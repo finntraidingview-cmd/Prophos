@@ -37182,20 +37182,36 @@ def zw_funded_cfd():
     firmen = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict)]
     if not firmen:
         return
-    konten = _sb_all("accounts", {"select": "id,name,firm,starting_balance", "account_type": "eq.funded_cfd"}) or []
+    konten = _sb_all("accounts", {"select": "id,name,firm,starting_balance,created_at", "account_type": "eq.funded_cfd"}) or []
     ids = [str(a["id"]) for a in konten]
     pend, verw, buch = [], [], []
     for i in range(0, len(ids), 80):
         teil = "in.(" + ",".join(ids[i:i + 80]) + ")"
-        pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id", "account_id": teil}) or []
-        verw += _sb_all("managed_payouts", {"select": "account_id", "account_id": teil}) or []
-        buch += _sb_all("transactions", {"select": "id,account_id", "kind": "eq.payout", "account_id": teil}) or []
+        pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at", "account_id": teil}) or []
+        verw += _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": teil}) or []
+        buch += _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": teil}) or []
     n = fcp_payouts_zaehlen(pend, verw, buch)
+    # GEWINNTAGE (Blue Guardian, BG1 Gegenprüfung): fehlen im Zyklus noch Tage, gibt es kein Radar-Ziel — sonst schlüge das Abhak-Popup „Waiting for Payout“ vor
+    # (zwei Phase-A-Tage à ~600 $ liegen schon über 1.000), der Planer hielte an und Blue Guardian zahlte nicht aus. Der Boden bleibt.
+    gt_konten = [a for a in konten if isinstance((fcp_je_groesse(ap_regel_finden(firmen, a.get("firm")), _wd_konto_groesse(a)) or {}).get("gewinntage"), dict)]
+    gt_plaene, zyk = {}, fcp_zyklus_start(pend, verw, buch)
+    if gt_konten:
+        for p in _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,started_at,ended_at,completed_at",
+                                         "master_account_id": "in.(" + ",".join(str(a["id"]) for a in gt_konten) + ")",
+                                         "status": "in.(completed,review)"}) or []:
+            gt_plaene.setdefault(str(p.get("master_account_id")), []).append(p)
+    gt_ids = {str(a["id"]) for a in gt_konten}
     for a in konten:
         aid = str(a["id"])
-        zb = fcp_konto_ziel_boden(ap_regel_finden(firmen, a.get("firm")), _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"))
+        regel = ap_regel_finden(firmen, a.get("firm"))
+        zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"))
         if zb:
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
+            if aid in gt_ids:
+                gti = fcp_gewinntage_ist((fcp_je_groesse(regel, _wd_konto_groesse(a)) or {}).get("gewinntage"), aid, gt_plaene.get(aid, []),
+                                         fcp_gewinntage_seit(zyk.get(aid), a.get("created_at")))
+                if not gti or int(gti[0]) < int(gti[1]):
+                    _zw["ziele"].pop(aid, None)
 
 
 def zw_tick(force=False):
@@ -39438,12 +39454,66 @@ def fcp_tp_modus(regel):
     return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
 
 
-def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None):
+# GEWINNTAGE IM PAYOUT-ZYKLUS (BG1, Finn 03.11.2026 ~23:59 Dubai, Blue Guardian 2-Step Standard Funded: „3 profitable Tage je ≥ 0,5 %, sonst kein Payout"):
+# je_groesse[...].gewinntage = {anzahl, min (Mindestgewinn je Tag in $), tp [von, bis]}. Phase A — solange im laufenden Zyklus weniger als anzahl Tage mit
+# ≥ min geschlossenem Gewinn erreicht sind: je Tag ein Trade mit TP gewürfelt in tp (auch wenn das Ziel schon erreicht ist — ohne die Tage kein Payout).
+# Phase B — Tage erfüllt, Ziel noch nicht: TP = Rest bis zum gewürfelten Ziel, ein Trade holt alles (kein Deckel). Gezählt wird mit ap_tage_ist (dieselbe
+# Zählung wie die Gewinntage im Challenge-Planer: Berlin-Tag des Trade-Endes, Tagessumme master_pl ≥ min), nur Trades nach dem letzten Payout (fcp_zyklus_start).
+def fcp_zyklus_start(pending, managed, buchungen):
+    """REIN RECHNEND (testbar): erster Berlin-Tag des laufenden Payout-Zyklus je Konto → {account_id: 'JJJJ-MM-TT'} = Tag NACH dem jüngsten Payout
+    (pending_payouts requested_at/created_at, managed_payouts payout_date/created_at, transactions kind payout occurred_at) — wie
+    payout_anfrage_konto_felder (goal_since = morgen): der Ziel-Trade vom Anfrage-Tag gehört zum alten Zyklus (Gegenprüfung BG1). Eine Buchung, auf die
+    pending_payouts.received_tx_id zeigt, zählt nicht (ihr occurred_at ist der Empfangstag, Tage nach der Anfrage — die Anfrage gibt das Konto schon frei).
+    Ein reines Datum gilt als Berlin-Kalendertag. Konten ohne Payout fehlen."""
+    tz = _ap_tz("Europe/Berlin")
+    verbucht = {str(z["received_tx_id"]) for z in pending or () if z.get("received_tx_id")}
+    tag = {}
+    for quelle, felder in ((pending, ("requested_at", "created_at")), (managed, ("payout_date", "created_at")), (buchungen, ("occurred_at",))):
+        for z in quelle or ():
+            aid = str(z.get("account_id") or "")
+            t = next((str(z.get(f)) for f in felder if z.get(f)), None)
+            if not aid or not t or (quelle is buchungen and str(z.get("id")) in verbucht):
+                continue
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+                d = t
+            else:
+                ts = _ap_ts(t)
+                if ts is None:
+                    continue
+                d = ts.astimezone(tz).date().isoformat()
+            if d > tag.get(aid, ""):
+                tag[aid] = d
+    return {aid: (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") for aid, d in tag.items()}
+
+
+def fcp_gewinntage_ist(gt, konto_id, plaene, seit_tag=None):
+    """REIN RECHNEND (testbar): (ist, soll) der Gewinntage im laufenden Zyklus oder None (Regel ohne gewinntage). plaene = Trades des Kontos; seit_tag =
+    erster Berlin-Tag des Zyklus (fcp_zyklus_start bzw. Anlegetag des Kontos im 1. Zyklus). Zählung = ap_tage_ist mit einem Hilfs-Konto
+    (goal_kind winning_days, goal_min_profit = gt.min, goal_since = seit_tag): Berlin-Tag des Trade-Endes, Tagessumme master_pl ≥ min."""
+    g = gt or {}
+    anz, mn = _wd_num(g.get("anzahl")), _wd_num(g.get("min"))
+    if not anz or anz <= 0 or not mn or mn <= 0:
+        return None
+    return ap_tage_ist({"id": konto_id, "goal_kind": "winning_days", "goal_min_profit": mn, "goal_target": int(anz), "goal_done_offset": 0,
+                        "goal_since": seit_tag or None}, plaene)
+
+
+def fcp_gewinntage_seit(zyklus_tag, konto_created_at):
+    """REIN RECHNEND (testbar): erster Berlin-Tag, ab dem Gewinntage zählen — Zyklus-Beginn, im 1. Zyklus (kein Payout) der Anlegetag des Kontos (Untergrenze,
+    Gegenprüfung BG1: Tage einer Challenge auf derselben Kontozeile zählen nie)."""
+    an = None
+    ts = _ap_ts(konto_created_at) if konto_created_at else None
+    if ts is not None:
+        an = ts.astimezone(_ap_tz("Europe/Berlin")).date().isoformat()
+    return max([d for d in (zyklus_tag, an) if d] or [None]) if (zyklus_tag or an) else None
+
+
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
     jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
     True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
     je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel), max_sl = accounts.max_risiko_trade — der SL liegt nie darüber (30.10.2026,
-    jede Firma)."""
+    jede Firma). gewinntage = (ist, soll) aus fcp_gewinntage_ist, nur bei jg.gewinntage (Blue Guardian, BG1 03.11.2026) — Phase A/B, s. oben."""
     if isinstance(zyklus, bool):
         zyklus = 1 if zyklus else 2
     zyklus = max(1, int(zyklus or 1))
@@ -39469,12 +39539,22 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ am/unter dem Boden ({_liq_de(g - dd)} $) — geblowt?")
     if gewinn > 2 * ziel_b[1] + dd:
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k — ↻ Balance neu lesen")
-    if gewinn >= ziel_b[0] - 0.005:
+    gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
+    gt_offen = False
+    if gt:
+        gi = gewinntage if isinstance(gewinntage, (list, tuple)) and len(gewinntage) == 2 else None
+        basis["gewinntage"] = list(gi) if gi else None
+        gt_offen = gi is None or int(gi[0]) < int(gi[1])             # Zählung nicht lesbar → Phase A (kleiner Trade), nie ein Ziel-Trade auf Verdacht
+    if gewinn >= ziel_b[0] - 0.005 and not gt_offen:
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     ziel = max(ziel, ziel_b[0])
     deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus)
-    if ep:
+    if gt and gt_offen:
+        tp, tp_art, deckel = fcp_wuerfel(gt.get("tp"), rnd), "gewinntag", None    # Phase A: ein Gewinntag-Trade je Tag (TP gewürfelt, BG 550–650 $)
+    elif gt:
+        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_TP_MIN_USD)), "rest", None   # Phase B: Rest bis zum Ziel in einem Trade
+    elif ep:
         tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_ERSTER_PAYOUT_TP_MIN_USD)), "erster_payout_refund", None
     elif fcp_tp_modus(regel) == "consistency50":
         rest = float(round(ziel - gewinn))
@@ -39650,13 +39730,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                     "created_at,planned_for,notes,funded_plan:mt5_baseline->funded_plan,final:mt5_baseline->final",
                                           "master_account_id": f"in.({teil})"}) or []    # alle Trades des Kontos (Gewinne, The5ers-Consistency)
         try:
-            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id", "account_id": f"in.({teil})"}) or []
-            verw += _sb_all("managed_payouts", {"select": "account_id", "account_id": f"in.({teil})"}) or []
-            buch += _sb_all("transactions", {"select": "id,account_id", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []
+            # Datumsfelder seit BG1 (03.11.2026): Zyklus-Beginn für die Gewinntage (fcp_zyklus_start); die Zählung der Payouts bleibt
+            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []
+            verw += _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []
+            buch += _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []
         except Exception as e:
             payouts_ok = False
             print(f"[funded-cfd] ⚠️ Payouts nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — kein Refund-Modus in diesem Lauf", flush=True)
     payout_n = fcp_payouts_zaehlen(pend, verw, buch)
+    zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -39723,8 +39805,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
+        gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None) \
+            if isinstance(jg.get("gewinntage"), dict) else None
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
-                              max_sl=a.get("max_risiko_trade"), gewinne=fcp_gewinne(pl))
+                              max_sl=a.get("max_risiko_trade"), gewinne=fcp_gewinne(pl), gewinntage=gti)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
@@ -39766,7 +39851,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         notiz = (f"Funded-CFD-Planer{'' if auto_k else ' · Vorschlag'} · Gewinn {_liq_de(r['gewinn'])} $ → Ziel {_liq_de(r['ziel'])} $"
                  f" · TP {r['tp_art']} · Hedge {_liq_de(r['hedge_eur'])} € auf {_liq_de(r['dd'])} $ DD"
                  + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else "")
-                 + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else ""))   # 03.11.2026
+                 + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
+                 + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else ""))   # Blue Guardian (BG1)
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
@@ -39777,7 +39863,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
-                                                                         "zyklus", "tp_deckel", "gewinne", "erster_payout")},
+                                                                         "zyklus", "tp_deckel", "gewinne", "erster_payout", "gewinntage")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
