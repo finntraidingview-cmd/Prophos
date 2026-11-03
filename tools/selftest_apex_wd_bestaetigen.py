@@ -16,7 +16,8 @@ ns = {"HEDGE_ARTEN": ("apex", "tradeify_final"), "re": re, "datetime": datetime,
 for n in ("hf_basis", "hf_ist_wd", "hf_wd_sichtbar", "wd_ist_recoverer_plan", "alarm_wd_bestaetigen", "_alarm_ts"):
     exec(fn(n), ns)
 b0, b1 = ns["hf_basis"]([]), ns["hf_basis"](["apex"])
-ok("or" not in b0 and b0["mt5_baseline->>hedge_art"] == "in.(apex,tradeify_final)", "Schalter leer: Filter wie vor dem Gate")
+# + Tradeify-Ausgleich (03.11.2026): auch mit leerer Apex-Liste stehen Hedge-Arten und markierte Ausgleichs-Trades im Filter, keine Apex-WD
+ok(b0.get("or") == "(mt5_baseline->>hedge_art.in.(apex,tradeify_final),mt5_baseline->>wd_ausgleich.eq.true)" and "winning_day" not in b0["or"], "Schalter leer: Hedge-Arten + Tradeify-Ausgleich, keine Apex-WD")
 ok("winning_day.is.true,notes.ilike.*Winning-Day-Farmer*,master_firm.ilike.*apex*" in b1["or"], "Gate an: nur Farmer-WD der Firma")
 w = {"winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Apex Trader"}
 ok(ns["hf_ist_wd"](w, ["apex"]), "Apex-Farmer-WD zählt")

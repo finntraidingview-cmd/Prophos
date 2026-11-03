@@ -17693,6 +17693,11 @@
       for(const [test, rg, warum] of ADM_ANFRAGBAR_REGELN){ if(test(f)){ regel = rg; grund = warum || ''; break } }
       if(!regel) return { regel: null, grund: grund || `${firm || 'Firma leer'}: keine Payout-Regel in firm_rules.json`, anfragbar: null, erhalten: null }
       if(regel.apex) return admApexAnfragbar(r, c, regel)
+      // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ — anfragbar 0, Railway lehnt die Anfrage dann auch ab
+      const zyT = window._wdZyklusRoh?.(r.account_id)
+      if(zyT && zyT.art === 'tradeify' && zyT.gesperrt)
+        return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0,
+                 sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +1 $` }
       if(c.profit == null) return { regel, grund: c.size == null ? 'Größe unklar' : 'keine Balance', anfragbar: null, erhalten: null }
       // Deckel je Größe (Lucid, 29.10.2026): die Regel bekommt den Deckel ihrer Größe, damit Anzeige („max. …") und Rechnung gleich sind
       if(regel.deckelJeGroesse){
@@ -18835,7 +18840,7 @@
     $('adm-anfrage-amt')?.addEventListener('input', e => { delete e.target.dataset.auto })
     $('adm-anfrage-ccy')?.addEventListener('change', e => { const n = $('adm-anfrage-amt'), v = _admAnfrage && _admAnfrage._anfVorschlag; if(!n.dataset.auto || !v) return
       const w = e.target.value === 'EUR' ? v.eur : e.target.value === v.urCcy ? v.ur : null; n.value = w != null ? String(w) : '' })
-    async function admAnfrageSpeichern(){
+    async function admAnfrageSpeichern(trotzdem){
       const r = _admAnfrage; if(!r || !admData) return
       const msg = $('admAnfrageMsg'), btn = $('admAnfrageSave'), betrag = Number($('adm-anfrage-amt').value), am = $('adm-anfrage-am').value || ''
       if(!(betrag > 0)){ msg.textContent = 'Betrag fehlt.'; msg.className = 'modal-msg err'; return }
@@ -18847,12 +18852,17 @@
         const tok = session?.access_token
         if(!tok) throw new Error('nicht angemeldet')
         const res = await fetch(`${WATCHER_HOME}/admin/payout-anfragen?ansicht=admin`, { method:'POST', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
-          body: JSON.stringify({ account_id: r.account_id, amount: betrag, currency: $('adm-anfrage-ccy').value, liegt_bei: $('adm-anfrage-bei').value.trim() || null, requested_at: am, naechster_payout: $('adm-anfrage-next').value || null }) })
+          body: JSON.stringify({ account_id: r.account_id, amount: betrag, currency: $('adm-anfrage-ccy').value, liegt_bei: $('adm-anfrage-bei').value.trim() || null, requested_at: am, naechster_payout: $('adm-anfrage-next').value || null, ...(trotzdem === true ? { trotzdem: true } : {}) }) })
         d = await res.json().catch(() => ({}))
         if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
       }catch(e){
         msg.textContent = 'Nicht eingetragen: ' + ((e && e.message) || e); msg.className = 'modal-msg err'
         btn.disabled = false
+        // NOTAUSGANG (Stopp S9 zu 7388c5f4): Tradeify „Zyklus im Plus“ sperrt — Admin darf trotzdem anfragen (Railway prüft das Admin-Recht), falls eine Lesung falsch ist
+        if(d && d.zyklus && trotzdem !== true){
+          const t = document.createElement('button'); t.type = 'button'; t.className = 'btn btn-mini btn-ghost'; t.style.marginLeft = '8px'; t.textContent = 'Trotzdem anfragen (Admin)'
+          t.addEventListener('click', () => admAnfrageSpeichern(true)); msg.appendChild(t)
+        }
         return
       }
       // Lokalen Stand nachziehen — dieselben Felder, die /admin/overview liefert
@@ -36997,7 +37007,8 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
-      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} try{ wdlRestVorgaengerTick() }catch(_){} }, 0)   // vorgemerkte Pläne mit frischer Lesung abhaken; Vorgänger eines Rest-Trades (02.11.2026)
+      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} try{ wdlRestVorgaengerTick() }catch(_){} }, 0)
+      try{ window._wdZyklusLaden?.({ admin: true }).then(g => { if(g) wdlRender() }).catch(() => {}) }catch(_){}   // Recovery-Chip (Tradeify, 03.11.2026)   // vorgemerkte Pläne mit frischer Lesung abhaken; Vorgänger eines Rest-Trades (02.11.2026)
       wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
       try{ await wdlPolarLaden() }catch(_){}   // Polar (20.10.2026): Stand je laufendem Polar-Plan (/polar/stand), 404 = Hand-Polar
     }catch(e){ wdl.fehler = String((e && e.message) || e) }
@@ -37533,7 +37544,7 @@
       const tip = [t.person, k.name || konto, k.kontonr || '', echo ? 'Echo (MT5)' : ''].filter(Boolean).join(' · ')
       const pid = String((e.z && e.z.plan_id) || t.plan_id || t.id || '')   // Live-Nachschreiben (lzLiveTick) je Zeile
       return `<div class="wdl-z wdl-z-lauf${echo ? ' wdl-z-echo' : ''}" style="--wdl-id:${idFarbe(String(t.user_id || ''))}" ${pid ? `data-lz-plan="${escapeHtml(pid)}" ` : ''}${o.attr ? o.attr(e) : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>${ri}${mi}${pl}${z}</div>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small>${window._kontoRecoveryChipHtml?.(t.konto_id, (t.konto || {}).name) || ''}</span>${ri}${mi}${pl}${z}</div>`
     }
     const s = o.summe, summe = s ? `<div class="wdl-z wdl-z-lauf lz-summe"><span class="wdl-z-wer"><b>Summe</b></span><span class="wdl-z-ri"></span><span class="wdl-z-mi"></span>`
       + `<span class="wdl-z-pl"><span data-lz-usd style="color:${col(s.usd)}">${usd(s.usd)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(s.eur)}">${eur(s.eur)}</small></span><span class="wdl-z-zeit"></span></div>` : ''
@@ -39077,7 +39088,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlHerkunftChip(t, 'n')}${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${wdlHerkunftChip(t, 'u')}${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlHerkunftChip(t, 'n')}${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${window._kontoRecoveryChipHtml?.(t.konto_id, (t.konto || {}).name) || ''}${wdlHerkunftChip(t, 'u')}${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -43728,6 +43739,11 @@
    * sonst käme man an „automatisch" nicht mehr heran. Stil wie der Challenge-Chip. Stand aus window._wdZyklus, gerechnet auf Railway. */
   function accRecovererChipHtml(a){
     const z = a && window._wdZyklusRoh?.(a.id); if(!z) return ''
+    // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026 Nachtrag): Chip „Recovery“, solange der Zyklus im Minus ist — gleicher Typ-Chip und gleiches Popup wie der Recoverer
+    if(z.art === 'tradeify'){
+      if(!z.gesperrt) return ''
+      return ` <span class="type-badge type-challenge acc-rec-chip" data-acc-rec="${escapeHtml(String(a.id))}" data-rec-name="${escapeHtml(String(a.name || ''))}" data-stop-row-click="1" title="${escapeHtml(z.grund || 'Recovery')} · klicken für Details">Recovery</span>`
+    }
     if(!(z.aktiv || z.schalter === 'an' || z.schalter === 'aus')) return ''
     const aus = !z.aktiv
     return ` <span class="type-badge type-challenge acc-rec-chip${aus ? ' acc-rec-aus' : ''}" data-acc-rec="${escapeHtml(String(a.id))}" data-rec-name="${escapeHtml(String(a.name || ''))}" data-stop-row-click="1" title="${escapeHtml(z.grund || 'Recoverer')} · klicken für Details">Recoverer</span>`
@@ -43740,7 +43756,17 @@
     if(!p || !(p.winningDay === true || p.winning_day === true || p.wd === true)) return false
     return /apex/i.test(String(p.masterFirm || p.master_firm || '')) && /^NQ/i.test(String(p.masterSymbol || p.master_symbol || p.master_symbol_root || p.symbol_root || ''))
   }
-  const planRecovererChipHtml = p => planIstRecoverer(p) ? ' <span class="type-badge type-challenge" title="Recoverer: Apex-Winning-Day nach Verlusttag, 1 NQ">Recoverer</span>' : ''
+  // RECOVERY (Tradeify, Finn 03.11.2026): Chip am Konto, solange der Zyklus seit dem letzten Payout im Minus ist — Konto-Zeile, WD-Karte, Radar, Planer-Zeilen; Klick → Popup
+  function kontoRecoveryChipHtml(kid, name){
+    const z = kid != null ? window._wdZyklusRoh?.(kid) : null
+    if(!z || z.art !== 'tradeify' || !z.gesperrt) return ''
+    // eigener Klick nur an diesem Chip (S9 03.11.2026: kein Sammel-Handler) — Radar, Planer, WD-Karte haben keinen data-acc-rec-Handler
+    return ` <span class="type-badge type-challenge" data-stop-row-click="1" style="cursor:pointer" onclick="event.stopPropagation();window._recoveryChipKlick(this)" data-rec-id="${escapeHtml(String(kid))}" data-rec-name="${escapeHtml(String(name || ''))}" title="${escapeHtml(z.grund || 'Recovery')} · klicken für Details">Recovery</span>`
+  }
+  window._kontoRecoveryChipHtml = kontoRecoveryChipHtml
+  window._recoveryChipKlick = el => window._recovererOeffnen?.(el.dataset.recId, el.dataset.recName)
+  const planRecovererChipHtml = p => planIstRecoverer(p) ? ' <span class="type-badge type-challenge" title="Recoverer: Apex-Winning-Day nach Verlusttag, 1 NQ">Recoverer</span>'
+    : kontoRecoveryChipHtml(p && (p.masterAccountId || p.master_account_id || p.konto_id), p && (p.masterName || p.master_name))
   window._planRecovererChipHtml = planRecovererChipHtml
   window._planIstRecoverer = planIstRecoverer
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
@@ -43751,6 +43777,22 @@
     document.getElementById('rec-konto').textContent = _recKonto.name || ''
     if(!z){ box.innerHTML = '<div class="kf">Kein Stand vorhanden.</div>'; return }
     const tagTxt = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : ''
+    const kopf = document.querySelector('#recovererModal .modal-head h3'), sch = document.querySelector('#recovererModal [data-rec-sch]')?.parentElement
+    if(kopf) kopf.textContent = z.art === 'tradeify' ? 'Recovery' : 'Recoverer'
+    if(sch) sch.hidden = z.art === 'tradeify'   // Tradeify: kein Schalter, die Regel gilt immer ab dem 2. Zyklus
+    if(z.art === 'tradeify'){
+      // RECOVERY (Finn 03.11.2026): klein und sachlich, was fehlt — Zyklus seit dem letzten Payout, Fehlbetrag bis +1 $, WD-Stand, nächster Trade
+      const zeilenT = [
+        ['Zyklus', `${z.nr}${z.start ? ' · seit Payout-Anfrage ' + tagTxt(z.start) : ''}`],
+        ['Gewinn seit letztem Payout', z.gewinn != null ? `${vz(z.gewinn)}${de(z.gewinn)} $` : 'unbekannt'],
+        ['Fehlt bis +1 $', z.gewinn != null ? `${(Math.max(0, 1 - Number(z.gewinn))).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : '–'],
+        ['Winning Days', `${z.stand ?? '–'}/${z.ziel_tage ?? 5}`],
+        ['Nächster Trade', z.aktiv ? `Ausgleich · TP ${de(z.ziel)} $ · Hedge ${de(z.hedge_eur)} €` : `normaler WD (Ausgleich ab ${Math.max(0, Number(z.ziel_tage || 5) - 1)}/${z.ziel_tage || 5})`],
+      ]
+      box.innerHTML = zeilenT.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--sub)">${escapeHtml(k)}</span><span class="tnum" style="font-weight:600">${escapeHtml(v)}</span></div>`).join('')
+        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +1 $).</div>`
+      return
+    }
     const handTp = Number(((accounts || []).find(a => String(a.id) === _recKonto.id) || {}).wdTp) || 0   // nur am eigenen Konto bekannt
     const schlecht = (z.tage || []).reduce((m, t) => (!m || Number(t.pnl) < Number(m.pnl)) ? t : m, null)
     const zeilen = [
@@ -54582,7 +54624,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2007'
+  const OS_TAB_BUILD = '2026-09-22.2008'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58615,6 +58657,8 @@
   // Nur der Schalter entscheidet, nicht die Netz-Marke start_sperre: abgeschaltet wartet kein Plan mehr (Prüfer S12). winning_day wie DB-Riegel und Liste.
   const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || p.winningDay !== true || !tpIstFarmerPlan(p)) return false
     const firma = String(p.masterFirm || '').toLowerCase()
+    // TRADEIFY-AUSGLEICH (Finn 03.11.2026 „yes“): jeder Ausgleichs-Trade (mt5_baseline.wd_ausgleich) wird einzeln bestätigt wie der Apex-WD; normale Tradeify-WD nicht
+    if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return !tpBestaetigenAusgenommen()
     return !tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k)) }
   /* Verwalter-Gruppen sind ausgenommen (Prüfer S12, 02.11.2026): sie stehen nie in Finns Liste, ein Apex-WD der Gruppe wäre sonst nicht bestätigbar. Dieselbe Regel wie der DB-Riegel, RPC
    * wd_bestaetigen_ich_ausgenommen() fragt nur nach der eigenen ID (10 min gemerkt, nur bei gesetzter Firmenliste). Unbekannt = nicht ausgenommen: lieber warten als ohne Bestätigung starten. */
@@ -68114,6 +68158,11 @@
   window._wdZyklusRoh = id => (id != null && window._wdZyklus.map[String(id)]) || null
   // Regel greift mit eigenen Werten: aktiv UND Ziel da (Schalter „an“ ohne Verlusttag = Normalwerte, Konstrukt Abschnitt 6)
   // als Funktion, nicht const: renderAccounts kann schon beim Laden des Moduls laufen, bevor diese Zeile dran ist
+  // Tradeify-Ausgleichs-Trade fällig (Zyklus im Plus, 03.11.2026): auch bei vollem WD-Ziel wird geplant
+  // Zyklus-Gewinn mit echtem Vorzeichen (0,60 $ ist +0,60, nicht „−1“) — Gegenprüfung 03.11.2026
+  function zyklusTxt(v){ const n = Number(v) || 0; return (n < 0 ? '−' : '+') + Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: Math.abs(n) < 10 ? 2 : 0, maximumFractionDigits: Math.abs(n) < 10 ? 2 : 0 }) }
+  window._zyklusTxt = zyklusTxt
+  function wdAusgleichFaellig(id){ const z = wdZyklusVon(id); return !!(z && z.art === 'tradeify') }
   function wdZyklusVon(id){ const z = window._wdZyklusRoh?.(id); return (z && z.aktiv && Number(z.ziel) > 0 && Number(z.hedge_eur) > 0) ? z : null }
   // Antwort von /admin/wd-plaene: je Konto Feld setzen oder entfernen. zyklus_ok false = Railway konnte nicht rechnen: Stand behalten — sonst fiele ein
   // Plan für Minuten auf den Staffel-Hedge zurück und ein Würfel würde neu gewürfelt (Gegenprüfung 02.11.2026). Altes Backend schickt das Feld nicht.
@@ -68182,7 +68231,8 @@
   // eigene Apex-Winning-Days-Konten dieses Logins (PC-Tab, Accounts-Liste)
   function wdZyklusEigene(o){
     if(!window._wdZyklusLaden) return Promise.resolve(false)
-    return window._wdZyklusLaden(Object.assign({ ids: (accounts || []).filter(a => a && a.type === 'winning_days' && /apex/i.test(String(a.firm || ''))).map(a => String(a.id)) }, o || {}))
+    // + Tradeify „Zyklus im Plus“ (03.11.2026): derselbe Stand von Railway (zyklus.art 'tradeify'), nie Tradeify CFD
+    return window._wdZyklusLaden(Object.assign({ ids: (accounts || []).filter(a => a && a.type === 'winning_days' && (/apex/i.test(String(a.firm || '')) || (/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm)))).map(a => String(a.id)) }, o || {}))
   }
   function tpVorplanZeile(acc, opt){
     const o = opt || {}
@@ -68211,7 +68261,9 @@
       // bei wd_sl 1.500 und Ziel 565 $ nur 85 € statt 226 € (Gegenprüfung 02.11.2026). hedgeAmTp ist der Wert für die Anzeige.
       zyklus = o.ohneRecoverer ? null : wdZyklusVon(acc && acc.id)
       if(zyklus){
-        const hand = Number(acc.wdTp) > 0 ? Number(acc.wdTp) : null
+        // Tradeify-Ausgleich (03.11.2026): die Hand-Vorgabe zählt nur, wenn sie größer ist (TP = max)
+        const hand0 = Number(acc.wdTp) > 0 ? Number(acc.wdTp) : null
+        const hand = (zyklus.art === 'tradeify') ? (hand0 != null && hand0 > Number(zyklus.ziel) ? hand0 : null) : hand0
         zyklusTp = hand != null ? hand : Number(zyklus.ziel)
         hedgeAmTp = hand != null ? zyklusTp * Number(zyklus.satz) / 1000 : Number(zyklus.hedge_eur)
         const risk = Number(acc.wdSl) || Number(acc.maxRisikoTrade) || zyklusTp
@@ -68907,9 +68959,10 @@
     if(!window._wdZyklus?.geladen && (k.wuerfel || {}).quelle === 'recoverer') return false
     // RECOVERER (02.11.2026): Regel-Ziel statt Würfel, Hand-Vorgabe schlägt die Regel. Endet die Regel, liegt der alte Wert außerhalb der Spanne → neu gewürfelt
     const zy = wdZyklusVon(kd.id), ktFest = wdRecovererKt(zy), instrFest = (zy && zy.instr === 'nq') ? 'nq' : null   // 1 NQ (Finn 02.11.2026)
-    const tp = tpVor != null ? tpVor : zy ? Number(zy.ziel) : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
+    // Tradeify-Ausgleich (03.11.2026): TP = max(Vorgabe, Ausgleich) — sonst bliebe ein Konto mit wd_tp 280 gesperrt; beim Apex-Recoverer schlägt die Vorgabe wie bisher
+    const tp = (zy && zy.art === 'tradeify') ? Math.max(Number(zy.ziel), tpVor || 0) : tpVor != null ? tpVor : zy ? Number(zy.ziel) : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
     const kt = ktFest != null ? ktFest : (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
-    const quelle = tpVor != null ? 'vorgabe' : zy ? 'recoverer' : 'wuerfel'
+    const quelle = (zy && zy.art === 'tradeify') ? 'recoverer' : tpVor != null ? 'vorgabe' : zy ? 'recoverer' : 'wuerfel'
     if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle || ((k.wuerfel || {}).instr || null) !== instrFest){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString(), ...(instrFest ? { instr: instrFest } : {}) }; ge = true }
     let vor = null
     if(z && !z.fehler){
@@ -69020,7 +69073,7 @@
     if(!(h.hedge_eur > 0) || !(h.multiplier > 0)) return null
     if(Math.abs((Number(plan.masterTp) || 0) - tp) <= 0.5 && Math.abs(Number(plan.hedgeEur) - h.hedge_eur) <= 1 && Number(plan.masterContracts) === kt && symbol === plan.masterSymbol) return null
     const upd = { master_tp: tp, master_symbol: symbol, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
-    return { upd, tp, kt, instr, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }
+    return { upd, tp, kt, instr, zyArt: zy.art || null, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }   // zyArt: Tradeify-Ausgleich braucht die Bestätigungs-Marke (03.11.2026)
   }
   window._wdRecovererAltplanUpd = wdRecovererAltplanUpd   // Test-Haken
   async function wdVorplanRegelnSpeichern(v){
@@ -69265,7 +69318,8 @@
       if(k.belegt){ konten.push({ ...basis, aktiv: false, hinweis: 'hat schon einen geplanten/laufenden Plan' }); continue }
       if(wdHeuteGestartet(k.acc.id, tag)){ konten.push({ ...basis, aktiv: false, heute: true, hinweis: WD_HINWEIS_HEUTE }); continue }   // 03.11.2026
       let ziel = null; try{ ziel = zielFortschritt(k.acc) }catch(_){}
-      if(ziel && ziel.done){ konten.push({ ...basis, aktiv: false, hinweis: 'Ziel schon voll' }); continue }
+      // TRADEIFY ZYKLUS IM PLUS (Gegenprüfung 03.11.2026): Ziel voll, Zyklus im Minus → der Ausgleichs-Trade ist fällig, Konto bleibt im Farmer
+      if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id)){ konten.push({ ...basis, aktiv: false, hinweis: 'Ziel schon voll' }); continue }
       const z = tpVorplanZeile(k.acc, { live: tpVorplanLive(k.acc), slaveCurrency: sPreset.currency, fx, regeln: vp.regeln, zufall: 0.5 })
       if(z.fehler){ konten.push({ ...basis, aktiv: false, hinweis: z.fehler }); continue }
       konten.push({ ...basis, aktiv: true, tpVon: z.tpVon, tpBis: z.tpBis, slave: z.slaveRisk, waehrung: sPreset.currency, live: z.live, plus: z.plus, pc: true })
@@ -69417,12 +69471,14 @@
         const z = tpVorplanZeile(accLike, { live: kd.live_balance, slaveCurrency: sPreset.currency, fx: d.fx, regeln: vp.regeln })
         if(z.fehler){ k.aktiv = false; k.hinweis = z.fehler; ge = true; continue }
         if(kd.live_balance == null && k.pc && typeof k.slave === 'number' && k.slave > 0){ z.slaveRisk = k.slave; z.live = k.live; z.plus = k.plus; z.hinweis = '' }
-        if(kd.tp_vorgabe > 0) z.tp = kd.tp_vorgabe
+        const zyT = wdZyklusVon(kd.id), ausgleich = !!(zyT && zyT.art === 'tradeify')   // Tradeify-Ausgleich (03.11.2026)
+        if(kd.tp_vorgabe > 0) z.tp = ausgleich ? Math.max(Number(z.tp) || 0, Number(kd.tp_vorgabe)) : kd.tp_vorgabe
         // .1487: Würfel aus der Zeile (oder jetzt würfeln und merken) — der Plan trägt genau die Werte, die „Plan heute Nacht“ zeigt
         if(wdKontoWuerfel(k, kd, vp, z)) ge = true
         if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
         const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), wdRecovererSymbol(symbol, (k.wuerfel || {}).instr), wdKontoRichtung(k, row.richtung), tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
+        if(ausgleich) pr.wd_ausgleich = true   // Railway legt ihn mit mt5_baseline.wd_ausgleich an → wartet auf Finns Bestätigung
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
@@ -69525,7 +69581,8 @@
     const slave = sl.slave, sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx: window._fxUsdEur || 0.85, regeln: vp.regeln })
     if(z.fehler) return { fehler: z.fehler }
-    if(acc.wdTp > 0) z.tp = Number(acc.wdTp)   // Farmer-Vorgabe, NICHT das Firmen-Limit maxProfitPerTrade
+    const zyAus = wdZyklusVon(acc.id), ausgleichA = !!(zyAus && zyAus.art === 'tradeify')   // Tradeify-Ausgleich (03.11.2026): Vorgabe nur, wenn größer
+    if(acc.wdTp > 0) z.tp = ausgleichA ? Math.max(Number(z.tp) || 0, Number(acc.wdTp)) : Number(acc.wdTp)   // Farmer-Vorgabe, NICHT das Firmen-Limit maxProfitPerTrade
     _tpNqMode = vp.instr
     try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
@@ -69565,6 +69622,7 @@
     if(ce) return { warten: true }   // ein anderer Tab legt gerade an — beim nächsten Abgleich steht sein Plan da
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_heil:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
+    if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })   // wartet auf Finns Bestätigung (03.11.2026)
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
     if(error){ supabase.from('user_settings').delete().eq('user_id', currentUserId).eq('key', claimKey).then(() => {}, () => {}); return { fehler: error.message } }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
@@ -69628,7 +69686,7 @@
           if(!farm){ set(k, 'aktiv', false); set(k, 'hinweis', WD_HINWEIS_FARM); continue }
           if(!String(acc.externalId || '').trim()){ set(k, 'aktiv', false); set(k, 'hinweis', WD_HINWEIS_EXT); continue }
           let ziel = null; try{ ziel = zielFortschritt(acc) }catch(_){}
-          if(ziel && ziel.done){ set(k, 'aktiv', false); set(k, 'hinweis', 'Ziel schon voll'); continue }
+          if(ziel && ziel.done && !wdAusgleichFaellig(acc.id)){ set(k, 'aktiv', false); set(k, 'hinweis', 'Ziel schon voll'); continue }   // + Tradeify-Ausgleich (03.11.2026)
           if(fremd.has(String(acc.id))){ set(k, 'aktiv', false); set(k, 'hinweis', 'hat schon einen geplanten/laufenden Plan'); continue }
         }
         const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx, regeln: vp.regeln, zufall: 0.5 })
@@ -69680,6 +69738,8 @@
           // TP-Vorgabe frisch aus der DB: accounts hat kein Realtime, der Cache kann eine neue Hand-Vorgabe noch nicht kennen. Lesefehler = nichts schreiben
           let altFrei = false
           if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
+          // Tradeify-Ausgleich (03.11.2026): ERST die Bestätigungs-Marke, dann den TP hochziehen — scheitert die Marke, bleibt der Plan, wie er ist (nie ein großer TP ohne Bestätigung)
+          if(alt && altFrei && alt.zyArt === 'tradeify'){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Ausgleich-Marke', e) } }
           if(alt && altFrei){
             // Alte Werte im Riegel (S9 02.11.2026): Pläne haben hier kein Realtime, eine Hand-Änderung am Mac sähe der Tab nicht. 0 Zeilen → frisch lesen, sonst schriebe er bis zum Start vergeblich
             const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)
@@ -71360,8 +71420,12 @@
   function wdRecovererZeile(){
     const box = document.getElementById('wd-rec-zeile'); if(!box) return
     const de = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
-    const z = ((_wd.daten && _wd.daten.konten) || []).filter(k => wdSichtOk(k.user_id)).map(k => [k, window._wdZyklusRoh(k.id)]).filter(([, y]) => y && y.aktiv)
-    box.innerHTML = z.map(([k, y]) => `<div>Recoverer · ${escapeHtml(String(k.person || ''))} ${escapeHtml(String(k.name || '').replace(/\s*→.*$/, ''))} · Zyklus ${y.nr}`
+    const z = ((_wd.daten && _wd.daten.konten) || []).filter(k => wdSichtOk(k.user_id)).map(k => [k, window._wdZyklusRoh(k.id)]).filter(([, y]) => y && (y.aktiv || (y.art === 'tradeify' && y.gesperrt)))
+    const wer = k => `${escapeHtml(String(k.person || ''))} ${escapeHtml(String(k.name || '').replace(/\s*→.*$/, ''))}`
+    // TRADEIFY ZYKLUS IM PLUS (03.11.2026): „Zyklus −X $ · Payout erst ab +1 $“, beim Ausgleichs-Trade mit TP und Hedge
+    box.innerHTML = z.map(([k, y]) => y.art === 'tradeify'
+      ? `<div>Recovery · ${wer(k)} · Zyklus ${zyklusTxt(y.gewinn)} $ · Payout erst ab +1 $${y.aktiv ? ` · Ausgleichs-Trade TP ${de(y.ziel)} $ / Hedge ${de(y.hedge_eur)} €` : ` · normale WD bis ${Number(y.ziel_tage) - 1}/${y.ziel_tage}`}</div>`
+      : `<div>Recoverer · ${wer(k)} · Zyklus ${y.nr}`
       + (Number(y.verlust) > 0 ? ` · −${de(y.verlust)} $` : ' · Normalwerte') + (Number(y.tage_geschaetzt) > 0 ? ` · noch ${y.tage_geschaetzt} Tage` : '') + '</div>').join('')
   }
   function wdRender(){
@@ -75305,6 +75369,11 @@
     // ANGEFRAGT (02.09.2026, Finns Pending-Flow): nur die Anfrage speichern —
     // das Datum ist hier der Anfrage-Tag. Gebucht wird erst beim ✓ Erhalten.
     if(kind === 'payout' && document.getElementById('fin-po-status')?.value === 'pending'){
+      // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ seit dem letzten Payout — Stand von Railway (window._wdZyklus)
+      const zyT = accountId ? window._wdZyklusRoh?.(accountId) : null
+      if(zyT && zyT.art === 'tradeify' && zyT.gesperrt){
+        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +1 $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return
+      }
       try{
         const row = {
           user_id: currentUserId,

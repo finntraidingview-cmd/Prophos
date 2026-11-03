@@ -4099,8 +4099,8 @@ def alarm_tick():
     evs = [ev for ev in alarm_ereignisse(rows, namen, jetzt, seit) if ev[0] not in _alarm["gemeldet"]]
     try:                                       # APEX-WD BESTÄTIGEN (02.11.2026): eigene Abfrage — Farmer-Pläne von nachts fallen aus „updated_at ≤ 3 h" heraus
         firmen_wd = wd_bestaetigen_firmen()
-        if firmen_wd:
-            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art",
+        if firmen_wd or TRADEIFY_AUSGLEICH_BESTAETIGEN:   # + Tradeify-Ausgleich (03.11.2026)
+            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art,aus:mt5_baseline->>wd_ausgleich",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
             gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
             wd_offen = [r for r in wd_offen if hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id"))]   # wie die Liste
@@ -14502,11 +14502,123 @@ def _wd_zyklus_regelzeile():
         return None, ((rows[0].get("vorplan") if rows and isinstance(rows[0].get("vorplan"), dict) else {}))
 
 
+# TRADEIFY: ZYKLUS IM PLUS (Finn 03.11.2026 ~04:30 Dubai über den Eingang; Jacob Tradeify 150k …6016: 5/5 WD, „Total Profit Since Last Payout“ −1.853,17 $ —
+# im Zyklus hat ein Big Trade verloren, Tradeify zahlt erst ab +1 $). Nur Tradeify-Futures, erst ab dem 2. Zyklus (nach dem ersten Payout); keine 50-%-Regel.
+# Zyklus-Gewinn = Live-Balance − Balance zu Beginn des ersten Trades nach der Payout-Anfrage (tv.balance_start; Tradeify zieht den Payout vorher ab — Jacob
+# 161.818,12 → 159.964,95 = −1.853,17 $, genau Tradeifys Wert). Unter +1 $: Payout gesperrt. Der Farmer fährt normale WD bis Ziel − 1; der Trade, der den letzten WD
+# bringt (bzw. sofort, wenn das Ziel schon steht), ist der AUSGLEICHS-Trade: TP = max(normaler WD-TP, Fehlbetrag + 1 $ + Puffer), Puffer 30–60 $ je Trade gewürfelt,
+# Hedge im €/$-Satz des normalen WD (Staffel ÷ normaler TP) mitwachsend. Gleiche Felder wie der Recoverer (aktiv, ziel, satz, hedge_eur) → tpVorplanZeile nimmt ihn
+# ohne zweiten Weg; art 'tradeify' unterscheidet. Apex bleibt unverändert.
+TRADEIFY_ZYKLUS_MIN_USD = 1.0
+TRADEIFY_ZYKLUS_PUFFER = (30, 60)
+# BESTÄTIGEN (Stopp S9 zu 7388c5f4, 03.11.2026): ob der Ausgleichs-Trade wie der Apex-Recoverer einzeln bestätigt werden muss, fragt der Eingang bei Finn. Vorbereitet als
+# Feld zyklus.bestaetigen; scharf (Pflicht im Farmer) erst nach Finns Antwort — bis dahin False
+TRADEIFY_AUSGLEICH_BESTAETIGEN = True   # Finn 03.11.2026 (über den Eingang): „yes“ — jeder Ausgleichs-Trade einzeln bestätigen, normale Tradeify-WD nicht   # Finn 03.11.2026 Nachtrag: Puffer des Ausgleichs-Trades je Trade gewürfelt 30–60 $ (Jitter-Regel), ersetzt „normaler TP − Linie“
+
+
+def tradeify_zyklus_firma(konto):
+    """Tradeify-Futures (nie Tradeify CFD)?"""
+    f = str((konto or {}).get("firm") or "")
+    return "tradeify" in f.lower() and not _ist_tradeify_cfd(f)
+
+
+def tradeify_zyklus_start_bal(plaene, start):
+    """REIN RECHNEND: tv.balance_start des ersten Trades mit Start-Tag (Berlin) NACH dem Anfrage-Tag — wie wd_zyklus_stand den Zyklus abgrenzt. None = noch kein Trade."""
+    if not start:
+        return None
+    # der FRÜHESTE Trade nach der Anfrage zählt; fehlt ihm balance_start, ist der Start unbekannt (Gegenprüfung 03.11.2026: sonst nähme die Rechnung einen
+    # späteren Trade und ließe den P&L davor weg — ein verlorener Trade gäbe fälschlich frei)
+    best = None
+    for p in plaene or ():
+        tag = _wd_berlin_tag(p.get("started_at") or p.get("ended_at") or p.get("completed_at"))
+        if not tag or tag <= start:
+            continue
+        if best is None or str(p.get("started_at") or p.get("ended_at") or "") < str(best.get("started_at") or best.get("ended_at") or ""):
+            best = p
+    if not best:
+        return None
+    bs = _wd_num(((best.get("tv") or {}) if isinstance(best.get("tv"), dict) else {}).get("balance_start"))
+    return bs if (bs is not None and bs > 0) else None
+
+
+def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None):
+    """REIN RECHNEND (testbar): `zyklus` eines Tradeify-Winning-Days-Kontos → {art, nr, start, start_bal, gewinn, gesperrt, fehl, aktiv, ziel, satz, hedge_eur,
+    ziel_normal, satz_normal, puffer, grund, grund_code}. aktiv = Ausgleichs-Trade fällig (Zyklus ≥ 2, Gewinn < +1 $, WD-Stand ≥ Ziel − 1)."""
+    st = wd_zyklus_stand(plaene, payouts)
+    out = {"art": "tradeify", "nr": st["nr"], "start": st["start"], "user_id": (konto or {}).get("user_id"), "aktiv": False, "gesperrt": False,
+           "start_bal": None, "gewinn": None, "fehl": None, "ziel": None, "satz": None, "hedge_eur": None, "verlust": 0.0}
+    d0 = lambda x: f"{abs(x):,.0f}".replace(",", ".")
+    if st["nr"] < 2:
+        return dict(out, grund_code="zyklus_1", grund="Zyklus 1 (vor dem ersten Payout gilt die Regel nicht)")
+    sb = tradeify_zyklus_start_bal(plaene, st["start"])
+    lv = _wd_num(live)
+    if sb is None or lv is None or lv <= 0:
+        return dict(out, grund_code="unbekannt", grund="Zyklus-Start oder Live-Balance unbekannt (noch kein Trade seit der Payout-Anfrage)")
+    # FRISCHE (Stopp S9 zu 7388c5f4): die Live-Balance zählt nur, wenn sie NACH dem Ende des letzten beendeten Trades gelesen wurde (wie ap_balance_live) — sonst
+    # rechnete eine alte Lesung einen falschen Fehlbetrag. Unbekannt = kein Ausgleich (normaler WD) und keine Payout-Sperre
+    letzt = max([_wd_iso_ts(p.get("ended_at") or p.get("completed_at")) or 0 for p in (plaene or ()) if p.get("status") in ("completed", "review")] or [0])
+    lt = _wd_iso_ts(live_at)
+    if letzt and (lt is None or lt < letzt):
+        return dict(out, grund_code="unbekannt", grund="Balance nicht frisch (vor dem Ende des letzten Trades gelesen) — ↻ Balance lesen")
+    gewinn = round(lv - sb, 2)
+    # DECKEL (Stopp S9 zu 7388c5f4: alte Endlesung, falsches Konto oder kaputtes balance_start ergäben einen beliebig großen TP ohne SL): ein Fehlbetrag über dem Max DD
+    # des Kontos hieße „geblowt“, ein Plus über 3 × Max DD ist für einen WD-Zyklus unplausibel → unbekannt. Ohne Max DD am Konto ebenfalls unbekannt
+    dd = _wd_num((konto or {}).get("max_drawdown"))
+    if not dd or dd <= 0:
+        return dict(out, grund_code="unbekannt", grund="kein Max DD am Konto — Zyklus nicht prüfbar")
+    if -gewinn > dd or gewinn > 3 * dd:
+        return dict(out, grund_code="unbekannt", grund=f"Zyklus {gewinn:+,.0f} $ unplausibel bei Max DD {dd:,.0f} $ — ↻ Balance lesen".replace(",", "."))
+    gesperrt = gewinn < TRADEIFY_ZYKLUS_MIN_USD
+    fehl = round(max(0.0, -gewinn), 2)
+    regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
+    fu = (regeln.get("fu") or {}).get("tradeify") if isinstance(regeln.get("fu"), dict) else None
+    von, bis = fu if (isinstance(fu, list) and len(fu) == 2) else (270, 290)
+    ziel_normal = round(((_wd_num(von) or 0) + max(_wd_num(von) or 0, _wd_num(bis) or 0)) / 2)
+    g = _wd_konto_groesse(konto)
+    sf = regeln.get("staffelFirma") if isinstance(regeln.get("staffelFirma"), dict) else {}
+    staffel_eur = _wd_staffel_eur(round(lv - g) if g else 0, sf.get("tradeify") or regeln.get("staffel"))
+    satz_normal = round(staffel_eur / ziel_normal * 1000, 2) if ziel_normal > 0 else 0.0
+    # Puffer je Trade gewürfelt (Jitter), aber stabil für denselben Trade: Saat = Konto + CME-Handelstag (höchstens 1 Trade je Tag) — sonst zöge jeder Abruf einen
+    # anderen TP und der Tab würde den geplanten Trade ständig nachziehen
+    import random as _rnd
+    puffer = float(_rnd.Random(f"tradeify-ausgleich|{(konto or {}).get('id')}|{_cme_handelstag(None)}").randint(*TRADEIFY_ZYKLUS_PUFFER))
+    stand, ziel_tage = int(_wd_num(wd_stand) or 0), int(_wd_num(wd_ziel) or 5)
+    aktiv = gesperrt and stand >= ziel_tage - 1
+    tp = max(float(ziel_normal), float(-(-(fehl + TRADEIFY_ZYKLUS_MIN_USD + puffer) // 1))) if aktiv else None   # aufgerundet auf ganze $
+    out.update({"start_bal": sb, "gewinn": gewinn, "gesperrt": gesperrt, "fehl": fehl, "aktiv": aktiv, "ziel_normal": ziel_normal, "satz_normal": satz_normal,
+                "puffer": puffer, "stand": stand, "ziel_tage": ziel_tage})
+    if aktiv:
+        out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
+                    "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
+    elif gesperrt:
+        out.update({"grund_code": "minus", "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Payout erst ab +1 $ — normale WD bis {ziel_tage - 1}/{ziel_tage} (jetzt {stand})"})
+    else:
+        out.update({"grund_code": "plus", "grund": f"Zyklus {st['nr']}: +{d0(gewinn)} $"})
+    return out
+
+
+def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan):
+    """Hängt `zyklus` (art tradeify) an die Tradeify-Konten der Liste — WD-Stand aus wd_auto_staende, sonst goal_done_offset."""
+    tr = [k for k in konten or () if tradeify_zyklus_firma(k)]
+    if not tr:
+        return
+    ids = [str(k["id"]) for k in tr]
+    auto = wd_auto_staende(ids)
+    alt = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,goal_done_offset,goal_target,max_drawdown", "id": f"in.({','.join(ids)})"})}
+    for k in tr:
+        a = alt.get(str(k["id"])) or {}
+        stand = (auto.get(str(k["id"])) or {}).get("stand", _wd_num(a.get("goal_done_offset")) or 0)
+        live = _wd_num(k.get("live_balance") if "live_balance" in k else k.get("tv_balance"))
+        live_at = k.get("live_at") if "live_at" in k else k.get("tv_balance_at")
+        k["zyklus"] = tradeify_zyklus_konto(dict(k, max_drawdown=k.get("max_drawdown") if k.get("max_drawdown") is not None else a.get("max_drawdown")),
+                                            plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at)
+
+
 def _wd_zyklus_anhaengen(konten):
     """Hängt `zyklus` an jedes Apex-Winning-Days-Konto der Liste (dicts wie in /admin/wd-plaene: id, firm, wd_farm, live_balance …).
     Wenige Abfragen für alle Konten zusammen (pending_payouts, transactions, trade_plans seit dem ältesten Zyklus-Start). → True, oder False
     bei einem Fehler: die Konten bleiben ohne Feld, der Aufrufer sagt das dem Frontend (zyklus_ok), damit es den Stand NICHT als „keine Regel" liest."""
-    apex = [k for k in konten or () if wd_zyklus_firma_key(k)]
+    apex = [k for k in konten or () if wd_zyklus_firma_key(k) or tradeify_zyklus_firma(k)]   # + Tradeify „Zyklus im Plus“ (03.11.2026)
     if not apex:
         return True
     try:
@@ -14533,7 +14645,12 @@ def _wd_zyklus_anhaengen(konten):
                                              "started_at": f"gte.{seit}"}):
                 plaene.setdefault(str(p.get("master_account_id")), []).append(p)
         for k in apex:
-            k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []))
+            if wd_zyklus_firma_key(k):
+                k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []))
+        try:   # eigener try (Gegenprüfung 03.11.2026): ein Fehler im Tradeify-Teil darf den Apex-Stand nie mitreißen
+            _tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan)
+        except Exception as e:
+            print(f"[tradeify-zyklus] ⚠️ {type(e).__name__}: {e}", flush=True)
         return True
     except Exception as e:
         print(f"[wd-zyklus] ⚠️ {type(e).__name__}: {e}", flush=True)
@@ -14619,8 +14736,8 @@ def wd_zyklus_route():
     if err:
         return err
     ids = [x.strip() for x in str(request.args.get("ids") or "").split(",") if len(x.strip()) >= 10][:60]
-    felder = "id,user_id,name,firm,account_type,starting_balance,wd_farm,tv_balance"
-    params = {"select": felder + ",wd_zyklus_regel", "account_type": "eq.winning_days", "firm": "ilike.*apex*"}
+    felder = "id,user_id,name,firm,account_type,starting_balance,wd_farm,tv_balance,tv_balance_at"
+    params = {"select": felder + ",wd_zyklus_regel", "account_type": "eq.winning_days", "or": "(firm.ilike.*apex*,firm.ilike.*tradeify*)"}   # + Tradeify (03.11.2026)
     if ids:
         params["id"] = f"in.({','.join(ids)})"
     try:
@@ -14644,6 +14761,7 @@ def wd_zyklus_route():
         konten.append({"id": str(a["id"]), "user_id": uid, "name": a.get("name") or "", "firm": a.get("firm") or "",
                        "starting_balance": _wd_num(a.get("starting_balance")), "wd_farm": bool(a.get("wd_farm")),
                        "live_balance": _wd_num(a.get("tv_balance")) if (_wd_num(a.get("tv_balance")) or 0) > 0 else None,
+                       "live_at": a.get("tv_balance_at"),   # Frische (Tradeify Zyklus im Plus, 03.11.2026)
                        "wd_zyklus_regel": a.get("wd_zyklus_regel")})
     if not _wd_zyklus_anhaengen(konten):
         return jsonify({"error": "Recoverer-Stand nicht rechenbar"}), 502   # das Frontend behält den letzten Stand
@@ -15463,6 +15581,10 @@ def admin_wd_plaene():
                 # kapitel_id bewusst nicht gesetzt (24.09.2026): der DB-Trigger ordnet den Plan nach Datum dem Kapitel zu.
                 # V2 statt Hedge-Weg (24.09.2026, Vollumstieg): route tvv2/mt5v2, kein Slave, kein Multiplier.
                 _wd_plan_v2(body, (acc[0].get("firm") if acc and acc[0].get("firm") else body.get("master_firm")))
+                # TRADEIFY-AUSGLEICH BESTÄTIGEN (Finn 03.11.2026 „yes“): der Farmer meldet den Ausgleichs-Trade mit wd_ausgleich — die Marke kann nur eine Bestätigung
+                # verlangen, nie eine erlassen; ohne Bestätigung startet der Plan nicht (Freigabe wie Apex-WD, hedge_freigabe_at)
+                if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:
+                    body["mt5_baseline"] = {"wd_ausgleich": True}
                 angelegt.append(sb_insert("trade_plans", body))
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
@@ -16331,6 +16453,15 @@ def admin_payout_anfragen():
         return jsonify({"error": f"Offene Anfragen nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
     if offen:
         return jsonify({"error": f"Für dieses Konto ist seit {offen[0].get('requested_at') or '?'} schon eine Anfrage offen — nichts angelegt", "offen": offen[0]}), 409
+    # TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ seit dem letzten Payout. Stand nicht rechenbar → keine Sperre
+    # NOTAUSGANG (Stopp S9 zu 7388c5f4): trotzdem true nur für Admin (Finn + Pascal / Pascal), falls eine falsche Lesung sperrt
+    trotzdem = b.get("trotzdem") is True and _planer_admin_auth()[1] is None
+    if tradeify_zyklus_firma(konto) and str(konto.get("account_type") or "") in ("funded", "winning_days") and not trotzdem:
+        kz = {"id": aid, "user_id": besitzer, "name": konto.get("name"), "firm": konto.get("firm"), "starting_balance": konto.get("starting_balance"),
+              "live_balance": _wd_num(konto.get("tv_balance")), "live_at": konto.get("tv_balance_at"), "max_drawdown": konto.get("max_drawdown")}
+        if _wd_zyklus_anhaengen([kz]) and (kz.get("zyklus") or {}).get("gesperrt"):
+            z = kz["zyklus"]
+            return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $ · Payout erst ab +1 $ — nichts angelegt".replace(",", "X").replace(".", ",").replace("X", ".").replace("-", "−"), "zyklus": z}), 409
     morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
     felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     try:
@@ -28815,10 +28946,10 @@ def hf_basis(firmen):
     basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null"}
     arten = "mt5_baseline->>hedge_art.in.(" + ",".join(HEDGE_ARTEN) + ")"
     if not firmen:
-        basis["mt5_baseline->>hedge_art"] = "in.(" + ",".join(HEDGE_ARTEN) + ")"
+        basis["or"] = f"({arten},mt5_baseline->>wd_ausgleich.eq.true)"   # + Tradeify-Ausgleich (03.11.2026), auch ohne Apex-Liste
         return basis
     wd = ",".join(f"and(winning_day.is.true,notes.ilike.*Winning-Day-Farmer*,master_firm.ilike.*{f}*)" for f in firmen)
-    basis["or"] = f"({arten},{wd})"
+    basis["or"] = f"({arten},{wd},mt5_baseline->>wd_ausgleich.eq.true)"   # + Tradeify-Ausgleich (03.11.2026)
     return basis
 
 
@@ -29113,9 +29244,12 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
 
 
 def hf_ist_wd(zeile, firmen):
-    """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) → True."""
+    """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) oder ein Tradeify-Ausgleichs-Trade
+    (mt5_baseline.wd_ausgleich, alias aus, 03.11.2026) → True."""
     if zeile.get("art") in HEDGE_ARTEN or zeile.get("winning_day") is not True or "Winning-Day-Farmer" not in str(zeile.get("notes") or ""):
         return False
+    if str(zeile.get("aus") or "").lower() == "true":
+        return True
     firm = str(zeile.get("master_firm") or "").lower()
     return any(f in firm for f in firmen)
 
@@ -29242,7 +29376,7 @@ def admin_auto_plan_hedge_freigabe():
         rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
                                                       "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
                                                       "winning_day,notes,slave_risk,master_risk,multiplier,"
-                                                      "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre",
+                                                      "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre,aus:mt5_baseline->>wd_ausgleich",
                                                       order="start_um.asc.nullslast"))
                 if str(r.get("user_id")) not in aus or hf_wd_sichtbar(r, firmen, gruppen_ids)]
         for r in rows:

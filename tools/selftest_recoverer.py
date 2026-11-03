@@ -125,6 +125,9 @@ def main():
     exec(src[i:src.find("\n\n\n", i)], ns)
     i = src.index("def _wd_zyklus_anhaengen(")
     exec(src[i:src.find("\n\n\n", i)], ns)
+    # Tradeify „Zyklus im Plus" (03.11.2026) hängt am selben Weg — hier nur Apex-Konten, der Tradeify-Teil hat tools/selftest_tradeify_zyklus.py
+    ns.setdefault("tradeify_zyklus_firma", lambda k: False)
+    ns.setdefault("_tradeify_zyklus_anhaengen", lambda *a, **k: None)
     fragen = []
 
     class Fehler(Exception):
