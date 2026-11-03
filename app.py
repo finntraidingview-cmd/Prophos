@@ -27736,6 +27736,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 raise
             _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(), params=weg).raise_for_status()
     if zeilen and not trocken:
+        # E3 (Finn 03.11.2026 ~23:10 Dubai: „CFD-Planer only Echo, fertig." — HT und Emin): CFD-Challenges gleich als Echo mit Fusion-Hedge anlegen.
+        # Fehler hier → die Pläne bleiben Echo V2 wie bisher (eh_tick stellt sie im Fenster um, der Riegel hält sie bis dahin) — nie ohne Hedge, nie kein Plan.
+        try:
+            _e3 = ap_echo_hedge_anlegen(zeilen, {str(k["a"]["id"]): (k["a"], k["bal"]) for _key, k, _w, _v in plan_roh}, reg.get("regeln") or {})
+            if _e3["echo"] or _e3["v2"]:
+                print(f"[auto-plan] {tag} Echo mit Hedge: {_e3['echo']} angelegt, {_e3['v2']} bleiben Echo V2 ({'; '.join(_e3['gruende'][:5])})", flush=True)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Echo-Hedge beim Anlegen: {type(e).__name__}: {e} — Pläne bleiben Echo V2 (eh_tick/Riegel)", flush=True)
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
         if r.status_code == 400 and "tages_grenze_usd" in (r.text or ""):
@@ -28795,7 +28803,7 @@ def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
     if not (alt and alt.get("status") == "ohne"):
         upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nEcho-Hedge: ohne Hedge, weil {grund}").strip()
     try:
-        if not sb_update("trade_plans", _eh_guard(p), upd):
+        if not sb_update("trade_plans", _eh_guard(p, route=p.get("route") or "mt5v2"), upd):   # E3: auch Echo (mt5) aus dem Planer
             return
     except Exception as e:
         _eh_spur(f"⚠️ {str(p['id'])[:8]} Grund nicht gespeichert: {type(e).__name__}: {e}")
@@ -28809,6 +28817,14 @@ def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"eh-ohne-{p['id']}")
 
 
+# E3 (Finn 03.11.2026 ~23:10 Dubai: „Es ist kein einziger Trade des CFD-Planers, ganz egal was. CFD-Planer only Echo, fertig." — für HT- und Emin-IDs):
+# ap_planen legt CFD-Challenges direkt als Echo (route mt5, Slave = Fusion der ID, Multiplikator B2) an, mt5_baseline.echo_hedge {status geplant} (ap_echo_hedge_anlegen).
+# eh_tick rechnet sie im Fenster nur nach (Lots/Marge/Lesung frisch) → status mit, oder ohne + Grund (Riegel hält mt5 mit echo_hedge ohne). Echo V2 aus der
+# Zeit davor (und Minis „Tage sammeln", E2) laufen wie bisher durch denselben Weg. Ein „ohne"-Plan auf Echo wird jeden Takt neu versucht (Marge kann frei werden).
+EH_E3_WEG = "(or(route.eq.mt5v2,mt5_baseline->echo_hedge->>status.in.(geplant,ohne)))"
+EH_E3_SCHNELL = "(or(and(route.eq.mt5v2,mt5_baseline->echo_hedge.is.null),mt5_baseline->echo_hedge->>status.eq.geplant))"
+
+
 def eh_fenster_oder(von, bis):
     """REIN RECHNEND (testbar): PostgREST-or für eh_tick/eh_schnell_tick — Start im Fenster von … bis ODER ohne Startzeit.
     OHNE STARTZEIT = HANDSTART (E1, Finn 03.11.2026 ~18:05 Dubai: „Aber warum war da kein Hedge? Alle CFD-Trades sind doch mit Echo."):
@@ -28816,6 +28832,81 @@ def eh_fenster_oder(von, bis):
     geleert und der Plan von Hand gestartet → tpPreflightMt5V2 = Echo V2 ohne Hedge (−2.399 $ / −1.999,60 $, Fusion +0). Ein bestätigter
     Plan ohne Startzeit wartet nur noch auf „Starten" — er wird sofort umgestellt, damit der Handstart Echo MIT Hedge fährt."""
     return f"(start_um.is.null,and(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()}))"
+
+
+def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par, jetzt_iso):
+    """REIN RECHNEND (testbar, E3 03.11.2026): eine Planer-Zeile → Echo mit Fusion-Hedge (route mt5, slave_*, multiplier, slave_risk,
+    mt5_baseline.echo_hedge {status geplant, quelle planer, lots, q …}, hedge_vorschau, Notiz) — dieselbe B2-Rechnung wie eh_tick (eh_hedge mit
+    Kontowert-Satz, netto_faktor, min_lot), nur ohne Marge/Fusion-Lesung (die rechnet eh_tick vor dem Start frisch nach). Nur CFD-Challenges
+    (EH_TYPEN) einer Firma auf Echo V2, nie ein Mini „Tage sammeln" (E2). Geht der Hedge nicht (kein Fusion-Konto, kein Kontowert …), bleibt die
+    Zeile Echo V2 — Echo ohne Slave lehnt der DB-Trigger trade_plans_kontoart_weg ab und bräche den ganzen Insert; der Claim-Riegel hält sie.
+    Ändert z in place. → ('echo', None) | ('v2', grund) | (None, None) = nicht betroffen."""
+    if str(z.get("route") or "") != "mt5v2" or not a or (a.get("account_type") or "") not in EH_TYPEN:
+        return None, None
+    base = dict(z.get("mt5_baseline") or {})
+    if base.get("tage_mini"):
+        return None, None
+    if not eh_plan_zaehlt(a, ap_regel_finden(firmen, a.get("firm"))):
+        return None, None
+    uid = str(z.get("user_id"))
+    hid, login = hedge.get(uid, (None, ""))
+    if not hid or hid not in hedge_acc:
+        return "v2", "kein Echo-Hedge-Konto (Fusion) bei dieser ID"
+    if bal is None:
+        return "v2", "Balance des Kontos nicht lesbar"
+    kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+    sppl = (((ctx_ppl.get("ppl") or {}).get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+    h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), z.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, z.get("master_risk"),
+                        par["netto_faktor"], par["min_lot"])
+    if grund or not h:
+        return "v2", str(grund or "Hedge nicht rechenbar")
+    login = login or str(hedge_acc[hid].get("external_id") or "")
+    base["echo_hedge"] = {"status": "geplant", "quelle": "planer", "at": jetzt_iso, "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"],
+                          "satz": kw.get("satz_eur_pro_usd"), "kontowert_eur": kw.get("wert_eur"), "balance": round(float(bal), 2), "login": login,
+                          "netto_faktor": par["netto_faktor"]}
+    base["hedge_vorschau"] = ehv_vorschau(h, None, z.get("master_tp"), jetzt_iso)
+    z.update({"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
+              "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": base,
+              "notes": (str(z.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                        f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()})
+    return "echo", None
+
+
+def ap_echo_hedge_anlegen(zeilen, konten, regeln):
+    """E3: alle Planer-Zeilen vor dem Insert durch ap_echo_hedge_zeile — konten = {account_id: (konto, balance)}. Lädt Hedge-Konten
+    (user_settings echo_hedge_account, nur eigene — gp_hedge_settings_eigen), Fusion-Konten, firm_specs und Kaufpreise wie eh_tick.
+    Schalter echo_hedge aus → nichts (Echo auf Challenges lässt der DB-Trigger dann nicht zu). → {echo, v2, gruende}"""
+    out = {"echo": 0, "v2": 0, "gruende": []}
+    par = eh_param(regeln)
+    firmen = (regeln or {}).get("firmen") or []
+    kand = [z for z in zeilen if str(z.get("route") or "") == "mt5v2" and not ((z.get("mt5_baseline") or {}).get("tage_mini"))
+            and ((konten.get(str(z.get("master_account_id"))) or (None, None))[0] or {}).get("account_type") in EH_TYPEN]
+    if not kand or not par["an"]:
+        return out
+    in_uids = "in.(" + ",".join(sorted({str(z["user_id"]) for z in kand})) + ")"
+    hedge = {}
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})):
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if v.get("accountId"):
+            hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
+    hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm,external_id", "id": "in.(" + ",".join(
+        sorted({h[0] for h in hedge.values()})) + ")"}) if hedge else [])}
+    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    kauf = _ap_kauf_echt(sorted({str(z["master_account_id"]) for z in kand}))
+    jetzt_iso = _wt_now_iso()
+    for z in kand:
+        a, bal = konten.get(str(z.get("master_account_id"))) or (None, None)
+        try:
+            art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, {"ppl": ppl, "ppl_firma": ppl_firma}, kauf, firmen, par, jetzt_iso)
+        except Exception as e:      # eine kaputte Zeile bleibt Echo V2, die anderen werden trotzdem Echo
+            art, grund = "v2", f"{type(e).__name__}: {str(e)[:80]}"
+        if art == "echo":
+            out["echo"] += 1
+        elif art == "v2":
+            out["v2"] += 1
+            out["gruende"].append(f"{z.get('master_name') or '—'}: {grund}")
+    return out
 
 
 def eh_plan_zaehlt(konto, regel):
@@ -28885,7 +28976,13 @@ def eh_rot_start_pruefen(jetzt, firmen, aus, namen):
 
 
 def eh_zurueck():
-    """Schalter aus → umgestellte, noch nicht gestartete Pläne zurück auf Echo V2 (ohne Slave). → Anzahl."""
+    """Schalter aus → früher: umgestellte, noch nicht gestartete Pläne zurück auf Echo V2 (ohne Slave). SEIT E3 (Finn 03.11.2026 ~23:10 Dubai: „CFD-Planer
+    only Echo, fertig.") NIE MEHR: kein Weg erzeugt für eine CFD-Challenge wieder Echo V2 — der Schalter aus lässt Echo-Pläne einfach Echo. → 0."""
+    return 0
+
+
+def _eh_zurueck_alt():
+    """Bis E3 (03.11.2026): Schalter aus → umgestellte Pläne zurück auf Echo V2. Nicht mehr aufgerufen, nur für den Rückbau."""
     n = 0
     for p in _sb_all("trade_plans", {"select": "id,user_id,master_name,mt5_baseline,updated_at", "status": "eq.planned", "route": "eq.mt5",
                                      "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
@@ -28950,9 +29047,10 @@ def _eh_tick_lauf(jetzt):
     # hand_werte_at filtert hier bewusst NICHT (30.10.2026, Chris 4e9a26ac — s. Kopf des Abschnitts)
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_risk,richtung,"
                                             "start_um,notes,mt5_baseline,updated_at",
-                                  "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
+                                  "status": "eq.planned", "route": "in.(mt5v2,mt5)", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
                                   "auto_bestaetigt_at": "not.is.null",          # unbestätigte Vorschläge starten nie (SU_CLAIM_GUARD)
                                   "or": eh_fenster_oder(von, bis),
+                                  "and": EH_E3_WEG,                             # E3: Echo V2 (alt) oder Echo aus dem Planer (geplant/ohne)
                                   "order": "start_um.asc"})
     _eh["gesehen"] = {str(p["id"]): str(p.get("updated_at") or "") for p in roh}   # für eh_schnell_tick: so schon gesehen
     namen, aus = _ap_namen()
@@ -29040,7 +29138,7 @@ def _eh_tick_lauf(jetzt):
                    "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                              f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()}
             try:
-                if not sb_update("trade_plans", _eh_guard(p), upd):
+                if not sb_update("trade_plans", _eh_guard(p, route=p.get("route") or "mt5v2"), upd):   # E3: Echo aus dem Planer nachrechnen
                     # inzwischen geändert → eh_schnell_tick sieht das neue updated_at gleich wieder; geclaimt → eh_rot_start_pruefen (🔴)
                     continue
             except Exception as e:
@@ -29077,9 +29175,9 @@ def eh_schnell_tick(jetzt=None):
         return False
     jetzt = jetzt or datetime.now(timezone.utc)
     von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
-    roh = _sb_all("trade_plans", {"select": "id,user_id,updated_at", "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true",
+    roh = _sb_all("trade_plans", {"select": "id,user_id,updated_at", "status": "eq.planned", "route": "in.(mt5v2,mt5)", "auto_plan": "is.true",
                                   "start_um_gestartet_at": "is.null", "auto_bestaetigt_at": "not.is.null",
-                                  "mt5_baseline->echo_hedge": "is.null",
+                                  "and": EH_E3_SCHNELL,                         # Echo V2 ohne Spur (wie bisher) oder Echo aus dem Planer, noch nicht nachgerechnet
                                   "or": eh_fenster_oder(von, bis)})
     gesehen, aus = _eh.get("gesehen") or {}, _eh.get("aus") or set()
     if not any(gesehen.get(str(p["id"])) != str(p.get("updated_at") or "") for p in roh if str(p.get("user_id")) not in aus):

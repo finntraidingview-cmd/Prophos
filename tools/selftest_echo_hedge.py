@@ -98,7 +98,8 @@ class DB:
         if t == "trade_plans":
             out = []
             for p in self.plaene:
-                if q.get("route") and p["route"] != q["route"][3:]:
+                rq = q.get("route") or ""
+                if rq.startswith("in.(") and p["route"] not in rq[4:-1].split(",") or rq.startswith("eq.") and p["route"] != rq[3:]:
                     continue
                 st = q.get("status") or ""
                 if st.startswith("eq.") and p["status"] != st[3:] or st.startswith("in.(") and p["status"] not in st[4:-1].split(","):
@@ -136,7 +137,14 @@ class DB:
                     continue
                 if q.get("hand_werte_at") == "is.null" and p.get("hand_werte_at"):
                     continue
-                if "and" in q:
+                e3 = (p.get("mt5_baseline") or {}).get("echo_hedge") or {}
+                if q.get("and", "").startswith("(or(route.eq.mt5v2,"):        # EH_E3_WEG (E3 03.11.2026): Echo V2 oder Echo aus dem Planer (geplant/ohne)
+                    if not (p["route"] == "mt5v2" or e3.get("status") in ("geplant", "ohne")):
+                        continue
+                elif q.get("and", "").startswith("(or(and(route.eq.mt5v2,"):  # EH_E3_SCHNELL: Echo V2 ohne Spur oder Echo „geplant"
+                    if not ((p["route"] == "mt5v2" and not e3) or e3.get("status") == "geplant"):
+                        continue
+                elif "and" in q:
                     von, bis = re.findall(r"start_um\.(?:gte|lte)\.([^,)]+)", q["and"])
                     if p.get("start_um") is None or not (von <= p["start_um"] <= bis):
                         continue
@@ -250,15 +258,15 @@ def takt():
     ok(next(p for p in plaene if p["id"] == "P11")["mt5_baseline"]["echo_hedge"]["grund"].startswith("keine frische Fusion-Lesung"),
        "Lesung 10 min alt → ohne Hedge")
 
-    print("Schalter aus → zurück")
+    print("Schalter aus → bleibt Echo (E3 03.11.2026: nie zurück auf Echo V2)")
     regeln["echo_hedge"]["an"] = False
     erg = ns["eh_tick"](jetzt=jetzt, force=True)
-    ok(p1["route"] == "mt5v2" and p1["slave_account_id"] is None and p1["multiplier"] is None and p1["mt5_baseline"]["echo_hedge"]["status"] == "zurueck",
-       f"P1 zurück auf Echo V2 ohne Slave ({erg})")
+    ok(p1["route"] == "mt5" and p1["slave_account_id"] == "H1" and p1["mt5_baseline"]["echo_hedge"]["status"] == "mit" and erg.get("zurueck") == 0,
+       f"P1 bleibt Echo mit Hedge, nichts zurück auf Echo V2 ({erg})")
     les["488579"]["at"] = jetzt.timestamp() - 30
     regeln["echo_hedge"]["an"] = True
     ns["eh_tick"](jetzt=jetzt, force=True)
-    ok(p1["route"] == "mt5", "wieder an → P1 erneut umgestellt (Status zurueck zählt nicht als ohne)")
+    ok(p1["route"] == "mt5", "wieder an → P1 weiter Echo mit Hedge")
     p1["start_um_gestartet_at"] = "claim"
     regeln["echo_hedge"]["an"] = False
     ns["eh_tick"](jetzt=jetzt, force=True)
