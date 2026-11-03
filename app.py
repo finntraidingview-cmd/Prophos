@@ -23800,8 +23800,18 @@ def ap_regel_konto(regel, konto, balance):
         regel = ap_regel_flex(regel, konto, balance)   # FundingPips Flex (max_drawdown ≥ 12 %) / Standard je Konto (Finn 08.10.2026)
     zk = (konto or {}).get("ziel_pct_konto")
     if isinstance(zk, dict) and any(_wd_num(v) is not None for v in zk.values()):
+        zkv = {k: float(v) for k, v in zk.items() if _wd_num(v) is not None}
         zp_alt = regel.get("ziel_pct") if isinstance((regel or {}).get("ziel_pct"), dict) else {}
-        regel = dict(regel or {}, ziel_pct=dict(zp_alt, **{k: float(v) for k, v in zk.items() if _wd_num(v) is not None}))
+        regel = dict(regel or {}, ziel_pct=dict(zp_alt, **zkv))
+        # KONTO-WERT GEHT IMMER VOR (03.11.2026, Finn — Mike FundingPips 50k Flex …5253, ziel_pct_konto {phase2: 8}): Planer (ap_konto_rechnen),
+        # Ziel-Wache (zw_ziel) und Boden mischen danach regel.je_groesse[Größe] mit dict(regel, **jg) ein — dessen ziel_pct (Flex 50k phase2 5)
+        # ersetzte das Konto-Ziel, Ziel 52.500 statt 54.000, „Ziel erreicht" bei 52.516. Darum das Konto-Ziel auch in jeden Größen-Block.
+        je = regel.get("je_groesse")
+        if isinstance(je, dict) and je:
+            # nur Blöcke mit eigenem ziel_pct-Dict: ohne gilt ohnehin regel.ziel_pct (mit Konto-Wert) — ein Teil-Dict hier verdrängte sonst
+            # beim dict(regel, **jg) die übrigen Phasen der Firma
+            regel = dict(regel, je_groesse={g: (dict(jg, ziel_pct=dict(jg["ziel_pct"], **zkv))
+                                                if isinstance(jg, dict) and isinstance(jg.get("ziel_pct"), dict) else jg) for g, jg in je.items()})
     ch = ((regel or {}).get("phasen") or {}).get("challenge")
     if not ch or not _wd_num((konto or {}).get("consistency_pct")):
         return regel
@@ -36963,7 +36973,8 @@ def zw_ziel(regel, phase, balance):
         return None
     # KERNWERTE JE GRÖSSE wie ap_konto_rechnen (Master 08.10.2026, Prüffall FP 50k Flex: Ziel-Wache sah 8 % = 54.000, der Planer 10 % =
     # 55.000 — ein Flex-Konto wäre schon bei +8 % „Ziel erreicht" samt Start-Sperre gewesen): regel.je_groesse[Größe] (von ap_regel_flex
-    # gesetzt) geht der Firma vor, gleiche Reihenfolge wie der Planer (also auch vor ziel_pct_konto). Ohne Block oder mit keine_werte wie bisher.
+    # gesetzt) geht der Firma vor, gleiche Reihenfolge wie der Planer. accounts.ziel_pct_konto geht trotzdem IMMER vor (03.11.2026, Finn):
+    # ap_regel_konto trägt es auch in die Größen-Blöcke ein. Ohne Block oder mit keine_werte wie bisher.
     jg = (regel.get("je_groesse") or {}).get(str(int(groesse)))
     if jg and not jg.get("keine_werte"):
         regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})

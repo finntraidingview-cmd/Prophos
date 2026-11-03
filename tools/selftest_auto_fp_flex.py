@@ -88,6 +88,30 @@ def main():
     w, g = R(RK(alt, konto(5000), 48916.0), "phase1", 48916.0, U)
     check(w and 1250 <= w["sl"] <= 1500, "ohne flex-Block (alter Stand): 50k-Block gilt wie bisher für jedes 50k-Konto")
 
+    # ── 5 KONTO-ZIEL GEHT IMMER VOR (03.11.2026, Finn — Mike FP 50k Flex …5253, ziel_pct_konto {phase2: 8}): der Flex-50k-Block bringt
+    #      eigenes ziel_pct (phase2 5) mit; vorher ersetzte er das Konto-Ziel → 52.500 statt 54.000, „Ziel erreicht" bei 52.516 ──────────────
+    src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
+    i = src.index("\ndef zw_ziel(") + 1
+    exec(src[i:src.find("\n\n\n", i)], a)
+    ZW = a["zw_ziel"]
+    mike = konto(6000, account_type="phase2", ziel_pct_konto={"phase2": 8})
+    zz = ZW(RK(FP, mike, 52516.02), "phase2", 52516.02)
+    check(zz and zz[0] == 54000.0, f"Mike 50k Flex P2 mit ziel_pct_konto 8 → Ziel-Wache 54.000 ({zz})")
+    wm, gm = R(RK(FP, mike, 52516.02), "phase2", 52516.02, U)
+    check(wm and wm["ziel"] == 54000.0, f"… Planer-Ziel 54.000 ({wm and wm['ziel']}, {gm})")
+    ohne = konto(6000, account_type="phase2")
+    zo = ZW(RK(FP, ohne, 52516.02), "phase2", 52516.02)
+    wo, go = R(RK(FP, ohne, 51000.0), "phase2", 51000.0, U)   # Planer unter dem Ziel (bei 52.516 meldet er „Ziel erreicht")
+    check(zo and zo[0] == 52500.0 and wo and wo["ziel"] == 52500.0, f"ohne ziel_pct_konto bleibt Flex 50k P2 5 % = 52.500 ({zo}, {wo and wo['ziel']}, {go})")
+    # nur phase2 am Konto: Phase 1 desselben Kontos behält den Flex-Wert 10 % (kein Teil-Dict, das die übrigen Phasen verdrängt)
+    m1 = dict(mike, account_type="phase1")
+    z1 = ZW(RK(FP, m1, 50100.0), "phase1", 50100.0)
+    check(z1 and z1[0] == 55000.0, f"ziel_pct_konto nur phase2 → phase1 bleibt Flex 10 % = 55.000 ({z1})")
+    # Standard-Konto ohne Größen-Block: Konto-Ziel wie bisher
+    s100 = konto(10000, account_type="phase1", ziel_pct_konto={"phase1": 10})
+    zs = ZW(RK(FP, s100, 100500.0), "phase1", 100500.0)
+    check(zs and zs[0] == 110000.0, f"Standard 100k ohne Block, ziel_pct_konto phase1 10 → 110.000 ({zs})")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")
