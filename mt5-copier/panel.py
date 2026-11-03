@@ -69,11 +69,20 @@ except OSError:
     pass
 
 
+_ABBILD_FEHLT_GEMELDET = set()
+
+
 def panel_code_weicht_ab(neu, name="panel"):
-    """REIN RECHNEND (testbar): weicht der Quelltext `neu` vom BEIM LADEN gemerkten Abbild ab? Kein Abbild → True (lieber neu starten)."""
+    """REIN RECHNEND (testbar): weicht der Quelltext `neu` vom BEIM LADEN gemerkten Abbild ab? Neuer Stand nicht geholt → True (lieber neu starten).
+    Kein Abbild (Datei beim Laden nicht lesbar) → False + einmal Log (S9 zu ae4b57db: sonst Neustart-Schleife, das Abbild fehlte nach jedem Start wieder)."""
     alt = _GELADEN.get(name)
-    if alt is None or neu is None:
+    if neu is None:
         return True
+    if alt is None:
+        if name not in _ABBILD_FEHLT_GEMELDET:
+            _ABBILD_FEHLT_GEMELDET.add(name)
+            print(f"[panel] Abbild von {name}.py beim Laden nicht lesbar — Update-Vergleich für diese Datei aus (kein Neustart deswegen).", flush=True)
+        return False
     return _code_glatt(neu) != _code_glatt(alt)
 
 
@@ -81,10 +90,15 @@ def panel_lauf_info():
     """Was dieser Panel-Prozess WIRKLICH fährt (für mt5_live.status.panel_lauf über den Prophos-Tab): Version, deren Code nachweislich läuft (Start bzw.
     nachgezogen nach Vergleich mit dem Abbild), Startzeit, PID, Datei (panel.py / panel_frisch.py), sha12 des geladenen Quelltexts."""
     import hashlib
-    b = _GELADEN.get("panel")
+    b, pv = _GELADEN.get("panel"), _GELADEN.get("provision")
+    ma = read_json(os.path.join(HERE, "panel_mutex_aufgabe.json"), None)
     return {"version": _GELADEN.get("version"), "start_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_GELADEN["start"])),
             "pid": _GELADEN.get("pid"), "datei": _GELADEN.get("datei"),
-            "sha12": hashlib.sha256(_code_glatt(b)).hexdigest()[:12] if b else None}
+            "sha12": hashlib.sha256(_code_glatt(b)).hexdigest()[:12] if b else None,
+            # S9 zu ae4b57db: Abbild von provision.py sichtbar (None = beim Laden nicht lesbar, Vergleich dafür aus)
+            "provision_sha12": hashlib.sha256(_code_glatt(pv)).hexdigest()[:12] if pv else None,
+            # S9: neue Panels, die wegen des Mutex aufgaben (Zähler, erste/letzte Zeit, PID) — steigt er, hält evtl. ein hängendes Panel den Mutex
+            "mutex_aufgaben": ma if isinstance(ma, dict) else None}
 
 # Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
@@ -7156,8 +7170,24 @@ def _selbst_auffrischen():
 
 # ══ NUR EIN PANEL JE PC (Betrieb 1 03.11.2026: pc-usq1i6 hatte ZWEI panel.py-Prozesse, beide 13:19 dt — zwei start-panel.bat-Schleifen). Unter Windows
 # setzt ThreadingHTTPServer SO_REUSEADDR (allow_reuse_address) — das erlaubt dort einen ZWEITEN Bind auf 127.0.0.1:8770; „Port belegt“ griff nie. Beide
-# Prozesse fuhren alle Wachen (Schließ-Wache, Version-Watcher, Puls-Locks nur je Prozess). Jetzt: benannter Mutex vor allen Threads, dazu exklusiver Bind. ══
+# Prozesse fuhren alle Wachen (Schließ-Wache, Version-Watcher, Puls-Locks nur je Prozess). Jetzt: benannter Mutex vor allen Threads. Der Bind bleibt wie er war
+# (S9-Stopp zu ae4b57db: SO_EXCLUSIVEADDRUSE scheitert, solange TIME_WAIT-Verbindungen auf 8770 stehen — das HTTP/1.0-Panel hat davon laufend viele, nach jedem
+# Update-Neustart wäre es 2–4 min weg gewesen). Gibt ein neues Panel wegen des Mutex auf, steht das in panel_mutex_aufgabe.json (panel_lauf.mutex_aufgaben). ══
 _EINZEL_MUTEX = []   # Handle festhalten (sonst gibt Windows den Mutex beim Aufräumen frei)
+MUTEX_AUFGABE_PFAD = os.path.join(HERE, "panel_mutex_aufgabe.json")
+
+
+def mutex_aufgabe_merken(jetzt):
+    """S9 zu ae4b57db: ein neues Panel gibt wegen des Mutex auf → Zähler + Zeit + PID in panel_mutex_aufgabe.json (das laufende Panel meldet es im
+    Herzschlag; hängt es, liest man die Datei per Lotse). Wirft nie."""
+    try:
+        alt = read_json(MUTEX_AUFGABE_PFAD, {}) or {}
+        d = {"n": int(alt.get("n") or 0) + 1, "erst_at": alt.get("erst_at") or jetzt, "letzt_at": jetzt, "pid": os.getpid()}
+        with open(MUTEX_AUFGABE_PFAD + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(MUTEX_AUFGABE_PFAD + ".tmp", MUTEX_AUFGABE_PFAD)
+    except Exception as e:
+        print(f"[panel] {MUTEX_AUFGABE_PFAD} nicht geschrieben: {type(e).__name__}: {e}", flush=True)
 
 
 def panel_einzel_instanz():
@@ -7179,17 +7209,6 @@ def panel_einzel_instanz():
         return True
 
 
-class _PanelServer(ThreadingHTTPServer):
-    """Exklusiver Bind (03.11.2026): unter Windows kein SO_REUSEADDR (ließ den zweiten Bind zu), sondern SO_EXCLUSIVEADDRUSE."""
-    allow_reuse_address = os.name != "nt"
-
-    def server_bind(self):
-        if os.name == "nt" and hasattr(__import__("socket"), "SO_EXCLUSIVEADDRUSE"):
-            import socket as _so
-            self.socket.setsockopt(_so.SOL_SOCKET, _so.SO_EXCLUSIVEADDRUSE, 1)
-        super().server_bind()
-
-
 def main():
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält das Panel nicht mehr an)", flush=True)
@@ -7197,6 +7216,7 @@ def main():
     # nach dem Auffrischen: läuft der frische Stand per runpy in DIESEM Prozess, legt erst dessen main() den Mutex an (sonst sähe es sich selbst)
     if not panel_einzel_instanz():
         print(f"[panel] Es läuft schon ein Panel auf Port {PORT} — dieses Fenster beendet sich (nächster Versuch der .bat in ~70 s).", flush=True)
+        mutex_aufgabe_merken(time.time())   # S9: ein hängendes Panel hält den Mutex → sichtbar machen (Zähler + Zeit)
         time.sleep(60)   # die .bat-Schleife startet nach 10 s neu: so nur ~1 Versuch je 70 s statt Download-Schleife alle 10 s
         sys.exit(f"Panel läuft schon (Port {PORT})")
     print("=" * 66)
@@ -7284,7 +7304,7 @@ def main():
                 pass
     print("=" * 66)
     try:
-        _PanelServer(("127.0.0.1", PORT), Handler).serve_forever()
+        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nPanel beendet.")
     except OSError as e:
