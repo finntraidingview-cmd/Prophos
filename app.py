@@ -4103,7 +4103,8 @@ def alarm_tick():
             wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art,aus:mt5_baseline->>wd_ausgleich",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
             gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
-            wd_offen = [r for r in wd_offen if hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id"))]   # wie die Liste
+            wd_offen = [r for r in wd_offen if (hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id")))
+                        or str(r.get("aus") or "").lower() == "true"]   # wie die Liste; Tradeify-Ausgleich auch aus Gruppen (Finn 03.11.2026: „auch bestätigen“)
             evs += [ev for ev in alarm_wd_bestaetigen(wd_offen, firmen_wd, namen, jetzt) if ev[0] not in _alarm["gemeldet"] and all(ev[0] != e[0] for e in evs)]
     except Exception as e:
         print(f"[alarm] ⚠️ Apex-WD-Bestätigung: {type(e).__name__}: {e}", flush=True)
@@ -29243,6 +29244,15 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
             "text": f.get("liq_regel_text") if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss"}
 
 
+def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):
+    """REIN RECHNEND (testbar): steht die Zeile in der Freigabe-Liste dieses Logins? Verwalter (verw_sicht = seine Gruppe): nur Tradeify-Ausgleichs-Trades seiner
+    Gruppe. Admin: wie bisher (HT, sichtbare Apex-WD) und jeder Ausgleichs-Trade, auch aus Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“)."""
+    ausgleich = str(r.get("aus") or "").lower() == "true"
+    if verw_sicht is not None:
+        return ausgleich and str(r.get("user_id")) in verw_sicht
+    return str(r.get("user_id")) not in (aus or ()) or hf_wd_sichtbar(r, firmen, gruppen_ids) or ausgleich
+
+
 def hf_ist_wd(zeile, firmen):
     """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) oder ein Tradeify-Ausgleichs-Trade
     (mt5_baseline.wd_ausgleich, alias aus, 03.11.2026) → True."""
@@ -29366,6 +29376,13 @@ def admin_auto_plan_hedge_freigabe():
         if _gs is not None:
             return _gs
     uid, err = _admin_voll()   # ADMIN_EMAILS oder voller Admin-Reiter-Login (30.10.2026, „Finn + Pascal")
+    # TRADEIFY-AUSGLEICH AUCH IN GRUPPEN (Finn 03.11.2026: „Nein, auch bestätigen“): ein Verwalter (Emin, ?ansicht=admin) sieht und bestätigt die Ausgleichs-Trades
+    # SEINER Gruppe — nur diese, keine Hedge-Arten, keine Apex-WD. Finn als Admin sieht sie ebenfalls (unten). So hängt kein Ausgleich unsichtbar
+    verw_sicht = None
+    if err and err[1] == 403:
+        _vu, _ve = _wd_login()
+        if _ve is None and _admin_verwalter() and _admin_sicht():
+            uid, err, verw_sicht = _vu, None, frozenset(str(x) for x in _admin_sicht())
     if err:
         return (jsonify({"ok": False, "msg": "Nur für Admins"}), 403) if err[1] == 403 else err
     try:
@@ -29378,7 +29395,7 @@ def admin_auto_plan_hedge_freigabe():
                                                       "winning_day,notes,slave_risk,master_risk,multiplier,"
                                                       "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre,aus:mt5_baseline->>wd_ausgleich",
                                                       order="start_um.asc.nullslast"))
-                if str(r.get("user_id")) not in aus or hf_wd_sichtbar(r, firmen, gruppen_ids)]
+                if hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids)]   # Ausgleich: auch Gruppen, Verwalter nur seine Gruppe (03.11.2026)
         for r in rows:
             r["wd"] = hf_ist_wd(r, firmen)       # Frontend: WD-Block im Funded-Planer zeigt wd=true, der Challenge-Block nur hedge_art
         if request.method == "GET":

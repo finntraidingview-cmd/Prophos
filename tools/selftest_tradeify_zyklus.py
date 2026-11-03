@@ -91,7 +91,17 @@ check("mt5_baseline->>wd_ausgleich.eq.true" in ruf("hf_basis", [])["or"] and "mt
 check('if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:' in app and "if(ausgleich) pr.wd_ausgleich = true" in html
       and "if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })" in html, "Marke wd_ausgleich an beiden Anlage-Wegen (Mac über Railway, Tab direkt)")
 check("altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned'))" in html, "Nachziehen auf den Ausgleich: erst die Marke, sonst kein großer TP")
-check("if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return !tpBestaetigenAusgenommen()" in html, "PC-Tab startet einen markierten Ausgleich erst nach der Bestätigung")
+check("if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return true" in html, "PC-Tab startet einen markierten Ausgleich erst nach der Bestätigung — auch in Gruppen (Finn: „auch bestätigen“)")
+lade("hf_zeile_fuer"); lade("hf_wd_sichtbar")
+emin, ht = {"user_id": "emin-mitglied", "aus": "true"}, {"user_id": "ht-id", "aus": None, "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
+check(ruf("hf_zeile_fuer", emin, None, {"emin-mitglied"}, ["apex"], {"emin-mitglied"}), "Admin sieht den Ausgleich auch aus einer Gruppe mit Verwalter")
+check(ruf("hf_zeile_fuer", emin, frozenset({"emin-mitglied"}), set(), ["apex"], set()) and not ruf("hf_zeile_fuer", dict(emin, user_id="fremd"), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
+      "Verwalter sieht nur die Ausgleichs-Trades seiner Gruppe")
+check(not ruf("hf_zeile_fuer", ht, frozenset({"ht-id"}), set(), ["apex"], set()), "Verwalter sieht keine anderen Freigaben (Hedge-Arten, Apex-WD, normale WD)")
+sqlg = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_gruppen.sql"), encoding="utf-8").read()
+check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true' and coalesce(new.winning_day, false))) then" in sqlg and "verwalter_user_id" not in sqlg.split("TRADEIFY-AUSGLEICH (03.11.2026)")[1].split("then")[0],
+      "DB-Netz: Ausgleich ohne Gruppen-Ausnahme (neue SQL-Datei)")
+check("'/hedge-freigabe?ansicht=admin'" in html and "String(z.aus || '').toLowerCase() === 'true')" in html, "Liste mit ansicht=admin (Verwalter), Ausgleich in „Zu bestätigen“ immer sichtbar")
 sql = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_bestaetigen.sql"), encoding="utf-8").read()
 check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true'" in sql, "DB-Netz hält einen unbestätigten Ausgleichs-Start (SQL-Datei)")
 check("if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id))" in html and "if(ziel && ziel.done && !wdAusgleichFaellig(acc.id))" in html, "Ziel voll + Zyklus im Minus: Konto bleibt im Farmer (Ausgleich wird angelegt)")

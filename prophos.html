@@ -54624,7 +54624,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2008'
+  const OS_TAB_BUILD = '2026-09-22.2009'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58658,7 +58658,7 @@
   const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || p.winningDay !== true || !tpIstFarmerPlan(p)) return false
     const firma = String(p.masterFirm || '').toLowerCase()
     // TRADEIFY-AUSGLEICH (Finn 03.11.2026 „yes“): jeder Ausgleichs-Trade (mt5_baseline.wd_ausgleich) wird einzeln bestätigt wie der Apex-WD; normale Tradeify-WD nicht
-    if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return !tpBestaetigenAusgenommen()
+    if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return true   // auch Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“) — der Verwalter bestätigt in seiner Ansicht
     return !tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k)) }
   /* Verwalter-Gruppen sind ausgenommen (Prüfer S12, 02.11.2026): sie stehen nie in Finns Liste, ein Apex-WD der Gruppe wäre sonst nicht bestätigbar. Dieselbe Regel wie der DB-Riegel, RPC
    * wd_bestaetigen_ich_ausgenommen() fragt nur nach der eigenen ID (10 min gemerkt, nur bei gesetzter Firmenliste). Unbekannt = nicht ausgenommen: lieber warten als ohne Bestätigung starten. */
@@ -61543,7 +61543,8 @@
   async function ahfLaden(){
     if(_ahf.laeuft) return
     _ahf.laeuft = true
-    try{ _ahf.d = await apdApi('GET', '/hedge-freigabe'); _ahf.fehler = ''; _ahf.at = Date.now() }
+    // ?ansicht=admin (03.11.2026): ein Verwalter bekommt so die Tradeify-Ausgleichs-Trades seiner Gruppe; für Finn ändert sich nichts
+    try{ _ahf.d = await apdApi('GET', '/hedge-freigabe?ansicht=admin'); _ahf.fehler = ''; _ahf.at = Date.now() }
     catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] } }
     finally{ _ahf.laeuft = false; ahfRender(); try{ window._wdUebersichtNeu?.() }catch(_){} }
   }
@@ -61658,7 +61659,7 @@
     for(const id of ids) _ahf.busy.add(String(id))
     ahfRender()
     try{
-      const d = await apdApi('POST', '/hedge-freigabe', { ids })   // immer die gezeigten IDs (alle:true gäbe auch unbestätigte frei)
+      const d = await apdApi('POST', '/hedge-freigabe?ansicht=admin', { ids })   // immer die gezeigten IDs (alle:true gäbe auch unbestätigte frei); ansicht: Verwalter (03.11.2026)
       const wd = ((_ahf.d && _ahf.d.zeilen) || []).some(z => z.wd && ids.map(String).includes(String(z.id))), n = d.freigegeben || 0, stehen = Object.values(d.nicht_neu_gestartet || {})
       if(typeof atToast === 'function') atToast(wd ? `✓ ${n} Winning Day${n === 1 ? '' : 's'} bestätigt — startet zur Startzeit` : `✓ ${n} Hedge-Trade${n === 1 ? '' : 's'} freigegeben`, 'start')
       if(stehen.length && typeof atToast === 'function') atToast(`⚠ ${stehen.length} nicht neu gestartet: ${String(stehen[0]).slice(0, 90)}`, 'end')   // APEX-WD BESTÄTIGEN: zu alt, anderer Handelstag
@@ -70628,7 +70629,8 @@
     try{ window._ahfWdLaden?.() }catch(_){}
     const d = wdUebersichtDaten(_wd.rows)
     const fehlerAhf = (typeof window._ahfFehler === 'function' && window._ahfFehler()) ? `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ ${escapeHtml(window._ahfFehler().slice(0, 160))}</div>` : ''   // sonst bliebe ein gescheitertes „Bestätigen" hier stumm
-    const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id))
+    // Tradeify-Ausgleich (Finn 03.11.2026: „auch bestätigen“): immer sichtbar, auch aus einer Gruppe außerhalb der gewählten Sicht — er darf nie unsichtbar hängen
+    const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id) || String(z.aus || '').toLowerCase() === 'true')
     // APEX-WD BESTÄTIGEN (02.11.2026): was oben in „Zu bestätigen" steht, nicht zugleich unter „Wartet auf Start" bzw. „überfällig" zeigen
     const offenIds = new Set(offen.map(z => String(z.id)))
     d.warten = d.warten.filter(e => !(e.p && offenIds.has(String(e.p.id))))
