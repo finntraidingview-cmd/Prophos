@@ -17,7 +17,7 @@ const fehler = []; let n = 0
 const ok = (b, t) => { n++; if(!b) fehler.push(t) }
 
 const plan = { id: 'p1', richtung: 'sell', masterSl: null, masterName: 'Tradeify 150k …0001' }
-const hedge = { status: 'offen', einstieg_nq: 28389.25, sl_level_nq: null }
+const hedge = { status: 'offen', einstieg_nq: 28389.25, sl_level_nq: null, liq_radar: true }
 const zeile = { id: 'p1', liq_regel_level_nq: 28558.71, liq_regel_balance: 145500, liq_regel_text: 'fest 4.500 $ ab Tagesstart 150.000,00 $ (End-of-Day)', einstieg_nq: 28389.25 }
 
 // 1) Marc-Fall: Level 28.558,71, 169,46 Pkt, Liquidation
@@ -41,6 +41,9 @@ ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: null })) === nu
 // 8) Einstieg nur in der Radar-Zeile → reicht
 const r8 = W(plan, Object.assign({}, hedge, { einstieg_nq: null }), zeile)
 ok(r8 && r8.sl_punkte === 169.46, '8: Einstieg aus der Radar-Zeile → ' + JSON.stringify(r8))
+// 8b) offener Hedge von vorher (ohne liq_radar-Merker) → nichts rückwirkend
+ok(W(plan, Object.assign({}, hedge, { liq_radar: undefined }), zeile) === null, '8b: Hedge ohne liq_radar (vor dem Stand geöffnet) → null')
+ok(SRC.includes("status: 'oeffnet', liq_radar: true,"), '8b: Hedge-Open setzt liq_radar')
 // 9) Verdrahtung: Wächter ruft den Nachtrag nur ohne SL-Level, WD-Weg ausgenommen
 ok(SRC.includes('if(!(slL > 0)) hedgeLiqAusRadar(p, h).catch(() => {})'), '9: Wächter stößt den Nachtrag ohne SL-Level an')
 ok(SRC.includes("if(typeof hedgeIstWd === 'function' && hedgeIstWd(p)) return"), '9: WD/Apex/finaler Tradeify bleiben auf ihrem Weg')

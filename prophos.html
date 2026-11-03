@@ -30113,7 +30113,8 @@
     // Supabase-Rundreise weniger vor dem Copier); vor jedem weiteren Hedge-Eintrag wird er abgewartet, damit nichts zurückfällt.
     _hedgeWegGestempelt.delete(String(plan.id))   // neuer Hedge = neues Master-Ende (29.10.2026): alten Stempel aus einem falschen Reader-Ende nie weiterrechnen
     // grund, grund_tab, close_at (30.10.2026): Reste eines früheren Close dürfen den neuen Hedge nicht beschriften (hedgeZuAusRing liest sie)
-    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, lots_stop: null, lots_ok_wartet: null, grund_code: null, lots_bestaetigt: (r && r.lots_bestaetigt) || null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
+    // liq_radar (03.11.2026, hedgeLiqAusRadar): nur Hedges, die mit diesem Stand geöffnet wurden, bekommen die Liq aus dem Radar — nichts rückwirkend an Fusion
+    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', liq_radar: true, grund: null, grund_tab: null, close_at: null, lots_stop: null, lots_ok_wartet: null, grund_code: null, lots_bestaetigt: (r && r.lots_bestaetigt) || null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -33667,13 +33668,14 @@
    * (/admin/live-trades liq_regel_level_nq — liq_regeln + Konto-Boden mit Peak, bei End-of-Day-Firmen ab Tagesstart, app.py), und schreibt sie
    * als sl_art 'liquidation' an den Hedge. Danach wie bei den WDs: der Wächter schließt dort per Feed (sl_feed), der Level-Abgleich setzt den
    * Fusion-TP als Airbag (hedgeSlNqEcht, Zweig 'liquidation'). Radar-Linie, Radar-Schluss und Airbag stehen damit auf EINEM Wert.
-   * Nur: Hedge offen, kein sl_level_nq, kein Master-SL, nicht der WD-Weg; je Plan höchstens alle HEDGE_LIQ_RADAR_MS; Backend-Altstand
+   * NUR NEUE STARTS (Master/Finn 03.11.2026): nur Hedges mit liq_radar (beim Open ab diesem Stand gesetzt) — offene Pläne von vorher bekommen
+   * nichts rückwirkend an Fusion. Nur: Hedge offen, kein sl_level_nq, kein Master-SL, nicht der WD-Weg; je Plan höchstens alle HEDGE_LIQ_RADAR_MS; Backend-Altstand
    * (stand_alt) oder unplausible Level (falsche Seite, < 10 oder > 2.000 Pkt) → nichts. */
   const HEDGE_LIQ_RADAR_MS = 60000
   const _hedgeLiqRadar = new Map()   // plan-id → letzter Versuch (ms)
   // REIN RECHNEND (Test-Haken window._hedgeLiqAusRadarWert): live-trades-Zeile t → Patch für mt5_baseline.hedge oder null
   function hedgeLiqAusRadarWert(p, h, t){
-    if(!p || !h || !t || h.status !== 'offen' || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0) return null
+    if(!p || !h || !t || h.status !== 'offen' || h.liq_radar !== true || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0) return null
     const plus = p.richtung === 'buy' ? 1 : p.richtung === 'sell' ? -1 : 0
     const lvl = Number(t.liq_regel_level_nq), ein = Number(h.einstieg_nq) > 1000 ? Number(h.einstieg_nq) : Number(t.einstieg_nq)
     if(!plus || !(lvl > 1000) || !(ein > 1000)) return null
@@ -33686,7 +33688,7 @@
   window._hedgeLiqAusRadarWert = hedgeLiqAusRadarWert
   async function hedgeLiqAusRadar(p, h){
     const pid = String(p && p.id || '')
-    if(!pid || !h || h.status !== 'offen' || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0 || p.status !== 'open') return
+    if(!pid || !h || h.status !== 'offen' || h.liq_radar !== true || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0 || p.status !== 'open') return
     if(typeof hedgeIstWd === 'function' && hedgeIstWd(p)) return   // WD/Apex/finaler Tradeify: eigener Weg (hedgeLiqLevel)
     if(Date.now() - (_hedgeLiqRadar.get(pid) || 0) < HEDGE_LIQ_RADAR_MS) return
     _hedgeLiqRadar.set(pid, Date.now())
