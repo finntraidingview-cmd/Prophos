@@ -28380,8 +28380,11 @@ def hedge_vorgemerkt(von, jetzt):
     frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
     oder = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
             f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})")
-    # Echo: auch umgestellte Pläne ohne Startzeit (E1 03.11.2026, eh_fenster_oder) — sie warten auf „Starten" von Hand und öffnen dann den Hedge
-    oder_echo = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,or(start_um.is.null,start_um.gte.{von.isoformat()})),"
+    # Echo: auch umgestellte Pläne ohne Startzeit (E1 03.11.2026, eh_fenster_oder) — sie warten auf „Starten" von Hand und öffnen dann den Hedge;
+    # nur, wenn in den letzten 12 h bestätigt (Prüfung 03.11.2026: ein liegengebliebener Plan ohne Startzeit blockierte sonst Grenze und Marge)
+    halb = (jetzt - timedelta(hours=12)).isoformat()
+    oder_echo = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,or(start_um.gte.{von.isoformat()},"
+                 f"and(start_um.is.null,auto_bestaetigt_at.gte.{halb}))),"
                  f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})")
     out = {}
     for feld, route in (("echo_hedge", "mt5"), ("tradeify_hedge", "tvv2"), ("apex_hedge", "tvv2")):

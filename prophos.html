@@ -52338,16 +52338,27 @@
     // Fusion-Hedge um, der Zeit-Start fährt ihn dann über tpPreflightMt5 MIT Hedge. Vom Zeit-Start aus (vonTick): Start-Fehler, sfTick plant neu.
     const v2Sperre = echoV2Gesperrt(plan, accounts.find(a => String(a.id) === String(plan.masterAccountId)))
     if(v2Sperre){
+      // FRISCH LESEN (Prüfung 03.11.2026): trade_plans hat kein Realtime — hat eh_tick den Plan inzwischen auf Echo mit Hedge umgestellt, steht im
+      // Tab-Speicher noch mt5v2. Zeile frisch holen und ersetzen; ist sie schon umgestellt, rot mit „erneut starten" (der nächste Start nimmt den Echo-Weg).
+      let frisch = null
+      try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle(); if(data) frisch = rkPlanErsetzen(data) }catch(_){}
+      const eh = ((frisch || plan).mt5Baseline || {}).echo_hedge
       let weiter = ''
-      if(!vonTick && plan.autoPlan === true && plan.autoBestaetigtAt && !plan.startUmGestartetAt){
+      if(frisch && frisch.route !== 'mt5v2'){
+        weiter = ` Railway hat ihn eben auf ${frisch.route === 'mt5' ? 'Echo mit Fusion-Hedge' : frisch.route} umgestellt — jetzt erneut starten.`
+      } else if(eh && eh.status === 'ohne'){
+        // Railway kann den Hedge nicht stellen (Mini, kein Fusion-Konto, Marge …) — keine neue Startzeit, sonst nur Schleifen; der Claim-Riegel hält ihn ohnehin
+        weiter = ` Railway kann den Hedge nicht stellen: ${String(eh.grund || eh.code || '?').slice(0, 140)} — startet nicht.`
+      } else if(!vonTick && plan.autoPlan === true && (frisch || plan).autoBestaetigtAt && !(frisch || plan).startUmGestartetAt){
+        // Bestätigter Auto-Plan von Hand: Startzeit jetzt + 1 min — eh_tick stellt binnen Sekunden um, der Zeit-Start fährt Echo mit Hedge
         try{
           const { data, error } = await supabase.from('trade_plans').update({ start_um: new Date(Date.now() + 60000).toISOString(), start_um_gestartet_at: null })
             .eq('id', plan.id).eq('status', 'planned').eq('route', 'mt5v2').is('start_um_gestartet_at', null).select('*')
-          if(!error && data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+          if(!error && data && data.length){ rkPlanErsetzen(data[0])
             weiter = ' Startzeit auf jetzt + 1 min gesetzt: Railway stellt den Plan auf Echo mit Fusion-Hedge um, dann startet er von selbst.' }
         }catch(_){}
       }
-      fail('v2hedge', escapeHtml(v2Sperre + '.' + (weiter || (plan.autoPlan === true ? ' Railway stellt Auto-Pläne vor dem Start auf Echo mit Fusion-Hedge um.' : ' Plan als Echo mit Fusion-Slave anlegen.'))))
+      fail('v2hedge', escapeHtml(v2Sperre + '.' + (weiter || (plan.autoPlan === true ? ' Railway stellt bestätigte Auto-Pläne vor dem Start auf Echo mit Fusion-Hedge um.' : ' Plan als Echo mit Fusion-Slave anlegen.'))))
     }
 
     // ── 3. Richtungs-Schutz (wie Echo: nie gegen einen laufenden/gespeicherten Trade derselben Firma) ──
@@ -62919,7 +62930,8 @@
       case 'v2link': return /nicht erreichbar/i.test(m) ? `Am PC${pc} start-alles.bat ausführen (Copier-Backend).`
         : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
         : `Am PC${pc}: Echo → „Neue Instanz" für Login${login} mit Terminal-Pfad anlegen (nach dem Phasenwechsel neuer Login).`
-      case 'v2hedge': return /mit Hedge|Kontoart/i.test(m) ? 'Nichts tun — Railway stellt den Plan auf Echo mit Fusion-Hedge um, danach startet er neu (oder Startzeit setzen).'
+      case 'v2hedge': return /kann den Hedge nicht stellen|Kontoart/i.test(m) ? 'Hedge nicht stellbar — startet nicht (CFD-Challenges nur mit Hedge). Grund in der Meldung beheben oder Plan neu planen.'
+        : /mit Hedge/i.test(m) ? 'Nichts tun — Railway stellt den Plan auf Echo mit Fusion-Hedge um, danach startet er neu (oder Startzeit setzen).'
         : /Duplikum/i.test(m) ?'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
       case 'v2dir': return 'Nichts tun — wartet, bis der Gegen-Trade derselben Firma zu ist.'
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
