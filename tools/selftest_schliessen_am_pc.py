@@ -41,12 +41,12 @@ ID = "FTDFYSLX150811161322"
 NB = [ID, "FTDFYSLX150811161399", "FTDFYSLX150811169999", "APEX6416990000045"]   # …161399 beginnt wie ID: gekürzt mehrdeutig
 
 
-def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False, tab="puls-mvz4o89y50p23m", leer=True, exit=False):
+def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False, tab="puls-mvz4o89y50p23m", leer=True, exit=False, fill_konto=None):
     """exit=True: Exit-Fill der Gegenseite (buy 1 MNQ, Master war sell 1) im selben Konto, 0,05 s alt — seit 03.11.2026 der einzige Beweis für den Panel-Close."""
     return {"an": True, "konto": konto, "positionen": pos if pos is not None else [], "positionen_ok": ok, "alter_s": alter, "blind": blind,
             "positionen_ts": ts if ts is not None else uhr[0] * 1000, "script_version": version, "positionen_tab": tab, "leer_beweis": leer,
             "fills": [{"tab_id": "puls-mvz4o89y50p23m", "seite": "buy", "menge": 1, "preis": 28100.0, "at": (uhr[0] - 0.05) * 1000, "symbol": "MNQZ6",
-                       "konto": konto, "art": "market"}] if exit else []}
+                       "konto": fill_konto if fill_konto is not None else konto, "art": "market"}] if exit else []}
 
 
 READER = {"tabs": [{"tab_id": "puls-mvz4o89y50p23m", "rolle": "broker", "version": "0.10.9"}]}
@@ -111,7 +111,8 @@ check(lauf([lambda: stand(konto=kurz, exit=True)] * 20) is None, "gekürzter Kon
 frisch_scharf(334, nb=[ID, "APEX6416990000045"])
 uhr[0] += 5
 lauf([lambda: stand(konto=kurz, pos=POS)] * 2)
-check(lauf([lambda: stand(konto=kurz, exit=True)] * 10) is not None, "gekürzt, aber unter den Konten der ID eindeutig → schließt")
+check(lauf([lambda: stand(konto=kurz, exit=True)] * 10) is None, "S9 zu 9e4f53e8: Fill nur mit gekürztem Kontotext → nie")
+check(lauf([lambda: stand(konto=kurz, exit=True, fill_konto=ID)] * 10) is not None, "gekürzt, aber unter den Konten der ID eindeutig → schließt")
 
 # 4) Kontowechsel: Position im Konto gesehen, dann anderes Konto flach → nie; zurück ins Konto → muss neu gesehen werden
 frisch_scharf(444)
@@ -155,7 +156,7 @@ def apex_lauf(beleg_res):
     uhr[0] += 5
     lauf([lambda: stand(konto="PAAPEX668794000000", pos=POS)] * 2)
     t0 = uhr[0]
-    t = lauf([lambda: stand(konto="PAAPEX668794000000", exit=True)] * 15)
+    t = lauf([lambda: stand(konto="PAAPEX668794000000", exit=True, fill_konto="PAAPEX6687940000007")] * 15)
     return None if t is None else t - t0
 d = apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000007"})
 check(d is not None and d <= 1.0, f"Apex gekürzt + Puls-Beleg „…0007“ (letzter Lauf bewiesen) → Close {d:.2f} s nach der ersten flachen Lesung" if d is not None else "Apex mit Beleg → Close")
@@ -195,6 +196,23 @@ uhr[0] += 5
 lauf([lambda: stand(pos=POS)] * 2)
 check(lauf([lambda: stand()] * 400) is None and not auftraege(), "Marc e72df7a0: flach ohne Exit-Fill, 40 s lang → nie schließen (der Tab entscheidet)")
 check(lauf([lambda: stand(exit=True)] * 5) is not None, "kommt danach der passende Exit-Fill → schließt")
+# S9-NACHSCHÄRFUNG zu 9e4f53e8 (03.11.2026)
+frisch_scharf(730)
+uhr[0] += 5
+lauf([lambda: stand(pos=POS)] * 2)
+check(lauf([lambda: dict(stand(exit=True), leer_beweis=None)] * 10) is None, "(a) Leer-Beweis fehlt (nicht True) → nie, auch mit Fill")
+check(lauf([lambda: stand(exit=True, fill_konto="FTDFYSLX1508111613")] * 10) is None, "(b) Fill-Konto gekürzt → nie")
+check(lauf([lambda: stand(exit=True, fill_konto="FTDFYSLX150811169999")] * 10) is None, "(b) Fill eines Nachbarkontos (volle Gegen-Order) → nie")
+frisch_scharf(731, nb=[ID, "APEX6416990000045"])
+uhr[0] += 5
+lauf([lambda: stand(konto=ID + " 150,000.00 USD", pos=POS)] * 2)
+check(lauf([lambda: stand(konto=ID + " 150,412.50 USD", exit=True, fill_konto=ID)] * 10) is not None, "(c) nur die Balance im Kontotext geändert → zählt als dasselbe Konto, schließt")
+frisch_scharf(732, nb=[ID, "APEX6416990000045"])
+uhr[0] += 5
+lauf([lambda: stand(konto="FTDFYSLX1508111613… 149,969.50 USD", pos=POS)] * 2)
+check(lauf([lambda: stand(konto=ID, exit=True, fill_konto=ID)] * 10) is None, "(c) Reader-Konto seit „Position da“ gewechselt (gekürzt → voll) → nie, muss neu gesehen werden")
+K = ns["scharf_konto_kern"]
+check(K("ftdfyslx150811161322 150,000.00 USD") == ID and K("") == "" and K(None) == "", "scharf_konto_kern: Kennung ohne Balance")
 # S9: liegengebliebener Eintrag
 frisch_scharf(701)
 uhr[0] += 10

@@ -2244,6 +2244,11 @@ def puls_beleg_gueltig(beleg_at, jetzt, idle_s):
     return float(idle_s) >= float(jetzt) - float(beleg_at)
 
 
+def scharf_konto_kern(text):
+    """REIN RECHNEND (S9 zu 9e4f53e8, 03.11.2026): Kennung des Reader-Kontotexts ohne Balance/Zusatz — erstes Wort aus A–Z/0–9, groß."""
+    return (re.split(r"[^A-Z0-9]+", str(text or "").strip().upper()) or [""])[0]
+
+
 def scharf_konto_sicher(text, ext, nachbarn, beleg=None):
     """REIN RECHNEND (testbar): steht der Reader sicher im scharfen Konto? Voller Text immer; gekürzt/angeklebt, wenn kein anderes Konto der ID
     (nachbarn = External IDs) im selben Bezug steht, oder — Apex-Falle, alle beginnen gleich — wenn der letzte Puls-Lauf genau dieses Konto bewiesen gewählt
@@ -2306,7 +2311,9 @@ def scharf_exit_fill(e, st, jetzt, beleg=None):
                 continue
         if not str(f.get("tab_id") or "").startswith("puls-"):
             continue
-        if not scharf_konto_sicher(f.get("konto"), e.get("ext_id"), e.get("nachbarn"), beleg):
+        # S9 zu 9e4f53e8 (03.11.2026): fill.konto ist das vorgewählte Konto (kontoMerk), nicht das aus der Meldung — nur der VOLLE Kontotext zählt,
+        # gekürzt oder per Puls-Beleg nie (sonst sähe im Marc-Fenster eine volle Gegen-Order eines Nachbarkontos wie der Exit aus)
+        if scharf_konto_bezug(f.get("konto"), e.get("ext_id")) != "ja":
             continue
         return f
     return None
@@ -2330,13 +2337,18 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
         e.update(flach_seit=None, flach_ts=[])
         return False, e, "Stand nicht frisch"
     if _scharf_wurzel_da(st, e.get("wurzel")):
-        e.update(gesehen=True, flach_seit=None, flach_ts=[])
+        e.update(gesehen=True, flach_seit=None, flach_ts=[], konto_gesehen=scharf_konto_kern(st.get("konto")))
         return False, e, "Position da"
     if not e.get("gesehen"):
         return False, e, "Position im Konto nie gesehen"
-    if st.get("leer_beweis") is False:   # S9: flach nur mit Leer-Beweis wie hedgeReaderMasterDa/1-s-Wächter im Tab; sonst entscheidet der Tab
+    # S9 zu 9e4f53e8 (03.11.2026): nur POSITIVER Leer-Beweis zählt (True), fehlend/unbekannt wie False — sonst entscheidet der Tab
+    if st.get("leer_beweis") is not True:
         e.update(flach_seit=None, flach_ts=[])
         return False, e, "flach ohne Leer-Beweis"
+    # S9 zu 9e4f53e8: Reader-Konto seit der letzten „Position da“-Lesung unverändert (Kennung ohne Balance); ein Wechsel dazwischen → nie
+    if e.get("konto_gesehen") is not None and scharf_konto_kern(st.get("konto")) != e.get("konto_gesehen"):
+        e.update(gesehen=False, flach_seit=None, flach_ts=[])
+        return False, e, "Reader-Konto seit „Position da“ gewechselt"
     ts = st.get("positionen_ts") or st.get("ts")
     lesungen = list(e.get("flach_ts") or [])
     if ts not in lesungen:
