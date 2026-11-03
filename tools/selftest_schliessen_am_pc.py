@@ -41,9 +41,12 @@ ID = "FTDFYSLX150811161322"
 NB = [ID, "FTDFYSLX150811161399", "FTDFYSLX150811169999", "APEX6416990000045"]   # …161399 beginnt wie ID: gekürzt mehrdeutig
 
 
-def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False, tab="puls-mvz4o89y50p23m", leer=True):
+def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False, tab="puls-mvz4o89y50p23m", leer=True, exit=False):
+    """exit=True: Exit-Fill der Gegenseite (buy 1 MNQ, Master war sell 1) im selben Konto, 0,05 s alt — seit 03.11.2026 der einzige Beweis für den Panel-Close."""
     return {"an": True, "konto": konto, "positionen": pos if pos is not None else [], "positionen_ok": ok, "alter_s": alter, "blind": blind,
-            "positionen_ts": ts if ts is not None else uhr[0] * 1000, "script_version": version, "positionen_tab": tab, "leer_beweis": leer}
+            "positionen_ts": ts if ts is not None else uhr[0] * 1000, "script_version": version, "positionen_tab": tab, "leer_beweis": leer,
+            "fills": [{"tab_id": "puls-mvz4o89y50p23m", "seite": "buy", "menge": 1, "preis": 28100.0, "at": (uhr[0] - 0.05) * 1000, "symbol": "MNQZ6",
+                       "konto": konto, "art": "market"}] if exit else []}
 
 
 READER = {"tabs": [{"tab_id": "puls-mvz4o89y50p23m", "rolle": "broker", "version": "0.10.9"}]}
@@ -59,7 +62,7 @@ def frisch_scharf(ticket=111, ext=ID, nb=NB):
         p = os.path.join(tmp, f)
         if os.path.exists(p):
             os.remove(p)
-    return ns["scharf_setzen"]({"ext_id": ext, "wurzel": "MNQ", "nachbarn": nb}, "plan-88b28130", ticket, READER)
+    return ns["scharf_setzen"]({"ext_id": ext, "wurzel": "MNQ", "nachbarn": nb, "richtung": "sell", "menge": 1}, "plan-88b28130", ticket, READER)
 
 
 def auftraege():
@@ -82,13 +85,13 @@ check(frisch_scharf(), "Hedge-Open mit Feld scharf → gemerkt (Datei)")
 uhr[0] += 5
 lauf([lambda: stand(pos=POS)] * 3)
 t_flach = uhr[0]
-t_zu = lauf([lambda: stand()] * 15)
+t_zu = lauf([lambda: stand(exit=True)] * 15)
 check(t_zu is not None and t_zu - t_flach <= 1.0, f"Normalfall: Close {t_zu - t_flach:.2f} s nach der ersten flachen Lesung (≤ 1 s)" if t_zu else "Normalfall: Close")
 a = auftraege()
 check(len(a) == 1 and a[0]["ticket"] == 111 and a[0]["grund"] == "master_ende_panel", "genau ein close-Auftrag an den Copier (hedge_solo_auftrag.json)")
 # Quittung → gelöst
 json.dump({a[0]["cmd_id"]: {"ok": True, "ticket": 111}}, open(os.path.join(tmp, "hedge_solo_ergebnis.json"), "w"))
-ns["_scharf_runde"](stand(), uhr[0])
+ns["_scharf_runde"](stand(exit=True), uhr[0])
 check(ns["scharf_laden"]() == [], "Copier quittiert ok → Eintrag gelöst")
 
 # 2) SIMON: Prophos-Tab weg — es braucht nur Datei + Reader (kein Tab-Aufruf im Weg)
@@ -97,49 +100,49 @@ uhr[0] += 5
 w = SRC[SRC.index("def _scharf_runde("):SRC.index("def _scharf_wache():")]
 check("mtcApi" not in w and "tradePlans" not in w, "Schließ-Weg ohne Prophos-Tab: nur hedge_scharf.json + Reader-Stand + Copier-Datei")
 lauf([lambda: stand(pos=POS)] * 2)
-check(lauf([lambda: stand()] * 10) is not None, "Simon-Fall: Tab weg, Reader sieht Position weg → Fusion-Close vom Panel")
+check(lauf([lambda: stand(exit=True)] * 10) is not None, "Simon-Fall: Tab weg, Reader sieht Position weg → Fusion-Close vom Panel")
 
 # 3) Konto nicht sicher: gekürzt und mehrdeutig (zwei Konten derselben ID beginnen gleich) → nie
 frisch_scharf(333)
 uhr[0] += 5
 kurz = "FTDFYSLX1508111613… 149,969.50 USD"
 lauf([lambda: stand(konto=kurz, pos=POS)] * 2)
-check(lauf([lambda: stand(konto=kurz)] * 20) is None, "gekürzter Kontotext passt auf zwei Konten der ID → nie schließen (Tab-Weg bleibt)")
+check(lauf([lambda: stand(konto=kurz, exit=True)] * 20) is None, "gekürzter Kontotext passt auf zwei Konten der ID → nie schließen (Tab-Weg bleibt)")
 frisch_scharf(334, nb=[ID, "APEX6416990000045"])
 uhr[0] += 5
 lauf([lambda: stand(konto=kurz, pos=POS)] * 2)
-check(lauf([lambda: stand(konto=kurz)] * 10) is not None, "gekürzt, aber unter den Konten der ID eindeutig → schließt")
+check(lauf([lambda: stand(konto=kurz, exit=True)] * 10) is not None, "gekürzt, aber unter den Konten der ID eindeutig → schließt")
 
 # 4) Kontowechsel: Position im Konto gesehen, dann anderes Konto flach → nie; zurück ins Konto → muss neu gesehen werden
 frisch_scharf(444)
 uhr[0] += 5
 lauf([lambda: stand(pos=POS)] * 2)
-check(lauf([lambda: stand(konto="FTDFYSLX150811169999")] * 10) is None, "anderes Konto flach → nie schließen")
-check(lauf([lambda: stand()] * 10) is None, "zurück im Konto, aber Position seit dem Wechsel nicht neu gesehen → nie")
+check(lauf([lambda: stand(konto="FTDFYSLX150811169999", exit=True)] * 10) is None, "anderes Konto flach → nie schließen")
+check(lauf([lambda: stand(exit=True)] * 10) is None, "zurück im Konto, aber Position seit dem Wechsel nicht neu gesehen → nie")
 
 # 5) blind / alt / altes Userscript / nie gesehen
 frisch_scharf(555)
 uhr[0] += 5
 lauf([lambda: stand(pos=POS)] * 2)
-check(lauf([lambda: stand(ok=False)] * 10 + [lambda: stand(alter=3.0)] * 10 + [lambda: stand(blind=True)] * 10) is None, "blind, alter Stand → nie schließen")
+check(lauf([lambda: stand(ok=False, exit=True)] * 10 + [lambda: stand(alter=3.0, exit=True)] * 10 + [lambda: stand(blind=True, exit=True)] * 10) is None, "blind, alter Stand → nie schließen")
 frisch_scharf(556)
 uhr[0] += 5
 lauf([lambda: stand(pos=POS, version="0.10.7")] * 2)
-check(lauf([lambda: stand(version="0.10.7")] * 10) is None, "Userscript älter als 0.10.8 → nie (bestehender Weg)")
+check(lauf([lambda: stand(version="0.10.7", exit=True)] * 10) is None, "Userscript älter als 0.10.8 → nie (bestehender Weg)")
 frisch_scharf(557)
 uhr[0] += 5
-check(lauf([lambda: stand()] * 20) is None, "Position im Konto nie gesehen → nie schließen")
+check(lauf([lambda: stand(exit=True)] * 20) is None, "Position im Konto nie gesehen → nie schließen")
 # 6) Hedge jünger als 3 s
 frisch_scharf(558)
 lauf([lambda: stand(pos=POS)])
-check(lauf([lambda: stand()] * 10) is None, "Hedge jünger als 3 s → wartet")
+check(lauf([lambda: stand(exit=True)] * 10) is None, "Hedge jünger als 3 s → wartet")
 # 7) keine Quittung → nach 2 s erneut
 frisch_scharf(559)
 uhr[0] += 5
 lauf([lambda: stand(pos=POS)] * 2)
-lauf([lambda: stand()] * 10)
+lauf([lambda: stand(exit=True)] * 10)
 uhr[0] += 2.1
-ns["_scharf_runde"](stand(), uhr[0])
+ns["_scharf_runde"](stand(exit=True), uhr[0])
 check(len(auftraege()) == 2, "ohne Quittung nach 2 s ein zweiter close-Auftrag (Copier antwortet schon_zu, wenn zu)")
 
 # APEX gekürzt (Chris pc-c19p2l a6f5c630 …0007, 02.11.2026 19:20): Reader „PAAPEX668794000000“ passt auf 7 Konten der ID → nur mit Puls-Beleg
@@ -147,12 +150,12 @@ APX = ["PAAPEX668794000000" + str(i) for i in range(1, 8)]
 def apex_lauf(beleg_res):
     if os.path.exists(ns["SCHARF_PFAD"]):
         os.remove(ns["SCHARF_PFAD"])
-    ns["scharf_setzen"]({"ext_id": "PAAPEX6687940000007", "wurzel": "MNQ", "nachbarn": APX}, "a6f5c630", 900, READER)
+    ns["scharf_setzen"]({"ext_id": "PAAPEX6687940000007", "wurzel": "MNQ", "nachbarn": APX, "richtung": "sell", "menge": 1}, "a6f5c630", 900, READER)
     ns["puls_beleg_merken"](beleg_res)
     uhr[0] += 5
     lauf([lambda: stand(konto="PAAPEX668794000000", pos=POS)] * 2)
     t0 = uhr[0]
-    t = lauf([lambda: stand(konto="PAAPEX668794000000")] * 15)
+    t = lauf([lambda: stand(konto="PAAPEX668794000000", exit=True)] * 15)
     return None if t is None else t - t0
 d = apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000007"})
 check(d is not None and d <= 1.0, f"Apex gekürzt + Puls-Beleg „…0007“ (letzter Lauf bewiesen) → Close {d:.2f} s nach der ersten flachen Lesung" if d is not None else "Apex mit Beleg → Close")
@@ -182,10 +185,16 @@ check("async function hedgeScharfNachholen(_tp)" in HTML and "await hedgeScharfN
 frisch_scharf(700)
 uhr[0] += 5
 lauf([lambda: stand(pos=POS, tab="t1abc")] * 2)
-check(lauf([lambda: stand(tab="t1abc")] * 10) is None, "Reader-Tab im normalen Chrome (nicht „puls-“) → nie schließen")
+check(lauf([lambda: stand(tab="t1abc", exit=True)] * 10) is None, "Reader-Tab im normalen Chrome (nicht „puls-“) → nie schließen")
 lauf([lambda: stand(pos=POS)] * 2)
-check(lauf([lambda: stand(leer=False)] * 10) is None, "flach ohne Leer-Beweis (leer_beweis false) → nie, der Tab entscheidet")
-check(lauf([lambda: stand()] * 10) is not None, "flach mit Leer-Beweis → schließt")
+check(lauf([lambda: stand(leer=False, exit=True)] * 10) is None, "flach ohne Leer-Beweis (leer_beweis false) → nie, der Tab entscheidet")
+check(lauf([lambda: stand(exit=True)] * 10) is not None, "flach mit Leer-Beweis + Exit-Fill → schließt")
+# VORFALL MARC e72df7a0 (03.11.2026): flach ohne Exit-Fill (Konto-/Login-Wechsel, Tradovate-Abriss) → nie, auch nach langer Zeit
+frisch_scharf(720)
+uhr[0] += 5
+lauf([lambda: stand(pos=POS)] * 2)
+check(lauf([lambda: stand()] * 400) is None and not auftraege(), "Marc e72df7a0: flach ohne Exit-Fill, 40 s lang → nie schließen (der Tab entscheidet)")
+check(lauf([lambda: stand(exit=True)] * 5) is not None, "kommt danach der passende Exit-Fill → schließt")
 # S9: liegengebliebener Eintrag
 frisch_scharf(701)
 uhr[0] += 10
@@ -212,7 +221,7 @@ uhr[0] += 2
 ns["_scharf_runde"](None, uhr[0], {710})
 check(abs(float(ns["scharf_laden"]()[0].get("copier_offen_at") or 0) - (uhr[0] - 2)) < 1e-6, "Copier-Beleg höchstens 1×/min geschrieben")
 lauf([lambda: stand(pos=POS)] * 2)
-check(lauf([lambda: stand()] * 10) is not None, "nach 4 h: Master weg → Panel schließt (nicht mehr der Tab nach 1 s)")
+check(lauf([lambda: stand(exit=True)] * 10) is not None, "nach 4 h: Master weg mit Exit-Fill → Panel schließt (nicht mehr der Tab nach 1 s)")
 frisch_scharf(711)
 t711 = uhr[0]
 for _ in range(4 * 60):
@@ -317,9 +326,9 @@ def spur(fill, erste_flach=0.35, takt=None, **fk):   # takt None = wie die Wache
     return None if t is None else t - exit_t
 d_fill, d_ohne = spur(True), spur(False)
 check(d_fill is not None and d_fill <= 0.45, f"mit Exit-Fill: CLOSE {d_fill:.2f} s nach dem Exit (Ziel ≤ 0,45 s)" if d_fill is not None else "mit Exit-Fill")
-check(d_ohne is not None and d_ohne <= 0.75, f"ohne Fill: 2 flache Lesungen über 0,3 s → CLOSE {d_ohne:.2f} s nach dem Exit" if d_ohne is not None else "ohne Fill")
+check(d_ohne is None, "ohne Fill: nie (seit 03.11.2026, Vorfall Marc e72df7a0) — flach allein ist kein Beweis")
 check(ns["SCHARF_TAKT_S"] == 0.1 and ns["SCHARF_TAKT_FLACH_S"] == 0.05 and ns["SCHARF_FLACH_LESUNGEN"] == 2 and ns["SCHARF_FLACH_S"] == 0.3,
-      "Takt 0,1 s, ab der ersten flachen Lesung 0,05 s, Grundregel 2 Lesungen über 0,3 s")
+      "Takt 0,1 s, ab der ersten flachen Lesung 0,05 s")
 check(ns["scharf_takt"]([]) == 0.1 and ns["scharf_takt"]([{"status": "offen", "flach_seit": None}]) == 0.1
       and ns["scharf_takt"]([{"status": "offen", "flach_seit": 1.0}]) == 0.05 and ns["scharf_takt"]([{"status": "schliesst", "flach_seit": 1.0}]) == 0.1,
       "scharf_takt: 0,05 s nur bei offenem Eintrag mit Flach-Strecke")
@@ -328,7 +337,7 @@ check("scharf_takt(scharf_laden())" in w and "time.sleep(1.0)" in w, "Wache schl
 for name, fk in (("Gleichrichtung", {"seite": "buy"}), ("Teilmenge", {"menge": 2}), ("alt (5 s)", {"at": (uhr[0] - 100) * 1000}),
                  ("normales Chrome", {"tab_id": "t1abc"}), ("anderes Konto", {"konto": "FTDFYSLX150811169999"}), ("andere Wurzel", {"symbol": "NQZ6"})):
     d = spur(True, **fk)
-    check(d is not None and d > 0.6, f"Fill passt nicht ({name}) → keine Abkürzung, Grundregel ({d:.2f} s)" if d is not None else f"Fill {name}")
+    check(d is None, f"Fill passt nicht ({name}) → nie schließen")
 if os.path.exists(ns["SCHARF_PFAD"]):
     os.remove(ns["SCHARF_PFAD"])
 ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ", "nachbarn": [ID]}, "alt", 991, READER)

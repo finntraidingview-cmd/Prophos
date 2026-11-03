@@ -2140,8 +2140,8 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
 # SCHARF SCHALTEN: öffnet der Tab einen Fusion-Hedge für einen TradingView-Trade (/api/hedge-solo open mit Feld scharf {ext_id, wurzel, nachbarn}), merkt das
 # Panel nach der Quittung {plan_id, ticket, ext_id, wurzel, nachbarn} in hedge_scharf.json (überlebt Tab- und Panel-Neustart).
 # SCHLIESS-WACHE (Thread, 0,1 s): liest den Reader-Stand (127.0.0.1:8790, dieselbe Quelle wie der Tab). Im scharfen Konto (voller Text = External ID, oder
-# gekürzt/angeklebt und unter den Konten der ID eindeutig — sonst nie) Position der Wurzel gesehen → danach zwei frische flache Lesungen im selben Konto über
-# ≥ 0,3 s → close-Auftrag an den Copier (hedge_solo_auftrag.json, wie /api/hedge-solo). Fail-safe: Konto nicht sicher, Stand blind/alt, Userscript < 0.10.8
+# gekürzt/angeklebt und unter den Konten der ID eindeutig — sonst nie) Position der Wurzel gesehen → danach flach + Exit-Fill der Gegenseite (seit 03.11.2026,
+# Vorfall Marc e72df7a0: nur mit Fill, flach allein nie) → close-Auftrag an den Copier (hedge_solo_auftrag.json, wie /api/hedge-solo). Fail-safe: Konto nicht sicher, Stand blind/alt, Userscript < 0.10.8
 # oder Position nie gesehen → nichts, der bestehende Weg im Tab greift. Der Tab bucht weiter und darf selbst schließen (doppelt: Copier antwortet schon_zu).
 # Gelöst wird ein Eintrag beim Close des Tabs (/api/hedge-solo close mit dem Ticket), nach dem eigenen Close (ok/schon_zu) oder nach 12 h.
 # Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks. ══
@@ -2349,8 +2349,13 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
     if fill:
         return True, e, (f"Master weg im Konto {e.get('ext_id')} (erste flache Lesung + Exit-Fill {fill.get('seite')} {fill.get('menge')} @ {fill.get('preis')}, "
                          f"{jetzt - float(fill.get('at')) / 1000.0:.2f} s alt)")
+    # NUR MIT BEWEIS (Eingang 03.11.2026, Vorfall Marc e72df7a0 Tradeify 150k …5998 pc-7ftp5l: SELL 3 NQ ab 28.252,75, TP 27.997,75, kein SL; Fusion-Ticket
+    # 244489604 um 10:11:27Z per Copier-Auftrag „PXsoloc“ zu, ohne Tab-Close (close_at leer, kein master_exit), Kurs 28.246,75 weit vor dem TP — der Master lief
+    # ~2 h ohne Hedge, bis „Buy 3 at 28,158.00“). Seit .2011 bleibt der Eintrag über 3 h scharf (Hedge war 10,75 h offen); flache Lesungen allein (Konto-/
+    # Login-Wechsel, Tradovate-Abriss: Tabelle leer, Kontotext noch der alte) reichten für den Close. Ab jetzt schließt das Panel NUR mit dem Exit-Fill der
+    # Gegenseite in voller Menge im sicheren Konto (oben); flach ohne Fill → nichts, der Tab entscheidet mit seinen Regeln (Wächter, Level, 1-s/30-s).
     if len(lesungen) >= SCHARF_FLACH_LESUNGEN and jetzt - e["flach_seit"] >= SCHARF_FLACH_S:
-        return True, e, f"Master weg im Konto {e.get('ext_id')} ({len(lesungen)} flache Lesungen über {jetzt - e['flach_seit']:.2f} s)"
+        return False, e, "flach ohne Exit-Fill — kein Beweis, der Tab entscheidet"
     return False, e, "flach, noch nicht bestätigt"
 
 
