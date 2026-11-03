@@ -298,14 +298,17 @@ def tab_wache_antwort(pid, pong, ping, jetzt):
     return felder, zeile
 
 
-def richtung_frei(plan_id, richtung, timeout=6):
+def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
     """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
     fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
     läuft bei derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? Seit 19.10.2026 auch: ist ein Big Trade
     DIESES PCs nah am TP/an der Liq (puls_heim_pruefen, code big_trade_nah/big_trade_unklar)? -> (frei, msg, code).
     FAIL-CLOSED: kein Token, kein Netz, 5xx, unklare Antwort = NICHT frei (code riegel_unerreichbar) — der Bot wird dann nicht
     gestartet, es ist beweisbar nichts gesendet, der Tab versucht es später erneut. Ohne Plan-UUID/Richtung (Probe, Konto-Check)
-    gibt es nichts zu prüfen -> frei."""
+    gibt es nichts zu prüfen -> frei.
+    zweit_aus (dict, optional): bekommt {zweit: True, zweit_art?} bei einer Zweit-Sperre (ZWEI ORBIT, 03.11.2026, Z4 — Lücke 2 der Prüfung S3:
+    Railway meldet „zweiter Start wartet“ als big_trade_nah mit zweit: true, das Panel gab nur code weiter; der PC-Tab unterscheidet jetzt am Flag
+    statt am Text und fragt dann alle 20–40 s /admin/zweit-frei statt 15 min zu warten)."""
     import urllib.request
     pid = str(plan_id or "").strip().lower()
     r = str(richtung or "").strip().lower()
@@ -331,6 +334,11 @@ def richtung_frei(plan_id, richtung, timeout=6):
                 # (code big_trade_nah / big_trade_unklar, Grund schon vollstaendig) — dann kein Kontowechsel. Ohne code: Gegenrichtung wie bisher.
                 code = str(d.get("code") or "gegenrichtung")
                 if code != "gegenrichtung":
+                    if isinstance(zweit_aus, dict) and d.get("zweit") is True:
+                        zweit_aus["zweit"] = True
+                        for k, n in (("zweit_art", 20), ("zweit_code", 20), ("bis", 40), ("firma", 60)):   # zweit_code/bis/firma: S6 (Z5)
+                            if d.get(k):
+                                zweit_aus[k] = str(d.get(k))[:n]
                     return False, str(d.get("grund") or "Big Trade auf diesem PC nah am TP/an der Liq — Puls bleibt im Konto"), code
                 return False, "Gegenrichtung gesperrt: " + str(d.get("grund") or "bei dieser ID läuft dort ein Trade in Gegenrichtung"), "gegenrichtung"
             fehler = str((d or {}).get("msg") or "unklare Antwort")[:160]
@@ -5674,10 +5682,11 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[panel] tv-konto RIEGEL ohne plan_id/richtung @{cmd['ext_id']} -> gesperrt", flush=True)
                     return self._send(200, json.dumps({"ok": False, "code": "riegel_unerreichbar", "retry_ok": True, "gesendet": False,
                                                        "msg": _fehlt}, ensure_ascii=False))
-                _frei, _msg, _code = richtung_frei(_pid, cmd["richtung"])
+                _zweit = {}
+                _frei, _msg, _code = richtung_frei(_pid, cmd["richtung"], zweit_aus=_zweit)
                 if not _frei:
                     print(f"[panel] tv-konto RIEGEL {_code} @{cmd['ext_id']} {cmd['richtung']}: {_msg[:160]}", flush=True)
-                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg}, ensure_ascii=False))
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg, **_zweit}, ensure_ascii=False))
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 # code + retry_ok (Cross-Check 24.09.2026): der Orbit-Start im Frontend wartet bei
                 # puls_beschaeftigt (Rundgang/tv-close halten den Lock minutenlang) statt abzubrechen —
@@ -5734,10 +5743,11 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[panel] tsxorder RIEGEL ohne plan_id/richtung @{cmd.get('ext_id')} -> gesperrt", flush=True)
                     return self._send(200, json.dumps({"ok": False, "code": "riegel_unerreichbar", "retry_ok": True, "gesendet": False,
                                                        "msg": _fehlt}, ensure_ascii=False))
-                _frei, _msg, _code = richtung_frei(cmd.get("plan_id"), cmd.get("richtung"))
+                _zweit = {}
+                _frei, _msg, _code = richtung_frei(cmd.get("plan_id"), cmd.get("richtung"), zweit_aus=_zweit)
                 if not _frei:
                     print(f"[panel] tsxorder RIEGEL {_code} @{cmd.get('ext_id')} {cmd.get('richtung')}: {_msg[:160]}", flush=True)
-                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg}, ensure_ascii=False))
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg, **_zweit}, ensure_ascii=False))
             if len(re.sub(r"[^A-Za-z0-9]", "", str(cmd.get("ext_id") or ""))) < 5:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False,
                     "msg": "Feld 'ext_id' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
@@ -6159,11 +6169,12 @@ class Handler(BaseHTTPRequestHandler):
             if not cmd["probe"]:
                 _pid = str(body.get("plan_id") or "").strip()
                 _fehlt = riegel_pflicht_fehlt(_pid, cmd["richtung"])
-                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, cmd["richtung"])
+                _zweit = {}   # ZWEI ORBIT (03.11.2026, Z4): zweit/zweit_art von Railway an den Tab
+                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, cmd["richtung"], zweit_aus=_zweit)
                 if not _frei:
                     print(f"[panel] tv-order RIEGEL {_code} @{cmd['ext_id']} {cmd['richtung']}: {_msg[:160]}", flush=True)
                     return self._send(200, json.dumps({"ok": False, "code": _code, "grund": _code, "retry_ok": True, "gesendet": False,
-                                                       "msg": _msg}, ensure_ascii=False))
+                                                       "msg": _msg, **_zweit}, ensure_ascii=False))
             # Neustart-Sperre (25.09.2026): nach einem echten Puls-Start folgt der Hedge-Open —
             # 3 min kein Copier-Update-Neustart, damit er einen frischen Copier vorfindet
             if not cmd["probe"]:

@@ -54767,7 +54767,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2016'
+  const OS_TAB_BUILD = '2026-09-22.2017'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55286,7 +55286,12 @@
     // Startzeit immer in Dubai-Zeit wie der Grund aus der DB (08.10.2026: Emins Toast mischte „seit 10:08 Dubai" mit „startet 09:11" PC-Ortszeit)
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : '?'
     // Gegen einen LAUFENDEN Trade derselben ID (sql/2026-10-09_gegenhedge_nur_gegenrichtung.sql, d.laeuft): gesperrt, bis er zu ist — kein „90 s"
-    const t = bt
+    // ZWEI ORBIT (03.11.2026, Z4): bei Zweit-Sperren der Grund aus der DB je Art („schon 2 von 2“, „gleiche Firma läuft schon“, „Markteröffnung …“) —
+    // „nur einer gleichzeitig“ nur noch, wenn höchstens einer erlaubt ist
+    const zg = bt && (d.zweit || d.zweit_art || d.code) ? zweitGrund(d) : null   // code: zweit_wartet / firma_laeuft / markt_oeffnung (S6)
+    const t = zg
+      ? `„${plan.masterName || '—'}" wartet: ${zg.kurz} — neue Prüfung ${um}`
+      : bt
       ? `„${plan.masterName || '—'}" wartet: Big Trade „${d.wer || '?'}" läuft noch in diesem Fenster (Orbit/Nova: nur einer gleichzeitig) — neue Prüfung ${um}`
       : gh && d.laeuft
       ? `„${plan.masterName || '—'}" gegen laufenden Trade gesperrt: ${d.grund || 'dein Konto läuft dort in Gegenrichtung'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — neue Prüfung ${um}`
@@ -55297,7 +55302,7 @@
     if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: d.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
     try{ renderTradePlans() }catch(_){}
     if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
-    console.warn(bt ? '[big-trade]' : gh ? '[gegenhedge]' : '[firmen-abstand]', t)
+    console.warn(zg ? '[zwei-orbit]' : bt ? '[big-trade]' : gh ? '[gegenhedge]' : '[firmen-abstand]', t)
     return t
   }
   window._faVorStart = plan => faVorStart(plan)   // Test-Haken (Stub)
@@ -55397,7 +55402,8 @@
         const schritt = unk ? 'unklar' : String((r && (r.schritt || r.code)) || (/nicht erreichbar|Backend/i.test(String(text)) ? 'pc' : 'puls'))
         // Konto-Befund (08.10.2026): puls_fehlstarts hat kein JSON-Feld → kurz an msg (sfMelden kappt bei 400)
         const kb = (typeof tvPulsKontoBefund === 'function') ? tvPulsKontoBefundText(tvPulsKontoBefund(r)) : ''
-        try{ await sfMelden(plan, { schritt, msg: (String(text).replace(/\s+/g, ' ') + kb).slice(0, 400), unklar: unk, bild: r && r.fehlerbild }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
+        try{ await sfMelden(plan, { schritt, msg: (String(text).replace(/\s+/g, ' ') + kb).slice(0, 400), unklar: unk, bild: r && r.fehlerbild,
+          zweit: !!(r && r.zweit === true), zweit_art: r && r.zweit_art, zweit_code: r && r.zweit_code, bis: r && r.bis }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }   // zweit: 03.11.2026, Z4
       }
       // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
       // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
@@ -59439,7 +59445,7 @@
     if(tpWdWartetAufBestaetigung(p)) return { kurz: '⏳ Wartet auf Bestätigung · Funded-Planer → Winning Days', marke: '⏳ Bestätigung offen',
       voll: 'Wartet auf deine Bestätigung im Funded-Planer → Winning Days. Ohne Bestätigung startet der Trade nicht und läuft ab; bestätigt startet er zur Startzeit (schon vorbei: in 3–6 min, am selben Handelstag).', versuche: 1, at: null }
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
-    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
@@ -59459,6 +59465,10 @@
         voll: /von Hand geändert/.test(text) ? `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — nach Hand-Werten stellt der Takt nicht mehr um.`
           : `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — startet von selbst, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`,
         versuche: Number(s.versuche) || 1, at: s.at } }
+    // ZWEI ORBIT (03.11.2026, Z4, Lücke 3 S3): DB-Sperre am Claim (trade_plans_big_trade / prophos_big_trade_halten) — Grund je Art statt unsichtbar
+    if(s.art === 'zweit' || s.art === 'firma' || s.art === 'markt'){ const zg = zweitGrund(s) || { kurz: text || 'zweiter Big Trade wartet', pille: 'zweiter wartet' }
+      return { kurz: `⏳ Wartet: ${zg.kurz}${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`, marke: `⏳ ${zg.pille}`,
+        voll: `Wartet: ${zg.kurz}. Startet von selbst, sobald es frei ist; bis dahin neuer Versuch alle 1–1,5 min.`, versuche: Number(s.versuche) || 1, at: s.at } }
     if(s.art === 'ein_finaler') return { kurz: `⛔ Wartet: nur ein finaler Trade je ID${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
@@ -59866,6 +59876,9 @@
     if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit') return false
     if(sfIstUac(sf)) return false   // Windows-Abfrage (23.10.2026): sichtbar lassen — Finn muss hin, auch wenn der Bot danach neu einplant
     if(sfDeckelVoll(sf)) return false
+    // ZWEI ORBIT (03.11.2026, Z4, Gegenprüfung): der Sofort-Start-Wächter plant erst bei „frei“ neu ein — f.at bleibt alt, solange der 1. Trade in der
+    // Spanne steht (auch Stunden). Warten ist kein Fehler: kein „hängt“, keine Handy-Meldung, kein rotes Start-Fehler
+    if(sfIstZweit(sf)) return true
     const at = Date.parse(sf.at || '') || 0
     return !!at && (jetzt || Date.now()) - at < SF_HAENGT_MS
   }
@@ -59883,6 +59896,9 @@
       const flag = { schritt: f.schritt || '', msg: msgK, unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
         versuche: (alt && Number(alt.versuche)) || 0, uac_n: uacAlt + (uacNeu ? 1 : 0), uac: uacNeu }   // Windows-Abfrage ≠ Fehlversuch (23.10.2026)
+      // ZWEI ORBIT (03.11.2026, Z4): Zweit-Sperre am Code (Panel reicht zweit/zweit_art von Railway durch) — Sofort-Start-Wächter + Texte je Grund
+      if(f.zweit === true){ flag.zweit = true; if(ZWEIT_ARTEN.includes(f.zweit_art)) flag.zweit_art = f.zweit_art
+        if(ZWEIT_CODE_ART[f.zweit_code]) flag.zweit_code = f.zweit_code; if(f.bis && Number.isFinite(Date.parse(f.bis))) flag.bis = String(f.bis) }
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
       try{ renderTradePlans() }catch(_){}
       // FEHLER-MUSTER (07.10.2026, Finn: „wenn es öfter die gleichen sind, genau diese Fehler eliminieren"): start_fehler wird je Plan
@@ -59909,6 +59925,87 @@
           'https://prophos.pages.dev/prophos#trades', 'sf-' + String(plan.id).slice(0, 8)) }catch(_){}
       }
     }catch(e){ console.warn('[start-fehler] schreiben', (e && e.message) || e) }
+  }
+  /* ZWEI ORBIT — GRUND JE SPERRE (03.11.2026, Z4, Lücke 3 der Prüfung S3: Toast, Karte, Grund-Zeile und Pille sagten bei jeder Zweit-Sperre
+   * „nur einer gleichzeitig“ bzw. „Big Trade auf dem PC kurz vor TP/Liq (2.000 $)“ — gemeint war die 2.500-$-Spanne zum 1. Trade, auf jedem PC).
+   * REIN: Railway-Antwort, start_fehler oder start_sperre → { art, kurz, pille } | null. Art zuerst aus dem Feld zweit_art (Railway/DB), sonst aus
+   * dem Grund-Text (alte Stände). Arten: voll · nah · gesendet · kein_kurs · gleiche_firma · markt. Test-Haken window._zweitGrund. */
+  // Codes von S6 (Z5, 03.11.2026): /richtung/frei zweit_code, /admin/zweit-frei + prophos_big_trade_halten code, start_sperre art 'firma'/'markt'
+  const ZWEIT_ARTEN = ['voll', 'nah', 'gesendet', 'kein_kurs', 'gleiche_firma', 'markt']
+  const ZWEIT_CODE_ART = { firma_laeuft: 'gleiche_firma', markt_oeffnung: 'markt', firma: 'gleiche_firma', markt: 'markt' }
+  function zweitGrund(d){
+    if(!d || typeof d !== 'object') return null
+    const g = String(d.grund || d.text || d.msg || '')
+    let art = ZWEIT_ARTEN.includes(d.zweit_art) ? d.zweit_art
+      : ZWEIT_CODE_ART[d.zweit_code] || ZWEIT_CODE_ART[d.code] || (d.art === 'firma' || d.art === 'markt' ? ZWEIT_CODE_ART[d.art] : null)
+    if(!art){
+      if(/gleiche Firma|derselben Firma|je Firma nur einer/i.test(g)) art = 'gleiche_firma'
+      else if(/Markteröffnung|Market Open/i.test(g)) art = 'markt'
+      else if(/gerade gesendet/i.test(g)) art = 'gesendet'
+      else if(/nicht prüfbar/i.test(g) && /zweiter Start wartet/i.test(g)) art = 'kein_kurs'
+      else if(/^\W*1\. Trade\b|zweiter Start wartet \(Spanne/.test(g)) art = 'nah'
+      else if(/Big Trades? .*in diesem Fenster/i.test(g)) art = 'voll'
+    }
+    if(!art) return null
+    const zahl = v => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) ? null : Number(v)
+    const usd = t => Number(String(t).replace(/\./g, '').replace(',', '.'))
+    const de = n => Math.round(n).toLocaleString('de-DE')
+    if(art === 'voll'){
+      const m = /schon (\d+) Big Trades.*höchstens (\d+)/.exec(g), m1 = /höchstens (\d+) gleichzeitig/.exec(g), einer = /läuft (noch|schon) in diesem Fenster/.test(g)
+      const n = m ? Number(m[1]) : (zahl(d.anzahl) ?? (einer ? 1 : null)), mx = m ? Number(m[2]) : (zahl(d.max_je_id) ?? (m1 ? Number(m1[1]) : einer ? 1 : null))
+      return { art, kurz: `schon ${n ?? '?'} von ${mx ?? '?'} Big Trades in diesem Fenster`, pille: n != null && mx != null ? `schon ${n} von ${mx}` : 'Fenster voll' }
+    }
+    if(art === 'nah'){
+      const reste = [zahl(d.rest_tp_usd), zahl(d.rest_liq_usd)].filter(x => x != null)
+      const mt = [...g.matchAll(/(-?\d[\d.]*) \$ vor (dem TP|der Liq)/g)].map(x => usd(x[1])).filter(Number.isFinite), ms = /Spanne (\d[\d.]*) \$/.exec(g)
+      const rest = reste.length ? Math.max(0, Math.min(...reste)) : (mt.length ? Math.max(0, Math.min(...mt)) : null)   // TP und Liq im Text: der kleinere Rest
+      const sp = zahl(d.zweit_usd) ?? (ms ? usd(ms[1]) : null)
+      return { art, kurz: `1. Trade zu nah (Rest ${rest != null ? de(rest) : '?'} $, Spanne ${sp != null ? de(sp) : '?'} $)`, pille: '1. Trade nah' }
+    }
+    if(art === 'gesendet') return { art, kurz: '1. Trade gerade gesendet — der zweite wartet, bis er offen ist', pille: 'gerade gesendet' }
+    if(art === 'kein_kurs') return { art, kurz: '1. Trade ohne Kurs — Abstand nicht prüfbar', pille: 'kein Kurs' }
+    if(art === 'gleiche_firma'){ const f = d.firma || (/ läuft schon bei (.+?) — je Firma/.exec(g) || [])[1]
+      return { art, kurz: `gleiche Firma läuft schon${f ? ' (' + f + ')' : ''}`, pille: 'gleiche Firma' } }
+    const bisMs = Date.parse(d.bis || '')
+    const bis = Number.isFinite(bisMs) ? new Date(bisMs).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : (/bis (\d{1,2}:\d{2}) Dubai/.exec(g) || [])[1]
+    return { art, kurz: `Markteröffnung 09:28–09:35 New York${bis ? ' (bis ' + bis + ' Dubai)' : ''}`, pille: 'Markteröffnung' }
+  }
+  window._zweitGrund = zweitGrund
+  /* ZWEI ORBIT — SOFORT-START-WÄCHTER (03.11.2026, Z4, Lücke 2 der Prüfung S3): „1. Trade zu nah“, „gerade gesendet“ und „ohne Kurs“ kamen über
+   * den Klick-Riegel als big_trade_nah/big_trade_unklar in den Start-Fehler-Weg und warteten 15 min (SF_WARTE_MS) — verließ der 1. Trade die
+   * Spanne oder schloss er, startete der zweite erst 15–20 min später. Jetzt: Zweit-Wartezeile (Flag zweit vom Panel, sonst der Railway-Satz
+   * „zweiter Start wartet“) → GET /admin/zweit-frei?plan= gestreut alle zweit_takt_von_s–bis_s (puls_heim_regel, Standard 20–40 s), bei frei
+   * sofort neu einplanen (Backend-Nachholen mit allen Regeln). Railway nicht erreichbar → wie bisher nach 15 min. Den Start macht wie immer
+   * tpStartUmTick mit allen Riegeln — der Klick-Riegel prüft die Spanne vor dem Klick noch einmal. */
+  const SF_ZWEIT_TAKT = { von: 20, bis: 40, at: 0 }
+  async function sfZweitTakt(){
+    if(Date.now() - SF_ZWEIT_TAKT.at < 10 * 60000) return SF_ZWEIT_TAKT
+    SF_ZWEIT_TAKT.at = Date.now()
+    try{
+      const { data } = await supabase.from('puls_heim_regel').select('zweit_takt_von_s,zweit_takt_bis_s').eq('id', 1).maybeSingle()
+      const v = Number(data && data.zweit_takt_von_s), b = Number(data && data.zweit_takt_bis_s)
+      if(v >= 5 && b >= v && b <= 600) Object.assign(SF_ZWEIT_TAKT, { von: v, bis: b })
+    }catch(_){}
+    return SF_ZWEIT_TAKT
+  }
+  function sfIstZweit(f){
+    return !!f && (f.schritt === 'big_trade_nah' || f.schritt === 'big_trade_unklar')
+      && (f.zweit === true || /zweiter Start wartet/.test(String(f.msg || '')))
+  }
+  const _sfZweitGefragt = new Map()   // planId → Zeitpunkt der letzten Frage (Takt gilt auch, wenn sfTick und der Wächter beide fragen)
+  // → { frei, grund, … } | 'warten' (Takt noch nicht um) | null (Railway nicht erreichbar → Zeit-Weg)
+  async function sfZweitFrei(plan){
+    const t = SF_ZWEIT_TAKT, zuletzt = _sfZweitGefragt.get(String(plan.id)) || 0
+    if(Date.now() - zuletzt < t.von * 1000) return 'warten'
+    _sfZweitGefragt.set(String(plan.id), Date.now())
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
+      if(!tok) return null
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 10000)
+      const r = await fetch(`${WATCHER_HOME}/admin/zweit-frei?plan=${encodeURIComponent(plan.id)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      return d && d.ok === true && typeof d.frei === 'boolean' ? d : null
+    }catch(_){ return null }
   }
   // Letzte Startminute des Tages (deutsche Zeit): Ende des letzten Start-Fensters (Delta-Monitor), höchstens start_bis (16:30 dt)
   // route (16.10.2026, Hinweis Slave 2): CFD-Wege (mt5v2/mt5) enden zusätzlich bei d.cfd_bis (18:00 Dubai, vom Backend umgerechnet)
@@ -59953,6 +60050,14 @@
     // Orbit V2 / Topstep V2 (08.10.2026): Puls-Schritte (pc, login, konto, asset, ticket, knopf, ruecklesung, popup, werte, zeitlimit …)
     // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
     // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
+    if(sfIstZweit(f)){   // ZWEI ORBIT (03.11.2026, Z4): s. sfZweitFrei — frei → sofort neu, gesperrt → weiter warten, Railway weg → 15-min-Weg unten
+      const z = await sfZweitFrei(plan)
+      if(z === 'warten') return null
+      if(z && z.frei) return 'zweiter Big Trade frei — sofort neu'
+      if(z){ const zg = zweitGrund(z); console.info(`[zwei-orbit] „${plan.masterName || 'Plan'}" wartet: ${zg ? zg.kurz : (z.grund || z.code || 'gesperrt')}`)
+        // Startfenster zu Ende: wie der 15-min-Weg einmal nachholen — das Backend antwortet „tagesende“, sfTick setzt den Status (sonst stünde der Plan ewig auf „wartet“)
+        return apPrHm(new Date().toISOString()) >= sfTagesEnde(plan.route) ? 'Startfenster zu Ende' : null }
+    }
     if(f.schritt === 'big_trade_nah' && sfIstWdSperre(f)) return `${sfIstApexSperre(f) ? 'Apex-Challenge' : 'Winning Day'} nah am TP/an der Liq — neuer Versuch in 2–4 min`   // s. sfIstWdSperre
     // Windows-Abfrage (23.10.2026, s. sfIstUac): neu einplanen, sobald consent.exe am PC weg ist — das Backend legt den Start auf jetzt +
     // 2–4 min (Zufall + Regeln). Kennt das Panel die Frage nicht (alter Stand/offline), bleibt es beim Zeit-Weg unten.
@@ -60121,7 +60226,31 @@
       'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
-  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre, still: sfStillUrteil, STILL_MS: SF_STILL_MS,
+  // Sofort-Start-Wächter (03.11.2026, Z4): nur Zweit-Wartezeilen, eigener gestreuter Takt (Puls-Jitter-Regel), teilt sich _sfLaeuft mit sfTick
+  async function sfZweitRunde(){
+    if(window._tabNebenSofort || !MT5_LOCAL || _sfLaeuft) return
+    const heute = sfTagDt(new Date().toISOString())
+    const kand = (tradePlans || []).filter(p => { const f = sfFlag(p)
+      return p && sfIstZweit(f) && f.status === 'rot' && p.status === 'planned' && p.startUmGestartetAt && !p.startedAt && !p.orbitGesendetAt
+        && !sfDeckelVoll(f) && p.startUm && sfTagDt(p.startUm) === heute })
+    if(!kand.length) return
+    await sfZweitTakt()
+    if(_sfLaeuft) return
+    _sfLaeuft = true
+    try{
+      for(const p of kand){
+        const f = sfFlag(p); if(!sfIstZweit(f) || f.status !== 'rot') continue
+        const grund = await sfBehoben(p, f); if(!grund) continue
+        const r = await sfNeuEinplanen(p, grund, false)
+        if(r === 'tagesende'){ try{ await baselinePatch(p.id, { start_fehler: Object.assign({}, f, { status: 'tagesende' }) }, 'planned') }catch(_){} }
+      }
+    }catch(e){ console.warn('[zwei-orbit] Wächter', (e && e.message) || e) }
+    finally{ _sfLaeuft = false }
+  }
+  const sfZweitPlanen = () => setTimeout(async () => { try{ await sfZweitRunde() }catch(_){} sfZweitPlanen() },
+    (SF_ZWEIT_TAKT.von + Math.random() * Math.max(0, SF_ZWEIT_TAKT.bis - SF_ZWEIT_TAKT.von)) * 1000)   // gestreut
+  sfZweitPlanen()
+  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, zweit: sfIstZweit, zweitRunde: sfZweitRunde, zweitTakt: SF_ZWEIT_TAKT, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre, still: sfStillUrteil, STILL_MS: SF_STILL_MS,
     uac: sfIstUac, uacText: sfIstUacText, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
@@ -62794,13 +62923,16 @@
       // KONTO OFFEN (09.10.2026, Master: Puls sendet seit 63bd2b4 nichts, wenn DIESES Konto schon eine NQ/MNQ-Position hat — Code konto_offen,
       // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
       // PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq (puls_heim_regel 2.000 $) — Warten ist richtig
-      case 'big_trade_nah': return sfIstWdSperre({ msg: m })
+      // ZWEI ORBIT (03.11.2026, Z4): Zweit-Sperre ist nicht die 2.000-$-Heim-Grenze dieses PCs, sondern die Spanne/Zahl zum 1. Trade derselben ID (jeder PC)
+      case 'big_trade_nah': case 'big_trade_unklar': if(sfIstZweit(sf)){ const zg = zweitGrund(sf)
+        return `Nichts tun — zweiter Big Trade derselben ID wartet: ${zg ? zg.kurz : 'zweiter Start wartet'}. Der PC-Tab fragt alle ${SF_ZWEIT_TAKT.von}–${SF_ZWEIT_TAKT.bis} s nach und plant sofort neu ein, sobald es frei ist.` }
+        if(sf.schritt === 'big_trade_unklar') return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
+        return sfIstWdSperre({ msg: m })
         ? `Nichts tun — auf dem PC${pc} steht ${sfIstApexSperre({ msg: m }) ? 'eine Apex-Challenge' : 'ein Winning Day'} kurz vor TP/Liq (100 $), Puls bleibt in dessen Konto. Der Plan versucht es in 2–4 min wieder.`
         : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
       case 'tab_nicht_erreichbar': return `Prophos-Tab am PC${pc} hat während des Starts nicht geantwortet (Tab schläft im Hintergrund) — nichts gesendet. Den Tab am PC nach vorn holen; der Plan versucht es in 15 min wieder.`
-      case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
         return `Am Konto ist schon eine Position offen${pos ? ` (${pos})` : ''} — Hand-Trade? Am PC${pc} in TradingView nachsehen. Der Plan versucht es in 15 min wieder.`
@@ -63233,6 +63365,7 @@
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
         const wer = sf.pc ? '' : t.user
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
+          zweit: sfIstZweit(sf) ? (zweitGrund(sf) || { pille: 'zweiter wartet' }) : null,   // Pille je Grund (03.11.2026, Z4)
           text: `nicht gestartet (${tplUhr(t.start, D.v)}) — ${(sfOhneSpur(sf.msg) || 'Check rot').slice(0, 160)}`,
           tun: tplSfTun(sf, wer) + ' ' + tplSfAuto(sf, D) })
       } else if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt){
@@ -63366,6 +63499,7 @@
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
+      if(z.zweit) return { w: z.zweit.pille, ton: 'gelb', r: 6 }   // ZWEI ORBIT (03.11.2026, Z4): Zweit-Sperre ist Warten, kein Start-Fehler
       if(/^nicht gestartet/i.test(t) && /(Big Trade|Winning Day|Apex-Challenge) .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: /Apex-Challenge/i.test(t) ? 'Apex-Challenge nah' : /Winning Day/i.test(t) ? 'Winning Day nah' : 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026; Winning Day seit 22.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
