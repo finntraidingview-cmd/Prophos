@@ -12921,7 +12921,7 @@ def _liq_de(v, d=0):
     return f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def liq_aus_regel(regel, groesse, balance_start, tagesstart):
+def liq_aus_regel(regel, groesse, balance_start, tagesstart, tagesstart_eod=None):
     """REIN RECHNEND (testbar): Liquidations-Balance nach einer liq_regeln-Zeile → (balance | None, text).
     fest           Start-Balance − Betrag           trailing_lock  min(Start-Balance − Betrag, Größe + Lock)
                    (maxdd_art 'eod_trailing': Tagesstart − Betrag, s. u.)
@@ -12939,8 +12939,9 @@ def liq_aus_regel(regel, groesse, balance_start, tagesstart):
         # erste Trade heute hat +5.667,78 $ gemacht. Liq ist 4.500 + das Plus von heute"): bei EOD-Firmen zählt der Betrag ab der Balance zu
         # Beginn des Handelstags, nicht ab dem Trade-Start — das Radar zeigte die Liq 75 statt ~169 Pkt über dem Einstieg (SELL 3 NQ).
         # Ohne Tagesstart wie bisher ab Start-Balance (dann ist dieser Trade der erste des Tages).
-        if regel.get("maxdd_art") == "eod_trailing" and tagesstart is not None:
-            return round(tagesstart - b, 2), f"fest {_liq_de(b)} $ ab Tagesstart {_liq_de(tagesstart, 2)} $ (End-of-Day)"
+        ts_e = tagesstart_eod if tagesstart_eod is not None else tagesstart
+        if regel.get("maxdd_art") == "eod_trailing" and ts_e is not None:
+            return round(ts_e - b, 2), f"fest {_liq_de(b)} $ ab Tagesstart {_liq_de(ts_e, 2)} $ (End-of-Day)"
         if balance_start is None:
             return None, f"fest {_liq_de(b)} $ — keine Start-Balance"
         return round(balance_start - b, 2), f"fest {_liq_de(b)} $ ab Start-Balance"
@@ -12981,13 +12982,24 @@ def liq_tagesstart(p, start_bal, fruehere):
     if tag and kand:
         f = min(kand, key=lambda x: str(x["started_at"]))
         return _wd_num(f["bal_start"]), "erster Trade des Handelstags"
-    # TODAY'S P&L BEIM START (03.11.2026, EOD-Liq): kein früherer Prophos-Trade heute, aber TradingView meldete beim Start schon einen
-    # Tages-P&L (z. B. Hand-Trade oder ein Plan ohne Start-Balance) → Tagesstart = Start-Balance − Today's P&L
-    tv = ((p.get("mt5_baseline") or {}).get("tv") or {}) if isinstance(p.get("mt5_baseline"), dict) else {}
-    tp = _wd_num(tv.get("today_pnl_start")) if isinstance(tv, dict) else None
-    if start_bal is not None and tp is not None and tp != 0 and abs(tp) < start_bal:
-        return round(start_bal - tp, 2), "Start-Balance − Today's P&L beim Start"
     return start_bal, "Start-Balance dieses Trades"
+
+
+def liq_tagesstart_eod(p, start_bal, fruehere):
+    """REIN RECHNEND (testbar): Tagesstart für die End-of-Day-Liq (liq_aus_regel fest + eod_trailing, 03.11.2026) → (wert | None, quelle).
+    Wie liq_tagesstart; ist kein früherer Prophos-Trade des Handelstags bekannt, aber TradingView meldete beim Start schon einen Tages-P&L
+    (tv.today_pnl_start, z. B. nach einem Hand-Trade) → Start-Balance − Today's P&L. Nur, wenn tv.datum_start derselbe CME-Handelstag wie
+    der Start ist (ein hängender P&L von gestern zählt nicht; Fremd-Review: sonst rückte die Liq um diesen Betrag zu weit weg)."""
+    ts, q = liq_tagesstart(p, start_bal, fruehere)
+    if q == "erster Trade des Handelstags" or start_bal is None:
+        return ts, q
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    tp = _wd_num(tv.get("today_pnl_start"))
+    st = p.get("started_at")
+    if tp is None or tp == 0 or abs(tp) >= start_bal or not st or not tv.get("datum_start") or str(tv.get("datum_start")) != str(_cme_handelstag(st)):
+        return ts, q
+    return round(start_bal - tp, 2), "Start-Balance − Today's P&L beim Start"
 
 
 _liq_kw_cache = {"at": 0.0, "firmen": None}
@@ -13049,12 +13061,17 @@ def _liq_verlauf_laden(acc_ids, streng=False):
     return out
 
 
-def liq_peak(p, acc, start_bal, verlauf):
+def liq_peak(p, acc, start_bal, verlauf, eod_tagesstart=None, eod=False):
     """REIN RECHNEND (testbar): höchste BELEGTE Balance des Kontos in seiner aktuellen Phase VOR dem Start dieses Trades → wert | None.
     Belegt = final.balance_end früherer Pläne (Ende vor diesem Start), tv.balance_start früherer Pläne, die Start-Balance dieses Trades
     und accounts.tv_balance (gelesen vor diesem Start). Phase = trade_plans.konto_typ gleich der Kontoart — Höchststände aus der
-    Challenge heben den Funded-Boden nicht (dieselbe Konto-Zeile wechselt die Phase). Pläne ohne konto_typ zählen nicht."""
+    Challenge heben den Funded-Boden nicht (dieselbe Konto-Zeile wechselt die Phase). Pläne ohne konto_typ zählen nicht.
+    eod=True (End-of-Day-Drawdown, 03.11.2026, Fremd-Review zu R1): der Boden trailt nur über Tagesend-Balances — zählen nur Werte früherer
+    CME-Handelstage (Start-Balance des ersten und End-Balance des letzten Trades je Tag) und der Tagesstart von heute (eod_tagesstart, sonst
+    die Start-Balance); Intraday-Stände von heute (Start dieses Trades nach einem Gewinn am Morgen) und accounts.tv_balance nicht."""
     a = acc or {}
+    if eod:
+        return _liq_peak_eod(p, a, start_bal, verlauf, eod_tagesstart)
     typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or p.get("master_account_id") or "")
     st = str(p.get("started_at") or "")
     werte = [start_bal] if start_bal is not None else []
@@ -13071,6 +13088,32 @@ def liq_peak(p, acc, start_bal, verlauf):
     tvb = _wd_num(a.get("tv_balance"))
     if tvb is not None and a.get("tv_balance_at") and (not st or str(a["tv_balance_at"]) <= st):
         werte.append(tvb)
+    werte = [w for w in werte if w is not None and w > 0]
+    return max(werte) if werte else None
+
+
+def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart):
+    """liq_peak im End-of-Day-Modus (s. dort)."""
+    typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or p.get("master_account_id") or "")
+    st = str(p.get("started_at") or "")
+    heute = _cme_handelstag(st) if st else None
+    erst, letzt = {}, {}   # Tag → (Zeit, Wert): Start-Balance des ersten Trades bzw. End-Balance des letzten Trades je Handelstag
+    for f in verlauf or ():
+        if str(f.get("master_account_id") or "") != aid or str(f.get("id")) == str(p.get("id")):
+            continue
+        if not f.get("konto_typ") or str(f.get("konto_typ")).lower() != typ:
+            continue
+        be, bs = _wd_num(f.get("bal_end")), _wd_num(f.get("bal_start"))
+        if bs is not None and f.get("started_at") and (not st or str(f["started_at"]) <= st):
+            d = _cme_handelstag(f["started_at"])
+            if d and (heute is None or str(d) < str(heute)) and (d not in erst or str(f["started_at"]) < erst[d][0]):
+                erst[d] = (str(f["started_at"]), bs)
+        if be is not None and f.get("ended_at") and (not st or str(f["ended_at"]) <= st):
+            d = _cme_handelstag(f["ended_at"])
+            if d and (heute is None or str(d) < str(heute)) and (d not in letzt or str(f["ended_at"]) > letzt[d][0]):
+                letzt[d] = (str(f["ended_at"]), be)
+    werte = [v for _t, v in list(erst.values()) + list(letzt.values())]
+    werte.append(tagesstart if tagesstart is not None else start_bal)
     werte = [w for w in werte if w is not None and w > 0]
     return max(werte) if werte else None
 
@@ -13155,7 +13198,8 @@ def _liq_pl_de(v):
     return None if v is None else f"{'−' if v < 0 else '+'}{_liq_de(abs(v))} $"
 
 
-def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None, kw_firmen=None):
+def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None, kw_firmen=None,
+                     peak_eod=None, tagesstart_eod=None):
     """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile → {liq_regel_balance, liq_regel_level_nq,
     liq_regel_text, liq_gilt, liq_regel_nur_balance, liq_boden_balance, liq_boden_text, liq_maxdd, liq_maxdd_art, liq_vergleich_text}.
     liq_regel_balance/_level_nq = die EFFEKTIVE Liquidation: die engere (höhere Balance) von Regel (liq_regeln, unverändert) und
@@ -13170,7 +13214,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     wd = plan_ist_wd(plan, typ) and not ah
     groesse = _wd_konto_groesse(a)
     regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
-    r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
+    r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart, tagesstart_eod)
     r_art = (regel or {}).get("art")
     if ah:
         d_bal, d_text = ah_dll_balance(a, tagesstart if tagesstart is not None else start_bal)
@@ -13182,7 +13226,9 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
         b_bal, b_text, dd, art = mll, f"MLL TopstepX {_liq_de(mll, 2)} $", None, "mll"
     else:
         b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, wd, kw_firmen)
-        b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, peak, start_bal, plan_balance_relativ(plan))
+        # End-of-Day (03.11.2026): Höchststand nur aus Tagesend-Balances (peak_eod), sonst trailte der Boden über Intraday-Gewinne (Fremd-Review R1)
+        pk = peak_eod if (peak_eod is not None and (b_regel or {}).get("maxdd_art") == "eod_trailing") else peak
+        b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, pk, start_bal, plan_balance_relativ(plan))
         ah_boden = _wd_num((((plan or {}).get("mt5_baseline") or {}).get("apex_hedge") or {}).get("liq_balance")) if ah else None
         if ah_boden and (b_bal is None or ah_boden > b_bal):
             b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ (Apex mit Hedge)"
@@ -13448,8 +13494,10 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
     if regeln is not None:
         tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
         # Konto-Boden (30.09.2026): Höchststand der Phase für EOD-trailing; Topstep V2 mit gelesener MLL nimmt die MLL als Boden
+        ts_eod, _tqe = liq_tagesstart_eod(p, start_bal, fruehere)
         regel_f = liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt,
-                                   peak=liq_peak(p, acc, start_bal, verlauf), mll=ub.get("liq_balance"), kw_firmen=kw_firmen)
+                                   peak=liq_peak(p, acc, start_bal, verlauf), mll=ub.get("liq_balance"), kw_firmen=kw_firmen,
+                                   peak_eod=liq_peak(p, acc, start_bal, verlauf, eod_tagesstart=ts_eod, eod=True), tagesstart_eod=ts_eod)
     demo_liq, demo_liq_pl = lt_demo_liq(liq_level, liq["pl_usd"], regel_f, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
