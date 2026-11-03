@@ -33660,6 +33660,48 @@
   const _hedgeMasterGesehen = new Set()   // plan-id: Reader (Konto passt, frisch) zeigte die Master-Position seit dem Hedge-Open (01.10.2026)   // plan-id → {text, seit}: seit wann der Reader DIESES Konto (passend) ununterbrochen zeigt
   const _hedgeNachgeholt = new Set()
   // Level eines Plans aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq) + TP/SL in Punkten — für Übernahmen/Nachholen (25.09.2026)
+  /* LIQ AUS DEM RADAR FÜR BIG TRADES OHNE MASTER-SL (03.11.2026, R1 — Marc Tradeify 150k Funded 004d8432 und Moritz ef7f1bfa, beide SELL
+   * 3 NQ ohne master_sl): am Hedge standen weder sl_level_nq (→ kein Radar-Schluss sl_feed) noch ein Fusion-TP (→ kein Airbag) auf der
+   * Liq-Seite. Liq-Level entstanden bisher nur aus master_sl (sl_punkte) oder bei WD/Apex/finalem Tradeify (hedgeIstWd → hedgeLiqLevel);
+   * ein Orbit-Big-Trade auf einem Funded-Konto ohne SL fiel durch. Jetzt holt der Wächter für solche Hedges die Liq, die das Radar zeigt
+   * (/admin/live-trades liq_regel_level_nq — liq_regeln + Konto-Boden mit Peak, bei End-of-Day-Firmen ab Tagesstart, app.py), und schreibt sie
+   * als sl_art 'liquidation' an den Hedge. Danach wie bei den WDs: der Wächter schließt dort per Feed (sl_feed), der Level-Abgleich setzt den
+   * Fusion-TP als Airbag (hedgeSlNqEcht, Zweig 'liquidation'). Radar-Linie, Radar-Schluss und Airbag stehen damit auf EINEM Wert.
+   * Nur: Hedge offen, kein sl_level_nq, kein Master-SL, nicht der WD-Weg; je Plan höchstens alle HEDGE_LIQ_RADAR_MS; Backend-Altstand
+   * (stand_alt) oder unplausible Level (falsche Seite, < 10 oder > 2.000 Pkt) → nichts. */
+  const HEDGE_LIQ_RADAR_MS = 60000
+  const _hedgeLiqRadar = new Map()   // plan-id → letzter Versuch (ms)
+  // REIN RECHNEND (Test-Haken window._hedgeLiqAusRadarWert): live-trades-Zeile t → Patch für mt5_baseline.hedge oder null
+  function hedgeLiqAusRadarWert(p, h, t){
+    if(!p || !h || !t || h.status !== 'offen' || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0) return null
+    const plus = p.richtung === 'buy' ? 1 : p.richtung === 'sell' ? -1 : 0
+    const lvl = Number(t.liq_regel_level_nq), ein = Number(h.einstieg_nq) > 1000 ? Number(h.einstieg_nq) : Number(t.einstieg_nq)
+    if(!plus || !(lvl > 1000) || !(ein > 1000)) return null
+    const pkt = Math.round(plus * (ein - lvl) * 100) / 100   // Liq liegt gegen die Trade-Richtung: BUY darunter, SELL darüber
+    if(!(pkt >= 10 && pkt <= 2000)) return null
+    const bal = Number(t.liq_regel_balance)
+    return { sl_level_nq: Math.round(lvl * 100) / 100, sl_art: 'liquidation', sl_punkte: pkt, liq_balance: bal > 0 ? bal : null,
+      liq_quelle: 'radar_liq_regel', sl_level_quelle: 'radar_liq_regel', liq_regel_text: String(t.liq_regel_text || '').slice(0, 160) || null }
+  }
+  window._hedgeLiqAusRadarWert = hedgeLiqAusRadarWert
+  async function hedgeLiqAusRadar(p, h){
+    const pid = String(p && p.id || '')
+    if(!pid || !h || h.status !== 'offen' || Number(h.sl_level_nq) > 0 || Number(p.masterSl) > 0 || p.status !== 'open') return
+    if(typeof hedgeIstWd === 'function' && hedgeIstWd(p)) return   // WD/Apex/finaler Tradeify: eigener Weg (hedgeLiqLevel)
+    if(Date.now() - (_hedgeLiqRadar.get(pid) || 0) < HEDGE_LIQ_RADAR_MS) return
+    _hedgeLiqRadar.set(pid, Date.now())
+    const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
+    const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
+    const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&nur_eigene=1&ids=${encodeURIComponent(pid)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+    const d = r.ok ? await r.json().catch(() => null) : null
+    if(!d || d.stand_alt) return
+    const t = ((d.trades) || []).find(x => String(x.id || x.plan_id || '') === pid); if(!t) return
+    const frischH = (p.mt5Baseline && p.mt5Baseline.hedge) || h
+    const patch = hedgeLiqAusRadarWert(p, frischH, t)
+    if(!patch){ console.info(`[hedge] Liq aus dem Radar für „${p.masterName || pid}": kein plausibles Level (${t.liq_regel_level_nq ?? '—'})`); return }
+    await hedgeAmPlanSchreiben(p.id, patch)
+    console.info(`[hedge] Liq aus dem Radar für „${p.masterName || pid}": ${patch.sl_level_nq} (${patch.sl_punkte} Pkt, ${patch.liq_regel_text || ''}) — Radar-Schluss + Airbag folgen`)
+  }
   function hedgeLevelAusPlan(p){
     try{
       const tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}
@@ -33850,6 +33892,8 @@
           const lvAus = (Number(h.tp_level_nq) > 0) ? null : hedgeLevelAusPlan(p)
           const tpL = Number(h.tp_level_nq) > 0 ? Number(h.tp_level_nq) : (lvAus && Number(lvAus.tp_level_nq)) || 0
           let slL = Number(h.sl_level_nq) > 0 ? Number(h.sl_level_nq) : (lvAus && Number(lvAus.sl_level_nq)) || 0
+          // LIQ AUS DEM RADAR (03.11.2026, s. hedgeLiqAusRadar): Big Trade ohne Master-SL → Liq-Level wie im Radar nachtragen (ohne await)
+          if(!(slL > 0)) hedgeLiqAusRadar(p, h).catch(() => {})
           // Liquidations-Level nachtragen (F22): Winning Day, Start-Balance jetzt da, Level noch nicht aus ihr → EINMAL rechnen + schreiben
           // (Einstieg = hedge.einstieg_nq); die Copier-Reserve bleibt auf dem alten Wert, maßgeblich ist der Wächter
           try{
