@@ -155,6 +155,17 @@ def main():
     r = ab([zeile("2026-11-04", [{"id": K, "aktiv": True, "hinweis": "", "plan_id": P}])], {K}, [], dub(9), REG, fest, geprueft=[P])
     check(r and r[0]["felder"]["konten"][0]["plan_id"] is None and r[0]["felder"]["konten"][0]["hinweis"] == HP and not r[0]["loeschen"],
           "Plan per ID gelesen und weg → Verweis raus, Konto raus")
+    # 8) PC-Tab (S2-Stopp zu 445103b7): bei offenem Payout löscht der Tab nie; jedes Löschen eines abgewählten Kontos nur mit DB-Guard
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    i = html.index("        if(!wdAktiv(k)){\n          // PAYOUT OFFEN (S2-Stopp")
+    blk = html[i:html.index("          continue\n        }", i)]
+    check(blk.index("if(wdPayoutHinweis(k.hinweis)) continue") < blk.index(".delete()"), "Tab: Payout-Hinweis → weiter, bevor gelöscht wird")
+    check(re.search(r"\.delete\(\)\.eq\('id', plan\.id\)\.eq\('status', 'planned'\)\s*\.is\('start_um_gestartet_at', null\)\.is\('started_at', null\)"
+                    r"\.is\('orbit_gesendet_at', null\)\.select\('id'\)", blk) is not None, "Tab: Löschen nur geplant, nie geclaimt/gestartet/gesendet")
+    check(blk.index("if(!eWeg && weg && weg.length)") < blk.index("set(k, 'plan_id', null)"), "Tab: plan_id nur leeren, wenn wirklich gelöscht")
+    check(html.count(".from('trade_plans').delete().eq('id', plan.id)\n") == 0, "kein ungesichertes Löschen per plan.id mehr im Farmer")
+    j = html.index("function suStartetNichtWeil(")
+    check("wdPayoutOffen(p.masterAccountId)) return WD_HINWEIS_PAYOUT" in html[j:j + 3000], "Start-Wächter: Farmer-Plan mit offenem Payout startet nicht")
     if FEHLER:
         print(f"\n{len(FEHLER)} Fehler")
         sys.exit(1)

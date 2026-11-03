@@ -60485,6 +60485,9 @@
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung im Funded-Planer → Winning Days'   // APEX-WD BESTÄTIGEN (02.11.2026)
     if(planKontoDeaktiviert(p)) return 'Konto deaktiviert'   // 30.10.2026; DB-Netz am Claim: trade_plans_a00_konto_deaktiviert
+    // PAYOUT OFFEN (03.11.2026): ein Farmer-Plan eines Kontos mit offener Payout-Anfrage startet nicht — Railway zieht ihn zurück (wd_payout_abgleich).
+    // try: _wd/wdPayoutOffen stehen weiter hinten im Modul (TDZ beim allerersten Takt)
+    try{ if(tpIstFarmerPlan(p) && wdPayoutOffen(p.masterAccountId)) return WD_HINWEIS_PAYOUT }catch(_){}
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
     { const ns = newsStartSperre(p); if(ns) return ns.text }   // NEWS-REGEL FUNDED CFD (30.10.2026): Plan wartet, startet nach dem Block
     return ''
@@ -70129,10 +70132,18 @@
       for(const k of konten){
         const plan = planVon(k)
         if(!wdAktiv(k)){
+          // PAYOUT OFFEN (S2-Stopp zu 445103b7, 03.11.2026): der Tab löscht dafür NIE — ein anderer Tab/PC derselben ID kann geclaimt oder per Hand gesendet haben,
+          // der Speicher hier weiß das nicht. Zurückziehen macht nur Railway (wd_payout_abgleich, Löschen mit Guard); bis dahin hält suStartetNichtWeil den Plan.
+          if(wdPayoutHinweis(k.hinweis)) continue
           if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
-            await supabase.from('trade_plans').delete().eq('id', plan.id)
-            const ix = tradePlans.indexOf(plan); if(ix >= 0) tradePlans.splice(ix, 1)
-            set(k, 'plan_id', null); set(k, 'status', null); set(k, 'start_um', null)
+            // Guard in der DB (S2-Stopp 03.11.2026): nur ein Plan, der wirklich noch geplant, nie geclaimt, nie gestartet und nie gesendet ist — plan_id nur
+            // leeren, wenn eine Zeile gelöscht wurde; sonst läuft er woanders schon und bleibt verknüpft
+            const { data: weg, error: eWeg } = await supabase.from('trade_plans').delete().eq('id', plan.id).eq('status', 'planned')
+              .is('start_um_gestartet_at', null).is('started_at', null).is('orbit_gesendet_at', null).select('id')
+            if(!eWeg && weg && weg.length){
+              const ix = tradePlans.indexOf(plan); if(ix >= 0) tradePlans.splice(ix, 1)
+              set(k, 'plan_id', null); set(k, 'status', null); set(k, 'start_um', null)
+            }
           }
           continue
         }
