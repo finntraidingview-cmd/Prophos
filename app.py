@@ -29249,7 +29249,8 @@ def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):
     Gruppe. Admin: wie bisher (HT, sichtbare Apex-WD) und jeder Ausgleichs-Trade, auch aus Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“)."""
     ausgleich = str(r.get("aus") or "").lower() == "true"
     if verw_sicht is not None:
-        return ausgleich and str(r.get("user_id")) in verw_sicht
+        # + hf_ist_wd (S9 zu bda93043): nur Winning-Day-Ausgleiche des Farmers (winning_day, Farmer-Notiz, keine Hedge-Art) seiner Gruppe
+        return ausgleich and str(r.get("user_id")) in verw_sicht and hf_ist_wd(r, firmen)
     return str(r.get("user_id")) not in (aus or ()) or hf_wd_sichtbar(r, firmen, gruppen_ids) or ausgleich
 
 

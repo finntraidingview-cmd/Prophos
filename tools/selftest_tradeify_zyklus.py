@@ -93,11 +93,14 @@ check('if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIG
 check("altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned'))" in html, "Nachziehen auf den Ausgleich: erst die Marke, sonst kein großer TP")
 check("if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return true" in html, "PC-Tab startet einen markierten Ausgleich erst nach der Bestätigung — auch in Gruppen (Finn: „auch bestätigen“)")
 lade("hf_zeile_fuer"); lade("hf_wd_sichtbar")
-emin, ht = {"user_id": "emin-mitglied", "aus": "true"}, {"user_id": "ht-id", "aus": None, "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
+emin, ht = {"user_id": "emin-mitglied", "aus": "true", "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}, {"user_id": "ht-id", "aus": None, "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
 check(ruf("hf_zeile_fuer", emin, None, {"emin-mitglied"}, ["apex"], {"emin-mitglied"}), "Admin sieht den Ausgleich auch aus einer Gruppe mit Verwalter")
 check(ruf("hf_zeile_fuer", emin, frozenset({"emin-mitglied"}), set(), ["apex"], set()) and not ruf("hf_zeile_fuer", dict(emin, user_id="fremd"), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
       "Verwalter sieht nur die Ausgleichs-Trades seiner Gruppe")
 check(not ruf("hf_zeile_fuer", ht, frozenset({"ht-id"}), set(), ["apex"], set()), "Verwalter sieht keine anderen Freigaben (Hedge-Arten, Apex-WD, normale WD)")
+check(not ruf("hf_zeile_fuer", dict(emin, art="apex"), frozenset({"emin-mitglied"}), set(), ["apex"], set())
+      and not ruf("hf_zeile_fuer", dict(emin, winning_day=False), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
+      "Verwalter: nur Winning-Day-Ausgleiche (hf_ist_wd) — keine Hedge-Art, kein Nicht-WD trotz Marke (S9 zu bda93043)")
 sqlg = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_gruppen.sql"), encoding="utf-8").read()
 check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true' and coalesce(new.winning_day, false))) then" in sqlg and "verwalter_user_id" not in sqlg.split("TRADEIFY-AUSGLEICH (03.11.2026)")[1].split("then")[0],
       "DB-Netz: Ausgleich ohne Gruppen-Ausnahme (neue SQL-Datei)")
