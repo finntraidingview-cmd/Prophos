@@ -39,7 +39,7 @@ ok(all(ns["eh_ohne_text"](c, "x").startswith("startet nicht") for c in ("balance
 ok("coalesce(new.route, '') not in ('mt5v2', 'mt5')" in sql and "kt not in ('challenge', 'phase1', 'phase2')" in sql, "Riegel: alle CFD-Challenges auf mt5v2/mt5")
 ok("prophos_ht_echo_hedge_an" not in sql.split("$$")[1] and "new.auto_plan" not in sql.split("$$")[1], "Riegel: unabhängig von Schalter und Auto-Plan")
 ok("new.slave_account_id is not null and coalesce(new.multiplier, 0) > 0" in sql, "Riegel: Echo nur mit Fusion-Slave und Multiplikator")
-ok("coalesce(gefunden, false) and kt not in" in sql, "Riegel: Konto nicht lesbar → halten (fail-closed)")
+ok("coalesce(gefunden, false) and kt <> '' and kt not in" in sql and "or kt = ''" in sql, "Riegel: Konto oder Kontoart nicht lesbar → halten (fail-closed)")
 ok("coalesce(new.start_claim_art, 'start') <> 'start'" in sql, "Verbrauchs-Claims laufen durch")
 
 # PC-Tab
