@@ -69356,11 +69356,13 @@
       _wd.regeln = data || null; _wd.geladen = true; _wd.letzteLadung = Date.now(); return true
     }catch(e){ console.warn('[wd] Regeln laden', e); return false }
   }
-  async function wdRowsLaden(tag){
+  async function wdRowsLaden(tag, ohneMerken){
     const { data, error } = await supabase.from('wd_tagesplan').select('*').eq('tag', tag).order('reihenfolge', { ascending: true, nullsFirst: false }).order('registriert_at', { ascending: true })
     if(error) throw error
     const aus = wdIdsAus()   // ausgelassene IDs (Emin, Finn) tauchen nirgends auf — auch nicht beim Würfeln
-    _wd.rows = (data || []).filter(x => !aus.has(String(x.user_id))); _wd.tag = tag; return _wd.rows
+    const rows = (data || []).filter(x => !aus.has(String(x.user_id)))
+    if(ohneMerken) return rows   // anderer Tag als der angezeigte (S2-Stopp zu 23811525): die Anzeige behält ihre Zeilen
+    _wd.rows = rows; _wd.tag = tag; return _wd.rows
   }
   function wdVorplanRegeln(){
     const v = (_wd.regeln && _wd.regeln.vorplan) || {}
@@ -69674,11 +69676,11 @@
 
   /* ── Erwartete Blöcke (Mac): alle IDs mit Funded/Live-Konten bei Futures-Firmen — aus der RPC/Railway,
    *    sonst aus der Admin-Übersicht. Konten ohne Farm-Haken bleiben sichtbar, aber abgewählt. ── */
-  function wdErwartet(){
+  function wdErwartet(opt){
     const proId = new Map()
     const add = (uid, person, k) => { const e = proId.get(uid) || { user_id: uid, name: person || uid.slice(0, 8), konten: [] }; e.konten.push(k); proId.set(uid, e) }
     const konto = (r, firm, farm) => {
-      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert, heute = !!r.heute_gestartet   // heute schon getradet (03.11.2026)
+      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert, heute = !!r.heute_gestartet && !(opt && opt.ohneHeute)   // heute schon getradet (03.11.2026); nicht für einen anderen Tag (S2-Stopp zu 23811525)
       const po = !!r.payout_offen   // PAYOUT OFFEN (03.11.2026, app.py): fährt nicht, bis der Payout abgehakt ist
       return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext && !heute && !po), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
                ...(heute ? { heute: true } : {}), ...(po ? { payout: true } : {}),
@@ -69701,9 +69703,9 @@
   // opt.nurUngewuerfelt (WD AUTOMATISCH DRIN, 30.10.2026): schon gewürfelte Zeilen (start_um) nicht anfassen — neue Konten dort kommen
   // nur über „Heute nicht drin" (+) bzw. am nächsten Tag; neue IDs bekommen ihre Zeile immer
   async function wdAlleEintragen(tag, opt){
-    const erw = wdErwartet()
+    const erw = wdErwartet(opt && opt.ohneHeute ? { ohneHeute: true } : undefined)
     if(erw === null) return { fehler: `Konten nicht ladbar${_wd.datenFehler ? ' (' + _wd.datenFehler + ')' : ''} — ich kenne nur IDs, deren PC-Tab sich eingetragen hat.` }
-    const rows = await wdRowsLaden(tag), byUid = new Map(rows.map(x => [String(x.user_id), x]))
+    const rows = await wdRowsLaden(tag, !!(opt && opt.ohneHeute)), byUid = new Map(rows.map(x => [String(x.user_id), x]))
     let neu = 0, aktualisiert = 0, fehler = null
     const jobs = []   // alle Schreibzugriffe parallel (23.09.2026, Finn: „warum dauert das Würfeln so lange?")
     // .1487: Würfel je Konto (TP + Kontrakte, Hedge-Rechnung) — Staffel aus der Live-Balance der RPC, sonst kleinste Stufe
@@ -72369,6 +72371,10 @@
       }catch(e){ console.warn('[wd] heilen', e) }
       _wd.rows = wdUmsortiertAuflegen(rows.map(wdMitLive)); wdRender(); wdCacheSchreiben(tag)
       if(!nurGruppe && d) wdAutoEintragen(tag)   // WD AUTOMATISCH DRIN (30.10.2026) — im Hintergrund, zeichnet nach dem Schreiben neu
+      // S2-Stopp zu 23811525 (03.11.2026): „Heute" bleibt abends stehen — der nächste Lauf-Tag wird trotzdem wie bisher schon abends eingetragen
+      // (IDs ohne PC-Tab), unabhängig vom angezeigten Tag; nur eintragen, nicht würfeln, Anzeige bleibt
+      { const jN = wdJetzt(WD_TZ_STD), naechster = jN ? wdNaechsterTag(_wd.regeln || {}, jN) : null
+        if(!nurGruppe && d && naechster && naechster !== tag) wdAutoEintragen(naechster, { nurEintragen: true }) }
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
   }
   /* WD AUTOMATISCH DRIN, Admin-Seite (30.10.2026): IDs ohne laufenden PC-Tab bekamen ihre Tageszeile nur über 🎲 Würfeln. Der HT-Admin-Reiter
@@ -72392,13 +72398,15 @@
     _wdRechte = { at: Date.now(), schreiben: ok }
     return ok
   }
-  async function wdAutoEintragen(tag){
-    const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD)
-    if(!r.aktiv || !j || _wd.busy || _wd.autoLaeuft || Date.now() - (_wd.autoAt || 0) < 5 * 60000) return
+  async function wdAutoEintragen(tag, opt){
+    const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD), nurE = !!(opt && opt.nurEintragen)
+    // Takt je Tag (S2-Stopp zu 23811525): angezeigter Tag und nächster Lauf-Tag laufen getrennt, je höchstens alle 5 min
+    _wd.autoAtJe = _wd.autoAtJe || {}
+    if(!r.aktiv || !j || _wd.busy || _wd.autoLaeuft || Date.now() - (_wd.autoAtJe[tag] || 0) < 5 * 60000) return
     if(tag !== j.tag && tag !== wdNaechsterTag(r, j)) return
     if(tag === j.tag && !wdHandelstag(j.wochentag)) return   // Wochenende: keine Zeilen (Prüfung 30.10.2026)
     if(typeof window._admNurGruppe === 'function' && window._admNurGruppe()) return
-    _wd.autoLaeuft = true; _wd.autoAt = Date.now()
+    _wd.autoLaeuft = true; _wd.autoAt = Date.now(); _wd.autoAtJe[tag] = Date.now()
     try{
       // PLANER SCHREIBEN NUR MIT RECHT (Master 30.10.2026: „in HT dürfen nur ‚Finn + Pascal' und ‚Pascal' in den Planern schreiben, alle
       // anderen nur ansehen") — vom Server (S4, /admin/planer-rechte), nicht prüfbar = nichts schreiben
@@ -72406,8 +72414,10 @@
       // nur in der HT-Sicht (kein Verwalter-Gruppen-Chip gewählt) und nur HT-IDs — Emins Gruppe tragen ihre eigenen PC-Tabs ein
       const gs = typeof window._admGruppeSicht === 'function' ? window._admGruppeSicht() : null
       if(!gs || gs.eingeschraenkt || (gs.gruppe && gs.gruppe !== gs.ht)) return
-      const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true, nurHt: true })
+      // nurEintragen = ein anderer Tag als der angezeigte: die geladenen Konten-Daten gehören zum angezeigten Tag — „heute schon getradet" gilt dort nicht
+      const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true, nurHt: true, ...(nurE ? { ohneHeute: true } : {}) })
       if(e.fehler || !(e.neu || e.aktualisiert)) return
+      if(nurE){ wdSay(`Automatisch für ${tag} eingetragen: ${e.neu || 0} ID${e.neu === 1 ? '' : 's'} neu, ${e.aktualisiert || 0} Zeile${e.aktualisiert === 1 ? '' : 'n'} ergänzt.`, 'ok'); return }
       let txt = `Automatisch eingetragen: ${e.neu || 0} ID${e.neu === 1 ? '' : 's'} neu, ${e.aktualisiert || 0} Zeile${e.aktualisiert === 1 ? '' : 'n'} um neue Konten ergänzt`
       // Würfeln nur, solange im Fenster noch Platz ist (Prüfung 30.10.2026: sonst landete eine neue ID nach „Spätestens" direkt hinter dem letzten Block)
       const fe = wdFensterMs(r, tag, Date.now())
