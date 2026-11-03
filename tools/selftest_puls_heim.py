@@ -11,9 +11,9 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "_ap_de", "plan_ist_apex_hedge", "puls_heim_schwellen", "puls_heim_nah", "puls_heim_kurs_frisch", "puls_heim_big_trades",
               "puls_heim_wd_trades", "puls_heim_wd_schwellen", "puls_heim_apex_trades", "puls_heim_apex_schwellen", "puls_heim_fenster", "puls_heim_im_fenster", "puls_heim_ist_big",
-              "puls_heim_zweit_regel", "puls_heim_zweit_urteil")
+              "puls_heim_zweit_regel", "puls_heim_zweit_urteil", "puls_heim_markt_oeffnung")
 KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR", "PULS_HEIM_WD_USD", "PULS_HEIM_CODE_ZWEIT",
-              "PULS_HEIM_ZWEIT_USD", "PULS_HEIM_ECHO_ROUTEN")
+              "PULS_HEIM_ZWEIT_USD", "PULS_HEIM_ECHO_ROUTEN", "PULS_HEIM_CODE_FIRMA", "PULS_HEIM_CODE_MARKT", "PULS_HEIM_MARKT_NY")
 
 
 def lade():
@@ -147,6 +147,23 @@ def main():
     ok(zu([A(None)], 2, 2500)["code"] == "big_trade_unklar", "nicht prüfbar → unklar (fail-closed)")
     ok(zu([A(False), A(False)], 2, 2500)["code"] == "zweit_wartet", "schon 2 bei big_max 2 → wartet")
     ok(zu([{"name": "x", "gesendet": True, "nah": None}], 2, 2500)["code"] == "zweit_wartet", "gerade gesendet → wartet")
+    # JE FIRMA NUR EINER + MARKTERÖFFNUNG (03.11.2026, Z5)
+    F = [{"name": "150k …3058", "firma": "Tradeify"}]
+    bis = datetime(2026, 11, 3, 14, 35, tzinfo=timezone.utc)
+    r3 = zu([], 1, 2500, F)
+    ok(not r3["frei"] and r3["code"] == "firma_laeuft" and r3["firma"] == "Tradeify" and "je Firma nur einer" in r3["grund"], f"nichts im Fenster, Firma läuft → gesperrt: {r3}")
+    ok(zu([A(False)], 2, 2500, F)["code"] == "firma_laeuft", "big_max 2, Firma doppelt → gesperrt")
+    ok(zu([A(False)], 1, 2500, F)["code"] == "zweit_wartet", "big_max 1, einer im Fenster → alter Weg (voll) vor Firma")
+    r4 = zu([A(False)], 2, 2500, None, bis)
+    ok(not r4["frei"] and r4["code"] == "markt_oeffnung" and r4["bis"] == bis.isoformat() and "18:35 Dubai" in r4["grund"], f"Markteröffnung + 1 läuft → gesperrt: {r4}")
+    ok(zu([], 2, 2500, None, bis)["frei"], "Markteröffnung, keiner läuft → frei")
+    ok(zu([A(False), A(False)], 2, 2500, None, bis)["code"] == "zweit_wartet" and "höchstens 2" in zu([A(False), A(False)], 2, 2500, None, bis)["grund"],
+       "Markteröffnung, schon 2 → voll wie bisher")
+    mo = ns["puls_heim_markt_oeffnung"]
+    u = lambda *a: datetime(*a, tzinfo=timezone.utc)   # noqa: E731
+    ok(mo(u(2026, 11, 3, 14, 30)) == u(2026, 11, 3, 14, 35) and mo(u(2026, 11, 3, 14, 28)) == u(2026, 11, 3, 14, 35), "Winter: 18:28/18:30 Dubai im Fenster, Ende 18:35")
+    ok(mo(u(2026, 11, 3, 14, 27, 59)) is None and mo(u(2026, 11, 3, 14, 35)) is None and mo(u(2026, 11, 3, 14, 40)) is None, "18:27:59 / 18:35 / 18:40 Dubai → außerhalb")
+    ok(mo(u(2026, 7, 1, 13, 30)) == u(2026, 7, 1, 13, 35) and mo(u(2026, 7, 1, 14, 30)) is None, "Sommer (EDT): 17:30 Dubai im Fenster, 18:30 nicht — wandert mit")
 
     if f:
         print("FEHLER:\n  " + "\n  ".join(f))

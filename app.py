@@ -18419,6 +18419,14 @@ def puls_heim_apex_schwellen(regel):
 PULS_HEIM_CODE_ZWEIT = "zweit_wartet"
 PULS_HEIM_ZWEIT_USD = 2500.0
 PULS_HEIM_ECHO_ROUTEN = ("mt5", "mt5v2", "dup")
+# JE FIRMA NUR EIN BIG TRADE + MARKTERÖFFNUNG (03.11.2026, Auftrag Z5; Finn ~17:40: „Bei jeder Firma nur ein einziger Big Trade" + in
+# 18:28–18:35 Dubai kein WEITERER Big Trade starten, wenn schon einer läuft — „nicht aktiv sein, sondern starten"). Dieselbe Entscheidung wie
+# prophos_big_trade_halten / trade_plans_big_trade (sql/2026-11-03_zwei_orbit_firma_marktoeffnung.sql): Firma über beide Fenster und auch bei
+# big_max_je_id = 2; Markteröffnung in New-York-Zeit (wandert mit der US-Zeitumstellung), nur wenn im Fenster schon einer läuft.
+PULS_HEIM_CODE_FIRMA = "firma_laeuft"
+PULS_HEIM_CODE_MARKT = "markt_oeffnung"
+PULS_HEIM_ZWEIT_CODES = (PULS_HEIM_CODE_ZWEIT, PULS_HEIM_CODE_FIRMA, PULS_HEIM_CODE_MARKT)
+PULS_HEIM_MARKT_NY = ((9, 28), (9, 35))
 
 
 def puls_heim_fenster(route):
@@ -18462,18 +18470,42 @@ def puls_heim_zweit_regel(regel):
     return max(1, mx), (float(z) if z is not None and z >= 0 else PULS_HEIM_ZWEIT_USD)
 
 
-def puls_heim_zweit_urteil(andere, max_je_id, zweit_usd):
+def puls_heim_markt_oeffnung(jetzt=None):
+    """REIN RECHNEND (testbar, 03.11.2026): liegt jetzt (aware datetime, Standard: jetzt) in 09:28–09:35 New York? → Fensterende (UTC) | None.
+    Wie prophos_big_trade_markt_oeffnung."""
+    from zoneinfo import ZoneInfo
+    ny = (jetzt or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+    (vh, vm), (bh, bm) = PULS_HEIM_MARKT_NY
+    if not ((vh, vm) <= (ny.hour, ny.minute) < (bh, bm)):
+        return None
+    return ny.replace(hour=bh, minute=bm, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def puls_heim_zweit_urteil(andere, max_je_id, zweit_usd, firma=None, markt_bis=None):
     """REIN RECHNEND (testbar): darf ein weiterer Big Trade derselben ID im selben Fenster starten? andere = [{name, art, nah, rest_tp_usd,
     rest_liq_usd, gesendet}] der schon laufenden (nah wie puls_heim_nah mit Schwellen (zweit_usd, zweit_usd); gesendet = Order gerade raus,
-    noch nicht offen). → {frei, code?, grund?, rest_tp_usd?, rest_liq_usd?}."""
-    andere = list(andere or ())
+    noch nicht offen). firma = [{name, firma}] laufende Big Trades derselben ID bei derselben Firma (beide Fenster); markt_bis = Ende der
+    Markteröffnung (puls_heim_markt_oeffnung) oder None. Reihenfolge wie prophos_big_trade_halten: nichts im Fenster → nur Firma; sonst voll →
+    Firma → Markteröffnung → Abstand. → {frei, code?, grund?, rest_tp_usd?, rest_liq_usd?, firma?, bis?}."""
+    andere, firma = list(andere or ()), list(firma or ())
+    def firma_sperre():
+        f = firma[0]
+        return {"frei": False, "code": PULS_HEIM_CODE_FIRMA, "firma": f.get("firma"),
+                "grund": f"Big Trade „{f.get('name') or '?'}“ läuft schon bei {f.get('firma') or '?'} — je Firma nur einer gleichzeitig"}
     if not andere:
-        return {"frei": True}
+        return firma_sperre() if firma else {"frei": True}
     if len(andere) >= int(max_je_id):
         a = andere[0]
         return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT,
                 "grund": (f"Big Trade „{a.get('name') or '?'}“{(' (' + a['art'] + ')') if a.get('art') else ''} läuft schon in diesem Fenster — höchstens {int(max_je_id)} gleichzeitig"
                           if int(max_je_id) <= 1 else f"schon {len(andere)} Big Trades in diesem Fenster — höchstens {int(max_je_id)}")}
+    if firma:
+        return firma_sperre()
+    if markt_bis is not None:
+        from zoneinfo import ZoneInfo
+        return {"frei": False, "code": PULS_HEIM_CODE_MARKT, "bis": markt_bis.isoformat(),
+                "grund": f"Markteröffnung 09:28–09:35 New York (bis {markt_bis.astimezone(ZoneInfo('Asia/Dubai')).strftime('%H:%M')} Dubai): "
+                         f"kein weiterer Big Trade, solange „{andere[0].get('name') or '?'}“ läuft"}
     for a in andere:
         if a.get("gesendet"):
             return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT, "grund": f"Big Trade {a.get('name')} wurde gerade gesendet — erst wenn er offen ist"}
@@ -18534,13 +18566,20 @@ def puls_heim_zweit_pruefen(plan):
                 return bool(iso) and (jetzt - datetime.fromisoformat(str(iso).replace("Z", "+00:00"))).total_seconds() < minuten * 60
             except ValueError:
                 return False
-        andere = [r for r in puls_heim_im_fenster(rows, f) if str(r.get("id")) != str(p.get("id")) and puls_heim_ist_big(r)
-                  and (r.get("status") == "open" or frisch(r.get("orbit_gesendet_at"), 10)
-                       or (frisch(r.get("start_um_gestartet_at"), 2) and not r.get("started_at")))]
-        if not andere:
+        lauf = [r for r in rows if str(r.get("id")) != str(p.get("id")) and puls_heim_ist_big(r)
+                and (r.get("status") == "open" or frisch(r.get("orbit_gesendet_at"), 10)
+                     or (frisch(r.get("start_um_gestartet_at"), 2) and not r.get("started_at")))]
+        andere = puls_heim_im_fenster(lauf, f)
+        # JE FIRMA NUR EINER (03.11.2026): über beide Fenster, Firma wie prophos_firma_key (_firm_norm); die eigene Firma aus der DB-Zeile
+        selbst = next((r for r in rows if str(r.get("id")) == str(p.get("id"))), None) or p
+        fk = _firm_norm(selbst.get("master_firm"))
+        firma = [{"name": r.get("master_name") or "?", "firma": fk} for r in lauf if _firm_norm(r.get("master_firm")) == fk]
+        if not andere and not firma:
             return {"frei": True, "max_je_id": mx, "zweit_usd": zu}
+        bis = puls_heim_markt_oeffnung(jetzt) if andere else None
         offen = [r for r in andere if r.get("status") == "open"]
-        naehe = {str(x[0].get("id")): x for x in _puls_heim_naehe(offen, lambda _a, _p: (zu, zu))} if (offen and len(andere) < mx) else {}
+        naehe = {str(x[0].get("id")): x for x in _puls_heim_naehe(offen, lambda _a, _p: (zu, zu))} \
+            if (offen and len(andere) < mx and not firma and bis is None) else {}
         liste = []
         for r in andere:
             x = naehe.get(str(r.get("id")))
@@ -18550,7 +18589,7 @@ def puls_heim_zweit_pruefen(plan):
             else:
                 liste.append({"name": r.get("master_name") or r.get("master_firm") or "?", "art": str(r.get("richtung") or "").upper(),
                               "gesendet": r.get("status") != "open", "nah": None})
-        u = puls_heim_zweit_urteil(liste, mx, zu)
+        u = puls_heim_zweit_urteil(liste, mx, zu, firma, bis)
         if not u.get("frei"):
             erst = next((a.get("info") for a in liste if a.get("info")), None)
             if erst:
@@ -18809,9 +18848,11 @@ def richtung_frei():
         if not heim.get("frei"):
             # zweit_wartet geht als big_trade_nah raus (Panel + PC-Tab kennen nur die Heim-Codes: Plan bleibt Geplant, kein Start-Fehler-Rot);
             # die Unterscheidung holt der Sofort-Start-Wächter des Tabs über GET /admin/zweit-frei (S7), zweit: true für neuere Panels
-            code = PULS_HEIM_CODE_NAH if heim.get("code") == PULS_HEIM_CODE_ZWEIT else heim.get("code")
+            # 03.11.2026 (Z5): firma_laeuft / markt_oeffnung genauso; der echte Code steht in zweit_code (für die Texte im Tab), bis = Fensterende
+            zw = heim.get("code") in PULS_HEIM_ZWEIT_CODES
+            code = PULS_HEIM_CODE_NAH if zw else heim.get("code")
             antwort.update(frei=False, code=code, grund=heim.get("grund"), big_trade=heim.get("big_trade"),
-                           zweit=heim.get("code") == PULS_HEIM_CODE_ZWEIT)
+                           zweit=zw, zweit_code=heim.get("code") if zw else None, bis=heim.get("bis"))
             print(f"[puls-heim] ⛔ PC {wer[1]} Plan {pid[:8]}: {heim.get('grund')}", flush=True)
     out = jsonify(antwort)
     out.headers["Cache-Control"] = "no-store"
