@@ -19497,11 +19497,22 @@
             const tw = r.waiting_since ? Math.max(0, -tageBis(r.waiting_since)) : null
             chip.textContent = 'Waiting for Payout' + (tw != null ? (tw === 0 ? ' · seit heute' : ` · seit ${tw} Tag${tw === 1 ? '' : 'en'}`) : '')
             st.appendChild(chip)
+            if(admAnfrageVon(r)) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ (P3) — nur die Anzeige, nie ein zusätzlicher Knopf
           }else if(c.tag && !(istWd(r) && r.wd_target > 0)){
-            const chip = document.createElement('span')
+            // CFD DIREKT ANFRAGEN (P3, Finn 04.11.2026 ~02:20 Dubai: „Dass ich bei den CFDs auf ‚Anfragbar‘ gehen kann und direkt anfangen kann“): ist der Termin
+            // fällig (heute/überfällig) und noch keine Anfrage offen, ist der Chip ein Knopf und öffnet dieselbe Anfrage wie „anfragbar“ bei den Futures
+            // (admAnfrageOeffnen — Termin danach = Anfrage-Datum + 14, finNextPayoutVorschlag). „morgen“/„in N Tagen“ bleiben reiner Hinweis.
+            const offen = !!admAnfrageVon(r), faellig = c.tage <= 0 && !offen
+            const chip = document.createElement(faellig ? 'button' : 'span')
             chip.className = 'chip ' + (c.tage < 0 ? 'chip-warn' : c.tage === 0 ? 'chip-good' : 'chip-neutral')
             chip.textContent = c.tage === 0 ? 'heute anfragbar' : c.tage === 1 ? 'morgen' : c.tage > 1 ? `in ${c.tage} Tagen` : c.tage === -1 ? 'seit gestern anfragbar' : `seit ${-c.tage} Tagen anfragbar`
+            if(faellig){
+              chip.type = 'button'; chip.style.cssText = 'border:0;cursor:pointer'
+              chip.title = `Payout für ${admShortName(r.person || '—')} anfragen`
+              chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
+            }
             st.appendChild(chip)
+            if(offen) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ — nur die Anzeige, nie ein zweiter Knopf
           }else{
             const s = document.createElement('span')
             s.style.cssText = `font-weight:600;color:${r.wd_ready ? 'var(--good)' : 'var(--violet)'}`
@@ -54944,7 +54955,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2024'
+  const OS_TAB_BUILD = '2026-09-22.2025'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
