@@ -27741,6 +27741,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             ausgelassen.append(dict(_zeile_je_konto.get(aid) or {"konto_id": aid}, grund=f"kein Echo-Hedge stellbar — {g} (CFD-Challenges nur mit Hedge)"))
             if not trocken:
                 ap_echo_ohne_melden(_zeile_je_konto.get(aid) or {"konto_id": aid}, g, tag)
+    if _e3["echo"]:      # PostgREST-Batch: alle Zeilen brauchen dieselben Schlüssel (PGRST102, Prüfung E3) — Hedge-Felder sonst null
+        for z in zeilen:
+            for f_ in ("slave_account_id", "slave_name", "slave_firm", "multiplier", "slave_risk"):
+                z.setdefault(f_, None)
     if _e3["echo"] or _e3["weg"]:
         print(f"[auto-plan] {tag} Echo mit Hedge: {_e3['echo']} geplant, {len(_e3['weg'])} nicht geplant (kein Hedge stellbar)", flush=True)
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
@@ -29084,7 +29088,7 @@ def _eh_tick_lauf(jetzt):
     von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
     # hand_werte_at filtert hier bewusst NICHT (30.10.2026, Chris 4e9a26ac — s. Kopf des Abschnitts)
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_risk,richtung,"
-                                            "start_um,notes,mt5_baseline,updated_at",
+                                            "start_um,notes,mt5_baseline,updated_at,route",   # route: Guard je Weg (E3, Prüfung: sonst 0 Zeilen bei Echo)
                                   "status": "eq.planned", "route": "in.(mt5v2,mt5)", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
                                   "auto_bestaetigt_at": "not.is.null",          # unbestätigte Vorschläge starten nie (SU_CLAIM_GUARD)
                                   "or": eh_fenster_oder(von, bis),

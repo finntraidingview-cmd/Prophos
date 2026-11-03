@@ -6,15 +6,14 @@
 -- TEIL 1 — Claim-Riegel trade_plans_a1_echo_hedge = E2-Fassung (sql/2026-11-03_echo_riegel_mini_frei.sql) PLUS: Echo mit Slave, aber echo_hedge 'ohne'
 --   (eh_tick konnte vor dem Start Lots/Marge/Lesung nicht stellen), wird gehalten wie Echo V2. Heute schreibt eh_tick 'ohne' nur an Echo V2 → vor dem
 --   Code-Push ohne Wirkung, also gefahrlos zuerst einspielbar.
--- TEIL 2 — offene Echo-V2-Pläne auf CFD-Challenges (nicht Mini, nie gestartet, nie an Orbit, Claim leer oder „verbrauch") → Echo mit Hedge aus der
---   Hedge-Vorschau (ehv_tick = dieselbe B2-Rechnung wie eh_tick): multiplier = hedge_vorschau.multiplier, slave_risk = hedge_vorschau.blow_eur, Slave = eigenes
---   Fusion-Konto aus user_settings.echo_hedge_account; echo_hedge {status geplant, quelle sql_e3} → eh_tick rechnet vor dem Start nach. Start-Fehler,
---   Start-Sperre und Claim („verbrauch") werden gelöscht. Pläne ohne Vorschau-Lots oder ohne eigenes Fusion-Konto bleiben unverändert (Riegel hält sie).
+-- TEIL 2 — offene Echo-V2-Pläne auf CFD-Challenges, die noch starten sollen (nicht Mini, nie geclaimt, nie gestartet/an Orbit, Startzeit in der Zukunft
+--   oder leer) → Echo mit Hedge aus der Hedge-Vorschau (ehv_tick = dieselbe B2-Rechnung wie eh_tick): multiplier = hedge_vorschau.multiplier, slave_risk =
+--   hedge_vorschau.blow_eur, Slave = eigenes Fusion-Konto aus user_settings.echo_hedge_account; echo_hedge {status geplant, quelle sql_e3} → eh_tick rechnet
+--   vor dem Start frisch nach. start_sperre fällt weg, Start-Fehler bleiben stehen. Ohne Vorschau-Lots oder eigenes Fusion-Konto: unverändert (Riegel hält).
 --   Der DB-Trigger trade_plans_kontoart_weg lässt das nur bei Schalter echo_hedge an zu (live: an).
---   Vorschau 03.11.2026 ~23:30 Dubai: 10 Pläne, alle planned_for 03.11. mit Startzeit vorbei — 9 HT (Finn+Pascal Tradeify …3892 unbestätigt, …4639;
---   Marco The5%ers …9497, FTMO …1330; Marc The5%ers …8290, FundedNext …9872; Mike FundingPips …5542; Chris FTMO …3667; Moritz Tradeify …7985) und
---   1 Emin (The5%ers 200k …7644 „deaktiviert", unbestätigt). Da ihr Tag vorbei ist, löscht der Nachtlauf-Tagesreset sie danach (kein Claim mehr = „weg");
---   wirksam ist Teil 2 für alles, was ab jetzt noch als Echo V2 offen ist.
+--   Trockenlauf 03.11.2026 ~23:55 Dubai: 0 Treffer. Die 10 heute hängenden Echo-V2-Pläne (9 HT, 1 Emin, Liste im Bericht S7_E3) sind verbraucht bzw. ihre
+--   Startzeit ist vorbei — sie bleiben, wie sie sind; der Nachtlauf-Tagesreset räumt sie (verbraucht/zu spät → gelöscht, nie geclaimt → gelöscht).
+--   Teil 2 ist das Netz für Echo-V2-Pläne, die nach dem Code-Push noch mit Startzeit in der Zukunft offen sind (z. B. vor dem Push angelegte Nachplanungen).
 -- Wiederholbar (Teil 2 trifft danach nichts mehr). Rückbau Teil 1: sql/2026-11-03_echo_riegel_mini_frei.sql erneut einspielen.
 -- NICHT vom Slave eingespielt.
 
@@ -109,8 +108,7 @@ update public.trade_plans p
        slave_account_id = h.id, slave_name = h.name, slave_firm = h.firm,
        multiplier = (p.mt5_baseline->'hedge_vorschau'->>'multiplier')::numeric,
        slave_risk = (p.mt5_baseline->'hedge_vorschau'->>'blow_eur')::numeric,
-       start_um_gestartet_at = null, start_claim_art = null,
-       mt5_baseline = (coalesce(p.mt5_baseline, '{}'::jsonb) - 'start_fehler' - 'start_sperre')
+       mt5_baseline = (coalesce(p.mt5_baseline, '{}'::jsonb) - 'start_sperre')
          || jsonb_build_object('echo_hedge', jsonb_build_object(
               'status', 'geplant', 'quelle', 'sql_e3', 'at', now(),
               'lots', (p.mt5_baseline->'hedge_vorschau'->>'lots')::numeric,
@@ -123,7 +121,8 @@ update public.trade_plans p
    and s.user_id = p.user_id and s.key = 'echo_hedge_account' and h.id::text = s.value->>'accountId' and h.user_id = p.user_id
    and p.status = 'planned' and p.route = 'mt5v2' and coalesce(p.auto_plan, false)
    and p.started_at is null and p.orbit_gesendet_at is null
-   and (p.start_um_gestartet_at is null or p.start_claim_art = 'verbrauch')
+   and p.start_um_gestartet_at is null                              -- nie geclaimt: ein „verbraucht"er Plan (verpasst, Ziel, Archiv) bleibt verbraucht
+   and (p.start_um is null or p.start_um >= now())                   -- nur, was noch starten soll (alte Vorschau vergangener Tage nie)
    and not (coalesce(p.mt5_baseline, '{}'::jsonb) ? 'tage_mini')
    and coalesce((p.mt5_baseline->'hedge_vorschau'->>'lots')::numeric, 0) > 0
    and coalesce((p.mt5_baseline->'hedge_vorschau'->>'multiplier')::numeric, 0) > 0

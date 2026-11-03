@@ -87,6 +87,10 @@ def planer():
     ok(i_e3 < i_fp < src.index('r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,'),
        "ap_planen: vor Fingerabdruck und Anlegen (Probelauf = Anlegen, HT und Gruppen)")
     blk = src[i_e3:i_fp]
+    ok('z.setdefault(f_, None)' in blk and '"slave_account_id", "slave_name", "slave_firm", "multiplier", "slave_risk"' in blk,
+       "Batch-Insert: alle Zeilen mit denselben Schlüsseln (PostgREST PGRST102)")
+    i_t = src.index("def _eh_tick_lauf(")
+    ok('"start_um,notes,mt5_baseline,updated_at,route"' in src[i_t:i_t + 1500], "eh_tick liest route mit (Guard je Weg, sonst 0 Zeilen bei Echo)")
     ok("zeilen = [z for z in zeilen if id(z) not in _weg_ids]" in blk and "geplant = [g for g in geplant" in blk and "ausgelassen.append(" in blk
        and "if not trocken:" in blk and "ap_echo_ohne_melden(" in blk, "nicht stellbar: nicht angelegt, aus geplant raus, ausgelassen mit Grund, ⚪ nur echt")
     ok("Echo V2" not in blk.split("except Exception as e:")[1].split("if _e3")[0], "Rechenfehler: auch dann kein Echo-V2-Ersatz")
@@ -143,8 +147,9 @@ def riegel():
     ok(sorted(re.split(r" when | else ", rest)) == sorted(re.split(r" when | else ", norm(e2))),
        "sonst = E2-Funktion (eine Bedingung mehr, when-Zeile „ohne“ vor „mt5“ und „nicht stellbar“ statt „nicht umgestellt“)")
     t2 = sql.split("$$")[2]
-    ok("p.route = 'mt5v2'" in t2 and "? 'tage_mini'" in t2 and "h.user_id = p.user_id" in t2 and "(p.start_um_gestartet_at is null or p.start_claim_art = 'verbrauch')" in t2,
-       "Teil 2: nur Echo V2, nie Mini, nur eigenes Fusion-Konto, nie echt geclaimt")
+    ok("p.route = 'mt5v2'" in t2 and "? 'tage_mini'" in t2 and "h.user_id = p.user_id" in t2 and "and p.start_um_gestartet_at is null" in t2
+       and "verbrauch'" not in t2.split("where")[1] and "(p.start_um is null or p.start_um >= now())" in t2 and "'start_fehler'" not in t2,
+       "Teil 2: nur Echo V2, nie Mini, nur eigenes Fusion-Konto, nie geclaimt (verbraucht bleibt verbraucht), nur künftige Starts, Start-Fehler bleiben")
 
 
 def main():
