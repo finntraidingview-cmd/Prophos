@@ -2013,6 +2013,49 @@ def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s,
     return True, warum, hinter_seit
 
 
+def tab_neulade_weg(stand, haupt_puls, pro0):
+    """REIN RECHNEND (testbar): 'cdp' | 'fenster'. VERDECKTER HAUPT-TAB ZUERST PER CDP (Betrieb 1 03.11.2026, 16:54 Dubai: 7 PC-Tabs hingen auf .2004–.2013,
+    alle mit tab_bw „Tab im Hintergrund — Panel lädt neu“, pc-2zc2we seit 02:36Z). Der alte Weg drückte zuerst Strg+F5 in JEDEM sichtbaren Chrome-Fenster mit
+    aktivem Prophos-Tab und galt dann als erledigt — steht neben dem verdeckten Haupt-Tab im Puls-Chrome ein sichtbarer „nur ansehen“-Tab, lud er alle 15 min
+    den falschen Tab, der Haupt-Tab (der mt5_live schreibt) blieb alt. Jetzt: pro0 = vorderste Prophos-Seite im Puls-Chrome (cdp_prophos_ziele, Haupt-Tab
+    zuerst) oder None. CDP nur, wenn pro0 KEIN „nur ansehen“-Tab (?neben=1) ist UND der Haupt-Tab nachweislich im Puls-Chrome liegt (haupt_puls True) oder —
+    Kennung unbekannt, etwa bei nur einem Tab — er „Hintergrund“ meldet (S2-Stopp 03.11.2026: „verdeckt“ allein reicht nicht, nie den ?neben=1-Tab laden und den
+    Haupt-Tab alt lassen; liegt der Haupt-Tab woanders, haupt_puls False → Fenster). Sonst wie bisher Fenster, CDP als Rückfall."""
+    if not isinstance(pro0, dict) or "neben=1" in str(pro0.get("url") or "") or haupt_puls is False:
+        return "fenster"
+    bw = (stand or {}).get("tab_bw") if isinstance(stand, dict) and isinstance(stand.get("tab_bw"), dict) else {}
+    verdeckt = "Hintergrund" in str((bw or {}).get("grund") or "")
+    return "cdp" if haupt_puls is True or verdeckt else "fenster"
+
+
+def cdp_vorn_erlaubt(stand, scharf_ids):
+    """REIN RECHNEND (testbar): darf das CDP-Neuladen den Prophos-Tab per /json/activate nach vorn holen? (alter S9-Stopp zu ed4f8de4, S2-Stopp 03.11.2026:
+    activate verdeckte TradingView/TopstepX 6–19 s.) Nur wenn der PC stumm ist: Tab-Stand lesbar, plaene_offen_tv == 0 (kein offener TV-/TSX-Plan; None =
+    IDs unbekannt → nein), kein Server-Riegel, kein offener scharfer TV-Trade mit Hedge. Sonst nur Page.reload im Hintergrund. Den TV_ORDER_LOCK und
+    _browser_und_mt5_frei prüft _prophos_tab_neuladen_cdp selbst."""
+    if not isinstance(stand, dict) or stand.get("ok") is not True or scharf_ids:
+        return False
+    if str(stand.get("riegel") or "").strip() or str(stand.get("riegel_tv") or "").strip():
+        return False
+    n = stand.get("plaene_offen_tv")
+    return isinstance(n, int) and not isinstance(n, bool) and n == 0
+
+
+def cdp_rueckweg_seiten(liste, pro_id, max_n=8):
+    """REIN RECHNEND (testbar): CDP-Seitenliste (/json/list, nach letzter Sichtbarkeit sortiert, jüngste zuerst) → die Seiten VOR dem Prophos-Tab, jüngste
+    zuerst, höchstens max_n. Für den Rückweg nach einem activate (S2-Stopp 03.11.2026: nicht immer TradingView nach vorn, sondern das, was vorher vorn war —
+    auch TopstepX). Der Rückweg aktiviert sie in umgekehrter Reihenfolge (älteste zuerst): So landet in JEDEM Chrome-Fenster zuletzt die Seite vorn, die dort
+    zuletzt sichtbar war, auch wenn TradingView und TopstepX in getrennten Fenstern liegen (Gegenprüfung 03.11.2026: die Liste kennt keine Fenster).
+    Prophos nicht in der Liste → nur die vorderste Seite."""
+    seiten = [t for t in liste or () if isinstance(t, dict) and t.get("type") == "page" and t.get("id")]
+    vor = []
+    for t in seiten:
+        if t.get("id") == pro_id:
+            return vor[:max_n]
+        vor.append(t)
+    return seiten[:1] if seiten and seiten[0].get("id") != pro_id else []
+
+
 def _win_leerlauf_s():
     """Sekunden seit der letzten Maus-/Tastatureingabe am PC (GetLastInputInfo) oder None."""
     try:
@@ -3127,8 +3170,18 @@ def _tab_neulade_waechter():
                                                                                TAB_NL["letzter_versuch"], _win_leerlauf_s(), frei, still)
                 if laden:
                     TAB_NL["letzter_versuch"] = jetzt
-                    ok, msg = _prophos_tab_neu_laden()
-                    if not ok and "kein Chrome-Fenster mit aktivem Prophos-Tab" in str(msg):
+                    try:
+                        pro0 = cdp_prophos_ziele(puls_liste or [], _TAB_OEFFNEN.get("url") or "")[0] if puls_da else None
+                    except Exception:
+                        pro0 = None
+                    weg = tab_neulade_weg(stand, (_TABS.get(_TAB_HAUPT.get("tid")) or {}).get("puls"), pro0)
+                    if weg == "cdp":   # 03.11.2026: verdeckter Haupt-Tab im Puls-Chrome → genau den, nicht ein sichtbares Neben-Fenster
+                        time.sleep(random.random() * 10)            # gestreut
+                        ok, msg = _prophos_tab_neuladen_cdp(stand)
+                        msg = f"per CDP im Puls-Chrome (Haupt-Tab {'im Puls-Chrome' if (_TABS.get(_TAB_HAUPT.get('tid')) or {}).get('puls') is True else 'verdeckt'}): {msg}"
+                    else:
+                        ok, msg = _prophos_tab_neu_laden()
+                    if weg != "cdp" and not ok and "kein Chrome-Fenster mit aktivem Prophos-Tab" in str(msg):
                         # kein eigenes Prophos-Fenster (Tab liegt im Puls-Chrome hinter TradingView, 30.10.2026) → per CDP neu laden;
                         # nicht im Puls-Chrome → bleibt beim bisherigen Hinweis
                         try:
@@ -3137,7 +3190,7 @@ def _tab_neulade_waechter():
                             pro = None
                         if pro:
                             time.sleep(random.random() * 10)        # gestreut
-                            ok, msg = _prophos_tab_neuladen_cdp()
+                            ok, msg = _prophos_tab_neuladen_cdp(stand)
                             msg = f"per CDP im Puls-Chrome: {msg}"
                     grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
                     TAB_NL.update(ergebnis=grund, ergebnis_at=jetzt)
@@ -3304,42 +3357,66 @@ def _prophos_tab_wecken():
         TV_ORDER_LOCK.release()
 
 
-def _prophos_tab_neuladen_cdp():
+def _prophos_tab_neuladen_cdp(stand=None):
     """Stufe 2 → (ok, Klartext): Prophos-Seite im Puls-Chrome per CDP Page.reload (ignoreCache) — über order_bot._CdpVerbindung in einem
-    frischen Prozess (nur 127.0.0.1:9333), danach gestreut auf die erste Abfrage warten und TradingView zurück nach vorn."""
+    frischen Prozess (nur 127.0.0.1:9333), danach gestreut auf die erste Abfrage warten. stand = Tab-Stand von Railway: nur wenn der PC stumm ist
+    (cdp_vorn_erlaubt) holt er den Tab vorher per activate nach vorn und danach die Seite zurück, die vorher vorn war; sonst lädt er im Hintergrund
+    (S2-Stopp 03.11.2026: TradingView/TopstepX blieb bei offenem Plan 6–19 s verdeckt). Nie einen „nur ansehen“-Tab (?neben=1)."""
     if not TV_ORDER_LOCK.acquire(blocking=False):
         return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    gehalten = True
     try:
         if not _browser_und_mt5_frei(tv_eigen=True):
             return False, "MT5-Order/Polar läuft gerade — nächster Versuch später"
         liste = _cdp_get("/json/list")
-        pro, tv = cdp_prophos_ziele(liste if isinstance(liste, list) else [], _TAB_OEFFNEN.get("url") or "")
+        liste = liste if isinstance(liste, list) else []
+        pro, _tv = cdp_prophos_ziele(liste, _TAB_OEFFNEN.get("url") or "")
         if not pro or not pro.get("webSocketDebuggerUrl"):
             return False, "Prophos-Tab im Puls-Chrome (CDP) nicht verbindbar"
+        if "neben=1" in str(pro.get("url") or ""):
+            # S2-Stopp 03.11.2026: im Puls-Chrome liegt nur ein „nur ansehen“-Tab — der Haupt-Tab ist woanders und bliebe alt
+            return False, "im Puls-Chrome nur ein „nur ansehen“-Tab (?neben=1) — Haupt-Tab liegt woanders, nicht per CDP geladen"
+        vorn = cdp_vorn_erlaubt(stand, scharf_konto_fest())
+        vorher = cdp_rueckweg_seiten(liste, pro.get("id")) if vorn else []
         t0 = time.time()
-        _cdp_get(f"/json/activate/{pro['id']}")
-        code = ("import sys, order_bot; c = order_bot._CdpVerbindung(sys.argv[1]); "
-                "c.rufe('Page.reload', {'ignoreCache': True}, timeout=8); c.zu(); print('ok')")
-        r = subprocess.run([sys.executable, "-c", code, pro["webSocketDebuggerUrl"]], cwd=HERE, capture_output=True, text=True, timeout=30,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if "ok" not in (r.stdout or ""):
-            return False, f"Page.reload ohne Antwort ({(r.stderr or '').strip()[-120:]})"
-        time.sleep(6 + random.random() * 4)
-        if _TAB_OEFFNEN["zuletzt"] < t0:
-            time.sleep(5 + random.random() * 4)
-        zurueck = ""
-        if tv and tv.get("id") != pro.get("id"):
-            try:
-                _cdp_get(f"/json/activate/{tv['id']}")
-                zurueck = ", TradingView wieder vorn"
-            except Exception as e:
-                zurueck = f", TradingView NICHT zurück ({type(e).__name__})"
+        fehler = ""
+        try:
+            if vorn:
+                _cdp_get(f"/json/activate/{pro['id']}")
+            code = ("import sys, order_bot; c = order_bot._CdpVerbindung(sys.argv[1]); "
+                    "c.rufe('Page.reload', {'ignoreCache': True}, timeout=8); c.zu(); print('ok')")
+            r = subprocess.run([sys.executable, "-c", code, pro["webSocketDebuggerUrl"]], cwd=HERE, capture_output=True, text=True, timeout=30,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if "ok" not in (r.stdout or ""):
+                fehler = f"Page.reload ohne Antwort ({(r.stderr or '').strip()[-120:]})"
+            if not vorn:
+                # im Hintergrund geladen: der Browser bleibt, wie er war — Puls nicht während des Wartens auf die erste Abfrage sperren
+                TV_ORDER_LOCK.release()
+                gehalten = False
+            if not fehler:
+                time.sleep(6 + random.random() * 4)
+                if _TAB_OEFFNEN["zuletzt"] < t0:
+                    time.sleep(5 + random.random() * 4)
+        finally:
+            zurueck = "" if vorn else ", im Hintergrund (offener Plan oder Riegel — nicht nach vorn geholt)"
+            if vorher:
+                # Rückweg auch nach einem Fehler: die Seiten, die vorher vorn waren (TradingView, TopstepX …), älteste zuerst — nicht pauschal TradingView
+                name = "TradingView" if "tradingview.com" in str(vorher[0].get("url") or "") else (str(vorher[0].get("title") or "")[:30] or "vorige Seite")
+                try:
+                    for t in reversed(vorher):
+                        _cdp_get(f"/json/activate/{t['id']}")
+                    zurueck = f", {name} wieder vorn"
+                except Exception as e:
+                    zurueck = f", {name} NICHT zurück ({type(e).__name__})"
+        if fehler:
+            return False, fehler + zurueck
         wach = _TAB_OEFFNEN["zuletzt"] >= t0
         return wach, f"Prophos-Tab neu geladen, {'fragt wieder' if wach else 'fragt noch nicht'} ({time.time() - t0:.0f} s){zurueck}"
     except Exception as e:
         return False, f"Neu laden fehlgeschlagen: {type(e).__name__}: {e}"
     finally:
-        TV_ORDER_LOCK.release()
+        if gehalten:
+            TV_ORDER_LOCK.release()
 
 
 def _prophos_tab_neu_oeffnen(still_s=None):
@@ -3426,7 +3503,7 @@ def _tab_heil_schritt(pc, still0):
         TAB_HEIL["letzte"] = jetzt
     TAB_HEIL["ep"] = ep_neu or {"stufe": 0, "at": 0.0, "start": jetzt}
     if aktion:
-        tun = {"wecken": _prophos_tab_wecken, "neuladen": _prophos_tab_neuladen_cdp,
+        tun = {"wecken": _prophos_tab_wecken, "neuladen": lambda: _prophos_tab_neuladen_cdp(stand),
                "neu_oeffnen": lambda: _prophos_tab_neu_oeffnen(still0)}.get(aktion)
         if tun:
             ok, msg = tun()
