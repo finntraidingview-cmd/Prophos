@@ -15710,6 +15710,17 @@ def admin_wd_plaene():
                             k["payout_offen"] = True
                 except Exception as e:
                     print(f"[wd] ⚠️ Payout offen: {type(e).__name__}: {e}", flush=True)
+                # WD-STAND WIE DER FARMER (W3, Finn 03.11.2026 ~19:05 Dubai: Spalte „WD" zeigte den alten Zähler goal_done_offset ohne den heutigen Haken —
+                # 4/5, der Farmer rechnete schon 5/5 „Ziel schon voll"): derselbe automatische Stand wie /admin/overview (wd_auto_staende); fehlt er, bleibt die RPC-Zahl
+                # nur für die sichtbare Admin-Ansicht (ansicht=admin) — der 30-s-Takt der Tabs braucht die Zahl nicht (Kosten, Gegenprüfung W3)
+                if request.args.get("ansicht") == "admin":
+                    try:
+                        for kid, st in (wd_auto_staende([k["id"] for k in konten]) or {}).items():
+                            k = next((x for x in konten if x["id"] == kid), None)
+                            if k is not None:
+                                k["wd_stand"] = st.get("stand")
+                    except Exception as e:
+                        print(f"[wd] ⚠️ WD-Stand: {type(e).__name__}: {e}", flush=True)
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
             # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)
             slaves = {}

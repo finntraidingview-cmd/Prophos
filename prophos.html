@@ -69046,7 +69046,18 @@
   // Tag, dessen Nacht gerade läuft bzw. als Nächstes läuft: bis 10:00 Dubai an einem Handelstag der heutige (die Blöcke laufen bis in den
   // Morgen), danach wdNaechsterTag. Nur für die Anzeige im Admin-Farmer — Eintragen/Würfeln der PC-Tabs bleibt bei wdNaechsterTag.
   // Seit dem Zeitfenster (08.10.2026) reichen die Blöcke bis Spätestens → heutiger Tag bis Spätestens + 2 h (mind. 10:00)
-  function wdLaufTag(r, j){ return (j && wdHandelstag(j.wochentag) && j.minuten < Math.min(24 * 60, Math.max(10 * 60, wdHhmmMin(wdBisHhmm(r), WD_BIS_STD) + 120))) ? j.tag : wdNaechsterTag(r, j) }
+  // HEUTE BIS ZUM NEUEN TAGESLAUF (W3, Finn 03.11.2026 ~19:05 Dubai: „Heute zeigt den heutigen Tag, nicht schon den nächsten" — vorher sprang die Ansicht
+  // seit 08.10. um Spätestens + 2 h, mit 16:30 also um 18:30, auf morgen): an einem Handelstag bleibt der Tag stehen, bis die Automatik den neuen Tag
+  // würfelt (WD_TAGESLAUF_HHMM, 00:10 Dubai) — davor noch der Vortag. Wochenende → nächster Handelstag wie bisher.
+  function wdLaufTag(r, j){
+    if(!j) return wdNaechsterTag(r, j)
+    if(j.minuten < wdHhmmMin(WD_TAGESLAUF_HHMM, '00:10')){
+      const gestern = wdTagPlus(j.tag, -1), [y, m, d] = gestern.split('-').map(Number)
+      if(wdHandelstag(new Date(Date.UTC(y, m - 1, d)).getUTCDay())) return gestern
+    }
+    return wdHandelstag(j.wochentag) ? j.tag : wdNaechsterTag(r, j)
+  }
+  window._wdLaufTag = wdLaufTag   // Test-Haken (W3)
   function wdNaechsterTag(r, j){
     const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || WD_VON_STD), startMin = m ? (+m[1]) * 60 + (+m[2]) : 300
     let tag = j.minuten < startMin ? j.tag : wdTagPlus(j.tag, 1)
@@ -69567,8 +69578,11 @@
       const ok = new Set(rail.konten.map(k => String(k.id)))
       const heute = new Map(rail.konten.filter(k => k && k.heute_gestartet).map(k => [String(k.id), k.heute_gestartet]))   // heute schon getradet (03.11.2026, app.py)
       for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false; if(heute.has(k.id)) k.heute_gestartet = heute.get(k.id) }
+      // WD-STAND WIE DER FARMER (W3, 03.11.2026): die RPC zählt den alten Zähler goal_done_offset — Railway liefert den automatischen Stand (wd_stand)
+      const stand = new Map(rail.konten.filter(k => k && k.wd_stand != null).map(k => [String(k.id), Number(k.wd_stand)]))
+      for(const k of konten) if(stand.has(k.id)) k.winning_days = stand.get(k.id)
     }
-    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: k.tp_vorgabe > 0 ? Number(k.tp_vorgabe) : null, sl_vorgabe: k.sl_vorgabe > 0 ? Number(k.sl_vorgabe) : null, winning_days: null,
+    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: k.tp_vorgabe > 0 ? Number(k.tp_vorgabe) : null, sl_vorgabe: k.sl_vorgabe > 0 ? Number(k.sl_vorgabe) : null, winning_days: k.wd_stand != null ? Number(k.wd_stand) : null,
       // live_balance/starting_balance aus Railway übernehmen, falls geliefert (Backend B8, F10 26.09.2026) — vorher hart null
       live_balance: k.live_balance != null ? Number(k.live_balance) : null, live_at: k.live_at || null, starting_balance: k.starting_balance != null ? Number(k.starting_balance) : null }))
     if(!konten && !rail){ _wd.daten = null; return null }
@@ -70626,11 +70640,22 @@
   const wdDe = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
   // Chips in der Optik der Admin-Übersicht (Finn: „so wie in Übersicht und Acc-Käufe — farblich schön")
   const wdChip = st => { const [t, k] = ({ geplant: ['⏰ geplant', 'neutral'], leer: ['— nichts drin', 'neutral'], laeuft: ['▶ läuft', 'good'], fertig: ['✓ fertig', 'good'], verpasst: ['✗ verpasst', 'bad'], erwartet: ['noch nicht eingetragen', 'warn'] }[st] || [st, 'neutral']); return `<span class="chip chip-${k}">${escapeHtml(t)}</span>` }
+  /* ZIEL ERREICHT SICHTBAR (W3, Finn 03.11.2026 ~19:05 Dubai: „Das Konto bleibt WD, der Haken bleibt an, und es steht weiter sichtbar … mit ‚5/5 · Payout
+   * anfragen', nicht als ‚nichts drin'"): der Farmer nimmt es wie bisher raus (Hinweis „Ziel schon voll" in der Zeile), nur die Anzeige sagt, was zu tun ist.
+   * Stand/Ziel aus der Kontenliste (wd_stand = Zählung des Farmers). */
+  const WD_HINWEIS_ZIEL = 'Ziel schon voll'
+  function wdHinweisText(h, id){
+    if(h !== WD_HINWEIS_ZIEL) return String(h || '')
+    const kd = wdKontoDaten(id), ziel = kd && kd.goal_target > 0 ? kd.goal_target : 5, ist = kd && kd.winning_days != null ? Math.max(ziel, kd.winning_days) : ziel
+    return `🏆 ${ist}/${ziel} · Payout anfragen`
+  }
+  const wdHinweisRuhig = h => h === WD_HINWEIS_ZIEL || wdPayoutHinweis(h)   // kein Fehler: Ziel erreicht bzw. Payout läuft
+  window._wdHinweisText = wdHinweisText   // Test-Haken (W3)
   function wdStand(k){
     const de = wdDe
     if(k.archiviert && !k.plan_id) return `<span style="color:var(--sub)">archiviert — im Konto-Archiv, fährt nicht mit</span>`
     if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Klick auf die Zeile nimmt es rein</span>`
-    if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
+    if(k.hinweis && !k.plan_id) return `<span style="color:${wdHinweisRuhig(k.hinweis) ? 'var(--good-ink, #15803d)' : 'var(--danger)'}">${escapeHtml(wdHinweisText(k.hinweis, k.id))}</span>`
     if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? `<span style="color:var(--sub)">noch kein Plan${wdVerwalter() ? '' : ' — „Würfeln"'}</span>` : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
     if(k.vorcheck === 'slave_nicht_bereit') return `<span style="color:var(--danger)">⚠ Slave-Terminal nicht bereit — Puls wartet</span>`
@@ -71166,7 +71191,9 @@
         const k = (x.konten || []), n = drin(x), mitPlan = k.filter(q => wdAktiv(q) && q.plan_id).length
         const ende = x.start_um ? new Date(x.start_um).getTime() + wdDauerMs(x, r) : 0
         const jetzt = x.start_um && now >= new Date(x.start_um).getTime() && now <= ende
-        const chipHtml = wdChip(erw ? 'erwartet' : x.status)
+        // W3 (03.11.2026): „leer", weil die Konten ihr Ziel erreicht haben bzw. auf den Payout warten → nicht „nichts drin"
+        const chipHtml = (!erw && x.status === 'leer' && k.length && k.every(q => wdHinweisRuhig(q.hinweis)))
+          ? `<span class="chip chip-good">${k.some(q => q.hinweis === WD_HINWEIS_ZIEL) ? '🏆 Ziel erreicht' : '⏳ Payout läuft'}</span>` : wdChip(erw ? 'erwartet' : x.status)
         const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
         const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
         const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
@@ -71257,7 +71284,7 @@
   // „2× archiviert · 1× schon Plan" — warum in einem Block nichts drin ist
   function wdGruende(konten){
     const z = new Map()
-    for(const k of konten){ if(wdAktiv(k)) continue; const g = String(k.hinweis || (k.farm === false ? WD_HINWEIS_FARM : 'abgewählt')).split(' — ')[0].split(' (')[0]; z.set(g, (z.get(g) || 0) + 1) }
+    for(const k of konten){ if(wdAktiv(k)) continue; const g = (k.hinweis === WD_HINWEIS_ZIEL ? wdHinweisText(k.hinweis, k.id) : String(k.hinweis || (k.farm === false ? WD_HINWEIS_FARM : 'abgewählt'))).split(' — ')[0].split(' (')[0]; z.set(g, (z.get(g) || 0) + 1) }
     return [...z.entries()].map(([g, n]) => `${n}× ${g}`).join(' · ')
   }
   function wdFehlend(){
@@ -71695,7 +71722,7 @@
       else if(!String(kd.ext || '').trim()) grund = WD_HINWEIS_EXT
       else if(!x) grund = 'ID heute noch nicht eingetragen'
       else if(!kz) grund = 'heute noch nicht in der Zeile der ID'
-      else grund = kz.hinweis || (kz.naechster_lauf ? WD_HINWEIS_TAGESLAUF : 'nur heute raus (von Hand)')
+      else grund = (kz.hinweis && wdHinweisText(kz.hinweis, kd.id)) || (kz.naechster_lauf ? WD_HINWEIS_TAGESLAUF : 'nur heute raus (von Hand)')
       const kann = !fest && !!String(kd.ext || '').trim() && !wdNurLesen(kd.user_id)   // Verwalter: Konten seiner Gruppe (30.10.2026)
       out.push({ kd, x, kz, grund, po: angefragt.has(String(kd.name || '').trim()), kann, farm: !!kd.wd_farm, firma: wdUebFirma(kd.firm) })
     }
@@ -71943,7 +71970,7 @@
     const j = wdJetzt(WD_TZ_STD)
     // Lauf-Tag statt „nächster Tag" (28.09.2026, Chris 79633d2e um 22:47 UTC gelöscht): nach 02:00 Dubai sprang der Tab auf morgen —
     // GET /admin/wd-plaene?tag=<morgen> räumt serverseitig alle geplanten Farmer-Pläne mit planned_for < tag weg, also die laufende
-    // Nacht. Bis 10:00 Dubai an einem Handelstag bleibt der heutige Tag stehen; von Hand gewählt (_wd.tagHand) wird nie überschrieben.
+    // Nacht. Seit W3 (03.11.2026) bleibt der heutige Tag bis zum Tageslauf 00:10 Dubai stehen (wdLaufTag); von Hand gewählt (_wd.tagHand) wird nie überschrieben.
     if(tagEl && (!tagEl.value || !_wd.tagHand)) tagEl.value = j ? wdLaufTag(_wd.regeln || {}, j) : new Date().toLocaleDateString('en-CA')
     if(c && Array.isArray(c.rows) && c.tag === (tagEl && tagEl.value) && !(_wd.rows || []).length){
       if(!_wd.daten && Array.isArray(c.konten)) _wd.daten = { konten: c.konten, slaves: {}, plaene: null, fx: 0.85, rail: false, belegt: {}, plaene_tag: [] }
@@ -72314,6 +72341,10 @@
     kpStatRender(); kpArchivRender()
   })
   async function wdNeuLaden(){
+    // TAG MITZIEHEN (W3, Gegenprüfung 03.11.2026): „Heute" bleibt bis zum Tageslauf 00:10 Dubai stehen — ein offener Reiter muss danach von selbst auf den
+    // neuen Tag (Eintragen/Würfeln der IDs ohne PC-Tab, wdAutoEintragen); von Hand gewählt (_wd.tagHand) bleibt
+    if(!_wd.tagHand){ const tEl = document.getElementById('wd-tag'), jT = wdJetzt(WD_TZ_STD), soll = jT ? wdLaufTag(_wd.regeln || {}, jT) : null
+      if(tEl && soll && tEl.value !== soll) tEl.value = soll }
     const tag = document.getElementById('wd-tag')?.value; if(!tag) return
     try{
       const [d, rowsRoh] = await Promise.all([wdDatenLaden(tag), wdRowsLaden(tag)])   // parallel (23.09.2026)
