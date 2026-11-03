@@ -66,7 +66,7 @@ exec(fn("eh_hedge"), dict(ns, _wd_num=lambda x: x, EH_STANDARD={"netto_faktor": 
 kl = hg["eh_hedge"](0.001, 0.01, 1.0, 1.0, None, 1.0, 0.01)[1]
 ok(ns["eh_grund_code"](kl) == "klein" and "klein" not in codes, "echter Text von eh_hedge unter 0,01 Lot: klein, hält nicht")
 ok(ns["eh_grund_code"]("kein Kontowert-Satz (Kontowert ÷ Polster) für dieses Konto") == "groesse", "kein Kontowert-Satz bleibt groesse, hält")
-ok(ns["eh_ohne_text"]("balance", "x").startswith("startet nicht") and ns["eh_ohne_text"]("marge", "x").startswith("startet als Echo V2"), "⚪-Text passt zum Riegel")
+ok(ns["eh_ohne_text"]("balance", "x").startswith("startet nicht") and ns["eh_ohne_text"]("marge", "x").startswith("startet nicht"), "⚪-Text passt zum Riegel (seit E1 03.11.2026 hält er jeden Code)")
 ok("start_claim_art, 'start') <> 'start'" in q and "interval '8 hours'" in q, "Verbrauchs-Claims gehen durch, höchstens 8 h")
 ok("ziel >= public.prophos_echo_fenster_ende(erst_at)" in q and q.index("grund := case") < q.index("set start_um = ziel"), "Riegel gibt am Fensterende auf, bevor er schiebt")
 ok("zeiten->'cfd_bis'" in q and "least(coalesce(ende, tag_ende), tag_ende)" in q, "Fensterende: cfd_bis, höchstens deutsche Tagesgrenze")

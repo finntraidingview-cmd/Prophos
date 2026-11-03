@@ -28238,8 +28238,9 @@ def eh_grund_code(grund):
 
 def eh_ohne_text(code, grund):
     """REIN RECHNEND (testbar): ⚪-Text zu einem Plan ohne Hedge — hält der Riegel oder startet er wirklich ohne."""
-    return (f"startet nicht, bis der Hedge rechenbar ist (Start rückt je 15–30 min, höchstens 8 h und bis Fensterende) — {grund}" if code in EH_HALT_CODES
-            else f"startet als Echo V2 ohne Hedge — {grund}")
+    # E1 (Finn 03.11.2026 ~18:10 Dubai: „Das Modell ist immer Echo, nie Echo V2. Immer mit Hedge."): seit sql/2026-11-03_cfd_challenge_nie_ohne_hedge.sql
+    # hält der Riegel JEDEN Code (auch klein, marge, grenze, kein_konto) — „startet als Echo V2 ohne Hedge" gibt es nicht mehr. code bleibt für die Spur.
+    return f"startet nicht, bis der Hedge steht (Start rückt je 15–30 min, höchstens 8 h und bis Fensterende) — {grund}"
 
 
 def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
@@ -28274,9 +28275,18 @@ def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"eh-ohne-{p['id']}")
 
 
+def eh_fenster_oder(von, bis):
+    """REIN RECHNEND (testbar): PostgREST-or für eh_tick/eh_schnell_tick — Start im Fenster von … bis ODER ohne Startzeit.
+    OHNE STARTZEIT = HANDSTART (E1, Finn 03.11.2026 ~18:05 Dubai: „Aber warum war da kein Hedge? Alle CFD-Trades sind doch mit Echo."):
+    Julian FTMO e4768f65 / FundingPips 1b555717 wurden 14:37 bestätigt, lagen noch nicht im Fenster, die Startzeit wurde im Order-Popup
+    geleert und der Plan von Hand gestartet → tpPreflightMt5V2 = Echo V2 ohne Hedge (−2.399 $ / −1.999,60 $, Fusion +0). Ein bestätigter
+    Plan ohne Startzeit wartet nur noch auf „Starten" — er wird sofort umgestellt, damit der Handstart Echo MIT Hedge fährt."""
+    return f"(start_um.is.null,and(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()}))"
+
+
 def eh_plan_zaehlt(konto, regel):
     """REIN RECHNEND (testbar): gehört der Plan zum Echo-Hedge-Weg? HT-CFD-Challenge (EH_TYPEN) einer Firma mit Planer-Route mt5v2.
-    Dieselbe Auswahl wie eh_tick vor der Hedge-Rechnung — Tage-Mini und ID-Filter (HT) prüft der Aufrufer."""
+    Dieselbe Auswahl wie eh_tick vor der Hedge-Rechnung — Tage-Mini und ID-Filter (HT + Planer-Gruppen seit 30.10.2026) prüft der Aufrufer."""
     return bool(konto) and (konto.get("account_type") or "") in EH_TYPEN and bool(regel) and str(regel.get("route") or "mt5v2") == "mt5v2"
 
 
@@ -28370,10 +28380,13 @@ def hedge_vorgemerkt(von, jetzt):
     frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
     oder = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
             f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})")
+    # Echo: auch umgestellte Pläne ohne Startzeit (E1 03.11.2026, eh_fenster_oder) — sie warten auf „Starten" von Hand und öffnen dann den Hedge
+    oder_echo = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,or(start_um.is.null,start_um.gte.{von.isoformat()})),"
+                 f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})")
     out = {}
     for feld, route in (("echo_hedge", "mt5"), ("tradeify_hedge", "tvv2"), ("apex_hedge", "tvv2")):
         for q in _sb_all("trade_plans", {"select": f"mt5_baseline->{feld}", "status": "in.(planned,open)", "route": f"eq.{route}",
-                                         f"mt5_baseline->{feld}->>status": "eq.mit", "or": oder}):
+                                         f"mt5_baseline->{feld}->>status": "eq.mit", "or": oder_echo if feld == "echo_hedge" else oder}):
             h = q.get(feld) if isinstance(q.get(feld), dict) else {}
             out[str(h.get("login") or "")] = out.get(str(h.get("login") or ""), 0.0) + (_wd_num(h.get("lots")) or 0.0)
     return out
@@ -28402,7 +28415,7 @@ def _eh_tick_lauf(jetzt):
                                             "start_um,notes,mt5_baseline,updated_at",
                                   "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
                                   "auto_bestaetigt_at": "not.is.null",          # unbestätigte Vorschläge starten nie (SU_CLAIM_GUARD)
-                                  "and": f"(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()})",
+                                  "or": eh_fenster_oder(von, bis),
                                   "order": "start_um.asc"})
     _eh["gesehen"] = {str(p["id"]): str(p.get("updated_at") or "") for p in roh}   # für eh_schnell_tick: so schon gesehen
     namen, aus = _ap_namen()
@@ -28530,7 +28543,7 @@ def eh_schnell_tick(jetzt=None):
     roh = _sb_all("trade_plans", {"select": "id,user_id,updated_at", "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true",
                                   "start_um_gestartet_at": "is.null", "auto_bestaetigt_at": "not.is.null",
                                   "mt5_baseline->echo_hedge": "is.null",
-                                  "and": f"(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()})"})
+                                  "or": eh_fenster_oder(von, bis)})
     gesehen, aus = _eh.get("gesehen") or {}, _eh.get("aus") or set()
     if not any(gesehen.get(str(p["id"])) != str(p.get("updated_at") or "") for p in roh if str(p.get("user_id")) not in aus):
         return False
@@ -28594,7 +28607,8 @@ def ehv_tick(jetzt=None, force=False):
         return {"geschrieben": 0}
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_contracts,master_risk,master_tp,start_um,mt5_baseline,updated_at",
                                   "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
-                                  "hand_werte_at": "is.null", "start_um": f"gte.{(jetzt - timedelta(hours=12)).isoformat()}", "order": "start_um.asc"})
+                                  "hand_werte_at": "is.null", "or": f"(start_um.is.null,start_um.gte.{(jetzt - timedelta(hours=12)).isoformat()})",   # ohne Startzeit: Handstart (E1 03.11.2026)
+                                  "order": "start_um.asc"})
     _namen, aus = _ap_namen()
     aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]

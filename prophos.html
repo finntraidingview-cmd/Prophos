@@ -52240,6 +52240,22 @@
       + ' · ' + (blow ? `SL ${de(sl)} $ = Blow am Boden` : 'SL nicht am Boden')
     return { final: pass && blow ? 'beide' : pass ? 'pass' : blow ? 'blow' : null, grund }
   }
+  /* CFD-CHALLENGE NIE ALS ECHO V2 (E1, Finn 03.11.2026 ~18:10 Dubai: „Alle, alle, alle CFDs, ob Phase One oder Phase Two, scheißegal welche ID,
+   * der Challenge-Planer CFD: Das Modell ist immer Echo, nie Echo V2. Immer mit Hedge."). Anlass: Julian FTMO …3873 / FundingPips …5329 (Emins
+   * Gruppe) wurden 14:37 bestätigt, die Startzeit im Order-Popup geleert und von Hand gestartet → dieser Weg fuhr Echo V2 ohne Hedge (−2.399 $ /
+   * −1.999,60 $, Fusion +0); Emin Tradeify CFD …7332 und Amir …7533 genauso. eh_tick stellt erst im Startfenster (bzw. ohne Startzeit gleich) auf
+   * Echo mit Fusion-Hedge um, der Claim-Riegel greift nur beim Claim — ein Handstart rutschte an beiden vorbei. Seit E1 startet KEIN Plan auf einem
+   * Challenge-/Phase-1-/Phase-2-Konto über Echo V2, ohne Ausnahme (auch Mini, Hand-Plan, Schalter aus). Kontoart vom Konto, sonst vom Plan
+   * (konto_typ); nicht lesbar → gesperrt (fail-closed). Funded CFD u. a. bleiben frei. Rein rechnend. → Sperrtext | null */
+  const ECHO_V2_GESPERRT_TYPEN = ['challenge', 'phase1', 'phase2']
+  function echoV2Gesperrt(plan, acc){
+    if(!plan || plan.route !== 'mt5v2') return null
+    const typ = String((acc && acc.type) || plan.kontoTyp || '').toLowerCase()
+    if(typ && !ECHO_V2_GESPERRT_TYPEN.includes(typ)) return null
+    return typ ? 'CFD-Challenges laufen immer mit Hedge — Echo V2 (ohne Fusion-Hedge) startet für Challenge/Phase 1/Phase 2 nie'
+               : 'Kontoart des Masters nicht lesbar — Echo V2 ohne Hedge vorsichtshalber nicht gestartet'
+  }
+  window._echoV2Gesperrt = echoV2Gesperrt   // Test-Haken
   async function tpPreflightMt5V2(plan){
     _pfMt5StopTimer()
     if(_pfRemoteHook && !_pfRemoteHook.armed && String(_pfRemoteHook.planId) !== String(plan.id)){
@@ -52316,6 +52332,22 @@
       if(fenster) fail('v2hedge', `Echo-Fenster dieser Instanz ist OFFEN (Panel-Plan „${escapeHtml(String(fenster.name || fenster.status))}") — ein laufender Copier würde die Order hedgen. Erst den Echo-Trade beenden.`)
       else if(_dupConnected && _dupLinkedIds.has(String(plan.masterAccountId))) fail('v2hedge', 'Der Master ist mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum würde die Order kopieren. Für Echo V2 den Master aus Duplikum nehmen.')
       else _pfSet('v2hedge', 'ok', `Copier ${route.inst.alive ? 'läuft, aber ohne offenes Echo-Fenster' : 'aus'} · Master nicht in Duplikum — nichts kopiert diese Order.`)
+    }
+    // ── 2a. CFD-Challenge nie als Echo V2 (E1 03.11.2026, s. echoV2Gesperrt) — Handstart, Remote-Signal und Startzeit laufen alle hier durch.
+    // Bestätigter Auto-Plan, von Hand gestartet: Startzeit = jetzt + 1 min (Claim zurück) — eh_tick stellt ihn binnen Sekunden auf Echo mit
+    // Fusion-Hedge um, der Zeit-Start fährt ihn dann über tpPreflightMt5 MIT Hedge. Vom Zeit-Start aus (vonTick): Start-Fehler, sfTick plant neu.
+    const v2Sperre = echoV2Gesperrt(plan, accounts.find(a => String(a.id) === String(plan.masterAccountId)))
+    if(v2Sperre){
+      let weiter = ''
+      if(!vonTick && plan.autoPlan === true && plan.autoBestaetigtAt && !plan.startUmGestartetAt){
+        try{
+          const { data, error } = await supabase.from('trade_plans').update({ start_um: new Date(Date.now() + 60000).toISOString(), start_um_gestartet_at: null })
+            .eq('id', plan.id).eq('status', 'planned').eq('route', 'mt5v2').is('start_um_gestartet_at', null).select('*')
+          if(!error && data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+            weiter = ' Startzeit auf jetzt + 1 min gesetzt: Railway stellt den Plan auf Echo mit Fusion-Hedge um, dann startet er von selbst.' }
+        }catch(_){}
+      }
+      fail('v2hedge', escapeHtml(v2Sperre + '.' + (weiter || (plan.autoPlan === true ? ' Railway stellt Auto-Pläne vor dem Start auf Echo mit Fusion-Hedge um.' : ' Plan als Echo mit Fusion-Slave anlegen.'))))
     }
 
     // ── 3. Richtungs-Schutz (wie Echo: nie gegen einen laufenden/gespeicherten Trade derselben Firma) ──
@@ -62887,7 +62919,8 @@
       case 'v2link': return /nicht erreichbar/i.test(m) ? `Am PC${pc} start-alles.bat ausführen (Copier-Backend).`
         : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
         : `Am PC${pc}: Echo → „Neue Instanz" für Login${login} mit Terminal-Pfad anlegen (nach dem Phasenwechsel neuer Login).`
-      case 'v2hedge': return /Duplikum/i.test(m) ? 'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
+      case 'v2hedge': return /mit Hedge|Kontoart/i.test(m) ? 'Nichts tun — Railway stellt den Plan auf Echo mit Fusion-Hedge um, danach startet er neu (oder Startzeit setzen).'
+        : /Duplikum/i.test(m) ?'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
       case 'v2dir': return 'Nichts tun — wartet, bis der Gegen-Trade derselben Firma zu ist.'
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
       // 07.10.2026 (Finn, Blue Guardian 16:49/16:50 „Prüfung fehlgeschlagen, nicht gestartet"): statt „nichts tun" sagen, was zu tun ist
@@ -67920,6 +67953,14 @@
       const mitH = tpWegMitHedge(), ohneH = routeIstV2(_tpRoute) && !mitH
       if(ohneH && (kt === 'funded' || kt === 'funded_cfd' || kt === 'winning_days')){
         msg(`Funded-Konto „${master.name}" nur mit Hedge — Weg Echo, Orbit, Nova, Winning Day oder Topstep (mit Hedge) wählen; ${_tpRoute === 'mt5v2' ? 'Echo V2' : _tpRoute === 'tsv2' ? 'Topstep V2' : 'Orbit V2'} ohne Hedge ist für Challenges.`, 'err'); return }
+      // CFD-CHALLENGE NIE ALS ECHO V2 (E1, Finn 03.11.2026 ~18:10 Dubai: „Das Modell ist immer Echo, nie Echo V2. Immer mit Hedge."): neuer Plan oder
+      // Wechsel auf Echo V2 für Challenge/Phase 1/Phase 2 wird nicht gespeichert. Ein bestehender Auto-Plan auf Echo V2 bleibt bearbeitbar (Startzeit,
+      // Werte) — Railway stellt ihn vor dem Start auf Echo mit Fusion-Hedge um, der PC-Tab startet ihn nie als Echo V2 (echoV2Gesperrt).
+      if(_tpRoute === 'mt5v2' && ['challenge', 'phase1', 'phase2'].includes(kt)){   // = ECHO_V2_GESPERRT_TYPEN (echoV2Gesperrt)
+        const _cur = _editingPlanId ? tradePlans.find(x => String(x.id) === String(_editingPlanId)) : null
+        if(!(_cur && _cur.autoPlan === true && _cur.route === 'mt5v2')){
+          msg(`CFD-Challenges laufen immer mit Hedge — „${master.name}" (Challenge/Phase) nie als Echo V2, Weg Echo mit Fusion-Slave wählen.`, 'err'); return }
+      }
       // Fremd-Modus (Admin für eine andere ID): der Schalter „Challenges mit Hedge" ist der EINGELOGGTEN ID — entscheiden muss der DB-Riegel mit dem der Ziel-ID
       if(mitH && routeIstV2(_tpRoute) && (kt === 'challenge' || kt === 'phase1' || kt === 'phase2') && !_tpChHedge && !_tpFuer && !tpRestHedgeErlaubt(master)){
         msg(`Challenge-/Phase-Konto „${master.name}" nur ohne Hedge — Echo V2, Orbit V2 oder Topstep V2 wählen, oder oben „Challenges mit Hedge" einschalten.`, 'err'); return } }
