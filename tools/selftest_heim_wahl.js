@@ -122,7 +122,7 @@ ok(heimNaechster([A, B], juengster, st, big({ a: 54, b: 40 })) === A, '14b: nur 
 // 15) nach der Order von B (Merker zurückgesetzt wie bigTradeHeimNachOrder) → sofort der nähere, keine Haltezeit
 st = { id: '', at: 0 }
 ok(heimNaechster([A, B], juengster, st, big({ a: 30, b: 33 })) === A && st.at === uhr, '15: nach Order sofort Prio-Wahl ohne Haltezeit')
-ok(SRC.includes("_bthBigWahl[f] = { id: '', at: 0, frei: true }"), '15: bigTradeHeimNachOrder setzt den Big-Trade-Merker zurück (frei)')
+ok(/_bthBigWahl\[f\] = \{ id: '', at: 0, frei: true(, vor: [^}\n]+)? \}/.test(SRC), '15: bigTradeHeimNachOrder setzt den Big-Trade-Merker zurück (frei; vor = Heimat vor der Order, Z6)')
 ok(SRC.includes('abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS'), '16: bigTradePlan rechnet Big Trades in Punkten mit BTH_WECHSEL_PKT/BTH_HALTE_MS')
 
 // ── NEULADEN (S2-Stopp zu f0312ad6) ── ss = sessionStorage-Ersatz, imKonto = wo der Puls-Chrome steht
