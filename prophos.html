@@ -4113,41 +4113,41 @@
   #ap-ids-root.ap-guestly .e2-unten1{grid-template-columns:1fr}
   /* E2e kompakt unter dem Zeitstrahl: eine Chip-Zeile, ein offener Bereich */
   #ap-ids-root.ap-guestly .e2-wrap.e2-klein{padding:16px 18px} #ap-ids-root.ap-guestly .e2-wrap.e2-klein.zu{padding:12px 18px}
-  /* E2f Nachtrag 7: WD-Einstellungs-Karte gespiegelt — gleiche Klassen/Abstände wie #adm-pane-wd (Zeilen „Einstellungen als drei Karten“, Design-Runde 08.10.2026), Guestly-Farben */
-  #ap-ids-root [data-e2-einst].e2-wdgr{padding:16px 18px} #ap-ids-root [data-e2-einst].e2-wdgr.zu{padding:12px 18px}
-  #ap-ids-root [data-e2-einst] .wd-panel-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap} #ap-ids-root [data-e2-einst].zu .wd-panel-kopf{margin-bottom:0}
-  #ap-ids-root [data-e2-einst] .panel-title{font-size:15px;font-weight:600;color:var(--g-text)} #ap-ids-root [data-e2-einst] .e2-psub{font-weight:400;color:var(--g-sub);font-size:12px}
-  #ap-ids-root [data-e2-einst] .wd-set-grid{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
-  @media (max-width:1180px){ #ap-ids-root [data-e2-einst] .wd-set-grid{grid-template-columns:1fr} }
-  #ap-ids-root [data-e2-einst] .wd-set-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
-  #ap-ids-root [data-e2-einst] .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
-  #ap-ids-root [data-e2-einst] .wd-set-card h4 .btn,#ap-ids-root [data-e2-einst] .e2-abs .btn{flex:none;height:26px;padding:0 10px;font-size:12px;line-height:24px}
-  #ap-ids-root [data-e2-einst] .wd-set-card h4 .h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
-  #ap-ids-root [data-e2-einst] .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px;align-items:end;margin-bottom:12px}
-  #ap-ids-root [data-e2-einst] .wd-feld{min-width:0} #ap-ids-root [data-e2-einst] .wd-feld label{display:flex;align-items:center;font-size:11.5px;color:var(--g-sub);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #ap-ids-root [data-e2-einst] .wd-feld .e2-feld{display:flex;width:100%} #ap-ids-root [data-e2-einst] .wd-feld .e2-in{flex:1;width:100%;height:32px;text-align:left;font-size:13px} #ap-ids-root [data-e2-einst] .wd-feld .e2-in:disabled{padding-left:0}
-  #ap-ids-root [data-e2-einst] .e2-wf-klein{display:block;font-size:10.5px;color:var(--g-sub);margin-top:3px}
-  #ap-ids-root [data-e2-einst] .wd-spanne{display:flex;align-items:center;gap:6px} #ap-ids-root [data-e2-einst] .wd-spanne .e2-feld{flex:1;min-width:0} #ap-ids-root [data-e2-einst] .wd-spanne > span{font-size:11.5px;color:var(--g-sub)}
-  #ap-ids-root [data-e2-einst] .wd-fuss{margin-top:auto;padding-top:10px;font-size:11.5px;color:var(--g-sub);line-height:1.4}
-  #ap-ids-root [data-e2-einst] .wd-abl-abschnitt{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
-  #ap-ids-root [data-e2-einst] .e2-abs .btn{margin-left:auto;text-transform:none;letter-spacing:0} #ap-ids-root [data-e2-einst] .e2-modus{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;display:inline-flex;align-items:center}
-  #ap-ids-root [data-e2-einst] .e2-sch{border-top:0;min-height:40px}
-  #ap-ids-root [data-e2-einst] .wd-firma{display:grid;grid-template-columns:10px minmax(90px,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;cursor:pointer;border-bottom:1px solid var(--g-rand);transition:background .12s;outline:none}
-  #ap-ids-root [data-e2-einst] .wd-firma:hover,#ap-ids-root [data-e2-einst] .wd-firma:focus-visible{background:var(--g-pille)} #ap-ids-root [data-e2-einst] .wd-firma.offen{border-bottom-color:transparent}
-  #ap-ids-root [data-e2-einst] .wd-firma .punkt{width:10px;height:10px;border-radius:50%} #ap-ids-root [data-e2-einst] .wd-firma .fl{min-width:0}
-  #ap-ids-root [data-e2-einst] .wd-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;color:var(--g-text)} #ap-ids-root [data-e2-einst] .wd-firma .fk{display:block;font-size:11.5px;color:var(--g-sub);line-height:1.35;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #ap-ids-root [data-e2-einst] .wd-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums;max-width:52%;overflow:hidden;text-overflow:ellipsis;justify-self:end}
-  #ap-ids-root [data-e2-einst] .wd-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
-  #ap-ids-root [data-e2-einst] .wd-firma.offen .fn,#ap-ids-root [data-e2-einst] .wd-firma.offen .fz,#ap-ids-root [data-e2-einst] .wd-firma.offen .pfeil{color:var(--g-lila)}
-  #ap-ids-root [data-e2-einst] .e2-fedit{padding:4px 4px 14px 24px;border-bottom:1px solid var(--g-rand)}
-  #ap-ids-root [data-e2-einst] .e2-fedit-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 0 4px} #ap-ids-root [data-e2-einst] .e2-fedit .e2-gr{margin:0}
-  #ap-ids-root [data-e2-einst] .e2-fedit .apg-zeitraum button{padding:6px 12px;font-size:12px}
-  #ap-ids-root [data-e2-einst] .e2-cons{border-top:0;min-height:34px;padding:0 0 4px}
-  #ap-ids-root [data-e2-einst] .e2-fest-z{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--g-sub);margin:-2px 0 6px} #ap-ids-root [data-e2-einst] .e2-fest-z span{display:flex;align-items:center} #ap-ids-root [data-e2-einst] .e2-fest-z b{margin-left:auto;font-weight:500;color:var(--g-text);font-variant-numeric:tabular-nums}
-  #ap-ids-root [data-e2-einst] .e2-konten{display:flex;flex-direction:column} #ap-ids-root [data-e2-einst] .e2-konten > .e2-konto:first-child{border-top:0}
-  #ap-ids-root [data-e2-einst] .e2-wd .wd-abl-abschnitt + .e2-zeile{border-top:0}
-  #ap-ids-root [data-e2-einst] .e2-gkopf{padding:0;width:auto;flex:1}
-  #ap-ids-root [data-e2-einst] .wd-set-card .e2-fuss{justify-content:flex-start;min-height:0;margin-top:auto;padding-top:8px}
+  /* E2f Nachtrag 7: WD-Einstellungs-Karte gespiegelt, gekapselt unter #e2-einst (wie S6 #e3-einst) — gleiche Klassen/Abstände wie #adm-pane-wd (Zeilen „Einstellungen als drei Karten“, Design-Runde 08.10.2026), Guestly-Farben */
+  #ap-ids-root.ap-guestly #e2-einst.e2-wdgr{padding:16px 18px} #ap-ids-root.ap-guestly #e2-einst.e2-wdgr.zu{padding:12px 18px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-panel-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap} #ap-ids-root.ap-guestly #e2-einst.zu .wd-panel-kopf{margin-bottom:0}
+  #ap-ids-root.ap-guestly #e2-einst .panel-title{font-size:15px;font-weight:600;color:var(--g-text)} #ap-ids-root.ap-guestly #e2-einst .e2-psub{font-weight:400;color:var(--g-sub);font-size:12px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
+  @media (max-width:1180px){ #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{grid-template-columns:1fr} }
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-card h4 .btn,#ap-ids-root.ap-guestly #e2-einst .e2-abs .btn{flex:none;height:26px;padding:0 10px;font-size:12px;line-height:24px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-card h4 .h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px;align-items:end;margin-bottom:12px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-feld{min-width:0} #ap-ids-root.ap-guestly #e2-einst .wd-feld label{display:flex;align-items:center;font-size:11.5px;color:var(--g-sub);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ap-ids-root.ap-guestly #e2-einst .wd-feld .e2-feld{display:flex;width:100%} #ap-ids-root.ap-guestly #e2-einst .wd-feld .e2-in{flex:1;width:100%;height:32px;text-align:left;font-size:13px} #ap-ids-root.ap-guestly #e2-einst .wd-feld .e2-in:disabled{padding-left:0}
+  #ap-ids-root.ap-guestly #e2-einst .e2-wf-klein{display:block;font-size:10.5px;color:var(--g-sub);margin-top:3px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-spanne{display:flex;align-items:center;gap:6px} #ap-ids-root.ap-guestly #e2-einst .wd-spanne .e2-feld{flex:1;min-width:0} #ap-ids-root.ap-guestly #e2-einst .wd-spanne > span{font-size:11.5px;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly #e2-einst .wd-fuss{margin-top:auto;padding-top:10px;font-size:11.5px;color:var(--g-sub);line-height:1.4}
+  #ap-ids-root.ap-guestly #e2-einst .wd-abl-abschnitt{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
+  #ap-ids-root.ap-guestly #e2-einst .e2-abs .btn{margin-left:auto;text-transform:none;letter-spacing:0} #ap-ids-root.ap-guestly #e2-einst .e2-modus{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;display:inline-flex;align-items:center}
+  #ap-ids-root.ap-guestly #e2-einst .e2-sch{border-top:0;min-height:40px}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma{display:grid;grid-template-columns:10px minmax(90px,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;cursor:pointer;border-bottom:1px solid var(--g-rand);transition:background .12s;outline:none}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma:hover,#ap-ids-root.ap-guestly #e2-einst .wd-firma:focus-visible{background:var(--g-pille)} #ap-ids-root.ap-guestly #e2-einst .wd-firma.offen{border-bottom-color:transparent}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma .punkt{width:10px;height:10px;border-radius:50%} #ap-ids-root.ap-guestly #e2-einst .wd-firma .fl{min-width:0}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;color:var(--g-text)} #ap-ids-root.ap-guestly #e2-einst .wd-firma .fk{display:block;font-size:11.5px;color:var(--g-sub);line-height:1.35;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums;max-width:52%;overflow:hidden;text-overflow:ellipsis;justify-self:end}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
+  #ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .fn,#ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .fz,#ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .pfeil{color:var(--g-lila)}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fedit{padding:4px 4px 14px 24px;border-bottom:1px solid var(--g-rand)}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fedit-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 0 4px} #ap-ids-root.ap-guestly #e2-einst .e2-fedit .e2-gr{margin:0}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fedit .apg-zeitraum button{padding:6px 12px;font-size:12px}
+  #ap-ids-root.ap-guestly #e2-einst .e2-cons{border-top:0;min-height:34px;padding:0 0 4px}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fest-z{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--g-sub);margin:-2px 0 6px} #ap-ids-root.ap-guestly #e2-einst .e2-fest-z span{display:flex;align-items:center} #ap-ids-root.ap-guestly #e2-einst .e2-fest-z b{margin-left:auto;font-weight:500;color:var(--g-text);font-variant-numeric:tabular-nums}
+  #ap-ids-root.ap-guestly #e2-einst .e2-konten{display:flex;flex-direction:column} #ap-ids-root.ap-guestly #e2-einst .e2-konten > .e2-konto:first-child{border-top:0}
+  #ap-ids-root.ap-guestly #e2-einst .e2-wd .wd-abl-abschnitt + .e2-zeile{border-top:0}
+  #ap-ids-root.ap-guestly #e2-einst .e2-gkopf{padding:0;width:auto;flex:1}
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-card .e2-fuss{justify-content:flex-start;min-height:0;margin-top:auto;padding-top:8px}
   /* E2f: Gruppe „Einstellungen“ wie bei Winning Days — Titel (klappt zu) über Chip-Zeile und Inhalt */
   #ap-ids-root.ap-guestly .e2-gkopf{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:0 0 12px;margin:0;cursor:pointer;text-align:left;font-family:inherit;color:var(--g-text)}
   #ap-ids-root.ap-guestly .e2-klein.zu .e2-gkopf{padding-bottom:0}
@@ -84747,7 +84747,8 @@
       teile.push(`Nachtlauf ${an(_apIds.aktiv)}${x.lzAt ? ' · letzter Lauf ' + escapeHtml(x.lzAt) : ''}`)
     }
     let schalter = ''; if(!fd) try{ schalter = apdBotSchalterHtml(v, apdAdmin()) + apdBotMeldungHtml() }catch(_){}
-    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${teile.join(' · ')}</div></div>
+    // E2f (Master 05.11.2026): bei Funded Futures heißt die Leiste „Nachplanen“ — „Einstellungen“ ist dort die WD-Gruppe darunter (sonst zweimal dasselbe Wort)
+    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">${fd && !fc ? 'Nachplanen' : 'Einstellungen'}</div><div class="apg-sub">${teile.join(' · ')}</div></div>
         ${x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}
         ${schalter ? `<details class="apg-schalter" data-apg-schalter${_apg.schalterAuf ? ' open' : ''}><summary>Schalter</summary>${schalter}</details>` : ''}</div>`
     // ── 5./6. Zeitstrahl + Listen (bestehend, im Kartenstil)
@@ -85832,7 +85833,7 @@
    * nur „Finn + Pascal"/„Pascal" bzw. Admin; alle anderen sehen die Werte ohne Eingabe. Konstanten aus dem Code stehen mit „fest im Code".
    * Der Reiter zeichnet alle 20 s neu (apIdsLiveTick): Eingaben liegen deshalb als Entwurf in _e2.entwurf (Pfad → Text), der Fokus samt Cursor
    * wird nach dem Neuzeichnen wiederhergestellt (e2Verdrahten). Am Planer selbst ändert sich nichts — er liest dieselbe Zeile wie bisher. */
-  const _e2 = { offen: null, letzte: null, zu: (() => { try{ return localStorage.getItem('prophos_e2_zu') === '1' }catch(_){ return false } })(), gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
+  const _e2 = { offen: null, letzte: null, zu: (() => { try{ return sessionStorage.getItem('prophos_e2_zu') === '1' }catch(_){ return false } })(), gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
   const E2_FELD = { ziel_gewinn: ['Ziel-Gewinn', '$', 'über dem Zyklus-Start'], max_trade: ['TP höchstens je Trade', '$', 'Deckel je Trade'], kosten_eur: ['Kontokosten', '€', 'offene Kosten zu Zyklusbeginn'],
     dd: ['Max Drawdown', '$', 'Abstand Start → Liquidation'], daily_usd: ['Daily Loss', '$', 'SL höchstens Daily Loss − Puffer'], hedge_eur: ['Hedge auf den Max DD', '€', 'Fusion-Betrag je voller DD'],
     sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'] }
@@ -85889,14 +85890,14 @@
     const darfR = !!darf && !!R && R.darf !== false && R.quelle !== 'standard'   // R.darf: nur Admin/„Finn + Pascal"/„Pascal" (Server)
     const nurText = R && R.quelle === 'standard' ? 'nur ansehen — Tabelle funded_plan_regeln noch nicht eingespielt (Standard-Regeln)' : 'nur ansehen — ändern als „Finn + Pascal“ / „Pascal“'
     const kopf = (rechts) => `<div class="wd-panel-kopf"><button type="button" class="e2-gkopf" data-e2-zu aria-expanded="${!_e2.zu}"><span class="panel-title">Einstellungen <span class="e2-psub">· Funded Futures · gelten für alle Gruppen</span></span>${rechts || ''}<span class="e2-gpfeil">${_e2.zu ? '▸' : '▾'}</span></button></div>`
-    if(!R) return `<div class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf('<span class="e2-kchip e2-knur">laden …</span>')}</div>`
+    if(!R) return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf('<span class="e2-kchip e2-knur">laden …</span>')}</div>`
     const nurChip = darfR ? '' : `<span class="e2-kchip e2-knur" title="${escapeHtml(nurText)}">nur ansehen</span>`
-    if(_e2.zu) return `<div class="apg-karte e2-wrap e2-wdgr zu" data-e2-einst>${kopf(nurChip)}</div>`
+    if(_e2.zu) return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr zu" data-e2-einst>${kopf(nurChip)}</div>`
     const firmen = R.firmen || [], an = firmen.filter(f => f.an), z = R.zeiten || {}, fen = (Q && Q.zeiten) || {}   // fen: Fenster, mit dem fdp_planen wirklich rechnet
     const fe = R.fenster_eigen && typeof R.fenster_eigen === 'object' ? R.fenster_eigen : null, feAn = !!e2Wert('z.fenster.an', !!fe)   // eigenes Startfenster (E2b-Nachtrag)
-    // sofort eine Firma offen (Nachtrag 6): zuletzt gewählte (localStorage, nur Bequemlichkeit), sonst die erste, die plant, sonst die erste
+    // sofort eine Firma offen (Nachtrag 6): zuletzt gewählte (sessionStorage, nur Bequemlichkeit), sonst die erste, die plant, sonst die erste
     if(typeof _e2.offen !== 'number' || !firmen[_e2.offen]){
-      let m = null; try{ m = localStorage.getItem('prophos_e2_firma') }catch(_){}
+      let m = null; try{ m = sessionStorage.getItem('prophos_e2_firma') }catch(_){}
       const i = m != null ? firmen.findIndex(x => x.name === m) : -1
       _e2.offen = i >= 0 ? i : Math.max(0, firmen.findIndex(x => x.an))
     }
@@ -86004,7 +86005,7 @@
         <div class="e2-konten">${grs.length ? (konten.length ? konten.map(kontoZeile).join('') : '<div class="wd-fuss" style="margin-top:0">keine Konten dieser Größe im Lauf</div>') : '<div class="wd-fuss" style="margin-top:0">—</div>'}</div>
         ${wdGruppe}</div>`
     }
-    return `<div class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${ablauf}${firmenK}${kontenK}</div></div>`
+    return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${ablauf}${firmenK}${kontenK}</div></div>`
   }
   // Zahl aus dem Feld (Komma oder Punkt) → Zahl | null
   const e2Zahl = t => { const x = String(t == null ? '' : t).trim().replace(/\s/g, '').replace(',', '.'); return x !== '' && isFinite(Number(x)) ? Number(x) : null }
@@ -86131,9 +86132,9 @@
     // E2f: Chips wechseln die Firma (kein leerer Zustand), gemerkt je Browser; Planer-Chip schaltet zwischen Ablauf und der letzten Firma
     box.querySelectorAll('[data-e2-firma]').forEach(b => b.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); b.click() } }))   // wd-firma ist ein div (role=button)
     box.querySelectorAll('[data-e2-firma]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const i = Number(b.dataset.e2Firma); _e2.offen = i; _e2.letzte = i
-      try{ const n = (((_fdpQ && _fdpQ.regeln && _fdpQ.regeln.firmen) || [])[i] || {}).name; if(n) localStorage.setItem('prophos_e2_firma', n) }catch(_){}
+      try{ const n = (((_fdpQ && _fdpQ.regeln && _fdpQ.regeln.firmen) || [])[i] || {}).name; if(n) sessionStorage.setItem('prophos_e2_firma', n) }catch(_){}
       apIdsRender() }))
-    box.querySelector('[data-e2-zu]')?.addEventListener('click', e => { e.preventDefault(); _e2.zu = !_e2.zu; try{ localStorage.setItem('prophos_e2_zu', _e2.zu ? '1' : '') }catch(_){} apIdsRender() })
+    box.querySelector('[data-e2-zu]')?.addEventListener('click', e => { e.preventDefault(); _e2.zu = !_e2.zu; try{ sessionStorage.setItem('prophos_e2_zu', _e2.zu ? '1' : '') }catch(_){} apIdsRender() })
     box.querySelector('[data-e2-mehr]')?.addEventListener('click', e => { e.preventDefault(); _e2.mehr = !_e2.mehr; apIdsRender() })   // Sicherheit auf/zu
     box.querySelector('[data-e2-wd-link]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('[data-planerchip="wd"]')?.click() })   // E2b: Quelle der WD-Regeln
     box.querySelectorAll('[data-e2-gr]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g] = b.dataset.e2Gr.split(':'); _e2.gr[fi] = g; apIdsRender() }))
