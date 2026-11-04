@@ -3994,7 +3994,7 @@
   #e3-einst .wd-firma .punkt{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
   #e3-einst .wd-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #e3-einst .wd-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;font-weight:500;white-space:nowrap;color:var(--e3-text);font-variant-numeric:tabular-nums}
-  #e3-einst .e3-fedit{display:block}
+  #e3-einst .e3-fedit{display:block} #e3-einst .e3-gilt{margin:8px 2px 0;font-size:11.5px;color:var(--e3-sub)}
   #e3-einst .e3-fkopf{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:2px 0 10px}
   #e3-einst .e3-fedit .e3-pille{margin-bottom:10px}
   #e3-einst .e3-fedit .e3-phase{background:var(--e3-karte);padding:8px 12px 4px}
@@ -86657,7 +86657,11 @@
       if(fxg && k in fxg) return { v: fxg[k], pfad: ['flex', 'je_groesse', tab.slice(5), k] }
       if(fx && (k === 'dd_pct' || k === 'ab_dd_pct') && k in fx) return { v: fx[k], pfad: ['flex', k] }   // ap_regel_flex nimmt aus flex nur je_groesse + dd_pct (ab_dd_pct = Erkennung)
       if(jg && k in jg) return { v: jg[k], pfad: ['je_groesse', tab, k] }
-      return { v: f[k], pfad: (jg || fx) ? null : [k], erbt: !!(jg || fx) && k in f }
+      // E3f (Nachtrag 9): eine Größe ohne eigenen Wert zeigt den Firmenwert und ist änderbar — teilen ALLE Größen die Firmenwerte (kein
+      // je_groesse), schreibt sie in die Firmenwerte; sonst legt das Backend je_groesse[Größe][k] als Kopie an (ap_einst_block_anlegen)
+      if(jg && !fx){ const teilen = !Object.keys(f.je_groesse || {}).length
+        return { v: f[k], pfad: f[k] === undefined ? null : (teilen ? [k] : ['je_groesse', tab, k]), erbt: false, teilen } }
+      return { v: f[k], pfad: fx ? null : [k], erbt: !!fx && k in f }
     }
   }
   const e3Kopf = t => t === 'std' ? 'Standard' : /^flex:/.test(t) ? 'Flex ' + e3Gr(t.slice(5)) : e3Gr(t)
@@ -86679,7 +86683,7 @@
   function e3Tabs(f){
     const gr = [...new Set([...(f.groessen || []), ...Object.keys(f.je_groesse || {})].map(String))].sort((a, b) => Number(a) - Number(b))
     const fx = f.flex && f.flex.je_groesse ? Object.keys(f.flex.je_groesse).sort((a, b) => Number(a) - Number(b)).map(g => 'flex:' + g) : []
-    return ['std', ...gr, ...fx]
+    return gr.length || fx.length ? [...gr, ...fx] : ['std']   // E3f (Nachtrag 9): kein „Standard"-Reiter, nur die echten Größen
   }
   // FIRMA (E3c): Kopf mit Modell-Chip + Im Planer · Größen-Reiter · Ziel (Ziel % je Phase, Consistency %) · Trade (TP, SL, Lots/Kontrakte,
   // Puffer je Phase) · Slider-Blöcke nur wo es sie gibt (Mindesttage, Topstep-Kette) · Konten. Pfade wie bisher (e3Quelle): je Größe gilt
@@ -86689,7 +86693,7 @@
   const e3Block = (titel, inhalt) => inhalt ? `<div class="e3-block"><div class="e3-block-t">${e3E(titel)}</div>${inhalt}</div>` : ''
   function e3DetailHtml(f, D, art, admin){
     const n = (f.namen || [])[0] || '?', tabs = e3Tabs(f), w = _e3.wahl[art] || {}
-    const tab = tabs.includes(w.tab) ? w.tab : 'std', m = e3Modell(f, D), msg = _e3.msg[n], cfd = art === 'cfd'
+    const tab = tabs.includes(w.tab) ? w.tab : tabs[0], m = e3Modell(f, D), msg = _e3.msg[n], cfd = art === 'cfd'
     const eigen = t => /^\d+$/.test(t) ? !!(f.je_groesse || {})[t] : /^flex:/.test(t)
     const pille = tabs.length > 1 ? `<div class="e3-pille" role="tablist">${tabs.map(t => `<button type="button" role="tab" data-e3-tab="${e3E(t)}" class="${t === tab ? 'an' : ''}" aria-selected="${t === tab}">${e3Kopf(t)}${t !== 'std' && eigen(t) ? '<i>•</i>' : ''}</button>`).join('')}</div>` : ''
     const q = e3Quelle(f, tab), grTab = /^\d+$/.test(tab) ? tab : /^flex:/.test(tab) ? tab.slice(5) : null
@@ -86713,9 +86717,9 @@
       return `<div class="e3-phase">${pks.length > 1 ? `<h5>${e3E(E3_PHASE[pk] || pk)}</h5>` : ''}${zeilen}</div>` }).join('')
     const slider = (titel, inhalt) => `<div class="e3-slider"><div class="e3-slider-kopf"><b>${e3E(titel)}</b><span class="e3-fest-an">an</span></div><div class="e3-s-werte">${inhalt}</div></div>`
     let bloecke = ''
-    if(tab === 'std' && f.gewinntage && typeof f.gewinntage === 'object')
+    if(f.gewinntage && typeof f.gewinntage === 'object')
       bloecke += slider('Mindesttage', Object.entries(f.gewinntage).map(([k, v]) => e3R(k === 'tp' ? 'TP' : k, e3Wert(v, ['gewinntage', k], k, admin, '$'))).join(''))
-    if(tab === 'std' && f.kette && typeof f.kette === 'object')
+    if(f.kette && typeof f.kette === 'object')
       bloecke += slider('Topstep-Kette', E3_KETTE.filter(([k]) => E3_KETTE_KURZ.includes(k) && k in f.kette).map(([k, label, einh]) => e3R(label, e3Wert(f.kette[k], ['kette', k], k, admin, einh))).join(''))
     // E3e (Nachtrag 7): Inhalt der aufgeklappten Firmenzeile in der WD-Karte „Firmen" — Speichern sitzt oben in der Karte (data-e3-speichern)
     return `<div class="e3-fedit" data-e3-firma="${e3E(n)}">
@@ -86723,6 +86727,7 @@
         ${msg ? `<span class="e3-msg ${msg.ok ? 'ok' : 'fehler'}">${e3E(msg.text)}</span>` : ''}</div>
       ${pille}${ohne ? e3GrStatus(f, tab) : ''}
       ${ohne ? '' : e3Block('Ziel', `<div class="e3-s-werte e3-eins">${ziel}</div>`) + e3Block('Trade', `<div class="e3-phasen e3-eins">${trade}</div>`)}
+      ${!ohne && ph.teilen && tabs.filter(t => /^\d+$/.test(t)).length > 1 ? `<div class="e3-gilt">gilt auch für ${tabs.filter(t => /^\d+$/.test(t) && t !== tab).map(e3Gr).join(' · ')}</div>` : ''}
       ${bloecke ? `<div class="e3-sl">${bloecke}</div>` : ''}</div>`
   }
   const e3An = (feld, an, admin) => admin ? `<input type="checkbox" class="e3-schalt" data-e3-schalter="${feld}"${an ? ' checked' : ''} aria-label="${e3E(feld)}">` : (an ? 'an' : 'aus')

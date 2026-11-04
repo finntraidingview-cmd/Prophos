@@ -36160,6 +36160,10 @@ def ap_einst_anwenden(firmen, firma, aenderungen):
                 return None, "planen = true | false"
             ziel["planen"] = a["wert"]
             continue
+        if pfad[0] == "je_groesse" and len(pfad) >= 3:
+            grund = ap_einst_block_anlegen(ziel, pfad[1], pfad[2])
+            if grund:
+                return None, f"{'/'.join(pfad)}: {grund}"
         knoten = ziel
         for k in pfad[:-1]:
             if not isinstance(knoten, dict) or k not in knoten:
@@ -36182,6 +36186,38 @@ def ap_einst_anwenden(firmen, firma, aenderungen):
         if not (t1 <= t2a < t2b):
             return None, "kette: Trade 1 bis ≤ Trade 2 ab < Trade 2 bis"
     return neu, None
+
+
+# GRÖSSE OHNE EIGENEN BLOCK (E3f, Nachtrag 9, Finn: „Es gibt immer ‚Standard‘ — lass das weg … einfach immer nur die Schablonen"): die
+# Einstellungen zeigen nur echte Größen. Speichert man an einer Größe einen Wert, den sie noch von der Firma erbt, legt das Speichern
+# je_groesse[g][feld] als Kopie des Firmenwerts an (ganzes Feld — phasen bzw. ziel_pct —, weil der Planer je Größe flach mischt:
+# dict(regel, **je_groesse[g]); ein halber phasen-Block würde die übrigen Phasen verdrängen) und ändert nur dort. Andere Größen bleiben,
+# wie sie sind. Teilen ALLE Größen die Firmenwerte (kein je_groesse), schreibt das Frontend direkt in die Firmenwerte (Hinweis „gilt auch für …").
+AP_EINST_BLOCK_FELDER = ("phasen", "ziel_pct", "dd_usd", "dd_pct", "daily_usd", "tp_max", "max_konten_tag")
+
+
+def ap_einst_block_anlegen(firma, g, feld):
+    """REIN RECHNEND (testbar, ändert firma): je_groesse[g][feld] aus dem Firmenwert anlegen, falls es fehlt → None | grund.
+    Nur echte Größen der Firma (groessen/wert_groessen), nur AP_EINST_BLOCK_FELDER, die die Firma selbst trägt. Größe außerhalb von
+    standard_groessen ohne eigenen Block → nie (ap_regel_flex: dort „Werte fehlen" — eine Kopie legte die Werte einer anderen Größe darauf)."""
+    gr = {str(int(float(x))) for x in list(firma.get("groessen") or []) + list(firma.get("wert_groessen") or []) if _wd_num(x)}
+    je = firma.get("je_groesse") if isinstance(firma.get("je_groesse"), dict) else None
+    blk = (je or {}).get(g)
+    if isinstance(blk, dict) and feld in blk:
+        return None                                   # gibt es schon — normaler Pfad
+    if g not in gr:
+        return f"{g} ist keine Größe der Firma"
+    if feld not in AP_EINST_BLOCK_FELDER or feld not in firma:
+        return f"{feld} kann je Größe nicht angelegt werden"
+    std = {str(int(float(x))) for x in (firma.get("standard_groessen") or []) if _wd_num(x)}
+    if std and g not in std and not isinstance(blk, dict):
+        return f"{int(g) // 1000}k ist keine Standard-Größe — Werte für diese Größe legt Finn an"
+    if je is None:
+        je = firma["je_groesse"] = {}
+    if not isinstance(je.get(g), dict):
+        je[g] = {}
+    je[g][feld] = json.loads(json.dumps(firma[feld]))
+    return None
 
 
 def ap_einst_uhr(x):

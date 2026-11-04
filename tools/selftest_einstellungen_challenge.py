@@ -80,6 +80,25 @@ check(g is None and neu[1]["phasen"]["challenge"]["puffer_je_menge"]["2"] == [16
       f"E3b: Puffer je Kontrakt-Zahl und Gewichte änderbar ({g})")
 check(A(FIRMEN, "topstep", [{"pfad": ["phasen", "challenge", "menge_gewichte", "1"], "wert": 130}])[0] is None, "E3b: Gewicht höchstens 100")
 
+print("1a) Größe ohne eigenen Block (E3f, Nachtrag 9)")
+neu, g = A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "100000", "phasen", "phase1", "tp"], "wert": [5500, 6500]}])
+f5 = neu[0] if neu else {}
+check(g is None and f5["je_groesse"]["100000"]["phasen"]["phase1"]["tp"] == [5500, 6500] and f5["je_groesse"]["100000"]["phasen"]["phase1"]["sl"] == [1800, 2160]
+      and f5["phasen"]["phase1"]["tp"] == [5400, 6300] and f5["je_groesse"]["200000"] == FIRMEN[0]["je_groesse"]["200000"],
+      f"100k ohne Block: ganze phasen kopiert, nur 100k geändert, Firma und 200k unverändert ({g})")
+neu, g = A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "100000", "ziel_pct", "phase1"], "wert": 9}])
+check(g is None and neu[0]["je_groesse"]["100000"]["ziel_pct"] == {"phase1": 9, "phase2": 5} and neu[0]["ziel_pct"]["phase1"] == 8, "Ziel-Zuordnung je Größe: ganze Zuordnung kopiert")
+check(A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "50000", "phasen", "phase1", "tp"], "wert": [1, 2]}])[0] is None, "keine Größe der Firma → nie")
+check(A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "100000", "route"], "wert": "x"}])[0] is None and A(FIRMEN, "topstep", [{"pfad": ["je_groesse", "150000", "kette", "t1_sl"], "wert": [1, 2]}])[0] is None,
+      "nur erlaubte Felder je Größe (keine route/kette)")
+FP = [{"namen": ["fundingpips"], "groessen": [50000, 100000], "standard_groessen": [100000], "phasen": {"phase1": {"tp": [5000, 7000]}}, "je_groesse": {}}]
+check(A(FP, "fundingpips", [{"pfad": ["je_groesse", "50000", "phasen", "phase1", "tp"], "wert": [2500, 3500]}])[0] is None,
+      "Größe außerhalb standard_groessen ohne Block → nie (sonst liefen 100k-Werte auf 50k)")
+neu, g = A(FP, "fundingpips", [{"pfad": ["je_groesse", "100000", "phasen", "phase1", "tp"], "wert": [5100, 7000]}])
+check(g is None and neu[0]["je_groesse"]["100000"]["phasen"]["phase1"]["tp"] == [5100, 7000], "Standard-Größe 100k: Block angelegt")
+check(A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "100000", "phasen", "phase1", "tp"], "wert": [5500, 6500]}, {"pfad": ["kauf_eur", "200000"], "wert": "x"}])[0] is None
+      and "100000" not in FIRMEN[0]["je_groesse"], "alles oder nichts: bei Fehler kein Block, Original unberührt")
+
 print("1b) Zeiten / Zufall / Bestätigen (E3b)")
 Z = app.ap_einst_zeiten_anwenden
 ZT = REG["zeiten"] | {"fenster": [["02:00", "20:00", 100]], "start_bis": "20:00", "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45],
