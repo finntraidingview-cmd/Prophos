@@ -4074,6 +4074,14 @@
   #ap-ids-root.ap-guestly .e2-balken{flex:1;height:6px;border-radius:999px;background:var(--g-pille);overflow:hidden;min-width:40px;margin:0 4px} #ap-ids-root.ap-guestly .e2-balken > b{display:block;height:100%;background:var(--g-a2);border-radius:999px}
   #ap-ids-root.ap-guestly .e2-kt{display:flex;align-items:center;gap:8px;min-height:40px;padding:5px 0;box-sizing:border-box;border-top:1px solid var(--g-gitter);font-size:13px} #ap-ids-root.ap-guestly .e2-gruppe > h5 + .e2-kt{border-top:0}
   #ap-ids-root.ap-guestly .e2-kt > span{width:54px;flex:none}
+  /* E2g: Kontrakte-Zeilen frei (+ Zeile / × / Anzahl wählen) — gleiche Ruhe wie die WD-Hedge-Staffel */
+  #ap-ids-root.ap-guestly .e2-kt > .e2-feld{width:auto}   /* die 54-px-Regel oben ist für den Namen; das Feld (64 px + %) lief sonst unter das × */
+  #ap-ids-root.ap-guestly .e2-ktsel{width:54px;flex:none;height:28px;padding:0 14px 0 6px;border:1px solid var(--g-rand);border-radius:8px;color:var(--g-text);font-size:13px;cursor:pointer;-webkit-appearance:none;appearance:none;   /* schlank, damit die Spalten bündig bleiben (Name 54 px); Pfeil selbst gezeichnet */
+    background:linear-gradient(45deg, transparent 50%, var(--g-sub) 50%) right 9px center / 4px 4px no-repeat, linear-gradient(135deg, var(--g-sub) 50%, transparent 50%) right 5px center / 4px 4px no-repeat, var(--g-karte)}
+  #ap-ids-root.ap-guestly .e2-ktx{flex:none;width:20px;height:24px;border:0;background:none;color:var(--g-sub);cursor:pointer;font-size:15px;line-height:1;padding:0;border-radius:6px} #ap-ids-root.ap-guestly .e2-ktx:hover{color:var(--g-text);background:var(--g-pille)}
+  #ap-ids-root.ap-guestly .e2-ktx-leer{flex:none;width:20px}
+  #ap-ids-root.ap-guestly .e2-ktfuss{display:flex;align-items:center;gap:10px;padding:6px 0 2px;border-top:1px solid var(--g-gitter);min-height:34px}
+  #ap-ids-root.ap-guestly .e2-ktsum{font-size:12px;color:var(--g-sub);margin-left:auto} #ap-ids-root.ap-guestly .e2-ktsum.fehler{color:var(--g-rot, #d92d20)}
   #ap-ids-root.ap-guestly .e2-fest{font-size:10.5px;font-weight:500;color:var(--g-sub);border:1px solid var(--g-rand);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap;vertical-align:1px}
   #ap-ids-root.ap-guestly .e2-sw{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:999px;background:var(--g-rand);position:relative;cursor:pointer;flex:none;margin:0;transition:background .15s}
   #ap-ids-root.ap-guestly .e2-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.25);transition:left .15s}
@@ -4098,7 +4106,9 @@
   #ap-ids-root.ap-guestly #e2-einst.e2-wdgr{padding:16px 18px} #ap-ids-root.ap-guestly #e2-einst.e2-wdgr.zu{padding:12px 18px}
   #ap-ids-root.ap-guestly #e2-einst .wd-panel-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap} #ap-ids-root.ap-guestly #e2-einst.zu .wd-panel-kopf{margin-bottom:0}
   #ap-ids-root.ap-guestly #e2-einst .panel-title{font-size:15px;font-weight:600;color:var(--g-text)} #ap-ids-root.ap-guestly #e2-einst .e2-psub{font-weight:400;color:var(--g-sub);font-size:12px}
-  #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.05fr) minmax(0,1.3fr);gap:14px;align-items:stretch}   /* Nachtrag 8: rechts die Firma mit den Feldern → breiter */
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr) minmax(0,1.15fr);gap:14px;align-items:stretch}   /* Nachtrag 10: Firmen | Ziel & Trade | Planer & Hedge */
+  #ap-ids-root.ap-guestly #e2-einst .e2-sc-ziel .h4sub .e2-dname{display:inline-flex;font-size:inherit;font-weight:inherit;color:inherit;gap:6px}
+  #ap-ids-root.ap-guestly #e2-einst .e2-global{padding-bottom:6px;margin-bottom:4px;border-bottom:1px solid var(--g-gitter)}
   @media (max-width:1180px){ #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{grid-template-columns:1fr} }
   #ap-ids-root.ap-guestly #e2-einst .wd-set-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
   #ap-ids-root.ap-guestly #e2-einst .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
@@ -16675,7 +16685,7 @@
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
       '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]',
-      '[data-e2-pfad]', '[data-e2-save]',   // E2 Einstellungen Funded Futures (04.11.2026)
+      '[data-e2-pfad]', '[data-e2-save]', '[data-e2-ktadd]', '[data-e2-ktx]', '[data-e2-ktsel]',   // E2 Einstellungen Funded Futures (04.11.2026), E2g Kontrakte-Zeilen
       // Winning Days
       '#wdWuerfel', '#wdSave', '#wdRiskAlle', '#wdRegelnSave', '#wdNdAlle', '#wdHedgeSave', '#wdHedgeSave2', '#wd-staffel-reset', '#wd-staffel-add', '#ws-knopf',
       '[data-wd-dir]', '[data-wd-flip]', '[data-wd-zeit]', '[data-wd-tp]', '[data-wd-sl]', '[data-wd-sx]', '[data-wd-se]', '[data-wd-sv]', '[data-wd-konto]', '[data-wd-id-alle]',
@@ -85935,7 +85945,7 @@
    * nur „Finn + Pascal"/„Pascal" bzw. Admin; alle anderen sehen die Werte ohne Eingabe. Konstanten aus dem Code stehen mit „fest im Code".
    * Der Reiter zeichnet alle 20 s neu (apIdsLiveTick): Eingaben liegen deshalb als Entwurf in _e2.entwurf (Pfad → Text), der Fokus samt Cursor
    * wird nach dem Neuzeichnen wiederhergestellt (e2Verdrahten). Am Planer selbst ändert sich nichts — er liest dieselbe Zeile wie bisher. */
-  const _e2 = { offen: null, letzte: null, zu: (() => { try{ return sessionStorage.getItem('prophos_e2_zu') === '1' }catch(_){ return false } })(), gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
+  const _e2 = { ktNeu: {}, offen: null, letzte: null, zu: (() => { try{ return sessionStorage.getItem('prophos_e2_zu') === '1' }catch(_){ return false } })(), gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
   const E2_FELD = { ziel_gewinn: ['Ziel-Gewinn', '$', 'über dem Zyklus-Start'], max_trade: ['TP höchstens je Trade', '$', 'Deckel je Trade'], kosten_eur: ['Kontokosten', '€', 'offene Kosten zu Zyklusbeginn'],
     dd: ['Max Drawdown', '$', 'Abstand Start → Liquidation'], daily_usd: ['Daily Loss', '$', 'SL höchstens Daily Loss − Puffer'], hedge_eur: ['Hedge auf den Max DD', '€', 'Fusion-Betrag je voller DD'],
     sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'] }
@@ -85956,6 +85966,25 @@
     return `<label class="e2-sch">${e2L(titel, unter)}<input type="checkbox" class="e2-sw" data-e2-pfad="${escapeHtml(pfad)}" data-e2-orig="${orig ? '1' : ''}"${w ? ' checked' : ''}${darf ? '' : ' disabled'}></label>`
   }
   const e2Offen = vor => Object.keys(_e2.entwurf).filter(p => vor ? p.startsWith(vor) : /^[sz]\./.test(p)).length
+  /* KONTRAKTE-ZEILEN FREI (E2g, Finn 05.11.2026 zum Block „Kontrakte NQ · Anteil“: „Bei denen noch auf ‚Plus‘ klicken und mehr hinzufügen“):
+   * „+ Zeile“ legt eine neue Kontrakte-Anzahl (1–10, noch nicht vorhanden) an, × entfernt eine (die letzte bleibt). Die Zeilenliste steht im Entwurf unter
+   * „f.i.g.G.kontrakte#z“ (zählt als Änderung, verfällt mit dem Entwurf), die Anteile wie bisher unter „…kontrakte.N“. Speichern ist gesperrt, solange die
+   * Summe nicht 100 % ergibt (± 1 % wie e2Body; der Server prüft ± 1,1 %). Der Server ersetzt das ganze Dict → entfernte Zeilen sind danach weg. */
+  const e2KtPfad = (fi, g) => `f.${fi}.g.${g}.kontrakte`
+  const e2KtKeys = (fi, g, v) => { const z = _e2.entwurf[e2KtPfad(fi, g) + '#z']; return Array.isArray(z) ? z.slice() : Object.keys(v || {}).sort((a, b) => Number(a) - Number(b)) }
+  const e2KtAnteil = (fi, g, v, k) => { const p = e2KtPfad(fi, g) + '.' + k; return e2Hat(p) ? e2Zahl(_e2.entwurf[p]) : v && v[k] != null ? Math.round(Number(v[k]) * 1000) / 10 : 0 }
+  const e2KtBeruehrt = (fi, g, v) => { const p = e2KtPfad(fi, g); return e2Hat(p + '#z') || e2KtKeys(fi, g, v).concat(Object.keys(v || {})).some(k => e2Hat(p + '.' + k)) }
+  const e2KtRund = x => Math.round((x || 0) * 10) / 10   // auf 0,1 % = 3 Stellen Anteil, genau wie e2Body sendet (Gegenprüfung: Sperre, Body und Server rechnen mit derselben Zahl)
+  const e2KtSumme = (fi, g, v) => Math.round(e2KtKeys(fi, g, v).reduce((s, k) => s + e2KtRund(e2KtAnteil(fi, g, v, k)), 0) * 10) / 10
+  const e2KtHinweis = (fi, g, v) => { if(!e2KtBeruehrt(fi, g, v)) return ''; const s = e2KtSumme(fi, g, v); return Math.abs(s - 100) > 1 ? `Summe ${e2De(s)} % — muss 100 % sein` : '' }
+  function e2KtSperre(karte){   // Text, solange eine Größe der Firma keine 100 % ergibt — sperrt deren Speichern
+    if(!/^firma:/.test(String(karte))) return ''
+    const fi = String(karte).split(':')[1], f = ((typeof _fdpQ !== 'undefined' && _fdpQ && _fdpQ.regeln && _fdpQ.regeln.firmen) || [])[Number(fi)]
+    for(const [g, w] of Object.entries((f && f.je_groesse) || {})){
+      const v = w && w.kontrakte; if(!v || typeof v !== 'object') continue
+      const h = e2KtHinweis(fi, g, v); if(h) return Object.keys(f.je_groesse).length > 1 ? `${fcfdGroesse(g)}: ${h}` : h }
+    return ''
+  }
   // Karte ↔ Pfad-Präfix (E2b-Nachtrag: Karte „Grenzen“ mit Pfaden k.*): ablauf = s.*/z.*, grenzen = k.*, firma:i = f.i.*
   const e2Vor = karte => karte === 'ablauf' ? '' : karte === 'grenzen' ? 'k.' : karte === 'abstand' ? 'za.' : 'f.' + String(karte).split(':')[1] + '.'
   const e2KarteVon = p => /^[sz]\./.test(p) ? 'ablauf' : /^k\./.test(p) ? 'grenzen' : /^za\./.test(p) ? 'abstand' : 'firma:' + p.split('.')[1]   // za.* = Abstände in „Sicherheit“ (E2d)
@@ -85975,13 +86004,13 @@
   const e2Spanne = (a, b) => `<div class="wd-spanne">${a}<span>–</span>${b}</div>`
   function e2Save(karte, darf, vor){
     if(!darf) return ''
-    const n = e2Offen(vor)
-    return `<button type="button" class="btn btn-ghost btn-xs" data-e2-save="${escapeHtml(karte)}"${_e2.laeuft || !n ? ' disabled' : ''}>${_e2.laeuft === karte ? 'speichert …' : 'Speichern'}</button>`
+    const n = e2Offen(vor), sp = e2KtSperre(karte)
+    return `<button type="button" class="btn btn-ghost btn-xs" data-e2-save="${escapeHtml(karte)}"${_e2.laeuft || !n || sp ? ' disabled' : ''}${sp ? ` title="${escapeHtml(sp)}"` : ''}>${_e2.laeuft === karte ? 'speichert …' : 'Speichern'}</button>`
   }
   function e2Meld(karte, darf, vor){
-    const m = _e2.meldung[karte], n = e2Offen(vor)
-    const text = m ? m.text : darf && n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : ''
-    return `<div class="wd-fuss e2-fuss"><small class="${m ? m.art : ''}">${escapeHtml(text)}</small></div>`
+    const m = _e2.meldung[karte], n = e2Offen(vor), sp = darf && n ? e2KtSperre(karte) : ''
+    const text = m ? m.text : sp || (darf && n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : '')
+    return `<div class="wd-fuss e2-fuss"><small class="${m ? m.art : sp ? 'fehler' : ''}">${escapeHtml(text)}</small></div>`
   }
   function e2EinstHtml(Q, darf){
     // Fokus merken, bevor der Reiter neu gezeichnet wird (Cursor bleibt beim Tippen, s. oben)
@@ -86019,10 +86048,12 @@
         <div class="wd-felder">${ki.map(kFeld).join('')}</div>
         ${R.konst_spalte ? '' : '<div class="wd-fuss">Spalte konst fehlt — sql/2026-11-05_fdp_einstellungen_db.sql einspielen</div>'}${e2Meld('grenzen', darfK, 'k.')}</div>`
     const tzKurz = String((fe && fe.tz) || fen.tz || 'Asia/Dubai').replace(/^\w+\//, '').replace('Berlin', 'dt. Zeit')
-    const ablauf = `<div class="wd-set-card e2-sc-ablauf"><h4><span>Ablauf<span class="h4sub">Planer, Bestätigen, Zeiten</span></span>${e2Save('ablauf', darfR, '')}</h4>
+    /* NACHTRAG 10 (Finn 05.11.2026 ~07:05: „Erste Spalte: Firma. Die Ablauf-Spalte in die zweite und dritte mit einbauen … zwei Spalten mit den ganzen Inputs —
+     * eine mit Zielen, eine mit Planer/Hedge —, jede mit eigenem Fokus“): links Firmen | Mitte „Ziel & Trade“ | rechts „Planer & Hedge“. Die globalen Ablauf-Werte
+     * stehen kompakt oben rechts als eigener Block (eigenes Speichern „ablauf“, merke() findet den Block über .e2-block); Pfade und e2Body bleiben gleich. */
+    const ablauf = `<div class="e2-block e2-global"><div class="wd-abl-abschnitt e2-abs">Planer · alle Firmen${e2Save('ablauf', darfR, '')}</div>
       ${e2Sch('s.aktiv', R.aktiv, darfR, 'Planer', 'an = legt Vorschläge/Pläne an · aus = nur Vorschau')}
       ${e2Sch('s.auto_bestaetigen', R.auto_bestaetigen, darfR, 'Selbst bestätigen', 'aus = jeder Funded-Trade von Hand unter „Zu bestätigen“')}
-      <div class="wd-abl-abschnitt">Zeiten</div>
       ${e2Sch('z.fenster.an', !!fe, darfR, 'Eigenes Startfenster', 'aus = Fenster des Challenge-Planers' + (fe ? '' : ' (' + String(fen.von || '–') + '–' + String(fen.bis || '–') + ')'))}
       <div class="wd-felder">
         ${e2WF('Start ab · ' + tzKurz, feAn ? '' : 'aus dem Challenge-Planer — Schalter an, dann änderbar', e2In('z.fenster.von', fe ? fe.von : fen.von, darfR && feAn, { label: 'Start ab', zeit: true }))}
@@ -86037,7 +86068,7 @@
       const w = x.je_groesse[_e2.gr[firmen.indexOf(x)] || grs[grs.length - 1]] || {}
       const t = x.tp_modus === 'rest' ? (Array.isArray(w.sl) ? `SL ${e2De(w.sl[0])}–${e2De(w.sl[1])} $` : 'Rest bis Ziel') : (w.max_trade != null ? `TP ≤ ${e2De(w.max_trade)} $` : '')
       return [t, ktText(w)].filter(Boolean).join(' · ') }
-    let edit = '', g = null, w = {}, grs = []
+    let zielT = '', hedgeT = '', g = null, w = {}, grs = []
     if(f){
       grs = Object.keys(f.je_groesse || {}).sort((a, b) => Number(a) - Number(b))
       if(!grs.includes(_e2.gr[fi])) _e2.gr[fi] = grs[grs.length - 1]
@@ -86052,32 +86083,47 @@
         return e2WF(l + ' · ' + e, u, e2In(p(k), v, darfR, { label: l }), klein) }
       const consOrig = f.consistency_pct != null ? Number(f.consistency_pct) : null
       const consAn = !!e2Wert(`f.${fi}.cons.an`, consOrig != null), consW = e2Zahl(e2Wert(`f.${fi}.cons`, String(consOrig != null ? consOrig : 50))) || 50
-      const kt = w.kontrakte && typeof w.kontrakte === 'object' ? Object.entries(w.kontrakte).sort((a, b) => Number(a[0]) - Number(b[0])) : []
-      const ktZeilen = kt.map(([k, a]) => { const pk = p('kontrakte') + '.' + k, pct = Math.round(Number(a) * 1000) / 10, ist = e2Zahl(e2Wert(pk, String(pct)))
-        return `<div class="e2-kt"><span>${escapeHtml(k)} ${escapeHtml(String(f.symbol || 'NQ'))}</span><span class="e2-balken"><b style="width:${Math.max(0, Math.min(100, ist == null ? pct : ist))}%"></b></span>${e2In(pk, pct, darfR, { kurz: true, einheit: '%', label: k + ' Kontrakte Anteil' })}</div>` }).join('')
+      const ktV = w.kontrakte && typeof w.kontrakte === 'object' ? w.kontrakte : null, ktK = ktV ? e2KtKeys(fi, g, ktV) : [], sym = escapeHtml(String(f.symbol || 'NQ'))
+      // E2g: neue Zeilen wählen ihre Anzahl (1–10, nur freie), × je Zeile außer der letzten, darunter „+ Zeile“ + Summen-Hinweis
+      const ktNeu = _e2.ktNeu[fi + ':' + g]
+      const ktZeilen = ktK.map(k => { const pk = p('kontrakte') + '.' + k, alt = Object.prototype.hasOwnProperty.call(ktV, k) && !(ktNeu && ktNeu.has(k) && e2Hat(pk)), pct = alt ? Math.round(Number(ktV[k]) * 1000) / 10 : '', ist = e2Zahl(e2Wert(pk, String(pct)))
+        const frei = [...Array(10)].map((_, j) => String(j + 1)).filter(x => x === k || !ktK.includes(x))
+        const name = alt || !darfR ? `<span>${escapeHtml(k)} ${sym}</span>`
+          : `<select class="e2-ktsel" data-e2-ktsel="${fi}:${escapeHtml(g)}:${escapeHtml(k)}" aria-label="Anzahl Kontrakte der neuen Zeile">${frei.map(x => `<option value="${x}"${x === k ? ' selected' : ''}>${x} ${sym}</option>`).join('')}</select>`
+        const weg = darfR && ktK.length > 1 ? `<button type="button" class="e2-ktx" data-e2-ktx="${fi}:${escapeHtml(g)}:${escapeHtml(k)}" title="Zeile entfernen" aria-label="${escapeHtml(k)} Kontrakte entfernen">×</button>` : darfR ? '<i class="e2-ktx-leer"></i>' : ''
+        return `<div class="e2-kt${alt ? '' : ' neu'}">${name}<span class="e2-balken"><b style="width:${Math.max(0, Math.min(100, ist == null ? Number(pct) || 0 : ist))}%"></b></span>${e2In(pk, pct, darfR, { kurz: true, einheit: '%', label: k + ' Kontrakte Anteil' })}${weg}</div>` }).join('')
+      const ktHin = ktV ? e2KtHinweis(fi, g, ktV) : '', ktSum = ktV && e2KtBeruehrt(fi, g, ktV) ? e2KtSumme(fi, g, ktV) : null
+      const ktFuss = ktV && (darfR || ktHin) ? `<div class="e2-ktfuss">${darfR && ktK.length < 10 ? `<button type="button" class="btn btn-ghost btn-xs" data-e2-ktadd="${fi}:${escapeHtml(g)}">+ Zeile</button>` : ''}<small class="e2-ktsum${ktHin ? ' fehler' : ''}" data-e2-ktsum="${fi}:${escapeHtml(g)}">${escapeHtml(ktHin || (ktSum != null ? `Summe ${e2De(ktSum)} %` : ''))}</small></div>` : ''
       const weitere = Object.keys(w).filter(k => k !== 'kontrakte' && !E2_FELD[k])
       const pille = grs.length > 1 ? `<div class="apg-zeitraum e2-gr" role="tablist" aria-label="Kontogröße">${grs.map(x => `<button type="button" class="${x === g ? 'on' : ''}" data-e2-gr="${fi}:${escapeHtml(x)}" role="tab" aria-selected="${x === g}">${escapeHtml(fcfdGroesse(x))}</button>`).join('')}</div>` : ''
-      edit = `<div class="e2-fdetail">
-        <div class="e2-fedit-kopf">${pille}<label class="e2-dsch">${e2I(grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}<span>im Planer</span><input type="checkbox" class="e2-sw" data-e2-pfad="f.${fi}.an" data-e2-orig="${f.an ? '1' : ''}"${e2Wert(`f.${fi}.an`, !!f.an) ? ' checked' : ''}${darfR && grs.length ? '' : ' disabled'}></label></div>
+      zielT = `<div class="e2-fdetail">
+        ${pille ? `<div class="e2-fedit-kopf">${pille}</div>` : ''}
         ${grs.length ? `<div class="wd-abl-abschnitt">Ziel</div>
         <div class="wd-felder">${w.ziel_gewinn != null ? feld('ziel_gewinn') : ''}</div>
         ${e2Sch(`f.${fi}.cons.an`, consOrig != null, darfR, 'Consistency', 'größter Tag höchstens x % des Gewinns im Zyklus — nur Parameter, der Funded-Planer prüft keine Consistency (Finn 27.10.2026)')}
         ${consAn ? `<div class="e2-zeile e2-cons"><input type="range" class="e2-range" min="10" max="100" step="5" data-e2-pfad="f.${fi}.cons" data-e2-orig="${consOrig != null ? consOrig : ''}" value="${consW}"${darfR ? '' : ' disabled'} aria-label="Consistency in %"><output class="e2-range-w">${e2De(consW)} %</output></div>` : ''}
         <div class="wd-abl-abschnitt">Trade<span class="e2-modus">${rest ? 'Rest bis Ziel' : 'normal'}${e2I(modusInfo)}</span></div>
-        <div class="wd-felder">${['max_trade', 'sl', 'dd', 'daily_usd', 'kosten_eur', 'hedge_eur'].filter(k => w[k] != null).map(feld).join('')}
-          ${f.lock_usd != null ? e2WF('Liq-Lock · $', 'Liquidation EOD-trailing, fest bei Größe + Lock (0 = fest ab dem Start)', e2In(`f.${fi}.lock`, f.lock_usd, darfR, { label: 'Liq-Lock' })) : ''}</div>
-        ${ktZeilen ? `<div class="wd-abl-abschnitt">Kontrakte ${escapeHtml(String(f.symbol || 'NQ'))} · Anteil</div>${ktZeilen}` : ''}
+        <div class="wd-felder">${['max_trade', 'sl', 'dd', 'daily_usd'].filter(k => w[k] != null).map(feld).join('')}</div>
+        ${ktZeilen ? `<div class="wd-abl-abschnitt">Kontrakte ${sym} · Anteil</div>${ktZeilen}${ktFuss}` : ''}
         ${weitere.map(k => `<div class="e2-zeile">${e2L(k, null, null, 'nur per SQL')}<em>${escapeHtml(typeof w[k] === 'object' ? JSON.stringify(w[k]) : String(w[k]))}</em></div>`).join('')}`
         : '<div class="wd-fuss">noch keine Werte hinterlegt — neue Größen per SQL</div>'}</div>`
+      // rechts: Firma im Planer + Kosten · Hedge (Größe wie in der Mitte gewählt)
+      const kh = ['kosten_eur', 'hedge_eur'].filter(k => w[k] != null)
+      hedgeT = `<div class="wd-abl-abschnitt">${escapeHtml(f.name)}</div>
+        <label class="e2-sch">${e2L('im Planer', grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}<input type="checkbox" class="e2-sw" data-e2-pfad="f.${fi}.an" data-e2-orig="${f.an ? '1' : ''}"${e2Wert(`f.${fi}.an`, !!f.an) ? ' checked' : ''}${darfR && grs.length ? '' : ' disabled'}></label>
+        ${kh.length || f.lock_usd != null ? `<div class="wd-abl-abschnitt">Kosten · Hedge${grs.length > 1 ? `<span class="e2-modus">${escapeHtml(fcfdGroesse(g))}</span>` : ''}</div>
+        <div class="wd-felder">${kh.map(feld).join('')}
+          ${f.lock_usd != null ? e2WF('Liq-Lock · $', 'Liquidation EOD-trailing, fest bei Größe + Lock (0 = fest ab dem Start)', e2In(`f.${fi}.lock`, f.lock_usd, darfR, { label: 'Liq-Lock' })) : ''}</div>` : ''}`
     }
-    const firmenK = `<div class="wd-set-card"><h4><span>Firmen<span class="h4sub">${an.length} von ${firmen.length} im Planer · Klick zeigt rechts die Details</span></span></h4>
+    const firmenK = `<div class="wd-set-card"><h4><span>Firmen<span class="h4sub">${an.length} von ${firmen.length} im Planer · Klick zeigt die Details</span></span></h4>
       <div class="e2-wdliste">${firmen.map((x, i) => { const gr = Object.keys(x.je_groesse || {}).sort((a, b) => Number(a) - Number(b)), on = i === fi
         return `<div class="wd-firma${on ? ' offen' : ''}" data-e2-firma="${i}" role="button" tabindex="0" aria-expanded="${on}"><span class="punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(x.name) : 'var(--g-a2)'}"></span>
           <span class="fl"><span class="fn">${escapeHtml(x.name)}${e2Offen(`f.${i}.`) ? ' ·' : ''}</span><span class="fk">${x.an ? 'plant' : 'aus'}${gr.length ? ' · ' + gr.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>
           <span class="fz">${escapeHtml(kernwerte(x))}</span><span class="pfeil">›</span></div>` }).join('')}</div></div>`
     /* ── 3) DETAILS DER GEWÄHLTEN FIRMA (Nachtrag 8 Finn 05.11.2026 ~06:30: „Das Konten hier weg machen. Je nachdem, auf welche Propfirma ich bei Firmen drücke, kommen rechts
      * die Details dazu“): Größen-Pillen, Ziel/Consistency, Trade, Kontrakte, dazu bei Funded Futures die Winning-Day-Kachel. Keine Konten-Spalte mehr. */
-    let detailK = '<div class="wd-set-card"><h4><span>Firma<span class="h4sub">keine Firma in den Regeln</span></span></h4></div>'
+    let mitteK = '<div class="wd-set-card"><h4><span>Ziel &amp; Trade<span class="h4sub">keine Firma in den Regeln</span></span></h4></div>'
+    let rechtsK = `<div class="wd-set-card e2-sc-planer"><h4><span>Planer &amp; Hedge</span></h4>${ablauf}</div>`
     if(f){
       // WINNING DAY (E2b): nur Anzeige aus app.py fdp_wd_anzeige; geändert wird unter Winning Days → Einstellungen (Link), keine zweite Schreibstelle
       const wd = f.wd && typeof f.wd === 'object' ? f.wd : null
@@ -86090,10 +86136,14 @@
         <div class="e2-zeile">${e2L('Bestätigen', wd.bestaetigen ? 'jeder Farmer-WD startet erst nach ✓ — Verwalter-Gruppen ausgenommen' : '')}<em>${wd.bestaetigen ? 'einzeln ✓' : 'von selbst'}</em></div>
         ${(wd.besonders || []).map(b => b && typeof b === 'object' ? `<div class="e2-zeile">${e2L(String(b.name || ''), b.info || '')}<em>${escapeHtml(String(b.wert || ''))}</em></div>` : '').join('')}
         <div class="wd-fuss">ändern unter <button type="button" class="e2-link" data-e2-wd-link>Winning Days → Einstellungen</button></div></div>`
-      detailK = `<div class="wd-set-card e2-sc-detail"><h4><span><span class="e2-dname"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>${escapeHtml(f.name)}</span><span class="h4sub">Modell ${escapeHtml(E2_MODELL)} · Fusion-Gegenhedge${grs.length ? ' · ' + grs.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
-        ${edit}${wdGruppe}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
+      const punkt = `<i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>`
+      // beide Spalten speichern dieselbe Karte „firma:i“ (ein Entwurf, ein Body) — der Knopf steht in jeder Spalte, damit er beim Tippen sichtbar ist
+      mitteK = `<div class="wd-set-card e2-sc-detail e2-sc-ziel"><h4><span>Ziel &amp; Trade<span class="h4sub"><span class="e2-dname">${punkt}${escapeHtml(f.name)}</span>${grs.length ? ' · ' + grs.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
+        ${zielT}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
+      rechtsK = `<div class="wd-set-card e2-sc-planer"><h4><span>Planer &amp; Hedge<span class="h4sub">Modell ${escapeHtml(E2_MODELL)} · Fusion-Gegenhedge</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
+        ${ablauf}${hedgeT}${wdGruppe}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
     }
-    return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${ablauf}${firmenK}${detailK}</div></div>`
+    return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${firmenK}${mitteK}${rechtsK}</div></div>`
   }
   // Zahl aus dem Feld (Komma oder Punkt) → Zahl | null
   const e2Zahl = t => { const x = String(t == null ? '' : t).trim().replace(/\s/g, '').replace(',', '.'); return x !== '' && isFinite(Number(x)) ? Number(x) : null }
@@ -86162,12 +86212,17 @@
       for(const [k, v] of Object.entries(w)){
         const p = `f.${i}.g.${g}.${k}`
         if(k === 'kontrakte' && v && typeof v === 'object'){
-          if(!Object.keys(v).some(kk => hat(p + '.' + kk))) continue
+          // E2g: Zeilen aus dem Entwurf (neu/entfernt), gesendet wird das ganze Dict (Server ersetzt es); 0 % fällt weg wie im Server
+          if(!e2KtBeruehrt(i, g, v)) continue
           const kt = {}; let sum = 0
-          for(const [kk, ww] of Object.entries(v)){ const x = hat(p + '.' + kk) ? e2Zahl(ent[p + '.' + kk]) : Math.round(Number(ww) * 1000) / 10
-            if(x == null || x < 0 || x > 100) return { fehler: `${fcfdGroesse(g)} Kontrakte ${kk}×: Anteil 0–100 %` }; kt[kk] = Math.round(x * 10) / 1000; sum += x }
-          if(Math.abs(sum - 100) > 1) return { fehler: `${fcfdGroesse(g)} Kontrakte: Anteile ergeben ${e2De(sum)} %, nicht 100 %` }
-          if(JSON.stringify(kt) !== JSON.stringify(Object.fromEntries(Object.entries(v).map(([kk, ww]) => [kk, Math.round(Number(ww) * 1000) / 1000])))) neu[k] = kt
+          for(const kk of e2KtKeys(i, g, v)){ const x = e2KtAnteil(i, g, v, kk), n = Number(kk)
+            if(!Number.isInteger(n) || n < 1 || n > 10) return { fehler: `${fcfdGroesse(g)} Kontrakte: Anzahl 1–10` }
+            if(x == null || x < 0 || x > 100) return { fehler: `${fcfdGroesse(g)} Kontrakte ${kk}×: Anteil 0–100 %` }
+            if(x > 0) kt[kk] = Math.round(x * 10) / 1000; sum += e2KtRund(x) }
+          sum = Math.round(sum * 10) / 10
+          if(!Object.keys(kt).length || Math.abs(sum - 100) > 1) return { fehler: `${fcfdGroesse(g)}: Summe ${e2De(Math.round(sum * 10) / 10)} % — muss 100 % sein` }
+          const norm = o => JSON.stringify(Object.entries(o).map(([kk, ww]) => [Number(kk), Math.round(Number(ww) * 1000) / 1000]).filter(x => x[1] > 0).sort((a, b) => a[0] - b[0]))
+          if(norm(kt) !== norm(v)) neu[k] = kt
           continue
         }
         if(!E2_FELD[k]) continue
@@ -86191,6 +86246,7 @@
   }
   function e2EntwurfLeeren(karte){
     for(const p of Object.keys(_e2.entwurf)) if(e2KarteVon(p) === karte) delete _e2.entwurf[p]
+    for(const k of Object.keys(_e2.ktNeu)) if('firma:' + k.split(':')[0] === karte) delete _e2.ktNeu[k]   // E2g: Neu-Marker der Kontrakte-Zeilen
     delete _e2.basis[karte]
   }
   async function e2Speichern(karte){
@@ -86226,6 +86282,30 @@
     box.querySelector('[data-e2-mehr]')?.addEventListener('click', e => { e.preventDefault(); _e2.mehr = !_e2.mehr; apIdsRender() })   // Sicherheit auf/zu
     box.querySelector('[data-e2-wd-link]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('[data-planerchip="wd"]')?.click() })   // E2b: Quelle der WD-Regeln
     box.querySelectorAll('[data-e2-gr]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g] = b.dataset.e2Gr.split(':'); _e2.gr[fi] = g; apIdsRender() }))
+    // E2g: Kontrakte-Zeilen (Zeilenliste im Entwurf, s. e2KtKeys); Basis-updated_at wie beim ersten Tippen
+    const ktOrig = (fi, g) => ((((((_fdpQ && _fdpQ.regeln && _fdpQ.regeln.firmen) || [])[Number(fi)] || {}).je_groesse || {})[g] || {}).kontrakte) || {}
+    const ktSetzen = (fi, g, keys) => { const kk = 'firma:' + fi, z = e2KtPfad(fi, g) + '#z', o = Object.keys(ktOrig(fi, g)).sort((a, b) => Number(a) - Number(b))
+      if(!(kk in _e2.basis)) _e2.basis[kk] = (_fdpQ && _fdpQ.regeln && _fdpQ.regeln.updated_at) || null
+      keys = [...new Set(keys)].sort((a, b) => Number(a) - Number(b))
+      if(JSON.stringify(keys) === JSON.stringify(o)) delete _e2.entwurf[z]; else _e2.entwurf[z] = keys
+      delete _e2.meldung[kk]; apIdsRender() }
+    const ktNeuMerken = (fi, g, n) => { const m = (_e2.ktNeu[fi + ':' + g] = _e2.ktNeu[fi + ':' + g] || new Set()); m.add(n)
+      const p = e2KtPfad(fi, g) + '.' + n; if(Object.prototype.hasOwnProperty.call(ktOrig(fi, g), n) && !e2Hat(p)) _e2.entwurf[p] = '' }   // früher entfernte Original-Anzahl: startet leer
+    box.querySelectorAll('[data-e2-ktadd]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g] = b.dataset.e2Ktadd.split(':'), keys = e2KtKeys(fi, g, ktOrig(fi, g))
+      const frei = [...Array(10)].map((_, j) => j + 1).filter(n => !keys.includes(String(n))), hoch = Math.max(0, ...keys.map(Number))
+      const n = frei.find(x => x > hoch) || frei[0]; if(!n) return   // nächste Anzahl über der größten, sonst die kleinste freie
+      ktNeuMerken(fi, g, String(n)); ktSetzen(fi, g, [...keys, String(n)]) }))
+    box.querySelectorAll('[data-e2-ktx]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g, k] = b.dataset.e2Ktx.split(':'), keys = e2KtKeys(fi, g, ktOrig(fi, g))
+      if(keys.length < 2) return   // die letzte Zeile bleibt
+      delete _e2.entwurf[e2KtPfad(fi, g) + '.' + k]; if(_e2.ktNeu[fi + ':' + g]) _e2.ktNeu[fi + ':' + g].delete(k); ktSetzen(fi, g, keys.filter(x => x !== k)) }))
+    box.querySelectorAll('[data-e2-ktsel]').forEach(s => s.addEventListener('change', () => { const [fi, g, k] = s.dataset.e2Ktsel.split(':'), n = s.value, p = e2KtPfad(fi, g)
+      if(n === k) return
+      const o = ktOrig(fi, g), orig = Object.prototype.hasOwnProperty.call(o, n) ? String(Math.round(Number(o[n]) * 1000) / 10) : ''
+      const wert = e2Hat(p + '.' + k) ? _e2.entwurf[p + '.' + k] : ''; delete _e2.entwurf[p + '.' + k]   // eingetippter Anteil wandert mit
+      if(_e2.ktNeu[fi + ':' + g]) _e2.ktNeu[fi + ':' + g].delete(k)
+      ktNeuMerken(fi, g, n)
+      if(String(wert) === orig) delete _e2.entwurf[p + '.' + n]; else _e2.entwurf[p + '.' + n] = wert   // gleich dem Original = kein Entwurf (Gegenprüfung: sonst Schein-Änderung)
+      ktSetzen(fi, g, e2KtKeys(fi, g, ktOrig(fi, g)).map(x => x === k ? n : x)) }))
     box.querySelectorAll('input[data-e2-pfad]').forEach(el => {
       const merke = () => { const p = el.dataset.e2Pfad
         const kk = e2KarteVon(p)
@@ -86236,12 +86316,19 @@
             setTimeout(() => apIdsRender(), 0); return } }   // eigenes Fenster an/aus: Zeitfelder frei-/abschalten
         else { if(el.value === el.dataset.e2Orig) delete _e2.entwurf[p]; else _e2.entwurf[p] = el.value
           if(el.type === 'range'){ const o = el.parentElement && el.parentElement.querySelector('output'); if(o) o.textContent = e2De(el.value) + ' %' }
-          el.classList.toggle('geaendert', el.value !== el.dataset.e2Orig) }
+          el.classList.toggle('geaendert', el.value !== el.dataset.e2Orig)
+          const mk = /^f\.(\d+)\.g\.([^.]+)\.kontrakte\.\d+$/.exec(p)   // E2g: Balken + Summe sofort mitziehen
+          if(mk){ const b = el.closest('.e2-kt')?.querySelector('.e2-balken > b'), x = e2Zahl(el.value); if(b) b.style.width = Math.max(0, Math.min(100, x || 0)) + '%'
+            const v = ktOrig(mk[1], mk[2]), sm2 = box.querySelector(`[data-e2-ktsum="${mk[1]}:${CSS.escape(mk[2])}"]`), h = e2KtHinweis(mk[1], mk[2], v)
+            if(sm2){ sm2.classList.toggle('fehler', !!h); sm2.textContent = h || (e2KtBeruehrt(mk[1], mk[2], v) ? `Summe ${e2De(e2KtSumme(mk[1], mk[2], v))} %` : '') } } }
         // Fuß sofort nachziehen (ohne Neuzeichnen): Knopf frei, Zähler der offenen Änderungen dieser Karte
         const karte = el.closest('.e2-block, .wd-set-card, .e2-detail, .e2-spalte, .e2-karte2'), kb = karte?.querySelector('[data-e2-save]'), sm = karte?.querySelector(':scope > .e2-fuss small')   // nur der eigene Fuß der Karte/des Blocks (Gegenprüfung E2f)
-        const n = kb ? e2Offen(e2Vor(kb.dataset.e2Save)) : 0
-        if(kb && !_e2.laeuft) kb.disabled = !n
-        if(sm && kb){ sm.className = ''; sm.textContent = n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : ''; delete _e2.meldung[kb.dataset.e2Save] } }
+        const n = kb ? e2Offen(e2Vor(kb.dataset.e2Save)) : 0, sp = kb && n ? e2KtSperre(kb.dataset.e2Save) : ''   // E2g: Summe ≠ 100 % sperrt
+        // Nachtrag 10: „firma:i“ hat Knopf + Fuß in zwei Spalten (Ziel & Trade, Planer & Hedge) → alle Knöpfe/Füße derselben Karte nachziehen
+        if(kb) box.querySelectorAll(`[data-e2-save="${CSS.escape(kb.dataset.e2Save)}"]`).forEach(b => { if(!_e2.laeuft){ b.disabled = !n || !!sp; b.title = sp }
+          const s2 = b === kb ? sm : b.closest('.e2-block, .wd-set-card')?.querySelector(':scope > .e2-fuss small')
+          if(s2){ s2.className = sp ? 'fehler' : ''; s2.textContent = sp || (n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : '') } })
+        if(kb) delete _e2.meldung[kb.dataset.e2Save] }
       el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', merke)
       if(el.type !== 'checkbox') el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); const b = el.closest('.e2-block, .wd-set-card, .e2-detail, .e2-spalte, .e2-karte2')?.querySelector('[data-e2-save]'); if(b) b.click() } })
     })

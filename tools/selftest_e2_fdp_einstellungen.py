@@ -158,7 +158,7 @@ check(ft["fehlt"] is True and ft["groessen"][0]["min_usd"] is None and ft["groes
 check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] is None, "Tradeify CFD zählt nie als Tradeify-WD")
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)' in gt2 and "_fr = _wd_firmen_regeln_lesen()" in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
-check("const wdGruppe = !wd ? ''" in HTML and "${edit}${wdGruppe}" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
+check("const wdGruppe = !wd ? ''" in HTML and "${hedgeT}${wdGruppe}" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day rechts (Planer & Hedge), Link zur Quelle, „noch nicht hinterlegt“")
 check("e2In(" not in HTML.split("const wdGruppe")[1].split("detailK = `")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
 check(all(isinstance(b, dict) and b.get("name") and b.get("wert") for x in (apex, tr, lu) for b in x["_dicts"]), "Besonderheiten als Parameter {name, wert, info}")
 check('class="e2-kchip e2-knur"' in HTML and "nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nur-ansehen-Chip in der Regel-Zeile (Grund im Tooltip), Erklärungen hinter ⓘ")
@@ -232,11 +232,34 @@ r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000)
 check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
 src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
 check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
-check('type="range" class="e2-range"' in HTML and 'class="wd-set-grid"' in HTML and "let detailK" in HTML and "${ablauf}${firmenK}${detailK}" in HTML and "const kontoZeile" not in HTML,
-      "Nachtrag 8: Ablauf | Firmen (nur Liste) | Details der gewählten Firma mit Consistency-Slider + Winning Day, keine Konten-Spalte")
+check('type="range" class="e2-range"' in HTML and 'class="wd-set-grid"' in HTML and "${firmenK}${mitteK}${rechtsK}" in HTML and "const kontoZeile" not in HTML
+      and "${ablauf}${hedgeT}${wdGruppe}" in HTML and '<div class="e2-block e2-global">' in HTML and "['max_trade', 'sl', 'dd', 'daily_usd'].filter" in HTML and "['kosten_eur', 'hedge_eur'].filter" in HTML,
+      "Nachtrag 10: Firmen | Ziel & Trade (Ziel, Consistency, Trade, Kontrakte) | Planer & Hedge (globale Werte kompakt oben, im Planer, Kosten/Hedge/Lock, WD), keine Konten-Spalte")
 check("konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]" in HTML and "start: an.start ?? (typeof z.start === 'number'" in HTML, "Kontoliste aus den Zeilen des Laufs, Anzeige-Werte vor der Uhrzeit start")
 check("data-e2-mehr" in HTML and "const sicherheit = !_e2.mehr ? '' :" in HTML, "Sicherheit hinter „mehr“")
 check(HTML.index("e2Oben = e2EinstHtml") < HTML.index("const listen = `<div data-apg-anker=\"offen\">"), "Block steht vor „Zu bestätigen“ (direkt am Zeitstrahl)")
+
+# ── E2g (Finn 05.11.2026: „Bei denen noch auf ‚Plus‘ klicken und mehr hinzufügen“): Kontrakte-Zeilen frei, Planer würfelt mit den neuen Anteilen
+import random as _rnd
+p, f = aend(REG, {"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"150000": {"kontrakte": {"2": 0.7, "3": 0.2, "4": 0.1}}}}})
+check(f is None and p["firmen"][0]["je_groesse"]["150000"]["kontrakte"] == {"2": 0.7, "3": 0.2, "4": 0.1}, "E2g: neue Zeile 4 Kontrakte angenommen (ganzes Dict ersetzt)")
+pw, fw = aend(REG, {"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"150000": {"kontrakte": {"3": 1}}}}})
+check(fw is None and pw["firmen"][0]["je_groesse"]["150000"]["kontrakte"] == {"3": 1}, "E2g: Zeile entfernt → Schlüssel weg (kein Zusammenführen mit dem alten Dict)")
+nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"150000": {"kontrakte": {"2": 0.7, "3": 0.2, "4": 0.05}}}}}, "E2g: Summe 95 %")
+nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"150000": {"kontrakte": {"0": 0.5, "2": 0.5}}}}}, "E2g: 0 Kontrakte")
+KT = ns["fdp_kontrakte"]
+rr = _rnd.Random(7)
+zz = [KT(p["firmen"][0]["je_groesse"]["150000"]["kontrakte"], 6, rr) for _ in range(4000)]
+anteil = {k: zz.count(k) / len(zz) for k in (2, 3, 4)}
+check(set(zz) == {2, 3, 4} and abs(anteil[2] - 0.7) < 0.03 and abs(anteil[3] - 0.2) < 0.03 and abs(anteil[4] - 0.1) < 0.03,
+      f"E2g: Würfel folgt den neuen Anteilen 70/20/10 (gemessen {anteil[2]:.2f}/{anteil[3]:.2f}/{anteil[4]:.2f})")
+check(max(KT({"2": 0.7, "3": 0.2, "4": 0.1}, 3, _rnd.Random(s)) for s in range(300)) == 3, "E2g: Minis der Stufe deckeln weiter (4 → 3 bei 3 Minis)")
+r4 = {R(p["firmen"][0], jg(p["firmen"][0], 150000), [{"minis": 6, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000,
+        konto_id="k1", rnd=_rnd.Random(s)).get("kontrakte") for s in range(400)}
+check(r4 == {2, 3, 4}, f"E2g: fdp_konto_rechnen plant mit der neuen Zeile (Kontrakte {sorted(r4)})")
+check("data-e2-ktadd" in HTML and "data-e2-ktx" in HTML and "data-e2-ktsel" in HTML and "ktK.length > 1" in HTML and "muss 100 % sein" in HTML
+      and "if(!e2KtBeruehrt(i, g, v)) continue" in HTML and "!n || sp ? ' disabled'" in HTML and "'[data-e2-ktadd]', '[data-e2-ktx]', '[data-e2-ktsel]'" in HTML,
+      "E2g Frontend: + Zeile, × (nicht bei der letzten), Anzahl wählbar, Summe ≠ 100 % sperrt Speichern, Schloss kennt die Knöpfe")
 
 # ── Verdrahtung
 rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══ FUNDED-CFD-PLANER")]
