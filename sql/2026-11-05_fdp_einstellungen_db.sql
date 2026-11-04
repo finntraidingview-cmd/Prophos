@@ -3,8 +3,8 @@
 --
 -- Neue Spalte funded_plan_regeln.konst (jsonb). LEER = jeder Wert fällt auf die Konstante in app.py zurück (fdp_konst) — nach dem Einspielen plant der
 -- Planer also genau wie vorher. Geändert wird erst über Funded Planer → Futures → Einstellungen → „Grenzen“ (POST /admin/funded-plan/regeln, nur Admin,
--- „Finn + Pascal“, „Pascal“). Schlüssel (Konstante, Grenzen): breakeven_tol (500, 0–5000 $), sl_min (100, 1–5000 $), tages_puffer (100, 0–1000 $),
--- liq_puffer (50, 0–1000 $), liq_min (300, 0–10000 $), bestaetigen_vorlauf_min (2, 0–60 min), bestaetigen_streu_min (10, 0–60 min).
+-- „Finn + Pascal“, „Pascal“). Schlüssel (Konstante, Grenzen): breakeven_tol (500, 0–5000 $), sl_min (100, 1–5000 $), tages_puffer (100, 1–1000 $),
+-- liq_puffer (50, 1–1000 $), liq_min (300, 0–10000 $), bestaetigen_vorlauf_min (2, 1–60 min), bestaetigen_streu_min (10, 1–60 min).
 -- Das eigene Startfenster braucht KEIN SQL: es steht in der bestehenden Spalte zeiten (zeiten.fenster_eigen {von, bis, tz}); ohne den Schlüssel gilt wie
 -- bisher das Fenster des Challenge-Planers.
 -- Ohne diese Spalte zeigt der Reiter die Grenzen mit dem Hinweis „SQL einspielen“, Speichern dort wird abgelehnt; alles andere läuft.
