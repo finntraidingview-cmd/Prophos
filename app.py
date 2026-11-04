@@ -35949,6 +35949,163 @@ def admin_auto_plan_ausgleich_einstellung():
     return jsonify({"ok": True, "ausgleich": neu, "bot": _ap_bot_stand(neu)})
 
 
+# ══ EINSTELLUNGEN CHALLENGE-PLANER (04.11.2026, Auftrag E3; Finn ~17:30: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute
+# nur im Code stecken, sollen unten visuell und änderbar stehen — je Modell andere Parameter … und überall sehen, welches Modell genutzt wird").
+# GET /admin/auto-plan/einstellungen: alles, was der Challenge-Planer liest — Kernwerte je Firma (regeln.firmen), Zeiten (Spalte zeiten),
+# Schalter, Hedge-Wege, Waage — plus die Konstanten, die fest im Code stehen (ap_einst_fest, nur zum Ansehen). Reines Lesen, Gate wie die
+# anderen Planer-Leserouten. POST /admin/auto-plan/kernwert: ändert NUR schon vorhandene Zahlen/Spannen/Schalter in regeln.firmen[] (Pfad je
+# Feld, gleicher Typ, feste Grenzen je Feld, nie neue Schlüssel) — Admin + Planer-Schreibrecht. Planer-Verhalten bleibt gleich, solange keiner
+# etwas ändert (dieselben Werte, dieselbe Quelle). ══
+AP_EINST_GRENZEN = {   # Feld → (min, max); Zahl oder Spanne [von, bis]. TP/SL/Drawdown/Tageslimit nie 0 (S6-Review: Tippfehler „0“ hätte geplant)
+    "ziel_pct": (0.1, 50.0), "boden_pct": (0.1, 50.0), "dd_pct": (0.1, 50.0), "ab_dd_pct": (0.1, 50.0),
+    "tp": (1.0, 200000.0), "sl": (1.0, 200000.0), "puffer": (0.0, 200000.0), "tp_max": (1.0, 200000.0), "dd_usd": (1.0, 200000.0),
+    "daily_usd": (1.0, 200000.0), "tagesziel_usd": (1.0, 200000.0), "blow_puffer_usd": (0.0, 200000.0), "t1_sl": (1.0, 200000.0),
+    "t1_tp": (1.0, 200000.0), "menge": (0.01, 500.0), "t2_menge": (0.01, 500.0), "menge_schritt": (0.01, 10.0), "kauf_eur": (0.0, 20000.0),
+}
+AP_EINST_GANZ = ("menge", "t2_menge", "menge_schritt")   # steht dort eine ganze Zahl (Kontrakte, Schritt 1), bleibt es eine ganze Zahl
+AP_EINST_ZUORDNUNG = ("challenge", "phase1", "phase2")  # Schlüssel einer Zuordnung (ziel_pct je Phase) — Feld ist der Name davor
+AP_EINST_SCHALTER = ("planen", "lock_bei_start", "soft")   # Ja/Nein-Felder einer Firma
+AP_EINST_PFAD_MAX = 6
+
+
+def ap_einst_fest():
+    """Konstanten des Challenge-Planers, die fest im Code stehen (nur zum Ansehen in den Einstellungen; Werte wie sie der Planer nutzt)."""
+    return {
+        "beide": {"firma_abstand_min": AP_FIRMA_ABSTAND_MIN, "nachplan_vorlauf_min": AP_NACHPLAN_VORLAUF_MIN, "faellig_min": AP_FAELLIG_MIN,
+                  "groesse_toleranz_pct": round(AP_GROESSE_TOLERANZ * 100, 1), "klein_pkt": AP_KLEIN_PKT, "klein_puffer_min_usd": AP_KLEIN_PUFFER_MIN,
+                  "start_bis_standard": AP_START_BIS_STANDARD, "neu_bis_standard": AP_NEU_BIS_STANDARD, "nacht_standard": AP_NACHT_STANDARD,
+                  "verteil_vorlauf_min": AP_VERTEIL_VORLAUF_MIN, "richtung_lauf_fest_min": AP_RICHTUNG_LAUF_FEST_MIN},
+        "cfd": {"rest_min_usd": AP_REST_MIN_CFD, "puffer_pkt": AP_PUFFER_PKT, "klein_schritt": AP_KLEIN_SCHRITT, "tage_pkt": list(AP_TAGE_CFD_PKT),
+                "tage_puffer_usd": AP_TAGE_PUFFER.get("cfd"), "cfd_ab_standard": AP_CFD_AB_STANDARD, "routen": list(AP_CFD_ROUTEN)},
+        "futures": {"rest_min_usd": AP_REST_MIN, "puffer_pkt": AP_PUFFER_PKT_FUT, "puffer_je_kt_usd": AP_PUFFER_JE_KT_FUT,
+                    "gebuehr_je_kt_usd": AP_GEBUEHR_JE_KT_FUT, "deckel_plus_usd": AP_FUT_DECKEL_PLUS_USD, "punktwert": dict(AP_PUNKTWERT_FUT),
+                    "paar_intern_min": list(AP_PAAR_ABSTAND), "paar_extern_min": list(AP_PAAR_ABSTAND_EXTERN), "paar_pc_min": AP_PAAR_PC_MIN,
+                    "paar_rs_min": AP_PAAR_RS_MIN, "tage_pkt": list(AP_TAGE_FUT_PKT), "tage_puffer_usd": AP_TAGE_PUFFER.get("futures"),
+                    "apex_dd_je_groesse": {str(k): v for k, v in AP_APEX_DD_JE_GROESSE_USD.items()}, "kette_standard": dict(AP_KETTE_STANDARD)},
+    }
+
+
+def ap_einst_wert(alt, neu, feld):
+    """REIN RECHNEND (testbar): neuer Wert für ein vorhandenes Feld → (wert, None) | (None, grund). Gleicher Typ wie alt: Zahl, Spanne [von, bis]
+    (von ≤ bis) oder Ja/Nein (nur AP_EINST_SCHALTER); Zahlen in AP_EINST_GRENZEN[feld]. Unbekanntes Feld oder anderer Typ → nie."""
+    if feld in AP_EINST_SCHALTER:
+        return (neu, None) if isinstance(alt, bool) and isinstance(neu, bool) else (None, f"{feld} = true | false")
+    if feld not in AP_EINST_GRENZEN:
+        return None, f"{feld} ist hier nicht änderbar"
+    lo, hi = AP_EINST_GRENZEN[feld]
+
+    def zahl(x, wie):
+        v = None if isinstance(x, bool) else _wd_num(x)
+        if v is None or not (lo <= v <= hi):
+            return None
+        if isinstance(wie, int) and not float(v).is_integer() and feld in AP_EINST_GANZ:
+            return None                     # ganze Kontrakte / Schritt 1 bleiben ganz (S6-Review: 1,5 NQ, falsche Puffer-Stufe)
+        return int(v) if isinstance(wie, int) and float(v).is_integer() else v   # ganze Zahl bleibt ganz (gleicher Typ wie bisher)
+    if isinstance(alt, (int, float)) and not isinstance(alt, bool):
+        v = zahl(neu, alt)
+        return (v, None) if v is not None else (None, f"{feld} = Zahl {lo:g}–{hi:g}")
+    if isinstance(alt, list) and len(alt) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in alt):
+        if not (isinstance(neu, list) and len(neu) == 2):
+            return None, f"{feld} = [von, bis]"
+        a, b = zahl(neu[0], alt[0]), zahl(neu[1], alt[1])
+        if a is None or b is None or a > b:
+            return None, f"{feld} = [von, bis], {lo:g}–{hi:g}, von ≤ bis"
+        return [a, b], None
+    return None, f"{feld}: bisheriger Wert ist weder Zahl noch Spanne — hier nicht änderbar"
+
+
+def ap_einst_anwenden(firmen, firma, aenderungen):
+    """REIN RECHNEND (testbar): firmen[] (Kopie) + Firmen-Schlüssel (namen[0]) + [{pfad:[…], wert}] → (firmen_neu, None) | (None, grund).
+    Alles oder nichts; jeder Pfad muss schon existieren (nie neue Schlüssel), Tiefe ≤ AP_EINST_PFAD_MAX."""
+    neu = json.loads(json.dumps(firmen or []))
+    ziel = next((f for f in neu if isinstance(f, dict) and (f.get("namen") or [None])[0] == firma), None)
+    if ziel is None:
+        return None, f"Firma {firma!r} nicht in den Kernwerten"
+    if not isinstance(aenderungen, list) or not aenderungen or len(aenderungen) > 60:
+        return None, "aenderungen = Liste mit 1–60 Einträgen"
+    for a in aenderungen:
+        pfad = a.get("pfad") if isinstance(a, dict) else None
+        if not (isinstance(pfad, list) and 1 <= len(pfad) <= AP_EINST_PFAD_MAX and all(isinstance(x, str) and x for x in pfad)):
+            return None, "pfad = Liste von Schlüsseln"
+        if pfad[0] in ("namen", "route", "boden", "symbol"):
+            return None, f"{pfad[0]} ist hier nicht änderbar"
+        knoten = ziel
+        for k in pfad[:-1]:
+            if not isinstance(knoten, dict) or k not in knoten:
+                return None, f"Pfad {'/'.join(pfad)} gibt es nicht"
+            knoten = knoten[k]
+        letzter = pfad[-1]
+        if not isinstance(knoten, dict) or letzter not in knoten:
+            return None, f"Pfad {'/'.join(pfad)} gibt es nicht"
+        # Grenze nach dem letzten Feld-Namen; Größen-Schlüssel („100000" in kauf_eur) und Phasen einer Zuordnung („phase1" in ziel_pct)
+        # nehmen den Namen davor — phasen/phase1/tp bleibt „tp"
+        zuord = lambda k: k.isdigit() or k in AP_EINST_ZUORDNUNG   # noqa: E731
+        feld = letzter if not zuord(letzter) else next((k for k in reversed(pfad[:-1]) if not zuord(k)), letzter)
+        wert, grund = ap_einst_wert(knoten[letzter], a.get("wert"), feld)
+        if grund:
+            return None, f"{'/'.join(pfad)}: {grund}"
+        knoten[letzter] = wert
+    return neu, None
+
+
+@app.route("/admin/auto-plan/einstellungen", methods=["GET", "OPTIONS"])
+def admin_auto_plan_einstellungen():
+    """GET → {ok, admin, firmen, zeiten, aktiv, schalter, echo_hedge, apex_hedge, tradeify_final_hedge, ausgleich, fest, updated_at} — nur lesen.
+    Nur Admin oder eine ID im Auto-Planer (HT): Verwalter-Gruppen sehen die HT-weiten Kernwerte nicht (S6-Review E3)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    regeln = reg.get("regeln") if isinstance(reg.get("regeln"), dict) else {}
+    zeiten = reg.get("zeiten") if isinstance(reg.get("zeiten"), dict) else {}
+
+    def sicher(fn):
+        try:
+            return fn(regeln)
+        except Exception as e:
+            return {"fehler": f"{type(e).__name__}: {e}"}
+    tz_neu, min_neu = ap_nachplan_neu_bis(zeiten)
+    out = {"ok": True, "admin": bool(admin), "updated_at": reg.get("updated_at"), "aktiv": reg.get("aktiv") is True,
+           "firmen": regeln.get("firmen") if isinstance(regeln.get("firmen"), list) else [],
+           "zeiten": dict(zeiten, nachtlauf=ap_nacht_param(zeiten), neu_bis={"tz": tz_neu, "uhr": f"{min_neu // 60:02d}:{min_neu % 60:02d}"}),
+           "schalter": {"auto_bestaetigen": ap_auto_best_umfang(regeln), "abhaken_auto_normal": regeln.get("abhaken_auto_normal") is True,
+                        "abhaken_auto_blow": regeln.get("abhaken_auto_blow") is True, "tradeify_final_halten": regeln.get("tradeify_final_halten") is True},
+           "echo_hedge": sicher(eh_param), "apex_hedge": sicher(ah_param), "tradeify_final_hedge": sicher(tfh_param),
+           "ausgleich": sicher(ap_ausgleich_param), "fest": ap_einst_fest()}
+    resp = jsonify(json.loads(json.dumps(out, default=str)))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/admin/auto-plan/kernwert", methods=["POST", "OPTIONS"])
+def admin_auto_plan_kernwert():
+    """POST {firma: namen[0], aenderungen: [{pfad: [...], wert}]} → regeln.firmen[] (nur vorhandene Felder, s. ap_einst_anwenden). Nur Admin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    body = request.get_json(silent=True) or {}
+    regeln = dict(reg.get("regeln") or {})
+    neu, grund = ap_einst_anwenden(regeln.get("firmen"), str(body.get("firma") or ""), body.get("aenderungen"))
+    if grund:
+        return jsonify({"ok": False, "msg": grund}), 400
+    regeln["firmen"] = neu
+    try:
+        sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    _ap_kw_cache.clear()   # Kontowert/Kernwerte-Antworten (60 s) gleich mit den neuen Werten
+    print(f"[einstellungen] Kernwerte {body.get('firma')}: {len(body.get('aenderungen') or [])} Feld(er) geändert ({uid})", flush=True)
+    return jsonify({"ok": True, "firma": next((f for f in neu if (f.get('namen') or [None])[0] == body.get("firma")), None)})
+
+
 # Nachtlauf-Uhrzeit (07.10.2026, Finn: „heute Nacht schon planen" — 01:00 Dubai statt 00:00 dt, = 23:00 dt Sommer / 22:00 dt
 # Winter am Vorabend). Parameter auto_plan_regeln.zeiten.nachtlauf {uhr, tz}; fehlt er, gilt genau dieser Standard. Geplant wird
 # der Handelstag (Mo–Fr, deutsches Datum), dessen Fenster ab 00:00 dt beginnen: Lauf für Tag T = letztes uhr@tz vor/um T 00:00 dt

@@ -3897,6 +3897,81 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter[open] > summary::after{content:'▴'}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs > :first-child{margin-top:0}
+  /* EINSTELLUNGEN CHALLENGE-PLANER (04.11.2026, E3; Finn: „Nimm dir wirklich gute Zeit, mach kein Rotzdesign"): Guestly-Formensprache
+     (.claude/design-vorlagen-guestly.md) — Karte 16 px Radius, dünner Rand, weicher Schatten, viel Luft, kräftige Überschriften, Lila-Akzent;
+     Farbe nur als kleiner Punkt; gestuft: erst Firma (Kacheln), dann Größe (Segment-Pille), dann Phasen als Kacheln. Eigene Tokens --e3-*. */
+  #e3-einst{--e3-karte:#fff;--e3-kpi:#f3f4f8;--e3-rand:#eceef3;--e3-text:#101828;--e3-sub:#667085;--e3-lila:#5447ce;--e3-lila-bg:#efedfd;--e3-gut:#12a150;
+    --e3-tuerkis:#0d9e9c;--e3-blau:#4996ff;--e3-schatten:0 10px 24px rgba(16,24,40,.06),0 2px 6px rgba(16,24,40,.04);--e3-knopf:#101828;--e3-knopf-text:#fff;
+    --e3-pille:#eef0f4;--e3-pille-an:#fff;--e3-rot:#e5484d;color:var(--e3-text);margin:28px 0 8px}
+  html[data-theme="dark"] #e3-einst{--e3-karte:#151a24;--e3-kpi:#1a2030;--e3-rand:#252c3b;--e3-text:#e7eaf0;--e3-sub:#98a2b3;--e3-lila:#b3aaff;--e3-lila-bg:rgba(136,124,252,.16);
+    --e3-gut:#3ccf7a;--e3-tuerkis:#4fe3e0;--e3-blau:#7ab4ff;--e3-schatten:0 10px 24px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25);--e3-knopf:#f4f5f8;--e3-knopf-text:#101828;
+    --e3-pille:#1f2636;--e3-pille-an:#2c3447;--e3-rot:#ff6b70}
+  #e3-einst .e3-kopf{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:0 2px 16px}
+  #e3-einst .e3-kopf h3{margin:0;font-size:20px;font-weight:650;letter-spacing:-.01em}
+  #e3-einst .e3-kopf p{margin:4px 0 0;color:var(--e3-sub);font-size:12.5px}
+  #e3-einst .e3-legende{margin-left:auto;display:flex;gap:14px;color:var(--e3-sub);font-size:12px;align-items:center;flex-wrap:wrap}
+  #e3-einst .e3-legende span{display:inline-flex;align-items:center;gap:6px}
+  #e3-einst .e3-pt{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--e3-sub);flex:0 0 6px;opacity:.55}
+  #e3-einst .e3-pt.db{background:var(--e3-gut);opacity:1}
+  #e3-einst .e3-oben{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px}
+  #e3-einst .e3-karte{background:var(--e3-karte);border:1px solid var(--e3-rand);border-radius:16px;box-shadow:var(--e3-schatten);padding:18px 20px;min-width:0}
+  #e3-einst .e3-karte h4{margin:0 0 12px;font-size:15px;font-weight:600}
+  #e3-einst .e3-karte h4 small{display:block;margin-top:3px;font-size:12px;font-weight:400;color:var(--e3-sub)}
+  #e3-einst .e3-herkunft{float:right;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:400;color:var(--e3-sub);margin-top:2px}
+  #e3-einst .e3-z{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--e3-rand);font-size:13px;min-height:22px}
+  #e3-einst .e3-z:first-of-type{border-top:0}
+  #e3-einst .e3-z > span{display:inline-flex;align-items:center;gap:8px;color:var(--e3-sub);min-width:0}
+  #e3-einst .e3-z > em{font-style:normal;font-variant-numeric:tabular-nums;text-align:right;color:var(--e3-text);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  #e3-einst .e3-z > em small{color:var(--e3-sub);font-size:11.5px}
+  #e3-einst .e3-hinweis{margin-top:12px;font-size:12px;color:var(--e3-sub);line-height:1.45}
+  #e3-einst .e3-schalt{appearance:none;-webkit-appearance:none;width:32px;height:18px;border-radius:999px;background:var(--e3-rand);position:relative;cursor:pointer;margin:0;transition:background .15s}
+  #e3-einst .e3-schalt::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.25);transition:left .15s}
+  #e3-einst .e3-schalt:checked{background:var(--e3-lila)} #e3-einst .e3-schalt:checked::after{left:16px}
+  #e3-einst .e3-schalt:disabled{opacity:.5;cursor:default}
+  #e3-einst .e3-titel{display:flex;align-items:flex-end;gap:12px;margin:30px 2px 12px}
+  #e3-einst .e3-titel b{font-size:16px;font-weight:600} #e3-einst .e3-titel span{color:var(--e3-sub);font-size:12.5px}
+  #e3-einst .e3-firmen{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+  #e3-einst .e3-fk{all:unset;box-sizing:border-box;cursor:pointer;background:var(--e3-kpi);border:1px solid transparent;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+  #e3-einst .e3-fk:hover{border-color:var(--e3-rand)}
+  #e3-einst .e3-fk.an{background:var(--e3-karte);border-color:var(--e3-lila);box-shadow:var(--e3-schatten)}
+  #e3-einst .e3-fk:focus-visible{outline:2px solid var(--e3-lila);outline-offset:2px}
+  #e3-einst .e3-fk b{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--e3-text)}
+  #e3-einst .e3-fk small{color:var(--e3-sub);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #e3-einst .e3-fk .aus{color:#b45309}
+  #e3-einst .e3-mod{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:var(--e3-lila)}
+  #e3-einst .e3-mod.orbit{background:var(--e3-tuerkis)} #e3-einst .e3-mod.topstep{background:var(--e3-blau)}
+  #e3-einst .e3-detail-kopf{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  #e3-einst .e3-detail-kopf h4{margin:0;font-size:18px;font-weight:650}
+  #e3-einst .e3-detail-kopf .meta{margin-top:5px;color:var(--e3-sub);font-size:12.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #e3-einst .e3-weg{display:inline-flex;align-items:center;gap:6px;background:var(--e3-lila-bg);color:var(--e3-lila);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+  #e3-einst .e3-rechts{margin-left:auto;display:flex;align-items:center;gap:10px}
+  #e3-einst .e3-knopf{background:var(--e3-knopf);color:var(--e3-knopf-text);border:0;border-radius:10px;padding:8px 16px;font:600 13px/1 inherit;cursor:pointer}
+  #e3-einst .e3-knopf:disabled{opacity:.35;cursor:default}
+  #e3-einst .e3-msg{font-size:12px;color:var(--e3-sub)} #e3-einst .e3-msg.ok{color:var(--e3-gut)} #e3-einst .e3-msg.fehler{color:var(--e3-rot)}
+  #e3-einst .e3-pille{display:inline-flex;flex-wrap:wrap;background:var(--e3-pille);border-radius:999px;padding:4px;gap:2px;margin-bottom:18px}
+  #e3-einst .e3-pille button{border:0;background:transparent;color:var(--e3-sub);font:600 12.5px/1 inherit;padding:8px 14px;border-radius:999px;cursor:pointer}
+  #e3-einst .e3-pille button.an{background:var(--e3-pille-an);color:var(--e3-text);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  #e3-einst .e3-pille button i{font-style:normal;color:var(--e3-lila);margin-left:4px}
+  #e3-einst .e3-teil{font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--e3-sub);margin:4px 0 10px}
+  #e3-einst .e3-teil + .e3-felder,#e3-einst .e3-teil + .e3-phasen{margin-bottom:20px}
+  #e3-einst .e3-felder{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+  #e3-einst .e3-feld{background:var(--e3-kpi);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+  #e3-einst .e3-feld > span{font-size:11.5px;color:var(--e3-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #e3-einst .e3-feld > em{font-style:normal;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  #e3-einst .e3-feld > em small,#e3-einst .e3-phase .e3-z small{font-weight:400;color:var(--e3-sub);font-size:11.5px}
+  #e3-einst .e3-phasen{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+  #e3-einst .e3-phase{background:var(--e3-kpi);border-radius:14px;padding:12px 16px 8px;min-width:0}
+  #e3-einst .e3-phase h5{margin:2px 0 6px;font-size:13.5px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+  #e3-einst .e3-phase h5 small{font-weight:400;color:var(--e3-sub);font-size:11.5px}
+  #e3-einst .e3-phase .e3-z{border-top-color:rgba(127,127,127,.14)}
+  #e3-einst .e3-in{width:82px;height:30px;box-sizing:border-box;border:1px solid var(--e3-rand);border-radius:8px;background:var(--e3-karte);color:var(--e3-text);
+    padding:0 8px;font:500 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right}
+  #e3-einst .e3-in:focus{outline:none;border-color:var(--e3-lila);box-shadow:0 0 0 3px var(--e3-lila-bg)}
+  #e3-einst .e3-in.geaendert{border-color:var(--e3-lila);background:var(--e3-lila-bg)}
+  #e3-einst .e3-bis{color:var(--e3-sub);margin:0 2px}
+  #e3-einst .e3-leer{color:var(--e3-sub);font-size:13px;padding:6px 0}
+  @media (max-width:820px){#e3-einst .e3-firmen{grid-template-columns:repeat(2,minmax(0,1fr))} #e3-einst .e3-in{width:72px;height:36px}
+    #e3-einst .e3-rechts{margin-left:0;width:100%} #e3-einst .e3-legende{margin-left:0}}
   /* FUNDED-CFD-REGELFELD (30.10.2026): Regeln je Firma × Größe als Karten wie die WD-Einstellungen (wd-set-card), klappbar wie „Schalter" */
   #ap-ids-root.ap-guestly .fcr-grid.fcr-news{flex-basis:100%;margin:4px 0 6px;grid-template-columns:minmax(0,560px)}   /* News-Kachel im Regelteil (30.10.2026) */
   #ap-ids-root.ap-guestly .fcr-news-schalter{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
@@ -12853,6 +12928,9 @@
             <div class="wd-ueb-graf apv-graf" id="apv-chart"></div>
             <div class="kis-s apv-msg" id="apv-msg"></div>
           </div>
+          <!-- EINSTELLUNGEN (04.11.2026, Auftrag E3; Finn: „Alle Inputs, die ich euch je Prop-Firma gegeben habe … unten visuell und änderbar"):
+               nur Challenge Planer → CFD bzw. → Futures, eigener Kasten (nicht in #ap-ids-root, das im Takt neu zeichnet) — Zeichnen im Modul (e3*) -->
+          <div class="e3-einst" id="e3-einst" hidden></div>
         </div>
         <!-- FUNDED CFD (30.10.2026, PLANER-TAB Schritt 1): nur die Hülle — dasselbe Gerüst wie Challenge/Funded Futures, Inhalt „kommt" -->
         <!-- FUNDED CFD (30.10.2026, PLANER-TAB): Hülle im Guestly-Gerüst wie Challenge/Funded Futures — gebaut von apgHuelleHtml (Modul), leer, „kommt" -->
@@ -85513,7 +85591,263 @@
     if(Q.vorschau) root.querySelectorAll('.ap-gr-offen .ap-adm-kopf b').forEach(b => { b.textContent = b.textContent.replace(/^Zu bestätigen/, 'Vorschau') })
     root.querySelectorAll('.ap-gr-offen .ap-adm-kopf span').forEach(s => { s.textContent = Q.vorschau ? 'Trockenlauf des Funded-Planers · nichts angelegt, bis er scharf ist · Zeiten Dubai' : s.textContent })
   }
+  /* ══ EINSTELLUNGEN CHALLENGE-PLANER (04.11.2026, Auftrag E3; Finn ~17:30: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute
+   * nur im Code stecken, sollen unten visuell und änderbar stehen — je Modell andere Parameter … und überall sehen, welches Modell genutzt wird";
+   * Nachtrag: „Nimm dir wirklich gute Zeit, mach kein Rotzdesign"). Unten auf Challenge Planer → CFD bzw. → Futures (#e3-einst, außerhalb von
+   * #ap-ids-root, das im Takt neu zeichnet), Guestly-Formensprache. Aufbau: vier Karten (Ablauf · Weg & Hedge · Waage · Fest im Code), darunter
+   * „Firmen": je Firma eine Kachel → Detailkarte mit Größen-Pille (Standard · 50k · 100k …) und den Phasen als Kacheln.
+   * JE GRÖSSE: der Planer mischt regel.je_groesse[Größe] flach über die Firma (dict(regel, **jg), app.py) — was die Größe selbst trägt, ist dort
+   * änderbar (Pfad je_groesse/…), alles andere steht „wie Standard" ohne Eingabe (sonst änderte man unbemerkt alle Größen). ZIEL %: ziel_pct
+   * {phase: %} am Knoten gewinnt vor phasen.<phase>.ziel_pct (app.py ~22997) — gezeigt und änderbar ist nur der wirksame Wert.
+   * Daten GET /admin/auto-plan/einstellungen (60 s gemerkt). Ändern nur Admin: Kernwerte über POST /kernwert (nur vorhandene Felder, gleicher
+   * Typ, Grenzen im Backend), Hedge-/Ausgleich-Schalter über die bestehende POST /ausgleich-einstellung. Punkt grün = Regel-Tabelle (DB),
+   * grau = fest im Code. Zeiten und Auto-Bestätigen haben hier (noch) keinen Schreibweg. ══ */
+  const _e3 = { d: null, at: 0, laeuft: false, fehler: '', art: null, msg: {}, wahl: {} }   // wahl: art → { firma, tab }
+  const E3_FRISCH_MS = 60000
+  const E3_AENDERBAR = new Set(['ziel_pct', 'boden_pct', 'dd_pct', 'ab_dd_pct', 'tp', 'sl', 'puffer', 'tp_max', 'dd_usd', 'daily_usd', 'tagesziel_usd',
+    'blow_puffer_usd', 't1_sl', 't1_tp', 'menge', 't2_menge', 'menge_schritt', 'kauf_eur'])   // = AP_EINST_GRENZEN (app.py)
+  const E3_SCHALTER = new Set(['planen', 'lock_bei_start', 'soft'])                          // = AP_EINST_SCHALTER (app.py)
+  const E3_FIRMA = { tradeify: 'Tradeify', apextrader: 'Apex Trader', fundednext: 'FundedNext', fundingpips: 'FundingPips', the5ers: 'The5%ers',
+    topstep: 'Topstep', ftmo: 'FTMO', fundednextfutures: 'FundedNext Futures', blueguardian: 'Blue Guardian', lucidtrading: 'Lucid Trading',
+    tradeifycfd: 'Tradeify CFD', ftmofutures: 'FTMO Futures' }
+  const E3_PHASE = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2' }
+  const E3_KONTO = [['kauf_eur', 'Kaufpreis', '€'], ['dd_usd', 'Drawdown', '$'], ['dd_pct', 'Drawdown', '%'], ['ab_dd_pct', 'ab Drawdown', '%'], ['daily_usd', 'Tagesverlust', '$'],
+    ['tp_max', 'TP höchstens', '$'], ['max_konten_tag', 'Konten je Tag', ''], ['planen', 'automatisch planen', ''], ['lock_bei_start', 'Lock beim Start', ''],
+    ['soft', 'weicher Tagesstopp', ''], ['skaliert', 'skaliert', '']]
+  const E3_PH_FELDER = [['tp', 'TP', '$'], ['sl', 'SL', '$'], ['menge', null, ''], ['menge_schritt', 'Schritt', ''], ['puffer', 'Puffer', '$'],
+    ['puffer_je_menge', 'Puffer je Menge', '$'], ['menge_gewichte', 'Gewichte', '%'], ['boden_pct', 'Boden', '% DD'], ['dd_usd', 'Drawdown', '$'], ['tp_max', 'TP höchstens', '$']]
+  const E3_KETTE = [['t1_bis', 'Trade 1 bis', ''], ['t1_sl', 'Trade 1 SL', '$'], ['t1_tp', 'Trade 1 TP', '$'], ['menge', 'Kontrakte', ''], ['t2_ab', 'Trade 2 ab', ''],
+    ['t2_bis', 'Trade 2 bis', ''], ['t2_menge', 'Trade 2 Kontrakte', ''], ['puffer', 'Puffer', '$'], ['daily_usd', 'Tagesverlust', '$'], ['tagesziel_usd', 'Tagesziel', '$'],
+    ['blow_puffer_usd', 'Blow-Puffer', '$'], ['t2_abstand_min', 'Abstand T2', 'min'], ['t2_streuung_min', 'Streuung T2', 'min']]
+  const e3E = s => escapeHtml(String(s == null ? '' : s))
+  const e3Z = v => typeof v === 'number' && isFinite(v) ? v.toLocaleString('de-DE', { maximumFractionDigits: 4 }) : v == null ? '—' : typeof v === 'boolean' ? (v ? 'ja' : 'nein') : e3E(v)
+  const e3Gr = k => /^\d+$/.test(String(k)) ? (Number(k) >= 1000 ? Math.round(Number(k) / 1000) + 'k' : String(k)) : e3E(k)   // nie roh ins HTML
+  const e3Spanne = v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'number')
+  const e3Sp = v => e3Spanne(v) ? (v[0] === v[1] ? e3Z(v[0]) : `${e3Z(v[0])} – ${e3Z(v[1])}`) : e3Z(v)
+  const e3Zeit = z => z && typeof z === 'object' ? `${e3E(z.uhr || '?')} ${z.tz === 'Asia/Dubai' ? 'Dubai' : z.tz === 'Europe/Berlin' ? 'dt' : e3E(z.tz || '')}` : z ? e3E(z) + ' dt' : '—'
+  const e3ArtVon = f => (f && (f.route === 'mt5v2' || f.route === 'mt5')) ? 'cfd' : 'futures'
+  const e3Name = f => E3_FIRMA[(f.namen || [])[0]] || (f.namen || [])[0] || '?'
+  function e3Modell(f, D){
+    const n = (f.namen || [])[0] || '', eh = D.echo_hedge || {}, ah = D.apex_hedge || {}, tf = D.tradeify_final_hedge || {}
+    if(e3ArtVon(f) === 'cfd') return { text: eh.an ? 'Echo mit Hedge' : 'Echo V2', kl: 'echo' }
+    if(f.route === 'tsv2') return { text: 'Topstep V2', kl: 'topstep' }
+    if(/apex/.test(n)) return { text: ah.an ? 'Orbit + Fusion-Hedge' : 'Orbit V2', kl: 'orbit' }
+    if(n === 'tradeify') return { text: tf.an ? 'Orbit V2 · Final mit Gegenhedge' : 'Orbit V2', kl: 'orbit' }
+    return { text: 'Orbit V2', kl: 'orbit' }
+  }
+  // Wert als Eingabe (Admin, änderbares Feld, Pfad bekannt) oder als Text; erbt = kommt vom Standard (kein Pfad) → „wie Standard"
+  function e3Wert(wert, pfad, feld, admin, einheit){
+    const p = pfad ? e3E(JSON.stringify(pfad)) : '', darf = admin && pfad && (E3_AENDERBAR.has(feld) || E3_SCHALTER.has(feld))
+    const ein = einheit ? ` <small>${e3E(einheit)}</small>` : ''
+    if(darf && E3_SCHALTER.has(feld) && typeof wert === 'boolean') return `<input type="checkbox" class="e3-schalt" data-e3-pfad="${p}" data-e3-alt="${wert ? 1 : 0}"${wert ? ' checked' : ''} aria-label="${e3E(feld)}">`
+    const schritt = Number.isInteger(wert) && ['menge', 't2_menge', 'menge_schritt'].includes(feld) ? '1' : 'any'   // ganze Kontrakte bleiben ganz (Backend AP_EINST_GANZ)
+    if(darf && typeof wert === 'number') return `<input type="number" step="${schritt}" class="e3-in" data-e3-pfad="${p}" data-e3-alt="${wert}" value="${wert}" aria-label="${e3E(feld)}">${ein}`
+    if(darf && e3Spanne(wert)) return `<input type="number" step="${Number.isInteger(wert[0]) && ['menge', 't2_menge'].includes(feld) ? 1 : 'any'}" class="e3-in" data-e3-pfad="${p}" data-e3-i="0" data-e3-alt="${wert[0]}" value="${wert[0]}" aria-label="${e3E(feld)} von"><span class="e3-bis">–</span><input type="number" step="any" class="e3-in" data-e3-pfad="${p}" data-e3-i="1" data-e3-alt="${wert[1]}" value="${wert[1]}" aria-label="${e3E(feld)} bis">${ein}`
+    if(wert == null) return feld === 'sl' ? '<small>kein SL</small>' : feld === 'tp' ? '<small>aus der Regel</small>' : '—'
+    if(wert && typeof wert === 'object' && !Array.isArray(wert)) return Object.entries(wert).map(([k, v]) => `${e3E(k)}: ${e3Sp(v)}`).join(' · ') + ein
+    return (e3Spanne(wert) ? e3Sp(wert) : e3Z(wert)) + ein
+  }
+  // wirksamer Knoten eines Reiters: tab 'std' = Firma; Größe g = dict(firma, **je_groesse[g]); 'flex:g' = dict(firma, **flex, **flex.je_groesse[g])
+  // → (k) => { v, pfad|null } — pfad null = geerbt (nur ansehen)
+  function e3Quelle(f, tab){
+    const jg = /^\d+$/.test(tab) ? ((f.je_groesse || {})[tab] || {}) : null
+    const fx = /^flex:/.test(tab) ? (f.flex || {}) : null, fxg = fx ? ((fx.je_groesse || {})[tab.slice(5)] || {}) : null
+    return k => {
+      if(fxg && k in fxg) return { v: fxg[k], pfad: ['flex', 'je_groesse', tab.slice(5), k] }
+      if(fx && (k === 'dd_pct' || k === 'ab_dd_pct') && k in fx) return { v: fx[k], pfad: ['flex', k] }   // ap_regel_flex nimmt aus flex nur je_groesse + dd_pct (ab_dd_pct = Erkennung)
+      if(jg && k in jg) return { v: jg[k], pfad: ['je_groesse', tab, k] }
+      return { v: f[k], pfad: (jg || fx) ? null : [k], erbt: !!(jg || fx) && k in f }
+    }
+  }
+  const e3Feld = (label, inhalt, erbt) => `<div class="e3-feld"><span>${e3E(label)}${erbt ? ' · wie Standard' : ''}</span><em>${inhalt}</em></div>`
+  function e3TabHtml(f, tab, art, admin){
+    const q = e3Quelle(f, tab), gr = /^\d+$/.test(tab) ? tab : /^flex:/.test(tab) ? tab.slice(5) : null
+    // Konto
+    const konto = []
+    for(const [k, label, einh] of E3_KONTO){
+      const x = q(k); if(x.v === undefined) continue
+      if(k === 'kauf_eur' && x.v && typeof x.v === 'object'){
+        const groessen = gr ? [gr] : Object.keys(x.v)
+        for(const g of groessen) if(g in x.v) konto.push(e3Feld(`${label} ${e3Gr(g)}`, e3Wert(x.v[g], x.pfad ? x.pfad.concat([g]) : (gr ? ['kauf_eur', g] : null), 'kauf_eur', admin, einh), false))
+        continue
+      }
+      konto.push(e3Feld(label, e3Wert(x.v, x.pfad, k, admin, einh), x.erbt))
+    }
+    // Phasen + Ziel % (wirksamer Wert: ziel_pct-Zuordnung am Knoten vor dem Feld der Phase)
+    const ph = q('phasen'), zp = q('ziel_pct')
+    const phasen = Object.entries((ph.v && typeof ph.v === 'object') ? ph.v : {}).map(([pk, pv]) => {
+      const zMap = zp.v && typeof zp.v === 'object' && zp.v[pk] != null
+      const ziel = zMap ? e3Wert(zp.v[pk], zp.pfad ? zp.pfad.concat([pk]) : null, 'ziel_pct', admin, '%')
+        : e3Wert(pv.ziel_pct, ph.pfad ? ph.pfad.concat([pk, 'ziel_pct']) : null, 'ziel_pct', admin, '%')
+      const zErbt = zMap ? !zp.pfad : !ph.pfad   // geerbt vom Standard (Größe/Flex ohne eigenes Ziel) → nur ansehen
+      const zeilen = [`<div class="e3-z"><span>Ziel${zErbt && !ph.erbt ? ' <small>· wie Standard</small>' : ''}</span><em>${ziel}</em></div>`]
+      for(const [k, label, einh] of E3_PH_FELDER){
+        if(!(k in pv)) continue
+        zeilen.push(`<div class="e3-z"><span>${e3E(label || (art === 'futures' ? 'Kontrakte' : 'Lots'))}</span><em>${e3Wert(pv[k], ph.pfad ? ph.pfad.concat([pk, k]) : null, k, admin, einh)}</em></div>`)
+      }
+      return `<div class="e3-phase"><h5>${e3E(E3_PHASE[pk] || pk)}${ph.erbt ? '<small>wie Standard</small>' : ''}</h5>${zeilen.join('')}</div>`
+    })
+    let extra = ''
+    if(tab === 'std' && f.kette && typeof f.kette === 'object'){
+      const z = E3_KETTE.filter(([k]) => k in f.kette).map(([k, label, einh]) => `<div class="e3-z"><span>${e3E(label)}</span><em>${e3Wert(f.kette[k], ['kette', k], k, admin, einh)}</em></div>`)
+      if(f.kette.menge_gewichte) z.push(`<div class="e3-z"><span>Gewichte Kontrakte</span><em>${e3Wert(f.kette.menge_gewichte, null, 'menge_gewichte', false, '%')}</em></div>`)
+      extra += `<div class="e3-phase"><h5>Topstep-Kette<small>zwei Trades am Tag</small></h5>${z.join('')}</div>`
+    }
+    if(tab === 'std' && f.gewinntage && typeof f.gewinntage === 'object')
+      extra += `<div class="e3-phase"><h5>Gewinntage<small>Mindesttage</small></h5>${Object.entries(f.gewinntage).map(([k, v]) => `<div class="e3-z"><span>${e3E(k === 'tp' ? 'TP' : k)}</span><em>${e3Wert(v, ['gewinntage', k], k, admin, '$')}</em></div>`).join('')}</div>`
+    return (konto.length ? `<div class="e3-teil">Konto${gr ? ' · ' + e3Gr(gr) : ''}</div><div class="e3-felder">${konto.join('')}</div>` : '')
+      + (phasen.length || extra ? `<div class="e3-teil">${art === 'futures' ? 'Trade' : 'Phasen'}</div><div class="e3-phasen">${phasen.join('')}${extra}</div>` : '')
+  }
+  function e3Tabs(f){
+    const gr = [...new Set([...(f.groessen || []), ...Object.keys(f.je_groesse || {})].map(String))].sort((a, b) => Number(a) - Number(b))
+    const fx = f.flex && f.flex.je_groesse ? Object.keys(f.flex.je_groesse).sort((a, b) => Number(a) - Number(b)).map(g => 'flex:' + g) : []
+    return ['std', ...gr, ...fx]
+  }
+  function e3DetailHtml(f, D, art, admin){
+    const n = (f.namen || [])[0] || '?', tabs = e3Tabs(f), w = _e3.wahl[art] || {}
+    const tab = tabs.includes(w.tab) ? w.tab : 'std', m = e3Modell(f, D), msg = _e3.msg[n]
+    const eigen = t => /^\d+$/.test(t) ? !!(f.je_groesse || {})[t] : /^flex:/.test(t)
+    const pille = tabs.length > 1 ? `<div class="e3-pille" role="tablist">${tabs.map(t => `<button type="button" role="tab" data-e3-tab="${e3E(t)}" class="${t === tab ? 'an' : ''}" aria-selected="${t === tab}"
+      title="${t === 'std' ? 'Werte der Firma — gelten für jede Größe ohne eigene Abweichung' : eigen(t) ? 'diese Größe hat eigene Werte' : 'keine eigenen Werte — wie Standard'}">${t === 'std' ? 'Standard' : /^flex:/.test(t) ? 'Flex ' + e3Gr(t.slice(5)) : e3Gr(t)}${t !== 'std' && eigen(t) ? '<i>•</i>' : ''}</button>`).join('')}</div>` : ''
+    const meta = [f.boden ? 'Boden ' + f.boden : '', f.symbol || '', f.planen === false ? '<span class="aus" style="color:#b45309">nicht automatisch geplant</span>' : ''].filter(Boolean)
+    return `<div class="e3-karte e3-detail" data-e3-firma="${e3E(n)}">
+      <div class="e3-detail-kopf"><div><h4>${e3E(e3Name(f))}</h4><div class="meta"><span class="e3-weg"><i class="e3-mod ${m.kl}"></i>${e3E(m.text)}</span>${meta.map(x => /^</.test(x) ? x : e3E(x)).join(' · ')}</div></div>
+        <div class="e3-rechts">${msg ? `<span class="e3-msg ${msg.ok ? 'ok' : 'fehler'}">${e3E(msg.text)}</span>` : ''}${admin ? `<button type="button" class="e3-knopf" data-e3-speichern="${e3E(n)}">Speichern</button>` : ''}</div></div>
+      ${pille}${e3TabHtml(f, tab, art, admin)}</div>`
+  }
+  // Herkunft steht im Kartenkopf (e3Herkunft); nur in der gemischten Karte „Waage" trägt eine Code-Zeile den grauen Punkt (quelle 'code')
+  const e3Zeile = (label, wert, quelle, gemischt) => `<div class="e3-z"><span>${gemischt ? `<i class="e3-pt${quelle === 'db' ? ' db' : ''}"></i>` : ''}${e3E(label)}</span><em>${wert}</em></div>`
+  const e3Herkunft = q => `<span class="e3-herkunft"><i class="e3-pt${q === 'db' ? ' db' : ''}"></i>${q === 'db' ? 'Regel-Tabelle' : q === 'code' ? 'fest im Code' : 'gemischt'}</span>`
+  const e3An = (feld, an, admin) => admin ? `<input type="checkbox" class="e3-schalt" data-e3-schalter="${feld}"${an ? ' checked' : ''} aria-label="${e3E(feld)}">` : (an ? 'an' : 'aus')
+  function e3ObenHtml(D, art, admin){
+    const z = D.zeiten || {}, s = D.schalter || {}, eh = D.echo_hedge || {}, ah = D.apex_hedge || {}, tf = D.tradeify_final_hedge || {}, au = D.ausgleich || {}
+    const F = D.fest || {}, fb = F.beide || {}, fa = F[art] || {}
+    const fenster = Array.isArray(z.fenster) ? z.fenster.map(f => `${e3E(f[0])}–${e3E(f[1])}`).join(', ') + (z.fenster_tz === 'Asia/Dubai' ? ' Dubai' : ' dt') : '—'
+    const ab = s.auto_bestaetigen === 'alle' ? 'alle Challenges' : s.auto_bestaetigen === 'cfd' ? (art === 'cfd' ? 'von selbst' : 'von Hand') : 'von Hand'
+    const ablauf = `<div class="e3-karte"><h4>${e3Herkunft('db')}Ablauf<small>Nachtlauf, Fenster, Bestätigen</small></h4>
+      ${e3Zeile('Nachtlauf', `${D.aktiv ? '' : 'aus · '}${e3Zeit(z.nachtlauf)}`, 'db')}${e3Zeile('Start-Fenster', fenster, 'db')}
+      ${e3Zeile('Spätester Start', e3Zeit(z.fenster_tz ? { uhr: z.start_bis, tz: z.fenster_tz } : z.start_bis), 'db')}
+      ${art === 'cfd' ? e3Zeile('CFD', `${e3Zeit(z.cfd_ab)} – ${e3Zeit(z.cfd_bis)}`, 'db') : ''}
+      ${e3Zeile('Neue Konten bis', e3Zeit(z.neu_bis), z.neu_bis && z.neu_bis.uhr ? 'db' : 'code')}
+      ${z.abstand_id_min != null ? e3Zeile('Abstand je ID', e3Z(z.abstand_id_min) + ' min', 'db') : ''}${z.pause_firma_min ? e3Zeile('Pause je Firma', e3Sp(z.pause_firma_min) + ' min', 'db') : ''}
+      ${e3Zeile('Bestätigen', ab, 'db')}${e3Zeile('Abhaken', s.abhaken_auto_normal ? 'von selbst' : 'von Hand', 'db')}
+      <div class="e3-hinweis">Zeiten und Bestätigen ändert weiter der Master — hier zum Nachsehen.</div></div>`
+    const weg = art === 'cfd'
+      ? `<div class="e3-karte"><h4>${e3Herkunft('db')}Weg &amp; Hedge<small>CFD-Challenges laufen über Echo</small></h4>
+        ${e3Zeile('Echo mit Fusion-Hedge', e3An('echo_hedge', eh.an, admin), 'db')}${e3Zeile('Hedge nachrechnen', 'ab ' + e3Z(eh.vorlauf_min) + ' min vor dem Start', 'db')}
+        ${e3Zeile('Nachlauf', e3Z(eh.nachlauf_min) + ' min', 'db')}${e3Zeile('Netto-Faktor', e3Z(eh.netto_faktor), 'db')}
+        ${e3Zeile('Mindest-Lot', e3Z(eh.min_lot), 'db')}${e3Zeile('Fusion gleichzeitig', 'bis ' + e3Z(eh.max_lots) + ' Lot', 'db')}
+        <div class="e3-hinweis">Der Planer legt jede CFD-Challenge gleich als Echo mit Hedge an. Ist kein Hedge stellbar, wird das Konto nicht geplant.</div></div>`
+      : `<div class="e3-karte"><h4>${e3Herkunft('db')}Weg &amp; Hedge<small>Orbit · Orbit V2 · Topstep V2 · Nova (bald)</small></h4>
+        ${e3Zeile('Apex mit Fusion-Hedge', e3An('apex_hedge', ah.an, admin), 'db')}${e3Zeile('Apex umstellen', e3Z(ah.vorlauf_min) + ' min vor dem Start', 'db')}
+        ${e3Zeile('Tradeify-Final mit Gegenhedge', e3An('tradeify_final_hedge', tf.an, admin), 'db')}${e3Zeile('Final halten, bis Hedge da', s.tradeify_final_halten ? 'ja' : 'nein', 'db')}
+        ${e3Zeile('Fusion gleichzeitig', 'bis ' + e3Z(eh.max_lots) + ' Lot', 'db')}
+        <div class="e3-hinweis">Weg je Firma steht an der Firma (Kachel unten). Big Trades mit Hedge plant der Funded-Planer.</div></div>`
+    const waage = `<div class="e3-karte"><h4>${e3Herkunft('gemischt')}Waage &amp; Abstände<small>${art === 'cfd' ? 'Long/Short in €' : 'Long/Short in Trades'}</small></h4>
+      ${e3Zeile('Ausgleich-Bot', e3An('aktiv', au.aktiv, admin), 'db', 1)}${e3Zeile('startet selbst', e3An('auto_start', au.auto_start, admin), 'db', 1)}
+      ${e3Zeile('Takt', e3Z(au.takt_min) + ' min', 'db', 1)}
+      ${art === 'cfd' ? e3Zeile('Zielband', e3Z(au.zielband_pct) + ' %', 'db', 1) + e3Zeile('groß ab', e3Z(au.gross_ab_eur) + ' €', 'db', 1)
+        : e3Zeile('Abstand höchstens', e3Z(au.waage_max_abstand) + ' Trades', 'db', 1) + e3Zeile('harter Deckel', au.waage_deckel_an ? 'an' : 'aus', 'db', 1)}
+      ${e3Zeile('Firmen-Abstand', e3Z(fb.firma_abstand_min) + ' min', 'code', 1)}
+      ${art === 'futures' ? e3Zeile('Paar extern', e3Sp(fa.paar_extern_min) + ' min', 'code', 1) + e3Zeile('Paar intern', e3Sp(fa.paar_intern_min) + ' min', 'code', 1)
+        + e3Zeile('gleicher PC frei', '± ' + e3Z(fa.paar_pc_min) + ' min', 'code', 1) + e3Zeile('Richtungsschutz', '± ' + e3Z(fa.paar_rs_min) + ' min', 'code', 1) : ''}
+      ${e3Zeile('Richtung fest nach Start', e3Z(fb.richtung_lauf_fest_min) + ' min', 'code', 1)}</div>`
+    const fest = `<div class="e3-karte"><h4>${e3Herkunft('code')}Fest im Code<small>gilt für alle Firmen · ändert der Master</small></h4>
+      ${e3Zeile('kein Auto-Trade unter', e3Z(fa.rest_min_usd) + ' $ Rest', 'code')}
+      ${e3Zeile('Puffer letzter Trade', e3Z(fa.puffer_pkt) + ' Pkt' + (art === 'futures' ? ' · ' + e3Z(fa.puffer_je_kt_usd) + ' $/Kt' : ''), 'code')}
+      ${art === 'futures' ? e3Zeile('Gebühr · Deckel', `${e3Z(fa.gebuehr_je_kt_usd)} $/Kt · +${e3Z(fa.deckel_plus_usd)} $`, 'code') : e3Zeile('Klein-Trade Lot-Schritt', e3Z(fa.klein_schritt), 'code')}
+      ${e3Zeile('Klein-Trade', `${e3Z(fb.klein_pkt)} Pkt · ab ${e3Z(fb.klein_puffer_min_usd)} $`, 'code')}
+      ${e3Zeile('Mindesttage-Trade', `${e3Sp(fa.tage_pkt)} Pkt · +${e3Z(fa.tage_puffer_usd)} $`, 'code')}
+      ${e3Zeile('Größe passt nicht ab', e3Z(fb.groesse_toleranz_pct) + ' %', 'code')}${e3Zeile('Nachplanen frühestens', '+' + e3Z(fb.nachplan_vorlauf_min) + ' min', 'code')}
+      ${e3Zeile('fällig, kein Umplanen', e3Z(fb.faellig_min) + ' min vorher', 'code')}</div>`
+    return ablauf + weg + waage + fest
+  }
+  function e3Html(D, art){
+    const admin = D.admin === true, firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
+    const w = _e3.wahl[art] = _e3.wahl[art] || {}
+    if(!firmen.some(f => (f.namen || [])[0] === w.firma)) w.firma = firmen.length ? (firmen[0].namen || [])[0] : null
+    const sel = firmen.find(f => (f.namen || [])[0] === w.firma)
+    const stand = D.updated_at ? 'zuletzt geändert ' + new Date(D.updated_at).toLocaleString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : ''
+    const kachel = f => { const n = (f.namen || [])[0], m = e3Modell(f, D), gr = (f.groessen || []).map(e3Gr).join(' · ')
+      return `<button type="button" class="e3-fk${n === w.firma ? ' an' : ''}" data-e3-wahl="${e3E(n)}" aria-pressed="${n === w.firma}"><b><i class="e3-mod ${m.kl}"></i>${e3E(e3Name(f))}</b>
+        <small>${e3E(m.text)}${gr ? ' · ' + e3E(gr) : ''}</small>${f.planen === false ? '<small class="aus">nicht automatisch geplant</small>' : ''}</button>` }
+    return `<div class="e3-kopf"><div><h3>Einstellungen · ${art === 'cfd' ? 'CFD' : 'Futures'}</h3><p>${admin ? 'Werte je Firma ändern und speichern — gilt ab dem nächsten Planer-Lauf' : 'nur ansehen'}${stand ? ' · ' + e3E(stand) : ''}</p></div>
+</div>
+      <div class="e3-oben">${e3ObenHtml(D, art, admin)}</div>
+      <div class="e3-titel"><b>Firmen</b><span>${firmen.length} ${art === 'cfd' ? 'CFD' : 'Futures'}-Firmen · Firma wählen, dann Größe</span></div>
+      ${firmen.length ? `<div class="e3-firmen">${firmen.map(kachel).join('')}</div>${sel ? e3DetailHtml(sel, D, art, admin) : ''}` : '<div class="e3-leer">Keine Firma mit Kernwerten für diese Art.</div>'}`
+  }
+  async function e3Laden(){
+    if(_e3.laeuft) return
+    _e3.laeuft = true
+    try{ _e3.d = await apdApi('GET', '/einstellungen'); _e3.fehler = '' }
+    catch(e){ _e3.fehler = (e && e.status === 404) ? '' : ((e && e.message) || String(e)); if(e && e.status === 404) _e3.d = null }
+    finally{ _e3.laeuft = false; _e3.at = Date.now(); e3EinstZeichnen() }   // ohne Zwang: offene Eingaben bleiben stehen (S6-Review)
+  }
+  function e3Geaendert(el){ return el.type === 'checkbox' ? (el.checked ? '1' : '0') !== el.dataset.e3Alt : String(el.value) !== String(el.dataset.e3Alt) }
+  const e3Offen = box => [...box.querySelectorAll('[data-e3-pfad]')].some(e3Geaendert)
+  function e3EinstZeichnen(nachLaden){
+    const box = document.getElementById('e3-einst'); if(!box) return
+    const pane = document.getElementById('adm-pane-planer'), art = typeof apArtJetzt === 'function' ? apArtJetzt() : null
+    if(!art || !pane || pane.hidden || (typeof apIstFunded === 'function' && apIstFunded())){ box.hidden = true; return }
+    // Eingaben schützen: mit ungespeicherten Änderungen oder Fokus im Kasten nicht neu zeichnen (der Planer zeichnet im Takt)
+    const offen = e3Offen(box) || box.contains(document.activeElement)
+    if(!_e3.laeuft && (!_e3.at || Date.now() - _e3.at > E3_FRISCH_MS) && !offen){ e3Laden(); if(!_e3.d){ box.hidden = false; box.innerHTML = '<div class="e3-kopf"><div><h3>Einstellungen</h3><p>lade …</p></div></div>' } return }
+    if(!_e3.d){ box.hidden = !_e3.fehler; if(_e3.fehler) box.innerHTML = `<div class="e3-kopf"><div><h3>Einstellungen</h3><p style="color:var(--danger)">⚠ ${e3E(_e3.fehler)}</p></div></div>`; return }
+    if(offen && !nachLaden && _e3.art === art) return
+    e3Neu(box, art)
+  }
+  function e3Neu(box, art){
+    _e3.art = art
+    box.hidden = false
+    box.innerHTML = e3Html(_e3.d, art)
+    box.querySelectorAll('[data-e3-pfad]').forEach(el => el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => el.classList.toggle('geaendert', e3Geaendert(el))))
+    box.querySelectorAll('[data-e3-speichern]').forEach(b => b.addEventListener('click', () => e3Speichern(b.dataset.e3Speichern, b)))
+    box.querySelectorAll('[data-e3-schalter]').forEach(cb => cb.addEventListener('change', () => e3Schalter(cb)))
+    const weiter = () => !e3Offen(box) || confirm('Ungespeicherte Änderungen verwerfen?')
+    box.querySelectorAll('[data-e3-wahl]').forEach(b => b.addEventListener('click', () => { if(!weiter()) return; _e3.wahl[art] = { firma: b.dataset.e3Wahl, tab: 'std' }; e3Neu(box, art) }))
+    box.querySelectorAll('[data-e3-tab]').forEach(b => b.addEventListener('click', () => { if(!weiter()) return; _e3.wahl[art] = Object.assign({}, _e3.wahl[art], { tab: b.dataset.e3Tab }); e3Neu(box, art) }))
+  }
+  // geänderte Felder einer Firmenkarte → [{pfad, wert}] (Spanne = beide Felder zusammen, auch wenn nur eines geändert wurde)
+  function e3AenderungenAus(karte){
+    const je = new Map()
+    karte.querySelectorAll('[data-e3-pfad]').forEach(el => {
+      const k = el.dataset.e3Pfad, alt = je.get(k) || { geaendert: false, werte: [], cb: el.type === 'checkbox' }
+      alt.geaendert = alt.geaendert || e3Geaendert(el)
+      if(alt.cb) alt.werte = el.checked; else alt.werte[Number(el.dataset.e3I || 0)] = el.value === '' ? null : Number(el.value)
+      alt.spanne = el.dataset.e3I != null; je.set(k, alt)
+    })
+    return [...je].filter(([, v]) => v.geaendert).map(([k, v]) => ({ pfad: JSON.parse(k), wert: v.cb ? v.werte : v.spanne ? v.werte : v.werte[0] }))
+  }
+  async function e3Speichern(firma, knopf){
+    const karte = knopf.closest('[data-e3-firma]'); if(!karte) return
+    const aenderungen = e3AenderungenAus(karte)
+    if(!aenderungen.length){ _e3.msg[firma] = { ok: true, text: 'nichts geändert' }; e3EinstZeichnen(true); return }
+    knopf.disabled = true
+    try{
+      const d = await apdApi('POST', '/kernwert', { firma, aenderungen })
+      const i = (_e3.d.firmen || []).findIndex(f => (f.namen || [])[0] === firma)
+      if(i >= 0 && d.firma) _e3.d.firmen[i] = d.firma
+      _e3.msg[firma] = { ok: true, text: `✓ ${aenderungen.length} Wert${aenderungen.length === 1 ? '' : 'e'} gespeichert` }
+    }catch(e){ _e3.msg[firma] = { ok: false, text: 'nicht gespeichert: ' + ((e && e.message) || e) } }
+    finally{ knopf.disabled = false; e3EinstZeichnen(true) }
+  }
+  async function e3Schalter(cb){
+    const feld = cb.dataset.e3Schalter, an = !!cb.checked
+    cb.disabled = true
+    try{
+      const d = await apdApi('POST', '/ausgleich-einstellung', { [feld]: an })
+      if(feld === 'echo_hedge' && d.echo_hedge) _e3.d.echo_hedge = Object.assign({}, _e3.d.echo_hedge, { an: d.echo_hedge.an })
+      else if(feld === 'apex_hedge' && d.apex_hedge) _e3.d.apex_hedge = Object.assign({}, _e3.d.apex_hedge, { an: d.apex_hedge.an })
+      else if(feld === 'tradeify_final_hedge' && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { an: d.tradeify_final_hedge.an })
+      else if(d.ausgleich) _e3.d.ausgleich = d.ausgleich
+      if(typeof atToast === 'function') atToast(`✓ ${feld.replace(/_/g, ' ')} ${an ? 'an' : 'aus'}`, 'end')
+    }catch(e){ cb.checked = !an; if(typeof atToast === 'function') atToast('nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+    finally{ cb.disabled = false; e3EinstZeichnen() }   // ohne Zwang: der Schalter zeigt den Stand schon, offene Eingaben der Firmenkarte bleiben
+  }
+  window._e3 = { html: e3Html, neu: e3Neu, aenderungen: e3AenderungenAus, stand: _e3 }   // Test-Haken (Stub)
   function apIdsRender(){
+    try{ e3EinstZeichnen() }catch(e){ console.warn('[e3] Einstellungen', e) }   // E3 (04.11.2026): Einstellungen unten, nur Challenge CFD/Futures
     if(!apIstFunded()) return apIdsRenderChallenge()
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(!_fdpQ){ root.style.padding = '22px 2px'; root.innerHTML = _fdpFehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fdpFehler)}</div>` : 'Lade ' + fdpArt().name + '…'; return }
