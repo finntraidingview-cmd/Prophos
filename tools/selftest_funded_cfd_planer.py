@@ -118,7 +118,7 @@ check(app.fcp_tp_deckel(RP, jg("FundingPips", 50000), 2) == (2000.0, "ziel_plus"
       "Deckel FundingPips 50k 2.000, Tradeify CFD 3.500 (auch Zyklus 1)")
 check(app.fcp_tp_deckel(dict(R5, tp_zyklen=[500, 900]), j5, 5) == (900.0, "zyklus"), "tp_zyklen aus der Regel gewinnt (letzter Wert gilt weiter)")
 
-print("2d) The5ers-Consistency JE ZYKLUS (Finn 04.11.2026): Zyklus-Beginn 750, danach TP = min(Rest, Gewinne des Zyklus)")
+print("2d) The5ers-Consistency (C5 04.11.2026; seit E1b 05.11.2026 Weg A: Endziel max(Z, B ÷ p × 1,02), Deckel p × F × 0,95, Rest gleich verteilt)")
 RC = app.ap_regel_finden(FIRMEN, "The5%ers")
 check(app.fcp_tp_modus(RC) == "consistency50" and app.fcp_tp_modus(app.ap_regel_finden(FIRMEN, "FundedNext")) is None, "Standard: nur The5ers consistency50")
 GM = app.fcp_gewinne([{"status": "completed", "master_pl": 635.70}, {"status": "completed", "master_pl": 603.84}, {"status": "completed", "master_pl": 61.05},
@@ -143,20 +143,16 @@ class Fest:            # Ziel genau auf einen Wert würfeln (Beispiele aus Finns
         return self.z if lo <= self.z <= hi else (lo + hi) / 2
 
 
-tm = app.fcp_konto_rechnen(j5, 98685, 100000, 2, False, 1.0, 0.85, Fest(1310), RC, gewinne=GM)
-check(tm["tp"] == 1301 and tm["tp_art"] == "consistency", f"Rest 2.625, Zyklus-Gewinne 1.300,59 → TP {tm['tp']} (Soll 1.301, höchstens die Gewinne)")
-tf = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=0.0)
-check(tf["tp"] == 750 and tf["tp_art"] == "consistency_start", f"Zyklus-Beginn (Gewinne 0), Rest 6.146 → TP {tf['tp']} (Soll 750)")
-tf2 = app.fcp_konto_rechnen(j5, 95354 + 750, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=750.0)
-check(tf2["tp"] == 750 and tf2["tp_art"] == "consistency", f"nach +750 im Zyklus → TP {tf2['tp']} (Soll 750)")
-tf3 = app.fcp_konto_rechnen(j5, 100000 + j5["ziel"][0] - 100, 100000, 2, False, 1.0, 0.85, Fest(j5["ziel"][0]), RC, gewinne=1500.0)
-check(tf3["tp"] == 250 and tf3["tp_art"] == "mindest", f"nach +750 +750, Rest 100 → TP {tf3['tp']} (Mindest 250)")
-tf4 = app.fcp_konto_rechnen(j5, 96854, 100000, 2, False, 1.0, 0.85, Fest(1500), RC, gewinne=1500.0)
-check(tf4["tp"] == 1500, f"nach +750 +750, Rest 4.646 → TP {tf4['tp']} (höchstens die Zyklus-Gewinne 1.500)")
-tx = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=None)
-check(tx["tp"] == 750 and tx["tp_art"] == "consistency_ohne_gewinne", "Gewinne nicht lesbar → 750 (fail-closed)")
-tg = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, Fest(1400), RC, gewinne=5000.0)
-check(tg["tp"] == 900, f"große Zyklus-Gewinne: TP nie über den Rest ({tg['tp']} = 900)")
+# WEG A (Finn 05.11.2026 ~04:20 Dubai: „Weg A, das Ziel bleibt") ersetzt „750-Start, höchstens die Zyklus-Gewinne" — tage = (größter Gewinn-Tag, Trades im Zyklus)
+tm = app.fcp_konto_rechnen(j5, 98685, 100000, 2, False, 1.0, 0.85, Fest(1310), RC, gewinne=GM, tage=(635.70, 3))
+check(tm["tp"] == 525 and tm["tp_art"] == "consistency" and tm["consistency"]["n"] == 5,
+      f"Moritz …2352: G −1.315, B 635,70, Z 1.310 → Endziel 1.310, Deckel 622, Rest 2.625 in 5 Trades → TP {tm['tp']} (Soll 525)")
+tf = app.fcp_konto_rechnen(j5, 100000, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=0.0, tage=(0.0, 0))
+check(tf["tp"] == 500 and tf["consistency"]["n"] == 3, f"Zyklus-Beginn, Z 1.500 → 3 Trades à {tf['tp']} (Soll 500, kein 750-Start mehr)")
+tx = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=None, tage=None)
+check(tx["tp"] == 712 and tx["tp_art"] == "consistency_ohne_zyklus", f"Zyklus nicht lesbar → Deckel mit F = Z: TP {tx['tp']} (Soll 712, fail-closed)")
+tg = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, Fest(1400), RC, gewinne=900.0, tage=(900.0, 2))
+check(tg["tp"] == 668 and tg["consistency"]["ende"] == 1836, f"großer Tag 900 bei G 500 → Endziel 1.836, Rest 1.336 in 2 Trades → TP {tg['tp']} (Soll 668)")
 tk = app.fcp_konto_rechnen(j, 98000, 100000, 2, False, 10.0, 0.85, random.Random(7), app.ap_regel_finden(FIRMEN, "FundedNext"), gewinne=0.0)
 check(tk["tp"] == 2850 and tk["tp_art"] == "gedeckelt", "FundedNext unverändert (Ziel + tp_deckel_plus)")
 
@@ -337,7 +333,7 @@ check(gp["100k 1 → Funded"]["tp_art"] == "erster_payout_refund" and 2050 <= gp
       "Konto mit −2k ohne Payout: Refund-Ziel ganz nachholen (2.050–2.150), Hedge 5.000 €")
 check(gp["100k 7 → Funded"]["eins_prozent"] and gp["100k 7 → Funded"]["sl"] <= 780, "Emin-Konto mit 1-%-Regel: kleiner SL")
 z3 = gp["200k 3 → Funded"]
-check(z3["tp_art"] in ("consistency_start", "consistency") and z3["tp"] <= 750, f"The5ers 200k frisch, ohne Zyklus-Gewinne: TP {z3['tp']} ≤ 750 (Consistency je Zyklus)")
+check(str(z3["tp_art"]).startswith("consistency") and z3["tp"] <= 0.5 * 0.95 * z3["ziel_bis"] + 1, f"The5ers 200k frisch: TP {z3['tp']} ≤ Deckel (Consistency Weg A)")
 check([z["konto"] for z in erg["ziel"]] == ["100k 4 → Funded"], "The5ers +1.600 → Ziel (Waiting for Payout)")
 aus = {z["konto"]: z["grund"] for z in erg["ausgelassen"]}
 check("Flex" in aus.get("100k Flex 6 → Funded", ""), "Flex nicht geplant")

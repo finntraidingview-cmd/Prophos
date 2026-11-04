@@ -40490,13 +40490,14 @@ FCP_GROESSE_LEERBAR = ("sl_1pct", "tp_erster", "daily_loss")          # dürfen 
 FCP_WERT_MAX = {"lots": 50.0}                                         # sonst 1.000.000
 
 
-def fcp_firma_einstellung(f):
+def fcp_firma_einstellung(f, param=None):
     """REIN (Anzeige): Regel-Felder einer Firma außer je_groesse — DB-Wert (oder None) und was der Planer wirklich nimmt (eff, inkl. Standard)."""
     f = f or {}
     key = ((f.get("namen") or [""])[0])
     return {"tp_modus": f.get("tp_modus"), "tp_modus_eff": fcp_tp_modus(f),
+            "consistency_pct": f.get("consistency_pct"), "consistency_pct_eff": fcp_consistency_pct(f),     # E1b: Consistency in % (None = keine)
             "tp_zyklen": f.get("tp_zyklen"), "tp_zyklen_eff": f.get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key),
-            "tp_deckel_plus": f.get("tp_deckel_plus"), "tp_deckel_plus_eff": f.get("tp_deckel_plus") if f.get("tp_deckel_plus") is not None else FCP_TP_DECKEL_PLUS_STANDARD,
+            "tp_deckel_plus": f.get("tp_deckel_plus"), "tp_deckel_plus_eff": f.get("tp_deckel_plus") if f.get("tp_deckel_plus") is not None else (param or fcp_param_standard())["tp_deckel_plus_standard"],
             "erster_payout": f.get("erster_payout"), "erster_payout_eff": fcp_erster_payout(f), "weg": FCP_WEG["name"]}
 
 
@@ -40535,9 +40536,40 @@ def fcp_regel_patch(zeile, body):
     {schalter: aktiv|auto_bestaetigen|ziel_auto_wartet, wert: bool} · {zeit: firma_abstand_min|abstand_id_min|vorlauf_min, wert: 0–240} ·
     {firma, an: bool} · {firma, groesse, feld (FCP_GROESSE_FELDER), wert} · {firma, feld: tp_deckel_plus|tp_zyklen|tp_modus, wert} ·
     {firma, feld: erster_payout.ziel|erster_payout.hedge_eur_je_dd|erster_payout.lots_faktor, wert} · {firma, groesse, feld: gewinntage.anzahl|.min|.tp, wert}.
-    Bereiche [von, bis] (von ≤ bis), Werte je Größe/Gewinntage/Refund > 0, tp_deckel_plus ≥ 0. Gibt nur die geänderten Spalten zurück; firmen wird ganz neu geschrieben (Kopie)."""
+    Bereiche [von, bis] (von ≤ bis), Werte je Größe/Gewinntage/Refund > 0, tp_deckel_plus ≥ 0. Gibt nur die geänderten Spalten zurück; firmen wird ganz neu geschrieben (Kopie).
+    E1b (05.11.2026): {param: FCP_PARAM_STANDARD-Schlüssel, wert: Zahl in FCP_PARAM_GRENZEN | bool | null = Standard} → Spalte parameter (fehlt sie, SQL-Datei
+    einspielen) · {zeit: "fenster", wert: {von, bis} | null = wie Challenge-Planer} · {firma, feld: "erster_payout", wert: bool} (Refund-Trade an/aus) ·
+    {firma, feld: "ohne_namen", wert: [Text, …]} · tp_modus auch "ziel" (aufs Ziel, auch wo der Code consistency50 vorgibt)."""
     import copy
     z, b = zeile or {}, body or {}
+    if b.get("param") is not None:
+        k, v = str(b.get("param")), b.get("wert")
+        if k not in FCP_PARAM_STANDARD:
+            return None, "unbekannter Parameter"
+        if "parameter" not in z:
+            return None, "Spalte parameter fehlt noch — sql/2026-11-05_fcp_einstellungen_db.sql einspielen (Master)"
+        neu = dict(z.get("parameter") if isinstance(z.get("parameter"), dict) else {})
+        if v is None or v == "":
+            neu.pop(k, None)                                          # leer → Standard aus dem Code
+        elif k in FCP_PARAM_SCHALTER:
+            if not isinstance(v, bool):
+                return None, f"{k}: true|false"
+            neu[k] = v
+        else:
+            x, (lo, hi) = (_fcp_zahl_ok(v) if not isinstance(v, bool) else None), FCP_PARAM_GRENZEN[k]
+            if x is None or not lo <= x <= hi:
+                return None, f"{k}: Zahl {lo:g}–{hi:g} oder leer (Standard)"
+            neu[k] = x
+        return {"parameter": neu}, None
+    if b.get("zeit") == "fenster":
+        zt, v = dict(z.get("zeiten") or {}), b.get("wert")
+        if v is None:
+            zt.pop("fenster", None)                                   # wie der Challenge-Planer
+        elif isinstance(v, dict) and fcp_fenster_eigen(v):
+            zt["fenster"] = {"von": str(v["von"]), "bis": str(v["bis"])}
+        else:
+            return None, "fenster: {von: HH:MM, bis: HH:MM}, bis nach von — oder leer (wie Challenge-Planer)"
+        return {"zeiten": zt}, None
     if b.get("schalter") is not None:
         k = str(b.get("schalter"))
         if k not in FCP_SCHALTER or not isinstance(b.get("wert"), bool):
@@ -40561,11 +40593,25 @@ def fcp_regel_patch(zeile, body):
             return None, "an = true|false"
         f["an"] = b["an"]
         return {"firmen": firmen}, None
-    if b.get("groesse") is not None and (feld in FCP_GROESSE_FELDER or feld.startswith("gewinntage.")):
+    if b.get("groesse") is not None and (feld in FCP_GROESSE_FELDER or feld == "gewinntage" or feld.startswith("gewinntage.")):
         jg = (f.get("je_groesse") or {}).get(str(b.get("groesse")))
         if not isinstance(jg, dict):
             return None, f"Größe {str(b.get('groesse'))[:12]} bei {name} nicht hinterlegt"
         v = b.get("wert")
+        if feld == "gewinntage":
+            # E1b: Gewinntage an/aus je Größe; an → bisherige Werte bzw. 3 Tage ≥ 0,5 % der Größe, TP 110–130 % davon (Blue Guardian 100k: 500 / 550–650)
+            if not isinstance(v, bool):
+                return None, "gewinntage: true|false"
+            if v:
+                if not isinstance(jg.get("gewinntage"), dict):
+                    g_ = _wd_num(str(b.get("groesse"))) or 0
+                    mn = round(g_ * 0.005)
+                    if mn <= 0:
+                        return None, "Gewinntage: Größe unbekannt"
+                    jg["gewinntage"] = {"anzahl": 3, "min": float(mn), "tp": [float(round(mn * 1.1)), float(round(mn * 1.3))]}
+            else:
+                jg.pop("gewinntage", None)
+            return {"firmen": firmen}, None
         if feld.startswith("gewinntage."):
             teil = feld.split(".", 1)[1]
             gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
@@ -40602,12 +40648,87 @@ def fcp_regel_patch(zeile, body):
             return None, "tp_zyklen: Liste aus 1–8 Beträgen > 0"
         f[feld] = [_fcp_zahl_ok(x) for x in v]
     elif feld == "tp_modus":
-        if v not in (None, "", "consistency50"):
-            return None, "tp_modus: consistency50 oder leer"
+        if v not in (None, "", "consistency50", "ziel"):           # "ziel" = aufs Ziel, auch bei The5ers (Code-Standard consistency50)
+            return None, "tp_modus: consistency50, ziel oder leer"
         if v:
             f[feld] = v
         else:
             f.pop(feld, None)
+    elif feld == "erster_payout":
+        # Refund-Trade an/aus (E1b): an → die Werte, die heute gelten (DB, sonst Code-Standard der Firma, sonst 50–100 $ / 0,5 € je $ DD); aus → false
+        if not isinstance(v, bool):
+            return None, "erster_payout: true|false"
+        if v:
+            alt = f.get("erster_payout") if isinstance(f.get("erster_payout"), dict) else None
+            f[feld] = copy.deepcopy(alt or FCP_ERSTER_PAYOUT_STANDARD.get(str((f.get("namen") or [""])[0])) or {"ziel": [50.0, 100.0], "hedge_eur_je_dd": 0.5})
+        else:
+            f[feld] = False
+    elif feld == "consistency_pct":
+        # E1b: Consistency in % je Zyklus; leer/0 = aus (ausdrücklich 0, damit der Code-Standard der Firma nicht greift). tp_modus wird abgelöst
+        if v is None or v == "" or v == 0:
+            f[feld] = 0
+        else:
+            w = _fcp_zahl_ok(v)
+            if w is None or not 1 <= w <= 99:
+                return None, "consistency_pct: 1–99 % oder leer (aus)"
+            f[feld] = w
+        f.pop("tp_modus", None)
+    elif feld == "gewinntage_alle" or feld.startswith("gewinntage_alle."):
+        # Gewinntage je FIRMA (Finn 05.11.2026 ~04:10: „Gewinntage (Slider; an → Anzahl, Mindestgewinn, TP von–bis)") — schreibt in alle Größen der Firma.
+        # $-Werte gelten für die KLEINSTE Größe (die zeigt das Panel), die anderen anteilig zur Kontogröße (Payout-Regeln in % der Größe, Fremd-Review E1b Runde 3)
+        teil = feld.split(".", 1)[1] if "." in feld else None
+        gr = {k: x for k, x in (f.get("je_groesse") or {}).items() if isinstance(x, dict) and (_wd_num(k) or 0) > 0}
+        if not gr:
+            return None, "Firma hat keine Größe"
+        reihe = sorted(gr, key=lambda k: _wd_num(k))
+        skal = lambda w, k, ref: float(round(float(w) * (_wd_num(k) / _wd_num(ref))))   # noqa: E731
+        if teil is None:
+            if not isinstance(v, bool):
+                return None, "gewinntage_alle: true|false"
+            ref = next((k for k in reihe if isinstance(gr[k].get("gewinntage"), dict)), None)
+            for k in reihe:
+                x = gr[k]
+                if not v:
+                    x.pop("gewinntage", None)
+                elif not isinstance(x.get("gewinntage"), dict):
+                    if ref:     # vorhandene Werte einer Größe anteilig übernehmen
+                        vg = gr[ref]["gewinntage"]
+                        x["gewinntage"] = {"anzahl": vg.get("anzahl"), "min": skal(vg.get("min") or 0, k, ref),
+                                           "tp": [skal(t, k, ref) for t in (vg.get("tp") or [0, 0])]}
+                    else:       # 3 Tage ≥ 0,5 % der Größe, TP 110–130 % davon (Blue Guardian 100k: 500 / 550–650)
+                        mn = round(_wd_num(k) * 0.005)
+                        x["gewinntage"] = {"anzahl": 3, "min": float(mn), "tp": [float(round(mn * 1.1)), float(round(mn * 1.3))]}
+        else:
+            mit = [k for k in reihe if isinstance(gr[k].get("gewinntage"), dict)]
+            if teil not in ("anzahl", "min", "tp") or not mit:
+                return None, "Gewinntage erst einschalten (anzahl, min, tp)"
+            w = _fcp_bereich_ok(v) if teil == "tp" else _fcp_zahl_ok(v)
+            if w is None or not (w[0] if isinstance(w, list) else w) > 0 or (teil == "anzahl" and w > 30):
+                return None, f"Gewinntage {teil}: ungültiger Wert"
+            ref = mit[0]
+            for k in mit:
+                gr[k]["gewinntage"][teil] = (int(round(w)) if teil == "anzahl" else
+                                             [skal(t, k, ref) for t in w] if teil == "tp" else skal(w, k, ref))
+    elif feld == "tp_erster_alle":
+        # E1b: Start-TP der Consistency für alle Größen der Firma (je_groesse[*].tp_erster); leer → Feld weg (dann parameter.consistency_start_usd)
+        w = None if v is None or v == "" else _fcp_zahl_ok(v)
+        if v not in (None, "") and (w is None or not w > 0):
+            return None, "Start-TP: Zahl > 0 oder leer (Standard)"
+        for jg_ in (f.get("je_groesse") or {}).values():
+            if isinstance(jg_, dict):
+                if w is None:
+                    jg_.pop("tp_erster", None)
+                else:
+                    jg_["tp_erster"] = w
+    elif feld == "ohne_namen":
+        # Teilwort im Kontonamen (w in name.lower()) — ab 3 Zeichen, sonst sperrt ein Tippfehler wie „e" fast alle Konten (Fremd-Review E1b).
+        # „flex" bleibt stehen: Flex-Konten haben andere Ziele (FundingPips Flex 8 % statt 10 %) und plant dieser Planer nicht
+        if not isinstance(v, list) or len(v) > 10 or any(not isinstance(x, str) or not 3 <= len(x.strip()) <= 30 for x in v):
+            return None, "nicht planen bei: höchstens 10 Wörter, je 3–30 Zeichen"
+        neu_w = sorted({x.strip().lower() for x in v})
+        if "flex" in [str(x).lower() for x in (f.get(feld) or [])] and "flex" not in neu_w:
+            return None, "„flex“ bleibt stehen — Flex-Konten haben andere Ziele (nur Wörter ergänzen)"
+        f[feld] = neu_w                                                # Planer vergleicht klein (w in name.lower())
     elif feld.startswith("erster_payout."):
         teil = feld.split(".", 1)[1]
         ep = f.get("erster_payout") if isinstance(f.get("erster_payout"), dict) else None
@@ -40649,7 +40770,7 @@ def fcp_wuerfel(b, rnd, stellen=0):
     return round(x, stellen) if stellen else float(round(x))
 
 
-def fcp_tp_deckel(regel, jg, zyklus):
+def fcp_tp_deckel(regel, jg, zyklus, plus_std=None):
     """REIN RECHNEND (testbar): (deckel $, art) je Trade — ('zyklus', The5ers-Stufe) oder ('ziel_plus', ziel[bis] + plus). zyklus ≥ 1."""
     key = ((regel or {}).get("namen") or [""])[0]
     stufen = (regel or {}).get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key)
@@ -40657,7 +40778,8 @@ def fcp_tp_deckel(regel, jg, zyklus):
         return float(stufen[min(max(int(zyklus), 1), len(stufen)) - 1]), "zyklus"
     plus = _wd_num((regel or {}).get("tp_deckel_plus"))
     lohi = fcp_bereich((jg or {}).get("ziel"))
-    return (lohi[1] if lohi else 0.0) + (plus if plus is not None else FCP_TP_DECKEL_PLUS_STANDARD), "ziel_plus"
+    std = FCP_TP_DECKEL_PLUS_STANDARD if plus_std is None else plus_std        # E1b: Standard aus funded_cfd_plan_regeln.parameter
+    return (lohi[1] if lohi else 0.0) + (plus if plus is not None else std), "ziel_plus"
 
 
 def fcp_eins_prozent(konto):
@@ -40743,6 +40865,17 @@ def fcp_tp_modus(regel):
     return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
 
 
+def fcp_consistency_pct(regel):
+    """CONSISTENCY ALS PARAMETER (E1b, Finn 05.11.2026: „bei The5ers Consistency einfach 50 % je Zyklus eintippen, dann wird das automatisch angewandt")
+    → p in % (0 < p < 100) oder None (keine Consistency). regel.consistency_pct gewinnt (0 = ausdrücklich aus); sonst wie bis .2035 tp_modus
+    (consistency50 → 50, ziel → keine) bzw. der Code-Standard je Firmen-Schlüssel (The5ers → 50)."""
+    r = regel or {}
+    if "consistency_pct" in r:
+        v = _wd_num(r.get("consistency_pct")) if not isinstance(r.get("consistency_pct"), bool) else None
+        return float(v) if v is not None and 0 < v < 100 else None
+    return 50.0 if fcp_tp_modus(r) == "consistency50" else None
+
+
 # GEWINNTAGE IM PAYOUT-ZYKLUS (BG1, Finn 03.11.2026 ~23:59 Dubai, Blue Guardian 2-Step Standard Funded: „3 profitable Tage je ≥ 0,5 %, sonst kein Payout"):
 # je_groesse[...].gewinntage = {anzahl, min (Mindestgewinn je Tag in $), tp [von, bis]}. Phase A — solange im laufenden Zyklus weniger als anzahl Tage mit
 # ≥ min geschlossenem Gewinn erreicht sind: je Tag ein Trade mit TP gewürfelt in tp (auch wenn das Ziel schon erreicht ist — ohne die Tage kein Payout).
@@ -40775,6 +40908,58 @@ def fcp_zyklus_start(pending, managed, buchungen):
     return {aid: (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") for aid, d in tag.items()}
 
 
+FCP_CONS_TP_MIN_USD = 50       # Weg A: kleinster TP eines Consistency-Trades (technisch, nicht im Panel — Finn 05.11.2026 ~04:20)
+FCP_CONS_PUFFER_ZIEL = 1.02    # Endziel mindestens größter Tag ÷ p × 1,02
+FCP_CONS_PUFFER_DECKEL = 0.95  # Deckel je Trade = p × Endziel × 0,95 (5 % Sicherheitsabstand)
+
+
+def fcp_tage_zyklus(plaene, seit_tag=None):
+    """REIN RECHNEND (testbar): (größter Gewinn-Tag $, Trades) im laufenden Payout-Zyklus | None (nicht sicher lesbar → fail-closed). Tag = Berlin-Tag des
+    Trade-Endes (ended_at, sonst completed_at, sonst started_at), Tagessumme master_pl der beendeten Trades (completed) — wie fcp_gewinne / ap_tage_ist.
+    Nur Tage > 0 zählen als größter Tag (0, wenn es keinen gibt). seit_tag = erster Berlin-Tag des Zyklus (fcp_gewinntage_seit)."""
+    tz, je_tag, n = _ap_tz("Europe/Berlin"), {}, 0
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
+        if ts is None:
+            return None                     # Zyklus nicht zuordenbar → nicht lesbar (wie fcp_gewinne)
+        d = ts.astimezone(tz).date().isoformat()
+        if seit_tag and d < str(seit_tag):
+            continue                        # früherer Zyklus — ein alter Trade ohne P&L stört nicht (Fremd-Review E1b Runde 3)
+        pl = _wd_num(p.get("master_pl"))
+        if pl is None:
+            return None
+        je_tag[d] = je_tag.get(d, 0.0) + float(pl)
+        n += 1
+    return round(max([v for v in je_tag.values() if v > 0] or [0.0]), 2), n
+
+
+def fcp_cons_rechnen(pct, ziel, gewinn, tage):
+    """REIN RECHNEND (testbar): CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai: „Weg A, das Ziel bleibt"). pct = p in %, ziel Z = gewürfeltes Ziel ($ über der
+    Kontogröße), gewinn G = Balance − Kontogröße (Verluste zählen), tage = (B größter Gewinn-Tag, k Trades) aus fcp_tage_zyklus oder None (nicht lesbar).
+    Endziel F = max(Z, B ÷ p × 1,02) · Deckel c = p × F × 0,95 · Rest R = F − G · n = ceil(R ÷ c) Trades · TP = R ÷ n (ganze $), mindestens 50, höchstens c.
+    Nicht lesbar → F = Z, TP = c (kleinster sichere Trade). → {tp, ende, deckel, rest, n, k, bester_tag, p, fertig} (fertig: R ≤ 0)."""
+    q = float(pct) / 100.0
+    if tage is None:
+        F = float(ziel)
+        c = q * F * FCP_CONS_PUFFER_DECKEL
+        R = F - float(gewinn)
+        return {"tp": float(max(FCP_CONS_TP_MIN_USD, min(int(c), round(R)))), "ende": round(F), "deckel": round(c, 2), "rest": round(R, 2), "n": None, "k": None,
+                "bester_tag": None, "p": float(pct), "fertig": False, "lesbar": False}
+    B, k = float(tage[0] or 0), int(tage[1] or 0)
+    F = max(float(ziel), B / q * FCP_CONS_PUFFER_ZIEL)
+    c = q * F * FCP_CONS_PUFFER_DECKEL
+    R = F - float(gewinn)
+    # fertig: Ziel erreicht UND kein Tag über p % (G ≥ B ÷ p) — der 2-%-Puffer gilt nur fürs Planen, sonst folgte wegen Spread/Kommission am letzten Trade
+    # fast jeden Zyklus ein 50-$-Extra-Trade (Fremd-Review E1b Runde 3)
+    if float(gewinn) >= max(float(ziel), B / q) - 0.005:
+        return {"tp": None, "ende": round(F), "deckel": round(c, 2), "rest": round(R, 2), "n": 0, "k": k, "bester_tag": B, "p": float(pct), "fertig": True, "lesbar": True}
+    n = max(1, int(R / c) + (1 if R - int(R / c) * c > 1e-6 else 0))   # aufrunden (ohne math-Import, Stück-Lader der Selbsttests)
+    tp = float(max(FCP_CONS_TP_MIN_USD, min(round(R / n), int(c))))   # erst Deckel, dann Mindest-TP (Fremd-Review E1b Runde 3)
+    return {"tp": tp, "ende": round(F), "deckel": round(c, 2), "rest": round(R, 2), "n": n, "k": k, "bester_tag": B, "p": float(pct), "fertig": False, "lesbar": True}
+
+
 def fcp_gewinntage_ist(gt, konto_id, plaene, seit_tag=None):
     """REIN RECHNEND (testbar): (ist, soll) der Gewinntage im laufenden Zyklus oder None (Regel ohne gewinntage). plaene = Trades des Kontos; seit_tag =
     erster Berlin-Tag des Zyklus (fcp_zyklus_start bzw. Anlegetag des Kontos im 1. Zyklus). Zählung = ap_tage_ist mit einem Hilfs-Konto
@@ -40797,12 +40982,13 @@ def fcp_gewinntage_seit(zyklus_tag, konto_created_at):
     return max([d for d in (zyklus_tag, an) if d] or [None]) if (zyklus_tag or an) else None
 
 
-def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None):
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None, param=None, tage=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
     jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
     True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
     je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel), max_sl = accounts.max_risiko_trade — der SL liegt nie darüber (30.10.2026,
     jede Firma). gewinntage = (ist, soll) aus fcp_gewinntage_ist, nur bei jg.gewinntage (Blue Guardian, BG1 03.11.2026) — Phase A/B, s. oben."""
+    P = param or fcp_param_standard()        # E1b: Mindest-TP, Consistency-Start, Deckel-Standard, Refund-Werte aus der DB (fcp_param), sonst Code
     if isinstance(zyklus, bool):
         zyklus = 1 if zyklus else 2
     zyklus = max(1, int(zyklus or 1))
@@ -40834,28 +41020,34 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         gi = gewinntage if isinstance(gewinntage, (list, tuple)) and len(gewinntage) == 2 else None
         basis["gewinntage"] = list(gi) if gi else None
         gt_offen = gi is None or int(gi[0]) < int(gi[1])             # Zählung nicht lesbar → Phase A (kleiner Trade), nie ein Ziel-Trade auf Verdacht
-    if gewinn >= ziel_b[0] - 0.005 and not gt_offen:
+    pct = fcp_consistency_pct(regel) if not (gt and gt_offen) and not ep else None
+    if pct:
+        # CONSISTENCY WEG A (05.11.2026): fertig erst, wenn das Ziel erreicht ist UND kein Tag größer als p % des Zyklus-Gewinns war (G ≥ max(Ziel, B ÷ p × 1,02)).
+        # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht über das Ziel hinaus)
+        bt = (tage[0] if isinstance(tage, (list, tuple)) and len(tage) == 2 else None)
+        f_min = max(ziel_b[0], (float(bt) / (pct / 100.0)) if bt else 0.0)     # ohne den Planungs-Puffer 1,02 (s. fcp_cons_rechnen)
+        if gewinn >= f_min - 0.005:
+            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": bt, "ende": round(f_min)})
+    elif gewinn >= ziel_b[0] - 0.005 and not gt_offen:
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     ziel = max(ziel, ziel_b[0])
-    deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus)
+    deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus, P["tp_deckel_plus_standard"])
     if gt and gt_offen:
         tp, tp_art, deckel = fcp_wuerfel(gt.get("tp"), rnd), "gewinntag", None    # Phase A: ein Gewinntag-Trade je Tag (TP gewürfelt, BG 550–650 $)
-    elif gt:
-        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_TP_MIN_USD)), "rest", None   # Phase B: Rest bis zum Ziel in einem Trade
+    elif gt and not pct:
+        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(P["tp_min_usd"])), "rest", None   # Phase B: Rest bis zum Ziel in einem Trade
+        # (mit Consistency nicht: ein Trade über den ganzen Rest würde selbst der größte Tag — dann Weg A unten, Fremd-Review E1b Runde 3)
     elif ep:
-        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_ERSTER_PAYOUT_TP_MIN_USD)), "erster_payout_refund", None
-    elif fcp_tp_modus(regel) == "consistency50":
-        # JE ZYKLUS (Finn 04.11.2026): Zyklus-Beginn bzw. nicht lesbar → 750, sonst höchstens die Zyklus-Gewinne; nie über den Rest
-        rest = float(round(ziel - gewinn))
-        g_ok = _wd_num(gewinne) if gewinne is not None else None
-        start = _wd_num(jg.get("tp_erster")) or float(FCP_CONSISTENCY_START_USD)
-        tp = float(round(min(rest, start if not g_ok or g_ok <= 0 else g_ok)))
-        tp_art = ("consistency" if g_ok and g_ok > 0 else "consistency_start") if g_ok is not None else "consistency_ohne_gewinne"
-        deckel = None
-        basis["gewinne"] = g_ok
-        if tp < FCP_TP_MIN_USD:
-            tp, tp_art = float(FCP_TP_MIN_USD), "mindest"
+        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(P["refund_tp_min_usd"])), "erster_payout_refund", None
+    elif pct:
+        # CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai, ersetzt C5 „750-Start, höchstens die Zyklus-Gewinne"): Endziel, Deckel, Rest gleich verteilt
+        # (fcp_cons_rechnen). Das Ziel Z bleibt das gewürfelte Ziel der Größe, G = Balance − Kontogröße, B = größter Gewinn-Tag im Zyklus
+        cr = fcp_cons_rechnen(pct, ziel, gewinn, tage if isinstance(tage, (list, tuple)) and len(tage) == 2 else None)
+        if cr["fertig"]:
+            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency=cr)
+        tp, tp_art, deckel = cr["tp"], ("consistency" if cr["lesbar"] else "consistency_ohne_zyklus"), None
+        basis["consistency"] = cr
     elif erster_zyklus and _wd_num(jg.get("tp_erster")):
         tp, tp_art = float(jg["tp_erster"]), "erster_payout"        # The5ers Zyklus 1: immer genau 750 (= tp_zyklen[0])
     elif erster_zyklus and deckel_art == "zyklus":
@@ -40864,8 +41056,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         tp, tp_art = float(round(ziel - gewinn)), ("nachholen" if gewinn < 0 else "ziel")
         if deckel and tp > deckel:
             tp, tp_art = float(deckel), "gedeckelt"                # Rest an den nächsten Tagen (Finn 30.10.2026)
-        if tp < FCP_TP_MIN_USD:
-            tp, tp_art = float(FCP_TP_MIN_USD), "mindest"
+        if tp < float(P["tp_min_usd"]):
+            tp, tp_art = float(P["tp_min_usd"]), "mindest"
     basis["tp_deckel"] = deckel
     sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") else jg.get("sl")
     sl = fcp_wuerfel(sl_b, rnd)
@@ -40881,13 +41073,13 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         # 1.130 → 1,37 (gedeckelt). SL-$ und Hedge-€ bleiben, die Fusion-Lots folgen den Master-Lots. Ohne Normal-Ziel der alte Faktor (Rückfall)
         lots_n = lots
         ziel_n = fcp_wuerfel(jg_normal.get("ziel"), rnd) if fcp_bereich(jg_normal.get("ziel")) else None
-        lv = fcp_lots_verhaeltnis(lots_n, tp, ziel_n, 2.0)
+        lv = fcp_lots_verhaeltnis(lots_n, tp, ziel_n, float(P["refund_lots_verhaeltnis"]))
         if lv:
             lots = lv
             basis["refund_lots"] = {"normal_lots": lots_n, "normal_ziel": ziel_n, "tp": tp}
         else:
             fk = _wd_num(ep.get("lots_faktor"))
-            lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
+            lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else float(P["refund_lots_rueckfall"]))
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
     if not mppl:
@@ -40915,11 +41107,59 @@ def fcp_richtung(fest, rnd):
 # derselben ID × Firma in Gegenrichtung sind harmlos: der DB-Riegel (trade_plans_gegenhedge) hält den zweiten, bis der erste zu ist.
 FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = False   # aus seit .1934 (30.10.2026): fa00bea0 dreht Echo mt5 am Start (rkFcfd), S2 OK — Schutz macht der Start
 
+# PARAMETER IN DER DB (E1b, Finn 05.11.2026 ~03:55 Dubai: „Nimm dir Winning Days als Beispiel … Uhrzeit, Verhältnis, Lots, alles änderbar"): Werte, die Pläne
+# beeinflussen und bis .2035 nur im Code standen, liegen in funded_cfd_plan_regeln.parameter (jsonb, sql/2026-11-05_fcp_einstellungen_db.sql). Fehlt ein
+# Schlüssel, ist er ungültig oder fehlt die Spalte noch (SQL nicht eingespielt), gilt der bisherige Code-Wert — gleiche Werte → gleiche Pläne (Selbsttest).
+def fcp_param_standard():
+    """Code-Werte der Parameter (Rückfall). Als Funktion, damit Selbsttests, die app.py stückweise laden (selftest_fcp_ftmo), die Konstanten nachladen können."""
+    return {"tp_min_usd": FCP_TP_MIN_USD, "consistency_start_usd": FCP_CONSISTENCY_START_USD,
+            "tp_deckel_plus_standard": FCP_TP_DECKEL_PLUS_STANDARD, "refund_tp_min_usd": FCP_ERSTER_PAYOUT_TP_MIN_USD,
+            "refund_lots_verhaeltnis": 2.0, "refund_lots_rueckfall": FCP_ERSTER_PAYOUT_LOTS_FAKTOR,
+            "richtung_laufend": FCP_RICHTUNG_LAUFEND_UEBERNEHMEN}
 
-def fcp_fest_richtung(plaene, tag_iso=None):
+
+FCP_PARAM_STANDARD = fcp_param_standard()
+FCP_PARAM_GRENZEN = {"tp_min_usd": (1, 5000), "consistency_start_usd": (1, 20000), "tp_deckel_plus_standard": (0, 50000),
+                     "refund_tp_min_usd": (1, 1000), "refund_lots_verhaeltnis": (0.1, 10), "refund_lots_rueckfall": (0.01, 1)}
+FCP_PARAM_SCHALTER = ("richtung_laufend",)
+
+
+def fcp_param(reg):
+    """REIN (testbar): Planer-Parameter = FCP_PARAM_STANDARD, überschrieben von gültigen Werten aus reg.parameter (Zahl in FCP_PARAM_GRENZEN bzw. bool)."""
+    p = fcp_param_standard()
+    roh = (reg or {}).get("parameter")
+    for k, v in (roh.items() if isinstance(roh, dict) else ()):
+        if k in FCP_PARAM_SCHALTER:
+            if isinstance(v, bool):
+                p[k] = v
+        elif k in FCP_PARAM_GRENZEN and not isinstance(v, bool):
+            x, (lo, hi) = _wd_num(v), FCP_PARAM_GRENZEN[k]
+            if x is not None and lo <= x <= hi:
+                p[k] = float(x)
+    return p
+
+
+def _fcp_hhmm_min(t):
+    """'HH:MM' → Minuten ab Mitternacht | None."""
+    m = re.fullmatch(r"(\d\d):(\d\d)", str(t or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def fcp_fenster_eigen(fen):
+    """REIN (testbar): eigenes Startfenster des Funded-CFD-Planers zeiten.fenster = {von: "HH:MM", bis: "HH:MM"} → (von_min, bis_min) | None (dann das Fenster
+    des Challenge-Planers wie bis .2035). Die Zone bleibt die des Challenge-Fensters (Dubai)."""
+    if not isinstance(fen, dict):
+        return None
+    a, b = _fcp_hhmm_min(fen.get("von")), _fcp_hhmm_min(fen.get("bis"))
+    return (a, b) if a is not None and b is not None and b > a else None
+
+
+def fcp_fest_richtung(plaene, tag_iso=None, an=None):
     """REIN RECHNEND (testbar): {uid|firmkey: richtung} aus Plänen [{user_id, master_firm, status, richtung, …}] — nur LAUFENDE bzw. auf die
     Nachlesung wartende (open, review); geplante zählen seit 30.10.2026 ~08:05 nicht mehr. Leer, wenn FCP_RICHTUNG_LAUFEND_UEBERNEHMEN aus."""
-    if not FCP_RICHTUNG_LAUFEND_UEBERNEHMEN:
+    if not (FCP_RICHTUNG_LAUFEND_UEBERNEHMEN if an is None else an):     # E1b: an = parameter.richtung_laufend
         return {}
     out, prio = {}, {}
     for p in plaene or ():
@@ -40976,6 +41216,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         print(f"[funded-cfd] ⚠️ Fenster des Challenge-Planers nicht gelesen ({type(e).__name__}: {e}) — Rückfall", flush=True)
         ap_zeiten = {}
     tzname, von_min, bis_min = fdp_fenster(ap_zeiten)
+    fen_ch = (von_min, bis_min)                                   # Fenster des Challenge-Planers (Anzeige „wie Challenge-Planer")
+    fen_eigen = fcp_fenster_eigen(zeiten.get("fenster"))           # E1b: eigenes Fenster in zeiten.fenster gewinnt, sonst wie bisher
+    if fen_eigen:
+        von_min, bis_min = fen_eigen
+    param = fcp_param(reg)
     firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
     an = [f for f in firmen if f.get("an")]
     gr_ids_fcp = {str(u) for u in _fd_gruppen_ids()}
@@ -40994,14 +41239,18 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "auto_bestaetigen": auto_ok,
            "news_regel": reg.get("news_regel") is not False,       # NEWS-REGEL (30.10.2026, S8): Kachel im Regelteil
            "ziel_auto_wartet": reg.get("ziel_auto_wartet") is True, "at": jetzt.isoformat(), "tag": plan_tag,
-           "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
+           "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min), fenster_eigen=bool(fen_eigen),
+                          fenster_challenge=f"{hhmm(fen_ch[0])}–{hhmm(fen_ch[1])}"),
+           # E1b: Planer-Parameter — wirksam (wert), Code-Standard und was in der DB steht; spalte False = SQL-Datei noch nicht eingespielt
+           "parameter": {"wert": param, "standard": FCP_PARAM_STANDARD, "db": reg.get("parameter") if isinstance(reg.get("parameter"), dict) else {},
+                         "spalte": "parameter" in reg},
            # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an")), "namen": f.get("namen") or [],
                        "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {},
                        # EINSTELLUNGEN (E1, 04.11.2026): die übrigen Regel-Felder der Firma + was der Planer daraus macht (inkl. Standard aus dem Code)
-                       **fcp_firma_einstellung(f)} for f in firmen],
+                       **fcp_firma_einstellung(f, param)} for f in firmen],
            "code": fcp_code_werte(),
-           "geplant": [], "ziel": [], "ausgelassen": [], "plaene": []}
+           "geplant": [], "ziel": [], "ausgelassen": [], "plaene": [], "konten_stand": []}
     if not uids:
         erg["msg"] = "keine ID"
         return erg
@@ -41036,7 +41285,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
-    fest_je = fcp_fest_richtung(offen_alle)
+    fest_je = fcp_fest_richtung(offen_alle, an=param["richtung_laufend"])
     gruppe_je = _fcp_gruppe_je_uid(uids)
     echo_bal, dup_bal = _ap_balance_karten()
     ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
@@ -41067,9 +41316,22 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if fkey.startswith("tradeify") and not _ist_tradeify_cfd(a.get("firm")):
             continue                     # Tradeify-Futures nie hier (Regel-Schlüssel „tradeify" ohne cfd hat keine Zeile, doppelt gesichert)
         zeile = {"konto_id": aid, "user_id": uid, "user": namen.get(uid) or uid[:8], "konto": a.get("name"), "firma": a.get("firm"), "firma_key": fkey}
+        try:   # E1b (Finn 05.11.2026 ~04:25): Kontoliste je Firma mit Ziel- und Consistency-Balken — aus den Lesungen dieses Laufs
+            _g = _wd_konto_groesse(a)
+            _jg = fcp_je_groesse(regel, _g) or {}
+            _bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+            _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None
+            _zb = fcp_bereich(_jg.get("ziel"))
+            erg["konten_stand"].append(dict(zeile, groesse=_g, balance=_bal, gewinn=round(float(_bal) - float(_g), 2) if _bal is not None and _g else None,
+                                            ziel_von=_zb[0] if _zb else None, ziel_bis=_zb[1] if _zb else None, wartet=bool(a.get("waiting_payout_since")),
+                                            bester_tag=_tz[0] if _tz else None, trades=_tz[1] if _tz else None, consistency_pct=fcp_consistency_pct(regel)))
+        except Exception as e:
+            print(f"[funded-cfd] ⚠️ Kontostand {aid[:8]}: {type(e).__name__}: {e}", flush=True)
         aus = lambda grund, **x: erg["ausgelassen"].append(dict(zeile, aktion="aus", grund=grund, **x))   # noqa: E731
-        if any(w and w in str(a.get("name") or "").lower() for w in (regel.get("ohne_namen") or [])):
-            aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht"); continue
+        _ohne = next((w for w in (regel.get("ohne_namen") or []) if w and w in str(a.get("name") or "").lower()), None)
+        if _ohne:
+            # Grund je Wort (Fremd-Review E1b: ohne_namen ist jetzt in den Einstellungen änderbar) — „flex" behält den bisherigen Text
+            aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht" if _ohne == "flex" else f"Name enthält „{_ohne}“ — nicht planen (Einstellung der Firma)"); continue
         if a.get("auto_planer") is False:
             aus(AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus"); continue
         if a.get("waiting_payout_since"):
@@ -41104,7 +41366,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if isinstance(jg.get("gewinntage"), dict) else None
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
-                              max_sl=a.get("max_risiko_trade"),
+                              max_sl=a.get("max_risiko_trade"), param=param,      # E1b: Planer-Parameter aus der DB (fcp_param)
+                              tage=fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None,   # Weg A
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r["aktion"] == "ziel":
@@ -41151,7 +41414,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
                  # The5ers je Zyklus (04.11.2026): Zyklus-Gewinne in der Notiz — Finn sieht, woraus der TP kommt (nicht lesbar → „?")
                  + ((f" · Zyklus-Gewinne {_liq_de(r['gewinne'])} $" if r.get("gewinne") is not None else " · Zyklus-Gewinne ?")
-                    if str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r) else ""))
+                    if (str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r)) and not r.get("consistency") else "")
+                 # Weg A (05.11.2026): „Consistency 50 % · Trade 3 von 8 · Endziel …"
+                 + ((lambda c: f" · Consistency {_liq_de(c['p'])} % · Trade {int(c['k']) + 1} von {int(c['k']) + int(c['n'])} · Endziel {_liq_de(c['ende'])} $ · größter Tag {_liq_de(c['bester_tag'])} $"
+                     if c.get("lesbar") else f" · Consistency {_liq_de(c['p'])} % · Zyklus nicht lesbar → kleinster sicherer Trade")(r["consistency"]) if r.get("consistency") else ""))
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
@@ -41162,7 +41428,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
-                                                                         "zyklus", "tp_deckel", "gewinne", "erster_payout", "gewinntage")},
+                                                                         "zyklus", "tp_deckel", "gewinne", "consistency", "erster_payout", "gewinntage")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
@@ -41447,7 +41713,14 @@ def admin_funded_cfd_plan_regel():
         return jsonify({"ok": False, "msg": "Die Funded-CFD-Regeln gelten für alle Gruppen — nur Admin"}), 403
     body = request.get_json(silent=True) or {}
     try:
-        zeile = (sb_select("funded_cfd_plan_regeln", {"select": "id,aktiv,auto_bestaetigen,ziel_auto_wartet,zeiten,firmen,updated_at", "id": "eq.1"}) or [None])[0]
+        try:   # E1b: Spalte parameter (sql/2026-11-05_fcp_einstellungen_db.sql) — fehlt sie noch, ohne sie lesen (Patch meldet es dann)
+            zeile = (sb_select("funded_cfd_plan_regeln", {"select": "id,aktiv,auto_bestaetigen,ziel_auto_wartet,zeiten,firmen,parameter,updated_at", "id": "eq.1"}) or [None])[0]
+        except Exception as e1:
+            # nur bei fehlender Spalte ohne sie lesen — ein anderer Fehler (z. B. kurzer Ausfall) soll nicht „Spalte fehlt" melden (Fremd-Review E1b)
+            _r1 = getattr(e1, "response", None)   # PostgREST: 400 „column funded_cfd_plan_regeln.parameter does not exist" (str(e1) trägt nur die URL)
+            if getattr(_r1, "status_code", None) != 400 or "parameter" not in str(getattr(_r1, "text", "") or ""):
+                raise
+            zeile = (sb_select("funded_cfd_plan_regeln", {"select": "id,aktiv,auto_bestaetigen,ziel_auto_wartet,zeiten,firmen,updated_at", "id": "eq.1"}) or [None])[0]
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Regeln nicht lesbar ({type(e).__name__})"}), 502
     if not zeile:
