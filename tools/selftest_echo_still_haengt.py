@@ -51,7 +51,7 @@ def main():
     # N2 (04.11.2026): der Beleg steht in sfVorOrderBeleg (Kopf der Antwort, „nichts gesendet/platziert" + Abbrüche vor dem Order-Knopf) — der Spiegel
     # oben prüft weiter die alten Wörter, die Erweiterung prüft tools/selftest_endlesung_deals.js im Browser
     beleg = html[html.index("function sfVorOrderBeleg("):html.index("window._sfVorOrderBeleg = sfVorOrderBeleg")]
-    check("sfVorOrderBeleg(sp.msg)" in u and "/nichts gesendet/i" in html and "/nichts platziert/i" in html and "split(/\\s+(?:Spur:|\\[)/)[0]" in beleg
+    check("sfVorOrderBeleg(sp.msg)" in u and "/nichts gesendet/i" in html and "/nichts platziert/i" in html and "split(/\\s+(?:Spur:|\\[(?=[\\d…]|\\.\\.\\.))/)[0]" in beleg
           and "!spNach && masterFlach === true) return { unklar: false" in u and "return { unklar: true" in u,
           "unklar = false nur mit Beleg (Kopf der Antwort sagt „nichts gesendet/platziert“ o. ä., oder keine Antwort + Master flach), sonst unklar")
     k = html[html.index("async function sfStillPruefen("):html.index("let _sfLaeuft = false, _sfAbgleichAt = 0")]
