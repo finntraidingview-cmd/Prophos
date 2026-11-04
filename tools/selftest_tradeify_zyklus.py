@@ -111,13 +111,13 @@ check("if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id))" in html and "if(z
 check("Math.max(Number(zy.ziel), tpVor || 0)" in html, "TP-Vorgabe am Konto schlägt den Ausgleich nicht (max)")
 check("document.addEventListener('click', e => {\n    const el = e.target && e.target.closest && e.target.closest('.acc-rec-chip" not in html and "window._recoveryChipKlick" in html, "kein Sammel-Klick-Handler, Klick nur am Chip")
 check('if tradeify_zyklus_firma(konto) and str(konto.get("account_type") or "") in ("funded", "winning_days") and not trotzdem:' in app
-      and "Payout erst ab +{_m:,.2f} $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < Mindest-Gewinn (Standard +1 $) abgelehnt (409)")
-check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count("Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE'") == 2,
+      and "Payout erst ab +{_m_txt} $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < Mindest-Gewinn (Standard +1 $) abgelehnt (409)")
+check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count("Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE'") == 2,
       "Frontend: Anfragbar-Zelle und Finanzen-Payout zeigen „Zyklus −X $ · Payout erst ab +<Mindest-Gewinn> $“ (Standard 1 $, E4)")
 check("(/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm))" in html, "Zyklus-Stand lädt auch für Tradeify-WD-Konten (nie Tradeify CFD)")
 check(html.count("window._kontoRecoveryChipHtml?.(t.konto_id") == 2 and "function kontoRecoveryChipHtml(kid, name)" in html and ">Recovery</span>" in html,
       "Chip „Recovery“ in Konto-Zeile, Planer/WD-Karte (planRecovererChipHtml) und Radar")
-check("[`Fehlt bis +${(Number(z.min_usd) || 1)" in html and "['Nächster Trade', z.aktiv ? `Ausgleich · TP" in html, "Popup: Zyklus, Fehlbetrag bis Mindest-Gewinn, WD-Stand, nächster Trade mit TP")
+check("[`Fehlt bis +${(z.min_usd != null ? Number(z.min_usd) : 1)" in html and "['Nächster Trade', z.aktiv ? `Ausgleich · TP" in html, "Popup: Zyklus, Fehlbetrag bis Mindest-Gewinn, WD-Stand, nächster Trade mit TP")
 
 # ── E4 (05.11.2026): Mindest-Gewinn je Zyklus als Parameter (wd_farmer_regeln.firmen_regeln) — Standard = Verhalten von vorher ──
 lade("wd_firmen_regel")

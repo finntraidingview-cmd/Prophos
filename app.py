@@ -16838,8 +16838,11 @@ def admin_payout_anfragen():
               "live_balance": _wd_num(konto.get("tv_balance")), "live_at": konto.get("tv_balance_at"), "max_drawdown": konto.get("max_drawdown")}
         if _wd_zyklus_anhaengen([kz]) and (kz.get("zyklus") or {}).get("gesperrt"):
             z = kz["zyklus"]
-            _m = float(_wd_num(z.get("min_usd")) or TRADEIFY_ZYKLUS_MIN_USD)   # E4: Mindest-Gewinn aus den WD-Einstellungen
-            return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $ · Payout erst ab +{_m:,.2f} $ — nichts angelegt".replace(",", "X").replace(".", ",").replace("X", ".").replace(",00 $", " $").replace("-", "−"), "zyklus": z}), 409
+            _m = _wd_num(z.get("min_usd"))   # E4: Mindest-Gewinn aus den WD-Einstellungen (fehlt → 1 $)
+            _m = float(TRADEIFY_ZYKLUS_MIN_USD if _m is None else _m)
+            _m_txt = (f"{_m:,.0f}" if _m.is_integer() else f"{_m:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
+            return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $".replace(",", "X").replace(".", ",").replace("X", ".").replace("-", "−")
+                                     + f" · Payout erst ab +{_m_txt} $ — nichts angelegt", "zyklus": z}), 409
     morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
     felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     try:

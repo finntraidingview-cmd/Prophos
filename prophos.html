@@ -18026,7 +18026,7 @@
       const zyT = window._wdZyklusRoh?.(r.account_id)
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt)
         return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0,
-                 sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` }   // E4: Mindest-Gewinn aus den WD-Einstellungen (Railway zyklus.min_usd)
+                 sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` }   // E4: Mindest-Gewinn aus den WD-Einstellungen (Railway zyklus.min_usd)
       if(c.profit == null) return { regel, grund: c.size == null ? 'Größe unklar' : 'keine Balance', anfragbar: null, erhalten: null }
       // Deckel je Größe (Lucid, 29.10.2026): die Regel bekommt den Deckel ihrer Größe, damit Anzeige („max. …") und Rechnung gleich sind
       if(regel.deckelJeGroesse){
@@ -44393,12 +44393,12 @@
       const zeilenT = [
         ['Zyklus', `${z.nr}${z.start ? ' · seit Payout-Anfrage ' + tagTxt(z.start) : ''}`],
         ['Gewinn seit letztem Payout', z.gewinn != null ? `${vz(z.gewinn)}${de(z.gewinn)} $` : 'unbekannt'],
-        [`Fehlt bis +${(Number(z.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $`, z.gewinn != null ? `${(Math.max(0, (Number(z.min_usd) || 1) - Number(z.gewinn))).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : '–'],   // E4: zyklus.min_usd
+        [`Fehlt bis +${(z.min_usd != null ? Number(z.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $`, z.gewinn != null ? `${(Math.max(0, (z.min_usd != null ? Number(z.min_usd) : 1) - Number(z.gewinn))).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : '–'],   // E4: zyklus.min_usd
         ['Winning Days', `${z.stand ?? '–'}/${z.ziel_tage ?? 5}`],
         ['Nächster Trade', z.aktiv ? `Ausgleich · TP ${de(z.ziel)} $ · Hedge ${de(z.hedge_eur)} €` : `normaler WD (Ausgleich ab ${Math.max(0, Number(z.ziel_tage || 5) - 1)}/${z.ziel_tage || 5})`],
       ]
       box.innerHTML = zeilenT.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--sub)">${escapeHtml(k)}</span><span class="tnum" style="font-weight:600">${escapeHtml(v)}</span></div>`).join('')
-        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +${(Number(z.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $).</div>`
+        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +${(z.min_usd != null ? Number(z.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $).</div>`
       return
     }
     const handTp = Number(((accounts || []).find(a => String(a.id) === _recKonto.id) || {}).wdTp) || 0   // nur am eigenen Konto bekannt
@@ -71072,11 +71072,12 @@
         </div>
       </div>`
   }
-  async function e4Speichern(){
+  async function e4Speichern(nurK){
     if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
     const box = document.getElementById('wd-firmen'); if(!box) return
     const alt = (_wd.regeln && _wd.regeln.firmen_regeln) || {}, neu = { ...alt }
-    box.querySelectorAll('[data-e4-firma]').forEach(el => {
+    // nur die geänderte Firma schreiben (Prüfung E4): die übrigen behalten ihren DB-Wert bzw. bleiben auf dem Code-Standard
+    box.querySelectorAll(nurK ? `[data-e4-firma="${nurK}"]` : '[data-e4-firma]').forEach(el => {
       const k = el.dataset.e4Firma, q = sel => el.querySelector(sel)
       const pct = parseInt(q(`[data-e4-pct="${k}"]`)?.value, 10), usd = parseFloat(q(`[data-e4-usd="${k}"]`)?.value), ab = parseInt(q(`[data-e4-ab="${k}"]`)?.value, 10)
       neu[k] = { konsistenz: { an: !!q(`[data-e4-an="${k}|konsistenz"]`)?.checked, pct: (isFinite(pct) && pct >= 1 && pct <= 100) ? pct : null },
@@ -71095,7 +71096,8 @@
       const [k, t] = el.dataset.e4An.split('|'), txt = box.querySelector(`[data-e4-pct-txt="${k}"]`), sl = box.querySelector(`[data-e4-pct="${k}"]`)
       if(t === 'konsistenz' && el.checked && txt && sl) txt.textContent = sl.value + ' %'   // an ohne hinterlegten Wert: der Slider-Wert gilt
     }))
-    box.querySelectorAll('[data-e4-an],[data-e4-pct],[data-e4-usd],[data-e4-ab]').forEach(el => el.addEventListener('change', () => e4Speichern().catch(e => wdSay('Payout-Regeln: ' + (e.message || e), 'err'))))
+    box.querySelectorAll('[data-e4-an],[data-e4-pct],[data-e4-usd],[data-e4-ab]').forEach(el => el.addEventListener('change', () =>
+      e4Speichern(el.closest('[data-e4-firma]')?.dataset.e4Firma).catch(e => wdSay('Payout-Regeln: ' + (e.message || e), 'err'))))
   }
   function wdFirmenRender(fu, vp){
     const box = document.getElementById('wd-firmen'); if(!box) return
@@ -76563,7 +76565,7 @@
       // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ seit dem letzten Payout — Stand von Railway (window._wdZyklus)
       const zyT = accountId ? window._wdZyklusRoh?.(accountId) : null
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt){
-        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return   // E4: zyklus.min_usd
+        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return   // E4: zyklus.min_usd
       }
       try{
         const row = {
