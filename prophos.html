@@ -54982,7 +54982,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2029'
+  const OS_TAB_BUILD = '2026-09-22.2030'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -83596,7 +83596,7 @@
     return { plan_id: id, user_id: t.user_id, user: t.user, firma: t.firma, konto: t.konto, ende4: t.ende4, typ: t.typ, richtung: t.richtung,
       route: t.route, start_um: new Date(Date.parse(D.tag + 'T00:00:00Z') + (t.start - off) * 60000).toISOString(), menge: t.menge, tp: t.tp, sl: t.sl,
       stufe, notes: rd.notes || (ep && ep.notes) || c.notes || (stufe ? 'Auto-Planer · ' + stufe : ''), konto_id: t.konto_id,
-      boden: rd.boden ?? c.boden ?? t.boden ?? null, balance: tplNum(rd.balance) } }
+      boden: rd.boden ?? c.boden ?? t.boden ?? null, balance: tplNum(rd.balance), gehedgt: !!t.gehedgt } }   // gehedgt: Weg-Chip Orbit/Orbit V2 (apgWeg, 04.11.2026)
   const apIdsEcht = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(String(t.plan_id || ''))
   function apIdsWartenLaeuft(){
     const D = apIdsHeute(), u = apSichtUid(), jetzt = Date.now()
@@ -84360,8 +84360,16 @@
       const g = z.hedge_vorschau && z.hedge_vorschau.grund
       // Grund steht ausgeschrieben im Hedge-Chip derselben Zeile — hier kurz, ganz im Tooltip
       return g ? ['Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`] : ['Echo', 'hedge', 'wird ~20 min vor dem Start auf Echo mit Fusion-Gegenhedge umgestellt'] }   // ECHO-NAMEN (Finn 30.10.2026 ~08:02): „Echo" = mit Hedge
-    return r === 'tvv2' ? ['Orbit V2', ''] : r === 'mt5v2' ? ['Echo V2', ''] : r === 'mt5' ? ['Echo', 'hedge'] : r === 'tsv2' ? ['Topstep V2', ''] : r ? [r, ''] : null }
+    // ORBIT-NAMEN WIE RADAR/TRADES (04.11.2026, Finn zum Funded Planer: „warum sind alle Modelle mit Orbit V2?"): tvv2/tsv2 standen hier immer als
+    // „Orbit V2"/„Topstep V2", auch mit Fusion-Hedge (orbit_v3 + hedge_eur). Jetzt derselbe Name wie überall (wegLabel): mit Hedge „Orbit" bzw.
+    // „Nova", ohne Hedge „Orbit V2"/„Topstep V2". Hedge aus /ids (orbit_v3, hedge_eur) oder der Planer-Zeile (gehedgt).
+    if(r === 'tvv2' || r === 'tsv2'){
+      const mitHedge = !!(z && (z.orbit_v3 === true || z.gehedgt === true || Number(z.hedge_eur) > 0))
+      const wd = !!(z && z.typ === 'winning_days')
+      return [wegLabel({ route: r, orbitV3: mitHedge && !wd, hedgeEur: mitHedge ? (Number(z.hedge_eur) || 1) : 0, kontoTyp: z && z.typ, notes: (z && z.notes) || '' }), mitHedge ? 'hedge' : ''] }
+    return r === 'mt5v2' ? ['Echo V2', ''] : r === 'mt5' ? ['Echo', 'hedge'] : r ? [r, ''] : null }
   const apgEchoHedgeAn = () => { try{ const v = apdDaten(); return !!(v && v.echo_hedge && v.echo_hedge.an === true) }catch(_){ return false } }
+  window._apgWeg = z => apgWeg(z)   // Test-Haken (04.11.2026)
   function apgZeilenSchmuecken(root, x){
     const je = new Map([...(x.offenListe || []).map(z => [String(z.plan_id), z]), ...(x.wartenListe || []).map(e => [String(e.z && e.z.plan_id), e.z])])
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {

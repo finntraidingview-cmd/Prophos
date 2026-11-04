@@ -35096,7 +35096,7 @@ def admin_auto_plan_ids():
     try:
         seit = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
         pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl,notes,auto_bestaetigt_at,"
-                                               "hedge_freigabe_at,hart:mt5_baseline->>hedge_art,hvs:mt5_baseline->hedge_vorschau",
+                                               "hedge_freigabe_at,hart:mt5_baseline->>hedge_art,hvs:mt5_baseline->hedge_vorschau,orbit_v3,hedge_eur",
                                      "status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
         pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
@@ -35130,6 +35130,8 @@ def admin_auto_plan_ids():
                           "konto_id": str(p.get("master_account_id") or "") or None,
                           # EIN BESTÄTIGEN JE TRADE (Finn 30.10.2026): Hedge-Pläne (apex / tradeify_final) zeigen ihre Vorschau in derselben Zeile
                           **ap_ids_hedge_felder(p),
+                          # WEG-CHIP (04.11.2026, Finn: „warum sind alle Modelle mit Orbit V2?"): Orbit mit Hedge vs. Orbit V2 ohne — wie Radar/Trades (wegLabel)
+                          "orbit_v3": bool(p.get("orbit_v3")), "hedge_eur": _wd_num(p.get("hedge_eur")),
                           "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                                           letzt_je.get(str(p.get("master_account_id") or ""))),
                           # BODEN (08.10.2026, Balance-Balken Slave 4) — wie delta.geplant[]
