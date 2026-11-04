@@ -4789,6 +4789,10 @@
   #adm-pane-wd .e4-feld{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub)}
   #adm-pane-wd .e4-feld i{font-style:normal}
   #adm-pane-wd .e4-feld .input{width:72px;height:28px;padding:0 8px;font-size:12.5px;box-sizing:border-box}
+  #adm-pane-wd .e4b{display:flex;flex-direction:column;gap:4px}
+  #adm-pane-wd .e4b.aus .e4b-z{display:none}
+  #adm-pane-wd .e4b-st{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-left:23px;min-height:28px}
+  #adm-pane-wd .e4b-pf{font-style:normal;color:var(--sub);font-size:12px}
   #adm-pane-wd .wd-chips{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 10px}
   #adm-pane-wd .wd-chip-f{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);font-size:11.5px;cursor:pointer;background:var(--surface,#fff)}
   #adm-pane-wd .wd-chip-f:hover{background:rgba(0,0,0,.03)}
@@ -71281,10 +71285,87 @@
           <span class="e4-z2"><span class="e4-feld"><input type="number" class="input mono" data-e4-usd="${k}" min="0" step="1" value="${usd != null ? usd : ''}" placeholder="—" title="Net Profit seit dem letzten Payout"><i>$</i></span>
             <span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4-ab="${k}" min="1" max="20" step="1" value="${r.min_netto.ab_zyklus}" title="Zyklus 1 = vor dem ersten Payout"></span></span>
         </div>
+        ${e4bRecovererHtml(k)}
       </div>`
   }
-  async function e4Speichern(nurK){
+  /* RECOVERER IN DER APEX-FIRMA (E4b, Finn 05.11.2026 ~06:50 Dubai: „Kannst du bei Apex auch den Recoverer, Consistency etc. hinzufügen, dass ich es einsehen und ggf.
+   * ändern kann."): dieselben Werte, mit denen Railway rechnet — wd_farmer_regeln.zyklus_regel (app.py wd_zyklus_konto / wd_zyklus_werte), kein eigener Speicher.
+   * Schalter je Firma = Schlüssel in zyklus_regel.firmen (und aktiv); ab Zyklus und Staffel gelten für Apex 150k und 100k gemeinsam. Gespeichert im selben
+   * e4Speichern, als Merge auf die frisch gelesene Zeile: bis, satz_normal, kt und alles Unbekannte bleiben, wie es ist. */
+  const E4B_ZYKLUS_STD = { stuetz: [{ v: 2000, ziel: 750, satz: 400 }, { v: 4000, ziel: 1500, satz: 300 }], firmen: ['apex', 'apex100'], ab_zyklus: 2, bis: '2x_bester', satz_normal: null, kt: null, aktiv: true }   // = app.py WD_ZYKLUS_VORGABE
+  const e4bIstRegel = z => !!(z && typeof z === 'object' && !Array.isArray(z))
+  const e4bAktiv = z => ('aktiv' in z) ? !!z.aktiv : true                                                         // wie app.py: not r.get("aktiv", True) → aus
+  const e4bFirmen = z => (Array.isArray(z.firmen) && z.firmen.length) ? z.firmen.slice() : E4B_ZYKLUS_STD.firmen.slice()   // wie app.py: firmen or Vorgabe
+  const e4bStuetz = z => ((Array.isArray(z.stuetz) && z.stuetz.length) ? z.stuetz : E4B_ZYKLUS_STD.stuetz).filter(e4bIstRegel)
+    .map(x => ({ v: Number(x.v) || 0, ziel: Number(x.ziel) || 0, satz: Number(x.satz) || 0 })).sort((a, b) => a.v - b.v)
+  function e4bZyklusMerge(alt, k, an, ab, stuetz){
+    // ohne DB-Regel ist der Recoverer aus (app.py keine_regel) — eine Änderung ohne Schalter „an" schaltet ihn deshalb nicht ein
+    const z = e4bIstRegel(alt) ? { ...alt } : { ...E4B_ZYKLUS_STD, stuetz: E4B_ZYKLUS_STD.stuetz.map(x => ({ ...x })), firmen: E4B_ZYKLUS_STD.firmen.slice(), aktiv: false }
+    const fi0 = e4bFirmen(z), aktiv0 = e4bAktiv(z)
+    if(an === true){ z.firmen = aktiv0 ? Array.from(new Set(fi0.concat([k]))) : [k]; z.aktiv = true }   // war ganz aus: nur diese Firma an, die andere bleibt aus
+    else if(an === false && aktiv0 && fi0.includes(k)){
+      const fi = fi0.filter(x => x !== k)
+      if(fi.length) z.firmen = fi; else z.aktiv = false   // leere Liste fiele in app.py auf die Vorgabe zurück → beide aus = aktiv false
+    }
+    if(Number.isInteger(ab) && ab >= 1 && ab <= 20) z.ab_zyklus = ab
+    if(Array.isArray(stuetz) && stuetz.length){
+      const alt0 = e4bStuetz(z)
+      z.stuetz = stuetz.map((x, i) => { const o = alt0[i] || {}, gut = v => isFinite(v) && v > 0
+        return { v: gut(x.v) ? x.v : o.v, ziel: gut(x.ziel) ? x.ziel : o.ziel, satz: gut(x.satz) ? x.satz : o.satz } })
+        .filter(x => x.v > 0 && x.ziel > 0 && x.satz > 0).sort((a, b) => a.v - b.v)
+      if(!z.stuetz.length) z.stuetz = alt0
+    }
+    return z
+  }
+  window._e4bZyklusMerge = e4bZyklusMerge
+  function e4bRecovererHtml(k){
+    if(k !== 'apex' && k !== 'apex100') return ''
+    const z = _wd.regeln && _wd.regeln.zyklus_regel, da = e4bIstRegel(z), an = da && e4bAktiv(z) && e4bFirmen(z).includes(k)
+    const zz = da ? z : E4B_ZYKLUS_STD, ab = Number(zz.ab_zyklus) || 2, de = v => Number(v || 0).toLocaleString('de-DE')
+    const tip = escapeHtml('nach einem Verlusttag im Payout-Zyklus WD-Ziel und Hedge linear nach dem Verlust (dazwischen linear, darüber Deckel), bis der Zyklus-Profit ≥ 2 × bester Tag ist (Apex 50 %) · 1 NQ · '
+      + 'ab Zyklus und Staffel gelten für Apex 150k und 100k gemeinsam · wd_farmer_regeln.zyklus_regel' + (da ? '' : ' fehlt — Schalter an legt sie an'))
+    const zeilen = e4bStuetz(zz).map((s, i) => `<div class="e4b-z e4b-st">
+          <span class="e4-feld"><i>bei −</i><input type="number" class="input mono" data-e4b-v="${k}|${i}" min="1" step="100" value="${s.v}" title="Verlust im Zyklus (schlechtester Tag), $"><i>$</i></span><i class="e4b-pf">→</i>
+          <span class="e4-feld"><input type="number" class="input mono" data-e4b-ziel="${k}|${i}" min="1" step="10" value="${s.ziel}" title="WD-Ziel je Tag, $"><i>$</i></span>
+          <span class="e4-feld"><input type="number" class="input mono" data-e4b-satz="${k}|${i}" min="1" step="10" value="${s.satz}" title="Hedge € je 1.000 $ Ziel — hier ${de(Math.round(s.ziel * s.satz / 10) / 100)} €"><i>€ / 1.000 $</i></span></div>`).join('')
+    return `<div class="e4b ${an ? '' : 'aus'}" data-e4b-firma="${k}">
+        <div class="e4-zeile">
+          <label class="e4-schalter" title="${tip}"><input type="checkbox" data-e4b-an="${k}" ${an ? 'checked' : ''}><span>Recoverer</span></label>
+          <span class="e4b-z e4-z2"><span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4b-ab="${k}" min="1" max="20" step="1" value="${ab}" title="Zyklus 1 = vor dem ersten Payout"></span>
+            <span class="e4-feld" title="${tip}">bis Profit ≥ 2 × bester Tag · 1 NQ</span></span>
+        </div>
+        ${zeilen}
+      </div>`
+  }
+  async function e4bSpeichern(k){
+    const box = document.getElementById('wd-firmen'), el = box && box.querySelector(`[data-e4b-firma="${k}"]`); if(!el) return
+    const q = s => el.querySelector(s), zahl = s => parseFloat(q(s)?.value)
+    const n = el.querySelectorAll('[data-e4b-v]').length, stuetz = []
+    for(let i = 0; i < n; i++) stuetz.push({ v: zahl(`[data-e4b-v="${k}|${i}"]`), ziel: zahl(`[data-e4b-ziel="${k}|${i}"]`), satz: zahl(`[data-e4b-satz="${k}|${i}"]`) })
+    // frisch lesen, dann mergen: ein anderer Tab oder die SQL könnte zyklus_regel seit dem Laden geändert haben
+    const { data, error: e0 } = await supabase.from('wd_farmer_regeln').select('zyklus_regel').eq('id', 1).maybeSingle()
+    if(e0){ wdSay(/zyklus_regel/.test(String(e0.message || '')) ? 'Recoverer: Spalte fehlt noch (sql/2026-11-02_recoverer.sql)' : 'Recoverer nicht gespeichert: ' + (e0.message || e0), 'err'); return }
+    const neu = e4bZyklusMerge(data ? data.zyklus_regel : null, k, !!q(`[data-e4b-an="${k}"]`)?.checked, parseInt(q(`[data-e4b-ab="${k}"]`)?.value, 10), stuetz)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('wd_farmer_regeln').update({ zyklus_regel: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
+    if(error){ wdSay('Recoverer nicht gespeichert: ' + (error.message || error), 'err'); return }
+    if(_wd.regeln) _wd.regeln.zyklus_regel = neu
+    // beide Apex-Blöcke auf den gespeicherten Stand (ab Zyklus und Staffel sind gemeinsam, ungültige Eingaben springen zurück)
+    for(const k2 of ['apex', 'apex100']){
+      const alt = box.querySelector(`[data-e4b-firma="${k2}"]`); if(!alt) continue
+      const t = document.createElement('div'); t.innerHTML = e4bRecovererHtml(k2); const neuEl = t.firstElementChild
+      alt.replaceWith(neuEl); e4bVerdrahten(neuEl)
+    }
+    wdSay('Recoverer gespeichert', 'ok')
+  }
+  function e4bVerdrahten(wurzel){
+    wurzel.querySelectorAll('[data-e4b-an]').forEach(el => el.addEventListener('change', () => el.closest('.e4b')?.classList.toggle('aus', !el.checked)))
+    wurzel.querySelectorAll('[data-e4b-an],[data-e4b-ab],[data-e4b-v],[data-e4b-ziel],[data-e4b-satz]').forEach(el => el.addEventListener('change', () =>
+      e4Speichern(el.closest('[data-e4b-firma]')?.dataset.e4bFirma, 'recoverer').catch(e => wdSay('Recoverer: ' + (e.message || e), 'err'))))
+  }
+  async function e4Speichern(nurK, teil){
     if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
+    if(teil === 'recoverer') return e4bSpeichern(nurK)   // E4b: eigene Spalte zyklus_regel, derselbe Weg und derselbe Riegel
     const box = document.getElementById('wd-firmen'); if(!box) return
     const alt = (_wd.regeln && _wd.regeln.firmen_regeln) || {}, neu = { ...alt }
     // nur die geänderte Firma schreiben (Prüfung E4): die übrigen behalten ihren DB-Wert bzw. bleiben auf dem Code-Standard
@@ -71309,6 +71390,7 @@
     }))
     box.querySelectorAll('[data-e4-an],[data-e4-pct],[data-e4-usd],[data-e4-ab]').forEach(el => el.addEventListener('change', () =>
       e4Speichern(el.closest('[data-e4-firma]')?.dataset.e4Firma).catch(e => wdSay('Payout-Regeln: ' + (e.message || e), 'err'))))
+    e4bVerdrahten(box)
   }
   function wdFirmenRender(fu, vp){
     const box = document.getElementById('wd-firmen'); if(!box) return

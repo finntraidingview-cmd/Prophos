@@ -273,6 +273,55 @@ return JSON.stringify({ a: a, hk: hMenge(hK), nqSperre: [wdNqOhneMenge('nq', hMe
     check("recoverer: !!window._planIstRecoverer?.(" in q_h and "if(p && typeof p.recoverer === 'boolean') return p.recoverer" in q_h, "Markierung: Läuft/Wartet-Karten prüfen das echte Symbol, nicht den NQ-Rückfall")
     check(q_h.count("window._planRecovererChipHtml?.(") >= 5 and "_planRecovererChipHtml = planRecovererChipHtml" in q_h, "Markierung: Chip in Zu bestätigen, Winning-Days-Übersicht und beiden Plan-Zeilen")
 
+    # ── E4b (05.11.2026): Recoverer in WD → Einstellungen → Firmen → Apex. Echte e4bZyklusMerge aus prophos.html (JavaScriptCore), Ergebnis in wd_zyklus_konto ──
+    import json
+    import copy
+    mike2 = [plan("2026-10-27", 374.88), plan("2026-10-30", -3998.16)]
+    zk0 = ns["wd_zyklus_konto"](dict(MIKE), REGEL, VORPLAN, mike2, PAY)
+    m_js = html[html.index("  const E4B_ZYKLUS_STD = {"):html.index("  window._e4bZyklusMerge = e4bZyklusMerge")]
+    std_js = re.search(r"const E4B_ZYKLUS_STD = (\{.*?\})   //", m_js).group(1)
+    check(json.loads(re.sub(r"(\w+):", r'"\1":', std_js).replace("'", '"')) == ns["WD_ZYKLUS_VORGABE"], "E4b: Frontend-Vorgabe = app.py WD_ZYKLUS_VORGABE")
+    alt = dict(copy.deepcopy(REGEL), eigen="bleibt")   # fremder Schlüssel muss den Merge überleben
+    faelle = {
+        "gleich":    [alt, "apex", True, 2, [{"v": 2000, "ziel": 750, "satz": 400}, {"v": 4000, "ziel": 1500, "satz": 300}]],
+        "ziel":      [alt, "apex", True, 2, [{"v": 2000, "ziel": 900, "satz": 400}, {"v": 4000, "ziel": 1800, "satz": 300}]],
+        "ab3":       [alt, "apex", True, 3, []],
+        "aus150":    [alt, "apex", False, 2, []],
+        "beideaus":  [dict(alt, firmen=["apex"]), "apex", False, 2, []],
+        "wiederan":  [dict(alt, firmen=["apex"], aktiv=False), "apex100", True, 2, []],
+        "ungueltig": [alt, "apex", True, 0, [{"v": None, "ziel": -5, "satz": 0}, {"v": 4000, "ziel": 1500, "satz": 300}]],
+        "ohneregel": [None, "apex", None, 3, []],
+    }
+    if shutil.which("osascript"):
+        js = "function run(){ var _wd = {}; function escapeHtml(s){ return s }\n" + m_js + "\nvar F = " + json.dumps(faelle) + ", r = {};\n" \
+             "for(var k in F){ var a = F[k]; r[k] = e4bZyklusMerge(a[0], a[1], a[2], a[3], a[4]) }\nreturn JSON.stringify(r) }"
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(js)
+        aus = subprocess.run(["osascript", "-l", "JavaScript", f.name], capture_output=True, text=True, timeout=30)
+        os.unlink(f.name)
+        check(aus.returncode == 0, f"E4b: Merge läuft in JavaScriptCore ({aus.stderr.strip()[:200]})")
+        if aus.returncode == 0:
+            m = json.loads(aus.stdout)
+            zk = lambda regel, konto=MIKE: ns["wd_zyklus_konto"](dict(konto), regel, VORPLAN, mike2, PAY)   # noqa: E731
+            g = zk(m["gleich"])
+            check(m["gleich"] == alt and (g["aktiv"], g["ziel"], g["satz"], g["hedge_eur"]) == (zk0["aktiv"], zk0["ziel"], zk0["satz"], zk0["hedge_eur"]),
+                  f"E4b: gleiche Werte gespeichert → gleiche Regel, gleiches Farmer-Ergebnis ({g['ziel']} $ / {g['hedge_eur']} €)")
+            check(m["gleich"]["eigen"] == "bleibt" and m["gleich"]["bis"] == "2x_bester" and m["gleich"]["satz_normal"] is None and "kt" in m["gleich"], "E4b: Merge statt Ersetzen — bis, satz_normal, kt, Fremdes bleiben")
+            z2 = zk(m["ziel"])
+            check(z2["aktiv"] and z2["ziel"] > zk0["ziel"] and z2["hedge_eur"] > zk0["hedge_eur"], f"E4b: Wert geändert wirkt — Ziel {zk0['ziel']} → {z2['ziel']} $, Hedge {zk0['hedge_eur']} → {z2['hedge_eur']} €")
+            z3 = zk(m["ab3"])
+            check(m["ab3"]["ab_zyklus"] == 3 and not z3["aktiv"] and z3["grund_code"] == "zyklus_1" and m["ab3"]["stuetz"] == REGEL["stuetz"], "E4b: ab Zyklus 3 wirkt — Mike im Zyklus 2 ohne Recoverer, Staffel unverändert")
+            a1 = zk(m["aus150"])
+            a2 = zk(m["aus150"], dict(MIKE, name="100k PAAPEX 0002", live_balance=104000))
+            check(m["aus150"]["firmen"] == ["apex100"] and a1["grund_code"] == "firma" and a2["firma_key"] == "apex100" and a2["aktiv"],
+                  f"E4b: Schalter je Firma — Apex 150k aus, Apex 100k bleibt an ({a1['grund_code']}, {a2['grund_code']})")
+            b = zk(m["beideaus"])
+            check(m["beideaus"]["aktiv"] is False and b["grund_code"] == "regel_aus", "E4b: letzte Firma aus → aktiv false (leere Liste fiele auf die Vorgabe zurück)")
+            check(m["wiederan"]["aktiv"] is True and m["wiederan"]["firmen"] == ["apex100"], "E4b: aus allen wieder an → nur diese Firma an, nicht die alte Liste")
+            check(m["ungueltig"]["ab_zyklus"] == 2 and m["ungueltig"]["stuetz"] == REGEL["stuetz"], "E4b: ungültige Eingaben behalten den alten Wert")
+            o = m["ohneregel"]
+            check(o["aktiv"] is False and o["ab_zyklus"] == 3 and zk(o)["grund_code"] == "regel_aus", "E4b: ohne DB-Regel schaltet eine Feldänderung den Recoverer nicht ein")
+
     print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
     return 1 if fehler else 0
 
