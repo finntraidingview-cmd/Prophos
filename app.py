@@ -21467,6 +21467,12 @@ TV_KONTEN_FIRMEN = ("Tradeify", "Apex Trader", "Lucid Trading", "MyFundedFutures
 TV_AUFTRAG_MIN_S, TV_AUFTRAG_MAX_S = 300, 3 * 3600
 TV_AUFTRAG_LAUF_MAX_S = 20 * 60          # „laeuft" länger als das (Tab neu geladen, PC aus) → wieder offen
 TV_TAEGLICH_MIN_S, TV_TAEGLICH_MAX_S = 20 * 3600, 28 * 3600
+# TAGES-FALLBACK AUS (Finn 04.11.2026: „Sicherheitsnetz: zusätzlich liest Puls einmal am Tag je Firma, auch ohne Mail — ne, das nicht."):
+# False → pc_tv_konten_auftrag legt keine Aufträge art 'taeglich' mehr an und gibt keine mehr aus; noch offene werden beim nächsten Abholen
+# als „fehler" (verworfen) geschlossen — sie hielten sonst den eindeutigen Index (je ID × Firma ein offener Auftrag) und blockierten die
+# Mail-Aufträge derselben Firma. Mail-Aufträge und das passive Mitlesen bleiben. True = wieder wie bis 04.11.2026.
+TV_KONTEN_TAEGLICH = False
+TV_TAEGLICH_VERWORFEN = {"msg": "Tages-Auftrag verworfen — Tages-Fallback abgeschaltet (Finn 04.11.2026), nur noch Mail-Aufträge", "code": "taeglich_aus"}
 # PROBELAUF-WEICHE (Master 29.10.2026: Klick-Pfad erst auf EINEM PC): Railway-Variable TV_KONTEN_PCS = Komma-Liste der PC-Kennungen, die
 # Aufträge bekommen; „alle" = jeder Puls-PC. Nicht gesetzt → kein PC bekommt einen Auftrag (Aufträge sammeln sich nur an). Sicherer Standard.
 # WEICHE IN DER DB (Finn 29.10.2026: „Ich möchte nicht immer Railway-Variablen hinzufügen"): auto_plan_regeln.regeln.tv_konten_pcs = Liste
@@ -21538,7 +21544,13 @@ def tv_konten_mail_auftraege(zeilen, uid):
             if f and f not in je_firma:
                 je_firma[f] = z
         for firma, z in je_firma.items():
-            offen = sb_select("tv_konten_auftrag", {"select": "id", "user_id": f"eq.{uid}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
+            offen = sb_select("tv_konten_auftrag", {"select": "id,art,status", "user_id": f"eq.{uid}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
+            if offen and not TV_KONTEN_TAEGLICH and offen[0].get("art") == "taeglich" and offen[0].get("status") == "offen":
+                # Tages-Fallback aus (04.11.2026, Fremd-Review): ein noch offener Tages-Auftrag würde verworfen — die Kauf-Mail darf nicht an ihm
+                # hängen bleiben. Ihn hier schließen (nur noch offen → fehler, verworfen) und den Mail-Auftrag anlegen.
+                sb_update("tv_konten_auftrag", {"id": f"eq.{offen[0]['id']}", "status": "eq.offen"},
+                          {"status": "fehler", "erledigt_at": datetime.now(timezone.utc).isoformat(), "ergebnis": TV_TAEGLICH_VERWORFEN})
+                offen = []
             if offen:
                 continue
             faellig = (datetime.now(timezone.utc) + timedelta(seconds=tv_auftrag_verzug_s())).isoformat()
@@ -21579,7 +21591,8 @@ def tv_taeglich_faellig(letzte_iso, jetzt, streu_r):
 @app.route("/pc/tv-konten-auftrag", methods=["GET", "OPTIONS"])
 def pc_tv_konten_auftrag():
     """PC-Tab der ID (sb-token): → {ok, auftrag: {id, firma, art, ext} | null}. Holt den ältesten fälligen Auftrag und setzt ihn auf „laeuft"
-    (atomar: nur offen → laeuft). Ohne Mail-Auftrag: je Tradovate-Firma mit Konten dieser ID höchstens 1× in 20–28 h ein Tages-Auftrag.
+    (atomar: nur offen → laeuft). Ohne Mail-Auftrag: je Tradovate-Firma mit Konten dieser ID höchstens 1× in 20–28 h ein Tages-Auftrag —
+    seit 04.11.2026 aus (TV_KONTEN_TAEGLICH = False, Finn): nur noch Mail-Aufträge, offene Tages-Aufträge werden verworfen.
     ext = External ID eines Kontos dieser Firma (der Puls braucht sie für den Login-Weg). Aufräumen: „laeuft" > 20 min → wieder offen."""
     if request.method == "OPTIONS":
         return "", 200
@@ -21598,6 +21611,18 @@ def pc_tv_konten_auftrag():
             firmen_mit = []                     # gerade erst geprüft
         else:
             _tv_fallback_merk[uid] = time.time()
+            if not TV_KONTEN_TAEGLICH:
+                # Tages-Fallback aus (04.11.2026): offene Tages-Aufträge schließen (im selben 30-min-Takt wie früher das Anlegen, kein Zugriff je
+                # Abfrage). „fehler" statt „erledigt": gelesen wurde nichts. Laufende dürfen zu Ende laufen. Fehler hier: Merker zurück, damit die
+                # nächste Abfrage es wieder versucht, und Mail-Aufträge trotzdem ausgeben (Fremd-Review)
+                try:
+                    sb_update("tv_konten_auftrag", {"user_id": f"eq.{uid}", "art": "eq.taeglich", "status": "eq.offen"},
+                              {"status": "fehler", "erledigt_at": jetzt.isoformat(), "ergebnis": TV_TAEGLICH_VERWORFEN})
+                except Exception as e:
+                    _tv_fallback_merk.pop(uid, None)
+                    print(f"[tv-konten] ⚠️ Tages-Aufträge nicht verworfen: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        if not TV_KONTEN_TAEGLICH:
+            firmen_mit = []                     # kein Tages-Auftrag mehr anlegen
         for f in firmen_mit:   # Tages-Fallback anlegen, wo nötig
             letzte = sb_select("tv_konten_auftrag", {"select": "created_at", "user_id": f"eq.{uid}", "firma": f"eq.{f}", "order": "created_at.desc", "limit": "1"}) or []
             streu = int(hashlib.sha256(f"{uid}|{f}".encode()).hexdigest()[:4], 16) / 65535
@@ -21606,8 +21631,9 @@ def pc_tv_konten_auftrag():
                     sb_insert("tv_konten_auftrag", {"user_id": uid, "firma": f, "art": "taeglich", "faellig_at": jetzt.isoformat()})
                 except Exception:
                     pass   # offener Auftrag dieser Firma existiert schon (Index) — gut so
-        faellig = sb_select("tv_konten_auftrag", {"select": "id,firma,art,faellig_at", "user_id": f"eq.{uid}", "status": "eq.offen",
-                                                  "faellig_at": f"lte.{jetzt.isoformat()}", "order": "faellig_at.asc", "limit": "1"}) or []
+        faellig = sb_select("tv_konten_auftrag", dict({"select": "id,firma,art,faellig_at", "user_id": f"eq.{uid}", "status": "eq.offen",
+                                                       "faellig_at": f"lte.{jetzt.isoformat()}", "order": "faellig_at.asc", "limit": "1"},
+                                                      **({} if TV_KONTEN_TAEGLICH else {"art": "eq.mail"}))) or []   # Tages-Fallback aus: nie ausgeben
         if not faellig:
             return jsonify({"ok": True, "auftrag": None})
         a = faellig[0]
