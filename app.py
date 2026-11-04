@@ -39766,6 +39766,148 @@ FCP_TP_DECKEL_PLUS_STANDARD = 1000
 _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 
 
+# ══ EINSTELLUNGEN FUNDED PLANER → CFD (E1, Finn 04.11.2026 ~17:30 Dubai: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute nur
+# im Code stecken, sollen unten visuell und änderbar stehen"). Alles, was in funded_cfd_plan_regeln steht, ist über POST /admin/funded-cfd-plan/regel
+# änderbar (nur Admin, eine Änderung je Aufruf, geprüft, mit Konfliktschutz über updated_at). Was nur im Code steht, liefert fcp_code_werte zum
+# Anzeigen („fest im Code"). Am Verhalten des Planers ändert das nichts: er liest dieselben Felder wie bisher. ══
+FCP_WEG = {"route": "mt5", "name": "Echo", "text": "klassisches Echo mit Fusion-Gegenhedge (route mt5, Slave = Echo-Hedge-Konto der ID)"}
+FCP_SCHALTER = ("aktiv", "auto_bestaetigen", "ziel_auto_wartet")
+FCP_ZEIT_FELDER = ("firma_abstand_min", "abstand_id_min", "vorlauf_min")
+FCP_GROESSE_FELDER = {"ziel": "bereich", "sl": "bereich", "sl_1pct": "bereich", "lots": "bereich", "hedge_eur": "zahl", "dd": "zahl",
+                      "tp_erster": "zahl", "daily_loss": "zahl"}
+FCP_GROESSE_LEERBAR = ("sl_1pct", "tp_erster", "daily_loss")          # dürfen fehlen → Feld weg (Planer nimmt dann den Normalweg)
+FCP_WERT_MAX = {"lots": 50.0}                                         # sonst 1.000.000
+
+
+def fcp_firma_einstellung(f):
+    """REIN (Anzeige): Regel-Felder einer Firma außer je_groesse — DB-Wert (oder None) und was der Planer wirklich nimmt (eff, inkl. Standard)."""
+    f = f or {}
+    key = ((f.get("namen") or [""])[0])
+    return {"tp_modus": f.get("tp_modus"), "tp_modus_eff": fcp_tp_modus(f),
+            "tp_zyklen": f.get("tp_zyklen"), "tp_zyklen_eff": f.get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key),
+            "tp_deckel_plus": f.get("tp_deckel_plus"), "tp_deckel_plus_eff": f.get("tp_deckel_plus") if f.get("tp_deckel_plus") is not None else FCP_TP_DECKEL_PLUS_STANDARD,
+            "erster_payout": f.get("erster_payout"), "erster_payout_eff": fcp_erster_payout(f), "weg": FCP_WEG["name"]}
+
+
+def fcp_code_werte():
+    """REIN (Anzeige): Werte, die nur im Code stehen — für „fest im Code" in den Einstellungen."""
+    return {"weg": FCP_WEG, "tp_min_usd": FCP_TP_MIN_USD, "consistency_start_usd": FCP_CONSISTENCY_START_USD,
+            "erster_payout_tp_min_usd": FCP_ERSTER_PAYOUT_TP_MIN_USD, "erster_payout_lots_faktor": FCP_ERSTER_PAYOUT_LOTS_FAKTOR,
+            "lot_schritt": FCP_LOT_SCHRITT, "takt_s": FCP_TAKT_S, "zeiten_standard": FCP_ZEITEN_STANDARD,
+            "tp_modus_standard": FCP_TP_MODUS_STANDARD, "tp_zyklen_standard": FCP_TP_ZYKLEN_STANDARD, "tp_deckel_plus_standard": FCP_TP_DECKEL_PLUS_STANDARD,
+            "erster_payout_standard": FCP_ERSTER_PAYOUT_STANDARD}
+
+
+def _fcp_zahl_ok(v, feld=""):
+    if isinstance(v, bool):          # float(True) = 1.0 — ein Schalterwert ist keine Zahl (Fremd-Review E1)
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if (x == x and 0 <= x <= FCP_WERT_MAX.get(feld, 1e6)) else None
+
+
+def _fcp_bereich_ok(v, feld=""):
+    """[von, bis] oder eine Zahl (→ [x, x]) → Liste oder None."""
+    w = v if isinstance(v, (list, tuple)) else [v, v]
+    if len(w) != 2:
+        return None
+    a, b = _fcp_zahl_ok(w[0], feld), _fcp_zahl_ok(w[1], feld)
+    if a is None or b is None or a > b:
+        return None
+    return [a, b]
+
+
+def fcp_regel_patch(zeile, body):
+    """REIN RECHNEND (testbar): EINE Änderung an funded_cfd_plan_regeln (Zeile id 1) → (update | None, fehler | None). body:
+    {schalter: aktiv|auto_bestaetigen|ziel_auto_wartet, wert: bool} · {zeit: firma_abstand_min|abstand_id_min|vorlauf_min, wert: 0–240} ·
+    {firma, an: bool} · {firma, groesse, feld (FCP_GROESSE_FELDER), wert} · {firma, feld: tp_deckel_plus|tp_zyklen|tp_modus, wert} ·
+    {firma, feld: erster_payout.ziel|erster_payout.hedge_eur_je_dd|erster_payout.lots_faktor, wert} · {firma, groesse, feld: gewinntage.anzahl|.min|.tp, wert}.
+    Bereiche [von, bis] (von ≤ bis), Werte je Größe/Gewinntage/Refund > 0, tp_deckel_plus ≥ 0. Gibt nur die geänderten Spalten zurück; firmen wird ganz neu geschrieben (Kopie)."""
+    import copy
+    z, b = zeile or {}, body or {}
+    if b.get("schalter") is not None:
+        k = str(b.get("schalter"))
+        if k not in FCP_SCHALTER or not isinstance(b.get("wert"), bool):
+            return None, "schalter ∈ aktiv/auto_bestaetigen/ziel_auto_wartet, wert true|false"
+        return {k: b["wert"]}, None
+    if b.get("zeit") is not None:
+        k, v = str(b.get("zeit")), _fcp_zahl_ok(b.get("wert"))
+        # firma_abstand_min/vorlauf_min liest der Planer mit „or 15" → 0 hieße in der Anzeige 0, im Planer 15 (Fremd-Review E1); nur abstand_id_min nimmt 0 an
+        if k not in FCP_ZEIT_FELDER or v is None or v > 240 or (k != "abstand_id_min" and v < 1):
+            return None, "zeit ∈ firma_abstand_min/vorlauf_min 1–240 min, abstand_id_min 0–240 min"
+        return {"zeiten": dict(z.get("zeiten") or {}, **{k: int(round(v))})}, None
+    firmen = copy.deepcopy(z.get("firmen") or [])
+    name = str(b.get("firma") or "")
+    # Name wie in der Anzeige (fcp_planen: name oder erster Eintrag aus namen)
+    f = next((x for x in firmen if isinstance(x, dict) and str(x.get("name") or (x.get("namen") or [""])[0]) == name), None)
+    if f is None:
+        return None, f"Firma „{name[:40]}“ nicht in der Regel"
+    feld = str(b.get("feld") or "")
+    if "an" in b and not feld:
+        if not isinstance(b.get("an"), bool):
+            return None, "an = true|false"
+        f["an"] = b["an"]
+        return {"firmen": firmen}, None
+    if b.get("groesse") is not None and (feld in FCP_GROESSE_FELDER or feld.startswith("gewinntage.")):
+        jg = (f.get("je_groesse") or {}).get(str(b.get("groesse")))
+        if not isinstance(jg, dict):
+            return None, f"Größe {str(b.get('groesse'))[:12]} bei {name} nicht hinterlegt"
+        v = b.get("wert")
+        if feld.startswith("gewinntage."):
+            teil = feld.split(".", 1)[1]
+            gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
+            if gt is None or teil not in ("anzahl", "min", "tp"):
+                return None, "Gewinntage nur, wo die Größe sie schon hat (anzahl, min, tp)"
+            w = _fcp_bereich_ok(v) if teil == "tp" else _fcp_zahl_ok(v)
+            # min 0 → fcp_gewinntage_ist None → Gewinntag-Phase endet nie; tp 0 → Plan steht still (Fremd-Review E1): alles > 0
+            if w is None or not (w[0] if isinstance(w, list) else w) > 0 or (teil == "anzahl" and w > 30):
+                return None, f"gewinntage.{teil}: ungültiger Wert"
+            gt[teil] = int(round(w)) if teil == "anzahl" else w
+            return {"firmen": firmen}, None
+        if v is None or v == "":
+            if feld not in FCP_GROESSE_LEERBAR:
+                return None, f"{feld} darf nicht leer sein"
+            jg.pop(feld, None)
+            return {"firmen": firmen}, None
+        w = _fcp_bereich_ok(v, feld) if FCP_GROESSE_FELDER[feld] == "bereich" else _fcp_zahl_ok(v, feld)
+        # alle Werte je Größe > 0 (Fremd-Review E1: Ziel 0 → jedes Konto sofort „Ziel erreicht" → mit ziel_auto_wartet auf Waiting for Payout)
+        if w is None or not (w if not isinstance(w, list) else w[0]) > 0:
+            return None, f"{feld}: ungültiger Wert ({'von–bis, von ≤ bis, > 0' if FCP_GROESSE_FELDER[feld] == 'bereich' else 'Zahl > 0'})"
+        jg[feld] = w
+        return {"firmen": firmen}, None
+    v = b.get("wert")
+    if feld == "tp_deckel_plus":
+        w = _fcp_zahl_ok(v)
+        if w is None:
+            return None, "tp_deckel_plus: Zahl ≥ 0"
+        f[feld] = w
+    elif feld == "tp_zyklen":
+        if not isinstance(v, list) or not 1 <= len(v) <= 8 or any(_fcp_zahl_ok(x) is None or not _fcp_zahl_ok(x) > 0 for x in v):
+            return None, "tp_zyklen: Liste aus 1–8 Beträgen > 0"
+        f[feld] = [_fcp_zahl_ok(x) for x in v]
+    elif feld == "tp_modus":
+        if v not in (None, "", "consistency50"):
+            return None, "tp_modus: consistency50 oder leer"
+        if v:
+            f[feld] = v
+        else:
+            f.pop(feld, None)
+    elif feld.startswith("erster_payout."):
+        teil = feld.split(".", 1)[1]
+        ep = f.get("erster_payout") if isinstance(f.get("erster_payout"), dict) else None
+        if ep is None or teil not in ("ziel", "hedge_eur_je_dd", "lots_faktor"):
+            return None, "Refund-Werte nur, wo die Firma einen Refund-Trade hat (ziel, hedge_eur_je_dd, lots_faktor)"
+        w = _fcp_bereich_ok(v) if teil == "ziel" else _fcp_zahl_ok(v)
+        if w is None or not (w[0] if isinstance(w, list) else w) > 0 or (teil == "lots_faktor" and w > 1):
+            return None, f"erster_payout.{teil}: ungültiger Wert"
+        ep[teil] = w
+    else:
+        return None, "unbekanntes Feld"
+    return {"firmen": firmen}, None
+
+
 def fcp_je_groesse(regel, groesse):
     """Werte je Kontogröße (ziel, sl, lots, hedge_eur, dd …) der Firmen-Regel oder None."""
     if not regel or not groesse:
@@ -40141,7 +40283,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an")), "namen": f.get("namen") or [],
-                       "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {}} for f in firmen],
+                       "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {},
+                       # EINSTELLUNGEN (E1, 04.11.2026): die übrigen Regel-Felder der Firma + was der Planer daraus macht (inkl. Standard aus dem Code)
+                       **fcp_firma_einstellung(f)} for f in firmen],
+           "code": fcp_code_werte(),
            "geplant": [], "ziel": [], "ausgelassen": [], "plaene": []}
     if not uids:
         erg["msg"] = "keine ID"
@@ -40570,6 +40715,44 @@ def admin_funded_cfd_plan_einstellung():
     _news_regel["at"] = 0.0                  # /news/calendar liest sofort neu
     print(f"[funded-cfd] News-Regel {'AN' if body['news_regel'] else 'AUS'} durch Admin {str(uid)[:8]}", flush=True)
     return jsonify({"ok": True, "news_regel": body["news_regel"], "n": len(zeilen or [])})
+
+
+@app.route("/admin/funded-cfd-plan/regel", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_regel():
+    """POST EINE Änderung der Regeln (fcp_regel_patch) — Einstellungen im Funded Planer → CFD (E1, 04.11.2026). Die Regeln gelten für alle
+    Gruppen → nur Admin. Konfliktschutz: geschrieben wird nur, wenn updated_at noch dem gelesenen Stand entspricht (sonst 409, neu laden)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
+    admin, uid, _lese, _schreib, err = _fcp_login()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Die Funded-CFD-Regeln gelten für alle Gruppen — nur Admin"}), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        zeile = (sb_select("funded_cfd_plan_regeln", {"select": "id,aktiv,auto_bestaetigen,ziel_auto_wartet,zeiten,firmen,updated_at", "id": "eq.1"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Regeln nicht lesbar ({type(e).__name__})"}), 502
+    if not zeile:
+        return jsonify({"ok": False, "msg": "funded_cfd_plan_regeln fehlt — SQL einspielen"}), 503
+    upd, fehler = fcp_regel_patch(zeile, body)
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), 400
+    jetzt = datetime.now(timezone.utc).isoformat()
+    filt = {"id": "eq.1"}
+    if zeile.get("updated_at"):
+        filt["updated_at"] = f"eq.{zeile['updated_at']}"
+    try:
+        zeilen = sb_update("funded_cfd_plan_regeln", filt, dict(upd, updated_at=jetzt))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__}: {str(e)[:120]})"}), 502
+    if not zeilen:
+        return jsonify({"ok": False, "msg": "Regeln wurden inzwischen geändert — neu laden und noch einmal"}), 409
+    print(f"[funded-cfd] Regel geändert durch Admin {str(uid)[:8]}: {json.dumps(body, ensure_ascii=False)[:200]}", flush=True)
+    return jsonify({"ok": True, "geaendert": sorted(upd.keys()), "updated_at": jetzt})
 
 
 @app.route("/admin/funded-cfd-plan/planen", methods=["POST", "OPTIONS"])

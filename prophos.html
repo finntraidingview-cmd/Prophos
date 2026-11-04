@@ -4048,6 +4048,20 @@
   @media (max-width:980px){ #ap-ids-root.ap-guestly .e2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} #ap-ids-root.ap-guestly .e2-haupt,#ap-ids-root.ap-guestly .e2-unten{grid-template-columns:1fr}
     #ap-ids-root.ap-guestly .e2-liste{flex-direction:row;overflow-x:auto} #ap-ids-root.ap-guestly .e2-firma{width:auto;flex:0 0 auto} }
   @media (max-width:520px){ #ap-ids-root.ap-guestly .e2-wrap{padding:16px 14px} #ap-ids-root.ap-guestly .e2-detail{padding:14px} #ap-ids-root.ap-guestly .e2-kpis{gap:10px} }
+  /* EINSTELLUNGEN FUNDED CFD (E1, 04.11.2026): Werte direkt in den Regel-Karten änderbar (nur Admin), Code-Werte mit Kennzeichen, Weg-Chip */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in{width:92px;max-width:100%;font:inherit;font-size:12px;font-variant-numeric:tabular-nums;color:var(--g-text);background:var(--g-karte,#fff);border:1px solid var(--g-rand);border-radius:7px;padding:2px 6px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in.breit{width:150px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in:focus{outline:2px solid var(--violet-soft,#c4bdfd);outline-offset:0;border-color:transparent}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-einheit{font-style:normal;color:var(--g-sub);margin-left:3px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-code{display:inline-block;font-size:11px;color:var(--g-sub);background:var(--g-rand);border-radius:999px;padding:0 7px;max-width:100%}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg{display:inline-flex;align-items:center;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;background:var(--g-tuerkis-bg);color:var(--g-tuerkis);white-space:nowrap}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg.klein{font-size:10.5px;padding:0 7px;margin-left:2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch{width:28px;height:16px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch-slider::before{width:12px;height:12px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leer{color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-z{grid-template-columns:118px minmax(0,1fr)}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs .tpl-karte{border:0;box-shadow:none;background:transparent;padding:0;margin:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-karte,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .tpl-bd,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-hb-klapp{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-kopf b{font-size:18px;font-weight:600}
@@ -16281,7 +16295,7 @@
     const PR_SCHREIB = [
       // Challenge / Funded (Futures + CFD)
       '[data-ap-ok]', '[data-ap-ok-id]', '#ap-ids-alle-ok', '[data-ap-zur]', '[data-ap-ri]', '[data-ap-id]', '[data-tpl-nachplan]', '[data-tpl-probe]', '[data-tpl-probe-alle]',
-      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]',
+      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-fcr-in]', '[data-fcr-sw]',
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
       '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]',
@@ -84648,57 +84662,145 @@
     const f = _fcfdR.d.firmen || []
     return `Regeln je Firma × Größe · ${f.map(x => x.firma).join(' · ') || 'keine Firma'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'}`
   }
+  /* EINSTELLUNGEN FUNDED PLANER → CFD (E1, Finn 04.11.2026 ~17:30 Dubai: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute nur im
+   * Code stecken, sollen unten visuell und änderbar stehen … und überall sehen, welches Modell genutzt wird"). Die Regel-Karten zeigen jetzt jeden
+   * Wert, mit dem der Planer rechnet: je Größe Ziel → Waiting, TP-Regel (Consistency/Refund/Deckel/Gewinntage), SL, SL mit 1-%-Regel, Lots, Hedge €
+   * auf $ DD, Daily Loss; je Firma Weg (Echo mit Hedge), TP-Modus, TP-Zyklen bzw. Deckel, Refund-Trade; gemeinsam Schalter und Zeiten. Was in der DB
+   * steht (funded_cfd_plan_regeln), ist für Admins direkt änderbar (Feld ändern → Enter/Verlassen → POST /admin/funded-cfd-plan/regel, eine Änderung je
+   * Aufruf, Server prüft); was nur im Code steht, trägt „fest im Code". Am Planer selbst ändert sich nichts. Präfix fcr-e (E1). */
+  const fcrZahl = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 })
+  const fcrWertText = v => Array.isArray(v) ? (Number(v[0]) === Number(v[1]) ? fcrZahl(v[0]) : `${fcrZahl(v[0])}–${fcrZahl(v[1])}`) : (v == null || v === '' ? '' : fcrZahl(v))
+  // Eingabe „1.300–1.500" / „1300 - 1500" / „1,5" → Zahl oder [von, bis]; leer → null; unlesbar → undefined
+  function fcrWertLesen(t, bereich){
+    const roh = String(t == null ? '' : t).trim(); if(!roh) return null
+    // deutsch wie die Anzeige: „1.500" = Tausender (erste Gruppe ≠ 0), „1,5" / „0,125" / „0.5" = Dezimal
+    const z = x => { const k = x.trim().replace(/\s/g, ''); if(!/^[\d.,]+$/.test(k) || /^[1-9]\d{0,2},\d{3}$/.test(k)) return NaN   // „1,300" mehrdeutig (englisch 1.300?) → ablehnen
+      const n = /^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(k) ? Number(k.replace(/\./g, '').replace(',', '.')) : Number(k.replace(',', '.')); return isFinite(n) ? n : NaN }
+    const teile = roh.split(/\s*[–—-]\s*(?=\d)/)
+    if(teile.length === 2){ const a = z(teile[0]), b = z(teile[1]); return isNaN(a) || isNaN(b) ? undefined : (bereich ? [a, b] : undefined) }
+    const x = z(roh); return isNaN(x) ? undefined : (bereich ? [x, x] : x)
+  }
+  window._fcrWertLesen = fcrWertLesen   // Test-Haken
+  window._fcfdRegelnHtml = () => fcfdRegelnHtml()   // Test-Haken (Stub)
+  // ein änderbarer Wert: Admin → Eingabefeld (data-fcr-in = was geändert wird), sonst Text
+  function fcrFeld(v, ziel, opt = {}){
+    const txt = fcrWertText(v) + (v != null && v !== '' && opt.einheit ? opt.einheit : '')
+    if(!window._fcfdAdmin || opt.nurText) return txt ? escapeHtml(txt) : `<span class="fcr-e-leer">${escapeHtml(opt.leer || '–')}</span>`   // leer: Rückfall zeigen (z. B. „wie SL“, Standard 1.000) wie der Platzhalter beim Admin
+    return `<input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(fcrWertText(v))}" placeholder="${escapeHtml(opt.leer || '–')}" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ bereich: !!opt.bereich }, ziel)))}" title="${escapeHtml(opt.titel || 'Enter oder Feld verlassen speichert — gilt für alle Gruppen')}">${opt.einheit ? `<i class="fcr-e-einheit">${escapeHtml(opt.einheit.trim())}</i>` : ''}`
+  }
+  const fcrCode = (txt, titel) => `<span class="fcr-e-code" title="${escapeHtml(titel || 'steht nur im Code (app.py) — Änderung über den Master')}">${txt} · fest im Code</span>`
+  const fcrSchalter = (k, an, titel) => `<label class="fcr-e-schalter" title="${escapeHtml(titel || '')}"><span class="switch"><input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''}${window._fcfdAdmin ? '' : ' disabled'}><span class="switch-slider"></span></span>${an ? 'an' : 'aus'}</label>`
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
-    const g = D.gemeinsam || {}, zeile = (l, v) => v == null || v === '' ? '' : `<span>${l}</span><em>${v}</em>`
-    // gemeinsame Regeln: Werte aus der DB, wo es sie gibt; der Rest beschreibt, was der Planer tut (Finns Antworten 30.10.2026)
-    const gem = [
-      `${g.trades_je_tag != null ? escapeHtml(String(g.trades_je_tag)) : '1'} Trade pro Tag je Konto · Echo mit Fusion-Gegenhedge`,
-      'Uhrzeit und Long/Short gewürfelt — läuft bei derselben ID × Firma schon ein Trade, nimmt der Funded-Trade dieselbe Richtung (Richtungsschutz)',
-      `Bestätigen ${g.auto_bestaetigen ? 'automatisch' : 'von Hand'}, wie im Challenge-Planer`,
-      `Ziel gemessen an der Starting Balance (Kontogröße) · erreicht → Waiting for Payout ${g.ziel_auto_wartet ? 'automatisch' : 'von Hand (Knopf am Konto)'} · Waiting for Payout wird nie geplant`,
-      ...(Array.isArray(g.hinweise) ? g.hinweise.map(String) : [])
-    ]
-    const gemKarte = `<div class="fcr-karte"><div class="fcr-kopf">Gemeinsam<small>alle Firmen</small></div><ul class="fcr-gem">${gem.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`
+    const g = D.gemeinsam || {}, C = D.code || {}, zeile = (l, v) => v == null || v === '' ? '' : `<span>${l}</span><em>${v}</em>`
+    const z = D.zeiten || {}, zs = C.zeiten_standard || {}
+    const zeitZeile = (k, l) => zeile(l, fcrFeld(z[k] ?? zs[k] ?? null, { zeit: k }, { einheit: ' min' }) + (z[k] == null && zs[k] != null ? ' ' + fcrCode('Standard') : ''))
+    const weg = C.weg ? `${escapeHtml(C.weg.name || 'Echo')} · mit Hedge` : 'Echo · mit Hedge'
+    const gemKarte = `<div class="fcr-karte"><div class="fcr-kopf">Gemeinsam<small>alle Firmen · gilt für alle Gruppen</small></div>
+      <div class="fcr-z">${zeile('Weg', `<span class="fcr-e-weg" title="${escapeHtml((C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)')}">${weg}</span>`)}
+        ${zeile('Planer', fcrSchalter('aktiv', !!D.aktiv, 'Funded-CFD-Planer an/aus (Takt alle 5 min)'))}
+        ${zeile('Bestätigen', fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'an = der Planer bestätigt seine Vorschläge selbst, aus = von Hand'))}
+        ${zeile('Ziel → Waiting', fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'an = Konto mit erreichtem Ziel automatisch auf „Waiting for Payout"'))}
+        ${zeitZeile('firma_abstand_min', 'Abstand je Firma')}${zeitZeile('abstand_id_min', 'Abstand je ID')}${zeitZeile('vorlauf_min', 'Vorlauf')}
+        ${zeile('Startfenster', z.von && z.bis ? escapeHtml(`${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}`) + ' ' + fcrCode('wie der Challenge-Planer') : null)}
+        ${zeile('Mindest-TP', fcrCode(`${fcrZahl(C.tp_min_usd ?? 250)} $`, 'Rest bis zum Ziel kleiner → TP so groß (FCP_TP_MIN_USD)'))}
+        ${zeile('Lot-Schritt', fcrCode(fcrZahl(C.lot_schritt ?? 0.01)))}</div>
+      <ul class="fcr-gem">${['1 Trade pro Tag je Konto · Uhrzeit und Long/Short gewürfelt', 'Richtungsschutz: läuft bei derselben ID × Firma schon ein Trade, dieselbe Richtung',
+        'Ziel gemessen an der Starting Balance · Waiting for Payout wird nie geplant', '1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen → SL mit 1-%-Regel',
+        ...(Array.isArray(g.hinweise) ? g.hinweise.map(String) : [])].map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`
     const firmaKarte = f => {
-      const ton = typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
-      const gr = (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse)).map(x => `<div class="fcr-gr"><b>${escapeHtml(fcfdGroesse(x.groesse))}</b><div class="fcr-z">
-          ${zeile('Ziel → Waiting', fcfdSpanne(x.ziel, ' $', '+'))}${zeile('TP', escapeHtml(fcfdTpText(x.tp) || ''))}
-          ${zeile('Stop-Loss', fcfdSpanne(x.sl, ' $'))}${zeile('SL mit 1-%-Regel', fcfdSpanne(x.sl_1pct, ' $'))}${zeile('Lots', fcfdSpanne(x.lots, f.symbol ? ' · ' + escapeHtml(String(f.symbol)) : ''))}
-          ${zeile('Hedge', x.hedge_eur != null ? `${fcfdSpanne(x.hedge_eur, ' €')}${x.hedge_dd != null ? ` auf ${fcfdSpanne(x.hedge_dd, ' $')} DD` : ''}` : null)}${zeile('Daily Loss', fcfdSpanne(x.daily_loss, ' $'))}</div>
-          ${x.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(x.hinweis))}</div>` : ''}</div>`).join('')
-      return `<div class="fcr-karte"><div class="fcr-kopf"><i style="background:${ton}"></i>${escapeHtml(f.firma)}<small>${(f.groessen || []).map(x => fcfdGroesse(x.groesse)).join(' · ')}</small></div>
-        ${f.hinweis ? `<div class="fcr-hinweis" style="margin-top:0">${escapeHtml(String(f.hinweis))}</div>` : ''}${gr || '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>`
+      const ton = typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)', fz = { firma: f.firma }
+      const cons = f.tp_modus_eff === 'consistency50', ep = f.erster_payout_eff
+      const epo = { nurText: !(f.erster_payout && typeof f.erster_payout === 'object') }   // Refund aus dem Code-Standard → nur anzeigen (Server ändert nur DB-Werte)
+      // TP-Regel der Firma (Kopf der Karte): Consistency je Zyklus · Refund-Trade · Deckel
+      const tpRegel = [
+        zeile('TP-Modus', cons ? `Consistency 50 % je Zyklus${f.tp_modus ? '' : ' ' + fcrCode('Standard')}` : 'aufs Ziel, gedeckelt'),
+        cons ? zeile('Consistency', `Start ${fcrZahl(C.consistency_start_usd ?? 750)} $ (je Größe änderbar), danach höchstens die Zyklus-Gewinne`) : '',
+        !cons ? zeile('TP-Deckel', `Ziel bis + ${fcrFeld(f.tp_deckel_plus ?? null, Object.assign({ feld: 'tp_deckel_plus' }, fz), { einheit: ' $', leer: fcrZahl(f.tp_deckel_plus_eff ?? 1000) })}${f.tp_deckel_plus == null ? ' ' + fcrCode('Standard ' + fcrZahl(f.tp_deckel_plus_eff ?? 1000) + ' $') : ''}`) : '',
+        f.tp_zyklen_eff && !cons ? zeile('TP-Zyklen', window._fcfdAdmin && Array.isArray(f.tp_zyklen) ? `<input class="fcr-e-in breit" type="text" value="${escapeHtml(f.tp_zyklen.map(fcrZahl).join(' · '))}" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'tp_zyklen', liste: true }, fz)))}" title="Beträge je Payout-Zyklus, getrennt mit · oder ;">` : escapeHtml(f.tp_zyklen_eff.map(fcrZahl).join(' · ')) + ' $' + (f.tp_zyklen ? '' : ' ' + fcrCode('Standard'))) : '',
+        ep ? zeile('Refund-Trade', `bis zum 1. Payout: Ziel +${fcrFeld(ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), Object.assign({ bereich: true, einheit: ' $' }, epo))}`) : zeile('Refund-Trade', 'keiner'),
+        ep ? zeile('Refund-Hedge', `${fcrFeld(ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), epo)} € je $ DD${f.erster_payout ? '' : ' ' + fcrCode('Standard')}`) : '',
+        ep ? zeile('Refund-Lots', ep.lots_faktor != null ? `× ${fcrFeld(ep.lots_faktor, Object.assign({ feld: 'erster_payout.lots_faktor' }, fz), epo)}` : `Verhältnis zum Normal-Trade ${fcrCode('Rückfall × ' + fcrZahl(C.erster_payout_lots_faktor ?? 0.1))}`) : '',
+        ep ? zeile('Refund-Mindest-TP', fcrCode(`${fcrZahl(C.erster_payout_tp_min_usd ?? 25)} $`)) : ''].join('')
+      const gr = (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse)).map(x => { const gz = Object.assign({ groesse: String(x.groesse) }, fz), r = x.roh || {}
+        const gt = r.gewinntage && typeof r.gewinntage === 'object' ? r.gewinntage : null
+        return `<div class="fcr-gr"><b>${escapeHtml(fcfdGroesse(x.groesse))}</b><div class="fcr-z">
+          ${zeile('Ziel → Waiting', '+' + fcrFeld(r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: ' $' }))}
+          ${cons ? zeile('Consistency-Start', fcrFeld(r.tp_erster ?? null, Object.assign({ feld: 'tp_erster' }, gz), { einheit: ' $', leer: fcrZahl(C.consistency_start_usd ?? 750) }) + (r.tp_erster == null ? ' ' + fcrCode(fcrZahl(C.consistency_start_usd ?? 750) + ' $') : '')) : (r.tp_erster != null ? zeile('TP 1. Zyklus', fcrFeld(r.tp_erster, Object.assign({ feld: 'tp_erster' }, gz), { einheit: ' $', leer: '–' })) : '')}
+          ${zeile('Stop-Loss', fcrFeld(r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: ' $' }))}
+          ${r.sl_1pct != null || window._fcfdAdmin ? zeile('SL mit 1-%-Regel', fcrFeld(r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: ' $', leer: 'wie SL' })) : ''}
+          ${zeile('Lots', fcrFeld(r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true }))}
+          ${zeile('Hedge', `${fcrFeld(r.hedge_eur ?? null, Object.assign({ feld: 'hedge_eur' }, gz), { einheit: ' €' })} auf ${fcrFeld(r.dd ?? null, Object.assign({ feld: 'dd' }, gz), { einheit: ' $' })} DD`)}
+          ${r.daily_loss != null || window._fcfdAdmin ? zeile('Daily Loss', fcrFeld(r.daily_loss ?? null, Object.assign({ feld: 'daily_loss' }, gz), { einheit: ' $', leer: '–' })) : ''}
+          ${gt ? zeile('Gewinntage', `${fcrFeld(gt.anzahl, Object.assign({ feld: 'gewinntage.anzahl' }, gz))} Tage ≥ ${fcrFeld(gt.min, Object.assign({ feld: 'gewinntage.min' }, gz), { einheit: ' $' })} · TP ${fcrFeld(gt.tp, Object.assign({ feld: 'gewinntage.tp' }, gz), { bereich: true, einheit: ' $' })}`) : ''}</div>
+          ${x.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(x.hinweis))}</div>` : ''}</div>` }).join('')
+      return `<div class="fcr-karte"><div class="fcr-kopf"><i style="background:${ton}"></i>${escapeHtml(f.firma)}<span class="fcr-e-weg klein">${escapeHtml(f.weg || 'Echo')} · Hedge</span><small>${(f.groessen || []).map(x => fcfdGroesse(x.groesse)).join(' · ')}</small></div>
+        <div class="fcr-z">${zeile('Firma', fcrSchalter('firma:' + f.firma, f.an !== false, 'Firma im Funded-CFD-Planer an/aus'))}${tpRegel}</div>
+        ${f.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(f.hinweis))}</div>` : ''}${gr || '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>`
     }
     return `<div class="fcr-grid">${gemKarte}${(D.firmen || []).map(firmaKarte).join('')}</div>`
   }
   // Rohdaten aus der DB → normalisiert (Adapter, sobald S4 die Struktur geliefert hat)
   // Quelle (S4, 30.10.2026): GET /admin/funded-cfd-plan — Tabelle funded_cfd_plan_regeln hat RLS ohne Policy, also nur über die Route.
-  // firmen[] = { name, an, namen, ohne_namen, je_groesse: { "<Größe>": { ziel, tp_erster, sl, sl_1pct, lots, hedge_eur, dd, daily_loss } } },
-  // dazu aktiv, auto_bestaetigen, ziel_auto_wartet, zeiten { von, bis, tz, firma_abstand_min, abstand_id_min }. Schon normalisiert (Stub) bleibt so.
+  // firmen[] = { name, an, namen, ohne_namen, je_groesse: { "<Größe>": { ziel, tp_erster, sl, sl_1pct, lots, hedge_eur, dd, daily_loss, gewinntage } },
+  // seit E1 (04.11.2026) dazu tp_modus/_eff, tp_zyklen/_eff, tp_deckel_plus/_eff, erster_payout/_eff, weg }, dazu aktiv, auto_bestaetigen,
+  // ziel_auto_wartet, zeiten { von, bis, tz, firma_abstand_min, abstand_id_min, vorlauf_min }, code {…} (fest im Code). Schon normalisiert (Stub) bleibt so.
   function fcfdRegelnNorm(roh){
     if(!roh || typeof roh !== 'object' || !Array.isArray(roh.firmen)) return null
     if(roh.gemeinsam) return roh   // schon normalisiert (Stub)
     const z = roh.zeiten || {}, hin = []
-    if(z.von && z.bis) hin.push(`Startfenster ${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}${z.firma_abstand_min != null ? ` · ≥ ${z.firma_abstand_min} min je Firma` : ''}${z.abstand_id_min != null ? ` · ≥ ${z.abstand_id_min} min je ID` : ''}`)
-    return { aktiv: !!roh.aktiv,
+    return { aktiv: !!roh.aktiv, zeiten: z, code: roh.code || {},
       gemeinsam: { auto_bestaetigen: !!roh.auto_bestaetigen, ziel_auto_wartet: !!roh.ziel_auto_wartet, hinweise: hin },
       firmen: roh.firmen.filter(f => f && f.je_groesse && typeof f.je_groesse === 'object').map(f => ({
-        firma: String(f.name || '?'),
+        firma: String(f.name || '?'), an: f.an, weg: f.weg,
+        tp_modus: f.tp_modus, tp_modus_eff: f.tp_modus_eff, tp_zyklen: f.tp_zyklen, tp_zyklen_eff: f.tp_zyklen_eff,
+        tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
         hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', Array.isArray(f.ohne_namen) && f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
-        groessen: Object.entries(f.je_groesse).filter(([, x]) => x && typeof x === 'object').map(([gr, x]) => ({ groesse: Number(gr), ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
+        groessen: Object.entries(f.je_groesse).filter(([, x]) => x && typeof x === 'object').map(([gr, x]) => ({ groesse: Number(gr), roh: x, ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
           hedge_eur: x.hedge_eur, hedge_dd: x.dd, daily_loss: x.daily_loss,
           tp: x.tp_erster ? { art: 'erst_payout', erst: x.tp_erster } : { art: 'ziel' } })) })) }
   }
+  // Speichern (E1): ein Feld bzw. ein Schalter → POST /admin/funded-cfd-plan/regel, danach neu laden; Fehler als Toast mit dem Grund des Servers
+  // mehrere Felder kurz hintereinander (Tab ins nächste Feld): nacheinander speichern, neu laden erst nach dem letzten (Fremd-Review E1)
+  const _fcrSpeichert = { kette: Promise.resolve(), offen: 0 }
+  function fcrSpeichern(body, el){
+    if(!window._fcfdAdmin) return
+    _fcrSpeichert.offen++; if(el) el.disabled = true
+    _fcrSpeichert.kette = _fcrSpeichert.kette.then(async () => {
+      try{ await apdApi('POST', '/regel', body, '/admin/funded-cfd-plan')
+        if(typeof atToast === 'function') atToast('✓ Funded-CFD-Regel gespeichert — gilt ab dem nächsten Planer-Takt', 'start') }
+      catch(e){ if(typeof atToast === 'function') atToast('Regel nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+      finally{ if(el) el.disabled = false
+        if(--_fcrSpeichert.offen === 0){ fcfdRegelnLaden(true); window._apIdsLaden?.() } }
+    })
+  }
+  function fcfdRegelnVerdrahten(root){
+    if(!root) return
+    root.querySelectorAll('input[data-fcr-in]').forEach(i => {
+      const los = () => { let ziel; try{ ziel = JSON.parse(i.dataset.fcrIn) }catch(_){ return }
+        const alt = i.defaultValue; if(i.value === alt) return
+        let wert
+        if(ziel.liste){ wert = String(i.value).split(/\s*[·;]\s*/).filter(Boolean).map(t => fcrWertLesen(t, false)); if(!wert.length || wert.some(w => typeof w !== 'number')){ i.value = alt; atToast?.('Zyklen: Beträge getrennt mit · oder ;', 'end'); return } }
+        else { wert = fcrWertLesen(i.value, ziel.bereich); if(wert === undefined){ i.value = alt; atToast?.(`„${i.value}“ ist keine Zahl${ziel.bereich ? ' bzw. kein Bereich von–bis' : ''}`, 'end'); return } }
+        const body = ziel.zeit ? { zeit: ziel.zeit, wert } : Object.assign({ firma: ziel.firma, feld: ziel.feld, wert }, ziel.groesse ? { groesse: ziel.groesse } : {})
+        fcrSpeichern(body, i) }
+      i.addEventListener('change', los); i.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); i.blur() } })
+    })
+    root.querySelectorAll('input[data-fcr-sw]').forEach(c => c.addEventListener('change', e => { e.stopPropagation()
+      const k = c.dataset.fcrSw, body = k.startsWith('firma:') ? { firma: k.slice(6), an: c.checked } : { schalter: k, wert: c.checked }
+      fcrSpeichern(body, c) }))
+  }
   const fcfdQuelle = () => typeof window._fcfdRegelnQuelle === 'function' ? window._fcfdRegelnQuelle() : apdApi('GET', '', null, '/admin/funded-cfd-plan')
   async function fcfdRegelnLaden(neu){
-    if(_fcfdR.laedt || (!neu && _fcfdR.d && Date.now() - _fcfdR.at < 300000)) return
+    if(_fcfdR.laedt){ if(neu) _fcfdR.nochmal = true; return }   // E1: Neuladen nach Speichern nicht verlieren, wenn gerade schon geladen wird
+    if(!neu && _fcfdR.d && Date.now() - _fcfdR.at < 300000) return
     if(!currentUserId && typeof window._fcfdRegelnQuelle !== 'function') return
     _fcfdR.laedt = true; _fcfdR.fehler = ''
     try{ _fcfdR.d = fcfdRegelnNorm(await fcfdQuelle()); _fcfdR.at = Date.now() }
     catch(e){ _fcfdR.fehler = (e && e.message) || String(e) }
-    finally{ _fcfdR.laedt = false; if(document.getElementById('apg-fcfd')?.offsetParent) apgFcfdRender(); if(_apIdsArtWert === 'fcfd' && document.getElementById('ap-ids-root')?.offsetParent) window._apIdsRender?.() }
+    finally{ _fcfdR.laedt = false; if(_fcfdR.nochmal){ _fcfdR.nochmal = false; setTimeout(() => fcfdRegelnLaden(true), 0) }
+      if(document.getElementById('apg-fcfd')?.offsetParent) apgFcfdRender(); if(_apIdsArtWert === 'fcfd' && document.getElementById('ap-ids-root')?.offsetParent) window._apIdsRender?.() }
   }
   // ÜBERSICHT JE FIRMA (Finn ~06:55: „Kacheln statt Tabelle"): Konten · planbar (Funded CFD ohne Waiting) · Waiting for Payout — k aus apgFcfdDaten
   function fcfdFirmenHtml(k){
@@ -84909,6 +85011,7 @@
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     el.querySelector('[data-apg-fcfd-neu]')?.addEventListener('click', ev => { ev.currentTarget.disabled = true; apgFcfdLaden(true); fcfdRegelnLaden(true) })
     el.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })
+    try{ fcfdRegelnVerdrahten(el) }catch(e){ console.warn('[fcr] Einstellungen', e) }   // E1: Felder/Schalter der Regeln
     try{ apgChartsMalen(el, _apgFcfd.daten, { ls: '#apg-fc-ls', balken: '#apg-fc-firma', ablage: _apgFcfd.charts }) }catch(e){ console.warn('[apg] Funded CFD Charts', e) }
   }
   function apgFcfdLaden(neu){
@@ -84937,6 +85040,7 @@
     root.querySelector('details[data-apg-schalter]')?.addEventListener('toggle', e => { _apg.schalterAuf = !!e.target.open })
     root.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })   // Funded CFD: Regeln offen halten
     try{ e2Verdrahten(root) }catch(e){ console.warn('[e2] Einstellungen Funded Futures', e) }   // E2 (04.11.2026)
+    try{ fcfdRegelnVerdrahten(root) }catch(e){ console.warn('[fcr] Einstellungen', e) }   // E1: Felder/Schalter der Regeln (nur Admin schreibt)
     { const t = root.querySelector('[data-apg-anker="wartet"] .fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
     // „✓ Erhalten“ in „Payouts auf dem Weg“ (Finn 30.10.2026 ~08:16): bestehendes Admin-Fenster „Payout erhalten“ (= Rückfrage), bucht über
     // /admin/payout-erhalten; „Payout anfragbar ab“ = Erhalten + 14 Tage, Konto raus aus Waiting for Payout, danach neu zeichnen
