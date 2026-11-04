@@ -4313,8 +4313,14 @@
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste{position:relative;padding:14px 18px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf{position:absolute;top:12px;right:16px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf .apg-haupt{padding:7px 14px;font-size:12.5px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;min-height:34px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-e-zeile{padding-right:130px}   /* Platz nur, wenn der Knopf da ist */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin-top:12px}
+  /* E1c (Finn 05.11.2026 ~06:00: „so eine ganze Gruppe wie bei Winning Days"): großer Titel wie die WD-Einstellungs-Gruppe, Kurzstand daneben, Klick klappt zu */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste{padding:16px 18px 18px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-gkopf{display:flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap;min-height:30px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-e-gkopf{padding-right:130px}   /* Platz nur, wenn der Knopf da ist */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-gtitel{border:0;background:transparent;padding:0;font-family:inherit;font-size:18px;font-weight:600;color:var(--g-text);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-pfeil{font-size:12px;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chips{margin-left:0!important}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl b{font-size:14.5px;font-weight:650;color:var(--g-text)}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl > span{font-size:12.5px;color:var(--g-sub)}
@@ -4334,6 +4340,43 @@
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-teil{background:var(--g-kpi);border-radius:14px;padding:14px 16px;min-width:0}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-teil > .fcr-e-block:first-child{margin-top:0;padding-top:0;border-top:0}
   @media (max-width:900px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-grid{grid-template-columns:minmax(0,1fr)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{padding-right:0} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf{position:static;margin-bottom:8px;text-align:right} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chips{margin-left:0} }
+  /* E1c NACHTRAG 7 (Finn 05.11.2026 ~06:05: „So eine Gruppe wie bei WD bitte überall machen"): Maße der WD-Einstellungen (wd-set-grid/-card, wd-abl-*, wd-firma)
+     in eigenen Klassen fcr-w-* — das WD-CSS bleibt unberührt */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-kopf{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;margin-bottom:12px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-w-kopf{padding-right:130px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w.zu .fcr-w-kopf{margin-bottom:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sub{font-size:12px;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
+  @media (max-width:1180px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-grid{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:900px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-w-kopf{padding-right:0} }
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4 .fcr-e-save{flex:none;height:26px;padding:0 10px;font-size:12px;border-radius:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;cursor:pointer}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz.lesen{cursor:default}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz b{font-size:13px;font-weight:600;color:var(--g-text);display:inline-flex;align-items:center}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz small{display:block;color:var(--g-sub);font-size:11.5px;line-height:1.35;margin-top:1px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz input{width:16px;height:16px;flex:0 0 16px;margin:0;accent-color:var(--g-a1);cursor:pointer}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-abschnitt{font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-eins{grid-template-columns:minmax(0,1fr)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firmen{display:flex;flex-direction:column}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--g-rand);cursor:pointer;transition:background .12s}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma:hover{background:color-mix(in srgb,var(--g-karte) 55%,transparent)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .punkt{width:10px;height:10px;border-radius:50%}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fl{min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;color:var(--g-text)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fk{display:block;font-size:11.5px;color:var(--g-sub);line-height:1.35;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen{border-bottom-color:transparent}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fn,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .pfeil,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fz{color:var(--g-a1)}
+  html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fn,html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .pfeil,html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fz{color:var(--g-lila)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.aus .punkt{opacity:.35}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma-edit{padding:4px 4px 14px 20px;border-bottom:1px solid var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma-edit .fcr-w-abschnitt:first-child,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills + .fcr-w-abschnitt{margin-top:10px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills{margin:4px 0 2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills button{padding:6px 14px;font-size:12px}
   /* Größen-Wahl als Segment-Pille (wie Zeitraum-Chips) */
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg{display:inline-flex;background:var(--g-pille);border-radius:999px;padding:3px;gap:2px;flex:none}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg button{border:0;background:transparent;color:var(--g-sub);font:inherit;font-size:12px;font-weight:600;line-height:1;padding:7px 12px;border-radius:999px;cursor:pointer;font-variant-numeric:tabular-nums}
@@ -85083,7 +85126,11 @@
    * Consistency %), Block „Trade" (Lots, SL, SL 1 %, Hedge € auf $ DD), Refund-Trade und Gewinntage als Schalter mit Feldern, unten die Konten der Firma mit
    * Ziel- und Consistency-Balken. Admin sieht Eingaben, „Speichern" je Karte; Schalter wirken sofort. Erklärungen nur hinter ⓘ. Ohne Schreibrecht: Balken
    * „Nur ansehen" und dieselbe Ansicht als Text. Technik (Abstände, Mindest-TP, Takt …) steht nicht im Panel. Gewählte Größe je Firma bleibt (localStorage). */
-  const _fcrSel = { firma: null, gr: {}, offen: null }   // offen: null (Grundzustand: nur die Zeile) | 'ablauf' | Firmenname
+  // offen: 'ablauf' | Firmenname — E1c (Finn 05.11.2026 ~06:00: „diese große Gruppe … direkt schon sieht"): immer eine Firma offen (zuletzt gewählt, sonst die erste);
+  // zu: ganze Gruppe zugeklappt (Klick auf den Titel, gemerkt, Standard offen)
+  const _fcrSel = { firma: null, gr: {}, offen: null, zu: false }
+  _fcrSel.offen = undefined
+  try{ const o = localStorage.getItem('fcr_offen'); if(o && o !== 'ablauf') _fcrSel.firma = o; _fcrSel.zu = localStorage.getItem('fcr_zu') === '1' }catch(_){}
   try{ const g = JSON.parse(localStorage.getItem('fcr_groesse') || '{}'); if(g && typeof g === 'object') _fcrSel.gr = g }catch(_){}
   const fcrAdmin = () => !!window._fcfdAdmin
   const fcrDarf = () => fcrAdmin() && (typeof window._planerDarf !== 'function' || !!window._planerDarf())   // Rechte-Sperre HT (PR_SCHREIB)
@@ -85129,7 +85176,7 @@
   }
   // Konten der Firma (Finn 05.11.2026 ~04:25): ID · Konto · Balance · Stand, dazu zwei schmale Balken — Ziel (Gewinn ÷ Ziel) und bei Consistency der größte
   // Tag ÷ Gewinn mit der p-Linie (grün ≤ p, orange darüber). Daten: konten_stand aus dem Planer-Lauf (eine Lesung, keine Abfrage je Konto)
-  function fcrKontenHtml(f, pct, D){
+  function fcrKontenListe(f, D){
     const key = String((f.namen || [])[0] || '')
     let quelle = (D.konten_stand || []).filter(x => String(x.firma_key || '') === key)
     if(!quelle.length){   // kein Planer-Lauf (Wochenende, Firma aus): Konten aus den Admin-Daten, ohne größten Tag
@@ -85138,7 +85185,10 @@
         const jg = ((f.groessen || []).find(y => Number(y.groesse) === Number(e.groesse)) || {}).roh || {}
         return { user: e.person, konto: e.r.name, groesse: e.groesse, balance: e.bal, gewinn: e.bal != null && e.groesse ? e.bal - e.groesse : null,
           ziel_von: Array.isArray(jg.ziel) ? jg.ziel[0] : null, wartet: e.wartet, bester_tag: null } }) }catch(_){ quelle = [] } }
-    const k = quelle.sort((a, b) => (Number(a.groesse) || 0) - (Number(b.groesse) || 0) || String(a.user || '').localeCompare(String(b.user || '')))
+    return quelle
+  }
+  function fcrKontenHtml(f, pct, D){
+    const k = fcrKontenListe(f, D).slice().sort((a, b) => (Number(a.groesse) || 0) - (Number(b.groesse) || 0) || String(a.user || '').localeCompare(String(b.user || '')))
     if(!k.length) return `<div class="fcr-e-konten-leer">keine Konten im Planer-Lauf${D.zeiten && D.zeiten.von ? '' : ''}</div>`
     const balken = (anteil, cls, linie) => `<span class="fcr-e-bar${cls ? ' ' + cls : ''}"><i style="width:${Math.max(0, Math.min(100, anteil * 100)).toFixed(1)}%"></i>${linie != null ? `<u style="left:${Math.min(100, linie * 100).toFixed(1)}%"></u>` : ''}</span>`
     return `<div class="fcr-e-konten">${k.map(x => {
@@ -85154,102 +85204,110 @@
           ${pct ? `<div title="größter Gewinn-Tag im Payout-Zyklus ÷ Gewinn — Linie bei ${fcrZahl(pct)} %"><span>Consistency</span>${consA != null ? balken(consA, consA <= pct / 100 ? 'gut' : 'warn', pct / 100) : balken(0, '', pct / 100)}<em>${consA != null ? Math.round(consA * 100) + ' %' : (B == null ? '?' : '–')}</em></div>` : ''}
         </div></div>` }).join('')}</div>`
   }
-  // KOMPAKT UNTER DEM ZEITSTRAHL (Finn 05.11.2026 ~05:35 Dubai: „relativ klein halten und, wenn ich draufklicke, Sachen freigeben … basic unter den Zeitstrahl"):
-  // Grundzustand = eine Zeile (Kurzstand + Chips „Ablauf" und je Firma). Ein Klick öffnet darunter die Details, ein zweiter schließt; nie zwei offen.
-  // „Jetzt planen" steht AUSSERHALB dieses Blocks (fcrLeisteHtml): die Funded-Seite tauscht den Knopf nach dem Zeichnen aus (fdpJetztPlanen) — beim lokalen
-  // Neuzeichnen käme sonst der Challenge-Knopf zurück
+  // GRUPPE WIE DIE WD-EINSTELLUNGEN (E1c, Finn 05.11.2026 ~06:05 Dubai, Foto der WD-Einstellungen: „So eine Gruppe wie bei WD bitte überall machen"):
+  // eine große Karte „Einstellungen", darin drei Spalten-Karten wie wd-set-card (Titel + Unterzeile + „Speichern" oben rechts):
+  // Ablauf | Firmen (Liste wie wd-firma, Klick klappt die Firma inline auf) | Konten der gewählten Firma. Maße aus der WD-Karte (#adm-pane-wd .wd-set-*),
+  // eigene Klassen fcr-w-* — das WD-CSS bleibt unberührt. „Jetzt planen" steht außerhalb (fcrLeisteHtml), Titel klappt die Gruppe zu (gemerkt).
+  const fcrWSchalter = (k, an, titel, unter, info) => `<label class="fcr-w-sz${fcrAdmin() ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}${info || ''}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</span>${fcrAdmin()
+    ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
+    : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
+  const fcrWAbschnitt = t => `<div class="fcr-w-abschnitt">${escapeHtml(t)}</div>`
+  const fcrWKopf = (titel, unter, karte) => `<h4 class="fcr-w-h4"><span>${titel}${unter ? `<span class="fcr-w-h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
     const g = D.gemeinsam || {}, C = D.code || {}, z = D.zeiten || {}, ad = fcrAdmin()
     const wegText = (C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)'
-    const weg = `<span class="fcr-e-weg klein" title="${escapeHtml(wegText)}"><i></i>${escapeHtml((C.weg && C.weg.name) || 'Echo')} · Hedge</span>`
-    const fenEigen = !!z.fenster_eigen, fenCh = String(z.fenster_challenge || ''), zone = String(z.tz || 'Asia/Dubai').replace(/^.*\//, '')
+    const fenEigen = !!z.fenster_eigen, fenCh = String(z.fenster_challenge || '').split('–'), zone = String(z.tz || 'Asia/Dubai').replace(/^.*\//, '')
     const news = fcrNewsInfo()
     const firmen = D.firmen || []
     const ton = f => typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
     const groessen = f => (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse))
-    if(_fcrSel.offen && _fcrSel.offen !== 'ablauf' && !firmen.some(f => f.firma === _fcrSel.offen)) _fcrSel.offen = null
-    const offen = _fcrSel.offen
-    // ── Zeile (Grundzustand)
-    const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, `Bestätigen ${g.auto_bestaetigen ? 'auto' : 'von Hand'}`, z.von && z.bis ? `${z.von}–${z.bis}` : '', `News-Pause ${news.an ? 'an' : 'aus'}`].filter(Boolean)
-    const chip = (attr, aktiv, inhalt, titel) => `<button type="button" class="fcr-e-chip${aktiv ? ' on' : ''}" ${attr} aria-expanded="${aktiv ? 'true' : 'false'}"${titel ? ` title="${escapeHtml(titel)}"` : ''}>${inhalt}</button>`
-    const zeile = `<div class="fcr-e-zeile">
-      <div class="fcr-e-zl"><b>Einstellungen</b><span>${kurz.map(escapeHtml).join(' · ')}</span>${fcrDarf() ? '' : `<em class="fcr-e-nur" title="ändern als „Finn + Pascal“ oder „Pascal“">${fcrSchloss('Schreibrecht')} nur ansehen</em>`}</div>
-      <div class="fcr-e-chips">${chip('data-fcr-auf="ablauf"', offen === 'ablauf', 'Ablauf', 'Planer, Bestätigen, Waiting, News-Pause, Startfenster')}
-        ${firmen.map(f => chip(`data-fcr-firma="${escapeHtml(f.firma)}"`, offen === f.firma, `<i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}${f.an === false ? '<small>aus</small>' : ''}`, groessen(f).map(x => fcfdGroesse(x.groesse)).join(' · '))).join('')}</div>
+    if(!_fcrSel.firma || !firmen.some(f => f.firma === _fcrSel.firma)) _fcrSel.firma = (_fcrSel.offen && firmen.some(f => f.firma === _fcrSel.offen)) ? _fcrSel.offen : (firmen[0] || {}).firma || null
+    if(_fcrSel.offen === undefined || (_fcrSel.offen && !firmen.some(f => f.firma === _fcrSel.offen))) _fcrSel.offen = _fcrSel.firma
+    const zu = !!_fcrSel.zu
+    const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '', `${firmen.length} Firmen`, 'Echo · mit Hedge'].filter(Boolean)
+    const kopf = `<div class="fcr-w-kopf"><button type="button" class="fcr-e-gtitel" data-fcr-zu aria-expanded="${zu ? 'false' : 'true'}" title="${zu ? 'aufklappen' : 'zuklappen'}">Einstellungen<span class="fcr-e-pfeil">${zu ? '▸' : '▾'}</span></button>
+      <span class="fcr-w-sub" title="${escapeHtml(wegText)}">${kurz.map(escapeHtml).join(' · ')}</span>${fcrDarf() ? '' : `<em class="fcr-e-nur" title="ändern als „Finn + Pascal“ oder „Pascal“">${fcrSchloss('Schreibrecht')} nur ansehen</em>`}</div>`
+    if(zu) return `<div class="fcr-e-wrap fcr-w zu" data-fcr-wurzel>${kopf}</div>`
+    // ── 1) Ablauf
+    const newsInfo = fcrInfo('news', `<b>News-Pause</b> · nur rote USD-News (Forex Factory)<br>2 h vorher keine neuen Funded-CFD-Starts · laufende bis spätestens 6 min (Echo V2: 10 min) vorher zu ·
+      frühestens 15 min danach wieder Starts<span class="fcr-e-pop-z">Nächster Termin: ${escapeHtml(news.naechster)}</span><span class="fcr-e-pop-z">Kalender: ${escapeHtml(news.kalender)}</span>`)
+    const fensterFeld = (t, n, label) => ad
+      ? `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-spanne fcr-w-eins"><input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml(fenCh[n] || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · leer = wie Challenge-Planer"></div></div>`
+      : `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-wert">${escapeHtml(t === 'von' ? (z.von || '–') : (z.bis || '–'))}</div></div>`
+    const ablauf = `<div class="fcr-w-card" data-fcr-karte="ablauf">
+      ${fcrWKopf('Ablauf', 'Automatik, Bestätigen, Zeiten', 'ablauf')}
+      ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', '1 Trade je Konto und Tag', fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
+      ${fcrWSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge ohne Klick')}
+      ${fcrWSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → Waiting', 'Konto am Ziel automatisch auf Waiting')}
+      ${fcrWAbschnitt('Zeiten')}
+      <div class="fcr-e-felder">${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
+      ${fcrWAbschnitt('News')}
+      ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
     </div>`
-    // ── Details: Ablauf
-    let auf = ''
-    if(offen === 'ablauf'){
-      const regelnInfo = fcrInfo('regeln', `<b>So plant er</b><br>1 Trade pro Tag je Konto, Uhrzeit im Startfenster und Long/Short gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance ·
-        Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen → „SL mit 1-%-Regel“`)
-      const newsInfo = fcrInfo('news', `<b>News-Pause</b> · nur rote USD-News (Forex Factory)<br>2 h vorher keine neuen Funded-CFD-Starts · laufende bis spätestens 6 min (Echo V2: 10 min) vorher zu ·
-        frühestens 15 min danach wieder Starts<span class="fcr-e-pop-z">Nächster Termin: ${escapeHtml(news.naechster)}</span><span class="fcr-e-pop-z">Kalender: ${escapeHtml(news.kalender)}</span>`)
-      const fenster = ad
-        ? `<div class="fcr-e-feld"><label>Startfenster <small>· ${escapeHtml(zone)}${fenCh ? ', leer = ' + escapeHtml(fenCh) : ''}</small></label><div class="fcr-e-spanne">${['von', 'bis'].map((t, n) =>
-            `<input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml((fenCh.split('–')[n]) || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · beide leer = wie Challenge-Planer">`).join('<span>–</span>')}</div></div>`
-        : fcrZeile('Startfenster', z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '–')
-      auf = `<div class="fcr-e-auf" data-fcr-karte="ablauf">
-        <div class="fcr-e-auf-kopf"><span class="fcr-e-titel">Ablauf ${regelnInfo}</span><span class="fcr-e-kopf-r">${weg}${fcrSpeichernKnopf('ablauf')}</span></div>
-        <div class="fcr-e-auf-grid"><div class="fcr-e-teil">
-          ${fcrSchalter('aktiv', !!D.aktiv, 'Planer')}${fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen')}
-          ${fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → automatisch Waiting')}${fcrSchalter('news', !!news.an, 'News-Pause', newsInfo)}
-        </div><div class="fcr-e-teil">${fenster}</div></div>
-      </div>`
-    }
-    // ── Details: Firma (Größen-Tabs → Ziel/Consistency → Trade → Schalter-Blöcke → Konten)
-    const f = offen && offen !== 'ablauf' ? firmen.find(x => x.firma === offen) : null
-    if(f){
-      const gl = groessen(f), fz = { firma: f.firma }
-      let grSel = String(_fcrSel.gr[f.firma] ?? '')
-      if(!gl.some(x => String(x.groesse) === grSel)) grSel = gl.length ? String(gl[0].groesse) : ''
+    // ── 2) Firmen: Liste, Klick klappt inline auf
+    const sel = firmen.find(f => f.firma === _fcrSel.firma) || null
+    const zeileF = f => {
+      const gl = groessen(f), auf = _fcrSel.offen === f.firma, pct = fcrConsPct(f)
+      let grSel = String(_fcrSel.gr[f.firma] ?? ''); if(!gl.some(x => String(x.groesse) === grSel)) grSel = gl.length ? String(gl[0].groesse) : ''
       const x = gl.find(y => String(y.groesse) === grSel), r = (x && x.roh) || {}
-      const pct = fcrConsPct(f), ep = f.erster_payout_eff, epDb = !!(f.erster_payout && typeof f.erster_payout === 'object')
-      const gt = gl.map(y => (y.roh || {}).gewinntage).find(v => v && typeof v === 'object') || null
-      const gtGr = gl.find(y => (y.roh || {}).gewinntage), gtBezug = gl.length > 1 && gtGr ? ` · bei ${fcfdGroesse(gtGr.groesse)}, andere anteilig` : ''
-      const gz = x ? Object.assign({ groesse: String(x.groesse) }, fz) : null
-      const tabs = gl.length ? `<div class="fcr-e-tabs" role="tablist">${gl.map(y => `<button type="button" role="tab" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === grSel ? ' class="on" aria-selected="true"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>` : ''
-      const consInfo = fcrInfo('cons', 'kein Tag mehr als p % des Gewinns im Payout-Zyklus: der Rest bis zum Ziel wird gleichmäßig auf Trades verteilt, jeder höchstens 95 % der erlaubten Tagesgröße')
-      let zielB, tradeB, firmaB
-      if(ad){
-        zielB = `<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$', titel: 'Gewinn über der Starting Balance — ist das Konto dort, ist es fertig' })}
-            ${pct ? fcrFeld('Consistency', pct, Object.assign({ feld: 'consistency_pct' }, fz), { einheit: '% je Zyklus', titel: '1–99 % · gilt für alle Größen' }) : '<div class="fcr-e-feld"></div>'}</div>
-          ${fcrSchalter('cons:' + f.firma, !!pct, 'Consistency', consInfo)}`
-        tradeB = `<div class="fcr-e-felder">
-            ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
-            ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
-            ${fcrFeld('SL 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
-            <div class="fcr-e-feld"><label>Hedge <small>· € auf $ DD</small></label><div class="fcr-e-spanne fcr-e-paar">
-              <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.hedge_eur == null ? '' : fcrZahl(r.hedge_eur))}" placeholder="€" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'hedge_eur' }, gz)))}" title="Fusion-Gegenhedge in €"><span>auf</span>
-              <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.dd == null ? '' : fcrZahl(r.dd))}" placeholder="$ DD" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'dd' }, gz)))}" title="Max Drawdown des Kontos in $"></div></div>
-          </div>`
-        firmaB = `${fcrSchalter('firma:' + f.firma, f.an !== false, 'Im Planer')}
-          ${fcrSchalter('refund:' + f.firma, !!ep, 'Refund-Trade', fcrInfo('refund', 'bis zum 1. Payout erst ein kleines Ziel mit eigenem Hedge, danach normal'))}
-          ${ep ? (epDb ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), { bereich: true, einheit: '$' })}
-              ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), { einheit: '€ je $ DD' })}</div>`
-            : '<div class="fcr-e-hinweis fcr-e-unter">Standard — Schalter aus und an, dann änderbar</div>') : ''}
-          ${fcrSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn — bis dahin je Tag ein Trade mit diesem TP, danach aufs Ziel'))}
-          ${gt ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage_alle.anzahl' }, fz), { einheit: 'Tage' })}
-            ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$' + gtBezug })}
-            ${fcrFeld('TP', gt.tp, Object.assign({ feld: 'gewinntage_alle.tp' }, fz), { bereich: true, einheit: '$' + gtBezug, breit: true })}</div>` : ''}`
-      } else {
-        zielB = `<div class="fcr-e-kpis zwei">${fcrKpi('Ziel bis Waiting', '+' + (fcrSpanne(r.ziel) || '–'), '$')}${fcrKpi('Consistency', pct ? fcrZahl(pct) + ' %' : 'aus', pct ? 'je Zyklus' : '')}</div>`
-        tradeB = `<div class="fcr-e-kpis">${fcrKpi('Lots', fcrSpanne(r.lots) || '–', '')}${fcrKpi('Stop-Loss', fcrSpanne(r.sl) || '–', '$')}
-            ${fcrKpi('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct) : 'wie SL', r.sl_1pct != null ? '$' : '')}${fcrKpi('Hedge', r.hedge_eur != null ? fcrZahl(r.hedge_eur) + ' €' : '–', r.dd != null ? `auf ${fcrZahl(r.dd)} $ DD` : '')}</div>`
-        firmaB = `${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}
-          ${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}
-          ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
+      const nKonten = fcrKontenListe(f, D).length   // gleiche Quelle wie die Konten-Spalte (Planer-Lauf, sonst Admin-Daten)
+      const unter = [f.an === false ? 'aus' : `${nKonten} im Planer`, pct ? `Consistency ${fcrZahl(pct)} %` : '', f.erster_payout_eff ? 'Refund' : ''].filter(Boolean).join(' · ')
+      const mono = [r.ziel ? fcrSpanne(r.ziel, '$') : '', r.lots ? fcrSpanne(r.lots) + ' Lot' : ''].filter(Boolean).join(' · ')
+      let inhalt = ''
+      if(auf){
+        const fz = { firma: f.firma }, gz = x ? Object.assign({ groesse: String(x.groesse) }, fz) : null
+        const ep = f.erster_payout_eff, epDb = !!(f.erster_payout && typeof f.erster_payout === 'object')
+        const gt = gl.map(y => (y.roh || {}).gewinntage).find(v => v && typeof v === 'object') || null
+        const gtGr = gl.find(y => (y.roh || {}).gewinntage), gtBezug = gl.length > 1 && gtGr ? ` · bei ${fcfdGroesse(gtGr.groesse)}` : ''
+        const pills = gl.length > 1 ? `<div class="fcr-e-tabs fcr-w-pills" role="tablist">${gl.map(y => `<button type="button" role="tab" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === grSel ? ' class="on" aria-selected="true"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>` : ''
+        const consInfo = fcrInfo('cons', 'kein Tag mehr als p % des Gewinns im Payout-Zyklus — der Rest bis zum Ziel wird gleichmäßig auf Trades verteilt')
+        if(ad){
+          inhalt = `${pills}
+            ${x ? `${fcrWAbschnitt('Ziel')}<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$' })}
+              ${pct ? fcrFeld('Consistency', pct, Object.assign({ feld: 'consistency_pct' }, fz), { einheit: '% je Zyklus' }) : '<div class="fcr-e-feld"></div>'}</div>
+            ${fcrWSchalter('cons:' + f.firma, !!pct, 'Consistency', '', consInfo)}
+            ${fcrWAbschnitt('Trade')}<div class="fcr-e-felder">
+              ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
+              ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
+              ${fcrFeld('SL 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
+              <div class="fcr-e-feld"><label>Hedge <small>· € auf $ DD</small></label><div class="fcr-e-spanne fcr-e-paar">
+                <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.hedge_eur == null ? '' : fcrZahl(r.hedge_eur))}" placeholder="€" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'hedge_eur' }, gz)))}" title="Fusion-Gegenhedge in €"><span>auf</span>
+                <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.dd == null ? '' : fcrZahl(r.dd))}" placeholder="$ DD" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'dd' }, gz)))}" title="Max Drawdown des Kontos in $"></div></div>
+            </div>` : '<div class="fcr-leer">keine Größe hinterlegt</div>'}
+            ${fcrWAbschnitt('Firma')}
+            ${fcrWSchalter('firma:' + f.firma, f.an !== false, 'Im Planer')}
+            ${fcrWSchalter('refund:' + f.firma, !!ep, 'Refund-Trade', 'bis zum 1. Payout', fcrInfo('refund', 'erst ein kleines Ziel mit eigenem Hedge, danach normal'))}
+            ${ep ? (epDb ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), { bereich: true, einheit: '$' })}
+                ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), { einheit: '€ je $ DD' })}</div>`
+              : '<div class="fcr-e-hinweis fcr-e-unter">Standard — Schalter aus und an, dann änderbar</div>') : ''}
+            ${fcrWSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', 'vor dem Ziel', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn — bis dahin je Tag ein Trade mit diesem TP'))}
+            ${gt ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage_alle.anzahl' }, fz), { einheit: 'Tage' })}
+              ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$' + gtBezug })}
+              ${fcrFeld('TP', gt.tp, Object.assign({ feld: 'gewinntage_alle.tp' }, fz), { bereich: true, einheit: '$' + gtBezug, breit: true })}</div>` : ''}`
+        } else {
+          inhalt = `${pills}${x ? `${fcrZeile('Ziel bis Waiting', '+' + fcrSpanne(r.ziel, '$'))}${fcrZeile('Consistency', pct ? fcrZahl(pct) + ' % je Zyklus' : 'aus')}
+            ${fcrZeile('Lots', fcrSpanne(r.lots))}${fcrZeile('Stop-Loss', fcrSpanne(r.sl, '$'))}${fcrZeile('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL')}
+            ${fcrZeile('Hedge', r.hedge_eur != null ? `${fcrZahl(r.hedge_eur)} € auf ${fcrZahl(r.dd)} $ DD` : '–')}` : ''}
+            ${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}
+            ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
+        }
       }
-      auf = `<div class="fcr-e-auf" data-fcr-karte="firma">
-        <div class="fcr-e-auf-kopf"><span class="fcr-e-titel"><i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}</span>${tabs}<span class="fcr-e-kopf-r">${weg}${fcrSpeichernKnopf('firma')}</span></div>
-        <div class="fcr-e-auf-grid">
-          <div class="fcr-e-teil">${x ? fcrBlock('Ziel', zielB) + fcrBlock('Trade', tradeB) : '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>
-          <div class="fcr-e-teil">${fcrBlock('Firma', firmaB)}${fcrBlock('Konten', fcrKontenHtml(f, pct, D))}</div>
-        </div>
-      </div>`
+      return `<button type="button" class="fcr-w-firma${auf ? ' offen' : ''}${f.firma === _fcrSel.firma ? ' gewaehlt' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}" aria-expanded="${auf ? 'true' : 'false'}">
+          <span class="punkt" style="background:${ton(f)}"></span><span class="fl"><span class="fn">${escapeHtml(f.firma)}</span><span class="fk">${escapeHtml(unter)}</span></span>
+          <span class="fz">${escapeHtml(mono)}</span><span class="pfeil">${auf ? '▾' : '▸'}</span></button>${auf ? `<div class="fcr-w-firma-edit">${inhalt}</div>` : ''}`
     }
-    return `<div class="fcr-e-wrap fcr-e-kompakt" data-fcr-wurzel>${zeile}${auf}</div>`
+    const liste = `<div class="fcr-w-card" data-fcr-karte="firma">
+      ${fcrWKopf('Firmen', 'Ziel bis Waiting · Lots je Größe', 'firma')}
+      <div class="fcr-w-firmen">${firmen.map(zeileF).join('') || '<div class="fcr-leer">keine Firma hinterlegt</div>'}</div>
+    </div>`
+    // ── 3) Konten der gewählten Firma
+    const konten = `<div class="fcr-w-card">
+      ${fcrWKopf('Konten', sel ? `${escapeHtml(sel.firma)} · Ziel und Consistency je Konto` : '–', '')}
+      ${sel ? fcrKontenHtml(sel, fcrConsPct(sel), D) : '<div class="fcr-leer">keine Firma gewählt</div>'}
+    </div>`
+    return `<div class="fcr-e-wrap fcr-w" data-fcr-wurzel>${kopf}<div class="fcr-w-grid">${ablauf}${liste}${konten}</div></div>`
   }
   // Einstellungs-Karte der Planer-Seite unter dem Zeitstrahl (Finn 05.11.2026 ~05:35): Knopf oben rechts außerhalb des neu zeichenbaren Blocks
   // Die Seite zeichnet sich im Takt komplett neu (apIdsRender): ungespeicherte Eingaben vorher einsammeln, fcfdRegelnVerdrahten setzt sie wieder ein
@@ -85311,7 +85369,7 @@
         const PA = D.parameter = Object.assign({ wert: {}, standard: {}, db: {}, spalte: true }, D.parameter)
         PA.db = Object.assign({}, PA.db); PA.wert = Object.assign({}, PA.wert)
         if(b.wert == null) delete PA.db[b.param]; else PA.db[b.param] = b.wert
-        PA.wert[b.param] = b.wert ?? (PA.standard[b.param] ?? FCR_PARAM_STD[b.param]); return }
+        PA.wert[b.param] = b.wert ?? (PA.standard[b.param] ?? null); return }   // FCR_PARAM_STD gibt es seit der Feldliste nicht mehr
       if(b.zeit === 'fenster'){
         const ch = String((D.zeiten || {}).fenster_challenge || '').split('–'), w = b.wert
         D.zeiten = Object.assign({}, D.zeiten, { fenster: w || undefined, fenster_eigen: !!w, von: w ? w.von : (ch[0] || D.zeiten.von), bis: w ? w.bis : (ch[1] || D.zeiten.bis) }); return }
@@ -85380,7 +85438,10 @@
       let ziel; try{ ziel = JSON.parse(i.dataset.fcrIn) }catch(_){ return }
       const box = ziel.teil ? i.closest('.fcr-e-spanne') : null
       if(box){   // Spanne von – bis: beide Felder zusammen; „bis" leer → wie „von", beide leer → Feld leeren (nur wo der Server es erlaubt)
-        const [ev, eb] = box.querySelectorAll('input'); fertig.add(ev); fertig.add(eb)
+        // Startfenster (E1c): „Start ab" und „Spätestens" stehen in zwei eigenen Feldern (wie WD) — das Paar über teil von/bis in der ganzen Karte suchen
+        const paar = ziel.fenster ? ['von', 'bis'].map(t => [...k.querySelectorAll('input[data-fcr-in]')].find(x => { try{ const d = JSON.parse(x.dataset.fcrIn); return d.fenster && d.teil === t }catch(_){ return false } }))
+          : [...box.querySelectorAll('input')]
+        const [ev, eb] = paar; if(!ev || !eb) return; fertig.add(ev); fertig.add(eb)
         let z0; try{ z0 = JSON.parse(ev.dataset.fcrIn) }catch(_){ return }
         if(z0.fenster){   // Startfenster HH:MM – HH:MM, beide leer = wie Challenge-Planer
           const a = ev.value.trim(), b = eb.value.trim(), ok = t => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)
@@ -85422,23 +85483,29 @@
       if(_fcrSel.mitnehmen){ const m = _fcrSel.mitnehmen; _fcrSel.mitnehmen = null   // nach dem Seiten-Neuzeichnen: ungespeicherte Eingaben zurück
         w.querySelectorAll('input[data-fcr-in]').forEach(i => { if(m.has(i.dataset.fcrIn)){ i.value = m.get(i.dataset.fcrIn); i.classList.add('geaendert') } }); setTimeout(() => fcrKnoepfe(w), 0) }
       w.addEventListener('click', e => {
+        if(e.target.closest('.fcr-e-pop')){ e.preventDefault(); return }   // Pop-up liegt im <label> der Schalter-Zeile — ein Klick darin schaltet sonst um (Fremd-Review E1c)
         const ib = e.target.closest('[data-fcr-info]')
         if(ib){ e.preventDefault(); const pop = ib.parentElement.querySelector('.fcr-e-pop'), zu = !!(pop && pop.hidden)
           w.querySelectorAll('.fcr-e-pop').forEach(p => { p.hidden = true }); if(pop) pop.hidden = !zu; return }
         const sb = e.target.closest('[data-fcr-save]')
         if(sb){ e.preventDefault(); fcrKarteSpeichern(sb.closest('[data-fcr-karte]')); return }
+        const zb = e.target.closest('[data-fcr-zu]')
+        if(zb){ e.preventDefault()   // E1c: ganze Gruppe zu-/aufklappen (gemerkt); ungespeicherte Felder warnen wie beim Wechsel
+          if(!_fcrSel.zu && fcrUngespeichert(w) && !w.dataset.fcrWarn){
+            w.dataset.fcrWarn = '1'; if(typeof atToast === 'function') atToast('Ungespeicherte Änderungen — erst „Speichern“; nochmal klicken klappt trotzdem zu', 'end'); return }
+          delete w.dataset.fcrWarn; _fcrSel.zu = !_fcrSel.zu; try{ localStorage.setItem('fcr_zu', _fcrSel.zu ? '1' : '0') }catch(_){}
+          fcrNeuZeichnen(w); return }
         const fb = e.target.closest('[data-fcr-firma]'), gb = e.target.closest('[data-fcr-gr]'), ab = e.target.closest('[data-fcr-auf]'); if(!fb && !gb && !ab) return
         e.preventDefault()
         if(gb && String(_fcrSel.gr[_fcrSel.offen] ?? '') === gb.dataset.fcrGr) return
-        if(fcrUngespeichert(w.querySelector('.fcr-e-auf')) && !w.dataset.fcrWarn){
+        if(fcrUngespeichert(w.querySelector('[data-fcr-karte="firma"]')) && !w.dataset.fcrWarn){
           w.dataset.fcrWarn = '1'; if(typeof atToast === 'function') atToast('Ungespeicherte Änderungen — erst „Speichern“; nochmal klicken wechselt trotzdem', 'end'); return }
         delete w.dataset.fcrWarn
-        // Chip „Ablauf" bzw. eine Firma: öffnen, zweiter Klick schließt — nie zwei gleichzeitig (Finn 05.11.2026 ~05:35)
-        if(ab) _fcrSel.offen = _fcrSel.offen === 'ablauf' ? null : 'ablauf'
-        else if(fb){ _fcrSel.offen = _fcrSel.offen === fb.dataset.fcrFirma ? null : fb.dataset.fcrFirma; if(_fcrSel.offen) _fcrSel.firma = _fcrSel.offen }
-        else { _fcrSel.gr[_fcrSel.offen] = gb.dataset.fcrGr; try{ localStorage.setItem('fcr_groesse', JSON.stringify(_fcrSel.gr)) }catch(_){} }   // Größe je Firma merken
+        // Firma-Zeile: klappt inline auf, nochmal klicken klappt zu (wie Tradeify bei WD); die zuletzt gewählte Firma bleibt in der Konten-Spalte (E1c Nachtrag 7)
+        if(fb){ const n = fb.dataset.fcrFirma; _fcrSel.offen = _fcrSel.offen === n ? null : n; _fcrSel.firma = n; try{ localStorage.setItem('fcr_offen', n) }catch(_){} }
+        else if(gb){ _fcrSel.gr[_fcrSel.offen] = gb.dataset.fcrGr; try{ localStorage.setItem('fcr_groesse', JSON.stringify(_fcrSel.gr)) }catch(_){} }   // Größe je Firma merken
         const neu = fcrNeuZeichnen(w)
-        if((fb || ab) && neu) neu.querySelector('.fcr-e-auf')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // Details ins Bild
+        if(fb && neu) neu.querySelector('.fcr-w-firma-edit')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // aufgeklappte Firma ins Bild
       })
       w.querySelectorAll('input[data-fcr-in]').forEach(i => {
         i.addEventListener('input', () => { i.classList.toggle('geaendert', i.value !== i.defaultValue); delete w.dataset.fcrWarn; fcrKnoepfe(w) })
@@ -85652,9 +85719,7 @@
     </div>`
     // REGEL-FELD (30.10.2026, Finn ~06:55 über den Master: „dasselbe Regel-Feld wie bei Winning Days"): klappbar wie „Schalter" im Challenge-Planer,
     // Werte aus der DB (fcfdRegelnLaden) — keine zweite Wahrheit im HTML; solange nichts hinterlegt ist, steht das dort
-    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
-        <button type="button" class="apg-haupt" disabled title="Der Funded-CFD-Planer plant noch nicht — die Regeln stehen schon">Jetzt planen</button>
-        ${fcfdRegelnHtml()}</div>`   // E1b: offen
+    const leiste = fcrLeisteHtml('')   // E1c: dieselbe Gruppe wie auf der Planer-Seite (Titel steht in der Gruppe)
     const firmenKarte = fcfdFirmenHtml(k)
     const geld = e => e.bal == null ? '–' : (e.ccy === 'EUR' ? apgZahl(e.bal) + ' €' : apgZahl(e.bal) + ' $')
     const kachel = e => `<div class="apg-konto" title="${escapeHtml(e.r.name || '')}">
