@@ -5282,7 +5282,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.exists(bot):
                     ensure_bot_source()
                 auftrag = {"cfg": os.path.join(HERE, inst["config_file"]), "von": (q.get("von") or [""])[0], "bis": (q.get("bis") or [""])[0],
-                           "symbol": (q.get("symbol") or [""])[0], "richtung": (q.get("richtung") or [""])[0], "lots": (q.get("lots") or [""])[0]}
+                           "symbol": (q.get("symbol") or [""])[0], "richtung": (q.get("richtung") or [""])[0], "lots": (q.get("lots") or [""])[0],
+                           "ohne": (q.get("ohne") or [""])[0]}
                 try:
                     p = subprocess.run([sys.executable, bot, "deals", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
                                        timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -6836,6 +6837,9 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
+                if inst["config_file"] in DEALS_LESEN:   # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
+                        "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts geklickt, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
                     "Fuer diese Instanz laeuft gerade schon ein Bot-Lauf — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))

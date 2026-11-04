@@ -48,8 +48,12 @@ def main():
           and "p.orbitGesendetAt" in u and "laeuftHier) return null" in u, "Kandidat: Echo mit Hedge, geplant, geclaimt, nicht gestartet, hier läuft kein Check")
     check("const SF_STILL_MS = 4 * 60000" in html and "jetzt - claim > 24 * 3600000" in u and "(Date.parse(f.at) || 0) >= claim - 5000" in u,
           "4 min nach dem Claim, höchstens 24 h, nicht doppelt (Start-Fehler nach dem Claim zählt)")
-    check("/nichts gesendet|nichts platziert/i" in u and "!spNach && masterFlach === true) return { unklar: false" in u and "return { unklar: true" in u,
-          "unklar = false nur mit Beleg (Antwort „nichts gesendet“ oder keine Antwort + Master flach), sonst unklar")
+    # N2 (04.11.2026): der Beleg steht in sfVorOrderBeleg (Kopf der Antwort, „nichts gesendet/platziert" + Abbrüche vor dem Order-Knopf) — der Spiegel
+    # oben prüft weiter die alten Wörter, die Erweiterung prüft tools/selftest_endlesung_deals.js im Browser
+    beleg = html[html.index("function sfVorOrderBeleg("):html.index("window._sfVorOrderBeleg = sfVorOrderBeleg")]
+    check("sfVorOrderBeleg(sp.msg)" in u and "/nichts gesendet/i" in html and "/nichts platziert/i" in html and "split(/\\s+(?:Spur:|\\[)/)[0]" in beleg
+          and "!spNach && masterFlach === true) return { unklar: false" in u and "return { unklar: true" in u,
+          "unklar = false nur mit Beleg (Kopf der Antwort sagt „nichts gesendet/platziert“ o. ä., oder keine Antwort + Master flach), sonst unklar")
     k = html[html.index("async function sfStillPruefen("):html.index("let _sfLaeuft = false, _sfAbgleichAt = 0")]
     check("mt5RouteResolve(p0, dd.instances || [])" in k and "if(!ri) continue" in k and "dd.copier_offline || dd._httpFail) return" in k,
           "Nachkontrolle nur für Pläne dieses PCs (lokale Copier-Instanz), Panel nicht lesbar → nichts")

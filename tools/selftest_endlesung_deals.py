@@ -55,6 +55,9 @@ def main():
     check(r["mehrdeutig"] is True and r["pl"] is None, "zwei passende Trades → mehrdeutig, kein P&L")
     check(u([d(17, 0), d(17, 1, typ=1, profit=10)], [], "", 2.3, "NAS100")["mehrdeutig"] is True, "ohne Richtung → nie zuordnen")
     check(u([d(18, 0), d(18, 1, typ=1, profit=10)], [], "buy", "", "NAS100")["mehrdeutig"] is True, "ohne Volumen → nie zuordnen")
+    # Prüfer N2: Hand-Trades (fremd_positionen) nie zuordnen
+    r = u([d(19, 0), d(19, 1, typ=1, profit=99)], [], "buy", 2.3, "NAS100", ohne=["19"])
+    check(r["treffer"] == [] and r["pl"] is None, "Hand-Trade-Position wird nie zugeordnet")
     # SELL-Plan
     r = u([d(13, 0, typ=1, vol=20), d(13, 1, typ=0, vol=20, profit=5469)], [], "sell", 20, "NAS100")
     check(r["treffer"] == [13] and r["pl"] == 5469, "SELL-Plan mit Gewinn")

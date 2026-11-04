@@ -28940,10 +28940,10 @@ def modus_loginok(expected, sekunden="90", pfad=None):
     return {"ok": True, "msg": "kein Login-Dialog", "ende": "zeit", "warten_s": round(warten_s), "trail": trail[-5:]}
 
 
-def deals_urteil(deals, positionen, richtung, lots, symbol):
+def deals_urteil(deals, positionen, richtung, lots, symbol, ohne=()):
     """REIN RECHNEND (testbar, N2 04.11.2026): aus der Deal-Historie eines Fensters den Trade eines Plans erkennen.
     deals = [{ticket, position, typ (0 buy / 1 sell), entry (0 in / 1 out / 2 inout / 3 out_by), symbol, volume, profit, swap, commission}],
-    positionen = offene Positions-IDs des Kontos. Treffer = Einstiegs-Deal in Plan-Richtung mit Plan-Volumen (±0,001) und passendem Symbol
+    positionen = offene Positions-IDs des Kontos, ohne = Positions-IDs von Hand-Trades (fremd_positionen), nie zugeordnet. Treffer = Einstiegs-Deal in Plan-Richtung mit Plan-Volumen (±0,001) und passendem Symbol
     (Anfang gleich, z. B. NAS100 / NAS100.cash). Gegenprüfung N2: ohne Richtung oder Volumen wird nie zugeordnet; mehr als ein Treffer = mehrdeutig.
     P&L = Summe profit + swap + commission über ALLE Deals der Position (auch die Einstiegs-Kommission), nur wenn sie zu ist.
     → {treffer: [position], offen: bool, pl: float | None, mehrdeutig: bool}"""
@@ -28955,8 +28955,10 @@ def deals_urteil(deals, positionen, richtung, lots, symbol):
         lots_f = None
     if typ_soll is None or lots_f is None:
         return {"treffer": [], "offen": False, "pl": None, "mehrdeutig": True}
-    treffer = []
+    treffer, ohne = [], {int(x) for x in ohne or () if str(x).strip().isdigit()}
     for d in deals or ():
+        if int(d.get("position") or 0) in ohne:
+            continue
         if int(d.get("entry", -1)) != 0 or int(d.get("typ", -1)) != typ_soll:
             continue
         if sym and not str(d.get("symbol") or "").upper().startswith(sym):
@@ -28976,7 +28978,7 @@ def deals_urteil(deals, positionen, richtung, lots, symbol):
 def modus_deals(auftrag):
     """NUR LESEN (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L … nie angezeigt wird"): Deal-Historie + Balance des Master-Logins
     einer Echo-Instanz für die Endlesung unklarer Pläne (Tagesreset „unklar", Radar „–"). Kein Schreibaufruf, kein Klick, kein Fenster.
-    auftrag = {cfg, von, bis (ISO), symbol, richtung, lots}. MT5 rechnet Deal-Zeiten in Server-Zeit —
+    auftrag = {cfg, von, bis (ISO), symbol, richtung, lots, ohne (Positions-IDs von Hand-Trades, Komma)}. MT5 rechnet Deal-Zeiten in Server-Zeit —
     zugeordnet wird über Richtung + Volumen + Symbol (deals_urteil), eindeutig im Fenster Claim −1 h … bis +4 h (Server-Zeit liegt 0–3 h vor UTC).
     → {ok, lesbar, grund?, login, balance, positionen, treffer, offen, pl, n_deals}"""
     try:
@@ -29008,16 +29010,28 @@ def modus_deals(auftrag):
                 return {"ok": False, "lesbar": False, "grund": "Terminal nicht angemeldet/verbunden (kein Konto oder keine Server-Verbindung)"}
             if expected and int(ai.login) != expected:
                 return {"ok": False, "lesbar": False, "grund": f"Terminal steht im falschen Konto ({ai.login} statt {expected})"}
-            roh = mt5.history_deals_get(von - _td(hours=1), bis + _td(hours=4))
+            # Prüfer-Stopp N2: Zeiten als UTC mit Zeitzone (MetaTrader5 rechnet naive Zeiten in der lokalen Zone des PCs um); Einstiege nur im
+            # kurzen Fenster ab dem Claim (bis +4 h, Server-Zeit 0–3 h vor UTC), die Ausstiege danach über die Position
+            roh = mt5.history_deals_get(von.replace(tzinfo=_tz.utc), bis.replace(tzinfo=_tz.utc) + _td(hours=4))   # ab Claim (Gegenprüfung: kein −1 h)
             if roh is None:
                 return {"ok": False, "lesbar": False, "grund": f"Deal-Historie nicht lesbar ({mt5.last_error()})"}
-            deals = [{"ticket": int(d.ticket), "position": int(getattr(d, "position_id", 0) or 0), "typ": int(d.type), "entry": int(d.entry),
-                      "symbol": str(d.symbol or ""), "volume": float(d.volume), "profit": float(d.profit), "swap": float(getattr(d, "swap", 0) or 0),
-                      "commission": float(getattr(d, "commission", 0) or 0)} for d in roh if int(d.type) in (0, 1)]
+
+            def _d(d):
+                return {"ticket": int(d.ticket), "position": int(getattr(d, "position_id", 0) or 0), "typ": int(d.type), "entry": int(d.entry),
+                        "symbol": str(d.symbol or ""), "volume": float(d.volume), "profit": float(d.profit), "swap": float(getattr(d, "swap", 0) or 0),
+                        "commission": float(getattr(d, "commission", 0) or 0)}
+            deals = [_d(d) for d in roh if int(d.type) in (0, 1)]
+            ohne = [x for x in str(auftrag.get("ohne") or "").split(",") if x.strip()]
             pos = [int(p.ticket) for p in (mt5.positions_get() or [])]
-            u = deals_urteil(deals, pos, auftrag.get("richtung"), auftrag.get("lots"), auftrag.get("symbol"))
+            kand = deals_urteil(deals, pos, auftrag.get("richtung"), auftrag.get("lots"), auftrag.get("symbol"), ohne)["treffer"]
+            for pid in kand:   # alle Deals der Treffer-Position(en), auch Ausstiege Stunden später
+                weitere = mt5.history_deals_get(position=int(pid)) or []
+                bekannt = {x["ticket"] for x in deals}
+                deals += [_d(d) for d in weitere if int(d.type) in (0, 1) and int(d.ticket) not in bekannt]
+            u = deals_urteil(deals, pos, auftrag.get("richtung"), auftrag.get("lots"), auftrag.get("symbol"), ohne)
+            orders = len(mt5.orders_get() or [])   # schwebende Orders: dann nie „nicht gelaufen" (Gegenprüfung N2)
             return {"ok": True, "lesbar": True, "login": int(ai.login), "balance": round(float(ai.balance), 2), "positionen": len(pos),
-                    "n_deals": len(deals), **u}
+                    "orders": orders, "n_deals": len(deals), **u}
         finally:
             mt5.shutdown()
     except Exception as e:

@@ -54982,7 +54982,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2027'
+  const OS_TAB_BUILD = '2026-09-22.2028'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60461,6 +60461,7 @@
     }
     const bal = Number(res.balance)
     if(Number(res.positionen) > 0) return { art: 'unklar', grund: `kein Deal des Plans, aber ${res.positionen} offene Position(en) am Konto` }
+    if(Number(res.orders) > 0) return { art: 'unklar', grund: `kein Deal des Plans, aber ${res.orders} schwebende Order(s) am Konto` }
     if(refBal == null || !isFinite(Number(refBal))) return { art: 'unklar', grund: 'kein Deal des Plans, aber keine Vergleichs-Balance (kein früherer Trade gelesen)' }
     if(!(bal > 0)) return { art: 'unklar', grund: 'kein Deal des Plans, Balance nicht lesbar' }
     if(Math.abs(bal - Number(refBal)) > 0.01) return { art: 'unklar', grund: `kein Deal des Plans, aber Balance ${bal.toLocaleString('de-DE')} statt ${Number(refBal).toLocaleString('de-DE')} $` }
@@ -60468,15 +60469,29 @@
   }
   window._deUrteil = deUrteil   // Test-Haken
   const deKandidat = r => !!r && r.status === 'review' && r.master_pl == null && (r.route === 'mt5' || r.route === 'mt5v2') && !r.started_at && !!r.start_um_gestartet_at
-    && !!(r.mt5_baseline && r.mt5_baseline.final && r.mt5_baseline.final.art === 'unklar')
+    && !!(r.mt5_baseline && r.mt5_baseline.final && r.mt5_baseline.final.art === 'unklar') && !r.mt5_baseline.manuell   // Manuelle Arbeit: Finns Hand (Prüfer N2)
+  /* VERGLEICHS-BALANCE (Prüfer-Stopp N2): nur eine Lesung eines ANDEREN Plans desselben Kontos, die vor dem Claim liegt — bal_nach.at < Claim, sonst
+   * final.balance_end eines vor dem Claim beendeten Plans. Nie eine Balance dieses Plans (der Tagesreset setzt ended_at = start_um < Claim). REIN — Test-Haken. */
+  function deVergleichsBalance(planId, claimIso, andere){
+    const c = Date.parse(claimIso)
+    for(const q of (andere || [])){
+      if(!q || String(q.id) === String(planId)) continue
+      const b = q.mt5_baseline || {}, bn = b.bal_nach, fe = b.final
+      if(bn && bn.ok && Number(bn.balance) > 0 && Date.parse(bn.at) < c) return Number(bn.balance)
+      if(fe && Number(fe.balance_end) > 0 && Date.parse(q.ended_at) < c && !(bn && Date.parse(bn.at) >= c)) return Number(fe.balance_end)
+    }
+    return null
+  }
+  window._deVergleichsBalance = deVergleichsBalance
   async function deTick(){
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || window._tabNebenSofort || _deLaeuft || Date.now() - _deAt < DE_TAKT_MS) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
     // Gegenprüfung N2: die Lesung hält den Order-Lock der Instanz bis 90 s — nie, solange auf diesem PC ein Echo-Start fällig oder gerade geclaimt ist
     const jetztMs = Date.now()
-    const startNah = (tradePlans || []).some(p => p && (p.route === 'mt5' || p.route === 'mt5v2') && p.status === 'planned' && !p.startedAt
-      && ((p.startUm && Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000) || (p.startUmGestartetAt && jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000)))
+    const startNah = (tradePlans || []).some(p => p && (p.route === 'mt5' || p.route === 'mt5v2') && (p.status === 'open'   // offener Echo-Trade: Schließen nie verzögern
+      || (p.status === 'planned' && !p.startedAt
+      && ((p.startUm && Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000) || (p.startUmGestartetAt && jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000)))))
     if(startNah || _suLaeuft) return
     _deAt = Date.now(); _deLaeuft = true
     try{
@@ -60492,30 +60507,35 @@
         const p = rowToPlan(r), ri = mt5V2Resolve(p, dd.instances || [])
         if(!ri || !ri.inst || !ri.inst.file) continue   // Instanz hängt an einem anderen PC — dessen Tab klärt
         _deVersucht.set(String(r.id), Date.now())
-        const claim = r.start_um_gestartet_at, bis = new Date(Date.parse(claim) + 24 * 3600000).toISOString()
-        const { data: vor } = await supabase.from('trade_plans').select('mt5_baseline,ended_at').eq('master_account_id', r.master_account_id)
-          .in('status', ['completed', 'review']).lt('ended_at', claim).order('ended_at', { ascending: false }).limit(1)
-        const vb = vor && vor[0] && vor[0].mt5_baseline
-        const refBal = vb && vb.bal_nach && vb.bal_nach.ok && Number(vb.bal_nach.balance) > 0 ? Number(vb.bal_nach.balance)
-          : (vb && vb.final && Number(vb.final.balance_end) > 0 ? Number(vb.final.balance_end) : null)
-        const qs = new URLSearchParams({ file: ri.inst.file, von: claim, bis, symbol: r.master_symbol || '', richtung: r.richtung || '', lots: r.master_contracts != null ? String(r.master_contracts) : '' })
+        // Einstieg nur binnen 2 h nach dem Claim (die Order fällt Sekunden danach); die Ausstiege holt der Bot über die Position (Prüfer N2)
+        const claim = r.start_um_gestartet_at, bis = new Date(Date.parse(claim) + 2 * 3600000).toISOString()
+        const { data: vor, error: eVor } = await supabase.from('trade_plans').select('id,mt5_baseline,ended_at').eq('master_account_id', r.master_account_id)
+          .neq('id', r.id).in('status', ['completed', 'review']).lt('ended_at', claim).order('ended_at', { ascending: false }).limit(5)
+        if(eVor) continue
+        const refBal = deVergleichsBalance(r.id, claim, vor)
+        // Hand-Trades nie zuordnen: Positionen aus fremd_positionen dieses Kontos im Fenster werden ausgeschlossen; nicht lesbar → nächster Takt
+        const { data: fp, error: eFp } = await supabase.from('fremd_positionen').select('ident').eq('konto_id', r.master_account_id)
+          .gte('seit', new Date(Date.parse(claim) - 3600000).toISOString()).lte('seit', bis)
+        if(eFp) continue
+        const ohne = (fp || []).map(x => String(x.ident || '').replace(/\D/g, '')).filter(Boolean).join(',')
+        const qs = new URLSearchParams({ file: ri.inst.file, von: claim, bis, symbol: r.master_symbol || '', richtung: r.richtung || '', lots: r.master_contracts != null ? String(r.master_contracts) : '', ohne })
         const res = await window.mtcApi('deals?' + qs.toString(), { timeoutMs: 100000 })
         if(res && res._httpFail) continue   // Panel alt (Route fehlt) oder weg → nächster Versuch in 30 min
         const u = deUrteil(res, refBal), jetzt = new Date().toISOString(), fin = Object.assign({}, r.mt5_baseline.final)
         if(u.art === 'offen') continue
         if(u.art === 'unklar'){
-          if(fin.unklar_grund !== u.grund) await baselinePatch(r.id, { final: Object.assign(fin, { unklar_grund: u.grund, deals_at: jetzt }) }, 'review')
+          if(fin.unklar_grund !== u.grund) await baselinePatchIn(r.id, 'final', { unklar_grund: u.grund, deals_at: jetzt }, 'review')   // nur zwei Felder, final bleibt
           continue
         }
-        // Buchen in EINEM Update (Gegenprüfung N2): P&L + final + bal_nach zusammen, nur solange noch kein P&L steht (Abhaken von Hand gewinnt) und der Plan
-        // seit dem Lesen unverändert ist. bal_nach = Balance am Ende DIESES Plans (Vergleichs-Balance + P&L), nie die heutige — sie ist die Vergleichs-
-        // Balance späterer Pläne desselben Kontos. Ohne Vergleichs-Balance beim Deal-Fall kein bal_nach (der Plan bleibt dann bis zum Abhaken „ungelesen").
+        // Buchen in EINEM Update (Gegenprüfung N2): P&L + final (+ bal_nach) zusammen, nur solange noch kein P&L steht (Abhaken von Hand gewinnt) und der Plan
+        // seit dem Lesen unverändert ist. Ein vorhandenes bal_nach wird nie überschrieben (Prüfer-Stopp N2); beim Deal-Fall kommt keins dazu (die Balance am
+        // Plan-Ende ist nicht gelesen). Nur „nicht gelaufen" ohne bal_nach bekommt die eben gelesene Balance (= Vergleichs-Balance ±0,01 $) mit Zeitstempel jetzt.
         const finNeu = u.art === 'deals'
           ? Object.assign(fin, { art: 'deals', quelle: 'deals', master_pl: u.pl, hinweis: `Endlesung über die Deals: ${u.grund}`, deals_at: jetzt, unklar_grund: null })
           : Object.assign(fin, { art: 'nicht_gelaufen', grund: 'nie_gefuellt_tagesende', quelle: 'deals_leer', master_pl: 0, today_pnl: 0, hinweis: `nicht gelaufen — ${u.grund}`, deals_at: jetzt, unklar_grund: null })
-        const balEnde = refBal != null ? Math.round((Number(refBal) + Number(u.pl || 0)) * 100) / 100 : null
-        const base = Object.assign({}, r.mt5_baseline || {}, { final: finNeu },
-          balEnde != null && balEnde > 0 ? { bal_nach: { ok: true, balance: balEnde, at: jetzt, quelle: 'deals', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } } : {})
+        const neuBal = (u.art === 'nicht_gelaufen' && !(r.mt5_baseline && r.mt5_baseline.bal_nach) && Number(res.balance) > 0)
+          ? { bal_nach: { ok: true, balance: Number(res.balance), at: jetzt, quelle: 'deals', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } } : {}
+        const base = Object.assign({}, r.mt5_baseline || {}, { final: finNeu }, neuBal)
         let q = supabase.from('trade_plans').update({ master_pl: u.pl, mt5_baseline: base }).eq('id', r.id).eq('status', 'review').is('master_pl', null)
         if(r.updated_at) q = q.eq('updated_at', r.updated_at)
         const { data: up } = await q.select('id')

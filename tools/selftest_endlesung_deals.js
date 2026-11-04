@@ -23,5 +23,12 @@
   r = U({ ok: true, lesbar: true, balance: 1, positionen: 0, treffer: [1, 2], mehrdeutig: true }, 1); ok(r.art === 'unklar' && /eindeutig/.test(r.grund), 'zwei Treffer → unklar')
   ok(!B('KEINE Bestaetigung binnen 12 s — Grund: zu wenig freie Marge für dieses Volumen (API: nötig 45 969.94, frei 23 007.24) — Kontostand'), 'kein Beleg: Marge nur aus der API')
   ok(B('KEINE Bestaetigung binnen 12 s — Grund: Handel gesperrt (Server: trading disabled) — Kontostand 1'), 'Beleg: Server lehnt ab')
+  r = U({ ok: true, lesbar: true, balance: 98984.38, positionen: 0, orders: 1, treffer: [] }, 98984.38); ok(r.art === 'unklar' && /schwebende/.test(r.grund), 'schwebende Order → unklar')
+  // Vergleichs-Balance (Prüfer-Stopp N2): nie aus dem Plan selbst, nur Lesungen vor dem Claim
+  const V = window._deVergleichsBalance, claim = '2026-11-03T03:52:06Z'
+  ok(V('p1', claim, [{ id: 'p1', ended_at: '2026-11-03T03:52:00Z', mt5_baseline: { bal_nach: { ok: true, balance: 5, at: '2026-11-03T03:00:00Z' } } }]) === null, 'eigener Plan zählt nie')
+  ok(V('p1', claim, [{ id: 'p0', ended_at: '2026-11-02T10:00:00Z', mt5_baseline: { bal_nach: { ok: true, balance: 98984.38, at: '2026-11-02T10:05:00Z' } } }]) === 98984.38, 'Lesung eines früheren Plans vor dem Claim')
+  ok(V('p1', claim, [{ id: 'p0', ended_at: '2026-11-02T10:00:00Z', mt5_baseline: { bal_nach: { ok: true, balance: 1, at: '2026-11-03T05:00:00Z' } } }]) === null, 'Lesung nach dem Claim zählt nicht')
+  ok(V('p1', claim, [{ id: 'p0', ended_at: '2026-11-02T10:00:00Z', mt5_baseline: { final: { balance_end: 98000 } } }]) === 98000, 'Rückfall final.balance_end vor dem Claim')
   return f
 })()
