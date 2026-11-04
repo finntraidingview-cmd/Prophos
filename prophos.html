@@ -49721,16 +49721,25 @@
     if(typeof atToast === 'function') atToast(erg.ok ? `✓ Mini-Trade „${plan.masterName || pid}" sofort wieder geschlossen (Tage sammeln)`
       : `⚠ Mini-Trade „${plan.masterName || pid}" nicht geschlossen: ${erg.msg || ''}${st.versuche < 6 ? ' — neuer Versuch gleich' : ' — bitte von Hand schließen'}`, 'end')
   }
-  function planZielErreicht(plan){
+  /* frisch (04.11.2026, T1 — Finn ~04:40 EzPoker-Tab, Orbit „150k TDFYSL… → Challenge": „hat das Ziel schon erreicht (Balance 159.031 ≥ Ziel
+   * 159.000)", live stand ziel_erreicht_at leer): planKontoSperreKern gibt hier die frische DB-Zeile des Kontos mit, wenn die Abfrage geklappt
+   * hat. Dann zählt die Markierung nur aus der DB (der Tab-Cache behält einen alten Stempel, handZielAbgleich löscht nie), und die Balance ist
+   * die jüngere von Cache und DB (tv_balance/_at). Das Ziel bleibt das der Plan-Notiz: accounts.ziel_usd ohne Markierung stammt nur aus
+   * Hand-SQL (die Ziel-Wache schreibt/löscht es nur mit der Markierung) und veraltet ungeprüft — als Quelle gäbe es die Sperre zu leicht frei
+   * (Gegenprüfung 04.11.2026). Ohne frisch (DB nicht lesbar, Anzeige-Wege) alles wie bisher. */
+  function planZielErreicht(plan, frisch){
     try{
       if(planIstTageMini(plan)) return null
       const konto = plan ? accounts.find(a => String(a.id) === String(plan.masterAccountId)) : null
       // Markierung der Ziel-Wache (app.py zw_tick, 07.10.2026) — gilt auch für Pläne ohne Auto-Planer-Ziel
-      if(konto && konto.zielErreichtAt) return { bal: konto.zielErreichtBal || 0, ziel: konto.zielUsd || 0 }
+      if(!frisch && konto && konto.zielErreichtAt) return { bal: konto.zielErreichtBal || 0, ziel: konto.zielUsd || 0 }
       const n = plan ? planAutoNotiz(plan.notes) : null
-      if(!n || !(n.ziel > 0)) return null
-      const b = planKontoBalance(konto)
-      return (b && isFinite(b.val) && b.val >= n.ziel) ? { bal: b.val, ziel: n.ziel } : null
+      const ziel = n && n.ziel > 0 ? n.ziel : 0
+      if(!(ziel > 0)) return null
+      let b = planKontoBalance(konto)
+      if(frisch && frisch.bal != null && isFinite(Number(frisch.bal)) && (!b || !(b.at > (Date.parse(frisch.balAt || '') || 0))))
+        b = { val: Number(frisch.bal), at: Date.parse(frisch.balAt || '') || 0 }
+      return (b && isFinite(b.val) && b.val >= ziel) ? { bal: b.val, ziel } : null
     }catch(_){ return null }
   }
   const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht${z.ziel > 0 ? ` (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')})` : ''} — kein Trade gestartet.`
@@ -49785,7 +49794,8 @@
     // Schon geclaimt (Startzeit-Tick hat die News-Sperre direkt vor dem Claim geprüft): nicht nochmal sperren — sonst wäre der Plan
     // verbraucht, ohne zu starten und ohne nachgeholt zu werden (Gegenprüfung 30.10.2026). Der Schließ-Zweig fängt einen Grenzfall ab.
     const ns = plan && plan.startUmGestartetAt ? null : newsStartSperre(plan)
-    if(ns && !(opts && opts.hand && newsTrotzdemAn(plan && plan.id))) return { art: 'news', text: `„${(plan && plan.masterName) || 'Konto'}": ${ns.text}.` }
+    // opts.newsTrotzdem (T1, 04.11.2026): „Trotzdem starten" im Auto-Start-Fenster des Absenders — reist als params.news_trotzdem am Orbit-Signal
+    if(ns && !(opts && ((opts.hand && newsTrotzdemAn(plan && plan.id)) || opts.newsTrotzdem))) return { art: 'news', text: `„${(plan && plan.masterName) || 'Konto'}": ${ns.text}.` }
     return null
   }
   async function planKontoSperreKern(plan, opts){
@@ -49799,13 +49809,14 @@
     const imArchiv = v => { try{ if(typeof v === 'string') v = JSON.parse(v) }catch(_){ v = null }; return !!(v && v[kid] && v[kid].archived) }
     // WAISE (09.10.2026): geplanter Plan ohne Konto = Konto gelöscht (FK setzt null; der Editor verlangt immer ein Master-Konto) → nie starten
     if(!kid && plan && plan.status === 'planned') return { art: 'waise', text: `„${name}" — Konto gelöscht, kein Start.` }
+    let frisch = null   // frische Konto-Zeile aus der DB (T1, 04.11.2026) — null = DB nicht lesbar → Cache wie bisher
     if(kid){
       // TIMEOUT 5 s (08.10.2026, Befund Slave 2 zu .1322): die zwei Abfragen laufen vor JEDEM Start — hängt Supabase (Last-Vorfälle
       // 29./30.09.), hing jeder Start hier. Nach 5 s gilt die DB als nicht lesbar → derselbe Rückfall auf den Cache wie beim DB-Fehler.
       let uhr = null
       try{
         const [ra, rp, rs] = await Promise.race([Promise.all([
-          supabase.from('accounts').select('ziel_erreicht_at,ziel_erreicht_bal,ziel_usd').eq('id', kid).maybeSingle(),
+          supabase.from('accounts').select('ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,tv_balance,tv_balance_at').eq('id', kid).maybeSingle(),
           supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30),
           supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'archive').maybeSingle()]),
           new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error('Timeout 5 s — Rückfall auf Cache')), 5000) })])
@@ -49816,13 +49827,14 @@
           const z = { bal: Number(ra.data.ziel_erreicht_bal) || 0, ziel: Number(ra.data.ziel_usd) || 0 }
           if(!zielFrei) return { art: 'ziel', z, text: planZielText(plan, z) }
         }
+        if(!ra.error && ra.data) frisch = { bal: ra.data.tv_balance, balAt: ra.data.tv_balance_at }   // T1 (04.11.2026): s. planZielErreicht
         const m = !rp.error && (rp.data || []).find(r => String(r.id) !== String(plan.id) && r.manuell && typeof r.manuell === 'object' && r.manuell.at)
         if(m) return { art: 'manuell', text: manuellText(String(m.manuell.notiz || '').slice(0, 60)) }
       }catch(e){ console.warn('[konto-sperre] DB', (e && e.message) || e) }
       finally{ clearTimeout(uhr) }
     }
     if(kid && isAccountArchived(kid)) return { art: 'archiv', text: archivText }
-    const z = zielFrei ? null : planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
+    const z = zielFrei ? null : planZielErreicht(plan, frisch); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
     const mc = kid && (tradePlans || []).find(p => String(p.masterAccountId) === kid && String(p.id) !== String(plan.id) && p.status === 'review'
       && p.mt5Baseline && p.mt5Baseline.manuell && typeof p.mt5Baseline.manuell === 'object' && p.mt5Baseline.manuell.at)
     return mc ? { art: 'manuell', text: manuellText(String(mc.mt5Baseline.manuell.notiz || '').slice(0, 60)) } : null
@@ -51969,7 +51981,7 @@
     { const sp = await planKontoSperre(plan, { hand: !!(opts && (opts.karte || opts.still)) })
       if(sp){
         planSperreToast(plan, sp, (opts && opts.karte && !opts.fehl && !opts.still) ? () => tpPreflightAndStart(planId, opts) : null)
-        if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
+        if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text, sp.art); return } }   // sp.art: Auto-Start-Fenster (T1, 04.11.2026)
     // FIRMEN-ABSTAND + GEGENHEDGE AUF JEDEM STARTWEG (08.10.2026, Master: Finn fragt, ob der Schutz bei JEDEM Start greift — tpPreflightAndStart
     // lief bisher ohne faVorStart und ohne Claim: „Trade planen → Speichern → sofort starten", „Echo fortsetzen", Duplikum-Resume nach
     // Konto-Edit, Orbit-Warteschlange vom Mac/Handy). Jetzt zentral hier, solange nichts gesendet ist. Ausgenommen die Wege, die nur das
@@ -54958,7 +54970,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2026'
+  const OS_TAB_BUILD = '2026-09-22.2027'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55539,9 +55551,10 @@
     // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start. Trotzdem starten (26.10.2026): nur der
     // Karten-Klick (opts.karte, auch nach dem Duplikum-Check) — Startzeit, Neu starten, Vorcheck, Radar unverändert; am PC zählt nur das
     // ausdrückliche ziel_trotzdem des Absenders am Signal
-    const sperre = await planKontoSperre(plan, fern ? { zielTrotzdem: !!fern.zielTrotzdem } : { hand: !!(opts && opts.karte) })
+    const sperre = await planKontoSperre(plan, fern ? { zielTrotzdem: !!fern.zielTrotzdem, newsTrotzdem: !!fern.newsTrotzdem } : { hand: !!(opts && opts.karte) })
     if(sperre){
-      if(fern) fern.melde({ ok:false, msg: sperre.text })
+      // sperre: Art der Sperre ans Signal-Ergebnis (T1, 04.11.2026) — das Auto-Start-Fenster des Absenders bietet bei ziel/news „Trotzdem starten"
+      if(fern) fern.melde({ ok:false, msg: sperre.text, sperre: sperre.art })
       planSperreToast(plan, sperre, (!fern && opts && opts.karte) ? () => tpOrbitStarten(planId, null, opts) : null)
       return
     }
@@ -55701,7 +55714,7 @@
     // Signal fährt die Schlange selbst, einen Plan nach dem anderen (tpOrbitSchlange).
     // Vorher lief hier das Check-Popup + tpOrbitRemote, ein Lauf zur Zeit — jeder weitere
     // Klick endete im Toast „gleich danach erneut Starten".
-    if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan)
+    if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan, { hand: !!(opts && opts.karte) })   // hand: „Trotzdem starten" im Fenster (T1, 04.11.2026)
     if(!fern && !(opts && opts.nachCheck) && !pv2){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       return tpPreflightAndStart(planId, { nurDup: true, karte: !!(opts && opts.karte), weiter: () => tpOrbitStarten(planId, null, { nachCheck: true, karte: !!(opts && opts.karte) }) })
@@ -56147,9 +56160,9 @@
       return
     }
     _rsqStep('dup', 'warn', '⏳ Duplikum-Check: Verknüpfung, Accounts, Multiplier, Symbol-Mapping…')
-    const halt = (doneHtml, haltText, details) => {
+    const halt = (doneHtml, haltText, details, trotzArt) => {
       if(_rsAktiv && String(_rsAktiv.planId || '') === pid && !_rsAktiv.sigId) _rsAktiv = null
-      _rsqDonePush(false, label, doneHtml)
+      _rsqDonePush(false, label, doneHtml, trotzArt ? { planId: pid, art: trotzArt, halt: haltText } : null)
       if(!_rsQueue.some(x => String(x) === pid)) _rsQueue.unshift(pid)
       _rsQueueHalt = haltText
       _rsQueueHaltDetails = details ? pid : null
@@ -56171,10 +56184,11 @@
           _rsqStep('dup', 'ok', 'Duplikum bereit.')
           await tpOrbitRemoteSchlange(plan, w)
         },
-        fehl: kurz => {
+        fehl: (kurz, sperrArt) => {
           gemeldet = true
           halt('✗ Duplikum-Check: ' + escapeHtml(kurz),
-               `⏸ Angehalten — Duplikum-Check rot bei „${plan.masterName || '—'}": ${kurz} — erst beheben, dann ▶ Weiter.`, true)
+               `⏸ Angehalten — Duplikum-Check rot bei „${plan.masterName || '—'}": ${kurz} — erst beheben, dann ▶ Weiter.`, true,
+               (sperrArt === 'ziel' || sperrArt === 'news') ? sperrArt : null)   // Konto-Sperre → „Trotzdem starten" (T1, 04.11.2026)
         } })
     }catch(e){
       gemeldet = true
@@ -56210,7 +56224,8 @@
         .insert({ plan_id: pid,
                   params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
                                                      tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null },
-                            ...(zielTrotzdemAn(pid) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026): Ziel-Sperre am PC aus
+                            ...(zielTrotzdemAn(pid) ? { ziel_trotzdem: true } : {}),       // Trotzdem starten (26.10.2026): Ziel-Sperre am PC aus
+                            ...(newsTrotzdemAn(pid) ? { news_trotzdem: true } : {}) } })   // News-Sperre am PC aus (T1, 04.11.2026, Knopf im Auto-Start-Fenster)
         .select('*').single()
       if(error) throw error
       sig = data
@@ -56236,9 +56251,11 @@
     if(_rsAktiv.cancel) stornoFallsWartet()   // ✕ kam schon während des Sendens
     const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
     // Abschluss wie bei Echo (tpRemoteCheck): haltMsg gesetzt = Schlange anhalten.
-    const fertig = (ok, msg, haltMsg) => {
+    const fertig = (ok, msg, haltMsg, trotzArt) => {
       stop()
-      _rsqDonePush(ok, label, msg)
+      // Konto-Sperre eines Hand-Starts (T1, 04.11.2026): eigene Pause mit Plan-Namen — der Knopf hebt nur sie auf, nie die eines anderen Plans
+      if(trotzArt && haltMsg && _rsHand.has(pid)) haltMsg = `⏸ Angehalten — „${plan.masterName || '—'}" am PC gesperrt (${trotzArt === 'news' ? 'News' : 'Ziel erreicht'}) — „Trotzdem starten" an der Zeile oder ▶ Weiter.`
+      _rsqDonePush(ok, label, msg, trotzArt ? { planId: pid, art: trotzArt, halt: haltMsg || null } : null)
       if(haltMsg) _rsQueueHalt = haltMsg
       _rsQueueRender()
       try{ loadTradePlansFromSupabase() }catch(_){}
@@ -56301,7 +56318,10 @@
           (_tsxText && erg.unklar) ? (/^⚠ UNKLAR — Position/.test(String(erg.msg || '')) ? '⏸ Angehalten — Position vermutlich offen, erst in TopstepX nachsehen, NICHT blind weiter.'
                                                                                          : '⏸ Angehalten — erst in TopstepX unter Orders nachsehen, NICHT blind weiter.')
           : erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst in TradingView nachsehen, NICHT blind weiter (liegt die Order, erkennt Duplikum sie von selbst).'
-                     : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.')
+                     : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.',
+          // Konto-Sperre am PC (T1, 04.11.2026): ergebnis.sperre ab diesem Build; ältere PC-Tabs nur am Ziel-Text (planZielText) erkennbar
+          (!erg.unklar && (erg.sperre === 'ziel' || erg.sperre === 'news')) ? erg.sperre
+            : (!erg.unklar && !erg.sperre && /hat das Ziel schon erreicht/.test(String(erg.msg || ''))) ? 'ziel' : null)
       }
     }
     _rsAktiv.timer = setInterval(tick, 2000)
@@ -56333,7 +56353,7 @@
       tpPreflightMt5(plan)
       return
     }
-    _rsQueueAdd(plan)
+    _rsQueueAdd(plan, { hand: karte })
   }
   /* ECHO-V2-CHECKS NACHEINANDER (07.10.2026, Finn: „bitte fixen" — heute 4× „Popup geschlossen — nichts platziert": The5ers
    * Summerplan 16:24, Blue Guardian 16:49/16:50 → geclaimt 17:02/17:03, Jacob FundingPips 18:24). Ursache: tpJetztStarten rief
@@ -56382,6 +56402,15 @@
   let _rsQueueHaltDetails = null  // planId, dessen stiller Duplikum-Check rot war → „Details" öffnet das Check-Popup (23.09.2026)
   let _rsqDone = []        // erledigte Läufe fürs Panel: { ok, label, msg }
   let _rsSende = false     // Riegel, solange das Insert eines Starts unterwegs ist (Doppelklick-Race)
+  /* TROTZDEM STARTEN IM AUTO-START-FENSTER (04.11.2026, T1 — Finn ~04:40 EzPoker-Tab, Orbit-Karte „Starten": das Fenster zeigte „× … hat das
+   * Ziel schon erreicht — kein Trade gestartet" + „Angehalten": „Es ist richtig, dass man den Trade nicht starten soll, aber die Meldung soll
+   * ‚Okay, trotzdem starten‘ anbieten, dass ich ihn durchdrücken kann"). Der Absender prüft beim Karten-Klick selbst (Toast mit Knopf), der
+   * PC-Tab prüft beim Signal noch einmal mit SEINEM Stand — sperrt erst er, kam bisher nur die rote Zeile. Jetzt: _rsHand merkt Pläne, die
+   * über „Starten" auf der Karte (opts.karte) in die Schlange kamen; sperrt ziel/news (PC: ergebnis.sperre, Absender-Check: fehl(…, art)),
+   * bekommt die rote Zeile den Knopf. Klick = derselbe Merker wie im Toast (_zielTrotzdem/_newsTrotzdem, 10 min) → reist als
+   * params.ziel_trotzdem/news_trotzdem am Signal; der Plan kommt vorn in die Schlange, die Pause DIESES Fehlers wird aufgehoben. Automatische
+   * Starts (Startzeit, Radar, Neu starten) kommen ohne hand → nie ein Knopf. Andere Fehler und andere Pausen unverändert. */
+  const _rsHand = new Set()   // planId → kam per Hand-Klick in die Schlange
   /* Ausblenden per ✕ (05.10.2026, Finn: „Mach für dieses Pop-up einfach einen kleinen X-Button, damit ich es schließen kann. Das
    * verschwindet nicht, ich muss immer die Seite neu laden" — ein roter Eintrag oder der Halt hält das Panel sonst offen, bis
    * „Alle stoppen"). Das ✕ ändert NICHTS an der Schlange: es merkt sich nur, was beim Schließen im Panel stand (laufender Start,
@@ -56431,8 +56460,9 @@
     _rsQueueRender()
   }
 
-  function _rsqDonePush(ok, label, msg){
-    const d = { ok, label, msg }
+  // trotz (T1, 04.11.2026): { planId, art: 'ziel'|'news', halt } → rote Zeile mit „Trotzdem starten" (nur Hand-Starts, s. _rsHand)
+  function _rsqDonePush(ok, label, msg, trotz){
+    const d = { ok, label, msg, trotz: (!ok && trotz && _rsHand.has(String(trotz.planId))) ? trotz : null }
     _rsqDone.push(d)
     // Grüne Zeilen räumen sich selbst weg — rote bleiben stehen, bis Finn
     // sie gesehen hat („Alle stoppen" leert alles).
@@ -56487,7 +56517,9 @@
     let h = ''
     for(const d of _rsqDone){
       h += `<div class="rsq-item"><div class="rsq-title"><span class="${d.ok ? 'rsq-done-ok' : 'rsq-done-err'}">${d.ok ? '✓' : '✗'}</span> ${escapeHtml(d.label)}</div>`
-        + (d.msg ? `<div class="rsq-msg">${d.msg}</div>` : '') + '</div>'
+        + (d.msg ? `<div class="rsq-msg">${d.msg}</div>` : '')
+        + (d.trotz ? `<div style="margin-top:6px"><button type="button" class="btn btn-primary rsq-trotz" data-rsq-trotz="${_rsqDone.indexOf(d)}" style="font-size:11.5px;padding:4px 10px">Trotzdem starten</button></div>` : '')
+        + '</div>'
     }
     if(aktiv){
       h += `<div class="rsq-item"><div class="rsq-title">▶ ${escapeHtml(_rsAktiv.planLabel)}`
@@ -56500,6 +56532,11 @@
         + `<button class="rsq-x" data-qx="${escapeHtml(String(pid))}" title="Aus der Warteschlange nehmen">✕</button></div></div>`
     })
     items.innerHTML = h
+    // „Trotzdem starten" (T1, 04.11.2026): eigener Handler je Knopf (Modal-Regel: keine Sammler)
+    items.querySelectorAll('[data-rsq-trotz]').forEach(b => {
+      const d = _rsqDone[Number(b.dataset.rsqTrotz)]
+      if(d && d.trotz) b.addEventListener('click', ev => { ev.stopPropagation(); _rsqTrotzdem(d) })
+    })
     if(aktiv) _rsqStepsPaint()
     // Karten spiegeln den Schlangen-Stand (Starten ↔ ⏳ Nr. N ↔ startet
     // gerade) — jede Schlangen-Änderung läuft hier durch, also reicht der
@@ -56507,13 +56544,44 @@
     try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
   }
 
-  function _rsQueueAdd(plan){
+  function _rsqTrotzdem(d){
+    const t = d && d.trotz; if(!t) return
+    const pid = String(t.planId)
+    const plan = (typeof tradePlans !== 'undefined' ? tradePlans : []).find(x => String(x.id) === pid)
+    if(!plan || plan.status !== 'planned'){ if(typeof atToast === 'function') atToast('Plan ist nicht mehr „Geplant" — nichts gestartet.', 'end'); return }
+    // Doppel-Order-Doktrin (Gegenprüfung 04.11.2026): läuft der Plan gerade, steht er schon in der Schlange oder ging sein Signal schon raus
+    // (Orbit mit Duplikum bleibt nach dem Senden „Geplant", nur orbit_gesendet_at) → kein zweiter Start über eine alte rote Zeile
+    // Ausnahme: rote Zeile aus dem Absender-Check (Duplikum still) — dort steht der Plan mit SEINER Pause schon vorn in der Schlange
+    const eigeneHalt = !!(t.halt && _rsQueueHalt === t.halt)
+    if((_rsAktiv && String(_rsAktiv.planId || '') === pid) || (_rsQueue.some(x => String(x) === pid) && !eigeneHalt) || plan.orbitGesendetAt){
+      d.trotz = null; _rsQueueRender()
+      if(typeof atToast === 'function') atToast(plan.orbitGesendetAt ? 'Signal für diesen Plan ging schon raus — nichts erneut gestartet.' : 'Dieser Trade läuft schon bzw. steht schon in der Warteschlange.', 'end')
+      return
+    }
+    if(t.art === 'news') _newsTrotzdem.set(pid, Date.now()); else _zielTrotzdem.set(pid, Date.now())
+    console.log(`[${t.art === 'news' ? 'news' : 'ziel'}-trotzdem] ${plan.masterName || pid}: Sperre für diesen Hand-Start übersprungen (Auto-Start-Fenster)`)
+    const i = _rsqDone.indexOf(d); if(i !== -1) _rsqDone.splice(i, 1)
+    _rsQueue = [pid].concat(_rsQueue.filter(x => String(x) !== pid))
+    _rsHand.add(pid)
+    // nur die Pause DIESES Fehlers aufheben — steht inzwischen eine andere, wartet der Plan vorn auf „▶ Weiter"
+    if(eigeneHalt){ _rsQueueHalt = null; _rsQueueHaltDetails = null }
+    else if(_rsQueueHalt && typeof atToast === 'function') atToast('Freigabe gemerkt — die Schlange steht wegen eines anderen Fehlers, erst dort ▶ Weiter.', 'end')
+    _rsQueueRender()
+    _rsQueuePump()
+  }
+  window._rsqTrotzdemTest = { done: () => _rsqDone, hand: _rsHand, schlange: () => _rsQueue, halt: () => _rsQueueHalt,
+    push: (ok, label, msg, trotz) => _rsqDonePush(ok, label, msg, trotz), setHalt: h => { _rsQueueHalt = h }, render: () => _rsQueueRender(),
+    zielAn: id => zielTrotzdemAn(id), newsAn: id => newsTrotzdemAn(id),
+    plan: p => { const i = tradePlans.findIndex(x => String(x.id) === String(p.id)); if(i >= 0) tradePlans[i] = p; else tradePlans.push(p) } }   // Test-Haken (Stub)
+  function _rsQueueAdd(plan, opts){
     const pid = String(plan.id)
     if((_rsAktiv && String(_rsAktiv.planId || '') === pid) || _rsQueue.some(x => String(x) === pid)){
       if(typeof atToast === 'function') atToast('Dieser Trade ist schon in der Warteschlange.', 'end')
       return
     }
     _rsQueue.push(pid)
+    if(opts && opts.hand) _rsHand.add(pid); else _rsHand.delete(pid)
+    for(const d of _rsqDone) if(d.trotz && String(d.trotz.planId) === pid) d.trotz = null   // neuer Start → alter Knopf weg (T1)
     _rsQueueRender()
     if(_rsAktiv || _rsQueueHalt){
       if(typeof atToast === 'function') atToast(`In der Warteschlange (Platz ${_rsQueue.length}) — startet automatisch, sobald der PC frei ist.`, 'start')
@@ -58062,7 +58130,8 @@
           if(typeof atToast === 'function') atToast(`📡 Remote-Signal (Orbit): ${plan.masterName || '—'} — Puls übernimmt in TradingView`, 'start')
           // Nicht awaiten: der Tick gibt _osBusy frei, _osActive hält den Riegel bis zum Ergebnis.
           tpOrbitStarten(plan.id, { werte: (sig.params || {}).orbit || {}, melde: res => _osErgebnis(sig.id, res),
-                                    zielTrotzdem: (sig.params || {}).ziel_trotzdem === true })   // nur der Knopf am Absender setzt es (26.10.2026)
+                                    zielTrotzdem: (sig.params || {}).ziel_trotzdem === true,     // nur der Knopf am Absender setzt es (26.10.2026)
+                                    newsTrotzdem: (sig.params || {}).news_trotzdem === true })   // ebenso, Knopf im Auto-Start-Fenster (T1, 04.11.2026)
             .catch(e => _osErgebnis(sig.id, { ok:false, unklar:true,
               msg:'Orbit-Start am PC abgebrochen: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Order liegt.' }))
           break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
