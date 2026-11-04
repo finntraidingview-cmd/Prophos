@@ -38142,6 +38142,17 @@
   const wdlPlTip = (t, echo, pb) => (t && t.balance_sprung) ? 'Tages-P&L — ' + balanceSprungText(t.balance_sprung)
     : wdlPlGesch(t) ? '≈ MLL − Start-Balance — ' + WDL_TSX_SCHAETZ_TIP + '. Beim Abhaken vorbelegt, bitte prüfen.'
     : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen'
+  /* N2 (04.11.2026, Finn: „der P&L wird nie angezeigt"): Echo-Plan ohne Order — Endlesung über die Deals (deTick) schreibt final.art „nicht_gelaufen",
+   * sonst steht der Grund in final.unklar_grund bzw. final.hinweis (Tagesreset). Nur Anzeige im Ergebnis-Wort. */
+  const wdlEndlesungChip = t => {
+    const f = (t && t.final) || null; if(!f) return ''
+    if(f.art === 'nicht_gelaufen') return `<span style="color:var(--sub)" title="${escapeHtml(String(f.hinweis || 'nicht gelaufen'))}">nicht gelaufen</span>`
+    if(f.art === 'unklar' && f.grund === 'tagesende_unklar'){
+      const g = String(f.unklar_grund || f.hinweis || 'Order am Konto prüfen')
+      return `<span style="color:var(--warn-ink, #b45309)" title="${escapeHtml(g)}">⚠ unklar: ${escapeHtml(g.length > 48 ? g.slice(0, 46) + '…' : g)}</span>`
+    }
+    return ''
+  }
   const WDL_TAGESLIMIT_ERG = '<span style="color:var(--warn-ink, #b45309);opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
@@ -39313,6 +39324,7 @@
         if(t.tage_mini && !wdlSprungErg(t) && !wdlBlowErg(t)) erg = `<b class="wdl-bestanden" style="color:var(--warn-ink, #b45309);background:var(--warn-bg, #FFFBEB);white-space:nowrap" title="Mini-Trade zum Tage sammeln (0,01 Lot) — Abhaken verbucht nur den Mini; das Konto bleibt in Bestanden → Tage sammeln, bis die Mindesttage voll sind">Tage-Mini</b>`
         else if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
         if(wdlKetteTagChip(t)) erg = (erg ? erg + ' ' : '') + wdlKetteTagChip(t)
+        if(!erg && wdlEndlesungChip(t)) erg = wdlEndlesungChip(t)   // N2 (04.11.2026): „nicht gelaufen" / „unklar: Grund" statt nur „–"
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span class="wdl-erg">${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
@@ -60396,6 +60408,21 @@
    * Start-Fehler. unklar = false (sfTick plant neu ein) nur mit Beleg „nichts gesendet": Order-Antwort nach dem Claim sagt es, oder es
    * gibt keine und der Copier zeigt das Master-Konto flach; sonst unklar (keine Doppel-Order). REIN — Test-Haken window._sf.still. */
   const SF_STILL_MS = 4 * 60000
+  /* BELEG „NICHT PLATZIERT" (N2, Finn 04.11.2026 ~04:15 Dubai: „der P&L wird nie angezeigt" — 6 von 7 Tagesreset-„unklar" der letzten 14 Tage waren nie
+   * platziert, ihre Order-Antwort sagte es nur in anderen Worten): nur der KOPF der Puls-Antwort zählt (vor „ Spur:"/„ [" — die Spur nennt auch bei
+   * erfolgreichen Läufen „Volumen-Feld leert nicht"). Beleg sind Abbrüche vor dem Order-Knopf und vom Server abgelehnte Orders ohne Position.
+   * Nie Beleg: Zeitlimit, Verbindungsabriss, „läuft gerade schon eine Order" (dann kann Puls geklickt haben). REIN — Test-Haken window._sfVorOrderBeleg. */
+  const SF_BELEG_NICHT_PLATZIERT = [/nichts gesendet/i, /nichts platziert/i, /^Kein MT5-Fenster mit Konto/i, /^Terminal-Verbindung fehlgeschlagen/i,
+    /Authorization failed/i, /^F9-Dialog nicht gefunden/i, /^Abbruch VOR dem Order-Knopf/i, /^Gegenrichtung gesperrt:/i,
+    // nur vom SERVER abgelehnt (Server:/Journal: im Kopf) — nie der API-Rechengrund „(API: nötig … frei …)": den rechnet der Bot NACH dem Klick, eine
+    // spät gefüllte Order senkt die freie Marge genau so (Gegenprüfung N2 04.11.2026, Doppel-Order-Gefahr)
+    /^KEINE Bestaetigung binnen \d+ s — Grund: [^(]*\((Server|Journal): /i]
+  function sfVorOrderBeleg(msg){
+    const kopf = String(msg || '').split(/\s+(?:Spur:|\[)/)[0]
+    if(/Zeitlimit|Timeout|brach nach|Verbindung zum Panel|läuft gerade schon eine Order|laeuft gerade schon eine Order|\(API:/i.test(kopf)) return false
+    return SF_BELEG_NICHT_PLATZIERT.some(rx => rx.test(kopf))
+  }
+  window._sfVorOrderBeleg = sfVorOrderBeleg
   function sfStillUrteil(p, jetzt, laeuftHier, masterFlach){
     if(!p || p.route !== 'mt5' || p.status !== 'planned' || !p.startUmGestartetAt || p.startedAt || p.orbitGesendetAt || laeuftHier) return null
     const claim = Date.parse(p.startUmGestartetAt) || 0
@@ -60404,7 +60431,7 @@
     if(f && (Date.parse(f.at) || 0) >= claim - 5000) return null   // nach diesem Claim schon gemeldet
     const sp = (p.mt5Baseline && p.mt5Baseline.puls_spur) || null
     const spNach = !!(sp && (Date.parse(sp.at) || 0) >= claim)
-    const spNichts = spNach && !sp.ok && /nichts gesendet|nichts platziert/i.test(String(sp.msg || ''))
+    const spNichts = spNach && !sp.ok && sfVorOrderBeleg(sp.msg)   // N2 (04.11.2026): Beleg auch in anderen Worten, nur der Kopf der Antwort
     const min = Math.round((jetzt - claim) / 60000)
     if(spNichts) return { unklar: false, msg: `Geclaimt vor ${min} min, danach still — letzte Order-Antwort: ${String(sp.msg).slice(0, 220)}` }
     if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.` }
@@ -60412,6 +60439,92 @@
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Order-Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → im Master-Terminal prüfen, ob eine Order liegt.`
       : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.` }
   }
+  /* ENDLESUNG UNKLARER ECHO-PLÄNE ÜBER DIE DEALS (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L aus irgendeinem Grund nicht erkannt wird …
+   * der P&L wird nie angezeigt. Bug fixen."): Echo-Pläne (mt5/mt5v2), die der Tagesreset als „unklar" nach Überprüfen schob (final.art unklar, kein P&L),
+   * klärt der PC-Tab, an dessen PC die Instanz des Master-Logins hängt, selbst — über das Panel (/api/deals → order_bot.py „deals", nur lesen):
+   *   Deal des Plans gefunden (Richtung + Volumen + Symbol, Position zu) → master_pl = Summe der Ausstiege, bleibt in Überprüfen (Abhaken vorbelegt);
+   *   kein Deal, keine offene Position UND Balance gleich der Balance nach dem letzten Trade des Kontos (±0,01 $) → „nicht gelaufen": P&L 0, final.grund
+   *     nie_gefuellt_tagesende (der Planer blockiert das Konto damit nicht, app.py ap_planen), bal_nach gelesen (Gegenrichtungs-Riegel frei);
+   *   sonst → bleibt unklar, der Grund steht am Plan (final.unklar_grund) und im Radar statt „–".
+   * Nie gebucht ohne Deal-Beleg, nie „nicht gelaufen" ohne Balance-Gegenprobe; nichts wird geklickt. Takt 10 min, je Plan höchstens alle 30 min. */
+  const DE_TAKT_MS = 10 * 60000, DE_PLAN_MS = 30 * 60000, DE_TAGE = 14
+  let _deAt = 0, _deLaeuft = false
+  const _deVersucht = new Map()
+  function deUrteil(res, refBal){
+    if(!res || res.ok === false || res.lesbar === false) return { art: 'unklar', grund: String((res && (res.grund || res.msg || res.error)) || 'Terminal/Panel nicht lesbar').slice(0, 160) }
+    const tr = Array.isArray(res.treffer) ? res.treffer : []
+    if(res.mehrdeutig || tr.length > 1) return { art: 'unklar', grund: tr.length > 1 ? `${tr.length} passende Trades am Konto — nicht eindeutig zuzuordnen` : 'Plan ohne Richtung/Volumen — nicht zuzuordnen' }
+    if(tr.length){
+      if(res.offen) return { art: 'offen', grund: 'Position des Plans ist noch offen' }
+      if(res.pl == null || !isFinite(Number(res.pl))) return { art: 'unklar', grund: 'Deal gefunden, aber kein Ausstieg in der Historie' }
+      return { art: 'deals', pl: Math.round(Number(res.pl) * 100) / 100, grund: `Deal gefunden (Position ${tr.join(', ')})` }
+    }
+    const bal = Number(res.balance)
+    if(Number(res.positionen) > 0) return { art: 'unklar', grund: `kein Deal des Plans, aber ${res.positionen} offene Position(en) am Konto` }
+    if(refBal == null || !isFinite(Number(refBal))) return { art: 'unklar', grund: 'kein Deal des Plans, aber keine Vergleichs-Balance (kein früherer Trade gelesen)' }
+    if(!(bal > 0)) return { art: 'unklar', grund: 'kein Deal des Plans, Balance nicht lesbar' }
+    if(Math.abs(bal - Number(refBal)) > 0.01) return { art: 'unklar', grund: `kein Deal des Plans, aber Balance ${bal.toLocaleString('de-DE')} statt ${Number(refBal).toLocaleString('de-DE')} $` }
+    return { art: 'nicht_gelaufen', pl: 0, grund: `kein Deal, keine Position, Balance unverändert ${bal.toLocaleString('de-DE')} $` }
+  }
+  window._deUrteil = deUrteil   // Test-Haken
+  const deKandidat = r => !!r && r.status === 'review' && r.master_pl == null && (r.route === 'mt5' || r.route === 'mt5v2') && !r.started_at && !!r.start_um_gestartet_at
+    && !!(r.mt5_baseline && r.mt5_baseline.final && r.mt5_baseline.final.art === 'unklar')
+  async function deTick(){
+    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || window._tabNebenSofort || _deLaeuft || Date.now() - _deAt < DE_TAKT_MS) return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    // Gegenprüfung N2: die Lesung hält den Order-Lock der Instanz bis 90 s — nie, solange auf diesem PC ein Echo-Start fällig oder gerade geclaimt ist
+    const jetztMs = Date.now()
+    const startNah = (tradePlans || []).some(p => p && (p.route === 'mt5' || p.route === 'mt5v2') && p.status === 'planned' && !p.startedAt
+      && ((p.startUm && Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000) || (p.startUmGestartetAt && jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000)))
+    if(startNah || _suLaeuft) return
+    _deAt = Date.now(); _deLaeuft = true
+    try{
+      const ab = new Date(Date.now() - DE_TAGE * 86400000).toISOString()
+      const { data: rows, error } = await supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'review').is('master_pl', null)
+        .in('route', ['mt5', 'mt5v2']).gte('ended_at', ab).limit(30)
+      if(error) throw error
+      const kand = (rows || []).filter(r => deKandidat(r) && !((_deVersucht.get(String(r.id)) || 0) > Date.now() - DE_PLAN_MS))
+      if(!kand.length) return
+      const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+      if(!dd || dd.copier_offline || dd._httpFail) return
+      for(const r of kand){
+        const p = rowToPlan(r), ri = mt5V2Resolve(p, dd.instances || [])
+        if(!ri || !ri.inst || !ri.inst.file) continue   // Instanz hängt an einem anderen PC — dessen Tab klärt
+        _deVersucht.set(String(r.id), Date.now())
+        const claim = r.start_um_gestartet_at, bis = new Date(Date.parse(claim) + 24 * 3600000).toISOString()
+        const { data: vor } = await supabase.from('trade_plans').select('mt5_baseline,ended_at').eq('master_account_id', r.master_account_id)
+          .in('status', ['completed', 'review']).lt('ended_at', claim).order('ended_at', { ascending: false }).limit(1)
+        const vb = vor && vor[0] && vor[0].mt5_baseline
+        const refBal = vb && vb.bal_nach && vb.bal_nach.ok && Number(vb.bal_nach.balance) > 0 ? Number(vb.bal_nach.balance)
+          : (vb && vb.final && Number(vb.final.balance_end) > 0 ? Number(vb.final.balance_end) : null)
+        const qs = new URLSearchParams({ file: ri.inst.file, von: claim, bis, symbol: r.master_symbol || '', richtung: r.richtung || '', lots: r.master_contracts != null ? String(r.master_contracts) : '' })
+        const res = await window.mtcApi('deals?' + qs.toString(), { timeoutMs: 100000 })
+        if(res && res._httpFail) continue   // Panel alt (Route fehlt) oder weg → nächster Versuch in 30 min
+        const u = deUrteil(res, refBal), jetzt = new Date().toISOString(), fin = Object.assign({}, r.mt5_baseline.final)
+        if(u.art === 'offen') continue
+        if(u.art === 'unklar'){
+          if(fin.unklar_grund !== u.grund) await baselinePatch(r.id, { final: Object.assign(fin, { unklar_grund: u.grund, deals_at: jetzt }) }, 'review')
+          continue
+        }
+        // Buchen in EINEM Update (Gegenprüfung N2): P&L + final + bal_nach zusammen, nur solange noch kein P&L steht (Abhaken von Hand gewinnt) und der Plan
+        // seit dem Lesen unverändert ist. bal_nach = Balance am Ende DIESES Plans (Vergleichs-Balance + P&L), nie die heutige — sie ist die Vergleichs-
+        // Balance späterer Pläne desselben Kontos. Ohne Vergleichs-Balance beim Deal-Fall kein bal_nach (der Plan bleibt dann bis zum Abhaken „ungelesen").
+        const finNeu = u.art === 'deals'
+          ? Object.assign(fin, { art: 'deals', quelle: 'deals', master_pl: u.pl, hinweis: `Endlesung über die Deals: ${u.grund}`, deals_at: jetzt, unklar_grund: null })
+          : Object.assign(fin, { art: 'nicht_gelaufen', grund: 'nie_gefuellt_tagesende', quelle: 'deals_leer', master_pl: 0, today_pnl: 0, hinweis: `nicht gelaufen — ${u.grund}`, deals_at: jetzt, unklar_grund: null })
+        const balEnde = refBal != null ? Math.round((Number(refBal) + Number(u.pl || 0)) * 100) / 100 : null
+        const base = Object.assign({}, r.mt5_baseline || {}, { final: finNeu },
+          balEnde != null && balEnde > 0 ? { bal_nach: { ok: true, balance: balEnde, at: jetzt, quelle: 'deals', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } } : {})
+        let q = supabase.from('trade_plans').update({ master_pl: u.pl, mt5_baseline: base }).eq('id', r.id).eq('status', 'review').is('master_pl', null)
+        if(r.updated_at) q = q.eq('updated_at', r.updated_at)
+        const { data: up } = await q.select('id')
+        console.log('[endlesung-deals]', String(r.id).slice(0, 8), u.art, u.pl, u.grund, up && up.length ? 'gebucht' : 'Plan inzwischen geändert — nächster Takt')
+      }
+    }catch(e){ console.warn('[endlesung-deals]', (e && e.message) || e) }
+    finally{ _deLaeuft = false }
+  }
+  setInterval(deTick, 60000)
   async function sfStillPruefen(){
     const jetzt = Date.now()
     const kand = (tradePlans || []).filter(p => sfStillUrteil(p, jetzt, pfLebtJetzt(p && p.id), null))

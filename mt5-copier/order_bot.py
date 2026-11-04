@@ -1083,7 +1083,7 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # GDI-Fehler, Bild zu groß, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
 # Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
-FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus"})
+FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus", "deals"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
 FEHLERFOTO_GLEICH_S = 600.0
 FEHLERFOTO_STUNDE = 12
@@ -28940,6 +28940,90 @@ def modus_loginok(expected, sekunden="90", pfad=None):
     return {"ok": True, "msg": "kein Login-Dialog", "ende": "zeit", "warten_s": round(warten_s), "trail": trail[-5:]}
 
 
+def deals_urteil(deals, positionen, richtung, lots, symbol):
+    """REIN RECHNEND (testbar, N2 04.11.2026): aus der Deal-Historie eines Fensters den Trade eines Plans erkennen.
+    deals = [{ticket, position, typ (0 buy / 1 sell), entry (0 in / 1 out / 2 inout / 3 out_by), symbol, volume, profit, swap, commission}],
+    positionen = offene Positions-IDs des Kontos. Treffer = Einstiegs-Deal in Plan-Richtung mit Plan-Volumen (±0,001) und passendem Symbol
+    (Anfang gleich, z. B. NAS100 / NAS100.cash). Gegenprüfung N2: ohne Richtung oder Volumen wird nie zugeordnet; mehr als ein Treffer = mehrdeutig.
+    P&L = Summe profit + swap + commission über ALLE Deals der Position (auch die Einstiegs-Kommission), nur wenn sie zu ist.
+    → {treffer: [position], offen: bool, pl: float | None, mehrdeutig: bool}"""
+    typ_soll = 0 if str(richtung).lower() == "buy" else 1 if str(richtung).lower() == "sell" else None
+    sym = str(symbol or "").upper().split(".")[0]
+    try:
+        lots_f = float(lots) if lots not in (None, "") else None
+    except (TypeError, ValueError):
+        lots_f = None
+    if typ_soll is None or lots_f is None:
+        return {"treffer": [], "offen": False, "pl": None, "mehrdeutig": True}
+    treffer = []
+    for d in deals or ():
+        if int(d.get("entry", -1)) != 0 or int(d.get("typ", -1)) != typ_soll:
+            continue
+        if sym and not str(d.get("symbol") or "").upper().startswith(sym):
+            continue
+        if abs(float(d.get("volume") or 0) - lots_f) > 0.001:
+            continue
+        if d.get("position") not in treffer:
+            treffer.append(d.get("position"))
+    offen = any(pid in set(positionen or ()) for pid in treffer)
+    eigene = [d for d in deals or () if d.get("position") in treffer]
+    zu = any(int(d.get("entry", -1)) in (1, 2, 3) for d in eigene)
+    pl = round(sum(float(d.get("profit") or 0) + float(d.get("swap") or 0) + float(d.get("commission") or 0) for d in eigene), 2) \
+        if (len(treffer) == 1 and zu and not offen) else None
+    return {"treffer": treffer, "offen": offen, "pl": pl, "mehrdeutig": len(treffer) > 1}
+
+
+def modus_deals(auftrag):
+    """NUR LESEN (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L … nie angezeigt wird"): Deal-Historie + Balance des Master-Logins
+    einer Echo-Instanz für die Endlesung unklarer Pläne (Tagesreset „unklar", Radar „–"). Kein Schreibaufruf, kein Klick, kein Fenster.
+    auftrag = {cfg, von, bis (ISO), symbol, richtung, lots}. MT5 rechnet Deal-Zeiten in Server-Zeit —
+    zugeordnet wird über Richtung + Volumen + Symbol (deals_urteil), eindeutig im Fenster Claim −1 h … bis +4 h (Server-Zeit liegt 0–3 h vor UTC).
+    → {ok, lesbar, grund?, login, balance, positionen, treffer, offen, pl, n_deals}"""
+    try:
+        with open(str(auftrag.get("cfg") or ""), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception as e:
+        return {"ok": False, "lesbar": False, "grund": f"Config nicht lesbar ({type(e).__name__})"}
+    path = str(cfg.get("master_terminal_path") or "").strip()
+    expected = int(cfg.get("master_expected_login") or 0)
+    if not path or not os.path.exists(path):
+        return {"ok": False, "lesbar": False, "grund": "Terminal-Pfad fehlt in der Config"}
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return {"ok": False, "lesbar": False, "grund": "MetaTrader5-Paket fehlt im Panel-Python"}
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    try:
+        von = _dt.fromisoformat(str(auftrag.get("von")).replace("Z", "+00:00")).astimezone(_tz.utc).replace(tzinfo=None)
+        bis = _dt.fromisoformat(str(auftrag.get("bis")).replace("Z", "+00:00")).astimezone(_tz.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return {"ok": False, "lesbar": False, "grund": "Zeitfenster ungültig"}
+    try:
+        if not mt5.initialize(path=path, timeout=20000):
+            return {"ok": False, "lesbar": False, "grund": f"Terminal nicht lesbar ({mt5.last_error()})"}
+        try:
+            ai = mt5.account_info()
+            ti = mt5.terminal_info()
+            if ai is None or ti is None or not getattr(ti, "connected", False):
+                return {"ok": False, "lesbar": False, "grund": "Terminal nicht angemeldet/verbunden (kein Konto oder keine Server-Verbindung)"}
+            if expected and int(ai.login) != expected:
+                return {"ok": False, "lesbar": False, "grund": f"Terminal steht im falschen Konto ({ai.login} statt {expected})"}
+            roh = mt5.history_deals_get(von - _td(hours=1), bis + _td(hours=4))
+            if roh is None:
+                return {"ok": False, "lesbar": False, "grund": f"Deal-Historie nicht lesbar ({mt5.last_error()})"}
+            deals = [{"ticket": int(d.ticket), "position": int(getattr(d, "position_id", 0) or 0), "typ": int(d.type), "entry": int(d.entry),
+                      "symbol": str(d.symbol or ""), "volume": float(d.volume), "profit": float(d.profit), "swap": float(getattr(d, "swap", 0) or 0),
+                      "commission": float(getattr(d, "commission", 0) or 0)} for d in roh if int(d.type) in (0, 1)]
+            pos = [int(p.ticket) for p in (mt5.positions_get() or [])]
+            u = deals_urteil(deals, pos, auftrag.get("richtung"), auftrag.get("lots"), auftrag.get("symbol"))
+            return {"ok": True, "lesbar": True, "login": int(ai.login), "balance": round(float(ai.balance), 2), "positionen": len(pos),
+                    "n_deals": len(deals), **u}
+        finally:
+            mt5.shutdown()
+    except Exception as e:
+        return {"ok": False, "lesbar": False, "grund": f"Lesen abgebrochen ({type(e).__name__}: {str(e)[:120]})"}
+
+
 def main():
     # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
     # '\u25bc' aus dem TradingView-Tab-Titel nicht kodieren — die Spur traegt den Titel, die JSON-Antwort
@@ -28962,6 +29046,13 @@ def main():
             fehlerfoto_nachreichen()
         except Exception as e:
             _fehlerfoto_log(f"nachreichen abgebrochen: {type(e).__name__}: {e}")
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "deals":
+        # N2 (04.11.2026): nur lesen — Deal-Historie für die Endlesung unklarer Echo-Pläne (Panel /api/deals), nie ein Fehlerfoto
+        try:
+            print(json.dumps(modus_deals(json.loads(sys.argv[2])), ensure_ascii=False))
+        except Exception as e:
+            print(json.dumps({"ok": False, "lesbar": False, "grund": f"deals: {type(e).__name__}: {e}"}, ensure_ascii=False))
         return 0
     fehlerfoto_huelle_einbauen(sys.argv[1] if len(sys.argv) >= 2 else "")   # ok-false-Antwort → „fehlerbild" + Foto (29.10.2026)
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":

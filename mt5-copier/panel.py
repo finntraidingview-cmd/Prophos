@@ -1685,6 +1685,7 @@ HEAL_LOCK = threading.Lock()
 # master-order-Aufrufe wuerden sonst zwei Orders platzieren.
 MASTER_ORDER_LOCKS = {}
 MASTER_ORDER_GUARD = threading.Lock()
+DEALS_LESEN = set()   # N2 (04.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade eine Deal-Lesung (/api/deals, nur lesen) hält
 
 # Orbit-Puls (30.08.2026): EIN Lock fuer den ganzen TradingView-Weg, nicht pro
 # Instanz. Der MT5-Bot bedient je ein eigenes Terminal, der TV-Bot bedient
@@ -5256,6 +5257,43 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/instances":
             haupt = tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
             return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt), ensure_ascii=False))
+        if path == "/api/deals":
+            # ENDLESUNG UNKLARER ECHO-PLÄNE (N2, Finn 04.11.2026 ~04:15 Dubai: „der P&L wird nie angezeigt"): Deal-Historie + Balance des Master-Logins
+            # über order_bot.py „deals" — nur lesen, nie ein Klick. Nur wenn auf dieser Instanz gerade keine Order läuft (MASTER_ORDER_LOCKS): ein
+            # zweiter MetaTrader5-Anschluss mitten in einem Order-Lauf bliebe sonst nicht folgenlos. Besetzt → 409, der Tab fragt später wieder.
+            q = parse_qs(urlparse(self.path).query)
+            fname = (q.get("file") or [""])[0]
+            inst = next((i for i in instances() if i["config_file"] == fname), None)
+            if not inst:
+                return self._send(404, json.dumps({"ok": False, "lesbar": False, "grund": "Instanz unbekannt"}, ensure_ascii=False))
+            # Gegenprüfung N2: nur ein Terminal lesen, das schon läuft — MetaTrader5.initialize startet ein geschlossenes (Standby, Login-Dialog) und
+            # direkt nach dem Start sind Positionen/Historie evtl. noch leer → „nicht gelaufen" wäre geraten
+            _cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+            _pfad = str(_cfg.get("master_terminal_path") or "").strip()
+            if not _pfad or not provision.terminal_pids(os.path.dirname(os.path.abspath(_pfad))):
+                return self._send(200, json.dumps({"ok": False, "lesbar": False, "grund": "Master-Terminal läuft nicht — nicht gelesen (wird nicht gestartet)"}, ensure_ascii=False))
+            with MASTER_ORDER_GUARD:
+                lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
+            if not lock.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "lesbar": False, "grund": "auf dieser Instanz läuft gerade eine Order"}, ensure_ascii=False))
+            DEALS_LESEN.add(inst["config_file"])
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                auftrag = {"cfg": os.path.join(HERE, inst["config_file"]), "von": (q.get("von") or [""])[0], "bis": (q.get("bis") or [""])[0],
+                           "symbol": (q.get("symbol") or [""])[0], "richtung": (q.get("richtung") or [""])[0], "lots": (q.get("lots") or [""])[0]}
+                try:
+                    p = subprocess.run([sys.executable, bot, "deals", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
+                                       timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    zeilen = (p.stdout or "").strip().splitlines()
+                    res = json.loads(zeilen[-1]) if zeilen else {"ok": False, "lesbar": False, "grund": "keine Antwort vom Bot"}
+                except Exception as e:
+                    res = {"ok": False, "lesbar": False, "grund": f"Bot-Lauf {type(e).__name__}"}
+            finally:
+                DEALS_LESEN.discard(inst["config_file"])
+                lock.release()
+            return self._send(200, json.dumps(res, ensure_ascii=False))
         if path == "/api/haupt-tab":
             # Tab im „nur ansehen"-Modus (30.10.2026, HAUPT-TAB): darf er wieder Haupt-Tab werden? Nur lesen, zählt nie als Herzschlag
             q = parse_qs(urlparse(self.path).query)
@@ -6683,6 +6721,9 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
+                if inst["config_file"] in DEALS_LESEN:   # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
+                        "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts gesendet, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
                     "Fuer diese Instanz laeuft gerade schon eine Order — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))

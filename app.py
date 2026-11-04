@@ -12411,7 +12411,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "tv": {k: tv.get(k) for k in ("einstieg_nq", "einstieg_quelle", "einstieg_fill", "einstieg_symbol", "today_pnl_start", "datum_start",
                                       "balance_start", "balance_relativ", "rpl_start") if k in tv},
         "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle",
-                                            "balance_end", "balance_relativ", "plattform") if k in final},
+                                            "balance_end", "balance_relativ", "plattform",
+                                            "hinweis", "unklar_grund") if k in final},   # N2 (04.11.2026): Radar zeigt „nicht gelaufen"/Grund statt „–"
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
         # MANUELLE ARBEIT (08.10.2026, Finn: Plan aus „Überprüfen" parken — „noch ein paar Winning Days mit 0,01 fahren, Notiz dran,
