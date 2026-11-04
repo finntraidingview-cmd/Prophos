@@ -4371,42 +4371,42 @@
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-teil > .fcr-e-block:first-child{margin-top:0;padding-top:0;border-top:0}
   @media (max-width:900px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-grid{grid-template-columns:minmax(0,1fr)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{padding-right:0} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf{position:static;margin-bottom:8px;text-align:right} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chips{margin-left:0} }
   /* E1c NACHTRAG 7 (Finn 05.11.2026 ~06:05: „So eine Gruppe wie bei WD bitte überall machen"): Maße der WD-Einstellungen (wd-set-grid/-card, wd-abl-*, wd-firma)
-     in eigenen Klassen fcr-w-* — das WD-CSS bleibt unberührt */
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-kopf{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;margin-bottom:12px}
+     mit den WD-Klassen selbst, gekapselt unter der eigenen Wurzel #fcr-einst.fcr-w — gleiche Spezifität wie vorher :is(#apg-fcfd,#ap-ids-root.ap-guestly) .x, damit nichts kippt (wie S6 unter #e3-einst, Master 05.11.2026 .2044) — das WD-CSS (#adm-pane-wd) bleibt unberührt, eigene Teile fcr-w-* */
+  #fcr-einst.fcr-w .fcr-w-kopf{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;margin-bottom:12px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-w-kopf{padding-right:130px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w.zu .fcr-w-kopf{margin-bottom:0}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sub{font-size:12px;color:var(--g-sub)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
-  @media (max-width:1180px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-grid{grid-template-columns:minmax(0,1fr)} }
+  #fcr-einst.fcr-w.zu .fcr-w-kopf{margin-bottom:0}
+  #fcr-einst.fcr-w .fcr-w-sub{font-size:12px;color:var(--g-sub)}
+  #fcr-einst.fcr-w .wd-set-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
+  @media (max-width:1180px){ #fcr-einst.fcr-w .wd-set-grid{grid-template-columns:minmax(0,1fr)} }
   @media (max-width:900px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-w-kopf{padding-right:0} }
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-h4 .fcr-e-save{flex:none;height:26px;padding:0 10px;font-size:12px;border-radius:8px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;cursor:pointer}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz.lesen{cursor:default}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz b{font-size:13px;font-weight:600;color:var(--g-text);display:inline-flex;align-items:center}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz small{display:block;color:var(--g-sub);font-size:11.5px;line-height:1.35;margin-top:1px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-sz input{width:16px;height:16px;flex:0 0 16px;margin:0;accent-color:var(--g-a1);cursor:pointer}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-abschnitt{font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-eins{grid-template-columns:minmax(0,1fr)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firmen{display:flex;flex-direction:column}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--g-rand);cursor:pointer;transition:background .12s}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma:hover{background:color-mix(in srgb,var(--g-karte) 55%,transparent)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .punkt{width:10px;height:10px;border-radius:50%}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fl{min-width:0}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;color:var(--g-text)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fk{display:block;font-size:11.5px;color:var(--g-sub);line-height:1.35;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen{border-bottom-color:transparent}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fn,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .pfeil,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fz{color:var(--g-a1)}
-  html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fn,html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .pfeil,html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.offen .fz{color:var(--g-lila)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma.aus .punkt{opacity:.35}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma-edit{padding:4px 4px 14px 20px;border-bottom:1px solid var(--g-rand)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-firma-edit .fcr-w-abschnitt:first-child,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills + .fcr-w-abschnitt{margin-top:10px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills{margin:4px 0 2px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-w-pills button{padding:6px 14px;font-size:12px}
+  #fcr-einst.fcr-w .wd-set-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
+  #fcr-einst.fcr-w .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
+  #fcr-einst.fcr-w .wd-set-card h4 .h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
+  #fcr-einst.fcr-w .wd-set-card h4 .fcr-e-save{flex:none;height:26px;padding:0 10px;font-size:12px;border-radius:8px}
+  #fcr-einst.fcr-w .wd-abl-schalter{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;cursor:pointer}
+  #fcr-einst.fcr-w .wd-abl-schalter.lesen{cursor:default}
+  #fcr-einst.fcr-w .wd-abl-schalter b{font-size:13px;font-weight:600;color:var(--g-text);display:inline-flex;align-items:center}
+  #fcr-einst.fcr-w .wd-abl-schalter small{display:block;color:var(--g-sub);font-size:11.5px;line-height:1.35;margin-top:1px}
+  #fcr-einst.fcr-w .wd-abl-schalter input{width:16px;height:16px;flex:0 0 16px;margin:0;accent-color:var(--g-a1);cursor:pointer}
+  #fcr-einst.fcr-w .wd-abl-abschnitt{font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
+  #fcr-einst.fcr-w .fcr-w-eins{grid-template-columns:minmax(0,1fr)}
+  #fcr-einst.fcr-w .fcr-w-firmen{display:flex;flex-direction:column}
+  #fcr-einst.fcr-w .wd-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--g-rand);cursor:pointer;transition:background .12s}
+  #fcr-einst.fcr-w .wd-firma:hover{background:color-mix(in srgb,var(--g-karte) 55%,transparent)}
+  #fcr-einst.fcr-w .wd-firma .punkt{width:10px;height:10px;border-radius:50%}
+  #fcr-einst.fcr-w .wd-firma .fl{min-width:0}
+  #fcr-einst.fcr-w .wd-firma .fn{display:block;font-weight:600;font-size:13.5px;white-space:nowrap;color:var(--g-text)}
+  #fcr-einst.fcr-w .wd-firma .fk{display:block;font-size:11.5px;color:var(--g-sub);line-height:1.35;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #fcr-einst.fcr-w .wd-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums}
+  #fcr-einst.fcr-w .wd-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
+  #fcr-einst.fcr-w .wd-firma.offen{border-bottom-color:transparent}
+  #fcr-einst.fcr-w .wd-firma.offen .fn,#fcr-einst.fcr-w .wd-firma.offen .pfeil,#fcr-einst.fcr-w .wd-firma.offen .fz{color:var(--g-a1)}
+  html[data-theme="dark"] #fcr-einst.fcr-w .wd-firma.offen .fn,html[data-theme="dark"] #fcr-einst.fcr-w .wd-firma.offen .pfeil,html[data-theme="dark"] #fcr-einst.fcr-w .wd-firma.offen .fz{color:var(--g-lila)}
+  #fcr-einst.fcr-w .wd-firma.aus .punkt{opacity:.35}
+  #fcr-einst.fcr-w .wd-firma-edit{padding:4px 4px 14px 20px;border-bottom:1px solid var(--g-rand)}
+  #fcr-einst.fcr-w .wd-firma-edit .wd-abl-abschnitt:first-child,#fcr-einst.fcr-w .fcr-w-pills + .wd-abl-abschnitt{margin-top:10px}
+  #fcr-einst.fcr-w .fcr-w-pills{margin:4px 0 2px}
+  #fcr-einst.fcr-w .fcr-w-pills button{padding:6px 14px;font-size:12px}
   /* Größen-Wahl als Segment-Pille (wie Zeitraum-Chips) */
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg{display:inline-flex;background:var(--g-pille);border-radius:999px;padding:3px;gap:2px;flex:none}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg button{border:0;background:transparent;color:var(--g-sub);font:inherit;font-size:12px;font-weight:600;line-height:1;padding:7px 12px;border-radius:999px;cursor:pointer;font-variant-numeric:tabular-nums}
@@ -85359,12 +85359,12 @@
   // GRUPPE WIE DIE WD-EINSTELLUNGEN (E1c, Finn 05.11.2026 ~06:05 Dubai, Foto der WD-Einstellungen: „So eine Gruppe wie bei WD bitte überall machen"):
   // eine große Karte „Einstellungen", darin drei Spalten-Karten wie wd-set-card (Titel + Unterzeile + „Speichern" oben rechts):
   // Ablauf | Firmen (Liste wie wd-firma, Klick klappt die Firma inline auf) | Konten der gewählten Firma. Maße aus der WD-Karte (#adm-pane-wd .wd-set-*),
-  // eigene Klassen fcr-w-* — das WD-CSS bleibt unberührt. „Jetzt planen" steht außerhalb (fcrLeisteHtml), Titel klappt die Gruppe zu (gemerkt).
-  const fcrWSchalter = (k, an, titel, unter, info) => `<label class="fcr-w-sz${fcrAdmin() ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}${info || ''}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</span>${fcrAdmin()
+  // WD-Klassen (wd-set-grid/-card, wd-abl-*, wd-firma) unter der eigenen Wurzel #fcr-einst, eigene Teile fcr-w-* — das WD-CSS (#adm-pane-wd) bleibt unberührt. „Jetzt planen" steht außerhalb (fcrLeisteHtml), Titel klappt die Gruppe zu (gemerkt).
+  const fcrWSchalter = (k, an, titel, unter, info) => `<label class="wd-abl-schalter${fcrAdmin() ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}${info || ''}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</span>${fcrAdmin()
     ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
     : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
-  const fcrWAbschnitt = t => `<div class="fcr-w-abschnitt">${escapeHtml(t)}</div>`
-  const fcrWKopf = (titel, unter, karte) => `<h4 class="fcr-w-h4"><span>${titel}${unter ? `<span class="fcr-w-h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
+  const fcrWAbschnitt = t => `<div class="wd-abl-abschnitt">${escapeHtml(t)}</div>`
+  const fcrWKopf = (titel, unter, karte) => `<h4><span>${titel}${unter ? `<span class="h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
@@ -85381,14 +85381,14 @@
     const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '', `${firmen.length} Firmen`, 'Echo · mit Hedge'].filter(Boolean)
     const kopf = `<div class="fcr-w-kopf"><button type="button" class="fcr-e-gtitel" data-fcr-zu aria-expanded="${zu ? 'false' : 'true'}" title="${zu ? 'aufklappen' : 'zuklappen'}">Einstellungen<span class="fcr-e-pfeil">${zu ? '▸' : '▾'}</span></button>
       <span class="fcr-w-sub" title="${escapeHtml(wegText)}">${kurz.map(escapeHtml).join(' · ')}</span>${fcrDarf() ? '' : `<em class="fcr-e-nur" title="ändern als „Finn + Pascal“ oder „Pascal“">${fcrSchloss('Schreibrecht')} nur ansehen</em>`}</div>`
-    if(zu) return `<div class="fcr-e-wrap fcr-w zu" data-fcr-wurzel>${kopf}</div>`
+    if(zu) return `<div class="fcr-e-wrap fcr-w zu" id="fcr-einst" data-fcr-wurzel>${kopf}</div>`
     // ── 1) Ablauf
     const newsInfo = fcrInfo('news', `<b>News-Pause</b> · nur rote USD-News (Forex Factory)<br>2 h vorher keine neuen Funded-CFD-Starts · laufende bis spätestens 6 min (Echo V2: 10 min) vorher zu ·
       frühestens 15 min danach wieder Starts<span class="fcr-e-pop-z">Nächster Termin: ${escapeHtml(news.naechster)}</span><span class="fcr-e-pop-z">Kalender: ${escapeHtml(news.kalender)}</span>`)
     const fensterFeld = (t, n, label) => ad
       ? `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-spanne fcr-w-eins"><input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml(fenCh[n] || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · leer = wie Challenge-Planer"></div></div>`
       : `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-wert">${escapeHtml(t === 'von' ? (z.von || '–') : (z.bis || '–'))}</div></div>`
-    const ablauf = `<div class="fcr-w-card" data-fcr-karte="ablauf">
+    const ablauf = `<div class="wd-set-card" data-fcr-karte="ablauf">
       ${fcrWKopf('Ablauf', 'Automatik, Bestätigen, Zeiten', 'ablauf')}
       ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', '1 Trade je Konto und Tag', fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
       ${fcrWSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge ohne Klick')}
@@ -85446,20 +85446,20 @@
             ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
         }
       }
-      return `<button type="button" class="fcr-w-firma${auf ? ' offen' : ''}${f.firma === _fcrSel.firma ? ' gewaehlt' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}" aria-expanded="${auf ? 'true' : 'false'}">
+      return `<button type="button" class="wd-firma${auf ? ' offen' : ''}${f.firma === _fcrSel.firma ? ' gewaehlt' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}" aria-expanded="${auf ? 'true' : 'false'}">
           <span class="punkt" style="background:${ton(f)}"></span><span class="fl"><span class="fn">${escapeHtml(f.firma)}</span><span class="fk">${escapeHtml(unter)}</span></span>
-          <span class="fz">${escapeHtml(mono)}</span><span class="pfeil">${auf ? '▾' : '▸'}</span></button>${auf ? `<div class="fcr-w-firma-edit">${inhalt}</div>` : ''}`
+          <span class="fz">${escapeHtml(mono)}</span><span class="pfeil">${auf ? '▾' : '▸'}</span></button>${auf ? `<div class="wd-firma-edit">${inhalt}</div>` : ''}`
     }
-    const liste = `<div class="fcr-w-card" data-fcr-karte="firma">
+    const liste = `<div class="wd-set-card" data-fcr-karte="firma">
       ${fcrWKopf('Firmen', 'Ziel bis Waiting · Lots je Größe', 'firma')}
       <div class="fcr-w-firmen">${firmen.map(zeileF).join('') || '<div class="fcr-leer">keine Firma hinterlegt</div>'}</div>
     </div>`
     // ── 3) Konten der gewählten Firma
-    const konten = `<div class="fcr-w-card">
+    const konten = `<div class="wd-set-card">
       ${fcrWKopf('Konten', sel ? `${escapeHtml(sel.firma)} · Ziel und Consistency je Konto` : '–', '')}
       ${sel ? fcrKontenHtml(sel, fcrConsPct(sel), D) : '<div class="fcr-leer">keine Firma gewählt</div>'}
     </div>`
-    return `<div class="fcr-e-wrap fcr-w" data-fcr-wurzel>${kopf}<div class="fcr-w-grid">${ablauf}${liste}${konten}</div></div>`
+    return `<div class="fcr-e-wrap fcr-w" id="fcr-einst" data-fcr-wurzel>${kopf}<div class="wd-set-grid">${ablauf}${liste}${konten}</div></div>`
   }
   // Einstellungs-Karte der Planer-Seite unter dem Zeitstrahl (Finn 05.11.2026 ~05:35): Knopf oben rechts außerhalb des neu zeichenbaren Blocks
   // Die Seite zeichnet sich im Takt komplett neu (apIdsRender): ungespeicherte Eingaben vorher einsammeln, fcfdRegelnVerdrahten setzt sie wieder ein
@@ -85657,7 +85657,7 @@
         if(fb){ const n = fb.dataset.fcrFirma; _fcrSel.offen = _fcrSel.offen === n ? null : n; _fcrSel.firma = n; try{ localStorage.setItem('fcr_offen', n) }catch(_){} }
         else if(gb){ _fcrSel.gr[_fcrSel.offen] = gb.dataset.fcrGr; try{ localStorage.setItem('fcr_groesse', JSON.stringify(_fcrSel.gr)) }catch(_){} }   // Größe je Firma merken
         const neu = fcrNeuZeichnen(w)
-        if(fb && neu) neu.querySelector('.fcr-w-firma-edit')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // aufgeklappte Firma ins Bild
+        if(fb && neu) neu.querySelector('.wd-firma-edit')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // aufgeklappte Firma ins Bild
       })
       w.querySelectorAll('input[data-fcr-in]').forEach(i => {
         i.addEventListener('input', () => { i.classList.toggle('geaendert', i.value !== i.defaultValue); delete w.dataset.fcrWarn; fcrKnoepfe(w) })
