@@ -22227,6 +22227,36 @@ def cdp_kontonr(text):
     return ""
 
 
+def _tv_konten_melden(eintraege, trail=None):
+    """KONTO-LISTE NEBENBEI MELDEN (L6, 04.11.2026, Finn: „Puls klickt bei jedem Trade ins Konto-Dropdown — erkennt er ein neues Konto,
+    soll es in Prophos ‚zu bestätigen‘ auftauchen. Schnell, simpel, kein Extra-Klick."): die Einträge der Liste, die DIESER Lauf geöffnet
+    hat (augen.js, 'APEX6780960000017 USD'), gehen als volle Namen (tv_konten_aus_texten, dieselbe Regel wie der Auftrag „Konto-Liste
+    lesen") an den lokalen Reader (POST /tv-konten → Merker → Railway /reader/tv-konten → „Neue Konten aus TradingView"). Bis hier sah
+    nur das Userscript die ~1 s offene Liste, im Puls-Chrome aber nur alle 5 s — seit 29.10. meldete deshalb nur pc-c19p2l.
+    Im Hintergrund-Thread, nie wartend, jeder Fehler still (alter Reader ohne /tv-konten → 404). -> Anzahl Namen"""
+    texte = [str(x.get("text") or "") for x in (eintraege or []) if isinstance(x, dict)] if isinstance(eintraege, list) else []
+    konten = [{"name": n, "quelle": "dropdown"} for n in tv_konten_aus_texten(texte)][:60]
+    if not konten:
+        return 0
+
+    def _senden():
+        try:
+            import urllib.request
+            req = urllib.request.Request(_TV_BASIS + "/tv-konten", data=json.dumps({"konten": konten}).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=2.0).read()
+        except Exception:
+            pass
+    try:
+        import threading
+        threading.Thread(target=_senden, daemon=True).start()
+        if trail is not None:
+            trail.append(f"Konto-Liste: {len(konten)} Name(n) an den Reader (Neue Konten aus TradingView)")
+    except Exception:
+        pass
+    return len(konten)
+
+
 def cdp_konto_gekuerzt(text):
     """REIN RECHNEND (testbar): Zeigt der Umschalter-Text die Kennung nur gekürzt ('PAAPEX684332000000… 162,497.64 USD')? Dann ist der
     Text allein nie ein Beleg für das Konto (Muster „konto_balance: puls stand auf einem anderen konto", 27.10.2026)."""
@@ -22879,6 +22909,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     gekuerzt_gemeldet = False
     ein_konto_ziel = False                                # Ein-Konto-Login, gekürzte Kennung = Ziel (cdp_ein_konto_ziel, 27.10.2026)
     liste_bestaetigt = False                              # Ziel in der Liste schon aktiv, Esc statt Klick (cdp_liste_aktiv_bestaetigt)
+    tvk_gemeldet = False                                  # L6: Namen der eigenen Liste einmal je Lauf an den Reader (_tv_konten_melden)
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
@@ -22946,6 +22977,10 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             st = s.stand(opts)
             continue
         if ko.get("liste_offen"):
+            if not tvk_gemeldet:
+                # L6: die Liste hat DIESER Lauf geöffnet (fremde Listen enden oben mit Esc) — Namen nebenbei melden, kein Klick, kein Warten
+                tvk_gemeldet = True
+                _tv_konten_melden(ko.get("eintraege"), trail)
             e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
             if not e:
                 # LISTE SCROLLEN (08.10.2026): Ziel 0×, gleicher Apex-User, Liste nicht ganz im Bild → VOR dem Esc abschnittsweise lesen

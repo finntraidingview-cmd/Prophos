@@ -973,6 +973,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "an": _an})
             return
 
+        # KONTO-LISTE VON PULS (L6, 04.11.2026, Finn: „Puls klickt bei jedem Trade ins Konto-Dropdown — erkennt er ein neues Konto,
+        # soll es in Prophos ‚zu bestaetigen‘ auftauchen"): der Order-Bot hat die Liste beim Kontowechsel ohnehin offen und gelesen
+        # (augen.js, „APEX6780960000017 USD") und schickt die vollen Namen hierher — ohne Extra-Klick. Das Userscript sah die ~1 s offene
+        # Liste nur per Zufall (Bedienfeld im Puls-Chrome alle 5 s), deshalb meldete seit 29.10. nur pc-c19p2l. Gleicher Merker und
+        # Versand wie konten_liste (tv_konten_merken → _tv_konten_schleife → Railway /reader/tv-konten). Vor dem Pause-Gate wie /bedienfeld.
+        if self.path.rstrip("/") == "/tv-konten":
+            _kl = daten.get("konten") if isinstance(daten, dict) else None
+            if not isinstance(_kl, list):
+                self._json(400, {"ok": False, "msg": "Feld 'konten' (Liste) fehlt"})
+                return
+            _n_neu = tv_konten_merken(_TVK, [{"name": k.get("name"), "quelle": "dropdown"} for k in _kl[:60] if isinstance(k, dict)], time.time())
+            if _n_neu:
+                print(f"\n[{time.strftime('%H:%M:%S')}] Konto-Liste von Puls: {_n_neu} neue(r) Name(n), {len(_TVK['namen'])} gesamt", flush=True)
+            self._json(200, {"ok": True, "neu": _n_neu, "namen": len(_TVK["namen"])})
+            return
+
         # Bedienfeld-Geometrie vom Userscript (30.08.2026, Orbit-Puls
         # Schritt 2). BEWUSST VOR dem Pause-Gate: der Schalter friert die
         # POSITIONEN ein (stale != flat), er blendet nicht die Augen ab —
