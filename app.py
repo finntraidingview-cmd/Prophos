@@ -39879,9 +39879,12 @@ def fcp_regel_patch(zeile, body):
         return {"firmen": firmen}, None
     v = b.get("wert")
     if feld == "tp_deckel_plus":
+        if v is None or v == "":                 # leer → Feld weg, es gilt wieder FCP_TP_DECKEL_PLUS_STANDARD (Fremd-Review E1-Design)
+            f.pop(feld, None)
+            return {"firmen": firmen}, None
         w = _fcp_zahl_ok(v)
         if w is None:
-            return None, "tp_deckel_plus: Zahl ≥ 0"
+            return None, "tp_deckel_plus: Zahl ≥ 0 oder leer (Standard)"
         f[feld] = w
     elif feld == "tp_zyklen":
         if not isinstance(v, list) or not 1 <= len(v) <= 8 or any(_fcp_zahl_ok(x) is None or not _fcp_zahl_ok(x) > 0 for x in v):

@@ -95,6 +95,9 @@ def main():
     ohne = dict(ZEILE, firmen=[{"an": True, "namen": ["tradeifycfd"], "je_groesse": {"100000": {"dd": 1, "sl": [1, 2], "lots": [1, 1], "ziel": [1, 2], "hedge_eur": 1}}}])
     u, f = P(ohne, {"firma": "tradeifycfd", "an": False})
     ok(u and u["firmen"][0]["an"] is False, "Firma ohne name: über namen[0] änderbar (wie die Anzeige)")
+    u, f = P(ZEILE, {"firma": "FundedNext", "feld": "tp_deckel_plus", "wert": None})
+    ok(u and "tp_deckel_plus" not in firma(u, "FundedNext") and app.fcp_firma_einstellung(firma(u, "FundedNext"))["tp_deckel_plus_eff"] == app.FCP_TP_DECKEL_PLUS_STANDARD,
+       "TP-Deckel leer → Feld weg, Standard aus dem Code gilt")
     # Zeile selbst nie verändert
     ok(json.dumps(ZEILE, sort_keys=True) == ROH, "Eingabe-Zeile unverändert (nur Kopie geändert)")
     # Anzeige: Standard aus dem Code + wirksame Werte

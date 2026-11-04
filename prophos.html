@@ -4048,20 +4048,116 @@
   @media (max-width:980px){ #ap-ids-root.ap-guestly .e2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} #ap-ids-root.ap-guestly .e2-haupt,#ap-ids-root.ap-guestly .e2-unten{grid-template-columns:1fr}
     #ap-ids-root.ap-guestly .e2-liste{flex-direction:row;overflow-x:auto} #ap-ids-root.ap-guestly .e2-firma{width:auto;flex:0 0 auto} }
   @media (max-width:520px){ #ap-ids-root.ap-guestly .e2-wrap{padding:16px 14px} #ap-ids-root.ap-guestly .e2-detail{padding:14px} #ap-ids-root.ap-guestly .e2-kpis{gap:10px} }
-  /* EINSTELLUNGEN FUNDED CFD (E1, 04.11.2026): Werte direkt in den Regel-Karten änderbar (nur Admin), Code-Werte mit Kennzeichen, Weg-Chip */
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in{width:92px;max-width:100%;font:inherit;font-size:12px;font-variant-numeric:tabular-nums;color:var(--g-text);background:var(--g-karte,#fff);border:1px solid var(--g-rand);border-radius:7px;padding:2px 6px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in.breit{width:150px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in:focus{outline:2px solid var(--violet-soft,#c4bdfd);outline-offset:0;border-color:transparent}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-einheit{font-style:normal;color:var(--g-sub);margin-left:3px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-code{display:inline-block;font-size:11px;color:var(--g-sub);background:var(--g-rand);border-radius:999px;padding:0 7px;max-width:100%}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg{display:inline-flex;align-items:center;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;background:var(--g-tuerkis-bg);color:var(--g-tuerkis);white-space:nowrap}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg.klein{font-size:10.5px;padding:0 7px;margin-left:2px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch{width:28px;height:16px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch-slider::before{width:12px;height:12px}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leer{color:var(--g-sub)}
-  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-z{grid-template-columns:118px minmax(0,1fr)}
+  /* EINSTELLUNGEN FUNDED CFD (E1-Design 04.11.2026, Finn: „mach kein Rotzdesign" — Vorbild Winning Days → Einstellungen, Guestly-Vorlage): drei gleich hohe
+     Karten Ablauf · Firmen · gewählte Firma, ruhige Typo-Skala (Titel 14,5 / Labels 11,5 / Werte 13), Felder 32 px mit Label oben, Abschnitte in
+     Großbuchstaben, Farbe nur als kleiner Punkt; Firma → Größe gestuft (Segment-Pille). Präfix fcr-e (E1) */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr) minmax(0,1.35fr);gap:16px;margin-top:14px;align-items:stretch}
+  @media (max-width:1180px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-detail{grid-column:1/-1} }
+  @media (max-width:760px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e{grid-template-columns:minmax(0,1fr)} }
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-karte{background:var(--g-kpi);border-radius:16px;padding:18px 20px 16px;min-width:0;display:flex;flex-direction:column}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:12px;margin-bottom:6px;border-bottom:1px solid var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kopf > span:first-child{font-size:15px;font-weight:650;color:var(--g-text);line-height:1.3;min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kopf > span:first-child > i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:1px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kopf small{display:block;font-size:11.5px;font-weight:400;color:var(--g-sub);margin-top:2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;background:var(--g-karte);color:var(--g-text);border:1px solid var(--g-rand);white-space:nowrap;cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-weg i{width:7px;height:7px;border-radius:50%;background:var(--g-a4)}
+  /* Schalter als Zeile: Titel + Satz links, Schalter rechts */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:9px 0;cursor:pointer}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz + .fcr-e-sz{border-top:1px dashed var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz b{font-size:13px;font-weight:600;color:var(--g-text)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz small{display:block;color:var(--g-sub);font-size:11.5px;line-height:1.35;margin-top:1px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz .switch{flex:none}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz:has(input:disabled){cursor:default}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz:has(input:disabled) .switch{opacity:.5}   /* nur ansehen: Schalter zeigt den Stand, wirkt aber nicht klickbar */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-abschnitt{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 10px;padding-top:12px;border-top:1px solid var(--g-rand);display:flex;align-items:baseline;gap:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-abschnitt small{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--g-sub);opacity:.85}
+  /* Felder: Label oben, 32 px, zwei bzw. drei Spalten */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-felder{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;align-items:start}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-felder.drei{grid-template-columns:repeat(3,minmax(0,1fr))}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-feld{min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-feld.breit{grid-column:1/-1}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-feld label{display:block;font-size:11.5px;color:var(--g-sub);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-feld label small{font-size:10.5px;opacity:.8}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in{width:100%;height:32px;box-sizing:border-box;font:inherit;font-size:13px;font-variant-numeric:tabular-nums;color:var(--g-text);background:var(--g-karte);border:1px solid var(--g-rand);border-radius:9px;padding:0 10px;transition:border-color .12s,box-shadow .12s}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in::placeholder{color:var(--g-sub);opacity:.75}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in:hover{border-color:color-mix(in srgb,var(--g-a2) 45%,var(--g-rand))}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in:focus{outline:0;border-color:var(--g-a2);box-shadow:0 0 0 3px var(--g-lila-bg)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in:disabled{opacity:.6}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) select.fcr-e-in{padding-right:6px;cursor:pointer}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-spanne{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:6px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-spanne span{font-size:12px;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-wert{height:32px;display:flex;align-items:center;font-size:13px;font-weight:500;color:var(--g-text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-wert.leer{color:var(--g-sub);font-weight:400}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-wert.text{white-space:normal;height:auto;min-height:32px;line-height:1.35;font-weight:500}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-hinweis{font-size:10.5px;color:var(--g-sub);margin-top:4px;line-height:1.35}
+  /* fest im Code: Name links, Wert rechts, gepunktete Trennung */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:12.5px;padding:5px 0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz + .fcr-e-cz{border-top:1px dashed var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz span{color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz b{font-weight:500;color:var(--g-text);font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz span{flex:none}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz[title]{cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-fuss{margin-top:auto;padding-top:14px;font-size:11.5px;color:var(--g-sub);line-height:1.45}
+  /* Firmen-Liste: Punkt · Name + Kurzregel · Größen · Pfeil */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firmen{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 10px;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border:1px solid transparent;border-radius:10px;padding:10px 10px;cursor:pointer;transition:background .12s,border-color .12s}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma > i{width:10px;height:10px;border-radius:50%}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma b{display:block;font-size:13.5px;font-weight:600;color:var(--g-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma small{display:block;font-size:11.5px;color:var(--g-sub);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma .fl{min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma .fg{font-size:12px;color:var(--g-sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma .pfeil{font-size:15px;color:var(--g-sub);text-align:center;line-height:1}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma:hover{background:color-mix(in srgb,var(--g-karte) 60%,transparent)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.an{background:var(--g-karte);border-color:var(--g-rand);box-shadow:0 1px 3px rgba(16,24,40,.06)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.an b,:is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.an .pfeil{color:var(--g-a1)}
+  html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.an b,html[data-theme="dark"] :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.an .pfeil{color:var(--g-lila)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.aus > i{opacity:.35}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-firma.aus b{color:var(--g-sub)}
+  /* Runde 3 (Master-Review 04.11.2026): Lese-Ansicht zuerst, „Bearbeiten" je Karte, Kennzahlen je Größe wie KPI-Karte, Schloss statt Text-Pille */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kopf-r{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-titel{font-size:17px!important;font-weight:700!important;letter-spacing:-.01em}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stift{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:9px;border:1px solid var(--g-rand);background:var(--g-karte);color:var(--g-text);font:inherit;font-size:12px;font-weight:600;line-height:1;cursor:pointer;transition:border-color .12s,background .12s}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stift:hover{border-color:var(--g-a2)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stift.an{background:var(--g-knopf);color:var(--g-knopf-text);border-color:var(--g-knopf)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-schloss{display:inline-flex;vertical-align:-1px;color:var(--g-sub);opacity:.7;cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-std{display:inline-flex;align-items:center;gap:4px;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stand{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--g-sub);white-space:nowrap}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stand i{width:7px;height:7px;border-radius:50%;background:var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stand.an{color:var(--g-text)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-stand.an i{background:var(--g-gut)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-sz.lesen{cursor:default}
+  /* Zeiten (Lese-Ansicht): drei kleine Kacheln */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-minis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-mini{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:12px;padding:9px 11px;min-width:0;cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-mini b{display:block;font-size:18px;font-weight:700;color:var(--g-text);font-variant-numeric:tabular-nums;line-height:1.2}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-mini b small{font-size:11.5px;font-weight:500;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-mini span{display:block;font-size:11px;color:var(--g-sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* So plant er: kurze Regel-Zeilen, Details im Tooltip */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-regeln{display:flex;flex-direction:column;gap:7px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-regeln div{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--g-text);cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-regeln i{width:6px;height:6px;border-radius:50%;background:var(--g-a2);flex:0 0 6px;opacity:.8}
+  /* Firma (Lese-Ansicht): Regel-Zeilen, je Größe ein Block mit vier Kennzahlen */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-regel{margin:4px 0 2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-gr{border-top:1px solid var(--g-rand);margin-top:14px;padding-top:14px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-gr-kopf{font-size:14px;font-weight:700;color:var(--g-text);margin-bottom:10px;display:flex;align-items:baseline;gap:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-gr-kopf small{font-size:11.5px;font-weight:400;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  @media (max-width:1500px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:12px;padding:11px 13px;min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi[title]{cursor:help}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi span{display:block;font-size:11.5px;color:var(--g-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi b{display:block;font-size:19px;font-weight:700;letter-spacing:-.01em;color:var(--g-text);font-variant-numeric:tabular-nums;margin-top:4px;line-height:1.2;overflow-wrap:anywhere}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi small{display:block;font-size:11px;color:var(--g-sub);margin-top:2px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-klein{margin-top:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-abschnitt-seg{justify-content:space-between;align-items:center}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-abschnitt-seg .fcr-e-seg{text-transform:none;letter-spacing:0}
+  /* Größen-Wahl als Segment-Pille (wie Zeitraum-Chips) */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg{display:inline-flex;background:var(--g-pille);border-radius:999px;padding:3px;gap:2px;flex:none}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg button{border:0;background:transparent;color:var(--g-sub);font:inherit;font-size:12px;font-weight:600;line-height:1;padding:7px 12px;border-radius:999px;cursor:pointer;font-variant-numeric:tabular-nums}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg button.on{background:var(--g-pille-an);color:var(--g-text);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  /* Handy: Spannen (zwei Felder) brauchen die volle Breite — eine Spalte; die drei Zeit-Felder bleiben nebeneinander (je eine Zahl) */
+  @media (max-width:520px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-felder{grid-template-columns:minmax(0,1fr)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-felder.drei{grid-template-columns:repeat(3,minmax(0,1fr))}
+    :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-karte{padding:14px 14px 12px} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-in{height:38px;font-size:16px}
+    :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi{padding:10px 11px} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-kpi b{font-size:16px;white-space:nowrap;overflow-wrap:normal} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-cz b{text-align:right} }   /* 16 px: iOS zoomt beim Antippen sonst hinein */
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs .tpl-karte{border:0;box-shadow:none;background:transparent;padding:0;margin:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-karte,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .tpl-bd,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-hb-klapp{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-kopf b{font-size:18px;font-weight:600}
@@ -16295,7 +16391,7 @@
     const PR_SCHREIB = [
       // Challenge / Funded (Futures + CFD)
       '[data-ap-ok]', '[data-ap-ok-id]', '#ap-ids-alle-ok', '[data-ap-zur]', '[data-ap-ri]', '[data-ap-id]', '[data-tpl-nachplan]', '[data-tpl-probe]', '[data-tpl-probe-alle]',
-      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-fcr-in]', '[data-fcr-sw]',
+      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-fcr-in]', '[data-fcr-sw]', '[data-fcr-edit]',
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
       '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]',
@@ -84660,7 +84756,7 @@
     if(_fcfdR.fehler) return 'Regeln nicht ladbar — ' + _fcfdR.fehler.slice(0, 80)
     if(!_fcfdR.d) return _fcfdR.laedt ? 'Regeln laden …' : 'Funded-CFD-Planer kommt — Regeln je Firma noch nicht hinterlegt'
     const f = _fcfdR.d.firmen || []
-    return `Regeln je Firma × Größe · ${f.map(x => x.firma).join(' · ') || 'keine Firma'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'}`
+    return `Echo · mit Hedge · ${f.length} ${f.length === 1 ? 'Firma' : 'Firmen'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'} · ${window._fcfdAdmin ? 'Werte direkt änderbar, gilt für alle Gruppen' : 'nur ansehen'}`
   }
   /* EINSTELLUNGEN FUNDED PLANER → CFD (E1, Finn 04.11.2026 ~17:30 Dubai: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute nur im
    * Code stecken, sollen unten visuell und änderbar stehen … und überall sehen, welches Modell genutzt wird"). Die Regel-Karten zeigen jetzt jeden
@@ -84669,7 +84765,7 @@
    * steht (funded_cfd_plan_regeln), ist für Admins direkt änderbar (Feld ändern → Enter/Verlassen → POST /admin/funded-cfd-plan/regel, eine Änderung je
    * Aufruf, Server prüft); was nur im Code steht, trägt „fest im Code". Am Planer selbst ändert sich nichts. Präfix fcr-e (E1). */
   const fcrZahl = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 })
-  const fcrWertText = v => Array.isArray(v) ? (Number(v[0]) === Number(v[1]) ? fcrZahl(v[0]) : `${fcrZahl(v[0])}–${fcrZahl(v[1])}`) : (v == null || v === '' ? '' : fcrZahl(v))
+  const fcrWertText = v => typeof v === 'string' ? v : Array.isArray(v) ? (Number(v[0]) === Number(v[1]) ? fcrZahl(v[0]) : `${fcrZahl(v[0])}–${fcrZahl(v[1])}`) : (v == null || v === '' ? '' : fcrZahl(v))
   // Eingabe „1.300–1.500" / „1300 - 1500" / „1,5" → Zahl oder [von, bis]; leer → null; unlesbar → undefined
   function fcrWertLesen(t, bereich){
     const roh = String(t == null ? '' : t).trim(); if(!roh) return null
@@ -84682,64 +84778,170 @@
   }
   window._fcrWertLesen = fcrWertLesen   // Test-Haken
   window._fcfdRegelnHtml = () => fcfdRegelnHtml()   // Test-Haken (Stub)
-  // ein änderbarer Wert: Admin → Eingabefeld (data-fcr-in = was geändert wird), sonst Text
-  function fcrFeld(v, ziel, opt = {}){
-    const txt = fcrWertText(v) + (v != null && v !== '' && opt.einheit ? opt.einheit : '')
-    if(!window._fcfdAdmin || opt.nurText) return txt ? escapeHtml(txt) : `<span class="fcr-e-leer">${escapeHtml(opt.leer || '–')}</span>`   // leer: Rückfall zeigen (z. B. „wie SL“, Standard 1.000) wie der Platzhalter beim Admin
-    return `<input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(fcrWertText(v))}" placeholder="${escapeHtml(opt.leer || '–')}" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ bereich: !!opt.bereich }, ziel)))}" title="${escapeHtml(opt.titel || 'Enter oder Feld verlassen speichert — gilt für alle Gruppen')}">${opt.einheit ? `<i class="fcr-e-einheit">${escapeHtml(opt.einheit.trim())}</i>` : ''}`
+  window._fcfdRegelnVerdrahten = r => fcfdRegelnVerdrahten(r)   // Test-Haken (Stub: Firma/Größe anklicken)
+  /* AUFBAU (E1-Design 04.11.2026, Finn: „Nimm dir wirklich gute Zeit, mach kein Rotzdesign" — Vorbild Funded Planer → Winning Days → Einstellungen,
+   * Guestly-Vorlage; Master-Review: Lese-Ansicht zuerst, Eingaben nur nach „Bearbeiten" je Karte, je Größe die Kennzahlen groß wie eine KPI-Karte,
+   * „fest im Code" leise als Schloss mit Tooltip, Regeln als kurze Zeilen). Drei Karten: Ablauf · Firmen (anklicken) · gewählte Firma (erst Firma,
+   * dann Größe). Auswahl und Bearbeiten-Stand (_fcrSel/_fcrEdit) bleiben beim Neuzeichnen nach dem Speichern stehen. */
+  const _fcrSel = { firma: null, groesse: null }
+  const _fcrEdit = { ablauf: false, firma: false }
+  const fcrAdmin = () => !!window._fcfdAdmin
+  const FCR_SCHLOSS = '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="3.2" y="7" width="9.6" height="6.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>'
+  const FCR_STIFT = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10.6 2.6l2.8 2.8-7.7 7.7H2.9v-2.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+  // „fest im Code": ein leises Schloss, Erklärung im Tooltip (überall gleich)
+  const fcrSchloss = titel => `<span class="fcr-e-schloss" title="${escapeHtml('fest im Code' + (titel ? ' — ' + titel : '') + ' · ändert der Master in app.py')}">${FCR_SCHLOSS}</span>`
+  const fcrStd = (t, titel) => `<span class="fcr-e-std">${fcrSchloss(titel || 'Standard, solange die Regel keinen eigenen Wert hat')}Standard ${escapeHtml(t)}</span>`
+  const fcrStift = k => fcrAdmin() ? `<button type="button" class="fcr-e-stift${_fcrEdit[k] ? ' an' : ''}" data-fcr-edit="${k}" title="${_fcrEdit[k] ? 'fertig — zurück zur Ansicht' : 'Werte bearbeiten · speichert je Feld beim Verlassen'}">${_fcrEdit[k] ? '✓ Fertig' : FCR_STIFT + ' Bearbeiten'}</button>` : ''
+  // Eingabe-Feld (nur im Bearbeiten-Modus): Label oben, 32 px; Spanne = zwei Felder von – bis. opt: einheit, leer (Platzhalter = Rückfall), bereich, hinweis, titel, breit
+  function fcrFeld(label, v, ziel, opt = {}){
+    const daten = teil => escapeHtml(JSON.stringify(Object.assign({ bereich: !!opt.bereich }, ziel, teil ? { teil } : {})))
+    const tip = escapeHtml(opt.titel || 'Enter oder Feld verlassen speichert · Esc verwirft · gilt für alle Gruppen')
+    const inp = (w, teil, ph) => `<input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(w == null || w === '' ? '' : fcrZahl(w))}" placeholder="${escapeHtml(ph || '–')}" data-fcr-in="${daten(teil)}" title="${tip}">`
+    const a = Array.isArray(v) ? v : [v, v]
+    const wert = opt.bereich ? `<div class="fcr-e-spanne">${inp(Array.isArray(v) ? a[0] : null, 'von', opt.leer || 'von')}<span>–</span>${inp(Array.isArray(v) ? a[1] : null, 'bis', opt.leer || 'bis')}</div>` : inp(Array.isArray(v) ? a[0] : v, null, opt.leer)
+    return `<div class="fcr-e-feld${opt.breit ? ' breit' : ''}"><label>${escapeHtml(label)}${opt.einheit ? ` <small>· ${escapeHtml(opt.einheit)}</small>` : ''}</label>${wert}${opt.hinweis ? `<div class="fcr-e-hinweis">${opt.hinweis}</div>` : ''}</div>`
   }
-  const fcrCode = (txt, titel) => `<span class="fcr-e-code" title="${escapeHtml(titel || 'steht nur im Code (app.py) — Änderung über den Master')}">${txt} · fest im Code</span>`
-  const fcrSchalter = (k, an, titel) => `<label class="fcr-e-schalter" title="${escapeHtml(titel || '')}"><span class="switch"><input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''}${window._fcfdAdmin ? '' : ' disabled'}><span class="switch-slider"></span></span>${an ? 'an' : 'aus'}</label>`
+  // Schalter-Zeile: Titel + Satz links; rechts im Bearbeiten-Modus der Schalter, sonst der Stand als leise Pille
+  const fcrSchalter = (k, an, titel, text, edit) => `<label class="fcr-e-sz${edit ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}</b>${text ? `<small>${escapeHtml(text)}</small>` : ''}</span>${edit
+    ? `<span class="switch"><input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''}><span class="switch-slider"></span></span>`
+    : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
+  // Lese-Zeile: Name links, Wert rechts (optional Schloss / Tooltip)
+  const fcrZeile = (name, wert, opt = {}) => wert == null || wert === '' ? '' : `<div class="fcr-e-cz"${opt.titel ? ` title="${escapeHtml(opt.titel)}"` : ''}><span>${escapeHtml(name)}${opt.code ? ' ' + fcrSchloss(opt.code) : ''}</span><b>${opt.html ? wert : escapeHtml(wert)}</b></div>`
+  // Kennzahl wie die KPI-Karte (Guestly): Label, große Zahl, Unterzeile
+  const fcrKpi = (name, zahl, unter, titel) => `<div class="fcr-e-kpi"${titel ? ` title="${escapeHtml(titel)}"` : ''}><span>${escapeHtml(name)}</span><b>${escapeHtml(zahl)}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</div>`
+  const fcrAbschnitt = (t, zusatz) => `<div class="fcr-e-abschnitt">${escapeHtml(t)}${zusatz ? `<small>${zusatz}</small>` : ''}</div>`
+  const fcrSpanne = (v, e) => { const t = fcrWertText(v).replace('–', '\u2060–\u2060'); return t ? t + (e ? '\u00a0' + e : '') : '' }   // geschütztes Leerzeichen: „150 $" bricht nie zwischen Zahl und Einheit
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
-    const g = D.gemeinsam || {}, C = D.code || {}, zeile = (l, v) => v == null || v === '' ? '' : `<span>${l}</span><em>${v}</em>`
-    const z = D.zeiten || {}, zs = C.zeiten_standard || {}
-    const zeitZeile = (k, l) => zeile(l, fcrFeld(z[k] ?? zs[k] ?? null, { zeit: k }, { einheit: ' min' }) + (z[k] == null && zs[k] != null ? ' ' + fcrCode('Standard') : ''))
-    const weg = C.weg ? `${escapeHtml(C.weg.name || 'Echo')} · mit Hedge` : 'Echo · mit Hedge'
-    const gemKarte = `<div class="fcr-karte"><div class="fcr-kopf">Gemeinsam<small>alle Firmen · gilt für alle Gruppen</small></div>
-      <div class="fcr-z">${zeile('Weg', `<span class="fcr-e-weg" title="${escapeHtml((C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)')}">${weg}</span>`)}
-        ${zeile('Planer', fcrSchalter('aktiv', !!D.aktiv, 'Funded-CFD-Planer an/aus (Takt alle 5 min)'))}
-        ${zeile('Bestätigen', fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'an = der Planer bestätigt seine Vorschläge selbst, aus = von Hand'))}
-        ${zeile('Ziel → Waiting', fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'an = Konto mit erreichtem Ziel automatisch auf „Waiting for Payout"'))}
-        ${zeitZeile('firma_abstand_min', 'Abstand je Firma')}${zeitZeile('abstand_id_min', 'Abstand je ID')}${zeitZeile('vorlauf_min', 'Vorlauf')}
-        ${zeile('Startfenster', z.von && z.bis ? escapeHtml(`${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}`) + ' ' + fcrCode('wie der Challenge-Planer') : null)}
-        ${zeile('Mindest-TP', fcrCode(`${fcrZahl(C.tp_min_usd ?? 250)} $`, 'Rest bis zum Ziel kleiner → TP so groß (FCP_TP_MIN_USD)'))}
-        ${zeile('Lot-Schritt', fcrCode(fcrZahl(C.lot_schritt ?? 0.01)))}</div>
-      <ul class="fcr-gem">${['1 Trade pro Tag je Konto · Uhrzeit und Long/Short gewürfelt', 'Richtungsschutz: läuft bei derselben ID × Firma schon ein Trade, dieselbe Richtung',
-        'Ziel gemessen an der Starting Balance · Waiting for Payout wird nie geplant', '1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen → SL mit 1-%-Regel',
-        ...(Array.isArray(g.hinweise) ? g.hinweise.map(String) : [])].map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`
-    const firmaKarte = f => {
-      const ton = typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)', fz = { firma: f.firma }
-      const cons = f.tp_modus_eff === 'consistency50', ep = f.erster_payout_eff
-      const epo = { nurText: !(f.erster_payout && typeof f.erster_payout === 'object') }   // Refund aus dem Code-Standard → nur anzeigen (Server ändert nur DB-Werte)
-      // TP-Regel der Firma (Kopf der Karte): Consistency je Zyklus · Refund-Trade · Deckel
-      const tpRegel = [
-        zeile('TP-Modus', cons ? `Consistency 50 % je Zyklus${f.tp_modus ? '' : ' ' + fcrCode('Standard')}` : 'aufs Ziel, gedeckelt'),
-        cons ? zeile('Consistency', `Start ${fcrZahl(C.consistency_start_usd ?? 750)} $ (je Größe änderbar), danach höchstens die Zyklus-Gewinne`) : '',
-        !cons ? zeile('TP-Deckel', `Ziel bis + ${fcrFeld(f.tp_deckel_plus ?? null, Object.assign({ feld: 'tp_deckel_plus' }, fz), { einheit: ' $', leer: fcrZahl(f.tp_deckel_plus_eff ?? 1000) })}${f.tp_deckel_plus == null ? ' ' + fcrCode('Standard ' + fcrZahl(f.tp_deckel_plus_eff ?? 1000) + ' $') : ''}`) : '',
-        f.tp_zyklen_eff && !cons ? zeile('TP-Zyklen', window._fcfdAdmin && Array.isArray(f.tp_zyklen) ? `<input class="fcr-e-in breit" type="text" value="${escapeHtml(f.tp_zyklen.map(fcrZahl).join(' · '))}" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'tp_zyklen', liste: true }, fz)))}" title="Beträge je Payout-Zyklus, getrennt mit · oder ;">` : escapeHtml(f.tp_zyklen_eff.map(fcrZahl).join(' · ')) + ' $' + (f.tp_zyklen ? '' : ' ' + fcrCode('Standard'))) : '',
-        ep ? zeile('Refund-Trade', `bis zum 1. Payout: Ziel +${fcrFeld(ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), Object.assign({ bereich: true, einheit: ' $' }, epo))}`) : zeile('Refund-Trade', 'keiner'),
-        ep ? zeile('Refund-Hedge', `${fcrFeld(ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), epo)} € je $ DD${f.erster_payout ? '' : ' ' + fcrCode('Standard')}`) : '',
-        ep ? zeile('Refund-Lots', ep.lots_faktor != null ? `× ${fcrFeld(ep.lots_faktor, Object.assign({ feld: 'erster_payout.lots_faktor' }, fz), epo)}` : `Verhältnis zum Normal-Trade ${fcrCode('Rückfall × ' + fcrZahl(C.erster_payout_lots_faktor ?? 0.1))}`) : '',
-        ep ? zeile('Refund-Mindest-TP', fcrCode(`${fcrZahl(C.erster_payout_tp_min_usd ?? 25)} $`)) : ''].join('')
-      const gr = (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse)).map(x => { const gz = Object.assign({ groesse: String(x.groesse) }, fz), r = x.roh || {}
-        const gt = r.gewinntage && typeof r.gewinntage === 'object' ? r.gewinntage : null
-        return `<div class="fcr-gr"><b>${escapeHtml(fcfdGroesse(x.groesse))}</b><div class="fcr-z">
-          ${zeile('Ziel → Waiting', '+' + fcrFeld(r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: ' $' }))}
-          ${cons ? zeile('Consistency-Start', fcrFeld(r.tp_erster ?? null, Object.assign({ feld: 'tp_erster' }, gz), { einheit: ' $', leer: fcrZahl(C.consistency_start_usd ?? 750) }) + (r.tp_erster == null ? ' ' + fcrCode(fcrZahl(C.consistency_start_usd ?? 750) + ' $') : '')) : (r.tp_erster != null ? zeile('TP 1. Zyklus', fcrFeld(r.tp_erster, Object.assign({ feld: 'tp_erster' }, gz), { einheit: ' $', leer: '–' })) : '')}
-          ${zeile('Stop-Loss', fcrFeld(r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: ' $' }))}
-          ${r.sl_1pct != null || window._fcfdAdmin ? zeile('SL mit 1-%-Regel', fcrFeld(r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: ' $', leer: 'wie SL' })) : ''}
-          ${zeile('Lots', fcrFeld(r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true }))}
-          ${zeile('Hedge', `${fcrFeld(r.hedge_eur ?? null, Object.assign({ feld: 'hedge_eur' }, gz), { einheit: ' €' })} auf ${fcrFeld(r.dd ?? null, Object.assign({ feld: 'dd' }, gz), { einheit: ' $' })} DD`)}
-          ${r.daily_loss != null || window._fcfdAdmin ? zeile('Daily Loss', fcrFeld(r.daily_loss ?? null, Object.assign({ feld: 'daily_loss' }, gz), { einheit: ' $', leer: '–' })) : ''}
-          ${gt ? zeile('Gewinntage', `${fcrFeld(gt.anzahl, Object.assign({ feld: 'gewinntage.anzahl' }, gz))} Tage ≥ ${fcrFeld(gt.min, Object.assign({ feld: 'gewinntage.min' }, gz), { einheit: ' $' })} · TP ${fcrFeld(gt.tp, Object.assign({ feld: 'gewinntage.tp' }, gz), { bereich: true, einheit: ' $' })}`) : ''}</div>
-          ${x.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(x.hinweis))}</div>` : ''}</div>` }).join('')
-      return `<div class="fcr-karte"><div class="fcr-kopf"><i style="background:${ton}"></i>${escapeHtml(f.firma)}<span class="fcr-e-weg klein">${escapeHtml(f.weg || 'Echo')} · Hedge</span><small>${(f.groessen || []).map(x => fcfdGroesse(x.groesse)).join(' · ')}</small></div>
-        <div class="fcr-z">${zeile('Firma', fcrSchalter('firma:' + f.firma, f.an !== false, 'Firma im Funded-CFD-Planer an/aus'))}${tpRegel}</div>
-        ${f.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(f.hinweis))}</div>` : ''}${gr || '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>`
+    const g = D.gemeinsam || {}, C = D.code || {}, z = D.zeiten || {}, zs = C.zeiten_standard || {}
+    const wegText = (C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)'
+    const weg = `<span class="fcr-e-weg" title="${escapeHtml(wegText)}"><i></i>${escapeHtml((C.weg && C.weg.name) || 'Echo')} · mit Hedge</span>`
+    const takt = Math.round((Number(C.takt_s) || 300) / 60), eA = fcrAdmin() && _fcrEdit.ablauf
+    // ── Karte 1: Ablauf
+    const zeit = (k, name, titel) => { const v = z[k] ?? zs[k]
+      return eA ? fcrFeld(name, v, { zeit: k }, { einheit: 'min', titel }) : `<div class="fcr-e-mini" title="${escapeHtml(titel)}"><b>${escapeHtml(v == null ? '–' : fcrZahl(v))}<small> min</small></b><span>${escapeHtml(name)}</span></div>` }
+    const regeln = [['1 Trade pro Tag je Konto', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt'],
+      ['gleiche Richtung je ID × Firma', 'läuft bei derselben ID × Firma schon ein Trade, bekommt der neue dieselbe Richtung'],
+      ['Ziel ab Starting Balance', 'Ziel → Waiting wird am Gewinn über der Starting Balance gemessen'],
+      ['Waiting wird nie geplant', 'Konten in Waiting for Payout bekommen keinen Trade, bis der Payout angefragt ist'],
+      ['1-%-Regel aus dem Konto', 'max_risiko_trade am Konto oder „1% RULE“ im Namen → Stop-Loss aus „SL mit 1-%-Regel“'],
+      ...(Array.isArray(g.hinweise) ? g.hinweise.map(t => [String(t), String(t)]) : [])]
+    const ablauf = `<div class="fcr-e-karte">
+      <div class="fcr-e-kopf"><span>Ablauf<small>Takt alle ${takt} min · gilt für alle Gruppen</small></span><span class="fcr-e-kopf-r">${weg}${fcrStift('ablauf')}</span></div>
+      ${fcrSchalter('aktiv', !!D.aktiv, 'Planer', 'plant Funded-CFD-Konten ohne Plan', eA)}
+      ${fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge laufen ohne Klick', eA)}
+      ${fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → Waiting for Payout', 'Konto mit Ziel automatisch auf Waiting', eA)}
+      ${fcrAbschnitt('Zeiten')}
+      <div class="${eA ? 'fcr-e-felder drei' : 'fcr-e-minis'}">
+        ${zeit('firma_abstand_min', 'Abstand Firma', 'Mindestabstand zwischen zwei Starts derselben Firma — 1 bis 240 min')}
+        ${zeit('abstand_id_min', 'Abstand ID', 'Mindestabstand zwischen zwei Starts derselben ID — 0 bis 240 min')}
+        ${zeit('vorlauf_min', 'Vorlauf', 'Startzeiten frühestens jetzt + Vorlauf — 1 bis 240 min')}
+      </div>
+      ${z.von && z.bis ? fcrZeile('Startfenster', `${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}`, { titel: 'kommt vom Challenge-Planer (dort einstellen)' }) : ''}
+      ${fcrAbschnitt('Fest im Code', fcrSchloss('diese Werte stehen nur in app.py'))}
+      ${fcrZeile('Mindest-TP', `${fcrZahl(C.tp_min_usd ?? 250)} $`, { titel: 'Rest bis zum Ziel kleiner → TP so groß (FCP_TP_MIN_USD)' })}
+      ${fcrZeile('Consistency-Start', `${fcrZahl(C.consistency_start_usd ?? 750)} $`, { titel: 'TP am Zyklus-Beginn, solange die Größe keinen eigenen Wert hat (FCP_CONSISTENCY_START_USD)' })}
+      ${fcrZeile('TP-Deckel', `Ziel + ${fcrZahl(C.tp_deckel_plus_standard ?? 1000)} $`, { titel: 'Standard, solange die Firma keinen eigenen Deckel hat (FCP_TP_DECKEL_PLUS_STANDARD)' })}
+      ${fcrZeile('Refund-Mindest-TP', `${fcrZahl(C.erster_payout_tp_min_usd ?? 25)} $`, { titel: 'Rest bis zum kleinen Ziel winzig → wenigstens so viel (FCP_ERSTER_PAYOUT_TP_MIN_USD)' })}
+      ${fcrZeile('Refund-Lots', `Verhältnis × 2`, { titel: `Lots des Refund-Trades im Verhältnis zum Normal-Trade × 2; ohne Normal-Ziel × ${fcrZahl(C.erster_payout_lots_faktor ?? 0.1)} (FCP_ERSTER_PAYOUT_LOTS_FAKTOR)` })}
+      ${fcrZeile('Lot-Schritt', fcrZahl(C.lot_schritt ?? 0.01), { titel: 'FCP_LOT_SCHRITT' })}
+      ${fcrAbschnitt('So plant er')}
+      <div class="fcr-e-regeln">${regeln.map(([t, d]) => `<div title="${escapeHtml(d)}"><i></i>${escapeHtml(t)}</div>`).join('')}</div>
+    </div>`
+    // ── Karte 2: Firmen (anklicken → Karte 3)
+    const firmen = D.firmen || []
+    if(!firmen.some(f => f.firma === _fcrSel.firma)) _fcrSel.firma = firmen.length ? firmen[0].firma : null
+    const ton = f => typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
+    const groessen = f => (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse))
+    const kurz = f => [f.tp_modus_eff === 'consistency50' ? 'Consistency 50 %' : 'aufs Ziel', f.erster_payout_eff ? 'Refund-Trade' : '',
+      (f.groessen || []).some(x => x.roh && x.roh.gewinntage) ? 'Gewinntage' : ''].filter(Boolean).join(' · ')
+    const liste = `<div class="fcr-e-karte">
+      <div class="fcr-e-kopf"><span>Firmen<small>${firmen.length} im Funded-CFD-Planer · anklicken</small></span></div>
+      <div class="fcr-e-firmen">${firmen.map(f => `<button type="button" class="fcr-e-firma${f.firma === _fcrSel.firma ? ' an' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}">
+          <i style="background:${ton(f)}"></i><span class="fl"><b>${escapeHtml(f.firma)}</b><small>${escapeHtml(f.an === false ? 'aus · wird nicht geplant' : kurz(f))}</small></span>
+          <span class="fg">${groessen(f).map(x => escapeHtml(fcfdGroesse(x.groesse))).join(' · ')}</span><span class="pfeil">›</span></button>`).join('') || '<div class="fcr-leer">keine Firma hinterlegt</div>'}</div>
+      <div class="fcr-e-fuss">Neue Firma oder Größe legt der Master in der Regel an — hier werden die Werte gepflegt.</div>
+    </div>`
+    // ── Karte 3: gewählte Firma
+    const f = firmen.find(x => x.firma === _fcrSel.firma)
+    let detail = '<div class="fcr-e-karte"><div class="fcr-leer">keine Firma gewählt</div></div>'
+    if(f){
+      const gl = groessen(f), eF = fcrAdmin() && _fcrEdit.firma, fz = { firma: f.firma }
+      if(!gl.some(x => String(x.groesse) === String(_fcrSel.groesse))) _fcrSel.groesse = gl.length ? String(gl[0].groesse) : null
+      const cons = f.tp_modus_eff === 'consistency50', ep = f.erster_payout_eff, epDb = !!(f.erster_payout && typeof f.erster_payout === 'object')
+      const key = String((f.namen || [])[0] || '').toLowerCase(), modusStd = !!((C.tp_modus_standard || {})[key])
+      const startStd = fcrZahl(C.consistency_start_usd ?? 750), deckelEff = fcrZahl(f.tp_deckel_plus_eff ?? 1000)
+      let inhalt
+      if(!eF){
+        // LESE-ANSICHT: Regel der Firma als kurze Zeilen, je Größe ein Block mit vier Kennzahlen groß + Rest klein
+        const tp = cons ? 'Consistency 50 % je Zyklus' : `aufs Ziel, höchstens Ziel + ${deckelEff} $`
+        const regel = `<div class="fcr-e-regel">
+          ${fcrZeile('Take-Profit', tp, { code: (cons && modusStd && !f.tp_modus) || (!cons && f.tp_deckel_plus == null) ? 'Standard aus dem Code' : '' })}
+          ${cons ? fcrZeile('danach', 'höchstens die Gewinne des Zyklus') : ''}
+          ${!cons && f.tp_zyklen_eff ? fcrZeile('TP-Zyklen', f.tp_zyklen_eff.map(fcrZahl).join(' · ') + ' $', { code: f.tp_zyklen ? '' : 'Standard aus dem Code' }) : ''}
+          ${fcrZeile('Refund-Trade', ep ? `bis zum 1. Payout · Ziel +${fcrSpanne(ep.ziel, '$')} · Hedge ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD${ep.lots_faktor != null ? ' · Lots × ' + fcrZahl(ep.lots_faktor) : ''}` : 'keiner', { code: ep && !epDb ? 'Standard aus dem Code' : '' })}
+        </div>`
+        const block = x => { const r = x.roh || {}, gt = r.gewinntage && typeof r.gewinntage === 'object' ? r.gewinntage : null
+          const klein = [
+            cons ? fcrZeile('Consistency-Start', `${r.tp_erster != null ? fcrZahl(r.tp_erster) : startStd} $`, { code: r.tp_erster == null ? 'Standard aus dem Code' : '' }) : (r.tp_erster != null ? fcrZeile('TP 1. Zyklus', `${fcrZahl(r.tp_erster)} $`) : ''),
+            fcrZeile('SL mit 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL'),
+            r.daily_loss != null ? fcrZeile('Daily Loss', `${fcrZahl(r.daily_loss)} $`) : '',
+            gt ? fcrZeile('Gewinntage', `${fcrZahl(gt.anzahl)} Tage ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}`, { titel: 'vor dem Ziel: so viele Gewinntage mit mindestens diesem Gewinn' }) : ''].join('')
+          return `<div class="fcr-e-gr"><div class="fcr-e-gr-kopf">${escapeHtml(fcfdGroesse(x.groesse))}<small>Konto ${escapeHtml(fcrZahl(x.groesse))} $</small></div>
+            <div class="fcr-e-kpis">
+              ${fcrKpi('Ziel → Waiting', '+' + (fcrSpanne(r.ziel) || '–'), '$ Gewinn', 'Gewinn über der Starting Balance, ab dem das Konto auf Waiting for Payout geht')}
+              ${fcrKpi('Stop-Loss', fcrSpanne(r.sl) || '–', '$ je Trade')}
+              ${fcrKpi('Lots', fcrSpanne(r.lots) || '–', 'gewürfelt')}
+              ${fcrKpi('Hedge', r.hedge_eur != null ? fcrZahl(r.hedge_eur) + ' €' : '–', r.dd != null ? `auf ${fcrZahl(r.dd)} $ DD` : '', 'Fusion-Gegenhedge je Konto für diesen Max Drawdown')}
+            </div>${klein ? `<div class="fcr-e-klein">${klein}</div>` : ''}</div>` }
+        inhalt = `${regel}${gl.map(block).join('') || '<div class="fcr-leer">keine Größe hinterlegt</div>'}`
+      } else {
+        // BEARBEITEN: Felder wie Winning Days — Firma-Regel, dann die gewählte Größe
+        const modus = !modusStd
+          ? `<div class="fcr-e-feld"><label>TP-Modus</label><select class="fcr-e-in" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'tp_modus', wahl: true }, fz)))}">
+              <option value=""${cons ? '' : ' selected'}>aufs Ziel, gedeckelt</option><option value="consistency50"${cons ? ' selected' : ''}>Consistency 50 % je Zyklus</option></select></div>`
+          : `<div class="fcr-e-feld"><label>TP-Modus</label><div class="fcr-e-wert">Consistency 50 % je Zyklus</div>${f.tp_modus ? '' : `<div class="fcr-e-hinweis">${fcrStd('für ' + f.firma)}</div>`}</div>`
+        const deckel = !cons ? fcrFeld('TP-Deckel', f.tp_deckel_plus ?? null, Object.assign({ feld: 'tp_deckel_plus' }, fz),
+          { einheit: '$ über dem Ziel', leer: deckelEff, hinweis: f.tp_deckel_plus == null ? fcrStd(deckelEff + ' $') : '', titel: 'TP höchstens so weit über dem Ziel' }) : ''
+        const zyklen = f.tp_zyklen_eff && !cons && Array.isArray(f.tp_zyklen)
+          ? `<div class="fcr-e-feld breit"><label>TP-Zyklen <small>· $ je Payout-Zyklus</small></label><input class="fcr-e-in" type="text" value="${escapeHtml(f.tp_zyklen.map(fcrZahl).join(' · '))}" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'tp_zyklen', liste: true }, fz)))}" title="Beträge getrennt mit · oder ;"></div>` : ''
+        const refund = ep && epDb ? `${fcrAbschnitt('Refund-Trade', 'bis zum 1. Payout')}<div class="fcr-e-felder">
+            ${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), { bereich: true, einheit: '$ Gewinn' })}
+            ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), { einheit: '€ je $ DD' })}
+            ${ep.lots_faktor != null ? fcrFeld('Lots ×', ep.lots_faktor, Object.assign({ feld: 'erster_payout.lots_faktor' }, fz), { titel: 'fester Faktor auf die Normal-Lots' }) : ''}</div>`
+          : ep ? `${fcrAbschnitt('Refund-Trade', 'bis zum 1. Payout')}<div class="fcr-e-hinweis">${fcrStd('für ' + f.firma)} — nicht in der Regel hinterlegt, darum hier nicht änderbar</div>` : ''
+        const x = gl.find(y => String(y.groesse) === String(_fcrSel.groesse))
+        let gr = '<div class="fcr-leer">keine Größe hinterlegt</div>'
+        if(x){ const gz = Object.assign({ groesse: String(x.groesse) }, fz), r = x.roh || {}, gt = r.gewinntage && typeof r.gewinntage === 'object' ? r.gewinntage : null
+          const seg = `<div class="fcr-e-seg">${gl.map(y => `<button type="button" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === String(_fcrSel.groesse) ? ' class="on"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>`
+          gr = `<div class="fcr-e-abschnitt fcr-e-abschnitt-seg"><span>Größe</span>${seg}</div>
+            <div class="fcr-e-felder">
+              ${fcrFeld('Ziel → Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$ Gewinn', titel: 'Gewinn über der Starting Balance, ab dem das Konto auf Waiting for Payout geht' })}
+              ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
+              ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
+              ${fcrFeld('SL mit 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
+              ${fcrFeld('Hedge', r.hedge_eur ?? null, Object.assign({ feld: 'hedge_eur' }, gz), { einheit: '€ auf Fusion' })}
+              ${fcrFeld('für Max DD', r.dd ?? null, Object.assign({ feld: 'dd' }, gz), { einheit: '$ am Konto', titel: 'Max Drawdown des Kontos, auf den sich der Hedge-Betrag bezieht' })}
+              ${cons ? fcrFeld('Consistency-Start', r.tp_erster ?? null, Object.assign({ feld: 'tp_erster' }, gz), { einheit: '$', leer: startStd, hinweis: r.tp_erster == null ? fcrStd(startStd + ' $') : '' })
+                : (r.tp_erster != null ? fcrFeld('TP 1. Zyklus', r.tp_erster, Object.assign({ feld: 'tp_erster' }, gz), { einheit: '$', leer: '–' }) : '')}
+              ${fcrFeld('Daily Loss', r.daily_loss ?? null, Object.assign({ feld: 'daily_loss' }, gz), { einheit: '$', leer: 'keiner' })}
+            </div>
+            ${gt ? `${fcrAbschnitt('Gewinntage', 'vor dem Ziel')}<div class="fcr-e-felder">
+              ${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage.anzahl' }, gz), { einheit: 'Tage' })}
+              ${fcrFeld('je mindestens', gt.min, Object.assign({ feld: 'gewinntage.min' }, gz), { einheit: '$' })}
+              ${fcrFeld('TP je Gewinntag', gt.tp, Object.assign({ feld: 'gewinntage.tp' }, gz), { bereich: true, einheit: '$', breit: true })}</div>` : ''}` }
+        inhalt = `${fcrSchalter('firma:' + f.firma, f.an !== false, 'Im Planer', 'Konten dieser Firma werden geplant', true)}
+          ${fcrAbschnitt('Take-Profit')}<div class="fcr-e-felder">${modus}${deckel}${zyklen}</div>${refund}${gr}`
+      }
+      detail = `<div class="fcr-e-karte fcr-e-detail">
+        <div class="fcr-e-kopf"><span class="fcr-e-titel"><i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}<small>${gl.map(x => escapeHtml(fcfdGroesse(x.groesse))).join(' · ')} · ${f.an === false ? 'aus — wird nicht geplant' : 'im Planer'}</small></span>
+          <span class="fcr-e-kopf-r"><span class="fcr-e-weg klein" title="${escapeHtml(wegText)}"><i></i>${escapeHtml(f.weg || 'Echo')} · Hedge</span>${fcrStift('firma')}</span></div>
+        ${inhalt}
+        ${f.hinweis ? `<div class="fcr-e-fuss">${escapeHtml(String(f.hinweis))}</div>` : ''}
+      </div>`
     }
-    return `<div class="fcr-grid">${gemKarte}${(D.firmen || []).map(firmaKarte).join('')}</div>`
+    return `<div class="fcr-e" data-fcr-wurzel>${ablauf}${liste}${detail}</div>`
   }
   // Rohdaten aus der DB → normalisiert (Adapter, sobald S4 die Struktur geliefert hat)
   // Quelle (S4, 30.10.2026): GET /admin/funded-cfd-plan — Tabelle funded_cfd_plan_regeln hat RLS ohne Policy, also nur über die Route.
@@ -84753,7 +84955,7 @@
     return { aktiv: !!roh.aktiv, zeiten: z, code: roh.code || {},
       gemeinsam: { auto_bestaetigen: !!roh.auto_bestaetigen, ziel_auto_wartet: !!roh.ziel_auto_wartet, hinweise: hin },
       firmen: roh.firmen.filter(f => f && f.je_groesse && typeof f.je_groesse === 'object').map(f => ({
-        firma: String(f.name || '?'), an: f.an, weg: f.weg,
+        firma: String(f.name || '?'), an: f.an, weg: f.weg, namen: f.namen,
         tp_modus: f.tp_modus, tp_modus_eff: f.tp_modus_eff, tp_zyklen: f.tp_zyklen, tp_zyklen_eff: f.tp_zyklen_eff,
         tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
         hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', Array.isArray(f.ohne_namen) && f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
@@ -84763,33 +84965,114 @@
   }
   // Speichern (E1): ein Feld bzw. ein Schalter → POST /admin/funded-cfd-plan/regel, danach neu laden; Fehler als Toast mit dem Grund des Servers
   // mehrere Felder kurz hintereinander (Tab ins nächste Feld): nacheinander speichern, neu laden erst nach dem letzten (Fremd-Review E1)
-  const _fcrSpeichert = { kette: Promise.resolve(), offen: 0 }
+  const _fcrSpeichert = { kette: Promise.resolve(), offen: 0, token: 0 }
   function fcrSpeichern(body, el){
     if(!window._fcfdAdmin) return
-    _fcrSpeichert.offen++; if(el) el.disabled = true
+    const els = Array.isArray(el) ? el : el ? [el] : []
+    _fcrSpeichert.offen++; els.forEach(x => { x.disabled = true })
     _fcrSpeichert.kette = _fcrSpeichert.kette.then(async () => {
       try{ await apdApi('POST', '/regel', body, '/admin/funded-cfd-plan')
+        els.forEach(x => { if(x.tagName === 'INPUT') x.defaultValue = x.value })
+        fcrLokal(body)   // lokale Daten sofort nachführen: Firma-/Größenwechsel vor dem Neuladen zeichnet sonst alte Werte (Fremd-Review E1-Design)
+        if(body.feld === 'tp_modus' || typeof body.an === 'boolean') document.querySelectorAll('[data-fcr-wurzel]').forEach(fcrNeuZeichnen)   // Modus/Firma an: andere Felder gelten
         if(typeof atToast === 'function') atToast('✓ Funded-CFD-Regel gespeichert — gilt ab dem nächsten Planer-Takt', 'start') }
-      catch(e){ if(typeof atToast === 'function') atToast('Regel nicht gespeichert: ' + ((e && e.message) || e), 'end') }
-      finally{ if(el) el.disabled = false
-        if(--_fcrSpeichert.offen === 0){ fcfdRegelnLaden(true); window._apIdsLaden?.() } }
+      catch(e){ els.forEach(x => { if(x.type === 'checkbox') x.checked = !x.checked; else if(x.tagName === 'SELECT') [...x.options].forEach(o => { o.selected = o.defaultSelected }); else if(x.tagName === 'INPUT') x.value = x.defaultValue })   // nicht gespeichert → alter Wert zurück (sonst stünde ein Wert da, der nicht gilt)
+        if(typeof atToast === 'function') atToast('Regel nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+      finally{ els.forEach(x => { x.disabled = false })
+        if(--_fcrSpeichert.offen === 0) fcrNachladen() }
     })
+  }
+  // eine gespeicherte Änderung in _fcfdR.d übernehmen (gleiche Bedeutung wie fcp_regel_patch auf dem Server); das Neuladen danach bestätigt es
+  function fcrLokal(b){
+    const D = _fcfdR.d; if(!D || !b) return
+    try{
+      if(b.schalter){ if(b.schalter === 'aktiv') D.aktiv = !!b.wert; else { D.gemeinsam = D.gemeinsam || {}; D.gemeinsam[b.schalter] = !!b.wert }; return }
+      const rund = x => { const n = Number(x), f = Math.floor(n); return n - f === 0.5 ? (f % 2 === 0 ? f : f + 1) : Math.round(n) }   // wie Pythons round (halbe auf gerade)
+      if(b.zeit){ D.zeiten = Object.assign({}, D.zeiten, { [b.zeit]: rund(b.wert) }); return }
+      const f = (D.firmen || []).find(x => x.firma === b.firma); if(!f) return
+      if(!b.feld && typeof b.an === 'boolean'){ f.an = b.an
+        const rest = String(f.hinweis || '').replace(/^aus — wird nicht geplant( · )?/, ''); f.hinweis = b.an ? rest : ['aus — wird nicht geplant', rest].filter(Boolean).join(' · '); return }
+      if(b.groesse != null){
+        const g = (f.groessen || []).find(x => String(x.groesse) === String(b.groesse)); if(!g) return
+        g.roh = Object.assign({}, g.roh)
+        if(b.feld.startsWith('gewinntage.')){ const t = b.feld.slice(11); g.roh.gewinntage = Object.assign({}, g.roh.gewinntage, { [t]: t === 'anzahl' ? rund(b.wert) : b.wert }); return }
+        if(b.wert == null) delete g.roh[b.feld]; else g.roh[b.feld] = b.wert
+        return }
+      if(b.feld === 'tp_deckel_plus'){ f.tp_deckel_plus = b.wert ?? null; f.tp_deckel_plus_eff = b.wert ?? ((D.code || {}).tp_deckel_plus_standard ?? 1000); return }
+      if(b.feld === 'tp_zyklen'){ f.tp_zyklen = b.wert; f.tp_zyklen_eff = b.wert; return }
+      if(b.feld === 'tp_modus'){ f.tp_modus = b.wert || null; f.tp_modus_eff = b.wert || null; return }
+      if(b.feld.startsWith('erster_payout.') && f.erster_payout && typeof f.erster_payout === 'object'){
+        const t = b.feld.slice(14); f.erster_payout = Object.assign({}, f.erster_payout, { [t]: b.wert }); f.erster_payout_eff = Object.assign({}, f.erster_payout_eff, { [t]: b.wert }) }
+    }catch(_){ /* nur Anzeige — das Neuladen holt den echten Stand */ }
+  }
+  // Neuladen nach dem Speichern erst, wenn kein Feld der Einstellungen mehr den Fokus hat (höchstens ~60 s warten)
+  // Jede neue Speicherung startet die Warte-Kette neu (Token) — ältere Ketten verfallen. Kein Zwangs-Neuladen, solange jemand in den Einstellungen
+  // ist (fcrLokal hält die Anzeige schon aktuell); nach ~10 min ohne Verlassen wird nicht mehr nachgeladen, der normale Takt holt es dann
+  function fcrNachladen(token, n = 0){
+    if(token == null){ token = ++_fcrSpeichert.token }
+    if(token !== _fcrSpeichert.token || _fcrSpeichert.offen) return
+    const drin = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-fcr-wurzel]')
+    if(drin){ if(n < 1500) setTimeout(() => fcrNachladen(token, n + 1), 400); return }
+    fcfdRegelnLaden(true); window._apIdsLaden?.()
+  }
+  // Verdrahtung je Einstellungs-Block (data-fcr-wurzel, einmal je Block): Firma/Größe wählen zeichnet nur den Block neu (Auswahl bleibt in _fcrSel),
+  // Felder speichern beim Verlassen/Enter, Schalter sofort. Spanne = zwei Felder von – bis → eine Änderung [von, bis]
+  // einen Einstellungs-Block aus _fcfdR.d neu zeichnen und verdrahten (Auswahl, Bearbeiten, nach dem Speichern von TP-Modus/Firma an)
+  function fcrNeuZeichnen(w){
+    if(!w || !w.isConnected) return null
+    const tmp = document.createElement('div'); tmp.innerHTML = fcfdRegelnHtml(); const neu = tmp.firstElementChild
+    if(!neu) return null
+    const eltern = w.parentElement; w.replaceWith(neu); fcfdRegelnVerdrahten(eltern); return neu
   }
   function fcfdRegelnVerdrahten(root){
     if(!root) return
-    root.querySelectorAll('input[data-fcr-in]').forEach(i => {
-      const los = () => { let ziel; try{ ziel = JSON.parse(i.dataset.fcrIn) }catch(_){ return }
-        const alt = i.defaultValue; if(i.value === alt) return
-        let wert
-        if(ziel.liste){ wert = String(i.value).split(/\s*[·;]\s*/).filter(Boolean).map(t => fcrWertLesen(t, false)); if(!wert.length || wert.some(w => typeof w !== 'number')){ i.value = alt; atToast?.('Zyklen: Beträge getrennt mit · oder ;', 'end'); return } }
-        else { wert = fcrWertLesen(i.value, ziel.bereich); if(wert === undefined){ i.value = alt; atToast?.(`„${i.value}“ ist keine Zahl${ziel.bereich ? ' bzw. kein Bereich von–bis' : ''}`, 'end'); return } }
-        const body = ziel.zeit ? { zeit: ziel.zeit, wert } : Object.assign({ firma: ziel.firma, feld: ziel.feld, wert }, ziel.groesse ? { groesse: ziel.groesse } : {})
-        fcrSpeichern(body, i) }
-      i.addEventListener('change', los); i.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); i.blur() } })
+    root.querySelectorAll('[data-fcr-wurzel]').forEach(w => { if(w.dataset.fcrV) return; w.dataset.fcrV = '1'
+      w.addEventListener('click', e => {
+        const fb = e.target.closest('[data-fcr-firma]'), gb = e.target.closest('[data-fcr-gr]'), eb = e.target.closest('[data-fcr-edit]'); if(!fb && !gb && !eb) return
+        e.preventDefault()
+        if(eb){ if(!fcrAdmin()) return; _fcrEdit[eb.dataset.fcrEdit] = !_fcrEdit[eb.dataset.fcrEdit] }   // Bearbeiten ↔ Ansicht je Karte
+        else if(fb){ if(_fcrSel.firma === fb.dataset.fcrFirma) return; _fcrSel.firma = fb.dataset.fcrFirma; _fcrSel.groesse = null }
+        else { if(_fcrSel.groesse === gb.dataset.fcrGr) return; _fcrSel.groesse = gb.dataset.fcrGr }
+        const neu = fcrNeuZeichnen(w)
+        if(fb && neu) neu.querySelector('.fcr-e-detail')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // Handy: Detail steht unter der Liste
+      })
+      w.querySelectorAll('[data-fcr-in]').forEach(i => {
+        let ziel; try{ ziel = JSON.parse(i.dataset.fcrIn) }catch(_){ return }
+        const zurueck = (t) => { i.value = i.defaultValue; if(t) atToast?.(t, 'end') }
+        const los = () => {
+          if(i.tagName === 'SELECT'){ fcrSpeichern(Object.assign({ firma: ziel.firma, feld: ziel.feld, wert: i.value || '' }), i); return }
+          if(i.value === i.defaultValue) return
+          let wert
+          if(ziel.liste){ wert = String(i.value).split(/\s*[·;]\s*/).filter(Boolean).map(t => fcrWertLesen(t, false))
+            if(!wert.length || wert.some(x => typeof x !== 'number')) return zurueck('Zyklen: Beträge getrennt mit · oder ;') }
+          else if(ziel.teil) return   // Spanne: speichert der focusout der Box (unten), wenn beide Felder fertig sind
+          else { wert = fcrWertLesen(i.value, false); if(wert === undefined) return zurueck(`„${i.value}“ ist keine Zahl`) }
+          const body = ziel.zeit ? { zeit: ziel.zeit, wert } : Object.assign({ firma: ziel.firma, feld: ziel.feld, wert }, ziel.groesse ? { groesse: ziel.groesse } : {})
+          fcrSpeichern(body, i)
+        }
+        if(!ziel.teil) i.addEventListener('change', los)
+        if(i.tagName === 'INPUT') i.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); i.blur() }
+          else if(e.key === 'Escape'){ const box = i.closest('.fcr-e-spanne'); (box ? box.querySelectorAll('input') : [i]).forEach(x => { x.value = x.defaultValue }); i.blur() } })   // Esc: ganze Spanne verwerfen
+      })
+      // Spanne (von – bis): erst speichern, wenn der Fokus die Box verlässt (Tab von „von" nach „bis" zählt nicht) — Fremd-Review E1-Design: sonst prüfte
+      // „von" gegen das alte „bis" (Verschieben nach oben unmöglich) bzw. Leeren schrieb kurz [bis, bis] scharf. „bis" leer → wie „von", beide leer → Feld leeren
+      w.querySelectorAll('.fcr-e-spanne').forEach(box => box.addEventListener('focusout', e => {
+        if(e.relatedTarget && box.contains(e.relatedTarget)) return
+        // Fensterwechsel (Cmd-Tab) mitten in der Spanne: nicht speichern — beim Zurückkommen und Verlassen speichert es dann
+        if(!e.relatedTarget && typeof document.hasFocus === 'function' && !document.hasFocus()) return
+        const [ev, eb] = box.querySelectorAll('input'); if(!ev || !eb || (ev.value === ev.defaultValue && eb.value === eb.defaultValue)) return
+        let ziel; try{ ziel = JSON.parse(ev.dataset.fcrIn) }catch(_){ return }
+        const zur = t => { ev.value = ev.defaultValue; eb.value = eb.defaultValue; if(t) atToast?.(t, 'end') }
+        const a = fcrWertLesen(ev.value, false), b = fcrWertLesen(eb.value, false)
+        if(a === undefined || b === undefined) return zur('keine Zahl — von und bis als Zahl eingeben')
+        let wert = null
+        if(a != null || b != null){ const von = a ?? b, bis = b ?? a; if(von > bis) return zur('von muss kleiner oder gleich bis sein'); wert = [von, bis] }
+        fcrSpeichern(Object.assign({ firma: ziel.firma, feld: ziel.feld, wert }, ziel.groesse ? { groesse: ziel.groesse } : {}), [ev, eb])
+      }))
+      w.querySelectorAll('input[data-fcr-sw]').forEach(c => c.addEventListener('change', e => { e.stopPropagation()
+        const k = c.dataset.fcrSw, body = k.startsWith('firma:') ? { firma: k.slice(6), an: c.checked } : { schalter: k, wert: c.checked }
+        fcrSpeichern(body, c) }))
     })
-    root.querySelectorAll('input[data-fcr-sw]').forEach(c => c.addEventListener('change', e => { e.stopPropagation()
-      const k = c.dataset.fcrSw, body = k.startsWith('firma:') ? { firma: k.slice(6), an: c.checked } : { schalter: k, wert: c.checked }
-      fcrSpeichern(body, c) }))
   }
   const fcfdQuelle = () => typeof window._fcfdRegelnQuelle === 'function' ? window._fcfdRegelnQuelle() : apdApi('GET', '', null, '/admin/funded-cfd-plan')
   async function fcfdRegelnLaden(neu){
@@ -84885,8 +85168,8 @@
     if(u) k = k.filter(e => String(e.r.user_id) === String(u))
     // PAYOUTS AUF DEM WEG statt „Firmen · n“ (Finn 30.10.2026 ~07:56 über den Master)
     const konten = ad ? fcfdWartetHtml(k) + fcfdUnterwegsHtml(ad, k, u) : apgKarte('Waiting for Payout', 'Konten-Übersicht lädt …', '<div class="apg-leer" style="padding:18px 0">lädt …</div>')
-    const regeln = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Regeln je Prop-Firma</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
-        <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Regeln</summary>${fcfdRegelnHtml()}</details></div>`
+    const regeln = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
+        <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Werte je Firma</summary>${fcfdRegelnHtml()}</details></div>`
     let news = ''; try{ news = fcfdNewsKarteHtml() }catch(e){ console.warn('[apg] News-Kachel', e) }
     return konten + `<div class="fcr-unten">${regeln.replace('<details class="apg-schalter" data-fcfd-regeln', news + '<details class="apg-schalter" data-fcfd-regeln')}</div>`
   }
@@ -84987,7 +85270,7 @@
     // Werte aus der DB (fcfdRegelnLaden) — keine zweite Wahrheit im HTML; solange nichts hinterlegt ist, steht das dort
     const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
         <button type="button" class="apg-haupt" disabled title="Der Funded-CFD-Planer plant noch nicht — die Regeln stehen schon">Jetzt planen</button>
-        <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Regeln</summary>${fcfdRegelnHtml()}</details></div>`
+        <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Werte je Firma</summary>${fcfdRegelnHtml()}</details></div>`
     const firmenKarte = fcfdFirmenHtml(k)
     const geld = e => e.bal == null ? '–' : (e.ccy === 'EUR' ? apgZahl(e.bal) + ' €' : apgZahl(e.bal) + ' $')
     const kachel = e => `<div class="apg-konto" title="${escapeHtml(e.r.name || '')}">
