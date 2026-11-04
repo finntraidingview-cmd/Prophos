@@ -158,8 +158,8 @@ check(ft["fehlt"] is True and ft["groessen"][0]["min_usd"] is None and ft["groes
 check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] is None, "Tradeify CFD zählt nie als Tradeify-WD")
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)' in gt2 and "_fr = _wd_firmen_regeln_lesen()" in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
-check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
-check("e2In(" not in HTML.split("const wdGruppe")[1].split("// (4) KONTOLISTE")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
+check("const wdGruppe = !wd ? ''" in HTML and "${edit}${wdGruppe}" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
+check("e2In(" not in HTML.split("const wdGruppe")[1].split("detailK = `")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
 check(all(isinstance(b, dict) and b.get("name") and b.get("wert") for x in (apex, tr, lu) for b in x["_dicts"]), "Besonderheiten als Parameter {name, wert, info}")
 check('class="e2-kchip e2-knur"' in HTML and "nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nur-ansehen-Chip in der Regel-Zeile (Grund im Tooltip), Erklärungen hinter ⓘ")
 
@@ -232,7 +232,8 @@ r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000)
 check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
 src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
 check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
-check('type="range" class="e2-range"' in HTML and "const kontoZeile" in HTML and 'class="wd-set-grid"' in HTML and "wd-firma-edit e2-fedit" in HTML, "Frontend: WD-Karte (drei Spalten), Firma inline aufgeklappt mit Consistency-Slider, Kontoliste")
+check('type="range" class="e2-range"' in HTML and 'class="wd-set-grid"' in HTML and "let detailK" in HTML and "${ablauf}${firmenK}${detailK}" in HTML and "const kontoZeile" not in HTML,
+      "Nachtrag 8: Ablauf | Firmen (nur Liste) | Details der gewählten Firma mit Consistency-Slider + Winning Day, keine Konten-Spalte")
 check("konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]" in HTML and "start: an.start ?? (typeof z.start === 'number'" in HTML, "Kontoliste aus den Zeilen des Laufs, Anzeige-Werte vor der Uhrzeit start")
 check("data-e2-mehr" in HTML and "const sicherheit = !_e2.mehr ? '' :" in HTML, "Sicherheit hinter „mehr“")
 check(HTML.index("e2Oben = e2EinstHtml") < HTML.index("const listen = `<div data-apg-anker=\"offen\">"), "Block steht vor „Zu bestätigen“ (direkt am Zeitstrahl)")

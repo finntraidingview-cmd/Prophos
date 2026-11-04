@@ -4117,7 +4117,7 @@
   #ap-ids-root.ap-guestly #e2-einst.e2-wdgr{padding:16px 18px} #ap-ids-root.ap-guestly #e2-einst.e2-wdgr.zu{padding:12px 18px}
   #ap-ids-root.ap-guestly #e2-einst .wd-panel-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap} #ap-ids-root.ap-guestly #e2-einst.zu .wd-panel-kopf{margin-bottom:0}
   #ap-ids-root.ap-guestly #e2-einst .panel-title{font-size:15px;font-weight:600;color:var(--g-text)} #ap-ids-root.ap-guestly #e2-einst .e2-psub{font-weight:400;color:var(--g-sub);font-size:12px}
-  #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch}   /* Firmen trägt die Felder → breiter als bei WD */
+  #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.05fr) minmax(0,1.3fr);gap:14px;align-items:stretch}   /* Nachtrag 8: rechts die Firma mit den Feldern → breiter */
   @media (max-width:1180px){ #ap-ids-root.ap-guestly #e2-einst .wd-set-grid{grid-template-columns:1fr} }
   #ap-ids-root.ap-guestly #e2-einst .wd-set-card{background:var(--g-kpi);border:0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-width:0}
   #ap-ids-root.ap-guestly #e2-einst .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--g-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3;color:var(--g-text)}
@@ -4139,9 +4139,9 @@
   #ap-ids-root.ap-guestly #e2-einst .wd-firma .fz{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;white-space:nowrap;color:var(--g-text);font-variant-numeric:tabular-nums;max-width:52%;overflow:hidden;text-overflow:ellipsis;justify-self:end}
   #ap-ids-root.ap-guestly #e2-einst .wd-firma .pfeil{font-size:11px;color:var(--g-sub);text-align:center}
   #ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .fn,#ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .fz,#ap-ids-root.ap-guestly #e2-einst .wd-firma.offen .pfeil{color:var(--g-lila)}
-  #ap-ids-root.ap-guestly #e2-einst .e2-fedit{padding:4px 4px 14px 24px;border-bottom:1px solid var(--g-rand)}
-  #ap-ids-root.ap-guestly #e2-einst .e2-fedit-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 0 4px} #ap-ids-root.ap-guestly #e2-einst .e2-fedit .e2-gr{margin:0}
-  #ap-ids-root.ap-guestly #e2-einst .e2-fedit .apg-zeitraum button{padding:6px 12px;font-size:12px}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fdetail{padding:0} #ap-ids-root.ap-guestly #e2-einst .e2-sc-detail .e2-dname{font-size:14.5px} #ap-ids-root.ap-guestly #e2-einst .e2-sc-detail .e2-wd{margin-top:4px}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fdetail .e2-fedit-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 0 4px} #ap-ids-root.ap-guestly #e2-einst .e2-fdetail .e2-gr{margin:0}
+  #ap-ids-root.ap-guestly #e2-einst .e2-fdetail .apg-zeitraum button{padding:6px 12px;font-size:12px}
   #ap-ids-root.ap-guestly #e2-einst .e2-cons{border-top:0;min-height:34px;padding:0 0 4px}
   #ap-ids-root.ap-guestly #e2-einst .e2-fest-z{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--g-sub);margin:-2px 0 6px} #ap-ids-root.ap-guestly #e2-einst .e2-fest-z span{display:flex;align-items:center} #ap-ids-root.ap-guestly #e2-einst .e2-fest-z b{margin-left:auto;font-weight:500;color:var(--g-text);font-variant-numeric:tabular-nums}
   #ap-ids-root.ap-guestly #e2-einst .e2-konten{display:flex;flex-direction:column} #ap-ids-root.ap-guestly #e2-einst .e2-konten > .e2-konto:first-child{border-top:0}
@@ -85950,17 +85950,16 @@
         return e2WF(l + ' · ' + e, u, e2In(p(k), v, darfR, { label: l }), klein) }
       const consOrig = f.consistency_pct != null ? Number(f.consistency_pct) : null
       const consAn = !!e2Wert(`f.${fi}.cons.an`, consOrig != null), consW = e2Zahl(e2Wert(`f.${fi}.cons`, String(consOrig != null ? consOrig : 50))) || 50
-      _e2._cons = consAn ? consW : null   // für die Kontoliste in Karte 3
       const kt = w.kontrakte && typeof w.kontrakte === 'object' ? Object.entries(w.kontrakte).sort((a, b) => Number(a[0]) - Number(b[0])) : []
       const ktZeilen = kt.map(([k, a]) => { const pk = p('kontrakte') + '.' + k, pct = Math.round(Number(a) * 1000) / 10, ist = e2Zahl(e2Wert(pk, String(pct)))
         return `<div class="e2-kt"><span>${escapeHtml(k)} ${escapeHtml(String(f.symbol || 'NQ'))}</span><span class="e2-balken"><b style="width:${Math.max(0, Math.min(100, ist == null ? pct : ist))}%"></b></span>${e2In(pk, pct, darfR, { kurz: true, einheit: '%', label: k + ' Kontrakte Anteil' })}</div>` }).join('')
       const weitere = Object.keys(w).filter(k => k !== 'kontrakte' && !E2_FELD[k])
       const pille = grs.length > 1 ? `<div class="apg-zeitraum e2-gr" role="tablist" aria-label="Kontogröße">${grs.map(x => `<button type="button" class="${x === g ? 'on' : ''}" data-e2-gr="${fi}:${escapeHtml(x)}" role="tab" aria-selected="${x === g}">${escapeHtml(fcfdGroesse(x))}</button>`).join('')}</div>` : ''
-      edit = `<div class="wd-firma-edit e2-fedit">
+      edit = `<div class="e2-fdetail">
         <div class="e2-fedit-kopf">${pille}<label class="e2-dsch">${e2I(grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}<span>im Planer</span><input type="checkbox" class="e2-sw" data-e2-pfad="f.${fi}.an" data-e2-orig="${f.an ? '1' : ''}"${e2Wert(`f.${fi}.an`, !!f.an) ? ' checked' : ''}${darfR && grs.length ? '' : ' disabled'}></label></div>
         ${grs.length ? `<div class="wd-abl-abschnitt">Ziel</div>
         <div class="wd-felder">${w.ziel_gewinn != null ? feld('ziel_gewinn') : ''}</div>
-        ${e2Sch(`f.${fi}.cons.an`, consOrig != null, darfR, 'Consistency', 'größter Tag höchstens x % des Gewinns im Zyklus — nur Anzeige in der Kontoliste, der Planer prüft keine Consistency')}
+        ${e2Sch(`f.${fi}.cons.an`, consOrig != null, darfR, 'Consistency', 'größter Tag höchstens x % des Gewinns im Zyklus — nur Parameter, der Funded-Planer prüft keine Consistency (Finn 27.10.2026)')}
         ${consAn ? `<div class="e2-zeile e2-cons"><input type="range" class="e2-range" min="10" max="100" step="5" data-e2-pfad="f.${fi}.cons" data-e2-orig="${consOrig != null ? consOrig : ''}" value="${consW}"${darfR ? '' : ' disabled'} aria-label="Consistency in %"><output class="e2-range-w">${e2De(consW)} %</output></div>` : ''}
         <div class="wd-abl-abschnitt">Trade<span class="e2-modus">${rest ? 'Rest bis Ziel' : 'normal'}${e2I(modusInfo)}</span></div>
         <div class="wd-felder">${['max_trade', 'sl', 'dd', 'daily_usd', 'kosten_eur', 'hedge_eur'].filter(k => w[k] != null).map(feld).join('')}
@@ -85969,27 +85968,15 @@
         ${weitere.map(k => `<div class="e2-zeile">${e2L(k, null, null, 'nur per SQL')}<em>${escapeHtml(typeof w[k] === 'object' ? JSON.stringify(w[k]) : String(w[k]))}</em></div>`).join('')}`
         : '<div class="wd-fuss">noch keine Werte hinterlegt — neue Größen per SQL</div>'}</div>`
     }
-    const firmenK = `<div class="wd-set-card"><h4><span>Firmen<span class="h4sub">${an.length} von ${firmen.length} im Planer · Ziel, Trade je Größe</span></span>${f && grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
+    const firmenK = `<div class="wd-set-card"><h4><span>Firmen<span class="h4sub">${an.length} von ${firmen.length} im Planer · Klick zeigt rechts die Details</span></span></h4>
       <div class="e2-wdliste">${firmen.map((x, i) => { const gr = Object.keys(x.je_groesse || {}).sort((a, b) => Number(a) - Number(b)), on = i === fi
         return `<div class="wd-firma${on ? ' offen' : ''}" data-e2-firma="${i}" role="button" tabindex="0" aria-expanded="${on}"><span class="punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(x.name) : 'var(--g-a2)'}"></span>
           <span class="fl"><span class="fn">${escapeHtml(x.name)}${e2Offen(`f.${i}.`) ? ' ·' : ''}</span><span class="fk">${x.an ? 'plant' : 'aus'}${gr.length ? ' · ' + gr.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>
-          <span class="fz">${escapeHtml(kernwerte(x))}</span><span class="pfeil">${on ? '▾' : '▸'}</span></div>${on ? edit : ''}` }).join('')}</div>
-      ${f && grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
-    // ── 3) KONTEN + WINNING DAY der gewählten Firma (Größe der Pille)
-    let kontenK = '<div class="wd-set-card"><h4><span>Konten<span class="h4sub">Firma wählen</span></span></h4></div>'
+          <span class="fz">${escapeHtml(kernwerte(x))}</span><span class="pfeil">›</span></div>` }).join('')}</div></div>`
+    /* ── 3) DETAILS DER GEWÄHLTEN FIRMA (Nachtrag 8 Finn 05.11.2026 ~06:30: „Das Konten hier weg machen. Je nachdem, auf welche Propfirma ich bei Firmen drücke, kommen rechts
+     * die Details dazu“): Größen-Pillen, Ziel/Consistency, Trade, Kontrakte, dazu bei Funded Futures die Winning-Day-Kachel. Keine Konten-Spalte mehr. */
+    let detailK = '<div class="wd-set-card"><h4><span>Firma<span class="h4sub">keine Firma in den Regeln</span></span></h4></div>'
     if(f){
-      const consW = _e2._cons
-      const fk = String(f.name || '').toLowerCase().replace(/\s+/g, ''), namen = (f.namen || []).map(x => String(x).toLowerCase())
-      const kontoDa = k => { const kf = String(k.firma || '').toLowerCase().replace(/\s+/g, ''); return (kf === fk || namen.some(n => n && kf.includes(n))) && !!k.groesse && String(Math.round(k.groesse)) === String(g) }
-      const konten = ((Q && Q.konten) || []).filter(kontoDa).sort((a, b) => String(a.user).localeCompare(String(b.user), 'de') || String(a.konto).localeCompare(String(b.konto), 'de'))
-      const kontoZeile = k => {
-        const zs = Number(k.ziel) - Number(k.start), gw = k.balance != null && k.start != null ? Number(k.balance) - Number(k.start) : null
-        const pz = zs > 0 && gw != null ? Math.max(0, Math.min(100, gw / zs * 100)) : null
-        const pc = consW != null && gw > 0 && Number(k.max_tag) > 0 ? Math.min(100, Number(k.max_tag) / gw * 100) : null
-        return `<div class="e2-konto"><div class="e2-konto-l"><b>${escapeHtml(k.user || '—')}</b><small>${escapeHtml((e4 => e4 ? '…' + e4 : String(k.konto || '').split('→')[0].trim())(typeof fdpEnde4 === 'function' ? fdpEnde4(k.konto) : ''))}${k.grund ? ' · ' + escapeHtml(k.grund) : ''}</small></div>
-          <div class="e2-konto-b"><span class="e2-bar" title="${pz != null ? `Gewinn ${e2De(gw)} $ von ${e2De(zs)} $ zum Ziel ${e2De(k.ziel)} $` : 'Ziel unbekannt'}"><b style="width:${pz != null ? pz.toFixed(1) : 0}%"></b></span>
-          ${consW != null ? `<span class="e2-bar e2-bar-c${pc != null && pc > consW ? ' drueber' : ''}" title="${pc != null ? `größter Tag ${e2De(k.max_tag)} $ = ${e2De(pc)} % des Gewinns` : 'noch kein Gewinn im Zyklus'}"><b style="width:${pc != null ? pc.toFixed(1) : 0}%"></b><i style="left:${consW}%"></i></span>` : ''}</div>
-          <em>${pz != null ? Math.round(pz) + ' %' : '–'}</em></div>` }
       // WINNING DAY (E2b): nur Anzeige aus app.py fdp_wd_anzeige; geändert wird unter Winning Days → Einstellungen (Link), keine zweite Schreibstelle
       const wd = f.wd && typeof f.wd === 'object' ? f.wd : null
       const wdz = wd ? ((wd.groessen || []).find(x => String(x.groesse) === String(g)) || (wd.groessen || [])[0] || null) : null
@@ -86001,11 +85988,10 @@
         <div class="e2-zeile">${e2L('Bestätigen', wd.bestaetigen ? 'jeder Farmer-WD startet erst nach ✓ — Verwalter-Gruppen ausgenommen' : '')}<em>${wd.bestaetigen ? 'einzeln ✓' : 'von selbst'}</em></div>
         ${(wd.besonders || []).map(b => b && typeof b === 'object' ? `<div class="e2-zeile">${e2L(String(b.name || ''), b.info || '')}<em>${escapeHtml(String(b.wert || ''))}</em></div>` : '').join('')}
         <div class="wd-fuss">ändern unter <button type="button" class="e2-link" data-e2-wd-link>Winning Days → Einstellungen</button></div></div>`
-      kontenK = `<div class="wd-set-card"><h4><span>Konten<span class="h4sub">${escapeHtml(f.name)}${g ? ' ' + escapeHtml(fcfdGroesse(g)) : ''} · Ziel-Fortschritt${consW != null ? ' · Consistency ' + e2De(consW) + ' %' : ''}</span></span></h4>
-        <div class="e2-konten">${grs.length ? (konten.length ? konten.map(kontoZeile).join('') : '<div class="wd-fuss" style="margin-top:0">keine Konten dieser Größe im Lauf</div>') : '<div class="wd-fuss" style="margin-top:0">—</div>'}</div>
-        ${wdGruppe}</div>`
+      detailK = `<div class="wd-set-card e2-sc-detail"><h4><span><span class="e2-dname"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>${escapeHtml(f.name)}</span><span class="h4sub">Modell ${escapeHtml(E2_MODELL)} · Fusion-Gegenhedge${grs.length ? ' · ' + grs.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
+        ${edit}${wdGruppe}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
     }
-    return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${ablauf}${firmenK}${kontenK}</div></div>`
+    return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${ablauf}${firmenK}${detailK}</div></div>`
   }
   // Zahl aus dem Feld (Komma oder Punkt) → Zahl | null
   const e2Zahl = t => { const x = String(t == null ? '' : t).trim().replace(/\s/g, '').replace(',', '.'); return x !== '' && isFinite(Number(x)) ? Number(x) : null }
