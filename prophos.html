@@ -4591,23 +4591,18 @@
   #adm-pane-wd .wd-firma-edit{display:none;padding:4px 4px 12px 24px;gap:10px;align-items:end;flex-wrap:wrap;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-firma.offen + .wd-firma-edit{display:flex}
   #adm-pane-wd .wd-firma-edit .wd-feld{width:96px}
-  /* E4 (05.11.2026): Payout-Regeln je Firma unter TP/Kontrakte — eigene Klassen e4-*, Look der WD-Einstellungen */
-  #adm-pane-wd .e4-regeln{flex:1 1 100%;margin-top:6px;padding-top:10px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:8px}
-  #adm-pane-wd .e4-kopf{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
-  #adm-pane-wd .e4-info{cursor:help;font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub-2);margin-left:2px}
-  #adm-pane-wd .e4-zeile{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface,#fff)}
-  #adm-pane-wd .e4-z1{display:flex;align-items:center;justify-content:space-between;gap:10px}
-  #adm-pane-wd .e4-z2{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-left:23px}
-  #adm-pane-wd .e4-zeile.aus .e4-slider,#adm-pane-wd .e4-zeile.aus .e4-wert,#adm-pane-wd .e4-zeile.aus .e4-feld{opacity:.4}
-  #adm-pane-wd .e4-schalter{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;cursor:pointer}
+  /* E4 (05.11.2026): zwei kleine Schalter je Firma unter TP/Kontrakte (Consistency, Mindest-Net-Profit) — Felder nur bei an; eigene Klassen e4-* */
+  #adm-pane-wd .e4-regeln{flex:1 1 100%;display:flex;flex-direction:column;gap:4px;margin-top:2px}
+  #adm-pane-wd .e4-zeile{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:30px}
+  #adm-pane-wd .e4-zeile.aus .e4-z2{display:none}
+  #adm-pane-wd .e4-schalter{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;color:var(--text)}
   #adm-pane-wd .e4-schalter input{width:15px;height:15px;margin:0;accent-color:var(--violet)}
-  #adm-pane-wd .e4-slider{flex:1 1 140px;min-width:110px;accent-color:var(--violet)}
-  #adm-pane-wd .e4-wert{min-width:42px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)}
+  #adm-pane-wd .e4-z2{display:inline-flex;align-items:center;gap:10px;flex:1 1 auto}
+  #adm-pane-wd .e4-slider{flex:1 1 120px;min-width:100px;max-width:200px;accent-color:var(--violet)}
+  #adm-pane-wd .e4-wert{min-width:38px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
   #adm-pane-wd .e4-feld{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub)}
   #adm-pane-wd .e4-feld i{font-style:normal}
-  #adm-pane-wd .e4-feld .input{width:76px;height:30px;padding:0 8px;font-size:12.5px;box-sizing:border-box}
-  #adm-pane-wd .e4-tag{font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--sub);white-space:nowrap}
-  #adm-pane-wd .e4-tag.an{border-color:transparent;background:var(--violet-soft, rgba(108,92,231,.12));color:var(--violet)}
+  #adm-pane-wd .e4-feld .input{width:72px;height:28px;padding:0 8px;font-size:12.5px;box-sizing:border-box}
   #adm-pane-wd .wd-chips{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 10px}
   #adm-pane-wd .wd-chip-f{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);font-size:11.5px;cursor:pointer;background:var(--surface,#fff)}
   #adm-pane-wd .wd-chip-f:hover{background:rgba(0,0,0,.03)}
@@ -71060,20 +71055,20 @@
     return { konsistenz: teil('konsistenz', [['pct', 1, 100]]), min_netto: teil('min_netto', [['usd', 0, 100000], ['ab_zyklus', 1, 20]]) }   // wie app.py wd_firmen_regel
   }
   function e4RegelnHtml(k){
+    // klein (NACHTRAG 5, Finn 05.11.2026 ~05:35): je Regel ein Schalter, die Felder erst bei an — Quelle und „wirkt/nur Parameter" nur im Tooltip
     const r = e4Regel(k), w = E4_WIRKT[k] || {}, q = E4_QUELLE[k] || ''
-    const tag = an => `<span class="e4-tag ${an ? 'an' : ''}" title="${an ? 'der Farmer rechnet damit' : 'nur Parameter — der Farmer rechnet noch nicht damit'}">${an ? 'wirkt' : 'Parameter'}</span>`
+    const tip = an => escapeHtml(q + (an ? ' · wirkt im Farmer' : ' · nur Parameter, der Farmer rechnet noch nicht damit'))
     const pct = r.konsistenz.pct, usd = r.min_netto.usd
     return `<div class="e4-regeln" data-e4-firma="${k}">
-        <div class="e4-kopf">Payout-Regeln <span class="e4-info" title="${escapeHtml(q)}">ⓘ</span></div>
         <div class="e4-zeile ${r.konsistenz.an ? '' : 'aus'}">
-          <div class="e4-z1"><label class="e4-schalter"><input type="checkbox" data-e4-an="${k}|konsistenz" ${r.konsistenz.an ? 'checked' : ''}><span>Consistency</span></label>${tag(!!w.konsistenz)}</div>
-          <div class="e4-z2"><input type="range" class="e4-slider" data-e4-pct="${k}" min="10" max="100" step="5" value="${pct != null ? pct : 50}" title="größter Tag höchstens so viel % des Gewinns im Zyklus">
-            <span class="e4-wert mono" data-e4-pct-txt="${k}">${pct != null ? pct + ' %' : '—'}</span></div>
+          <label class="e4-schalter" title="${tip(!!w.konsistenz)}"><input type="checkbox" data-e4-an="${k}|konsistenz" ${r.konsistenz.an ? 'checked' : ''}><span>Consistency</span></label>
+          <span class="e4-z2"><input type="range" class="e4-slider" data-e4-pct="${k}" min="10" max="100" step="5" value="${pct != null ? pct : 50}" title="größter Tag ≤ % des Zyklus-Gewinns">
+            <span class="e4-wert mono" data-e4-pct-txt="${k}">${pct != null ? pct : 50} %</span></span>
         </div>
         <div class="e4-zeile ${r.min_netto.an ? '' : 'aus'}">
-          <div class="e4-z1"><label class="e4-schalter"><input type="checkbox" data-e4-an="${k}|min_netto" ${r.min_netto.an ? 'checked' : ''}><span>Mindest-Gewinn je Zyklus</span></label>${tag(!!w.min_netto)}</div>
-          <div class="e4-z2"><span class="e4-feld"><input type="number" class="input mono" data-e4-usd="${k}" min="0" step="1" value="${usd != null ? usd : ''}" placeholder="—" title="Net Profit seit dem letzten Payout, ab dem die Firma auszahlt"><i>$</i></span>
-            <span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4-ab="${k}" min="1" max="20" step="1" value="${r.min_netto.ab_zyklus}" title="Zyklus 1 = vor dem ersten Payout"></span></div>
+          <label class="e4-schalter" title="${tip(!!w.min_netto)}"><input type="checkbox" data-e4-an="${k}|min_netto" ${r.min_netto.an ? 'checked' : ''}><span>Mindest-Net-Profit je Zyklus</span></label>
+          <span class="e4-z2"><span class="e4-feld"><input type="number" class="input mono" data-e4-usd="${k}" min="0" step="1" value="${usd != null ? usd : ''}" placeholder="—" title="Net Profit seit dem letzten Payout"><i>$</i></span>
+            <span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4-ab="${k}" min="1" max="20" step="1" value="${r.min_netto.ab_zyklus}" title="Zyklus 1 = vor dem ersten Payout"></span></span>
         </div>
       </div>`
   }
