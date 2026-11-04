@@ -39324,8 +39324,8 @@ def admin_funded_plan_ids():
 #    „Waiting for Payout" (nur angezeigt, umgestellt nur mit ziel_auto_wartet; der Knopf im Konto setzt waiting_payout_since wie bisher).
 #    Konten mit waiting_payout_since plant der Planer nie.
 #  - TP immer aufs Ziel: Ziel (je Trade gewürfelt in ziel[von, bis]) − bisheriger Gewinn — nach einem Verlusttag entsprechend höher
-#    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers im 1. Payout-Zyklus (kein Payout in pending/managed_payouts) fest tp_erster 750 $:
-#    die Consistency Rule (größter Tag ≤ 50 %) wird beim Payout nicht zurückgesetzt (Finn 30.10.2026).
+#    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers: Consistency Rule (größter Tag ≤ 50 %) JE PAYOUT-ZYKLUS — sie wird beim Payout
+#    zurückgesetzt (Finn 04.11.2026: das Dashboard zeigt „Days 100 %" je Zyklus, Moritz …4292 mit 3 Zyklen à einem Trade ~1.470 $), s. FCP_TP_MODUS_STANDARD.
 #    Je Trade gedeckelt (FCP_TP_ZYKLEN_STANDARD / FCP_TP_DECKEL_PLUS_STANDARD, fcp_tp_deckel) — der Rest kommt an den nächsten Tagen.
 #  - SL und Lots gewürfelt in ihrem Bereich; FundedNext mit 1-%-Risk-Limit (accounts.max_risiko_trade gesetzt oder „1% RULE" im Namen,
 #    fcp_eins_prozent) → sl_1pct; der SL liegt nie über max_risiko_trade (jede Firma).
@@ -39342,17 +39342,22 @@ FCP_ZEITEN_STANDARD = {"firma_abstand_min": 15, "abstand_id_min": 10, "vorlauf_m
 FCP_ART = "cfd"
 FCP_TP_MIN_USD = 250          # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 1.300 → 10 $ ≈ Spread): TP 250 $, kleiner Overshoot (Prüfung S4)
 # TP-DECKEL BEIM NACHHOLEN (Finn 30.10.2026 ~07:20, Anlass Trockenlauf: The5ers 200k −14.023 → TP 15.410 $): je Trade höchstens
-#  - The5ers (Consistency 50 %, wird beim Payout nicht zurückgesetzt): nach Payout-Zyklus tp_zyklen[Zyklus − 1], ab dem letzten Wert dieser —
+#  - The5ers (Consistency 50 % je Payout-Zyklus, s. unten consistency50 — ersetzt diesen Deckel): nach Payout-Zyklus tp_zyklen[Zyklus − 1], ab dem letzten Wert dieser —
 #    Zyklus 1 (noch kein Payout) immer genau 750 $ (auch nach Verlust), 2: 1.500, 3: 3.000, ab 4: 6.000. Zyklus = bisherige Payouts + 1.
 #  - andere Firmen (keine Consistency): ziel[bis] + tp_deckel_plus (1.000 $); der Rest kommt an den nächsten Tagen.
 # Werte je Firma in funded_cfd_plan_regeln.firmen[] (sql/2026-10-30_funded_cfd_tp_deckel.sql); fehlen sie, gelten diese Standards.
 FCP_TP_ZYKLEN_STANDARD = {"the5ers": [750, 1500, 3000, 6000]}
-# THE5ERS-CONSISTENCY (Finn 30.10.2026 ~07:40, ersetzt tp_erster 750 + tp_zyklen bei The5ers): TP = min(Rest, max(Rest / 2, Gewinne)) —
-# Rest = Ziel (gewürfelt in ziel[von, bis]) − Balance, Gewinne = Summe aller Gewinn-Trades des Kontos (trade_plans completed, master_pl > 0,
-# alle bisherigen, auch vor einem Payout — die 50-%-Regel wird nie zurückgesetzt; Verluste zählen nicht). Beispiele: Moritz …2352
-# Gewinne 635,70 + 603,84 + 61,05, Rest 2.625 → TP 1.312; Finn + Pascal …5250 ohne Gewinne, Rest 6.146 → 3.073, danach wieder 3.073.
-# Fail-closed: Gewinne nicht sicher lesbar (beendeter Trade ohne master_pl) → Rest / 2. Schalter regel.tp_modus = "consistency50".
+# THE5ERS-CONSISTENCY JE ZYKLUS (Finn 04.11.2026 ~14:45 Dubai, ersetzt die Fassung vom 30.10.2026 „TP = min(Rest, max(Rest / 2, Gewinne aller
+# Zyklen))" — die erlaubte praktisch immer den ganzen Rest in einem Trade, z. B. Emin …6530 TP 4.773 mit Gewinnen 8.117 aus allen Zyklen):
+# „Alles 1:1 gleich lassen. Nur: TP höchstens so groß wie die bisherigen Gewinne des DERZEITIGEN Zyklus. Wir beginnen wieder bei 750 und 750,
+# danach die Gewinne vom aktuellen Zyklus." Gewinne = Summe der Gewinn-Trades (completed, master_pl > 0, Verluste zählen nicht) seit dem
+# Zyklus-Beginn — dem Tag nach dem jüngsten Payout (fcp_zyklus_start: pending_payouts requested_at/created_at, managed_payouts payout_date/
+# created_at, transactions kind payout occurred_at; dieselbe Grenze wie die Blue-Guardian-Gewinntage, der Trade vom Anfrage-Tag gehört zum alten
+# Zyklus), im 1. Zyklus ab dem Anlegetag des Kontos. TP = Zyklus-Gewinne 0 → FCP_CONSISTENCY_START_USD (750), sonst min(Rest, Zyklus-Gewinne),
+# beides höchstens der Rest und mindestens FCP_TP_MIN_USD → 750, 750, dann höchstens die Zyklus-Gewinne (1.500, 3.000 …). Kein Rest / 2 mehr.
+# Fail-closed: Gewinne nicht sicher lesbar (beendeter Trade ohne master_pl, Payouts nicht lesbar) → 750. Schalter regel.tp_modus = "consistency50".
 FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
+FCP_CONSISTENCY_START_USD = 750   # TP am Zyklus-Beginn (noch keine Gewinne im Zyklus) und wenn die Gewinne nicht lesbar sind (Finn 04.11.2026)
 # ERSTER PAYOUT = REFUND (Finn 30.10.2026 ~08:00 FundedNext; FTMO seit 03.11.2026, Ziel 50–100 $, sql/2026-11-03_funded_cfd_ftmo.sql): solange das Konto noch keinen
 # Payout hatte (Zyklus 1, dieselbe Zählung wie bei The5ers: pending_payouts + managed_payouts), gilt ein kleines Ziel (+50 bis +150 $,
 # TP aufs Ziel, auch nach Verlust ganz nachholen — der TP-Deckel und der Mindest-TP greifen hier nicht) und ein großer Hedge: hedge_eur_je_dd
@@ -39417,13 +39422,21 @@ def fcp_eins_prozent(konto):
     return bool((_wd_num(k.get("max_risiko_trade")) or 0) > 0 or re.search(r"(?<![0-9])1\s*%\s*-?\s*rule", str(k.get("name") or ""), re.I))
 
 
-def fcp_gewinne(plaene):
+def fcp_gewinne(plaene, seit_tag=None):
     """REIN RECHNEND (testbar): Summe der Gewinn-Trades eines Kontos (status completed, master_pl > 0) — None, wenn ein beendeter Trade
-    keinen master_pl hat (nicht sicher lesbar → fail-closed Rest / 2)."""
+    keinen master_pl hat (nicht sicher lesbar → fail-closed TP 750). seit_tag = erster Berlin-Tag des laufenden Payout-Zyklus (fcp_gewinntage_seit):
+    nur Trades, deren Ende (ended_at, sonst completed_at, sonst started_at) an oder nach diesem Tag liegt (Finn 04.11.2026, Consistency je Zyklus)."""
     summe = 0.0
+    tz = _ap_tz("Europe/Berlin") if seit_tag else None
     for p in plaene or ():
         if p.get("status") != "completed":
             continue
+        if seit_tag:
+            ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
+            if ts is None:
+                return None         # Zyklus nicht zuordenbar → nicht lesbar → TP 750 (mitzählen machte den TP größer, Fremd-Review 04.11.2026)
+            if ts.astimezone(tz).date().isoformat() < str(seit_tag):
+                continue            # Trade aus einem früheren Zyklus (vor dem jüngsten Payout) — zählt nicht
         pl = _wd_num(p.get("master_pl"))
         if pl is None:
             return None
@@ -39587,10 +39600,12 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     elif ep:
         tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_ERSTER_PAYOUT_TP_MIN_USD)), "erster_payout_refund", None
     elif fcp_tp_modus(regel) == "consistency50":
+        # JE ZYKLUS (Finn 04.11.2026): Zyklus-Beginn bzw. nicht lesbar → 750, sonst höchstens die Zyklus-Gewinne; nie über den Rest
         rest = float(round(ziel - gewinn))
         g_ok = _wd_num(gewinne) if gewinne is not None else None
-        tp = float(round(min(rest, max(rest / 2.0, g_ok or 0.0))))
-        tp_art = "consistency" if g_ok is not None else "consistency_ohne_gewinne"
+        start = _wd_num(jg.get("tp_erster")) or float(FCP_CONSISTENCY_START_USD)
+        tp = float(round(min(rest, start if not g_ok or g_ok <= 0 else g_ok)))
+        tp_art = ("consistency" if g_ok and g_ok > 0 else "consistency_start") if g_ok is not None else "consistency_ohne_gewinne"
         deckel = None
         basis["gewinne"] = g_ok
         if tp < FCP_TP_MIN_USD:
@@ -39839,7 +39854,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None) \
             if isinstance(jg.get("gewinntage"), dict) else None
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
-                              max_sl=a.get("max_risiko_trade"), gewinne=fcp_gewinne(pl), gewinntage=gti)
+                              # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
+                              max_sl=a.get("max_risiko_trade"),
+                              gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
@@ -39882,7 +39899,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  f" · TP {r['tp_art']} · Hedge {_liq_de(r['hedge_eur'])} € auf {_liq_de(r['dd'])} $ DD"
                  + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else "")
                  + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
-                 + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else ""))   # Blue Guardian (BG1)
+                 + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
+                 # The5ers je Zyklus (04.11.2026): Zyklus-Gewinne in der Notiz — Finn sieht, woraus der TP kommt (nicht lesbar → „?")
+                 + ((f" · Zyklus-Gewinne {_liq_de(r['gewinne'])} $" if r.get("gewinne") is not None else " · Zyklus-Gewinne ?")
+                    if str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r) else ""))
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
