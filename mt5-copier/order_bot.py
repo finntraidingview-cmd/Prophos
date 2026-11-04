@@ -3424,6 +3424,31 @@ def _finde_terminal(login):
     return None
 
 
+# GEDULDIGE FENSTERSUCHE (F1, Befund Lotse L4 03.11.2026, Marco FundedNext …3615: das Terminal war seit 1:45 min eingeloggt, die Suche lief genau
+# EINMAL, fand das Fenster noch nicht in der Fensterliste und gab sofort auf — „Kein MT5-Fenster mit Konto", Plan 114a10de hing den ganzen Tag).
+# Jetzt bis TERMINAL_SUCHE_S lang alle 2–3,5 s (gestreut, Jitter-Regel) neu suchen, bevor aufgegeben wird. Es wird nur gesucht, nichts geklickt —
+# ein Abbruch danach bleibt ein Abbruch VOR dem Order-Knopf (Beleg „nicht platziert").
+TERMINAL_SUCHE_S = 30
+TERMINAL_SUCHE_BIS = 200           # Lauf-Sekunde, ab der nicht mehr geduldig gesucht wird (Deckel 300 s, Spur-Wache 240 s)
+TERMINAL_SUCHE_TAKT = (2.0, 1.0)   # _warte(minimum, streuung): 2–3,5 s (warte_dauer streut etwas über die Streuung hinaus)
+
+
+def _finde_terminal_geduldig(login, dauer_s=TERMINAL_SUCHE_S, finder=None, warte=None, uhr=None):
+    """Wie _finde_terminal, aber bis dauer_s Sekunden mit gestreuten Pausen wiederholt. finder/warte/uhr sind Test-Haken.
+    -> (Fenster | None, Anzahl Suchen)"""
+    finder = finder or _finde_terminal
+    warte = warte or _warte
+    uhr = uhr or time.monotonic
+    ende = uhr() + float(dauer_s)
+    n = 0
+    while True:
+        n += 1
+        w = finder(login)
+        if w is not None or uhr() >= ende:
+            return w, n
+        warte(*TERMINAL_SUCHE_TAKT)
+
+
 def _zurueck_zu_prophos():
     """Ausgangssituation (28.08.2026, Finns Ansage nach dem ersten Remote-
     Erfolg): nach JEDEM Lauf — Erfolg, Abbruch oder SL/TP-Warnung — wechselt
@@ -13172,10 +13197,14 @@ def run(cfg_path, cmd):
     _warte(0.0, 1.2)
 
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
-    w = _finde_terminal(expected)
+    # F1 (04.11.2026): bis 30 s gestreut neu suchen statt einmal — höchstens bis Sekunde TERMINAL_SUCHE_BIS des Laufs (Gegenprüfung: Login/Warm-Warten
+    # vorher können lang sein, der Order-Knopf muss weit vor dem 300-s-Deckel des Panels liegen, sonst stürbe der Lauf nach dem Klick = „unklar")
+    w, n_suche = _finde_terminal_geduldig(expected, dauer_s=min(TERMINAL_SUCHE_S, max(0, TERMINAL_SUCHE_BIS - trail.sekunden())))
+    if n_suche > 1:
+        trail.append(f"Fenster-Suche {n_suche}x" + ("" if w is not None else " ohne Treffer"))
     if w is None:
         return {"ok": False, "retry_ok": True,
-                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden. "
+                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden (nach {n_suche} Suchen in ~{TERMINAL_SUCHE_S} s). "
                        + _UAC_HINWEIS}
     _fenster_betreten(w)
     if not konto_im_titel(expected, w.window_text()):
