@@ -232,15 +232,9 @@ r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000)
 check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
 src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
 check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
-check("const consBlock" in HTML and 'type="range" class="e2-range"' in HTML and "const kontoGruppe" in HTML and 'class="e2-auf-g' in HTML and "const sicherheit" in HTML,
-      "Frontend: Consistency-Slider, Kontoliste, Planer-Bereich mit Ablauf + Sicherheit")
+check('type="range" class="e2-range"' in HTML and "const kontoZeile" in HTML and 'class="wd-set-grid"' in HTML and "wd-firma-edit e2-fedit" in HTML, "Frontend: WD-Karte (drei Spalten), Firma inline aufgeklappt mit Consistency-Slider, Kontoliste")
 check("konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]" in HTML and "start: an.start ?? (typeof z.start === 'number'" in HTML, "Kontoliste aus den Zeilen des Laufs, Anzeige-Werte vor der Uhrzeit start")
-check("if(karte === 'abstand'){" in HTML and "e2In('za.' + k" in HTML and "e2Fuss('abstand', darfR, 'za.')" in HTML, "Abstände eigene Karte (Speichern je Block)")
-
-# ── E2e (Nachtrag 5): kompakt unter dem Zeitstrahl, ein Bereich offen
-check("_e2.offen = _e2.offen === i ? null : i" in HTML and "_e2.offen = _e2.offen === 'planer' ? null : 'planer'" in HTML and 'class="e2-kzeile"' in HTML,
-      "Regel-Zeile mit Chips, Klick öffnet Firma bzw. Planer, zweiter Klick schließt")
-check("data-e2-mehr" in HTML and "_e2.mehr ? sicherheit : ''" in HTML, "Sicherheit hinter „mehr“")
+check("data-e2-mehr" in HTML and "const sicherheit = !_e2.mehr ? '' :" in HTML, "Sicherheit hinter „mehr“")
 check(HTML.index("e2Oben = e2EinstHtml") < HTML.index("const listen = `<div data-apg-anker=\"offen\">"), "Block steht vor „Zu bestätigen“ (direkt am Zeitstrahl)")
 
 # ── Verdrahtung
