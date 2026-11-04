@@ -39231,6 +39231,13 @@ def admin_funded_plan():
     erg["info"] = {k: _fdp_info.get(k) for k in ("letzter", "fehler")}
     try:   # Einstellungen für den Reiter (E2, 04.11.2026) — Lesefehler lässt die Vorschau unberührt
         erg["regeln"] = fdp_regeln_anzeige(_fdp_regeln_laden(), erg.get("regeln_quelle") or "db")
+        try:   # Winning Day je Firma (E2b) — nur Anzeige; Lesefehler lässt die Einstellungen ohne WD-Kachel
+            _zr, _vp = _wd_zyklus_regelzeile()
+            _best = wd_bestaetigen_firmen()
+            for _f in erg["regeln"].get("firmen") or []:
+                _f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best)
+        except Exception as e:
+            print(f"[funded-plan] ⚠️ WD je Firma: {type(e).__name__}: {e}", flush=True)
         # darf: dieselbe Regel wie POST /admin/funded-plan/regeln — sonst sähe Emins Verwalter offene Felder und bekäme beim Speichern 403
         try:
             erg["regeln"]["darf"] = bool(_admin or str(_uid) in {str(u) for u in (admin_voll_uids() or ())})
@@ -39673,6 +39680,86 @@ def fdp_regeln_aendern(reg, body):
     if not patch:
         return None, "nichts zu ändern"
     return patch, None
+
+
+# ── WINNING DAY JE FIRMA (E2b, 04.11.2026, Finn ~19:15 Dubai zum Foto der Einstellungen: „Vielleicht noch hinzufügen: Was ist ein Winning Day?“ — nach
+# dem Big Trade (Ziel erreicht) geht das Konto auf Winning Days). NUR ANZEIGE, Quelle der Wahrheit bleibt Winning Days → Einstellungen bzw. der Code des Farmers:
+#  - Mindestgewinn je Tag: wd_min_gewinn (WD_GOOD_DAY_MIN; je Konto überschreibbar mit goal_min_profit) — dieselbe Funktion, mit der der Farmer zählt
+#  - WDs bis Payout: goal_target je Konto, Standard 5 (wd_konten_alle / Abhaken „or 5“)
+#  - TP und Kontrakte je WD-Trade: wd_farmer_regeln.vorplan.regeln.fu / .kt (Winning Days → Einstellungen → Firmen); fehlt die Firma dort, der Standard des
+#    Farmers (WD_FU_STANDARD = TP_VP_VORGABE.fu im Frontend; Lucid nimmt die Tradeify-Werte wie tpVpLucidWieTradeify)
+#  - Besonderheiten aus dem Code: Apex-Recoverer (wd_farmer_regeln.zyklus_regel, sonst WD_ZYKLUS_VORGABE), Tradeify Zyklus im Plus (TRADEIFY_ZYKLUS_*)
+WD_FU_STANDARD = {"tradeify": [270, 290], "lucid": [270, 290], "fnfutures": [270, 290], "apex": [370, 390], "apex100": [320, 340], "topstep": [220, 240], "sonst": [270, 290]}
+
+
+def fdp_wd_schluessel(name, groesse=None):
+    """REIN RECHNEND (testbar): Firmen-Schlüssel des WD-Farmers wie tpVorplanFirmaKey im Frontend (fnfutures, apex/apex100 nach Größe, lucid, tradeify, topstep, sonst)."""
+    f = str(name or "").lower()
+    if "fundednext" in f and "futur" in f:
+        return "fnfutures"
+    if "apex" in f:
+        return "apex100" if str(groesse or "") == "100000" else "apex"
+    if "lucid" in f:
+        return "lucid"
+    if _ist_tradeify_cfd(name):
+        return "sonst"
+    return "tradeify" if "tradeify" in f else "topstep" if "topstep" in f else "sonst"
+
+
+def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=()):
+    """REIN RECHNEND (testbar): „Was ist ein Winning Day“ für eine Firma der Funded-Futures-Regel → {groessen: [{groesse, min_usd, tp, tp_quelle, kt, instr}],
+    ziel_std, bestaetigen, besonders: [Text], fehlt: bool}. Größen = die der Funded-Regel; ohne Größe ein Eintrag für die Firma. bestaetigen = wd_bestaetigen_firmen()
+    (Farmer-WD dieser Firma starten erst nach ✓ unter Funded Planer → Winning Days)."""
+    name = (firma or {}).get("name") or ""
+    vp = vorplan if isinstance(vorplan, dict) else {}
+    rg = vp.get("regeln") if isinstance(vp.get("regeln"), dict) else {}
+    fu = rg.get("fu") if isinstance(rg.get("fu"), dict) else {}
+    ktr = rg.get("kt") if isinstance(rg.get("kt"), dict) else {}
+    rund = lambda x: int(float(x) + 0.5) if x is not None else None   # noqa: E731 — wie Math.round im Frontend (positiv)
+    kt_std = max(1, rund(_wd_num(vp.get("kt")) or 1))
+    instr = "NQ" if vp.get("instr") == "nq" else "MNQ"
+    gr = sorted((str(g) for g in ((firma or {}).get("je_groesse") or {})), key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else 0) or [None]
+    zeilen = []
+    for g in gr:
+        key = fdp_wd_schluessel(name, g)
+        tp = fu.get(key) if isinstance(fu.get(key), list) else (fu.get("tradeify") if key == "lucid" and isinstance(fu.get("tradeify"), list) else None)
+        quelle = "wd-farmer" if tp else "standard"
+        tp = tp or WD_FU_STANDARD.get(key)
+        k = ktr.get(key) if isinstance(ktr.get(key), list) else (ktr.get("tradeify") if key == "lucid" and isinstance(ktr.get("tradeify"), list) else None)
+        # wie wdKtSpanne (Gegenprüfung E2b): von = max(1, round(sp[0] || std)), bis = max(von, round(sp[1] || von)); keine Liste → [std, std]
+        if k is not None:
+            kv = max(1, rund(_wd_num(k[0] if len(k) > 0 else None) or kt_std))
+            kt = [kv, max(kv, rund(_wd_num(k[1] if len(k) > 1 else None) or kv))]
+        else:
+            kt = [kt_std, kt_std]
+        konto = {"firm": name, "name": f"{int(float(g)) // 1000}k" if g else ""}
+        zeilen.append({"groesse": g, "schluessel": key, "min_usd": wd_min_gewinn(konto), "tp": [_wd_num(x) for x in tp] if tp else None, "tp_quelle": quelle,
+                       "kt": kt, "instr": instr})
+    f = str(name).lower()
+    bes = []
+    if "apex" in f and not isinstance(zyklus_regel, dict):
+        # wie wd_zyklus_konto: ohne DB-Regel ist der Recoverer aus (Code keine_regel), nicht „an mit Vorgabe" (Gegenprüfung E2b)
+        bes.append("Recoverer nicht eingerichtet (wd_farmer_regeln.zyklus_regel fehlt) — nach einem Verlusttag laufen normale WD")
+    elif "apex" in f:
+        zr = zyklus_regel
+        st = sorted(((_wd_num(x.get("v")), _wd_num(x.get("ziel")), _wd_num(x.get("satz"))) for x in (zr.get("stuetz") or WD_ZYKLUS_VORGABE["stuetz"]) if isinstance(x, dict)),
+                    key=lambda x: x[0] or 0)
+        de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731
+        fi = zr.get("firmen") or WD_ZYKLUS_VORGABE["firmen"]
+        gilt = [("100k" if z["schluessel"] == "apex100" else "150k") for z in zeilen if z["schluessel"] in fi]
+        an = bool(zr.get("aktiv", True)) and bool(gilt)                  # wie wd_zyklus_konto: not r.get("aktiv", True) → aus, Schlüssel nicht in firmen → aus
+        bes.append(f"Recoverer {'an' + (' (' + ' · '.join(gilt) + ')' if len(gilt) < len(zeilen) else '') if an else 'aus'}: ab dem {int(_wd_num(zr.get('ab_zyklus')) or 2)}. Payout-Zyklus nach einem Verlusttag WD-Ziel und Hedge linear nach dem Verlust — "
+                   + " · ".join(f"−{de(v)} $ → {de(z)} $ / {de(sa)} €" for v, z, sa in st if v and z and sa)
+                   + f"; bis der Zyklus-Profit ≥ 2 × bester Tag ist · {WD_ZYKLUS_KT} {WD_ZYKLUS_INSTR.upper()}")
+    if "tradeify" in f and not _ist_tradeify_cfd(name):
+        bes.append(f"Zyklus im Plus: ab dem 2. Zyklus Payout erst ab +{TRADEIFY_ZYKLUS_MIN_USD:.0f} $ Gewinn seit der letzten Anfrage — im Minus normale WD bis Ziel − 1, "
+                   f"der letzte ist der Ausgleichs-Trade (Fehlbetrag + {TRADEIFY_ZYKLUS_PUFFER[0]}–{TRADEIFY_ZYKLUS_PUFFER[1]} $){', einzeln bestätigen' if TRADEIFY_AUSGLEICH_BESTAETIGEN else ''}")
+    if "lucid" in f:
+        bes.append("1:1 die Tradeify-Regeln (Finn 23.10.2026) — WD-Werte von Tradeify, solange Lucid keine eigenen hat; die Zyklus-im-Plus-Regel gilt nur für Tradeify")
+    if "fundednext" in f and "futur" in f:
+        bes.append("wie Tradeify (Finn 16.10.2026), eigener Schlüssel im WD-Farmer")
+    best = any(str(k) and str(k) in f for k in (bestaetigen or ()))   # wie tpWdWartetAufBestaetigung / wd_bestaetigen_noetig: Teilstring im Firmennamen
+    return {"groessen": zeilen, "ziel_std": 5, "bestaetigen": best, "besonders": bes, "fehlt": all(z["min_usd"] is None for z in zeilen)}
 
 
 @app.route("/admin/funded-plan/regeln", methods=["POST", "OPTIONS"])

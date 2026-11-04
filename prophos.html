@@ -4044,6 +4044,9 @@
   #ap-ids-root.ap-guestly .e2-fuss{display:flex;gap:12px;align-items:center;justify-content:flex-end;margin-top:14px;min-height:36px}
   #ap-ids-root.ap-guestly .e2-fuss small{color:var(--g-sub);font-size:12px;margin-right:auto} #ap-ids-root.ap-guestly .e2-fuss small.fehler{color:var(--g-rot)} #ap-ids-root.ap-guestly .e2-fuss small.ok{color:var(--g-gut)}
   #ap-ids-root.ap-guestly .e2-fuss .apg-haupt{padding:9px 18px;font-size:13px} #ap-ids-root.ap-guestly .e2-fuss .apg-haupt:disabled{opacity:.4;cursor:default}
+  #ap-ids-root.ap-guestly .e2-wd .e2-wd-bes{margin:8px 0 4px;padding-left:16px;font-size:11.5px;line-height:1.5}
+  #ap-ids-root.ap-guestly .e2-wd-fuss{border-top:1px solid var(--g-gitter);padding:8px 0 6px;font-size:11.5px;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly .e2-link{border:0;background:none;padding:0;font:inherit;color:var(--g-lila);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   #ap-ids-root.ap-guestly .e2-leer{color:var(--g-sub);font-size:13px;padding:22px 4px;line-height:1.5}
   @media (max-width:980px){ #ap-ids-root.ap-guestly .e2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} #ap-ids-root.ap-guestly .e2-haupt,#ap-ids-root.ap-guestly .e2-unten{grid-template-columns:1fr}
     #ap-ids-root.ap-guestly .e2-liste{flex-direction:row;overflow-x:auto} #ap-ids-root.ap-guestly .e2-firma{width:auto;flex:0 0 auto} }
@@ -85416,13 +85419,26 @@
       }
       const rest = Object.keys(w).filter(k => k !== 'kontrakte' && !E2_FELD[k])
       if(rest.length) gruppen.push(`<div class="e2-gruppe"><h5>Weitere</h5>${rest.map(k => `<div class="e2-zeile"><span>${escapeHtml(k)}<span class="e2-fest">nur per SQL</span></span><em>${escapeHtml(typeof w[k] === 'object' ? JSON.stringify(w[k]) : String(w[k]))}</em></div>`).join('')}</div>`)
+      /* WINNING DAY (E2b, 04.11.2026, Finn ~19:15 zum Foto: „Vielleicht noch hinzufügen: Was ist ein Winning Day?“): nach dem Ziel geht das Konto auf Winning Days —
+       * was dort als WD zählt, je Firma × Größe. Nur Anzeige aus app.py fdp_wd_anzeige (wd_min_gewinn = Zählung des Farmers, goal_target-Standard 5, TP/Kontrakte aus
+       * Winning Days → Einstellungen, Besonderheiten aus dem Farmer-Code); geändert wird nur dort — der Link springt hin, hier gibt es keine zweite Schreibstelle. */
+      const wd = f.wd && typeof f.wd === 'object' ? f.wd : null
+      const wdz = wd ? ((wd.groessen || []).find(x => String(x.groesse) === String(g)) || (wd.groessen || [])[0] || null) : null
+      const wdGruppe = !wd ? '' : `<div class="e2-gruppe e2-wd"><h5>Winning Day</h5>
+        <div class="e2-zeile"><span>Zählt als Winning Day<small>Tagesgewinn Master, Wert am Konto geht vor</small></span><em>${wdz && wdz.min_usd != null ? 'ab ' + e2De(wdz.min_usd) + ' $' : 'noch nicht hinterlegt'}</em></div>
+        <div class="e2-zeile"><span>Winning Days bis Payout<small>Ziel je Konto, Standard</small></span><em>${e2De(wd.ziel_std)}</em></div>
+        ${wdz && wdz.tp ? `<div class="e2-zeile"><span>TP je WD-Trade<small>${wdz.tp_quelle === 'wd-farmer' ? 'WD-Farmer' : 'Standard des WD-Farmers'} · je Konto gewürfelt</small></span><em>${e2De(wdz.tp[0])}–${e2De(wdz.tp[1])} $</em></div>` : ''}
+        ${wdz && wdz.kt ? `<div class="e2-zeile"><span>Kontrakte je WD-Trade</span><em>${wdz.kt[0] === wdz.kt[1] ? e2De(wdz.kt[0]) : e2De(wdz.kt[0]) + '–' + e2De(wdz.kt[1])} ${escapeHtml(String(wdz.instr || ''))}</em></div>` : ''}
+        <div class="e2-zeile"><span>Bestätigen${wd.bestaetigen ? '<small>Verwalter-Gruppen ausgenommen</small>' : ''}</span><em>${wd.bestaetigen ? 'jeder WD einzeln ✓' : 'startet von selbst'}</em></div>
+        ${(wd.besonders || []).length ? `<ul class="e2-regeln e2-wd-bes">${wd.besonders.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>` : ''}
+        <div class="e2-wd-fuss">nur Anzeige · ändern unter <button type="button" class="e2-link" data-e2-wd-link>Winning Days → Einstellungen</button></div></div>`
       const firmaGruppe = `<div class="e2-gruppe"><h5>Firma</h5>${e2Sch(`f.${fi}.an`, f.an, darfR && grs.length > 0, 'Im Funded-Planer', grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}
         ${f.lock_usd != null ? `<div class="e2-zeile"><span>Liq-Lock<small>Liq zieht nach, fest bei Größe + Lock</small></span>${e2In(`f.${fi}.lock`, f.lock_usd, darfR, { einheit: '$', label: 'Liq-Lock', titel: 'Liquidation EOD-trailing; 0 = fest ab dem Start' })}</div>` : ''}</div>`
       const pille = grs.length > 1 ? `<div class="apg-zeitraum e2-gr" role="tablist" aria-label="Kontogröße">${grs.map(x => `<button type="button" class="${x === g ? 'on' : ''}" data-e2-gr="${fi}:${escapeHtml(x)}" role="tab" aria-selected="${x === g}">${escapeHtml(fcfdGroesse(x))}</button>`).join('')}</div>`
         : grs.length ? `<div class="apg-sub e2-gr" style="font-weight:600;color:var(--g-text)">${escapeHtml(fcfdGroesse(g))}</div>` : ''
       detail = `<div class="e2-detail"><div class="e2-dkopf"><div><div class="e2-dname"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>${escapeHtml(f.name)}</div>
           <div class="e2-dsub">${grs.length ? escapeHtml(modus) : 'Für diese Firma sind noch keine Werte hinterlegt — neue Größen kommen per SQL dazu, danach stehen sie hier zum Ändern.'}</div></div></div>
-        ${pille}<div class="e2-gruppen">${firmaGruppe}${grs.length ? gruppen.join('') : ''}</div>${grs.length || f.lock_usd != null ? e2Fuss('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
+        ${pille}<div class="e2-gruppen">${firmaGruppe}${grs.length ? gruppen.join('') : ''}${wdGruppe}</div>${grs.length || f.lock_usd != null ? e2Fuss('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
     }
     const ablauf = `<div class="e2-karte2"><div class="apg-titel">Ablauf</div><div class="apg-sub">alle Firmen · Startzeiten zufällig im Fenster</div>
       <div class="e2-gruppe" style="background:transparent;padding:6px 0 0"><h5 hidden></h5>
@@ -85518,6 +85534,7 @@
   function e2Verdrahten(root){
     const box = root.querySelector('[data-e2-einst]'); if(!box) return
     box.querySelectorAll('[data-e2-firma]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); _e2.firma = Number(b.dataset.e2Firma); apIdsRender() }))
+    box.querySelector('[data-e2-wd-link]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('[data-planerchip="wd"]')?.click() })   // E2b: Quelle der WD-Regeln
     box.querySelectorAll('[data-e2-gr]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g] = b.dataset.e2Gr.split(':'); _e2.gr[fi] = g; apIdsRender() }))
     box.querySelectorAll('input[data-e2-pfad]').forEach(el => {
       const merke = () => { const p = el.dataset.e2Pfad
