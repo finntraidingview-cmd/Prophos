@@ -4276,6 +4276,31 @@
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-bar.gut i{background:var(--g-gut)}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-bar.warn i{background:#f59e0b}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-bar u{position:absolute;top:-3px;bottom:-3px;width:1.5px;margin-left:-.75px;background:var(--g-sub);opacity:.7;text-decoration:none}
+  /* KOMPAKT UNTER DEM ZEITSTRAHL (Finn 05.11.2026 ~05:35): eine Zeile mit Kurzstand + Chips, Details erst nach Klick (Ablauf oder eine Firma) */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste{position:relative;padding:14px 18px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf{position:absolute;top:12px;right:16px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf .apg-haupt{padding:7px 14px;font-size:12.5px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;min-height:34px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste:has(.fcr-e-leiste-knopf button) .fcr-e-zeile{padding-right:130px}   /* Platz nur, wenn der Knopf da ist */
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl b{font-size:14.5px;font-weight:650;color:var(--g-text)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zl > span{font-size:12.5px;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-nur{font-style:normal;font-size:11.5px;color:var(--g-sub);display:inline-flex;align-items:center;gap:4px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--g-rand);background:var(--g-karte);color:var(--g-text);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:border-color .12s,background .12s}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chip i{width:8px;height:8px;border-radius:50%}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chip small{font-size:10.5px;font-weight:500;color:var(--g-sub)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chip:hover{border-color:var(--g-a2)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chip.on{background:var(--g-lila-bg);border-color:transparent;color:var(--g-lila)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf{margin-top:14px;padding-top:14px;border-top:1px solid var(--g-rand)}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-kopf .fcr-e-titel{font-size:16px;font-weight:700;color:var(--g-text);display:inline-flex;align-items:center}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-kopf .fcr-e-titel > i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-kopf .fcr-e-kopf-r{margin-left:auto}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-teil{background:var(--g-kpi);border-radius:14px;padding:14px 16px;min-width:0}
+  :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-teil > .fcr-e-block:first-child{margin-top:0;padding-top:0;border-top:0}
+  @media (max-width:900px){ :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-auf-grid{grid-template-columns:minmax(0,1fr)} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-zeile{padding-right:0} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-leiste-knopf{position:static;margin-bottom:8px;text-align:right} :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-chips{margin-left:0} }
   /* Größen-Wahl als Segment-Pille (wie Zeitraum-Chips) */
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg{display:inline-flex;background:var(--g-pille);border-radius:999px;padding:3px;gap:2px;flex:none}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-e-seg button{border:0;background:transparent;color:var(--g-sub);font:inherit;font-size:12px;font-weight:600;line-height:1;padding:7px 12px;border-radius:999px;cursor:pointer;font-variant-numeric:tabular-nums}
@@ -84616,6 +84641,11 @@
     const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>` + e2Oben
     const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div>${x.heuteHb || ''}`
     let unten = ''; if(fc) try{ unten = fcfdUnterHtml(u) }catch(e){ console.warn('[apg] Funded CFD unten', e) }   // Waiting · Firmen · Regeln
+    // FUNDED CFD (Finn 05.11.2026 ~05:35 Dubai: „Mach die Regeln basic unter den Zeitstrahl. Dann kommt ‚zu bestätigen'"): kompakte Einstellungen
+    // direkt unter dem Zeitstrahl, die alte Leiste darüber entfällt (ihr „Nachplanen"/„Jetzt planen" zieht mit)
+    if(fc){ const np = x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''}>${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''
+      let einst = ''; try{ einst = fcrLeisteHtml(np) }catch(e){ console.warn('[fcr] Einstellungen', e) }
+      return kopf + kpis + charts + zs + einst + listen + unten }
     return kopf + kpis + charts + leiste + zs + (x.funded ? '' : '<div class="e3-platz" data-e3-platz></div>') + listen + unten   // E3c: Einstellungen unter dem Zeitstrahl, vor „Zu bestätigen“
   }
   /* P&L VON HEUTE (30.10.2026, Finn ~06:55 über den Master: „P&L von heute — wie gut/schlecht der Tag läuft"): dieselben Radar-Zeilen wie die
@@ -85020,7 +85050,7 @@
    * Consistency %), Block „Trade" (Lots, SL, SL 1 %, Hedge € auf $ DD), Refund-Trade und Gewinntage als Schalter mit Feldern, unten die Konten der Firma mit
    * Ziel- und Consistency-Balken. Admin sieht Eingaben, „Speichern" je Karte; Schalter wirken sofort. Erklärungen nur hinter ⓘ. Ohne Schreibrecht: Balken
    * „Nur ansehen" und dieselbe Ansicht als Text. Technik (Abstände, Mindest-TP, Takt …) steht nicht im Panel. Gewählte Größe je Firma bleibt (localStorage). */
-  const _fcrSel = { firma: null, gr: {} }
+  const _fcrSel = { firma: null, gr: {}, offen: null }   // offen: null (Grundzustand: nur die Zeile) | 'ablauf' | Firmenname
   try{ const g = JSON.parse(localStorage.getItem('fcr_groesse') || '{}'); if(g && typeof g === 'object') _fcrSel.gr = g }catch(_){}
   const fcrAdmin = () => !!window._fcfdAdmin
   const fcrDarf = () => fcrAdmin() && (typeof window._planerDarf !== 'function' || !!window._planerDarf())   // Rechte-Sperre HT (PR_SCHREIB)
@@ -85091,100 +85121,109 @@
           ${pct ? `<div title="größter Gewinn-Tag im Payout-Zyklus ÷ Gewinn — Linie bei ${fcrZahl(pct)} %"><span>Consistency</span>${consA != null ? balken(consA, consA <= pct / 100 ? 'gut' : 'warn', pct / 100) : balken(0, '', pct / 100)}<em>${consA != null ? Math.round(consA * 100) + ' %' : (B == null ? '?' : '–')}</em></div>` : ''}
         </div></div>` }).join('')}</div>`
   }
+  // KOMPAKT UNTER DEM ZEITSTRAHL (Finn 05.11.2026 ~05:35 Dubai: „relativ klein halten und, wenn ich draufklicke, Sachen freigeben … basic unter den Zeitstrahl"):
+  // Grundzustand = eine Zeile (Kurzstand + Chips „Ablauf" und je Firma). Ein Klick öffnet darunter die Details, ein zweiter schließt; nie zwei offen.
+  // „Jetzt planen" steht AUSSERHALB dieses Blocks (fcrLeisteHtml): die Funded-Seite tauscht den Knopf nach dem Zeichnen aus (fdpJetztPlanen) — beim lokalen
+  // Neuzeichnen käme sonst der Challenge-Knopf zurück
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
     const g = D.gemeinsam || {}, C = D.code || {}, z = D.zeiten || {}, ad = fcrAdmin()
     const wegText = (C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)'
-    const weg = klein => `<span class="fcr-e-weg${klein ? ' klein' : ''}" title="${escapeHtml(wegText)}"><i></i>${escapeHtml((C.weg && C.weg.name) || 'Echo')} · ${klein ? 'Hedge' : 'mit Hedge'}</span>`
+    const weg = `<span class="fcr-e-weg klein" title="${escapeHtml(wegText)}"><i></i>${escapeHtml((C.weg && C.weg.name) || 'Echo')} · Hedge</span>`
     const fenEigen = !!z.fenster_eigen, fenCh = String(z.fenster_challenge || ''), zone = String(z.tz || 'Asia/Dubai').replace(/^.*\//, '')
     const news = fcrNewsInfo()
-    // ── Karte 1: Ablauf
-    const regelnInfo = fcrInfo('regeln', `<b>So plant er</b><br>1 Trade pro Tag je Konto, Uhrzeit im Startfenster und Long/Short gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance ·
-      Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen → „SL mit 1-%-Regel“`)
-    const newsInfo = fcrInfo('news', `<b>News-Pause</b> · nur rote USD-News (Forex Factory)<br>2 h vorher keine neuen Funded-CFD-Starts · laufende bis spätestens 6 min (Echo V2: 10 min) vorher zu ·
-      frühestens 15 min danach wieder Starts<span class="fcr-e-pop-z">Nächster Termin: ${escapeHtml(news.naechster)}</span><span class="fcr-e-pop-z">Kalender: ${escapeHtml(news.kalender)}</span>`)
-    const fenster = ad
-      ? `<div class="fcr-e-felder"><div class="fcr-e-feld breit"><label>Startfenster <small>· ${escapeHtml(zone)}, leer = wie Challenge-Planer${fenCh ? ' (' + escapeHtml(fenCh) + ')' : ''}</small></label><div class="fcr-e-spanne">${['von', 'bis'].map((t, n) =>
-          `<input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml((fenCh.split('–')[n]) || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · beide leer = wie Challenge-Planer">`).join('<span>–</span>')}</div></div></div>`
-      : (z.von && z.bis ? fcrZeile('Startfenster', `${z.von}–${z.bis} ${zone}${fenEigen ? '' : ' · wie Challenge'}`) : '')
-    const ablauf = `<div class="fcr-e-karte" data-fcr-karte="ablauf">
-      <div class="fcr-e-kopf"><span>Ablauf ${regelnInfo}<small>gilt für alle Gruppen</small></span><span class="fcr-e-kopf-r">${weg(false)}${fcrSpeichernKnopf('ablauf')}</span></div>
-      ${fcrSchalter('aktiv', !!D.aktiv, 'Planer')}
-      ${fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen')}
-      ${fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel erreicht → automatisch Waiting')}
-      ${fcrSchalter('news', !!news.an, 'News-Pause', newsInfo)}
-      <div class="fcr-e-luft"></div>
-      ${fenster}
-    </div>`
-    // ── Karte 2: Firmen (anklicken → Karte 3)
     const firmen = D.firmen || []
-    if(!firmen.some(f => f.firma === _fcrSel.firma)) _fcrSel.firma = firmen.length ? firmen[0].firma : null
     const ton = f => typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
     const groessen = f => (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse))
-    const kurz = f => { const p = fcrConsPct(f); return [p ? `Consistency ${fcrZahl(p)} %` : '', f.erster_payout_eff ? 'Refund-Trade' : '',
-      (f.groessen || []).some(x => x.roh && x.roh.gewinntage) ? 'Gewinntage' : ''].filter(Boolean).join(' · ') || 'aufs Ziel' }
-    const liste = `<div class="fcr-e-karte">
-      <div class="fcr-e-kopf"><span>Firmen<small>${firmen.length} im Funded-CFD-Planer</small></span></div>
-      <div class="fcr-e-firmen">${firmen.map(f => `<button type="button" class="fcr-e-firma${f.firma === _fcrSel.firma ? ' an' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}">
-          <i style="background:${ton(f)}"></i><span class="fl"><b>${escapeHtml(f.firma)}</b><small>${escapeHtml(f.an === false ? 'aus · wird nicht geplant' : kurz(f))}</small></span>
-          <span class="fg">${groessen(f).map(x => escapeHtml(fcfdGroesse(x.groesse))).join(' · ')}</span><span class="pfeil">›</span></button>`).join('') || '<div class="fcr-leer">keine Firma hinterlegt</div>'}</div>
+    if(_fcrSel.offen && _fcrSel.offen !== 'ablauf' && !firmen.some(f => f.firma === _fcrSel.offen)) _fcrSel.offen = null
+    const offen = _fcrSel.offen
+    // ── Zeile (Grundzustand)
+    const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, `Bestätigen ${g.auto_bestaetigen ? 'auto' : 'von Hand'}`, z.von && z.bis ? `${z.von}–${z.bis}` : '', `News-Pause ${news.an ? 'an' : 'aus'}`].filter(Boolean)
+    const chip = (attr, aktiv, inhalt, titel) => `<button type="button" class="fcr-e-chip${aktiv ? ' on' : ''}" ${attr} aria-expanded="${aktiv ? 'true' : 'false'}"${titel ? ` title="${escapeHtml(titel)}"` : ''}>${inhalt}</button>`
+    const zeile = `<div class="fcr-e-zeile">
+      <div class="fcr-e-zl"><b>Einstellungen</b><span>${kurz.map(escapeHtml).join(' · ')}</span>${fcrDarf() ? '' : `<em class="fcr-e-nur" title="ändern als „Finn + Pascal“ oder „Pascal“">${fcrSchloss('Schreibrecht')} nur ansehen</em>`}</div>
+      <div class="fcr-e-chips">${chip('data-fcr-auf="ablauf"', offen === 'ablauf', 'Ablauf', 'Planer, Bestätigen, Waiting, News-Pause, Startfenster')}
+        ${firmen.map(f => chip(`data-fcr-firma="${escapeHtml(f.firma)}"`, offen === f.firma, `<i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}${f.an === false ? '<small>aus</small>' : ''}`, groessen(f).map(x => fcfdGroesse(x.groesse)).join(' · '))).join('')}</div>
     </div>`
-    // ── Karte 3: gewählte Firma
-    const f = firmen.find(x => x.firma === _fcrSel.firma)
-    let detail = '<div class="fcr-e-karte"><div class="fcr-leer">keine Firma gewählt</div></div>'
+    // ── Details: Ablauf
+    let auf = ''
+    if(offen === 'ablauf'){
+      const regelnInfo = fcrInfo('regeln', `<b>So plant er</b><br>1 Trade pro Tag je Konto, Uhrzeit im Startfenster und Long/Short gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance ·
+        Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen → „SL mit 1-%-Regel“`)
+      const newsInfo = fcrInfo('news', `<b>News-Pause</b> · nur rote USD-News (Forex Factory)<br>2 h vorher keine neuen Funded-CFD-Starts · laufende bis spätestens 6 min (Echo V2: 10 min) vorher zu ·
+        frühestens 15 min danach wieder Starts<span class="fcr-e-pop-z">Nächster Termin: ${escapeHtml(news.naechster)}</span><span class="fcr-e-pop-z">Kalender: ${escapeHtml(news.kalender)}</span>`)
+      const fenster = ad
+        ? `<div class="fcr-e-feld"><label>Startfenster <small>· ${escapeHtml(zone)}${fenCh ? ', leer = ' + escapeHtml(fenCh) : ''}</small></label><div class="fcr-e-spanne">${['von', 'bis'].map((t, n) =>
+            `<input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml((fenCh.split('–')[n]) || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · beide leer = wie Challenge-Planer">`).join('<span>–</span>')}</div></div>`
+        : fcrZeile('Startfenster', z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '–')
+      auf = `<div class="fcr-e-auf" data-fcr-karte="ablauf">
+        <div class="fcr-e-auf-kopf"><span class="fcr-e-titel">Ablauf ${regelnInfo}</span><span class="fcr-e-kopf-r">${weg}${fcrSpeichernKnopf('ablauf')}</span></div>
+        <div class="fcr-e-auf-grid"><div class="fcr-e-teil">
+          ${fcrSchalter('aktiv', !!D.aktiv, 'Planer')}${fcrSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen')}
+          ${fcrSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → automatisch Waiting')}${fcrSchalter('news', !!news.an, 'News-Pause', newsInfo)}
+        </div><div class="fcr-e-teil">${fenster}</div></div>
+      </div>`
+    }
+    // ── Details: Firma (Größen-Tabs → Ziel/Consistency → Trade → Schalter-Blöcke → Konten)
+    const f = offen && offen !== 'ablauf' ? firmen.find(x => x.firma === offen) : null
     if(f){
       const gl = groessen(f), fz = { firma: f.firma }
       let grSel = String(_fcrSel.gr[f.firma] ?? '')
       if(!gl.some(x => String(x.groesse) === grSel)) grSel = gl.length ? String(gl[0].groesse) : ''
       const x = gl.find(y => String(y.groesse) === grSel), r = (x && x.roh) || {}
       const pct = fcrConsPct(f), ep = f.erster_payout_eff, epDb = !!(f.erster_payout && typeof f.erster_payout === 'object')
-      const gtAlle = gl.map(y => (y.roh || {}).gewinntage).filter(v => v && typeof v === 'object'), gt = gtAlle[0] || null
+      const gt = gl.map(y => (y.roh || {}).gewinntage).find(v => v && typeof v === 'object') || null
       const gtGr = gl.find(y => (y.roh || {}).gewinntage), gtBezug = gl.length > 1 && gtGr ? ` · bei ${fcfdGroesse(gtGr.groesse)}, andere anteilig` : ''
       const gz = x ? Object.assign({ groesse: String(x.groesse) }, fz) : null
       const tabs = gl.length ? `<div class="fcr-e-tabs" role="tablist">${gl.map(y => `<button type="button" role="tab" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === grSel ? ' class="on" aria-selected="true"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>` : ''
-      const consInfo = fcrInfo('cons', 'kein Tag darf mehr als p % des Gewinns im Payout-Zyklus bringen: der Planer verteilt den Rest bis zum Ziel gleichmäßig auf Trades, jeder höchstens 95 % der erlaubten Tagesgröße; war ein Tag schon zu groß, wird das Ziel des Zyklus entsprechend höher')
-      let zielB, tradeB, refundB, gtB
+      const consInfo = fcrInfo('cons', 'kein Tag mehr als p % des Gewinns im Payout-Zyklus: der Rest bis zum Ziel wird gleichmäßig auf Trades verteilt, jeder höchstens 95 % der erlaubten Tagesgröße')
+      let zielB, tradeB, firmaB
       if(ad){
-        zielB = x ? `<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$ Gewinn', titel: 'Gewinn über der Starting Balance — ist das Konto dort, ist es fertig (Waiting for Payout)' })}</div>
-          ${fcrSchalter('cons:' + f.firma, !!pct, 'Consistency', consInfo)}
-          ${pct ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('je Zyklus', pct, Object.assign({ feld: 'consistency_pct' }, fz), { einheit: '% · gilt für alle Größen', titel: '1–99 %' })}</div>` : ''}` : ''
-        tradeB = x ? `<div class="fcr-e-felder">
+        zielB = `<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$', titel: 'Gewinn über der Starting Balance — ist das Konto dort, ist es fertig' })}
+            ${pct ? fcrFeld('Consistency', pct, Object.assign({ feld: 'consistency_pct' }, fz), { einheit: '% je Zyklus', titel: '1–99 % · gilt für alle Größen' }) : '<div class="fcr-e-feld"></div>'}</div>
+          ${fcrSchalter('cons:' + f.firma, !!pct, 'Consistency', consInfo)}`
+        tradeB = `<div class="fcr-e-felder">
             ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
             ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
-            ${fcrFeld('SL mit 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
+            ${fcrFeld('SL 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
             <div class="fcr-e-feld"><label>Hedge <small>· € auf $ DD</small></label><div class="fcr-e-spanne fcr-e-paar">
               <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.hedge_eur == null ? '' : fcrZahl(r.hedge_eur))}" placeholder="€" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'hedge_eur' }, gz)))}" title="Fusion-Gegenhedge in €"><span>auf</span>
               <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.dd == null ? '' : fcrZahl(r.dd))}" placeholder="$ DD" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'dd' }, gz)))}" title="Max Drawdown des Kontos in $"></div></div>
-          </div>` : ''
-        refundB = `${fcrSchalter('refund:' + f.firma, !!ep, 'Refund-Trade', fcrInfo('refund', 'bis zum 1. Payout erst ein kleines Ziel mit eigenem Hedge, danach normal'))}
-          ${ep ? (epDb ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), { bereich: true, einheit: '$ Gewinn' })}
+          </div>`
+        firmaB = `${fcrSchalter('firma:' + f.firma, f.an !== false, 'Im Planer')}
+          ${fcrSchalter('refund:' + f.firma, !!ep, 'Refund-Trade', fcrInfo('refund', 'bis zum 1. Payout erst ein kleines Ziel mit eigenem Hedge, danach normal'))}
+          ${ep ? (epDb ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, fz), { bereich: true, einheit: '$' })}
               ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, fz), { einheit: '€ je $ DD' })}</div>`
-            : '<div class="fcr-e-hinweis fcr-e-unter">Standard aus dem Code — Schalter einmal aus und an, dann änderbar</div>') : ''}`
-        gtB = `${fcrSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn (Payout-Regel der Firma) — bis dahin je Tag ein Trade mit diesem TP, danach aufs Ziel'))}
+            : '<div class="fcr-e-hinweis fcr-e-unter">Standard — Schalter aus und an, dann änderbar</div>') : ''}
+          ${fcrSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn — bis dahin je Tag ein Trade mit diesem TP, danach aufs Ziel'))}
           ${gt ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage_alle.anzahl' }, fz), { einheit: 'Tage' })}
-            ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$ je Tag' + gtBezug })}
-            ${fcrFeld('TP', gt.tp, Object.assign({ feld: 'gewinntage_alle.tp' }, fz), { bereich: true, einheit: '$ je Gewinntag' + gtBezug, breit: true })}</div>` : ''}`
+            ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$' + gtBezug })}
+            ${fcrFeld('TP', gt.tp, Object.assign({ feld: 'gewinntage_alle.tp' }, fz), { bereich: true, einheit: '$' + gtBezug, breit: true })}</div>` : ''}`
       } else {
-        zielB = x ? `<div class="fcr-e-kpis zwei">${fcrKpi('Ziel bis Waiting', '+' + (fcrSpanne(r.ziel) || '–'), '$ Gewinn')}${fcrKpi('Consistency', pct ? fcrZahl(pct) + ' %' : 'aus', pct ? 'je Payout-Zyklus' : '')}</div>` : ''
-        tradeB = x ? `<div class="fcr-e-kpis">${fcrKpi('Lots', fcrSpanne(r.lots) || '–', 'gewürfelt')}${fcrKpi('Stop-Loss', fcrSpanne(r.sl) || '–', '$ je Trade')}
-            ${fcrKpi('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct) : 'wie SL', r.sl_1pct != null ? '$' : '')}${fcrKpi('Hedge', r.hedge_eur != null ? fcrZahl(r.hedge_eur) + ' €' : '–', r.dd != null ? `auf ${fcrZahl(r.dd)} $ DD` : '')}</div>` : ''
-        refundB = fcrZeile('Refund-Trade', ep ? `Ziel +${fcrSpanne(ep.ziel, '$')} · Hedge ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')
-        gtB = fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} Tage ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')
+        zielB = `<div class="fcr-e-kpis zwei">${fcrKpi('Ziel bis Waiting', '+' + (fcrSpanne(r.ziel) || '–'), '$')}${fcrKpi('Consistency', pct ? fcrZahl(pct) + ' %' : 'aus', pct ? 'je Zyklus' : '')}</div>`
+        tradeB = `<div class="fcr-e-kpis">${fcrKpi('Lots', fcrSpanne(r.lots) || '–', '')}${fcrKpi('Stop-Loss', fcrSpanne(r.sl) || '–', '$')}
+            ${fcrKpi('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct) : 'wie SL', r.sl_1pct != null ? '$' : '')}${fcrKpi('Hedge', r.hedge_eur != null ? fcrZahl(r.hedge_eur) + ' €' : '–', r.dd != null ? `auf ${fcrZahl(r.dd)} $ DD` : '')}</div>`
+        firmaB = `${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}
+          ${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}
+          ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
       }
-      detail = `<div class="fcr-e-karte fcr-e-detail" data-fcr-karte="firma">
-        <div class="fcr-e-kopf"><span class="fcr-e-titel"><i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}<small>${f.an === false ? 'aus — wird nicht geplant' : 'im Planer'}</small></span>
-          <span class="fcr-e-kopf-r">${weg(true)}${fcrSpeichernKnopf('firma')}</span></div>
-        ${ad ? fcrSchalter('firma:' + f.firma, f.an !== false, 'Im Planer') : ''}
-        <div class="fcr-e-gr-leiste"><span>Kontogröße</span>${tabs}</div>
-        ${x ? fcrBlock('Ziel', zielB) + fcrBlock('Trade', tradeB) : '<div class="fcr-leer">keine Größe hinterlegt</div>'}
-        ${fcrBlock('Firma', refundB + gtB)}
-        ${fcrBlock('Konten', fcrKontenHtml(f, pct, D))}
+      auf = `<div class="fcr-e-auf" data-fcr-karte="firma">
+        <div class="fcr-e-auf-kopf"><span class="fcr-e-titel"><i style="background:${ton(f)}"></i>${escapeHtml(f.firma)}</span>${tabs}<span class="fcr-e-kopf-r">${weg}${fcrSpeichernKnopf('firma')}</span></div>
+        <div class="fcr-e-auf-grid">
+          <div class="fcr-e-teil">${x ? fcrBlock('Ziel', zielB) + fcrBlock('Trade', tradeB) : '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>
+          <div class="fcr-e-teil">${fcrBlock('Firma', firmaB)}${fcrBlock('Konten', fcrKontenHtml(f, pct, D))}</div>
+        </div>
       </div>`
     }
-    const balken = fcrDarf() ? '' : `<div class="fcr-e-balken">${fcrSchloss('Schreibrecht')} Nur ansehen — ändern als „Finn + Pascal“ oder „Pascal“</div>`
-    return `<div class="fcr-e-wrap" data-fcr-wurzel>${balken}<div class="fcr-e">${ablauf}${liste}${detail}</div></div>`
+    return `<div class="fcr-e-wrap fcr-e-kompakt" data-fcr-wurzel>${zeile}${auf}</div>`
   }
+  // Einstellungs-Karte der Planer-Seite unter dem Zeitstrahl (Finn 05.11.2026 ~05:35): Knopf oben rechts außerhalb des neu zeichenbaren Blocks
+  // Die Seite zeichnet sich im Takt komplett neu (apIdsRender): ungespeicherte Eingaben vorher einsammeln, fcfdRegelnVerdrahten setzt sie wieder ein
+  function fcrLeisteHtml(knopf){
+    const alt = new Map(); document.querySelectorAll('[data-fcr-wurzel] input[data-fcr-in].geaendert').forEach(i => alt.set(i.dataset.fcrIn, i.value))
+    if(alt.size) _fcrSel.mitnehmen = alt
+    return `<div class="apg-karte fcr-e-leiste" data-apg-anker="einst">${knopf ? `<div class="fcr-e-leiste-knopf">${knopf}</div>` : ''}${fcfdRegelnHtml()}</div>` }
   // Rohdaten aus der DB → normalisiert (Adapter, sobald S4 die Struktur geliefert hat)
   // Quelle (S4, 30.10.2026): GET /admin/funded-cfd-plan — Tabelle funded_cfd_plan_regeln hat RLS ohne Policy, also nur über die Route.
   // firmen[] = { name, an, namen, ohne_namen, je_groesse: { "<Größe>": { ziel, tp_erster, sl, sl_1pct, lots, hedge_eur, dd, daily_loss, gewinntage } },
@@ -85347,23 +85386,26 @@
       document.addEventListener('click', e => { if(e.target && e.target.closest && e.target.closest('.fcr-e-info')) return
         document.querySelectorAll('.fcr-e-pop:not([hidden])').forEach(p => { p.hidden = true }) }) }
     root.querySelectorAll('[data-fcr-wurzel]').forEach(w => { if(w.dataset.fcrV) return; w.dataset.fcrV = '1'
+      if(_fcrSel.mitnehmen){ const m = _fcrSel.mitnehmen; _fcrSel.mitnehmen = null   // nach dem Seiten-Neuzeichnen: ungespeicherte Eingaben zurück
+        w.querySelectorAll('input[data-fcr-in]').forEach(i => { if(m.has(i.dataset.fcrIn)){ i.value = m.get(i.dataset.fcrIn); i.classList.add('geaendert') } }); setTimeout(() => fcrKnoepfe(w), 0) }
       w.addEventListener('click', e => {
         const ib = e.target.closest('[data-fcr-info]')
         if(ib){ e.preventDefault(); const pop = ib.parentElement.querySelector('.fcr-e-pop'), zu = !!(pop && pop.hidden)
           w.querySelectorAll('.fcr-e-pop').forEach(p => { p.hidden = true }); if(pop) pop.hidden = !zu; return }
         const sb = e.target.closest('[data-fcr-save]')
         if(sb){ e.preventDefault(); fcrKarteSpeichern(sb.closest('[data-fcr-karte]')); return }
-        const fb = e.target.closest('[data-fcr-firma]'), gb = e.target.closest('[data-fcr-gr]'); if(!fb && !gb) return
+        const fb = e.target.closest('[data-fcr-firma]'), gb = e.target.closest('[data-fcr-gr]'), ab = e.target.closest('[data-fcr-auf]'); if(!fb && !gb && !ab) return
         e.preventDefault()
-        if(fb && _fcrSel.firma === fb.dataset.fcrFirma) return
-        if(gb && String(_fcrSel.gr[_fcrSel.firma] ?? '') === gb.dataset.fcrGr) return
-        if(fcrUngespeichert(w.querySelector('[data-fcr-karte="firma"]')) && !w.dataset.fcrWarn){
-          w.dataset.fcrWarn = '1'; if(typeof atToast === 'function') atToast('Ungespeicherte Änderungen — erst „Speichern“, oder nochmal klicken zum Verwerfen', 'end'); return }
+        if(gb && String(_fcrSel.gr[_fcrSel.offen] ?? '') === gb.dataset.fcrGr) return
+        if(fcrUngespeichert(w.querySelector('.fcr-e-auf')) && !w.dataset.fcrWarn){
+          w.dataset.fcrWarn = '1'; if(typeof atToast === 'function') atToast('Ungespeicherte Änderungen — erst „Speichern“; nochmal klicken wechselt trotzdem', 'end'); return }
         delete w.dataset.fcrWarn
-        if(fb) _fcrSel.firma = fb.dataset.fcrFirma
-        else { _fcrSel.gr[_fcrSel.firma] = gb.dataset.fcrGr; try{ localStorage.setItem('fcr_groesse', JSON.stringify(_fcrSel.gr)) }catch(_){} }   // Größe je Firma merken
+        // Chip „Ablauf" bzw. eine Firma: öffnen, zweiter Klick schließt — nie zwei gleichzeitig (Finn 05.11.2026 ~05:35)
+        if(ab) _fcrSel.offen = _fcrSel.offen === 'ablauf' ? null : 'ablauf'
+        else if(fb){ _fcrSel.offen = _fcrSel.offen === fb.dataset.fcrFirma ? null : fb.dataset.fcrFirma; if(_fcrSel.offen) _fcrSel.firma = _fcrSel.offen }
+        else { _fcrSel.gr[_fcrSel.offen] = gb.dataset.fcrGr; try{ localStorage.setItem('fcr_groesse', JSON.stringify(_fcrSel.gr)) }catch(_){} }   // Größe je Firma merken
         const neu = fcrNeuZeichnen(w)
-        if(fb && neu) neu.querySelector('.fcr-e-detail')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // Handy: Detail steht unter der Liste
+        if((fb || ab) && neu) neu.querySelector('.fcr-e-auf')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })   // Details ins Bild
       })
       w.querySelectorAll('input[data-fcr-in]').forEach(i => {
         i.addEventListener('input', () => { i.classList.toggle('geaendert', i.value !== i.defaultValue); delete w.dataset.fcrWarn; fcrKnoepfe(w) })
@@ -85478,9 +85520,7 @@
     if(u) k = k.filter(e => String(e.r.user_id) === String(u))
     // PAYOUTS AUF DEM WEG statt „Firmen · n“ (Finn 30.10.2026 ~07:56 über den Master)
     const konten = ad ? fcfdWartetHtml(k) + fcfdUnterwegsHtml(ad, k, u) : apgKarte('Waiting for Payout', 'Konten-Übersicht lädt …', '<div class="apg-leer" style="padding:18px 0">lädt …</div>')
-    const regeln = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
-        ${fcfdRegelnHtml()}</div>`   // E1b: offen, News-Pause steht im Ablauf (Zeile + ⓘ)
-    return konten + `<div class="fcr-unten">${regeln}</div>`
+    return konten   // E1b (05.11.2026): Einstellungen stehen jetzt unter dem Zeitstrahl (fcrLeisteHtml)
   }
   /* NEWS-KACHEL (Master 30.10.2026, Regeln Finn ~07:28 / S8 8427eda9): im Regelteil die News-Regel für Funded CFD — rote USD-News (Forex Factory,
    * impact High): seit Finn ~07:47 2 h vorher keine neuen Starts, laufende bis spätestens 6 min (V2: 10 min) vorher zu, frühestens 15 min danach. An/Aus aus GET
