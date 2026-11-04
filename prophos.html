@@ -54982,7 +54982,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2030'
+  const OS_TAB_BUILD = '2026-09-22.2031'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63824,7 +63824,9 @@
       }
       else if(fin && typeof tvV2LoginBremse === 'function'){ try{ const lb = tvV2LoginBremse(fin, jetzt); if(lb && lb.pruefen) txt = `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten` }catch(_){} }
       if(!txt && b.hedge && b.hedge.status === 'fehler') txt = `Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`
-      if(txt) add(currentUserId, ich, { art: 'plan', firma: p.masterFirm, konto: p.masterName, ende4: '', text: txt })
+      // typ (04.11.2026): Kontoart für die Funded-Weiche (fdpKlasse) — „Tradeify" am Plan kann ein CFD-Konto (funded_cfd) sein
+      const _acc = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
+      if(txt) add(currentUserId, ich, { art: 'plan', firma: p.masterFirm, konto: p.masterName, typ: (_acc && _acc.type) || '', ende4: '', text: txt })
     }
     // FREMD-POSITIONEN (08.10.2026, Finn über Master: „alle Sicherheitssachen einbauen" — auch Trades direkt in TradingView/MT5 ohne Plan):
     // delta.fremd[] (app.py fp_tick, heute nur MT5). Gegenläufiger Start derselben Firma binnen 3 min um das erste Erscheinen (andere ID
@@ -83480,7 +83482,15 @@
     if(f) return ((typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(f)) || (/tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(f) && !istTradeifyCfd(f))) ? 'futures' : 'cfd'
     return /^(tv|ts|orbit|polar|nova)/i.test(String((o && o.route) || '')) ? 'futures' : 'cfd' }
   const apArtPasst = o => { const a = apArtJetzt(); return !a || apArtVon(o) === a }
+  /* FUNDED FUTURES · FUNDED CFD (04.11.2026, Finn mit Foto Funded Planer → Futures: „Braucht dich · 3" mit Apex …0001 UND The5%ers …0448 / Tradeify
+   * CFD …4620 — „CFD-Funded-Trades sollen bei CFD kommen, nicht bei Funded Futures"): die Funded-Quellen liefern ihre Trades schon je Art, „Braucht
+   * dich" (tplBraucht) liest aber zusätzlich Konten/Endlesungen der ganzen ID. Dieselbe Weiche wie im Challenge-Planer (D.artPasst), nur Anzeige:
+   * Kontoart funded_cfd → CFD, sonst nach der Firma wie apArtVon (Tradeify CFD, The5%ers, FTMO … → CFD; Apex, Topstep, Tradeify … → Futures). */
+  const fdpKlasse = z => String((z && z.typ) || '') === 'funded_cfd' ? 'fcfd' : (apArtVon(z) === 'cfd' ? 'fcfd' : 'funded')
+  const fdpArtPasst = z => fdpKlasse(z) === _apIdsArtWert
+  window._fdpKlasse = fdpKlasse   // Test-Haken
   function apArtD(D){   // wie tplSichtFilter: Trades + Summen L/S nur dieser Kontoart
+    if(D && apIstFunded()) return { ...D, artPasst: fdpArtPasst }   // Funded: nur „Braucht dich" weichen, Trades kommen schon je Art
     if(!D || !apArtJetzt()) return D
     const trades = D.trades.filter(apArtPasst)
     let L = 0, S = 0
