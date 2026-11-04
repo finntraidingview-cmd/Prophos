@@ -23479,9 +23479,64 @@ AP_PAAR_ABSTAND = (2.0, 30.0)          # Paar INTERN (dieselbe Futures-Firma, zw
 AP_PAAR_ABSTAND_EXTERN = (2.0, 5.0)    # Paar EXTERN (zwei Futures-Firmen, z. B. Tradeify ↔ Topstep): 2–5 min (Finn 25.10.2026)
 AP_PAAR_PC_MIN = 3.0                   # derselbe PC (ID): kein anderer Start in ± 3 min (wie der Start-Wächter)
 AP_PAAR_RS_MIN = 30.0                  # Richtungsschutz beim Rücken: keine Gegenrichtung derselben ID × Firma in ± 30 min (wie AP_WAAGE_RS_HORIZONT_MIN)
+# ZUFALL-PARAMETER (05.11.2026, Auftrag E3b; Finn: „die Parameter, die fürs Zufallsprinzip genommen werden, sodass ich die bearbeiten kann —
+# wie bei Winning Days"): die Würfel-Werte des Challenge-Planers stehen in auto_plan_regeln.regeln.zufall; fehlt ein Schlüssel oder ist er
+# ungültig, gilt einzeln der Code-Wert (dieselben Zahlen → dieselben Pläne, Selbsttest tools/selftest_einstellungen_challenge.py). Der Planer
+# trägt sie als zeiten["_zufall"] durch (ap_zeiten_mit_zufall) — nur im Speicher, nie zurückgeschrieben; die rechnenden Funktionen lesen
+# zeiten["_zufall"].get(k, KONSTANTE) inline (Selbsttests laden sie einzeln). SQL sql/2026-11-05_ap_zufall_parameter.sql.
+# Schlüssel → (Code-Konstante, Art, min, max) — eine Zeile, damit die Selbsttest-Lader (einzeilige AP_-Konstanten) sie mitnehmen
+# Grenzen passend zu den festen Start-Wächtern (S6-Review E3b): Paar-Partner ≤ 30 min (ap_waage_folgt, AP_WAAGE_FOLGT_MIN), Richtungsschutz
+# ≥ 30 (AP_WAAGE_RS_HORIZONT_MIN), PC ≥ 3 (Start-Wächter); Würfe ≤ 30 (Laufzeit je Planer-Lauf, heute 20 × 16)
+AP_ZUFALL_FELDER = {"paar_extern_min": ("AP_PAAR_ABSTAND_EXTERN", "spanne", 0.5, 30.0), "paar_intern_min": ("AP_PAAR_ABSTAND", "spanne", 0.5, 30.0), "paar_pc_min": ("AP_PAAR_PC_MIN", "zahl", 3.0, 30.0), "paar_rs_min": ("AP_PAAR_RS_MIN", "zahl", 30.0, 240.0), "verteil_jitter_min": ("AP_VERTEIL_JITTER_MIN", "zahl", 0.0, 60.0), "fenster_wuerfe": ("AP_FENSTER_WUERFE", "ganz", 1, 30), "gegen_wuerfe": ("AP_GEGEN_WUERFE", "ganz", 1, 30)}
 
 
-def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=(), firma_min=None, pc_min=None, frueh=None):
+def ap_zufall_code():
+    """Code-Werte der Zufall-Parameter (Rückfall) — Spannen als Liste [von, bis]."""
+    g = globals()
+    return {k: (list(g[c]) if art == "spanne" else g[c]) for k, (c, art, _lo, _hi) in AP_ZUFALL_FELDER.items() if c in g}
+
+
+def ap_zufall_pruefen(k, v):
+    """REIN RECHNEND: (wert, None) | (None, grund) für einen Zufall-Parameter (Typ und Grenzen aus AP_ZUFALL_FELDER)."""
+    if k not in AP_ZUFALL_FELDER:
+        return None, f"{k} ist kein Zufall-Parameter"
+    _c, art, lo, hi = AP_ZUFALL_FELDER[k]
+
+    def zahl(x):
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or x != x or not (lo <= x <= hi):
+            return None
+        return x
+    if art == "spanne":
+        if not (isinstance(v, (list, tuple)) and len(v) == 2):
+            return None, f"{k} = [von, bis]"
+        a, b = zahl(v[0]), zahl(v[1])
+        if a is None or b is None or a > b:
+            return None, f"{k} = [von, bis], {lo:g}–{hi:g}, von ≤ bis"
+        return [a, b], None
+    x = zahl(v)
+    if x is None or (art == "ganz" and not float(x).is_integer()):
+        return None, f"{k} = {'ganze Zahl' if art == 'ganz' else 'Zahl'} {lo:g}–{hi:g}"
+    return (int(x) if art == "ganz" else x), None
+
+
+def ap_zufall(regeln):
+    """REIN RECHNEND: wirksame Zufall-Parameter — regeln.zufall je Schlüssel, sonst (oder ungültig) der Code-Wert."""
+    out = ap_zufall_code()
+    z = (regeln or {}).get("zufall") if isinstance(regeln, dict) else None
+    for k, v in (z.items() if isinstance(z, dict) else ()):
+        w, grund = ap_zufall_pruefen(k, v)
+        if grund is None:
+            out[k] = w
+    return out
+
+
+def ap_zeiten_mit_zufall(reg):
+    """zeiten des Challenge-Planers + _zufall (wirksame Zufall-Parameter aus regeln) — eine Kopie, nur im Speicher."""
+    zeiten = (reg or {}).get("zeiten")
+    return dict(zeiten if isinstance(zeiten, dict) else {}, _zufall=ap_zufall((reg or {}).get("regeln")))
+
+
+def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=(), firma_min=None, pc_min=None, frueh=None, zufall=None):
     """REIN RECHNEND (testbar, Finn 19.10.2026): Paare Long/Short der Futures-Waage-Firmen (nicht `ohne` = Apex).
     PROPFIRM-EXTERN ZUERST (Finn 25.10.2026: „wenn verschiedene Propfirm-Accounts frei sind … soll das immer so gegengehedged werden,
     dass es nicht propfirm-intern gehedged wird, sondern propfirm-extern" — heute ~20 Tradeify, ~5 Topstep, 2–3 Lucid am Tag):
@@ -23503,8 +23558,11 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
     der SPÄTERE der beiden (nie ein fester) rückt auf Anker + Abstand. Frei = PC ± 3 min, Firma ≥ 1 min zu anderen IDs, im Fenster der
     Tranche, Richtungsschutz (fest_refs + Gegenrichtung derselben ID × Firma ± 30 min). → (neue minuten, [{art, firma, user, richtung, key,
     von, nach, anker, anker_id, anker_firma}])."""
+    zf = zufall if isinstance(zufall, dict) else {}     # E3b (05.11.2026): Zufall-Parameter (ap_zufall, geprüft), sonst Code-Wert
     firma_min = float(AP_FIRMA_ABSTAND_MIN if firma_min is None else firma_min)
-    pc_min = float(AP_PAAR_PC_MIN if pc_min is None else pc_min)
+    pc_min = float(zf.get("paar_pc_min", AP_PAAR_PC_MIN) if pc_min is None else pc_min)
+    rs_min = float(zf.get("paar_rs_min", AP_PAAR_RS_MIN))
+    ab_extern, ab_intern = tuple(zf.get("paar_extern_min", AP_PAAR_ABSTAND_EXTERN)), tuple(zf.get("paar_intern_min", AP_PAAR_ABSTAND))
     out = dict(minuten)
     info = []
     neu_keys = [k for k in out if k in tr_info and richtung.get(k) in ("buy", "sell")
@@ -23532,12 +23590,12 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
     def rs_frei(k, m):
         t = tr_info[k]
         u, fk, r = str(t.get("user")), str(t.get("fkey")), richtung.get(k)
-        if any(u2 == u and f2 == fk and r2 != r and abs(s - m) < AP_PAAR_RS_MIN for u2, f2, r2, s in rs_fest):
+        if any(u2 == u and f2 == fk and r2 != r and abs(s - m) < rs_min for u2, f2, r2, s in rs_fest):
             return False
         for k2, m2 in out.items():
             t2 = tr_info.get(k2) or {}
             if k2 != k and str(t2.get("user")) == u and str(t2.get("fkey")) == fk and richtung.get(k2) in ("buy", "sell") \
-                    and richtung.get(k2) != r and abs(float(m2) - m) < AP_PAAR_RS_MIN:
+                    and richtung.get(k2) != r and abs(float(m2) - m) < rs_min:
                 return False
         return True
 
@@ -23584,7 +23642,7 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
     firmen = sorted(n_firma, key=lambda fk: (n_firma[fk], fk))     # kleiner Pool zuerst (Topstep/Lucid vor Tradeify)
 
     def paaren(k, extern):
-        abstand = AP_PAAR_ABSTAND_EXTERN if extern else AP_PAAR_ABSTAND
+        abstand = ab_extern if extern else ab_intern
         r, u, m, fk = richtung[k], str(tr_info[k].get("user")), float(out[k]), str(tr_info[k].get("fkey"))
         gegen = "sell" if r == "buy" else "buy"
 
@@ -23645,7 +23703,7 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
     (info.stufe < 1) vor dem fenster-treueren — volle Abstände sind Finns harte Regel (Prüfung Slave 2, 08.10.2026).
     Gleicher rnd → gleiches Ergebnis (Probelauf = Anlegen)."""
     best = None
-    for _w in range(AP_FENSTER_WUERFE):
+    for _w in range(int(((zeiten or {}).get("_zufall") or {}).get("fenster_wuerfe", AP_FENSTER_WUERFE))):   # E3b: regeln.zufall, sonst Code
         info_w = {}
         m = _ap_zeiten_verteilen_einmal(tranchen, zeiten, random.Random(rnd.random()), frueheste_min=frueheste_min, info=info_w,
                                         bestehend=bestehend)
@@ -27308,7 +27366,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     if not uids:
         return {"ok": False, "msg": "Keine ID mit Konten in challenge/phase1/phase2" if alle_ids
                 else "Keine IDs im Auto-Planer (auto_plan_regeln.user_ids leer)"}
-    zeiten = reg.get("zeiten") or {}
+    zeiten = ap_zeiten_mit_zufall(reg)          # E3b (05.11.2026): + _zufall aus regeln.zufall (Rückfall Code) — nur im Speicher
     firmen = (reg.get("regeln") or {}).get("firmen") or []
     jetzt = datetime.now(timezone.utc)
     tag = tag or jetzt.astimezone(_ap_tz(AP_TZ_LAUF)).strftime("%Y-%m-%d")
@@ -27650,7 +27708,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     firma_fest += [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung"), "start": x.get("start"),
                     "route": x.get("route")} for x in stand.get("starts_heute") or ()]
     bester = None
-    for _wurf in range(AP_GEGEN_WUERFE):
+    for _wurf in range(int((zeiten.get("_zufall") or {}).get("gegen_wuerfe", AP_GEGEN_WUERFE))):     # E3b: regeln.zufall, sonst Code
         zinfo_w = {}
         minuten_w = ap_zeiten_verteilen(list(tr_info.values()), zeiten, rnd, frueheste_min=frueh, info=zinfo_w,
                                         bestehend=bestehend_pc)
@@ -27675,7 +27733,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # (dieselbe Firma, zwei IDs, 2–30 min) — Richtung bleibt immer, nur die Startzeit rückt.
     try:
         minuten, paare_info = ap_paare_legen(minuten, richtung, tr_info, bestehend_pc, firma_fest, rnd, ohne=ap_waage_ohne_liste({"param": param}),
-                                             frueh=frueh)      # 19.10.2026: Anker nur in der Zukunft (Nachplanen am Nachmittag)
+                                             frueh=frueh, zufall=zeiten.get("_zufall"))      # 19.10.2026: Anker nur in der Zukunft (Nachplanen am Nachmittag)
         if paare_info:
             print(f"[auto-plan] {tag} Paare: " + " · ".join(f"{p.get('art', 'intern')} {p['firma']} {p['user']} {p['richtung']} {_ap_hhmm_txt(p['von'])}→{_ap_hhmm_txt(p['nach'])}"
                                                            f" (zu {p.get('anker_firma') or p['firma']})" for p in paare_info), flush=True)
@@ -31757,7 +31815,7 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                 continue
             frei_ = [t for t in range(int(-(-lo // 1)), hi + 1) if ok(t, f)]
             if frei_:
-                ziel = float(rnd.choice([t for t in frei_ if t <= frei_[0] + AP_VERTEIL_JITTER_MIN]))
+                ziel = float(rnd.choice([t for t in frei_ if t <= frei_[0] + float(((zeiten or {}).get("_zufall") or {}).get("verteil_jitter_min", AP_VERTEIL_JITTER_MIN))]))   # E3b
                 break
         if ziel is not None and ziel > s0:
             neu[i] = ziel
@@ -32992,7 +33050,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     (der Planer ersetzt seine unbestätigten Vorschläge). Nur Lesen. offen[] und die Einsatz-Basis nur Konten der AP_TYPEN
     (Winning Days/Funded raus, Finn 07.10.2026); Richtungsschutz und Starts sehen alle laufenden Trades."""
     jetzt = jetzt or datetime.now(timezone.utc)
-    zeiten = reg.get("zeiten") or {}
+    zeiten = ap_zeiten_mit_zufall(reg)          # E3b: Verteilung/Umplanen mit denselben Zufall-Parametern wie der Planer
     regeln = reg.get("regeln") or {}
     firmen = regeln.get("firmen") or []
     param = ap_ausgleich_param(regeln)
@@ -35955,16 +36013,21 @@ def admin_auto_plan_ausgleich_einstellung():
 # Schalter, Hedge-Wege, Waage — plus die Konstanten, die fest im Code stehen (ap_einst_fest, nur zum Ansehen). Reines Lesen, Gate wie die
 # anderen Planer-Leserouten. POST /admin/auto-plan/kernwert: ändert NUR schon vorhandene Zahlen/Spannen/Schalter in regeln.firmen[] (Pfad je
 # Feld, gleicher Typ, feste Grenzen je Feld, nie neue Schlüssel) — Admin + Planer-Schreibrecht. Planer-Verhalten bleibt gleich, solange keiner
-# etwas ändert (dieselben Werte, dieselbe Quelle). ══
+# etwas ändert (dieselben Werte, dieselbe Quelle). E3b (05.11.2026): POST /admin/auto-plan/ablaufwert für Zeiten (Spalte zeiten), Zufall
+# (regeln.zufall, AP_ZUFALL_FELDER) und auto_bestaetigen; GET liefert dazu zufall/zufall_db/zeiten_db und regel_info (firm_rules.json). ══
 AP_EINST_GRENZEN = {   # Feld → (min, max); Zahl oder Spanne [von, bis]. TP/SL/Drawdown/Tageslimit nie 0 (S6-Review: Tippfehler „0“ hätte geplant)
     "ziel_pct": (0.1, 50.0), "boden_pct": (0.1, 50.0), "dd_pct": (0.1, 50.0), "ab_dd_pct": (0.1, 50.0),
     "tp": (1.0, 200000.0), "sl": (1.0, 200000.0), "puffer": (0.0, 200000.0), "tp_max": (1.0, 200000.0), "dd_usd": (1.0, 200000.0),
     "daily_usd": (1.0, 200000.0), "tagesziel_usd": (1.0, 200000.0), "blow_puffer_usd": (0.0, 200000.0), "t1_sl": (1.0, 200000.0),
     "t1_tp": (1.0, 200000.0), "menge": (0.01, 500.0), "t2_menge": (0.01, 500.0), "menge_schritt": (0.01, 10.0), "kauf_eur": (0.0, 20000.0),
+    # E3b (05.11.2026, Finn: „die ganze Sache bearbeiten"): Puffer je Kontrakt-Zahl, Gewichte, Kette, Konten je Tag
+    "puffer_je_menge": (0.0, 200000.0), "menge_gewichte": (0.0, 100.0), "t2_menge_gewichte": (0.0, 100.0), "dll_puffer": (0.0, 200000.0),
+    "t2_abstand_min": (0.0, 600.0), "t2_streuung_min": (0.0, 600.0), "max_konten_tag": (1.0, 50.0),
 }
-AP_EINST_GANZ = ("menge", "t2_menge", "menge_schritt")   # steht dort eine ganze Zahl (Kontrakte, Schritt 1), bleibt es eine ganze Zahl
+AP_EINST_GANZ = ("menge", "t2_menge", "menge_schritt", "max_konten_tag")   # steht dort eine ganze Zahl (Kontrakte, Schritt 1), bleibt sie ganz
+AP_EINST_UHR = ("t1_bis", "t2_ab", "t2_bis")             # Uhrzeit-Text „HH:MM" der Topstep-Kette (E3b)
 AP_EINST_ZUORDNUNG = ("challenge", "phase1", "phase2")  # Schlüssel einer Zuordnung (ziel_pct je Phase) — Feld ist der Name davor
-AP_EINST_SCHALTER = ("planen", "lock_bei_start", "soft")   # Ja/Nein-Felder einer Firma
+AP_EINST_SCHALTER = ("planen", "lock_bei_start", "soft", "skaliert")   # Ja/Nein-Felder einer Firma
 AP_EINST_PFAD_MAX = 6
 
 
@@ -35974,7 +36037,8 @@ def ap_einst_fest():
         "beide": {"firma_abstand_min": AP_FIRMA_ABSTAND_MIN, "nachplan_vorlauf_min": AP_NACHPLAN_VORLAUF_MIN, "faellig_min": AP_FAELLIG_MIN,
                   "groesse_toleranz_pct": round(AP_GROESSE_TOLERANZ * 100, 1), "klein_pkt": AP_KLEIN_PKT, "klein_puffer_min_usd": AP_KLEIN_PUFFER_MIN,
                   "start_bis_standard": AP_START_BIS_STANDARD, "neu_bis_standard": AP_NEU_BIS_STANDARD, "nacht_standard": AP_NACHT_STANDARD,
-                  "verteil_vorlauf_min": AP_VERTEIL_VORLAUF_MIN, "richtung_lauf_fest_min": AP_RICHTUNG_LAUF_FEST_MIN},
+                  "verteil_vorlauf_min": AP_VERTEIL_VORLAUF_MIN, "richtung_lauf_fest_min": AP_RICHTUNG_LAUF_FEST_MIN,
+                  "nachplan_takt_min": round(AP_NACHPLAN_TAKT_S / 60.0, 1)},
         "cfd": {"rest_min_usd": AP_REST_MIN_CFD, "puffer_pkt": AP_PUFFER_PKT, "klein_schritt": AP_KLEIN_SCHRITT, "tage_pkt": list(AP_TAGE_CFD_PKT),
                 "tage_puffer_usd": AP_TAGE_PUFFER.get("cfd"), "cfd_ab_standard": AP_CFD_AB_STANDARD, "routen": list(AP_CFD_ROUTEN)},
         "futures": {"rest_min_usd": AP_REST_MIN, "puffer_pkt": AP_PUFFER_PKT_FUT, "puffer_je_kt_usd": AP_PUFFER_JE_KT_FUT,
@@ -35990,6 +36054,9 @@ def ap_einst_wert(alt, neu, feld):
     (von ≤ bis) oder Ja/Nein (nur AP_EINST_SCHALTER); Zahlen in AP_EINST_GRENZEN[feld]. Unbekanntes Feld oder anderer Typ → nie."""
     if feld in AP_EINST_SCHALTER:
         return (neu, None) if isinstance(alt, bool) and isinstance(neu, bool) else (None, f"{feld} = true | false")
+    if feld in AP_EINST_UHR:
+        u = ap_einst_uhr(neu)
+        return (u, None) if isinstance(alt, str) and u else (None, f"{feld} = Uhrzeit HH:MM")
     if feld not in AP_EINST_GRENZEN:
         return None, f"{feld} ist hier nicht änderbar"
     lo, hi = AP_EINST_GRENZEN[feld]
@@ -36045,7 +36112,208 @@ def ap_einst_anwenden(firmen, firma, aenderungen):
         if grund:
             return None, f"{'/'.join(pfad)}: {grund}"
         knoten[letzter] = wert
+    kette = ziel.get("kette") if isinstance(ziel.get("kette"), dict) else {}
+    if all(isinstance(kette.get(k), str) for k in AP_EINST_UHR):       # Kette: Trade 1 bis ≤ Trade 2 ab < Trade 2 bis (E3b)
+        t1, t2a, t2b = (_ap_hhmm(kette[k]) for k in AP_EINST_UHR)
+        if not (t1 <= t2a < t2b):
+            return None, "kette: Trade 1 bis ≤ Trade 2 ab < Trade 2 bis"
     return neu, None
+
+
+def ap_einst_uhr(x):
+    """REIN RECHNEND: „H:MM“/„HH:MM“ (00:00–23:59) → „HH:MM“, sonst None."""
+    m = re.match(r"^(\d{1,2}):(\d{2})$", str(x or "").strip()) if isinstance(x, str) else None
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+
+# ZEITEN (Spalte auto_plan_regeln.zeiten, E3b 05.11.2026): erlaubte Pfade → Art. Uhrzeiten nur die Uhr, die Zeitzone bleibt.
+AP_EINST_ZEITEN = {
+    ("nachtlauf", "uhr"): "uhr", ("cfd_ab", "uhr"): "uhr", ("cfd_bis", "uhr"): "uhr", ("neu_bis", "uhr"): "uhr", ("start_bis",): "uhr",
+    # abstand_id_min ab 1: die Leser rechnen „or 3" — 0 würde still zu 3 (S6-Review E3b). pause_firma_min liest der Planer seit 06.10.2026 nicht
+    # mehr (_ap_zeiten_verteilen_einmal) — darum weder Anzeige noch Schreibweg.
+    ("abstand_id_min",): ("zahl", 1.0, 30.0), ("abstand_konto_s",): ("spanne", 0.0, 900.0),
+}
+AP_EINST_BESTAETIGEN = {"aus": False, "cfd": "cfd", "alle": True}   # regeln.auto_bestaetigen (ap_auto_best_umfang)
+# Zahlen in den Regel-Blöcken (E3b Nachtrag 2, Finn: „Winning Days als Beispiel … alle wichtigen Sachen kann ich anpassen"): Block → Feld →
+# (min, max, ganz). Fehlt das Feld im Block, legt es das Speichern an (die Leser eh_param/ah_param/tfh_param/ap_ausgleich_param nehmen sonst
+# ihren Standard). Die An/Aus-Schalter der Hedge-Wege und des Ausgleich-Bots bleiben bei POST /ausgleich-einstellung.
+# Grenzen GENAU wie die Leser (eh_param/tfh_param/ah_param verwerfen sonst still und nehmen den Standard — S6-Review E3b Befund 1)
+_AP_EINST_HEDGE = {"vorlauf_min": (3.0, 120.0, False), "nachlauf_min": (0.0, 60.0, False), "netto_faktor": (0.5, 1.0, False), "min_lot": (0.01, 1.0, False)}
+AP_EINST_BLOECKE = {
+    "echo_hedge": dict(_AP_EINST_HEDGE, max_lots=(1.0, 1000.0, False)), "apex_hedge": dict(_AP_EINST_HEDGE),
+    "tradeify_final_hedge": dict(_AP_EINST_HEDGE, max_lots=(1.0, 1000.0, False)),
+    "ausgleich": {"takt_min": (2, 120, True), "zielband_pct": (1.0, 100.0, False), "gross_ab_eur": (0.0, 100000.0, False),
+                  "laufzeit_min": (30, 1440, True), "waage_max_abstand": (1.0, 20.0, False)},   # waage_max_abstand liest auch der DB-Claim-Riegel
+}
+AP_EINST_REGEL_SCHALTER = {("abhaken_auto_normal",), ("abhaken_auto_blow",), ("tradeify_final_halten",), ("ausgleich", "waage_deckel_an")}
+
+
+def ap_einst_zeiten_anwenden(zeiten, aenderungen):
+    """REIN RECHNEND (testbar): zeiten (Kopie) + [{pfad, wert}] → (zeiten_neu, None) | (None, grund). Alles oder nichts.
+    Pfade aus AP_EINST_ZEITEN plus Start-Fenster ["fenster", "<i>", "0"|"1"] (von/bis eines vorhandenen Fensters, Anteil bleibt).
+    Fehlt nachtlauf/neu_bis, legt die Uhr sie mit der Standard-Zeitzone an (die Anzeige zeigte bisher den Standard). Danach: jedes Fenster
+    von < bis, CFD ab < CFD bis (gleiche Zeitzone)."""
+    neu = json.loads(json.dumps(zeiten if isinstance(zeiten, dict) else {}))
+    if not isinstance(aenderungen, list) or not aenderungen or len(aenderungen) > 30:
+        return None, "zeiten = Liste mit 1–30 Einträgen"
+    for a in aenderungen:
+        pfad = a.get("pfad") if isinstance(a, dict) else None
+        if not (isinstance(pfad, list) and pfad and all(isinstance(x, str) and x for x in pfad)):
+            return None, "pfad = Liste von Schlüsseln"
+        txt, w = "/".join(pfad), a.get("wert")
+        if pfad[0] == "fenster" and len(pfad) == 3 and pfad[1].isdigit() and pfad[2] in ("0", "1"):
+            fl = neu.get("fenster")
+            i = int(pfad[1])
+            if not (isinstance(fl, list) and i < len(fl) and isinstance(fl[i], list) and len(fl[i]) >= 2):
+                return None, f"{txt}: Fenster gibt es nicht"
+            u = ap_einst_uhr(w)
+            if not u:
+                return None, f"{txt} = Uhrzeit HH:MM"
+            fl[i][int(pfad[2])] = u
+            continue
+        art = AP_EINST_ZEITEN.get(tuple(pfad))
+        if art is None:
+            return None, f"{txt} ist hier nicht änderbar"
+        if art == "uhr":
+            u = ap_einst_uhr(w)
+            if not u:
+                return None, f"{txt} = Uhrzeit HH:MM"
+            if len(pfad) == 1:
+                neu[pfad[0]] = u
+                continue
+            knoten = neu.get(pfad[0])
+            if isinstance(knoten, str) and pfad[0] in ("cfd_ab", "cfd_bis"):
+                neu[pfad[0]] = u                     # alte Form „HH:MM" deutscher Zeit bleibt dieselbe Form
+                continue
+            if not isinstance(knoten, dict):
+                if pfad[0] == "nachtlauf":
+                    knoten = neu[pfad[0]] = {"tz": AP_NACHT_STANDARD["tz"]}
+                elif pfad[0] == "neu_bis":
+                    knoten = neu[pfad[0]] = {"tz": AP_NEU_BIS_STANDARD["tz"]}
+                else:
+                    return None, f"{txt} gibt es nicht"
+            knoten["uhr"] = u
+            continue
+        kind, lo, hi = art
+        alt = neu.get(pfad[0])
+        if alt is None:
+            return None, f"{txt} gibt es nicht"
+        ok = lambda x: not isinstance(x, bool) and isinstance(x, (int, float)) and lo <= x <= hi   # noqa: E731
+        if kind == "zahl":
+            if not ok(w):
+                return None, f"{txt} = Zahl {lo:g}–{hi:g}"
+            neu[pfad[0]] = int(w) if isinstance(alt, int) and float(w).is_integer() else w
+        else:
+            if not (isinstance(alt, list) and len(alt) == 2):
+                return None, f"{txt}: bisheriger Wert ist keine Spanne"
+            if not (isinstance(w, list) and len(w) == 2 and ok(w[0]) and ok(w[1]) and w[0] <= w[1]):
+                return None, f"{txt} = [von, bis], {lo:g}–{hi:g}, von ≤ bis"
+            neu[pfad[0]] = [int(x) if float(x).is_integer() and all(isinstance(y, int) for y in alt) else x for x in w]
+    for i, f in enumerate(neu.get("fenster") or ()):
+        if isinstance(f, list) and len(f) >= 2 and ap_einst_uhr(f[0]) and ap_einst_uhr(f[1]) and _ap_hhmm(f[0]) >= _ap_hhmm(f[1]):
+            return None, f"Start-Fenster {i + 1}: von < bis"
+    ca, cb = neu.get("cfd_ab"), neu.get("cfd_bis")
+    if isinstance(ca, dict) and isinstance(cb, dict) and ca.get("tz") == cb.get("tz") and ap_einst_uhr(ca.get("uhr")) and ap_einst_uhr(cb.get("uhr")) \
+            and _ap_hhmm(ca["uhr"]) >= _ap_hhmm(cb["uhr"]):
+        return None, "CFD: ab < bis"
+    return neu, None
+
+
+def ap_einst_regeln_anwenden(regeln, zufall=None, auto_bestaetigen=None, bloecke=None, schalter=None):
+    """REIN RECHNEND (testbar): regeln (Kopie) + Zufall-Parameter {k: wert} + auto_bestaetigen ("aus"|"cfd"|"alle") + bloecke {block: {feld:
+    zahl}} (AP_EINST_BLOECKE) + schalter [{pfad, wert: bool}] (AP_EINST_REGEL_SCHALTER) → (regeln_neu, None) | (None, grund). Alles oder nichts.
+    Zufall: nur AP_ZUFALL_FELDER, Typ/Grenzen ap_zufall_pruefen; regeln.zufall wird angelegt, wenn es fehlt."""
+    neu = json.loads(json.dumps(regeln if isinstance(regeln, dict) else {}))
+    if bloecke is not None:
+        if not isinstance(bloecke, dict) or not bloecke:
+            return None, "bloecke = {Block: {Feld: Zahl}}"
+        for blk, werte in bloecke.items():
+            erlaubt = AP_EINST_BLOECKE.get(blk)
+            if erlaubt is None or not isinstance(werte, dict) or not werte:
+                return None, f"{blk} ist hier nicht änderbar"
+            ziel = neu.get(blk) if isinstance(neu.get(blk), dict) else {}
+            for k, v in werte.items():
+                if k not in erlaubt:
+                    return None, f"{blk}/{k} ist hier nicht änderbar"
+                lo, hi, ganz = erlaubt[k]
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not (lo <= v <= hi) or (ganz and not float(v).is_integer()):
+                    return None, f"{blk}/{k} = {'ganze Zahl' if ganz else 'Zahl'} {lo:g}–{hi:g}"
+                ziel[k] = int(v) if ganz else v
+            neu[blk] = ziel
+    if schalter is not None:
+        if not isinstance(schalter, list) or not schalter:
+            return None, "schalter = [{pfad, wert}]"
+        for x in schalter:
+            pfad = tuple(x.get("pfad") or ()) if isinstance(x, dict) and isinstance(x.get("pfad"), list) else ()
+            if pfad not in AP_EINST_REGEL_SCHALTER or not isinstance(x.get("wert"), bool):
+                return None, f"{'/'.join(map(str, pfad)) or '?'} = true | false (nur {', '.join('/'.join(q) for q in sorted(AP_EINST_REGEL_SCHALTER))})"
+            if len(pfad) == 1:
+                neu[pfad[0]] = x["wert"]
+            else:
+                blk = neu.get(pfad[0]) if isinstance(neu.get(pfad[0]), dict) else {}
+                blk[pfad[1]] = x["wert"]
+                neu[pfad[0]] = blk
+    if zufall is not None:
+        if not isinstance(zufall, dict) or not zufall:
+            return None, "zufall = {Schlüssel: Wert}"
+        z = neu.get("zufall") if isinstance(neu.get("zufall"), dict) else {}
+        for k, v in zufall.items():
+            w, grund = ap_zufall_pruefen(k, v)
+            if grund:
+                return None, f"zufall/{k}: {grund}"
+            z[k] = w
+        neu["zufall"] = z
+    if auto_bestaetigen is not None:
+        if auto_bestaetigen not in AP_EINST_BESTAETIGEN:
+            return None, "auto_bestaetigen = aus | cfd | alle"
+        neu["auto_bestaetigen"] = AP_EINST_BESTAETIGEN[auto_bestaetigen]
+    return neu, None
+
+
+# FIRMEN-REGELN (E3b, Finn: „eine Info wie bei den Regeln der Props, wo der Drawdown drin ist und was als Take Profit zählt"): die passenden
+# Abschnitte aus firm_rules.json (gleiche Quelle wie „Regeln der Props"), nur zur Anzeige. Planer-Firma → id in firm_rules.json.
+AP_REGEL_INFO_ID = {"tradeify": "tradeify", "apextrader": "apex", "fundednext": "fundednext", "fundingpips": "fundingpips",
+                    "the5ers": "the5ers", "topstep": "topstep", "ftmo": "ftmo"}
+AP_REGEL_INFO_ABSCHNITTE = (("Daily Loss", r"daily loss|\bdll\b"), ("Drawdown", r"drawdown|max loss|\bmll\b"), ("Ziel", r"profit.?target"),
+                            ("Consistency", r"consisten|best day"), ("Zeit & Mindesttage", r"time.?rules"))
+_ap_regel_info_cache = {}
+
+
+def ap_regel_info_abschnitte(md, max_zeichen=2400):
+    """REIN RECHNEND: Markdown einer Firma → [{gruppe, kopf, text}] — je „### …“-Abschnitt, dessen Kopf zu einer Gruppe passt (erste Gruppe gewinnt)."""
+    teile, kopf, zeilen = [], None, []
+    for z in (str(md or "") + "\n### ").splitlines():
+        if z.startswith("### ") or z.startswith("## "):
+            if kopf is not None:
+                for gruppe, muster in AP_REGEL_INFO_ABSCHNITTE:
+                    if re.search(muster, kopf, re.I):
+                        txt = "\n".join(zeilen).strip()
+                        teile.append({"gruppe": gruppe, "kopf": kopf, "text": txt[:max_zeichen] + (" …" if len(txt) > max_zeichen else "")})
+                        break
+            kopf, zeilen = (z[4:].strip() if z.startswith("### ") else None), []
+        else:
+            zeilen.append(z)
+    rang = {g: i for i, (g, _m) in enumerate(AP_REGEL_INFO_ABSCHNITTE)}
+    return sorted(teile, key=lambda t: rang[t["gruppe"]])
+
+
+def ap_regel_info():
+    """firm_rules.json (neben app.py) → {planer_firma: {name, id, updated_at, abschnitte}} — je Dateistand einmal gelesen."""
+    pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firm_rules.json")
+    try:
+        mt = os.path.getmtime(pfad)
+    except OSError:
+        return {}
+    if _ap_regel_info_cache.get("mt") != mt:
+        with open(pfad, encoding="utf-8") as fh:
+            d = json.load(fh)
+        je = {str(f.get("id")): f for f in (d.get("firms") or []) if isinstance(f, dict)}
+        _ap_regel_info_cache.update(mt=mt, daten={k: {"id": i, "name": je[i].get("name"), "updated_at": je[i].get("updated_at"),
+                                                          "abschnitte": ap_regel_info_abschnitte(je[i].get("rules_markdown"))}
+                                                       for k, i in AP_REGEL_INFO_ID.items() if i in je})
+    return _ap_regel_info_cache["daten"]
 
 
 @app.route("/admin/auto-plan/einstellungen", methods=["GET", "OPTIONS"])
@@ -36072,7 +36340,12 @@ def admin_auto_plan_einstellungen():
            "schalter": {"auto_bestaetigen": ap_auto_best_umfang(regeln), "abhaken_auto_normal": regeln.get("abhaken_auto_normal") is True,
                         "abhaken_auto_blow": regeln.get("abhaken_auto_blow") is True, "tradeify_final_halten": regeln.get("tradeify_final_halten") is True},
            "echo_hedge": sicher(eh_param), "apex_hedge": sicher(ah_param), "tradeify_final_hedge": sicher(tfh_param),
-           "ausgleich": sicher(ap_ausgleich_param), "fest": ap_einst_fest()}
+           "ausgleich": sicher(ap_ausgleich_param), "fest": ap_einst_fest(),
+           # E3b: Zufall-Parameter (wirksam, Code-Rückfall, welche aus der Tabelle) + Firmen-Regeln aus firm_rules.json
+           "zufall": ap_zufall(regeln), "zufall_code": ap_zufall_code(),
+           "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
+           if isinstance(regeln.get("zufall"), dict) else [],
+           "zeiten_db": zeiten, "regel_info": sicher(lambda _r: ap_regel_info())}
     resp = jsonify(json.loads(json.dumps(out, default=str)))
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -36104,6 +36377,47 @@ def admin_auto_plan_kernwert():
     _ap_kw_cache.clear()   # Kontowert/Kernwerte-Antworten (60 s) gleich mit den neuen Werten
     print(f"[einstellungen] Kernwerte {body.get('firma')}: {len(body.get('aenderungen') or [])} Feld(er) geändert ({uid})", flush=True)
     return jsonify({"ok": True, "firma": next((f for f in neu if (f.get('namen') or [None])[0] == body.get("firma")), None)})
+
+
+@app.route("/admin/auto-plan/ablaufwert", methods=["POST", "OPTIONS"])
+def admin_auto_plan_ablaufwert():
+    """POST {zeiten?: [{pfad, wert}], zufall?: {k: wert}, auto_bestaetigen?: aus|cfd|alle, bloecke?: {block: {feld: zahl}}, schalter?: [{pfad,
+    wert}]} → Spalte zeiten und/oder regeln (E3b). Nur Admin.
+    Alles oder nichts (ap_einst_zeiten_anwenden, ap_einst_regeln_anwenden); ein Update für beide Spalten."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    body = request.get_json(silent=True) or {}
+    patch = {}
+    if body.get("zeiten") is not None:
+        z_neu, grund = ap_einst_zeiten_anwenden(reg.get("zeiten"), body.get("zeiten"))
+        if grund:
+            return jsonify({"ok": False, "msg": grund}), 400
+        patch["zeiten"] = z_neu
+    if any(body.get(k) is not None for k in ("zufall", "auto_bestaetigen", "bloecke", "schalter")):
+        r_neu, grund = ap_einst_regeln_anwenden(reg.get("regeln"), body.get("zufall"), body.get("auto_bestaetigen"), body.get("bloecke"),
+                                                body.get("schalter"))
+        if grund:
+            return jsonify({"ok": False, "msg": grund}), 400
+        patch["regeln"] = r_neu
+    if not patch:
+        return jsonify({"ok": False, "msg": "nichts zu ändern"}), 400
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        sb_update("auto_plan_regeln", {"id": "eq.1"}, patch)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    print(f"[einstellungen] Ablauf: {', '.join(k for k in patch if k != 'updated_at')} geändert ({uid})", flush=True)
+    r = patch.get("regeln") or reg.get("regeln") or {}
+    return jsonify({"ok": True, "zeiten": patch.get("zeiten", reg.get("zeiten")), "zufall": ap_zufall(r),
+                    "auto_bestaetigen": ap_auto_best_umfang(r)})
 
 
 # Nachtlauf-Uhrzeit (07.10.2026, Finn: „heute Nacht schon planen" — 01:00 Dubai statt 00:00 dt, = 23:00 dt Sommer / 22:00 dt
