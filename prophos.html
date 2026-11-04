@@ -4102,6 +4102,23 @@
   #ap-ids-root.ap-guestly .e2-wd-fuss{border-top:1px solid var(--g-gitter);padding:8px 0 6px;font-size:11.5px;color:var(--g-sub)}
   #ap-ids-root.ap-guestly .e2-link{border:0;background:none;padding:0;font:inherit;color:var(--g-lila);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   #ap-ids-root.ap-guestly .e2-unten1{grid-template-columns:1fr}
+  /* E2e kompakt unter dem Zeitstrahl: eine Chip-Zeile, ein offener Bereich */
+  #ap-ids-root.ap-guestly .e2-wrap.e2-klein{padding:12px 16px}
+  #ap-ids-root.ap-guestly .e2-kzeile{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+  #ap-ids-root.ap-guestly .e2-ktitel{font-size:13px;font-weight:600;color:var(--g-text);margin-right:4px;display:inline-flex;align-items:center}
+  #ap-ids-root.ap-guestly .e2-ktrenn{width:1px;height:20px;background:var(--g-rand);margin:0 4px}
+  #ap-ids-root.ap-guestly .e2-kchip{display:inline-flex;align-items:center;gap:7px;min-height:32px;max-width:100%;box-sizing:border-box;padding:0 12px;border-radius:999px;border:1px solid var(--g-rand);background:var(--g-karte);color:var(--g-text);font-family:inherit;font-size:12.5px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap}
+  #ap-ids-root.ap-guestly .e2-kchip span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:520px){ #ap-ids-root.ap-guestly .e2-kchip-p{white-space:normal;flex-wrap:wrap;padding:7px 12px;line-height:1.35;border-radius:14px} #ap-ids-root.ap-guestly .e2-ktrenn{display:none} }
+  #ap-ids-root.ap-guestly .e2-kchip span{font-weight:400;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly .e2-kchip:hover{background:var(--g-pille)} #ap-ids-root.ap-guestly .e2-kchip.on{background:var(--g-lila-bg);border-color:var(--g-a2);color:var(--g-lila)} #ap-ids-root.ap-guestly .e2-kchip.on span{color:var(--g-lila)}
+  #ap-ids-root.ap-guestly .e2-kchip.aus{color:var(--g-sub)} #ap-ids-root.ap-guestly .e2-knur{cursor:default;color:var(--g-sub);background:var(--g-pille);border-color:transparent;font-weight:500}
+  #ap-ids-root.ap-guestly .e2-auf{margin-top:14px} #ap-ids-root.ap-guestly .e2-auf > .e2-detail{padding:16px}
+  #ap-ids-root.ap-guestly .e2-auf-g{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,2fr);gap:14px;align-items:start} #ap-ids-root.ap-guestly .e2-auf-g > .e2-sicher{margin-top:0}
+  #ap-ids-root.ap-guestly .e2-auf-g.nur{grid-template-columns:minmax(240px,420px)}
+  #ap-ids-root.ap-guestly .e2-mehr{margin-top:10px;border:0;background:none;padding:4px 0;font-family:inherit;font-size:12.5px;font-weight:600;line-height:1;color:var(--g-sub);cursor:pointer} #ap-ids-root.ap-guestly .e2-mehr:hover,#ap-ids-root.ap-guestly .e2-mehr.on{color:var(--g-lila)}
+  #ap-ids-root.ap-guestly .e2-stapel.e2-reihe{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:start}
+  @media (max-width:980px){ #ap-ids-root.ap-guestly .e2-auf-g{grid-template-columns:1fr} }
   /* E2d Zielbild: drei Spalten Ablauf · Firmen · Firma, unten Sicherheit */
   #ap-ids-root.ap-guestly .e2-drei{display:grid;grid-template-columns:minmax(230px,1fr) minmax(220px,.9fr) minmax(0,1.9fr);gap:16px;align-items:start}
   #ap-ids-root.ap-guestly .e2-spalte{border:1px solid var(--g-rand);border-radius:16px;padding:16px 16px 12px;min-width:0}
@@ -84568,10 +84585,11 @@
         ${x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}
         ${schalter ? `<details class="apg-schalter" data-apg-schalter${_apg.schalterAuf ? ' open' : ''}><summary>Schalter</summary>${schalter}</details>` : ''}</div>`
     // ── 5./6. Zeitstrahl + Listen (bestehend, im Kartenstil)
-    const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>`
+    // E2e (Nachtrag 5, Finn 05.11.2026 ~05:35: „Regeln … basic unter den Zeitstrahl. Dann kommt ‚zu bestätigen‘“): Funded Futures hängt seine Regel-Zeile direkt an den Zeitstrahl
+    let e2Oben = ''; if(fd && !fc) try{ e2Oben = e2EinstHtml(Q, x.admin) }catch(e){ console.warn('[e2] Einstellungen Funded Futures', e) }
+    const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>` + e2Oben
     const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div>${x.heuteHb || ''}`
     let unten = ''; if(fc) try{ unten = fcfdUnterHtml(u) }catch(e){ console.warn('[apg] Funded CFD unten', e) }   // Waiting · Firmen · Regeln
-    if(fd && !fc) try{ unten = e2EinstHtml(Q, x.admin) }catch(e){ console.warn('[e2] Einstellungen Funded Futures', e) }   // E2 (04.11.2026): Einstellungen unten
     return kopf + kpis + charts + leiste + zs + listen + unten
   }
   /* P&L VON HEUTE (30.10.2026, Finn ~06:55 über den Master: „P&L von heute — wie gut/schlecht der Tag läuft"): dieselben Radar-Zeilen wie die
@@ -85536,7 +85554,7 @@
    * nur „Finn + Pascal"/„Pascal" bzw. Admin; alle anderen sehen die Werte ohne Eingabe. Konstanten aus dem Code stehen mit „fest im Code".
    * Der Reiter zeichnet alle 20 s neu (apIdsLiveTick): Eingaben liegen deshalb als Entwurf in _e2.entwurf (Pfad → Text), der Fokus samt Cursor
    * wird nach dem Neuzeichnen wiederhergestellt (e2Verdrahten). Am Planer selbst ändert sich nichts — er liest dieselbe Zeile wie bisher. */
-  const _e2 = { firma: null, gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
+  const _e2 = { offen: null, gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
   const E2_FELD = { ziel_gewinn: ['Ziel-Gewinn', '$', 'über dem Zyklus-Start'], max_trade: ['TP höchstens je Trade', '$', 'Deckel je Trade'], kosten_eur: ['Kontokosten', '€', 'offene Kosten zu Zyklusbeginn'],
     dd: ['Max Drawdown', '$', 'Abstand Start → Liquidation'], daily_usd: ['Daily Loss', '$', 'SL höchstens Daily Loss − Puffer'], hedge_eur: ['Hedge auf den Max DD', '€', 'Fusion-Betrag je voller DD'],
     sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'] }
@@ -85576,17 +85594,11 @@
     try{ const a = document.activeElement; _e2.fokus = a && a.dataset && a.dataset.e2Pfad ? { pfad: a.dataset.e2Pfad, pos: a.type === 'range' ? null : a.selectionStart } : null }catch(_){ _e2.fokus = null }
     const R = Q && Q.regeln
     const darfR = !!darf && !!R && R.darf !== false && R.quelle !== 'standard'   // R.darf: nur Admin/„Finn + Pascal"/„Pascal" (Server)
-    // Nur-ansehen-Balken (Nachtrag 3): ohne Schreibrecht oben klar sagen, wer ändern darf — statt Hinweis an jeder Karte
-    const nur = R && !darfR ? `<div class="e2-nur">${R.quelle === 'standard' ? 'Nur ansehen — Tabelle funded_plan_regeln noch nicht eingespielt (Standard-Regeln)' : 'Nur ansehen — ändern als „Finn + Pascal“ / „Pascal“'}</div>` : ''
-    const kopf = `<div class="e2-kopf"><div><div class="apg-titel">Einstellungen</div><div class="apg-sub">Funded Futures · gelten für alle Gruppen</div></div></div>${nur}`
-    if(!R) return `<div class="apg-karte e2-wrap" data-e2-einst>${kopf}<div class="e2-leer">Einstellungen laden …</div></div>`
+    // Nur ansehen (Nachtrag 3/5): als Chip in der Regel-Zeile, Grund im Tooltip — Tabelle fehlt bzw. wer ändern darf
+    const nurText = R && R.quelle === 'standard' ? 'nur ansehen — Tabelle funded_plan_regeln noch nicht eingespielt (Standard-Regeln)' : 'nur ansehen — ändern als „Finn + Pascal“ / „Pascal“'
+    if(!R) return `<div class="apg-karte e2-wrap e2-klein" data-e2-einst><div class="e2-kzeile"><span class="e2-ktitel">Regeln</span><span class="e2-kchip e2-knur">laden …</span></div></div>`
     const firmen = R.firmen || [], an = firmen.filter(f => f.an), z = R.zeiten || {}, fen = (Q && Q.zeiten) || {}   // fen: Fenster, mit dem fdp_planen wirklich rechnet
     const fe = R.fenster_eigen && typeof R.fenster_eigen === 'object' ? R.fenster_eigen : null, feAn = !!e2Wert('z.fenster.an', !!fe)   // eigenes Startfenster (E2b-Nachtrag)
-    const kpis = `<div class="e2-kpis">
-      ${e2Kpi(E2_ICON.weg, 'Modell', E2_MODELL, 'Fusion-Gegenhedge')}
-      ${e2Kpi(APG_ICON.lauf, 'Planer', R.aktiv ? 'scharf' : 'Vorschau', R.aktiv ? 'plant alle 5 min' : 'legt nichts an', R.aktiv ? 'gut' : '')}
-      ${e2Kpi(APG_ICON.ok, 'Bestätigen', R.auto_bestaetigen ? 'automatisch' : 'von Hand', R.auto_bestaetigen ? 'startet zur Startzeit' : 'unter „Zu bestätigen"')}
-      ${e2Kpi(E2_ICON.firma, 'Firmen', `${an.length} von ${firmen.length}`, an.map(f => f.name).join(' · ') || 'keine Firma an')}</div>`
     /* ZIELBILD (E2d, Nachtrag 4 Finn 05.11.2026 ~04:30, Muster Funded-CFD-Panel): links „Ablauf“ nur mit dem, was Finn ändern will (Planer, Bestätigen,
      * Startfenster, Trades je ID) · Mitte „Firmen“ · rechts die Firma: Größen-Tabs → Ziel (Ziel-Gewinn + Consistency) → Trade → Slider-Blöcke (Winning Day) →
      * Kontoliste mit Ziel-Balken. Abstände, Vorlauf und Grenzen stehen unten im Block „Sicherheit“. Pfade/Speichern wie bisher (e2Body). */
@@ -85599,12 +85611,8 @@
         <div class="e2-zeile sp">${e2L('Startfenster · ' + String((fe && fe.tz) || fen.tz || 'Asia/Dubai').replace(/^\w+\//, '').replace('Berlin', 'dt. Zeit'), feAn ? 'Startzeiten zufällig dazwischen' : 'gerade aus dem Challenge-Planer übernommen — Schalter an, dann änderbar')}<span class="e2-feld">${e2In('z.fenster.von', fe ? fe.von : fen.von, darfR && feAn, { kurz: true, label: 'Fenster von', zeit: true })}<i>–</i>${e2In('z.fenster.bis', fe ? fe.bis : fen.bis, darfR && feAn, { kurz: true, label: 'Fenster bis', zeit: true })}</span></div></div>
       ${e2Fuss('ablauf', darfR, '')}</div>`
     // Firma wählen (Liste Mitte), dann Größe (Segment-Pille)
-    if(_e2.firma == null || !firmen[_e2.firma]) _e2.firma = Math.max(0, firmen.findIndex(f => f.an))
-    const fi = _e2.firma, f = firmen[fi]
-    const liste = `<div class="e2-spalte"><div class="e2-stitel">Firmen<small>${an.length} von ${firmen.length} im Planer</small></div><div class="e2-liste" role="tablist" aria-label="Prop-Firma">${firmen.map((x, i) => { const gr = Object.keys(x.je_groesse || {}).sort((a, b) => Number(a) - Number(b))
-      const n = e2Offen(`f.${i}.`)
-      return `<button type="button" class="e2-firma${i === fi ? ' on' : ''}" data-e2-firma="${i}" role="tab" aria-selected="${i === fi}"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(x.name) : 'var(--g-a2)'}"></i>
-        <span class="e2-firma-l"><b>${escapeHtml(x.name)}${n ? ' ·' : ''}</b><small>${gr.length ? gr.map(g => fcfdGroesse(g)).join(' · ') : 'keine Werte'}</small></span><span class="e2-status${x.an ? ' an' : ''}">${x.an ? 'plant' : 'aus'}</span></button>` }).join('')}</div></div>`
+    // E2e (Nachtrag 5): Grundzustand zu — _e2.offen = null | 'planer' | Index der Firma; ein Bereich zur Zeit, zweiter Klick schließt
+    const fi = typeof _e2.offen === 'number' && firmen[_e2.offen] ? _e2.offen : null, f = fi != null ? firmen[fi] : null
     let detail = '<div class="e2-detail"><div class="e2-leer">keine Firma in den Regeln</div></div>'
     if(f){
       const grs = Object.keys(f.je_groesse || {}).sort((a, b) => Number(a) - Number(b))
@@ -85665,7 +85673,7 @@
       detail = `<div class="e2-detail"><div class="e2-dkopf"><div class="e2-dname"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>${escapeHtml(f.name)}</div>
           <label class="e2-dsch">${e2I(grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}<span>im Planer</span><input type="checkbox" class="e2-sw" data-e2-pfad="f.${fi}.an" data-e2-orig="${f.an ? '1' : ''}"${e2Wert(`f.${fi}.an`, !!f.an) ? ' checked' : ''}${darfR && grs.length ? '' : ' disabled'}></label></div>
         ${grs.length ? '' : '<div class="e2-dsub">noch keine Werte hinterlegt — neue Größen per SQL</div>'}
-        ${pille}<div class="e2-stapel">${zielGruppe}${tradeGruppe}${wdGruppe}${kontoGruppe}</div>${grs.length ? e2Fuss('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
+        ${pille}<div class="e2-stapel e2-reihe">${zielGruppe}${tradeGruppe}${wdGruppe}</div>${kontoGruppe ? `<div class="e2-stapel">${kontoGruppe}</div>` : ''}${grs.length ? e2Fuss('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
     }
     /* SICHERHEIT (Nachtrag 4: „Zeit-/Logik-Technik nicht im Ablauf“): Abstände/Vorlauf (Karte ablauf) und Grenzen (Karte grenzen) — weiter änderbar, Speichern je Block;
      * Firmen-Abstand (DB-Riegel), Takt und Punktwerte nur ansehen mit Grund. */
@@ -85681,7 +85689,19 @@
       <div class="e2-block"><div class="e2-gruppe"><h5>Grenzen${e2I((R.fest_text || []).join(' · '))}</h5>${ki.map(kZeile).join('')}
         ${R.konst_spalte ? '' : '<div class="e2-wd-fuss">Spalte konst fehlt — sql/2026-11-05_fdp_einstellungen_db.sql einspielen, bis dahin gelten die Werte aus dem Code</div>'}</div>
         ${e2Fuss('grenzen', darfK, 'k.')}</div></div></div>`
-    return `<div class="apg-karte e2-wrap" data-e2-einst>${kopf}${kpis}<div class="e2-drei">${ablauf}${liste}${detail}</div>${sicherheit}</div>`
+    /* KOMPAKT (E2e, Nachtrag 5 Finn 05.11.2026 ~05:35: „relativ klein halten und, wenn ich draufklicke, Sachen freigeben … basic unter den Zeitstrahl“): eine Zeile
+     * Planer-Chip (öffnet Ablauf + Sicherheit) · Bestätigen · Fenster · je ID, dazu die Firmen als Chips (öffnen ihre Details). Zahlen + kurze Labels, Rest hinter ⓘ. */
+    const offen = _e2.offen
+    const fenTxt = feAn && fe ? `${fe.von}–${fe.bis}` : `${String(fen.von || '–')}–${String(fen.bis || '–')}`
+    const planerChip = `<button type="button" class="e2-kchip e2-kchip-p${offen === 'planer' ? ' on' : ''}" data-e2-offen="planer" aria-expanded="${offen === 'planer'}"><i class="e2-punkt" style="background:${R.aktiv ? 'var(--g-gut)' : 'var(--g-sub)'}"></i>Planer ${R.aktiv ? 'an' : 'aus'}<span>${R.auto_bestaetigen ? 'bestätigt selbst' : 'Bestätigen von Hand'} · ${escapeHtml(fenTxt)} · ${e2De(z.max_je_id_tag)}/ID</span>${e2Offen('') + e2Offen('za.') + e2Offen('k.') ? ' ·' : ''}</button>`
+    const firmenChips = firmen.map((x, i) => { const gr = Object.keys(x.je_groesse || {}).sort((a, b) => Number(a) - Number(b))
+      return `<button type="button" class="e2-kchip${offen === i ? ' on' : ''}${x.an ? '' : ' aus'}" data-e2-firma="${i}" aria-expanded="${offen === i}"><i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(x.name) : 'var(--g-a2)'}"></i>${escapeHtml(x.name)}${gr.length ? `<span>${gr.map(g => fcfdGroesse(g)).join(' · ')}</span>` : ''}${e2Offen(`f.${i}.`) ? ' ·' : ''}</button>` }).join('')
+    const zeile = `<div class="e2-kzeile"><span class="e2-ktitel">Regeln${e2I('Funded Futures · gelten für alle Gruppen · Orbit mit Fusion-Gegenhedge' + (darfR ? '' : ' · ' + nurText))}</span>${planerChip}<span class="e2-ktrenn"></span>${firmenChips}${darfR ? '' : `<span class="e2-kchip e2-knur" title="${escapeHtml(nurText)}">nur ansehen</span>`}</div>`
+    // Sicherheit hinter „mehr“ (Master 05.11.2026 zu Nachtrag 5): der Planer-Chip zeigt nur den Ablauf, Abstände + Grenzen erst nach dem Klick
+    const mehrN = e2Offen('za.') + e2Offen('k.')
+    const mehr = `<button type="button" class="e2-mehr${_e2.mehr ? ' on' : ''}" data-e2-mehr aria-expanded="${!!_e2.mehr}">Sicherheit${mehrN ? ' ·' : ''} ${_e2.mehr ? '‹' : '›'}</button>`
+    const auf = offen === 'planer' ? `<div class="e2-auf"><div class="e2-auf-g${_e2.mehr ? '' : ' nur'}">${ablauf.replace(/<\/div>$/, mehr + '</div>')}${_e2.mehr ? sicherheit : ''}</div></div>` : f ? `<div class="e2-auf">${detail}</div>` : ''
+    return `<div class="apg-karte e2-wrap e2-klein" data-e2-einst>${zeile}${auf}</div>`
   }
   // Zahl aus dem Feld (Komma oder Punkt) → Zahl | null
   const e2Zahl = t => { const x = String(t == null ? '' : t).trim().replace(/\s/g, '').replace(',', '.'); return x !== '' && isFinite(Number(x)) ? Number(x) : null }
@@ -85805,7 +85825,9 @@
   }
   function e2Verdrahten(root){
     const box = root.querySelector('[data-e2-einst]'); if(!box) return
-    box.querySelectorAll('[data-e2-firma]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); _e2.firma = Number(b.dataset.e2Firma); apIdsRender() }))
+    box.querySelectorAll('[data-e2-firma]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const i = Number(b.dataset.e2Firma); _e2.offen = _e2.offen === i ? null : i; apIdsRender() }))   // zweiter Klick schließt (E2e)
+    box.querySelector('[data-e2-offen="planer"]')?.addEventListener('click', e => { e.preventDefault(); _e2.offen = _e2.offen === 'planer' ? null : 'planer'; apIdsRender() })
+    box.querySelector('[data-e2-mehr]')?.addEventListener('click', e => { e.preventDefault(); _e2.mehr = !_e2.mehr; apIdsRender() })   // Sicherheit auf/zu
     box.querySelector('[data-e2-wd-link]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('[data-planerchip="wd"]')?.click() })   // E2b: Quelle der WD-Regeln
     box.querySelectorAll('[data-e2-gr]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); const [fi, g] = b.dataset.e2Gr.split(':'); _e2.gr[fi] = g; apIdsRender() }))
     box.querySelectorAll('input[data-e2-pfad]').forEach(el => {
@@ -85833,7 +85855,7 @@
       if(el){ el.focus(); try{ if(_e2.fokus.pos != null) el.setSelectionRange(_e2.fokus.pos, _e2.fokus.pos) }catch(_){} }
       _e2.fokus = null }
   }
-  window._e2Test = { body: (R, k) => e2Body(R, k), entwurf: () => _e2.entwurf, speichern: k => e2Speichern(k), zustand: () => ({ laeuft: _e2.laeuft, meldung: _e2.meldung }), oeffnen: () => apIdsRender(), waehle: (fi, g) => { _e2.firma = fi; if(g) _e2.gr[fi] = g; apIdsRender() } }   // Test-Haken (Stub)
+  window._e2Test = { body: (R, k) => e2Body(R, k), entwurf: () => _e2.entwurf, speichern: k => e2Speichern(k), zustand: () => ({ laeuft: _e2.laeuft, meldung: _e2.meldung }), oeffnen: () => apIdsRender(), waehle: (fi, g) => { _e2.offen = fi; if(g) _e2.gr[fi] = g; apIdsRender() } }   // Test-Haken (Stub)
   /* Chart-Reihe im Guestly-Look (30.10.2026, aus apGuestlyVerdrahten herausgezogen, damit WD und Funded CFD dieselben Charts zeichnen):
    * d.ls = [{ name, L, S }] → Spiegelbalken (oben d.namen[0], unten d.namen[1], Standard Long/Short); d.std = 24 Werte je Stunde ODER
    * d.balken = { labels, werte, einheit: [eins, viele] } → Balken. o = { ls, balken: Selektoren, ablage: Array für destroy }. Nur Zeichnen. */

@@ -158,10 +158,10 @@ check(ft["fehlt"] is True and ft["groessen"][0]["min_usd"] is None and ft["groes
 check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] is None, "Tradeify CFD zählt nie als Tradeify-WD")
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)' in gt2 and "_fr = _wd_firmen_regeln_lesen()" in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
-check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}${kontoGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
+check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
 check("e2In(" not in HTML.split("const wdGruppe")[1].split("// (4) KONTOLISTE")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
 check(all(isinstance(b, dict) and b.get("name") and b.get("wert") for x in (apex, tr, lu) for b in x["_dicts"]), "Besonderheiten als Parameter {name, wert, info}")
-check('class="e2-nur"' in HTML and "Nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nachtrag 3: Nur-ansehen-Balken oben, Erklärungen hinter ⓘ")
+check('class="e2-kchip e2-knur"' in HTML and "nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nur-ansehen-Chip in der Regel-Zeile (Grund im Tooltip), Erklärungen hinter ⓘ")
 
 # ── E2b-Nachtrag: Grenzen aus dem Code in die DB + eigenes Startfenster — gleiche Werte → gleiche Pläne
 KON, FE = ns["fdp_konst"], ns["fdp_fenster_eigen"]
@@ -232,10 +232,16 @@ r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000)
 check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
 src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
 check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
-check("const consBlock" in HTML and 'type="range" class="e2-range"' in HTML and "const kontoGruppe" in HTML and 'class="e2-drei"' in HTML and "const sicherheit" in HTML,
-      "Frontend: Consistency-Slider, Kontoliste, drei Spalten, Sicherheit unten")
+check("const consBlock" in HTML and 'type="range" class="e2-range"' in HTML and "const kontoGruppe" in HTML and 'class="e2-auf-g' in HTML and "const sicherheit" in HTML,
+      "Frontend: Consistency-Slider, Kontoliste, Planer-Bereich mit Ablauf + Sicherheit")
 check("konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]" in HTML and "start: an.start ?? (typeof z.start === 'number'" in HTML, "Kontoliste aus den Zeilen des Laufs, Anzeige-Werte vor der Uhrzeit start")
 check("if(karte === 'abstand'){" in HTML and "e2In('za.' + k" in HTML and "e2Fuss('abstand', darfR, 'za.')" in HTML, "Abstände eigene Karte (Speichern je Block)")
+
+# ── E2e (Nachtrag 5): kompakt unter dem Zeitstrahl, ein Bereich offen
+check("_e2.offen = _e2.offen === i ? null : i" in HTML and "_e2.offen = _e2.offen === 'planer' ? null : 'planer'" in HTML and 'class="e2-kzeile"' in HTML,
+      "Regel-Zeile mit Chips, Klick öffnet Firma bzw. Planer, zweiter Klick schließt")
+check("data-e2-mehr" in HTML and "_e2.mehr ? sicherheit : ''" in HTML, "Sicherheit hinter „mehr“")
+check(HTML.index("e2Oben = e2EinstHtml") < HTML.index("const listen = `<div data-apg-anker=\"offen\">"), "Block steht vor „Zu bestätigen“ (direkt am Zeitstrahl)")
 
 # ── Verdrahtung
 rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══ FUNDED-CFD-PLANER")]
@@ -243,7 +249,7 @@ check("_planer_schreib_gate()" in rt and "admin_voll_uids()" in rt and "fdp_rege
 check('"updated_at": f"eq.{reg.get(\'updated_at\')}"' in rt and "409" in rt, "Route: Schreiben nur, wenn updated_at noch passt (sonst 409)")
 gt = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('erg["regeln"] = fdp_regeln_anzeige(_fdp_regeln_laden()' in gt, "GET /admin/funded-plan hängt die Einstellungen an")
-check("regeln: d.regeln || null" in HTML and "if(fd && !fc) try{ unten = e2EinstHtml(Q, x.admin) }" in HTML and "try{ e2Verdrahten(root) }" in HTML,
+check("regeln: d.regeln || null" in HTML and "if(fd && !fc) try{ e2Oben = e2EinstHtml(Q, x.admin) }" in HTML and "${T.zeitstrahl}</div>` + e2Oben" in HTML and "try{ e2Verdrahten(root) }" in HTML,
       "prophos.html: Q.regeln, Einstellungen unten nur bei Funded Futures, verdrahtet")
 check("'[data-e2-pfad]', '[data-e2-save]'" in HTML, "Planer-Rechte-Schloss sperrt Eingaben + Speichern ohne Schreibrecht")
 check("apdApi('POST', '/regeln', body, '/admin/funded-plan')" in HTML, "Speichern über die neue Route")
