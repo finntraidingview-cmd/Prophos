@@ -99,6 +99,50 @@ check(g is None and neu[0]["je_groesse"]["100000"]["phasen"]["phase1"]["tp"] == 
 check(A(FIRMEN, "the5ers", [{"pfad": ["je_groesse", "100000", "phasen", "phase1", "tp"], "wert": [5500, 6500]}, {"pfad": ["kauf_eur", "200000"], "wert": "x"}])[0] is None
       and "100000" not in FIRMEN[0]["je_groesse"], "alles oder nichts: bei Fehler kein Block, Original unberührt")
 
+print("1a2) Prüfer-Stopp E3f: neuer Block rechnet im Planer genau wie vorher (echte Firmen-Regeln)")
+ECHT = json.load(open(os.path.join(HIER, "selftest_einstellungen_firmen.json"), encoding="utf-8"))
+UU = [{"tp": a, "sl": b, "menge": c, "puffer": d} for a, b, c, d in ((0.0, 0.0, 0.0, 0.0), (0.3, 0.6, 0.5, 0.4), (1.0, 1.0, 1.0, 1.0), (0.77, 0.12, 0.9, 0.5))]
+def rechnen(regel, phase, bal, uu):
+    try:
+        return app.ap_konto_rechnen(regel, phase, bal, uu, ppl=1.0)
+    except Exception as e:      # gleicher Fehler auf beiden Seiten zählt als gleich
+        return ("fehler", type(e).__name__)
+FAELLE = [("the5ers", "100000", ["phase1", "phase2"], [100000.0, 101500.0, 104000.0]),
+          ("fundednext", "100000", ["phase1", "phase2"], [100000.0, 103000.0, 106500.0]),
+          ("fundednextfutures", "150000", ["challenge"], [150000.0, 152000.0, 155000.0]),
+          ("apextrader", "150000", ["challenge"], [150000.0, 153000.0])]
+for fk, g, phs, bals in FAELLE:
+    alt = ECHT[fk]
+    ph0 = phs[0]
+    # No-op: TP der Phase auf denselben Wert setzen — legt (falls nötig) den Block an
+    jg_alt = (alt.get("je_groesse") or {}).get(g) or {}
+    quelle = (jg_alt.get("phasen") or alt["phasen"])[ph0]
+    neu, gr = A([alt], fk, [{"pfad": ["je_groesse", g, "phasen", ph0, "tp" if quelle.get("tp") else "menge"], "wert": quelle.get("tp") or quelle["menge"]}])
+    gleich = gr is None and all(rechnen(alt, ph, bal, uu) == rechnen(neu[0], ph, bal, uu) for ph in phs for bal in bals for uu in UU)
+    andere = all(rechnen(alt, ph, bal, uu) == rechnen(neu[0], ph, bal, uu) for x in (alt.get("groessen") or []) if str(int(x)) != g
+                 for ph in phs for bal in [float(x), float(x) * 1.02] for uu in UU) if gr is None else False
+    check(gleich and andere, f"{fk} {int(g) // 1000}k: Block angelegt, ap_konto_rechnen für alle Phasen/Balancen/Zufall gleich, andere Größen gleich ({gr})")
+# echte Änderung wirkt nur auf diese Größe
+n5, gr = A([ECHT["the5ers"]], "the5ers", [{"pfad": ["je_groesse", "100000", "phasen", "phase1", "tp"], "wert": [6000, 6000]}])
+w5 = app.ap_konto_rechnen(n5[0], "phase1", 100000.0, UU[1], ppl=1.0)[0]
+w2a, w2n = (app.ap_konto_rechnen(r, "phase1", 200000.0, UU[1], ppl=1.0) for r in (ECHT["the5ers"], n5[0]))
+check(gr is None and w5 and w5["tp"] == 6000 and w2a == w2n, f"The5ers 100k TP 6.000 wirkt nur auf 100k, 200k unverändert ({w5 and w5['tp']})")
+check(A([ECHT["the5ers"]], "the5ers", [{"pfad": ["je_groesse", "150000", "phasen", "phase1", "tp"], "wert": [1, 2]}])[0] is None, "skalierte Firma: keine neue Größe außer 100k")
+check(A([ECHT["apextrader"]], "apextrader", [{"pfad": ["je_groesse", "25000", "phasen", "challenge", "tp"], "wert": [1, 2]}])[0] is None,
+      "Apex 25k (Block ohne Phasen = nicht geplant): Phasen nicht still einschalten")
+# Konto-Consistency im Block (Master-Entscheid): FNF Futures 150k mit eigenem Block + Konto 50 %
+nf, gr = A([ECHT["fundednextfutures"]], "fundednextfutures", [{"pfad": ["je_groesse", "150000", "phasen", "challenge", "tp"], "wert": ECHT["fundednextfutures"]["phasen"]["challenge"]["tp"]}])
+kk = {"id": "x", "account_type": "challenge", "firm": "FundedNext Futures", "consistency_pct": 50}
+rk = app.ap_regel_konto(nf[0], kk, 151000.0)
+ch_b = rk["je_groesse"]["150000"]["phasen"]["challenge"]
+ziel_usd = 150000 * float(ECHT["fundednextfutures"]["ziel_pct"]["challenge"]) / 100
+wk = app.ap_konto_rechnen(rk, "challenge", 151000.0, UU[1], ppl=1.0)
+check(gr is None and ch_b["tp_max"] == round(ziel_usd * 0.5) and ch_b["tp"][1] - ch_b["tp"][0] == 100,
+      f"Konto-Consistency 50 % greift im 150k-Block: tp_max {ch_b['tp_max']} = 50 % × {ziel_usd:.0f}, TP-Spanne mitgerückt {ch_b['tp']}")
+check(app.ap_regel_konto(nf[0], dict(kk, consistency_pct=None), 151000.0) == nf[0], "ohne Konto-Wert: Regel unverändert")
+r50k = app.ap_regel_konto(ECHT["fundednextfutures"], kk, 51000.0)
+check(r50k["je_groesse"]["50000"]["phasen"]["challenge"]["tp_max"] == round(50000 * 5 / 100 * 0.5), "FNF Futures 50k (eigener Block, Ziel 5 %): Konto 50 % → 1.250")
+
 print("1b) Zeiten / Zufall / Bestätigen (E3b)")
 Z = app.ap_einst_zeiten_anwenden
 ZT = REG["zeiten"] | {"fenster": [["02:00", "20:00", 100]], "start_bis": "20:00", "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45],
@@ -200,8 +244,8 @@ check(z5["cons_pct"] == 50.0 and z5["cons_quelle"] == "konto" and z5["groesster_
 FNF = {"namen": ["fundednextfutures"], "route": "tvv2", "groessen": [50000, 150000], "ziel_pct": {"challenge": 5.3333}, "phasen": {"challenge": {"tp_max": 3200}},
        "je_groesse": {"50000": {"ziel_pct": {"challenge": 5}, "phasen": {"challenge": {"tp_max": 1000}}}}}
 zj = app.ap_konten_stand_zeile(dict(K, consistency_pct=50), FNF, 51000.0, {})
-check(zj["cons_pct"] == 40.0 and zj["cons_quelle"] == "firma" and zj["cons_waehlbar"] is False,
-      f"Review: Größe mit eigenen Phasen — Konto-Wert greift nicht (ap_konto_rechnen), Anzeige 40 % aus dem Größen-Block, nicht wählbar ({zj['cons_pct']})")
+check(zj["cons_pct"] == 50.0 and zj["cons_quelle"] == "konto" and zj["cons_waehlbar"] is True and zj["cons_firma"] == 40.0,
+      f"Prüfer-Stopp E3f: Konto-Wert greift auch bei eigenem Größen-Block — 50 % (Konto), Größen-Standard 40 % ({zj['cons_pct']})")
 check(z["cons_waehlbar"] is True and z["cons_firma"] == 40.0, "Tradeify Standard: wählbar, Firmen-Wert 40 %")
 check(app.ap_konten_stand_zeile(K, TS, None, {})["ziel"] is None and app.ap_konten_stand_zeile(K, None, 153000.0, {})["ziel"] is None, "ohne Balance/Regel: nur Bekanntes")
 zc = app.ap_konten_stand_zeile(dict(K, account_type="phase1", firm="The5ers"), FIRMEN[0], 101000.0, {"x": 500.0})

@@ -1,0 +1,408 @@
+{
+ "apextrader": {
+  "soft": true,
+  "boden": "statisch",
+  "namen": [
+   "apextrader",
+   "apex"
+  ],
+  "route": "tvv2",
+  "dd_usd": 4000,
+  "phasen": {
+   "challenge": {
+    "sl": null,
+    "tp": null,
+    "menge": [
+     2,
+     2.5556
+    ],
+    "puffer": [
+     100,
+     100
+    ],
+    "ziel_pct": 6,
+    "menge_schritt": 1
+   }
+  },
+  "symbol": "NQ",
+  "groessen": [
+   100000,
+   150000
+  ],
+  "kauf_eur": {
+   "100000": 45,
+   "150000": 150
+  },
+  "ziel_pct": {
+   "challenge": 6
+  },
+  "daily_usd": 2000,
+  "je_groesse": {
+   "25000": {
+    "dd_usd": 1500
+   },
+   "50000": {
+    "dd_usd": 2500
+   },
+   "75000": {
+    "dd_usd": 2750
+   },
+   "100000": {
+    "dd_usd": 3000,
+    "phasen": {
+     "challenge": {
+      "sl": null,
+      "tp": null,
+      "menge": [
+       2,
+       2.5556
+      ],
+      "puffer": [
+       100,
+       100
+      ],
+      "ziel_pct": 6,
+      "menge_schritt": 1
+     }
+    },
+    "daily_usd": 1500
+   },
+   "150000": {
+    "dd_usd": 4000,
+    "phasen": {
+     "challenge": {
+      "sl": null,
+      "tp": null,
+      "menge": [
+       2,
+       2.5556
+      ],
+      "puffer": [
+       100,
+       100
+      ],
+      "ziel_pct": 6,
+      "menge_schritt": 1
+     }
+    }
+   },
+   "250000": {
+    "dd_usd": 6500
+   },
+   "300000": {
+    "dd_usd": 7500
+   }
+  },
+  "max_konten_tag": [
+   2,
+   3
+  ]
+ },
+ "fundednext": {
+  "boden": "statisch",
+  "namen": [
+   "fundednext"
+  ],
+  "route": "mt5v2",
+  "dd_pct": 10,
+  "phasen": {
+   "phase1": {
+    "sl": [
+     2250,
+     3150
+    ],
+    "tp": [
+     5400,
+     7200
+    ],
+    "menge": [
+     2.1,
+     3.2
+    ],
+    "puffer": [
+     25,
+     50
+    ],
+    "ziel_pct": 8,
+    "boden_pct": 10,
+    "menge_schritt": 0.1
+   },
+   "phase2": {
+    "sl": [
+     2250,
+     3150
+    ],
+    "tp": [
+     5400,
+     7200
+    ],
+    "menge": [
+     2.1,
+     3.2
+    ],
+    "puffer": [
+     25,
+     50
+    ],
+    "ziel_pct": 5,
+    "boden_pct": 10,
+    "menge_schritt": 0.1
+   }
+  },
+  "groessen": [
+   50000,
+   100000
+  ],
+  "kauf_eur": {
+   "50000": 261,
+   "100000": 500
+  },
+  "ziel_pct": {
+   "phase1": 8,
+   "phase2": 5
+  },
+  "je_groesse": {
+   "50000": {
+    "phasen": {
+     "phase1": {
+      "sl": [
+       1012.5,
+       1237.5
+      ],
+      "tp": [
+       3150,
+       4050
+      ],
+      "menge": [
+       1,
+       1.5
+      ],
+      "puffer": [
+       50,
+       50
+      ],
+      "boden_pct": 10,
+      "menge_schritt": 0.1
+     },
+     "phase2": {
+      "sl": [
+       1012.5,
+       1237.5
+      ],
+      "tp": [
+       1800,
+       2025
+      ],
+      "menge": [
+       1,
+       1.5
+      ],
+      "puffer": [
+       50,
+       50
+      ],
+      "boden_pct": 10,
+      "menge_schritt": 0.1
+     }
+    }
+   }
+  },
+  "wert_groessen": [
+   50000,
+   100000
+  ]
+ },
+ "the5ers": {
+  "boden": "statisch",
+  "namen": [
+   "the5ers"
+  ],
+  "route": "mt5v2",
+  "dd_pct": 10,
+  "phasen": {
+   "phase1": {
+    "sl": [
+     1800,
+     2160
+    ],
+    "tp": [
+     5400,
+     6300
+    ],
+    "menge": [
+     20,
+     30
+    ],
+    "puffer": [
+     25,
+     50
+    ],
+    "ziel_pct": 8,
+    "boden_pct": 10,
+    "menge_schritt": 1
+   },
+   "phase2": {
+    "sl": [
+     1800,
+     2160
+    ],
+    "tp": [
+     5400,
+     6300
+    ],
+    "menge": [
+     20,
+     30
+    ],
+    "puffer": [
+     25,
+     50
+    ],
+    "ziel_pct": 5,
+    "boden_pct": 10,
+    "menge_schritt": 1
+   }
+  },
+  "groessen": [
+   100000,
+   200000
+  ],
+  "kauf_eur": {
+   "100000": 146,
+   "200000": 226
+  },
+  "skaliert": true,
+  "ziel_pct": {
+   "phase1": 8,
+   "phase2": 5
+  },
+  "je_groesse": {
+   "200000": {
+    "phasen": {
+     "phase1": {
+      "sl": [
+       3600,
+       4320
+      ],
+      "tp": [
+       10800,
+       12600
+      ],
+      "menge": [
+       50,
+       60
+      ],
+      "puffer": [
+       110,
+       150
+      ],
+      "ziel_pct": 8,
+      "boden_pct": 10,
+      "menge_schritt": 1
+     },
+     "phase2": {
+      "sl": [
+       3600,
+       4320
+      ],
+      "tp": [
+       10800,
+       12600
+      ],
+      "menge": [
+       50,
+       60
+      ],
+      "puffer": [
+       110,
+       150
+      ],
+      "ziel_pct": 5,
+      "boden_pct": 10,
+      "menge_schritt": 1
+     }
+    }
+   }
+  }
+ },
+ "fundednextfutures": {
+  "boden": "nachziehend",
+  "namen": [
+   "fundednextfutures"
+  ],
+  "route": "tvv2",
+  "dd_usd": 4000,
+  "phasen": {
+   "challenge": {
+    "sl": null,
+    "tp": [
+     3050,
+     3150
+    ],
+    "menge": [
+     2,
+     3
+    ],
+    "dd_usd": 4000,
+    "tp_max": 3200,
+    "ziel_pct": 5.333333333333334,
+    "menge_schritt": 1,
+    "puffer_je_menge": {
+     "2": [
+      15,
+      25
+     ],
+     "3": [
+      25,
+      40
+     ]
+    }
+   }
+  },
+  "planen": false,
+  "symbol": "NQ",
+  "groessen": [
+   50000,
+   150000
+  ],
+  "kauf_eur": {
+   "50000": 74,
+   "150000": 258
+  },
+  "ziel_pct": {
+   "challenge": 5.333333333333334
+  },
+  "je_groesse": {
+   "50000": {
+    "dd_usd": 1500,
+    "phasen": {
+     "challenge": {
+      "sl": null,
+      "tp": [
+       900,
+       980
+      ],
+      "menge": [
+       1,
+       1
+      ],
+      "dd_usd": 1500,
+      "tp_max": 1000,
+      "ziel_pct": 5,
+      "menge_schritt": 1,
+      "puffer_je_menge": {
+       "1": [
+        15,
+        25
+       ]
+      }
+     }
+    },
+    "ziel_pct": {
+     "challenge": 5
+    }
+   }
+  },
+  "lock_bei_start": true
+ }
+}

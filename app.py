@@ -23956,10 +23956,31 @@ def ap_regel_konto(regel, konto, balance):
             # beim dict(regel, **jg) die übrigen Phasen der Firma
             regel = dict(regel, je_groesse={g: (dict(jg, ziel_pct=dict(jg["ziel_pct"], **zkv))
                                                 if isinstance(jg, dict) and isinstance(jg.get("ziel_pct"), dict) else jg) for g, jg in je.items()})
-    ch = ((regel or {}).get("phasen") or {}).get("challenge")
-    if not ch or not _wd_num((konto or {}).get("consistency_pct")):
+    if not _wd_num((konto or {}).get("consistency_pct")):
         return regel
     groesse = (ap_groesse(regel.get("groessen"), balance) if balance else None) or (regel.get("groessen") or [None])[0]
+    # KONTO-CONSISTENCY AUCH IM GRÖSSEN-BLOCK (Master 05.11.2026, im Sinne Finns: „soll immer wirken"): trägt die Größe eigene phasen
+    # (je_groesse[g].phasen.challenge — ap_konto_rechnen nimmt dann nur die), gilt der Konto-Wert dort; Ziel % wie der Planer (Block vor Firma)
+    jg = ((regel.get("je_groesse") or {}).get(str(int(float(groesse)))) if groesse and isinstance(regel.get("je_groesse"), dict) else None)
+    ch_jg = ((jg.get("phasen") or {}).get("challenge") if isinstance(jg, dict) and not jg.get("keine_werte") and isinstance(jg.get("phasen"), dict) else None)
+    if isinstance(ch_jg, dict) and ch_jg:
+        zmap = jg.get("ziel_pct") if isinstance(jg.get("ziel_pct"), dict) else (regel.get("ziel_pct") if isinstance(regel.get("ziel_pct"), dict) else {})
+        zp = zmap.get("challenge")
+        et = ap_consistency_etappe(zp if zp is not None else ch_jg.get("ziel_pct"), konto, groesse)
+        if not et:
+            return regel
+        alt = _wd_num(ch_jg.get("tp_max"))
+        tp = ch_jg.get("tp")
+        if alt is None and tp:
+            alt = float(tp[-1]) + 50
+        ch2 = dict(ch_jg, tp_max=float(et))                       # Block-Werte sind unskaliert (ap_konto_rechnen: f = 1 bei Block)
+        if tp and alt is not None:
+            ch2["tp"] = [round(float(x) + et - alt) for x in tp]
+        jg2 = dict(jg, phasen=dict(jg["phasen"], challenge=ch2))
+        return dict(regel, je_groesse=dict(regel["je_groesse"], **{str(int(float(groesse))): jg2}))
+    ch = ((regel or {}).get("phasen") or {}).get("challenge")
+    if not ch:
+        return regel
     zp = (regel.get("ziel_pct") or {}).get("challenge") if isinstance(regel.get("ziel_pct"), dict) else None
     et = ap_consistency_etappe(zp if zp is not None else ch.get("ziel_pct"), konto, groesse)
     if not et:
@@ -36212,11 +36233,27 @@ def ap_einst_block_anlegen(firma, g, feld):
     std = {str(int(float(x))) for x in (firma.get("standard_groessen") or []) if _wd_num(x)}
     if std and g not in std and not isinstance(blk, dict):
         return f"{int(g) // 1000}k ist keine Standard-Größe — Werte für diese Größe legt Finn an"
-    if je is None:
-        je = firma["je_groesse"] = {}
-    if not isinstance(je.get(g), dict):
-        je[g] = {}
-    je[g][feld] = json.loads(json.dumps(firma[feld]))
+    if isinstance(blk, dict) and feld == "phasen":
+        # Block ohne phasen = der Planer plant diese Größe nicht (ap_konto_rechnen: keine Regel für die Phase) — nicht still einschalten
+        return f"{int(g) // 1000}k hat keine eigenen Phasen-Werte — die Größe plant der Planer nicht"
+    if not isinstance(blk, dict):
+        # NEUER BLOCK (Prüfer-Stopp E3f): ein vorhandener Block ersetzt im Planer die Phasen (ap_konto_rechnen, ap_boden_konto, zw_ziel — kein
+        # Rückfall) und der Boden nimmt dann nicht mehr den DD je Größe aus ap_kw_param. Darum immer die vollen Firmen-Phasen mitkopieren und,
+        # wenn die Kernwerte für die Größe einen eigenen DD kennen, auch dd_usd — dann rechnet der Planer genau wie vorher. Skalierte Firmen
+        # (The5ers: Phasen in 100k-Einheiten × Größe ÷ 100k, Block-Werte unskaliert) nur bei 100k, wo der Faktor 1 ist.
+        if firma.get("skaliert") and g != "100000":
+            return f"{int(g) // 1000}k: skalierte Firma — Werte je Größe legt Finn an"
+        if not isinstance(firma.get("phasen"), dict) or not firma["phasen"]:
+            return "Firma ohne Phasen — kein Block je Größe"
+        neu_blk = {"phasen": json.loads(json.dumps(firma["phasen"]))}
+        ddg = ((ap_kw_param(firma) or {}).get("dd_je_groesse") or {}).get(g)
+        if _wd_num(ddg) and "dd_usd" not in neu_blk:
+            neu_blk["dd_usd"] = float(ddg)
+        if je is None:
+            je = firma["je_groesse"] = {}
+        je[g] = neu_blk
+    if feld not in je[g]:
+        je[g][feld] = json.loads(json.dumps(firma[feld]))
     return None
 
 
@@ -36507,9 +36544,8 @@ def ap_konten_stand_zeile(a, regel, bal, tage_pl):
     jg = ((regel.get("je_groesse") or {}).get(str(int(groesse))) or {}) if isinstance(regel.get("je_groesse"), dict) else {}
     jg_ph = isinstance(jg, dict) and isinstance(jg.get("phasen"), dict) and bool(jg["phasen"])
     ch = (((jg.get("phasen") or {}).get("challenge")) or ch_firma) if jg_ph else ch_firma
-    # Konto-Wert greift nur dort, wo ap_regel_konto ihn einträgt: regel.phasen.challenge — trägt die Größe eigene phasen, nimmt der Planer die
-    # (ap_konto_rechnen), der Konto-Wert fiele still weg (S6-Review E3c). Dann: Größen-/Firmen-Wert zeigen, nicht wählbar.
-    wirkt = bool(ch_firma) and not jg_ph and str(a.get("account_type")) == "challenge"
+    # Konto-Wert greift, wo ap_regel_konto ihn einträgt — seit Prüfer-Stopp E3f auch im Größen-Block (je_groesse[g].phasen.challenge)
+    wirkt = bool(ch) and str(a.get("account_type")) == "challenge"
     if _wd_num(ch.get("tp_max")) and ziel_usd > 0:
         out["cons_firma"] = round(float(ch["tp_max"]) / ziel_usd * 100.0, 1)
     kp = _wd_num(a.get("consistency_pct"))
