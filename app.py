@@ -36155,6 +36155,11 @@ def ap_einst_anwenden(firmen, firma, aenderungen):
             return None, "pfad = Liste von Schlüsseln"
         if pfad[0] in ("namen", "route", "boden", "symbol"):
             return None, f"{pfad[0]} ist hier nicht änderbar"
+        if pfad == ["planen"] and "planen" not in ziel:       # Firma an/aus (E3b Zusatz 4): fehlt = an; darf als Ja/Nein angelegt werden
+            if not isinstance(a.get("wert"), bool):
+                return None, "planen = true | false"
+            ziel["planen"] = a["wert"]
+            continue
         knoten = ziel
         for k in pfad[:-1]:
             if not isinstance(knoten, dict) or k not in knoten:
@@ -36438,6 +36443,139 @@ def admin_auto_plan_kernwert():
     return jsonify({"ok": True, "firma": next((f for f in neu if (f.get('namen') or [None])[0] == body.get("firma")), None)})
 
 
+# KONTEN JE FIRMA (E3b Zusatz 4, Finn 05.11.2026: „Genau das Gleiche auch für den Challenge-Planer … mit Zielen, Consistency, alles. Bei
+# Tradeify geht's manchmal mit 40 %, manchmal mit 50 %, sodass man auswählen kann"): Kontoliste je Firma mit Ziel-Fortschritt und — wo die
+# Firma eine Consistency hat (Futures mit tp_max) — größter Tag ÷ Ziel-$ gegen die Grenze. Nur Lesen, gleiche Quellen wie der Planer
+# (acc_balance_wahl, ap_regel_konto, zw_ziel). Consistency je Konto = accounts.consistency_pct (bestehende Logik ap_regel_konto: tp_max =
+# pct × Ziel-$); leer = Firmen-Standard, der im TP-Deckel steckt (tp_max ÷ Ziel-$). Ändern: POST /konto-consistency, nur Admin.
+_ap_ks_cache = {}
+AP_KS_TTL_S = 60
+
+
+def ap_konten_stand_zeile(a, regel, bal, tage_pl):
+    """REIN RECHNEND (testbar): ein Konto → {groesse, balance, ziel, ziel_usd, gewinn, fortschritt, cons_pct, cons_quelle, groesster_tag,
+    cons_anteil}. tage_pl = {tag: Summe master_pl} der abgeschlossenen Pläne des Kontos. Ohne Regel/Balance: nur, was bekannt ist."""
+    out = {"balance": bal, "groesse": None, "ziel": None, "ziel_usd": None, "gewinn": None, "fortschritt": None,
+           "cons_pct": None, "cons_quelle": None, "cons_firma": None, "cons_waehlbar": False, "groesster_tag": None, "cons_anteil": None}
+    if not regel or not bal:
+        return out
+    rk = ap_regel_konto(regel, a, float(bal))
+    z = zw_ziel(rk, a.get("account_type"), float(bal))
+    if not z:
+        return out
+    ziel, groesse = z
+    ziel_usd = round(ziel - groesse, 2)
+    out.update(groesse=groesse, ziel=ziel, ziel_usd=ziel_usd, gewinn=round(float(bal) - groesse, 2),
+               fortschritt=round((float(bal) - groesse) / ziel_usd, 4) if ziel_usd > 0 else None)
+    ch_firma = ((regel.get("phasen") or {}).get("challenge") or {}) if isinstance(regel.get("phasen"), dict) else {}
+    jg = ((regel.get("je_groesse") or {}).get(str(int(groesse))) or {}) if isinstance(regel.get("je_groesse"), dict) else {}
+    jg_ph = isinstance(jg, dict) and isinstance(jg.get("phasen"), dict) and bool(jg["phasen"])
+    ch = (((jg.get("phasen") or {}).get("challenge")) or ch_firma) if jg_ph else ch_firma
+    # Konto-Wert greift nur dort, wo ap_regel_konto ihn einträgt: regel.phasen.challenge — trägt die Größe eigene phasen, nimmt der Planer die
+    # (ap_konto_rechnen), der Konto-Wert fiele still weg (S6-Review E3c). Dann: Größen-/Firmen-Wert zeigen, nicht wählbar.
+    wirkt = bool(ch_firma) and not jg_ph and str(a.get("account_type")) == "challenge"
+    if _wd_num(ch.get("tp_max")) and ziel_usd > 0:
+        out["cons_firma"] = round(float(ch["tp_max"]) / ziel_usd * 100.0, 1)
+    kp = _wd_num(a.get("consistency_pct"))
+    out["cons_waehlbar"] = wirkt and out["cons_firma"] is not None
+    if kp and wirkt:
+        out.update(cons_pct=float(kp), cons_quelle="konto")
+    elif out["cons_firma"] is not None:
+        out.update(cons_pct=out["cons_firma"], cons_quelle="firma")
+    if out["cons_pct"] and tage_pl:
+        gt = max([v for v in tage_pl.values() if v is not None] or [0])
+        out.update(groesster_tag=round(gt, 2), cons_anteil=round(gt / ziel_usd, 4) if ziel_usd > 0 and gt > 0 else 0.0)
+    return out
+
+
+def ap_konten_stand(reg, jetzt=None):
+    """Kontoliste des Challenge-Planers (IDs aus auto_plan_regeln.user_ids, Typen AP_TYPEN, ohne Archiv) mit Ziel/Consistency je Konto."""
+    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    if not uids:
+        return []
+    firmen = (reg.get("regeln") or {}).get("firmen") or []
+    konten = _ap_konten_laden({"user_id": "in.(" + ",".join(uids) + ")", "account_type": "in.(" + ",".join(AP_TYPEN) + ")", "order": "id.asc"})
+    archiv = _ap_archiviert_gemerkt()
+    konten = [a for a in konten if str(a.get("id")) not in archiv]
+    echo_bal, dup_bal = _ap_balance_karten()
+    namen, _aus = _ap_namen()
+    tage = {}
+    ids = [str(a["id"]) for a in konten]
+    tz_b = _ap_tz("Europe/Berlin")
+    for i in range(0, len(ids), 80):
+        for p in _sb_all("trade_plans", {"select": "master_account_id,status,started_at,ended_at,completed_at,master_pl",
+                                         "master_account_id": "in.(" + ",".join(ids[i:i + 80]) + ")", "status": "eq.completed", "master_pl": "not.is.null"}):
+            # Tag wie der Planer (ap_tage_ist): Berlin-Tag des Trade-Endes, sonst Start, sonst Abschluss (Prüfer E3c: nicht der UTC-Tag von started_at)
+            ts = _ap_ts(p.get("ended_at") or p.get("started_at") or p.get("completed_at"))
+            if ts is None:
+                continue
+            t = ts.astimezone(tz_b).date().isoformat()
+            d = tage.setdefault(str(p["master_account_id"]), {})
+            d[t] = d.get(t, 0.0) + float(p["master_pl"])
+    out = []
+    for a in konten:
+        regel = ap_regel_finden(firmen, a.get("firm"))
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        zeile = ap_konten_stand_zeile(a, regel, bal, tage.get(str(a["id"])))
+        out.append(dict(zeile, id=str(a["id"]), user_id=str(a.get("user_id")), user=namen.get(str(a.get("user_id")), str(a.get("user_id"))[:8]), name=a.get("name"),
+                        external_id=a.get("external_id"), typ=a.get("account_type"), firma=ap_firma_key(firmen, a.get("firm")),
+                        deaktiviert=bool(a.get("deaktiviert")), konto_cons=_wd_num(a.get("consistency_pct"))))
+    return out
+
+
+@app.route("/admin/auto-plan/konten-stand", methods=["GET", "OPTIONS"])
+def admin_auto_plan_konten_stand():
+    """GET → {ok, konten: [...]} — Kontoliste je Firma für die Einstellungen (60 s gemerkt). Gate wie /einstellungen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if _ap_ks_cache.get("bis", 0) < time.time():
+        try:
+            _ap_ks_cache.update(konten=ap_konten_stand(reg), bis=time.time() + AP_KS_TTL_S, fehler=None)
+        except Exception as e:
+            _ap_ks_cache.update(konten=[], bis=time.time() + 10, fehler=f"{type(e).__name__}: {e}")
+    # ohne Admin nur die eigenen Konten (Gate _ap_zugang: eine Planer-ID sieht nur ihre Zeilen — S6-Review E3c)
+    konten = _ap_ks_cache.get("konten") or []
+    if not admin:
+        konten = [k for k in konten if k.get("user_id") == str(uid)]
+    resp = jsonify(json.loads(json.dumps({"ok": True, "admin": bool(admin), "konten": konten,
+                                          "fehler": _ap_ks_cache.get("fehler")}, default=str)))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/admin/auto-plan/konto-consistency", methods=["POST", "OPTIONS"])
+def admin_auto_plan_konto_consistency():
+    """POST {konto_id, pct: null | 1–100} → accounts.consistency_pct (null = Firmen-Standard). Nur Admin, nur Challenge-Konten des Planers."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    body = request.get_json(silent=True) or {}
+    kid, pct = str(body.get("konto_id") or ""), body.get("pct")
+    if pct is not None and (isinstance(pct, bool) or not isinstance(pct, (int, float)) or not (1 <= pct <= 100)):
+        return jsonify({"ok": False, "msg": "pct = leer (Standard) oder 1–100"}), 400
+    rows = sb_select("accounts", {"select": "id,user_id,account_type", "id": f"eq.{kid}"}) if re.match(r"^[0-9a-f-]{36}$", kid) else []
+    if not rows or rows[0].get("account_type") not in AP_TYPEN or str(rows[0].get("user_id")) not in {str(u) for u in (reg.get("user_ids") or [])}:
+        return jsonify({"ok": False, "msg": "Konto nicht im Challenge-Planer"}), 400
+    try:
+        sb_update("accounts", {"id": f"eq.{kid}"}, {"consistency_pct": pct})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    _ap_ks_cache.clear()
+    _ap_kw_cache.clear()
+    print(f"[einstellungen] Consistency Konto {kid}: {pct if pct is not None else 'Standard'} ({uid})", flush=True)
+    return jsonify({"ok": True, "konto_id": kid, "pct": pct})
+
+
 @app.route("/admin/auto-plan/ablaufwert", methods=["POST", "OPTIONS"])
 def admin_auto_plan_ablaufwert():
     """POST {zeiten?: [{pfad, wert}], zufall?: {k: wert}, auto_bestaetigen?: aus|cfd|alle, bloecke?: {block: {feld: zahl}}, schalter?: [{pfad,
@@ -36466,6 +36604,10 @@ def admin_auto_plan_ablaufwert():
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
         patch["regeln"] = r_neu
+    if body.get("aktiv") is not None:                        # Planer an/aus (Spalte aktiv: Nachtlauf + Nachplanen)
+        if not isinstance(body.get("aktiv"), bool):
+            return jsonify({"ok": False, "msg": "aktiv = true | false"}), 400
+        patch["aktiv"] = body["aktiv"]
     if not patch:
         return jsonify({"ok": False, "msg": "nichts zu ändern"}), 400
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -36476,7 +36618,7 @@ def admin_auto_plan_ablaufwert():
     print(f"[einstellungen] Ablauf: {', '.join(k for k in patch if k != 'updated_at')} geändert ({uid})", flush=True)
     r = patch.get("regeln") or reg.get("regeln") or {}
     return jsonify({"ok": True, "zeiten": patch.get("zeiten", reg.get("zeiten")), "zufall": ap_zufall(r),
-                    "auto_bestaetigen": ap_auto_best_umfang(r)})
+                    "auto_bestaetigen": ap_auto_best_umfang(r), "aktiv": patch.get("aktiv", reg.get("aktiv") is True)})
 
 
 # Nachtlauf-Uhrzeit (07.10.2026, Finn: „heute Nacht schon planen" — 01:00 Dubai statt 00:00 dt, = 23:00 dt Sommer / 22:00 dt

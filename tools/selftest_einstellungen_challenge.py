@@ -165,6 +165,40 @@ check(gleich, "ap_zeiten_verteilen: 10 Seeds — ohne / SQL-Werte identisch")
 w1 = app.ap_zeiten_verteilen(tranchen(), dict(ZV, _zufall={"fenster_wuerfe": 1}), random.Random(4))
 check(len(w1) == len(MIXV), "Würfe = 1 läuft (ein Wurf)")
 
+print("1d) Zusatz 4: Firma an/aus, Kontoliste (Ziel + Consistency)")
+neu, g = A(FIRMEN, "the5ers", [{"pfad": ["planen"], "wert": False}])
+check(g is None and neu[0]["planen"] is False and "planen" not in FIRMEN[0], f"Firma an/aus legt planen an, wenn es fehlt ({g})")
+check(A(FIRMEN, "the5ers", [{"pfad": ["planen"], "wert": "nein"}])[0] is None, "planen nur true/false")
+TS = {"namen": ["tradeify"], "route": "tvv2", "groessen": [150000], "ziel_pct": {"challenge": 6}, "phasen": {"challenge": {"tp": [3450, 3550], "tp_max": 3600, "ziel_pct": 6}}}
+K = {"id": "k", "account_type": "challenge", "firm": "Tradeify", "consistency_pct": None}
+z = app.ap_konten_stand_zeile(K, TS, 153000.0, {"2026-11-01": 1500.0, "2026-11-02": 3420.0, "2026-11-03": -200.0})
+check(z["groesse"] == 150000 and z["ziel"] == 159000 and z["ziel_usd"] == 9000 and z["gewinn"] == 3000 and abs(z["fortschritt"] - 0.3333) < 1e-3,
+      f"Ziel 159.000, Gewinn 3.000 → 33 % ({z})")
+check(z["cons_pct"] == 40.0 and z["cons_quelle"] == "firma" and z["groesster_tag"] == 3420.0 and abs(z["cons_anteil"] - 0.38) < 1e-3,
+      "Consistency aus dem Firmen-Deckel 3.600 ÷ 9.000 = 40 %, größter Tag 3.420 = 38 %")
+z5 = app.ap_konten_stand_zeile(dict(K, consistency_pct=50), TS, 153000.0, {})
+check(z5["cons_pct"] == 50.0 and z5["cons_quelle"] == "konto" and z5["groesster_tag"] is None, "Konto-Wert 50 % geht vor (ap_regel_konto), ohne Tage kein Balken")
+FNF = {"namen": ["fundednextfutures"], "route": "tvv2", "groessen": [50000, 150000], "ziel_pct": {"challenge": 5.3333}, "phasen": {"challenge": {"tp_max": 3200}},
+       "je_groesse": {"50000": {"ziel_pct": {"challenge": 5}, "phasen": {"challenge": {"tp_max": 1000}}}}}
+zj = app.ap_konten_stand_zeile(dict(K, consistency_pct=50), FNF, 51000.0, {})
+check(zj["cons_pct"] == 40.0 and zj["cons_quelle"] == "firma" and zj["cons_waehlbar"] is False,
+      f"Review: Größe mit eigenen Phasen — Konto-Wert greift nicht (ap_konto_rechnen), Anzeige 40 % aus dem Größen-Block, nicht wählbar ({zj['cons_pct']})")
+check(z["cons_waehlbar"] is True and z["cons_firma"] == 40.0, "Tradeify Standard: wählbar, Firmen-Wert 40 %")
+check(app.ap_konten_stand_zeile(K, TS, None, {})["ziel"] is None and app.ap_konten_stand_zeile(K, None, 153000.0, {})["ziel"] is None, "ohne Balance/Regel: nur Bekanntes")
+zc = app.ap_konten_stand_zeile(dict(K, account_type="phase1", firm="The5ers"), FIRMEN[0], 101000.0, {"x": 500.0})
+check(zc["ziel"] == 108000 and zc["cons_pct"] is None, "CFD ohne tp_max: keine Consistency")
+
+# Größter Tag = Berlin-Tag des Trade-Endes (Prüfer E3c): 23:15 UTC und 23:30 UTC am 04.11. sind beide der 05.11. in Berlin → ein Tag
+_alt = (app._ap_konten_laden, app._ap_archiviert_gemerkt, app._ap_balance_karten, app._ap_namen, app._sb_all)
+app._ap_konten_laden = lambda p: [{"id": "kb", "user_id": "u1", "firm": "Tradeify", "account_type": "challenge", "tv_balance": 153000, "tv_balance_at": "2026-11-05T08:00:00+00:00"}]
+app._ap_archiviert_gemerkt = lambda: set(); app._ap_balance_karten = lambda: ({}, {}); app._ap_namen = lambda: ({"u1": "ID 1"}, set())
+app._sb_all = lambda t, p: [{"master_account_id": "kb", "status": "completed", "started_at": "2026-11-04T20:00:00+00:00", "ended_at": "2026-11-04T23:15:00+00:00", "master_pl": 1500},
+                            {"master_account_id": "kb", "status": "completed", "started_at": "2026-11-04T21:00:00+00:00", "ended_at": "2026-11-04T23:30:00+00:00", "master_pl": 1200},
+                            {"master_account_id": "kb", "status": "completed", "started_at": "2026-11-03T10:00:00+00:00", "ended_at": "2026-11-03T11:00:00+00:00", "master_pl": 2000}] if t == "trade_plans" else []
+ks = app.ap_konten_stand({"user_ids": ["u1"], "regeln": {"firmen": [TS]}})
+check(len(ks) == 1 and ks[0]["groesster_tag"] == 2700.0 and ks[0]["user_id"] == "u1", f"größter Tag als Berlin-Tag des Endes: 1.500 + 1.200 am 05.11. ({ks[0]['groesster_tag'] if ks else None})")
+app._ap_konten_laden, app._ap_archiviert_gemerkt, app._ap_balance_karten, app._ap_namen, app._sb_all = _alt
+
 print("2) GET /admin/auto-plan/einstellungen")
 app._ap_zugang = lambda admin_reiter=False: (True, "u", json.loads(json.dumps(REG)), None)
 c = app.app.test_client()
@@ -215,8 +249,41 @@ r = c.post("/admin/auto-plan/ablaufwert", json={"bloecke": {"apex_hedge": {"vorl
 check(r.status_code == 200 and gespeichert[-1]["regeln"]["apex_hedge"]["vorlauf_min"] == 15 and gespeichert[-1]["regeln"]["tradeify_final_halten"] is False
       and "zeiten" not in gespeichert[-1], "Blöcke + Schalter über die Route, Zeiten unberührt")
 n = len(gespeichert)
+r = c.post("/admin/auto-plan/ablaufwert", json={"aktiv": False})
+check(r.status_code == 200 and gespeichert[-1].get("aktiv") is False and "regeln" not in gespeichert[-1] and r.get_json()["aktiv"] is False, "Planer an/aus schreibt nur Spalte aktiv")
+check(c.post("/admin/auto-plan/ablaufwert", json={"aktiv": "aus"}).status_code == 400, "aktiv nur true/false")
+n = len(gespeichert)
+
+print("4b) GET /admin/auto-plan/konten-stand")
+_ks_n = []
+app.ap_konten_stand = lambda reg: _ks_n.append(1) or [{"id": "k1", "firma": "tradeify", "fortschritt": 0.5}]
+app._ap_ks_cache.clear()
+r1 = c.get("/admin/auto-plan/konten-stand"); r2 = c.get("/admin/auto-plan/konten-stand")
+check(r1.status_code == 200 and r1.get_json()["konten"][0]["id"] == "k1" and len(_ks_n) == 1 and r2.headers.get("Cache-Control") == "no-store", "Kontoliste, 60 s gemerkt, no-store")
+app._ap_ks_cache.update(konten=[{"id": "a", "user_id": "u"}, {"id": "b", "user_id": "andere"}], bis=9e18)
+app._ap_zugang = lambda admin_reiter=False: (False, "u", json.loads(json.dumps(REG)), None)
+check([k["id"] for k in c.get("/admin/auto-plan/konten-stand").get_json()["konten"]] == ["a"], "Review: ohne Admin nur die eigenen Konten")
+app._ap_zugang = lambda admin_reiter=False: (True, "u", json.loads(json.dumps(REG)), None)
+check(len(c.get("/admin/auto-plan/konten-stand").get_json()["konten"]) == 2, "Admin sieht alle")
+
+print("5) POST /admin/auto-plan/konto-consistency (Zusatz 4)")
+KID = "11111111-2222-3333-4444-555555555555"
+REG["user_ids"] = ["u-ht"]
+app.sb_select = lambda t, p: [{"id": KID, "user_id": "u-ht", "account_type": "challenge"}] if p.get("id") == f"eq.{KID}" else []
+r = c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": 50})
+check(r.status_code == 200 and gespeichert[-1] == {"consistency_pct": 50}, "50 % gespeichert")
+r = c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": None})
+check(r.status_code == 200 and gespeichert[-1] == {"consistency_pct": None}, "leer = zurück auf Firmen-Standard")
+n = len(gespeichert)
+check(c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": 150}).status_code == 400
+      and c.post("/admin/auto-plan/konto-consistency", json={"konto_id": "x", "pct": 50}).status_code == 400 and len(gespeichert) == n, "Grenzen 1–100, nur bekannte Konten")
+app.sb_select = lambda t, p: [{"id": KID, "user_id": "fremd", "account_type": "challenge"}]
+check(c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": 50}).status_code == 400, "Konto einer ID außerhalb des Planers → 400")
+app.sb_select = lambda t, p: [{"id": KID, "user_id": "u-ht", "account_type": "funded"}]
+check(c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": 50}).status_code == 400 and len(gespeichert) == n, "Funded-Konto → 400")
 app._ap_zugang = lambda admin_reiter=False: (False, "u", json.loads(json.dumps(REG)), None)
 check(c.post("/admin/auto-plan/ablaufwert", json={"auto_bestaetigen": "aus"}).status_code == 403 and len(gespeichert) == n, "kein Admin → 403")
+check(c.post("/admin/auto-plan/konto-consistency", json={"konto_id": KID, "pct": 50}).status_code == 403 and len(gespeichert) == n, "Konto-Consistency ohne Admin → 403")
 
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
