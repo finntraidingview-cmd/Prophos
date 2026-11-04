@@ -291,6 +291,8 @@ return JSON.stringify({ a: a, hk: hMenge(hK), nqSperre: [wdNqOhneMenge('nq', hMe
         "wiederan":  [dict(alt, firmen=["apex"], aktiv=False), "apex100", True, 2, []],
         "ungueltig": [alt, "apex", True, 0, [{"v": None, "ziel": -5, "satz": 0}, {"v": 4000, "ziel": 1500, "satz": 300}]],
         "ohneregel": [None, "apex", None, 3, []],
+        "altansicht": [dict(alt, aktiv=False), "apex", None, 3, None],          # Gegenprüfung E4b: nur ab Zyklus geändert, Schalter nicht angefasst
+        "nur100k":   [dict(alt, firmen=["apex"]), "apex100", None, 2, None],   # 100k in der DB aus, Feld im 100k-Block geändert
     }
     if shutil.which("osascript"):
         js = "function run(){ var _wd = {}; function escapeHtml(s){ return s }\n" + m_js + "\nvar F = " + json.dumps(faelle) + ", r = {};\n" \
@@ -319,6 +321,12 @@ return JSON.stringify({ a: a, hk: hMenge(hK), nqSperre: [wdNqOhneMenge('nq', hMe
             check(m["beideaus"]["aktiv"] is False and b["grund_code"] == "regel_aus", "E4b: letzte Firma aus → aktiv false (leere Liste fiele auf die Vorgabe zurück)")
             check(m["wiederan"]["aktiv"] is True and m["wiederan"]["firmen"] == ["apex100"], "E4b: aus allen wieder an → nur diese Firma an, nicht die alte Liste")
             check(m["ungueltig"]["ab_zyklus"] == 2 and m["ungueltig"]["stuetz"] == REGEL["stuetz"], "E4b: ungültige Eingaben behalten den alten Wert")
+            check(m["altansicht"]["aktiv"] is False and m["altansicht"]["ab_zyklus"] == 3 and zk(m["altansicht"])["grund_code"] == "regel_aus",
+                  "E4b: alte Ansicht — Zahl geändert, Schalter nicht angefasst → Recoverer bleibt aus")
+            check(m["nur100k"]["firmen"] == ["apex"], "E4b: Feld im 100k-Block schaltet 100k nicht wieder ein")
+            e4s = html[html.index("  async function e4bSpeichern("):html.index("  function e4bVerdrahten(")]
+            check("const an = d.e4bAn != null ? !!quelle.checked : undefined, ab = d.e4bAb != null ? parseInt(quelle.value, 10) : undefined" in e4s
+                  and "'recoverer', el)" in html and ".eq('id', 1).select('id')" in e4s, "E4b: Speichern gibt nur das geänderte Feld weiter, prüft die getroffene Zeile")
             o = m["ohneregel"]
             check(o["aktiv"] is False and o["ab_zyklus"] == 3 and zk(o)["grund_code"] == "regel_aus", "E4b: ohne DB-Regel schaltet eine Feldänderung den Recoverer nicht ein")
 

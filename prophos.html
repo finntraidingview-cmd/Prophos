@@ -4777,6 +4777,14 @@
   #adm-pane-wd .wd-firma-edit{display:none;padding:4px 4px 12px 24px;gap:10px;align-items:end;flex-wrap:wrap;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-firma.offen + .wd-firma-edit{display:flex}
   #adm-pane-wd .wd-firma-edit .wd-feld{width:96px}
+  /* NACHTRAG 10 (Finn 05.11.2026 ~07:05): links Firmen-Liste, Mitte die Werte der gewählten Firma, rechts Ablauf + Hedge-Staffel untereinander */
+  #adm-pane-wd .wd-set-grid{grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr) minmax(0,1.1fr)}
+  @media (max-width:1180px){#adm-pane-wd .wd-set-grid{grid-template-columns:1fr}}
+  #adm-pane-wd .wd-set-spalte{display:flex;flex-direction:column;gap:14px;min-width:0}
+  #adm-pane-wd .wd-set-spalte > .wd-set-card{flex:0 0 auto}
+  #adm-pane-wd #wd-firmen .wd-firma.offen{background:var(--surface-tint)}
+  #adm-pane-wd #wd-firma-werte .wd-firma-edit{padding:0;border-bottom:0}
+  #adm-pane-wd #wd-firma-werte .wd-firma-edit.offen{display:flex}
   /* E4 (05.11.2026): zwei kleine Schalter je Firma unter TP/Kontrakte (Consistency, Mindest-Net-Profit) — Felder nur bei an; eigene Klassen e4-* */
   #adm-pane-wd .e4-regeln{flex:1 1 100%;display:flex;flex-direction:column;gap:4px;margin-top:2px}
   #adm-pane-wd .e4-zeile{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:30px}
@@ -13186,6 +13194,19 @@
               <div class="panel-title">Einstellungen <span style="font-weight:400;color:var(--sub);font-size:12px">· gelten für alle PC-Tabs · Firma oder Stufe anklicken, Werte eingeben, speichern</span></div>
             </div>
             <div class="wd-set-grid">
+              <!-- NACHTRAG 10 (Finn 05.11.2026 ~07:05 Dubai: „Bei Winning Days ist es gut, nur die Anordnung: links die Firmen."): Inhalt unverändert,
+                   nur umgeordnet — LINKS die Firmen-Liste, MITTE die Werte der gewählten Firma (bisher inline aufgeklappt, wdFirmenRender legt sie in
+                   #wd-firma-werte), RECHTS Ablauf + Gegenhedge + Hedge-Staffel. Alle IDs und Speichern-Wege wie zuvor. -->
+              <div class="wd-set-card">
+                <h4><span>Firmen<span class="h4sub">TP je Gewinntag</span></span></h4>
+                <div id="wd-firmen"></div>
+              </div>
+              <div class="wd-set-card" id="wd-firma-karte">
+                <h4><span><span id="wd-firma-titel">Firma</span><span class="h4sub">TP, Kontrakte, Payout-Regeln</span></span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave">Speichern</button></h4>
+                <div id="wd-firma-werte"></div>
+                <div class="kf wd-fuss">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
+              </div>
+              <div class="wd-set-spalte">
               <div class="wd-set-card">
                 <h4><span>Ablauf<span class="h4sub">Automatik, Gegenhedge, Zeiten</span></span> <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
                 <!-- Ablauf aufgeräumt (27.09.2026, Finn: „mach das Design von Ablauf allgemein mal bisschen cleaner"): drei Abschnitte
@@ -13218,11 +13239,6 @@
                   <div class="wd-feed leer" id="wd-hedge-kurs">Kurs-Feed: —</div>
                 </div>
               </div>
-              <div class="wd-set-card">
-                <h4><span>Firmen<span class="h4sub">TP je Gewinntag</span></span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave">Speichern</button></h4>
-                <div id="wd-firmen"></div>
-                <div class="kf wd-fuss">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
-              </div>
               <!-- Staffel = Slave-Betrag nach Balance-Überschuss — ohne Slave sinnlos, darum im
                    hedge-freien Kapitel ausgeblendet (24.09.2026, admHedgeModus). Daten bleiben unangetastet. -->
               <div class="wd-set-card" id="wd-staffel-card">
@@ -13231,7 +13247,7 @@
                      die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
                      Tabelle gilt Standard. -->
                 <div class="wd-chips" id="wd-staffel-firmen"></div>
-                <div class="kf" id="wd-staffel-aus" style="margin-bottom:8px;color:var(--warn-ink, #b45309)" hidden>wirkt erst, wenn links „Fusion-Gegenhedge" an ist</div>
+                <div class="kf" id="wd-staffel-aus" style="margin-bottom:8px;color:var(--warn-ink, #b45309)" hidden>wirkt erst, wenn oben „Fusion-Gegenhedge" an ist</div>
                 <div id="wd-staffel-body"></div>
                 <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
                   <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add">+ Zeile</button>
@@ -13239,6 +13255,7 @@
                 </div>
                 <!-- Hinweis als Statuszeile unten (Design-Runde 08.10.2026); gleiche ID, wdStaffelChips schreibt den Text weiter -->
                 <div class="kf wd-fuss" id="wd-staffel-hinweis">nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)</div>
+              </div>
               </div>
             </div>
           </div>
@@ -71337,18 +71354,28 @@
         ${zeilen}
       </div>`
   }
-  async function e4bSpeichern(k){
-    const box = document.getElementById('wd-firmen'), el = box && box.querySelector(`[data-e4b-firma="${k}"]`); if(!el) return
-    const q = s => el.querySelector(s), zahl = s => parseFloat(q(s)?.value)
-    const n = el.querySelectorAll('[data-e4b-v]').length, stuetz = []
-    for(let i = 0; i < n; i++) stuetz.push({ v: zahl(`[data-e4b-v="${k}|${i}"]`), ziel: zahl(`[data-e4b-ziel="${k}|${i}"]`), satz: zahl(`[data-e4b-satz="${k}|${i}"]`) })
+  async function e4bSpeichern(k, quelle){
+    const box = document.getElementById('wd-firma-werte'), el = box && box.querySelector(`[data-e4b-firma="${k}"]`); if(!el) return
+    const q = s => el.querySelector(s), d = (quelle && quelle.dataset) || {}
     // frisch lesen, dann mergen: ein anderer Tab oder die SQL könnte zyklus_regel seit dem Laden geändert haben
     const { data, error: e0 } = await supabase.from('wd_farmer_regeln').select('zyklus_regel').eq('id', 1).maybeSingle()
     if(e0){ wdSay(/zyklus_regel/.test(String(e0.message || '')) ? 'Recoverer: Spalte fehlt noch (sql/2026-11-02_recoverer.sql)' : 'Recoverer nicht gespeichert: ' + (e0.message || e0), 'err'); return }
-    const neu = e4bZyklusMerge(data ? data.zyklus_regel : null, k, !!q(`[data-e4b-an="${k}"]`)?.checked, parseInt(q(`[data-e4b-ab="${k}"]`)?.value, 10), stuetz)
+    const alt = data ? data.zyklus_regel : null
+    // nur das geänderte Feld geht in den Merge (Gegenprüfung E4b): Schalter nur beim Klick auf den Schalter, ab Zyklus nur bei ab Zyklus, die Staffel nur die eine Zelle —
+    // sonst schaltete eine alte Ansicht den Recoverer beim Ändern einer Zahl wieder ein, und der andere Apex-Block schriebe seine alten Werte zurück
+    const an = d.e4bAn != null ? !!quelle.checked : undefined, ab = d.e4bAb != null ? parseInt(quelle.value, 10) : undefined
+    let stuetz
+    const zelle = d.e4bV || d.e4bZiel || d.e4bSatz
+    if(zelle){
+      const i = parseInt(String(zelle).split('|')[1], 10), f = d.e4bV ? 'v' : (d.e4bZiel ? 'ziel' : 'satz')
+      stuetz = e4bStuetz(e4bIstRegel(alt) ? alt : E4B_ZYKLUS_STD)
+      if(stuetz[i]) stuetz[i] = { ...stuetz[i], [f]: parseFloat(quelle.value) }
+    }
+    const neu = e4bZyklusMerge(alt, k, an, ab, stuetz)
     const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('wd_farmer_regeln').update({ zyklus_regel: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
+    const { data: getroffen, error } = await supabase.from('wd_farmer_regeln').update({ zyklus_regel: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1).select('id')
     if(error){ wdSay('Recoverer nicht gespeichert: ' + (error.message || error), 'err'); return }
+    if(Array.isArray(getroffen) && !getroffen.length){ wdSay('Recoverer nicht gespeichert: keine Zeile geändert (Recht?)', 'err'); return }
     if(_wd.regeln) _wd.regeln.zyklus_regel = neu
     // beide Apex-Blöcke auf den gespeicherten Stand (ab Zyklus und Staffel sind gemeinsam, ungültige Eingaben springen zurück)
     for(const k2 of ['apex', 'apex100']){
@@ -71361,12 +71388,12 @@
   function e4bVerdrahten(wurzel){
     wurzel.querySelectorAll('[data-e4b-an]').forEach(el => el.addEventListener('change', () => el.closest('.e4b')?.classList.toggle('aus', !el.checked)))
     wurzel.querySelectorAll('[data-e4b-an],[data-e4b-ab],[data-e4b-v],[data-e4b-ziel],[data-e4b-satz]').forEach(el => el.addEventListener('change', () =>
-      e4Speichern(el.closest('[data-e4b-firma]')?.dataset.e4bFirma, 'recoverer').catch(e => wdSay('Recoverer: ' + (e.message || e), 'err'))))
+      e4Speichern(el.closest('[data-e4b-firma]')?.dataset.e4bFirma, 'recoverer', el).catch(e => wdSay('Recoverer: ' + (e.message || e), 'err'))))
   }
-  async function e4Speichern(nurK, teil){
+  async function e4Speichern(nurK, teil, quelle){
     if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
-    if(teil === 'recoverer') return e4bSpeichern(nurK)   // E4b: eigene Spalte zyklus_regel, derselbe Weg und derselbe Riegel
-    const box = document.getElementById('wd-firmen'); if(!box) return
+    if(teil === 'recoverer') return e4bSpeichern(nurK, quelle)   // E4b: eigene Spalte zyklus_regel, derselbe Weg und derselbe Riegel
+    const box = document.getElementById('wd-firma-werte'); if(!box) return
     const alt = (_wd.regeln && _wd.regeln.firmen_regeln) || {}, neu = { ...alt }
     // nur die geänderte Firma schreiben (Prüfung E4): die übrigen behalten ihren DB-Wert bzw. bleiben auf dem Code-Standard
     box.querySelectorAll(nurK ? `[data-e4-firma="${nurK}"]` : '[data-e4-firma]').forEach(el => {
@@ -71393,35 +71420,44 @@
     e4bVerdrahten(box)
   }
   function wdFirmenRender(fu, vp){
-    const box = document.getElementById('wd-firmen'); if(!box) return
-    const konten = (_wd.daten && _wd.daten.konten) || [], offen = _wd.firmaOffen || null
+    // NACHTRAG 10 (05.11.2026): Liste links (#wd-firmen), Werte der gewählten Firma in der Mitte (#wd-firma-werte) — Inhalt wie zuvor; ohne Wahl die erste Firma
+    const box = document.getElementById('wd-firmen'), werte = document.getElementById('wd-firma-werte'); if(!box || !werte) return
+    const konten = (_wd.daten && _wd.daten.konten) || []
+    if(!TP_VP_FIRMEN.includes(_wd.firmaOffen)) _wd.firmaOffen = TP_VP_FIRMEN[0]
+    const offen = _wd.firmaOffen
     vp = vp || wdVorplanRegeln()
-    box.innerHTML = TP_VP_FIRMEN.map(k => {
+    const teile = TP_VP_FIRMEN.map(k => {
       const [name, farbe, hint] = WD_FIRMEN[k] || [k, '#636e72', ''], sp = Array.isArray(fu[k]) ? fu[k] : TP_VP_VORGABE.fu[k], ks = wdKtSpanne(k, vp)
-      return `<div class="wd-firma ${offen === k ? 'offen' : ''}" data-wd-firma="${k}" title="anklicken: TP-Spanne bearbeiten">
+      return [`<div class="wd-firma ${offen === k ? 'offen' : ''}" data-wd-firma="${k}" title="anklicken: TP-Spanne bearbeiten">
           <span class="punkt" style="background:${farbe}"></span>
           <span class="fl"><span class="fn">${escapeHtml(name)}</span><span class="fk" data-wd-fk="${k}">${wdFirmaKurz(k, konten)}${hint ? ' · ' + escapeHtml(hint) : ''}</span></span>
-          <span class="fz" data-wd-fz="${k}">${wdDe(sp[0])}–${wdDe(sp[1])} $ · ${wdKtText(ks)}</span><span class="kf pfeil">${offen === k ? '▾' : '▸'}</span></div>
-        <div class="wd-firma-edit">
+          <span class="fz" data-wd-fz="${k}">${wdDe(sp[0])}–${wdDe(sp[1])} $ · ${wdKtText(ks)}</span><span class="kf pfeil">${offen === k ? '▸' : ''}</span></div>`,
+        `<div class="wd-firma-edit ${offen === k ? 'offen' : ''}" data-wd-edit="${k}">
           <div class="wd-feld"><label>TP von ($)</label><input type="number" class="input mono" data-wd-fu="${k}-von" min="0" step="5" value="${sp[0]}"></div>
           <div class="wd-feld"><label>TP bis ($)</label><input type="number" class="input mono" data-wd-fu="${k}-bis" min="0" step="5" value="${sp[1]}"></div>
           <div class="wd-feld" style="width:90px"><label>Kontrakte von</label><input type="number" class="input mono" data-wd-kt="${k}-von" min="1" step="1" value="${ks[0]}"></div>
           <div class="wd-feld" style="width:90px"><label>Kontrakte bis</label><input type="number" class="input mono" data-wd-kt="${k}-bis" min="1" step="1" value="${ks[1]}"></div>
           <div class="kf" style="align-self:center">TP und Kontrakte je Konto zufällig aus der Spanne · dann oben „Speichern"</div>
           ${e4RegelnHtml(k)}
-        </div>`
-    }).join('')
-    e4Verdrahten(box)
+        </div>`]
+    })
+    box.innerHTML = teile.map(t => t[0]).join('')
+    werte.innerHTML = teile.map(t => t[1]).join('')
+    const titel = () => { const t = document.getElementById('wd-firma-titel'); if(t) t.textContent = (WD_FIRMEN[_wd.firmaOffen] || [_wd.firmaOffen || 'Firma'])[0] }
+    titel()
+    e4Verdrahten(werte)
     box.querySelectorAll('[data-wd-firma]').forEach(el => el.addEventListener('click', () => {
-      _wd.firmaOffen = _wd.firmaOffen === el.dataset.wdFirma ? null : el.dataset.wdFirma
-      wdStaffelWahl(_wd.firmaOffen || 'standard')   // Klick auf die Firma zeigt rechts ihre Hedge-Tabelle
-      box.querySelectorAll('[data-wd-firma]').forEach(x => { const an = x.dataset.wdFirma === _wd.firmaOffen; x.classList.toggle('offen', an); const pf = x.querySelector('.pfeil'); if(pf) pf.textContent = an ? '▾' : '▸' })
+      _wd.firmaOffen = el.dataset.wdFirma   // Liste: eine Firma ist immer gewählt (kein Zuklappen mehr)
+      wdStaffelWahl(_wd.firmaOffen)   // Klick auf die Firma zeigt rechts ihre Hedge-Tabelle
+      box.querySelectorAll('[data-wd-firma]').forEach(x => { const an = x.dataset.wdFirma === _wd.firmaOffen; x.classList.toggle('offen', an); const pf = x.querySelector('.pfeil'); if(pf) pf.textContent = an ? '▸' : '' })
+      werte.querySelectorAll('[data-wd-edit]').forEach(x => x.classList.toggle('offen', x.dataset.wdEdit === _wd.firmaOffen))
+      titel()
     }))
-    box.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('change', wdAutoHedge))
-    box.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('input', () => {
+    werte.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('change', wdAutoHedge))
+    werte.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('input', () => {
       const k = (inp.dataset.wdFu || inp.dataset.wdKt).split('-')[0]
-      const v = parseFloat(box.querySelector(`[data-wd-fu="${k}-von"]`)?.value) || 0, b2 = parseFloat(box.querySelector(`[data-wd-fu="${k}-bis"]`)?.value) || v
-      const ka = Math.max(1, parseInt(box.querySelector(`[data-wd-kt="${k}-von"]`)?.value, 10) || 1), kb = Math.max(ka, parseInt(box.querySelector(`[data-wd-kt="${k}-bis"]`)?.value, 10) || ka)
+      const v = parseFloat(werte.querySelector(`[data-wd-fu="${k}-von"]`)?.value) || 0, b2 = parseFloat(werte.querySelector(`[data-wd-fu="${k}-bis"]`)?.value) || v
+      const ka = Math.max(1, parseInt(werte.querySelector(`[data-wd-kt="${k}-von"]`)?.value, 10) || 1), kb = Math.max(ka, parseInt(werte.querySelector(`[data-wd-kt="${k}-bis"]`)?.value, 10) || ka)
       const fz = box.querySelector(`[data-wd-fz="${k}"]`); if(fz) fz.textContent = `${wdDe(v)}–${wdDe(Math.max(v, b2))} $ · ${wdKtText([ka, kb])}`
     }))
   }
@@ -71451,7 +71487,10 @@
     if(!_wd.staffelArbeit) return
     const l = wdStaffelLesen(); if(!l.length) return
     const w = _wd.staffelWahl || 'standard'
+    // NACHTRAG 10: ungeänderte Kopie des Standards bleibt „wie Standard" — sonst machte schon das Durchklicken der Firmen-Liste jede Firma zur eigenen Tabelle
+    const _sig = x => JSON.stringify((x || []).map(z => [Math.max(0, Math.round(Number(z.von) || 0)), Math.round((Number(z.eur) || 0) * 100) / 100]).sort((a, b) => a[0] - b[0]))
     if(w === 'standard') _wd.staffelArbeit.standard = l
+    else if(!wdStaffelEigen(w) && _sig(l) === _sig(_wd.staffelArbeit.standard)) { /* unverändert */ }
     else _wd.staffelArbeit[w] = l   // ab jetzt eigene Tabelle dieser Firma
     wdStaffelChips()
   }
