@@ -39072,6 +39072,15 @@ def admin_funded_plan():
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
     erg = fcp_sicht(erg, lese)
     erg["info"] = {k: _fdp_info.get(k) for k in ("letzter", "fehler")}
+    try:   # Einstellungen für den Reiter (E2, 04.11.2026) — Lesefehler lässt die Vorschau unberührt
+        erg["regeln"] = fdp_regeln_anzeige(_fdp_regeln_laden(), erg.get("regeln_quelle") or "db")
+        # darf: dieselbe Regel wie POST /admin/funded-plan/regeln — sonst sähe Emins Verwalter offene Felder und bekäme beim Speichern 403
+        try:
+            erg["regeln"]["darf"] = bool(_admin or str(_uid) in {str(u) for u in (admin_voll_uids() or ())})
+        except Exception:
+            erg["regeln"]["darf"] = bool(_admin)
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Einstellungen: {type(e).__name__}: {e}", flush=True)
     return jsonify(erg), (200 if erg.get("ok") else 503)
 
 
@@ -39339,6 +39348,204 @@ def admin_funded_plan_ids():
     sb_update("funded_plan_regeln", {"id": "eq.1"}, {"user_ids": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
     print(f"[funded-plan] IDs: {u[:8]} {'rein' if body.get('drin') else 'raus'} ({len(neu)} IDs)", flush=True)
     return jsonify({"ok": True, "user_id": u, "drin": bool(body.get("drin")), "n": len(neu)})
+
+
+# ══ EINSTELLUNGEN FUNDED PLANER → FUTURES (E2, 04.11.2026, Finn ~17:30 Dubai: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die
+# heute nur im Code stecken, sollen unten visuell und änderbar stehen — je Modell andere Parameter … und überall sehen, welches Modell genutzt
+# wird"). Vorbild Funded Planer → Winning Days → Einstellungen. Zwei Teile, am Planer selbst ändert sich NICHTS (gleiche Werte → gleiche Pläne):
+#  - fdp_regeln_anzeige: was der Planer heute liest — funded_plan_regeln (Schalter, zeiten, Firmen × Größe) plus die Konstanten, die fest im
+#    Code bzw. in der DB-Funktion stehen (FDP_FEST, nur Anzeige). GET /admin/funded-plan hängt es als „regeln“ an.
+#  - fdp_regeln_aendern + POST /admin/funded-plan/regeln: ändert NUR Felder, die es in der Zeile schon gibt (keine neue Firma, keine neue Größe,
+#    kein neuer Schlüssel), mit Grenzen je Feld und Typ wie gehabt (Zahl bleibt Zahl, Spanne bleibt Spanne). firma_abstand_min bleibt fest —
+#    der DB-Trigger trade_plans_firmen_abstand setzt beim Start 15 min aus prophos_firmen_abstand_funded_fenster() durch; mit einem anderen
+#    Wert hier plante Python Zeiten, die der Trigger verschiebt. Gleichzeitiges Ändern: updated_at muss passen, sonst 409.
+FDP_FEST = [   # (Schlüssel, Bezeichnung, Wert, Einheit, wo) — nur Anzeige im Reiter, Quelle der Wahrheit bleibt die Konstante
+    ("takt", "Nachplanen alle", FDP_TAKT_S // 60, "min", "code"),
+    ("bestaetigen_vorlauf", "Start nach dem Bestätigen frühestens", FDP_BESTAETIGEN_VORLAUF_S // 60, "min", "code"),
+    ("firma_abstand", "Firmen-Abstand beim Start", 15, "min", "db"),
+    ("breakeven_tol", "Break-even erst ab mehr als … unter dem Start", FDP_BREAKEVEN_TOL_USD, "$", "code"),
+    ("sl_min", "kein Trade bei SL unter", FDP_SL_MIN_USD, "$", "code"),
+    ("tages_puffer", "Puffer SL ↔ Daily Loss (Modus Rest)", FDP_TAGES_PUFFER, "$", "code"),
+    ("liq_puffer", "Puffer SL ↔ Liquidation (Modus Rest)", FDP_LIQ_PUFFER, "$", "code"),
+    ("liq_min", "kein Trade unter Abstand zur Liq (Modus Rest)", FDP_LIQ_MIN_ABSTAND, "$", "code"),
+    ("nq_ppl", "NQ je Punkt und Kontrakt", FDP_NQ_PPL, "$", "code"),
+    ("fusion_ppl", "Fusion je NAS100-Punkt und Lot", FDP_SLAVE_PPL, "€", "code"),
+]
+FDP_FEST_TEXT = [   # Regeln ohne Zahl, fest im Code (fdp_planen / fdp_konto_rechnen)
+    "Weg: Orbit Big Trade mit Fusion-Gegenhedge (route tvv2 + orbit_v3, hedge_eur > 0) — Prio wie ein Orbit-Big-Trade von Hand",
+    "Hedge-Betrag = offene Kosten (Kontokosten − Hedge-Ergebnisse im Zyklus) ÷ (Balance − Liq); Modus Rest: Hedge € je $ DD fest",
+    "Daily Loss und Minis je Stufe aus liq_regeln (Stufe nach Balance beim Planen), Liquidation EOD-trailing mit Lock",
+    "Startfenster = Fenster des Challenge-Planers (auto_plan_regeln.zeiten), darin zufällig",
+    "1 Trade je Konto und CME-Handelstag · Ziel erreicht → Konto auf Winning Days",
+]
+# Untergrenze 1 (Gegenprüfung 04.11.2026): 0 rechnet der Planer nicht als 0 — vorlauf_min „or 15", abstand_id_min beim Bestätigen „or 90"
+_FDP_ZEIT_FELDER = {"max_je_id_tag": (1, 6, True), "abstand_id_min": (1, 600, False), "vorlauf_min": (1, 120, False)}
+_FDP_GR_FELDER = {"ziel_gewinn": (1, 50000), "max_trade": (1, 50000), "kosten_eur": (0, 5000), "dd": (1, 20000), "daily_usd": (1, 20000),
+                  "hedge_eur": (0, 10000), "sl": (1, 20000)}
+
+
+def fdp_regeln_anzeige(reg, quelle="db"):
+    """REIN RECHNEND (testbar): Einstellungen des Funded-Futures-Planers für den Reiter → dict. reg = Zeile funded_plan_regeln (None = Standard)."""
+    r = reg or {"aktiv": False, "auto_bestaetigen": False, "firmen": FDP_FIRMEN_STANDARD, "zeiten": {}}
+    firmen = []
+    for f in r.get("firmen") or []:
+        if not isinstance(f, dict):
+            continue
+        jg = f.get("je_groesse") if isinstance(f.get("je_groesse"), dict) else {}
+        firmen.append({"name": f.get("name") or (f.get("namen") or ["?"])[0], "namen": list(f.get("namen") or []), "an": bool(f.get("an")),
+                       "symbol": f.get("symbol"), "lock_usd": f.get("lock_usd"), "tp_modus": f.get("tp_modus") or "normal",
+                       "je_groesse": {str(k): dict(v) for k, v in jg.items() if isinstance(v, dict)}})
+    return {"quelle": quelle if reg else "standard", "aktiv": bool(r.get("aktiv")), "auto_bestaetigen": r.get("auto_bestaetigen") is True,
+            "updated_at": r.get("updated_at"), "zeiten": dict(FDP_ZEITEN_STANDARD, **(r.get("zeiten") or {})), "zeiten_db": dict(r.get("zeiten") or {}),
+            "firmen": firmen, "fest": [{"key": k, "name": n, "wert": w, "einheit": e, "wo": wo} for k, n, w, e, wo in FDP_FEST], "fest_text": list(FDP_FEST_TEXT)}
+
+
+def _fdp_zahl(v, lo, hi, ganz=False, nk=2):
+    """Zahl in [lo, hi] (ganz: ohne Nachkomma, sonst auf nk Stellen) → float | None."""
+    if isinstance(v, bool) or v is None or v == "":
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    if x != x or x < lo or x > hi or (ganz and x != int(x)):
+        return None
+    return int(x) if ganz or x == int(x) else round(x, nk)
+
+
+def fdp_regeln_aendern(reg, body):
+    """REIN RECHNEND (testbar): Änderung aus POST /admin/funded-plan/regeln prüfen und in die Zeile mischen → (patch, None) | (None, fehler).
+    body = {updated_at, schalter?: {aktiv?, auto_bestaetigen?}, zeiten?: {max_je_id_tag?, abstand_id_min?, vorlauf_min?},
+    firma?: {name, an?, lock_usd?, je_groesse?: {"<Größe>": {<Feld>: Wert}}}}. Nur vorhandene Firmen, Größen und Schlüssel; Typ bleibt."""
+    if not reg:
+        return None, "funded_plan_regeln fehlt — SQL einspielen"
+    b = body if isinstance(body, dict) else {}
+    if str(b.get("updated_at") or "") != str(reg.get("updated_at") or ""):
+        return None, "inzwischen geändert — neu laden, dann erneut speichern"
+    bekannt = {"updated_at", "schalter", "zeiten", "firma"}
+    if set(b) - bekannt:
+        return None, "unbekannte Felder: " + ", ".join(sorted(set(b) - bekannt))
+    patch = {}
+    sch = b.get("schalter")
+    if sch is not None:
+        if not isinstance(sch, dict) or not sch or set(sch) - {"aktiv", "auto_bestaetigen"} or any(not isinstance(v, bool) for v in sch.values()):
+            return None, "schalter: nur aktiv / auto_bestaetigen als true/false"
+        patch.update(sch)
+    zt = b.get("zeiten")
+    if zt is not None:
+        if not isinstance(zt, dict) or not zt:
+            return None, "zeiten: leer"
+        if "firma_abstand_min" in zt:
+            return None, "firma_abstand_min ist fest (DB-Funktion prophos_firmen_abstand_funded_fenster) — hier nicht änderbar"
+        neu_z = dict(reg.get("zeiten") or {})
+        for k, v in zt.items():
+            if k not in _FDP_ZEIT_FELDER:
+                return None, f"zeiten.{k}: nicht änderbar"
+            lo, hi, ganz = _FDP_ZEIT_FELDER[k]
+            x = _fdp_zahl(v, lo, hi, ganz)
+            if x is None:
+                return None, f"zeiten.{k}: Zahl {lo}–{hi}{' (ganz)' if ganz else ''}"
+            neu_z[k] = x
+        patch["zeiten"] = neu_z
+    fa = b.get("firma")
+    if fa is not None:
+        if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse"} or len(fa) < 2:
+            return None, "firma: {name, an | lock_usd | je_groesse}"
+        firmen = [dict(f) if isinstance(f, dict) else f for f in (reg.get("firmen") or [])]
+        idx = [i for i, f in enumerate(firmen) if isinstance(f, dict) and (f.get("name") or (f.get("namen") or [""])[0]) == fa["name"]]
+        if len(idx) != 1:
+            return None, f"Firma „{fa['name']}“ nicht (eindeutig) in den Regeln"
+        f = firmen[idx[0]]
+        if "an" in fa:
+            if not isinstance(fa["an"], bool):
+                return None, "an: true/false"
+            f["an"] = fa["an"]
+        if "lock_usd" in fa:
+            if "lock_usd" not in f:
+                return None, "lock_usd: bei dieser Firma nicht hinterlegt"
+            x = _fdp_zahl(fa["lock_usd"], 0, 1000)
+            if x is None:
+                return None, "lock_usd: Zahl 0–1000"
+            f["lock_usd"] = x
+        if "je_groesse" in fa:
+            jg_alt = f.get("je_groesse") if isinstance(f.get("je_groesse"), dict) else {}
+            if not isinstance(fa["je_groesse"], dict) or not fa["je_groesse"]:
+                return None, "je_groesse: leer"
+            jg = {k: dict(v) if isinstance(v, dict) else v for k, v in jg_alt.items()}
+            for gr, werte in fa["je_groesse"].items():
+                if str(gr) not in jg or not isinstance(jg[str(gr)], dict):
+                    return None, f"Größe {gr}: nicht hinterlegt (neue Größen nur per SQL)"
+                if not isinstance(werte, dict) or not werte:
+                    return None, f"Größe {gr}: leer"
+                z = jg[str(gr)]
+                for k, v in werte.items():
+                    if k not in z:
+                        return None, f"{gr}.{k}: bei dieser Größe nicht hinterlegt"
+                    if k == "kontrakte":
+                        if not isinstance(v, dict) or not v or not isinstance(z[k], dict):
+                            return None, f"{gr}.kontrakte: {{Kontrakte: Anteil}}"
+                        kt = {}
+                        for kk, w in v.items():
+                            n, ww = _fdp_zahl(kk, 1, 10, True), _fdp_zahl(w, 0, 1, nk=3)   # Anteile auf 3 Stellen wie das Frontend (Gegenprüfung)
+                            if n is None or ww is None:
+                                return None, f"{gr}.kontrakte: Kontrakte 1–10, Anteil 0–1"
+                            if ww > 0:
+                                kt[str(n)] = ww
+                        if not kt or abs(sum(kt.values()) - 1) > 0.011:
+                            return None, f"{gr}.kontrakte: Anteile müssen zusammen 100 % ergeben"
+                        z[k] = kt
+                        continue
+                    if k not in _FDP_GR_FELDER:
+                        return None, f"{gr}.{k}: nicht änderbar"
+                    lo, hi = _FDP_GR_FELDER[k]
+                    if isinstance(z[k], (list, tuple)):
+                        if not isinstance(v, (list, tuple)) or len(v) != 2:
+                            return None, f"{gr}.{k}: Spanne [von, bis]"
+                        a, e = _fdp_zahl(v[0], lo, hi), _fdp_zahl(v[1], lo, hi)
+                        if a is None or e is None or a > e:
+                            return None, f"{gr}.{k}: Spanne {lo}–{hi}, von ≤ bis"
+                        z[k] = [a, e]
+                    else:
+                        x = _fdp_zahl(v, lo, hi)
+                        if x is None:
+                            return None, f"{gr}.{k}: Zahl {lo}–{hi}"
+                        z[k] = x
+            f["je_groesse"] = jg
+        firmen[idx[0]] = f
+        patch["firmen"] = firmen
+    if not patch:
+        return None, "nichts zu ändern"
+    return patch, None
+
+
+@app.route("/admin/funded-plan/regeln", methods=["POST", "OPTIONS"])
+def admin_funded_plan_regeln():
+    """POST → funded_plan_regeln ändern (E2, 04.11.2026). Nur Admin bzw. „Finn + Pascal“/„Pascal“ (admin_voll_uids) — die Regeln gelten für
+    alle Gruppen. Prüfen und Mischen in fdp_regeln_aendern; Antwort mit den neuen Einstellungen (fdp_regeln_anzeige)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
+    admin, uid, _sicht, err = _fdp_login()
+    if err:
+        return err
+    try:
+        voll = admin or str(uid) in {str(u) for u in (admin_voll_uids() or ())}
+    except Exception:
+        voll = admin
+    if not voll:
+        return jsonify({"ok": False, "msg": "Regeln des Funded-Planers ändern nur „Finn + Pascal“ und „Pascal“ — sie gelten für alle Gruppen"}), 403
+    reg = _fdp_regeln_laden()
+    patch, fehler = fdp_regeln_aendern(reg, request.get_json(silent=True) or {})
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), (503 if not reg else 409 if fehler.startswith("inzwischen") else 400)
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    neu = sb_update("funded_plan_regeln", {"id": "eq.1", "updated_at": f"eq.{reg.get('updated_at')}"}, patch)
+    if not neu:
+        return jsonify({"ok": False, "msg": "inzwischen geändert — neu laden, dann erneut speichern"}), 409
+    print(f"[funded-plan] Regeln geändert ({', '.join(k for k in patch if k != 'updated_at')}) von {str(uid or 'admin')[:8]}", flush=True)
+    return jsonify({"ok": True, "regeln": fdp_regeln_anzeige(neu[0] if isinstance(neu, list) else _fdp_regeln_laden())})
 
 
 # ══ FUNDED-CFD-PLANER (30.10.2026, Finn ~07:00 Dubai: „Ja, bauen"; Regeln diktiert 05:10–06:55, .claude/master/funded-cfd-planer-regeln.md).
