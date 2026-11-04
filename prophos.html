@@ -41807,6 +41807,8 @@
           // Popup noch Banner gezeigt).
           // zurück auf open (Endlesung „noch offen“ in einem anderen Tab, 29.10.2026) → Ende-Merker auch hier weg (s. atPendingWeg)
           if(op.status === 'review' && np.status === 'open') atPendingWeg(np.id)
+          // P1 (05.11.2026): wieder „Geplant" (Tagesreset → Überprüfen → zurück zu Geplant) → Ende-Merker des alten Laufs weg, sonst Banner/Popup-Sperre beim nächsten Ende
+          if(np.status === 'planned' && op.status !== 'planned') atPendingWeg(np.id)
           if(np.status === 'review' && op.status !== 'review'){
             // fromServer=true: Status + P&L hat der Server schon erledigt —
             // nur Banner/Popup zeigen, nichts erneut schreiben oder fetchen.
@@ -41948,7 +41950,26 @@
       const el = document.getElementById(`at-prompt-${pid}`); if(el) el.remove()
     }catch(_){}
   }
+  // REIN (Test-Haken window._atEndeWeg): 'nur_review' = Merker stand schon, Plan trotzdem nach Überprüfen (ohne Popup) · 'nichts' = schon gemeldet ·
+  // 'normal' = Merker setzen, Popup, (lokal) nach Überprüfen
+  function atEndeWeg(plan, fromServer, schonGemeldet){
+    if(!fromServer && plan && plan.status === 'open' && schonGemeldet) return 'nur_review'
+    return schonGemeldet ? 'nichts' : 'normal'
+  }
+  window._atEndeWeg = atEndeWeg
   function atShowEndPrompt(plan, fromServer){
+    /* ENDE OHNE „ÜBERPRÜFEN" (P1, Finn 05.11.2026 ~05:25 Dubai: „manche Trades laden einfach nicht den P&L" — Mike FP …8534 c4db1e61 und Marco FN
+     * …3615 114a10de am 04.11.: final mit master_balance + closed_sum geschrieben, Plan blieb stundenlang „open", ohne P&L und Fusion-Buchung).
+     * Ursache: der Ende-Merker pendingFinish (localStorage) stand schon vom Vortag — der Tagesreset hatte beide Pläne nach „Überprüfen" geschoben
+     * (jeder Tab zeigt dann atShowEndPrompt(np, true) → Merker gesetzt), danach gingen sie zurück auf „Geplant" ohne dass der Merker fiel (atPendingWeg
+     * nur bei review → open). Beim echten Ende kehrte diese Funktion früh zurück und atMoveToReview lief nie. Jetzt: der Merker spart nur das Popup —
+     * ein lokal erkanntes Ende eines offenen Plans schiebt IMMER nach „Überprüfen" (atMoveToReview mit Status-Guard open, Auto-P&L füllt nur leere Felder). */
+    if(atEndeWeg(plan, fromServer, autoTrack.pendingFinish.has(String(plan.id))) === 'nur_review'){
+      console.info('[review] Ende-Merker stand schon — Plan trotzdem nach Überprüfen', plan.masterName || plan.id)
+      if(typeof atMoveToReview === 'function') atMoveToReview(plan)
+      else if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
+      return
+    }
     if(document.getElementById(`at-prompt-${plan.id}`)) return
     // Schon einmal gemeldet? → Popup NICHT erneut zeigen (auch nicht nach "Später").
     // Der orange Banner in der Karte bleibt als Erinnerung; das Popup kommt erst
@@ -53764,6 +53785,7 @@
 
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
+    if(newStatus === 'planned'){ try{ atPendingWeg(planId) }catch(_){} }   // P1 (05.11.2026): zurück zu Geplant → Ende-Merker des alten Laufs weg (Banner beim nächsten Lauf)
     try{
       const updates = { status: newStatus }
       // started_at nur setzen, wenn noch keins existiert — beim Reopen aus "Überprüfen"
@@ -60737,8 +60759,11 @@
     // nur vom SERVER abgelehnt (Server:/Journal: im Kopf) — nie der API-Rechengrund „(API: nötig … frei …)": den rechnet der Bot NACH dem Klick, eine
     // spät gefüllte Order senkt die freie Marge genau so (Gegenprüfung N2 04.11.2026, Doppel-Order-Gefahr)
     /^KEINE Bestaetigung binnen \d+ s — Grund: [^(]*\((Server|Journal): /i]
+  // P1 (Finn 05.11.2026 ~05:25 Dubai, Marco pc-t8wg97 ohne DNS): der Kopf endet vor „ Spur:" oder vor der Bot-Spur „ [0.0s·…"/„ […]" — NICHT an
+  // jeder eckigen Klammer: „Riegel-Prüfung (Gegenrichtung) nicht erreichbar: <urlopen error [Errno 11001] getaddrinfo failed> — nichts gesendet, …"
+  // verlor sonst sein „nichts gesendet" (4 Pläne am 04.11. unklar statt nachgeholt, zwei sperrten …3615 per Gegenrichtung)
   function sfVorOrderBeleg(msg){
-    const kopf = String(msg || '').split(/\s+(?:Spur:|\[)/)[0]
+    const kopf = String(msg || '').split(/\s+(?:Spur:|\[(?=[\d…]|\.\.\.))/)[0]
     if(/Zeitlimit|Timeout|brach nach|Verbindung zum Panel|läuft gerade schon eine Order|laeuft gerade schon eine Order|\(API:/i.test(kopf)) return false
     return SF_BELEG_NICHT_PLATZIERT.some(rx => rx.test(kopf))
   }
