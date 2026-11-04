@@ -37,7 +37,8 @@ k0, k1 = SRC.index("FDP_FEST = ["), SRC.index('@app.route("/admin/funded-plan/re
 _konst = "\n".join(z for z in SRC.splitlines() if z.startswith(("WD_GOOD_DAY_MIN = ", "WD_ZYKLUS_KT, WD_ZYKLUS_INSTR = ", "TRADEIFY_ZYKLUS_MIN_USD = ", "TRADEIFY_ZYKLUS_PUFFER = ", "TRADEIFY_AUSGLEICH_BESTAETIGEN = ")))
 _vorg = SRC[SRC.index("WD_ZYKLUS_VORGABE = {"):SRC.index("WD_ZYKLUS_KT, WD_ZYKLUS_INSTR")]
 exec(_konst + "\n" + _vorg, ns)
-exec("\n".join(block(n) for n in HILFEN) + "\n" + SRC[i:j] + "\n" + SRC[k0:k1], ns)
+b0, b1 = SRC.index("def fdp_start_bestaetigt("), SRC.index("def _fdp_login(")   # Bestätigen-Zeiten + FDP_KONST/fdp_konst (E2b-Nachtrag)
+exec("\n".join(block(n) for n in HILFEN) + "\n" + SRC[i:j] + "\n" + SRC[b0:b1] + "\n" + SRC[k0:k1], ns)
 anz, aend = ns["fdp_regeln_anzeige"], ns["fdp_regeln_aendern"]
 
 REG = {"aktiv": True, "auto_bestaetigen": False, "updated_at": "2026-11-03T22:10:00.123+00:00", "user_ids": ["u1"],
@@ -57,8 +58,8 @@ ap = next(f for f in a["firmen"] if f["name"] == "Apex Trader")
 check(ap["an"] and ap["je_groesse"]["150000"]["kontrakte"] == {"2": 0.9, "3": 0.1} and ap["tp_modus"] == "normal", "Anzeige: Apex je Größe vollständig, Modus normal")
 check(next(f for f in a["firmen"] if f["name"] == "FTMO Futures")["tp_modus"] == "rest", "Anzeige: FTMO Futures Modus rest")
 fest = {x["key"]: x for x in a["fest"]}
-check(fest["breakeven_tol"]["wert"] == 500 and fest["sl_min"]["wert"] == 100 and fest["firma_abstand"]["wo"] == "db" and fest["takt"]["wert"] == 5,
-      "Anzeige: Konstanten aus dem Code (500 $, 100 $, Firmen-Abstand DB, Takt 5 min)")
+check(a["konst"]["breakeven_tol"] == 500 and a["konst"]["sl_min"] == 100 and fest["firma_abstand"]["wo"] == "db" and fest["takt"]["wert"] == 5,
+      "Anzeige: Grenzen mit Rückfall (500 $, 100 $), Firmen-Abstand DB-Riegel, Takt 5 min")
 check(anz(None)["quelle"] == "standard" and anz(None)["firmen"][0]["name"] == "Apex Trader", "ohne Zeile: Standard-Regeln, Quelle standard")
 check(REG == ALT, "Anzeige ändert die Zeile nicht")
 
@@ -120,27 +121,35 @@ nach2 = R(p["firmen"][0], jg(p["firmen"][0], 100000), ST100, 101000.0, 101000.0,
 check(nach2["tp"] == 5000 and vor["tp"] == 6000, "geänderter Wert wirkt (TP höchstens 5.000 statt 6.000)")
 
 # ── E2b: Winning Day je Firma (fdp_wd_anzeige) — Werte aus denselben Funktionen/Konstanten wie der Farmer
-W = ns["fdp_wd_anzeige"]
+W0 = ns["fdp_wd_anzeige"]
+
+
+def W(*a):
+    """fdp_wd_anzeige + besonders als Textzeilen (Name Wert Info) für die Prüfungen"""
+    r = W0(*a)
+    r["_dicts"] = r["besonders"]
+    r["besonders"] = [f"{b['name']} {b['wert']} | {b.get('info', '')}" for b in r["besonders"]]
+    return r
 apex = W(REG["firmen"][0], {}, {"aktiv": True, "stuetz": [{"v": 2000, "ziel": 750, "satz": 400}, {"v": 4000, "ziel": 1500, "satz": 300}], "firmen": ["apex", "apex100"], "ab_zyklus": 2}, ["apex"])
 g = {z["groesse"]: z for z in apex["groessen"]}
 check(g["100000"]["min_usd"] == 300 and g["150000"]["min_usd"] == 350, "Apex: WD ab 300 $ (100k) / 350 $ (150k) — wd_min_gewinn")
 check(g["100000"]["tp"] == [320, 340] and g["150000"]["tp"] == [370, 390] and g["150000"]["tp_quelle"] == "standard", "Apex: TP-Spanne Standard des Farmers je Größe")
-check(apex["bestaetigen"] is True and any("Recoverer an:" in b and "−2.000 $ → 750 $ / 400 €" in b for b in apex["besonders"]), "Apex: Bestätigen + Recoverer aus der DB-Regel")
-check(any("Recoverer nicht eingerichtet" in b for b in W(REG["firmen"][0], {}, None, [])["besonders"]), "ohne zyklus_regel: Recoverer nicht eingerichtet (wie wd_zyklus_konto keine_regel)")
-check(any("Recoverer aus" in b for b in W(REG["firmen"][0], {}, {"aktiv": None}, [])["besonders"]), "zyklus_regel.aktiv null → aus wie im Farmer")
-check(any("Recoverer an (150k)" in b for b in W(REG["firmen"][0], {}, {"aktiv": True, "firmen": ["apex"]}, [])["besonders"]), "firmen nur apex → gilt nur 150k")
+check(apex["bestaetigen"] is True and any(b.startswith("Recoverer an · ab Zyklus 2") for b in apex["besonders"]) and any(b.startswith("bei −2.000 $ Verlust 750 $ / 400 €") for b in apex["besonders"]) and any(b.startswith("bei −4.000 $ Verlust 1.500 $ / 300 €") for b in apex["besonders"]), "Apex: Bestätigen + Recoverer aus der DB-Regel")
+check(any(b.startswith("Recoverer nicht eingerichtet") for b in W(REG["firmen"][0], {}, None, [])["besonders"]), "ohne zyklus_regel: Recoverer nicht eingerichtet (wie wd_zyklus_konto keine_regel)")
+check(any(b.startswith("Recoverer aus") for b in W(REG["firmen"][0], {}, {"aktiv": None}, [])["besonders"]), "zyklus_regel.aktiv null → aus wie im Farmer")
+check(any(b.startswith("Recoverer an (150k)") for b in W(REG["firmen"][0], {}, {"aktiv": True, "firmen": ["apex"]}, [])["besonders"]), "firmen nur apex → gilt nur 150k")
 _kt = lambda k, std=1: W({"name": "Tradeify", "je_groesse": {}}, {"kt": std, "regeln": {"kt": {"tradeify": k}}}, None, [])["groessen"][0]["kt"]
 check(_kt([3, None]) == [3, 3] and _kt([3]) == [3, 3] and _kt([2, 1]) == [2, 2] and _kt([1.5, 2.5]) == [2, 3] and _kt(None, 2.5) == [3, 3], "Kontrakte wie wdKtSpanne (bis ≥ von, gerundet)")
 vp = {"instr": "nq", "kt": 1, "regeln": {"fu": {"tradeify": [260, 280], "apex": [380, 400]}, "kt": {"tradeify": [1, 2]}}}
 apex2 = W(REG["firmen"][0], vp, {"aktiv": False, "ab_zyklus": 3, "stuetz": [{"v": 1000, "ziel": 500, "satz": 450}]}, [])
 g2 = {z["groesse"]: z for z in apex2["groessen"]}
 check(g2["150000"]["tp"] == [380, 400] and g2["150000"]["tp_quelle"] == "wd-farmer" and g2["100000"]["tp_quelle"] == "standard", "TP aus wd_farmer_regeln.vorplan.regeln.fu, fehlender Schlüssel = Standard")
-check(apex2["bestaetigen"] is False and any("Recoverer aus" in b and "3. Payout-Zyklus" in b and "−1.000 $ → 500 $ / 450 €" in b for b in apex2["besonders"]), "Recoverer aus der DB-Regel (zyklus_regel)")
+check(apex2["bestaetigen"] is False and any(b.startswith("Recoverer aus") for b in apex2["besonders"]) and not any(b.startswith("bei −") for b in apex2["besonders"]), "Recoverer aus der DB-Regel (zyklus_regel)")
 tr = W({"name": "Tradeify", "je_groesse": {}}, vp, None, [])
 check(tr["groessen"][0]["min_usd"] == 250 and tr["groessen"][0]["tp"] == [260, 280] and tr["groessen"][0]["kt"] == [1, 2] and tr["groessen"][0]["instr"] == "NQ", "Tradeify: 250 $, TP/Kontrakte aus dem Farmer")
-check(any("Zyklus im Plus" in b and "+1 $" in b for b in tr["besonders"]), "Tradeify: Zyklus im Plus")
+check(any(b.startswith("Payout ab Zyklus 2 +1 $") for b in tr["besonders"]) and any(b.startswith("Ausgleichs-Trade Fehlbetrag + 30–60 $") for b in tr["besonders"]), "Tradeify: Zyklus im Plus")
 lu = W({"name": "Lucid Trading", "je_groesse": {}}, vp, None, [])
-check(lu["groessen"][0]["min_usd"] == 250 and lu["groessen"][0]["tp"] == [260, 280] and not any("Zyklus im Plus:" in b for b in lu["besonders"]), "Lucid: 250 $, Tradeify-Werte, keine Zyklus-Regel")
+check(lu["groessen"][0]["min_usd"] == 250 and lu["groessen"][0]["tp"] == [260, 280] and not any(b.startswith("Payout ab Zyklus") for b in lu["besonders"]) and any(b.startswith("Regeln wie Tradeify") for b in lu["besonders"]), "Lucid: 250 $, Tradeify-Werte, keine Zyklus-Regel")
 check(W({"name": "Topstep", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] == 150, "Topstep: 150 $")
 check(W({"name": "FundedNext Futures", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] == 250, "FundedNext Futures: 250 $")
 ft = W(REG["firmen"][-1], {}, None, [])
@@ -149,7 +158,61 @@ check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best)' in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
 check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
-check("data-e2-wd" not in HTML.split("const wdGruppe")[1].split("const firmaGruppe")[0].replace("data-e2-wd-link", ""), "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
+check("e2In(" not in HTML.split("const wdGruppe")[1].split("const firmaGruppe")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
+check(all(isinstance(b, dict) and b.get("name") and b.get("wert") for x in (apex, tr, lu) for b in x["_dicts"]), "Besonderheiten als Parameter {name, wert, info}")
+check('class="e2-nur"' in HTML and "Nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nachtrag 3: Nur-ansehen-Balken oben, Erklärungen hinter ⓘ")
+
+# ── E2b-Nachtrag: Grenzen aus dem Code in die DB + eigenes Startfenster — gleiche Werte → gleiche Pläne
+KON, FE = ns["fdp_konst"], ns["fdp_fenster_eigen"]
+std = KON({})
+check(std == {"breakeven_tol": 500.0, "sl_min": 100.0, "tages_puffer": 100.0, "liq_puffer": 50.0, "liq_min": 300.0, "bestaetigen_vorlauf_min": 2.0, "bestaetigen_streu_min": 10.0},
+      "fdp_konst ohne Spalte/Werte = die Konstanten (500/100/100/50/300 $, 2/10 min)")
+check(KON({"konst": {"sl_min": "abc", "liq_min": -5, "breakeven_tol": True, "tages_puffer": 80}}) == dict(std, tages_puffer=80.0), "ungültige DB-Werte → Konstante, gültige gelten")
+FT = REG["firmen"][-1]; jft = jg(FT, 50000)
+for bal, peak in ((51200.0, 51200.0), (49400.0, 50000.0), (47300.0, 50000.0)):
+    for kt in (None, 1):
+        a1 = R(FT, jft, [], bal, peak, 0.0, 50000, 50000, random.Random(7), None, kt, "k-ftmo")
+        a2 = R(FT, jft, [], bal, peak, 0.0, 50000, 50000, random.Random(7), None, kt, "k-ftmo", konst=std)
+        if a1 != a2:
+            break
+check(a1 == a2, "FTMO Futures (Modus Rest): konst = Standard rechnet exakt wie ohne konst")
+a3 = [R(ALT["firmen"][0], jg(ALT["firmen"][0], 100000), ST100, b, b, 350.0, 100000, 100000, kt_fest=2, konst=std) for b in (99600.0, 99400.0, 101000.0)]
+a4 = [R(ALT["firmen"][0], jg(ALT["firmen"][0], 100000), ST100, b, b, 350.0, 100000, 100000, kt_fest=2) for b in (99600.0, 99400.0, 101000.0)]
+check(a3 == a4, "Apex (Modus normal): konst = Standard rechnet exakt wie ohne konst (Break-even-Grenze, SL)")
+b1 = R(ALT["firmen"][0], jg(ALT["firmen"][0], 100000), ST100, 99400.0, 99400.0, 350.0, 100000, 100000, kt_fest=2)
+b2 = R(ALT["firmen"][0], jg(ALT["firmen"][0], 100000), ST100, 99400.0, 99400.0, 350.0, 100000, 100000, kt_fest=2, konst=dict(std, breakeven_tol=1000.0))
+check(b1["tp_art"] == "break_even" and b2["tp_art"] == "normal", "geänderte Break-even-Grenze wirkt (99.400 $: 500 → Break-even, 1.000 → normal)")
+c1 = R(FT, jft, [], 50400.0, 50400.0, 0.0, 50000, 50000, None, None, 1, "k-ftmo", konst=dict(std, liq_min=4000.0))
+check(c1["aktion"] == "aus" and "4.000" in c1["grund"], "geänderter Mindestabstand zur Liq wirkt")
+jetzt = datetime(2026, 11, 5, 8, 0, tzinfo=timezone.utc)
+check(ns["fdp_start_bestaetigt"](None, jetzt) == ns["fdp_start_bestaetigt"](None, jetzt, 60 * std["bestaetigen_vorlauf_min"]), "Bestätigen-Vorlauf: Standard = Konstante")
+pl = [{"id": "p1", "fp_start": None, "firma": "ht|apex", "user_id": "u1"}, {"id": "p2", "fp_start": None, "firma": "ht|apex", "user_id": "u2"}]
+v1 = ns["fdp_start_verteilen"](pl, [], jetzt, 900, 5400, random.Random(3))
+v2 = ns["fdp_start_verteilen"](pl, [], jetzt, 900, 5400, random.Random(3), vorlauf_s=60 * std["bestaetigen_vorlauf_min"], streu_s=60 * std["bestaetigen_streu_min"])
+check(v1 == v2, "Streuung beim Bestätigen: Standard = Konstante (gleiche Zeiten)")
+check(FE(None) is None and FE({"von": "05:00", "bis": "18:00"}) == ("Asia/Dubai", 300, 1080) and FE({"von": "18:00", "bis": "05:00"}) is None
+      and FE({"von": "5:00", "bis": "18:00"}) is None and FE({"von": "05:75", "bis": "18:00"}) is None and FE({"von": "05:00", "bis": "18:00", "tz": "UTC"}) is None, "eigenes Fenster: gültig/ungültig")
+src_plan = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
+check("fdp_fenster_eigen(zeiten.get(\"fenster_eigen\")) or fdp_fenster(ap_zeiten)" in src_plan and "konst=konst" in src_plan, "fdp_planen: eigenes Fenster vor Challenge-Planer, konst an die Rechnung")
+check(SRC.count("fdp_fenster(ap_zeiten)") == 3 and "fdp_fenster_eigen" not in SRC[SRC.index("def fcp_planen("):SRC.index("def fcp_planen(") + 3000], "Funded CFD unverändert (kein eigenes Fenster, keine konst)")
+# Ändern
+REGK = dict(REG, konst={})
+p, f = aend(REGK, {"updated_at": U, "konst": {"breakeven_tol": 750, "bestaetigen_streu_min": 5}})
+check(f is None and p["konst"] == {"breakeven_tol": 750, "bestaetigen_streu_min": 5}, f"konst ändern ({f})")
+nein({"updated_at": U, "konst": {"breakeven_tol": 700}}, "konst ohne Spalte (SQL fehlt)")
+for body, txt in (({"sl_min": 0}, "sl_min 0"), ({"liq_puffer": 0}, "Liq-Puffer 0 (S9)"), ({"bestaetigen_streu_min": 0}, "Streuung 0 (Jitter)"), ({"liq_min": 20000}, "liq_min zu groß"), ({"takt": 5}, "Takt (Technik)"), ({"breakeven_tol": True}, "bool")):
+    p, f = aend(REGK, {"updated_at": U, "konst": body}); check(p is None and bool(f), f"konst abgelehnt: {txt} ({f})")
+p, f = aend(REG, {"updated_at": U, "zeiten": {"fenster_eigen": {"von": "05:00", "bis": "18:00", "tz": "Asia/Dubai"}}})
+check(f is None and p["zeiten"]["fenster_eigen"] == {"von": "05:00", "bis": "18:00", "tz": "Asia/Dubai"} and p["zeiten"]["abstand_id_min"] == 90, "eigenes Fenster setzen, Rest der zeiten bleibt")
+p, f = aend(dict(REG, zeiten=dict(REG["zeiten"], fenster_eigen={"von": "05:00", "bis": "18:00", "tz": "Asia/Dubai"})), {"updated_at": U, "zeiten": {"fenster_eigen": None}})
+check(f is None and "fenster_eigen" not in p["zeiten"], "eigenes Fenster aus → zurück auf den Challenge-Planer")
+nein({"updated_at": U, "zeiten": {"fenster_eigen": {"von": "18:00", "bis": "05:00"}}}, "Fenster von > bis")
+nein({"updated_at": U, "zeiten": {"fenster_eigen": {"von": "05:00", "bis": "18:00", "x": 1}}}, "Fenster mit fremdem Feld")
+an2 = anz(dict(REGK, konst={"sl_min": 150}, zeiten=dict(REG["zeiten"], fenster_eigen={"von": "05:00", "bis": "18:00", "tz": "Asia/Dubai"})))
+check(an2["konst"]["sl_min"] == 150 and an2["konst"]["liq_min"] == 300 and an2["konst_spalte"] is True and an2["fenster_eigen"]["von"] == "05:00"
+      and {x["key"] for x in an2["fest"]} == {"takt", "firma_abstand", "nq_ppl", "fusion_ppl"} and all(x["grund"] for x in an2["fest"]), "Anzeige: konst + Fenster, nur Technik/DB-Riegel/Kontraktwerte fest (mit Grund)")
+check(anz(REG)["konst_spalte"] is False, "Anzeige erkennt fehlende Spalte konst")
+check("if(karte === 'grenzen'){" in HTML and "e2In('z.fenster.von'" in HTML and "e2Sch('z.fenster.an'" in HTML and "body.konst = ko" in HTML, "Frontend: Grenzen + Fenster änderbar")
 
 # ── Verdrahtung
 rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══ FUNDED-CFD-PLANER")]

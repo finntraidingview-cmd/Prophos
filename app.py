@@ -38606,10 +38606,10 @@ def fdp_stufe(stufen, balance):
     return _wd_num(st.get("daily_loss_usd")), int(_wd_num(st.get("minis")) or 0) or None, nr
 
 
-def fdp_tp(balance, start, ziel, max_trade):
+def fdp_tp(balance, start, ziel, max_trade, tol=FDP_BREAKEVEN_TOL_USD):
     """REIN RECHNEND (testbar): (tp | None, art). Mehr als FDP_BREAKEVEN_TOL_USD unter dem Start zurück auf Break-even ('break_even'), sonst
     min(max_trade, Ziel − Balance) ('normal'); Ziel erreicht → (None, 'ziel'). Anlass: Marc 99.988 $ hätte sonst TP 12,40 $ und Hedge 1,02 €."""
-    if balance < start - FDP_BREAKEVEN_TOL_USD:
+    if balance < start - tol:   # tol = konst.breakeven_tol (E2b-Nachtrag 05.11.2026), Rückfall FDP_BREAKEVEN_TOL_USD
         return round(start - balance, 2), "break_even"
     rest = ziel - balance
     if rest <= 0.005:
@@ -38715,6 +38715,25 @@ def fdp_vorschlag_neu(plan, r):
 FDP_TAGES_PUFFER = 100                    # $ zwischen SL und Daily Loss (Schlupf am Fill, wie AP_TAGES_PUFFER)
 FDP_LIQ_PUFFER = 50                       # $ zwischen SL und Liquidation (Eingang 03.11.2026 nach S9-Stopp zu b8e6dc2b: nie genau auf die Liq)
 FDP_LIQ_MIN_ABSTAND = 300                 # darunter kein Trade mehr: „zu nah an der Liquidation" (Eingang 03.11.2026)
+FDP_BESTAETIGEN_STREU_S = 600            # verschobene Startzeit: Zufall 0–10 min obendrauf (Puls-Jitter-Regel, nie im festen Takt)
+# KONSTANTEN IN DIE DB (E2b-Nachtrag 05.11.2026, Finn: „Nimm Winning Days als Beispiel — Uhrzeit, Verhältnis, Lots, alles änderbar“): die Werte, die Pläne beeinflussen,
+# stehen in funded_plan_regeln.konst (sql/2026-11-05_fdp_einstellungen_db.sql); fehlt ein Schlüssel oder die Spalte, gilt die Konstante — gleiche Werte, gleiche Pläne.
+# Schlüssel → (Konstante, Untergrenze, Obergrenze). Funded CFD (fcp_*) nutzt weiter die Konstanten.
+# Untergrenze 1 bei Puffern, Vorlauf und Streuung (Gegenprüfung 05.11.2026): 0 hieße SL genau an Daily Loss/Liq (S9-Regel) bzw. fester Takt (Jitter-Regel)
+FDP_KONST = {"breakeven_tol": (FDP_BREAKEVEN_TOL_USD, 0, 5000), "sl_min": (FDP_SL_MIN_USD, 1, 5000), "tages_puffer": (FDP_TAGES_PUFFER, 1, 1000),
+             "liq_puffer": (FDP_LIQ_PUFFER, 1, 1000), "liq_min": (FDP_LIQ_MIN_ABSTAND, 0, 10000),
+             "bestaetigen_vorlauf_min": (FDP_BESTAETIGEN_VORLAUF_S / 60, 1, 60), "bestaetigen_streu_min": (FDP_BESTAETIGEN_STREU_S / 60, 1, 60)}
+
+
+def fdp_konst(reg):
+    """REIN RECHNEND (testbar): Grenzen des Funded-Futures-Planers → {Schlüssel: Zahl} — Wert aus reg.konst, wenn Zahl in den Grenzen, sonst die Konstante."""
+    roh = (reg or {}).get("konst") if isinstance((reg or {}).get("konst"), dict) else {}
+    out = {}
+    for k, (std, lo, hi) in FDP_KONST.items():
+        v = roh.get(k)
+        x = None if isinstance(v, bool) else _wd_num(v)
+        out[k] = float(x) if x is not None and lo <= x <= hi else float(std)
+    return out
 
 
 def fdp_ziel_gewinn(jg, konto_id=None):
@@ -38728,7 +38747,7 @@ def fdp_ziel_gewinn(jg, konto_id=None):
     return float(_wd_num(z) or 0)
 
 
-def fdp_sl_rest(jg, balance, liq, rnd=None):
+def fdp_sl_rest(jg, balance, liq, rnd=None, tages_puffer=FDP_TAGES_PUFFER, liq_puffer=FDP_LIQ_PUFFER):
     """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_LIQ_PUFFER,
     ganze Dollar abgerundet. Ohne rnd die Mitte."""
     b = jg.get("sl") if isinstance(jg.get("sl"), (list, tuple)) and len(jg.get("sl")) == 2 else None
@@ -38738,17 +38757,21 @@ def fdp_sl_rest(jg, balance, liq, rnd=None):
     sl = rnd.uniform(lo, hi) if rnd is not None else (lo + hi) / 2.0
     d = _wd_num(jg.get("daily_usd"))
     if d:
-        sl = min(sl, d - FDP_TAGES_PUFFER)
-    sl = min(sl, balance - liq - FDP_LIQ_PUFFER)   # S9-Stopp zu b8e6dc2b / Eingang: nie genau an die Liquidation, Schlupf am Fill würde das Konto blasen
+        sl = min(sl, d - tages_puffer)
+    sl = min(sl, balance - liq - liq_puffer)   # S9-Stopp zu b8e6dc2b / Eingang: nie genau an die Liquidation, Schlupf am Fill würde das Konto blasen
     return float(int(sl)) if sl > 0 else None
 
 
-def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None):
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None, konst=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
     offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert),
     tage = fdp_tage (nur Anzeige „größter Tag x %"), kt_fest = Kontrakte eines schon gewürfelten Vorschlags."""
     g = float(groesse or 0)
+    # konst (E2b-Nachtrag 05.11.2026, Finn: „alles änderbar“): Grenzen aus funded_plan_regeln.konst (fdp_konst), sonst die Konstanten — gleiche Werte, gleiche Rechnung
+    K = konst if isinstance(konst, dict) else {}
+    k_tol, k_slmin = K.get("breakeven_tol", FDP_BREAKEVEN_TOL_USD), K.get("sl_min", FDP_SL_MIN_USD)
+    k_tp, k_lp, k_lmin = K.get("tages_puffer", FDP_TAGES_PUFFER), K.get("liq_puffer", FDP_LIQ_PUFFER), K.get("liq_min", FDP_LIQ_MIN_ABSTAND)
     if not jg or not g:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer"}
     dd = _wd_num(jg.get("dd"))
@@ -38767,7 +38790,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if rest_modus:
         tp, art = (round(ziel - balance, 2), "rest") if ziel - balance > 0.005 else (None, "ziel")   # kein Deckel, kein Break-even
     else:
-        tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0)
+        tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0, k_tol)
     gew = round(balance - start, 2)
     max_tag = max([v for v in (tage or {}).values() if v > 0], default=0.0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
@@ -38776,10 +38799,10 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if art == "ziel":
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
     if rest_modus:
-        if balance - liq < FDP_LIQ_MIN_ABSTAND:
-            return dict(basis, aktion="aus", grund=f"zu nah an der Liquidation ({_liq_de(balance - liq)} $ Abstand, unter {FDP_LIQ_MIN_ABSTAND} $)")
-        sl = fdp_sl_rest(jg, balance, liq, rnd)
-        if not sl or sl < FDP_SL_MIN_USD:
+        if balance - liq < k_lmin:
+            return dict(basis, aktion="aus", grund=f"zu nah an der Liquidation ({_liq_de(balance - liq)} $ Abstand, unter {_liq_de(k_lmin)} $)")
+        sl = fdp_sl_rest(jg, balance, liq, rnd, k_tp, k_lp)
+        if not sl or sl < k_slmin:
             return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
         kt = int(kt_fest) if kt_fest else fdp_kontrakte(jg.get("kontrakte") or {"1": 1}, None, rnd)
         he, ddj = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("dd"))
@@ -38794,7 +38817,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if not dll:
         return dict(basis, aktion="aus", grund="keine Stufe (liq_regeln) für diese Größe")
     sl = fdp_sl(dll, balance, liq)
-    if not sl or sl < FDP_SL_MIN_USD:
+    if not sl or sl < k_slmin:
         return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
     kt = min(int(minis or kt_fest), int(kt_fest)) if kt_fest else fdp_kontrakte(jg.get("kontrakte"), minis, rnd)
     h = fdp_hedge(offen, balance, liq, tp, sl, kt)
@@ -38802,6 +38825,28 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
         return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} €)")
     return dict(basis, aktion="planen", grund="", tp=tp, sl=sl, kontrakte=kt, tp_art=art, stufe=nr, dll=dll, minis=minis,
                 tp_pkt=round(tp / (FDP_NQ_PPL * kt), 2), sl_pkt=round(sl / (FDP_NQ_PPL * kt), 2), **h)
+
+
+FDP_FENSTER_TZ = ("Asia/Dubai", "Europe/Berlin")
+
+
+def fdp_fenster_eigen(fe):
+    """REIN RECHNEND (testbar): eigenes Startfenster des Funded-Futures-Planers (zeiten.fenster_eigen {von, bis, tz}, E2b-Nachtrag 05.11.2026, Finn: „die Uhrzeit
+    ändern … alles“) → (tz, von_min, bis_min) | None. None (fehlt/ungültig) = wie bisher das Fenster des Challenge-Planers (fdp_fenster)."""
+    if not isinstance(fe, dict):
+        return None
+    try:
+        hm = lambda s: int(str(s)[:2]) * 60 + int(str(s)[3:5])   # noqa: E731
+        if not (re.match(r"^\d{2}:\d{2}$", str(fe.get("von") or "")) and re.match(r"^\d{2}:\d{2}$", str(fe.get("bis") or ""))):
+            return None
+        von, bis, tz = hm(fe["von"]), hm(fe["bis"]), str(fe.get("tz") or "Asia/Dubai")
+        if int(str(fe["von"])[3:5]) > 59 or int(str(fe["bis"])[3:5]) > 59:   # „05:75“ nie als 06:15 rechnen (Gegenprüfung)
+            return None
+    except (TypeError, ValueError):
+        return None
+    if tz not in FDP_FENSTER_TZ or not (0 <= von < bis <= 24 * 60):
+        return None
+    return tz, von, bis
 
 
 def fdp_fenster(ap_zeiten):
@@ -38931,7 +38976,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     except Exception as e:
         print(f"[funded-plan] ⚠️ Fenster des Challenge-Planers nicht gelesen ({type(e).__name__}: {e}) — Rückfall", flush=True)
         ap_zeiten = {}
-    tzname, von_min, bis_min = fdp_fenster(ap_zeiten)
+    tzname, von_min, bis_min = fdp_fenster_eigen(zeiten.get("fenster_eigen")) or fdp_fenster(ap_zeiten)   # eigenes Fenster vor dem des Challenge-Planers (E2b-Nachtrag)
+    konst = fdp_konst(reg)
     firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
     an = [f for f in firmen if f.get("an")]
     ht_uids = [str(u) for u in (reg.get("user_ids") or [])]
@@ -39011,7 +39057,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
-                                 konto_id=str(a["id"])), zy
+                                 konto_id=str(a["id"]), konst=konst), zy
 
     for a in konten:
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
@@ -39292,9 +39338,9 @@ def fdp_eingriff_filter(aktion, plan_ids, sicht_uid=None, art=None):
     return params, bed[1]
 
 
-def fdp_start_bestaetigt(vorschlag_iso, jetzt):
-    """REIN RECHNEND (testbar): Startzeit beim Bestätigen = vorgeschlagene Zeit, frühestens jetzt + FDP_BESTAETIGEN_VORLAUF_S."""
-    frueh = jetzt + timedelta(seconds=FDP_BESTAETIGEN_VORLAUF_S)
+def fdp_start_bestaetigt(vorschlag_iso, jetzt, vorlauf_s=FDP_BESTAETIGEN_VORLAUF_S):
+    """REIN RECHNEND (testbar): Startzeit beim Bestätigen = vorgeschlagene Zeit, frühestens jetzt + vorlauf_s (Standard FDP_BESTAETIGEN_VORLAUF_S; Futures: konst)."""
+    frueh = jetzt + timedelta(seconds=vorlauf_s)
     try:
         v = datetime.fromisoformat(str(vorschlag_iso).replace("Z", "+00:00")) if vorschlag_iso else None
     except ValueError:
@@ -39302,10 +39348,7 @@ def fdp_start_bestaetigt(vorschlag_iso, jetzt):
     return (v if v and v > frueh else frueh).astimezone(timezone.utc).isoformat()
 
 
-FDP_BESTAETIGEN_STREU_S = 600            # verschobene Startzeit: Zufall 0–10 min obendrauf (Puls-Jitter-Regel, nie im festen Takt)
-
-
-def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rnd=None):
+def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rnd=None, vorlauf_s=FDP_BESTAETIGEN_VORLAUF_S, streu_s=FDP_BESTAETIGEN_STREU_S):
     """REIN RECHNEND (testbar): Startzeiten beim Bestätigen → {plan_id: iso}. Vorfall 28.10.2026 10:38 Dubai: Finn bestätigte 7 Vorschläge auf
     einmal, vier davon mit schon vergangener Zeit — fdp_start_bestaetigt setzte alle vier auf „jetzt + 2 min" → vier Apex-Big-Trades (zwei
     davon Chris) im selben Augenblick. Jetzt: plaene = [{id, fp_start, firma, user_id}] (Funded = immer Big Trade), belegt = [(firma, user_id,
@@ -39313,7 +39356,7 @@ def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rn
     Abstände hält (abstand_firma_s zu jedem Start derselben Firma, abstand_id_s zu jedem Big Trade derselben ID); sonst ab frühestens
     jetzt + Vorlauf + Zufall und hinter jeden Konflikt geschoben (+ Zufall) — der Reihe nach, auch gegeneinander."""
     rnd = rnd or random.Random()
-    frueh = jetzt + timedelta(seconds=FDP_BESTAETIGEN_VORLAUF_S)
+    frueh = jetzt + timedelta(seconds=vorlauf_s)   # vorlauf_s/streu_s: Futures aus konst (E2b-Nachtrag), Funded CFD wie bisher die Konstanten
     bel = list(belegt or ())
     def zeit(s):
         try:
@@ -39332,13 +39375,13 @@ def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rn
     out = {}
     for p in sorted(plaene or (), key=lambda p: zeit(p.get("fp_start")) or frueh):
         v = zeit(p.get("fp_start"))
-        x = v if v and v > frueh else frueh + timedelta(seconds=rnd.uniform(0, FDP_BESTAETIGEN_STREU_S))
+        x = v if v and v > frueh else frueh + timedelta(seconds=rnd.uniform(0, streu_s))
         f, u = str(p.get("firma") or ""), str(p.get("user_id") or "")
         for _ in range(500):
             k = konflikt(x, f, u)
             if k is None:
                 break
-            x = k + timedelta(seconds=rnd.uniform(0, FDP_BESTAETIGEN_STREU_S))
+            x = k + timedelta(seconds=rnd.uniform(0, streu_s))
         out[str(p["id"])] = x.astimezone(timezone.utc).isoformat()
         bel.append((f, u, True, x))
     return out
@@ -39401,11 +39444,13 @@ def _fdp_eingriff(aktion):
                 big = (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
                        and bool(b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0))
                 belegt.append((fkey(b.get("master_firm"), b.get("user_id")), str(b.get("user_id")), big, t))
+            kb = fdp_konst(reg)   # Vorlauf + Streuung beim Bestätigen (E2b-Nachtrag 05.11.2026), Rückfall die Konstanten
+            vl_s, st_s = 60 * kb["bestaetigen_vorlauf_min"], 60 * kb["bestaetigen_streu_min"]
             starts = fdp_start_verteilen([dict(p, firma=fkey(p.get("master_firm"), p.get("user_id"))) for p in neu], belegt, jetzt,
-                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 90))
+                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 90), vorlauf_s=vl_s, streu_s=st_s)
             for p in neu:
                 zeilen += sb_update("trade_plans", dict(params, id=f"eq.{p['id']}"),
-                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": starts.get(str(p["id"])) or fdp_start_bestaetigt(p.get("fp_start"), jetzt),
+                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": starts.get(str(p["id"])) or fdp_start_bestaetigt(p.get("fp_start"), jetzt, vl_s),
                                      "start_um_gestartet_at": None})
         elif art == "delete":
             zeilen = sb_delete("trade_plans", params)
@@ -39523,23 +39568,26 @@ def admin_funded_plan_ids():
 #    kein neuer Schlüssel), mit Grenzen je Feld und Typ wie gehabt (Zahl bleibt Zahl, Spanne bleibt Spanne). firma_abstand_min bleibt fest —
 #    der DB-Trigger trade_plans_firmen_abstand setzt beim Start 15 min aus prophos_firmen_abstand_funded_fenster() durch; mit einem anderen
 #    Wert hier plante Python Zeiten, die der Trigger verschiebt. Gleichzeitiges Ändern: updated_at muss passen, sonst 409.
-FDP_FEST = [   # (Schlüssel, Bezeichnung, Wert, Einheit, wo) — nur Anzeige im Reiter, Quelle der Wahrheit bleibt die Konstante
-    ("takt", "Nachplanen alle", FDP_TAKT_S // 60, "min", "code"),
-    ("bestaetigen_vorlauf", "Start nach dem Bestätigen frühestens", FDP_BESTAETIGEN_VORLAUF_S // 60, "min", "code"),
-    ("firma_abstand", "Firmen-Abstand beim Start", 15, "min", "db"),
-    ("breakeven_tol", "Break-even erst ab mehr als … unter dem Start", FDP_BREAKEVEN_TOL_USD, "$", "code"),
-    ("sl_min", "kein Trade bei SL unter", FDP_SL_MIN_USD, "$", "code"),
-    ("tages_puffer", "Puffer SL ↔ Daily Loss (Modus Rest)", FDP_TAGES_PUFFER, "$", "code"),
-    ("liq_puffer", "Puffer SL ↔ Liquidation (Modus Rest)", FDP_LIQ_PUFFER, "$", "code"),
-    ("liq_min", "kein Trade unter Abstand zur Liq (Modus Rest)", FDP_LIQ_MIN_ABSTAND, "$", "code"),
-    ("nq_ppl", "NQ je Punkt und Kontrakt", FDP_NQ_PPL, "$", "code"),
-    ("fusion_ppl", "Fusion je NAS100-Punkt und Lot", FDP_SLAVE_PPL, "€", "code"),
+FDP_FEST = [   # (Schlüssel, Bezeichnung, Wert, Einheit, wo, Grund) — nur Anzeige: Technik, DB-Riegel und Kontraktwerte (E2b-Nachtrag: alles andere ist änderbar, FDP_KONST)
+    ("takt", "Nachplanen alle", FDP_TAKT_S // 60, "min", "code", "Technik — Takt des Railway-Laufs"),
+    ("firma_abstand", "Firmen-Abstand beim Start", 15, "min", "db", "DB-Riegel: der Trigger trade_plans_firmen_abstand setzt 15 min beim Start durch"),
+    ("nq_ppl", "NQ je Punkt und Kontrakt", FDP_NQ_PPL, "$", "code", "Kontraktwert der CME, keine Einstellung"),
+    ("fusion_ppl", "Fusion je NAS100-Punkt und Lot", FDP_SLAVE_PPL, "€", "code", "Kontraktwert bei Fusion (wie tpWdSlavePpl)"),
 ]
+FDP_KONST_TEXT = {   # Anzeige der änderbaren Grenzen (Bezeichnung, Einheit, Erklärung)
+    "breakeven_tol": ("Break-even ab", "$", "so weit unter dem Start ist das Konto noch „frisch“, darunter TP = zurück auf den Start"),
+    "sl_min": ("Mindest-SL", "$", "darunter kein Trade (zu nah an der Liquidation)"),
+    "tages_puffer": ("Puffer zum Daily Loss", "$", "SL höchstens Daily Loss − Puffer (Modus Rest)"),
+    "liq_puffer": ("Puffer zur Liquidation", "$", "SL höchstens Abstand zur Liq − Puffer (Modus Rest)"),
+    "liq_min": ("Mindestabstand zur Liq", "$", "darunter kein Trade mehr (Modus Rest)"),
+    "bestaetigen_vorlauf_min": ("Vorlauf nach dem Bestätigen", "min", "vergangene Startzeit → frühestens jetzt + Vorlauf"),
+    "bestaetigen_streu_min": ("Streuung beim Verschieben", "min", "Zufall 0 … n min obendrauf (Jitter-Regel)"),
+}
 FDP_FEST_TEXT = [   # Regeln ohne Zahl, fest im Code (fdp_planen / fdp_konto_rechnen)
     "Weg: Orbit Big Trade mit Fusion-Gegenhedge (route tvv2 + orbit_v3, hedge_eur > 0) — Prio wie ein Orbit-Big-Trade von Hand",
     "Hedge-Betrag = offene Kosten (Kontokosten − Hedge-Ergebnisse im Zyklus) ÷ (Balance − Liq); Modus Rest: Hedge € je $ DD fest",
     "Daily Loss und Minis je Stufe aus liq_regeln (Stufe nach Balance beim Planen), Liquidation EOD-trailing mit Lock",
-    "Startfenster = Fenster des Challenge-Planers (auto_plan_regeln.zeiten), darin zufällig",
+    "Startfenster = eigenes Fenster (Ablauf), sonst das des Challenge-Planers (auto_plan_regeln.zeiten) — darin zufällig",
     "1 Trade je Konto und CME-Handelstag · Ziel erreicht → Konto auf Winning Days",
 ]
 # Untergrenze 1 (Gegenprüfung 04.11.2026): 0 rechnet der Planer nicht als 0 — vorlauf_min „or 15", abstand_id_min beim Bestätigen „or 90"
@@ -39561,7 +39609,11 @@ def fdp_regeln_anzeige(reg, quelle="db"):
                        "je_groesse": {str(k): dict(v) for k, v in jg.items() if isinstance(v, dict)}})
     return {"quelle": quelle if reg else "standard", "aktiv": bool(r.get("aktiv")), "auto_bestaetigen": r.get("auto_bestaetigen") is True,
             "updated_at": r.get("updated_at"), "zeiten": dict(FDP_ZEITEN_STANDARD, **(r.get("zeiten") or {})), "zeiten_db": dict(r.get("zeiten") or {}),
-            "firmen": firmen, "fest": [{"key": k, "name": n, "wert": w, "einheit": e, "wo": wo} for k, n, w, e, wo in FDP_FEST], "fest_text": list(FDP_FEST_TEXT)}
+            "firmen": firmen, "fest": [{"key": k, "name": n, "wert": w, "einheit": e, "wo": wo, "grund": gr} for k, n, w, e, wo, gr in FDP_FEST], "fest_text": list(FDP_FEST_TEXT),
+            # E2b-Nachtrag: Grenzen mit Rückfall (konst = gilt jetzt, konst_db = was in der Zeile steht, spalte = Spalte konst eingespielt) + eigenes Fenster
+            "konst": fdp_konst(reg), "konst_db": dict((r.get("konst") or {}) if isinstance(r.get("konst"), dict) else {}), "konst_spalte": bool(reg) and "konst" in reg,
+            "konst_info": [{"key": k, "name": t[0], "einheit": t[1], "text": t[2], "std": float(FDP_KONST[k][0]), "lo": FDP_KONST[k][1], "hi": FDP_KONST[k][2]} for k, t in FDP_KONST_TEXT.items()],
+            "fenster_eigen": (r.get("zeiten") or {}).get("fenster_eigen") if fdp_fenster_eigen((r.get("zeiten") or {}).get("fenster_eigen")) else None}
 
 
 def _fdp_zahl(v, lo, hi, ganz=False, nk=2):
@@ -39586,7 +39638,7 @@ def fdp_regeln_aendern(reg, body):
     b = body if isinstance(body, dict) else {}
     if str(b.get("updated_at") or "") != str(reg.get("updated_at") or ""):
         return None, "inzwischen geändert — neu laden, dann erneut speichern"
-    bekannt = {"updated_at", "schalter", "zeiten", "firma"}
+    bekannt = {"updated_at", "schalter", "zeiten", "firma", "konst"}
     if set(b) - bekannt:
         return None, "unbekannte Felder: " + ", ".join(sorted(set(b) - bekannt))
     patch = {}
@@ -39603,6 +39655,14 @@ def fdp_regeln_aendern(reg, body):
             return None, "firma_abstand_min ist fest (DB-Funktion prophos_firmen_abstand_funded_fenster) — hier nicht änderbar"
         neu_z = dict(reg.get("zeiten") or {})
         for k, v in zt.items():
+            if k == "fenster_eigen":   # E2b-Nachtrag: eigenes Startfenster; null = zurück auf das Fenster des Challenge-Planers
+                if v is None:
+                    neu_z.pop("fenster_eigen", None)
+                    continue
+                if not isinstance(v, dict) or set(v) - {"von", "bis", "tz"} or not fdp_fenster_eigen(v):
+                    return None, "zeiten.fenster_eigen: {von: HH:MM, bis: HH:MM, tz: Asia/Dubai | Europe/Berlin}, von < bis"
+                neu_z["fenster_eigen"] = {"von": str(v["von"]), "bis": str(v["bis"]), "tz": str(v.get("tz") or "Asia/Dubai")}
+                continue
             if k not in _FDP_ZEIT_FELDER:
                 return None, f"zeiten.{k}: nicht änderbar"
             lo, hi, ganz = _FDP_ZEIT_FELDER[k]
@@ -39611,6 +39671,22 @@ def fdp_regeln_aendern(reg, body):
                 return None, f"zeiten.{k}: Zahl {lo}–{hi}{' (ganz)' if ganz else ''}"
             neu_z[k] = x
         patch["zeiten"] = neu_z
+    ko = b.get("konst")
+    if ko is not None:
+        if "konst" not in reg:
+            return None, "Spalte konst fehlt — sql/2026-11-05_fdp_einstellungen_db.sql einspielen"
+        if not isinstance(ko, dict) or not ko:
+            return None, "konst: leer"
+        neu_k = dict(reg.get("konst") or {}) if isinstance(reg.get("konst"), dict) else {}
+        for k, v in ko.items():
+            if k not in FDP_KONST:
+                return None, f"konst.{k}: nicht änderbar"
+            lo, hi = FDP_KONST[k][1], FDP_KONST[k][2]
+            x = _fdp_zahl(v, lo, hi)
+            if x is None:
+                return None, f"konst.{k}: Zahl {lo}–{hi}"
+            neu_k[k] = x
+        patch["konst"] = neu_k
     fa = b.get("firma")
     if fa is not None:
         if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse"} or len(fa) < 2:
@@ -39736,10 +39812,11 @@ def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=()):
         zeilen.append({"groesse": g, "schluessel": key, "min_usd": wd_min_gewinn(konto), "tp": [_wd_num(x) for x in tp] if tp else None, "tp_quelle": quelle,
                        "kt": kt, "instr": instr})
     f = str(name).lower()
+    # Besonderheiten als PARAMETER {name, wert, info} (Nachtrag 3, Finn 05.11.2026: „Die Logik soll nicht da stehen, nur der Parameter“) — info steht im Reiter hinter ⓘ
     bes = []
     if "apex" in f and not isinstance(zyklus_regel, dict):
         # wie wd_zyklus_konto: ohne DB-Regel ist der Recoverer aus (Code keine_regel), nicht „an mit Vorgabe" (Gegenprüfung E2b)
-        bes.append("Recoverer nicht eingerichtet (wd_farmer_regeln.zyklus_regel fehlt) — nach einem Verlusttag laufen normale WD")
+        bes.append({"name": "Recoverer", "wert": "nicht eingerichtet", "info": "wd_farmer_regeln.zyklus_regel fehlt — nach einem Verlusttag laufen normale WD"})
     elif "apex" in f:
         zr = zyklus_regel
         st = sorted(((_wd_num(x.get("v")), _wd_num(x.get("ziel")), _wd_num(x.get("satz"))) for x in (zr.get("stuetz") or WD_ZYKLUS_VORGABE["stuetz"]) if isinstance(x, dict)),
@@ -39748,16 +39825,20 @@ def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=()):
         fi = zr.get("firmen") or WD_ZYKLUS_VORGABE["firmen"]
         gilt = [("100k" if z["schluessel"] == "apex100" else "150k") for z in zeilen if z["schluessel"] in fi]
         an = bool(zr.get("aktiv", True)) and bool(gilt)                  # wie wd_zyklus_konto: not r.get("aktiv", True) → aus, Schlüssel nicht in firmen → aus
-        bes.append(f"Recoverer {'an' + (' (' + ' · '.join(gilt) + ')' if len(gilt) < len(zeilen) else '') if an else 'aus'}: ab dem {int(_wd_num(zr.get('ab_zyklus')) or 2)}. Payout-Zyklus nach einem Verlusttag WD-Ziel und Hedge linear nach dem Verlust — "
-                   + " · ".join(f"−{de(v)} $ → {de(z)} $ / {de(sa)} €" for v, z, sa in st if v and z and sa)
-                   + f"; bis der Zyklus-Profit ≥ 2 × bester Tag ist · {WD_ZYKLUS_KT} {WD_ZYKLUS_INSTR.upper()}")
+        ab = int(_wd_num(zr.get("ab_zyklus")) or 2)
+        bes.append({"name": "Recoverer", "wert": ("an" + (" (" + " · ".join(gilt) + ")" if len(gilt) < len(zeilen) else "") + f" · ab Zyklus {ab}") if an else "aus",
+                    "info": f"nach einem Verlusttag im Payout-Zyklus WD-Ziel und Hedge linear nach dem Verlust, bis der Zyklus-Profit ≥ 2 × bester Tag ist · {WD_ZYKLUS_KT} {WD_ZYKLUS_INSTR.upper()}"})
+        if an:   # eine Zeile je Stützpunkt (Verlust im Zyklus → WD-Ziel / Hedge), dazwischen linear
+            bes += [{"name": f"bei −{de(v)} $ Verlust", "wert": f"{de(z)} $ / {de(sa)} €", "info": "Verlust im Zyklus → WD-Ziel $ / Hedge €, dazwischen linear"}
+                    for v, z, sa in st if v and z and sa]
     if "tradeify" in f and not _ist_tradeify_cfd(name):
-        bes.append(f"Zyklus im Plus: ab dem 2. Zyklus Payout erst ab +{TRADEIFY_ZYKLUS_MIN_USD:.0f} $ Gewinn seit der letzten Anfrage — im Minus normale WD bis Ziel − 1, "
-                   f"der letzte ist der Ausgleichs-Trade (Fehlbetrag + {TRADEIFY_ZYKLUS_PUFFER[0]}–{TRADEIFY_ZYKLUS_PUFFER[1]} $){', einzeln bestätigen' if TRADEIFY_AUSGLEICH_BESTAETIGEN else ''}")
+        bes.append({"name": "Payout ab Zyklus 2", "wert": f"+{TRADEIFY_ZYKLUS_MIN_USD:.0f} $ im Zyklus", "info": "Zyklus im Plus: Tradeify zahlt ab dem 2. Zyklus erst, wenn der Gewinn seit der letzten Anfrage mindestens so hoch ist"})
+        bes.append({"name": "Ausgleichs-Trade", "wert": f"Fehlbetrag + {TRADEIFY_ZYKLUS_PUFFER[0]}–{TRADEIFY_ZYKLUS_PUFFER[1]} $" + (" · einzeln ✓" if TRADEIFY_AUSGLEICH_BESTAETIGEN else ""),
+                    "info": "im Minus normale WD bis Ziel − 1, der letzte WD gleicht den Fehlbetrag aus"})
     if "lucid" in f:
-        bes.append("1:1 die Tradeify-Regeln (Finn 23.10.2026) — WD-Werte von Tradeify, solange Lucid keine eigenen hat; die Zyklus-im-Plus-Regel gilt nur für Tradeify")
+        bes.append({"name": "Regeln", "wert": "wie Tradeify", "info": "1:1 die Tradeify-Regeln (Finn 23.10.2026) — WD-Werte von Tradeify, solange Lucid keine eigenen hat; die Zyklus-im-Plus-Regel gilt nur für Tradeify"})
     if "fundednext" in f and "futur" in f:
-        bes.append("wie Tradeify (Finn 16.10.2026), eigener Schlüssel im WD-Farmer")
+        bes.append({"name": "Regeln", "wert": "wie Tradeify", "info": "Finn 16.10.2026 — eigener Schlüssel im WD-Farmer"})
     best = any(str(k) and str(k) in f for k in (bestaetigen or ()))   # wie tpWdWartetAufBestaetigung / wd_bestaetigen_noetig: Teilstring im Firmennamen
     return {"groessen": zeilen, "ziel_std": 5, "bestaetigen": best, "besonders": bes, "fehlt": all(z["min_usd"] is None for z in zeilen)}
 
