@@ -1181,12 +1181,15 @@
     font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);background:transparent;outline:none;
   }
   #dashboard-view .note-ta::placeholder{color:var(--sub-2)}
+  /* UMBRUCH STATT ABSCHNEIDEN (04.11.2026, Finn: „Bei Zetteln, die für alle IDs sind, sieht man den Löschknopf nicht"): Datum + Chip
+     „von <ID>" + Schalter + Kopieren + 🗑 passten auf ~310 px nicht, die Karte (overflow hidden) schnitt den Mülleimer ab. Jetzt bricht die
+     Fußzeile um: Knöpfe rücken in eine eigene Zeile, immer rechtsbündig, nichts wird abgeschnitten. */
   #dashboard-view .note-foot{
-    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    display:flex;align-items:center;justify-content:space-between;gap:6px 8px;flex-wrap:wrap;
     padding:8px 12px;border-top:1px solid var(--border-soft);
   }
-  #dashboard-view .note-time{font-size:11px;color:var(--sub-2);font-family:var(--mono)}
-  #dashboard-view .note-actions{display:flex;gap:4px}
+  #dashboard-view .note-time{font-size:11px;color:var(--sub-2);font-family:var(--mono);display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px;min-width:0}
+  #dashboard-view .note-actions{display:flex;align-items:center;gap:4px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
   #dashboard-view .note-btn{
     display:inline-flex;align-items:center;gap:4px;padding:4px 9px;font-size:11.5px;font-weight:500;
     background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--sub);
@@ -54955,7 +54958,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2025'
+  const OS_TAB_BUILD = '2026-09-22.2026'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
