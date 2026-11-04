@@ -4591,6 +4591,23 @@
   #adm-pane-wd .wd-firma-edit{display:none;padding:4px 4px 12px 24px;gap:10px;align-items:end;flex-wrap:wrap;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-firma.offen + .wd-firma-edit{display:flex}
   #adm-pane-wd .wd-firma-edit .wd-feld{width:96px}
+  /* E4 (05.11.2026): Payout-Regeln je Firma unter TP/Kontrakte — eigene Klassen e4-*, Look der WD-Einstellungen */
+  #adm-pane-wd .e4-regeln{flex:1 1 100%;margin-top:6px;padding-top:10px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:8px}
+  #adm-pane-wd .e4-kopf{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
+  #adm-pane-wd .e4-info{cursor:help;font-weight:400;text-transform:none;letter-spacing:0;color:var(--sub-2);margin-left:2px}
+  #adm-pane-wd .e4-zeile{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface,#fff)}
+  #adm-pane-wd .e4-z1{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  #adm-pane-wd .e4-z2{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-left:23px}
+  #adm-pane-wd .e4-zeile.aus .e4-slider,#adm-pane-wd .e4-zeile.aus .e4-wert,#adm-pane-wd .e4-zeile.aus .e4-feld{opacity:.4}
+  #adm-pane-wd .e4-schalter{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;cursor:pointer}
+  #adm-pane-wd .e4-schalter input{width:15px;height:15px;margin:0;accent-color:var(--violet)}
+  #adm-pane-wd .e4-slider{flex:1 1 140px;min-width:110px;accent-color:var(--violet)}
+  #adm-pane-wd .e4-wert{min-width:42px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)}
+  #adm-pane-wd .e4-feld{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub)}
+  #adm-pane-wd .e4-feld i{font-style:normal}
+  #adm-pane-wd .e4-feld .input{width:76px;height:30px;padding:0 8px;font-size:12.5px;box-sizing:border-box}
+  #adm-pane-wd .e4-tag{font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--sub);white-space:nowrap}
+  #adm-pane-wd .e4-tag.an{border-color:transparent;background:var(--violet-soft, rgba(108,92,231,.12));color:var(--violet)}
   #adm-pane-wd .wd-chips{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 10px}
   #adm-pane-wd .wd-chip-f{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);font-size:11.5px;cursor:pointer;background:var(--surface,#fff)}
   #adm-pane-wd .wd-chip-f:hover{background:rgba(0,0,0,.03)}
@@ -18014,7 +18031,7 @@
       const zyT = window._wdZyklusRoh?.(r.account_id)
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt)
         return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0,
-                 sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +1 $` }
+                 sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` }   // E4: Mindest-Gewinn aus den WD-Einstellungen (Railway zyklus.min_usd)
       if(c.profit == null) return { regel, grund: c.size == null ? 'Größe unklar' : 'keine Balance', anfragbar: null, erhalten: null }
       // Deckel je Größe (Lucid, 29.10.2026): die Regel bekommt den Deckel ihrer Größe, damit Anzeige („max. …") und Rechnung gleich sind
       if(regel.deckelJeGroesse){
@@ -44381,12 +44398,12 @@
       const zeilenT = [
         ['Zyklus', `${z.nr}${z.start ? ' · seit Payout-Anfrage ' + tagTxt(z.start) : ''}`],
         ['Gewinn seit letztem Payout', z.gewinn != null ? `${vz(z.gewinn)}${de(z.gewinn)} $` : 'unbekannt'],
-        ['Fehlt bis +1 $', z.gewinn != null ? `${(Math.max(0, 1 - Number(z.gewinn))).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : '–'],
+        [`Fehlt bis +${(Number(z.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $`, z.gewinn != null ? `${(Math.max(0, (Number(z.min_usd) || 1) - Number(z.gewinn))).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : '–'],   // E4: zyklus.min_usd
         ['Winning Days', `${z.stand ?? '–'}/${z.ziel_tage ?? 5}`],
         ['Nächster Trade', z.aktiv ? `Ausgleich · TP ${de(z.ziel)} $ · Hedge ${de(z.hedge_eur)} €` : `normaler WD (Ausgleich ab ${Math.max(0, Number(z.ziel_tage || 5) - 1)}/${z.ziel_tage || 5})`],
       ]
       box.innerHTML = zeilenT.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--sub)">${escapeHtml(k)}</span><span class="tnum" style="font-weight:600">${escapeHtml(v)}</span></div>`).join('')
-        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +1 $).</div>`
+        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +${(Number(z.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $).</div>`
       return
     }
     const handTp = Number(((accounts || []).find(a => String(a.id) === _recKonto.id) || {}).wdTp) || 0   // nur am eigenen Konto bekannt
@@ -71017,6 +71034,74 @@
     document.querySelectorAll('#wd-firmen [data-wd-fk]').forEach(el => { const k = el.dataset.wdFk, hint = (WD_FIRMEN[k] || [])[2] || ''; el.textContent = wdFirmaKurz(k, konten) + (hint ? ' · ' + hint : '') })
   }
   const wdKtText = ([a, b]) => a === b ? `${a} Kt` : `${a}–${b} Kt`
+  /* PAYOUT-REGELN JE FIRMA (E4, Finn 05.11.2026 ~05:30 Dubai: „Bei Winning Days die Consistency Rule hinzufügen, z. B. bei Apex, und das Minimum-Payout bzw. den
+   * Mindest-Net-Profit, den man in jedem Zyklus machen muss — bei Tradeify und Topstep nach dem ersten Payout, bei Lucid genauso."): zwei Parameter je Firma in
+   * wd_farmer_regeln.firmen_regeln (eigene Spalte — wdHedgeSpeichern baut vorplan neu und ließe fremde Schlüssel fallen). Standard = app.py WD_FIRMEN_REGELN_STD
+   * (gleich halten). „wirkt": heute nur Tradeify Mindest-Gewinn (Zyklus im Plus, Railway tradeify_zyklus_konto); der Rest ist Parameter ohne Farmer-Logik. */
+  const E4_WD_FIRMEN_STD = {
+    apex:      { konsistenz: { an: true,  pct: 50 },   min_netto: { an: false, usd: null, ab_zyklus: 1 } },
+    apex100:   { konsistenz: { an: true,  pct: 50 },   min_netto: { an: false, usd: null, ab_zyklus: 1 } },
+    tradeify:  { konsistenz: { an: false, pct: null }, min_netto: { an: true,  usd: 1,    ab_zyklus: 2 } },
+    lucid:     { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
+    fnfutures: { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
+    topstep:   { konsistenz: { an: true,  pct: 40 },   min_netto: { an: false, usd: null, ab_zyklus: 2 } },
+    sonst:     { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } } }
+  const E4_QUELLE = { apex: 'firm_rules.json Apex PA: kein Tag über 50 % des Net Profit seit dem letzten Payout · Min Payout 500 $',
+    apex100: 'firm_rules.json Apex PA: kein Tag über 50 % des Net Profit seit dem letzten Payout · Min Payout 500 $',
+    tradeify: 'Consistency: Select Funded keine, Growth Funded 35 % (firm_rules.json) · Mindest-Gewinn: Zyklus im Plus ab dem 2. Zyklus (Finn 03.11.2026), Min Payout 250 $',
+    topstep: 'firm_rules.json Topstep XFA Consistency Path: bester Tag ≤ 40 % · Mindest-Gewinn je Zyklus noch nicht hinterlegt',
+    lucid: 'noch nicht hinterlegt (nicht in firm_rules.json)', fnfutures: 'noch nicht hinterlegt', sonst: 'noch nicht hinterlegt' }
+  const E4_WIRKT = { tradeify: { min_netto: true } }   // Rest: nur Parameter (Konstrukt im Bericht S7_E4)
+  function e4Regel(k){
+    const std = E4_WD_FIRMEN_STD[k] || E4_WD_FIRMEN_STD.sonst, db = ((_wd.regeln && _wd.regeln.firmen_regeln) || {})[k] || {}
+    const teil = (t, felder) => { const s0 = std[t], d = (db[t] && typeof db[t] === 'object') ? db[t] : {}, z = { an: typeof d.an === 'boolean' ? d.an : s0.an }
+      for(const [f, lo, hi] of felder){ const v = Number(d[f]); z[f] = (d[f] != null && d[f] !== '' && isFinite(v) && v >= lo && v <= hi) ? v : s0[f] }
+      return z }
+    return { konsistenz: teil('konsistenz', [['pct', 1, 100]]), min_netto: teil('min_netto', [['usd', 0, 100000], ['ab_zyklus', 1, 20]]) }   // wie app.py wd_firmen_regel
+  }
+  function e4RegelnHtml(k){
+    const r = e4Regel(k), w = E4_WIRKT[k] || {}, q = E4_QUELLE[k] || ''
+    const tag = an => `<span class="e4-tag ${an ? 'an' : ''}" title="${an ? 'der Farmer rechnet damit' : 'nur Parameter — der Farmer rechnet noch nicht damit'}">${an ? 'wirkt' : 'Parameter'}</span>`
+    const pct = r.konsistenz.pct, usd = r.min_netto.usd
+    return `<div class="e4-regeln" data-e4-firma="${k}">
+        <div class="e4-kopf">Payout-Regeln <span class="e4-info" title="${escapeHtml(q)}">ⓘ</span></div>
+        <div class="e4-zeile ${r.konsistenz.an ? '' : 'aus'}">
+          <div class="e4-z1"><label class="e4-schalter"><input type="checkbox" data-e4-an="${k}|konsistenz" ${r.konsistenz.an ? 'checked' : ''}><span>Consistency</span></label>${tag(!!w.konsistenz)}</div>
+          <div class="e4-z2"><input type="range" class="e4-slider" data-e4-pct="${k}" min="10" max="100" step="5" value="${pct != null ? pct : 50}" title="größter Tag höchstens so viel % des Gewinns im Zyklus">
+            <span class="e4-wert mono" data-e4-pct-txt="${k}">${pct != null ? pct + ' %' : '—'}</span></div>
+        </div>
+        <div class="e4-zeile ${r.min_netto.an ? '' : 'aus'}">
+          <div class="e4-z1"><label class="e4-schalter"><input type="checkbox" data-e4-an="${k}|min_netto" ${r.min_netto.an ? 'checked' : ''}><span>Mindest-Gewinn je Zyklus</span></label>${tag(!!w.min_netto)}</div>
+          <div class="e4-z2"><span class="e4-feld"><input type="number" class="input mono" data-e4-usd="${k}" min="0" step="1" value="${usd != null ? usd : ''}" placeholder="—" title="Net Profit seit dem letzten Payout, ab dem die Firma auszahlt"><i>$</i></span>
+            <span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4-ab="${k}" min="1" max="20" step="1" value="${r.min_netto.ab_zyklus}" title="Zyklus 1 = vor dem ersten Payout"></span></div>
+        </div>
+      </div>`
+  }
+  async function e4Speichern(){
+    if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
+    const box = document.getElementById('wd-firmen'); if(!box) return
+    const alt = (_wd.regeln && _wd.regeln.firmen_regeln) || {}, neu = { ...alt }
+    box.querySelectorAll('[data-e4-firma]').forEach(el => {
+      const k = el.dataset.e4Firma, q = sel => el.querySelector(sel)
+      const pct = parseInt(q(`[data-e4-pct="${k}"]`)?.value, 10), usd = parseFloat(q(`[data-e4-usd="${k}"]`)?.value), ab = parseInt(q(`[data-e4-ab="${k}"]`)?.value, 10)
+      neu[k] = { konsistenz: { an: !!q(`[data-e4-an="${k}|konsistenz"]`)?.checked, pct: (isFinite(pct) && pct >= 1 && pct <= 100) ? pct : null },
+                 min_netto: { an: !!q(`[data-e4-an="${k}|min_netto"]`)?.checked, usd: (isFinite(usd) && usd >= 0) ? usd : null, ab_zyklus: (isFinite(ab) && ab >= 1 && ab <= 20) ? ab : 2 } }
+    })
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('wd_farmer_regeln').update({ firmen_regeln: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
+    if(error){ wdSay(/firmen_regeln/.test(String(error.message || '')) ? 'Payout-Regeln: Spalte fehlt noch (sql/2026-11-05_wd_firmen_regeln.sql)' : 'Payout-Regeln nicht gespeichert: ' + (error.message || error), 'err'); return }
+    if(_wd.regeln) _wd.regeln.firmen_regeln = neu
+    wdSay('Payout-Regeln gespeichert', 'ok')
+  }
+  function e4Verdrahten(box){
+    box.querySelectorAll('[data-e4-pct]').forEach(el => el.addEventListener('input', () => { const t = box.querySelector(`[data-e4-pct-txt="${el.dataset.e4Pct}"]`); if(t) t.textContent = el.value + ' %' }))
+    box.querySelectorAll('[data-e4-an]').forEach(el => el.addEventListener('change', () => {
+      el.closest('.e4-zeile')?.classList.toggle('aus', !el.checked)
+      const [k, t] = el.dataset.e4An.split('|'), txt = box.querySelector(`[data-e4-pct-txt="${k}"]`), sl = box.querySelector(`[data-e4-pct="${k}"]`)
+      if(t === 'konsistenz' && el.checked && txt && sl) txt.textContent = sl.value + ' %'   // an ohne hinterlegten Wert: der Slider-Wert gilt
+    }))
+    box.querySelectorAll('[data-e4-an],[data-e4-pct],[data-e4-usd],[data-e4-ab]').forEach(el => el.addEventListener('change', () => e4Speichern().catch(e => wdSay('Payout-Regeln: ' + (e.message || e), 'err'))))
+  }
   function wdFirmenRender(fu, vp){
     const box = document.getElementById('wd-firmen'); if(!box) return
     const konten = (_wd.daten && _wd.daten.konten) || [], offen = _wd.firmaOffen || null
@@ -71033,8 +71118,10 @@
           <div class="wd-feld" style="width:90px"><label>Kontrakte von</label><input type="number" class="input mono" data-wd-kt="${k}-von" min="1" step="1" value="${ks[0]}"></div>
           <div class="wd-feld" style="width:90px"><label>Kontrakte bis</label><input type="number" class="input mono" data-wd-kt="${k}-bis" min="1" step="1" value="${ks[1]}"></div>
           <div class="kf" style="align-self:center">TP und Kontrakte je Konto zufällig aus der Spanne · dann oben „Speichern"</div>
+          ${e4RegelnHtml(k)}
         </div>`
     }).join('')
+    e4Verdrahten(box)
     box.querySelectorAll('[data-wd-firma]').forEach(el => el.addEventListener('click', () => {
       _wd.firmaOffen = _wd.firmaOffen === el.dataset.wdFirma ? null : el.dataset.wdFirma
       wdStaffelWahl(_wd.firmaOffen || 'standard')   // Klick auf die Firma zeigt rechts ihre Hedge-Tabelle
@@ -76481,7 +76568,7 @@
       // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ seit dem letzten Payout — Stand von Railway (window._wdZyklus)
       const zyT = accountId ? window._wdZyklusRoh?.(accountId) : null
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt){
-        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +1 $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return
+        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return   // E4: zyklus.min_usd
       }
       try{
         const row = {

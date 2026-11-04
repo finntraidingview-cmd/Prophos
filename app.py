@@ -14599,6 +14599,51 @@ TRADEIFY_ZYKLUS_PUFFER = (30, 60)
 TRADEIFY_AUSGLEICH_BESTAETIGEN = True   # Finn 03.11.2026 (über den Eingang): „yes“ — jeder Ausgleichs-Trade einzeln bestätigen, normale Tradeify-WD nicht   # Finn 03.11.2026 Nachtrag: Puffer des Ausgleichs-Trades je Trade gewürfelt 30–60 $ (Jitter-Regel), ersetzt „normaler TP − Linie“
 
 
+# WD-FIRMEN-REGELN (E4, Finn 05.11.2026 ~05:30 Dubai: „Bei Winning Days die Consistency Rule hinzufügen, z. B. bei Apex, und das Minimum-Payout bzw. den
+# Mindest-Net-Profit, den man in jedem Zyklus machen muss — bei Tradeify und Topstep nach dem ersten Payout, bei Lucid genauso."): je Firma der WD-Einstellungen
+# (Schlüssel wie TP_VP_FIRMEN im Frontend) zwei Parameter in wd_farmer_regeln.firmen_regeln (sql/2026-11-05_wd_firmen_regeln.sql), Funded Planer → Winning Days
+# → Einstellungen → Firma: konsistenz {an, pct} = größter Tag ≤ pct % des Zyklus-Gewinns, min_netto {an, usd, ab_zyklus} = Mindest-Net-Profit je Zyklus ab Zyklus n.
+# WIRKT heute nur Tradeify min_netto (= „Zyklus im Plus", vorher fest TRADEIFY_ZYKLUS_MIN_USD ab Zyklus 2) — alles andere ist Parameter ohne Farmer-Logik (Konstrukt
+# im Bericht, Finn entscheidet). Fehlt die Spalte oder die Firma, gelten diese Standardwerte (Quelle je Zeile; dasselbe in prophos.html E4_WD_FIRMEN_STD).
+WD_FIRMEN_REGELN_STD = {
+    "apex":      {"konsistenz": {"an": True, "pct": 50}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 1}},    # firm_rules.json Apex PA: kein Tag > 50 % des Net Profit seit dem letzten Payout
+    "apex100":   {"konsistenz": {"an": True, "pct": 50}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 1}},    # dito
+    "tradeify":  {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": True, "usd": 1.0, "ab_zyklus": 2}},   # Select Funded ohne Consistency (firm_rules.json); Zyklus im Plus (Finn 03.11.)
+    "lucid":     {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},  # noch nicht hinterlegt (nicht in firm_rules.json)
+    "fnfutures": {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},  # noch nicht hinterlegt
+    "topstep":   {"konsistenz": {"an": True, "pct": 40}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},    # firm_rules.json Topstep XFA Consistency Path: bester Tag ≤ 40 %
+    "sonst":     {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}}}
+
+
+def wd_firmen_regel(firmen_regeln, key):
+    """REIN RECHNEND (testbar, E4): Regel einer WD-Firma → {konsistenz: {an, pct}, min_netto: {an, usd, ab_zyklus}}. Feldweise: DB-Wert, sonst Standard
+    (WD_FIRMEN_REGELN_STD[key], sonst „sonst"). Ungültiges (pct außerhalb 1–100, usd < 0, ab_zyklus < 1) fällt auf den Standard dieses Feldes zurück."""
+    std = WD_FIRMEN_REGELN_STD.get(str(key or "")) or WD_FIRMEN_REGELN_STD["sonst"]
+    db = (firmen_regeln or {}).get(str(key or "")) if isinstance(firmen_regeln, dict) else None
+    db = db if isinstance(db, dict) else {}
+    out = {}
+    for teil, felder in (("konsistenz", (("pct", 1, 100),)), ("min_netto", (("usd", 0, 100000), ("ab_zyklus", 1, 20)))):
+        s, d = std[teil], (db.get(teil) if isinstance(db.get(teil), dict) else {})
+        z = {"an": d["an"] if isinstance(d.get("an"), bool) else s["an"]}
+        for f, lo, hi in felder:
+            v = _wd_num(d.get(f)) if f in d and not isinstance(d.get(f), bool) else None
+            z[f] = (int(v) if f in ("pct", "ab_zyklus") else float(v)) if (v is not None and lo <= v <= hi) else s[f]
+        out[teil] = z
+    return out
+
+
+def _wd_firmen_regeln_lesen():
+    """wd_farmer_regeln.firmen_regeln (E4) → dict | {}. Spalte fehlt (SQL nicht eingespielt) oder Lesefehler → {} = Standardwerte."""
+    try:
+        rows = sb_select("wd_farmer_regeln", {"select": "firmen_regeln", "id": "eq.1"}) or []
+        v = rows[0].get("firmen_regeln") if rows else None
+        return v if isinstance(v, dict) else {}
+    except Exception as e:
+        if "firmen_regeln" not in str(getattr(getattr(e, "response", None), "text", "") or e):
+            print(f"[wd-firmen-regeln] ⚠️ nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Standardwerte", flush=True)
+        return {}
+
+
 def tradeify_zyklus_firma(konto):
     """Tradeify-Futures (nie Tradeify CFD)?"""
     f = str((konto or {}).get("firm") or "")
@@ -14624,15 +14669,23 @@ def tradeify_zyklus_start_bal(plaene, start):
     return bs if (bs is not None and bs > 0) else None
 
 
-def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None):
+def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None, regel=None):
     """REIN RECHNEND (testbar): `zyklus` eines Tradeify-Winning-Days-Kontos → {art, nr, start, start_bal, gewinn, gesperrt, fehl, aktiv, ziel, satz, hedge_eur,
-    ziel_normal, satz_normal, puffer, grund, grund_code}. aktiv = Ausgleichs-Trade fällig (Zyklus ≥ 2, Gewinn < +1 $, WD-Stand ≥ Ziel − 1)."""
+    ziel_normal, satz_normal, puffer, grund, grund_code, min_usd, ab_zyklus}. aktiv = Ausgleichs-Trade fällig (Zyklus ≥ ab_zyklus, Gewinn < min_usd, WD-Stand ≥ Ziel − 1).
+    regel = wd_firmen_regel(…, "tradeify")["min_netto"] (E4); ohne → Standard (an, 1 $, ab Zyklus 2 = das Verhalten von vorher). Regel aus → nie gesperrt, kein Ausgleich."""
+    mn = regel if isinstance(regel, dict) else WD_FIRMEN_REGELN_STD["tradeify"]["min_netto"]
+    min_usd = float(_wd_num(mn.get("usd")) if _wd_num(mn.get("usd")) is not None else TRADEIFY_ZYKLUS_MIN_USD)
+    ab = int(_wd_num(mn.get("ab_zyklus")) or 2)
     st = wd_zyklus_stand(plaene, payouts)
     out = {"art": "tradeify", "nr": st["nr"], "start": st["start"], "user_id": (konto or {}).get("user_id"), "aktiv": False, "gesperrt": False,
-           "start_bal": None, "gewinn": None, "fehl": None, "ziel": None, "satz": None, "hedge_eur": None, "verlust": 0.0}
+           "start_bal": None, "gewinn": None, "fehl": None, "ziel": None, "satz": None, "hedge_eur": None, "verlust": 0.0, "min_usd": min_usd, "ab_zyklus": ab}
     d0 = lambda x: f"{abs(x):,.0f}".replace(",", ".")
-    if st["nr"] < 2:
-        return dict(out, grund_code="zyklus_1", grund="Zyklus 1 (vor dem ersten Payout gilt die Regel nicht)")
+    m_txt = f"{min_usd:,.0f}".replace(",", ".") if float(min_usd).is_integer() else f"{min_usd:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if not mn.get("an"):
+        return dict(out, grund_code="regel_aus", grund="Mindest-Gewinn je Zyklus aus (Winning Days → Einstellungen → Tradeify)")
+    if st["nr"] < ab:
+        return dict(out, grund_code="zyklus_1", grund=("Zyklus 1 (vor dem ersten Payout gilt die Regel nicht)" if ab == 2 and st["nr"] == 1
+                                                       else f"Zyklus {st['nr']} (die Regel gilt ab Zyklus {ab})"))
     sb = tradeify_zyklus_start_bal(plaene, st["start"])
     lv = _wd_num(live)
     if sb is None or lv is None or lv <= 0:
@@ -14651,7 +14704,7 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
         return dict(out, grund_code="unbekannt", grund="kein Max DD am Konto — Zyklus nicht prüfbar")
     if -gewinn > dd or gewinn > 3 * dd:
         return dict(out, grund_code="unbekannt", grund=f"Zyklus {gewinn:+,.0f} $ unplausibel bei Max DD {dd:,.0f} $ — ↻ Balance lesen".replace(",", "."))
-    gesperrt = gewinn < TRADEIFY_ZYKLUS_MIN_USD
+    gesperrt = gewinn < min_usd
     fehl = round(max(0.0, -gewinn), 2)
     regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
     fu = (regeln.get("fu") or {}).get("tradeify") if isinstance(regeln.get("fu"), dict) else None
@@ -14667,24 +14720,26 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     puffer = float(_rnd.Random(f"tradeify-ausgleich|{(konto or {}).get('id')}|{_cme_handelstag(None)}").randint(*TRADEIFY_ZYKLUS_PUFFER))
     stand, ziel_tage = int(_wd_num(wd_stand) or 0), int(_wd_num(wd_ziel) or 5)
     aktiv = gesperrt and stand >= ziel_tage - 1
-    tp = max(float(ziel_normal), float(-(-(fehl + TRADEIFY_ZYKLUS_MIN_USD + puffer) // 1))) if aktiv else None   # aufgerundet auf ganze $
+    # aufgerundet auf ganze $; E4: max(Fehlbetrag + 1 $, Mindest-Gewinn − Gewinn) — bei 1 $ genau die alte Formel, bei mehr reicht der TP bis zum Mindest-Gewinn
+    tp = max(float(ziel_normal), float(-(-(max(fehl + TRADEIFY_ZYKLUS_MIN_USD, min_usd - gewinn) + puffer) // 1))) if aktiv else None
     out.update({"start_bal": sb, "gewinn": gewinn, "gesperrt": gesperrt, "fehl": fehl, "aktiv": aktiv, "ziel_normal": ziel_normal, "satz_normal": satz_normal,
                 "puffer": puffer, "stand": stand, "ziel_tage": ziel_tage})
     if aktiv:
         out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
     elif gesperrt:
-        out.update({"grund_code": "minus", "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Payout erst ab +1 $ — normale WD bis {ziel_tage - 1}/{ziel_tage} (jetzt {stand})"})
+        out.update({"grund_code": "minus", "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Payout erst ab +{m_txt} $ — normale WD bis {ziel_tage - 1}/{ziel_tage} (jetzt {stand})"})
     else:
         out.update({"grund_code": "plus", "grund": f"Zyklus {st['nr']}: +{d0(gewinn)} $"})
     return out
 
 
-def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan):
-    """Hängt `zyklus` (art tradeify) an die Tradeify-Konten der Liste — WD-Stand aus wd_auto_staende, sonst goal_done_offset."""
+def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None):
+    """Hängt `zyklus` (art tradeify) an die Tradeify-Konten der Liste — WD-Stand aus wd_auto_staende, sonst goal_done_offset. firmen_regeln = wd_farmer_regeln.firmen_regeln (E4)."""
     tr = [k for k in konten or () if tradeify_zyklus_firma(k)]
     if not tr:
         return
+    mn = wd_firmen_regel(firmen_regeln, "tradeify")["min_netto"]
     ids = [str(k["id"]) for k in tr]
     auto = wd_auto_staende(ids)
     alt = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,goal_done_offset,goal_target,max_drawdown", "id": f"in.({','.join(ids)})"})}
@@ -14694,7 +14749,7 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan):
         live = _wd_num(k.get("live_balance") if "live_balance" in k else k.get("tv_balance"))
         live_at = k.get("live_at") if "live_at" in k else k.get("tv_balance_at")
         k["zyklus"] = tradeify_zyklus_konto(dict(k, max_drawdown=k.get("max_drawdown") if k.get("max_drawdown") is not None else a.get("max_drawdown")),
-                                            plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at)
+                                            plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at, regel=mn)
 
 
 def _wd_zyklus_anhaengen(konten):
@@ -14731,7 +14786,7 @@ def _wd_zyklus_anhaengen(konten):
             if wd_zyklus_firma_key(k):
                 k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []))
         try:   # eigener try (Gegenprüfung 03.11.2026): ein Fehler im Tradeify-Teil darf den Apex-Stand nie mitreißen
-            _tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan)
+            _tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())
         except Exception as e:
             print(f"[tradeify-zyklus] ⚠️ {type(e).__name__}: {e}", flush=True)
         return True
@@ -16783,7 +16838,8 @@ def admin_payout_anfragen():
               "live_balance": _wd_num(konto.get("tv_balance")), "live_at": konto.get("tv_balance_at"), "max_drawdown": konto.get("max_drawdown")}
         if _wd_zyklus_anhaengen([kz]) and (kz.get("zyklus") or {}).get("gesperrt"):
             z = kz["zyklus"]
-            return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $ · Payout erst ab +1 $ — nichts angelegt".replace(",", "X").replace(".", ",").replace("X", ".").replace("-", "−"), "zyklus": z}), 409
+            _m = float(_wd_num(z.get("min_usd")) or TRADEIFY_ZYKLUS_MIN_USD)   # E4: Mindest-Gewinn aus den WD-Einstellungen
+            return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $ · Payout erst ab +{_m:,.2f} $ — nichts angelegt".replace(",", "X").replace(".", ",").replace("X", ".").replace(",00 $", " $").replace("-", "−"), "zyklus": z}), 409
     morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
     felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     try:
@@ -39594,8 +39650,9 @@ def admin_funded_plan():
         try:   # Winning Day je Firma (E2b) — nur Anzeige; Lesefehler lässt die Einstellungen ohne WD-Kachel
             _zr, _vp = _wd_zyklus_regelzeile()
             _best = wd_bestaetigen_firmen()
+            _fr = _wd_firmen_regeln_lesen()   # E4: Mindest-Gewinn je Zyklus aus den WD-Einstellungen
             for _f in erg["regeln"].get("firmen") or []:
-                _f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best)
+                _f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)
         except Exception as e:
             print(f"[funded-plan] ⚠️ WD je Firma: {type(e).__name__}: {e}", flush=True)
         # darf: dieselbe Regel wie POST /admin/funded-plan/regeln — sonst sähe Emins Verwalter offene Felder und bekäme beim Speichern 403
@@ -40096,7 +40153,7 @@ def fdp_wd_schluessel(name, groesse=None):
     return "tradeify" if "tradeify" in f else "topstep" if "topstep" in f else "sonst"
 
 
-def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=()):
+def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=(), firmen_regeln=None):
     """REIN RECHNEND (testbar): „Was ist ein Winning Day“ für eine Firma der Funded-Futures-Regel → {groessen: [{groesse, min_usd, tp, tp_quelle, kt, instr}],
     ziel_std, bestaetigen, besonders: [Text], fehlt: bool}. Größen = die der Funded-Regel; ohne Größe ein Eintrag für die Firma. bestaetigen = wd_bestaetigen_firmen()
     (Farmer-WD dieser Firma starten erst nach ✓ unter Funded Planer → Winning Days)."""
@@ -40146,7 +40203,9 @@ def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=()):
             bes += [{"name": f"bei −{de(v)} $ Verlust", "wert": f"{de(z)} $ / {de(sa)} €", "info": "Verlust im Zyklus → WD-Ziel $ / Hedge €, dazwischen linear"}
                     for v, z, sa in st if v and z and sa]
     if "tradeify" in f and not _ist_tradeify_cfd(name):
-        bes.append({"name": "Payout ab Zyklus 2", "wert": f"+{TRADEIFY_ZYKLUS_MIN_USD:.0f} $ im Zyklus", "info": "Zyklus im Plus: Tradeify zahlt ab dem 2. Zyklus erst, wenn der Gewinn seit der letzten Anfrage mindestens so hoch ist"})
+        _mn = wd_firmen_regel(firmen_regeln, "tradeify")["min_netto"]   # E4: Parameter aus Winning Days → Einstellungen (Standard 1 $ ab Zyklus 2)
+        bes.append({"name": f"Payout ab Zyklus {_mn['ab_zyklus']}", "wert": (f"+{_mn['usd']:,.0f} $ im Zyklus".replace(",", ".") if _mn["an"] else "aus"),
+                    "info": "Zyklus im Plus: Tradeify zahlt erst, wenn der Gewinn seit der letzten Anfrage mindestens so hoch ist (Winning Days → Einstellungen → Tradeify)"})
         bes.append({"name": "Ausgleichs-Trade", "wert": f"Fehlbetrag + {TRADEIFY_ZYKLUS_PUFFER[0]}–{TRADEIFY_ZYKLUS_PUFFER[1]} $" + (" · einzeln ✓" if TRADEIFY_AUSGLEICH_BESTAETIGEN else ""),
                     "info": "im Minus normale WD bis Ziel − 1, der letzte WD gleicht den Fehlbetrag aus"})
     if "lucid" in f:

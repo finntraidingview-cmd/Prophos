@@ -111,11 +111,52 @@ check("if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id))" in html and "if(z
 check("Math.max(Number(zy.ziel), tpVor || 0)" in html, "TP-Vorgabe am Konto schlägt den Ausgleich nicht (max)")
 check("document.addEventListener('click', e => {\n    const el = e.target && e.target.closest && e.target.closest('.acc-rec-chip" not in html and "window._recoveryChipKlick" in html, "kein Sammel-Klick-Handler, Klick nur am Chip")
 check('if tradeify_zyklus_firma(konto) and str(konto.get("account_type") or "") in ("funded", "winning_days") and not trotzdem:' in app
-      and "Payout erst ab +1 $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < +1 $ abgelehnt (409)")
-check("zyT.art === 'tradeify' && zyT.gesperrt" in html and "Payout erst ab +1 $" in html, "Frontend: Anfragbar-Zelle, Finanzen-Payout und WD-Karte zeigen „Zyklus −X $ · Payout erst ab +1 $“")
+      and "Payout erst ab +{_m:,.2f} $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < Mindest-Gewinn (Standard +1 $) abgelehnt (409)")
+check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count("Payout erst ab +${(Number(zyT.min_usd) || 1).toLocaleString('de-DE'") == 2,
+      "Frontend: Anfragbar-Zelle und Finanzen-Payout zeigen „Zyklus −X $ · Payout erst ab +<Mindest-Gewinn> $“ (Standard 1 $, E4)")
 check("(/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm))" in html, "Zyklus-Stand lädt auch für Tradeify-WD-Konten (nie Tradeify CFD)")
 check(html.count("window._kontoRecoveryChipHtml?.(t.konto_id") == 2 and "function kontoRecoveryChipHtml(kid, name)" in html and ">Recovery</span>" in html,
       "Chip „Recovery“ in Konto-Zeile, Planer/WD-Karte (planRecovererChipHtml) und Radar")
-check("['Fehlt bis +1 $'" in html and "['Nächster Trade', z.aktiv ? `Ausgleich · TP" in html, "Popup: Zyklus, Fehlbetrag bis +1 $, WD-Stand, nächster Trade mit TP")
+check("[`Fehlt bis +${(Number(z.min_usd) || 1)" in html and "['Nächster Trade', z.aktiv ? `Ausgleich · TP" in html, "Popup: Zyklus, Fehlbetrag bis Mindest-Gewinn, WD-Stand, nächster Trade mit TP")
+
+# ── E4 (05.11.2026): Mindest-Gewinn je Zyklus als Parameter (wd_farmer_regeln.firmen_regeln) — Standard = Verhalten von vorher ──
+lade("wd_firmen_regel")
+std = ruf("wd_firmen_regel", {}, "tradeify")
+check(std == {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": True, "usd": 1.0, "ab_zyklus": 2}}, f"Standard Tradeify: Mindest-Gewinn 1 $ ab Zyklus 2, keine Consistency ({std})")
+z_std = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, FRISCH, regel=std["min_netto"])
+check({k: z_std[k] for k in ("gesperrt", "aktiv", "ziel", "fehl", "grund_code")} == {k: z[k] for k in ("gesperrt", "aktiv", "ziel", "fehl", "grund_code")},
+      "Standard-Regel ausdrücklich = ohne Regel: gleicher Ausgleich, gleicher TP (Verhalten unverändert)")
+z_aus = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, FRISCH, regel={"an": False, "usd": 1, "ab_zyklus": 2})
+check(not z_aus["gesperrt"] and not z_aus["aktiv"] and z_aus["grund_code"] == "regel_aus", "Regel aus: keine Payout-Sperre, kein Ausgleichs-Trade")
+z_ab3 = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, FRISCH, regel={"an": True, "usd": 1, "ab_zyklus": 3})
+check(z_ab3["grund_code"] == "zyklus_1" and not z_ab3["gesperrt"] and "ab Zyklus 3" in z_ab3["grund"], "ab Zyklus 3: Zyklus 2 noch frei")
+z_100 = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, FRISCH, regel={"an": True, "usd": 100, "ab_zyklus": 2})
+check(z_100["gesperrt"] and z_100["aktiv"] and z_100["min_usd"] == 100 and z_100["ziel"] >= 1853.17 + 100 + 30 and "ab +100 $" not in z_100["grund"],
+      f"100 $ Mindest-Gewinn: Ausgleichs-TP reicht bis Fehlbetrag + 100 $ + Puffer ({z_100['ziel']} $)")
+PLUS = [dict(p) for p in PL]
+z_p = ruf("tradeify_zyklus_konto", JACOB, PLUS, PAY, 3, 5, VP, 161868.12, FRISCH, regel={"an": True, "usd": 100, "ab_zyklus": 2})
+check(z_p["gewinn"] == 50.0 and z_p["gesperrt"] and z_p["grund_code"] == "minus" and "ab +100 $" in z_p["grund"], f"+50 $ bei 100 $ Mindest-Gewinn: gesperrt ({z_p['grund']})")
+z_p1 = ruf("tradeify_zyklus_konto", JACOB, PLUS, PAY, 3, 5, VP, 161868.12, FRISCH)
+check(not z_p1["gesperrt"] and z_p1["grund_code"] == "plus", "+50 $ beim Standard (1 $): frei wie bisher")
+kaputt = ruf("wd_firmen_regel", {"tradeify": {"min_netto": {"an": "ja", "usd": -5, "ab_zyklus": 0}}, "apex": {"konsistenz": {"pct": 150}}}, "tradeify")
+check(kaputt["min_netto"] == {"an": True, "usd": 1.0, "ab_zyklus": 2}, "Ungültiges fällt feldweise auf den Standard zurück")
+check(ruf("wd_firmen_regel", {"apex": {"konsistenz": {"pct": 150}}}, "apex")["konsistenz"] == {"an": True, "pct": 50}, "Apex-Consistency 150 % ungültig → 50 %")
+check(ruf("wd_firmen_regel", None, "gibtsnicht") == ruf("wd_firmen_regel", None, "sonst"), "unbekannte Firma = sonst")
+# Frontend-Standard gleich dem Backend
+m = re.search(r"const E4_WD_FIRMEN_STD = \{(.*?)\} \}\n", html, re.S)
+check(bool(m), "Frontend: E4_WD_FIRMEN_STD vorhanden")
+if m:
+    import json as _j
+    roh = "{" + m.group(1) + "} }"
+    js = re.sub(r"(\w+):", r'"\1":', roh).replace("true", "true").replace("null", "null")
+    fe = _j.loads(js)
+    be = ns["WD_FIRMEN_REGELN_STD"]
+    check({k: {t: {f: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v) for f, v in d.items()} for t, d in x.items()} for k, x in fe.items()}
+          == {k: {t: {f: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v) for f, v in d.items()} for t, d in x.items()} for k, x in be.items()},
+          "Frontend-Standard = app.py WD_FIRMEN_REGELN_STD (alle Firmen)")
+check("${e4RegelnHtml(k)}" in html and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
+      "Einstellungen → Firmen: Payout-Regeln je Firma, Speichern in firmen_regeln, nur HT-weit (wdNurGruppe)")
+check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn)" in app,
+      "Railway liest firmen_regeln (Rückfall Standard) und gibt die Regel an tradeify_zyklus_konto")
 print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)
