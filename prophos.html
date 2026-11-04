@@ -3976,7 +3976,18 @@
   #e3-einst .e3-z > span{flex:0 1 auto} #e3-einst .e3-z > em{flex:0 0 auto}
   /* E3c (05.11.2026, Nachtrag 5): kompakt unter dem Zeitstrahl — eine Zeile „Planer", Firmen-Chips, Firma erst nach Klick */
   #e3-einst{margin:14px 0 18px}
-  #e3-einst .e3-planer{display:flex;align-items:center;flex-wrap:wrap;gap:10px 22px;padding:10px 16px}
+  /* E3d: Gruppe „Einstellungen" wie die WD-Einstellungen (.panel + .wd-panel-kopf), Titel klappt */
+  #e3-einst .e3-gruppe{background:var(--e3-karte);border:1px solid var(--e3-rand);border-radius:16px;box-shadow:var(--e3-schatten);padding:16px 18px;margin:0}
+  #e3-einst .e3-gruppe .wd-panel-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  #e3-einst .e3-gruppe .panel-title{font-size:18px;font-weight:600;color:var(--e3-text);letter-spacing:-.01em}
+  #e3-einst .e3-gruppe .e3-detail{background:transparent;border:0;box-shadow:none;border-radius:0;padding:14px 2px 0;margin-top:12px;border-top:1px solid var(--e3-rand)}
+  @media (max-width:820px){#e3-einst .e3-gruppe{padding:12px 12px;border-radius:14px}}
+  #e3-einst .e3-gruppe-t{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  #e3-einst .e3-gruppe-t:focus-visible{outline:2px solid var(--e3-lila);outline-offset:3px;border-radius:6px}
+  #e3-einst .e3-auf{width:7px;height:7px;border-right:1.5px solid var(--e3-sub);border-bottom:1.5px solid var(--e3-sub);transform:rotate(45deg);margin-top:-3px;transition:transform .15s}
+  #e3-einst .e3-gruppe.zu .e3-auf{transform:rotate(-45deg);margin-top:0}
+  #e3-einst .e3-gruppe.zu .wd-panel-kopf{margin-bottom:0}
+  #e3-einst .e3-planer{display:flex;align-items:center;flex-wrap:wrap;gap:10px 22px;padding:10px 14px;background:var(--e3-kpi);border-radius:12px}
   #e3-einst .e3-pf{display:inline-flex;align-items:center;gap:8px;font-size:13px} #e3-einst .e3-pf > span{color:var(--e3-sub)}
   #e3-einst .e3-pf small{color:var(--e3-sub);font-size:11.5px;margin-left:2px} #e3-einst .e3-pf b{font-weight:600}
   #e3-einst .e3-kopf-z{display:flex;align-items:center;gap:10px;justify-content:flex-end} #e3-einst .e3-planer .e3-kopf-z{margin:0 0 0 auto}
@@ -86645,22 +86656,32 @@
       : fe.map((f, i) => `${e3AIn('zeiten', ['fenster', String(i), '0'], f[0], 'uhr', admin)}<span class="e3-bis">–</span>${e3AIn('zeiten', ['fenster', String(i), '1'], f[1], 'uhr', admin)}`).join(' ')) : '—'
     const nb = z.neu_bis && typeof z.neu_bis === 'object' ? z.neu_bis : null
     const feld = (label, inhalt) => `<span class="e3-pf"><span>${e3E(label)}</span>${inhalt}</span>`
-    return `<div class="e3-karte e3-planer" data-e3-ablauf>
+    return `<div class="e3-planer" data-e3-ablauf>
       ${feld('Planer', admin ? e3AIn('aktiv', ['aktiv'], D.aktiv === true, 'schalt', admin) : `<b>${D.aktiv ? 'an' : 'aus'}</b>`)}
       ${feld('Bestätigen', bestIn)}${feld('Fenster', fenster + `<small>${e3E(e3Tz(z.fenster_tz))}</small>`)}
       ${feld('Neue Konten bis', nb ? (admin ? e3AIn('zeiten', ['neu_bis', 'uhr'], nb.uhr, 'uhr', admin) : `<b>${e3E(nb.uhr)}</b>`) : '—')}
       ${admin ? e3Speicherzeile(admin) : '<span class="e3-nur-k" title="ändern als „Finn + Pascal“ oder „Pascal“">nur ansehen</span>'}</div>`
   }
+  // E3d (Nachtrag 6, Finn: „so eine ganze Gruppe wie bei Winning Days … dass man das direkt schon sieht"): alles in EINER Gruppe „Einstellungen"
+  // (Panel wie die WD-Einstellungen); beim Laden ist sofort eine Firma offen (zuletzt gewählte, sonst die erste); Klick auf den Titel klappt
+  // die Gruppe zu — beides je Browser gemerkt (localStorage, Fehler egal), Standard offen.
+  const E3_MERK = 'e3.einst.'
+  const e3Merk = (k, v) => { try{ if(v === undefined) return localStorage.getItem(E3_MERK + k); if(v === null) localStorage.removeItem(E3_MERK + k); else localStorage.setItem(E3_MERK + k, v) }catch(_){ return null } }
   function e3Html(D, art){
     const admin = D.admin === true, firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
     const w = _e3.wahl[art] = _e3.wahl[art] || {}
+    const hat = n => firmen.some(f => (f.namen || [])[0] === n)
+    if(!hat(w.firma)){ const m = e3Merk('firma.' + art); w.firma = hat(m) ? m : (firmen.length ? (firmen[0].namen || [])[0] : null); w.tab = w.tab || 'std' }
     const sel = firmen.find(f => (f.namen || [])[0] === w.firma)
+    const zu = e3Merk('zu') === '1'
+    const kopf = `<div class="wd-panel-kopf"><button type="button" class="e3-gruppe-t" data-e3-zu aria-expanded="${!zu}"><span class="panel-title">Einstellungen</span><i class="e3-auf" aria-hidden="true"></i></button></div>`
+    if(zu) return `<div class="panel e3-gruppe zu">${kopf}</div>`
     const chip = f => { const n = (f.namen || [])[0], m = e3Modell(f, D)
       return `<button type="button" class="e3-chip${n === w.firma ? ' an' : ''}${f.planen === false ? ' aus' : ''}" data-e3-wahl="${e3E(n)}" aria-expanded="${n === w.firma}"
         title="${e3E(m.text)}${f.planen === false ? ' · nicht automatisch geplant' : ''}"><i class="e3-mod ${m.kl}"></i>${e3E(e3Name(f))}<small>${e3E((f.groessen || []).map(e3Gr).join(' · '))}</small></button>` }
-    return `${e3PlanerHtml(D, art, admin)}
+    return `<div class="panel e3-gruppe">${kopf}${e3PlanerHtml(D, art, admin)}
       <div class="e3-chips">${firmen.map(chip).join('') || '<span class="e3-leer">keine Firma</span>'}</div>
-      ${sel ? e3DetailHtml(sel, D, art, admin) : ''}`
+      ${sel ? e3DetailHtml(sel, D, art, admin) : ''}</div>`
   }
   async function e3Laden(){
     if(_e3.laeuft) return
@@ -86702,9 +86723,14 @@
     box.querySelectorAll('[data-e3-kcons]').forEach(sel => sel.addEventListener('change', () => e3KontoCons(sel)))
     box.querySelectorAll('[data-e3-alle]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.e3Alle; (_e3.kontenAlle = _e3.kontenAlle || {})[k] = !_e3.kontenAlle[k]; e3Neu(box, art) }))
     // Firma wählen: nur die Firmenkarte zählt als „ungespeichert" (Ablauf/Zufall stehen außerhalb und bleiben beim Neuzeichnen nicht stehen → mitfragen)
-    // Firmen-Chip: öffnet die Firma, zweiter Klick schließt (E3c, Nachtrag 5) — nie zwei Firmen offen
-    box.querySelectorAll('[data-e3-wahl]').forEach(b => b.addEventListener('click', () => { if(!weiter()) return
-      const n = b.dataset.e3Wahl, zu = (_e3.wahl[art] || {}).firma === n; _e3.wahl[art] = { firma: zu ? null : n, tab: 'std' }; e3Neu(box, art) }))
+    // Firmen-Chip wechselt die offene Firma (E3d: immer eine offen, gemerkt)
+    box.querySelectorAll('[data-e3-wahl]').forEach(b => b.addEventListener('click', () => { const n = b.dataset.e3Wahl
+      if((_e3.wahl[art] || {}).firma === n || !weiter()) return
+      _e3.wahl[art] = { firma: n, tab: 'std' }; e3Merk('firma.' + art, n); e3Neu(box, art) }))
+    // Titel „Einstellungen" klappt die ganze Gruppe zu/auf (gemerkt) — ungespeicherte Werte nicht still verwerfen
+    box.querySelectorAll('[data-e3-zu]').forEach(b => b.addEventListener('click', () => { const zu = e3Merk('zu') === '1'
+      if(!zu && [...box.querySelectorAll('[data-e3-pfad]')].some(e3Geaendert) && !confirm('Ungespeicherte Änderungen verwerfen?')) return
+      e3Merk('zu', zu ? null : '1'); e3Neu(box, art) }))
     box.querySelectorAll('[data-e3-tab]').forEach(b => b.addEventListener('click', () => { if(!weiter()) return; _e3.wahl[art] = Object.assign({}, _e3.wahl[art], { tab: b.dataset.e3Tab }); e3Neu(box, art) }))
   }
   // geänderte Felder einer Firmenkarte → [{pfad, wert}] (Spanne = beide Felder zusammen, auch wenn nur eines geändert wurde)
