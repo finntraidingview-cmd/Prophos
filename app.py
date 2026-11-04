@@ -39135,6 +39135,18 @@ def fdp_sl_rest(jg, balance, liq, rnd=None, tages_puffer=FDP_TAGES_PUFFER, liq_p
     return float(int(sl)) if sl > 0 else None
 
 
+def fdp_konto_anzeige(groesse, jg, balance, zy, tage_fn, plaene, konto_id):
+    """REIN RECHNEND (testbar): Werte für die Kontoliste im Reiter (E2d) → {groesse, start, ziel, gewinn, max_tag}. Dieselbe Rechnung wie fdp_konto_rechnen
+    (Zyklus-Start, sonst Balance, sonst Größe; Ziel = Start + fdp_ziel_gewinn; größter Tag aus fdp_tage) — nur Anzeige, kein Würfel."""
+    g = float(groesse or 0)
+    start = zy["start"] if zy.get("start") is not None else balance
+    start = float(start) if start else g
+    ziel = start + fdp_ziel_gewinn(jg, konto_id)
+    tage = tage_fn(plaene, zy.get("ab"))
+    return {"groesse": g, "start": round(start, 2), "ziel": round(ziel, 2), "gewinn": round(balance - start, 2) if balance is not None else None,
+            "max_tag": round(max([v for v in tage.values() if v > 0], default=0.0), 2), "zyklus": zy.get("nr")}
+
+
 def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None, konst=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
@@ -39445,6 +39457,10 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             erg["ausgelassen"].append(dict(zeile, grund="wartet auf Payout")); continue
         if not jg:
             erg["ausgelassen"].append(dict(zeile, grund=f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-Planer")); continue
+        try:   # Kontoliste im Reiter (E2d, 05.11.2026): Ziel-Fortschritt auch für Konten, die heute nicht gerechnet werden — ohne Würfel, ändert keinen Plan
+            zeile["anzeige"] = fdp_konto_anzeige(g, jg, zeile["balance"], fdp_zyklus(g, payouts.get(aid), pl), fdp_tage, pl, aid)
+        except Exception as e:
+            print(f"[funded-plan] ⚠️ Anzeige {a.get('name')}: {type(e).__name__}: {e}", flush=True)
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
         if lauf:
             # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
@@ -39980,6 +39996,7 @@ def fdp_regeln_anzeige(reg, quelle="db"):
         jg = f.get("je_groesse") if isinstance(f.get("je_groesse"), dict) else {}
         firmen.append({"name": f.get("name") or (f.get("namen") or ["?"])[0], "namen": list(f.get("namen") or []), "an": bool(f.get("an")),
                        "symbol": f.get("symbol"), "lock_usd": f.get("lock_usd"), "tp_modus": f.get("tp_modus") or "normal",
+                       "consistency_pct": _wd_num(f.get("consistency_pct")),   # E2d: nur Anzeige (Kontoliste), der Planer prüft keine Consistency
                        "je_groesse": {str(k): dict(v) for k, v in jg.items() if isinstance(v, dict)}})
     return {"quelle": quelle if reg else "standard", "aktiv": bool(r.get("aktiv")), "auto_bestaetigen": r.get("auto_bestaetigen") is True,
             "updated_at": r.get("updated_at"), "zeiten": dict(FDP_ZEITEN_STANDARD, **(r.get("zeiten") or {})), "zeiten_db": dict(r.get("zeiten") or {}),
@@ -40063,8 +40080,8 @@ def fdp_regeln_aendern(reg, body):
         patch["konst"] = neu_k
     fa = b.get("firma")
     if fa is not None:
-        if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse"} or len(fa) < 2:
-            return None, "firma: {name, an | lock_usd | je_groesse}"
+        if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse", "consistency_pct"} or len(fa) < 2:
+            return None, "firma: {name, an | lock_usd | je_groesse | consistency_pct}"
         firmen = [dict(f) if isinstance(f, dict) else f for f in (reg.get("firmen") or [])]
         idx = [i for i, f in enumerate(firmen) if isinstance(f, dict) and (f.get("name") or (f.get("namen") or [""])[0]) == fa["name"]]
         if len(idx) != 1:
@@ -40074,6 +40091,14 @@ def fdp_regeln_aendern(reg, body):
             if not isinstance(fa["an"], bool):
                 return None, "an: true/false"
             f["an"] = fa["an"]
+        if "consistency_pct" in fa:   # E2d (Finn: „Tradeify manchmal 40, manchmal 50 — auswählen“): Anzeige-Parameter je Firma, null = keine; neuer Schlüssel ausdrücklich erlaubt
+            if fa["consistency_pct"] is None:
+                f.pop("consistency_pct", None)
+            else:
+                x = _fdp_zahl(fa["consistency_pct"], 10, 100)
+                if x is None:
+                    return None, "consistency_pct: Zahl 10–100 oder null"
+                f["consistency_pct"] = x
         if "lock_usd" in fa:
             if "lock_usd" not in f:
                 return None, "lock_usd: bei dieser Firma nicht hinterlegt"

@@ -158,8 +158,8 @@ check(ft["fehlt"] is True and ft["groessen"][0]["min_usd"] is None and ft["groes
 check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] is None, "Tradeify CFD zählt nie als Tradeify-WD")
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)' in gt2 and "_fr = _wd_firmen_regeln_lesen()" in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
-check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
-check("e2In(" not in HTML.split("const wdGruppe")[1].split("const firmaGruppe")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
+check("const wdGruppe = !wd ? ''" in HTML and "${wdGruppe}${kontoGruppe}</div>" in HTML and "data-e2-wd-link" in HTML and "noch nicht hinterlegt" in HTML, "Kachel Winning Day im Detail, Link zur Quelle, „noch nicht hinterlegt“")
+check("e2In(" not in HTML.split("const wdGruppe")[1].split("// (4) KONTOLISTE")[0], "WD-Kachel ohne Eingabefelder (keine zweite Schreibstelle)")
 check(all(isinstance(b, dict) and b.get("name") and b.get("wert") for x in (apex, tr, lu) for b in x["_dicts"]), "Besonderheiten als Parameter {name, wert, info}")
 check('class="e2-nur"' in HTML and "Nur ansehen — ändern als „Finn + Pascal“ / „Pascal“" in HTML and "const e2I = t =>" in HTML, "Nachtrag 3: Nur-ansehen-Balken oben, Erklärungen hinter ⓘ")
 
@@ -214,6 +214,28 @@ check(an2["konst"]["sl_min"] == 150 and an2["konst"]["liq_min"] == 300 and an2["
       and {x["key"] for x in an2["fest"]} == {"takt", "firma_abstand", "nq_ppl", "fusion_ppl"} and all(x["grund"] for x in an2["fest"]), "Anzeige: konst + Fenster, nur Technik/DB-Riegel/Kontraktwerte fest (mit Grund)")
 check(anz(REG)["konst_spalte"] is False, "Anzeige erkennt fehlende Spalte konst")
 check("if(karte === 'grenzen'){" in HTML and "e2In('z.fenster.von'" in HTML and "e2Sch('z.fenster.an'" in HTML and "body.konst = ko" in HTML, "Frontend: Grenzen + Fenster änderbar")
+
+# ── E2d: Zielbild (Ablauf schlank · Firmen · Firma: Ziel/Consistency → Trade → Winning Day → Kontoliste · Sicherheit unten)
+KA = ns["fdp_konto_anzeige"]
+ka = KA(150000, {"ziel_gewinn": 15000}, 158000.0, {"nr": 1, "ab": None, "start": 150000.0}, ns["fdp_tage"], [], "k1")
+check(ka["start"] == 150000 and ka["ziel"] == 165000 and ka["gewinn"] == 8000 and ka["max_tag"] == 0, "Kontoliste: Ziel/Gewinn wie fdp_konto_rechnen (Zyklus 1)")
+ka2 = KA(150000, {"ziel_gewinn": 15000}, 158000.0, {"nr": 2, "ab": "2026-11-01", "start": None}, ns["fdp_tage"], [], "k1")
+check(ka2["start"] == 158000 and ka2["ziel"] == 173000, "Kontoliste: Zyklus nach Payout ohne Trade startet bei der Balance (wie der Planer)")
+r_a = R(ALT["firmen"][0], jg(ALT["firmen"][0], 150000), [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000, kt_fest=2, konto_id="k1")
+check(r_a["ziel"] == ka["ziel"] and r_a["start"] == ka["start"] and r_a["gewinn"] == ka["gewinn"], "Kontoliste = Rechnung des Planers (Ziel, Start, Gewinn)")
+p, f = aend(REG, {"updated_at": U, "firma": {"name": "Apex Trader", "consistency_pct": 40}})
+check(f is None and p["firmen"][0]["consistency_pct"] == 40, "Consistency je Firma setzen (neuer Anzeige-Parameter erlaubt)")
+p, f = aend(dict(REG, firmen=[dict(REG["firmen"][0], consistency_pct=50)] + REG["firmen"][1:]), {"updated_at": U, "firma": {"name": "Apex Trader", "consistency_pct": None}})
+check(f is None and "consistency_pct" not in p["firmen"][0], "Consistency aus → Schlüssel weg")
+nein({"updated_at": U, "firma": {"name": "Apex Trader", "consistency_pct": 5}}, "Consistency unter 10 %")
+r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000), [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000, kt_fest=2, konto_id="k1")
+check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
+src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
+check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
+check("const consBlock" in HTML and 'type="range" class="e2-range"' in HTML and "const kontoGruppe" in HTML and 'class="e2-drei"' in HTML and "const sicherheit" in HTML,
+      "Frontend: Consistency-Slider, Kontoliste, drei Spalten, Sicherheit unten")
+check("konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]" in HTML and "start: an.start ?? (typeof z.start === 'number'" in HTML, "Kontoliste aus den Zeilen des Laufs, Anzeige-Werte vor der Uhrzeit start")
+check("if(karte === 'abstand'){" in HTML and "e2In('za.' + k" in HTML and "e2Fuss('abstand', darfR, 'za.')" in HTML, "Abstände eigene Karte (Speichern je Block)")
 
 # ── Verdrahtung
 rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══ FUNDED-CFD-PLANER")]
