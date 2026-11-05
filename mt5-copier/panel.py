@@ -1418,10 +1418,25 @@ def boot_terminal_noetig(st):
     return bool(st.get("master_positions"))
 
 
-def _windows_laufzeit_s():
+def _windows_laufzeit_s(k32=None):
+    """Windows-Betriebszeit in Sekunden oder None (kein Windows / Fehler). k32 = kernel32 (Test-Haken, sonst ctypes.windll.kernel32).
+    ÜBERLAUF (PU1, 05.11.2026): GetTickCount64 lief ohne restype — ctypes nimmt dann c_int (32 Bit mit Vorzeichen), ab 2^31 ms (≈ 24,8 Tage
+    Betriebszeit) kam eine negative bzw. falsche Zahl, und _boot_terminals hielt einen Panel-Neustart für „frisch gebootet" (öffnete alle
+    Master-Terminals). Jetzt restype c_ulonglong; Rückfall nur ohne GetTickCount64 (Windows vor Vista): GetTickCount mit c_uint32 (läuft nach
+    ≈ 49,7 Tagen über — dann ist ein kleiner Wert möglich, aber nie negativ)."""
     try:
         import ctypes
-        return ctypes.windll.kernel32.GetTickCount64() / 1000.0
+        if k32 is None:
+            k32 = ctypes.windll.kernel32
+        f = getattr(k32, "GetTickCount64", None)
+        if f is not None:
+            f.restype = ctypes.c_ulonglong
+            f.argtypes = []
+            return int(f()) / 1000.0
+        f = k32.GetTickCount
+        f.restype = ctypes.c_uint32
+        f.argtypes = []
+        return int(f()) / 1000.0
     except Exception:
         return None
 
