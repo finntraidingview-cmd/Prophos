@@ -104,6 +104,9 @@ function tpStartUmText(iso){ return 'um ' + String(iso).slice(11, 16) }
 function atToast(t){ TOASTS.push(t) }
 function renderTradePlans(){}
 const _console = []; const console = { warn: (...a) => _console.push(a.join(' ')) }
+// RT1 (05.11.2026): tpStartSperre prüft seit f96c0d8a (Lots-Deckel, 02.11.) und 7543d4da (Apex-WD bestätigen, 02.11.) zuerst zwei eigene
+// Sperren — für diese Pläne (kein Fusion-Hedge, kein Winning Day) greifen sie nicht; neutral nachgebaut, cfdAufgegeben (R4b 8d576003) echt geladen
+const tpFusionLots = () => null, tpLotsDeckelFehlt = () => false, tpLotsDeckelText = () => '', tpWdWartetAufBestaetigung = () => false
 %s
 const P = { id: 'p-2', masterName: '150k …9050', masterFirm: 'Tradeify', richtung: 'buy', startUm: '2026-10-21T20:00:00.000Z',
             mt5Baseline: { start_sperre: { art: 'ein_finaler', versuche: 2 } } }
@@ -185,7 +188,8 @@ def main():
         check(False, "jsc fehlt — Frontend-Teil nicht ausführbar")
     else:
         # js_funktion schneidet ab „function" — die beiden sind async
-        js = "\n".join(["async " + js_funktion(html, "efFrei"), "async " + js_funktion(html, "efVerschieben"), js_funktion(html, "tpStartSperre")])
+        js = "\n".join(["async " + js_funktion(html, "efFrei"), "async " + js_funktion(html, "efVerschieben"), js_funktion(html, "tpStartSperre"),
+                        js_funktion(html, "cfdAufgegeben")])   # RT1 (05.11.2026): seit 8d576003 (R4b) ruft tpStartSperre cfdAufgegeben
         js = JS_TEST % js
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
             f.write(js)
