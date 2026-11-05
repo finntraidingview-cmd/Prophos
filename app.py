@@ -8391,6 +8391,7 @@ ADM_OV_CACHE_S = 20
 _adm_ov_cache = {}      # schluessel → (bis_epoch, start_epoch des Baus, body_bytes)
 _adm_ov_laeuft = {}     # schluessel → threading.Event (Bau läuft)
 _adm_ov_lock = threading.Lock()
+_adm_ov_schreib = {"at": 0.0}   # letzter erfolgreicher Schreib-Aufruf auf /admin/* (S4 05.11.2026)
 
 
 def adm_ov_schluessel(uid, args):
@@ -8430,7 +8431,8 @@ def adm_ov_holen(schluessel, frisch, bauen):
             if len(_adm_ov_cache) >= 40:              # Deckel
                 _adm_ov_cache.clear()
             e = _adm_ov_cache.get(schluessel)
-            if not (e and e[1] > t0):                 # ein später gestarteter Bau (z. B. frisch=1 nach Schreiben) bleibt stehen
+            # ein später gestarteter Bau (z. B. frisch=1 nach Schreiben) bleibt stehen; ein Bau, der VOR einem Schreiben auf /admin/* begann, wird nicht gemerkt
+            if not (e and e[1] > t0) and t0 >= _adm_ov_schreib["at"]:
                 _adm_ov_cache[schluessel] = (t0 + ADM_OV_CACHE_S, t0, body)
         return body, "miss", 0.0
     finally:
@@ -8439,6 +8441,21 @@ def adm_ov_holen(schluessel, frisch, bauen):
                 if _adm_ov_laeuft.get(schluessel) is eigen:
                     _adm_ov_laeuft.pop(schluessel, None)
             eigen.set()
+
+
+@app.after_request
+def adm_ov_nach_schreiben(r):
+    """LD1 (Prüfer S4 05.11.2026: „nach jedem Admin-Schreiben frisch"): jeder erfolgreiche POST/PATCH/PUT/DELETE auf /admin/* leert den
+    Übersichts-Kurzcache aller IDs — die nächste Übersicht baut neu, egal von welchem Tab. Direkte Supabase-Schreibwege aus dem Browser sieht der
+    Server nicht; dort gilt höchstens ADM_OV_CACHE_S (und der Tab lädt nach eigenem Schreiben ohnehin mit frisch=1)."""
+    try:
+        if request.method in ("POST", "PATCH", "PUT", "DELETE") and request.path.startswith("/admin/") and r.status_code < 400:
+            with _adm_ov_lock:
+                _adm_ov_schreib["at"] = time.time()
+                _adm_ov_cache.clear()
+    except Exception:
+        pass
+    return r
 
 
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])

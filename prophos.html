@@ -16684,7 +16684,7 @@
         const d = await r.json().catch(() => ({}))
         if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
         if(msg) msg.textContent = `✓ ${d.gruppe || gname}`
-        admLoad()
+        admLoad({ frisch: true })   // LD1 (S4): nach eigenem Schreiben frisch — am 20-s-Server-Cache vorbei
       }catch(e){ if(msg) msg.textContent = 'nicht gespeichert: ' + ((e && e.message) || e); b.disabled = false }
     })
     function admGruppeChips(){
@@ -17071,6 +17071,7 @@
     }
     // beim Login (showDashboard) und beim ersten Öffnen: Eintrag DIESER ID lesen (je ID genau einer)
     function admStandVorladen(){
+      try{ admFremdWeg() }catch(_){}   // LD1 (S4): bei jedem Login zuerst — nie window._admData der alten ID für Farmer/Funded CFD
       const uid = String(currentUserId || ''); if(!uid || typeof indexedDB === 'undefined') return Promise.resolve(null)
       if(_admVorladen && _admVorladen.uid === uid) return _admVorladen.p
       const p = admStandLesen(uid).then(e => {
@@ -17081,6 +17082,14 @@
       return p
     }
     window._admStandVorladen = admStandVorladen
+    // Abmelden (showLogin): gemerkten Stand DIESER ID aus IndexedDB löschen und den Speicher leeren (S4 05.11.2026)
+    window._admStandLeeren = async uid => {
+      uid = String(uid || ''); if(!uid) return
+      if(_admGemerkt && _admGemerkt.uid === uid) _admGemerkt = null
+      if(_admVorladen && _admVorladen.uid === uid) _admVorladen = null
+      if(admDataUid === uid){ admData = null; window._admData = null; admDataUid = null; admDataQ = null; _admAusSpeicher = false }
+      try{ const db = await admIdb(); db.transaction('kv', 'readwrite').objectStore('kv').delete(uid) }catch(_){}
+    }
     // Abfrage der Übersicht (vorher inline in admLoad) — auch der Schlüssel, unter dem der Stand gilt
     function admQuery(){
       // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
@@ -79422,6 +79431,7 @@
   // Beim Logout: lokalen Cache leeren
   const _origShowLogin = showLogin
   showLogin = function(){
+    try{ window._admStandLeeren?.(currentUserId) }catch(_){}   // LD1 (S4): gemerkter Admin-Stand dieser ID weg (vor currentUserId = null)
     accounts = []
     tradePlans = []
     transactions = []

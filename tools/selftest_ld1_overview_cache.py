@@ -38,6 +38,9 @@ def bauen(kapitel_id=None):
 
 app._wd_login = login
 app.admin_build_overview = bauen
+# Schreib-Route für den Test (vor dem ersten Request anlegen): erfolgreicher POST auf /admin/* leert den Cache (S4 05.11.2026)
+app.app.add_url_rule("/admin/_ld1_test_schreiben", "ld1_test_schreiben", lambda: ("{}", 200), methods=["POST"])
+app.app.add_url_rule("/admin/_ld1_test_fehler", "ld1_test_fehler", lambda: ("{}", 403), methods=["POST"])
 c = app.app.test_client()
 
 
@@ -134,6 +137,29 @@ _, d13, _ = holen("?v=1&frisch=1")
 t2.join()
 _, d14, a14 = holen("?v=1")
 ok(a14 == "hit" and d14["n"] == d13["n"], f"alter Bau überschreibt den frischen nicht (Treffer n={d14['n']}, frisch n={d13['n']})")
+
+# 8c) erfolgreicher POST auf /admin/* leert den Cache aller IDs; abgelehnter (403) nicht
+leeren()
+holen("?s=1")
+ZUSTAND["uid"] = "uid-b"; holen("?s=1"); ZUSTAND["uid"] = "uid-a"
+c.post("/admin/_ld1_test_fehler")
+_, _, a15 = holen("?s=1")
+c.post("/admin/_ld1_test_schreiben")
+_, _, a16 = holen("?s=1")
+ZUSTAND["uid"] = "uid-b"; _, _, a17 = holen("?s=1"); ZUSTAND["uid"] = "uid-a"
+ok(a15 == "hit" and a16 == "miss" and a17 == "miss", f"Schreiben auf /admin/* leert den Cache aller IDs, 403 nicht ({a15}/{a16}/{a17})")
+
+# 8d) ein Bau, der VOR einem Schreiben begann, wird nicht gemerkt
+leeren()
+ZUSTAND["dauer"] = 0.4
+t3 = threading.Thread(target=lambda: app.app.test_client().get("/admin/overview?w=2"))
+t3.start()
+time.sleep(0.1)
+c.post("/admin/_ld1_test_schreiben")
+t3.join()
+ZUSTAND["dauer"] = 0.0
+_, _, a18 = holen("?w=2")
+ok(a18 == "miss", f"Bau vor dem Schreiben nicht gemerkt ({a18})")
 
 # 9) Deckel: höchstens 40 Einträge
 leeren()

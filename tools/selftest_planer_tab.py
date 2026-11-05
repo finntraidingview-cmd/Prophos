@@ -57,16 +57,22 @@ def main():
     ok("localStorage" not in s[s.find("const PLANER_CHIP_SS"):s.find("function showLocked()")], "Chip-Merker ohne localStorage")
     ok("sessionStorage.getItem(PLANER_CHIP_SS)" in s, "Chip-Merker in sessionStorage")
     # Lazy: Übersicht im Planer-Modus erst nach dem Planer
-    ok("if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)" in s,
+    # LD1 (05.11.2026): „alt" = kein Stand, Stand aus IndexedDB (immer einmal frisch nachladen) oder älter als ADM_CACHE_MS
+    ok("const admAlt = () => !admData || _admAusSpeicher || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS" in s
+       and "if(planerJetzt && !planerWarten) setTimeout(() => { if(admAlt()) admLoad() }, 2500)" in s,
        "Übersicht im Planer-Modus verzögert (nur bekannte HT-Rolle)")
     # Verwalter zuerst (Master 30.10.2026): ohne bekannte Rolle wartet der Planer auf admLoad, Panes bis dahin aus
     ok("const planerSchnell = eigenerCode === null && !eigenerCodeUnklar && !['verwalter', 'eigen'].includes(planerRolle())" in s
-       and "const planerWarten = planerJetzt && !admFrisch && !planerSchnell" in s, "schnell nur mit Standard-Code und ohne eingeschränkte Rolle")
+       and "const planerWarten = planerJetzt && !admData && !planerSchnell" in s, "schnell nur mit Standard-Code und ohne eingeschränkte Rolle")
+    # LD1: Stand einer anderen ID nie zeigen, gemerkter Stand DIESER ID ersetzt das Warten (Verwalter-Erkennung steckt im Stand derselben ID)
+    ok("admFremdWeg()\n      if(!admData) admGemerktUebernehmen(admQuery())" in s, "fremder Stand weg, gemerkter Stand derselben ID vor dem Warten")
     sql = open(os.path.join(os.path.dirname(HTML), "sql", "2026-10-30_verwalter_braucht_code.sql"), encoding="utf-8").read()
     ok("before insert or update of verwalter_user_id on public.id_gruppen" in sql and "before update or delete on public.admin_zugang" in sql
        and "coalesce(btrim(z.code), '') <> ''" in sql, "Riegel: Verwalter braucht eigenen Code")
-    ok("admLoad().finally(() => { planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } })" in s,
-       "Planer öffnet erst nach der Verwalter-Erkennung")
+    ok("const oeffnen = () => { if(offen) return; offen = true; planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } }" in s
+       and "Promise.resolve(p).finally(oeffnen)" in s
+       and "admGemerktUebernehmen(admQuery()); if(admData && admDataUid === String(currentUserId || '')) oeffnen()" in s,
+       "Planer öffnet erst nach der Verwalter-Erkennung (Übersicht oder gemerkter Stand derselben ID)")
     ok("if(!planerWarten) planerChipOeffnen()" in s, "kein Chip vor der Erkennung")
     ok("(!admData && ec && planerRolle() === 'verwalter' && !KASSE_REITER_HT.has(n))" in s, "bekannter Verwalter: Link vor der Übersicht, ohne HT-Reiter")
     ok("section.view.adm-planer-warten #kasse-content [id^=\"adm-pane-\"]{display:none !important}" in s, "Panes während des Wartens aus")
