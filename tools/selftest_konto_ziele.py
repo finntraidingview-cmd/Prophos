@@ -105,6 +105,18 @@ PL = [pl(BG["id"], "funded_cfd", "mt5", "2026-10-28T07:05:11+00:00", "2026-10-28
       pl(AX["id"], "winning_days", "tvv2", "2026-10-30T03:59:23+00:00", "2026-10-30T04:47:59+00:00", 380.88, 164978.3, 165359.18, None, 0, 380.88, "2026-10-30", "2026-10-30"),
       pl(AX["id"], "winning_days", "tvv2", "2026-11-03T05:11:26+00:00", "2026-11-03T06:12:56+00:00", 379.84, 165359.18, 165739.02, None, 0, 379.84, "2026-11-03", "2026-11-03"),
       pl(AX["id"], "winning_days", "tvv2", "2026-11-04T12:58:32+00:00", "2026-11-04T15:15:34+00:00", -4041.12, 165739.02, 161697.9, None, 0, -4041.12, "2026-11-04", "2026-11-04")]
+TX = {"id": "14e31eae-22e4-4684-8272-438a821a53cf", "user_id": "u-z", "name": "150k FTDFYSLX150393423058 → Winning Days", "firm": "Tradeify",
+      "account_type": "winning_days", "external_id": "FTDFYSLX150393423058", "max_drawdown": 4500, "tv_balance": 159967.22, "goal_kind": "winning_days",
+      "goal_target": 5, "goal_manual": True, "goal_done_offset": 1, "created_at": "2026-10-20T12:40:42+00:00", "wd_farm": True, "goal_wd_korrektur": 0,
+      "goal_wd_seit": "2026-10-30T00:00:00+00:00", "goal_wd_hand_tage": ["2026-11-04"], "payout_ready_at": "2026-11-11"}
+for _st, _en, _pl, _bs, _be in (("2026-10-20T13:51:15+00:00", "2026-10-20T14:17:37+00:00", 15792.72, 150000, 165792.72),
+                               ("2026-10-29T06:04:28+00:00", "2026-10-29T20:09:49+00:00", -691.80, 161698.92, 161007.12),
+                               ("2026-10-30T11:01:36+00:00", "2026-10-30T19:47:24+00:00", -1543.80, 161007.12, 159463.32),
+                               ("2026-11-02T07:02:42+00:00", "2026-11-02T07:34:33+00:00", 264.30, 159463.32, 159727.62),
+                               ("2026-11-03T08:25:36+00:00", "2026-11-03T12:48:43+00:00", -30.76, 159727.62, 159696.86),
+                               ("2026-11-04T02:12:57+00:00", "2026-11-04T02:20:46+00:00", 270.36, 159696.86, 159967.22)):
+    PL.append(pl(TX["id"], "funded" if _pl > 10000 else "winning_days", "tvv2", _st, _en, _pl, _bs, _be, None, 0, None, _st[:10], _en[:10]))
+TX_PAY = ([], [], [{"id": "364da3aa", "account_id": TX["id"], "amount": 3633, "currency": "EUR", "occurred_at": "2026-10-30"}])   # echte Payout-Buchung
 ZR = {"bis": "2x_bester", "aktiv": True, "firmen": ["apex", "apex100"], "stuetz": [{"v": 2000, "satz": 400, "ziel": 750}, {"v": 4000, "satz": 300, "ziel": 1500}], "ab_zyklus": 2}
 VP = {"regeln": {"fu": {"apex": [370, 390], "apex100": [320, 330]}}}
 JETZT = "2026-11-05T03:30:00+00:00"
@@ -114,7 +126,10 @@ def ctx_fuer(a):
     plaene = [p for p in PL if p["master_account_id"] == a["id"]]
     verlauf = [dict(p, id=str(i), bal_end=p["fin"]["balance_end"], bal_start=p["tv"]["balance_start"]) for i, p in enumerate(plaene) if p["route"] in ("tvv2", "tsv2")]
     c = {"bal": a["tv_balance"], "bal_quelle": "TV", "bal_stand": a.get("tv_balance_at"), "plaene": plaene, "jetzt": JETZT, "ap_firmen": AP_FIRMEN, "liq_regeln": LIQ,
-         "fcp_regel": FCP, "fcp_pay": ([], [], []), "wd_firmen_regeln": {}, "wd_pay": []}
+         "fcp_regel": FCP, "fcp_pay": ([], [], []), "wd_firmen_regeln": {}, "wd_pay": [], "payouts": ([], [], []) if a["account_type"] in ("funded_cfd", "funded", "winning_days") else None}   # wie die Route
+    if a["id"] == TX["id"]:
+        c["payouts"] = TX_PAY
+        c["wd_pay"] = [{"requested_at": "2026-10-30", "status": "received"}]
     c["peak"] = ruf("liq_peak", {}, a, None, verlauf)
     ts = ruf("kz_tagesstart", ruf("kz_phase_plaene", plaene, a["account_type"]), a["tv_balance"], JETZT)[0]
     c["peak_eod"] = ruf("liq_peak", {"started_at": JETZT, "master_account_id": a["id"]}, a, a["tv_balance"], verlauf, eod_tagesstart=ts, eod=True)
@@ -184,6 +199,21 @@ kr = kachel(o, "recoverer")
 check(kr is not None and kr["pill"] == ["Aus", "grau"] and "Zyklus 1" in (kr["unter"] or "") and kr["wert"] == "−4.041 $", f"WD: Recoverer aus, Verlusttag {kr and kr['wert']} — {kr and kr['unter']}")
 check(next(c for c in o["urteil"]["checks"] if c[1] == "Mindest-Net-Profit")[0] == "info", "WD: Mindest-Net-Profit aus (Apex) → kein ✓, nur Hinweis")
 check(o["urteil"]["ok"] is False and "Winning Days" in o["urteil"]["grund"] and "Consistency" in o["urteil"]["grund"], f"WD: kein Payout — {o['urteil']['grund']}")
+
+# ── K2 (Finn 05.11.2026): Payout-Verlauf, „Payout ab" nur CFD ──
+c = ctx_fuer(TX)
+o = ergebnisse["winning_days_tradeify"] = ruf("kz_rechnen", TX, c)
+check(o["payouts"] == [{"datum": "2026-10-30", "betrag": 3633.0, "waehrung": "EUR", "status": "erhalten"}], f"Tradeify WD …3058: Payout-Verlauf = Buchung 30.10. 3.633 € erhalten ({o['payouts']})")
+check(not any(c_[1] == "Payout ab" for c_ in o["urteil"]["checks"]), "Futures/WD: keine Zeile „Payout ab“ (gibt es nur bei CFD), obwohl payout_ready_at gesetzt ist")
+check(o["zyklus"]["nr"] == 2, f"Tradeify WD: Zyklus 2 nach dem Payout ({o['urteil']['sub']})")
+bg_r = ruf("kz_rechnen", dict(BG, payout_ready_at="2026-11-20"), ctx_fuer(BG))
+check(any(c_[1] == "Payout ab" for c_ in bg_r["urteil"]["checks"]) and bg_r["payouts"] == [], "Funded CFD: „Payout ab“ bleibt, Payout-Verlauf leer (kein Payout)")
+pv = ruf("kz_payouts", [{"id": "p1", "amount": 2500, "currency": "USD", "requested_at": "2026-11-01", "status": "pending"},
+                        {"id": "p2", "amount": 3000, "currency": "USD", "requested_at": "2026-10-10", "received_at": "2026-10-14", "status": "received", "received_tx_id": "t1"}],
+         [{"amount": 1000, "payout_date": "2026-09-01"}], [{"id": "t1", "amount": 2700, "currency": "EUR", "occurred_at": "2026-10-14"}, {"id": "t2", "amount": 900, "currency": "EUR", "occurred_at": "2026-10-20"}])
+check([(x["datum"], x["status"]) for x in pv] == [("2026-11-01", "angefragt"), ("2026-10-20", "erhalten"), ("2026-10-14", "erhalten"), ("2026-09-01", "verbucht")],
+      f"kz_payouts: angefragt/erhalten/verbucht, verknüpfte Buchung nicht doppelt, neueste zuerst ({[(x['datum'], x['status']) for x in pv]})")
+check(ruf("kz_rechnen", TF, ctx_fuer(TF) | {"payouts": None})["payouts"] is None, "Challenge: kein Payout-Verlauf")
 
 # ── Fremd-Review K1: Randfälle ──
 o = ruf("kz_rechnen", TF, dict(ctx_fuer(TF), bal=None))

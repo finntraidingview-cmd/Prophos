@@ -3905,6 +3905,15 @@
   html[data-theme="dark"] #k1-ziele{--k-karte:#151a24;--k-kpi:#1a2030;--k-rand:#252c3b;--k-text:#e7eaf0;--k-sub:#98a2b3;--k-gitter:rgba(255,255,255,.06);--k-lila:#b3aaff;
     --k-lila-bg:rgba(136,124,252,.16);--k-gut:#3ccf7a;--k-gut-bg:rgba(60,207,122,.13);--k-rot:#ff6b70;--k-rot-bg:rgba(255,107,112,.13);--k-warn:#fdb022;--k-warn-bg:rgba(253,176,34,.13);
     --k-pille:#1f2636;--k-linie:#a79fff}
+  [data-view="account-detail"] .ad-kompakt #ad-activity-list [style*="font-size:13px"]{font-size:12.5px !important}
+  [data-view="account-detail"] .ad-kompakt #ad-activity-list [style*="font-size:11.5px"]{font-size:11px !important;margin-top:1px !important}
+  .k1-po{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .k1-po:last-child{border-bottom:0}
+  .k1-po b{font-weight:600;font-variant-numeric:tabular-nums;margin-left:auto}
+  .k1-po small{color:var(--sub);font-size:11.5px;min-width:70px;font-variant-numeric:tabular-nums}
+  .k1-po .k1-po-st{font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--surface-tint, rgba(127,127,127,.12));color:var(--sub)}
+  .k1-po .k1-po-st.erhalten{background:color-mix(in srgb, var(--good) 14%, transparent);color:var(--good-ink, var(--good))}
+  .k1-po .k1-po-st.angefragt{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn-ink, var(--warn))}
   #k1-ziele .k1-haupt{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;align-items:stretch}
   #k1-ziele .k1-karte{background:var(--k-karte);border:1px solid var(--k-rand);border-radius:16px;padding:16px 18px;min-width:0}
   #k1-ziele .k1-karte h4{margin:0;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -12074,33 +12083,31 @@
       </div>
 
       <!-- Konto-Ziele wie im Prop-Dashboard (K1, 05.11.2026): Payout/Phase · Trading Objectives · Balance-Verlauf — k1Anzeigen -->
+      <!-- K2 (Finn 05.11.2026 ~08:45: „hier kann der Großteil eigentlich auch weg"): oben nur Gesamtkosten + Balance, dann Konto-Ziele,
+           Trade-Verlauf kompakt, Payout-Verlauf. Account-Daten und Verknüpfungen & Status sind raus (Bearbeiten bleibt oben rechts). -->
+      <div id="ad-stats" style="margin-bottom:14px"></div>
+
       <div id="k1-ziele"></div>
 
-      <!-- Stats-Reihe -->
-      <div id="ad-stats" style="margin-bottom:18px"></div>
-
-      <!-- Detail-Grid: Links Stammdaten, Rechts Status / Verlinkungen -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px" id="ad-detail-grid">
-        <div class="panel">
-          <div class="panel-head"><div class="panel-title">Account-Daten</div></div>
-          <div id="ad-data-list" style="display:flex;flex-direction:column;gap:10px;padding:14px 0 4px"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><div class="panel-title">Verknüpfungen & Status</div></div>
-          <div id="ad-links-list" style="display:flex;flex-direction:column;gap:10px;padding:14px 0 4px"></div>
-        </div>
-      </div>
-
-      <!-- Aktivitäts-Timeline (Trades + Buchungen chronologisch) -->
-      <div class="panel" style="margin-bottom:18px">
+      <!-- Trade-Verlauf (Trades + Buchungen ohne Payouts, kompakt) -->
+      <div class="panel ad-kompakt" style="margin-bottom:14px">
         <div class="panel-head" style="display:flex;justify-content:space-between;align-items:center">
-          <div class="panel-title">Aktivität <span id="ad-act-count" style="color:var(--sub);font-weight:400">(0)</span></div>
+          <div class="panel-title">Trade-Verlauf <span id="ad-act-count" style="color:var(--sub);font-weight:400">(0)</span></div>
           <span style="font-size:11.5px;color:var(--sub)" id="ad-act-summary">—</span>
         </div>
-        <div id="ad-activity-list" style="display:flex;flex-direction:column"></div>
+        <div id="ad-activity-list" style="display:flex;flex-direction:column;max-height:340px;overflow-y:auto"></div>
         <div id="ad-act-empty" class="empty" style="border:none;background:transparent;padding:30px 18px">
           <p style="color:var(--sub);font-size:13px">Noch keine Aktivität auf diesem Account.</p>
         </div>
+      </div>
+
+      <!-- Payout-Verlauf (K2): pending_payouts · Payout-Buchungen · managed_payouts aus GET /konto-ziele — k1PayoutsZeichnen -->
+      <div class="panel ad-kompakt" id="k1-payouts" style="margin-bottom:18px" hidden>
+        <div class="panel-head" style="display:flex;justify-content:space-between;align-items:center">
+          <div class="panel-title">Payout-Verlauf <span id="k1-po-count" style="color:var(--sub);font-weight:400"></span></div>
+          <span style="font-size:11.5px;color:var(--sub)" id="k1-po-summe"></span>
+        </div>
+        <div id="k1-po-list" style="display:flex;flex-direction:column"></div>
       </div>
     </section>
 
@@ -44113,8 +44120,9 @@
   function k1Anzeigen(acc){
     const el = document.getElementById('k1-ziele'); if(!el || !acc) return
     const id = String(acc.id)
-    if(acc.type === 'live'){ el.innerHTML = ''; return }
+    if(acc.type === 'live'){ el.innerHTML = ''; const pb = document.getElementById('k1-payouts'); if(pb) pb.hidden = true; return }
     const c = _k1.cache[id]
+    { const pb = document.getElementById('k1-payouts'); if(pb && !(c && c.d)) pb.hidden = true }   // anderes Konto: alter Verlauf nie stehen lassen
     if(c && c.d) k1Zeichnen(id)
     else el.innerHTML = `<div class="k1-karte"><div class="k1-leer">${c && c.fehler ? 'Ziele nicht ladbar — ' + escapeHtml(c.fehler) : 'Ziele werden geladen …'}</div></div>`
     setTimeout(() => k1BalNachtragen(id), 0)        // nach dem Neuaufbau der Stats-Reihe (renderAccountDetail baut sie nach diesem Aufruf)
@@ -44192,6 +44200,7 @@
   function k1Zeichnen(id){
     const el = document.getElementById('k1-ziele'), d = _k1.cache[id] && _k1.cache[id].d
     if(!el || !d || String(_detailAccountId) !== id) return
+    try{ k1PayoutsZeichnen(id) }catch(_){}
     const u = d.urteil
     if(!u){ el.innerHTML = ''; return }
     const ring = u.ok === true ? '✓' : u.ok === false ? '✕' : '?'
@@ -44206,6 +44215,24 @@
       </div>
       <div class="k1-karte k1-chart"><h4>Balance<span class="k1-leg"><span class="l-bal">Balance</span>${d.chart && d.chart.ziel != null ? '<span class="l-ziel">Ziel</span>' : ''}${d.chart && d.chart.boden != null ? '<span class="l-boden">Boden</span>' : ''}</span></h4>
         ${k1Chart(d.chart || {}, d.balance && d.balance.wert)}</div>`
+  }
+  // PAYOUT-VERLAUF (K2, Finn 05.11.2026: „darunter ein Payout-Verlauf"): Zeilen aus /konto-ziele (kz_payouts: angefragt · erhalten · verbucht),
+  // nichts gerechnet; nur Funded-Konten (Challenges haben keine Payouts → Karte bleibt verborgen)
+  function k1PayoutsZeichnen(id){
+    const box = document.getElementById('k1-payouts'), d = _k1.cache[id] && _k1.cache[id].d
+    if(!box || String(_detailAccountId) !== id) return
+    if(!d || !Array.isArray(d.payouts)){ box.hidden = true; return }
+    const liste = document.getElementById('k1-po-list'), n = document.getElementById('k1-po-count'), su = document.getElementById('k1-po-summe')
+    const geld = (v, w) => v == null ? '—' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + (String(w || '').toUpperCase() === 'EUR' ? ' €' : ' $')
+    if(n) n.textContent = d.payouts.length ? `(${d.payouts.length})` : ''
+    const erh = d.payouts.filter(x => x.status === 'erhalten' || x.status === 'verbucht')
+    if(su) su.textContent = erh.length ? `${erh.length} erhalten` : ''
+    if(liste) liste.innerHTML = d.payouts.length ? d.payouts.map(x => `<div class="k1-po">
+        <small>${escapeHtml(x.datum ? new Date(x.datum + 'T12:00:00').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—')}</small>
+        <span class="k1-po-st ${escapeHtml(x.status)}">${escapeHtml(x.status)}</span>
+        <b>${escapeHtml(geld(x.betrag, x.waehrung))}</b></div>`).join('')
+      : '<div style="padding:14px 0 6px;color:var(--sub);font-size:12.5px">Noch kein Payout auf diesem Konto.</div>'
+    box.hidden = false
   }
   window._k1 = _k1   // Stub-/Selbsttest-Haken
 
@@ -44274,36 +44301,21 @@
     // Fortschritts-Ziel (10.09.2026): "3/5 Winning Days" als eigene Kachel
     const adZiel = (typeof zielFortschritt === 'function') ? zielFortschritt(acc) : null
 
+    // K2 (Finn 05.11.2026 ~08:45): Stats-Reihe nur noch Gesamtkosten + Balance (+ Plus/Minus bei geblowten Konten); Offene Trades,
+    // Trades Gesamt, P/L realisiert und Winning Days sind raus (WDs stehen in den Trading Objectives)
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        ${adIsLive ? '' : `<div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,color-mix(in srgb, var(--violet) 10%, transparent),color-mix(in srgb, var(--teal) 7%, transparent));border:1px solid color-mix(in srgb, var(--violet) 30%, transparent)">
+        ${adIsLive ? '' : `<div class="kpi" style="flex:0 1 240px;min-width:170px;padding:14px 18px;background:linear-gradient(135deg,color-mix(in srgb, var(--violet) 10%, transparent),color-mix(in srgb, var(--teal) 7%, transparent));border:1px solid color-mix(in srgb, var(--violet) 30%, transparent)">
           <div class="kpi-label" style="color:var(--violet)">Gesamtkosten</div>
           <div class="kpi-value tnum" style="font-size:20px;color:var(--violet)">${adGkStr}</div>
           ${adGkSub}
         </div>`}
-        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+        <div class="kpi" style="flex:0 1 240px;min-width:170px;padding:14px 18px">
           <div class="kpi-label">Balance</div>
           <div class="kpi-value tnum" style="font-size:18px" id="ad-bal-wert">${adBalStr}</div>
           ${adLiveSrc ? `<div style="font-size:10px;color:var(--violet);font-weight:500;margin-top:2px">Live · ${adLiveSrc}</div>` : ''}
         </div>
-        <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
-          <div class="kpi-label">Offene Trades</div>
-          <div class="kpi-value tnum" style="font-size:18px">${openPlans}</div>
-        </div>
-        <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
-          <div class="kpi-label">Trades Gesamt</div>
-          <div class="kpi-value tnum" style="font-size:18px">${donePlans}</div>
-        </div>
-        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
-          <div class="kpi-label">P/L realisiert</div>
-          <div class="kpi-value tnum ${totalPl>=0?'delta-pos':'delta-neg'}" style="font-size:18px">${totalPl>=0?'+':''}$${totalPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
-        </div>
-        ${adZiel ? `<div class="kpi" style="flex:1;min-width:135px;padding:14px 18px">
-          <div class="kpi-label">🏆 ${zielLabel(acc)}</div>
-          <div class="kpi-value tnum" style="font-size:18px;color:${adZiel.done ? 'var(--good)' : 'var(--violet)'}">${Math.min(adZiel.count, adZiel.target)}/${adZiel.target}${adZiel.done ? ' ✓' : ''}</div>
-          <div style="margin-top:5px;margin-left:-6px">${zielDotsHtml(adZiel)}</div>
-        </div>` : ''}
         ${adGainLoss ? `<div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
           <div class="kpi-label">💀 Plus (Live)</div>
           <div class="kpi-value tnum delta-pos" style="font-size:18px">+${adGainLoss.gainEur.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})} €</div>
@@ -44398,7 +44410,7 @@
     const actCountEl = document.getElementById('ad-act-count')
     const actSumEl   = document.getElementById('ad-act-summary')
     if(actEl){
-      const txs = (transactions||[]).filter(t=>String(t.accountId)===String(acc.id))
+      const txs = (transactions||[]).filter(t=>String(t.accountId)===String(acc.id) && t.kind !== 'payout')   // K2: Payouts stehen im Payout-Verlauf
       const items = [
         ...acPlans.filter(p=>p.status==='completed').map(p=>({
           type:'trade', date: p.completedAt||p.plannedFor||'', obj:p
@@ -44440,29 +44452,27 @@
           // dessen Speichern zieht die Live-P/L-Buchungen über die Plan-
           // Kennung im Notiz-Feld nach (upsertAutoTransaction), die Finanzen
           // folgen also von selbst. Eigene Verdrahtung unten, kein Sammel-Handler.
-          return `<div data-ad-plan="${escapeHtml(String(p.id))}" title="Klicken: Trade bearbeiten (P&L, Notiz)" style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer">
-            <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'var(--good-ink, #15803d)':'var(--danger-ink, #b91c1c)'};margin-top:5px;flex-shrink:0"></span>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px">${escapeHtml(wdHedge ? 'Winning Day' : isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${wdHedge ? 'Fusion-Hedge' : isMaster?'Slave':'Master'}</span> <span style="font-size:11px;color:var(--sub-2);font-weight:400">✎</span></div>
-              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-weight:700;font-size:13px;${plCls}">${pl>=0?'+':''}$${pl.toLocaleString('de-DE',{minimumFractionDigits:0})}</div>
-              ${otherHasPl ? `<div style="font-size:10.5px;${otherCls};margin-top:2px">${otherLabel}${(otherIsLive || wdHedge)?' 🔴':''}: ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</div>` : ''}
-            </div>
+          // K2 (Finn 05.11.2026: „Trade-Verlauf kleiner/kompakter"): eine Zeile je Trade — Datum · Gegenseite bzw. Weg · Gegen-P&L · P&L
+          const wegName = { tvv2: 'Orbit', mt5: 'Echo', mt5v2: 'Echo V2', tsv2: 'Topstep V2', tvplus: 'Duplikum', polar: 'Polar', nova: 'Nova' }[p.route] || 'Trade'
+          const gegen = wdHedge ? 'Winning Day → Fusion-Hedge' : isMaster ? (p.slaveName ? p.slaveName + ' → Slave' : wegName) : ((p.masterName || '—') + ' → Master')
+          const kurzDatum = p.completedAt ? new Date(p.completedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'
+          return `<div data-ad-plan="${escapeHtml(String(p.id))}" title="Klicken: Trade bearbeiten (P&L, Notiz) · ${escapeHtml(dateLabel)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px">
+            <span style="width:7px;height:7px;border-radius:50%;background:${pl>=0?'var(--good-ink, #15803d)':'var(--danger-ink, #b91c1c)'};flex-shrink:0"></span>
+            <span style="color:var(--sub);font-size:11.5px;min-width:62px;font-variant-numeric:tabular-nums">${escapeHtml(kurzDatum)}</span>
+            <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(gegen)}${p.status==='completed' ? '' : ' <span style="color:var(--sub);font-size:11px">· offen</span>'}</span>
+            ${otherHasPl ? `<span style="font-size:11px;${otherCls};white-space:nowrap">${otherLabel}${(otherIsLive || wdHedge)?' 🔴':''} ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</span>` : ''}
+            <span style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${plCls}">${pl>=0?'+':'−'}$${Math.abs(pl).toLocaleString('de-DE',{minimumFractionDigits:0})}</span>
           </div>`
         } else {
           const t = item.obj
           const amt = Number(t.amount||0)
           const amtCls = amt>=0?'color:var(--good-ink, #15803d)':'color:var(--danger-ink, #b91c1c)'
-          const dateLabel = t.date ? new Date(t.date).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
-          return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
-            <span style="width:8px;height:8px;border-radius:50%;background:var(--sub-2);margin-top:5px;flex-shrink:0"></span>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px">${escapeHtml(t.description||t.kind||'Buchung')}</div>
-              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${dateLabel} · Account-${t.kind==='account_purchase'?'Kauf':'Buchung'} (auto)</div>
-            </div>
-            <span style="font-weight:700;font-size:13px;${amtCls}">${amt>=0?'+':''}${Number(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+          const kurzDatum = t.date ? new Date(t.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'
+          return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex-shrink:0"></span>
+            <span style="color:var(--sub);font-size:11.5px;min-width:62px;font-variant-numeric:tabular-nums">${escapeHtml(kurzDatum)}</span>
+            <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.description||t.kind||'Buchung')} <span style="color:var(--sub);font-size:11px">· ${t.kind==='account_purchase'?'Kauf':'Buchung'}</span></span>
+            <span style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${amtCls}">${amt>=0?'+':'−'}${Math.abs(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
           </div>`
         }
       }).join('') : '<div style="padding:24px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Aktivität für diesen Account.</div>'

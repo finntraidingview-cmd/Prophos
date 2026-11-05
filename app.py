@@ -37107,9 +37107,7 @@ def kz_rechnen(a, ctx):
                        (f"≥ {kz_usd(mn.get('usd'))}" if mn_gilt else f"ab Zyklus {mn.get('ab_zyklus')}") if mn.get("an") else "aus"])
         if wz and wz.get("art") != "tradeify" and wz.get("firma_key"):
             checks.append(["info", "Recoverer", ("aktiv · Tagesverlust " + kz_usd(-wz["verlust"])) if wz.get("aktiv") else "aus"])
-        if a.get("payout_ready_at"):
-            frei = str(a["payout_ready_at"])[:10] <= str(ctx.get("jetzt") or datetime.now(timezone.utc).isoformat())[:10]
-            checks.append(["ok" if frei else "nein", "Payout ab", kz_tag(a["payout_ready_at"])])
+        # „Payout ab" (Tage) gibt es nur bei CFD — bei Futures zählen nur die Winning Days (Finn 05.11.2026, K2)
         bekannt = ist is not None and soll
         ok = bool(bekannt and ist >= soll and cons_ok and mn_ok and not any(c[0] == "nein" for c in checks))
         fehlt = [c[1] for c in checks if c[0] == "nein"]
@@ -37119,7 +37117,28 @@ def kz_rechnen(a, ctx):
                          "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if bekannt else "am Konto kein Ziel (goal_target)", "checks": checks}
     kach.append(kz_trades_kachel(phase, (out.get("zyklus") or {}).get("seit")))
     out["kacheln"] = kach
+    out["payouts"] = kz_payouts(*ctx["payouts"]) if ctx.get("payouts") else None
     return out
+
+
+def kz_payouts(pend, verw, buch):
+    """REIN (testbar, K2 Finn 05.11.2026: „darunter ein Payout-Verlauf"): Payouts eines Kontos → [{datum, betrag, waehrung, status}] neueste zuerst.
+    pending_payouts: status pending → „angefragt", received → „erhalten" (Datum = received_at, sonst requested_at), sonst der Status selbst;
+    transactions kind payout ohne Anfrage, die auf sie zeigt (received_tx_id) → „erhalten"; managed_payouts → „verbucht". Nichts gerechnet."""
+    verknuepft = {str(z.get("received_tx_id")) for z in pend or () if z.get("received_tx_id")}
+    out = []
+    for z in pend or ():
+        st = str(z.get("status") or "pending")
+        d = (z.get("received_at") if st == "received" else None) or z.get("requested_at") or z.get("created_at")
+        out.append({"datum": str(d or "")[:10], "betrag": _wd_num(z.get("amount")), "waehrung": z.get("currency") or "USD",
+                    "status": {"pending": "angefragt", "received": "erhalten"}.get(st, st)})
+    for t in buch or ():
+        if str(t.get("id")) in verknuepft:
+            continue
+        out.append({"datum": str(t.get("occurred_at") or "")[:10], "betrag": _wd_num(t.get("amount")), "waehrung": t.get("currency") or "EUR", "status": "erhalten"})
+    for z in verw or ():
+        out.append({"datum": str(z.get("payout_date") or z.get("created_at") or "")[:10], "betrag": _wd_num(z.get("amount")), "waehrung": "USD", "status": "verbucht"})
+    return sorted(out, key=lambda x: x["datum"], reverse=True)
 
 
 def kz_darf(uid, konto_uid, admin, gruppe):
@@ -37178,20 +37197,26 @@ def konto_ziele():
         ctx["peak"] = liq_peak({}, a, None, verlauf)
         ctx["peak_eod"] = liq_peak({"started_at": jetzt, "master_account_id": kid}, a, bal, verlauf,
                                    eod_tagesstart=kz_tagesstart(kz_phase_plaene(plaene, typ), bal, jetzt)[0], eod=True)
+        if typ in ("funded_cfd", "funded", "winning_days"):
+            # Payout-Zeilen EINMAL lesen (K2: dazu Betrag/Status für den Payout-Verlauf); Zählung/Zyklus unverändert aus denselben Zeilen
+            pend = _sb_all("pending_payouts", {"select": "id,account_id,amount,currency,requested_at,status,received_at,received_tx_id,created_at",
+                                               "account_id": f"eq.{kid}"}) or []
+            verw = _sb_all("managed_payouts", {"select": "id,account_id,amount,payout_date,created_at", "account_id": f"eq.{kid}"}) or []
+            buch = _sb_all("transactions", {"select": "id,account_id,amount,currency,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or []
+            ctx["payouts"] = (pend, verw, buch)
         if typ == "funded_cfd":
             ctx["fcp_regel"] = _fcp_regeln_laden() or {}
-            ctx["fcp_pay"] = (_sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at", "account_id": f"eq.{kid}"}) or [],
-                              _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"eq.{kid}"}) or [],
-                              _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or [])
+            ctx["fcp_pay"] = ctx["payouts"]
         elif typ in ("funded", "winning_days"):
             ctx["wd_firmen_regeln"] = _wd_firmen_regeln_lesen()
             pay, verkn = [], set()
-            for t in _sb_all("pending_payouts", {"select": "account_id,requested_at,status,received_tx_id", "account_id": f"eq.{kid}",
-                                                 "status": "in.(pending,received)"}) or []:
+            for t in pend:                             # wie bisher: nur pending/received zählen für den Zyklus
+                if str(t.get("status") or "") not in ("pending", "received"):
+                    continue
                 pay.append(t)
                 if t.get("received_tx_id"):
                     verkn.add(str(t["received_tx_id"]))
-            for t in _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or []:
+            for t in buch:
                 if str(t.get("id")) not in verkn and t.get("occurred_at"):
                     pay.append({"requested_at": str(t["occurred_at"])[:10], "status": "received"})
             ctx["wd_pay"] = pay
