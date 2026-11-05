@@ -64367,7 +64367,7 @@
    * _ap_hedge_mit_freigeben). Dieser Block zeigt nur noch die Altlast: schon bestätigt (z. B. vom Bot oder vor dem Umbau), Freigabe fehlt —
    * derselbe eine Knopf gibt frei. Unbestätigte Hedge-Pläne zeigt er nicht mehr (die stehen in „Zu bestätigen"). ══ */
   const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
-  const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
+  const AHF_ART = { tradeify_final: ['Final', 'Finaler Trade (Tradeify, Lucid): startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],   // LF1 06.11.2026: firmenneutral, Schlüssel bleibt
                     apex: ['Orbit Prio 2', 'Orbit Prio 2: Challenge auf dem Winning-Day-Weg mit Fusion-Hedge (Apex und jede Firma mit Modell „Orbit Prio 2“)'],   // MO1 05.11.2026
                     // APEX-WD BESTÄTIGEN (Finn 02.11.2026 04:30: „alle Apex-Trades kurz einzeln bestätigen … nur Apex"): Farmer-Winning-Day einer Firma aus
                     // wd_farmer_regeln.bestaetigen_firmen — GET /hedge-freigabe liefert ihn mit wd:true, ✓ setzt hedge_freigabe_at, der Claim-Riegel hält bis dahin
@@ -86978,7 +86978,7 @@
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
     if(z && (z.hedge_art === 'apex')) return [modellName('orbit_prio2'), 'hedge']   // MK1 05.11.2026: Prio-2-Plan (ah_tick) heißt „Orbit Prio 2“, nicht „WD-Weg + Hedge“ (echte WD-Pläne bleiben Winning Day)
     // FINAL-ANZEIGE (Finn 30.10.2026 ~08:10: „sieht nicht, dass dort gegengehedgt wird"): „Orbit" (MK1, früher „Orbit + Hedge") + Abzeichen „Final" (apgZeilenSchmuecken)
-    if(z && (z.hedge_art === 'tradeify_final')) return [modellName('orbit'), 'hedge', 'Finaler Tradeify-Trade: Orbit mit Fusion-Gegenhedge — der Blow deckt den Kontowert']
+    if(z && (z.hedge_art === 'tradeify_final')) return [modellName('orbit'), 'hedge', 'Finaler Trade (Tradeify, Lucid): Orbit mit Fusion-Gegenhedge — der Blow deckt den Kontowert']
     // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
     // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
     // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
@@ -87001,7 +87001,7 @@
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
       const z = je.get(String(r.dataset.planId)), w = apgWeg(z), ort = r.querySelector('.pz-k2') || r.querySelector('.pz-k1'); if(!w || !ort || ort.querySelector('.apg-weg')) return
       const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; if(w[2]) c.title = w[2]; ort.appendChild(c)
-      if(z && z.hedge_art === 'tradeify_final'){ const f = document.createElement('span'); f.className = 'apg-weg final'; f.textContent = 'Final'; f.title = 'Finaler Trade dieses Tradeify-Kontos'; ort.appendChild(f) } })
+      if(z && z.hedge_art === 'tradeify_final'){ const f = document.createElement('span'); f.className = 'apg-weg final'; f.textContent = 'Final'; f.title = 'Finaler Trade dieses Kontos (Tradeify, Lucid)'; ort.appendChild(f) } })
     if(!apIstFunded()){ apgMasterFusion(root, je); apgHedgePaare(root, je, x) }
   }
   /* FINAL-ANZEIGE (Finn 30.10.2026 ~08:10, über den Master): Hedge-Pläne (hedge_art 'tradeify_final' | 'apex') zeigen ihre Ausgänge als Paare wie
@@ -87063,7 +87063,7 @@
         const grund = vs && vs.lots == null ? String(vs.grund || vs.fehler || '') : ''
         if(AHF_ART_KURZ[z.hedge_art] && vs && vs.lots != null){   // FINAL-ANZEIGE: TP/SL als Paar-Zeile (apgHedgePaare), hier nur Lots
           zellen.lots.appendChild(fus(`${z2(vs.lots, 2)}`, `Fusion-Gegenhedge: ${z2(vs.lots, 2)} Lot NAS100${vs.q ? ` · q ${vs.q} €/$` : ''}`)); return }
-        const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Orbit-Prio-2-Hedge' : z.hedge_art === 'tradeify_final' ? 'Tradeify-Final-Hedge' : 'Hedge'
+        const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Orbit-Prio-2-Hedge' : z.hedge_art === 'tradeify_final' ? 'Final-Hedge' : 'Hedge'
         if(!vs || (!grund && vs.lots == null)){ for(const c of Object.values(zellen)) c.appendChild(fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')); return }
         if(grund){ for(const c of Object.values(zellen)) c.appendChild(fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')); return }
         const ml = Number(z.menge), mult = vs.multiplier != null ? Number(vs.multiplier) : (ml > 0 ? Number(vs.lots) / ml : null)
@@ -89049,6 +89049,9 @@
       if(sel.gewinntage && typeof sel.gewinntage === 'object') bl += slider('Mindesttage', true, null, Object.entries(sel.gewinntage).map(([k, v]) => e3R(k === 'tp' ? 'TP' : k, e3Wert(v, ['gewinntage', k], k, admin, '$'))).join(''))
       if(sel.kette && typeof sel.kette === 'object') bl += slider('Topstep-Kette', true, null, E3_KETTE.filter(([k]) => E3_KETTE_KURZ.includes(k) && k in sel.kette).map(([k, label, einh]) => e3R(label, e3Wert(sel.kette[k], ['kette', k], k, admin, einh))).join(''))
       if(n === 'tradeify') bl += slider('Final-Trade mit Gegenhedge', !!(D.tradeify_final_hedge || {}).an, 'tradeify_final_hedge', '')
+      // LUCID-FINAL WIE TRADEIFY (LF1, Finn 06.11.2026): Lucid in regeln.tradeify_final_hedge.firmen — nur HT und nie Orbit Prio 2 (Emins Lucid bleibt bei
+      // Orbit Prio 2); der Hauptschalter steht bei Tradeify. Fehlt firmen (älteres Backend), kein Slider.
+      if(n === 'lucidtrading' && Array.isArray((D.tradeify_final_hedge || {}).firmen)) bl += slider(`Final-Trade mit Gegenhedge wie Tradeify (nur HT${(D.tradeify_final_hedge || {}).an ? '' : ' · Hauptschalter bei Tradeify aus'})`, D.tradeify_final_hedge.firmen.includes('lucid'), 'tradeify_final_hedge_lucid', '')
       const md = e3ModellWert(sel, D)
       if(!cfd && sel.route !== 'tsv2' && md === 'orbit_prio2') bl += slider('Orbit Prio 2 · Fusion-Hedge (Schalter für alle Prio-2-Firmen)', !!(D.apex_hedge || {}).an, 'apex_hedge', '')
       if(cfd) bl += slider('Echo statt Echo V2', !!(D.echo_hedge || {}).an, 'echo_hedge', '')   // MK1: Schalter heißt nach dem Modell
@@ -89278,8 +89281,9 @@
     const feld = cb.dataset.e3Schalter, an = !!cb.checked
     cb.disabled = true
     try{
-      const d = await apdApi('POST', '/ausgleich-einstellung', { [feld]: an })
-      if(feld === 'echo_hedge' && d.echo_hedge) _e3.d.echo_hedge = Object.assign({}, _e3.d.echo_hedge, { an: d.echo_hedge.an })
+      const d = await apdApi('POST', '/ausgleich-einstellung', feld === 'tradeify_final_hedge_lucid' ? { tradeify_final_hedge_firma: { firma: 'lucid', an } } : { [feld]: an })
+      if(feld === 'tradeify_final_hedge_lucid' && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { firmen: d.tradeify_final_hedge.firmen })
+      else if(feld === 'echo_hedge' && d.echo_hedge) _e3.d.echo_hedge = Object.assign({}, _e3.d.echo_hedge, { an: d.echo_hedge.an })
       else if(feld === 'apex_hedge' && d.apex_hedge) _e3.d.apex_hedge = Object.assign({}, _e3.d.apex_hedge, { an: d.apex_hedge.an })
       else if(feld === 'tradeify_final_hedge' && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { an: d.tradeify_final_hedge.an })
       else if(d.ausgleich) _e3.d.ausgleich = d.ausgleich

@@ -30891,7 +30891,13 @@ def ehv_tick(jetzt=None, force=False):
 # DB-Halte-Riegel (trade_plans_a_final_halten) hält ihn am Claim; Grund in mt5_baseline.tradeify_hedge, ⚪ einmal kurz vor dem Start.
 # Schalter auto_plan_regeln.regeln.tradeify_final_hedge.an (Standard AUS — dann gilt nur der Halte-Riegel); aus → umgestellte, nicht
 # gestartete Pläne zurück auf Orbit V2. Der Riegel trade_plans_kontoart_weg lässt genau diesen Weg durch (sql/2026-10-29_tradeify_final_hedge.sql).
-TFH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "max_lots": 60.0, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
+TFH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "max_lots": 60.0, "vorlauf_min": 20.0, "nachlauf_min": 30.0, "firmen": ("tradeify",)}
+# LUCID-FINAL WIE TRADEIFY (LF1, Finn 06.11.2026: „der letzte Trade bei Lucid komplett genau gleich wie bei Tradeify"): regeln.tradeify_final_hedge.firmen
+# nimmt weitere Futures-Firmen in diesen Weg — Tradeify ist immer drin (fehlt das Feld: nur Tradeify, bitgleich wie bisher). Zusatz-Firmen nur für HT-IDs
+# und nur, wo die Firma NICHT Orbit Prio 2 fährt (Emins Lucid = orbit_prio2 → bleibt bei ah_tick, ein Hedge je Plan). Die DB-Riegel (Halten, ein
+# finaler je ID, Kontoart-Weg) greifen bei der Zusatz-Firma nur an Plänen mit der Marke hedge_art 'tradeify_final' (sql/2026-11-06_lucid_final_hedge.sql).
+TFH_FIRMEN_ERLAUBT = ("tradeify", "lucid")
+TFH_FIRMA_NAME = {"tradeify": "Tradeify", "lucid": "Lucid"}
 TFH_SLAVE_PPL = 0.85          # € je Punkt und Lot Fusion — derselbe feste Wert wie hedgeMultAusRisiko im PC-Tab
 _tfh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
 
@@ -30906,7 +30912,33 @@ def tfh_param(regeln):
         v = _wd_num(roh.get(k))
         if v is not None and not isinstance(roh.get(k), bool) and lo <= v <= hi:
             out[k] = float(v)
+    fl = roh.get("firmen") if isinstance(roh.get("firmen"), list) else []   # LF1: Tradeify immer, dazu nur erlaubte Firmen, ohne Doppel
+    out["firmen"] = ("tradeify",) + tuple(sorted({str(x).strip().lower() for x in fl if str(x).strip().lower() in TFH_FIRMEN_ERLAUBT} - {"tradeify"}))
     return out
+
+
+def tfh_firma(firm, firmen=("tradeify",)):
+    """REIN RECHNEND (testbar): Schlüssel der Firma in diesem Weg ('tradeify' | 'lucid') oder None. Tradeify CFD nie; eine Zusatz-Firma nur, wenn sie
+    in firmen steht (tfh_param)."""
+    f = re.sub(r"[^a-z0-9]", "", str(firm or "").lower())
+    if "tradeify" in f:
+        return None if _ist_tradeify_cfd(firm) else "tradeify"
+    if "lucid" in f and "lucid" in (firmen or ()):
+        return "lucid"
+    return None
+
+
+def tfh_plan_dabei(p, firmen, gruppen_ids, fm, gm):
+    """REIN RECHNEND (testbar): gehört der geplante Plan p diesem Weg? Tradeify wie bisher (jede ID, die nicht ausgeblendet ist). Zusatz-Firma (LF1):
+    nur HT-IDs (nicht in einer Verwalter-Gruppe) und nur, wenn das Modell der Firma nicht Orbit Prio 2 ist (ah_tick hedgt dort jeden Plan)."""
+    k = tfh_firma(p.get("master_firm"), firmen)
+    if k is None:
+        return False
+    if k == "tradeify":
+        return True
+    if str(p.get("user_id")) in gruppen_ids:
+        return False
+    return ap_plan_modell(p, fm, gm) != "orbit_prio2"
 
 
 def ap_plan_final_text(notes, tp):
@@ -30974,8 +31006,13 @@ def tfh_stand(regeln=None):
         p = tfh_param(regeln if regeln is not None else _eh_regeln())
     except Exception as e:
         return {"an": None, "fehler": f"{type(e).__name__}: {e}"}
-    return {"an": p["an"], "netto_faktor": p["netto_faktor"], "max_lots": p["max_lots"], "umgestellt": _tfh["umgestellt"],
+    return {"an": p["an"], "netto_faktor": p["netto_faktor"], "max_lots": p["max_lots"], "firmen": list(p["firmen"]), "umgestellt": _tfh["umgestellt"],
             "ohne": _tfh["ohne"], "zurueck": _tfh["zurueck"], "fehler": _tfh["fehler"] or None, "letzt": _tfh["letzt"][-10:]}
+
+
+def tfh_name(p):
+    """Anzeigename der Firma eines Plans in diesem Weg (LF1): „Tradeify" | „Lucid" — für Tradeify bitgleich mit den bisherigen Texten."""
+    return TFH_FIRMA_NAME.get(tfh_firma(p.get("master_firm"), TFH_FIRMEN_ERLAUBT) or "tradeify", "Tradeify")
 
 
 def _tfh_spur(text):
@@ -31016,7 +31053,7 @@ def _tfh_ohne(p, code, grund, wer, jetzt):
         _tfh["ohne"] += 1
         _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: kein Gegenhedge — {grund}")
     if melden:
-        alarm_senden(3, "tradeify_final_ohne", "Finaler Tradeify-Trade ohne Gegenhedge",
+        alarm_senden(3, "tradeify_final_ohne", f"Finaler {tfh_name(p)}-Trade ohne Gegenhedge",   # Schlüssel tradeify_final_ohne bleibt (LF1)
                      f"{wer} · {p.get('master_name') or '—'}: startet nicht ohne Gegenhedge (bleibt geplant) — {grund}",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"tfh-ohne-{p['id']}")
 
@@ -31082,13 +31119,22 @@ def tfh_tick(jetzt=None, force=False):
     von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
     # alle geplanten (auch spätere/unbestätigte): Kennung hedge_art + Vorschau für den Block „Neue Hedge-Trades bestätigen"; umgestellt wird
     # nur im Fenster, bestätigt UND freigegeben (hedge_freigabe_at, sql/2026-10-29_hedge_freigabe.sql)
+    firmen_filter = {"master_firm": "ilike.*tradeify*"} if par["firmen"] == ("tradeify",) else \
+        {"or": "(" + ",".join(f"master_firm.ilike.*{k}*" for k in par["firmen"]) + ")"}   # LF1: Zusatz-Firmen (Lucid); ohne = bitgleich wie bisher
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_symbol,master_tp,richtung,"
                                             "start_um,notes,mt5_baseline,updated_at,auto_bestaetigt_at,hedge_freigabe_at",
                                   "status": "eq.planned", "route": "eq.tvv2", "orbit_v3": "not.is.true", "auto_plan": "is.true",
-                                  "start_um_gestartet_at": "is.null", "master_firm": "ilike.*tradeify*", "order": "start_um.asc"})
+                                  "start_um_gestartet_at": "is.null", **firmen_filter, "order": "start_um.asc"})
     namen, aus = _ap_namen()
-    aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
-    plaene = [p for p in roh if str(p.get("user_id")) not in aus and not _ist_tradeify_cfd(p.get("master_firm"))]
+    _gids = {str(u) for u in ap_planer_gruppen_ids()}
+    aus = set(aus) - _gids   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
+    if par["firmen"] == ("tradeify",):
+        plaene = [p for p in roh if str(p.get("user_id")) not in aus and not _ist_tradeify_cfd(p.get("master_firm"))]
+    else:   # LF1: Zusatz-Firma nur HT und nie Orbit Prio 2 (Gruppen-Modelle nicht lesbar → Zusatz-Firma diesen Takt aus, Tradeify läuft weiter)
+        _gm, _gm_fehler = ap_gruppen_modelle(mit_fehler=True) if roh else ({}, False)
+        _fm = regeln.get("firmen") or []
+        plaene = [p for p in roh if str(p.get("user_id")) not in aus and tfh_plan_dabei(p, par["firmen"], _gids, _fm, _gm)
+                  and (not _gm_fehler or tfh_firma(p.get("master_firm"), par["firmen"]) == "tradeify")]
     erg = {"umgestellt": 0, "ohne": 0}
     if not plaene:
         return erg
@@ -31157,7 +31203,7 @@ def tfh_tick(jetzt=None, force=False):
             try:
                 sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)})
                 if base.get("hedge_art") != "tradeify_final":
-                    _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler Tradeify erkannt — wartet auf Bestätigung im Challenge-Planer")
+                    _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler {tfh_name(p)} erkannt — wartet auf Bestätigung im Challenge-Planer")
             except Exception as e:
                 _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
             continue
@@ -31193,7 +31239,7 @@ def tfh_tick(jetzt=None, force=False):
                 "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"]}
         upd = {"orbit_v3": True, "hedge_eur": h["hedge_eur"], "hedge_faktor": h["hedge_faktor"], "multiplier": h["multiplier"],
                "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, tradeify_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit']} (finaler Tradeify, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit']} (finaler {tfh_name(p)}, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ",")).strip()}
         try:
             if not sb_update("trade_plans", _tfh_guard(p), upd):
@@ -31204,7 +31250,7 @@ def tfh_tick(jetzt=None, force=False):
         vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
         erg["umgestellt"] += 1
         _tfh["umgestellt"] += 1
-        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: {MODELL_NAME['orbit']} (finaler Tradeify) {h['lots']:.2f} Lot (q {h['q']}, Blow +{h['slave_risk']:.0f} €)")
+        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: {MODELL_NAME['orbit']} (finaler {tfh_name(p)}) {h['lots']:.2f} Lot (q {h['q']}, Blow +{h['slave_risk']:.0f} €)")
     return erg
 
 
@@ -38404,6 +38450,22 @@ def admin_auto_plan_ausgleich_einstellung():
             return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
         _tfh["at"] = 0.0
         print(f"[tradeify-hedge] Schalter {'AN' if body['tradeify_final_hedge'] else 'AUS'} ({uid})", flush=True)
+        return jsonify({"ok": True, "tradeify_final_hedge": tfh_stand(regeln)})
+    if "tradeify_final_hedge_firma" in body:   # LF1 (Finn 06.11.2026): Zusatz-Firma (Lucid) in den Final-Weg — regeln.tradeify_final_hedge.firmen;
+        tf_f = body["tradeify_final_hedge_firma"]   # der Hauptschalter .an bleibt, Tradeify ist immer drin
+        if not (isinstance(tf_f, dict) and tf_f.get("firma") in TFH_FIRMEN_ERLAUBT and tf_f.get("firma") != "tradeify"
+                and isinstance(tf_f.get("an"), bool)):
+            return jsonify({"ok": False, "msg": "tradeify_final_hedge_firma = {firma: lucid, an: true | false}"}), 400
+        tf_roh = regeln.get("tradeify_final_hedge") if isinstance(regeln.get("tradeify_final_hedge"), dict) else {}
+        alt = [k for k in tfh_param(regeln)["firmen"] if k != "tradeify"]
+        neu_f = sorted((set(alt) | {tf_f["firma"]}) if tf_f["an"] else (set(alt) - {tf_f["firma"]}))
+        regeln["tradeify_final_hedge"] = dict(tf_roh, firmen=["tradeify"] + neu_f)
+        try:
+            sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        _tfh["at"] = 0.0
+        print(f"[tradeify-hedge] Firma {tf_f['firma']} {'AN' if tf_f['an'] else 'AUS'} ({uid})", flush=True)
         return jsonify({"ok": True, "tradeify_final_hedge": tfh_stand(regeln)})
     neu = dict(ap_ausgleich_param(regeln))
     for k in ("aktiv", "auto_start"):
