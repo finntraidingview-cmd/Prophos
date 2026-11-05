@@ -50389,7 +50389,9 @@
   const DEFAULT_FIRM_SPECS = [
     { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
-    { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'$', dupSymbol:'US100.cash' },
+    // FS1 (05.11.2026, Befund S2 HX1): 1,00 statt 0,85 — MT5 US100.cash Kontraktgröße 1 = 1 $ je Punkt und Lot (wie sql/2026-10-08_ftmo_kernwerte.sql:34).
+    // Der alte Wert legte seit 08.10. bei 7 neuen Logins FTMO mit 0,85 an (Railway-Anzeigen × 0,85 zu klein) — Bestand: sql/2026-11-05_ftmo_ppl_seed_fix.sql
+    { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'US100.cash' },
     // 25.10.2026 (Finn): FTMO Futures eigene Futures-Firma neben FTMO (CFD) — bestehende Logins per sql/2026-10-25_ftmo_futures_firma.sql
     { name:'FTMO Futures',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FundedNext',    symbol:'',       unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NDX100' },
