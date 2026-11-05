@@ -16013,6 +16013,7 @@
       const { error } = await supabase.auth.setSession(sess)
       if(error) throw error
       localStorage.setItem(PROF_ACTIVE, userId)
+      try{ sessionStorage.setItem('prophos_arch_warten', String(userId)) }catch(_){}   // AC1: nach dem Neuladen erst das Archiv dieser ID (ARCH_WARTEN_SS)
       // NEU LADEN statt nur die View zu wechseln: dupState, tsState, pairs, Firm-Specs u.a.
       // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
       // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
@@ -43036,6 +43037,27 @@
    *   }
    * ====================================================================== */
   const ARCH_LS    = 'prophos_account_archive'
+  /* ARCHIV NACH ID-WECHSEL (AC1, Finn 05.11.2026: „Wenn ich IDs wechsle, zeigt Accounts 3–4 s lang auch alle archivierten Konten"): der Bucket einer ID
+   * ist der Stand vom letzten Verlassen — was seitdem archiviert wurde (Server: Blow/„Phase bestanden" schreibt user_settings 'archive' direkt,
+   * _konto_archiv_eintragen; andere Geräte), fehlt dort. Bis der Initial-Sync das Cloud-Archiv geholt hat, stand es in der Liste. Jetzt: nur direkt nach
+   * einem ID-Wechsel (sessionStorage-Merker aus profSwitchToKern, kein localStorage → keine Quota-Falle, in keinem Bucket) wartet die Liste im Lade-Zustand
+   * auf das Cloud-Archiv dieser ID (initialSyncFromSupabase holt es als ERSTEN Schlüssel), höchstens 6 s, dann der lokale Stand. Normales Neuladen unverändert. */
+  const ARCH_WARTEN_SS = 'prophos_arch_warten'
+  let _archWartenId = (() => { try{ return sessionStorage.getItem(ARCH_WARTEN_SS) || null }catch(_){ return null } })()
+  const _archWartenBis = Date.now() + 6000
+  function archWartet(){
+    if(!_archWartenId) return false
+    let uid = null; try{ uid = currentUserId }catch(_){}   // currentUserId steht weiter unten im Modul (let) — vor der Deklaration nicht lesbar
+    if(Date.now() > _archWartenBis || (uid && String(uid) !== _archWartenId)){ archWartenEnde(false); return false }
+    return true
+  }
+  function archWartenEnde(neuZeichnen = true){
+    if(!_archWartenId) return
+    _archWartenId = null
+    try{ sessionStorage.removeItem(ARCH_WARTEN_SS) }catch(_){}
+    if(neuZeichnen){ try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){} }
+  }
+  if(_archWartenId) setTimeout(() => archWartenEnde(true), 6100)   // Rückfall: Cloud nicht erreichbar → lokaler Stand
   const PARENT_LS  = 'prophos_account_parents'
 
   function getArchive(){
@@ -45350,6 +45372,11 @@
     // Filter-Dropdowns aktuell halten (Firmen-Liste kann sich ändern)
     if(typeof populateAccountFilters === 'function') populateAccountFilters()
 
+    if(archWartet()){   // AC1: nach ID-Wechsel erst das Archiv dieser ID — nie ein Bild mit inzwischen archivierten Konten
+      if(accEls.empty) accEls.empty.style.display = 'none'
+      accEls.table.innerHTML = '<tr><td colspan="7" style="color:var(--sub);font-size:13px;padding:22px 20px">Lade Accounts…</td></tr>'
+      return
+    }
     const archive = (typeof getArchive === 'function') ? getArchive() : {}
     const parents = (typeof getParents === 'function') ? getParents() : {}
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
@@ -79015,9 +79042,9 @@
 
   // Liste aller Keys die wir synchronisieren
   const SYNC_KEYS = [
+    'prophos_account_archive',   // AC1 (05.11.2026): zuerst — nach einem ID-Wechsel wartet die Accounts-Liste darauf (archWarten)
     'prophos_dup_links',
     'prophos_mirror_pairs',
-    'prophos_account_archive',
     'prophos_account_parents',
     'prophos_custom_firms',
     'prophos_kapitel'   // gewähltes Kapitel {id} — gleich auf Mac, PC und Handy (24.09.2026)
@@ -79141,6 +79168,7 @@
           migrated++
         }
         // wenn beide leer: nichts tun
+        if(lsKey === 'prophos_account_archive' && typeof archWartenEnde === 'function') archWartenEnde(true)   // AC1: Archiv dieser ID da → Liste zeichnen
       }
       console.log(`[sync] Initial-Sync fertig — ${downloaded} aus Cloud geladen, ${migrated} hochgeladen`)
       // UI-Refresh nach erfolgreichem Sync
@@ -79158,6 +79186,7 @@
       if(typeof mt5LoadLinks === 'function') mt5LoadLinks().catch(e => console.warn('[mt5links] init:', e))
     } finally {
       _syncInProgress = false
+      if(typeof archWartenEnde === 'function') archWartenEnde(true)   // AC1: auch bei Fehler im Sync nicht weiter warten
     }
   }
 
