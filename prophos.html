@@ -16936,14 +16936,24 @@
       // gezeichnet (Übersicht verzögert) wird nur bei Entsperrung mit dem Standard-Code (kein eigener Code, Flag '1') und ohne gemerkte
       // eingeschränkte Rolle — jeder Verwalter hat einen eigenen Code (Riegel sql/2026-10-30_verwalter_braucht_code.sql) und entsperrt mit '2'.
       // Sonst lädt die Übersicht sofort, der Planer zeigt „Lade Planer …" und öffnet erst mit der Verwalter-Erkennung (admData)
-      const planerJetzt = planerModus(), admFrisch = !!admData && Date.now() - (window._admLadeZeit || 0) <= ADM_CACHE_MS
+      // LD1 (05.11.2026): Stand einer anderen ID nie zeigen; gemerkten Stand DIESER ID (IndexedDB, beim Login vorgeladen) sofort übernehmen.
+      // Steht ein Stand dieser ID (Speicher oder gemerkt), ist die Verwalter-Erkennung schon da → Planer sofort, Übersicht still im Hintergrund.
+      admFremdWeg()
+      if(!admData) admGemerktUebernehmen(admQuery())
+      const admAlt = () => !admData || _admAusSpeicher || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS
+      const planerJetzt = planerModus(), admFrisch = !admAlt()
       const planerSchnell = eigenerCode === null && !eigenerCodeUnklar && !['verwalter', 'eigen'].includes(planerRolle())
-      const planerWarten = planerJetzt && !admFrisch && !planerSchnell
+      const planerWarten = planerJetzt && !admData && !planerSchnell
       if(!admFrisch){
-        if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)
+        if(planerJetzt && !planerWarten) setTimeout(() => { if(admAlt()) admLoad() }, 2500)
         else if(planerWarten){
           planerWarteSetzen(true)
-          admLoad().finally(() => { planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } })
+          let offen = false
+          const oeffnen = () => { if(offen) return; offen = true; planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } }
+          const p = admLoad()
+          // LD1: kommt der gemerkte Stand dieser ID erst jetzt aus IndexedDB (Vorladen lief noch), öffnet der Planer damit — die Übersicht lädt weiter
+          Promise.race([admStandVorladen(), new Promise(r => setTimeout(r, 450))]).then(() => { admGemerktUebernehmen(admQuery()); if(admData && admDataUid === String(currentUserId || '')) oeffnen() }).catch(() => {})
+          Promise.resolve(p).finally(oeffnen)
         }
         else admLoad()
       }
@@ -17023,94 +17033,183 @@
       return `<small>Master-P&L ${v == null ? '—' : admUsdSign(v)}</small>`
     }
 
-    window._admLaden = () => admLoad()   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026)
+    window._admLaden = o => admLoad(o)   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026); LD1: { frisch: true } nach eigenem Schreiben
     // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
-    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender(); kasseReiterFuer(eigenerCode); admGruppeChips() }
+    window._admStub = d => { admData = d; window._admData = d; admDataUid = String(currentUserId || ''); admDataQ = admQuery(); admPersonColorsBauen(); admRender(); admFinRender(); kasseReiterFuer(eigenerCode); admGruppeChips() }
     window._admKapStub = d => admKapitelRender(d)   // Entwickler-Haken wie _admStub: Kapitel/Statistik mit Stub-Daten zeichnen (24.09.2026)
-    async function admLoad(){
+    /* LD1 SOFORTSTAND JE ID (Master 05.11.2026, Finn: „Wenn ich auf Challenge-Planer oder Funded-Planer drücke, lädt es immer 5–6 Sekunden … auch wenn
+     * ich ins Admin gehe, egal welche ID"). Gemessen (Railway 12 h): /admin/overview p90 ~3,5–4 s, bis 5,5 s. Bis .2066 versteckte admLoad den ganzen
+     * Admin bei JEDEM Laden („Lade Übersicht…"), nach Neuladen/ID-Wechsel gab es keinen Stand, und der Planer wartete mit eigenem Code auf die Übersicht
+     * (Verwalter-Erkennung), bevor er selbst lud → Kette Übersicht + Planer ≈ 5–6 s. Jetzt:
+     *  (1) die letzte Antwort je ID liegt in IndexedDB (Schlüssel = user_id, mit der Abfrage q; höchstens 12 h alt) — beim Login vorgeladen und beim
+     *      Öffnen SOFORT gezeichnet, frisch wird still im Hintergrund nachgeladen (Knopf ↻ zeigt „⋯"); eine andere ID sieht nie diesen Stand
+     *      (Eintrag je ID, Anwenden nur bei gleicher ID + gleicher Abfrage, Antwort einer inzwischen gewechselten ID wird verworfen);
+     *  (2) mit Stand im Speicher bleibt der Admin beim Nachladen sichtbar (statt ausgeblendet), ein Fehler lässt den Stand stehen und nennt seine Zeit;
+     *  (3) gleichzeitige Ladewünsche derselben ID + Abfrage teilen EINEN Abruf (Admin, Planer, Funded CFD, Farmer); ↻ und Laden nach eigenem
+     *      Schreiben (window._admLaden({ frisch: true })) holen immer neu — mit frisch=1 auch am Server-Kurzcache (20 s) vorbei.
+     * Inhalt und Rechnung der Übersicht unverändert; nur wann gezeichnet wird. */
+    const ADM_IDB = 'prophos_adm_stand', ADM_IDB_MAX_MS = 12 * 3600 * 1000
+    let admDataUid = null, admDataQ = null, _admAusSpeicher = false, _admGemerkt = null, _admVorladen = null, _admLauf = null
+    function admIdb(){
+      return new Promise((res, rej) => {
+        try{ const r = indexedDB.open(ADM_IDB, 1); r.onupgradeneeded = () => { try{ r.result.createObjectStore('kv') }catch(_){} }
+          r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }catch(e){ rej(e) }
+      })
+    }
+    async function admStandLesen(uid){
+      const db = await admIdb()
+      return new Promise(res => { try{ const g = db.transaction('kv', 'readonly').objectStore('kv').get(uid); g.onsuccess = () => res(g.result || null); g.onerror = () => res(null) }catch(_){ res(null) } })
+    }
+    async function admStandSchreiben(uid, q, t){
+      if(!uid || typeof t !== 'string') return
+      try{ const db = await admIdb(); const st = db.transaction('kv', 'readwrite').objectStore('kv'); st.put({ uid, q, at: Date.now(), t }, uid) }catch(_){}
+      if(_admGemerkt && _admGemerkt.uid === uid) _admGemerkt = null   // Speicher-Stand ist jetzt admData selbst
+    }
+    // beim Login (showDashboard) und beim ersten Öffnen: Eintrag DIESER ID lesen (je ID genau einer)
+    function admStandVorladen(){
+      const uid = String(currentUserId || ''); if(!uid || typeof indexedDB === 'undefined') return Promise.resolve(null)
+      if(_admVorladen && _admVorladen.uid === uid) return _admVorladen.p
+      const p = admStandLesen(uid).then(e => {
+        if(e && e.uid === uid && typeof e.t === 'string' && Date.now() - (Number(e.at) || 0) < ADM_IDB_MAX_MS && uid === String(currentUserId || '')) _admGemerkt = e
+        return _admGemerkt
+      }).catch(() => null)
+      _admVorladen = { uid, p }
+      return p
+    }
+    window._admStandVorladen = admStandVorladen
+    // Abfrage der Übersicht (vorher inline in admLoad) — auch der Schlüssel, unter dem der Stand gilt
+    function admQuery(){
+      // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
+      // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
+      let kap = window._kapitel ? window._kapitel.aktiv : 'alle'
+      const gq = typeof window._admGruppeQ === 'function' ? window._admGruppeQ('') : ''
+      // VERWALTER-GRUPPE = NUR SEIT DEM NEUSTART (12.10.2026, Finn: „immer nur die Daten nach dem Neustart" — Chip „Emin" zeigte
+      // unter „Alle" auch Emins archivierte 111 Konten, 23.900 € Kauf → Payouts-Saldo ≈ −26.000): eine gewählte Verwalter-Gruppe
+      // lädt wie Emins eigener Login (kapitelFuerLogin) nur die Neue Ära (2)
+      if(kap === 'alle' && gq) kap = 2
+      // Gruppenfilter (08.10.2026): ?gruppe= wie ?kapitel= — der Server blendet die übrigen IDs aus (Summen stimmen mit der Liste)
+      // ansicht=admin (Nachbesserung A, 08.10.2026): nur Admin-Reiter schicken es — ein Verwalter bekommt seine Gruppe NUR hier, sein
+      // PC-Tab (Start, Endlesung, Hedge …) ohne den Marker wie bisher nur die eigene ID
+      return ['ansicht=admin', kap !== 'alle' ? `kapitel=${encodeURIComponent(kap)}` : '', gq].filter(Boolean).join('&')
+    }
+    // gemerkten Stand übernehmen — nur gleiche ID UND gleiche Abfrage, nur wenn noch nichts im Speicher ist
+    function admGemerktUebernehmen(q){
+      const uid = String(currentUserId || ''), e = _admGemerkt
+      if(admData || !uid || !e || e.uid !== uid || e.q !== q) return false
+      try{ admAnwenden(JSON.parse(e.t), Number(e.at) || 0, q, uid, true); return true }catch(err){ console.warn('[adm] gemerkter Stand', err); _admGemerkt = null; return false }
+    }
+    // fremde ID im Speicher (Login gewechselt ohne Neuladen) → weg, bevor irgendetwas zeichnet
+    function admFremdWeg(){ const uid = String(currentUserId || ''); if(admData && admDataUid !== uid){ admData = null; window._admData = null; admDataQ = null; _admAusSpeicher = false } }
+    function admLaedtZeigen(an){
+      const b = $('adm-refresh'); if(!b) return
+      b.textContent = an ? '⋯' : '↻'
+      b.title = an ? `Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'} · aktualisiere …` : 'Neu laden'
+    }
+    function admAnwenden(d, at, q, uid, ausSpeicher){
+      const msg = $('adm-msg'), body = $('adm-body')
+      admData = d; admDataUid = uid; admDataQ = q; _admAusSpeicher = !!ausSpeicher
+      try{ planerRolleMerken(d) }catch(_){}   // PLANER-TAB: Rolle dieser ID für die Sitzung (Verwalter zuerst)
+      if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
+      window._admLadeZeit = at
+      window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
+      // Lesbare Namen: seit 28.08.2026 liefert der Server die
+      // user_metadata-Namen ("Pascal", "Moritz") direkt als person/name mit
+      // (person_mail/mail = E-Mail daneben) — vorher kannte er nur die
+      // E-Mail. Der lokale Profil-Umschalter (prophos_profiles) gewinnt
+      // weiterhin, wo er die Person kennt; danach ziehen Filter, Balken,
+      // Tabelle UND Suche automatisch den Namen.
+      const nameById = new Map()
+      for(const p of (typeof profList === 'function' ? profList() : [])){
+        if(p && p.userId && p.name) nameById.set(String(p.userId), p.name)
+      }
+      const personName = (uid, fallback) => nameById.get(String(uid)) || admShortName(fallback || uid)
+      for(const r of (d.accounts || [])){ r.email = r.person_mail || r.person; r.person = personName(r.user_id, r.person) }
+      for(const p of (d.people || [])){ p.email = p.mail || p.name; p.name = personName(p.user_id, p.name) }
+      for(const t of (d.pending_payouts || [])){ t.person = personName(t.user_id, t.person) }
+      for(const t of (d.trades_heute || [])){ t.person = personName(t.user_id, t.person) }
+      ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
+
+      // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
+      // Summen, ohne dass man es der Auswertung ansieht. Der Server nennt sie
+      // per E-Mail; der Profil-Umschalter kennt dazu den Namen.
+      const nameByMail = new Map()
+      for(const p of (typeof profList === 'function' ? profList() : [])){
+        if(p && p.email && p.name) nameByMail.set(String(p.email).toLowerCase(), p.name)
+      }
+      const ex = (d.excluded || []).map(m => nameByMail.get(String(m).toLowerCase()) || admShortName(m))
+      $('adm-excluded-note').textContent = ex.length
+        ? `Nicht enthalten: ${ex.join(', ')} — nutzt Prophos eigenständig. `
+        : ''
+
+      const selP = $('adm-person'), curP = selP.value, curPName = selP.selectedOptions[0]?.textContent || curP
+      selP.innerHTML = '<option value="">Alle Personen</option>' +
+        (d.people || []).map(p => `<option value="${escapeHtml(p.user_id)}">${escapeHtml(p.name)}</option>`).join('')
+      selP.value = curP
+      // Review-Finding 24.09.2026 (K21): die von admKapPersonOeffnen angelegte Option einer ausgeblendeten
+      // Person verschwand hier still (value → '') — die Übersicht zeigte alle, ohne es zu sagen.
+      if(curP && selP.value !== curP){
+        selP.value = ''
+        if(typeof atToast === 'function') atToast(`Person „${curPName}" ist im Admin ausgeblendet — Filter: alle Personen`, 'warn')
+      }
+      const selF = $('adm-firm'), curF = selF.value
+      selF.innerHTML = '<option value="">Alle Firmen</option>' +
+        (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
+      selF.value = curF
+      msg.style.display = 'none'; body.hidden = false
+      kasseReiterFuer(eigenerCode)   // Admin-Gruppen (08.10.2026): Verwalter erst mit dieser Antwort erkennbar → Reiter + HT-Schalter
+      admGruppeChips()               // Finns Gruppenfilter (Namen aus id_gruppen)
+      if(eigenerCode && !$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()   // WD-Blöcke warteten auf die Gruppe (window._admGruppeOk)
+      else if(!$('adm-pane-wd')?.hidden) window._wdNeuZeichnen?.()          // .1773: Sicht jetzt sicher bekannt → Farmer sofort mit ihr zeichnen, nicht erst im Takt
+      admKapChipRender()       // Hinweis-Chip „Kapitel: …" in der Toolbar (24.09.2026)
+      admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
+      admRender()
+      admBuysRender()
+      admFinRender()
+      admKontenRender()   // Alle Accounts (13.10.2026)
+      window._admPcsOeffnen?.()   // PC-Tabs (08.10.2026): Namen der IDs kommen aus dieser Antwort
+    }
+    async function admLoad(opt){
+      const frisch = !!(opt && opt.frisch === true)   // Klick-Event (alter Aufruf) zählt nicht als frisch
       const msg = $('adm-msg'), body = $('adm-body')
       if(!msg) return
-      msg.style.display = ''; msg.textContent = 'Lade Übersicht…'; body.hidden = true
+      admFremdWeg()
+      const uid0 = String(currentUserId || '')
+      let q = admQuery()
+      if(!admData){   // nichts im Speicher (Neuladen, ID-Wechsel): gemerkten Stand dieser ID sofort zeigen (Lesen ≤ 0,4 s abwarten)
+        try{ await Promise.race([admStandVorladen(), new Promise(r => setTimeout(r, 400))]) }catch(_){}
+        if(uid0 !== String(currentUserId || '')) return
+        q = admQuery(); admGemerktUebernehmen(q)
+      }
+      if(!frisch && _admLauf && _admLauf.uid === uid0 && _admLauf.q === q) return _admLauf.p   // läuft schon: denselben Abruf teilen
+      const lauf = { uid: uid0, q, p: null }
+      _admLauf = lauf
+      lauf.p = admLaden(lauf, frisch, msg, body).finally(() => { if(_admLauf === lauf) _admLauf = null })
+      return lauf.p
+    }
+    async function admLaden(lauf, frisch, msg, body){
+      const uid0 = lauf.uid, q = lauf.q
+      const standDa = () => !!admData && admDataUid === uid0 && admDataQ === q
+      if(standDa()) admLaedtZeigen(true)
+      else { msg.style.display = ''; msg.textContent = 'Lade Übersicht…'; body.hidden = true }
       try{
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
         if(!tok) throw new Error('nicht angemeldet')
-        // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
-        // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
-        let kap = window._kapitel ? window._kapitel.aktiv : 'alle'
-        // VERWALTER-GRUPPE = NUR SEIT DEM NEUSTART (12.10.2026, Finn: „immer nur die Daten nach dem Neustart" — Chip „Emin" zeigte
-        // unter „Alle" auch Emins archivierte 111 Konten, 23.900 € Kauf → Payouts-Saldo ≈ −26.000): eine gewählte Verwalter-Gruppe
-        // lädt wie Emins eigener Login (kapitelFuerLogin) nur die Neue Ära (2)
-        if(kap === 'alle' && window._admGruppeQ('')) kap = 2
-        // Gruppenfilter (08.10.2026): ?gruppe= wie ?kapitel= — der Server blendet die übrigen IDs aus (Summen stimmen mit der Liste)
-        // ansicht=admin (Nachbesserung A, 08.10.2026): nur Admin-Reiter schicken es — ein Verwalter bekommt seine Gruppe NUR hier, sein
-        // PC-Tab (Start, Endlesung, Hedge …) ohne den Marker wie bisher nur die eigene ID
-        const q = ['ansicht=admin', kap !== 'alle' ? `kapitel=${encodeURIComponent(kap)}` : '', window._admGruppeQ('')].filter(Boolean).join('&')
-        const r = await fetch(`${WATCHER_HOME}/admin/overview` + (q ? '?' + q : ''),
+        const r = await fetch(`${WATCHER_HOME}/admin/overview?` + q + (frisch ? '&frisch=1' : ''),
                               { headers: { 'sb-token': tok }, cache:'no-store' })
-        const d = await r.json()
+        const t = await r.text()
+        let d = {}; try{ d = JSON.parse(t) }catch(_){ if(r.ok) throw new Error('Antwort nicht lesbar') }
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
-        admData = d
-        try{ planerRolleMerken(d) }catch(_){}   // PLANER-TAB: Rolle dieser ID für die Sitzung (Verwalter zuerst)
-        if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
-        window._admLadeZeit = Date.now()
-        window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
-        // Lesbare Namen: seit 28.08.2026 liefert der Server die
-        // user_metadata-Namen ("Pascal", "Moritz") direkt als person/name mit
-        // (person_mail/mail = E-Mail daneben) — vorher kannte er nur die
-        // E-Mail. Der lokale Profil-Umschalter (prophos_profiles) gewinnt
-        // weiterhin, wo er die Person kennt; danach ziehen Filter, Balken,
-        // Tabelle UND Suche automatisch den Namen.
-        const nameById = new Map()
-        for(const p of (typeof profList === 'function' ? profList() : [])){
-          if(p && p.userId && p.name) nameById.set(String(p.userId), p.name)
-        }
-        const personName = (uid, fallback) => nameById.get(String(uid)) || admShortName(fallback || uid)
-        for(const r of (d.accounts || [])){ r.email = r.person_mail || r.person; r.person = personName(r.user_id, r.person) }
-        for(const p of (d.people || [])){ p.email = p.mail || p.name; p.name = personName(p.user_id, p.name) }
-        for(const t of (d.pending_payouts || [])){ t.person = personName(t.user_id, t.person) }
-        for(const t of (d.trades_heute || [])){ t.person = personName(t.user_id, t.person) }
-        ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
-
-        // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
-        // Summen, ohne dass man es der Auswertung ansieht. Der Server nennt sie
-        // per E-Mail; der Profil-Umschalter kennt dazu den Namen.
-        const nameByMail = new Map()
-        for(const p of (typeof profList === 'function' ? profList() : [])){
-          if(p && p.email && p.name) nameByMail.set(String(p.email).toLowerCase(), p.name)
-        }
-        const ex = (d.excluded || []).map(m => nameByMail.get(String(m).toLowerCase()) || admShortName(m))
-        $('adm-excluded-note').textContent = ex.length
-          ? `Nicht enthalten: ${ex.join(', ')} — nutzt Prophos eigenständig. `
-          : ''
-
-        const selP = $('adm-person'), curP = selP.value, curPName = selP.selectedOptions[0]?.textContent || curP
-        selP.innerHTML = '<option value="">Alle Personen</option>' +
-          (d.people || []).map(p => `<option value="${escapeHtml(p.user_id)}">${escapeHtml(p.name)}</option>`).join('')
-        selP.value = curP
-        // Review-Finding 24.09.2026 (K21): die von admKapPersonOeffnen angelegte Option einer ausgeblendeten
-        // Person verschwand hier still (value → '') — die Übersicht zeigte alle, ohne es zu sagen.
-        if(curP && selP.value !== curP){
-          selP.value = ''
-          if(typeof atToast === 'function') atToast(`Person „${curPName}" ist im Admin ausgeblendet — Filter: alle Personen`, 'warn')
-        }
-        const selF = $('adm-firm'), curF = selF.value
-        selF.innerHTML = '<option value="">Alle Firmen</option>' +
-          (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
-        selF.value = curF
-        msg.style.display = 'none'; body.hidden = false
-        kasseReiterFuer(eigenerCode)   // Admin-Gruppen (08.10.2026): Verwalter erst mit dieser Antwort erkennbar → Reiter + HT-Schalter
-        admGruppeChips()               // Finns Gruppenfilter (Namen aus id_gruppen)
-        if(eigenerCode && !$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()   // WD-Blöcke warteten auf die Gruppe (window._admGruppeOk)
-        else if(!$('adm-pane-wd')?.hidden) window._wdNeuZeichnen?.()          // .1773: Sicht jetzt sicher bekannt → Farmer sofort mit ihr zeichnen, nicht erst im Takt
-        admKapChipRender()       // Hinweis-Chip „Kapitel: …" in der Toolbar (24.09.2026)
-        admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
-        admRender()
-        admBuysRender()
-        admFinRender()
-        admKontenRender()   // Alle Accounts (13.10.2026)
-        window._admPcsOeffnen?.()   // PC-Tabs (08.10.2026): Namen der IDs kommen aus dieser Antwort
+        if(uid0 !== String(currentUserId || '')) return   // ID inzwischen gewechselt: nichts zeichnen, nichts merken
+        if(q !== admQuery()) return                        // Kapitel/Gruppe inzwischen gewechselt: der neuere Abruf zeichnet
+        admAnwenden(d, Date.now(), q, uid0, false)
+        admStandSchreiben(uid0, q, t)
       }catch(e){
+        if(uid0 !== String(currentUserId || '')) return
+        if(standDa()){   // LD1: Stand bleibt stehen, die Zeile sagt, von wann er ist
+          msg.style.display = ''; msg.textContent = `Übersicht nicht aktualisiert: ${e.message || e} — angezeigt: Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'}`
+          return
+        }
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
         // Käufe- und Finanzen-Tab hängen an denselben Daten — dort denselben
@@ -17119,7 +17218,7 @@
           const bm = $(mid)
           if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $(bid).hidden = true }
         }
-      }
+      }finally{ admLaedtZeigen(false) }
     }
 
     // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
@@ -23115,7 +23214,7 @@
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
-      $('adm-refresh')?.addEventListener('click', admLoad)
+      $('adm-refresh')?.addEventListener('click', () => admLoad({ frisch: true }))   // LD1: ↻ immer frisch (auch am Server-Kurzcache vorbei)
       $('adm-kap-refresh')?.addEventListener('click', admKapitelLaden)
       // Kapitel-Regler in der Topbar (24.09.2026): Übersicht/Käufe/Payouts neu vom Server (gefiltert),
       // die Kapitel-Karten nur neu zeichnen (ihre Zahlen hängen nicht an der Wahl, nur der Rahmen).
@@ -67371,7 +67470,7 @@
       const zeit = p.start_um ? new Date(p.start_um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
       closeTradePlanModal()
       if(typeof atToast === 'function') atToast(`✓ Plan für ${f.name} angelegt — ${f.acc.name}, ${String(p.richtung || '').toUpperCase()}${sofort ? ', startet jetzt am PC der ID' : zeit ? `, Start ${zeit}` : ''}`, 'ok')
-      try{ window._admLaden?.() }catch(_){}
+      try{ window._admLaden?.({ frisch: true }) }catch(_){}   // LD1: nach eigenem Schreiben frisch
       return true
     }catch(e){ msg('Nicht gespeichert: ' + ((e && e.message) || e), 'err'); return false }
   }
@@ -78955,7 +79054,7 @@
         if(c && typeof c === 'object' && !Array.isArray(c)){ delete archNeu()[String(o.id)]; if(o.altId) delete archNeu()[String(o.altId)]; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(c)) } }catch(_){}
       try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase(); if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
     }
-    try{ window._admLaden?.() }catch(_){}
+    try{ window._admLaden?.({ frisch: true }) }catch(_){}
     try{ tvNeuRender(); if(_admKTv.at) admKTvRender(); window._admKontoMailNeu?.(true) }catch(_){}
     if(typeof atToast === 'function') atToast(`↩ ${o.name} archiviert${o.altId ? ` · ${o.altName || 'alte Zeile'} wieder aktiv` : ''}`, 'ok')
   }
@@ -78988,7 +79087,7 @@
       if(!fremd && d.archiviert && d.alt && d.alt.id) try{ window._dupDeleteAccountForProphos?.(d.alt.id) }catch(_){}
       if(!fremd && d.plaene_entfernt && d.alt && d.alt.id) try{ tradePlans = (tradePlans || []).filter(p => !(String(p.masterAccountId) === String(d.alt.id) && p.status === 'planned' && !p.startedAt && !p.startUmGestartetAt)); renderTradePlans() }catch(_){}
       try{ if(!fremd && typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){}
-      try{ window._admLaden?.() }catch(_){}
+      try{ window._admLaden?.({ frisch: true }) }catch(_){}
       tvNeuRender(); if(_admKTv.at) admKTvRender()
       try{ window._admKontoMailNeu?.() }catch(_){}
       return false
@@ -79039,7 +79138,7 @@
     try{ window._admKontoMailNeu?.() }catch(_){}
     const zusatz = [acc.creds ? 'Zugangsdaten nicht übernommen' : '', d && d.hinweis].filter(Boolean).join(' · ')
     if(!still && typeof atToast === 'function') atToast(`✓ ${acc.name} für ${fuer.name} angelegt${zusatz ? ' — ' + zusatz : ''}`, zusatz ? 'end' : 'ok')
-    try{ window._admLaden?.() }catch(_){}
+    try{ window._admLaden?.({ frisch: true }) }catch(_){}   // LD1: nach eigenem Schreiben frisch
     return d
   }
   window._kontoFuerAnlegen = (fuer, acc, cons) => kontoFuerAnlegen(fuer, acc, cons)   // cons = Consistency aus dem Modal (ging bis 30.10.2026 verloren)
@@ -79288,6 +79387,7 @@
       if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
       if(typeof mailBadgeLaden === 'function') setTimeout(() => { mailWechselPruefen(); mailBadgeLaden() }, 1500)   // Mail-Reiter (16.10.2026)
       try{ window._planerLinkSync?.() }catch(_){}   // PLANER-TAB (30.10.2026): Link „Planer" je ID (Admin entsperrt + Recht)
+      try{ window._admStandVorladen?.() }catch(_){}   // LD1: gemerkten Admin-Stand dieser ID schon jetzt lesen (Öffnen zeichnet sofort)
       // Duplikum automatisch verbinden, wenn für diesen Prophos-User Zugangsdaten
       // hinterlegt sind (nur falls noch kein Token da ist) — damit nach einem
       // Account-Wechsel nicht jedes Mal manuell verbunden werden muss.
@@ -79338,6 +79438,7 @@
         if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
         if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
         try{ window._planerLinkSync?.() }catch(_){}   // PLANER-TAB (30.10.2026)
+        try{ window._admStandVorladen?.() }catch(_){}   // LD1
       }
     }catch(_){}
   })()

@@ -8380,6 +8380,63 @@ def admin_build_overview(kapitel_id=None):
                         "liste": kapitel_liste, "hedge_aus": hedge_aus}}
 
 
+# LD1 KURZ-CACHE DER ÜBERSICHT (Master 05.11.2026, Finn: „Wenn ich auf Challenge-Planer oder Funded-Planer drücke, lädt es immer 5–6 Sekunden …
+# auch wenn ich ins Admin gehe, egal welche ID"). admin_build_overview braucht p90 ~3,5–4 s (Railway 12 h) und wird beim Öffnen oft mehrfach
+# kurz hintereinander geholt (Admin öffnen, Planer, Funded CFD, Farmer, zweiter Tab). Die fertige Antwort (Bytes) bleibt ADM_OV_CACHE_S je
+# Schlüssel (Login-ID, alle Query-Parameter außer frisch) — die Sicht (Verwalter/Gruppe/Chip/ansicht) entsteht in _wd_login allein aus ID +
+# Parametern, eine ID sieht nie den Stand einer anderen. Gleichzeitige Anfragen desselben Schlüssels warten auf EINEN Bau (Single-Flight).
+# ?frisch=1 (↻ und nach eigenem Schreiben im Tab) baut immer neu und legt den neuen Stand ab. Fehler werden nie gemerkt. Reine Anzeige-Route,
+# keine Logik geändert; die PC-Tab-Routen (Delta/Waage, Start-Prüfung) bleiben ungecacht.
+ADM_OV_CACHE_S = 20
+_adm_ov_cache = {}      # schluessel → (bis_epoch, gebaut_epoch, body_bytes)
+_adm_ov_laeuft = {}     # schluessel → threading.Event (Bau läuft)
+_adm_ov_lock = threading.Lock()
+
+
+def adm_ov_schluessel(uid, args):
+    """Cache-Schlüssel: Login-ID + alle Query-Parameter (sortiert, mehrfache erhalten) ohne frisch."""
+    paare = args.items(multi=True) if hasattr(args, "getlist") else (args or {}).items()
+    return (str(uid or ""), tuple(sorted((str(k), str(v)) for k, v in paare if k != "frisch")))
+
+
+def adm_ov_holen(schluessel, frisch, bauen):
+    """(body_bytes, 'hit' | 'miss' | 'warten', alter_s). bauen() → bytes (wirft bei Fehler; dann wird nichts gemerkt).
+    frisch → immer neu bauen (wartet nie auf einen älteren Bau). Sonst: gültiger Eintrag → hit; läuft schon ein Bau desselben Schlüssels →
+    warten (höchstens 30 s) und dessen Ergebnis nehmen; sonst selbst bauen."""
+    jetzt = time.time()
+    eigen = None
+    if not frisch:
+        with _adm_ov_lock:
+            e = _adm_ov_cache.get(schluessel)
+            if e and e[0] > jetzt:
+                return e[2], "hit", round(jetzt - e[1], 1)
+            ev = _adm_ov_laeuft.get(schluessel)
+            if ev is None:
+                eigen = _adm_ov_laeuft[schluessel] = threading.Event()
+        if eigen is None:
+            ev.wait(30)
+            with _adm_ov_lock:
+                e = _adm_ov_cache.get(schluessel)
+            if e and e[0] > time.time():
+                return e[2], "warten", round(time.time() - e[1], 1)
+            # Bau des anderen schlug fehl oder dauerte zu lange → selbst bauen (ohne Single-Flight-Eintrag)
+    try:
+        body = bauen()
+        t = time.time()
+        with _adm_ov_lock:
+            if len(_adm_ov_cache) >= 40:              # Deckel: abgelaufene raus, notfalls alles
+                for k in ([k for k, v in _adm_ov_cache.items() if v[0] <= t] or list(_adm_ov_cache)):
+                    _adm_ov_cache.pop(k, None)
+            _adm_ov_cache[schluessel] = (t + ADM_OV_CACHE_S, t, body)
+        return body, "miss", 0.0
+    finally:
+        if eigen is not None:
+            with _adm_ov_lock:
+                if _adm_ov_laeuft.get(schluessel) is eigen:
+                    _adm_ov_laeuft.pop(schluessel, None)
+            eigen.set()
+
+
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])
 def admin_overview():
     if request.method == "OPTIONS":
@@ -8394,7 +8451,11 @@ def admin_overview():
     except ValueError:
         return jsonify({"error": "kapitel muss eine Zahl oder 'alle' sein"}), 400
     try:
-        return jsonify(admin_build_overview(kapitel_id))
+        # LD1: Kurz-Cache je Login-ID + Parameter (Erklärung bei ADM_OV_CACHE_S); X-Prophos-Cache zeigt hit/miss/warten fürs Messen
+        body, art, alter = adm_ov_holen(adm_ov_schluessel(_uid, request.args), str(request.args.get("frisch") or "") == "1",
+                                        lambda: jsonify(admin_build_overview(kapitel_id)).get_data())
+        return Response(body, mimetype="application/json", headers={"X-Prophos-Cache": art, "X-Prophos-Alter": str(alter),
+                                                                     "Access-Control-Expose-Headers": "X-Prophos-Cache, X-Prophos-Alter"})
     except Exception as e:
         print(f"[admin] ⚠️ overview: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
