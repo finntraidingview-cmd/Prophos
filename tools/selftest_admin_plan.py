@@ -83,7 +83,10 @@ def lade(db, gate):
     ns = {"app": app, "jsonify": jsonify, "request": request, "g": g, "re": re, "requests": requests, "datetime": datetime,
           "timedelta": timedelta, "timezone": timezone, "sb_select": db.sb_select, "sb_insert": db.sb_insert, "_sb_anfrage": db._sb_anfrage,
           "_sb_pruefen": lambda r: None, "_sb_headers": lambda *a: {}, "SUPABASE_URL": "https://x", "_admin_konto_gate": gate, "threading": threading,
-          "_ap_norm": lambda f: re.sub(r"[^a-z0-9]", "", str(f or "").lower()), "_firm_norm": lambda f: f}
+          "_ap_norm": lambda f: re.sub(r"[^a-z0-9]", "", str(f or "").lower()), "_firm_norm": lambda f: f,
+          # RT1 (05.11.2026): admin_plan_anlegen ruft seit b9aeed0c (PLANER-RECHTE HT, 30.10.2026) zuerst _planer_schreib_gate() — liegt
+          # außerhalb des exec-Ausschnitts (NameError → 500). Hier „darf“; der Riegel selbst: tools/selftest_planer_rechte_ht.py
+          "_planer_schreib_gate": lambda: None}
     exec(src[i:j], ns)
     return app, ns
 
