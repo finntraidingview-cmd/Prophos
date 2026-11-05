@@ -165,7 +165,7 @@ def main():
 
     # ── (D) Railway claimt nie selbst ──────────────────────────────────────────────────────────────────────────────────────
     setzt = [m.group(0) for m in re.finditer(r'"start_um_gestartet_at":\s*([^,}\n]+)', src)
-             if not re.match(r'(?:f?"(?:is|eq)\.|None\b)', m.group(1).strip())]   # nur Filter (is./eq.) und Zurücksetzen (None)
+             if not re.match(r'(?:f?"(?:is|eq|gte|gt|lte|lt|not)\.|None\b)', m.group(1).strip())]   # nur Filter (is./eq./gte. …) und Zurücksetzen (None) — gte. seit eh_rot (M3 05.11.2026: Lese-Filter, kein Claim)
     check(not setzt, f"app.py setzt den Claim nie selbst — jeder automatische Start geht über den DB-Riegel ({setzt})")
 
     # ── (E) PC-Tab ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -217,7 +217,8 @@ def main():
     # Richtung/Claim → claimt 'verbrauch' → durch. Kein Weg führt dabei zum echten Start (der läge erst NACH den Sperre-Zweigen).
     erst = trigger(None, 3, True)
     html2 = open(HTML, encoding="utf-8").read()
-    tick = html2[html2.index("      const sperre = await planKontoSperre(plan)\n      const zielOk"):html2.index("      if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }")]
+    # M3 (05.11.2026): zwischen planKontoSperre und zielOk steht seit der News-Regel (30.10.2026) „news → return" (kein Claim) — Anker nur die Sperre-Zeile
+    tick = html2[html2.index("      const sperre = await planKontoSperre(plan)\n      if(sperre && sperre.art === 'news') return"):html2.index("      if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }")]
     i_sp, i_rk, i_claim = tick.find("planKontoSperre(plan)"), tick.find("await rkVorStart(plan)"), tick.find("suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)")
     zweige = [tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie starten"), tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Manuelle Arbeit"),
               tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Ziel erreicht")]

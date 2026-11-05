@@ -295,7 +295,9 @@ def sb_all(t, p):
     if t == "accounts" and p.get("account_type") == "eq.funded_cfd":
         return [{k: v for k, v in a.items() if k != "_bal"} for a in KONTEN]
     if t == "accounts":
-        return [{"id": v, "name": "Fusion " + v, "firm": "Fusion Markets"} for v in FUS.values()]
+        # M3 (05.11.2026): seit 02.11. nimmt der Planer nur ein Hedge-Konto der EIGENEN ID (gp_hedge_settings_eigen liest id,user_id,external_id) — der Stub
+        # nennt darum den Besitzer; ohne user_id galt jedes Fusion-Konto als fremd und kein Konto wurde geplant
+        return [{"id": v, "user_id": u, "external_id": "9" + v[1:] + "0001", "name": "Fusion " + v, "firm": "Fusion Markets"} for u, v in FUS.items()]
     if t == "trade_plans" and "status" in p:
         return OFFEN
     if t == "user_settings":

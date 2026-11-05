@@ -100,7 +100,11 @@ def schleife(ns):
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
                      "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
-BASIS = "f54267bf"     # Stand vor heute Nacht (30.10.2026 ~03:45 Dubai); ändert ein späterer Commit den Planer bewusst → nachziehen
+BASIS = "d7fe2f6c"     # nachgezogen (M3, 05.11.2026): f54267bf (30.10. ~03:45) kannte ap_waage_groesse noch nicht (a16155f4 nahm sie in die Liste, ließ BASIS stehen →
+                       # ValueError seit 02.11.). Bewusste Änderungen seit f54267bf: Gruppe wie HT, Topstep-Tagesende, Konto deaktiviert, Tage-Mini (je 30.10.),
+                       # Waage-Deckel je Größe (a16155f4, 02.11.), E3 CFD-Planer nur Echo mit Hedge (03./04.11.), E3b Zufall-Parameter aus regeln.zufall
+                       # (d7fe2f6c, 05.11., Rückfall = Code-Werte). Ändert ein späterer Commit den Planer bewusst → BASIS nachziehen.
+BASIS_ROH = True       # BASIS enthält alle bisherigen bewussten Änderungen → Vergleich Zeichen für Zeichen (die Filter unten galten für f54267bf)
 
 
 def planer_unveraendert(src, ns):
@@ -133,8 +137,11 @@ def planer_unveraendert(src, ns):
         ohne_te = lambda t: re.sub(r"\n    plaene = \[dict\(p, status=\"completed\"[^\n]*\n[^\n]*for p in plaene\]", "", re.sub(r',"\n\s+"kette_te:mt5_baseline->kette->tagesende", "order"', '", "order"', t))   # noqa: E731
         # KONTO DEAKTIVIERT (30.10.2026, S4): ap_planen nennt für deaktivierte Konten einen eigenen Grund, die Rechnung bleibt — Vergleich ohne diese Weiche
         ohne_dk = lambda t: t.replace('AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else ', "")   # noqa: E731
-        anders = [n for n in PLANER_FUNKTIONEN
-                  if (ohne_gruppe(ohne_te(ohne_dk(fn(src, n)))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
+        if BASIS_ROH:
+            anders = [n for n in PLANER_FUNKTIONEN if fn(src, n) != fn(alt, n)]
+        else:
+            anders = [n for n in PLANER_FUNKTIONEN
+                      if (ohne_gruppe(ohne_te(ohne_dk(fn(src, n)))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
         ok(not anders, f"Planer-/Waage-Rechnung identisch mit {BASIS} ({anders or 'alle gleich'})")
     ok("ap_eh_richtungen_mischen" not in src and "eh_an" not in fn(src, "ap_planen"), "kein Würfel-Code, ap_planen kennt den Schalter nicht")
     W, N = ns["ap_klassen_waage"], ns["ap_waage_nachschub"]

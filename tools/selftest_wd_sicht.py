@@ -26,7 +26,8 @@ def lade(login, daten):
     src = open(APP, encoding="utf-8").read()
     i = src.index("\ndef _admin_verwalter_gruppen_ids(") + 1
     vg = src[i:src.find("\n\n\n", i)]
-    a = src.index("# ══ WD-SICHT FÜR JEDEN LOGIN")
+    # ab wd_sicht_fuer (M3 05.11.2026): zwischen Kopf-Kommentar und Funktion liegen seit 03.11. andere Teile (wd_cme_tag_start, Payout-Abgleich mit threading)
+    a = src.index("\ndef wd_sicht_fuer(") + 1
     b = src.index('@app.route("/admin/wd-plaene"', a)
     app = Flask("t")
 

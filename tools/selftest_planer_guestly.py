@@ -41,18 +41,21 @@ def main():
     ok("border-radius:16px" in css, "Karten 16 px Radius")
     # Aufbau in der Reihenfolge der Vorgabe
     i = s.index("function apGuestlyHtml(x){")
-    g = s[i:s.index("function apGuestlyVerdrahten(root){", i)]
-    # Funded-CFD-Regeln (30.10.2026) laden bewusst über GET /admin/funded-cfd-plan — ihr Block zählt nicht als „neue Abfrage" des Gerüsts
-    _a, _b = g.find("/* FUNDED-CFD-REGELN"), g.find("window._fcfdRegelnStub")
-    if 0 <= _a < _b: g = g[:_a] + g[_b:]
-    ok(g.rstrip().endswith("return kopf + kpis + charts + leiste + zs + listen\n  }") or "return kopf + kpis + charts + leiste + zs + listen" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · Listen")
+    # M3 (05.11.2026): nur der Rumpf von apGuestlyHtml bis zu seiner schließenden Klammer — seit 30.10. stehen zwischen ihm und apGuestlyVerdrahten
+    # weitere Funktionen (P&L heute, Challenge-Verlauf mit eigener Abfrage /verlauf-eur, Funded-CFD-Regeln …), die nicht zum Gerüst gehören
+    g = s[i:s.index("\n  }\n", i) + 4]
+    # E3c (Einstellungen-Platz unter dem Zeitstrahl) und Funded CFD E1c (Gruppe statt Leiste, eigener Zweig) — bewusste Reihenfolgen seit 04./05.11.2026
+    ok("return kopf + kpis + charts + leiste + zs + (x.funded ? '' : '<div class=\"e3-platz\" data-e3-platz></div>') + listen + unten" in g
+       and "return kopf + kpis + charts + zs + einst + listen + unten }" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · (E3-Platz) · Listen; Funded CFD: Zeitstrahl · Einstellungen · Listen")
     ok('<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button>' in g, "7/30 Tage ausgegraut mit „kommt“")
     ok("data-ap-tag" in g and "data-apg-id" in g and "data-apg-firma" in g, "Zeitraum + Filter ID/Firma")
     ok(g.count("apgKpi({ gross: true") >= 2 and g.count("apgKpi({ icon:") >= 3, "2 große + 3 kleine KPI-Karten")
     for n in ("P&amp;L hypothetisch", "Zu bestätigen", "Läuft", "Braucht dich", "Wartet auf Start"):
-        ok(f"name: '{n}'" in g, "KPI " + n)
+        ok(f"name: '{n}'" in g or (n == "Zu bestätigen" and "name: vorschau ? 'Vorschau' : 'Zu bestätigen'" in g), "KPI " + n)   # Funded Futures: „Vorschau", solange der Funded-Planer aus ist (30.10.2026)
     ok('id="apg-c-ls"' in g and 'id="apg-c-std"' in g, "Chart-Reihe Long/Short + Starts je Stunde")
-    ok(g.count('data-tpl-nachplan="1"') == 1 and 'class="apg-haupt"' in g, "EIN Hauptknopf Nachplanen (bestehender Handler)")
+    # zwei Stellen, je Zweig genau ein Knopf: Funded CFD (if(fc){ … return }) gibt ihn in die Einstellungen-Gruppe, alle anderen in die Leiste
+    _fc = g[g.index("    if(fc){ const np = "):g.index("return kopf + kpis + charts + zs + einst + listen + unten }")]
+    ok(g.count('data-tpl-nachplan="1"') == 2 and _fc.count('data-tpl-nachplan="1"') == 1 and 'class="apg-haupt"' in g, "EIN Hauptknopf Nachplanen je Zweig (bestehender Handler)")
     ok("apdBotSchalterHtml(v, apdAdmin())" in g and "<details class=\"apg-schalter\"" in g, "bestehende Schalter aufklappbar, nicht entfernt")
     ok("x.ow.offen" in g and "x.ow.laeuft" in g and "T.braucht" in g and "x.ow.warten" in g and "T.zeitstrahl" in g, "Zeitstrahl + Listen aus den bestehenden Bausteinen")
     ok('id="ap-ids-tpl"' in g and 'id="ap-ids-neu"' in g, "bestehende Kopf-Knöpfe")
@@ -77,7 +80,8 @@ def main():
     ok("r.type === 'funded_cfd' && !r.archived" in s and "fetch(" not in c, "Funded CFD: Konten aus /admin/overview, keine eigene Abfrage")
     ok(c.count("apgKpi({ gross: true") == 2 and c.count("apgKpi({ icon:") == 3, "Funded CFD: 2 große + 3 kleine KPI-Karten")
     ok('id="apg-fc-ls"' in c and 'id="apg-fc-firma"' in c, "Funded CFD: Charts je ID + je Firma")
-    ok('class="apg-haupt" disabled' in c, "Funded CFD: Planen bleibt gesperrt")
+    # E1c (b448da21, 05.11.2026): der gesperrte „Jetzt planen"-Knopf ist mit der alten Leiste weg — die Gruppe bekommt hier keinen Knopf (fcrLeisteHtml(''))
+    ok("fcrLeisteHtml('')" in c and "data-tpl-nachplan" not in c and "Jetzt planen" not in c, "Funded CFD (Entwurf): kein Planen-Knopf")
     ok("if(name === 'fcfd') window._fcfdNebenLaden?.()" in s, "Funded CFD: beim Öffnen Übersicht + Regeln nachladen")
     # Funded CFD im Challenge-Gerüst (30.10.2026, Master nach .1926): dritte Quelle wie Funded Futures, Knöpfe über die eigene Route
     ok("fcfd: { basis: '/admin/funded-cfd-plan'" in s and "bauen: d => fcpQuelleBauen(d)" in s, "Funded CFD: Quelle + Route je Art")
