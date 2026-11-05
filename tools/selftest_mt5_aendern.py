@@ -153,17 +153,30 @@ def lade():
     src = open(BOT, encoding="utf-8").read()
     uhr = Uhr()
     ns = {"re": re, "time": uhr, "os": os}
-    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE", "NACHZIEH_SL_TOLERANZ"):
+    # RT1 (05.11.2026): AENDERN_NACH_MENUE_S + AENDERN_TAB_ANRECHNUNG_MAX_S kamen mit J2 (ac2dc5f2, 31.10.2026) dazu — aus dem Quelltext nachladen.
+    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE", "NACHZIEH_SL_TOLERANZ",
+              "AENDERN_NACH_MENUE_S", "AENDERN_TAB_ANRECHNUNG_MAX_S"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for name in ("fmt_preis", "berechne_sl_tp", "sltp_vom_fill", "sltp_abweichung_usd", "kommission_runde", "nachzieh_seiten",
                  "tagesgrenze_pruefen", "sl_ausloeser", "sl_tagesgrenze_vom_fill", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
                  "_feld_lesen", "_feld_tippen", "_ist_aendern_dialog", "_dialog_gehoert_zu", "_menuepunkt_ausloesen",
-                 "_kontextmenue_aendern_klicken", "_reihen_scan", "_map_felder", "_sltp_klicken", "_sltp_nachziehen"):
+                 "_kontextmenue_aendern_klicken", "_reihen_scan", "_map_felder", "_sltp_klicken", "_sltp_nachziehen",
+                 # RT1 (05.11.2026): neue Hilfen im Ändern-Weg nachladen — _el_tasten (851ab5a2, 28.10.2026: ESC/Tippen statt
+                 # el.type_keys, ohne pywinauto-Tastatur fällt es auf el.type_keys zurück), _fenster_zustand_text + _aendern_vorn
+                 # (J2 ac2dc5f2, 31.10.2026: Spur + Terminal nach vorn; ohne Windows-u32 → „unbekannt“, kein Abbruch)
+                 "_el_tasten", "_fenster_zustand_text", "_aendern_vorn"):
         exec(fn(src, name), ns)
     ns.update(_warte=lambda a=0, b=0: uhr.sleep(a), tipp_takt=lambda n, **_k: [0.01] * n, _echo_klick=lambda r, schritte=0: True,
               _echo_klickziel=lambda r: (r.left + 1, r.top + 1), _maus_fahren=lambda *a, **k: None, is_paused=lambda: False,
               _fremde_dialoge_schliessen=lambda w: None, _anker_lesen=lambda p: (_ for _ in ()).throw(OSError("kein Anker")),
               _anker_schreiben=lambda p, **f: None, _dialog_struktur=lambda d: "?", _handel_tab_aktivieren=lambda *a, **k: "suche")
+    # RT1 (05.11.2026): _reihen_scan prüft seit J2 (ac2dc5f2, 31.10.2026) vor jedem Klick _punkt_frei (WindowFromPoint,
+    # nur Windows). Der Lader lädt es nicht nach → NameError. Hier: Punkt gehört dem Terminal (der Verdeckt-Fall hat
+    # seinen eigenen Test in mt5-copier/selftest.py). Ebenso seit 851ab5a2 (28.10.2026) _warte(*klick_zoegern()) vor
+    # jedem Scan-Klick (Hand-Zögern) — hier ohne Wartezeit, die Testuhr läuft nur über _warte.
+    # J2 (ac2dc5f2) stößt bei „Dialog nicht offen“ zudem fehlerfoto_anstossen an (eigener Prozess) — hier kein Foto.
+    ns.update(_punkt_frei=lambda w, x, y: True, klick_zoegern=lambda zufall=None, hand=None: (0.0, 0.0),
+              fehlerfoto_anstossen=lambda weg, tab, code: (None, "Selbsttest: kein Foto"))
     return ns, uhr, src
 
 
@@ -236,7 +249,8 @@ def main():
     check(d is eigen and any("Doppelklick-Scan" in s for s in spur), "Kontextmenü nie lesbar → zweite Runde per Doppelklick")
     ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: None
     spur = []
-    check(ns["_reihen_scan"](w, T, spur, 450) is None and "Zeilen-Scan ohne Treffer" in spur[-1], "kein Treffer → None + Diagnose in der Spur")
+    # RT1 (05.11.2026): seit J2 (ac2dc5f2) folgt der Diagnose noch eine „Punkte: …“-Zeile je Klickpunkt — Diagnose daher in der Spur, nicht mehr zwingend letzte Zeile
+    check(ns["_reihen_scan"](w, T, spur, 450) is None and any("Zeilen-Scan ohne Treffer" in s for s in spur), "kein Treffer → None + Diagnose in der Spur")
 
     # ── b) Preisfelder ───────────────────────────────────────────────────────────────────────────────
     P, FT = ns["fmt_preis"], ns["_feld_tippen"]
@@ -359,22 +373,27 @@ def main():
     spur = []
     d = ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + 999, max_punkte=ns["AENDERN_MAX_PUNKTE"])
     punkte = {(x, y) for x, y, _t_, _d in klicks}
-    check(d is None and len(punkte) == ns["AENDERN_MAX_PUNKTE"] and f"abgebrochen (Grenze {ns['AENDERN_MAX_PUNKTE']} Punkte)" in spur[-1]
-          and "kein Menue" in spur[-1], f"kein Treffer → genau {ns['AENDERN_MAX_PUNKTE']} Punkte, Abbruch mit Grund — {spur[-1][:110]}…")
+    # RT1 (05.11.2026): seit J2 (ac2dc5f2, 31.10.2026) steht hinter der Zähler-Zeile noch „Punkte: …“ (je Punkt Ergebnis + Dauer) —
+    # geprüft wird dieselbe Zähler-Zeile, nur nicht mehr als letzte Spur-Zeile
+    def scan_zeile(sp):
+        return next((s for s in reversed(sp) if "Zeilen-Scan ohne Treffer" in s or "Anker-Schnellweg ohne Treffer" in s), "")
+    z = scan_zeile(spur)
+    check(d is None and len(punkte) == ns["AENDERN_MAX_PUNKTE"] and f"abgebrochen (Grenze {ns['AENDERN_MAX_PUNKTE']} Punkte)" in z
+          and "kein Menue" in z, f"kein Treffer → genau {ns['AENDERN_MAX_PUNKTE']} Punkte, Abbruch mit Grund — {z[:110]}…")
     check(all(y >= 450 for _x, y, _t_, _d in klicks), "auch mit Grenze nur untere Fensterhälfte")
     # Frist: jeder Punkt kostet ~6 s → nach der Frist kein weiterer Klick
     klicks.clear()
     ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: (uhr.sleep(5.0), None)[1]
     spur, t0 = [], uhr.t
     d = ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + ns["AENDERN_FRIST_S"], max_punkte=99)
-    check(d is None and f"abgebrochen (Grenze {ns['AENDERN_FRIST_S']:g} s)" in spur[-1] and uhr.t - t0 < ns["AENDERN_FRIST_S"] + 7,
+    check(d is None and f"abgebrochen (Grenze {ns['AENDERN_FRIST_S']:g} s)" in scan_zeile(spur) and uhr.t - t0 < ns["AENDERN_FRIST_S"] + 7,
           f"Frist {ns['AENDERN_FRIST_S']:g} s: Abbruch nach {uhr.t - t0:.0f} s, {len({(x, y) for x, y, _a, _b in klicks})} Punkte")
     # ausgegraut = Klick in der Liste neben der Zeile → kein Doppelklick dort
     klicks.clear()
     ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: "ausgegraut"
     spur = []
     ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + 999, max_punkte=3)
-    check(not any(dp for _x, _y, _t_, dp in klicks) and "3x ausgegraut" in spur[-1], "ausgegraut → kein Doppelklick an dieser Stelle, Zähler in der Spur")
+    check(not any(dp for _x, _y, _t_, dp in klicks) and "3x ausgegraut" in scan_zeile(spur), "ausgegraut → kein Doppelklick an dieser Stelle, Zähler in der Spur")
     # _sltp_klicken: alle Wege leer → sauberer Abbruch mit dialog False + Grund, kein Klick nach der Frist
     klicks.clear()
     ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: (uhr.sleep(timeout), "kein_menue")[1]
@@ -385,7 +404,8 @@ def main():
     ns["_klick_absolut"] = lambda x, y, taste="links", doppel=False: zeiten.append(uhr.t) or alt_klick(x, y, taste, doppel)
     spur, t0 = [], uhr.t
     k = ns["_sltp_klicken"](w, T, "NAS100", "29746.18", "29696.32", spur)
-    check(k["ok"] is False and k.get("dialog") is False and "Frist" in k["msg"] and spur[-1] == k["msg"],
+    # RT1 (05.11.2026): J2 (ac2dc5f2) hängt nach dem Grund noch „Stand beim Abbruch: <Fensterzustand>“ an — Grund steht direkt davor
+    check(k["ok"] is False and k.get("dialog") is False and "Frist" in k["msg"] and spur[-2] == k["msg"] and spur[-1].startswith("Stand beim Abbruch"),
           f"_sltp_klicken ohne Treffer → dialog False, Grund „{k['msg'][:70]}…“")
     check(max(zeiten) - t0 <= ns["AENDERN_FRIST_S"] and uhr.t - t0 < ns["AENDERN_FRIST_S"] + 8,
           f"letzter Klick {max(zeiten) - t0:.1f} s nach Start (Frist {ns['AENDERN_FRIST_S']:g} s), fertig nach {uhr.t - t0:.1f} s statt Minuten")
