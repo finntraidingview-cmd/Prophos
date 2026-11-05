@@ -10,8 +10,10 @@
 --   echo_scharf_max_ms    Höchstwartezeit Scharf-Beweis (Copier meldet armed für die Config), danach Start-Fehler. Vorher 30000, bleibt
 --   echo_vorwaermen_s     Master-Terminal eines Echo-mit-Hedge-Plans so viele Sekunden vor der Startzeit öffnen und einloggen (nur das
 --                         Terminal, kein Trade-Fenster, keine Order; gestreut 0–10 s früher). 0 = aus (= vorher). Vorschlag 75
--- Der Tab liest mit select=* (alle 5 min): fehlt eine Spalte, gilt der Wert von vorher — ohne diese Datei ändert sich nichts.
--- Grenzen im Tab (Untergrenzen bleiben auch bei kleineren Werten hier): Versatz 0–10 s, Pause-Minimum ≥ 1 s, Scharf 10–120 s,
+-- Der Tab liest mit select=* (alle 5 min): fehlt eine Spalte, gilt der Wert von vorher.
+-- ACHTUNG: Die Standardwerte SIND die Vorschläge — Einspielen schaltet sofort 0–1,5 s, 3–10 s und Vorwärmen 75 s an.
+-- Grenzen im Tab (Untergrenzen bleiben auch bei kleineren Werten hier): Versatz-Rahmen 0,5–10 s, Pause-Minimum ≥ 1 s, Pause-Streuung ≥ 1 s
+-- (nie fest, Jitter-Regel), Scharf 10–120 s,
 -- Vorwärmen 0–300 s. Werte hier ändern = binnen 5 min wirksam, kein Code-Push. Idempotent. NICHT eingespielt (Finns Wort abwarten).
 alter table public.puls_heim_regel add column if not exists echo_versatz_max_ms integer not null default 1500;
 alter table public.puls_heim_regel add column if not exists echo_pause_min_ms   integer not null default 3000;
@@ -20,7 +22,7 @@ alter table public.puls_heim_regel add column if not exists echo_scharf_max_ms  
 alter table public.puls_heim_regel add column if not exists echo_vorwaermen_s   integer not null default 75;
 do $c$ begin
   alter table public.puls_heim_regel add constraint puls_heim_regel_echo_tempo_check check (
-    echo_versatz_max_ms between 0 and 10000 and echo_pause_min_ms between 1000 and 60000 and echo_pause_streu_ms between 0 and 60000
+    echo_versatz_max_ms between 500 and 10000 and echo_pause_min_ms between 1000 and 60000 and echo_pause_streu_ms between 1000 and 60000
     and echo_scharf_max_ms between 10000 and 120000 and echo_vorwaermen_s between 0 and 300);
 exception when duplicate_object then null; end $c$;
 comment on column public.puls_heim_regel.echo_versatz_max_ms is 'Echo: Versatz zur Startzeit 0..max ms gewürfelt (vorher 4000; ES2 05.11.2026)';

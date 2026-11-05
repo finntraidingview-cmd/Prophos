@@ -54215,9 +54215,10 @@
     const s = ECHO_TEMPO_STANDARD, r = z || {}
     const zahl = (v, min, max, std) => { const n = Number(v); return (v === null || v === undefined || v === '' || !isFinite(n)) ? std : Math.min(max, Math.max(min, Math.round(n))) }
     return {
-      versatzMaxMs: zahl(r.echo_versatz_max_ms, 0, 10000, s.versatzMaxMs),
+      // Streuung nie 0 (Prüfer S8, Jitter-Regel „alles aus Zufall" 28.10.2026): Versatz ≥ 0,5 s Rahmen, Pause-Streuung ≥ 1 s
+      versatzMaxMs: zahl(r.echo_versatz_max_ms, 500, 10000, s.versatzMaxMs),
       pauseMinMs:   zahl(r.echo_pause_min_ms, 1000, 60000, s.pauseMinMs),
-      pauseStreuMs: zahl(r.echo_pause_streu_ms, 0, 60000, s.pauseStreuMs),
+      pauseStreuMs: zahl(r.echo_pause_streu_ms, 1000, 60000, s.pauseStreuMs),
       scharfMaxMs:  zahl(r.echo_scharf_max_ms, 10000, 120000, s.scharfMaxMs),
       vorwaermenS:  zahl(r.echo_vorwaermen_s, 0, 300, s.vorwaermenS),
     }
@@ -54269,7 +54270,45 @@
     }
     return { ok:false, r, grund: echoFensterGrund(r) }
   }
-  window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS }   // Test-Haken
+  /* FENSTER ZURÜCKNEHMEN (ES2-Nachbesserung, 05.11.2026, Prüfer S8): seit ES2 steht das Trade-Fenster schon VOR dem Terminal-Start auf
+   * „geplant" — scheitert der Start (Terminal, Login, Scharf-Beweis, 4 min ohne Snapshot, Popup zu), bliebe der Copier für diese Config bis
+   * zu 6 h scharf, und ein späterer Hand-Trade auf diesem Master würde ungeplant auf Fusion gehedgt (Vorfall-Art 05.11.: ungeplanter Hedge).
+   * Jeder Ausstieg ohne Order nimmt das Fenster deshalb sofort zurück: panel.py /api/plan-delete?id= (delete_plan, derselbe Weg wie der
+   * Löschen-Knopf der Panel-Ansicht). Nur ein Fenster, das DIESER Check als „geplant" bekam und das laut Panel (instances → plans) noch
+   * genau so steht: nie „laufend" (dann liegt eine Position), nie mit neuerem armed_at (ein anderer Start auf demselben Master hat es
+   * inzwischen erneuert — upsert_plan hält ein Fenster je Config), nie, wenn der frische Snapshot eine Master-Position zeigt.
+   * REIN bis auf die zwei Panel-Aufrufe; wirft nie. → { ok, grund } */
+  function echoFensterZuruecknehmenUrteil(fenR, inst, aktuell){   // REIN: darf das Fenster weg? → '' = ja, sonst der Grund
+    const p = (fenR && fenR.plan) || {}
+    if(!(fenR && fenR.ok === true) || !(Number(p.id) > 0)) return 'kein Fenster von diesem Check'
+    if(String(p.status || '') !== 'geplant') return `Fenster steht auf „${String(p.status || 'leer')}"`
+    if(aktuell === null) return 'Fenster schon weg'
+    if(aktuell){
+      if(String(aktuell.status || '') !== 'geplant') return `Fenster steht inzwischen auf „${String(aktuell.status || 'leer')}"`
+      if(String(aktuell.armed_at || '') !== String(p.armed_at || '')) return 'Fenster inzwischen von einem anderen Start erneuert'
+    }
+    const st = (inst && inst.status) || {}
+    if(inst && inst.alive && !st.note && (Array.isArray(st.master_positions) ? st.master_positions : []).length) return 'Master-Position offen'
+    return ''
+  }
+  async function echoFensterZuruecknehmen(file, fenR, planId){
+    try{
+      let inst = null, aktuell   // aktuell: undefined = Plan-Liste nicht lesbar (dann nur nach der eigenen Antwort), null = weg
+      try{
+        const d = await window.mtcApi('instances')
+        inst = ((d && d.instances) || []).find(x => x.file === file) || null
+        if(d && Array.isArray(d.plans)) aktuell = d.plans.find(x => String(x.id) === String(((fenR || {}).plan || {}).id)) || null
+      }catch(_){ inst = null }
+      const nein = echoFensterZuruecknehmenUrteil(fenR, inst, aktuell)
+      if(nein) return { ok:false, grund: nein }
+      const r = await window.mtcApi(`plan-delete?id=${encodeURIComponent(String(fenR.plan.id))}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body:'{}' })
+      console.info('[echo-fenster] zurückgenommen', file, fenR.plan.id, (r && r.msg) || '')
+      return { ok: !!(r && r.ok), grund: String((r && (r.msg || r.error)) || '') }
+    }catch(e){ return { ok:false, grund: String((e && e.message) || e) } }
+  }
+  window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS,
+    zuruckUrteil: echoFensterZuruecknehmenUrteil }   // Test-Haken
   async function tpPreflightMt5(plan){
     // ES2 (05.11.2026, Prüf-Fund): Merker „Check lebt" VOR dem ersten await — tpJetztStarten ruft diesen Check ohne await, sonst sähe der
     // nächste Echo-Start während der Lots-Deckel-Lesung keinen laufenden Check (echoVorlaufAktiv) und übernähme das Popup
@@ -54623,8 +54662,11 @@
       // Master-Terminal (copier.py plan_armed_files: „geplant" gilt 6 h ab armed_at) — ist das Terminal bereit, steht armed meist schon.
       // Der Riegel bleibt: master-order erst bei armed === true (Ticker unten). Der Panel-eigene Start (panel.py „Trade starten") schreibt
       // den Plan seit jeher VOR start-terminal. Scheitert der Terminal-Start, bleibt das Fenster „geplant" stehen wie nach einem Scharf-
-      // Fehler bisher auch (kein Hedge ohne Master-Position, nach 6 h zu).
+      // Fehler bisher auch — seit der Nachbesserung (Prüfer S8) nimmt jeder Ausstieg ohne Order es sofort zurück (fensterWeg).
       const fenP = echoFensterSchreiben(file, plan.multiplier, 3)
+      let fensterR = null   // jüngste geprüfte Panel-Antwort zum Fenster dieses Checks (fen.r, später die Neu-Schreibungen)
+      const fensterWeg = async () => { const f = fensterR || ((await fenP) || {}).r; const z = await echoFensterZuruecknehmen(file, f, plan.id)
+        if(!z.ok) console.info('[echo-fenster] bleibt:', z.grund) }
       const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(sendCreds
@@ -54633,6 +54675,7 @@
       if(!ts.ok){
         _pfSet('m5term', 'err', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String(ts.msg || ts.error || 'Fehler')))
         hardFail = true
+        await fensterWeg()   // S8: das parallel geschriebene Fenster nicht 6 h scharf stehen lassen
       } else {
         // Nach Erfolg: route='mt5' persistieren (nur wenn noch nicht gesetzt; Status
         // bleibt 'planned' — planned→open macht die Erkennung) + Plan auch ins
@@ -54651,6 +54694,7 @@
         // gibt es keinen Ticker und keine Order, sondern einen Start-Fehler mit genau dieser Ursache. Seit ES2 schon mit dem Terminal-Start
         // losgeschickt (fenP oben), hier nur das Ergebnis abwarten
         const fen = await fenP
+        if(fen.ok) fensterR = fen.r
         if(!fen.ok){
           const grund = `Echo-Trade-Fenster nicht offen (${fen.grund}) — nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Panel/Copier prüfen, dann „Erneut versuchen".`
           _pfSet('m5term', 'err', escapeHtml(grund))
@@ -54681,6 +54725,7 @@
             // späterer Check desselben Plans sie unerwartet abfeuern.
             _tpPendingOrder = null
             _pfMt5StopTimer()
+            await fensterWeg()   // S8 (bei übernommenem Popup lässt echoFensterZuruecknehmen es stehen)
             await sfEinmal({ schritt: 'm5abbruch', msg: 'Check-Popup geschlossen oder von einem anderen Plan übernommen, bevor eine Order gesendet wurde — nichts platziert.', unklar: false })
             return
           }
@@ -54710,6 +54755,7 @@
               _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
                 msg:'Terminal ist im FALSCHEN Konto eingeloggt — nichts platziert. Am PC von Hand ins richtige Konto wechseln.' })
             }
+            if(!(sendCreds && sec <= 25)) await fensterWeg()   // S8: falsches Konto — der Neustart über „Weiter" schreibt das Fenster neu
             if(!(sendCreds && sec <= 25)) await sfEinmal({ schritt: 'm5login', msg: `Terminal im falschen Konto eingeloggt (${String(wrongLogin)} statt ${String(route.masterLogin)}) — nichts platziert.`, unklar: false })
             return
           }
@@ -54731,13 +54777,14 @@
               _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // Plakette nicht auf „Ready" stehen lassen (Prüf-Agent)
               _pfStatusSave()
               try{ renderTradePlans() }catch(_){}
+              await fensterWeg()   // S8: nicht in echo_scharf_max_ms zur Order — Fenster zurück
               await sfEinmal({ schritt: 'm5scharf', msg: grund, unklar: false })
               return
             }
             if(urteil === 'warten'){
               if(Date.now() >= fensterNeuAb){
                 if(fensterNeuAb) echoFensterSchreiben(file, plan.multiplier, 1)   // nicht beim ersten Tick (eben geschrieben)
-                  .then(x => { if(x && x.ok && String(x.r.plan.status) === 'geplant') altLaufend = false }, () => {})
+                  .then(x => { if(x && x.ok){ fensterR = x.r; if(String(x.r.plan.status) === 'geplant') altLaufend = false } }, () => {})
                 // gestreut (Jitter-Regel). Altes „laufend"-Fenster (ES2, 05.11.2026): der Plan-Ticker des Panels beendet es bei flachem
                 // Master binnen 5 s, erst das nächste plan?file legt „geplant" neu an — dann 2–4 s statt 8–12 s (ein upsert auf „laufend"
                 // frischt nur armed_at auf, schadet also nie)
@@ -54758,6 +54805,7 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)){
+                await fensterWeg()   // S8
                 await sfEinmal({ schritt: 'm5abbruch', msg: 'Check-Popup kurz vor dem Abschuss geschlossen — nichts platziert.', unklar: false })
                 return
               }
@@ -54855,6 +54903,9 @@
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                   // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
+                  // S8: beweisbar nichts gesendet (retry_ok bzw. Echo pausiert, keine Position) → Fenster zurück; „Erneut" schreibt es neu.
+                  // UNKLAR (kein retry_ok) bleibt es stehen — dort kann eine Order liegen, die gehedgt werden muss
+                  if(!(r && r.price && r.ticket) && (retryOk || echoAus)) await fensterWeg()
                   if(!(r && r.price && r.ticket) && echoAus) await sfEinmal({ schritt: 'm5pause', msg: 'Echo ist pausiert (Not-Aus) — nichts gesendet.', unklar: false })
                   if(!(r && r.price && r.ticket) && !echoAus) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
                 }
@@ -54887,6 +54938,7 @@
             _pfSet('m5term', 'err', 'Terminal liefert nach 4 Minuten nichts — Details-Log der Copier-Karte prüfen (und im Terminal: Reiter „Experten").')
             _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
               msg:'Terminal liefert nach 4 Minuten nichts — Check hängt am PC, nichts platziert.' })
+            await fensterWeg()   // S8
             await sfEinmal({ schritt: 'm5term', msg: `Terminal liefert nach 4 Minuten nichts${note ? ' (' + note + ')' : ''} — nichts platziert.`, unklar: false })
             return
           }
