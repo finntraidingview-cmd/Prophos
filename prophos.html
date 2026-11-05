@@ -4957,6 +4957,8 @@
   #dashboard-view .type-badge.acc-rec-chip{margin-left:6px;cursor:pointer;vertical-align:middle}   /* Recoverer (02.11.2026): Farben wie type-challenge */
   #dashboard-view .type-badge.acc-rec-chip.acc-rec-aus{opacity:.55}
   #dashboard-view .type-badge.acc-refund-chip{margin-left:6px;background:#fff;border-color:#C9CBFF;color:#5049A2;vertical-align:middle}
+  #dashboard-view .type-badge.acc-od-chip{margin-left:6px;background:#fff;border-color:#9ED9C8;color:#16735A;vertical-align:middle}   /* O1 On Demand */
+  :where([data-theme=dark]) #dashboard-view .type-badge.acc-od-chip{background-color:var(--surface);border-color:rgba(22,160,120,0.45);color:#5cc4a3}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
   /* Planer-Spalte (08.10.2026, Finn: „mies hässlich" zum Chip in der Typ-Spalte): eigene schmale Spalte — Haken (accounts.auto_planer)
    * + kleine Zeile daneben: Startzeit grün (geplant), „ausgelassen" amber, „aus"/„–" grau. Klein, keine Pillen. */
@@ -4965,6 +4967,17 @@
   #dashboard-view .acc-ap input:disabled{cursor:default}
   #dashboard-view .acc-ap-s{color:var(--sub);font-variant-numeric:tabular-nums}
   #dashboard-view .acc-ap-s.drin{color:#047857;font-weight:600}
+  /* O1 Add-ons-Spalte: Chips (1 % Rule, On Demand) + kleiner Planer-Haken */
+  #dashboard-view .acc-addon-zelle{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+  #dashboard-view .acc-addons{display:inline-flex;gap:4px;flex-wrap:wrap}
+  #dashboard-view .acc-addon{font:inherit;font-size:11px;font-weight:600;line-height:1;padding:4px 8px;border-radius:999px;border:1px dashed var(--line);background:transparent;color:var(--sub-2,var(--sub));cursor:pointer;white-space:nowrap}
+  #dashboard-view .acc-addon:hover:not(:disabled){border-color:var(--sub)}
+  #dashboard-view .acc-addon:disabled{cursor:default;opacity:.6}
+  #dashboard-view .acc-addon.an{border-style:solid;border-color:#F2C46D;background:#FFF7E6;color:#9A5B00}
+  #dashboard-view .acc-addon.od.an{border-color:#9ED9C8;background:#EAF8F3;color:#16735A}
+  :where([data-theme=dark]) #dashboard-view .acc-addon.an{background:rgba(242,196,109,.12);border-color:rgba(242,196,109,.45);color:#f2c46d}
+  :where([data-theme=dark]) #dashboard-view .acc-addon.od.an{background:rgba(22,160,120,.14);border-color:rgba(22,160,120,.45);color:#5cc4a3}
+  #dashboard-view .acc-ap-k .acc-ap-s{font-size:11px}
   #dashboard-view .acc-ap-s.raus{color:#b45309}
   #dashboard-view .acc-ap-s.bald{color:var(--violet);font-weight:600}   /* Planer-Chip „nächster Lauf ≤ 10 min" nach einer Balance-Lesung (08.10.2026) */
   #dashboard-view #ac-cons-row[hidden],#dashboard-view #ac-cons-frei[hidden],#dashboard-view #bulk-cons-row[hidden],#dashboard-view #bulk-cons-frei[hidden]{display:none}
@@ -9396,7 +9409,7 @@
                   <th>Typ</th>
                   <th>Balance</th>
                   <!-- „Wert" (Kontowert) raus, „Planer" an die Stelle (Finn 08.10.2026: „den Wert nutze ich eh nie, ersetze ihn mit Planer") -->
-                  <th title="Auto-Planer (08.10.2026): Haken = darf eingeplant werden; daneben Startzeit des letzten Laufs (Dubai) oder der Grund, warum nicht">Planer</th>
+                  <th title="Add-ons des Kontos (1 % Rule, On Demand — Klick schaltet an/aus) und der Auto-Planer-Haken (Stand des letzten Laufs im Tooltip)">Add-ons</th>
                   <th>Verknüpfungen</th>
                   <th style="padding-right:20px"></th>
                 </tr>
@@ -15131,6 +15144,14 @@
           <input class="input mono" id="ac-max-risiko" type="number" step="50" min="0" placeholder="z.B. 1000 (1 % von 100K)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Nur für dieses Konto, z. B. bei einer 1-%-Regel. Das Konto wird in der Liste markiert.</div>
         </div>
+        <!-- O1 (05.11.2026, Finn ~07:20 Dubai: „Auf den Account drücken und On Demand switchen; dann gelten diese Regeln"): Spalte accounts.on_demand
+             (sql/2026-11-05_fcp_on_demand.sql). Nur sichtbar, wenn die Spalte da ist und das Konto ein FundedNext-CFD-Konto ist. Dazu das feste Ziel
+             des Zyklus (accounts.fcp_ziel, schreibt der Funded-CFD-Planer) — für jedes Funded-CFD-Konto, sobald eins gewürfelt ist. -->
+        <div class="field" id="ac-od-feld" hidden style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="ac-on-demand" style="width:16px;height:16px;margin:0"> Add-on · On Demand</label>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">FundedNext On-Demand: Ziel 2–2,25 % · Consistency 40 % · kein Refund-Trade · Payout anfragbar, sobald Ziel + Consistency erfüllt sind</div>
+        </div>
+        <div id="ac-ziel-fest" hidden style="grid-column:1/-1;font-size:12px;color:var(--sub)"></div>
         <!-- Auto-Planer-Haken (08.10.2026, Finn: „unter Accounts eine grobe Übersicht, welche Accounts gerade im Auto-Planer drin
              sind — so einen Haken: Auto-Planer"): Spalte accounts.auto_planer. Aus = Nachtlauf und Nachplanen lassen das Konto aus
              (Grund im Lauf). Ob es sonst drin ist (Typ, Firma, Balance, Ziel), entscheidet weiter der Planer; die Liste zeigt den
@@ -19687,7 +19708,7 @@
         ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
            <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
         : '<span class="mono" style="color:var(--sub-2)">—</span>'
-      let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRecovererChipHtml(a)) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
+      let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRecovererChipHtml(a)) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accOnDemandChipHtml(a) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
       let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
       let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
       // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
@@ -43846,7 +43867,10 @@
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
-      maxRisikoTrade: row.max_risiko_trade != null ? Number(row.max_risiko_trade) : null,   // eigene Vorgabe je Konto (07.10.2026), nicht das Firmen-Limit
+      maxRisikoTrade: row.max_risiko_trade != null ? Number(row.max_risiko_trade) : null,
+      // O1 (05.11.2026): undefined = Spalte fehlt noch (SQL nicht eingespielt) → kein Schalter, nichts geschrieben
+      onDemand: row.on_demand === undefined ? undefined : row.on_demand === true,
+      fcpZiel: row.fcp_ziel && typeof row.fcp_ziel === 'object' ? row.fcp_ziel : null,   // eigene Vorgabe je Konto (07.10.2026), nicht das Firmen-Limit
       autoPlaner: row.auto_planer !== false,   // Auto-Planer-Haken (08.10.2026): false = nie automatisch einplanen
       wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
@@ -44001,6 +44025,7 @@
     maxDd:    document.getElementById('ac-max-drawdown'),
     maxRisiko: document.getElementById('ac-max-risiko'),   // Max Risiko / Trade (07.10.2026)
     autoPlaner: document.getElementById('ac-auto-planer'),   // Auto-Planer-Haken (08.10.2026)
+    onDemand: document.getElementById('ac-on-demand'), odFeld: document.getElementById('ac-od-feld'), zielFest: document.getElementById('ac-ziel-fest'),   // O1 (05.11.2026)
     deakt: document.getElementById('ac-deaktiviert'), deaktRow: document.getElementById('ac-deakt-row'),   // Konto deaktiviert (30.10.2026)
     extId:    document.getElementById('ac-ext-id'),
     wdFarm:   document.getElementById('ac-wd-farm'),
@@ -44338,7 +44363,8 @@
         ['Max Loss / Trade', acc.maxLossPerTrade ? ('$' + Number(acc.maxLossPerTrade).toLocaleString('de-DE')) : '—'],
         ['Max Profit / Trade', acc.maxProfitPerTrade ? ('$' + Number(acc.maxProfitPerTrade).toLocaleString('de-DE')) : '—'],
         ['Max Risiko / Trade', acc.maxRisikoTrade ? ('$' + Number(acc.maxRisikoTrade).toLocaleString('de-DE')) : '—'],
-        ['External ID', acc.externalId || '—']
+        ['External ID', acc.externalId || '—'],
+        ...(typeof accO1DetailZeilen === 'function' ? accO1DetailZeilen(acc) : [])   // O1-Hook (On Demand, festes Ziel) — Detailseite K1 (S5) übernimmt ihn
       ]
       dataEl.innerHTML = rows.map(([l,v])=>`
         <div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)">
@@ -44672,8 +44698,8 @@
     // frischen Planer-Stand holen: nach 1 min (Lesung durch) und nach dem Nachplan-Takt (≤ 10 min + Luft)
     for(const ms of [60000, 11 * 60000]) setTimeout(() => { _ap.laufAt = 0; apLetztenHolen().then(() => { try{ renderAccounts() }catch(_){} }).catch(() => {}) }, ms)
   }
-  function accPlanerZelleHtml(a, archiviert){
-    if(!a || !AP_CHIP_TYPEN.includes(a.type)) return '<span style="color:var(--sub-2)">—</span>'
+  function accPlanerZelleHtml(a, archiviert, kompakt){
+    if(!a || !AP_CHIP_TYPEN.includes(a.type)) return kompakt ? '' : '<span style="color:var(--sub-2)">—</span>'
     const id = String(a.id), an = a.autoPlaner !== false
     let l = null; try{ l = _ap.letzter }catch(_){}
     const tag = l && l.tag ? String(l.tag) : ''
@@ -44694,7 +44720,57 @@
       }
       else { txt = '–'; tip = l ? `Im letzten Lauf (${tag}) nicht dabei` : 'Noch kein Planer-Lauf geladen' }
     }
+    // ADD-ONS-SPALTE (O1, Finn 05.11.2026 ~07:55: „mach anstatt Planer hier ‚Add-ons'"): kompakt nur der kleine Haken, Stand des Laufs im Tooltip
+    if(kompakt) return `<label class="acc-ap acc-ap-k" title="Auto-Planer · ${escapeHtml(txt)} — ${escapeHtml(tip)}"><input type="checkbox" data-acc-ap="${escapeHtml(id)}"${an ? ' checked' : ''}${archiviert ? ' disabled' : ''}><span class="acc-ap-s ${cls}">Planer</span></label>`
     return `<label class="acc-ap" title="${escapeHtml(tip)}"><input type="checkbox" data-acc-ap="${escapeHtml(id)}"${an ? ' checked' : ''}${archiviert ? ' disabled' : ''}><span class="acc-ap-s ${cls}">${escapeHtml(txt)}</span></label>`
+  }
+  /* ADD-ONS (O1, Finn 05.11.2026 ~07:55: „Wenn ein Konto als 1 % Rule geflaggt ist, bleibt das trotzdem bestehen — ein Konto kann z. B. 1 % Rule + das
+   * On-Demand-Add-on haben. Das nennen wir in Prophos ab jetzt ‚Add-ons'"): beide unabhängig kombinierbar.
+   * - 1 % Rule: wie bisher accounts.max_risiko_trade ODER „1% Rule" im Namen (so erkennen es Funded-CFD-Planer fcp_eins_prozent und WD-Farmer weiter).
+   *   Klick an → max_risiko_trade = 1 % der Kontogröße; Klick aus → max_risiko_trade leer (steht es im Namen, bleibt es — Hinweis, Name im Bearbeiten ändern).
+   * - On Demand: eigene Spalte accounts.on_demand (nur FundedNext-CFD, nur wenn die Spalte da ist). */
+  const accEinsProzentName = a => /(^|[^0-9])1\s*%\s*-?\s*rule/i.test(String((a && a.name) || ''))
+  function accAddonsHtml(a, archiviert){
+    if(!a) return ''
+    const chips = [], frei = !archiviert
+    const ep = (a.maxRisikoTrade > 0) || accEinsProzentName(a)
+    if(ep || a.type === 'funded_cfd' || a.type === 'funded' || a.type === 'winning_days'){
+      const b = a.maxRisikoTrade > 0 ? Number(a.maxRisikoTrade).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : ''
+      const t = ep ? `1 % Rule an${b ? ' · max ' + b + ' je Trade' : ''}${accEinsProzentName(a) ? ' · steht im Namen' : ''}` : '1 % Rule aus — Klick schaltet an (max Risiko = 1 % der Kontogröße)'
+      chips.push(`<button type="button" class="acc-addon${ep ? ' an' : ''}" data-acc-addon="eins" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>1 % Rule</button>`)
+    }
+    if(a.type === 'funded_cfd' && a.onDemand !== undefined && accIstFundedNextCfd(a)){
+      const zf = accZielFestText(a)
+      const t = a.onDemand ? `On Demand an — Ziel 2–2,25 % · Consistency 40 % · Payout anfragbar, sobald erfüllt${zf ? ' · festes Ziel ' + zf : ''}` : 'On Demand aus — Klick schaltet an'
+      chips.push(`<button type="button" class="acc-addon od${a.onDemand ? ' an' : ''}" data-acc-addon="od" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>On Demand</button>`)
+    }
+    return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
+  }
+  async function accAddonUmstellen(id, art, btn){
+    const a = (accounts || []).find(x => String(x.id) === String(id)); if(!a) return
+    let upd = null, msg = ''
+    if(art === 'od'){ upd = { on_demand: !a.onDemand }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
+    else if(art === 'eins'){
+      if(a.maxRisikoTrade > 0){ upd = { max_risiko_trade: null }; msg = accEinsProzentName(a) ? '1 % Rule: max Risiko geleert — steht aber im Namen und gilt weiter (Name im Bearbeiten ändern)' : '1 % Rule aus' }
+      else if(accEinsProzentName(a)){ if(typeof atToast === 'function') atToast('1 % Rule steht im Namen — zum Ausschalten den Namen im Bearbeiten ändern', 'end'); return }
+      else {
+        const gN = parseFloat(String(kontoNameTeile(a.name).groesse || '').replace(',', '.'))   // Kontogröße: Starting Balance, sonst „100k" aus dem Namen
+        const g = Number(a.startingBalance) > 0 ? Number(a.startingBalance) : (gN > 0 ? gN * 1000 : 0)
+        if(!(g > 0)){ if(typeof atToast === 'function') atToast('1 % Rule: Kontogröße unbekannt — max Risiko im Bearbeiten eintragen', 'end'); return }
+        upd = { max_risiko_trade: Math.round(g / 100) }; msg = `1 % Rule an — max ${Math.round(g / 100).toLocaleString('de-DE')} $ je Trade`
+      }
+    }
+    if(!upd) return
+    if(btn) btn.disabled = true
+    try{
+      const { data, error } = await supabase.from('accounts').update(upd).eq('id', a.id).select('*').single()
+      if(error) throw error
+      if(!data) throw new Error('nicht gespeichert (fremdes Konto?)')
+      if('on_demand' in upd) a.onDemand = data.on_demand === true
+      if('max_risiko_trade' in upd) a.maxRisikoTrade = data.max_risiko_trade != null ? Number(data.max_risiko_trade) : null
+      if(typeof atToast === 'function') atToast('Add-on · ' + msg, 'start')
+      renderAccounts()
+    }catch(e){ if(btn) btn.disabled = false; if(typeof atToast === 'function') atToast('Add-on nicht gespeichert: ' + ((e && e.message) || e), 'end') }
   }
   // Haken umschalten: sofort gespeichert (accounts.auto_planer), Zeile neu — der nächste Planer-Lauf (10-min-Takt / Nacht) nimmt es auf
   async function accAutoPlanerUmstellen(id, an, cb){
@@ -44852,6 +44928,34 @@
    * Buchungen geladen sind (_txGeladen, oben bei accounts), sonst stünde der Chip beim Start kurz an jedem Konto. */
   // payoutsN (21.10.2026, Admin → Alle Accounts, Finn: „ich sehe gar nichts"): fremde IDs haben keine eigenen transactions im Tab — dort zählt
   // der Server je Konto erhaltene + angefragte Payouts (admin payouts_n, dieselbe Zahl wie der FundedNext-Refund im Payout-Kalender)
+  // ON DEMAND + FESTES ZIEL (O1, Finn 05.11.2026 ~07:20 Dubai): Chip „On Demand" neben Waiting/Refund; das feste Ziel des Zyklus (accounts.fcp_ziel)
+  // steht im Chip-Titel, im Konto-Bearbeiten und in den Konto-Daten (accO1DetailZeilen — Hook für die Detailseite K1 von S5)
+  const accIstFundedNextCfd = a => !!a && /f(ou|u)nded\s*next/i.test(String(a.firm || '')) && !/futures/i.test(String(a.firm || ''))
+  function accZielFestText(a){
+    const z = a && a.fcpZiel, usd = z && Number(z.usd)
+    if(!(usd > 0)) return ''
+    return `+${usd.toLocaleString('de-DE', { maximumFractionDigits: 0 })} $${z.zyklus ? ' · Zyklus ' + Number(z.zyklus) : ''}`
+  }
+  function accOnDemandChipHtml(a){
+    if(!a || a.type !== 'funded_cfd' || a.onDemand !== true) return ''
+    const zf = accZielFestText(a)
+    return ` <span class="type-badge acc-od-chip" title="On-Demand-Konto: Ziel 2–2,25 % · Consistency 40 % · kein Refund-Trade · Payout anfragbar, sobald Ziel + Consistency erfüllt sind${zf ? ' · festes Ziel ' + escapeHtml(zf) : ''}">On Demand</span>`
+  }
+  function accO1DetailZeilen(acc){
+    if(!acc || acc.type !== 'funded_cfd') return []
+    const z = []
+    const ad = [(acc.maxRisikoTrade > 0 || accEinsProzentName(acc)) ? '1 % Rule' : '', acc.onDemand === true ? 'On Demand' : ''].filter(Boolean)   // Add-ons (O1)
+    if(ad.length || (acc.onDemand !== undefined && accIstFundedNextCfd(acc))) z.push(['Add-ons', ad.join(' · ') || '—'])
+    const zf = accZielFestText(acc); if(zf) z.push(['Ziel fest', zf])
+    return z
+  }
+  function accOdFelderSetzen(acc){
+    const zeig = !!acc && acc.onDemand !== undefined && accIstFundedNextCfd(acc) && acc.type === 'funded_cfd'
+    if(accEls.odFeld) accEls.odFeld.hidden = !zeig
+    if(accEls.onDemand) accEls.onDemand.checked = !!(acc && acc.onDemand)
+    const zf = acc && acc.type === 'funded_cfd' ? accZielFestText(acc) : ''
+    if(accEls.zielFest){ accEls.zielFest.hidden = !zf; accEls.zielFest.textContent = zf ? `Festes Ziel (Funded-CFD-Planer): ${zf} — neu gewürfelt nach dem nächsten Payout` : '' }
+  }
   function accRefundChipHtml(a, payoutsN){
     if(!a || a.type !== 'funded_cfd') return ''
     if(payoutsN == null && !_txGeladen) return ''
@@ -45498,9 +45602,9 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${isArchived ? '' : accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${isArchived ? '' : accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
-            <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
+            <td data-stop-row-click="1"><span class="acc-addon-zelle">${accAddonsHtml(a, isArchived)}${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived, true)) : accPlanerZelleHtml(a, isArchived, true)}</span></td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
@@ -45619,6 +45723,7 @@
         btn.addEventListener('click', e => { e.stopPropagation(); accWdUmstellen(btn.dataset.accWdtyp, btn.dataset.ziel, { btn }) })
       })
       // Auto-Planer-Haken (08.10.2026): eigener Handler, sofort gespeichert
+      accEls.table.querySelectorAll('[data-acc-addon]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); accAddonUmstellen(b.dataset.accId, b.dataset.accAddon, b) }))   // O1 Add-ons
       accEls.table.querySelectorAll('[data-acc-ap]').forEach(cb => {
         cb.addEventListener('click', e => e.stopPropagation())
         cb.addEventListener('change', e => { e.stopPropagation(); accAutoPlanerUmstellen(cb.dataset.accAp, cb.checked, cb) })
@@ -45689,6 +45794,7 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = editAccount.maxRisikoTrade != null ? editAccount.maxRisikoTrade : ''
+      accOdFelderSetzen(editAccount)   // O1: On Demand + festes Ziel
       if(accEls.autoPlaner) accEls.autoPlaner.checked = editAccount.autoPlaner !== false
       if(accEls.deakt) accEls.deakt.checked = !!editAccount.deaktiviertAt
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
@@ -45725,6 +45831,7 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = ''
+      accOdFelderSetzen(null)   // O1: neues Konto — On Demand erst nach dem Anlegen (Bearbeiten)
       if(accEls.autoPlaner) accEls.autoPlaner.checked = true   // neue Konten standardmäßig im Auto-Planer (08.10.2026)
       if(accEls.extId) accEls.extId.value = ''
       if(accEls.wdFarm) accEls.wdFarm.checked = false   // neue Konten nie im WD-Farm (F17-Ergänzung 27.09.2026, vorher Standard drin)
@@ -46121,6 +46228,7 @@
       maxLossPerTrade: !isNaN(maxLossPerTrade) && maxLossPerTrade > 0 ? maxLossPerTrade : null,
       maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
       maxRisikoTrade: !isNaN(maxRisiko) && maxRisiko > 0 ? maxRisiko : null,
+      onDemand: accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? accEls.onDemand.checked : undefined,   // O1: nur wenn der Schalter sichtbar war
       autoPlaner: accEls.autoPlaner ? accEls.autoPlaner.checked : true,   // Auto-Planer-Haken (08.10.2026)
       // Ziel-Felder je nach sichtbarem Block: Winning Days (Futures-Funded,
       // manuell) / Fortschritts-Ziel (CFD-Phase, automatisch) / sonst Bestand.
@@ -46255,6 +46363,7 @@
           max_loss_per_trade: acc.maxLossPerTrade,
           max_profit_per_trade: acc.maxProfitPerTrade,
           max_risiko_trade: acc.maxRisikoTrade,
+          ...(acc.onDemand !== undefined ? { on_demand: !!acc.onDemand } : {}),   // O1: nur mit Spalte (sonst schlüge jedes Speichern fehl)
           auto_planer: acc.autoPlaner !== false,   // Auto-Planer-Haken (08.10.2026)
           // Typ wechselt auf Winning Days → Haken an (Finn 03.11.2026, s. accWdUmstellen); sonst der Haken aus dem Popup (Ausschalten bleibt möglich)
           wd_farm: !!acc.wdFarm || (acc.type === 'winning_days' && String((accounts.find(x => String(x.id) === String(_editingAccountId)) || {}).type || '') !== 'winning_days'),

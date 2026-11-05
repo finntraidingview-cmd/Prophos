@@ -248,8 +248,9 @@ def consistency():
        "alter Trade ohne P&L aus früherem Zyklus stört nicht")
     # durch fcp_konto_rechnen: The5ers (Ziel 1.300–1.500, rnd None → Mitte 1.400)
     r1 = app.fcp_konto_rechnen(jg, 100000, 100000, 2, False, 1.0, 0.85, None, t5_pct, tage=(0.0, 0))
-    ok(r1["aktion"] == "planen" and r1["tp_art"] == "consistency" and r1["tp"] == 467.0 and r1["consistency"]["n"] == 3,
-       f"Konto-Rechnung The5ers frisch: TP {r1.get('tp')} (1.400 ÷ 3), Trade 1 von 3")
+    # seit O1 (05.11.2026) Consistency nach Finn (fcp_cons_finn): TP (p − 5 %) … p der Distanz, höchstens p × Summe Gewinn-Tage am Ende × 0,95
+    ok(r1["aktion"] == "planen" and r1["tp_art"] == "consistency" and 0.45 * 1400 - 1 <= r1["tp"] <= 665.0 and r1["consistency"]["n"] == 3,
+       f"Konto-Rechnung The5ers frisch: TP {r1.get('tp')} (45–50 % von 1.400, Deckel 665), Trade 1 von 3")
     r2 = app.fcp_konto_rechnen(jg, 101600, 100000, 2, False, 1.0, 0.85, None, t5_pct, tage=(760.0, 2))
     ok(r2["aktion"] == "ziel", "G 1.600, B 760 → Ziel erreicht (Endziel 1.550, größter Tag 47 %)")
     r3 = app.fcp_konto_rechnen(jg, 101320, 100000, 2, False, 1.0, 0.85, None, t5_pct, tage=(760.0, 2))

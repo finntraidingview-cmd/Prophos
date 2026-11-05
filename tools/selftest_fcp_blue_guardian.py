@@ -120,7 +120,7 @@ check(r["aktion"] == "ziel", "FundedNext Ziel erreicht wie bisher")
 fp = app[app.index("def fcp_planen("):app.index("def fcp_sicht(")]
 check('"select": "account_id,received_tx_id,requested_at,created_at"' in fp and '"select": "account_id,payout_date,created_at"' in fp and '"select": "id,account_id,occurred_at"' in fp,
       "fcp_planen liest die Payout-Daten für den Zyklus-Beginn")
-check("fcp_gewinntage_seit(zyklus_ab.get(aid), a.get(\"created_at\"))" in fp and "zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}" in fp and "gewinntage=gti)" in fp and '"erster_payout", "gewinntage")' in fp,
+check("fcp_gewinntage_seit(zyklus_ab.get(aid), a.get(\"created_at\"))" in fp and "zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}" in fp and ("gewinntage=gti)" in fp or "gewinntage=gti,\n" in fp) and ('"erster_payout", "gewinntage")' in fp or '"erster_payout", "gewinntage",\n' in fp),   # O1: danach ziel_fest, on_demand
       "fcp_planen zählt die Gewinntage je Konto, reicht sie durch und schreibt sie in den Vorschlag")
 zw = app[app.index("def zw_funded_cfd():"):app.index("def zw_tick(")]
 check("if not gti or int(gti[0]) < int(gti[1]):\n                    _zw[\"ziele\"].pop(aid, None)" in zw and '"account_id,received_tx_id,requested_at,created_at"' in zw,

@@ -41550,6 +41550,51 @@ def fcp_payouts_zaehlen(pending, managed, buchungen):
     return n
 
 
+# ON-DEMAND-KONTEN (O1, Finn 05.11.2026 ~07:20 Dubai: „Bei FundedNext gibt's On-Demand-Accounts: Ziel ~2 %, keine Tage, nur Consistency einhalten
+# und mindestens 2.000 machen … Auf den Account drücken und On Demand switchen; dann gelten diese Regeln, Lots-Verhältnis gleich, TP/SL wie hier"):
+# gilt nur für Konten mit accounts.on_demand = true. Ziel je 100k (skaliert mit der Kontogröße), Consistency p %, kein Refund-Trade, keine Gewinntage;
+# SL, Lots, Hedge wie die Firma normal. Überschreibbar je Firma in funded_cfd_plan_regeln (firmen[].on_demand = {ziel_je_100k, consistency_pct}).
+FCP_ON_DEMAND_STANDARD = {"fundednext": {"ziel_je_100k": [2000, 2250], "consistency_pct": 40}}
+
+
+def fcp_on_demand_regel(regel):
+    """On-Demand-Werte der Firma ({ziel_je_100k [von, bis], consistency_pct}) — regel.on_demand (false = keine), sonst Standard je Firmen-Schlüssel."""
+    r = regel or {}
+    od = r.get("on_demand") if "on_demand" in r else FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0]))
+    if not isinstance(od, dict) or not fcp_bereich(od.get("ziel_je_100k")):
+        return None
+    if "consistency_pct" not in od:     # Override ohne p → Standard der Firma (Fremd-Review O1: sonst fail-open ohne Consistency)
+        od = dict(od, consistency_pct=(FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0])) or {}).get("consistency_pct"))
+    p = _wd_num(od.get("consistency_pct"))
+    return {"ziel_je_100k": list(fcp_bereich(od.get("ziel_je_100k"))), "consistency_pct": float(p) if p is not None and 0 < p < 100 else None}
+
+
+def fcp_on_demand_anwenden(regel, jg, groesse):
+    """REIN (testbar): Regel + Größen-Werte eines On-Demand-Kontos → (regel, jg) oder None (Firma ohne On-Demand-Regel / Größe fehlt).
+    Ziel = ziel_je_100k × Größe ÷ 100.000 (ganze $), Consistency p %, Refund-Trade aus, keine Gewinntage; alles andere (SL, Lots, Hedge, DD) bleibt."""
+    od, g = fcp_on_demand_regel(regel), _wd_num(groesse)
+    if not od or not jg or not g:
+        return None
+    f = float(g) / 100000.0
+    jg2 = {k: v for k, v in dict(jg).items() if k not in ("gewinntage", "tp_erster")}
+    jg2["ziel"] = [float(round(od["ziel_je_100k"][0] * f)), float(round(od["ziel_je_100k"][1] * f))]
+    r2 = dict(regel or {}, erster_payout=False, consistency_pct=od["consistency_pct"] or 0, tp_modus=None)
+    return r2, jg2
+
+
+# FESTES ZIEL JE KONTO (O1, Finn 05.11.2026 ~07:20: „in Zukunft bei ALLEN Funded-CFD-Accounts: das Ziel wird je Account einmal per Zufall gewählt und
+# steht fest; der Planer verteilt dann (z. B. 400, dann 800)"): accounts.fcp_ziel = {zyklus, usd, at}. Gilt, solange der Payout-Zyklus derselbe ist und
+# der Wert im heutigen Ziel-Bereich liegt (Refund-Zyklus → normales Ziel, On Demand an/aus, Bereich geändert → neu würfeln). Gewürfelt wird IMMER
+# (gleicher Zufalls-Verbrauch wie bisher), damit alle anderen Werte eines Laufs gleich bleiben (Diff-Test selftest_fcp_on_demand).
+def fcp_ziel_fest(gespeichert, zyklus, ziel_b, gewuerfelt):
+    """REIN (testbar): (ziel $, neu: bool). gespeichert = accounts.fcp_ziel (dict | None), ziel_b = [von, bis], gewuerfelt = heute gewürfelter Wert."""
+    s = gespeichert if isinstance(gespeichert, dict) else {}
+    usd, z = _wd_num(s.get("usd")), _wd_num(s.get("zyklus"))
+    if usd is not None and z is not None and int(z) == int(zyklus) and ziel_b and ziel_b[0] - 0.005 <= usd <= ziel_b[1] + 0.005:
+        return float(usd), False
+    return float(gewuerfelt), True
+
+
 def fcp_erster_payout(regel):
     """Erster-Payout-Werte der Firma ({ziel, hedge_eur_je_dd}) — regel.erster_payout (false = aus), sonst Standard je Firmen-Schlüssel, sonst None."""
     r = regel or {}
@@ -41654,8 +41699,87 @@ def fcp_tage_zyklus(plaene, seit_tag=None):
     return round(max([v for v in je_tag.values() if v > 0] or [0.0]), 2), n
 
 
+def fcp_tage_zyklus_w(plaene, seit_tag=None):
+    """REIN RECHNEND (testbar, O1 05.11.2026): Zyklus-Werte für die Consistency nach Finn → {b: größter Gewinn-Tag, w: Summe der Gewinn-Tage,
+    n: Trades, serie: Summe der Gewinn-Trades seit dem letzten Verlust-Trade, serie_n: deren Anzahl} | None (nicht sicher lesbar, wie fcp_tage_zyklus).
+    Tag = Berlin-Tag des Trade-Endes; nur beendete Trades (completed) ab seit_tag."""
+    tz, je_tag, liste = _ap_tz("Europe/Berlin"), {}, []
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
+        if ts is None:
+            return None
+        d = ts.astimezone(tz).date().isoformat()
+        if seit_tag and d < str(seit_tag):
+            continue
+        pl = _wd_num(p.get("master_pl"))
+        if pl is None:
+            return None
+        je_tag[d] = je_tag.get(d, 0.0) + float(pl)
+        liste.append((ts, float(pl)))
+    serie, serie_n = 0.0, 0
+    for _ts, pl in sorted(liste, key=lambda x: x[0]):
+        if pl < 0:
+            serie, serie_n = 0.0, 0                     # Verlust-Trade → neue Serie (Distanz neu)
+        else:
+            serie, serie_n = serie + pl, serie_n + 1
+    pos = [v for v in je_tag.values() if v > 0]
+    return {"b": round(max(pos or [0.0]), 2), "w": round(sum(pos), 2), "n": len(liste), "serie": round(serie, 2), "serie_n": serie_n}
+
+
+FCP_CONS_ANTEIL_SPANNE = 5.0     # TP je Trade = Zufall (p − 5 %) … p der Distanz (Finn 05.11.2026 ~07:50: „35–40 % davon, per Zufall bei jedem Trade")
+
+
+def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None):
+    """REIN RECHNEND (testbar): CONSISTENCY NACH FINN (O1, 05.11.2026 ~07:45/07:50 Dubai, ersetzt Weg A für alle Consistency-Firmen):
+    „Angenommen wir machen −2.000, dann fehlen noch genau 5.000 zum Ziel. 40 % davon sind 2.000, der größte Tag darf nicht über 2.000 sein. Dann machen
+    wir 1.500, 1.900, 1.600 … So wenige Trades wie möglich, immer nur das, was zum Ziel noch fehlt" · „Wir nehmen die aktuelle Balance bis zum Ziel =
+    Distanz. Der Take-Profit ist immer z. B. 35–40 % davon, per Zufall bei jedem Trade."
+    Z = Ziel (festes Ziel des Kontos), G = Gewinn über der Kontogröße, R = Z − G (was fehlt), W = Summe der Gewinn-Tage im Zyklus, B = größter Gewinn-Tag.
+    Basis der Consistency ist W (nicht der Netto-Gewinn): am Ende W_end = W + R (alle Rest-Trades gewinnen), Bedingung B ≤ p × W_end — sonst R so weit
+    erhöhen, bis es passt (B ÷ p × 1,02 − W). Deckel je Trade c = p × W_end × 0,95. Distanz D = R + Gewinne seit dem letzten Verlust-Trade (Serie;
+    nach einem Verlust neu). TP = Zufall (p − 5 %) … p × D, höchstens c; ist R ≤ c, schließt der Trade genau den Rest. Mindestens 50 $.
+    Fertig: G ≥ Z und B ≤ p × W. Nicht lesbar (tw None) → TP = min(p × Z × 0,95, Rest), mindestens 50 (kleinster sicherer Trade).
+    → {tp, ende, deckel, rest, n (Trades inkl. diesem), k (Trades der Serie bisher), bester_tag, summe_tage, distanz, anteil, p, fertig, lesbar}"""
+    q, Z, G = float(pct) / 100.0, float(ziel), float(gewinn)
+    if tw is None:
+        c = q * Z * FCP_CONS_PUFFER_DECKEL
+        R = Z - G
+        return {"tp": float(max(FCP_CONS_TP_MIN_USD, min(int(c), round(R)))), "ende": round(Z), "deckel": round(c, 2), "rest": round(R, 2), "n": None,
+                "k": None, "bester_tag": None, "summe_tage": None, "distanz": None, "anteil": None, "p": float(pct), "fertig": False, "lesbar": False}
+    B, W = float(tw.get("b") or 0), float(tw.get("w") or 0)
+    S, k = float(tw.get("serie") or 0), int(tw.get("serie_n") or 0)
+    if G >= Z - 0.005 and B <= q * W + 0.005:
+        return {"tp": None, "ende": round(Z), "deckel": None, "rest": round(Z - G, 2), "n": 0, "k": k, "bester_tag": B, "summe_tage": W, "distanz": None,
+                "anteil": None, "p": float(pct), "fertig": True, "lesbar": True}
+    R = max(Z - G, B / q * FCP_CONS_PUFFER_ZIEL - W, 0.0)
+    c = q * (W + R) * FCP_CONS_PUFFER_DECKEL
+    D = R + S
+    lo = max(q - FCP_CONS_ANTEIL_SPANNE / 100.0, q / 2.0)
+    anteil = rnd.uniform(lo, q) if rnd is not None else (lo + q) / 2.0
+    if R <= c + 0.005:
+        tp = R                                          # Rest passt unter den Deckel → genau der Rest (so wenige Trades wie möglich)
+    else:
+        tp = min(anteil * D, c, R)
+    tp = float(max(FCP_CONS_TP_MIN_USD, round(tp)))
+    n = 1 if tp >= R - 0.5 else 1 + int((R - tp) / c) + (1 if (R - tp) - int((R - tp) / c) * c > 1e-6 else 0)
+    return {"tp": tp, "ende": round(G + R), "deckel": round(c, 2), "rest": round(R, 2), "n": n, "k": k, "bester_tag": B, "summe_tage": W,
+            "distanz": round(D, 2), "anteil": round(anteil, 4), "p": float(pct), "fertig": False, "lesbar": True}
+
+
+def fcp_tw_aus(tage, gewinn):
+    """tage aus dem Planer (dict von fcp_tage_zyklus_w) oder alt (B, Trades) aus Selbsttests → dict | None. Alt ohne Summe: W ≈ max(G, B, 0), Serie 0."""
+    if isinstance(tage, dict):
+        return tage
+    if isinstance(tage, (list, tuple)) and len(tage) == 2:
+        b = float(tage[0] or 0)
+        return {"b": b, "w": max(float(gewinn), b, 0.0), "n": int(tage[1] or 0), "serie": 0.0, "serie_n": 0}
+    return None
+
+
 def fcp_cons_rechnen(pct, ziel, gewinn, tage):
-    """REIN RECHNEND (testbar): CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai: „Weg A, das Ziel bleibt"). pct = p in %, ziel Z = gewürfeltes Ziel ($ über der
+    """SEIT O1 (05.11.2026) NICHT MEHR IM PLANER — abgelöst durch fcp_cons_finn; bleibt nur für den alten Selbsttest. REIN RECHNEND: CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai: „Weg A, das Ziel bleibt"). pct = p in %, ziel Z = gewürfeltes Ziel ($ über der
     Kontogröße), gewinn G = Balance − Kontogröße (Verluste zählen), tage = (B größter Gewinn-Tag, k Trades) aus fcp_tage_zyklus oder None (nicht lesbar).
     Endziel F = max(Z, B ÷ p × 1,02) · Deckel c = p × F × 0,95 · Rest R = F − G · n = ceil(R ÷ c) Trades · TP = R ÷ n (ganze $), mindestens 50, höchstens c.
     Nicht lesbar → F = Z, TP = c (kleinster sichere Trade). → {tp, ende, deckel, rest, n, k, bester_tag, p, fertig} (fertig: R ≤ 0)."""
@@ -41701,7 +41825,8 @@ def fcp_gewinntage_seit(zyklus_tag, konto_created_at):
     return max([d for d in (zyklus_tag, an) if d] or [None]) if (zyklus_tag or an) else None
 
 
-def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None, param=None, tage=None):
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None, param=None, tage=None,
+                      ziel_fest=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
     jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
     True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
@@ -41743,13 +41868,23 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     if pct:
         # CONSISTENCY WEG A (05.11.2026): fertig erst, wenn das Ziel erreicht ist UND kein Tag größer als p % des Zyklus-Gewinns war (G ≥ max(Ziel, B ÷ p × 1,02)).
         # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht über das Ziel hinaus)
-        bt = (tage[0] if isinstance(tage, (list, tuple)) and len(tage) == 2 else None)
-        f_min = max(ziel_b[0], (float(bt) / (pct / 100.0)) if bt else 0.0)     # ohne den Planungs-Puffer 1,02 (s. fcp_cons_rechnen)
-        if gewinn >= f_min - 0.005:
-            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": bt, "ende": round(f_min)})
+        # O1 (Finn 05.11.2026): Ziel erreicht = G ≥ Z und größter Tag B ≤ p × Summe der Gewinn-Tage W. Z = festes Ziel des Kontos, sonst Ziel-von.
+        # Ohne Zufall (sonst verschöbe ein Konto am Ziel die Würfe aller folgenden Konten des Laufs)
+        tw0 = fcp_tw_aus(tage, gewinn)
+        z_f, _n0 = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0]) if ziel_fest is not None else (ziel_b[0], True)
+        z_f = max(z_f, ziel_b[0])
+        if tw0 is None:
+            if gewinn >= ziel_b[0] - 0.005:                  # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht)
+                return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": None, "ende": round(ziel_b[0])})
+        elif gewinn >= z_f - 0.005 and float(tw0.get("b") or 0) <= pct / 100.0 * float(tw0.get("w") or 0) + 0.005:
+            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout",
+                        consistency={"p": pct, "bester_tag": tw0.get("b"), "summe_tage": tw0.get("w"), "ende": round(z_f)})
     elif gewinn >= ziel_b[0] - 0.005 and not gt_offen:
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
+    if ziel_fest is not None:            # O1: festes Ziel je Konto und Zyklus (dict = Feature an, {} = noch keins gespeichert) — None = wie bisher je Lauf
+        ziel, _neu = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel)
+        basis["ziel_fest"] = {"zyklus": zyklus, "usd": ziel, "neu": _neu}
     ziel = max(ziel, ziel_b[0])
     deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus, P["tp_deckel_plus_standard"])
     if gt and gt_offen:
@@ -41762,7 +41897,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     elif pct:
         # CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai, ersetzt C5 „750-Start, höchstens die Zyklus-Gewinne"): Endziel, Deckel, Rest gleich verteilt
         # (fcp_cons_rechnen). Das Ziel Z bleibt das gewürfelte Ziel der Größe, G = Balance − Kontogröße, B = größter Gewinn-Tag im Zyklus
-        cr = fcp_cons_rechnen(pct, ziel, gewinn, tage if isinstance(tage, (list, tuple)) and len(tage) == 2 else None)
+        # seit O1 (05.11.2026) nach Finn: fcp_cons_finn — Basis Summe der Gewinn-Tage, TP (p − 5 %) … p der Distanz, letzter Trade = Rest
+        cr = fcp_cons_finn(pct, ziel, gewinn, fcp_tw_aus(tage, gewinn), rnd)
         if cr["fertig"]:
             return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency=cr)
         tp, tp_art, deckel = cr["tp"], ("consistency" if cr["lesbar"] else "consistency_ohne_zyklus"), None
@@ -41978,8 +42114,18 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     ruhe = ("keine Firma an" if not an else
             "Wochenende — kein Handelstag" if datetime.strptime(plan_tag, "%Y-%m-%d").weekday() >= 5 else None)   # wie fdp_planen: NAS100 zu
     in_uids = "in.(" + ",".join(uids) + ")"
-    konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade",
-                                  "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
+    # O1 (05.11.2026): on_demand + fcp_ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten noch, läuft der Planer genau wie bisher
+    od_spalte = True
+    try:
+        konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade,on_demand,fcp_ziel",
+                                      "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
+    except requests.exceptions.HTTPError as e:
+        if "on_demand" not in str(getattr(e.response, "text", "") or e) and "fcp_ziel" not in str(getattr(e.response, "text", "") or e):
+            raise                        # anderer Fehler (5xx, …): nicht still ohne On Demand planen (Fremd-Review O1)
+        od_spalte = False
+        print("[funded-cfd] on_demand/fcp_ziel fehlen — ohne On Demand / festes Ziel (SQL 2026-11-05_fcp_on_demand.sql)", flush=True)
+        konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade",
+                                      "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
     archiv = _ap_archiviert()
     konten = [a for a in ap_deaktiviert_anwenden(konten) if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
     ids = [str(a["id"]) for a in konten]
@@ -42025,12 +42171,13 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     for p in plaene:
         je_plan.setdefault(str(p.get("master_account_id")), []).append(p)
     rnd = random.Random(seed if seed is not None else f"fcp-{plan_tag}-{int(jetzt.timestamp() // FCP_TAKT_S)}")
-    kand = []
+    kand, ziel_schreiben = [], {}
     for a in ([] if ruhe else konten):
         aid, uid, pl = str(a["id"]), str(a.get("user_id")), je_plan.get(str(a["id"]), [])
         regel = ap_regel_finden(an, a.get("firm"))
         if not regel:
             continue                     # Firma aus: nur in plaene, nie geplant
+        od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
         fkey = (regel.get("namen") or [""])[0]
         if fkey.startswith("tradeify") and not _ist_tradeify_cfd(a.get("firm")):
             continue                     # Tradeify-Futures nie hier (Regel-Schlüssel „tradeify" ohne cfd hat keine Zeile, doppelt gesichert)
@@ -42038,12 +42185,18 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         try:   # E1b (Finn 05.11.2026 ~04:25): Kontoliste je Firma mit Ziel- und Consistency-Balken — aus den Lesungen dieses Laufs
             _g = _wd_konto_groesse(a)
             _jg = fcp_je_groesse(regel, _g) or {}
+            _rk = regel
+            if od_an:
+                _rk, _jg = fcp_on_demand_anwenden(regel, _jg, _g) or (regel, _jg)
             _bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
             _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None
+            _tw = fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None   # O1: Summe der Gewinn-Tage
             _zb = fcp_bereich(_jg.get("ziel"))
             erg["konten_stand"].append(dict(zeile, groesse=_g, balance=_bal, gewinn=round(float(_bal) - float(_g), 2) if _bal is not None and _g else None,
                                             ziel_von=_zb[0] if _zb else None, ziel_bis=_zb[1] if _zb else None, wartet=bool(a.get("waiting_payout_since")),
-                                            bester_tag=_tz[0] if _tz else None, trades=_tz[1] if _tz else None, consistency_pct=fcp_consistency_pct(regel)))
+                                            bester_tag=_tz[0] if _tz else None, trades=_tz[1] if _tz else None, consistency_pct=fcp_consistency_pct(_rk),
+                                            summe_gewinntage=_tw["w"] if _tw else None,
+                                            on_demand=od_an, ziel_fest=(a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)))
         except Exception as e:
             print(f"[funded-cfd] ⚠️ Kontostand {aid[:8]}: {type(e).__name__}: {e}", flush=True)
         aus = lambda grund, **x: erg["ausgelassen"].append(dict(zeile, aktion="aus", grund=grund, **x))   # noqa: E731
@@ -42059,6 +42212,12 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         jg = fcp_je_groesse(regel, g)
         if not jg:
             aus(f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-CFD-Planer"); continue
+        regel_k = regel
+        if od_an:
+            _oda = fcp_on_demand_anwenden(regel, jg, g)
+            if not _oda:
+                aus("On Demand am Konto — für diese Firma gibt es keine On-Demand-Regel"); continue
+            regel_k, jg = _oda
         if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
             aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen"); continue
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
@@ -42083,12 +42242,19 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
         gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None) \
             if isinstance(jg.get("gewinntage"), dict) else None
-        r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
+        r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
                               max_sl=a.get("max_risiko_trade"), param=param,      # E1b: Planer-Parameter aus der DB (fcp_param)
-                              tage=fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None,   # Weg A
-                              gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti)
+                              tage=fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None,   # O1: Consistency nach Finn
+                              gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
+                              # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
+                              ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
+        if od_an:
+            r["on_demand"] = True
+        if r.get("aktion") == "planen" and (r.get("ziel_fest") or {}).get("neu"):
+            ziel_schreiben[aid] = ({"zyklus": r["ziel_fest"]["zyklus"], "usd": r["ziel_fest"]["usd"], "at": jetzt.isoformat()},
+                                   a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
         elif r["aktion"] != "planen":
@@ -42179,11 +42345,12 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else "")
                  + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
                  + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
+                 + (" · On Demand" if r.get("on_demand") else "") + (" · Ziel fest" if r.get("ziel_fest") else "")   # O1
                  # The5ers je Zyklus (04.11.2026): Zyklus-Gewinne in der Notiz — Finn sieht, woraus der TP kommt (nicht lesbar → „?")
                  + ((f" · Zyklus-Gewinne {_liq_de(r['gewinne'])} $" if r.get("gewinne") is not None else " · Zyklus-Gewinne ?")
                     if (str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r)) and not r.get("consistency") else "")
                  # Weg A (05.11.2026): „Consistency 50 % · Trade 3 von 8 · Endziel …"
-                 + ((lambda c: f" · Consistency {_liq_de(c['p'])} % · Trade {int(c['k']) + 1} von {int(c['k']) + int(c['n'])} · Endziel {_liq_de(c['ende'])} $ · größter Tag {_liq_de(c['bester_tag'])} $"
+                 + ((lambda c: f" · Consistency {_liq_de(c['p'])} % · noch {_liq_de(c['rest'])} $ · Trade {int(c['k']) + 1} von {int(c['k']) + int(c['n'])} · größter Tag {_liq_de(c['bester_tag'])} $"
                      if c.get("lesbar") else f" · Consistency {_liq_de(c['p'])} % · Zyklus nicht lesbar → kleinster sicherer Trade")(r["consistency"]) if r.get("consistency") else ""))
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
@@ -42195,7 +42362,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
-                                                                         "zyklus", "tp_deckel", "gewinne", "consistency", "erster_payout", "gewinntage")},
+                                                                         "zyklus", "tp_deckel", "gewinne", "consistency", "erster_payout", "gewinntage",
+                                                                         "ziel_fest", "on_demand")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
@@ -42218,6 +42386,28 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               {"waiting_payout_since": jetzt.isoformat()})
                 except Exception as e:
                     print(f"[funded-cfd] ⚠️ Waiting for Payout {r.get('konto')}: {e}", flush=True)
+        # O1: festes Ziel einmal je Konto und Zyklus speichern (nur wenn neu gewürfelt) — danach nimmt jeder Lauf genau diesen Wert
+        for aid, (zf, alt) in ziel_schreiben.items():
+            try:
+                # Guard: nur, wenn seit dem Laden kein anderer Lauf geschrieben hat (Takt + „Jetzt planen" gleichzeitig, Fremd-Review O1)
+                w_ = {"id": f"eq.{aid}", "account_type": "eq.funded_cfd"}
+                if alt is None:
+                    w_["fcp_ziel"] = "is.null"
+                elif alt.get("at"):
+                    w_["fcp_ziel->>at"] = f"eq.{alt['at']}"
+                sb_update("accounts", w_, {"fcp_ziel": zf})
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ festes Ziel {aid[:8]}: {e}", flush=True)
+        # O1: On Demand — Payout sofort anfragbar, sobald Ziel + Consistency erfüllt sind (keine 14/21 Tage): „Payout anfragbar ab" = heute
+        for r in erg["ziel"]:
+            if not r.get("on_demand") or (r.get("consistency") or {}).get("bester_tag") is None:
+                continue                 # Zyklus nicht lesbar → Consistency nicht geprüft → kein „anfragbar ab heute" (Fremd-Review O1)
+            try:
+                for p_ in (sb_select("accounts", {"select": "id,payout_ready_at", "id": f"eq.{r['konto_id']}"}) or []):
+                    if not p_.get("payout_ready_at") or str(p_["payout_ready_at"])[:10] > plan_tag:
+                        sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd"}, {"payout_ready_at": plan_tag})
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ On Demand Payout-Termin {r.get('konto')}: {e}", flush=True)
         if zeilen:
             try:
                 sb_insert("auto_plan_lauf", {"tag": plan_tag, "quelle": "funded_cfd", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen")}})
