@@ -27537,6 +27537,12 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
         return {"ok": False, "msg": "auto_plan_regeln fehlt (SQL 2026-10-05_auto_planer.sql einspielen)"}
+    if gruppe:   # REGEL JE UNTERNEHMEN (Phase 1): die Gruppe plant mit Standard + ihren Abweichungen (ap_reg_unternehmen); ohne Abweichung = Standard
+        try:
+            reg = ap_reg_unternehmen(reg, (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gruppe.get('gruppe_id')}"}) or [None])[0])
+        except Exception as e:   # fail-closed (Fremd-Review): nie still mit HT-Werten für die Gruppe planen
+            print(f"[auto-plan] ⚠️ Regel des Unternehmens {str(gruppe.get('gruppe_id'))[:8]}: {type(e).__name__}: {e} — nicht geplant", flush=True)
+            return {"ok": False, "msg": f"Regel des Unternehmens nicht lesbar ({type(e).__name__}) — nicht geplant"}
     alle_ids = bool(ids) and ap_ids_alle(ids, trocken)      # PROBELAUF-ALLE-IDS (07.10.2026): nur im Probelauf, nie beim Anlegen
     uids = ap_ids_laden() if alle_ids else [str(u) for u in (reg.get("user_ids") or [])]
     if gruppe:
@@ -30563,6 +30569,246 @@ def ap_gruppe_firma_an(regel, fm):
     if v in AP_MODELLE:
         return True
     return regel.get("planen") is not False
+
+
+# ══ REGEL JE UNTERNEHMEN = STANDARD + ABWEICHUNG JE FELD (Phase 1 Challenge-Planer, Finn 05.11.2026 ~06:35 über den Master: „Wenn ich Regeln gebe,
+# gelten sie standardmäßig bei allen Unternehmen genau gleich — vorausgewählt. Ein Unternehmen kann sie ändern, dann betrifft es nicht die anderen.")
+# Standard = auto_plan_regeln id=1 = die HT-Regel (Finn: „HT-Einstellungen sind immer Standard" — HT hat keine eigene Abweichungsebene). Ein Unternehmen
+# (Verwalter-Gruppe, auto_plan_gruppe) speichert NUR seine Abweichungen: regeln = {"firmen": {namen[0]: {Pfad…: Wert}}, "zeiten": {"fenster": […]}}.
+# Wirksame Regel = Standard, überlagert mit den Abweichungen, deren Pfad es im Standard gibt; Nicht-Geändertes folgt dem Standard live. Modell und
+# „im Planer" der Gruppe stehen weiter in firmen_modell (MO1b/c) und gehen in dieselbe wirksame Regel ein (modell, planen). Ein 3. Unternehmen =
+# neue Zeile mit leerer Abweichung = alles Standard. Phase 1 änderbar: Firma an/aus, Modell, TP, Lots/Kontrakte, Puffer, Schritt, Startfenster;
+# Ziel %, Drawdown, Boden, Kauf, Consistency bleiben Standard (folgt in Phase 2, wenn auch Ziel-Wache/Boden/Kontowert je Unternehmen lesen). ══
+AP_UNT_FELDER = ("tp", "menge", "puffer", "puffer_je_menge", "menge_schritt")
+AP_UNT_NIE = ("kette", "gewinntage")   # Fremd-Review: Topstep-Kette (Trade 2 legt ap_kette_tick aus dem Standard an) und Mindesttage bleiben Standard
+
+
+def _unt_feld(pfad):
+    """Feld-Name eines Firmen-Pfads wie ap_einst_anwenden: Größen-/Phasen-Schlüssel nehmen den Namen davor."""
+    zuord = lambda k: str(k).isdigit() or k in AP_EINST_ZUORDNUNG   # noqa: E731
+    letzter = pfad[-1]
+    return letzter if not zuord(letzter) else next((k for k in reversed(pfad[:-1]) if not zuord(k)), letzter)
+
+
+def ap_unt_feld_ok(pfad):
+    """REIN RECHNEND (testbar): darf ein Unternehmen diesen Firmen-Pfad abweichend setzen (Phase 1)?"""
+    return isinstance(pfad, (list, tuple)) and bool(pfad) and all(isinstance(x, str) and x for x in pfad) and _unt_feld(list(pfad)) in AP_UNT_FELDER \
+        and not any(x in AP_UNT_NIE for x in pfad)
+
+
+def _unt_hol(d, pfad):
+    for k in pfad:
+        if not isinstance(d, dict) or k not in d:
+            return False, None
+        d = d[k]
+    return True, d
+
+
+def _unt_blaetter(d, vor=()):
+    """(Pfad, Wert) aller Blätter einer Abweichung (Listen und Zahlen sind Blätter)."""
+    if not isinstance(d, dict) or not d:
+        return [(list(vor), d)] if vor else []
+    out = []
+    for k, v in d.items():
+        out += _unt_blaetter(v, vor + (str(k),)) if isinstance(v, dict) and v else [(list(vor + (str(k),)), v)]
+    return out
+
+
+def _unt_setzen(d, pfad, wert):
+    for k in pfad[:-1]:
+        d = d.setdefault(k, {})
+    d[pfad[-1]] = wert
+
+
+def _unt_loeschen(d, pfad):
+    """Blatt entfernen und leere Knoten darüber aufräumen."""
+    kette = [d]
+    for k in pfad[:-1]:
+        if not isinstance(kette[-1], dict) or k not in kette[-1]:
+            return
+        kette.append(kette[-1][k])
+    if isinstance(kette[-1], dict):
+        kette[-1].pop(pfad[-1], None)
+    for i in range(len(pfad) - 1, 0, -1):
+        if isinstance(kette[i], dict) and not kette[i]:
+            kette[i - 1].pop(pfad[i - 1], None)
+
+
+def ap_unt_regeln(standard, abw, fm=None):
+    """REIN RECHNEND (testbar): wirksame regeln eines Unternehmens = Standard (Kopie) + Abweichungen je Firmen-Pfad (nur Pfade, die es im Standard gibt,
+    nur AP_UNT_FELDER) + firmen_modell (aus → planen false, Modell → planen true + modell). abw None/leer und fm leer → Standard unverändert (bitgleich)."""
+    r = json.loads(json.dumps(standard or {}))
+    af = ((abw or {}).get("firmen") or {}) if isinstance(abw, dict) else {}
+    for f in r.get("firmen") or []:
+        if not isinstance(f, dict):
+            continue
+        k = (f.get("namen") or [""])[0]
+        for pfad, wert in _unt_blaetter(af.get(k) or {}):
+            da, _alt = _unt_hol(f, pfad)
+            if da and ap_unt_feld_ok(pfad):
+                _unt_setzen(f, pfad, json.loads(json.dumps(wert)))
+        v = (fm or {}).get(k) if isinstance(fm, dict) else None
+        if v == AP_GRUPPE_AUS:
+            f["planen"] = False
+        elif v in AP_MODELLE:
+            f["planen"], f["modell"] = True, v
+    return r
+
+
+def ap_unt_zeiten(standard, abw):
+    """REIN RECHNEND (testbar): wirksame Zeiten (Spalte zeiten) = Standard + Abweichung zeiten.fenster (Startfenster, Phase 1)."""
+    z = json.loads(json.dumps(standard or {}))
+    fe = ((abw or {}).get("zeiten") or {}).get("fenster") if isinstance(abw, dict) else None
+    if isinstance(fe, list) and fe:
+        z["fenster"] = json.loads(json.dumps(fe))
+    return z
+
+
+def ap_unt_abweichung_liste(abw, fm=None):
+    """REIN RECHNEND (testbar): geänderte Felder für die Markierung in den Einstellungen → {"firmen": {namen[0]: [Pfad…]}, "zeiten": [Pfad…]}."""
+    out = {"firmen": {}, "zeiten": []}
+    for k, o in (((abw or {}).get("firmen") or {}) if isinstance(abw, dict) else {}).items():
+        out["firmen"][str(k)] = [p for p, _v in _unt_blaetter(o or {})]
+    for k, v in ((fm or {}) if isinstance(fm, dict) else {}).items():
+        if v == AP_GRUPPE_AUS or v in AP_MODELLE:
+            out["firmen"].setdefault(str(k), []).extend([["planen"], ["modell"]])
+    if isinstance(abw, dict) and isinstance((abw.get("zeiten") or {}).get("fenster"), list):
+        out["zeiten"].append(["fenster"])
+    return out
+
+
+def ap_reg_unternehmen(reg, zeile):
+    """Zeile auto_plan_regeln (Standard) + Zeile auto_plan_gruppe des Unternehmens → wirksame Zeile {…, regeln, zeiten} (Kopie). zeile None → Standard."""
+    if not zeile:
+        return reg
+    abw = zeile.get("regeln") if isinstance(zeile.get("regeln"), dict) else {}
+    fm = zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {}
+    return dict(reg, regeln=ap_unt_regeln(reg.get("regeln") or {}, abw, fm), zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw))
+
+
+def ap_unt_je_uid(reg, gruppen=None, zeilen=None):
+    """Wirksame Regel je ID für die Wachen (Mengen-/Fenster-Wache, Fremd-Review: sie maßen alle Pläne am Standard und setzten so die Kontrakte
+    bzw. das Startfenster eines Unternehmens zurück) → (je_uid {uid: wirksame reg}, gesperrt). IDs ohne Unternehmen fehlen in je_uid (= Standard).
+    gesperrt: IDs, deren Unternehmen nicht lesbar ist → die Wachen fassen ihre Pläne nicht an (fail-closed); None = Gruppen gar nicht lesbar →
+    nur die HT-IDs (reg.user_ids) sind sicher Standard."""
+    try:
+        gruppen = ap_planer_gruppen() if gruppen is None else gruppen
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ Gruppen nicht lesbar: {type(e).__name__}: {e} — Wachen nur für HT-IDs", flush=True)
+        return {}, None
+    if not gruppen:
+        return {}, set()
+    try:
+        zeilen = zeilen if zeilen is not None else {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ auto_plan_gruppe nicht lesbar: {type(e).__name__}: {e} — Pläne der Gruppen bleiben unberührt", flush=True)
+        return {}, {u for g in gruppen for u in g.get("ids") or ()}
+    je, gesperrt = {}, set()
+    for g in gruppen:
+        z = zeilen.get(str(g.get("gruppe_id")))
+        eff = ap_reg_unternehmen(reg, z) if z else None
+        for u in g.get("ids") or ():
+            if eff is None:
+                gesperrt.add(str(u))
+            else:
+                je[str(u)] = eff
+    return je, gesperrt
+
+
+def ap_unt_wache_reg(reg, uid, je_uid, gesperrt):
+    """Regel, mit der eine Wache den Plan dieser ID misst, oder None (nicht anfassen)."""
+    uid = str(uid or "")
+    if gesperrt is None:
+        return reg if uid in {str(u) for u in (reg.get("user_ids") or [])} else None
+    if uid in gesperrt:
+        return None
+    return je_uid.get(uid, reg)
+
+
+def ap_unt_kernwert(std_firmen, abw, fm, firma, aenderungen, standard=None):
+    """REIN RECHNEND (testbar): Änderungen eines Unternehmens an einer Firma → (abw_neu, fm_neu, firma_wirksam, None) | (None, None, None, Grund).
+    aenderungen [{pfad, wert}] wie /kernwert; standard [Pfad…] = diese Felder auf den Standard zurück. Gleiche Grenzen/Typen wie der Standard
+    (ap_einst_anwenden auf der wirksamen Regel); nur AP_UNT_FELDER + planen; nur Pfade, die es im Standard gibt (nie neue Größen-Blöcke).
+    Ein Wert gleich dem Standard wird nicht gespeichert (Abweichung weg). planen → firmen_modell (aus | Modell)."""
+    abw = json.loads(json.dumps(abw if isinstance(abw, dict) else {}))
+    fm = dict(fm if isinstance(fm, dict) else {})
+    std = next((f for f in std_firmen or [] if isinstance(f, dict) and (f.get("namen") or [None])[0] == firma), None)
+    if std is None:
+        return None, None, None, f"Firma {firma!r} nicht in den Regeln"
+    af = abw.setdefault("firmen", {}).setdefault(firma, {})
+    for pfad in standard or []:
+        if not isinstance(pfad, list) or not pfad:
+            return None, None, None, "standard = Liste von Pfaden"
+        if pfad in (["planen"], ["modell"]):
+            fm.pop(firma, None)
+        else:
+            _unt_loeschen(af, [str(x) for x in pfad])
+    plan_aend = [a for a in (aenderungen or []) if isinstance(a, dict) and a.get("pfad") == ["planen"]]
+    rest = [a for a in (aenderungen or []) if isinstance(a, dict) and a.get("pfad") != ["planen"]]
+    for a in rest:
+        pfad = a.get("pfad")
+        if not ap_unt_feld_ok(pfad):
+            return None, None, None, f"{'/'.join(map(str, pfad or []))}: im Unternehmen nur lesbar (Standard; folgt in Phase 2)"
+        if not _unt_hol(std, pfad)[0]:
+            return None, None, None, f"{'/'.join(pfad)} gibt es im Standard nicht"
+    eff = ap_unt_regeln({"firmen": std_firmen}, abw, fm)["firmen"]
+    if rest:
+        neu, grund = ap_einst_anwenden(eff, firma, rest)
+        if grund:
+            return None, None, None, grund
+        ziel = next(f for f in neu if (f.get("namen") or [None])[0] == firma)
+        for a in rest:
+            pfad = [str(x) for x in a["pfad"]]
+            _da, w = _unt_hol(ziel, pfad)
+            if json.dumps(w, sort_keys=True) == json.dumps(_unt_hol(std, pfad)[1], sort_keys=True):
+                _unt_loeschen(af, pfad)                 # gleich dem Standard → keine Abweichung
+            else:
+                _unt_setzen(af, pfad, w)
+    for a in plan_aend:
+        if not isinstance(a.get("wert"), bool):
+            return None, None, None, "planen = true | false"
+        if a["wert"]:
+            if fm.get(firma) in AP_MODELLE:
+                pass                                       # schon an mit eigenem Modell
+            elif std.get("planen") is not False:
+                fm.pop(firma, None)                        # wieder wie der Standard (an)
+            else:
+                # Standard plant die Firma nicht → in der Gruppe an mit Standard-Modell (FNF: Orbit V2) — nur, wo ein Modell wählbar ist (wie
+                # /admin/gruppen-plan ap_modell_setzen): CFD, Topstep V2 und Tradeify bleiben wie der Standard (Fremd-Review)
+                if std.get("route") in AP_CFD_ROUTEN or std.get("route") == "tsv2" or firma in AP_MODELL_NICHT_WAEHLBAR:
+                    return None, None, None, f"{firma}: im Unternehmen nicht anschaltbar (Standard plant sie nicht, Weg ohne Modell-Wahl)"
+                fm[firma] = ap_firma_modell(std, None)
+        else:
+            fm[firma] = AP_GRUPPE_AUS
+    if not af:
+        abw["firmen"].pop(firma, None)
+    if not abw.get("firmen"):
+        abw.pop("firmen", None)
+    f_neu = next(f for f in ap_unt_regeln({"firmen": std_firmen}, abw, fm)["firmen"] if (f.get("namen") or [None])[0] == firma)
+    return abw, fm, f_neu, None
+
+
+def ap_unt_zeiten_aendern(std_zeiten, abw, aenderungen, standard=False):
+    """REIN RECHNEND (testbar): Startfenster eines Unternehmens → (abw_neu, zeiten_wirksam, None) | (None, None, Grund). Nur Pfade fenster/…;
+    Prüfung wie der Standard (ap_einst_zeiten_anwenden); gleich dem Standard → Abweichung weg. standard=True → Startfenster zurück auf Standard."""
+    abw = json.loads(json.dumps(abw if isinstance(abw, dict) else {}))
+    if standard:
+        (abw.get("zeiten") or {}).pop("fenster", None)
+    for a in aenderungen or []:
+        if not (isinstance(a, dict) and isinstance(a.get("pfad"), list) and a["pfad"] and a["pfad"][0] == "fenster"):
+            return None, None, "im Unternehmen ist nur das Startfenster änderbar (übrige Zeiten folgen in Phase 2)"
+    if aenderungen:
+        eff = ap_unt_zeiten(std_zeiten, abw)
+        neu, grund = ap_einst_zeiten_anwenden(eff, aenderungen)
+        if grund:
+            return None, None, grund
+        if json.dumps(neu.get("fenster"), sort_keys=True) == json.dumps((std_zeiten or {}).get("fenster"), sort_keys=True):
+            (abw.get("zeiten") or {}).pop("fenster", None)
+        else:
+            abw.setdefault("zeiten", {})["fenster"] = neu.get("fenster")
+    if isinstance(abw.get("zeiten"), dict) and not abw["zeiten"]:
+        abw.pop("zeiten")
+    return abw, ap_unt_zeiten(std_zeiten, abw), None
 
 
 def ap_plan_modell(p, firmen, gruppen_modelle):
@@ -36825,32 +37071,6 @@ def ap_regel_info():
     return _ap_regel_info_cache["daten"]
 
 
-def ap_einst_gruppen_sicht(uid, daten, gruppen_zeilen, regeln):
-    """REIN RECHNEND (testbar): Einstellungen im Login eines GRUPPEN-VERWALTERS (MO1b, Finn-Foto Login Emin: „⚠ Einstellungen: Diese ID ist nicht im
-    Auto-Planer") → Antwort | None (kein Verwalter einer Gruppe mit Planer-Zeile). Werte SEINER Gruppe: Planer an/aus (auto_plan_gruppe.aktiv) und das Modell
-    je Futures-Firma (firmen_modell, änderbar über POST /admin/gruppen-plan aktion modell). Die HT-Kernwerte bleiben verborgen (S6-Review E3) — die Firmen
-    kommen nur mit Name/Weg/Größen; die Gruppe plant mit denselben Regeln wie Hermann Technologies."""
-    eigene = [g for g in (daten or {}).get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)
-              and str(g.get("id")) in (gruppen_zeilen or {})]
-    if not eigene:
-        return None
-    g = eigene[0]
-    z = gruppen_zeilen[str(g["id"])] or {}
-    fm = z.get("firmen_modell") if isinstance(z.get("firmen_modell"), dict) else {}
-    firmen = [{k: f.get(k) for k in ("namen", "route", "groessen", "planen") if k in f} for f in (regeln.get("firmen") or []) if isinstance(f, dict)]
-    an = lambda fn: {"an": bool((fn(regeln) or {}).get("an"))}   # noqa: E731
-    return {"ok": True, "admin": False, "gruppe_admin": True,
-            "gruppe_sicht": {"gruppe_id": str(g["id"]), "name": g.get("name"), "aktiv": z.get("aktiv") is True, "spalte": "firmen_modell" in z},
-            "firmen": firmen, "aktiv": z.get("aktiv") is True, "zeiten": {}, "schalter": {}, "fest": {},
-            "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
-            "gruppen_modelle": [{"gruppe_id": str(g["id"]), "name": g.get("name"), "spalte": "firmen_modell" in z,
-                                 "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
-                                 "an": {(f.get("namen") or [""])[0]: ap_gruppe_firma_an(f, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)}}],
-            "modell_nicht": {k: "finaler Tradeify fährt mit eigenem Gegenhedge" for k in AP_MODELL_NICHT_WAEHLBAR}, "modell_namen": AP_MODELL_NAME,
-            "echo_hedge": an(eh_param), "apex_hedge": an(ah_param), "tradeify_final_hedge": an(tfh_param), "ausgleich": {}, "zufall": {}, "zufall_code": {},
-            "zufall_db": [], "zeiten_db": {}, "regel_info": {}}
-
-
 @app.route("/admin/auto-plan/einstellungen", methods=["GET", "OPTIONS"])
 def admin_auto_plan_einstellungen():
     """GET → {ok, admin, firmen, zeiten, aktiv, schalter, echo_hedge, apex_hedge, tradeify_final_hedge, ausgleich, fest, updated_at} — nur lesen.
@@ -36858,20 +37078,26 @@ def admin_auto_plan_einstellungen():
     if request.method == "OPTIONS":
         return "", 200
     admin, uid, reg, err = _ap_zugang()
+    # REGEL JE UNTERNEHMEN (Phase 1): ein Verwalter sieht die wirksame Regel SEINES Unternehmens (Standard + Abweichung), ein Admin wählt
+    # ?unternehmen=<gruppe_id> (ohne = Standard, heute = was HT bearbeitet). Statt „⚠ Diese ID ist nicht im Auto-Planer" (Finn-Foto Login Emin).
+    unt = None
     if err:
-        # GRUPPEN-VERWALTER (MO1b): statt „Diese ID ist nicht im Auto-Planer" die Einstellungen SEINER Gruppe (ap_einst_gruppen_sicht)
-        if uid and not admin and reg and err[1] == 403:
-            try:
-                gzeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
-                gs = ap_einst_gruppen_sicht(uid, admin_gruppen_daten(), gzeilen, reg.get("regeln") if isinstance(reg.get("regeln"), dict) else {})
-            except Exception as e:
-                print(f"[einstellungen] ⚠️ Gruppen-Sicht {str(uid)[:8]}: {type(e).__name__}: {e}", flush=True)
-                gs = None
-            if gs:
-                resp = jsonify(json.loads(json.dumps(gs, default=str)))
-                resp.headers["Cache-Control"] = "no-store"
-                return resp
-        return err
+        if not (uid and not admin and reg and err[1] == 403):
+            return err
+        try:
+            unt = next((str(g["id"]) for g in admin_gruppen_daten().get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)), None)
+        except Exception as e:
+            print(f"[einstellungen] ⚠️ Unternehmen {str(uid)[:8]}: {type(e).__name__}: {e}", flush=True)
+        if not unt:
+            return err
+    elif admin and request.args.get("unternehmen"):
+        unt = str(request.args.get("unternehmen"))
+    zeile = None
+    if unt:
+        zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{unt}"}) or [None])[0]
+        if not zeile:
+            return jsonify({"ok": False, "msg": "Unternehmen ohne Planer-Zeile"}), 404
+        reg = ap_reg_unternehmen(reg, zeile)
     regeln = reg.get("regeln") if isinstance(reg.get("regeln"), dict) else {}
     zeiten = reg.get("zeiten") if isinstance(reg.get("zeiten"), dict) else {}
 
@@ -36899,9 +37125,46 @@ def admin_auto_plan_einstellungen():
            "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
            if isinstance(regeln.get("zufall"), dict) else [],
            "zeiten_db": zeiten, "regel_info": sicher(lambda _r: ap_regel_info())}
+    if unt:
+        namen_g = {str(g.get("id")): g.get("name") for g in admin_gruppen_daten().get("gruppen") or ()}
+        fm = zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {}
+        modelle = {(f.get("namen") or [""])[0]: ap_firma_modell(f, None) for f in (regeln.get("firmen") or []) if isinstance(f, dict)}
+        out.update(admin=bool(admin), gruppe_darf=True, unt_felder=list(AP_UNT_FELDER), modelle=modelle,
+                   abweichung=ap_unt_abweichung_liste(zeile.get("regeln"), fm),
+                   unternehmen={"gruppe_id": unt, "name": namen_g.get(unt), "aktiv": zeile.get("aktiv") is True,
+                                "spalte_regeln": "regeln" in zeile, "spalte_modell": "firmen_modell" in zeile},
+                   gruppe_sicht={"gruppe_id": unt, "name": namen_g.get(unt), "aktiv": zeile.get("aktiv") is True, "spalte": "firmen_modell" in zeile},
+                   gruppen_modelle=[{"gruppe_id": unt, "name": namen_g.get(unt), "spalte": "firmen_modell" in zeile, "modelle": modelle,
+                                     "an": {(f.get("namen") or [""])[0]: f.get("planen") is not False for f in (regeln.get("firmen") or []) if isinstance(f, dict)}}])
+    if admin:
+        try:
+            out["unternehmen_liste"] = [{"gruppe_id": None, "name": "Hermann Technologies (Standard)"}] + \
+                [{"gruppe_id": str(g["gruppe_id"]), "name": g.get("name")} for g in ap_planer_gruppen()]
+        except Exception as e:
+            print(f"[einstellungen] ⚠️ Unternehmen-Liste: {type(e).__name__}: {e}", flush=True)
     resp = jsonify(json.loads(json.dumps(out, default=str)))
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+def _ap_unt_zugang(gid):
+    """Schreibrecht auf die Regel eines Unternehmens (Verwalter-Gruppe) → (uid, reg, zeile, None) | (…, Fehler). Admin oder Verwalter GENAU dieser Gruppe
+    (wie die übrigen Gruppen-Felder, /admin/gruppen-plan). zeile ohne Spalte regeln → 503 (sql/2026-11-05_regel_unternehmen.sql)."""
+    admin, uid, reg, err = _ap_zugang()
+    if err and (not uid or err[1] != 403):
+        return uid, None, None, err
+    if not reg:
+        return uid, None, None, (jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503)
+    if not admin:
+        eigene = {str(g.get("id")) for g in admin_gruppen_daten().get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)}
+        if str(gid) not in eigene:
+            return uid, None, None, (jsonify({"ok": False, "msg": "Nur der Verwalter dieses Unternehmens (oder Admin)"}), 403)
+    zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gid}"}) or [None])[0]
+    if not zeile:
+        return uid, None, None, (jsonify({"ok": False, "msg": "Unternehmen ohne Planer-Zeile"}), 404)
+    if "regeln" not in zeile:
+        return uid, None, None, (jsonify({"ok": False, "msg": "Spalte regeln fehlt — sql/2026-11-05_regel_unternehmen.sql einspielen"}), 503)
+    return uid, reg, zeile, None
 
 
 @app.route("/admin/auto-plan/kernwert", methods=["POST", "OPTIONS"])
@@ -36912,12 +37175,39 @@ def admin_auto_plan_kernwert():
     _gs = _planer_schreib_gate()
     if _gs is not None:
         return _gs
+    body = request.get_json(silent=True) or {}
+    if body.get("gruppe_id"):
+        # REGEL JE UNTERNEHMEN (Phase 1): nur die Abweichung der Gruppe ändern (ap_unt_kernwert), der Standard bleibt
+        gid = str(body.get("gruppe_id"))
+        uid, reg, zeile, err = _ap_unt_zugang(gid)
+        if err:
+            return err
+        abw, fm, f_neu, grund = ap_unt_kernwert((reg.get("regeln") or {}).get("firmen"), zeile.get("regeln"), zeile.get("firmen_modell"),
+                                                str(body.get("firma") or ""), body.get("aenderungen") or [], body.get("standard") or [])
+        if grund:
+            return jsonify({"ok": False, "msg": grund}), 400
+        upd = {"regeln": abw, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if "firmen_modell" in zeile:
+            upd["firmen_modell"] = fm
+        elif fm != (zeile.get("firmen_modell") or {}):
+            return jsonify({"ok": False, "msg": "Spalte firmen_modell fehlt — sql/2026-11-05_orbit_prio2.sql einspielen"}), 503
+        flt = {"gruppe_id": f"eq.{gid}"}
+        if zeile.get("updated_at"):
+            flt["updated_at"] = f"eq.{zeile['updated_at']}"    # gleichzeitiges Speichern (Modell-Dropdown, zweiter Tab) überschreibt sich nicht
+        try:
+            rows = sb_update("auto_plan_gruppe", flt, upd)
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        if not rows:
+            return jsonify({"ok": False, "msg": "inzwischen geändert — Einstellungen neu laden und noch einmal speichern"}), 409
+        print(f"[einstellungen] Unternehmen {gid[:8]} {body.get('firma')}: {len(body.get('aenderungen') or [])} geändert, "
+              f"{len(body.get('standard') or [])} auf Standard ({uid})", flush=True)
+        return jsonify({"ok": True, "firma": f_neu, "abweichung": ap_unt_abweichung_liste(abw, fm)})
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
     if not admin:
         return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
-    body = request.get_json(silent=True) or {}
     regeln = dict(reg.get("regeln") or {})
     neu, grund = ap_einst_anwenden(regeln.get("firmen"), str(body.get("firma") or ""), body.get("aenderungen"))
     if grund:
@@ -37784,12 +38074,34 @@ def admin_auto_plan_ablaufwert():
     _gs = _planer_schreib_gate()
     if _gs is not None:
         return _gs
+    body = request.get_json(silent=True) or {}
+    if body.get("gruppe_id"):
+        # REGEL JE UNTERNEHMEN (Phase 1): nur das Startfenster der Gruppe (Abweichung zeiten.fenster); Schalter/Bestätigen/Zufall bleiben Standard
+        gid = str(body.get("gruppe_id"))
+        uid, reg, zeile, err = _ap_unt_zugang(gid)
+        if err:
+            return err
+        if any(body.get(k) is not None for k in ("zufall", "auto_bestaetigen", "bloecke", "schalter", "aktiv")):
+            return jsonify({"ok": False, "msg": "im Unternehmen ist nur das Startfenster änderbar (Schalter gelten für alle; Rest folgt in Phase 2)"}), 400
+        abw, z_neu, grund = ap_unt_zeiten_aendern(reg.get("zeiten"), zeile.get("regeln"), body.get("zeiten") or [], body.get("standard") is True)
+        if grund:
+            return jsonify({"ok": False, "msg": grund}), 400
+        flt = {"gruppe_id": f"eq.{gid}"}
+        if zeile.get("updated_at"):
+            flt["updated_at"] = f"eq.{zeile['updated_at']}"    # gleichzeitiges Speichern überschreibt die Firmen-Abweichungen nicht
+        try:
+            rows = sb_update("auto_plan_gruppe", flt, {"regeln": abw, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        if not rows:
+            return jsonify({"ok": False, "msg": "inzwischen geändert — Einstellungen neu laden und noch einmal speichern"}), 409
+        print(f"[einstellungen] Unternehmen {gid[:8]} Startfenster {'auf Standard' if body.get('standard') is True else 'geändert'} ({uid})", flush=True)
+        return jsonify({"ok": True, "zeiten": z_neu, "abweichung": ap_unt_abweichung_liste(abw, zeile.get("firmen_modell"))})
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
     if not admin:
         return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
-    body = request.get_json(silent=True) or {}
     patch = {}
     if body.get("zeiten") is not None:
         z_neu, grund = ap_einst_zeiten_anwenden(reg.get("zeiten"), body.get("zeiten"))
@@ -38357,19 +38669,37 @@ def ap_gruppen_nachplan_tick(jetzt, zustand):
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv,zeiten,updated_at", "id": "eq.1"}) or [{}])[0]
     tz = _ap_tz(AP_TZ_TAG)
     d = jetzt.astimezone(tz)
-    if not reg.get("aktiv") or not ap_nachplan_fenster(d, reg.get("zeiten")):
+    if not reg.get("aktiv"):
+        return None
+    # REGEL JE UNTERNEHMEN (Fremd-Review): Fenster und „Regel geändert" je Gruppe aus Standard + ihrer Abweichung (zeiten.fenster, updated_at
+    # der Gruppen-Zeile); ohne Abweichung wie bisher. Zeilen nicht lesbar → kein Gruppen-Nachplanen in diesem Takt (Planer wäre fail-closed).
+    try:
+        zeilen_g = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id,regeln,updated_at"}) or []}
+    except Exception as e:
+        print(f"[gruppen-plan] ⚠️ Nachplanen: auto_plan_gruppe nicht lesbar ({type(e).__name__}: {e})", flush=True)
+        return None
+
+    def _reg_g(gid):
+        z = zeilen_g.get(str(gid)) or {}
+        abw = z.get("regeln") if isinstance(z.get("regeln"), dict) else {}
+        if not abw:
+            return reg
+        ua = max(str(reg.get("updated_at") or ""), str(z.get("updated_at") or "")) or None
+        return dict(reg, zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw), updated_at=ua)
+    gruppen = [gr for gr in ap_planer_gruppen(nur_aktiv=True) if ap_nachplan_fenster(d, _reg_g(gr["gruppe_id"]).get("zeiten"))]
+    if not gruppen:
         return None
     if not _ap_nachplan_lock.acquire(blocking=False):
         return None                       # Knopf „Jetzt neu berechnen“ rechnet gerade → nächster Takt
     out = {}
     try:
-        for gr in ap_planer_gruppen(nur_aktiv=True):
+        for gr in gruppen:
             gid = gr["gruppe_id"]
             ll = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
             if str(ll.get("tag") or "") > d.strftime("%Y-%m-%d"):
                 continue                  # Knopf „morgen“ hat schon den nächsten Tag geplant: sein Protokoll nicht mit heute überschreiben
             try:
-                erg, kand = _ap_nachplan_rechnen(d.strftime("%Y-%m-%d"), jetzt, _ap_gruppen_nachplan["je"].setdefault(gid, {}), reg, tz, gruppe=gr)
+                erg, kand = _ap_nachplan_rechnen(d.strftime("%Y-%m-%d"), jetzt, _ap_gruppen_nachplan["je"].setdefault(gid, {}), _reg_g(gid), tz, gruppe=gr)
                 out[gid] = len((erg or {}).get("geplant") or [])
                 _ap_gruppen_nachplan["fehler"] = ""
                 if out[gid]:
@@ -39831,18 +40161,34 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
         print(f"[balance-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
     stand = _ap_stand_laden(reg, jetzt)
     plaene = _ap_stand_plaene(stand)
-    zuviel = ap_fenster_ueberhang(plaene, stand.get("zeiten"), stand["jetzt_min"])
+    # REGEL JE UNTERNEHMEN (Fremd-Review): ein Plan einer Gruppe misst sich am Startfenster SEINES Unternehmens (Standard + Abweichung
+    # zeiten.fenster); Gruppe nicht lesbar → ihre Pläne bleiben stehen. Ohne Abweichung: dieselben Zeiten wie bisher (bitgleich).
+    je_uid, gesperrt = ap_unt_je_uid(reg)
+
+    def _zeiten_von(x):
+        r = ap_unt_wache_reg(reg, x.get("user_id"), je_uid, gesperrt)
+        if r is None:
+            return None
+        fe = (r.get("zeiten") or {}).get("fenster")
+        if r is reg or fe == (reg.get("zeiten") or {}).get("fenster"):
+            return stand.get("zeiten")
+        return dict(stand.get("zeiten") or {}, fenster=fe)
+    zuviel = []
+    for x in plaene:
+        zt = _zeiten_von(x)
+        if zt is not None:
+            zuviel += [(y, bis, zt) for y, bis in ap_fenster_ueberhang([x], zt, stand["jetzt_min"])]
     if not zuviel:
         return []
     laufend = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None} for z in stand["offen"]]
     lz = (stand.get("param") or {}).get("laufzeit_min")
     tz_d = _ap_tz(AP_7T_TZ)
     fertig = []
-    for x, bis in zuviel:
+    for x, bis, zt in zuviel:
         jm = float(stand["jetzt_min"])
         spanne = max(0.0, float(bis) - 30 - (jm + 15))
         ab = jm + 15 + rnd.random() * spanne
-        m, fehler = ap_nachhol_minute(x, plaene, stand["starts_heute"], stand["id_fest"], jm, stand.get("zeiten"), lz, laufend, rnd=rnd, ab_min=ab)
+        m, fehler = ap_nachhol_minute(x, plaene, stand["starts_heute"], stand["id_fest"], jm, zt, lz, laufend, rnd=rnd, ab_min=ab)
         if m is None:
             print(f"[fenster-wache] {str(x['plan_id'])[:8]} {x.get('firma_name') or x.get('firma')} bleibt um {_ap_hhmm_txt(x['start_min'])} dt: {fehler}", flush=True)
             continue
@@ -39919,10 +40265,14 @@ def ap_menge_wache(jetzt, reg):
         return []
     kids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
     accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})} if kids else {}
+    je_uid, gesperrt = ap_unt_je_uid(reg)   # REGEL JE UNTERNEHMEN: Pläne einer Gruppe an IHRER Regel messen (Kontrakte des Unternehmens)
     out = []
     for p in plaene:
         a = accs.get(str(p.get("master_account_id")))
-        regel = ap_regel_finden(firmen, p.get("master_firm"))
+        reg_p = ap_unt_wache_reg(reg, p.get("user_id"), je_uid, gesperrt)
+        if reg_p is None:
+            continue
+        regel = ap_regel_finden(((reg_p.get("regeln") or {}).get("firmen") or []) if reg_p is not reg else firmen, p.get("master_firm"))
         m = _AP_BAL_NOTIZ.search(str(p.get("notes") or ""))
         if not a or not regel or not m:
             continue

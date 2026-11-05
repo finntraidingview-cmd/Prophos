@@ -297,17 +297,60 @@ check(gs and gs[0]["modelle"] == {"tradeify": "orbit_v2", "apextrader": "orbit_p
 
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 # Einstellungen im Login des Verwalters (Finn-Foto Emin: „⚠ Einstellungen: Diese ID ist nicht im Auto-Planer")
-_daten = {"gruppen": [{"id": "gr-emin", "name": "Emin", "verwalter_id": EMIN}]}
-_gz = {"gr-emin": {"gruppe_id": "gr-emin", "aktiv": True, "firmen_modell": {"lucidtrading": "orbit_prio2"}}}
-_gsv = app.ap_einst_gruppen_sicht(EMIN, _daten, _gz, {"firmen": FIRMEN, "apex_hedge": {"an": True}})
-check(_gsv and _gsv["gruppe_sicht"]["name"] == "Emin" and _gsv["gruppe_admin"] is True and _gsv["admin"] is False
-      and _gsv["modelle"] == {"tradeify": "orbit_v2", "apextrader": "orbit_prio2", "lucidtrading": "orbit_prio2"},
-      f"Verwalter Emin: Einstellungen seiner Gruppe mit ihren Modellen ({(_gsv or {}).get('modelle')})")
-check(all(set(f) <= {"namen", "route", "groessen", "planen"} for f in _gsv["firmen"]), "Gruppen-Sicht zeigt keine HT-Kernwerte (nur Name/Weg/Größen)")
-check(app.ap_einst_gruppen_sicht(HT, _daten, _gz, {"firmen": FIRMEN}) is None and app.ap_einst_gruppen_sicht(EMIN, _daten, {}, {"firmen": FIRMEN}) is None,
-      "kein Verwalter / Gruppe ohne Planer-Zeile → keine Gruppen-Sicht (bleibt 403)")
-check("if(D.gruppe_sicht) return `<div class=\"wd-set-card\">" in html and "const darfG = admin || D.gruppe_admin === true" in html and "if(!gs) modell = mZeile('Modell · Hermann Technologies'" in html,
-      "Frontend: Gruppen-Sicht zeigt nur die Zeile der eigenen Gruppe, änderbar für den Verwalter")
+# Einstellungen im Login des Verwalters: seit „Regel je Unternehmen" (Phase 1) liefert GET /admin/auto-plan/einstellungen die wirksame Regel SEINES
+# Unternehmens (Standard + Abweichung) — Rechte, Merge und Markierung prüft tools/selftest_regel_unternehmen.py; hier nur die Modell-Zeile im Frontend.
+check(not hasattr(app, "ap_einst_gruppen_sicht"), "alte Gruppen-Sicht (nur Name/Weg/Größen) ersetzt durch die Regel des Unternehmens")
+check("const darfG = admin || D.gruppe_admin === true" in html and "if(!gs) modell = mZeile('Modell · Hermann Technologies'" in html
+      and "data-e3-gruppe=" in html, "Frontend: im Unternehmen nur die Modell-Zeile der eigenen Gruppe, änderbar für den Verwalter")
+
+print("3e) FundedNext Futures 50k bei Emin mit Orbit Prio 2 (Finn 05.11.2026: FNF → Prio 2; Regel + Liq-Regel 11 + Konten live gelesen)")
+# Regel live (auto_plan_regeln id=1): HT plant FNF nicht (planen false), 50k: Max DD 1.500 $, Kauf 74 €; Liq-Regel 11: EOD-Trailing, Lock bei Größe + 100.
+# Emins FNF-50k-Konten tragen max_daily_drawdown = max_drawdown = 1.500 (die Firma hat keinen eigenen Daily Loss) → der Boden am EOD-Hoch liegt immer
+# über Tagesstart − 1.500, der „Daily" greift also nie vor dem Boden: Hedge rechnet und schließt am Boden.
+FNF = {"boden": "nachziehend", "namen": ["fundednextfutures"], "route": "tvv2", "dd_usd": 4000, "planen": False, "symbol": "NQ", "groessen": [50000, 150000],
+       "kauf_eur": {"50000": 74, "150000": 258}, "ziel_pct": {"challenge": 5.333333333333334}, "lock_bei_start": True,
+       "phasen": {"challenge": {"sl": None, "tp": [3050, 3150], "menge": [2, 3], "dd_usd": 4000, "tp_max": 3200, "ziel_pct": 5.333333333333334, "menge_schritt": 1,
+                                "puffer_je_menge": {"2": [15, 25], "3": [25, 40]}}},
+       "je_groesse": {"50000": {"dd_usd": 1500, "ziel_pct": {"challenge": 5}, "phasen": {"challenge": {"sl": None, "tp": [900, 980], "menge": [1, 1], "dd_usd": 1500,
+                                                                                                     "tp_max": 1000, "ziel_pct": 5, "menge_schritt": 1, "puffer_je_menge": {"1": [15, 25]}}}}}}
+KF = konto("a0000000-0000-4000-8000-00000000f050", EMIN, "FundedNext Futures", 50000, 50000.0, None)
+KF["max_drawdown"] = 1500
+KONTEN.append(KF); PLAENE.append(plan(KF, 1, 950)); PF = ID(KF)
+LIQ_REGELN.append({"id": 11, "firma": "FundedNext Futures", "kontotyp": None, "groesse": None, "art": None, "betrag_usd": None, "lock_ueber_start_usd": None,
+                   "stufen": None, "wie_kontotyp": None, "maxdd_art": "eod_trailing", "maxdd_lock_ueber_groesse_usd": 100, "maxdd_usd": 4000})
+_ff = FIRMEN + [FNF]
+_e, vs = lauf(firmen=_ff)
+check(PF not in vs, "ohne Gruppen-Eintrag: FNF wie HT aus — nicht vorgemerkt")
+_e, vs = lauf(firmen=_ff, gruppe={"fundednextfutures": "orbit_prio2"})
+_v = vs.get(PF) or {}
+print("     FNF 50k:", json.dumps(ohne_at(_v), sort_keys=True))
+_sf = app.ap_kontowert_konto(KF, 50000.0, _ff)["satz_eur_pro_usd"]   # 74 ÷ 1.500 = 0,0493 (gerundeter Satz wie Apex/Lucid)
+check(PF in vs and _sf == 0.0493 and _v.get("eur") == round(_sf * 1500, 2) and _v.get("polster_usd") == 1500.0 and _v.get("liq_balance") == 48500.0 and _v.get("abstand_usd") == 1500.0,
+      f"FNF 50k Prio 2: Kontowert {_v.get('eur')} € auf {_v.get('polster_usd')} $ (Kauf 74 ÷ Max DD 1.500), Boden {_v.get('liq_balance')}, Abstand {_v.get('abstand_usd')} $")
+check(abs(float(_v.get("blow_eur") or 0) - round(_v["eur"] / 0.89, 2)) < 0.02, f"Blow {_v.get('blow_eur')} € = Wert ÷ 0,89 (wie Apex/Lucid)")
+check(sorted(k for k in vs if k != PF) == sorted([A150, A100]), "HT bleibt: nur Apex vorgemerkt, HT plant FNF nicht")
+KF["max_daily_drawdown"] = 1500                      # live: dll = Max DD
+_v2 = lauf(firmen=_ff, gruppe={"fundednextfutures": "orbit_prio2"})[1].get(PF) or {}
+check(ohne_at(_v2) == ohne_at(_v), "mit max_daily_drawdown 1.500 (live) dieselbe Rechnung — der Daily greift nicht vor dem Boden")
+VERLAUF[:] = [{"id": "f1", "master_account_id": KF["id"], "konto_typ": "challenge", "started_at": "2026-11-03T14:00:00+00:00",
+               "ended_at": "2026-11-03T15:00:00+00:00", "bal_start": 50000.0, "bal_end": 50600.0}]
+KF["_bal"] = 50300.0                                  # EOD-Hoch 50.600, jetzt 50.300 → Boden 49.100, Polster 1.200; Satz wächst mit dem Gewinn (74 × (1+300/1.500) = 89 €)
+_v = lauf(firmen=_ff, gruppe={"fundednextfutures": "orbit_prio2"})[1].get(PF) or {}
+_sf = app.ap_kontowert_konto(KF, 50300.0, _ff)["satz_eur_pro_usd"]
+check(_v.get("liq_balance") == 49100.0 and _v.get("polster_usd") == 1200.0 and _v.get("eur") == round(_sf * 1200, 2) and _v.get("abstand_usd") == 1200.0,
+      f"unter dem EOD-Hoch: Boden {_v.get('liq_balance')} (50.600 − 1.500), Polster {_v.get('polster_usd')} $, Wert {_v.get('eur')} €, Abstand {_v.get('abstand_usd')} $ (Daily 1.500 greift nicht)")
+VERLAUF[0]["bal_end"] = 52000.0; KF["_bal"] = 51800.0
+_v = lauf(firmen=_ff, gruppe={"fundednextfutures": "orbit_prio2"})[1].get(PF) or {}
+print(f"     FNF Lock: Boden {_v.get('liq_balance')}, Polster {_v.get('polster_usd')}")
+check(_v.get("liq_balance") in (50000.0, 50100.0) and float(_v.get("polster_usd") or 0) == 51800.0 - float(_v.get("liq_balance") or 0),
+      f"EOD-Hoch 52.000 → Boden gelockt ({_v.get('liq_balance')}), nicht 50.500")
+_sa = app._sb_all
+app._sb_all = _sb_verlauf_kaputt
+_v = lauf(firmen=_ff, gruppe={"fundednextfutures": "orbit_prio2"})[1].get(PF) or {}
+app._sb_all = _sa
+check(_v.get("code") == "boden", f"Verlauf nicht lesbar → kein Hedge (fail-closed wie Lucid) ({_v.get('fehler')})")
+VERLAUF[:] = []
+KONTEN.remove(KF); PLAENE.pop(); LIQ_REGELN.pop()
 
 print("3d) MO1c: Gruppe schaltet eine Firma an, die HT nicht plant (FundedNext Futures 50k bei Emin)")
 _fnf = {"namen": ["fundednextfutures"], "route": "tvv2", "planen": False, "je_groesse": {"50000": {"dd_usd": 1500}}}

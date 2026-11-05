@@ -4043,6 +4043,13 @@
   #e3-einst .wd-set-card h4{font-size:14.5px;font-weight:600;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--e3-rand);display:flex;justify-content:space-between;align-items:center;gap:8px;line-height:1.3}
   #e3-einst .wd-set-card h4 .btn{flex:none;height:26px;padding:0 10px;font-size:12px;line-height:24px}
   #e3-einst .wd-set-card h4 .h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--e3-sub);margin-top:2px}
+  #e3-einst .e3-unt{display:inline-flex;gap:4px;margin-left:10px;flex-wrap:wrap}
+  #e3-einst .e3-unt-b{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--border,#d0d5dd);background:transparent;color:var(--text-2,#475467);cursor:pointer}
+  #e3-einst .e3-unt-b.an{background:var(--accent-soft,#eef2ff);color:var(--accent,#4f46e5);border-color:transparent;font-weight:600}
+  #e3-einst .e3-abw{position:relative;display:inline-flex;align-items:center;gap:4px;border-radius:8px;box-shadow:0 0 0 2px var(--accent-soft,#e0e7ff)}
+  #e3-einst .e3-abw-m{box-shadow:0 0 0 2px var(--accent-soft,#e0e7ff);border-radius:4px;padding:0 3px}
+  #e3-einst .e3-std{font:inherit;font-size:12px;line-height:1;padding:2px 6px;border-radius:6px;border:1px solid var(--border,#d0d5dd);background:var(--bg,#fff);color:var(--text-2,#475467);cursor:pointer}
+  #e3-einst .e3-unt-hinweis{font-size:12px;color:var(--text-2,#667085);margin:6px 0 10px}
   #e3-einst .e3-k4{display:inline-flex;align-items:center;gap:8px}
   #e3-einst .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px;align-items:end;margin-bottom:12px}
   #e3-einst .wd-felder:last-child{margin-bottom:0}
@@ -87552,8 +87559,23 @@
     return { text: modellName('orbit_v2'), kl: 'orbit' }
   }
   // Wert als Eingabe (Admin, änderbares Feld, Pfad bekannt) oder als Text; erbt = kommt vom Standard (kein Pfad) → „wie Standard"
+  /* REGEL JE UNTERNEHMEN (Phase 1, Finn 05.11.2026): in der Ansicht eines Unternehmens (D.unternehmen) sind nur die Felder aus D.unt_felder (TP, Lots, Puffer,
+   * Schritt) und „im Planer" änderbar — Ziel/Drawdown/Boden bleiben Standard („folgt in Phase 2"). Vom Unternehmen geänderte Felder (D.abweichung)
+   * sind markiert und haben ↺ „auf Standard zurück". _e3.untFelder/_e3.abwAkt setzt die Karte der gewählten Firma. */
   function e3Wert(wert, pfad, feld, admin, einheit){
+    if(_e3.untFelder && pfad && !Array.isArray(wert) && !(wert && typeof wert === 'object') && _e3.abwAkt && _e3.abwAkt.has(JSON.stringify(pfad))){
+      const innen = e3WertRoh(wert, pfad, feld, admin, einheit)
+      return `<span class="e3-abw" title="vom Unternehmen geändert">${innen}${admin ? `<button type="button" class="e3-std" data-e3-std="${e3E(JSON.stringify(pfad))}" title="auf Standard zurück">↺</button>` : ''}</span>`
+    }
+    if(_e3.untFelder && pfad && Array.isArray(wert) && _e3.abwAkt && _e3.abwAkt.has(JSON.stringify(pfad))){
+      const innen = e3WertRoh(wert, pfad, feld, admin, einheit)
+      return `<span class="e3-abw" title="vom Unternehmen geändert">${innen}${admin ? `<button type="button" class="e3-std" data-e3-std="${e3E(JSON.stringify(pfad))}" title="auf Standard zurück">↺</button>` : ''}</span>`
+    }
+    return e3WertRoh(wert, pfad, feld, admin, einheit)
+  }
+  function e3WertRoh(wert, pfad, feld, admin, einheit){
     const p = pfad ? e3E(JSON.stringify(pfad)) : '', darf = admin && pfad && (E3_AENDERBAR.has(feld) || E3_SCHALTER.has(feld) || E3_UHR.has(feld))
+      && (!_e3.untFelder || ((_e3.untFelder.has(feld) || feld === 'planen') && !(pfad || []).some(k => k === 'kette' || k === 'gewinntage')))   // Kette/Mindesttage bleiben Standard (= AP_UNT_NIE)
     const ein = einheit ? ` <small>${e3E(einheit)}</small>` : ''
     if(darf && E3_UHR.has(feld) && typeof wert === 'string') return `<input type="time" class="e3-in e3-uhr" data-e3-pfad="${p}" data-e3-alt="${e3E(wert)}" value="${e3E(wert)}" aria-label="${e3E(feld)}">`
     // Zuordnung je Kontrakt-Zahl (Puffer je Menge, Gewichte): jeder Eintrag einzeln, Pfad …/<Anzahl> (E3b)
@@ -87690,10 +87712,11 @@
   // LINKS Firmen | MITTE „Ziel & Trade" der gewählten Firma | RECHTS „Planer & Hedge" (globale Planer-Werte oben + Firma an/aus, Modell,
   // Slider-Blöcke, Hedge). Jede Karte speichert, was in ihr geändert ist (Firmenwerte über /kernwert, Planer-Werte über /ablaufwert).
   function e3ZielTradeKarte(D, art, admin, sel){
-    if(D.gruppe_sicht) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', sel ? e3Name(sel) : '—')}<div class="e3-leer">Die Gruppe plant mit denselben Regeln wie Hermann Technologies (Ziel, Trade, Consistency) — ändert der Admin. Hier wählst du das Modell je Firma.</div></div>`
+    if(D.unternehmen && sel) _e3.abwAkt = new Set((((D.abweichung || {}).firmen || {})[(sel.namen || [])[0]] || []).map(x => JSON.stringify(x)))
     if(!sel) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', '—')}<div class="e3-leer">keine Firma</div></div>`
     const n = (sel.namen || [])[0], knopf = admin ? `<span class="e3-k4">${(_e3.msg[n] || {}).text ? `<span class="e3-msg ${_e3.msg[n].ok ? 'ok' : 'fehler'}">${e3E(_e3.msg[n].text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-xs" data-e3-speichern="${e3E(n)}">Speichern</button></span>` : ''
-    return `<div class="wd-set-card e3-zt-karte">${e3Kopf4(`Ziel & Trade · ${e3Name(sel)}`, (sel.groessen || []).map(e3Gr).join(' · ') || 'Ziel, Consistency, Trade', knopf)}${e3DetailHtml(sel, D, art, admin)}</div>`
+    const untHinweis = D.unternehmen ? `<div class="e3-unt-hinweis">TP, Kontrakte, Puffer und Schritt änderst du nur für ${e3E((D.unternehmen || {}).name || 'dieses Unternehmen')} — <span class="e3-abw-m">markiert</span> = eigene Änderung, ↺ = zurück auf Standard. Ziel, Drawdown und Consistency folgen dem Standard (änderbar ab Phase 2).${(D.unternehmen || {}).spalte_regeln === false ? ' ⚠ Spalte regeln fehlt — sql/2026-11-05_regel_unternehmen.sql einspielen.' : ''}</div>` : ''
+    return `<div class="wd-set-card e3-zt-karte">${e3Kopf4(`Ziel & Trade · ${e3Name(sel)}`, (sel.groessen || []).map(e3Gr).join(' · ') || 'Ziel, Consistency, Trade', knopf)}${untHinweis}${e3DetailHtml(sel, D, art, admin)}</div>`
   }
   function e3PlanerHedgeKarte(D, art, admin, sel){
     const z = D.zeiten || {}, s = D.schalter || {}, cfd = art === 'cfd'
@@ -87709,11 +87732,15 @@
         ${nb ? feld(`Neue Konten bis <small>· ${e3E(e3Tz(nb.tz))}</small>`, uhr(['neu_bis', 'uhr'], nb.uhr)) : ''}
         ${fe ? feld(`Start ab <small>· ${e3E(tz)}</small>`, uhr(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhr(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1])) : ''}</div></div>`
     const gs = D.gruppe_sicht
-    const planerG = gs ? `<div><label class="wd-abl-schalter"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · an/aus oben in der Planer-Leiste</small></span><b>${gs.aktiv ? 'an' : 'aus'}</b></label></div>` : ''
+    const feAbw = ((D.abweichung || {}).zeiten || []).some(x => JSON.stringify(x) === '["fenster"]')
+    const planerG = gs ? `<div data-e3-ablauf><label class="wd-abl-schalter"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · an/aus oben in der Planer-Leiste</small></span><b>${gs.aktiv ? 'an' : 'aus'}</b></label>
+      ${fe ? `<div class="wd-felder${feAbw ? ' e3-abw' : ''}">${feld(`Start ab <small>· ${e3E(tz)}</small>`, uhr(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhr(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1]))}${feAbw && admin ? '<button type="button" class="e3-std" data-e3-std-zeiten title="Startfenster auf Standard zurück">↺</button>' : ''}</div>` : ''}
+      <div class="e3-unt-hinweis">Bestätigen, Neue-Konten-Zeit und die Hedge-Schalter gelten für alle Unternehmen — ändern unter „Hermann Technologies (Standard)“.</div></div>` : ''
     let firma = ''
     if(sel){
       const n = (sel.namen || [])[0], m = e3Modell(sel, D)
-      const slider = (titel, an, feld_, inhalt) => `<div class="e3-slider"><div class="e3-slider-kopf"><b>${e3E(titel)}</b><span>${feld_ ? e3An(feld_, an, admin) : '<span class="e3-fest-an">an</span>'}</span></div>${an && inhalt ? `<div class="e3-s-werte e3-eins">${inhalt}</div>` : ''}</div>`
+      // Hedge-Schalter gelten für alle Unternehmen: in der Unternehmens-Sicht nur Anzeige (ändern unter „Hermann Technologies (Standard)", Fremd-Review)
+      const slider = (titel, an, feld_, inhalt) => `<div class="e3-slider"><div class="e3-slider-kopf"><b>${e3E(titel)}</b><span>${feld_ ? e3An(feld_, an, admin && !D.unternehmen) : '<span class="e3-fest-an">an</span>'}</span></div>${an && inhalt ? `<div class="e3-s-werte e3-eins">${inhalt}</div>` : ''}</div>`
       let bl = ''
       if(sel.gewinntage && typeof sel.gewinntage === 'object') bl += slider('Mindesttage', true, null, Object.entries(sel.gewinntage).map(([k, v]) => e3R(k === 'tp' ? 'TP' : k, e3Wert(v, ['gewinntage', k], k, admin, '$'))).join(''))
       if(sel.kette && typeof sel.kette === 'object') bl += slider('Topstep-Kette', true, null, E3_KETTE.filter(([k]) => E3_KETTE_KURZ.includes(k) && k in sel.kette).map(([k, label, einh]) => e3R(label, e3Wert(sel.kette[k], ['kette', k], k, admin, einh))).join(''))
@@ -87742,22 +87769,26 @@
             darfG ? mSel(`data-e3-modell="${e3E(n)}" data-e3-gruppe="${e3E(g.gruppe_id)}"`, gw, nichtGrund || ohneSp, E3_MODELLE_G) : `<b>${gw === 'aus' ? 'aus' : modellName(gw === 'orbit_prio2' ? 'orbit_prio2' : 'orbit_v2')}</b>`)
         }
       }
+      if(D.unternehmen) _e3.abwAkt = new Set((((D.abweichung || {}).firmen || {})[n] || []).map(x => JSON.stringify(x)))
       firma = `<div class="wd-abl-abschnitt">${e3E(e3Name(sel))}</div><div data-e3-firma="${e3E(n)}">
         <div class="e3-fkopf"><span class="e3-weg"><i class="e3-mod ${m.kl}"></i>${e3E(m.text)}</span></div>
         <label class="wd-abl-schalter"><span><b>Im Planer</b><small>Firma automatisch planen</small></span>${e3Wert(sel.planen !== false, ['planen'], 'planen', admin, '')}</label>
         ${modell}${bl}</div>`
     }
     const knopf = admin ? `<span class="e3-k4"><span class="e3-msg" data-e3-ablauf-msg></span><button type="button" class="btn btn-ghost btn-xs" data-e3-rechts-speichern${sel ? ` data-e3-firma-n="${e3E((sel.namen || [])[0])}"` : ''}>Speichern</button></span>` : ''
-    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', gs ? `${cfd ? 'CFD' : 'Futures'} · Gruppe ${gs.name || ''}` : `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, gs ? '' : knopf)}${gs ? planerG : planer}${firma}</div>`
+    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', gs ? `${cfd ? 'CFD' : 'Futures'} · ${gs.name || ''}` : `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, knopf)}${gs ? planerG : planer}${firma}</div>`
   }
   function e3Html(D, art){
-    const admin = D.admin === true, firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
+    const admin = D.admin === true || (!!D.unternehmen && D.gruppe_darf === true), firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
     const w = _e3.wahl[art] = _e3.wahl[art] || {}
     const hat = n => firmen.some(f => (f.namen || [])[0] === n)
     if(!hat(w.firma)){ const m = e3Merk('firma.' + art); w.firma = hat(m) ? m : (firmen.length ? (firmen[0].namen || [])[0] : null); w.tab = 'std' }
     const sel = firmen.find(f => (f.namen || [])[0] === w.firma)
     const gs = D.gruppe_sicht   // MO1b: Login eines Gruppen-Verwalters (Emin) — Werte SEINER Gruppe statt der HT-Regel
-    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · Gruppe ' + e3E(gs.name || '') : admin ? '' : ' · nur ansehen'}</span></div></div>
+    // REGEL JE UNTERNEHMEN: Modus für e3Wert; Admin wählt oben das Unternehmen (Standard = Hermann Technologies · Emin · …)
+    _e3.untFelder = D.unternehmen ? new Set(D.unt_felder || []) : null
+    const unt = (D.unternehmen_liste || []).length > 1 ? `<span class="e3-unt">${D.unternehmen_liste.map(u => `<button type="button" class="e3-unt-b${String(u.gruppe_id || '') === String((D.unternehmen || {}).gruppe_id || '') ? ' an' : ''}" data-e3-unt="${e3E(u.gruppe_id || '')}">${e3E(u.name || '?')}</button>`).join('')}</span>` : ''
+    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · ' + e3E(gs.name || '') + ' · Standard + eigene Änderungen' : admin ? '' : ' · nur ansehen'}</span></div>${unt}</div>
       <div class="wd-set-grid">${e3FirmenKarte(D, art, admin, firmen, w)}${e3ZielTradeKarte(D, art, admin, sel)}${e3PlanerHedgeKarte(D, art, admin, sel)}</div></div>`
   }
   async function e3Laden(){
@@ -87765,7 +87796,7 @@
     _e3.laeuft = true
     // Kontoliste parallel (blockiert die Einstellungen nicht, S6-Review E3c); zeichnet nach, sobald sie da ist
     apdApi('GET', '/konten-stand').then(k => { _e3.konten = (k && k.konten) || [] }).catch(() => { _e3.konten = _e3.konten || [] }).finally(() => { try{ e3EinstZeichnen() }catch(_){} })
-    try{ _e3.d = await apdApi('GET', '/einstellungen'); _e3.fehler = '' }
+    try{ _e3.d = await apdApi('GET', '/einstellungen' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')); _e3.fehler = '' }
     catch(e){ _e3.fehler = (e && e.status === 404) ? '' : ((e && e.message) || String(e)); if(e && e.status === 404) _e3.d = null }
     finally{ _e3.laeuft = false; _e3.at = Date.now(); e3EinstZeichnen() }   // ohne Zwang: offene Eingaben bleiben stehen (S6-Review)
   }
@@ -87796,6 +87827,23 @@
     box.querySelectorAll('[data-e3-speichern]').forEach(b => b.addEventListener('click', () => e3Speichern(b.dataset.e3Speichern, b)))
     box.querySelectorAll('[data-e3-schalter]').forEach(cb => cb.addEventListener('change', () => e3Schalter(cb)))
     box.querySelectorAll('[data-e3-modell]').forEach(sl => sl.addEventListener('change', () => e3ModellSetzen(sl)))   // MO1
+    // REGEL JE UNTERNEHMEN: ↺ ein Feld bzw. das Startfenster zurück auf Standard; Admin wechselt das Unternehmen
+    box.querySelectorAll('[data-e3-std]').forEach(b => b.addEventListener('click', async ev => { ev.preventDefault(); ev.stopPropagation()
+      const firma = (b.closest('[data-e3-firma]') || {}).dataset?.e3Firma, gid = ((_e3.d || {}).unternehmen || {}).gruppe_id; if(!firma || !gid) return
+      b.disabled = true
+      try{ const d = await apdApi('POST', '/kernwert', { gruppe_id: gid, firma, standard: [JSON.parse(b.dataset.e3Std)] }); if(d.abweichung) _e3.d.abweichung = d.abweichung
+        const i = (_e3.d.firmen || []).findIndex(f => (f.namen || [])[0] === firma); if(i >= 0 && d.firma) _e3.d.firmen[i] = d.firma
+        if(typeof atToast === 'function') atToast('↺ auf Standard zurück', 'end') }
+      catch(e){ if(typeof atToast === 'function') atToast('nicht zurückgesetzt: ' + ((e && e.message) || e), 'end') }
+      _e3.at = 0; e3EinstZeichnen(true) }))
+    box.querySelectorAll('[data-e3-std-zeiten]').forEach(b => b.addEventListener('click', async ev => { ev.preventDefault(); ev.stopPropagation()
+      const gid = ((_e3.d || {}).unternehmen || {}).gruppe_id; if(!gid) return
+      b.disabled = true
+      try{ await apdApi('POST', '/ablaufwert', { gruppe_id: gid, standard: true }); if(typeof atToast === 'function') atToast('↺ Startfenster auf Standard', 'end') }
+      catch(e){ if(typeof atToast === 'function') atToast('nicht zurückgesetzt: ' + ((e && e.message) || e), 'end') }
+      _e3.at = 0; _e3.d = null; e3EinstZeichnen(true) }))
+    box.querySelectorAll('[data-e3-unt]').forEach(b => b.addEventListener('click', () => { if(!weiter()) return
+      _e3.untWahl = b.dataset.e3Unt || null; _e3.d = null; _e3.at = 0; e3EinstZeichnen(true) }))
     const weiter = () => ![...box.querySelectorAll('.e3-fedit [data-e3-pfad]')].some(e3Geaendert) || confirm('Ungespeicherte Änderungen der Firma verwerfen?')
     box.querySelectorAll('[data-e3-ablauf-speichern]').forEach(b => b.addEventListener('click', () => e3AblaufSpeichern(b)))
     // „Planer & Hedge" (Nachtrag 10): ein Speichern für die Planer-Werte (/ablaufwert) und die Firmenwerte dieser Karte (/kernwert)
@@ -87832,7 +87880,9 @@
     if(!aenderungen.length){ _e3.msg[firma] = { ok: true, text: 'nichts geändert' }; e3EinstZeichnen(true); return }
     knopf.disabled = true
     try{
-      const d = await apdApi('POST', '/kernwert', { firma, aenderungen })
+      const unt = _e3.d && _e3.d.unternehmen ? { gruppe_id: _e3.d.unternehmen.gruppe_id } : {}
+      const d = await apdApi('POST', '/kernwert', Object.assign({ firma, aenderungen }, unt))
+      if(unt.gruppe_id){ if(d.abweichung) _e3.d.abweichung = d.abweichung; _e3.at = 0 }   // Unternehmen: Markierung frisch, Planer-Werte beim nächsten Laden
       const i = (_e3.d.firmen || []).findIndex(f => (f.namen || [])[0] === firma)
       if(i >= 0 && d.firma) _e3.d.firmen[i] = d.firma
       _e3.msg[firma] = { ok: true, text: `✓ ${aenderungen.length} Wert${aenderungen.length === 1 ? '' : 'e'} gespeichert` }
@@ -87880,7 +87930,8 @@
     if(!Object.keys(body).length){ zeig(true, 'nichts geändert'); return }
     knopf.disabled = true
     try{
-      const antw = await apdApi('POST', '/ablaufwert', body)
+      const antw = await apdApi('POST', '/ablaufwert', _e3.d && _e3.d.unternehmen ? Object.assign({}, body, { gruppe_id: _e3.d.unternehmen.gruppe_id }) : body)
+      if(_e3.d && _e3.d.unternehmen){ if(antw.abweichung) _e3.d.abweichung = antw.abweichung; _e3.at = 0 }
       e3DatenNach(body, antw)
       // Gespeichertes gilt als neuer Stand (kein Neuzeichnen: offene Eingaben in anderen Karten bleiben); frische Werte holt der nächste Takt
       karte.querySelectorAll('[data-e3-ort]').forEach(el => { el.dataset.e3Alt = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value; el.classList.remove('geaendert') })
