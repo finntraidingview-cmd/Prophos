@@ -12,7 +12,7 @@ B  _ap_stand_laden VORHER (app.py aus `git show <basis>:app.py`) gegen NACHHER m
 C  Quelltext-Verträge: Gruppen-Aufrufer geben eigene mit, Hand-Eingriffe je Plan nehmen _ap_stand_fuer_uid, HT-Lauf ohne Gruppen-IDs,
    POST user_ids sperrt Gruppen-IDs, heute_beendet je Unternehmen gemerkt, A11 bricht ab statt eines Topfs, Hedge-Takte mit
    ap_ppl_ctx_unternehmen, prophos.html würfelt nur das eigene Unternehmen (prophos_gruppe_von), Fehler → nicht würfeln
-Aufruf: python3 tools/selftest_unternehmen_getrennt.py [basis-commit, Standard: HEAD]"""
+Aufruf: python3 tools/selftest_unternehmen_getrennt.py [basis-commit, Standard: Stand vor dem UNT2-Commit]"""
 import copy
 import json
 import os
@@ -48,6 +48,7 @@ def lade(src):
           "ap_echo_hedge_anlegen": lambda z, k, r: {"echo": 0, "weg": []}, "ap_echo_kandidat": lambda z, k: False,
           "ap_echo_ohne_melden": lambda *a, **k: None, "lots_deckel_lots": lambda p: None, "admin_gruppen_daten": lambda: DATEN,
           "_firm_norm": lambda x: str(x or "")}
+    __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum = Standard (wie die anderen Lader)
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
@@ -129,7 +130,12 @@ def uids(stand, *schl):
 
 
 def main():
-    basis = sys.argv[1] if len(sys.argv) > 1 else "HEAD"
+    # Basis = Stand vor UNT2: Elternteil des Commits, der ap_unternehmen_filter einführt (git log -S); noch nicht committet → HEAD
+    basis = sys.argv[1] if len(sys.argv) > 1 else None
+    if not basis:
+        ein = subprocess.run(["git", "-C", WURZEL, "log", "-1", "--format=%H", "-S", "def ap_unternehmen_filter(", "--", "app.py"],
+                             capture_output=True, text=True).stdout.strip()
+        basis = (ein + "^") if ein else "HEAD"
     neu_src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
     alt_src = subprocess.run(["git", "-C", WURZEL, "show", f"{basis}:app.py"], capture_output=True, text=True).stdout
     n = lade(neu_src)
