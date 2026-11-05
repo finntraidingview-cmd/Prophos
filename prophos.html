@@ -77872,6 +77872,12 @@
     const q = d.quelle === 'railway' ? ' · noch aus der Railway-Variable' : d.quelle === 'aus' ? ' · aus' : ''
     box.innerHTML = `<span style="color:var(--sub)">TV-Konten lesen auf${q}:</span>`
       + (d.bekannte || []).map(x => chip(x.pc, x.name || x.pc, alle || an.has(x.pc))).join('') + chip('alle', 'alle PCs', alle)
+    // L7 (05.11.2026): offene Mail-Aufträge, deren ID keinen eingeschalteten PC hat — lagen seit 29.10. still (Weiche nur auf einem PC)
+    const wt = Array.isArray(d.wartend) ? d.wartend : []
+    if(wt.length){
+      const wer = [...new Set(wt.map(w => `${w.person}${w.firma ? ' · ' + w.firma : ''}`))]
+      box.insertAdjacentHTML('beforeend', `<span style="color:var(--warn-ink, #b45309);font-size:12px" title="${esc(wer.join('\n'))}">⏳ ${wt.length} Mail-Auftr${wt.length === 1 ? 'ag wartet' : 'äge warten'} — kein eingeschalteter PC mit Lebenszeichen in 24 h (${esc(wer.slice(0, 3).join(', '))}${wer.length > 3 ? ' …' : ''})</span>`)
+    }
     box.hidden = false
     box.querySelectorAll('[data-tvkpc]').forEach(b => b.addEventListener('click', () => {
       const k = b.dataset.tvkpc, s0 = new Set([...an].filter(x => x !== 'alle'))

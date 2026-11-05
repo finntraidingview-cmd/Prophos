@@ -21425,6 +21425,18 @@ def reader_tv_konten_schreiben():
     return jsonify({"ok": True, "n": len(zeilen)})
 
 
+def tvk_wartend(auftraege, pc_user, liste):
+    """REIN RECHNEND (testbar, L7 05.11.2026 — Mail-Aufträge seit 29.10. nie gelaufen, weil die Weiche nur pc-c19p2l freigab): offene Mail-Aufträge,
+    deren ID keinen freigegebenen PC hat → [{user_id, firma, faellig_at}]. pc_user = {pc: user_id} (PCs der letzten 24 h), liste = Weiche
+    (tv_konten_pcs). „alle" → nichts wartet. Eine ID ohne PC der letzten 24 h wartet ebenfalls (kein Tab, der abholen könnte)."""
+    frei = {str(x).lower() for x in (liste or ())}
+    if "alle" in frei:
+        return []
+    mit_pc = {str(u) for pc, u in (pc_user or {}).items() if str(pc).lower() in frei and u}
+    return [{"user_id": str(a.get("user_id")), "firma": a.get("firma"), "faellig_at": a.get("faellig_at")} for a in auftraege or ()
+            if a.get("status") == "offen" and a.get("art") == "mail" and str(a.get("user_id")) not in mit_pc]
+
+
 @app.route("/admin/tv-konten-pcs", methods=["GET", "POST", "OPTIONS"])
 def admin_tv_konten_pcs():
     """Weiche „TV-Konten lesen auf" (Finn 29.10.2026). GET → {ok, pcs, quelle, bekannte:[{pc, name}]} (PCs der letzten 24 h aus mt5_live, Namen aus
@@ -21466,8 +21478,20 @@ def admin_tv_konten_pcs():
         bekannte = [{"pc": pc, "name": namen.get(pc) or pc} for pc, u in pcs.items() if u and u not in aus and not _alarm_fremd_verwaltet(u)]
         bekannte.sort(key=lambda x: str(x["name"]).lower())
     except Exception as e:
+        pcs, aus = None, set()
         print(f"[tv-konten] PC-Liste: {type(e).__name__}", flush=True)
-    return jsonify({"ok": True, "pcs": liste, "quelle": quelle, "bekannte": bekannte})
+    # L7 (05.11.2026): offene Mail-Aufträge ohne freigegebenen PC ihrer ID — die Zeile im Admin zeigt sie, damit sie nicht still liegen bleiben
+    wartend = None
+    try:
+        if pcs is not None:
+            offen = sb_select("tv_konten_auftrag", {"select": "user_id,firma,art,status,faellig_at", "status": "eq.offen", "art": "eq.mail",
+                                                    "order": "faellig_at.asc", "limit": "200"}) or []
+            pn = _ap_namen()[0]
+            wartend = [dict(w, person=pn.get(w["user_id"]) or w["user_id"][:8]) for w in tvk_wartend(offen, pcs, liste)
+                       if w["user_id"] not in aus and not _alarm_fremd_verwaltet(w["user_id"])]   # wie bekannte: ausgeblendete IDs und Emins Gruppe nie
+    except Exception as e:
+        print(f"[tv-konten] wartende Aufträge: {type(e).__name__}", flush=True)
+    return jsonify({"ok": True, "pcs": liste, "quelle": quelle, "bekannte": bekannte, "wartend": wartend})
 
 
 @app.route("/admin/tv-konten", methods=["GET", "OPTIONS"])
