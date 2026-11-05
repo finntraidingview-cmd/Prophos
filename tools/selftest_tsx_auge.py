@@ -65,9 +65,11 @@ def jsc(code):
 def frontend_test():
     s = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
     k = s.index("  const tsxKontoGleich = ")
+    # RT1 (05.11.2026): 2cc2e33c (29.10.2026, finaler Tradeify Orbit V3) — hedgeLiqLevel ruft hedgeIstTradeifyFinal (const-Pfeil), Lader holt die Zeile mit
+    kf = s.index("  const hedgeIstTradeifyFinal = ")
     code = "\n".join(fn(s, n) for n in ("tvSymbolWurzel", "hedgeKontoPasst", "hedgeMasterWegEntscheid", "hedgeMasterTeilweise", "tsxStandListe", "hedgeLiqLevel"))
     code = ("var window = {}, accounts = [], _liqRegeln = null; function liqRegelnLaden(){ return { catch(){} } } function tpKontoGroesseAusName(){ return 0 }\n"
-            + code + "\n" + s[k:s.index("\n", k)] + r"""
+            + code + "\n" + s[k:s.index("\n", k)] + "\n" + s[kf:s.index("\n", kf)] + r"""
 var aus = [], f = (b, t) => aus.push((b ? 'OK ' : 'ROT ') + t)
 var L = tsxStandListe({ positionen: [{ symbol: 'MNQZ26', seite: 'sell', menge: 3 }] })
 f(L[0].wurzel === 'MNQ' && L[0].menge_zahl === 3 && L[0].richtung === 'sell', 'Frontend: Positionen → Reader-Liste')
@@ -91,10 +93,14 @@ f(/Kontogröße/.test(hedgeLiqLevel({ route: 'tsv2', richtung: 'buy', mt5Baselin
 f(hedgeLiqLevel({ route: 'tvv2', richtung: 'buy', mt5Baseline: { tv: { mll_start: 0, balance_start: 5000, balance_relativ: true } } }, 29000, 2, 3).liq_quelle !== 'topstepx_mll', 'Liq: Orbit (tvv2) unberührt')
 print(aus.join('\n'))
 """)
-    # Variante B (27.10.2026): im Schnell-Wächter steht die 5-s-Sperre VOR dem Schließ-Entscheid
+    # Variante B (27.10.2026): im Schnell-Wächter steht die Flach-Sperre VOR dem Schließ-Entscheid
+    # RT1 (05.11.2026): 49c48357 + 3cf9720f (29.10.2026, Finn „unter 1 sec") ersetzen die feste 5-s-Sperre (TSX_FLACH_MIN_MS jetzt 0) durch
+    # die Flach-Folge des Auges (flach_folge ≥ 3 über ≥ 200 ms); FAIL-SAFE ohne flach_folge / mehrere Tabs bleibt ≥ 5 s (TSX_FLACH_ALT_MS).
+    # Geprüft wird dieselbe Regel am neuen Ort: Sperre (Folge bzw. 5-s-Rückfall) steht vor hedgeMasterWegEntscheid
     i = s.index("  async function hedgeTsxSchnellTick("); t = s[i:s.index("\n  setInterval(hedgeTsxSchnellTick", i)]
-    g, e = t.find("< TSX_FLACH_MIN_MS) continue"), t.find("hedgeMasterWegEntscheid(")
-    check("const TSX_FLACH_MIN_MS = 5000" in s and 0 < g < e, "Frontend: Topstep schließt erst nach ≥ 5 s durchgehend flach (Variante B)")
+    g, e = t.find("if(fs ? !fs.ok : jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_ALT_MS) continue"), t.find("hedgeMasterWegEntscheid(")
+    check("const TSX_FLACH_FOLGE = 3, TSX_FLACH_FOLGE_MS = 200, TSX_FLACH_ALT_MS = 5000," in s and "const fs = tsxFlachSchnell(st, r.tabs)" in t
+          and 0 < g < e, "Frontend: Topstep schließt erst nach Flach-Folge ≥ 3 / ≥ 200 ms, sonst ≥ 5 s durchgehend flach (Variante B, Auge 0.3.1)")
     for z in (jsc(code) or "ROT JavaScriptCore lieferte nichts").strip().splitlines():
         check(z.startswith("OK "), z[3:] if z.startswith("OK ") else z)
 
