@@ -10157,7 +10157,7 @@
             <label>Weg</label>
             <div class="seg" id="tp-vp-weg">
               <button type="button" data-vp-weg="tvv2" class="active">Orbit V2 <span style="opacity:.6;font-size:11px">ohne Hedge</span></button>
-              <button type="button" data-vp-weg="tvplus">Orbit <span style="opacity:.6;font-size:11px">Duplikum</span></button>
+              <button type="button" data-vp-weg="tvplus" style="display:none" title="Duplikum abgeschaltet (05.11.2026)">Orbit <span style="opacity:.6;font-size:11px">Duplikum</span></button>
             </div>
           </div>
           <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5" id="tp-vp-intro-v2">
@@ -10419,7 +10419,7 @@
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <!-- Duplikum (Puls) = früher „Orbit (Puls)" (route tvplus): Prophos richtet Duplikum ein, Puls platziert in TradingView,
                      Duplikum kopiert auf den Slave — seit 01.10.2026 abends ganz rechts unter „Mit Hedge" (Finn) -->
-                <button type="button" id="tp-route-tvplus">Duplikum (Puls)</button>
+                <button type="button" id="tp-route-tvplus" style="display:none" title="Duplikum abgeschaltet (05.11.2026)">Duplikum (Puls)</button>
               </div>
               <div class="tp-route-gruppe">Ohne Hedge</div>
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
@@ -10429,7 +10429,7 @@
               </div>
               <div class="tp-route-gruppe">Alte Modelle</div>
               <div class="seg" id="tp-route-seg" style="opacity:.85">
-                <button type="button" id="tp-route-dup">Duplikum (manuell)</button>
+                <button type="button" id="tp-route-dup" style="display:none" title="Duplikum abgeschaltet (05.11.2026)">Duplikum (manuell)</button>
               </div>
             </div>
             <div class="field" id="tp-master-row">
@@ -24274,7 +24274,19 @@
    * Hilfs-Wrapper: ruft beliebigen Duplikium-V4-Endpoint via Backend-Proxy auf.
    * Verwendung später: dupApi('GET', 'slave/getSlave.php')
    */
+  // DUPLIKUM ABGESCHALTET (Finn 05.11.2026: „in Zukunft Duplikum raus“, Futures laufen bei allen über Orbit). Vorfall Emin 05.11.2026
+  // 12:51 Dubai: der tvplus-Trade vom 03.11. hatte in Duplikum Tradeify …8522 → Fusion 430095 mit −5,2165 eingetragen; die Verbindung
+  // blieb stehen und kopierte den Winning Day (2 MNQ) als 10,43 Lot NEBEN dem richtigen Prophos-Hedge (2,12 Lot). Code bleibt liegen,
+  // nur nichts mehr schreiben: Multiplikator, Symbol-Mapping, neue Konten. Lesen (Konten, Positionen, Settings) bleibt für alte Ansichten.
+  const DUPLIKUM_AUS = true
+  const DUPLIKUM_AUS_TEXT = 'Duplikum ist abgeschaltet (05.11.2026) — Futures laufen über Orbit. Diesen Trade bitte als Orbit neu planen.'
+  const DUP_SCHREIB_PFADE = /^(settings\/setSettings|mapping\/(addMappings|editMapping)|account\/addAccount)\.php$/
+  window._duplikumAus = { an: DUPLIKUM_AUS, text: DUPLIKUM_AUS_TEXT }   // für die Start-Sperre in tpPreflightAndStart (eigener Abschnitt)
   async function dupApi(method, path, body){
+    if(DUPLIKUM_AUS && DUP_SCHREIB_PFADE.test(String(path || ''))){
+      console.warn('[duplikum] abgeschaltet — nicht geschrieben:', path)
+      return { ok: false, status: 0, data: { error: DUPLIKUM_AUS_TEXT } }
+    }
     if(!dupState.token) throw new Error('Nicht verbunden')
     const r = await fetch(`${TS_BACKEND}/duplikum/${path}`, {
       method,
@@ -53249,6 +53261,16 @@
   }
 
   let _pfOrbitWeiter = null   // Orbit: Fortsetzung nach grünem Duplikum-Check (s. tpOrbitStarten)
+  // Duplikum abgeschaltet (05.11.2026, siehe DUPLIKUM_AUS bei dupApi): ein alter Duplikum-Plan startet nicht mehr — weder Karte noch
+  // Auto-Start-Schlange noch Fern-Start. Meldung auf demselben Weg wie der Lots-Deckel (Fern-Quittung, opts.fehl, sonst Toast).
+  function tpDuplikumAusStopp(plan, opts){
+    const da = window._duplikumAus
+    if(!(da && da.an)) return false
+    const t = da.text || 'Duplikum ist abgeschaltet — bitte als Orbit neu planen.'
+    try{ _pfRemoteMelde(plan.id, { ok: false, msg: t }) }catch(_){}
+    if(opts && typeof opts.fehl === 'function') opts.fehl(t); else if(typeof atToast === 'function') atToast('⚠ ' + t, 'end')
+    return true
+  }
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
@@ -53304,6 +53326,8 @@
     // Erst DESSEN „Speichern" kommt mit nurDup hierher zurück und fährt den Duplikum-Check
     // (22.09.2026) — bis dahin galt „NIE in den Duplikum-Preflight durchfallen", weil der
     // Orbit-Copier hedgte; heute kopiert Duplikum.
+    // Duplikum (Puls) = Puls platziert, Duplikum kopiert den Hedge — ohne Duplikum liefe der Master nackt (05.11.2026)
+    if(plan.route === 'tvplus' && tpDuplikumAusStopp(plan, opts)) return
     if(plan.route === 'tvplus' && !orbitDup) return openTpOrderModal(planId)
 
     // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
@@ -53318,6 +53342,9 @@
     const mt5Route = (plan.route === 'dup' || orbitDup) ? null
       : ((typeof planMt5Route === 'function') ? planMt5Route(plan) : null)
     if(mt5Route) return tpPreflightMt5(plan)
+
+    // Ab hier nur noch der Duplikum-Weg (dup, Alt-Pläne ohne Route): Topstep-Mirror und MT5 sind oben schon abgebogen (05.11.2026)
+    if(tpDuplikumAusStopp(plan, opts)) return
 
     _pfPlanId = planId
 
@@ -56251,7 +56278,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2082'
+  const OS_TAB_BUILD = '2026-09-22.2083'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56813,6 +56840,12 @@
     if(plan && plan.fundedVorschlag){
       const t = 'Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.'
       if(fern) fern.melde({ ok:false, msg: t }); else toast(t, 'end')
+      return
+    }
+    // Duplikum abgeschaltet (05.11.2026): Fern-/Auto-Starts kommen direkt hierher — ein Duplikum-(Puls)-Plan darf Puls nie mehr auslösen
+    if(plan && plan.route === 'tvplus' && window._duplikumAus && window._duplikumAus.an){
+      const t = window._duplikumAus.text
+      if(fern) fern.melde({ ok:false, msg: t }); else toast('⚠ ' + t, 'end')
       return
     }
     const _wdFehlt = plan ? await tpWdBestaetigungFehlt(plan) : ''
@@ -66688,8 +66721,8 @@
     _tpRoute = _editPlan ? (['mt5', 'tvplus', 'mt5v2', 'tvv2', 'tsv2'].includes(_editPlan.route) ? _editPlan.route
                             : (typeof planMirrorRoute === 'function' && planMirrorRoute(_editPlan)) ? 'topstep'
                             : 'dup')
-                         : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2', 'tsv2'].includes(localStorage.getItem(TP_ROUTE_LS))
-                            ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
+                         : (['mt5', 'topstep', 'mt5v2', 'tvv2', 'tsv2'].includes(localStorage.getItem(TP_ROUTE_LS))   // tvplus/dup raus (Duplikum abgeschaltet 05.11.2026)
+                            ? localStorage.getItem(TP_ROUTE_LS) : 'tvv2')
     // Winning Day (24.09.2026 abends): beim Bearbeiten = tvv2-Plan mit hedge_eur; neu = letzte Wahl
     _tpWd = _editPlan ? ((_editPlan.route === 'tvv2' || _editPlan.route === 'tsv2') && _editPlan.hedgeEur > 0)
                       : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
@@ -70483,7 +70516,7 @@
       tpVorplanRegelnSetzen(regeln)
     }catch(_){ tpVorplanRegelnSetzen(null) }
     // Weg: Orbit V2 ist Standard (24.09.2026); der alte Duplikum-Weg nur, wenn er zuletzt bewusst gewählt war
-    _vpWeg = (g.weg === 'tvplus') ? 'tvplus' : 'tvv2'
+    _vpWeg = 'tvv2'   // Duplikum abgeschaltet (05.11.2026): gespeichertes 'tvplus' fällt auf Orbit V2
     const slEl = document.getElementById('tp-vp-sl'); if(slEl) slEl.value = (g.sl > 0) ? g.sl : ''
     const suEl = document.getElementById('tp-vp-start-um'); if(suEl) suEl.value = ''
     tpVorplanStartUmHinweis()
@@ -70601,7 +70634,7 @@
   }))
   // Weg-Schalter (24.09.2026): Orbit V2 ↔ alter Duplikum-Weg — eigene Verdrahtung, Liste rechnet neu
   document.querySelectorAll('[data-vp-weg]').forEach(b => b.addEventListener('click', () => {
-    _vpWeg = b.dataset.vpWeg === 'tvplus' ? 'tvplus' : 'tvv2'
+    _vpWeg = 'tvv2'   // Duplikum abgeschaltet (05.11.2026)
     if(tpVorplanIstV2() && !_vpDir) tpVorplanDirSetzen('kompass')
     tpVorplanWegAnwenden()
     if(!tpVorplanIstV2() && !((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
