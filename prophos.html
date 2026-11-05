@@ -54329,6 +54329,7 @@
   // REIN RECHNEND (window._mt5OrderWiederholen, 30.10.2026): master-order-Antwort + Sekunden seit dem ersten Versuch → erneut versuchen?
   // Nur bei retry_ok (beweisbar nichts gesendet) und Terminal-Gründen; terminal_heilt bis 180 s, sonst 90 s — wie der Echo-V2-Weg
   function mt5OrderWiederholen(r, seitMs){
+    if(echoBotNichtScharf(r)) return false   // ES2d: „nicht scharf" ist eine Antwort, kein Terminal-Heilen (Bot hat schon bis scharf_max_s gewartet)
     // pc_tipp_sperre (30.10.2026, Routine „Puls-Fehler“ .1953): ein anderer Echo-Lauf an diesem PC tippt noch — der Bot hat gewartet und nichts gesendet, 90 s wie Terminal-Gründe
     const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || r.grund === 'pc_tipp_sperre' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
     return wartbar && seitMs <= (r.grund === 'terminal_heilt' ? 180000 : 90000)
@@ -54452,8 +54453,17 @@
       return { ok: !!(r && r.ok), grund: String((r && (r.msg || r.error)) || '') }
     }catch(e){ return { ok:false, grund: String((e && e.message) || e) } }
   }
+  /* SCHARF-BEWEIS IM BOT (ES2d, 05.11.2026, Finn: Echo „sollte nicht über 1 Minute dauern"; Bot-Teil ES3b .2091, Prüfer S2): kann der Bot an
+   * DIESEM PC das Trade-Fenster selbst prüfen (order_bot echo_scharf_urteil, scharf_pflicht), darf der Tab master-order schon schicken, sobald
+   * der Copier läuft — statt erst auf Snapshot + armed zu warten (~2–5 s). Ein alter Bot ignoriert scharf_pflicht still (→ Order ohne Scharf-
+   * Beweis = ungehedgt). Deshalb NUR mit ausdrücklicher Meldung des laufenden Panels in GET instances: bot_faehig enthält 'scharf_pflicht'
+   * (Panel meldet es nur, wenn sein eigener Code das Feld durchreicht UND das order_bot.py, das es startet, den Scharf-Beweis kann). Fehlt die
+   * Meldung (alter Panel-/Bot-Stand, Lese-Fehler), wartet der Tab wie bisher selbst. REIN. */
+  function echoBotScharfFaehig(d){ return !!(d && Array.isArray(d.bot_faehig) && d.bot_faehig.includes('scharf_pflicht')) }
+  // Bot-Antwort „Copier nicht scharf" (ES3b: retry_ok, nichts gesendet) — nie als Terminal-Grund wiederholen, sondern Start-Fehler m5scharf
+  function echoBotNichtScharf(r){ return !!(r && !r.ok && r.retry_ok === true && (r.grund === 'nicht_scharf' || r.code === 'nicht_scharf')) }
   window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS,
-    zuruckUrteil: echoFensterZuruecknehmenUrteil }   // Test-Haken
+    zuruckUrteil: echoFensterZuruecknehmenUrteil, botFaehig: echoBotScharfFaehig, botNichtScharf: echoBotNichtScharf }   // Test-Haken
   async function tpPreflightMt5(plan){
     // ES2 (05.11.2026, Prüf-Fund): Merker „Check lebt" VOR dem ersten await — tpJetztStarten ruft diesen Check ohne await, sonst sähe der
     // nächste Echo-Start während der Lots-Deckel-Lesung keinen laufenden Check (echoVorlaufAktiv) und übernähme das Popup
@@ -54904,7 +54914,12 @@
             if(!(sendCreds && sec <= 25)) await sfEinmal({ schritt: 'm5login', msg: `Terminal im falschen Konto eingeloggt (${String(wrongLogin)} statt ${String(route.masterLogin)}) — nichts platziert.`, unklar: false })
             return
           }
-          if(inst2 && inst2.alive && !note){
+          // ES2d: Bot prüft selbst (s. echoBotScharfFaehig) → master-order, sobald der Copier frisch läuft (alive = running + Status ≤ 15 s, sonst
+          // schlägt der Frische-Riegel copier_alt des Panels an); note (Snapshot fehlt noch) wartet der Bot selbst ab. Nur mit gemerkter Bot-Order
+          // (der Hand-Weg „im Terminal traden" braucht weiter alive && !note) und nie bei altem „laufend"-Fenster (das erneuert nur dieser Ticker)
+          const imBot = !altLaufend && echoBotScharfFaehig(d2) && !!(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id))
+          if(inst2 && inst2.alive && (!note || imBot)){
+            if(!imBot){   // ES2d: ohne Bot-Fähigkeit der Scharf-Beweis im Tab wie bisher
             // SCHARF-BEWEIS (30.10.2026, s. echoFensterSchreiben): Terminal bereit heißt noch nicht, dass der Copier hedgt — erst mit
             // status.armed === true für diese config geht es weiter (Bot-Order wie Hand-Trade). Solange es fehlt, plan?file gestreut alle
             // 8–12 s erneut (ein Fenster, das das Panel vor dem Fill schon wieder auf „beendet" gesetzt hat, wird so neu angelegt);
@@ -54938,6 +54953,7 @@
               _pfSet('m5term', 'warn', `⏳ Terminal bereit — ${altLaufend ? 'altes Trade-Fenster („laufend") wird erneuert' : 'warte, bis der Copier das Trade-Fenster scharf meldet'}… (${Math.round((Date.now() - scharfAb) / 1000)}s)`)
               return
             }
+            }   // Ende Scharf-Beweis im Tab (ES2d)
             _pfMt5StopTimer()
             const fe = document.getElementById('pf-final')
             // Bot-Order gemerkt? Dann übernimmt jetzt der Bot (15.08.2026, Finns
@@ -54966,7 +54982,7 @@
               // losgehen') — die HÄNDE-WEG-Ansage steht, während der Bot schon
               // arbeitet. Über Parsec bewegt er den Cursor ohnehin nicht sichtbar,
               // er füllt den Order-Dialog direkt aus.
-              _pfSet('m5term', 'ok', '✓ Bot füllt den Order-Dialog…')
+              _pfSet('m5term', 'ok', imBot ? '✓ Bot übernimmt — prüft das Trade-Fenster selbst, dann füllt er den Order-Dialog…' : '✓ Bot füllt den Order-Dialog…')
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
               if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} ${po.sl_usd ? `(TP $${po.tp_usd} · SL $${po.sl_usd})` : '(ohne SL/TP — machst du von Hand)'} — HÄNDE WEG, bis die Bestätigung kommt!` }
               try{
@@ -54995,7 +55011,9 @@
                       headers:{'Content-Type':'application/json'},
                       body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
                                              volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,
-                                             final: _fin.final, final_grund: _fin.grund }) })
+                                             final: _fin.final, final_grund: _fin.grund,
+                                             // ES2d: Scharf-Beweis im Bot (nur mit gemeldeter Fähigkeit); der Bot kappt selbst auf 5–60 s
+                                             ...(imBot ? { scharf_pflicht: true, scharf_max_s: Math.round(scharfMax / 1000) } : {}) }) })
                     if(!mt5OrderWiederholen(r, Date.now() - t0)) break
                     if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
                       r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
@@ -55026,11 +55044,13 @@
                   // Terminal schauen, sonst droht die Doppel-Order (Review-Blocker).
                   const retryOk = !!(r && r.retry_ok)
                   const echoAus = _pfEchoPausiert(r)
-                  _pfSet('m5term', 'err', (echoAus ? 'Nichts platziert: ' : 'Order fehlgeschlagen: ')
+                  const nichtScharf = echoBotNichtScharf(r)   // ES2d: Bot meldet „Copier nicht scharf" — wie der Scharf-Fehler im Tab
+                  _pfSet('m5term', 'err', (echoAus || nichtScharf ? 'Nichts platziert: ' : 'Order fehlgeschlagen: ')
                     + escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort')))
                   if(fe){ fe.className = 'pf-final err'
                     fe.textContent = echoAus
                       ? '⏸ Echo ist pausiert — es wurde NICHTS gesendet. Unten fortsetzen, dann läuft der Check sofort neu.'
+                      : nichtScharf ? '✗ Copier nicht scharf — es wurde NICHTS gesendet.'
                       : retryOk
                       ? '✗ Order abgelehnt — Meldung oben. Erneut „Weiter" → „Starten".'
                       : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
@@ -55044,7 +55064,12 @@
                   }
                   // Ans Handy: inkl. des kritischsten Falls „Position OFFEN, SL/TP
                   // fehlt" (price+ticket ohne ok) — die Warnung muss ankommen.
-                  _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
+                  if(nichtScharf){
+                    _pfRemoteMelde(plan.id, { ok:false, check_fail:true, msg: String(r.msg || 'Copier nicht scharf — nichts gesendet.') })
+                    _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // wie der Scharf-Fehler im Tab
+                    _pfStatusSave()
+                    try{ renderTradePlans() }catch(_){}
+                  } else _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                   // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
@@ -55052,7 +55077,8 @@
                   // UNKLAR (kein retry_ok) bleibt es stehen — dort kann eine Order liegen, die gehedgt werden muss
                   if(!(r && r.price && r.ticket) && (retryOk || echoAus)) await fensterWeg()
                   if(!(r && r.price && r.ticket) && echoAus) await sfEinmal({ schritt: 'm5pause', msg: 'Echo ist pausiert (Not-Aus) — nichts gesendet.', unklar: false })
-                  if(!(r && r.price && r.ticket) && !echoAus) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
+                  if(!(r && r.price && r.ticket) && nichtScharf) await sfEinmal({ schritt: 'm5scharf', msg: String(r.msg || 'Copier nicht scharf — nichts gesendet.'), unklar: false })
+                  if(!(r && r.price && r.ticket) && !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
                 }
               }catch(e){
                 _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))

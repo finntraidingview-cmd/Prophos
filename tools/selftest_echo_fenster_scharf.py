@@ -6,7 +6,8 @@ armed). Prüft die Verdrahtung in prophos.html und spielt Fenster-Versuche und B
 
 ES2/ES2b (05.11.2026, Slave 7, Prüfer S2/S8): Fenster geht parallel zum Terminal-Start raus (fenP), Höchstwartezeit aus der Einstellung
 (echoTempo().scharfMaxMs, 10–120 s, Standard 30 s), jeder Ausstieg ohne Order nimmt das Fenster zurück (fensterWeg →
-echoFensterZuruecknehmen) — nur mit Beweis „keine Master-Position" (echoFensterZuruecknehmenUrteil, geschlossen)."""
+echoFensterZuruecknehmen) — nur mit Beweis „keine Master-Position" (echoFensterZuruecknehmenUrteil, geschlossen).
+ES2d: Scharf-Beweis im Bot (ES3b) nur, wenn das Panel bot_faehig 'scharf_pflicht' meldet — sonst prüft der Tab wie bisher."""
 import os
 import sys
 
@@ -123,7 +124,13 @@ def main():
     f = t[a:b]
     check("hardFail = true" in f and "schritt: 'm5fenster'" in f and "unklar: false" in f and "await sfEinmal({ schritt: 'm5fenster'" in f and a < b,   # sfEinmal = nur nach Start zur Startzeit (ECHO-STILL-HAENGT)
           "Fenster zu → hardFail (kein Ticker, keine Order) + Start-Fehler m5fenster bei Start zur Startzeit")
-    k = t[t.index("if(inst2 && inst2.alive && !note){"):]
+    k = t[t.index("if(inst2 && inst2.alive && (!note || imBot)){"):]
+    vor_k = t[t.index("_pfMt5Timer = setInterval(async () => {"):t.index("if(inst2 && inst2.alive && (!note || imBot)){")]
+    check("const imBot = !altLaufend && echoBotScharfFaehig(d2) && !!(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id))" in vor_k,
+          "ES2d: Tab-Warten entfällt nur mit gemeldeter Bot-Fähigkeit, gemerkter Bot-Order und ohne altes „laufend“-Fenster")
+    check(k.index("if(!imBot){") < k.index("echoScharfUrteil(inst2") and "}   // Ende Scharf-Beweis im Tab (ES2d)" in k
+          and k.index("}   // Ende Scharf-Beweis im Tab (ES2d)") < k.index("master-order?file="),
+          "ES2d: ohne Bot-Fähigkeit läuft der Scharf-Beweis im Tab unverändert vor master-order")
     i_u, i_o = k.index("echoScharfUrteil(inst2, Date.now() - scharfAb, altLaufend, scharfMax)"), k.index("master-order?file=")
     fehlt = k[k.index("if(urteil === 'fehlt'){"):k.index("if(urteil === 'warten'){")]
     warten = k[k.index("if(urteil === 'warten'){"):k.index("_pfMt5StopTimer()\n            const fe = document.getElementById('pf-final')")]
@@ -132,6 +139,15 @@ def main():
           "nicht scharf nach der Höchstwartezeit → Ticker aus, gemerkte Order verworfen, Handy-Meldung, Start-Fehler m5scharf")
     check("await fensterWeg()" in fehlt and fehlt.index("await fensterWeg()") < fehlt.index("schritt: 'm5scharf'"), "nicht scharf → Fenster zurück vor dem Start-Fehler (ES2b)")
     order = k[k.index("master-order?file="):]
+    body = order[:order.index("if(!mt5OrderWiederholen(r, Date.now() - t0)) break")]
+    check("...(imBot ? { scharf_pflicht: true, scharf_max_s: Math.round(scharfMax / 1000) } : {})" in body and html.count("scharf_pflicht: true") == 1,
+          "ES2d: scharf_pflicht nur im Echo-mit-Hedge-Body und nur mit Bot-Fähigkeit (Echo V2 nie)")
+    mw = html[html.index("function mt5OrderWiederholen(r, seitMs){"):html.index("window._mt5OrderWiederholen = mt5OrderWiederholen")]
+    check(mw.index("if(echoBotNichtScharf(r)) return false") < mw.index("const wartbar"), "ES2d: „nicht scharf“ vom Bot wird nie als Terminal-Grund wiederholt")
+    nsf = order[order.index("const nichtScharf = echoBotNichtScharf(r)"):order.index("}catch(e){")]
+    check("schritt: 'm5scharf'" in nsf and "check_fail:true" in nsf and "state: 'issue'" in nsf and "'✗ Copier nicht scharf — es wurde NICHTS gesendet.'" in nsf
+          and "&& !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order'" in nsf,
+          "ES2d: Bot meldet nicht scharf → Start-Fehler m5scharf, Plakette issue, Handy check_fail, kein m5order")
     nach = order[order.index("pulsSpurSchreiben(plan.id, r)"):order.index("}catch(e){")]
     check("(retryOk || echoAus)) await fensterWeg()" in nach and nach.count("await fensterWeg()") == 1,
           "Order abgelehnt: Fenster nur zurück bei beweisbar nichts gesendet (retry_ok / Echo pausiert), nie bei UNKLAR (ES2b)")
@@ -169,6 +185,34 @@ def main():
     check(erg[0] == "fehlt" and erg[1] == 62, f"Einstellung 60 s → Start-Fehler erst nach 60 s ({erg})")
     check(urteil({"status": {}}, 31000, False, 60000) == "warten" and urteil({"status": {}}, 31000, False, 0) == "fehlt",
           "maxMs 0/fehlt → Standard 30 s")
+    # Bot-Fähigkeit (ES2d, Spiegel von echoBotScharfFaehig / echoBotNichtScharf)
+    def bot_faehig(d):
+        return bool(d and isinstance(d.get("bot_faehig"), list) and "scharf_pflicht" in d["bot_faehig"])
+    def bot_nicht_scharf(r):
+        return bool(r and not r.get("ok") and r.get("retry_ok") is True and (r.get("grund") == "nicht_scharf" or r.get("code") == "nicht_scharf"))
+    check(not bot_faehig({}) and not bot_faehig({"version": "2026-09-22.2091"}) and not bot_faehig({"bot_faehig": "scharf_pflicht"})
+          and bot_faehig({"bot_faehig": ["scharf_pflicht"]}), "Bot-Fähigkeit nur mit ausdrücklicher Liste — Versionsnummer allein reicht nicht")
+    check(bot_nicht_scharf({"ok": False, "retry_ok": True, "code": "nicht_scharf"}) and not bot_nicht_scharf({"ok": False, "code": "nicht_scharf"})
+          and not bot_nicht_scharf({"ok": False, "retry_ok": True, "grund": "terminal_heilt"}), "nicht_scharf nur mit retry_ok (beweisbar nichts gesendet)")
+    fz = html[html.index("function echoBotScharfFaehig(d){"):html.index("window._echoFenster = ")]
+    check("Array.isArray(d.bot_faehig) && d.bot_faehig.includes('scharf_pflicht')" in fz and "r.retry_ok === true && (r.grund === 'nicht_scharf' || r.code === 'nicht_scharf')" in fz,
+          "JS-Regeln = Spiegel hier (bot_faehig, nicht_scharf)")
+    # Panel meldet die Fähigkeit (ES2d): reine Funktion aus panel.py gegen den Bot von jetzt und den vor ES3b
+    import ast, subprocess
+    psrc = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
+    fn = [n for n in ast.parse(psrc).body if isinstance(n, ast.FunctionDef) and n.name == "bot_faehig_aus_quelle"][0]
+    ns = {}
+    exec(compile(ast.Module([fn], []), "panel.bot_faehig_aus_quelle", "exec"), ns)
+    neu = open(os.path.join(HIER, "..", "mt5-copier", "order_bot.py"), encoding="utf-8").read()
+    alt = subprocess.run(["git", "show", "ed4ea1b1:mt5-copier/order_bot.py"], capture_output=True, text=True, cwd=os.path.join(HIER, "..")).stdout
+    check(bool(alt.strip()), "Vergleichs-Bot vor ES3b (ed4ea1b1) lesbar — sonst prüfte der nächste Punkt nichts")
+    check(ns["bot_faehig_aus_quelle"](neu) == ["scharf_pflicht"] and bool(alt.strip()) and ns["bot_faehig_aus_quelle"](alt) == []
+          and ns["bot_faehig_aus_quelle"]("") == [], "Panel: scharf_pflicht nur für einen Bot mit Scharf-Beweis (ES3b), nicht für den Bot davor")
+    check('"bot_faehig": bot_faehig(),' in psrc and 'if not ohne_hedge and body.get("scharf_pflicht") is True:' in psrc,
+          "Panel: instances meldet bot_faehig, master-order reicht scharf_pflicht nur bei Echo mit Hedge durch")
+    mo = psrc[psrc.index('if not ohne_hedge and body.get("scharf_pflicht") is True:'):]
+    check(mo.index('if "scharf_pflicht" not in bot_faehig():') < mo.index('cmd["scharf_pflicht"] = True') and '"code": "nicht_scharf"' in mo[:mo.index('cmd["scharf_pflicht"] = True')],
+          "Panel: beim Senden noch einmal — Bot ohne Scharf-Beweis → nicht_scharf, nichts gestartet (Gegenprüfung ES2d)")
     # Rücknahme-Urteil (ES2b, geschlossen)
     g = {"ok": True, "plan": {"id": 7, "status": "geplant", "armed_at": "2026-11-05T19:00:00"}}
     gleich = {"id": 7, "status": "geplant", "armed_at": "2026-11-05T19:00:00"}

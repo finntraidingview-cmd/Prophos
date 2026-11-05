@@ -936,6 +936,9 @@ def snapshot():
             "panel_lauf": panel_lauf_info(),
             # Stand des Bots (kann dem Panel voraus sein — er wird ohne Neustart getauscht)
             "bot_version": BOT_STAND.get("version"),
+            # FÄHIGKEITEN (ES2d, 05.11.2026, Prüfer S2): was dieses Panel durchreicht UND das order_bot.py kann, das es gleich startet — der Tab
+            # lässt sein eigenes Warten auf „scharf“ nur mit 'scharf_pflicht' hier weg (eine Versionsnummer allein beweist das nicht)
+            "bot_faehig": bot_faehig(),
             "copier_log": clog.get("lines") or [],
             "copier_log_at": clog.get("updated_at"),
             # Echo-Not-Aus (28.08.2026): Zustand fuers Pause/Start-Chip in Prophos
@@ -6915,6 +6918,14 @@ class Handler(BaseHTTPRequestHandler):
             # SCHARF-BEWEIS IM BOT (ES2/ES3-Zusatz 05.11.2026, order_bot echo_scharf_urteil): nur Echo mit Hedge; true nur ausdrücklich (bool),
             # scharf_max_s kappt der Bot selbst (5–60 s). Ohne Feld (alter Tab) prüft wie bisher der Tab vor dem Senden.
             if not ohne_hedge and body.get("scharf_pflicht") is True:
+                # FÄHIGKEIT BEIM SENDEN (ES2d-Gegenprüfung 05.11.2026): der Tab hat bot_faehig beim instances-Takt gelesen — wurde order_bot.py
+                # seitdem gegen einen Stand ohne Scharf-Beweis getauscht (ensure_bot_source, Rückbau auf main), ignorierte der Bot das Feld still
+                # → ungehedgt. Deshalb hier noch einmal: ohne Fähigkeit nichts starten, Antwort nicht_scharf (retry_ok, nichts gesendet)
+                if "scharf_pflicht" not in bot_faehig():
+                    return self._send(200, json.dumps({"ok": False, "retry_ok": True, "gesendet": False, "grund": "nicht_scharf", "code": "nicht_scharf",
+                                                       "msg": "Bot an diesem PC kann den Scharf-Beweis nicht (order_bot.py ohne ES3b) — nichts gesendet. "
+                                                              "→ Tab neu laden lassen, dann prüft der Tab das Trade-Fenster wieder selbst."},
+                                                      ensure_ascii=False))
                 cmd["scharf_pflicht"] = True
                 cmd["scharf_max_s"] = body.get("scharf_max_s")
             # Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B, Auto-Planer ap_tagesgrenze): nur Echo V2, Zahl ≥ 0 oder None —
@@ -7343,6 +7354,43 @@ def hedge_bereit_setzen(sekunden, grund):
 # atomar auf Platte) — einzige Ruecksicht: nie mitten in einer Provisionierung.
 UPDATE_URL = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
               "main/mt5-copier/VERSION")
+
+
+# ── BOT-FÄHIGKEITEN (ES2d, 05.11.2026, Prüfer S2 zu ES3b) ─────────────────────────────────────────────────────────────────────────────
+# Der Tab darf master-order ohne eigenen Scharf-Beweis nur schicken, wenn der Bot auf DIESEM PC ihn selbst führt: ein alter Bot ignoriert
+# scharf_pflicht still → Order ohne Hedge-Fenster = ungehedgt. VERSION/bot_version beweisen das nicht (order_bot.py wird ohne Panel-Neustart
+# getauscht und kann der VERSION-Datei hinterherhinken, s. ensure_bot_source). Beweis: dieser Panel-Code reicht scharf_pflicht durch (sonst
+# gäbe es diese Funktion nicht) UND das order_bot.py, das jede Order frisch von der Platte startet, enthält den Scharf-Beweis (ES3b) — je
+# mtime einmal gelesen. Fehler beim Lesen → keine Fähigkeit (der Tab wartet dann wie bisher selbst).
+_BOT_FAEHIG = {"mtime": None, "liste": []}
+
+
+def bot_faehig_aus_quelle(text):
+    """REIN RECHNEND (testbar): Quelltext von order_bot.py → Liste der Fähigkeiten. 'scharf_pflicht' nur mit Urteil, Warten und BEIDEN
+    Prüfstellen (vor Terminal/F9 und vor dem Order-Knopf)."""
+    t = str(text or "")
+    out = []
+    if ("def echo_scharf_urteil(" in t and "def _echo_scharf_abwarten(" in t
+            and t.count('cmd.get("scharf_pflicht") is True and not cmd.get("ohne_hedge")') >= 2):
+        out.append("scharf_pflicht")
+    return out
+
+
+def bot_faehig():
+    """Fähigkeiten des order_bot.py neben dem Panel (je mtime gecacht). Wirft nie."""
+    pfad = os.path.join(HERE, "order_bot.py")
+    try:
+        mt = os.path.getmtime(pfad)
+    except OSError:
+        return []
+    if _BOT_FAEHIG["mtime"] != mt:
+        try:
+            with open(pfad, "r", encoding="utf-8") as f:
+                _BOT_FAEHIG["liste"] = bot_faehig_aus_quelle(f.read())
+        except Exception:
+            _BOT_FAEHIG["liste"] = []
+        _BOT_FAEHIG["mtime"] = mt
+    return list(_BOT_FAEHIG["liste"])
 
 
 def _local_version():
