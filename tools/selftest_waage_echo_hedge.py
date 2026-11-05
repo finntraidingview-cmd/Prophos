@@ -100,7 +100,7 @@ def schleife(ns):
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
                      "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
-BASIS = "310aeebb"     # nachgezogen (05.11.2026, S6, UNT1 Regel je Unternehmen): ap_planen bewusst geändert — Gruppen-Lauf plant mit Standard + Abweichung des Unternehmens (ap_reg_unternehmen), fail-closed; HT-Lauf (gruppe=None) unverändert.
+BASIS = "ddaad32e"     # nachgezogen (05.11.2026, S6, UNT1 — BASIS = main-Commit ddaad32e statt Branch-SHA 310aeebb, S4-Hinweis; Regel je Unternehmen): ap_planen bewusst geändert — Gruppen-Lauf plant mit Standard + Abweichung des Unternehmens (ap_reg_unternehmen), fail-closed; HT-Lauf (gruppe=None) unverändert.
                        # Davor (05.11.2026, S6, MO1b/MO1c, de916af9): ap_planen bewusst geändert — Gruppen-Lauf schaltet Firmen über firmen_modell an/aus (ap_gruppe_firma_an) und wiegt mit dem Modell der Gruppe (ap_waage_param_gruppe); HT-Lauf (gruppe=None) unverändert.
 # Davor (05.11.2026, S4, gemeinsame Push-Kette M3d + M2): zwei bewusste Planer-Änderungen — M3d ap_paare_legen gegen_frei (Rücken nie
                        # ≤ AP_GEGEN_FIRMA_MIN an Gegenrichtung einer anderen ID derselben Firma, außer zum eigenen Anker; Befund M3c) und M2 ap_planen Consistency-Ziel
