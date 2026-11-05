@@ -1190,7 +1190,7 @@ def fehlerfoto_anstossen(weg, tab, code):
         bid = fehlerfoto_id()
         import subprocess
         flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "fehlerfoto",
+        subprocess.Popen([*bot_argv(os.path.abspath(__file__)), "fehlerfoto",
                           json.dumps({"id": bid, "tab": tab, "weg": weg, "code": str(code or "")[:40], "eltern": os.getpid()})],
                          creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         return fehlerfoto_praefix(pc, bid), ""
@@ -1261,6 +1261,67 @@ class _FehlerfotoAusgabe:
 
     def __getattr__(self, n):
         return getattr(self._echt, n)
+
+
+# BOT VORKOMPILIERT STARTEN (SW1b, 05.11.2026, Befund SW1: jede Bot-Aktion — tvlesen, tvkonto, Endlesung, loginok, augen … — ist ein neuer
+# python-Prozess, der order_bot.py (~29.500 Zeilen) jedes Mal neu übersetzt, ~1 s CPU je Start auf den PCs). Jetzt startet ein kleiner -c-Starter
+# den Bot als IMPORTIERTES Modul mit .pyc im __pycache__ neben der Datei (derselbe Ordner, den die `python -c "import order_bot …"`-Aufrufe des
+# Panels schon seit Wochen benutzen — vom Virenscanner nachweislich nicht geblockt). Kein veraltetes .pyc: das .pyc ist „checked-hash" — Python
+# vergleicht bei JEDEM Start den Inhalt (Hash) von order_bot.py mit dem .pyc und übersetzt neu, sobald die Datei anders ist (Update per
+# ensure_bot_source, egal wie Zeitstempel/Größe stehen); ein .pyc ohne Hash-Prüfung (vom -c-Import) wird beim ersten Start ersetzt.
+# Ablauf, Takte und Wege des Bots bleiben gleich: sys.argv wie beim Skriptstart ([bot, modus, …]), sys.path[0] = Bot-Ordner, __main__.__file__ =
+# order_bot.py (fehlerfoto_huelle_einbauen erkennt den Bot-Prozess daran), Rückgabewert = main(). RÜCKFALL: scheitert Übersetzen/Laden VOR main()
+# (kein Schreibrecht, Importfehler …), läuft der alte Weg runpy.run_path(…, "__main__") = genau `python order_bot.py` und das .pyc wird gelöscht (ein
+# kaputtes .pyc heilt sich so beim nächsten Start; die Modul-Ebene von order_bot.py hat keine Seiteneffekte); ein Fehler IN main() wird nie
+# wiederholt (keine zweite Order). Ganz abschalten: Datei bot_ohne_cache.flag neben dem Bot → wieder [python, order_bot.py].
+# DIESELBE Zeichenkette steht in order_bot.py (BOT_STARTER_CODE, Selbststarts augen/fehlerfoto/tsxbleiben) — Selbsttest prüft Gleichheit.
+BOT_STARTER_CODE = (
+    "import sys, os\n"
+    "bot = os.path.abspath(sys.argv[1])\n"
+    "sys.argv = [bot] + sys.argv[2:]\n"
+    "if sys.path and sys.path[0] == '':\n"
+    "    sys.path[0] = os.path.dirname(bot)\n"
+    "else:\n"
+    "    sys.path.insert(0, os.path.dirname(bot))\n"
+    "__file__ = bot\n"
+    "try:\n"
+    "    import importlib.util, py_compile\n"
+    "    pyc = importlib.util.cache_from_source(bot)\n"
+    "    try:\n"
+    "        with open(pyc, 'rb') as f:\n"
+    "            kopf = f.read(16)\n"
+    "    except OSError:\n"
+    "        kopf = b''\n"
+    "    if len(kopf) < 16 or int.from_bytes(kopf[4:8], 'little') != 3:\n"
+    "        py_compile.compile(bot, cfile=pyc, doraise=True, invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)\n"
+    "except Exception:\n"
+    "    pass\n"
+    "try:\n"
+    "    import importlib\n"
+    "    _ob = importlib.import_module(os.path.splitext(os.path.basename(bot))[0])\n"
+    "except Exception:\n"
+    "    _ob = None\n"
+    "if _ob is None:\n"
+    "    try:\n"
+    "        os.remove(importlib.util.cache_from_source(bot))\n"
+    "    except Exception:\n"
+    "        pass\n"
+    "    import runpy\n"
+    "    runpy.run_path(bot, run_name='__main__')\n"
+    "    sys.exit(0)\n"
+    "sys.exit(_ob.main())\n"
+)
+
+
+def bot_argv(bot):
+    """Aufruf des Order-Bots ohne die Argumente danach (SW1b): [python, -c, Starter, bot] — mit bot_ohne_cache.flag neben dem Bot der alte Weg
+    [python, bot]. Die Argumente (modus, Befehl …) folgen wie bisher."""
+    try:
+        if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(bot)), "bot_ohne_cache.flag")):
+            return [sys.executable, bot]
+    except Exception:
+        return [sys.executable, bot]
+    return [sys.executable, "-c", BOT_STARTER_CODE, bot]
 
 
 def fehlerfoto_huelle_einbauen(argv1):
@@ -1541,7 +1602,7 @@ def fehlerfoto_nachreichen_anstossen():
             json.dump(merk, f)
         import subprocess
         flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "fehlerfoto_nachreichen"], creationflags=flags,
+        subprocess.Popen([*bot_argv(os.path.abspath(__file__)), "fehlerfoto_nachreichen"], creationflags=flags,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         return True
     except Exception:
@@ -17196,7 +17257,7 @@ def augen_anstossen():
             return False
         import subprocess
         flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "augen", "{}"], creationflags=flags,
+        subprocess.Popen([*bot_argv(os.path.abspath(__file__)), "augen", "{}"], creationflags=flags,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         return True
     except Exception:
@@ -17985,7 +18046,7 @@ def _puls_bleiben_starten(s, trail=None):
         if not _BLEIBEN_KIND[0]:
             import subprocess
             flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
-            subprocess.Popen([sys.executable, os.path.abspath(__file__), "tsxbleiben",
+            subprocess.Popen([*bot_argv(os.path.abspath(__file__)), "tsxbleiben",
                               json.dumps({"hwnd": int(hwnd), "lauf": os.getpid()})], creationflags=flags,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
             _BLEIBEN_KIND[0] = True

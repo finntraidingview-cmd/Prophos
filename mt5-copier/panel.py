@@ -652,6 +652,67 @@ def ensure_bot_source(sha=None):
     return False
 
 
+# BOT VORKOMPILIERT STARTEN (SW1b, 05.11.2026, Befund SW1: jede Bot-Aktion — tvlesen, tvkonto, Endlesung, loginok, augen … — ist ein neuer
+# python-Prozess, der order_bot.py (~29.500 Zeilen) jedes Mal neu übersetzt, ~1 s CPU je Start auf den PCs). Jetzt startet ein kleiner -c-Starter
+# den Bot als IMPORTIERTES Modul mit .pyc im __pycache__ neben der Datei (derselbe Ordner, den die `python -c "import order_bot …"`-Aufrufe des
+# Panels schon seit Wochen benutzen — vom Virenscanner nachweislich nicht geblockt). Kein veraltetes .pyc: das .pyc ist „checked-hash" — Python
+# vergleicht bei JEDEM Start den Inhalt (Hash) von order_bot.py mit dem .pyc und übersetzt neu, sobald die Datei anders ist (Update per
+# ensure_bot_source, egal wie Zeitstempel/Größe stehen); ein .pyc ohne Hash-Prüfung (vom -c-Import) wird beim ersten Start ersetzt.
+# Ablauf, Takte und Wege des Bots bleiben gleich: sys.argv wie beim Skriptstart ([bot, modus, …]), sys.path[0] = Bot-Ordner, __main__.__file__ =
+# order_bot.py (fehlerfoto_huelle_einbauen erkennt den Bot-Prozess daran), Rückgabewert = main(). RÜCKFALL: scheitert Übersetzen/Laden VOR main()
+# (kein Schreibrecht, Importfehler …), läuft der alte Weg runpy.run_path(…, "__main__") = genau `python order_bot.py` und das .pyc wird gelöscht (ein
+# kaputtes .pyc heilt sich so beim nächsten Start; die Modul-Ebene von order_bot.py hat keine Seiteneffekte); ein Fehler IN main() wird nie
+# wiederholt (keine zweite Order). Ganz abschalten: Datei bot_ohne_cache.flag neben dem Bot → wieder [python, order_bot.py].
+# DIESELBE Zeichenkette steht in order_bot.py (BOT_STARTER_CODE, Selbststarts augen/fehlerfoto/tsxbleiben) — Selbsttest prüft Gleichheit.
+BOT_STARTER_CODE = (
+    "import sys, os\n"
+    "bot = os.path.abspath(sys.argv[1])\n"
+    "sys.argv = [bot] + sys.argv[2:]\n"
+    "if sys.path and sys.path[0] == '':\n"
+    "    sys.path[0] = os.path.dirname(bot)\n"
+    "else:\n"
+    "    sys.path.insert(0, os.path.dirname(bot))\n"
+    "__file__ = bot\n"
+    "try:\n"
+    "    import importlib.util, py_compile\n"
+    "    pyc = importlib.util.cache_from_source(bot)\n"
+    "    try:\n"
+    "        with open(pyc, 'rb') as f:\n"
+    "            kopf = f.read(16)\n"
+    "    except OSError:\n"
+    "        kopf = b''\n"
+    "    if len(kopf) < 16 or int.from_bytes(kopf[4:8], 'little') != 3:\n"
+    "        py_compile.compile(bot, cfile=pyc, doraise=True, invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)\n"
+    "except Exception:\n"
+    "    pass\n"
+    "try:\n"
+    "    import importlib\n"
+    "    _ob = importlib.import_module(os.path.splitext(os.path.basename(bot))[0])\n"
+    "except Exception:\n"
+    "    _ob = None\n"
+    "if _ob is None:\n"
+    "    try:\n"
+    "        os.remove(importlib.util.cache_from_source(bot))\n"
+    "    except Exception:\n"
+    "        pass\n"
+    "    import runpy\n"
+    "    runpy.run_path(bot, run_name='__main__')\n"
+    "    sys.exit(0)\n"
+    "sys.exit(_ob.main())\n"
+)
+
+
+def bot_argv(bot):
+    """Aufruf des Order-Bots ohne die Argumente danach (SW1b): [python, -c, Starter, bot] — mit bot_ohne_cache.flag neben dem Bot der alte Weg
+    [python, bot]. Die Argumente (modus, Befehl …) folgen wie bisher."""
+    try:
+        if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(bot)), "bot_ohne_cache.flag")):
+            return [sys.executable, bot]
+    except Exception:
+        return [sys.executable, bot]
+    return [sys.executable, "-c", BOT_STARTER_CODE, bot]
+
+
 def ensure_pywinauto():
     """Klick-Bot-Abhaengigkeit selbst installieren (15.08.2026, Finns Ansage:
     die Order muss per SICHTBAREM Mausklick laufen — pywinauto steuert Maus und
@@ -4590,7 +4651,7 @@ def _login_ok_wache(fname, expected, install_dir=None):
                 ensure_bot_source()
             res = {}
             try:
-                p = subprocess.run([sys.executable, bot, "loginok", str(int(expected)), str(LOGIN_WACHE_RUNDE_S), pfad],
+                p = subprocess.run([*bot_argv(bot), "loginok", str(int(expected)), str(LOGIN_WACHE_RUNDE_S), pfad],
                                    capture_output=True, text=True, errors="replace", timeout=LOGIN_WACHE_RUNDE_S + 60,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 zeilen = (p.stdout or "").strip().splitlines()
@@ -5533,7 +5594,7 @@ class Handler(BaseHTTPRequestHandler):
                            "symbol": (q.get("symbol") or [""])[0], "richtung": (q.get("richtung") or [""])[0], "lots": (q.get("lots") or [""])[0],
                            "ohne": (q.get("ohne") or [""])[0]}
                 try:
-                    p = subprocess.run([sys.executable, bot, "deals", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
+                    p = subprocess.run([*bot_argv(bot), "deals", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
                                        timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                     zeilen = (p.stdout or "").strip().splitlines()
                     res = json.loads(zeilen[-1]) if zeilen else {"ok": False, "lesbar": False, "grund": "keine Antwort vom Bot"}
@@ -5845,7 +5906,7 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(bot):
                 ensure_bot_source()
             try:
-                p = subprocess.run([sys.executable, bot, "mousetest"],
+                p = subprocess.run([*bot_argv(bot), "mousetest"],
                                    capture_output=True, text=True, errors="replace", timeout=60)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
@@ -5868,7 +5929,7 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(bot):
                 ensure_bot_source()
             try:
-                p = subprocess.run([sys.executable, bot, "tvfokus"],
+                p = subprocess.run([*bot_argv(bot), "tvfokus"],
                                    capture_output=True, text=True, errors="replace", timeout=60)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
@@ -5900,7 +5961,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 24s: der Proxy in app.py gibt dieser Route 25 s. Der Bot
                 # wartet hoechstens 12 s auf den Beweis (plus Fenster-Scans) und meldet sonst
                 # ehrlich "laedt noch" — der Start selbst ist dann schon passiert.
-                p = subprocess.run([sys.executable, bot, "tvstart", json.dumps(tvcfg)],
+                p = subprocess.run([*bot_argv(bot), "tvstart", json.dumps(tvcfg)],
                                    capture_output=True, text=True, errors="replace", timeout=24)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
@@ -5989,7 +6050,7 @@ class Handler(BaseHTTPRequestHandler):
                 # und Autofill (50) + Fenster zu (35) + neu lesen (45) — im
                 # Normalfall ist nach wenigen Sekunden Schluss, die Zahl ist die
                 # Obergrenze des laengsten Wegs.
-                p = subprocess.run([sys.executable, bot, "tvkonto", json.dumps(cmd)],
+                p = subprocess.run([*bot_argv(bot), "tvkonto", json.dumps(cmd)],
                                    capture_output=True, text=True, errors="replace", timeout=260)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
@@ -6049,7 +6110,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.exists(bot):
                     res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "gesendet": False, "msg": "order_bot.py fehlt auf diesem PC."}
                 else:
-                    p = subprocess.run([sys.executable, bot, "tsxorder", json.dumps(cmd)],
+                    p = subprocess.run([*bot_argv(bot), "tsxorder", json.dumps(cmd)],
                                        capture_output=True, text=True, errors="replace", timeout=to,
                                        env=dict(os.environ, PULS_BOT_STAND=f"{BOT_STAND.get('version') or '?'} {str(BOT_STAND.get('sha') or '')[:7]}"))
                     line = (p.stdout or "").strip().splitlines()
@@ -6099,7 +6160,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.exists(bot):
                     res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg": "order_bot.py fehlt auf diesem PC."}
                 else:
-                    p = subprocess.run([sys.executable, bot, modus, json.dumps(cmd)],
+                    p = subprocess.run([*bot_argv(bot), modus, json.dumps(cmd)],
                                        capture_output=True, text=True, errors="replace", timeout=to,
                                        env=dict(os.environ, PULS_BOT_STAND=f"{BOT_STAND.get('version') or '?'} {str(BOT_STAND.get('sha') or '')[:7]}"))
                     line = (p.stdout or "").strip().splitlines()
@@ -6189,7 +6250,7 @@ class Handler(BaseHTTPRequestHandler):
                     to = min(300, int(timeout_s) + 110 + (25 if cmd["ende"] else 0))   # Ende-Modus: Historie + Befund
                     if cmd["tv_username"]:
                         to = max(to, 260)
-                    p = subprocess.run([sys.executable, bot, "tvlesen", json.dumps(cmd)],
+                    p = subprocess.run([*bot_argv(bot), "tvlesen", json.dumps(cmd)],
                                        capture_output=True, text=True, errors="replace", timeout=to)
                     line = (p.stdout or "").strip().splitlines()
                     res = json.loads(line[-1]) if line else {
@@ -6261,7 +6322,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.exists(bot):
                     res = {"ok": False, "code": "bot_fehlt", "msg": "order_bot.py fehlt auf diesem PC"}
                 else:
-                    p = subprocess.run([sys.executable, bot, "tvkontenliste", json.dumps(cmd)],
+                    p = subprocess.run([*bot_argv(bot), "tvkontenliste", json.dumps(cmd)],
                                        capture_output=True, text=True, errors="replace", timeout=to)
                     line = (p.stdout or "").strip().splitlines()
                     res = json.loads(line[-1]) if line else {"ok": False, "code": "bot_stumm",
@@ -6305,7 +6366,7 @@ class Handler(BaseHTTPRequestHandler):
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):
                     ensure_bot_source()
-                p = subprocess.run([sys.executable, bot, modus, json.dumps(cmd)],
+                p = subprocess.run([*bot_argv(bot), modus, json.dumps(cmd)],
                                    capture_output=True, text=True, errors="replace", timeout=frist)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {"ok": False, "code": "bot_stumm", "msg": (p.stderr or "").strip()[-200:] or "keine Antwort"}
@@ -6392,7 +6453,7 @@ class Handler(BaseHTTPRequestHandler):
                     # die 260-s-Obergrenze von tv-konto.
                     if cmd["tv_username"]:
                         to = max(to, 260)
-                    p = subprocess.run([sys.executable, bot, "tvclose", json.dumps(cmd)],
+                    p = subprocess.run([*bot_argv(bot), "tvclose", json.dumps(cmd)],
                                        capture_output=True, text=True, errors="replace", timeout=to)
                     line = (p.stdout or "").strip().splitlines()
                     res = json.loads(line[-1]) if line else {
@@ -6521,7 +6582,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Ticket) plus 25s Bestaetigungsfenster; der Rest ist Puffer.
                 # Kuerzer waere die Fehlerklasse von 18.08.2026 — ein Abbruch
                 # mitten im Ablauf, bei dem niemand weiss, wie weit er kam.
-                p = subprocess.run([sys.executable, bot, "tvorder", json.dumps(cmd)],
+                p = subprocess.run([*bot_argv(bot), "tvorder", json.dumps(cmd)],
                                    capture_output=True, text=True, errors="replace", timeout=180)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
@@ -7008,7 +7069,7 @@ class Handler(BaseHTTPRequestHandler):
                 # nannte). 300s deckt den schlimmsten Scan locker; die Bremse
                 # bleibt, weil an diesem Aufruf das Lock fuer ALLE Trade-Starts
                 # haengt — ein wirklich haengender Bot darf es nicht ewig halten.
-                p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
+                p = subprocess.run([*bot_argv(bot), os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
                                    capture_output=True, text=True, errors="replace", timeout=300)
                 line = (p.stdout or "").strip().splitlines()
@@ -7116,7 +7177,7 @@ class Handler(BaseHTTPRequestHandler):
                     "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
             cmd = {"aktion": "close", "ticket": ticket, "symbol": symbol}
             try:
-                p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
+                p = subprocess.run([*bot_argv(bot), os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
                                    capture_output=True, text=True, errors="replace", timeout=300)
                 line = (p.stdout or "").strip().splitlines()
