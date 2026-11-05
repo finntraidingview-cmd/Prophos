@@ -7702,7 +7702,8 @@ def tages_neustart_info():
         d = read_json(os.path.join(HERE, TN_DATEI), None)
         if not isinstance(d, dict):
             return {"stand": TN_STAND.get("grund") or None}
-        return dict({k: d.get(k) for k in ("tag", "at", "ram_vorher", "ram_nachher", "copier_neu", "schritte")}, stand=TN_STAND.get("grund") or None)
+        return dict({k: d.get(k) for k in ("tag", "at", "ram_vorher", "ram_nachher", "copier_neu", "backend_neu", "reader_neu", "abbruch", "schritte")},
+                    stand=TN_STAND.get("grund") or None)
     except Exception:
         return None
 
@@ -7724,19 +7725,155 @@ def _tn_schreiben(d):
 
 
 def _tn_frisch_ruhig(pc):
-    """Direkt vor dem Neustart den Tab-Stand FRISCH holen (Prüfer DR1: der gemerkte Stand kann 150 s alt sein) → (ruhig, grund)."""
+    """Direkt vor dem Neustart den Tab-Stand FRISCH holen (Prüfer DR1: der gemerkte Stand kann 150 s alt sein) → (ruhig, grund, sicht)."""
     st = _tab_stand_holen(pc, TAB_NL.get("grund") or "") if pc else None
     s = st.get("tages_neustart") if isinstance(st, dict) and st.get("ok") else None
     if not isinstance(s, dict):
-        return False, "Tab-Stand frisch nicht lesbar"
+        return False, "Tab-Stand frisch nicht lesbar", {}
     if isinstance(st, dict):
         TAB_NL.update(stand=st, stand_at=time.time())
-    return bool(s.get("an") and s.get("pc_frei") and s.get("offen") and s.get("ruhig")), str(s.get("grund") or "")
+    return bool(s.get("an") and s.get("pc_frei") and s.get("offen") and s.get("ruhig")), str(s.get("grund") or ""), s
+
+
+# ── DR1b (Finn/Master 05.11.2026: „das komplette Backend … daily neu starten“): lokales Backend (app.py, Port 5000) und Reader (reader-server.py,
+# Port 8790) im selben ruhigen Moment. Neu starten = genau die EINE lauschende python-PID beenden — taskkill /F OHNE /T. Backend: python ist Kind
+# von cmd /c start-prophos.bat (Schleife: Ende → 10 s → frische Dateien → Neustart), mit /T stürbe die Schleife mit. Reader: am Port lauscht das
+# Kind der Reader-Aufsicht (reader-server.py startet es per Popen), die Aufsicht startet es nach ~5 s aus der vorhandenen Datei neu (Prüfer DR1b).
+# PID über netstat wie der Reader selbst (reader-server.py netstat_lauscher); beendet wird nur, was python ist UND das Skript in der Befehlszeile
+# trägt — nie ein fremdes Programm auf dem Port. Backend zusätzlich nie bei aktiver Spiegel-Sitzung (mirror_sessions: ihr Stand ist laut
+# _local_version_watcher nicht wiederherstellbar; das Update wartet dort auch). Kein Popen, kein UAC (eigener Benutzer).
+# (name, port, skript, frist_s, rückkehr-pfad) — Rückkehr über einen billigen Pfad (Prüfer DR1b: „/“ des Backends lädt erst 7 MB prophos.html)
+TN_TEILE = (("backend", 5000, "app.py", 120.0, "/health"), ("reader", 8790, "reader-server.py", 60.0, "/"))
+
+
+def netstat_lauscher(text, port):
+    """REIN RECHNEND (testbar, wie reader-server.py): PIDs, die laut 'netstat -ano -p TCP' auf <port> lauschen (Gegenstelle 0.0.0.0:0)."""
+    pids = set()
+    for z in str(text or "").splitlines():
+        t = z.split()
+        if len(t) >= 5 and t[0].upper() == "TCP" and t[1].endswith(f":{port}") and t[2] in ("0.0.0.0:0", "[::]:0"):
+            try:
+                pids.add(int(t[-1]))
+            except ValueError:
+                pass
+    return sorted(pids)
+
+
+def tn_prozesse_parsen(roh):
+    """REIN RECHNEND (testbar): JSON aus Get-CimInstance Win32_Process → {pid: {name, cmd}}."""
+    try:
+        d = json.loads(roh) if roh else []
+    except ValueError:
+        return {}
+    out = {}
+    for x in ([d] if isinstance(d, dict) else d if isinstance(d, list) else []):
+        try:
+            out[int(x.get("ProcessId"))] = {"name": str(x.get("Name") or ""), "cmd": str(x.get("CommandLine") or "")}
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def tn_port_ziel(pids, prozesse, skript):
+    """REIN RECHNEND (testbar): (pid | None, grund). Genau EIN Lauscher, der python*.exe ist und skript als eigenes Wort in der Befehlszeile hat
+    (…\\app.py, nicht dapp.py) — sonst None. Fremdes Programm, mehrere Lauscher oder unlesbare Befehlszeile → nie beenden."""
+    if not pids:
+        return None, "läuft nicht (Port frei)"
+    if len(pids) > 1:
+        return None, f"{len(pids)} Programme lauschen — nichts beendet"
+    p = prozesse.get(pids[0])
+    if not p:
+        return None, f"PID {pids[0]}: Befehlszeile nicht lesbar — nichts beendet"
+    name, cmd = p["name"].lower(), p["cmd"].lower()
+    if not re.fullmatch(r"python[0-9.]*w?\.exe|py\.exe", name):     # auch python3.12.exe (Microsoft Store)
+        return None, f"PID {pids[0]} ist {p['name'] or '?'} — fremdes Programm, nichts beendet"
+    if not re.search(r"(^|[\s\\/\"'])" + re.escape(skript.lower()) + r"($|[\s\"'])", cmd):
+        return None, f"PID {pids[0]}: python ohne {skript} — fremdes Programm, nichts beendet"
+    return pids[0], ""
+
+
+def tn_spiegel_scharf(daten):
+    """REIN RECHNEND (testbar): GET /mirror/status (ohne pairId) des Backends → [pair_id] aktiver Spiegel-Sitzungen, None = nicht lesbar.
+    Die Übersicht liefert weder engine noch direction — darum zählt hier jede aktive Sitzung (strenger als der Update-Weg, nie lockerer)."""
+    if not isinstance(daten, dict):
+        return None
+    return sorted(str(k) for k, v in daten.items() if isinstance(v, dict) and v.get("active"))
+
+
+def _tn_spiegel_frei():
+    """→ (frei, grund). Nicht lesbar → nicht frei (kein Kill)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/mirror/status", timeout=8) as r:
+            scharf = tn_spiegel_scharf(json.loads(r.read().decode("utf-8") or "null"))
+    except Exception as e:
+        return False, f"Spiegel-Stand nicht lesbar ({type(e).__name__}) — Backend nicht neu"
+    if scharf is None:
+        return False, "Spiegel-Stand nicht lesbar — Backend nicht neu"
+    return (not scharf), (f"Spiegel-Sitzung aktiv ({', '.join(scharf)[:60]}) — Backend nicht neu" if scharf else "")
+
+
+def _tn_netstat():
+    r = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=15, errors="replace",
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return r.stdout or ""
+
+
+def _tn_prozesse(pids):
+    if not pids:
+        return {}
+    filt = " or ".join(f"ProcessId={int(p)}" for p in pids)
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", f"Get-CimInstance Win32_Process -Filter \"{filt}\" "
+                        "| Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress"],
+                       capture_output=True, text=True, timeout=25, errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return tn_prozesse_parsen((r.stdout or "").strip())
+
+
+def _tn_antwortet(port, pfad="/"):
+    import urllib.request
+    import urllib.error
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}{pfad}", timeout=4).close()
+        return True
+    except urllib.error.HTTPError:
+        return True                        # antwortet (404 o. ä.) = läuft
+    except Exception:
+        return False
+
+
+def _tn_teil_neu(port, skript, frist_s, pfad="/", vorab=None):
+    """Ein Teil neu starten → (status, text). VOR dem Kill: 'fehlt' | 'fremd' | 'belegt' | 'uebersprungen' (Fehler beim Prüfen — nichts
+    angefasst, weitermachen; Prüfer DR1b). NACH dem Kill: 'neu' | 'nicht_zurueck' | 'fehler'. vorab() → (frei, grund), z. B. Spiegel-Schutz."""
+    try:
+        pids = netstat_lauscher(_tn_netstat(), port)
+        pid, grund = tn_port_ziel(pids, _tn_prozesse(pids), skript)
+        if pid is None:
+            return ("fehlt" if not pids else "fremd"), grund
+        if vorab is not None:
+            frei, g = vorab()
+            if not frei:
+                return "belegt", g
+        r = subprocess.run(["taskkill", "/PID", str(int(pid)), "/F"], capture_output=True, text=True, timeout=15,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode != 0:      # z. B. „Zugriff verweigert“ (mit Adminrechten gestartet) — läuft weiter, nichts kaputt
+            return "uebersprungen", f"taskkill PID {pid} abgelehnt ({(r.stdout or r.stderr or '').strip()[:80]})"
+    except Exception as e:
+        return "uebersprungen", f"vor dem Beenden: {type(e).__name__}: {str(e)[:80]} — nichts angefasst"
+    try:
+        t0 = time.time()
+        while time.time() - t0 < frist_s:
+            time.sleep(2 + random.random() * 2)              # gestreut
+            neu = netstat_lauscher(_tn_netstat(), port)
+            if neu and pid not in neu and _tn_antwortet(port, pfad):
+                return "neu", f"neu (PID {pid} → {neu[0]}, {int(time.time() - t0)} s)"
+        return "nicht_zurueck", f"PID {pid} beendet, nach {int(frist_s)} s nicht zurück"
+    except Exception as e:
+        return "fehler", f"nach dem Beenden: {type(e).__name__}: {str(e)[:80]}"
 
 
 def _tages_neustart_ausfuehren(tag):
     """Die Schritte (bestehende Wege) → endet mit os._exit(0), außer es ist doch nicht ruhig/nicht schreibbar (dann False, nichts getan)."""
-    ruhig, g = _tn_frisch_ruhig(pc_id_lesen())
+    ruhig, g, sicht = _tn_frisch_ruhig(pc_id_lesen())
     if not ruhig:
         TN_STAND["streu_bis"] = None
         print(f"[tages-neustart] frisch geprüft doch nicht ruhig: {g or 'aus'}", flush=True)
@@ -7762,6 +7899,27 @@ def _tages_neustart_ausfuehren(tag):
             schritte.append("Copier: Neustart-Wunsch abgelegt")
         except OSError as e:
             schritte.append(f"Copier-Wunsch nicht geschrieben ({type(e).__name__})")
+        # DR1b: Backend, dann Reader — VOR dem Chrome-Schritt (der neue Tab braucht das Backend, das neue Userscript trifft den frischen Reader)
+        teile = sicht.get("teile") if isinstance(sicht.get("teile"), dict) else {}
+        for name, port, skript, frist, pfad in TN_TEILE:
+            if teile.get(name) is False:
+                schritte.append(f"{name}: aus (pc_neustart.teile)")
+                continue
+            st, txt = _tn_teil_neu(port, skript, frist, pfad, _tn_spiegel_frei if name == "backend" else None)
+            merk[f"{name}_neu"] = st == "neu"
+            schritte.append(f"{name}: {txt}")
+            if name == "backend" and st in ("nicht_zurueck", "fehler"):
+                # ohne Backend öffnet kein Tab (_tab_oeffnen prüft localhost:5000) → vor dem Chrome-Schritt aufhören, Chrome/Tab/Panel bleiben
+                with _PANEL_POST_LOCK:
+                    _PANEL_POST["zu"] = False
+                _tn_schreiben(dict(merk, abbruch=f"Backend kam nicht zurück: {txt}", schritte=schritte + ["abgebrochen vor dem Chrome-Schritt"]))
+                _tab_heil_melden(f"täglicher Neustart abgebrochen — Backend (Port 5000) kam nicht zurück: {txt}", "tages_neustart")
+                print(f"[tages-neustart] {tag}: Abbruch — Backend kam nicht zurück ({txt})", flush=True)
+                return True
+            if name == "reader" and st in ("nicht_zurueck", "fehler"):
+                # S2 (DR1b): der Reader ist der erste Weg der Fusion-Schließkette (Schließ-Wache liest ihn) → 🟠, aber kein Abbruch (Tab-Weg bleibt)
+                _tab_heil_melden(f"täglicher Neustart — Reader (Port 8790) kam nicht zurück: {txt}", "tages_neustart")
+                print(f"[tages-neustart] {tag}: Reader kam nicht zurück ({txt}) — 🟠, weiter", flush=True)
         code = ("import json, order_bot\nt = []\nok, txt = order_bot._puls_chrome_beenden(t)\nprint(json.dumps([bool(ok), str(txt)[:160]]))\n")
         try:
             r = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=90,
@@ -7836,7 +7994,7 @@ def _tages_neustart_waechter():
                 _tab_heil_melden(f"im Fenster kein ruhiger Moment ({TN_STAND.get('grund') or 'belegt'})", "tages_neustart")   # 🟠 1× je PC und Tag
             elif entsch == "jetzt":
                 if _tages_neustart_ausfuehren(tag):   # endet im Erfolgsfall mit os._exit; True = Panel blieb wegen Polar
-                    grund = "Chrome/Copier neu, Panel blieb (Polar)"
+                    grund = "Panel blieb (Polar-Lauf oder Abbruch, s. tages_neustart.json)"
                 else:
                     grund = "doch nicht ruhig/belegt — nächster Takt"
             if grund != TN_STAND["grund"]:

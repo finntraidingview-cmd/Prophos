@@ -52,7 +52,8 @@ def _ap_hhmm(s):
 
 app_pfad = os.path.join(WURZEL, "app.py")
 app_src = open(app_pfad, encoding="utf-8").read()
-std = {"an": False, "tz": "Asia/Dubai", "von": "02:30", "bis": "05:00", "nur_pcs": [], "ruhe_vor_start_min": 30}
+std = {"an": False, "tz": "Asia/Dubai", "von": "02:30", "bis": "05:00", "nur_pcs": [], "ruhe_vor_start_min": 30,
+       "teile": {"backend": True, "reader": True}}
 ns = funktionen(app_pfad, {"pc_neustart_regel", "pc_neustart_fenster", "pc_neustart_unruhe", "pc_neustart_sicht"},
                 {"PC_NEUSTART_STANDARD": std, "_ap_tz": _ap_tz, "_ap_ts": _ap_ts, "_ap_hhmm": _ap_hhmm, "re": re, "timedelta": timedelta})
 regel, fenster, unruhe, sicht = ns["pc_neustart_regel"], ns["pc_neustart_fenster"], ns["pc_neustart_unruhe"], ns["pc_neustart_sicht"]
@@ -66,6 +67,9 @@ chk(r["nur_pcs"] == ["pc-onkrbk"] and r["ruhe_vor_start_min"] == 5, "nur_pcs nor
 chk(regel({"an": True, "von": "03:00", "bis": "03:00"})["an"] is False, "leeres Fenster → aus")
 chk(regel({"an": True, "nur_pcs": ["pc-x"]})["nur_pcs"] == ["-"], "nur Tippfehler in nur_pcs → kein PC (nie alle)")
 chk(regel({"an": True, "nur_pcs": []})["nur_pcs"] == [], "leere Liste = alle PCs")
+chk(regel({"an": True, "teile": {"reader": False}})["teile"] == {"backend": True, "reader": False}, "DR1b: Teil nur mit false aus")
+chk(regel({"an": True, "teile": {"backend": 0, "reader": "nein"}})["teile"] == {"backend": True, "reader": True}, "DR1b: kein echtes false → bleibt an")
+chk(regel({"an": True})["teile"] is not std["teile"], "DR1b: Standard-teile nie geteilt (Kopie)")
 
 print("Fenster (Dubai = UTC+4)")
 u = lambda h, m=0: datetime(2026, 11, 6, h, m, tzinfo=timezone.utc)
@@ -150,6 +154,58 @@ chk('_tab_heil_melden(' in p_src and '"tages_neustart")' in p_src and 'art") or 
 chk('"mt5_baseline->hedge->>pc": f"eq.{pc}"' in app_src and "start_um.is.null" in app_src, "Hedges dieses PCs und Handstarts ohne Startzeit geladen")
 chk("_puls_chrome_beenden" in p_src and "_tab_oeffnen(TAB_URL, lock_gehalten=True)" in p_src, "bestehende Wege: Puls-Chrome zu, Tab wieder auf")
 chk("terminal64" not in p_src[p_src.index("def _tages_neustart_ausfuehren"):p_src.index("def _tages_neustart_nachher")], "MT5-Terminals werden nicht angefasst")
+
+print("DR1b: Backend + Reader")
+pn2 = funktionen(p_pfad, {"netstat_lauscher", "tn_prozesse_parsen", "tn_port_ziel", "tn_spiegel_scharf"}, {"json": json, "re": re})
+nl, pp, pz, sp = pn2["netstat_lauscher"], pn2["tn_prozesse_parsen"], pn2["tn_port_ziel"], pn2["tn_spiegel_scharf"]
+NS = """
+Aktive Verbindungen
+  Proto  Lokale Adresse         Remoteadresse          Status           PID
+  TCP    0.0.0.0:5000           0.0.0.0:0              ABHÖREN          4711
+  TCP    127.0.0.1:8790         0.0.0.0:0              ABHÖREN          815
+  TCP    127.0.0.1:50000        127.0.0.1:5000         HERGESTELLT      999
+  TCP    127.0.0.1:15000        0.0.0.0:0              ABHÖREN          123
+  TCP    [::]:5000              [::]:0                 LISTENING        4711
+"""
+chk(nl(NS, 5000) == [4711], "netstat: nur der Lauscher auf :5000 (nicht die Verbindung zu 5000, nicht :15000), Sprache egal")
+chk(nl(NS, 8790) == [815], "netstat: Reader-Lauscher")
+chk(nl("Müll\nTCP kaputt\n", 5000) == [] and nl("", 5000) == [] and nl(None, 5000) == [], "netstat kaputt/leer → keine PID")
+chk(nl("  TCP    0.0.0.0:5000   0.0.0.0:0   LISTENING   abc", 5000) == [], "PID keine Zahl → nichts")
+pr = pp(json.dumps([{"ProcessId": 4711, "Name": "python.exe", "CommandLine": "python  app.py"},
+                    {"ProcessId": 815, "Name": "python.exe", "CommandLine": "C:\\Python312\\python.exe reader-server.py"}]))
+chk(pz([4711], pr, "app.py") == (4711, ""), "python app.py → beenden")
+chk(pz([815], pr, "reader-server.py") == (815, ""), "python reader-server.py → beenden")
+chk(pz([], pr, "app.py")[0] is None, "Port frei → nichts")
+chk(pz([4711, 815], pr, "app.py")[0] is None, "zwei Lauscher → nichts")
+fremd = pp(json.dumps({"ProcessId": 4711, "Name": "node.exe", "CommandLine": "node app.py"}))
+chk(pz([4711], fremd, "app.py")[0] is None, "fremdes Programm (node) auf :5000 → NIE beenden")
+fremd2 = pp(json.dumps({"ProcessId": 4711, "Name": "python.exe", "CommandLine": "python -m http.server 5000"}))
+chk(pz([4711], fremd2, "app.py")[0] is None, "python ohne app.py (anderes Skript) → nie beenden")
+fremd3 = pp(json.dumps({"ProcessId": 4711, "Name": "python.exe", "CommandLine": "python myapp.py"}))
+chk(pz([4711], fremd3, "app.py")[0] is None, "myapp.py ist nicht app.py → nie beenden")
+chk(pz([4711], pp(json.dumps({"ProcessId": 4711, "Name": "python.exe", "CommandLine": "python C:\\Prophos\\mt5-copier\\app.py"})), "app.py")[0] == 4711,
+    "voller Pfad …\\app.py → ja")
+chk(pz([4711], {}, "app.py")[0] is None and pz([4711], pp("kaputt"), "app.py")[0] is None, "Befehlszeile unlesbar → nie beenden")
+chk(pz([4711], pp(json.dumps({"ProcessId": 4711, "Name": "chrome.exe", "CommandLine": "chrome app.py"})), "app.py")[0] is None, "chrome → nie")
+chk(pz([4711], pp(json.dumps({"ProcessId": 4711, "Name": "python3.12.exe", "CommandLine": "python3.12.exe app.py"})), "app.py")[0] == 4711,
+    "Store-Python python3.12.exe → ja")
+chk(pz([4711], pp(json.dumps({"ProcessId": 4711, "Name": "pythonx.exe", "CommandLine": "pythonx.exe app.py"})), "app.py")[0] is None, "pythonx.exe → nie")
+chk(sp({}) == [] and sp({"a": {"active": False}}) == [], "Spiegel: keine aktive Sitzung → frei")
+chk(sp({"a": {"active": True, "positions": {}}, "b": {"active": False}}) == ["a"], "Spiegel: jede aktive Sitzung sperrt (auch ohne Position)")
+chk(sp(None) is None and sp([]) is None, "Spiegel unlesbar → None (kein Kill)")
+tb = p_src[p_src.index("def _tn_teil_neu"):p_src.index("def _tages_neustart_ausfuehren")]
+chk(tb.index("vorab()") < tb.index('"taskkill"') and "r.returncode != 0" in tb, "Spiegel-Schutz vor dem Kill, abgelehnter taskkill = übersprungen")
+chk("_tn_spiegel_frei if name == \"backend\"" in p_src and '"/health")' in p_src, "Backend: Spiegel-Schutz + Rückkehr über /health")
+chk('"taskkill", "/PID", str(int(pid)), "/F"]' in tb and '"/T"' not in tb, "taskkill /F OHNE /T (die .bat-Schleife lebt weiter)")
+chk("tn_port_ziel(" in tb and tb.index("tn_port_ziel(") < tb.index("taskkill"), "erst prüfen, dann beenden")
+ta = p_src[p_src.index("def _tages_neustart_ausfuehren"):p_src.index("def _tages_neustart_nachher")]
+chk(ta.index("for name, port, skript, frist, pfad in TN_TEILE") < ta.index("_puls_chrome_beenden"), "Backend/Reader VOR dem Chrome-Schritt")
+chk('name == "backend" and st in ("nicht_zurueck", "fehler")' in ta and "abbruch=" in ta and ta.index("abbruch=") < ta.index("_puls_chrome_beenden"),
+    "Backend nicht zurück → Abbruch vor Chrome, im Merker vermerkt")
+chk('teile.get(name) is False' in ta, "Unterschalter je Teil")
+rb = ta[ta.index('if name == "reader" and st in ("nicht_zurueck", "fehler")'):]
+chk("_tab_heil_melden(" in rb[:600] and "return" not in rb[:rb.index("flush=True)") + 12], "Reader nicht zurück → 🟠, aber kein Abbruch")
+chk('("backend", 5000, "app.py", 120.0, "/health"), ("reader", 8790, "reader-server.py", 60.0, "/")' in p_src, "Fristen Backend 120 s, Reader 60 s")
 
 print("Copier")
 c_pfad = os.path.join(WURZEL, "mt5-copier", "copier.py")

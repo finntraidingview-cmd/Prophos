@@ -21869,14 +21869,17 @@ def lotse_plan_stand(signale_laeuft, plaene, uids, pc, jetzt):
 # Fenster von/bis in tz (Vorschlag 02:30–05:00 Dubai), nur_pcs (leer = alle), ruhe_vor_start_min (30). Ruhig = kein Signal läuft auf dem PC,
 # kein Polar-Lauf der IDs, kein Plan open, kein Überprüfen-Plan mit offenem Hedge, kein Start in den nächsten ruhe_vor_start_min (Handpläne und
 # bestätigte Vorschläge), kein Claim < 15 min. Gelesen wird nur, wenn an + PC frei + Fenster offen (sonst keine Abfrage). Fehler → nicht ruhig. ══
-PC_NEUSTART_STANDARD = {"an": False, "tz": "Asia/Dubai", "von": "02:30", "bis": "05:00", "nur_pcs": [], "ruhe_vor_start_min": 30}
+PC_NEUSTART_STANDARD = {"an": False, "tz": "Asia/Dubai", "von": "02:30", "bis": "05:00", "nur_pcs": [], "ruhe_vor_start_min": 30,
+                        "teile": {"backend": True, "reader": True}}   # DR1b: lokales Backend + Reader, je Teil abschaltbar
 
 
 def pc_neustart_regel(roh):
     """REIN RECHNEND (testbar): puls_heim_regel.pc_neustart → vollständige Regel; Fehlendes/Ungültiges → Standard (an bleibt dann aus)."""
-    r = dict(PC_NEUSTART_STANDARD)
+    r = dict(PC_NEUSTART_STANDARD, teile=dict(PC_NEUSTART_STANDARD["teile"]))
     if not isinstance(roh, dict):
         return r
+    if isinstance(roh.get("teile"), dict):              # DR1b: nur ein echtes false schaltet einen Teil ab
+        r["teile"] = {k: roh["teile"].get(k) is not False for k in r["teile"]}
     r["an"] = roh.get("an") is True
     for k in ("von", "bis"):
         v = str(roh.get(k) or "")
@@ -21944,7 +21947,7 @@ def pc_neustart_sicht(regel_roh, pc, jetzt, laden):
     r = pc_neustart_regel(regel_roh)
     tag, offen, vorbei = pc_neustart_fenster(r, jetzt)
     out = {"an": r["an"], "pc_frei": (not r["nur_pcs"]) or pc in r["nur_pcs"], "tag": tag, "offen": offen, "vorbei": vorbei,
-           "ruhig": False, "grund": ""}
+           "ruhig": False, "grund": "", "teile": r["teile"]}
     if not (out["an"] and out["pc_frei"] and offen):
         return out
     try:
