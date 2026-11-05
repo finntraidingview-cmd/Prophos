@@ -193,6 +193,14 @@ ok("w_[\"fcp_ziel\"] = \"is.null\"" in fp and "requests.exceptions.HTTPError" in
    "Erstwurf mit Guard (kein Rennen), Rückfall nur bei fehlender Spalte")
 ok("\"ziel_fest\", \"on_demand\")}" in fp, "festes Ziel + On Demand stehen im funded_plan des Trades")
 
+print("— Prüfer O1: Konto-Seite (kz_rechnen) rechnet wie der Planer, On Demand ohne Regel plant normal —")
+kz = SRC[SRC.index("def kz_rechnen("):SRC.index("def kz_rechnen(") + 30000]
+kz = kz[kz.index('    elif typ == "funded_cfd":'):]
+kz = kz[:kz.index("\n    else:\n")]
+ok("fcp_tage_zyklus_w(plaene, seit)" in kz and 'tzw["b"] / tzw["w"]' in kz and "fcp_ziel_fest(a.get(\"fcp_ziel\")" in kz and "fcp_on_demand_anwenden(freg, jg, groesse)" in kz,
+   "kz_rechnen Funded CFD: Consistency = größter Tag ÷ Summe der Gewinn-Tage, festes Ziel, On-Demand-Regel")
+ok("od_an = False" in fp and "On Demand ohne Regel dieser Firma → normale Regel" in fp, "On Demand bei Firma ohne Regel: normal geplant, Hinweis in der Notiz")
+
 print("— Trades je Tag (E1e): Patch, Consistency zählt den Tag als Summe —")
 Z0 = {"id": 1, "zeiten": {"vorlauf_min": 15}, "firmen": []}
 u, f_ = app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 2})

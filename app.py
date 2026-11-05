@@ -36986,18 +36986,36 @@ def kz_rechnen(a, ctx):
         out["zyklus"] = {"nr": zyklus, "seit": seit, "payouts": n_pay}
         jg = fcp_je_groesse(freg, groesse) or {}
         zb = fcp_konto_ziel_boden(freg, groesse, zyklus, a.get("name")) if freg else None
+        # O1 (Master 05.11.2026, Prüfer): Konto-Seite rechnet wie der Planer — On-Demand-Regel, festes Ziel des Zyklus, Consistency auf der Summe der Gewinn-Tage
+        od_an = a.get("on_demand") is True and bool(freg) and bool(jg)
+        _oda = fcp_on_demand_anwenden(freg, jg, groesse) if od_an else None
+        if _oda:
+            freg, jg = _oda
+            _zbo, _dd = fcp_bereich(jg.get("ziel")), _wd_num(jg.get("dd"))
+            zb = (float(groesse) + _zbo[0], float(groesse) - float(_dd or 0)) if (_zbo and groesse) else zb
         ep = fcp_erster_payout(freg) if (freg and zyklus == 1) else None
         bereich = fcp_bereich((ep or jg).get("ziel")) if (ep or jg) else None
+        z_fest = None
+        if bereich and isinstance(a.get("fcp_ziel"), dict):
+            _z, _neu = fcp_ziel_fest(a.get("fcp_ziel"), zyklus, bereich, bereich[0])
+            z_fest = None if _neu else max(_z, bereich[0])
+        if zb and z_fest is not None and groesse:
+            zb = (float(groesse) + z_fest, zb[1])
+        out["on_demand"] = bool(_oda)
+        out["ziel_fest"] = z_fest
         wartet = bool(a.get("waiting_payout_since"))
         if zb and gewinn is not None:
             ziel_bal, boden = zb
             erreicht = wartet or bal >= ziel_bal
             out["chart"].update(ziel=ziel_bal, boden=boden)
-            f = max(0.0, min(1.0, gewinn / bereich[0])) if bereich and bereich[0] > 0 else None
+            z_eff = z_fest if z_fest is not None else bereich[0]
+            f = max(0.0, min(1.0, gewinn / z_eff)) if z_eff and z_eff > 0 else None
             kach.append(kz_kachel("ziel", "Ziel", kz_pct(f, 0) if erreicht else kz_usd(ziel_bal - bal), None if erreicht else "fehlen",
-                                  f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel {kz_usd(bereich[0], 0, True)}" + (f"–{_liq_de(bereich[1])} $" if bereich[1] != bereich[0] else ""),
+                                  (f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel fest {kz_usd(z_fest, 0, True)}" if z_fest is not None else
+                                   f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel {kz_usd(bereich[0], 0, True)}" + (f"–{_liq_de(bereich[1])} $" if bereich[1] != bereich[0] else "")),
                                   f, "gut" if erreicht else "", None, ["Erreicht", "gut"] if erreicht else ["Offen", "grau"],
-                                  ("Refund-Ziel 1. Zyklus" if ep else "Ziel je Zyklus") + " aus funded_cfd_plan_regeln; erreicht ab dem unteren Wert (wie Radar)"))
+                                  ("On-Demand-Ziel" if _oda else "Refund-Ziel 1. Zyklus" if ep else "Ziel je Zyklus")
+                                  + (" · festes Ziel des Zyklus (accounts.fcp_ziel), wie der Planer" if z_fest is not None else " aus funded_cfd_plan_regeln; erreicht ab dem unteren Wert (wie Radar)")))
             dd = _wd_num(jg.get("dd"))
             kach.append(kz_ml_kachel(boden, dd, "statisch", bal, "Boden wie im Funded-CFD-Planer (Größe − dd)"))
         else:
@@ -37009,13 +37027,16 @@ def kz_rechnen(a, ctx):
             out["chart"]["boden"] = b
         kach.append(kz_dl_kachel(dl, dl_grund))
         p_cons = fcp_consistency_pct(freg) if freg else None
-        tzy = fcp_tage_zyklus(plaene, seit)
+        # O1 (Finn 05.11.2026 ~07:45): Basis = Summe der Gewinn-Tage im Zyklus (fcp_tage_zyklus_w, wie fcp_cons_finn im Planer), nicht der Netto-Gewinn
+        tzw = fcp_tage_zyklus_w(plaene, seit)
         cons_ok = True
+        an = None
         if p_cons:
-            an = (tzy[0] / gewinn) if (tzy and gewinn and gewinn > 0) else None
-            cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzy and tzy[0] == 0 and gewinn and gewinn > 0)
-            kach.append(kz_cons_kachel(p_cons, an, tzy[0] if tzy else None, gewinn, "Gewinn", "Consistency je Zyklus (fcp_consistency_pct, Weg A)",
-                                       "Zyklus nicht lesbar" if tzy is None else "noch kein Gewinn"))
+            an = (tzw["b"] / tzw["w"]) if (tzw and tzw["w"] > 0) else None
+            cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzw and tzw["w"] == 0 and gewinn and gewinn > 0)
+            kach.append(kz_cons_kachel(p_cons, an, tzw["b"] if tzw else None, tzw["w"] if tzw else None, "Summe der Gewinn-Tage",
+                                       "Consistency je Zyklus: größter Tag ÷ Summe der Gewinn-Tage (wie der Funded-CFD-Planer)",
+                                       "Zyklus nicht lesbar" if tzw is None else "noch kein Gewinn-Tag"))
         else:
             kach.append(kz_cons_kachel(None, None, None, None, "", "fcp_consistency_pct: keine"))
         gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
@@ -37023,12 +37044,14 @@ def kz_rechnen(a, ctx):
         if gt:
             kach.append(kz_tage_kachel("tage", "Gewinntage", gti[0] if gti else None, gti[1] if gti else None,
                                        f"Tage ≥ {kz_usd(_wd_num(gt.get('min')))} im Zyklus", "je_groesse.gewinntage — Zählung wie der Planer"))
-        checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting",
-                       (f"{kz_usd(gewinn, 0, True)} / {kz_usd(bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")])
+        checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting" + (" (fest)" if z_fest is not None else ""),
+                       (f"{kz_usd(gewinn, 0, True)} / {kz_usd(z_fest if z_fest is not None else bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")])
+        if _oda:
+            checks.append(["info", "Add-on On Demand", "Ziel 2–2,25 % · Consistency " + (_liq_de(p_cons) + " %" if p_cons else "–")])
         if gt:
             checks.append([("ok" if gti[0] >= gti[1] else "nein") if gti else "info", f"Gewinntage ≥ {kz_usd(_wd_num(gt.get('min')))}", f"{gti[0]} / {gti[1]}" if gti else "—"])
         if p_cons:
-            checks.append(["ok" if cons_ok else "nein", f"Consistency ≤ {_liq_de(p_cons)} %", kz_pct((tzy[0] / gewinn) if (tzy and gewinn and gewinn > 0) else None)])
+            checks.append(["ok" if cons_ok else "nein", f"Consistency ≤ {_liq_de(p_cons)} %", kz_pct(an)])
         else:
             checks.append(["info", "Consistency", "keine"])
         checks.append(["info", "Refund-Trade", f"Ziel {_liq_de(bereich[0])}–{_liq_de(bereich[1])} $" if ep and bereich else "aus" if freg else "—"])
@@ -37168,7 +37191,12 @@ def konto_ziele():
         return jsonify({"ok": False, "msg": "id fehlt"}), 400
     try:
         try:
-            rows = sb_select("accounts", {"select": KZ_KONTO_SEL, "id": f"eq.{kid}"}) or []
+            try:   # O1: On Demand + festes Ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten, wie bisher
+                rows = sb_select("accounts", {"select": KZ_KONTO_SEL + ",on_demand,fcp_ziel", "id": f"eq.{kid}"}) or []
+            except requests.exceptions.HTTPError as e:
+                if "on_demand" not in str(getattr(e.response, "text", "") or e) and "fcp_ziel" not in str(getattr(e.response, "text", "") or e):
+                    raise
+                rows = sb_select("accounts", {"select": KZ_KONTO_SEL, "id": f"eq.{kid}"}) or []
         except requests.exceptions.HTTPError:
             rows = sb_select("accounts", {"select": AP_KONTO_FELDER_OHNE_CONS + ",ziel_usd,waiting_payout_since,payout_ready_at,wd_farm", "id": f"eq.{kid}"}) or []
     except Exception as e:
@@ -42238,9 +42266,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         regel_k = regel
         if od_an:
             _oda = fcp_on_demand_anwenden(regel, jg, g)
-            if not _oda:
-                aus("On Demand am Konto — für diese Firma gibt es keine On-Demand-Regel"); continue
-            regel_k, jg = _oda
+            if _oda:
+                regel_k, jg = _oda
+            else:
+                od_an = False            # Prüfer O1: Firma ohne On-Demand-Regel → normal planen (nicht still „aus"); Hinweis in der Notiz
+                zeile["on_demand_ohne_regel"] = True
         if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
             aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen"); continue
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
@@ -42371,7 +42401,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else "")
                  + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
                  + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
-                 + (" · On Demand" if r.get("on_demand") else "") + (" · Ziel fest" if r.get("ziel_fest") else "")   # O1
+                 + (" · On Demand" if r.get("on_demand") else "") + (" · On Demand ohne Regel dieser Firma → normale Regel" if r.get("on_demand_ohne_regel") else "")
+                 + (" · Ziel fest" if r.get("ziel_fest") else "")   # O1
                  # The5ers je Zyklus (04.11.2026): Zyklus-Gewinne in der Notiz — Finn sieht, woraus der TP kommt (nicht lesbar → „?")
                  + ((f" · Zyklus-Gewinne {_liq_de(r['gewinne'])} $" if r.get("gewinne") is not None else " · Zyklus-Gewinne ?")
                     if (str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r)) and not r.get("consistency") else "")

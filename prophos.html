@@ -44734,20 +44734,24 @@
     if(!a) return ''
     const chips = [], frei = !archiviert
     const ep = (a.maxRisikoTrade > 0) || accEinsProzentName(a)
-    if(ep || a.type === 'funded_cfd' || a.type === 'funded' || a.type === 'winning_days'){
+    // Prüfer O1: nur Funded CFD — bei Challenges/Funded/WD speist max_risiko_trade das Hedge-Risiko (hedgeRisikoMaster, WD-Farmer wdSl || maxRisikoTrade),
+    // ein Fehlklick würde dort die Hedge-Lots ändern. Dort bleibt der Max-Risiko-Chip (accRisikoChipHtml) in der Typ-Spalte, nur Anzeige.
+    if(a.type === 'funded_cfd'){
       const b = a.maxRisikoTrade > 0 ? Number(a.maxRisikoTrade).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : ''
       const t = ep ? `1 % Rule an${b ? ' · max ' + b + ' je Trade' : ''}${accEinsProzentName(a) ? ' · steht im Namen' : ''}` : '1 % Rule aus — Klick schaltet an (max Risiko = 1 % der Kontogröße)'
       chips.push(`<button type="button" class="acc-addon${ep ? ' an' : ''}" data-acc-addon="eins" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>1 % Rule</button>`)
     }
-    if(a.type === 'funded_cfd' && a.onDemand !== undefined && accIstFundedNextCfd(a)){
+    if(a.type === 'funded_cfd' && a.onDemand !== undefined && (accIstFundedNextCfd(a) || a.onDemand === true)){   // an bei anderer Firma: zeigen, damit man es ausschalten kann
       const zf = accZielFestText(a)
-      const t = a.onDemand ? `On Demand an — Ziel 2–2,25 % · Consistency 40 % · Payout anfragbar, sobald erfüllt${zf ? ' · festes Ziel ' + zf : ''}` : 'On Demand aus — Klick schaltet an'
+      const t = a.onDemand ? (accIstFundedNextCfd(a) ? `On Demand an — Ziel 2–2,25 % · Consistency 40 % · Payout anfragbar, sobald erfüllt${zf ? ' · festes Ziel ' + zf : ''}`
+        : 'On Demand an, aber die Firma hat keine On-Demand-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'On Demand aus — Klick schaltet an'
       chips.push(`<button type="button" class="acc-addon od${a.onDemand ? ' an' : ''}" data-acc-addon="od" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>On Demand</button>`)
     }
     return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
   }
   async function accAddonUmstellen(id, art, btn){
     const a = (accounts || []).find(x => String(x.id) === String(id)); if(!a) return
+    if(art === 'eins' && a.type !== 'funded_cfd') return   // nie bei anderen Kontoarten (Hedge-Risiko, Prüfer O1)
     let upd = null, msg = ''
     if(art === 'od'){ upd = { on_demand: !a.onDemand }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
     else if(art === 'eins'){
@@ -44950,7 +44954,7 @@
     return z
   }
   function accOdFelderSetzen(acc){
-    const zeig = !!acc && acc.onDemand !== undefined && accIstFundedNextCfd(acc) && acc.type === 'funded_cfd'
+    const zeig = !!acc && acc.onDemand !== undefined && (accIstFundedNextCfd(acc) || acc.onDemand === true) && acc.type === 'funded_cfd'
     if(accEls.odFeld) accEls.odFeld.hidden = !zeig
     if(accEls.onDemand) accEls.onDemand.checked = !!(acc && acc.onDemand)
     const zf = acc && acc.type === 'funded_cfd' ? accZielFestText(acc) : ''
@@ -45602,7 +45606,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${isArchived ? '' : accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${isArchived ? '' : accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${a.type === 'funded_cfd' ? '' : accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td data-stop-row-click="1"><span class="acc-addon-zelle">${accAddonsHtml(a, isArchived)}${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived, true)) : accPlanerZelleHtml(a, isArchived, true)}</span></td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
