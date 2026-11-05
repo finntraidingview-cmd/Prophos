@@ -16923,7 +16923,7 @@
       const wc = $('wd-weg-chip')
       if(wc){
         wc.hidden = !an
-        wc.textContent = hedgeAn ? 'Orbit V2 · Fusion-Gegenhedge' : 'Orbit V2 · ohne Hedge'
+        wc.textContent = hedgeAn ? modellName('winning_day') : `${modellName('winning_day')} · ohne Hedge`   // MK1 05.11.2026: Modellname statt „Orbit V2 · Fusion-Gegenhedge“
         wc.title = hedgeAn ? 'Winning Day: Puls platziert, der PC öffnet die Fusion-Gegenorder — beide Schließ-Level in MetaTrader'
                            : 'Neue Ära: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum'
       }
@@ -26146,7 +26146,24 @@
     try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
     return false
   }
-  const wegLabel = p => tpIstApexHedge(p) ? 'Orbit Prio 2' : tpIstWdPlan(p) ? 'Winning Day' : tpIstNova(p) ? 'Nova' : tpIstOrbitV3(p) ? 'Orbit' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
+  /* MODELL-NAMEN (MK1, Master 05.11.2026, Variante A: „Ein Modell = ein Name überall“): EINE Tabelle für alle Anzeigen (Chips, Karten, Einstellungen,
+   * Zeitstrahl-Tooltips). Echo = mt5 mit Fusion-Hedge · Echo V2 = ohne Hedge · Orbit = tvv2 + Hedge (früher „Orbit V3“) · Orbit V2 = ohne Hedge ·
+   * Orbit Prio 2 = Apex-Weg, WD-Logik + Fusion-Hedge (früher „WD-Weg + Hedge“) · Nova = Topstep + Hedge · Topstep V2 = ohne Hedge · Winning Day =
+   * WD-Farmer. Der Name sagt den Hedge schon — kein „mit Hedge“/„Fusion-Gegenhedge“ dahinter. NUR ANZEIGE: die Radar-Filter/-Gruppen (WDL_MODELLE,
+   * WDL_HEDGE_GRUPPEN) nutzen genau diese Texte als Schlüssel und bleiben unverändert; Userscript-/Tampermonkey-Texte („Orbit V3 · Puls-Chrome“)
+   * stehen so im Userscript-Menü und bleiben, sonst findet man sie dort nicht. Funktions-Deklaration (gehoben) — Radar und Karten zeichnen vor dieser Zeile.
+   * modellName(x): x = Schlüssel ('orbit_prio2'), Route ('mt5', 'tvv2', 'tsv2' …), schon ein Name, ein Plan (tradePlans, camelCase → wegLabel)
+   * oder eine Radar-Zeile (snake_case → wdlWeg). Unbekannt → der Text selbst. */
+  function modellName(x){
+    const T = modellName.T || (modellName.T = Object.freeze({ echo: 'Echo', echo_v2: 'Echo V2', orbit: 'Orbit', orbit_v2: 'Orbit V2', orbit_prio2: 'Orbit Prio 2',
+      nova: 'Nova', topstep_v2: 'Topstep V2', winning_day: 'Winning Day', polar: 'Polar', duplikum: 'Duplikum' }))
+    if(x == null) return ''
+    if(typeof x === 'object') return ('masterAccountId' in x || 'orbitV3' in x || 'masterName' in x) ? wegLabel(x) : wdlWeg(x)
+    const t = String(x).trim(), k = t.toLowerCase()
+    const ROUTE = { mt5: 'echo', mt5v2: 'echo_v2', tvv2: 'orbit_v2', tvv3: 'orbit', orbit_v3: 'orbit', apex_hedge: 'orbit_prio2', tsv2: 'topstep_v2', wd: 'winning_day', tvplus: 'duplikum' }
+    return T[k] || T[ROUTE[k]] || t
+  }
+  const wegLabel = p => tpIstApexHedge(p) ? modellName('orbit_prio2') : tpIstWdPlan(p) ? modellName('winning_day') : tpIstNova(p) ? modellName('nova') : tpIstOrbitV3(p) ? modellName('orbit') : p && p.route === 'mt5v2' ? modellName('echo_v2') : p && p.route === 'tsv2' ? modellName('topstep_v2') : modellName('orbit_v2')   // Weg-Label für Anzeigen (25.09.2026; Namen seit MK1 aus modellName)
   /* WEG-SYMBOLE (Finn 21.10.2026: die Wege bekommen eigene Symbole, passend zum Namen — „visuell cooler"): Inline-SVG, currentColor, eine
    * Strichstärke, 16er-Raster; der Name bleibt daneben. Familien: Echo (Wiederhall: Quelle + Schallwellen), Orbit (Umlaufbahn mit Punkt),
    * Winning Day (Siegel mit Häkchen — 🏆 bleibt dem Good Day), Polar (Polarstern), Nova (aufleuchtender Stern mit Strahlen, 27.10.2026).
@@ -37501,17 +37518,17 @@
   // Orbit V2 / Orbit V3 / Winning Day / Topstep V2 / Echo V2 statt nur der Plattform — Blöcke bleiben nach wdlPf sortiert.
   // orbit_v3/konto_typ liefert /admin/live-trades seit .917; ein älteres Backend ohne die Felder → eigener Plan aus tradePlans
   function wdlWeg(t){
-    if(!t) return 'Orbit V2'
-    if(wdlIstPolar(t)) return 'Polar'   // Sticker „Polar" (20.10.2026)
-    if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
-    if(t.apex_hedge === true) return 'Orbit Prio 2'   // MO1 05.11.2026: Name „Orbit Prio 2“ (Apex + jede Firma mit Modell orbit_prio2) · Apex-Challenge auf dem WD-Weg (ah_tick, 29.10.2026): Fusion-Hedge, zählt NIE als Winning Day
+    if(!t) return modellName('orbit_v2')   // MK1 05.11.2026: Namen aus modellName — gleiche Texte, Radar-Filter/-Gruppen unverändert
+    if(wdlIstPolar(t)) return modellName('polar')   // Sticker „Polar" (20.10.2026)
+    if(wdlIstEcho(t)) return t.route === 'mt5' ? modellName('echo') : modellName('echo_v2')   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
+    if(t.apex_hedge === true) return modellName('orbit_prio2')   // MO1 05.11.2026: Name „Orbit Prio 2“ (Apex + jede Firma mit Modell orbit_prio2) · Apex-Challenge auf dem WD-Weg (ah_tick, 29.10.2026): Fusion-Hedge, zählt NIE als Winning Day
     // Winning Day auf Topstep (.1496, Finn 13.10.2026: „Winning Day ist der Knopf, Topstep V2 der Weg"): die Pille sagt Winning Day
-    if(t.route === 'tsv2' && t.orbit_v3) return 'Nova'   // Topstep Big Trade (27.10.2026): Orbit-Hedge, kein Winning Day — heißt Nova (Master 27.10.2026)
-    if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? 'Winning Day' : 'Topstep V2'
+    if(t.route === 'tsv2' && t.orbit_v3) return modellName('nova')   // Topstep Big Trade (27.10.2026): Orbit-Hedge, kein Winning Day — heißt Nova (Master 27.10.2026)
+    if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? modellName('winning_day') : modellName('topstep_v2')
     let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
-    if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit'   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
-    if(Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days') return 'Winning Day'
-    return eigen ? wegLabel(eigen) : 'Orbit V2'
+    if(t.orbit_v3 || (eigen && eigen.orbitV3)) return modellName('orbit')   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
+    if(Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days') return modellName('winning_day')
+    return eigen ? wegLabel(eigen) : modellName('orbit_v2')
   }
   // Slave-P&L (Fusion-Gegenhedge, €) eines beendeten Hedge-Trades: Wert am Plan, sonst der geschlossene Hedge; ohne Hedge null
   function wdlSlavePl(t){
@@ -53529,7 +53546,7 @@
       if(frisch && frisch.route !== 'mt5v2'){
         // Startzeit schon gesetzt (z. B. vom vorigen Klick „jetzt + 1 min") → nicht zusätzlich von Hand starten, sonst fielen Hand- und Zeit-Start zusammen (Prüfung 03.11.2026)
         const su = Date.parse(frisch.startUm || '')
-        weiter = ` Railway hat ihn eben auf ${frisch.route === 'mt5' ? 'Echo mit Fusion-Hedge' : frisch.route} umgestellt — `
+        weiter = ` Railway hat ihn eben auf ${frisch.route === 'mt5' ? modellName('echo') : frisch.route} umgestellt — `
           + (su && su > Date.now() - 30 * 60000 && !frisch.startUmGestartetAt ? `er startet zur Startzeit ${new Date(su).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} von selbst, nicht von Hand starten.` : 'jetzt erneut starten.')
       } else if(eh && eh.status === 'ohne'){
         // Railway kann den Hedge nicht stellen (Mini, kein Fusion-Konto, Marge …) — keine neue Startzeit, sonst nur Schleifen; der Claim-Riegel hält ihn ohnehin
@@ -53540,10 +53557,10 @@
           const { data, error } = await supabase.from('trade_plans').update({ start_um: new Date(Date.now() + 60000).toISOString(), start_um_gestartet_at: null })
             .eq('id', plan.id).eq('status', 'planned').eq('route', 'mt5v2').is('start_um_gestartet_at', null).select('*')
           if(!error && data && data.length){ rkPlanErsetzen(data[0])
-            weiter = ' Startzeit auf jetzt + 1 min gesetzt: Railway stellt den Plan auf Echo mit Fusion-Hedge um, dann startet er von selbst.' }
+            weiter = ' Startzeit auf jetzt + 1 min gesetzt: Railway stellt den Plan auf Echo um, dann startet er von selbst.' }
         }catch(_){}
       }
-      fail('v2hedge', escapeHtml(v2Sperre + '.' + (weiter || (plan.autoPlan === true ? ' Railway stellt bestätigte Auto-Pläne vor dem Start auf Echo mit Fusion-Hedge um.' : ' Plan als Echo mit Fusion-Slave anlegen.'))))
+      fail('v2hedge', escapeHtml(v2Sperre + '.' + (weiter || (plan.autoPlan === true ? ' Railway stellt bestätigte Auto-Pläne vor dem Start auf Echo um.' : ' Plan als Echo (mit Fusion-Slave) anlegen.'))))
     }
 
     // ── 3. Richtungs-Schutz (wie Echo: nie gegen einen laufenden/gespeicherten Trade derselben Firma) ──
@@ -62882,7 +62899,7 @@
   function apdEchoHedgeSchalterHtml(v, admin){
     const eh = v && v.echo_hedge
     if(!eh || typeof eh.an !== 'boolean') return ''
-    const tip = admin ? `HT-CFD-Challenges starten als Echo mit Fusion-Hedge (B2, Faktor ${eh.netto_faktor}, max. ${eh.max_lots} Lot) — aus = Echo V2 ohne Hedge` : 'nur Admin'
+    const tip = admin ? `HT-CFD-Challenges starten als Echo (B2, Faktor ${eh.netto_faktor}, max. ${eh.max_lots} Lot) — aus = Echo V2` : 'nur Admin'
     return `<label title="${escapeHtml(tip)}"><span class="switch"><input type="checkbox" data-apd-schalter="echo_hedge"${eh.an ? ' checked' : ''}${admin ? (_apd.busy.has('echo_hedge') ? ' disabled' : '') : ' disabled'}><span class="switch-slider"></span></span>${eh.an ? 'Echo-Hedge an' : 'Echo-Hedge aus'}</label>`
   }
   /* APEX-CHALLENGE-WD-HEDGE (30.10.2026, Finn: „bei Apex IMMER bei den Challenges mit Gegenhedge"): dritter Schalter =
@@ -64102,7 +64119,7 @@
     const acc1 = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null, b1 = acc1 ? tplKontoBalance(acc1) : null
     const menge1 = t.menge == null ? '—' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const symbol1 = /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge1} Lot` : `${menge1} × ${(r1 && r1.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ')}`
-    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2') : (p1 && p1.orbitV3) ? 'Orbit V3' : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? 'Orbit + Hedge · Final' : 'Orbit V2'
+    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2') : (p1 && p1.orbitV3) ? modellName('orbit') : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? `${modellName('orbit')} · Final` : modellName('orbit_v2')
     const einstieg1 = (r1 && Number(r1.einstieg_nq) > 1000) ? Number(r1.einstieg_nq).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
     const quelle1 = (r1 && r1.einstieg_quelle) || (t.auto ? 'Auto-Planer' : 'Hand')
     const zeit1 = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') ? `${tplUhr(t.start, v)} – ${t.ende != null ? tplUhr(t.ende, v) : '?'}` : `Start ${tplUhr(t.start, v)}`
@@ -64146,7 +64163,7 @@
    * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
   const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
   const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2')
-    : (p1 && p1.orbitV3) ? 'Orbit' : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? 'Orbit + Hedge · Final' : 'Orbit V2'   // ORBIT-NAMEN (Finn 30.10.2026): mit Hedge „Orbit", ohne Hedge „Orbit V2"; FINAL-ANZEIGE
+    : (p1 && p1.orbitV3) ? modellName('orbit') : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? `${modellName('orbit')} · Final` : modellName('orbit_v2')   // MK1 05.11.2026: „Orbit · Final“ statt „Orbit + Hedge · Final“ · ORBIT-NAMEN (Finn 30.10.2026): mit Hedge „Orbit", ohne Hedge „Orbit V2"; FINAL-ANZEIGE
   function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
   function tkEinzelHtml(t, v){
     const r1 = (_tpl.lt && _tpl.lt.get(String(t.plan_id))) || null, p1 = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
@@ -64396,7 +64413,7 @@
         : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
         : `Am PC${pc}: Echo → „Neue Instanz" für Login${login} mit Terminal-Pfad anlegen (nach dem Phasenwechsel neuer Login).`
       case 'v2hedge': return /kann den Hedge nicht stellen|Kontoart/i.test(m) ? 'Hedge nicht stellbar — startet nicht (CFD-Challenges nur mit Hedge). Grund in der Meldung beheben oder Plan neu planen.'
-        : /mit Hedge/i.test(m) ? 'Nichts tun — Railway stellt den Plan auf Echo mit Fusion-Hedge um, danach startet er neu (oder Startzeit setzen).'
+        : /mit Hedge/i.test(m) ? 'Nichts tun — Railway stellt den Plan auf Echo um, danach startet er neu (oder Startzeit setzen).'
         : /Duplikum/i.test(m) ?'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
       case 'v2dir': return 'Nichts tun — wartet, bis der Gegen-Trade derselben Firma zu ist.'
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
@@ -85737,9 +85754,9 @@
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
-    if(z && (z.hedge_art === 'apex')) return ['WD-Weg + Hedge', 'hedge']
-    // FINAL-ANZEIGE (Finn 30.10.2026 ~08:10: „sieht nicht, dass dort gegengehedgt wird"): „Orbit + Hedge" + Abzeichen „Final" (apgZeilenSchmuecken)
-    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit + Hedge', 'hedge', 'Finaler Tradeify-Trade: Orbit mit Fusion-Gegenhedge — der Blow deckt den Kontowert']
+    if(z && (z.hedge_art === 'apex')) return [modellName('orbit_prio2'), 'hedge']   // MK1 05.11.2026: Prio-2-Plan (ah_tick) heißt „Orbit Prio 2“, nicht „WD-Weg + Hedge“ (echte WD-Pläne bleiben Winning Day)
+    // FINAL-ANZEIGE (Finn 30.10.2026 ~08:10: „sieht nicht, dass dort gegengehedgt wird"): „Orbit" (MK1, früher „Orbit + Hedge") + Abzeichen „Final" (apgZeilenSchmuecken)
+    if(z && (z.hedge_art === 'tradeify_final')) return [modellName('orbit'), 'hedge', 'Finaler Tradeify-Trade: Orbit mit Fusion-Gegenhedge — der Blow deckt den Kontowert']
     // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
     // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
     // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
@@ -85824,7 +85841,7 @@
         const grund = vs && vs.lots == null ? String(vs.grund || vs.fehler || '') : ''
         if(AHF_ART_KURZ[z.hedge_art] && vs && vs.lots != null){   // FINAL-ANZEIGE: TP/SL als Paar-Zeile (apgHedgePaare), hier nur Lots
           zellen.lots.appendChild(fus(`${z2(vs.lots, 2)}`, `Fusion-Gegenhedge: ${z2(vs.lots, 2)} Lot NAS100${vs.q ? ` · q ${vs.q} €/$` : ''}`)); return }
-        const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Orbit Prio 2 (Fusion-Hedge, WD-Weg)' : z.hedge_art === 'tradeify_final' ? 'Tradeify-Final-Hedge' : 'Hedge'
+        const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Orbit-Prio-2-Hedge' : z.hedge_art === 'tradeify_final' ? 'Tradeify-Final-Hedge' : 'Hedge'
         if(!vs || (!grund && vs.lots == null)){ for(const c of Object.values(zellen)) c.appendChild(fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')); return }
         if(grund){ for(const c of Object.values(zellen)) c.appendChild(fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')); return }
         const ml = Number(z.menge), mult = vs.multiplier != null ? Number(vs.multiplier) : (ml > 0 ? Number(vs.lots) / ml : null)
@@ -85885,7 +85902,7 @@
     if(_fcfdR.fehler) return 'Regeln nicht ladbar — ' + _fcfdR.fehler.slice(0, 80)
     if(!_fcfdR.d) return _fcfdR.laedt ? 'Regeln laden …' : 'Funded-CFD-Planer kommt — Regeln je Firma noch nicht hinterlegt'
     const f = _fcfdR.d.firmen || []
-    return `Echo · mit Hedge · ${f.length} ${f.length === 1 ? 'Firma' : 'Firmen'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'} · ${window._fcfdAdmin ? 'Werte direkt änderbar, gilt für alle Gruppen' : 'nur ansehen'}`
+    return `${modellName('echo')} · ${f.length} ${f.length === 1 ? 'Firma' : 'Firmen'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'} · ${window._fcfdAdmin ? 'Werte direkt änderbar, gilt für alle Gruppen' : 'nur ansehen'}`
   }
   /* EINSTELLUNGEN FUNDED PLANER → CFD (E1, Finn 04.11.2026 ~17:30 Dubai: „Alle Inputs, die ich euch je Prop-Firma gegeben habe und die heute nur im
    * Code stecken, sollen unten visuell und änderbar stehen … und überall sehen, welches Modell genutzt wird"). Die Regel-Karten zeigen jetzt jeden
@@ -86001,7 +86018,7 @@
     if(!_fcrSel.firma || !firmen.some(f => f.firma === _fcrSel.firma)) _fcrSel.firma = (_fcrSel.offen && firmen.some(f => f.firma === _fcrSel.offen)) ? _fcrSel.offen : (firmen[0] || {}).firma || null
     _fcrSel.offen = _fcrSel.firma   // E1d (Nachtrag 8): keine Inline-Klappe mehr — die gewählte Firma steht rechts
     const zu = !!_fcrSel.zu
-    const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '', `${firmen.length} Firmen`, 'Echo · mit Hedge'].filter(Boolean)
+    const kurz = [`Planer ${D.aktiv ? 'an' : 'aus'}`, z.von && z.bis ? `${z.von}–${z.bis} ${zone}` : '', `${firmen.length} Firmen`, modellName('echo')].filter(Boolean)
     const kopf = `<div class="fcr-w-kopf"><button type="button" class="fcr-e-gtitel" data-fcr-zu aria-expanded="${zu ? 'false' : 'true'}" title="${zu ? 'aufklappen' : 'zuklappen'}">Einstellungen<span class="fcr-e-pfeil">${zu ? '▸' : '▾'}</span></button>
       <span class="fcr-w-sub" title="${escapeHtml(wegText)}">${kurz.map(escapeHtml).join(' · ')}</span>${fcrDarf() ? '' : `<em class="fcr-e-nur" title="ändern als „Finn + Pascal“ oder „Pascal“">${fcrSchloss('Schreibrecht')} nur ansehen</em>`}</div>`
     if(zu) return `<div class="fcr-e-wrap fcr-w zu" id="fcr-einst" data-fcr-wurzel>${kopf}</div>`
@@ -86816,7 +86833,7 @@
       // beide Spalten speichern dieselbe Karte „firma:i“ (ein Entwurf, ein Body) — der Knopf steht in jeder Spalte, damit er beim Tippen sichtbar ist
       mitteK = `<div class="wd-set-card e2-sc-detail e2-sc-ziel"><h4><span>Ziel &amp; Trade<span class="h4sub"><span class="e2-dname">${punkt}${escapeHtml(f.name)}</span>${grs.length ? ' · ' + grs.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
         ${zielT}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
-      rechtsK = `<div class="wd-set-card e2-sc-planer"><h4><span>Planer &amp; Hedge<span class="h4sub">Modell ${escapeHtml(E2_MODELL)} · Fusion-Gegenhedge</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
+      rechtsK = `<div class="wd-set-card e2-sc-planer"><h4><span>Planer &amp; Hedge<span class="h4sub">Modell ${escapeHtml(modellName(E2_MODELL))}</span></span>${grs.length ? e2Save('firma:' + fi, darfR, `f.${fi}.`) : ''}</h4>
         ${ablauf}${hedgeT}${wdGruppe}${grs.length ? e2Meld('firma:' + fi, darfR, `f.${fi}.`) : ''}</div>`
     }
     return `<div id="e2-einst" class="apg-karte e2-wrap e2-wdgr" data-e2-einst>${kopf(nurChip)}<div class="wd-set-grid">${firmenK}${mitteK}${rechtsK}</div></div>`
@@ -87522,16 +87539,17 @@
   const e3Name = f => E3_FIRMA[(f.namen || [])[0]] || (f.namen || [])[0] || '?'
   /* ORBIT PRIO 2 (MO1, Finn 05.11.2026): Modell je Futures-Firma — orbit_v2 (ohne Hedge) | orbit_prio2 (der bisherige Apex-Weg: Fusion-Gegenhedge, WD-Logik,
    * Priorität über Winning Days). Wirksamer Wert vom Server (GET einstellungen → modelle, app.py ap_firma_modell); fehlt er: Apex → Prio 2, sonst V2. */
-  const E3_MODELLE = [['orbit_v2', 'Orbit V2'], ['orbit_prio2', 'Orbit Prio 2']]
+  const E3_MODELLE = [['orbit_v2', modellName('orbit_v2')], ['orbit_prio2', modellName('orbit_prio2')]]
   const e3ModellWert = (f, D) => { const n = (f.namen || [])[0] || '', v = ((D && D.modelle) || {})[n] || f.modell
     return v === 'orbit_prio2' || v === 'orbit_v2' ? v : (/apex/.test(n) ? 'orbit_prio2' : 'orbit_v2') }
   function e3Modell(f, D){
     const n = (f.namen || [])[0] || '', eh = D.echo_hedge || {}, ah = D.apex_hedge || {}, tf = D.tradeify_final_hedge || {}
-    if(e3ArtVon(f) === 'cfd') return { text: eh.an ? 'Echo mit Hedge' : 'Echo V2', kl: 'echo' }
-    if(f.route === 'tsv2') return { text: 'Topstep V2', kl: 'topstep' }
-    if(e3ModellWert(f, D) === 'orbit_prio2') return { text: ah.an ? 'Orbit Prio 2' : 'Orbit V2 · Orbit Prio 2 aus', kl: 'orbit' }
-    if(n === 'tradeify') return { text: tf.an ? 'Orbit V2 · Final mit Gegenhedge' : 'Orbit V2', kl: 'orbit' }
-    return { text: 'Orbit V2', kl: 'orbit' }
+    // MK1 05.11.2026: Namen aus modellName („Echo“ statt „Echo mit Hedge“; finaler Tradeify-Trade läuft als Orbit)
+    if(e3ArtVon(f) === 'cfd') return { text: eh.an ? modellName('echo') : modellName('echo_v2'), kl: 'echo' }
+    if(f.route === 'tsv2') return { text: modellName('topstep_v2'), kl: 'topstep' }
+    if(e3ModellWert(f, D) === 'orbit_prio2') return { text: ah.an ? modellName('orbit_prio2') : `${modellName('orbit_v2')} · ${modellName('orbit_prio2')} aus`, kl: 'orbit' }
+    if(n === 'tradeify') return { text: tf.an ? `${modellName('orbit_v2')} · Final als ${modellName('orbit')}` : modellName('orbit_v2'), kl: 'orbit' }
+    return { text: modellName('orbit_v2'), kl: 'orbit' }
   }
   // Wert als Eingabe (Admin, änderbares Feld, Pfad bekannt) oder als Text; erbt = kommt vom Standard (kein Pfad) → „wie Standard"
   function e3Wert(wert, pfad, feld, admin, einheit){
@@ -87702,7 +87720,7 @@
       if(n === 'tradeify') bl += slider('Final-Trade mit Gegenhedge', !!(D.tradeify_final_hedge || {}).an, 'tradeify_final_hedge', '')
       const md = e3ModellWert(sel, D)
       if(!cfd && sel.route !== 'tsv2' && md === 'orbit_prio2') bl += slider('Orbit Prio 2 · Fusion-Hedge (Schalter für alle Prio-2-Firmen)', !!(D.apex_hedge || {}).an, 'apex_hedge', '')
-      if(cfd) bl += slider('Echo mit Fusion-Hedge', !!(D.echo_hedge || {}).an, 'echo_hedge', '')
+      if(cfd) bl += slider('Echo statt Echo V2', !!(D.echo_hedge || {}).an, 'echo_hedge', '')   // MK1: Schalter heißt nach dem Modell
       // MODELL (MO1): Futures wählbar, CFD fest Echo mit Hedge. MO1b (Finn 05.11.2026: „unter Challenge-Planer, zum Beispiel bei Emin, die Option, das Modell zu
       // ändern“): eine Zeile für Hermann Technologies (regeln.firmen[].modell) und je Verwalter-Gruppe eine (auto_plan_gruppe.firmen_modell, POST /admin/gruppen-plan
       // aktion modell). Tradeify (eigener Final-Hedge) und Topstep V2 (eigener Weg) ausgegraut mit Grund.
@@ -87712,7 +87730,7 @@
       const E3_MODELLE_G = [['aus', 'aus'], ...E3_MODELLE]
       const mZeile = (titel, unter, inhalt) => `<label class="wd-abl-schalter"><span><b>${e3E(titel)}</b><small>${e3E(unter)}</small></span>${inhalt}</label>`
       let modell = ''
-      if(cfd) modell = mZeile('Modell', 'fest', '<b>Echo mit Hedge</b>')
+      if(cfd) modell = mZeile('Modell', 'fest', `<b>${modellName('echo')}</b>`)
       else {
         // Gruppen-Sicht (Verwalter): nur die Zeile SEINER Gruppe, änderbar (Rechte wie die übrigen Gruppen-Felder); Admin: HT + jede Gruppe
         if(!gs) modell = mZeile('Modell · Hermann Technologies', nichtGrund || 'Orbit V2 ohne Hedge · Orbit Prio 2 mit Fusion-Hedge',
@@ -87721,7 +87739,7 @@
         for(const g of (D.gruppen_modelle || [])){
           const gw = (g.an && g.an[n] === false) ? 'aus' : ((g.modelle || {})[n] || md), ohneSp = g.spalte === false ? 'Spalte fehlt — sql/2026-11-05_orbit_prio2.sql einspielen' : ''
           modell += mZeile(gs ? 'Modell' : `Modell · Gruppe ${g.name || '?'}`, nichtGrund || ohneSp || (gs ? 'Orbit V2 ohne Hedge · Orbit Prio 2 mit Fusion-Hedge' : 'eigene Einstellung der Gruppe'),
-            darfG ? mSel(`data-e3-modell="${e3E(n)}" data-e3-gruppe="${e3E(g.gruppe_id)}"`, gw, nichtGrund || ohneSp, E3_MODELLE_G) : `<b>${gw === 'aus' ? 'aus' : gw === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}</b>`)
+            darfG ? mSel(`data-e3-modell="${e3E(n)}" data-e3-gruppe="${e3E(g.gruppe_id)}"`, gw, nichtGrund || ohneSp, E3_MODELLE_G) : `<b>${gw === 'aus' ? 'aus' : modellName(gw === 'orbit_prio2' ? 'orbit_prio2' : 'orbit_v2')}</b>`)
         }
       }
       firma = `<div class="wd-abl-abschnitt">${e3E(e3Name(sel))}</div><div data-e3-firma="${e3E(n)}">

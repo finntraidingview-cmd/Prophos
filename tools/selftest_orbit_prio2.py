@@ -336,7 +336,7 @@ html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 check("data-e3-modell=" in html and "apdApi('POST', '/modell', { firma, modell })" in html and "mSel(`data-e3-modell=\"${e3E(n)}\"`, md, nichtGrund)" in html,
       "Einstellungen: Dropdown „Modell“ speichert über /admin/auto-plan/modell, Tradeify/Topstep ausgegraut mit Grund")
 check("aktion: 'modell', firma, modell }, '/admin/gruppen-plan')" in html and "data-e3-gruppe=" in html, "MO1b: Zeile je Gruppe speichert über /admin/gruppen-plan")
-check("tpIstApexHedge(p) ? 'Orbit Prio 2'" in html and "'Apex-Hedge'" not in html, "Anzeige-Name „Orbit Prio 2“ statt „Apex-Hedge“")
+check("tpIstApexHedge(p) ? modellName('orbit_prio2')" in html and "orbit_prio2: 'Orbit Prio 2'" in html and "'Apex-Hedge'" not in html, "Anzeige-Name „Orbit Prio 2“ statt „Apex-Hedge“")
 
 print()
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER:\n  - " + "\n  - ".join(FEHLER))

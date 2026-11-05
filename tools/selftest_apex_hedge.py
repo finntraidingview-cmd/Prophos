@@ -160,7 +160,7 @@ soll("Live-Zeile trägt apex_hedge", 'z["apex_hedge"] = plan_ist_apex_hedge(q)' 
 # 02.11.2026: 4 Aufrufer statt 3 — der vierte kam mit Zwei-Orbit (strengerer Riegel), dazu die Definition selbst = 5 Treffer.
 soll("SQL: Big-Trade-Riegel sieht Apex als WD (4 Aufrufer)", SQL.count("public.prophos_wd_wie(") == 5 and "function public.prophos_wd_wie(" in SQL)
 soll("Tab: konto_typ/Sticker/Tagesplan über tpWdZaehlt", HTML.count("tpWdZaehlt(") >= 3 and "if(tpWdZaehlt(p))        return 'wd'" in HTML)
-soll("Tab: Radar-Label Orbit Prio 2 (früher Apex-Hedge) mit Fusion-Spalte", "if(t.apex_hedge === true) return 'Orbit Prio 2'" in HTML
+soll("Tab: Radar-Label Orbit Prio 2 (früher Apex-Hedge) mit Fusion-Spalte", "if(t.apex_hedge === true) return modellName('orbit_prio2')" in HTML and "orbit_prio2: 'Orbit Prio 2'" in HTML
      and HTML.count("'Winning Day', 'Orbit Prio 2'") >= 3)
 soll("Tradeify-Final-Hedge-Schalter: Delta-Feld, Route (bool), tfh_stand",
      '"tradeify_final_hedge": tfh_stand()' in APP and '"tradeify_final_hedge = true | false"' in APP and "def tfh_stand(" in APP)
