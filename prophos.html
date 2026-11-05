@@ -85662,12 +85662,14 @@
       const deckelEigen = f.tp_deckel_plus != null
       // TP 1. Zyklus wirkt nur ohne Refund-Trade und ohne Gewinntage (fcp_konto_rechnen: die Zweige davor gewinnen) — sonst nicht als Feld zeigen
       const tpErsterWirkt = !f.erster_payout_eff && !gl.some(y => (y.roh || {}).gewinntage)
+      // E1e (Finn 05.11.2026 ~08:30): „SL 1-%-Regel" nur bei Firmen mit 1-%-Regel (laut Finn nur FundedNext) — die Erkennung je Konto (Add-on 1 % Rule) bleibt
+      const einsFirma = String((f.namen || [])[0] || '') === 'fundednext'   // FTMO hat live auch sl_1pct-Werte (gelten weiter für Konten mit Add-on 1 % Rule), Feld nur bei FundedNext
       const pills = gl.length > 1 ? `<div class="fcr-e-tabs fcr-w-pills" role="tablist">${gl.map(y => `<button type="button" role="tab" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === grSel ? ' class="on" aria-selected="true"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>` : ''
       if(!x) return `${pills}<div class="fcr-leer">keine Größe hinterlegt</div>`
       if(!ad) return `${pills}${fcrZeile('Ziel bis Waiting', '+' + fcrSpanne(r.ziel, '$'))}${fcrZeile('Consistency', pct ? `${fcrZahl(pct)} % je Zyklus${alleGr ? ' · alle Größen' : ''}` : 'aus')}
         ${pct ? fcrZeile('TP', 'Rest bis Ziel gleich verteilt') : `${stufen ? fcrZeile('TP-Stufen je Zyklus', stufen.map(fcrZahl).join(' · ') + ' $') : deckelEigen ? fcrZeile('TP-Deckel', `Ziel bis + ${fcrZahl(f.tp_deckel_plus)} $`) : ''}
           ${tpErsterWirkt ? fcrZeile('TP 1. Zyklus', r.tp_erster != null ? fcrZahl(r.tp_erster) + ' $' : 'normal') : ''}`}
-        ${fcrZeile('Lots', fcrSpanne(r.lots))}${fcrZeile('Stop-Loss', fcrSpanne(r.sl, '$'))}${fcrZeile('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL')}
+        ${fcrZeile('Lots', fcrSpanne(r.lots))}${fcrZeile('Stop-Loss', fcrSpanne(r.sl, '$'))}${einsFirma ? fcrZeile('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL') : ''}
         ${fcrZeile('Hedge', r.hedge_eur != null ? `${fcrZahl(r.hedge_eur)} € auf ${fcrZahl(r.dd)} $ DD` : '–')}`
       // O1 (Finn 05.11.2026 ~07:50): Consistency-TP = Zufall (p − 5 %) … p der Distanz, letzter Trade = Rest, kein Tag über p % der Gewinn-Tage
       const tpTeil = pct ? `<div class="fcr-e-hinweis fcr-w-leise">TP je Trade ${fcrZahl(Math.max(pct - 5, pct / 2))}–${fcrZahl(pct)} % der Distanz zum Ziel (Zufall), letzter Trade = Rest · kein Tag über ${fcrZahl(pct)} % der Gewinn-Tage</div>`
@@ -85685,7 +85687,7 @@
         ${fcrWAbschnitt('Trade')}<div class="fcr-e-felder">
           ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
           ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
-          ${fcrFeld('SL 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' })}
+          ${einsFirma ? fcrFeld('SL 1-%-Regel', r.sl_1pct ?? null, Object.assign({ feld: 'sl_1pct' }, gz), { bereich: true, einheit: '$', leer: 'wie SL' }) : ''}
           <div class="fcr-e-feld"><label>Hedge <small>· € auf $ DD</small></label><div class="fcr-e-spanne fcr-e-paar">
             <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.hedge_eur == null ? '' : fcrZahl(r.hedge_eur))}" placeholder="€" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'hedge_eur' }, gz)))}" title="Fusion-Gegenhedge in €"><span>auf</span>
             <input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(r.dd == null ? '' : fcrZahl(r.dd))}" placeholder="$ DD" data-fcr-in="${escapeHtml(JSON.stringify(Object.assign({ feld: 'dd' }, gz)))}" title="Max Drawdown des Kontos in $"></div></div>
