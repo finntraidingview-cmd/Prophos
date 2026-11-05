@@ -44736,7 +44736,9 @@
     const ep = (a.maxRisikoTrade > 0) || accEinsProzentName(a)
     // Prüfer O1: nur Funded CFD — bei Challenges/Funded/WD speist max_risiko_trade das Hedge-Risiko (hedgeRisikoMaster, WD-Farmer wdSl || maxRisikoTrade),
     // ein Fehlklick würde dort die Hedge-Lots ändern. Dort bleibt der Max-Risiko-Chip (accRisikoChipHtml) in der Typ-Spalte, nur Anzeige.
-    if(a.type === 'funded_cfd'){
+    // O1b (Finn 05.11.2026, Foto Accounts .2056: „1 % Rule nur möglich bei FundedNext, wie gesagt"): nur FundedNext; bei einer anderen Firma nur,
+    // wenn es schon AN ist (max_risiko_trade / „1% Rule" im Namen) — damit man es ausschalten kann (wie On Demand)
+    if(a.type === 'funded_cfd' && (accIstFundedNextCfd(a) || ep)){
       const b = a.maxRisikoTrade > 0 ? Number(a.maxRisikoTrade).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : ''
       const t = ep ? `1 % Rule an${b ? ' · max ' + b + ' je Trade' : ''}${accEinsProzentName(a) ? ' · steht im Namen' : ''}` : '1 % Rule aus — Klick schaltet an (max Risiko = 1 % der Kontogröße)'
       chips.push(`<button type="button" class="acc-addon${ep ? ' an' : ''}" data-acc-addon="eins" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>1 % Rule</button>`)
@@ -44752,6 +44754,7 @@
   async function accAddonUmstellen(id, art, btn){
     const a = (accounts || []).find(x => String(x.id) === String(id)); if(!a) return
     if(art === 'eins' && a.type !== 'funded_cfd') return   // nie bei anderen Kontoarten (Hedge-Risiko, Prüfer O1)
+    if(art === 'eins' && !accIstFundedNextCfd(a) && !(a.maxRisikoTrade > 0) && !accEinsProzentName(a)) return   // O1b: anschalten nur bei FundedNext
     let upd = null, msg = ''
     if(art === 'od'){ upd = { on_demand: !a.onDemand }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
     else if(art === 'eins'){
