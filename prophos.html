@@ -54296,6 +54296,7 @@
     const _fin = echoV2Final(plan, po)   // pass/blow/beide/null — reist als final mit, der Bot schreibt es in die Puls-Spur
     let r = null
     const t0 = Date.now()
+    sfSendetHier(plan.id)   // CL1: ab hier kann eine Order raus — nie „nichts gesendet" aus dem Speicher
     for(;;){
       const tReq = Date.now()
       try{
@@ -55030,6 +55031,7 @@
                 const _fin = echoV2Final(plan, po)
                 const laufVorher = _pfV2Laeuft
                 _pfV2Laeuft = String(plan.id)
+                sfSendetHier(plan.id)   // CL1: ab hier kann eine Order raus — nie „nichts gesendet" aus dem Speicher
                 try{
                   for(;;){
                     pfLebt(plan.id, 340000)   // master-order darf bis 320 s brauchen (s. pfLebt)
@@ -56807,7 +56809,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2102'
+  const OS_TAB_BUILD = '2026-09-22.2103'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57347,6 +57349,10 @@
   }
   window._faVorStart = plan => faVorStart(plan)   // Test-Haken (Stub)
   async function tpOrbitStarten(planId, fern, opts){
+    sfLaeuftMarke(planId, true)   // CL1: Start läuft (auch Hand/Fern) — die Still-Nachkontrolle wartet
+    try{ return await tpOrbitStartenMitMarke(planId, fern, opts) }finally{ sfLaeuftMarke(planId, false) }
+  }
+  async function tpOrbitStartenMitMarke(planId, fern, opts){
     if(!fern) return tpOrbitStartenKern(planId, null, opts)
     let gemeldet = false
     const f2 = Object.assign({}, fern, { melde: x => { gemeldet = true; return fern.melde(x) } })
@@ -57574,6 +57580,7 @@
       if(tsPulsModus() === 'aus') return fehler('Puls für Topstep ist AUS (Admin → Winning Days → Ablauf) — nichts gestartet. Topstep V2 von Hand: „Läuft".')
       if(tsPulsModus() === 'lesen'){
         _tpOrbitLaeuft = true
+        sfSendetHier(plan.id)   // CL1 (Probe ohne Order, aber Puls läuft — vorsichtig wie gesendet)
         try{
           if(imPopup) _pfAddRow('ob-order', 'Puls-Probe in TopstepX (bis vor den Knopf)')
           if(imPopup) _pfSet('ob-order', 'warn', `⏳ TopstepX → Konto ${escapeHtml(extId)} → Balance, Flach-Prüfung, Order-Typ, Brackets, Contract, Menge — endet VOR dem Klick, KEINE Order (Schalter „nur lesen")`)
@@ -57661,6 +57668,7 @@
       }
     }
     _tpOrbitLaeuft = true
+    sfSendetHier(plan.id)   // CL1: ab hier kann Puls klicken — nie „nichts gesendet" aus dem Speicher
     // KONTO-BELEG AUS DER ORDER (29.10.2026, Marc pc-7ftp5l 28.10. abends, Apex-Big-Trades 130ef370/744eb925/c06e02a5): die Order bewies das
     // Konto über den Listen-Klick (konto_aktiv = volle External ID), einen Beleg setzte aber nur der Heimweg (bigTradeHeim). Die Heim-Wache
     // hielt den Puls-Chrome bei gekürztem Apex-Namen deshalb für fremd und schickte 90 s nach der Order einen überflüssigen Heimweg (11–14 s
@@ -58213,6 +58221,7 @@
   // das Popup jetzt in Ruhe und claimt nichts (wie bei jedem laufenden Check). Claim, Start und Guard bleiben unverändert.
   let _pfV2Laeuft = null
   function tpV2Nacheinander(planId, order){
+    sfLaeuftMarke(planId, true)   // CL1: wartet in der Kette = läuft (Gegenprüfung)
     const lauf = _pfV2Kette.then(async () => {
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
@@ -58220,7 +58229,7 @@
       _pfV2Laeuft = String(plan.id)
       try{ await tpPreflightMt5V2(plan) }
       finally{ if(_pfV2Laeuft === String(plan.id)) _pfV2Laeuft = null }
-    }).catch(e => console.warn('[echo-v2] Check', (e && e.message) || e))
+    }).catch(e => console.warn('[echo-v2] Check', (e && e.message) || e)).finally(() => sfLaeuftMarke(planId, false))
     _pfV2Kette = Promise.race([lauf, new Promise(r => setTimeout(r, 4 * 60000))])
     return lauf
   }
@@ -62206,6 +62215,18 @@
   async function sfBehoben(plan, f){
     if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'riegel_aufgegeben' || f.schritt === 'index_pause') return null   // R4b: Startfenster zu Ende — nie von selbst neu einplanen (neue Uhrzeit von Hand geht)
+    // STILLER CLAIM (CL1, Gegenprüfung): der Beleg „nichts gesendet" galt beim Melden — dazwischen kann von Hand/vom Handy gestartet worden sein (der
+    // meldet ohne Startzeit keinen neuen Start-Fehler). Neu eingeplant wird nur, wenn JETZT frisch aus der DB nichts dagegen spricht: noch planned, nie
+    // gestartet/gesendet, keine Puls-Antwort seit dem Claim, keine UNKLAR-Marke, Flag unverändert puls_still — und hier weder gesendet noch ein Lauf
+    if(f.schritt === 'puls_still'){
+      if(sfHier(plan.id).gesendet || sfLaeuftHier(plan)) return null
+      let row = null
+      try{ const { data } = await supabase.from('trade_plans').select('status,started_at,orbit_gesendet_at,start_um_gestartet_at,mt5_baseline').eq('id', plan.id).maybeSingle(); row = data || null }catch(_){ row = null }
+      if(!row || row.status !== 'planned' || row.started_at || row.orbit_gesendet_at) return null
+      const b = (row.mt5_baseline && typeof row.mt5_baseline === 'object') ? row.mt5_baseline : {}, cl = Date.parse(row.start_um_gestartet_at || '') || 0
+      if(b.puls_unklar || !b.start_fehler || b.start_fehler.schritt !== 'puls_still' || b.start_fehler.unklar) return null
+      if(b.puls_spur && (Date.parse(b.puls_spur.at) || 0) >= cl - 5000) return null
+    }
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
     // Winning Day, von der Auge-Sperre angehalten (Sperre seit 30.10.2026 nur noch Nova): braucht kein Auge, sofort regelkonform nachholen
     if((f.schritt === 'auge_fehlt' || f.schritt === 'auge_blind') && !tsxStartBrauchtAuge(plan)) return 'Winning Day braucht kein TopstepX-Auge'
@@ -62339,10 +62360,34 @@
     return SF_BELEG_NICHT_PLATZIERT.some(rx => rx.test(kopf))
   }
   window._sfVorOrderBeleg = sfVorOrderBeleg
-  function sfStillUrteil(p, jetzt, laeuftHier, masterFlach){
-    if(!p || p.route !== 'mt5' || p.status !== 'planned' || !p.startUmGestartetAt || p.startedAt || p.orbitGesendetAt || laeuftHier) return null
+  /* STILLER CLAIM AUF ALLEN PULS-WEGEN (CL1, 05./06.11.2026, Master nach TC1c: „ein Claim ohne Start muss eine Fehler-Spur hinterlassen und regelkonform
+   * nachholbar sein, statt still zu hängen — kein Doppelstart, wenn der Bot doch läuft"). Befund: die Nachkontrolle galt nur für Echo mit Hedge (mt5);
+   * Orbit/Topstep/Echo V2 (tvv2/tsv2/mt5v2) blieben nach einem Claim ohne Ergebnis für immer stumm (Jacob 14f5ebf2: Claim 19:51 Dubai, um 20:09
+   * „Prophos-Tab antwortet nicht" — Tab hing/lud neu mitten im Start, danach nichts). Beleg „nichts gesendet" ohne Antwort jetzt aus dem SPEICHER
+   * dieser Seite: sie hat den Claim selbst gesetzt (sfGeclaimtHier, tpStartUmTick) und seitdem nie an Bot/Puls gesendet (sfSendetHier — gesetzt
+   * VOR jedem master-order bzw. Puls-Lauf, also nie zu spät). Nach einem Neuladen ist der Speicher leer → kein Beleg → unklar (Handy, Order prüfen).
+   * Ohne eigenen Beleg melden die anderen Wege erst nach SF_STILL_FREMD_MS — die Seite mit dem Beleg ist dann schon dran gewesen. */
+  const SF_STILL_ROUTEN = ['mt5', 'mt5v2', 'tvv2', 'tsv2'], SF_STILL_FREMD_MS = 10 * 60000
+  function sfGeclaimtHier(id, claimIso){ try{ (window._sfClaimHier || (window._sfClaimHier = new Map())).set(String(id), Date.parse(claimIso) || Date.now()) }catch(_){} }
+  function sfSendetHier(id){ try{ (window._sfSendetHier || (window._sfSendetHier = new Set())).add(String(id)) }catch(_){} }
+  // Laufmarke je Plan (Gegenprüfung CL1): ein Hand-/Fern-Start in tpOrbitStarten bzw. ein Plan in der Echo-V2-Kette gilt als „läuft", bis er fertig ist
+  function sfLaeuftMarke(id, an){
+    try{ const m = window._sfLaeuftIds || (window._sfLaeuftIds = new Map()), k = String(id), n = (m.get(k) || 0) + (an ? 1 : -1)
+      if(n > 0) m.set(k, n); else m.delete(k) }catch(_){}
+  }
+  function sfHier(id){
+    let claim = null, gesendet = false
+    try{ claim = (window._sfClaimHier && window._sfClaimHier.get(String(id))) || null; gesendet = !!(window._sfSendetHier && window._sfSendetHier.has(String(id))) }catch(_){}
+    return { claim, gesendet }
+  }
+  function sfStillUrteil(p, jetzt, laeuftHier, masterFlach, hier){
+    if(!p || !SF_STILL_ROUTEN.includes(p.route) || p.status !== 'planned' || !p.startUmGestartetAt || p.startedAt || p.orbitGesendetAt || laeuftHier) return null
     const claim = Date.parse(p.startUmGestartetAt) || 0
     if(!claim || jetzt - claim < SF_STILL_MS || jetzt - claim > 24 * 3600000) return null   // älter als 24 h: Altlast, kein Alarm
+    // CL1: Beleg aus dem Speicher — genau dieser Claim kam von dieser Seite, seitdem nichts gesendet
+    const hierBeleg = !!(hier && hier.claim != null && Math.abs(Number(hier.claim) - claim) < 5000 && !hier.gesendet
+      && !(p.mt5Baseline && p.mt5Baseline.puls_unklar) && !(p.route === 'mt5' && masterFlach === false))   // Gegenprüfung: UNKLAR-Marke / Master offen → kein Beleg
+    if(p.route !== 'mt5' && !hierBeleg && jetzt - claim < SF_STILL_FREMD_MS) return null
     const f = sfFlag(p)
     if(f && (Date.parse(f.at) || 0) >= claim - 5000) return null   // nach diesem Claim schon gemeldet
     const sp = (p.mt5Baseline && p.mt5Baseline.puls_spur) || null
@@ -62351,6 +62396,11 @@
     const min = Math.round((jetzt - claim) / 60000)
     if(spNichts) return { unklar: false, msg: `Geclaimt vor ${min} min, danach still — letzte Order-Antwort: ${String(sp.msg).slice(0, 220)}` }
     if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.` }
+    if(!spNach && hierBeleg) return { unklar: false, msg: `Geclaimt vor ${min} min, der Start endete in diesem Tab ohne Ergebnis, bevor etwas an ${p.route === 'mt5' || p.route === 'mt5v2' ? 'den Bot' : 'Puls'} ging — nichts gesendet.` }
+    const wo = p.route === 'mt5v2' ? 'im Master-Terminal' : 'in ' + pulsPlattform(p)
+    if(p.route !== 'mt5') return { unklar: true, msg: spNach
+      ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → ${wo} prüfen, ob eine Order liegt.`
+      : `Geclaimt vor ${min} min, danach kein Ergebnis (Tab neu geladen oder Start lief woanders) → ${wo} prüfen, ob eine Order liegt.` }
     return { unklar: true, msg: spNach
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Order-Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → im Master-Terminal prüfen, ob eine Order liegt.`
       : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.` }
@@ -62515,26 +62565,41 @@
     finally{ _deLaeuft = false }
   }
   setInterval(deTick, 60000)
+  // CL1: läuft hier gerade ein Start für diesen Plan (Echo-Check, Echo-V2-Kette, Orbit-/Topstep-Lauf, Startzeit-Takt)? Ein laufender Orbit-Lauf hält ALLE an
+  function sfLaeuftHier(p){
+    const id = String((p && p.id) || '')
+    // Gegenprüfung CL1: auch Signal-/Remote-Lauf und jede laufende Echo-V2-Kette halten alle Pläne an (vorsichtig: lieber einen Takt später melden)
+    try{ return pfLebtJetzt(id) || !!_pfV2Laeuft || !!_tpOrbitLaeuft || !!_osActive || !!_rsAktiv || (!!_suLaeuft && String(_suLaufId) === id)
+      || !!(window._sfLaeuftIds && window._sfLaeuftIds.get(id)) }catch(_){ return true }
+  }
   async function sfStillPruefen(){
     const jetzt = Date.now()
-    const kand = (tradePlans || []).filter(p => sfStillUrteil(p, jetzt, pfLebtJetzt(p && p.id), null))
+    const kand = (tradePlans || []).filter(p => sfStillUrteil(p, jetzt, sfLaeuftHier(p), null, sfHier(p && p.id)))
     if(!kand.length) return
-    const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
-    if(!dd || dd.copier_offline || dd._httpFail) return   // Panel nicht lesbar → nächster Takt (sonst wüsste dieser PC nicht, ob der Plan ihm gehört)
+    // Echo mit Hedge: nur Pläne dieses PCs (lokale Copier-Instanz) + Flach-Beweis des Copiers; die anderen Wege brauchen das Panel hier nicht (CL1)
+    let dd = null
+    if(kand.some(p => p.route === 'mt5')){
+      dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+      if(!dd || dd.copier_offline || dd._httpFail) dd = null   // Panel nicht lesbar → Echo-mit-Hedge-Pläne im nächsten Takt (sonst wüsste dieser PC nicht, ob der Plan ihm gehört)
+    }
     for(const p0 of kand){
-      const ri = mt5RouteResolve(p0, dd.instances || [])
-      if(!ri) continue   // Plan gehört nicht zu diesem PC — dessen Tab prüft selbst
+      let ri = null
+      if(p0.route === 'mt5'){
+        if(!dd) continue
+        ri = mt5RouteResolve(p0, dd.instances || [])
+        if(!ri) continue   // Plan gehört nicht zu diesem PC — dessen Tab prüft selbst
+      }
       const { data: row } = await supabase.from('trade_plans').select('*').eq('id', p0.id).maybeSingle()
       if(!row || row.start_claim_art === 'verbrauch'
          || (!row.start_claim_art && Date.parse(row.start_um_gestartet_at) - Date.parse(row.start_um) > 30 * 60000)) continue   // verpasst: meldet tpStartUmTick selbst (Toast + Handy, von Hand starten)
       const p = rowToPlan(row)
-      const st = (ri.inst && ri.inst.status) || {}
-      const flach = (ri.inst && ri.inst.alive && !st.note && Array.isArray(st.master_positions)) ? st.master_positions.length === 0 : null
-      const u = sfStillUrteil(p, Date.now(), pfLebtJetzt(p0.id), flach)
+      const st = (ri && ri.inst && ri.inst.status) || {}
+      const flach = (ri && ri.inst && ri.inst.alive && !st.note && Array.isArray(st.master_positions)) ? st.master_positions.length === 0 : null
+      const u = sfStillUrteil(p, Date.now(), sfLaeuftHier(p0), flach, sfHier(p0.id))
       if(!u) continue
       // Plan von einem früheren Tag: sfTick plant nur heutige neu ein und meldet nur heutige als hängend → unklar (Handy-Meldung, von Hand)
       const alt = !!(p.startUm && sfTagDt(p.startUm) !== sfTagDt(new Date().toISOString()))
-      await sfMelden(p, { schritt: 'm5still', msg: u.msg + (alt ? ' (Plan von einem früheren Tag — von Hand entscheiden)' : ''), unklar: u.unklar || alt })
+      await sfMelden(p, { schritt: p.route === 'mt5' ? 'm5still' : 'puls_still', msg: u.msg + (alt ? ' (Plan von einem früheren Tag — von Hand entscheiden)' : ''), unklar: u.unklar || alt })
     }
   }
   let _sfLaeuft = false, _sfAbgleichAt = 0
@@ -63188,6 +63253,7 @@
       const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true, plan.startUm || null)
       if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }
       _suClaimPause.delete(String(plan.id))
+      if(!(verspaetet > fenster)) sfGeclaimtHier(plan.id, data[0].start_um_gestartet_at)   // CL1: Beleg „diese Seite hat geclaimt" (s. sfStillUrteil)
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
       renderTradePlans()
       // Start-Fenster: 30 min, Farmer 60 min (07.10.2026, vorher 10 min) — eine Schlange aus mehreren Konten darf nie verfallen.
