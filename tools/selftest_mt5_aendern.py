@@ -30,6 +30,10 @@ def check(ok, name):
         FEHLER.append(name)
 
 
+def src_bot():
+    return open(BOT, encoding="utf-8").read()
+
+
 def fn(src, name):
     i = src.index(f"\ndef {name}(") + 1
     return src[i:src.find("\n\n\n", i)]
@@ -258,8 +262,23 @@ def main():
           "fmt_preis: digits 1/2/3, immer Punkt (MT5-Felder unabhängig von der Windows-Sprache)")
     for dg, wert in ((1, 29746.2), (2, 29746.18), (3, 1.235)):
         f, spur = Feld((0, 0, 10, 10)), []
-        check(FT(f, P(wert, dg), "TP", spur) and f.inhalt == P(wert, dg) and any("leert nicht ('0.00')" in s for s in spur),
-              f"Feld füllt „0.00“ nach → über die Auswahl getippt, digits {dg}: {f.inhalt}")
+        # ES3 (05.11.2026): kein Löschversuch mehr (scheiterte in 99–100 % an „0.00") — gleich markieren und drübertippen
+        check(FT(f, P(wert, dg), "TP", spur) and f.inhalt == P(wert, dg) and not any("leert nicht" in s for s in spur)
+              and "^a{DELETE}" not in f.tasten and "{HOME}+{END}{DELETE}" not in f.tasten and f.tasten[:2] == ["{HOME}+{END}", "^a"],
+              f"Feld füllt „0.00“ nach → ohne Löschversuch über die Auswahl getippt, digits {dg}: {f.inhalt}")
+    # ES3: Feld-Takt (tipp_faktor < 1) tippt den Wert als einen Block — dasselbe Ergebnis, Rücklesen beweist es
+    exec(re.search(r"^ECHO_TIPP_FAKTOR_MIN = .*$", src_bot(), re.M).group(0), ns)
+    exec(re.search(r"^ECHO_TASTE_MIN_S = .*$", src_bot(), re.M).group(0), ns)
+    exec(fn(src_bot(), "feld_takt"), ns)
+    ns["_hand"] = lambda: {"tempo": 1.0}
+    ns["_ECHO_TEMPO_LAUF"], ns["_ECHO_F9"] = {"tipp_faktor": 0.5}, {"an": True}
+    f, spur = Feld((0, 0, 10, 10)), []
+    check(FT(f, "29746.18", "SL", spur) and f.inhalt == "29746.18" and f.tasten == ["{HOME}+{END}", "^a", "29746.18"]
+          and "SL getippt: 29746.18" in spur, "Feld-Takt (tipp_faktor 0,5, F9-Dialog): Pos1+Shift+Ende, ^a, Wert als ein Block → bestätigt")
+    ns["_ECHO_F9"] = {"an": False}
+    f, spur = Feld((0, 0, 10, 10)), []
+    check(FT(f, "29746.18", "TP", spur) and f.tasten[2:] == list("29746.18"), "außerhalb des F9-Dialogs (Ändern-Dialog): Zeichen-Takt wie bisher")
+    ns["_ECHO_TEMPO_LAUF"] = {"tipp_faktor": 1.0}
     f, spur = Feld((0, 0, 10, 10), komma=True), []
     check(FT(f, "29746.18", "SL", spur) and any("SL getippt: 29746.18" in s for s in spur), "Feld zeigt Komma (29746,18) → als Zahl gleich")
     f, spur = Feld((0, 0, 10, 10), taub=True), []

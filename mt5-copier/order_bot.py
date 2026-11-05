@@ -2784,11 +2784,13 @@ WARTE_DENK_ANTEIL = 0.04
 WARTE_DENK_S = (0.3, 1.1)
 
 
-def warte_dauer(minimum, streuung, zufall=None, hand=None):
+def warte_dauer(minimum, streuung, zufall=None, hand=None, ruhig=None):
     """REIN RECHNEND (testbar): Länge einer _warte-Pause (s). Minimum bleibt unangetastet (was die UI braucht). Obendrauf statt
     gleichverteilt 0..streuung jetzt schief verteilt (u^1,4 — kurze Zugaben häufiger) mal Pausen-Faktor der Hand (0,8–1,5), also
     0..1,5 × streuung; der Schnitt bleibt fast gleich (≈ 0,48 statt 0,5 × streuung), die Spanne wird breiter. Bei Pausen ab
-    WARTE_DENK_AB s Minimum in rund 4 % eine kurze Denkpause (+0,3–1,1 s). streuung 0 = bewusst fest (keine Zugabe, keine Denkpause)."""
+    WARTE_DENK_AB s Minimum in rund 4 % eine kurze Denkpause (+0,3–1,1 s). streuung 0 = bewusst fest (keine Zugabe, keine Denkpause).
+    ruhig (ES3, 05.11.2026; None = _ECHO_RUHIG des Laufs, an nur im F9-Dialog bei Einstellung „Denkpausen aus"): keine Denkpause, Pausen-
+    Faktor höchstens 1,0 — die Streuung 0..streuung bleibt (Jitter-Regel), das Minimum sowieso."""
     rnd = zufall or random
     try:
         mn, st = max(0.0, float(minimum)), max(0.0, float(streuung))
@@ -2796,11 +2798,115 @@ def warte_dauer(minimum, streuung, zufall=None, hand=None):
         return 0.0
     if st <= 0:
         return mn
+    if ruhig is None:
+        ruhig = bool((globals().get("_ECHO_RUHIG") or {}).get("an"))   # get: Selbsttest-Lader ziehen warte_dauer allein
     h = hand or _hand()
-    d = mn + (rnd.random() ** 1.4) * st * h["pause"]
-    if mn >= WARTE_DENK_AB and rnd.random() < WARTE_DENK_ANTEIL:
+    d = mn + (rnd.random() ** 1.4) * st * (min(1.0, h["pause"]) if ruhig else h["pause"])
+    if not ruhig and mn >= WARTE_DENK_AB and rnd.random() < WARTE_DENK_ANTEIL:
         d += rnd.uniform(*WARTE_DENK_S)
     return d
+
+
+# ECHO-TEMPO (ES3, Finn 05.11.2026: „Es ist ja per Zufallsprinzip mit Variablen, aber es sollte nicht über 1 Minute dauern … Orders sollen
+# viel schneller prozessiert werden, wie es ganz am Anfang war"). Befund ES1 (~970 Läufe): Bot bis Fill 16 s → 24 s seit .1798 (28.10., „alles
+# aus Zufall"), vor allem Volumen/SL/TP tippen (je Zeichen Haltezeit + Takt + Stocken) und der Löschversuch „Feld leert nicht", der in 99–100 %
+# aller Läufe scheitert und je Feld ~1,5–2 s Tasten kostet. Drei Werte als Einstellung (wd_farmer_regeln.puls_echo_tempo über GET /puls-regel,
+# lokal echo_tempo.json), Rückfall = die heutigen Werte:
+#   tipp_faktor  1,0 = heutiger Zeichen-Takt; < 1 = Feld-Takt (feld_takt): Haltezeit/Abstand EINMAL je Feld gewürfelt, je Zeichen ±15 %,
+#                ohne Stocken, mal Faktor (höchstens bis ECHO_TIPP_FAKTOR_MIN) — die Streuung bleibt je Lauf/Feld, nicht mehr je Zeichen
+#   denkpausen   True = heute; False = im F9-Dialog keine Denkpause und Pausen-Faktor ≤ 1 (warte_dauer ruhig)
+#   versatz_s    Bot-Versatz vor dem ersten Schritt 0..versatz_s (heute 1,2 s), höchstens ECHO_VERSATZ_MAX_S
+ECHO_TEMPO_STANDARD = {"tipp_faktor": 1.0, "denkpausen": True, "versatz_s": 1.2}
+ECHO_TIPP_FAKTOR_MIN = 0.3
+ECHO_VERSATZ_MAX_S = 3.0
+ECHO_TASTE_MIN_S = (0.012, 0.008)   # Feld-Takt nie unter 12 ms Haltezeit / 8 ms Abstand (vor .1798 tippte pywinauto ~10 ms ohne Haltezeit)
+_ECHO_RUHIG = {"an": False}
+# Tipp-Faktor nur im F9-Dialog (Gegenprüfung ES3): an ab „F9-Dialog offen", aus bei „Position offen" und im main-finally — der Ändern-Dialog
+# (SL/TP am Fill nachziehen bzw. nachtragen) tippt wie bisher
+_ECHO_F9 = {"an": False}
+
+
+def echo_tempo_werte(roh):
+    """REIN RECHNEND (testbar): Einstellung (dict aus /puls-regel bzw. echo_tempo.json, auch {"werte": …}) → vollständige, gekappte Werte.
+    Fehlt ein Schlüssel oder ist er unbrauchbar, gilt für ihn der heutige Wert (ECHO_TEMPO_STANDARD). -> dict"""
+    d = roh.get("werte") if isinstance(roh, dict) and isinstance(roh.get("werte"), dict) else roh
+    d = d if isinstance(d, dict) else {}
+    out = dict(ECHO_TEMPO_STANDARD)
+    try:
+        f = float(d["tipp_faktor"])
+        if f == f:                                        # NaN raus
+            out["tipp_faktor"] = min(1.0, max(ECHO_TIPP_FAKTOR_MIN, f))
+    except (KeyError, TypeError, ValueError):
+        pass
+    if isinstance(d.get("denkpausen"), bool):
+        out["denkpausen"] = d["denkpausen"]
+    try:
+        v = float(d["versatz_s"])
+        if v == v:
+            out["versatz_s"] = min(ECHO_VERSATZ_MAX_S, max(0.0, v))
+    except (KeyError, TypeError, ValueError):
+        pass
+    return out
+
+
+def echo_tempo_text(w):
+    """Spur-Zeile, nur wenn die Werte von heute abweichen (sonst None) — so ist in der Puls-Spur nachlesbar, mit welchem Tempo ein Lauf lief."""
+    if w == ECHO_TEMPO_STANDARD:
+        return None
+    return (f"Tempo: Tippen ×{w['tipp_faktor']:g} · Denkpausen {'an' if w['denkpausen'] else 'aus'} · Versatz 0–{w['versatz_s']:g} s"
+            ).replace(".", ",")
+
+
+def feld_takt(n, faktor, zufall=None, hand=None):
+    """REIN RECHNEND (testbar, ES3): (haltezeit, abstand) in s je Zeichen eines Feld-Werts für den Feld-Takt — Grundwerte EINMAL je Feld
+    (Haltezeit 30–110 ms, Abstand 20–90 ms, mal Hand-Tempo), je Zeichen ±15 %, kein Stocken, mal faktor, nie unter ECHO_TASTE_MIN_S.
+    -> Liste der Länge n."""
+    rnd = zufall or random
+    h = hand or _hand()
+    try:
+        f = min(1.0, max(ECHO_TIPP_FAKTOR_MIN, float(faktor)))
+    except (TypeError, ValueError):
+        f = 1.0
+    halte = rnd.uniform(0.03, 0.11) * h["tempo"] * f
+    abstand = rnd.uniform(0.02, 0.09) * h["tempo"] * f
+    return [(max(ECHO_TASTE_MIN_S[0], halte * rnd.uniform(0.85, 1.15)), max(ECHO_TASTE_MIN_S[1], abstand * rnd.uniform(0.85, 1.15)))
+            for _ in range(max(0, int(n)))]
+
+
+_ECHO_TEMPO_LAUF = dict(ECHO_TEMPO_STANDARD)   # Werte DIESES Laufs (run setzt sie); Polar/Close/Selbsttests ohne run: heutige Werte
+ECHO_TEMPO_DATEI = "echo_tempo.json"
+
+
+def _echo_tempo_lauf():
+    """Werte für diesen Lauf aus der lokalen echo_tempo.json (sofort, ohne Netz) — und im Hintergrund frisch von Railway holen und die Datei
+    für den NÄCHSTEN Lauf schreiben (GET /puls-regel/<pc>, 2 s, wie die Augen-Regel). Eine Änderung der Einstellung wirkt also ab dem
+    zweiten Echo-Lauf je PC. Nur eine ausdrückliche Antwort mit „echo_tempo" ändert die Datei; Netzfehler, alte App-Version oder
+    fehlende Spalte lassen sie stehen. Ohne Datei: heutige Werte. Nie ein Fehler nach außen."""
+    try:
+        werte = echo_tempo_werte(_augen_json_lesen(ECHO_TEMPO_DATEI))
+    except Exception:
+        werte = dict(ECHO_TEMPO_STANDARD)
+    pc = None
+    try:
+        pc = _augen_pc_id()
+    except Exception:
+        pass
+    if pc:
+        def _holen():
+            import urllib.request
+            try:
+                with urllib.request.urlopen(f"{PULS_BACKEND}/puls-regel/{pc}", timeout=2.0) as r:
+                    d = json.loads(r.read().decode("utf-8", "replace"))
+                if isinstance(d, dict) and isinstance(d.get("echo_tempo"), dict):
+                    _augen_json_schreiben(ECHO_TEMPO_DATEI, {"werte": d["echo_tempo"], "at": time.time(), "pc": pc})
+            except Exception:
+                pass
+        try:
+            import threading
+            threading.Thread(target=_holen, daemon=True).start()
+        except Exception:
+            pass
+    return werte
 
 
 def klick_haltezeit(zufall=None, hand=None):
@@ -11309,28 +11415,32 @@ def _feld_tippen(el, wert, name, trail, rahmen=None):
                 if _ins_feld_klicken():
                     trail.append(f"{name}-Feld angeklickt (Versuch {_versuch})")
             _warte(0.1, 0.15)
-            # Feld GARANTIERT leeren (18.08.2026, Finns 22-Einwand: steht vom
-            # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
-            # Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur
-            # eines von beiden. Danach ZURUECKLESEN, ob es wirklich leer ist.
-            _el_tasten(el, "^a{DELETE}", set_foreground=False)
-            _el_tasten(el, "{HOME}+{END}{DELETE}", set_foreground=False)
-            _warte(0.08, 0.1)
-            rest = (_feld_lesen(el) or "").strip()
-            if rest:
-                # Feld fuellt sich selbst wieder (Auto-Format)? Dann alles
-                # markieren und DRUEBERtippen — die Auswahl wird ersetzt, das
-                # Ruecklesen unten beweist das Ergebnis.
-                trail.append(f"{name}-Feld leert nicht ('{rest}') — tippe ueber die Auswahl")
-                _el_tasten(el, "^a", set_foreground=False)
-                _el_tasten(el, "{HOME}+{END}", set_foreground=False)
-            # Tippen im Hand-Takt (07.10.2026): je Zeichen ein eigener Abstand aus tipp_takt (× 0,6, damit es im Schnitt nicht
-            # langsamer wird als pywinautos festes 50-ms-Raster) — vorher tickte jedes Zeichen im exakt gleichen Abstand
+            # Feld leeren = ALLES MARKIEREN und DRUEBERtippen (18.08.2026, Finns 22-Einwand: steht vom letzten Trade noch '2' drin und es
+            # kommt '2' dazu, sind es 22). Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur eines von beiden; die Auswahl wird
+            # beim Tippen ersetzt, das Ruecklesen unten beweist das Ergebnis. ES3 (05.11.2026): der Löschversuch davor (Strg+A Entf,
+            # Pos1+Shift+Ende Entf, Nachlesen) ist raus — MT5 füllt das Feld sofort mit '0.00' nach, er scheiterte in 99–100 % aller
+            # Läufe („Feld leert nicht ('0.00') — tippe ueber die Auswahl") und kostete je Feld ~1,5–2 s Tasten. Der Weg danach war
+            # schon immer genau dieser.
+            # Reihenfolge Pos1+Shift+Ende ZUERST, dann Strg+A (Gegenprüfung ES3): bliebe Strg+A vorn, höbe Pos1 seine Markierung wieder
+            # auf — ein Feld, das nur Strg+A kann, bekäme den Wert vorn angefügt ('2' + '2.00'). So bleibt die Auswahl des Befehls stehen,
+            # den das Feld kennt. Feld-Takt (nur F9-Dialog, _ECHO_F9) auch für die Markier-Tasten — mit der Untergrenze ECHO_TASTE_MIN_S.
+            _tf = float((globals().get("_ECHO_TEMPO_LAUF") or {}).get("tipp_faktor") or 1.0) \
+                if (globals().get("_ECHO_F9") or {}).get("an") else 1.0
+            _tk = (lambda n: feld_takt(n, _tf)) if _tf < 1.0 else None
+            _el_tasten(el, "{HOME}+{END}", set_foreground=False, takt=_tk)
+            _el_tasten(el, "^a", set_foreground=False, takt=_tk)
             _txt = str(wert)
-            for _ch, _dt in zip(_txt, tipp_takt(len(_txt))):
-                # 28.10.2026: jede Taste mit eigener Haltezeit (tasten_takt, × 0,6) — Abstand danach × 0,3, im Schnitt kaum langsamer
-                _el_tasten(el, _ch, set_foreground=False, pruefen=False, tempo=0.6)
-                time.sleep(_dt * 0.3)
+            if _tf < 1.0:
+                # FELD-TAKT (ES3, Einstellung tipp_faktor < 1): der Wert als ein Block, Haltezeit/Abstand einmal je Feld gewürfelt
+                # (feld_takt), je Zeichen ±15 % — Streuung je Lauf/Feld statt je Zeichen
+                _el_tasten(el, _txt, set_foreground=False, pruefen=False, takt=_tk)
+            else:
+                # Tippen im Hand-Takt (07.10.2026): je Zeichen ein eigener Abstand aus tipp_takt (× 0,6, damit es im Schnitt nicht
+                # langsamer wird als pywinautos festes 50-ms-Raster) — vorher tickte jedes Zeichen im exakt gleichen Abstand
+                for _ch, _dt in zip(_txt, tipp_takt(len(_txt))):
+                    # 28.10.2026: jede Taste mit eigener Haltezeit (tasten_takt, × 0,6) — Abstand danach × 0,3, im Schnitt kaum langsamer
+                    _el_tasten(el, _ch, set_foreground=False, pruefen=False, tempo=0.6)
+                    time.sleep(_dt * 0.3)
             _warte(0.12, 0.15)
             ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
@@ -13179,6 +13289,11 @@ def run(cfg_path, cmd):
     trail = _StempelSpur()
     _spur_wache(trail, "v2order_zeit")   # Spur-Wache (23.10.2026): die Spur überlebt den 300-s-Deckel des Panels, s. _spur_wache
     trail.append(maus_hand_text())
+    # ECHO-TEMPO (ES3, 05.11.2026, s. ECHO_TEMPO_STANDARD): Werte dieses Laufs — weichen sie von heute ab, steht eine Zeile in der Spur
+    _ECHO_TEMPO_LAUF.clear()
+    _ECHO_TEMPO_LAUF.update(_echo_tempo_lauf())
+    if echo_tempo_text(_ECHO_TEMPO_LAUF):
+        trail.append(echo_tempo_text(_ECHO_TEMPO_LAUF))
     # PC-TIPP-SPERRE (30.10.2026, s. echo_tipp_sperre_urteil): nie zwei Echo-Läufe gleichzeitig an einem PC — vor dem ersten Schritt,
     # der ein Fenster anfasst (Login-Dialog, Terminal betreten, F9). Freigabe in main nach dem Heimweg.
     _sperre_t0 = time.time()
@@ -13207,7 +13322,8 @@ def run(cfg_path, cmd):
     # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
     # beieinander. 0-1.2 s Wuerfel VOR dem ersten sichtbaren Schritt zieht die
     # Laeufe von Beginn an auseinander.
-    _warte(0.0, 1.2)
+    # ES3 (05.11.2026): Streuung als Einstellung versatz_s (heute 1,2 s, Vorschlag 0,6 s); 0 = kein Versatz
+    _warte(0.0, float(_ECHO_TEMPO_LAUF.get("versatz_s", 1.2)))
 
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     # F1 (04.11.2026): bis 30 s gestreut neu suchen statt einmal — höchstens bis Sekunde TERMINAL_SUCHE_BIS des Laufs (Gegenprüfung: Login/Warm-Warten
@@ -13280,6 +13396,9 @@ def run(cfg_path, cmd):
                            + _spur(trail) + "]"
                            + (" — " + sperre[1] if sperre else " — " + _UAC_HINWEIS if vorn == 0 else "") + f9_zusatz}
     trail.append("F9-Dialog offen")
+    # ES3 (05.11.2026): Einstellung „Denkpausen aus" gilt ab hier bis „Position offen" (bzw. bis zum Ende des Laufs, main setzt zurück)
+    _ECHO_RUHIG["an"] = not _ECHO_TEMPO_LAUF.get("denkpausen", True)
+    _ECHO_F9["an"] = True             # Tipp-Faktor nur im F9-Dialog
     # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
     # Tempo-Umbau: "manchmal vertippt er sich beim Asset und findet es nicht —
     # seit heute"). Vorher lieferte die sekundenlange Baum-Suche dem frisch
@@ -13611,6 +13730,7 @@ def run(cfg_path, cmd):
             unruhe.stop()
             fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
             trail.append(f"Position offen @ {fill}")
+            _ECHO_RUHIG["an"] = _ECHO_F9["an"] = False   # ES3: Denkpausen + Tipp-Faktor nur im F9-Dialog — Nachziehen/Ändern-Dialog wie bisher
             # Schalter aus (18.08.2026): Order pur, SL/TP macht Finn von Hand —
             # Dialog zu, fertig, KEIN Scan. (mit_sltp steht seit 02.09. oben.)
             if not mit_sltp:
@@ -21509,11 +21629,12 @@ def _win_tasten(text_sk):
     _tasten_gestreut(text_sk)
 
 
-def _tasten_gestreut(text_sk, with_spaces=True, tempo=1.0):
+def _tasten_gestreut(text_sk, with_spaces=True, tempo=1.0, takt=None):
     """send_keys-Ausdruck (z. B. „^a{DELETE}", „{F9}", „1.25") Taste für Taste: Drücken, Haltezeit, Loslassen, gewürfelter Abstand
     (tasten_takt). Zerlegt wird VOR dem ersten Tastendruck (pywinauto parse_keys, keine Wirkung) — klappt das nicht (andere pywinauto-
     Version), geht der ganze Ausdruck wie bisher über send_keys, nur mit gewürfelter pause. Modifier (Strg/Shift) zerlegt pywinauto
-    selbst in getrenntes Drücken und Loslassen; die bleiben so und bekommen nur den Abstand."""
+    selbst in getrenntes Drücken und Loslassen; die bleiben so und bekommen nur den Abstand.
+    takt (ES3, 05.11.2026): Funktion n → [(haltezeit, abstand)] statt tasten_takt (Feld-Takt feld_takt); tempo wirkt dann nicht zusätzlich."""
     from pywinauto import keyboard
     try:
         folge = []
@@ -21526,7 +21647,13 @@ def _tasten_gestreut(text_sk, with_spaces=True, tempo=1.0):
     except Exception:
         keyboard.send_keys(text_sk, with_spaces=with_spaces, pause=random.uniform(0.03, 0.08))
         return
-    for (runter, hoch), (halte, abstand) in zip(folge, tasten_takt(len(folge))):
+    if takt is not None:
+        zeiten, tempo = takt(len(folge)), 1.0
+        if len(zeiten) < len(folge):                       # Rechenfehler im Takt → nie weniger Tasten, Rest im alten Takt
+            zeiten = list(zeiten) + tasten_takt(len(folge) - len(zeiten))
+    else:
+        zeiten = tasten_takt(len(folge))
+    for (runter, hoch), (halte, abstand) in zip(folge, zeiten):
         runter.run()
         if hoch is not None:
             time.sleep(halte * tempo)
@@ -21534,7 +21661,7 @@ def _tasten_gestreut(text_sk, with_spaces=True, tempo=1.0):
         time.sleep(abstand * tempo)
 
 
-def _el_tasten(el, text_sk, set_foreground=True, with_spaces=False, pruefen=True, tempo=1.0):
+def _el_tasten(el, text_sk, set_foreground=True, with_spaces=False, pruefen=True, tempo=1.0, takt=None):
     """Ersatz für el.type_keys(text_sk, …) (28.10.2026): Prüfung und Fokus macht pywinauto wie bisher (type_keys mit leerem Text
     sendet nichts; pruefen=False lässt das weg — Zeichen-Schleifen nach einem Fokus-Beweis), die Tasten selbst gehen gestreut über
     _tasten_gestreut — vorher ~10 ms fester Abstand ohne Haltezeit. Ohne pywinauto-Tastatur (Mac, Attrappen im Selftest) wie früher
@@ -21546,7 +21673,7 @@ def _el_tasten(el, text_sk, set_foreground=True, with_spaces=False, pruefen=True
         return
     if pruefen:
         el.type_keys("", set_foreground=set_foreground)
-    _tasten_gestreut(text_sk, with_spaces=with_spaces, tempo=tempo)
+    _tasten_gestreut(text_sk, with_spaces=with_spaces, tempo=tempo, takt=takt)
 
 
 
@@ -29417,6 +29544,7 @@ def main():
         # hier statt in run(), damit JEDER Ausgang sie loest, auch der Absturz.
         # Ohne das haenge der Prozess bis zu seinem Ende am Terminal.
         _api_trennen()
+        _ECHO_RUHIG["an"] = _ECHO_F9["an"] = False   # ES3: Abbruch im F9-Dialog → Heimweg wieder mit den heutigen Pausen
     # Ausgangssituation (28.08.2026): nach jedem Lauf zurueck in den Prophos-
     # Tab — hier statt in run(), damit ausnahmslos JEDER Ausgang (Erfolg,
     # Abbruch, SL/TP-Warnung) denselben Heimweg nimmt. mousetest/inspect

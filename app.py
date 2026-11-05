@@ -22872,6 +22872,45 @@ def puls_regel_stand(jetzt, lesen=None):
     return True
 
 
+# ECHO-TEMPO (ES3, Finn 05.11.2026: „Orders sollen viel schneller prozessiert werden, wie es ganz am Anfang war"; Befund ES1: Bot bis Fill
+# 24 s statt 16 s seit .1798 „alles aus Zufall"): Tipp-Tempo im F9-Dialog, Denkpausen an/aus und Bot-Versatz als Einstellung in
+# wd_farmer_regeln.puls_echo_tempo (jsonb, sql/2026-11-05_echo_tipp_tempo.sql). Reist mit GET /puls-regel/<pc_id> als „echo_tempo" an den
+# Bot (der merkt es lokal in echo_tempo.json). EIGENER Cache und eigener Read: fehlt die Spalte noch oder ist die DB weg, bleibt die
+# Augen-/Topstep-Regel unberührt und der Schlüssel fehlt in der Antwort → der Bot nimmt seine gemerkten bzw. die heutigen Werte.
+# Gegenprüfung ES3: (1) Spalte null nach einem guten Read → {} senden (= „heutige Werte"), sonst behielte jeder PC nach dem Rückbau die zuletzt
+# geholten Werte für immer; (2) der Read läuft NIE im Request-Pfad (sb_select kann bei hängender DB > 10 s brauchen, die Augen-/Topstep-Antwort
+# hat beim Bot 2 s) — veraltet der Stand, frischt ein Hintergrund-Thread auf, die Anfrage nimmt sofort den letzten Stand.
+_PULS_ECHO_CACHE = {"at": 0.0, "wert": None, "gut": False, "laeuft": False}
+PULS_ECHO_CACHE_S = 60
+
+
+def puls_echo_tempo_lesen(jetzt, lesen=None):
+    """Ein Read von puls_echo_tempo in den Cache (lesen = sb_select, im Test ersetzbar). Fehler/fehlende Spalte: Stand bleibt."""
+    try:
+        z = (lesen or sb_select)("wd_farmer_regeln", {"id": "eq.1", "select": "puls_echo_tempo"})
+        w = (z[0].get("puls_echo_tempo") if z else None)
+        _PULS_ECHO_CACHE["wert"], _PULS_ECHO_CACHE["gut"] = (w if isinstance(w, dict) else {}), True
+    except Exception:
+        pass
+    finally:
+        _PULS_ECHO_CACHE["laeuft"] = False
+
+
+def puls_echo_tempo_stand(jetzt, lesen=None, sofort=False):
+    """Letzter guter Stand von puls_echo_tempo -> dict ({} = Spalte null = heutige Werte) | None (noch nie gut gelesen → Schlüssel fehlt).
+    Älter als PULS_ECHO_CACHE_S → EIN Hintergrund-Read (sofort=True liest im Aufruf, nur für Tests); die Anfrage wartet nie darauf."""
+    if jetzt - _PULS_ECHO_CACHE["at"] > PULS_ECHO_CACHE_S and not _PULS_ECHO_CACHE["laeuft"]:
+        _PULS_ECHO_CACHE["at"], _PULS_ECHO_CACHE["laeuft"] = jetzt, True
+        if sofort:
+            puls_echo_tempo_lesen(jetzt, lesen)
+        else:
+            try:
+                threading.Thread(target=puls_echo_tempo_lesen, args=(jetzt, lesen), daemon=True).start()
+            except Exception:
+                _PULS_ECHO_CACHE["laeuft"] = False
+    return _PULS_ECHO_CACHE["wert"] if _PULS_ECHO_CACHE["gut"] else None
+
+
 @app.route("/puls-regel/<pc_id>", methods=["GET", "OPTIONS"])
 def puls_regel_lesen(pc_id):
     if request.method == "OPTIONS":
@@ -22884,6 +22923,9 @@ def puls_regel_lesen(pc_id):
     if _PULS_REGEL_CACHE["tsx_gut"]:
         out["tsx"] = puls_augen_modus(pc_id, _PULS_REGEL_CACHE["tsx"])   # 'cdp' genau dann, wenn pc in puls_topstep_pcs (Vertrag T3)
         out["topstep_pc"] = out["tsx"] == "cdp"                          # dasselbe als bool (erste Fassung, falls jemand es liest)
+    et = puls_echo_tempo_stand(time.time())                              # ES3 (05.11.2026): nur mit gutem Stand ({} = heute), sonst ohne Schlüssel
+    if et is not None:
+        out["echo_tempo"] = et
     return jsonify(out)
 
 
