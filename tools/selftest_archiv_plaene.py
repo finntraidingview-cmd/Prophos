@@ -130,9 +130,9 @@ def main():
     ua = block(html, "  function unarchiveAccount(", "\n  }\n")
     check("archivUeberallEntfernen(accountId)" in ua and "delete _archNeu[accountId]" in ua, "unarchiveAccount ruft das Backend (alle Profile)")
     asa = block(html, "  function archivSchreibenAbgeglichen(", "\n  }\n")
-    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSetting('archive')" in asa and "{ ...basis, ..._archNeu }" in asa
+    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSettingGenau('archive')" in asa and "if(!gelesen.ok)" in asa and "{ ...basis, ..._archNeu }" in asa
           and "archivSchreibenAbgeglichen(accountId, arch[accountId])" in block(html, "  function archiveAccount(", "\n  /* ARCHIVIERT"),
-          "Archivieren: lokal ohne Upload, dann Cloud-Stand + eigene neue Einträge hochladen (kein alter Tab-Stand)")
+          "Archivieren: lokal ohne Upload, dann Cloud-Stand + eigene neue Einträge hochladen (kein alter Tab-Stand); Cloud nicht lesbar → kein Upload (AC2)")
 
     d = block(app, '@app.route("/admin/auto-plan/delta"')
     check("ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())" in d, "GET /admin/auto-plan/delta filtert mit gemerktem Archiv")

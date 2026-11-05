@@ -43256,7 +43256,7 @@
   /* ARCHIVIEREN MIT CLOUD-ABGLEICH (09.10.2026): jeder Schreibvorgang lädt den GANZEN lokalen Blob hoch (Write-through). Ein Tab, der seit
    * dem Login nicht neu geladen hat, kennt einen inzwischen überall entfernten Eintrag noch — beim nächsten Archivieren käme er zurück und
    * der Sweep löschte wieder Pläne. Deshalb: lokal sofort (ohne Upload), dann Cloud-Stand + dieser Eintrag hochladen (Cloud gewinnt wie beim
-   * Login). Cloud nicht lesbar → wie bisher der lokale Stand. _archNeu: alles, was DIESER Tab archiviert hat — zwei Archivierungen kurz
+   * Login). Cloud nicht lesbar → seit AC2 (05.11.2026) KEIN Upload (nur lokal, _archNeu nimmt den Eintrag beim nächsten Mal mit). _archNeu: alles, was DIESER Tab archiviert hat — zwei Archivierungen kurz
    * hintereinander lesen sonst denselben alten Cloud-Stand und die zweite überschriebe die erste. */
   const _archNeu = {}
   function archivSchreibenAbgeglichen(accountId, eintrag){
@@ -79408,7 +79408,7 @@
           else await saveSetting(cloudKey, local)
           migrated++
         }
-        // wenn beide leer — oder Zeile da, aber leer: nichts tun
+        // wenn beide leer — oder Zeile da, aber leer: nichts tun (AC2: eine leere Zeile verhindert die Migration — gewollt, sicherer als lokal hochladen)
         if(lsKey === 'prophos_account_archive' && typeof archWartenEnde === 'function') archWartenEnde(true)   // AC1: Archiv dieser ID da → Liste zeichnen
       }
       console.log(`[sync] Initial-Sync fertig — ${downloaded} aus Cloud geladen, ${migrated} hochgeladen${uebersprungen ? `, ${uebersprungen} nicht lesbar (ausgelassen)` : ''}`)

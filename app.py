@@ -26628,18 +26628,39 @@ def ap_blow_auto_pruefen(plan, acc, regel, neuer_plan=False):
 def _konto_archiv_eintragen(uid, aid, grund, jetzt_iso, name=None):
     """Konto im Archiv des Besitzers eintragen (user_settings key 'archive' {konto_id: {archived, reason, at}}: lesen → ergänzen →
     upsert; ein schon archiviertes Konto bleibt unverändert) + Echo-Löschauftrag wie archiveAccount() im Frontend (07.09.2026), still,
-    falls keins verknüpft. grund 'blown' | 'passed_pending'. → True (neu archiviert) | False (war schon). Wirft bei DB-Fehlern."""
-    z = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"})
-    v = (z[0] if z else {}).get("value")
-    if isinstance(v, str):
-        v = json.loads(v)
-    arch = v if isinstance(v, dict) else {}
-    neu = not (isinstance(arch.get(aid), dict) and arch[aid].get("archived"))
-    if neu:
+    falls keins verknüpft. grund 'blown' | 'passed_pending'. → True (neu archiviert) | False (war schon). Wirft bei DB-Fehlern.
+    AC3 (05.11.2026): Schreiben mit updated_at-Wächter wie _archiv_eintrag_entfernen — hat ein Tab/anderer Lauf zwischen Lesen und Schreiben das Archiv
+    geändert, neu lesen und nur diesen Eintrag ergänzen (bis 3 Versuche); ohne Zeile anlegen (gleichzeitig angelegt → neu lesen). Nie ein fremder Stand weg."""
+    neu = False
+    for _versuch in range(3):
+        z = sb_select("user_settings", {"select": "value,updated_at", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"})
+        zeile = z[0] if z else None
+        v = (zeile or {}).get("value")
+        if isinstance(v, str):
+            v = json.loads(v)
+        arch = dict(v) if isinstance(v, dict) else {}
+        neu = not (isinstance(arch.get(aid), dict) and arch[aid].get("archived"))
+        if not neu:
+            break
         arch[aid] = {"archived": True, "reason": grund, "at": jetzt_iso}
-        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
-                    json={"user_id": uid, "key": "archive", "value": arch, "updated_at": jetzt_iso},
-                    headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+        if zeile is None:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings",
+                            json={"user_id": uid, "key": "archive", "value": arch, "updated_at": jetzt_iso},
+                            headers=_sb_headers("return=minimal"), timeout=12)
+            if r.status_code == 409:      # gleichzeitig angelegt → neu lesen und ergänzen
+                continue
+            r.raise_for_status()
+            break
+        guard = {"user_id": f"eq.{uid}", "key": "eq.archive"}
+        if zeile.get("updated_at"):
+            guard["updated_at"] = f"eq.{zeile['updated_at']}"
+        else:
+            guard["updated_at"] = "is.null"
+        if sb_update("user_settings", guard, {"value": arch, "updated_at": jetzt_iso}):
+            break
+        # 0 Zeilen: dazwischen geschrieben → neu lesen
+    else:
+        raise RuntimeError("Archiv nach 3 Versuchen nicht geschrieben (Wächter updated_at)")
     try:
         ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"})
         if ml and ml[0].get("mt5_login"):
