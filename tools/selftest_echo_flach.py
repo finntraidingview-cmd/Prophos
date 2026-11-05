@@ -4,7 +4,7 @@ Fälle: Chris Tradeify CFD 100k …7785 Phase 1 (70af3250, frisch, Balance 0, 0 
 (27cde17e Marco, c4db1e61 Mike, 114a10de Marco — Terminal von der Geist-Prüfung wieder geöffnet, frischer flacher Stand) lösen aus; ein normaler
 offener Trade (1aaa8823 Marc, Position + Hedge), ein frischer Plan (< 60 min), eine alte Copier-Zeile (PC still), ein Plan nach 59 min und — S2-Stopp
 zu 37ba5b49 — Zeilen MIT note („warte auf Snapshot“ bei Echo V2, „Snapshot eingefroren“) nicht: dort ist pos [] nur unbekannt, das meldet die Frost-Wache.
-Läuft die echte echo_frost_tick mit Attrappen für Supabase und Versand. Ohne Netz. Aufruf: python3 tools/selftest_echo_flach.py"""
+Dazu TC1c Weg A (Echo-Ende von Railway nach ≥ 10 min frisch flach, nur mit belegter Balance: af4f8ee8 Jacob, 70af3250 Chris). Läuft die echte echo_frost_tick mit Attrappen für Supabase und Versand. Ohne Netz. Aufruf: python3 tools/selftest_echo_flach.py"""
 import ast
 import os
 import re
@@ -24,7 +24,7 @@ def check(ok, name):
 
 
 baum = ast.parse(SRC)
-FUNKS = ("echo_frost_urteil", "echo_gesehen_belegt", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig", "echo_terminal_zu",
+FUNKS = ("echo_frost_urteil", "echo_gesehen_belegt", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig", "echo_terminal_zu", "_ts_iso", "echo_auto_ende_urteil", "_echo_auto_ende_schreiben", "_wd_num", "_liq_de",
          "lt_echo_live_wahl", "echo_flach_urteil", "echo_flach_n", "echo_flach_schritt", "echo_frost_tick", "hand_echo_flach", "admin_in_sicht")
 ns = {"datetime": datetime, "timezone": timezone, "timedelta": timedelta, "time": __import__("time")}
 exec(re.search(r"^MODELL_NAME = .*$", SRC, re.M).group(0), ns)
@@ -32,6 +32,8 @@ exec(re.search(r"^ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S =
 exec(re.search(r"^ECHO_FLACH_S, ECHO_FLACH_ERINNERN_S = .*$", SRC, re.M).group(0), ns)
 exec(re.search(r'^ECHO_FLACH_TXT = .*$', SRC, re.M).group(0), ns)
 exec(re.search(r'^ECHO_TERMINAL_ZU_TXT = .*$', SRC, re.M).group(0), ns)
+exec(re.search(r"^ECHO_AUTO_ENDE_S = .*$", SRC, re.M).group(0), ns)
+exec(re.search(r"^ECHO_AUTO_ERGEBNIS_ANTEIL = .*$", SRC, re.M).group(0), ns)
 for f in FUNKS:
     knoten = next(k for k in baum.body if isinstance(k, ast.FunctionDef) and k.name == f)
     exec(compile(ast.Module(body=[knoten], type_ignores=[]), "app.py", "exec"), ns)
@@ -179,8 +181,78 @@ a = SRC[SRC.index("def admin_handarbeit("):]
 check('gr["manuell"] = hand_echo_flach(gr.get("manuell"), list(_echo_flach_stand.values()), sicht, std_aus, ausgeblendet)' in a[:a.index("antwort = {")],
       "admin_handarbeit hängt die Zeilen vor dem Zählen an (n zählt mit)")
 check("if(z.art === 'offen_flach') return zeile(z," in HTML, "Handarbeit-Popup zeigt den Text der neuen Zeile")
-t = SRC[SRC.index("def echo_flach_schritt("):SRC.index("def echo_frost_tick(")]
+t = SRC[SRC.index("def echo_flach_schritt("):SRC.index("# ECHO-ENDE VON RAILWAY")]
 check("sb_update" not in t and "_sb_anfrage" not in t and "baselinePatch" not in t and "rpc/" not in t, "kein Schreibweg in den Plan")
+
+# ── TC1c Weg A: Echo-Ende von Railway nach ≥ 10 min frisch flach, nur mit belegter Balance ──
+E = ns["echo_auto_ende_urteil"]
+J = T0
+chris = {"id": "70af3250-aaaa", "status": "open", "route": "mt5", "started_at": "2026-11-05T03:06:41.890+00:00", "final_at": None, "bal0": "103576.8",
+         "master_pl": None, "master_tp": "1465.00", "master_sl": "1806.00"}
+jacob = {"id": "af4f8ee8-aaaa", "status": "open", "route": "mt5", "started_at": "2026-11-05T15:47:00+00:00", "final_at": None, "bal0": "95643",
+         "master_pl": None, "master_tp": "2850.00", "master_sl": "713.00"}
+J2 = datetime(2026, 11, 5, 19, 48, tzinfo=timezone.utc).timestamp()
+z_jacob = {"updated_at": iso(J2 - 1), "note": None, "pos": [], "hd": {}, "mbal": "98266.71"}
+z_chris = {"updated_at": iso(J2 - 2), "note": None, "pos": [], "hd": {}, "mbal": "0"}
+acc_chris = {"tv_balance": "105144.8", "tv_balance_at": "2026-11-05T03:46:51.496+00:00"}
+u, g = E(jacob, z_jacob, {}, J2 - 11 * 60, True, J2)
+check(u is not None and u[0]["master_balance"] == 98266.71 and u[0]["beleg"] == "mt5_live" and u[1]["master_pl"] == 2623.71 and u[1]["status"] == "review"
+      and u[1]["pl_quelle"] == "echo" and u[0]["quelle"] == "railway_flach", f"af4f8ee8 Jacob: 11 min flach, Balance 98.266,71 aus MT5 → review, P&L +2.623,71 ({g})")
+u, g = E(chris, z_chris, acc_chris, J2 - 11 * 60, True, J2)
+check(u is not None and u[0]["master_balance"] == 105144.8 and u[0]["beleg"] == "konto" and u[1]["master_pl"] == 1568.0
+      and u[1]["ended_at"].startswith("2026-11-05T03:46:51"), f"70af3250 Chris: Balance 0 → letzte Konto-Lesung 105.144,80 nach dem Start, P&L +1.568, Ende 03:46 ({g})")
+check(E(jacob, z_jacob, {}, J2 - 9 * 60, True, J2)[0] is None, "erst 9 min flach → nichts")
+check(E(jacob, z_jacob, {}, J2 - 11 * 60, False, J2)[0] is None, "nie eine Position belegt → nichts")
+check(E(dict(jacob, final_at="2026-11-05T19:00:00Z"), z_jacob, {}, J2 - 11 * 60, True, J2)[0] is None, "final schon am Plan (Tab) → nichts")
+check(E(jacob, dict(z_jacob, note="Snapshot eingefroren …"), {}, J2 - 11 * 60, True, J2)[0] is None, "Zeile mit note → nichts (Frost-Wache)")
+check(E(jacob, dict(z_jacob, hd={"1": [{"ticket": 9}]}), {}, J2 - 11 * 60, True, J2)[0] is None, "Hedge noch offen → nichts")
+z_aus = dict(z_chris)
+check(E(chris, z_aus, {"tv_balance": "103576.8", "tv_balance_at": "2026-11-05T05:00:00+00:00"}, J2 - 11 * 60, True, J2)[0] is None,
+      "Balance 0 + Konto-Lesung = Start-Balance (Terminal evtl. nicht eingeloggt, Trade läuft) → nichts")
+check(E(chris, z_aus, {"tv_balance": "105144.8", "tv_balance_at": "2026-11-05T02:00:00+00:00"}, J2 - 11 * 60, True, J2)[0] is None,
+      "Konto-Lesung VOR dem Start → kein Beleg, nichts")
+check(E(dict(chris, bal0=None), z_aus, acc_chris, J2 - 11 * 60, True, J2)[0] is None, "Balance 0 ohne Start-Balance → kein Ergebnis-Beleg, nichts")
+u, _ = E(dict(jacob, bal0=None), z_jacob, {}, J2 - 11 * 60, True, J2)
+check(u is not None and "master_pl" not in u[1], "MT5-Balance ohne Start-Balance: beenden, aber kein P&L geschätzt (Finn trägt ein)")
+check(E(dict(jacob, master_pl=12.0), z_jacob, {}, J2 - 11 * 60, True, J2)[0][1].get("master_pl") is None, "vorhandener P&L wird nie überschrieben")
+check(E(dict(jacob, route="tvv2"), z_jacob, {}, J2 - 11 * 60, True, J2)[0] is None, "nur Echo-Routen")
+# Ablauf im Takt (Attrappe Supabase): schreibt final (Guard open) + review (Guard open), ⚪-Meldung, Uhr/Zeile weg
+GESENDET.clear(); LOG.clear(); ns["_alarm"]["gemeldet"].clear(); ns["_echo_flach_seit"].clear(); ns["_echo_flach_stand"].clear()
+GESCHRIEBEN = []
+
+
+class _R:
+    def __init__(self, d):
+        self.d = d
+
+    def json(self):
+        return self.d
+
+
+def _anfrage(meth, url, **kw):
+    GESCHRIEBEN.append(("rpc", kw["json"]["p_plan"], kw["json"]["p_status"], sorted(kw["json"]["p_patch"])))
+    return _R({"final": kw["json"]["p_patch"]["final"]})
+
+
+def _update(tab, filt, upd):
+    GESCHRIEBEN.append(("update", filt.get("id"), filt.get("status"), upd.get("status")))
+    return [{"id": filt["id"]}]
+
+
+PL = [dict(jacob, user_id="u-jacob", master_account_id="k7924", master_firm="FundedNext", master_name="100k 14197924 → Funded", eg="2026-11-05T15:48:18+00:00")]
+ACCS[:] = [{"id": "k7924", "external_id": "14197924", "tv_balance": "98266.71", "tv_balance_at": iso(J2 - 240)}]
+live = lambda j: [{"master_login": "14197924", "pc_name": "pc-auzre5", "updated_at": iso(j - 1), "note": None, "pos": [], "hd": {}, "mbal": "98266.71"}]   # noqa: E731
+ns.update(_sb_anfrage=_anfrage, sb_update=_update, _sb_pruefen=lambda r: None)
+STATE["jetzt"] = J2 - 11 * 60
+tick(PL, {"u-jacob": "Jacob"}, J2 - 11 * 60)
+check(not GESCHRIEBEN, "erster flacher Takt: nichts geschrieben")
+STATE["jetzt"] = J2
+tick(PL, {"u-jacob": "Jacob"}, J2)
+check(GESCHRIEBEN == [("rpc", "af4f8ee8-aaaa", "open", ["final"]), ("update", "eq.af4f8ee8-aaaa", "eq.open", "review")],
+      f"nach 11 min: final (Guard open) + review (Guard open) — {GESCHRIEBEN}")
+ae = [g for g in GESENDET if g["art"] == "echo_auto_ende"]
+check(len(ae) == 1 and ae[0]["prio"] == 3 and "98.266,71" in ae[0]["text"] and "+2623.71" in ae[0]["text"], f"⚪-Meldung „Echo-Plan beendet“ ({ae[0]['text'][:110] if ae else '-'})")
+check("af4f8ee8-aaaa" not in ns["_echo_flach_seit"] and "af4f8ee8-aaaa" not in ns["_echo_flach_stand"], "Flach-Uhr und „Manuelle Arbeit“-Zeile weg")
 
 print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

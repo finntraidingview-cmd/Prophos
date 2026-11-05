@@ -4334,7 +4334,7 @@ def alarm_tick():
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,puls_offen_n:mt5_baseline->final->>puls_offen_n,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
-           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,"
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,bal0:mt5_baseline->>master_balance,master_pl,master_sl,"
            "rv:mt5_baseline->richtung_verstoss")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
@@ -4534,6 +4534,73 @@ def echo_flach_schritt(r, z, login, namen, pc_namen, jetzt_ts, started_ts):
     return f"echo_flach|{pid}|{n}", text, {"pc": pc, "route": r.get("route"), "login4": login[-4:] if login else None, "flach_min": minuten}
 
 
+# ECHO-ENDE VON RAILWAY (TC1c Weg A, Master 05.11.2026, Finn: „der Account ist auch schon längst beendet, fix das, dass es nicht mehr kommt, diese Bugs
+# nerven“ — Jacob FundedNext 100k …7924 af4f8ee8, Chris Tradeify CFD 100k …7785 70af3250): beendet der PC-Tab einen Echo-Plan nicht (alte Claims, Balance 0 nach dem
+# Phasen-Ziel, Tab neu geladen …), obwohl der Copier Master UND Hedge seit ECHO_AUTO_ENDE_S durchgehend frisch flach meldet, macht Railway dasselbe wie das
+# normale Ende im Tab: final {master_balance, closed_sum, closed_tickets, at} (Guard open) → status review + ended_at, master_pl = Endbalance − Start-Balance
+# (pl_quelle echo). Nur mit BELEG: Balance > 0 aus der frischen Copier-Zeile, sonst die zuletzt gelesene Konto-Balance NACH dem Start — die aber nur, wenn
+# sie ein echtes Ergebnis zeigt (|Balance − Start| ≥ ECHO_AUTO_ERGEBNIS_ANTEIL × min(TP, SL)), damit ein nicht eingeloggtes Terminal (Balance 0, 0 Positionen)
+# nie einen laufenden Trade beendet. Ohne Beleg nichts — dann bleibt der 🟠 aus TC1b. Nie ohne Position-Beleg (echo_pos_gesehen_at), nie mit final am Plan.
+ECHO_AUTO_ENDE_S = 10 * 60
+ECHO_AUTO_ERGEBNIS_ANTEIL = 0.5
+
+
+def _ts_iso(x):
+    try:
+        return datetime.fromisoformat(str(x).replace("Z", "+00:00")).timestamp() if x else None
+    except (TypeError, ValueError):
+        return None
+
+
+def echo_auto_ende_urteil(r, z, acc, flach_seit, gesehen, jetzt_ts):
+    """REIN RECHNEND (testbar): → ((final, upd), "") zum Beenden oder (None, grund). r = Plan-Zeile aus alarm_tick (status, route, started_at,
+    final_at, bal0, master_pl, master_tp, master_sl), z = jüngste mt5_live-Zeile (updated_at, note, pos, hd, mbal), acc = Konto (tv_balance,
+    tv_balance_at), flach_seit = Railway-Flach-Uhr (echo_flach_schritt), gesehen = Position/Hedge für diesen Plan belegt."""
+    if str(r.get("status")) != "open" or str(r.get("route") or "") not in ("mt5", "mt5v2"):
+        return None, "kein offener Echo-Plan"
+    if r.get("final_at"):
+        return None, "final steht schon am Plan (Tab)"
+    if not gesehen:
+        return None, "für diesen Plan nie eine Position belegt"
+    start_ts = _ts_iso(r.get("started_at"))
+    if not start_ts or jetzt_ts - start_ts < ECHO_AUTO_ENDE_S:
+        return None, "Plan läuft noch keine 10 min"
+    if flach_seit is None or jetzt_ts - flach_seit < ECHO_AUTO_ENDE_S or not echo_flach_urteil(z, jetzt_ts):
+        return None, "Master + Hedge noch nicht 10 min frisch flach"
+    b0 = _wd_num(r.get("bal0"))
+    bal, beleg, beleg_at = _wd_num((z or {}).get("mbal")), None, None
+    if bal and bal > 0:
+        beleg, beleg_at = "mt5_live", (z or {}).get("updated_at")
+    else:
+        kb, kat = _wd_num((acc or {}).get("tv_balance")), _ts_iso((acc or {}).get("tv_balance_at"))
+        ziele = [abs(v) for v in (_wd_num(r.get("master_tp")), _wd_num(r.get("master_sl"))) if v]
+        if not (kb and kb > 0 and kat and kat >= start_ts):
+            return None, "keine belegte Balance > 0 nach dem Start"
+        if not b0 or not ziele or abs(kb - b0) < ECHO_AUTO_ERGEBNIS_ANTEIL * min(ziele):
+            return None, "Konto-Balance zeigt kein Trade-Ergebnis (Terminal evtl. nicht eingeloggt)"
+        bal, beleg, beleg_at = kb, "konto", (acc or {}).get("tv_balance_at")
+    ende_ts = flach_seit
+    if beleg == "konto" and _ts_iso(beleg_at):
+        ende_ts = min(ende_ts, _ts_iso(beleg_at))          # die Konto-Lesung lag schon nach dem Ende (Chris: 07:46 statt abends)
+    ende_iso = datetime.fromtimestamp(max(ende_ts, start_ts), timezone.utc).isoformat()
+    fin = {"master_balance": round(bal, 2), "closed_sum": None, "closed_tickets": [], "at": datetime.fromtimestamp(jetzt_ts, timezone.utc).isoformat(),
+           "quelle": "railway_flach", "beleg": beleg, "beleg_at": beleg_at, "flach_seit": datetime.fromtimestamp(flach_seit, timezone.utc).isoformat()}
+    upd = {"status": "review", "ended_at": ende_iso}
+    if b0 and b0 > 0 and r.get("master_pl") is None:
+        upd.update(master_pl=round(bal - b0, 2), pl_quelle="echo")
+    return (fin, upd), ""
+
+
+def _echo_auto_ende_schreiben(pid, fin, upd):
+    """final mit Guard open (mt5_baseline_patch), dann status review (Guard open). → True, wenn der Plan jetzt beendet ist. Wirft nach außen."""
+    rr = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                     json={"p_plan": pid, "p_patch": {"final": fin}, "p_status": "open"})
+    _sb_pruefen(rr)
+    if not rr.json():
+        return False                                       # nicht mehr open (Tab war schneller)
+    return bool(sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.open"}, upd))
+
+
 def echo_frost_tick(rows, namen, jetzt_ts):
     echo = [r for r in rows or [] if str(r.get("status")) == "open" and str(r.get("route") or "") in ("mt5", "mt5v2") and r.get("master_account_id")]
     for pid in [k for k in _echo_frost if k not in {str(r.get("id")) for r in echo}]:
@@ -4546,9 +4613,9 @@ def echo_frost_tick(rows, namen, jetzt_ts):
     if not echo:
         return
     ids = sorted({str(r["master_account_id"]) for r in echo})
-    accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,external_id", "id": f"in.({','.join(ids)})"}) or [])}
+    accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,external_id,tv_balance,tv_balance_at", "id": f"in.({','.join(ids)})"}) or [])}
     logins = sorted({str((accs.get(str(r["master_account_id"])) or {}).get("external_id") or "").strip() for r in echo} - {""})
-    live = lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at,note:status->>note,pos:status->master_positions,"
+    live = lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at,note:status->>note,pos:status->master_positions,mbal:status->>master_balance,"
                                                               "hd:status->hedges", "master_login": f"in.({','.join(logins)})"}) or []) if logins else {}
     pc_namen = _pc_namen_daten()
     for r in echo:
@@ -4580,6 +4647,25 @@ def echo_frost_tick(rows, namen, jetzt_ts):
                                  fl[1], uid=str(r.get("user_id") or ""), plan_id=pid, schluessel=fl[0], tag=f"alarm-echo-flach-{pid[:8]}", daten=fl[2])
         except Exception as e:
             print(f"[alarm] ⚠️ Echo flach {pid[:8]}: {type(e).__name__}: {e}", flush=True)
+        try:   # TC1c Weg A: ≥ 10 min frisch flach + belegte Balance → beenden wie das normale Ende im Tab
+            urteil, _grund = echo_auto_ende_urteil(r, z, accs.get(str(r["master_account_id"])), _echo_flach_seit.get(pid), gesehen, jetzt_ts)
+            if urteil and _echo_auto_ende_schreiben(pid, *urteil):
+                fin_a, upd_a = urteil
+                _echo_flach_seit.pop(pid, None)
+                _echo_flach_stand.pop(pid, None)
+                uid_a = str(r.get("user_id") or "")
+                konto_a = f"{r.get('master_firm') or ''} …{login[-4:]}".strip() if login else str(r.get("master_name") or "")
+                pl_a = upd_a.get("master_pl")
+                print(f"[alarm] Echo-Ende von Railway: {pid[:8]} {konto_a} Balance {fin_a['master_balance']} ({fin_a['beleg']})", flush=True)
+                alarm_senden(3, "echo_auto_ende", "Echo-Plan beendet — Master + Hedge flach",
+                             f"{namen.get(uid_a, uid_a[:8])} · {konto_a}: Copier meldete 10 min weder Position noch Hedge, Plan nach „Überprüfen“ — "
+                             f"Endbalance {_liq_de(fin_a['master_balance'], 2)} $ ({'MT5' if fin_a['beleg'] == 'mt5_live' else 'letzte Konto-Lesung'})"
+                             + (f", P&L {pl_a:+.2f} $" if pl_a is not None else "") + ". Bitte abhaken (Fusion-P&L prüfen).",
+                             uid=uid_a, plan_id=pid, schluessel=f"echo_auto_ende|{pid}", tag=f"alarm-echo-ende-{pid[:8]}",
+                             daten={"beleg": fin_a["beleg"], "balance": fin_a["master_balance"], "master_pl": pl_a})
+                continue
+        except Exception as e:
+            print(f"[alarm] ⚠️ Echo-Ende {pid[:8]}: {type(e).__name__}: {e}", flush=True)
         gestoert, grund = echo_frost_urteil(z, jetzt_ts)
         if not gestoert:
             _echo_frost.pop(pid, None)
