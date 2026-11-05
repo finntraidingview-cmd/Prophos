@@ -7426,6 +7426,28 @@ def _quickedit_modus(mode):
     return (int(mode) & ~0x0040) | 0x0080
 
 
+# ══ PC WACH HALTEN (PL2, Master 05.11.2026 nach PL1: PC von Mike pc-l5o8bv schlief heute 13× ein, 6 h, Panel UND Tab still, 3 Starts 21–64 min zu
+# spät). Bisher hielt nur der TV-Reader den PC wach (tv-reader/reader-server.py wach_halten, 25.09.2026) — fehlt oder hängt er, greift der
+# Energiesparplan von Windows. Jetzt auch das Panel, derselbe Weg: SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) — kein
+# Admin, kein UAC, keine Systemeinstellung geändert; der Bildschirm darf aus (kein ES_DISPLAY_REQUIRED). Gilt je THREAD, darum im Haupt-Thread
+# vor serve_forever (lebt so lange wie das Panel); endet der Prozess, gilt wieder Windows. Fehler → nur Hinweis, nichts bricht. ══
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+
+
+def pc_wach_halten(kernel32=None):
+    """→ None (kein Windows), True (gesetzt), False (abgelehnt/Fehler). kernel32 = Ersatz für Tests. Wirft nie."""
+    try:
+        if kernel32 is None:
+            if os.name != "nt":
+                return None
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+        return bool(kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED))
+    except Exception:
+        return False
+
+
 def quickedit_aus():
     """-> None (kein Windows), True (aus bzw. war schon aus), False (keine Konsole / abgelehnt)."""
     if os.name != "nt":
@@ -8050,6 +8072,10 @@ def panel_einzel_instanz():
 def main():
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält das Panel nicht mehr an)", flush=True)
+    _wach = pc_wach_halten()   # PL2 (05.11.2026): Haupt-Thread, lebt bis serve_forever endet
+    if _wach is not None:
+        print("PC bleibt wach, solange das Panel läuft (Bildschirm darf aus, keine Systemeinstellung geändert)" if _wach
+              else "[panel] PC wach halten abgelehnt — es gilt der Energiesparplan von Windows", flush=True)
     _selbst_auffrischen()
     # nach dem Auffrischen: läuft der frische Stand per runpy in DIESEM Prozess, legt erst dessen main() den Mutex an (sonst sähe es sich selbst)
     if not panel_einzel_instanz():
