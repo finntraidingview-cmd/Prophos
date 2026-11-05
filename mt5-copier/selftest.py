@@ -76,6 +76,19 @@ def run(name, positions, hedges, *, mult=1.0, expect_actions=None,
     return ok
 
 
+def _test_sicher(fn):
+    """ST1 (Master 05.11.2026, S7/S9/S2 unabhängig gesehen): ein Test, der mit einer Ausnahme abbricht (z. B. ValueError aus .index() auf einem
+    veralteten Quelltext-Anker), zählt als ✗ — die Suite läuft weiter und prüft alles danach (vorher stoppte main() am ersten Abbruch)."""
+    try:
+        return fn()
+    except Exception as e:   # noqa: BLE001 — bewusst jeder Fehler eines Einzeltests
+        import traceback
+        zeile = (traceback.extract_tb(e.__traceback__)[-1:] or [None])[0]
+        wo = f" ({zeile.filename.rsplit('/', 1)[-1]}:{zeile.lineno})" if zeile else ""
+        print(f"✗ {fn.__name__}: ABBRUCH {type(e).__name__}: {str(e)[:200]}{wo}")
+        return False
+
+
 def main():
     results = []
     # 28.10.2026: Offen-Bleiben nach Puls-Läufen im ganzen Selftest aus — Tests mit Attrappen-Fenstern (_WIN_EINGABE=True) schrieben sonst
@@ -2004,79 +2017,79 @@ def main():
         and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
 
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
-    results.append(test_terminal_pids_ohne_wmic())
-    results.append(test_mt5_update_still())
-    results.append(test_vordergrund_waechter_ohne_windows())
-    results.append(test_kerze_fortschreiben())
-    results.append(test_solo_level_und_grund())
-    results.append(test_echo_hedge_sl_nachziehen())
-    results.append(test_aendern_dialog_diagnose())
-    results.append(test_solo_zu_ring())
-    results.append(test_solo_plan_kennung())
-    results.append(test_solo_riegel())
-    results.append(test_solo_sltp_rennen())
-    results.append(test_pc_id())
-    results.append(test_lese_instanz())
-    results.append(test_endlesung_bausteine())
-    results.append(test_profil_riegel())
-    results.append(test_fenster_treue())
-    results.append(test_puls_tempo())
-    results.append(test_puls_topstep())
-    results.append(test_puls_augen_cdp())
-    results.append(test_puls_k3())
-    results.append(test_puls_cdp_login())
-    results.append(test_cdp_konto_regression_865())
-    results.append(test_panel_open_zweites_auge())
-    results.append(test_cdp_konto_weg())
-    results.append(test_cdp_konto_weg_gleicher_login())
-    results.append(test_puls_fehler_1571())
-    results.append(test_puls_fehler_1603())
-    results.append(test_puls_fehler_1606())
-    results.append(test_puls_fehler_1611())
-    results.append(test_puls_fehler_1682())
-    results.append(test_puls_fehler_1787())
-    results.append(test_puls_fehler_1800())
-    results.append(test_puls_fehler_1850())
-    results.append(test_puls_fehler_1887())
-    results.append(test_puls_fehler_1924())
-    results.append(test_puls_fehler_1953())
-    results.append(test_puls_fehler_1698())
-    results.append(test_cdp_connect_zweiter_versuch())
-    results.append(test_tsx_k0())
-    results.append(test_tsx_k1_vorbau())
-    results.append(test_tsx_k2())
-    results.append(test_tsx_k3a())
-    results.append(test_tsx_k4())
-    results.append(test_puls_win_maus())
-    results.append(test_puls_nie_chrome_schliessen())
-    results.append(test_tsx_konto_abgekuerzt())
-    results.append(test_tsx_titel_url())
-    results.append(test_tsx_zeilen())
-    results.append(test_tsx_inventar_ida())
-    results.append(test_tsx_beweis())
-    results.append(test_tsx_order())
-    results.append(test_tsx_login())
-    results.append(test_tsx_bracket_b36())
-    results.append(test_puls_heim())
-    results.append(test_tv_tp_orders())
-    results.append(test_puls_ein_konto_gekuerzt())
-    results.append(test_puls_ein_konto_erwartet())
-    results.append(test_puls_fehler_1784())
-    results.append(test_hedge_bereit())
-    results.append(test_quickedit())
-    results.append(test_login_wache())
-    results.append(test_login_eigenes_konto())
-    results.append(test_tsx_auge_reparatur())
-    results.append(test_panel_tab_wecken_ea_frost())
-    results.append(test_tsx_auge_jemals())
-    results.append(test_windows_abfrage_vorbeugen())
-    results.append(test_tv_neuladen())
-    results.append(test_tv_tm_update())
-    results.append(test_puls_windows_suche_vorn())
-    results.append(test_hedge_closed_at_ms())
-    results.append(test_puls_fehlerfoto())
-    results.append(test_fehlerfoto_luecken())
-    results.append(test_magic_zwilling())
+    results.append(_test_sicher(test_terminal_pids_ohne_wmic))
+    results.append(_test_sicher(test_mt5_update_still))
+    results.append(_test_sicher(test_vordergrund_waechter_ohne_windows))
+    results.append(_test_sicher(test_kerze_fortschreiben))
+    results.append(_test_sicher(test_solo_level_und_grund))
+    results.append(_test_sicher(test_echo_hedge_sl_nachziehen))
+    results.append(_test_sicher(test_aendern_dialog_diagnose))
+    results.append(_test_sicher(test_solo_zu_ring))
+    results.append(_test_sicher(test_solo_plan_kennung))
+    results.append(_test_sicher(test_solo_riegel))
+    results.append(_test_sicher(test_solo_sltp_rennen))
+    results.append(_test_sicher(test_pc_id))
+    results.append(_test_sicher(test_lese_instanz))
+    results.append(_test_sicher(test_endlesung_bausteine))
+    results.append(_test_sicher(test_profil_riegel))
+    results.append(_test_sicher(test_fenster_treue))
+    results.append(_test_sicher(test_puls_tempo))
+    results.append(_test_sicher(test_puls_topstep))
+    results.append(_test_sicher(test_puls_augen_cdp))
+    results.append(_test_sicher(test_puls_k3))
+    results.append(_test_sicher(test_puls_cdp_login))
+    results.append(_test_sicher(test_cdp_konto_regression_865))
+    results.append(_test_sicher(test_panel_open_zweites_auge))
+    results.append(_test_sicher(test_cdp_konto_weg))
+    results.append(_test_sicher(test_cdp_konto_weg_gleicher_login))
+    results.append(_test_sicher(test_puls_fehler_1571))
+    results.append(_test_sicher(test_puls_fehler_1603))
+    results.append(_test_sicher(test_puls_fehler_1606))
+    results.append(_test_sicher(test_puls_fehler_1611))
+    results.append(_test_sicher(test_puls_fehler_1682))
+    results.append(_test_sicher(test_puls_fehler_1787))
+    results.append(_test_sicher(test_puls_fehler_1800))
+    results.append(_test_sicher(test_puls_fehler_1850))
+    results.append(_test_sicher(test_puls_fehler_1887))
+    results.append(_test_sicher(test_puls_fehler_1924))
+    results.append(_test_sicher(test_puls_fehler_1953))
+    results.append(_test_sicher(test_puls_fehler_1698))
+    results.append(_test_sicher(test_cdp_connect_zweiter_versuch))
+    results.append(_test_sicher(test_tsx_k0))
+    results.append(_test_sicher(test_tsx_k1_vorbau))
+    results.append(_test_sicher(test_tsx_k2))
+    results.append(_test_sicher(test_tsx_k3a))
+    results.append(_test_sicher(test_tsx_k4))
+    results.append(_test_sicher(test_puls_win_maus))
+    results.append(_test_sicher(test_puls_nie_chrome_schliessen))
+    results.append(_test_sicher(test_tsx_konto_abgekuerzt))
+    results.append(_test_sicher(test_tsx_titel_url))
+    results.append(_test_sicher(test_tsx_zeilen))
+    results.append(_test_sicher(test_tsx_inventar_ida))
+    results.append(_test_sicher(test_tsx_beweis))
+    results.append(_test_sicher(test_tsx_order))
+    results.append(_test_sicher(test_tsx_login))
+    results.append(_test_sicher(test_tsx_bracket_b36))
+    results.append(_test_sicher(test_puls_heim))
+    results.append(_test_sicher(test_tv_tp_orders))
+    results.append(_test_sicher(test_puls_ein_konto_gekuerzt))
+    results.append(_test_sicher(test_puls_ein_konto_erwartet))
+    results.append(_test_sicher(test_puls_fehler_1784))
+    results.append(_test_sicher(test_hedge_bereit))
+    results.append(_test_sicher(test_quickedit))
+    results.append(_test_sicher(test_login_wache))
+    results.append(_test_sicher(test_login_eigenes_konto))
+    results.append(_test_sicher(test_tsx_auge_reparatur))
+    results.append(_test_sicher(test_panel_tab_wecken_ea_frost))
+    results.append(_test_sicher(test_tsx_auge_jemals))
+    results.append(_test_sicher(test_windows_abfrage_vorbeugen))
+    results.append(_test_sicher(test_tv_neuladen))
+    results.append(_test_sicher(test_tv_tm_update))
+    results.append(_test_sicher(test_puls_windows_suche_vorn))
+    results.append(_test_sicher(test_hedge_closed_at_ms))
+    results.append(_test_sicher(test_puls_fehlerfoto))
+    results.append(_test_sicher(test_fehlerfoto_luecken))
+    results.append(_test_sicher(test_magic_zwilling))
 
     print()
     ok = sum(1 for r in results if r)
@@ -2819,13 +2832,18 @@ def test_panel_tab_wecken_ea_frost():
         and N(dict(st_bg, riegel="Signal läuft"), j0, None, 0, 300, True)[0] is False
         and N(dict(st_bg, tab_bw={"grund": "Tab im Hintergrund — Panel lädt neu", "hinter_seit": (j0 - 100) * 1000}), j0, None, 0, 300, True)[0] is False,
         "Hintergrund-Tab: Panel lädt nach 3 min (sichtbarer Tab weiter erst nach 20 min), Riegel gelten")
+    # ST1 (05.11.2026): seit b6c31e64 (03.11.2026, S2-Stopp zu f148012d: verdeckter Haupt-Tab per CDP, activate nur bei stummem PC) bekommt
+    # _prophos_tab_neuladen_cdp den Tab-Stand (stand) und gibt im Hintergrund-Weg die Sperre VOR dem Warten frei (gehalten = False, finally nur
+    # „if gehalten:") — darum Aufruf „(stand)“ und 3 release()-Stellen statt 2; geprüft wird jetzt zusätzlich, dass nie doppelt freigegeben wird
     q = inspect.getsource(panel._tab_neulade_waechter)
-    chk("_prophos_tab_neuladen_cdp()" in q and "cdp_prophos_ziele(" in q and "random.random()" in q,
+    chk("_prophos_tab_neuladen_cdp(stand)" in q and "cdp_prophos_ziele(" in q and "random.random()" in q,
         "Panel: kein Prophos-Fenster → im Puls-Chrome per CDP neu laden (gestreut), sonst bisheriger Hinweis")
-    q = inspect.getsource(panel._prophos_tab_wecken) + inspect.getsource(panel._prophos_tab_neuladen_cdp)
+    q_nl = inspect.getsource(panel._prophos_tab_neuladen_cdp)
+    q = inspect.getsource(panel._prophos_tab_wecken) + q_nl
     chk(q.count("TV_ORDER_LOCK.acquire(blocking=False)") == 2 and "/json/activate/" in q and "Page.reload" in q and "random.random()" in q
-        and q.count("TV_ORDER_LOCK.release()") == 2 and "click" not in q.lower() and "taste" not in q.lower(),
-        "Wecken/Neu laden: unter TV_ORDER_LOCK, nur /json/activate bzw. Page.reload, gestreut, kein Klick/Taste")
+        and q.count("TV_ORDER_LOCK.release()") == 3 and q_nl.count("gehalten = False") == 1 and "        if gehalten:\n            TV_ORDER_LOCK.release()" in q_nl
+        and "click" not in q.lower() and "taste" not in q.lower(),
+        "Wecken/Neu laden: unter TV_ORDER_LOCK (Hintergrund-Weg gibt sie einmal früher frei, nie doppelt), nur /json/activate bzw. Page.reload, gestreut, kein Klick/Taste")
     q = inspect.getsource(panel._prophos_tab_neu_oeffnen)
     chk("TV_ORDER_LOCK.acquire(blocking=False)" in q and "/json/close/" in q and "lock_gehalten=True" in q and "if not weg:" in q
         and q.index("if not weg:") < q.index("_tab_oeffnen(") and "still_s < TAB_HEIL_START_S" in q,
@@ -6104,8 +6122,10 @@ def test_puls_fehler_1787():
     chk("sleep(" not in q and "_warte(" in q and "Popen" not in q and "TerminateProcess" not in q and "click" not in q.lower()
         and "type_keys" not in q and "set_focus" not in q, "Warm-Warten: nur lesen + _warte (Streuung), kein Klick/Start/Kill/fester sleep")
     q_run = _i.getsource(ob.run)
+    # ST1 (05.11.2026): Anker „w = _finde_terminal(expected)" seit d3cd170d (F1, 03.11.2026: MT5-Fenster bis 30 s gestreut neu suchen) →
+    # „w, n_suche = _finde_terminal_geduldig(expected" — absichtliche Änderung, der Test prüft weiter dieselbe Reihenfolge
     chk(q_run.count("_terminal_warm_abwarten(path, trail)") == 1
-        and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w = _finde_terminal(expected)"),
+        and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w, n_suche = _finde_terminal_geduldig(expected"),
         "run(): Warm-Warten genau einmal, nach Login/Lesen ok und vor dem Terminal-Fenster (Guard, F9 unverändert dahinter)")
     chk("if login_warm_pruefen(trail, trail.sekunden()):" in q_run
         and "Login/Lesen: {runden} Runden" in _i.getsource(ob._login_dann_lesen),
@@ -6237,7 +6257,7 @@ def test_puls_fehler_1800():
     chk('if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):' not in q_run
         and q_run.count("login_warm_pruefen(trail, trail.sekunden())") == 1
         and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("login_warm_pruefen(trail, trail.sekunden())")
-        < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w = _finde_terminal(expected)"),
+        < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w, n_suche = _finde_terminal_geduldig(expected"),   # ST1: Anker seit d3cd170d (s. .1787)
         "run(): alter Runden-Auslöser weg, neuer genau einmal nach Login/Lesen ok, vor dem Terminal-Fenster")
     q = _i.getsource(ob._terminal_warm_abwarten) + _i.getsource(P)
     chk("sleep(" not in q and "Popen" not in q and "TerminateProcess" not in q and "click" not in q.lower() and "type_keys" not in q,
