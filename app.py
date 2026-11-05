@@ -3527,7 +3527,13 @@ def admin_ohne_unternehmen_zeilen(daten, uid_aufrufer, mail_aufrufer):
 
 
 def _wd_login_ich():
-    """(user_id, E-Mail) des eingeloggten Aufrufers dieser Anfrage oder ("", "")."""
+    """(user_id, E-Mail) des eingeloggten Aufrufers dieser Anfrage oder ("", ""). Hat _wd_login sie schon gelesen (g.login_uid/login_mail),
+    keine zweite Anfrage an /auth/v1/user (UNT0-Fix)."""
+    try:
+        if getattr(g, "login_uid", None):
+            return str(g.login_uid), str(getattr(g, "login_mail", "") or "")
+    except RuntimeError:
+        pass
     try:
         r0 = _auth_user_anfrage((request.headers.get("sb-token") or "").strip())
         u = (r0.json() or {}) if r0.status_code == 200 else {}
@@ -12211,6 +12217,9 @@ def _wd_login():
         # Admin-Gruppen (08.10.2026): Einschränkung als MENGE (Verwalter = seine Gruppe, Mitglied = nur er); ohne Einschränkung
         # Finns ?gruppe=-Lesefilter (nur GET). admin_gruppe 60 s gemerkt; fehlt die Tabelle noch, gibt es keine Gruppen.
         sicht, verwalter = admin_sicht_lesen(str(u["id"]))
+        # UNT0-Fix (S5-Prüfung 05.11.2026, Finn: Übersicht 5–6 s): Login-ID + Mail dieser Anfrage merken — _wd_login_ich liest sie hier statt einer
+        # zweiten /auth/v1/user-Anfrage je Übersicht
+        g.login_uid, g.login_mail = str(u["id"]), str(u.get("email") or "").strip().lower()
         # ANZEIGE ≠ AUSFÜHRUNG (Master 08.10.2026, Nachbesserung A): die Gruppe gilt nur in der Admin-Ansicht (?ansicht=admin bzw.
         # sicht=admin, das schicken allein die Admin-Reiter). Jede andere Anfrage desselben Logins — der PC-Tab des Verwalters (Start,
         # Endlesung, Hedge, Abhaken, Radar, Farmer-Automatik …) — sieht und ändert wie bis .1380 nur die eigene ID.

@@ -118,5 +118,10 @@ check("CREATE TRIGGER id_gruppe_neu_ht AFTER INSERT ON auth.users FOR EACH ROW E
 check('id="adm-ohne-unt"' in HTML and "function admOhneUntRender()" in HTML and "`${WATCHER_HOME}/admin/id-gruppe`" in HTML
       and "try{ admOhneUntRender() }catch(_){}   // UNT0" in HTML and "!admEingeschraenkt() && admData && Array.isArray(admData.ohne_unternehmen)" in HTML,
       "Frontend: Zeile „Ohne Unternehmen“ mit Auswahl + Zuordnen, nur ohne Einschränkung")
+# UNT0-Fix (S5): keine zweite /auth/v1/user-Anfrage je Übersicht — _wd_login merkt Login-ID + Mail im g, _wd_login_ich liest sie zuerst
+wl = SRC[SRC.index("def _wd_login():"):SRC.index("def _wd_personen(")]
+wi = SRC[SRC.index("def _wd_login_ich("):SRC.index("# MELDUNG „NEUE ID OHNE UNTERNEHMEN")]
+check('g.login_uid, g.login_mail = str(u["id"]), str(u.get("email") or "").strip().lower()' in wl
+      and wi.index('if getattr(g, "login_uid", None):') < wi.index("_auth_user_anfrage("), "Login-Mail aus _wd_login (g), Rückfall nur ohne g")
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)
