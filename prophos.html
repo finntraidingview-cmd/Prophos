@@ -3898,6 +3898,50 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs > :first-child{margin-top:0}
   /* EINSTELLUNGEN CHALLENGE-PLANER (E3 04.11. → E3c 05.11.2026): Guestly-Formensprache, eigene Tokens --e3-*; seit E3c kompakt unter dem Zeitstrahl. */
+  /* ══ KONTO-ZIELE (K1, Finn 05.11.2026 ~07:00 Dubai: „Propfirm-Dashboards 1:1 in Prophos — Payout-Eligibility, Max Drawdown, Daily Loss …"):
+     Kopf der Konto-Detailseite. Guestly-Karten wie WD-Einstellungen, Farbe nur als Punkt/Pille/Balken. Daten GET /konto-ziele (app.py kz_rechnen). ══ */
+  #k1-ziele{--k-karte:#fff;--k-kpi:#f3f4f8;--k-rand:#eceef3;--k-text:#101828;--k-sub:#667085;--k-gitter:rgba(16,24,40,.06);--k-lila:#5447ce;--k-lila-bg:#efedfd;
+    --k-gut:#12a150;--k-gut-bg:#e3f6ea;--k-rot:#e5484d;--k-rot-bg:#fdecec;--k-warn:#b45309;--k-warn-bg:#fdf3e1;--k-pille:#eef0f4;--k-linie:#887cfc;color:var(--k-text);margin-bottom:18px}
+  html[data-theme="dark"] #k1-ziele{--k-karte:#151a24;--k-kpi:#1a2030;--k-rand:#252c3b;--k-text:#e7eaf0;--k-sub:#98a2b3;--k-gitter:rgba(255,255,255,.06);--k-lila:#b3aaff;
+    --k-lila-bg:rgba(136,124,252,.16);--k-gut:#3ccf7a;--k-gut-bg:rgba(60,207,122,.13);--k-rot:#ff6b70;--k-rot-bg:rgba(255,107,112,.13);--k-warn:#fdb022;--k-warn-bg:rgba(253,176,34,.13);
+    --k-pille:#1f2636;--k-linie:#a79fff}
+  #k1-ziele .k1-haupt{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;align-items:stretch}
+  #k1-ziele .k1-karte{background:var(--k-karte);border:1px solid var(--k-rand);border-radius:16px;padding:16px 18px;min-width:0}
+  #k1-ziele .k1-karte h4{margin:0;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  #k1-ziele .k1-karte h4 small{font-size:11.5px;color:var(--k-sub);font-weight:400;text-align:right}
+  #k1-ziele .k1-i{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:50%;border:1px solid var(--k-rand);color:var(--k-sub);font-size:9px;font-weight:700;font-style:normal;margin-left:5px;cursor:help;vertical-align:1px}
+  #k1-ziele .k1-urteil{display:flex;align-items:center;gap:12px;margin:12px 0;padding:12px 13px;border-radius:13px;background:var(--k-kpi)}
+  #k1-ziele .k1-ring{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:16px;font-weight:700;flex:none;background:var(--k-pille);color:var(--k-sub)}
+  #k1-ziele .k1-urteil.ja .k1-ring{background:var(--k-gut-bg);color:var(--k-gut)} #k1-ziele .k1-urteil.nein .k1-ring{background:var(--k-rot-bg);color:var(--k-rot)}
+  #k1-ziele .k1-urteil b{display:block;font-size:14.5px;font-weight:650} #k1-ziele .k1-urteil small{display:block;color:var(--k-sub);font-size:11.5px;margin-top:2px;line-height:1.35}
+  #k1-ziele .k1-ck{display:flex;align-items:center;gap:10px;min-height:34px;border-top:1px solid var(--k-gitter);font-size:12.5px}
+  #k1-ziele .k1-ck:first-child{border-top:0}
+  #k1-ziele .k1-ck i{font-style:normal;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:800;flex:none;background:var(--k-pille);color:var(--k-sub)}
+  #k1-ziele .k1-ck.ok i{background:var(--k-gut-bg);color:var(--k-gut)} #k1-ziele .k1-ck.nein i{background:var(--k-rot-bg);color:var(--k-rot)}
+  #k1-ziele .k1-ck span{flex:1;min-width:0} #k1-ziele .k1-ck em{font-style:normal;color:var(--k-sub);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px}
+  #k1-ziele .k1-ck.nein em{color:var(--k-rot)}
+  #k1-ziele .k1-obj{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-top:12px}
+  #k1-ziele .k1-t{background:var(--k-kpi);border-radius:13px;padding:13px 14px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+  #k1-ziele .k1-t-kopf{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;color:var(--k-sub);font-weight:500}
+  #k1-ziele .k1-pill{font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--k-pille);color:var(--k-sub)}
+  #k1-ziele .k1-pill.gut{background:var(--k-gut-bg);color:var(--k-gut)} #k1-ziele .k1-pill.rot{background:var(--k-rot-bg);color:var(--k-rot)} #k1-ziele .k1-pill.warn{background:var(--k-warn-bg);color:var(--k-warn)}
+  #k1-ziele .k1-t-zahl{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #k1-ziele .k1-t-zahl small{font-size:11.5px;font-weight:500;color:var(--k-sub);margin-left:3px}
+  #k1-ziele .k1-t.leer .k1-t-zahl{color:var(--k-sub)}
+  #k1-ziele .k1-t-unter{font-size:11px;color:var(--k-sub);font-variant-numeric:tabular-nums;line-height:1.35}
+  #k1-ziele .k1-bar{position:relative;height:6px;border-radius:999px;background:var(--k-pille);margin-top:1px}
+  #k1-ziele .k1-bar > b{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--k-lila)}
+  #k1-ziele .k1-bar.gut > b{background:var(--k-gut)} #k1-ziele .k1-bar.rot > b{background:var(--k-rot)} #k1-ziele .k1-bar.warn > b{background:var(--k-warn)}
+  #k1-ziele .k1-bar > s{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--k-text);opacity:.7}
+  #k1-ziele .k1-chart{margin-top:14px}
+  #k1-ziele .k1-leg{display:flex;gap:14px;font-size:11px;color:var(--k-sub);font-weight:400}
+  #k1-ziele .k1-leg span::before{content:"";display:inline-block;width:14px;height:2px;margin-right:6px;vertical-align:3px;background:currentColor}
+  #k1-ziele .k1-leg .l-bal{color:var(--k-linie)} #k1-ziele .k1-leg .l-ziel{color:var(--k-gut)} #k1-ziele .k1-leg .l-boden{color:var(--k-rot)}
+  #k1-ziele .k1-leer{color:var(--k-sub);font-size:12.5px;padding:14px 0 4px}
+  #k1-ziele svg text{font-family:inherit}
+  @media (max-width:1100px){ #k1-ziele .k1-obj{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  @media (max-width:860px){ #k1-ziele .k1-haupt{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:520px){ #k1-ziele .k1-obj{grid-template-columns:minmax(0,1fr)} }
   #e3-einst{--e3-karte:#fff;--e3-kpi:#f3f4f8;--e3-rand:#eceef3;--e3-text:#101828;--e3-sub:#667085;--e3-lila:#5447ce;--e3-lila-bg:#efedfd;--e3-gut:#12a150;
     --e3-tuerkis:#0d9e9c;--e3-blau:#4996ff;--e3-schatten:0 10px 24px rgba(16,24,40,.06),0 2px 6px rgba(16,24,40,.04);--e3-knopf:#101828;--e3-knopf-text:#fff;
     --e3-pille:#eef0f4;--e3-pille-an:#fff;--e3-rot:#e5484d;color:var(--e3-text);margin:28px 0 8px}
@@ -12028,6 +12072,9 @@
           </button>
         </div>
       </div>
+
+      <!-- Konto-Ziele wie im Prop-Dashboard (K1, 05.11.2026): Payout/Phase · Trading Objectives · Balance-Verlauf — k1Anzeigen -->
+      <div id="k1-ziele"></div>
 
       <!-- Stats-Reihe -->
       <div id="ad-stats" style="margin-bottom:18px"></div>
@@ -44056,6 +44103,106 @@
   })()
 
   // ── Account Detail View ──
+  /* ══ KONTO-ZIELE (K1, Finn 05.11.2026 ~07:00 Dubai, Foto Blue Guardian 100k …8631: „In den Dashboards der Propfirmen steht zu jedem Account, ob er
+   * payout-eligible ist … Wenn ich auf einen Account drücke, das komplett umbauen — Max Drawdown, Daily Loss usw. — so wie bei der Prop.")
+   * Kopf der Detailseite: links Payout/Phase (Ja/Nein + Checkliste), rechts Trading Objectives, darunter Balance-Verlauf mit Ziel- und Boden-Linie.
+   * Alle Zahlen und Texte rechnet Railway (GET /konto-ziele → app.py kz_rechnen, dieselben Funktionen wie Planer/Radar) — hier nur zeichnen.
+   * 60 s je Konto gemerkt (renderAccountDetail läuft bei jedem Plan-Speichern neu). Eigene Verdrahtung, kein Sammel-Handler. ══ */
+  const _k1 = { cache: {}, laeuft: {} }
+  const K1_TTL_MS = 60000
+  function k1Anzeigen(acc){
+    const el = document.getElementById('k1-ziele'); if(!el || !acc) return
+    const id = String(acc.id)
+    if(acc.type === 'live'){ el.innerHTML = ''; return }
+    const c = _k1.cache[id]
+    if(c && c.d) k1Zeichnen(id)
+    else el.innerHTML = `<div class="k1-karte"><div class="k1-leer">${c && c.fehler ? 'Ziele nicht ladbar — ' + escapeHtml(c.fehler) : 'Ziele werden geladen …'}</div></div>`
+    setTimeout(() => k1BalNachtragen(id), 0)        // nach dem Neuaufbau der Stats-Reihe (renderAccountDetail baut sie nach diesem Aufruf)
+    if(!c || Date.now() - c.at > K1_TTL_MS) k1Laden(id)
+  }
+  async function k1Laden(id){
+    if(_k1.laeuft[id]) return
+    _k1.laeuft[id] = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+      _k1.cache[id] = { at: Date.now(), d }
+    }catch(e){
+      _k1.cache[id] = Object.assign(_k1.cache[id] || {}, { at: Date.now(), fehler: String(e && e.message || e) })
+    }finally{ _k1.laeuft[id] = false }
+    if(String(_detailAccountId) !== id) return
+    const c = _k1.cache[id]
+    if(c.d) k1Zeichnen(id)
+    else { const el = document.getElementById('k1-ziele'); if(el) el.innerHTML = `<div class="k1-karte"><div class="k1-leer">Ziele nicht ladbar — ${escapeHtml(c.fehler || '')}</div></div>` }
+    k1BalNachtragen(id)
+  }
+  // Balance „—" in der alten Stats-Reihe: die Detailseite las nur TSX/MT5/Duplikum/Copier — Railway wählt wie überall (acc_balance_wahl, inkl. TradingView)
+  function k1BalNachtragen(id){
+    const d = _k1.cache[id] && _k1.cache[id].d, w = document.getElementById('ad-bal-wert')
+    if(!d || !w || String(_detailAccountId) !== id || w.textContent.trim() !== '—' || !(d.balance && d.balance.wert)) return
+    w.textContent = fmtMoney(d.balance.wert)
+    w.insertAdjacentHTML('afterend', `<div style="font-size:10px;color:var(--violet);font-weight:500;margin-top:2px">${escapeHtml(d.balance.quelle || '')}${d.balance.stand ? ' · ' + escapeHtml(new Date(d.balance.stand).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : ''}</div>`)
+  }
+  function k1Bar(anteil, farbe, linie){
+    if(anteil == null) return ''
+    const w = Math.max(0, Math.min(1, Number(anteil))) * 100
+    return `<div class="k1-bar ${escapeHtml(farbe || '')}"><b style="width:${w.toFixed(1)}%"></b>${linie != null ? `<s style="left:calc(${(Number(linie) * 100).toFixed(1)}% - 1px)"></s>` : ''}</div>`
+  }
+  function k1Kachel(t){
+    return `<div class="k1-t${t.leer ? ' leer' : ''}">
+      <div class="k1-t-kopf"><span>${escapeHtml(t.titel)}${t.info ? `<i class="k1-i" title="${escapeHtml(t.info)}">i</i>` : ''}</span>${t.pill ? `<span class="k1-pill ${escapeHtml(t.pill[1] || '')}">${escapeHtml(t.pill[0])}</span>` : ''}</div>
+      <div class="k1-t-zahl">${escapeHtml(t.wert)}${t.klein ? `<small>${escapeHtml(t.klein)}</small>` : ''}</div>
+      ${k1Bar(t.anteil, t.farbe, t.linie)}
+      ${t.unter ? `<div class="k1-t-unter">${escapeHtml(t.unter)}</div>` : ''}</div>`
+  }
+  function k1Chart(ch, bal){
+    const pts = (ch.punkte || []).map(p => ({ t: p.t, v: Number(p.bal) }))
+    if(ch.start) pts.unshift({ t: null, v: Number(ch.start), start: true })
+    if(bal && (!pts.length || Math.abs(pts[pts.length - 1].v - bal) > 0.005)) pts.push({ t: 'jetzt', v: Number(bal) })
+    if(pts.length < 2) return '<div class="k1-leer">Noch kein Verlauf — es gibt keinen beendeten Trade mit Balance-Lesung.</div>'
+    const W = 1000, H = 170, pl = 56, pr = 10, pt = 10, pb = 22
+    const linien = [ch.ziel, ch.boden, ch.start].filter(v => v != null).map(Number)
+    let lo = Math.min(...pts.map(p => p.v), ...linien), hi = Math.max(...pts.map(p => p.v), ...linien)
+    const pad = (hi - lo) * .12 || 100; lo -= pad; hi += pad
+    const x = i => pl + i * (W - pl - pr) / (pts.length - 1), y = v => pt + (hi - v) / (hi - lo) * (H - pt - pb)
+    const pfad = pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ')
+    const fl = pfad + ` L ${x(pts.length - 1).toFixed(1)} ${H - pb} L ${pl} ${H - pb} Z`
+    const lin = (v, kl, txt) => v == null ? '' : `<line x1="${pl}" x2="${W - pr}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(${kl})" stroke-width="1.2" stroke-dasharray="5 4" opacity=".85"/>
+      <text x="${pl - 7}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="var(${kl})">${txt}</text>`
+    const jede = Math.max(1, Math.ceil(pts.length / 10))   // höchstens ~10 Achsen-Beschriftungen (Guestly-Vorlage)
+    const lab = p => p.start ? 'Start' : p.t === 'jetzt' ? 'jetzt' : new Date(p.t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:8px" role="img" aria-label="Balance-Verlauf">
+      <defs><linearGradient id="k1-fl" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#887cfc" stop-opacity=".26"/><stop offset="1" stop-color="#887cfc" stop-opacity="0"/></linearGradient></defs>
+      ${lin(ch.start != null ? Number(ch.start) : null, '--k-sub', [ch.ziel, ch.boden].some(v => v != null && Math.abs(y(Number(v)) - y(Number(ch.start))) < 13) ? '' : escapeHtml(Math.round(Number(ch.start) / 1000) + 'k'))}
+      ${lin(ch.ziel != null ? Number(ch.ziel) : null, '--k-gut', 'Ziel')}${lin(ch.boden != null ? Number(ch.boden) : null, '--k-rot', 'Boden')}
+      <path d="${fl}" fill="url(#k1-fl)"/><path d="${pfad}" fill="none" stroke="var(--k-linie)" stroke-width="2" stroke-linejoin="round"/>
+      ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3" fill="var(--k-karte)" stroke="var(--k-linie)" stroke-width="1.6"><title>${escapeHtml(lab(p) + ' · ' + fmtMoney(p.v))}</title></circle>
+        ${(i % jede === 0 || i === pts.length - 1) ? `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--k-sub)">${escapeHtml(lab(p))}</text>` : ''}`).join('')}
+    </svg>`
+  }
+  function k1Zeichnen(id){
+    const el = document.getElementById('k1-ziele'), d = _k1.cache[id] && _k1.cache[id].d
+    if(!el || !d || String(_detailAccountId) !== id) return
+    const u = d.urteil
+    if(!u){ el.innerHTML = ''; return }
+    const ring = u.ok === true ? '✓' : u.ok === false ? '✕' : '?'
+    const sym = s => s === 'ok' ? '✓' : s === 'nein' ? '✕' : '·'
+    const firmaSub = [d.firma, d.groesse ? Math.round(d.groesse / 1000) + 'k' : null].filter(Boolean).join(' · ')
+    el.innerHTML = `<div class="k1-haupt">
+        <div class="k1-karte"><h4>${escapeHtml(u.titel)}<small>${escapeHtml(u.sub || firmaSub)}</small></h4>
+          <div class="k1-urteil ${u.ok === true ? 'ja' : u.ok === false ? 'nein' : ''}"><div class="k1-ring">${ring}</div><div><b>${escapeHtml(u.text)}</b><small>${escapeHtml(u.grund || '')}</small></div></div>
+          <div>${(u.checks || []).map(c => `<div class="k1-ck ${escapeHtml(c[0])}"><i>${sym(c[0])}</i><span>${escapeHtml(c[1])}</span><em>${escapeHtml(c[2])}</em></div>`).join('')}</div>
+        </div>
+        <div class="k1-karte"><h4>Trading Objectives<small>${escapeHtml(firmaSub)}</small></h4><div class="k1-obj">${(d.kacheln || []).map(k1Kachel).join('')}</div></div>
+      </div>
+      <div class="k1-karte k1-chart"><h4>Balance<span class="k1-leg"><span class="l-bal">Balance</span>${d.chart && d.chart.ziel != null ? '<span class="l-ziel">Ziel</span>' : ''}${d.chart && d.chart.boden != null ? '<span class="l-boden">Boden</span>' : ''}</span></h4>
+        ${k1Chart(d.chart || {}, d.balance && d.balance.wert)}</div>`
+  }
+  window._k1 = _k1   // Stub-/Selbsttest-Haken
+
   function renderAccountDetail(){
     const acc = (accounts||[]).find(a => String(a.id) === String(_detailAccountId))
     if(!acc){ switchView('accounts'); return }
@@ -44064,6 +44211,7 @@
     document.getElementById('ad-subtitle').textContent = `${acc.firm||'—'} · ${typeLabel(acc.type)}`
     document.getElementById('ad-back-btn').onclick = () => switchView('accounts')
     document.getElementById('ad-edit-btn').onclick = () => openAccountModal(null, acc)
+    try{ k1Anzeigen(acc) }catch(e){ console.warn('[konto-ziele]', e) }   // K1: Prop-Dashboard-Kopf (eigener try — die alte Seite bleibt bei einem Fehler)
 
     // Stats row
     const acPlans = (tradePlans||[]).filter(p => String(p.masterAccountId)===String(acc.id) || String(p.slaveAccountId)===String(acc.id))
@@ -44130,7 +44278,7 @@
         </div>`}
         <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
           <div class="kpi-label">Balance</div>
-          <div class="kpi-value tnum" style="font-size:18px">${adBalStr}</div>
+          <div class="kpi-value tnum" style="font-size:18px" id="ad-bal-wert">${adBalStr}</div>
           ${adLiveSrc ? `<div style="font-size:10px;color:var(--violet);font-weight:500;margin-top:2px">Live · ${adLiveSrc}</div>` : ''}
         </div>
         <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">

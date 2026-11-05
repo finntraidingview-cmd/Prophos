@@ -36672,6 +36672,546 @@ def admin_auto_plan_konto_consistency():
     return jsonify({"ok": True, "konto_id": kid, "pct": pct})
 
 
+# ══ KONTO-ZIELE (K1, Finn 05.11.2026 ~07:00 Dubai, Foto Blue Guardian 100k …8631: „In den Dashboards der Propfirmen steht zu jedem Account, ob er
+# payout-eligible ist … Wenn ich auf einen Account drücke, das komplett umbauen — Max Drawdown, Daily Loss usw. — so wie bei der Prop."). GET /konto-ziele?id=
+# → Kopf-Kachel Payout/Phase (Ja/Nein + Checkliste), Trading Objectives (Ziel, Max Loss, Max Daily Loss, Consistency, Tage) und Balance-Verlauf für die
+# Konto-Detailseite. NUR ANZEIGE, KEINE ZWEITE WAHRHEIT: jede Zahl kommt aus derselben Funktion wie im Planer/Radar — Challenge ap_konten_stand_zeile
+# (Ziel, Consistency) + ap_boden_sicher (Boden) + ap_tage_ist, Funded CFD fcp_konto_ziel_boden + fcp_gewinntage_ist + fcp_tage_zyklus + fcp_consistency_pct,
+# Winning Days wd_auto_stand + wd_zyklus_stand + wd_firmen_regel (+ Recoverer/Tradeify-Zyklus aus _wd_zyklus_anhaengen), Max Loss sonst liq_konto_boden,
+# Daily Loss aus den Firmen-Kernwerten (ap_tagesgrenze) bzw. liq_regeln (Tagesstart/Stufen), Balance acc_balance_wahl (inkl. tv_balance). Fehlt eine Regel:
+# Kachel „—" mit Grund. Gate: eigenes Konto, Admin (wie die Planer-Routen) oder die eigene Gruppe — sonst 403, nie fremde Konten.
+KZ_PLAN_SEL = ("id,master_account_id,status,route,konto_typ,started_at,ended_at,completed_at,master_pl,"
+               "tv:mt5_baseline->tv,fin:mt5_baseline->final")
+KZ_KONTO_SEL = (AP_KONTO_FELDER + ",ziel_usd,waiting_payout_since,payout_ready_at,wd_farm,wd_zyklus_regel,goal_wd_korrektur,goal_wd_seit,goal_wd_hand_tage")
+KZ_CHART_MAX = 60
+_kz_karten_cache = {}
+KZ_KARTEN_TTL_S = 60
+
+
+def kz_usd(v, d=0, vz=False):
+    """REIN: 5.510 $ / −4.010 $ / +9.005 $ (vz = Vorzeichen auch bei Plus)."""
+    if v is None:
+        return "—"
+    s = _liq_de(abs(float(v)), d)
+    return ("−" if float(v) < 0 else "+" if vz and float(v) > 0 else "") + s + " $"
+
+
+def kz_tag(iso):
+    """REIN: '2026-10-28…' → '28.10.' (leer → '')."""
+    t = str(iso or "")[:10]
+    return f"{t[8:10]}.{t[5:7]}." if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t) else t
+
+
+def kz_pct(v, d=1):
+    """REIN: Anteil 0,388 → „38,8 %"."""
+    if v is None:
+        return "—"
+    s = f"{float(v) * 100:.{d}f}".replace(".", ",")
+    return (s[:-2] if s.endswith(",0") else s) + " %"
+
+
+def kz_plan_bal(p):
+    """REIN: belegte Balance nach einem Trade — final.balance_end (Orbit/Topstep), sonst final.master_balance (Echo) | None."""
+    fin = p.get("fin") if isinstance(p.get("fin"), dict) else {}
+    for k in ("balance_end", "master_balance"):
+        v = _wd_num(fin.get(k))
+        if v and v > 0:
+            return float(v)
+    return None
+
+
+def kz_phase_plaene(plaene, typ):
+    """REIN: Trades der aktuellen Phase des Kontos (konto_typ gleich der Kontoart; ohne konto_typ zählt der Trade — Echo trägt das Feld nicht immer).
+    Funded und Winning Days sind dasselbe Funded-Konto (Big Trade, dann WD auf derselben Zeile) — beide zählen."""
+    fam = {"funded", "winning_days"} if str(typ or "").lower() in ("funded", "winning_days") else {str(typ or "").lower()}
+    return [p for p in plaene or () if not p.get("konto_typ") or str(p.get("konto_typ")).lower() in fam]
+
+
+def kz_chart(plaene, typ):
+    """REIN (testbar): Balance-Verlauf → [{t, bal}] der beendeten Trades der Phase, sortiert nach Ende, höchstens KZ_CHART_MAX (die jüngsten)."""
+    pts = []
+    for p in sorted(kz_phase_plaene(plaene, typ), key=lambda x: str(x.get("ended_at") or x.get("completed_at") or "")):
+        t, b = p.get("ended_at") or p.get("completed_at"), kz_plan_bal(p)
+        if p.get("status") in ("completed", "review") and t and b:
+            pts.append({"t": str(t), "bal": round(b, 2)})
+    return pts[-KZ_CHART_MAX:]
+
+
+def kz_tagesstart(plaene, bal, jetzt_iso=None):
+    """REIN (testbar): Balance zu Beginn des CME-Handelstags → (wert, quelle). Frühester Trade von heute mit tv.balance_start, sonst Endbalance − P&L des
+    frühesten beendeten Trades von heute (Echo), sonst die aktuelle Balance (heute noch kein Trade)."""
+    heute = _cme_handelstag(jetzt_iso)
+    kand = []
+    for p in plaene or ():
+        st = p.get("started_at")
+        if not st or _cme_handelstag(st) != heute:
+            continue
+        bs = _wd_num((p.get("tv") or {}).get("balance_start")) if isinstance(p.get("tv"), dict) else None
+        if not bs:
+            be, pl = kz_plan_bal(p), _wd_num(p.get("master_pl"))
+            bs = round(be - pl, 2) if (be and pl is not None and p.get("status") in ("completed", "review")) else None
+        if bs and bs > 0:
+            kand.append((str(st), float(bs)))
+    if kand:
+        return min(kand)[1], "Balance beim ersten Trade heute"
+    return (float(bal) if bal else None), "aktuelle Balance (heute noch kein Trade)"
+
+
+def kz_regel_groesse(regel, groesse):
+    """REIN: Firmen-Kernwerte mit dem Block der Kontogröße eingemischt (wie zw_ziel/ap_boden_konto)."""
+    if not regel or not groesse:
+        return regel
+    jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if isinstance(regel.get("je_groesse"), dict) else None
+    return dict(regel, **{k: v for k, v in jg.items() if k != "phasen"}) if isinstance(jg, dict) and not jg.get("keine_werte") else regel
+
+
+def kz_daily(ap_regel, liq_regel, groesse, tagesstart, bal):
+    """REIN (testbar): Max Daily Loss → {betrag, level, uebrig, weich, text} | None (die Firma hat keins hinterlegt). Erst die Firmen-Kernwerte des Planers
+    (ap_tagesgrenze: daily_pct/daily_usd), bei weichem Tagesstopp (Apex, soft) bzw. ohne Kernwert die liq_regeln-Zeile (tagesstart/stufen). Kein Rückgriff
+    auf accounts.max_daily_drawdown (Master K1: nur wo die Firma eins hat)."""
+    if tagesstart is None or not groesse:
+        return None
+    r = kz_regel_groesse(ap_regel, groesse)
+    g = ap_tagesgrenze(r, groesse, tagesstart) if r else None
+    if g:
+        pct = _wd_num((r or {}).get("daily_pct"))
+        txt = (f"{_liq_de(pct, 1 if pct % 1 else 0)} % ab " + ("Kontogröße" if str(r.get("daily_basis") or "") == "groesse" else "Tagesstart")) if pct else "fest"
+        return {"betrag": round(g, 2), "level": round(tagesstart - g, 2), "uebrig": round(float(bal) - (tagesstart - g), 2) if bal else None,
+                "weich": False, "text": txt, "quelle": "Firmen-Kernwerte des Planers"}
+    if liq_regel and liq_regel.get("art") in ("tagesstart", "stufen"):
+        lv, txt = liq_aus_regel(liq_regel, groesse, None, tagesstart)
+        if lv is not None:
+            weich = bool((ap_regel or {}).get("soft"))
+            return {"betrag": round(tagesstart - lv, 2), "level": lv, "uebrig": round(float(bal) - lv, 2) if bal else None, "weich": weich,
+                    "text": ("weicher Tagesstopp · " if weich else "") + ("Stufe nach Balance" if liq_regel.get("art") == "stufen" else "ab Tagesstart"),
+                    "quelle": "liq_regeln · " + txt}
+    return None
+
+
+KZ_BODEN_ART = {"statisch": "statisch", "eod_trailing": "End-of-Day nachziehend", "nachziehend": "nachziehend", "nachziehend_lock": "nachziehend, Lock beim Start",
+                "nachziehend_geschaetzt": "nachziehend (geschätzt)"}
+
+
+def kz_kachel(key, titel, wert=None, klein=None, unter=None, anteil=None, farbe="", linie=None, pill=None, info="", leer=False):
+    return {"key": key, "titel": titel, "wert": wert if wert is not None else "—", "klein": klein, "unter": unter, "anteil": anteil, "farbe": farbe,
+            "linie": linie, "pill": pill, "info": info, "leer": leer or wert is None}
+
+
+def kz_ml_kachel(boden, dd, art, bal, quelle):
+    """REIN: Max-Loss-Kachel aus Boden (Level), Max DD und Art."""
+    if boden is None or not bal:
+        return kz_kachel("max_loss", "Max Loss", None, unter="kein Boden bekannt", info=quelle or "")
+    uebrig = round(float(bal) - float(boden), 2)
+    a = max(0.0, min(1.0, uebrig / float(dd))) if dd else None
+    farbe = "rot" if uebrig <= 0 or (a is not None and a < .25) else "warn" if (a is not None and a < .5) else "gut"
+    pill = ["Verletzt", "rot"] if uebrig <= 0 else ["On track", "gut"] if farbe == "gut" else [f"{kz_pct(1 - a, 0)} weg", farbe]
+    return kz_kachel("max_loss", "Max Loss", kz_usd(uebrig), "übrig", f"Level {kz_usd(boden)} · {KZ_BODEN_ART.get(art, art or 'statisch')}", a, farbe, None, pill,
+                     (quelle or "") + (f" · Max DD {kz_usd(dd)}" if dd else ""))
+
+
+def kz_dl_kachel(dl, grund):
+    if not dl:
+        return kz_kachel("daily_loss", "Max Daily Loss", None, unter="nicht hinterlegt", info=grund)
+    if dl.get("uebrig") is None:
+        return kz_kachel("daily_loss", "Max Daily Loss", None, unter="Balance unbekannt", info=f"Daily Loss {kz_usd(dl['betrag'])} · {dl.get('quelle_text') or ''}".strip(" ·"))
+    a = max(0.0, min(1.0, (dl["uebrig"] or 0) / dl["betrag"])) if dl["betrag"] else None
+    farbe = "rot" if (dl["uebrig"] or 0) <= 0 else "warn" if (a is not None and a < .5) else "gut"
+    return kz_kachel("daily_loss", "Max Daily Loss", kz_usd(dl["uebrig"]), "übrig", f"Level {kz_usd(dl['level'])} · {dl['text']}", a, farbe, None,
+                     ["Erreicht", "rot"] if farbe == "rot" else ["On track", "gut"] if farbe == "gut" else ["knapp", "warn"],
+                     f"Daily Loss {kz_usd(dl['betrag'])} · {dl.get('quelle_text') or ''}".strip(" ·"))
+
+
+def kz_cons_kachel(grenze_pct, anteil, bester, basis, basis_text, info, aus_grund=None):
+    """REIN: Consistency-Kachel — größter Tag ÷ Basis gegen die Grenze (Balken-Skala bis 1,5 × Grenze, Strich bei der Grenze)."""
+    if grenze_pct is None:
+        return kz_kachel("consistency", "Consistency", None, unter="keine Regel", info=(info + (" · " + aus_grund if aus_grund else "")).strip(" ·"))
+    g = float(grenze_pct) / 100.0
+    if anteil is None:
+        return kz_kachel("consistency", "Consistency", None, unter=f"Grenze {kz_pct(g, 0)} · " + (aus_grund or "noch kein Gewinn"), info=info,
+                         pill=[f"≤ {kz_pct(g, 0)}", "grau"])
+    ok = anteil <= g + 1e-9
+    skala = 1.5 * g
+    return kz_kachel("consistency", "Consistency", kz_pct(anteil), None, f"größter Tag {kz_usd(bester)} ÷ {basis_text} {kz_usd(basis)} · Grenze {kz_pct(g, 0)}",
+                     min(1.0, anteil / skala) if skala else None, "gut" if ok else "rot", g / skala if skala else None,
+                     ["In range", "gut"] if ok else ["Out of range", "rot"], info)
+
+
+def kz_tage_kachel(key, titel, ist, soll, unter, info):
+    if ist is None or not soll:
+        return kz_kachel(key, titel, None, unter="kein Ziel hinterlegt", info=info)
+    ok = ist >= soll
+    return kz_kachel(key, titel, str(int(ist)), f"/ {int(soll)}", unter, min(1.0, ist / soll), "gut" if ok else "", None,
+                     ["Erreicht", "gut"] if ok else ["Offen", "grau"], info)
+
+
+def kz_trades_kachel(phase, seit=None):
+    """REIN: beendete Trades der Phase (ab seit, Berlin-Tag des Endes) + der letzte mit P&L."""
+    tz_b = _ap_tz("Europe/Berlin")
+    fertig = []
+    for p in phase or ():
+        t = _ap_ts(p.get("ended_at") or p.get("completed_at"))
+        if p.get("status") in ("completed", "review") and t is not None and (not seit or t.astimezone(tz_b).date().isoformat() >= str(seit)[:10]):
+            fertig.append((t, p))
+    if not fertig:
+        return kz_kachel("trades", "Trades" + (" im Zyklus" if seit else ""), "0", unter="noch kein beendeter Trade", info="beendete Trades dieser Phase")
+    t, p = max(fertig, key=lambda x: x[0])
+    pl = _wd_num(p.get("master_pl"))
+    return kz_kachel("trades", "Trades" + (" im Zyklus" if seit else ""), str(len(fertig)), None,
+                     f"letzter {t.astimezone(tz_b).strftime('%d.%m.')}" + (f" · {kz_usd(pl, 0, True)}" if pl is not None else ""), None, "", None, None,
+                     "beendete Trades dieser Phase" + (f" seit {kz_tag(seit)}" if seit else ""))
+
+
+def kz_rechnen(a, ctx):
+    """REIN RECHNEND (testbar): ein Konto + geladene Daten → {typ, groesse, balance, urteil, kacheln, chart}. ctx: bal, bal_quelle, bal_stand, plaene (alle
+    Trades des Kontos, KZ_PLAN_SEL), jetzt (ISO), ap_firmen (auto_plan_regeln.regeln.firmen), fcp_regel (Zeile funded_cfd_plan_regeln), liq_regeln, peak
+    (liq_peak), peak_eod, wd_firmen_regeln, wd_pay (pending/received + Buchungen wie _wd_zyklus_anhaengen), wd_zyklus (Feld zyklus | None),
+    fcp_pay (pending, managed, buchungen)."""
+    a = a or {}
+    typ = str(a.get("account_type") or "").lower()
+    aid = str(a.get("id") or "")
+    bal = _wd_num(ctx.get("bal"))
+    plaene = [p for p in (ctx.get("plaene") or []) if str(p.get("master_account_id") or aid) == aid]
+    phase = kz_phase_plaene(plaene, typ)
+    groesse = _wd_num(a.get("starting_balance")) if typ in AP_TYPEN and _wd_num(a.get("starting_balance")) else None
+    groesse = _wd_konto_groesse(a) or groesse or liq_konto_groesse(a)
+    out = {"ok": True, "id": aid, "typ": typ, "firma": a.get("firm"), "groesse": groesse,
+           "balance": {"wert": bal, "quelle": ctx.get("bal_quelle"), "stand": ctx.get("bal_stand")},
+           "urteil": None, "kacheln": [], "chart": {"punkte": kz_chart(phase, typ), "start": groesse, "ziel": None, "boden": None}}
+    if typ == "live":
+        return out
+    ap_regel = ap_regel_finden(ctx.get("ap_firmen") or [], a.get("firm"))
+    ts, ts_quelle = kz_tagesstart(phase, bal, ctx.get("jetzt"))
+    # Liq-Regel wie der Radar (liq_regel_felder): Kontoart des Kontos (winning_days löst wie_kontotyp selbst auf), Winning Day = wd für liq_boden_kernwerte
+    liq_typ = typ
+    liq_r, _weg = liq_regel_waehlen(ctx.get("liq_regeln") or [], a.get("firm"), liq_typ, groesse)
+    express = ist_topstep_express(a)
+    dl = None if express else kz_daily(ap_regel, liq_r, groesse, ts, bal)
+    if express:
+        out["chart"]["start"] = None       # TopstepX zählt Express ab 0 $ — Kontogröße als Linie wäre falsch
+    if dl:
+        dl["quelle_text"] = f"{dl['quelle']} · Tagesstart {kz_usd(ts, 2)} ({ts_quelle})"
+    dl_grund = ("Topstep Express — Daily Loss steht in TopstepX (Balance ab 0 $)" if express else
+                "die Firma hat kein Daily Loss hinterlegt (Kernwerte/liq_regeln)" if ts is not None else "Balance unbekannt")
+    checks, kach = [], []
+    gewinn = round(bal - groesse, 2) if (bal and groesse) else None
+
+    def liq_ml():
+        r2, a2, g2 = liq_boden_kernwerte(liq_r, a, liq_typ, typ == "winning_days", ctx.get("ap_firmen"))
+        eod = (r2 or {}).get("maxdd_art") == "eod_trailing"
+        pk = ctx.get("peak_eod") if eod else ctx.get("peak")
+        # start_bal None: ein Boden über der Balance (geblowt / Datenzweifel) bleibt sichtbar — die Kachel zeigt dann „Verletzt" statt „—"
+        b, txt, dd, art = liq_konto_boden(r2, a2, g2, pk, None)
+        if b is not None and bal and b >= bal:
+            txt += " — liegt nicht unter der Balance (geblowt oder Datenzweifel)"
+        return b, dd, art, txt
+
+    if typ in AP_TYPEN:
+        # ── Challenge / Phase 1 / Phase 2: wie der Challenge-Planer (Einstellungen → Konten) ──
+        tage_pl = {}
+        tz_b = _ap_tz("Europe/Berlin")
+        for p in plaene:
+            if p.get("status") != "completed" or _wd_num(p.get("master_pl")) is None:
+                continue
+            t = _ap_ts(p.get("ended_at") or p.get("started_at") or p.get("completed_at"))
+            if t is not None:
+                d = t.astimezone(tz_b).date().isoformat()
+                tage_pl[d] = tage_pl.get(d, 0.0) + float(p["master_pl"])
+        z = ap_konten_stand_zeile(a, ap_regel, bal, tage_pl or None)
+        out["stand"] = z
+        if z.get("groesse"):
+            groesse = out["groesse"] = out["chart"]["start"] = z["groesse"]
+            gewinn = z["gewinn"]
+        # Ziel wie der Radar (admin_skala_felder): accounts.ziel_usd der Ziel-Wache, sonst die Planer-Regel (zw_ziel über ap_konten_stand_zeile)
+        ziel_bal = _wd_num(a.get("ziel_usd")) or z.get("ziel")
+        ziel_usd = round(ziel_bal - groesse, 2) if (ziel_bal and groesse) else None
+        # erreicht: Markierung der Ziel-Wache gilt wie im Planer („Ziel erreicht = nie planen", auch wenn das Konto aus dem Login weg ist)
+        erreicht = bool(a.get("ziel_erreicht_at")) or bool(ziel_bal and bal and zw_erreicht(ziel_bal, bal, typ))
+        out["chart"]["ziel"] = ziel_bal
+        quelle_z = "Ziel-Wache (accounts.ziel_usd)" if _wd_num(a.get("ziel_usd")) else "Planer-Regel (auto_plan_regeln)" if ziel_bal else ""
+        if ziel_bal and gewinn is not None and ziel_usd:
+            f = 1.0 if erreicht else max(0.0, min(1.0, gewinn / ziel_usd)) if ziel_usd > 0 else None
+            kach.append(kz_kachel("ziel", "Ziel", kz_pct(f, 0) if erreicht else kz_usd(max(0.0, ziel_bal - bal)), None if erreicht else "fehlen",
+                                  f"{kz_usd(gewinn, 0, True)} von {kz_usd(ziel_usd, 0, True)} · Ziel {kz_usd(ziel_bal)}", f, "gut" if erreicht else "",
+                                  None, ["Erreicht", "gut"] if erreicht else ["Offen", "grau"], quelle_z))
+        else:
+            kach.append(kz_kachel("ziel", "Ziel", None, unter="keine Ziel-Regel", info="weder Planer-Regel (Firma/Größe) noch accounts.ziel_usd"))
+        bk = ap_boden_sicher(ctx.get("ap_firmen") or [], a, bal, {aid: ctx.get("peak")}) if bal else {}
+        b_ap = bk.get("boden") if bk.get("boden") is not None else bk.get("boden_min")   # wie ap_boden_zeile / zw_tick
+        if b_ap is not None:
+            dd = round(groesse - bk["boden_min"], 2) if (groesse and bk.get("boden_min") is not None) else _wd_num(a.get("max_drawdown"))
+            kach.append(kz_ml_kachel(b_ap, dd, bk.get("boden_art") if bk.get("boden") is not None else "statisch", bal, "Boden wie im Planer (Kernwerte)"))
+            out["chart"]["boden"] = b_ap
+        else:
+            b, dd, art, txt = liq_ml()
+            kach.append(kz_ml_kachel(b, dd, art, bal, txt))
+            out["chart"]["boden"] = b
+        kach.append(kz_dl_kachel(dl, dl_grund))
+        cons_ok = True
+        if z.get("cons_pct"):
+            an = z.get("cons_anteil")
+            cons_ok = an is None or an <= float(z["cons_pct"]) / 100.0 + 1e-9
+            kach.append(kz_cons_kachel(z["cons_pct"], an, z.get("groesster_tag"), ziel_usd, "Ziel",
+                                       "größter Tag ÷ Ziel-$ wie der Challenge-Planer, Grenze " + ("am Konto" if z.get("cons_quelle") == "konto" else "Firmen-Standard"),
+                                       "noch kein abgeschlossener Trade"))
+        else:
+            kach.append(kz_cons_kachel(None, None, None, None, "", "keine Consistency in den Kernwerten (tp_max)"))
+        ti = ap_tage_ist(a, plaene)
+        tage_titel = "Gewinntage" if ap_tage_gewinn(a) is not None else "Mindesttage"
+        kach.append(kz_tage_kachel("tage", tage_titel, ti[0] if ti else None, ti[1] if ti else None,
+                                   (f"Tage ≥ {kz_usd(ap_tage_gewinn(a))}" if ap_tage_gewinn(a) is not None else "Handelstage") if ti else "keine Mindesttage am Konto",
+                                   "ap_tage_ist wie der Planer (Berlin-Tage ab goal_since)"))
+        checks.append(["ok" if erreicht else "nein", f"Ziel {kz_usd(ziel_bal)}" if ziel_bal else "Ziel",
+                       f"{kz_usd(gewinn, 0, True)} / {kz_usd(ziel_usd, 0, True)}" if (ziel_usd and gewinn is not None) else "—"])
+        if z.get("cons_pct"):
+            checks.append(["ok" if cons_ok else "nein", f"Consistency ≤ {kz_pct(float(z['cons_pct']) / 100, 0)}", kz_pct(z.get("cons_anteil"))])
+        if ti:
+            checks.append(["ok" if ti[0] >= ti[1] else "nein", tage_titel, f"{ti[0]} / {ti[1]}"])
+        ok = erreicht and cons_ok and (not ti or ti[0] >= ti[1])
+        if a.get("ziel_erreicht_at"):
+            checks.append(["info", "Ziel-Wache", "erreicht am " + kz_tag(a["ziel_erreicht_at"])])
+        if ok:
+            checks.append(["info", "Nächster Schritt", "Konto umstellen (nächste Phase)"])
+        fehlt = [c[1] for c in checks if c[0] == "nein"]
+        out["urteil"] = {"art": "phase", "titel": "Phase", "ok": ok if ziel_bal else None,
+                         "text": "Bestanden" if ok else "Noch nicht bestanden" if ziel_bal else "Ziel unbekannt",
+                         "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if ziel_bal else "keine Ziel-Regel", "checks": checks}
+    elif typ == "funded_cfd":
+        # ── Funded CFD: wie der Funded-CFD-Planer (Ziel bis Waiting, Gewinntage, Consistency je Zyklus) ──
+        freg = ap_regel_finden(((ctx.get("fcp_regel") or {}).get("firmen") or []), a.get("firm"))
+        pend, verw, buch = (ctx.get("fcp_pay") or ([], [], []))
+        n_pay = fcp_payouts_zaehlen(pend, verw, buch).get(aid, 0)
+        zyklus = n_pay + 1
+        z_ab = fcp_zyklus_start(pend, verw, buch).get(aid)
+        seit = fcp_gewinntage_seit(z_ab, a.get("created_at"))
+        out["zyklus"] = {"nr": zyklus, "seit": seit, "payouts": n_pay}
+        jg = fcp_je_groesse(freg, groesse) or {}
+        zb = fcp_konto_ziel_boden(freg, groesse, zyklus, a.get("name")) if freg else None
+        ep = fcp_erster_payout(freg) if (freg and zyklus == 1) else None
+        bereich = fcp_bereich((ep or jg).get("ziel")) if (ep or jg) else None
+        wartet = bool(a.get("waiting_payout_since"))
+        if zb and gewinn is not None:
+            ziel_bal, boden = zb
+            erreicht = wartet or bal >= ziel_bal
+            out["chart"].update(ziel=ziel_bal, boden=boden)
+            f = max(0.0, min(1.0, gewinn / bereich[0])) if bereich and bereich[0] > 0 else None
+            kach.append(kz_kachel("ziel", "Ziel", kz_pct(f, 0) if erreicht else kz_usd(ziel_bal - bal), None if erreicht else "fehlen",
+                                  f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel {kz_usd(bereich[0], 0, True)}" + (f"–{_liq_de(bereich[1])} $" if bereich[1] != bereich[0] else ""),
+                                  f, "gut" if erreicht else "", None, ["Erreicht", "gut"] if erreicht else ["Offen", "grau"],
+                                  ("Refund-Ziel 1. Zyklus" if ep else "Ziel je Zyklus") + " aus funded_cfd_plan_regeln; erreicht ab dem unteren Wert (wie Radar)"))
+            dd = _wd_num(jg.get("dd"))
+            kach.append(kz_ml_kachel(boden, dd, "statisch", bal, "Boden wie im Funded-CFD-Planer (Größe − dd)"))
+        else:
+            erreicht = wartet
+            kach.append(kz_kachel("ziel", "Ziel", None, unter="Balance unbekannt" if (zb and gewinn is None) else "keine Ziel-Regel",
+                                  info="keine Balance-Lesung" if (zb and gewinn is None) else "keine Werte für diese Firma/Größe in funded_cfd_plan_regeln"))
+            b, dd, art, txt = liq_ml()
+            kach.append(kz_ml_kachel(b, dd, art, bal, txt))
+            out["chart"]["boden"] = b
+        kach.append(kz_dl_kachel(dl, dl_grund))
+        p_cons = fcp_consistency_pct(freg) if freg else None
+        tzy = fcp_tage_zyklus(plaene, seit)
+        cons_ok = True
+        if p_cons:
+            an = (tzy[0] / gewinn) if (tzy and gewinn and gewinn > 0) else None
+            cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzy and tzy[0] == 0 and gewinn and gewinn > 0)
+            kach.append(kz_cons_kachel(p_cons, an, tzy[0] if tzy else None, gewinn, "Gewinn", "Consistency je Zyklus (fcp_consistency_pct, Weg A)",
+                                       "Zyklus nicht lesbar" if tzy is None else "noch kein Gewinn"))
+        else:
+            kach.append(kz_cons_kachel(None, None, None, None, "", "fcp_consistency_pct: keine"))
+        gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
+        gti = fcp_gewinntage_ist(gt, aid, plaene, seit) if gt else None
+        if gt:
+            kach.append(kz_tage_kachel("tage", "Gewinntage", gti[0] if gti else None, gti[1] if gti else None,
+                                       f"Tage ≥ {kz_usd(_wd_num(gt.get('min')))} im Zyklus", "je_groesse.gewinntage — Zählung wie der Planer"))
+        checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting",
+                       (f"{kz_usd(gewinn, 0, True)} / {kz_usd(bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")])
+        if gt:
+            checks.append([("ok" if gti[0] >= gti[1] else "nein") if gti else "info", f"Gewinntage ≥ {kz_usd(_wd_num(gt.get('min')))}", f"{gti[0]} / {gti[1]}" if gti else "—"])
+        if p_cons:
+            checks.append(["ok" if cons_ok else "nein", f"Consistency ≤ {_liq_de(p_cons)} %", kz_pct((tzy[0] / gewinn) if (tzy and gewinn and gewinn > 0) else None)])
+        else:
+            checks.append(["info", "Consistency", "keine"])
+        checks.append(["info", "Refund-Trade", f"Ziel {_liq_de(bereich[0])}–{_liq_de(bereich[1])} $" if ep and bereich else "aus" if freg else "—"])
+        checks.append(["ok" if wartet else "info", "Waiting for Payout", ("seit " + kz_tag(a["waiting_payout_since"])) if wartet else "—"])
+        if a.get("payout_ready_at"):
+            frei = str(a["payout_ready_at"])[:10] <= str(ctx.get("jetzt") or datetime.now(timezone.utc).isoformat())[:10]
+            checks.append(["ok" if frei else "nein", "Payout ab", kz_tag(a["payout_ready_at"])])
+        ok = bool(freg) and erreicht and cons_ok and (not gt or bool(gti and gti[0] >= gti[1]))
+        fehlt = [c[1] for c in checks if c[0] == "nein"]
+        out["urteil"] = {"art": "payout", "titel": "Payout", "ok": ok if freg else None, "sub": f"Zyklus {zyklus}" + (f" · seit {kz_tag(seit)}" if seit else ""),
+                         "text": "Payout möglich" if ok else "Noch kein Payout" if freg else "keine Planer-Regel",
+                         "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if freg else "Firma nicht im Funded-CFD-Planer", "checks": checks}
+    else:
+        # ── Funded Futures / Winning Days: wie der WD-Farmer (WDs, Zyklus, Firmen-Regel Consistency + Mindest-Net-Profit, Recoverer) ──
+        b, dd, art, txt = liq_ml()
+        kach.append(kz_ml_kachel(b, dd, art, bal, txt))
+        out["chart"]["boden"] = b
+        kach.append(kz_dl_kachel(dl, dl_grund))
+        key = fdp_wd_schluessel(a.get("firm"), str(int(groesse)) if groesse else None)
+        fr = wd_firmen_regel(ctx.get("wd_firmen_regeln") or {}, key)
+        pay = ctx.get("wd_pay") or []
+        echte = [t for t in pay if t.get("requested_at")]
+        # Zyklus 1 (noch kein Payout): wd_zyklus_stand zählt erst nach einer Anfrage — für die Anzeige zählen dann alle Tage ab Zyklus-Beginn (goal_wd_seit,
+        # sonst Anlegetag): ein gedachter Vortag als Anfrage, die Nummer bleibt 1
+        seit0 = str(a.get("goal_wd_seit") or a.get("created_at") or "")[:10]
+        if echte:
+            st = wd_zyklus_stand(phase, echte)
+        else:
+            vortag = (datetime.strptime(seit0, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d") if seit0 else "1970-01-01"
+            st = dict(wd_zyklus_stand(phase, [{"requested_at": vortag, "status": "received"}]), nr=1, start=None)
+        # Zyklus-Beginn = Tag NACH der Anfrage (wd_zyklus_stand zählt tag > start, wie fcp_zyklus_start)
+        seit_z = (datetime.strptime(st["start"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") if st["start"] else (seit0 or None)
+        out["zyklus"] = {"nr": st["nr"], "seit": seit_z, "profit": st["profit"], "bester": st["bester"]}
+        wz = ctx.get("wd_zyklus") if isinstance(ctx.get("wd_zyklus"), dict) else None
+        soll = int(_wd_num(a.get("goal_target")) or 0) or (5 if wd_hand_erlaubt(a) else None)   # Futures-Funded zählt implizit mit 5 (wie _wd_good_day_konto_upd)
+        ist = wd_auto_stand(a, plaene) if wd_auto_konto(a) else ((ap_tage_ist(a, plaene) or (None, None))[0] if soll else None)
+        ist_wd = typ == "winning_days" or str(a.get("goal_kind") or "") == "winning_days"
+        mg = wd_min_gewinn(a)
+        kach.insert(0, kz_tage_kachel("tage", "Winning Days" if ist_wd else "Ziel-Tage", ist, soll,
+                                      (f"Tage ≥ {kz_usd(mg)}" if mg else "Tage im Plus") + (" · automatisch gezählt" if wd_auto_konto(a) else ""),
+                                      "wd_auto_stand wie der WD-Farmer (Auto-Tage ∪ Hand-Tage + Korrektur)"))
+        kon = fr["konsistenz"]
+        cons_ok = True
+        best = max(st["bester"] or 0.0, 0.0)
+        if kon.get("an") and kon.get("pct"):
+            an = (best / st["profit"]) if st["profit"] > 0 else None
+            # ohne Trade im Zyklus ist nichts verletzt; mit Trades und Gewinn ≤ 0 gibt es keinen Payout
+            cons_ok = (an is not None and an <= kon["pct"] / 100.0 + 1e-9) or not st["tage"]
+            kach.append(kz_cons_kachel(kon["pct"], an, best, st["profit"], "Zyklus-Gewinn", "WD-Firmenregel konsistenz (Winning Days → Einstellungen → Firma)",
+                                       "noch kein Zyklus-Gewinn"))
+        else:
+            kach.append(kz_cons_kachel(None, None, None, None, "", "WD-Firmenregel: Consistency aus"))
+        mn = fr["min_netto"]
+        mn_gilt = bool(mn.get("an")) and st["nr"] >= int(mn.get("ab_zyklus") or 1)
+        zg = (wz or {}).get("gewinn") if (wz and wz.get("art") == "tradeify" and wz.get("gewinn") is not None) else st["profit"]
+        mn_ok = (not mn_gilt) or (zg is not None and zg >= float(mn.get("usd") or 0))
+        if wz and wz.get("art") != "tradeify" and wz.get("firma_key"):
+            # Verlusttag aus dem Zyklus dieser Seite (im 1. Zyklus zählt wd_zyklus_stand des Farmers noch keine Tage — der Recoverer gilt dort ohnehin nicht)
+            _vl = wz.get("verlust") or st.get("verlust")
+            kach.append(kz_kachel("recoverer", "Recoverer", kz_usd(-_vl) if _vl else "kein Verlusttag", "Verlusttag" if _vl else None,
+                                  (f"Ziel {kz_usd(wz['ziel'])} · Hedge {_liq_de(wz['hedge_eur'])} €" if wz.get("aktiv") and wz.get("ziel") else wz.get("grund")),
+                                  None, "", None, ["Aktiv", "warn"] if wz.get("aktiv") else ["Aus", "grau"], wz.get("grund") or ""))
+        else:
+            kach.append(kz_kachel("zyklus", "Zyklus-Gewinn", kz_usd(zg, 0, True) if zg is not None else None, None,
+                                  (f"Mindest-Net-Profit {kz_usd(mn.get('usd'))} ab Zyklus {mn.get('ab_zyklus')}" if mn.get("an") else "kein Mindest-Net-Profit"),
+                                  None, "gut" if (mn_gilt and mn_ok) else "rot" if mn_gilt else "", None,
+                                  (["Erfüllt", "gut"] if mn_ok else ["Gesperrt", "rot"]) if mn_gilt else None,
+                                  (wz or {}).get("grund") or "WD-Firmenregel min_netto"))
+        if ist is not None and soll:
+            checks.append(["ok" if ist >= soll else "nein", "Winning Days" if ist_wd else "Ziel-Tage", f"{ist} / {soll}"])
+        if kon.get("an") and kon.get("pct"):
+            checks.append([("ok" if cons_ok else "nein") if st["tage"] else "info", f"Consistency ≤ {kon['pct']} %",
+                           kz_pct((best / st["profit"]) if st["profit"] > 0 else None) if st["tage"] else "noch kein Trade"])
+        checks.append(["info", "Zyklus-Gewinn", kz_usd(zg, 0, True) if zg is not None else "—"])
+        checks.append([("ok" if mn_ok else "nein") if mn_gilt else "info", "Mindest-Net-Profit",
+                       (f"≥ {kz_usd(mn.get('usd'))}" if mn_gilt else f"ab Zyklus {mn.get('ab_zyklus')}") if mn.get("an") else "aus"])
+        if wz and wz.get("art") != "tradeify" and wz.get("firma_key"):
+            checks.append(["info", "Recoverer", ("aktiv · Tagesverlust " + kz_usd(-wz["verlust"])) if wz.get("aktiv") else "aus"])
+        if a.get("payout_ready_at"):
+            frei = str(a["payout_ready_at"])[:10] <= str(ctx.get("jetzt") or datetime.now(timezone.utc).isoformat())[:10]
+            checks.append(["ok" if frei else "nein", "Payout ab", kz_tag(a["payout_ready_at"])])
+        bekannt = ist is not None and soll
+        ok = bool(bekannt and ist >= soll and cons_ok and mn_ok and not any(c[0] == "nein" for c in checks))
+        fehlt = [c[1] for c in checks if c[0] == "nein"]
+        out["urteil"] = {"art": "payout", "titel": "Payout", "ok": ok if bekannt else None,
+                         "sub": f"Zyklus {st['nr']}" + (f" · seit {kz_tag(out['zyklus']['seit'])}" if out["zyklus"]["seit"] else ""),
+                         "text": "Payout möglich" if ok else "Noch kein Payout" if bekannt else "kein WD-Ziel",
+                         "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if bekannt else "am Konto kein Ziel (goal_target)", "checks": checks}
+    kach.append(kz_trades_kachel(phase, (out.get("zyklus") or {}).get("seit")))
+    out["kacheln"] = kach
+    return out
+
+
+def kz_darf(uid, konto_uid, admin, gruppe):
+    """REIN (testbar): darf dieser Login die Ziele des Kontos sehen? Eigenes Konto, Admin (Planer-Gate) oder Konto einer ID der eigenen Lese-Gruppe."""
+    if not uid or not konto_uid:
+        return False
+    return str(uid) == str(konto_uid) or bool(admin) or (bool(gruppe) and str(konto_uid) in {str(x) for x in gruppe})
+
+
+def _kz_karten():
+    """Echo-/Duplikum-Balances (alle Logins) 60 s gemerkt — die Detailseite fragt je Klick, nicht im Takt."""
+    if _kz_karten_cache.get("bis", 0) < time.time():
+        _kz_karten_cache.update(karten=_ap_balance_karten(), bis=time.time() + KZ_KARTEN_TTL_S)
+    return _kz_karten_cache["karten"]
+
+
+@app.route("/konto-ziele", methods=["GET", "OPTIONS"])
+def konto_ziele():
+    """GET ?id=<accounts.id> → kz_rechnen (s. oben). Nur lesen. 400 ohne id, 404 unbekannt, 403 fremdes Konto."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    kid = str(request.args.get("id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", kid):
+        return jsonify({"ok": False, "msg": "id fehlt"}), 400
+    try:
+        try:
+            rows = sb_select("accounts", {"select": KZ_KONTO_SEL, "id": f"eq.{kid}"}) or []
+        except requests.exceptions.HTTPError:
+            rows = sb_select("accounts", {"select": AP_KONTO_FELDER_OHNE_CONS + ",ziel_usd,waiting_payout_since,payout_ready_at,wd_farm", "id": f"eq.{kid}"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Konto nicht lesbar ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"ok": False, "msg": "Konto unbekannt"}), 404
+    a = rows[0]
+    darf = str(a.get("user_id")) == str(uid)
+    if not darf:
+        _mail, aerr = _planer_admin_auth()
+        if aerr is not None and aerr[1] == 502:
+            return aerr                    # Anmeldung nicht prüfbar — nicht als „fremdes Konto" melden
+        darf = kz_darf(uid, a.get("user_id"), aerr is None, None if aerr is None else ap_lese_gruppe(uid))
+    if not darf:
+        return jsonify({"ok": False, "msg": "fremdes Konto"}), 403
+    try:
+        jetzt = datetime.now(timezone.utc).isoformat()
+        echo_bal, dup_bal = _kz_karten()
+        bal, _ccy, quelle, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+        plaene = _sb_all("trade_plans", {"select": KZ_PLAN_SEL, "master_account_id": f"eq.{kid}", "order": "started_at.asc"}) or []
+        # Kernwerte und liq_regeln aus den 60-s-Caches des Radars (_liq_kw_laden = auto_plan_regeln.regeln.firmen, _liq_regeln_laden)
+        ctx = {"bal": bal, "bal_quelle": quelle, "bal_stand": stand, "plaene": plaene, "jetzt": jetzt,
+               "ap_firmen": _liq_kw_laden() or [], "liq_regeln": _liq_regeln_laden() or []}
+        typ = str(a.get("account_type") or "").lower()
+        verlauf = _liq_verlauf_laden([kid])
+        ctx["peak"] = liq_peak({}, a, None, verlauf)
+        ctx["peak_eod"] = liq_peak({"started_at": jetzt, "master_account_id": kid}, a, bal, verlauf,
+                                   eod_tagesstart=kz_tagesstart(kz_phase_plaene(plaene, typ), bal, jetzt)[0], eod=True)
+        if typ == "funded_cfd":
+            ctx["fcp_regel"] = _fcp_regeln_laden() or {}
+            ctx["fcp_pay"] = (_sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at", "account_id": f"eq.{kid}"}) or [],
+                              _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"eq.{kid}"}) or [],
+                              _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or [])
+        elif typ in ("funded", "winning_days"):
+            ctx["wd_firmen_regeln"] = _wd_firmen_regeln_lesen()
+            pay, verkn = [], set()
+            for t in _sb_all("pending_payouts", {"select": "account_id,requested_at,status,received_tx_id", "account_id": f"eq.{kid}",
+                                                 "status": "in.(pending,received)"}) or []:
+                pay.append(t)
+                if t.get("received_tx_id"):
+                    verkn.add(str(t["received_tx_id"]))
+            for t in _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or []:
+                if str(t.get("id")) not in verkn and t.get("occurred_at"):
+                    pay.append({"requested_at": str(t["occurred_at"])[:10], "status": "received"})
+            ctx["wd_pay"] = pay
+            if typ == "winning_days":
+                k = {"id": kid, "user_id": str(a.get("user_id")), "name": a.get("name") or "", "firm": a.get("firm") or "",
+                     "starting_balance": _wd_num(a.get("starting_balance")), "wd_farm": bool(a.get("wd_farm")),
+                     "live_balance": _wd_num(a.get("tv_balance")) if (_wd_num(a.get("tv_balance")) or 0) > 0 else None,
+                     "live_at": a.get("tv_balance_at"), "wd_zyklus_regel": a.get("wd_zyklus_regel")}
+                if _wd_zyklus_anhaengen([k]):
+                    ctx["wd_zyklus"] = k.get("zyklus")
+        erg = kz_rechnen(a, ctx)
+    except Exception as e:
+        print(f"[konto-ziele] ⚠️ {kid[:8]}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"nicht rechenbar ({type(e).__name__})"}), 502
+    erg["at"] = jetzt
+    resp = jsonify(json.loads(json.dumps(erg, default=str)))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/admin/auto-plan/ablaufwert", methods=["POST", "OPTIONS"])
 def admin_auto_plan_ablaufwert():
     """POST {zeiten?: [{pfad, wert}], zufall?: {k: wert}, auto_bestaetigen?: aus|cfd|alle, bloecke?: {block: {feld: zahl}}, schalter?: [{pfad,
