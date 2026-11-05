@@ -71419,8 +71419,32 @@
   }
   window._wdRegistrierenNachziehen = wdRegistrierenNachziehen   // Test-Haken
   // Offene Zeilen des Tages würfeln und schreiben. alleNeu = echter Zufall für alles, was noch nicht läuft.
+  /* UNTERNEHMEN HABEN NICHTS GEGENEINANDER (UNT2, 05.11.2026, Finn-Grundsatz; Bericht G2 A8): gewürfelt wird nur über die Zeilen des
+   * eigenen Unternehmens — vorher würfelte jeder Tab (auch Emins) Reihenfolge, Blockabstand, Startzeiten, belegt und Seed über die
+   * Zeilen ALLER IDs, und ein HT-Tab schrieb auch Emins Zeilen. Unternehmen = prophos_gruppe_von (RPC, security definer — derselbe
+   * Schlüssel wie Firmen-Abstand/Gegenhedge in der DB), je ID 10 min gemerkt. Nicht lesbar → nicht würfeln (nächster Takt versucht es wieder). */
+  const _wdUnt = new Map()
+  async function wdUnternehmenVon(uid){
+    const k = String(uid || ''), m = _wdUnt.get(k)
+    if(m && Date.now() - m.at < 10 * 60000) return m.g
+    const { data, error } = await supabase.rpc('prophos_gruppe_von', { uid: k })
+    if(error) throw error
+    const g = data == null ? '' : String(data)
+    _wdUnt.set(k, { g, at: Date.now() }); return g
+  }
+  async function wdNurEigenesUnternehmen(rows, ich){
+    const u = String(ich || ''); if(!u) throw new Error('ohne Login kein Unternehmen')
+    const ids = [...new Set([u, ...(rows || []).map(x => String(x.user_id))])]
+    const g = new Map(await Promise.all(ids.map(async x => [x, await wdUnternehmenVon(x)])))
+    return (rows || []).filter(x => g.get(String(x.user_id)) === g.get(u))
+  }
+  window._wdNurEigenesUnternehmen = wdNurEigenesUnternehmen   // Test-Haken
   async function wdWuerfelnSchreiben(tag, alleNeu){
-    const rows = await wdRowsLaden(tag), r = _wd.regeln || {}
+    let ich; try{ ich = currentUserId }catch(_){ ich = null }
+    let rows
+    try{ rows = await wdNurEigenesUnternehmen(await wdRowsLaden(tag), ich) }
+    catch(e){ console.warn('[wd] Unternehmen nicht lesbar — nicht gewürfelt', e); return 0 }
+    const r = _wd.regeln || {}
     const offen = rows.filter(x => alleNeu ? (x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst') : (x.status === 'geplant' && !x.start_um))
     if(!offen.length) return 0
     const seed = alleNeu ? null : tag + '|' + offen.map(x => x.user_id).sort().join(',')
@@ -71967,7 +71991,10 @@
       else if(Date.now() - (_wd.nachgezogenAt || 0) > 5 * 60000){ _wd.nachgezogenAt = Date.now(); try{ if(await wdRegistrierenNachziehen(tagZiel)) _wd.eigeneAt = 0 }catch(e){ console.warn('[wd] nachziehen', e) } }
       // Automatik = nachts um 00:10 selbst würfeln (deterministisch, damit zwei Tabs dasselbe schreiben)
       if(r.aktiv && wdHandelstag(j.wochentag) && wdTickEntscheidung(j, r, null).wuerfeln && tagZiel === j.tag){
-        const rows = await wdRowsLaden(j.tag); if(rows.some(x => x.status === 'geplant' && !x.start_um)){ await wdWuerfelnSchreiben(j.tag, false); _wd.eigeneAt = 0 }   // gewürfelt → eigene Zeilen sofort lesen (01.10.2026)
+        // UNT2 (Prüfung): nur ungewürfelte Zeilen des EIGENEN Unternehmens lösen das Würfeln aus — sonst hielte eine Zeile des anderen Unternehmens
+        // (dessen PC aus ist) jeden Tab den ganzen Tag im 30-s-Takt; Unternehmen nicht lesbar → diesen Takt nicht würfeln
+        let rows = []; try{ rows = await wdNurEigenesUnternehmen(await wdRowsLaden(j.tag), uid) }catch(e){ console.warn('[wd] Unternehmen nicht lesbar', e) }
+        if(rows.some(x => x.status === 'geplant' && !x.start_um)){ if(await wdWuerfelnSchreiben(j.tag, false)) _wd.eigeneAt = 0 }   // gewürfelt → eigene Zeilen sofort lesen (01.10.2026)
       }
       // Eigene Zeilen alle 30 s nur, solange die Nacht „scharf" ist (01.10.2026, Supabase-Kontingent überschritten — Edge-Logs
       // 30.09. 08–16 UTC: 3.490 GET wd_tagesplan in 8 h, fast alles diese Abfrage je PC alle 30 s, auch tagsüber ohne Plan):

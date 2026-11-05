@@ -75,7 +75,7 @@ def planer():
     ok(art == "v2" and "unter 0,01 Lot" in grund, "Hedge unter 0,01 Lot: nicht stellbar mit Grund")
 
     print("ap_echo_hedge_anlegen (Schalter, Fehler je Zeile)")
-    ns2 = eh.lade(dict(STUBS, _sb_all=lambda t, q: [], gp_hedge_settings_eigen=lambda rows: rows, ap_ppl_karte=lambda rows, norm=None: ({}, {}),
+    ns2 = eh.lade(dict(STUBS, _sb_all=lambda t, q: [], gp_hedge_settings_eigen=lambda rows: rows, ap_ppl_karte=lambda rows, norm=None: ({}, {}), ap_ppl_ctx_unternehmen=lambda rows, norm=None: {"ppl": {}, "ppl_firma": {}},
                        _ap_kauf_echt=lambda ids: {}, GP_HEDGE_KEY="echo_hedge_account"))
     z, a = zeile("FTMO")
     r = ns2["ap_echo_hedge_anlegen"]([z], {"A-FTMO": (a, 100000.0)}, {"echo_hedge": {"an": False}, "firmen": FIRMEN})
@@ -115,7 +115,7 @@ def nachrechnen():
     ns = eh.lade(dict(STUBS, sb_select=db.sb_select, _sb_all=db._sb_all, sb_update=db.sb_update,
                       alarm_senden=lambda *a, **k: db.alarme.append((a, k)),
                       _ap_namen=lambda: ({"U1": "Mike"}, set()), gp_verwalter_karte=lambda: {}, ap_planer_gruppen_ids=lambda: set(),
-                      AP_KONTO_FELDER="id", GP_HEDGE_KEY="echo_hedge_account", ap_ppl_karte=lambda rows, norm=None: ({}, {}),
+                      AP_KONTO_FELDER="id", GP_HEDGE_KEY="echo_hedge_account", ap_ppl_karte=lambda rows, norm=None: ({}, {}), ap_ppl_ctx_unternehmen=lambda rows, norm=None: {"ppl": {}, "ppl_firma": {}},
                       _ap_balance_karten=lambda: ({}, {}), _ap_kauf_echt=lambda ids: {}, gp_fusion_lesungen=lambda uids, j: les,
                       acc_balance_wahl=lambda a, e, d: (100000.0, "USD", "Echo", "")))
     print("eh_tick rechnet Echo aus dem Planer nach")

@@ -13,7 +13,7 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_kette_regel", "ap_kette_mll",
-              "ap_kette_trade1", "ap_kw_param", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_notiz", "zw_erreicht")
+              "ap_kette_trade1", "ap_kw_param", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_ppl_firma_wahl", "ap_notiz", "zw_erreicht")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_PUFFER_MIN", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
               "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
 FEHLER = []

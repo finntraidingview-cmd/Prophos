@@ -23651,7 +23651,7 @@ def ap_cfd_ppl(ctx, konto):
     if not ctx or not konto:
         return None
     fk = _ap_norm(_firm_norm(konto.get("firm")))
-    t = (ctx.get("ppl") or {}).get((str(konto.get("user_id")), fk)) or (ctx.get("ppl_firma") or {}).get(fk)
+    t = (ctx.get("ppl") or {}).get((str(konto.get("user_id")), fk)) or ap_ppl_firma_wahl(ctx, konto.get("user_id"), fk)   # UNT2: Rückfall je Unternehmen
     if not t or str(t[2] or "Lots") != "Lots":
         return None            # Prüfer Slave 2 (09.10.2026): „Kontrakte"/MNQ-Wert bei einer CFD-Firma → kein Punktwert, Handarbeit
     v = _wd_num(t[0])
@@ -25418,7 +25418,8 @@ AP_HB_TZ = "Asia/Dubai"
 AP_HB_CACHE_S = 30
 AP_HB_BLOW_ANTEIL = 0.95                               # wie ap_letzter_trade_geblasen: ≥ 95 % verloren = geblowt
 AP_HB_ECHT_QUELLEN = ("tv", "reader", "puls", "hand")  # pl_quelle eines echten Ergebnisses (ap_letzter_trade_geblasen)
-_ap_hb_cache = {"bis": 0.0, "tag": None, "zeilen": None, "ab": None}
+_ap_hb_cache = {"bis": 0.0, "tag": None, "zeilen": None, "ab": None}   # HT („ht"); Gruppen in _ap_hb_cache_je (UNT2)
+_ap_hb_cache_je = {}
 _ap_hb_lock = threading.Lock()
 
 
@@ -25536,14 +25537,17 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
     return out
 
 
-def _ap_hb_laden(firmen, jetzt=None, ab=None):
+def _ap_hb_laden(firmen, jetzt=None, ab=None, unternehmen=None):
     """heute_beendet[] aller IDs (ohne ADMIN_EXCLUDE_EMAILS), neueste zuerst — nur Lesen: beendete Pläne mit Ende seit 00:00 Dubai, ihre
     Konten, Archiv-Gründe, Läufe der Start-Tage (Satz wie die Hypo-Bilanz); Kontowerte heute nur, wenn eine Zeile sonst ohne Satz bliebe
     (ap_kontowerte_gemerkt, höchstens einmal je Minute). → (zeilen, ab_iso)
     VERLAUF IN € (29.10.2026, PLANER-VERLAUF-EURO): ab = früherer Tagesbeginn (00:00 Dubai) → dieselbe Rechnung über mehrere Dubai-Tage.
     „Jüngster Trade des Kontos“ und der Archiv-Grund gelten dann JE DUBAI-TAG des Endes (rückwirkend zählt nur eine Archivierung am selben
-    Tag, sonst kippten alte Tage); für heute allein ist das genau die bisherige Rechnung."""
+    Tag, sonst kippten alte Tage); für heute allein ist das genau die bisherige Rechnung.
+    unternehmen (UNT2, G2 A5): "ht" = nur Hermann Technologies, frozenset = genau diese IDs einer Gruppe (Tages-Saldo von Planer/Bot),
+    None = wie bisher nur ohne ausgeblendete (Verlauf in €, filtert danach nach Sicht)."""
     jetzt = jetzt or datetime.now(timezone.utc)
+    gehoert = (lambda u: True) if unternehmen is None else ap_unternehmen_filter(None if unternehmen == "ht" else unternehmen, admin_gruppen_daten())
     z = jetzt.astimezone(_ap_tz(AP_HB_TZ))
     if ab is None:
         ab = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo)
@@ -25559,7 +25563,7 @@ def _ap_hb_laden(firmen, jetzt=None, ab=None):
         p = dict(p, mt5_baseline={"tv": p.pop("tv", None), "final": p.pop("final", None), "balance_start": p.pop("bstart", None),
                                   "bal_nach": p.pop("bn", None)})
         e = _ap_ts(ap_hb_ende(p))
-        if e is not None and e >= ab and str(p.get("user_id")) not in aus:
+        if e is not None and e >= ab and gehoert(p.get("user_id")) and (str(p.get("user_id")) not in aus or unternehmen not in (None, "ht")):
             plaene.append(p)
     kids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
     accs = {}
@@ -25661,17 +25665,24 @@ def _ap_hb_laden(firmen, jetzt=None, ab=None):
     return zeilen, ab.isoformat()
 
 
-def ap_heute_beendet_gemerkt(firmen, jetzt=None):
-    """_ap_hb_laden mit dem 30-s-Merker (alle IDs, je Dubai-Tag); Single-Flight — zwei Tabs gleichzeitig laden nicht doppelt.
-    Fehler fliegen durch (nicht gemerkt)."""
+def ap_heute_beendet_gemerkt(firmen, jetzt=None, unternehmen="ht"):
+    """_ap_hb_laden mit dem 30-s-Merker (je Unternehmen und Dubai-Tag); Single-Flight — zwei Tabs gleichzeitig laden nicht doppelt.
+    Fehler fliegen durch (nicht gemerkt). unternehmen: "ht" (Standard) oder frozenset der Gruppen-IDs (UNT2) — vorher ein Merker für
+    alle, gefüllt mit der Ausblendung des ersten Aufrufers (Gruppen-Chip → Emins Zeilen im Tages-Saldo des HT-Bots)."""
     jetzt = jetzt or datetime.now(timezone.utc)
     tag = jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d")
+    unternehmen = "ht" if unternehmen in (None, "ht") else frozenset(str(u) for u in unternehmen)
     with _ap_hb_lock:
-        c = _ap_hb_cache
+        if unternehmen == "ht":
+            c = _ap_hb_cache
+        else:
+            if len(_ap_hb_cache_je) > 20:
+                _ap_hb_cache_je.clear()
+            c = _ap_hb_cache_je.setdefault(unternehmen, {"bis": 0.0, "tag": None, "zeilen": None, "ab": None})
         if c["zeilen"] is not None and c["tag"] == tag and c["bis"] > time.time():
             return c["zeilen"], c["ab"]
-        zeilen, ab = _ap_hb_laden(firmen, jetzt)
-        _ap_hb_cache.update(bis=time.time() + AP_HB_CACHE_S, tag=tag, zeilen=zeilen, ab=ab)
+        zeilen, ab = _ap_hb_laden(firmen, jetzt, unternehmen=unternehmen)
+        c.update(bis=time.time() + AP_HB_CACHE_S, tag=tag, zeilen=zeilen, ab=ab)
         return zeilen, ab
 
 
@@ -27854,6 +27865,13 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     uids = ap_ids_laden() if alle_ids else [str(u) for u in (reg.get("user_ids") or [])]
     if gruppe:
         uids = sorted(str(u) for u in (gruppe.get("ids") or ()))   # GRUPPE WIE HT (30.10.2026): genau die IDs der Verwalter-Gruppe
+    else:   # UNT2 (G2 A4): der HT-Lauf plant nie IDs einer Verwalter-Gruppe — auch wenn sie in user_ids stünden (live 0); Gruppen nicht lesbar → nicht planen
+        try:
+            _ht = ap_unternehmen_filter(None, admin_gruppen_daten())
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — HT nicht geplant", flush=True)
+            return {"ok": False, "msg": f"Gruppen nicht lesbar ({type(e).__name__}) — nicht geplant (sonst ohne Trennung der Unternehmen)"}
+        uids = [u for u in uids if _ht(u)]
     if nur_uid and nur_uid not in uids:
         return {"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}
     if not uids:
@@ -28068,7 +28086,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     param = ap_ausgleich_param(reg.get("regeln"))
     stand = _ap_stand_laden(reg, jetzt, tag, ersetzt=lambda p: str(p.get("user_id")) in uids and _vorschlag(p),
                             extra_konten=[k["a"]["id"] for k in kandidaten], echo_bal=echo_bal, dup_bal=dup_bal,
-                            namen=namen, ausgeblendet=ausgeblendet)
+                            namen=namen, ausgeblendet=ausgeblendet, eigene=uids if gruppe else None)   # UNT2: Stand nur aus dem Unternehmen
     if gruppe:   # ORBIT PRIO 2 AUS DER WAAGE (MO1b): die Gruppe wiegt mit IHREN Modellen — Prio-2-Firmen der Gruppe raus, HT-Einträge gelten ihr nicht
         try:
             _fm_g = _fm_gruppe or {}
@@ -28083,7 +28101,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # ZWEI WAAGEN (17.10.2026): Finn wiegt nur das laufende Buch — mit regeln.ausgleich.waage (Standard) bleibt die Basis laufend
     if tag == jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d") and not param.get("waage"):
         try:
-            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], jetzt)
+            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], jetzt,
+                                                                                 unternehmen=frozenset(uids) if gruppe else "ht")   # UNT2
             ap_tages_saldo(stand)
         except Exception as e:
             stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
@@ -29022,6 +29041,88 @@ def ap_gruppe_ausgeblendet(namen, ids):
     return {str(u) for u in (namen or ())} - {str(u) for u in (ids or ())}
 
 
+# ══ UNTERNEHMEN HABEN NICHTS GEGENEINANDER (UNT2, 05.11.2026, Finn-Grundsatz; berichte G2 A1–A5/A11, G2b Schritt 2): der Stand eines
+# Unternehmens wird EXPLIZIT aus der Gruppen-Zugehörigkeit gefiltert, nicht aus der Sicht des Requests (_admin_standard_aus ist bei
+# eingeschränktem Login / Gruppen-Chip leer — dann zählte HT Emins Pläne mit) und nicht aus der „Rest"-Annahme über die Nutzerliste.
+# HT = jede ID außer denen der Verwalter-Gruppen (auch eine neue ID ohne Zeile), eine Gruppe = genau ihre IDs. ══
+def ap_unternehmen_filter(eigene, daten):
+    """REIN RECHNEND: gehört(uid) → bool für den Stand EINES Unternehmens. eigene=None → HT (alles außer den Verwalter-Gruppen aus
+    daten = admin_gruppen_daten()), sonst genau die IDs in eigene."""
+    if eigene is None:
+        fremd = frozenset(_admin_verwalter_gruppen_ids(daten))
+        return lambda u: str(u) not in fremd
+    eig = frozenset(str(u) for u in eigene)
+    return lambda u: str(u) in eig
+
+
+def ap_unternehmen_ids(uid, daten):
+    """REIN RECHNEND: IDs (frozenset) der Verwalter-Gruppe, zu der uid gehört (Verwalter + Mitglieder), oder None = HT."""
+    daten = daten or {}
+    for x in daten.get("gruppen") or ():
+        v = x.get("verwalter_id")
+        if not v:
+            continue
+        ids = frozenset({str(v)} | {str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) == str(x.get("id"))})
+        if str(uid) in ids:
+            return ids
+    return None
+
+
+def ap_unternehmen_karte(daten):
+    """REIN RECHNEND: {uid: gruppe_id} für alle IDs der Verwalter-Gruppen — jede andere ID ist HT (Schlüssel „ht")."""
+    daten = daten or {}
+    out = {}
+    for x in daten.get("gruppen") or ():
+        if x.get("verwalter_id"):
+            gid = str(x.get("id"))
+            out[str(x["verwalter_id"])] = gid
+            for m in daten.get("mitglieder") or ():
+                if str(m.get("gruppe_id")) == gid:
+                    out[str(m.get("user_id"))] = gid
+    return out
+
+
+def ap_ppl_firma_je_unternehmen(rows, karte, norm=None):
+    """REIN RECHNEND: firm_specs-Zeilen → {unternehmen: je_firma} (ap_ppl_karte je Unternehmen getrennt) — der Fallback-Punktwert einer
+    Firma kommt nur aus dem eigenen Unternehmen (G2 A2)."""
+    teile = {}
+    for r in rows or ():
+        teile.setdefault((karte or {}).get(str(r.get("user_id")), "ht"), []).append(r)
+    return {k: ap_ppl_karte(v, norm=norm)[1] for k, v in teile.items()}
+
+
+def ap_ppl_firma_wahl(ctx, uid, fk):
+    """Fallback-Punktwert (ppl, symbol, unit) der Firma fk für die ID uid: mit ctx["ppl_firma_je"] aus ihrem Unternehmen
+    (ctx["unternehmen_von"] = ap_unternehmen_karte), sonst ctx["ppl_firma"] (der ctx kennt nur ein Unternehmen, z. B. der Planer-Stand)."""
+    je = (ctx or {}).get("ppl_firma_je")
+    if je is not None:
+        return (je.get(((ctx or {}).get("unternehmen_von") or {}).get(str(uid), "ht")) or {}).get(fk)
+    return ((ctx or {}).get("ppl_firma") or {}).get(fk)
+
+
+def ap_ppl_ctx_unternehmen(rows, norm=None):
+    """firm_specs-Zeilen (mehrerer Unternehmen) → {ppl, ppl_firma, ppl_firma_je, unternehmen_von} für die Hedge-/Funded-Takte.
+    Gruppen nicht lesbar → wie vor UNT2 (ein Fallback über alle, Meldung): ein fehlender Punktwert hielte sonst einen Hedge an."""
+    ppl, ppl_firma = ap_ppl_karte(rows, norm=norm)
+    ctx = {"ppl": ppl, "ppl_firma": ppl_firma}
+    try:
+        karte = ap_unternehmen_karte(admin_gruppen_daten())
+        ctx.update(ppl_firma_je=ap_ppl_firma_je_unternehmen(rows, karte, norm=norm), unternehmen_von=karte)
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ Gruppen für den Punktwert-Rückfall nicht lesbar ({type(e).__name__}: {e}) — Rückfall über alle", flush=True)
+    return ctx
+
+
+def _ap_stand_fuer_uid(reg, uid, jetzt=None, **kw):
+    """Live-Stand des Unternehmens, zu dem die ID uid gehört (Hand-Eingriffe je Plan: Nachholen, Startzeit, Bot-Eingriff) — HT-Plan gegen den
+    HT-Stand, Gruppen-Plan gegen den Stand seiner Gruppe. Gruppen nicht lesbar → Fehler fliegt (nie still gegen beide Unternehmen)."""
+    eig = ap_unternehmen_ids(uid, admin_gruppen_daten())
+    if eig is None:
+        return _ap_stand_laden(reg, jetzt, **kw)
+    namen, _aus = _ap_namen()
+    return _ap_stand_laden(reg, jetzt, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, eig), eigene=eig, **kw)
+
+
 def ap_planer_gruppen(nur_aktiv=False):
     """[{gruppe_id, name, ids (frozenset), aktiv, letzter_lauf}] — Verwalter-Gruppen mit Zeile in auto_plan_gruppe."""
     daten = admin_gruppen_daten()
@@ -29537,15 +29638,15 @@ def ap_echo_hedge_anlegen(zeilen, konten, regeln):
             hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
     hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm,external_id", "id": "in.(" + ",".join(
         sorted({h[0] for h in hedge.values()})) + ")"}) if hedge else [])}
-    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
-                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    ctx_ppl = ap_ppl_ctx_unternehmen(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                     norm=lambda n: _ap_norm(_firm_norm(n)))   # UNT2: Punktwert-Rückfall je Unternehmen
     kauf = _ap_kauf_echt(sorted({str(z["master_account_id"]) for z in kand}))
     jetzt_iso = _wt_now_iso()
     for z in kand:
         a, bal = konten.get(str(z.get("master_account_id"))) or (None, None)
         try:
-            art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, {"ppl": ppl, "ppl_firma": ppl_firma}, kauf,
-                                              ap_unt_firmen(a.get("user_id") or z.get("user_id"), firmen, streng=False), par, jetzt_iso)   # UNT3
+            art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf,
+                                              ap_unt_firmen(a.get("user_id") or z.get("user_id"), firmen, streng=False), par, jetzt_iso)   # UNT3; UNT2: Punktwert je Unternehmen
         except Exception as e:      # eine kaputte Zeile wird nicht angelegt, die anderen trotzdem Echo
             art, grund = "v2", f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})"
         if art == "echo":
@@ -29724,9 +29825,9 @@ def _eh_tick_lauf(jetzt):
             hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
     hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm,external_id", "id": "in.(" + ",".join(
         sorted({h[0] for h in hedge.values()})) + ")"}) if hedge else [])}
-    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
-                                  norm=lambda n: _ap_norm(_firm_norm(n)))
-    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    ctx_ppl = ap_ppl_ctx_unternehmen(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                     norm=lambda n: _ap_norm(_firm_norm(n)))   # UNT2: Punktwert-Rückfall je Unternehmen
+    ppl = ctx_ppl["ppl"]
     echo_bal, dup_bal = _ap_balance_karten()
     kauf = _ap_kauf_echt(sorted(konten)) if konten else {}
     try:
@@ -29903,9 +30004,9 @@ def ehv_tick(jetzt=None, force=False):
     in_uids = "in.(" + ",".join(sorted({str(p["user_id"]) for p in plaene})) + ")"
     hedge = {str(r["user_id"]) for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}))
              if isinstance(r.get("value"), dict) and r["value"].get("accountId")}
-    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
-                                  norm=lambda n: _ap_norm(_firm_norm(n)))
-    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    ctx_ppl = ap_ppl_ctx_unternehmen(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                     norm=lambda n: _ap_norm(_firm_norm(n)))   # UNT2: Punktwert-Rückfall je Unternehmen
+    ppl = ctx_ppl["ppl"]
     echo_bal, dup_bal = _ap_balance_karten()
     kauf = _ap_kauf_echt(sorted(konten)) if konten else {}
     for p in plaene:
@@ -34135,13 +34236,17 @@ def ap_id_fest(offen_rows, geplant_rows, jetzt_min, horizont_min=AP_ID_FEST_HORI
 
 
 def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), echo_bal=None, dup_bal=None, namen=None,
-                    ausgeblendet=None):
+                    ausgeblendet=None, eigene=None):
     """Live-Stand für Delta, Bot und manuelle Eingriffe — ALLE IDs (wie Radar, ohne ADMIN_EXCLUDE_EMAILS): laufende Trades mit
     Delta + Restabständen (Orbit: Einstieg/Level aus mt5_baseline + Reader-Kurs; Echo: mt5_live-Position), heutige geplante
     Pläne (deutscher Tag) mit Delta + Änderbarkeit, heutige Starts (weicher Malus), Richtungsschutz anderer Tage. ersetzt(p) = Plan zählt nicht
     (der Planer ersetzt seine unbestätigten Vorschläge). Nur Lesen. offen[] und die Einsatz-Basis nur Konten der AP_TYPEN
-    (Winning Days/Funded raus, Finn 07.10.2026); Richtungsschutz und Starts sehen alle laufenden Trades."""
+    (Winning Days/Funded raus, Finn 07.10.2026); Richtungsschutz und Starts sehen alle laufenden Trades.
+    eigene (UNT2, 05.11.2026): None = Stand von Hermann Technologies, sonst die IDs EINER Verwalter-Gruppe. Pläne, WD-Blöcke und
+    firm_specs kommen nur aus diesem Unternehmen (ap_unternehmen_filter) — zusätzlich zu ausgeblendet, unabhängig von der Request-Sicht.
+    Gruppen nicht lesbar → Fehler fliegt (nie still ein Stand über beide Unternehmen)."""
     jetzt = jetzt or datetime.now(timezone.utc)
+    gehoert = ap_unternehmen_filter(eigene, admin_gruppen_daten())
     zeiten = ap_zeiten_mit_zufall(reg)          # E3b: Verteilung/Umplanen mit denselben Zufall-Parametern wie der Planer
     regeln = reg.get("regeln") or {}
     firmen = regeln.get("firmen") or []
@@ -34153,9 +34258,13 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     jetzt_min = (jetzt - mitternacht).total_seconds() / 60.0
     if namen is None or ausgeblendet is None:
         namen, ausgeblendet = _ap_namen()
+    _aus = {str(u) for u in (ausgeblendet or ())}
+
+    def sicht(p):   # UNT2: im Unternehmen und nicht ausgeblendet
+        return gehoert(p.get("user_id")) and str(p.get("user_id")) not in _aus
     ersetzt = ersetzt or (lambda p: False)
     offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
-             if str(p.get("user_id")) not in ausgeblendet]
+             if sicht(p)]
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
                                                                  "pp:mt5_baseline->puls_pause,"   # Puls-Pause (Braucht dich, 20.10.2026)
@@ -34164,11 +34273,11 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                                                  "tm:mt5_baseline->tage_mini",   # Tage-Mini bleibt Echo V2 (ap_eh_wird_hedgen, 30.10.2026)
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-                    if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p) and not ap_ist_waise(p)]   # Waise (09.10.2026)
+                    if sicht(p) and not ersetzt(p) and not ap_ist_waise(p)]   # Waise (09.10.2026)
     gestartet = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,richtung,status,started_at",
                                                     "status": "in.(review,completed)", "started_at": "gte." + mitternacht.isoformat(),
                                                     "order": "id.asc"})
-                 if str(p.get("user_id")) not in ausgeblendet and (_ap_iso_min(p.get("started_at"), mitternacht) or 0) < 24 * 60]
+                 if sicht(p) and (_ap_iso_min(p.get("started_at"), mitternacht) or 0) < 24 * 60]
     heute, andere_tage = [], []
     for p in geplant_alle:
         m = _ap_iso_min(p.get("start_um"), mitternacht) if p.get("start_um") else None
@@ -34189,7 +34298,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
             konten[str(a["id"])] = a
     if echo_bal is None or dup_bal is None:
         echo_bal, dup_bal = _ap_balance_karten()
-    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit"}),
+    # UNT2 (G2 A2): Punktwert-Rückfall „häufigster Wert der Firma" nur aus dem eigenen Unternehmen
+    ppl, ppl_firma = ap_ppl_karte([r for r in _sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit"}) if gehoert(r.get("user_id"))],
                                   norm=lambda n: _ap_norm(_firm_norm(n)))
     ctx = {"firmen": firmen, "kauf": _ap_kauf_echt([i for i in ids if i in konten]), "ppl": ppl, "ppl_firma": ppl_firma,
            "echo_bal": echo_bal, "dup_bal": dup_bal}
@@ -34290,10 +34400,12 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                  "start": round(m, 2), "richtung": p.get("richtung")})
     # WINNING-DAYS-FARMER (08.10.2026): gewürfelte Blöcke, deren Pläne noch nicht angelegt sind, zählen wie feste Starts — Firmen-
     # Abstand (5 min zu anderen IDs), PC-Abstand derselben ID und Richtung für Nachtlauf, Bot und Hand-Start (ap_wd_block_starts).
-    # Alle IDs, auch ausgeblendete: echte Trades. Fehler → ohne (Stand wie bisher).
+    # Alle IDs des Unternehmens, auch ausgeblendete (ADMIN_EXCLUDE): echte Trades — die des anderen Unternehmens nie (UNT2, G2 A1).
+    # Fehler → ohne (Stand wie bisher).
     try:
         tage = ",".join(sorted({(mitternacht + timedelta(days=d)).date().isoformat() for d in (-1, 0, 1)}))
-        wd_rows = sb_select("wd_tagesplan", {"select": "tag,user_id,name,status,start_um,richtung,konten", "tag": f"in.({tage})"})
+        wd_rows = [r for r in sb_select("wd_tagesplan", {"select": "tag,user_id,name,status,start_um,richtung,konten", "tag": f"in.({tage})"}) or []
+                   if gehoert(r.get("user_id"))]
         bekannt = {str(p.get("id")) for p in offen + geplant_alle + gestartet}
         starts_heute += ap_wd_block_starts(wd_rows, mitternacht, firmen, bekannt)
     except Exception as e:
@@ -34903,7 +35015,7 @@ def ap_waage_tick(regeln_param=None):
     try:
         namen, _aus = _ap_namen()
         for gr in (ap_planer_gruppen(nur_aktiv=True) if namen else []):   # ohne Nutzerliste keine Gruppen-Waage (nie gegen HT wiegen)
-            st_g = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+            st_g = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]), eigene=gr["ids"])
             try:     # ORBIT PRIO 2 (MO1b): wie ap_planen — die Gruppe wiegt mit ihren eigenen Modellen
                 _fm_g = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in (gr.get("ids") or ())}), {})
                 st_g["param"] = ap_waage_param_gruppe(st_g.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
@@ -35636,7 +35748,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
         return {"neu": [], "fehler": "auto_plan_regeln fehlt"}
     firmen = (reg.get("regeln") or {}).get("firmen") or []
     param = ap_ausgleich_param(reg.get("regeln"))
-    stand = None
+    stand_je = {}                  # UNT2 (Prüfung): Trade 2 gegen den Stand des Unternehmens seiner ID (HT-Kette nie gegen Emins Pläne und umgekehrt)
     neu, gruende = [], {}
     sperren = _ap_sperren()        # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein Trade 2; Lesefehler → leer (wie bisher)
     for t1 in offen_t1:
@@ -35659,8 +35771,10 @@ def ap_kette_tick(jetzt=None, rnd=None):
             continue
         if ((t1.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"):
             continue                                  # Tag ist abgeschlossen und wartet auf Finns Haken — kein Trade 2 mehr (30.10.2026)
-        if stand is None:
-            stand = _ap_stand_laden(reg, jetzt)
+        _uk = ap_unternehmen_ids(t1.get("user_id"), admin_gruppen_daten())
+        if _uk not in stand_je:
+            stand_je[_uk] = _ap_stand_fuer_uid(reg, t1.get("user_id"), jetzt)
+        stand = stand_je[_uk]
         ende_min = (datetime.fromisoformat(str(t1["ended_at"]).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
         abst, streu = kette.get("t2_abstand_min") or [5, 20], kette.get("t2_streuung_min") or [0, 45]
         # frühestens Ende + Abstand, frühestens Fensterbeginn + Streuung (sonst stünden alle Trade 2 genau um 11:00 — Muster)
@@ -36090,12 +36204,21 @@ def admin_auto_plan_delta():
             # GRUPPEN-SICHT (30.10.2026, Emin gleich wie Finn): Verwalter mit sicht=admin bzw. Finns Gruppen-Chip — Stand nur aus genau
             # diesen IDs. Vorher lud der Stand mit der Standard-Ausblendung (ADMIN_EXCLUDE), dem Verwalter fehlten seine eigenen Pläne.
             namen, _aus = _ap_namen()
-            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, sicht_d))
+            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, sicht_d), eigene=sicht_d)
+            _hb_u = sicht_d
+        elif isinstance(sicht_d, str) and ap_unternehmen_ids(sicht_d, admin_gruppen_daten()):
+            # UNT2 (Prüfung): eigene ID eines Gruppen-Mitglieds (PC-Tab ohne sicht, rkSaldo/Delta-Monitor) → Stand seines Unternehmens; der HT-Stand
+            # kennt seine Pläne nicht mehr (vorher lieferte der eingeschränkte Login einen Stand über alle IDs)
+            _eig = ap_unternehmen_ids(sicht_d, admin_gruppen_daten())
+            namen, _aus = _ap_namen()
+            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, _eig), eigene=_eig)
+            _hb_u = _eig
         else:
             stand = _ap_stand_laden(reg)
+            _hb_u = "ht"
         # HEUTE BEENDET (Finn 08.10.2026, ID-Detail + Kachel „Heute"): eigener try — fällt es aus, bleibt das übrige Delta unberührt
-        try:
-            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [])
+        try:   # UNT2: aus demselben Unternehmen wie der Stand
+            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], unternehmen=_hb_u)
         except Exception as e:
             stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
@@ -36225,6 +36348,12 @@ def admin_auto_plan_ids():
         if not re.fullmatch(r"[0-9a-f-]{36}", uid):
             return jsonify({"ok": False, "msg": "user_id fehlt"}), 400
         soll = bool(body.get("drin"))
+        try:
+            _ht_id = ap_unternehmen_filter(None, admin_gruppen_daten())(uid)
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"Gruppen nicht lesbar ({type(e).__name__}) — nichts geändert"}), 502
+        if soll and not _ht_id:   # UNT2 (G2 A4): Gruppen-IDs plant ihr eigener Lauf
+            return jsonify({"ok": False, "msg": "Diese ID gehört zu einer Verwalter-Gruppe — sie plant ihr eigener Gruppen-Lauf"}), 409
         neu = [u for u in drin if u != uid] + ([uid] if soll else [])
         sb_update("auto_plan_regeln", {"id": "eq.1"}, {"user_ids": neu})
         _ap_planer_cache_leeren()          # neue Planer-ID gilt sofort im Admin-Reiter (Cache _ap_im_planer)
@@ -36570,7 +36699,7 @@ def _ap_nachholen_kern(pid, alle, uid, jetzt=None, gruppe=None):
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
         return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
-    stand = _ap_stand_laden(reg, jetzt)
+    stand = _ap_stand_fuer_uid(reg, plan.get("user_id"), jetzt)   # UNT2: gegen den Stand des eigenen Unternehmens
     plaene_tag = _ap_stand_plaene(stand)
     ziel = next((x for x in plaene_tag if str(x.get("plan_id")) == pid), None) or {
         "plan_id": pid, "user_id": str(plan.get("user_id")), "richtung": plan.get("richtung"),
@@ -36685,7 +36814,7 @@ def _ap_werte_setzen(pid, body, admin, uid, gruppe=None):
         if not reg:
             return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
         # Stand des TAGES, an dem der neue Start liegt (Planer-Tag = deutsche Zeit) — auch Pläne von morgen (Nachtlauf)
-        stand = _ap_stand_laden(reg, jetzt, tag=dt.astimezone(_ap_tz(AP_TZ_TAG)).strftime("%Y-%m-%d"))
+        stand = _ap_stand_fuer_uid(reg, plan.get("user_id"), jetzt, tag=dt.astimezone(_ap_tz(AP_TZ_TAG)).strftime("%Y-%m-%d"))   # UNT2
         neu_min = (dt - stand["mitternacht"]).total_seconds() / 60.0
         dubai = lambda d: d.astimezone(_ap_tz(AP_7T_TZ)).strftime("%H:%M") if d else None
         plaene_tag = _ap_stand_plaene(stand)
@@ -36791,7 +36920,9 @@ def admin_auto_plan_eingriff():
     if aktion == "richtung_plan":
         return _ap_richtung_plan(pid)
     try:
-        stand = _ap_stand_laden(reg)
+        # UNT2: Stand des Unternehmens, zu dem der Plan gehört (HT-Plan nie gegen Emins Pläne, Emins nie gegen HT)
+        _puid = (sb_select("trade_plans", {"select": "user_id", "id": f"eq.{pid}"}) or [{}])[0].get("user_id")
+        stand = _ap_stand_fuer_uid(reg, _puid)
         neu_min = None
         if aktion == "start":
             # start_min (Minuten ab 00:00 dt) hat Vorrang (Frontend .1084 schickt beides), sonst start 'HH:MM' dt oder ISO
@@ -37030,14 +37161,14 @@ def admin_auto_plan_waage_start():
         gr = ap_gruppe_von_uid(plan.get("user_id"))
         if gr:
             namen, _aus = _ap_namen()
-            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]), eigene=gr["ids"])
             try:     # ORBIT PRIO 2 (Fremd-Review MO1b): die Startprüfung wiegt die Gruppe mit IHREN Modellen wie ap_planen und der Bot
                 _fm_g = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in (gr.get("ids") or ())}), {})
                 stand["param"] = ap_waage_param_gruppe(stand.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
             except Exception as e:
                 print(f"[waage-start] ⚠️ Gruppe Orbit Prio 2: {type(e).__name__}: {e}", flush=True)
-        else:
-            stand = _ap_stand_laden(reg)
+        else:   # UNT2: HT-Plan → HT-Stand; Verwalter-Gruppe ohne Planer-Zeile → Stand ihrer Gruppe (nie der HT-Stand)
+            stand = _ap_stand_fuer_uid(reg, plan.get("user_id"))
         pc = _ap_pc_lebt_gecacht()
         lage = ap_waage_start_lage(stand, pid, richtung, pc_lebt=pc)
         if lage is None:
@@ -41831,9 +41962,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     # sich nicht gegenseitig — Schlüssel „<Gruppe>|<Firma>", HT = „ht" (für reine HT-Läufe wie bisher)
     try:
         gdaten = admin_gruppen_daten()
-    except Exception as e:
-        print(f"[funded-plan] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
-        gdaten = {}
+    except Exception as e:   # UNT2 (G2 A11): nicht lesbar → Lauf abbrechen, nie ein Topf für beide Unternehmen
+        print(f"[funded-plan] ⚠️ Gruppen: {type(e).__name__}: {e} — nicht geplant", flush=True)
+        return dict(erg, ok=False, msg=f"Gruppen nicht lesbar ({type(e).__name__}) — nicht geplant (Firmen-Abstand je Unternehmen)")
     gk = lambda u, fk: fd_gruppen_schluessel(str(u), gdaten) + "|" + str(fk)   # noqa: E731
     for b in offen_alle or []:
         t = b.get("started_at") if b.get("status") == "open" else (b.get("start_um") or b.get("fp_start"))   # Vorschlag: vorgeschlagene Zeit
@@ -43604,7 +43735,8 @@ def _fcp_regeln_laden():
 
 
 def _fcp_gruppe_je_uid(uids):
-    """{user_id: gruppen_id} aus id_gruppe_mitglied (Firmen-Abstand je Gruppe wie der DB-Trigger). Lesefehler → leer (dann eine Gruppe)."""
+    """{user_id: gruppen_id} aus id_gruppe_mitglied (Firmen-Abstand je Gruppe wie der DB-Trigger). Lesefehler → None (UNT2, G2 A11: der
+    Aufrufer bricht ab — vorher leer = ein Topf für beide Unternehmen)."""
     try:     # kleinste gruppe_id je ID — genau wie prophos_gruppe_von im DB-Trigger (fd_gruppen_schluessel)
         # 02.11.2026 (Betrieb 1 beim Fix mt5_links): id_gruppe_mitglied hat keine Spalte id — _sb_all sortierte nach id.asc → HTTP 400, das except unten schluckte es,
         # seit 1aa73f07 (30.10.) rechnete der Funded-CFD-Planer den Firmen-Abstand über alle IDs als eine Gruppe. user_id ist Primärschlüssel (sql/2026-10-08_admin_gruppen.sql)
@@ -43613,7 +43745,7 @@ def _fcp_gruppe_je_uid(uids):
         return {str(u): fd_gruppen_schluessel(u, daten) for u in uids}
     except Exception as e:
         print(f"[funded-cfd] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
-        return {}
+        return None
 
 
 def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
@@ -43712,10 +43844,12 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
     fest_je = fcp_fest_richtung(offen_alle, an=param["richtung_laufend"])
     gruppe_je = _fcp_gruppe_je_uid(uids)
+    if gruppe_je is None:
+        return {"ok": False, "msg": "Gruppen nicht lesbar — nicht geplant (Firmen-Abstand je Unternehmen)", "geplant": [], "ausgelassen": []}
     echo_bal, dup_bal = _ap_balance_karten()
-    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
-                                  norm=lambda n: _ap_norm(_firm_norm(n)))
-    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    ctx_ppl = ap_ppl_ctx_unternehmen(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                     norm=lambda n: _ap_norm(_firm_norm(n)))   # UNT2: Punktwert-Rückfall je Unternehmen
+    ppl = ctx_ppl["ppl"]
     hedge_ids = {}
     for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})) or []:
         v = r.get("value") if isinstance(r.get("value"), dict) else {}

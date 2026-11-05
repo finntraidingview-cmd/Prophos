@@ -69,6 +69,7 @@ def welt(plaene):
     class _R:
         pass
     stubs = {"sb_select": sb_select, "_ap_stand_laden": stand_laden, "_ap_stand_plaene": lambda st: st["plaene"],
+             "_ap_stand_fuer_uid": lambda reg, uid, *a, **k: stand_laden(reg, *a, **k),   # UNT2: Stand des Unternehmens (hier eins)
              "ap_firma_key": lambda firmen, f: f, "sb_update": sb_update, "jsonify": lambda d: d,
              "_ap_tz": lambda z: timezone.utc, "AP_7T_TZ": "UTC", "_sb_anfrage": lambda *a, **k: _R(), "SUPABASE_URL": "",
              "_sb_headers": lambda: {}, "_sb_pruefen": lambda r: None, "datetime": datetime, "timezone": timezone,

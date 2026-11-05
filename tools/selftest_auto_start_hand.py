@@ -101,6 +101,7 @@ def main():
     stand = {"firmen": [], "mitternacht": mitt, "jetzt_min": 150.0, "starts_heute": [], "id_fest": {}, "param": {"laufzeit_min": 120}, "zeiten": {},
              "geplant": []}
     ns.update({"jsonify": lambda d: d, "_ap_stand_laden": lambda reg, j=None, tag=None: (tage.append(tag), stand)[1],
+               "_ap_stand_fuer_uid": lambda reg, uid, j=None, tag=None: (tage.append(tag), stand)[1],   # UNT2: Stand des Unternehmens
                "_ap_stand_plaene": lambda st: [plan(PID, U, "the5ers", "buy", 790), plan("q1", V, "the5ers", "sell", 155)],
                "_ap_hand_spalte_fehlt": lambda e: False, "AP_FEST_HAND": "Werte von Hand geändert"})
     geschrieben, tage = [], []

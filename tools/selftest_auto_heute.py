@@ -39,6 +39,7 @@ def lade():
     ns["eh_stand"] = lambda regeln=None: {"an": False}
     ns["ah_stand"] = lambda regeln=None: {"an": False}   # Apex-Hedge-Schalter (30.10.2026), wie eh_stand
     ns["tfh_stand"] = lambda regeln=None: {"an": False}   # Tradeify-Final-Hedge-Schalter (30.10.2026), wie eh_stand
+    ns["admin_gruppen_daten"] = lambda: {"gruppen": [], "mitglieder": []}   # UNT2: ohne Gruppen = alles HT
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
@@ -47,10 +48,11 @@ def lade():
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     teile = [konst(k) for k in ("_KETTE_DLL_CACHE", "AP_KW_FUNDED", "LT_BALANCE_SPRUNG_USD", "AP_KW_PHASEN", "AP_TYPEN", "AP_GROESSE_TOLERANZ", "LT_ECHO_ROUTEN", "AP_HB_TZ",
-                                "AP_HB_CACHE_S", "AP_HB_BLOW_ANTEIL", "AP_HB_ECHT_QUELLEN", "_ap_hb_cache", "_ap_hb_lock", "AP_LAUF_NUR_CHALLENGE")]
+                                "AP_HB_CACHE_S", "AP_HB_BLOW_ANTEIL", "AP_HB_ECHT_QUELLEN", "_ap_hb_cache", "_ap_hb_cache_je", "_ap_hb_lock", "AP_LAUF_NUR_CHALLENGE")]
     teile += [block(f) for f in ("_wd_num", "lt_pl_balance", "lt_balance_sprung", "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf",
                                  "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "ap_konto_plaene_grenze", "hypo_bilanz_zeile",
-                                 "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_konto_plaene", "_ap_hb_laden", "ap_heute_beendet_gemerkt")]
+                                 "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_konto_plaene", "_ap_hb_laden", "ap_heute_beendet_gemerkt",
+                                 "_admin_verwalter_gruppen_ids", "ap_unternehmen_filter")]   # UNT2: heute_beendet je Unternehmen
     __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec("\n".join(teile), ns)
     return ns

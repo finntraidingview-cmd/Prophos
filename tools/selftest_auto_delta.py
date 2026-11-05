@@ -43,7 +43,8 @@ FIRMEN = [
 ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "14:30", 40], ["14:30", "17:30", 40], ["17:30", "19:30", 20]],
           "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45]}
 
-REIN = ("ap_waage_ohne_liste", "ap_waage_ohne", "ap_paare_legen",   # M3c (05.11.2026): Futures-Paare wirklich mitrechnen — fehlten seit 19.10., ap_planen fing den NameError ab
+REIN = ("_admin_verwalter_gruppen_ids", "ap_unternehmen_filter", "ap_unternehmen_ids", "ap_unternehmen_karte", "ap_ppl_firma_wahl",   # UNT2 (05.11.2026): Stand je Unternehmen
+        "ap_ppl_firma_je_unternehmen", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_paare_legen",   # M3c (05.11.2026): Futures-Paare wirklich mitrechnen — fehlten seit 19.10., ap_planen fing den NameError ab
         "ap_cons_regel", "zw_cons_moeglich", "zw_cons_ziel", "zw_cons_tage", "_zw_cons_tage_laden", "zw_ziel", "ap_konten_stand_zeile",   # M2/M2b (05.11.2026): Consistency-Ziel in ap_planen/gp_planen
         "ap_zufall_code", "ap_zufall_pruefen", "ap_zufall", "ap_zeiten_mit_zufall",   # E3b (05.11.2026): Zufall-Parameter aus regeln.zufall
         "_ap_plan_am_tag", "tfh_param", "eh_param", "ap_tradeify_final_halten", "ap_tagesdeckel", "ap_firma_gesperrt", "ap_ist_waise", "ap_id_fest", "ap_id_misch", "_ist_tradeify_cfd", "ap_klasse", "_ap_misch_fenster", "_ap_misch_zelle", "ap_misch_lage", "ap_misch_bewerter", "ap_firma_misch", "ap_misch_text", "ap_ext_fehlt", "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_notiz", "_ap_hhmm", "_ap_hhmm_txt",
@@ -54,7 +55,7 @@ REIN = ("ap_waage_ohne_liste", "ap_waage_ohne", "ap_paare_legen",   # M3c (05.11
         "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "ap_nachhol_minute", "ap_start_hand_pruefen", "ap_kette_regel", "ap_kette_mll", "ap_tage_mini", "ap_tage_ist", "ap_tage_gewinn", "ap_tage_konto", "ap_kette_trade1", "ap_kette_trade2", "ap_kette_angefressen", "ap_kette_t1_fertig", "ap_kette_startwert_veraltet", "ap_nachplan_fenster", "_ap_gegen_partner", "_ap_gegen_firma", "_ap_ts", "ap_plan_verfallen", "ap_verfallen_grenze", "ap_versuche_alt_pl", "_ap_leichen_abschliessen", "_ap_id_konflikt", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_konto_flex", "ap_regel_flex", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab", "ap_fenster_liste", "ap_zeit_dt_min", "ap_cfd_bis", "ap_klasse_bis",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder", "lt_pl_balance", "lt_balance_sprung",
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden", "ap_kette_mll_belegt", "_ap_kette_mlls")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
-IO = ("ap_waage_groesse", "_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "ap_richtung_hand_fest", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
+IO = ("_ap_stand_fuer_uid", "ap_waage_groesse", "_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "ap_richtung_hand_fest", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "_ap_bot_hat_arbeit", "_ap_bot_tick", "ap_kette_tick", "ap_kette_startwert_neu", "ap_kette_letzter_trade", "ap_kette_tagesende", "ap_kette_lesen_bis", "_ap_kette_regeln_laden", "_ap_kette_lesen_bis_schreiben", "_ap_kette_t1_stand", "ap_kette_abhaken", "_wd_erledigt_upd", "_cme_handelstag", "_ap_kette_grund", "_ap_kette_takt", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "ap_zuege_je_id", "_ap_dubai_versatz", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "_ap_konten_lesen", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "ap_blow_ausschluss", "_ap_rk_flag",
       "ap_richtungsschutz", "ap_startwert_frisch", "liq_konto_groesse", "_wd_konto_groesse", "_ap_konten_mit_trade", "_ap_login_zwillinge",
@@ -78,6 +79,8 @@ def lade():
     ns["ap_echo_ohne_melden"] = lambda *a, **k: None
     # Lots-Deckel (Funded/Fusion): eigener Test — hier neutral (kein Deckel). Fehlte im Lader, die Tests waren auf origin/main mit NameError rot (S6, E3b)
     ns["lots_deckel_lots"] = lambda p: None
+    # UNT2 (05.11.2026): Stand/Planer filtern explizit nach Unternehmen (admin_gruppen_daten) — hier ohne Gruppen = alles HT wie bisher
+    ns["admin_gruppen_daten"] = lambda: {"gruppen": [], "mitglieder": []}
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
