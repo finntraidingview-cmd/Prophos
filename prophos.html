@@ -3913,33 +3913,49 @@
   .k1-po .k1-po-st{font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--surface-tint, rgba(127,127,127,.12));color:var(--sub)}
   .k1-po .k1-po-st.erhalten{background:color-mix(in srgb, var(--good) 14%, transparent);color:var(--good-ink, var(--good))}
   .k1-po .k1-po-st.angefragt{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn-ink, var(--warn))}
-  /* ABHAK-KARTE (AB1, Finn 05.11.2026 ~06:00 Dubai): nach dem Abhaken eines Funded-CFD-Trades ~3 s unten rechts — Mini-Balance-Graf, drei Zeilen, ggf. Knopf.
-     Animation nur transform/opacity; prefers-reduced-motion = ohne Animation. */
-  .ab1{position:fixed;right:18px;bottom:96px;z-index:9800;width:320px;overflow:hidden;max-width:calc(100vw - 32px);box-sizing:border-box;background:var(--surface, #fff);color:var(--ink, #101828);
-    border:1px solid var(--border, #eceef3);border-radius:16px;padding:14px 16px 12px;box-shadow:var(--shadow-pop, 0 10px 24px rgba(16,24,40,.12));cursor:pointer;
-    animation:ab1-rein .22s var(--ease, ease-out) both}
-  .ab1.weg{animation:ab1-raus .2s ease-in both}
-  @keyframes ab1-rein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-  @keyframes ab1-raus{to{opacity:0;transform:translateY(8px)}}
-  .ab1-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px}
-  .ab1-kopf b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0} .ab1-kopf small{color:var(--sub, #667085);font-size:11px;white-space:nowrap}
-  .ab1 svg{display:block;width:100%;height:58px;margin:8px 0 6px;overflow:hidden}
-  .ab1-wisch{animation:ab1-wisch .9s .15s cubic-bezier(.3,.7,.3,1) both}
-  @keyframes ab1-wisch{from{transform:translateX(0)}to{transform:translateX(100%)}}
-  .ab1-punkt{animation:ab1-punkt .25s .95s ease-out both;transform-box:fill-box;transform-origin:center}
-  @keyframes ab1-punkt{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
-  .ab1-z{display:flex;align-items:center;gap:9px;min-height:28px;font-size:12.5px;border-top:1px solid var(--border-soft, rgba(16,24,40,.06));
-    animation:ab1-zeile .25s calc(.35s + var(--i) * .3s) ease-out both}
-  @keyframes ab1-zeile{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
-  .ab1-z i{font-style:normal;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:800;flex:none;
-    background:var(--surface-tint, rgba(127,127,127,.12));color:var(--sub, #667085)}
-  .ab1-z.ok i{background:color-mix(in srgb, var(--good, #12b76a) 16%, transparent);color:var(--good-ink, var(--good, #12b76a))}
-  .ab1-z span{flex:1;min-width:0;color:var(--sub, #667085);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .ab1-z em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
-  .ab1-z span small{display:block;font-size:10.5px;opacity:.85;margin-top:1px}
-  .ab1-z.ok em{color:var(--good-ink, var(--good, #12b76a));font-weight:600}
-  .ab1 .btn{width:100%;margin-top:9px;justify-content:center;animation:ab1-zeile .25s 1.3s ease-out both}
-  @media (max-width:820px){ .ab1{right:12px;left:auto;width:min(320px, calc(100vw - 24px));bottom:calc(var(--mob-nav-h, 58px) + 86px + env(safe-area-inset-bottom, 0px))} }   /* Handy-Schicht: über der unteren Navigation */
-  @media (prefers-reduced-motion: reduce){ .ab1,.ab1.weg,.ab1-wisch,.ab1-punkt,.ab1-z,.ab1 .btn{animation:none !important} .ab1-wisch{transform:translateX(100%)} }
+  /* ABHAK-STRAHL (AB2, Finn 05.11.2026 ~18:00 Dubai, ersetzt die AB1-Karte unten rechts): Karte dort, wo das Abhak-Popup war (Bildmitte), Strahlen im Stil
+     der K1-Balken der Konto-Seite (gleiche Farben hell/dunkel), ohne Ampel-Farben und ohne „in range“ (Master 05.11.2026: nur Zahlen,
+     Finn urteilt selbst). Blass = Stand vor dem Trade, kräftig lädt sich auf den Stand danach. Animation nur
+     transform/opacity; prefers-reduced-motion = ohne Bewegung. */
+  .ab2{--k-karte:#fff;--k-rand:#eceef3;--k-text:#101828;--k-sub:#667085;--k-gitter:rgba(16,24,40,.06);--k-lila:#5447ce;--k-lila-soft:#887cfc;
+    --k-gut:#12a150;--k-rot:#e5484d;--k-pille:#eef0f4;
+    position:fixed;left:50%;top:40%;z-index:9800;width:360px;max-width:calc(100vw - 32px);box-sizing:border-box;transform:translate(-50%,-50%);
+    background:var(--k-karte);color:var(--k-text);border:1px solid var(--k-rand);border-radius:16px;padding:16px 18px 13px;
+    box-shadow:0 14px 40px rgba(16,24,40,.22);cursor:pointer;animation:ab2-rein .2s ease-out both}
+  html[data-theme="dark"] .ab2{--k-karte:#151a24;--k-rand:#252c3b;--k-text:#e7eaf0;--k-sub:#98a2b3;--k-gitter:rgba(255,255,255,.06);--k-lila:#b3aaff;--k-lila-soft:#a79fff;
+    --k-gut:#3ccf7a;--k-rot:#ff6b70;--k-pille:#1f2636;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+  .ab2.weg{animation:ab2-raus .2s ease-in both}
+  @keyframes ab2-rein{from{opacity:0;transform:translate(-50%,-50%) scale(.96)}to{opacity:1;transform:translate(-50%,-50%)}}
+  @keyframes ab2-raus{from{opacity:1;transform:translate(-50%,-50%)}to{opacity:0;transform:translate(-50%,-47%)}}
+  .ab2-kopf{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .ab2-kopf > div:first-child{min-width:0}
+  .ab2-kopf b{display:block;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ab2-kopf small{display:block;font-size:11.5px;color:var(--k-sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ab2-pl{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap;line-height:1.1;text-align:right}
+  .ab2-pl small{display:block;font-size:10.5px;font-weight:500;color:var(--k-sub);margin-top:2px}
+  .ab2-pl.gut{color:var(--k-gut)} .ab2-pl.rot{color:var(--k-rot)}
+  .ab2-block{margin-top:14px;animation:ab2-zeile .25s calc(.08s + var(--i) * .16s) ease-out both}
+  .ab2-block.ab2-zeile{margin-top:12px;padding-top:10px;border-top:1px solid var(--k-gitter)}
+  .ab2-zk{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11.5px;color:var(--k-sub);font-weight:500}
+  .ab2-zk span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ab2-zk span small{font-size:10.5px;opacity:.85;margin-left:4px}
+  .ab2-zk em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--k-text);font-weight:600;white-space:nowrap}
+  .ab2-bar{position:relative;height:8px;border-radius:999px;background:var(--k-pille);margin-top:7px}
+  .ab2-bar > b,.ab2-bar > i{position:absolute;left:0;top:0;bottom:0;width:100%;border-radius:999px;transform-origin:left center}
+  .ab2-bar > b{background:var(--k-lila-soft);opacity:.35;transform:scaleX(var(--v))}
+  .ab2-bar > i{background:var(--k-lila);transform:scaleX(var(--n));animation:ab2-laden .95s calc(.3s + var(--i, 0) * .16s) cubic-bezier(.3,.7,.3,1) both}
+  .ab2-bar > s{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;background:var(--k-text);opacity:.65}
+  @keyframes ab2-laden{from{transform:scaleX(var(--v))}to{transform:scaleX(var(--n))}}
+  .ab2-ach{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--k-sub);font-variant-numeric:tabular-nums;margin-top:5px}
+  .ab2-ach span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ab2-tage{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+  .ab2-tage i{width:11px;height:11px;border-radius:50%;background:var(--k-pille)}
+  .ab2-tage i.an{background:var(--k-lila)}
+  .ab2-fuss{margin-top:12px;padding-top:9px;border-top:1px solid var(--k-gitter);font-size:11.5px;color:var(--k-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ab2 .btn{width:100%;margin-top:10px;justify-content:center;animation:ab2-zeile .25s 1.2s ease-out both}
+  @keyframes ab2-zeile{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  @media (max-width:520px){ .ab2{top:42%;padding:14px 15px 12px} .ab2-pl{font-size:19px} }
+  @media (prefers-reduced-motion: reduce){ .ab2,.ab2.weg,.ab2-block,.ab2-bar > i,.ab2 .btn{animation:none !important} }
   #k1-ziele .k1-haupt{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;align-items:stretch}
   #k1-ziele .k1-karte{background:var(--k-karte);border:1px solid var(--k-rand);border-radius:16px;padding:16px 18px;min-width:0}
   #k1-ziele .k1-karte h4{margin:0;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -37393,7 +37409,7 @@
   let _mwdErlSicht = false   // aus dem Radar geöffnet (27.10.2026): Speichern mit ?ansicht=admin — Verwalter hakt Pläne seiner Gruppe ab
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
   let _mwdErlWd = false, _mwdErlWdKonto = null   // Winning-Day-Plan + Konto für die Good-Day-Vorschau (23.10.2026)
-  let _mwdErlAb1 = null   // AB1 (05.11.2026): Konto-ID eines Funded-CFD-Plans → Abhak-Karte nach dem Speichern
+  let _mwdErlAb2 = null   // AB2 (05.11.2026): {konto_id, typ, name, unter} eines Challenge-/Funded-CFD-Plans → Abhak-Strahl nach dem Klick
   let _mwdErlWdhAn = false, _mwdErlWdhAngefasst = false   // „Dieser Trade war ein Winning Day" (30.10.2026): sichtbar / von Hand angefasst
   function mklWdErledigtOeffnen(pid, extra, opts){
     _mwdErlSicht = !!(opts && opts.sicht)   // jedes Öffnen setzt neu — nur die Radar-Knöpfe geben sicht mit
@@ -37412,7 +37428,10 @@
     const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
     if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
-    _mwdErlAb1 = String(pw.konto_typ || '') === 'funded_cfd' && pw.konto_id ? String(pw.konto_id) : null   // AB1: Abhak-Karte nach dem Speichern
+    // AB2: Abhak-Strahl für Challenge + Funded CFD (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person)
+    _mwdErlAb2 = (AB2_TYPEN.includes(String(pw.konto_typ || '')) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
+      name: [String((pw.konto || {}).firma || ''), (pw.konto || {}).groesse ? String(pw.konto.groesse) : '', (pw.konto || {}).kontonr_ende ? '…' + pw.konto.kontonr_ende : ''].filter(Boolean).join(' ') || 'Konto',
+      unter: pw.person ? String(pw.person) : '' } : null
     const k = pw.konto || {}
     const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = 'Trade erledigt'
     const info = document.getElementById('mwd-erl-info')
@@ -37590,7 +37609,7 @@
   // P/L-Felder tolerant + „±" (30.09.2026) — je Feld eigene Verdrahtung, kein Sammel-Handler
   plFeldVerdrahten('mwd-erl-master', 'mwd-erl-master-pm', 'mwd-erl-master-hinweis')
   plFeldVerdrahten('mwd-erl-fusion', 'mwd-erl-fusion-pm', 'mwd-erl-fusion-hinweis')
-  function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null; _mwdErlAb1 = null }
+  function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null; _mwdErlAb2 = null }
   let _mwdErlEinKlick = false   // nur_review: Ein Klick darf nichts überschreiben, was schon abgehakt ist (S2 30.10.2026)
   let _mwdErlStill = false   // stiller Ein Klick ohne Klick (Takt, 02.11.2026 S9): 409 „nicht mehr in Überprüfen“ = schon abgehakt (zweiter Tab) → kein Fehler-Toast
   async function mklWdErledigtSpeichern(){
@@ -37606,7 +37625,7 @@
     const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
-    const ab1Konto = (still || !['none', 'waiting'].includes(kontoStatus)) ? null : _mwdErlAb1   // AB1: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt/bestanden
+    const ab2Info = (still || !['none', 'waiting', 'passed'].includes(kontoStatus)) ? null : _mwdErlAb2   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
     const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
     const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
     if(btn) btn.disabled = true; say('')
@@ -37616,12 +37635,16 @@
     let abArt = '', abNach = () => {}
     try{ abArt = abhakArt(pid, kontoStatus); abNach = abhakZeileWandern(pid, abArt) }catch(_){}
     mklWdErledigtZu(); wdlSofortErledigt(pid)
-    try{ abNach(); abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
+    // AB2 (Finn 05.11.2026): Abhak-Strahl sofort (Kopf + Trade-P&L), die Strahlen kommen mit dem Stand nach dem Buchen. Er zeigt „bestanden“ selbst —
+    // dann ohne die Bestanden-Pille unten (geblowt hat keinen Strahl und behält sie)
+    let ab2 = null
+    try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden' })) : null }catch(_){ ab2 = null }
+    try{ abNach(); if(!ab2) abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
     if(btn) btn.disabled = false
     // Sofort-Rückmeldung (02.10.2026, Finn: „hängt 3–4 s, bis unten rechts Erledigt kommt") — die Antwort ersetzt sie mit dem Buchungs-Ergebnis
-    if(typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')
+    if(!ab2 && typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')   // mit Strahl sagt dessen Fußzeile „wird gebucht …“
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -37634,8 +37657,7 @@
       // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
       wdlSofortErledigt(pid)   // Plan ist zu (auch bei Buchungsfehler) → Live Trades sofort nach „Erledigt"
-      if(ab1Konto && !d.buchung_fehler){ try{ ab1Karte(ab1Konto, { planId: pid, mpl, spl, sicht, plHand }) }catch(_){} }   // AB1: Abhak-Karte (eigene Abfrage, ein Fehler stört das Abhaken nie)
-      if(d.buchung_fehler){ if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
+      if(d.buchung_fehler){ if(ab2) ab2Zu(ab2.el); if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
       const ar = d.archiv || null
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
@@ -37658,7 +37680,11 @@
       const wdhTxt = !gdH ? '' : gdH.gezaehlt ? ` · 🏆 Winning Day ${gdH.stand}/${gdH.ziel}` : gdH.fehler ? '' : ' · 🏆 Winning Day heute schon gezählt'
       const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '')
         + (d.review && d.review.konto_id ? ' · ✅ bestanden — Konto steht im Review' : '') + umTxt + wdhTxt   // bestanden → Review statt Archiv (02.11.2026)
-      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : ohneHedge ? 'Erledigt' : polar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (fusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
+      const erlTxt = (bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : ohneHedge ? 'Erledigt' : polar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (fusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt
+      // AB2: steht der Strahl, kommt dieser Satz (Fusion-Buchung, Archiv, Umstellen) klein in seine Fußzeile statt in einen Toast; ein Fehler beim
+      // Umstellen bleibt zusätzlich ein Toast (rot), damit er nicht übersehen wird
+      if(ab2){ try{ ab2Fertig(ab2, erlTxt.replace(/^Erledigt( · )?/, '') || 'gebucht', { planId: pid, mpl, spl, sicht, plHand }) }catch(_){} }
+      if((!ab2 || !ab2.el.isConnected || umFehl) && typeof atToast === 'function') atToast(erlTxt, umFehl ? 'end' : 'ok')   // Karte schon zu (Klick/Maus/12 s) → Toast wie vorher
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
       try{
@@ -37676,7 +37702,7 @@
           if(!(arch[ar.konto_id] && arch[ar.konto_id].archived)){ arch[ar.konto_id] = { archived: true, reason: 'passed_pending', at: new Date().toISOString() }; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(arch)) }
           if(typeof renderAccounts === 'function') renderAccounts()
           if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender()
-          if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => openSuccessorWizard(ar.konto_id), 200)
+          if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => { if(ab2) ab2Zu(ab2.el); openSuccessorWizard(ar.konto_id) }, 200)   // AB2: der Assistent ist der nächste Schritt — Strahl weg
         }
       }catch(e){ console.warn('[abhaken] Nachfolger öffnen', e) }
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
@@ -37686,6 +37712,7 @@
     }catch(e){
       // still nur bei „nicht mehr in Überprüfen“ (schon abgehakt, anderer Tab); jeder andere 409 (z. B. „gleichzeitig geändert“, Betrieb 1 02.11.2026) ruft die Zeile zurück
       if(still && e && e.status === 409){ if(!/nicht mehr in Überprüfen/.test(String(e.message || ''))) wdlLokalVergessen(pid); try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return }
+      if(ab2) ab2Zu(ab2.el)   // AB2: nicht gebucht → kein Strahl stehen lassen
       if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
       wdlLokalVergessen(pid)   // nicht gebucht → die Zeile kommt mit dem nächsten Stand zurück nach „Überprüfen" (08.10.2026)
       try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
@@ -44588,30 +44615,164 @@
       : '<div style="padding:14px 0 6px;color:var(--sub);font-size:12.5px">Noch kein Payout auf diesem Konto.</div>'
     box.hidden = false
   }
-  /* ABHAK-KARTE (AB1, Finn 05.11.2026 ~06:00 Dubai, Ja zur Vorschau): nach dem Abhaken eines Funded-CFD-Trades eine kleine Karte (~3 s, schließt von selbst,
-   * Klick schließt sofort). Zahlen nur aus GET /konto-ziele (kz_rechnen → abhak: Ziel, Consistency, nächster Trade aus fcp_konto_rechnen) — keine eigene
-   * Rechnung, keine Empfehlung. Knopf „→ Waiting for Payout" nur bei Ziel UND Consistency erfüllt, nur eigenes Konto (accWartetUmstellen, derselbe Weg wie
-   * der Haken im Trades-Dialog). Fehler → keine Karte (das Abhaken ist schon gebucht). */
-  let _ab1Timer = null, _ab1Nr = 0
-  function ab1Zu(el){
-    const k = el || document.getElementById('ab1-karte'); if(!k || k.classList.contains('weg')) return
-    if(k === document.getElementById('ab1-karte')){ clearTimeout(_ab1Timer); _ab1Timer = null }   // nie den Timer einer neueren Karte löschen
+  /* ABHAK-STRAHL (AB2, Finn 05.11.2026 ~18:00 Dubai, ersetzt die AB1-Karte unten rechts und für diese Konten den Toast „Erledigt · Fusion … am Trade“):
+   * „Dieses Popper unten rechts ist voll kacke … Erstmal so ein Strahl, wo sich der Balken auflädt, wie viele jetzt vom Profit Target entfernt sind, wie sich
+   * die Consistency Rule anpasst.“ Karte dort, wo das Abhak-Popup war (Bildmitte): Kopf mit Konto + Trade-P&L sofort beim Klick, die Strahlen, sobald
+   * GET /konto-ziele den Stand nach dem Buchen liefert. Zahlen nur aus /konto-ziele (dieselben wie die Konto-Seite K1, kz_rechnen) — keine eigene Regel-Rechnung,
+   * keine Empfehlung. Strahl 1 Profit Target (Kontogröße → Ziel; Stand vorher = Balance − Trade-P&L), Strahl 2 Consistency (größter Tag ÷ Basis, Strich =
+   * Grenze der Firma), dazu Gewinn-/Mindesttage als Punkte und bei Funded CFD der Payout. Fusion nur als Fußzeile. Gilt für Challenge (challenge/phase1/phase2)
+   * und Funded CFD; Funded Futures / Winning Days behalten den WD-Flug. Knopf „→ Waiting for Payout“ wie AB1 (Ziel UND Consistency erfüllt). Nur Anzeige:
+   * ein Fehler hier stört das Abhaken nie (Aufrufer in try). */
+  const AB2_TYPEN = ['challenge', 'phase1', 'phase2', 'funded_cfd']
+  let _ab2Timer = null, _ab2Nr = 0
+  function ab2Zu(el){
+    const k = el || document.getElementById('ab2-karte'); if(!k || k.classList.contains('weg')) return
+    if(k === document.getElementById('ab2-karte')){ clearTimeout(_ab2Timer); _ab2Timer = null }   // nie den Timer einer neueren Karte löschen
     k.classList.add('weg'); setTimeout(() => k.remove(), 220)
   }
-  async function ab1Karte(kontoId, radar){
-    const id = String(kontoId || ''); if(!id) return
-    const nr = ++_ab1Nr
+  function ab2Zeit(k, ms){
+    if(!k || document.getElementById('ab2-karte') !== k) return
+    clearTimeout(_ab2Timer)
+    if(k.matches(':hover')) return                      // Maus darauf: hält die Karte, mouseleave startet den Timer
+    _ab2Timer = setTimeout(() => ab2Zu(k), ms)
+  }
+  const ab2Usd = v => (v == null || !isFinite(Number(v))) ? '—' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
+  const ab2Pct = (v, st) => (v == null || !isFinite(Number(v))) ? '—' : (Math.round(Number(v) * 100 * (st ? 10 : 1)) / (st ? 10 : 1)).toLocaleString('de-DE') + ' %'
+  const ab2Num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+  const ab2Fr = v => Math.max(0, Math.min(1, Number(v) || 0)).toFixed(4)
+  /* Sofort beim Klick: Karte mit Kopf (Konto, Art, Trade-P&L) und Fuß „wird gebucht …". info {konto_id, typ, name, unter, mpl, bestanden}.
+   * → Griff {nr, el, info} oder null (Kontoart ohne Strahl → der Aufrufer zeigt seinen Toast wie bisher). */
+  function ab2Start(info){
+    if(!info || !info.konto_id || !AB2_TYPEN.includes(String(info.typ || ''))) return null
+    const nr = ++_ab2Nr
+    document.getElementById('ab2-karte')?.remove(); clearTimeout(_ab2Timer)
+    const mpl = ab2Num(info.mpl)
+    const plTxt = mpl == null ? '' : `${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+    const art = String(info.typ) === 'funded_cfd' ? 'Funded CFD' : (typeof typeLabel === 'function' ? typeLabel(info.typ) : String(info.typ))
+    const k = document.createElement('div')
+    k.id = 'ab2-karte'; k.className = 'ab2'; k.setAttribute('role', 'status')
+    k.innerHTML = `<div class="ab2-kopf"><div><b>${escapeHtml(String(info.name || 'Konto'))}</b><small data-ab2-art>${escapeHtml([info.unter, art].filter(Boolean).join(' · '))}`
+      + `${info.bestanden ? ' · bestanden' : ''}</small></div>`
+      + (plTxt ? `<div class="ab2-pl ${mpl < 0 ? 'rot' : mpl > 0 ? 'gut' : ''}">${escapeHtml(plTxt)}<small>Trade</small></div>` : '') + '</div>'
+      + '<div data-ab2-inhalt></div><div class="ab2-fuss"><span data-ab2-fuss>wird gebucht …</span></div>'
+    document.body.appendChild(k)
+    k.addEventListener('click', e => { if(e.target.closest('[data-ab2-wartet]')) return; ab2Zu(k) })
+    k.addEventListener('mouseenter', () => { if(document.getElementById('ab2-karte') === k) clearTimeout(_ab2Timer) })
+    k.addEventListener('mouseleave', () => ab2Zeit(k, 1500))
+    ab2Zeit(k, 12000)   // Sicherung: kommt die Antwort nie, geht die Karte nach 12 s
+    return { nr, el: k, info }
+  }
+  /* Nach der Buchung: Fuß-Text setzen (Fusion), Stand aus /konto-ziele holen, Strahlen zeichnen. radar = {planId, mpl, spl, sicht, plHand} für den
+   * Waiting-Knopf an fremden Konten (wie AB1). Fehler beim Holen → nur Kopf + Fuß, Karte geht nach 3 s. */
+  async function ab2Fertig(h, fuss, radar){
+    if(!h || h.nr !== _ab2Nr || !h.el.isConnected) return
+    const f = h.el.querySelector('[data-ab2-fuss]'); if(f) f.textContent = fuss || 'gebucht'
     let d = null
     try{
       const { data: { session } } = await supabase.auth.getSession()
-      const tok = session?.access_token; if(!tok) return
-      const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
-      d = await r.json().catch(() => null)
-      if(!r.ok || !d || d.ok === false) return
-      _k1.cache[id] = { at: Date.now(), d }                 // die Detailseite hat damit gleich den frischen Stand
-    }catch(_){ return }
-    const ab = d.abhak; if(!ab || d.typ !== 'funded_cfd' || nr !== _ab1Nr) return   // nur das jüngste Abhaken zeichnet
-    ab1Zeichnen(id, d, radar)
+      const tok = session?.access_token
+      if(tok){
+        const id = String(h.info.konto_id)
+        const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        d = await r.json().catch(() => null)
+        if(!r.ok || !d || d.ok === false) d = null
+        else _k1.cache[id] = { at: Date.now(), d }          // die Konto-Seite hat damit gleich den frischen Stand
+      }
+    }catch(_){ d = null }
+    if(h.nr !== _ab2Nr || !h.el.isConnected) return          // inzwischen zu oder ein neueres Abhaken
+    let knopf = false
+    if(d){ try{ knopf = ab2Zeichnen(h, d, radar) }catch(e){ console.warn('[ab2]', e) } }
+    ab2Zeit(h.el, !d ? 3000 : knopf ? 10000 : 7000)
+  }
+  /* Strahlen in die Karte zeichnen. → true, wenn der Waiting-Knopf steht (Karte bleibt länger). */
+  function ab2Zeichnen(h, d, radar){
+    const k = h.el, info = h.info, id = String(info.konto_id)
+    const typ = String(d.typ || info.typ || ''), ab = d.abhak || null
+    const kach = key => ((d.kacheln || []).find(x => x && x.key === key && !x.leer)) || null
+    const mpl = ab2Num(info.mpl) ?? 0
+    const bal = ab2Num(ab && ab.bal) ?? ab2Num(d.balance && d.balance.wert)
+    const start = ab2Num(d.groesse) ?? ab2Num(d.chart && d.chart.start)
+    const ziel = ab2Num(ab && ab.ziel_bal) ?? ab2Num(d.chart && d.chart.ziel)
+    const teile = []
+    let i = 0
+    // 1 · Profit Target: Kontogröße → Ziel, blass = Stand vor dem Trade, kräftig lädt sich auf den Stand danach
+    if(bal != null && start != null && ziel != null && ziel > start){
+      const spanne = ziel - start, vor = bal - mpl
+      const zk = kach('ziel')
+      const erreicht = !!info.bestanden || (ab ? !!ab.erreicht : !!(zk && zk.pill && zk.pill[0] === 'Erreicht')) || bal >= ziel - 0.005
+      const rest = Math.max(0, ziel - bal)
+      const rechts = erreicht ? `Ziel ${ab2Usd(ziel)} erreicht` : `noch ${ab2Usd(rest)} · ${ab2Pct(Math.max(0, 1 - rest / spanne))} geschafft`
+      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Profit Target</span><em>${escapeHtml(rechts)}</em></div>`
+        + `<div class="ab2-bar" style="--v:${ab2Fr((vor - start) / spanne)};--n:${erreicht ? 1 : ab2Fr((bal - start) / spanne)}"><b></b><i></i></div>`
+        + `<div class="ab2-ach"><span>${ab2Usd(start)}</span><span>${escapeHtml(ab2Usd(vor))} → ${escapeHtml(ab2Usd(bal))}</span><span>${ab2Usd(ziel)}</span></div></div>`)
+    }
+    // 2 · Consistency: Skala bis 1,5 × Grenze (wie die K1-Kachel), Strich = Grenze
+    const c = ab && ab.cons
+    if(c && ab2Num(c.p)){
+      const g = Number(c.p) / 100, skala = 1.5 * g, an = ab2Num(c.anteil), b = ab2Num(c.b), w = ab2Num(c.w)
+      // vorher: ein Verlust ändert die Summe der Gewinn-Tage nicht; ein Gewinn erhöht sie — der größte Tag bleibt nur sicher gleich, wenn er größer ist als
+      // dieser Trade (sonst unbekannt → kein „vorher", der Balken lädt von 0)
+      let anVor = null
+      if(an != null && mpl <= 0) anVor = an
+      else if(an != null && b != null && w != null && b > mpl + 0.5 && w - mpl > 0) anVor = b / (w - mpl)
+      const fehlt = (an != null && an > g + 1e-9 && b != null && w != null && g > 0) ? Math.max(0, b / g - w) : null
+      const rechts = (an == null ? '— ' : ab2Pct(an, true) + ' ') + `· Grenze ${ab2Pct(g)}`
+      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Consistency</span><em>${escapeHtml(rechts)}</em></div>`
+        + `<div class="ab2-bar" style="--v:${anVor == null ? 0 : ab2Fr(anVor / skala)};--n:${an == null ? 0 : ab2Fr(an / skala)}"><b></b><i></i><s style="left:${(100 / 1.5).toFixed(2)}%"></s></div>`
+        + `<div class="ab2-ach"><span>größter Tag ${escapeHtml(ab2Usd(b))} ÷ ${escapeHtml(ab2Usd(w))}${an != null ? ' = ' + escapeHtml(ab2Pct(an, true)) : ''}</span><span>${fehlt != null ? `noch ${escapeHtml(ab2Usd(fehlt))} bis ${escapeHtml(ab2Pct(g))}` : anVor != null && an != null && Math.abs(anVor - an) > 0.0005 ? `vorher ${escapeHtml(ab2Pct(anVor, true))}` : ''}</span></div></div>`)
+    } else {
+      const ck = kach('consistency')
+      if(ck && ck.anteil != null){
+        teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Consistency</span><em>${escapeHtml(String(ck.wert || '—'))}</em></div>`
+          + `<div class="ab2-bar" style="--v:0;--n:${ab2Fr(ck.anteil)}"><b></b><i></i>${ck.linie != null ? `<s style="left:${(Number(ck.linie) * 100).toFixed(2)}%"></s>` : ''}</div>`
+          + `<div class="ab2-ach"><span>${escapeHtml(String(ck.unter || ''))}</span></div></div>`)
+      }
+    }
+    // 3 · Tage als Punkte: Funded CFD Gewinntage aus abhak, Challenge die Tage-Kachel (Gewinn-/Mindesttage)
+    let tIst = null, tSoll = null, tTitel = 'Gewinntage', tUnter = ''
+    if(ab && Array.isArray(ab.gewinntage)){ tIst = ab2Num(ab.gewinntage[0]); tSoll = ab2Num(ab.gewinntage[1]) }
+    else {
+      const tk = kach('tage')
+      if(tk){ tIst = ab2Num(tk.wert); tSoll = ab2Num(String(tk.klein || '').replace(/[^\d]/g, '')); tTitel = String(tk.titel || 'Tage'); tUnter = String(tk.unter || '') }
+    }
+    if(tIst != null && tSoll && tSoll <= 20){
+      const punkte = Array.from({ length: tSoll }, (_, j) => `<i class="${j < tIst ? 'an' : ''}"></i>`).join('')
+      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>${escapeHtml(tTitel)}${tUnter ? ` <small>${escapeHtml(tUnter)}</small>` : ''}</span><em>${tIst}/${tSoll}</em></div>`
+        + `<div class="ab2-tage">${punkte}</div></div>`)
+    }
+    // 4 · Payout (Funded CFD) bzw. Phase (Challenge) — eine Zeile
+    if(ab){
+      const nx = ab.naechster
+      const txt = ab.wartet ? '⏳ Waiting for Payout' : ab.bereit ? 'Payout bereit' : (nx && nx.aktion === 'planen' && nx.tp) ? `nächster Trade ≈ ${ab2Usd(nx.tp)}` : '—'
+      teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Payout${d.urteil && d.urteil.sub ? ` <small>${escapeHtml(d.urteil.sub)}</small>` : ''}</span>`
+        + `<em${nx && nx.grund && !ab.bereit ? ` title="${escapeHtml(String(nx.grund))}"` : ''}>${escapeHtml(txt)}</em></div></div>`)
+    }
+    const inhalt = k.querySelector('[data-ab2-inhalt]'); if(inhalt) inhalt.innerHTML = teile.join('')
+    // Knopf „→ Waiting for Payout" — dieselbe Regel wie AB1: nur Funded CFD, Ziel UND Consistency erfüllt, eigenes Konto oder Radar-Kontext
+    const acc = (accounts || []).find(a => String(a.id) === id)
+    const radarOk = !!(radar && radar.planId && radar.mpl != null && isFinite(Number(radar.mpl)))
+    const knopf = typ === 'funded_cfd' && !!(ab && ab.bereit && !ab.wartet) && (acc ? (acc.type === 'funded_cfd' && !acc.waitingPayoutSince) : radarOk)
+    if(knopf){
+      k.insertAdjacentHTML('beforeend', '<button type="button" class="btn btn-primary" data-ab2-wartet>→ Waiting for Payout</button>')
+      const b = k.querySelector('[data-ab2-wartet]')
+      b.addEventListener('click', e => {
+        e.stopPropagation(); if(b.disabled) return
+        const jetzt = (accounts || []).find(a => String(a.id) === id)   // frisch: inzwischen woanders umgestellt → nichts schreiben
+        if(jetzt){
+          if(jetzt.type !== 'funded_cfd' || jetzt.waitingPayoutSince){ ab2Zu(k); return }
+          b.disabled = true
+          accWartetUmstellen(id, true).then(() => { delete _k1.cache[id]; ab2Zu(k) })
+          return
+        }
+        if(!radarOk){ ab2Zu(k); return }
+        b.disabled = true
+        ab1WartetRadar(radar)
+          .then(() => { if(typeof atToast === 'function') atToast(`⏳ ${info.name || 'Konto'}: Waiting for Payout`, 'ok') })
+          .catch(err => { if(typeof atToast === 'function') atToast('Nicht umgestellt: ' + ((err && err.message) || err), 'end') })
+          .finally(() => { delete _k1.cache[id]; ab2Zu(k) })
+      })
+    }
+    return knopf
   }
   /* „→ Waiting for Payout" (S4/Master 05.11.2026): eigenes Konto → accWartetUmstellen wie bisher; fremdes Konto (Admin im Radar, z. B. Finn + Pascal) → derselbe
    * Radar-Weg wie das Popup: PATCH /admin/wd-plaene erledigt mit konto_status 'waiting', gleiche plan_id und dieselben P&L-Werte (zweites „Erledigt" ist auf dem
@@ -44627,73 +44788,7 @@
     if(!(um && um.umgestellt)) throw new Error((um && (um.fehler || um.grund)) || 'Konto nicht umgestellt')
     return true
   }
-  function ab1Zeichnen(id, d, radar){
-    const ab = d.abhak
-    document.getElementById('ab1-karte')?.remove()
-    const usd = v => (v == null || !isFinite(Number(v))) ? '—' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
-    const acc = (accounts || []).find(a => String(a.id) === id)
-    const name = (acc && acc.name) || d.firma || 'Funded CFD'
-    // Graf: Stand vor dem Trade → neuer Stand (die Punkte der Konto-Seite), Ziel gestrichelt
-    const pts = ((d.chart && d.chart.punkte) || []).map(p => Number(p.bal)).filter(isFinite)
-    const nach = Number(ab.bal) || pts[pts.length - 1]
-    const reihe = pts.length && Math.abs(pts[pts.length - 1] - nach) < 0.5 ? pts.slice(-6) : pts.slice(-5).concat([nach])
-    if(reihe.length < 2) reihe.unshift(Number(d.chart && d.chart.start) || nach)
-    const zl = ab.ziel_bal != null ? Number(ab.ziel_bal) : null
-    let lo = Math.min(...reihe, zl ?? Infinity), hi = Math.max(...reihe, zl ?? -Infinity); const pad = (hi - lo) * .15 || 50; lo -= pad; hi += pad
-    const W = 268, H = 58, x = i => 4 + i * (W - 8) / (reihe.length - 1), y = v => 4 + (hi - v) / (hi - lo) * (H - 8)
-    const pfad = reihe.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ')
-    const iL = reihe.length - 1, gut = nach >= reihe[iL - 1]
-    const svg = !(isFinite(nach) && reihe.every(v => isFinite(v))) ? '' : `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">
-      ${zl != null ? `<line x1="0" x2="${W}" y1="${y(zl).toFixed(1)}" y2="${y(zl).toFixed(1)}" stroke="var(--good, #12b76a)" stroke-width="1.2" stroke-dasharray="4 4" opacity=".8"/>` : ''}
-      <path d="${pfad}" fill="none" stroke="var(--violet-soft, #887cfc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      <rect class="ab1-wisch" x="${x(iL - 1).toFixed(1)}" y="-4" width="${(W - x(iL - 1) + 6).toFixed(1)}" height="${H + 8}" fill="var(--surface, #fff)"/>
-      <circle class="ab1-punkt" cx="${x(iL).toFixed(1)}" cy="${y(nach).toFixed(1)}" r="3.5" fill="${gut ? 'var(--good, #12b76a)' : 'var(--danger, #f04438)'}"/>
-    </svg>`
-    const zeilen = []
-    zeilen.push(ab.erreicht ? ['ok', 'Ziel', '✓ erreicht'] : ['', 'Ziel', `noch ${usd(ab.rest)} bis Ziel`])
-    if(ab.cons){
-      const c = ab.cons, pz = c.anteil == null ? '—' : (Math.round(c.anteil * 1000) / 10).toLocaleString('de-DE') + ' %'
-      zeilen.push([c.ok ? 'ok' : '', 'Consistency', `${pz} (≤ ${String(c.p).replace('.', ',')} %)`, `${c.b == null ? '—' : Math.round(Number(c.b)).toLocaleString('de-DE')} / ${usd(c.w)}`, 'größter Tag / Summe der Gewinn-Tage im Zyklus'])
-    }
-    const nx = ab.naechster
-    zeilen.push(ab.bereit ? ['ok', 'Payout', 'Payout bereit']
-      : nx && nx.aktion === 'planen' && nx.tp ? ['', 'Payout', `nächster Trade ≈ ${usd(nx.tp)}`]
-      : ab.gewinntage ? ['', 'Payout', `Gewinntage ${ab.gewinntage[0]}/${ab.gewinntage[1]}`]
-      : ['', 'Payout', '—', '', nx && nx.grund ? String(nx.grund) : ''])
-    const radarOk = !!(radar && radar.planId && radar.mpl != null && isFinite(Number(radar.mpl)))
-    const knopf = ab.bereit && !ab.wartet && (acc ? (acc.type === 'funded_cfd' && !acc.waitingPayoutSince) : radarOk)   // fremd: nur mit Radar-Kontext
-    const k = document.createElement('div')
-    k.id = 'ab1-karte'; k.className = 'ab1'; k.setAttribute('role', 'status')
-    k.innerHTML = `<div class="ab1-kopf"><b>${escapeHtml(name)}</b><small>${escapeHtml((d.urteil && d.urteil.sub) || 'Funded CFD')}</small></div>${svg}`
-      + zeilen.map((z, i) => `<div class="ab1-z ${z[0]}" style="--i:${i}"${z[4] ? ` title="${escapeHtml(z[4])}"` : ''}><i>${z[0] === 'ok' ? '✓' : '·'}</i><span>${escapeHtml(z[1])}${z[3] ? `<small>${escapeHtml(z[3])}</small>` : ''}</span><em>${escapeHtml(z[2])}</em></div>`).join('')
-      + (knopf ? '<button type="button" class="btn btn-primary" data-ab1-wartet>→ Waiting for Payout</button>' : '')
-    document.body.appendChild(k)
-    k.addEventListener('click', e => {
-      const b = e.target.closest('[data-ab1-wartet]')
-      if(!b){ ab1Zu(k); return }
-      e.stopPropagation(); if(b.disabled) return
-      const jetzt = (accounts || []).find(a => String(a.id) === id)   // frisch: inzwischen woanders umgestellt → nichts schreiben
-      if(jetzt){
-        if(jetzt.type !== 'funded_cfd' || jetzt.waitingPayoutSince){ ab1Zu(k); return }
-        b.disabled = true
-        accWartetUmstellen(id, true).then(() => { delete _k1.cache[id]; ab1Zu(k) })
-        return
-      }
-      if(!radarOk){ ab1Zu(k); return }
-      b.disabled = true
-      ab1WartetRadar(radar)
-        .then(() => { if(typeof atToast === 'function') atToast(`⏳ ${name}: Waiting for Payout`, 'ok') })
-        .catch(err => { if(typeof atToast === 'function') atToast('Nicht umgestellt: ' + ((err && err.message) || err), 'end') })
-        .finally(() => { delete _k1.cache[id]; ab1Zu(k) })
-    })
-    // ~3 s, mit Knopf 6 s (ein Knopf, der nach 3 s weg ist, ist kaum zu treffen); Maus darüber hält die Karte
-    const dauer = knopf ? 6000 : 3000
-    const start = ms => { clearTimeout(_ab1Timer); _ab1Timer = setTimeout(() => ab1Zu(k), ms) }
-    k.addEventListener('mouseenter', () => clearTimeout(_ab1Timer))
-    k.addEventListener('mouseleave', () => start(1500))
-    start(dauer)
-  }
-  window._ab1Karte = ab1Karte; window._ab1Zeichnen = ab1Zeichnen   // Stub-/Selbsttest-Haken
+  window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen   // Stub-/Selbsttest-Haken
   window._k1 = _k1   // Stub-/Selbsttest-Haken
 
   function renderAccountDetail(){
@@ -56278,7 +56373,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2083'
+  const OS_TAB_BUILD = '2026-09-22.2084'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -76572,8 +76667,14 @@
         if(_kuCb.dataset.ziel === 'winning_days' && _kuAkt.type === 'funded') await accWdUmstellen(masterAcc.id, 'winning_days')
         else if(_kuCb.dataset.ziel === 'waiting' && _kuAkt.type === 'funded_cfd' && !_kuAkt.waitingPayoutSince) await accWartetUmstellen(masterAcc.id, true)
       }
-      // AB1 (Finn 05.11.2026): Abhak-Karte für Funded CFD — nach dem Umstellen oben, damit sie den Stand danach zeigt; nicht bei geblowt/bestanden
-      if(masterAcc && masterAcc.type === 'funded_cfd' && statusChoice === 'none' && !blown && typeof ab1Karte === 'function'){ try{ ab1Karte(masterAcc.id) }catch(_){} }
+      // AB2 (Finn 05.11.2026): Abhak-Strahl für Challenge + Funded CFD — nach dem Umstellen oben, damit er den Stand danach zeigt; nicht bei geblowt/bestanden
+      // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand.
+      if(masterAcc && AB2_TYPEN.includes(String(masterAcc.type || '')) && statusChoice === 'none' && !blown){
+        try{
+          const h = ab2Start({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null })
+          if(h) ab2Fertig(h, 'gespeichert', null)
+        }catch(_){}
+      }
 
       renderTradePlans()
       // Account-Detailseite offen? Dann Aktivität + Buchungen nachziehen
