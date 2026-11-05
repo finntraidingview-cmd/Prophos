@@ -143,16 +143,18 @@ class Fest:            # Ziel genau auf einen Wert würfeln (Beispiele aus Finns
         return self.z if lo <= self.z <= hi else (lo + hi) / 2
 
 
-# WEG A (Finn 05.11.2026 ~04:20 Dubai: „Weg A, das Ziel bleibt") ersetzt „750-Start, höchstens die Zyklus-Gewinne" — tage = (größter Gewinn-Tag, Trades im Zyklus)
+# seit O1 (05.11.2026 ~07:45/07:50) CONSISTENCY NACH FINN statt Weg A: Rest R = Z − G (erhöht, bis B ≤ p × (W + R)), Deckel p × (W + R) × 0,95,
+# TP = Zufall (p − 5 %) … p der Distanz (Fest → Mitte 47,5 %), Rest ≤ Deckel → genau der Rest. tage alt (B, Trades) → W ≈ max(G, B), keine Serie
 tm = app.fcp_konto_rechnen(j5, 98685, 100000, 2, False, 1.0, 0.85, Fest(1310), RC, gewinne=GM, tage=(635.70, 3))
-check(tm["tp"] == 525 and tm["tp_art"] == "consistency" and tm["consistency"]["n"] == 5,
-      f"Moritz …2352: G −1.315, B 635,70, Z 1.310 → Endziel 1.310, Deckel 622, Rest 2.625 in 5 Trades → TP {tm['tp']} (Soll 525)")
+check(tm["tp"] == 1247 and tm["tp_art"] == "consistency" and tm["consistency"]["n"] == 2 and tm["consistency"]["rest"] == 2625,
+      f"Moritz …2352: G −1.315, B 635,70, Z 1.310 → noch 2.625, Deckel 1.549, TP 47,5 % → {tm['tp']} (Soll 1.247), 2 Trades")
 tf = app.fcp_konto_rechnen(j5, 100000, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=0.0, tage=(0.0, 0))
-check(tf["tp"] == 500 and tf["consistency"]["n"] == 3, f"Zyklus-Beginn, Z 1.500 → 3 Trades à {tf['tp']} (Soll 500, kein 750-Start mehr)")
+check(tf["tp"] == 712 and tf["consistency"]["n"] == 3, f"Zyklus-Beginn, Z 1.500 → TP {tf['tp']} (Soll 712 = Deckel), 3 Trades")
 tx = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=None, tage=None)
 check(tx["tp"] == 712 and tx["tp_art"] == "consistency_ohne_zyklus", f"Zyklus nicht lesbar → Deckel mit F = Z: TP {tx['tp']} (Soll 712, fail-closed)")
 tg = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, Fest(1400), RC, gewinne=900.0, tage=(900.0, 2))
-check(tg["tp"] == 668 and tg["consistency"]["ende"] == 1836, f"großer Tag 900 bei G 500 → Endziel 1.836, Rest 1.336 in 2 Trades → TP {tg['tp']} (Soll 668)")
+check(tg["tp"] == 445 and tg["consistency"]["rest"] == 936 and tg["consistency"]["n"] == 2,
+      f"großer Tag 900 bei G 500 → Rest erhöht auf 936 (B ≤ 50 % × W), TP {tg['tp']} (Soll 445), 2 Trades")
 tk = app.fcp_konto_rechnen(j, 98000, 100000, 2, False, 10.0, 0.85, random.Random(7), app.ap_regel_finden(FIRMEN, "FundedNext"), gewinne=0.0)
 check(tk["tp"] == 2850 and tk["tp_art"] == "gedeckelt", "FundedNext unverändert (Ziel + tp_deckel_plus)")
 
@@ -371,11 +373,15 @@ pw = (ws.get("plaene") or [{}])[0]
 check(len(ws.get("plaene") or []) == 1 and pw.get("funded_cfd_plan") and pw.get("groesse") == 100000 and pw.get("dd") == 10000 and pw.get("balance") == 98000,
       "Samstag: bestehender Plan trotzdem in plaene, mit Größe/DD/Balance (Notiz als Kennung)")
 erg2 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
-zeilen = [z for t, z in GESCHRIEBEN if t == "trade_plans"]
+zeilen = [g[1] for g in GESCHRIEBEN if g[0] == "trade_plans"]   # O1: GESCHRIEBEN enthält auch Updates (3-Tupel)
 check(len(zeilen) == 5 and all(z["start_um"] is None and z["auto_bestaetigt_at"] is None and z["route"] == "mt5" and z["auto_plan"] is False
                                and z["slave_account_id"] and z["mt5_baseline"]["funded_plan"]["art"] == "cfd" for z in zeilen),
       "scharf: 5 Vorschläge ohne start_um, Echo mit Slave, Kennung funded_plan.art cfd")
-check(not [g for g in GESCHRIEBEN if g[0] == "update"], "Ziel erreicht stellt ohne ziel_auto_wartet nichts um")
+check(not [g for g in GESCHRIEBEN if g[0] == "update" and "fcp_ziel" not in (g[3] if len(g) > 3 else {})], "Ziel erreicht stellt ohne ziel_auto_wartet nichts um")
+# O1 (05.11.2026): festes Ziel je Konto — im echten Lauf einmal geschrieben, mit Guard „noch keins gespeichert" (fcp_ziel=is.null)
+_fz = [g for g in GESCHRIEBEN if g[0] == "update" and "fcp_ziel" in (g[3] if len(g) > 3 else {})]
+check(_fz and all(g[2].get("fcp_ziel") == "is.null" and isinstance(g[3]["fcp_ziel"].get("usd"), float) for g in _fz),
+      f"festes Ziel je geplantem Konto gespeichert, Guard is.null ({len(_fz)} Konten)")
 check(all(z["mt5_baseline"]["funded_plan"]["start_um"] for z in zeilen), "Vorschlagszeit in mt5_baseline.funded_plan.start_um")
 s = app.fcp_sicht(erg, frozenset({E1}))
 check({z["user_id"] for z in s["geplant"] + s["ausgelassen"]} == {E1}, "Sicht Emin: nur Emins Zeilen")
