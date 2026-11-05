@@ -143,16 +143,23 @@ def main():
     # ── A reine Helfer ──
     F = n["ap_unternehmen_filter"]
     ht, gr = F(None, DATEN), F({U3}, DATEN)
-    check(ht(U1) and ht(U2) and not ht(U3) and ht("neu-ohne-zeile"), "A1 HT = jede ID außer der Verwalter-Gruppe (auch neue ID ohne Zeile)")
+    check(ht(U1) and ht(U2) and not ht(U3) and not ht("neu-ohne-zeile"), "A1 HT = Mitglieder der Gruppe ohne Verwalter; Verwalter-Gruppe und ID ohne Unternehmen (UNT0) nicht")
+    check(F(None, {"gruppen": [], "mitglieder": []})("neu-ohne-zeile"), "A1b ohne Gruppen-Tabellen: alles HT wie vor den Gruppen")
     check(gr(U3) and not gr(U1) and not gr("neu-ohne-zeile"), "A2 Gruppe = genau ihre IDs")
-    check(n["ap_unternehmen_ids"](U3, DATEN) == frozenset({U3}) and n["ap_unternehmen_ids"](U1, DATEN) is None, "A3 ap_unternehmen_ids: Gruppe bzw. None = HT")
-    check(n["ap_unternehmen_karte"](DATEN) == {U3: "g-emin"}, "A4 ap_unternehmen_karte nur Verwalter-Gruppen")
+    check(n["ap_unternehmen_ids"](U3, DATEN) == frozenset({U3}) and n["ap_unternehmen_ids"](U1, DATEN) is None
+          and n["ap_unternehmen_ids"]("neu", DATEN) == frozenset({"neu"}), "A3 ap_unternehmen_ids: Gruppe · None = HT · ohne Unternehmen = nur sie selbst")
+    K = n["ap_unternehmen_karte"](DATEN)
+    S = n["ap_unternehmen_schluessel"]
+    check(K == {U1: "ht", U2: "ht", U3: "g-emin"} and S(U1, K) == "ht" and S(U3, K) == "g-emin" and S("neu", K) == "solo:neu" and S("neu", {}) == "ht",
+          "A4 Schlüssel: HT · Gruppe · ohne Unternehmen = solo:<uid> (keine Kopplung) · ohne Gruppen alles HT")
     rows = [{"user_id": U1, "name": "FTMO", "ppl": "1.0", "unit": "Lots"}, {"user_id": U3, "name": "FTMO", "ppl": "0.85", "unit": "Lots"},
             {"user_id": U3, "name": "FTMO", "ppl": "0.85", "unit": "Lots"}]
-    je = n["ap_ppl_firma_je_unternehmen"](rows, {U3: "g-emin"})
+    je = n["ap_ppl_firma_je_unternehmen"](rows + [{"user_id": "neu", "name": "FTMO", "ppl": "7.0", "unit": "Lots"}], K)
     check(je["ht"]["ftmo"][0] == 1.0 and je["g-emin"]["ftmo"][0] == 0.85, "A5 Rückfall je Unternehmen getrennt (HT 1,0 / Emin 0,85 statt Mehrheit 0,85 für alle)")
     ppl, pf = n["ap_ppl_karte"](rows)
-    ctx = {"ppl": {}, "ppl_firma": pf, "ppl_firma_je": je, "unternehmen_von": {U3: "g-emin"}}
+    ctx = {"ppl": {}, "ppl_firma": pf, "ppl_firma_je": je, "unternehmen_von": K}
+    check(je.get("solo:neu", {}).get("ftmo", (0,))[0] == 7.0 and n["ap_cfd_ppl"](ctx, {"user_id": "neu2", "firm": "FTMO"}) is None,
+          "A5b ohne Unternehmen: eigener Rückfall, eine andere ID ohne Unternehmen erbt nichts")
     check(n["ap_cfd_ppl"](ctx, {"user_id": U2, "firm": "FTMO"}) == 1.0 and n["ap_cfd_ppl"](ctx, {"user_id": U3, "firm": "FTMO"}) == 0.85,
           "A6 ap_cfd_ppl: HT-ID ohne eigene Zeile nimmt den HT-Wert, Emin-ID den Emin-Wert")
     check(n["ap_cfd_ppl"]({"ppl": {}, "ppl_firma": pf}, {"user_id": U2, "firm": "FTMO"}) == 0.85, "A7 ohne ppl_firma_je wie bisher (ein Unternehmen im ctx)")
@@ -210,7 +217,7 @@ def main():
     check(fn("_ap_nachholen_kern").count("_ap_stand_fuer_uid(reg, plan.get(\"user_id\"), jetzt)") == 1
           and "_ap_stand_fuer_uid(reg, plan.get(\"user_id\"), jetzt, tag=" in fn("_ap_werte_setzen")
           and "stand = _ap_stand_fuer_uid(reg, _puid)" in neu_src, "C5 Hand-Eingriffe je Plan (Nachholen, Startzeit, Bot-Eingriff) gegen den Stand des eigenen Unternehmens")
-    check("Diese ID gehört zu einer Verwalter-Gruppe" in neu_src, "C6 POST user_ids nimmt keine Gruppen-ID in den HT-Planer")
+    check("Diese ID gehört nicht zu Hermann Technologies (Verwalter-Gruppe oder noch ohne Unternehmen)" in neu_src, "C6 POST user_ids nimmt keine Gruppen-ID und keine ID ohne Unternehmen in den HT-Planer")
     hb = fn("ap_heute_beendet_gemerkt")
     check("_ap_hb_cache_je" in hb and "unternehmen=unternehmen" in hb, "C7 heute_beendet je Unternehmen gemerkt (vorher ein Merker mit der Sicht des ersten Aufrufers)")
     check("return None" in fn("_fcp_gruppe_je_uid") and "if gruppe_je is None:" in fn("fcp_planen")
@@ -237,9 +244,9 @@ def main():
         j1 = html.index("window._wdNurEigenesUnternehmen = wdNurEigenesUnternehmen", j0)
         js = ("var window = {}, FEHLT = false, AUFRUFE = 0;\n"
               "var supabase = { rpc: function(n, a){ AUFRUFE++; if(FEHLT) return Promise.resolve({ data: null, error: { message: 'weg' } });"
-              " var g = { u1: 'g-ht', u2: 'g-ht', u3: 'g-emin', u4: null }[a.uid]; return Promise.resolve({ data: g === undefined ? null : g, error: null }) } };\n"
+              " var g = { u1: 'g-ht', u2: 'g-ht', u3: 'g-emin', u4: null, u5: null }[a.uid]; return Promise.resolve({ data: g === undefined ? null : g, error: null }) } };\n"
               + html[j0:j1] + "\nvar ERG = {};\n"
-              "var rows = [{user_id:'u1'},{user_id:'u2'},{user_id:'u3'},{user_id:'u4'}];\n"
+              "var rows = [{user_id:'u1'},{user_id:'u2'},{user_id:'u3'},{user_id:'u4'},{user_id:'u5'}];\n"
               "(async function(){\n"
               " ERG.ht = (await wdNurEigenesUnternehmen(rows, 'u1')).map(function(x){return x.user_id}).join(',');\n"
               " ERG.emin = (await wdNurEigenesUnternehmen(rows, 'u3')).map(function(x){return x.user_id}).join(',');\n"
@@ -256,8 +263,8 @@ def main():
             e = json.loads(r.stdout.strip())
         except ValueError:
             e = {"roh": (r.stdout + r.stderr)[:300]}
-        check(e.get("ht") == "u1,u2" and e.get("emin") == "u3" and e.get("ohne") == "u4", f"D1 Würfel-Zeilen je Unternehmen: HT u1,u2 · Emin u3 · ohne Gruppe nur sich ({e})")
-        check(e.get("aufrufe") == 4, f"D2 je ID einmal gefragt, dann gemerkt ({e.get('aufrufe')} RPCs für 3 Tabs × 4 IDs)")
+        check(e.get("ht") == "u1,u2" and e.get("emin") == "u3" and e.get("ohne") == "u4", f"D1 Würfel-Zeilen je Unternehmen: HT u1,u2 · Emin u3 · ohne Unternehmen nur sich, nicht mit u5 ({e})")
+        check(e.get("aufrufe") == 5, f"D2 je ID einmal gefragt, dann gemerkt ({e.get('aufrufe')} RPCs für 3 Tabs × 5 IDs)")
         check(e.get("fehler") == "fliegt" and e.get("login") == "fliegt", "D3 RPC-Fehler oder ohne Login → Fehler fliegt (wdWuerfelnSchreiben würfelt dann nicht)")
     else:
         print("  (D übersprungen: kein osascript)")

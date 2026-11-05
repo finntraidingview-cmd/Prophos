@@ -71436,7 +71436,9 @@
     const u = String(ich || ''); if(!u) throw new Error('ohne Login kein Unternehmen')
     const ids = [...new Set([u, ...(rows || []).map(x => String(x.user_id))])]
     const g = new Map(await Promise.all(ids.map(async x => [x, await wdUnternehmenVon(x)])))
-    return (rows || []).filter(x => g.get(String(x.user_id)) === g.get(u))
+    // UNT0 (Master 05.11.2026): ohne Unternehmen (kein prophos_gruppe_von) = Topf für sich — würfelt nur mit sich selbst, nie mit anderen ohne Zeile
+    const k = x => g.get(x) || ('solo:' + x)
+    return (rows || []).filter(x => k(String(x.user_id)) === k(u))
   }
   window._wdNurEigenesUnternehmen = wdNurEigenesUnternehmen   // Test-Haken
   async function wdWuerfelnSchreiben(tag, alleNeu){

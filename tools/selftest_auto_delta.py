@@ -43,7 +43,7 @@ FIRMEN = [
 ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "14:30", 40], ["14:30", "17:30", 40], ["17:30", "19:30", 20]],
           "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45]}
 
-REIN = ("_admin_verwalter_gruppen_ids", "ap_unternehmen_filter", "ap_unternehmen_ids", "ap_unternehmen_karte", "ap_ppl_firma_wahl",   # UNT2 (05.11.2026): Stand je Unternehmen
+REIN = ("_admin_verwalter_gruppen_ids", "ap_unternehmen_filter", "ap_unternehmen_ids", "ap_unternehmen_karte", "ap_unternehmen_schluessel", "ap_ppl_firma_wahl",   # UNT2 (05.11.2026): Stand je Unternehmen
         "ap_ppl_firma_je_unternehmen", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_paare_legen",   # M3c (05.11.2026): Futures-Paare wirklich mitrechnen — fehlten seit 19.10., ap_planen fing den NameError ab
         "ap_cons_regel", "zw_cons_moeglich", "zw_cons_ziel", "zw_cons_tage", "_zw_cons_tage_laden", "zw_ziel", "ap_konten_stand_zeile",   # M2/M2b (05.11.2026): Consistency-Ziel in ap_planen/gp_planen
         "ap_zufall_code", "ap_zufall_pruefen", "ap_zufall", "ap_zeiten_mit_zufall",   # E3b (05.11.2026): Zufall-Parameter aus regeln.zufall

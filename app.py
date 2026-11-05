@@ -27871,6 +27871,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         except Exception as e:
             print(f"[auto-plan] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — HT nicht geplant", flush=True)
             return {"ok": False, "msg": f"Gruppen nicht lesbar ({type(e).__name__}) — nicht geplant (sonst ohne Trennung der Unternehmen)"}
+        _weg_u = [u for u in uids if not _ht(u)]
+        if _weg_u:   # UNT0: ID ohne Unternehmen (oder Verwalter-Gruppe) plant nicht mit HT — erst zuordnen (Admin), dann plant ihr Unternehmen
+            print(f"[auto-plan] ℹ️ {len(_weg_u)} ID(s) nicht im HT-Lauf (Verwalter-Gruppe oder ohne Unternehmen): {', '.join(u[:8] for u in _weg_u)}", flush=True)
         uids = [u for u in uids if _ht(u)]
     if nur_uid and nur_uid not in uids:
         return {"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}
@@ -29044,19 +29047,26 @@ def ap_gruppe_ausgeblendet(namen, ids):
 # ══ UNTERNEHMEN HABEN NICHTS GEGENEINANDER (UNT2, 05.11.2026, Finn-Grundsatz; berichte G2 A1–A5/A11, G2b Schritt 2): der Stand eines
 # Unternehmens wird EXPLIZIT aus der Gruppen-Zugehörigkeit gefiltert, nicht aus der Sicht des Requests (_admin_standard_aus ist bei
 # eingeschränktem Login / Gruppen-Chip leer — dann zählte HT Emins Pläne mit) und nicht aus der „Rest"-Annahme über die Nutzerliste.
-# HT = jede ID außer denen der Verwalter-Gruppen (auch eine neue ID ohne Zeile), eine Gruppe = genau ihre IDs. ══
+# HT = die IDs der Gruppe(n) ohne Verwalter, eine Gruppe = genau ihre IDs. OHNE UNTERNEHMEN (UNT0, Master 05.11.2026: „ohne Unternehmen = nur sich
+# selbst, nichts gekoppelt"): eine ID ohne Zeile in id_gruppe_mitglied (und nicht Verwalter) ist ein Topf für sich — nie im HT-Stand, keine Waage,
+# kein Deckel, kein WD-Pool mit irgendwem (wie admin_ohne_unternehmen). Ohne Gruppen-Tabellen (gruppen leer) ist wie vor den Gruppen alles HT. ══
 def ap_unternehmen_filter(eigene, daten):
-    """REIN RECHNEND: gehört(uid) → bool für den Stand EINES Unternehmens. eigene=None → HT (alles außer den Verwalter-Gruppen aus
-    daten = admin_gruppen_daten()), sonst genau die IDs in eigene."""
+    """REIN RECHNEND: gehört(uid) → bool für den Stand EINES Unternehmens. eigene=None → HT (daten = admin_gruppen_daten(): weder in einer
+    Verwalter-Gruppe noch ohne Unternehmen), sonst genau die IDs in eigene."""
     if eigene is None:
+        daten = daten or {}
         fremd = frozenset(_admin_verwalter_gruppen_ids(daten))
-        return lambda u: str(u) not in fremd
+        if not (daten.get("gruppen") or ()):
+            return lambda u: str(u) not in fremd
+        drin = frozenset(str(m.get("user_id")) for m in daten.get("mitglieder") or ())
+        return lambda u: str(u) in drin and str(u) not in fremd
     eig = frozenset(str(u) for u in eigene)
     return lambda u: str(u) in eig
 
 
 def ap_unternehmen_ids(uid, daten):
-    """REIN RECHNEND: IDs (frozenset) der Verwalter-Gruppe, zu der uid gehört (Verwalter + Mitglieder), oder None = HT."""
+    """REIN RECHNEND: IDs (frozenset) des Unternehmens von uid, wenn es nicht HT ist — Verwalter-Gruppe (Verwalter + Mitglieder) bzw. bei einer
+    ID ohne Unternehmen (UNT0) nur sie selbst —, sonst None = HT."""
     daten = daten or {}
     for x in daten.get("gruppen") or ():
         v = x.get("verwalter_id")
@@ -29065,21 +29075,33 @@ def ap_unternehmen_ids(uid, daten):
         ids = frozenset({str(v)} | {str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) == str(x.get("id"))})
         if str(uid) in ids:
             return ids
+    if (daten.get("gruppen") or ()) and str(uid) not in {str(m.get("user_id")) for m in daten.get("mitglieder") or ()}:
+        return frozenset({str(uid)})               # ohne Unternehmen: Topf für sich
     return None
 
 
 def ap_unternehmen_karte(daten):
-    """REIN RECHNEND: {uid: gruppe_id} für alle IDs der Verwalter-Gruppen — jede andere ID ist HT (Schlüssel „ht")."""
+    """REIN RECHNEND: {uid: Schlüssel} — Verwalter-Gruppe = gruppe_id, HT-Mitglied = „ht". Leer ohne Gruppen-Tabellen (dann alles HT).
+    Nachschlagen über ap_unternehmen_schluessel (ID ohne Unternehmen = eigener Schlüssel „solo:<uid>")."""
     daten = daten or {}
     out = {}
-    for x in daten.get("gruppen") or ():
+    gruppen = daten.get("gruppen") or ()
+    mit_v = {str(x.get("id")) for x in gruppen if x.get("verwalter_id")}
+    for m in daten.get("mitglieder") or ():
+        out[str(m.get("user_id"))] = str(m.get("gruppe_id")) if str(m.get("gruppe_id")) in mit_v else "ht"
+    for x in gruppen:
         if x.get("verwalter_id"):
-            gid = str(x.get("id"))
-            out[str(x["verwalter_id"])] = gid
-            for m in daten.get("mitglieder") or ():
-                if str(m.get("gruppe_id")) == gid:
-                    out[str(m.get("user_id"))] = gid
+            out[str(x["verwalter_id"])] = str(x.get("id"))
     return out
+
+
+def ap_unternehmen_schluessel(uid, karte):
+    """REIN RECHNEND: Unternehmens-Schlüssel einer ID aus ap_unternehmen_karte — unbekannt: „ht", solange es keine Gruppen gibt (karte leer),
+    sonst „solo:<uid>" (ohne Unternehmen, UNT0: koppelt mit niemandem)."""
+    k = (karte or {}).get(str(uid))
+    if k is not None:
+        return k
+    return "ht" if not karte else "solo:" + str(uid)
 
 
 def ap_ppl_firma_je_unternehmen(rows, karte, norm=None):
@@ -29087,7 +29109,7 @@ def ap_ppl_firma_je_unternehmen(rows, karte, norm=None):
     Firma kommt nur aus dem eigenen Unternehmen (G2 A2)."""
     teile = {}
     for r in rows or ():
-        teile.setdefault((karte or {}).get(str(r.get("user_id")), "ht"), []).append(r)
+        teile.setdefault(ap_unternehmen_schluessel(r.get("user_id"), karte), []).append(r)
     return {k: ap_ppl_karte(v, norm=norm)[1] for k, v in teile.items()}
 
 
@@ -29096,7 +29118,7 @@ def ap_ppl_firma_wahl(ctx, uid, fk):
     (ctx["unternehmen_von"] = ap_unternehmen_karte), sonst ctx["ppl_firma"] (der ctx kennt nur ein Unternehmen, z. B. der Planer-Stand)."""
     je = (ctx or {}).get("ppl_firma_je")
     if je is not None:
-        return (je.get(((ctx or {}).get("unternehmen_von") or {}).get(str(uid), "ht")) or {}).get(fk)
+        return (je.get(ap_unternehmen_schluessel(uid, (ctx or {}).get("unternehmen_von"))) or {}).get(fk)
     return ((ctx or {}).get("ppl_firma") or {}).get(fk)
 
 
@@ -36353,7 +36375,7 @@ def admin_auto_plan_ids():
         except Exception as e:
             return jsonify({"ok": False, "msg": f"Gruppen nicht lesbar ({type(e).__name__}) — nichts geändert"}), 502
         if soll and not _ht_id:   # UNT2 (G2 A4): Gruppen-IDs plant ihr eigener Lauf
-            return jsonify({"ok": False, "msg": "Diese ID gehört zu einer Verwalter-Gruppe — sie plant ihr eigener Gruppen-Lauf"}), 409
+            return jsonify({"ok": False, "msg": "Diese ID gehört nicht zu Hermann Technologies (Verwalter-Gruppe oder noch ohne Unternehmen) — erst im Admin zuordnen"}), 409
         neu = [u for u in drin if u != uid] + ([uid] if soll else [])
         sb_update("auto_plan_regeln", {"id": "eq.1"}, {"user_ids": neu})
         _ap_planer_cache_leeren()          # neue Planer-ID gilt sofort im Admin-Reiter (Cache _ap_im_planer)
