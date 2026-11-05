@@ -23701,7 +23701,25 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
                 return False
         return True
 
-    def frei(k, m):
+    gegen_min = float(AP_GEGEN_FIRMA_MIN)   # M3d (05.11.2026): Gegenrichtung, andere ID, gleiche Firma — wie ap_planen (_ap_gegen_dicht), außer zum eigenen Paar-Anker
+
+    def gegen_frei(k, m, anker_id):
+        """Rücken nie näher als AP_GEGEN_FIRMA_MIN an einen Gegenrichtungs-Trade einer ANDEREN ID derselben Firma — ausgenommen der eigene Paar-Anker
+        (gewollte Paare bleiben 2–5 / 2–30 min). Befund M3c: frei() prüfte zu anderen IDs nur AP_FIRMA_ABSTAND_MIN (1 min) ohne Richtung."""
+        t = tr_info[k]
+        u, fk, r = str(t.get("user")), str(t.get("fkey")), richtung.get(k)
+        for k2, m2 in out.items():
+            t2 = tr_info.get(k2) or {}
+            if k2 != k and str(k2) != str(anker_id) and str(t2.get("user")) != u and str(t2.get("fkey")) == fk \
+                    and richtung.get(k2) in ("buy", "sell") and richtung.get(k2) != r and abs(float(m2) - m) < gegen_min:
+                return False
+        for x in fest:
+            if x["_id"] != anker_id and str(x.get("user_id")) != u and str(x.get("firma")) == fk and x.get("richtung") != r \
+                    and abs(float(x["start"]) - m) < gegen_min:
+                return False
+        return True
+
+    def frei(k, m, anker_id=None):
         t = tr_info[k]
         u = str(t.get("user"))
         if t.get("ab_min") is not None and m < float(t["ab_min"]) - 1e-9:
@@ -23716,6 +23734,8 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
         if any(abs(x - m) < firma_min for u2, x in je_firma.get(str(t.get("fkey")), ()) if u2 != u and abs(x - alt) > 1e-9):
             return False
         if not rs_frei(k, m):
+            return False
+        if not gegen_frei(k, m, anker_id):
             return False
         try:
             f = ap_fest_am_start(t.get("fest_refs") or (), m) if t.get("fest_refs") else None
@@ -23775,7 +23795,7 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
             ziel = None
             for _ in range(24):
                 z = anker + rnd.uniform(*abstand)
-                if frei(mover, z):
+                if frei(mover, z, anker_id):
                     ziel = z
                     break
             if ziel is None:

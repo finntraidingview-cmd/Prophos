@@ -8,7 +8,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "random": random}
     teile = []
-    for k in ("WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES", "AP_CFD_ROUTEN", "AP_FIRMA_ABSTAND_MIN", "AP_PAAR_ABSTAND", "AP_PAAR_ABSTAND_EXTERN", "AP_PAAR_PC_MIN", "AP_PAAR_RS_MIN", "AP_WAAGE_OHNE_FIRMEN"):
+    for k in ("WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES", "AP_CFD_ROUTEN", "AP_FIRMA_ABSTAND_MIN", "AP_PAAR_ABSTAND", "AP_PAAR_ABSTAND_EXTERN", "AP_PAAR_PC_MIN", "AP_PAAR_RS_MIN", "AP_WAAGE_OHNE_FIRMEN", "AP_GEGEN_FIRMA_MIN"):
         teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0).split("  #")[0])
     for name in ("ap_klasse", "ap_waage_ohne", "ap_paare_legen"):
         i = src.index(f"\ndef {name}(") + 1
@@ -116,6 +116,22 @@ def main():
     # 16) Topstep-Fenster (bis_min = t1_bis): Partner hinter dem Anker läge nach dem Fenster → kein Zug
     out16, info16 = P({"t1": 658.0, "s1": 659.0}, {"t1": "sell", "s1": "buy"}, {"t1": TI("mike"), "s1": TI("ina", "topstep", "tsv2", bis_min=660.0)}, [], [], random.Random(16))
     check(out16["s1"] <= 660.0, f"Topstep Trade 1 bleibt im Fenster bis t1_bis ({out16['s1']})")
+    # 17) M3d (05.11.2026, Befund M3c, seed 1009 in firma_misch): Rücken nie näher als AP_GEGEN_FIRMA_MIN (3) an einen Gegenrichtungs-Trade einer ANDEREN
+    #     ID derselben Firma — fester Anker Short 15:40 (940), neuer fremder Short 16:01 (961) einer dritten ID; der Long rückt auf 940 + 2–30, nie in 958–964
+    w17 = []
+    for sd17 in range(40):
+        out17, _i17 = P({"l": 875.0, "s": 961.0}, {"l": "buy", "s": "sell"}, {"l": TI("b5"), "s": TI("b1")}, [],
+                        [{"user_id": "b0", "firma": "tradeify", "richtung": "sell", "start": 940.0, "route": "tvv2"}], random.Random(sd17))
+        w17.append(out17["l"])
+    check(all(abs(x - 961.0) >= 3.0 for x in w17) and any(x != 875.0 for x in w17),
+          f"Rücken hält ≥ 3 min zum fremden Gegen-Short 16:01 (40 Seeds, nächster {min(abs(x - 961.0) for x in w17):.2f} min)")
+    # 18) der EIGENE Paar-Anker bleibt ausgenommen: Abstand 2–3 min zum Anker weiter möglich (Paare unverändert)
+    nah = []
+    for sd18 in range(200):
+        out18, info18 = P({"l": 500.0}, {"l": "buy"}, {"l": TI("mike")}, [],
+                          [{"user_id": "ina", "firma": "tradeify", "richtung": "sell", "start": 300.0, "route": "tvv2"}], random.Random(sd18))
+        nah.append(out18["l"] - 300.0)
+    check(min(nah) < 3.0 and min(nah) >= 2.0 and max(nah) <= 30.0, f"eigener Anker ausgenommen: Abstände {round(min(nah), 2)}–{round(max(nah), 2)} min (2–3 min kommen vor)")
     # 9) gleicher rnd → gleiches Ergebnis (Probelauf = Anlegen)
     a = P(minuten, richtung, tr, [], [], random.Random(9))[0]; b = P(minuten, richtung, tr, [], [], random.Random(9))[0]
     check(a == b, "deterministisch je Seed")
