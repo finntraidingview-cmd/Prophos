@@ -156,7 +156,8 @@ def lauf_tv(seite, scharf=True, richtung="buy"):
     alt = {n: getattr(ob, n) for n in namen}
     try:
         ob._cdp_sitzung_holen = lambda c, t: seite
-        ob._cdp_konto_mit_login = lambda sitz, ext, opts, c, t, r: (True, "", "", sitz[0].stand(opts), {"konto_aktiv": ext})
+        # RT1 (05.11.2026): seit 90eb0fe5 (27.10.2026) rufen die Order-/Probe-Wege _cdp_konto_mit_login(..., frisch=True) — Attrappe nimmt das Wort an
+        ob._cdp_konto_mit_login = lambda sitz, ext, opts, c, t, r, frisch=False: (True, "", "", sitz[0].stand(opts), {"konto_aktiv": ext})
         ob._cdp_today_aus_reiter = lambda s, opts, t: (None, None, None, None)
         ob._cdp_ticket_fuellen = lambda s, st, plan, sym, opts, t: (True, "", "", "ticket", s.stand(opts), s.stand(opts)["kauf_knopf"])
         ob.cdp_ticket_ruecklesung = lambda st, plan: (True, "passt", [])
