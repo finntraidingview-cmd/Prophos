@@ -115,7 +115,9 @@ soll("Tab: Apex-Hedge-Level = max(Boden, Daily Loss)", "art === 'apex_boden' ? h
 soll("Tick: nur tvv2, ungeclaimt, ohne Hand-Werte, kein Orbit V3, ohne Hedge",
      all(x in t for x in ('"route": "eq.tvv2"', '"start_um_gestartet_at": "is.null"',
                           '"hand_werte_at": "is.null"', '"orbit_v3": "is.false"', '(hedge_eur.is.null,hedge_eur.eq.0)')))
-soll("Tick: nur Apex und nur Kontoart challenge", "_firm_norm(AH_FIRMA)" in t and '== "challenge"' in t)
+# ORBIT PRIO 2 (MO1, 05.11.2026): statt fest Apex jede Firma mit Modell orbit_prio2 — ohne Feld weiter nur Apex (Standard am Firmennamen)
+soll("Tick: nur Modell Orbit Prio 2 (Standard Apex) und nur Kontoart challenge",
+     'ap_plan_modell(p, _fm, _gm) == "orbit_prio2"' in t and '== "challenge"' in t and "(_firm_norm(firm) == _firm_norm(AH_FIRMA)) if firm" in block("ap_firma_modell"))
 soll("Vormerken: hedge_art 'apex' + hedge_vorschau (Namen für S4)", 'hedge_art="apex", hedge_vorschau=vs' in t)
 soll("Umstellen nur mit hedge_freigabe_at + auto_bestaetigt_at",
      'p.get("hedge_freigabe_at") and p.get("auto_bestaetigt_at")' in t and 'g["hedge_freigabe_at"] = "not.is.null"' in t)
@@ -150,7 +152,7 @@ soll("SQL: kontoart_weg Zeichen für Zeichen wie S4s Datei",
      _kw(SQL) == _kw(open(os.path.join(W, "sql", "2026-10-29_tradeify_final_hedge.sql"), encoding="utf-8").read()))
 soll("Tab: Kennung + zählt-als-WD", "const tpIstApexHedge = p =>" in HTML and "const tpWdZaehlt = p => tpIstWdPlan(p) && !tpIstApexHedge(p)" in HTML)
 soll("Tab: Liq am Challenge-Boden statt Größe + 100", "if(ahLiq > 0){ liq = ahLiq; art = 'apex_boden' }" in HTML)
-soll("Liq am Boden auch im Backend (_lt_liq_balance)", "Apex mit Hedge: Challenge-Boden" in block("_lt_liq_balance"))
+soll("Liq am Boden auch im Backend (_lt_liq_balance)", "Orbit Prio 2: Challenge-Boden" in block("_lt_liq_balance"))
 soll("Zählstellen: wd-heute, Overview, konto_typ, Good Day nehmen Apex aus",
      "or plan_ist_apex_hedge(p):" in APP and "ah_status:mt5_baseline->apex_hedge->>status" in APP
      and 'and not plan_ist_apex_hedge(plan) else None' in APP and "if f_kk is None or (plan_ist_apex_hedge(plan) and not wd_hand):" in APP)   # seit 0c5022dc (30.10.): Hand-Haken darf den Apex-Hedge zählen
@@ -158,8 +160,8 @@ soll("Live-Zeile trägt apex_hedge", 'z["apex_hedge"] = plan_ist_apex_hedge(q)' 
 # 02.11.2026: 4 Aufrufer statt 3 — der vierte kam mit Zwei-Orbit (strengerer Riegel), dazu die Definition selbst = 5 Treffer.
 soll("SQL: Big-Trade-Riegel sieht Apex als WD (4 Aufrufer)", SQL.count("public.prophos_wd_wie(") == 5 and "function public.prophos_wd_wie(" in SQL)
 soll("Tab: konto_typ/Sticker/Tagesplan über tpWdZaehlt", HTML.count("tpWdZaehlt(") >= 3 and "if(tpWdZaehlt(p))        return 'wd'" in HTML)
-soll("Tab: Radar-Label Apex-Hedge mit Fusion-Spalte", "if(t.apex_hedge === true) return 'Apex-Hedge'" in HTML
-     and HTML.count("'Winning Day', 'Apex-Hedge'") >= 3)
+soll("Tab: Radar-Label Orbit Prio 2 (früher Apex-Hedge) mit Fusion-Spalte", "if(t.apex_hedge === true) return 'Orbit Prio 2'" in HTML
+     and HTML.count("'Winning Day', 'Orbit Prio 2'") >= 3)
 soll("Tradeify-Final-Hedge-Schalter: Delta-Feld, Route (bool), tfh_stand",
      '"tradeify_final_hedge": tfh_stand()' in APP and '"tradeify_final_hedge = true | false"' in APP and "def tfh_stand(" in APP)
 soll("Tab: Tradeify-Final-Hedge-Schalter neben Apex", 'data-apd-schalter="tradeify_final_hedge"' in HTML

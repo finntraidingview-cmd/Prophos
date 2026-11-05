@@ -3994,8 +3994,8 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
         if st == "planned" and ss.get("art") == "apex_hedge" and str(ss.get("at") or "") > seit_iso and not ahm.get("gemeldet"):
             nx = _alarm_ts(ss.get("naechster"))
             nx_txt = nx.astimezone(_ap_tz("Asia/Dubai")).strftime("%H:%M") if nx else "?"
-            out.append((f"{pid}|apex_hedge", 3, "apex_hedge_ohne", "Apex wartet auf Hedge",
-                        f"{wer} · {konto}: {str(ss.get('text') or 'Apex-Challenge wartet auf Gegenhedge')[:160]} — startet nie ohne Hedge, "
+            out.append((f"{pid}|apex_hedge", 3, "apex_hedge_ohne", "Orbit Prio 2 wartet auf Hedge",
+                        f"{wer} · {konto}: {str(ss.get('text') or 'Orbit Prio 2 wartet auf Gegenhedge')[:160]} — startet nie ohne Hedge, "
                         f"nächster Versuch {nx_txt} Dubai.", uid, pid))
         tfh = p.get("tfh") if isinstance(p.get("tfh"), dict) else {}
         if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso and not tfh.get("gemeldet"):
@@ -12830,8 +12830,8 @@ def _lt_liq_balance(acc, plan, balance_start):
     if wd and ah_liq and ah_liq > 0:               # Apex mit Hedge: max(Challenge-Boden, Daily Loss) — Tagesstart ≈ Start-Balance (der Tab
         d_bal, d_text = ah_dll_balance(acc, balance_start)   # rechnet das Hedge-Level mit dem echten Tagesstart, wd_sl_zeile nimmt es dann)
         if d_bal is not None and d_bal > ah_liq:
-            return d_bal, f"Apex mit Hedge: {d_text} (über dem Challenge-Boden {ah_liq:,.0f} $)".replace(",", ".")
-        return round(ah_liq, 2), f"Apex mit Hedge: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
+            return d_bal, f"Orbit Prio 2: {d_text} (über dem Challenge-Boden {ah_liq:,.0f} $)".replace(",", ".")
+        return round(ah_liq, 2), f"Orbit Prio 2: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
         return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
@@ -13252,7 +13252,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
         b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, pk, start_bal, plan_balance_relativ(plan))
         ah_boden = _wd_num((((plan or {}).get("mt5_baseline") or {}).get("apex_hedge") or {}).get("liq_balance")) if ah else None
         if ah_boden and (b_bal is None or ah_boden > b_bal):
-            b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ (Apex mit Hedge)"
+            b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ (Orbit Prio 2)"
     kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
     bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
     text = b_text if gilt == "boden" else r_text
@@ -30232,11 +30232,15 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
 
 def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):
     """REIN RECHNEND (testbar): steht die Zeile in der Freigabe-Liste dieses Logins? Verwalter (verw_sicht = seine Gruppe): nur Tradeify-Ausgleichs-Trades seiner
-    Gruppe. Admin: wie bisher (HT, sichtbare Apex-WD) und jeder Ausgleichs-Trade, auch aus Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“)."""
+    Gruppe, seit MO1 (05.11.2026) auch die Orbit-Prio-2-Hedges (art 'apex') seiner Gruppe. Admin: wie bisher (HT, sichtbare Apex-WD) und jeder Ausgleichs-Trade,
+    auch aus Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“)."""
     ausgleich = str(r.get("aus") or "").lower() == "true"
     if verw_sicht is not None:
         # + hf_ist_wd (S9 zu bda93043): nur Winning-Day-Ausgleiche des Farmers (winning_day, Farmer-Notiz, keine Hedge-Art) seiner Gruppe
-        return ausgleich and str(r.get("user_id")) in verw_sicht and hf_ist_wd(r, firmen)
+        # ORBIT PRIO 2 (MO1, 05.11.2026, Master: „bei Emins Gruppe bestätigt Emin selbst“): dazu die Orbit-Prio-2-Hedges (hedge_art 'apex') SEINER Gruppe
+        if str(r.get("user_id")) not in verw_sicht:
+            return False
+        return (ausgleich and hf_ist_wd(r, firmen)) or r.get("art") == "apex"
     return str(r.get("user_id")) not in (aus or ()) or hf_wd_sichtbar(r, firmen, gruppen_ids) or ausgleich
 
 
@@ -30438,6 +30442,59 @@ AH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "vorlauf_min"
 AH_TAKT_S = 60
 AH_FIRMA = "Apex Trader"
 _ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": [], "hand": set()}
+# ORBIT PRIO 2 (MO1, Finn 05.11.2026 ~10:00 Dubai, „ja bau ma“: „unter Challenge-Planer bei Futures unter Settings auf Lucid gehen und das Modell zu dem Modell
+# machen, das jetzt ist“): der Apex-Challenge-Weg oben (Fusion-Gegenhedge, WD-Logik für Start/Schluss/Verspätung, Priorität über Winning Days) heißt
+# „Orbit Prio 2“ und ist je Firma wählbar — Feld `modell` der Firmen-Regel: orbit_v2 (ohne Hedge) | orbit_prio2 (dieser Weg, dieselbe Rechnung,
+# dieselbe Marke hedge_art 'apex', derselbe DB-Riegel trade_plans_a1_apex_hedge). Je Gruppe getrennt: HT = auto_plan_regeln.regeln.firmen[].modell,
+# Verwalter-Gruppe = auto_plan_gruppe.firmen_modell {Firmen-Schlüssel namen[0]: modell} (sql/2026-11-05_orbit_prio2.sql). Fehlt der Wert: wie bisher —
+# Apex → orbit_prio2, jede andere Firma → orbit_v2 (Apex bitgleich).
+AP_MODELLE = ("orbit_v2", "orbit_prio2")
+AP_MODELL_NAME = {"orbit_v2": "Orbit V2", "orbit_prio2": "Orbit Prio 2"}
+AP_MODELL_NICHT_WAEHLBAR = ("tradeify",)   # Firmen-Schlüssel namen[0]: finaler Tradeify fährt über tfh_tick (hedge_art 'tradeify_final') — nie zusätzlich Prio 2
+
+
+def ap_firma_modell(regel, firm, gruppe_modell=None):
+    """REIN RECHNEND (testbar): Modell einer Futures-Firma → 'orbit_v2' | 'orbit_prio2'. gruppe_modell = {namen[0]: modell} einer Verwalter-Gruppe
+    (None = HT: regel['modell']). Fehlt/ungültig → Standard nach Firmenname (Apex → orbit_prio2, sonst orbit_v2) — genau die alte Regel."""
+    if ((regel or {}).get("namen") or [""])[0] in AP_MODELL_NICHT_WAEHLBAR:
+        v = None                                       # Tradeify: nie Prio 2, auch wenn jemand das Feld per Hand setzt (Fremd-Review MO1)
+    elif gruppe_modell is not None:
+        v = (gruppe_modell or {}).get(((regel or {}).get("namen") or [""])[0]) if isinstance(gruppe_modell, dict) else None
+    else:
+        v = (regel or {}).get("modell") if isinstance(regel, dict) else None
+    if v in AP_MODELLE:
+        return v
+    # Plan: genau der alte Vergleich am Firmennamen (bitgleich); ohne Firmenname (Einstellungen je Regel): Regel-Namen enthalten Apex
+    ist_apex = (_firm_norm(firm) == _firm_norm(AH_FIRMA)) if firm else (bool(regel) and ap_regel_finden([regel], AH_FIRMA) is regel)
+    return "orbit_prio2" if ist_apex else "orbit_v2"
+
+
+def ap_gruppen_modelle():
+    """{user_id: {namen[0]: modell}} für alle IDs der Verwalter-Gruppen mit Planer-Zeile (auto_plan_gruppe.firmen_modell). Spalte fehlt (SQL noch nicht
+    eingespielt) oder Lesefehler → die Gruppe bekommt {} (= Standard je Firma, wie bisher). HT-IDs kommen nicht vor."""
+    out = {}
+    try:
+        gruppen = ap_planer_gruppen()
+    except Exception as e:
+        print(f"[orbit-prio2] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
+        return out
+    try:
+        zeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+    except Exception as e:
+        print(f"[orbit-prio2] ⚠️ auto_plan_gruppe: {type(e).__name__}: {e}", flush=True)
+        zeilen = {}
+    for g in gruppen:
+        fm = (zeilen.get(str(g.get("gruppe_id"))) or {}).get("firmen_modell")
+        fm = {str(k): v for k, v in fm.items() if v in AP_MODELLE} if isinstance(fm, dict) else {}
+        for u in g.get("ids") or ():
+            out[str(u)] = fm
+    return out
+
+
+def ap_plan_modell(p, firmen, gruppen_modelle):
+    """REIN RECHNEND (testbar): Modell eines geplanten Futures-Plans (ID × Firma) — Regel der Firma aus firmen, Gruppe aus gruppen_modelle (ap_gruppen_modelle)."""
+    firm = p.get("master_firm") or ""
+    return ap_firma_modell(ap_regel_finden(firmen, firm), firm, gruppen_modelle.get(str(p.get("user_id"))))
 
 
 def ah_param(regeln):
@@ -30505,7 +30562,7 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
     neu = {"status": "ohne", "code": code, "grund": grund, "at": _wt_now_iso(), "gemeldet": bool((alt or {}).get("gemeldet")) or melden}
     upd = {"mt5_baseline": dict(base, apex_hedge=neu)}
     if not (alt and alt.get("status") == "ohne"):
-        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nApex-Hedge: wartet auf Hedge, weil {grund}").strip()
+        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nOrbit Prio 2: wartet auf Hedge, weil {grund}").strip()
     try:
         if not sb_update("trade_plans", _ah_guard(p), upd):
             return
@@ -30516,7 +30573,7 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
         _ah["ohne"] += 1
         _ah_spur(f"{wer} · {p.get('master_name') or '—'}: wartet auf Hedge — {grund}")
     if melden:
-        alarm_senden(3, "apex_hedge_ohne", "Apex wartet auf Hedge",
+        alarm_senden(3, "apex_hedge_ohne", "Orbit Prio 2 wartet auf Hedge",
                      f"{wer} · {p.get('master_name') or '—'}: startet nie ohne Hedge — wartet, bis er rechenbar ist ({grund}); "
                      f"Start rückt je 15–30 min weiter",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"ah-ohne-{p['id']}")
@@ -30626,7 +30683,27 @@ def ah_tick(jetzt=None, force=False):
             raise
         roh = _sb_all("trade_plans", {"select": felder, **filt})
         freigabe_da = False
-    roh = [p for p in roh if _firm_norm(p.get("master_firm") or "") == _firm_norm(AH_FIRMA)]
+    # ORBIT PRIO 2 (MO1): statt fest „Apex Trader" jede Firma, deren Modell orbit_prio2 ist (HT-Regel bzw. Gruppen-Feld); ohne Feld genau wie bisher nur Apex
+    _gm = ap_gruppen_modelle() if roh else {}
+    if roh:                                            # Fremd-Review MO1: Gruppen-IDs nie auf die HT-Regel fallen lassen (Lesefehler → {} = Standard je Firma)
+        for _u in ap_planer_gruppen_ids():
+            _gm.setdefault(str(_u), {})
+    _fm = regeln.get("firmen") or []
+    # MODELL ZURÜCK AUF ORBIT V2 (Fremd-Review MO1): vorgemerkte, noch nicht umgestellte Pläne verlieren Marke + Vorschau (wie ah_zurueck) — sonst hielte
+    # der Riegel trade_plans_a1_apex_hedge sie für immer („wartet auf Hedge"), weil ah_tick sie nicht mehr sieht. Umgestellte (status 'mit') bleiben bis zum Start.
+    for p in roh:
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if (p.get("_ah_nach") or base.get("hedge_art") != "apex" or (base.get("apex_hedge") or {}).get("status") == "mit"
+                or ap_plan_modell(p, _fm, _gm) == "orbit_prio2"):
+            continue
+        neu = {k: v for k, v in base.items() if k not in ("hedge_art", "hedge_vorschau")}
+        try:
+            if sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
+                                         "mt5_baseline->>hedge_art": "eq.apex"}, {"mt5_baseline": neu}):
+                _ah_spur(f"{p.get('master_name') or '—'}: Modell Orbit V2 — Marke Orbit Prio 2 entfernt")
+        except Exception as e:
+            _ah_spur(f"⚠️ {str(p['id'])[:8]} Marke nicht entfernt: {type(e).__name__}: {e}")
+    roh = [p for p in roh if ap_plan_modell(p, _fm, _gm) == "orbit_prio2"]
     namen, aus = _ap_namen()
     aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
@@ -30747,7 +30824,7 @@ def ah_tick(jetzt=None, force=False):
                 "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Apex mit Hedge (WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Orbit Prio 2 (Fusion-Hedge, WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · "
                          + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ",")).strip()}
         g = _ah_guard(p)
@@ -30761,7 +30838,7 @@ def ah_tick(jetzt=None, force=False):
         vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
         erg["umgestellt"] += 1
         _ah["umgestellt"] += 1
-        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: Apex mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: Orbit Prio 2 {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
 
     # (3) NACHZIEHEN — umgestellt, nicht geclaimt: Lots auf den Abstand bis zum Trade-Ende (ah_abstand). Gleiche Marge-Prüfung wie (2), die eigenen alten Lots
     # zählen dabei nicht doppelt. Passt die Marge nicht, bleibt der Plan wie er ist (kleinerer Hedge) und die Spur sagt warum.
@@ -36556,6 +36633,9 @@ def admin_auto_plan_einstellungen():
                         "abhaken_auto_blow": regeln.get("abhaken_auto_blow") is True, "tradeify_final_halten": regeln.get("tradeify_final_halten") is True},
            "echo_hedge": sicher(eh_param), "apex_hedge": sicher(ah_param), "tradeify_final_hedge": sicher(tfh_param),
            "ausgleich": sicher(ap_ausgleich_param), "fest": ap_einst_fest(),
+           # ORBIT PRIO 2 (MO1): wirksames Modell je Futures-Firma der HT-Regel (ohne Feld: Apex → orbit_prio2, sonst orbit_v2)
+           "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
+           "modell_namen": AP_MODELL_NAME,
            # E3b: Zufall-Parameter (wirksam, Code-Rückfall, welche aus der Tabelle) + Firmen-Regeln aus firm_rules.json
            "zufall": ap_zufall(regeln), "zufall_code": ap_zufall_code(),
            "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
@@ -36592,6 +36672,57 @@ def admin_auto_plan_kernwert():
     _ap_kw_cache.clear()   # Kontowert/Kernwerte-Antworten (60 s) gleich mit den neuen Werten
     print(f"[einstellungen] Kernwerte {body.get('firma')}: {len(body.get('aenderungen') or [])} Feld(er) geändert ({uid})", flush=True)
     return jsonify({"ok": True, "firma": next((f for f in neu if (f.get('namen') or [None])[0] == body.get("firma")), None)})
+
+
+def ap_modell_setzen(firmen, firma, modell):
+    """REIN RECHNEND (testbar): regeln.firmen mit modell an der Firma namen[0] == firma → (neue Liste, None) | (None, Grund). Nur Futures-Firmen
+    (CFD fährt immer Echo mit Hedge, E3: e3ArtVon); Werte AP_MODELLE. Die anderen Felder bleiben unberührt (Kopie, kein Umsortieren)."""
+    if modell not in AP_MODELLE:
+        return None, "modell = " + " | ".join(AP_MODELLE)
+    neu, treffer = [], False
+    for f in firmen or []:
+        if isinstance(f, dict) and ((f.get("namen") or [None])[0] == firma):
+            if f.get("route") in AP_CFD_ROUTEN:          # wie e3ArtVon im Frontend: route mt5/mt5v2 = CFD
+                return None, "CFD-Firma — fährt immer Echo mit Hedge"
+            if f.get("route") == "tsv2":                 # Topstep V2: eigener Weg in TopstepX, ah_tick nimmt nur tvv2
+                return None, "Topstep V2 — eigener Weg, kein Modell wählbar"
+            if firma in AP_MODELL_NICHT_WAEHLBAR:      # Fremd-Review MO1: finaler Tradeify hat seinen eigenen Hedge (tfh_tick) — beide würden hedge_art je Minute überschreiben
+                return None, "Tradeify — finaler Trade hat einen eigenen Gegenhedge, kein Modell wählbar"
+            f = dict(f, modell=modell)
+            treffer = True
+        neu.append(f)
+    if not treffer:
+        return None, f"Firma {firma!r} nicht in den Regeln"
+    return neu, None
+
+
+@app.route("/admin/auto-plan/modell", methods=["POST", "OPTIONS"])
+def admin_auto_plan_modell():
+    """POST {firma: namen[0], modell: orbit_v2 | orbit_prio2} → regeln.firmen[].modell (HT). ORBIT PRIO 2 (MO1, 05.11.2026): ein neues Feld,
+    darum nicht über /kernwert (das ändert nur vorhandene). Nur Admin + Planer-Schreibrecht. Verwalter-Gruppen: auto_plan_gruppe.firmen_modell (SQL)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    body = request.get_json(silent=True) or {}
+    regeln = dict(reg.get("regeln") or {})
+    neu, grund = ap_modell_setzen(regeln.get("firmen"), str(body.get("firma") or ""), str(body.get("modell") or ""))
+    if grund:
+        return jsonify({"ok": False, "msg": grund}), 400
+    regeln["firmen"] = neu
+    try:
+        sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    print(f"[einstellungen] Modell {body.get('firma')} → {body.get('modell')} ({uid})", flush=True)
+    f = next((x for x in neu if (x.get("namen") or [None])[0] == body.get("firma")), None)
+    return jsonify({"ok": True, "firma": f, "modell": ap_firma_modell(f, None)})
 
 
 # KONTEN JE FIRMA (E3b Zusatz 4, Finn 05.11.2026: „Genau das Gleiche auch für den Challenge-Planer … mit Zielen, Consistency, alles. Bei

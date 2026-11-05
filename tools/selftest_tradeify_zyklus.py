@@ -98,9 +98,13 @@ check(ruf("hf_zeile_fuer", emin, None, {"emin-mitglied"}, ["apex"], {"emin-mitgl
 check(ruf("hf_zeile_fuer", emin, frozenset({"emin-mitglied"}), set(), ["apex"], set()) and not ruf("hf_zeile_fuer", dict(emin, user_id="fremd"), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
       "Verwalter sieht nur die Ausgleichs-Trades seiner Gruppe")
 check(not ruf("hf_zeile_fuer", ht, frozenset({"ht-id"}), set(), ["apex"], set()), "Verwalter sieht keine anderen Freigaben (Hedge-Arten, Apex-WD, normale WD)")
-check(not ruf("hf_zeile_fuer", dict(emin, art="apex"), frozenset({"emin-mitglied"}), set(), ["apex"], set())
+check(not ruf("hf_zeile_fuer", dict(emin, art="tradeify_final"), frozenset({"emin-mitglied"}), set(), ["apex"], set())
       and not ruf("hf_zeile_fuer", dict(emin, winning_day=False), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
-      "Verwalter: nur Winning-Day-Ausgleiche (hf_ist_wd) — keine Hedge-Art, kein Nicht-WD trotz Marke (S9 zu bda93043)")
+      "Verwalter: Winning-Day-Ausgleiche (hf_ist_wd) — keine andere Hedge-Art, kein Nicht-WD trotz Marke (S9 zu bda93043)")
+# ORBIT PRIO 2 (MO1, 05.11.2026, Master: „bei Emins Gruppe bestätigt Emin selbst“): Orbit-Prio-2-Hedge (art 'apex') der eigenen Gruppe ja, fremder nie
+_op = {"user_id": "emin-mitglied", "art": "apex", "winning_day": False, "notes": "Auto-Planer", "master_firm": "Lucid Trading"}
+check(ruf("hf_zeile_fuer", _op, frozenset({"emin-mitglied"}), set(), ["apex"], set()) and not ruf("hf_zeile_fuer", dict(_op, user_id="ht-id"), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
+      "Verwalter bestätigt Orbit Prio 2 nur seiner Gruppe (MO1)")
 sqlg = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_gruppen.sql"), encoding="utf-8").read()
 check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true' and coalesce(new.winning_day, false))) then" in sqlg and "verwalter_user_id" not in sqlg.split("TRADEIFY-AUSGLEICH (03.11.2026)")[1].split("then")[0],
       "DB-Netz: Ausgleich ohne Gruppen-Ausnahme (neue SQL-Datei)")
