@@ -17048,13 +17048,17 @@
      *  (3) gleichzeitige Ladewünsche derselben ID + Abfrage teilen EINEN Abruf (Admin, Planer, Funded CFD, Farmer); ↻ und Laden nach eigenem
      *      Schreiben (window._admLaden({ frisch: true })) holen immer neu — mit frisch=1 auch am Server-Kurzcache (20 s) vorbei.
      * Inhalt und Rechnung der Übersicht unverändert; nur wann gezeichnet wird. */
-    const ADM_IDB = 'prophos_adm_stand', ADM_IDB_MAX_MS = 12 * 3600 * 1000
-    let admDataUid = null, admDataQ = null, _admAusSpeicher = false, _admGemerkt = null, _admVorladen = null, _admLauf = null
+    const ADM_IDB = 'prophos_adm_stand', ADM_IDB_MAX_MS = 12 * 3600 * 1000, ADM_IDB_ENG_MS = 3600 * 1000   // eingeschränkte Sicht (Verwalter/Mitglied): 1 h
+    let admDataUid = null, admDataQ = null, _admAusSpeicher = false, _admGemerkt = null, _admVorladen = null, _admLauf = null, _admLaufNr = 0
+    let _admIdbP = null
     function admIdb(){
-      return new Promise((res, rej) => {
+      if(_admIdbP) return _admIdbP
+      _admIdbP = new Promise((res, rej) => {
         try{ const r = indexedDB.open(ADM_IDB, 1); r.onupgradeneeded = () => { try{ r.result.createObjectStore('kv') }catch(_){} }
           r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }catch(e){ rej(e) }
       })
+      _admIdbP.catch(() => { _admIdbP = null })   // nächster Versuch öffnet neu
+      return _admIdbP
     }
     async function admStandLesen(uid){
       const db = await admIdb()
@@ -17096,10 +17100,20 @@
     function admGemerktUebernehmen(q){
       const uid = String(currentUserId || ''), e = _admGemerkt
       if(admData || !uid || !e || e.uid !== uid || e.q !== q) return false
-      try{ admAnwenden(JSON.parse(e.t), Number(e.at) || 0, q, uid, true); return true }catch(err){ console.warn('[adm] gemerkter Stand', err); _admGemerkt = null; return false }
+      try{
+        const d = JSON.parse(e.t)
+        if(Array.isArray(d && d.sicht_ids) && Date.now() - (Number(e.at) || 0) > ADM_IDB_ENG_MS){ _admGemerkt = null; return false }   // eingeschränkte Sicht: Rolle kann sich ändern
+        admAnwenden(d, Number(e.at) || 0, q, uid, true); return true
+      }catch(err){ console.warn('[adm] gemerkter Stand', err); _admGemerkt = null; admData = null; window._admData = null; admDataUid = null; admDataQ = null; _admAusSpeicher = false; return false }
     }
     // fremde ID im Speicher (Login gewechselt ohne Neuladen) → weg, bevor irgendetwas zeichnet
-    function admFremdWeg(){ const uid = String(currentUserId || ''); if(admData && admDataUid !== uid){ admData = null; window._admData = null; admDataQ = null; _admAusSpeicher = false } }
+    function admFremdWeg(){
+      const uid = String(currentUserId || ''); if(!admData || admDataUid === uid) return
+      admData = null; window._admData = null; admDataQ = null; _admAusSpeicher = false
+      const msg = $('adm-msg'), body = $('adm-body')   // Review LD1: sofort ausblenden — nie 0,4 s die Tabellen der alten ID unter dem neuen Login
+      if(body) body.hidden = true
+      if(msg){ msg.style.display = ''; msg.textContent = 'Lade Übersicht…' }
+    }
     function admLaedtZeigen(an){
       const b = $('adm-refresh'); if(!b) return
       b.textContent = an ? '⋯' : '↻'
@@ -17167,6 +17181,7 @@
       admFinRender()
       admKontenRender()   // Alle Accounts (13.10.2026)
       window._admPcsOeffnen?.()   // PC-Tabs (08.10.2026): Namen der IDs kommen aus dieser Antwort
+      try{ document.dispatchEvent(new CustomEvent('prophos:adm-daten')) }catch(_){}   // LD1: Leser in anderen Blöcken (Funded CFD) zeichnen nach
     }
     async function admLoad(opt){
       const frisch = !!(opt && opt.frisch === true)   // Klick-Event (alter Aufruf) zählt nicht als frisch
@@ -17181,7 +17196,7 @@
         q = admQuery(); admGemerktUebernehmen(q)
       }
       if(!frisch && _admLauf && _admLauf.uid === uid0 && _admLauf.q === q) return _admLauf.p   // läuft schon: denselben Abruf teilen
-      const lauf = { uid: uid0, q, p: null }
+      const lauf = { uid: uid0, q, p: null, nr: ++_admLaufNr }
       _admLauf = lauf
       lauf.p = admLaden(lauf, frisch, msg, body).finally(() => { if(_admLauf === lauf) _admLauf = null })
       return lauf.p
@@ -17189,6 +17204,7 @@
     async function admLaden(lauf, frisch, msg, body){
       const uid0 = lauf.uid, q = lauf.q
       const standDa = () => !!admData && admDataUid === uid0 && admDataQ === q
+      const veraltet = () => lauf.nr !== _admLaufNr || uid0 !== String(currentUserId || '') || q !== admQuery()   // Review LD1: nur der jüngste Lauf zeichnet
       if(standDa()) admLaedtZeigen(true)
       else { msg.style.display = ''; msg.textContent = 'Lade Übersicht…'; body.hidden = true }
       try{
@@ -17200,12 +17216,11 @@
         const t = await r.text()
         let d = {}; try{ d = JSON.parse(t) }catch(_){ if(r.ok) throw new Error('Antwort nicht lesbar') }
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
-        if(uid0 !== String(currentUserId || '')) return   // ID inzwischen gewechselt: nichts zeichnen, nichts merken
-        if(q !== admQuery()) return                        // Kapitel/Gruppe inzwischen gewechselt: der neuere Abruf zeichnet
+        if(veraltet()) return   // ID/Kapitel/Gruppe gewechselt oder ein neuerer Abruf läuft (z. B. frisch nach eigenem Schreiben): der zeichnet
         admAnwenden(d, Date.now(), q, uid0, false)
         admStandSchreiben(uid0, q, t)
       }catch(e){
-        if(uid0 !== String(currentUserId || '')) return
+        if(veraltet()) return
         if(standDa()){   // LD1: Stand bleibt stehen, die Zeile sagt, von wann er ist
           msg.style.display = ''; msg.textContent = `Übersicht nicht aktualisiert: ${e.message || e} — angezeigt: Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'}`
           return
@@ -17218,7 +17233,7 @@
           const bm = $(mid)
           if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $(bid).hidden = true }
         }
-      }finally{ admLaedtZeigen(false) }
+      }finally{ if(lauf.nr === _admLaufNr) admLaedtZeigen(false) }
     }
 
     // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
@@ -86824,12 +86839,16 @@
     apgFcfdRender()
     if((window._admData && !neu) || _apgFcfd.laedt || typeof window._admLaden !== 'function') return
     _apgFcfd.laedt = true
-    Promise.resolve().then(() => window._admLaden()).catch(() => {}).then(() => { _apgFcfd.laedt = false; apgFcfdRender() })
+    Promise.resolve().then(() => window._admLaden({ frisch: !!neu })).catch(() => {}).then(() => { _apgFcfd.laedt = false; apgFcfdRender() })   // LD1: „neu" = frisch
   }
   window._apgFcfdOeffnen = () => { try{ apgFcfdLaden(false); fcfdRegelnLaden(false) }catch(e){ console.warn('[apg] Funded CFD', e) } }
   // Funded CFD im Challenge-Gerüst (30.10.2026): Waiting-Block braucht die Konten-Übersicht (/admin/overview, wie der Entwurf), das Regel-Feld
   // die Regeln — beide nur nachladen, wenn sie fehlen, danach den Reiter neu zeichnen
   const fcfdReiterOffen = () => _apIdsArtWert === 'fcfd' && !!document.getElementById('ap-ids-root')?.offsetParent
+  // LD1 (05.11.2026): kommt eine neue Übersicht (Hintergrund-Abruf nach dem gemerkten Stand, ↻, nach Schreiben), sichtbares Funded CFD nachzeichnen
+  document.addEventListener('prophos:adm-daten', () => {
+    try{ if(fcfdReiterOffen()) window._apIdsRender?.(); else if(document.getElementById('apg-fcfd')?.offsetParent) apgFcfdRender() }catch(e){ console.warn('[apg] Funded CFD nach Übersicht', e) }
+  })
   window._fcfdNebenLaden = () => {
     try{ fcfdRegelnLaden(false) }catch(_){}
     if(window._admData || _apgFcfd.laedt || typeof window._admLaden !== 'function') return

@@ -123,6 +123,18 @@ _, _, a12 = holen("?w=1&frisch=1")
 t1.join()
 ok(a12 == "miss" and ZUSTAND["baue"] == 2, f"frisch=1 baut parallel selbst ({a12}, {ZUSTAND['baue']} Bauten, {time.time() - t0:.2f} s)")
 
+# 8b) älterer (nicht frischer) Bau, der NACH dem frisch=1-Bau fertig wird, überschreibt dessen Stand nicht (Review LD1)
+leeren()
+ZUSTAND["dauer"] = 0.5
+t2 = threading.Thread(target=lambda: app.app.test_client().get("/admin/overview?v=1"))
+t2.start()
+time.sleep(0.1)
+ZUSTAND["dauer"] = 0.0
+_, d13, _ = holen("?v=1&frisch=1")
+t2.join()
+_, d14, a14 = holen("?v=1")
+ok(a14 == "hit" and d14["n"] == d13["n"], f"alter Bau überschreibt den frischen nicht (Treffer n={d14['n']}, frisch n={d13['n']})")
+
 # 9) Deckel: höchstens 40 Einträge
 leeren()
 for i in range(55):

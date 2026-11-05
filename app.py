@@ -8388,7 +8388,7 @@ def admin_build_overview(kapitel_id=None):
 # ?frisch=1 (↻ und nach eigenem Schreiben im Tab) baut immer neu und legt den neuen Stand ab. Fehler werden nie gemerkt. Reine Anzeige-Route,
 # keine Logik geändert; die PC-Tab-Routen (Delta/Waage, Start-Prüfung) bleiben ungecacht.
 ADM_OV_CACHE_S = 20
-_adm_ov_cache = {}      # schluessel → (bis_epoch, gebaut_epoch, body_bytes)
+_adm_ov_cache = {}      # schluessel → (bis_epoch, start_epoch des Baus, body_bytes)
 _adm_ov_laeuft = {}     # schluessel → threading.Event (Bau läuft)
 _adm_ov_lock = threading.Lock()
 
@@ -8421,13 +8421,17 @@ def adm_ov_holen(schluessel, frisch, bauen):
                 return e[2], "warten", round(time.time() - e[1], 1)
             # Bau des anderen schlug fehl oder dauerte zu lange → selbst bauen (ohne Single-Flight-Eintrag)
     try:
+        t0 = time.time()                              # Startzeit des Baus = Stand der Daten (Review LD1)
         body = bauen()
         t = time.time()
         with _adm_ov_lock:
-            if len(_adm_ov_cache) >= 40:              # Deckel: abgelaufene raus, notfalls alles
-                for k in ([k for k, v in _adm_ov_cache.items() if v[0] <= t] or list(_adm_ov_cache)):
-                    _adm_ov_cache.pop(k, None)
-            _adm_ov_cache[schluessel] = (t + ADM_OV_CACHE_S, t, body)
+            for k in [k for k, v in _adm_ov_cache.items() if v[0] <= t]:   # Abgelaufene sofort raus (Einträge können MB groß sein)
+                _adm_ov_cache.pop(k, None)
+            if len(_adm_ov_cache) >= 40:              # Deckel
+                _adm_ov_cache.clear()
+            e = _adm_ov_cache.get(schluessel)
+            if not (e and e[1] > t0):                 # ein später gestarteter Bau (z. B. frisch=1 nach Schreiben) bleibt stehen
+                _adm_ov_cache[schluessel] = (t0 + ADM_OV_CACHE_S, t0, body)
         return body, "miss", 0.0
     finally:
         if eigen is not None:
