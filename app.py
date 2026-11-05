@@ -8068,6 +8068,15 @@ def admin_build_overview(kapitel_id=None):
                 r["po_offen"] = str(r["id"]) in offen_po
     except Exception as e:
         print(f"[admin] ⚠️ payout-ab: {type(e).__name__}: {e}", flush=True)
+    # ADD-ON ON DEMAND (OD1, Finn 05.11.2026, Marc FundedNext …7821/…7823): fremde Konten zeigten im Admin „Payout-Datum fehlt“/„Payout in 19 T“, weil die
+    # Zeile on_demand nicht kannte — mit ihr fällt der Termin-Chip bei On Demand weg (payoutAbInfo). Eigenes try: fehlt die Spalte, bleibt das Feld weg (= wie bisher).
+    try:
+        od_an = {str(a["id"]) for a in (_sb_all("accounts", {"select": "id", "account_type": "eq.funded_cfd", "on_demand": "is.true"}) or [])}
+        for r in rows:
+            if r.get("type") == "funded_cfd":
+                r["on_demand"] = str(r["id"]) in od_an
+    except Exception as e:
+        print(f"[admin] ⚠️ on_demand: {type(e).__name__}: {e}", flush=True)
     # HEUTE TRADEN (16.10.2026): je Funded-Futures-Konto heute_traden {getradet, geplant_um} — eigenes try, ohne Abfrage bleibt die Liste heil
     # Seit 21.10.2026 im selben Lesen auch heute_pl {getradet, laeuft, pl, n} je Funded-/Funded-CFD-Konto (Polar-Dropdown): Master-Seite aus
     # derselben Abfrage (+ master_pl), Slave-Seite (Polar) aus EINER weiteren über slave_account_id
@@ -17100,6 +17109,19 @@ def admin_payout_calc():
         return jsonify({"error": f"Nicht gespeichert ({type(e).__name__})"}), 502
 
 
+def _konto_on_demand(aid):
+    """OD1 (Finn 05.11.2026: „per Datum-Feld und per Tagen fällt hier beides mal weg"): Funded-CFD-Konto mit Add-on On Demand? Dann setzen Anfragen und
+    Erhalten keinen nächsten Payout-Termin (jeder Aufrufer, auch Admin → Payouts mit vorbelegtem „+ 14"). Spalte fehlt / Lesefehler → False (wie bisher)."""
+    if not aid:
+        return False
+    try:
+        z = sb_select("accounts", {"select": "id,account_type,on_demand", "id": f"eq.{aid}", "limit": "1"}) or []
+    except Exception as e:
+        print(f"[payout] ⚠️ on_demand {str(aid)[:8]} nicht lesbar ({type(e).__name__}) — Termin wie übergeben", flush=True)
+        return False
+    return bool(z) and z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True
+
+
 def payout_konto_felder(naechster, waiting_leeren):
     """REIN RECHNEND (testbar): Konto-Felder beim Abhaken eines Payouts — payout_ready_at nur mit nächstem Termin (ein stehender Termin
     fällt nie still auf null), waiting_payout_since = null nur auf Wunsch (waiting_leeren true). Leer = Konto nicht anfassen."""
@@ -17216,6 +17238,8 @@ def admin_payout_erhalten():
     aid = str(p.get("account_id") or "")
     leeren = b.get("waiting_leeren") is True
     waiting_geleert = False
+    if naechster and _konto_on_demand(aid):
+        naechster = None                 # OD1: On Demand hat keinen Termin (Vorbelegung „Anfrage + 14" aus dem Admin wirkt nicht)
     k_upd = payout_konto_felder(naechster, leeren)
     if aid and k_upd:
         try:
@@ -17358,6 +17382,8 @@ def admin_payout_anfragen():
             return jsonify({"error": f"Zyklus {z['gewinn']:+,.2f} $".replace(",", "X").replace(".", ",").replace("X", ".").replace("-", "−")
                                      + f" · Payout erst ab +{_m_txt} $ — nichts angelegt", "zyklus": z}), 409
     morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
+    if naechster and _konto_on_demand(aid):
+        naechster = None                 # OD1: On Demand hat keinen Termin — ein stehender wird geleert (payout_anfrage_konto_felder)
     felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     try:
         zeile = sb_insert("pending_payouts", {
@@ -39110,7 +39136,9 @@ def kz_rechnen(a, ctx):
             checks.append(["info", "Consistency", "keine"])
         checks.append(["info", "Refund-Trade", f"Ziel {_liq_de(bereich[0])}–{_liq_de(bereich[1])} $" if ep and bereich else "aus" if freg else "—"])
         checks.append(["ok" if wartet else "info", "Waiting for Payout", ("seit " + kz_tag(a["waiting_payout_since"])) if wartet else "—"])
-        if a.get("payout_ready_at"):
+        if _oda:   # OD1 (Finn 05.11.2026): On Demand hat kein Payout-Datum und keine Tage — anfragbar, sobald Ziel + Consistency erfüllt sind
+            checks.append(["info", "Payout ab", "On Demand — sobald Ziel + Consistency erfüllt (kein Datum, keine Tage)"])
+        elif a.get("payout_ready_at"):
             frei = str(a["payout_ready_at"])[:10] <= str(ctx.get("jetzt") or datetime.now(timezone.utc).isoformat())[:10]
             checks.append(["ok" if frei else "nein", "Payout ab", kz_tag(a["payout_ready_at"])])
         ok = bool(freg) and erreicht and cons_ok and (not gt or bool(gti and gti[0] >= gti[1]))
@@ -40816,13 +40844,20 @@ def zw_markierung_juenger(ziel_erreicht_at, bal_stand):
     return bool(m and b and m > b)
 
 
-def fcp_konto_ziel_boden(regel, groesse, zyklus, name=None):
+def fcp_konto_ziel_boden(regel, groesse, zyklus, name=None, on_demand=False):
     """REIN RECHNEND (testbar): FUNDED CFD ZIEL IM RADAR (Finn 30.10.2026 14:1x: „Die Funded-CFD-Trades haben doch auch ein Ziel") → (Ziel-Balance,
     Boden) | None. Genau die Planer-Regel aus fcp_konto_rechnen: Ziel erreicht ab Kontogröße + ziel[von], im 1. Zyklus der Refund-Firmen das
-    kleine Ziel (fcp_erster_payout), Boden = Kontogröße − dd. Keine Regel (Firma/Größe/Flex) → None, dann bleibt die Zeile wie bisher."""
+    kleine Ziel (fcp_erster_payout), Boden = Kontogröße − dd. Keine Regel (Firma/Größe/Flex) → None, dann bleibt die Zeile wie bisher.
+    on_demand=True (OD1, Finn 05.11.2026, Marc FundedNext 100k …7821: „wenn der Account On-Demand ist und noch im ersten Payout-Zyklus ist, dann
+    ist On-Demand das Dominantere, was das Ziel vorgibt, weil das die Regel ist, wie wir einen Payout anfragen können"): wie der Planer
+    fcp_on_demand_anwenden — On-Demand-Ziel je 100k statt Refund-Ziel, auch im 1. Zyklus. Firma ohne On-Demand-Regel → normale Regel."""
     jg = fcp_je_groesse(regel, groesse)
     if not jg or any(w and w in str(name or "").lower() for w in ((regel or {}).get("ohne_namen") or [])):
         return None
+    if on_demand:
+        _oda = fcp_on_demand_anwenden(regel, jg, groesse)
+        if _oda:
+            regel, jg = _oda             # erster_payout=False → kein Refund-Ziel, Ziel = On Demand
     ep = fcp_erster_payout(regel) if int(zyklus or 1) == 1 else None
     bereich, dd = fcp_bereich((ep or jg).get("ziel")), _wd_num(jg.get("dd"))
     if not bereich or not dd:
@@ -40837,8 +40872,17 @@ def zw_funded_cfd():
     firmen = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict)]
     if not firmen:
         return
-    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,starting_balance,created_at", "account_type": "eq.funded_cfd"}) or []
+    # OD1 (Finn 05.11.2026): On-Demand-Konten bekommen auch im 1. Zyklus das On-Demand-Ziel (sonst schlüge das Abhak-Popup nach dem kleinen Refund-Trade
+    # „Waiting for Payout“ vor, obwohl FundedNext erst ab ~2.000 $ auszahlt). Fehlt die Spalte on_demand, rechnet alles wie bisher.
+    _sel = "id,user_id,name,firm,starting_balance,created_at"
+    try:
+        konten = _sb_all("accounts", {"select": _sel + ",on_demand", "account_type": "eq.funded_cfd"}) or []
+    except requests.exceptions.HTTPError as e:
+        if "on_demand" not in str(getattr(e.response, "text", "") or e):
+            raise
+        konten = _sb_all("accounts", {"select": _sel, "account_type": "eq.funded_cfd"}) or []
     ids = [str(a["id"]) for a in konten]
+    od_ids = {str(a["id"]) for a in konten if a.get("on_demand") is True}
     pend, verw, buch = [], [], []
     for i in range(0, len(ids), 80):
         teil = "in.(" + ",".join(ids[i:i + 80]) + ")"
@@ -40849,7 +40893,13 @@ def zw_funded_cfd():
     # GEWINNTAGE (Blue Guardian, BG1 Gegenprüfung): fehlen im Zyklus noch Tage, gibt es kein Radar-Ziel — sonst schlüge das Abhak-Popup „Waiting for Payout“ vor
     # (zwei Phase-A-Tage à ~600 $ liegen schon über 1.000), der Planer hielte an und Blue Guardian zahlte nicht aus. Der Boden bleibt.
     firmen_von = lambda a: (fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {}).get("firmen") or []   # noqa: E731 — UNT4: Regel des Unternehmens; streng (S4-Stopp): unbekannt → keine Regel, nie still der Standard
-    gt_konten = [a for a in konten if isinstance((fcp_je_groesse(ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)) or {}).get("gewinntage"), dict)]
+    def _gt_jg(a):
+        """Größen-Werte, die für dieses Konto gelten — On Demand nur, wenn die Firma eine On-Demand-Regel hat (sonst normal mit Gewinntagen, wie der Planer)."""
+        _r, _g = ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)
+        _j = fcp_je_groesse(_r, _g) or {}
+        _o = fcp_on_demand_anwenden(_r, _j, _g) if str(a["id"]) in od_ids else None   # OD1: On Demand hat keine Gewinntage
+        return _o[1] if _o else _j
+    gt_konten = [a for a in konten if isinstance(_gt_jg(a).get("gewinntage"), dict)]
     gt_plaene, zyk = {}, fcp_zyklus_start(pend, verw, buch)
     if gt_konten:
         for p in _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,started_at,ended_at,completed_at",
@@ -40860,7 +40910,7 @@ def zw_funded_cfd():
     for a in konten:
         aid = str(a["id"])
         regel = ap_regel_finden(firmen_von(a), a.get("firm"))   # UNT4
-        zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"))
+        zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"), on_demand=aid in od_ids)
         if zb:
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
             if aid in gt_ids:

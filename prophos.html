@@ -19547,6 +19547,8 @@
       if(t.account_id && !$('adm-receive-next').value && /^\d{4}-\d{2}-\d{2}/.test(String(t.requested_at || ''))){ $('adm-receive-next').value = admReceivePlus(String(t.requested_at).slice(0, 10), 14); delete $('adm-receive-next').dataset.auto }   // ohne Termin am Konto: Anfrage-Datum + 14 (P1)
       else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, _admReceiveO.naechsterTage); $('adm-receive-next').dataset.auto = '1' }
       else delete $('adm-receive-next').dataset.auto
+      // OD1 (Finn 05.11.2026): On Demand hat kein Payout-Datum — nichts vorbelegen (der Server setzt bei On Demand ohnehin keinen Termin, _konto_on_demand)
+      if(konto && konto.on_demand === true){ $('adm-receive-next').value = ''; delete $('adm-receive-next').dataset.auto }
       $('adm-receive-next').disabled = !t.account_id
       const msg = $('admReceiveMsg'); msg.textContent = ''; msg.className = 'modal-msg'
       $('admReceiveSave').disabled = false
@@ -19687,7 +19689,10 @@
       const r = _admAnfrage, el = $('adm-anfrage-next'), ab = $('adm-anfrage-am').value || ''
       if(!el) return
       if(!neu && el.value !== (el.dataset.vorschlag || '')) return
-      const acc = r ? { type: r.type, firm: r.account_firm, payoutReadyAt: r.ready_at || null } : null
+      const acc = r ? { type: r.type, firm: r.account_firm, payoutReadyAt: r.ready_at || null,
+        // OD1: payout_ready-Zeilen kennen on_demand nicht → Admin-Kontozeile (admData.accounts, fremde IDs) bzw. eigenes Konto (accounts)
+        onDemand: r.on_demand === true || ((admData?.accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).on_demand === true
+          || ((accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).onDemand === true } : null
       let v = ''
       // P1 (Finn 03.11.2026 ~22:55 Dubai): Anfrage-Datum + 14 bei allen Funded-Konten, auch Funded Futures/Winning Days (vorher nur CFD, Futures blieb leer)
       const fundedArt = acc && ['funded', 'winning_days'].includes(acc.type)
@@ -19763,6 +19768,7 @@
         goalDoneOffset: tage ? (r.tage_ist != null ? r.tage_ist : n(r.goal_done_offset)) : n(r.goal_done_offset),
         goalSince: r.goal_since || null, goalManual: tage ? true : !!r.goal_manual, goalManualLast: tage ? null : (r.goal_manual_last || null),
         payoutReadyAt: r.payout_ready_at || null, waitingPayoutSince: r.waiting_payout_since || null,
+        ...(r.on_demand === undefined ? {} : { onDemand: r.on_demand === true }),   // OD1 (05.11.2026): Add-on On Demand fremder Konten (/admin/overview)
         autoPlaner: r.auto_planer !== false, zielErreichtAt: r.ziel_erreicht_at || null, zielErreichtBal: n(r.ziel_erreicht_bal),
         zielUsd: n(r.ziel_usd), maxRisikoTrade: n(r.max_risiko_trade), tvBalanceQuelle: r.tv_balance_quelle || null,
         restPlanerAt: r.rest_planer_at || null,   // Rest zurück im Planer (20.10.2026)
@@ -56415,7 +56421,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2089'
+  const OS_TAB_BUILD = '2026-09-22.2090'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -75063,6 +75069,9 @@
     if(!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return null
     const heute = _deTodayStr()
     const tage = Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
+    // OD1 (Finn 05.11.2026, Fremd-Review): On Demand hat keinen Termin — ein KÜNFTIGES Datum (alter Anlege-/Hand-Termin) gilt nirgends (Chips, Finanzen,
+    // Admin-Filter); heute/vergangen = vom Planer gesetzt, sobald Ziel + Consistency erreicht sind → „anfragbar"
+    if(a.type === 'funded_cfd' && a.onDemand === true && tage > 0) return null
     const d = new Date(tag + 'T12:00:00Z')
     const kurz = d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'UTC' })
     const lang = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' })
@@ -75079,6 +75088,13 @@
   function payoutAbInfo(a, h){
     if(!a || a.type !== 'funded_cfd') return null
     if(h && h.offen) return { stufe: 'angefragt', tage: null }
+    // OD1 (Finn 05.11.2026, Marc FundedNext …7821/…7823): „Wenn man das On-Demand-Addon hat, dann gibt es keine Mindestanzahl mehr, auf die man warten
+    // muss. Also per Datum-Feld und per Tagen fällt hier beides mal weg." — kein „Payout-Datum fehlt", kein „in X T". Erreicht das Konto Ziel + Consistency,
+    // setzt der Funded-CFD-Planer „anfragbar ab" auf heute (app.py, O1) → „Payout jetzt"; ein künftiges Datum (alter Anlege-Termin) zählt nicht.
+    if(a.onDemand === true){
+      const j = payoutReadyInfo(a)
+      return j && j.faellig ? { stufe: 'jetzt', tage: 0, tag: j.tag, kurz: j.kurz, lang: j.lang } : { stufe: 'od', tage: null }
+    }
     const i = payoutReadyInfo(a)
     if(!i) return { stufe: 'fehlt', tage: null }
     return { stufe: i.faellig ? 'jetzt' : 'tage', tage: Math.max(0, i.tage), tag: i.tag, kurz: i.kurz, lang: i.lang }
@@ -75089,6 +75105,7 @@
     if(!i) return ''
     const ziel = klick ? ` data-acc-po="${escapeHtml(String(a.id))}" role="button" tabindex="0"` : ''
     if(i.stufe === 'angefragt') return '<span class="acc-po acc-po-sub" title="Payout ist angefragt (Finanzen → offene Anfragen)">💸 Payout angefragt</span>'
+    if(i.stufe === 'od') return '<span class="acc-po acc-po-sub" title="Add-on On Demand: kein Payout-Datum, keine Mindesttage — anfragbar, sobald das On-Demand-Ziel + Consistency erreicht sind (Funded-CFD-Planer → Einstellungen → Add-on · On Demand)">💸 Payout bei Ziel · On Demand</span>'
     if(i.stufe === 'fehlt') return `<span class="acc-po acc-po-fehlt${klick ? ' is-klick' : ''}"${ziel} title="Kein „Payout anfragbar ab“ eingetragen${klick ? ' — Klick öffnet das Feld' : ' — im Account-Modal der ID eintragen'}">💸 Payout-Datum fehlt</span>`
     if(i.stufe === 'jetzt') return `<span class="acc-po acc-po-jetzt" title="Payout anfragbar seit ${escapeHtml(i.lang)}">💸 Payout jetzt</span>`
     return `<span class="acc-po acc-po-tage" title="Payout anfragbar ab ${escapeHtml(i.lang)}">💸 Payout in ${i.tage} T · ab ${i.kurz}</span>`
@@ -77821,6 +77838,8 @@
   // Buchungstag), sonst heute. Nach einer Anfrage ist auch bei FundedNext schon der zweite Zyklus: 14 Tage (die 21 gelten nur ab dem Anlegen,
   // sql/2026-11-03_payout_termin_beim_anlegen.sql). Ändert Finn das Datum oben, zieht der Vorschlag mit, solange das Feld unberührt ist.
   function finNextPayoutVorschlag(acc, abTag){
+    // OD1 (Finn 05.11.2026): On Demand hat kein Payout-Datum — nach der Anfrage kein „heute + 14“, das Feld bleibt leer (Ziel + Consistency entscheiden)
+    if(acc && acc.type === 'funded_cfd' && acc.onDemand === true) return ''
     const heute = /^\d{4}-\d{2}-\d{2}$/.test(String(abTag || '')) ? String(abTag) : (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
     const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
     const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
@@ -86958,6 +86977,11 @@
    * (created). Frist = frühester Termin, kein Muss; gerechnete Termine tragen den Hinweis „gerechnet". Nur Anzeige. */
   function fcfdPayoutAb(r, verlauf){
     const ab = String(r.payout_ready_at || r.payout_at || '').slice(0, 10)   // wie Admin → Alle Accounts (admKontoAusZeile liest payout_ready_at)
+    // OD1 (Finn 05.11.2026): On Demand — keine 14/21 Tage; wartet das Konto, ist das Ziel erreicht → anfragbar ab heute (ein künftiges Datum zählt nicht)
+    if(r.on_demand === true){
+      const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
+      return /^\d{4}-\d{2}-\d{2}$/.test(ab) && ab <= heute ? { ab, gerechnet: false } : { ab: heute, gerechnet: true, grund: 'On Demand: kein Payout-Datum, anfragbar, sobald Ziel + Consistency erreicht' }
+    }
     if(/^\d{4}-\d{2}-\d{2}$/.test(ab)) return { ab, gerechnet: false }
     const letzter = (verlauf || []).filter(v => v && v.art === 'payout' && String(v.aid) === String(r.id) && v.datum).map(v => String(v.datum).slice(0, 10)).sort().pop() || ''
     const basis = letzter || String(r.created || '').slice(0, 10)
