@@ -294,7 +294,7 @@ rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══
 check("_planer_schreib_gate()" in rt and "admin_voll_uids()" in rt and "fdp_regeln_aendern(reg" in rt, "Route: Planer-Rechte + nur Admin/„Finn + Pascal“/„Pascal“ + Prüfung")
 check('"updated_at": f"eq.{reg.get(\'updated_at\')}"' in rt and "409" in rt, "Route: Schreiben nur, wenn updated_at noch passt (sonst 409)")
 gt = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
-check('erg["regeln"] = fdp_regeln_anzeige(_fdp_regeln_laden()' in gt, "GET /admin/funded-plan hängt die Einstellungen an")
+check('erg["regeln"] = fdp_regeln_anzeige(_us["eff"] if _us else _reg_std' in gt, "GET /admin/funded-plan hängt die Einstellungen an (UNT4: Regel des Unternehmens)")
 check("regeln: d.regeln || null" in HTML and "if(fd && !fc) try{ e2Oben = e2EinstHtml(Q, x.admin) }" in HTML and "${T.zeitstrahl}</div>` + e2Oben" in HTML and "try{ e2Verdrahten(root) }" in HTML,
       "prophos.html: Q.regeln, Einstellungen unten nur bei Funded Futures, verdrahtet")
 check("'[data-e2-pfad]', '[data-e2-save]'" in HTML, "Planer-Rechte-Schloss sperrt Eingaben + Speichern ohne Schreibrecht")

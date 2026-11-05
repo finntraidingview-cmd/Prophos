@@ -1,0 +1,415 @@
+{
+ "fdp": {
+  "id": 1,
+  "aktiv": true,
+  "konst": {},
+  "firmen": [
+   {
+    "an": true,
+    "name": "Apex Trader",
+    "namen": [
+     "apextrader",
+     "apex"
+    ],
+    "symbol": "NQ",
+    "lock_usd": 100,
+    "je_groesse": {
+     "100000": {
+      "dd": 3000,
+      "kontrakte": {
+       "2": 0.9,
+       "3": 0.1
+      },
+      "max_trade": 6000,
+      "kosten_eur": 350,
+      "ziel_gewinn": 12000
+     },
+     "150000": {
+      "dd": 4000,
+      "kontrakte": {
+       "2": 0.9,
+       "3": 0.1
+      },
+      "max_trade": 7500,
+      "kosten_eur": 550,
+      "ziel_gewinn": 15000
+     }
+    },
+    "consistency_pct": 50
+   },
+   {
+    "an": false,
+    "name": "Tradeify",
+    "namen": [
+     "tradeify"
+    ]
+   },
+   {
+    "an": false,
+    "name": "Topstep",
+    "namen": [
+     "topstep"
+    ]
+   },
+   {
+    "an": false,
+    "name": "Lucid Trading",
+    "namen": [
+     "lucidtrading",
+     "lucid"
+    ]
+   },
+   {
+    "an": false,
+    "name": "FundedNext Futures",
+    "namen": [
+     "fundednextfutures"
+    ]
+   },
+   {
+    "an": true,
+    "name": "FTMO Futures",
+    "namen": [
+     "ftmofutures"
+    ],
+    "symbol": "NQ",
+    "lock_usd": 0,
+    "tp_modus": "rest",
+    "je_groesse": {
+     "50000": {
+      "dd": 3000,
+      "sl": [
+       750,
+       850
+      ],
+      "daily_usd": 1000,
+      "hedge_eur": 450,
+      "kontrakte": {
+       "1": 1
+      },
+      "kosten_eur": 120,
+      "ziel_gewinn": [
+       4750,
+       5000
+      ]
+     }
+    }
+   }
+  ],
+  "zeiten": {
+   "vorlauf_min": 15,
+   "max_je_id_tag": 3,
+   "abstand_id_min": 90,
+   "firma_abstand_min": 15
+  },
+  "updated_at": "2026-11-04T23:40:41.444295+00:00",
+  "auto_bestaetigen": false
+ },
+ "fcp": {
+  "id": 1,
+  "aktiv": true,
+  "firmen": [
+   {
+    "an": true,
+    "name": "The5%ers",
+    "namen": [
+     "the5ers"
+    ],
+    "tp_zyklen": [
+     750,
+     1500,
+     3000,
+     6000
+    ],
+    "je_groesse": {
+     "100000": {
+      "dd": 10000,
+      "sl": [
+       1800,
+       2400
+      ],
+      "lots": [
+       14,
+       23
+      ],
+      "ziel": [
+       1300,
+       1500
+      ],
+      "hedge_eur": 750,
+      "tp_erster": 750
+     },
+     "200000": {
+      "dd": 20000,
+      "sl": [
+       3600,
+       5000
+      ],
+      "lots": [
+       15,
+       24
+      ],
+      "ziel": [
+       1300,
+       1500
+      ],
+      "hedge_eur": 1500,
+      "tp_erster": 750
+     }
+    },
+    "consistency_pct": 50
+   },
+   {
+    "an": true,
+    "name": "FundedNext",
+    "namen": [
+     "fundednext"
+    ],
+    "je_groesse": {
+     "50000": {
+      "dd": 5000,
+      "sl": [
+       875,
+       1225
+      ],
+      "lots": [
+       1,
+       1.75
+      ],
+      "ziel": [
+       1500,
+       1850
+      ],
+      "sl_1pct": [
+       300,
+       400
+      ],
+      "hedge_eur": 750
+     },
+     "100000": {
+      "dd": 10000,
+      "sl": [
+       1750,
+       2450
+      ],
+      "lots": [
+       1,
+       1.75
+      ],
+      "ziel": [
+       1500,
+       1850
+      ],
+      "sl_1pct": [
+       670,
+       780
+      ],
+      "hedge_eur": 1500
+     },
+     "200000": {
+      "dd": 20000,
+      "sl": [
+       3500,
+       4900
+      ],
+      "lots": [
+       1,
+       1.75
+      ],
+      "ziel": [
+       1500,
+       1850
+      ],
+      "sl_1pct": [
+       1500,
+       1700
+      ],
+      "hedge_eur": 3000
+     }
+    },
+    "erster_payout": {
+     "ziel": [
+      50,
+      150
+     ],
+     "hedge_eur_je_dd": 0.5
+    },
+    "tp_deckel_plus": 1000
+   },
+   {
+    "an": true,
+    "name": "FundingPips",
+    "namen": [
+     "fundingpips"
+    ],
+    "je_groesse": {
+     "50000": {
+      "dd": 5000,
+      "sl": [
+       650,
+       800
+      ],
+      "lots": [
+       0.375,
+       0.4
+      ],
+      "ziel": [
+       625,
+       1000
+      ],
+      "hedge_eur": 1000
+     },
+     "100000": {
+      "dd": 10000,
+      "sl": [
+       1300,
+       1600
+      ],
+      "lots": [
+       0.75,
+       0.8
+      ],
+      "ziel": [
+       1250,
+       2000
+      ],
+      "hedge_eur": 2000
+     }
+    },
+    "ohne_namen": [
+     "flex"
+    ],
+    "tp_deckel_plus": 1000,
+    "consistency_pct": 0
+   },
+   {
+    "an": true,
+    "name": "Tradeify CFD",
+    "namen": [
+     "tradeifycfd"
+    ],
+    "je_groesse": {
+     "100000": {
+      "dd": 10000,
+      "sl": [
+       1750,
+       2400
+      ],
+      "lots": [
+       2.5,
+       3.1
+      ],
+      "ziel": [
+       1500,
+       2500
+      ],
+      "hedge_eur": 2000,
+      "daily_loss": 3000
+     }
+    },
+    "tp_deckel_plus": 1000
+   },
+   {
+    "an": true,
+    "name": "FTMO",
+    "namen": [
+     "ftmo"
+    ],
+    "je_groesse": {
+     "100000": {
+      "dd": 10000,
+      "sl": [
+       1750,
+       2450
+      ],
+      "lots": [
+       10,
+       17.5
+      ],
+      "ziel": [
+       1500,
+       2500
+      ],
+      "sl_1pct": [
+       670,
+       780
+      ],
+      "hedge_eur": 1500
+     },
+     "200000": {
+      "dd": 20000,
+      "sl": [
+       3500,
+       4900
+      ],
+      "lots": [
+       10,
+       17.5
+      ],
+      "ziel": [
+       1500,
+       2500
+      ],
+      "sl_1pct": [
+       1500,
+       1700
+      ],
+      "hedge_eur": 3000
+     }
+    },
+    "erster_payout": {
+     "ziel": [
+      50,
+      100
+     ],
+     "hedge_eur_je_dd": 0.5
+    },
+    "tp_deckel_plus": 1000
+   },
+   {
+    "an": true,
+    "name": "Blue Guardian",
+    "namen": [
+     "blueguardian",
+     "bluegardian"
+    ],
+    "je_groesse": {
+     "100000": {
+      "dd": 8000,
+      "sl": [
+       1250,
+       1600
+      ],
+      "lots": [
+       1,
+       1.75
+      ],
+      "ziel": [
+       1000,
+       2000
+      ],
+      "hedge_eur": 1000,
+      "gewinntage": {
+       "tp": [
+        550,
+        650
+       ],
+       "min": 500,
+       "anzahl": 3
+      }
+     }
+    },
+    "erster_payout": false
+   }
+  ],
+  "zeiten": {
+   "vorlauf_min": 15,
+   "abstand_id_min": 10,
+   "firma_abstand_min": 15
+  },
+  "news_regel": true,
+  "updated_at": "2026-11-05T02:41:17.278847+00:00",
+  "auto_bestaetigen": true,
+  "ziel_auto_wartet": false
+ }
+}

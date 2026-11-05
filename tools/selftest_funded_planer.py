@@ -39,6 +39,7 @@ def laden():
           "GP_SLAVE_PPL": 0.85, "_firm_norm": lambda x: str(x or ""),
           # FUNDED-PLANER JE GRUPPE (30.10.2026): ohne Gruppen = reiner HT-Lauf wie bisher (selftest_funded_je_gruppe prüft die Gruppen)
           "ap_planer_gruppen_ids": lambda: set(), "admin_gruppen_daten": lambda: {}, "ap_deaktiviert_anwenden": lambda k, ids=None: k}
+    __import__("_unt_stub").unt_stub(ns)   # UNT3/UNT4: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec("\n".join(block(n) for n in HILFEN) + "\n" + SRC[i:j], ns)
     return ns
 

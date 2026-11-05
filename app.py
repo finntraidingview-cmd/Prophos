@@ -31248,6 +31248,273 @@ def ap_regel_unternehmen(uid, firmen_std, firm, ktx=None, streng=True):
     return ap_regel_finden(ap_unt_firmen(uid, firmen_std, ktx, streng), firm)
 
 
+# ══ UNT4 (Master 05.11.2026): FUNDED-PLANER-REGELN JE UNTERNEHMEN = STANDARD + ABWEICHUNG JE FELD — wie der Challenge-Planer (UNT1/UNT3) ══
+# Standard = funded_plan_regeln id 1 (Futures) bzw. funded_cfd_plan_regeln id 1 (CFD), heute = HT. Ein Unternehmen (auto_plan_gruppe) speichert in der
+# Spalte funded_regeln NUR seine Abweichungen: {"futures": {"firmen": {Schlüssel: {Pfad…: Wert}}}, "cfd": {"firmen": {…}, "parameter": {k: v}}}.
+# Schlüssel = namen[0] (sonst name). Abweichen darf jedes Feld, das es im Standard gibt (nie name/namen, nie neue Größen); Schalter, Zeiten,
+# Startfenster, Konstanten und News-Regel gelten für alle. Ohne Abweichung liefern die Leser die Standard-Zeile selbst (bitgleich). WD-Farmer nicht.
+FD_UNT_ARTEN = ("futures", "cfd")
+FD_UNT_NIE = ("name", "namen")
+
+
+def fd_firma_key(f):
+    return str(((f or {}).get("namen") or [None])[0] or (f or {}).get("name") or "") if isinstance(f, dict) else ""
+
+
+FD_UNT_WERT, FD_UNT_WEG = "__wert__", "__weg__"   # Blatt-Marker: Feld neu/anderer Typ (ganzer Wert) bzw. Feld weg (Fremd-Review UNT4: Refund, Gewinntage, Consistency …)
+
+
+def _fd_blaetter(d, vor=()):
+    """(Pfad, Wert) der Abweichung — ein Marker-Dict ({__wert__: …} / {__weg__: true}) ist ein Blatt."""
+    if isinstance(d, dict) and d and not (set(d) <= {FD_UNT_WERT, FD_UNT_WEG}):
+        out = []
+        for k, v in d.items():
+            out += _fd_blaetter(v, vor + (str(k),))
+        return out
+    return [(list(vor), d)] if vor else []
+
+
+def _fd_neue_groesse(f_std, pfad):
+    """True, wenn der Pfad eine Größe anlegen würde, die der Standard nicht hat (nie im Unternehmen — neue Größen nur per SQL)."""
+    return len(pfad) >= 2 and pfad[0] == "je_groesse" and pfad[1] not in ((f_std or {}).get("je_groesse") or {})
+
+
+def fd_unt_overlay(firmen_std, abw_f):
+    """REIN RECHNEND (testbar): Firmen-Liste (Kopie) + Abweichung je Firmen-Schlüssel. Normales Blatt nur, wo es den Pfad im Standard gibt;
+    {__wert__: v} setzt den ganzen Wert (Feld neu oder anderer Typ), {__weg__: true} entfernt das Feld. Nie name/namen, nie neue Größen."""
+    r = json.loads(json.dumps(firmen_std or []))
+    for f in r:
+        if not isinstance(f, dict):
+            continue
+        for pfad, wert in _fd_blaetter((abw_f or {}).get(fd_firma_key(f)) or {}):
+            if not pfad or pfad[0] in FD_UNT_NIE or _fd_neue_groesse(f, pfad):
+                continue
+            if isinstance(wert, dict) and wert.get(FD_UNT_WEG):
+                _unt_loeschen(f, pfad)
+            elif isinstance(wert, dict) and FD_UNT_WERT in wert:
+                ziel = f
+                for k in pfad[:-1]:
+                    if not isinstance(ziel.get(k), dict):
+                        ziel[k] = {}
+                    ziel = ziel[k]
+                ziel[pfad[-1]] = json.loads(json.dumps(wert[FD_UNT_WERT]))
+            elif _unt_hol(f, pfad)[0]:
+                _unt_setzen(f, pfad, json.loads(json.dumps(wert)))
+    return r
+
+
+def _fd_diff_knoten(a, b, vor, out):
+    for k in sorted(set(a) | set(b), key=str):
+        p = vor + [str(k)]
+        if k in a and k not in b:
+            _unt_setzen(out, p, {FD_UNT_WEG: True})
+        elif k not in a:
+            _unt_setzen(out, p, {FD_UNT_WERT: b[k]})
+        elif isinstance(a[k], dict) and isinstance(b[k], dict):
+            _fd_diff_knoten(a[k], b[k], p, out)
+        elif json.dumps(a[k], sort_keys=True) != json.dumps(b[k], sort_keys=True):
+            _unt_setzen(out, p, b[k] if type(a[k]) is type(b[k]) or (isinstance(a[k], (int, float)) and isinstance(b[k], (int, float))) else {FD_UNT_WERT: b[k]})
+
+
+def fd_unt_diff(firmen_std, firmen_neu):
+    """REIN RECHNEND (testbar): Abweichung = was in firmen_neu gegenüber dem Standard anders ist → {Schlüssel: {Pfad…: Wert | Marker}}."""
+    neu_je = {fd_firma_key(f): f for f in firmen_neu or [] if isinstance(f, dict)}
+    out = {}
+    for f in firmen_std or []:
+        if not isinstance(f, dict):
+            continue
+        k = fd_firma_key(f)
+        n = neu_je.get(k)
+        if not isinstance(n, dict):
+            continue
+        o = {}
+        _fd_diff_knoten({x: v for x, v in f.items() if x not in FD_UNT_NIE}, {x: v for x, v in n.items() if x not in FD_UNT_NIE}, [], o)
+        if o:
+            out[k] = o
+    return out
+
+
+def fd_unt_abw(zeile, art):
+    fr = (zeile or {}).get("funded_regeln")
+    a = fr.get(art) if isinstance(fr, dict) else None
+    return a if isinstance(a, dict) else {}
+
+
+def fd_unt_reg_von(reg, abw):
+    """REIN RECHNEND (testbar): Regel-Zeile des Standards + Abweichung → wirksame Zeile (Kopie); ohne Abweichung dieselbe Zeile."""
+    if not reg or not (abw.get("firmen") or abw.get("parameter")):
+        return reg
+    eff = dict(reg, firmen=fd_unt_overlay(reg.get("firmen") or [], abw.get("firmen") or {}))
+    if isinstance(abw.get("parameter"), dict) and abw["parameter"]:
+        eff["parameter"] = dict(reg.get("parameter") if isinstance(reg.get("parameter"), dict) else {}, **abw["parameter"])
+    return eff
+
+
+def fd_unt_reg(reg, art, uid, ktx=None):
+    """Funded-Regel (Zeile funded_plan_regeln / funded_cfd_plan_regeln) für eine ID = Standard + Abweichung ihres Unternehmens. HT / ohne
+    Unternehmen / ohne Abweichung / Kontext nicht lesbar → reg selbst (wie vor UNT4; die Funded-Planer legen nur Vorschläge an)."""
+    if not reg:
+        return reg
+    k = ktx if ktx is not None else ap_unt_kontext()
+    if not k.get("ok"):
+        return reg
+    gid = (k.get("gid_von") or {}).get(str(uid or ""))
+    if not gid:
+        return reg
+    abw = fd_unt_abw((k.get("zeilen") or {}).get(gid), art)
+    if not (abw.get("firmen") or abw.get("parameter")):
+        return reg
+    memo = k.setdefault("memo", {})
+    m = memo.get(("fd", art, gid, id(reg)))
+    if m and m[0] is reg:
+        return m[1]
+    eff = fd_unt_reg_von(reg, abw)
+    memo[("fd", art, gid, id(reg))] = (reg, eff)
+    return eff
+
+
+def fd_unt_an(reg, art, uid, ktx=None):
+    """Eingeschaltete Firmen (an) der Funded-Regel im Unternehmen der ID."""
+    return [f for f in ((fd_unt_reg(reg, art, uid, ktx) or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")]
+
+
+FD_UNT_NICHT_FREI = ("Einstellungen je Unternehmen noch nicht freigeschaltet — es gilt der Standard. "
+                     "Admin: sql/2026-11-05_funded_regel_unternehmen.sql einspielen.")
+
+
+def _fd_unternehmen(admin, uid, ktx=None):
+    """Welches Unternehmen zeigen/ändern die Funded-Einstellungen? → (gruppe_id | None, darf). Admin: ?unternehmen= (ohne = Standard = HT),
+    darf immer. Sonst das Unternehmen der eigenen ID (ap_unt_kontext); ändern darf nur sein Verwalter."""
+    k = ktx if ktx is not None else ap_unt_kontext()
+    if admin:
+        g = str(request.args.get("unternehmen") or (request.get_json(silent=True) or {}).get("gruppe_id") or "") if request else ""
+        return (g or None), True
+    g = (k.get("gid_von") or {}).get(str(uid or ""))
+    if not g:
+        return None, False
+    try:
+        verw = any(str(x.get("id")) == g and str(x.get("verwalter_id") or "") == str(uid) for x in admin_gruppen_daten().get("gruppen") or ())
+    except Exception:
+        verw = False
+    return g, verw
+
+
+def fd_unt_schreiben(reg, zeile, art, body, aendern):
+    """REIN RECHNEND (testbar): Änderung eines Unternehmens an der Funded-Regel → (abw_neu, reg_wirksam, None) | (None, None, Grund).
+    aendern(eff_reg, body) = die Prüfung des Standards (fdp_regeln_aendern / fcp_regel_patch) → (patch, fehler); geprüft wird auf der wirksamen
+    Regel, gespeichert nur die Differenz zum Standard. body.standard = {firma, pfad} | {param} → dieses Feld zurück auf den Standard."""
+    abw = json.loads(json.dumps(fd_unt_abw(zeile, art)))
+    std = reg or {}
+    st = body.get("standard")
+    if isinstance(st, dict):
+        if st.get("param"):
+            (abw.get("parameter") or {}).pop(str(st["param"]), None)
+        else:
+            k = str(st.get("firma") or "")
+            pfade = st.get("pfade") if isinstance(st.get("pfade"), list) else [st.get("pfad")]
+            key = next((fd_firma_key(f) for f in std.get("firmen") or [] if isinstance(f, dict) and k in (fd_firma_key(f), f.get("name"))), None)
+            if not key or not pfade or any(not isinstance(pf, list) or not pf for pf in pfade):
+                return None, None, "standard = {firma, pfad: [...] | pfade: [[...], …]} | {param}"
+            for pf in pfade:
+                _unt_loeschen(abw.setdefault("firmen", {}).setdefault(key, {}), [str(x) for x in pf])
+            if not abw["firmen"].get(key):
+                abw["firmen"].pop(key, None)
+    else:
+        if body.get("param") is not None and str(body.get("param")) in FCP_PARAM_SCHALTER:
+            return None, None, f"{body.get('param')} ist ein Schalter — gilt für alle Unternehmen"
+        eff = fd_unt_reg_von(std, abw)
+        patch, fehler = aendern(eff, body)
+        if fehler:
+            return None, None, fehler
+        if "firmen" in patch:
+            neu_f = fd_unt_diff(std.get("firmen") or [], patch["firmen"])
+            ok_f = fd_unt_overlay(std.get("firmen") or [], neu_f)
+            if json.dumps(ok_f, sort_keys=True) != json.dumps(patch["firmen"], sort_keys=True):
+                return None, None, "neue Größen nur per SQL — im Unternehmen nur Größen ändern, die es im Standard gibt"
+            abw["firmen"] = neu_f
+        if "parameter" in patch:
+            std_p = std.get("parameter") if isinstance(std.get("parameter"), dict) else {}
+            k, v = str(body.get("param") or ""), body.get("wert")
+            ap_ = dict(abw.get("parameter") or {})
+            if v is None or v == "":
+                ap_.pop(k, None)                      # leer → wie der Standard (nicht der Code-Standard)
+            elif patch["parameter"].get(k) == std_p.get(k):
+                ap_.pop(k, None)
+            else:
+                ap_[k] = patch["parameter"].get(k)
+            abw["parameter"] = ap_
+        if set(patch) - {"firmen", "parameter"}:
+            return None, None, "im Unternehmen sind nur Firmen-Werte und Parameter änderbar (Schalter, Zeiten und Fenster gelten für alle)"
+    for t in ("firmen", "parameter"):
+        if t in abw and not abw[t]:
+            abw.pop(t)
+    return abw, fd_unt_reg_von(std, abw), None
+
+
+def _fd_unt_post(art, reg, admin, uid, body, aendern):
+    """POST einer Unternehmens-Abweichung (gruppe_id im Body) für die Funded-Regel art → Flask-Antwort. Admin oder Verwalter genau dieser Gruppe."""
+    gid = str(body.get("gruppe_id") or "")
+    g_eigen, darf = _fd_unternehmen(admin, uid)
+    if not admin and (not darf or g_eigen != gid):
+        return jsonify({"ok": False, "msg": "Nur der Verwalter dieses Unternehmens (oder Admin)"}), 403
+    if not reg:
+        return jsonify({"ok": False, "msg": "Funded-Regel fehlt — SQL einspielen"}), 503
+    zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gid}"}) or [None])[0]
+    if not zeile:
+        return jsonify({"ok": False, "msg": "Unternehmen ohne Planer-Zeile"}), 404
+    if "funded_regeln" not in zeile:
+        return jsonify({"ok": False, "msg": FD_UNT_NICHT_FREI, "code": "unt_nicht_frei"}), 409
+    b = {k: v for k, v in body.items() if k != "gruppe_id"}
+    abw, eff, grund = fd_unt_schreiben(reg, zeile, art, b, aendern)
+    if grund:
+        return jsonify({"ok": False, "msg": grund}), 400
+    jetzt_iso = datetime.now(timezone.utc).isoformat()
+    g_flt, g_upd = ap_unt_stempel(zeile, jetzt_iso)
+    fr = dict(zeile.get("funded_regeln") if isinstance(zeile.get("funded_regeln"), dict) else {}, **{art: abw})
+    try:
+        rows = sb_update("auto_plan_gruppe", dict({"gruppe_id": f"eq.{gid}"}, **g_flt), dict({"funded_regeln": fr, "updated_at": jetzt_iso}, **g_upd))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"ok": False, "msg": "inzwischen geändert — neu laden und noch einmal speichern"}), 409
+    print(f"[funded-{art}] Unternehmen {gid[:8]}: {json.dumps(b, ensure_ascii=False)[:160]} ({str(uid or 'admin')[:8]})", flush=True)
+    return jsonify(json.loads(json.dumps({"ok": True, "abweichung": fd_unt_liste(abw), "eff": eff, "updated_at": reg.get("updated_at")}, default=str))), 200
+
+
+def fd_unt_sicht(art, reg, admin, uid):
+    """GET-Teil der Unternehmens-Sicht → None (Standard) | {gruppe_id, name, spalte, darf, abw, eff, liste}. Admin: ?unternehmen=, sonst eigenes."""
+    try:
+        unt, darf = _fd_unternehmen(admin, uid)
+        if not unt or not reg:
+            return None
+        zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{unt}"}) or [None])[0]
+        if not zeile:
+            return None
+        namen_g = {str(g.get("id")): g.get("name") for g in admin_gruppen_daten().get("gruppen") or ()}
+        abw = fd_unt_abw(zeile, art)
+        return {"gruppe_id": unt, "name": namen_g.get(unt), "spalte": "funded_regeln" in zeile, "darf": bool(darf), "abw": abw,
+                "eff": fd_unt_reg_von(reg, abw), "liste": fd_unt_liste(abw)}
+    except Exception as e:
+        print(f"[funded-{art}] ⚠️ Unternehmens-Sicht: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def fd_unt_auswahl(admin):
+    """Admin: Unternehmen zum Umschalten (Standard = Hermann Technologies + Planer-Gruppen)."""
+    if not admin:
+        return None
+    try:
+        return [{"gruppe_id": None, "name": "Hermann Technologies (Standard)"}] + [{"gruppe_id": str(g["gruppe_id"]), "name": g.get("name")} for g in ap_planer_gruppen()]
+    except Exception:
+        return None
+
+
+def fd_unt_liste(abw):
+    """Markierung in den Einstellungen → {"firmen": {Schlüssel: [Pfad…]}, "parameter": [k…]}."""
+    return {"firmen": {str(k): [p for p, _v in _fd_blaetter(o or {})] for k, o in ((abw or {}).get("firmen") or {}).items()},
+            "parameter": sorted(((abw or {}).get("parameter") or {}).keys())}
+
+
 def ap_unt_wache_reg(reg, uid, je_uid, gesperrt):
     """Regel, mit der eine Wache den Plan dieser ID misst, oder None (nicht anfassen)."""
     uid = str(uid or "")
@@ -38655,7 +38922,7 @@ def konto_ziele():
             buch = _sb_all("transactions", {"select": "id,account_id,amount,currency,occurred_at", "kind": "eq.payout", "account_id": f"eq.{kid}"}) or []
             ctx["payouts"] = (pend, verw, buch)
         if typ == "funded_cfd":
-            ctx["fcp_regel"] = _fcp_regeln_laden() or {}
+            ctx["fcp_regel"] = fd_unt_reg(_fcp_regeln_laden() or {}, "cfd", a.get("user_id")) or {}   # UNT4: Regel des Unternehmens der ID
             ctx["fcp_pay"] = ctx["payouts"]
         elif typ in ("funded", "winning_days"):
             ctx["wd_firmen_regeln"] = _wd_firmen_regeln_lesen()
@@ -39790,6 +40057,10 @@ def ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, letzt, echo_bal
 def ap_bal_gruppe_funded_filter(konten, firmen_fdp, firmen_fcp):
     """REIN RECHNEND (testbar): Funded → Firmen an im Funded-Planer, Funded CFD → Firmen an im Funded-CFD-Planer. Eine Firma, die kein Planer fährt, wird nicht gelesen."""
     an = lambda fs: [f for f in fs or () if isinstance(f, dict) and f.get("an")]
+    if callable(firmen_fdp) or callable(firmen_fcp):   # UNT4: Firmen je Konto (Regel des Unternehmens der ID)
+        fdp_f = firmen_fdp if callable(firmen_fdp) else (lambda _a: firmen_fdp)
+        fcp_f = firmen_fcp if callable(firmen_fcp) else (lambda _a: firmen_fcp)
+        return [a for a in konten or () if ap_regel_finden(an(fcp_f(a) if a.get("account_type") == "funded_cfd" else fdp_f(a)), a.get("firm"))]
     fdp, fcp = an(firmen_fdp), an(firmen_fcp)
     return [a for a in konten or () if ap_regel_finden(fcp if a.get("account_type") == "funded_cfd" else fdp, a.get("firm"))]
 
@@ -39822,8 +40093,9 @@ def ap_bal_auto_gruppen_tick(jetzt, reg=None):
     # Funded + Funded CFD der Gruppe (Eingang 02.11.2026, Lücke aus S17): eigener try, ein Fehler lässt die Planer-Konten unberührt. Firmen wie die Funded-Planer (an), Regeln wie HT-Quelle (E).
     try:
         f_konten = ap_bal_gruppe_funded_filter(_sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": in_uids, "account_type": "in.(funded,funded_cfd)"}),
-                                               (_fdp_regeln_laden() or {}).get("firmen"),
-                                               (sb_select("funded_cfd_plan_regeln", {"select": "firmen", "id": "eq.1"}) or [{}])[0].get("firmen"))
+                                               (lambda _r: lambda a: (fd_unt_reg(_r, "futures", a.get("user_id")) or {}).get("firmen"))(_fdp_regeln_laden() or {}),
+                                               (lambda _r: lambda a: (fd_unt_reg(_r, "cfd", a.get("user_id")) or {}).get("firmen"))(
+                                                   (sb_select("funded_cfd_plan_regeln", {"select": "firmen", "id": "eq.1"}) or [{}])[0]))   # UNT4
         kand.update(ap_bal_auto_funded(f_konten, letzt, set(kand), echo_bal, dup_bal, archiv))
         konten.update({str(a.get("id")): a for a in f_konten})
     except Exception as e:
@@ -40183,7 +40455,7 @@ def zw_funded_cfd():
     firmen = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict)]
     if not firmen:
         return
-    konten = _sb_all("accounts", {"select": "id,name,firm,starting_balance,created_at", "account_type": "eq.funded_cfd"}) or []
+    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,starting_balance,created_at", "account_type": "eq.funded_cfd"}) or []
     ids = [str(a["id"]) for a in konten]
     pend, verw, buch = [], [], []
     for i in range(0, len(ids), 80):
@@ -40194,7 +40466,8 @@ def zw_funded_cfd():
     n = fcp_payouts_zaehlen(pend, verw, buch)
     # GEWINNTAGE (Blue Guardian, BG1 Gegenprüfung): fehlen im Zyklus noch Tage, gibt es kein Radar-Ziel — sonst schlüge das Abhak-Popup „Waiting for Payout“ vor
     # (zwei Phase-A-Tage à ~600 $ liegen schon über 1.000), der Planer hielte an und Blue Guardian zahlte nicht aus. Der Boden bleibt.
-    gt_konten = [a for a in konten if isinstance((fcp_je_groesse(ap_regel_finden(firmen, a.get("firm")), _wd_konto_groesse(a)) or {}).get("gewinntage"), dict)]
+    firmen_von = lambda a: (fd_unt_reg(reg, "cfd", a.get("user_id")) or {}).get("firmen") or firmen   # noqa: E731 — UNT4: Regel des Unternehmens
+    gt_konten = [a for a in konten if isinstance((fcp_je_groesse(ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)) or {}).get("gewinntage"), dict)]
     gt_plaene, zyk = {}, fcp_zyklus_start(pend, verw, buch)
     if gt_konten:
         for p in _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,started_at,ended_at,completed_at",
@@ -40204,7 +40477,7 @@ def zw_funded_cfd():
     gt_ids = {str(a["id"]) for a in gt_konten}
     for a in konten:
         aid = str(a["id"])
-        regel = ap_regel_finden(firmen, a.get("firm"))
+        regel = ap_regel_finden(firmen_von(a), a.get("firm"))   # UNT4
         zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"))
         if zb:
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
@@ -41910,7 +42183,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
            "geplant": [], "ziel": [], "ausgelassen": [], "ids": []}
-    if not uids or not an:
+    if not uids or not (an or any(fd_unt_an(reg, "futures", u) for u in uids)):   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
         erg["msg"] = "keine ID bzw. keine Firma an"
         return erg
     if datetime.strptime(cme_heute, "%Y-%m-%d").weekday() >= 5:
@@ -41919,7 +42192,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,"
                                             "max_drawdown,waiting_payout_since,starting_balance,created_at",
                                   "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
-    konten = [a for a in ap_deaktiviert_anwenden(konten) or [] if ap_regel_finden(an, a.get("firm"))]
+    _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
+    an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx) is reg else fd_unt_an(reg, "futures", u, _ktx)   # noqa: E731
+    konten = [a for a in ap_deaktiviert_anwenden(konten) or [] if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
     archiv = _ap_archiviert()
     konten = [a for a in konten if str(a.get("id")) not in archiv]
     ids = [str(a["id"]) for a in konten]
@@ -41974,7 +42249,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
         zeile = {"konto_id": aid, "user_id": str(a.get("user_id")), "konto": a.get("name"), "firma": a.get("firm"),
                  "balance": _wd_num(a.get("tv_balance")), "balance_at": a.get("tv_balance_at")}
-        regel = ap_regel_finden(an, a.get("firm"))
+        regel = ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))   # UNT4
         g = _wd_konto_groesse(a)
         jg = fdp_je_groesse(regel, g)
         if a.get("auto_planer") is False:
@@ -42049,7 +42324,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             m = (datetime.fromisoformat(str(t).replace("Z", "+00:00")).astimezone(tz) - mitternacht).total_seconds() / 60.0
         except ValueError:
             continue
-        rf = ap_regel_finden(an, b.get("master_firm"))
+        rf = ap_regel_finden(an_von(b.get("user_id")), b.get("master_firm"))   # UNT4
         if rf:
             belegt_firma.setdefault(gk(b.get("user_id"), (rf.get("namen") or [""])[0]), []).append(m)
         if (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
@@ -42191,7 +42466,9 @@ def admin_funded_plan():
     erg = fcp_sicht(erg, lese)
     erg["info"] = {k: _fdp_info.get(k) for k in ("letzter", "fehler")}
     try:   # Einstellungen für den Reiter (E2, 04.11.2026) — Lesefehler lässt die Vorschau unberührt
-        erg["regeln"] = fdp_regeln_anzeige(_fdp_regeln_laden(), erg.get("regeln_quelle") or "db")
+        _reg_std = _fdp_regeln_laden()
+        _us = fd_unt_sicht("futures", _reg_std, _admin, _uid)   # UNT4: Regel des Unternehmens (Standard + Abweichung)
+        erg["regeln"] = fdp_regeln_anzeige(_us["eff"] if _us else _reg_std, erg.get("regeln_quelle") or "db")
         try:   # Winning Day je Firma (E2b) — nur Anzeige; Lesefehler lässt die Einstellungen ohne WD-Kachel
             _zr, _vp = _wd_zyklus_regelzeile()
             _best = wd_bestaetigen_firmen()
@@ -42205,6 +42482,10 @@ def admin_funded_plan():
             erg["regeln"]["darf"] = bool(_admin or str(_uid) in {str(u) for u in (admin_voll_uids() or ())})
         except Exception:
             erg["regeln"]["darf"] = bool(_admin)
+        if _us:
+            erg["regeln"].update(darf=_us["darf"], abweichung=_us["liste"],
+                                 unternehmen={k: _us[k] for k in ("gruppe_id", "name", "spalte")})
+        erg["regeln"]["unternehmen_liste"] = fd_unt_auswahl(_admin)
     except Exception as e:
         print(f"[funded-plan] ⚠️ Einstellungen: {type(e).__name__}: {e}", flush=True)
     return jsonify(erg), (200 if erg.get("ok") else 503)
@@ -42789,6 +43070,22 @@ def admin_funded_plan_regeln():
     admin, uid, _sicht, err = _fdp_login()
     if err:
         return err
+    body = request.get_json(silent=True) or {}
+    if body.get("gruppe_id"):
+        # UNT4: Abweichung eines Unternehmens (nur Firmen-Werte) — geprüft wie der Standard (fdp_regeln_aendern auf der wirksamen Regel)
+        if set(body) - {"gruppe_id", "updated_at", "firma", "standard"}:
+            return jsonify({"ok": False, "msg": "im Unternehmen sind nur Firmen-Werte änderbar (Schalter, Zeiten, Fenster, Grenzen gelten für alle)"}), 400
+        reg = _fdp_regeln_laden()
+        _a = lambda eff, b: fdp_regeln_aendern(dict(eff, updated_at=(reg or {}).get("updated_at")), dict(b, updated_at=(reg or {}).get("updated_at")))   # noqa: E731
+        antw = _fd_unt_post("futures", reg, admin, uid, body, _a)
+        if antw[0].is_json and (antw[0].get_json() or {}).get("ok"):
+            _us = fd_unt_sicht("futures", _fdp_regeln_laden(), admin, uid)   # frisch: Name, Spalte, Auswahl wie im GET
+            _d = antw[0].get_json()
+            regeln = fdp_regeln_anzeige(_d.get("eff"), "db")   # wirksame Regel NACH dem Speichern (ein erneutes Lesen könnte den alten Stand liefern)
+            regeln.update(abweichung=_d["abweichung"], darf=True, unternehmen_liste=fd_unt_auswahl(admin),
+                          unternehmen={k: _us[k] for k in ("gruppe_id", "name", "spalte")} if _us else {"gruppe_id": str(body["gruppe_id"])})
+            return jsonify(json.loads(json.dumps({"ok": True, "regeln": regeln}, default=str)))
+        return antw
     try:
         voll = admin or str(uid) in {str(u) for u in (admin_voll_uids() or ())}
     except Exception:
@@ -43840,6 +44137,14 @@ def _fcp_gruppe_je_uid(uids):
         return None
 
 
+def fcp_firmen_anzeige(firmen, param):
+    """Firmen-Teil der Einstellungen im Reiter „Funded Planer → CFD" (aus fcp_planen herausgezogen, UNT4: auch für die Regel eines Unternehmens)."""
+    return [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an")), "namen": f.get("namen") or [],
+             "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {},
+             # EINSTELLUNGEN (E1, 04.11.2026): die übrigen Regel-Felder der Firma + was der Planer daraus macht (inkl. Standard aus dem Code)
+             **fcp_firma_einstellung(f, param)} for f in firmen if isinstance(f, dict)]
+
+
 def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     """Ein Lauf des Funded-CFD-Planers. trocken=True: nur rechnen (GET /admin/funded-cfd-plan), sonst Vorschläge anlegen.
     → {ok, geplant[], ziel[], ausgelassen[], plaene[], …} über alle IDs der Regel (nur_ids: nur diese, „Jetzt planen" einer Gruppe) —
@@ -43860,6 +44165,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     if fen_eigen:
         von_min, bis_min = fen_eigen
     param = fcp_param(reg)
+    _ktx = ap_unt_kontext()   # UNT4
     firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
     an = [f for f in firmen if f.get("an")]
     gr_ids_fcp = {str(u) for u in _fd_gruppen_ids()}
@@ -43884,10 +44190,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            "parameter": {"wert": param, "standard": FCP_PARAM_STANDARD, "db": reg.get("parameter") if isinstance(reg.get("parameter"), dict) else {},
                          "spalte": "parameter" in reg},
            # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
-           "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an")), "namen": f.get("namen") or [],
-                       "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {},
-                       # EINSTELLUNGEN (E1, 04.11.2026): die übrigen Regel-Felder der Firma + was der Planer daraus macht (inkl. Standard aus dem Code)
-                       **fcp_firma_einstellung(f, param)} for f in firmen],
+           "firmen": fcp_firmen_anzeige(firmen, param),
            "code": fcp_code_werte(),
            "geplant": [], "ziel": [], "ausgelassen": [], "plaene": [], "konten_stand": []}
     if not uids:
@@ -43895,7 +44198,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         return erg
     # Ohne Firma an bzw. am Wochenende plant der Lauf nichts Neues, liefert aber die bestehenden Pläne (plaene) — der Reiter zeigt sonst
     # „Zu bestätigen"/„Läuft" leer (S3, 30.10.2026). ruhe = Grund, warum nicht geplant wird.
-    ruhe = ("keine Firma an" if not an else
+    ruhe = ("keine Firma an" if not (an or any(fd_unt_an(reg, "cfd", u, _ktx) for u in uids)) else
             "Wochenende — kein Handelstag" if datetime.strptime(plan_tag, "%Y-%m-%d").weekday() >= 5 else None)   # wie fdp_planen: NAS100 zu
     in_uids = "in.(" + ",".join(uids) + ")"
     # O1 (05.11.2026): on_demand + fcp_ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten noch, läuft der Planer genau wie bisher
@@ -43965,7 +44268,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     heute_tag = plan_tag if n_tag > 1 else None
     for a in ([] if ruhe else konten):
         aid, uid, pl = str(a["id"]), str(a.get("user_id")), je_plan.get(str(a["id"]), [])
-        regel = ap_regel_finden(an, a.get("firm"))
+        reg_u = fd_unt_reg(reg, "cfd", uid, _ktx)   # UNT4: Regel des Unternehmens der ID (Standard + Abweichung)
+        regel = ap_regel_finden(an if reg_u is reg else [f for f in (reg_u.get("firmen") or []) if isinstance(f, dict) and f.get("an")], a.get("firm"))
+        param_u = param if reg_u is reg else fcp_param(reg_u)
         if not regel:
             continue                     # Firma aus: nur in plaene, nie geplant
         od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
@@ -44040,7 +44345,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if isinstance(jg.get("gewinntage"), dict) else None
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
-                              max_sl=a.get("max_risiko_trade"), param=param,      # E1b: Planer-Parameter aus der DB (fcp_param)
+                              max_sl=a.get("max_risiko_trade"), param=param_u,      # E1b: Planer-Parameter aus der DB (fcp_param)
                               tage=fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag) if payouts_ok else None,   # O1/E1e
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
@@ -44224,7 +44529,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         k = km.get(str(p.get("master_account_id"))) or {}
         # Größe, DD und Live-Balance für Boden/Rest im Reiter (S3, 30.10.2026)
         g_k = _wd_konto_groesse(k)
-        jg_k = fcp_je_groesse(ap_regel_finden(firmen, k.get("firm")), g_k) or {}
+        jg_k = fcp_je_groesse(ap_regel_finden((fd_unt_reg(reg, "cfd", k.get("user_id"), _ktx) or {}).get("firmen") or firmen, k.get("firm")), g_k) or {}   # UNT4
         bal_k = acc_balance_wahl(k, echo_bal, dup_bal)[0] if k else None
         erg["plaene"].append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or k.get("user_id") or ""), "konto_id": str(p.get("master_account_id")),
                               "groesse": g_k, "dd": _wd_num(jg_k.get("dd")), "balance": round(float(bal_k), 2) if bal_k else None,
@@ -44348,7 +44653,15 @@ def admin_funded_cfd_plan():
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
     erg = fcp_sicht(erg, sicht)
     erg["info"] = {k: _fcp_info.get(k) for k in ("letzter", "fehler")}
-    return jsonify(erg), (200 if erg.get("ok") else 503)
+    _us = fd_unt_sicht("cfd", _fcp_regeln_laden(), _admin, _uid)   # UNT4: Einstellungen des Unternehmens (Standard + Abweichung)
+    if _us:
+        _p = fcp_param(_us["eff"])
+        erg["firmen"] = fcp_firmen_anzeige([f for f in (_us["eff"].get("firmen") or []) if isinstance(f, dict)], _p)
+        if isinstance(erg.get("parameter"), dict):
+            erg["parameter"] = dict(erg["parameter"], wert=_p, db=_us["eff"].get("parameter") if isinstance(_us["eff"].get("parameter"), dict) else {})
+        erg.update(abweichung=_us["liste"], unternehmen={k: _us[k] for k in ("gruppe_id", "name", "spalte")}, gruppe_darf=_us["darf"])
+    erg["unternehmen_liste"] = fd_unt_auswahl(_admin)
+    return jsonify(json.loads(json.dumps(erg, default=str)) if _us else erg), (200 if erg.get("ok") else 503)
 
 
 def _fcp_eingriff(aktion):
@@ -44473,9 +44786,22 @@ def admin_funded_cfd_plan_regel():
     admin, uid, _lese, _schreib, err = _fcp_login()
     if err:
         return err
+    body = request.get_json(silent=True) or {}
+    if body.get("gruppe_id"):
+        # UNT4: Abweichung eines Unternehmens (Firmen-Werte + Parameter) — geprüft wie der Standard (fcp_regel_patch auf der wirksamen Regel)
+        if body.get("schalter") is not None or body.get("zeit") is not None:
+            return jsonify({"ok": False, "msg": "im Unternehmen sind nur Firmen-Werte und Parameter änderbar (Schalter und Zeiten gelten für alle)"}), 400
+        try:
+            reg_c = _fcp_regeln_laden()
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"Regeln nicht lesbar ({type(e).__name__})"}), 502
+        antw = _fd_unt_post("cfd", reg_c, admin, uid, body, fcp_regel_patch)
+        if (antw[0].get_json() or {}).get("ok"):
+            d = antw[0].get_json()
+            return jsonify({"ok": True, "abweichung": d["abweichung"], "geaendert": ["funded_regeln"]})
+        return antw
     if not admin:
         return jsonify({"ok": False, "msg": "Die Funded-CFD-Regeln gelten für alle Gruppen — nur Admin"}), 403
-    body = request.get_json(silent=True) or {}
     try:
         try:   # E1b: Spalte parameter (sql/2026-11-05_fcp_einstellungen_db.sql) — fehlt sie noch, ohne sie lesen (Patch meldet es dann)
             zeile = (sb_select("funded_cfd_plan_regeln", {"select": "id,aktiv,auto_bestaetigen,ziel_auto_wartet,zeiten,firmen,parameter,updated_at", "id": "eq.1"}) or [None])[0]
