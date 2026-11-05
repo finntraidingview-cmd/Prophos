@@ -85725,7 +85725,7 @@
       ${fcrWKopf('Planer & Hedge', 'alle Firmen · ' + (sel ? escapeHtml(sel.firma) : '–'), 'planer')}
       ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', '1 Trade je Konto und Tag', fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
       ${fcrWSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge ohne Klick')}
-      ${fcrWSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → Waiting', 'Konto am Ziel automatisch auf Waiting')}
+      ${''/* E1e (Finn 05.11.2026 ~08:30): kein Schalter „Ziel → Waiting" — Waiting setzt das Abhaken nach geprüften Ziel-Regeln; ziel_auto_wartet bleibt im Code aus */}
       ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
       <div class="fcr-e-felder fcr-w-zeiten">${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
       ${sel ? firmaTeil(sel) : ''}
