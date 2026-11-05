@@ -1097,7 +1097,8 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
 FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus", "deals"})
-FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
+FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl",
+                                   "nicht_scharf"})   # ES2/ES3: Copier nicht scharf = beweisbar nichts getippt, kein Bildschirm-Foto
 FEHLERFOTO_GLEICH_S = 600.0
 FEHLERFOTO_STUNDE = 12
 FEHLERFOTO_QUALITAET = 60   # nur noch das CDP-Tab-Foto (JPEG)
@@ -2907,6 +2908,106 @@ def _echo_tempo_lauf():
         except Exception:
             pass
     return werte
+
+
+# SCHARF-BEWEIS IM BOT (ES2/ES3-Zusatz, Finn 05.11.2026 „Orders sollen viel schneller prozessiert werden"): bisher schickte der Tab master-order erst,
+# wenn der Copier für diese Config status.armed === true meldete (echoScharfUrteil, Befund Slave 8 30.10.2026: zwei Echo-mit-Hedge-Master liefen
+# ohne Hedge). Das kostete ~9 s vor dem Bot (Tick- und Snapshot-Takt). Neu: schickt der Tab scharf_pflicht: true, prüft der Bot SELBST — nach
+# „Login/Lesen ok" und VOR „Terminal betreten"/F9 —, und der Tab darf master-order schon beim Terminal-Start schicken. Dieselbe Regel wie im Tab:
+# status_<cfg>.json running + armed === true, nicht älter als ECHO_SCHARF_FRISCH_S, und ein „laufend"-Fenster bei flachem Master zählt nicht (altes
+# Fenster, das der Plan-Ticker des Panels gleich beendet — Prüf-Agent 30.10.2026). Nicht scharf nach scharf_max_s → Abbruch „nicht_scharf",
+# beweisbar nichts gesendet (retry_ok), kein Fehlerfoto. Ohne scharf_pflicht (alter Tab, Echo V2) wie bisher — dann hat der Tab schon geprüft.
+ECHO_SCHARF_FRISCH_S = 15
+ECHO_SCHARF_MAX_S = (5.0, 60.0)      # erlaubte Spanne für scharf_max_s; Standard 30 s wie ECHO_SCHARF_MAX_MS im Tab
+ECHO_SCHARF_STANDARD_S = 30.0
+
+
+def echo_scharf_urteil(status, plans, datei, jetzt, immer_scharf=False):
+    """REIN RECHNEND (testbar): ist das Trade-Fenster dieser Config scharf? status = status_<cfg>.json (dict), plans = plans.json (Liste;
+    None = unlesbar), datei = Dateiname der Config, jetzt = datetime (lokal, wie updated_at), immer_scharf = cfg.immer_scharf (Copier wie
+    Orbit ohne Fenster). -> ('scharf' | 'warten', grund).
+    Gegenprüfung (05.11.2026): armed im Status hinkt plans.json bis ~1,5 s hinterher (Copier liest Pläne alle 0,5 s, schreibt den Status
+    ~1×/s) — darum muss plans.json SELBST jetzt ein offenes Fenster zeigen (Regel copier.plan_armed_files: „geplant“ ≤ 6 h ab armed_at,
+    „laufend“), „laufend“ nur mit Master-Position (sonst altes Fenster, Tab-Regel altLaufend); plans.json unlesbar → warten (der Copier
+    hedgt dann selbst nicht). Dazu wie im Tab (alive && !note): eine gesetzte note (kein/eingefrorener Snapshot) = warten, paused = warten."""
+    from datetime import datetime as _dt
+    st = status if isinstance(status, dict) else {}
+    if not st.get("running"):
+        return "warten", "Copier läuft nicht (status running fehlt)"
+    try:
+        alt = (jetzt - _dt.fromisoformat(str(st.get("updated_at") or ""))).total_seconds()
+    except (TypeError, ValueError):
+        alt = None
+    if alt is None or alt > ECHO_SCHARF_FRISCH_S or alt < -5:
+        return "warten", f"Copier-Status nicht frisch ({'ohne Zeit' if alt is None else f'{alt:.0f} s alt'})"
+    if st.get("note"):
+        return "warten", f"Copier meldet: {str(st.get('note'))[:80]}"
+    if st.get("paused"):
+        return "warten", "Echo ist pausiert"
+    if st.get("armed") is not True:
+        return "warten", f"kein offenes Trade-Fenster (armed {st.get('armed')!r})"
+    if immer_scharf:
+        return "scharf", ""
+    if not isinstance(plans, list):
+        return "warten", "plans.json nicht lesbar — der Copier hedgt ohne Fenster nicht"
+    flach = not (st.get("master_positions") if isinstance(st.get("master_positions"), list) else [])
+    offen = None
+    for p in plans:
+        if not isinstance(p, dict) or p.get("file") != datei:
+            continue
+        if p.get("status") == "laufend":
+            offen = offen or ("laufend_flach" if flach else "laufend")
+        elif p.get("status") == "geplant":
+            try:
+                if (jetzt - _dt.fromisoformat(str(p.get("armed_at") or ""))).total_seconds() <= 6 * 3600:
+                    offen = "geplant"
+            except (TypeError, ValueError):
+                pass
+    if offen in ("geplant", "laufend"):
+        return "scharf", ""
+    if offen == "laufend_flach":
+        return "warten", "altes Trade-Fenster („laufend“ bei flachem Master) — der Plan-Ticker beendet es gleich"
+    return "warten", "kein offenes Trade-Fenster in plans.json"
+
+
+def echo_scharf_max(cmd):
+    """REIN RECHNEND (testbar): scharf_max_s aus dem Befehl, gekappt auf ECHO_SCHARF_MAX_S; fehlt/unbrauchbar → ECHO_SCHARF_STANDARD_S."""
+    try:
+        v = float(cmd.get("scharf_max_s"))
+        if v == v:
+            return min(ECHO_SCHARF_MAX_S[1], max(ECHO_SCHARF_MAX_S[0], v))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return ECHO_SCHARF_STANDARD_S
+
+
+def _echo_scharf_abwarten(cfg_path, max_s, trail, immer_scharf=False):
+    """Copier-Status dieser Config lesen, bis scharf oder max_s um sind (_warte(0.5, 0.3)-Takt, gestreut). -> (True, '') | (False, grund).
+    Nur lesend: status_<cfg>.json (schreibt der Copier atomar) und plans.json (schreibt das Panel atomar) neben der Config."""
+    ordner, datei = os.path.dirname(os.path.abspath(cfg_path)), os.path.basename(cfg_path)
+    status_datei = os.path.join(ordner, re.sub(r"^config", "status", datei, count=1, flags=re.I))
+    t0, grund = time.time(), "nicht gelesen"
+    while True:
+        try:
+            with open(status_datei, "r", encoding="utf-8") as f:
+                st = json.load(f)
+        except Exception as e:
+            st, grund = None, f"Status-Datei nicht lesbar ({type(e).__name__})"
+        plans = None
+        try:
+            with open(os.path.join(ordner, "plans.json"), "r", encoding="utf-8") as f:
+                plans = json.load(f)
+        except Exception:
+            plans = None                      # unlesbar → warten (Gegenprüfung 05.11.2026)
+        if st is not None:
+            from datetime import datetime as _dt
+            urteil, grund = echo_scharf_urteil(st, plans, datei, _dt.now(), immer_scharf=immer_scharf)
+            if urteil == "scharf":
+                trail.append(f"Copier scharf nach {time.time() - t0:.1f} s".replace(".", ","))
+                return True, ""
+        if time.time() - t0 >= max_s:
+            return False, grund
+        _warte(0.5, 0.3)
 
 
 def klick_haltezeit(zufall=None, hand=None):
@@ -13318,6 +13419,17 @@ def run(cfg_path, cmd):
     if login_warm_pruefen(trail, trail.sekunden()):
         _terminal_warm_abwarten(path, trail)
 
+    # SCHARF-BEWEIS IM BOT (ES2/ES3-Zusatz, s. echo_scharf_urteil): nur Echo mit Hedge und nur, wenn der Tab ihn verlangt — VOR dem ersten Schritt,
+    # der das Terminal anfasst. Höchstens bis Lauf-Sekunde TERMINAL_SUCHE_BIS (danach braucht die Terminal-Suche ihr Budget unter dem 300-s-Deckel).
+    if cmd.get("scharf_pflicht") is True and not cmd.get("ohne_hedge"):
+        _sch_max = min(echo_scharf_max(cmd), max(0.0, TERMINAL_SUCHE_BIS - trail.sekunden()))
+        _sch_ok, _sch_grund = _echo_scharf_abwarten(cfg_path, _sch_max, trail, immer_scharf=bool(cfg.get("immer_scharf", False)))
+        if not _sch_ok:
+            return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
+                    "msg": (f"Copier nicht scharf — nach {_sch_max:.0f} s meldet Echo für diese Config kein offenes Trade-Fenster "
+                            f"({_sch_grund}). Nichts gesendet, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Copier-Log prüfen, "
+                            "dann „Weiter“ → „Starten“ erneut. [" + _spur(trail) + "]")}
+
     # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
     # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
     # beieinander. 0-1.2 s Wuerfel VOR dem ersten sichtbaren Schritt zieht die
@@ -13619,6 +13731,20 @@ def run(cfg_path, cmd):
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
                        f"Knoepfe: {', '.join(inventar) or 'keine'} [" + _spur(trail) + "]"}
+    # LETZTER BLICK VOR DEM UNUMKEHRBAREN KNOPF (Gegenprüfung ES3b 05.11.2026): zwischen dem Scharf-Beweis oben und hier liegen Terminal-Suche,
+    # F9 und Tippen (bis ~30 s) — ein „laufend“-Fenster mit Master-Position kann in der Zeit beendet werden. Ein Lesen ohne Warten; nicht scharf →
+    # Dialog per ESC zu, Abbruch nicht_scharf (der Knopf ist nicht gedrückt, nichts gesendet).
+    if cmd.get("scharf_pflicht") is True and not cmd.get("ohne_hedge"):
+        _sch_ok, _sch_grund = _echo_scharf_abwarten(cfg_path, 0.0, [], immer_scharf=bool(cfg.get("immer_scharf", False)))
+        if not _sch_ok:
+            try:
+                _el_tasten(dlg, "{ESC}", set_foreground=False)
+            except Exception:
+                pass
+            trail.append(f"vor dem {muster}-Knopf nicht mehr scharf: {_sch_grund}")
+            return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
+                    "msg": (f"Copier vor dem {muster}-Knopf nicht mehr scharf ({_sch_grund}) — Dialog geschlossen, nichts gesendet. [" + _spur(trail) + "]")}
+        trail.append(f"vor dem {muster}-Knopf noch scharf")
     try:
         _maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)   # Anfahrt auf einen gewürfelten Punkt (07.10.2026)
     except Exception:

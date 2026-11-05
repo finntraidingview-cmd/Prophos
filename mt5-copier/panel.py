@@ -6683,6 +6683,11 @@ class Handler(BaseHTTPRequestHandler):
             _fin = str(body.get("final") or "").strip().lower()
             cmd["final"] = _fin if _fin in (("pass", "blow", "beide", "gewinntag") if ohne_hedge else ("pass", "beide", "gewinntag")) else None
             cmd["final_grund"] = str(body.get("final_grund") or "").strip()[:160] if (ohne_hedge or cmd["final"]) else ""
+            # SCHARF-BEWEIS IM BOT (ES2/ES3-Zusatz 05.11.2026, order_bot echo_scharf_urteil): nur Echo mit Hedge; true nur ausdrücklich (bool),
+            # scharf_max_s kappt der Bot selbst (5–60 s). Ohne Feld (alter Tab) prüft wie bisher der Tab vor dem Senden.
+            if not ohne_hedge and body.get("scharf_pflicht") is True:
+                cmd["scharf_pflicht"] = True
+                cmd["scharf_max_s"] = body.get("scharf_max_s")
             # Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B, Auto-Planer ap_tagesgrenze): nur Echo V2, Zahl ≥ 0 oder None —
             # None = keine Prüfung; der Bot zieht den SL am echten Fill nach, wenn er die Grenze reißen würde
             try:
