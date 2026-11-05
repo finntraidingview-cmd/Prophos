@@ -67013,6 +67013,8 @@
     const d = await apdApi('POST', '/' + aktion, Object.assign(aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] }, sichtP), basis)
     const n = Number(d && d.n) || 0
     if(aus) aus.zeilen = Array.isArray(d && d.zeilen) ? d.zeilen : []   // wirklich geänderte Zeilen (Admin „Zu bestätigen" blendet sie sofort aus, 08.10.2026)
+    // HF1b (05.11.2026): wie viele Hedge-Freigaben das ✓ mitgesetzt hat (app.py _ap_eingriff hedge_frei) — null = Backend ohne das Feld
+    if(aus) aus.hedgeFrei = d && d.hedge_frei !== undefined && d.hedge_frei !== null ? (Number(d.hedge_frei) || 0) : null
     if(typeof atToast === 'function') atToast(n ? (aktion === 'bestaetigen' ? `✓ ${n} Auto-Plan${n === 1 ? '' : 'e'} bestätigt — startet zur Startzeit` : aktion === 'zurueck' ? '↶ Bestätigung zurückgenommen' : '🗑 Vorschlag gelöscht')
       : '⚠ Nichts geändert — schon bestätigt, gestartet oder nicht mehr geplant', n ? 'start' : 'end')
     return n
@@ -85831,6 +85833,13 @@
       if(typeof atToast === 'function') atToast('⇅ Nicht gedreht: ' + msg.slice(0, 160), 'end')
     }finally{ _apIds.riLaeuft.delete(id); apIdsRender(); apIdsLaden() }
   }
+  // HF1b (REIN, Test-Haken window._apHedgeFreiLokal): gilt ein bestätigter Hedge-Plan lokal als freigegeben? frei = hedge_frei der Antwort (null = altes
+  // Backend → wie bisher ja), nHedge = Hedge-Pläne im Klick. Nur wenn der Server für alle eine Freigabe gemeldet hat.
+  function apHedgeFreiLokal(frei, nHedge){
+    if(frei === null || frei === undefined) return true
+    return Number(nHedge) > 0 && Number(frei) >= Number(nHedge)
+  }
+  window._apHedgeFreiLokal = apHedgeFreiLokal
   async function apIdsOk(ids){
     const lauf = fdpLaeufer()   // Funded-Reiter (27.10.2026): Fortsetzung nach await im selben Daten-Stand wie der Klick
     ids = [...new Set((ids || []).map(String))].filter(id => !_apIds.okLaeuft.has(id)); if(!ids.length) return
@@ -85841,8 +85850,14 @@
       await tplEingriff('bestaetigen', ids, aus)
       // Antwort ok: alle angefragten raus — nicht geänderte sind schon bestätigt/gestartet/weg (Guard planned + unbestätigt), also auch nicht offen
       const jetzt = Date.now()
+      // HF1b (Finn 05.11.2026, Emin „✓ alle 4/2": Karten zeigten erst „bereit", nach dem Neuladen „⏳ wartet auf Hedge-Freigabe"): das ✓ gibt Hedges
+      // nur bei vollem Admin mit Sicht alle IDs mit frei, Emins Gruppe nie (app.py _ap_eingriff / _ap_hedge_mit_freigeben, MO1 „Emin bestätigt selbst").
+      // Lokal gilt ein Hedge-Plan darum nur als freigegeben, wenn der Server für ALLE Hedge-Pläne dieses Klicks eine Freigabe meldet; sonst „wartet"
+      // (bei einer Teilmenge lieber kurz zu vorsichtig — das nächste Laden bringt den genauen Stand). Backend ohne Feld (null) → wie bisher.
+      const nHedge = ids.filter(id => { const z = _apIds.offen.find(x => String(x.plan_id) === id); return !!(z && z.hedge_art) }).length
+      const hedgeFreiLokal = apHedgeFreiLokal(aus.hedgeFrei, nHedge)
       lauf(() => { for(const id of ids){ _apIds.okWeg.set(id, jetzt); _apIds.zurLokal.delete(id); try{ _tpl.okLokal.add(id) }catch(_){}
-        const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt }) } })   // sofort in „Wartet auf Start" (auch morgen)
+        const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt, frei: hedgeFreiLokal }) } })   // sofort in „Wartet auf Start" (auch morgen)
       const raus = () => { lauf(() => { _apIds.offen = _apIds.offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))); for(const id of ids) _apIds.okLaeuft.delete(id) }); apIdsRender() }
       // kurzes Ausblenden der Zeile(n), dann neu zeichnen (Zähler „Zu bestätigen · n", „n offen", „✓ alle n" zählen mit)
       const zeilen = ids.map(id => document.querySelector(`#ap-ids-root .pz-z[data-plan-id="${CSS.escape(id)}"]`)).filter(Boolean)
@@ -86045,8 +86060,9 @@
     for(const [id, e] of _apIds.warteLokal){
       // lokaler Merker: weg, sobald der Plan läuft, der Start 20 min vorbei ist oder (mit /ids bestaetigt[]) der Server ihn kennt bzw. nicht mehr kennt
       if(lIds.has(id) || Date.parse(e.z.start_um || '') < jetzt - 1200000 || (Array.isArray(_apIds.bestaetigt) && _apIds.bestaetigtT0 > e.at)){ _apIds.warteLokal.delete(id); continue }
-      // ✓ in „Zu bestätigen" gibt einen Hedge-Plan zugleich frei — lokal also nicht „wartet auf Hedge-Freigabe" zeigen (FINAL-ANZEIGE 30.10.2026)
-      if(!w.has(id)) w.set(id, { z: e.z && e.z.hedge_art ? Object.assign({}, e.z, { hedge_frei: true }) : e.z })
+      // ✓ in „Zu bestätigen" gibt einen Hedge-Plan zugleich frei — lokal also nicht „wartet auf Hedge-Freigabe" zeigen (FINAL-ANZEIGE 30.10.2026);
+      // seit HF1b nur, wenn die Antwort die Freigabe gemeldet hat (e.frei) — bei Emins Gruppe gibt das ✓ nichts frei, die Karte wartet dann sofort sichtbar
+      if(!w.has(id)) w.set(id, { z: e.z && e.z.hedge_art ? Object.assign({}, e.z, { hedge_frei: e.frei !== false || e.z.hedge_frei === true }) : e.z })
     }
     const sicht = e => (!u || String(e.z.user_id) === u) && apArtPasst(e.z)   // + Kontoart (PLANER-GLIEDERUNG)
     const warten = [...w.values()].filter(e => sicht(e) && !lIds.has(String(e.z.plan_id)) && !_apIds.zurLokal.has(String(e.z.plan_id)))
