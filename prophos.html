@@ -29389,14 +29389,22 @@
     return je
   }
   // Steht auf diesem PC gleich ein Start an (oder läuft einer)? Dann kein Terminal öffnen, nur frischen Snapshot lesen (Prüfer Slave 2)
+  /* CLAIM NUR FRISCH (TC1c, 05.11.2026, Finn zu Jacob FundedNext 100k …7924, Plan af4f8ee8: „der Account ist auch schon längst beendet, fix das, dass es nicht
+   * mehr kommt“): ein geclaimter, nie gestarteter Plan (start_um_gestartet_at ohne started_at) zählte hier FÜR IMMER als „Start steht an“ — live hingen am
+   * 05.11. bei 7 IDs solche Claims (Marco 6, Jacob 4, Mike 2 …, ältester 03:01 UTC). Damit übersprang echoLoginLesen/echoGeistAnstossen jede Login-Lesung, die
+   * Echo-Ende-Erkennung nach einem Tab-Neuladen wurde nie reif (Jacob: Master + Hedge 4 h frisch flach, Balance 98.266,71, Plan blieb offen) und ebnTick öffnete
+   * kein Terminal. Jetzt zählt ein Claim nur EBN_CLAIM_FRISCH_MS lang (ein echter Start ist bis dahin gelaufen bzw. die Lauf-Marken oben greifen). REIN. */
+  const EBN_CLAIM_FRISCH_MS = 15 * 60000
+  function ebnStartNahPlaene(plaene, jetzt){
+    return (plaene || []).some(p => p && p.status === 'planned' && (routeIstEcho(p.route) || routeIstOrbit(p.route) || p.route === 'tsv2')
+      && !(p.autoPlan === true && !p.autoBestaetigtAt)
+      && ((p.startUmGestartetAt && !p.startedAt && (() => { const c = Date.parse(p.startUmGestartetAt); return !isFinite(c) || jetzt - c < EBN_CLAIM_FRISCH_MS })())
+        || (p.startUm && (() => { const d = Date.parse(p.startUm) - jetzt; return d < 5 * 60000 && d > -15 * 60000 })())))
+  }
+  window._ebnStartNahPlaene = ebnStartNahPlaene   // Test-Haken
   function ebnStartNah(){
     try{ if(_tpOrbitLaeuft || _osActive || _suLaeuft || _pfV2Laeuft) return true }catch(_){ return true }
-    const jetzt = Date.now()
-    try{
-      return (tradePlans || []).some(p => p && p.status === 'planned' && (routeIstEcho(p.route) || routeIstOrbit(p.route) || p.route === 'tsv2')
-        && !(p.autoPlan === true && !p.autoBestaetigtAt)
-        && ((p.startUmGestartetAt && !p.startedAt) || (p.startUm && (() => { const d = Date.parse(p.startUm) - jetzt; return d < 5 * 60000 && d > -15 * 60000 })())))
-    }catch(_){ return true }
+    try{ return ebnStartNahPlaene(tradePlans, Date.now()) }catch(_){ return true }
   }
   const EBN_OEFFNEN_MAX = 2   // danach nur noch Snapshot lesen bis zur Frist (Prüfer Slave 2: Chris' PC meldete 7/10 Lese-EAs eingefroren)
   async function ebnMerken(p, bn){
@@ -56799,7 +56807,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2101'
+  const OS_TAB_BUILD = '2026-09-22.2102'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
