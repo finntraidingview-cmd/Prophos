@@ -91,6 +91,13 @@ def main():
     ok("name === 'fcfd' ? 'fcfd' : 'challenge'" in s, "Reiter fcfd schaltet die Quelle")
     ok("unten = fcfdUnterHtml(u)" in s and "Planer aus — Vorschläge kommen, sobald Finn ihn einschaltet" in s, "Funded CFD: Waiting · Firmen · Regeln unten, Leer-Hinweis")
     ok("apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })" in s, "Challenge zeichnet über denselben Helfer")
+    # UI1d (05.11.2026, Master + S2-Hinweis): Block „Planer · alle Firmen" — vor geladener Sicht nur Platzhalter, nie ein alter Knoten
+    j = s.index("  function apgAlleEinsetzen(){")
+    ein = s[j:s.index("\n  }\n", j)]
+    ok("if(!(typeof _e3 !== 'undefined' && _e3.d)) return '<div class=\"apg-alle-warte\" data-apg-alle-warte></div>'" in s,
+       "Sicht noch unbekannt → leerer Platzhalter statt HT-Block (kein Aufblitzen in der Gruppen-Sicht)")
+    ok("_apg.alleKnoten = null; _apg.alleKnopf = null" in ein and "|| _apg.alleKnoten" not in ein and "t.innerHTML = apgAlleHtml(v, _apg.alleX)" in ein
+       and "v = apdDaten() || {}" in ein, "Einsetzen nach e3Neu baut frisch aus dem aktuellen Stand (apdDaten), nie den abgehängten alten Knoten")
     for t in f:
         print("✗", t)
     print("OK" if not f else f"\n{len(f)} FEHLER")

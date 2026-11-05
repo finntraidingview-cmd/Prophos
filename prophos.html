@@ -85627,7 +85627,11 @@
    * S4-Stopp (05.11.2026): in der Gruppen-Sicht (Verwalter, D.gruppe_sicht — Unternehmen getrennt) gibt es den HT-Block nicht. */
   const apgGruppenSicht = () => { try{ return !!(_e3.d && _e3.d.gruppe_sicht) }catch(_){ return false } }
   function apgAlleHtml(v, x){
+    _apg.alleX = { lzAt: x && x.lzAt, admin: !!(x && x.admin) }   // für das frische Einsetzen nach e3Neu (apgAlleEinsetzen)
     if(apgGruppenSicht()) return ''
+    // Sauber (b), Master 05.11.2026: solange die Sicht nicht feststeht (_e3.d noch nicht geladen), nichts von HT zeichnen — sonst blitzte der HT-Block in der
+    // Gruppen-Sicht kurz über dem Zeitstrahl auf. Leerer Platzhalter; e3Neu setzt den Block danach ein (apgAlleEinsetzen baut ihn frisch).
+    if(!(typeof _e3 !== 'undefined' && _e3.d)) return '<div class="apg-alle-warte" data-apg-alle-warte></div>'
     const admin = apdAdmin(), sperr = k => (!admin || _apd.busy.has(k)) ? ' disabled' : ''
     const zeile = (k, an, titel, sub, tip) => `<label class="wd-abl-schalter" title="${escapeHtml(admin ? tip : 'nur Admin')}"><span><b>${escapeHtml(titel)}</b>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</span>`
       + `<input type="checkbox" class="e3-schalt" data-apd-schalter="${k}"${an ? ' checked' : ''}${sperr(k)} aria-label="${escapeHtml(titel)}"></label>`
@@ -85646,17 +85650,23 @@
   }
   // Umzug in die Einstellungs-Gruppe: Block in „Planer & Hedge" (data-e3-alle-platz), Knopf in den Kopf der Gruppe (data-e3-kopf-platz). Ohne Gruppe bleibt
   // der Block an seiner Stelle über dem Zeitstrahl. Nach jedem Neuzeichnen von #e3-einst (e3Neu) setzt er sich wieder ein. Gruppen-Sicht: Block weg.
+  // S2-Hinweis (05.11.2026): nie einen abgehängten alten Knoten wieder einsetzen — steht der Block nicht (mehr) in #ap-ids-root (e3Neu hat #e3-einst neu
+  // gezeichnet, oder er war beim Zeichnen nur Platzhalter), wird er frisch aus dem aktuellen Stand gebaut (apdDaten, _apIds, _tpl) — Schalter nie alt.
   function apgAlleEinsetzen(){
     const root = document.getElementById('ap-ids-root'), box = document.getElementById('e3-einst')
-    const blk = (root && root.querySelector('[data-apg-alle]')) || _apg.alleKnoten
-    if(apgGruppenSicht()){ if(blk && blk.parentNode) blk.remove(); _apg.alleKnoten = null; _apg.alleKnopf = null; return }
-    if(!blk || !box || !root || !root.contains(box)) return
+    _apg.alleKnoten = null; _apg.alleKnopf = null
+    if(apgGruppenSicht()){ root && root.querySelectorAll('[data-apg-alle], [data-apg-alle-warte]').forEach(b => b.remove()); return }
+    if(!box || !root || !root.contains(box)) return
     const platz = box.querySelector('[data-e3-alle-platz]'), kopf = box.querySelector('[data-e3-kopf-platz]')
     if(!platz) return
-    _apg.alleKnoten = blk
+    let blk = root.querySelector('[data-apg-alle]')
+    if(!blk && _apg.alleX){ let v = {}; try{ v = apdDaten() || {} }catch(_){}
+      const t = document.createElement('div'); t.innerHTML = apgAlleHtml(v, _apg.alleX); blk = t.querySelector('[data-apg-alle]') }
+    if(!blk) return
+    root.querySelectorAll('[data-apg-alle-warte]').forEach(b => b.remove())
     if(blk.parentNode !== platz) platz.replaceChildren(blk)
-    const quelle = blk.querySelector('[data-apg-alle-knopf-quelle]'), kn = (quelle && quelle.firstElementChild) || _apg.alleKnopf
-    if(kopf){ if(kn){ _apg.alleKnopf = kn; if(kn.parentNode !== kopf) kopf.replaceChildren(kn) } else kopf.replaceChildren() }
+    const quelle = blk.querySelector('[data-apg-alle-knopf-quelle]'), kn = quelle && quelle.firstElementChild
+    if(kopf){ if(kn){ if(kn.parentNode !== kopf) kopf.replaceChildren(kn) } else if(!kopf.querySelector('[data-apg-alle-knopf]')) kopf.replaceChildren() }
   }
   window._apgAlleEinsetzen = apgAlleEinsetzen
   /* P&L VON HEUTE (30.10.2026, Finn ~06:55 über den Master: „P&L von heute — wie gut/schlecht der Tag läuft"): dieselben Radar-Zeilen wie die
