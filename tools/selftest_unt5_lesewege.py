@@ -138,6 +138,23 @@ def teil_kundenzahlungen():
     check(ids(kz_lauf(NEU_SRC, A, daten_fehler=True)) == [A], "2c Gruppen nicht lesbar → nur die eigenen Zeilen des Logins")
 
 
+# ── 3) wd_konten_alle (SQL, nicht eingespielt) ──
+def teil_wd_konten_alle():
+    pfad = os.path.join(WURZEL, "sql", "2026-11-05_unt5_wd_konten_alle.sql")
+    rb = os.path.join(WURZEL, "sql", "2026-11-05_unt5_wd_konten_alle_rueckbau.sql")
+    if not os.path.exists(pfad):
+        return
+    neu, alt = open(pfad, encoding="utf-8").read(), open(rb, encoding="utf-8").read()
+    fn = lambda t: t[t.index("CREATE OR REPLACE FUNCTION"):t.index("$function$;", t.index("CREATE OR REPLACE FUNCTION"))]  # noqa: E731
+    import difflib, hashlib
+    dazu = [z[1:] for z in difflib.unified_diff(fn(alt).splitlines(), fn(neu).splitlines(), lineterm="", n=0) if z.startswith("+") and not z.startswith("+++")]
+    weg = [z for z in difflib.unified_diff(fn(alt).splitlines(), fn(neu).splitlines(), lineterm="", n=0) if z.startswith("-") and not z.startswith("---")]
+    check(not weg and len(dazu) == 4 and "a.user_id = auth.uid()" in dazu[1] and "prophos_gruppe_von(a.user_id) = public.prophos_gruppe_von(auth.uid())" in dazu[3],
+          "3a wd_konten_alle: einzige Änderung = Filter eigenes Unternehmen (ohne Unternehmen nur eigene), Rest zeichengleich")
+    check(hashlib.md5((fn(alt) + "$function$\n").encode()).hexdigest() == "62d4b9ecdb11a7a852cccf86f309e35d", "3b Rückbau = Live-Fassung vom 05.11. (md5)")
+    check("revoke execute on function public.wd_konten_alle() from anon;" in neu and "begin;" in neu and "commit;" in neu, "3c anon ohne EXECUTE, eine Transaktion")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")
