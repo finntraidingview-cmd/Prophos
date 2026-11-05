@@ -37431,7 +37431,7 @@
     // AB2: Abhak-Strahl für Challenge + Funded CFD (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person)
     _mwdErlAb2 = (AB2_TYPEN.includes(String(pw.konto_typ || '')) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
       name: [String((pw.konto || {}).firma || ''), (pw.konto || {}).groesse ? String(pw.konto.groesse) : '', (pw.konto || {}).kontonr_ende ? '…' + pw.konto.kontonr_ende : ''].filter(Boolean).join(' ') || 'Konto',
-      unter: pw.person ? String(pw.person) : '' } : null
+      unter: pw.person ? String(pw.person) : '', base: pw.mt5_baseline || null } : null   // base: AB2b Plan-Balance (ab2PlanBal)
     const k = pw.konto || {}
     const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = 'Trade erledigt'
     const info = document.getElementById('mwd-erl-info')
@@ -37638,7 +37638,7 @@
     // AB2 (Finn 05.11.2026): Abhak-Strahl sofort (Kopf + Trade-P&L), die Strahlen kommen mit dem Stand nach dem Buchen. Er zeigt „bestanden“ selbst —
     // dann ohne die Bestanden-Pille unten (geblowt hat keinen Strahl und behält sie)
     let ab2 = null
-    try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden' })) : null }catch(_){ ab2 = null }
+    try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, ab2PlanBal(pid, ab2Info.base), { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden' })) : null }catch(_){ ab2 = null }
     try{ abNach(); if(!ab2) abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
@@ -44649,6 +44649,24 @@
   const ab2Fr = v => Math.max(0, Math.min(1, Number(v) || 0)).toFixed(4)
   /* Sofort beim Klick: Karte mit Kopf (Konto, Art, Trade-P&L) und Fuß „wird gebucht …". info {konto_id, typ, name, unter, mpl, bestanden}.
    * → Griff {nr, el, info} oder null (Kontoart ohne Strahl → der Aufrufer zeigt seinen Toast wie bisher). */
+  /* BALANCE DIESES TRADES (AB2b, Nachkontrolle 05.11.2026): Stand vor/nach dem abgehakten Trade aus dem Plan selbst — Radar-Zeile (balance_start/_end aus
+   * /admin/live-trades, Orbit/Topstep wie Echo) bzw. mt5_baseline (tv.balance_start/final.balance_end, Echo master_balance/final.master_balance). Die Balance
+   * von /konto-ziele ist die Lesung JETZT: wird Stunden später abgehakt und hat das Konto inzwischen einen Folgetrade, stimmt „Balance − Trade-P&L" nicht
+   * (Fund BG …7770: Plan e8fa35d4 100.000 → 100.447,83, Konto danach 100.534,71 → Karte hätte „100.086,88 → 100.534,71" gezeigt). → {start, ende} | Teile null */
+  function ab2PlanBal(pid, base){
+    let s = null, e = null
+    try{
+      const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
+      if(t){ s = ab2Num(t.balance_start); e = ab2Num(t.balance_end) }
+    }catch(_){}
+    const b = (base && typeof base === 'object') ? base : null
+    if(b){
+      const f = (b.final && typeof b.final === 'object') ? b.final : {}, tv = (b.tv && typeof b.tv === 'object') ? b.tv : {}
+      if(e == null) e = ab2Num(f.balance_end) ?? ab2Num(f.master_balance)
+      if(s == null) s = ab2Num(tv.balance_start) ?? ab2Num(b.master_balance)
+    }
+    return { start: (s != null && s > 0) ? s : null, ende: (e != null && e > 0) ? e : null }
+  }
   function ab2Start(info){
     if(!info || !info.konto_id || !AB2_TYPEN.includes(String(info.typ || ''))) return null
     const nr = ++_ab2Nr
@@ -44697,14 +44715,15 @@
     const typ = String(d.typ || info.typ || ''), ab = d.abhak || null
     const kach = key => ((d.kacheln || []).find(x => x && x.key === key && !x.leer)) || null
     const mpl = ab2Num(info.mpl) ?? 0
-    const bal = ab2Num(ab && ab.bal) ?? ab2Num(d.balance && d.balance.wert)
+    // AB2b: Stand nach DIESEM Trade aus dem Plan (ab2PlanBal), nur ohne Plan-Lesung die Konto-Balance jetzt
+    const bal = ab2Num(info.ende) ?? ab2Num(ab && ab.bal) ?? ab2Num(d.balance && d.balance.wert)
     const start = ab2Num(d.groesse) ?? ab2Num(d.chart && d.chart.start)
     const ziel = ab2Num(ab && ab.ziel_bal) ?? ab2Num(d.chart && d.chart.ziel)
     const teile = []
     let i = 0
     // 1 · Profit Target: Kontogröße → Ziel, blass = Stand vor dem Trade, kräftig lädt sich auf den Stand danach
     if(bal != null && start != null && ziel != null && ziel > start){
-      const spanne = ziel - start, vor = bal - mpl
+      const spanne = ziel - start, vor = ab2Num(info.start) ?? (bal - mpl)   // AB2b: Plan-Start, sonst nach − Trade-P&L
       const zk = kach('ziel')
       const erreicht = !!info.bestanden || (ab ? !!ab.erreicht : !!(zk && zk.pill && zk.pill[0] === 'Erreicht')) || bal >= ziel - 0.005
       const rest = Math.max(0, ziel - bal)
@@ -44795,7 +44814,7 @@
     if(!(um && um.umgestellt)) throw new Error((um && (um.fehler || um.grund)) || 'Konto nicht umgestellt')
     return true
   }
-  window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen   // Stub-/Selbsttest-Haken
+  window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen; window._ab2PlanBal = ab2PlanBal   // Stub-/Selbsttest-Haken
   window._k1 = _k1   // Stub-/Selbsttest-Haken
 
   function renderAccountDetail(){
@@ -56396,7 +56415,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2087'
+  const OS_TAB_BUILD = '2026-09-22.2088'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -76694,7 +76713,8 @@
       // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand.
       if(masterAcc && AB2_TYPEN.includes(String(masterAcc.type || '')) && statusChoice === 'none' && !blown){
         try{
-          const h = ab2Start({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null })
+          const h = ab2Start(Object.assign({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null },
+                                           ab2PlanBal(p.id, p.mt5Baseline)))   // AB2b: Stand vor/nach diesem Trade aus dem Plan
           if(h) ab2Fertig(h, 'gespeichert', null)
         }catch(_){}
       }
