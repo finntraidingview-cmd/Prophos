@@ -87914,7 +87914,8 @@
     // KOPF WIE DIE FUNDED-CFD-GRUPPE (UI1, Finn 05.11.2026: „genau diese Gruppe soll auch zum Challenge-Planer kommen"): „Einstellungen" + Kurzzeile
     // Planer an/aus · Startfenster · n Firmen · Modell, rechts „Nachplanen" (UI1b-Platz data-e3-kopf-platz, nur ohne Gruppen-Sicht) — S6-Chips (${unt}) bleiben
     const zk = D.zeiten || {}, fk = Array.isArray(zk.fenster) && zk.fenster.length ? zk.fenster : null
-    const mods = art === 'cfd' ? ['Echo · mit Hedge'] : [...new Set(firmen.map(f => f.route === 'tsv2' ? 'Topstep V2' : (e3ModellWert(f, D) === 'orbit_prio2' ? 'Orbit Prio 2 · mit Hedge' : 'Orbit V2')))]
+    // Namen aus der zentralen Tabelle (MK1: ein Modell = ein Name, der Name sagt den Hedge schon)
+    const mods = art === 'cfd' ? [modellName('echo')] : [...new Set(firmen.map(f => f.route === 'tsv2' ? modellName('topstep_v2') : modellName(e3ModellWert(f, D) === 'orbit_prio2' ? 'orbit_prio2' : 'orbit_v2')))]
     const kurz = [`Planer ${(gs ? gs.aktiv : D.aktiv) ? 'an' : 'aus'}`, fk ? `${fk[0][0]}–${fk[fk.length - 1][1]} ${e3Tz(zk.fenster_tz)}` : '', `${firmen.length} Firmen`, ...mods].filter(Boolean)
     return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · ' + e3E(gs.name || '') + ' · Standard + eigene Änderungen' : admin ? '' : ' · nur ansehen'}</span><span class="e3-kurz">${kurz.map(e3E).join(' · ')}</span></div>${unt}${gs ? '' : '<span class="e3-kopf-platz" data-e3-kopf-platz></span>'}</div>
       <div class="wd-set-grid">${e3FirmenKarte(D, art, admin, firmen, w)}${e3ZielTradeKarte(D, art, admin, sel)}${e3PlanerHedgeKarte(D, art, admin, sel)}</div></div>`
