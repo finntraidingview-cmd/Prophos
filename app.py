@@ -42876,6 +42876,16 @@ FCP_ZEIT_FELDER = ("firma_abstand_min", "abstand_id_min", "vorlauf_min")
 FCP_GROESSE_FELDER = {"ziel": "bereich", "sl": "bereich", "sl_1pct": "bereich", "lots": "bereich", "hedge_eur": "zahl", "dd": "zahl",
                       "tp_erster": "zahl", "daily_loss": "zahl"}
 FCP_GROESSE_LEERBAR = ("sl_1pct", "tp_erster", "daily_loss")          # dürfen fehlen → Feld weg (Planer nimmt dann den Normalweg)
+# SA1 #6 (Prüfer-Hinweis O1/E1e, NK1 05.11.2026; Finn: „1 % gibt es nur bei FundedNext"): das Feld „SL 1-%-Regel" zeigt die UI nur bei FundedNext
+# (prophos.html einsFirma) — der Planer nimmt sl_1pct deshalb auch nur dort, und gesetzt werden kann es nur dort (Leeren überall).
+FCP_SL_1PCT_FIRMEN = ("fundednext",)
+
+
+def fcp_sl_1pct_firma(regel):
+    """REIN RECHNEND: gilt sl_1pct für diese Firmen-Regel? regel None (alte Aufrufe ohne Regel) → ja (wie bisher, kleinerer SL = sicher)."""
+    if regel is None:
+        return True
+    return str(((regel or {}).get("namen") or [""])[0]) in FCP_SL_1PCT_FIRMEN
 FCP_WERT_MAX = {"lots": 50.0}                                         # sonst 1.000.000
 
 
@@ -43028,6 +43038,8 @@ def fcp_regel_patch(zeile, body):
                 return None, f"{feld} darf nicht leer sein"
             jg.pop(feld, None)
             return {"firmen": firmen}, None
+        if feld == "sl_1pct" and not fcp_sl_1pct_firma(f):   # SA1 #6: nur wo das Feld sichtbar ist (FundedNext)
+            return None, "SL 1-%-Regel gibt es nur bei FundedNext"
         w = _fcp_bereich_ok(v, feld) if FCP_GROESSE_FELDER[feld] == "bereich" else _fcp_zahl_ok(v, feld)
         # alle Werte je Größe > 0 (Fremd-Review E1: Ziel 0 → jedes Konto sofort „Ziel erreicht" → mit ziel_auto_wartet auf Waiting for Payout)
         if w is None or not (w if not isinstance(w, list) else w[0]) > 0:
@@ -43631,7 +43643,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         if tp < float(P["tp_min_usd"]):
             tp, tp_art = float(P["tp_min_usd"]), "mindest"
     basis["tp_deckel"] = deckel
-    sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") else jg.get("sl")
+    # SA1 #6: sl_1pct nur bei Firmen mit sichtbarem Feld (FundedNext) — FTMO hatte live unsichtbare Werte; max_sl deckelt unten weiter jede Firma
+    sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") and fcp_sl_1pct_firma(regel) else jg.get("sl")
     sl = fcp_wuerfel(sl_b, rnd)
     ms = _wd_num(max_sl)
     if sl and ms and ms > 0 and sl > ms:

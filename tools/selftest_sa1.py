@@ -63,6 +63,35 @@ u, f = app.fcp_regel_patch(Z, {"firma": "FTMO", "feld": "on_demand.consistency_p
 ok(f is None and "on_demand" not in u["firmen"][1], "#5 FTMO: alten Override leeren bleibt erlaubt")
 ok(list(app.FCP_ON_DEMAND_STANDARD) == ["fundednext"], "#5 On Demand gibt es heute nur bei FundedNext (FCP_ON_DEMAND_STANDARD)")
 
+# ── #6 sl_1pct nur bei FundedNext (Planer + Patch), SQL leert FTMO ──
+JG = {"ziel": [5000, 5000], "sl": [1750, 1750], "sl_1pct": [700, 700], "lots": [10, 10], "hedge_eur": 1500, "dd": 10000}
+FN = {"name": "FundedNext", "namen": ["fundednext"], "je_groesse": {"100000": dict(JG)}}
+FT = {"name": "FTMO", "namen": ["ftmo"], "je_groesse": {"100000": dict(JG)}}
+
+
+def sl_von(regel, eins):
+    r = app.fcp_konto_rechnen(dict(JG), 100000.0, 100000.0, 2, eins, 1.0, 1.0, None, regel)
+    return r.get("sl")
+
+
+ok(sl_von(FN, True) == 700 and sl_von(FN, False) == 1750, f"#6 FundedNext: 1-%-Konto → sl_1pct, sonst SL ({sl_von(FN, True)}/{sl_von(FN, False)})")
+ok(sl_von(FT, True) == 1750, f"#6 FTMO: sl_1pct (unsichtbar) wird nie genommen ({sl_von(FT, True)})")
+ok(sl_von(None, True) == 700, "#6 ohne Regel (alte Aufrufe) wie bisher: kleinerer SL")
+r = app.fcp_konto_rechnen(dict(JG), 100000.0, 100000.0, 2, True, 1.0, 1.0, None, FT, max_sl=1000)
+ok(r.get("sl") == 1000, f"#6 FTMO mit max_risiko_trade: Deckel greift weiter ({r.get('sl')})")
+Z6 = {"id": 1, "firmen": [FN, FT]}
+u, f = app.fcp_regel_patch(Z6, {"firma": "FTMO", "groesse": 100000, "feld": "sl_1pct", "wert": [600, 700]})
+ok(u is None and "nur bei FundedNext" in str(f), f"#6 Patch: sl_1pct bei FTMO setzen → abgelehnt ({f})")
+u, f = app.fcp_regel_patch(Z6, {"firma": "FTMO", "groesse": 100000, "feld": "sl_1pct", "wert": None})
+ok(f is None and "sl_1pct" not in u["firmen"][1]["je_groesse"]["100000"], "#6 Patch: sl_1pct bei FTMO leeren erlaubt")
+u, f = app.fcp_regel_patch(Z6, {"firma": "FundedNext", "groesse": 100000, "feld": "sl_1pct", "wert": [650, 750]})
+ok(f is None and u["firmen"][0]["je_groesse"]["100000"]["sl_1pct"] == [650, 750], "#6 Patch: sl_1pct bei FundedNext setzbar")
+SQL6 = open(os.path.join(WURZEL, "sql", "2026-11-05_sa1_ftmo_sl_1pct_leeren.sql"), encoding="utf-8").read()
+ok("f->'namen'->>0 = 'ftmo'" in SQL6 and "g.value - 'sl_1pct'" in SQL6 and "NICHT EINGESPIELT" in SQL6 and "RÜCKBAU" in SQL6,
+   "#6 SQL: nur FTMO, nur sl_1pct, nicht eingespielt, mit Rückbau")
+ok("const einsFirma = String((f.namen || [])[0] || '') === 'fundednext'" in HTML and app.FCP_SL_1PCT_FIRMEN == ("fundednext",),
+   "#6 Planer-Firmen = sichtbares Feld in der UI (nur FundedNext)")
+
 if __name__ == "__main__":
     print("\n" + ("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER"))
     sys.exit(1 if FEHLER else 0)
