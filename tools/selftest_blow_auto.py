@@ -115,7 +115,11 @@ def main():
     check('_konto_archiv_eintragen(uid, aid, "blown"' in t and "push_an_user(" in t, "Archiv als blown + Push an Inhaber/Admins")
     check('_konto_archiv_eintragen(uid, aid, "blown" if blown else "passed_pending"' in src, "Erledigt-Route nutzt denselben Archiv-Helfer")
     # Feldliste geht seit 20.10.2026 (7ff78c06, Polar im Radar) nach blown weiter (slave_account_id …) → „orbit_v3,blown," reicht
-    check(re.search(r'orbit_v3,blown[,")]', src) is not None and '"blown": bool(p.get("blown"))})' in src, "Radar-Zeile trägt blown (Chip auch bei Echo)")
+    # RT1 (05.11.2026): seit 00d13be7 (Nova ohne SL/TP, 29.10.2026) folgen nach "blown" in der Radar-Zeile ohne_sltp/wieder_offen — „})" fällt weg;
+    # geprüft wird dasselbe Feld direkt unter seinem Radar-Kommentar
+    check(re.search(r'orbit_v3,blown[,")]', src) is not None
+          and re.search(r'# blown am Plan \(09\.10\.2026\): Echo-Zeilen haben keine Liq im Radar[^\n]*\n\s*"blown": bool\(p\.get\("blown"\)\)[,}]', src) is not None,
+          "Radar-Zeile trägt blown (Chip auch bei Echo)")
 
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1
