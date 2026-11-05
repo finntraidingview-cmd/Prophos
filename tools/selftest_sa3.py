@@ -61,14 +61,31 @@ def sb_all(t, params):
     if t == "transactions":
         if FEHL["tx"]:
             raise RuntimeError("weg")
-        return [{"account_id": "k1", "occurred_at": "2026-10-20T10:00:00+00:00"}, {"account_id": "k1", "occurred_at": "2026-11-03T08:00:00+00:00"}]
+        return [{"account_id": "k1", "occurred_at": "2026-10-20T10:00:00+00:00", "kind": "account_purchase", "notes": ""},
+                {"account_id": "k1", "occurred_at": "2026-11-03T08:00:00+00:00", "kind": "account_purchase", "notes": "Reset von LFE20251001000001 (auto)"},
+                {"account_id": "k1", "occurred_at": "2026-11-04T20:00:00+00:00", "kind": "account_purchase", "notes": "Add-on 1 % Rule"}]   # nach dem Reset: kein Reset
     return []
 
 
 app._sb_all = sb_all
 app.sb_select = lambda t, params: [{"id": "k1", "external_id": EXT}] if t == "accounts" else []
 app._liq_verlauf_cache.clear()
-ok([z["id"] for z in app._liq_verlauf_laden(["k1"])] == ["c"], "(b) Lader: jüngste Kaufbuchung + External ID → nur Zeilen nach dem Reset")
+ok([z["id"] for z in app._liq_verlauf_laden(["k1"])] == ["c"], "(b) Lader: Reset-Buchung (Notiz) + External ID → nur Zeilen nach dem Reset; späteres Add-on verschiebt nichts")
+# Master/S4 05.11.2026: ein Add-on-/Gebühren-Kauf auf derselben Zeile ist KEIN Reset → die alten Hochs bleiben (vorsichtig)
+NUR_ADDON = [{"account_id": "k1", "occurred_at": "2026-11-03T08:00:00+00:00", "kind": "account_purchase", "notes": "Add-on On Demand"},
+             {"account_id": "k1", "occurred_at": "2026-11-03T09:00:00+00:00", "kind": "account_purchase", "notes": None}]
+Z_GLEICH = [dict(z, master_name=f"50k {EXT} → Challenge") for z in Z]   # alle Trades unter derselben Nummer (kein ID-Wechsel)
+app._sb_all = lambda tb, params: NUR_ADDON if tb == "transactions" else ([dict(z) for z in Z_GLEICH] if tb == "trade_plans" else [])
+app._liq_verlauf_cache.clear()
+ok([z["id"] for z in app._liq_verlauf_laden(["k1"])] == ["a", "b", "c"], "(b) nur Add-on-/Gebühren-Käufe, gleiche External ID → kein Reset, alte Hochs bleiben")
+pk = app.liq_peak({"id": "neu", "master_account_id": "k1", "started_at": "2026-11-05T14:00:00+00:00"}, {"id": "k1", "account_type": "challenge"},
+                  50600, app._liq_verlauf_laden(["k1"]), eod=True)
+ok(pk == 52800, f"(b) Add-on auf derselben Zeile: EOD-Hoch bleibt 52.800 (vorsichtig) ({pk})")
+app._sb_all = sb_all
+app.sb_select = lambda tb, params: [{"id": "k1", "external_id": EXT}] if tb == "accounts" else []
+ok(app.liq_reset_buchung({"kind": "account_purchase", "notes": "Reset von TDFYSL150219964586 (auto)"}) and app.liq_reset_buchung({"notes": "reset"})
+   and not app.liq_reset_buchung({"kind": "account_purchase", "notes": "Add-on 1 % Rule"}) and not app.liq_reset_buchung({"notes": "Presetkauf"})
+   and not app.liq_reset_buchung({"kind": "payout", "notes": "Reset"}) and not app.liq_reset_buchung({}), "(b) liq_reset_buchung: nur „Reset“ als Wort in der Notiz eines Kaufs")
 ok("master_name" in str(app.__dict__.get("_liq_verlauf_laden").__code__.co_consts), "(b) Lader liest master_name mit")
 FEHL["tx"] = True
 app._liq_verlauf_cache.clear()

@@ -13390,8 +13390,9 @@ _liq_verlauf_cache = {}
 # ah_eod_beleg sichtbar. Routen direkt im Select (die Selbsttest-Lader ziehen die Funktion als Block, ohne Modul-Konstanten).
 def liq_verlauf_nach_reset(zeilen, reset_at=None, ext_id=None):
     """REIN RECHNEND (testbar, SA3 05.11.2026, Hinweis S6/MO1b: „Ein Lucid-Reset auf derselben Konto-Zeile behält alte EOD-Hochs, auch im Radar"):
-    nur Verlaufs-Zeilen NACH dem letzten Reset des Kontos. Reset = (1) reset_at: jüngste Kauf-/Reset-Buchung (transactions account_purchase) auf
-    dieser Konto-Zeile — Zeilen, die davor starteten (bzw. ohne Start davor endeten), zählen nicht; (2) neue External ID: der Plan-Name (master_name,
+    nur Verlaufs-Zeilen NACH dem letzten Reset des Kontos. Reset = (1) reset_at: jüngste AUSDRÜCKLICHE Reset-Buchung auf dieser Konto-Zeile
+    (transactions account_purchase mit „Reset" in der Notiz, wie /konto-reset-bestaetigen „Reset von <alte ID> (auto)" bucht — ein Add-on oder eine Gebühr
+    als Kauf ist KEIN Reset, Master/S4 05.11.2026) — Zeilen, die davor starteten (bzw. ohne Start davor endeten), zählen nicht; (2) neue External ID: der Plan-Name (master_name,
     Namensregel „<Größe> <External ID> → <Phase>") nennt ausdrücklich eine ANDERE Kontonummer derselben Form (Präfix der aktuellen ID + ≥ 6 Ziffern,
     z. B. Lucid LFE…/LFF…) und nicht die aktuelle. Ohne erkennbare Form (Topstep 150KTC-…, Namen ohne Nummer) bleibt die Zeile — im Zweifel zählt
     das alte Hoch (höherer Boden = vorsichtig). Live 05.11.2026 bitgleich: kein Plan vor der letzten Kaufbuchung seines Kontos."""
@@ -13412,8 +13413,18 @@ def liq_verlauf_nach_reset(zeilen, reset_at=None, ext_id=None):
     return out
 
 
+LIQ_RESET_NOTIZ = re.compile(r"(?<![A-Za-z])reset(?![A-Za-z])", re.I)   # ausdrücklich als Reset gebucht (Notiz), nie ein bloßer Kauf
+
+
+def liq_reset_buchung(t):
+    """REIN RECHNEND (testbar): ist diese Buchung ein ausdrücklicher Reset? Nur account_purchase mit „Reset" als Wort in der Notiz."""
+    t = t or {}
+    return str(t.get("kind") or "account_purchase") == "account_purchase" and bool(LIQ_RESET_NOTIZ.search(str(t.get("notes") or "")))
+
+
 def _liq_reset_infos(acc_ids):
-    """{konto_id: (reset_at | None, external_id | None)} für liq_verlauf_nach_reset — Lesefehler → {} (dann wie bisher: kein Filter)."""
+    """{konto_id: (reset_at | None, external_id | None)} für liq_verlauf_nach_reset — reset_at nur aus ausdrücklichen Reset-Buchungen (liq_reset_buchung);
+    im Zweifel keins (die alten Hochs bleiben, vorsichtig). Lesefehler → {} (dann wie bisher: kein Filter)."""
     ids = sorted({str(x) for x in acc_ids if x})
     out = {}
     try:
@@ -13421,7 +13432,9 @@ def _liq_reset_infos(acc_ids):
             teil = ",".join(ids[i:i + 80])
             for a in sb_select("accounts", {"select": "id,external_id", "id": f"in.({teil})"}) or []:
                 out[str(a.get("id"))] = [None, a.get("external_id")]
-            for t in _sb_all("transactions", {"select": "account_id,occurred_at", "kind": "eq.account_purchase", "account_id": f"in.({teil})"}) or []:
+            for t in _sb_all("transactions", {"select": "account_id,occurred_at,kind,notes", "kind": "eq.account_purchase", "account_id": f"in.({teil})"}) or []:
+                if not liq_reset_buchung(t):
+                    continue                        # Kauf/Add-on/Gebühr ohne Reset-Vermerk: kein Reset
                 k = str(t.get("account_id"))
                 e = out.setdefault(k, [None, None])
                 if t.get("occurred_at") and (e[0] is None or (_ap_ts(t["occurred_at"]) or datetime.min.replace(tzinfo=timezone.utc)) > (_ap_ts(e[0]) or datetime.min.replace(tzinfo=timezone.utc))):
