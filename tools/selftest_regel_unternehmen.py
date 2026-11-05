@@ -210,7 +210,7 @@ print("7) Prüfer S2 zu UNT1: Stempel regeln_at, Nachplanen fail-safe")
 check(app.ap_unt_stempel({"regeln_at": None}, "T") == ({"regeln_at": "is.null"}, {"regeln_at": "T"}) and app.ap_unt_stempel({"regeln_at": "A"}, "T")[0] == {"regeln_at": "eq.A"}
       and app.ap_unt_stempel({"updated_at": "X"}, "T") == ({}, {}), "Guard + Stempel über regeln_at; Spalte fehlt → kein Guard (updated_at setzt jeder Lauf)")
 _np = src[src.index("\ndef ap_gruppen_nachplan_tick("):src.index("\ndef ", src.index("\ndef ap_gruppen_nachplan_tick(") + 10)]
-check('sb_select("auto_plan_gruppe", {"select": "*"})' in _np and 'z.get("regeln_at")' in _np and "zeilen_g = {}" in _np,
+check('sb_select("auto_plan_gruppe", {"select": "*"})' in _np and 'ap_gruppe_regel_bezug(reg.get("updated_at"), z,' in _np and "zeilen_g = {}" in _np,   # NP1: regeln_at über ap_gruppe_regel_bezug
       "Gruppen-Nachplanen: select * (ohne Spalte regeln kein 400), Lesefehler → Standard statt Abbruch, „Regel geändert\" = regeln_at")
 check("Firmen an · anklicken" in html and "'Konto' : 'Konten'} im Planer" in html, "Kopf „n von m Firmen an“, Zeilen „n Konten im Planer“ (Finn-Foto Emin)")
 

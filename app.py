@@ -36292,6 +36292,7 @@ def admin_gruppen_plan():
                     return jsonify({"ok": False, "msg": grund}), 400
                 _j = datetime.now(timezone.utc).isoformat()
                 sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gid}"}, dict({"firmen_modell": fm, "updated_at": _j}, **ap_unt_stempel(zeile, _j)[1]))   # Modell = Teil der Regel
+                ap_gruppe_regel_geaendert(gid, _j)   # NP1: Gruppen-Nachplanen rechnet „keine Regel"-Konten neu
                 print(f"[gruppen-plan] {gid[:8]} Modell {body.get('firma')} → {body.get('modell')} ({'Admin' if admin else 'uid ' + str(uid)[:8]})", flush=True)
                 return jsonify({"ok": True, "gruppe_id": gid, "firmen_modell": fm})
             if aktion not in ("planen", "probe"):
@@ -37532,6 +37533,7 @@ def admin_auto_plan_kernwert():
             return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
         if not rows:
             return jsonify({"ok": False, "msg": "inzwischen geändert — Einstellungen neu laden und noch einmal speichern"}), 409
+        ap_gruppe_regel_geaendert(gid, jetzt_iso)   # NP1
         print(f"[einstellungen] Unternehmen {gid[:8]} {body.get('firma')}: {len(body.get('aenderungen') or [])} geändert, "
               f"{len(body.get('standard') or [])} auf Standard ({uid})", flush=True)
         # UNT3 Fremd-Review: Max DD/Daily je Unternehmen ändern die Kernwerte, nicht die Konten — accounts.max_drawdown bleibt (Radar-Boden, und
@@ -38471,6 +38473,7 @@ def admin_auto_plan_ablaufwert():
             return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
         if not rows:
             return jsonify({"ok": False, "msg": "inzwischen geändert — Einstellungen neu laden und noch einmal speichern"}), 409
+        ap_gruppe_regel_geaendert(gid, jetzt_iso)   # NP1
         print(f"[einstellungen] Unternehmen {gid[:8]} Startfenster {'auf Standard' if body.get('standard') is True else 'geändert'} ({uid})", flush=True)
         return jsonify({"ok": True, "zeiten": z_neu, "abweichung": ap_unt_abweichung_liste(abw, zeile.get("firmen_modell"))})
     admin, uid, reg, err = _ap_zugang()
@@ -39033,6 +39036,25 @@ def ap_nachplan_tick(jetzt, zustand):
 # nächsten Nachtlauf keinen Plan. Jetzt derselbe Takt je aktiver Gruppe, im selben Rhythmus wie HT (auch beim Wecker). Nur Vorschläge: kein
 # _ap_auto_best-Anstoß, und ap_planen bestätigt für Gruppen nie. Merker außerhalb von _ap_info — das geht per GET an jeden PC-Tab hinaus.
 _ap_gruppen_nachplan = {"takt": None, "fehler": "", "je": {}}
+# NP1 (05.11.2026, Emins FNF …6243 / Lucid …0002 „keine Regel für diese Firma“ blieben nach der Modell-Änderung bis morgen draußen): eine Änderung an der
+# Regel EINES Unternehmens (Modell/Firma an-aus, Firmenwerte, Startfenster) gilt im Gruppen-Nachplanen als „Regel geändert“ — wie auto_plan_regeln.updated_at
+# für HT. Quelle: Spalte regeln_at (UNT1, fehlt live noch) und dieser Prozess-Merker, den die Schreibwege setzen (fail-safe ohne Spalte; nach einem
+# Neustart nur die Spalte). updated_at der Gruppen-Zeile taugt nicht: den setzt jeder Planer-Lauf.
+_ap_gruppe_regel_at = {}
+
+
+def ap_gruppe_regel_geaendert(gid, at_iso):
+    """Merkt den Zeitpunkt einer Regel-Änderung des Unternehmens gid (nur der jüngste je Gruppe)."""
+    alt = _ap_gruppe_regel_at.get(str(gid))
+    if not alt or (_ap_ts(at_iso) or datetime.min.replace(tzinfo=timezone.utc)) > (_ap_ts(alt) or datetime.min.replace(tzinfo=timezone.utc)):
+        _ap_gruppe_regel_at[str(gid)] = at_iso
+
+
+def ap_gruppe_regel_bezug(reg_at, zeile, merk_at):
+    """REIN RECHNEND (testbar): „Regel geändert"-Bezug des Gruppen-Nachplanens = jüngster von auto_plan_regeln.updated_at, auto_plan_gruppe.regeln_at
+    (falls die Spalte da ist) und dem Prozess-Merker. Nicht lesbare Werte fallen weg; ohne Gruppen-Änderung = reg_at (bitgleich wie bisher)."""
+    werte = [w for w in (reg_at, (zeile or {}).get("regeln_at"), merk_at) if w and _ap_ts(w) is not None]
+    return max(werte, key=lambda w: _ap_ts(w)) if werte else reg_at
 
 
 def ap_gruppen_nachplan_tick(jetzt, zustand):
@@ -39060,10 +39082,11 @@ def ap_gruppen_nachplan_tick(jetzt, zustand):
     def _reg_g(gid):
         z = zeilen_g.get(str(gid)) or {}
         abw = z.get("regeln") if isinstance(z.get("regeln"), dict) else {}
+        # „Regel geändert" = eigener Stempel regeln_at (nicht updated_at — den setzt jeder Planer-Lauf); NP1: auch ohne Abweichung (Modell/Firma an-aus
+        # steht in firmen_modell) und mit dem Prozess-Merker der Schreibwege, solange die Spalte regeln_at live fehlt
+        ua = ap_gruppe_regel_bezug(reg.get("updated_at"), z, _ap_gruppe_regel_at.get(str(gid)))
         if not abw:
-            return reg
-        # „Regel geändert" = eigener Stempel regeln_at (nicht updated_at — den setzt jeder Planer-Lauf)
-        ua = max(str(reg.get("updated_at") or ""), str(z.get("regeln_at") or "")) or None
+            return dict(reg, updated_at=ua)
         return dict(reg, zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw), updated_at=ua)
     gruppen = [gr for gr in ap_planer_gruppen(nur_aktiv=True) if ap_nachplan_fenster(d, _reg_g(gr["gruppe_id"]).get("zeiten"))]
     if not gruppen:
