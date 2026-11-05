@@ -13050,6 +13050,9 @@ LIQ_VERLAUF_CACHE_S = 60
 _liq_verlauf_cache = {}
 
 
+# PB1 (S2/Master 05.11.2026, Emins FNF Futures 50k …3807: +1.000 $ am 04.11. über Duplikum, Verlauf leer → Boden 48.500 statt 49.498): der Verlauf liest
+# auch tvplus (Duplikum, Futures über TradingView). Zeilen ohne Balance-Beleg zählen in keinem Höchststand, machen aber den beendeten Trade für
+# ah_eod_beleg sichtbar. Routen direkt im Select (die Selbsttest-Lader ziehen die Funktion als Block, ohne Modul-Konstanten).
 def _liq_verlauf_laden(acc_ids, streng=False):
     """Belegte Balances (tv.balance_start, final.balance_end) aller Orbit-/Topstep-V2-Pläne der Konten, ohne Zeitgrenze (der Höchststand
     kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance).
@@ -13065,10 +13068,10 @@ def _liq_verlauf_laden(acc_ids, streng=False):
     try:
         for i in range(0, len(fehlt), 80):
             teil = fehlt[i:i + 80]
-            zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,started_at,ended_at,"
+            zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,status,route,started_at,ended_at,"
                                                        "bal_end:mt5_baseline->final->balance_end,bal_start:mt5_baseline->tv->balance_start,"
                                                        "mll_start:mt5_baseline->tv->mll_start",   # MLL-Lesung je Start (15.10.2026, ap_kette_mll_belegt)
-                                             "master_account_id": f"in.({','.join(teil)})", "route": "in.(tvv2,tsv2)"})
+                                             "master_account_id": f"in.({','.join(teil)})", "route": "in.(tvv2,tsv2,tvplus)"})   # PB1: + tvplus (Duplikum)
             je = {a: [] for a in teil}
             for z in zeilen or []:
                 je.setdefault(str(z.get("master_account_id")), []).append(z)
@@ -30721,6 +30724,46 @@ def ah_eod_polster(bal, polster, boden):
     return p if p > 0 else None
 
 
+def ah_eod_beleg(a, verlauf, jetzt_iso=None):
+    """REIN RECHNEND (testbar, PB1 05.11.2026): (Tagesschluss aus der Lesung | None, Fehlgrund | None) für den Boden am EOD-Hoch.
+    LESUNG ALS TAGESSCHLUSS: accounts.tv_balance zählt als Schluss eines abgeschlossenen Handelstags, wenn sie NACH dem Ende jedes beendeten Trades
+    dieser Phase gelesen wurde und heute (CME-Tag) noch kein Trade beendet wurde — dann hat sich die Balance seit dem letzten Schluss nicht bewegt
+    (…3807: 50.998,12 am 04.11. 23:27 UTC nach dem Duplikum-Trade). Ein heute beendeter Trade macht sie zum Intraday-Stand → zählt nicht.
+    BELEG-PFLICHT (fail-closed): jeder frühere Handelstag mit beendetem Trade braucht einen Schluss-Beleg — final.balance_end des letzten Trades
+    dieses Tages, tv.balance_start des nächsten Trades danach oder (letzter Tag) die gültige Lesung. Fehlt er, ist das EOD-Hoch unbekannt → Grund."""
+    k = a or {}
+    aid, typ = str(k.get("id") or ""), str(k.get("account_type") or "").lower()
+    heute = _cme_handelstag(jetzt_iso)
+    z = [f for f in verlauf or () if str(f.get("master_account_id") or "") == aid and f.get("ended_at")
+         and (not f.get("konto_typ") or str(f.get("konto_typ")).lower() == typ) and str(f.get("status") or "completed") in ("completed", "review")]
+    z.sort(key=lambda f: str(f.get("ended_at")))
+    letzt_ende = str(z[-1]["ended_at"]) if z else ""
+    lb, lat = _wd_num(k.get("tv_balance")), str(k.get("tv_balance_at") or "")
+    heute_beendet = any(_cme_handelstag(f["ended_at"]) == heute for f in z)
+    lesung = lb if (lb and lb > 0 and lat and (not letzt_ende or ap_balance_live(lat, letzt_ende)) and not heute_beendet) else None
+    tage = {}
+    for f in z:
+        d = _cme_handelstag(f["ended_at"])
+        if d and heute and d < heute:
+            tage[d] = f                                    # sortiert → der letzte beendete Trade des Tages
+    starts = sorted([f for f in verlauf or () if str(f.get("master_account_id") or "") == aid and f.get("started_at")
+                     and (not f.get("konto_typ") or str(f.get("konto_typ")).lower() == typ)], key=lambda f: str(f.get("started_at")))
+    for d in sorted(tage):
+        f = tage[d]
+        if _wd_num(f.get("bal_end")) is not None:
+            continue
+        nach = next((g for g in starts if str(g.get("started_at")) > str(f["ended_at"])), None)
+        if nach is not None and _wd_num(nach.get("bal_start")) is not None:
+            continue
+        if lesung is not None and str(f["ended_at"]) == letzt_ende:
+            continue
+        return None, (f"Balance-Beleg fehlt für den Trade vom {d} ({f.get('route') or '?'}) — EOD-Hoch unbekannt, kein Hedge (Balance lesen)")
+    return lesung, None
+
+
+_ah_beleg_gemeldet = {}   # plan_id → Grund (PB1: Alarm einmal je Plan und Grund)
+
+
 def _ah_boden_eod(a, firmen):
     """Konto-Boden am EOD-Hoch wie Radar/Live-Trades (liq_regel_waehlen + liq_boden_kernwerte + liq_konto_boden mit liq_peak eod) → (boden, None) |
     (None, Grund). Höchststand nur aus ABGESCHLOSSENEN Handelstagen (heutiger Intraday-Stand zählt nie). FAIL-CLOSED (Fremd-Review MO1b): ist der
@@ -30741,7 +30784,14 @@ def _ah_boden_eod(a, firmen):
         if dd_k and abs(float(dd_a) - float(dd_k)) > 0.5:
             return None, f"Max DD am Konto {_ap_de(float(dd_a), 0)} $ ≠ Kernwerte {_ap_de(float(dd_k), 0)} $ — Konto prüfen"
         verlauf = _liq_verlauf_laden([a.get("id")], streng=True)
-        pk = liq_peak({"started_at": _wt_now_iso(), "master_account_id": a.get("id")}, a, None, verlauf, eod=True)
+        jetzt_iso = _wt_now_iso()
+        pk = liq_peak({"started_at": jetzt_iso, "master_account_id": a.get("id")}, a, None, verlauf, eod=True)
+        # PB1: Tagesschluss aus der bestätigten Lesung (kein Trade heute beendet) zählt mit; fehlt einem früheren Trade der Beleg → kein Hedge
+        lesung, beleg_fehlt = ah_eod_beleg(a, verlauf, jetzt_iso)
+        if beleg_fehlt:
+            return None, beleg_fehlt
+        if lesung is not None:
+            pk = max(pk or 0.0, float(lesung))
         boden = liq_konto_boden(b_regel, b_acc, b_gr, pk, None)[0]
         if boden is None:
             return None, "Konto-Boden nicht rechenbar"
@@ -30867,6 +30917,12 @@ def ah_tick(jetzt=None, force=False):
         if (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("boden") == "nachziehend":
             _b_eod, _b_grund = _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), firmen)
             if _b_grund:                                   # fail-closed (Fremd-Review MO1b): kein stiller Rückfall auf Balance − DD
+                if _b_grund.startswith("Balance-Beleg fehlt") and _ah_beleg_gemeldet.get(str(p.get("id"))) != _b_grund:
+                    _ah_beleg_gemeldet[str(p.get("id"))] = _b_grund   # PB1: Plan bleibt ohne Hedge-Freigabe gehalten, einmal melden
+                    try:
+                        push_an_user(uid, f"Hedge gehalten: {a.get('name') or 'Konto'}", _b_grund, tag=f"ah-beleg-{str(p.get('id'))[:8]}")
+                    except Exception as e:
+                        _ah_spur(f"⚠️ Alarm Beleg {str(p.get('id'))[:8]}: {type(e).__name__}")
                 return None, None, None, bal, None, ("boden", _b_grund)
             pol_eod = ah_eod_polster(bal, polster, _b_eod)
             if pol_eod is None:
