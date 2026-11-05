@@ -1,18 +1,21 @@
+-- ÜBERHOLT — NIE EINSPIELEN (05.11.2026 ~21:37 Dubai): Finns Foto der Lucid-Seite „150K FLEX EVAL“ zeigt Max Loss Limit $4.500 (EOD),
+-- Daily Loss $2.700, Consistency 40 %. Max DD bleibt 4.500. Gemeint war: das Liq-/„Konto weg“-Level muss am Daily 2.700 liegen.
+-- Der Inhalt unten ist auskommentiert.
 -- LUCID 150k MAX DRAWDOWN 4.000 (Finn 05.11.2026 ~21:35 Dubai: „Der Max Drawdown ist 4k, aber wir haben hier ein Daily von 2,7k“).
 -- Vorher dd_usd 4500 im Planer (regeln.firmen[lucid] + phasen.challenge) und accounts.max_drawdown 4500 bei 19 Lucid-150k-Challenges.
 -- Daily Loss 2.700 bleibt (daily_usd). Nur Challenges; Funded/WD-Lucid-150k (je 1) unverändert bis Finn bestätigt.
 -- Rückbau: dieselben Felder auf 4500.
 
-update public.auto_plan_regeln r
-   set regeln = jsonb_set(r.regeln, '{firmen}', (
-         select jsonb_agg(
-                  case when f->'namen' ? 'lucid' or f->'namen' ? 'lucidtrading' then
-                    jsonb_set(jsonb_set(f, '{dd_usd}', '4000'::jsonb), '{phasen,challenge,dd_usd}', '4000'::jsonb)
-                  else f end order by ord)
-           from jsonb_array_elements(r.regeln->'firmen') with ordinality as t(f, ord))),
-       updated_at = now()
- where r.id = 1;
+-- update public.auto_plan_regeln r
+--    set regeln = jsonb_set(r.regeln, '{firmen}', (
+--          select jsonb_agg(
+--                   case when f->'namen' ? 'lucid' or f->'namen' ? 'lucidtrading' then
+--                     jsonb_set(jsonb_set(f, '{dd_usd}', '4000'::jsonb), '{phasen,challenge,dd_usd}', '4000'::jsonb)
+--                   else f end order by ord)
+--            from jsonb_array_elements(r.regeln->'firmen') with ordinality as t(f, ord))),
+--        updated_at = now()
+--  where r.id = 1;
 
-update public.accounts
-   set max_drawdown = 4000
- where firm ilike '%lucid%' and name ilike '150k%' and account_type = 'challenge' and max_drawdown = 4500;
+-- update public.accounts
+--    set max_drawdown = 4000
+--  where firm ilike '%lucid%' and name ilike '150k%' and account_type = 'challenge' and max_drawdown = 4500;
