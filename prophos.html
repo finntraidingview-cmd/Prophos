@@ -85379,20 +85379,21 @@
       const { gl, grSel, x, r } = grWahl(f), pct = fcrConsPct(f), alleGr = gl.length > 1 ? 'gilt für alle Größen' : ''
       const fz = { firma: f.firma }, gz = x ? Object.assign({ groesse: String(x.groesse) }, fz) : null
       const stufen = Array.isArray(f.tp_zyklen_eff) && f.tp_zyklen_eff.length ? f.tp_zyklen_eff : null
-      const pStd = ((D.parameter || {}).wert || {}), deckelStd = pStd.tp_deckel_plus_standard ?? null
+      // TP-Deckel nur, wo die Firma einen eigenen hat (Master 05.11.2026 nach Finns Feldliste) — der Code-Standard bleibt still im Hintergrund
+      const deckelEigen = f.tp_deckel_plus != null
       // TP 1. Zyklus wirkt nur ohne Refund-Trade und ohne Gewinntage (fcp_konto_rechnen: die Zweige davor gewinnen) — sonst nicht als Feld zeigen
       const tpErsterWirkt = !f.erster_payout_eff && !gl.some(y => (y.roh || {}).gewinntage)
       const pills = gl.length > 1 ? `<div class="fcr-e-tabs fcr-w-pills" role="tablist">${gl.map(y => `<button type="button" role="tab" data-fcr-gr="${escapeHtml(String(y.groesse))}"${String(y.groesse) === grSel ? ' class="on" aria-selected="true"' : ''}>${escapeHtml(fcfdGroesse(y.groesse))}</button>`).join('')}</div>` : ''
       if(!x) return `${pills}<div class="fcr-leer">keine Größe hinterlegt</div>`
       if(!ad) return `${pills}${fcrZeile('Ziel bis Waiting', '+' + fcrSpanne(r.ziel, '$'))}${fcrZeile('Consistency', pct ? `${fcrZahl(pct)} % je Zyklus${alleGr ? ' · alle Größen' : ''}` : 'aus')}
-        ${pct ? fcrZeile('TP', 'Rest bis Ziel gleich verteilt') : `${stufen ? fcrZeile('TP-Stufen je Zyklus', stufen.map(fcrZahl).join(' · ') + ' $') : fcrZeile('TP-Deckel', `Ziel bis + ${fcrZahl(f.tp_deckel_plus_eff ?? deckelStd ?? 0)} $`)}
+        ${pct ? fcrZeile('TP', 'Rest bis Ziel gleich verteilt') : `${stufen ? fcrZeile('TP-Stufen je Zyklus', stufen.map(fcrZahl).join(' · ') + ' $') : deckelEigen ? fcrZeile('TP-Deckel', `Ziel bis + ${fcrZahl(f.tp_deckel_plus)} $`) : ''}
           ${tpErsterWirkt ? fcrZeile('TP 1. Zyklus', r.tp_erster != null ? fcrZahl(r.tp_erster) + ' $' : 'normal') : ''}`}
         ${fcrZeile('Lots', fcrSpanne(r.lots))}${fcrZeile('Stop-Loss', fcrSpanne(r.sl, '$'))}${fcrZeile('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL')}
         ${fcrZeile('Hedge', r.hedge_eur != null ? `${fcrZahl(r.hedge_eur)} € auf ${fcrZahl(r.dd)} $ DD` : '–')}`
       const tpTeil = pct ? `<div class="fcr-e-hinweis fcr-w-leise">TP = Rest bis zum Ziel gleichmäßig, je Trade höchstens ${fcrZahl(pct)} % des Endziels</div>`
         : `<div class="fcr-e-felder">${stufen
             ? `<div class="fcr-e-feld breit"><label>TP-Stufen je Zyklus <small>· $, mit · getrennt${alleGr ? ' · alle Größen' : ''}</small></label><input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(stufen.map(fcrZahl).join(' · '))}" placeholder="750 · 1.500" data-fcr-in="${escapeHtml(JSON.stringify({ firma: f.firma, feld: 'tp_zyklen', liste: true }))}" title="TP je Payout-Zyklus: 1. Wert im 1. Zyklus usw."></div>`
-            : fcrFeld('TP-Deckel', f.tp_deckel_plus ?? null, Object.assign({ feld: 'tp_deckel_plus' }, fz), { einheit: '$ über Ziel bis' + (alleGr ? ' · alle Größen' : ''), leer: deckelStd != null ? fcrZahl(deckelStd) : 'Standard', titel: 'TP höchstens Ziel-bis + dieser Betrag; leer = Standard der TP-Regeln' })}
+            : deckelEigen ? fcrFeld('TP-Deckel', f.tp_deckel_plus, Object.assign({ feld: 'tp_deckel_plus' }, fz), { einheit: '$ über Ziel bis' + (alleGr ? ' · alle Größen' : ''), leer: 'Standard', titel: 'TP höchstens Ziel-bis + dieser Betrag; leer = Standard' }) : ''}
           ${tpErsterWirkt ? fcrFeld('TP 1. Zyklus', r.tp_erster ?? null, Object.assign({ feld: 'tp_erster' }, gz), { einheit: '$', leer: 'normal', titel: 'fester TP im ersten Payout-Zyklus; leer = normal (Rest bis Ziel, gedeckelt)' }) : ''}</div>`
       return `${pills}
         ${fcrWAbschnitt('Ziel')}<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$' })}
@@ -85418,13 +85419,6 @@
     const fensterFeld = (t, n, label) => ad
       ? `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-spanne fcr-w-eins"><input class="fcr-e-in" type="text" inputmode="numeric" value="${escapeHtml(fenEigen && z.fenster ? String(z.fenster[t] || '') : '')}" placeholder="${escapeHtml(fenCh[n] || 'HH:MM')}" data-fcr-in="${escapeHtml(JSON.stringify({ zeit: 'fenster', teil: t, fenster: true }))}" title="HH:MM · leer = wie Challenge-Planer"></div></div>`
       : `<div class="fcr-e-feld"><label>${label} <small>· ${escapeHtml(zone)}</small></label><div class="fcr-e-wert">${escapeHtml(t === 'von' ? (z.von || '–') : (z.bis || '–'))}</div></div>`
-    // TP-Regeln aller Firmen (parameter, E1b): änderbar erst mit der Spalte parameter (SQL 2026-11-05_fcp_einstellungen_db.sql) — bis dahin die geltenden Code-Werte
-    const PA = D.parameter || null, paW = (PA && PA.wert) || {}, paStd = (PA && PA.standard) || {}
-    const paramFeld = (k, label, einheit, titel) => fcrFeld(label, PA && PA.db && PA.db[k] != null ? PA.db[k] : null, { param: k }, { einheit, leer: paStd[k] != null ? fcrZahl(paStd[k]) : '–', titel })
-    const tpRegeln = !PA ? '' : (ad && PA.spalte)
-      ? `<div class="fcr-e-felder drei">${paramFeld('tp_min_usd', 'Mindest-TP', '$', 'kein Trade mit kleinerem TP; leer = Code-Wert')}${paramFeld('tp_deckel_plus_standard', 'TP-Deckel', '$ über Ziel bis', 'Standard für Firmen ohne eigenen TP-Deckel; leer = Code-Wert')}${paramFeld('refund_tp_min_usd', 'Refund-TP min', '$', 'kleinster TP des Refund-Trades; leer = Code-Wert')}</div>`
-      : `${fcrZeile('Mindest-TP', paW.tp_min_usd != null ? fcrZahl(paW.tp_min_usd) + ' $' : '–')}${fcrZeile('TP-Deckel', paW.tp_deckel_plus_standard != null ? `Ziel bis + ${fcrZahl(paW.tp_deckel_plus_standard)} $` : '–')}${fcrZeile('Refund-TP min', paW.refund_tp_min_usd != null ? fcrZahl(paW.refund_tp_min_usd) + ' $' : '–')}
-        ${ad ? '<div class="fcr-e-hinweis fcr-w-leise">änderbar, sobald die Spalte „parameter“ da ist (SQL 2026-11-05_fcp_einstellungen_db.sql)</div>' : ''}`
     const firmaTeil = f => {
       const { gl } = grWahl(f), alleGr = gl.length > 1 ? ' · alle Größen' : ''
       const fz = { firma: f.firma }, ep = f.erster_payout_eff, epDb = !!(f.erster_payout && typeof f.erster_payout === 'object')
@@ -85450,7 +85444,6 @@
       ${fcrWSchalter('ziel_auto_wartet', !!g.ziel_auto_wartet, 'Ziel → Waiting', 'Konto am Ziel automatisch auf Waiting')}
       ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
       <div class="fcr-e-felder fcr-w-zeiten">${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
-      ${tpRegeln ? fcrWAbschnitt('TP-Regeln · alle Firmen') + tpRegeln : ''}
       ${sel ? firmaTeil(sel) : ''}
     </div>`
     return `<div class="fcr-e-wrap fcr-w" id="fcr-einst" data-fcr-wurzel>${kopf}<div class="wd-set-grid">${liste}${mitte}${rechts}</div></div>`
