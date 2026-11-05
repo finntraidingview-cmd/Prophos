@@ -86428,8 +86428,11 @@
       const modusInfo = rest ? 'TP = Rest bis zum Ziel (kein Deckel, kein Break-even), SL je Trade gewürfelt, Hedge fester Satz auf den Max DD'
         : `TP bis „TP höchstens je Trade“, mehr als ${e2De(bt)} $ unter dem Start zurück auf Break-even, SL = Daily Loss der Stufe (liq_regeln), Hedge aus den offenen Kosten`
       const p = k => `f.${fi}.g.${g}.${k}`
-      const feld = k => { const v = w[k], [l, e, u] = E2_FELD[k]
-        const klein = k === 'ziel_gewinn' ? (zv => Array.isArray(v) ? `Ziel ${zv(v[0])} – ${zv(v[1])}` : `Ziel ${zv(v)}`)(x => e2De(Number(g) + Number(x)) + ' $') : ''   // Ziel-Endwert (Finn 04.11.: „sehr clean“)
+      const feld = k => { const v0 = w[k], [l, e, u] = E2_FELD[k]
+        // E2h (Finn 05.11.2026 zum Foto Apex 100k: „mach hier bei Ziel immer von – bis"): Ziel-Gewinn immer als Spanne — eine alte Zahl zeigt von = bis
+        const v = k === 'ziel_gewinn' && !Array.isArray(v0) && v0 != null ? [v0, v0] : v0
+        const zw = i => { const x = e2Zahl(e2Wert(p(k) + '.' + i, e2Txt(v[i]))); return x == null ? Number(v[i]) : x }   // Endwert aus dem Entwurf (merke() zieht ihn beim Tippen nach)
+        const klein = k === 'ziel_gewinn' ? (zv => `Ziel ${zv(zw(0))} – ${zv(zw(1))} $`)(x => e2De(Number(g) + Number(x))) : ''   // Ziel-Endwert als Spanne (Finn 04.11.: „sehr clean“)
         if(Array.isArray(v)) return e2WF(l + ' · ' + e, u + ' · von – bis', e2Spanne(e2In(p(k) + '.0', v[0], darfR, { label: l + ' von' }), e2In(p(k) + '.1', v[1], darfR, { label: l + ' bis' })), klein)
         return e2WF(l + ' · ' + e, u, e2In(p(k), v, darfR, { label: l }), klein) }
       const consOrig = f.consistency_pct != null ? Number(f.consistency_pct) : null
@@ -86577,6 +86580,14 @@
           continue
         }
         if(!E2_FELD[k]) continue
+        if(k === 'ziel_gewinn' && !Array.isArray(v)){   // E2h: gespeicherte Zahl, im Reiter immer von – bis → gesendet als Spanne [von, bis] (gleich = unverändert)
+          if(!hat(p + '.0') && !hat(p + '.1')) continue
+          const a = hat(p + '.0') ? e2Zahl(ent[p + '.0']) : Number(v), e = hat(p + '.1') ? e2Zahl(ent[p + '.1']) : Number(v)
+          if(a == null || e == null) return { fehler: `${fcfdGroesse(g)} ${E2_FELD[k][0]}: keine Zahl` }
+          if(a > e) return { fehler: `${fcfdGroesse(g)} ${E2_FELD[k][0]}: von ≤ bis` }
+          if(a !== Number(v) || e !== Number(v)) neu[k] = [a, e]
+          continue
+        }
         if(Array.isArray(v)){
           if(!hat(p + '.0') && !hat(p + '.1')) continue
           const a = hat(p + '.0') ? e2Zahl(ent[p + '.0']) : Number(v[0]), e = hat(p + '.1') ? e2Zahl(ent[p + '.1']) : Number(v[1])
@@ -86668,6 +86679,9 @@
         else { if(el.value === el.dataset.e2Orig) delete _e2.entwurf[p]; else _e2.entwurf[p] = el.value
           if(el.type === 'range'){ const o = el.parentElement && el.parentElement.querySelector('output'); if(o) o.textContent = e2De(el.value) + ' %' }
           el.classList.toggle('geaendert', el.value !== el.dataset.e2Orig)
+          const mz = /^f\.\d+\.g\.(\d+)\.ziel_gewinn\.[01]$/.exec(p)   // E2h: „Ziel von – bis $“ unter dem Feld sofort mitziehen
+          if(mz){ const wf = el.closest('.wd-feld'), kl = wf && wf.querySelector('.e2-wf-klein'), ins = wf ? [...wf.querySelectorAll('input[data-e2-pfad]')] : []
+            if(kl && ins.length === 2){ const zz = ins.map(x => e2Zahl(x.value)); if(zz.every(x => x != null)) kl.textContent = `Ziel ${e2De(Number(mz[1]) + zz[0])} – ${e2De(Number(mz[1]) + zz[1])} $` } }
           const mk = /^f\.(\d+)\.g\.([^.]+)\.kontrakte\.\d+$/.exec(p)   // E2g: Balken + Summe sofort mitziehen
           if(mk){ const b = el.closest('.e2-kt')?.querySelector('.e2-balken > b'), x = e2Zahl(el.value); if(b) b.style.width = Math.max(0, Math.min(100, x || 0)) + '%'
             const v = ktOrig(mk[1], mk[2]), sm2 = box.querySelector(`[data-e2-ktsum="${mk[1]}:${CSS.escape(mk[2])}"]`), h = e2KtHinweis(mk[1], mk[2], v)

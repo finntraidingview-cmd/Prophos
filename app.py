@@ -40123,13 +40123,23 @@ def fdp_konst(reg):
     return out
 
 
-def fdp_ziel_gewinn(jg, konto_id=None):
+def fdp_ziel_gewinn(jg, konto_id=None, zyklus=None):
     """REIN RECHNEND (testbar): Ziel-Gewinn des Kontos — Zahl wie bisher (Apex), Spanne [von, bis] je Konto FEST aus der Konto-ID gewürfelt (gleiches Ziel an jedem
-    Tag, kein Hin und Her zwischen den Takten), ganze Dollar. Ohne ID die Mitte."""
+    Tag, kein Hin und Her zwischen den Takten), ganze Dollar. Ohne ID die Mitte.
+    JE PAYOUT-ZYKLUS NEU (E2h, Finn 05.11.2026 zum Foto Apex 100k: „mach hier bei Ziel immer von – bis"): ab Zyklus 2 geht die Zyklus-Nummer in den Würfel
+    (Konto-ID|Zyklus) — je Zyklus ein Ziel, darin fest, ohne neue Spalte. Zyklus 1 (oder unbekannt) würfelt wie bisher nur aus der Konto-ID, damit laufende
+    Konten (FTMO Futures seit 03.11.) ihr Ziel behalten. von = bis → genau dieser Wert (bitgleich mit der alten Einzelzahl)."""
     z = (jg or {}).get("ziel_gewinn")
     if isinstance(z, (list, tuple)) and len(z) == 2 and _wd_num(z[0]) is not None and _wd_num(z[1]) is not None:
         lo, hi = float(z[0]), float(z[1])
-        u = (int(hashlib.sha256(str(konto_id).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF) if konto_id else 0.5
+        if hi <= lo:
+            return lo
+        try:
+            zn = int(zyklus) if zyklus is not None else 1
+        except (TypeError, ValueError):
+            zn = 1
+        saat = str(konto_id) if zn <= 1 else f"{konto_id}|{zn}"
+        u = (int(hashlib.sha256(saat.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF) if konto_id else 0.5
         return float(round(lo + (hi - lo) * u))
     return float(_wd_num(z) or 0)
 
@@ -40155,13 +40165,13 @@ def fdp_konto_anzeige(groesse, jg, balance, zy, tage_fn, plaene, konto_id):
     g = float(groesse or 0)
     start = zy["start"] if zy.get("start") is not None else balance
     start = float(start) if start else g
-    ziel = start + fdp_ziel_gewinn(jg, konto_id)
+    ziel = start + fdp_ziel_gewinn(jg, konto_id, zy.get("nr"))   # E2h: Ziel je Payout-Zyklus
     tage = tage_fn(plaene, zy.get("ab"))
     return {"groesse": g, "start": round(start, 2), "ziel": round(ziel, 2), "gewinn": round(balance - start, 2) if balance is not None else None,
             "max_tag": round(max([v for v in tage.values() if v > 0], default=0.0), 2), "zyklus": zy.get("nr")}
 
 
-def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None, konst=None):
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None, konst=None, zyklus=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
     offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert),
@@ -40181,7 +40191,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
         return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
     start = float(start) if start else g
     rest_modus = (regel or {}).get("tp_modus") == "rest"           # FTMO Futures (03.11.2026), s. oben
-    ziel = start + fdp_ziel_gewinn(jg, konto_id)
+    ziel = start + fdp_ziel_gewinn(jg, konto_id, zyklus)   # E2h: Spanne je Payout-Zyklus fest gewürfelt (zyklus = fdp_zyklus nr)
     # Plausibel? (27.10.2026, Befund Chris 100k …0003 mit 150.074 $ = Endbalance seines 150k-Kontos, gekürzte Kennung in TradingView):
     # mehr als ein Trade über dem Ziel kann der Planer nicht erzeugt haben → Lesung anzweifeln statt „Ziel erreicht" zu melden
     if balance > ziel + float(jg.get("max_trade") or (dd if rest_modus else 0) or 0):
@@ -40456,7 +40466,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
-                                 konto_id=str(a["id"]), konst=konst), zy
+                                 konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy
 
     for a in konten:
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
@@ -41157,7 +41167,8 @@ def fdp_regeln_aendern(reg, body):
                     if k not in _FDP_GR_FELDER:
                         return None, f"{gr}.{k}: nicht änderbar"
                     lo, hi = _FDP_GR_FELDER[k]
-                    if isinstance(z[k], (list, tuple)):
+                    # E2h (Finn 05.11.2026: „bei Ziel immer von – bis"): Ziel-Gewinn darf von der Zahl zur Spanne werden (alte Zahl = von = bis)
+                    if isinstance(z[k], (list, tuple)) or (k == "ziel_gewinn" and isinstance(v, (list, tuple))):
                         if not isinstance(v, (list, tuple)) or len(v) != 2:
                             return None, f"{gr}.{k}: Spanne [von, bis]"
                         a, e = _fdp_zahl(v[0], lo, hi), _fdp_zahl(v[1], lo, hi)

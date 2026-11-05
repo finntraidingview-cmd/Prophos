@@ -95,7 +95,7 @@ nein({"updated_at": U, "firma": {"name": "Gibt es nicht", "an": True}}, "unbekan
 nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"50000": {"dd": 2000}}}}, "neue Größe")
 nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"daily_usd": 1000}}}}, "neuer Schlüssel")
 nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"ziel_gewinn": -5}}}}, "negativer Wert")
-nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"ziel_gewinn": [1, 2]}}}}, "Zahl als Spanne")
+nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"max_trade": [1, 2]}}}}, "Zahl als Spanne (max_trade; ziel_gewinn darf seit E2h)")
 nein({"updated_at": U, "firma": {"name": "FTMO Futures", "je_groesse": {"50000": {"sl": [900, 800]}}}}, "Spanne von > bis")
 nein({"updated_at": U, "firma": {"name": "FTMO Futures", "je_groesse": {"50000": {"sl": 800}}}}, "Spanne als Zahl")
 nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"kontrakte": {"2": 0.5, "3": 0.2}}}}}, "Kontrakte ≠ 100 %")
@@ -260,6 +260,34 @@ check(r4 == {2, 3, 4}, f"E2g: fdp_konto_rechnen plant mit der neuen Zeile (Kontr
 check("data-e2-ktadd" in HTML and "data-e2-ktx" in HTML and "data-e2-ktsel" in HTML and "ktK.length > 1" in HTML and "muss 100 % sein" in HTML
       and "if(!e2KtBeruehrt(i, g, v)) continue" in HTML and "!n || sp ? ' disabled'" in HTML and "'[data-e2-ktadd]', '[data-e2-ktx]', '[data-e2-ktsel]'" in HTML,
       "E2g Frontend: + Zeile, × (nicht bei der letzten), Anzahl wählbar, Summe ≠ 100 % sperrt Speichern, Schloss kennt die Knöpfe")
+
+# ── E2h (Finn 05.11.2026: „mach hier bei Ziel immer von – bis"): Ziel-Gewinn als Spanne, je Payout-Zyklus fest gewürfelt
+import hashlib as _hl
+ZG = ns["fdp_ziel_gewinn"]
+alt_wurf = lambda lo, hi, kid: float(round(lo + (hi - lo) * (int(_hl.sha256(str(kid).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF)))   # Formel vor E2h
+check(ZG({"ziel_gewinn": 12000}, "k1", 3) == 12000.0 == ZG({"ziel_gewinn": [12000, 12000]}, "k1", 3) == ZG({"ziel_gewinn": [12000, 12000]}, "k1"),
+      "E2h: alte Zahl = von = bis → bitgleich 12.000, egal welcher Zyklus")
+sp = {"ziel_gewinn": [11500, 12500]}
+ids = [f"konto{i}" for i in range(40)]
+check(all(ZG(sp, k) == ZG(sp, k, 1) == ZG(sp, k, None) == alt_wurf(11500, 12500, k) for k in ids), "E2h: Zyklus 1/unbekannt würfelt wie vorher nur aus der Konto-ID (laufende Ziele bleiben)")
+z2 = [ZG(sp, k, 2) for k in ids]
+check(all(11500 <= x <= 12500 and x == int(x) for x in z2) and sum(1 for k, x in zip(ids, z2) if x != ZG(sp, k, 1)) >= 35 and z2 == [ZG(sp, k, 2) for k in ids]
+      and len({ZG(sp, "konto0", z) for z in range(1, 8)}) >= 5, "E2h: ab Zyklus 2 je Zyklus neu, in der Spanne, ganze Dollar, im Zyklus fest")
+p, f = aend(REG, {"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"ziel_gewinn": [11500, 12500]}}}})
+check(f is None and p["firmen"][0]["je_groesse"]["100000"]["ziel_gewinn"] == [11500, 12500], "E2h: Zahl → Spanne [von, bis] angenommen")
+nein({"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"ziel_gewinn": [12500, 11500]}}}}, "E2h: von > bis")
+p2, f2 = aend(REG, {"updated_at": U, "firma": {"name": "Apex Trader", "je_groesse": {"100000": {"ziel_gewinn": 12500}}}})
+check(f2 is None and p2["firmen"][0]["je_groesse"]["100000"]["ziel_gewinn"] == 12500, "E2h: Zahl bleibt weiter möglich")
+ST = [{"minis": 3, "ab_balance": 100000, "daily_loss_usd": 1750}]
+r_zahl = R(ALT["firmen"][0], jg(ALT["firmen"][0], 100000), ST, 101000.0, 101000.0, 350.0, 100000, 100000, kt_fest=2, konto_id="k1", zyklus=2)
+r_paar = R(ALT["firmen"][0], dict(jg(ALT["firmen"][0], 100000), ziel_gewinn=[12000, 12000]), ST, 101000.0, 101000.0, 350.0, 100000, 100000, kt_fest=2, konto_id="k1", zyklus=2)
+check(r_zahl == r_paar and r_zahl.get("ziel") == 112000, f"E2h: Planer rechnet mit [12.000, 12.000] genau wie mit 12.000 (Ziel {r_zahl.get('ziel')})")
+r_sp = [R(ALT["firmen"][0], dict(jg(ALT["firmen"][0], 100000), ziel_gewinn=[11500, 12500]), ST, 101000.0, 101000.0, 350.0, 100000, 100000, kt_fest=2, konto_id="k1", zyklus=z).get("ziel") for z in (1, 2, 3)]
+check(r_sp[0] == 100000 + ZG(sp, "k1", 1) and r_sp[1] == 100000 + ZG(sp, "k1", 2) and r_sp[2] == 100000 + ZG(sp, "k1", 3), f"E2h: fdp_konto_rechnen nutzt das Zyklus-Ziel ({r_sp})")
+pl_src = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
+check('konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy' in pl_src and 'fdp_ziel_gewinn(jg, konto_id, zy.get("nr"))' in SRC, "E2h: fdp_planen und Kontoliste geben den Payout-Zyklus mit")
+check("const v = k === 'ziel_gewinn' && !Array.isArray(v0) && v0 != null ? [v0, v0] : v0" in HTML and "if(k === 'ziel_gewinn' && !Array.isArray(v)){" in HTML
+      and "Ziel ${zv(zw(0))} – ${zv(zw(1))} $" in HTML, "E2h Frontend: Ziel immer von – bis, Endwert darunter als Spanne, Zahl → Spanne gesendet")
 
 # ── Verdrahtung
 rt = SRC[SRC.index('@app.route("/admin/funded-plan/regeln"'):SRC.index("# ══ FUNDED-CFD-PLANER")]
