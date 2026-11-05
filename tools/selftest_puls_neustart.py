@@ -250,8 +250,11 @@ def main():
     check("frist_s" in inspect.signature(ob.modus_tsxlesen_cdp).parameters, "modus_tsxlesen_cdp nimmt frist_s (zweiter Versuch mit Restzeit)")
     check("PULS_NEUSTART_NIE" in dir(ob) and "zeit" in ob.PULS_NEUSTART_NIE and ob.PULS_NEUSTART_BUDGET_S["tsv2"] < 170 and ob.PULS_NEUSTART_BUDGET_S["tvv2"] < 260,
           "Budgets liegen unter den Panel-Zeitlimits (tsx-konto 170 s, tv-konto 260 s)")
-    check(len(ob.PULS_ERGEBNIS_FELDER) == 47 and "unklar" in ob.PULS_ERGEBNIS_FELDER and "warnung" in ob.PULS_ERGEBNIS_FELDER,
-          "PULS_ERGEBNIS_FELDER unveraendert (47 Felder, unklar/warnung)")
+    # RT1 (05.11.2026): ac122917 (Nova-Brackets, 29.10.2026) hat bewusst brackets_fehlen/bracket_dialog/bracket_dialog_bild
+    # angehängt (47 → 50) — Zahl nachgezogen, die drei neuen Felder werden mitgeprüft
+    check(len(ob.PULS_ERGEBNIS_FELDER) == 50 and "unklar" in ob.PULS_ERGEBNIS_FELDER and "warnung" in ob.PULS_ERGEBNIS_FELDER
+          and all(k in ob.PULS_ERGEBNIS_FELDER for k in ("brackets_fehlen", "bracket_dialog", "bracket_dialog_bild")),
+          "PULS_ERGEBNIS_FELDER unveraendert (50 Felder, unklar/warnung, Nova-Brackets)")
 
     # ── Abriss der CDP-Verbindung (08.10.2026, Muster WinError 10053): sanft neu anhängen statt Chrome-Neustart ──────────────────
     ab = ob.cdp_abriss_erkannt
