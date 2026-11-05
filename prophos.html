@@ -3846,7 +3846,7 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px;min-width:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
-  /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): großer 14-Tage-Chart, „Am nächsten am Pass" */
+  /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): großer 14-Tage-Chart („Am nächsten am Pass" entfernt 05.11.2026, Finn: „kann komplett weg") */
   #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:140px;margin-top:12px;padding-top:0;border-top:0}
   #ap-ids-root.ap-guestly .apg-cv-kz{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
   #ap-ids-root.ap-guestly .apg-cv-k{background:var(--g-kpi);border-radius:12px;padding:12px 14px;min-width:0}
@@ -3859,15 +3859,6 @@
   @media (max-width:560px){ #ap-ids-root.ap-guestly .apg-cv-kz{grid-template-columns:minmax(0,1fr);gap:8px} #ap-ids-root.ap-guestly .apg-cv-k{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:12px;padding:9px 12px;align-items:start}
     #ap-ids-root.ap-guestly .apg-cv-k small{grid-column:1;grid-row:1} #ap-ids-root.ap-guestly .apg-cv-k b{grid-column:1;grid-row:2 / span 3;font-size:20px;white-space:nowrap} #ap-ids-root.ap-guestly .apg-cv-k span{grid-column:2;text-align:right;margin-top:0;font-size:11.5px} #ap-ids-root.ap-guestly .apg-cv-k span.hinweis{margin-top:0} }
   #ap-ids-root.ap-guestly .apg-cv-keiner{margin-top:12px;font-size:12.5px;color:var(--g-sub)}
-  #ap-ids-root.ap-guestly .apg-cv-nah{margin-top:14px;padding-top:12px;border-top:1px solid var(--g-rand)}
-  #ap-ids-root.ap-guestly .apg-cv-nah-t{font-size:13px;font-weight:600;color:var(--g-text);margin-bottom:6px}
-  #ap-ids-root.ap-guestly .apg-cv-nz{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(80px,1fr) auto;gap:12px;align-items:center;padding:5px 0;font-size:12.5px;color:var(--g-sub)}
-  #ap-ids-root.ap-guestly .apg-cv-nz .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--g-text)}
-  #ap-ids-root.ap-guestly .apg-cv-nz .nm i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-  #ap-ids-root.ap-guestly .apg-cv-nz .bar{height:6px;border-radius:3px;background:var(--g-rand);overflow:hidden}
-  #ap-ids-root.ap-guestly .apg-cv-nz .bar i{display:block;height:100%;background:var(--g-gut);opacity:.7}
-  #ap-ids-root.ap-guestly .apg-cv-nz b{font-weight:600;color:var(--g-text);font-variant-numeric:tabular-nums}
-  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv-nz{grid-template-columns:minmax(0,1fr) auto} #ap-ids-root.ap-guestly .apg-cv-nz .bar{grid-column:1/-1;order:3} }
   /* P&L von heute (Challenge, 30.10.2026): Kennzahlen rechts im Kartenkopf, Chart volle Breite */
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
@@ -85168,11 +85159,11 @@
     // Funded CFD (30.10.2026, Master: „EIN großer Chart wie im Challenge Planer“): derselbe P&L-Chart; unter fdpTausch stehen TPL_TYPEN auf
     // funded_cfd und _tpl.lt auf den Funded-CFD-Plänen — apgPlHeute zeigt also nur diese Trades. Funded Futures behält die zwei Charts.
     // CHALLENGE-CHART-NEU (Finn 30.10.2026 ~08:25: „P&L von heute sagt im Challenge Planer nichts"): Challenge zeigt den 14-Tage-Verlauf (seit 30.10.2026 14:0x nur noch Chart, keine Kacheln)
-    // + „Am nächsten am Pass" (apgCv*); der P&L-Chart bleibt für Funded CFD (und Winning Days)
+    // (apgCv*; „Am nächsten am Pass" entfernt 05.11.2026); der P&L-Chart bleibt für Funded CFD (und Winning Days)
     // nur Challenge → Futures (Finn 30.10.2026: „Challenge → CFD behält vorerst den P&L-Chart")
     const cvAn = !fd && apArtJetzt() === 'futures'
     _apg.pl = (fc || (!fd && !cvAn)) ? apgPlHeute({ tag, uid: u, firma: fs ? fs.firma : 'alle' }) : null
-    _apg.cv = cvAn ? apgCvDaten({ uid: u, trades: T.D.trades }) : null
+    _apg.cv = cvAn ? apgCvDaten({ uid: u }) : null
     const nL = ls.reduce((a, z) => a + z.L, 0), nS = ls.reduce((a, z) => a + z.S, 0)
     const charts = cvAn ? apgCvHtml(_apg.cv) : (!fd || fc) ? apgPlKarteHtml(_apg.pl) : `<div class="apg-charts">
       <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Long · Short je ID</div><div class="apg-sub"><span class="lila">${nL} Long</span> · <span class="tuerkis">${nS} Short</span> · ${tag === 'morgen' ? 'morgen' : 'heute'}, alle Trades der Sicht</div></div>
@@ -85342,8 +85333,8 @@
    * Gruppe wie der Planer) — je beendetem Challenge-/Phase-Trade (app.py: nur AP_TYPEN) Dubai-Tag, Firma, $ und art. „bestanden" setzt app.py
    * ap_hb_zeile, wenn die End-Balance das Phasenziel erreicht, das Konto als passed archiviert ist oder accounts.ziel_erreicht_at (Ziel-Wache) nach
    * dem Start liegt; „geblowt", wenn als blown archiviert oder der Verlust das Polster frisst. Gewonnen/verloren = $ > 0 / < 0 (bestanden zählt als
-   * gewonnen, geblowt als verloren). Folgt ID (apSichtUid) und CFD/Futures (apArtPasst). „Am nächsten am Pass" aus den Trade-Zeilen des Planers
-   * (Balance + Rest bis Ziel je Konto). Nur Anzeige, eigene Abfrage höchstens alle 2 min. */
+   * gewonnen, geblowt als verloren). Folgt ID (apSichtUid) und CFD/Futures (apArtPasst). („Am nächsten am Pass" entfernt 05.11.2026, Finn: „kann komplett
+   * weg".) Nur Anzeige, eigene Abfrage höchstens alle 2 min. */
   const _apgCv = { d: null, at: 0, q: '', laeuft: false, nr: 0, fehler: '' }
   const apgCvQuery = () => '?sicht=admin&tage=14' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
   async function apgCvLaden(){
@@ -85379,17 +85370,7 @@
       if(z.art === 'bestanden') t.best++
       if(z.art === 'geblowt') t.blow++
     }
-    // „Am nächsten am Pass": je Konto die Trade-Zeile mit Balance + Rest (Planer-Lauf / Delta), kleinster Rest zuerst
-    const konten = new Map()
-    for(const t of o.trades || []){
-      if(t.wd || t.rest == null || !(Number(t.rest) > 0) || t.balance == null) continue
-      if(o.uid && String(t.user_id) !== String(o.uid)) continue
-      if(!apArtPasst(t) || (t.typ && !TPL_TYPEN.includes(String(t.typ)))) continue
-      const k = String(t.konto_id || (t.user_id + '|' + t.konto)); const alt = konten.get(k)
-      if(!alt || Number(t.rest) < Number(alt.rest)) konten.set(k, t)
-    }
-    const nah = [...konten.values()].sort((a, b) => Number(a.rest) - Number(b.rest)).slice(0, 5)
-    return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage, nah }
+    return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage }
   }
   /* NUR EINE LINIE (Finn 30.10.2026, Auftrag C2: „Ich will einfach nur eine einzige Linie. Es ist so viel advanced. Heute, 7 Tage und 14 Tage sind gut. Aber ich will nur eine kleine Linie im
    * Verlauf von heute"): Kacheln wie bisher, darunter Fusion hypothetisch kumuliert für heute (Dubai), je beendetem Trade ein Schritt. Rechenwerte unverändert aus apgCvDaten (t.fh, t.usd). */
@@ -85415,16 +85396,10 @@
   }
   function apgCvHtml(c){
     const leer = !c.geladen ? (c.fehler ? '⚠ Verlauf nicht ladbar: ' + escapeHtml(c.fehler.slice(0, 120)) : 'lädt …') : c.tage[c.tage.length - 1].n ? '' : 'heute noch kein Trade'
-    const rest = v => Math.round(Number(v)).toLocaleString('de-DE') + ' $'
-    const nah = c.nah.length ? `<div class="apg-cv-nah"><div class="apg-cv-nah-t">Am nächsten am Pass</div>${c.nah.map(t => {
-        let g = 0; try{ g = Number(kontoGroesseAnzeige(t.konto, null, null)) || 0 }catch(_){}
-        const ziel = Number(t.balance) + Number(t.rest), pct = g > 0 && ziel > g ? Math.max(0, Math.min(100, (Number(t.balance) - g) / (ziel - g) * 100)) : null
-        return `<div class="apg-cv-nz" title="${escapeHtml(`${t.user || ''} · ${t.konto || ''} — Balance ${rest(t.balance)} → Ziel ${rest(ziel)}`)}"><span class="nm"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '')} · ${escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(t.firma) : String(t.firma || ''))}${t.ende4 ? ' …' + escapeHtml(String(t.ende4)) : ''}</span>`
-          + `<span class="bar">${pct != null ? `<i style="width:${pct.toFixed(1)}%"></i>` : ''}</span><b>noch ${rest(t.rest)}</b></div>` }).join('')}</div>` : ''
     return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Fusion hypothetisch in € · Futures · beendete Trades der Sicht · Linie: heute (Dubai)</div></div>
         <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile). Fusion hypothetisch € = Master-P&amp;L $ × Kontowert-Satz, geblowt = −Kontowert, nur Trades ohne Hedge; Trades mit Hedge zählen dort nicht. Master $ = alle beendeten Trades. Heute zählt mit in den 7 und 14 Tagen. Folgt ID und CFD/Futures.">i</span></div>
         ${c.geladen ? apgCvKacheln(c) : ''}
-        ${leer ? `<div class="apg-cv-keiner">${leer}</div>` : '<div class="apg-chart"><canvas id="apg-c-cv" role="img" aria-label="Fusion hypothetisch in Euro, kumuliert über den heutigen Tag"></canvas></div>'}${nah}</div>`
+        ${leer ? `<div class="apg-cv-keiner">${leer}</div>` : '<div class="apg-chart"><canvas id="apg-c-cv" role="img" aria-label="Fusion hypothetisch in Euro, kumuliert über den heutigen Tag"></canvas></div>'}</div>`
   }
   function apgCvMalen(root, c, ablage){
     const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return

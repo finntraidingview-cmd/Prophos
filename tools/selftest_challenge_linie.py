@@ -41,6 +41,7 @@ check(E["Float"][-1]["y"] == 0.3 == E["Float"][-2]["y"], "Endpunkt auf Cent glei
 check('"ende": z.get("ende")' in app[app.index("def ap_verlauf_zeilen("):app.index("def ap_verlauf_gemerkt(")], "Backend liefert die Endzeit")
 for tot in ("apgCvSummen", "apgCvTagHtml", "apg-cv-tip", "apg-cv-tag", "_apgCv.tag", "Tag im Plus"):
     check(tot not in html, f"entfernt: {tot}")
-check("Am nächsten am Pass" in html and "apgCvKacheln(c)" in html, "Kacheln und „Am nächsten am Pass“ bleiben")
+# UI1 (05.11.2026, Finn: „Am nächsten am Pass … das kann komplett weg“): Block samt Rechnung und Stilen weg, Kacheln bleiben
+check("apgCvKacheln(c)" in html and "apg-cv-nah" not in html and "apg-cv-nz" not in html and "c.nah" not in html, "Kacheln bleiben, „Am nächsten am Pass“ samt Rechnung und Stilen entfernt")
 print("\n" + (f"✗ {len(FEHLER)} Fehler" if FEHLER else "✓ alles grün"))
 sys.exit(1 if FEHLER else 0)
