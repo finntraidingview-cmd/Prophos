@@ -76,6 +76,9 @@ def lade():
     ns = {"threading": threading, "time": uhr, "json": json, "base64": base64, "hashlib": hashlib,
           "SUPABASE_URL": "https://beispiel.invalid", "SUPABASE_ANON_KEY": "anon", "_sb_headers": lambda p=None: {},
           "_sb_anfrage": _sb_anfrage, "sb_select": sb_select}
+    # RT1 (05.11.2026): b4b414a7 (UNT0, 05.11.2026) setzt @app.route("/admin/id-gruppe") mitten in den geladenen Block
+    # (zwischen admin_zugang und dup_creds_lesen) — Attrappe für den Dekorator, die Route selbst prüft dieser Test nicht
+    ns["app"] = type("AppAttrappe", (), {"route": staticmethod(lambda *a, **k: (lambda f: f))})()
     exec(src[a:e] + "\n\n" + leer, ns)
     return ns, uhr, zaehler, antworten
 
