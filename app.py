@@ -19012,12 +19012,16 @@ def reader_feed_pc_erlaubt(uid, besitzer, gehoert):
 
 
 def _pc_feed_besitzer(pc):
-    """Besitzer des PCs (jüngste mt5_live-Meldung) aus dem pc_namen-Cache; Lesefehler → None (= wie ein neuer PC: nur der Login selbst)."""
+    """Besitzer des PCs (jüngste mt5_live-Meldung) aus dem pc_namen-Cache. Unbekannter PC bei gelesener Besitzer-Liste → None (neuer PC, der
+    Login selbst). Liste leer/nicht lesbar (Kaltstart, mt5_live-Fehler) → „?" (fail-closed: nur kein Schlüssel; der Tab fragt jede Minute neu)."""
     try:
         _pc_namen_daten()
-        return (_pc_namen_cache.get("besitzer") or {}).get(pc)
+        karte = _pc_namen_cache.get("besitzer") or {}
     except Exception:
-        return None
+        karte = {}
+    if not karte:
+        return "?"
+    return karte.get(pc)
 
 
 # ── CODE-QUELLE (07.10.2026, Finn: „man kann Prophos ja jetzt klauen" → Repo privat; Finn im Chat: „Code-Auslieferung über
@@ -45569,6 +45573,10 @@ def _lq_antwort_laden():
     except Exception as e:
         print(f"[liquide] ⚠️ pending_payouts: {type(e).__name__}: {e}", flush=True)   # Übersicht trotzdem, hörbar
         pending = []
+    # UNT5 (Prüfung): zusätzlich direkt erlauben statt nur sperren — fällt die Nutzerliste aus (aus leer), bleibt Fremdes trotzdem draußen.
+    # Sheets ohne person_uid pflegt HT selbst (wie bisher sichtbar).
+    sheets = [sh for sh in sheets or () if not sh.get("person_uid") or gehoert(sh.get("person_uid"))]
+    pending = [p for p in pending or () if gehoert(p.get("user_id"))]
     return lq_antwort(sheets, staende, nutzer, personen, pending, _lq_fx(), ADMIN_EMAILS, frozenset(aus))
 
 

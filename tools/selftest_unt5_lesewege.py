@@ -82,7 +82,7 @@ def teil_helfer():
 
 
 # ── 1) Liquide ──
-def liquide_lauf(src, login, daten_fehler=False):
+def liquide_lauf(src, login, daten_fehler=False, ohne_nutzer=False):
     sheets = [{"id": 1, "person_uid": M, "person_name": "Mike", "sheet_id": "s-m", "aktiv": True},
               {"id": 2, "person_uid": X, "person_name": "Amir", "sheet_id": "s-x", "aktiv": True}]
     staende = [{"sheet_id": "s-m", "day": "2026-11-05", "kontostand": 1000, "diff": 0}, {"sheet_id": "s-x", "day": "2026-11-05", "kontostand": 700, "diff": 0}]
@@ -92,7 +92,7 @@ def liquide_lauf(src, login, daten_fehler=False):
     def _sb_all(tab, q):
         return {"kunden_sheets": sheets, "bank_staende": staende, "liq_personen": [], "pending_payouts": pending}[tab]
     req = types.SimpleNamespace(environ={"prophos.admin_uid": login})
-    extra = {"_sb_all": _sb_all, "_auth_liste_anfrage": lambda: _Antwort({"users": USERS}), "request": req, "datetime": __import__("datetime").datetime,
+    extra = {"_sb_all": _sb_all, "_auth_liste_anfrage": lambda: _Antwort({"users": [] if ohne_nutzer else USERS}), "request": req, "datetime": __import__("datetime").datetime,
              "timezone": __import__("datetime").timezone, "_ap_tz": __import__("zoneinfo").ZoneInfo, "LQ_VERLAUF_TAGE": 30, "LQ_TOLERANZ_EUR": 1,
              "ADMIN_EXCLUDE_EMAILS": {"emin@example.invalid"}, "ADMIN_EMAILS": {"finn@example.invalid"}, "_lq_fx": lambda: 0.9,
              "_wd_num": lambda v: float(v) if v is not None else None}
@@ -114,6 +114,9 @@ def teil_liquide():
     check(neu["summe_kunden_eur"] == 1000 and alt["summe_kunden_eur"] == 1700, "1c Summe Kundengeld nur HT (1.000 statt 1.700)")
     fz = liquide_lauf(NEU_SRC, A, daten_fehler=True)
     check(not fz["sheets"] and not fz["pending"] and set(fz["kunde"]) <= {A}, "1d Gruppen nicht lesbar → nur der Login selbst (nichts Fremdes)")
+    on = liquide_lauf(NEU_SRC, A, ohne_nutzer=True)
+    check([p["user_id"] for p in on["pending"]] == [M] and [x["person_uid"] for x in on["sheets"]] == [M],
+          "1e Nutzerliste fällt aus (Prüfung): trotzdem nur HT-Payouts/-Sheets (erlauben statt nur sperren)")
 
 
 # ── 2) Kundenzahlungen ──
@@ -231,6 +234,10 @@ def teil_feed_token():
     check(e(A, M, ht) and e(A, A, ht) and e(A, None, ht), "7a HT-Login: Schlüssel für HT-PCs, eigene und neue PCs wie bisher")
     check(not e(A, X, ht) and not e(X, M, em) and e(X, E, em), "7b fremdes Unternehmen → kein Schlüssel (HT ↛ Emin-PC, Emin ↛ HT-PC), Emin ↔ Emin ja")
     check(not e(A, M, lambda u: str(u) == A) and e(A, A, lambda u: str(u) == A), "7c Gruppen nicht lesbar → nur PCs der eigenen ID")
+    check(not e(A, "?", ht) and not e(X, "?", em), "7e Besitzer-Liste leer/nicht lesbar („?“) → kein Schlüssel (Prüfung)")
+    i2 = NEU_SRC.index("\ndef _pc_feed_besitzer(")
+    fb = NEU_SRC[i2:NEU_SRC.index("\n\n\n", i2)]
+    check("if not karte:\n        return \"?\"" in fb, "7f _pc_feed_besitzer: leere Liste → „?“ (nicht „neuer PC“)")
     i = NEU_SRC.index("\ndef reader_feed_token(")
     r = NEU_SRC[i:NEU_SRC.index("\n\n\n", i)]
     check("if not reader_feed_pc_erlaubt(uid, _pc_feed_besitzer(pc), unt_sicht_login(uid)):" in r and "), 403" in r, "7d POST /reader-feed-token prüft den PC-Besitzer (403)")
