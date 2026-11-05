@@ -223,6 +223,9 @@ rk2, jgo2 = app.fcp_on_demand_anwenden(FN, JG(FN, 100000), 100000)
 rv = R(jgo2, 101200, 100000, 2, False, 1.0, 0.85, random.Random(4), regel=rk2, tage=dict(base, heute=900.0), ziel_fest={"zyklus": 2, "usd": 2150})
 ok(rv["aktion"] == "aus" and "Tages-Deckel" in rv["grund"], f"Konto-Rechnung: Tages-Deckel → aus mit Grund ({rv.get('grund')})")
 ok(CF(40, 2150, 1200, base, None) == c_ohne, "ohne „heute“ (1 Trade je Tag) = wie bisher")
+ok("heute_tag = plan_tag if n_tag > 1 else None" in fp and "heute_berlin" not in fp,
+   "Tagessumme nach Plan-Tag und nur bei N > 1 (Nachtfenster 01:00–03:00 Dubai rechnet nicht mit gestern; N = 1 bitgleich)")
+ok('r.get("tp_art") == "gewinntag"' in fp and "Gewinntage: ein Trade je Tag" in fp, "Gewinntage Phase A: kein zweiter Gewinntag-Trade am selben Tag")
 
 print()
 print("alle Tests bestanden" if not FEHLER else f"{len(FEHLER)} ROT")

@@ -42222,7 +42222,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     kand, ziel_schreiben = [], {}
     _ntj = _wd_num((reg.get("zeiten") or {}).get("trades_je_tag"))
     n_tag = max(1, min(5, int(_ntj))) if _ntj else 1                          # E1e: Trades je Konto und Tag
-    heute_berlin = jetzt.astimezone(_ap_tz("Europe/Berlin")).date().isoformat()   # Tag der Consistency (Berlin, wie fcp_tage_zyklus_w)
+    # Tag für die Tagessumme der Consistency = Plan-Tag (nicht das Berlin-Datum von jetzt: im Nachtfenster 01:00–03:00 Dubai plant er schon den nächsten
+    # Tag, Berlin ist noch gestern — Fremd-Review E1e). Nur bei N > 1: mit 1 Trade je Tag gibt es heute keinen weiteren, also bitgleich wie bisher
+    heute_tag = plan_tag if n_tag > 1 else None
     for a in ([] if ruhe else konten):
         aid, uid, pl = str(a["id"]), str(a.get("user_id")), je_plan.get(str(a["id"]), [])
         regel = ap_regel_finden(an, a.get("firm"))
@@ -42301,13 +42303,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
                               max_sl=a.get("max_risiko_trade"), param=param,      # E1b: Planer-Parameter aus der DB (fcp_param)
-                              tage=fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_berlin) if payouts_ok else None,   # O1/E1e
+                              tage=fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag) if payouts_ok else None,   # O1/E1e
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if od_an:
             r["on_demand"] = True
+        if _heute_n >= 1 and r.get("aktion") == "planen" and r.get("tp_art") == "gewinntag":
+            aus("heute schon getradet — Gewinntage: ein Trade je Tag (zählt sonst nicht als neuer Tag)"); continue   # Fremd-Review E1e
         if r.get("aktion") == "planen" and (r.get("ziel_fest") or {}).get("neu"):
             ziel_schreiben[aid] = ({"zyklus": r["ziel_fest"]["zyklus"], "usd": r["ziel_fest"]["usd"], "at": jetzt.isoformat()},
                                    a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)

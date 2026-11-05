@@ -85615,7 +85615,8 @@
     ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
     : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
   // E1e (Finn 05.11.2026 ~08:30): Trades je Konto und Tag aus der Regel (zeiten.trades_je_tag, Standard 1)
-  function fcrTradesJeTag(){ try{ const n = Number((((_fcfdR || {}).d || {}).zeiten || {}).trades_je_tag); return n >= 1 ? Math.min(5, Math.round(n)) : 1 }catch(_){ return 1 } }
+  function fcrTradesJeTag(){ try{ const q = typeof _fdpQ !== 'undefined' && _fdpQ && _fdpQ.zeiten ? _fdpQ.zeiten.trades_je_tag : undefined   // zuerst der Planer-Stand der Seite
+      const n = Number(q != null ? q : (((_fcfdR || {}).d || {}).zeiten || {}).trades_je_tag); return n >= 1 ? Math.min(5, Math.round(n)) : 1 }catch(_){ return 1 } }
   function fcrTradesText(){ const n = fcrTradesJeTag(); return n === 1 ? '1 Trade je Konto und Tag' : `bis ${n} Trades je Konto und Tag, nie gleichzeitig` }
   const fcrWAbschnitt = t => `<div class="wd-abl-abschnitt">${escapeHtml(t)}</div>`
   const fcrWKopf = (titel, unter, karte) => `<h4><span>${titel}${unter ? `<span class="h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
@@ -85804,6 +85805,7 @@
       if(b.zeit === 'fenster'){
         const ch = String((D.zeiten || {}).fenster_challenge || '').split('–'), w = b.wert
         D.zeiten = Object.assign({}, D.zeiten, { fenster: w || undefined, fenster_eigen: !!w, von: w ? w.von : (ch[0] || D.zeiten.von), bis: w ? w.bis : (ch[1] || D.zeiten.bis) }); return }
+      if(b.zeit === 'trades_je_tag' && b.wert == null){ const zt = Object.assign({}, D.zeiten); delete zt.trades_je_tag; D.zeiten = zt; return }   // leer = 1 (Fremd-Review E1e)
       if(b.zeit){ D.zeiten = Object.assign({}, D.zeiten, { [b.zeit]: rund(b.wert) }); return }
       const f = (D.firmen || []).find(x => x.firma === b.firma); if(!f) return
       if(!b.feld && typeof b.an === 'boolean'){ f.an = b.an
@@ -86956,7 +86958,7 @@
   // Antwort von /admin/funded-cfd-plan (S4) → dieselbe Form wie fdpQuelleBauen. Echo mit Fusion-Hedge: Lots statt Kontrakte, $ je Punkt aus
   // TP ÷ TP-Punkte; Fusion −€ am TP (hedge_tp_eur), +€ am SL (hedge_sl_eur), gedeckt = Hedge-€ auf den DD. Solange der Planer aus ist, gibt
   // es KEINE Vorschau-Zeilen (Master: „dann ein klarer Leer-Hinweis"); Braucht dich nur mit Gründen, bei denen Finn etwas tun kann.
-  const FCP_AUSG_LEISE = /^Waiting for Payout|^heute schon getradet|^Flex-Konto|kein freier Slot|schon geplant|geplanten\/laufenden/i
+  const FCP_AUSG_LEISE = /^Waiting for Payout|^heute schon|Tages-Deckel|^Flex-Konto|kein freier Slot|schon geplant|geplanten\/laufenden/i   // E1e: „heute schon N Trades", Tages-Deckel
   function fcpQuelleBauen(d){
     const heute = tplDatum(new Date()), aktiv = !!d.aktiv, plaene = d.plaene || []
     const namen = new Map()

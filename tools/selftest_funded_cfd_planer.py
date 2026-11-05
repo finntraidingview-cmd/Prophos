@@ -401,7 +401,7 @@ check(_grund(e1, KONTEN[0]["id"]) == "heute schon getradet" and KONTEN[0]["id"] 
       "ohne Einstellung (1): nach einem Trade heute → „heute schon getradet“ (wie bisher)")
 REG["zeiten"]["trades_je_tag"] = 2
 e2 = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
-check(KONTEN[0]["id"] in {g["konto_id"] for g in e2["geplant"]} or (_grund(e2, KONTEN[0]["id"]) or "") != "heute schon getradet",
+check(KONTEN[0]["id"] in {g["konto_id"] for g in e2["geplant"]} or not (_grund(e2, KONTEN[0]["id"]) or "").startswith("heute schon"),
       f"Trades je Tag 2: nach einem Trade heute wird das Konto wieder geplant ({_grund(e2, KONTEN[0]['id']) or 'geplant'})")
 _heute2 = dict(_heute, id="pz2", started_at=(JETZT - timedelta(hours=1)).isoformat(), ended_at=(JETZT - timedelta(minutes=40)).isoformat())
 app._sb_all = lambda t, p: ([dict(_heute), dict(_heute2)] if t == "trade_plans" and "master_account_id" in p else _alt2(t, p))
