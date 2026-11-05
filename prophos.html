@@ -85659,9 +85659,11 @@
     ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
     : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
   // E1e (Finn 05.11.2026 ~08:30): Trades je Konto und Tag aus der Regel (zeiten.trades_je_tag, Standard 1)
-  function fcrTradesJeTag(){ try{ const q = typeof _fdpQ !== 'undefined' && _fdpQ && _fdpQ.zeiten ? _fdpQ.zeiten.trades_je_tag : undefined   // zuerst der Planer-Stand der Seite
-      const n = Number(q != null ? q : (((_fcfdR || {}).d || {}).zeiten || {}).trades_je_tag); return n >= 1 ? Math.min(5, Math.round(n)) : 1 }catch(_){ return 1 } }
-  function fcrTradesText(){ const n = fcrTradesJeTag(); return n === 1 ? '1 Trade je Konto und Tag' : `bis ${n} Trades je Konto und Tag, nie gleichzeitig` }
+  // O1b (Master 05.11.2026: Untertitel sagte nach dem Speichern noch „1 Trade"): zuerst die Regel (fcrLokal führt sie beim Speichern nach), sonst der Planer-Stand der Seite
+  function fcrTradesJeTag(){ try{ const zr = ((_fcfdR || {}).d || {}).zeiten
+      const q = zr ? zr.trades_je_tag : (typeof _fdpQ !== 'undefined' && _fdpQ && _fdpQ.zeiten ? _fdpQ.zeiten.trades_je_tag : undefined)
+      const n = Number(q); return n >= 1 ? Math.min(5, Math.round(n)) : 1 }catch(_){ return 1 } }
+  function fcrTradesText(){ const n = fcrTradesJeTag(); return n === 1 ? '1 Trade je Konto und Tag' : `${n} Trades je Konto und Tag · nie gleichzeitig` }
   const fcrWAbschnitt = t => `<div class="wd-abl-abschnitt">${escapeHtml(t)}</div>`
   const fcrWKopf = (titel, unter, karte) => `<h4><span>${titel}${unter ? `<span class="h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
   function fcfdRegelnHtml(){
@@ -85761,13 +85763,24 @@
       const gt = gl.map(y => (y.roh || {}).gewinntage).find(v => v && typeof v === 'object') || null
       const gtGr = gl.find(y => (y.roh || {}).gewinntage), gtBezug = gl.length > 1 && gtGr ? ` · bei ${fcfdGroesse(gtGr.groesse)}` : ''
       const epFz = fz   // Refund mit Code-Standard (noch kein DB-Block): fcrKarteSpeichern legt vorher den Block an
-      if(!ad) return `${fcrWAbschnitt(f.firma + alleGr)}${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}
+      // O1b (Finn 05.11.2026: „füg da irgendwie noch das On Demand dazu, was das ist bei FundedNext"): Add-on On Demand je Firma, nur FundedNext
+      const odE = String((f.namen || [])[0] || '') === 'fundednext' ? (f.on_demand_eff || { ziel_je_100k: [2000, 2250], consistency_pct: 40 }) : null
+      const odN = odE ? fcrKontenListe(f, D).filter(x => x.on_demand).length : 0
+      const odSub = `kein Refund-Trade · Payout sofort anfragbar · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`
+      const odInfo = fcrInfo('od', 'Konten mit Add-on „On Demand" (Accounts → Add-ons): Ziel je 100k skaliert mit der Kontogröße, Consistency je Zyklus, kein Refund-Trade, keine Gewinntage; SL, Lots und Hedge wie normal. Leeres Feld = Standard 2.000–2.250 $ / 40 %')
+      const odBlock = !odE ? '' : ad
+        ? `<div class="wd-abl-schalter lesen"><span><b>Add-on · On Demand${odInfo}</b><small>${escapeHtml(odSub)}</small></span></div>
+          <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel je 100k', odE.ziel_je_100k, Object.assign({ feld: 'on_demand.ziel_je_100k' }, fz), { bereich: true, einheit: '$', leer: 'Standard' })}
+            ${fcrFeld('Consistency', odE.consistency_pct ?? null, Object.assign({ feld: 'on_demand.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '40' })}</div>`
+        : fcrZeile('Add-on On Demand', `+${fcrSpanne(odE.ziel_je_100k, '$')} je 100k · Consistency ${fcrZahl(odE.consistency_pct ?? 40)} % · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`)
+      if(!ad) return `${fcrWAbschnitt(f.firma + alleGr)}${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}${odBlock}
         ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
       return `<div data-fcr-firmateil>${fcrWAbschnitt(f.firma + alleGr)}
         ${fcrWSchalter('firma:' + f.firma, f.an !== false, 'Im Planer')}
         ${fcrWSchalter('refund:' + f.firma, !!ep, 'Refund-Trade', 'bis zum 1. Payout', fcrInfo('refund', 'erst ein kleines Ziel mit eigenem Hedge, danach normal'))}
         ${ep ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, epFz), { bereich: true, einheit: '$' })}
             ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, epFz), { einheit: '€ je $ DD' })}</div>` : ''}
+        ${odBlock}
         ${fcrWSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', 'vor dem Ziel', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn — bis dahin je Tag ein Trade mit diesem TP'))}
         ${gt ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage_alle.anzahl' }, fz), { einheit: 'Tage' })}
           ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$' + gtBezug })}
@@ -85807,7 +85820,7 @@
         firma: String(f.name || '?'), an: f.an, weg: f.weg, namen: f.namen, ohne_namen: Array.isArray(f.ohne_namen) ? f.ohne_namen : [],
         tp_modus: f.tp_modus, tp_modus_eff: f.tp_modus_eff, tp_zyklen: f.tp_zyklen, tp_zyklen_eff: f.tp_zyklen_eff,
         consistency_pct: f.consistency_pct, consistency_pct_eff: f.consistency_pct_eff,
-        tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
+        tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, on_demand: f.on_demand, on_demand_eff: f.on_demand_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
         hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', Array.isArray(f.ohne_namen) && f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
         groessen: Object.entries(f.je_groesse).filter(([, x]) => x && typeof x === 'object').map(([gr, x]) => ({ groesse: Number(gr), roh: x, ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
           hedge_eur: x.hedge_eur, hedge_dd: x.dd, daily_loss: x.daily_loss,
@@ -85887,6 +85900,10 @@
       if(b.feld === 'ohne_namen'){
         f.ohne_namen = [...new Set((b.wert || []).map(x => String(x).trim().toLowerCase()))].sort()
         f.hinweis = [f.an === false ? 'aus — wird nicht geplant' : '', f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '); return }
+      if(b.feld.startsWith('on_demand.')){   // O1b: Add-on On Demand — leer = Standard (das Neuladen holt den echten Stand)
+        const t = b.feld.slice(10), STD = { ziel_je_100k: [2000, 2250], consistency_pct: 40 }
+        const od = Object.assign({}, f.on_demand && typeof f.on_demand === 'object' ? f.on_demand : {}); if(b.wert == null) delete od[t]; else od[t] = b.wert
+        f.on_demand = Object.keys(od).length ? od : null; f.on_demand_eff = Object.assign({}, f.on_demand_eff || STD, { [t]: b.wert ?? STD[t] }); return }
       if(b.feld.startsWith('erster_payout.') && f.erster_payout && typeof f.erster_payout === 'object'){
         const t = b.feld.slice(14); f.erster_payout = Object.assign({}, f.erster_payout, { [t]: b.wert }); f.erster_payout_eff = Object.assign({}, f.erster_payout_eff, { [t]: b.wert }) }
     }catch(_){ /* nur Anzeige — das Neuladen holt den echten Stand */ }

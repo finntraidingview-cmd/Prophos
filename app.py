@@ -41427,7 +41427,8 @@ def fcp_firma_einstellung(f, param=None):
             "consistency_pct": f.get("consistency_pct"), "consistency_pct_eff": fcp_consistency_pct(f),     # E1b: Consistency in % (None = keine)
             "tp_zyklen": f.get("tp_zyklen"), "tp_zyklen_eff": f.get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key),
             "tp_deckel_plus": f.get("tp_deckel_plus"), "tp_deckel_plus_eff": f.get("tp_deckel_plus") if f.get("tp_deckel_plus") is not None else (param or fcp_param_standard())["tp_deckel_plus_standard"],
-            "erster_payout": f.get("erster_payout"), "erster_payout_eff": fcp_erster_payout(f), "weg": FCP_WEG["name"]}
+            "erster_payout": f.get("erster_payout"), "erster_payout_eff": fcp_erster_payout(f), "weg": FCP_WEG["name"],
+            "on_demand": f.get("on_demand"), "on_demand_eff": fcp_on_demand_regel(f)}       # O1b: Add-on On Demand (DB-Override, was gilt)
 
 
 def fcp_code_werte():
@@ -41677,6 +41678,27 @@ def fcp_regel_patch(zeile, body):
         if w is None or not (w[0] if isinstance(w, list) else w) > 0 or (teil == "lots_faktor" and w > 1):
             return None, f"erster_payout.{teil}: ungültiger Wert"
         ep[teil] = w
+    elif feld in ("on_demand.ziel_je_100k", "on_demand.consistency_pct"):
+        # O1b (Finn 05.11.2026: „füg da irgendwie noch das On Demand dazu, was das ist bei FundedNext"): Add-on On Demand je Firma —
+        # leer = Feld weg (Code-Standard FCP_ON_DEMAND_STANDARD); beide leer → kein Override mehr
+        teil = feld.split(".", 1)[1]
+        od = dict(f.get("on_demand")) if isinstance(f.get("on_demand"), dict) else {}
+        if v is None or v == "":
+            od.pop(teil, None)
+        elif teil == "ziel_je_100k":
+            w = _fcp_bereich_ok(v)
+            if w is None or not w[0] > 0:
+                return None, "On Demand · Ziel je 100k: von–bis in $ (> 0)"
+            od[teil] = w
+        else:
+            w = _fcp_zahl_ok(v)
+            if w is None or not 0 < w < 100:
+                return None, "On Demand · Consistency: 1–99 %"
+            od[teil] = w
+        if od:
+            f["on_demand"] = od
+        else:
+            f.pop("on_demand", None)
     else:
         return None, "unbekanntes Feld"
     return {"firmen": firmen}, None
@@ -41780,11 +41802,12 @@ FCP_ON_DEMAND_STANDARD = {"fundednext": {"ziel_je_100k": [2000, 2250], "consiste
 def fcp_on_demand_regel(regel):
     """On-Demand-Werte der Firma ({ziel_je_100k [von, bis], consistency_pct}) — regel.on_demand (false = keine), sonst Standard je Firmen-Schlüssel."""
     r = regel or {}
-    od = r.get("on_demand") if "on_demand" in r else FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0]))
+    std = FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0])) or {}
+    od = r.get("on_demand") if "on_demand" in r else std
+    if isinstance(od, dict) and od is not std:
+        od = dict(std, **od)            # Override je Feld über dem Standard (O1b: in den Einstellungen nur Ziel ODER nur p geändert); fehlt p → Standard (Fremd-Review O1)
     if not isinstance(od, dict) or not fcp_bereich(od.get("ziel_je_100k")):
         return None
-    if "consistency_pct" not in od:     # Override ohne p → Standard der Firma (Fremd-Review O1: sonst fail-open ohne Consistency)
-        od = dict(od, consistency_pct=(FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0])) or {}).get("consistency_pct"))
     p = _wd_num(od.get("consistency_pct"))
     return {"ziel_je_100k": list(fcp_bereich(od.get("ziel_je_100k"))), "consistency_pct": float(p) if p is not None and 0 < p < 100 else None}
 
