@@ -7,7 +7,7 @@
 --     least(prophos_waage_fenster_ende(erst) [Planer-Fenster + deutsche Tagesgrenze, wie der Waage-Deckel], zeiten.cfd_bis am Tag von erst).
 --   • Läge der nächste Versuch hinter dem Fensterende → nicht weiterschieben, sondern aufgeben: start_sperre {art richtung, status aufgegeben, text
 --     „Riegel: Gegenrichtung Schwesterkonto … — nicht gestartet …"}, Protokoll in auto_plan_umplanung, kein Claim.
---   • Einmal aufgegeben: jeder echte Start-Claim wird abgewiesen (kein Order), nur der Verbrauchs-Claim des PC-Tabs (start_claim_art 'verbrauch', „verpasst")
+--   • Einmal aufgegeben (nur für DIESE Startzeit, start_sperre.start): jeder echte Start-Claim wird abgewiesen (kein Order), nur der Verbrauchs-Claim des PC-Tabs (start_claim_art 'verbrauch', „verpasst")
 --     geht durch — so endet der Plan wie ein verpasster, und die Endlesung (N2) schreibt den Grund aus start_sperre ins Review.
 -- Der 90-s-Zweig (prophos_gegenhedge_konflikt, schiebt 20–40 s) bleibt unverändert.
 -- Idempotent (create or replace), nur Funktionen. Rückbau: die Fassung aus sql/2026-10-13_gegenrichtung_hart.sql bzw. pg_get_functiondef vor dem Einspielen
@@ -61,7 +61,9 @@ begin
   -- R4b: nur Challenge-Planer-CFD bekommt Fensterende und Aufgeben
   cfd := coalesce(new.auto_plan, false) and new.route in ('mt5', 'mt5v2');
   ss := coalesce(old.mt5_baseline->'start_sperre', '{}'::jsonb);
-  if cfd and ss->>'art' = 'richtung' and ss->>'status' = 'aufgegeben' then
+  -- Prüfer-Stopp R4b: aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit (von Hand, Nachholen) startet wieder normal
+  if cfd and ss->>'art' = 'richtung' and ss->>'status' = 'aufgegeben' and old.start_um is not null and (ss->>'start') is not null
+     and (ss->>'start')::timestamptz = old.start_um then
     if coalesce(new.start_claim_art, '') = 'verbrauch' then
       return new;                          -- Verbrauch sendet nichts — der Plan endet wie ein verpasster
     end if;
@@ -75,14 +77,18 @@ begin
     txt := k || ': dein Konto ' || coalesce(hart->>'grund', 'läuft dort in Gegenrichtung');
     n := coalesce((old.mt5_baseline->'start_sperre'->>'versuche')::int, 0) + 1;
     if cfd then
-      erst := case when ss->>'art' = 'richtung' and (ss->>'erst') is not null then (ss->>'erst')::timestamptz else coalesce(old.start_um, now()) end;
+      -- erst nur aus derselben Sperr-Kette (wie Waage-Deckel D′): wartet, naechster = jetzige Startzeit, ≤ 24 h — sonst beginnt eine neue Kette
+      erst := case when ss->>'art' = 'richtung' and ss->>'status' = 'wartet' and (ss->>'erst') is not null and (ss->>'naechster') is not null
+                         and old.start_um is not null and (ss->>'naechster')::timestamptz = old.start_um
+                         and (ss->>'erst')::timestamptz > now() - interval '24 hours'
+                   then (ss->>'erst')::timestamptz else coalesce(old.start_um, now()) end;
       ende := public.prophos_cfd_fenster_ende(erst);
       if ziel > ende then
         txt := 'Riegel: Gegenrichtung Schwesterkonto — nicht gestartet (' || txt || '; Startfenster endete '
                || to_char(ende at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai, Versuch ' || n || ')';
         update public.trade_plans set
                mt5_baseline = coalesce(mt5_baseline, '{}'::jsonb) || jsonb_build_object('start_sperre', jsonb_build_object(
-                 'art', 'richtung', 'status', 'aufgegeben', 'text', txt, 'at', now(), 'erst', erst, 'ende', ende, 'versuche', n))
+                 'art', 'richtung', 'status', 'aufgegeben', 'text', txt, 'at', now(), 'erst', erst, 'ende', ende, 'versuche', n, 'start', old.start_um))
          where id = new.id;
         insert into public.auto_plan_umplanung (plan_id, user_id, firma, von_richtung, nach_richtung, von_start, nach_start, grund, quelle)
         values (new.id, new.user_id, new.master_firm, new.richtung, new.richtung, old.start_um, old.start_um, '[Gegenrichtung gleiche ID] ' || txt, 'start');

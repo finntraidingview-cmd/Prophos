@@ -39,6 +39,8 @@ def main():
     cme = html[i:html.index("\n  }\n", i) + 4]
     j = html.index("  const CFD_PAUSE_PUFFER_MS = ")
     cfd = html[j:html.index("  window._cfdIndexPauseZiel = cfdIndexPauseZiel", j)]
+    q = html.index("  function cfdAufgegeben(p){")
+    cfd += html[q:html.index("\n  window._cfdAufgegeben", q)]
     k = html.index("  function deNichtGelaufenHinweis(r, grund){")
     dng = html[k:html.index("\n  }\n", k) + 4]
 
@@ -68,6 +70,10 @@ def main():
               "out.h1 = deNichtGelaufenHinweis({ mt5_baseline: { start_sperre: { art: 'richtung', status: 'aufgegeben', text: 'Riegel: Gegenrichtung Schwesterkonto — nicht gestartet (x)' } } }, 'kein Deal');\n"
               "out.h2 = deNichtGelaufenHinweis({ mt5_baseline: { start_sperre: { art: 'richtung', status: 'wartet', text: 'y' } } }, 'kein Deal');\n"
               "out.h3 = deNichtGelaufenHinweis({ mt5_baseline: {} }, 'kein Deal');\n"
+              "var SS = { art: 'richtung', status: 'aufgegeben', start: '2026-11-04T22:00:40.099Z', text: 't' };\n"
+              "out.a1 = cfdAufgegeben({ startUm: '2026-11-04T22:00:40.099+00:00', mt5Baseline: { start_sperre: SS } });\n"
+              "out.a2 = cfdAufgegeben({ startUm: '2026-11-05T09:00:00+00:00', mt5Baseline: { start_sperre: SS } });\n"
+              "out.a3 = cfdAufgegeben({ startUm: '2026-11-04T22:00:40.099Z', mt5Baseline: { start_sperre: { art: 'richtung', status: 'aufgegeben', text: 'alt' } } });\n"
               "return JSON.stringify(out) }")
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
             f.write(js)
@@ -96,6 +102,8 @@ def main():
             py = [1 if (ns["_cme_offen_seit_s"](t / 1000) is not None and ns["_cme_offen_seit_s"](t / 1000) >= pu * 60) else 0 for t in raster]
             diff = [raster[n] for n in range(len(raster)) if py[n] != o["raster"][n]]
             check(not diff and pu == 15, f"Tab-Regel = Railway (_cme_offen_seit_s ≥ FCP_PAUSE_PUFFER_MIN {pu} min) für {len(raster)} Minuten Winter + Sommer (Abweichungen {diff[:3]})")
+            check(o["a1"] is True and o["a2"] is False and o["a3"] is False,
+                  f"aufgegeben nur für genau die Startzeit (Prüfer-Stopp R4b): gleiche {o['a1']}, neue Uhrzeit {o['a2']}, ohne start {o['a3']}")
             check(o["h1"].startswith("nicht gestartet — Riegel: Gegenrichtung Schwesterkonto") and o["h2"] == "nicht gelaufen — kein Deal" and o["h3"] == "nicht gelaufen — kein Deal",
                   f"Endlesung: aufgegebener Riegel steht im Review ({o['h1'][:60]} …), sonst wie bisher")
 
@@ -108,10 +116,15 @@ def main():
           "Start-Takt: vor rkVorStart — aufgegeben → nur Verbrauch mit Grund, Index-Pause → schieben")
     check("const cfdIndexRoute = p => !!p && (p.route === 'mt5' || p.route === 'mt5v2')" in html, "nur CFD/NAS100-Routen (Echo, Echo V2); Futures/Orbit/Topstep/Polar unberührt")
     check(".is('start_um_gestartet_at', null).eq('start_um', plan.startUm).select('*')" in html, "Schieben nur ungeclaimt und mit der alten Startzeit (Guard)")
-    check("'index_pause'].includes(s.art)" in html and "if(s.art === 'richtung' && s.status === 'aufgegeben')" in html and "hinweis: deNichtGelaufenHinweis(r, u.grund)" in html,
+    check("'index_pause'].includes(s.art)" in html and "if(s.art === 'richtung' && _aufg)" in html and "hinweis: deNichtGelaufenHinweis(r, u.grund)" in html,
           "Karte zeigt Index-Pause und aufgegebenen Riegel, Endlesung schreibt den Grund")
 
+    check("if(f.schritt === 'riegel_aufgegeben' || f.schritt === 'index_pause') return null" in html, "sfBehoben: aufgegebene Pläne plant sfTick nie von selbst neu")
     # (D) SQL
+    check("and (ss->>'start')::timestamptz = old.start_um then" in sql and "'versuche', n, 'start', old.start_um))" in sql,
+          "SQL: aufgegeben an die Startzeit gebunden — neue Uhrzeit startet wieder normal")
+    check("and (ss->>'naechster')::timestamptz = old.start_um" in sql and "(ss->>'erst')::timestamptz > now() - interval '24 hours'" in sql,
+          "SQL: erst nur aus derselben Sperr-Kette (≤ 24 h, naechster = Startzeit)")
     check("cfd := coalesce(new.auto_plan, false) and new.route in ('mt5', 'mt5v2');" in sql, "SQL: nur Challenge-Planer-CFD (auto_plan, mt5/mt5v2)")
     check("if coalesce(new.start_claim_art, '') = 'verbrauch' then" in sql and "return null;                           -- aufgegeben" in sql,
           "SQL: aufgegeben lässt nur den Verbrauchs-Claim durch")
