@@ -54202,6 +54202,41 @@
    * Copier für DIESE config status.armed === true meldet (copier.py: Fenster offen oder immer_scharf), höchstens ECHO_SCHARF_MAX_MS
    * warten — sonst keine Order, sondern Start-Fehler. REIN bis auf echoFensterSchreiben (Test-Haken window._echoFenster). */
   const ECHO_SCHARF_MAX_MS = 30000
+  /* ECHO-TEMPO ALS EINSTELLUNG (ES2, 05.11.2026, Finn: „es sollte nicht über 1 Minute dauern … die Orders sollen viel schneller prozessiert
+   * werden, wie es ganz am Anfang war"; Messung ES1: Echo vom Claim bis zur Order Median 48 s statt 28 s am 23.–27.10., p90 ~170 s, keine
+   * Überlast). Die Wartezeiten des Echo-Starts im Tab stehen in puls_heim_regel (id 1), nicht im Code (Finn 05.11.: Werte über die
+   * Einstellung): Versatz zur Startzeit, Pause zwischen zwei Echo-Starts, Höchstwartezeit Scharf-Beweis, Vorwärmen vor dem Start.
+   * Fehlt die Zeile oder eine Spalte (sql/2026-11-05_echo_tempo.sql nicht eingespielt), gelten die Werte von vorher (ECHO_TEMPO_STANDARD,
+   * Vorwärmen aus) — dann ändert sich nichts. Gestreut wird weiter (Jitter-Regel), einstellbar ist nur der Rahmen; die Untergrenzen
+   * unten lässt auch eine Einstellung nicht unterschreiten. Frisch alle 5 min im Hintergrund, nie blockierend. */
+  const ECHO_TEMPO_STANDARD = { versatzMaxMs: 4000, pauseMinMs: 5000, pauseStreuMs: 25000, scharfMaxMs: ECHO_SCHARF_MAX_MS, vorwaermenS: 0 }
+  let _echoTempo = { ...ECHO_TEMPO_STANDARD }, _echoTempoAt = 0, _echoTempoLaeuft = false
+  function echoTempoAusZeile(z){   // REIN: Zeile puls_heim_regel (oder null) → Werte, je Spalte Rückfall auf den Standard
+    const s = ECHO_TEMPO_STANDARD, r = z || {}
+    const zahl = (v, min, max, std) => { const n = Number(v); return (v === null || v === undefined || v === '' || !isFinite(n)) ? std : Math.min(max, Math.max(min, Math.round(n))) }
+    return {
+      versatzMaxMs: zahl(r.echo_versatz_max_ms, 0, 10000, s.versatzMaxMs),
+      pauseMinMs:   zahl(r.echo_pause_min_ms, 1000, 60000, s.pauseMinMs),
+      pauseStreuMs: zahl(r.echo_pause_streu_ms, 0, 60000, s.pauseStreuMs),
+      scharfMaxMs:  zahl(r.echo_scharf_max_ms, 10000, 120000, s.scharfMaxMs),
+      vorwaermenS:  zahl(r.echo_vorwaermen_s, 0, 300, s.vorwaermenS),
+    }
+  }
+  function echoTempo(){
+    if(!_echoTempoLaeuft && Date.now() - _echoTempoAt > 5 * 60000){
+      _echoTempoLaeuft = true
+      ;(async () => {
+        try{
+          const { data, error } = await supabase.from('puls_heim_regel').select('*').eq('id', 1).maybeSingle()
+          if(error) throw error
+          _echoTempo = echoTempoAusZeile(data); _echoTempoAt = Date.now()
+        }catch(e){ _echoTempoAt = Date.now() - 4 * 60000; console.warn('[echo-tempo] Einstellung nicht lesbar — letzter Stand bleibt', (e && e.message) || e) }   // in ~1 min erneut
+        finally{ _echoTempoLaeuft = false }
+      })()
+    }
+    return _echoTempo
+  }
+  window._echoTempo = { ausZeile: echoTempoAusZeile, jetzt: () => _echoTempo, STANDARD: ECHO_TEMPO_STANDARD }   // Test-Haken
   function echoFensterOk(r){
     const st = String(((r && r.plan) || {}).status || '')
     return !!(r && r.ok === true && (st === 'geplant' || st === 'laufend'))
@@ -54214,11 +54249,12 @@
   // 'scharf' | 'warten' | 'fehlt' — seitMs = seit wann das Terminal bereit ist (alive, keine note). altLaufend (Prüf-Agent 30.10.2026):
   // das Panel gab einen ALTEN „laufend"-Plan zurück (upsert_plan setzt ihn nicht auf „geplant") — bei flachem Master beendet ihn der
   // Plan-Ticker des Panels binnen 5 s, das Fenster wäre vor dem Fill zu. Dann gilt armed erst, wenn ein neues „geplant" bestätigt ist.
-  function echoScharfUrteil(inst, seitMs, altLaufend){
+  // maxMs (ES2, 05.11.2026): Höchstwartezeit aus der Einstellung (echoTempo().scharfMaxMs), ohne Angabe wie bisher ECHO_SCHARF_MAX_MS
+  function echoScharfUrteil(inst, seitMs, altLaufend, maxMs){
     const st = (inst && inst.status) || {}
     const flach = !((Array.isArray(st.master_positions) ? st.master_positions : []).length)
     if(st.armed === true && !(altLaufend && flach)) return 'scharf'
-    return seitMs > ECHO_SCHARF_MAX_MS ? 'fehlt' : 'warten'
+    return seitMs > (maxMs > 0 ? maxMs : ECHO_SCHARF_MAX_MS) ? 'fehlt' : 'warten'
   }
   async function echoFensterSchreiben(file, multiplier, versuche){
     let r = null
@@ -54235,8 +54271,11 @@
   }
   window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS }   // Test-Haken
   async function tpPreflightMt5(plan){
+    // ES2 (05.11.2026, Prüf-Fund): Merker „Check lebt" VOR dem ersten await — tpJetztStarten ruft diesen Check ohne await, sonst sähe der
+    // nächste Echo-Start während der Lots-Deckel-Lesung keinen laufenden Check (echoVorlaufAktiv) und übernähme das Popup
+    pfLebt(plan.id, 120000)
     // LOTS-DECKEL (S9 02.11.2026): Fern-Signal und Hand-Weg springen direkt hierher. Vor allem anderen, es läuft noch kein Copier
-    if(await tpLotsDeckelFrisch(plan)){ const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
+    if(await tpLotsDeckelFrisch(plan)){ pfLebt(plan.id, 0); const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
       if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
       if(typeof atToast === 'function') atToast(t, 'end')
       return }
@@ -54578,6 +54617,14 @@
       const mc = (mAcc && mAcc.creds) || {}
       const sendCreds = !!(mc.login && mc.password && String(mc.login) === String(route.masterLogin))
       pfLebt(plan.id, 120000)
+      const scharfMax = echoTempo().scharfMaxMs   // ES2: Höchstwartezeit Scharf-Beweis aus der Einstellung, für diesen Lauf fest
+      // SCHARF-BEWEIS PARALLEL (ES2 Hebel 2, 05.11.2026, ES1: der Scharf-Beweis kostete seit 30.10. im Median +9 s vor dem Bot): das
+      // Trade-Fenster geht GLEICHZEITIG mit dem Terminal-Start raus, nicht erst danach. Der Copier liest plans.json unabhängig vom
+      // Master-Terminal (copier.py plan_armed_files: „geplant" gilt 6 h ab armed_at) — ist das Terminal bereit, steht armed meist schon.
+      // Der Riegel bleibt: master-order erst bei armed === true (Ticker unten). Der Panel-eigene Start (panel.py „Trade starten") schreibt
+      // den Plan seit jeher VOR start-terminal. Scheitert der Terminal-Start, bleibt das Fenster „geplant" stehen wie nach einem Scharf-
+      // Fehler bisher auch (kein Hedge ohne Master-Position, nach 6 h zu).
+      const fenP = echoFensterSchreiben(file, plan.multiplier, 3)
       const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(sendCreds
@@ -54601,8 +54648,9 @@
           }catch(e){ console.warn('[pf/mt5] route persist:', e) }
         }
         // Trade-Fenster für den Copier (30.10.2026, s. echoFensterSchreiben): Antwort geprüft, bis zu 3 Versuche gestreut — bleibt es zu,
-        // gibt es keinen Ticker und keine Order, sondern einen Start-Fehler mit genau dieser Ursache
-        const fen = await echoFensterSchreiben(file, plan.multiplier, 3)
+        // gibt es keinen Ticker und keine Order, sondern einen Start-Fehler mit genau dieser Ursache. Seit ES2 schon mit dem Terminal-Start
+        // losgeschickt (fenP oben), hier nur das Ergebnis abwarten
+        const fen = await fenP
         if(!fen.ok){
           const grund = `Echo-Trade-Fenster nicht offen (${fen.grund}) — nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Panel/Copier prüfen, dann „Erneut versuchen".`
           _pfSet('m5term', 'err', escapeHtml(grund))
@@ -54671,11 +54719,11 @@
             // 8–12 s erneut (ein Fenster, das das Panel vor dem Fill schon wieder auf „beendet" gesetzt hat, wird so neu angelegt);
             // nach ECHO_SCHARF_MAX_MS keine Order, sondern Start-Fehler.
             if(!scharfAb) scharfAb = Date.now()
-            const urteil = echoScharfUrteil(inst2, Date.now() - scharfAb, altLaufend)
+            const urteil = echoScharfUrteil(inst2, Date.now() - scharfAb, altLaufend, scharfMax)
             if(urteil === 'fehlt'){
               _pfMt5StopTimer()
               if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null   // nie später abfeuern
-              const grund = `Copier nicht scharf — ${Math.round(ECHO_SCHARF_MAX_MS / 1000)} s nach dem Terminal-Start meldet Echo für diese Config kein offenes Trade-Fenster (armed ${String(((inst2.status) || {}).armed)}). Nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Copier-Log prüfen, dann „Weiter" → „Starten" erneut.`
+              const grund = `Copier nicht scharf — ${Math.round(scharfMax / 1000)} s nach dem Terminal-Start meldet Echo für diese Config kein offenes Trade-Fenster (armed ${String(((inst2.status) || {}).armed)}). Nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Copier-Log prüfen, dann „Weiter" → „Starten" erneut.`
               _pfSet('m5term', 'err', escapeHtml(grund))
               const feS = document.getElementById('pf-final')
               if(feS){ feS.style.display = 'block'; feS.className = 'pf-final err'; feS.textContent = '✗ Copier nicht scharf — es wurde NICHTS gesendet.' }
@@ -54690,7 +54738,10 @@
               if(Date.now() >= fensterNeuAb){
                 if(fensterNeuAb) echoFensterSchreiben(file, plan.multiplier, 1)   // nicht beim ersten Tick (eben geschrieben)
                   .then(x => { if(x && x.ok && String(x.r.plan.status) === 'geplant') altLaufend = false }, () => {})
-                fensterNeuAb = Date.now() + 8000 + Math.random() * 4000   // gestreut (Jitter-Regel)
+                // gestreut (Jitter-Regel). Altes „laufend"-Fenster (ES2, 05.11.2026): der Plan-Ticker des Panels beendet es bei flachem
+                // Master binnen 5 s, erst das nächste plan?file legt „geplant" neu an — dann 2–4 s statt 8–12 s (ein upsert auf „laufend"
+                // frischt nur armed_at auf, schadet also nie)
+                fensterNeuAb = Date.now() + (altLaufend ? 2000 + Math.random() * 2000 : 8000 + Math.random() * 4000)
               }
               _pfSet('m5term', 'warn', `⏳ Terminal bereit — ${altLaufend ? 'altes Trade-Fenster („laufend") wird erneuert' : 'warte, bis der Copier das Trade-Fenster scharf meldet'}… (${Math.round((Date.now() - scharfAb) / 1000)}s)`)
               return
@@ -54817,6 +54868,7 @@
               }
               return
             }
+            pfLebt(plan.id, 0)   // ES2: Check ohne Bot-Order ist hier durch — sonst hielte der Merker den nächsten Echo-Start bis zu 30 s auf (echoVorlaufAktiv)
             _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
             if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
               fe.textContent = '✓ Alles bereit — im MT5-Terminal traden. Die Auto-Erkennung übernimmt beim Einstieg.' }
@@ -62582,6 +62634,80 @@
     }
     return neu
   }
+  /* ECHO-VORLAUF (ES2 Hebel 4, 05.11.2026): Der Echo-Check (tpPreflightMt5) läuft ohne await — der Lauf dieses Takts endet Millisekunden
+   * nach dem Claim, die Pause danach (bisher 5–30 s) war der einzige Abstand zum nächsten Start. Ein zweiter Echo-Check übernimmt aber
+   * dasselbe Popup (_pfPlanId, _pfMt5Timer): steht der erste noch vor seiner Order (Terminal/Scharf-Beweis), bricht er ab. Mit der
+   * kürzeren Pause aus der Einstellung deshalb: ein Echo-Plan startet erst, wenn kein Echo-Check dieses Tabs mehr VOR seiner Order steht
+   * (pfLebt-Merker ohne laufende master-order) und kein Bot mehr tippt (_pfV2Laeuft, s. tpStartUmTick). */
+  function echoVorlaufAktiv(){
+    const jetzt = Date.now()
+    let laeuft = null; try{ laeuft = _pfV2Laeuft }catch(_){ laeuft = null }
+    for(const [id, bis] of _pfLebtBis) if(bis > jetzt && String(laeuft) !== id) return true
+    return false
+  }
+  // Pause nach einem Lauf (ES2): nach einem Echo-Start die Echo-Pause aus der Einstellung, für alle anderen Wege (Orbit, Polar) wie bisher
+  // 5–30 s — _suPauseBisAndere hält jeden Nicht-Echo-Start bis dahin auf, damit Puls-Chrome und ein noch tippender Echo-Bot sich nie
+  // schneller als heute begegnen
+  let _suPauseBisAndere = 0
+  /* VORWÄRMEN (ES2 Hebel 5, 05.11.2026, ES1: die langen Echo-Starts — p90 140–180 s — sind kalt startende Master-Terminals, Login > 10 s in
+   * ~12 % der Läufe, PC von Marco Median 161 s). Ein fälliger Echo-mit-Hedge-Plan (Route mt5, startet von selbst) bekommt sein Master-
+   * Terminal x s vor der Startzeit geöffnet und eingeloggt (start-terminal mit Zugangsdaten wie im Check), x = echo_vorwaermen_s, gestreut
+   * um 0–10 s früher. NUR das Terminal: kein Trade-Fenster, kein Copier scharf, keine Order — das macht der Check zur Startzeit wie bisher.
+   * Nie, solange an diesem PC etwas läuft: start-terminal holt das Fenster nach vorn (panel.py _fenster_nach_vorn) und nähme einem
+   * tippenden Bot die Tasten weg. Je Plan und Startzeit ein Versuch; läuft das Terminal schon, nichts. 0 = aus (Standard ohne Einstellung). */
+  const _echoVorgewaermt = new Map()   // planId|startUm → ms (Versuch gemacht)
+  const _echoVorwaermFrueher = new Map()   // planId|startUm → 0–10000 ms, einmal je Plan gewürfelt
+  let _echoVorwaermenLaeuft = false
+  async function echoVorwaermenTick(){
+    if(_echoVorwaermenLaeuft) return
+    try{
+      if(window._tabNebenSofort || !MT5_LOCAL || typeof window.mtcApi !== 'function') return
+      const vw = echoTempo().vorwaermenS
+      if(!(vw > 0)) return
+      let uid; try{ uid = currentUserId }catch(_){ uid = null }
+      if(!uid) return
+      let belegt = true
+      try{ belegt = !!(_suLaeuft || _pfV2Laeuft || _pfMt5Timer || _tpOrbitLaeuft || _osActive || _rsAktiv || (_rsQueue && _rsQueue.length) || polarStartSperre()) }catch(_){ belegt = true }
+      if(belegt || echoVorlaufAktiv() || document.getElementById('tpPreflightModal')?.classList.contains('open')) return
+      const jetzt = Date.now()
+      if(jetzt < _suPauseBis) return   // eben gestartet: ein Bot kann noch tippen
+      for(const [k, ms] of _echoVorgewaermt) if(jetzt - ms > 6 * 3600000) _echoVorgewaermt.delete(k)
+      if(_echoVorwaermFrueher.size > 200) _echoVorwaermFrueher.clear()
+      const scharf = !!(_suScharf && _suScharf.an)
+      let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+      const kand = (_tp || []).filter(p => p && p.route === 'mt5' && suNichtGestartet(p) && p.startUm && !_echoVorgewaermt.has(String(p.id) + '|' + p.startUm))
+        .map(p => ({ p, bis: new Date(p.startUm).getTime() - jetzt }))
+        .filter(x => x.bis > 15000 && x.bis <= vw * 1000 && suStartetVonSelbst(x.p, scharf))
+        .sort((a, b) => a.bis - b.bis)
+      if(!kand.length) return
+      const { p: plan, bis } = kand[0]
+      const schluessel = String(plan.id) + '|' + plan.startUm
+      // gestreut (Jitter-Regel): je Plan einmal 0–10 s früher als x
+      if(!_echoVorwaermFrueher.has(schluessel)) _echoVorwaermFrueher.set(schluessel, Math.floor(Math.random() * 10000))
+      if(bis > vw * 1000 - (_echoVorwaermFrueher.get(schluessel) || 0)) return
+      _echoVorwaermFrueher.delete(schluessel)
+      _echoVorgewaermt.set(schluessel, jetzt)
+      _echoVorwaermenLaeuft = true
+      const dd = await window.mtcApi('instances')
+      if(!dd || dd.copier_offline || dd._httpFail) return
+      const route = mt5RouteResolve(plan, dd.instances || [])
+      // keine Instanz → der Check zur Startzeit meldet es. alive heißt nur „Copier läuft" (panel.py: running + frisch) — bei zugefahrenem
+      // Master-Terminal steht dazu note „warte auf Snapshot" (copier.py). Warm = alive && !note wie im Ticker des Checks → nichts tun;
+      // Copier aus (!alive) → Vorwärmen nutzlos, der Check meldet es
+      const vNote = String(((route && route.inst && route.inst.status) || {}).note || '')
+      if(!route || !route.inst || !route.inst.alive || !vNote) return
+      const mAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+      const mc = (mAcc && mAcc.creds) || {}
+      const sendCreds = !!(mc.login && mc.password && String(mc.login) === String(route.masterLogin))
+      const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(sendCreds
+          ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(route.inst, mc.login, mc.server) }
+          : {}) })
+      console.info('[echo-vorwärmen]', plan.masterName || String(plan.id).slice(0, 8), Math.round(bis / 1000) + ' s vor Start →', (ts && (ts.msg || ts.error)) || (ts && ts.ok ? 'ok' : 'keine Antwort'))
+    }catch(e){ console.warn('[echo-vorwärmen]', (e && e.message) || e) }
+    finally{ _echoVorwaermenLaeuft = false }
+  }
   async function tpStartUmTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL) return
@@ -62621,7 +62747,24 @@
     try{ suVorschlaegeMelden(_tp, now) }catch(e){ console.warn('[start-um] Vorschlag-Meldung', (e && e.message) || e) }
     try{ suWarteTick({ now, scharf, erster: faellig[0] || null }) }catch(e){ console.warn('[start-um] Warte-Grund', (e && e.message) || e) }
     if(!faellig.length) return
-    let plan = faellig[0]
+    // ES2 (05.11.2026): Vorwärmen holt gleich ein Fenster nach vorn — während der paar Sekunden startet nichts (auch kein Orbit-Klick)
+    if(_echoVorwaermenLaeuft){ warte('PC beschäftigt: das Master-Terminal eines Echo-Plans wird gerade vorgewärmt (wenige Sekunden)'); return }
+    // ES2: Nicht-Echo-Wege halten die alte Pause nach einem Echo-Start ein (_suPauseBisAndere); ein Echo-Plan wartet, solange ein anderer
+    // Echo-Check dieses Tabs vor seiner Order steht (echoVorlaufAktiv) oder dessen Bot noch tippt (_pfV2Laeuft = master-order unterwegs
+    // bzw. Echo-V2-Check): der Terminal-Start des nächsten Plans holt sein Fenster nach vorn und nähme dem Bot die Tasten (Anlass PC-Tipp-
+    // Sperre .1953) — „nur so lange, bis die PC-Tipp-Sperre frei ist" (Master ES2). Nur Warte-Grund, kein Claim. Wartet der vorderste,
+    // startet der nächste fällige Plan, der darf (Prüf-Fund: ein wartender Echo-Plan hielte sonst Orbit/Polar dahinter minutenlang auf;
+    // Muster _suClaimPause — „die Schlange läuft weiter")
+    let echoBot = false; try{ echoBot = !!_pfV2Laeuft }catch(_){ echoBot = false }
+    const echoBelegt = echoBot || echoVorlaufAktiv()
+    const darf = p => routeIstEcho(p.route) ? !echoBelegt : Date.now() >= _suPauseBisAndere
+    let plan = faellig.find(darf)
+    if(!plan){
+      warte(!routeIstEcho(faellig[0].route) ? 'Zufalls-Abstand nach dem letzten Start'
+        : echoBot ? 'PC beschäftigt: Puls tippt gerade eine andere Echo-Order an diesem PC — Plan startet danach'
+        : 'PC beschäftigt: ein anderer Echo-Start dieses Tabs steht noch vor seiner Order (Popup „Trade-Start" am PC) — Plan startet danach')
+      return
+    }
     const lauf = ++_suLauf
     _suLaeuft = true; _suLaufSeit = Date.now(); _suLaufName = plan.masterName || ''; _suLaufId = String(plan.id)
     let gelaufen = false
@@ -62777,7 +62920,10 @@
       const nachLauf = _suLetzterLauf > 0 && Date.now() - _suLetzterLauf < 2 * 60000
       try{ anderes = (faellig.length > 1 && !nachLauf) || (_rsQueue && _rsQueue.length > 0) || !!_rsAktiv }catch(_){ anderes = false }
       // 28.10.2026 (Finn: „alles aus Zufall"): auch ohne Warteschlange nicht mehr auf die Sekunde — 0–4 s Versatz (kurze häufiger)
-      const jitter = anderes ? SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) : Math.round(Math.pow(Math.random(), 1.5) * 4000)
+      // ES2 (05.11.2026): für Echo-Pläne Rahmen aus der Einstellung (echoTempo: Versatz, Pause) — gestreut bleibt es; ohne Einstellung 0–4 s / 5–30 s wie bisher
+      const et = routeIstEcho(plan.route) ? echoTempo() : null
+      const jitter = anderes ? (et ? et.pauseMinMs : SU_PAUSE_MIN_MS) + Math.floor(Math.random() * (et ? et.pauseStreuMs : SU_PAUSE_STREU_MS))
+        : Math.round(Math.pow(Math.random(), 1.5) * (et ? et.versatzMaxMs : 4000))
       const jitterAnderes = anderes
       const rest = faellig.length - 1
       if(typeof atToast === 'function') atToast(jitterAnderes
@@ -62793,7 +62939,15 @@
       if(lauf === _suLauf){
         _suLaeuft = false
         // Nach einem Lauf: Zufalls-Abstand, bevor der nächste aus der Schlange startet (Jitter-Regel, nie fest)
-        if(gelaufen){ _suLetzterLauf = Date.now(); _suPauseBis = _suLetzterLauf + SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) }
+        if(gelaufen){
+          _suLetzterLauf = Date.now()
+          _suPauseBisAndere = _suLetzterLauf + SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS)
+          // ES2: nach einem Echo-Start die Echo-Pause aus der Einstellung (Nicht-Echo-Wege halten _suPauseBisAndere ein, s. oben)
+          const etP = routeIstEcho(plan && plan.route) ? echoTempo() : null
+          // ohne eigene Werte (Einstellung fehlt / gleich 5–30 s) dieselbe gewürfelte Pause wie bisher — nichts ändert sich
+          const eigen = etP && (etP.pauseMinMs !== SU_PAUSE_MIN_MS || etP.pauseStreuMs !== SU_PAUSE_STREU_MS)
+          _suPauseBis = eigen ? _suLetzterLauf + etP.pauseMinMs + Math.floor(Math.random() * etP.pauseStreuMs) : _suPauseBisAndere
+        }
       }
     }
   }
@@ -62801,6 +62955,7 @@
     vorschlaegeMelden: suVorschlaegeMelden, claimGuard: SU_CLAIM_GUARD, gemeldetReset: () => { _suVorschlagGemeldet = null; try{ localStorage.removeItem(SU_VORSCHLAG_LS) }catch(_){} },
     stand: () => ({ laeuft: _suLaeuft, pauseBis: _suPauseBis, claimPause: [..._suClaimPause.entries()] }) }   // Test-Haken (Stub)
   setInterval(tpStartUmTick, 1000)   // 15 s → 1 s (23.09.2026): die Prüfung ist rein lokal, die DB sieht nur den Claim
+  setInterval(echoVorwaermenTick, 5000)   // ES2 Hebel 5: rein lokal bis zum Terminal-Start, ohne Einstellung (vorwaermenS 0) sofort zurück
   /* ══ ENDE GEPLANTE STARTZEIT ══ */
 
   /* ══ AUTO-PLANER (05.10.2026, Finn: „die KI erkennt, bei welchem Step der Account steht, und plant den nächsten Trade —
