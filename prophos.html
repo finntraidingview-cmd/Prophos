@@ -3996,6 +3996,19 @@
   #e3-einst .e3-schalt{appearance:none;-webkit-appearance:none;width:32px;height:18px;border-radius:999px;background:var(--e3-rand);position:relative;cursor:pointer;margin:0;transition:background .15s}
   #e3-einst .e3-schalt::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.25);transition:left .15s}
   #e3-einst .e3-schalt:checked{background:var(--e3-lila)} #e3-einst .e3-schalt:checked::after{left:16px}
+  /* UI1/UI1b: Kopf wie die Funded-CFD-Gruppe (Kurzzeile, Knopf rechts), „Planer & Hedge · alle Firmen" oben in der rechten Karte */
+  #e3-einst .e3-gruppe .panel-title .e3-kurz{font-size:12px;font-weight:400;color:var(--e3-sub);margin-left:12px}   /* wie .fcr-w-sub: in der Titelzeile */
+  #e3-einst .e3-kopf-platz{margin-left:auto;display:inline-flex;align-items:center}
+  #ap-ids-root.ap-guestly #e3-einst .e3-kopf-platz .apg-haupt{padding:7px 14px;font-size:12.5px}
+  #ap-ids-root.ap-guestly #e3-einst .apg-alle{margin-bottom:4px} #ap-ids-root.ap-guestly #e3-einst .apg-alle .e3-alle-titel{margin-top:0;padding-top:0;border-top:0}
+  #ap-ids-root.ap-guestly #e3-einst .apg-alle .apg-alle-gilt{font-weight:400;color:var(--e3-sub);text-transform:none;letter-spacing:0;margin-left:4px}
+  #ap-ids-root.ap-guestly #e3-einst .apg-alle-status{font-size:11.5px;color:var(--e3-sub);margin:-2px 0 6px}
+  #e3-einst .e3-gp-knopf{flex:none;height:26px;padding:0 10px;font-size:12px}
+  /* Rückfall ohne Einstellungs-Gruppe (lädt noch / Fehler): Block als kleine Karte über dem Zeitstrahl, Schalter bedienbar */
+  #ap-ids-root.ap-guestly > .apg-alle{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;padding:12px 16px;margin-bottom:16px}
+  #ap-ids-root.ap-guestly > .apg-alle .wd-abl-schalter{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:5px 0;font-size:13px}
+  #ap-ids-root.ap-guestly > .apg-alle .wd-abl-schalter small{display:block;color:var(--g-sub);font-size:11.5px}
+  #ap-ids-root.ap-guestly > .apg-alle .apg-alle-status{font-size:11.5px;color:var(--g-sub)}
   #e3-einst .e3-schalt:disabled{opacity:.5;cursor:default}
   #e3-einst .e3-mod{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:var(--e3-lila)}
   #e3-einst .e3-mod.orbit{background:var(--e3-tuerkis)} #e3-einst .e3-mod.topstep{background:var(--e3-blau)}
@@ -85461,8 +85474,10 @@
     }).join('')
   }
   function gpVerdrahten(root){
-    root.querySelectorAll('[data-gp-auf]').forEach(b => b.addEventListener('click', () => { _gp.auf = _gp.auf === b.dataset.gpAuf ? '' : b.dataset.gpAuf; apIdsRender() }))
-    root.querySelectorAll('[data-gp]').forEach(b => b.addEventListener('click', async () => {
+    // UI1b: #e3-einst überlebt apIdsRender — ein Knopf wird nur einmal gebunden (sonst zwei Listener: an und gleich wieder aus)
+    const neu = sel => [...root.querySelectorAll(sel)].filter(b => { if(b.dataset.gpGebunden) return false; b.dataset.gpGebunden = '1'; return true })
+    neu('[data-gp-auf]').forEach(b => b.addEventListener('click', () => { _gp.auf = _gp.auf === b.dataset.gpAuf ? '' : b.dataset.gpAuf; apIdsRender() }))
+    neu('[data-gp]').forEach(b => b.addEventListener('click', async () => {
       const [aktion, gid] = b.dataset.gp.split(':'), g = _gp.gruppen.find(x => String(x.gruppe_id) === gid); if(!g || _gp.laeuft) return
       _gp.laeuft = true; _gp.msg = aktion === 'probe' ? 'Probelauf rechnet …' : (aktion === 'planen' || aktion === 'morgen') ? 'plant …' : ''; apIdsRender()
       try{
@@ -85600,8 +85615,50 @@
     if(fc){ const np = x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''}>${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''
       let einst = ''; try{ einst = fcrLeisteHtml(np) }catch(e){ console.warn('[fcr] Einstellungen', e) }
       return kopf + kpis + charts + zs + einst + listen + unten }
-    return kopf + kpis + charts + leiste + zs + (x.funded ? '' : '<div class="e3-platz" data-e3-platz></div>') + listen + unten   // E3c: Einstellungen unter dem Zeitstrahl, vor „Zu bestätigen“
+    // UI1b (Finn 05.11.2026: „Diese obere Einstellungsgruppe mit Bot an, Echo-Hedge … bitte alles runter in die Einstellungen packen"): im Challenge-Planer
+    // steht statt der Leiste der Block „Planer · alle Firmen" — apIdsRender hängt ihn in die Karte „Planer & Hedge" (#e3-einst), solange die steht
+    const oben = (!fd && !x.funded) ? apgAlleHtml(v, x) : leiste
+    return kopf + kpis + charts + oben + zs + (x.funded ? '' : '<div class="e3-platz" data-e3-platz></div>') + listen + unten   // E3c: Einstellungen unter dem Zeitstrahl, vor „Zu bestätigen“
   }
+  /* PLANER · ALLE FIRMEN (UI1b, Finn 05.11.2026): die frühere obere Leiste des Challenge-Planers (Bot, Echo-Hedge, Orbit Prio 2, Tradeify-Final-Hedge,
+   * Nachtlauf/letzter Lauf, „Nachplanen") als Block oben in „Planer & Hedge" der Einstellungs-Gruppe. Dieselben Eingaben und Handler wie bisher:
+   * data-apd-schalter (change-Listener an #ap-ids-root → apdEinstellung, Rechte im Backend), data-tpl-nachplan (tplKlick an #ap-ids-root) — #e3-einst
+   * hängt in #ap-ids-root, die Ereignisse kommen dort an. Nur der Ort und der Stil (Schalter wie die übrigen e3-Schalter) sind neu.
+   * S4-Stopp (05.11.2026): in der Gruppen-Sicht (Verwalter, D.gruppe_sicht — Unternehmen getrennt) gibt es den HT-Block nicht. */
+  const apgGruppenSicht = () => { try{ return !!(_e3.d && _e3.d.gruppe_sicht) }catch(_){ return false } }
+  function apgAlleHtml(v, x){
+    if(apgGruppenSicht()) return ''
+    const admin = apdAdmin(), sperr = k => (!admin || _apd.busy.has(k)) ? ' disabled' : ''
+    const zeile = (k, an, titel, sub, tip) => `<label class="wd-abl-schalter" title="${escapeHtml(admin ? tip : 'nur Admin')}"><span><b>${escapeHtml(titel)}</b>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</span>`
+      + `<input type="checkbox" class="e3-schalt" data-apd-schalter="${k}"${an ? ' checked' : ''}${sperr(k)} aria-label="${escapeHtml(titel)}"></label>`
+    const r = []
+    r.push(zeile('aktiv', !!(v.bot || {}).aktiv, 'Ausgleichs-Bot', 'Waage und Richtung im Takt', 'Ausgleichs-Bot an/aus'))
+    if(v.echo_hedge && typeof v.echo_hedge.an === 'boolean') r.push(zeile('echo_hedge', v.echo_hedge.an, 'Echo-Hedge', 'CFD-Challenges als Echo mit Fusion-Hedge',
+      `HT-CFD-Challenges starten als Echo mit Fusion-Hedge (Faktor ${v.echo_hedge.netto_faktor}, max. ${v.echo_hedge.max_lots} Lot) — aus = Echo V2 ohne Hedge`))
+    if(v.apex_hedge && typeof v.apex_hedge.an === 'boolean') r.push(zeile('apex_hedge', v.apex_hedge.an, 'Orbit Prio 2', 'Apex + Firmen mit Modell Orbit Prio 2 mit Fusion-Hedge',
+      'Orbit Prio 2: Challenges starten wie Winning Days mit Fusion-Hedge — aus = Orbit V2 ohne Hedge'))
+    if(v.tradeify_final_hedge && typeof v.tradeify_final_hedge.an === 'boolean') r.push(zeile('tradeify_final_hedge', v.tradeify_final_hedge.an, 'Tradeify-Final-Hedge', 'finaler Trade mit Fusion-Gegenhedge',
+      'finaler Tradeify-Futures-Trade als Orbit V3 mit Fusion-Gegenhedge — aus = finale Trades werden gehalten'))
+    const status = `Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${x.lzAt ? ' · letzter Lauf ' + escapeHtml(x.lzAt) : ''}`
+    const knopf = x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1" data-apg-alle-knopf${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''
+    return `<div class="apg-alle" data-apg-alle><div class="wd-abl-abschnitt e3-alle-titel">Planer &amp; Hedge · alle Firmen <small class="apg-alle-gilt">gilt für alle</small></div>
+        <div class="apg-alle-status">${status}</div>${r.join('')}${apdBotMeldungHtml()}<span class="apg-alle-knopf" data-apg-alle-knopf-quelle>${knopf}</span></div>`
+  }
+  // Umzug in die Einstellungs-Gruppe: Block in „Planer & Hedge" (data-e3-alle-platz), Knopf in den Kopf der Gruppe (data-e3-kopf-platz). Ohne Gruppe bleibt
+  // der Block an seiner Stelle über dem Zeitstrahl. Nach jedem Neuzeichnen von #e3-einst (e3Neu) setzt er sich wieder ein. Gruppen-Sicht: Block weg.
+  function apgAlleEinsetzen(){
+    const root = document.getElementById('ap-ids-root'), box = document.getElementById('e3-einst')
+    const blk = (root && root.querySelector('[data-apg-alle]')) || _apg.alleKnoten
+    if(apgGruppenSicht()){ if(blk && blk.parentNode) blk.remove(); _apg.alleKnoten = null; _apg.alleKnopf = null; return }
+    if(!blk || !box || !root || !root.contains(box)) return
+    const platz = box.querySelector('[data-e3-alle-platz]'), kopf = box.querySelector('[data-e3-kopf-platz]')
+    if(!platz) return
+    _apg.alleKnoten = blk
+    if(blk.parentNode !== platz) platz.replaceChildren(blk)
+    const quelle = blk.querySelector('[data-apg-alle-knopf-quelle]'), kn = (quelle && quelle.firstElementChild) || _apg.alleKnopf
+    if(kopf){ if(kn){ _apg.alleKnopf = kn; if(kn.parentNode !== kopf) kopf.replaceChildren(kn) } else kopf.replaceChildren() }
+  }
+  window._apgAlleEinsetzen = apgAlleEinsetzen
   /* P&L VON HEUTE (30.10.2026, Finn ~06:55 über den Master: „P&L von heute — wie gut/schlecht der Tag läuft"): dieselben Radar-Zeilen wie die
    * Heute-Bilanz (_tpl.lt aus /admin/live-trades, schon Sicht je Gruppe) — Start heute (Dubai), ohne Winning Day, Polar, Tage-Mini; dazu
    * ID-Filter (apSichtUid), Firmen-Filter, Kontoart CFD/Futures (apArtPasst) und nur Challenge-/Phase-Konten (TPL_TYPEN). Master $ = master_pl.wert, Fusion € wie das Abhak-Popup
@@ -87219,6 +87276,7 @@
     root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + (gHtml || (leiste + gpHtml + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb))
     const e3p = root.querySelector('[data-e3-platz]')
     if(e3k && e3p){ e3p.appendChild(e3k); if(e3f && document.activeElement !== e3f) try{ e3f.focus({ preventScroll: true }) }catch(_){} }
+    try{ _apg.alleKnoten = null; _apg.alleKnopf = null; apgAlleEinsetzen() }catch(e){ console.warn('[apg] Planer · alle Firmen', e) }   // UI1b
     if(gHtml){ apGuestlyVerdrahten(root); try{ apgZeilenSchmuecken(root, ow) }catch(e){ console.warn('[apg] Weg-Chips', e) } }
     root.querySelector('details[data-ap-hb]')?.addEventListener('toggle', e => { _apIds.hbAuf = !!e.target.open })
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
@@ -87785,7 +87843,9 @@
     const gs = D.gruppe_sicht
     const uhrG = (pfad, wert) => (gs && (D.unternehmen || {}).spalte_regeln === false) ? `<div class="wd-abl-wert">${e3E(wert || '—')}</div>` : uhr(pfad, wert)   // ohne Spalte regeln: Startfenster nur Anzeige
     const feAbw = ((D.abweichung || {}).zeiten || []).some(x => JSON.stringify(x) === '["fenster"]')
-    const planerG = gs ? `<div data-e3-ablauf><label class="wd-abl-schalter"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · an/aus oben in der Planer-Leiste</small></span><b>${gs.aktiv ? 'an' : 'aus'}</b></label>
+    // S4-Stopp UI1b: an/aus der Gruppe hier (die obere Leiste gibt es nicht mehr) — derselbe Knopf/Handler wie in gpLeisteHtml (data-gp="aktiv:<gruppe>", gpVerdrahten)
+    const gpKnopf = gs && gs.gruppe_id ? `<button type="button" class="btn btn-ghost btn-xs e3-gp-knopf" data-gp="aktiv:${e3E(String(gs.gruppe_id))}" title="Nachtlauf dieser Gruppe zur selben Zeit wie Hermann Technologies">${gs.aktiv ? 'Ausschalten' : 'Einschalten'}</button>` : ''
+    const planerG = gs ? `<div data-e3-ablauf><label class="wd-abl-schalter lesen"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · ${gs.aktiv ? 'an' : 'aus'}${(typeof _gp !== 'undefined' && _gp.msg) ? ' · ' + e3E(_gp.msg) : ''}</small></span>${gpKnopf || `<b>${gs.aktiv ? 'an' : 'aus'}</b>`}</label>
       ${fe ? `<div class="wd-felder${feAbw ? ' e3-abw' : ''}">${feld(`Start ab <small>· ${e3E(tz)}</small>`, uhrG(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhrG(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1]))}${feAbw && admin ? '<button type="button" class="e3-std" data-e3-std-zeiten title="Startfenster auf Standard zurück">↺</button>' : ''}</div>` : ''}
       <div class="e3-unt-hinweis">Bestätigen, Neue-Konten-Zeit und die Hedge-Schalter gelten für alle Unternehmen — ändern unter „Hermann Technologies (Standard)“.</div></div>` : ''
     let firma = ''
@@ -87828,7 +87888,7 @@
         ${modell}${bl}</div>`
     }
     const knopf = admin ? `<span class="e3-k4"><span class="e3-msg" data-e3-ablauf-msg></span><button type="button" class="btn btn-ghost btn-xs" data-e3-rechts-speichern${sel ? ` data-e3-firma-n="${e3E((sel.namen || [])[0])}"` : ''}>Speichern</button></span>` : ''
-    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', gs ? `${cfd ? 'CFD' : 'Futures'} · ${gs.name || ''}` : `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, knopf)}${gs ? planerG : planer}${firma}</div>`
+    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', gs ? `${cfd ? 'CFD' : 'Futures'} · ${gs.name || ''}` : `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, knopf)}${gs ? planerG : '<div data-e3-alle-platz></div>' + planer}${firma}</div>`   // UI1b: „Planer & Hedge · alle Firmen" oben (nur ohne Gruppen-Sicht)
   }
   function e3Html(D, art){
     const admin = D.admin === true || (!!D.unternehmen && D.gruppe_darf === true), firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
@@ -87841,7 +87901,12 @@
     // Spalte regeln fehlt (SQL nicht eingespielt): im Unternehmen nur „im Planer" + Modell änderbar, alles andere Anzeige (Master: klare Meldung statt Fehler)
     _e3.untFelder = D.unternehmen ? new Set((D.unternehmen.spalte_regeln === false) ? [] : (D.unt_felder || [])) : null
     const unt = (D.unternehmen_liste || []).length > 1 ? `<span class="e3-unt">${D.unternehmen_liste.map(u => `<button type="button" class="e3-unt-b${String(u.gruppe_id || '') === String((D.unternehmen || {}).gruppe_id || '') ? ' an' : ''}" data-e3-unt="${e3E(u.gruppe_id || '')}">${e3E(u.name || '?')}</button>`).join('')}</span>` : ''
-    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · ' + e3E(gs.name || '') + ' · Standard + eigene Änderungen' : admin ? '' : ' · nur ansehen'}</span></div>${unt}</div>
+    // KOPF WIE DIE FUNDED-CFD-GRUPPE (UI1, Finn 05.11.2026: „genau diese Gruppe soll auch zum Challenge-Planer kommen"): „Einstellungen" + Kurzzeile
+    // Planer an/aus · Startfenster · n Firmen · Modell, rechts „Nachplanen" (UI1b-Platz data-e3-kopf-platz, nur ohne Gruppen-Sicht) — S6-Chips (${unt}) bleiben
+    const zk = D.zeiten || {}, fk = Array.isArray(zk.fenster) && zk.fenster.length ? zk.fenster : null
+    const mods = art === 'cfd' ? ['Echo · mit Hedge'] : [...new Set(firmen.map(f => f.route === 'tsv2' ? 'Topstep V2' : (e3ModellWert(f, D) === 'orbit_prio2' ? 'Orbit Prio 2 · mit Hedge' : 'Orbit V2')))]
+    const kurz = [`Planer ${(gs ? gs.aktiv : D.aktiv) ? 'an' : 'aus'}`, fk ? `${fk[0][0]}–${fk[fk.length - 1][1]} ${e3Tz(zk.fenster_tz)}` : '', `${firmen.length} Firmen`, ...mods].filter(Boolean)
+    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · ' + e3E(gs.name || '') + ' · Standard + eigene Änderungen' : admin ? '' : ' · nur ansehen'}</span><span class="e3-kurz">${kurz.map(e3E).join(' · ')}</span></div>${unt}${gs ? '' : '<span class="e3-kopf-platz" data-e3-kopf-platz></span>'}</div>
       <div class="wd-set-grid">${e3FirmenKarte(D, art, admin, firmen, w)}${e3ZielTradeKarte(D, art, admin, sel)}${e3PlanerHedgeKarte(D, art, admin, sel)}</div></div>`
   }
   async function e3Laden(){
@@ -87874,6 +87939,8 @@
     const schl = el => (el.dataset.e3Ort || 'kern:' + ((el.closest('[data-e3-firma]') || {}).dataset || {}).e3Firma) + '|' + el.dataset.e3Pfad + '|' + (el.dataset.e3I || '')
     const offen = [...box.querySelectorAll('[data-e3-pfad]')].filter(e3Geaendert).map(el => [schl(el), el.type === 'checkbox' ? el.checked : el.value])
     box.innerHTML = e3Html(_e3.d, art)
+    try{ window._apgAlleEinsetzen?.() }catch(_){}   // UI1b: Block „Planer · alle Firmen" + „Nachplanen" wieder hinein (nicht in der Gruppen-Sicht)
+    try{ gpVerdrahten(box) }catch(_){}                // S4-Stopp UI1b: Gruppen-Planer an/aus (data-gp) im Gruppen-Block — derselbe Handler wie die alte Leiste
     if(offen.length){ const je = new Map(offen); box.querySelectorAll('[data-e3-pfad]').forEach(el => { const k = schl(el)
       if(!je.has(k)) return; if(el.type === 'checkbox') el.checked = je.get(k); else el.value = je.get(k); el.classList.toggle('geaendert', e3Geaendert(el)) }) }
     box.querySelectorAll('[data-e3-pfad]').forEach(el => el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => el.classList.toggle('geaendert', e3Geaendert(el))))

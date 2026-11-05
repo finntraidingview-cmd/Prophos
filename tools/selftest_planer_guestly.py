@@ -45,7 +45,9 @@ def main():
     # weitere Funktionen (P&L heute, Challenge-Verlauf mit eigener Abfrage /verlauf-eur, Funded-CFD-Regeln …), die nicht zum Gerüst gehören
     g = s[i:s.index("\n  }\n", i) + 4]
     # E3c (Einstellungen-Platz unter dem Zeitstrahl) und Funded CFD E1c (Gruppe statt Leiste, eigener Zweig) — bewusste Reihenfolgen seit 04./05.11.2026
-    ok("return kopf + kpis + charts + leiste + zs + (x.funded ? '' : '<div class=\"e3-platz\" data-e3-platz></div>') + listen + unten" in g
+    # UI1b (05.11.2026): im Challenge-Planer steht statt der Leiste der Block „Planer · alle Firmen" (oben), der in die Einstellungs-Gruppe umzieht
+    ok("return kopf + kpis + charts + oben + zs + (x.funded ? '' : '<div class=\"e3-platz\" data-e3-platz></div>') + listen + unten" in g
+       and "const oben = (!fd && !x.funded) ? apgAlleHtml(v, x) : leiste" in g
        and "return kopf + kpis + charts + zs + einst + listen + unten }" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · (E3-Platz) · Listen; Funded CFD: Zeitstrahl · Einstellungen · Listen")
     ok('<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button>' in g, "7/30 Tage ausgegraut mit „kommt“")
     ok("data-ap-tag" in g and "data-apg-id" in g and "data-apg-firma" in g, "Zeitraum + Filter ID/Firma")
