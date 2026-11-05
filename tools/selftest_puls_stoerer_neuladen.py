@@ -32,7 +32,10 @@ src = open(BOT, encoding="utf-8").read()
 ns = {"re": re, "_warte": lambda *a, **k: None, "cdp_rect": lambda el: (el or {}).get("rect") if isinstance(el, dict) else None,
       "_cdp_kachel_weg": lambda s, trail: 0}
 exec(re.search(r"^CDP_TAUB_STOERER_TAGS = .*$", src, re.M).group(0), ns)
-for name in ("cdp_taub_stoerer", "_cdp_seite_stoerer_versuch", "_cdp_tab_neu_laden", "_cdp_nach_link_mit_neuladen"):
+# RT1 (05.11.2026): 3530eded (.1784) hat CDP_TAUB_STOERER_RX („Go ad-free“-Karte) in cdp_taub_stoerer ergänzt — Lader holt sie mit
+exec(re.search(r"^CDP_TAUB_STOERER_RX = .*$", src, re.M).group(0), ns)
+# RT1 (05.11.2026): 3530eded (.1784) hat die Räumung aus _cdp_seite_stoerer_versuch in _cdp_stoerer_raeumen ausgelagert (gemeinsam mit Units-Feld)
+for name in ("cdp_taub_stoerer", "_cdp_stoerer_raeumen", "_cdp_seite_stoerer_versuch", "_cdp_tab_neu_laden", "_cdp_nach_link_mit_neuladen"):
     exec(fn(src, name), ns)
 T, V, NL, NLM = ns["cdp_taub_stoerer"], ns["_cdp_seite_stoerer_versuch"], ns["_cdp_tab_neu_laden"], ns["_cdp_nach_link_mit_neuladen"]
 
