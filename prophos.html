@@ -9409,7 +9409,7 @@
                   <th>Typ</th>
                   <th>Balance</th>
                   <!-- „Wert" (Kontowert) raus, „Planer" an die Stelle (Finn 08.10.2026: „den Wert nutze ich eh nie, ersetze ihn mit Planer") -->
-                  <th title="Add-ons des Kontos (1 % Rule, On Demand — Klick schaltet an/aus) und der Auto-Planer-Haken (Stand des letzten Laufs im Tooltip)">Add-ons</th>
+                  <th title="Add-ons des Kontos (1 % Rule nur FundedNext, On Demand) — Klick schaltet an/aus; der Auto-Planer-Haken steht im Konto-Bearbeiten">Add-ons</th>
                   <th>Verknüpfungen</th>
                   <th style="padding-right:20px"></th>
                 </tr>
@@ -45611,7 +45611,7 @@
             <td>${escapeHtml(a.firm || '–')}</td>
             <td>${accTypChipHtml(a)}${isArchived ? '' : accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${a.type === 'funded_cfd' ? '' : accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
-            <td data-stop-row-click="1"><span class="acc-addon-zelle">${accAddonsHtml(a, isArchived)}${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived, true)) : accPlanerZelleHtml(a, isArchived, true)}</span></td>
+            <td data-stop-row-click="1">${accAddonsHtml(a, isArchived) || '<span style="color:var(--sub-2)">—</span>'}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
