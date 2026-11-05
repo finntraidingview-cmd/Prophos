@@ -223,6 +223,19 @@ def teil_ziel_wache():
     check(emp(M) == {M}, "6c Gruppen nicht lesbar → nur der Besitzer")
 
 
+# ── 7) Feed-Token ──
+def teil_feed_token():
+    n = lade(NEU_SRC, HELFER + ("reader_feed_pc_erlaubt",))
+    e = n["reader_feed_pc_erlaubt"]
+    ht, em = n["ap_unternehmen_von_login"](A, DATEN), n["ap_unternehmen_von_login"](X, DATEN)
+    check(e(A, M, ht) and e(A, A, ht) and e(A, None, ht), "7a HT-Login: Schlüssel für HT-PCs, eigene und neue PCs wie bisher")
+    check(not e(A, X, ht) and not e(X, M, em) and e(X, E, em), "7b fremdes Unternehmen → kein Schlüssel (HT ↛ Emin-PC, Emin ↛ HT-PC), Emin ↔ Emin ja")
+    check(not e(A, M, lambda u: str(u) == A) and e(A, A, lambda u: str(u) == A), "7c Gruppen nicht lesbar → nur PCs der eigenen ID")
+    i = NEU_SRC.index("\ndef reader_feed_token(")
+    r = NEU_SRC[i:NEU_SRC.index("\n\n\n", i)]
+    check("if not reader_feed_pc_erlaubt(uid, _pc_feed_besitzer(pc), unt_sicht_login(uid)):" in r and "), 403" in r, "7d POST /reader-feed-token prüft den PC-Besitzer (403)")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")

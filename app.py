@@ -18995,7 +18995,29 @@ def reader_feed_token():
     pc = str((request.get_json(silent=True) or {}).get("pc") or "").strip()
     if not READER_KENNUNG_MUSTER.fullmatch(pc):
         return jsonify({"ok": False, "msg": "pc ungültig"}), 400
+    # UNT5 (05.11.2026): Schlüssel nur für einen PC des eigenen Unternehmens — vorher konnte jeder Login einen Feed-/Code-Schlüssel für jeden
+    # fremden PC-Namen ausstellen. Besitzer = jüngste mt5_live-Meldung (pc_namen-Cache, 60 s); PC ohne bekannten Besitzer (neu) = der Login selbst.
+    # Gruppen nicht lesbar → nur PCs der eigenen ID (fail-closed). Der Tab versucht es jede Minute neu (epFeedSchluessel), ein ID-Wechsel am PC
+    # löst sich, sobald die neue ID dort mt5_live geschrieben hat.
+    if not reader_feed_pc_erlaubt(uid, _pc_feed_besitzer(pc), unt_sicht_login(uid)):
+        print(f"[reader-feed] ⛔ {uid[:8]} Schlüssel für {pc} abgelehnt — PC gehört zu einem anderen Unternehmen", flush=True)
+        return jsonify({"ok": False, "msg": "Dieser PC gehört zu einem anderen Unternehmen"}), 403
     return jsonify({"ok": True, "token": f"{uid}.{pc}.{_reader_feed_sig(uid, pc)}"})
+
+
+def reader_feed_pc_erlaubt(uid, besitzer, gehoert):
+    """REIN RECHNEND (testbar, UNT5): darf uid einen Schlüssel für diesen PC bekommen? Kein bekannter Besitzer oder er selbst → ja, sonst nur
+    gleiches Unternehmen (gehoert = unt_sicht_login(uid))."""
+    return (not besitzer) or str(besitzer) == str(uid) or bool(gehoert(besitzer))
+
+
+def _pc_feed_besitzer(pc):
+    """Besitzer des PCs (jüngste mt5_live-Meldung) aus dem pc_namen-Cache; Lesefehler → None (= wie ein neuer PC: nur der Login selbst)."""
+    try:
+        _pc_namen_daten()
+        return (_pc_namen_cache.get("besitzer") or {}).get(pc)
+    except Exception:
+        return None
 
 
 # ── CODE-QUELLE (07.10.2026, Finn: „man kann Prophos ja jetzt klauen" → Repo privat; Finn im Chat: „Code-Auslieferung über
