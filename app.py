@@ -13388,6 +13388,50 @@ _liq_verlauf_cache = {}
 # PB1 (S2/Master 05.11.2026, Emins FNF Futures 50k …3807: +1.000 $ am 04.11. über Duplikum, Verlauf leer → Boden 48.500 statt 49.498): der Verlauf liest
 # auch tvplus (Duplikum, Futures über TradingView). Zeilen ohne Balance-Beleg zählen in keinem Höchststand, machen aber den beendeten Trade für
 # ah_eod_beleg sichtbar. Routen direkt im Select (die Selbsttest-Lader ziehen die Funktion als Block, ohne Modul-Konstanten).
+def liq_verlauf_nach_reset(zeilen, reset_at=None, ext_id=None):
+    """REIN RECHNEND (testbar, SA3 05.11.2026, Hinweis S6/MO1b: „Ein Lucid-Reset auf derselben Konto-Zeile behält alte EOD-Hochs, auch im Radar"):
+    nur Verlaufs-Zeilen NACH dem letzten Reset des Kontos. Reset = (1) reset_at: jüngste Kauf-/Reset-Buchung (transactions account_purchase) auf
+    dieser Konto-Zeile — Zeilen, die davor starteten (bzw. ohne Start davor endeten), zählen nicht; (2) neue External ID: der Plan-Name (master_name,
+    Namensregel „<Größe> <External ID> → <Phase>") nennt ausdrücklich eine ANDERE Kontonummer derselben Form (Präfix der aktuellen ID + ≥ 6 Ziffern,
+    z. B. Lucid LFE…/LFF…) und nicht die aktuelle. Ohne erkennbare Form (Topstep 150KTC-…, Namen ohne Nummer) bleibt die Zeile — im Zweifel zählt
+    das alte Hoch (höherer Boden = vorsichtig). Live 05.11.2026 bitgleich: kein Plan vor der letzten Kaufbuchung seines Kontos."""
+    rs = _ap_ts(reset_at) if reset_at else None
+    ext = str(ext_id or "").strip()
+    m = re.match(r"[A-Za-z]{2,}", ext)
+    tok = re.compile(r"(?<![A-Za-z0-9])" + re.escape(m.group(0)) + r"[0-9]{6,}(?![A-Za-z0-9])", re.I) if m and len(ext) >= 8 else None
+    out = []
+    for z in zeilen or ():
+        t = _ap_ts(z.get("started_at") or z.get("ended_at"))
+        if rs and t and t < rs:
+            continue
+        if tok:
+            name = str(z.get("master_name") or "")
+            if ext.upper() not in name.upper() and any(x.upper() != ext.upper() for x in tok.findall(name)):
+                continue
+        out.append(z)
+    return out
+
+
+def _liq_reset_infos(acc_ids):
+    """{konto_id: (reset_at | None, external_id | None)} für liq_verlauf_nach_reset — Lesefehler → {} (dann wie bisher: kein Filter)."""
+    ids = sorted({str(x) for x in acc_ids if x})
+    out = {}
+    try:
+        for i in range(0, len(ids), 80):
+            teil = ",".join(ids[i:i + 80])
+            for a in sb_select("accounts", {"select": "id,external_id", "id": f"in.({teil})"}) or []:
+                out[str(a.get("id"))] = [None, a.get("external_id")]
+            for t in _sb_all("transactions", {"select": "account_id,occurred_at", "kind": "eq.account_purchase", "account_id": f"in.({teil})"}) or []:
+                k = str(t.get("account_id"))
+                e = out.setdefault(k, [None, None])
+                if t.get("occurred_at") and (e[0] is None or (_ap_ts(t["occurred_at"]) or datetime.min.replace(tzinfo=timezone.utc)) > (_ap_ts(e[0]) or datetime.min.replace(tzinfo=timezone.utc))):
+                    e[0] = t["occurred_at"]
+    except Exception as e:
+        print(f"[liq-verlauf] ⚠️ Reset-Infos: {type(e).__name__}: {e} — ohne Reset-Filter", flush=True)
+        return {}
+    return {k: tuple(v) for k, v in out.items()}
+
+
 def _liq_verlauf_laden(acc_ids, streng=False):
     """Belegte Balances (tv.balance_start, final.balance_end) aller Orbit-/Topstep-V2-Pläne der Konten, ohne Zeitgrenze (der Höchststand
     kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance).
@@ -13403,14 +13447,20 @@ def _liq_verlauf_laden(acc_ids, streng=False):
     try:
         for i in range(0, len(fehlt), 80):
             teil = fehlt[i:i + 80]
-            zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,status,route,started_at,ended_at,master_pl,"
+            zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,status,route,started_at,ended_at,master_pl,master_name,"
                                                        "bal_end:mt5_baseline->final->balance_end,bal_start:mt5_baseline->tv->balance_start,"
                                                        "mll_start:mt5_baseline->tv->mll_start",   # MLL-Lesung je Start (15.10.2026, ap_kette_mll_belegt)
                                              "master_account_id": f"in.({','.join(teil)})", "route": "in.(tvv2,tsv2,tvplus,polar)"})   # PB1: + tvplus (Duplikum), polar
             je = {a: [] for a in teil}
             for z in zeilen or []:
                 je.setdefault(str(z.get("master_account_id")), []).append(z)
+            try:                                   # SA3: nur Zeilen nach dem letzten Reset (Kauf-/Reset-Buchung bzw. neue External ID);
+                ri = _liq_reset_infos(teil)        # nie ein Grund, die Lesung (streng: MLL-Kette) scheitern zu lassen → ohne Filter wie bisher
+            except Exception:
+                ri = {}
             for a, l in je.items():
+                if a in ri:
+                    l = liq_verlauf_nach_reset(l, *ri[a])
                 _liq_verlauf_cache[a] = (jetzt, l)
                 out += l
     except Exception as e:
@@ -36569,6 +36619,14 @@ def admin_auto_plan_delta():
         else:
             stand = _ap_stand_laden(reg)
             _hb_u = "ht"
+        if _hb_u != "ht":
+            # SA3 (a) (S6/MO1b, NK1 05.11.2026): der Stand eines Unternehmens wiegt mit SEINER Waage-Liste und SEINEN Modellen — wie ap_planen, der
+            # Waage-Takt und die Startprüfung (ap_waage_param_gruppe); vorher wog die Delta-Anzeige die Gruppe mit der HT-Liste waage_ohne. Fehler → HT-Liste
+            try:
+                _fm_g = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in _hb_u}), {})
+                stand["param"] = ap_waage_param_gruppe(stand.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
+            except Exception as e:
+                print(f"[auto-plan] ⚠️ Delta-Waage je Unternehmen: {type(e).__name__}: {e} — HT-Liste", flush=True)
         # HEUTE BEENDET (Finn 08.10.2026, ID-Detail + Kachel „Heute"): eigener try — fällt es aus, bleibt das übrige Delta unberührt
         try:   # UNT2: aus demselben Unternehmen wie der Stand
             stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], unternehmen=_hb_u)
