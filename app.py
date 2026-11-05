@@ -31962,6 +31962,14 @@ def ap_ausgleich_param(regeln):
     # APEX OHNE WAAGE (19.10.2026): Liste von Firmen-Teilstrings, Standard AP_WAAGE_OHNE_FIRMEN; [] in der DB = alle wiegen mit
     wo = a.get("waage_ohne")
     out["waage_ohne"] = [str(x).strip().lower() for x in wo if str(x).strip()] if isinstance(wo, list) else list(AP_WAAGE_OHNE_FIRMEN)
+    # SA1 #8b (S6/MO1b, NK1 05.11.2026): die Liste entstand bisher erst beim ersten Speichern eines Modells (ap_waage_ohne_modell) — jetzt schon beim Laden
+    # aus den Modellen der Firmen abgeleitet (dieselbe Funktion, idempotent: gleiche Liste wie nach dem Speichern; ohne Prio-2-Firma bitgleich wie bisher).
+    # waage_ohne_modell geht mit, damit das Speichern des Ausgleichs (regeln.ausgleich = dieser Stand) die Modell-Einträge nicht zu Hand-Einträgen macht.
+    try:
+        _abl = ap_waage_ohne_modell(a, (regeln or {}).get("firmen") if isinstance(regeln, dict) else None)
+        out["waage_ohne"], out["waage_ohne_modell"] = list(_abl["waage_ohne"]), list(_abl["waage_ohne_modell"])
+    except Exception as e:
+        print(f"[waage] ⚠️ waage_ohne aus den Modellen nicht ableitbar ({type(e).__name__}: {e}) — gespeicherte Liste", flush=True)
     # WAAGE-DECKEL (Finn 23.10.2026 ~14:05: „Nie mehr als 2 darf der Abstand sein"): regeln.ausgleich.waage_max_abstand, Standard 2, geklemmt
     # 1–20; dieselbe Zahl liest der DB-Claim-Riegel (sql/2026-10-23_waage_deckel.sql)
     try:
@@ -37852,6 +37860,10 @@ def ap_waage_param_gruppe(param, ausgleich_roh, firmen, fm):
     Gruppen nicht (prophos_waage_ausgeblendet) — dort wirkt nur dieser Parameter. Ohne Gruppen-Feld (fm leer): nur die HT-Einträge fallen weg."""
     p = dict(param or {})
     ht = {str(x).strip().lower() for x in ((ausgleich_roh or {}).get("waage_ohne_modell") or []) if str(x).strip()}
+    try:   # SA1 #8b: auch die beim Laden abgeleiteten HT-Modell-Einträge (ap_ausgleich_param) — sonst wöge die Gruppe HT-Prio-2-Firmen nicht mit
+        ht |= {str(x).strip().lower() for x in (ap_waage_ohne_modell(ausgleich_roh, firmen).get("waage_ohne_modell") or []) if str(x).strip()}
+    except Exception:
+        pass
     ohne = [x for x in (p.get("waage_ohne") or []) if x not in ht]
     for f in firmen or []:
         if isinstance(f, dict) and ap_regel_finden([f], AH_FIRMA) is not f and ap_firma_modell(f, None, fm or {}) == "orbit_prio2":

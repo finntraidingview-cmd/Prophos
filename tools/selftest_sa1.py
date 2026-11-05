@@ -92,6 +92,24 @@ ok("f->'namen'->>0 = 'ftmo'" in SQL6 and "g.value - 'sl_1pct'" in SQL6 and "NICH
 ok("const einsFirma = String((f.namen || [])[0] || '') === 'fundednext'" in HTML and app.FCP_SL_1PCT_FIRMEN == ("fundednext",),
    "#6 Planer-Firmen = sichtbares Feld in der UI (nur FundedNext)")
 
+# ── #8b waage_ohne schon beim Laden aus den Modellen ──
+F_OHNE = [{"name": "Apex", "namen": ["apex"]}, {"name": "Lucid", "namen": ["lucid"]}, {"name": "Tradeify", "namen": ["tradeify"]}]
+F_MIT = [{"name": "Apex", "namen": ["apex"]}, {"name": "Lucid", "namen": ["lucid"], "modell": "orbit_prio2"}, {"name": "Tradeify", "namen": ["tradeify"]}]
+p0 = app.ap_ausgleich_param({"firmen": F_OHNE})
+ok(p0["waage_ohne"] == ["apex"] and p0.get("waage_ohne_modell") == [], f"#8b ohne Prio-2-Firma bitgleich: nur apex ({p0['waage_ohne']})")
+p1 = app.ap_ausgleich_param({"firmen": F_MIT})                      # nie gespeichert: ausgleich fehlt ganz
+ok("apex" in p1["waage_ohne"] and any("lucid" in k for k in p1["waage_ohne"]) and p1["waage_ohne_modell"],
+   f"#8b Prio-2-Firma ohne je gespeichertes Modell: schon beim Laden raus aus der Waage ({p1['waage_ohne']})")
+gesp = app.ap_waage_ohne_modell({}, F_MIT)                          # Stand nach dem Speichern des Modells
+p2 = app.ap_ausgleich_param({"firmen": F_MIT, "ausgleich": gesp})
+ok(p2["waage_ohne"] == gesp["waage_ohne"] and p2["waage_ohne_modell"] == gesp["waage_ohne_modell"], "#8b nach dem Speichern dieselbe Liste (idempotent)")
+p3 = app.ap_ausgleich_param({"firmen": F_OHNE, "ausgleich": gesp})  # Modell zurück auf Orbit V2
+ok(p3["waage_ohne"] == ["apex"], f"#8b Modell zurückgestellt → Eintrag fällt beim Laden weg ({p3['waage_ohne']})")
+hand = {"waage_ohne": ["apex", "topstep"]}
+ok(app.ap_ausgleich_param({"firmen": F_MIT, "ausgleich": hand})["waage_ohne"][:2] == ["apex", "topstep"], "#8b Hand-Einträge bleiben")
+pg = app.ap_waage_param_gruppe(p1, {}, F_MIT, {})                   # Gruppe ohne eigenes Modell: HT-Prio-2 (nur beim Laden abgeleitet) fällt weg
+ok(pg["waage_ohne"] == ["apex"], f"#8b Gruppe: abgeleitete HT-Modell-Einträge werden abgezogen ({pg['waage_ohne']})")
+
 if __name__ == "__main__":
     print("\n" + ("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER"))
     sys.exit(1 if FEHLER else 0)
