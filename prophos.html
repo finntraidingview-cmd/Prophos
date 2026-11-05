@@ -43264,10 +43264,13 @@
     const lokal = getArchive(); lokal[accountId] = eintrag
     try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(lokal)) }catch(_){ saveArchive(lokal); return }
     ;(async () => {
-      let cloud = null
-      try{ cloud = await fetchSetting('archive') }catch(_){}
-      if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ cloud = null } }
-      const basis = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? cloud : getArchive()
+      // AC2: Cloud nicht lesbar → kein Upload des lokalen Stands (er könnte veraltet sein und Server-Einträge überschreiben). Lokal steht der Eintrag
+      // schon, _archNeu behält ihn — die nächste Archivierung mit lesbarer Cloud lädt ihn mit hoch.
+      const gelesen = await fetchSettingGenau('archive').catch(() => ({ ok: false }))
+      if(!gelesen.ok){ console.warn('[archiv] Cloud-Archiv nicht lesbar — nur lokal archiviert, Upload beim nächsten Mal'); return }
+      let cloud = gelesen.value
+      if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return } }   // kaputt gelesen → nicht überschreiben
+      const basis = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? cloud : getArchive()   // keine Zeile/leer → lokaler Stand (wie bisher)
       saveArchive({ ...basis, ..._archNeu })   // lokal + Upload (Write-through)
     })()
   }
@@ -79294,8 +79297,12 @@
   /**
    * Liest einen Wert aus Supabase. Gibt null zurück wenn nicht da.
    */
-  async function fetchSetting(key){
-    if(!currentUserId) return null
+  /* LESEFEHLER ≠ „GIBT ES NICHT" (AC2, Prüfer 05.11.2026): fetchSetting gab bei Fehler/Timeout null zurück — der Initial-Sync hielt das für „Cloud leer"
+   * und lud den LOKALEN Stand als „Migration" hoch. Ein veralteter lokaler Stand überschrieb so ein serverseitig geschriebenes Archiv (Blow, „Phase
+   * bestanden", _konto_archiv_eintragen). fetchSettingGenau unterscheidet: { ok: false } = nicht lesbar · { ok: true, zeile: false } = belegt keine Zeile ·
+   * { ok: true, zeile: true, value } = Zeile da. fetchSetting bleibt für die übrigen Leser wie bisher (null bei Fehler oder ohne Zeile). */
+  async function fetchSettingGenau(key){
+    if(!currentUserId) return { ok: false }
     try {
       const { data, error } = await supabase
         .from('user_settings')
@@ -79307,16 +79314,20 @@
         // Tabelle existiert noch nicht? Migration nötig
         if(error.code === '42P01' || /relation .* does not exist/i.test(error.message||'')){
           console.warn('[sync] user_settings-Tabelle existiert nicht. Bitte SQL-Migration einspielen.')
-          return null
+          return { ok: false }
         }
         console.warn('[sync] fetchSetting failed:', key, error.message)
-        return null
+        return { ok: false }
       }
-      return data?.value ?? null
+      return data ? { ok: true, zeile: true, value: data.value ?? null } : { ok: true, zeile: false, value: null }
     } catch(e){
       console.warn('[sync] fetchSetting exception:', key, e)
-      return null
+      return { ok: false }
     }
+  }
+  async function fetchSetting(key){
+    const r = await fetchSettingGenau(key)
+    return r.ok ? (r.value ?? null) : null
   }
 
   /**
@@ -79377,25 +79388,29 @@
     if(!currentUserId){ return }
     _syncInProgress = true
     try {
-      let migrated = 0, downloaded = 0
+      let migrated = 0, downloaded = 0, uebersprungen = 0
       for(const lsKey of SYNC_KEYS){
         const cloudKey = SYNC_KEY_MAP[lsKey]
-        const cloud = await fetchSetting(cloudKey)
+        const gelesen = await fetchSettingGenau(cloudKey)
+        const cloud = gelesen.ok ? gelesen.value : null
         const local = safeParseLS(lsKey)
 
-        if(!isEmpty(cloud)){
+        if(!gelesen.ok){
+          // AC2: nicht lesbar (Fehler/Timeout/500) → diesen Schlüssel auslassen: weder hochladen noch lokal überschreiben (nächster Sync holt ihn)
+          uebersprungen++
+        } else if(!isEmpty(cloud)){
           // Cloud gewinnt
           localStorage.setItem(lsKey, JSON.stringify(cloud))
           downloaded++
-        } else if(!isEmpty(local)){
-          // Migration: localStorage → Cloud (One-time für bestehende Daten)
+        } else if(!gelesen.zeile && !isEmpty(local)){
+          // Migration: localStorage → Cloud (One-time für bestehende Daten) — nur, wenn belegt KEINE Zeile da ist (200 ohne Zeile, AC2)
           await saveSetting(cloudKey, local)
           migrated++
         }
-        // wenn beide leer: nichts tun
+        // wenn beide leer — oder Zeile da, aber leer: nichts tun
         if(lsKey === 'prophos_account_archive' && typeof archWartenEnde === 'function') archWartenEnde(true)   // AC1: Archiv dieser ID da → Liste zeichnen
       }
-      console.log(`[sync] Initial-Sync fertig — ${downloaded} aus Cloud geladen, ${migrated} hochgeladen`)
+      console.log(`[sync] Initial-Sync fertig — ${downloaded} aus Cloud geladen, ${migrated} hochgeladen${uebersprungen ? `, ${uebersprungen} nicht lesbar (ausgelassen)` : ''}`)
       // UI-Refresh nach erfolgreichem Sync
       if(typeof renderAccounts === 'function') renderAccounts()
       if(typeof renderPairs === 'function') renderPairs()
