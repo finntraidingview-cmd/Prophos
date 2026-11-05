@@ -71269,7 +71269,8 @@
   const WD_HINWEIS_EXT = 'ohne External ID — der Bot kann das Konto nicht wählen'
   const WD_HINWEIS_ARCHIV = 'archiviert (Konto-Archiv) — fährt nicht mit'
   const WD_HINWEIS_TAGESLAUF = `kommt im nächsten Tageslauf dazu (${WD_TAGESLAUF_HHMM} Dubai)`
-  const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden']   // vom Server gesetzt, nicht von Finn
+  // SA1c (05.11.2026): + „Payout-Stand nicht lesbar …" (app.py WD_GRUND_PAYOUT_UNLESBAR, POST fail-closed) — vorübergehend, beim nächsten Lauf wieder dabei
+  const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden', 'Payout-Stand nicht lesbar – nächster Lauf versucht es wieder']   // vom Server gesetzt, nicht von Finn
   /* HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden. Für den
    * heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht wurde, aber für die zukünftigen ja."): ein Konto, auf dem im
    * CME-Handelstag des Lauf-Tags (Vortag 17:00 Chicago, wie app.py wd_cme_tag_start) schon ein Plan gestartet ist, kommt heute nicht dazu — aktiv false mit

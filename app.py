@@ -15771,6 +15771,10 @@ def wd_cme_tag_start(tag):
 # Rein: nur Railway hebt den Hinweis auf — heute mit eigener Startzeit (nach_start, jetzt + 10–20 min), solange das Fenster (wd_farmer_regeln.bis_hhmm)
 # offen ist und heute auf dem Konto nichts gestartet/geplant ist; sonst „ab morgen". Die PC-Tabs setzen den Hinweis selbst nur (wdAbgleich), nie zurück. ══
 WD_HINWEIS_PAYOUT = "Payout angefragt – wartet auf Auszahlung"
+# SA1c (S6-Hinweis zu SA1 #4, Master 05.11.2026): ist pending_payouts beim Anlegen nicht lesbar, legt POST /admin/wd-plaene für KEIN Konto an (fail-closed) —
+# der Tab prüft seit SA1 #4 nur noch den Zeilen-Hinweis. Der Grund ist vorübergehend: der Tab (WD_AUTO_HINWEISE) nimmt das Konto beim nächsten Lauf wieder mit.
+WD_GRUND_PAYOUT_UNLESBAR = "Payout-Stand nicht lesbar – nächster Lauf versucht es wieder"
+_wd_po_fehler_gemeldet = {"at": 0.0}
 WD_HINWEIS_PAYOUT_MORGEN = "Payout erhalten – ab morgen wieder drin"
 WD_HINWEIS_FARM = "nicht im Farm (Haken aus)"                                    # = prophos.html WD_HINWEIS_FARM/_EXT/_ARCHIV
 WD_HINWEIS_EXT = "ohne External ID — der Bot kann das Konto nicht wählen"
@@ -16249,6 +16253,7 @@ def admin_wd_plaene():
         # PAYOUT OFFEN (R2c, 05.11.2026 — Vorfall Jacob 04.11.: der Mac legte bei offener Anfrage zweimal je 3 WD-Pläne an, W1 zog sie wieder zurück):
         # dieselbe Regel wie wd_payout_abgleich — Konto mit offener Anfrage (pending_payouts status pending) bekommt keinen Plan; der Grund ist genau
         # WD_HINWEIS_PAYOUT, der Mac schreibt ihn als Hinweis in die Tageszeile, und W1 holt das Konto nach dem Abhaken von selbst zurück.
+        po_fehler = None
         try:
             _mids = sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""})
             po_offen = set()
@@ -16256,8 +16261,17 @@ def admin_wd_plaene():
                 po_offen |= {str(p.get("account_id")) for p in sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending",
                                                                                            "account_id": "in.(" + ",".join(_mids[i:i + 80]) + ")"}) or []}
         except Exception as e:
-            print(f"[wd] ⚠️ Payout offen (anlegen): {type(e).__name__}: {e}", flush=True)
-            po_offen = set()          # wie bisher; der Tab (wdPlaeneAnlegen) und W1 prüfen weiter
+            # SA1c: fail-closed — ohne lesbaren Payout-Stand kein WD-Plan (der Tab prüft nur noch den Zeilen-Hinweis); einmal je 30 min an die Master-IDs
+            print(f"[wd] ⚠️ Payout offen (anlegen): {type(e).__name__}: {e} — kein WD-Plan in diesem Lauf", flush=True)
+            po_offen, po_fehler = set(), f"{type(e).__name__}"
+            if time.time() - _wd_po_fehler_gemeldet["at"] > 1800:
+                _wd_po_fehler_gemeldet["at"] = time.time()
+                try:
+                    alarm_senden(2, "wd_payout_unlesbar", "WD-Pläne nicht angelegt",
+                                 f"Offene Payout-Anfragen nicht lesbar ({po_fehler}) — {len(_mids)} Konto(s) ohne WD-Plan, der nächste Lauf versucht es wieder.",
+                                 schluessel=f"wd_payout_unlesbar|{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}")
+                except Exception as e2:
+                    print(f"[wd] ⚠️ Alarm Payout unlesbar: {type(e2).__name__}", flush=True)
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -16273,6 +16287,8 @@ def admin_wd_plaene():
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
                 if ap_firma_gesperrt(acc[0], sperren):
                     uebersprungen.append({"master_account_id": mid, "grund": AP_GRUND_GESPERRT}); continue
+                if po_fehler:
+                    uebersprungen.append({"master_account_id": mid, "grund": WD_GRUND_PAYOUT_UNLESBAR}); continue   # SA1c fail-closed
                 if mid in po_offen:
                     uebersprungen.append({"master_account_id": mid, "grund": WD_HINWEIS_PAYOUT}); continue
                 offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um,start_um_gestartet_at", "master_account_id": f"eq.{mid}",

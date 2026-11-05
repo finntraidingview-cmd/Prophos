@@ -70,7 +70,9 @@ d = c.post("/admin/wd-plaene", json={"plaene": [zeile(K_PO)]}).get_json() or {}
 check(len(ANGELEGT) == 1 and not d.get("uebersprungen"), "nach dem Abhaken (keine offene Anfrage) wird wieder angelegt")
 ANGELEGT.clear(); DB.update(pending={K_PO}, kaputt=True)
 d = c.post("/admin/wd-plaene", json={"plaene": [zeile(K_PO)]}).get_json() or {}
-check(len(ANGELEGT) == 1, "pending_payouts nicht lesbar → wie bisher (Tab + W1 prüfen weiter)")
+# SA1c (05.11.2026, S6-Hinweis): seit SA1 #4 prüft der Tab nur noch den Zeilen-Hinweis → der Server ist beim Lesefehler fail-closed (kein Plan, vorübergehender Grund)
+check(len(ANGELEGT) == 0 and [u.get("grund") for u in d.get("uebersprungen") or []] == [app.WD_GRUND_PAYOUT_UNLESBAR],
+      "pending_payouts nicht lesbar → fail-closed: kein Plan, Grund „Payout-Stand nicht lesbar“ (vorübergehend)")
 DB["kaputt"] = False
 
 print("2) prophos.html — dieselbe Regel in allen Hand-Wegen")
