@@ -13002,7 +13002,7 @@ def admin_wd_heute():
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
                   "master_symbol,master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,orbit_v3,"
                   "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,"
-                  "slave_pl,pl_quelle")
+                  "slave_pl,pl_quelle,slave_risk")   # slave_risk: HP1c (Hinweis S4 05.11.2026) — Fusion € am Liq für WD (lt_fusion_paar), sonst nur am TP
         # PostgREST: verschachteltes Oder heisst or(...) OHNE Punkt — "or.(...)" gab 400 Bad Request
         # (Finn 25.09.2026 am Markt-Block: "Winning Days des Tages nicht ladbar"). ilike statt eq, damit
         # Notes mit Zusatztext den Farmer-Plan nicht verlieren.

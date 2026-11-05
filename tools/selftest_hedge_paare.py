@@ -52,6 +52,11 @@ check(f({}, None) == (None, None) and f(None, {}) == (None, None), "leere Eingab
 check(f({"hedge_eur": 0}, {"funded_plan": {"hedge_tp_eur": 0}}) == (None, None), "0 € zählt nicht als Wert")
 check('**dict(zip(("fusion_tp_eur", "fusion_sl_eur"), lt_fusion_paar(p, base))),' in block("_wd_heute_zeile"), "_wd_heute_zeile gibt fusion_tp_eur/fusion_sl_eur mit")
 check(",rest_hedge,slave_risk\")" in APP, "/admin/live-trades liest slave_risk")
+# HP1c (Hinweis S4): auch /admin/wd-heute liest slave_risk — sonst fehlt WD-Zeilen im Radar-Heute der Fusion-€ am Liq
+_wh = APP[APP.index("\ndef admin_wd_heute("):]
+_wh = _wh[:_wh.index("\n\n\n")]
+check('"slave_pl,pl_quelle,slave_risk")' in _wh, "/admin/wd-heute liest slave_risk")
+check(f({"route": "tvv2", "hedge_eur": 400, "slave_risk": 750}, {"hedge": {"ticket": 7}}) == (-400.0, 750.0), "WD-Zeile mit slave_risk: Fusion € an TP und Liq")
 
 # --- Tab ---
 check("?? (tplNum(x.tp) > 0 ? Number(x.tp) : null) ?? tplNum(g && g.tp)," in HTML and "?? (tplNum(x.sl) > 0 ? Number(x.sl) : null) ?? tplNum(g && g.sl)," in HTML,
