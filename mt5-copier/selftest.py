@@ -91,138 +91,182 @@ def _test_sicher(fn):
 
 def main():
     results = []
+    # ST2 (Master 05.11.2026, ST1-Review): die Inline-Prüfungen unten laufen je Gruppe in einer eigenen Funktion über _test_sicher —
+    # ein Abbruch (z. B. ValueError aus .index() auf einem veralteten Anker) zählt ✗ statt die Suite zu stoppen. Namen, die eine Gruppe
+    # für spätere Gruppen setzt, laufen über nonlocal und sind hier vorbelegt (gleiche Werte wie vorher, nur mit Netz).
+    def _inline(fn):
+        if _test_sicher(fn) is False:
+            results.append(False)
+    BASE = _DE = _F = _FR = _G = _K = _KN = _LV = _M1 = _M2 = _N = _NL = _OP = _P = _PK = _PT = _PTF = _T = _WF = _alt = None
+    _auf = _ber = _bf = _cfgL = _cfgT = _d1 = _d2 = _el = _f = _finn = _g = _haupt = _ids = _json = _lb = _li = _nb = None
+    _nl_felder = _nl_schalter = _nl_werte = _offen = _ohne = _sp = _stOK = _sw = _taz = _td = _term = _tp = _types = _vu = None
+    _zu = ang = d = e = f = fenster = k = n = ohne = order_bot = panel = pop = provision = sl = tempfile = tp = v = x = z = None
     # 28.10.2026: Offen-Bleiben nach Puls-Läufen im ganzen Selftest aus — Tests mit Attrappen-Fenstern (_WIN_EINGABE=True) schrieben sonst
     # die Marke puls_tsx_bleiben.json neben den Bot und starteten Kind-Prozesse; der Bleiben-Test schaltet es für sich wieder an
-    import order_bot as _ob_aus
-    _ob_aus._BLEIBEN_AN[0] = False
+    def _ab_96():   # ST2: Inline-Prüfung ab Zeile 96 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        import order_bot as _ob_aus
+        _ob_aus._BLEIBEN_AN[0] = False
 
-    # 1) Neue Master-Position BUY -> Hedge SELL, gleiches Volumen
-    results.append(run(
-        "Neue Master-BUY-Position → Hedge SELL 1.0 (Richtung gedreht)",
-        [{"ident": 1, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {},
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 1.0}]))
+        # 1) Neue Master-Position BUY -> Hedge SELL, gleiches Volumen
+        results.append(run(
+            "Neue Master-BUY-Position → Hedge SELL 1.0 (Richtung gedreht)",
+            [{"ident": 1, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {},
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 1.0}]))
+    _inline(_ab_96)
 
     # 2) Master SELL -> Hedge BUY
-    results.append(run(
-        "Master-SELL-Position → Hedge BUY (Richtung gedreht)",
-        [{"ident": 2, "symbol": "NAS100", "type": 1, "volume": 0.5, "contract_size": 1.0}],
-        {},
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.5}]))
+    def _ab_107():   # ST2: Inline-Prüfung ab Zeile 107 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Master-SELL-Position → Hedge BUY (Richtung gedreht)",
+            [{"ident": 2, "symbol": "NAS100", "type": 1, "volume": 0.5, "contract_size": 1.0}],
+            {},
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.5}]))
+    _inline(_ab_107)
 
     # 3) Hedge existiert schon in richtiger Groesse -> NICHTS tun (Idempotenz)
-    results.append(run(
-        "Hedge bereits korrekt vorhanden → keine Aktion (Idempotenz)",
-        [{"ident": 3, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {3: [{"ticket": 900, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        expect_actions=[]))
+    def _ab_114():   # ST2: Inline-Prüfung ab Zeile 114 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Hedge bereits korrekt vorhanden → keine Aktion (Idempotenz)",
+            [{"ident": 3, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {3: [{"ticket": 900, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            expect_actions=[]))
+    _inline(_ab_114)
 
     # 4) Master teil-geschlossen 1.0 -> 0.6, Hedge 1.0 -> es muessen 0.4 zu
-    results.append(run(
-        "Master teil-geschlossen (1.0→0.6) → Hedge 0.4 schliessen",
-        [{"ident": 4, "symbol": "NAS100", "type": 0, "volume": 0.6, "contract_size": 1.0}],
-        {4: [{"ticket": 901, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.4}]))
+    def _ab_121():   # ST2: Inline-Prüfung ab Zeile 121 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Master teil-geschlossen (1.0→0.6) → Hedge 0.4 schliessen",
+            [{"ident": 4, "symbol": "NAS100", "type": 0, "volume": 0.6, "contract_size": 1.0}],
+            {4: [{"ticket": 901, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.4}]))
+    _inline(_ab_121)
 
     # 5) Master aufgestockt 1.0 -> 1.5, Hedge 1.0 -> 0.5 nachlegen
-    results.append(run(
-        "Master aufgestockt (1.0→1.5) → Hedge 0.5 nachlegen",
-        [{"ident": 5, "symbol": "NAS100", "type": 0, "volume": 1.5, "contract_size": 1.0}],
-        {5: [{"ticket": 902, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.5}]))
+    def _ab_128():   # ST2: Inline-Prüfung ab Zeile 128 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Master aufgestockt (1.0→1.5) → Hedge 0.5 nachlegen",
+            [{"ident": 5, "symbol": "NAS100", "type": 0, "volume": 1.5, "contract_size": 1.0}],
+            {5: [{"ticket": 902, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.5}]))
+    _inline(_ab_128)
 
     # 6) Master-Position weg -> Hedge komplett schliessen
-    results.append(run(
-        "Master-Position geschlossen → Hedge komplett zu",
-        [],
-        {6: [{"ticket": 903, "symbol": "NAS100", "type": 1, "volume": 0.8}]},
-        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.8}]))
+    def _ab_135():   # ST2: Inline-Prüfung ab Zeile 135 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Master-Position geschlossen → Hedge komplett zu",
+            [],
+            {6: [{"ticket": 903, "symbol": "NAS100", "type": 1, "volume": 0.8}]},
+            expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.8}]))
+    _inline(_ab_135)
 
     # 7) Kontraktgroessen-Umrechnung: Master cs=1, Hedge cs=10 -> 1.0 wird 0.1
-    results.append(run(
-        "Kontraktgroesse Master 1 vs Hedge 10 → 1.0 Lot wird 0.1",
-        [{"ident": 7, "symbol": "MASTER_IDX", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {},
-        expect_actions=[{"kind": "open", "symbol": "IDX10", "volume": 0.1}]))
+    def _ab_142():   # ST2: Inline-Prüfung ab Zeile 142 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Kontraktgroesse Master 1 vs Hedge 10 → 1.0 Lot wird 0.1",
+            [{"ident": 7, "symbol": "MASTER_IDX", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {},
+            expect_actions=[{"kind": "open", "symbol": "IDX10", "volume": 0.1}]))
+    _inline(_ab_142)
 
     # 8) Multiplikator 0.427 auf 1.0 Lot -> 0.43 (auf 0.01 gerundet)
-    results.append(run(
-        "Multiplikator 0.427 → auf Lot-Raster 0.01 gerundet = 0.43",
-        [{"ident": 8, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, mult=0.427,
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.43}]))
+    def _ab_149():   # ST2: Inline-Prüfung ab Zeile 149 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Multiplikator 0.427 → auf Lot-Raster 0.01 gerundet = 0.43",
+            [{"ident": 8, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {}, mult=0.427,
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.43}]))
+    _inline(_ab_149)
 
     # 9) Grobes Lot-Raster 0.1: 0.427 -> 0.4
-    results.append(run(
-        "Grobes Lot-Raster 0.1 → 0.427 wird 0.4",
-        [{"ident": 9, "symbol": "MASTER_GROB", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, mult=0.427,
-        expect_actions=[{"kind": "open", "symbol": "GROB", "volume": 0.4}]))
+    def _ab_156():   # ST2: Inline-Prüfung ab Zeile 156 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Grobes Lot-Raster 0.1 → 0.427 wird 0.4",
+            [{"ident": 9, "symbol": "MASTER_GROB", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {}, mult=0.427,
+            expect_actions=[{"kind": "open", "symbol": "GROB", "volume": 0.4}]))
+    _inline(_ab_156)
 
     # 10) max-Lots-Grenze abgeschafft (15.08.2026, Finns Ansage): grosse Faktoren
     #     laufen ungebremst durch — Deckel ist nur noch das Broker-volume_max.
-    results.append(run(
-        "Keine Sicherheitsgrenze mehr: Multiplikator 10 → 10 Lots gehen durch",
-        [{"ident": 10, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, mult=10.0,
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 10.0}]))
+    def _ab_164():   # ST2: Inline-Prüfung ab Zeile 164 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Keine Sicherheitsgrenze mehr: Multiplikator 10 → 10 Lots gehen durch",
+            [{"ident": 10, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {}, mult=10.0,
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 10.0}]))
+    _inline(_ab_164)
 
     # 11) Fehlendes Symbol-Mapping -> keine Aktion, Warnung
-    results.append(run(
-        "Unbekanntes Master-Symbol → keine Order, Warnung",
-        [{"ident": 11, "symbol": "GIBTSNICHT", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {},
-        expect_actions=[], expect_warn_contains="Kein Symbol-Mapping"))
+    def _ab_171():   # ST2: Inline-Prüfung ab Zeile 171 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Unbekanntes Master-Symbol → keine Order, Warnung",
+            [{"ident": 11, "symbol": "GIBTSNICHT", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {},
+            expect_actions=[], expect_warn_contains="Kein Symbol-Mapping"))
+    _inline(_ab_171)
 
     # 12) Volumen unter Mindest-Lot -> keine Order, Warnung
-    results.append(run(
-        "Berechnetes Volumen unter Mindest-Lot → keine Order, Warnung",
-        [{"ident": 12, "symbol": "NAS100", "type": 0, "volume": 0.001, "contract_size": 1.0}],
-        {}, mult=0.001,
-        expect_actions=[], expect_warn_contains="Mindest-Lot"))
+    def _ab_178():   # ST2: Inline-Prüfung ab Zeile 178 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Berechnetes Volumen unter Mindest-Lot → keine Order, Warnung",
+            [{"ident": 12, "symbol": "NAS100", "type": 0, "volume": 0.001, "contract_size": 1.0}],
+            {}, mult=0.001,
+            expect_actions=[], expect_warn_contains="Mindest-Lot"))
+    _inline(_ab_178)
 
     # 13) Beim Start offene Position wird uebersprungen (skip_idents)
-    results.append(run(
-        "Beim Start offene Master-Position wird nicht nachtraeglich gehedged",
-        [{"ident": 13, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, skip=frozenset({13}),
-        expect_actions=[]))
+    def _ab_185():   # ST2: Inline-Prüfung ab Zeile 185 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Beim Start offene Master-Position wird nicht nachtraeglich gehedged",
+            [{"ident": 13, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {}, skip=frozenset({13}),
+            expect_actions=[]))
+    _inline(_ab_185)
 
     # 14) Neustart-Recovery: Hedge existiert, Master unveraendert -> nichts doppelt
-    results.append(run(
-        "Neustart mit bestehendem Hedge → kein Doppel-Hedge",
-        [{"ident": 14, "symbol": "NAS100", "type": 0, "volume": 2.0, "contract_size": 1.0}],
-        {14: [{"ticket": 904, "symbol": "NAS100", "type": 1, "volume": 2.0}]},
-        expect_actions=[]))
+    def _ab_192():   # ST2: Inline-Prüfung ab Zeile 192 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Neustart mit bestehendem Hedge → kein Doppel-Hedge",
+            [{"ident": 14, "symbol": "NAS100", "type": 0, "volume": 2.0, "contract_size": 1.0}],
+            {14: [{"ticket": 904, "symbol": "NAS100", "type": 1, "volume": 2.0}]},
+            expect_actions=[]))
+    _inline(_ab_192)
 
     # 16) NEUSTART mit offener Master-Position UND offenem Hedge (Bug 13.08.2026):
     #     Die Startup-Position steht auf der Skip-Liste. Der bestehende Hedge darf
     #     WEDER angefasst NOCH geschlossen werden — sonst waere die laufende Position
     #     nach einem Copier-Neustart ungehedged.
-    results.append(run(
-        "NEUSTART: Master offen (uebersprungen) + Hedge offen → Hedge bleibt unangetastet",
-        [{"ident": 20, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        skip=frozenset({20}),
-        expect_actions=[]))
+    def _ab_202():   # ST2: Inline-Prüfung ab Zeile 202 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "NEUSTART: Master offen (uebersprungen) + Hedge offen → Hedge bleibt unangetastet",
+            [{"ident": 20, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            skip=frozenset({20}),
+            expect_actions=[]))
+    _inline(_ab_202)
 
     # 17) Danach schliesst der Master wirklich -> der Hedge MUSS mitgehen,
     #     obwohl die Position auf der Skip-Liste stand.
-    results.append(run(
-        "NEUSTART: uebersprungener Master schliesst spaeter → Hedge wird geschlossen",
-        [],
-        {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        skip=frozenset({20}),
-        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 1.0}]))
+    def _ab_211():   # ST2: Inline-Prüfung ab Zeile 211 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "NEUSTART: uebersprungener Master schliesst spaeter → Hedge wird geschlossen",
+            [],
+            {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            skip=frozenset({20}),
+            expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 1.0}]))
+    _inline(_ab_211)
 
     # 15) Zwei Master-Positionen gleichzeitig -> zwei getrennte Hedges
-    results.append(run(
-        "Zwei Master-Positionen → zwei getrennte Hedges",
-        [{"ident": 15, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0},
-         {"ident": 16, "symbol": "US500", "type": 1, "volume": 0.2, "contract_size": 1.0}],
-        {},
-        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 1.0},
-                        {"kind": "open", "symbol": "US500", "volume": 0.2}]))
+    def _ab_219():   # ST2: Inline-Prüfung ab Zeile 219 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "Zwei Master-Positionen → zwei getrennte Hedges",
+            [{"ident": 15, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0},
+             {"ident": 16, "symbol": "US500", "type": 1, "volume": 0.2, "contract_size": 1.0}],
+            {},
+            expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 1.0},
+                            {"kind": "open", "symbol": "US500", "volume": 0.2}]))
+    _inline(_ab_219)
 
     # ── Flotten-Pruefung (Multi-Master, seit 13.08.2026) ────────────────────────
     def fleet(name, cfgs, *, expect_error_contains=None, expect_ok=False):
@@ -236,44 +280,55 @@ def main():
             print(f"    Fehler: {errors}")
         return ok
 
-    BASE = {"hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe", "hedge_expected_login": 400002}
+    def _ab_239():   # ST2: Inline-Prüfung ab Zeile 239 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal BASE
+        BASE = {"hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe", "hedge_expected_login": 400002}
 
-    # 18) Doppelte magic wird als Fehler erkannt (der kritische Audit-Fund)
-    results.append(fleet(
-        "FLOTTE: doppelte magic → Abbruch-Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
-         dict(BASE, _file="config-m2.json", magic=770001, snapshot_file="b.csv", master_expected_login=2)],
-        expect_error_contains="magic 770001"))
+        # 18) Doppelte magic wird als Fehler erkannt (der kritische Audit-Fund)
+        results.append(fleet(
+            "FLOTTE: doppelte magic → Abbruch-Fehler",
+            [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
+             dict(BASE, _file="config-m2.json", magic=770001, snapshot_file="b.csv", master_expected_login=2)],
+            expect_error_contains="magic 770001"))
+    _inline(_ab_239)
 
     # 19) Doppelte snapshot_file wird als Fehler erkannt
-    results.append(fleet(
-        "FLOTTE: doppelte snapshot_file → Abbruch-Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="x.csv", master_expected_login=1),
-         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="X.CSV", master_expected_login=2)],
-        expect_error_contains="snapshot_file"))
+    def _ab_249():   # ST2: Inline-Prüfung ab Zeile 249 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(fleet(
+            "FLOTTE: doppelte snapshot_file → Abbruch-Fehler",
+            [dict(BASE, _file="config.json", magic=770001, snapshot_file="x.csv", master_expected_login=1),
+             dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="X.CSV", master_expected_login=2)],
+            expect_error_contains="snapshot_file"))
+    _inline(_ab_249)
 
     # 20) master_expected_login 0 ist ab zwei Mastern verboten
-    results.append(fleet(
-        "FLOTTE: master_expected_login 0 bei zwei Mastern → Abbruch-Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
-         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=0)],
-        expect_error_contains="master_expected_login"))
+    def _ab_256():   # ST2: Inline-Prüfung ab Zeile 256 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(fleet(
+            "FLOTTE: master_expected_login 0 bei zwei Mastern → Abbruch-Fehler",
+            [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
+             dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=0)],
+            expect_error_contains="master_expected_login"))
+    _inline(_ab_256)
 
     # 21) Abweichendes Hedge-Terminal zwischen den Configs → Fehler
-    results.append(fleet(
-        "FLOTTE: unterschiedliche Hedge-Terminals → Abbruch-Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
-         {"_file": "config-m2.json", "magic": 770002, "snapshot_file": "b.csv",
-          "master_expected_login": 2, "hedge_terminal_path": "C:\\ANDERES\\terminal64.exe",
-          "hedge_expected_login": 400002}],
-        expect_error_contains="hedge_terminal_path"))
+    def _ab_263():   # ST2: Inline-Prüfung ab Zeile 263 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(fleet(
+            "FLOTTE: unterschiedliche Hedge-Terminals → Abbruch-Fehler",
+            [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
+             {"_file": "config-m2.json", "magic": 770002, "snapshot_file": "b.csv",
+              "master_expected_login": 2, "hedge_terminal_path": "C:\\ANDERES\\terminal64.exe",
+              "hedge_expected_login": 400002}],
+            expect_error_contains="hedge_terminal_path"))
+    _inline(_ab_263)
 
     # 22) Saubere Zwei-Master-Flotte geht durch
-    results.append(fleet(
-        "FLOTTE: saubere Zwei-Master-Config → keine Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
-         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=400003)],
-        expect_ok=True))
+    def _ab_272():   # ST2: Inline-Prüfung ab Zeile 272 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(fleet(
+            "FLOTTE: saubere Zwei-Master-Config → keine Fehler",
+            [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
+             dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=400003)],
+            expect_ok=True))
+    _inline(_ab_272)
 
     # ── Startup-Skip mit Hedge-Adoption (Neustart-Recovery, seit 13.08.2026) ────
     def skiptest(name, positions, hedges, adopt, expect):
@@ -285,31 +340,40 @@ def main():
         return ok
 
     # 23) Position MIT bestehendem Hedge wird adoptiert (nicht uebersprungen)
-    results.append(skiptest(
-        "NEUSTART: Position mit Hedge wird adoptiert, ohne Hedge uebersprungen",
-        [{"ident": 30, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0},
-         {"ident": 31, "symbol": "US500", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {30: [{"ticket": 950, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        False, {31}))
+    def _ab_288():   # ST2: Inline-Prüfung ab Zeile 288 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(skiptest(
+            "NEUSTART: Position mit Hedge wird adoptiert, ohne Hedge uebersprungen",
+            [{"ident": 30, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0},
+             {"ident": 31, "symbol": "US500", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {30: [{"ticket": 950, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            False, {31}))
+    _inline(_ab_288)
 
     # 24) adopt_existing=true uebernimmt alles
-    results.append(skiptest(
-        "NEUSTART: adopt_existing=true → nichts wird uebersprungen",
-        [{"ident": 32, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, True, set()))
+    def _ab_296():   # ST2: Inline-Prüfung ab Zeile 296 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(skiptest(
+            "NEUSTART: adopt_existing=true → nichts wird uebersprungen",
+            [{"ident": 32, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+            {}, True, set()))
+    _inline(_ab_296)
 
     # 25) Adoptierte Position: Teil-Schliessung nach Neustart wird jetzt nachgezogen
     #     (vorher: Skip-Liste → Hedge blieb auf 1.0 stehen, bis der Master ganz zu war)
-    results.append(run(
-        "NEUSTART: adoptierter Master teil-geschlossen (1.0→0.4) → Hedge folgt",
-        [{"ident": 33, "symbol": "NAS100", "type": 0, "volume": 0.4, "contract_size": 1.0}],
-        {33: [{"ticket": 951, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
-        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.6}]))
+    def _ab_303():   # ST2: Inline-Prüfung ab Zeile 303 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        results.append(run(
+            "NEUSTART: adoptierter Master teil-geschlossen (1.0→0.4) → Hedge folgt",
+            [{"ident": 33, "symbol": "NAS100", "type": 0, "volume": 0.4, "contract_size": 1.0}],
+            {33: [{"ticket": 951, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+            expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.6}]))
+    _inline(_ab_303)
 
     # ── Provisionierung: reine Logik (13.08.2026) ───────────────────────────
-    import json as _json
-    import tempfile
-    import provision
+    def _ab_310():   # ST2: Inline-Prüfung ab Zeile 310 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _json, provision, tempfile
+        import json as _json
+        import tempfile
+        import provision
+    _inline(_ab_310)
 
     def prov(name, fn):
         try:
@@ -320,184 +384,224 @@ def main():
         print(("✓ " if ok else "✗ ") + name)
         return ok
 
-    with tempfile.TemporaryDirectory() as td:
-        base = {"mode": "demo", "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
-                "hedge_expected_login": 400002, "master_expected_login": 400001,
-                "snapshot_file": "prophos_master.csv", "magic": 770001,
-                "comment_prefix": "PH", "multiplier": 1.0,
-                "symbol_map": {"NAS100": "NAS100"},
-                "_kommentar": "wird nicht uebernommen"}
-        m2 = dict(base, magic=770002, comment_prefix="P2", snapshot_file="prophos_master2.csv")
-        _json.dump(base, open(os.path.join(td, "config.json"), "w"))
-        _json.dump(m2, open(os.path.join(td, "config-master2.json"), "w"))
+    def _ab_323():   # ST2: Inline-Prüfung ab Zeile 323 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        with tempfile.TemporaryDirectory() as td:
+            base = {"mode": "demo", "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+                    "hedge_expected_login": 400002, "master_expected_login": 400001,
+                    "snapshot_file": "prophos_master.csv", "magic": 770001,
+                    "comment_prefix": "PH", "multiplier": 1.0,
+                    "symbol_map": {"NAS100": "NAS100"},
+                    "_kommentar": "wird nicht uebernommen"}
+            m2 = dict(base, magic=770002, comment_prefix="P2", snapshot_file="prophos_master2.csv")
+            _json.dump(base, open(os.path.join(td, "config.json"), "w"))
+            _json.dump(m2, open(os.path.join(td, "config-master2.json"), "w"))
 
-        # 26) Vergabe: naechste freie magic 770003, Praefix P3, Snapshot nach Name
-        ident = provision.alloc_identity(td, "ftmo1")
-        results.append(prov(
-            "PROVISION: magic/prefix/snapshot fortlaufend und kollisionsfrei vergeben",
-            lambda: ident == {"magic": 770003, "prefix": "P3",
-                              "snapshot": "prophos_master_ftmo1.csv"}))
+            # 26) Vergabe: naechste freie magic 770003, Praefix P3, Snapshot nach Name
+            ident = provision.alloc_identity(td, "ftmo1")
+            results.append(prov(
+                "PROVISION: magic/prefix/snapshot fortlaufend und kollisionsfrei vergeben",
+                lambda: ident == {"magic": 770003, "prefix": "P3",
+                                  "snapshot": "prophos_master_ftmo1.csv"}))
 
-        # 27) Neue Config erbt Hedge-Felder, Master-Felder neu; KEIN mode-Feld
-        # mehr — auch nicht aus der Basis geerbt (25.08.2026, Modus-Ausbau:
-        # der Copier sendet immer echt, das Feld ist abgeschafft)
-        cfg = provision.build_master_config(base, name="ftmo1", master_login=555001,
-                                            terminal_path="C:\\MT5-ftmo1\\terminal64.exe",
-                                            ident=ident)
-        results.append(prov(
-            "PROVISION: Config erbt Hedge-Ziel, kein mode-Feld, keine _kommentare",
-            lambda: cfg["hedge_expected_login"] == 400002
-                    and "mode" not in cfg
-                    and "mode" not in provision.build_master_config(
-                        dict(base, mode="live"), name="x1",
-                        master_login=1, terminal_path="C:\\x\\terminal64.exe",
-                        ident=ident)
-                    and cfg["master_expected_login"] == 555001
-                    and cfg["magic"] == 770003
-                    and "_kommentar" not in cfg))
+            # 27) Neue Config erbt Hedge-Felder, Master-Felder neu; KEIN mode-Feld
+            # mehr — auch nicht aus der Basis geerbt (25.08.2026, Modus-Ausbau:
+            # der Copier sendet immer echt, das Feld ist abgeschafft)
+            cfg = provision.build_master_config(base, name="ftmo1", master_login=555001,
+                                                terminal_path="C:\\MT5-ftmo1\\terminal64.exe",
+                                                ident=ident)
+            results.append(prov(
+                "PROVISION: Config erbt Hedge-Ziel, kein mode-Feld, keine _kommentare",
+                lambda: cfg["hedge_expected_login"] == 400002
+                        and "mode" not in cfg
+                        and "mode" not in provision.build_master_config(
+                            dict(base, mode="live"), name="x1",
+                            master_login=1, terminal_path="C:\\x\\terminal64.exe",
+                            ident=ident)
+                        and cfg["master_expected_login"] == 555001
+                        and cfg["magic"] == 770003
+                        and "_kommentar" not in cfg))
 
-        # 27b) magic_base pro PC (27.08.2026): teilt sich der PC das Hedge-Konto
-        # mit anderen, vergibt die Provisionierung im eigenen 1000er-Block.
-        # Reine Blocklogik (base verschiebt Start + Praefix zaehlt im Block):
-        magic_base_logik = (
-            provision.next_magic(set(), 771000) == 771001
-            and provision.next_magic({771001, 771002}, 771000) == 771003
-            and provision.prefix_for(771001, set(), 771000) == "PH"
-            and provision.prefix_for(771002, {"PH"}, 771000) == "P2"
-            # Bestands-PC ohne magic_base bleibt exakt wie bisher (Default 770000):
-            and provision.next_magic({770001, 770002}) == 770003)
-        # Und end-zu-end an einem FRISCHEN Ordner (= eigener PC von ID B, eigener
-        # Ordner): der erste Account landet sauber im 771000er-Block mit PH.
-        with tempfile.TemporaryDirectory() as td2:
-            # Vorlage ohne magic/comment_prefix — genau wie die echte
-            # config.vorlage.json (die ist kein Account).
-            _json.dump({"hedge_expected_login": 400004,
-                        "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
-                        "magic_base": 771000},
-                       open(os.path.join(td2, "config.vorlage.json"), "w"))
-            ident_block1 = provision.alloc_identity(td2, "idb1", magic_base=771000)
-        results.append(prov(
-            "PROVISION: magic_base verschiebt den Block; frischer PC → magic 771001, Praefix PH",
-            lambda: magic_base_logik
-                    and ident_block1 == {"magic": 771001, "prefix": "PH",
-                                         "snapshot": "prophos_master_idb1.csv"}))
+            # 27b) magic_base pro PC (27.08.2026): teilt sich der PC das Hedge-Konto
+            # mit anderen, vergibt die Provisionierung im eigenen 1000er-Block.
+            # Reine Blocklogik (base verschiebt Start + Praefix zaehlt im Block):
+            magic_base_logik = (
+                provision.next_magic(set(), 771000) == 771001
+                and provision.next_magic({771001, 771002}, 771000) == 771003
+                and provision.prefix_for(771001, set(), 771000) == "PH"
+                and provision.prefix_for(771002, {"PH"}, 771000) == "P2"
+                # Bestands-PC ohne magic_base bleibt exakt wie bisher (Default 770000):
+                and provision.next_magic({770001, 770002}) == 770003)
+            # Und end-zu-end an einem FRISCHEN Ordner (= eigener PC von ID B, eigener
+            # Ordner): der erste Account landet sauber im 771000er-Block mit PH.
+            with tempfile.TemporaryDirectory() as td2:
+                # Vorlage ohne magic/comment_prefix — genau wie die echte
+                # config.vorlage.json (die ist kein Account).
+                _json.dump({"hedge_expected_login": 400004,
+                            "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
+                            "magic_base": 771000},
+                           open(os.path.join(td2, "config.vorlage.json"), "w"))
+                ident_block1 = provision.alloc_identity(td2, "idb1", magic_base=771000)
+            results.append(prov(
+                "PROVISION: magic_base verschiebt den Block; frischer PC → magic 771001, Praefix PH",
+                lambda: magic_base_logik
+                        and ident_block1 == {"magic": 771001, "prefix": "PH",
+                                             "snapshot": "prophos_master_idb1.csv"}))
 
-        # 28) plan_checks faengt die Nutzerfehler ab
-        probs = provision.plan_checks(td, "böse name!", "abc", "", None)
-        results.append(prov(
-            "PROVISION: plan_checks meldet Name/Login/Server/Vorlage-Fehler",
-            lambda: len(probs) >= 4))
+            # 28) plan_checks faengt die Nutzerfehler ab
+            probs = provision.plan_checks(td, "böse name!", "abc", "", None)
+            results.append(prov(
+                "PROVISION: plan_checks meldet Name/Login/Server/Vorlage-Fehler",
+                lambda: len(probs) >= 4))
 
-        # 29) Vorhandener Account wird nicht ueberschrieben
-        _json.dump({}, open(os.path.join(td, "config-ftmo1.json"), "w"))
-        probs2 = provision.plan_checks(td, "ftmo1", "555001", "Srv", None)
-        results.append(prov(
-            "PROVISION: existierende config-ftmo1.json blockiert das Anlegen",
-            lambda: any("bereits angelegt" in p for p in probs2)))
-        # 29a) Gleicher Name, anderer Login (19.10.2026, Marcos FTMO-Fall): kein
-        # "bereits angelegt" mehr, sondern "Name vergeben" — und ein Login, der
-        # schon unter anderem Namen laeuft, wird genannt.
-        _json.dump({"master_expected_login": 14335517},
-                   open(os.path.join(td, "config-100kPhase1.json"), "w"))
-        probs3 = provision.plan_checks(td, "100kPhase1", "511450116", "Srv", None)
-        results.append(prov(
-            "PROVISION: gleicher Name + anderer Login = 'schon vergeben', nicht 'bereits angelegt'",
-            lambda: any("schon vergeben" in p and "14335517" in p for p in probs3)
-                    and not any("bereits angelegt" in p for p in probs3)))
-        probs4 = provision.plan_checks(td, "100kPhase1", "14335517", "Srv", None)
-        results.append(prov(
-            "PROVISION: gleicher Name + gleicher Login = 'bereits angelegt'",
-            lambda: any("bereits angelegt" in p for p in probs4)
-                    and not any("schon angelegt (" in p for p in probs4)))
-        probs5 = provision.plan_checks(td, "FNF17", "14335517", "Srv", None)
-        results.append(prov(
-            "PROVISION: bekannter Login unter neuem Namen nennt die vorhandene Config",
-            lambda: any("schon angelegt (config-100kPhase1.json)" in p for p in probs5)))
+            # 29) Vorhandener Account wird nicht ueberschrieben
+            _json.dump({}, open(os.path.join(td, "config-ftmo1.json"), "w"))
+            probs2 = provision.plan_checks(td, "ftmo1", "555001", "Srv", None)
+            results.append(prov(
+                "PROVISION: existierende config-ftmo1.json blockiert das Anlegen",
+                lambda: any("bereits angelegt" in p for p in probs2)))
+            # 29a) Gleicher Name, anderer Login (19.10.2026, Marcos FTMO-Fall): kein
+            # "bereits angelegt" mehr, sondern "Name vergeben" — und ein Login, der
+            # schon unter anderem Namen laeuft, wird genannt.
+            _json.dump({"master_expected_login": 14335517},
+                       open(os.path.join(td, "config-100kPhase1.json"), "w"))
+            probs3 = provision.plan_checks(td, "100kPhase1", "511450116", "Srv", None)
+            results.append(prov(
+                "PROVISION: gleicher Name + anderer Login = 'schon vergeben', nicht 'bereits angelegt'",
+                lambda: any("schon vergeben" in p and "14335517" in p for p in probs3)
+                        and not any("bereits angelegt" in p for p in probs3)))
+            probs4 = provision.plan_checks(td, "100kPhase1", "14335517", "Srv", None)
+            results.append(prov(
+                "PROVISION: gleicher Name + gleicher Login = 'bereits angelegt'",
+                lambda: any("bereits angelegt" in p for p in probs4)
+                        and not any("schon angelegt (" in p for p in probs4)))
+            probs5 = provision.plan_checks(td, "FNF17", "14335517", "Srv", None)
+            results.append(prov(
+                "PROVISION: bekannter Login unter neuem Namen nennt die vorhandene Config",
+                lambda: any("schon angelegt (config-100kPhase1.json)" in p for p in probs5)))
+    _inline(_ab_323)
 
     # 29b) Trade-Fenster (25.08.2026, Finns Ansage: Copier nicht 24/7 scharf):
     # 'laufend' oeffnet immer, 'geplant' nur frisch (<= 6h), 'beendet' und
     # Eintraege ohne brauchbare Zeit nie.
-    from copier import plan_armed_files
-    from datetime import datetime as _dt
-    _now = _dt(2026, 8, 25, 12, 0, 0)
-    _plans = [
-        {"file": "config-a.json", "status": "laufend", "armed_at": "2026-08-20T00:00:00"},
-        {"file": "config-b.json", "status": "geplant", "armed_at": "2026-08-25T09:00:00"},
-        {"file": "config-c.json", "status": "geplant", "armed_at": "2026-08-24T09:00:00"},
-        {"file": "config-d.json", "status": "beendet", "armed_at": "2026-08-25T11:59:00"},
-        {"file": "config-e.json", "status": "geplant"},
-    ]
-    results.append(prov(
-        "TRADE-FENSTER: laufend immer, geplant nur frisch (6h), beendet/ohne Zeit nie",
-        lambda: plan_armed_files(_plans, _now) == {"config-a.json", "config-b.json"}
-                and plan_armed_files([], _now) == set()
-                and plan_armed_files(None, _now) == set()))
+    def _ab_420():   # ST2: Inline-Prüfung ab Zeile 420 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        from copier import plan_armed_files
+        from datetime import datetime as _dt
+        _now = _dt(2026, 8, 25, 12, 0, 0)
+        _plans = [
+            {"file": "config-a.json", "status": "laufend", "armed_at": "2026-08-20T00:00:00"},
+            {"file": "config-b.json", "status": "geplant", "armed_at": "2026-08-25T09:00:00"},
+            {"file": "config-c.json", "status": "geplant", "armed_at": "2026-08-24T09:00:00"},
+            {"file": "config-d.json", "status": "beendet", "armed_at": "2026-08-25T11:59:00"},
+            {"file": "config-e.json", "status": "geplant"},
+        ]
+        results.append(prov(
+            "TRADE-FENSTER: laufend immer, geplant nur frisch (6h), beendet/ohne Zeit nie",
+            lambda: plan_armed_files(_plans, _now) == {"config-a.json", "config-b.json"}
+                    and plan_armed_files([], _now) == set()
+                    and plan_armed_files(None, _now) == set()))
+    _inline(_ab_420)
 
     # 30) Startdateien: Login-ini transient, StartUp-ini ohne Zugangsdaten
-    ini = provision.build_login_ini(555001, "geheim", "FusionMarkets-Demo")
-    sup = provision.build_startup_ini(preset="prophos-ftmo1.set")
-    results.append(prov(
-        "PROVISION: Login-ini mit KeepPrivate=1, StartUp-ini ohne Passwort",
-        lambda: "Password=geheim" in ini and "Login=555001" in ini
-                and "KeepPrivate=1" in ini
-                and "Password" not in sup and "Expert=ProphosHedgeReader" in sup
-                and "ExpertParameters=prophos-ftmo1.set" in sup))
+    def _ab_437():   # ST2: Inline-Prüfung ab Zeile 437 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        ini = provision.build_login_ini(555001, "geheim", "FusionMarkets-Demo")
+        sup = provision.build_startup_ini(preset="prophos-ftmo1.set")
+        results.append(prov(
+            "PROVISION: Login-ini mit KeepPrivate=1, StartUp-ini ohne Passwort",
+            lambda: "Password=geheim" in ini and "Login=555001" in ini
+                    and "KeepPrivate=1" in ini
+                    and "Password" not in sup and "Expert=ProphosHedgeReader" in sup
+                    and "ExpertParameters=prophos-ftmo1.set" in sup))
+    _inline(_ab_437)
 
     # ── Order-Bot: reine Rechenlogik (15.08.2026) ──────────────────────────
-    import order_bot
+    def _ab_447():   # ST2: Inline-Prüfung ab Zeile 447 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal order_bot
+        import order_bot
+    _inline(_ab_447)
 
     def chk(name, cond):
         results.append(cond)
         print(("✓ " if cond else "✗ ") + name)
         return cond
 
-    sl, tp = order_bot.berechne_sl_tp("buy", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
-    chk("ORDER-BOT: BUY 0.2 @ 20000, SL $100/TP $300 → 19500 / 21500",
-        sl == 19500.0 and tp == 21500.0)
-    sl, tp = order_bot.berechne_sl_tp("sell", 20000.0, 1.0, 10.0, sl_usd=100, tp_usd=300)
-    chk("ORDER-BOT: SELL, Kontraktgroesse 10 → SL 20010 / TP 19970 (gespiegelt)",
-        sl == 20010.0 and tp == 19970.0)
+    def _ab_454():   # ST2: Inline-Prüfung ab Zeile 454 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal sl, tp
+        sl, tp = order_bot.berechne_sl_tp("buy", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+        chk("ORDER-BOT: BUY 0.2 @ 20000, SL $100/TP $300 → 19500 / 21500",
+            sl == 19500.0 and tp == 21500.0)
+    _inline(_ab_454)
+    def _ab_457():   # ST2: Inline-Prüfung ab Zeile 457 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal sl, tp
+        sl, tp = order_bot.berechne_sl_tp("sell", 20000.0, 1.0, 10.0, sl_usd=100, tp_usd=300)
+        chk("ORDER-BOT: SELL, Kontraktgroesse 10 → SL 20010 / TP 19970 (gespiegelt)",
+            sl == 20010.0 and tp == 19970.0)
+    _inline(_ab_457)
     # F9-Direktweg (02.09.2026): SL/TP werden schon im Order-Dialog aus dem
     # Vor-Fill-Kurs gerechnet — BUY vom Ask, SELL vom Bid. Nagelt die Ref-Wahl
     # fest, damit ein Umbau sie nicht still vertauscht (waere SL/TP am falschen
     # Kursende). Ask=20002, Bid=20000, Spread 2.
-    slb, tpb = order_bot.berechne_sl_tp("buy", 20002.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
-    chk("ORDER-BOT: F9-BUY rechnet vom Ask (SL unter, TP ueber dem Ask)",
-        slb < 20002.0 < tpb)
-    sls, tps = order_bot.berechne_sl_tp("sell", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
-    chk("ORDER-BOT: F9-SELL rechnet vom Bid (SL ueber, TP unter dem Bid)",
-        tps < 20000.0 < sls)
-    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
-                                 "volumen": 0.2, "sl_usd": 100, "tp_usd": 300})
-    chk("ORDER-BOT: vollstaendiger Befehl → keine Fehler", f == [])
-    f = order_bot.pruefe_befehl({"symbol": "", "richtung": "kaufen", "volumen": 0})
-    chk("ORDER-BOT: kaputter Befehl → Symbol/Richtung/Volumen gemeldet (SL/TP optional)",
-        len(f) == 3)
+    def _ab_464():   # ST2: Inline-Prüfung ab Zeile 464 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        slb, tpb = order_bot.berechne_sl_tp("buy", 20002.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+        chk("ORDER-BOT: F9-BUY rechnet vom Ask (SL unter, TP ueber dem Ask)",
+            slb < 20002.0 < tpb)
+    _inline(_ab_464)
+    def _ab_467():   # ST2: Inline-Prüfung ab Zeile 467 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        sls, tps = order_bot.berechne_sl_tp("sell", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+        chk("ORDER-BOT: F9-SELL rechnet vom Bid (SL ueber, TP unter dem Bid)",
+            tps < 20000.0 < sls)
+    _inline(_ab_467)
+    def _ab_470():   # ST2: Inline-Prüfung ab Zeile 470 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                     "volumen": 0.2, "sl_usd": 100, "tp_usd": 300})
+        chk("ORDER-BOT: vollstaendiger Befehl → keine Fehler", f == [])
+    _inline(_ab_470)
+    def _ab_473():   # ST2: Inline-Prüfung ab Zeile 473 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"symbol": "", "richtung": "kaufen", "volumen": 0})
+        chk("ORDER-BOT: kaputter Befehl → Symbol/Richtung/Volumen gemeldet (SL/TP optional)",
+            len(f) == 3)
+    _inline(_ab_473)
     # SL/TP-Schalter (18.08.2026): beide weg = ok, nur eines = Fehler
-    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy", "volumen": 0.2})
-    chk("ORDER-BOT: Befehl OHNE SL/TP (Schalter aus) → gueltig", f == [])
-    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
-                                 "volumen": 0.2, "sl_usd": 100})
-    chk("ORDER-BOT: nur SL ohne TP → genau ein Fehler (nur zusammen)", len(f) == 1)
-    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
-                                 "volumen": float("nan"), "sl_usd": 100, "tp_usd": 300})
-    chk("ORDER-BOT: NaN-Volumen wird abgelehnt (isfinite-Wachter)", len(f) == 1)
+    def _ab_477():   # ST2: Inline-Prüfung ab Zeile 477 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy", "volumen": 0.2})
+        chk("ORDER-BOT: Befehl OHNE SL/TP (Schalter aus) → gueltig", f == [])
+    _inline(_ab_477)
+    def _ab_479():   # ST2: Inline-Prüfung ab Zeile 479 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                     "volumen": 0.2, "sl_usd": 100})
+        chk("ORDER-BOT: nur SL ohne TP → genau ein Fehler (nur zusammen)", len(f) == 1)
+    _inline(_ab_479)
+    def _ab_482():   # ST2: Inline-Prüfung ab Zeile 482 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                     "volumen": float("nan"), "sl_usd": 100, "tp_usd": 300})
+        chk("ORDER-BOT: NaN-Volumen wird abgelehnt (isfinite-Wachter)", len(f) == 1)
+    _inline(_ab_482)
     # SL/TP-per-Klick-Helfer (18.08.2026): reine Textlogik am Mac testbar
-    chk("ORDER-BOT: Aendern-Knopf erkannt, Abbrechen/Loeschen/Schliessen nicht",
-        order_bot.ist_aendern_knopf("#123 buy 0.20 NAS100 sl: 19500.00 tp: 21500.00 ändern")
-        and order_bot.ist_aendern_knopf("Modify")
-        and not order_bot.ist_aendern_knopf("Abbrechen")
-        and not order_bot.ist_aendern_knopf("Löschen")
-        and not order_bot.ist_aendern_knopf("Close #123 buy 0.20")
-        and not order_bot.ist_aendern_knopf(""))
-    chk("ORDER-BOT: SL/TP-Bestaetigung mit Rundungs-Toleranz, 0.0 faellt durch",
-        order_bot.sltp_bestaetigt(19500.01, 21500.0, 19500.0, 21500.0, 2)
-        and not order_bot.sltp_bestaetigt(0.0, 21500.0, 19500.0, 21500.0, 2)
-        and not order_bot.sltp_bestaetigt(19400.0, 21500.0, 19500.0, 21500.0, 2))
-    chk("ORDER-BOT: Ticket-Suche trifft nur die eigene Zeile",
-        order_bot.zeile_nennt_ticket("123456789 NAS100 buy 0.20", 123456789)
-        and not order_bot.zeile_nennt_ticket("9123456789 NAS100", 123456789)
-        and not order_bot.zeile_nennt_ticket("", 123456789))
+    def _ab_486():   # ST2: Inline-Prüfung ab Zeile 486 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Aendern-Knopf erkannt, Abbrechen/Loeschen/Schliessen nicht",
+            order_bot.ist_aendern_knopf("#123 buy 0.20 NAS100 sl: 19500.00 tp: 21500.00 ändern")
+            and order_bot.ist_aendern_knopf("Modify")
+            and not order_bot.ist_aendern_knopf("Abbrechen")
+            and not order_bot.ist_aendern_knopf("Löschen")
+            and not order_bot.ist_aendern_knopf("Close #123 buy 0.20")
+            and not order_bot.ist_aendern_knopf(""))
+    _inline(_ab_486)
+    def _ab_493():   # ST2: Inline-Prüfung ab Zeile 493 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: SL/TP-Bestaetigung mit Rundungs-Toleranz, 0.0 faellt durch",
+            order_bot.sltp_bestaetigt(19500.01, 21500.0, 19500.0, 21500.0, 2)
+            and not order_bot.sltp_bestaetigt(0.0, 21500.0, 19500.0, 21500.0, 2)
+            and not order_bot.sltp_bestaetigt(19400.0, 21500.0, 19500.0, 21500.0, 2))
+    _inline(_ab_493)
+    def _ab_497():   # ST2: Inline-Prüfung ab Zeile 497 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Ticket-Suche trifft nur die eigene Zeile",
+            order_bot.zeile_nennt_ticket("123456789 NAS100 buy 0.20", 123456789)
+            and not order_bot.zeile_nennt_ticket("9123456789 NAS100", 123456789)
+            and not order_bot.zeile_nennt_ticket("", 123456789))
+    _inline(_ab_497)
     # Order-Panel per UIA finden (25.09.2026, Popup-Fall): angedockt rechts vs. frei schwebend
     # mittig — beide liefern Units/TP/SL im Bereich; Reiter ohne Felder = 'ohne_felder'; ein
     # 'Markt'-Text anderswo (ohne Felder darunter) gewinnt nicht gegen das echte Ticket.
@@ -507,385 +611,505 @@ def main():
                 ("Stop", (x + 160, y, x + 220, y + 24), "TabItem"), ("Stop Limit", (x + 230, y, x + 330, y + 24), "TabItem"),
                 ("Einheiten", (x + 10, y + 60, x + 100, y + 80), "Text"), ("Take Profit, $", (x + 10, y + 140, x + 130, y + 160), "Text"),
                 ("Stop-Loss, $", (x + 10, y + 220, x + 130, y + 240), "Text"), ("Kauf 5 MNQZ6 MARKT", (x + 10, y + 320, x + 380, y + 360), "Button")]
-    fenster = (0, 0, 1920, 1080)
-    ang = order_bot.tv_panel_bereich(_roh_ticket(1500, 250), fenster)
-    pop = order_bot.tv_panel_bereich(_roh_ticket(1000, 300) + [("Markt", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text"),
-                                                              ("Positions", (1050, 950, 1120, 970), "TabItem"), ("Account Balance", (1200, 990, 1320, 1008), "Text")], fenster)
-    ohne = order_bot.tv_panel_bereich([("Market", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
+    def _ab_510():   # ST2: Inline-Prüfung ab Zeile 510 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal ang, fenster, ohne, pop
+        fenster = (0, 0, 1920, 1080)
+        ang = order_bot.tv_panel_bereich(_roh_ticket(1500, 250), fenster)
+        pop = order_bot.tv_panel_bereich(_roh_ticket(1000, 300) + [("Markt", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text"),
+                                                                  ("Positions", (1050, 950, 1120, 970), "TabItem"), ("Account Balance", (1200, 990, 1320, 1008), "Text")], fenster)
+        ohne = order_bot.tv_panel_bereich([("Market", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
+    _inline(_ab_510)
     def _findet(ber, x):
         u = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_UNITS, y_von=ber["reiter_y"])
         tp = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_TP, y_von=ber["reiter_y"])
         sl = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_SL, y_von=ber["reiter_y"])
         return len(u) == 1 and len(tp) == 1 and len(sl) == 1
-    chk("ORDER-BOT: Order-Panel angedockt rechts per UIA gefunden (Units/TP/SL im Bereich, modus angedockt)",
-        ang and not ang["ohne_felder"] and ang["modus"] == "angedockt" and ang["labels"] == 3
-        and ang["links"] <= 1510 and ang["rechts"] >= 1830 and ang["reiter_y"] == 262 and _findet(ang, 1500)
-        and ang["spur"].startswith("Panel: angedockt @"))
-    dock2 = order_bot.tv_panel_bereich(_roh_ticket(900, 300) + [("Watchlist", (1450, 120, 1550, 140), "Text"), ("NQ1!", (1450, 200, 1500, 220), "DataItem")], fenster)
-    chk("ORDER-BOT: angedockt mit Watchlist rechts daneben bleibt 'angedockt' (nichts unter der Box)",
-        dock2 and dock2["modus"] == "angedockt" and dock2["darunter"] == 0 and dock2["rand_rechts"] > 80
-        and "0 Elemente darunter" in dock2["spur"])
-    chk("ORDER-BOT: Order-Panel als Popup mittig gefunden, 'Markt'-Text anderswo gewinnt nicht (modus Popup, Elemente darunter)",
-        pop and not pop["ohne_felder"] and pop["modus"] == "Popup" and pop["labels"] == 3 and pop["darunter"] == 2
-        and pop["links"] <= 1010 and pop["rechts"] >= 1330 and pop["reiter_y"] == 312 and pop["market"]["punkt"][0] == 1045
-        and _findet(pop, 1000) and "Popup @" in pop["spur"])
-    chk("ORDER-BOT: Reiter-Zeile ohne Beschriftungen darunter → ohne_felder (kein Blindklick), keine Reiter → None",
-        ohne and ohne["ohne_felder"] and ohne["modus"] == "Reiter ohne Felder"
-        and order_bot.tv_panel_bereich([("Einheiten", (10, 10, 50, 30), "Text")], fenster) is None
-        and order_bot.tv_panel_bereich([], None) is None)
+    def _ab_520():   # ST2: Inline-Prüfung ab Zeile 520 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Order-Panel angedockt rechts per UIA gefunden (Units/TP/SL im Bereich, modus angedockt)",
+            ang and not ang["ohne_felder"] and ang["modus"] == "angedockt" and ang["labels"] == 3
+            and ang["links"] <= 1510 and ang["rechts"] >= 1830 and ang["reiter_y"] == 262 and _findet(ang, 1500)
+            and ang["spur"].startswith("Panel: angedockt @"))
+    _inline(_ab_520)
+    def _ab_524():   # ST2: Inline-Prüfung ab Zeile 524 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        dock2 = order_bot.tv_panel_bereich(_roh_ticket(900, 300) + [("Watchlist", (1450, 120, 1550, 140), "Text"), ("NQ1!", (1450, 200, 1500, 220), "DataItem")], fenster)
+        chk("ORDER-BOT: angedockt mit Watchlist rechts daneben bleibt 'angedockt' (nichts unter der Box)",
+            dock2 and dock2["modus"] == "angedockt" and dock2["darunter"] == 0 and dock2["rand_rechts"] > 80
+            and "0 Elemente darunter" in dock2["spur"])
+    _inline(_ab_524)
+    def _ab_528():   # ST2: Inline-Prüfung ab Zeile 528 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Order-Panel als Popup mittig gefunden, 'Markt'-Text anderswo gewinnt nicht (modus Popup, Elemente darunter)",
+            pop and not pop["ohne_felder"] and pop["modus"] == "Popup" and pop["labels"] == 3 and pop["darunter"] == 2
+            and pop["links"] <= 1010 and pop["rechts"] >= 1330 and pop["reiter_y"] == 312 and pop["market"]["punkt"][0] == 1045
+            and _findet(pop, 1000) and "Popup @" in pop["spur"])
+    _inline(_ab_528)
+    def _ab_532():   # ST2: Inline-Prüfung ab Zeile 532 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Reiter-Zeile ohne Beschriftungen darunter → ohne_felder (kein Blindklick), keine Reiter → None",
+            ohne and ohne["ohne_felder"] and ohne["modus"] == "Reiter ohne Felder"
+            and order_bot.tv_panel_bereich([("Einheiten", (10, 10, 50, 30), "Text")], fenster) is None
+            and order_bot.tv_panel_bereich([], None) is None)
+    _inline(_ab_532)
     # Neues TradingView-Layout (25.09.2026, Finns Screenshot, angedockt): Reiterzeile 1 'Order | DOM',
     # Verkauf/Kauf, Reiterzeile 2 'Markt … Stop Limit', 'Einheiten' als AUFKLAPPMENUE (ComboBox), daneben
     # 'Ø USD Risiko', 'Take Profit, $' / 'Stop-Loss, $' ebenfalls Menues mit Schalter rechts.
-    _NL = [("Order", (1500, 120, 1560, 144), "TabItem"), ("DOM", (1570, 120, 1620, 144), "TabItem"),
-           ("Verkauf 30.827,25", (1500, 170, 1650, 220), "Button"), ("Kauf 30.827,75", (1660, 170, 1810, 220), "Button"),
-           ("Markt", (1510, 250, 1560, 274), "TabItem"), ("Limit", (1580, 250, 1630, 274), "TabItem"),
-           ("Stop", (1650, 250, 1700, 274), "TabItem"), ("Stop Limit", (1720, 250, 1810, 274), "TabItem"),
-           ("Einheiten", (1510, 300, 1600, 322), "ComboBox"), ("Ø USD Risiko", (1660, 300, 1800, 322), "ComboBox"),
-           ("Tick Wert 2,50 USD", (1510, 360, 1650, 378), "Text"), ("Aussteige", (1510, 400, 1600, 418), "Text"),
-           ("Take Profit, $", (1510, 440, 1640, 462), "ComboBox"), ("Stop-Loss, $", (1510, 520, 1640, 542), "ComboBox"),
-           ("Time-in-Force Day", (1510, 600, 1700, 618), "Text"), ("Kauf 5 MNQZ6 MARKT", (1510, 700, 1810, 740), "Button")]
-    _nl_felder = [(1510, 326, 1640, 350), (1660, 326, 1800, 350), (1510, 466, 1640, 490), (1510, 546, 1640, 570)]
-    _nl_werte = ["5", "12,50", "250", "100"]
-    _nl_schalter = [((1770, 442, 1806, 460), True), ((1770, 522, 1806, 540), False)]
-    _nb = order_bot.tv_panel_bereich(_NL, (0, 0, 1920, 1080))
-    chk("ORDER-BOT (neues Layout): reiter_y auf der Markt-Zeile, nicht auf 'Order | DOM'; Beschriftungen als ComboBox gefunden",
-        _nb and _nb["reiter_y"] == 262 and _nb["labels"] == 3 and _nb["modus"] == "angedockt"
-        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])) == 1
-        and order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])[0]["typ"] == "ComboBox"
-        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])) == 1
-        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_SL, y_von=_nb["reiter_y"])) == 1)
-    _lab_u = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])
-    _lab_tp = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])
-    chk("ORDER-BOT (neues Layout): Feld unter 'Einheiten' ist das linke (nicht 'Ø USD Risiko'), Schalter zu 'Take Profit' gefunden",
-        order_bot.tv_label_mit_feld(_lab_u, _nl_felder, _nb)[1] == 0
-        and order_bot.tv_label_mit_feld(_lab_tp, _nl_felder, _nb)[1] == 2
-        and order_bot.tv_schalter_zu(_nl_schalter, _lab_tp[0]["r"], _nb) == ((1770, 442, 1806, 460), True))
+    def _ab_539():   # ST2: Inline-Prüfung ab Zeile 539 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _NL, _nb, _nl_felder, _nl_schalter, _nl_werte
+        _NL = [("Order", (1500, 120, 1560, 144), "TabItem"), ("DOM", (1570, 120, 1620, 144), "TabItem"),
+               ("Verkauf 30.827,25", (1500, 170, 1650, 220), "Button"), ("Kauf 30.827,75", (1660, 170, 1810, 220), "Button"),
+               ("Markt", (1510, 250, 1560, 274), "TabItem"), ("Limit", (1580, 250, 1630, 274), "TabItem"),
+               ("Stop", (1650, 250, 1700, 274), "TabItem"), ("Stop Limit", (1720, 250, 1810, 274), "TabItem"),
+               ("Einheiten", (1510, 300, 1600, 322), "ComboBox"), ("Ø USD Risiko", (1660, 300, 1800, 322), "ComboBox"),
+               ("Tick Wert 2,50 USD", (1510, 360, 1650, 378), "Text"), ("Aussteige", (1510, 400, 1600, 418), "Text"),
+               ("Take Profit, $", (1510, 440, 1640, 462), "ComboBox"), ("Stop-Loss, $", (1510, 520, 1640, 542), "ComboBox"),
+               ("Time-in-Force Day", (1510, 600, 1700, 618), "Text"), ("Kauf 5 MNQZ6 MARKT", (1510, 700, 1810, 740), "Button")]
+        _nl_felder = [(1510, 326, 1640, 350), (1660, 326, 1800, 350), (1510, 466, 1640, 490), (1510, 546, 1640, 570)]
+        _nl_werte = ["5", "12,50", "250", "100"]
+        _nl_schalter = [((1770, 442, 1806, 460), True), ((1770, 522, 1806, 540), False)]
+        _nb = order_bot.tv_panel_bereich(_NL, (0, 0, 1920, 1080))
+        chk("ORDER-BOT (neues Layout): reiter_y auf der Markt-Zeile, nicht auf 'Order | DOM'; Beschriftungen als ComboBox gefunden",
+            _nb and _nb["reiter_y"] == 262 and _nb["labels"] == 3 and _nb["modus"] == "angedockt"
+            and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])) == 1
+            and order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])[0]["typ"] == "ComboBox"
+            and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])) == 1
+            and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_SL, y_von=_nb["reiter_y"])) == 1)
+    _inline(_ab_539)
+    def _ab_557():   # ST2: Inline-Prüfung ab Zeile 557 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _lab_u = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])
+        _lab_tp = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])
+        chk("ORDER-BOT (neues Layout): Feld unter 'Einheiten' ist das linke (nicht 'Ø USD Risiko'), Schalter zu 'Take Profit' gefunden",
+            order_bot.tv_label_mit_feld(_lab_u, _nl_felder, _nb)[1] == 0
+            and order_bot.tv_label_mit_feld(_lab_tp, _nl_felder, _nb)[1] == 2
+            and order_bot.tv_schalter_zu(_nl_schalter, _lab_tp[0]["r"], _nb) == ((1770, 442, 1806, 460), True))
+    _inline(_ab_557)
     # Rueckfall ohne jede Beschriftung: Units = oberstes Zahlenfeld, TP/SL ueber die Schalter-Zeilen
-    _ohne = [e for e in _NL if e[2] != "ComboBox"]
-    _nb2 = order_bot.tv_panel_bereich(_ohne, (0, 0, 1920, 1080))
-    _iu = order_bot.tv_feld_ohne_label(_nl_felder, _nl_werte, {"links": 1480, "rechts": 1840}, 262)
-    _zeilen = order_bot.tv_schalter_zeilen(_nl_schalter, {"links": 1480, "rechts": 1840}, 350)
-    _lab_sl = {"r": (1490, _zeilen[1][1], _zeilen[1][0] - 6, _zeilen[1][3])}
-    chk("ORDER-BOT (Rueckfall): ohne Beschriftungen → ohne_felder; Units = oberstes Zahlenfeld; TP/SL-Zeilen in Reihenfolge, Feld unter der SL-Zeile",
-        _nb2 and _nb2["ohne_felder"] and _iu == 0 and len(_zeilen) == 2 and _zeilen[0][1] == 442 and _zeilen[1][1] == 522
-        and order_bot.tv_feld_unter(_nl_felder, _lab_sl["r"], {"links": 1480, "rechts": 1840}) == 3
-        and order_bot.tv_feld_ohne_label([(1510, 200, 1600, 220)], ["5"], {"links": 1480, "rechts": 1840}, 262) is None)
+    def _ab_564():   # ST2: Inline-Prüfung ab Zeile 564 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _ohne, e
+        _ohne = [e for e in _NL if e[2] != "ComboBox"]
+        _nb2 = order_bot.tv_panel_bereich(_ohne, (0, 0, 1920, 1080))
+        _iu = order_bot.tv_feld_ohne_label(_nl_felder, _nl_werte, {"links": 1480, "rechts": 1840}, 262)
+        _zeilen = order_bot.tv_schalter_zeilen(_nl_schalter, {"links": 1480, "rechts": 1840}, 350)
+        _lab_sl = {"r": (1490, _zeilen[1][1], _zeilen[1][0] - 6, _zeilen[1][3])}
+        chk("ORDER-BOT (Rueckfall): ohne Beschriftungen → ohne_felder; Units = oberstes Zahlenfeld; TP/SL-Zeilen in Reihenfolge, Feld unter der SL-Zeile",
+            _nb2 and _nb2["ohne_felder"] and _iu == 0 and len(_zeilen) == 2 and _zeilen[0][1] == 442 and _zeilen[1][1] == 522
+            and order_bot.tv_feld_unter(_nl_felder, _lab_sl["r"], {"links": 1480, "rechts": 1840}) == 3
+            and order_bot.tv_feld_ohne_label([(1510, 200, 1600, 220)], ["5"], {"links": 1480, "rechts": 1840}, 262) is None)
+    _inline(_ab_564)
     # Deutsch (25.09.2026, Finn: 'Englisch geht sofort, Deutsch nicht'): Namen mit weichem Trennstrich,
     # geschuetztem Leerzeichen und Menue-Pfeil, Beschriftung als Hyperlink/Group — normalisiert getroffen
-    _DE = [("Markt", (1510, 250, 1560, 274), "TabItem"), ("Stop\u00a0Limit", (1720, 250, 1810, 274), "TabItem"),
-           ("Ein\u00adheiten \u25be", (1510, 300, 1600, 322), "Hyperlink"), ("Take\u00a0Profit, $ \u25be", (1510, 440, 1640, 462), "Group"),
-           ("Stop-Loss, $\u25bc", (1510, 520, 1640, 542), "Menu"), ("Order", (1500, 120, 1560, 144), "TabItem")]
-    _db = order_bot.tv_panel_bereich(_DE, (0, 0, 1920, 1080))
-    chk("ORDER-BOT (Deutsch): weicher Trennstrich, NBSP, Menue-Pfeil, Typen Hyperlink/Group/Menu → Reiter + 3 Beschriftungen",
-        _db and _db["labels"] == 3 and _db["reiter_y"] == 262
-        and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_UNITS, y_von=_db["reiter_y"])[0]["text"] == "Einheiten"
-        and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_TP, y_von=_db["reiter_y"])[0]["text"] == "Take Profit, $"
-        and "$" in order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_SL, y_von=_db["reiter_y"])[0]["text"]
-        and order_bot.tv_name_norm("  Ein\u00adheiten\u00a0\u25be ") == "Einheiten"
-        and bool(order_bot.TV_RX_UNITS.search("Stück")) and bool(order_bot.TV_RX_UNITS.search("Anzahl"))
-        and not order_bot.TV_RX_UNITS.search("Order") and not order_bot.TV_RX_TP.search("Tick Wert 2,50 USD"))
-    _inv = order_bot.tv_panel_inventar(_NL, _nb, 4)
-    chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
-        _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3
-        and "Kauf 30" not in _inv)
+    def _ab_575():   # ST2: Inline-Prüfung ab Zeile 575 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _DE
+        _DE = [("Markt", (1510, 250, 1560, 274), "TabItem"), ("Stop\u00a0Limit", (1720, 250, 1810, 274), "TabItem"),
+               ("Ein\u00adheiten \u25be", (1510, 300, 1600, 322), "Hyperlink"), ("Take\u00a0Profit, $ \u25be", (1510, 440, 1640, 462), "Group"),
+               ("Stop-Loss, $\u25bc", (1510, 520, 1640, 542), "Menu"), ("Order", (1500, 120, 1560, 144), "TabItem")]
+        _db = order_bot.tv_panel_bereich(_DE, (0, 0, 1920, 1080))
+        chk("ORDER-BOT (Deutsch): weicher Trennstrich, NBSP, Menue-Pfeil, Typen Hyperlink/Group/Menu → Reiter + 3 Beschriftungen",
+            _db and _db["labels"] == 3 and _db["reiter_y"] == 262
+            and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_UNITS, y_von=_db["reiter_y"])[0]["text"] == "Einheiten"
+            and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_TP, y_von=_db["reiter_y"])[0]["text"] == "Take Profit, $"
+            and "$" in order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_SL, y_von=_db["reiter_y"])[0]["text"]
+            and order_bot.tv_name_norm("  Ein\u00adheiten\u00a0\u25be ") == "Einheiten"
+            and bool(order_bot.TV_RX_UNITS.search("Stück")) and bool(order_bot.TV_RX_UNITS.search("Anzahl"))
+            and not order_bot.TV_RX_UNITS.search("Order") and not order_bot.TV_RX_TP.search("Tick Wert 2,50 USD"))
+    _inline(_ab_575)
+    def _ab_587():   # ST2: Inline-Prüfung ab Zeile 587 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _inv = order_bot.tv_panel_inventar(_NL, _nb, 4)
+        chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
+            _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3
+            and "Kauf 30" not in _inv)
+    _inline(_ab_587)
     # Zuruecklesen mit Nachlesen (25.09.2026, pc-iiiiii: 'Stop loss: im Feld steht '?' statt 250.0')
     def _folge(werte):
         it = iter(werte)
         return lambda: next(it, None)
-    _pausen = []
-    _w = lambda: _pausen.append(1)
-    r1 = order_bot.tv_wert_nachlesen(_folge([None, 250.0]), 250.0, _w)
-    r2 = order_bot.tv_wert_nachlesen(_folge([25.0, 25.0, 250.0]), 250.0, _w)
-    r3 = order_bot.tv_wert_nachlesen(_folge([25.0, None, 25.0]), 250.0, _w)
-    r4 = order_bot.tv_wert_nachlesen(_folge([None, None, None]), 250.0, _w)
-    r5 = order_bot.tv_wert_nachlesen(_folge([250.004]), 250.0, _w)
-    chk("ORDER-BOT: Zuruecklesen — Feld kurz weg (None) → 2. Lesung ok; abgeschnitten '25' → bis 3 Lesungen; nie mehr als 3",
-        r1 == (True, 250.0, 2) and r2 == (True, 250.0, 3) and r3 == (False, 25.0, 3) and r4 == (False, None, 3)
-        and r5[0] is True and r5[2] == 1 and len(_pausen) == 1 + 2 + 2 + 2)
+    def _ab_595():   # ST2: Inline-Prüfung ab Zeile 595 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _pausen = []
+        _w = lambda: _pausen.append(1)
+        r1 = order_bot.tv_wert_nachlesen(_folge([None, 250.0]), 250.0, _w)
+        r2 = order_bot.tv_wert_nachlesen(_folge([25.0, 25.0, 250.0]), 250.0, _w)
+        r3 = order_bot.tv_wert_nachlesen(_folge([25.0, None, 25.0]), 250.0, _w)
+        r4 = order_bot.tv_wert_nachlesen(_folge([None, None, None]), 250.0, _w)
+        r5 = order_bot.tv_wert_nachlesen(_folge([250.004]), 250.0, _w)
+        chk("ORDER-BOT: Zuruecklesen — Feld kurz weg (None) → 2. Lesung ok; abgeschnitten '25' → bis 3 Lesungen; nie mehr als 3",
+            r1 == (True, 250.0, 2) and r2 == (True, 250.0, 3) and r3 == (False, 25.0, 3) and r4 == (False, None, 3)
+            and r5[0] is True and r5[2] == 1 and len(_pausen) == 1 + 2 + 2 + 2)
+    _inline(_ab_595)
     # Ruecklese-Vergleich (18.08.2026, Feld zeigte '2', MT5 rechnete 0.01):
     # als Zahl vergleichen, MT5-Umformatierung und Locale duerfen nicht stoeren
-    chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",
-        order_bot.zahl_gleich("2.00", "2")
-        and order_bot.zahl_gleich("19 500,00", "19500.00")
-        and not order_bot.zahl_gleich("0.01", "2")
-        and not order_bot.zahl_gleich("", "2"))
+    def _ab_607():   # ST2: Inline-Prüfung ab Zeile 607 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",
+            order_bot.zahl_gleich("2.00", "2")
+            and order_bot.zahl_gleich("19 500,00", "19500.00")
+            and not order_bot.zahl_gleich("0.01", "2")
+            and not order_bot.zahl_gleich("", "2"))
+    _inline(_ab_607)
     # Bestaetigen-Knopf vs. 'Position aendern'-Reiter (18.08.2026)
-    chk("ORDER-BOT: Bestaetigen-Knopf erkannt, Reiter/Abbrechen nicht",
-        order_bot.ist_bestaetigen_knopf(
-            "Ändern #512345477 buy 1 NAS100 30006.46 sl: 30003.46 tp: 30339.46")
-        and not order_bot.ist_bestaetigen_knopf("Position ändern")
-        and not order_bot.ist_bestaetigen_knopf("Abbrechen")
-        and not order_bot.ist_bestaetigen_knopf("Ändern"))
+    def _ab_613():   # ST2: Inline-Prüfung ab Zeile 613 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Bestaetigen-Knopf erkannt, Reiter/Abbrechen nicht",
+            order_bot.ist_bestaetigen_knopf(
+                "Ändern #512345477 buy 1 NAS100 30006.46 sl: 30003.46 tp: 30339.46")
+            and not order_bot.ist_bestaetigen_knopf("Position ändern")
+            and not order_bot.ist_bestaetigen_knopf("Abbrechen")
+            and not order_bot.ist_bestaetigen_knopf("Ändern"))
+    _inline(_ab_613)
     # Handel-Zeile vs. Chart-Titel/Navigator (18.08.2026, EA-Dialog-Vorfall)
-    chk("ORDER-BOT: Handel-Zeile erkannt, Chart-Titel/Navigator nicht",
-        order_bot.ist_handelszeile("nas100, 512309082, buy, 1.00, 29992.33", "NAS100")
-        and not order_bot.ist_handelszeile("NAS100,M1: US Tech 100 Index", "NAS100")
-        and not order_bot.ist_handelszeile("ProphosHedgeReader - NAS100,M1", "NAS100")
-        and not order_bot.ist_handelszeile("", "NAS100"))
+    def _ab_620():   # ST2: Inline-Prüfung ab Zeile 620 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Handel-Zeile erkannt, Chart-Titel/Navigator nicht",
+            order_bot.ist_handelszeile("nas100, 512309082, buy, 1.00, 29992.33", "NAS100")
+            and not order_bot.ist_handelszeile("NAS100,M1: US Tech 100 Index", "NAS100")
+            and not order_bot.ist_handelszeile("ProphosHedgeReader - NAS100,M1", "NAS100")
+            and not order_bot.ist_handelszeile("", "NAS100"))
+    _inline(_ab_620)
     # Rueckkehr nach Prophos (28.08.2026, Finns 'Ausgangssituation'): Home-Base
     # braucht Titel UND Browser-Klasse — die Backend-Konsole heisst selbst
     # 'Prophos-Backend' (title in start-prophos.bat) und darf NIE Treffer sein.
-    chk("ORDER-BOT: Prophos-Fenster erkannt (Chrome-Tab, PWA-Huelle, Firefox)",
-        order_bot.ist_prophos_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
-        and order_bot.ist_prophos_fenster("Prophos", "Chrome_WidgetWin_1")
-        and order_bot.ist_prophos_fenster("Prophos — Mozilla Firefox", "MozillaWindowClass"))
-    chk("ORDER-BOT: Backend-Konsole/MT5-Terminal sind KEIN Prophos-Fenster",
-        not order_bot.ist_prophos_fenster("Prophos-Backend", "ConsoleWindowClass")
-        and not order_bot.ist_prophos_fenster("Prophos-Backend", "CASCADIA_HOSTING_WINDOW_CLASS")
-        and not order_bot.ist_prophos_fenster("400001: FTMO-Demo", order_bot.MT5_KLASSE))
-    chk("ORDER-BOT: DevTools/leerer Titel/leere Klasse sind KEIN Prophos-Fenster",
-        not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
-        and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
-        and not order_bot.ist_prophos_fenster("Prophos", ""))
+    def _ab_628():   # ST2: Inline-Prüfung ab Zeile 628 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Prophos-Fenster erkannt (Chrome-Tab, PWA-Huelle, Firefox)",
+            order_bot.ist_prophos_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+            and order_bot.ist_prophos_fenster("Prophos", "Chrome_WidgetWin_1")
+            and order_bot.ist_prophos_fenster("Prophos — Mozilla Firefox", "MozillaWindowClass"))
+    _inline(_ab_628)
+    def _ab_632():   # ST2: Inline-Prüfung ab Zeile 632 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Backend-Konsole/MT5-Terminal sind KEIN Prophos-Fenster",
+            not order_bot.ist_prophos_fenster("Prophos-Backend", "ConsoleWindowClass")
+            and not order_bot.ist_prophos_fenster("Prophos-Backend", "CASCADIA_HOSTING_WINDOW_CLASS")
+            and not order_bot.ist_prophos_fenster("400001: FTMO-Demo", order_bot.MT5_KLASSE))
+    _inline(_ab_632)
+    def _ab_636():   # ST2: Inline-Prüfung ab Zeile 636 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: DevTools/leerer Titel/leere Klasse sind KEIN Prophos-Fenster",
+            not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
+            and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
+            and not order_bot.ist_prophos_fenster("Prophos", ""))
+    _inline(_ab_636)
     # Orbit-Puls Schritt 1 (28.08.2026): TradingView-Fenster erkennen. Der
     # Fenstertitel ist immer der AKTIVE Tab — 'tradingview' steht mitten im
     # Titel (Chart davor, Browser-Name dahinter), daher contains; DevTools
     # tragen die URL im Titel und duerfen NIE Treffer sein.
-    chk("ORDER-BOT: TradingView-Fenster erkannt (Chrome/Firefox, Chart-Titel)",
-        order_bot.ist_tradingview_fenster("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
-        and order_bot.ist_tradingview_fenster("TradingView — Track All Markets — Mozilla Firefox", "MozillaWindowClass")
-        and order_bot.ist_tradingview_fenster("(1) MNQ1! 1m CME — TradingView", "Chrome_WidgetWin_1"))
-    chk("ORDER-BOT: DevTools/Prophos/Konsole/MT5 sind KEIN TradingView-Fenster",
-        not order_bot.ist_tradingview_fenster("DevTools - www.tradingview.com/chart", "Chrome_WidgetWin_1")
-        and not order_bot.ist_tradingview_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
-        and not order_bot.ist_tradingview_fenster("tradingview", "ConsoleWindowClass")
-        and not order_bot.ist_tradingview_fenster("", "Chrome_WidgetWin_1")
-        and not order_bot.ist_tradingview_fenster("TradingView", order_bot.MT5_KLASSE))
+    def _ab_644():   # ST2: Inline-Prüfung ab Zeile 644 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: TradingView-Fenster erkannt (Chrome/Firefox, Chart-Titel)",
+            order_bot.ist_tradingview_fenster("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
+            and order_bot.ist_tradingview_fenster("TradingView — Track All Markets — Mozilla Firefox", "MozillaWindowClass")
+            and order_bot.ist_tradingview_fenster("(1) MNQ1! 1m CME — TradingView", "Chrome_WidgetWin_1"))
+    _inline(_ab_644)
+    def _ab_648():   # ST2: Inline-Prüfung ab Zeile 648 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: DevTools/Prophos/Konsole/MT5 sind KEIN TradingView-Fenster",
+            not order_bot.ist_tradingview_fenster("DevTools - www.tradingview.com/chart", "Chrome_WidgetWin_1")
+            and not order_bot.ist_tradingview_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+            and not order_bot.ist_tradingview_fenster("tradingview", "ConsoleWindowClass")
+            and not order_bot.ist_tradingview_fenster("", "Chrome_WidgetWin_1")
+            and not order_bot.ist_tradingview_fenster("TradingView", order_bot.MT5_KLASSE))
+    _inline(_ab_648)
 
     # ── Futures-Puls Neuaufbau Schritt 1 (21.09.2026): TradingView starten ──
     # Die URL kommt aus einer Config-Datei und landet in einem Browser, in dem
     # Prop-Konten eingeloggt sind — alles ausser https://…tradingview.com/ muss
     # still auf den Standard zurueckfallen.
-    chk("TV-START: URL — nur https + tradingview.com, sonst Standard",
-        order_bot.tv_start_url("") == order_bot.TV_START_URL
-        and order_bot.tv_start_url(None) == order_bot.TV_START_URL
-        and order_bot.tv_start_url("https://www.tradingview.com/chart/AbC123/") == "https://www.tradingview.com/chart/AbC123/"
-        and order_bot.tv_start_url("https://de.tradingview.com/chart/") == "https://de.tradingview.com/chart/"
-        and order_bot.tv_start_url("http://www.tradingview.com/chart/") == order_bot.TV_START_URL
-        and order_bot.tv_start_url("https://www.tradingview.com.evil.io/chart/") == order_bot.TV_START_URL
-        and order_bot.tv_start_url("https://evil.io/?x=https://www.tradingview.com/") == order_bot.TV_START_URL
-        and order_bot.tv_start_url("https://www.tradingview.com/chart/ --remote-debugging-port=1") == order_bot.TV_START_URL)
-    chk("TV-START: Chrome-Aufruf — eigenes Fenster, Profil nur wenn gesetzt, URL zuletzt",
-        order_bot.tv_start_befehl("C:/c.exe", "") == ["C:/c.exe", "--new-window", order_bot.TV_START_URL]
-        and order_bot.tv_start_befehl("C:/c.exe", "", "Profile 2")
-            == ["C:/c.exe", "--profile-directory=Profile 2", "--new-window", order_bot.TV_START_URL]
-        and order_bot.tv_start_befehl("C:/c.exe", "ftp://x", "  ")[-1] == order_bot.TV_START_URL)
+    def _ab_659():   # ST2: Inline-Prüfung ab Zeile 659 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-START: URL — nur https + tradingview.com, sonst Standard",
+            order_bot.tv_start_url("") == order_bot.TV_START_URL
+            and order_bot.tv_start_url(None) == order_bot.TV_START_URL
+            and order_bot.tv_start_url("https://www.tradingview.com/chart/AbC123/") == "https://www.tradingview.com/chart/AbC123/"
+            and order_bot.tv_start_url("https://de.tradingview.com/chart/") == "https://de.tradingview.com/chart/"
+            and order_bot.tv_start_url("http://www.tradingview.com/chart/") == order_bot.TV_START_URL
+            and order_bot.tv_start_url("https://www.tradingview.com.evil.io/chart/") == order_bot.TV_START_URL
+            and order_bot.tv_start_url("https://evil.io/?x=https://www.tradingview.com/") == order_bot.TV_START_URL
+            and order_bot.tv_start_url("https://www.tradingview.com/chart/ --remote-debugging-port=1") == order_bot.TV_START_URL)
+    _inline(_ab_659)
+    def _ab_668():   # ST2: Inline-Prüfung ab Zeile 668 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-START: Chrome-Aufruf — eigenes Fenster, Profil nur wenn gesetzt, URL zuletzt",
+            order_bot.tv_start_befehl("C:/c.exe", "") == ["C:/c.exe", "--new-window", order_bot.TV_START_URL]
+            and order_bot.tv_start_befehl("C:/c.exe", "", "Profile 2")
+                == ["C:/c.exe", "--profile-directory=Profile 2", "--new-window", order_bot.TV_START_URL]
+            and order_bot.tv_start_befehl("C:/c.exe", "ftp://x", "  ")[-1] == order_bot.TV_START_URL)
+    _inline(_ab_668)
 
     # ── Futures-Puls Neuaufbau Schritt 2a (21.09.2026): richtiges Konto? ──
     # Ein Fehlurteil 'richtig' hiesse spaeter: Order auf dem falschen Prop-Konto.
-    _bf = lambda aktiv, schalter=True: {"konto": {"aktiv": aktiv, "schalter": ({"x": 1} if schalter else None)}}
-    chk("TV-KONTO: Zustand — richtig / falsch / kein Broker",
-        order_bot.tv_konto_zustand(_bf("FNFTCH-150k-4711 · Demo"), "FNFTCH150K4711") == ("richtig", "FNFTCH-150k-4711 · Demo")
-        and order_bot.tv_konto_zustand(_bf("TDFYSL50K99"), "FNFTCH150K4711")[0] == "falsch"
-        and order_bot.tv_konto_zustand(_bf("", schalter=False), "FNFTCH150K4711") == ("kein_broker", "")
-        and order_bot.tv_konto_zustand({}, "FNFTCH150K4711")[0] == "kein_broker"
-        and order_bot.tv_konto_zustand(None, "FNFTCH150K4711")[0] == "kein_broker"
-        # Schalter da, Text leer: es STEHT etwas da, nur nicht lesbar -> nie 'richtig'
-        and order_bot.tv_konto_zustand(_bf(""), "FNFTCH150K4711")[0] == "falsch"
-        # zu kurze External ID matcht nie (Riegel aus tv_konto_passt)
-        and order_bot.tv_konto_zustand(_bf("PA-12"), "12")[0] == "falsch")
-    chk("TV-KONTO: Befehl — External ID Pflicht, Username optional aber sauber, geschwister = Liste",
-        order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "FNF_finn"}) == []
-        and order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711"}) == []
-        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "12", "tv_username": ""})) == 1
-        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a b"})) == 1
-        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a\tb"})) == 1
-        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "geschwister": "x"})) == 1
-        and order_bot.pruefe_tv_konto_befehl("x") != [])
+    def _ab_676():   # ST2: Inline-Prüfung ab Zeile 676 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _bf
+        _bf = lambda aktiv, schalter=True: {"konto": {"aktiv": aktiv, "schalter": ({"x": 1} if schalter else None)}}
+        chk("TV-KONTO: Zustand — richtig / falsch / kein Broker",
+            order_bot.tv_konto_zustand(_bf("FNFTCH-150k-4711 · Demo"), "FNFTCH150K4711") == ("richtig", "FNFTCH-150k-4711 · Demo")
+            and order_bot.tv_konto_zustand(_bf("TDFYSL50K99"), "FNFTCH150K4711")[0] == "falsch"
+            and order_bot.tv_konto_zustand(_bf("", schalter=False), "FNFTCH150K4711") == ("kein_broker", "")
+            and order_bot.tv_konto_zustand({}, "FNFTCH150K4711")[0] == "kein_broker"
+            and order_bot.tv_konto_zustand(None, "FNFTCH150K4711")[0] == "kein_broker"
+            # Schalter da, Text leer: es STEHT etwas da, nur nicht lesbar -> nie 'richtig'
+            and order_bot.tv_konto_zustand(_bf(""), "FNFTCH150K4711")[0] == "falsch"
+            # zu kurze External ID matcht nie (Riegel aus tv_konto_passt)
+            and order_bot.tv_konto_zustand(_bf("PA-12"), "12")[0] == "falsch")
+    _inline(_ab_676)
+    def _ab_687():   # ST2: Inline-Prüfung ab Zeile 687 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: Befehl — External ID Pflicht, Username optional aber sauber, geschwister = Liste",
+            order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "FNF_finn"}) == []
+            and order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711"}) == []
+            and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "12", "tv_username": ""})) == 1
+            and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a b"})) == 1
+            and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a\tb"})) == 1
+            and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "geschwister": "x"})) == 1
+            and order_bot.pruefe_tv_konto_befehl("x") != [])
+    _inline(_ab_687)
     # Finns Korrektur 21.09.2026: im Dropdown steht nur der Kontoname. Derselbe
     # Login wird ueber die Geschwister-Konten derselben Firma bewiesen.
-    _g = ["APEX-123-02", "APEX-123-011"]
-    chk("TV-KONTO: Geschwister — gleicher Login erkannt, fremdes Konto bleibt 'falsch'",
-        order_bot.tv_konto_zustand(_bf("APEX-123-02 · PA"), "APEX-123-01", _g)[0] == "gleicher_login"
-        and order_bot.tv_konto_zustand(_bf("APEX-123-01 · PA"), "APEX-123-01", _g)[0] == "richtig"
-        and order_bot.tv_konto_zustand(_bf("TDFY-999-01"), "APEX-123-01", _g)[0] == "falsch"
-        and order_bot.tv_konto_zustand(_bf("APEX-123-02"), "APEX-123-01", [])[0] == "falsch")
+    def _ab_697():   # ST2: Inline-Prüfung ab Zeile 697 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _g
+        _g = ["APEX-123-02", "APEX-123-011"]
+        chk("TV-KONTO: Geschwister — gleicher Login erkannt, fremdes Konto bleibt 'falsch'",
+            order_bot.tv_konto_zustand(_bf("APEX-123-02 · PA"), "APEX-123-01", _g)[0] == "gleicher_login"
+            and order_bot.tv_konto_zustand(_bf("APEX-123-01 · PA"), "APEX-123-01", _g)[0] == "richtig"
+            and order_bot.tv_konto_zustand(_bf("TDFY-999-01"), "APEX-123-01", _g)[0] == "falsch"
+            and order_bot.tv_konto_zustand(_bf("APEX-123-02"), "APEX-123-01", [])[0] == "falsch")
+    _inline(_ab_697)
     # Teilstring-Falle: 'APEX-123-01' steckt in 'APEX-123-011'. Ohne die
     # Laengste-ID-Regel gaelte das Geschwister-Konto als das Zielkonto — und
     # die Order ginge spaeter aufs falsche Konto.
-    chk("TV-KONTO: laengste passende ID gewinnt (…-01 ist nicht …-011)",
-        order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-01", _g)[0] == "gleicher_login"
-        and order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-011", ["APEX-123-01"])[0] == "richtig"
-        and order_bot.tv_konto_bestes("APEX-123-011 · PA", ["APEX-123-01", "APEX-123-011"]) == "APEX-123-011"
-        and order_bot.tv_konto_bestes("TDFY", ["APEX-123-01"]) == "")
-    _e = lambda t, **k: dict({"text": t, "rect": {"x": 1, "y": 1, "w": 9, "h": 9}}, **k)
-    chk("TV-KONTO: Dropdown-Eintrag — genau einer, nie der laengere Namensvetter, nie ein mehrdeutiger",
-        order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g)[0]["text"] == "APEX-123-01"
-        and order_bot.tv_konto_eintrag([_e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g) == (None, 0)
-        and order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-01 (2)")], "APEX-123-01", _g) == (None, 2)
-        and order_bot.tv_konto_eintrag([_e("APEX-123-01", fehlt=True)], "APEX-123-01", _g) == (None, 0)
-        and order_bot.tv_konto_eintrag([{"text": "APEX-123-01"}], "APEX-123-01", _g) == (None, 0)
-        and order_bot.tv_konto_eintrag(None, "APEX-123-01", _g) == (None, 0))
+    def _ab_706():   # ST2: Inline-Prüfung ab Zeile 706 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: laengste passende ID gewinnt (…-01 ist nicht …-011)",
+            order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-01", _g)[0] == "gleicher_login"
+            and order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-011", ["APEX-123-01"])[0] == "richtig"
+            and order_bot.tv_konto_bestes("APEX-123-011 · PA", ["APEX-123-01", "APEX-123-011"]) == "APEX-123-011"
+            and order_bot.tv_konto_bestes("TDFY", ["APEX-123-01"]) == "")
+    _inline(_ab_706)
+    def _ab_711():   # ST2: Inline-Prüfung ab Zeile 711 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _e = lambda t, **k: dict({"text": t, "rect": {"x": 1, "y": 1, "w": 9, "h": 9}}, **k)
+        chk("TV-KONTO: Dropdown-Eintrag — genau einer, nie der laengere Namensvetter, nie ein mehrdeutiger",
+            order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g)[0]["text"] == "APEX-123-01"
+            and order_bot.tv_konto_eintrag([_e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g) == (None, 0)
+            and order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-01 (2)")], "APEX-123-01", _g) == (None, 2)
+            and order_bot.tv_konto_eintrag([_e("APEX-123-01", fehlt=True)], "APEX-123-01", _g) == (None, 0)
+            and order_bot.tv_konto_eintrag([{"text": "APEX-123-01"}], "APEX-123-01", _g) == (None, 0)
+            and order_bot.tv_konto_eintrag(None, "APEX-123-01", _g) == (None, 0))
+    _inline(_ab_711)
 
     # Finns erster PC-Lauf 21.09.2026: richtiges Konto sichtbar im Panel, Bot
     # meldete 'kein Broker' — die data-name-Anker des Userscripts trafen nichts.
     # Nachgestellt: konto{} leer, die Kontonummer steht nur in der panel-Liste,
     # dreifach verschachtelt (Huelle > Knopf > Textspanne), Fenster 1900x990.
-    _G = {"innerWidth": 1900, "innerHeight": 990, "dpr": 1}
-    _P = lambda *els: {"geo": _G, "konto": {"aktiv": "", "schalter": None, "eintraege": []}, "panel": list(els)}
-    _el = lambda text, x, y, w, h: {"tag": "div", "text": text, "rect": [x, y, w, h]}
-    _finn = _P(_el("Tradovate", 70, 850, 120, 30),
-               _el("APEX0000000000024 USD", 72, 905, 200, 34),      # Huelle
-               _el("APEX0000000000024 USD", 76, 908, 190, 28),      # Knopf
-               _el("APEX0000000000024", 84, 912, 130, 20),           # Textspanne
-               _el("Positions", 75, 950, 80, 28))
-    chk("TV-KONTO: Kontonummer im Panel-Text schlaegt fehlenden Anker (Finns Lauf 21.09.)",
-        order_bot.tv_konto_zustand(_finn, "APEX0000000000024", [])[0] == "richtig"
-        and order_bot.tv_konto_zustand(_finn, "APEX0000000000031", ["APEX0000000000024"])[0] == "gleicher_login"
-        and order_bot.tv_konto_zustand(_finn, "TDFY123456", ["TDFY999999"])[0] == "kein_broker")
-    chk("TV-KONTO: Text-Suche — verschachtelte Treffer werden EIN Element (das innerste)",
-        [e["rect"] for e in order_bot.tv_konto_per_text(_finn, ["APEX0000000000024"])] == [[84, 912, 130, 20]])
+    def _ab_724():   # ST2: Inline-Prüfung ab Zeile 724 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P, _el, _finn
+        _G = {"innerWidth": 1900, "innerHeight": 990, "dpr": 1}
+        _P = lambda *els: {"geo": _G, "konto": {"aktiv": "", "schalter": None, "eintraege": []}, "panel": list(els)}
+        _el = lambda text, x, y, w, h: {"tag": "div", "text": text, "rect": [x, y, w, h]}
+        _finn = _P(_el("Tradovate", 70, 850, 120, 30),
+                   _el("APEX0000000000024 USD", 72, 905, 200, 34),      # Huelle
+                   _el("APEX0000000000024 USD", 76, 908, 190, 28),      # Knopf
+                   _el("APEX0000000000024", 84, 912, 130, 20),           # Textspanne
+                   _el("Positions", 75, 950, 80, 28))
+        chk("TV-KONTO: Kontonummer im Panel-Text schlaegt fehlenden Anker (Finns Lauf 21.09.)",
+            order_bot.tv_konto_zustand(_finn, "APEX0000000000024", [])[0] == "richtig"
+            and order_bot.tv_konto_zustand(_finn, "APEX0000000000031", ["APEX0000000000024"])[0] == "gleicher_login"
+            and order_bot.tv_konto_zustand(_finn, "TDFY123456", ["TDFY999999"])[0] == "kein_broker")
+    _inline(_ab_724)
+    def _ab_736():   # ST2: Inline-Prüfung ab Zeile 736 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-KONTO: Text-Suche — verschachtelte Treffer werden EIN Element (das innerste)",
+            [e["rect"] for e in order_bot.tv_konto_per_text(_finn, ["APEX0000000000024"])] == [[84, 912, 130, 20]])
+    _inline(_ab_736)
     # Offene Aufklappliste: zwei bekannte Konten sichtbar -> welcher aktiv ist,
     # sagt der Text nicht -> NIE 'richtig' aus dem Text-Weg.
-    _offen = _P(_el("APEX0000000000024 USD", 76, 908, 190, 28), _el("APEX0000000000031 USD", 76, 860, 190, 28))
-    chk("TV-KONTO: Text-Suche — zwei bekannte Konten sichtbar = kein Urteil",
-        order_bot.tv_konto_zustand(_offen, "APEX0000000000024", ["APEX0000000000031"])[0] == "kein_broker")
-    chk("TV-KONTO: Text-Suche — Nummer in der oberen Fensterhaelfte zaehlt nicht, fuer Listeneintraege doch",
-        order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"]) == []
-        and len(order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"], ueberall=True)) == 1)
-    chk("TV-KONTO: Text-Suche — Listeneintrag nur das ZIEL, nie der Umschalter selbst",
-        [e["text"] for e in order_bot.tv_konto_per_text(_offen, ["APEX0000000000024", "APEX0000000000031"],
-            nur_ziel="APEX0000000000031", ohne=(76, 908, 190, 28), ueberall=True)] == ["APEX0000000000031 USD"]
-        and order_bot.tv_konto_per_text(_offen, ["APEX0000000000024"], nur_ziel="APEX0000000000024",
-            ohne=(76, 908, 190, 28), ueberall=True) == [])
-    chk("TV-KONTO: Diagnose — nur der untere Bereich, ohne Doppelte, klein genug fuer die Zwischenablage",
-        [e["text"] for e in order_bot.tv_diagnose(dict(_finn, dump=_finn["panel"] + [_el("Trade", 1700, 20, 60, 30)]))["unten"]]
-            == ["Tradovate", "APEX0000000000024 USD", "APEX0000000000024 USD", "APEX0000000000024", "Positions"]
-        and order_bot.tv_diagnose(None)["unten"] == [])
+    def _ab_740():   # ST2: Inline-Prüfung ab Zeile 740 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _offen
+        _offen = _P(_el("APEX0000000000024 USD", 76, 908, 190, 28), _el("APEX0000000000031 USD", 76, 860, 190, 28))
+        chk("TV-KONTO: Text-Suche — zwei bekannte Konten sichtbar = kein Urteil",
+            order_bot.tv_konto_zustand(_offen, "APEX0000000000024", ["APEX0000000000031"])[0] == "kein_broker")
+    _inline(_ab_740)
+    def _ab_743():   # ST2: Inline-Prüfung ab Zeile 743 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: Text-Suche — Nummer in der oberen Fensterhaelfte zaehlt nicht, fuer Listeneintraege doch",
+            order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"]) == []
+            and len(order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"], ueberall=True)) == 1)
+    _inline(_ab_743)
+    def _ab_746():   # ST2: Inline-Prüfung ab Zeile 746 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-KONTO: Text-Suche — Listeneintrag nur das ZIEL, nie der Umschalter selbst",
+            [e["text"] for e in order_bot.tv_konto_per_text(_offen, ["APEX0000000000024", "APEX0000000000031"],
+                nur_ziel="APEX0000000000031", ohne=(76, 908, 190, 28), ueberall=True)] == ["APEX0000000000031 USD"]
+            and order_bot.tv_konto_per_text(_offen, ["APEX0000000000024"], nur_ziel="APEX0000000000024",
+                ohne=(76, 908, 190, 28), ueberall=True) == [])
+    _inline(_ab_746)
+    def _ab_751():   # ST2: Inline-Prüfung ab Zeile 751 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-KONTO: Diagnose — nur der untere Bereich, ohne Doppelte, klein genug fuer die Zwischenablage",
+            [e["text"] for e in order_bot.tv_diagnose(dict(_finn, dump=_finn["panel"] + [_el("Trade", 1700, 20, 60, 30)]))["unten"]]
+                == ["Tradovate", "APEX0000000000024 USD", "APEX0000000000024 USD", "APEX0000000000024", "Positions"]
+            and order_bot.tv_diagnose(None)["unten"] == [])
+    _inline(_ab_751)
 
     # Finns ZWEITER Lauf 21.09.2026: Dropdown ging auf, "0 Eintraege" — die
     # Liste haengt am Ende des DOM, hinter der Kappung von panel/dump. Seit
     # Userscript 0.4.2 kommt 'treffer' (gezielte Suche im ganzen DOM); ist das
     # Feld da, gilt NUR es — auch leer.
-    _T = lambda treffer, *panel: dict(_P(*panel), treffer=treffer, version="0.4.2")
-    _tr = lambda text, x, y, w=190, h=28: {"rect": [x, y, w, h], "text": text, "rolle": "option", "liste": True}
-    _zu = _T([_tr("APEX0000000000031", 84, 912, 130, 20)])
-    _auf = _T([_tr("APEX0000000000031", 84, 912, 130, 20),                 # Umschalter
-               _tr("APEX0000000000024", 90, 300), _tr("APEX0000000000031", 90, 340),
-               _tr("APEX0000000000047", 90, 380)])
-    _ids = ["APEX0000000000024", "APEX0000000000031", "APEX0000000000047"]
-    chk("TV-KONTO: 'treffer' — Zustand bei geschlossener Liste, Zieleintrag bei offener (auch oben im Fenster)",
-        order_bot.tv_konto_zustand(_zu, "APEX0000000000024", _ids[1:])[0] == "gleicher_login"
-        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000024",
-             ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 300, 190, 28]]
-        # aktives Konto steht ZWEIMAL da (Umschalter + Liste): als Ziel gesucht
-        # bleibt nur der Listeneintrag, der Umschalter ist ausgenommen
-        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000031",
-             ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 340, 190, 28]])
-    chk("TV-KONTO: 'treffer' vorhanden aber leer schlaegt die gekappte panel-Liste (nie beides mischen)",
-        order_bot.tv_konto_per_text(_T([], _el("APEX0000000000024", 84, 912, 130, 20)), _ids) == []
-        and len(order_bot.tv_konto_per_text(dict(_P(_el("APEX0000000000024", 84, 912, 130, 20)), treffer=None), _ids)) == 1)
-    chk("TV-KONTO: Userscript-Mindestversion",
-        order_bot.tv_version_min("0.4.2", "0.4.2") and order_bot.tv_version_min("0.5.0", "0.4.2")
-        and order_bot.tv_version_min("0.4.10", "0.4.2")
-        and not order_bot.tv_version_min("0.4.1", "0.4.2") and not order_bot.tv_version_min(None, "0.4.2")
-        and not order_bot.tv_version_min("abc", "0.4.2"))
+    def _ab_760():   # ST2: Inline-Prüfung ab Zeile 760 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _T, _auf, _ids, _zu, e
+        _T = lambda treffer, *panel: dict(_P(*panel), treffer=treffer, version="0.4.2")
+        _tr = lambda text, x, y, w=190, h=28: {"rect": [x, y, w, h], "text": text, "rolle": "option", "liste": True}
+        _zu = _T([_tr("APEX0000000000031", 84, 912, 130, 20)])
+        _auf = _T([_tr("APEX0000000000031", 84, 912, 130, 20),                 # Umschalter
+                   _tr("APEX0000000000024", 90, 300), _tr("APEX0000000000031", 90, 340),
+                   _tr("APEX0000000000047", 90, 380)])
+        _ids = ["APEX0000000000024", "APEX0000000000031", "APEX0000000000047"]
+        chk("TV-KONTO: 'treffer' — Zustand bei geschlossener Liste, Zieleintrag bei offener (auch oben im Fenster)",
+            order_bot.tv_konto_zustand(_zu, "APEX0000000000024", _ids[1:])[0] == "gleicher_login"
+            and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000024",
+                 ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 300, 190, 28]]
+            # aktives Konto steht ZWEIMAL da (Umschalter + Liste): als Ziel gesucht
+            # bleibt nur der Listeneintrag, der Umschalter ist ausgenommen
+            and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000031",
+                 ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 340, 190, 28]])
+    _inline(_ab_760)
+    def _ab_775():   # ST2: Inline-Prüfung ab Zeile 775 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: 'treffer' vorhanden aber leer schlaegt die gekappte panel-Liste (nie beides mischen)",
+            order_bot.tv_konto_per_text(_T([], _el("APEX0000000000024", 84, 912, 130, 20)), _ids) == []
+            and len(order_bot.tv_konto_per_text(dict(_P(_el("APEX0000000000024", 84, 912, 130, 20)), treffer=None), _ids)) == 1)
+    _inline(_ab_775)
+    def _ab_778():   # ST2: Inline-Prüfung ab Zeile 778 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: Userscript-Mindestversion",
+            order_bot.tv_version_min("0.4.2", "0.4.2") and order_bot.tv_version_min("0.5.0", "0.4.2")
+            and order_bot.tv_version_min("0.4.10", "0.4.2")
+            and not order_bot.tv_version_min("0.4.1", "0.4.2") and not order_bot.tv_version_min(None, "0.4.2")
+            and not order_bot.tv_version_min("abc", "0.4.2"))
+    _inline(_ab_778)
 
     # Augen ohne Userscript (21.09.2026, Finn: 'ohne Tampermonkey'): Chromes
     # Accessibility-Baum ueber Windows-UIA. Rechtecke sind echte Bildschirm-Pixel
     # (l,t,r,b). Nachgestellt: Fenster 0,0-1920,1040, Umschalter unten links,
     # offene Liste darueber, jeder Eintrag als ListItem-Huelle + Text.
-    _F = (0, 0, 1920, 1040)
-    _sw = ("APEX0000000000031 USD", (84, 960, 260, 984))
-    _li = [("APEX0000000000024", (90, 700, 300, 728)), ("APEX0000000000024", (96, 704, 230, 724)),
-           ("APEX0000000000031", (90, 740, 300, 768)), ("APEX0000000000031", (96, 744, 230, 764)),
-           ("APEX0000000000047", (90, 780, 300, 808)), ("TDFY000123456", (90, 820, 300, 848))]
-    chk("TV-UIA: geschlossene Liste = genau ein Element = Urteil moeglich; Klickpunkt = Mitte in Bildschirm-Pixeln",
-        [(e["id"], e["punkt"]) for e in order_bot.tv_uia_filtern([_sw], _ids, _F)] == [("APEX0000000000031", (172, 972))])
-    chk("TV-UIA: offene Liste — Ziel genau einmal (innerstes Element), Umschalter ausgenommen, fremdes Konto nie",
-        [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000024", ohne=_sw[1])] == [(96, 704, 230, 724)]
-        and [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000031", ohne=_sw[1])] == [(96, 744, 230, 764)]
-        and order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="TDFY000123456") == []
-        and len(order_bot.tv_uia_filtern([_sw] + _li, _ids, _F)) == 4)
-    chk("TV-UIA: ausserhalb des Fensters / Nullgroesse / kaputtes Rechteck zaehlt nie",
-        order_bot.tv_uia_filtern([("APEX0000000000024", (2500, 700, 2700, 728))], _ids, _F) == []
-        and order_bot.tv_uia_filtern([("APEX0000000000024", (90, 700, 90, 728))], _ids, _F) == []
-        and order_bot.tv_uia_filtern([("APEX0000000000024", None), ("APEX0000000000024", ("a", 1, 2, 3))], _ids, _F) == []
-        and order_bot.tv_uia_filtern(None, _ids, _F) == [])
+    def _ab_788():   # ST2: Inline-Prüfung ab Zeile 788 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _F, _li, _sw, e
+        _F = (0, 0, 1920, 1040)
+        _sw = ("APEX0000000000031 USD", (84, 960, 260, 984))
+        _li = [("APEX0000000000024", (90, 700, 300, 728)), ("APEX0000000000024", (96, 704, 230, 724)),
+               ("APEX0000000000031", (90, 740, 300, 768)), ("APEX0000000000031", (96, 744, 230, 764)),
+               ("APEX0000000000047", (90, 780, 300, 808)), ("TDFY000123456", (90, 820, 300, 848))]
+        chk("TV-UIA: geschlossene Liste = genau ein Element = Urteil moeglich; Klickpunkt = Mitte in Bildschirm-Pixeln",
+            [(e["id"], e["punkt"]) for e in order_bot.tv_uia_filtern([_sw], _ids, _F)] == [("APEX0000000000031", (172, 972))])
+    _inline(_ab_788)
+    def _ab_795():   # ST2: Inline-Prüfung ab Zeile 795 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-UIA: offene Liste — Ziel genau einmal (innerstes Element), Umschalter ausgenommen, fremdes Konto nie",
+            [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000024", ohne=_sw[1])] == [(96, 704, 230, 724)]
+            and [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000031", ohne=_sw[1])] == [(96, 744, 230, 764)]
+            and order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="TDFY000123456") == []
+            and len(order_bot.tv_uia_filtern([_sw] + _li, _ids, _F)) == 4)
+    _inline(_ab_795)
+    def _ab_800():   # ST2: Inline-Prüfung ab Zeile 800 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-UIA: ausserhalb des Fensters / Nullgroesse / kaputtes Rechteck zaehlt nie",
+            order_bot.tv_uia_filtern([("APEX0000000000024", (2500, 700, 2700, 728))], _ids, _F) == []
+            and order_bot.tv_uia_filtern([("APEX0000000000024", (90, 700, 90, 728))], _ids, _F) == []
+            and order_bot.tv_uia_filtern([("APEX0000000000024", None), ("APEX0000000000024", ("a", 1, 2, 3))], _ids, _F) == []
+            and order_bot.tv_uia_filtern(None, _ids, _F) == [])
+    _inline(_ab_800)
 
     # Schritt 2b (21.09.2026 nachts): Tradovate-Login wechseln. Gefunden wird
     # ueber sichtbare NAMEN — die Muster muessen eng sein, denn daneben stehen
     # Knoepfe, die NIE getroffen werden duerfen.
-    chk("TV-LOGIN: Login-Knopf nur EXAKT — nie 'Sign in with Google/Apple'",
-        all(order_bot.TV_RX_LOGIN.search(x) for x in ("Login", "Log in", "Sign in", "Anmelden", "login"))
-        and not any(order_bot.TV_RX_LOGIN.search(x) for x in
-                    ("Sign in with Google", "Sign in with Apple", "Login help", "Need help?", "Mit Google anmelden")))
-    chk("TV-LOGIN: Abmelden / Connect / Demo / Broker — deutsch und englisch, nichts Benachbartes",
-        all(order_bot.TV_RX_LOGOUT.search(x) for x in ("Log out", "Logout", "Sign out", "Abmelden", "Disconnect", "Verbindung trennen"))
-        and not any(order_bot.TV_RX_LOGOUT.search(x) for x in ("Login", "Trading settings", "Go to broker", "Abbrechen"))
-        and all(order_bot.TV_RX_CONNECT.search(x) for x in ("Connect", "Connect broker", "Verbinden"))
-        and not any(order_bot.TV_RX_CONNECT.search(x) for x in ("Cannot connect to broker? Let us know", "Connected", "Disconnect"))
-        and order_bot.TV_RX_DEMO.search("Demo") and not order_bot.TV_RX_DEMO.search("Demo account info")
-        and order_bot.TV_RX_BROKER.search("Tradovate") and order_bot.TV_RX_BROKER.search("Tradovate 4.4")
-        and not order_bot.TV_RX_BROKER.search("Tradovated") and not order_bot.TV_RX_BROKER.search("Connect Tradovate")
-        and order_bot.TV_RX_KACHELSICHT.search("Paper Trading") and not order_bot.TV_RX_TRADE.search("Trade with your broker"))
-    _N = [("Tradovate", (70, 850, 190, 880), "Button"), ("Tradovate", (100, 856, 170, 874), "Text"),
-          ("Tradovate", (900, 300, 1000, 330), "Text"), ("Trade", (1700, 10, 1760, 40), "Button"),
-          ("Unsichtbar", None, "Button"), ("Tradovate", (5000, 850, 5100, 880), "Button")]
-    chk("TV-LOGIN: Namens-Filter — Bereich (unten/oben), innerstes Element, rect=None und ausserhalb raus",
-        [e["r"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(100, 856, 170, 874)]
-        and len(order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F)) == 2
-        and [e["punkt"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_bis=0.15)] == [(1730, 25)]
-        and order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_von=0.5) == [])
-    chk("TV-LOGIN: Tasten-Escape — Sonderzeichen im Username werden nicht zu Tastenkombinationen",
-        order_bot.tv_tasten_escape("APEX_000000") == "APEX_000000"
-        and order_bot.tv_tasten_escape("max+apex(1)") == "max{+}apex{(}1{)}"
-        and order_bot.tv_tasten_escape("a^b%c~d") == "a{^}b{%}c{~}d")
-    chk("TV-LOGIN: Diagnose-Inventar — kurz, ohne Doppelte, lange Texte (News) raus",
-        order_bot.tv_uia_inventar(_N + [("x" * 60, (1, 1, 9, 9), "Text")]) ==
-            ["Button:Tradovate@70,850", "Text:Tradovate@100,856", "Button:Trade@1700,10", "Button:Unsichtbar"])
+    def _ab_809():   # ST2: Inline-Prüfung ab Zeile 809 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        chk("TV-LOGIN: Login-Knopf nur EXAKT — nie 'Sign in with Google/Apple'",
+            all(order_bot.TV_RX_LOGIN.search(x) for x in ("Login", "Log in", "Sign in", "Anmelden", "login"))
+            and not any(order_bot.TV_RX_LOGIN.search(x) for x in
+                        ("Sign in with Google", "Sign in with Apple", "Login help", "Need help?", "Mit Google anmelden")))
+    _inline(_ab_809)
+    def _ab_813():   # ST2: Inline-Prüfung ab Zeile 813 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        chk("TV-LOGIN: Abmelden / Connect / Demo / Broker — deutsch und englisch, nichts Benachbartes",
+            all(order_bot.TV_RX_LOGOUT.search(x) for x in ("Log out", "Logout", "Sign out", "Abmelden", "Disconnect", "Verbindung trennen"))
+            and not any(order_bot.TV_RX_LOGOUT.search(x) for x in ("Login", "Trading settings", "Go to broker", "Abbrechen"))
+            and all(order_bot.TV_RX_CONNECT.search(x) for x in ("Connect", "Connect broker", "Verbinden"))
+            and not any(order_bot.TV_RX_CONNECT.search(x) for x in ("Cannot connect to broker? Let us know", "Connected", "Disconnect"))
+            and order_bot.TV_RX_DEMO.search("Demo") and not order_bot.TV_RX_DEMO.search("Demo account info")
+            and order_bot.TV_RX_BROKER.search("Tradovate") and order_bot.TV_RX_BROKER.search("Tradovate 4.4")
+            and not order_bot.TV_RX_BROKER.search("Tradovated") and not order_bot.TV_RX_BROKER.search("Connect Tradovate")
+            and order_bot.TV_RX_KACHELSICHT.search("Paper Trading") and not order_bot.TV_RX_TRADE.search("Trade with your broker"))
+    _inline(_ab_813)
+    def _ab_822():   # ST2: Inline-Prüfung ab Zeile 822 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _N, e
+        _N = [("Tradovate", (70, 850, 190, 880), "Button"), ("Tradovate", (100, 856, 170, 874), "Text"),
+              ("Tradovate", (900, 300, 1000, 330), "Text"), ("Trade", (1700, 10, 1760, 40), "Button"),
+              ("Unsichtbar", None, "Button"), ("Tradovate", (5000, 850, 5100, 880), "Button")]
+        chk("TV-LOGIN: Namens-Filter — Bereich (unten/oben), innerstes Element, rect=None und ausserhalb raus",
+            [e["r"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(100, 856, 170, 874)]
+            and len(order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F)) == 2
+            and [e["punkt"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_bis=0.15)] == [(1730, 25)]
+            and order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_von=0.5) == [])
+    _inline(_ab_822)
+    def _ab_830():   # ST2: Inline-Prüfung ab Zeile 830 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: Tasten-Escape — Sonderzeichen im Username werden nicht zu Tastenkombinationen",
+            order_bot.tv_tasten_escape("APEX_000000") == "APEX_000000"
+            and order_bot.tv_tasten_escape("max+apex(1)") == "max{+}apex{(}1{)}"
+            and order_bot.tv_tasten_escape("a^b%c~d") == "a{^}b{%}c{~}d")
+    _inline(_ab_830)
+    def _ab_834():   # ST2: Inline-Prüfung ab Zeile 834 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: Diagnose-Inventar — kurz, ohne Doppelte, lange Texte (News) raus",
+            order_bot.tv_uia_inventar(_N + [("x" * 60, (1, 1, 9, 9), "Text")]) ==
+                ["Button:Tradovate@70,850", "Text:Tradovate@100,856", "Button:Trade@1700,10", "Button:Unsichtbar"])
+    _inline(_ab_834)
 
     # Finns erster 2b-Lauf (21.09.2026 nachts): aktiv war 'PAAPEX0000000000008' —
     # darin steckt 'APEX0000000000008' als Teilstring. Zwei verschiedene Konten.
-    chk("TV-KONTO: ganze Woerter statt Teilstring — PAAPEX…008 ist NICHT APEX…008",
-        not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX0000000000008")
-        and order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "PAAPEX0000000000008")
-        and order_bot.tv_konto_wort_passt("APEX0000000000024 USD", "APEX0000000000024")
-        and order_bot.tv_konto_wort_passt("APEX-123-01 · PA", "APEX12301")
-        and order_bot.tv_konto_wort_passt("Konto (APEX-123-01)", "APEX-123-01")
-        and not order_bot.tv_konto_wort_passt("APEX-123-011", "APEX-123-01")
-        and not order_bot.tv_konto_wort_passt("PA-12", "12")
-        and order_bot.tv_konto_zustand(_bf("PAAPEX0000000000008 USD"), "APEX0000000000008", [])[0] == "falsch")
-    chk("TV-LOGIN: Menuepunkt 'Connect another broker…' und kontonummer-artige Namen",
-        order_bot.TV_RX_ANDERER_BROKER.search("Connect another broker…")
-        and order_bot.TV_RX_ANDERER_BROKER.search("Anderen Broker verbinden…")
-        and not order_bot.TV_RX_ANDERER_BROKER.search("Connect broker")
-        and not order_bot.TV_RX_ANDERER_BROKER.search("Trading settings…")
-        and all(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("PAAPEX0000000000008 USD", "APEX0000000000024", "TDFY-123456-01 EUR"))
-        and not any(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("Account Balance", "157,501.40", "NQU2026", "Tradovate", "29,613.75 USD")))
-    _K = [("Tradovate", (640, 470, 740, 500), "Text"), ("Tradovate", (660, 400, 720, 460), "Image"),
-          ("Tradovate", (110, 970, 180, 995), "Text"), ("Tradovate", (80, 965, 210, 1000), "Button")]
-    chk("TV-LOGIN: Kachel — Bild-Alt neben dem Text ist EIN Ding (Typ-Vorrang), Broker-Knopf unten ausgenommen",
-        [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, 0.08, 0.78, ohne=(80, 965, 210, 1000))] == [(640, 470, 740, 500)]
-        and [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(110, 970, 180, 995)])
-    chk("TV-LOGIN: Spur fuer die Fehlermeldung — nur Einschlaegiges, kurz",
-        order_bot.tv_uia_spur([("Trade", None, "Button"), ("Indicators", None, "Button"), ("Tradovate", (1, 1, 9, 9), "Text"),
-                               ("Log out", None, "MenuItem"), ("x" * 50 + "broker", None, "Text")]) == "Button:Trade | Text:Tradovate | MenuItem:Log out"
-        and order_bot.tv_uia_spur([]) == "nichts Einschlaegiges")
+    def _ab_840():   # ST2: Inline-Prüfung ab Zeile 840 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: ganze Woerter statt Teilstring — PAAPEX…008 ist NICHT APEX…008",
+            not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX0000000000008")
+            and order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "PAAPEX0000000000008")
+            and order_bot.tv_konto_wort_passt("APEX0000000000024 USD", "APEX0000000000024")
+            and order_bot.tv_konto_wort_passt("APEX-123-01 · PA", "APEX12301")
+            and order_bot.tv_konto_wort_passt("Konto (APEX-123-01)", "APEX-123-01")
+            and not order_bot.tv_konto_wort_passt("APEX-123-011", "APEX-123-01")
+            and not order_bot.tv_konto_wort_passt("PA-12", "12")
+            and order_bot.tv_konto_zustand(_bf("PAAPEX0000000000008 USD"), "APEX0000000000008", [])[0] == "falsch")
+    _inline(_ab_840)
+    def _ab_849():   # ST2: Inline-Prüfung ab Zeile 849 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        chk("TV-LOGIN: Menuepunkt 'Connect another broker…' und kontonummer-artige Namen",
+            order_bot.TV_RX_ANDERER_BROKER.search("Connect another broker…")
+            and order_bot.TV_RX_ANDERER_BROKER.search("Anderen Broker verbinden…")
+            and not order_bot.TV_RX_ANDERER_BROKER.search("Connect broker")
+            and not order_bot.TV_RX_ANDERER_BROKER.search("Trading settings…")
+            and all(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("PAAPEX0000000000008 USD", "APEX0000000000024", "TDFY-123456-01 EUR"))
+            and not any(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("Account Balance", "157,501.40", "NQU2026", "Tradovate", "29,613.75 USD")))
+    _inline(_ab_849)
+    def _ab_856():   # ST2: Inline-Prüfung ab Zeile 856 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _K, e
+        _K = [("Tradovate", (640, 470, 740, 500), "Text"), ("Tradovate", (660, 400, 720, 460), "Image"),
+              ("Tradovate", (110, 970, 180, 995), "Text"), ("Tradovate", (80, 965, 210, 1000), "Button")]
+        chk("TV-LOGIN: Kachel — Bild-Alt neben dem Text ist EIN Ding (Typ-Vorrang), Broker-Knopf unten ausgenommen",
+            [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, 0.08, 0.78, ohne=(80, 965, 210, 1000))] == [(640, 470, 740, 500)]
+            and [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(110, 970, 180, 995)])
+    _inline(_ab_856)
+    def _ab_861():   # ST2: Inline-Prüfung ab Zeile 861 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: Spur fuer die Fehlermeldung — nur Einschlaegiges, kurz",
+            order_bot.tv_uia_spur([("Trade", None, "Button"), ("Indicators", None, "Button"), ("Tradovate", (1, 1, 9, 9), "Text"),
+                                   ("Log out", None, "MenuItem"), ("x" * 50 + "broker", None, "Text")]) == "Button:Trade | Text:Tradovate | MenuItem:Log out"
+            and order_bot.tv_uia_spur([]) == "nichts Einschlaegiges")
+    _inline(_ab_861)
 
     # Fund der Simulation (21.09.2026 nachts): der Username steckt als Teilstring
     # in einer Kontonummer — der Autofill-Vorschlag darf nur als GANZES WORT passen.
-    chk("TV-LOGIN: Autofill — Username nur als ganzes Wort, nie in 'PAAPEX0000000000008'",
-        order_bot.tv_konto_wort_passt("APEX_000000", "APEX_000000")
-        and order_bot.tv_konto_wort_passt("APEX_000000, ••••••••", "APEX_000000")
-        and order_bot.tv_konto_wort_passt("apex_000000 tradovate.com", "APEX_000000")
-        and not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX_000000")
-        and not order_bot.tv_konto_wort_passt("APEX_0000000", "APEX_000000"))
+    def _ab_868():   # ST2: Inline-Prüfung ab Zeile 868 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: Autofill — Username nur als ganzes Wort, nie in 'PAAPEX0000000000008'",
+            order_bot.tv_konto_wort_passt("APEX_000000", "APEX_000000")
+            and order_bot.tv_konto_wort_passt("APEX_000000, ••••••••", "APEX_000000")
+            and order_bot.tv_konto_wort_passt("apex_000000 tradovate.com", "APEX_000000")
+            and not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX_000000")
+            and not order_bot.tv_konto_wort_passt("APEX_0000000", "APEX_000000"))
+    _inline(_ab_868)
 
     # Direkt-Adresse zum Tradovate-Dialog (am echten TradingView bewiesen,
     # 21.09.2026 nachts) — ersetzt Knopf "Trade" + Kachel-Suche.
-    chk("TV-LOGIN: trade-now-Adresse — Layout bleibt, fremde Parameter fallen weg, fremde Domain nie",
-        order_bot.tv_trade_now_url("") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
-        and order_bot.tv_trade_now_url("https://www.tradingview.com/chart/BRKeE9Lw/?symbol=CME_MINI%3ANQU2026")
-            == "https://www.tradingview.com/chart/BRKeE9Lw/?trade-now=TRADOVATE"
-        and order_bot.tv_trade_now_url("https://evil.io/chart/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
-        and order_bot.tv_trade_now_url("https://www.tradingview.com/symbols/NQ/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE")
-    chk("TV-LOGIN: Namenslisten der gezielten Suche passen zu ihren Mustern (sonst findet die eine, was der Filter verwirft)",
-        all(order_bot.TV_RX_LOGOUT.search(n) for n in order_bot.TV_NAMEN_LOGOUT)
-        and all(order_bot.TV_RX_CONNECT.search(n) for n in order_bot.TV_NAMEN_CONNECT)
-        and all(order_bot.TV_RX_LOGIN.search(n) for n in order_bot.TV_NAMEN_LOGIN)
-        and all(order_bot.TV_RX_DEMO.search(n) for n in order_bot.TV_NAMEN_DEMO)
-        and all(order_bot.TV_RX_BROKER.search(n) for n in order_bot.TV_NAMEN_BROKER))
+    def _ab_877():   # ST2: Inline-Prüfung ab Zeile 877 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: trade-now-Adresse — Layout bleibt, fremde Parameter fallen weg, fremde Domain nie",
+            order_bot.tv_trade_now_url("") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
+            and order_bot.tv_trade_now_url("https://www.tradingview.com/chart/BRKeE9Lw/?symbol=CME_MINI%3ANQU2026")
+                == "https://www.tradingview.com/chart/BRKeE9Lw/?trade-now=TRADOVATE"
+            and order_bot.tv_trade_now_url("https://evil.io/chart/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
+            and order_bot.tv_trade_now_url("https://www.tradingview.com/symbols/NQ/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE")
+    _inline(_ab_877)
+    def _ab_883():   # ST2: Inline-Prüfung ab Zeile 883 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal n
+        chk("TV-LOGIN: Namenslisten der gezielten Suche passen zu ihren Mustern (sonst findet die eine, was der Filter verwirft)",
+            all(order_bot.TV_RX_LOGOUT.search(n) for n in order_bot.TV_NAMEN_LOGOUT)
+            and all(order_bot.TV_RX_CONNECT.search(n) for n in order_bot.TV_NAMEN_CONNECT)
+            and all(order_bot.TV_RX_LOGIN.search(n) for n in order_bot.TV_NAMEN_LOGIN)
+            and all(order_bot.TV_RX_DEMO.search(n) for n in order_bot.TV_NAMEN_DEMO)
+            and all(order_bot.TV_RX_BROKER.search(n) for n in order_bot.TV_NAMEN_BROKER))
+    _inline(_ab_883)
 
     # Finns Screenshots 21.09.2026 22:04: die Tradovate-Anmeldung ist ein TAB im
     # selben Fenster — Chromes Adressleiste liegt als ERSTES Eingabefeld im Baum.
@@ -893,591 +1117,772 @@ def main():
         def __init__(s, l, t, r, b): s._r = (l, t, r, b)
         def rectangle(s):
             return type("R", (), dict(left=s._r[0], top=s._r[1], right=s._r[2], bottom=s._r[3]))()
-    _adr, _usr, _pw, _such = _Fd(160, 160, 1400, 190), _Fd(1081, 467, 1518, 508), _Fd(1081, 554, 1518, 596), _Fd(1090, 300, 1400, 330)
-    chk("TV-LOGIN: Username-Feld = direkt UEBER dem Passwortfeld — nie die Adressleiste, nie ein entferntes Feld",
-        order_bot.tv_feld_darueber([_adr, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
-        and order_bot.tv_feld_darueber([_adr, _pw], _pw, (1081, 554, 1518, 596)) is None
-        and order_bot.tv_feld_darueber([_adr, _such, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
-        and order_bot.tv_feld_darueber([], _pw, (1081, 554, 1518, 596)) is None)
+    def _ab_896():   # ST2: Inline-Prüfung ab Zeile 896 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _adr, _usr, _pw, _such = _Fd(160, 160, 1400, 190), _Fd(1081, 467, 1518, 508), _Fd(1081, 554, 1518, 596), _Fd(1090, 300, 1400, 330)
+        chk("TV-LOGIN: Username-Feld = direkt UEBER dem Passwortfeld — nie die Adressleiste, nie ein entferntes Feld",
+            order_bot.tv_feld_darueber([_adr, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
+            and order_bot.tv_feld_darueber([_adr, _pw], _pw, (1081, 554, 1518, 596)) is None
+            and order_bot.tv_feld_darueber([_adr, _such, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
+            and order_bot.tv_feld_darueber([], _pw, (1081, 554, 1518, 596)) is None)
+    _inline(_ab_896)
 
     # Finns Weg (22.09.2026): TradingView-Tab schliessen, neu mit dem Link
     # oeffnen. Strg+W darf NUR in einen Tab gehen, der nachweislich TradingView
     # ist — nie in den Prophos-Tab.
-    chk("TV-LOGIN: Strg+W nur in TradingView — nie Prophos, nie irgendein anderer Tab",
-        order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed - Google Chrome", "Chrome_WidgetWin_1")
-        and order_bot.tv_tab_schliessbar("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
-        and not order_bot.tv_tab_schliessbar("Prophos - Google Chrome", "Chrome_WidgetWin_1")
-        and not order_bot.tv_tab_schliessbar("Tradeify Futures - User Dashboard - Google Chrome", "Chrome_WidgetWin_1")
-        and not order_bot.tv_tab_schliessbar("Cockpit | Duplikium Trade Copier - Google Chrome", "Chrome_WidgetWin_1")
-        and not order_bot.tv_tab_schliessbar("", "Chrome_WidgetWin_1")
-        and not order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed", "ConsoleWindowClass"))
+    def _ab_906():   # ST2: Inline-Prüfung ab Zeile 906 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-LOGIN: Strg+W nur in TradingView — nie Prophos, nie irgendein anderer Tab",
+            order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed - Google Chrome", "Chrome_WidgetWin_1")
+            and order_bot.tv_tab_schliessbar("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
+            and not order_bot.tv_tab_schliessbar("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+            and not order_bot.tv_tab_schliessbar("Tradeify Futures - User Dashboard - Google Chrome", "Chrome_WidgetWin_1")
+            and not order_bot.tv_tab_schliessbar("Cockpit | Duplikium Trade Copier - Google Chrome", "Chrome_WidgetWin_1")
+            and not order_bot.tv_tab_schliessbar("", "Chrome_WidgetWin_1")
+            and not order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed", "ConsoleWindowClass"))
+    _inline(_ab_906)
 
     # Finns Idee 22.09.2026: "Don't remember me" bei jedem Verbinden setzen.
-    chk("TV-LOGIN: 'Don't remember me' — erkannt in allen Schreibweisen, nichts Benachbartes",
-        all(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
-            ("Don't remember me", "Don’t remember me", "Do not remember me", "Nicht merken", "Nicht speichern"))
-        and not any(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
-                    ("Remember me", "Connect", "Demo", "Cannot connect to broker? Let us know."))
-        and all(order_bot.TV_RX_NICHT_MERKEN.search(n) for n in order_bot.TV_NAMEN_NICHT_MERKEN))
+    def _ab_916():   # ST2: Inline-Prüfung ab Zeile 916 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal n, x
+        chk("TV-LOGIN: 'Don't remember me' — erkannt in allen Schreibweisen, nichts Benachbartes",
+            all(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
+                ("Don't remember me", "Don’t remember me", "Do not remember me", "Nicht merken", "Nicht speichern"))
+            and not any(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
+                        ("Remember me", "Connect", "Demo", "Cannot connect to broker? Let us know."))
+            and all(order_bot.TV_RX_NICHT_MERKEN.search(n) for n in order_bot.TV_NAMEN_NICHT_MERKEN))
+    _inline(_ab_916)
 
     # Schritt 3 (22.09.2026): Asset ueber die Watchlist. Nachgestellt nach Finns
     # Screenshot: Fenster 0,107-2000,1190; Watchlist rechts oben mit NQZ2026 /
     # MNQZ2026, darunter der Detail-Kasten mit demselben Symbol, links oben der
     # Symbol-Knopf des Charts, im Order-Panel der Kontrakt.
-    _WF = (0, 107, 2000, 1190)
-    _WL = [("BTC1!", (70, 205, 130, 230), "Button"),                       # Chart-Symbol links oben
-           ("NQZ2026", (1680, 333, 1740, 353), "Text"), ("MNQZ2026", (1680, 365, 1748, 385), "Text"),
-           ("E-mini Nasdaq-100 Futures (Dec 2026)", (1656, 770, 1900, 790), "Text"),
-           ("NQZ2026", (1690, 733, 1752, 755), "Text"),                    # Detail-Kasten UNTER der Watchlist
-           ("30,787.00", (1745, 333, 1808, 353), "Text"), ("Watchlist", (1656, 256, 1720, 276), "Text")]
-    chk("TV-ASSET: Watchlist — NQ und MNQ sauber getrennt, oberste Fundstelle gewinnt, nie der Chart-Knopf links",
-        order_bot.tv_watchlist_zeile(_WL, "NQ", _WF)[0]["r"] == (1680, 333, 1740, 353)
-        and order_bot.tv_watchlist_zeile(_WL, "MNQ", _WF)[0]["r"] == (1680, 365, 1748, 385)
-        and order_bot.tv_watchlist_zeile(_WL, "ES", _WF) == (None, 0)
-        and order_bot.tv_watchlist_zeile([("NQZ2026", (70, 205, 130, 230), "Button")], "NQ", _WF) == (None, 0)
-        and order_bot.tv_watchlist_zeile(_WL, "", _WF) == (None, 0)
-        and order_bot.tv_watchlist_zeile(None, "NQ", _WF) == (None, 0))
-    chk("TV-ASSET: zwei Treffer auf derselben Hoehe = mehrdeutig, kein Klick",
-        order_bot.tv_watchlist_zeile([("NQZ2026", (1680, 333, 1740, 353), "Text"), ("NQZ6", (1850, 335, 1900, 355), "Text")], "NQ", _WF) == (None, 2))
-    chk("TV-ASSET: Beweis am Fenstertitel — Prophos-Symbol und TradingView-Symbol haben dieselbe Wurzel",
-        order_bot.tv_titel_wurzel("NQZ2026 30,787.00 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("NQZ6") == "NQ"
-        and order_bot.tv_titel_wurzel("MNQZ2026 30,786.25 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("MNQZ6") == "MNQ"
-        and order_bot.tv_titel_wurzel("BTC1! 86,680 ▲ +0.1% Unnamed - Google Chrome") == "BTC"
-        and order_bot.tv_titel_wurzel("(1) NQZ2026 30,787.00 ▼ −0.2% Unnamed") == "NQ")
+    def _ab_927():   # ST2: Inline-Prüfung ab Zeile 927 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _WF
+        _WF = (0, 107, 2000, 1190)
+        _WL = [("BTC1!", (70, 205, 130, 230), "Button"),                       # Chart-Symbol links oben
+               ("NQZ2026", (1680, 333, 1740, 353), "Text"), ("MNQZ2026", (1680, 365, 1748, 385), "Text"),
+               ("E-mini Nasdaq-100 Futures (Dec 2026)", (1656, 770, 1900, 790), "Text"),
+               ("NQZ2026", (1690, 733, 1752, 755), "Text"),                    # Detail-Kasten UNTER der Watchlist
+               ("30,787.00", (1745, 333, 1808, 353), "Text"), ("Watchlist", (1656, 256, 1720, 276), "Text")]
+        chk("TV-ASSET: Watchlist — NQ und MNQ sauber getrennt, oberste Fundstelle gewinnt, nie der Chart-Knopf links",
+            order_bot.tv_watchlist_zeile(_WL, "NQ", _WF)[0]["r"] == (1680, 333, 1740, 353)
+            and order_bot.tv_watchlist_zeile(_WL, "MNQ", _WF)[0]["r"] == (1680, 365, 1748, 385)
+            and order_bot.tv_watchlist_zeile(_WL, "ES", _WF) == (None, 0)
+            and order_bot.tv_watchlist_zeile([("NQZ2026", (70, 205, 130, 230), "Button")], "NQ", _WF) == (None, 0)
+            and order_bot.tv_watchlist_zeile(_WL, "", _WF) == (None, 0)
+            and order_bot.tv_watchlist_zeile(None, "NQ", _WF) == (None, 0))
+    _inline(_ab_927)
+    def _ab_940():   # ST2: Inline-Prüfung ab Zeile 940 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ASSET: zwei Treffer auf derselben Hoehe = mehrdeutig, kein Klick",
+            order_bot.tv_watchlist_zeile([("NQZ2026", (1680, 333, 1740, 353), "Text"), ("NQZ6", (1850, 335, 1900, 355), "Text")], "NQ", _WF) == (None, 2))
+    _inline(_ab_940)
+    def _ab_942():   # ST2: Inline-Prüfung ab Zeile 942 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ASSET: Beweis am Fenstertitel — Prophos-Symbol und TradingView-Symbol haben dieselbe Wurzel",
+            order_bot.tv_titel_wurzel("NQZ2026 30,787.00 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("NQZ6") == "NQ"
+            and order_bot.tv_titel_wurzel("MNQZ2026 30,786.25 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("MNQZ6") == "MNQ"
+            and order_bot.tv_titel_wurzel("BTC1! 86,680 ▲ +0.1% Unnamed - Google Chrome") == "BTC"
+            and order_bot.tv_titel_wurzel("(1) NQZ2026 30,787.00 ▼ −0.2% Unnamed") == "NQ")
+    _inline(_ab_942)
 
     # Bruecke am Panel vorbei (22.09.2026): neue Felder reisen als '@feld=wert'
     # in der geschwister-Liste. Sie duerfen NIE als Kontonummer gelten.
-    _br = order_bot.tv_bruecke_auspacken({"ext_id": "APEX1", "geschwister":
-          ["@symbol=MNQZ6", "@richtung=sell", "@volumen=1", "@tp_usd=", "@boese=1", "APEX0000000000031", "@kaputt"]})
-    chk("TV-BRUECKE: Marken werden Felder, verschwinden aus der Liste, Unbekanntes wird verworfen",
-        _br["symbol"] == "MNQZ6" and _br["richtung"] == "sell" and _br["volumen"] == "1"
-        and _br.get("tp_usd") in (None, "") and "boese" not in _br
-        and _br["geschwister"] == ["APEX0000000000031", "@kaputt"]
-        and order_bot.tv_konto_zustand(_bf("MNQZ6"), "APEX1XX", _br["geschwister"])[0] == "falsch")
-    chk("TV-BRUECKE: ein echtes Feld im Befehl gewinnt gegen die Marke",
-        order_bot.tv_bruecke_auspacken({"symbol": "NQZ6", "geschwister": ["@symbol=MNQZ6"]})["symbol"] == "NQZ6"
-        and order_bot.tv_bruecke_auspacken({"geschwister": None})["geschwister"] == [])
+    def _ab_950():   # ST2: Inline-Prüfung ab Zeile 950 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _br = order_bot.tv_bruecke_auspacken({"ext_id": "APEX1", "geschwister":
+              ["@symbol=MNQZ6", "@richtung=sell", "@volumen=1", "@tp_usd=", "@boese=1", "APEX0000000000031", "@kaputt"]})
+        chk("TV-BRUECKE: Marken werden Felder, verschwinden aus der Liste, Unbekanntes wird verworfen",
+            _br["symbol"] == "MNQZ6" and _br["richtung"] == "sell" and _br["volumen"] == "1"
+            and _br.get("tp_usd") in (None, "") and "boese" not in _br
+            and _br["geschwister"] == ["APEX0000000000031", "@kaputt"]
+            and order_bot.tv_konto_zustand(_bf("MNQZ6"), "APEX1XX", _br["geschwister"])[0] == "falsch")
+    _inline(_ab_950)
+    def _ab_957():   # ST2: Inline-Prüfung ab Zeile 957 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-BRUECKE: ein echtes Feld im Befehl gewinnt gegen die Marke",
+            order_bot.tv_bruecke_auspacken({"symbol": "NQZ6", "geschwister": ["@symbol=MNQZ6"]})["symbol"] == "NQZ6"
+            and order_bot.tv_bruecke_auspacken({"geschwister": None})["geschwister"] == [])
+    _inline(_ab_957)
 
     # Schritt 4a (22.09.2026): Order-Panel ausfuellen. Nachgestellt nach Finns
     # Screenshot — inklusive der Schnell-Knoepfe SELL/BUY links im Chart, die
     # NIE getroffen werden duerfen.
-    _OP = [("SELL", (70, 275, 150, 310), "Button"), ("BUY", (188, 275, 270, 310), "Button"),
-           ("Market", (1337, 415, 1383, 435), "Text"), ("Limit", (1418, 415, 1452, 435), "Text"),
-           ("Stop", (1494, 415, 1523, 435), "Text"), ("Stop Limit", (1550, 415, 1617, 435), "Text"),
-           ("Sell 30,827.25", (1326, 345, 1470, 398), "Button"), ("Sell", (1335, 350, 1360, 366), "Text"),
-           ("Buy 30,827.75", (1472, 345, 1618, 398), "Button"), ("Buy", (1584, 350, 1608, 366), "Text"),
-           ("Stop loss, $", (1325, 700, 1400, 718), "Text"), ("Market open", (1675, 911, 1750, 929), "Text"),
-           ("Buy 1 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
-    _ber = order_bot.tv_panel_bereich(_OP)
-    chk("TV-ORDER: Panel-Anker aus der Reiter-Zeile; ohne 'Stop Limit' auf derselben Zeile kein Panel",
-        _ber is not None and _ber["links"] == 1295 and _ber["rechts"] == 1648 and _ber["market"]["punkt"] == (1360, 425)   # seit 25.09.2026: links inkl. 'Stop loss, $' (1325 − 30), rechts inkl. Senden-Knopf (1618 + 30)
-        and order_bot.tv_panel_bereich([x for x in _OP if x[0] != "Stop Limit"]) is None
-        and order_bot.tv_panel_bereich([("Market", (1337, 415, 1383, 435), "Text"), ("Stop Limit", (1550, 700, 1617, 720), "Text")]) is None)
-    chk("TV-ORDER: Seite nur IM Panel und nur ueber der Reiter-Zeile — nie die Schnell-Knoepfe im Chart, innerstes Element",
-        [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["buy"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1584, 350, 1608, 366)]
-        and [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["sell"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1335, 350, 1360, 366)])
-    chk("TV-ORDER: Kauf-Knopf nur UNTER der Stop-Loss-Zeile — der Seiten-Kasten 'Buy 30,827.75' ist keiner",
-        [e["text"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=718)] == ["Buy 1 MNQZ6 MARKET"]
-        and len(order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=_ber["reiter_y"] - 150)) == 3)
-    _FR = [(1326, 485, 1460, 520), (1326, 643, 1460, 678), (1500, 643, 1617, 678), (1326, 730, 1460, 765), (160, 160, 1400, 190), None]
-    chk("TV-ORDER: Wertfeld = direkt unter der Beschriftung, das LINKE; nie das Umrechnungsfeld, nie die Adressleiste",
-        order_bot.tv_feld_unter(_FR, (1325, 612, 1415, 630), _ber) == 1
-        and order_bot.tv_feld_unter(_FR, (1325, 700, 1400, 718), _ber) == 3
-        and order_bot.tv_feld_unter(_FR, (1325, 462, 1360, 480), _ber) == 0
-        and order_bot.tv_feld_unter(_FR, (1325, 900, 1400, 918), _ber) is None)
+    def _ab_964():   # ST2: Inline-Prüfung ab Zeile 964 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _OP, _ber, x
+        _OP = [("SELL", (70, 275, 150, 310), "Button"), ("BUY", (188, 275, 270, 310), "Button"),
+               ("Market", (1337, 415, 1383, 435), "Text"), ("Limit", (1418, 415, 1452, 435), "Text"),
+               ("Stop", (1494, 415, 1523, 435), "Text"), ("Stop Limit", (1550, 415, 1617, 435), "Text"),
+               ("Sell 30,827.25", (1326, 345, 1470, 398), "Button"), ("Sell", (1335, 350, 1360, 366), "Text"),
+               ("Buy 30,827.75", (1472, 345, 1618, 398), "Button"), ("Buy", (1584, 350, 1608, 366), "Text"),
+               ("Stop loss, $", (1325, 700, 1400, 718), "Text"), ("Market open", (1675, 911, 1750, 929), "Text"),
+               ("Buy 1 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
+        _ber = order_bot.tv_panel_bereich(_OP)
+        chk("TV-ORDER: Panel-Anker aus der Reiter-Zeile; ohne 'Stop Limit' auf derselben Zeile kein Panel",
+            _ber is not None and _ber["links"] == 1295 and _ber["rechts"] == 1648 and _ber["market"]["punkt"] == (1360, 425)   # seit 25.09.2026: links inkl. 'Stop loss, $' (1325 − 30), rechts inkl. Senden-Knopf (1618 + 30)
+            and order_bot.tv_panel_bereich([x for x in _OP if x[0] != "Stop Limit"]) is None
+            and order_bot.tv_panel_bereich([("Market", (1337, 415, 1383, 435), "Text"), ("Stop Limit", (1550, 700, 1617, 720), "Text")]) is None)
+    _inline(_ab_964)
+    def _ab_976():   # ST2: Inline-Prüfung ab Zeile 976 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-ORDER: Seite nur IM Panel und nur ueber der Reiter-Zeile — nie die Schnell-Knoepfe im Chart, innerstes Element",
+            [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["buy"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1584, 350, 1608, 366)]
+            and [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["sell"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1335, 350, 1360, 366)])
+    _inline(_ab_976)
+    def _ab_979():   # ST2: Inline-Prüfung ab Zeile 979 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal e
+        chk("TV-ORDER: Kauf-Knopf nur UNTER der Stop-Loss-Zeile — der Seiten-Kasten 'Buy 30,827.75' ist keiner",
+            [e["text"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=718)] == ["Buy 1 MNQZ6 MARKET"]
+            and len(order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=_ber["reiter_y"] - 150)) == 3)
+    _inline(_ab_979)
+    def _ab_982():   # ST2: Inline-Prüfung ab Zeile 982 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _FR
+        _FR = [(1326, 485, 1460, 520), (1326, 643, 1460, 678), (1500, 643, 1617, 678), (1326, 730, 1460, 765), (160, 160, 1400, 190), None]
+        chk("TV-ORDER: Wertfeld = direkt unter der Beschriftung, das LINKE; nie das Umrechnungsfeld, nie die Adressleiste",
+            order_bot.tv_feld_unter(_FR, (1325, 612, 1415, 630), _ber) == 1
+            and order_bot.tv_feld_unter(_FR, (1325, 700, 1400, 718), _ber) == 3
+            and order_bot.tv_feld_unter(_FR, (1325, 462, 1360, 480), _ber) == 0
+            and order_bot.tv_feld_unter(_FR, (1325, 900, 1400, 918), _ber) is None)
+    _inline(_ab_982)
     # Finns Lauf 22.09.: "'Units' nicht eindeutig (2 Treffer)" — Text + Name des Auswahlmenues.
-    _L2 = [{"text": "Units", "r": (1325, 462, 1360, 480), "punkt": (1342, 471)},
-           {"text": "Units", "r": (1500, 300, 1560, 318), "punkt": (1530, 309)}]
-    chk("TV-ORDER: doppelte Beschriftung — es zaehlt die MIT Eingabefeld darunter, sonst keine",
-        order_bot.tv_label_mit_feld(_L2, _FR, _ber)[0]["r"] == (1325, 462, 1360, 480)
-        and order_bot.tv_label_mit_feld(_L2, _FR, _ber)[1] == 0
-        and order_bot.tv_label_mit_feld([_L2[1]], _FR, _ber) == (None, None)
-        and order_bot.tv_label_mit_feld([], _FR, _ber) == (None, None))
-    chk("TV-ORDER: Zahlen lesen — englisch, deutsch, mit Einheit; nichts Zaehlbares = None",
-        order_bot.tv_zahl_lesen("17.00") == 17.0 and order_bot.tv_zahl_lesen("1,875.00") == 1875.0
-        and order_bot.tv_zahl_lesen("1.875,00") == 1875.0 and order_bot.tv_zahl_lesen("12,5") == 12.5
-        and order_bot.tv_zahl_lesen("1,875") == 1875.0 and order_bot.tv_zahl_lesen("25 ticks") == 25.0
-        and order_bot.tv_zahl_lesen("") is None and order_bot.tv_zahl_lesen("abc") is None)
-    chk("TV-ORDER: Plan — leerer SL heisst AUS (Finns Regel), Menge muss ganze Kontrakte sein",
-        order_bot.tv_order_plan({"richtung": "SELL", "volumen": "1", "tp_usd": "300", "sl_usd": ""})[0] == {"richtung": "sell", "menge": 1, "tp": 300.0, "sl": None}
-        and order_bot.tv_order_plan({"richtung": "buy", "volumen": 2, "tp_usd": None, "sl_usd": "0"})[0] == {"richtung": "buy", "menge": 2, "tp": None, "sl": None}
-        and order_bot.tv_order_plan({"richtung": "buy", "volumen": "1.5"})[0] is None
-        and order_bot.tv_order_plan({"richtung": "", "volumen": "1"})[0] is None
-        and order_bot.tv_order_plan({"richtung": "buy", "volumen": "0"})[0] is None)
+    def _ab_989():   # ST2: Inline-Prüfung ab Zeile 989 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _L2 = [{"text": "Units", "r": (1325, 462, 1360, 480), "punkt": (1342, 471)},
+               {"text": "Units", "r": (1500, 300, 1560, 318), "punkt": (1530, 309)}]
+        chk("TV-ORDER: doppelte Beschriftung — es zaehlt die MIT Eingabefeld darunter, sonst keine",
+            order_bot.tv_label_mit_feld(_L2, _FR, _ber)[0]["r"] == (1325, 462, 1360, 480)
+            and order_bot.tv_label_mit_feld(_L2, _FR, _ber)[1] == 0
+            and order_bot.tv_label_mit_feld([_L2[1]], _FR, _ber) == (None, None)
+            and order_bot.tv_label_mit_feld([], _FR, _ber) == (None, None))
+    _inline(_ab_989)
+    def _ab_996():   # ST2: Inline-Prüfung ab Zeile 996 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER: Zahlen lesen — englisch, deutsch, mit Einheit; nichts Zaehlbares = None",
+            order_bot.tv_zahl_lesen("17.00") == 17.0 and order_bot.tv_zahl_lesen("1,875.00") == 1875.0
+            and order_bot.tv_zahl_lesen("1.875,00") == 1875.0 and order_bot.tv_zahl_lesen("12,5") == 12.5
+            and order_bot.tv_zahl_lesen("1,875") == 1875.0 and order_bot.tv_zahl_lesen("25 ticks") == 25.0
+            and order_bot.tv_zahl_lesen("") is None and order_bot.tv_zahl_lesen("abc") is None)
+    _inline(_ab_996)
+    def _ab_1001():   # ST2: Inline-Prüfung ab Zeile 1001 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER: Plan — leerer SL heisst AUS (Finns Regel), Menge muss ganze Kontrakte sein",
+            order_bot.tv_order_plan({"richtung": "SELL", "volumen": "1", "tp_usd": "300", "sl_usd": ""})[0] == {"richtung": "sell", "menge": 1, "tp": 300.0, "sl": None}
+            and order_bot.tv_order_plan({"richtung": "buy", "volumen": 2, "tp_usd": None, "sl_usd": "0"})[0] == {"richtung": "buy", "menge": 2, "tp": None, "sl": None}
+            and order_bot.tv_order_plan({"richtung": "buy", "volumen": "1.5"})[0] is None
+            and order_bot.tv_order_plan({"richtung": "", "volumen": "1"})[0] is None
+            and order_bot.tv_order_plan({"richtung": "buy", "volumen": "0"})[0] is None)
+    _inline(_ab_1001)
     # Schritt 4b (22.09.2026): der Kauf-Klick haengt an EINER ausdruecklichen Marke.
-    chk("TV-ORDER 4b: scharf nur mit Marke (bool oder Bruecken-Text '1') — nie bei 'false'/'0'/leer, nie mit probe",
-        order_bot.tv_ist_scharf({"scharf": True}) and order_bot.tv_ist_scharf({"scharf": "1"})
-        and not order_bot.tv_ist_scharf({}) and not order_bot.tv_ist_scharf({"scharf": False})
-        and not order_bot.tv_ist_scharf({"scharf": "false"}) and not order_bot.tv_ist_scharf({"scharf": "0"})
-        and not order_bot.tv_ist_scharf({"scharf": ""}) and not order_bot.tv_ist_scharf({"scharf": None})
-        and not order_bot.tv_ist_scharf({"scharf": True, "probe": True})
-        and not order_bot.tv_ist_scharf({"scharf": "1", "probe": "1"}))
-    chk("TV-ORDER 4b: die Marke reist ueber die Bruecke (altes Panel) und ist nie eine Kontonummer",
-        order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"scharf": False, "geschwister": ["@scharf=1", "APEX1"]}))
-        and order_bot.tv_bruecke_auspacken({"geschwister": ["@scharf=1", "APEX1"]})["geschwister"] == ["APEX1"]
-        and not order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"geschwister": ["APEX1"]})))
+    def _ab_1008():   # ST2: Inline-Prüfung ab Zeile 1008 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER 4b: scharf nur mit Marke (bool oder Bruecken-Text '1') — nie bei 'false'/'0'/leer, nie mit probe",
+            order_bot.tv_ist_scharf({"scharf": True}) and order_bot.tv_ist_scharf({"scharf": "1"})
+            and not order_bot.tv_ist_scharf({}) and not order_bot.tv_ist_scharf({"scharf": False})
+            and not order_bot.tv_ist_scharf({"scharf": "false"}) and not order_bot.tv_ist_scharf({"scharf": "0"})
+            and not order_bot.tv_ist_scharf({"scharf": ""}) and not order_bot.tv_ist_scharf({"scharf": None})
+            and not order_bot.tv_ist_scharf({"scharf": True, "probe": True})
+            and not order_bot.tv_ist_scharf({"scharf": "1", "probe": "1"}))
+    _inline(_ab_1008)
+    def _ab_1015():   # ST2: Inline-Prüfung ab Zeile 1015 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER 4b: die Marke reist ueber die Bruecke (altes Panel) und ist nie eine Kontonummer",
+            order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"scharf": False, "geschwister": ["@scharf=1", "APEX1"]}))
+            and order_bot.tv_bruecke_auspacken({"geschwister": ["@scharf=1", "APEX1"]})["geschwister"] == ["APEX1"]
+            and not order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"geschwister": ["APEX1"]})))
+    _inline(_ab_1015)
     # 4b-Beweis ohne Reader (22.09.2026, Finns Lauf: Reader pausiert, Duplikium kopiert):
     # die Positions-Tabelle unten in TradingView. Anker = Kopf 'Symbol' unter dem Reiter
     # 'Positions'; Side/Qty optional (Finns Remote-Lauf 01:39: Chrome nannte nur 'Symbol').
-    _PT = [("Symbol", (1656, 297, 1700, 315), "Text"),                      # Watchlist-Kopf: nie der Anker
-           ("Positions", (72, 932, 130, 950), "TabItem"), ("Orders", (154, 932, 200, 950), "TabItem"),
-           ("Symbol", (56, 979, 120, 997), "DataItem"), ("Side", (213, 979, 240, 997), "Text"), ("Qty", (433, 979, 456, 997), "Text"),
-           ("MNQZ6", (75, 1020, 125, 1038), "Text"), ("Short", (213, 1020, 250, 1038), "Text"), ("-3", (433, 1020, 445, 1038), "Text"),
-           ("NQZ6", (75, 1054, 125, 1072), "Text"), ("Long", (213, 1054, 250, 1072), "Text"), ("2", (433, 1054, 445, 1072), "Text"),
-           ("MNQZ2026", (1680, 365, 1748, 385), "Text")]
-    _ohne = lambda d: (d and {k: v for k, v in d.items() if k != "anker"})
-    chk("TV-ORDER 4b: Positions-Tabelle — Zeile nur bei passender Wurzel UND Seite, MNQ nie NQ, Watchlist zaehlt nie",
-        _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")) == {"menge": 3.0, "zeilen": 1, "spalten": True}
-        and _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
-        and _ohne(order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy")) == {"menge": 2.0, "zeilen": 1, "spalten": True}
-        and _ohne(order_bot.tv_positions_tabelle(_PT[:6], "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
-        and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")["anker"] == (56, 979, 120, 997))
+    def _ab_1022():   # ST2: Inline-Prüfung ab Zeile 1022 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _PT, _ohne, k, v
+        _PT = [("Symbol", (1656, 297, 1700, 315), "Text"),                      # Watchlist-Kopf: nie der Anker
+               ("Positions", (72, 932, 130, 950), "TabItem"), ("Orders", (154, 932, 200, 950), "TabItem"),
+               ("Symbol", (56, 979, 120, 997), "DataItem"), ("Side", (213, 979, 240, 997), "Text"), ("Qty", (433, 979, 456, 997), "Text"),
+               ("MNQZ6", (75, 1020, 125, 1038), "Text"), ("Short", (213, 1020, 250, 1038), "Text"), ("-3", (433, 1020, 445, 1038), "Text"),
+               ("NQZ6", (75, 1054, 125, 1072), "Text"), ("Long", (213, 1054, 250, 1072), "Text"), ("2", (433, 1054, 445, 1072), "Text"),
+               ("MNQZ2026", (1680, 365, 1748, 385), "Text")]
+        _ohne = lambda d: (d and {k: v for k, v in d.items() if k != "anker"})
+        chk("TV-ORDER 4b: Positions-Tabelle — Zeile nur bei passender Wurzel UND Seite, MNQ nie NQ, Watchlist zaehlt nie",
+            _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")) == {"menge": 3.0, "zeilen": 1, "spalten": True}
+            and _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
+            and _ohne(order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy")) == {"menge": 2.0, "zeilen": 1, "spalten": True}
+            and _ohne(order_bot.tv_positions_tabelle(_PT[:6], "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
+            and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")["anker"] == (56, 979, 120, 997))
+    _inline(_ab_1022)
     # Reiter durch Meldungen verdeckt (22.09.2026 09:50): der Anker aus dem Vorher-Blick traegt weiter
-    chk("TV-ORDER 4b: ohne sichtbaren Reiter zaehlt die Tabelle nur mit dem Anker aus dem Vorher-Blick (+-20 px)",
-        order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
-        and _ohne(order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 979, 120, 997))) == {"menge": 3.0, "zeilen": 1, "spalten": True}
-        and order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 700, 120, 718)) is None)
-    _PT2 = [x for x in _PT if x[0] not in ("Side", "Qty")]              # Finns Lauf: nur 'Symbol' benannt
-    chk("TV-ORDER 4b: ohne Side/Qty zaehlen Zeilen mit der Symbol-Wurzel in der Symbol-Spalte (Menge unbekannt)",
-        _ohne(order_bot.tv_positions_tabelle(_PT2, "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
-        and _ohne(order_bot.tv_positions_tabelle(_PT2, "NQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
-        and _ohne(order_bot.tv_positions_tabelle(_PT2, "ESZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": False})
-    chk("TV-ORDER 4b: ohne Reiter 'Positions' ueber dem Kopf gibt es KEINEN Tabellen-Beweis (None, nicht 'flach')",
-        order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
-        and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
-        and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
-        and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
+    def _ab_1036():   # ST2: Inline-Prüfung ab Zeile 1036 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        chk("TV-ORDER 4b: ohne sichtbaren Reiter zaehlt die Tabelle nur mit dem Anker aus dem Vorher-Blick (+-20 px)",
+            order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
+            and _ohne(order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 979, 120, 997))) == {"menge": 3.0, "zeilen": 1, "spalten": True}
+            and order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 700, 120, 718)) is None)
+    _inline(_ab_1036)
+    def _ab_1040():   # ST2: Inline-Prüfung ab Zeile 1040 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        _PT2 = [x for x in _PT if x[0] not in ("Side", "Qty")]              # Finns Lauf: nur 'Symbol' benannt
+        chk("TV-ORDER 4b: ohne Side/Qty zaehlen Zeilen mit der Symbol-Wurzel in der Symbol-Spalte (Menge unbekannt)",
+            _ohne(order_bot.tv_positions_tabelle(_PT2, "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
+            and _ohne(order_bot.tv_positions_tabelle(_PT2, "NQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
+            and _ohne(order_bot.tv_positions_tabelle(_PT2, "ESZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": False})
+    _inline(_ab_1040)
+    def _ab_1045():   # ST2: Inline-Prüfung ab Zeile 1045 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal x
+        chk("TV-ORDER 4b: ohne Reiter 'Positions' ueber dem Kopf gibt es KEINEN Tabellen-Beweis (None, nicht 'flach')",
+            order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
+            and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
+            and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
+            and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
+    _inline(_ab_1045)
     # Avg Fill je Wurzel + Tabellen-Diagnose (25.09.2026, Plan …: Nachlauf 'nicht lesbar (3 s)')
-    _PTF = _PT + [("Avg Fill Price", (560, 979, 660, 997), "Text"), ("30,725.25", (560, 1020, 640, 1038), "Text"),
-                  ("30.710,50", (560, 1054, 640, 1072), "Text")]
-    _zf = order_bot.tv_positionen_auspacken(order_bot.tv_positions_lesen(_PTF, order_bot.tv_positions_kopf(_PTF)))
-    _af = order_bot.tv_avg_fill_je_wurzel(_zf)
-    chk("TV-LESEN: avg_fill_je_wurzel aus der Positions-Tabelle (englisch + deutsch), MNQ nie NQ",
-        _af.get("MNQ", {}).get("avg_fill") == 30725.25 and _af.get("NQ", {}).get("avg_fill") == 30710.5
-        and _af["MNQ"]["symbol"] == "MNQZ6" and order_bot.tv_avg_fill_je_wurzel([]) == {}
-        and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": None}]) == {}
-        and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": "—"}, {"symbol": "MNQZ6", "einstieg_zahl": 30100.0}])["MNQ"]["avg_fill"] == 30100.0)
-    _d1 = order_bot.tv_tabellen_diagnose(_PTF, None, "MNQZ6")
-    _d2 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], None, "MNQZ6")
-    _d3 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], (56, 979, 120, 997), "MNQZ6")
-    chk("TV-ORDER: Tabellen-Diagnose — Kopf/Zeilen/Einstieg-Spalte/erste Zeile/Zone, verdeckter Reiter mit und ohne Anker",
-        _d1.startswith("Kopf ja · Zeilen 2 · Zeilen MNQ 1 · Einstieg-Spalte ja · erste Zeile MNQZ6 Einstieg '30,725.25'")
-        and _d2.startswith("Kopf nein · Zeilen 0") and "kein Reiter 'Positions' zu sehen" in _d2
-        and _d3.startswith("Kopf ja (per Anker) · Zeilen 2") and order_bot.tv_tabellen_diagnose(None, None, "X").startswith("Kopf nein"))
+    def _ab_1051():   # ST2: Inline-Prüfung ab Zeile 1051 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _PTF
+        _PTF = _PT + [("Avg Fill Price", (560, 979, 660, 997), "Text"), ("30,725.25", (560, 1020, 640, 1038), "Text"),
+                      ("30.710,50", (560, 1054, 640, 1072), "Text")]
+        _zf = order_bot.tv_positionen_auspacken(order_bot.tv_positions_lesen(_PTF, order_bot.tv_positions_kopf(_PTF)))
+        _af = order_bot.tv_avg_fill_je_wurzel(_zf)
+        chk("TV-LESEN: avg_fill_je_wurzel aus der Positions-Tabelle (englisch + deutsch), MNQ nie NQ",
+            _af.get("MNQ", {}).get("avg_fill") == 30725.25 and _af.get("NQ", {}).get("avg_fill") == 30710.5
+            and _af["MNQ"]["symbol"] == "MNQZ6" and order_bot.tv_avg_fill_je_wurzel([]) == {}
+            and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": None}]) == {}
+            and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": "—"}, {"symbol": "MNQZ6", "einstieg_zahl": 30100.0}])["MNQ"]["avg_fill"] == 30100.0)
+    _inline(_ab_1051)
+    def _ab_1060():   # ST2: Inline-Prüfung ab Zeile 1060 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _d1, _d2, x
+        _d1 = order_bot.tv_tabellen_diagnose(_PTF, None, "MNQZ6")
+        _d2 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], None, "MNQZ6")
+        _d3 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], (56, 979, 120, 997), "MNQZ6")
+        chk("TV-ORDER: Tabellen-Diagnose — Kopf/Zeilen/Einstieg-Spalte/erste Zeile/Zone, verdeckter Reiter mit und ohne Anker",
+            _d1.startswith("Kopf ja · Zeilen 2 · Zeilen MNQ 1 · Einstieg-Spalte ja · erste Zeile MNQZ6 Einstieg '30,725.25'")
+            and _d2.startswith("Kopf nein · Zeilen 0") and "kein Reiter 'Positions' zu sehen" in _d2
+            and _d3.startswith("Kopf ja (per Anker) · Zeilen 2") and order_bot.tv_tabellen_diagnose(None, None, "X").startswith("Kopf nein"))
+    _inline(_ab_1060)
     # Schalter + Meldung (22.09.2026 01:50, Finns Lauf: SL vergessen, weil 'Feld bedienbar'
     # als 'Schalter an' galt). Umschalter = gleiche Zeile, rechts, der aeusserste im Panel.
-    _BER = {"links": 1300, "rechts": 1630}
-    _SCH = [((1580, 612, 1615, 630), False), ((1580, 700, 1615, 718), True), ((1470, 703, 1490, 717), True), ((1800, 702, 1830, 718), False)]
-    chk("TV-ORDER 4b: Umschalter zur Beschriftung — gleiche Zeile, ganz rechts im Panel, nie ausserhalb",
-        order_bot.tv_schalter_zu(_SCH, (1325, 612, 1415, 630), _BER) == ((1580, 612, 1615, 630), False)
-        and order_bot.tv_schalter_zu(_SCH, (1325, 700, 1400, 718), _BER) == ((1580, 700, 1615, 718), True)
-        and order_bot.tv_schalter_zu(_SCH, (1325, 462, 1360, 480), _BER) == (None, None)
-        and order_bot.tv_schalter_zu(None, (1325, 612, 1415, 630), _BER) == (None, None))
-    _TO = [("Take Profit order placed on MNQZ6", (130, 1100, 420, 1120), "Text"), ("Sell 2 at 30,858.25", (130, 1125, 300, 1140), "Text"),
-           ("Order filled: Buy 1 NQZ2026", (130, 1150, 400, 1170), "Text"), ("Start creating order", (1325, 920, 1618, 978), "Button"),
-           ("Take Profit order placed on ESZ6", None, "Text")]
-    chk("TV-ORDER 4b: TradingViews Order-Meldungen — Symbol im Text muss die Plan-Wurzel sein, ohne Symbol zaehlt sie; nie Unsichtbares oder der Kauf-Knopf",
-        order_bot.tv_order_meldungen(_TO, "MNQZ6") == ["Take Profit order placed on MNQZ6"]
-        and order_bot.tv_order_meldungen(_TO, "NQZ6") == ["Order filled: Buy 1 NQZ2026"]
-        and order_bot.tv_order_meldungen(_TO, "ESZ6") == []
-        and order_bot.tv_order_meldungen([("Take Profit order placed on", (130, 1100, 400, 1120), "Text"), ("Stop Loss order placed on", (130, 1130, 400, 1150), "Text")], "NQZ6")
-            == ["Take Profit order placed on", "Stop Loss order placed on"])
+    def _ab_1069():   # ST2: Inline-Prüfung ab Zeile 1069 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _BER = {"links": 1300, "rechts": 1630}
+        _SCH = [((1580, 612, 1615, 630), False), ((1580, 700, 1615, 718), True), ((1470, 703, 1490, 717), True), ((1800, 702, 1830, 718), False)]
+        chk("TV-ORDER 4b: Umschalter zur Beschriftung — gleiche Zeile, ganz rechts im Panel, nie ausserhalb",
+            order_bot.tv_schalter_zu(_SCH, (1325, 612, 1415, 630), _BER) == ((1580, 612, 1615, 630), False)
+            and order_bot.tv_schalter_zu(_SCH, (1325, 700, 1400, 718), _BER) == ((1580, 700, 1615, 718), True)
+            and order_bot.tv_schalter_zu(_SCH, (1325, 462, 1360, 480), _BER) == (None, None)
+            and order_bot.tv_schalter_zu(None, (1325, 612, 1415, 630), _BER) == (None, None))
+    _inline(_ab_1069)
+    def _ab_1076():   # ST2: Inline-Prüfung ab Zeile 1076 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _TO = [("Take Profit order placed on MNQZ6", (130, 1100, 420, 1120), "Text"), ("Sell 2 at 30,858.25", (130, 1125, 300, 1140), "Text"),
+               ("Order filled: Buy 1 NQZ2026", (130, 1150, 400, 1170), "Text"), ("Start creating order", (1325, 920, 1618, 978), "Button"),
+               ("Take Profit order placed on ESZ6", None, "Text")]
+        chk("TV-ORDER 4b: TradingViews Order-Meldungen — Symbol im Text muss die Plan-Wurzel sein, ohne Symbol zaehlt sie; nie Unsichtbares oder der Kauf-Knopf",
+            order_bot.tv_order_meldungen(_TO, "MNQZ6") == ["Take Profit order placed on MNQZ6"]
+            and order_bot.tv_order_meldungen(_TO, "NQZ6") == ["Order filled: Buy 1 NQZ2026"]
+            and order_bot.tv_order_meldungen(_TO, "ESZ6") == []
+            and order_bot.tv_order_meldungen([("Take Profit order placed on", (130, 1100, 400, 1120), "Text"), ("Stop Loss order placed on", (130, 1130, 400, 1150), "Text")], "NQZ6")
+                == ["Take Profit order placed on", "Stop Loss order placed on"])
+    _inline(_ab_1076)
     # Fill aus der Meldung (28.09.2026, Vorfall ID C …: Einstieg aus dem Feed 12 Pkt neben dem echten Fill)
-    _ME = [("Market order executed on", (130, 1040, 330, 1058), "Text"), ("MNQZ6", (335, 1040, 390, 1058), "Hyperlink"),
-           ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text"),
-           ("Take Profit order placed on", (130, 1100, 330, 1118), "Text"), ("MNQZ6", (335, 1100, 390, 1118), "Hyperlink"),
-           ("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
-    _m1 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4)
-    _m2 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4, vorher=["Buy 4 at 30,838.00"])   # alte Meldung zaehlt nie
-    _m3 = order_bot.tv_meldung_preise([("Take Profit order placed on MNQZ6 · Sell 2 at 30,858.25", (130, 1100, 520, 1118), "Text")], "MNQZ6", "buy", 2)
-    _m4 = order_bot.tv_meldung_preise([("Market order executed on NQZ6 · Sell 1 at 30.838,50", (130, 1100, 520, 1118), "Text")], "NQZ6", "sell", 1)
-    _m5 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 3)            # falsche Menge -> nichts
-    _m6 = order_bot.tv_meldung_preise(_ME, "ESZ6", "buy", 4)             # Symbol-Chip MNQZ6 neben dem Titel, Plan ES -> fremd, nichts
-    _m7 = order_bot.tv_meldung_preise([("Stop Loss order placed on", (130, 1100, 330, 1118), "Text"), ("Sell 4 at 30,700.00", (130, 1122, 300, 1138), "Text")], "MNQZ6", "buy", 4)
-    _m8 = order_bot.tv_meldung_preise([("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 4)
-    chk("TV-ORDER Fill aus der Meldung: executed + Plan-Seite = Fill, TP-Order-Preis der Gegenseite, alte/fremde Menge nie, SL nie als TP",
-        _m1["fill"] == 30838.0 and _m1["tp"] == 30872.75 and _m1["sl"] is None
-        and _m2["fill"] is None and _m2["tp"] == 30872.75
-        and _m3["fill"] is None and _m3["tp"] == 30858.25
-        and _m4["fill"] == 30838.5 and _m4["tp"] is None
-        and _m5["fill"] is None and _m5["tp"] is None
-        and _m6["fill"] is None and _m6["tp"] is None
-        and _m7["tp"] is None and _m7["sl"] == 30700.0 and _m7["fill"] is None
-        and _m8["fill"] == 30838.0 and _m8["tp"] == 30872.75
-        and order_bot.tv_meldung_art("Take Profit order filled on MNQZ6") == "tp" and order_bot.tv_meldung_art("Market order executed on") == "fill"
-        and "Text:Buy 4 at 30,838.00" in order_bot.tv_meldung_zone(_ME))
+    def _ab_1086():   # ST2: Inline-Prüfung ab Zeile 1086 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _ME = [("Market order executed on", (130, 1040, 330, 1058), "Text"), ("MNQZ6", (335, 1040, 390, 1058), "Hyperlink"),
+               ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text"),
+               ("Take Profit order placed on", (130, 1100, 330, 1118), "Text"), ("MNQZ6", (335, 1100, 390, 1118), "Hyperlink"),
+               ("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
+        _m1 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4)
+        _m2 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4, vorher=["Buy 4 at 30,838.00"])   # alte Meldung zaehlt nie
+        _m3 = order_bot.tv_meldung_preise([("Take Profit order placed on MNQZ6 · Sell 2 at 30,858.25", (130, 1100, 520, 1118), "Text")], "MNQZ6", "buy", 2)
+        _m4 = order_bot.tv_meldung_preise([("Market order executed on NQZ6 · Sell 1 at 30.838,50", (130, 1100, 520, 1118), "Text")], "NQZ6", "sell", 1)
+        _m5 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 3)            # falsche Menge -> nichts
+        _m6 = order_bot.tv_meldung_preise(_ME, "ESZ6", "buy", 4)             # Symbol-Chip MNQZ6 neben dem Titel, Plan ES -> fremd, nichts
+        _m7 = order_bot.tv_meldung_preise([("Stop Loss order placed on", (130, 1100, 330, 1118), "Text"), ("Sell 4 at 30,700.00", (130, 1122, 300, 1138), "Text")], "MNQZ6", "buy", 4)
+        _m8 = order_bot.tv_meldung_preise([("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 4)
+        chk("TV-ORDER Fill aus der Meldung: executed + Plan-Seite = Fill, TP-Order-Preis der Gegenseite, alte/fremde Menge nie, SL nie als TP",
+            _m1["fill"] == 30838.0 and _m1["tp"] == 30872.75 and _m1["sl"] is None
+            and _m2["fill"] is None and _m2["tp"] == 30872.75
+            and _m3["fill"] is None and _m3["tp"] == 30858.25
+            and _m4["fill"] == 30838.5 and _m4["tp"] is None
+            and _m5["fill"] is None and _m5["tp"] is None
+            and _m6["fill"] is None and _m6["tp"] is None
+            and _m7["tp"] is None and _m7["sl"] == 30700.0 and _m7["fill"] is None
+            and _m8["fill"] == 30838.0 and _m8["tp"] == 30872.75
+            and order_bot.tv_meldung_art("Take Profit order filled on MNQZ6") == "tp" and order_bot.tv_meldung_art("Market order executed on") == "fill"
+            and "Text:Buy 4 at 30,838.00" in order_bot.tv_meldung_zone(_ME))
+    _inline(_ab_1086)
     # Finn 28.09.2026: „Market order filled" + Bracket-Modification, DE-Format, deutsche Woerter; Rohtexte immer
-    _MD = [("Market order filled", (130, 1040, 330, 1058), "Text"), ("Buy 1 at 30,816.25", (130, 1062, 300, 1078), "Text"),
-           ("Limit order modified", (130, 1100, 330, 1118), "Text"), ("Sell 1 at 30,822.00", (130, 1122, 300, 1138), "Text"),
-           ("Take profit, $", (1325, 500, 1420, 518), "Text"), ("Sell 1 at 30,999.00", (1325, 522, 1480, 538), "Text")]
-    _d1 = order_bot.tv_meldung_preise(_MD, "MNQZ6", "buy", 1)
-    _d2 = order_bot.tv_meldung_preise([("Marktorder ausgeführt", (130, 1040, 330, 1058), "Text"), ("Kaufen 1 zu 30.816,25", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 1)
-    _r1 = order_bot.tv_meldung_roh(_MD + [("Chart", (0, 0, 50, 20), "Text")], vorher=["Chart"])
-    chk("TV-ORDER Meldung: 'Market order filled' = Fill, 'Limit order modified' = TP (tv_limit), DE-Format/deutsch, Panel-Label nie, Rohtexte",
-        _d1["fill"] == 30816.25 and _d1["tp"] == 30822.0
-        and _d2["fill"] == 30816.25
-        and order_bot.tv_meldung_art("Take profit, $") is None and order_bot.tv_meldung_art("Limit order filled on MNQZ6") == "tp"
-        and "Text:Market order filled" in _r1 and "Text:Sell 1 at 30,822.00" in _r1 and not any("Chart" in x for x in _r1))
+    def _ab_1110():   # ST2: Inline-Prüfung ab Zeile 1110 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _d1, _d2, x
+        _MD = [("Market order filled", (130, 1040, 330, 1058), "Text"), ("Buy 1 at 30,816.25", (130, 1062, 300, 1078), "Text"),
+               ("Limit order modified", (130, 1100, 330, 1118), "Text"), ("Sell 1 at 30,822.00", (130, 1122, 300, 1138), "Text"),
+               ("Take profit, $", (1325, 500, 1420, 518), "Text"), ("Sell 1 at 30,999.00", (1325, 522, 1480, 538), "Text")]
+        _d1 = order_bot.tv_meldung_preise(_MD, "MNQZ6", "buy", 1)
+        _d2 = order_bot.tv_meldung_preise([("Marktorder ausgeführt", (130, 1040, 330, 1058), "Text"), ("Kaufen 1 zu 30.816,25", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 1)
+        _r1 = order_bot.tv_meldung_roh(_MD + [("Chart", (0, 0, 50, 20), "Text")], vorher=["Chart"])
+        chk("TV-ORDER Meldung: 'Market order filled' = Fill, 'Limit order modified' = TP (tv_limit), DE-Format/deutsch, Panel-Label nie, Rohtexte",
+            _d1["fill"] == 30816.25 and _d1["tp"] == 30822.0
+            and _d2["fill"] == 30816.25
+            and order_bot.tv_meldung_art("Take profit, $") is None and order_bot.tv_meldung_art("Limit order filled on MNQZ6") == "tp"
+            and "Text:Market order filled" in _r1 and "Text:Sell 1 at 30,822.00" in _r1 and not any("Chart" in x for x in _r1))
+    _inline(_ab_1110)
     # Finns Screenshots 28.09.2026 00:34 (PC von ID C): drei gestapelte Meldungen, sichtbar nur eine + 'Show more' (Zaehler 3)
-    _ST = [("Market order placed on", (40, 900, 240, 918), "Text"), ("MNQZ6", (245, 900, 300, 918), "Button"), ("Buy 1", (40, 922, 90, 938), "Text"),
-           ("Market order executed on", (40, 960, 250, 978), "Text"), ("MNQZ6", (255, 960, 310, 978), "Button"), ("Buy 1 at 30,807.25", (40, 982, 200, 998), "Text"),
-           ("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("MNQZ6", (265, 1020, 320, 1038), "Button"), ("Sell 1 at 30,812.75", (40, 1042, 200, 1058), "Text")]
-    _s1 = order_bot.tv_meldung_preise(_ST, "MNQZ6", "buy", 1)
-    _k1 = order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show more", (40, 1070, 140, 1090), "Button"),
-                                        ("Show more", (1500, 300, 1580, 320), "Button")])
-    chk("TV-ORDER Stapel: executed = Fill 30807.25, TP-Limit 30812.75, 'Buy 1' ohne Preis nie; 'Show more' nur am Stapel, 'Show less' nie, fremdes nie",
-        _s1["fill"] == 30807.25 and _s1["tp"] == 30812.75
-        and order_bot.tv_meldung_preise(_ST, "ESZ6", "buy", 1)["fill"] is None   # Chip MNQZ6 neben dem Titel, Plan ES -> fremd
-        and _k1 == {"punkt": (90, 1080), "text": "Show more"}
-        and order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show less 3", (40, 1070, 140, 1090), "Button")]) is None
-        and order_bot.tv_show_more_knopf([("Show more", (1500, 300, 1580, 320), "Button")]) is None)
+    def _ab_1122():   # ST2: Inline-Prüfung ab Zeile 1122 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _ST = [("Market order placed on", (40, 900, 240, 918), "Text"), ("MNQZ6", (245, 900, 300, 918), "Button"), ("Buy 1", (40, 922, 90, 938), "Text"),
+               ("Market order executed on", (40, 960, 250, 978), "Text"), ("MNQZ6", (255, 960, 310, 978), "Button"), ("Buy 1 at 30,807.25", (40, 982, 200, 998), "Text"),
+               ("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("MNQZ6", (265, 1020, 320, 1038), "Button"), ("Sell 1 at 30,812.75", (40, 1042, 200, 1058), "Text")]
+        _s1 = order_bot.tv_meldung_preise(_ST, "MNQZ6", "buy", 1)
+        _k1 = order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show more", (40, 1070, 140, 1090), "Button"),
+                                            ("Show more", (1500, 300, 1580, 320), "Button")])
+        chk("TV-ORDER Stapel: executed = Fill 30807.25, TP-Limit 30812.75, 'Buy 1' ohne Preis nie; 'Show more' nur am Stapel, 'Show less' nie, fremdes nie",
+            _s1["fill"] == 30807.25 and _s1["tp"] == 30812.75
+            and order_bot.tv_meldung_preise(_ST, "ESZ6", "buy", 1)["fill"] is None   # Chip MNQZ6 neben dem Titel, Plan ES -> fremd
+            and _k1 == {"punkt": (90, 1080), "text": "Show more"}
+            and order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show less 3", (40, 1070, 140, 1090), "Button")]) is None
+            and order_bot.tv_show_more_knopf([("Show more", (1500, 300, 1580, 320), "Button")]) is None)
+    _inline(_ab_1122)
     # LIVE-BEFUND ID F … (23:07 UTC): 'Show more' geklickt, Stapel blieb zu — Aufklappen muss bewiesen werden
-    _zu = [("Market order executed on", (40, 1020, 260, 1038), "Text"), ("Sell 4", (40, 1042, 85, 1058), "Text"),
-           ("at 30,794.75", (90, 1042, 190, 1058), "Text"), ("Show more", (420, 936, 515, 956), "Button")]
-    _auf = _zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text"), ("Buy 4", (40, 982, 85, 998), "Text"),
-                      ("at 30,760.75", (90, 982, 190, 998), "Text"), ("Show less", (420, 900, 515, 920), "Button")]
-    chk("TV-ORDER Stapel offen/zu beweisen (ID F 23:07: Klick traf, Stapel blieb zu)",
-        not order_bot.tv_stapel_offen(_zu) and order_bot.tv_stapel_offen(_auf)
-        and order_bot.tv_stapel_offen(_zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text")])
-        and order_bot.tv_meldung_preise(_auf, "MNQZ6", "sell", 4)["tp"] == 30760.75)
+    def _ab_1135():   # ST2: Inline-Prüfung ab Zeile 1135 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _auf, _zu
+        _zu = [("Market order executed on", (40, 1020, 260, 1038), "Text"), ("Sell 4", (40, 1042, 85, 1058), "Text"),
+               ("at 30,794.75", (90, 1042, 190, 1058), "Text"), ("Show more", (420, 936, 515, 956), "Button")]
+        _auf = _zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text"), ("Buy 4", (40, 982, 85, 998), "Text"),
+                          ("at 30,760.75", (90, 982, 190, 998), "Text"), ("Show less", (420, 900, 515, 920), "Button")]
+        chk("TV-ORDER Stapel offen/zu beweisen (ID F 23:07: Klick traf, Stapel blieb zu)",
+            not order_bot.tv_stapel_offen(_zu) and order_bot.tv_stapel_offen(_auf)
+            and order_bot.tv_stapel_offen(_zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text")])
+            and order_bot.tv_meldung_preise(_auf, "MNQZ6", "sell", 4)["tp"] == 30760.75)
+    _inline(_ab_1135)
     # LIVE-BEFUND .726 (Plan …, PC von ID C): ["TabItem:Positions 1", "TabItem:Orders 1", "Text:Market order executed on", "Text:Buy 1",
     # "Text:at 30,801.00"] — Seite+Menge und Preis in ZWEI Knoten; 'Show more' rechts UEBER dem Toast (Button mit Text-Kind, Zaehler 3)
-    _LV = [("Positions 1", (60, 1200, 150, 1220), "TabItem"), ("Orders 1", (160, 1200, 240, 1220), "TabItem"),
-           ("Market order executed on", (40, 1020, 250, 1038), "Text"), ("MNQZ6", (255, 1020, 310, 1038), "Button"),
-           ("Buy 1", (40, 1042, 85, 1058), "Text"), ("at 30,801.00", (90, 1042, 190, 1058), "Text"),
-           ("Show more", (230, 985, 330, 1005), "Button"), ("Show more", (240, 988, 310, 1002), "Text"), ("3", (335, 987, 351, 1003), "Text")]
-    _l1 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])
-    _l2 = order_bot.tv_meldung_preise([("Market order executed on", (40, 1020, 250, 1038), "Text"), ("Buy 1", (40, 1042, 85, 1058), "Text"),
-                                       ("at 30,801.00", (40, 1062, 140, 1078), "Text")], "MNQZ6", "buy", 1)
-    _l3 = order_bot.tv_meldung_preise([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("at 30,858.25", (40, 1042, 140, 1058), "Text")], "MNQZ6", "buy", 1)
-    _l4 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["at 30,801.00"])   # alter Preis-Knoten zaehlt nie
-    _rl = order_bot.tv_meldung_roh(_LV)
-    chk("TV-ORDER Live .726: 'Buy 1' + 'at 30,801.00' getrennt -> Fill 30801, 'at' allein unter TP-Titel = TP, 'Show more' ueber dem Toast (Text-Kind), Umgebung in der Rohliste",
-        _l1["fill"] == 30801.0 and _l2["fill"] == 30801.0 and _l3["tp"] == 30858.25 and _l3["fill"] is None and _l4["fill"] is None
-        and order_bot.tv_show_more_knopf(_LV) == {"punkt": (275, 995), "text": "Show more"}
-        and any(x.startswith("UMGEBUNG: ") and "Button:Show more" in x for x in _rl))
+    def _ab_1145():   # ST2: Inline-Prüfung ab Zeile 1145 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _LV, x
+        _LV = [("Positions 1", (60, 1200, 150, 1220), "TabItem"), ("Orders 1", (160, 1200, 240, 1220), "TabItem"),
+               ("Market order executed on", (40, 1020, 250, 1038), "Text"), ("MNQZ6", (255, 1020, 310, 1038), "Button"),
+               ("Buy 1", (40, 1042, 85, 1058), "Text"), ("at 30,801.00", (90, 1042, 190, 1058), "Text"),
+               ("Show more", (230, 985, 330, 1005), "Button"), ("Show more", (240, 988, 310, 1002), "Text"), ("3", (335, 987, 351, 1003), "Text")]
+        _l1 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])
+        _l2 = order_bot.tv_meldung_preise([("Market order executed on", (40, 1020, 250, 1038), "Text"), ("Buy 1", (40, 1042, 85, 1058), "Text"),
+                                           ("at 30,801.00", (40, 1062, 140, 1078), "Text")], "MNQZ6", "buy", 1)
+        _l3 = order_bot.tv_meldung_preise([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("at 30,858.25", (40, 1042, 140, 1058), "Text")], "MNQZ6", "buy", 1)
+        _l4 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["at 30,801.00"])   # alter Preis-Knoten zaehlt nie
+        _rl = order_bot.tv_meldung_roh(_LV)
+        chk("TV-ORDER Live .726: 'Buy 1' + 'at 30,801.00' getrennt -> Fill 30801, 'at' allein unter TP-Titel = TP, 'Show more' ueber dem Toast (Text-Kind), Umgebung in der Rohliste",
+            _l1["fill"] == 30801.0 and _l2["fill"] == 30801.0 and _l3["tp"] == 30858.25 and _l3["fill"] is None and _l4["fill"] is None
+            and order_bot.tv_show_more_knopf(_LV) == {"punkt": (275, 995), "text": "Show more"}
+            and any(x.startswith("UMGEBUNG: ") and "Button:Show more" in x for x in _rl))
+    _inline(_ab_1145)
     # DEUTSCHES TRADINGVIEW (29.09.2026, ID F pc-bbbbbb, Plan …, Rohtext aus hedge.tv_meldung_roh): 'Take-Profit-Order platziert für'
     # + 'zu 30.564,75 kaufen' (Preis VOR dem Verb, deutsches Zahlenformat); Fill vermutlich 'Marktorder ausgeführt für' + '4 zu 30.600,50 verkaufen'
-    _DE = [("Positionen 1", (60, 1200, 170, 1220), "TabItem"), ("Orders 1", (180, 1200, 260, 1220), "TabItem"),
-           ("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
-    _DEF = [("Marktorder ausgeführt für", (40, 960, 250, 978), "Text"), ("4 zu 30.600,50 verkaufen", (40, 982, 230, 998), "Text")] + _DE
-    _g1 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["Positionen 1", "Orders 1"])
-    _g2 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 4)
-    _g3 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 3)                       # falsche Menge am Fill -> kein Fill, TP (ohne Menge) bleibt
-    _g4 = order_bot.tv_meldung_preise([("Take-Profit-Order platziert für MNQZ6 · 2 zu 30.858,25 verkaufen", (40, 1020, 480, 1038), "Text")], "MNQZ6", "buy", 2)
-    _g5 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["zu 30.564,75 kaufen"])   # alte Preis-Zeile zaehlt nie
-    chk("TV-ORDER Deutsch: 'zu 30.564,75 kaufen' unter TP-Titel = TP, '4 zu 30.600,50 verkaufen' unter 'Marktorder ausgeführt' = Fill, Menge geprueft, alte Zeile zaehlt nie",
-        _g1["tp"] == 30564.75 and _g1["fill"] is None and _g2["fill"] == 30600.5 and _g2["tp"] == 30564.75
-        and _g3["fill"] is None and _g3["tp"] == 30564.75 and _g4["tp"] == 30858.25 and _g5["tp"] is None
-        and order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])["fill"] == 30801.0)   # englisch unveraendert
+    def _ab_1161():   # ST2: Inline-Prüfung ab Zeile 1161 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _DE
+        _DE = [("Positionen 1", (60, 1200, 170, 1220), "TabItem"), ("Orders 1", (180, 1200, 260, 1220), "TabItem"),
+               ("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
+        _DEF = [("Marktorder ausgeführt für", (40, 960, 250, 978), "Text"), ("4 zu 30.600,50 verkaufen", (40, 982, 230, 998), "Text")] + _DE
+        _g1 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["Positionen 1", "Orders 1"])
+        _g2 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 4)
+        _g3 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 3)                       # falsche Menge am Fill -> kein Fill, TP (ohne Menge) bleibt
+        _g4 = order_bot.tv_meldung_preise([("Take-Profit-Order platziert für MNQZ6 · 2 zu 30.858,25 verkaufen", (40, 1020, 480, 1038), "Text")], "MNQZ6", "buy", 2)
+        _g5 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["zu 30.564,75 kaufen"])   # alte Preis-Zeile zaehlt nie
+        chk("TV-ORDER Deutsch: 'zu 30.564,75 kaufen' unter TP-Titel = TP, '4 zu 30.600,50 verkaufen' unter 'Marktorder ausgeführt' = Fill, Menge geprueft, alte Zeile zaehlt nie",
+            _g1["tp"] == 30564.75 and _g1["fill"] is None and _g2["fill"] == 30600.5 and _g2["tp"] == 30564.75
+            and _g3["fill"] is None and _g3["tp"] == 30564.75 and _g4["tp"] == 30858.25 and _g5["tp"] is None
+            and order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])["fill"] == 30801.0)   # englisch unveraendert
+    _inline(_ab_1161)
     # Neuheit (29.09.2026, …): gleicher Titel stand schon vorher da -> neu nur ueber Anzahl oder neue Preis-Zeile
-    _alt = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.500,00 kaufen", (40, 1042, 200, 1058), "Text")]
-    _nv = {str(e[0]).strip() for e in _alt}
-    _zv = order_bot.tv_meldung_zaehlen(_alt, "MNQZ6")
-    _jetzt_preis = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
-    _jetzt_zwei = _alt + [("Take-Profit-Order platziert für", (40, 960, 280, 978), "Text")]
-    chk("TV-ORDER neue Meldung trotz gleichem Titel: neue Preis-Zeile oder mehr gleiche Titel = neu; unveraendert = nichts; neuer Titel wie bisher",
-        order_bot.tv_meldungen_neu(_alt, "MNQZ6", _nv, _zv) == []
-        and order_bot.tv_meldungen_neu(_jetzt_preis, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für · zu 30.564,75 kaufen"]
-        and order_bot.tv_meldungen_neu(_jetzt_zwei, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für"]
-        and order_bot.tv_meldungen_neu([("Market order executed on", (40, 1020, 250, 1038), "Text")], "MNQZ6", {"Positions"}, {}) == ["Market order executed on"]
-        and order_bot.tv_meldungen_neu([("Jahr zu Tag in 1-tägige Intervalle", (40, 1020, 250, 1038), "Button")], "MNQZ6", set(), {}) == [])
-    chk("TV-ORDER Orders-Reiter Rohzone fuer puls_diagnose: Knoten bis 260 px unter dem Reiter, Typ:Name@x,y",
-        order_bot.tv_orders_roh_zone([("Orders 1", (180, 700, 260, 720), "TabItem"), ("Säulen-Einstellung", (200, 740, 300, 760), "Button"),
-                                      ("Symbol", (40, 745, 90, 760), "HeaderItem"), ("weit weg", (40, 1100, 90, 1120), "Text")])
-        == ["TabItem:Orders 1@180,700", "Button:Säulen-Einstellung@200,740", "HeaderItem:Symbol@40,745"])
+    def _ab_1174():   # ST2: Inline-Prüfung ab Zeile 1174 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _alt, e
+        _alt = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.500,00 kaufen", (40, 1042, 200, 1058), "Text")]
+        _nv = {str(e[0]).strip() for e in _alt}
+        _zv = order_bot.tv_meldung_zaehlen(_alt, "MNQZ6")
+        _jetzt_preis = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
+        _jetzt_zwei = _alt + [("Take-Profit-Order platziert für", (40, 960, 280, 978), "Text")]
+        chk("TV-ORDER neue Meldung trotz gleichem Titel: neue Preis-Zeile oder mehr gleiche Titel = neu; unveraendert = nichts; neuer Titel wie bisher",
+            order_bot.tv_meldungen_neu(_alt, "MNQZ6", _nv, _zv) == []
+            and order_bot.tv_meldungen_neu(_jetzt_preis, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für · zu 30.564,75 kaufen"]
+            and order_bot.tv_meldungen_neu(_jetzt_zwei, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für"]
+            and order_bot.tv_meldungen_neu([("Market order executed on", (40, 1020, 250, 1038), "Text")], "MNQZ6", {"Positions"}, {}) == ["Market order executed on"]
+            and order_bot.tv_meldungen_neu([("Jahr zu Tag in 1-tägige Intervalle", (40, 1020, 250, 1038), "Button")], "MNQZ6", set(), {}) == [])
+    _inline(_ab_1174)
+    def _ab_1185():   # ST2: Inline-Prüfung ab Zeile 1185 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER Orders-Reiter Rohzone fuer puls_diagnose: Knoten bis 260 px unter dem Reiter, Typ:Name@x,y",
+            order_bot.tv_orders_roh_zone([("Orders 1", (180, 700, 260, 720), "TabItem"), ("Säulen-Einstellung", (200, 740, 300, 760), "Button"),
+                                          ("Symbol", (40, 745, 90, 760), "HeaderItem"), ("weit weg", (40, 1100, 90, 1120), "Text")])
+            == ["TabItem:Orders 1@180,700", "Button:Säulen-Einstellung@200,740", "HeaderItem:Symbol@40,745"])
+    _inline(_ab_1185)
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
-    chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
-        order_bot.tv_fremdes_konto(["30,849.00", "4000000", "APEX0000000000025 USD"], ["TDFYSL150310000001", "TDFYSL150310000000"]) == "APEX0000000000025 USD"
-        and order_bot.tv_fremdes_konto(["APEX0000000000025 USD"], ["APEX0000000000025"]) == ""
-        and order_bot.tv_fremdes_konto(["PAAPEX0000000000031"], ["APEX0000000000031"]) == ""      # Geschwister-aehnlich: kein Urteil
-        and order_bot.tv_fremdes_konto(["4000000", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
-        and order_bot.tv_fremdes_konto(None, ["APEX1"]) == "")
-    chk("TV-TAB: Chromes 'Website verlassen?' — 'Verlassen'/'Leave' wird gefunden, 'Abbrechen' nie, Unsichtbares nie",
-        order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", (1003, 288, 1101, 322), "Button")])["punkt"] == (1052, 305)
-        and order_bot.tv_verlassen_knopf([("Leave", (10, 10, 60, 30), "Button")])["text"] == "Leave"
-        and order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", None, "Button")]) is None
-        and order_bot.tv_verlassen_knopf([]) is None)
-    chk("TV-TAB: Chart-Titel OHNE Pfeil (genau 0 %) wird erkannt — nie Prophos/DevTools/Kurse ohne Symbol",
-        order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed - Google Chrome", "", "") == 1
-        and order_bot.tv_tab_rang("(2) MNQZ2026 30,849.00 ▲ +0.21% Unnamed", "", "") == 1
-        and order_bot.tv_tab_rang("BTC1! 86,680 −0.1% Unnamed", "", "") == 1
-        and order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed", "", "NQZ6") == 3
-        and order_bot.tv_tab_rang("Prophos - Google Chrome", "", "") == 0
-        and order_bot.tv_tab_rang("DevTools - NQZ2026 30,784.50 0%", "", "") == 0
-        and order_bot.tv_tab_rang("30,784.50 0% Unnamed", "", "") == 0)
+    def _ab_1190():   # ST2: Inline-Prüfung ab Zeile 1190 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
+            order_bot.tv_fremdes_konto(["30,849.00", "4000000", "APEX0000000000025 USD"], ["TDFYSL150310000001", "TDFYSL150310000000"]) == "APEX0000000000025 USD"
+            and order_bot.tv_fremdes_konto(["APEX0000000000025 USD"], ["APEX0000000000025"]) == ""
+            and order_bot.tv_fremdes_konto(["PAAPEX0000000000031"], ["APEX0000000000031"]) == ""      # Geschwister-aehnlich: kein Urteil
+            and order_bot.tv_fremdes_konto(["4000000", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
+            and order_bot.tv_fremdes_konto(None, ["APEX1"]) == "")
+    _inline(_ab_1190)
+    def _ab_1196():   # ST2: Inline-Prüfung ab Zeile 1196 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-TAB: Chromes 'Website verlassen?' — 'Verlassen'/'Leave' wird gefunden, 'Abbrechen' nie, Unsichtbares nie",
+            order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", (1003, 288, 1101, 322), "Button")])["punkt"] == (1052, 305)
+            and order_bot.tv_verlassen_knopf([("Leave", (10, 10, 60, 30), "Button")])["text"] == "Leave"
+            and order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", None, "Button")]) is None
+            and order_bot.tv_verlassen_knopf([]) is None)
+    _inline(_ab_1196)
+    def _ab_1201():   # ST2: Inline-Prüfung ab Zeile 1201 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-TAB: Chart-Titel OHNE Pfeil (genau 0 %) wird erkannt — nie Prophos/DevTools/Kurse ohne Symbol",
+            order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed - Google Chrome", "", "") == 1
+            and order_bot.tv_tab_rang("(2) MNQZ2026 30,849.00 ▲ +0.21% Unnamed", "", "") == 1
+            and order_bot.tv_tab_rang("BTC1! 86,680 −0.1% Unnamed", "", "") == 1
+            and order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed", "", "NQZ6") == 3
+            and order_bot.tv_tab_rang("Prophos - Google Chrome", "", "") == 0
+            and order_bot.tv_tab_rang("DevTools - NQZ2026 30,784.50 0%", "", "") == 0
+            and order_bot.tv_tab_rang("30,784.50 0% Unnamed", "", "") == 0)
+    _inline(_ab_1201)
     # Tradovate-Panel hoch/runter (22.09.2026, Finns PC): Kandidaten fuer den ⤢-Knopf
-    _FR = (0, 107, 2000, 1190)
-    _PK = [("Tradovate", (100, 1122, 170, 1140), "Button"), ("Account Balance", (1016, 1165, 1116, 1183), "Text"),
-           ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"), ("Symbol", (1656, 297, 1700, 315), "Text")]
-    _KN = [("", (1570, 1122, 1586, 1140)), ("", (1608, 1122, 1624, 1140)), ("", (170, 1122, 190, 1140)), ("Publish", (1930, 208, 1990, 228))]
-    _LG = order_bot.tv_panel_lage(_PK, _KN, _FR)
-    chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann Raster ab 6 px links der 'Profit'-Kante; nie 'Publish'",
-        _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174 and _LG["rechts"] == 1620 and _LG["zeile_y"] == 1131
-        and _LG["kandidaten"][0] == (1613, 1131, "ueber dem i von 'Profit' (-43)") and _LG["kandidaten"][1][:2] == (1613, 1137)
-        and any(k[2] == "unbenannter Knopf der Panelzeile" for k in _LG["kandidaten"]) and all(1100 <= k[1] <= 1150 for k in _LG["kandidaten"])
-        and not any(k[0] > 1620 for k in _LG["kandidaten"]))
-    chk("TV-PANEL: 'ueber Profit' ist immer der erste Kandidat (ein benannter Knopf an derselben Stelle faellt als Doppel weg); ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
-        order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][:2] == (1613, 1131)
-        and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"][0][:2] == (1613, 1131)
-        and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["rechts"] == 1620)
-    chk("TV-PANEL: Lage 'oben' (Panel maximiert: Kopfzeile im oberen Drittel); ohne Kopfzeile None",
-        order_bot.tv_panel_lage([("Tradovate", (100, 208, 170, 226), "Button"), ("Account Balance", (1345, 252, 1445, 270), "Text"), ("Profit", (1585, 252, 1620, 270), "Text")], None, _FR)["zustand"] == "oben"
-        and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["zustand"] is None
-        and order_bot.tv_panel_lage(_PK, _KN, None)["zustand"] is None)
+    def _ab_1210():   # ST2: Inline-Prüfung ab Zeile 1210 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _FR, _KN, _PK, k
+        _FR = (0, 107, 2000, 1190)
+        _PK = [("Tradovate", (100, 1122, 170, 1140), "Button"), ("Account Balance", (1016, 1165, 1116, 1183), "Text"),
+               ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"), ("Symbol", (1656, 297, 1700, 315), "Text")]
+        _KN = [("", (1570, 1122, 1586, 1140)), ("", (1608, 1122, 1624, 1140)), ("", (170, 1122, 190, 1140)), ("Publish", (1930, 208, 1990, 228))]
+        _LG = order_bot.tv_panel_lage(_PK, _KN, _FR)
+        chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann Raster ab 6 px links der 'Profit'-Kante; nie 'Publish'",
+            _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174 and _LG["rechts"] == 1620 and _LG["zeile_y"] == 1131
+            and _LG["kandidaten"][0] == (1613, 1131, "ueber dem i von 'Profit' (-43)") and _LG["kandidaten"][1][:2] == (1613, 1137)
+            and any(k[2] == "unbenannter Knopf der Panelzeile" for k in _LG["kandidaten"]) and all(1100 <= k[1] <= 1150 for k in _LG["kandidaten"])
+            and not any(k[0] > 1620 for k in _LG["kandidaten"]))
+    _inline(_ab_1210)
+    def _ab_1220():   # ST2: Inline-Prüfung ab Zeile 1220 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-PANEL: 'ueber Profit' ist immer der erste Kandidat (ein benannter Knopf an derselben Stelle faellt als Doppel weg); ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
+            order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][:2] == (1613, 1131)
+            and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"][0][:2] == (1613, 1131)
+            and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["rechts"] == 1620)
+    _inline(_ab_1220)
+    def _ab_1224():   # ST2: Inline-Prüfung ab Zeile 1224 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-PANEL: Lage 'oben' (Panel maximiert: Kopfzeile im oberen Drittel); ohne Kopfzeile None",
+            order_bot.tv_panel_lage([("Tradovate", (100, 208, 170, 226), "Button"), ("Account Balance", (1345, 252, 1445, 270), "Text"), ("Profit", (1585, 252, 1620, 270), "Text")], None, _FR)["zustand"] == "oben"
+            and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["zustand"] is None
+            and order_bot.tv_panel_lage(_PK, _KN, None)["zustand"] is None)
+    _inline(_ab_1224)
     # Klickpunkt am Fensterrand (22.09.2026 12:33, Finns PC): Umschalter ragt unter den Rand
-    chk("TV-UIA: Klickpunkt bleibt 12 px ueber dem Fensterboden, wenn das Element darunter hinausragt",
-        order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 1165, 330, 1200))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)
-        and order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 900, 330, 930))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 915))
-    chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
-        order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
-        and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
-        and not order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "buy", 1)[0]
-        and not order_bot.tv_senden_text_passt("Buy 1 BTCU6 @ 86,740 LIMIT", "buy", 1)[0]
-        and not order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 1)[0])
+    def _ab_1229():   # ST2: Inline-Prüfung ab Zeile 1229 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-UIA: Klickpunkt bleibt 12 px ueber dem Fensterboden, wenn das Element darunter hinausragt",
+            order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 1165, 330, 1200))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)
+            and order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 900, 330, 930))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 915))
+    _inline(_ab_1229)
+    def _ab_1232():   # ST2: Inline-Prüfung ab Zeile 1232 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
+            order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
+            and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
+            and not order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "buy", 1)[0]
+            and not order_bot.tv_senden_text_passt("Buy 1 BTCU6 @ 86,740 LIMIT", "buy", 1)[0]
+            and not order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 1)[0])
+    _inline(_ab_1232)
 
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
-    chk("TV: Symbol-Wurzel — Dauerkontrakt, Monatskontrakt, Boerse, blanke Wurzel",
-        order_bot.tv_symbol_root("MNQ1!") == "MNQ"
-        and order_bot.tv_symbol_root("CME_MINI:MNQ1!") == "MNQ"
-        and order_bot.tv_symbol_root("MNQZ2025") == "MNQ"
-        and order_bot.tv_symbol_root("NQZ2026") == "NQ"
-        and order_bot.tv_symbol_root("MNQ") == "MNQ"
-        and order_bot.tv_symbol_root("MNQ1! 1m CME") == "MNQ"
-        and order_bot.tv_symbol_root("") == "")
+    def _ab_1242():   # ST2: Inline-Prüfung ab Zeile 1242 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Symbol-Wurzel — Dauerkontrakt, Monatskontrakt, Boerse, blanke Wurzel",
+            order_bot.tv_symbol_root("MNQ1!") == "MNQ"
+            and order_bot.tv_symbol_root("CME_MINI:MNQ1!") == "MNQ"
+            and order_bot.tv_symbol_root("MNQZ2025") == "MNQ"
+            and order_bot.tv_symbol_root("NQZ2026") == "NQ"
+            and order_bot.tv_symbol_root("MNQ") == "MNQ"
+            and order_bot.tv_symbol_root("MNQ1! 1m CME") == "MNQ"
+            and order_bot.tv_symbol_root("") == "")
+    _inline(_ab_1242)
     # Die Falle, an der eine naive Monatsregel scheitert: in 'MNQ1!' sieht 'Q1'
     # aus wie Monat+Jahr — uebrig bliebe 'MN', und der Vergleich waere still
     # falsch statt laut.
-    chk("TV: MNQ und NQ sind NIE dasselbe Instrument",
-        order_bot.tv_symbol_passt("MNQ1!", "MNQ")
-        and order_bot.tv_symbol_passt("MNQZ2025", "MNQ")
-        and not order_bot.tv_symbol_passt("MNQ1!", "NQ")
-        and not order_bot.tv_symbol_passt("NQZ2026", "MNQ")
-        and not order_bot.tv_symbol_passt("", "MNQ"))
+    def _ab_1253():   # ST2: Inline-Prüfung ab Zeile 1253 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: MNQ und NQ sind NIE dasselbe Instrument",
+            order_bot.tv_symbol_passt("MNQ1!", "MNQ")
+            and order_bot.tv_symbol_passt("MNQZ2025", "MNQ")
+            and not order_bot.tv_symbol_passt("MNQ1!", "NQ")
+            and not order_bot.tv_symbol_passt("NQZ2026", "MNQ")
+            and not order_bot.tv_symbol_passt("", "MNQ"))
+    _inline(_ab_1253)
     # Tab-Suchbegriff (30.08.2026, Finns erster Live-Lauf): der Bot suchte den
     # Tab am Wort 'tradingview' und fand nichts — bei ihm heisst der Tab
     # 'NQU2026 29.491,75 ▼ −0,69 %'. Jetzt meldet die Seite ihren Titel selbst.
-    chk("TV: Tab-Suchbegriff ist das Symbol, nicht der tickende Preis",
-        order_bot.tv_tab_suchbegriff("NQU2026 29.491,75 ▼ −0,69 %") == "NQU2026"
-        and order_bot.tv_tab_suchbegriff("MNQ1! 1m CME — TradingView") == "MNQ1!"
-        and order_bot.tv_tab_suchbegriff("TradingView — Track All Markets") == "TradingView")
-    chk("TV: Zaehler-Praefixe und Leeres ergeben KEINEN Suchbegriff",
-        order_bot.tv_tab_suchbegriff("(1) NQU2026 29.491,75") == "NQU2026"
-        and order_bot.tv_tab_suchbegriff("") == ""
-        and order_bot.tv_tab_suchbegriff(None) == ""
-        and order_bot.tv_tab_suchbegriff("(3) 7 %") == "")
+    def _ab_1262():   # ST2: Inline-Prüfung ab Zeile 1262 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Tab-Suchbegriff ist das Symbol, nicht der tickende Preis",
+            order_bot.tv_tab_suchbegriff("NQU2026 29.491,75 ▼ −0,69 %") == "NQU2026"
+            and order_bot.tv_tab_suchbegriff("MNQ1! 1m CME — TradingView") == "MNQ1!"
+            and order_bot.tv_tab_suchbegriff("TradingView — Track All Markets") == "TradingView")
+    _inline(_ab_1262)
+    def _ab_1266():   # ST2: Inline-Prüfung ab Zeile 1266 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Zaehler-Praefixe und Leeres ergeben KEINEN Suchbegriff",
+            order_bot.tv_tab_suchbegriff("(1) NQU2026 29.491,75") == "NQU2026"
+            and order_bot.tv_tab_suchbegriff("") == ""
+            and order_bot.tv_tab_suchbegriff(None) == ""
+            and order_bot.tv_tab_suchbegriff("(3) 7 %") == "")
+    _inline(_ab_1266)
     # Tab-Treffer (30.08.2026, Finns Fehlversuch MIT voller Spur): sein Tab
     # heisst 'NQU2026 29,491.75 ▼ −0.69% Unnamed' — kein 'tradingview' drin.
     # Der dritte Weg (Symbol-Wurzel aus dem Befehl) braucht weder Userscript
     # noch Titel und muss genau diesen Namen treffen.
-    chk("TV: Tab per Symbol-Wurzel getroffen (NQU6 findet NQU2026-Tab)",
-        order_bot.tv_tab_passt("NQU2026 29,491.75 ▼ −0.69% Unnamed", "", "NQU6")
-        and order_bot.tv_tab_passt("MNQU2026 29,491.75", "", "MNQ")
-        and order_bot.tv_tab_passt("MNQ1! 1m CME — TradingView", "", "")
-        and order_bot.tv_tab_passt("NQU2026 …", "NQU2026", ""))
-    chk("TV: fremde Tabs sind NIE der TradingView-Tab",
-        not order_bot.tv_tab_passt("Prophos\xa0- Arbeitsspeichernutzung\xa0- 303 MB", "", "NQU6")
-        and not order_bot.tv_tab_passt("Echo-Panel – Speicherauslastung – 37,3 MB", "", "NQU6")
-        and not order_bot.tv_tab_passt("127.0.0.1:8770/api/instances", "", "NQU6")
-        and not order_bot.tv_tab_passt("DevTools - www.tradingview.com/chart", "", "NQU6")
-        and not order_bot.tv_tab_passt("", "", "NQU6"))
+    def _ab_1275():   # ST2: Inline-Prüfung ab Zeile 1275 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Tab per Symbol-Wurzel getroffen (NQU6 findet NQU2026-Tab)",
+            order_bot.tv_tab_passt("NQU2026 29,491.75 ▼ −0.69% Unnamed", "", "NQU6")
+            and order_bot.tv_tab_passt("MNQU2026 29,491.75", "", "MNQ")
+            and order_bot.tv_tab_passt("MNQ1! 1m CME — TradingView", "", "")
+            and order_bot.tv_tab_passt("NQU2026 …", "NQU2026", ""))
+    _inline(_ab_1275)
+    def _ab_1280():   # ST2: Inline-Prüfung ab Zeile 1280 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: fremde Tabs sind NIE der TradingView-Tab",
+            not order_bot.tv_tab_passt("Prophos\xa0- Arbeitsspeichernutzung\xa0- 303 MB", "", "NQU6")
+            and not order_bot.tv_tab_passt("Echo-Panel – Speicherauslastung – 37,3 MB", "", "NQU6")
+            and not order_bot.tv_tab_passt("127.0.0.1:8770/api/instances", "", "NQU6")
+            and not order_bot.tv_tab_passt("DevTools - www.tradingview.com/chart", "", "NQU6")
+            and not order_bot.tv_tab_passt("", "", "NQU6"))
+    _inline(_ab_1280)
     # MNQ-Plan darf NIE den NQ-Tab greifen (und umgekehrt) — dieselbe Trennung
     # wie beim Instrument-Vergleich, hier nur eine Ebene frueher.
     # Der Rang loest Finns zweiten Fehlversuch (31.08.2026): Plan stand auf NQ,
     # sein Chart auf MNQ -- der Tab wurde deshalb gar nicht gefunden, obwohl er
     # offen war. Den Chart umzustellen ist aber Schritt 4 der Kette, die Suche
     # darf ihn also nicht voraussetzen. Finns ECHTER Tab-Name aus der Spur:
-    _FINN_TAB = "MNQU2026 29.455,50 ▼ −0.12% Unnamed\xa0– Arbeitsspeichernutzung"
-    chk("TV: Chart-Tab wird auch bei ANDEREM Symbol gefunden (Pfeil + Prozent)",
-        order_bot.tv_tab_rang(_FINN_TAB, "", "NQU6") == 1
-        and order_bot.tv_tab_rang(_FINN_TAB, "", "MNQ") == 3)
-    chk("TV: passendes Symbol schlaegt blossen Chart-Titel (Rang 3 > 1)",
-        order_bot.tv_tab_rang("NQU2026 29.491,75 ▼ −0,69%", "", "NQU6") == 3
-        and order_bot.tv_tab_rang("MNQU2026 29.455,50 ▼ −0.12%", "", "NQU6") == 1
-        and order_bot.tv_tab_rang("MNQ1! — TradingView", "", "NQU6") == 2)
-    chk("TV: gewoehnliche Tabs bleiben bei Rang 0",
-        order_bot.tv_tab_rang("Prophos\xa0– Arbeitsspeichernutzung\xa0– 149 MB", "", "NQU6") == 0
-        and order_bot.tv_tab_rang("Cockpit | Duplikium Trade Copier", "", "NQU6") == 0
-        and order_bot.tv_tab_rang("Tradeify Futures - User Dashboard", "", "NQU6") == 0
-        and order_bot.tv_tab_rang("FundedNext - Prop Trading Firm for CFDs and Futures", "", "NQU6") == 0
-        and order_bot.tv_tab_rang("DevTools - www.tradingview.com/chart", "", "NQU6") == 0
-        and order_bot.tv_tab_rang("DAX -0,87%", "", "NQU6") == 0)
-    chk("TV: MNQ und NQ greifen sich beim SYMBOL-Rang nicht gegenseitig",
-        order_bot.tv_tab_rang("NQU2026 29,491.75", "", "MNQ") == 0
-        and order_bot.tv_tab_rang("MNQU2026 29,491.75", "", "NQU6") == 0)
+    def _ab_1292():   # ST2: Inline-Prüfung ab Zeile 1292 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _FINN_TAB = "MNQU2026 29.455,50 ▼ −0.12% Unnamed\xa0– Arbeitsspeichernutzung"
+        chk("TV: Chart-Tab wird auch bei ANDEREM Symbol gefunden (Pfeil + Prozent)",
+            order_bot.tv_tab_rang(_FINN_TAB, "", "NQU6") == 1
+            and order_bot.tv_tab_rang(_FINN_TAB, "", "MNQ") == 3)
+    _inline(_ab_1292)
+    def _ab_1296():   # ST2: Inline-Prüfung ab Zeile 1296 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: passendes Symbol schlaegt blossen Chart-Titel (Rang 3 > 1)",
+            order_bot.tv_tab_rang("NQU2026 29.491,75 ▼ −0,69%", "", "NQU6") == 3
+            and order_bot.tv_tab_rang("MNQU2026 29.455,50 ▼ −0.12%", "", "NQU6") == 1
+            and order_bot.tv_tab_rang("MNQ1! — TradingView", "", "NQU6") == 2)
+    _inline(_ab_1296)
+    def _ab_1300():   # ST2: Inline-Prüfung ab Zeile 1300 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: gewoehnliche Tabs bleiben bei Rang 0",
+            order_bot.tv_tab_rang("Prophos\xa0– Arbeitsspeichernutzung\xa0– 149 MB", "", "NQU6") == 0
+            and order_bot.tv_tab_rang("Cockpit | Duplikium Trade Copier", "", "NQU6") == 0
+            and order_bot.tv_tab_rang("Tradeify Futures - User Dashboard", "", "NQU6") == 0
+            and order_bot.tv_tab_rang("FundedNext - Prop Trading Firm for CFDs and Futures", "", "NQU6") == 0
+            and order_bot.tv_tab_rang("DevTools - www.tradingview.com/chart", "", "NQU6") == 0
+            and order_bot.tv_tab_rang("DAX -0,87%", "", "NQU6") == 0)
+    _inline(_ab_1300)
+    def _ab_1307():   # ST2: Inline-Prüfung ab Zeile 1307 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: MNQ und NQ greifen sich beim SYMBOL-Rang nicht gegenseitig",
+            order_bot.tv_tab_rang("NQU2026 29,491.75", "", "MNQ") == 0
+            and order_bot.tv_tab_rang("MNQU2026 29,491.75", "", "NQU6") == 0)
+    _inline(_ab_1307)
     # Senden-Knopf-Text (31.08.2026, aus Finns Panel-Dump): TradingView
     # beschriftet den Knopf mit "Kauf 3 NQU6 MARKT" -- Richtung, Menge, Symbol
     # und Orderart in einem String. Das ist die letzte Probe vor dem
     # unumkehrbaren Klick, also gehoert jeder Fall hier her.
-    chk("TV: Senden-Knopf bestaetigt die geplante Order (de + en)",
-        order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "buy", 3)[0]
-        and order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "sell", 3)[0]
-        and order_bot.tv_senden_text_passt("Buy 3 NQU6 MARKET", "buy", 3)[0]
-        and order_bot.tv_senden_text_passt("Sell 2 MNQU6 MARKET", "sell", 2)[0])
+    def _ab_1314():   # ST2: Inline-Prüfung ab Zeile 1314 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Senden-Knopf bestaetigt die geplante Order (de + en)",
+            order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "buy", 3)[0]
+            and order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "sell", 3)[0]
+            and order_bot.tv_senden_text_passt("Buy 3 NQU6 MARKET", "buy", 3)[0]
+            and order_bot.tv_senden_text_passt("Sell 2 MNQU6 MARKET", "sell", 2)[0])
+    _inline(_ab_1314)
     # 'Verkauf' ENTHAELT 'kauf' — wer darauf nicht achtet, haelt einen Verkauf
     # fuer einen Kauf. Das ist die Richtungsverwechslung, gegen die der ganze
     # Rest der Kette abgesichert ist.
-    chk("TV: Richtungsverwechslung wird erkannt (Verkauf enthaelt 'kauf')",
-        not order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "buy", 3)[0]
-        and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "sell", 3)[0])
-    chk("TV: falsche Menge und falsche Orderart stoppen den Klick",
-        not order_bot.tv_senden_text_passt("Kauf 30 NQU6 MARKT", "buy", 3)[0]
-        and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 LIMIT", "buy", 3)[0]
-        and not order_bot.tv_senden_text_passt("", "buy", 3)[0])
-    chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
-        order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
-        and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
-        and not order_bot.tv_konto_passt("PA-1234567", "PA-7654321"))
-    chk("TV: zu kurze External ID trifft NIE ein Konto (Fehlgriff = falsches Konto)",
-        not order_bot.tv_konto_passt("PA-12", "12")
-        and not order_bot.tv_konto_passt("PA-1234567", "")
-        and not order_bot.tv_konto_passt("PA-1234567", None))
-    chk("TV: deutsche Zahlen aus der Oberflaeche, Leeres bleibt None",
-        order_bot.tv_de_zahl("1.234,5") == 1234.5
-        and order_bot.tv_de_zahl("2") == 2.0
-        and order_bot.tv_de_zahl("-3") == -3.0
-        and order_bot.tv_de_zahl("") is None
-        and order_bot.tv_de_zahl("-") is None
-        and order_bot.tv_de_zahl(None) is None)
-    _POS = [{"symbol": "MNQZ2025", "seite": "Long",  "menge": "2"},
-            {"symbol": "MNQH2026", "seite": "Long",  "menge": "1"},
-            {"symbol": "MNQZ2025", "seite": "Short", "menge": "5"},
-            {"symbol": "NQZ2025",  "seite": "Long",  "menge": "9"}]
-    chk("TV: Mengen-Summe zaehlt nur gleiche Wurzel UND gleiche Richtung",
-        order_bot.tv_menge_summe(_POS, "MNQ", "buy") == 3.0
-        and order_bot.tv_menge_summe(_POS, "MNQ", "sell") == 5.0
-        and order_bot.tv_menge_summe(_POS, "NQ", "buy") == 9.0
-        and order_bot.tv_menge_summe([], "MNQ", "buy") == 0.0)
+    def _ab_1322():   # ST2: Inline-Prüfung ab Zeile 1322 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Richtungsverwechslung wird erkannt (Verkauf enthaelt 'kauf')",
+            not order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "buy", 3)[0]
+            and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "sell", 3)[0])
+    _inline(_ab_1322)
+    def _ab_1325():   # ST2: Inline-Prüfung ab Zeile 1325 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: falsche Menge und falsche Orderart stoppen den Klick",
+            not order_bot.tv_senden_text_passt("Kauf 30 NQU6 MARKT", "buy", 3)[0]
+            and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 LIMIT", "buy", 3)[0]
+            and not order_bot.tv_senden_text_passt("", "buy", 3)[0])
+    _inline(_ab_1325)
+    def _ab_1329():   # ST2: Inline-Prüfung ab Zeile 1329 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
+            order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
+            and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
+            and not order_bot.tv_konto_passt("PA-1234567", "PA-7654321"))
+    _inline(_ab_1329)
+    def _ab_1333():   # ST2: Inline-Prüfung ab Zeile 1333 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: zu kurze External ID trifft NIE ein Konto (Fehlgriff = falsches Konto)",
+            not order_bot.tv_konto_passt("PA-12", "12")
+            and not order_bot.tv_konto_passt("PA-1234567", "")
+            and not order_bot.tv_konto_passt("PA-1234567", None))
+    _inline(_ab_1333)
+    def _ab_1337():   # ST2: Inline-Prüfung ab Zeile 1337 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: deutsche Zahlen aus der Oberflaeche, Leeres bleibt None",
+            order_bot.tv_de_zahl("1.234,5") == 1234.5
+            and order_bot.tv_de_zahl("2") == 2.0
+            and order_bot.tv_de_zahl("-3") == -3.0
+            and order_bot.tv_de_zahl("") is None
+            and order_bot.tv_de_zahl("-") is None
+            and order_bot.tv_de_zahl(None) is None)
+    _inline(_ab_1337)
+    def _ab_1344():   # ST2: Inline-Prüfung ab Zeile 1344 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _POS = [{"symbol": "MNQZ2025", "seite": "Long",  "menge": "2"},
+                {"symbol": "MNQH2026", "seite": "Long",  "menge": "1"},
+                {"symbol": "MNQZ2025", "seite": "Short", "menge": "5"},
+                {"symbol": "NQZ2025",  "seite": "Long",  "menge": "9"}]
+        chk("TV: Mengen-Summe zaehlt nur gleiche Wurzel UND gleiche Richtung",
+            order_bot.tv_menge_summe(_POS, "MNQ", "buy") == 3.0
+            and order_bot.tv_menge_summe(_POS, "MNQ", "sell") == 5.0
+            and order_bot.tv_menge_summe(_POS, "NQ", "buy") == 9.0
+            and order_bot.tv_menge_summe([], "MNQ", "buy") == 0.0)
+    _inline(_ab_1344)
     # Koordinaten: dpr traegt Windows-Skalierung UND Seiten-Zoom, die
     # Browser-Dekoration sitzt oben, der Viewport klebt links am Klientrand.
-    _P, _G = order_bot.tv_bildschirm_punkt(
-        [100, 50, 40, 20],
-        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 100, 1920, 980))
-    chk("TV: CSS-Punkt -> Bildschirm (100 % Skalierung, 80 px Browser-Kopf)", _P == (120, 240))
-    _P, _G = order_bot.tv_bildschirm_punkt(
-        [100, 50, 40, 20],
-        {"dpr": 1.5, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 2880, 1500))
-    chk("TV: CSS-Punkt -> Bildschirm (150 % Skalierung)", _P == (180, 240))
+    def _ab_1355():   # ST2: Inline-Prüfung ab Zeile 1355 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P
+        _P, _G = order_bot.tv_bildschirm_punkt(
+            [100, 50, 40, 20],
+            {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 100, 1920, 980))
+        chk("TV: CSS-Punkt -> Bildschirm (100 % Skalierung, 80 px Browser-Kopf)", _P == (120, 240))
+    _inline(_ab_1355)
+    def _ab_1359():   # ST2: Inline-Prüfung ab Zeile 1359 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P
+        _P, _G = order_bot.tv_bildschirm_punkt(
+            [100, 50, 40, 20],
+            {"dpr": 1.5, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 2880, 1500))
+        chk("TV: CSS-Punkt -> Bildschirm (150 % Skalierung)", _P == (180, 240))
+    _inline(_ab_1359)
     # Der Breiten-Abgleich ist der Riegel gegen den lautlosen Fehlklick: passt
     # innerWidth*dpr nicht zur gemessenen Klientbreite, stimmt eine Annahme
     # nicht (DevTools seitlich, falsches Fenster, Prozess nicht DPI-bewusst).
-    _P, _G = order_bot.tv_bildschirm_punkt(
-        [100, 50, 40, 20],
-        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1000, 980))
-    chk("TV: Breiten-Abgleich schlaegt fehl -> KEIN Klick, mit Begruendung",
-        _P is None and "Breiten" in _G)
-    _P, _G = order_bot.tv_bildschirm_punkt(
-        [100, 50, 40, 20],
-        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 1500))
-    chk("TV: unplausible Browser-Dekoration -> KEIN Klick", _P is None and "Dekoration" in _G)
-    _P, _G = order_bot.tv_bildschirm_punkt(
-        [5000, 50, 40, 20],
-        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 980))
-    chk("TV: Ziel ausserhalb des Fensters -> KEIN Klick", _P is None)
-    chk("TV: TP/SL-Einheit muss Geld sein — Ticks/Prozent zaehlen NIE",
-        order_bot.tv_einheit_ist_geld("$")
-        and order_bot.tv_einheit_ist_geld("USD")
-        and order_bot.tv_einheit_ist_geld("Geld")
-        and not order_bot.tv_einheit_ist_geld("Ticks")
-        and not order_bot.tv_einheit_ist_geld("%")
-        and not order_bot.tv_einheit_ist_geld(""))
-    chk("TV: Zahlen deutsch schreiben — ganze Kontrakte ohne Nachkomma",
-        order_bot.tv_zahl_text(2) == "2"
-        and order_bot.tv_zahl_text(2.0) == "2"
-        and order_bot.tv_zahl_text(300) == "300"
-        and order_bot.tv_zahl_text(2.5) == "2,5")
-    chk("TV: gueltiger Orbit-Befehl (mit und ohne SL/TP)",
-        order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
-                                    "richtung": "buy", "volumen": 2,
-                                    "sl_usd": 100, "tp_usd": 300}) == []
-        and order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
-                                        "richtung": "sell", "volumen": 1}) == [])
-    chk("TV: fehlende/zu kurze External ID wird gemeldet",
-        len(order_bot.pruefe_tv_befehl({"symbol": "MNQ", "richtung": "buy", "volumen": 1})) == 1
-        and len(order_bot.pruefe_tv_befehl({"ext_id": "12", "symbol": "MNQ",
-                                            "richtung": "buy", "volumen": 1})) == 1)
-    chk("TV: halbe Absicherung (nur SL oder nur TP) wird abgelehnt",
-        len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
-                                        "richtung": "buy", "volumen": 1,
-                                        "sl_usd": 100})) == 1)
-    chk("TV: Bruchteil-Kontrakte und 0/negativ werden abgelehnt",
-        len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
-                                        "richtung": "buy", "volumen": 1.5})) == 1
-        and len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
-                                            "richtung": "kauf", "volumen": 0})) == 2)
+    def _ab_1366():   # ST2: Inline-Prüfung ab Zeile 1366 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P
+        _P, _G = order_bot.tv_bildschirm_punkt(
+            [100, 50, 40, 20],
+            {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1000, 980))
+        chk("TV: Breiten-Abgleich schlaegt fehl -> KEIN Klick, mit Begruendung",
+            _P is None and "Breiten" in _G)
+    _inline(_ab_1366)
+    def _ab_1371():   # ST2: Inline-Prüfung ab Zeile 1371 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P
+        _P, _G = order_bot.tv_bildschirm_punkt(
+            [100, 50, 40, 20],
+            {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 1500))
+        chk("TV: unplausible Browser-Dekoration -> KEIN Klick", _P is None and "Dekoration" in _G)
+    _inline(_ab_1371)
+    def _ab_1375():   # ST2: Inline-Prüfung ab Zeile 1375 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G, _P
+        _P, _G = order_bot.tv_bildschirm_punkt(
+            [5000, 50, 40, 20],
+            {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 980))
+        chk("TV: Ziel ausserhalb des Fensters -> KEIN Klick", _P is None)
+    _inline(_ab_1375)
+    def _ab_1379():   # ST2: Inline-Prüfung ab Zeile 1379 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: TP/SL-Einheit muss Geld sein — Ticks/Prozent zaehlen NIE",
+            order_bot.tv_einheit_ist_geld("$")
+            and order_bot.tv_einheit_ist_geld("USD")
+            and order_bot.tv_einheit_ist_geld("Geld")
+            and not order_bot.tv_einheit_ist_geld("Ticks")
+            and not order_bot.tv_einheit_ist_geld("%")
+            and not order_bot.tv_einheit_ist_geld(""))
+    _inline(_ab_1379)
+    def _ab_1386():   # ST2: Inline-Prüfung ab Zeile 1386 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Zahlen deutsch schreiben — ganze Kontrakte ohne Nachkomma",
+            order_bot.tv_zahl_text(2) == "2"
+            and order_bot.tv_zahl_text(2.0) == "2"
+            and order_bot.tv_zahl_text(300) == "300"
+            and order_bot.tv_zahl_text(2.5) == "2,5")
+    _inline(_ab_1386)
+    def _ab_1391():   # ST2: Inline-Prüfung ab Zeile 1391 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: gueltiger Orbit-Befehl (mit und ohne SL/TP)",
+            order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                        "richtung": "buy", "volumen": 2,
+                                        "sl_usd": 100, "tp_usd": 300}) == []
+            and order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                            "richtung": "sell", "volumen": 1}) == [])
+    _inline(_ab_1391)
+    def _ab_1397():   # ST2: Inline-Prüfung ab Zeile 1397 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: fehlende/zu kurze External ID wird gemeldet",
+            len(order_bot.pruefe_tv_befehl({"symbol": "MNQ", "richtung": "buy", "volumen": 1})) == 1
+            and len(order_bot.pruefe_tv_befehl({"ext_id": "12", "symbol": "MNQ",
+                                                "richtung": "buy", "volumen": 1})) == 1)
+    _inline(_ab_1397)
+    def _ab_1401():   # ST2: Inline-Prüfung ab Zeile 1401 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: halbe Absicherung (nur SL oder nur TP) wird abgelehnt",
+            len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                            "richtung": "buy", "volumen": 1,
+                                            "sl_usd": 100})) == 1)
+    _inline(_ab_1401)
+    def _ab_1405():   # ST2: Inline-Prüfung ab Zeile 1405 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TV: Bruchteil-Kontrakte und 0/negativ werden abgelehnt",
+            len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                            "richtung": "buy", "volumen": 1.5})) == 1
+            and len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                                "richtung": "kauf", "volumen": 0})) == 2)
+    _inline(_ab_1405)
     # Remote-Close (28.08.2026): der Menuepunkt, der frueher der verbotene war —
     # jetzt Ziel, darum Praefix-Match und harter Alle-/Massen-Ausschluss.
-    chk("CLOSE: Menuepunkt 'Position schließen'/'Close position' erkannt (de/en/ss)",
-        order_bot.ist_close_menuepunkt("Position schließen")
-        and order_bot.ist_close_menuepunkt("Position schliessen")
-        and order_bot.ist_close_menuepunkt("Close position"))
-    chk("CLOSE: Alle-/Massen-/Ändern-Punkte sind NIE Treffer",
-        not order_bot.ist_close_menuepunkt("Alle Positionen schließen")
-        and not order_bot.ist_close_menuepunkt("Close all positions")
-        and not order_bot.ist_close_menuepunkt("Massenoperationen")
-        and not order_bot.ist_close_menuepunkt("Ändern oder löschen")
-        and not order_bot.ist_close_menuepunkt("Neue Order")
-        and not order_bot.ist_close_menuepunkt(""))
-    chk("CLOSE: Schliessen-Knopf nur mit EIGENEM Ticket, Ändern/Abbrechen nie",
-        order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis", 596061571)
-        and order_bot.ist_schliessen_knopf("Close #596061571 buy 1.20 NAS100 by Market", 596061571)
-        and not order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100", 111222333)
-        and not order_bot.ist_schliessen_knopf("Ändern #596061571 buy 1 NAS100 sl: 29349.04 tp: 29570.71", 596061571)
-        and not order_bot.ist_schliessen_knopf("Abbrechen", 596061571)
-        and not order_bot.ist_schliessen_knopf("", 596061571))
+    def _ab_1412():   # ST2: Inline-Prüfung ab Zeile 1412 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Menuepunkt 'Position schließen'/'Close position' erkannt (de/en/ss)",
+            order_bot.ist_close_menuepunkt("Position schließen")
+            and order_bot.ist_close_menuepunkt("Position schliessen")
+            and order_bot.ist_close_menuepunkt("Close position"))
+    _inline(_ab_1412)
+    def _ab_1416():   # ST2: Inline-Prüfung ab Zeile 1416 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Alle-/Massen-/Ändern-Punkte sind NIE Treffer",
+            not order_bot.ist_close_menuepunkt("Alle Positionen schließen")
+            and not order_bot.ist_close_menuepunkt("Close all positions")
+            and not order_bot.ist_close_menuepunkt("Massenoperationen")
+            and not order_bot.ist_close_menuepunkt("Ändern oder löschen")
+            and not order_bot.ist_close_menuepunkt("Neue Order")
+            and not order_bot.ist_close_menuepunkt(""))
+    _inline(_ab_1416)
+    def _ab_1423():   # ST2: Inline-Prüfung ab Zeile 1423 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Schliessen-Knopf nur mit EIGENEM Ticket, Ändern/Abbrechen nie",
+            order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis", 596061571)
+            and order_bot.ist_schliessen_knopf("Close #596061571 buy 1.20 NAS100 by Market", 596061571)
+            and not order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100", 111222333)
+            and not order_bot.ist_schliessen_knopf("Ändern #596061571 buy 1 NAS100 sl: 29349.04 tp: 29570.71", 596061571)
+            and not order_bot.ist_schliessen_knopf("Abbrechen", 596061571)
+            and not order_bot.ist_schliessen_knopf("", 596061571))
+    _inline(_ab_1423)
     # Ein-Klick-Haftungsausschluss (01.09.2026): der EINE fremde Dialog, den
     # der Bot bestaetigen darf — entsprechend eng muss die Signatur sein.
-    chk("CLOSE: Zustimmen-Knopf des Ein-Klick-Haftungsausschlusses erkannt (de/en)",
-        order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschäftsbedingungen")
-        and order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschaeftsbedingungen")
-        and order_bot.ist_einklick_akzeptieren_knopf("I accept the terms and conditions")
-        and order_bot.ist_einklick_akzeptieren_knopf("I agree to the Terms and Conditions"))
-    _lb = ["Loggen Sie sich ein, um vollen Zugriff auf Ihr Handelskonto zu erhalten.",
-           "Kontonummer:", "Passwort:", "Server:"]
-    chk("LOGIN: MT5-Einloggen-Dialog fuers eigene Konto wird erkannt (07.10.2026)",
-        order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK", "Abbrechen"], ["26692392"], 26692392)
-        and order_bot.ist_mt5_login_dialog("Login", ["Login:", "Password:", "Server:"],
-                                           ["OK", "Cancel"], ["Kontonummer:", "26692392"], 26692392))
-    chk("LOGIN: fremdes Konto, anderer Titel, ohne OK oder ohne Konto bleibt unberuehrt",
-        not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692393"], 26692392)
-        and not order_bot.ist_mt5_login_dialog("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392)
-        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392)
-        and not order_bot.ist_mt5_login_dialog("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392)
-        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["126692392"], 26692392)
-        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen", "Cancel"], ["26692392"], 26692392))
+    def _ab_1432():   # ST2: Inline-Prüfung ab Zeile 1432 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Zustimmen-Knopf des Ein-Klick-Haftungsausschlusses erkannt (de/en)",
+            order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschäftsbedingungen")
+            and order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschaeftsbedingungen")
+            and order_bot.ist_einklick_akzeptieren_knopf("I accept the terms and conditions")
+            and order_bot.ist_einklick_akzeptieren_knopf("I agree to the Terms and Conditions"))
+    _inline(_ab_1432)
+    def _ab_1437():   # ST2: Inline-Prüfung ab Zeile 1437 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _lb
+        _lb = ["Loggen Sie sich ein, um vollen Zugriff auf Ihr Handelskonto zu erhalten.",
+               "Kontonummer:", "Passwort:", "Server:"]
+        chk("LOGIN: MT5-Einloggen-Dialog fuers eigene Konto wird erkannt (07.10.2026)",
+            order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK", "Abbrechen"], ["26692392"], 26692392)
+            and order_bot.ist_mt5_login_dialog("Login", ["Login:", "Password:", "Server:"],
+                                               ["OK", "Cancel"], ["Kontonummer:", "26692392"], 26692392))
+    _inline(_ab_1437)
+    def _ab_1443():   # ST2: Inline-Prüfung ab Zeile 1443 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("LOGIN: fremdes Konto, anderer Titel, ohne OK oder ohne Konto bleibt unberuehrt",
+            not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692393"], 26692392)
+            and not order_bot.ist_mt5_login_dialog("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392)
+            and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392)
+            and not order_bot.ist_mt5_login_dialog("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392)
+            and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["126692392"], 26692392)
+            and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen", "Cancel"], ["26692392"], 26692392))
+    _inline(_ab_1443)
     # 19.10.2026 (Finn: „nur auf OK oder auf Login druecken"; Mike pc 02:18 UTC „uebergangen (Konto passt nicht)", Dialog blieb vorn):
     # Titel als Anfang, Knopf „Login"/„Anmelden", Kontofeld „12345678 - Broker", Spur nennt die eine Haelfte
-    _G = order_bot.mt5_login_dialog_grund
-    chk("LOGIN 19.10.: Titel-Anfang, Login/Anmelden-Knopf, Kontofeld mit Zusatz werden erkannt; Grund in der Spur",
-        order_bot.ist_mt5_login_dialog("Login to Trade Account", ["Login:", "Password:", "Server:"], ["Login", "Cancel"], ["26692392 - Broker-Demo"], 26692392)
-        and order_bot.ist_mt5_login_dialog("Anmeldung bei Handelskonto", _lb, ["Anmelden", "Abbrechen"], ["26692392"], 26692392)
-        and order_bot.ist_mt5_login_titel("Login to Trade Account") and order_bot.ist_mt5_login_titel("Einloggen")
-        and not order_bot.ist_mt5_login_titel("Logintest") and not order_bot.ist_mt5_login_titel("Eigenschaften") and not order_bot.ist_mt5_login_titel("")
-        and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login", "OK"]) == "OK" and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login"]) == "Login"
-        and order_bot.mt5_login_knopf_waehlen(["Cancel", "Abbrechen"]) is None
-        and _G("Einloggen", _lb, ["OK"], ["26692392"], 26692392) == ""
-        and _G("Einloggen", _lb, ["OK"], ["26692393"], 26692392).startswith("Konto passt nicht (Feld 26692393")
-        and _G("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392).startswith("kein OK/Login-Knopf")
-        and _G("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392) == "Beschriftungen ohne Passwort/Server"
-        and _G("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392).startswith("Titel")
-        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392 (2)"], 26692392) is False
-        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392"], 0))
-    chk("CLOSE: Abbrechen/Ablehnen und halbe Treffer sind NIE Zustimmung",
-        not order_bot.ist_einklick_akzeptieren_knopf("Abbrechen")
-        and not order_bot.ist_einklick_akzeptieren_knopf("Cancel")
-        and not order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die Bedingungen NICHT")
-        and not order_bot.ist_einklick_akzeptieren_knopf("I do not accept the terms")
-        and not order_bot.ist_einklick_akzeptieren_knopf("Akzeptieren")
-        and not order_bot.ist_einklick_akzeptieren_knopf("Geschäftsbedingungen")
-        and not order_bot.ist_einklick_akzeptieren_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis")
-        and not order_bot.ist_einklick_akzeptieren_knopf(""))
-    chk("CLOSE: Haftungs-Fenster am Titel erkannt, MT5-Hauptfenster nie",
-        order_bot.ist_einklick_dialog("Ein-Klick-Handel")
-        and order_bot.ist_einklick_dialog("One Click Trading")
-        and not order_bot.ist_einklick_dialog("10000003 - FivePercentOnline-Real: Demokonto - Hedge")
-        and not order_bot.ist_einklick_dialog(""))
+    def _ab_1452():   # ST2: Inline-Prüfung ab Zeile 1452 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _G
+        _G = order_bot.mt5_login_dialog_grund
+        chk("LOGIN 19.10.: Titel-Anfang, Login/Anmelden-Knopf, Kontofeld mit Zusatz werden erkannt; Grund in der Spur",
+            order_bot.ist_mt5_login_dialog("Login to Trade Account", ["Login:", "Password:", "Server:"], ["Login", "Cancel"], ["26692392 - Broker-Demo"], 26692392)
+            and order_bot.ist_mt5_login_dialog("Anmeldung bei Handelskonto", _lb, ["Anmelden", "Abbrechen"], ["26692392"], 26692392)
+            and order_bot.ist_mt5_login_titel("Login to Trade Account") and order_bot.ist_mt5_login_titel("Einloggen")
+            and not order_bot.ist_mt5_login_titel("Logintest") and not order_bot.ist_mt5_login_titel("Eigenschaften") and not order_bot.ist_mt5_login_titel("")
+            and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login", "OK"]) == "OK" and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login"]) == "Login"
+            and order_bot.mt5_login_knopf_waehlen(["Cancel", "Abbrechen"]) is None
+            and _G("Einloggen", _lb, ["OK"], ["26692392"], 26692392) == ""
+            and _G("Einloggen", _lb, ["OK"], ["26692393"], 26692392).startswith("Konto passt nicht (Feld 26692393")
+            and _G("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392).startswith("kein OK/Login-Knopf")
+            and _G("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392) == "Beschriftungen ohne Passwort/Server"
+            and _G("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392).startswith("Titel")
+            and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392 (2)"], 26692392) is False
+            and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392"], 0))
+    _inline(_ab_1452)
+    def _ab_1467():   # ST2: Inline-Prüfung ab Zeile 1467 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Abbrechen/Ablehnen und halbe Treffer sind NIE Zustimmung",
+            not order_bot.ist_einklick_akzeptieren_knopf("Abbrechen")
+            and not order_bot.ist_einklick_akzeptieren_knopf("Cancel")
+            and not order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die Bedingungen NICHT")
+            and not order_bot.ist_einklick_akzeptieren_knopf("I do not accept the terms")
+            and not order_bot.ist_einklick_akzeptieren_knopf("Akzeptieren")
+            and not order_bot.ist_einklick_akzeptieren_knopf("Geschäftsbedingungen")
+            and not order_bot.ist_einklick_akzeptieren_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis")
+            and not order_bot.ist_einklick_akzeptieren_knopf(""))
+    _inline(_ab_1467)
+    def _ab_1476():   # ST2: Inline-Prüfung ab Zeile 1476 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Haftungs-Fenster am Titel erkannt, MT5-Hauptfenster nie",
+            order_bot.ist_einklick_dialog("Ein-Klick-Handel")
+            and order_bot.ist_einklick_dialog("One Click Trading")
+            and not order_bot.ist_einklick_dialog("10000003 - FivePercentOnline-Real: Demokonto - Hedge")
+            and not order_bot.ist_einklick_dialog(""))
+    _inline(_ab_1476)
     # Kennzeichen des Dialogs (01.09.2026, zweiter Anlauf): der Titel allein
     # war zu streng — ein Kind-Fenster ohne lesbare Beschriftung fiel still
     # durch. Jetzt zaehlt Titel ODER Fliesstext, und ein fremder Vertrag ohne
@@ -1500,18 +1905,26 @@ def main():
         def descendants(self, control_type=None):
             return self._texte if control_type == "Text" else []
 
-    chk("CLOSE: Ein-Klick-Kennzeichen greift ueber Titel ODER Fliesstext",
-        order_bot._einklick_kennzeichen(_FakeFenster("Ein-Klick-Handel"))
-        and order_bot._einklick_kennzeichen(_FakeFenster("", [
-            "Haftungsausschluss",
-            'Sie sind dabei das Handeln mit einem Klick ("One Click Trading") zu aktivieren.']))
-        and not order_bot._einklick_kennzeichen(_FakeFenster("Vertrag", [
-            "Ich bestaetige die Geschaeftsbedingungen des Brokers gelesen zu haben."]))
-        and not order_bot._einklick_kennzeichen(_FakeFenster("")))
-    f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 596061571, "symbol": "NAS100"})
-    chk("CLOSE: Befehl mit Ticket+Symbol → gueltig (ohne Richtung/Lots/SL/TP)", f == [])
-    f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 0, "symbol": ""})
-    chk("CLOSE: Befehl ohne Ticket/Symbol → beide gemeldet", len(f) == 2)
+    def _ab_1503():   # ST2: Inline-Prüfung ab Zeile 1503 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("CLOSE: Ein-Klick-Kennzeichen greift ueber Titel ODER Fliesstext",
+            order_bot._einklick_kennzeichen(_FakeFenster("Ein-Klick-Handel"))
+            and order_bot._einklick_kennzeichen(_FakeFenster("", [
+                "Haftungsausschluss",
+                'Sie sind dabei das Handeln mit einem Klick ("One Click Trading") zu aktivieren.']))
+            and not order_bot._einklick_kennzeichen(_FakeFenster("Vertrag", [
+                "Ich bestaetige die Geschaeftsbedingungen des Brokers gelesen zu haben."]))
+            and not order_bot._einklick_kennzeichen(_FakeFenster("")))
+    _inline(_ab_1503)
+    def _ab_1511():   # ST2: Inline-Prüfung ab Zeile 1511 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 596061571, "symbol": "NAS100"})
+        chk("CLOSE: Befehl mit Ticket+Symbol → gueltig (ohne Richtung/Lots/SL/TP)", f == [])
+    _inline(_ab_1511)
+    def _ab_1513():   # ST2: Inline-Prüfung ab Zeile 1513 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal f
+        f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 0, "symbol": ""})
+        chk("CLOSE: Befehl ohne Ticket/Symbol → beide gemeldet", len(f) == 2)
+    _inline(_ab_1513)
 
     # ── Notfall-SL/TP (27.08.2026): reine Rechenlogik ──────────────────────
     # Wichtigster Fall zuerst: der in den GEWINN nachgezogene Master-SL — die
@@ -1523,86 +1936,122 @@ def main():
 
     # Kursabstand der Broker (01.10.2026, Finns Screenshots): The5ers SELL 24 @ 30355,08, Ask 30339,07
     # → P&L +384,24 $; Fusion 30372,06/30372,86 → Abstand +33,39
-    chk("ABSTAND: The5ers SELL 24 Lot, Equity−Balance +384,24, Fusion-Mitte 30372,46 → +33,39",
-        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 200000.0, 200384.24, "USD", 30372.46) == 33.39)
-    chk("ABSTAND: BUY 1 Lot cs 20, P&L −200 → Master 30354,6; Fusion 30360 → +5,4",
-        broker_abstand({"type": 0, "price_open": 30364.6, "volume": 1, "contract_size": 20}, 1, 1000.0, 800.0, "USD", 30360.0) == 5.4)
-    chk("ABSTAND: zwei Master-Positionen → Rueckfall Hedge-Entry − Master-Entry",
-        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 2, 1.0, 2.0, "USD", 30372.46, 30382.61) == 27.53)
-    chk("ABSTAND: EUR-Konto ohne Hedge-Entry → None (wie bisher, keine Verschiebung)",
-        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 1.0, 2.0, "EUR", 30372.46) is None)
-    chk("ABSTAND: > 400 Pkt (falsches Symbol) → None",
-        broker_abstand({"type": 0, "price_open": 28904.96, "volume": 2, "contract_size": 10}, 1, 0.0, 0.0, "USD", 30372.0) is None)
+    def _ab_1526():   # ST2: Inline-Prüfung ab Zeile 1526 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ABSTAND: The5ers SELL 24 Lot, Equity−Balance +384,24, Fusion-Mitte 30372,46 → +33,39",
+            broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 200000.0, 200384.24, "USD", 30372.46) == 33.39)
+    _inline(_ab_1526)
+    def _ab_1528():   # ST2: Inline-Prüfung ab Zeile 1528 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ABSTAND: BUY 1 Lot cs 20, P&L −200 → Master 30354,6; Fusion 30360 → +5,4",
+            broker_abstand({"type": 0, "price_open": 30364.6, "volume": 1, "contract_size": 20}, 1, 1000.0, 800.0, "USD", 30360.0) == 5.4)
+    _inline(_ab_1528)
+    def _ab_1530():   # ST2: Inline-Prüfung ab Zeile 1530 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ABSTAND: zwei Master-Positionen → Rueckfall Hedge-Entry − Master-Entry",
+            broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 2, 1.0, 2.0, "USD", 30372.46, 30382.61) == 27.53)
+    _inline(_ab_1530)
+    def _ab_1532():   # ST2: Inline-Prüfung ab Zeile 1532 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ABSTAND: EUR-Konto ohne Hedge-Entry → None (wie bisher, keine Verschiebung)",
+            broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 1.0, 2.0, "EUR", 30372.46) is None)
+    _inline(_ab_1532)
+    def _ab_1534():   # ST2: Inline-Prüfung ab Zeile 1534 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ABSTAND: > 400 Pkt (falsches Symbol) → None",
+            broker_abstand({"type": 0, "price_open": 28904.96, "volume": 2, "contract_size": 10}, 1, 0.0, 0.0, "USD", 30372.0) is None)
+    _inline(_ab_1534)
     # Ende-zu-Ende mit Finns Zahlen: verschobene Master-Level → Fusion-SL 30346,55 / -TP 30449,29
-    _mp = {"type": 1, "price_open": 30355.08 + 33.39, "sl": 30410.37 + 33.39, "tp": 30316.97 + 33.39}
-    chk("ABSTAND: The5ers-Trade auf Fusion → Hedge-SL 30346,55 (TP+10 % dahinter), Hedge-TP 30449,29 (SL+10 %)",
-        sltp(_mp) == {"sl": 30346.55, "tp": 30449.29})
-    chk("NOTFALL: LONG-Master, SL 2490/TP 2520 @ Entry 2500 → Hedge-TP 2489, Hedge-SL 2522 (gekreuzt, 10% dahinter)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 2490.0, "tp": 2520.0})
-        == {"tp": 2489.0, "sl": 2522.0})
-    chk("NOTFALL: SHORT-Master, SL 2510/TP 2480 → Hedge-TP 2511, Hedge-SL 2478 (gespiegelt)",
-        sltp({"type": 1, "price_open": 2500.0, "sl": 2510.0, "tp": 2480.0})
-        == {"tp": 2511.0, "sl": 2478.0})
-    chk("NOTFALL: LONG-SL in den Gewinn nachgezogen (2510 > Entry 2500) → Hedge-TP 2509 liegt DAHINTER (unter dem Master-SL)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 2510.0, "tp": 0.0})
-        == {"tp": 2509.0, "sl": 0.0})
-    chk("NOTFALL: Breakeven-SL (Distanz 0) → Mindest-Puffer 100 Punkte greift (Hedge-TP 2499)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 2500.0, "tp": 0.0}, puffer=100)
-        == {"tp": 2499.0, "sl": 0.0})
-    chk("NOTFALL: Mindest-Puffer schlaegt Prozent-Puffer, wenn er groesser ist (Distanz 1 → 1.0 statt 0.1)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 2499.0, "tp": 0.0}, puffer=100)
-        == {"tp": 2498.0, "sl": 0.0})
-    chk("NOTFALL: Master ohne SL/TP (0.0) → beide Hedge-Level 0.0 (= loeschen)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 0.0, "tp": 0.0})
-        == {"tp": 0.0, "sl": 0.0})
-    chk("NOTFALL: altes EA ohne Felder (None) → None, es wird NICHTS angefasst",
-        sltp({"type": 0, "price_open": None, "sl": None, "tp": None}) is None
-        and sltp({"type": 0, "price_open": 2500.0, "sl": None, "tp": None}) is None)
-    chk("NOTFALL: Rundung auf Broker-Digits (2492.663 → 2492.66)",
-        sltp({"type": 0, "price_open": 2500.0, "sl": 2493.33, "tp": 0.0})
-        == {"tp": 2492.66, "sl": 0.0})
+    def _ab_1537():   # ST2: Inline-Prüfung ab Zeile 1537 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _mp = {"type": 1, "price_open": 30355.08 + 33.39, "sl": 30410.37 + 33.39, "tp": 30316.97 + 33.39}
+        chk("ABSTAND: The5ers-Trade auf Fusion → Hedge-SL 30346,55 (TP+10 % dahinter), Hedge-TP 30449,29 (SL+10 %)",
+            sltp(_mp) == {"sl": 30346.55, "tp": 30449.29})
+    _inline(_ab_1537)
+    def _ab_1540():   # ST2: Inline-Prüfung ab Zeile 1540 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: LONG-Master, SL 2490/TP 2520 @ Entry 2500 → Hedge-TP 2489, Hedge-SL 2522 (gekreuzt, 10% dahinter)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 2490.0, "tp": 2520.0})
+            == {"tp": 2489.0, "sl": 2522.0})
+    _inline(_ab_1540)
+    def _ab_1543():   # ST2: Inline-Prüfung ab Zeile 1543 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: SHORT-Master, SL 2510/TP 2480 → Hedge-TP 2511, Hedge-SL 2478 (gespiegelt)",
+            sltp({"type": 1, "price_open": 2500.0, "sl": 2510.0, "tp": 2480.0})
+            == {"tp": 2511.0, "sl": 2478.0})
+    _inline(_ab_1543)
+    def _ab_1546():   # ST2: Inline-Prüfung ab Zeile 1546 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: LONG-SL in den Gewinn nachgezogen (2510 > Entry 2500) → Hedge-TP 2509 liegt DAHINTER (unter dem Master-SL)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 2510.0, "tp": 0.0})
+            == {"tp": 2509.0, "sl": 0.0})
+    _inline(_ab_1546)
+    def _ab_1549():   # ST2: Inline-Prüfung ab Zeile 1549 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: Breakeven-SL (Distanz 0) → Mindest-Puffer 100 Punkte greift (Hedge-TP 2499)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 2500.0, "tp": 0.0}, puffer=100)
+            == {"tp": 2499.0, "sl": 0.0})
+    _inline(_ab_1549)
+    def _ab_1552():   # ST2: Inline-Prüfung ab Zeile 1552 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: Mindest-Puffer schlaegt Prozent-Puffer, wenn er groesser ist (Distanz 1 → 1.0 statt 0.1)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 2499.0, "tp": 0.0}, puffer=100)
+            == {"tp": 2498.0, "sl": 0.0})
+    _inline(_ab_1552)
+    def _ab_1555():   # ST2: Inline-Prüfung ab Zeile 1555 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: Master ohne SL/TP (0.0) → beide Hedge-Level 0.0 (= loeschen)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 0.0, "tp": 0.0})
+            == {"tp": 0.0, "sl": 0.0})
+    _inline(_ab_1555)
+    def _ab_1558():   # ST2: Inline-Prüfung ab Zeile 1558 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: altes EA ohne Felder (None) → None, es wird NICHTS angefasst",
+            sltp({"type": 0, "price_open": None, "sl": None, "tp": None}) is None
+            and sltp({"type": 0, "price_open": 2500.0, "sl": None, "tp": None}) is None)
+    _inline(_ab_1558)
+    def _ab_1561():   # ST2: Inline-Prüfung ab Zeile 1561 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL: Rundung auf Broker-Digits (2492.663 → 2492.66)",
+            sltp({"type": 0, "price_open": 2500.0, "sl": 2493.33, "tp": 0.0})
+            == {"tp": 2492.66, "sl": 0.0})
+    _inline(_ab_1561)
 
     # Snapshot-Parser v5: Entry/SL/TP werden gelesen, alte 6-Feld-Zeilen
     # degradieren auf None (nie 0 — 'Beweis oder leer').
-    import tempfile as _tf
-    with _tf.TemporaryDirectory() as _td:
-        _v5 = os.path.join(_td, "v5.csv")
-        with open(_v5, "w") as f:
-            f.write("PROPHOS1;7;123;400001;Srv;2;1;10000.00;10000.00;USD;1\n"
-                    "P;101;NAS100;0;1.00000000;1.00000000;20000.00000000;19900.00000000;20200.00000000\n"
-                    "END;7;1\n")
-        _alt = os.path.join(_td, "alt.csv")
-        with open(_alt, "w") as f:
-            f.write("PROPHOS1;3;123;400001;Srv;2;1\n"
-                    "P;102;NAS100;0;1.00000000;1.00000000\n"
-                    "END;3;1\n")
-        s5 = read_snapshot(_v5)
-        sa = read_snapshot(_alt)
-        chk("SNAPSHOT v5: Entry/SL/TP aus der P-Zeile gelesen",
-            s5 is not None and s5["positions"][0]["price_open"] == 20000.0
-            and s5["positions"][0]["sl"] == 19900.0 and s5["positions"][0]["tp"] == 20200.0)
-        chk("SNAPSHOT alt (6 Felder): price_open/sl/tp bleiben None, Rest liest normal",
-            sa is not None and sa["positions"][0]["volume"] == 1.0
-            and sa["positions"][0]["price_open"] is None and sa["positions"][0]["sl"] is None)
+    def _ab_1567():   # ST2: Inline-Prüfung ab Zeile 1567 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _alt, _td, f
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as _td:
+            _v5 = os.path.join(_td, "v5.csv")
+            with open(_v5, "w") as f:
+                f.write("PROPHOS1;7;123;400001;Srv;2;1;10000.00;10000.00;USD;1\n"
+                        "P;101;NAS100;0;1.00000000;1.00000000;20000.00000000;19900.00000000;20200.00000000\n"
+                        "END;7;1\n")
+            _alt = os.path.join(_td, "alt.csv")
+            with open(_alt, "w") as f:
+                f.write("PROPHOS1;3;123;400001;Srv;2;1\n"
+                        "P;102;NAS100;0;1.00000000;1.00000000\n"
+                        "END;3;1\n")
+            s5 = read_snapshot(_v5)
+            sa = read_snapshot(_alt)
+            chk("SNAPSHOT v5: Entry/SL/TP aus der P-Zeile gelesen",
+                s5 is not None and s5["positions"][0]["price_open"] == 20000.0
+                and s5["positions"][0]["sl"] == 19900.0 and s5["positions"][0]["tp"] == 20200.0)
+            chk("SNAPSHOT alt (6 Felder): price_open/sl/tp bleiben None, Rest liest normal",
+                sa is not None and sa["positions"][0]["volume"] == 1.0
+                and sa["positions"][0]["price_open"] is None and sa["positions"][0]["sl"] is None)
+    _inline(_ab_1567)
 
     # Notfall-Close-Klassifizierung: nur Broker-SL/TP-Fills (DEAL_REASON 4/5)
     # auf OUT-Deals zaehlen — Hand-Close (REASON_CLIENT=0) und Stop-Out
     # (REASON_SO=6) bleiben 'extern', schon verbuchte Deals nie doppelt.
-    from types import SimpleNamespace as _NS
-    _deals = [
-        _NS(ticket=1, entry=1, reason=4),   # SL-Fill  → Notfall
-        _NS(ticket=2, entry=1, reason=5),   # TP-Fill  → Notfall
-        _NS(ticket=3, entry=1, reason=0),   # Hand     → extern
-        _NS(ticket=4, entry=1, reason=6),   # Stop-Out → extern
-        _NS(ticket=5, entry=0, reason=4),   # IN-Deal  → nie
-        _NS(ticket=6, entry=1, reason=5),   # schon verbucht
-    ]
-    _nf = find_notfall_deals(_deals, {6}, out_entries=(1, 2), reason_sl=4, reason_tp=5)
-    chk("NOTFALL-CLOSE: SL/TP-Fills erkannt, Hand/Stop-Out/IN/verbucht aussortiert",
-        [d.ticket for d in _nf] == [1, 2])
-    chk("NOTFALL-CLOSE: leere/None-Deal-Liste → leer",
-        find_notfall_deals(None, set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == []
-        and find_notfall_deals([], set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == [])
+    def _ab_1591():   # ST2: Inline-Prüfung ab Zeile 1591 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal d
+        from types import SimpleNamespace as _NS
+        _deals = [
+            _NS(ticket=1, entry=1, reason=4),   # SL-Fill  → Notfall
+            _NS(ticket=2, entry=1, reason=5),   # TP-Fill  → Notfall
+            _NS(ticket=3, entry=1, reason=0),   # Hand     → extern
+            _NS(ticket=4, entry=1, reason=6),   # Stop-Out → extern
+            _NS(ticket=5, entry=0, reason=4),   # IN-Deal  → nie
+            _NS(ticket=6, entry=1, reason=5),   # schon verbucht
+        ]
+        _nf = find_notfall_deals(_deals, {6}, out_entries=(1, 2), reason_sl=4, reason_tp=5)
+        chk("NOTFALL-CLOSE: SL/TP-Fills erkannt, Hand/Stop-Out/IN/verbucht aussortiert",
+            [d.ticket for d in _nf] == [1, 2])
+    _inline(_ab_1591)
+    def _ab_1603():   # ST2: Inline-Prüfung ab Zeile 1603 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("NOTFALL-CLOSE: leere/None-Deal-Liste → leer",
+            find_notfall_deals(None, set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == []
+            and find_notfall_deals([], set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == [])
+    _inline(_ab_1603)
 
     # ── Order-Bot: offene Terminal-Verbindung (31.08.2026, Finns Tempo-Frage) ──
     # Gegen ein FAKE-MetaTrader5 statt gegen Vermutungen: die eine Zahl, um die
@@ -1610,7 +2059,10 @@ def main():
     # Terminal kostet auf den PCs 0,5-2 s, sechs davon waren Finns Pausen.
     # Das echte Paket gibt es auf dem Mac nicht; die Attrappe reicht, weil hier
     # NUR das Verbindungs-Verhalten geprueft wird, nicht MT5 selbst.
-    import types as _types
+    def _ab_1613():   # ST2: Inline-Prüfung ab Zeile 1613 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _types
+        import types as _types
+    _inline(_ab_1613)
 
     class _FakeMT5:
         def __init__(self):
@@ -1650,46 +2102,49 @@ def main():
         order_bot._api_stat_reset()
         return fake
 
-    _P = r"C:\MT5\terminal64.exe"
-    try:
-        fk = _fake_an()
-        for _ in range(6):
+    def _ab_1653():   # ST2: Inline-Prüfung ab Zeile 1653 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _P
+        _P = r"C:\MT5\terminal64.exe"
+        try:
+            fk = _fake_an()
+            for _ in range(6):
+                _r = order_bot._api_lesen(_P, 10000001)
+            chk("ORDER-BOT: 6 Lesevorgaenge docken nur EINMAL an (vorher 6x)",
+                fk.init_calls == 1 and fk.shutdown_calls == 0 and "positionen" in _r)
+            chk("ORDER-BOT: Spur weist die API-Bilanz aus",
+                "API-Lesen 6x" in order_bot._spur(["X"]))
+            order_bot._api_trennen()
+            order_bot._api_lesen(_P, 10000001)
+            chk("ORDER-BOT: nach _api_trennen wird frisch angedockt",
+                fk.shutdown_calls == 1 and fk.init_calls == 2)
+
+            fk = _fake_an()
+            order_bot._api_lesen(_P, 10000001)
+            fk.ai_none_mal = 1                      # Verbindung stirbt mittendrin
             _r = order_bot._api_lesen(_P, 10000001)
-        chk("ORDER-BOT: 6 Lesevorgaenge docken nur EINMAL an (vorher 6x)",
-            fk.init_calls == 1 and fk.shutdown_calls == 0 and "positionen" in _r)
-        chk("ORDER-BOT: Spur weist die API-Bilanz aus",
-            "API-Lesen 6x" in order_bot._spur(["X"]))
-        order_bot._api_trennen()
-        order_bot._api_lesen(_P, 10000001)
-        chk("ORDER-BOT: nach _api_trennen wird frisch angedockt",
-            fk.shutdown_calls == 1 and fk.init_calls == 2)
+            chk("ORDER-BOT: Verbindungsabriss → genau ein Wiederanlauf, Lesen klappt",
+                "positionen" in _r and fk.init_calls == 2)
 
-        fk = _fake_an()
-        order_bot._api_lesen(_P, 10000001)
-        fk.ai_none_mal = 1                      # Verbindung stirbt mittendrin
-        _r = order_bot._api_lesen(_P, 10000001)
-        chk("ORDER-BOT: Verbindungsabriss → genau ein Wiederanlauf, Lesen klappt",
-            "positionen" in _r and fk.init_calls == 2)
+            fk = _fake_an(); fk.init_ok = False
+            _r = order_bot._api_lesen(_P, 10000001)
+            chk("ORDER-BOT: Terminal weg → Fehlertext wie bisher, hoechstens 2 Versuche",
+                _r.get("fehler", "").startswith("Terminal-Verbindung") and fk.init_calls == 2)
 
-        fk = _fake_an(); fk.init_ok = False
-        _r = order_bot._api_lesen(_P, 10000001)
-        chk("ORDER-BOT: Terminal weg → Fehlertext wie bisher, hoechstens 2 Versuche",
-            _r.get("fehler", "").startswith("Terminal-Verbindung") and fk.init_calls == 2)
+            fk = _fake_an(); fk.login = 999999
+            _r = order_bot._api_lesen(_P, 10000001)
+            chk("ORDER-BOT: falsches Konto bleibt harter Riegel (kein Wiederanlauf)",
+                "FALSCHEN Konto" in _r.get("fehler", "") and fk.init_calls == 1)
 
-        fk = _fake_an(); fk.login = 999999
-        _r = order_bot._api_lesen(_P, 10000001)
-        chk("ORDER-BOT: falsches Konto bleibt harter Riegel (kein Wiederanlauf)",
-            "FALSCHEN Konto" in _r.get("fehler", "") and fk.init_calls == 1)
-
-        fk = _fake_an()
-        order_bot._api_lesen(r"C:\MT5-A\terminal64.exe", 10000001)
-        order_bot._api_lesen(r"C:\MT5-B\terminal64.exe", 10000001)
-        chk("ORDER-BOT: Pfadwechsel haengt sauber um (trennen, neu andocken)",
-            fk.init_calls == 2 and fk.shutdown_calls == 1)
-    finally:
-        sys.modules.pop("MetaTrader5", None)
-        order_bot._MT5_PFAD = None
-        order_bot._api_stat_reset()
+            fk = _fake_an()
+            order_bot._api_lesen(r"C:\MT5-A\terminal64.exe", 10000001)
+            order_bot._api_lesen(r"C:\MT5-B\terminal64.exe", 10000001)
+            chk("ORDER-BOT: Pfadwechsel haengt sauber um (trennen, neu andocken)",
+                fk.init_calls == 2 and fk.shutdown_calls == 1)
+        finally:
+            sys.modules.pop("MetaTrader5", None)
+            order_bot._MT5_PFAD = None
+            order_bot._api_stat_reset()
+    _inline(_ab_1653)
 
     # ── Order-Bot: SL/TP-Feld — Ausnahme sichtbar + Klick-Anlauf (31.08.2026) ──
     # Finns Fall: "5x geklappt, beim 6. nicht", und die Spur endete stumm mit
@@ -1735,274 +2190,345 @@ def main():
         def get_value(self):
             return self.inhalt
 
-    _rahmen = _types.SimpleNamespace(rectangle=lambda: _FakeRect(0, 0, 500, 400))
-    _echt_klick, _echt_warte = order_bot._klick_absolut, order_bot._warte
-    _klicks = []
-    order_bot._klick_absolut = lambda x, y, **kw: (_klicks.append((x, y)) or True)
-    order_bot._warte = lambda a, b: None
-    try:
-        _sp = []
-        _f = _FakeFeld(heilt_ab=99)          # Feld nimmt nie Fokus an
-        _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
-        chk("ORDER-BOT: SL-Fehlschlag nennt jetzt den GRUND statt nur 'NICHT uebernommen'",
-            _ok is False
-            and any("SL-Versuch 1 abgebrochen: RuntimeError" in z for z in _sp)
-            and any("SL NICHT uebernommen" in z for z in _sp))
+    def _ab_1738():   # ST2: Inline-Prüfung ab Zeile 1738 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _f, _sp, z
+        _rahmen = _types.SimpleNamespace(rectangle=lambda: _FakeRect(0, 0, 500, 400))
+        _echt_klick, _echt_warte = order_bot._klick_absolut, order_bot._warte
+        _klicks = []
+        order_bot._klick_absolut = lambda x, y, **kw: (_klicks.append((x, y)) or True)
+        order_bot._warte = lambda a, b: None
+        try:
+            _sp = []
+            _f = _FakeFeld(heilt_ab=99)          # Feld nimmt nie Fokus an
+            _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+            chk("ORDER-BOT: SL-Fehlschlag nennt jetzt den GRUND statt nur 'NICHT uebernommen'",
+                _ok is False
+                and any("SL-Versuch 1 abgebrochen: RuntimeError" in z for z in _sp)
+                and any("SL NICHT uebernommen" in z for z in _sp))
 
-        _sp, _klicks[:] = [], []
-        _f = _FakeFeld(heilt_ab=2)           # zweiter Anlauf klappt
-        _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
-        chk("ORDER-BOT: zweiter Anlauf klickt ins Feld und traegt den Wert ein",
-            _ok is True and len(_klicks) == 1
-            and any("SL-Feld angeklickt (Versuch 2)" in z for z in _sp)
-            and _f.inhalt == "29311.07")
+            _sp, _klicks[:] = [], []
+            _f = _FakeFeld(heilt_ab=2)           # zweiter Anlauf klappt
+            _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+            chk("ORDER-BOT: zweiter Anlauf klickt ins Feld und traegt den Wert ein",
+                _ok is True and len(_klicks) == 1
+                and any("SL-Feld angeklickt (Versuch 2)" in z for z in _sp)
+                and _f.inhalt == "29311.07")
 
-        _sp, _klicks[:] = [], []
-        _f = _FakeFeld(heilt_ab=2, rect=(900, 900, 980, 920))   # ausserhalb
-        order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
-        chk("ORDER-BOT: Feld ausserhalb des Dialogs wird NICHT blind geklickt",
-            not _klicks and any("ausserhalb des Dialogs" in z for z in _sp))
-    finally:
-        order_bot._klick_absolut, order_bot._warte = _echt_klick, _echt_warte
+            _sp, _klicks[:] = [], []
+            _f = _FakeFeld(heilt_ab=2, rect=(900, 900, 980, 920))   # ausserhalb
+            order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+            chk("ORDER-BOT: Feld ausserhalb des Dialogs wird NICHT blind geklickt",
+                not _klicks and any("ausserhalb des Dialogs" in z for z in _sp))
+        finally:
+            order_bot._klick_absolut, order_bot._warte = _echt_klick, _echt_warte
+    _inline(_ab_1738)
 
     # ── Order-Bot: Anker-Merge + Stempel-Spur (01.09.2026, Tempo-Umbau) ────
     # Der Handel-Tab speichert seinen Klickpunkt jetzt in DERSELBEN Anker-Datei
     # wie der Zeilen-Scan. Geprueft wird genau der Unfall, der ohne Merge
     # passiert waere: ein Zeilen-Treffer (SL/TP oder Close) wischt den
     # Tab-Punkt weg — und umgekehrt.
-    import tempfile as _tempfile
-    with _tempfile.TemporaryDirectory() as _td:
-        _ap = os.path.join(_td, "anker-config.json")
-        chk("ORDER-BOT: Anker-Lesen ohne Datei → leeres dict, kein Fehler",
-            order_bot._anker_lesen(_ap) == {} and order_bot._anker_lesen(None) == {})
-        order_bot._anker_schreiben(_ap, x_frac=0.4, y_off=316)
-        order_bot._anker_schreiben(_ap, handel_x_off=61, handel_y_off=42)
-        order_bot._anker_schreiben(_ap, x_frac=0.5, y_off=300)
-        _a = order_bot._anker_lesen(_ap)
-        chk("ORDER-BOT: Anker-Schreiben MERGED — Tab-Punkt ueberlebt den Zeilen-Treffer",
-            _a.get("x_frac") == 0.5 and _a.get("y_off") == 300
-            and _a.get("handel_x_off") == 61 and _a.get("handel_y_off") == 42)
-        # None loescht (02.09.2026, Belastung-Fehlklick): ein verworfener
-        # Tab-Punkt muss WIRKLICH aus der Datei — sonst klickt der naechste
-        # Lauf denselben Fehlpunkt, waehrend der Zeilen-Anker bleiben soll.
-        order_bot._anker_schreiben(_ap, handel_x_off=None, handel_y_off=None,
-                                   handel_x_frac=None)
-        _a = order_bot._anker_lesen(_ap)
-        chk("ORDER-BOT: Anker-Wert None LOESCHT den Schluessel, Rest bleibt",
-            "handel_x_off" not in _a and "handel_y_off" not in _a
-            and _a.get("x_frac") == 0.5 and _a.get("y_off") == 300)
-        with open(_ap, "w", encoding="utf-8") as _f:
-            _f.write("kaputt{")
-        chk("ORDER-BOT: kaputte Anker-Datei → leeres dict statt Absturz",
-            order_bot._anker_lesen(_ap) == {})
+    def _ab_1773():   # ST2: Inline-Prüfung ab Zeile 1773 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _f, _td
+        import tempfile as _tempfile
+        with _tempfile.TemporaryDirectory() as _td:
+            _ap = os.path.join(_td, "anker-config.json")
+            chk("ORDER-BOT: Anker-Lesen ohne Datei → leeres dict, kein Fehler",
+                order_bot._anker_lesen(_ap) == {} and order_bot._anker_lesen(None) == {})
+            order_bot._anker_schreiben(_ap, x_frac=0.4, y_off=316)
+            order_bot._anker_schreiben(_ap, handel_x_off=61, handel_y_off=42)
+            order_bot._anker_schreiben(_ap, x_frac=0.5, y_off=300)
+            _a = order_bot._anker_lesen(_ap)
+            chk("ORDER-BOT: Anker-Schreiben MERGED — Tab-Punkt ueberlebt den Zeilen-Treffer",
+                _a.get("x_frac") == 0.5 and _a.get("y_off") == 300
+                and _a.get("handel_x_off") == 61 and _a.get("handel_y_off") == 42)
+            # None loescht (02.09.2026, Belastung-Fehlklick): ein verworfener
+            # Tab-Punkt muss WIRKLICH aus der Datei — sonst klickt der naechste
+            # Lauf denselben Fehlpunkt, waehrend der Zeilen-Anker bleiben soll.
+            order_bot._anker_schreiben(_ap, handel_x_off=None, handel_y_off=None,
+                                       handel_x_frac=None)
+            _a = order_bot._anker_lesen(_ap)
+            chk("ORDER-BOT: Anker-Wert None LOESCHT den Schluessel, Rest bleibt",
+                "handel_x_off" not in _a and "handel_y_off" not in _a
+                and _a.get("x_frac") == 0.5 and _a.get("y_off") == 300)
+            with open(_ap, "w", encoding="utf-8") as _f:
+                _f.write("kaputt{")
+            chk("ORDER-BOT: kaputte Anker-Datei → leeres dict statt Absturz",
+                order_bot._anker_lesen(_ap) == {})
+    _inline(_ab_1773)
 
-    _sp = order_bot._StempelSpur()
-    _sp.append("Terminal betreten")
-    _sp.append("F9-Dialog offen")
-    chk("ORDER-BOT: Stempel-Spur traegt Sekunden pro Station, _spur liest sie wie bisher",
-        all("s·" in z for z in _sp) and _sp[0].endswith("Terminal betreten")
-        and "Terminal betreten → " in order_bot._spur(_sp))
+    def _ab_1799():   # ST2: Inline-Prüfung ab Zeile 1799 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _sp, z
+        _sp = order_bot._StempelSpur()
+        _sp.append("Terminal betreten")
+        _sp.append("F9-Dialog offen")
+        chk("ORDER-BOT: Stempel-Spur traegt Sekunden pro Station, _spur liest sie wie bisher",
+            all("s·" in z for z in _sp) and _sp[0].endswith("Terminal betreten")
+            and "Terminal betreten → " in order_bot._spur(_sp))
+    _inline(_ab_1799)
 
     # Spur-Wache (Routine „Puls-Fehler" 23.10.2026, Muster „v2order: order-bot timeout (#)", 5× auf 3 PCs, trail immer leer):
     # feuert nach der Frist mit der BIS DAHIN gesammelten Spur (Daemon-Faden, B17-Weg), vorher nie; Echo-Order und Close hängen sie
     # direkt an die Stempel-Spur, die Frist liegt klar unter dem 300-s-Deckel des Panels.
-    _gesendet = []
-    _alt_ds = order_bot._puls_diagnose_senden
-    order_bot._puls_diagnose_senden = lambda spur=None, schritt="": _gesendet.append((list(spur or []), schritt))
-    try:
-        _sw = order_bot._StempelSpur()
-        _sw.append("Login/Lesen ok")
-        _t = order_bot._spur_wache(_sw, "v2order_zeit", nach_s=0.05)
-        _sw.append("Terminal betreten")
-        _t.join(3.0)
-        chk("ORDER-BOT: Spur-Wache schickt nach der Frist die bis dahin gesammelte Spur (alle Stationen) im Daemon-Faden",
-            _t is not None and _t.daemon and len(_gesendet) == 1 and _gesendet[0][1] == "v2order_zeit"
-            and any(z.endswith("Terminal betreten") for z in _gesendet[0][0]) and any("Spur-Wache" in z for z in _gesendet[0][0]))
-        _t2 = order_bot._spur_wache(order_bot._StempelSpur(), "v2order_zeit", nach_s=60.0)
-        _t2.cancel()
-        import inspect as _insp_sw
-        _src_run, _src_close = _insp_sw.getsource(order_bot.run), _insp_sw.getsource(order_bot.run_close)
-        chk("ORDER-BOT: Spur-Wache feuert nicht vor der Frist; Echo-Order + Close hängen sie an die Spur, Frist unter dem Panel-Deckel",
-            len(_gesendet) == 1 and 120.0 <= order_bot.SPUR_WACHE_S <= 270.0
-            and '_spur_wache(trail, "v2order_zeit")' in _src_run and _src_run.index("_StempelSpur()") < _src_run.index("_spur_wache(trail")
-            and '_spur_wache(trail, "close_zeit")' in _src_close and _src_close.index("_StempelSpur()") < _src_close.index("_spur_wache(trail"))
-    finally:
-        order_bot._puls_diagnose_senden = _alt_ds
+    def _ab_1809():   # ST2: Inline-Prüfung ab Zeile 1809 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _sw, z
+        _gesendet = []
+        _alt_ds = order_bot._puls_diagnose_senden
+        order_bot._puls_diagnose_senden = lambda spur=None, schritt="": _gesendet.append((list(spur or []), schritt))
+        try:
+            _sw = order_bot._StempelSpur()
+            _sw.append("Login/Lesen ok")
+            _t = order_bot._spur_wache(_sw, "v2order_zeit", nach_s=0.05)
+            _sw.append("Terminal betreten")
+            _t.join(3.0)
+            chk("ORDER-BOT: Spur-Wache schickt nach der Frist die bis dahin gesammelte Spur (alle Stationen) im Daemon-Faden",
+                _t is not None and _t.daemon and len(_gesendet) == 1 and _gesendet[0][1] == "v2order_zeit"
+                and any(z.endswith("Terminal betreten") for z in _gesendet[0][0]) and any("Spur-Wache" in z for z in _gesendet[0][0]))
+            _t2 = order_bot._spur_wache(order_bot._StempelSpur(), "v2order_zeit", nach_s=60.0)
+            _t2.cancel()
+            import inspect as _insp_sw
+            _src_run, _src_close = _insp_sw.getsource(order_bot.run), _insp_sw.getsource(order_bot.run_close)
+            chk("ORDER-BOT: Spur-Wache feuert nicht vor der Frist; Echo-Order + Close hängen sie an die Spur, Frist unter dem Panel-Deckel",
+                len(_gesendet) == 1 and 120.0 <= order_bot.SPUR_WACHE_S <= 270.0
+                and '_spur_wache(trail, "v2order_zeit")' in _src_run and _src_run.index("_StempelSpur()") < _src_run.index("_spur_wache(trail")
+                and '_spur_wache(trail, "close_zeit")' in _src_close and _src_close.index("_StempelSpur()") < _src_close.index("_spur_wache(trail"))
+        finally:
+            order_bot._puls_diagnose_senden = _alt_ds
+    _inline(_ab_1809)
 
     # Abriss im Lesepfad (25.10.2026, Routine Puls-Fehler, Muster „endlesung/konto_balance: cdp_fehler: … ConnectionAbortedError
     # [WinError 10053]"): zweiter Lesedurchlauf nur im 1. Durchlauf, nur bei einem Abriss, nur rechtzeitig — und modus_tvlesen_cdp
     # sichert die Spur per B17, bevor sie der Tab auf 2000 Zeichen kürzt
-    _taz = order_bot.tvlesen_abriss_zweiter
-    chk("ORDER-BOT: Lesung — Abriss (WinError 10053) im 1. Durchlauf nach 25 s → zweiter Lesedurchlauf",
-        _taz(1, "ConnectionAbortedError: [WinError 10053] Eine bestehende Verbindung wurde softwaregesteuert abgebrochen", 25.0)[0] is True
-        and _taz(1, "ConnectionResetError: [WinError 10054] x", 60.0)[0] is True)
-    chk("ORDER-BOT: Lesung — kein zweiter Durchlauf im 2. Durchlauf, bei einem Sachfehler oder zu spät (> 120 s)",
-        _taz(2, "ConnectionAbortedError: [WinError 10053]", 40.0)[0] is False
-        and _taz(1, "KeyError: 'konto'", 10.0)[0] is False
-        and _taz(1, "TimeoutError: timed out", 10.0)[0] is False
-        and _taz(1, "ConnectionAbortedError: [WinError 10053]", 130.0)[0] is False)
-    import inspect as _insp_tl
-    _src_tl = _insp_tl.getsource(order_bot.modus_tvlesen_cdp)
-    chk("ORDER-BOT: Lesung — modus_tvlesen_cdp läuft höchstens zweimal (for durchlauf in (1, 2)), B17-Spur 'tvlesen_abriss', neu anhängen statt Chrome-Neustart",
-        "for durchlauf in (1, 2):" in _src_tl and '"tvlesen_abriss"' in _src_tl and "tvlesen_abriss_zweiter(durchlauf" in _src_tl
-        and "_puls_verbindung_neu_anhaengen(trail" in _src_tl and "_puls_chrome_neustart" not in _src_tl)
+    def _ab_1835():   # ST2: Inline-Prüfung ab Zeile 1835 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _taz
+        _taz = order_bot.tvlesen_abriss_zweiter
+        chk("ORDER-BOT: Lesung — Abriss (WinError 10053) im 1. Durchlauf nach 25 s → zweiter Lesedurchlauf",
+            _taz(1, "ConnectionAbortedError: [WinError 10053] Eine bestehende Verbindung wurde softwaregesteuert abgebrochen", 25.0)[0] is True
+            and _taz(1, "ConnectionResetError: [WinError 10054] x", 60.0)[0] is True)
+    _inline(_ab_1835)
+    def _ab_1839():   # ST2: Inline-Prüfung ab Zeile 1839 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Lesung — kein zweiter Durchlauf im 2. Durchlauf, bei einem Sachfehler oder zu spät (> 120 s)",
+            _taz(2, "ConnectionAbortedError: [WinError 10053]", 40.0)[0] is False
+            and _taz(1, "KeyError: 'konto'", 10.0)[0] is False
+            and _taz(1, "TimeoutError: timed out", 10.0)[0] is False
+            and _taz(1, "ConnectionAbortedError: [WinError 10053]", 130.0)[0] is False)
+    _inline(_ab_1839)
+    def _ab_1844():   # ST2: Inline-Prüfung ab Zeile 1844 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        import inspect as _insp_tl
+        _src_tl = _insp_tl.getsource(order_bot.modus_tvlesen_cdp)
+        chk("ORDER-BOT: Lesung — modus_tvlesen_cdp läuft höchstens zweimal (for durchlauf in (1, 2)), B17-Spur 'tvlesen_abriss', neu anhängen statt Chrome-Neustart",
+            "for durchlauf in (1, 2):" in _src_tl and '"tvlesen_abriss"' in _src_tl and "tvlesen_abriss_zweiter(durchlauf" in _src_tl
+            and "_puls_verbindung_neu_anhaengen(trail" in _src_tl and "_puls_chrome_neustart" not in _src_tl)
+    _inline(_ab_1844)
 
     # UAC-/Update-Hinweis (02.09.2026): NUR bei Terminal-nicht-erreichbar, nie
     # bei Konto-/Symbol-Sachfehlern — sonst schickt er Finn an den PC, obwohl
     # gar keine Windows-Abfrage offen ist.
-    chk("ORDER-BOT: UAC-Hinweis bei Verbindungsfehler, nicht bei Konto/Symbol",
-        order_bot._ist_verbindungsfehler("Terminal-Verbindung fehlgeschlagen: (-1, 'x')")
-        and order_bot._ist_verbindungsfehler("Kein Konto verbunden (account_info leer).")
-        and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 10000001).")
-        and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
+    def _ab_1853():   # ST2: Inline-Prüfung ab Zeile 1853 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: UAC-Hinweis bei Verbindungsfehler, nicht bei Konto/Symbol",
+            order_bot._ist_verbindungsfehler("Terminal-Verbindung fehlgeschlagen: (-1, 'x')")
+            and order_bot._ist_verbindungsfehler("Kein Konto verbunden (account_info leer).")
+            and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 10000001).")
+            and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
+    _inline(_ab_1853)
 
     # Verbindungsfehler-Ursache (16.10.2026, Muster „v2order: terminal-verbindung fehlgeschlagen: (-# 'ipc timeout')", 16× auf 4 PCs):
     # eine festgestellte Ursache statt „Evtl. Windows-Abfrage"
-    _vu = order_bot.verbindung_ursache
-    _tp = "C:\\MT5-X\\terminal64.exe"
-    _K = order_bot.MT5_KLASSE
-    _term = {"pid": 7, "name": "terminal64.exe", "pfad": _tp}
-    _haupt = {"pid": 7, "titel": "10000001 - FundedNext", "klasse": _K, "sichtbar": True, "haengt": False}
-    chk("ORDER-BOT: Verbindung — Sicherheitsabfrage offen (consent.exe) geht vor",
-        _vu(_tp, [_term, {"pid": 9, "name": "consent.exe", "pfad": ""}], [_haupt])[0] == "uac_offen")
-    chk("ORDER-BOT: Verbindung — liveupdate läuft → Update",
-        _vu(_tp, [_term, {"pid": 8, "name": "terminal64.exe", "pfad": "C:\\Users\\x\\AppData\\Roaming\\MetaQuotes\\Terminal\\AB\\liveupdate\\terminal64.exe"}], [_haupt])[0] == "update_laeuft")
-    chk("ORDER-BOT: Verbindung — Terminal dieses Pfads läuft nicht",
-        _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": "C:\\MT5-Y\\terminal64.exe"}], [])[0] == "terminal_aus")
-    chk("ORDER-BOT: Verbindung — Pfade nicht lesbar → unbekannt, nie „läuft nicht“",
-        _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": ""}], [])[0] == "unbekannt")
-    chk("ORDER-BOT: Verbindung — Hauptfenster hängt",
-        _vu(_tp, [_term], [dict(_haupt, haengt=True)])[0] == "haengt")
-    _vd = _vu(_tp, [_term], [_haupt, {"pid": 7, "titel": "Einloggen", "klasse": "#32770", "sichtbar": True, "haengt": False}])
-    chk("ORDER-BOT: Verbindung — Dialog im Terminal offen, Titel genannt", _vd[0] == "dialog_offen" and "Einloggen" in _vd[1])
-    chk("ORDER-BOT: Verbindung — läuft ohne sichtbares Hauptfenster",
-        _vu(_tp, [_term], [dict(_haupt, sichtbar=False)])[0] == "ohne_fenster")
-    _va = _vu(_tp, [_term], [_haupt, {"pid": 99, "titel": "Fremd", "klasse": "X", "sichtbar": True, "haengt": False},
-                              {"pid": 7, "titel": "NAS100,M1", "klasse": "MetaQuotes::MetaTrader::5.00::Chart", "sichtbar": True, "haengt": False}])
-    chk("ORDER-BOT: Verbindung — läuft, reagiert, antwortet nicht; fremde Fenster zählen nicht",
-        _va[0] == "antwortet_nicht" and "→" in _va[1] and " oder " not in _va[1])
+    def _ab_1861():   # ST2: Inline-Prüfung ab Zeile 1861 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _K, _haupt, _term, _tp, _vu
+        _vu = order_bot.verbindung_ursache
+        _tp = "C:\\MT5-X\\terminal64.exe"
+        _K = order_bot.MT5_KLASSE
+        _term = {"pid": 7, "name": "terminal64.exe", "pfad": _tp}
+        _haupt = {"pid": 7, "titel": "10000001 - FundedNext", "klasse": _K, "sichtbar": True, "haengt": False}
+        chk("ORDER-BOT: Verbindung — Sicherheitsabfrage offen (consent.exe) geht vor",
+            _vu(_tp, [_term, {"pid": 9, "name": "consent.exe", "pfad": ""}], [_haupt])[0] == "uac_offen")
+    _inline(_ab_1861)
+    def _ab_1868():   # ST2: Inline-Prüfung ab Zeile 1868 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Verbindung — liveupdate läuft → Update",
+            _vu(_tp, [_term, {"pid": 8, "name": "terminal64.exe", "pfad": "C:\\Users\\x\\AppData\\Roaming\\MetaQuotes\\Terminal\\AB\\liveupdate\\terminal64.exe"}], [_haupt])[0] == "update_laeuft")
+    _inline(_ab_1868)
+    def _ab_1870():   # ST2: Inline-Prüfung ab Zeile 1870 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Verbindung — Terminal dieses Pfads läuft nicht",
+            _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": "C:\\MT5-Y\\terminal64.exe"}], [])[0] == "terminal_aus")
+    _inline(_ab_1870)
+    def _ab_1872():   # ST2: Inline-Prüfung ab Zeile 1872 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Verbindung — Pfade nicht lesbar → unbekannt, nie „läuft nicht“",
+            _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": ""}], [])[0] == "unbekannt")
+    _inline(_ab_1872)
+    def _ab_1874():   # ST2: Inline-Prüfung ab Zeile 1874 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Verbindung — Hauptfenster hängt",
+            _vu(_tp, [_term], [dict(_haupt, haengt=True)])[0] == "haengt")
+    _inline(_ab_1874)
+    def _ab_1876():   # ST2: Inline-Prüfung ab Zeile 1876 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _vd = _vu(_tp, [_term], [_haupt, {"pid": 7, "titel": "Einloggen", "klasse": "#32770", "sichtbar": True, "haengt": False}])
+        chk("ORDER-BOT: Verbindung — Dialog im Terminal offen, Titel genannt", _vd[0] == "dialog_offen" and "Einloggen" in _vd[1])
+    _inline(_ab_1876)
+    def _ab_1878():   # ST2: Inline-Prüfung ab Zeile 1878 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("ORDER-BOT: Verbindung — läuft ohne sichtbares Hauptfenster",
+            _vu(_tp, [_term], [dict(_haupt, sichtbar=False)])[0] == "ohne_fenster")
+    _inline(_ab_1878)
+    def _ab_1880():   # ST2: Inline-Prüfung ab Zeile 1880 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _va = _vu(_tp, [_term], [_haupt, {"pid": 99, "titel": "Fremd", "klasse": "X", "sichtbar": True, "haengt": False},
+                                  {"pid": 7, "titel": "NAS100,M1", "klasse": "MetaQuotes::MetaTrader::5.00::Chart", "sichtbar": True, "haengt": False}])
+        chk("ORDER-BOT: Verbindung — läuft, reagiert, antwortet nicht; fremde Fenster zählen nicht",
+            _va[0] == "antwortet_nicht" and "→" in _va[1] and " oder " not in _va[1])
+    _inline(_ab_1880)
 
     # ── Panel: Terminal-Zu-Entscheidung (03.09.2026) ───────────────────────
     # Geschlossen wird NUR bei frischem, warnungsfreiem Status ohne Position,
     # ohne Hedge und ohne aktiven Plan — jede einzelne Bedingung muss blocken.
-    import panel
-    _cfgT = {"master_terminal_path": "C:\\MT5-X\\terminal64.exe"}
-    _stOK = {"running": True, "master_positions": [], "hedges": {"1": []}}
-    # Hedge-Riegel (22.09.2026, Finn: "auf einmal oeffnet sich das Slave-Hedge-Terminal"):
-    # zeigt master_terminal_path in den Hedge-Ordner, wird NIE geschlossen.
-    _stZU = {"running": True, "master_positions": [], "hedges": {}}
-    _tsb = lambda m, h: panel.terminal_schliessbar({"master_terminal_path": m, "hedge_terminal_path": h}, _stZU, 5, None)[0]
-    chk("TERMINAL-ZU: Hedge-Installation wird nie geschlossen (Master- und Hedge-Pfad im selben Ordner), aehnliche Ordnernamen aber schon",
-        _tsb(r"C:\MT5-A\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
-        and _tsb(r"C:\MT5-Hedge\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is False
-        and _tsb(r"C:\MT5-Hedge2\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
-        and _tsb(r"C:\MT5-A\terminal64.exe", "") is True)
+    def _ab_1888():   # ST2: Inline-Prüfung ab Zeile 1888 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _cfgT, _stOK, panel
+        import panel
+        _cfgT = {"master_terminal_path": "C:\\MT5-X\\terminal64.exe"}
+        _stOK = {"running": True, "master_positions": [], "hedges": {"1": []}}
+        # Hedge-Riegel (22.09.2026, Finn: "auf einmal oeffnet sich das Slave-Hedge-Terminal"):
+        # zeigt master_terminal_path in den Hedge-Ordner, wird NIE geschlossen.
+        _stZU = {"running": True, "master_positions": [], "hedges": {}}
+        _tsb = lambda m, h: panel.terminal_schliessbar({"master_terminal_path": m, "hedge_terminal_path": h}, _stZU, 5, None)[0]
+        chk("TERMINAL-ZU: Hedge-Installation wird nie geschlossen (Master- und Hedge-Pfad im selben Ordner), aehnliche Ordnernamen aber schon",
+            _tsb(r"C:\MT5-A\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
+            and _tsb(r"C:\MT5-Hedge\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is False
+            and _tsb(r"C:\MT5-Hedge2\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
+            and _tsb(r"C:\MT5-A\terminal64.exe", "") is True)
+    _inline(_ab_1888)
 
     # Leerlauf-Waechter (22.09.2026): schliessen erst nach ununterbrochen leerem Lauf ab Schwelle
-    chk("TERMINAL-LEERLAUF: Zaehler startet beim ersten leeren Blick, schliesst ab Schwelle, jeder nicht-leere Blick setzt zurueck",
-        panel.leerlauf_entscheidung(True, None, 1000.0, 900) == (1000.0, False)
-        and panel.leerlauf_entscheidung(True, 1000.0, 1500.0, 900) == (1000.0, False)
-        and panel.leerlauf_entscheidung(True, 1000.0, 1900.0, 900) == (1000.0, True)
-        and panel.leerlauf_entscheidung(False, 1000.0, 1900.0, 900) == (None, False)
-        and panel.leerlauf_entscheidung(False, None, 1900.0, 900) == (None, False))
-    chk("PANEL: Terminal-Zu nur bei frischem Status ohne Position/Hedge/Plan",
-        panel.terminal_schliessbar(_cfgT, _stOK, 5, None)[0] is True
-        and panel.terminal_schliessbar(_cfgT, _stOK, 99, None)[0] is False
-        and panel.terminal_schliessbar(_cfgT, dict(_stOK, running=False), 5, None)[0] is False
-        and panel.terminal_schliessbar(_cfgT, dict(_stOK, master_positions=[{"i": 1}]), 5, None)[0] is False
-        and panel.terminal_schliessbar(_cfgT, dict(_stOK, hedges={"7": [{"ticket": 1}]}), 5, None)[0] is False
-        and panel.terminal_schliessbar(_cfgT, _stOK, 5, "geplant")[0] is False
-        and panel.terminal_schliessbar(_cfgT, _stOK, 5, "laufend")[0] is False
-        and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
-    chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
-        panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
+    def _ab_1902():   # ST2: Inline-Prüfung ab Zeile 1902 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("TERMINAL-LEERLAUF: Zaehler startet beim ersten leeren Blick, schliesst ab Schwelle, jeder nicht-leere Blick setzt zurueck",
+            panel.leerlauf_entscheidung(True, None, 1000.0, 900) == (1000.0, False)
+            and panel.leerlauf_entscheidung(True, 1000.0, 1500.0, 900) == (1000.0, False)
+            and panel.leerlauf_entscheidung(True, 1000.0, 1900.0, 900) == (1000.0, True)
+            and panel.leerlauf_entscheidung(False, 1000.0, 1900.0, 900) == (None, False)
+            and panel.leerlauf_entscheidung(False, None, 1900.0, 900) == (None, False))
+    _inline(_ab_1902)
+    def _ab_1908():   # ST2: Inline-Prüfung ab Zeile 1908 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("PANEL: Terminal-Zu nur bei frischem Status ohne Position/Hedge/Plan",
+            panel.terminal_schliessbar(_cfgT, _stOK, 5, None)[0] is True
+            and panel.terminal_schliessbar(_cfgT, _stOK, 99, None)[0] is False
+            and panel.terminal_schliessbar(_cfgT, dict(_stOK, running=False), 5, None)[0] is False
+            and panel.terminal_schliessbar(_cfgT, dict(_stOK, master_positions=[{"i": 1}]), 5, None)[0] is False
+            and panel.terminal_schliessbar(_cfgT, dict(_stOK, hedges={"7": [{"ticket": 1}]}), 5, None)[0] is False
+            and panel.terminal_schliessbar(_cfgT, _stOK, 5, "geplant")[0] is False
+            and panel.terminal_schliessbar(_cfgT, _stOK, 5, "laufend")[0] is False
+            and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
+    _inline(_ab_1908)
+    def _ab_1917():   # ST2: Inline-Prüfung ab Zeile 1917 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
+            panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
+    _inline(_ab_1917)
     # Echo V2 ohne Copier (30.09.2026, ID A): frischer Lese-EA-Snapshot ist der Beweis
-    _lese0 = {"lesen": True, "master_positions": []}
-    _stAlt = dict(_stOK, running=False)
-    chk("PANEL: Terminal-Zu ohne Copier nur mit frischem Lese-EA, ohne Position, ohne alten Hedge",
-        panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, _lese0)[0] is True
-        and panel.terminal_schliessbar(_cfgT, {}, None, None, _lese0)[0] is True
-        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, None)[0] is False
-        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, dict(_lese0, master_positions=[{"i": 1}]))[0] is False
-        and panel.terminal_schliessbar(_cfgT, dict(_stAlt, hedges={"7": [{"ticket": 1}]}), 999, None, _lese0)[0] is False
-        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, "laufend", _lese0)[0] is False
-        and panel.terminal_schliessbar({}, _stAlt, 999, None, _lese0)[0] is False)
+    def _ab_1920():   # ST2: Inline-Prüfung ab Zeile 1920 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        _lese0 = {"lesen": True, "master_positions": []}
+        _stAlt = dict(_stOK, running=False)
+        chk("PANEL: Terminal-Zu ohne Copier nur mit frischem Lese-EA, ohne Position, ohne alten Hedge",
+            panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, _lese0)[0] is True
+            and panel.terminal_schliessbar(_cfgT, {}, None, None, _lese0)[0] is True
+            and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, None)[0] is False
+            and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, dict(_lese0, master_positions=[{"i": 1}]))[0] is False
+            and panel.terminal_schliessbar(_cfgT, dict(_stAlt, hedges={"7": [{"ticket": 1}]}), 999, None, _lese0)[0] is False
+            and panel.terminal_schliessbar(_cfgT, _stAlt, 999, "laufend", _lese0)[0] is False
+            and panel.terminal_schliessbar({}, _stAlt, 999, None, _lese0)[0] is False)
+    _inline(_ab_1920)
     # Zufalls-Streuung: Auto-Zu wuerfelt 1-2 min (21.09.2026, vorher 1-60 min)
     # — nie sofort und nie im immer gleichen Abstand (waere selbst ein Muster).
-    _vz = [panel._zufalls_verzoegerung() for _ in range(200)]
-    chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 120 s",
-        all(60 <= v <= 120 for v in _vz) and len(set(round(v) for v in _vz)) > 10)
+    def _ab_1932():   # ST2: Inline-Prüfung ab Zeile 1932 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal v
+        _vz = [panel._zufalls_verzoegerung() for _ in range(200)]
+        chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 120 s",
+            all(60 <= v <= 120 for v in _vz) and len(set(round(v) for v in _vz)) > 10)
+    _inline(_ab_1932)
 
     # Zu-Auftrag ueberlebt den Panel-Neustart (21.09.2026): Trade-Ende schreibt
     # 'terminal_zu: offen' nach plans.json, der Panel-Start holt ihn nach, der
     # Worker loescht den Vermerk am Ende wieder.
-    _pf_alt, _zs_alt = panel.PLANS_FILE, panel._terminal_zu_starten
-    with tempfile.TemporaryDirectory() as _td:
-        try:
-            panel.PLANS_FILE = os.path.join(_td, "plans.json")
-            _gestartet = []
-            panel._terminal_zu_starten = lambda f, a: _gestartet.append((f, a))
-            panel._save_plans([{"id": 1, "file": "config.json", "name": "X", "multiplier": 1,
-                                "status": "laufend", "started_at": "x", "ended_at": None}])
-            panel.advance_plans([{"file": "config.json", "alive": True,
-                                  "status": {"running": True, "master_positions": []}}])
-            _pl = panel._load_plans()
-            chk("PANEL: Trade-Ende vermerkt den Terminal-Zu-Auftrag auf Platte und startet den Worker",
-                _pl[0]["status"] == "beendet" and _pl[0].get("terminal_zu") == "offen"
-                and _gestartet == [("config.json", "Trade-Ende")])
-            _gestartet.clear()
-            panel.terminal_zu_nachholen()
-            chk("PANEL: Panel-Start holt den offenen Terminal-Zu-Auftrag genau einmal nach",
-                len(_gestartet) == 1 and _gestartet[0][0] == "config.json")
-            panel._terminal_zu_erledigt("config.json")
-            _gestartet.clear()
-            panel.terminal_zu_nachholen()
-            chk("PANEL: erledigter Terminal-Zu-Auftrag wird nicht noch einmal nachgeholt",
-                _gestartet == [] and "terminal_zu" not in panel._load_plans()[0])
-        finally:
-            panel.PLANS_FILE, panel._terminal_zu_starten = _pf_alt, _zs_alt
+    def _ab_1939():   # ST2: Inline-Prüfung ab Zeile 1939 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _td
+        _pf_alt, _zs_alt = panel.PLANS_FILE, panel._terminal_zu_starten
+        with tempfile.TemporaryDirectory() as _td:
+            try:
+                panel.PLANS_FILE = os.path.join(_td, "plans.json")
+                _gestartet = []
+                panel._terminal_zu_starten = lambda f, a: _gestartet.append((f, a))
+                panel._save_plans([{"id": 1, "file": "config.json", "name": "X", "multiplier": 1,
+                                    "status": "laufend", "started_at": "x", "ended_at": None}])
+                panel.advance_plans([{"file": "config.json", "alive": True,
+                                      "status": {"running": True, "master_positions": []}}])
+                _pl = panel._load_plans()
+                chk("PANEL: Trade-Ende vermerkt den Terminal-Zu-Auftrag auf Platte und startet den Worker",
+                    _pl[0]["status"] == "beendet" and _pl[0].get("terminal_zu") == "offen"
+                    and _gestartet == [("config.json", "Trade-Ende")])
+                _gestartet.clear()
+                panel.terminal_zu_nachholen()
+                chk("PANEL: Panel-Start holt den offenen Terminal-Zu-Auftrag genau einmal nach",
+                    len(_gestartet) == 1 and _gestartet[0][0] == "config.json")
+                panel._terminal_zu_erledigt("config.json")
+                _gestartet.clear()
+                panel.terminal_zu_nachholen()
+                chk("PANEL: erledigter Terminal-Zu-Auftrag wird nicht noch einmal nachgeholt",
+                    _gestartet == [] and "terminal_zu" not in panel._load_plans()[0])
+            finally:
+                panel.PLANS_FILE, panel._terminal_zu_starten = _pf_alt, _zs_alt
+    _inline(_ab_1939)
 
     # ── Panel: Terminal-Zu nach Config-Loeschung (07.09.2026, Archiv-Auftrag) ──
     # Nach dem Loeschen einer Instanz darf NUR der eigene Master-Ordner
     # geschossen werden — nie das Hedge-Terminal, nie der Ordner einer anderen
     # Config. Pfade forward-slash, damit der Test auf Mac UND Windows laeuft.
-    _cfgL  = {"master_terminal_path": "/mt5/acc1/terminal64.exe",
-              "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
-    _fremd = {"master_terminal_path": "/mt5/acc2/terminal64.exe",
-              "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
-    chk("PANEL: Loesch-Terminal-Zu trifft den eigenen Master-Ordner",
-        panel.loesch_terminal_dir(_cfgL, [_fremd]) is not None
-        and panel.loesch_terminal_dir(_cfgL, []) is not None
-        and panel.loesch_terminal_dir(_cfgL, None) is not None)
-    chk("PANEL: Loesch-Terminal-Zu — ohne Master-Pfad (Orbit/TV) nie schiessen",
-        panel.loesch_terminal_dir({}, []) is None
-        and panel.loesch_terminal_dir({"master_terminal_path": "  "}, []) is None
-        and panel.loesch_terminal_dir(None, []) is None)
-    chk("PANEL: Loesch-Terminal-Zu — Master==Hedge-Ordner (Fehlkonfig) nie schiessen",
-        panel.loesch_terminal_dir({"master_terminal_path": "/mt5/hedge/terminal64.exe",
-                                   "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"},
-                                  []) is None)
-    chk("PANEL: Loesch-Terminal-Zu — Ordner einer ANDEREN Config nie schiessen",
-        panel.loesch_terminal_dir(_cfgL, [{"master_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None
-        and panel.loesch_terminal_dir(_cfgL, [{"hedge_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None)
+    def _ab_1969():   # ST2: Inline-Prüfung ab Zeile 1969 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _cfgL
+        _cfgL  = {"master_terminal_path": "/mt5/acc1/terminal64.exe",
+                  "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
+        _fremd = {"master_terminal_path": "/mt5/acc2/terminal64.exe",
+                  "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
+        chk("PANEL: Loesch-Terminal-Zu trifft den eigenen Master-Ordner",
+            panel.loesch_terminal_dir(_cfgL, [_fremd]) is not None
+            and panel.loesch_terminal_dir(_cfgL, []) is not None
+            and panel.loesch_terminal_dir(_cfgL, None) is not None)
+    _inline(_ab_1969)
+    def _ab_1977():   # ST2: Inline-Prüfung ab Zeile 1977 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("PANEL: Loesch-Terminal-Zu — ohne Master-Pfad (Orbit/TV) nie schiessen",
+            panel.loesch_terminal_dir({}, []) is None
+            and panel.loesch_terminal_dir({"master_terminal_path": "  "}, []) is None
+            and panel.loesch_terminal_dir(None, []) is None)
+    _inline(_ab_1977)
+    def _ab_1981():   # ST2: Inline-Prüfung ab Zeile 1981 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("PANEL: Loesch-Terminal-Zu — Master==Hedge-Ordner (Fehlkonfig) nie schiessen",
+            panel.loesch_terminal_dir({"master_terminal_path": "/mt5/hedge/terminal64.exe",
+                                       "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"},
+                                      []) is None)
+    _inline(_ab_1981)
+    def _ab_1985():   # ST2: Inline-Prüfung ab Zeile 1985 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("PANEL: Loesch-Terminal-Zu — Ordner einer ANDEREN Config nie schiessen",
+            panel.loesch_terminal_dir(_cfgL, [{"master_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None
+            and panel.loesch_terminal_dir(_cfgL, [{"hedge_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None)
+    _inline(_ab_1985)
 
     # ── Magic-Umzug 11.09.2026 (The5ers-Kollision von ID C — NUR 2 Accounts) ────
     # PC-uebergreifende magic-Kollision am gemeinsamen Hedge-Konto: fremder
     # Copier schloss die frischen Hedges sofort. Der Umzug darf ausschliesslich
     # die zwei benannten Master treffen und nie einen neuen Konflikt erzeugen.
-    _M1, _M2 = sorted(MAGIC_UMZUG)   # die zwei benannten Master — echte Logins stehen nur in der Logik-Tabelle (copier.py)
-    chk("Magic-Umzug trifft NUR die zwei benannten Master",
-        magic_umzug_ziel(_M1, 770005, set()) == 779215
-        and magic_umzug_ziel(_M2, 770006, set()) == 779216
-        and magic_umzug_ziel(10000004, 770007, set()) is None
-        and magic_umzug_ziel(0, 770005, set()) is None
-        and magic_umzug_ziel(None, 770005, set()) is None)
-    chk("Magic-Umzug ist idempotent und respektiert hoehere Bloecke",
-        magic_umzug_ziel(_M1, 779215, set()) is None
-        and magic_umzug_ziel(_M1, 771003, set()) is None)
-    chk("Magic-Umzug weicht belegtem Ziel aus (nie neuer lokaler Konflikt)",
-        magic_umzug_ziel(_M1, 770005, {779215}) is None
-        and magic_umzug_ziel(_M2, 770006, {779215}) == 779216)
+    def _ab_1993():   # ST2: Inline-Prüfung ab Zeile 1993 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal _M1, _M2
+        _M1, _M2 = sorted(MAGIC_UMZUG)   # die zwei benannten Master — echte Logins stehen nur in der Logik-Tabelle (copier.py)
+        chk("Magic-Umzug trifft NUR die zwei benannten Master",
+            magic_umzug_ziel(_M1, 770005, set()) == 779215
+            and magic_umzug_ziel(_M2, 770006, set()) == 779216
+            and magic_umzug_ziel(10000004, 770007, set()) is None
+            and magic_umzug_ziel(0, 770005, set()) is None
+            and magic_umzug_ziel(None, 770005, set()) is None)
+    _inline(_ab_1993)
+    def _ab_2000():   # ST2: Inline-Prüfung ab Zeile 2000 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("Magic-Umzug ist idempotent und respektiert hoehere Bloecke",
+            magic_umzug_ziel(_M1, 779215, set()) is None
+            and magic_umzug_ziel(_M1, 771003, set()) is None)
+    _inline(_ab_2000)
+    def _ab_2003():   # ST2: Inline-Prüfung ab Zeile 2003 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        chk("Magic-Umzug weicht belegtem Ziel aus (nie neuer lokaler Konflikt)",
+            magic_umzug_ziel(_M1, 770005, {779215}) is None
+            and magic_umzug_ziel(_M2, 770006, {779215}) == 779216)
+    _inline(_ab_2003)
 
     # ── Magic-Familie 11.09.2026 nachmittags (Erweiterung auf 760000-779999) ──
     # Die Flotte hatte alle Bestands-Bloecke 770000-776000 vergeben; erweitert
@@ -2011,10 +2537,13 @@ def main():
     # dass die Umzugs-Ziele in der Familie liegen — laegen sie draussen,
     # wuerden die umgezogenen Hedges von ID C auf jedem anderen PC als FREMDE
     # Position alarmiert.
-    chk("Magic-Familie: 760000-779999, Bestand + Umzugs-Reservat innerhalb",
-        FAMILIE_MIN == 760000 and FAMILIE_MAX == 779999
-        and all(FAMILIE_MIN <= z <= FAMILIE_MAX for z in MAGIC_UMZUG.values())
-        and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
+    def _ab_2014():   # ST2: Inline-Prüfung ab Zeile 2014 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
+        nonlocal z
+        chk("Magic-Familie: 760000-779999, Bestand + Umzugs-Reservat innerhalb",
+            FAMILIE_MIN == 760000 and FAMILIE_MAX == 779999
+            and all(FAMILIE_MIN <= z <= FAMILIE_MAX for z in MAGIC_UMZUG.values())
+            and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
+    _inline(_ab_2014)
 
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
     results.append(_test_sicher(test_terminal_pids_ohne_wmic))
