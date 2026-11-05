@@ -222,6 +222,22 @@ KONTEN[2]["_bal"] = 48700.0
 _e, _v = lauf(firmen=mit_modell(FIRMEN, "lucidtrading", "orbit_prio2"))
 check((_v.get(LHT) or {}).get("code") == "polster" and "lots" not in (_v.get(LHT) or {}),
       f"Balance unter dem EOD-Boden → kein Hedge, vorgemerkt mit Grund „polster“ (Riegel hält, wie Apex) ({(_v.get(LHT) or {}).get('fehler')})")
+KONTEN[2]["_bal"] = 50300.0
+_c = lambda: (lauf(firmen=mit_modell(FIRMEN, "lucidtrading", "orbit_prio2"))[1].get(LHT) or {})   # noqa: E731
+KONTEN[2]["max_drawdown"] = 2500
+_v = _c(); KONTEN[2]["max_drawdown"] = 2000
+check(_v.get("code") == "boden" and "Kernwerte" in str(_v.get("fehler")), f"Max DD am Konto ≠ Kernwerte → kein Hedge ({_v.get('fehler')})")
+_lr = list(LIQ_REGELN); LIQ_REGELN[:] = []
+_v = _c(); LIQ_REGELN[:] = _lr
+check(_v.get("code") == "boden", f"keine EOD-Liq-Regel → kein Hedge, kein stiller Rückfall ({_v.get('fehler')})")
+_sa = app._sb_all
+def _sb_verlauf_kaputt(t, p):
+    if t == "trade_plans" and "bal_end" in str(p.get("select") or ""):
+        raise RuntimeError("DB weg")
+    return _sa(t, p)
+app._sb_all = _sb_verlauf_kaputt
+_v = _c(); app._sb_all = _sa
+check(_v.get("code") == "boden", f"Verlauf nicht lesbar (streng) → kein Hedge ({_v.get('fehler')})")
 VERLAUF[:] = []; KONTEN[2]["_bal"] = 50000.0
 check(ohne_at(lauf()[1].get(A150)) == ohne_at(json.load(open(SOLL_DATEI, encoding="utf-8"))[A150]) if SOLL_DATEI and os.path.exists(SOLL_DATEI) else True,
       "Apex (statisch) bleibt mit Liq-Regeln/Verlauf bitgleich")

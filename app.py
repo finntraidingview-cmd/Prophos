@@ -30701,24 +30701,35 @@ def ah_eod_polster(bal, polster, boden):
 
 
 def _ah_boden_eod(a, firmen):
-    """Konto-Boden am EOD-Hoch wie Radar/Live-Trades (liq_regel_waehlen + liq_boden_kernwerte + liq_konto_boden mit liq_peak eod): nur für
-    maxdd_art eod_trailing, Höchststand nur aus ABGESCHLOSSENEN Handelstagen (heutiger Intraday-Stand zählt nie — ein zu hoher Boden schlösse den
-    Hedge vor der echten Liquidation). → Boden | None (statisch, kein DD, nicht lesbar)."""
+    """Konto-Boden am EOD-Hoch wie Radar/Live-Trades (liq_regel_waehlen + liq_boden_kernwerte + liq_konto_boden mit liq_peak eod) → (boden, None) |
+    (None, Grund). Höchststand nur aus ABGESCHLOSSENEN Handelstagen (heutiger Intraday-Stand zählt nie). FAIL-CLOSED (Fremd-Review MO1b): ist der
+    echte Boden nicht sicher rechenbar — Verlauf nicht lesbar, keine EOD-Liq-Regel, kein Max DD, Max DD am Konto ≠ Kernwerte der Größe —, gibt es KEINEN
+    Hedge (Grund), nie einen stillen Rückfall auf Balance − DD (der läge über dem echten Boden, wenn das Konto heute im Plus ist)."""
     try:
         typ = str(a.get("account_type") or "challenge").lower()
         regel, _w = liq_regel_waehlen(_liq_regeln_laden(), a.get("firm"), typ, _wd_konto_groesse(a))
         b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, False, firmen)
         if (b_regel or {}).get("maxdd_art") != "eod_trailing":
-            return None
-        pk = liq_peak({"started_at": _wt_now_iso(), "master_account_id": a.get("id")}, a, None, _liq_verlauf_laden([a.get("id")]), eod=True)
-        boden = liq_konto_boden(b_regel, b_acc, b_gr, pk, None)[0]
+            return None, "keine EOD-Liq-Regel für diese Firma (liq_regeln) — Boden am EOD-Hoch nicht rechenbar"
         kw = ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}
-        if boden is not None and kw.get("lock_bei_start") is True and b_gr:   # Kernwerte: Boden höchstens bis zum Start (Lucid, FundedNext Futures)
+        dd_k = _wd_num((kw.get("dd_je_groesse") or {}).get(str(int(b_gr)))) if b_gr else None
+        dd_k = dd_k or _wd_num(kw.get("dd_usd"))
+        dd_a = _wd_num((b_acc or {}).get("max_drawdown")) or _wd_num((b_regel or {}).get("maxdd_usd"))
+        if not dd_a or not b_gr:
+            return None, "kein Max Drawdown / keine Kontogröße am Konto"
+        if dd_k and abs(float(dd_a) - float(dd_k)) > 0.5:
+            return None, f"Max DD am Konto {_ap_de(float(dd_a), 0)} $ ≠ Kernwerte {_ap_de(float(dd_k), 0)} $ — Konto prüfen"
+        verlauf = _liq_verlauf_laden([a.get("id")], streng=True)
+        pk = liq_peak({"started_at": _wt_now_iso(), "master_account_id": a.get("id")}, a, None, verlauf, eod=True)
+        boden = liq_konto_boden(b_regel, b_acc, b_gr, pk, None)[0]
+        if boden is None:
+            return None, "Konto-Boden nicht rechenbar"
+        if kw.get("lock_bei_start") is True:   # Kernwerte: Boden höchstens bis zum Start (Lucid, FundedNext Futures)
             boden = min(boden, float(b_gr))
-        return boden
+        return boden, None
     except Exception as e:
-        _ah_spur(f"⚠️ {str(a.get('id'))[:8]} Boden am EOD-Hoch nicht rechenbar ({type(e).__name__}: {e}) — Polster aus dem Kontowert")
-        return None
+        _ah_spur(f"⚠️ {str(a.get('id'))[:8]} Boden am EOD-Hoch nicht rechenbar ({type(e).__name__}: {e})")
+        return None, f"Boden am EOD-Hoch nicht rechenbar ({type(e).__name__})"
 
 
 def ah_vorschau(h, wert, polster, liq, master_tp):
@@ -30833,7 +30844,10 @@ def ah_tick(jetzt=None, force=False):
         # BODEN AM EOD-HOCH (MO1b): nachziehende Firmen (Lucid …) liquidieren am höchsten Tagesschluss − Max DD, nicht an Balance − DD — steht das
         # Konto unter seinem EOD-Hoch, ist das Polster kleiner; Wert = Satz × Polster wie bei Apex. Statische Firmen (Apex) unverändert.
         if (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("boden") == "nachziehend":
-            pol_eod = ah_eod_polster(bal, polster, _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), firmen))
+            _b_eod, _b_grund = _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), firmen)
+            if _b_grund:                                   # fail-closed (Fremd-Review MO1b): kein stiller Rückfall auf Balance − DD
+                return None, None, None, bal, None, ("boden", _b_grund)
+            pol_eod = ah_eod_polster(bal, polster, _b_eod)
             if pol_eod is None:
                 return None, None, None, bal, None, ("polster", f"kein Polster: Balance {_ap_de(float(bal), 0)} $ steht am Boden (EOD-Hoch − Max DD) — Konto prüfen")
             if pol_eod != polster:
@@ -36259,6 +36273,11 @@ def admin_auto_plan_waage_start():
         if gr:
             namen, _aus = _ap_namen()
             stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+            try:     # ORBIT PRIO 2 (Fremd-Review MO1b): die Startprüfung wiegt die Gruppe mit IHREN Modellen wie ap_planen und der Bot
+                _fm_g = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in (gr.get("ids") or ())}), {})
+                stand["param"] = ap_waage_param_gruppe(stand.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
+            except Exception as e:
+                print(f"[waage-start] ⚠️ Gruppe Orbit Prio 2: {type(e).__name__}: {e}", flush=True)
         else:
             stand = _ap_stand_laden(reg)
         pc = _ap_pc_lebt_gecacht()
