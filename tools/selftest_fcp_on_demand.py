@@ -156,7 +156,7 @@ tw = app.fcp_tage_zyklus_w([{"status": "completed", "master_pl": 400, "ended_at"
                             {"status": "completed", "master_pl": 500, "ended_at": "2026-11-05T10:00:00+00:00"},
                             {"status": "completed", "master_pl": 250, "ended_at": "2026-11-06T10:00:00+00:00"},
                             {"status": "completed", "master_pl": 900, "ended_at": "2026-10-20T10:00:00+00:00"}], "2026-11-01")
-ok(tw == {"b": 500.0, "w": 1150.0, "n": 4, "serie": 750.0, "serie_n": 2}, f"Zyklus-Werte: größter Tag 500, Summe Gewinn-Tage 1.150, Serie seit Verlust 750 / 2 ({tw})")
+ok(tw == {"b": 500.0, "w": 1150.0, "n": 4, "serie": 750.0, "serie_n": 2, "heute": 0.0}, f"Zyklus-Werte: größter Tag 500, Summe Gewinn-Tage 1.150, Serie seit Verlust 750 / 2 ({tw})")
 ok(app.fcp_tage_zyklus_w([{"status": "completed", "master_pl": None, "ended_at": "2026-11-03T10:00:00+00:00"}]) is None, "P&L fehlt → nicht lesbar")
 
 print("— On Demand: Z 2.180, p 40 → 3 Trades —")
@@ -192,6 +192,29 @@ ok("{\"payout_ready_at\": plan_tag}" in fp and "if not r.get(\"on_demand\") or (
 ok("w_[\"fcp_ziel\"] = \"is.null\"" in fp and "requests.exceptions.HTTPError" in fp and "raise" in fp[fp.index("od_spalte = True"):fp.index("od_spalte = False")],
    "Erstwurf mit Guard (kein Rennen), Rückfall nur bei fehlender Spalte")
 ok("\"ziel_fest\", \"on_demand\")}" in fp, "festes Ziel + On Demand stehen im funded_plan des Trades")
+
+print("— Trades je Tag (E1e): Patch, Consistency zählt den Tag als Summe —")
+Z0 = {"id": 1, "zeiten": {"vorlauf_min": 15}, "firmen": []}
+u, f_ = app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 2})
+ok(u and u["zeiten"]["trades_je_tag"] == 2 and u["zeiten"]["vorlauf_min"] == 15 and "trades_je_tag" not in Z0["zeiten"], "Patch Trades je Tag 2 (Rest der Zeiten bleibt)")
+ok(app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 0})[0] is None and app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 6})[0] is None
+   and app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 1.5})[0] is None, "0, 6, 1,5 → abgelehnt (ganze Zahl 1–5)")
+u, _f = app.fcp_regel_patch({"zeiten": {"trades_je_tag": 3, "vorlauf_min": 15}}, {"zeit": "trades_je_tag", "wert": None})
+ok(u and "trades_je_tag" not in u["zeiten"] and u["zeiten"]["vorlauf_min"] == 15, "leer → Feld weg (= 1)")
+tw2 = app.fcp_tage_zyklus_w([{"status": "completed", "master_pl": 500, "ended_at": "2026-11-05T06:00:00+00:00"},
+                             {"status": "completed", "master_pl": 300, "ended_at": "2026-11-05T09:00:00+00:00"},
+                             {"status": "completed", "master_pl": 400, "ended_at": "2026-11-04T09:00:00+00:00"}], "2026-11-01", "2026-11-05")
+ok(tw2["b"] == 800.0 and tw2["w"] == 1200.0 and tw2["heute"] == 800.0, f"zwei Trades am selben Tag = EIN Tag (größter Tag 800, heute 800): {tw2}")
+base = {"b": 800, "w": 1200, "n": 3, "serie": 1200, "serie_n": 3}
+c_ohne = CF(40, 2150, 1200, dict(base, heute=0.0), None)
+c_mit = CF(40, 2150, 1200, dict(base, heute=500.0), None)
+ok(c_mit["tp"] is not None and c_mit["tp"] <= c_ohne["deckel"] - 500 + 0.5, f"heute schon +500: TP {c_mit['tp']:g} ≤ Deckel − 500 (Tagessumme bleibt unter dem Deckel)")
+c_voll = CF(40, 2150, 1200, dict(base, heute=900.0), None)
+ok(c_voll.get("tages_deckel") is True and c_voll["tp"] is None, "heute schon +900 ≥ Deckel → kein weiterer Trade heute")
+rk2, jgo2 = app.fcp_on_demand_anwenden(FN, JG(FN, 100000), 100000)
+rv = R(jgo2, 101200, 100000, 2, False, 1.0, 0.85, random.Random(4), regel=rk2, tage=dict(base, heute=900.0), ziel_fest={"zyklus": 2, "usd": 2150})
+ok(rv["aktion"] == "aus" and "Tages-Deckel" in rv["grund"], f"Konto-Rechnung: Tages-Deckel → aus mit Grund ({rv.get('grund')})")
+ok(CF(40, 2150, 1200, base, None) == c_ohne, "ohne „heute“ (1 Trade je Tag) = wie bisher")
 
 print()
 print("alle Tests bestanden" if not FEHLER else f"{len(FEHLER)} ROT")

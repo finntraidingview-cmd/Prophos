@@ -85114,7 +85114,7 @@
       const nm = fc ? 'Funded-CFD-Planer' : 'Funded-Planer'
       teile.push(Q ? (Q.aktiv ? nm + ' an' : nm + (fc ? ' aus' : ' aus · Vorschau')) : nm)
       if(z.von || z.bis) teile.push(`Start ${escapeHtml(String(z.von || ''))}–${escapeHtml(String(z.bis || ''))} Dubai, zufällig`)
-      if(fc) teile.push('1 Trade je Konto und Tag', `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`, `${Number(z.abstand_id_min) || 10} min je ID`, `Bestätigen ${Q && Q.apIds && _ap.info && _ap.info.auto_bestaetigen && _ap.info.auto_bestaetigen.aktiv ? 'automatisch' : 'von Hand'}`)
+      if(fc) teile.push(fcrTradesText(), `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`, `${Number(z.abstand_id_min) || 10} min je ID`, `Bestätigen ${Q && Q.apIds && _ap.info && _ap.info.auto_bestaetigen && _ap.info.auto_bestaetigen.aktiv ? 'automatisch' : 'von Hand'}`)
       else teile.push(`max. ${Number(z.max_je_id_tag) || 2} Funded-Trades je ID und Tag`, `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`)
       if(Q && Q.regelnQuelle === 'standard') teile.push('Standard-Regeln')
     }else{
@@ -85610,6 +85610,9 @@
   const fcrWSchalter = (k, an, titel, unter, info) => `<label class="wd-abl-schalter${fcrAdmin() ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}${info || ''}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</span>${fcrAdmin()
     ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
     : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
+  // E1e (Finn 05.11.2026 ~08:30): Trades je Konto und Tag aus der Regel (zeiten.trades_je_tag, Standard 1)
+  function fcrTradesJeTag(){ try{ const n = Number((((_fcfdR || {}).d || {}).zeiten || {}).trades_je_tag); return n >= 1 ? Math.min(5, Math.round(n)) : 1 }catch(_){ return 1 } }
+  function fcrTradesText(){ const n = fcrTradesJeTag(); return n === 1 ? '1 Trade je Konto und Tag' : `bis ${n} Trades je Konto und Tag, nie gleichzeitig` }
   const fcrWAbschnitt = t => `<div class="wd-abl-abschnitt">${escapeHtml(t)}</div>`
   const fcrWKopf = (titel, unter, karte) => `<h4><span>${titel}${unter ? `<span class="h4sub">${unter}</span>` : ''}</span>${karte ? fcrSpeichernKnopf(karte) : ''}</h4>`
   function fcfdRegelnHtml(){
@@ -85723,11 +85726,12 @@
     }
     const rechts = `<div class="wd-set-card" data-fcr-karte="planer">
       ${fcrWKopf('Planer & Hedge', 'alle Firmen · ' + (sel ? escapeHtml(sel.firma) : '–'), 'planer')}
-      ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', '1 Trade je Konto und Tag', fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
+      ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', fcrTradesText(), fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
       ${fcrWSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge ohne Klick')}
       ${''/* E1e (Finn 05.11.2026 ~08:30): kein Schalter „Ziel → Waiting" — Waiting setzt das Abhaken nach geprüften Ziel-Regeln; ziel_auto_wartet bleibt im Code aus */}
       ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
-      <div class="fcr-e-felder fcr-w-zeiten">${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
+      <div class="fcr-e-felder drei fcr-w-zeiten">${ad ? fcrFeld('Trades je Tag', z.trades_je_tag ?? null, { zeit: 'trades_je_tag' }, { einheit: 'je Konto', leer: '1', titel: 'bis zu so viele Trades je Konto und Tag (1–5), nie gleichzeitig; leer = 1' })
+        : `<div class="fcr-e-feld"><label>Trades je Tag <small>· je Konto</small></label><div class="fcr-e-wert">${fcrTradesJeTag()}</div></div>`}${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
       ${sel ? firmaTeil(sel) : ''}
     </div>`
     return `<div class="fcr-e-wrap fcr-w" id="fcr-einst" data-fcr-wurzel>${kopf}<div class="wd-set-grid">${liste}${mitte}${rechts}</div></div>`
@@ -87037,7 +87041,7 @@
     root.querySelectorAll('.ap-ids-kopf b').forEach(b => { b.textContent = b.textContent.replace(/IDs im Trade-Planer/, 'IDs im ' + A.name) })
     root.querySelectorAll('.ap-ids-kopf span').forEach(s => { if(!/Nachtlauf/.test(s.textContent)) return
       s.textContent = (Q.aktiv ? A.name + ' an' : A.name + (Q.fcfd ? ' aus' : ' aus · Vorschau')) + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
-      s.title = Q.fcfd ? `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · 1 Trade je Konto und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand · ${Q.zeiten.abstand_id_min || 10} min je ID`
+      s.title = Q.fcfd ? `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${fcrTradesText()} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand · ${Q.zeiten.abstand_id_min || 10} min je ID`
         : `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
         + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
     // „Jetzt planen" (27.10.2026, Finn: alle Funded-Konten einmal geplant sehen, ohne zu bestätigen): statt „Nachplanen" des Challenge-Planers

@@ -389,6 +389,31 @@ z0 = zeilen[0]
 check(abs(z0["multiplier"] * z0["master_contracts"] - [g for g in erg2["geplant"] if g["konto_id"] == z0["master_account_id"]][0]["hedge_lots"]) < 0.02,
       "multiplier × Lots = Hedge-Lots")
 
+print("2h) Trades je Tag (E1e, Finn 05.11.2026 ~08:30): bis N je Konto und Tag, nie gleichzeitig, Standard 1 = wie bisher")
+_alt2 = app._sb_all
+_heute = {"id": "pz1", "user_id": H1, "master_account_id": KONTEN[0]["id"], "master_firm": "FundedNext", "status": "completed", "master_pl": 300.0,
+          "started_at": (JETZT - timedelta(hours=2)).isoformat(), "ended_at": (JETZT - timedelta(hours=1, minutes=30)).isoformat()}
+app._sb_all = lambda t, p: ([dict(_heute)] if t == "trade_plans" and "master_account_id" in p else _alt2(t, p))
+def _grund(e, kid):
+    return next((x.get("grund") for x in e["ausgelassen"] if x.get("konto_id") == kid), None)
+e1 = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+check(_grund(e1, KONTEN[0]["id"]) == "heute schon getradet" and KONTEN[0]["id"] not in {g["konto_id"] for g in e1["geplant"]},
+      "ohne Einstellung (1): nach einem Trade heute → „heute schon getradet“ (wie bisher)")
+REG["zeiten"]["trades_je_tag"] = 2
+e2 = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+check(KONTEN[0]["id"] in {g["konto_id"] for g in e2["geplant"]} or (_grund(e2, KONTEN[0]["id"]) or "") != "heute schon getradet",
+      f"Trades je Tag 2: nach einem Trade heute wird das Konto wieder geplant ({_grund(e2, KONTEN[0]['id']) or 'geplant'})")
+_heute2 = dict(_heute, id="pz2", started_at=(JETZT - timedelta(hours=1)).isoformat(), ended_at=(JETZT - timedelta(minutes=40)).isoformat())
+app._sb_all = lambda t, p: ([dict(_heute), dict(_heute2)] if t == "trade_plans" and "master_account_id" in p else _alt2(t, p))
+e3 = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+check((_grund(e3, KONTEN[0]["id"]) or "").startswith("heute schon 2 Trades"), f"Trades je Tag 2: nach zwei Trades → aus ({_grund(e3, KONTEN[0]['id'])})")
+_off = dict(_heute, id="pz3", status="open", ended_at=None)
+app._sb_all = lambda t, p: ([dict(_off)] if t == "trade_plans" and "master_account_id" in p else _alt2(t, p))
+e4 = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+check(_grund(e4, KONTEN[0]["id"]) == "läuft gerade", "nie gleichzeitig: läuft ein Trade, plant er keinen zweiten")
+del REG["zeiten"]["trades_je_tag"]
+app._sb_all = _alt2
+
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)
