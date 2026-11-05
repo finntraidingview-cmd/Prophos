@@ -109,7 +109,9 @@ ALT = [
 
 def main():
     args = sys.argv[1:]
-    alt = args[args.index("--alt") + 1] if "--alt" in args else "HEAD"
+    # RB1 (05.11.2026): ohne --alt den letzten Stand VOR dem Umbau nehmen, sobald HEAD ihn schon enthält — sonst verglich (D) den Umbau mit sich
+    # selbst und (E) war rot (RT1). 635aba60 = letzter Stand vor dem Umbau (s. Kopf).
+    alt = args[args.index("--alt") + 1] if "--alt" in args else ("635aba60" if "const CRED_LBL" in quelle("HEAD") else "HEAD")
     neu_src = quelle(None)
 
     # (A) Zugangs-Mails im Feld „External IDs"
@@ -161,6 +163,15 @@ def main():
     (a,), (n,) = lauf(src_alt, [("parse", karte)]), lauf(neu_src, [("parse", karte)])
     check(len(a) == len(n) == 1 and a[0]["typ"] == "challenge" and n[0]["typ"] == "" and {**a[0], "typ": ""} == n[0],
           "(E) FundedNext-Zugangskarte ohne Dashboard: Typ „challenge“ → leer (Vorlage gewinnt), sonst identisch")
+
+    # (F) RB1 (Befund RT1, seit .1734): eine Kennung mit „#" (oder die eines anderen Logins der Zeile) wird nie zum Passwort; ein echtes
+    #     Passwort mit „#" im Abschnitt bleibt
+    faelle = ["#511000003, 511000004; 511000005", "#511000006\n#511000007", "\"511000008\"\n511000009",
+              "511000010\nPq#4abcd\nFTMO-Demo"]
+    rf = lauf(neu_src, [("parse", f) for f in faelle])
+    pw = [[(b["id"], (b.get("zugang") or {}).get("password")) for b in blk] for blk in rf]
+    check(all(p is None for blk in pw[:3] for _i, p in blk), f"(F) Kennung mit #/Anführungszeichen nie als Passwort: {pw[:3]}")
+    check(pw[3] == [("511000010", "Pq#4abcd")], f"(F) echtes Passwort mit # im Abschnitt bleibt: {pw[3]}")
 
     print("\nALLES GRUEN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1

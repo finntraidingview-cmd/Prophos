@@ -48076,7 +48076,12 @@
           // Abschnitt = Login-Zeile bis vor den nächsten Login; Werte in einer Zeile (Tab/;/Leerzeichen) auf eigene Zeilen, „Server 2" bleibt
           const teil = roh.slice(b.pos, k + 1 < out.length ? out[k + 1].pos : roh.length).replace(/[\t;,]+| {2,}| (?!\d{1,4}\b)/g, '\n')
           const z = acParseCredBlob(teil) || {}, zg = {}
-          if(z.password && z.password !== b.id) zg.password = z.password
+          // RB1 (Master 05.11.2026, Befund RT1 bulk_mail, seit .1734): „#511000003, 511000004" ergab password „#511000003" — ersterTok nimmt
+          // das # von der Kennung, acParseCredBlob lässt es am Passwort stehen, der Vergleich mit b.id griff nicht. Eine Kennung (mit/ohne
+          // #/Anführungszeichen, auch die eines anderen Logins der Liste) ist nie ein Passwort; Passwort nur, was wirklich im Abschnitt steht.
+          const ohneZeichen = s => String(s || '').trim().replace(/^[#"']+|["']+$/g, '')
+          const kennungen = new Set(out.map(o => ohneZeichen(o.id)))
+          if(z.password && !kennungen.has(ohneZeichen(z.password))) zg.password = z.password
           if(z.server) zg.server = z.server
           if(zg.password || zg.server) b.zugang = zg
         })
