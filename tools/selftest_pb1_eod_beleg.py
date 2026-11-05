@@ -53,7 +53,7 @@ def boden(a, verlauf):
 
 
 src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
-ok('"route": "in.(tvv2,tsv2,tvplus)"' in src and "konto_typ,status,route,started_at" in src, "_liq_verlauf_laden: auch tvplus, status/route im Select")
+ok('"route": "in.(tvv2,tsv2,tvplus,polar)"' in src and "konto_typ,status,route,started_at,ended_at,master_pl" in src, "_liq_verlauf_laden: auch tvplus, status/route im Select")
 
 b, g = boden(FNF, [TVPLUS])
 ok(g is None and abs(b - 49498.12) < 0.01, f"…3807: Lesung 50.998,12 nach dem Duplikum-Trade = Tagesschluss → Boden 49.498,12 ({b}, {g})")
@@ -80,6 +80,26 @@ tv1 = {"master_account_id": L1["id"], "konto_typ": "challenge", "status": "compl
        "ended_at": "2026-11-03T18:07:53+00:00", "bal_end": None, "bal_start": None}
 b6, g6 = boden(L1, [tv1])
 ok(b6 is None and g6 and "Balance-Beleg fehlt" in g6, f"Lucid …0001: Duplikum-Trade 03.11. ohne Beleg, Lesung vom 02.11. → fail-closed ({g6})")
+
+# Fremd-Review PB1: jeder genutzte Beleg zählt, nicht nur die Lesung
+orbit_heute = {"master_account_id": FNF["id"], "konto_typ": "challenge", "status": "completed", "route": "tvv2", "started_at": "2026-11-05T01:00:00+00:00",
+               "ended_at": "2026-11-05T01:40:00+00:00", "bal_start": 50998.12, "bal_end": 51200.0, "master_pl": 201.88}
+b9, g9 = boden(dict(FNF, tv_balance=51200.0, tv_balance_at="2026-11-05T01:41:00+00:00"), [TVPLUS, orbit_heute])
+ok(g9 is None and abs(b9 - 49498.12) < 0.01, f"BLOCKER-Fall: Duplikum 04.11. + Orbit heute mit balance_start 50.998 → Boden 49.498 statt 48.500 ({b9}, {g9})")
+ohne_typ = {"master_account_id": FNF["id"], "konto_typ": None, "status": "completed", "route": "tvv2", "started_at": "2026-11-03T10:00:00+00:00",
+            "ended_at": "2026-11-03T11:00:00+00:00", "bal_end": 51000.0}
+b10, g10 = boden(dict(FNF, tv_balance_at="2026-11-02T10:00:00+00:00"), [ohne_typ])
+ok(b10 is None and g10 and "Balance-Beleg fehlt" in g10, f"Plan ohne konto_typ ist kein Beleg (wie liq_peak) → fail-closed ({g10})")
+t1 = dict(TVPLUS, id="t1", started_at="2026-11-03T13:00:00+00:00", ended_at="2026-11-03T14:00:00+00:00", master_pl=500.0)
+t2 = dict(TVPLUS, id="t2", master_pl=1000.0)
+b11, g11 = boden(dict(FNF, tv_balance=51500.0), [t1, t2])
+ok(g11 is None and abs(b11 - 50000.0) < 0.01, f"zwei Duplikum-Tage ohne Belege: Schluss 03.11. = Lesung − P&L danach (50.500), Hoch 51.500 → Boden 50.000 ({b11}, {g11})")
+t2_ohne = dict(t2, master_pl=None)
+b12, g12 = boden(dict(FNF, tv_balance=51500.0), [t1, t2_ohne])
+ok(b12 is None and g12 and "2026-11-03" in g12, f"späterer Trade ohne P&L → Rekonstruktion unmöglich → fail-closed ({g12})")
+heute_pl = dict(heute, master_pl=200.0)
+b13, g13 = boden(dict(FNF, tv_balance=51198.12, tv_balance_at="2026-11-05T01:31:00+00:00"), [dict(TVPLUS, master_pl=1000.0), heute_pl])
+ok(g13 is None and abs(b13 - 49498.12) < 0.01, f"heute ein Duplikum-Trade mit P&L: Schluss 04.11. = 51.198,12 − 200 → Boden 49.498 ({b13}, {g13})")
 
 hoch = dict(TVPLUS, route="tvv2", bal_end=52200.0)
 b7, g7 = boden(dict(FNF, tv_balance=52200.0, tv_balance_at="2026-11-04T23:27:32+00:00"), [hoch])
