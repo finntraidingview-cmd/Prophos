@@ -27703,20 +27703,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             ausgelassen.append(dict(zeile, grund=gb, **ap_boden_zeile(regel, a, float(bal), stand if quelle_b != "Nachlesung" else letzt)))
             continue
         regel_kk = ap_regel_konto(regel, a, float(bal))
-        if a.get("account_type") == "challenge" and not a.get("ziel_erreicht_at") and zw_cons_moeglich(regel, a):
-            # CONSISTENCY (M2 05.11.2026): steht die Balance am Regel-Ziel, der größte Tag aber über p × Gewinn → Ziel = größter Tag ÷ p,
-            # der Planer plant den Rest-Trade dorthin. Markierte Konten nie (Tage-Mini bleibt Mini). Tage aus ALLEN Trades wie die Ziel-Wache
-            # (eig kennt nur 30 Tage — Fremd-Review: sonst Stillstand „Ziel erreicht" ohne Markierung); Lesefehler → eig
-            _z0 = zw_ziel(regel_kk, "challenge", float(bal))
-            _cz = None
-            if _z0 and float(bal) >= _z0[0]:
-                try:
-                    _ct = _zw_cons_tage_laden([aid]).get(aid) or {}
-                except Exception:
-                    _ct = zw_cons_tage(eig, aid)
-                _cz = zw_cons_ziel(regel, a, float(bal), _ct)
-            if _cz and not _cz["erfuellt"]:
-                regel_kk = dict(regel_kk, _ziel_min=_cz["ziel_cons"], _cons=_cz)
+        regel_kk = ap_cons_regel(regel, regel_kk, a, float(bal), eig)   # Consistency-Ziel (M2 05.11.2026)
         kandidaten.append({"a": a, "regel": regel_kk, "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
                            "tage": ap_tage_ist(a, eig),          # Mindesttage (ist, soll) oder None — Mini-Trade bei Ziel erreicht (09.10.2026)
                            "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
@@ -28457,7 +28444,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
         if gb:
             aus(gb)
             continue
-        regel_k = dict(ap_regel_konto(regel, a, float(bal)), route="mt5")
+        regel_k = ap_cons_regel(regel, dict(ap_regel_konto(regel, a, float(bal)), route="mt5"), a, float(bal), eig)   # Consistency-Ziel wie ap_planen (M2b 05.11.2026)
         mppl = ap_cfd_ppl(ctx_ppl, a)
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl, rest_planer=bool(a.get("rest_planer_at")))
@@ -38685,6 +38672,26 @@ def zw_cons_ziel(regel, konto, balance, tage_pl):
     ziel_cons = round(max(ziel, groesse + noetig), 2)
     return {"p": p, "quelle": quelle, "groesster_tag": round(gt, 2), "gewinn": round(float(balance) - groesse, 2), "ziel": ziel,
             "ziel_cons": ziel_cons, "erfuellt": float(balance) >= ziel_cons}
+
+
+def ap_cons_regel(regel, regel_k, konto, balance, eig):
+    """Planer (ap_planen UND gp_planen, M2b 05.11.2026): Konto-Regel regel_k mit Consistency-Ziel (_ziel_min/_cons), wenn die Balance am Regel-Ziel
+    steht, der größte Tag aber über p × Gewinn liegt — sonst regel_k unverändert. Markierte Konten nie (Tage-Mini bleibt Mini), Rangfolge wie
+    zw_cons_ziel (Konto-Wert → Firmen-Feld → Vorgabe, Apex nie). Tage aus ALLEN Trades wie die Ziel-Wache (eig kennt nur die geladenen Pläne —
+    Fremd-Review M2: sonst Stillstand „Ziel erreicht" ohne Markierung); Lesefehler → eig."""
+    a = konto or {}
+    if a.get("account_type") != "challenge" or a.get("ziel_erreicht_at") or not zw_cons_moeglich(regel, a) or not balance:
+        return regel_k
+    z0 = zw_ziel(regel_k, "challenge", float(balance))
+    if not z0 or float(balance) < z0[0]:
+        return regel_k
+    aid = str(a.get("id"))
+    try:
+        ct = _zw_cons_tage_laden([aid]).get(aid) or {}
+    except Exception:
+        ct = zw_cons_tage(eig, aid)
+    cz = zw_cons_ziel(regel, a, float(balance), ct)
+    return dict(regel_k, _ziel_min=cz["ziel_cons"], _cons=cz) if cz and not cz["erfuellt"] else regel_k
 
 
 def zw_erreicht(ziel, balance, phase):

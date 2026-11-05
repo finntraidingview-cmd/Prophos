@@ -13,7 +13,7 @@ SRC = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel", "ap_kette_mll",
               "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "liq_peak", "_ap_peaks", "ap_boden_sicher",
               "_ap_norm", "_ap_tz", "_ap_ts", "ap_consistency_etappe", "ap_konto_flex", "ap_regel_flex", "ap_regel_konto", "zw_ziel",
-              "zw_cons_tage", "zw_cons_moeglich", "zw_cons_ziel", "zw_erreicht", "ap_konten_stand_zeile")
+              "zw_cons_tage", "zw_cons_moeglich", "zw_cons_ziel", "ap_cons_regel", "zw_erreicht", "ap_konten_stand_zeile")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT",
               "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN", "ZW_CONS_FIRMEN")
 FEHLER = []
@@ -135,10 +135,34 @@ check('not (flags.get(aid) or {}).get("ziel_erreicht_at")' in tk and "float(bal)
       and 'regel = dict(regel, _ziel_min=cons["ziel_cons"])' in tk and "zw_cons_ziel(regel0, a, bal" in tk,
       "zw_tick: nur unmarkierte Challenge-Konten am Ziel, Trades einmal je Lauf, Firmen-Regel ungemischt, Ziel angehoben")
 pl = SRC[SRC.index("def ap_planen("):SRC.index("# TAGESDECKEL JE FIRMA (19.10.2026")]
-check('regel_kk = dict(regel_kk, _ziel_min=_cz["ziel_cons"], _cons=_cz)' in pl and '"regel": regel_kk' in pl
-      and 'a.get("account_type") == "challenge" and not a.get("ziel_erreicht_at") and zw_cons_moeglich(regel, a)' in pl
-      and "_ct = _zw_cons_tage_laden([aid]).get(aid) or {}" in pl and "_ct = zw_cons_tage(eig, aid)" in pl,
-      "ap_planen: Consistency-Ziel nur für unmarkierte Konten, Tage aus allen Trades wie die Ziel-Wache (Rückfall 30 Tage)")
+check("regel_kk = ap_cons_regel(regel, regel_kk, a, float(bal), eig)" in pl and '"regel": regel_kk' in pl,
+      "ap_planen: Kandidat bekommt das Consistency-Ziel über ap_cons_regel")
+gp = SRC[SRC.index("def gp_planen("):SRC.index("def gp_planen(") + 20000]
+check('regel_k = ap_cons_regel(regel, dict(ap_regel_konto(regel, a, float(bal)), route="mt5"), a, float(bal), eig)' in gp
+      and gp.index("ap_cons_regel(") < gp.index("w, grund = ap_konto_rechnen(regel_k"), "gp_planen (CFD-Route): dasselbe Consistency-Ziel vor ap_konto_rechnen (M2b)")
+
+# ── ap_cons_regel (beide Planer): Rangfolge, markierte Konten, Tage aus allen Trades, Rückfall bei Lesefehler
+geladen = []
+def _laden_ok(ids):
+    geladen.append(list(ids))
+    return {"k1": T_EZ}
+def _laden_kaputt(ids):
+    raise RuntimeError("Timeout")
+cr = ns["ap_cons_regel"]
+ns["_zw_cons_tage_laden"] = _laden_ok
+rkk = rk(TRADEIFY, konto(), 159200)
+x = cr(TRADEIFY, rkk, konto(), 159200, [])
+check(x.get("_ziel_min") == 159500 and x["_cons"]["p"] == 40 and geladen == [["k1"]], f"ap_cons_regel: Tage aus allen Trades (geladen {geladen}), Ziel 159.500")
+check(cr(TRADEIFY, rkk, dict(konto(), ziel_erreicht_at="2026-11-04T10:00:00+00:00"), 159200, []) is rkk, "markiertes Konto: Regel unverändert (Tage-Mini bleibt Mini)")
+geladen.clear()
+check(cr(APEX, rk(APEX, konto(firm="Apex"), 159200), konto(firm="Apex"), 159200, []).get("_ziel_min") is None and geladen == [], "Apex ohne Konto-Wert: nichts gelesen, nichts geändert")
+check(cr(TRADEIFY, rk(TRADEIFY, konto(), 155000), konto(), 155000, []).get("_ziel_min") is None and geladen == [], "unter dem Regel-Ziel: nichts gelesen")
+ns["_zw_cons_tage_laden"] = _laden_kaputt
+y = cr(TRADEIFY, rkk, konto(), 159200, EZ)
+check(y.get("_ziel_min") == 159500, "Lesefehler → Rückfall auf die geladenen Pläne (eig)")
+check(cr(TRADEIFY, rkk, konto(), 159200, []).get("_ziel_min") is None, "Lesefehler ohne eigene Pläne → keine Consistency (kein Absturz)")
+x2 = cr(TRADEIFY, dict(rkk, route="mt5"), konto(cons=50), 159200, EZ)
+check(x2.get("_ziel_min") is None and x2.get("route") == "mt5", "Konto-Wert 50 % erfüllt → Regel unverändert (Route bleibt)")
 check('ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": 50, "topstep": 50}' in SRC and '"apex"' not in SRC[SRC.index("ZW_CONS_FIRMEN = {"):SRC.index("ZW_CONS_FIRMEN = {") + 80],
       "Vorgabe: Tradeify (TP-Deckel), Lucid 50, Topstep 50 — Apex nie")
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")
