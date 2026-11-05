@@ -28,6 +28,7 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
+    __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in KONST] + [block(f) for f in NEU]), ns)
     # ap_ausgleichen/_ap_stand_plaene/_ap_aenderungen_anwenden neu laden: sie greifen auf die eben geladenen Namen zu
     exec("\n".join(block(f) for f in ("_ap_stand_plaene", "_ap_aenderungen_anwenden", "ap_ausgleichen", "_ap_stand_laden")), ns)

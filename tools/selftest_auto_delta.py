@@ -102,6 +102,7 @@ def lade():
             pass
     for zeile in extra:
         try:
+            __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
             exec(zeile, ns)
         except Exception:
             pass        # verweist auf etwas Mehrzeiliges (z. B. AP_KONTO_FELDER) — brauchen diese Tests nicht

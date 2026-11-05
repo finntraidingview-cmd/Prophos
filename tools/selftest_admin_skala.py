@@ -64,7 +64,7 @@ check(F({}, [], []) == {"boden": None, "boden_art": None, "boden_text": None, "z
 ns["liq_konto_boden"] = lambda *x: (_ for _ in ()).throw(RuntimeError("kaputt"))
 z = F(a, [], [])
 check(z["boden"] is None and "RuntimeError" in z["boden_text"] and z["ziel"] == 111672.0, "Boden wirft → Boden None mit Grund, Ziel trotzdem")
-check("r.update(admin_skala_felder(a_, _sk_regeln, _sk_kw))" in APP and "_sk_regeln, _sk_kw = _liq_regeln_laden(), _liq_kw_laden()" in APP, "admin_build_overview hängt die Felder je Zeile an (Regeln einmal je Abruf)")
+check("r.update(admin_skala_felder(a_, _sk_regeln, ap_unt_firmen(a_.get(\"user_id\"), _sk_kw, streng=False) if _sk_kw is not None else None))" in APP and "_sk_regeln, _sk_kw = _liq_regeln_laden(), _liq_kw_laden()" in APP, "admin_build_overview hängt die Felder je Zeile an (Regeln einmal je Abruf, UNT3: Kernwerte des Unternehmens der ID)")
 
 # (2) Frontend admSkalaInfo
 m = re.search(r"    function admSkalaInfo\(r\)\{\n.*?\n    \}", HTML, re.S)

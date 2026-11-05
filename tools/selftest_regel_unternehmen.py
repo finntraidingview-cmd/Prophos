@@ -42,8 +42,10 @@ check(hol(r, "lucidtrading", LU) == [1300, 1400] and hol(r, "lucidtrading", ["je
 std2 = copy.deepcopy(STD); next(f for f in std2["firmen"] if f["namen"][0] == "lucidtrading")["je_groesse"]["50000"]["phasen"]["challenge"]["menge"] = [2, 2]
 check(hol(app.ap_unt_regeln(std2, abw, {}), "lucidtrading", ["je_groesse", "50000", "phasen", "challenge", "menge"]) == [2, 2],
       "Standard ändert sich → nicht geändertes Feld folgt live")
-r = app.ap_unt_regeln(STD, {"firmen": {"lucidtrading": {"je_groesse": {"50000": {"phasen": {"challenge": {"ziel_pct": 3}}}}}, "gibtsnicht": {"x": 1}}}, {})
-check(hol(r, "lucidtrading", ["je_groesse", "50000", "phasen", "challenge", "ziel_pct"]) == 6, "Ziel % (nicht Phase 1) wirkt nie aus der Abweichung")
+r = app.ap_unt_regeln(STD, {"firmen": {"lucidtrading": {"je_groesse": {"50000": {"phasen": {"challenge": {"ziel_pct": 3, "tp_max": 1}}}}}, "gibtsnicht": {"x": 1}}}, {})
+check(hol(r, "lucidtrading", ["je_groesse", "50000", "phasen", "challenge", "ziel_pct"]) == 3
+      and hol(r, "lucidtrading", ["je_groesse", "50000", "phasen", "challenge", "tp_max"]) == 1500,
+      "Phase 2: Ziel % wirkt aus der Abweichung, Consistency (tp_max) bleibt Standard")
 r = app.ap_unt_regeln(STD, {"firmen": {"tradeify": {"je_groesse": {"150000": {"phasen": {"challenge": {"tp": [1, 2]}}}}}}}, {})
 check("je_groesse" not in next(f for f in r["firmen"] if f["namen"][0] == "tradeify"), "Pfad, den es im Standard nicht gibt → wirkt nie (kein neuer Größen-Block)")
 r = app.ap_unt_regeln(STD, {}, {"fundednextfutures": "orbit_v2", "lucidtrading": "aus"})
@@ -60,7 +62,11 @@ check(g is None and a3 == {}, "Wert = Standard → Abweichung weg")
 a4, _fm, _f, g = app.ap_unt_kernwert(FIRMEN, a2, {}, "lucidtrading", [], [LU])
 check(g is None and a4 == {}, "↺ auf Standard zurück")
 _a, _fm, _f, g = app.ap_unt_kernwert(FIRMEN, {}, {}, "lucidtrading", [{"pfad": ["je_groesse", "50000", "phasen", "challenge", "ziel_pct"], "wert": 4}])
-check(g and "Phase 2" in g, f"Ziel % im Unternehmen nur lesbar ({g})")
+check(g is None and _a == {"firmen": {"lucidtrading": {"je_groesse": {"50000": {"phasen": {"challenge": {"ziel_pct": 4}}}}}}}, f"Phase 2: Ziel % im Unternehmen änderbar ({g or _a})")
+_a, _fm, _f, g = app.ap_unt_kernwert(FIRMEN, {}, {}, "lucidtrading", [{"pfad": ["je_groesse", "50000", "dd_usd"], "wert": 2500}])
+check(g is None and _a == {"firmen": {"lucidtrading": {"je_groesse": {"50000": {"dd_usd": 2500}}}}}, f"Phase 2: Max DD im Unternehmen änderbar ({g or _a})")
+_a, _fm, _f, g = app.ap_unt_kernwert(FIRMEN, {}, {}, "lucidtrading", [{"pfad": ["je_groesse", "50000", "phasen", "challenge", "tp_max"], "wert": 1200}])
+check(bool(g) and "für alle" in g, f"Consistency (tp_max) gilt für alle ({g})")
 _a, _fm, _f, g = app.ap_unt_kernwert(FIRMEN, {}, {}, "lucidtrading", [{"pfad": LU, "wert": [0, 1]}])
 check(bool(g), f"Grenzen wie der Standard (TP 0 abgelehnt: {g})")
 _a, fm5, f5, g = app.ap_unt_kernwert(FIRMEN, {}, {}, "fundednextfutures", [{"pfad": ["planen"], "wert": True}])
@@ -207,6 +213,54 @@ _np = src[src.index("\ndef ap_gruppen_nachplan_tick("):src.index("\ndef ", src.i
 check('sb_select("auto_plan_gruppe", {"select": "*"})' in _np and 'z.get("regeln_at")' in _np and "zeilen_g = {}" in _np,
       "Gruppen-Nachplanen: select * (ohne Spalte regeln kein 400), Lesefehler → Standard statt Abbruch, „Regel geändert\" = regeln_at")
 check("Firmen an · anklicken" in html and "'Konto' : 'Konten'} im Planer" in html, "Kopf „n von m Firmen an“, Zeilen „n Konten im Planer“ (Finn-Foto Emin)")
+
+print("6) Phase 2 (UNT3): alle Konto-Leser über ap_unt_firmen / ap_regel_unternehmen")
+K0 = {"ok": True, "gid_von": {EMIN: "gr-emin"}, "zeilen": {"gr-emin": {"regeln": {}, "firmen_modell": {}}}, "ht": frozenset({"h1"}), "memo": {}}
+check(app.ap_unt_firmen("h1", FIRMEN, K0) is FIRMEN and app.ap_unt_firmen(EMIN, FIRMEN, K0) is FIRMEN and app.ap_unt_firmen("fremd", FIRMEN, K0) is FIRMEN,
+      "ohne Abweichung: HT, Emin und IDs ohne Unternehmen bekommen DIESELBE Liste (bitgleich)")
+K1 = dict(K0, zeilen={"gr-emin": {"regeln": abw, "firmen_modell": {}}}, memo={})
+e1 = app.ap_unt_firmen(EMIN, FIRMEN, K1)
+check(hol({"firmen": e1}, "lucidtrading", LU) == [1300, 1400] and app.ap_unt_firmen(EMIN, FIRMEN, K1) is e1 and app.ap_unt_firmen("h1", FIRMEN, K1) is FIRMEN,
+      "mit Abweichung: Emin seine Regel (gemerkt je Takt), HT Standard")
+check(app.ap_regel_unternehmen(EMIN, FIRMEN, "Lucid Trading", K1)["je_groesse"]["50000"]["phasen"]["challenge"]["tp"] == [1300, 1400],
+      "ap_regel_unternehmen(uid, firmen, firm) = Regel der Firma im Unternehmen der ID")
+K2 = dict(K0, ok=False)
+check(app.ap_unt_firmen(EMIN, FIRMEN, K2) == [] and app.ap_unt_firmen("h1", FIRMEN, K2) is FIRMEN and app.ap_unt_firmen(EMIN, FIRMEN, K2, streng=False) is FIRMEN,
+      "Kontext unbekannt: schreibende Leser (streng) überspringen Nicht-HT-Konten, Anzeigen rechnen Standard")
+app._ap_unt_ktx.update(bis=0)
+check(app.ap_unt_kontext().get("ohne_key") is True and app.ap_unt_firmen(EMIN, FIRMEN) is FIRMEN, "ohne Service-Key (Tests, lokal): kein Unternehmen → Standard, keine Abfrage")
+src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
+def fn(name):
+    i = src.index("\ndef " + name + "(")
+    return src[i:src.index("\ndef ", i + 5)]
+LESER = {"zw_tick": "ap_regel_unternehmen(a.get(\"user_id\")", "_ap_blow_beim_abhaken": "ap_regel_unternehmen(", "ap_blow_auto_tick": "ap_regel_unternehmen(",
+         "ap_normal_auto_tick": "ap_regel_unternehmen(", "admin_build_kontowerte": "ap_unt_firmen(a.get(\"user_id\")", "ah_tick": "fa = ap_unt_firmen(",
+         "_eh_tick_lauf": "ap_unt_firmen(", "ehv_tick": "ap_unt_firmen(", "tfh_tick": "ap_unt_firmen(", "ap_echo_hedge_anlegen": "ap_unt_firmen(",
+         "ap_kette_tick": "ap_regel_unternehmen(t1.get(\"user_id\")", "ap_kette_abhaken": "ap_regel_unternehmen(", "vorrat2_rechnen_lauf": "ap_unt_firmen(uid",
+         "konto_dd_vorschlag": "ap_unt_firmen(", "admin_live_trades": "ap_unt_firmen(p.get(\"user_id\")", "_ap_stand_laden": "ap_unt_firmen(",
+         "_ap_bewerten": "ap_regel_unternehmen(", "admin_hypo_bilanz": "ap_unt_firmen(", "konto_ziele": "ap_unt_firmen(a.get(\"user_id\")",
+         "admin_build_overview": "ap_unt_firmen(a_.get(\"user_id\")", "puls_heim_pruefen": "ap_unt_firmen(", "admin_auto_plan_hedge_freigabe": "ap_unt_firmen(",
+         "gp_planen": "ap_unt_regeln({\"firmen\": firmen}"}
+abw_b = {"firmen": {"lucidtrading": {"je_groesse": {"50000": {"phasen": {"challenge": {"menge": [2, 2]}}}}}}}
+KAB = {"ok": True, "gid_von": {EMIN: "gr-emin", "b1": "gr-b"}, "zeilen": {"gr-emin": {"regeln": abw, "firmen_modell": {}},
+       "gr-b": {"regeln": abw_b, "firmen_modell": {}}}, "ht": frozenset({"h1"}), "memo": {}}
+eA = app.ap_unt_firmen(EMIN, FIRMEN, KAB)
+mb = ["je_groesse", "50000", "phasen", "challenge", "menge"]
+check(app.ap_unt_firmen("h1", eA, KAB) is FIRMEN and app.ap_unt_firmen(EMIN, eA, KAB) is eA
+      and hol({"firmen": app.ap_unt_firmen("b1", eA, KAB)}, "lucidtrading", LU) == [1450, 1500]
+      and hol({"firmen": app.ap_unt_firmen("b1", eA, KAB)}, "lucidtrading", mb) == [2, 2],
+      "Fremd-Review: schon wirksame Liste (Gruppen-Lauf A) → HT rechnet Standard, Gruppe B Standard + B (nie A + B)")
+rA = app.ap_reg_unternehmen({"regeln": {"firmen": FIRMEN}}, {"gruppe_id": "gr-emin", "regeln": abw, "firmen_modell": {}})
+check(app.ap_unt_firmen("h1", rA["regeln"]["firmen"], KAB) is FIRMEN, "ap_reg_unternehmen (Planer-Lauf) trägt die Kennung ebenso")
+app.sb_select = lambda t, p: [dict(ZEILE, regeln={}, firmen_modell={})] if t == "auto_plan_gruppe" else (
+    [{"id": 1, "regeln": STD, "zeiten": {"fenster": [["02:00", "20:00", 100]]}, "user_ids": []}] if t == "auto_plan_regeln" else [])
+app.sb_update = lambda t, f, u: [u]
+app._ap_zugang = lambda admin_reiter=False: (False, EMIN, reg0, _403)
+app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "gr-emin", "name": "Emin", "verwalter_id": EMIN}]}
+r = c.post("/admin/auto-plan/kernwert", json={"gruppe_id": "gr-emin", "firma": "lucidtrading", "aenderungen": [{"pfad": ["je_groesse", "50000", "dd_usd"], "wert": 2500}]})
+check(r.status_code == 200 and "Accounts" in str((r.get_json() or {}).get("hinweis")), f"Max DD im Unternehmen gespeichert → Hinweis auf das Max DD der Konten ({r.status_code})")
+fehlt = [k for k, m in LESER.items() if m not in fn(k)]
+check(not fehlt, f"{len(LESER)} Konto-Leser lesen die Regel des Unternehmens ({fehlt or 'alle'})")
 
 print()
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER:\n  - " + "\n  - ".join(FEHLER))

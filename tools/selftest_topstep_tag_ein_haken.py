@@ -39,6 +39,7 @@ def block(name):
 
 
 ns = {"datetime": datetime, "timezone": timezone, "re": re}
+__import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
 exec("\n\n".join(block(f) for f in ("_wd_num", "_ap_ts", "_ap_hhmm", "_ap_tz", "ap_kette_t1_fertig", "ap_kette_lesen_bis", "lt_kette_teil", "lt_kette_teile")), ns)
 TZ = ZoneInfo("Europe/Berlin")
 KR = {"t2_bis": "19:30"}

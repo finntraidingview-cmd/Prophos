@@ -49,6 +49,7 @@ def lade():
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     m = re.search(r"^AP_KW_TYP_NAME = \{.*?\}$", src, re.M | re.S)
+    __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec("\n".join([konst(k) for k in ("AP_GROESSE_TOLERANZ", "_KETTE_DLL_CACHE", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_KW_CACHE_S", "_ap_kw_cache",
                                        "_ap_kw_cache_lock", "AP_KW_TYP_FIX", "AP_LESE_FELDER")] + [m.group(0)] + [block(f) for f in (
         "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert",

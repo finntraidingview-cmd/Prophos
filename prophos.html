@@ -43531,7 +43531,7 @@
     if(d) return d
     try{
       const tok = await _pushTok()
-      const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}${(acc.userId || acc.user_id) ? '&user_id=' + encodeURIComponent(acc.userId || acc.user_id) : ''}`   /* UNT3: Max DD nach dem Unternehmen der Konto-ID */, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const j = r.ok ? await r.json() : null
       return sucDdVorschlag(acc, zielTyp, vorlagen, j && j.dd)
     }catch(_){ return null }
@@ -87560,7 +87560,7 @@
   }
   // Wert als Eingabe (Admin, änderbares Feld, Pfad bekannt) oder als Text; erbt = kommt vom Standard (kein Pfad) → „wie Standard"
   /* REGEL JE UNTERNEHMEN (Phase 1, Finn 05.11.2026): in der Ansicht eines Unternehmens (D.unternehmen) sind nur die Felder aus D.unt_felder (TP, Lots, Puffer,
-   * Schritt) und „im Planer" änderbar — Ziel/Drawdown/Boden bleiben Standard („folgt in Phase 2"). Vom Unternehmen geänderte Felder (D.abweichung)
+   * Schritt) und „im Planer" änderbar; seit Phase 2 (UNT3) auch Ziel %, Drawdown, Daily, Boden-% (= AP_UNT_FELDER). Vom Unternehmen geänderte Felder (D.abweichung)
    * sind markiert und haben ↺ „auf Standard zurück". _e3.untFelder/_e3.abwAkt setzt die Karte der gewählten Firma. */
   function e3Wert(wert, pfad, feld, admin, einheit){
     if(_e3.untFelder && pfad && !Array.isArray(wert) && !(wert && typeof wert === 'object') && _e3.abwAkt && _e3.abwAkt.has(JSON.stringify(pfad))){
@@ -87715,7 +87715,7 @@
     if(D.unternehmen && sel) _e3.abwAkt = new Set((((D.abweichung || {}).firmen || {})[(sel.namen || [])[0]] || []).map(x => JSON.stringify(x)))
     if(!sel) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', '—')}<div class="e3-leer">keine Firma</div></div>`
     const n = (sel.namen || [])[0], knopf = admin ? `<span class="e3-k4">${(_e3.msg[n] || {}).text ? `<span class="e3-msg ${_e3.msg[n].ok ? 'ok' : 'fehler'}">${e3E(_e3.msg[n].text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-xs" data-e3-speichern="${e3E(n)}">Speichern</button></span>` : ''
-    const untHinweis = D.unternehmen ? `<div class="e3-unt-hinweis">TP, Kontrakte, Puffer und Schritt änderst du nur für ${e3E((D.unternehmen || {}).name || 'dieses Unternehmen')} — <span class="e3-abw-m">markiert</span> = eigene Änderung, ↺ = zurück auf Standard. Ziel, Drawdown und Consistency folgen dem Standard (änderbar ab Phase 2).${(D.unternehmen || {}).spalte_regeln === false ? ' <b>Einstellungen je Unternehmen noch nicht freigeschaltet</b> — es gilt der Standard; Firma an/aus und Modell gehen schon.' : ''}</div>` : ''
+    const untHinweis = D.unternehmen ? `<div class="e3-unt-hinweis">Ziel %, Drawdown, Daily, Boden, TP, Kontrakte, Puffer und Schritt änderst du nur für ${e3E((D.unternehmen || {}).name || 'dieses Unternehmen')} — <span class="e3-abw-m">markiert</span> = eigene Änderung, ↺ = zurück auf Standard. Kaufpreis, Consistency, Topstep-Kette und Mindesttage gelten für alle.${(D.unternehmen || {}).spalte_regeln === false ? ' <b>Einstellungen je Unternehmen noch nicht freigeschaltet</b> — es gilt der Standard; Firma an/aus und Modell gehen schon.' : ''}</div>` : ''
     return `<div class="wd-set-card e3-zt-karte">${e3Kopf4(`Ziel & Trade · ${e3Name(sel)}`, (sel.groessen || []).map(e3Gr).join(' · ') || 'Ziel, Consistency, Trade', knopf)}${untHinweis}${e3DetailHtml(sel, D, art, admin)}</div>`
   }
   function e3PlanerHedgeKarte(D, art, admin, sel){
@@ -87887,7 +87887,7 @@
       if(unt.gruppe_id){ if(d.abweichung) _e3.d.abweichung = d.abweichung; _e3.at = 0 }   // Unternehmen: Markierung frisch, Planer-Werte beim nächsten Laden
       const i = (_e3.d.firmen || []).findIndex(f => (f.namen || [])[0] === firma)
       if(i >= 0 && d.firma) _e3.d.firmen[i] = d.firma
-      _e3.msg[firma] = { ok: true, text: `✓ ${aenderungen.length} Wert${aenderungen.length === 1 ? '' : 'e'} gespeichert` }
+      _e3.msg[firma] = { ok: true, text: `✓ ${aenderungen.length} Wert${aenderungen.length === 1 ? '' : 'e'} gespeichert` + (d && d.hinweis ? ' · ' + d.hinweis : '') }
     }catch(e){ _e3.msg[firma] = { ok: false, text: 'nicht gespeichert: ' + ((e && e.message) || e) } }
     finally{ knopf.disabled = false; e3EinstZeichnen(true) }
   }

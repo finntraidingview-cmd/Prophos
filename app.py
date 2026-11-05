@@ -7233,7 +7233,7 @@ def _gp_zuwachs_karte(accounts, archived, plans, aktive_ketten):
     for c in glieder:
         a = by_id.get(c) or {}
         typ = a.get("account_type") or ""
-        p = ap_kw_param(ap_regel_finden(firmen, a.get("firm")))
+        p = ap_kw_param(ap_regel_unternehmen(a.get("user_id"), firmen, a.get("firm"), streng=False))   # UNT3: Regel des Unternehmens
         # Live-Stand nur am aktiven Konto selbst; abgelöste Vorgänger rechnen vorwärts ab Kontogröße (Express ab 0)
         bal = acc_balance_wahl(a, echo_bal, dup_bal)[0] if c not in archived else None
         start = 0.0 if ist_topstep_express(a) else _wd_konto_groesse(a)
@@ -7960,7 +7960,7 @@ def admin_build_overview(kapitel_id=None):
     for r in rows:
         a_ = by_id.get(r["id"]) or {}
         r.update(_firma_felder(a_, r["id"]))
-        r.update(admin_skala_felder(a_, _sk_regeln, _sk_kw))
+        r.update(admin_skala_felder(a_, _sk_regeln, ap_unt_firmen(a_.get("user_id"), _sk_kw, streng=False) if _sk_kw is not None else None))   # UNT3
 
     # Live-Konten (Hedge-Broker) stehen bewusst NICHT in rows — jede Summe der
     # Übersicht würde sie sonst mitzählen. Die Firmen-Ansicht zeigt sie trotzdem
@@ -10597,6 +10597,18 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
         rg = ap_regel_finden(firmen_regeln, f)
         stufen[f] = vorrat_stufen_aus_kernwerten(rg, param)
         kws[f] = ap_kw_param(rg)
+    # UNT3: Stufen + Kernwerte je Zelle aus der Regel des Unternehmens der ID (Standard + Abweichung); ohne Abweichung dieselben wie oben
+    _ktx, _st_je = ap_unt_kontext(), {}
+
+    def _stufen_kw(uid, f):
+        fs = ap_unt_firmen(uid, firmen_regeln, _ktx, streng=False)
+        if fs is firmen_regeln:
+            return stufen.get(f) or {}, kws.get(f)
+        m = _st_je.get((id(fs), f))
+        if not m or m[0] is not fs:                    # Liste selbst mit ablegen (Fremd-Review: id() allein kann nach Neuladen wiederkehren)
+            rg_u = ap_regel_finden(fs, f)
+            m = _st_je[(id(fs), f)] = (fs, vorrat_stufen_aus_kernwerten(rg_u, param) or {}, ap_kw_param(rg_u))
+        return m[1], m[2]
     standard = ein.get("standard_status") if ein.get("standard_status") in ("frei", "gesperrt") else "frei"
     try:
         echo_bal, dup_bal = _ap_balance_karten()
@@ -10665,7 +10677,8 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             status = gesetzt if gesetzt in VORRAT_STATUS else standard
             liste = je.get((uid, f), [])
             seed = zlib.crc32(f"{uid}|{f}".encode("utf-8")) % 1000003
-            z = vorrat2_zelle(ziele[f], stufen.get(f) or {}, liste, status, param, faktoren.get(f), seed, kws.get(f))
+            _st_u, _kw_u = _stufen_kw(uid, f)
+            z = vorrat2_zelle(ziele[f], _st_u, liste, status, param, faktoren.get(f), seed, _kw_u)
             nr = z["nachkauf"]["n_roh"]
             tb = vorrat_totband(nr, vorher.get((uid, f)), jetzt_iso, param) if isinstance(nr, int) else None
             z["totband"] = tb
@@ -14006,7 +14019,8 @@ def admin_live_trades():
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
                 trades.append(z)
             else:
-                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
+                              kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
                 z["plattform"] = "orbit"
                 if p.get("status") == "open" and solo_je_pc:
                     z["slave_pl_live"] = lt_fusion_pl_solo((p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None, solo_je_pc, jetzt_ts)
@@ -18938,7 +18952,8 @@ def _puls_heim_naehe(plaene, schwellen_je):
     out = []
     for p in plaene:
         acc = accs.get(str(p.get("master_account_id") or ""))
-        z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+        z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
+                      kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
         kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
         n = puls_heim_nah(z, kurs, schwellen_je(acc, p))
         name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
@@ -19233,7 +19248,8 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
         kurse = _kurs_jetzt()
         for p in big:
             acc = accs.get(str(p.get("master_account_id") or ""))
-            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
+                          kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
             kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
             n = puls_heim_nah(z, kurs, puls_heim_schwellen(regel, (acc or {}).get("firm") or p.get("master_firm")))
             name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
@@ -19250,7 +19266,8 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
         for p, schw, art_name, art_info in ([(x, apex_schw, "Apex-Challenge", {"apex_hedge": True}) for x in apexe]
                                             + [(x, wd_schw, "Winning Day", {"winning_day": True}) for x in wds]):
             acc = accs.get(str(p.get("master_account_id") or ""))
-            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
+                          kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
             kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
             n = puls_heim_nah(z, kurs, schw)
             # Liq-Level unbekannt → puls_heim_nah sagt „nicht prüfbar“, obwohl der TP-Rest feststeht: dann zählt der TP allein (Prüfer 22.10.2026)
@@ -24857,7 +24874,7 @@ def admin_build_kontowerte(sicht=None):
     aktiv = [str(a["id"]) for a in konten if str(a["id"]) not in archiv and (a.get("account_type") or "") != "live"]
     kauf = _ap_kauf_echt(aktiv) if aktiv else {}
     # Höchststand für die Topstep-Kette mit DLL (09.10.2026, MLL im Kontowert) — nur Kettenkonten, eine Abfrage, Fehler → ohne
-    kette_ids = [a for a in konten if str(a["id"]) in aktiv and (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("kette_daily")]
+    kette_ids = [a for a in konten if str(a["id"]) in aktiv and (ap_kw_param(ap_regel_unternehmen(a.get("user_id"), firmen, a.get("firm"), streng=False)) or {}).get("kette_daily")]
     peaks = _ap_peaks(kette_ids) if kette_ids else {}
     # frische Konten: Startwert wie im Planer (ap_startwert_frisch, Finn 09.10.2026) — Verlauf nur für aktive Konten ohne Lesung
     _aktiv = set(aktiv)
@@ -24871,7 +24888,8 @@ def admin_build_kontowerte(sicht=None):
         if bal is None and aid in ohne:
             lg = str(a.get("external_id") or "").strip()
             bal = ap_startwert_frisch(a, None if gehandelt is None else aid in gehandelt, gelesen=bool(lg) and (lg in echo_bal or lg in dup_bal))
-        werte[aid] = ap_kontowert_konto(a, bal, firmen, kauf.get(aid), archiviert=aid in archiv, peak=peaks.get(aid))
+        werte[aid] = ap_kontowert_konto(a, bal, ap_unt_firmen(a.get("user_id"), firmen, streng=False), kauf.get(aid), archiviert=aid in archiv,
+                                        peak=peaks.get(aid))   # UNT3: Kernwerte des Unternehmens der ID
     return werte
 
 
@@ -25084,7 +25102,8 @@ def admin_hypo_bilanz():
                 tag = datetime.fromisoformat(st.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
             except Exception:
                 tag = st[:10]
-            z = hypo_bilanz_zeile(p, accs.get(aid), firmen, lauf.get((tag, aid)), (kw.get(aid) or {}).get("satz_eur_pro_usd"), disp)
+            z = hypo_bilanz_zeile(p, accs.get(aid), ap_unt_firmen(p.get("user_id"), firmen, streng=False), lauf.get((tag, aid)),
+                                  (kw.get(aid) or {}).get("satz_eur_pro_usd"), disp)   # UNT3
             if z:
                 z["tag"] = tag
                 aus.append(z)
@@ -25326,7 +25345,7 @@ def _ap_hb_laden(firmen, jetzt=None, ab=None):
 
     def zeile(p, kw_heute):
         k = str(p.get("master_account_id") or "")
-        return ap_hb_zeile(p, accs.get(k), firmen, lauf.get((tag_je.get(str(p.get("id"))), k)), kw_heute, namen,
+        return ap_hb_zeile(p, accs.get(k), ap_unt_firmen(p.get("user_id"), firmen, streng=False), lauf.get((tag_je.get(str(p.get("id"))), k)), kw_heute, namen,
                            archiv_am_tag(k, p), letzter=bool(k) and str(ap_hb_ende(p) or "") >= letzt.get((k, dtag(p)), ""))
     zeilen = [zeile(p, None) for p in plaene]
     fehlt = [i for i, r in enumerate(zeilen) if r["art"] != "offen" and r["eur"] is None]
@@ -26517,13 +26536,14 @@ def _ap_blow_beim_abhaken(plan, master_pl):
             be = float(bs) + float(master_pl)
         if bs is None or be is None or not plan.get("master_account_id"):
             return False
-        acc = (sb_select("accounts", {"select": "id,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown",
+        acc = (sb_select("accounts", {"select": "id,user_id,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown",
                                       "id": f"eq.{plan['master_account_id']}", "limit": "1"}) or [None])[0]
         phase = str(plan.get("konto_typ") or (acc or {}).get("account_type") or "")
         if not acc or phase not in AP_TYPEN:
             return False
         reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
-        regel = ap_regel_finden(((reg.get("regeln") or {}).get("firmen") or []), acc.get("firm"))
+        # UNT3: Boden nach der Regel des Unternehmens der ID (Standard + Abweichung); Unternehmen unbekannt → keine Regel → nicht blown (Finn hakt)
+        regel = ap_regel_unternehmen(acc.get("user_id") or plan.get("user_id"), ((reg.get("regeln") or {}).get("firmen") or []), acc.get("firm"))
         if not regel:
             return False
         return ap_ende_unter_boden(ap_regel_konto(regel, acc, float(bs)), phase, bs, be)
@@ -26739,7 +26759,7 @@ def ap_blow_auto_tick(force=False):
             ende = _ap_iso_ts(p.get("ended_at") or p.get("completed_at"))
             neuer = ende is None or any(str(q.get("master_account_id")) == str(p["master_account_id"]) and str(q.get("id")) != str(p["id"])
                                         and (_ap_iso_ts(q.get("created_at")) or 0) > ende for q in alle)
-            k = ap_blow_auto_pruefen(p, acc, ap_regel_finden(firmen, (acc or {}).get("firm")) if acc else None, neuer)
+            k = ap_blow_auto_pruefen(p, acc, ap_regel_unternehmen(acc.get("user_id"), firmen, acc.get("firm")) if acc else None, neuer)   # UNT3
             if k and _ap_blow_auto_abhaken(p, acc, k):
                 n += 1
         except Exception as e:
@@ -27031,7 +27051,7 @@ def ap_normal_auto_tick():
         if not acc or str(acc["id"]) in archiv:
             continue
         try:
-            k = ap_normal_auto_pruefen(p, acc, ap_regel_finden(firmen, acc.get("firm")))
+            k = ap_normal_auto_pruefen(p, acc, ap_regel_unternehmen(acc.get("user_id"), firmen, acc.get("firm")))   # UNT3
             if k and _ap_normal_auto_abhaken(p, k):
                 n += 1
         except Exception as e:
@@ -28387,6 +28407,9 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
     frueh = ((jetzt + timedelta(minutes=GP_VORLAUF_MIN)) - mitternacht).total_seconds() / 60.0
     in_uids = "in.(" + ",".join(uids) + ")"
     firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+    # UNT3: die Gruppe plant mit Standard + ihrer Abweichung (zeile = ihre auto_plan_gruppe-Zeile)
+    firmen = ap_unt_regeln({"firmen": firmen}, zeile.get("regeln") if isinstance(zeile.get("regeln"), dict) else {},
+                           zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {})["firmen"]
     konten = ap_deaktiviert_anwenden(_sb_all("accounts", {"select": AP_KONTO_FELDER + ",purchase_cost", "user_id": in_uids, "order": "id.asc",
                                                           "account_type": "in.(" + ",".join(AP_TYPEN) + ")"}))
     roh = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_sl,blown,route,"
@@ -29234,7 +29257,8 @@ def ap_echo_hedge_anlegen(zeilen, konten, regeln):
     for z in kand:
         a, bal = konten.get(str(z.get("master_account_id"))) or (None, None)
         try:
-            art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, {"ppl": ppl, "ppl_firma": ppl_firma}, kauf, firmen, par, jetzt_iso)
+            art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, {"ppl": ppl, "ppl_firma": ppl_firma}, kauf,
+                                              ap_unt_firmen(a.get("user_id") or z.get("user_id"), firmen, streng=False), par, jetzt_iso)   # UNT3
         except Exception as e:      # eine kaputte Zeile wird nicht angelegt, die anderen trotzdem Echo
             art, grund = "v2", f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})"
         if art == "echo":
@@ -29259,7 +29283,8 @@ def eh_rot_kandidaten(plaene, konten, firmen, aus, regel_finden):
         if str(p.get("user_id")) in aus or base.get("echo_hedge") or base.get("tage_mini") or not p.get("start_um_gestartet_at"):
             continue
         a = konten.get(str(p.get("master_account_id")))
-        if eh_plan_zaehlt(a, regel_finden(firmen, (a or {}).get("firm"))):
+        fs = firmen(a) if callable(firmen) else firmen   # UNT3: callable = Firmen je Konto (Regel des Unternehmens der ID)
+        if eh_plan_zaehlt(a, regel_finden(fs, (a or {}).get("firm"))):
             out.append(p)
     return out
 
@@ -29299,10 +29324,10 @@ def eh_rot_start_pruefen(jetzt, firmen, aus, namen):
     roh = [p for p in roh if str(p.get("user_id")) not in aus]
     if not roh:
         return 0
-    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,firm,account_type", "id": "in.(" + ",".join(
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,user_id,firm,account_type", "id": "in.(" + ",".join(
         sorted({str(p["master_account_id"]) for p in roh if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
     n = 0
-    for p in eh_rot_kandidaten(roh, konten, firmen, aus, ap_regel_finden):
+    for p in eh_rot_kandidaten(roh, konten, lambda a: ap_unt_firmen((a or {}).get("user_id"), firmen, streng=False), aus, ap_regel_finden):   # UNT3
         if _eh_rot_schon(f"eh-rot-faellig-{p['id']}"):
             continue                                      # schon vor dem Start mit Grund 🔴 gemeldet
         n += _eh_rot(p, "start", "als Echo V2 OHNE Fusion-Hedge gestartet — die Umstellung kam nicht vor dem Claim (kein Grund am Plan). "
@@ -29432,7 +29457,7 @@ def _eh_tick_lauf(jetzt):
             if not a:
                 offen[str(p["id"])] = (p, "Konto des Plans nicht lesbar (accounts) — Hedge nicht rechenbar")
                 continue
-            if not eh_plan_zaehlt(a, ap_regel_finden(firmen, a.get("firm"))):
+            if not eh_plan_zaehlt(a, ap_regel_finden(ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), a.get("firm"))):   # UNT3
                 continue                                      # nur CFD-Challenges von Firmen auf Echo V2
             uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
             base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -29450,7 +29475,7 @@ def _eh_tick_lauf(jetzt):
             if bal is None:
                 _eh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
                 continue
-            kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+            kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))
             sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
             h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
                                 par["netto_faktor"], par["min_lot"])
@@ -29600,7 +29625,7 @@ def ehv_tick(jetzt=None, force=False):
         a = konten.get(str(p.get("master_account_id")))
         if not a or (a.get("account_type") or "") not in EH_TYPEN:
             continue
-        regel = ap_regel_finden(firmen, a.get("firm"))
+        regel = ap_regel_finden(ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), a.get("firm"))   # UNT3
         if not regel or str(regel.get("route") or "mt5v2") != "mt5v2":
             continue
         base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -29615,7 +29640,7 @@ def ehv_tick(jetzt=None, force=False):
             if bal is None:
                 grund = "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)"
             else:
-                kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+                kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))
                 sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
                 h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
                                     par["netto_faktor"], par["min_lot"])
@@ -29859,7 +29884,7 @@ def tfh_tick(jetzt=None, force=False):
             base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
             if base.get("tage_mini"):
                 continue
-            vs = tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par)
+            vs = tfh_vorschau(a, p, echo_bal, dup_bal, ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf, par)
             if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
                 try:
                     sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)})
@@ -29889,7 +29914,7 @@ def tfh_tick(jetzt=None, force=False):
             continue
         # KENNUNG + VORSCHAU (Master 29.10.2026, „Neue Hedge-Trades bestätigen"): hedge_art 'tradeify_final' + hedge_vorschau {lots, hedge_eur,
         # blow_eur, pass_eur, q} — geschrieben nur bei neuer Kennung oder geänderter Vorschau; dann diesen Takt nicht umstellen (updated_at neu)
-        vs = tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par)
+        vs = tfh_vorschau(a, p, echo_bal, dup_bal, ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf, par)
         if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
             try:
                 sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)})
@@ -29909,7 +29934,7 @@ def tfh_tick(jetzt=None, force=False):
         if bal is None:
             _tfh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
             continue
-        kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+        kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))   # UNT3
         satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
         polster = (wert / satz) if (satz and wert) else None
         ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
@@ -30439,11 +30464,12 @@ def admin_auto_plan_hedge_freigabe():
             try:   # eigener try: fällt die Rechnung aus, bleibt die Liste bestätigbar, die Spalte zeigt „–"
                 kids = sorted({str(r.get("master_account_id")) for r in rows if r.get("wd") and r.get("master_account_id")})
                 if kids:
-                    konten = {str(k.get("id")): k for k in _sb_all("accounts", {"select": "id,firm,name,external_id,account_type,starting_balance,max_drawdown,tv_balance", "id": "in.(" + ",".join(kids) + ")"})}
+                    konten = {str(k.get("id")): k for k in _sb_all("accounts", {"select": "id,user_id,firm,name,external_id,account_type,starting_balance,max_drawdown,tv_balance", "id": "in.(" + ",".join(kids) + ")"})}
                     regeln, kw, fruehere = _liq_regeln_laden(), _liq_kw_laden(), _wd_fruehere_trades(kids)
                     for r in rows:
                         if r.get("wd"):
-                            r["master_verlust"] = hf_wd_master_verlust(regeln, konten.get(str(r.get("master_account_id"))), r, kw, fruehere)
+                            r["master_verlust"] = hf_wd_master_verlust(regeln, konten.get(str(r.get("master_account_id"))), r,
+                                                                       ap_unt_firmen(r.get("user_id"), kw, streng=False) if kw is not None else None, fruehere)   # UNT3
             except Exception as e:
                 print(f"[hedge-freigabe] ⚠️ Master-Verlust: {type(e).__name__}: {e}", flush=True)
             return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows], "wd_firmen": firmen})
@@ -30578,10 +30604,12 @@ def ap_gruppe_firma_an(regel, fm):
 # Wirksame Regel = Standard, überlagert mit den Abweichungen, deren Pfad es im Standard gibt; Nicht-Geändertes folgt dem Standard live. Modell und
 # „im Planer" der Gruppe stehen weiter in firmen_modell (MO1b/c) und gehen in dieselbe wirksame Regel ein (modell, planen). Ein 3. Unternehmen =
 # neue Zeile mit leerer Abweichung = alles Standard. Phase 1 änderbar: Firma an/aus, Modell, TP, Lots/Kontrakte, Puffer, Schritt, Startfenster;
-# Ziel %, Drawdown, Boden, Kauf, Consistency bleiben Standard (folgt in Phase 2, wenn auch Ziel-Wache/Boden/Kontowert je Unternehmen lesen). ══
+# Phase 2 (UNT3): + Ziel %, Drawdown, Daily, Boden-% (alle Konto-Leser lesen die Regel des Unternehmens); Kauf, Consistency (tp_max), Kette, Mindesttage bleiben Standard. ══
 AP_UNT_NICHT_FREI = ("Einstellungen je Unternehmen noch nicht freigeschaltet — es gilt der Standard (Firma an/aus und Modell gehen schon). "
                      "Admin: sql/2026-11-05_regel_unternehmen.sql einspielen.")
-AP_UNT_FELDER = ("tp", "menge", "puffer", "puffer_je_menge", "menge_schritt")
+AP_UNT_FELDER = ("tp", "menge", "puffer", "puffer_je_menge", "menge_schritt",
+                 # PHASE 2 (UNT3): seit alle Konto-Leser die Regel des Unternehmens lesen (ap_unt_firmen) auch Ziel %, Drawdown, Daily und Boden
+                 "ziel_pct", "dd_usd", "dd_pct", "daily_usd", "boden_pct")
 AP_UNT_NIE = ("kette", "gewinntage")   # Fremd-Review: Topstep-Kette (Trade 2 legt ap_kette_tick aus dem Standard an) und Mindesttage bleiben Standard
 
 
@@ -30685,7 +30713,13 @@ def ap_reg_unternehmen(reg, zeile):
         return reg
     abw = zeile.get("regeln") if isinstance(zeile.get("regeln"), dict) else {}
     fm = zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {}
-    return dict(reg, regeln=ap_unt_regeln(reg.get("regeln") or {}, abw, fm), zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw))
+    r = ap_unt_regeln(reg.get("regeln") or {}, abw, fm)
+    if isinstance(r.get("firmen"), list):
+        std_f = (reg.get("regeln") or {}).get("firmen")
+        eff = _UntFirmen(r["firmen"])
+        eff.std, eff.gid = (std_f.std if isinstance(std_f, _UntFirmen) else std_f), str(zeile.get("gruppe_id") or "") or None
+        r["firmen"] = eff
+    return dict(reg, regeln=r, zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw))
 
 
 def ap_unt_je_uid(reg, gruppen=None, zeilen=None):
@@ -30715,6 +30749,93 @@ def ap_unt_je_uid(reg, gruppen=None, zeilen=None):
             else:
                 je[str(u)] = eff
     return je, gesperrt
+
+
+# ══ PHASE 2 (UNT3, Master 05.11.2026): ALLE KONTO-LESER der Challenge-Planer-Regel lesen die Regel des Unternehmens der ID (Standard + Abweichung) ══
+# Ziel-Wache, Boden/Abhaken (Blow), Kontowert, Radar-Liq, Vorrat, Echo-/Orbit-Prio-2-/Tradeify-Hedge-Takt, Topstep-Kette, Bestätigen-Prüfung,
+# M2-Consistency: statt ap_regel_finden(firmen_std, firm) → ap_regel_finden(ap_unt_firmen(uid, firmen_std), firm). Der Kontext (welche ID gehört zu
+# welchem Unternehmen, dessen Abweichung) ist 30 s gemerkt; ohne Abweichung und ohne firmen_modell kommt DIESELBE Liste zurück (bitgleich).
+# Kontext nicht lesbar: der letzte gute Stand (≤ AP_UNT_KTX_ALT_S) gilt weiter, sonst nur HT-IDs (auto_plan_regeln.user_ids) mit Standard — eine
+# ID ohne sicher bekanntes Unternehmen bekommt [] (keine Regel: die Leser rechnen/schreiben nichts, fail-closed) — für Markierungen (Ziel erreicht,
+# Blow, Auto-Abhaken). Bewusst Standard (streng=False): Anzeigen, die Hedge-Takte (Echo, Orbit Prio 2, Tradeify — ein fehlender Hedge ist das
+# größere Risiko als einer am Standard; ihre Riegel bleiben) und die Topstep-Kette (sonst fiele Trade 2 des Tages aus, wie vor Phase 2).
+AP_UNT_KTX_S = 30
+AP_UNT_KTX_ALT_S = 900
+_ap_unt_ktx = {"bis": 0.0, "gut_at": 0.0, "gid_von": {}, "zeilen": {}, "ht": frozenset(), "ok": False, "memo": {}}
+
+
+def _ap_unt_ktx_laden():
+    gruppen = ap_planer_gruppen()
+    zeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+    ht = frozenset(str(u) for u in ((sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0].get("user_ids") or []))
+    gid_von = {str(u): str(g["gruppe_id"]) for g in gruppen for u in g.get("ids") or ()}
+    return gid_von, zeilen, ht
+
+
+def ap_unt_kontext(frisch=False):
+    """{gid_von: {uid: gruppe_id}, zeilen: {gruppe_id: auto_plan_gruppe-Zeile}, ht: HT-IDs, ok} — 30 s gemerkt (Lesefehler: letzter guter Stand)."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if not frisch and _ap_unt_ktx["bis"] > jetzt:
+            return _ap_unt_ktx
+    if not SUPABASE_SERVICE_KEY:
+        # ohne Service-Key (Selbsttests, lokaler Mac ohne Schlüssel) ist kein Unternehmen lesbar → alle Konten Standard, wie vor Phase 2
+        with _kurz_cache_lock:
+            _ap_unt_ktx.update(bis=jetzt + AP_UNT_KTX_S, gid_von={}, zeilen={}, ok=True, memo={}, ohne_key=True)
+        return _ap_unt_ktx
+    try:
+        gid_von, zeilen, ht = _ap_unt_ktx_laden()
+        with _kurz_cache_lock:
+            _ap_unt_ktx.update(bis=jetzt + AP_UNT_KTX_S, gut_at=jetzt, gid_von=gid_von, zeilen=zeilen, ht=ht, ok=True, memo={})
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ Kontext nicht lesbar: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        with _kurz_cache_lock:
+            alt = jetzt - (_ap_unt_ktx.get("gut_at") or 0) <= AP_UNT_KTX_ALT_S
+            _ap_unt_ktx.update(bis=jetzt + 10, ok=bool(alt and _ap_unt_ktx.get("gut_at")))
+            if not _ap_unt_ktx["ok"]:
+                _ap_unt_ktx.update(gid_von={}, zeilen={}, memo={})
+    return _ap_unt_ktx
+
+
+class _UntFirmen(list):
+    """Wirksame regeln.firmen eines Unternehmens (Fremd-Review UNT3): merkt sich die Standard-Liste (std) und die Gruppe (gid). Bekommt ein Leser
+    schon eine wirksame Liste (Gruppen-Lauf: ap_planen → _ap_stand_laden mit der Regel der Gruppe), überlagert ap_unt_firmen je ID wieder vom
+    Standard aus — nie Gruppe A + Gruppe B, und HT-Konten rechnen nie mit der Regel einer Gruppe."""
+    std = None
+    gid = None
+
+
+def ap_unt_firmen(uid, firmen_std, ktx=None, streng=True):
+    """REGEL JE UNTERNEHMEN (Phase 2): regeln.firmen des Unternehmens dieser ID = Standard (firmen_std, wie bisher gelesen) + Abweichung + firmen_modell.
+    HT-ID / ID ohne Unternehmen / Unternehmen ohne Abweichung → firmen_std selbst (dasselbe Objekt, bitgleich). Unternehmen nicht sicher bekannt
+    (Kontext seit > 15 min nicht lesbar): HT-IDs Standard, alle anderen [] (streng, schreibende Leser) bzw. Standard (streng=False, nur Anzeige)."""
+    k = ktx if ktx is not None else ap_unt_kontext()
+    uid = str(uid or "")
+    if isinstance(firmen_std, _UntFirmen) and firmen_std.std is not None:
+        firmen_std = firmen_std.std                    # schon wirksame Liste → vom Standard aus je ID
+    if not k.get("ok"):
+        return firmen_std if (uid in (k.get("ht") or ()) or not streng) else []
+    gid = (k.get("gid_von") or {}).get(uid)
+    if not gid:
+        return firmen_std
+    z = (k.get("zeilen") or {}).get(gid) or {}
+    abw = z.get("regeln") if isinstance(z.get("regeln"), dict) else {}
+    fm = z.get("firmen_modell") if isinstance(z.get("firmen_modell"), dict) else {}
+    if not (abw.get("firmen") or fm):
+        return firmen_std
+    memo = k.setdefault("memo", {})
+    m = memo.get((gid, id(firmen_std)))
+    if m and m[0] is firmen_std:
+        return m[1]
+    eff = _UntFirmen(ap_unt_regeln({"firmen": firmen_std or []}, abw, fm)["firmen"])
+    eff.std, eff.gid = firmen_std, gid
+    memo[(gid, id(firmen_std))] = (firmen_std, eff)
+    return eff
+
+
+def ap_regel_unternehmen(uid, firmen_std, firm, ktx=None, streng=True):
+    """Regel der Firma firm für ein Konto der ID uid (Standard + Abweichung seines Unternehmens) — der eine Weg für alle Konto-Leser."""
+    return ap_regel_finden(ap_unt_firmen(uid, firmen_std, ktx, streng), firm)
 
 
 def ap_unt_wache_reg(reg, uid, je_uid, gesperrt):
@@ -30759,7 +30880,7 @@ def ap_unt_kernwert(std_firmen, abw, fm, firma, aenderungen, standard=None):
     for a in rest:
         pfad = a.get("pfad")
         if not ap_unt_feld_ok(pfad):
-            return None, None, None, f"{'/'.join(map(str, pfad or []))}: im Unternehmen nur lesbar (Standard; folgt in Phase 2)"
+            return None, None, None, f"{'/'.join(map(str, pfad or []))}: im Unternehmen nur lesbar (gilt für alle Unternehmen — Standard)"
         if not _unt_hol(std, pfad)[0]:
             return None, None, None, f"{'/'.join(pfad)} gibt es im Standard nicht"
     eff = ap_unt_regeln({"firmen": std_firmen}, abw, fm)["firmen"]
@@ -31171,7 +31292,8 @@ def ah_tick(jetzt=None, force=False):
         bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
         if bal is None:
             return None, None, None, None, None, ("balance", "Balance des Kontos nicht lesbar (Kontowert und Boden für den Hedge)")
-        kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+        fa = ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False)   # UNT3: Kernwerte des Unternehmens
+        kw = ap_kontowert_konto(a, float(bal), fa, kauf.get(str(a["id"])))
         werte = ah_werte(kw)
         if not werte:
             if _wd_num(kw.get("satz_eur_pro_usd")):
@@ -31180,8 +31302,8 @@ def ah_tick(jetzt=None, force=False):
         satz, wert, polster = werte                        # polster: $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
         # BODEN AM EOD-HOCH (MO1b): nachziehende Firmen (Lucid …) liquidieren am höchsten Tagesschluss − Max DD, nicht an Balance − DD — steht das
         # Konto unter seinem EOD-Hoch, ist das Polster kleiner; Wert = Satz × Polster wie bei Apex. Statische Firmen (Apex) unverändert.
-        if (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("boden") == "nachziehend":
-            _b_eod, _b_grund = _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), firmen)
+        if (ap_kw_param(ap_regel_finden(fa, a.get("firm"))) or {}).get("boden") == "nachziehend":
+            _b_eod, _b_grund = _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), fa)
             if _b_grund:                                   # fail-closed (Fremd-Review MO1b): kein stiller Rückfall auf Balance − DD
                 if len(_ah_beleg_gemeldet) > 500:
                     _ah_beleg_gemeldet.clear()
@@ -33615,7 +33737,7 @@ def _ap_gehedgt_plan(p):
 def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=False):
     """Kontowert, Gewicht (€) und Delta eines Trades aus dem Kontext des Stands (Kernwerte, echte Käufe, firm_specs)."""
     a = a or {}
-    regel = ap_regel_konto(ap_regel_finden(ctx["firmen"], a.get("firm")), a, bal)
+    regel = ap_regel_konto(ap_regel_unternehmen(a.get("user_id"), ctx["firmen"], a.get("firm"), streng=False), a, bal)   # UNT3: Regel des Unternehmens
     p = ap_kw_param(regel)
     kw = ap_kontowert(a.get("account_type"), bal, p, ctx["kauf"].get(str(a.get("id")))) if a and bal else None
     fk = _ap_norm(_firm_norm(a.get("firm")))
@@ -33952,7 +34074,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                               letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
                  # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer
-                 **ap_boden_sicher(firmen, a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks),
+                 **ap_boden_sicher(ap_unt_firmen((a or {}).get("user_id") or p.get("user_id"), firmen, streng=False), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks),   # UNT3
                  konto_id=str(p.get("master_account_id") or "") or None,
                  # Slave 7 (08.10.2026, „Wartet auf Start" fremder IDs): notes + die Balance, mit der der Planer rechnet — nur Anzeige
                  notes=_ap_notes_kurz(p.get("notes")), balance=round(float(bal(a)), 2) if bal(a) is not None else None)   # Frontend tplDaten ordnet Konto/Balance darüber zu (08.10.2026)
@@ -35232,7 +35354,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
     sperren = _ap_sperren()        # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein Trade 2; Lesefehler → leer (wie bisher)
     for t1 in offen_t1:
         pid = str(t1["id"])
-        regel = ap_regel_finden(firmen, t1.get("master_firm"))
+        regel = ap_regel_unternehmen(t1.get("user_id"), firmen, t1.get("master_firm"), streng=False)   # UNT3: Regel des Unternehmens (Kettenfelder bleiben Standard, dd_usd je Unternehmen)
         kette = ap_kette_regel(regel)
         if not kette:
             gruende[pid] = "Firma ohne Kettenregel"
@@ -35468,7 +35590,7 @@ def ap_kette_abhaken(jetzt=None):
             if regeln is None:
                 regeln = _ap_kette_regeln_laden()     # Lesefehler → {}: 1/2 läuft weiter automatisch, die Kette darf nicht stehen bleiben
             firmen = regeln.get("firmen") or []
-        regel = ap_regel_finden(firmen, p.get("master_firm"))
+        regel = ap_regel_unternehmen(p.get("user_id"), firmen, p.get("master_firm"), streng=False)   # UNT3
         kette_r = ap_kette_regel(regel) if regel else None
         letzter = bool(upd.get("blown")) or ap_kette_letzter_trade(k, bal, regel, kette_r)
         if not letzter and kette_r:
@@ -35527,7 +35649,7 @@ def _ap_kette_lesen_bis_schreiben(p, regeln, jetzt):
     k0 = (p.get("mt5_baseline") or {}).get("kette") or {}
     if int(k0.get("nr") or 0) != 1 or k0.get("lesen_bis_at") or k0.get("tagesende"):
         return
-    regel = ap_regel_finden((regeln or {}).get("firmen") or [], p.get("master_firm")) if (regeln or {}).get("firmen") else None
+    regel = ap_regel_unternehmen(p.get("user_id"), (regeln or {}).get("firmen") or [], p.get("master_firm"), streng=False) if (regeln or {}).get("firmen") else None   # UNT3
     kr = ap_kette_regel(regel) if regel else None
     ende = p.get("ended_at") or ((p.get("mt5_baseline") or {}).get("final") or {}).get("at")
     if not kr or not ende:
@@ -35658,7 +35780,9 @@ def konto_dd_vorschlag():
         return err
     try:
         reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
-        dd = konto_dd_aus_regel((reg.get("regeln") or {}).get("firmen") or [], request.args.get("firma"), _wd_num(request.args.get("groesse")))
+        # UNT3: Max DD nach der Regel des Unternehmens der ID, für die das Konto angelegt wird (?user_id=, sonst der Login)
+        fs = ap_unt_firmen(request.args.get("user_id") or _uid, (reg.get("regeln") or {}).get("firmen") or [], streng=False)
+        dd = konto_dd_aus_regel(fs, request.args.get("firma"), _wd_num(request.args.get("groesse")))
         return jsonify({"ok": True, "dd": dd})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
@@ -35907,7 +36031,7 @@ def admin_auto_plan_ids():
                           "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                                           letzt_je.get(str(p.get("master_account_id") or ""))),
                           # BODEN (08.10.2026, Balance-Balken Slave 4) — wie delta.geplant[]
-                          **ap_boden_sicher(reg.get("firmen"), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks)})
+                          **ap_boden_sicher(ap_unt_firmen((a or {}).get("user_id"), reg.get("firmen"), streng=False), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks)})   # UNT3
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
         bestaetigt = None
@@ -37205,7 +37329,14 @@ def admin_auto_plan_kernwert():
             return jsonify({"ok": False, "msg": "inzwischen geändert — Einstellungen neu laden und noch einmal speichern"}), 409
         print(f"[einstellungen] Unternehmen {gid[:8]} {body.get('firma')}: {len(body.get('aenderungen') or [])} geändert, "
               f"{len(body.get('standard') or [])} auf Standard ({uid})", flush=True)
-        return jsonify({"ok": True, "firma": f_neu, "abweichung": ap_unt_abweichung_liste(abw, fm)})
+        # UNT3 Fremd-Review: Max DD/Daily je Unternehmen ändern die Kernwerte, nicht die Konten — accounts.max_drawdown bleibt (Radar-Boden, und
+        # Orbit Prio 2 stoppt bei „Max DD am Konto ≠ Kernwerte"). Hinweis statt stillem Auseinanderlaufen.
+        hinweis = None
+        if any(isinstance(a, dict) and isinstance(a.get("pfad"), list) and a["pfad"] and a["pfad"][-1] in ("dd_usd", "dd_pct", "daily_usd")
+               for a in (body.get("aenderungen") or [])):
+            hinweis = ("Max DD/Daily gilt für Planer, Kontowert und Boden — die Konten behalten ihr Max DD (Accounts): bitte dort gleich setzen, "
+                       "sonst stoppt Orbit Prio 2 mit „Max DD am Konto ≠ Kernwerte\"")
+        return jsonify({"ok": True, "firma": f_neu, "abweichung": ap_unt_abweichung_liste(abw, fm), "hinweis": hinweis})
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
@@ -38056,7 +38187,7 @@ def konto_ziele():
         plaene = _sb_all("trade_plans", {"select": KZ_PLAN_SEL, "master_account_id": f"eq.{kid}", "order": "started_at.asc"}) or []
         # Kernwerte und liq_regeln aus den 60-s-Caches des Radars (_liq_kw_laden = auto_plan_regeln.regeln.firmen, _liq_regeln_laden)
         ctx = {"bal": bal, "bal_quelle": quelle, "bal_stand": stand, "plaene": plaene, "jetzt": jetzt,
-               "ap_firmen": _liq_kw_laden() or [], "liq_regeln": _liq_regeln_laden() or []}
+               "ap_firmen": ap_unt_firmen(a.get("user_id"), _liq_kw_laden() or [], streng=False), "liq_regeln": _liq_regeln_laden() or []}   # UNT3
         typ = str(a.get("account_type") or "").lower()
         verlauf = _liq_verlauf_laden([kid])
         ctx["peak"] = liq_peak({}, a, None, verlauf)
@@ -39657,7 +39788,8 @@ def zw_tick(force=False):
         aid = str(a["id"])
         if aid in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
             continue
-        regel = regel0 = ap_regel_finden(firmen, a.get("firm"))
+        # UNT3: Ziel %, Boden und M2-Consistency nach der Regel des Unternehmens der ID; Unternehmen unbekannt → keine Regel → nicht markiert
+        regel = regel0 = ap_regel_unternehmen(a.get("user_id"), firmen, a.get("firm"))
         _bw = acc_balance_wahl(a, echo_bal, dup_bal)
         bal = _bw[0]
         if regel and bal:

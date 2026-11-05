@@ -31,6 +31,7 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
+    __import__("_unt_stub").unt_stub(a)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec("\n".join([re.search(r"^AP_IDS_ALLE = .*$", src, re.M).group(0)]
                    + [block(f) for f in ("ap_ids_modus", "ap_ids_alle", "ap_ids_laden", "ap_ids_benutzt", "ap_eingriff_sicht")]), a)
     return a

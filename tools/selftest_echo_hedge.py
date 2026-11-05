@@ -46,6 +46,7 @@ def lade(extra=None):
     # Riegel „Hedge-Konto nur der eigenen ID“ (02.11.2026): _eh_tick_lauf liest echo_hedge_account durch gp_hedge_settings_eigen
     h0 = src.index("\n_gp_hedge_fremd = {}") + 1
     h1 = src.index("\n\n\n", src.index("\ndef gp_hedge_settings_eigen(") + 1)
+    __import__("_unt_stub").unt_stub(ns)   # UNT3: Regel je Unternehmen im Namensraum (Standard, wie ohne Service-Key)
     exec(gp + "\n" + src[h0:h1] + "\n" + src[i:j], ns)
     return ns
 
