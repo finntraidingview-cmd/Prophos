@@ -63607,8 +63607,10 @@
         menge: tplNum(x.menge) ?? tplNum(g && g.menge) ?? (p ? p.masterContracts : null),
         // TP/SL GEÄNDERT ÜBERNEHMEN (07.10.2026, Finn: TP im Plan auf 4.550 gesetzt, Planer zeigte weiter 4.402 aus dem Nachtlauf):
         // gespeicherter Plan zuerst, dann der DB-Stand aus dem Delta (Punkte × $/Pkt), der Lauf nur noch als Rückfall
-        tp: (p && tplNum(p.masterTp) > 0 ? Number(p.masterTp) : null) ?? (tplNum(x.tp_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.tp_punkte * x.usd_pro_pkt) : null) ?? tplNum(g && g.tp),
-        sl: (p && tplNum(p.masterSl) > 0 ? Number(p.masterSl) : null) ?? (tplNum(x.sl_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.sl_punkte * x.usd_pro_pkt) : null) ?? tplNum(g && g.sl),
+        // HP1 (Finn 05.11.2026, Foto Funded Planer → CFD → „Wartet“: TP $/SL $ „–“ bei allen FundedNext): die Funded-CFD-Zeilen (fcpQuelleBauen, Pläne aus der DB)
+        // tragen tp/sl in $ (master_tp/master_sl), aber keine Punkte — ohne eigenen Plan der ID blieb die Zelle leer. Delta-Zeilen des Challenge-Planers haben kein tp-Feld.
+        tp: (p && tplNum(p.masterTp) > 0 ? Number(p.masterTp) : null) ?? (tplNum(x.tp_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.tp_punkte * x.usd_pro_pkt) : null) ?? (tplNum(x.tp) > 0 ? Number(x.tp) : null) ?? tplNum(g && g.tp),
+        sl: (p && tplNum(p.masterSl) > 0 ? Number(p.masterSl) : null) ?? (tplNum(x.sl_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.sl_punkte * x.usd_pro_pkt) : null) ?? (tplNum(x.sl) > 0 ? Number(x.sl) : null) ?? tplNum(g && g.sl),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
         stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
         hinweis_code: x.hinweis_code || null, hinweis_fix: x.hinweis_fix || null, ext_fehlt: !!x.ext_fehlt,   // genauer Kontowert-Grund + Fix (app.py ap_kontowert_grund, 09.10.2026)
@@ -85062,7 +85064,9 @@
     return { plan_id: id, user_id: t.user_id, user: t.user, firma: t.firma, konto: t.konto, ende4: t.ende4, typ: t.typ, richtung: t.richtung,
       route: t.route, start_um: new Date(Date.parse(D.tag + 'T00:00:00Z') + (t.start - off) * 60000).toISOString(), menge: t.menge, tp: t.tp, sl: t.sl,
       stufe, notes: rd.notes || (ep && ep.notes) || c.notes || (stufe ? 'Auto-Planer · ' + stufe : ''), konto_id: t.konto_id,
-      boden: rd.boden ?? c.boden ?? t.boden ?? null, balance: tplNum(rd.balance), gehedgt: !!t.gehedgt } }   // gehedgt: Weg-Chip Orbit/Orbit V2 (apgWeg, 04.11.2026)
+      boden: rd.boden ?? c.boden ?? t.boden ?? null, balance: tplNum(rd.balance), gehedgt: !!t.gehedgt,   // gehedgt: Weg-Chip Orbit/Orbit V2 (apgWeg, 04.11.2026)
+      // HP1 (Finn 05.11.2026: „bei jedem Hedge-Trade IMMER beide“): Fusion-Werte der Funded-Zeile (fcp/fdpQuelleBauen → fusion) bis in Wartet/Läuft — planZeileHtml zeichnet daraus die Paare
+      ...(rd.fusion ? { fusion: rd.fusion } : {}), ...(rd.refund != null ? { refund: rd.refund } : {}) } }
   const apIdsEcht = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(String(t.plan_id || ''))
   function apIdsWartenLaeuft(){
     const D = apIdsHeute(), u = apSichtUid(), jetzt = Date.now()
