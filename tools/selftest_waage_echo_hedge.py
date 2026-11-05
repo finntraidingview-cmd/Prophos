@@ -100,7 +100,10 @@ def schleife(ns):
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
                      "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
-BASIS = "d7fe2f6c"     # nachgezogen (M3, 05.11.2026): f54267bf (30.10. ~03:45) kannte ap_waage_groesse noch nicht (a16155f4 nahm sie in die Liste, ließ BASIS stehen →
+BASIS = "3e2d47cc"     # nachgezogen (05.11.2026, S4, gemeinsame Push-Kette M3d + M2): zwei bewusste Planer-Änderungen — M3d ap_paare_legen gegen_frei (Rücken nie
+                       # ≤ AP_GEGEN_FIRMA_MIN an Gegenrichtung einer anderen ID derselben Firma, außer zum eigenen Anker; Befund M3c) und M2 ap_planen Consistency-Ziel
+                       # (ap_cons_regel: Rest-Trade bis Required profit). 3e2d47cc = Kopf der Kette direkt vor diesem Commit (Push ohne Rebase, SHA bleibt). Vorher d7fe2f6c.
+                       # Davor nachgezogen (M3, 05.11.2026): f54267bf (30.10. ~03:45) kannte ap_waage_groesse noch nicht (a16155f4 nahm sie in die Liste, ließ BASIS stehen →
                        # ValueError seit 02.11.). Bewusste Änderungen seit f54267bf: Gruppe wie HT, Topstep-Tagesende, Konto deaktiviert, Tage-Mini (je 30.10.),
                        # Waage-Deckel je Größe (a16155f4, 02.11.), E3 CFD-Planer nur Echo mit Hedge (03./04.11.), E3b Zufall-Parameter aus regeln.zufall
                        # (d7fe2f6c, 05.11., Rückfall = Code-Werte). Ändert ein späterer Commit den Planer bewusst → BASIS nachziehen.
