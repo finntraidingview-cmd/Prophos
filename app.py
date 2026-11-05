@@ -39867,6 +39867,7 @@ FDP_TAGES_PUFFER = 100                    # $ zwischen SL und Daily Loss (Schlup
 FDP_LIQ_PUFFER = 50                       # $ zwischen SL und Liquidation (Eingang 03.11.2026 nach S9-Stopp zu b8e6dc2b: nie genau auf die Liq)
 FDP_LIQ_MIN_ABSTAND = 300                 # darunter kein Trade mehr: „zu nah an der Liquidation" (Eingang 03.11.2026)
 FDP_BESTAETIGEN_STREU_S = 600            # verschobene Startzeit: Zufall 0–10 min obendrauf (Puls-Jitter-Regel, nie im festen Takt)
+FDP_BESTAETIGEN_SCHRITT_S = 120       # M1 (05.11.2026): Schritt beim Herausschieben aus der Index-Pause (nur mit erlaubt, Funded CFD)
 # KONSTANTEN IN DIE DB (E2b-Nachtrag 05.11.2026, Finn: „Nimm Winning Days als Beispiel — Uhrzeit, Verhältnis, Lots, alles änderbar“): die Werte, die Pläne beeinflussen,
 # stehen in funded_plan_regeln.konst (sql/2026-11-05_fdp_einstellungen_db.sql); fehlt ein Schlüssel oder die Spalte, gilt die Konstante — gleiche Werte, gleiche Pläne.
 # Schlüssel → (Konstante, Untergrenze, Obergrenze). Funded CFD (fcp_*) nutzt weiter die Konstanten.
@@ -40516,13 +40517,16 @@ def fdp_start_bestaetigt(vorschlag_iso, jetzt, vorlauf_s=FDP_BESTAETIGEN_VORLAUF
     return (v if v and v > frueh else frueh).astimezone(timezone.utc).isoformat()
 
 
-def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rnd=None, vorlauf_s=FDP_BESTAETIGEN_VORLAUF_S, streu_s=FDP_BESTAETIGEN_STREU_S):
+def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rnd=None, vorlauf_s=FDP_BESTAETIGEN_VORLAUF_S, streu_s=FDP_BESTAETIGEN_STREU_S,
+                        erlaubt=None):
     """REIN RECHNEND (testbar): Startzeiten beim Bestätigen → {plan_id: iso}. Vorfall 28.10.2026 10:38 Dubai: Finn bestätigte 7 Vorschläge auf
     einmal, vier davon mit schon vergangener Zeit — fdp_start_bestaetigt setzte alle vier auf „jetzt + 2 min" → vier Apex-Big-Trades (zwei
     davon Chris) im selben Augenblick. Jetzt: plaene = [{id, fp_start, firma, user_id}] (Funded = immer Big Trade), belegt = [(firma, user_id,
     big, datetime)] der übrigen geplanten/laufenden Pläne. Die vorgeschlagene Zeit bleibt, wenn sie nach jetzt + Vorlauf liegt und die
     Abstände hält (abstand_firma_s zu jedem Start derselben Firma, abstand_id_s zu jedem Big Trade derselben ID); sonst ab frühestens
-    jetzt + Vorlauf + Zufall und hinter jeden Konflikt geschoben (+ Zufall) — der Reihe nach, auch gegeneinander."""
+    jetzt + Vorlauf + Zufall und hinter jeden Konflikt geschoben (+ Zufall) — der Reihe nach, auch gegeneinander.
+    erlaubt(datetime) → bool (M1, 05.11.2026, nur Funded CFD: fcp_cfd_offen — Index-Pause): ist die Zeit nicht erlaubt, rückt sie in
+    Schritten FDP_BESTAETIGEN_SCHRITT_S + Zufall (Jitter-Regel) nach hinten, bis Markt und Abstände passen. None = wie bisher (Funded Futures)."""
     rnd = rnd or random.Random()
     frueh = jetzt + timedelta(seconds=vorlauf_s)   # vorlauf_s/streu_s: Futures aus konst (E2b-Nachtrag), Funded CFD wie bisher die Konstanten
     bel = list(belegt or ())
@@ -40547,9 +40551,12 @@ def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rn
         f, u = str(p.get("firma") or ""), str(p.get("user_id") or "")
         for _ in range(500):
             k = konflikt(x, f, u)
-            if k is None:
+            if k is None and (erlaubt is None or erlaubt(x)):
                 break
-            x = k + timedelta(seconds=rnd.uniform(0, streu_s))
+            x = (k + timedelta(seconds=rnd.uniform(0, streu_s))) if k is not None else x + timedelta(seconds=FDP_BESTAETIGEN_SCHRITT_S + rnd.uniform(0, streu_s))
+        if erlaubt is not None and not erlaubt(x):
+            out[str(p["id"])] = None                   # kein erlaubter Start gefunden (Fremd-Review M1) → nicht bestätigen statt in die Pause
+            continue
         out[str(p["id"])] = x.astimezone(timezone.utc).isoformat()
         bel.append((f, u, True, x))
     return out
@@ -41077,7 +41084,58 @@ def admin_funded_plan_regeln():
 FCP_TAKT_S = 300
 FCP_ZEITEN_STANDARD = {"firma_abstand_min": 15, "abstand_id_min": 10, "vorlauf_min": 15}
 FCP_ART = "cfd"
-FCP_TP_MIN_USD = 250          # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 1.300 → 10 $ ≈ Spread): TP 250 $, kleiner Overshoot (Prüfung S4)
+# INDEX-PAUSE (M1, 05.11.2026 — Vorfall 03./04.11.: Blue Guardian …8631 um 02:11 Dubai, FundingPips …8534 um 02:27 Dubai vorgeschlagen, NAS100 handelt
+# dann nicht): Funded-CFD-Starts nur bei offenem Index-Markt. Die tägliche Pause folgt CME/Globex 16:00–17:00 Chicago (cme_markt_offen, Sommer/Winter
+# über zoneinfo: Winter 02:00–03:00 Dubai, Sommer 01:00–02:00 Dubai) plus Wochenende; dazu dieselbe Grenze wie der Challenge-Planer für CFD
+# (auto_plan_regeln.zeiten.cfd_ab über ap_cfd_ab, je deutschem Tag). FCP_PAUSE_PUFFER_MIN = frühestens so lange nach der Öffnung — derselbe Abstand
+# wie cfd_ab 02:15 Dubai zur Öffnung 02:00 im Sommer; im Winter rechnet cfd_ab (02:15 Dubai = 23:15 dt am Vortag) auf 00:00 dt = 03:00 Dubai, also
+# genau auf die Öffnung — ohne Puffer würde der erste Trade in die ersten Sekunden des Markts fallen.
+FCP_PAUSE_PUFFER_MIN = 15
+FCP_PAUSE_UEBERFAELLIG_MIN = 30   # überfällige Pläne nur so lange verschieben, wie der PC-Tab sie noch startet (pulsStartFenster: 30 min, danach „verbraucht")
+
+
+def fcp_cfd_offen(t_utc, ap_zeiten, puffer_min=FCP_PAUSE_PUFFER_MIN):
+    """REIN RECHNEND (testbar): darf ein Funded-CFD-Trade um t_utc (aware datetime) starten? → bool. Nein in der Index-Pause (CME 16:00–17:00 CT,
+    Wochenende — _cme_offen_seit_s), in den ersten puffer_min Minuten nach der Öffnung und vor zeiten.cfd_ab des Challenge-Planers (deutscher Tag,
+    ap_cfd_ab). Kein Ende (cfd_bis) — das Ende setzt weiter das Fenster des Funded-CFD-Planers."""
+    try:
+        seit = _cme_offen_seit_s(t_utc)
+        if seit is None or seit < float(puffer_min) * 60:
+            return False
+        lok = t_utc.astimezone(_ap_tz(AP_TZ_TAG))
+        return lok.hour * 60 + lok.minute >= ap_cfd_ab(ap_zeiten, lok.date())
+    except Exception:
+        return False                                             # nicht rechenbar → nie dort starten (fail-closed)
+
+
+def fcp_pause_verschieben(plaene, jetzt, offen, bis_dt=None, ueberfaellig_min=FCP_PAUSE_UEBERFAELLIG_MIN):
+    """REIN RECHNEND (testbar): geplante Funded-CFD-Pläne (mt5_baseline.funded_plan.art cfd), die in der Index-Pause starten würden → [plan].
+    Start = start_um, bei Vorschlägen funded_plan.start_um; maßgeblich ist max(Start, jetzt) — ein überfälliger Plan startet sofort, also nur,
+    wenn JETZT Pause ist. offen(datetime) = fcp_cfd_offen mit den Zeiten des Laufs. Gestartete/geclaimte Pläne nie.
+    Fremd-Review M1: nur Pläne dieses Laufs — Start höchstens bis_dt (Fensterende des Laufs; ein Plan für morgen bleibt dem Lauf seines Tages)
+    und höchstens ueberfaellig_min überfällig (älter verbraucht der PC-Tab ohnehin, nie wiederbeleben)."""
+    out = []
+    for p in plaene or ():
+        fp = p.get("funded_plan") if isinstance(p.get("funded_plan"), dict) else {}
+        if p.get("status") != "planned" or p.get("started_at") or p.get("start_um_gestartet_at") or fp.get("art") != FCP_ART:
+            continue
+        roh = p.get("start_um") or fp.get("start_um")
+        try:
+            t = datetime.fromisoformat(str(roh).replace("Z", "+00:00")) if roh else None
+        except ValueError:
+            t = None
+        if t is None:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        if t < jetzt - timedelta(minutes=float(ueberfaellig_min)) or (bis_dt is not None and t > bis_dt):
+            continue
+        if not offen(max(t, jetzt)):
+            out.append(p)
+    return out
+
+
+FCP_TP_MIN_USD = 250         # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 1.300 → 10 $ ≈ Spread): TP 250 $, kleiner Overshoot (Prüfung S4)
 # TP-DECKEL BEIM NACHHOLEN (Finn 30.10.2026 ~07:20, Anlass Trockenlauf: The5ers 200k −14.023 → TP 15.410 $): je Trade höchstens
 #  - The5ers (Consistency 50 % je Payout-Zyklus, s. unten consistency50 — ersetzt diesen Deckel): nach Payout-Zyklus tp_zyklen[Zyklus − 1], ab dem letzten Wert dieser —
 #    Zyklus 1 (noch kein Payout) immer genau 750 $ (auch nach Verlust), 2: 1.500, 3: 3.000, ab 4: 6.000. Zyklus = bisherige Payouts + 1.
@@ -41905,7 +41963,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     for i in range(0, len(ids), 80):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,started_at,ended_at,completed_at,start_um,"
-                                                    "master_pl,slave_pl,route,richtung,master_contracts,master_tp,master_sl,multiplier,auto_bestaetigt_at,"
+                                                    "master_pl,slave_pl,route,richtung,master_contracts,master_tp,master_sl,multiplier,auto_bestaetigt_at,start_um_gestartet_at,"
                                                     "created_at,planned_for,notes,funded_plan:mt5_baseline->funded_plan,final:mt5_baseline->final",
                                           "master_account_id": f"in.({teil})"}) or []    # alle Trades des Kontos (Gewinne, The5ers-Consistency)
         try:
@@ -41919,7 +41977,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     payout_n = fcp_payouts_zaehlen(pend, verw, buch)
     zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
-    offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
+    offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
     fest_je = fcp_fest_richtung(offen_alle, an=param["richtung_laufend"])
     gruppe_je = _fcp_gruppe_je_uid(uids)
@@ -42014,10 +42072,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             r["letzter_trade"] = max([str(p.get("started_at")) for p in pl if p.get("started_at")] or [str(a.get("created_at") or "")]) or None
             kand.append((a, r))
     # Startzeiten (Minuten ab Mitternacht der Fenster-Zone): Firmen-Abstand je Gruppe, Abstand je ID (ein PC) gegen alle Starts der IDs
+    # INDEX-PAUSE (M1, 05.11.2026): geplante Funded-CFD-Pläne, die in der Pause starten würden, bekommen in diesem Lauf eine neue Zeit
+    # (fcp_pause_verschieben) — ihre alte Zeit belegt nichts mehr, die neue zählt für Firmen-Abstand und Abstand je ID der neuen Vorschläge.
+    markt = lambda m: fcp_cfd_offen((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc), ap_zeiten)   # noqa: E731
+    pause = [] if ruhe else fcp_pause_verschieben(plaene, jetzt, lambda t: fcp_cfd_offen(t, ap_zeiten), bis_dt=mitternacht + timedelta(minutes=float(bis_min)))
+    pause_ids = {str(p.get("id")) for p in pause}
     belegt_id, belegt_firma = {}, {}
     for b in offen_alle:
         t = b.get("started_at") if b.get("status") == "open" else (b.get("start_um") or b.get("fp_start"))
-        if not t or b.get("status") == "review":
+        if not t or b.get("status") == "review" or (b.get("status") == "planned" and str(b.get("id")) in pause_ids):
             continue
         m = _ap_iso_min(t, mitternacht)
         if m is None:
@@ -42025,13 +42088,56 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         u = str(b.get("user_id"))
         belegt_id.setdefault(u, []).append(m)
         belegt_firma.setdefault(gruppe_je.get(u, "") + "|" + _ap_norm(_firm_norm(b.get("master_firm"))), []).append(m)
+    erg["verschoben"] = []
+    if pause:
+        _gk = lambda p: gruppe_je.get(str(p.get("user_id")), "") + "|" + _ap_norm(_firm_norm(p.get("master_firm")))   # noqa: E731
+        neu_m, _nicht = fdp_zeiten([(str(p.get("user_id")), str(p.get("id")), _gk(p)) for p in pause], belegt_id, belegt_firma,
+                                   ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=markt)
+        k_name = {str(a["id"]): a.get("name") for a in konten}
+        dubai = _ap_tz("Asia/Dubai")
+        for p in pause:
+            pid, fp = str(p.get("id")), (p.get("funded_plan") if isinstance(p.get("funded_plan"), dict) else {})
+            alt_iso = p.get("start_um") or fp.get("start_um")
+            try:
+                alt_txt = datetime.fromisoformat(str(alt_iso).replace("Z", "+00:00")).astimezone(dubai).strftime("%d.%m %H:%M")
+            except (TypeError, ValueError):
+                alt_txt = str(alt_iso)
+            e = {"plan_id": pid, "konto_id": str(p.get("master_account_id")), "konto": k_name.get(str(p.get("master_account_id"))),
+                 "user_id": str(p.get("user_id")), "alt": alt_iso, "vorschlag": not p.get("start_um")}
+            m = neu_m.get(pid)
+            if m is None:
+                erg["verschoben"].append(dict(e, neu=None, grund="Start in der Index-Pause — kein freier Slot im Fenster, bitte von Hand verschieben"))
+                print(f"[funded-cfd] ⚠️ Plan {pid[:8]} startet {alt_txt} Dubai in der Index-Pause — kein freier Slot", flush=True)
+                continue
+            neu_dt = mitternacht + timedelta(minutes=m)
+            neu_iso = neu_dt.astimezone(timezone.utc).isoformat()
+            erg["verschoben"].append(dict(e, neu=neu_iso, grund=f"Index-Pause: {alt_txt} → {neu_dt.astimezone(dubai).strftime('%d.%m %H:%M')} Dubai"))
+            u = str(p.get("user_id"))
+            belegt_id.setdefault(u, []).append(m)
+            belegt_firma.setdefault(_gk(p), []).append(m)
+            if trocken:
+                continue
+            try:
+                z = (sb_select("trade_plans", {"select": "mt5_baseline,notes", "id": f"eq.{pid}"}) or [{}])[0]
+                mb = z.get("mt5_baseline") if isinstance(z.get("mt5_baseline"), dict) else {}
+                upd = {"mt5_baseline": dict(mb, funded_plan=dict(mb.get("funded_plan") or fp, start_um=neu_iso)),
+                       "notes": (str(z.get("notes") or "").rstrip() + f"\n⏱ Index-Pause (NAS100 zu): Start {alt_txt} → "
+                                 f"{neu_dt.astimezone(dubai).strftime('%d.%m %H:%M')} Dubai").strip()}
+                if p.get("start_um"):
+                    upd["start_um"] = neu_iso            # bestätigter Plan: auch die Startzeit des PC-Tabs (Vorschlag: nur die vorgeschlagene Zeit)
+                # nur solange nie geclaimt/gestartet — Rennen mit dem PC-Tab: dann bleibt alles, wie es ist
+                if sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "start_um_gestartet_at": "is.null"}, upd):
+                    print(f"[funded-cfd] Plan {pid[:8]} aus der Index-Pause verschoben: {alt_txt} → {neu_dt.astimezone(dubai).strftime('%H:%M')} Dubai", flush=True)
+            except Exception as ex:
+                print(f"[funded-cfd] ⚠️ Verschieben {pid[:8]}: {type(ex).__name__}: {ex}", flush=True)
     im_tag = lambda m: _cme_handelstag((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc).isoformat()) == plan_tag   # noqa: E731
     kmap = {str(a["id"]): (a, r) for a, r in kand}
+    # nie in die Index-Pause würfeln (M1): CME-Handelstag des Plans UND Index-Markt offen (fcp_cfd_offen, cfd_ab wie der Challenge-Planer)
     minuten, ohne = fdp_zeiten([(str(a["user_id"]), str(a["id"]), gruppe_je.get(str(a["user_id"]), "") + "|" + _ap_norm(_firm_norm(a.get("firm"))))
                                 for a, _r in kand], belegt_id, belegt_firma, ab_min, float(bis_min), id_abst, f_abst, rnd,
-                               erlaubt=im_tag, letzt={str(a["id"]): r.get("letzter_trade") for a, r in kand})
+                               erlaubt=lambda m: im_tag(m) and markt(m), letzt={str(a["id"]): r.get("letzter_trade") for a, r in kand})
     for aid in ohne:
-        erg["ausgelassen"].append(dict(kmap[aid][1], aktion="aus", grund="kein freier Slot mehr im Fenster heute (Firmen-Abstand / Abstand je ID)"))
+        erg["ausgelassen"].append(dict(kmap[aid][1], aktion="aus", grund="kein freier Slot mehr im Fenster heute (Firmen-Abstand / Abstand je ID / Index-Pause)"))
     zeilen = []
     for aid, m in sorted(minuten.items(), key=lambda x: x[1]):
         a, r = kmap[aid]
@@ -42127,7 +42233,7 @@ def fcp_sicht(erg, sicht):
     if sicht is None:
         return erg
     out = dict(erg)
-    for f in ("geplant", "ziel", "ausgelassen", "plaene", "ids", "alle_ids"):      # ids/alle_ids: Funded-Planer (fdp_planen)
+    for f in ("geplant", "ziel", "ausgelassen", "plaene", "ids", "alle_ids", "verschoben"):      # ids/alle_ids: Funded-Planer (fdp_planen); verschoben: M1
         if isinstance(erg.get(f), list):
             out[f] = [z for z in erg.get(f) or [] if admin_in_sicht(z.get("user_id"), sicht)]
     out["sicht"] = "eigene" if isinstance(sicht, str) else "gruppe"
@@ -42275,10 +42381,18 @@ def _fcp_eingriff(aktion):
                 except ValueError:
                     continue
                 belegt.append((gk(b.get("user_id"), b.get("master_firm")), str(b.get("user_id")), True, t))
+            try:          # Index-Pause (M1): dieselbe Grenze wie beim Würfeln — cfd_ab des Challenge-Planers (nicht lesbar → Code-Standard)
+                ap_z = (sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0].get("zeiten") or {}
+            except Exception:
+                ap_z = {}
             starts = fdp_start_verteilen([dict(p, firma=gk(p.get("user_id"), p.get("master_firm"))) for p in neu], belegt, jetzt,
-                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 10))
+                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 10),
+                                         erlaubt=lambda x: fcp_cfd_offen(x, ap_z))
             zeilen = []
             for p in neu:
+                if str(p["id"]) in starts and starts[str(p["id"])] is None:   # Index-Pause ohne erlaubten Start (M1) → Vorschlag bleibt unbestätigt
+                    print(f"[funded-cfd] ⚠️ Bestätigen {str(p['id'])[:8]}: kein Start außerhalb der Index-Pause gefunden — bleibt Vorschlag", flush=True)
+                    continue
                 zeilen += sb_update("trade_plans", dict(params, id=f"eq.{p['id']}"),
                                     {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": starts.get(str(p["id"])) or fdp_start_bestaetigt(p.get("fp_start"), jetzt),
                                      "start_um_gestartet_at": None})
