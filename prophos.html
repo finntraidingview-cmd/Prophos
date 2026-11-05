@@ -61037,7 +61037,7 @@
     if(z.aufgeben){
       const text = `Index-Pause (NAS100 zu)${z.frei ? ` bis ${uhr(z.frei - CFD_PAUSE_PUFFER_MS)} Dubai + 15 min` : ''} — danach ist das Startfenster zu Ende, nicht gestartet`
       try{ await baselinePatch(plan.id, { start_sperre: { art: 'index_pause', status: 'aufgegeben', text, at: new Date().toISOString(), versuche: n, start: plan.startUm } }, 'planned') }catch(_){}
-      const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie in der Pause starten (R4b)
+      const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', false, plan.startUm || null)   // Verbrauch: nie in der Pause starten (R4b); SA1: nur diese Startzeit
       if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0])
         await sfMelden(tradePlans[iv] || plan, { schritt: 'index_pause', msg: `„${name}": ${text}.` })
         rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: plan.richtung, von_start: plan.startUm, nach_start: plan.startUm, grund: `[Index-Pause] ${text}` })
@@ -62096,9 +62096,13 @@
    * sie nicht unterscheiden. Jetzt im selben Update start_claim_art 'start' | 'verbrauch' (sql/2026-10-23_start_claim_art.sql); 'verbrauch'
    * lässt der Riegel immer durch. Fehlt die Spalte noch, derselbe Claim ohne das Feld (wie bei pl_quelle) — dann bremst der Riegel wie vorher.
    * → { data, error } wie das Supabase-Update. guard = SU_CLAIM_GUARD (nur bestätigte Auto-/Hand-Pläne) wie bisher an derselben Stelle. */
-  async function suClaimSetzen(planId, art, guard){
+  // SA1 #1 (Prüfer-Hinweis M1, NK1 05.11.2026): startUm = die Startzeit der Kopie, auf der die Entscheidung fiel — wurde der Plan inzwischen verschoben
+  // (z. B. aus der Index-Pause ≤ 30 s vor der alten Zeit), trifft der Claim keine Zeile und der Tab liest frisch (suClaimFehlgriff). undefined = ohne Zeit-Guard
+  // (Verbrauch aus Gründen, die nicht an der Uhrzeit hängen: Archiv, Manuelle Arbeit, Ziel erreicht).
+  async function suClaimSetzen(planId, art, guard, startUm){
     const mach = upd => {
       let q = supabase.from('trade_plans').update(upd).eq('id', planId).eq('status', 'planned').is('start_um_gestartet_at', null)
+      if(startUm !== undefined) q = startUm ? q.eq('start_um', startUm) : q.is('start_um', null)
       if(guard) q = q.or(SU_CLAIM_GUARD)
       return q.select('*')
     }
@@ -62361,7 +62365,7 @@
         const ssA = plan.mt5Baseline && plan.mt5Baseline.start_sperre
         // nur für genau die Startzeit, bei der aufgegeben wurde (Prüfer-Stopp R4b) — eine neue Uhrzeit startet wieder normal
         if(cfdAufgegeben(plan)){
-          const { data: dg } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Riegel hat aufgegeben (R4b)
+          const { data: dg } = await suClaimSetzen(plan.id, 'verbrauch', false, plan.startUm || null)   // Verbrauch: Riegel hat aufgegeben (R4b); SA1: nur diese Startzeit
           if(dg && dg.length){ const ig = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(ig >= 0) tradePlans[ig] = rowToPlan(dg[0])
             await sfMelden(tradePlans[ig] || plan, { schritt: ssA.art === 'richtung' ? 'riegel_aufgegeben' : 'index_pause', msg: String(ssA.text || '').slice(0, 300) }) }
           else await suClaimFehlgriff(plan, null)
@@ -62407,7 +62411,7 @@
         const vc = await slaveBereitPruefen(plan)
         if(!vc.ok){
           if(verspaetet > fenster){
-            const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', true)   // Verbrauch: verpasst (23.10.2026)
+            const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', true, plan.startUm || null)   // Verbrauch: verpasst (23.10.2026); SA1: nur diese Startzeit
             if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund, vc.checks) }
             else await suClaimFehlgriff(plan, null)
             vorcheckKarteZeigen(plan, vc, 'verpasst')
@@ -62427,7 +62431,8 @@
       try{ if(_tpOrbitLaeuft || _osActive) return }catch(_){}
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
       // Art (23.10.2026): ein verpasster Plan wird hier nur verbraucht (Meldung unten), sonst ist es der echte Start
-      const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)
+      // SA1 #1: Claim nur auf genau diese Startzeit — ein inzwischen verschobener Plan startet nie mit der alten Kopie
+      const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true, plan.startUm || null)
       if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }
       _suClaimPause.delete(String(plan.id))
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])

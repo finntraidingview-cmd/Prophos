@@ -109,10 +109,10 @@ def main():
 
     # (C) Verdrahtung im Tab
     t = html[html.index("  async function tpStartUmTick(){"):]
-    t = t[:t.index("const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)")]
+    t = t[:t.index("const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true, plan.startUm || null)")]
     i_hook, i_rk = t.find("if(cfdIndexRoute(plan)){"), t.find("const rk = await rkVorStart(plan)")
     check(0 < i_hook < i_rk and "if(verspaetet <= fenster && await cfdIndexPauseVerschieben(plan)) return" in t
-          and "await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Riegel hat aufgegeben (R4b)" in t,
+          and "await suClaimSetzen(plan.id, 'verbrauch', false, plan.startUm || null)   // Verbrauch: Riegel hat aufgegeben (R4b)" in t,
           "Start-Takt: vor rkVorStart — aufgegeben → nur Verbrauch mit Grund, Index-Pause → schieben")
     check("const cfdIndexRoute = p => !!p && (p.route === 'mt5' || p.route === 'mt5v2')" in html, "nur CFD/NAS100-Routen (Echo, Echo V2); Futures/Orbit/Topstep/Polar unberührt")
     check(".is('start_um_gestartet_at', null).eq('start_um', plan.startUm).select('*')" in html, "Schieben nur ungeclaimt und mit der alten Startzeit (Guard)")

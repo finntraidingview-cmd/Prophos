@@ -219,16 +219,16 @@ def main():
     html2 = open(HTML, encoding="utf-8").read()
     # M3 (05.11.2026): zwischen planKontoSperre und zielOk steht seit der News-Regel (30.10.2026) „news → return" (kein Claim) — Anker nur die Sperre-Zeile
     tick = html2[html2.index("      const sperre = await planKontoSperre(plan)\n      if(sperre && sperre.art === 'news') return"):html2.index("      if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }")]
-    i_sp, i_rk, i_claim = tick.find("planKontoSperre(plan)"), tick.find("await rkVorStart(plan)"), tick.find("suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)")
+    i_sp, i_rk, i_claim = tick.find("planKontoSperre(plan)"), tick.find("await rkVorStart(plan)"), tick.find("suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true, plan.startUm || null)")
     zweige = [tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie starten"), tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Manuelle Arbeit"),
               tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Ziel erreicht")]
     check(erst == "gebremst" and 0 <= i_sp < min(zweige) and all(0 < z < i_rk < i_claim for z in zweige)
           and trigger("verbrauch", 15, True) == "durch",
           "Übergang: verschobener Verbrauch → nächster Tick erkennt Archiv/Manuell/Ziel VOR Richtung und Start-Claim, claimt 'verbrauch', geht durch")
-    check(tick.count("return\n") >= 3 and tick.find("suClaimSetzen(plan.id, 'verbrauch', true)   // Verbrauch: verpasst") > 0
+    check(tick.count("return\n") >= 3 and tick.find("suClaimSetzen(plan.id, 'verbrauch', true, plan.startUm || null)   // Verbrauch: verpasst") > 0
           and tick.count("supabase.from('trade_plans').update({ start_um_gestartet_at") == 0,
           "alle Claims im Start-Takt über suClaimSetzen mit Art (verpasst nach Vorprüfung = 'verbrauch'), keiner mehr ohne")
-    hilf = html2[html2.index("  async function suClaimSetzen(planId, art, guard){"):html2.index("  async function suClaimSetzen(planId, art, guard){") + 1200]
+    hilf = html2[html2.index("  async function suClaimSetzen(planId, art, guard, startUm){"):html2.index("  async function suClaimSetzen(planId, art, guard, startUm){") + 1200]
     check("start_claim_art: art" in hilf and "/start_claim_art/i.test(" in hilf and "mach({ start_um_gestartet_at: new Date().toISOString() })" in hilf,
           "suClaimSetzen: Art im selben Update; fehlt die Spalte, derselbe Claim ohne Art (Riegel bremst dann wie vorher)")
     # ── (G) Auflagen der Prüfung 23.10.2026 (A1–D) ─────────────────────────────────────────────────────────────────────────
