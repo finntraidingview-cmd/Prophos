@@ -96,6 +96,28 @@ ffc = dict(ff, account_type="challenge")
 check(f(ffc, bal=50000.0, kw=kwf)["liq_regel_balance"] == 49000.0, "FTMO Futures Challenge: Daily 1.000 → 49.000")
 for typ in ("phase1", "phase2"):
     check(f(dict(L150, account_type=typ))["liq_regel_balance"] == 147300.0, f"{typ}: Daily gilt wie challenge")
+# LQ1c (Finn 05.11.2026: „Lucid-Daily = Tagespause, das Konto lebt“): weich über liq_regeln (sql/2026-11-05_liq_lucid_daily.sql), NICHT über Kernwert soft
+SQL = open(os.path.join(os.path.dirname(HIER), "sql", "2026-11-05_liq_lucid_daily.sql"), encoding="utf-8").read()
+import re as _re
+ZEILEN = [{"id": 100 + n, "firma": "Lucid Trading", "kontotyp": "challenge", "groesse": g, "art": "tagesstart", "betrag_usd": b_, "maxdd_art": "eod_trailing"}
+          for n, (g, b_) in enumerate(_re.findall(r"select 'Lucid Trading', 'challenge', (\d+), 'tagesstart', (\d+), 'eod_trailing'", SQL))]
+check(sorted((z["groesse"], z["betrag_usd"]) for z in ZEILEN) == [("150000", "2700"), ("50000", "1200")], f"SQL legt Lucid 150k 2.700 + 50k 1.200 an ({len(ZEILEN)} Zeilen)")
+RS = REGELN + ZEILEN
+rs = f(L150, regeln=RS)
+check(rs["liq_regel_balance"] == 147300.0 and rs["liq_regel_soft"] is True and rs["liq_regel_art"] == "tagesstart" and rs["liq_boden_balance"] == 145500.0
+      and "Planer-Einstellung" not in rs["liq_regel_text"], f"Lucid 150k mit Zeile: weich (Tageslimit, Konto lebt), Boden 145.500 bleibt — {rs['liq_regel_text']}")
+check(f(dict(L150, starting_balance=50000, max_drawdown=2000, name="50k LFE…"), bal=50000.0, regeln=RS)["liq_regel_balance"] == 48800.0, "Lucid 50k mit Zeile: 48.800 weich")
+check(f(L150, bal=149000.0, peak=152000.0, regeln=RS)["liq_gilt"] == "boden", "mit Zeile unter dem EOD-Hoch: der engere Boden gilt (EOD-Trailing mitgetragen)")
+check(f(dict(L150, account_type="funded"), regeln=RS)["liq_regel_balance"] == f(dict(L150, account_type="funded"), kw=None)["liq_regel_balance"], "Lucid Funded mit Zeile: unverändert")
+check(f(ffc, bal=50000.0, kw=kwf, regeln=RS)["liq_regel_soft"] is False, "FTMO Futures Challenge bleibt hart (Kernwert ohne soft)")
+check("auto_plan_regeln" not in SQL.split("-- Kontrolle")[0].replace("auto_plan_regeln.regeln.firmen[lucid]", "") and "update" not in SQL.lower().split("-- kontrolle")[0]
+      and "delete from public.liq_regeln where firma = 'Lucid Trading' and kontotyp = 'challenge'" in SQL and "where not exists" in SQL,
+      "SQL fasst die Planer-Kernwerte nicht an, idempotent, mit Rückbau")
+# Planer unverändert: ap_tagesgrenze liest weiter die harte Lucid-Grenze aus den Kernwerten (kein soft gesetzt)
+j = SRC.index("def ap_tagesgrenze(")
+exec(SRC[j:SRC.find("\n\n\n", j)], a)
+check(a["ap_tagesgrenze"](KW[0], 150000, 150000) == 2700.0 and a["ap_tagesgrenze"](KW[1], 150000, 150000) is None,
+      "Planer: Lucid-Tagesgrenze 2.700 bleibt (hart, Modell unverändert), Apex weich → keine Grenze wie bisher")
 b = SRC[SRC.index("def liq_regel_felder("):SRC.index("def lt_demo_liq(")]
 check('if not ah and not wd and kw_firmen is not None and r_art not in ("tagesstart", "stufen") and typ in ("challenge", "phase1", "phase2"):' in b, "Orbit Prio 2 (ah) und Winning Days ausgenommen, Tageslimit-Regeln haben Vorrang")
 
