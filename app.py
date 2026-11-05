@@ -3699,6 +3699,54 @@ def admin_gruppen_liste(daten):
     return sorted(out, key=lambda z: (not z["ht"], z["name"].lower(), z["id"]))
 
 
+# UNT6 (Master 05.11.2026, K3 Teil C1/C2 — nur Anzeige): Rolle und Gruppen-Start fürs Frontend aus den Tabellen statt aus festen Listen im Tab.
+def adm_krone(uid, daten, voll):
+    """REIN RECHNEND (testbar): Krone am Login = Voll-Admin (admin_voll) oder Verwalter eines Unternehmens — dieselben IDs, die der Tab bis
+    UNT6 fest kannte (ADMIN_KRONE_IDS: Finn + Pascal, Pascal, Emin). Ohne uid → False."""
+    u = str(uid or "")
+    if not u:
+        return False
+    return u in {str(x) for x in (voll or ())} or any(str(x.get("verwalter_id") or "") == u for x in (daten or {}).get("gruppen") or ())
+
+
+def adm_gk_start_iso(angelegt_at, tz_name="Europe/Berlin"):
+    """REIN RECHNEND (testbar): Start der Kachel „Gesamtkosten" eines Unternehmens = 00:00 Uhr deutscher Zeit am Tag seiner Anlage
+    (id_gruppen.angelegt_at) als ISO mit Offset. Live: Emin angelegt 08.10.2026 22:01 deutscher Zeit → '2026-10-08T00:00:00+02:00' — genau der
+    Wert, der bis UNT6 fest im Tab stand. Nicht lesbar → None."""
+    try:
+        from zoneinfo import ZoneInfo
+        t = _ap_ts(angelegt_at)                   # Postgres-Formen („ +00", 1–6 Nachkommastellen) wie überall im Backend
+        if t is None:
+            return None
+        tz = ZoneInfo(tz_name)
+        return datetime.combine(t.astimezone(tz).date(), datetime.min.time(), tzinfo=tz).isoformat()
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def _adm_gruppen_angelegt():
+    """{gruppe_id: angelegt_at} aus id_gruppen — eigene kleine Abfrage, damit admin_gruppen_daten (Sicht/Rechte) unverändert bleibt."""
+    return {str(x.get("id")): x.get("angelegt_at") for x in sb_select("id_gruppen", {"select": "id,angelegt_at"}) or [] if x.get("id")}
+
+
+def adm_gk_start_eintragen(info, daten, angelegt, nur_uid):
+    """REIN RECHNEND (testbar): trägt den Start (adm_gk_start_iso) nur bei Unternehmen MIT Verwalter ein — HT hatte im Tab keinen Start und bekommt
+    keinen. Uneingeschränkt: info.gruppen[].gk_start. Eingeschränkter Login (nur_uid): info.gruppe_eigen = [{id, name, gk_start}] der eigenen
+    Verwalter-Gruppe(n) — dieselbe Auswahl wie gruppe_namen (Verwalter oder Mitglied), keine fremden Gruppen."""
+    verw = {str(x.get("id")): x for x in (daten or {}).get("gruppen") or () if x.get("verwalter_id")}
+    start = {gid: s for gid in verw for s in [adm_gk_start_iso((angelegt or {}).get(gid))] if s}
+    if nur_uid:
+        ich = str(nur_uid)
+        meine = {str(m.get("gruppe_id")) for m in (daten or {}).get("mitglieder") or () if str(m.get("user_id")) == ich}
+        info["gruppe_eigen"] = [{"id": gid, "name": str(x.get("name") or ""), "gk_start": start[gid]}
+                                for gid, x in sorted(verw.items()) if gid in start and (str(x.get("verwalter_id")) == ich or gid in meine)]
+        return info
+    for z in info.get("gruppen") or ():
+        if isinstance(z, dict) and not z.get("ht") and str(z.get("id")) in start:
+            z["gk_start"] = start[str(z.get("id"))]
+    return info
+
+
 def admin_gruppe_filter_menge(gruppe, daten, alle_ids):
     """REIN RECHNEND: Finns Lese-Filter ?gruppe= → frozenset oder None (kein Filter). Gruppe MIT Verwalter = Verwalter + Mitglieder;
     Gruppe ohne Verwalter (Hermann Technologies, auch 'ht') = alle_ids ohne die IDs der Verwalter-Gruppen — eine neue ID ohne Zeile
@@ -8357,6 +8405,16 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         print(f"[admin] ⚠️ gruppen: {type(e).__name__}: {e}", flush=True)
         gruppen_info = {"gruppen": [], "gruppen_fehler": f"{type(e).__name__}"}
+    # UNT6 (Master 05.11.2026, K3 Teil C — nur Anzeige): Krone am Login und Start der Kachel „Gesamtkosten" kommen vom Server statt aus festen
+    # Listen im Tab (ADMIN_KRONE_IDS, ADM_GK_START_JE_GRUPPE nach Gruppenname). Eigener try je Feld: fehlt eins, nimmt der Tab seinen bisherigen Wert.
+    try:
+        gruppen_info["krone"] = adm_krone(getattr(g, "login_uid", None), admin_gruppen_daten(), admin_voll_uids())
+    except Exception as e:
+        print(f"[admin] ⚠️ krone: {type(e).__name__}: {e}", flush=True)
+    try:
+        adm_gk_start_eintragen(gruppen_info, admin_gruppen_daten(), _adm_gruppen_angelegt(), _admin_nur_uid())
+    except Exception as e:
+        print(f"[admin] ⚠️ gk_start: {type(e).__name__}: {e}", flush=True)
     # excluded_uids zusaetzlich zu den E-Mails (26.08.2026): die Flotte im
     # Frontend blendet diese Personen komplett aus und braucht dafuer die uid —
     # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.

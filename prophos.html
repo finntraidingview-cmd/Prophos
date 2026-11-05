@@ -15800,6 +15800,7 @@
   })
 
   /* ========== USER HYDRATION ========== */
+  // UNT6 (05.11.2026): ADMIN_KRONE_IDS ist nur noch der Rückfall, bis /admin/overview da ist — dann zeigt admAnwenden die Krone nach d.krone (Server-Rolle)
   // ADMIN-KRONE (02.11.2026): genau diese drei IDs, Finn + Pascal, Pascal, Emin. Bewusst feste Liste: admin_voll hat Finn + Pascal und Pascal (für den Browser nicht lesbar), admin_zugang nur Emin
   const ADMIN_KRONE_IDS = new Set(['48f272b4-913e-4598-a06a-1dcc3d5679fb', '728b4d23-ff5c-45f9-b6de-9b75c1f9a78a', '6cceb3f3-dc78-48ee-8668-26081da3e70f'])
   const ADMIN_KRONE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg>'
@@ -17050,7 +17051,7 @@
 
     window._admLaden = o => admLoad(o)   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026); LD1: { frisch: true } nach eigenem Schreiben
     // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
-    window._admStub = d => { admData = d; window._admData = d; admDataUid = String(currentUserId || ''); admDataQ = admQuery(); admPersonColorsBauen(); admRender(); admFinRender(); kasseReiterFuer(eigenerCode); admGruppeChips() }
+    window._admStub = d => { admData = d; window._admData = d; admDataUid = String(currentUserId || ''); admDataQ = admQuery(); admKroneSetzen(d, admDataUid); admPersonColorsBauen(); admRender(); admFinRender(); kasseReiterFuer(eigenerCode); admGruppeChips() }
     window._admKapStub = d => admKapitelRender(d)   // Entwickler-Haken wie _admStub: Kapitel/Statistik mit Stub-Daten zeichnen (24.09.2026)
     /* LD1 SOFORTSTAND JE ID (Master 05.11.2026, Finn: „Wenn ich auf Challenge-Planer oder Funded-Planer drücke, lädt es immer 5–6 Sekunden … auch wenn
      * ich ins Admin gehe, egal welche ID"). Gemessen (Railway 12 h): /admin/overview p90 ~3,5–4 s, bis 5,5 s. Bis .2066 versteckte admLoad den ganzen
@@ -17143,10 +17144,15 @@
       b.textContent = an ? '⋯' : '↻'
       b.title = an ? `Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'} · aktualisiere …` : 'Neu laden'
     }
+    // UNT6 (Master 05.11.2026, K3 C1): Krone nach der Rolle vom Server (d.krone = admin_voll oder Verwalter) — fehlt das Feld, bleibt die feste Liste (hydrateUser)
+    function admKroneSetzen(d, uid){
+      try{ const kr = document.getElementById('userKrone'); if(kr && d && typeof d.krone === 'boolean' && String(uid || '') === String(currentUserId || '')) kr.hidden = !d.krone }catch(_){}
+    }
     function admAnwenden(d, at, q, uid, ausSpeicher){
       const msg = $('adm-msg'), body = $('adm-body')
       admData = d; admDataUid = uid; admDataQ = q; _admAusSpeicher = !!ausSpeicher
       try{ planerRolleMerken(d) }catch(_){}   // PLANER-TAB: Rolle dieser ID für die Sitzung (Verwalter zuerst)
+      admKroneSetzen(d, uid)   // UNT6 (K3 C1)
       if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
       window._admLadeZeit = at
       window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
@@ -18773,11 +18779,15 @@
       if(akt) g = gl.find(x => String(x.id) === String(akt))
       else if(admEingeschraenkt()){
         // Verwalter/Mitglied: das Backend liefert gruppen: [] (keine fremden IDs), dafür gruppe_namen = Namen der eigenen Gruppe(n) (29.10.2026)
-        const nm = (admData.gruppe_namen || []).find(n => ADM_GK_START_JE_GRUPPE[String(n).trim()])
-        if(nm) g = { name: nm }
+        // UNT6 (Master 05.11.2026, K3 C2): eigene Verwalter-Gruppe mit Start vom Server (gruppe_eigen[].gk_start, über gruppe_id) — fehlt sie, wie bisher über den Namen
+        const eig = (admData.gruppe_eigen || []).find(x => x && x.gk_start)
+        const nm = eig ? null : (admData.gruppe_namen || []).find(n => ADM_GK_START_JE_GRUPPE[String(n).trim()])
+        if(eig) g = eig
+        else if(nm) g = { name: nm }
         else { const ids = new Set((admData.sicht_ids || []).map(String)); g = gl.find(x => !x.ht && (x.ids || []).some(i => ids.has(String(i)))) }
       }
-      const iso = g && ADM_GK_START_JE_GRUPPE[String(g.name || '').trim()]
+      // UNT6: Start je gruppe_id vom Server (gk_start = 00:00 deutscher Zeit am Anlagetag des Unternehmens, nur mit Verwalter), sonst die Liste nach Name
+      const iso = g && (g.gk_start || ADM_GK_START_JE_GRUPPE[String(g.name || '').trim()])
       const t = iso ? new Date(iso) : null
       return t && Number.isFinite(t.getTime()) ? t : null
     }
@@ -22341,6 +22351,7 @@
       return s.gruppe || s.ht || String(((kisDaten?.gruppen || []).find(x => x.ht) || {}).id || '')
     }
     window._kisGruppeNeu = () => { kisDaten = null; $('kis-body').hidden = true; kisLaden() }
+    window._kisStub = d => { kisDaten = d; $('kis-body').hidden = false; const m = $('kis-msg'); if(m) m.style.display = 'none'; kisRender() }   // UNT6: Test-Haken wie _admStub (Kapital ohne Login zeichnen)
     const kisEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
     const kisEur2 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const kisUsd = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -22662,16 +22673,21 @@
       </div>`
     }
 
+    // UNT6 (Master 05.11.2026, K3 C3): Namen aus id_gruppen.name statt fest im Tab. kisUntName: Anzeige-Name (leer → bei HT wie bisher
+    // „Hermann Technologies"); kisGkName: Name im Geschäftskonto-Text — nur ein Unternehmen MIT Verwalter, sonst wie bisher „Emin" (sichtbar gleich)
+    const kisUntName = g => !g ? '' : (String(g.name || '').trim() || (g.ht ? 'Hermann Technologies' : ''))
+    const kisGkName = () => { const g = kisDaten && kisDaten.gruppe; return (g && !g.ht && String(g.name || '').trim()) || 'Emin' }
     function kisRender(){
       const d = kisDaten; if(!d) return
       const sel = $('kis-gruppe')
+      try{ const pn = $('kis-p-name'); if(pn) pn.placeholder = `Name (z. B. Geschäftskonto ${kisGkName()})` }catch(_){}   // UNT6 C3
       if(sel){
-        sel.innerHTML = (d.gruppen || []).map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.ht ? 'Hermann Technologies' : g.name)}</option>`).join('')
+        sel.innerHTML = (d.gruppen || []).map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(kisUntName(g))}</option>`).join('')
         sel.value = d.gruppe?.id || ''
       }
       const ist = d.ist || {}, soll = d.soll || {}, kurs = d.kurs || {}, fr = d.fusion_report || {}
       const fxTxt = `${Number(kurs.fx || 0).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$`
-      $('kis-sub').textContent = `${d.gruppe ? (d.gruppe.ht ? 'Hermann Technologies' : d.gruppe.name) + ' · ' : ''}Stand ${kisZeit(d.generated)} · alles in EUR · Wallets zum ${kurs.quelle || 'Kurs'} ${fxTxt}${kurs.stand ? ' vom ' + kisTag(kurs.stand) : ''}`
+      $('kis-sub').textContent = `${d.gruppe ? kisUntName(d.gruppe) + ' · ' : ''}Stand ${kisZeit(d.generated)} · alles in EUR · Wallets zum ${kurs.quelle || 'Kurs'} ${fxTxt}${kurs.stand ? ' vom ' + kisTag(kurs.stand) : ''}`
       $('kis-ist').textContent = kisEur.format(ist.summe || 0)
       $('kis-ist-s').textContent = 'Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts'
       $('kis-soll').textContent = kisEur.format(soll.summe || 0)
@@ -22703,7 +22719,7 @@
       const gq = d.gk_quelle
       $('kis-gk-anteil').textContent = gq?.anteil_hinweis ? `${gq.anteil_hinweis}: ${kisEur2.format((ist.geschaeftskonto || 0) / 2)}` : ''
       $('kis-gk-quelle').innerHTML = !gq ? ''
-        : `Quelle: Emins Sheet „${escapeHtml(gq.titel || 'Buchhaltung')}“${gq.stand_text ? ' · ' + escapeHtml(gq.stand_text) : ''}`
+        : `Quelle: ${escapeHtml(kisGkName())}s Sheet „${escapeHtml(gq.titel || 'Buchhaltung')}“${gq.stand_text ? ' · ' + escapeHtml(gq.stand_text) : ''}`
           + (gq.abruf_at ? ` · gelesen ${kisZeit(gq.abruf_at)}${gq.zeilen != null ? ', ' + gq.zeilen + ' Zeilen' : ''}` : ' · noch nie gelesen')
           + (gq.fehler ? ` · <span style="color:var(--warn-ink)">${escapeHtml(gq.fehler)}</span>` : '')
           + ` <button class="btn btn-ghost" id="kis-gk-sheet" style="padding:2px 8px;font-size:11.5px;margin-left:4px">Sheet jetzt lesen</button>`
@@ -22884,7 +22900,7 @@
         const raw = $('kis-a-betrag').value
         if(raw === '' || isNaN(Number(raw)) || Number(raw) === 0) return kisFehler('Anfangsstand in € eingeben')
         kisSenden('/admin/kapital/gk', 'POST', { gruppe: kisGruppe, datum: $('kis-gk-anfang').dataset.datum || '2026-09-01', betrag: Number(raw),
-          waehrung: 'EUR', kategorie: 'Anfangsstand', text: 'Anfangsstand Geschäftskonto (Emin/Bank)' }, ev.target.closest('#kis-a-ok'))
+          waehrung: 'EUR', kategorie: 'Anfangsstand', text: `Anfangsstand Geschäftskonto (${kisGkName()}/Bank)` }, ev.target.closest('#kis-a-ok'))
         return
       }
       const g = ev.target.closest('.kis-gk-weg')
