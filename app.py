@@ -40809,11 +40809,53 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
         ap_bal_wache(jetzt)                   # BALANCE-WACHE (22.10.2026) — eigenes try wie die Mengen-Wache
     except Exception as e:
         print(f"[balance-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
-    stand = _ap_stand_laden(reg, jetzt)
+    # FW1: HT-Fehler (Stand/Lauf) halten die Gruppen nicht auf — sie laufen trotzdem, danach fliegt der HT-Fehler wie bisher (Aufrufer: fehler)
+    ht_fehler, je_uid, gesperrt, fertig = None, None, None, []
+    try:
+        stand = _ap_stand_laden(reg, jetzt)
+        # REGEL JE UNTERNEHMEN (Fremd-Review): ein Plan einer Gruppe misst sich am Startfenster SEINES Unternehmens (Standard + Abweichung
+        # zeiten.fenster); Gruppe nicht lesbar → ihre Pläne bleiben stehen. Ohne Abweichung: dieselben Zeiten wie bisher (bitgleich).
+        je_uid, gesperrt = ap_unt_je_uid(reg)
+        fertig = _ap_fenster_wache_lauf(reg, stand, je_uid, gesperrt, rnd)
+    except Exception as e:
+        ht_fehler = e
+        print(f"[fenster-wache] ⚠️ HT: {type(e).__name__}: {e} — Gruppen laufen trotzdem", flush=True)
+    if je_uid is None:
+        je_uid, gesperrt = ap_unt_je_uid(reg)
+    # FW1 (Master 05.11.2026, Hinweis S2 aus UNT2): der HT-Stand kennt seit UNT2 nur HT-Pläne — die Pläne jeder aktiven Verwalter-Gruppe
+    # bewacht derselbe Lauf mit dem Stand IHRES Unternehmens (eigene=ids, wie Waage-Takt). Je Gruppe eigenes try: nicht lesbar → nur diese
+    # Gruppe übersprungen + gemeldet; Gruppen-Liste nicht lesbar → alle Gruppen übersprungen, HT unberührt. HT läuft zuerst (bitgleich).
+    stat_g = {}
+    try:
+        gruppen = ap_planer_gruppen(nur_aktiv=True)
+    except Exception as e:
+        gruppen = []
+        stat_g["_liste"] = {"fehler": f"{type(e).__name__}: {e}"}
+        print(f"[fenster-wache] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — Gruppen-Pläne diesen Takt nicht bewacht", flush=True)
+    if gruppen:
+        namen, _aus = _ap_namen()
+    for gr in gruppen:
+        gid = str(gr.get("gruppe_id"))
+        try:
+            st_g = _ap_stand_laden(reg, jetzt, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]), eigene=gr["ids"])
+            f_g = _ap_fenster_wache_lauf(reg, st_g, je_uid, gesperrt, rnd)
+            fertig = list(fertig) + list(f_g)
+            stat_g[gid] = {"name": gr.get("name"), "fehler": "", "verschoben": len(f_g)}
+        except Exception as e:
+            stat_g[gid] = {"name": gr.get("name"), "fehler": f"{type(e).__name__}: {e}", "verschoben": 0}
+            print(f"[fenster-wache] ⚠️ Gruppe {gr.get('name') or gid[:8]}: Stand nicht lesbar ({type(e).__name__}: {e}) — übersprungen", flush=True)
+    _ap_fenster_wache["gruppen"] = stat_g
+    if fertig:
+        _ap_fenster_wache["verschoben"] = (fertig + _ap_fenster_wache.get("verschoben", []))[:40]
+    if ht_fehler is not None:
+        raise ht_fehler
+    return fertig
+
+
+def _ap_fenster_wache_lauf(reg, stand, je_uid, gesperrt, rnd):
+    """Fenster-Wache über EINEN Stand (HT oder eine Verwalter-Gruppe, FW1): Pläne hinter dem Klassen-Ende vorziehen → Liste der Verschiebungen.
+    Startfenster je Plan aus der Regel seines Unternehmens (ap_unt_wache_reg); gesperrt/None → Plan nicht anfassen."""
     plaene = _ap_stand_plaene(stand)
-    # REGEL JE UNTERNEHMEN (Fremd-Review): ein Plan einer Gruppe misst sich am Startfenster SEINES Unternehmens (Standard + Abweichung
-    # zeiten.fenster); Gruppe nicht lesbar → ihre Pläne bleiben stehen. Ohne Abweichung: dieselben Zeiten wie bisher (bitgleich).
-    je_uid, gesperrt = ap_unt_je_uid(reg)
 
     def _zeiten_von(x):
         r = ap_unt_wache_reg(reg, x.get("user_id"), je_uid, gesperrt)
@@ -40855,7 +40897,6 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
             print(f"[fenster-wache] {str(x['plan_id'])[:8]} {x.get('firma_name') or x.get('firma')}: {alt_d} → {neu_d} Dubai", flush=True)
         else:
             print(f"[fenster-wache] {str(x['plan_id'])[:8]} nicht verschoben: {f2 or 'Guard (gestartet/bestätigt+fällig/geändert)'}", flush=True)
-    _ap_fenster_wache["verschoben"] = (fertig + _ap_fenster_wache.get("verschoben", []))[:40]
     return fertig
 
 

@@ -212,8 +212,10 @@ def main():
     check("eigene=uids if gruppe else None" in plan, "C1 ap_planen: Gruppen-Lauf lädt den Stand mit eigene = Gruppen-IDs")
     check("uids = [u for u in uids if _ht(u)]" in plan and "HT nicht geplant" in plan, "C2 HT-Lauf ohne IDs der Verwalter-Gruppen, Gruppen nicht lesbar → nicht geplant")
     check('unternehmen=frozenset(uids) if gruppe else "ht"' in plan, "C3 Tages-Saldo im Planer je Unternehmen")
-    check(neu_src.count('ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]), eigene=gr["ids"])') == 2
-          and "ausgeblendet=ap_gruppe_ausgeblendet(namen, sicht_d), eigene=sicht_d)" in neu_src, "C4 Waage-Takt, Waage-Start, Delta-Sicht: Gruppen-Stand mit eigene")
+    # FW1 (05.11.2026, S2): dritter Gruppen-Aufrufer = Fenster-Wache je Gruppe (ap_fenster_wache_tick, mit jetzt)
+    check(neu_src.count('ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]), eigene=gr["ids"])') == 3
+          and 'ap_planer_gruppen(nur_aktiv=True)' in fn("ap_fenster_wache_tick")
+          and "ausgeblendet=ap_gruppe_ausgeblendet(namen, sicht_d), eigene=sicht_d)" in neu_src, "C4 Waage-Takt, Waage-Start, Fenster-Wache (FW1), Delta-Sicht: Gruppen-Stand mit eigene")
     check(fn("_ap_nachholen_kern").count("_ap_stand_fuer_uid(reg, plan.get(\"user_id\"), jetzt)") == 1
           and "_ap_stand_fuer_uid(reg, plan.get(\"user_id\"), jetzt, tag=" in fn("_ap_werte_setzen")
           and "stand = _ap_stand_fuer_uid(reg, _puid)" in neu_src, "C5 Hand-Eingriffe je Plan (Nachholen, Startzeit, Bot-Eingriff) gegen den Stand des eigenen Unternehmens")
