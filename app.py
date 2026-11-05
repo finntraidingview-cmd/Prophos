@@ -12618,8 +12618,18 @@ def lt_fusion_paar(p, base):
     Fusion € am Master-TP (≤ 0) und am Master-SL bzw. bei der Liquidation (≥ 0) aus den Werten, die am Plan schon stehen — dieselbe Reihenfolge wie die
     Planer-Karten im Tab (fcpQuelleBauen / wdPlanFusion): mt5_baseline.funded_plan.hedge_tp_eur/hedge_sl_eur (Funded CFD/Futures) → hedge_vorschau
     pass_eur|tp_eur / blow_eur (Echo-Hedge, Orbit Prio 2, Tradeify-Final) → hedge_eur / slave_risk (Winning Day, Orbit). Keine neue Rechnung.
-    Ohne Wert → None (Echo V2, Orbit V2, Topstep V2 ohne Hedge). → (tp_eur, sl_eur)"""
+    Ohne Wert → None (Echo V2, Orbit V2, Topstep V2 ohne Hedge). → (tp_eur, sl_eur)
+    NUR BEI ECHTEM HEDGE (Stopp S4 05.11.2026): ehv_tick schreibt die Vorschau für ALLE Echo-V2-Pläne, und ein Apex-/Tradeify-Final-Plan behält sie, wenn er
+    ohne Hedge auf Orbit V2 zurückfällt — live 4 Echo-V2-Trades mit {pass −338, blow +92} ohne Fusion. Gehedgt ist ein Trade nur mit: Echo (route mt5 + Slave),
+    Orbit/Nova (orbit_v3), Winning Day (hedge_eur > 0), Orbit Prio 2 (apex_hedge.status 'mit'), Tradeify-Final (tradeify_hedge.status 'mit') oder
+    laufendem Hedge am Plan (mt5_baseline.hedge). Sonst (None, None) — auch wenn eine Vorschau oder ein funded_plan steht."""
     p, base = p or {}, base if isinstance(base, dict) else {}
+    mit = lambda k: isinstance(base.get(k), dict) and base[k].get("status") == "mit"   # noqa: E731
+    echt = ((str(p.get("route") or "") == "mt5" and bool(p.get("slave_account_id"))) or bool(p.get("orbit_v3"))
+            or (_wd_num(p.get("hedge_eur")) or 0) > 0 or mit("apex_hedge") or mit("tradeify_hedge")
+            or (isinstance(base.get("hedge"), dict) and bool(base.get("hedge"))))
+    if not echt:
+        return None, None
     fp = base.get("funded_plan") if isinstance(base.get("funded_plan"), dict) else {}
     vs = base.get("hedge_vorschau") if isinstance(base.get("hedge_vorschau"), dict) else {}
     pos = lambda v: abs(float(_wd_num(v))) if _wd_num(v) is not None and float(_wd_num(v)) != 0 else None   # noqa: E731
