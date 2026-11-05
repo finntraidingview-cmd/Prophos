@@ -24010,13 +24010,15 @@ def _ap_hhmm(s):
     return int(h) * 60 + int(m)
 
 
-def ap_start_bis(zeiten):
+def ap_start_bis(zeiten, heute=None):
     """Letzte erlaubte Startminute (dt) aus zeiten.start_bis, Standard 16:30 (Finn 07.10.2026: „alle Trades bis spätestens
     16:30 deutscher Zeit gestartet"). Mit zeiten.fenster_tz (16.10.2026, Finn denkt in Dubai-Zeit) gilt start_bis in DIESER Zone und
-    wird je Tag in deutsche Minuten umgerechnet (ap_zeit_dt_min) — 20:00 Dubai = 18:00 dt im Sommer, 17:00 im Winter."""
+    wird je Tag in deutsche Minuten umgerechnet (ap_zeit_dt_min) — 20:00 Dubai = 18:00 dt im Sommer, 17:00 im Winter.
+    heute (ZU1, 05.11.2026): der Plan-Tag, für den gerechnet wird — None = heute (wie bisher). Liegt zwischen heute und dem Plan-Tag eine
+    Zeitumstellung (Nachtlauf der Umstellungsnacht), war das Ende sonst 1 h falsch."""
     fz = (zeiten or {}).get("fenster_tz")
     if fz and (zeiten or {}).get("start_bis"):
-        m = ap_zeit_dt_min({"tz": fz, "uhr": zeiten.get("start_bis")})
+        m = ap_zeit_dt_min({"tz": fz, "uhr": zeiten.get("start_bis")}, heute)
         if m is not None:
             return m
     try:
@@ -24084,8 +24086,9 @@ def ap_zeit_dt_min(cb, heute=None):
 
 
 def ap_klasse_bis(zeiten, route, heute=None):
-    """Letzte Startminute (dt) je Klasse: CFD-Wege (AP_CFD_ROUTEN) min(start_bis, cfd_bis), sonst start_bis."""
-    bis = ap_start_bis(zeiten)
+    """Letzte Startminute (dt) je Klasse: CFD-Wege (AP_CFD_ROUTEN) min(start_bis, cfd_bis), sonst start_bis — beides für den Plan-Tag heute
+    (ZU1: vorher rechnete start_bis immer mit dem heutigen Datum, das Futures-Ende stimmte am Plan-Tag nach einer Zeitumstellung nicht)."""
+    bis = ap_start_bis(zeiten, heute)
     if route in AP_CFD_ROUTEN:
         cb = ap_cfd_bis(zeiten, heute)
         if cb is not None:
