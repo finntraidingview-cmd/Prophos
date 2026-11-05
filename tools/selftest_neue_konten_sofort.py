@@ -29,7 +29,7 @@ def check(ok, name):
 
 def lade_extra(ns):
     src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
-    for fn in ("ap_zeit_dt_min", "ap_fenster_liste", "ap_start_bis", "ap_cfd_ab", "ap_cfd_bis", "ap_klasse_bis", "ap_wecker_pruefen",
+    for fn in ("ap_zeit_dt_min", "ap_zeiten_heute", "ap_fenster_liste", "ap_start_bis", "ap_cfd_ab", "ap_cfd_bis", "ap_klasse_bis", "ap_wecker_pruefen",
                "ap_fenster_ueberhang"):
         i = src.index(f"\ndef {fn}(") + 1
         exec(src[i:src.index("\n\n\n", i)], ns)

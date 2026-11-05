@@ -19,7 +19,8 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 WURZEL = os.path.dirname(HIER)
 BASIS = sys.argv[1] if len(sys.argv) > 1 else "cfe1c129"   # main-Commit vor ZU1
 FEHLER = []
-NAMEN = ("_ap_hhmm", "_ap_tz", "ap_zeit_dt_min", "ap_cfd_bis", "ap_start_bis", "ap_klasse_bis")
+NAMEN = ("_ap_hhmm", "_ap_hhmm_txt", "_ap_tz", "ap_zeiten_heute", "ap_zeit_dt_min", "ap_cfd_ab", "ap_cfd_bis", "ap_start_bis", "ap_fenster_liste",
+         "ap_klasse_bis")
 
 
 def check(ok, text):
@@ -43,6 +44,8 @@ def lade(src, heute_fest=None):
             exec(m.group(0), ns)
     teile = []
     for n in NAMEN:
+        if f"\ndef {n}(" not in src:
+            continue                     # BASIS vor ZU1b kennt ap_zeiten_heute nicht
         i = src.index(f"\ndef {n}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -98,6 +101,36 @@ def main():
               f"4 ohne Plan-Tag wie bisher (heute {h:%d.%m.}): {n['ap_start_bis'](Z)}")
     i = neu_src.index("\ndef ap_klasse_bis(")
     check("bis = ap_start_bis(zeiten, heute)" in neu_src[i:neu_src.find("\n\n\n", i)], "4 ap_klasse_bis gibt den Plan-Tag an ap_start_bis weiter (HT und Emin, dieselbe Funktion)")
+    # ── ZU1b: der Plan-Tag reist an den zeiten mit (zeiten["_tag"]) — Fenster, Fensterende, CFD-Grenzen überall für den Plan-Tag ──
+    ZF = dict(Z, fenster=[["02:00", "20:00", 1]], cfd_ab={"tz": "Asia/Dubai", "uhr": "02:15"})
+    n = lade(neu_src, date(2026, 10, 24))           # heute Sommerzeit, Plan-Tag nach der Umstellung
+    zt = dict(ZF, _tag="2026-10-26")
+    check(n["ap_start_bis"](zt) == 17 * 60 and n["ap_fenster_liste"](zt) == [["00:00", "17:00", 1]] and n["ap_cfd_bis"](zt) == 15 * 60,
+          f"5 _tag=26.10. bei heute 24.10.: Fensterende 17:00, Fenster {n['ap_fenster_liste'](zt)}, CFD-Ende 15:00 dt")
+    check(n["ap_start_bis"](ZF) == 18 * 60 and n["ap_fenster_liste"](ZF) == [["00:00", "18:00", 1]], "5 ohne _tag weiter heute (24.10. Sommer: 18:00)")
+    check(n["ap_start_bis"](zt, date(2026, 10, 24)) == 18 * 60, "5 ausdrücklicher Tag geht vor _tag")
+    check(n["ap_start_bis"](dict(ZF, _tag="kaputt")) == 18 * 60 and n["ap_zeiten_heute"](None) is None, "5 _tag unlesbar → heute (wie bisher)")
+    n = lade(neu_src, date(2027, 3, 27))
+    zt = dict(ZF, _tag="2027-03-29")
+    check(n["ap_start_bis"](zt) == 18 * 60 and n["ap_fenster_liste"](zt)[0][1] == "18:00" and n["ap_klasse_bis"](zt, "tvv2") == 18 * 60,
+          "5 Winter → Sommer: _tag=29.03.2027 bei heute 27.03. → 18:00 (auch ap_klasse_bis ohne Tag)")
+    abw = []
+    n = lade(neu_src, date(2026, 6, 15))
+    d = date(2026, 1, 1)
+    while d <= date(2027, 12, 31):
+        a = lade(alt_src, d)
+        zt = dict(ZF, _tag=d.isoformat())
+        for f in ("ap_start_bis", "ap_fenster_liste", "ap_cfd_ab", "ap_cfd_bis"):
+            if n[f](zt) != a[f](ZF):
+                abw.append((d.isoformat(), f))
+        d += timedelta(days=1)
+    check(not abw, f"5 jeder Tag 2026–2027: zeiten mit _tag = BASIS am Plan-Tag für Fensterende, Fenster, CFD ab/bis ({abw[:3] or 'bitgleich'})")
+    i = neu_src.index("\ndef ap_planen(")
+    pl = neu_src[i:neu_src.index("\ndef ", i + 10)]
+    j = neu_src.index("\ndef _ap_stand_laden(")
+    st = neu_src[j:neu_src.index("\ndef ", j + 10)]
+    check('zeiten["_tag"] = tag' in pl and 'zeiten["_tag"] = tag' in st,
+          "5 ap_planen und _ap_stand_laden hängen den Plan-Tag an (Verfallen-Grenze, Verteilen, Misch-Fenster, Umplanen, Eingriff, Fenster-Wache lesen diese zeiten)")
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 1 if FEHLER else 0
 

@@ -188,7 +188,7 @@ for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE"):
 for pat in (r"^AP_TYPEN = .*$", r"^AP_NACHPLAN_VORLAUF_MIN = .*$", r"^AP_NACHPLAN_REST_RE = .*$", r"^AP_REST_MIN_CFD = .*$", r"^AP_NEU_BIS_STANDARD = .*$",
             r"^AP_TZ_TAG = .*$", r"^_ap_nachplan_lock = .*$", r"^_ap_gruppen_nachplan = .*$", r"^_ap_gruppe_regel_at = .*$"):   # NP1
     exec(re.search(pat, SRC, re.M).group(0), ns)
-for n in ("_ap_ts", "_ap_hhmm", "ap_start_bis", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter", "ap_nachplan_ziel_frei", "ap_konto_neu_zu_spaet",
+for n in ("_ap_ts", "_ap_hhmm", "ap_zeiten_heute", "ap_start_bis", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter", "ap_nachplan_ziel_frei", "ap_konto_neu_zu_spaet",
           "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken", "_ap_nachplan_rechnen", "ap_gruppen_nachplan_tick",
           "ap_gruppe_regel_bezug"):   # NP1
     exec(block(n), ns)

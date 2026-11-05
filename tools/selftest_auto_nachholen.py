@@ -36,7 +36,7 @@ def lade():
               "AP_ABSTAND_ID_FIRMA_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_START_BIS_STANDARD"):
         if k not in a:
             teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0))
-    for fn in ("ap_start_bis", "ap_start_hand_pruefen", "_ap_gegen_firma", "ap_nachhol_minute"):
+    for fn in ("ap_zeiten_heute", "ap_start_bis", "ap_start_hand_pruefen", "_ap_gegen_firma", "ap_nachhol_minute"):
         if fn not in a:
             i = src.index(f"\ndef {fn}(") + 1
             teile.append(src[i:src.find("\n\n\n", i)])

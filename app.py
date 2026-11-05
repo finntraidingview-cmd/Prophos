@@ -24018,7 +24018,7 @@ def ap_start_bis(zeiten, heute=None):
     Zeitumstellung (Nachtlauf der Umstellungsnacht), war das Ende sonst 1 h falsch."""
     fz = (zeiten or {}).get("fenster_tz")
     if fz and (zeiten or {}).get("start_bis"):
-        m = ap_zeit_dt_min({"tz": fz, "uhr": zeiten.get("start_bis")}, heute)
+        m = ap_zeit_dt_min({"tz": fz, "uhr": zeiten.get("start_bis")}, ap_zeiten_heute(zeiten, heute))
         if m is not None:
             return m
     try:
@@ -24039,6 +24039,7 @@ def ap_fenster_liste(zeiten, heute=None):
     fz = (zeiten or {}).get("fenster_tz")
     if not fz:
         return roh
+    heute = ap_zeiten_heute(zeiten, heute)
     out = []
     for f in roh:
         try:
@@ -24054,7 +24055,7 @@ def ap_fenster_liste(zeiten, heute=None):
 def ap_cfd_ab(zeiten, heute=None):
     """Früheste Startminute (dt) für CFD-Trades aus zeiten.cfd_ab, Standard 00:20. Futures dürfen ab 00:00. Seit 16.10.2026 auch als
     {"tz": "Asia/Dubai", "uhr": "02:15"} (Finn: CFD-Fenster 02:15–18:00 Dubai) — je Tag in deutsche Minuten umgerechnet (ap_zeit_dt_min)."""
-    m = ap_zeit_dt_min((zeiten or {}).get("cfd_ab"), heute)
+    m = ap_zeit_dt_min((zeiten or {}).get("cfd_ab"), ap_zeiten_heute(zeiten, heute))
     return m if m is not None else _ap_hhmm(AP_CFD_AB_STANDARD)
 
 
@@ -24062,7 +24063,23 @@ def ap_cfd_bis(zeiten, heute=None):
     """Letzte Startminute (dt) für CFD-Trades (NEUE-KONTEN-SOFORT, Finn 16.10.2026: Challenge-Typen „FUTURES 02:00–20:00 Dubai, CFD
     02:15–18:00 Dubai"). zeiten.cfd_bis = {"tz": "Asia/Dubai", "uhr": "18:00"} oder "HH:MM" deutscher Zeit (ap_zeit_dt_min).
     Fehlt der Wert: None = kein eigenes CFD-Ende (wie Futures, start_bis)."""
-    return ap_zeit_dt_min((zeiten or {}).get("cfd_bis"), heute)
+    return ap_zeit_dt_min((zeiten or {}).get("cfd_bis"), ap_zeiten_heute(zeiten, heute))
+
+
+def ap_zeiten_heute(zeiten, heute=None):
+    """REIN RECHNEND (ZU1b, 05.11.2026): Tag, für den eine Uhrzeit aus zeiten umgerechnet wird — ausdrücklich übergeben, sonst der Plan-Tag,
+    den Planer und Stand an ihre zeiten hängen (zeiten["_tag"] = "JJJJ-MM-TT", nur im Speicher wie _zufall), sonst None = heute (wie bisher).
+    So rechnen Startfenster, Fensterende und CFD-Grenzen überall für den Plan-Tag — auch tief in Verteilen, Umplanen, Eingriff, Misch-Fenster,
+    Verfallen-Grenze, ohne jeden Aufrufer einzeln umzustellen. Am normalen Tag bitgleich (gleicher Versatz Dubai → DE)."""
+    if heute is not None:
+        return heute
+    t = (zeiten or {}).get("_tag") if isinstance(zeiten, dict) else None
+    if not t:
+        return None
+    try:
+        return datetime.strptime(str(t)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def ap_zeit_dt_min(cb, heute=None):
@@ -28119,6 +28136,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     jetzt = datetime.now(timezone.utc)
     tag = tag or jetzt.astimezone(_ap_tz(AP_TZ_LAUF)).strftime("%Y-%m-%d")
     tag_d = datetime.strptime(tag, "%Y-%m-%d")
+    zeiten["_tag"] = tag          # ZU1b: Fenster/Fensterende/CFD-Grenzen dieses Laufs für den Plan-Tag (ap_zeiten_heute), nur im Speicher
     if tag_d.weekday() >= 5:
         return {"ok": True, "tag": tag, "msg": "Wochenende — nichts geplant", "geplant": [], "ausgelassen": []}
     if quelle == "nacht" and not trocken and not gruppe:      # Gruppe: Claim in auto_plan_gruppe (ap_gruppe_planen)
@@ -34822,6 +34840,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     tz = _ap_tz(zeiten.get("tz") or AP_TZ_TAG)
     tag = tag or jetzt.astimezone(tz).strftime("%Y-%m-%d")
     td = datetime.strptime(tag, "%Y-%m-%d")
+    zeiten["_tag"] = tag          # ZU1b: alle Leser dieses Stands (Bot, Umplanen, Eingriff, Wachen) rechnen Fenster für den Stand-Tag
     mitternacht = datetime(td.year, td.month, td.day, tzinfo=tz)
     jetzt_min = (jetzt - mitternacht).total_seconds() / 60.0
     if namen is None or ausgeblendet is None:
