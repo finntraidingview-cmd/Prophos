@@ -8,6 +8,7 @@ prop-baum, /ids POST, konto_balance_darf). Nachbesserungen Master 08.10.2026: (A
 Verwalters (ohne Marker) sieht/ändert nur die eigene ID, dazu Quelltext-Proben der PC-Wege in prophos.html; (B) Trade-Planer-Summen
 nur über die Sicht (ap_stand_sicht, ap_lauf_ohne_summen); (C) Finns Chip einer Verwalter-Gruppe zeigt auch den ausgeblendeten Verwalter.
 Platzhalter-IDs, keine echten Namen. Aufruf: python3 tools/selftest_admin_gruppen.py"""
+import json
 import os
 import re
 import sys
@@ -72,16 +73,20 @@ def lade():
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids",
-             "admin_lese_gruppe_menge", "admin_radar_lese_sicht", "ap_lese_gruppe"]   # SICHT JE GRUPPE (30.10.2026)
+             "admin_lese_gruppe_menge", "admin_radar_lese_sicht", "ap_lese_gruppe",   # SICHT JE GRUPPE (30.10.2026)
+             "_fx_wert", "_fx_admin_uids", "fx_aus_zeilen"]
+    # RT1 (05.11.2026): _admin_basis liest den Kurs seit f08ecc92 (USD→EUR live, 03.11.2026) über fx_aus_zeilen(_fx_admin_uids()) —
+    # der Block-Lader lud die FX-Helfer + FX_STANDARD nicht nach (NameError); Prüfabsicht unverändert
     # PC_AUS_S (20.10.2026, Prüfer S2): admin_pc_stand nutzt seit e61516c1 („PC aus", 19.10.) die Schwelle PC_AUS_S — ohne sie NameError im Lader
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
-                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S", "PLANER_WD_AUTOMATIK")]
+                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S", "PLANER_WD_AUTOMATIK", "FX_STANDARD",
+                                "WD_HAND_AKTIONEN")]   # RT1 (05.11.2026): admin_wd_plaene nutzt seit f732ab86 (WD-Zeile von Hand, 02.11.) WD_HAND_AKTIONEN
     # PLANER-RECHTE HT (30.10.2026): der Schreib-Riegel lässt Verwalter/Mitglieder durch — hier Platzhalter, eigener Test
     # tools/selftest_planer_rechte_ht.py prüft ihn
     teile += ["def _planer_schreib_gate():\n    return None", "def _planer_admin_auth():\n    return _admin_auth()"]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
     teile += [block(n) for n in namen]
-    ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
+    ns = {"re": re, "json": json, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
           "datetime": datetime, "timedelta": timedelta, "timezone": timezone, "_kurz_cache_lock": threading.Lock(),
           "SUPABASE_SERVICE_KEY": "svc", "SUPABASE_URL": "https://beispiel.invalid", "ADMIN_EMAILS": {"admin@beispiel.invalid"},
           "ADMIN_EXCLUDE_EMAILS": {"aus@beispiel.invalid", "verw-aus@beispiel.invalid"}, "AP_TYPEN": ("challenge", "phase1", "phase2")}
@@ -283,7 +288,9 @@ def main():
     q_html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
     check("name: 'Alle' }, ...liste" not in q_html and "id: x.ht ? '' : x.id" in q_html,
           "Frontend: Chips nur „Hermann Technologies · <Verwalter-Gruppen>“, HT = Standard ohne ?gruppe=")
-    check("if(!gp){ const ht = (admData?.gruppen || []).find(y => y.ht); return !ht || !(ht.ausser || [])" in q_html,
+    # RT1 (05.11.2026): seit .1773 (6a4be91c, 27.10.2026) liest _admGruppeOk die Gruppen über admGruppenListe() (admData oder gemerkte
+    # Liste) statt admData?.gruppen — dieselbe Regel (ohne Chip fällt die HT-ausser-Liste raus) am neuen Text
+    check("const gl = admGruppenListe()" in q_html and "if(!gp){ const ht = gl.find(y => y.ht); return !ht || !(ht.ausser || [])" in q_html,
           "Frontend: _admGruppeOk ohne Chip blendet die ausser-Liste der HT-Gruppe aus")
 
     # Schreib-Schutz wd-plaene — mit Admin-Ansicht (Reiter „Winning Days")
@@ -391,10 +398,13 @@ def main():
     check("/admin/live-trades?tage=1&nur_eigene=1&status=open" in html, "A: Endlesung des PC-Tabs fragt live-trades nur_eigene=1 (Server eq.me)")
     check(html.count("ansicht=admin") >= 8 and "wdSichtbar() ? '&ansicht=admin'" in html and "(wdSichtbar() ? ((query ? '&' : '?') + 'ansicht=admin')" in html,
           "A: Admin-Ansicht nur aus Admin-Reitern (Farmer nur bei sichtbarem Reiter)")
+    # RT1 (05.11.2026): feste Fenster (900/2200/2600 Zeichen) → ganzer Funktionsrumpf; die Rümpfe wuchsen (55f97f5f UNT2
+    # wdNurEigenesUnternehmen im Würfeln, wdNeuLaden), dieselben Riegel stehen weiter drin
     i = html.index("async function wdWuerfelnSchreiben(")
-    check("window._admNurGruppe()) ? {}" in html[i:i + 900], "A: Würfel-Automatik nimmt keine Richtungen aus der Verwalter-Ansicht")
+    check("window._admNurGruppe()) ? {}" in html[i:html.index("\n  }\n", i)], "A: Würfel-Automatik nimmt keine Richtungen aus der Verwalter-Ansicht")
     i = html.index("async function wdNeuLaden(")
-    check("!nurGruppe && d && d.rail" in html[i:i + 2200] and "String(x.user_id) === ich" in html[i:i + 2600],
+    _nl = html[i:html.index("\n  }\n", i)]
+    check("!nurGruppe && d && d.rail" in _nl and "String(x.user_id) === ich" in _nl,
           "A: Farmer-Reiter eines Verwalters räumt/heilt nur die eigene Zeile")
     # 6) Tabellen fehlen (SQL nicht eingespielt) → keine Gruppen, nichts kippt
     fake_db(ns, tabellen_fehlen=True)
@@ -489,7 +499,9 @@ def main():
     chip = html0[html0.index("  function wdRichtungChip(x, erw){"):html0.index("  async function wdRichtungUmschalten(")]
     check("const hakenSperre = fest || nurLesen ||" in karte and "const tagKnopf = (!erw && !fest && !nurLesen &&" in karte
           and "data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest || nurLesen ? 'disabled' : ''}" in karte
-          and "if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class=\"chip ${kl}\">" in chip,
+          # RT1 (05.11.2026): seit 34044362 („Richtung ruhig“, Pfeile je Konto) trägt der Span einen Tooltip — weiter Span ohne data-wd-flip
+          and "if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class=\"chip ${kl}\"${tipJe ?" in chip
+          and "data-wd-flip" not in chip[chip.index("if(fest || wdNurLesen(x.user_id)) return"):chip.index("\n", chip.index("if(fest || wdNurLesen(x.user_id)) return"))],
           "Verwalter, fremde ID: Haken/alle disabled, kein nur-heute-Knopf, Richtungs-Chip als Span ohne data-wd-flip")
     hand = html0[html0.index("    box.querySelectorAll('[data-wd-drag]').forEach(g => {"):html0.index("  function wdGruende(konten){")]
     check(hand.count("wdVerwalter()") >= 3 and "if(wdVerwalter()) return ev.preventDefault();" in hand
@@ -516,17 +528,33 @@ def main():
     for name in ("async function wdSlotEinplanen(", "async function wdKontoHaken(", "async function wdKontoHakenOhneZeile(", "async function wdKontoHeute(",
                  "async function wdRichtungUmschalten(", "async function mklWdPlanSpeichern(", "async function mklWdPlanTauschen(", "async function mklWdPlanNeuAnlegen("):
         check("await wdDarf(" in fn(name, 900), f"M1: {name[15:-1]} prüft wdDarf vor dem Schreiben")
-    check("await wdNurErlaubte(offen, true)" in fn("async function wdWuerfelnSchreiben(", 1600), "M1: Würfel-Automatik schreibt eingeschränkt nur die eigene Zeile")
+    _ws = html.index("async function wdWuerfelnSchreiben(")   # RT1 (05.11.2026): ganzer Rumpf statt 1.600 Zeichen (55f97f5f UNT2)
+    check("await wdNurErlaubte(offen, true)" in html[_ws:html.index("\n  }\n", _ws)], "M1: Würfel-Automatik schreibt eingeschränkt nur die eigene Zeile")
     # jede Schreibstelle in wd_farmer_regeln bzw. jeder Aufruf von wd_konto_setzen hat in SEINER Funktion/seinem Handler vorher einen Riegel
     import re as _re
 
     def umgebung(k):   # vom letzten Funktions- bzw. Handler-Anfang bis zur Stelle
         return html[max(html.rfind("function ", 0, k), html.rfind("addEventListener(", 0, k)):k]
+    # RT1 (05.11.2026): neue Schreibstellen seit dem Test — wd_farmer_regeln 5 → 7 (eadc208b E4 e4Speichern, ab71b766 E4b e4bSpeichern),
+    # wd_konto_setzen 4 → 6 (1d6a94e0 wdKontoEinwuerfeln, e2e84fca wdHakenSofort). Zahl bleibt exakt (jede neue Stelle muss hier auffallen);
+    # ein Helfer ohne eigenen Riegel zählt nur, wenn JEDER Aufruf von ihm in einer Funktion mit Riegel steht (e4bSpeichern ← e4Speichern,
+    # wdHakenSofort ← wdKontoHaken/wdKontoHakenOhneZeile)
+    def gesperrt(k, riegel, tiefe=2):
+        if any(r in umgebung(k) for r in riegel):
+            return True
+        if tiefe <= 0:
+            return False
+        kopf = _re.match(r"function (\w+)\(", html[html.rfind("function ", 0, k):])
+        if not kopf:
+            return False
+        aufrufe = [m.start() for m in _re.finditer(r"(?<![\w.])" + kopf.group(1) + r"\(", html)
+                   if not html[max(0, m.start() - 9):m.start()].endswith("function ")]
+        return bool(aufrufe) and all(gesperrt(a, riegel, tiefe - 1) for a in aufrufe)
     stellen = [m.start() for m in _re.finditer(r"supabase\.from\('wd_farmer_regeln'\)\.update", html)]
-    check(len(stellen) == 5 and all(("wdNurGruppe()" in umgebung(k) or "_admNurGruppeLaden()" in umgebung(k)) for k in stellen),
+    check(len(stellen) == 7 and all(gesperrt(k, ("wdNurGruppe()", "_admNurGruppeLaden()")) for k in stellen),
           f"M1: alle {len(stellen)} Schreibstellen in wd_farmer_regeln für Eingeschränkte gesperrt")
     rpc = [m.start() for m in _re.finditer(r"supabase\.rpc\('wd_konto_setzen'", html)]
-    check(len(rpc) == 4 and all(("wdDarf(" in umgebung(k) or "wdNurGruppe()" in umgebung(k)) for k in rpc),
+    check(len(rpc) == 6 and all(gesperrt(k, ("wdDarf(", "wdNurGruppe()")) for k in rpc),
           f"M1: alle {len(rpc)} Aufrufe von wd_konto_setzen hinter wdDarf/wdNurGruppe")
     i = html.index("async function admKapSpeichern(")
     check("if(admEingeschraenkt() || eigenerCode)" in html[i:i + 900], "M1: kapitel (HT-weit) schreibt ein eingeschränkter Login nie")
