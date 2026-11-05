@@ -209,6 +209,20 @@ def teil_fremd_konflikte():
         check(hashlib.md5((fn(alt) + "\n").encode()).hexdigest() == "9bb3a0198249043c7a3ed3cfdfbdb44f", "5f Rückbau = Live-Fassung (md5)")
 
 
+# ── 6) Ziel-Wache-Push ──
+def teil_ziel_wache():
+    i = NEU_SRC.index("\ndef zw_tick(")
+    zt = NEU_SRC[i:NEU_SRC.index("\ndef ", i + 10)]
+    check('for uid in {str(a.get("user_id"))} | _admins_fuer_uid(a.get("user_id"), admins or set()):' in zt
+          and '"🎯 Ziel erreicht"' in zt and "(admins or set()):\n                push_an_user(uid, \"🎯" not in zt,
+          "6a zw_tick: „Ziel erreicht“ nur an Besitzer + Admins seines Unternehmens")
+    n = lade(NEU_SRC, HELFER)
+    emp = lambda uid: {uid} | n["_admins_fuer_uid"](uid, {A})  # noqa: E731
+    check(emp(M) == {M, A} and emp(X) == {X, E} and emp(E) == {E} and emp(O) == {O}, "6b HT-Konto → Besitzer + HT-Admin (wie vorher), Emin-Konto → Besitzer + Emin, ohne Unternehmen → nur Besitzer")
+    n["admin_gruppen_daten"] = lambda: (_ for _ in ()).throw(RuntimeError("weg"))
+    check(emp(M) == {M}, "6c Gruppen nicht lesbar → nur der Besitzer")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")

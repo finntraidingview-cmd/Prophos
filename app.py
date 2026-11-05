@@ -40779,7 +40779,9 @@ def zw_tick(force=False):
             wer = namen.get(str(a.get("user_id")), "")
             text = (f"{a.get('name') or 'Konto'} ({a.get('firm') or '–'}{' · ' + wer if wer else ''}): Balance "
                     f"{float(bal):,.0f} ≥ Ziel {ziel:,.0f} — Phase umstellen / auszahlen.").replace(",", ".")
-            for uid in {str(a.get("user_id"))} | (admins or set()):
+            # UNT5 (05.11.2026): nur Besitzer + Admins SEINES Unternehmens (HT → HT-Admins wie bisher, Emin-Gruppe → Emin, ohne Unternehmen → keiner;
+            # Gruppen nicht lesbar → nur der Besitzer) — vorher bekamen Finn + Pascal auch Emins Konten am Ziel
+            for uid in {str(a.get("user_id"))} | _admins_fuer_uid(a.get("user_id"), admins or set()):
                 push_an_user(uid, "🎯 Ziel erreicht", text, "https://prophos.pages.dev/prophos#accounts", "ziel-" + aid[:8])
             print(f"[ziel-wache] 🎯 {text}", flush=True)
         elif war and not erreicht:
