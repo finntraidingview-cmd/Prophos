@@ -41129,7 +41129,7 @@ def fp_tick(force=False):
             return
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_fremd_konflikte", headers=_sb_headers(), json={}, timeout=(5, 15))
         _sb_pruefen(r)
-        konflikte = r.json() or []
+        konflikte = fp_konflikte_je_unternehmen(r.json() or [], offen)
     except requests.exceptions.HTTPError as e:
         if _fp_tabelle_fehlt(e):
             _fp["tabelle_fehlt"] = True          # sql/2026-10-08_fremd_positionen.sql noch nicht eingespielt
@@ -41162,10 +41162,30 @@ def fp_tick(force=False):
                 f"{' ' + str(menge) if menge is not None else ''} {f.get('symbol') or ''} von Hand gegen {k.get('gegen_konto') or '?'}"
                 f"{' (' + gwer + ')' if gwer else ''} {_fp_richtung(k.get('gegen_richtung'))}"
                 f"{' (von Hand)' if k.get('art') == 'hand' else ''}").replace("  ", " ")
-        for uid in {str(f.get("user_id")), str(k.get("gegen_user"))} | (admins or set()):
+        # UNT5: Admins nur des eigenen Unternehmens (HT → HT-Admins, Gruppe → ihr Verwalter, ohne Unternehmen → keiner)
+        for uid in {str(f.get("user_id")), str(k.get("gegen_user"))} | _admins_fuer_uid(f.get("user_id"), admins or set()):
             if uid and uid != "None":
                 push_an_user(uid, "⚠ Gegenhedge", text, "https://prophos.pages.dev/prophos#tplaner", "fremd-" + key[:40], renotify=True)
         print(f"[fremd] ⚠ Gegenhedge {key}: {text}", flush=True)
+
+
+def fp_konflikte_filter(konflikte, offen, karte):
+    """REIN RECHNEND (testbar, UNT5): nur Konflikte innerhalb EINES Unternehmens (karte = ap_unternehmen_karte; ohne Unternehmen = solo:<uid>) —
+    eine HT-Hand-Position gegen einen Emin-Plan ist kein Gegenhedge (Unternehmen haben nichts gegeneinander)."""
+    von = {str(f.get("id")): str(f.get("user_id")) for f in offen or ()}
+    return [k for k in konflikte or ()
+            if ap_unternehmen_schluessel(von.get(str(k.get("fremd_id"))), karte) == ap_unternehmen_schluessel(k.get("gegen_user"), karte)]
+
+
+def fp_konflikte_je_unternehmen(konflikte, offen):
+    """fp_konflikte_filter mit admin_gruppen_daten — nicht lesbar → nur Konflikte derselben ID (fail-closed, Meldung)."""
+    try:
+        karte = ap_unternehmen_karte(admin_gruppen_daten())
+    except Exception as e:
+        print(f"[fremd] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — Konflikte nur je ID", flush=True)
+        von = {str(f.get("id")): str(f.get("user_id")) for f in offen or ()}
+        return [k for k in konflikte or () if von.get(str(k.get("fremd_id"))) == str(k.get("gegen_user"))]
+    return fp_konflikte_filter(konflikte, offen, karte)
 
 
 def fp_loop():

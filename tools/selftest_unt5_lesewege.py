@@ -178,6 +178,37 @@ def teil_pc_namen():
           "4f Route filtert je Login, Besitzer im Cache von _pc_namen_daten (Reader-Meldungen _rw_pc_namen unverändert)")
 
 
+# ── 5) prophos_fremd_konflikte (Railway-Filter sofort + SQL, nicht eingespielt) ──
+def teil_fremd_konflikte():
+    n = lade(NEU_SRC, HELFER + ("ap_unternehmen_karte", "ap_unternehmen_schluessel", "fp_konflikte_filter", "fp_konflikte_je_unternehmen"))
+    offen = [{"id": 1, "user_id": M}, {"id": 2, "user_id": X}, {"id": 3, "user_id": O}]
+    k = [{"fremd_id": 1, "gegen_user": A, "gegen_id": "p-ht"}, {"fremd_id": 1, "gegen_user": X, "gegen_id": "p-em"},
+         {"fremd_id": 2, "gegen_user": E, "gegen_id": "p-em2"}, {"fremd_id": 2, "gegen_user": M, "gegen_id": "p-ht2"},
+         {"fremd_id": 3, "gegen_user": O, "gegen_id": "p-o"}, {"fremd_id": 3, "gegen_user": A, "gegen_id": "p-ht3"}]
+    karte = n["ap_unternehmen_karte"](DATEN)
+    erg = [x["gegen_id"] for x in n["fp_konflikte_filter"](k, offen, karte)]
+    check(erg == ["p-ht", "p-em2", "p-o"], f"5a nur Konflikte im eigenen Unternehmen: HT↔HT, Emin↔Emin, ohne Unternehmen nur mit sich ({erg})")
+    check([x["gegen_id"] for x in n["fp_konflikte_filter"](k[:1], offen, {})] == ["p-ht"] and
+          len(n["fp_konflikte_filter"](k, offen, {})) == len(k), "5b ohne Gruppen-Tabellen: alles wie bisher")
+    n["admin_gruppen_daten"] = lambda: (_ for _ in ()).throw(RuntimeError("weg"))
+    check([x["gegen_id"] for x in n["fp_konflikte_je_unternehmen"](k, offen)] == ["p-o"], "5c Gruppen nicht lesbar → nur Konflikte derselben ID")
+    i = NEU_SRC.index("\ndef fp_tick(")
+    ft = NEU_SRC[i:NEU_SRC.index("\ndef ", i + 10)]
+    check("konflikte = fp_konflikte_je_unternehmen(r.json() or [], offen)" in ft and "_admins_fuer_uid(f.get(\"user_id\"), admins or set())" in ft,
+          "5d fp_tick: Konflikte je Unternehmen, Push nur an die Admins des Unternehmens")
+    pfad = os.path.join(WURZEL, "sql", "2026-11-05_unt5_fremd_konflikte.sql")
+    rb = os.path.join(WURZEL, "sql", "2026-11-05_unt5_fremd_konflikte_rueckbau.sql")
+    if os.path.exists(pfad):
+        import difflib, hashlib
+        neu, alt = open(pfad, encoding="utf-8").read(), open(rb, encoding="utf-8").read()
+        fn = lambda t: t[t.index("CREATE OR REPLACE FUNCTION"):t.index("end $function$", t.index("CREATE OR REPLACE FUNCTION")) + len("end $function$")]  # noqa: E731
+        d = [z for z in difflib.unified_diff(fn(alt).splitlines(), fn(neu).splitlines(), lineterm="", n=0) if z[:1] in "+-" and z[:3] not in ("+++", "---")]
+        weg = [z for z in d if z.startswith("-")]
+        check(weg == ["-     and g.seit between f.seit - w and f.seit + w;"] and sum(1 for z in d if "prophos_gruppe_von(" in z) == 4,
+              "5e SQL: beide Joins nur im eigenen Unternehmen, sonst zeichengleich")
+        check(hashlib.md5((fn(alt) + "\n").encode()).hexdigest() == "9bb3a0198249043c7a3ed3cfdfbdb44f", "5f Rückbau = Live-Fassung (md5)")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")
