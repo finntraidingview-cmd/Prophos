@@ -43554,16 +43554,23 @@
     archNeu()[accountId] = eintrag
     const lokal = getArchive(); lokal[accountId] = eintrag
     try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(lokal)) }catch(_){ saveArchive(lokal); return }
+    // UPLOAD IMMER AUSDRÜCKLICH (NA1, 05.11.2026, Finn: Jacobs drei bestandene Apex-Challenges …0017/…0019/…0020 blieben nach dem Nachfolger
+    // 17:28 Dubai unter Accounts und im Radar auf Review — parents stand in der Cloud, archive nicht). Seit AC3 (.2065, 892ee549) lädt der
+    // localStorage-Hook nur noch den UNTERSCHIED zum vorherigen lokalen Stand hoch. Die Zeile oben schreibt den Eintrag aber schon vorher am
+    // Hook vorbei → saveArchive unten sah keinen Unterschied, der Eintrag kam nie in user_settings.archive (seit .2065 kein einziger aus dem
+    // Tab, nur Server-Blows) und war nach dem Neuladen oder auf einem anderen Gerät weg („Cloud gewinnt"). Jetzt genau diese Änderung über
+    // archivCloudMerge: frischer Cloud-Stand, nur dieser Eintrag, updated_at-Wächter, bei Lesefehler vorgemerkt mit Wiederholer (wie AC2/AC3).
+    archivCloudMerge({ setzen: { [accountId]: eintrag }, entfernen: [] })
     ;(async () => {
-      // AC2: Cloud nicht lesbar → kein Upload des lokalen Stands (er könnte veraltet sein und Server-Einträge überschreiben). Lokal steht der Eintrag
-      // schon; er wird nur als Änderung vorgemerkt (unten, archivCloudMerge) und nachgeschrieben, sobald die Cloud lesbar ist.
+      // Lokalen Stand mit der Cloud abgleichen (nur lokal, am Hook vorbei — der Upload läuft oben). Cloud nicht lesbar oder kaputt → lokal bleibt.
+      // ID gewechselt oder Archiv hier geändert (z. B. Entarchivieren) während des Lesens → verwerfen, wie archivCloudAbgleich (Gegenprüfung NA1)
+      const uidVor = currentUserId, standVor = localStorage.getItem(ARCH_LS)
       const gelesen = await fetchSettingGenau('archive').catch(() => ({ ok: false }))
-      // S2 (05.11.2026): sonst ginge der Eintrag beim nächsten Neuladen verloren („Cloud gewinnt") → als Änderung vormerken, der Wiederholer (20 s) schreibt nach
-      if(!gelesen.ok){ console.warn('[archiv] Cloud-Archiv nicht lesbar — vorgemerkt, wird nachgeschrieben'); archivCloudMerge({ setzen: { [accountId]: eintrag }, entfernen: [] }); return }
+      if(!gelesen.ok || currentUserId !== uidVor || localStorage.getItem(ARCH_LS) !== standVor) return
       let cloud = gelesen.value
-      if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return } }   // kaputt gelesen → nicht überschreiben
+      if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return } }
       const basis = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? cloud : getArchive()   // keine Zeile/leer → lokaler Stand (wie bisher)
-      saveArchive({ ...basis, ...archNeu() })   // lokal + Upload (Write-through)
+      try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify({ ...basis, ...archNeu() })) }catch(_){}
     })()
   }
   /* OFFENE TABS (Finn 30.10.2026): das Archiv kam nur beim Laden. Ein Konto, das ein anderer Tab, das Handy oder der Server archiviert hat (Abhaken „Phase bestanden"), stand
@@ -56389,7 +56396,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2086'
+  const OS_TAB_BUILD = '2026-09-22.2087'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

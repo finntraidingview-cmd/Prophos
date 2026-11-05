@@ -130,9 +130,15 @@ def main():
     ua = block(html, "  function unarchiveAccount(", "\n  }\n")
     check("archivUeberallEntfernen(accountId)" in ua and "delete archNeu()[accountId]" in ua, "unarchiveAccount ruft das Backend (alle Profile)")
     asa = block(html, "  function archivSchreibenAbgeglichen(", "\n  }\n")
-    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSettingGenau('archive')" in asa and "if(!gelesen.ok)" in asa and "{ ...basis, ...archNeu() }" in asa and "archivCloudMerge({ setzen: { [accountId]: eintrag }" in asa
+    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSettingGenau('archive')" in asa and "if(!gelesen.ok" in asa and "{ ...basis, ...archNeu() }" in asa and "archivCloudMerge({ setzen: { [accountId]: eintrag }" in asa
           and "archivSchreibenAbgeglichen(accountId, arch[accountId])" in block(html, "  function archiveAccount(", "\n  /* ARCHIVIERT"),
           "Archivieren: lokal ohne Upload, dann Cloud-Stand + eigene neue Einträge hochladen (kein alter Tab-Stand); Cloud nicht lesbar → kein Upload (AC2)")
+    # NA1 (05.11.2026): der Upload läuft IMMER ausdrücklich über archivCloudMerge, vor dem Cloud-Lesen — nie über saveArchive/den Diff-Hook
+    # (der lokale Stand trägt den Eintrag schon, der Hook sah keinen Unterschied; Jacobs drei Apex-Challenges blieben so unarchiviert)
+    i_merge = asa.find("archivCloudMerge({ setzen: { [accountId]: eintrag }")
+    check(i_merge >= 0 and i_merge < asa.find("fetchSettingGenau('archive')") and "saveArchive({ ...basis" not in asa
+          and "if(!gelesen.ok || currentUserId !== uidVor" in asa,
+          "NA1: Archivieren lädt den Eintrag immer über archivCloudMerge hoch (vor dem Lesen), nie über den Diff-Hook (saveArchive)")
 
     d = block(app, '@app.route("/admin/auto-plan/delta"')
     check("ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())" in d, "GET /admin/auto-plan/delta filtert mit gemerktem Archiv")
