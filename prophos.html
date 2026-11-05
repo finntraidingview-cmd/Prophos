@@ -56823,7 +56823,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2105'
+  const OS_TAB_BUILD = '2026-09-22.2106'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62428,6 +62428,7 @@
    *   sonst → bleibt unklar, der Grund steht am Plan (final.unklar_grund) und im Radar statt „–".
    * Nie gebucht ohne Deal-Beleg, nie „nicht gelaufen" ohne Balance-Gegenprobe; nichts wird geklickt. Takt 10 min, je Plan höchstens alle 30 min. */
   const DE_TAKT_MS = 10 * 60000, DE_PLAN_MS = 30 * 60000, DE_TAGE = 14
+  const DE_OEFFNEN_MAX = 2, _deOeffnet = new Map()   // MT1: so oft öffnet dieser Tab ein zugefahrenes Master-Terminal je Plan zum Lesen
   let _deAt = 0, _deLaeuft = false
   const _deVersucht = new Map()
   function deUrteil(res, refBal){
@@ -62551,6 +62552,27 @@
         const res = await window.mtcApi('deals?' + qs.toString(), { timeoutMs: 100000 })
         if(res && res._httpFail) continue   // Panel alt (Route fehlt) oder weg → nächster Versuch in 30 min
         const u = deUrteil(res, refBal), jetzt = new Date().toISOString(), fin = Object.assign({}, r.mt5_baseline.final)
+        /* MT1 (06.11.2026, Finn: „Account startet nicht / P&L fehlt / hängende unklar-Zeilen sollen nicht mehr vorkommen"; Fall Marco e5e3995a): das Panel
+         * liest die Deals nur aus einem LAUFENDEN Terminal („Master-Terminal läuft nicht — nicht gelesen", Gegenprüfung N2: direkt nach dem Start ist die
+         * Historie evtl. leer). Die Master-Terminals sind zwischen den Trades aber zu, und ein Konto in Überprüfen bekommt keinen neuen Trade — die
+         * Lesung kam nie. Jetzt öffnet dieser Tab das Terminal selbst zum Lesen (mt5KontoBalanceJetzt: Login-Zwang, nur Balance, keine Order; wartet,
+         * solange Puls arbeitet) und liest die Deals ~10 min später (Historie geladen) — höchstens DE_OEFFNEN_MAX-mal je Plan, nie wenn hier ein Start
+         * ansteht (ebnStartNah) oder Polar läuft. Das Urteil selbst bleibt deUrteil (NG1-Weg). */
+        if(u.art === 'unklar' && res && res.lesbar === false && /Master-Terminal läuft nicht/.test(String(res.grund || ''))){
+          const n = _deOeffnet.get(String(r.id)) || 0
+          let frei = false; try{ frei = !(typeof ebnStartNah === 'function' && ebnStartNah()) && !(typeof polarLaeuft === 'function' && polarLaeuft()) && typeof mt5KontoBalanceJetzt === 'function' }catch(_){ frei = false }
+          if(n < DE_OEFFNEN_MAX && frei){
+            let lb = null; try{ lb = await mt5KontoBalanceJetzt(r.master_account_id, ri.masterLogin, {}) }catch(e){ lb = { ok: false, msg: String((e && e.message) || e) } }
+            if(lb && lb.ok){
+              _deOeffnet.set(String(r.id), n + 1)   // nur ein wirklich geöffnetes Terminal zählt (Gegenprüfung: „Lesung läuft schon" o. ä. nicht)
+              // Gegenprüfung: der Leerlauf-Wächter des Panels schließt ein Terminal ohne Trade nach 15–19 min — die Deals deshalb nach ~5–7 min (Historie
+              // geladen, Terminal noch offen): Plan ab jetzt + 5 min wieder fällig, ein Extra-Takt in 5–7 min (gestreut)
+              _deVersucht.set(String(r.id), Date.now() - DE_PLAN_MS + 5 * 60000)
+              setTimeout(() => { _deAt = 0; deTick() }, 5 * 60000 + Math.floor(Math.random() * 120000))
+            }
+            u.grund = `Master-Terminal war zu — ${lb && lb.ok ? 'zum Lesen geöffnet (Balance ' + Number(lb.balance).toLocaleString('de-DE') + ' $), Deals in ~6 min' : 'Öffnen nicht geklappt: ' + String((lb && lb.msg) || '—').slice(0, 80)}`.slice(0, 160)
+          }
+        }
         if(u.art === 'offen') continue
         // NG1: bewiesen nicht gelaufen → löschen statt mit 0,00 $ zum Abhaken stellen; spricht etwas am Plan dagegen, wie bisher buchen
         if(u.art === 'nicht_gelaufen'){
@@ -62579,6 +62601,105 @@
     finally{ _deLaeuft = false }
   }
   setInterval(deTick, 60000)
+  /* NIE GELAUFEN AUF ORBIT/TOPSTEP (NG2, 06.11.2026, Finn: „ja dann bau den scheiß"; Fall Mike Lucid 5b2a2fd1 …0001): Orbit V2/Topstep V2 (tvv2/tsv2),
+   * geclaimt, nie gestartet, der Tagesreset schob ihn „unklar" nach Überprüfen; die Puls-Endlesung las danach flach (Positions-Tabelle), Balance
+   * 150.000 = Start, Today's P&L 0 — trotzdem stand er mit +0,00 unter Abhaken. Wie NG1 (Echo): ist „nicht gelaufen" bewiesen, wird der Plan
+   * gelöscht. Beweis: Puls-Endlesung nach dem Tagesreset (final.quelle puls, grund tagesende_unklar) flach, gelesene Balance = Vergleichs-Balance ±1 $,
+   * kein Fill/Einstieg, keine TradingView-Spur aus einem Lauf, kein Hedge/Ticket/Fusion-P&L, kein Hand-Trade (fremd_positionen) im Fenster.
+   * Vergleichs-Balance: Ende eines anderen Plans desselben Kontos vor dem Claim (deVergleichsBalance), sonst die Planer-Balance aus der Notiz
+   * („Balance 150.000 (TV)") — nur wenn seit dem Anlegen kein anderer Plan des Kontos gestartet ist. Today's P&L zählt NICHT als Beweis (der
+   * Tagesreset liest nach dem Handelstag, die Zahl ist dann immer 0). Fehlt etwas, bleibt der Plan, wie er ist — nie schätzen. REIN bis deWeg. */
+  const NG2_TAKT_MS = 10 * 60000
+  let _ng2At = 0, _ng2Laeuft = false
+  function ng2NotizBalance(notes){
+    const m = String(notes || '').match(/Balance ([\d.]+(?:,\d+)?) \((?:TV|TopstepX|TSX)\)/)
+    if(!m) return null
+    const n = Number(m[1].replace(/\./g, '').replace(',', '.'))
+    return n > 0 ? n : null
+  }
+  // Gegenprüfung NG2: Vergleichs-Balance nur aus einer LESUNG vor dem Claim (Lesezeit, nicht ended_at — der Tagesreset setzt ended_at = start_um,
+  // die Balance kommt erst nachts dazu und kann den Trade dieses Plans schon enthalten). REIN.
+  function ng2VergleichsBalance(planId, claimIso, andere){
+    const c = Date.parse(claimIso)
+    for(const q of (andere || [])){
+      if(!q || String(q.id) === String(planId)) continue
+      const b = q.mt5_baseline || {}, bn = b.bal_nach, fe = b.final || {}
+      if(bn && bn.ok && Number(bn.balance) > 0 && Date.parse(bn.at) < c) return Number(bn.balance)
+      const lz = Date.parse(fe.puls_at || fe.lesen_at || '')
+      if(Number(fe.balance_end) > 0 && isFinite(lz) && lz < c) return Number(fe.balance_end)
+    }
+    return null
+  }
+  const ng2Alnum = v => String(v || '').replace(/[^0-9a-z]/gi, '').toUpperCase()
+  function ng2Urteil(r, refBal, extId){
+    if(!r) return 'kein Plan'
+    if(r.status !== 'review') return 'nicht in Überprüfen'
+    if(r.route !== 'tvv2' && r.route !== 'tsv2') return 'kein Orbit-/Topstep-Plan'
+    if(r.started_at || r.orbit_gesendet_at) return 'Plan war gestartet'
+    if(r.master_pl != null) return 'P&L am Plan'
+    if(r.slave_pl != null && Number(r.slave_pl) !== 0) return 'Fusion-P&L am Plan'
+    const b = (r.mt5_baseline && typeof r.mt5_baseline === 'object') ? r.mt5_baseline : {}
+    const f = (b.final && typeof b.final === 'object') ? b.final : {}
+    if(f.grund !== 'tagesende_unklar' || f.quelle !== 'puls') return 'keine Puls-Endlesung nach dem Tagesreset'
+    // Gegenprüfung: Lesung NACH dem Tagesreset, nur die Positions-Tabelle zählt als flach (nicht „offener G&V 0"), und Puls stand auf DIESEM Konto
+    if(!(Date.parse(f.puls_at || '') > Date.parse(f.tagesreset_at || ''))) return 'Puls-Lesung nicht nach dem Tagesreset'
+    if(f.puls_flach !== 'tabelle') return 'Puls hat nicht über die Positions-Tabelle flach gelesen'
+    const ext = ng2Alnum(extId)
+    if(ext.length < 6 || !ng2Alnum(f.puls_konto).includes(ext)) return 'Puls-Lesung nicht nachweislich auf diesem Konto'
+    if(!(Number(f.balance_end) > 0)) return 'keine Balance gelesen'
+    if(f.exit_fill || f.einstieg || f.einstieg_fill || f.einstieg_nq || f.preis || f.ticket || f.konto_geblowt || f.konto_weg || f.master_pl_schaetzung != null) return 'Fill-/Konto-Beleg im Ende-Eintrag'
+    if(b.manuell) return 'Manuelle Arbeit'
+    // puls_pause = „Trade evtl. von Hand", Polar-Lauf → bleibt. puls_unklar/start_fehler.unklar sind genau der Fall, den dieser Beweis klärt
+    if(b.puls_pause || r.polar_lauf) return 'Puls-Pause-/Polar-Marke am Plan'
+    if(b.hedge || b.ticket || b.versuche_alt || b.polar || (b.live && b.live.offen) || (b.tv && typeof b.tv === 'object' && Object.keys(b.tv).length)) return 'Hedge/Ticket/TradingView-Spur am Plan'
+    if(refBal == null || !(Number(refBal) > 0)) return 'keine Vergleichs-Balance'
+    if(Math.abs(Number(f.balance_end) - Number(refBal)) > 0.01) return `Balance ${Number(f.balance_end).toLocaleString('de-DE')} statt ${Number(refBal).toLocaleString('de-DE')} $`
+    return ''
+  }
+  window._ng2Urteil = ng2Urteil; window._ng2NotizBalance = ng2NotizBalance   // Test-Haken
+  async function ng2Tick(){
+    if(window._tabNebenSofort || _ng2Laeuft || Date.now() - _ng2At < NG2_TAKT_MS) return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    _ng2At = Date.now(); _ng2Laeuft = true
+    try{
+      const ab = new Date(Date.now() - DE_TAGE * 86400000).toISOString()
+      const { data: rows, error } = await supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'review').is('master_pl', null)
+        .is('started_at', null).in('route', ['tvv2', 'tsv2']).gte('ended_at', ab).limit(30)
+      if(error) throw error
+      for(const r of (rows || [])){
+        const bal = Number(((r.mt5_baseline || {}).final || {}).balance_end)
+        const { data: acc, error: eAcc } = await supabase.from('accounts').select('external_id').eq('id', r.master_account_id).maybeSingle()
+        if(eAcc || !acc) continue
+        const extId = acc.external_id || ''
+        if(ng2Urteil(r, bal, extId)) continue   // scheitert schon ohne die Vergleichs-Balance
+        const claim = r.start_um_gestartet_at || r.start_um
+        if(!claim) continue
+        const { data: vor, error: eVor } = await supabase.from('trade_plans').select('id,mt5_baseline,ended_at').eq('master_account_id', r.master_account_id)
+          .neq('id', r.id).in('status', ['completed', 'review']).lt('ended_at', claim).order('ended_at', { ascending: false }).limit(5)
+        if(eVor) continue
+        let ref = ng2VergleichsBalance(r.id, claim, vor)
+        if(ref == null){
+          // Planer-Balance aus der Notiz nur, wenn seit dem Anlegen kein anderer Plan dieses Kontos gestartet ODER geclaimt wurde (Gegenprüfung)
+          const seit = new Date(r.created_at || claim).toISOString()   // Z-Format: kein „+" im or-Filter (wie app.py ap_tagesreset)
+          const { data: dazw, error: eDz } = await supabase.from('trade_plans').select('id').eq('master_account_id', r.master_account_id).neq('id', r.id)
+            .or(`started_at.gte.${seit},start_um_gestartet_at.gte.${seit}`).limit(1)
+          if(eDz || (dazw && dazw.length)) continue
+          ref = ng2NotizBalance(r.notes)
+        }
+        // Hand-Trades im Fenster (1 h vor dem Claim bis zur Lesung): dann ist die Balance kein Beweis
+        const bis = ((r.mt5_baseline || {}).final || {}).puls_at || new Date().toISOString()
+        const { data: fp, error: eFp } = await supabase.from('fremd_positionen').select('ident').eq('konto_id', r.master_account_id)
+          .gte('seit', new Date(Date.parse(claim) - 3600000).toISOString()).lte('seit', bis).limit(1)
+        if(eFp || (fp && fp.length)) continue
+        const nein = ng2Urteil(r, ref, extId)
+        if(nein){ console.info('[ng2]', String(r.id).slice(0, 8), 'bleibt:', nein); continue }
+        await deWeg(r, `Orbit/Topstep nie gelaufen: Puls flach, Balance ${bal.toLocaleString('de-DE')} = vorher (NG2)`)
+      }
+    }catch(e){ console.warn('[ng2]', (e && e.message) || e) }
+    finally{ _ng2Laeuft = false }
+  }
+  setInterval(ng2Tick, 60000)
   // CL1: läuft hier gerade ein Start für diesen Plan (Echo-Check, Echo-V2-Kette, Orbit-/Topstep-Lauf, Startzeit-Takt)? Ein laufender Orbit-Lauf hält ALLE an
   function sfLaeuftHier(p){
     const id = String((p && p.id) || '')
