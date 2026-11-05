@@ -3954,8 +3954,20 @@
   .ab2-fuss{margin-top:12px;padding-top:9px;border-top:1px solid var(--k-gitter);font-size:11.5px;color:var(--k-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ab2 .btn{width:100%;margin-top:10px;justify-content:center;animation:ab2-zeile .25s 1.2s ease-out both}
   @keyframes ab2-zeile{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  /* AB2c (Finn 05.11.2026): nur Funded-Planer-Trades, mehrere hintereinander = Liste (neuester oben voll, ältere kompakt: Kopf + Profit-Target-Strahl) */
+  .ab2-titel{display:none;font-size:11.5px;color:var(--k-sub);font-weight:500;margin:-2px 0 10px}
+  .ab2.liste .ab2-titel{display:block}
+  .ab2.liste{top:50%}
+  .ab2-liste{max-height:min(72vh,560px);overflow-y:auto;overscroll-behavior:contain;margin:0 -4px;padding:0 4px}
+  .ab2-eintrag{animation:ab2-zeile .25s ease-out both}
+  .ab2-eintrag + .ab2-eintrag{margin-top:12px;padding-top:12px;border-top:1px solid var(--k-gitter)}
+  .ab2-eintrag.kompakt .ab2-block:not(:first-child),.ab2-eintrag.kompakt .ab2-fuss,.ab2-eintrag.kompakt .btn{display:none}
+  .ab2-eintrag.kompakt .ab2-block{margin-top:9px;animation:none}
+  .ab2-eintrag.kompakt .ab2-kopf b{font-size:12.5px} .ab2-eintrag.kompakt .ab2-pl{font-size:16px}
+  .ab2-tage i{animation:ab2-punkt .3s calc(.45s + var(--j, 0) * .06s) ease-out both}
+  @keyframes ab2-punkt{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
   @media (max-width:520px){ .ab2{top:42%;padding:14px 15px 12px} .ab2-pl{font-size:19px} }
-  @media (prefers-reduced-motion: reduce){ .ab2,.ab2.weg,.ab2-block,.ab2-bar > i,.ab2 .btn{animation:none !important} }
+  @media (prefers-reduced-motion: reduce){ .ab2,.ab2.weg,.ab2-block,.ab2-bar > i,.ab2 .btn,.ab2-eintrag,.ab2-tage i{animation:none !important} }
   #k1-ziele .k1-haupt{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;align-items:stretch}
   #k1-ziele .k1-karte{background:var(--k-karte);border:1px solid var(--k-rand);border-radius:16px;padding:16px 18px;min-width:0}
   #k1-ziele .k1-karte h4{margin:0;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -37415,7 +37427,8 @@
   let _mwdErlSicht = false   // aus dem Radar geöffnet (27.10.2026): Speichern mit ?ansicht=admin — Verwalter hakt Pläne seiner Gruppe ab
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
   let _mwdErlWd = false, _mwdErlWdKonto = null   // Winning-Day-Plan + Konto für die Good-Day-Vorschau (23.10.2026)
-  let _mwdErlAb2 = null   // AB2 (05.11.2026): {konto_id, typ, name, unter} eines Challenge-/Funded-CFD-Plans → Abhak-Strahl nach dem Klick
+  let _mwdErlAb2 = null   // AB2 (05.11.2026): {konto_id, typ, name, unter} eines Funded-CFD-Plans des Funded-Planers (AB2c) → Abhak-Strahl nach dem Klick
+  let _mwdErlChallenge = false   // AB2c (05.11.2026): Challenge/Phase → still abhaken, kein „Erledigt"-Toast unten rechts
   let _mwdErlWdhAn = false, _mwdErlWdhAngefasst = false   // „Dieser Trade war ein Winning Day" (30.10.2026): sichtbar / von Hand angefasst
   function mklWdErledigtOeffnen(pid, extra, opts){
     _mwdErlSicht = !!(opts && opts.sicht)   // jedes Öffnen setzt neu — nur die Radar-Knöpfe geben sicht mit
@@ -37434,8 +37447,9 @@
     const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
     if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
-    // AB2: Abhak-Strahl für Challenge + Funded CFD (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person)
-    _mwdErlAb2 = (AB2_TYPEN.includes(String(pw.konto_typ || '')) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
+    // AB2: Abhak-Strahl (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person) — seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
+    _mwdErlChallenge = AB2_STILL_TYPEN.includes(String(pw.konto_typ || ''))
+    _mwdErlAb2 = (ab2Gilt(pw.konto_typ, pw.mt5_baseline) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
       name: [String((pw.konto || {}).firma || ''), (pw.konto || {}).groesse ? String(pw.konto.groesse) : '', (pw.konto || {}).kontonr_ende ? '…' + pw.konto.kontonr_ende : ''].filter(Boolean).join(' ') || 'Konto',
       unter: pw.person ? String(pw.person) : '', base: pw.mt5_baseline || null } : null   // base: AB2b Plan-Balance (ab2PlanBal)
     const k = pw.konto || {}
@@ -37633,6 +37647,7 @@
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
     const ab2Info = (still || !['none', 'waiting', 'passed'].includes(kontoStatus)) ? null : _mwdErlAb2   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
     const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
+    const stillAbhak = _mwdErlChallenge   // AB2c: Challenge — keine „Erledigt"-Toasts (Fehler bleiben rot)
     const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
@@ -37650,7 +37665,7 @@
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
     if(btn) btn.disabled = false
     // Sofort-Rückmeldung (02.10.2026, Finn: „hängt 3–4 s, bis unten rechts Erledigt kommt") — die Antwort ersetzt sie mit dem Buchungs-Ergebnis
-    if(!ab2 && typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')   // mit Strahl sagt dessen Fußzeile „wird gebucht …“
+    if(!ab2 && !stillAbhak && typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')   // mit Strahl sagt dessen Fußzeile „wird gebucht …“; Challenge still (AB2c)
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -37690,7 +37705,8 @@
       // AB2: steht der Strahl, kommt dieser Satz (Fusion-Buchung, Archiv, Umstellen) klein in seine Fußzeile statt in einen Toast; ein Fehler beim
       // Umstellen bleibt zusätzlich ein Toast (rot), damit er nicht übersehen wird
       if(ab2){ try{ ab2Fertig(ab2, erlTxt.replace(/^Erledigt( · )?/, '') || 'gebucht', { planId: pid, mpl, spl, sicht, plHand }) }catch(_){} }
-      if((!ab2 || !ab2.el.isConnected || umFehl) && typeof atToast === 'function') atToast(erlTxt, umFehl ? 'end' : 'ok')   // Karte schon zu (Klick/Maus/12 s) → Toast wie vorher
+      // Karte schon zu (Klick/Maus/12 s) → Toast wie vorher; Challenge still (AB2c, Finn: „die ganzen Challenges … kann ich vergessen“) — nur ein Umstell-Fehler kommt rot
+      if((!ab2 || !ab2.el.isConnected || umFehl) && (!stillAbhak || umFehl) && typeof atToast === 'function') atToast(erlTxt, umFehl ? 'end' : 'ok')
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
       try{
@@ -44637,17 +44653,59 @@
    * und Funded CFD; Funded Futures / Winning Days behalten den WD-Flug. Knopf „→ Waiting for Payout“ wie AB1 (Ziel UND Consistency erfüllt). Nur Anzeige:
    * ein Fehler hier stört das Abhaken nie (Aufrufer in try). */
   const AB2_TYPEN = ['challenge', 'phase1', 'phase2', 'funded_cfd']
+  /* NUR FUNDED-PLANER (AB2c, Finn 05.11.2026: „mir geht's hier nicht um jeden einzelnen Trade, sondern nur um die Funded CFDs, also nur um alle Funded
+   * Trades, die über den Funded Planner gemacht werden. Die ganzen Challenges, das sind ja so viele, das kann ich vergessen."): Karte nur für Funded CFD
+   * mit mt5_baseline.funded_plan (Kennung des Funded-CFD-Planers, bleibt über den Echo-Start erhalten — DB 7 Tage: 50 von 61 erledigten Funded-CFD-
+   * Plänen, die 11 ohne sind Hand-Trades). Funded Futures haben in /konto-ziele keinen Abhak-Stand (kz_rechnen: nur Challenge + funded_cfd) und
+   * behalten den WD-Flug. Challenges (AB2_STILL_TYPEN) haken still ab: keine Karte, kein „Erledigt"-Toast unten rechts — Fehler bleiben rote Toasts. */
+  const AB2_STILL_TYPEN = ['challenge', 'phase1', 'phase2']
+  function ab2Gilt(typ, base){ return String(typ || '') === 'funded_cfd' && !!(base && typeof base === 'object' && base.funded_plan) }
   let _ab2Timer = null, _ab2Nr = 0
+  const ab2Karte = () => { const k = document.getElementById('ab2-karte'); return (k && !k.classList.contains('weg')) ? k : null }
+  // el = Eintrag (eine Konto-Zeile) oder die ganze Karte. Ein Eintrag geht allein, solange andere bleiben; sonst geht die Karte
   function ab2Zu(el){
-    const k = el || document.getElementById('ab2-karte'); if(!k || k.classList.contains('weg')) return
+    const eintrag = !!(el && el.classList && el.classList.contains('ab2-eintrag'))
+    const k = eintrag ? el.closest('.ab2') : (el || document.getElementById('ab2-karte'))
+    if(eintrag && k && [...k.querySelectorAll('.ab2-eintrag')].some(x => x !== el)){ el.remove(); ab2Kompakt(k); return }
+    if(!k || k.classList.contains('weg')) return
     if(k === document.getElementById('ab2-karte')){ clearTimeout(_ab2Timer); _ab2Timer = null }   // nie den Timer einer neueren Karte löschen
     k.classList.add('weg'); setTimeout(() => k.remove(), 220)
   }
-  function ab2Zeit(k, ms){
-    if(!k || document.getElementById('ab2-karte') !== k) return
+  function ab2Zeit(el, ms){
+    const k = el && el.closest ? el.closest('.ab2') : null
+    if(!k || document.getElementById('ab2-karte') !== k || k.classList.contains('weg')) return
     clearTimeout(_ab2Timer)
     if(k.matches(':hover')) return                      // Maus darauf: hält die Karte, mouseleave startet den Timer
     _ab2Timer = setTimeout(() => ab2Zu(k), ms)
+  }
+  // Liste (AB2c): neuester Eintrag oben voll, ältere kompakt (Kopf + Profit-Target-Strahl); Titel zählt die Konten
+  function ab2Kompakt(k){
+    const es = [...k.querySelectorAll('.ab2-eintrag')]
+    es.forEach((e, j) => e.classList.toggle('kompakt', j > 0))
+    k.classList.toggle('liste', es.length > 1)
+    const t = k.querySelector('.ab2-titel'); if(t) t.textContent = `${es.length} Funded-Trades abgehakt`
+  }
+  /* ZAHLEN ZÄHLEN MIT (AB2c, Finn: „eine Animation kommt"): jedes [data-ab2-z] läuft in ~1 s von data-von auf data-bis, gleichzeitig mit dem Strahl
+   * (Verzögerung data-ab — wie die Balken-Animation). prefers-reduced-motion: sofort der Endwert. Nur Anzeige. */
+  const _ab2Fmt = { usd: v => ab2Usd(v), pl: v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`, pct: v => ab2Pct(v, true) }
+  function ab2Zaehlen(root){
+    const still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    root.querySelectorAll('[data-ab2-z]').forEach(el => {
+      const von = Number(el.dataset.von), bis = Number(el.dataset.bis), fmt = _ab2Fmt[el.dataset.fmt] || _ab2Fmt.usd
+      if(!isFinite(von) || !isFinite(bis)) return
+      if(still || Math.abs(bis - von) < 1e-9){ el.textContent = fmt(bis); return }
+      el.textContent = fmt(von)
+      const ab = Number(el.dataset.ab) || 0, dauer = 950
+      let t0 = 0
+      const schritt = t => {
+        if(!el.isConnected) return
+        if(!t0) t0 = t
+        const x = Math.min(1, Math.max(0, (t - t0 - ab) / dauer)), e = 1 - Math.pow(1 - x, 3)   // wie cubic-bezier(.3,.7,.3,1)
+        el.textContent = fmt(von + (bis - von) * e)
+        if(x < 1) requestAnimationFrame(schritt)
+      }
+      requestAnimationFrame(schritt)
+    })
   }
   const ab2Usd = v => (v == null || !isFinite(Number(v))) ? '—' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
   const ab2Pct = (v, st) => (v == null || !isFinite(Number(v))) ? '—' : (Math.round(Number(v) * 100 * (st ? 10 : 1)) / (st ? 10 : 1)).toLocaleString('de-DE') + ' %'
@@ -44674,29 +44732,42 @@
     return { start: (s != null && s > 0) ? s : null, ende: (e != null && e > 0) ? e : null }
   }
   function ab2Start(info){
-    if(!info || !info.konto_id || !AB2_TYPEN.includes(String(info.typ || ''))) return null
+    if(!info || !info.konto_id || String(info.typ || '') !== 'funded_cfd') return null   // AB2c: nur Funded CFD (Aufrufer prüfen ab2Gilt)
     const nr = ++_ab2Nr
-    document.getElementById('ab2-karte')?.remove(); clearTimeout(_ab2Timer)
     const mpl = ab2Num(info.mpl)
-    const plTxt = mpl == null ? '' : `${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
-    const art = String(info.typ) === 'funded_cfd' ? 'Funded CFD' : (typeof typeLabel === 'function' ? typeLabel(info.typ) : String(info.typ))
-    const k = document.createElement('div')
-    k.id = 'ab2-karte'; k.className = 'ab2'; k.setAttribute('role', 'status')
-    k.innerHTML = `<div class="ab2-kopf"><div><b>${escapeHtml(String(info.name || 'Konto'))}</b><small data-ab2-art>${escapeHtml([info.unter, art].filter(Boolean).join(' · '))}`
+    const art = 'Funded CFD'
+    // AB2c: steht die Karte noch (mehrere Funded hintereinander abgehakt), kommt der neue Trade als Zeile oben dazu statt die Karte zu ersetzen
+    let k = ab2Karte()
+    if(!k){
+      document.getElementById('ab2-karte')?.remove(); clearTimeout(_ab2Timer)
+      k = document.createElement('div')
+      k.id = 'ab2-karte'; k.className = 'ab2'; k.setAttribute('role', 'status')
+      k.innerHTML = '<div class="ab2-titel"></div><div class="ab2-liste"></div>'
+      document.body.appendChild(k)
+      k.addEventListener('click', e => { if(e.target.closest('[data-ab2-wartet]')) return; ab2Zu(k) })
+      k.addEventListener('mouseenter', () => { if(document.getElementById('ab2-karte') === k) clearTimeout(_ab2Timer) })
+      k.addEventListener('mouseleave', () => ab2Zeit(k, 1500))
+    }
+    const liste = k.querySelector('.ab2-liste')
+    liste.querySelectorAll('.ab2-eintrag').forEach(x => { if(x.dataset.konto === String(info.konto_id)) x.remove() })   // dasselbe Konto noch einmal → nur die neue Zeile
+    const e = document.createElement('div')
+    e.className = 'ab2-eintrag'; e.dataset.konto = String(info.konto_id); e.dataset.nr = String(nr)
+    e.innerHTML = `<div class="ab2-kopf"><div><b>${escapeHtml(String(info.name || 'Konto'))}</b><small data-ab2-art>${escapeHtml([info.unter, art].filter(Boolean).join(' · '))}`
       + `${info.bestanden ? ' · bestanden' : ''}</small></div>`
-      + (plTxt ? `<div class="ab2-pl ${mpl < 0 ? 'rot' : mpl > 0 ? 'gut' : ''}">${escapeHtml(plTxt)}<small>Trade</small></div>` : '') + '</div>'
+      + (mpl == null ? '' : `<div class="ab2-pl ${mpl < 0 ? 'rot' : mpl > 0 ? 'gut' : ''}"><span data-ab2-z data-von="0" data-bis="${mpl}" data-fmt="pl">${escapeHtml(_ab2Fmt.pl(mpl))}</span><small>Trade</small></div>`) + '</div>'
       + '<div data-ab2-inhalt></div><div class="ab2-fuss"><span data-ab2-fuss>wird gebucht …</span></div>'
-    document.body.appendChild(k)
-    k.addEventListener('click', e => { if(e.target.closest('[data-ab2-wartet]')) return; ab2Zu(k) })
-    k.addEventListener('mouseenter', () => { if(document.getElementById('ab2-karte') === k) clearTimeout(_ab2Timer) })
-    k.addEventListener('mouseleave', () => ab2Zeit(k, 1500))
-    ab2Zeit(k, 12000)   // Sicherung: kommt die Antwort nie, geht die Karte nach 12 s
-    return { nr, el: k, info }
+    liste.prepend(e)
+    ;[...liste.querySelectorAll('.ab2-eintrag')].slice(6).forEach(x => x.remove())   // höchstens 6 Konten
+    liste.scrollTop = 0
+    ab2Kompakt(k)
+    ab2Zaehlen(e)   // Trade-P&L zählt von 0 hoch
+    ab2Zeit(e, 12000)   // Sicherung: kommt die Antwort nie, geht die Karte nach 12 s
+    return { nr, el: e, info }
   }
   /* Nach der Buchung: Fuß-Text setzen (Fusion), Stand aus /konto-ziele holen, Strahlen zeichnen. radar = {planId, mpl, spl, sicht, plHand} für den
    * Waiting-Knopf an fremden Konten (wie AB1). Fehler beim Holen → nur Kopf + Fuß, Karte geht nach 3 s. */
   async function ab2Fertig(h, fuss, radar){
-    if(!h || h.nr !== _ab2Nr || !h.el.isConnected) return
+    if(!h || !h.el.isConnected) return   // AB2c: jeder Eintrag der Liste zeichnet selbst — kein „nur der neueste"
     const f = h.el.querySelector('[data-ab2-fuss]'); if(f) f.textContent = fuss || 'gebucht'
     let d = null
     try{
@@ -44710,7 +44781,7 @@
         else _k1.cache[id] = { at: Date.now(), d }          // die Konto-Seite hat damit gleich den frischen Stand
       }
     }catch(_){ d = null }
-    if(h.nr !== _ab2Nr || !h.el.isConnected) return          // inzwischen zu oder ein neueres Abhaken
+    if(!h.el.isConnected) return          // inzwischen zu (Klick, Timer, dasselbe Konto neu abgehakt)
     let knopf = false
     if(d){ try{ knopf = ab2Zeichnen(h, d, radar) }catch(e){ console.warn('[ab2]', e) } }
     ab2Zeit(h.el, !d ? 3000 : knopf ? 10000 : 7000)
@@ -44732,11 +44803,23 @@
       const spanne = ziel - start, vor = ab2Num(info.start) ?? (bal - mpl)   // AB2b: Plan-Start, sonst nach − Trade-P&L
       const zk = kach('ziel')
       const erreicht = !!info.bestanden || (ab ? !!ab.erreicht : !!(zk && zk.pill && zk.pill[0] === 'Erreicht')) || bal >= ziel - 0.005
-      const rest = Math.max(0, ziel - bal)
-      const rechts = erreicht ? `Ziel ${ab2Usd(ziel)} erreicht` : `noch ${ab2Usd(rest)} · ${ab2Pct(Math.max(0, 1 - rest / spanne))} geschafft`
-      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Profit Target</span><em>${escapeHtml(rechts)}</em></div>`
-        + `<div class="ab2-bar" style="--v:${ab2Fr((vor - start) / spanne)};--n:${erreicht ? 1 : ab2Fr((bal - start) / spanne)}"><b></b><i></i></div>`
-        + `<div class="ab2-ach"><span>${ab2Usd(start)}</span><span>${escapeHtml(ab2Usd(vor))} → ${escapeHtml(ab2Usd(bal))}</span><span>${ab2Usd(ziel)}</span></div></div>`)
+      const rest = Math.max(0, ziel - bal), restVor = Math.max(0, ziel - vor)
+      // MASSSTAB AB DEM BODEN (AB2c, Finn: „bei diesem Popup passiert einfach gar nichts" — Fall Jacob 95.683 → 93.643 bei Start 100.000: vorher und nachher
+      // lagen unter dem Start, beide Balken standen auf 0). Liegt ein Stand unter dem Start und kennt /konto-ziele den Boden (chart.boden), läuft der
+      // Strahl vom Boden zum Ziel, der Start ist ein Strich — so bewegt er sich bei jedem Trade sichtbar. Sonst wie bisher Start → Ziel.
+      const boden = ab2Num(d.chart && d.chart.boden)
+      // links bis zum Boden, höchstens ein Viertel der Ziel-Spanne unter dem tieferen Stand (sonst wäre der Weg zum Ziel nur ein Rest am rechten Rand)
+      const lo = (boden != null && boden < start && Math.min(vor, bal) < start) ? Math.max(boden, Math.min(vor, bal) - spanne * 0.25) : start
+      const breite = ziel - lo
+      const geschafft = Math.max(0, 1 - rest / spanne)
+      const rechts = erreicht ? `Ziel ${escapeHtml(ab2Usd(ziel))} erreicht`
+        : `noch <span data-ab2-z data-von="${restVor}" data-bis="${rest}" data-ab="${300 + (i * 160)}">${escapeHtml(ab2Usd(rest))}</span> · ${escapeHtml(ab2Pct(geschafft))} geschafft`
+      teile.push(`<div class="ab2-block" style="--i:${i}"><div class="ab2-zk"><span>Profit Target</span><em>${rechts}</em></div>`
+        + `<div class="ab2-bar" style="--v:${ab2Fr((vor - lo) / breite)};--n:${erreicht ? 1 : ab2Fr((bal - lo) / breite)}"><b></b><i></i>`
+        + (lo < start ? `<s style="left:${(100 * (start - lo) / breite).toFixed(2)}%" title="Start ${escapeHtml(ab2Usd(start))}"></s>` : '') + '</div>'
+        + `<div class="ab2-ach"><span>${lo < start ? (boden != null && lo <= boden + 0.5 ? 'Boden ' : '') + escapeHtml(ab2Usd(lo)) : escapeHtml(ab2Usd(start))}</span>`
+        + `<span>${escapeHtml(ab2Usd(vor))} → <span data-ab2-z data-von="${vor}" data-bis="${bal}" data-ab="${300 + (i * 160)}">${escapeHtml(ab2Usd(bal))}</span></span><span>${escapeHtml(ab2Usd(ziel))}</span></div></div>`)
+      i++
     }
     // 2 · Consistency: Skala bis 1,5 × Grenze (wie die K1-Kachel), Strich = Grenze
     const c = ab && ab.cons
@@ -44748,10 +44831,12 @@
       if(an != null && mpl <= 0) anVor = an
       else if(an != null && b != null && w != null && b > mpl + 0.5 && w - mpl > 0) anVor = b / (w - mpl)
       const fehlt = (an != null && an > g + 1e-9 && b != null && w != null && g > 0) ? Math.max(0, b / g - w) : null
-      const rechts = (an == null ? '— ' : ab2Pct(an, true) + ' ') + `· Grenze ${ab2Pct(g)}`
-      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Consistency</span><em>${escapeHtml(rechts)}</em></div>`
+      // AB2c: der Anteil zählt mit dem Strahl von „vorher" auf jetzt
+      const rechts = (an == null ? '— ' : anVor != null ? `<span data-ab2-z data-fmt="pct" data-von="${anVor}" data-bis="${an}" data-ab="${300 + i * 160}">${escapeHtml(ab2Pct(an, true))}</span> `
+        : escapeHtml(ab2Pct(an, true)) + ' ') + escapeHtml(`· Grenze ${ab2Pct(g)}`)
+      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>Consistency</span><em>${rechts}</em></div>`
         + `<div class="ab2-bar" style="--v:${anVor == null ? 0 : ab2Fr(anVor / skala)};--n:${an == null ? 0 : ab2Fr(an / skala)}"><b></b><i></i><s style="left:${(100 / 1.5).toFixed(2)}%"></s></div>`
-        + `<div class="ab2-ach"><span>größter Tag ${escapeHtml(ab2Usd(b))} ÷ ${escapeHtml(ab2Usd(w))}${an != null ? ' = ' + escapeHtml(ab2Pct(an, true)) : ''}</span><span>${fehlt != null ? `noch ${escapeHtml(ab2Usd(fehlt))} bis ${escapeHtml(ab2Pct(g))}` : anVor != null && an != null && Math.abs(anVor - an) > 0.0005 ? `vorher ${escapeHtml(ab2Pct(anVor, true))}` : ''}</span></div></div>`)
+        + `<div class="ab2-ach"><span>${an == null && b == null ? 'noch kein Gewinn-Tag in diesem Zyklus' : `größter Tag ${escapeHtml(ab2Usd(b))} ÷ ${escapeHtml(ab2Usd(w))}${an != null ? ' = ' + escapeHtml(ab2Pct(an, true)) : ''}`}</span><span>${fehlt != null ? `noch ${escapeHtml(ab2Usd(fehlt))} bis ${escapeHtml(ab2Pct(g))}` : anVor != null && an != null && Math.abs(anVor - an) > 0.0005 ? `vorher ${escapeHtml(ab2Pct(anVor, true))}` : ''}</span></div></div>`)
     } else {
       const ck = kach('consistency')
       if(ck && ck.anteil != null){
@@ -44768,7 +44853,7 @@
       if(tk){ tIst = ab2Num(tk.wert); tSoll = ab2Num(String(tk.klein || '').replace(/[^\d]/g, '')); tTitel = String(tk.titel || 'Tage'); tUnter = String(tk.unter || '') }
     }
     if(tIst != null && tSoll && tSoll <= 20){
-      const punkte = Array.from({ length: tSoll }, (_, j) => `<i class="${j < tIst ? 'an' : ''}"></i>`).join('')
+      const punkte = Array.from({ length: tSoll }, (_, j) => `<i class="${j < tIst ? 'an' : ''}" style="--j:${j}"></i>`).join('')   // AB2c: Punkte nacheinander
       teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>${escapeHtml(tTitel)}${tUnter ? ` <small>${escapeHtml(tUnter)}</small>` : ''}</span><em>${tIst}/${tSoll}</em></div>`
         + `<div class="ab2-tage">${punkte}</div></div>`)
     }
@@ -44779,7 +44864,7 @@
       teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Payout${d.urteil && d.urteil.sub ? ` <small>${escapeHtml(d.urteil.sub)}</small>` : ''}</span>`
         + `<em${nx && nx.grund && !ab.bereit ? ` title="${escapeHtml(String(nx.grund))}"` : ''}>${escapeHtml(txt)}</em></div></div>`)
     }
-    const inhalt = k.querySelector('[data-ab2-inhalt]'); if(inhalt) inhalt.innerHTML = teile.join('')
+    const inhalt = k.querySelector('[data-ab2-inhalt]'); if(inhalt){ inhalt.innerHTML = teile.join(''); ab2Zaehlen(inhalt) }   // AB2c: Zahlen zählen mit dem Strahl
     // Knopf „→ Waiting for Payout" — dieselbe Regel wie AB1: nur Funded CFD, Ziel UND Consistency erfüllt, eigenes Konto oder Radar-Kontext
     const acc = (accounts || []).find(a => String(a.id) === id)
     const radarOk = !!(radar && radar.planId && radar.mpl != null && isFinite(Number(radar.mpl)))
@@ -44820,7 +44905,7 @@
     if(!(um && um.umgestellt)) throw new Error((um && (um.fehler || um.grund)) || 'Konto nicht umgestellt')
     return true
   }
-  window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen; window._ab2PlanBal = ab2PlanBal   // Stub-/Selbsttest-Haken
+  window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen; window._ab2PlanBal = ab2PlanBal; window._ab2Gilt = ab2Gilt   // Stub-/Selbsttest-Haken
   window._k1 = _k1   // Stub-/Selbsttest-Haken
 
   function renderAccountDetail(){
@@ -56421,7 +56506,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2091'
+  const OS_TAB_BUILD = '2026-09-22.2092'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -76726,9 +76811,9 @@
         if(_kuCb.dataset.ziel === 'winning_days' && _kuAkt.type === 'funded') await accWdUmstellen(masterAcc.id, 'winning_days')
         else if(_kuCb.dataset.ziel === 'waiting' && _kuAkt.type === 'funded_cfd' && !_kuAkt.waitingPayoutSince) await accWartetUmstellen(masterAcc.id, true)
       }
-      // AB2 (Finn 05.11.2026): Abhak-Strahl für Challenge + Funded CFD — nach dem Umstellen oben, damit er den Stand danach zeigt; nicht bei geblowt/bestanden
-      // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand.
-      if(masterAcc && AB2_TYPEN.includes(String(masterAcc.type || '')) && statusChoice === 'none' && !blown){
+      // AB2 (Finn 05.11.2026): Abhak-Strahl — nach dem Umstellen oben, damit er den Stand danach zeigt; nicht bei geblowt/bestanden
+      // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand. Seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
+      if(masterAcc && ab2Gilt(masterAcc.type, p.mt5Baseline) && statusChoice === 'none' && !blown){
         try{
           const h = ab2Start(Object.assign({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null },
                                            ab2PlanBal(p.id, p.mt5Baseline)))   // AB2b: Stand vor/nach diesem Trade aus dem Plan
