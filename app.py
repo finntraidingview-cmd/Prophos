@@ -13823,7 +13823,9 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     # für Lucid nur den Drawdown kennt. Kennt die Regel selbst kein Tageslimit (art nicht tagesstart/stufen), zählt der Tagesverlust der Firma aus den
     # Planer-Einstellungen (daily_usd, je Größe) ab Tagesstart als dritte Grenze — die engere gilt, also min(Daily, Max Loss). Hart (Kernwert ohne soft) →
     # art 'tageslimit' (Konto weg am Daily); weich → 'tagesstart' wie Apex. Winning Days (Größe + 100) und Orbit Prio 2 (ah_dll_balance oben) unverändert.
-    if not ah and not wd and kw_firmen is not None and r_art not in ("tagesstart", "stufen"):
+    # NUR PRÜFPHASEN (S2-Stopp zu c74bd705): die Kernwerte sind die des Challenge-Planers — bei Funded/Live (Apex PA, Lucid/FTMO-Futures Funded) gälte sonst
+    # das Challenge-Daily, und über hedgeLiqAusRadarWert (Orbit-Funded-Big-Trade ohne Master-SL) schlösse der Hedge an einer Linie, an der der Master weiterläuft.
+    if not ah and not wd and kw_firmen is not None and r_art not in ("tagesstart", "stufen") and typ in ("challenge", "phase1", "phase2"):
         d_usd, d_weich = liq_kw_daily(kw_firmen, a.get("firm"), groesse)
         ts_d = tagesstart if tagesstart is not None else start_bal
         if d_usd and ts_d is not None:

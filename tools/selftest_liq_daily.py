@@ -82,8 +82,22 @@ check(rw["liq_regel_balance"] == 49000.0 and rw["liq_regel_soft"] is True and rw
 check(D(KW, "Lucid Trading", 150000) == (2700.0, False) and D(KW, "Lucid Trading", 50000) == (1200.0, False) and D(KW, "Apex Trader", 100000) == (1500.0, True)
       and D(KW, "Tradeify", 150000) == (None, False) and D(None, "Lucid Trading", 150000) == (None, False) and D(KW, "Lucid Trading", None) == (2700.0, False),
       "liq_kw_daily: je Größe zuerst, sonst Firma; weich aus soft; ohne Wert/Kernwerte nichts")
+# S2-Stopp zu c74bd705: nur Prüfphasen — Funded/Live behalten ihre Liq (Kernwerte sind die des Challenge-Planers; die Linie speist hedgeLiqAusRadarWert)
+for typ in ("funded", "live", "funded_cfd"):
+    rf, rf0 = f(dict(L150, account_type=typ)), f(dict(L150, account_type=typ), kw=None)
+    check(rf["liq_regel_balance"] == rf0["liq_regel_balance"] and "Planer-Einstellung" not in str(rf["liq_regel_text"]), f"Lucid {typ}: unverändert ({rf['liq_regel_text']})")
+apex_pa = {"firm": "Apex Trader", "account_type": "funded", "starting_balance": 150000, "max_drawdown": 4000, "name": "150k PA APEX…"}
+rg = REGELN + [{"id": 4, "firma": "Apex Trader", "kontotyp": "funded", "groesse": None, "art": None, "maxdd_art": "eod_trailing", "maxdd_lock_ueber_groesse_usd": "100"}]
+check(f(apex_pa, regeln=rg)["liq_regel_balance"] == f(apex_pa, regeln=rg, kw=None)["liq_regel_balance"], "Apex PA (funded, Regel ohne Tageslimit): unverändert")
+ff = {"firm": "FTMO Futures", "account_type": "funded", "starting_balance": 50000, "max_drawdown": 3000, "name": "50k FTMO F"}
+kwf = KW + [{"namen": ["ftmofutures"], "daily_usd": 1000, "dd_usd": 3000, "boden": "nachziehend"}]
+check(f(ff, bal=50000.0, kw=kwf)["liq_regel_balance"] == f(ff, bal=50000.0, kw=None)["liq_regel_balance"], "FTMO Futures Funded: unverändert")
+ffc = dict(ff, account_type="challenge")
+check(f(ffc, bal=50000.0, kw=kwf)["liq_regel_balance"] == 49000.0, "FTMO Futures Challenge: Daily 1.000 → 49.000")
+for typ in ("phase1", "phase2"):
+    check(f(dict(L150, account_type=typ))["liq_regel_balance"] == 147300.0, f"{typ}: Daily gilt wie challenge")
 b = SRC[SRC.index("def liq_regel_felder("):SRC.index("def lt_demo_liq(")]
-check("if not ah and not wd and kw_firmen is not None and r_art not in (\"tagesstart\", \"stufen\"):" in b, "Orbit Prio 2 (ah) und Winning Days ausgenommen, Tageslimit-Regeln haben Vorrang")
+check('if not ah and not wd and kw_firmen is not None and r_art not in ("tagesstart", "stufen") and typ in ("challenge", "phase1", "phase2"):' in b, "Orbit Prio 2 (ah) und Winning Days ausgenommen, Tageslimit-Regeln haben Vorrang")
 
 print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)
