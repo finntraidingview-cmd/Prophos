@@ -209,6 +209,12 @@
   /* Plan gelöscht · Rückgängig (06.10.2026): nur dieser Toast nimmt Klicks an */
   .at-toast.undo{pointer-events:auto}
   .at-toast .at-undo{background:none;border:none;padding:0;margin-left:2px;color:#fff;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;flex-shrink:0}
+  /* PC-RUHIG (SW2, 05.11.2026, Emin pc-onkrbk: GPU 46 % ohne Nutzer am Bildschirm, 8 GB RAM zu 88 % voll): im PC-Tab laufen die Dauer-Animationen
+     (Puls-/Live-Punkte, Karten-Glühen, Weg-Symbole, Cosmos — viele über box-shadow, also Neuzeichnen in jedem Bild) auch ohne Zuschauer. Ohne Eingabe
+     (pcRuhig, Standard 60 s) halten alle Animationen in ihrem aktuellen Bild an (play-state paused — kein Neuzeichnen mehr); die erste Maus-/Tastatur-
+     Eingabe nimmt die Klasse weg und jede läuft dort weiter. Nicht iteration-count: eine beendete Endlos-Animation startete nach dem Aufwachen nicht neu
+     (Stub-Messung 95 → 5). Was in der Ruhe neu einblendet (Toast), wartet im ersten Bild bis zur nächsten Eingabe — sieht niemand, Entfernen läuft per Timer. */
+  html.pc-ruhig *,html.pc-ruhig *::before,html.pc-ruhig *::after{animation-play-state:paused !important}
   /* ABHAK-RÜCKMELDUNG (Finn 21.10.2026: beim Abhaken im Radar eine kurze, schöne Rückmeldung — bestanden cool und knapp, geblowt ruhig;
      kein Klick, blockiert nichts, ≤ 1,4 s). Schwebende Karte unten mittig, Kreis + Haken bzw. Strich zeichnen sich, dann steigt sie weg. */
   .abhak-rm{position:fixed;left:50%;bottom:96px;z-index:9998;display:flex;align-items:center;gap:10px;padding:9px 16px 9px 11px;
@@ -25609,6 +25615,20 @@
     }catch(_){ return Math.random().toString(36).slice(2, 10) }
   })()
   const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && !TAB_NEBEN
+  /* PC-RUHIG (SW2, 05.11.2026, s. CSS html.pc-ruhig): nur im PC-Tab. Ohne Eingabe seit prophos_pc_ruhig_s Sekunden (localStorage, Standard 60,
+   * 0 = aus) bekommt <html> die Klasse pc-ruhig → alle Animationen halten an. Nur Anzeige: kein Takt, keine Order-/Schließ-Logik. */
+  ;(function pcRuhig(){
+    if(!MT5_LOCAL) return
+    let sek = 60
+    try{ const roh = localStorage.getItem('prophos_pc_ruhig_s'); if(roh !== null && roh !== '' && isFinite(Number(roh))) sek = Number(roh) }catch(_){}
+    if(!(sek > 0)) return
+    let zuletzt = Date.now()
+    const html = document.documentElement
+    const wach = () => { zuletzt = Date.now(); if(html.classList.contains('pc-ruhig')) html.classList.remove('pc-ruhig') }
+    for(const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(ev, wach, { passive: true, capture: true })
+    setInterval(() => { if(Date.now() - zuletzt > sek * 1000 && !html.classList.contains('pc-ruhig')) html.classList.add('pc-ruhig') }, 5000)
+    window._pcRuhig = { an: () => { zuletzt = 0 }, wach }   // Stub-/Test-Haken
+  })()
   const TAB_NEBEN_ANLAUF_MS = 90000
   function tabNebenWerden(){
     // nie mitten in einem Lauf: dieselbe Ruhe-Prüfung wie das Sofort-Update — nur „Tab im Hintergrund" zählt hier nicht (nur-ansehen-Tab)
@@ -42356,6 +42376,20 @@
   planPoll.RUHE_MS = 30_000
   planPoll.sig = null; planPoll.sigUid = null; planPoll.at = 0; planPoll.fehlerN = 0; planPoll.fehlerBis = 0
   const planPollSig = rows => (rows || []).map(r => String(r.id) + '@' + String(r.updated_at || '')).join('|')
+  /* SW2 (05.11.2026): welche Zeilen der Probe [{id, updated_at}] sind neu oder geändert gegenüber dem letzten Stand (planPoll.sig + tradePlans)?
+   * → {pr, ids, alt} | null (null = voll laden: zu viele Änderungen oder kein Vergleichsstand). Ein Plan, der lokal fehlt (neu, oder vorher im
+   * Lösch-Fenster ausgeblendet), wird mitgeholt. */
+  planPoll.DELTA_MAX = 60
+  function planPollDelta(pr){
+    const vorher = new Set(String(planPoll.sig || '').split('|').filter(Boolean))
+    const alt = new Map((tradePlans || []).map(p => [String(p.id), p]))
+    const ids = []
+    for(const r of pr || []){
+      const id = String(r.id)
+      if(!vorher.has(id + '@' + String(r.updated_at || '')) || !alt.has(id)) ids.push(id)
+    }
+    return ids.length > planPoll.DELTA_MAX ? null : { pr, ids, alt }
+  }
   const planPollFehler = f => {
     if(!f){ planPoll.fehlerN = 0; planPoll.fehlerBis = 0; return }
     planPoll.fehlerN = Math.min(planPoll.fehlerN + 1, 3)
@@ -42378,6 +42412,7 @@
     planPoll.inFlight = true
     try{
       // alle 5 min trotzdem voll (Sicherheitsnetz: ein lokal abweichender Stand ohne DB-Änderung kommt so wie früher zurück)
+      let delta = null
       if(planPoll.sig != null && planPoll.sigUid === uid && jetzt - (planPoll.vollAt || 0) < 5 * 60_000){
         const { data: pr, error: pe } = await supabase
           .from('trade_plans').select('id,updated_at')
@@ -42386,15 +42421,41 @@
         if(pe || !pr){ planPollFehler(true); return }
         planPollFehler(false)
         if(planPollSig(pr) === planPoll.sig) return   // nichts geändert — kein voller Abruf
+        delta = planPollDelta(pr)
       }
-      const { data, error } = await supabase
-        .from('trade_plans').select('*')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false })
-      if(error || !data){ planPollFehler(true); return }
-      planPollFehler(false)
-      planPoll.sig = planPollSig(data); planPoll.sigUid = uid; planPoll.vollAt = Date.now()
-      const fresh = data.map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))   // Löschen läuft noch (Rückgängig-Fenster)
+      let fresh = null, deltaGeholt = false
+      if(delta && delta.ids.length){
+        // NUR GEÄNDERTE ZEILEN (SW2, 05.11.2026): bis hier lud jede Änderung ALLE Pläne der ID mit select=* — Edge-Logs 05.11. 13–14 UTC: Emins
+        // PC-Tab 254 volle Abrufe/h (771 Pläne, ~5–10 KB je Zeile mit mt5_baseline ≈ 1–2 GB JSON/h), Ina 240/h; fast jede Probe sah eine
+        // Änderung (Baseline-Schreiber stempeln updated_at im Sekundentakt). Jetzt kommen nur die Zeilen mit neuem updated_at bzw. die neuen;
+        // die übrigen bleiben die bisherigen Objekte (wie vorher, wenn „changed“ unten falsch blieb). Reihenfolge = die der Probe
+        // (created_at desc). Gelöschte fallen weg, weil sie in der Probe fehlen. Voller Abruf weiter alle 5 min (Sicherheitsnetz oben).
+        const { data: dz, error: de } = await supabase.from('trade_plans').select('*').eq('user_id', uid).in('id', delta.ids)
+        if(de || !dz){ planPollFehler(true); return }
+        planPollFehler(false)
+        const neuById = new Map(dz.map(r => [String(r.id), rowToPlan(r)]))
+        // Vergleichsstand ERST NACH dem Abruf (Prüfer SW2): ersetzte loadTradePlansFromSupabase tradePlans währenddessen, gilt dessen Stand
+        const altJetzt = new Map((tradePlans || []).map(p => [String(p.id), p]))
+        if(delta.ids.every(id => neuById.has(id)) && delta.pr.every(r => neuById.has(String(r.id)) || altJetzt.has(String(r.id)))){
+          fresh = delta.pr.map(r => neuById.get(String(r.id)) || altJetzt.get(String(r.id))).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))
+          planPoll.sig = planPollSig(delta.pr); planPoll.sigUid = uid
+          deltaGeholt = true
+        }
+        // fehlt eine Zeile (gerade gelöscht/geändert zwischen Probe und Abruf) → unten voll wie bisher
+      } else if(delta){
+        fresh = delta.pr.map(r => delta.alt.get(String(r.id))).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))   // nur gelöscht (ohne await, Stand aktuell)
+        planPoll.sig = planPollSig(delta.pr); planPoll.sigUid = uid
+      }
+      if(!fresh){
+        const { data, error } = await supabase
+          .from('trade_plans').select('*')
+          .eq('user_id', uid)
+          .order('created_at', { ascending: false })
+        if(error || !data){ planPollFehler(true); return }
+        planPollFehler(false)
+        planPoll.sig = planPollSig(data); planPoll.sigUid = uid; planPoll.vollAt = Date.now()
+        fresh = data.map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))   // Löschen läuft noch (Rückgängig-Fenster)
+      }
       const oldById = new Map((tradePlans || []).map(p => [String(p.id), p]))
       let changed = fresh.length !== (tradePlans || []).length
       const zielCheckIds = []   // Fortschritts-Ziel: nach dem Übernehmen prüfen
@@ -42433,6 +42494,10 @@
         renderTradePlans()
         if(typeof zielNachTradeCheck === 'function')
           zielCheckIds.forEach(id => { try{ zielNachTradeCheck(id) }catch(_){} })
+      } else if(deltaGeholt){
+        // Prüfer SW2: geholte Zeilen mit nur ungeprüften Änderungen (mt5_baseline, hedge_eur, notes …) trotzdem übernehmen — sonst blieben sie bis
+        // zum nächsten vollen Abruf alt, weil die Probe sie schon als bekannt führt. Ohne Neuzeichnen, wie bisher bei „nichts Geprüftes geändert"
+        tradePlans = fresh
       }
     }catch(_){
     }finally{ planPoll.inFlight = false }
@@ -42915,7 +42980,9 @@
       mpWatch.quiet.delete(uid)
       return sb
     }catch(e){
-      mpWatch.clients.delete(uid)
+      // SW2 (05.11.2026): den Client behalten (exp 0 = ungültig, der nächste Versuch nimmt denselben) — vorher delete → bei abgelaufener Sitzung
+      // baute jeder mpTick (60 s / 5 min) einen NEUEN createClient, jeder hängt einen visibilitychange-Hörer an window, der nie wegkommt
+      mpWatch.clients.set(uid, { sb, exp: 0 })
       if(!mpWatch.quiet.has(uid)){
         mpWatch.quiet.add(uid)
         console.warn(`[mpw] ${uid}: Sitzung abgelaufen — Profil einmal manuell öffnen.`)
@@ -56616,7 +56683,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2093'
+  const OS_TAB_BUILD = '2026-09-22.2094'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
