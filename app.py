@@ -30795,7 +30795,10 @@ def _ah_boden_eod(a, firmen):
         boden = liq_konto_boden(b_regel, b_acc, b_gr, pk, None)[0]
         if boden is None:
             return None, "Konto-Boden nicht rechenbar"
-        if kw.get("lock_bei_start") is True:   # Kernwerte: Boden höchstens bis zum Start (Lucid, FundedNext Futures)
+        # LOCK AUS EINER QUELLE (PB1-Zusatz, Befund S6 05.11.2026): liq_regeln.maxdd_lock_ueber_groesse_usd gewinnt (FNF Futures 50k: Größe + 100 = 50.100,
+        # wie Radar und echte Liquidation; vorher deckelte der Kernwerte-Lock auf 50.000 → Hedge-zu ≠ Liquidation). Nur ohne Lock in liq_regeln (Lucid) der
+        # Kernwerte-Lock: Boden höchstens bis zum Start
+        if kw.get("lock_bei_start") is True and _wd_num((b_regel or {}).get("maxdd_lock_ueber_groesse_usd")) is None:
             boden = min(boden, float(b_gr))
         return boden, None
     except Exception as e:
