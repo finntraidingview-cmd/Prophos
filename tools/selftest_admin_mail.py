@@ -90,8 +90,14 @@ def main():
     check(I({A: ""}, set(), [], {})[0]["name"] == A[:8], "ohne Namen → erste 8 Zeichen")
 
     # Routen-Vertrag (Quelltext)
-    i = src.index('@app.route("/admin/mail", methods=["GET", "PATCH", "OPTIONS"])')
-    blk = src[i:src.index('@app.route("/code/datei/', i)]
+    # RT1 (05.11.2026): zwischen /admin/mail und /admin/mail/<id> stehen inzwischen andere Routen (f5833769 /ht/payouts.csv,
+    # 071b245c /admin/konto-mails u. a., die selbst _admin_mail_auth/_admin_mail_sicht nutzen) — der Block bis /code/datei/ zählte sie mit.
+    # Jetzt genau die beiden Admin-Mail-Routen (je bis zur nächsten Route), dieselben Prüfungen
+    def _route(kopf):
+        j = src.index(kopf)
+        return src[j:src.index("\n@app.route(", j + 1)]
+    blk = (_route('@app.route("/admin/mail", methods=["GET", "PATCH", "OPTIONS"])')
+           + _route('@app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])'))
     # seit 21.10.2026 (af8c441d, „Finn + Pascal" sah keine Mails): Gate _admin_mail_auth = ADMIN_EMAILS (_admin_auth zuerst) ODER
     # eingetragener Mail-Leser (admin_mail_leser), der im Admin nicht eingeschränkt ist
     gate = src[src.index("\ndef _admin_mail_auth("):src.index('@app.route("/admin/mail", methods=')]
@@ -105,9 +111,16 @@ def main():
 
     # Frontend
     html = open(HTML, encoding="utf-8").read()
-    check("const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail'])" in html, "Reiter Mail nur Hermann Technologies (nie Verwalter)")
+    # RT1 (05.11.2026): seit 071b245c/b6a231c6 (29.10.2026, „Konten aus Mail“ im Mail-Reiter) steht 'kontomail' mit in der HT-Liste —
+    # 'mail' muss weiter drin sein, Verwalter-Weg über KASSE_REITER_HT unverändert
+    _kr = re.search(r"const KASSE_REITER_HT = new Set\(\[([^\]]*)\]\)", html)
+    check(bool(_kr) and "'mail'" in _kr.group(1) and "if(admIstVerwalter()) return !KASSE_REITER_HT.has(name)" in html,
+          "Reiter Mail nur Hermann Technologies (nie Verwalter)")
     check('data-admtab="mail">Mail</button>' in html and '<div id="adm-pane-mail" hidden>' in html, "Reiter-Knopf + Pane vorhanden")
-    check("$('adm-pane-mail').hidden     = name !== 'mail'" in html and "if(name === 'mail') window._admMailOeffnen?.()" in html, "Umschalter blendet Pane und lädt beim Öffnen")
+    # RT1 (05.11.2026): seit b6a231c6 (Admin aufgeräumt, 29.10.2026) teilt sich der Reiter Mail mit „Konten aus Mail“ (Sicht-Umschalter
+    # mailSicht) — Pane nur bei name 'mail' + Sicht 'mails', geladen nur beim Öffnen
+    check("$('adm-pane-mail').hidden     = !(name === 'mail' && mailSicht === 'mails')" in html
+          and "if(name === 'mail' && mailSicht === 'mails') window._admMailOeffnen?.()" in html, "Umschalter blendet Pane und lädt beim Öffnen")
     a = html.index("/* ══ ADMIN → MAIL (21.10.2026")
     blk = html[a:html.index("window._admMailStub", a)]
     check("setInterval" not in blk and "setTimeout(" not in blk, "kein Takt im Admin-Mail-Block (nur Öffnen + ↻)")
