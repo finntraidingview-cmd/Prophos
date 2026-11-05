@@ -56,6 +56,12 @@ URTEILE = [
     ("", 3000, 2000, None),                                     # Handplan ohne Notiz
     ("Winning-Day-Farmer", 3000, 2000, None),
     ("Auto-Planer · letzter Trade (Rest bis Ziel) · Rest 2.964 $ bis Ziel · Balance 105.036 (MT5)", None, None, None),   # Order pur
+    # JU1 (05.11.2026): Gewinntag = eigenes TP-Ziel (Challenge-Stufe bzw. Funded-Planer tp_art), mit Blow am Boden → beide
+    ("Auto-Planer · Gewinntag 1/3 sammeln · TP 1.083 $ (Big Trade erst, wenn nur noch 1 Tag fehlt) · Rest 6.419 $ bis Ziel · Balance 97.581 (Echo)", 1083, 2000, "gewinntag"),
+    ("Auto-Planer · Gewinntag 1/3 sammeln · TP 1.013 $ (Big Trade erst, wenn nur noch 1 Tag fehlt), SL hinter den Boden (+50 $) · Rest 9.586 $ bis Ziel · Balance 94.414 (Echo)", 1013, 2000, "beide"),
+    ("Funded-CFD-Planer · Gewinn 0 $ → Ziel 101.764 $ · TP gewinntag · Gewinntage 0/3", 590, 1397, "gewinntag", {"funded_plan": {"tp_art": "gewinntag"}}),
+    ("Funded-CFD-Planer · Gewinn 0 $ → Ziel 101.764 $ · TP ziel", 1764, 1397, None, {"funded_plan": {"tp_art": "ziel"}}),
+    ("Funded-CFD-Planer · TP gewinntag", None, None, None, {"funded_plan": {"tp_art": "gewinntag"}}),   # ohne TP: nichts
 ]
 
 
@@ -127,9 +133,13 @@ def main():
     NZ = ns["nachzieh_cmd"]
     c_v2 = {"ohne_hedge": True, "final": "pass", "final_grund": "x", "tages_grenze_usd": 500}
     c_h = {"ohne_hedge": False, "final": "pass", "final_grund": "x", "tages_grenze_usd": 500}
+    # JU1 (05.11.2026, Weg A): Echo mit Hedge behält die TP-Seite (pass/beide → pass, gewinntag), nie blow, nie die Tagesgrenze
+    c_hf = lambda f: NZ(dict(c_h, final=f))
     check("_sltp_nachziehen_lauf(" in f9 and "c = nachzieh_cmd(cmd)" in lauf and "_sltp_nachziehen(w, path, expected, p, c," in lauf
-          and NZ(c_v2) == c_v2 and NZ(c_h)["final"] is None and NZ(c_h)["tages_grenze_usd"] is None,
-          "F9-Zweig: finales Nachziehen (final/Tagesgrenze) nur mit cmd ohne_hedge (Echo V2), Echo mit Hedge nur Plan-SL")
+          and NZ(c_v2) == c_v2 and NZ(c_h)["final"] == "pass" and NZ(c_h)["tages_grenze_usd"] is None and NZ(c_h)["final_grund"] == "x"
+          and c_hf("beide")["final"] == "pass" and c_hf("gewinntag")["final"] == "gewinntag" and c_hf("Gewinntag")["final"] == "gewinntag"
+          and c_hf("blow")["final"] is None and c_hf("blow")["final_grund"] == "" and c_hf(None)["final"] is None and c_hf("quatsch")["final"] is None,
+          "F9-Zweig: Echo V2 voll (final/Tagesgrenze); Echo mit Hedge nur TP-Seite (pass/gewinntag), kein blow, keine Tagesgrenze")
     check("sl_end, tp_end = nz[\"sl\"], nz[\"tp\"]" in f9 and "\"sl\": sl_end, \"tp\": tp_end" in f9, "Antwort trägt die tatsächlich gesetzten Level")
     check("if not nz[\"ok\"]:" in f9 and "SOFORT" in f9 and "\"retry_ok\": False" in f9, "fehlt ein Level → ok False, nie erneut platzieren")
     nach = r[r.index("if f9_getippt:\n"):]
@@ -151,19 +161,22 @@ def main():
     i = psrc.index("cmd[\"ohne_hedge\"] = ohne_hedge")
     check(psrc.rfind("ohne_hedge = bool(body.get(\"ohne_hedge\"))", 0, i) > psrc.rfind("\"sl_usd\": body.get(\"sl_usd\"), \"tp_usd\": body.get(\"tp_usd\")}", 0, i)
           and psrc.index("json.dumps(cmd)", i) > i, "panel: ohne_hedge steht vor dem Bot-Start im Befehl")
-    check('cmd["final"] = _fin if ohne_hedge and _fin in ("pass", "blow", "beide") else None' in psrc
-          and psrc.index('cmd["final"] =', i) < psrc.index("json.dumps(cmd)", i), "panel: final nur pass/blow/beide und nur bei Echo V2")
+    check('cmd["final"] = _fin if _fin in (("pass", "blow", "beide", "gewinntag") if ohne_hedge else ("pass", "beide", "gewinntag")) else None' in psrc
+          and psrc.index('cmd["final"] =', i) < psrc.index("json.dumps(cmd)", i)
+          and 'cmd["tages_grenze_usd"] = _tg if ohne_hedge and' in psrc,
+          "panel: final Echo V2 pass/blow/beide/gewinntag, Echo mit Hedge nur pass/beide/gewinntag (JU1); Tagesgrenze nur Echo V2")
 
     # PC-Tab: Urteil echoV2Final (jsc) + es reist im Befehl mit
     html = open(HTML, encoding="utf-8").read()
-    check("final: _fin.final, final_grund: _fin.grund" in html and "const _fin = echoV2Final(plan, po)" in html,
-          "PC-Tab: /api/master-order trägt final + final_grund aus echoV2Final")
+    check("final: _fin.final, final_grund: _fin.grund" in html and html.count("const _fin = echoV2Final(plan, po)") == 2
+          and "volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,\n                                             final: _fin.final, final_grund: _fin.grund }) })" in html,
+          "PC-Tab: /api/master-order trägt final + final_grund aus echoV2Final — Echo V2 UND Echo mit Hedge (JU1)")
     if not os.path.exists(JSC):
         check(False, "jsc fehlt — Urteil im PC-Tab nicht ausführbar")
     else:
-        js = "\n".join(js_funktion(html, n) for n in ("planSchritt", "planAutoNotiz", "echoV2Final"))
-        js += "\nconst F = %s\nprint(JSON.stringify(F.map(f => echoV2Final({ notes: f[0] }, { tp_usd: f[1], sl_usd: f[2] }))))\n" % json.dumps(
-            [[n, tp, sl] for n, tp, sl, _e in URTEILE])
+        js = "\n".join(js_funktion(html, n) for n in ("planSchritt", "planAutoNotiz", "echoGewinntag", "echoV2Final"))
+        js += "\nconst F = %s\nprint(JSON.stringify(F.map(f => echoV2Final({ notes: f[0], mt5Baseline: f[3] }, { tp_usd: f[1], sl_usd: f[2] }))))\n" % json.dumps(
+            [[n, tp, sl, (b[0] if b else None)] for n, tp, sl, _e, *b in URTEILE])
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
             f.write(js)
         try:
@@ -174,7 +187,7 @@ def main():
             check(False, "jsc: " + (r.stdout + r.stderr)[-400:])
         else:
             aus = json.loads(r.stdout.strip().splitlines()[-1])
-            for (notiz, tp, _sl, soll), ist in zip(URTEILE, aus):
+            for (notiz, tp, _sl, soll, *_b), ist in zip(URTEILE, aus):
                 check(ist["final"] == soll and ist["grund"], f"echoV2Final {(notiz or '(ohne Notiz)')[:58]}… TP {tp} → {ist['final']} ({ist['grund']})")
 
     # Planer: CFD-Puffer des letzten Trades 1,5 Pkt

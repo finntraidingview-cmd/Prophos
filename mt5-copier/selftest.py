@@ -2375,9 +2375,18 @@ def test_echo_hedge_sl_nachziehen():
         e16, s16 = lauf(116.0)
         ok = ok and e16["nachgezogen"] and klicks == [("19900.00", "20210.00")] and e16["sl"] == 19900.0 and e16["tp"] == 20210.0 \
             and any("(SL wegen Plan + 15 %)" in x for x in s16)
-        # final/Tagesgrenze gelten bei Echo mit Hedge nicht: 14 % + final pass + Grenze 500 $ → kein Klick
-        e_f, _ = lauf(114.0, {"final": "pass", "tages_grenze_usd": 500.0})
+        # 'blow' und Tagesgrenze gelten bei Echo mit Hedge nicht: 14 % + final blow + Grenze 500 $ → kein Klick
+        e_f, _ = lauf(114.0, {"final": "blow", "tages_grenze_usd": 500.0})
         ok = ok and not klicks and not e_f["nachgezogen"]
+        # JU1 (05.11.2026, Weg A): TP-Seite gilt jetzt auch mit Hedge — 'pass', 'beide' und 'gewinntag' ziehen NUR den TP am Fill nach
+        # (Fill 20.000 + 2.000 $ ÷ 10 $/Pkt = 20.200), der SL (14 %, unter Plan + 15 %) bleibt beim groben Wert, die Grenze zählt nicht
+        for fin in ("pass", "beide", "gewinntag"):
+            e_p, s_p = lauf(114.0, {"final": fin, "tages_grenze_usd": 500.0})
+            ok = ok and e_p["nachgezogen"] and klicks == [("19886.00", "20200.00")] and e_p["tp"] == 20200.0 and e_p["sl"] == 19886.0 \
+                and any(f"Final: {'pass' if fin == 'beide' else fin}" in x and "nur TP am Fill" in x for x in s_p)
+        # pass + SL 16 % über Plan → beide Seiten am Fill (SL 19.900 über den Plan-Auslöser, TP 20.200), Grenze zählt weiter nicht
+        e_b, s_b = lauf(116.0, {"final": "pass", "tages_grenze_usd": 500.0})
+        ok = ok and e_b["nachgezogen"] and klicks == [("19900.00", "20200.00")] and any("nur TP+SL am Fill" in x for x in s_b)
         lage["klick"] = "aus"
         ea, sa = lauf(116.0)
         ok = ok and ea["ok"] and not ea["nachgezogen"] and ea["sl"] == 19884.0 and ea["tp"] == 20210.0 and "grobe F9-Level bleiben" in ea["grund"]

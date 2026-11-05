@@ -6675,12 +6675,14 @@ class Handler(BaseHTTPRequestHandler):
             # laufende EA-Selbstheilung fuer dieses Terminal (die killt und startet das Terminal neu — mitten
             # im Order-Dialog waere das ein UNKLAR). Der Bot selbst bleibt unveraendert (Login-Guard, Klick).
             ohne_hedge = bool(body.get("ohne_hedge"))
-            # an den Bot (21.10.2026): nur Echo V2 und nur ein FINALER Trade zieht nach dem Fill exakt nach (order_bot nachzieh_seiten) —
-            # final = 'pass' | 'blow' | 'beide' | None aus dem PC-Tab (echoV2Final), final_grund nur für die Spur; Echo mit Hedge nie
+            # an den Bot (21.10.2026): nur ein FINALER Trade zieht nach dem Fill exakt nach (order_bot nachzieh_seiten; Echo mit Hedge seit JU1 nur TP) —
+            # final = 'pass' | 'blow' | 'beide' | 'gewinntag' | None aus dem PC-Tab (echoV2Final), final_grund nur für die Spur.
+            # JU1 (Finn 05.11.2026, Weg A): Echo mit Hedge bekommt nur die TP-Seite (pass/beide/gewinntag, der Bot macht daraus nachzieh_cmd),
+            # nie 'blow' und nie die Tagesgrenze (31.10.2026 unverändert)
             cmd["ohne_hedge"] = ohne_hedge
             _fin = str(body.get("final") or "").strip().lower()
-            cmd["final"] = _fin if ohne_hedge and _fin in ("pass", "blow", "beide") else None
-            cmd["final_grund"] = str(body.get("final_grund") or "").strip()[:160] if ohne_hedge else ""
+            cmd["final"] = _fin if _fin in (("pass", "blow", "beide", "gewinntag") if ohne_hedge else ("pass", "beide", "gewinntag")) else None
+            cmd["final_grund"] = str(body.get("final_grund") or "").strip()[:160] if (ohne_hedge or cmd["final"]) else ""
             # Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B, Auto-Planer ap_tagesgrenze): nur Echo V2, Zahl ≥ 0 oder None —
             # None = keine Prüfung; der Bot zieht den SL am echten Fill nach, wenn er die Grenze reißen würde
             try:

@@ -350,7 +350,8 @@ def main():
         check(ka == [] and not e["nachgezogen"] and e["seiten"] is None and "Final: keins" in spur[-1] and "kein Ändern-Klick" in spur[-1],
               f"final {fin!r} → kein Ändern-Klick, grobe F9-Level wie bisher")
     check(ns["nachzieh_seiten"]("Pass") == (True, False) and ns["nachzieh_seiten"]("blow") == (False, True)
-          and ns["nachzieh_seiten"]("beide") == (True, True) and ns["nachzieh_seiten"](None) == (False, False), "nachzieh_seiten")
+          and ns["nachzieh_seiten"]("beide") == (True, True) and ns["nachzieh_seiten"](None) == (False, False)
+          and ns["nachzieh_seiten"]("gewinntag") == (True, False), "nachzieh_seiten (JU1: gewinntag = TP-Seite)")
 
     # ── f) Harte Grenze beim Öffnen des Ändern-Dialogs (26.10.2026) ─────────────────────────────────────
     ns, uhr, _src = lade()

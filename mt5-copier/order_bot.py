@@ -200,15 +200,27 @@ def sl_ausloeser(verlust_usd, sl_usd, grenze_usd=None):
 
 # SL-KLICK AUCH FÜR ECHO MIT HEDGE (Finn 31.10.2026 über den Master: „bei Echo V2 und bei Echo, dass es eine generelle Regel ist"; Befund: 0 von 94
 # Echo-mit-Hedge-Trades seit 26.10. liefen durchs Nachziehen, Vorfall Marco …6321 Plan b6be307e: Plan-SL 2.211 $, Verlust −3.063 $). Nur der Auslöser
-# „Plan + 15 %" und nur die SL-Seite: final und Tagesgrenze gelten bei Echo mit Hedge nicht, der TP wird unverändert mitgetippt. Der Hedge läuft unabhängig
+# „Plan + 15 %" und nur die SL-Seite: Tagesgrenze und 'blow' gelten bei Echo mit Hedge nicht (TP-Seite seit JU1 05.11.2026, s. u.). Der Hedge läuft unabhängig
 # vom Bot: der Copier öffnet ihn aus dem EA-Snapshot und rechnet seine Notfall-Level in jedem Tick aus dem SL/TP der Master-Position (copier.plan_sltp) —
 # der neue SL zieht das Hedge-Level also von selbst mit, Lots/Richtung/Formel bleiben.
+# TP AM FILL AUCH FÜR ECHO MIT HEDGE (JU1, Finn 05.11.2026: „ja“ zu Weg A, „TP am Fill nachziehen, auch für Gewinntage“; Anlass PF1 Marco FTMO …1330:
+# Plan-TP 1.053 $ ab dem Kurs 54 s vor dem Fill, Fill 29,9 Pkt daneben → +1.948 $, Konto 105.940 statt 105.045; GT1 Blue Guardian Funded …7770: TP 590 $,
+# Fill 9,3 Pkt schlechter → +447,83 $, Gewinntag ≥ 500 $ verfehlt). Seit E1 (03.11.) laufen alle CFD-Challenges als Echo mit Hedge, der grobe F9-TP blieb
+# dort immer stehen. Jetzt behält Echo mit Hedge die TP-Seite des finalen Urteils: 'pass' (TP lässt das Konto bestehen, auch aus 'beide') und
+# 'gewinntag' (Mindest-$ je Tag, Finn: „genau das Gleiche wie bei Take Profit, bei Overall Goal oder beim Stop Loss“). 'blow' und die Tagesgrenze
+# bleiben bei Echo mit Hedge weiter aus (31.10.2026); der Hedge folgt dem neuen Master-TP von selbst (copier.plan_sltp, Master-TP → Hedge-SL).
+# Die TP-Urteile stehen als feste Liste in nachzieh_cmd UND nachzieh_seiten (keine Modul-Konstante: Selbsttest-Lader ziehen die Funktionen einzeln).
 def nachzieh_cmd(cmd):
-    """REIN RECHNEND (testbar): der Auftrag für _sltp_nachziehen. Echo V2: derselbe cmd. Echo mit Hedge: Kopie ohne final/final_grund/tages_grenze_usd,
-    damit nur sl_ausloeser 'plan' einen Klick auslöst."""
+    """REIN RECHNEND (testbar): der Auftrag für _sltp_nachziehen. Echo V2: derselbe cmd. Echo mit Hedge: Kopie ohne Tagesgrenze, final nur noch
+    als TP-Seite ('pass' bzw. 'gewinntag', 'beide' → 'pass', 'blow'/sonst → None) — der SL klickt dort nur über sl_ausloeser 'plan'."""
     if cmd.get("ohne_hedge"):
         return cmd
-    return dict(cmd, final=None, final_grund="", tages_grenze_usd=None)
+    f = str(cmd.get("final") or "").strip().lower()
+    tp_final = ("gewinntag" if f == "gewinntag" else "pass") if f in ("pass", "beide", "gewinntag") else None
+    grund = str(cmd.get("final_grund") or "") if tp_final else ""
+    if f == "beide":
+        grund = (grund + " · " if grund else "") + "SL-Seite bei Echo mit Hedge aus"   # Spur ehrlich: der SL am Boden wird hier nicht bewegt
+    return dict(cmd, final=tp_final, final_grund=grund, tages_grenze_usd=None)
 
 
 def sl_tagesgrenze_vom_fill(richtung, fill, volumen, contract_size, sl_usd, grenze_usd, komm_usd=0.0, digits=2):
@@ -237,9 +249,10 @@ def sl_tagesgrenze_vom_fill(richtung, fill, volumen, contract_size, sl_usd, gren
 
 
 def nachzieh_seiten(final):
-    """REIN RECHNEND (testbar): cmd.final → (tp_nachziehen, sl_nachziehen). Unbekannt/leer (auch altes Frontend) → (False, False)."""
+    """REIN RECHNEND (testbar): cmd.final → (tp_nachziehen, sl_nachziehen). Unbekannt/leer (auch altes Frontend) → (False, False).
+    'gewinntag' (JU1, 05.11.2026) = TP-Seite wie 'pass': der Mindest-$ des Tages ist ein TP-Ziel."""
     f = str(final or "").strip().lower()
-    return f in ("pass", "beide"), f in ("blow", "beide")
+    return f in ("pass", "beide", "gewinntag"), f in ("blow", "beide")
 
 
 def sltp_vom_fill(richtung, fill, volumen, contract_size, sl_usd, tp_usd, komm_usd=0.0, digits=2):

@@ -53776,18 +53776,31 @@
    * egal"). Der Bot (order_bot nachzieh_seiten) zieht nach dem Fill NUR die Seite exakt nach, die das Konto beendet: 'pass' = der TP lässt
    * bestehen (TP-$ ≥ Rest bis Ziel laut Auto-Planer-Notiz — letzter Trade / Klein-Trade), 'blow' = der SL blowt (Stufe „SL hinter den Boden"
    * bzw. „SL auf Boden gekappt", ap_konto_rechnen), 'beide', sonst null = kein Ändern-Klick wie bisher. Handpläne ohne Notiz → null.
-   * Rein rechnend (Selbsttest tools/selftest_cfd_tp_fill.py). -> {final, grund} */
+   * Rein rechnend (Selbsttest tools/selftest_cfd_tp_fill.py). -> {final, grund}
+   * JU1 (Finn 05.11.2026, Weg A „TP am Fill nachziehen, auch für Gewinntage"): dasselbe Urteil reist jetzt auch beim Echo MIT Hedge mit (der Bot
+   * nimmt dort nur die TP-Seite, order_bot nachzieh_cmd), und ein GEWINNTAG-Trade ist ein eigenes TP-Ziel: 'gewinntag' = der TP soll genau den
+   * Mindest-$ des Tages liefern (Finn: „genau das Gleiche wie bei Take Profit, bei Overall Goal oder beim Stop Loss"). Erkannt am Funded-Planer
+   * (mt5_baseline.funded_plan.tp_art 'gewinntag', Blue Guardian 550–650 $) bzw. an der Auto-Planer-Stufe „Gewinntag x/y sammeln". Gewinntag + Blow
+   * am Boden → 'beide'. Anlass GT1 Blue Guardian …7770: TP 590 $, Fill 9,3 Pkt schlechter → +447,83 $, Tag unter 500 $ nicht gezählt. */
+  function echoGewinntag(plan, n){
+    const fp = plan && plan.mt5Baseline && plan.mt5Baseline.funded_plan
+    if(fp && typeof fp === 'object' && fp.tp_art === 'gewinntag') return 'Gewinntag-Trade (Funded-Planer)'
+    return n && /^Gewinntag\b/i.test(String(n.stufe || '')) ? `Gewinntag-Trade (${String(n.stufe).split(' · ')[0]})` : null
+  }
   function echoV2Final(plan, po){
     const n = plan ? planAutoNotiz(plan.notes) : null
     const tp = Number(po && po.tp_usd), sl = Number(po && po.sl_usd)
-    if(!n) return { final: null, grund: 'kein Auto-Plan (Notiz ohne Rest/Ziel)' }
+    const gt = echoGewinntag(plan, n)
+    if(!n && !gt) return { final: null, grund: 'kein Auto-Plan (Notiz ohne Rest/Ziel)' }
     if(!(tp > 0)) return { final: null, grund: 'ohne SL/TP' }
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    if(!n) return { final: 'gewinntag', grund: `${gt}: TP ${de(tp)} $ exakt am Fill` }
     const pass = tp >= n.rest
     const blow = /SL hinter den Boden|SL auf Boden gekappt/i.test(n.stufe)
-    const grund = (pass ? `TP ${de(tp)} $ ≥ Rest ${de(n.rest)} $ bis Ziel ${de(n.ziel)}` : `TP ${de(tp)} $ < Rest ${de(n.rest)} $ bis Ziel`)
+    const grund = (pass ? `TP ${de(tp)} $ ≥ Rest ${de(n.rest)} $ bis Ziel ${de(n.ziel)}` : gt ? `${gt}: TP ${de(tp)} $ exakt am Fill` : `TP ${de(tp)} $ < Rest ${de(n.rest)} $ bis Ziel`)
       + ' · ' + (blow ? `SL ${de(sl)} $ = Blow am Boden` : 'SL nicht am Boden')
-    return { final: pass && blow ? 'beide' : pass ? 'pass' : blow ? 'blow' : null, grund }
+    const tpZiel = pass || !!gt
+    return { final: tpZiel && blow ? 'beide' : pass ? 'pass' : gt ? 'gewinntag' : blow ? 'blow' : null, grund }
   }
   /* CFD-CHALLENGE NIE ALS ECHO V2 (E1, Finn 03.11.2026 ~18:10 Dubai: „Alle, alle, alle CFDs, ob Phase One oder Phase Two, scheißegal welche ID,
    * der Challenge-Planer CFD: Das Modell ist immer Echo, nie Echo V2. Immer mit Hedge."). Anlass: Julian FTMO …3873 / FundingPips …5329 (Emins
@@ -54610,6 +54623,8 @@
                 // plant nicht parallel, der Build-Wächter lädt nicht mitten im Warten neu („Start läuft"). Claim, Guard, Deckel, Riegel gleich.
                 const t0 = Date.now()
                 let r = null
+                // JU1 (Finn 05.11.2026, Weg A): finales Urteil auch hier — der Bot zieht bei Echo mit Hedge nur die TP-Seite (pass/gewinntag) am Fill nach
+                const _fin = echoV2Final(plan, po)
                 const laufVorher = _pfV2Laeuft
                 _pfV2Laeuft = String(plan.id)
                 try{
@@ -54618,7 +54633,8 @@
                     r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                       headers:{'Content-Type':'application/json'},
                       body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
-                                             volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                                             volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,
+                                             final: _fin.final, final_grund: _fin.grund }) })
                     if(!mt5OrderWiederholen(r, Date.now() - t0)) break
                     if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
                       r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
@@ -56373,7 +56389,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2084'
+  const OS_TAB_BUILD = '2026-09-22.2085'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
