@@ -93,7 +93,12 @@ def sb_select(tab, q):
         return live(STATE["jetzt"])
     if tab == "alarm_log":
         return []
+    if tab == "trade_plans":
+        return [dict(PLAN_DB)] if PLAN_DB else []
     return []
+
+
+PLAN_DB = {}   # Plan-Zeile für _echo_auto_ende_schreiben (TC1c-Nachzug)
 
 
 def alarm_senden(prio, art, titel, text, **kw):
@@ -235,7 +240,8 @@ def _anfrage(meth, url, **kw):
 
 
 def _update(tab, filt, upd):
-    GESCHRIEBEN.append(("update", filt.get("id"), filt.get("status"), upd.get("status")))
+    GESCHRIEBEN.append(("update", filt.get("id"), filt.get("status"), filt.get("mt5_baseline->final"), filt.get("updated_at"), upd.get("status"),
+                        sorted((upd.get("mt5_baseline") or {}).keys())))
     return [{"id": filt["id"]}]
 
 
@@ -243,13 +249,25 @@ PL = [dict(jacob, user_id="u-jacob", master_account_id="k7924", master_firm="Fun
 ACCS[:] = [{"id": "k7924", "external_id": "14197924", "tv_balance": "98266.71", "tv_balance_at": iso(J2 - 240)}]
 live = lambda j: [{"master_login": "14197924", "pc_name": "pc-auzre5", "updated_at": iso(j - 1), "note": None, "pos": [], "hd": {}, "mbal": "98266.71"}]   # noqa: E731
 ns.update(_sb_anfrage=_anfrage, sb_update=_update, _sb_pruefen=lambda r: None)
+PLAN_DB.update(status="open", updated_at="2026-11-05T15:48:19.193241+00:00", mt5_baseline={"master_balance": 95643, "echo_pos_gesehen_at": "x", "puls_spur": {"ok": True}})
 STATE["jetzt"] = J2 - 11 * 60
 tick(PL, {"u-jacob": "Jacob"}, J2 - 11 * 60)
 check(not GESCHRIEBEN, "erster flacher Takt: nichts geschrieben")
 STATE["jetzt"] = J2
 tick(PL, {"u-jacob": "Jacob"}, J2)
-check(GESCHRIEBEN == [("rpc", "af4f8ee8-aaaa", "open", ["final"]), ("update", "eq.af4f8ee8-aaaa", "eq.open", "review")],
-      f"nach 11 min: final (Guard open) + review (Guard open) — {GESCHRIEBEN}")
+check(GESCHRIEBEN == [("update", "eq.af4f8ee8-aaaa", "eq.open", "is.null", "eq.2026-11-05T15:48:19.193241+00:00", "review",
+                        ["echo_pos_gesehen_at", "final", "master_balance", "puls_spur"])],
+      f"nach 11 min: EIN Update — Guard open + final fehlt + updated_at, Baseline behalten + final — {GESCHRIEBEN}")
+W = ns["_echo_auto_ende_schreiben"]
+GESCHRIEBEN.clear()
+PLAN_DB.update(status="open", mt5_baseline={"master_balance": 95643, "final": {"closed_sum": -14.2, "at": "jetzt"}})
+check(W("af4f8ee8-aaaa", {"master_balance": 1}, {"status": "review"}) is False and not GESCHRIEBEN, "Tab hat schon final geschrieben → Railway schreibt nichts (Tab-final mit closed_sum bleibt)")
+PLAN_DB.update(status="review", mt5_baseline={"master_balance": 95643})
+check(W("af4f8ee8-aaaa", {"master_balance": 1}, {"status": "review"}) is False and not GESCHRIEBEN, "Plan nicht mehr open → nichts")
+PLAN_DB.clear()
+check(W("af4f8ee8-aaaa", {"master_balance": 1}, {"status": "review"}) is False and not GESCHRIEBEN, "Plan nicht lesbar → nichts")
+src_w = SRC[SRC.index("def _echo_auto_ende_schreiben("):SRC.index("def echo_frost_tick(")]
+check("rpc/mt5_baseline_patch" not in src_w and src_w.count("sb_update(") == 1, "kein zweischrittiges Schreiben mehr (kein RPC, genau ein Update)")
 ae = [g for g in GESENDET if g["art"] == "echo_auto_ende"]
 check(len(ae) == 1 and ae[0]["prio"] == 3 and "98.266,71" in ae[0]["text"] and "+2623.71" in ae[0]["text"], f"⚪-Meldung „Echo-Plan beendet“ ({ae[0]['text'][:110] if ae else '-'})")
 check("af4f8ee8-aaaa" not in ns["_echo_flach_seit"] and "af4f8ee8-aaaa" not in ns["_echo_flach_stand"], "Flach-Uhr und „Manuelle Arbeit“-Zeile weg")

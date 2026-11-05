@@ -4592,13 +4592,19 @@ def echo_auto_ende_urteil(r, z, acc, flach_seit, gesehen, jetzt_ts):
 
 
 def _echo_auto_ende_schreiben(pid, fin, upd):
-    """final mit Guard open (mt5_baseline_patch), dann status review (Guard open). → True, wenn der Plan jetzt beendet ist. Wirft nach außen."""
-    rr = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
-                     json={"p_plan": pid, "p_patch": {"final": fin}, "p_status": "open"})
-    _sb_pruefen(rr)
-    if not rr.json():
-        return False                                       # nicht mehr open (Tab war schneller)
-    return bool(sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.open"}, upd))
+    """EIN Update: final + status review (+ ended_at/master_pl) — nur solange der Plan open ist, noch KEIN final trägt und seit dem Lesen unverändert
+    ist (updated_at, Trigger trade_plans_set_updated_at). TC1c-Nachzug (S2-Hinweis zu d7429fd0): vorher final per mt5_baseline_patch und danach der Status —
+    schrieb der Tab im selben Moment sein eigenes final (mit closed_sum), konnte Railways final es dazwischen überschreiben. Jetzt gewinnt immer das Tab-final.
+    → True, wenn der Plan jetzt beendet ist. Wirft nach außen."""
+    rows = sb_select("trade_plans", {"select": "status,updated_at,mt5_baseline", "id": f"eq.{pid}", "limit": "1"}) or []
+    p = rows[0] if rows else None
+    base = (p or {}).get("mt5_baseline") if isinstance((p or {}).get("mt5_baseline"), dict) else {}
+    if not p or p.get("status") != "open" or base.get("final"):
+        return False                                       # nicht mehr open bzw. Tab hat schon beendet
+    filt = {"id": f"eq.{pid}", "status": "eq.open", "mt5_baseline->final": "is.null"}
+    if p.get("updated_at"):
+        filt["updated_at"] = f"eq.{p['updated_at']}"
+    return bool(sb_update("trade_plans", filt, dict(upd, mt5_baseline=dict(base, final=fin))))
 
 
 def echo_frost_tick(rows, namen, jetzt_ts):
