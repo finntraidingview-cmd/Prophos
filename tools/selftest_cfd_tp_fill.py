@@ -119,7 +119,17 @@ def main():
     # Verdrahtung run(): nur Echo V2, grobe Level bleiben bei Fehlschlag, nie ein API-Schreibweg
     r = fn(bsrc, "run")
     f9 = r[r.index("direkt im F9-Dialog gesetzt\")"):r.index("if f9_getippt:\n")]
-    check("if cmd.get(\"ohne_hedge\"):" in f9 and "_sltp_nachziehen(" in f9, "F9-Zweig: Nachziehen nur mit cmd ohne_hedge (Echo V2)")
+    # RT1 (05.11.2026): seit 1a005ac5 (J1, Finn 31.10.2026 „bei Echo V2 und bei Echo … generelle Regel") läuft der F9-Zweig immer über
+    # _sltp_nachziehen_lauf; die Echo-V2-Trennung steht jetzt in nachzieh_cmd: nur cmd ohne_hedge behält final/Tagesgrenze, Echo mit Hedge
+    # bekommt final=None (nur SL bei Plan + 15 %). Geprüft wird dieselbe Regel am neuen Ort, verhaltend.
+    lauf = fn(bsrc, "_sltp_nachziehen_lauf")
+    exec(fn(bsrc, "nachzieh_cmd"), ns)
+    NZ = ns["nachzieh_cmd"]
+    c_v2 = {"ohne_hedge": True, "final": "pass", "final_grund": "x", "tages_grenze_usd": 500}
+    c_h = {"ohne_hedge": False, "final": "pass", "final_grund": "x", "tages_grenze_usd": 500}
+    check("_sltp_nachziehen_lauf(" in f9 and "c = nachzieh_cmd(cmd)" in lauf and "_sltp_nachziehen(w, path, expected, p, c," in lauf
+          and NZ(c_v2) == c_v2 and NZ(c_h)["final"] is None and NZ(c_h)["tages_grenze_usd"] is None,
+          "F9-Zweig: finales Nachziehen (final/Tagesgrenze) nur mit cmd ohne_hedge (Echo V2), Echo mit Hedge nur Plan-SL")
     check("sl_end, tp_end = nz[\"sl\"], nz[\"tp\"]" in f9 and "\"sl\": sl_end, \"tp\": tp_end" in f9, "Antwort trägt die tatsächlich gesetzten Level")
     check("if not nz[\"ok\"]:" in f9 and "SOFORT" in f9 and "\"retry_ok\": False" in f9, "fehlt ein Level → ok False, nie erneut platzieren")
     nach = r[r.index("if f9_getippt:\n"):]
