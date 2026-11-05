@@ -60720,7 +60720,9 @@
     if(tpWdWartetAufBestaetigung(p)) return { kurz: '⏳ Wartet auf Bestätigung · Funded-Planer → Winning Days', marke: '⏳ Bestätigung offen',
       voll: 'Wartet auf deine Bestätigung im Funded-Planer → Winning Days. Ohne Bestätigung startet der Trade nicht und läuft ab; bestätigt startet er zur Startzeit (schon vorbei: in 3–6 min, am selben Handelstag).', versuche: 1, at: null }
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
-    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    // R4b (05.11.2026): aufgegeben (Gegenrichtung / Index-Pause) gilt bis zum Ablauf des Plans, nicht nur 30 min
+    const _aufg = s && s.status === 'aufgegeben' && (s.art === 'richtung' || s.art === 'index_pause')
+    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt', 'index_pause'].includes(s.art) || !(_aufg || Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
@@ -60747,6 +60749,13 @@
     if(s.art === 'ein_finaler') return { kurz: `⛔ Wartet: nur ein finaler Trade je ID${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
+    // INDEX-PAUSE (R4b, 05.11.2026): CFD/NAS100 startet nie in der CME-Pause — verschoben auf Pause-Ende + 15 min bzw. nach Fensterende nicht gestartet
+    if(s.art === 'index_pause') return s.status === 'aufgegeben'
+      ? { kurz: '⛔ Index-Pause: nicht gestartet — Startfenster zu Ende', marke: '⛔ Index-Pause', voll: `Nicht gestartet: ${text}`, versuche: Number(s.versuche) || 1, at: s.at }
+      : { kurz: `⏳ Index-Pause (NAS100 zu)${um ? ` · Start ${um}` : ''}`, marke: '⏳ Index-Pause', voll: `Wartet: ${text}`, versuche: Number(s.versuche) || 1, at: s.at }
+    // R4b: der Gegenrichtungs-Riegel gibt CFD-Challenges am Fensterende auf (sql/2026-11-05_gegenhedge_cfd_fensterende.sql), statt weiterzuschieben
+    if(s.art === 'richtung' && s.status === 'aufgegeben') return { kurz: '⛔ Riegel: Gegenrichtung Schwesterkonto — nicht gestartet', marke: '⛔ Gegenrichtung',
+      voll: `Nicht gestartet: ${String(s.text || '')}. Das Startfenster ist zu Ende — Start von Hand oder neue Uhrzeit.`, versuche: Number(s.versuche) || 1, at: s.at }
     return { kurz: `⛔ Order ging nicht durch wegen Richtungsschutz${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Order ging nicht durch wegen Richtungsschutz: ${text}. Abhaken/Nachlesen des Gegen-Trades löst die Sperre; bis dahin versucht der PC-Tab es alle 5–60 min (Zufall) neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
@@ -60761,6 +60770,63 @@
       if(a != null && b != null && m >= a && m < b) return t0 + (b - m) * 60000
     }
     return t0 + 60 * 60000
+  }
+  /* INDEX-PAUSE AM START (R4b, Master 05.11.2026 — Befund S7 R4: drei Tradeify-CFD-Challenges kamen 02:00–02:32 Dubai frei = NAS100-/CME-Pause → „Market
+   * closed"): CFD/NAS100 (route mt5 / mt5v2) startet nie in der Pause. Dieselbe Regel wie Railway (app.py cme_markt_offen / _cme_offen_seit_s, M1 fcp_cfd_offen):
+   * cmeMarktOffen (CME 16:00–17:00 Chicago + Wochenende) und erst 15 min nach der Öffnung (= FCP_PAUSE_PUFFER_MIN). Liegt der Start in der Pause → auf
+   * Pause-Ende + 15 min (+ 0–3 min Zufall) schieben; läge das hinter dem Startfenster (Challenge-Planer: rkFensterEnde des ersten Starts, höchstens die
+   * deutsche Tagesgrenze; sonst 3 h) → nicht gestartet mit sichtbarem Grund. Futures/Orbit/Topstep/Polar unberührt. */
+  const CFD_PAUSE_PUFFER_MS = 15 * 60000
+  const cfdIndexRoute = p => !!p && (p.route === 'mt5' || p.route === 'mt5v2')
+  const cfdIndexOffen = ms => cmeMarktOffen(ms) && cmeMarktOffen(ms - CFD_PAUSE_PUFFER_MS)
+  // REIN RECHNEND (testbar über window._cfdIndexPauseZiel): null = jetzt offen; sonst { ziel } oder { aufgeben, frei }; zufall ∈ [0, 1)
+  function cfdIndexPauseZiel(nowMs, endeMs, zufall){
+    if(cfdIndexOffen(nowMs)) return null
+    let m = Math.ceil(nowMs / 60000) * 60000
+    for(let i = 0; i < 4 * 24 * 60 && !cfdIndexOffen(m); i++) m += 60000
+    if(!cfdIndexOffen(m)) return { aufgeben: true, frei: null }
+    const z = m + Math.floor((zufall == null ? Math.random() : zufall) * 3 * 60000)
+    if(endeMs != null && z > endeMs) return { aufgeben: true, frei: m }
+    return { ziel: z, frei: m }
+  }
+  window._cfdIndexPauseZiel = cfdIndexPauseZiel
+  function cfdPauseEnde(plan, nowMs){
+    if(!plan.autoPlan) return nowMs + 3 * 3600000
+    const ss = plan.mt5Baseline && plan.mt5Baseline.start_sperre
+    const erst = (ss && ss.erst) || plan.startUm
+    const t0 = Date.parse(erst); if(!isFinite(t0)) return nowMs
+    let tagEnde = null
+    try{ const tag = wdJetzt('Europe/Berlin', new Date(t0)).tag; tagEnde = wdZeitpunkt(wdTagPlus(tag, 1), '00:00', 'Europe/Berlin').getTime() }catch(_){ tagEnde = null }
+    const fe = rkFensterEnde(erst)
+    return tagEnde != null ? Math.min(fe, tagEnde) : fe
+  }
+  // → true = erledigt (verschoben oder aufgegeben), der Tick startet nichts
+  async function cfdIndexPauseVerschieben(plan){
+    const nowMs = Date.now(), z = cfdIndexPauseZiel(nowMs, cfdPauseEnde(plan, nowMs))
+    if(!z) return false
+    const name = plan.masterName || 'Plan', uhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+    const alt = plan.mt5Baseline && plan.mt5Baseline.start_sperre, n = ((alt && alt.art === 'index_pause' && Number(alt.versuche)) || 0) + 1
+    if(z.aufgeben){
+      const text = `Index-Pause (NAS100 zu)${z.frei ? ` bis ${uhr(z.frei - CFD_PAUSE_PUFFER_MS)} Dubai + 15 min` : ''} — danach ist das Startfenster zu Ende, nicht gestartet`
+      try{ await baselinePatch(plan.id, { start_sperre: { art: 'index_pause', status: 'aufgegeben', text, at: new Date().toISOString(), versuche: n } }, 'planned') }catch(_){}
+      const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie in der Pause starten (R4b)
+      if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0])
+        await sfMelden(tradePlans[iv] || plan, { schritt: 'index_pause', msg: `„${name}": ${text}.` }) }
+      else await suClaimFehlgriff(plan, null)
+      rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: plan.richtung, von_start: plan.startUm, nach_start: plan.startUm, grund: `[Index-Pause] ${text}` })
+      if(typeof atToast === 'function') atToast(`⛔ „${name}": ${text}.`, 'end')
+      return true
+    }
+    const ziel = new Date(z.ziel).toISOString(), text = `Index-Pause (NAS100 zu) — Start auf ${uhr(z.ziel)} Dubai verschoben (Pause-Ende + 15 min)`
+    const { data, error } = await supabase.from('trade_plans').update({ start_um: ziel }).eq('id', plan.id).eq('status', 'planned')
+      .is('start_um_gestartet_at', null).eq('start_um', plan.startUm).select('*')
+    if(error || !data || !data.length){ await suClaimFehlgriff(plan, error || null); return true }
+    rkPlanErsetzen(data[0])
+    try{ await baselinePatch(plan.id, { start_sperre: { art: 'index_pause', status: 'wartet', text, at: new Date().toISOString(), naechster: ziel, versuche: n } }, 'planned') }catch(_){}
+    rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: plan.richtung, von_start: plan.startUm, nach_start: ziel, grund: `[Index-Pause] ${text}` })
+    if(typeof atToast === 'function') atToast(`⏳ „${name}": ${text}.`, 'start')
+    try{ renderTradePlans() }catch(_){}
+    return true
   }
   async function rkProtokoll(plan, eintrag){   // auto_plan_umplanung (quelle 'start') — nur der Service-Key schreibt, daher über Railway
     try{
@@ -61474,6 +61540,13 @@
     return { art: 'nicht_gelaufen', pl: 0, grund: `kein Deal, keine Position, Balance unverändert ${bal.toLocaleString('de-DE')} $` }
   }
   window._deUrteil = deUrteil   // Test-Haken
+  // R4b (05.11.2026): hat ein Riegel den Start aufgegeben (Gegenrichtung Schwesterkonto / Index-Pause), steht DIESER Grund im Review statt nur „nicht gelaufen 0,00"
+  function deNichtGelaufenHinweis(r, grund){
+    const ss = r && r.mt5_baseline && r.mt5_baseline.start_sperre
+    if(ss && ss.status === 'aufgegeben' && (ss.art === 'richtung' || ss.art === 'index_pause') && ss.text) return `nicht gestartet — ${String(ss.text).slice(0, 300)} (${grund})`
+    return `nicht gelaufen — ${grund}`
+  }
+  window._deNichtGelaufenHinweis = deNichtGelaufenHinweis   // Test-Haken
   const deKandidat = r => !!r && r.status === 'review' && r.master_pl == null && (r.route === 'mt5' || r.route === 'mt5v2') && !r.started_at && !!r.start_um_gestartet_at
     && !!(r.mt5_baseline && r.mt5_baseline.final && r.mt5_baseline.final.art === 'unklar') && !r.mt5_baseline.manuell   // Manuelle Arbeit: Finns Hand (Prüfer N2)
   /* VERGLEICHS-BALANCE (Prüfer-Stopp N2): nur eine Lesung eines ANDEREN Plans desselben Kontos, die vor dem Claim liegt — bal_nach.at < Claim, sonst
@@ -61538,7 +61611,7 @@
         // Plan-Ende ist nicht gelesen). Nur „nicht gelaufen" ohne bal_nach bekommt die eben gelesene Balance (= Vergleichs-Balance ±0,01 $) mit Zeitstempel jetzt.
         const finNeu = u.art === 'deals'
           ? Object.assign(fin, { art: 'deals', quelle: 'deals', master_pl: u.pl, hinweis: `Endlesung über die Deals: ${u.grund}`, deals_at: jetzt, unklar_grund: null })
-          : Object.assign(fin, { art: 'nicht_gelaufen', grund: 'nie_gefuellt_tagesende', quelle: 'deals_leer', master_pl: 0, today_pnl: 0, hinweis: `nicht gelaufen — ${u.grund}`, deals_at: jetzt, unklar_grund: null })
+          : Object.assign(fin, { art: 'nicht_gelaufen', grund: 'nie_gefuellt_tagesende', quelle: 'deals_leer', master_pl: 0, today_pnl: 0, hinweis: deNichtGelaufenHinweis(r, u.grund), deals_at: jetzt, unklar_grund: null })
         const neuBal = (u.art === 'nicht_gelaufen' && !(r.mt5_baseline && r.mt5_baseline.bal_nach) && Number(res.balance) > 0)
           ? { bal_nach: { ok: true, balance: Number(res.balance), at: jetzt, quelle: 'deals', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } } : {}
         const base = Object.assign({}, r.mt5_baseline || {}, { final: finNeu }, neuBal)
@@ -62052,6 +62125,19 @@
           await sfMelden(tradePlans[iz] || plan, { schritt: 'ziel_erreicht', msg: t })
         }
         return
+      }
+      // R4b (05.11.2026): CFD/NAS100 — ein vom Riegel aufgegebener Plan (Gegenrichtung Schwesterkonto / Index-Pause) wird nur verbraucht, mit Grund;
+      // ein Start in der Index-Pause wird auf Pause-Ende + 15 min geschoben (cfdIndexPauseVerschieben). Futures/Orbit unberührt.
+      if(cfdIndexRoute(plan)){
+        const ssA = plan.mt5Baseline && plan.mt5Baseline.start_sperre
+        if(ssA && ssA.status === 'aufgegeben' && (ssA.art === 'richtung' || ssA.art === 'index_pause')){
+          const { data: dg } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Riegel hat aufgegeben (R4b)
+          if(dg && dg.length){ const ig = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(ig >= 0) tradePlans[ig] = rowToPlan(dg[0])
+            await sfMelden(tradePlans[ig] || plan, { schritt: ssA.art === 'richtung' ? 'riegel_aufgegeben' : 'index_pause', msg: String(ssA.text || '').slice(0, 300) }) }
+          else await suClaimFehlgriff(plan, null)
+          return
+        }
+        if(verspaetet <= fenster && await cfdIndexPauseVerschieben(plan)) return
       }
       // RICHTUNG AM START (07.10.2026): frisch prüfen, VOR Slave-Vorprüfung und Claim — Auto-Plan dreht, sonst verschieben
       if(verspaetet <= fenster){
