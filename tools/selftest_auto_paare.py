@@ -123,8 +123,15 @@ def main():
         out17, _i17 = P({"l": 875.0, "s": 961.0}, {"l": "buy", "s": "sell"}, {"l": TI("b5"), "s": TI("b1")}, [],
                         [{"user_id": "b0", "firma": "tradeify", "richtung": "sell", "start": 940.0, "route": "tvv2"}], random.Random(sd17))
         w17.append(out17["l"])
-    check(all(abs(x - 961.0) >= 3.0 for x in w17) and any(x != 875.0 for x in w17),
-          f"Rücken hält ≥ 3 min zum fremden Gegen-Short 16:01 (40 Seeds, nächster {min(abs(x - 961.0) for x in w17):.2f} min)")
+    check(all(abs(x - 961.0) > 3.0 for x in w17) and any(x != 875.0 for x in w17),
+          f"Rücken hält > 3 min zum fremden Gegen-Short 16:01 — genau 3,00 gilt wie in _ap_gegen_partner als Konflikt (40 Seeds, nächster {min(abs(x - 961.0) for x in w17):.2f} min)")
+    # 17b) Grenze nach dem Runden: fremder Short 1000, Anker 990 fest, Long rückt auf 990 + 2–30 — nie auf [997, 1003] (auch nicht 1003,00 nach round(…, 2))
+    w17b = []
+    for sd in range(300):
+        o, _i = P({"l": 900.0, "s": 1000.0}, {"l": "buy", "s": "sell"}, {"l": TI("b5"), "s": TI("b1")}, [],
+                  [{"user_id": "b0", "firma": "tradeify", "richtung": "sell", "start": 990.0, "route": "tvv2"}], random.Random(sd))
+        w17b.append(o["l"])
+    check(all(abs(x - 1000.0) > 3.0 for x in w17b if x != 900.0), f"nach dem Runden nie ≤ 3,00 min am fremden Gegen-Trade (300 Seeds, nächster {min(abs(x - 1000.0) for x in w17b):.2f})")
     # 18) der EIGENE Paar-Anker bleibt ausgenommen: Abstand 2–3 min zum Anker weiter möglich (Paare unverändert)
     nah = []
     for sd18 in range(200):

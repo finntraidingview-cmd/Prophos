@@ -23708,14 +23708,15 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
         (gewollte Paare bleiben 2–5 / 2–30 min). Befund M3c: frei() prüfte zu anderen IDs nur AP_FIRMA_ABSTAND_MIN (1 min) ohne Richtung."""
         t = tr_info[k]
         u, fk, r = str(t.get("user")), str(t.get("fkey")), richtung.get(k)
+        m = round(m, 2)   # S4 zu M3d: geprüft wird der Wert, den verschieben() speichert, mit ≤ wie _ap_gegen_partner — genau 3,00 min ist auch dort Konflikt
         for k2, m2 in out.items():
             t2 = tr_info.get(k2) or {}
             if k2 != k and str(k2) != str(anker_id) and str(t2.get("user")) != u and str(t2.get("fkey")) == fk \
-                    and richtung.get(k2) in ("buy", "sell") and richtung.get(k2) != r and abs(float(m2) - m) < gegen_min:
+                    and richtung.get(k2) in ("buy", "sell") and richtung.get(k2) != r and abs(float(m2) - m) <= gegen_min:
                 return False
         for x in fest:
             if x["_id"] != anker_id and str(x.get("user_id")) != u and str(x.get("firma")) == fk and x.get("richtung") != r \
-                    and abs(float(x["start"]) - m) < gegen_min:
+                    and abs(float(x["start"]) - m) <= gegen_min:
                 return False
         return True
 
