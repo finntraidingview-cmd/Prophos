@@ -23098,6 +23098,13 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     # Kontowert und Vorrat; die alten Felder in phasen{} gelten nur noch, wenn die Firma die Kernwerte nicht hat
     zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
+    _zmin = _wd_num(regel.get("_ziel_min"))   # Consistency-Ziel (M2 05.11.2026, zw_cons_ziel): Rest bis „Required profit"
+    _ctxt = ""
+    if _zmin and _zmin > ziel:
+        ziel = float(_zmin)
+        _c = regel.get("_cons") if isinstance(regel.get("_cons"), dict) else None
+        if _c:
+            _ctxt = f" · Consistency {float(_c['p']):g} %: größter Tag {float(_c['groesster_tag']):,.0f} $ → Ziel {ziel:,.0f} $".replace(",", ".")
     # DD je Größe aus den Kernwerten (ap_kw_param.dd_je_groesse: DB je_groesse, sonst Apex-Tabelle, 20.10.2026) — derselbe Boden wie
     # ap_boden_konto (Anzeige, Erledigt-Klick) und der Radar; ohne Eintrag bleibt der Firmen-DD
     _ddg = (ap_kw_param(regel) or {}).get("dd_je_groesse", {}).get(str(int(groesse)))   # ohne _wd_num: die Selftest-Lader ziehen diesen Block allein
@@ -23144,9 +23151,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             klein["stufe"] += " · Rest zurück im Planer"
         elif cfd:
             return None, (f"Rest {f'{rest:.2f}'.replace('.', ',')} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
-                          "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen — oder im Radar „→ Trade-Planer“)")
+                          "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen — oder im Radar „→ Trade-Planer“)" + _ctxt)
         else:
-            return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr — oder im Radar „→ Trade-Planer“)"
+            return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr — oder im Radar „→ Trade-Planer“)" + _ctxt
     if cfd and rest < AP_REST_MIN and not ppl:
         return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
                       "Punktwert der Firma eintragen, sonst von Hand")
@@ -23228,6 +23235,8 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             stufe = (stufe.replace(f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)", "")
                      + f", SL auf Tagesgrenze gekappt ({f'{tg:,.0f}'.replace(',', '.')} − {t_puffer} $)")
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
+    if _ctxt:
+        stufe = f"{stufe}{_ctxt}"
     out = {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
            "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe, "tages_grenze_usd": tg}
     if klein and klein.get("symbol"):
@@ -27693,7 +27702,22 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             # geblowt? — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026)
             ausgelassen.append(dict(zeile, grund=gb, **ap_boden_zeile(regel, a, float(bal), stand if quelle_b != "Nachlesung" else letzt)))
             continue
-        kandidaten.append({"a": a, "regel": ap_regel_konto(regel, a, float(bal)), "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
+        regel_kk = ap_regel_konto(regel, a, float(bal))
+        if a.get("account_type") == "challenge" and not a.get("ziel_erreicht_at") and zw_cons_moeglich(regel, a):
+            # CONSISTENCY (M2 05.11.2026): steht die Balance am Regel-Ziel, der größte Tag aber über p × Gewinn → Ziel = größter Tag ÷ p,
+            # der Planer plant den Rest-Trade dorthin. Markierte Konten nie (Tage-Mini bleibt Mini). Tage aus ALLEN Trades wie die Ziel-Wache
+            # (eig kennt nur 30 Tage — Fremd-Review: sonst Stillstand „Ziel erreicht" ohne Markierung); Lesefehler → eig
+            _z0 = zw_ziel(regel_kk, "challenge", float(bal))
+            _cz = None
+            if _z0 and float(bal) >= _z0[0]:
+                try:
+                    _ct = _zw_cons_tage_laden([aid]).get(aid) or {}
+                except Exception:
+                    _ct = zw_cons_tage(eig, aid)
+                _cz = zw_cons_ziel(regel, a, float(bal), _ct)
+            if _cz and not _cz["erfuellt"]:
+                regel_kk = dict(regel_kk, _ziel_min=_cz["ziel_cons"], _cons=_cz)
+        kandidaten.append({"a": a, "regel": regel_kk, "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
                            "tage": ap_tage_ist(a, eig),          # Mindesttage (ist, soll) oder None — Mini-Trade bei Ziel erreicht (09.10.2026)
                            "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
@@ -38587,7 +38611,80 @@ def zw_ziel(regel, phase, balance):
         zp = ph.get("ziel_pct")
     if not zp:
         return None
-    return round(groesse * (1 + float(zp) / 100.0), 2), groesse
+    ziel = round(groesse * (1 + float(zp) / 100.0), 2)
+    zm = _wd_num(regel.get("_ziel_min"))   # Consistency-Ziel (zw_cons_ziel, M2 05.11.2026) — nur von zw_tick/ap_planen gesetzt
+    return (max(ziel, round(float(zm), 2)) if zm else ziel), groesse
+
+
+# ══ CONSISTENCY VOR „ZIEL ERREICHT" (M2, 05.11.2026 — Vorfall 04.11. EzPoker Tradeify 150k: Balance über dem Ziel, aber der größte Tag lag über
+# 40 % des Gewinns → die Firma zählte es nicht, ~200 $ fehlten; die Ziel-Wache setzte trotzdem „Ziel erreicht → Review", Finn musste „Trotzdem
+# starten" und ziel_pct von Hand anheben). Jetzt: Ziel gilt erst, wenn auch größter Tag ≤ p × Gewinn; sonst Ziel = Start + größter Tag ÷ p
+# („Required profit"), das Konto bleibt im Planer und bekommt den Rest-Trade dorthin. p wie die Konten-Liste (ap_konten_stand_zeile): Konto-Wert
+# accounts.consistency_pct (Challenge) geht IMMER vor. Firmen-Wert nur für Firmen mit echter Consistency-Regel in der Challenge (Master 05.11.2026):
+#   1) Feld consistency_pct der Firma in auto_plan_regeln.regeln.firmen[] (Zahl % oder null = keine) — für den späteren Consistency-Slider je Firma;
+#   2) sonst die Vorgabe ZW_CONS_FIRMEN (Schlüssel = Anfang von _ap_norm(Firma)): Tradeify „tp_max" = TP-Deckel ÷ Ziel-$ wie die Konten-Liste
+#      (firm_rules.json: Select Evaluation 40 %, Growth Evaluation KEINE — Growth-Konto: Konto-Wert 100 setzen), Lucid 50 (Finn 05.11.2026:
+#      „Lucid 150K Flex Consistency 50 %"), Topstep 50 (firm_rules.json: „Combine Consistency Target: Best Day ≤ 50% of Total Profits zum Pass").
+#   Apex Eval NIE (firm_rules.json: „Eval (alle 4.0 Accounts): KEINE Consistency Rule" — tp_max ist dort nur Tagesdeckel); FundedNext Futures nicht
+#   (firm_rules.json nennt 40 % nur allgemein für die Futures-Programme, nicht für die Challenge-Phase).
+# Tage = Berlin-Tag des Trade-Endes, Σ master_pl der abgeschlossenen Trades des Kontos (wie die Konten-Liste); Hand-Trades ohne Plan fehlen.
+ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": 50, "topstep": 50}
+
+
+def zw_cons_tage(plaene, konto_id, tz=None):
+    """REIN RECHNEND (testbar): {Berlin-Tag: Σ master_pl} der abgeschlossenen Trades (completed/review) eines Kontos — Tag wie ap_konten_stand."""
+    tz = tz or _ap_tz("Europe/Berlin")
+    out = {}
+    for p in plaene or ():
+        if str(p.get("master_account_id")) != str(konto_id) or p.get("status") not in ("completed", "review"):
+            continue
+        pl, t = _wd_num(p.get("master_pl")), _ap_ts(p.get("ended_at") or p.get("started_at") or p.get("completed_at"))
+        if pl is None or t is None:
+            continue
+        d = t.astimezone(tz).date().isoformat()
+        out[d] = out.get(d, 0.0) + float(pl)
+    return out
+
+
+def zw_cons_moeglich(regel, konto):
+    """REIN RECHNEND: kann für dieses Konto eine Consistency gelten (Challenge + Konto-Wert, Firmen-Feld oder Firma in ZW_CONS_FIRMEN)? Erst dann
+    werden Trades gelesen (Fremd-Review M2: Apex & Co. dürfen keinen neuen Lese-/Fehlerweg bekommen)."""
+    a = konto or {}
+    if not regel or str(a.get("account_type")) != "challenge":
+        return False
+    if _wd_num(a.get("consistency_pct")):
+        return True
+    if "consistency_pct" in regel:
+        return bool(_wd_num(regel.get("consistency_pct")))
+    n = str(_ap_norm(a.get("firm")))
+    return any(n.startswith(k) for k in ZW_CONS_FIRMEN)
+
+
+def zw_cons_ziel(regel, konto, balance, tage_pl):
+    """REIN RECHNEND (testbar): Consistency-Ziel eines Challenge-Kontos → None (keine Consistency, kein Tag, Regel ok) oder
+    {p, quelle, groesster_tag, gewinn, ziel, ziel_cons, erfuellt}. regel = Firmen-Regel (NICHT schon ap_regel_konto — die Rechnung macht das
+    wie ap_konten_stand_zeile selbst). ziel_cons = max(Ziel, Größe + größter Tag ÷ p), auf den Dollar aufgerundet; erfuellt = Balance ≥ ziel_cons."""
+    a = konto or {}
+    if not regel or not balance or str(a.get("account_type")) != "challenge":
+        return None
+    z = ap_konten_stand_zeile(a, regel, float(balance), tage_pl)
+    if z.get("cons_quelle") == "konto":
+        p, quelle = _wd_num(z.get("cons_pct")), "konto"
+    elif "consistency_pct" in regel:      # Feld der Firma (später Slider je Firma): Zahl oder null = keine Consistency
+        p, quelle = _wd_num(regel.get("consistency_pct")), "firma"
+    else:
+        n = str(_ap_norm(a.get("firm")))
+        vg = next((v for k, v in ZW_CONS_FIRMEN.items() if n.startswith(k)), None)
+        p, quelle = (_wd_num(z.get("cons_firma")) if vg == "tp_max" else _wd_num(vg)), "firma"
+    gt = max([float(v) for v in (tage_pl or {}).values() if _wd_num(v) is not None] or [0.0])
+    if not p or p <= 0 or p > 100 or gt <= 0 or not z.get("ziel") or not z.get("groesse"):
+        return None
+    ziel, groesse = float(z["ziel"]), float(z["groesse"])
+    q = gt / (p / 100.0)                          # Required profit: größter Tag ÷ p (ganze Dollar, aufgerundet; ohne math — Selftest-Lader)
+    noetig = int(q) + (1 if q - int(q) > 1e-9 else 0)
+    ziel_cons = round(max(ziel, groesse + noetig), 2)
+    return {"p": p, "quelle": quelle, "groesster_tag": round(gt, 2), "gewinn": round(float(balance) - groesse, 2), "ziel": ziel,
+            "ziel_cons": ziel_cons, "erfuellt": float(balance) >= ziel_cons}
 
 
 def zw_erreicht(ziel, balance, phase):
@@ -38671,6 +38768,19 @@ def zw_funded_cfd():
                     _zw["ziele"].pop(aid, None)
 
 
+def _zw_cons_tage_laden(ids):
+    """{konto_id: {Berlin-Tag: Σ master_pl}} der abgeschlossenen Trades (completed/review) — einmal je Lauf, nur wenn ein Konto am Ziel steht."""
+    roh = []
+    for i in range(0, len(ids), 80):
+        roh += _sb_all("trade_plans", {"select": "master_account_id,status,started_at,ended_at,completed_at,master_pl",
+                                       "master_account_id": "in.(" + ",".join(ids[i:i + 80]) + ")", "status": "in.(completed,review)",
+                                       "master_pl": "not.is.null"}) or []
+    je = {}
+    for p in roh:
+        je.setdefault(str(p.get("master_account_id")), []).append(p)
+    return {k: zw_cons_tage(v, k) for k, v in je.items()}
+
+
 def zw_tick(force=False):
     if not force and time.time() - _zw["at"] < ZW_TAKT_S:
         return
@@ -38701,16 +38811,35 @@ def zw_tick(force=False):
     konten = _ap_konten_laden({"order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
-    namen, admins, n = None, None, 0
+    namen, admins, n, cons_tage = None, None, 0, None
     for a in konten:
         aid = str(a["id"])
         if aid in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
             continue
-        regel = ap_regel_finden(firmen, a.get("firm"))
+        regel = regel0 = ap_regel_finden(firmen, a.get("firm"))
         _bw = acc_balance_wahl(a, echo_bal, dup_bal)
         bal = _bw[0]
         if regel and bal:
             regel = ap_regel_konto(regel, a, float(bal))   # Ziel-% je Konto (ziel_pct_konto, 07.10.2026)
+        cons = None
+        if regel and bal and a.get("account_type") == "challenge" and not (flags.get(aid) or {}).get("ziel_erreicht_at"):
+            # CONSISTENCY (M2 05.11.2026): Trades erst lesen, wenn die Balance das Regel-Ziel erreicht — sonst ändert sich nichts
+            _z0 = zw_ziel(regel, "challenge", bal)
+            if _z0 and float(bal) >= _z0[0] and zw_cons_moeglich(regel0, a):
+                if cons_tage is None:
+                    try:
+                        cons_tage = _zw_cons_tage_laden([str(k["id"]) for k in konten if k.get("account_type") == "challenge"])
+                    except Exception as e:   # Lesefehler: dieses Mal ohne Consistency weiter — der Lauf der übrigen Konten bricht nie ab
+                        print(f"[ziel-wache] ⚠️ Consistency-Tage nicht lesbar: {type(e).__name__}: {str(e)[:120]}", flush=True)
+                        cons_tage = False
+                cons = zw_cons_ziel(regel0, a, bal, cons_tage.get(aid)) if cons_tage else None
+                if cons_tage is False:
+                    continue   # nicht markieren, solange die Consistency nicht prüfbar ist (nächster Lauf in 5 min)
+                if cons and cons["ziel_cons"] > _z0[0]:
+                    regel = dict(regel, _ziel_min=cons["ziel_cons"])
+                    if not cons["erfuellt"]:
+                        print(f"[ziel-wache] Consistency {a.get('name') or aid[:8]}: Balance {float(bal):.0f} ≥ Ziel {_z0[0]:.0f}, aber größter Tag "
+                              f"{cons['groesster_tag']:.0f} > {cons['p']:g} % → Ziel {cons['ziel_cons']:.0f} (Rest-Trade im Planer)", flush=True)
         zg = zw_ziel(regel, a.get("account_type"), bal) if (regel and bal) else None
         if not zg:
             continue
