@@ -51,9 +51,16 @@ def main():
     i = app.index("\ndef _ah_ohne(")
     ah = app[i:app.find("\n\n\n", i)]
     ok("Orbit V2 ohne Hedge" not in ah and "startet nie ohne Hedge" in ah, "_ah_ohne-Meldung: wartet statt ohne Hedge")
-    ok("ahm:mt5_baseline->apex_hedge" in app and '"apex_hedge"):' in app, "alarm_tick liest apex_hedge, gp_push nimmt die Art aus")
+    # RT1 (05.11.2026): seit 46ca1fe2 (Echo-Plan mit nicht rechenbarem Hedge) steht hinter "apex_hedge" noch "echo_hedge" im Ausnahme-Tupel
+    # von gp_push_ereignisse — geprüft wird jetzt das Tupel selbst: apex_hedge muss drin sein
+    _gp = app[app.index("\ndef gp_push_ereignisse("):]
+    _gp = _gp[:_gp.find("\n\n\n")]
+    _tup = re.search(r'ss\.get\("art"\) in \(([^)]*)\):', _gp)
+    ok("ahm:mt5_baseline->apex_hedge" in app and bool(_tup) and '"apex_hedge"' in _tup.group(1), "alarm_tick liest apex_hedge, gp_push nimmt die Art aus")
     html = lies("prophos.html")
-    ok("'waage_deckel', 'apex_hedge'].includes(s.art)" in html and "if(s.art === 'apex_hedge')" in html, "tpStartSperre zeigt die Sperre")
+    # RT1 (05.11.2026): seit 46ca1fe2 folgen in der Art-Liste von tpStartSperre weitere Arten ('echo_hedge', …) hinter 'apex_hedge'
+    _ts = re.search(r"\['index_pause'[^\]]*\]\.includes\(s\.art\)", html)
+    ok(bool(_ts) and "'apex_hedge'" in _ts.group(0) and "if(s.art === 'apex_hedge')" in html, "tpStartSperre zeigt die Sperre")
     ok("/von Hand geändert/.test(text)" in html, "tpStartSperre: eigener Satz für Hand-Werte")
     for t in f:
         print("✗", t)
