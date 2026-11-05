@@ -48,6 +48,17 @@ check(V(plan, [vortrag, zwischen]) is None, "anderer Trade begann zwischen Start
 danach = {"id": "cccc", "started_at": "2026-11-05T14:30:00+00:00", "ended_at": None}
 check(V(plan, [vortrag, danach])["pl"] == 86.88, "Trade erst NACH dem Ende dieses Trades → stört nicht")
 check(V(dict(plan, started_at=None), [vortrag]) is None, "ohne Startzeit → nichts")
+# S2-Stopp zu c767c9ea: Trade w desselben Kontos, der VOR dem Vortrag begann und erst danach schloss
+w_ueber = {"id": "wwww", "started_at": "2026-11-05T07:00:00+00:00", "ended_at": "2026-11-05T08:30:00+00:00", "bal_echo": 100300.0}
+check(V(plan, [vortrag, w_ueber]) is None, "w über v (07:00–08:30, v 07:24–08:10) → nichts (Endbalance von v ist nicht die Balance vor diesem Trade)")
+w_luecke = dict(w_ueber, ended_at="2026-11-05T11:15:00+00:00")
+check(V(plan, [vortrag, w_luecke]) is None, "w endet in der Lücke zwischen v und diesem Trade (11:15) → nichts")
+w_offen = dict(w_ueber, ended_at=None)
+check(V(plan, [vortrag, w_offen]) is None, "w begann vor v und ist noch offen → nichts")
+w_vorher = dict(w_ueber, ended_at="2026-11-05T08:00:00+00:00")
+check(V(plan, [vortrag, w_vorher])["pl"] == 86.88, "w schloss VOR dem Ende von v (08:00) → steckt in v's Endbalance, Vortrag gilt")
+w_gleich = dict(w_ueber, ended_at="2026-11-05T08:10:00+00:00")
+check(V(plan, [vortrag, w_gleich])["pl"] == 86.88, "w schloss genau mit v → Vortrag gilt")
 
 # Verdrahtung
 a = SRC[SRC.index("def _vortrag_anhaengen("):SRC.index("def _lt_echo_zeile(")]
@@ -57,6 +68,12 @@ check("return _vortrag_anhaengen(z, p)   # AB3b" in SRC and "_vortrag_anhaengen(
       "Vortrag in /admin/live-trades (Echo-Zeile) und /admin/wd-heute (Radar)")
 check('elif daten.get("pl_quelle") == "balance_vortrag":' in SRC and '"balance_vortrag")  # pl_quelle eines echten' in SRC,
       "Radar-Speichern übernimmt pl_quelle 'balance_vortrag'; zählt als echtes Ergebnis")
+r_ = SRC[SRC.index('filt = {"id": f"eq.{pid}", "route": f"in.({\',\'.join(WD_ERLEDIGT_ROUTEN)})"'):]
+r_ = r_[:r_.index("if z:")]
+check('upd.pop("pl_quelle", None)' in r_ and '"23514" in _txt' in r_ and r_.count('sb_update("trade_plans", filt, upd)') == 2 and "raise" in r_,
+      "Radar-Speichern: Check lehnt pl_quelle ab (SQL fehlt) → einmal ohne pl_quelle, andere Fehler wie bisher")
+check("(!isFinite(ms(x.endedAt)) || ms(x.endedAt) > ve)" in HTML and '(not f.get("ended_at") or str(f["ended_at"]) > ve)' in SRC,
+      "dieselbe Dazwischen-Regel in JS (ab3Vortrag) und Python (echo_vortrag)")
 check("'balance_vortrag'::text" in SQL and "drop constraint if exists trade_plans_pl_quelle_check" in SQL, "SQL erlaubt 'balance_vortrag' im Check (idempotent)")
 check(": _mplWert != null ? _mplWert\n      : _vt ? _fz(_vt.pl) : null" in HTML and "&& _mplWert == null && pw.vortrag" in HTML,
       "Radar-Popup: Vortrag nur als Letztes (nach Balance-Sprung, pl_balance, master_pl.wert) — verdrängt nie einen Wert")

@@ -14312,8 +14312,11 @@ def echo_vortrag(p, andere):
     bv = _vortrag_bal(v)
     if bv is None:
         return None                                   # nie auf einen älteren Trade ausweichen
-    if any(t0 < str(f["started_at"]) and (not t1 or str(f["started_at"]) <= t1) for f in gleiche if f is not v):
-        return None                                   # anderer Trade dazwischen
+    # anderer Trade dazwischen (S2-Stopp zu c767c9ea): JEDER andere Trade des Kontos, der vor dem Ende dieses Trades begann und nicht schon vor dem Ende des
+    # Vortrags beendet war — auch einer, der vor dem Vortrag begann und erst danach schloss (über v / in der Lücke), oder der noch offen ist
+    ve = str(v["ended_at"])
+    if any((not t1 or str(f["started_at"]) < t1) and (not f.get("ended_at") or str(f["ended_at"]) > ve) for f in gleiche if f is not v):
+        return None
     return {"pl": round(be - bv, 2), "balance_vorher": bv, "balance_nachher": be, "plan_id": str(v.get("id")), "ended_at": v.get("ended_at")}
 
 
@@ -16914,7 +16917,17 @@ def admin_wd_plaene():
                                 "status": "eq.review" if daten.get("nur_review") is True else "in.(open,review,completed)"}
                         if plan.get("updated_at"):
                             filt["updated_at"] = f"eq.{plan['updated_at']}"
-                        z = sb_update("trade_plans", filt, upd)
+                        try:
+                            z = sb_update("trade_plans", filt, upd)
+                        except requests.exceptions.HTTPError as e:
+                            # AB3b (S2-Stopp zu c767c9ea): kennt der Check-Constraint die P&L-Herkunft noch nicht (SQL fehlt, z. B. 'balance_vortrag'),
+                            # einmal ohne pl_quelle speichern — wie das Trades-Popup; das Abhaken selbst darf daran nie scheitern
+                            _txt = str(getattr(getattr(e, "response", None), "text", "") or "")
+                            if "pl_quelle" not in upd or not ("pl_quelle" in _txt or "23514" in _txt):
+                                raise
+                            print(f"[wd-plaene] ⚠️ pl_quelle {upd.get('pl_quelle')!r} abgelehnt ({_txt[:120]}) — speichere ohne", flush=True)
+                            upd.pop("pl_quelle", None)
+                            z = sb_update("trade_plans", filt, upd)
                         if z:
                             break
                     else:

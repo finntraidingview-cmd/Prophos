@@ -77054,7 +77054,10 @@
     const vb = (v.mt5Baseline && typeof v.mt5Baseline === 'object') ? v.mt5Baseline : {}
     const bv = n(vb.final && vb.final.master_balance) ?? n(vb.bal_nach && vb.bal_nach.balance) ?? n(vb.final && vb.final.balance_end)
     if(bv == null) return null
-    if(gleiche.some(x => x !== v && ms(x.startedAt) > t0 && (!isFinite(t1) || ms(x.startedAt) <= t1))) return null   // anderer Trade dazwischen
+    // anderer Trade dazwischen (S2-Stopp zu c767c9ea): jeder andere Trade des Kontos, der vor dem Ende dieses Trades begann und nicht schon vor dem Ende des
+    // Vortrags beendet war — auch über v / in der Lücke, oder noch offen
+    const ve = ms(v.endedAt)
+    if(gleiche.some(x => x !== v && (!isFinite(t1) || ms(x.startedAt) < t1) && (!isFinite(ms(x.endedAt)) || ms(x.endedAt) > ve))) return null
     return { pl: Math.round((be - bv) * 100) / 100, balance_vorher: bv, balance_nachher: be, plan_id: String(v.id), ended_at: v.endedAt || null }
   }
   window._ab3Vortrag = ab3Vortrag   // Test-Haken
