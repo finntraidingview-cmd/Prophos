@@ -1,3 +1,5 @@
+-- ⚠️ ÜBERHOLT 05.11.2026 (PF2, Finn: „Futures haben nicht Payout ab … Payout ab ist meistens nur bei den CFDs“) — NICHT EINSPIELEN.
+-- Gilt jetzt: sql/2026-11-05_futures_ohne_payout_ab.sql (Funded Futures / Winning Days ohne Datum, DB-Wache).
 -- 2026-11-04 — „Payout anfragbar ab“ für bestehende FundedNext-Futures-Funded-Konten (P2, Finn 04.11.2026 ~00:20 Dubai zur Frage FundedNext Futures:
 -- „1. 21 Tage, danach alles 14“). Neue Konten: prophos.html payoutErsterTermin (Anlegetag + 21, Formular); nach jeder Payout-Anfrage + 14
 -- (finNextPayoutVorschlag). Der Trigger accounts_payout_termin_neu (sql/2026-11-03_payout_termin_beim_anlegen.sql) kennt nur Funded CFD und bleibt so.

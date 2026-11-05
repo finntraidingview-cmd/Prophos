@@ -22,8 +22,10 @@ def check(ok, name):
 
 fn = HTML[HTML.index("  function payoutErsterTermin("):HTML.index("  window._payoutErsterTermin")]
 FAELLE = [("FundedNext", "funded_cfd", "2026-11-03", "2026-11-24"), ("Funded Next", "funded_cfd", "2026-11-03", "2026-11-24"),
-          ("FTMO", "funded_cfd", "2026-11-03", "2026-11-17"), ("Apex", "funded", "2026-11-03", "2026-11-17"),
-          ("Tradeify", "winning_days", "2026-12-25", "2027-01-08"), ("FundedNext Futures", "funded", "2026-11-03", "2026-11-24"), ("FundedNext", "phase2", "2026-11-03", ""),
+          ("FTMO", "funded_cfd", "2026-11-03", "2026-11-17"),
+          # PF2 (Finn 05.11.2026: „Futures haben nicht Payout ab … Payout ab ist meistens nur bei den CFDs"): Funded Futures / Winning Days kein Termin
+          ("Apex", "funded", "2026-11-03", ""), ("Tradeify", "winning_days", "2026-12-25", ""), ("FundedNext Futures", "funded", "2026-11-03", ""),
+          ("Lucid Trading", "funded", "2026-11-05", ""), ("FundedNext", "phase2", "2026-11-03", ""),
           ("FundedNext", "live", "2026-11-03", ""), ("FTMO", "funded_cfd", "", "")]
 js = fn + "\nconst _deTodayStr = () => '2026-11-03';\nprint(JSON.stringify(" + json.dumps(FAELLE) + ".map(f => payoutErsterTermin(f[0], f[1], f[2]))));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -38,17 +40,21 @@ for (firm, typ, tag, soll), g in zip(FAELLE, erg):
 vf = HTML[HTML.index("  function payoutVorschlagFeld("):HTML.index("  window._payoutErsterTermin")]
 check("el.value && el.value !== (el.dataset.vorschlag || '')" in vf, "von Hand geändert bleibt (nur leer oder letzter Vorschlag wird überschrieben)")
 tg = HTML[HTML.index("  function toggleAcBloecke(){"):HTML.index("  function toggleAcBloecke(){") + 6000]
-check("accEls.payoutSec.hidden = !(istFunded || istCfd)" in tg and "if(!_editingAccountId) payoutVorschlagFeld(accEls.payoutReady, firm, typ)" in tg,
-      "Account-Modal: Feld bei allen Funded-Typen sichtbar, nur beim Anlegen vorbelegt (Bearbeiten nie)")
+check("accEls.payoutSec.hidden = !istCfd" in tg and "if(!_editingAccountId) payoutVorschlagFeld(accEls.payoutReady, firm, typ)" in tg,
+      "Account-Modal: Feld nur bei Funded CFD (PF2), nur beim Anlegen vorbelegt (Bearbeiten nie)")
+check("const payoutReadyVal = !payoutAbErlaubt(type) ? null :" in HTML, "Account-Modal: Futures speichern nie ein Datum (Alt-Termin fällt beim Speichern weg, PF2)")
 check("accEls.payoutReady.value = ''; accEls.payoutReady.dataset.vorschlag = ''" in HTML, "neues Konto: Feld und Vorschlag zurückgesetzt")
-check('id="suc-payout-ready"' in HTML and 'id="suc-payout-row" hidden' in HTML, "Nachfolger-Assistent hat das Feld (versteckt bis Funded-Typ)")
+check('id="suc-payout-ready"' in HTML and 'id="suc-payout-row" hidden' in HTML and "if(row) row.hidden = typ !== 'funded_cfd'" in HTML,
+      "Nachfolger-Assistent hat das Feld (nur bei Funded CFD sichtbar, PF2)")
 sw = HTML[HTML.index("  function openSuccessorWizard("):HTML.index("  function openSuccessorWizard(") + 5000]
 check("sucPayoutVorschlag()" in sw and "pr.dataset.vorschlag = ''" in sw, "Assistent belegt beim Öffnen frisch vor")
 check("document.getElementById('suc-type')?.addEventListener('change', sucPayoutVorschlag)" in HTML and "document.getElementById('suc-firm')?.addEventListener('input', sucPayoutVorschlag)" in HTML,
       "Assistent folgt Typ und Firma")
-check("if(pr && prRow && !prRow.hidden && /^\\d{4}-\\d{2}-\\d{2}$/.test(pr.value)) newAcc.payoutReadyAt = pr.value" in HTML, "Assistent speichert das Datum nur bei sichtbarem Feld")
+check("if(pr && prRow && !prRow.hidden && /^\\d{4}-\\d{2}-\\d{2}$/.test(pr.value) && payoutAbErlaubt(type)) newAcc.payoutReadyAt = pr.value" in HTML,
+      "Assistent speichert das Datum nur bei sichtbarem Feld und nie bei Futures (PF2)")
 check("payout_ready_at:  a.payoutReadyAt  || null" in HTML, "accountToRow schreibt payout_ready_at")
-check("(window._finKontoIstCfd(acc) || fundedArt)" in HTML, "Admin-Anfrage: Anfrage-Datum + 14 auch bei Funded Futures/Winning Days")
+check("fundedArt" not in HTML and "acc && typeof window._finKontoIstCfd === 'function' && window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag" in HTML,
+      "Admin-Anfrage: Anfrage-Datum + 14 nur bei CFD — Futures leer (PF2, vorher P1 auch Funded Futures/Winning Days)")
 check("else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value)" in HTML and "admReceivePlus(String(t.requested_at).slice(0, 10), 14)" in HTML,
       "Erhalten-Modal: Termin vom Konto geht vor, sonst Anfrage-Datum + 14, erst dann Erhalten + N")
 fv = HTML[HTML.index("  function finNextPayoutVorschlag("):HTML.index("  function finKontoIstCfd(")]

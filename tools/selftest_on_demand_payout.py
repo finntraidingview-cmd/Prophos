@@ -107,7 +107,11 @@ app.sb_select = _sel
 ok(app._konto_on_demand("od") is True and app._konto_on_demand("norm") is False and app._konto_on_demand("fut") is False
    and app._konto_on_demand("kaputt") is False and app._konto_on_demand("") is False, "_konto_on_demand: nur Funded CFD mit on_demand, Lesefehler → False (wie bisher)")
 app.sb_select = _sel0
-ok(src.count("if naechster and _konto_on_demand(aid):") == 2, "Anfragen UND Erhalten (Admin-Routen): bei On Demand kein nächster Termin — auch mit vorbelegtem „+ 14“")
+# PF2 (05.11.2026): das Erhalten prüft jetzt _konto_ohne_payout_termin (On Demand ODER Futures), das Anfragen weiter _konto_on_demand (Futures schützt dort
+# payout_anfrage_konto_felder selbst) — dieselbe On-Demand-Regel an beiden Routen
+ok(src.count("if naechster and _konto_on_demand(aid):") == 1 and src.count("if naechster and _konto_ohne_payout_termin(aid):") == 1
+   and 'z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True' in src[src.index("def _konto_ohne_payout_termin("):src.index("def _konto_on_demand(")],
+   "Anfragen UND Erhalten (Admin-Routen): bei On Demand kein nächster Termin — auch mit vorbelegtem „+ 14“")
 ok("if(konto && konto.on_demand === true){ $('adm-receive-next').value = ''" in html, "Admin → Payout erhalten: bei On Demand nichts vorbelegt")
 ok("(admData?.accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).on_demand === true" in html,
    "Admin → Payouts „Anfragen“: On Demand fremder Konten aus admData.accounts → kein „+ 14“")

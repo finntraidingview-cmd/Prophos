@@ -8196,7 +8196,7 @@ def admin_build_overview(kapitel_id=None):
         return {"size": _pnum(a.get("account_size")),
                 "start": _pnum(a.get("starting_balance")),
                 "balance": round(_bal, 2) if _bal is not None else None,
-                "payout_at": str(a.get("payout_ready_at") or "")[:10],
+                "payout_at": str(a.get("payout_ready_at") or "")[:10] if payout_ab_erlaubt(a.get("account_type")) else "",   # PF2: Futures ohne Payout ab
                 "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
                 "im_trade": offen.get(aid),
                 "letztes_ende": ende.get(aid),
@@ -8276,7 +8276,7 @@ def admin_build_overview(kapitel_id=None):
             "account_firm": (a.get("firm") or "").strip(),
             "ext": a.get("external_id") or "",
             "type": a.get("account_type") or "",
-            "ready_at": d[:10] if d else "",
+            "ready_at": d[:10] if (d and payout_ab_erlaubt(typ)) else "",   # PF2: Futures zählen Winning Days, kein Datum
             "wd_count": count if manual else None,
             "wd_target": target if manual else None,
             "wd_ready": bool(manual and target > 0 and count >= target),
@@ -17109,6 +17109,39 @@ def admin_payout_calc():
         return jsonify({"error": f"Nicht gespeichert ({type(e).__name__})"}), 502
 
 
+# FUTURES HABEN KEIN „PAYOUT AB" (PF2, Finn 05.11.2026, Jacob Apex 100k …0003/…0004/…0005 → Funded zeigten „Payout ab 19.11. · in 14 Tagen":
+# „Futures haben nicht Payout ab … die einzige Regel ist hier, z. B. bei Apex: Winning Days sammeln + Net Profit vom jeweiligen Zyklus + 50 %
+# Consistency … Tradeify: nur Net Profit vom Zyklus + Winning Days; Lucid auch … Payout ab ist meistens nur bei den CFDs."). P1 (03.11.2026) hatte den
+# Termin beim Anlegen auch für Funded Futures/Winning Days vorbelegt und „Anfrage + 14" für alle Funded vorgeschlagen; K2 (.2054) blendete ihn nur auf
+# der Konto-Detailseite aus. Jetzt an der Quelle: diese Kontoarten bekommen nie ein payout_ready_at (Anfragen, Erhalten, Kalender, Übersicht), die
+# DB-Wache sql/2026-11-05_futures_ohne_payout_ab.sql leert es bei jedem Schreiben.
+PAYOUT_OHNE_AB_TYPEN = ("funded", "winning_days")
+
+
+def payout_ab_erlaubt(typ):
+    """REIN RECHNEND (testbar): darf diese Kontoart ein „Payout anfragbar ab"-Datum tragen? Futures (funded, winning_days) nie."""
+    return str(typ or "") not in PAYOUT_OHNE_AB_TYPEN
+
+
+def _konto_ohne_payout_termin(aid):
+    """Konto ohne nächsten Payout-Termin: Futures (PF2) oder Funded CFD mit On Demand (OD1). Lesefehler → False (Termin wie übergeben, wie bisher)."""
+    if not aid:
+        return False
+    try:
+        z = sb_select("accounts", {"select": "id,account_type,on_demand", "id": f"eq.{aid}", "limit": "1"}) or []
+    except Exception as e:
+        # Gegenprüfung PF2: die Futures-Sperre hängt nicht an on_demand — zweiter Versuch nur mit der Kontoart (fehlt die Spalte on_demand oder war es
+        # ein kurzer Aussetzer), erst dann wie bisher „Termin wie übergeben" (die DB-Wache accounts_futures_ohne_payout_ab leert ihn dann trotzdem)
+        try:
+            z = sb_select("accounts", {"select": "id,account_type", "id": f"eq.{aid}", "limit": "1"}) or []
+        except Exception:
+            print(f"[payout] ⚠️ Kontoart {str(aid)[:8]} nicht lesbar ({type(e).__name__}) — Termin wie übergeben", flush=True)
+            return False
+    if not z:
+        return False
+    return (not payout_ab_erlaubt(z[0].get("account_type"))) or (z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True)
+
+
 def _konto_on_demand(aid):
     """OD1 (Finn 05.11.2026: „per Datum-Feld und per Tagen fällt hier beides mal weg"): Funded-CFD-Konto mit Add-on On Demand? Dann setzen Anfragen und
     Erhalten keinen nächsten Payout-Termin (jeder Aufrufer, auch Admin → Payouts mit vorbelegtem „+ 14"). Spalte fehlt / Lesefehler → False (wie bisher)."""
@@ -17238,8 +17271,8 @@ def admin_payout_erhalten():
     aid = str(p.get("account_id") or "")
     leeren = b.get("waiting_leeren") is True
     waiting_geleert = False
-    if naechster and _konto_on_demand(aid):
-        naechster = None                 # OD1: On Demand hat keinen Termin (Vorbelegung „Anfrage + 14" aus dem Admin wirkt nicht)
+    if naechster and _konto_ohne_payout_termin(aid):
+        naechster = None                 # OD1: On Demand hat keinen Termin (Vorbelegung „Anfrage + 14" aus dem Admin wirkt nicht); PF2: Futures auch nicht
     k_upd = payout_konto_felder(naechster, leeren)
     if aid and k_upd:
         try:
@@ -17279,7 +17312,7 @@ def payout_anfrage_konto_felder(konto, naechster, morgen):
                 out.update(goal_done_offset=0, goal_manual_last=None, goal_kind="winning_days", goal_manual=True, goal_target=ziel)
             else:
                 out["goal_since"] = morgen
-    if naechster:
+    if naechster and payout_ab_erlaubt(typ):        # PF2 (05.11.2026): Futures nie ein Termin — ein stehender (Alt-)Termin wird geleert
         out["payout_ready_at"] = naechster
     elif konto.get("payout_ready_at"):
         out["payout_ready_at"] = None

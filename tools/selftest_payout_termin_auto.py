@@ -33,6 +33,7 @@ check("for each row execute function public.accounts_payout_termin_neu()" in sql
 # (b) Vorschlag ab dem Anfrage-Datum
 a = html.index("  function finNextPayoutVorschlag(")
 js = "const _deTodayStr = () => '2026-11-03', window = {}\nconst tpFirmIstCfd = f => /fundednext|ftmo|fundingpips|the5|tradeify cfd/i.test(String(f || ''))\n" \
+     + html[html.index("  function payoutAbErlaubt("):html.index("  window._payoutAbErlaubt")] \
      + html[a:html.index("  function updateFinPayoutFields(")] + """
 const cfd = { type: 'funded_cfd', firm: 'FundedNext', payoutReadyAt: null }
 const r = {
@@ -42,6 +43,7 @@ const r = {
   frueher: finNextPayoutVorschlag(Object.assign({}, cfd, { payoutReadyAt: '2026-11-10' }), '2026-11-01'),
   fut: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: null }, '2026-11-01'),
   futAnlege: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: '2026-11-17' }, '2026-11-10'),
+  wd: finNextPayoutVorschlag({ type: 'winning_days', firm: 'Tradeify', payoutReadyAt: null }, '2026-11-01'),
   istCfd: [finKontoIstCfd({ type: 'winning_days', firm: 'Tradeify' }), finKontoIstCfd({ type: 'funded_cfd', firm: 'X' })]
 }
 print(JSON.stringify(r))"""
@@ -55,13 +57,15 @@ except Exception:
     print(rr.stdout[-400:], rr.stderr[-400:]); e = {}
 check(e.get("ab") == "2026-11-15" and e.get("heute") == "2026-11-17", "Anfrage-Datum + 14 (auch FundedNext, zweiter Zyklus); ohne Datum heute + 14")
 check(e.get("spaeter") == "2026-12-01" and e.get("frueher") == "2026-11-15", "späteres Datum am Konto bleibt, früheres gehört zum alten Zyklus")
-check(e.get("fut") == "2026-11-15" and e.get("istCfd") == [False, True], "Futures im Finanzen-Fenster Anfrage + 14; CFD-Erkennung")
-check(e.get("futAnlege") == "2026-11-24", "P1: Funded Futures mit Anlege-Termin 17.11., Anfrage 10.11. → 24.11. (nicht der alte Termin)")
+# PF2 (Finn 05.11.2026: „Futures haben nicht Payout ab"): Funded Futures/Winning Days bekommen nach der Anfrage KEIN „+ 14" mehr (vorher P1)
+check(e.get("fut") == "" and e.get("istCfd") == [False, True], "Futures im Finanzen-Fenster: kein Termin (PF2); CFD-Erkennung")
+check(e.get("futAnlege") == "" and e.get("wd") == "", "PF2: Funded Futures mit Alt-Termin und Winning Days → kein Termin")
 
 # Einbau
 check("nextEl.dataset.ab !== abTag && nextEl.value === (nextEl.dataset.vorschlag || '')" in html and "addEventListener('change', () => { updateFinWiederholen(); updateFinPayoutFields() })" in html,
       "Finanzen: Datum oben geändert → Vorschlag zieht mit, solange das Feld unberührt ist")
-check("admAnfrageNextVorschlag(true)" in html and "(window._finKontoIstCfd(acc) || fundedArt) && typeof window._finNextPayoutVorschlag" in html and "if(!neu && el.value !== (el.dataset.vorschlag || '')) return" in html,
-      "Admin → Payouts „Anfragen“: CFD und seit P1 (03.11.2026) auch Funded Futures/Winning Days vorbelegt, Hand-Datum bleibt beim Datumswechsel")
+check("admAnfrageNextVorschlag(true)" in html and "window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag" in html and "fundedArt" not in html
+      and "if(!neu && el.value !== (el.dataset.vorschlag || '')) return" in html,
+      "Admin → Payouts „Anfragen“: nur CFD vorbelegt (PF2: Futures nicht mehr, wie vor P1), Hand-Datum bleibt beim Datumswechsel")
 print("ALLES GRÜN" if not fehler else f"{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)
