@@ -30,7 +30,8 @@ def funktion(src, name):
 def main():
     src = open(HTML, encoding="utf-8").read()
     js = funktion(src, "bstZeitVon") + funktion(src, "bstZeitKurz")
-    js += re.search(r"^  const bstTsSort = .*$", src, re.M).group(0) + "\n"
+    # RT1 (05.11.2026): seit .1710 (b4ca8b6c) steht „const bstTsSort =(x, y)" ohne Leerzeichen vor der Klammer — Regex lässt beides zu
+    js += re.search(r"^  const bstTsSort\s*=.*$", src, re.M).group(0) + "\n"
     js += r"""
     const J = '2026-10-21T00:50:00Z'   // = 21.10.2026 04:50 Dubai (Finns Uhrzeit)
     const out = {}
@@ -73,7 +74,8 @@ def main():
     # Verdrahtung: Spalte in allen vier Stationen + Sortierung je Station
     check(src.count("bstDatumZelle(") >= 4, f"bstDatumZelle an bstZeilen, Rest von Hand, Trade-/Review-Zeilen ({src.count('bstDatumZelle(')}×)")
     # Kopf „Konto" heißt seit 21.10.2026 (1afc7d03, Zeitstrahl im Radar) „Konto · Boden → Ziel"
-    check("'Balance → Ziel', 'Tage', 'Bestanden', 'Status', ''" in src and "['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu']" in src, "Spaltenkopf Bestanden in bstTab und Trade abhaken")
+    # RT1 (05.11.2026): seit .1710 (b4ca8b6c) heißt der Kopf in „Tage sammeln" „Heute getradet" (datumKopf), sonst weiter „Bestanden"
+    check("'Balance → Ziel', 'Tage', datumKopf || 'Bestanden', 'Status', ''" in src and "['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu']" in src, "Spaltenkopf Bestanden in bstTab und Trade abhaken")
     check(src.count(".sort(bstTsSort)") >= 3 and "nachZiel(bestTr || [])" in src, "Sortierung nach Zeit in Tage sammeln/Review, Rest von Hand, Trade abhaken")
     check('grid-template-areas:"wer ri mi konto datum pl zeit"' in src and '"datum datum datum datum" "ri mi mi zeit"' in src, "CSS: Spalte datum (Desktop) + eigene Zeile unter dem Namen (Handy)")
     print()
