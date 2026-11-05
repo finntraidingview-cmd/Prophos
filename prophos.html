@@ -60722,7 +60722,7 @@
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
     // R4b (05.11.2026): aufgegeben (Gegenrichtung / Index-Pause) gilt bis zum Ablauf des Plans, nicht nur 30 min
     const _aufg = cfdAufgegeben(p)
-    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt', 'index_pause'].includes(s.art) || !(_aufg || Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !['index_pause', 'richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt'].includes(s.art) || !(_aufg || Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist

@@ -116,7 +116,7 @@ def main():
           "Start-Takt: vor rkVorStart — aufgegeben → nur Verbrauch mit Grund, Index-Pause → schieben")
     check("const cfdIndexRoute = p => !!p && (p.route === 'mt5' || p.route === 'mt5v2')" in html, "nur CFD/NAS100-Routen (Echo, Echo V2); Futures/Orbit/Topstep/Polar unberührt")
     check(".is('start_um_gestartet_at', null).eq('start_um', plan.startUm).select('*')" in html, "Schieben nur ungeclaimt und mit der alten Startzeit (Guard)")
-    check("'index_pause'].includes(s.art)" in html and "if(s.art === 'richtung' && _aufg)" in html and "hinweis: deNichtGelaufenHinweis(r, u.grund)" in html,
+    check("['index_pause', 'richtung', 'ein_finaler'" in html and "if(s.art === 'richtung' && _aufg)" in html and "hinweis: deNichtGelaufenHinweis(r, u.grund)" in html,
           "Karte zeigt Index-Pause und aufgegebenen Riegel, Endlesung schreibt den Grund")
 
     check("if(f.schritt === 'riegel_aufgegeben' || f.schritt === 'index_pause') return null" in html, "sfBehoben: aufgegebene Pläne plant sfTick nie von selbst neu")
