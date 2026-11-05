@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.10"   # 0.9.10 (07.10.2026): Code + Userscript über Railway (Repo privat)
+READER_VERSION = "0.9.11"   # 0.9.11 (05.11.2026, SW1): positions.json nur bei Änderung bzw. höchstens 1×/s · 0.9.10 (07.10.2026): Code + Userscript über Railway
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -713,6 +713,29 @@ def _schreibe_datei(stand):
     os.replace(tmp, DATEI)
 
 
+# positions.json GEDROSSELT (0.9.11, SW1 05.11.2026, Anlass ES4/SW1: PCs seit 02.11. täglich langsamer, CPU 55–86 % im Leerlauf): der Puls-Chrome POSTet bis
+# 20×/s (Userscript INTERVALMS 50), und JEDER POST schrieb die ganze Datei neu (tmp + os.replace — unter Windows prüft der Virenscanner jede neue Datei).
+# Gelesen wird sie aber nur von Hand-Werkzeugen (tv_verbinder/tv_snapshot, Diagnose-Skript); Panel, Polar und Prophos fragen per GET den Speicher-Stand.
+# Jetzt: sofort, wenn sich die Positionen eines Tabs ändern oder blind/an wechselt, sonst höchstens alle DATEI_TAKT_S. Der Speicher-Stand (GET) bleibt je POST frisch.
+DATEI_TAKT_S = 1.0
+_datei_s = [0.0]
+
+
+def datei_faellig(wichtig, jetzt, zuletzt, takt=DATEI_TAKT_S):
+    """REIN RECHNEND (testbar): positions.json jetzt schreiben? wichtig = Positionen/blind/an geändert → immer; sonst erst nach takt Sekunden."""
+    return bool(wichtig) or (jetzt - zuletzt) >= takt or jetzt < zuletzt
+
+
+def _schreibe_datei_gedrosselt(stand_fn, wichtig=False):
+    """stand_fn liefert den Stand erst, wenn wirklich geschrieben wird (spart auch _mit_an je POST)."""
+    jetzt = time.time()
+    if not datei_faellig(wichtig, jetzt, _datei_s[0]):
+        return False
+    _schreibe_datei(stand_fn())
+    _datei_s[0] = jetzt
+    return True
+
+
 def script_version_waehlen(tabs, jetzt_s, fallback_v, fallback_s):
     """REIN RECHNEND (testbar, 30.10.2026, Befund Master/Slave 5 am PC von Finn + Pascal pc-2zc2we: Puls-Chrome mit 0.10.2, echoplus_live
     meldete 0.9.10). script_version war der LETZTE Payload irgendeines Tabs — laeuft am PC ein zweites Chrome mit TradingView und altem
@@ -1201,6 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         _ist_blind = bool(daten.get("blind") or alt_und_ploetzlich_flach)
         _melden = _entprellt(_t.setdefault("meld", {}), _ist_blind, _jetzt_p)
+        _war_blind = bool(_t.get("blind_grund"))   # 0.9.11: Wechsel blind ↔ sehend schreibt positions.json sofort
         if daten.get("blind") or alt_und_ploetzlich_flach:
             if daten.get("blind"):
                 _t["blind_grund"] = str(daten.get("blind_grund") or "Reader meldet blind")
@@ -1215,7 +1239,7 @@ class Handler(BaseHTTPRequestHandler):
                       f"Stand eingefroren, Hedges bleiben stehen.")
             _effektiv_setzen(time.time())
             try:
-                _schreibe_datei(_mit_an(_stand))
+                _schreibe_datei_gedrosselt(lambda: _mit_an(_stand), wichtig=not _war_blind)   # 0.9.11: Wechsel nach blind sofort, sonst gedrosselt
             except Exception as e:
                 print(f"\n[WARN] positions.json nicht schreibbar: {e}")
             self._json(200, {"ok": True, "an": True, "blind": True})
@@ -1229,10 +1253,12 @@ class Handler(BaseHTTPRequestHandler):
         elif _melden:
             print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder ({_tid}).")
 
+        _pos_vorher = (_t.get("stand") or {}).get("positionen") if isinstance(_t.get("stand"), dict) else None
         _t["stand"], _t["stand_s"] = daten, time.time()
         _effektiv_setzen(time.time())
         try:
-            _schreibe_datei(_mit_an(_stand))
+            # 0.9.11: Positionen dieses Tabs geändert (auch nach blind) → sofort, sonst höchstens alle DATEI_TAKT_S
+            _schreibe_datei_gedrosselt(lambda: _mit_an(_stand), wichtig=(daten.get("positionen") != _pos_vorher) or _war_blind)
         except Exception as e:
             # Datei-Schreibfehler soll den Empfang nicht killen
             print(f"\n[WARN] positions.json nicht schreibbar: {e}")

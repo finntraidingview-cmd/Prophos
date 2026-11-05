@@ -86,6 +86,217 @@ def panel_code_weicht_ab(neu, name="panel"):
     return _code_glatt(neu) != _code_glatt(alt)
 
 
+# ══ LAST DES PCs MESSEN (SW1, Finn 05.11.2026: „Ich denke nicht, dass es daran liegt, dass die PCs überlastet sind … vielleicht ist eher der Fehler, wie die
+# Software die Hardware belastet“). Anlass ES4: PC von Marco (pc-t8wg97) und PC von Emin (pc-onkrbk) seit 02.11. täglich langsamer (Login 37 → 97 s, jeder
+# UI-Schritt 2–6× langsamer, auch Puls in Chrome), Task-Manager-Fotos 05.11.: CPU 55–86 % im Leerlauf, ein Großteil in Hintergrundprozessen — aber KEIN PC
+# meldete RAM, CPU oder Prozesse, die Ursache war aus der Ferne nicht belegbar. Jetzt misst das Panel alle ~5 min (gestreut, Jitter-Regel): RAM gesamt/belegt,
+# CPU des ganzen PCs, Windows-Betriebszeit und je Prozessname (chrome, terminal64, python, MsMpEng …) Anzahl, Arbeitsspeicher und CPU-Anteil; dazu jede
+# python.exe einzeln mit Rolle (panel / copier aus status-*.json / Kind des Panels = Order-Bot / sonst ?), Elternprozess und Laufzeit — so fallen doppelte
+# oder wachsende Prozesse auf. Nur lesend (Toolhelp + OpenProcess nur mit Mindestrecht 0x1000, wie provision.prozess_pfad), keine Unterprozesse, ein paar ms je Runde.
+# Reist ohne Frontend-Änderung über panel_lauf.last nach mt5_live.status (der Tab reicht panel_lauf unverändert durch). ══
+# Takt 5 min (CPU als Mittel über die 5 min): der Tab kopiert panel_lauf in JEDE mt5_live-Zeile des PCs und pusht bei jeder Änderung (Fingerabdruck) — so kommt
+# höchstens 1 zusätzlicher Upsert je 5 min dazu (Supabase-Diät 01.10.2026), Listen kurz (~1 KB je Zeile).
+PC_LAST_TAKT_S = 300.0
+PC_LAST_TOP_N = 5
+PC_LAST_PY_MAX = 8
+_PC_LAST = None          # letzte Messung, als Ganzes ersetzt (nie Teil-Stand, kein clear/update-Fenster) → panel_lauf_info()["last"]
+_PC_LAST_VORHER = {}     # {"pids": {pid: (name, cpu_100ns)}, "t": monotonic, "sys": (idle, kernel, user)}
+_PC_LAST_W32 = {}        # ctypes-Strukturen einmal angelegt (nicht je Runde neue Klassen)
+
+
+def pc_last_auswerten(prozesse, vorher_pids, dt_s, ncpu, rollen=None, panel_pid=None, top_n=PC_LAST_TOP_N):
+    """REIN RECHNEND (testbar). prozesse = [{pid, ppid, name, cpu (100-ns-Einheiten Kernel+User) | None, ws, priv (Bytes) | None, start_s (Unix) | None}],
+    vorher_pids = {pid: (name, cpu)} der letzten Runde, dt_s = Wandzeit dazwischen, ncpu = logische Kerne, rollen = {pid: 'copier' …}.
+    CPU-% immer als Anteil des GANZEN PCs (100 % = alle Kerne voll), nur für Prozesse, die in beiden Runden mit gleichem Namen da waren.
+    → (namen: Top-Liste je Prozessname, python: jede python(w).exe einzeln, neu_vorher)."""
+    rollen = rollen or {}
+    jetzt = time.time()
+    je_name, py, neu = {}, [], {}
+    nenner = (float(dt_s) * 1e7 * max(1, int(ncpu or 1))) if dt_s and dt_s > 0 else None
+    for p in prozesse or []:
+        try:
+            pid, name = int(p.get("pid")), str(p.get("name") or "?").lower()
+        except (TypeError, ValueError):
+            continue
+        cpu = p.get("cpu")
+        if cpu is not None:
+            neu[pid] = (name, cpu)
+        pct = None
+        alt = vorher_pids.get(pid) if vorher_pids else None
+        if nenner and cpu is not None and alt and alt[0] == name and cpu >= alt[1]:
+            pct = 100.0 * (cpu - alt[1]) / nenner
+        g = je_name.setdefault(name, {"name": name, "n": 0, "ws_mb": 0.0, "priv_mb": 0.0, "cpu_pct": 0.0, "_cpu_da": False})
+        g["n"] += 1
+        g["ws_mb"] += (p.get("ws") or 0) / 1048576.0
+        g["priv_mb"] += (p.get("priv") or 0) / 1048576.0
+        if pct is not None:
+            g["cpu_pct"] += pct
+            g["_cpu_da"] = True
+        if name in ("python.exe", "pythonw.exe"):
+            ppid = p.get("ppid")
+            rolle = ("panel" if panel_pid and pid == panel_pid else rollen.get(pid)
+                     or ("panel-kind" if panel_pid and ppid == panel_pid else "?"))
+            st = p.get("start_s")
+            py.append({"pid": pid, "ppid": ppid, "rolle": rolle,
+                       "ws_mb": round((p.get("ws") or 0) / 1048576.0), "priv_mb": round((p.get("priv") or 0) / 1048576.0),
+                       "cpu_pct": round(pct, 1) if pct is not None else None,
+                       "alter_h": round((jetzt - st) / 3600.0, 1) if st else None})
+    alle = list(je_name.values())   # erst ungerundet sortieren, dann runden (gerundete Gleichstände verdrehten die Reihenfolge)
+    nach_cpu = sorted(alle, key=lambda g: -g["cpu_pct"])[:top_n]
+    nach_ram = sorted(alle, key=lambda g: -g["priv_mb"])[:top_n]
+    namen = sorted({g["name"]: g for g in nach_cpu + nach_ram}.values(), key=lambda g: (-g["cpu_pct"], -g["priv_mb"]))
+    for g in namen:
+        g["ws_mb"], g["priv_mb"] = round(g["ws_mb"]), round(g["priv_mb"])
+        g["cpu_pct"] = round(g["cpu_pct"], 1) if g.pop("_cpu_da") else None
+    py.sort(key=lambda x: (-(x["cpu_pct"] or 0), -x["ws_mb"]))
+    return namen, py[:PC_LAST_PY_MAX], neu
+
+
+def _pc_w32():
+    """ctypes-Typen für die Messung, einmal je Prozess angelegt. Nur Windows."""
+    if _PC_LAST_W32:
+        return _PC_LAST_W32
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class PE32(ctypes.Structure):
+        _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("th32ProcessID", wt.DWORD),
+                    ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)), ("th32ModuleID", wt.DWORD), ("cntThreads", wt.DWORD),
+                    ("th32ParentProcessID", wt.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", wt.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+
+    class PMC(ctypes.Structure):   # PROCESS_MEMORY_COUNTERS_EX
+        _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t), ("PrivateUsage", ctypes.c_size_t)]
+
+    class MSEX(ctypes.Structure):  # MEMORYSTATUSEX
+        _fields_ = [("dwLength", wt.DWORD), ("dwMemoryLoad", wt.DWORD), ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong), ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+    k32 = ctypes.windll.kernel32
+    k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    k32.CreateToolhelp32Snapshot.argtypes = [wt.DWORD, wt.DWORD]
+    k32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    k32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    k32.OpenProcess.restype = ctypes.c_void_p
+    k32.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    k32.GetProcessTimes.argtypes = [ctypes.c_void_p] + [ctypes.POINTER(wt.FILETIME)] * 4
+    k32.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.DWORD]
+    k32.GetSystemTimes.argtypes = [ctypes.POINTER(wt.FILETIME)] * 3
+    k32.GetTickCount64.restype = ctypes.c_ulonglong
+    _PC_LAST_W32.update(ctypes=ctypes, wt=wt, k32=k32, PE32=PE32, PMC=PMC, MSEX=MSEX)
+    return _PC_LAST_W32
+
+
+def _ft(f):
+    return (int(f.dwHighDateTime) << 32) | int(f.dwLowDateTime)
+
+
+def _pc_prozesse_lesen():
+    """Alle Prozesse: pid, ppid, name, CPU-Zeit, Arbeitsspeicher, privater Speicher, Startzeit. Prozesse ohne Zugriff (geschützte) nur mit Name/pid."""
+    w = _pc_w32()
+    ctypes, wt, k32 = w["ctypes"], w["wt"], w["k32"]
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)        # TH32CS_SNAPPROCESS
+    if snap == ctypes.c_void_p(-1).value or not snap:
+        return None
+    roh = []
+    try:
+        pe = w["PE32"]()
+        pe.dwSize = ctypes.sizeof(pe)
+        ok = k32.Process32FirstW(snap, ctypes.byref(pe))
+        while ok:
+            roh.append((int(pe.th32ProcessID), int(pe.th32ParentProcessID), str(pe.szExeFile)))
+            ok = k32.Process32NextW(snap, ctypes.byref(pe))
+    finally:
+        k32.CloseHandle(snap)
+    out = []
+    pmc = w["PMC"]()
+    c_, e_, kz, uz = wt.FILETIME(), wt.FILETIME(), wt.FILETIME(), wt.FILETIME()
+    for pid, ppid, name in roh:
+        d = {"pid": pid, "ppid": ppid, "name": name, "cpu": None, "ws": None, "priv": None, "start_s": None}
+        if pid:
+            # NUR das Mindestrecht 0x1000 (PROCESS_QUERY_LIMITED_INFORMATION, wie provision/order_bot): reicht ab Windows 8.1 für Zeiten UND Speicher. Kein VM_READ —
+            # sonst öffnete die Wache alle 5 min auch lsass.exe mit Leserecht, was Defender-ASR/EDR als Zugriffsversuch melden kann (S9-Gegenprüfung SW1)
+            h = k32.OpenProcess(0x1000, False, pid)
+            if h:
+                try:
+                    if k32.GetProcessTimes(h, ctypes.byref(c_), ctypes.byref(e_), ctypes.byref(kz), ctypes.byref(uz)):
+                        d["cpu"] = _ft(kz) + _ft(uz)
+                        d["start_s"] = (_ft(c_) - 116444736000000000) / 1e7 if _ft(c_) else None
+                    pmc.cb = ctypes.sizeof(pmc)
+                    if k32.K32GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb):
+                        d["ws"], d["priv"] = int(pmc.WorkingSetSize), int(pmc.PrivateUsage)
+                finally:
+                    k32.CloseHandle(h)
+        out.append(d)
+    return out
+
+
+def pc_last_system(ms_load, ram_gesamt, ram_frei, sys_jetzt, sys_vorher, uptime_ms):
+    """REIN RECHNEND (testbar): System-Zeile. sys_* = (idle, kernel, user) in 100 ns (kernel enthält idle) → CPU-% des PCs seit der letzten Runde."""
+    cpu = None
+    if sys_jetzt and sys_vorher:
+        di, dk, du = (sys_jetzt[0] - sys_vorher[0]), (sys_jetzt[1] - sys_vorher[1]), (sys_jetzt[2] - sys_vorher[2])
+        if dk + du > 0:
+            cpu = round(100.0 * (dk + du - di) / (dk + du), 1)
+    return {"ram_gesamt_gb": round(ram_gesamt / 1073741824.0, 1) if ram_gesamt else None,
+            "ram_frei_gb": round(ram_frei / 1073741824.0, 1) if ram_frei is not None else None,
+            "ram_belegt_pct": ms_load, "cpu_pct": cpu,
+            "betrieb_h": round(uptime_ms / 3600000.0, 1) if uptime_ms else None}
+
+
+def _pc_last_runde():
+    w = _pc_w32()
+    ctypes, wt, k32 = w["ctypes"], w["wt"], w["k32"]
+    ms = w["MSEX"]()
+    ms.dwLength = ctypes.sizeof(ms)
+    k32.GlobalMemoryStatusEx(ctypes.byref(ms))
+    i_, k_, u_ = wt.FILETIME(), wt.FILETIME(), wt.FILETIME()
+    sys_jetzt = (_ft(i_), _ft(k_), _ft(u_)) if k32.GetSystemTimes(ctypes.byref(i_), ctypes.byref(k_), ctypes.byref(u_)) else None
+    t = time.monotonic()
+    prozesse = _pc_prozesse_lesen() or []
+    rollen = {}
+    for inst in instances():   # Copier-PID steht in jeder status-*.json (Instanz-Sperre des Copiers)
+        try:
+            pid_c = int((read_json(os.path.join(HERE, inst["status_file"]), {}) or {}).get("pid") or 0)
+        except (TypeError, ValueError):
+            pid_c = 0
+        if pid_c:
+            rollen[pid_c] = "copier"
+    dt = (t - _PC_LAST_VORHER["t"]) if _PC_LAST_VORHER.get("t") else None
+    namen, py, neu = pc_last_auswerten(prozesse, _PC_LAST_VORHER.get("pids"), dt, os.cpu_count() or 1, rollen, os.getpid())
+    sysz = pc_last_system(int(ms.dwMemoryLoad), int(ms.ullTotalPhys), int(ms.ullAvailPhys), sys_jetzt, _PC_LAST_VORHER.get("sys"),
+                          int(k32.GetTickCount64()))
+    _PC_LAST_VORHER.update(pids=neu, t=t, sys=sys_jetzt)
+    erg = dict(sysz, at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), kerne=os.cpu_count(), prozesse=len(prozesse),
+               python_n=sum(1 for p in prozesse if str(p.get("name") or "").lower() in ("python.exe", "pythonw.exe")),
+               namen=namen if dt else None, python=py)
+    global _PC_LAST
+    _PC_LAST = erg
+
+
+def _pc_last_waechter():
+    """Thread: alle ~5 min eine Messung (erste CPU-Werte ab der zweiten Runde, ~60 s nach der ersten). Wirft nie; ohne Windows nichts."""
+    global _PC_LAST
+    if os.name != "nt":
+        return
+    time.sleep(20 + random.uniform(0, 20))
+    runde = 0
+    while True:
+        runde += 1
+        try:
+            _pc_last_runde()
+        except Exception as e:
+            _PC_LAST = {"fehler": f"{type(e).__name__}: {e}"[:160], "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        # erste Runde liefert nur Vorwerte → zweite schon nach ~60 s, danach im 5-min-Takt
+        time.sleep((60.0 if runde == 1 else PC_LAST_TAKT_S) + random.uniform(0, 15))
+
+
 def panel_lauf_info():
     """Was dieser Panel-Prozess WIRKLICH fährt (für mt5_live.status.panel_lauf über den Prophos-Tab): Version, deren Code nachweislich läuft (Start bzw.
     nachgezogen nach Vergleich mit dem Abbild), Startzeit, PID, Datei (panel.py / panel_frisch.py), sha12 des geladenen Quelltexts."""
@@ -98,7 +309,9 @@ def panel_lauf_info():
             # S9 zu ae4b57db: Abbild von provision.py sichtbar (None = beim Laden nicht lesbar, Vergleich dafür aus)
             "provision_sha12": hashlib.sha256(_code_glatt(pv)).hexdigest()[:12] if pv else None,
             # S9: neue Panels, die wegen des Mutex aufgaben (Zähler, erste/letzte Zeit, PID) — steigt er, hält evtl. ein hängendes Panel den Mutex
-            "mutex_aufgaben": ma if isinstance(ma, dict) else None}
+            "mutex_aufgaben": ma if isinstance(ma, dict) else None,
+            # SW1 (05.11.2026): Last des PCs (RAM/CPU/Betriebszeit, je Prozessname, jede python.exe), s. LAST DES PCs MESSEN — None bis zur ersten Messung
+            "last": _PC_LAST}
 
 # Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
@@ -2625,9 +2838,25 @@ def scharf_copier_solo():
     return out if geprueft else None
 
 
-def scharf_copier_tickets():
-    """Offene Solo-Hedge-Tickets aus den frischen Copier-Status-Dateien (status.hedge_solo) → set | None (nicht prüfbar)."""
-    solo = scharf_copier_solo()
+# SCHLIESS-WACHE OHNE DAUER-LESEN (SW1, 05.11.2026, Anlass ES4/SW1: PCs seit 02.11. täglich langsamer): die Wache läuft mit offenem Eintrag 10–20×/s und las
+# dabei JEDES Mal alle status-*.json (15–35 Dateien à ~9 KB = bis 300 KB JSON je Runde, bis 6 MB/s Parsen + Datei-Öffnen unter dem Virenscanner) — der Copier
+# schreibt sie aber nur 1×/s (write_status, m.last_status > 1.0). Jetzt höchstens alle SCHARF_COPIER_CACHE_S neu gelesen, dazwischen derselbe Stand: der Inhalt
+# ist ohnehin bis 1 s alt, die Leser brauchen ihn nur für den Copier-Beleg (1×/min) und „im Copier nicht mehr offen“ (erst nach 30 s Karenz). Der Close-Weg selbst
+# (Reader-Stand je Runde, Takt 0,1/0,05 s) bleibt unverändert. Fehler werden nicht gemerkt (nächste Runde liest neu).
+SCHARF_COPIER_CACHE_S = 0.5
+_SCHARF_COPIER_CACHE = {"t": None, "wert": None}
+
+
+def scharf_copier_tickets(jetzt=None, lesen=None):
+    """Offene Solo-Hedge-Tickets aus den frischen Copier-Status-Dateien (status.hedge_solo) → set | None (nicht prüfbar). Höchstens alle
+    SCHARF_COPIER_CACHE_S neu gelesen (s. Block oben); jetzt/lesen nur für den Selbsttest."""
+    jetzt = time.monotonic() if jetzt is None else jetzt
+    c = _SCHARF_COPIER_CACHE
+    if c["t"] is not None and 0 <= jetzt - c["t"] < SCHARF_COPIER_CACHE_S:
+        solo = c["wert"]
+    else:
+        solo = (lesen or scharf_copier_solo)()
+        c["t"], c["wert"] = jetzt, solo
     return set(solo) if solo is not None else None
 
 
@@ -7423,6 +7652,7 @@ def main():
     threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
     threading.Thread(target=_scharf_wache, daemon=True).start()   # Schließ-Wache (02.11.2026, s. SCHLIESSEN AUF DEM PC)
     threading.Thread(target=_ea_frost_waechter, daemon=True).start()   # F2 (30.10.2026): EA-Selbstheilung ohne Knopf
+    threading.Thread(target=_pc_last_waechter, daemon=True).start()   # SW1 (05.11.2026): Last des PCs messen, s. LAST DES PCs MESSEN
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die
