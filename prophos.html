@@ -61221,7 +61221,7 @@
   function sfVersuchtErneut(sf, jetzt){
     if(!sf || sf.status !== 'rot' || sf.unklar) return false
     const schritt = String(sf.schritt || '')
-    if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit') return false
+    if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit' || schritt === 'riegel_aufgegeben' || schritt === 'index_pause') return false   // R4b: nie von selbst neu → sofort in „Braucht dich“, keine 30-min-Handy-Meldung
     if(sfIstUac(sf)) return false   // Windows-Abfrage (23.10.2026): sichtbar lassen — Finn muss hin, auch wenn der Bot danach neu einplant
     if(sfDeckelVoll(sf)) return false
     // ZWEI ORBIT (03.11.2026, Z4, Gegenprüfung): der Sofort-Start-Wächter plant erst bei „frei“ neu ein — f.at bleibt alt, solange der 1. Trade in der
