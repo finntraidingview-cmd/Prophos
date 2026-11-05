@@ -29220,6 +29220,45 @@ def ap_unternehmen_schluessel(uid, karte):
     return "ht" if not karte else "solo:" + str(uid)
 
 
+# ══ LESEWEGE NUR IM EIGENEN UNTERNEHMEN (UNT5, 05.11.2026, Finn: „Finn + Pascal sehen als HT-Admins nichts von Emin, und Emin sieht nichts von HT";
+# G2b Schritt 1, Rest im Backend, den die G3-RLS nicht abdeckt). Fail-closed: Unternehmen nicht lesbar → nur die eigene ID. ══
+def ap_unternehmen_von_login(uid, daten):
+    """REIN RECHNEND: gehört(u) → bool = gleiches Unternehmen wie der Login uid (HT / Verwalter-Gruppe / ohne Unternehmen = nur er selbst)."""
+    return ap_unternehmen_filter(ap_unternehmen_ids(uid, daten), daten)
+
+
+def unt_sicht_login(uid):
+    """gehört(u) für das Unternehmen des Logins — Gruppen nicht lesbar → nur die eigene ID (fail-closed, Meldung)."""
+    try:
+        return ap_unternehmen_von_login(uid, admin_gruppen_daten())
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — Sicht nur die eigene ID", flush=True)
+        return lambda u: str(u) == str(uid)
+
+
+def ap_admins_fuer(uid, ht_admins, daten):
+    """REIN RECHNEND: Admins des Unternehmens der ID uid (Empfänger von Pushes über ihre Konten): HT → ht_admins (ADMIN_EMAILS-IDs, wie bisher);
+    Verwalter-Gruppe → ihr Verwalter; ohne Unternehmen → keiner (nur der Besitzer selbst bekommt die Meldung)."""
+    eig = ap_unternehmen_ids(uid, daten)
+    if eig is None:
+        return set(ht_admins or ())
+    daten = daten or {}
+    for x in daten.get("gruppen") or ():
+        v = x.get("verwalter_id")
+        if v and str(v) in eig:
+            return {str(v)}
+    return set()
+
+
+def _admins_fuer_uid(uid, ht_admins):
+    """ap_admins_fuer mit admin_gruppen_daten — nicht lesbar → keiner (nur der Besitzer, fail-closed)."""
+    try:
+        return ap_admins_fuer(uid, ht_admins, admin_gruppen_daten())
+    except Exception as e:
+        print(f"[unternehmen] ⚠️ Gruppen nicht lesbar ({type(e).__name__}: {e}) — Push nur an den Besitzer", flush=True)
+        return set()
+
+
 def ap_ppl_firma_je_unternehmen(rows, karte, norm=None):
     """REIN RECHNEND: firm_specs-Zeilen → {unternehmen: je_firma} (ap_ppl_karte je Unternehmen getrennt) — der Fallback-Punktwert einer
     Firma kommt nur aus dem eigenen Unternehmen (G2 A2)."""
@@ -45450,9 +45489,12 @@ def _lq_antwort_laden():
     # keine id-Spalte, PostgREST antwortet 400 (mit order=id.asc gegen das echte PostgREST geprüft)
     personen = _sb_all("liq_personen", {"select": "user_id,ist_kunde", "order": "user_id.asc"})
     nutzer, aus = [], set()
+    # UNT5 (05.11.2026): nur Personen aus dem Unternehmen des Logins (Liquide ist HT-Voll-Admins vorbehalten → HT) — vorher nur ADMIN_EXCLUDE
+    # (Emin selbst), Emins Mitglieder standen mit Kunden-Flag, offenen Payouts und Sheets in HTs Liquide. Gruppen nicht lesbar → nur der Login.
+    gehoert = unt_sicht_login(request.environ.get("prophos.admin_uid"))
     for u in (_auth_liste_anfrage().json() or {}).get("users", []):
         mail = str(u.get("email") or "").strip().lower()
-        if mail in ADMIN_EXCLUDE_EMAILS:
+        if mail in ADMIN_EXCLUDE_EMAILS or not gehoert(u.get("id")):
             aus.add(str(u.get("id")))
         nutzer.append((str(u.get("id")), mail))
     try:
