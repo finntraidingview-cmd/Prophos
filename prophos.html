@@ -44172,15 +44172,21 @@
     const fl = pfad + ` L ${x(pts.length - 1).toFixed(1)} ${H - pb} L ${pl} ${H - pb} Z`
     const lin = (v, kl, txt) => v == null ? '' : `<line x1="${pl}" x2="${W - pr}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(${kl})" stroke-width="1.2" stroke-dasharray="5 4" opacity=".85"/>
       <text x="${pl - 7}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="var(${kl})">${txt}</text>`
-    const jede = Math.max(1, Math.ceil(pts.length / 10))   // höchstens ~10 Achsen-Beschriftungen (Guestly-Vorlage)
     const lab = p => p.start ? 'Start' : p.t === 'jetzt' ? 'jetzt' : new Date(p.t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    // K1b (Prüfer-Hinweis 05.11.2026): je Tag EINE Beschriftung, mittig unter den Punkten dieses Tages (zwei Trades am 04.11. → „04.11." nur einmal);
+    // höchstens ~10 Beschriftungen (Guestly-Vorlage), die letzte immer
+    const tage = []
+    pts.forEach((p, i) => { const l = lab(p), t = tage[tage.length - 1]; if(t && t.l === l) t.bis = i; else tage.push({ l, von: i, bis: i }) })
+    const jede = Math.max(1, Math.ceil(tage.length / 10))
+    const achse = tage.filter((t, k) => k % jede === 0 || k === tage.length - 1)
+      .map(t => `<text x="${((x(t.von) + x(t.bis)) / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--k-sub)">${escapeHtml(t.l)}</text>`).join('')
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:8px" role="img" aria-label="Balance-Verlauf">
       <defs><linearGradient id="k1-fl" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#887cfc" stop-opacity=".26"/><stop offset="1" stop-color="#887cfc" stop-opacity="0"/></linearGradient></defs>
       ${lin(ch.start != null ? Number(ch.start) : null, '--k-sub', [ch.ziel, ch.boden].some(v => v != null && Math.abs(y(Number(v)) - y(Number(ch.start))) < 13) ? '' : escapeHtml(Math.round(Number(ch.start) / 1000) + 'k'))}
       ${lin(ch.ziel != null ? Number(ch.ziel) : null, '--k-gut', 'Ziel')}${lin(ch.boden != null ? Number(ch.boden) : null, '--k-rot', 'Boden')}
       <path d="${fl}" fill="url(#k1-fl)"/><path d="${pfad}" fill="none" stroke="var(--k-linie)" stroke-width="2" stroke-linejoin="round"/>
-      ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3" fill="var(--k-karte)" stroke="var(--k-linie)" stroke-width="1.6"><title>${escapeHtml(lab(p) + ' · ' + fmtMoney(p.v))}</title></circle>
-        ${(i % jede === 0 || i === pts.length - 1) ? `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--k-sub)">${escapeHtml(lab(p))}</text>` : ''}`).join('')}
+      ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3" fill="var(--k-karte)" stroke="var(--k-linie)" stroke-width="1.6"><title>${escapeHtml(lab(p) + ' · ' + fmtMoney(p.v))}</title></circle>`).join('')}
+      ${achse}
     </svg>`
   }
   function k1Zeichnen(id){
