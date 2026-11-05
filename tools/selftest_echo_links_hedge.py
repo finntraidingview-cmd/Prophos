@@ -143,9 +143,10 @@ neu3, g3 = R([zeile("6cceb3f3", "704925f0")], konten, {}, {})
 check(neu3 == [] and "kein eigenes Konto" in g3["6cceb3f3"], "kein eigenes Konto mit dem Login → verworfen")
 neu4, g4 = R([zeile("6cceb3f3", "unbekannt")], konten, eigene, links)
 check(neu4[0]["value"]["accountId"] == "901a4804" and "nicht gefunden" not in g4.get("6cceb3f3", "x"), "unbekanntes Konto, Login aus der Einstellung → eigenes über die Verknüpfung")
-check(len(re.findall(r'gp_hedge_settings_eigen\(_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 6
-      and len(re.findall(r'_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 6,
-      "alle sechs Planer-Stellen (Gruppe, Echo-Hedge, ehv, Tradeify-Final, Apex, Funded-CFD) lesen die Einstellung nur durch den Riegel")
+# RT1 (05.11.2026): seit 53a63381 (E3, CFD-Planer nur Echo mit Hedge) liest auch ap_echo_hedge_anlegen die Einstellung — durch den Riegel; 6 → 7
+check(len(re.findall(r'gp_hedge_settings_eigen\(_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 7
+      and len(re.findall(r'_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 7,
+      "alle sieben Planer-Stellen (Gruppe, Echo-Hedge-Anlegen, Echo-Hedge, ehv, Tradeify-Final, Apex, Funded-CFD) lesen die Einstellung nur durch den Riegel")
 import types as _t
 ns2 = {"_sb_all": lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 500")), "re": re, "print": lambda *a, **k: None}
 i2 = APP.index("\n_gp_hedge_fremd = {}") + 1
