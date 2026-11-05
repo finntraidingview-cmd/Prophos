@@ -139,7 +139,7 @@ pc_zeilen[:] = [W, A, B]
 check(app.puls_heim_pruefen("pc-abcd", route="tvv2")["frei"], "keiner nah → frei")
 NAH.update(a1=True, w1=True)
 r = app.puls_heim_pruefen("pc-abcd", route="tvv2")
-check(not r["frei"] and r["code"] == "big_trade_nah" and r["grund"].startswith(app.MODELL_NAME["orbit_prio2"]) and r["big_trade"]["plan"] == "a1" and r["big_trade"].get("apex_hedge") is True,
+check(not r["frei"] and r["code"] == "big_trade_nah" and r["grund"].startswith("Apex-Challenge") and r["big_trade"]["plan"] == "a1" and r["big_trade"].get("apex_hedge") is True,
       f"Apex und WD nah → Apex zuerst ({r.get('grund')})")
 NAH.update(b1=True)
 check(app.puls_heim_pruefen("pc-abcd", route="tvv2")["big_trade"]["plan"] == "b1", "Big Trade nah → Big Trade zuerst")

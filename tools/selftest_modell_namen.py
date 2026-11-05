@@ -79,8 +79,12 @@ py = ast.literal_eval(re.search(r"^MODELL_NAME = (\{.*\})\s*$", APP, re.M).group
 js = dict(re.findall(r"(\w+): '([^']+)'", fn[fn.index("Object.freeze({"):fn.index("}))")]))
 check(py == js, f"app.py MODELL_NAME = JS-Tabelle ({sorted(set(py.items()) ^ set(js.items()))})")
 for alt in ["'Echo mit Hedge' if mit_hedge", "fährt immer Echo mit Hedge\"", "(f\"Echo mit Hedge: {h['lots']", "(f\"Orbit V3 (finaler Tradeify",
-            "Orbit V3 mit Gegenhedge {h", "Orbit Prio 2 (Fusion-Hedge, WD-Weg): {h", '"Apex-Challenge", {"apex_hedge": True}']:
+            "Orbit V3 mit Gegenhedge {h", "Orbit Prio 2 (Fusion-Hedge, WD-Weg): {h"]:
     check(alt not in APP, f"app.py-Abweichler weg: {alt}")
+# Rückbau (S3 05.11.2026): der Puls-Heim-Grund „Apex-Challenge …“ ist ein SCHLÜSSEL — der Tab liest den Anfang (sfIstWdSperre/sfIstApexSperre,
+# 2–4 min statt 15 min neu einplanen). MK1b hatte ihn auf „Orbit Prio 2“ umbenannt → Erkennung aus. Muss bleiben, solange der Tab so liest.
+check('[(x, apex_schw, "Apex-Challenge", {"apex_hedge": True}) for x in apexe]' in APP and "/^\\W*(Winning Day|Apex-Challenge)\\b/" in HTML,
+      "Puls-Heim-Grund bleibt „Apex-Challenge“ (Schlüssel für sfIstWdSperre im Tab)")
 US = open(os.path.join(WURZEL, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
 check("'Puls-Chrome (Orbit) — einschalten'" in US and "● Orbit · Puls-Chrome" in US and "`● Orbit V3 ·" not in US and "'Puls-Chrome (Orbit V3)" not in US,
       "Userscript: Menü und Abzeichen „Orbit“ (Version bewusst nicht angehoben)")

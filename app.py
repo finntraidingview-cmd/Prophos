@@ -19550,7 +19550,7 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
                 return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
                         "grund": f"Big Trade {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
         # Apex-Challenge (02.11.2026) vor den Winning Days; beide: eigene 100-$-Grenze, nicht prüfbar = frei (s. oben)
-        for p, schw, art_name, art_info in ([(x, apex_schw, MODELL_NAME["orbit_prio2"], {"apex_hedge": True}) for x in apexe]
+        for p, schw, art_name, art_info in ([(x, apex_schw, "Apex-Challenge", {"apex_hedge": True}) for x in apexe]   # SCHLÜSSEL, kein Anzeigename (S3 05.11.2026, Rückbau MK1b): der Tab liest den Grund-Anfang (sfIstWdSperre/sfIstApexSperre → 2–4 min statt 15 min, „Apex-Challenge nah“) — nie umbenennen ohne den Tab
                                             + [(x, wd_schw, MODELL_NAME["winning_day"], {"winning_day": True}) for x in wds]):
             acc = accs.get(str(p.get("master_account_id") or ""))
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
