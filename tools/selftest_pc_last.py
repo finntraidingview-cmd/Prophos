@@ -74,6 +74,7 @@ s = S(88, 8 * 1073741824, 1 * 1073741824, (100, 500, 500), (0, 0, 0), 3 * 864000
 check(s == {"ram_gesamt_gb": 8.0, "ram_frei_gb": 1.0, "ram_belegt_pct": 88, "cpu_pct": 90.0, "betrieb_h": 72.0},
       f"System: idle 100 von 1000 → 90 % CPU, 8 GB / 1 GB frei, 72 h Betrieb ({s})")
 check(S(10, 0, None, None, None, 0)["cpu_pct"] is None, "System ohne Vorwert → CPU unbekannt")
+ns["tages_neustart_info"] = lambda: None   # DR1 (05.11.2026): eigener Test tools/selftest_tages_neustart.py
 ns["_PC_LAST"] = {"cpu_pct": 1}
 check(ns["panel_lauf_info"]()["last"] == {"cpu_pct": 1}, "Herzschlag: panel_lauf.last trägt die letzte Messung")
 ns["_PC_LAST"] = None

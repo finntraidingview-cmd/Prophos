@@ -311,7 +311,8 @@ def panel_lauf_info():
             # S9: neue Panels, die wegen des Mutex aufgaben (Zähler, erste/letzte Zeit, PID) — steigt er, hält evtl. ein hängendes Panel den Mutex
             "mutex_aufgaben": ma if isinstance(ma, dict) else None,
             # SW1 (05.11.2026): Last des PCs (RAM/CPU/Betriebszeit, je Prozessname, jede python.exe), s. LAST DES PCs MESSEN — None bis zur ersten Messung
-            "last": _PC_LAST}
+            "last": _PC_LAST,
+            "tages_neustart": tages_neustart_info()}   # DR1 (05.11.2026): letzter täglicher Neustart + RAM vorher/nachher
 
 # Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
@@ -7628,6 +7629,225 @@ def _selbst_auffrischen():
         print(f"[panel] Selbst-Auffrischen uebersprungen ({type(e).__name__}) — normaler Start.", flush=True)
 
 
+# ══ TÄGLICHER NEUSTART JE PC (DR1, Finn 05.11.2026: „Wenn man das komplette Backend und auch die Prophos-Seite daily einmal neu startet, dann
+# müsste ja der RAM in der Cache gelöscht werden.“ Anlass ES4: PC von Marco pc-t8wg97 und Emin pc-onkrbk seit 02.11. täglich langsamer, Emin RAM
+# 90 %). Sicherheitsnetz, die eigentliche Ursache suchen SW1/SW2. Einmal je Dubai-Tag, im Fenster aus puls_heim_regel.pc_neustart (Standard
+# AUS, nur_pcs für den Testlauf), nur wenn Railway den PC ruhig meldet (Tab-Stand „tages_neustart“: kein Plan open, kein Hedge offen, kein
+# Start in den nächsten 30 min, kein Signal) UND hier nichts läuft (panel_beschaeftigt_gruende, Browser/MT5 frei, kein scharfer Eintrag,
+# niemand am PC). Nur BESTEHENDE Wege: Puls-Chrome per order_bot._puls_chrome_beenden zu, Prophos-Tab per _tab_oeffnen wieder auf (startet
+# das Puls-Chrome selbst), Copier über copier_neustart.json (startet nur flach neu, wie das Selbst-Update), Panel zuletzt per os._exit →
+# start-panel.bat. MT5-Terminals bleiben offen (Login-Kosten). Gestreut 1–20 min ab dem ersten ruhigen Moment (Jitter-Regel). Ergebnis in
+# tages_neustart.json (überlebt den Exit) → panel_lauf.tages_neustart → mt5_live.status über den Prophos-Tab: at, ram_vorher/ram_nachher (%),
+# copier_neu (PID gewechselt), schritte. Kein ruhiger Moment bis Fensterende → einmal Spur an Railway (/pc/update-spur), morgen neu. ══
+TN_DATEI = "tages_neustart.json"
+TN_TAKT_S = 60.0
+TN_STREU_S = (60.0, 20 * 60.0)
+TN_LEERLAUF_MIN_S = 120.0       # so lange keine Eingabe am PC (sonst sitzt jemand davor)
+TN_NACHHER_S = 5 * 60.0         # RAM nach dem Neustart erst messen, wenn Tab/Puls-Chrome wieder stehen
+
+
+def tages_neustart_entscheiden(sicht, tag_erledigt, jetzt, streu_bis, gruende_lokal, idle_s, verpasst_gemeldet):
+    """REIN RECHNEND (testbar). sicht = Tab-Stand-Feld tages_neustart von Railway ({an, pc_frei, tag, offen, vorbei, ruhig, grund}) oder None;
+    tag_erledigt = Dubai-Tag des letzten Neustarts. → ('aus' | 'warten' | 'streuen' | 'jetzt' | 'verpasst', grund)."""
+    s = sicht if isinstance(sicht, dict) else None
+    if not s or not s.get("an"):
+        return "aus", "aus (puls_heim_regel.pc_neustart.an)" if s else "Tab-Stand ohne tages_neustart (Railway alt oder nicht lesbar)"
+    if not s.get("pc_frei"):
+        return "aus", "PC nicht in nur_pcs"
+    tag = str(s.get("tag") or "")
+    if not tag or tag == str(tag_erledigt or ""):
+        return "aus", f"heute schon neu gestartet ({tag})" if tag else "Tag unbekannt"
+    if s.get("vorbei"):
+        return ("aus", "Fenster vorbei, schon gemeldet") if verpasst_gemeldet == tag else ("verpasst", f"kein ruhiger Moment im Fenster ({tag})")
+    if not s.get("offen"):
+        return "aus", "außerhalb des Fensters"
+    if not s.get("ruhig"):
+        return "warten", "Railway: " + str(s.get("grund") or "nicht ruhig")[:160]
+    if gruende_lokal:
+        return "warten", "Panel: " + ", ".join(gruende_lokal)[:160]
+    if idle_s is not None and idle_s < TN_LEERLAUF_MIN_S:
+        return "warten", f"jemand am PC (letzte Eingabe vor {int(idle_s)} s)"
+    if streu_bis is None:
+        return "streuen", "ruhig — Streuung würfeln"
+    if jetzt < streu_bis:
+        return "warten", f"Streuung noch {int(streu_bis - jetzt)} s"
+    return "jetzt", "ruhig"
+
+
+def _ram_prozent():
+    """Belegter Arbeitsspeicher in % (GlobalMemoryStatusEx) oder None — nur Windows, wirft nie."""
+    try:
+        import ctypes
+
+        class _MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong), ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong), ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        ms = _MS()
+        ms.dwLength = ctypes.sizeof(_MS)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+            return None
+        return int(ms.dwMemoryLoad)
+    except Exception:
+        return None
+
+
+def _copier_pid():
+    return (read_json(os.path.join(HERE, "copier-log.json"), None) or {}).get("pid")
+
+
+def tages_neustart_info():
+    """Kurzfassung für panel_lauf (→ mt5_live.status über den Tab). Wirft nie."""
+    try:
+        d = read_json(os.path.join(HERE, TN_DATEI), None)
+        if not isinstance(d, dict):
+            return {"stand": TN_STAND.get("grund") or None}
+        return dict({k: d.get(k) for k in ("tag", "at", "ram_vorher", "ram_nachher", "copier_neu", "schritte")}, stand=TN_STAND.get("grund") or None)
+    except Exception:
+        return None
+
+
+TN_STAND = {"grund": "", "streu_bis": None, "streu_tag": "", "verpasst": ""}
+
+
+def _tn_schreiben(d):
+    """tages_neustart.json schreiben → True/False. Ohne geschriebenen Merker kein Neustart (Prüfer DR1: sonst wüsste das neue Panel nicht,
+    dass heute schon neu gestartet wurde, und startete im Fenster wieder und wieder neu)."""
+    try:
+        with open(os.path.join(HERE, TN_DATEI) + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(os.path.join(HERE, TN_DATEI) + ".tmp", os.path.join(HERE, TN_DATEI))
+        return True
+    except OSError as e:
+        print(f"[tages-neustart] Merker nicht schreibbar ({type(e).__name__}) — kein Neustart", flush=True)
+        return False
+
+
+def _tn_frisch_ruhig(pc):
+    """Direkt vor dem Neustart den Tab-Stand FRISCH holen (Prüfer DR1: der gemerkte Stand kann 150 s alt sein) → (ruhig, grund)."""
+    st = _tab_stand_holen(pc, TAB_NL.get("grund") or "") if pc else None
+    s = st.get("tages_neustart") if isinstance(st, dict) and st.get("ok") else None
+    if not isinstance(s, dict):
+        return False, "Tab-Stand frisch nicht lesbar"
+    if isinstance(st, dict):
+        TAB_NL.update(stand=st, stand_at=time.time())
+    return bool(s.get("an") and s.get("pc_frei") and s.get("offen") and s.get("ruhig")), str(s.get("grund") or "")
+
+
+def _tages_neustart_ausfuehren(tag):
+    """Die Schritte (bestehende Wege) → endet mit os._exit(0), außer es ist doch nicht ruhig/nicht schreibbar (dann False, nichts getan)."""
+    ruhig, g = _tn_frisch_ruhig(pc_id_lesen())
+    if not ruhig:
+        TN_STAND["streu_bis"] = None
+        print(f"[tages-neustart] frisch geprüft doch nicht ruhig: {g or 'aus'}", flush=True)
+        return False
+    ram0, pid0 = _ram_prozent(), _copier_pid()
+    merk = {"tag": tag, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "at_ts": time.time(), "ram_vorher": ram0,
+            "ram_nachher": None, "copier_pid_vorher": pid0, "copier_neu": None, "schritte": ["begonnen"]}
+    if not _tn_schreiben(merk):            # VOR dem ersten Schritt: der Tag gilt ab hier als erledigt
+        return False
+    if not _panel_zu_und_leeren(False):
+        _tn_schreiben(dict(merk, tag=None, schritte=["abgebrochen: Panel beim Zumachen belegt"]))
+        return False
+    schritte = []
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        with _PANEL_POST_LOCK:
+            _PANEL_POST["zu"] = False
+        _tn_schreiben(dict(merk, tag=None, schritte=["abgebrochen: Puls im Browser"]))
+        return False
+    try:
+        try:
+            with open(os.path.join(HERE, "copier_neustart.json"), "w", encoding="utf-8") as f:
+                json.dump({"at": time.time(), "von": "tages_neustart"}, f)
+            schritte.append("Copier: Neustart-Wunsch abgelegt")
+        except OSError as e:
+            schritte.append(f"Copier-Wunsch nicht geschrieben ({type(e).__name__})")
+        code = ("import json, order_bot\nt = []\nok, txt = order_bot._puls_chrome_beenden(t)\nprint(json.dumps([bool(ok), str(txt)[:160]]))\n")
+        try:
+            r = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=90,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            ok, txt = json.loads((r.stdout or "").strip().splitlines()[-1])
+        except Exception as e:
+            ok, txt = False, f"{type(e).__name__}"
+        schritte.append(("Puls-Chrome zu: " if ok else "Puls-Chrome nicht zu: ") + str(txt))
+        time.sleep(3 + random.random() * 4)
+        ok2, msg2 = _tab_oeffnen(TAB_URL, lock_gehalten=True)   # startet das Puls-Chrome selbst (_puls_chrome_sicher), Prophos im eigenen Fenster
+        schritte.append(("Prophos-Tab neu: " if ok2 else "Prophos-Tab NICHT neu: ") + str(msg2)[:160])
+    finally:
+        TV_ORDER_LOCK.release()
+    time.sleep(8 + random.random() * 4)   # der neue Tab lädt, bevor das Panel kurz weg ist
+    # LETZTE PRÜFUNG vor dem Exit wie beim Update-Neustart (Prüfer DR1): läuft inzwischen etwas, bis UPDATE_LEERLAUF_S auf das Ende warten
+    ende = time.time() + UPDATE_LEERLAUF_S
+    while panel_beschaeftigt_gruende() and time.time() < ende:
+        time.sleep(0.5)
+    rest = panel_beschaeftigt_gruende()
+    if any(str(x).startswith("Polar") for x in rest):     # Polar nie abreißen: Panel bleibt, Chrome/Copier sind schon neu
+        with _PANEL_POST_LOCK:
+            _PANEL_POST["zu"] = False
+        _tn_schreiben(dict(merk, schritte=schritte + ["Panel NICHT neu: Polar-Lauf"]))
+        return True
+    _tn_schreiben(dict(merk, schritte=schritte + ["Panel: Neustart (start-panel.bat)" + (f", lief noch: {', '.join(rest)[:80]}" if rest else "")]))
+    print(f"[tages-neustart] {tag}: RAM {ram0} % · " + " · ".join(schritte) + " → Panel-Neustart", flush=True)
+    os._exit(0)
+
+
+def _tages_neustart_nachher():
+    """Nach dem Panel-Start: war der Neustart eben erst (< 30 min) und fehlt die Messung → nach TN_NACHHER_S RAM + Copier-PID nachtragen."""
+    try:
+        d = read_json(os.path.join(HERE, TN_DATEI), None)
+        if not isinstance(d, dict) or d.get("ram_nachher") is not None or time.time() - float(d.get("at_ts") or 0) > 1800:
+            return
+        time.sleep(TN_NACHHER_S)
+        d["ram_nachher"] = _ram_prozent()
+        pid = _copier_pid()
+        d["copier_neu"] = bool(pid and pid != d.get("copier_pid_vorher"))
+        with open(os.path.join(HERE, TN_DATEI), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        print(f"[tages-neustart] danach: RAM {d.get('ram_vorher')} → {d['ram_nachher']} % · Copier neu: {d['copier_neu']}", flush=True)
+    except Exception as e:
+        print(f"[tages-neustart] Nachmessung: {type(e).__name__}: {e}", flush=True)
+
+
+def _tages_neustart_waechter():
+    if os.name != "nt":
+        return
+    _tages_neustart_nachher()
+    time.sleep(120 + random.random() * 60)
+    while True:
+        try:
+            st = TAB_NL.get("stand") if time.time() - float(TAB_NL.get("stand_at") or 0) < 150 else None
+            sicht = st.get("tages_neustart") if isinstance(st, dict) else None
+            d = read_json(os.path.join(HERE, TN_DATEI), None)
+            erledigt = d.get("tag") if isinstance(d, dict) else None
+            lokal = panel_beschaeftigt_gruende()
+            if not _browser_und_mt5_frei():
+                lokal = lokal + ["Browser/MT5 belegt"]
+            if scharf_konto_fest():
+                lokal = lokal + ["offener TradingView-Trade mit Hedge (scharf)"]
+            tag = str((sicht or {}).get("tag") or "")
+            if TN_STAND["streu_tag"] != tag:
+                TN_STAND.update(streu_bis=None, streu_tag=tag)
+            entsch, grund = tages_neustart_entscheiden(sicht, erledigt, time.time(), TN_STAND["streu_bis"], lokal, _win_leerlauf_s(),
+                                                       TN_STAND["verpasst"])
+            if entsch == "streuen":
+                TN_STAND["streu_bis"] = time.time() + random.uniform(*TN_STREU_S)
+            elif entsch == "verpasst":
+                TN_STAND["verpasst"] = tag
+                _tab_heil_melden(f"im Fenster kein ruhiger Moment ({TN_STAND.get('grund') or 'belegt'})", "tages_neustart")   # 🟠 1× je PC und Tag
+            elif entsch == "jetzt":
+                if _tages_neustart_ausfuehren(tag):   # endet im Erfolgsfall mit os._exit; True = Panel blieb wegen Polar
+                    grund = "Chrome/Copier neu, Panel blieb (Polar)"
+                else:
+                    grund = "doch nicht ruhig/belegt — nächster Takt"
+            if grund != TN_STAND["grund"]:
+                TN_STAND["grund"] = grund
+                if entsch != "aus":
+                    print(f"[tages-neustart] {entsch}: {grund}", flush=True)
+        except Exception as e:
+            print(f"[tages-neustart] Fehler: {type(e).__name__}: {e}", flush=True)
+        time.sleep(TN_TAKT_S + random.random() * 30)
+
+
 # ══ NUR EIN PANEL JE PC (Betrieb 1 03.11.2026: pc-usq1i6 hatte ZWEI panel.py-Prozesse, beide 13:19 dt — zwei start-panel.bat-Schleifen). Unter Windows
 # setzt ThreadingHTTPServer SO_REUSEADDR (allow_reuse_address) — das erlaubt dort einen ZWEITEN Bind auf 127.0.0.1:8770; „Port belegt“ griff nie. Beide
 # Prozesse fuhren alle Wachen (Schließ-Wache, Version-Watcher, Puls-Locks nur je Prozess). Jetzt: benannter Mutex vor allen Threads. Der Bind bleibt wie er war
@@ -7713,6 +7933,7 @@ def main():
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
     # Tab selbst neu laden (16.10.2026) — Details bei _tab_neulade_waechter
     threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
+    threading.Thread(target=_tages_neustart_waechter, daemon=True).start()   # DR1 (05.11.2026): täglicher Neustart je PC, Standard aus
     threading.Thread(target=_scharf_wache, daemon=True).start()   # Schließ-Wache (02.11.2026, s. SCHLIESSEN AUF DEM PC)
     threading.Thread(target=_ea_frost_waechter, daemon=True).start()   # F2 (30.10.2026): EA-Selbstheilung ohne Knopf
     threading.Thread(target=_pc_last_waechter, daemon=True).start()   # SW1 (05.11.2026): Last des PCs messen, s. LAST DES PCs MESSEN

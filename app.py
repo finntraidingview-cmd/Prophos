@@ -5022,6 +5022,16 @@ def pc_tab_heil_spur():
                      f"{wer_txt}: Prophos im Puls-Chrome nicht angemeldet — einmal einloggen (im Puls-Chrome-Fenster mit Prophos). Bis dahin "
                      f"bleibt der Prophos-Tab im anderen Chrome Haupt-Tab.", uid=uid, daten={"pc": pc}, schluessel=f"puls_login|{pc}")
         return jsonify({"ok": True})
+    if str(d.get("art") or "") == "tages_neustart":
+        # DR1 (05.11.2026): täglicher Neustart fiel aus — im ganzen Fenster kein ruhiger Moment → 🟠 einmal je PC und Tag, morgen neu
+        key = f"{pc}|tages-neustart"
+        if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 20 * 3600:
+            return jsonify({"ok": True, "gedrosselt": True})
+        _UPDATE_SPUR_MERK[key] = time.time()
+        alarm_senden(2, "tages_neustart_aus", f"Täglicher Neustart ausgefallen: {wer_txt}"[:120],
+                     f"{wer_txt}: {grund or 'kein ruhiger Moment im Fenster'} — heute nicht neu gestartet, morgen neuer Versuch im Fenster.",
+                     uid=uid, daten={"pc": pc, "grund": grund}, schluessel=f"tages_neustart|{pc}")
+        return jsonify({"ok": True})
     key = f"{pc}|tab-heil"
     if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 3600:
         return jsonify({"ok": True, "gedrosselt": True})
@@ -21853,6 +21863,120 @@ def lotse_plan_stand(signale_laeuft, plaene, uids, pc, jetzt):
             "riegel_tv": tab_stand_riegel(signale_laeuft, tv, pc, jetzt)}
 
 
+# ══ TÄGLICHER NEUSTART JE PC (DR1, Finn 05.11.2026: „Wenn man das komplette Backend und auch die Prophos-Seite daily einmal neu startet, dann
+# müsste ja der RAM in der Cache gelöscht werden.“). Railway sagt dem Panel im Tab-Stand nur, OB dieser PC jetzt neu starten darf; den Neustart
+# macht das Panel (panel.py TÄGLICHER NEUSTART). Einstellung: puls_heim_regel.pc_neustart (sql/2026-11-05_pc_neustart.sql) — an (Standard aus),
+# Fenster von/bis in tz (Vorschlag 02:30–05:00 Dubai), nur_pcs (leer = alle), ruhe_vor_start_min (30). Ruhig = kein Signal läuft auf dem PC,
+# kein Polar-Lauf der IDs, kein Plan open, kein Überprüfen-Plan mit offenem Hedge, kein Start in den nächsten ruhe_vor_start_min (Handpläne und
+# bestätigte Vorschläge), kein Claim < 15 min. Gelesen wird nur, wenn an + PC frei + Fenster offen (sonst keine Abfrage). Fehler → nicht ruhig. ══
+PC_NEUSTART_STANDARD = {"an": False, "tz": "Asia/Dubai", "von": "02:30", "bis": "05:00", "nur_pcs": [], "ruhe_vor_start_min": 30}
+
+
+def pc_neustart_regel(roh):
+    """REIN RECHNEND (testbar): puls_heim_regel.pc_neustart → vollständige Regel; Fehlendes/Ungültiges → Standard (an bleibt dann aus)."""
+    r = dict(PC_NEUSTART_STANDARD)
+    if not isinstance(roh, dict):
+        return r
+    r["an"] = roh.get("an") is True
+    for k in ("von", "bis"):
+        v = str(roh.get(k) or "")
+        if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", v):
+            r[k] = v
+    if isinstance(roh.get("tz"), str) and roh.get("tz"):
+        try:
+            _ap_tz(roh["tz"])
+            r["tz"] = roh["tz"]
+        except Exception:
+            pass
+    if r["von"] == r["bis"]:
+        r["an"] = False                              # leeres Fenster = nie
+    if isinstance(roh.get("nur_pcs"), list):
+        r["nur_pcs"] = [str(x).strip().lower() for x in roh["nur_pcs"] if re.fullmatch(r"pc-[a-z0-9]{4,12}", str(x).strip().lower())]
+        if roh["nur_pcs"] and not r["nur_pcs"]:
+            r["nur_pcs"] = ["-"]                     # nur Tippfehler in der Liste → KEIN PC (leer hieße „alle“)
+    try:
+        r["ruhe_vor_start_min"] = max(5, min(240, int(roh.get("ruhe_vor_start_min"))))
+    except (TypeError, ValueError):
+        pass
+    return r
+
+
+def pc_neustart_fenster(regel, jetzt):
+    """REIN RECHNEND (testbar): (tag, offen, vorbei) in regel.tz. tag = Kalendertag des Fensterbeginns (über Mitternacht: Vortag)."""
+    lok = jetzt.astimezone(_ap_tz(regel.get("tz") or "Asia/Dubai"))
+    m, von, bis = lok.hour * 60 + lok.minute, _ap_hhmm(regel["von"]), _ap_hhmm(regel["bis"])
+    if von < bis:
+        return lok.date().isoformat(), von <= m < bis, m >= bis
+    # Fenster über Mitternacht (z. B. 23:30–02:00): vor bis = Fenster vom Vortag; zwischen bis und von = das zuletzt beendete Fenster, also auch
+    # vom Vortag (sonst wäre der neue Tag nach dem Fensterende schon „vorbei, nicht erledigt“ → täglicher Fehlalarm, Prüfer DR1); ab von = heute
+    ab_von = m >= von
+    tag = lok.date() if ab_von else (lok.date() - timedelta(days=1))
+    return tag.isoformat(), ab_von or m < bis, bis <= m < von
+
+
+def pc_neustart_unruhe(plaene, signale, polar, jetzt, ruhe_min, pc):
+    """REIN RECHNEND (testbar): EIN Grund, warum der PC gerade nicht neu starten darf, sonst ''."""
+    if signale:
+        return f"Puls/Signal läuft auf diesem PC ({len(signale)})"
+    if polar:
+        return "Polar-Lauf der IDs dieses PCs"
+    for p in plaene or ():
+        st = str(p.get("status") or "")
+        hp = p.get("hedge_pc")
+        if st == "open":
+            return "Trade läuft (open)"
+        if st == "review" and p.get("hedge_status") in ("offen", "oeffnet", "schliesst", "unklar") and (not hp or hp == pc):
+            return "Überprüfen-Plan mit offenem Hedge"
+        if st != "planned":
+            continue
+        gest, su = _ap_ts(p.get("start_um_gestartet_at")), _ap_ts(p.get("start_um"))
+        if gest is not None and (jetzt - gest).total_seconds() < 900:
+            return "Start geclaimt (< 15 min)"
+        # bis 60 min NACH start_um kann der Tab noch starten (Nachholen, Farmer-Fenster 60 min, Startsperren — Prüfer DR1)
+        if gest is None and su is not None and -3600 <= (su - jetzt).total_seconds() <= ruhe_min * 60 \
+                and (not p.get("auto_plan") or p.get("auto_bestaetigt_at")):
+            return f"Start in {max(0, int((su - jetzt).total_seconds() // 60))} min"
+    return ""
+
+
+def pc_neustart_sicht(regel_roh, pc, jetzt, laden):
+    """Feld tages_neustart des Tab-Stands. laden(ruhe_min) → (plaene, polar) wird nur aufgerufen, wenn an + PC frei + Fenster offen."""
+    r = pc_neustart_regel(regel_roh)
+    tag, offen, vorbei = pc_neustart_fenster(r, jetzt)
+    out = {"an": r["an"], "pc_frei": (not r["nur_pcs"]) or pc in r["nur_pcs"], "tag": tag, "offen": offen, "vorbei": vorbei,
+           "ruhig": False, "grund": ""}
+    if not (out["an"] and out["pc_frei"] and offen):
+        return out
+    try:
+        plaene, polar, signale = laden(r["ruhe_vor_start_min"])
+    except Exception as e:
+        out["grund"] = f"Ruhe nicht prüfbar ({type(e).__name__})"
+        return out
+    out["grund"] = pc_neustart_unruhe(plaene, signale, polar, jetzt, r["ruhe_vor_start_min"], pc)
+    out["ruhig"] = not out["grund"]
+    return out
+
+
+def _pc_neustart_laden(uids, sig, jetzt, pc):
+    def laden(ruhe_min):
+        if not uids:
+            raise ValueError("keine ID an diesem PC")
+        u = "in.(" + ",".join(uids) + ")"
+        sel = ("status,start_um,start_um_gestartet_at,auto_plan,auto_bestaetigt_at,"
+               "hedge_status:mt5_baseline->hedge->>status,hedge_pc:mt5_baseline->hedge->>pc")
+        plaene = sb_select("trade_plans", {"select": sel,
+                                           "user_id": u, "or": f"(status.in.(open,review),and(status.eq.planned,start_um.is.null),"
+                                                               f"and(status.eq.planned,start_um.lte.{(jetzt + timedelta(minutes=ruhe_min)).isoformat()},"
+                                                               f"start_um.gte.{(jetzt - timedelta(hours=12)).isoformat()}))", "limit": "500"}) or []
+        # Hedges, die DIESER PC hält, auch für IDs, die nicht in seinen mt5_live-Zeilen stehen (Prüfer DR1, wie puls_heim_pruefen)
+        plaene += sb_select("trade_plans", {"select": sel, "status": "in.(open,review)", "mt5_baseline->hedge->>pc": f"eq.{pc}",
+                                            "limit": "50"}) or []
+        polar = sb_select("polar_lauf", {"select": "id", "status": "not.in.(fertig,abbruch)", "or": f"(master_user_id.{u},slave_user_id.{u})",
+                                         "updated_at": "gte." + (jetzt - timedelta(minutes=30)).isoformat(), "limit": "3"}) or []
+        return plaene, polar, sig
+    return laden
+
+
 @app.route("/code/tab-stand/<pc>", methods=["GET"])
 def code_tab_stand(pc):
     """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel}. Nur Lesen."""
@@ -21905,8 +22029,13 @@ def code_tab_stand(pc):
         print(f"[tab-stand] {pc}: {spur}", flush=True)
     if request.headers.get("User-Agent") != "prophos-agent":   # der Lotse-Agent schickt keine Spur, sonst wäre der Grund bei jeder Eingabe leer
         tab_nl_merken(_tab_nl_stand, pc, spur, (request.args.get("ergebnis") or "").strip()[:300], request.args.get("ergebnis_at"), time.time())
+    try:   # DR1 (05.11.2026): täglicher Neustart — Fehler nie den Tab-Stand kosten lassen, dann eben „aus“
+        tn = pc_neustart_sicht((_puls_heim_regel() or {}).get("pc_neustart"), pc, jetzt, _pc_neustart_laden(uids, sig, jetzt, pc))
+    except Exception as e:
+        tn = {"an": False, "grund": f"nicht lesbar ({type(e).__name__})"}
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
+                    "tages_neustart": tn,
                     **lotse_plan_stand(sig, plaene, uids, pc, jetzt),
                     "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 

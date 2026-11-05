@@ -693,6 +693,20 @@ def hedge_bereit_rest(pfad, jetzt):
     return max(0.0, min(900.0, rest))
 
 
+NEUSTART_WUNSCH = "copier_neustart.json"   # Täglicher Neustart (DR1, 05.11.2026): Panel schreibt {at}, der Copier startet flach neu
+NEUSTART_WUNSCH_S = 15 * 60
+
+
+def neustart_wunsch_offen(pfad, jetzt):
+    """REIN RECHNEND bis auf das Lesen (testbar): liegt ein frischer Neustart-Wunsch des Panels da (at jünger als NEUSTART_WUNSCH_S, nicht
+    in der Zukunft)? Fehlt/kaputt/alt → False. Ein alter Wunsch wird nie ausgeführt (sonst startete ein Copier Stunden später ohne Ruhe-Prüfung)."""
+    try:
+        at = float((load_json(pfad) or {}).get("at") or 0)
+    except (FileNotFoundError, ValueError, OSError, TypeError, AttributeError, json.JSONDecodeError):
+        return False
+    return 0 <= float(jetzt) - at < NEUSTART_WUNSCH_S
+
+
 SOLO_MAGIC = 790001
 SOLO_KOMMENTAR = "PXsolo"
 SOLO_KOMMENTAR_MAX = 31    # MT5: Order-Kommentar hoechstens 31 Zeichen
@@ -2643,6 +2657,24 @@ def main():
                     log(f"↻ Update {_LAUF['version']} → {rv} verfuegbar — warte, bis alle Master "
                         f"flach sind ({', '.join(busy)}).")
                 update_warte.update(auf=rv, grund=busy[:6])
+
+            # TÄGLICHER NEUSTART (DR1, Finn 05.11.2026: „das komplette Backend … daily einmal neu starten, dann müsste der RAM … gelöscht
+            # werden"): das Panel legt copier_neustart.json ab — derselbe saubere Weg wie das Selbst-Update, also NUR wenn alle Master flach
+            # sind und kein Start bevorsteht. Ein Wunsch gilt NEUSTART_WUNSCH_S; danach verfällt er still (dann eben morgen).
+            if neustart_wunsch_offen(os.path.join(here, NEUSTART_WUNSCH), time.time()):
+                busy_w = [m.file for m in masters if getattr(m, "busy", True)]
+                if hedge_bereit_rest(os.path.join(here, HEDGE_BEREIT), time.time()) > 0:
+                    busy_w.append("Start steht bevor")
+                if not busy_w:
+                    try:
+                        os.remove(os.path.join(here, NEUSTART_WUNSCH))
+                        _weg = True
+                    except OSError as e:   # nicht löschbar → KEIN Neustart (sonst 15 min lang Neustart-Schleife, Prüfer DR1)
+                        _weg = False
+                        log(f"⚠ Täglicher Neustart: {NEUSTART_WUNSCH} nicht löschbar ({type(e).__name__}) — kein Neustart")
+                    if _weg:
+                        log("↻ Täglicher Neustart (Wunsch vom Panel) — alle Master flach, starte neu (start-copier.bat).")
+                        break
 
             # Neue/geloeschte config*.json → Neustart, damit die Flotten-Pruefung
             # und die Startpruefungen fuer den neuen Master laufen.

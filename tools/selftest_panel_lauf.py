@@ -52,6 +52,7 @@ check('_GELADEN["version"] = remote' in SRC, "VERSION nachgezogen → panel_lauf
 import json as _json
 ns["json"] = _json
 ns["read_json"] = lambda p, d=None: (_json.load(open(p)) if os.path.exists(p) else d)
+ns["tages_neustart_info"] = lambda: None   # DR1 (05.11.2026): eigener Test tools/selftest_tages_neustart.py
 info = ns["panel_lauf_info"]()
 check(info["version"] == "2026-09-22.2011" and re.fullmatch(r"[0-9a-f]{12}", info["sha12"] or "") and info["pid"] == os.getpid()
       and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", info["start_at"]) and info["datei"] == "panel.py", f"panel_lauf_info: {info}")
