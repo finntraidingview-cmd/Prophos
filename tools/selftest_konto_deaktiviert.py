@@ -89,9 +89,11 @@ def sb_all(t, p):
     if t == "accounts" and p.get("account_type") == "eq.funded_cfd":
         return [dict(a) for a in KONTEN]
     if t == "accounts":
-        return [{"id": "f", "name": "Fusion", "firm": "Fusion Markets"}]
+        # RT1 (05.11.2026): seit 1bc0f4eb (02.11.2026) liest fcp_planen das Hedge-Konto durch gp_hedge_settings_eigen — es zählt nur ein
+        # Konto der eigenen ID (Besitzer + Login); das nachgebaute Fusion-Konto gehört deshalb U und trägt einen Login
+        return [{"id": "f", "name": "Fusion", "firm": "Fusion Markets", "user_id": U, "external_id": "430095"}]
     if t == "user_settings":
-        return [{"user_id": U, "value": {"accountId": "f"}}]
+        return [{"user_id": U, "value": {"accountId": "f", "hedgeLogin": "430095"}}]
     if t == "firm_specs":
         return [{"user_id": U, "name": "The5%ers", "ppl": 1.0, "unit": "Lots"}]
     return []
