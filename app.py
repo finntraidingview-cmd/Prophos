@@ -18548,7 +18548,12 @@ def reader_feed_token():
 # liefert es denselben Stand aus. Zugang NUR mit dem PC-Schlüssel, den der eingeloggte Prophos-Tab ohnehin für den Reader holt
 # (uid.pc.sig, reader_feed_token_pruefen) — kein neues Geheimnis. Einzelne IDs sperren: Env CODE_SPERRE (user_ids, komma-getrennt).
 # Nur Dateien der PC-Seite (app.py, prophos.html, requirements.txt, mt5-copier/*, tv-reader/*), nie Pfade mit „..".
-CODE_PFAD_MUSTER = re.compile(r"^(app\.py|prophos\.html|sw\.js|requirements\.txt|(?:mt5-copier|tv-reader)/[A-Za-z0-9_][A-Za-z0-9_.-]{0,80})$")
+# LO1 (05.11.2026, Lotse auf Emins PC pc-onkrbk per PowerShell statt Parsec-Kopie): dazu die PC-Dateien von pc-fernzugriff — setup-pc.ps1,
+# rueckbau-pc.ps1, diagnose.ps1, agent/<datei>, foto/<datei> (je eine Ebene). NIE mac/ (Mac-Seite), acl.hujson (Tailnet-Regeln), ANLEITUNG.md,
+# foto/mac/ — die gehören nicht auf PCs. Geprüft: keine Geheimnisse in diesen Dateien (Tailscale-Key fragt setup-pc.ps1 per Read-Host ab).
+_CODE_NAME = r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}"
+CODE_PFAD_MUSTER = re.compile(r"^(app\.py|prophos\.html|sw\.js|requirements\.txt|(?:mt5-copier|tv-reader)/" + _CODE_NAME
+                              + r"|pc-fernzugriff/(?:setup-pc\.ps1|rueckbau-pc\.ps1|diagnose\.ps1|(?:agent|foto)/" + _CODE_NAME + r"))$")
 _CODE_WURZEL = os.path.dirname(os.path.abspath(__file__))
 
 
