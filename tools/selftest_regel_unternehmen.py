@@ -173,6 +173,24 @@ out = app.ap_menge_wache(_dt(2026, 11, 5, 6, 0, tzinfo=_tz.utc), {"regeln": STD,
 check([m[0] for m in MW] == ["eq.ph"] and MW[0][1]["master_contracts"] == 1,
       f"Mengen-Wache: Emins Plan (2 Kontrakte = seine Regel) bleibt, HT-Plan 2 → 1 nach Standard ({MW})")
 
+print("5) Kontoliste je Unternehmen (Finn-Foto Login Emin .2065: „0 im Planer“ bei jeder Firma)")
+KS = []
+app.ap_konten_stand = lambda r: KS.append(sorted(r.get("user_ids") or [])) or [{"id": "k" + u[:2], "user_id": u, "firma": "lucidtrading"} for u in r.get("user_ids") or []]
+app.ap_planer_gruppen = lambda nur_aktiv=False: [{"gruppe_id": "gr-emin", "ids": frozenset({EMIN, "jona"}), "aktiv": True}]
+app.sb_select = lambda t, p: [dict(ZEILE)] if t == "auto_plan_gruppe" else []
+app._ap_ks_cache.clear()
+r = c.get("/admin/auto-plan/konten-stand")
+d = r.get_json() or {}
+check(r.status_code == 200 and d.get("unternehmen") == "gr-emin" and KS[-1] == sorted([EMIN, "jona"]) and len(d.get("konten") or []) == 2,
+      f"Verwalter Emin: Konten aller IDs seiner Gruppe ({r.status_code}, {KS[-1:]}) statt 403 → „0 im Planer\"")
+app._ap_zugang = lambda admin_reiter=False: (True, "admin", reg0, None)
+app._ap_ks_cache.clear()
+r = c.get("/admin/auto-plan/konten-stand?unternehmen=gr-emin")
+r0 = c.get("/admin/auto-plan/konten-stand")
+check(r.status_code == 200 and (r.get_json() or {}).get("unternehmen") == "gr-emin" and r0.status_code == 200 and (r0.get_json() or {}).get("unternehmen") is None
+      and KS[-1] == [], f"Admin: ?unternehmen= → Konten der Gruppe, ohne → Standard wie bisher (HT user_ids) ({KS})")
+check("'/konten-stand' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')" in html, "Frontend lädt die Kontoliste des gewählten Unternehmens")
+
 print()
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER:\n  - " + "\n  - ".join(FEHLER))
 sys.exit(1 if FEHLER else 0)

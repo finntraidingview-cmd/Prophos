@@ -37078,20 +37078,9 @@ def admin_auto_plan_einstellungen():
     if request.method == "OPTIONS":
         return "", 200
     admin, uid, reg, err = _ap_zugang()
-    # REGEL JE UNTERNEHMEN (Phase 1): ein Verwalter sieht die wirksame Regel SEINES Unternehmens (Standard + Abweichung), ein Admin wählt
-    # ?unternehmen=<gruppe_id> (ohne = Standard, heute = was HT bearbeitet). Statt „⚠ Diese ID ist nicht im Auto-Planer" (Finn-Foto Login Emin).
-    unt = None
+    unt, err = _ap_einst_unternehmen(admin, uid, reg, err)
     if err:
-        if not (uid and not admin and reg and err[1] == 403):
-            return err
-        try:
-            unt = next((str(g["id"]) for g in admin_gruppen_daten().get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)), None)
-        except Exception as e:
-            print(f"[einstellungen] ⚠️ Unternehmen {str(uid)[:8]}: {type(e).__name__}: {e}", flush=True)
-        if not unt:
-            return err
-    elif admin and request.args.get("unternehmen"):
-        unt = str(request.args.get("unternehmen"))
+        return err
     zeile = None
     if unt:
         zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{unt}"}) or [None])[0]
@@ -37401,25 +37390,60 @@ def ap_konten_stand(reg, jetzt=None):
     return out
 
 
+def _ap_einst_unternehmen(admin, uid, reg, err):
+    """REGEL JE UNTERNEHMEN (Phase 1): welches Unternehmen zeigen die Einstellungen? → (gruppe_id | None = Standard, Fehler | None). Ein Verwalter
+    (403 aus _ap_zugang, weil nicht im HT-Planer) sieht SEIN Unternehmen, ein Admin wählt ?unternehmen=<gruppe_id>. Statt „⚠ Diese ID ist nicht
+    im Auto-Planer" (Finn-Foto Login Emin). Gemeinsam für GET /einstellungen und /konten-stand."""
+    if err:
+        if not (uid and not admin and reg and err[1] == 403):
+            return None, err
+        unt = None
+        try:
+            unt = next((str(g["id"]) for g in admin_gruppen_daten().get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)), None)
+        except Exception as e:
+            print(f"[einstellungen] ⚠️ Unternehmen {str(uid)[:8]}: {type(e).__name__}: {e}", flush=True)
+        return (unt, None) if unt else (None, err)
+    if admin and request.args.get("unternehmen"):
+        return str(request.args.get("unternehmen")), None
+    return None, None
+
+
 @app.route("/admin/auto-plan/konten-stand", methods=["GET", "OPTIONS"])
 def admin_auto_plan_konten_stand():
     """GET → {ok, konten: [...]} — Kontoliste je Firma für die Einstellungen (60 s gemerkt). Gate wie /einstellungen."""
     if request.method == "OPTIONS":
         return "", 200
     admin, uid, reg, err = _ap_zugang()
+    unt, err = _ap_einst_unternehmen(admin, uid, reg, err)
     if err:
         return err
-    if _ap_ks_cache.get("bis", 0) < time.time():
-        try:
-            _ap_ks_cache.update(konten=ap_konten_stand(reg), bis=time.time() + AP_KS_TTL_S, fehler=None)
-        except Exception as e:
-            _ap_ks_cache.update(konten=[], bis=time.time() + 10, fehler=f"{type(e).__name__}: {e}")
-    # ohne Admin nur die eigenen Konten (Gate _ap_zugang: eine Planer-ID sieht nur ihre Zeilen — S6-Review E3c)
-    konten = _ap_ks_cache.get("konten") or []
-    if not admin:
-        konten = [k for k in konten if k.get("user_id") == str(uid)]
-    resp = jsonify(json.loads(json.dumps({"ok": True, "admin": bool(admin), "konten": konten,
-                                          "fehler": _ap_ks_cache.get("fehler")}, default=str)))
+    if unt:
+        # REGEL JE UNTERNEHMEN (Finn-Foto Login Emin .2065: „0 im Planer" bei jeder Firma): Konten der IDs DIESES Unternehmens, gezählt wie bei HT
+        # (AP_TYPEN, ohne Archiv), Ziel/Consistency nach seiner wirksamen Regel. Der Verwalter sieht alle Konten seiner Gruppe.
+        c = _ap_ks_cache.setdefault("je", {}).setdefault(unt, {})
+        if c.get("bis", 0) < time.time():
+            try:
+                gr = next((g for g in ap_planer_gruppen() if str(g["gruppe_id"]) == unt), None)
+                if not gr:
+                    return jsonify({"ok": False, "msg": "Unternehmen ohne Planer-Zeile"}), 404
+                zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{unt}"}) or [None])[0]
+                reg_u = dict(ap_reg_unternehmen(reg, zeile), user_ids=sorted(gr["ids"]))
+                c.update(konten=ap_konten_stand(reg_u), bis=time.time() + AP_KS_TTL_S, fehler=None)
+            except Exception as e:
+                c.update(konten=[], bis=time.time() + 10, fehler=f"{type(e).__name__}: {e}")
+        konten, fehler = c.get("konten") or [], c.get("fehler")
+    else:
+        if _ap_ks_cache.get("bis", 0) < time.time():
+            try:
+                _ap_ks_cache.update(konten=ap_konten_stand(reg), bis=time.time() + AP_KS_TTL_S, fehler=None)
+            except Exception as e:
+                _ap_ks_cache.update(konten=[], bis=time.time() + 10, fehler=f"{type(e).__name__}: {e}")
+        # ohne Admin nur die eigenen Konten (Gate _ap_zugang: eine Planer-ID sieht nur ihre Zeilen — S6-Review E3c)
+        konten, fehler = _ap_ks_cache.get("konten") or [], _ap_ks_cache.get("fehler")
+        if not admin:
+            konten = [k for k in konten if k.get("user_id") == str(uid)]
+    resp = jsonify(json.loads(json.dumps({"ok": True, "admin": bool(admin), "konten": konten, "unternehmen": unt,
+                                          "fehler": fehler}, default=str)))
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
