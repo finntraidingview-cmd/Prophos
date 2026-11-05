@@ -39120,10 +39120,17 @@ def kz_rechnen(a, ctx):
         else:
             kach.append(kz_cons_kachel(None, None, None, None, "", "fcp_consistency_pct: keine"))
         gt = jg.get("gewinntage") if isinstance(jg.get("gewinntage"), dict) else None
-        gti = fcp_gewinntage_ist(gt, aid, plaene, seit) if gt else None
+        # GT2: Korrektur von Hand (accounts.fcp_gewinntage, nur dieser Zyklus) — dieselbe wie Planer und Radar; auto = Prophos-Zählung ohne Korrektur
+        _gk = fcp_gt_korrektur(ctx.get("fcp_gt"), zyklus) if gt else 0   # Route liest accounts.fcp_gewinntage (fcp_gt_korr_laden) in ctx
+        gti_auto = fcp_gewinntage_ist(gt, aid, plaene, seit) if gt else None
+        gti = fcp_gewinntage_ist(gt, aid, plaene, seit, _gk) if gt else None
         if gt:
             kach.append(kz_tage_kachel("tage", "Gewinntage", gti[0] if gti else None, gti[1] if gti else None,
-                                       f"Tage ≥ {kz_usd(_wd_num(gt.get('min')))} im Zyklus", "je_groesse.gewinntage — Zählung wie der Planer"))
+                                       f"Tage ≥ {kz_usd(_wd_num(gt.get('min')))} im Zyklus" + (f" · {_gk:+d} von Hand" if _gk else ""),
+                                       "je_groesse.gewinntage — Zählung wie der Planer (Summe aller abgeschlossenen Trades je Berlin-Tag)"
+                                       + (" + Korrektur von Hand (Account bearbeiten → Gewinntage)" if _gk else "")))
+            out["gewinntage"] = {"ist": gti[0] if gti else None, "soll": gti[1] if gti else None, "auto": gti_auto[0] if gti_auto else None,
+                                 "korrektur": _gk, "zyklus": zyklus, "min": _wd_num(gt.get("min"))}
         checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting" + (" (fest)" if z_fest is not None else ""),
                        (f"{kz_usd(gewinn, 0, True)} / {kz_usd(z_fest if z_fest is not None else bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")])
         if _oda:
@@ -39334,6 +39341,7 @@ def konto_ziele():
         if typ == "funded_cfd":
             ctx["fcp_regel"] = fd_unt_reg(_fcp_regeln_laden() or {}, "cfd", a.get("user_id")) or {}   # UNT4: Regel des Unternehmens der ID
             ctx["fcp_pay"] = ctx["payouts"]
+            ctx["fcp_gt"] = fcp_gt_korr_laden([kid]).get(kid)   # GT2: Gewinntage von Hand (kz_rechnen bleibt rein rechnend)
         elif typ in ("funded", "winning_days"):
             ctx["wd_firmen_regeln"] = _wd_firmen_regeln_lesen()
             pay, verkn = [], set()
@@ -40907,6 +40915,7 @@ def zw_funded_cfd():
                                          "status": "in.(completed,review)"}) or []:
             gt_plaene.setdefault(str(p.get("master_account_id")), []).append(p)
     gt_ids = {str(a["id"]) for a in gt_konten}
+    gt_korr = fcp_gt_korr_laden(sorted(gt_ids)) if gt_ids else {}   # GT2: Gewinntage von Hand (wie der Planer)
     for a in konten:
         aid = str(a["id"])
         regel = ap_regel_finden(firmen_von(a), a.get("firm"))   # UNT4
@@ -40915,7 +40924,7 @@ def zw_funded_cfd():
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
             if aid in gt_ids:
                 gti = fcp_gewinntage_ist((fcp_je_groesse(regel, _wd_konto_groesse(a)) or {}).get("gewinntage"), aid, gt_plaene.get(aid, []),
-                                         fcp_gewinntage_seit(zyk.get(aid), a.get("created_at")))
+                                         fcp_gewinntage_seit(zyk.get(aid), a.get("created_at")), fcp_gt_korrektur(gt_korr.get(aid), n.get(aid, 0) + 1))
                 if not gti or int(gti[0]) < int(gti[1]):
                     _zw["ziele"].pop(aid, None)
 
@@ -44333,16 +44342,46 @@ def fcp_cons_rechnen(pct, ziel, gewinn, tage):
     return {"tp": tp, "ende": round(F), "deckel": round(c, 2), "rest": round(R, 2), "n": n, "k": k, "bester_tag": B, "p": float(pct), "fertig": False, "lesbar": True}
 
 
-def fcp_gewinntage_ist(gt, konto_id, plaene, seit_tag=None):
+def fcp_gewinntage_ist(gt, konto_id, plaene, seit_tag=None, korrektur=0):
     """REIN RECHNEND (testbar): (ist, soll) der Gewinntage im laufenden Zyklus oder None (Regel ohne gewinntage). plaene = Trades des Kontos; seit_tag =
     erster Berlin-Tag des Zyklus (fcp_zyklus_start bzw. Anlegetag des Kontos im 1. Zyklus). Zählung = ap_tage_ist mit einem Hilfs-Konto
-    (goal_kind winning_days, goal_min_profit = gt.min, goal_since = seit_tag): Berlin-Tag des Trade-Endes, Tagessumme master_pl ≥ min."""
+    (goal_kind winning_days, goal_min_profit = gt.min, goal_since = seit_tag): Berlin-Tag des Trade-Endes, Tagessumme master_pl ≥ min — ALLE
+    abgeschlossenen Trades des Kontos an dem Tag, auch Hand-Trades. korrektur = ± Tage von Hand (GT2, fcp_gt_korrektur), nie unter 0."""
     g = gt or {}
     anz, mn = _wd_num(g.get("anzahl")), _wd_num(g.get("min"))
     if not anz or anz <= 0 or not mn or mn <= 0:
         return None
-    return ap_tage_ist({"id": konto_id, "goal_kind": "winning_days", "goal_min_profit": mn, "goal_target": int(anz), "goal_done_offset": 0,
+    return ap_tage_ist({"id": konto_id, "goal_kind": "winning_days", "goal_min_profit": mn, "goal_target": int(anz), "goal_done_offset": int(korrektur or 0),
                         "goal_since": seit_tag or None}, plaene)
+
+
+# GEWINNTAGE VON HAND (GT2, Finn 05.11.2026, Blue Guardian 100k …7770 Funded CFD: „Ich wollte jetzt gerade unter Settings dem quasi +1 Tag hinzufügen, aber ich
+# kann es hier nirgends sehen … Wenn ich auf den Account draufdrücke, kann ich diese Gewinntage nicht bearbeiten"): accounts.fcp_gewinntage = {zyklus, korrektur,
+# at} (sql/2026-11-05_fcp_gewinntage_korrektur.sql). Gilt NUR im Payout-Zyklus, in dem sie gesetzt wurde (wie fcp_ziel) — nach dem nächsten Payout zählt
+# Prophos wieder von 0, ohne dass jemand zurücksetzen muss. Planer, Radar/Abhak und Konto-Seite lesen denselben Wert (fcp_gt_korr_laden) → ein Stand überall.
+def fcp_gt_korrektur(wert, zyklus):
+    """REIN RECHNEND (testbar): ± Tage aus accounts.fcp_gewinntage für den Zyklus zyklus (int) — anderer Zyklus, kaputt oder leer → 0."""
+    if not isinstance(wert, dict):
+        return 0
+    z, k = _wd_num(wert.get("zyklus")), _wd_num(wert.get("korrektur"))
+    if z is None or k is None or zyklus is None or int(z) != int(zyklus):
+        return 0
+    return max(-99, min(99, int(round(k))))
+
+
+def fcp_gt_korr_laden(ids):
+    """{konto_id: accounts.fcp_gewinntage} für ids — Spalte fehlt (SQL nicht eingespielt) oder Lesefehler → {} (Zählung wie bisher, ohne Korrektur)."""
+    out = {}
+    ids = [str(i) for i in (ids or []) if i]
+    try:
+        for i in range(0, len(ids), 150):
+            for r in _sb_all("accounts", {"select": "id,fcp_gewinntage", "id": "in.(" + ",".join(ids[i:i + 150]) + ")"}) or []:
+                if isinstance(r.get("fcp_gewinntage"), dict):
+                    out[str(r["id"])] = r["fcp_gewinntage"]
+    except Exception as e:
+        print(f"[gewinntage] ⚠️ fcp_gewinntage nicht lesbar ({type(e).__name__}) — ohne Korrektur von Hand", flush=True)
+        return {}
+    return out
 
 
 def fcp_gewinntage_seit(zyklus_tag, konto_created_at):
@@ -44670,6 +44709,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     archiv = _ap_archiviert()
     konten = [a for a in ap_deaktiviert_anwenden(konten) if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
     ids = [str(a["id"]) for a in konten]
+    gt_korr = fcp_gt_korr_laden(ids)     # GT2: Gewinntage von Hand je Konto + Zyklus (Spalte fehlt → {})
     plaene, pend, verw, buch = [], [], [], []
     payouts_ok = True                    # Payout-Quellen nicht lesbar → nie Refund-Modus (Zyklus gilt als „schon ausgezahlt", fail-closed)
     for i in range(0, len(ids), 80):
@@ -44795,8 +44835,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
         # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
-        gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None) \
-            if isinstance(jg.get("gewinntage"), dict) else None
+        gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")),
+                                  fcp_gt_korrektur(gt_korr.get(aid), payout_n.get(aid, 0) + 1)) if payouts_ok else None) \
+            if isinstance(jg.get("gewinntage"), dict) else None   # GT2: + Korrektur von Hand des laufenden Zyklus
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
                               max_sl=a.get("max_risiko_trade"), param=param_u,      # E1b: Planer-Parameter aus der DB (fcp_param)

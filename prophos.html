@@ -15249,6 +15249,19 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">FundedNext On-Demand: Ziel 2–2,25 % · Consistency 40 % · kein Refund-Trade · Payout anfragbar, sobald Ziel + Consistency erfüllt sind</div>
         </div>
         <div id="ac-ziel-fest" hidden style="grid-column:1/-1;font-size:12px;color:var(--sub)"></div>
+        <!-- GT2 (05.11.2026, Finn — Blue Guardian 100k …7770: „Wenn ich auf den Account draufdrücke, kann ich diese Gewinntage nicht bearbeiten … von 1 zu 3"):
+             Stand der Gewinntage im laufenden Payout-Zyklus, nur bei Funded-CFD-Konten mit Mindest-$-Tagen (Regel je_groesse.gewinntage). Zahlen aus
+             GET /konto-ziele (dieselbe Zählung wie Planer/Radar). „Setzen“ speichert sofort die Differenz zur Zählung als accounts.fcp_gewinntage
+             {zyklus, korrektur} — gilt nur in diesem Zyklus (sql/2026-11-05_fcp_gewinntage_korrektur.sql). -->
+        <div class="field" id="ac-gt-feld" hidden style="grid-column:1/-1">
+          <label for="ac-gt-ist">Gewinntage (dieser Payout-Zyklus)</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="input mono" type="number" id="ac-gt-ist" min="0" step="1" style="width:80px">
+            <span id="ac-gt-soll" style="color:var(--sub)"></span>
+            <button type="button" class="btn btn-ghost btn-xs" id="ac-gt-setzen">Setzen</button>
+          </div>
+          <div id="ac-gt-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+        </div>
         <!-- Auto-Planer-Haken (08.10.2026, Finn: „unter Accounts eine grobe Übersicht, welche Accounts gerade im Auto-Planer drin
              sind — so einen Haken: Auto-Planer"): Spalte accounts.auto_planer. Aus = Nachtlauf und Nachplanen lassen das Konto aus
              (Grund im Lauf). Ob es sonst drin ist (Typ, Firma, Balance, Ziel), entscheidet weiter der Planer; die Liste zeigt den
@@ -45680,6 +45693,63 @@
     const zf = acc && acc.type === 'funded_cfd' ? accZielFestText(acc) : ''
     if(accEls.zielFest){ accEls.zielFest.hidden = !zf; accEls.zielFest.textContent = zf ? `Festes Ziel (Funded-CFD-Planer): ${zf} — neu gewürfelt nach dem nächsten Payout` : '' }
   }
+  /* GEWINNTAGE VON HAND (GT2, Finn 05.11.2026, Blue Guardian 100k …7770): Feld „Gewinntage (dieser Payout-Zyklus)“ im Account-Modal. Stand, Zählung und
+   * Zyklus aus GET /konto-ziele (app.py kz_rechnen → out.gewinntage: ist, soll, auto, korrektur, zyklus, min — dieselbe Zählung wie Planer/Radar). „Setzen“
+   * schreibt accounts.fcp_gewinntage = { zyklus, korrektur: Wert − Zählung } sofort (0 → leer), danach neu laden. Nur Funded CFD mit Mindest-$-Tagen. */
+  const _accGt = { id: null, d: null }
+  // Stand aus /konto-ziele → out.gewinntage | null (Regel ohne Mindest-$-Tage, Fehler)
+  async function accGtHolen(id){
+    const { data: { session } } = await supabase.auth.getSession()
+    const tok = session?.access_token; if(!tok) return null
+    const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    return (!r.ok || d.ok === false || !d.gewinntage || d.gewinntage.soll == null) ? null : d.gewinntage
+  }
+  async function accGtFeldSetzen(acc){
+    const feld = document.getElementById('ac-gt-feld'); if(!feld) return
+    feld.hidden = true; _accGt.id = acc && acc.id != null ? String(acc.id) : null; _accGt.d = null
+    if(!acc || acc.type !== 'funded_cfd' || _accGt.id == null) return
+    const id = _accGt.id
+    try{
+      const g = await accGtHolen(id)
+      if(_accGt.id !== id || !g) return   // anderes Konto geöffnet / kein Feld
+      accGtZeigen(g)
+    }catch(e){ console.warn('[gewinntage] Stand nicht lesbar', e) }
+  }
+  function accGtZeigen(g){
+    _accGt.d = g
+    const feld = document.getElementById('ac-gt-feld'), inp = document.getElementById('ac-gt-ist'), soll = document.getElementById('ac-gt-soll'), hint = document.getElementById('ac-gt-hint')
+    if(!feld || !inp) return
+    const de = v => Math.round(Number(v) || 0).toLocaleString('de-DE')
+    inp.value = g.ist != null ? String(g.ist) : ''
+    if(soll) soll.textContent = `von ${g.soll}`
+    if(hint) hint.textContent = `Prophos zählt ${g.auto ?? '–'} Tag${g.auto === 1 ? '' : 'e'} mit ≥ ${de(g.min)} $ (Summe aller abgeschlossenen Trades je Berlin-Tag, auch Hand-Trades)`
+      + (g.korrektur ? ` · ${g.korrektur > 0 ? '+' : ''}${g.korrektur} von Hand` : '') + ` · gilt nur in Zyklus ${g.zyklus}, nach dem nächsten Payout zählt es neu`
+    feld.hidden = false
+  }
+  async function accGtSpeichern(){
+    const g = _accGt.d, id = _accGt.id, inp = document.getElementById('ac-gt-ist'), btn = document.getElementById('ac-gt-setzen')
+    if(!g || !id || !inp) return
+    const wert = Math.round(Number(inp.value))
+    if(!Number.isFinite(wert) || wert < 0 || wert > 99){ if(typeof atToast === 'function') atToast('Gewinntage: ganze Zahl ab 0'); return }
+    if(btn) btn.disabled = true
+    try{
+      // frische Zählung direkt vor dem Speichern (Fremd-Review GT2: Modal lange offen, inzwischen ein Tag mehr gezählt → Korrektur sonst um 1 daneben)
+      const f = await accGtHolen(id).catch(() => null) || g
+      const korrektur = wert - (Number(f.auto) || 0)
+      const { data, error } = await supabase.from('accounts').update({ fcp_gewinntage: korrektur ? { zyklus: f.zyklus, korrektur, at: new Date().toISOString() } : null }).eq('id', id).select('id')
+      if(error) throw error
+      if(!data || !data.length) throw new Error('Konto nicht geändert (keine Schreibrechte für dieses Konto)')   // RLS blockt still — nie „✓“ ohne Zeile
+      if(typeof atToast === 'function') atToast(`✓ Gewinntage ${wert} von ${f.soll}${korrektur ? ` (${korrektur > 0 ? '+' : ''}${korrektur} von Hand)` : ''} — Planer und Radar zählen ab jetzt so`, 'end')
+      if(_accGt.id === id) await accGtFeldSetzen({ id, type: 'funded_cfd' })   // nur, wenn noch dasselbe Konto offen ist (Fremd-Review GT2)
+    }catch(e){
+      const m = String(e && e.message || e)
+      const t = /fcp_gewinntage/.test(m) ? 'Spalte fcp_gewinntage fehlt — sql/2026-11-05_fcp_gewinntage_korrektur.sql einspielen' : 'Nicht gespeichert: ' + m
+      if(typeof atToast === 'function') atToast(t); else alert(t)
+    }finally{ if(btn) btn.disabled = false }
+  }
+  document.getElementById('ac-gt-setzen')?.addEventListener('click', () => { accGtSpeichern() })
+  window._accGt = { zeigen: accGtZeigen, laden: accGtFeldSetzen, stand: _accGt }   // Test-Haken (Stub)
   function accRefundChipHtml(a, payoutsN){
     if(!a || a.type !== 'funded_cfd') return ''
     if(payoutsN == null && !_txGeladen) return ''
@@ -46524,6 +46594,7 @@
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = editAccount.maxRisikoTrade != null ? editAccount.maxRisikoTrade : ''
       accOdFelderSetzen(editAccount)   // O1: On Demand + festes Ziel
+      accGtFeldSetzen(editAccount)   // GT2: Gewinntage (Funded CFD mit Mindest-$-Tagen)
       if(accEls.autoPlaner) accEls.autoPlaner.checked = editAccount.autoPlaner !== false
       if(accEls.deakt) accEls.deakt.checked = !!editAccount.deaktiviertAt
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
@@ -46561,6 +46632,7 @@
       accEls.maxDd.value = ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = ''
       accOdFelderSetzen(null)   // O1: neues Konto — On Demand erst nach dem Anlegen (Bearbeiten)
+      accGtFeldSetzen(null)   // GT2: neues Konto — kein Gewinntage-Feld
       if(accEls.autoPlaner) accEls.autoPlaner.checked = true   // neue Konten standardmäßig im Auto-Planer (08.10.2026)
       if(accEls.extId) accEls.extId.value = ''
       if(accEls.wdFarm) accEls.wdFarm.checked = false   // neue Konten nie im WD-Farm (F17-Ergänzung 27.09.2026, vorher Standard drin)
@@ -56683,7 +56755,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2094'
+  const OS_TAB_BUILD = '2026-09-22.2095'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
