@@ -85632,7 +85632,7 @@
     // AUFBAU SEIT E1d (Nachtrag 10, Finn 05.11.2026 ~07:05 Dubai: „Erste Spalte: Firma. Die Ablauf-Spalte in die zweite und dritte mit einbauen. Die Konten-Spalte
     // soll weg … zwei Spalten mit den ganzen Inputs … jede mit eigenem Fokus … den Take-Profit bearbeiten können, JEDEN einzelnen Parameter"):
     // LINKS Firmen (Liste) | MITTE „Ziel & Trade" der gewählten Firma (Größen, Ziel, Consistency, TP, Lots/SL/Hedge) | RECHTS „Planer & Hedge"
-    // (globale Planer-Werte kompakt oben, TP-Regeln aller Firmen, dann Firma im Planer, Refund-Trade, Gewinntage). Keine Konten-Spalte, keine Größe „Standard" (Nachtrag 9).
+    // (globale Planer-Werte kompakt oben, dann Firma im Planer, Refund-Trade, Gewinntage). Keine Konten-Spalte, keine Größe „Standard" (Nachtrag 9).
     const sel = firmen.find(f => f.firma === _fcrSel.firma) || null
     const grWahl = f => { const gl = groessen(f); let grSel = String(_fcrSel.gr[f.firma] ?? ''); if(!gl.some(x => String(x.groesse) === grSel)) grSel = gl.length ? String(gl[0].groesse) : ''
       const x = gl.find(y => String(y.groesse) === grSel); return { gl, grSel, x, r: (x && x.roh) || {} } }
@@ -85669,16 +85669,19 @@
           ${tpErsterWirkt ? fcrZeile('TP 1. Zyklus', r.tp_erster != null ? fcrZahl(r.tp_erster) + ' $' : 'normal') : ''}`}
         ${fcrZeile('Lots', fcrSpanne(r.lots))}${fcrZeile('Stop-Loss', fcrSpanne(r.sl, '$'))}${fcrZeile('SL 1-%-Regel', r.sl_1pct != null ? fcrSpanne(r.sl_1pct, '$') : 'wie SL')}
         ${fcrZeile('Hedge', r.hedge_eur != null ? `${fcrZahl(r.hedge_eur)} € auf ${fcrZahl(r.dd)} $ DD` : '–')}`
-      const tpTeil = pct ? `<div class="fcr-e-hinweis fcr-w-leise">TP = Rest bis zum Ziel gleichmäßig, je Trade höchstens ${fcrZahl(pct)} % des Endziels</div>`
+      // O1 (Finn 05.11.2026 ~07:50): Consistency-TP = Zufall (p − 5 %) … p der Distanz, letzter Trade = Rest, kein Tag über p % der Gewinn-Tage
+      const tpTeil = pct ? `<div class="fcr-e-hinweis fcr-w-leise">TP je Trade ${fcrZahl(Math.max(pct - 5, pct / 2))}–${fcrZahl(pct)} % der Distanz zum Ziel (Zufall), letzter Trade = Rest · kein Tag über ${fcrZahl(pct)} % der Gewinn-Tage</div>`
         : `<div class="fcr-e-felder">${stufen
             ? `<div class="fcr-e-feld breit"><label>TP-Stufen je Zyklus <small>· $, mit · getrennt${alleGr ? ' · alle Größen' : ''}</small></label><input class="fcr-e-in" type="text" inputmode="decimal" value="${escapeHtml(stufen.map(fcrZahl).join(' · '))}" placeholder="750 · 1.500" data-fcr-in="${escapeHtml(JSON.stringify({ firma: f.firma, feld: 'tp_zyklen', liste: true }))}" title="TP je Payout-Zyklus: 1. Wert im 1. Zyklus usw."></div>`
             : deckelEigen ? fcrFeld('TP-Deckel', f.tp_deckel_plus, Object.assign({ feld: 'tp_deckel_plus' }, fz), { einheit: '$ über Ziel bis' + (alleGr ? ' · alle Größen' : ''), leer: 'Standard', titel: 'TP höchstens Ziel-bis + dieser Betrag; leer = Standard' }) : ''}
           ${tpErsterWirkt ? fcrFeld('TP 1. Zyklus', r.tp_erster ?? null, Object.assign({ feld: 'tp_erster' }, gz), { einheit: '$', leer: 'normal', titel: 'fester TP im ersten Payout-Zyklus; leer = normal (Rest bis Ziel, gedeckelt)' }) : ''}</div>`
+      // ohne TP-Feld (z. B. Blue Guardian: Gewinntage an, kein eigener Deckel) keine leere Überschrift „Take-Profit" (Prüfer E1d)
+      const tpHat = !!(pct || stufen || deckelEigen || tpErsterWirkt)
       return `${pills}
         ${fcrWAbschnitt('Ziel')}<div class="fcr-e-felder">${fcrFeld('Ziel bis Waiting', r.ziel, Object.assign({ feld: 'ziel' }, gz), { bereich: true, einheit: '$' })}
           ${pct ? fcrFeld('Consistency', pct, Object.assign({ feld: 'consistency_pct' }, fz), { einheit: '% je Zyklus' }) : '<div class="fcr-e-feld"></div>'}</div>
         ${fcrWSchalter('cons:' + f.firma, !!pct, 'Consistency', alleGr, consInfo)}
-        ${fcrWAbschnitt('Take-Profit')}${tpTeil}
+        ${tpHat ? fcrWAbschnitt('Take-Profit') + tpTeil : ''}
         ${fcrWAbschnitt('Trade')}<div class="fcr-e-felder">
           ${fcrFeld('Lots', r.lots, Object.assign({ feld: 'lots' }, gz), { bereich: true })}
           ${fcrFeld('Stop-Loss', r.sl, Object.assign({ feld: 'sl' }, gz), { bereich: true, einheit: '$' })}
