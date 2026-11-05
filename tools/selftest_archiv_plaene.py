@@ -122,8 +122,9 @@ def main():
           "Recht: Besitzer, Admin, Verwalter der Gruppe des Besitzers")
     check(not darf("u-x", False, "u-b", None) and not darf("u-v", False, "u-b", {"u-c"}) and not darf("u-b", False, None, None),
           "kein Recht: fremde ID, Verwalter anderer Gruppe, Konto unbekannt")
-    ep = block(app, '@app.route("/account/entarchivieren"')
-    check('guard["updated_at"] = f"eq.{row[\'updated_at\']}"' in ep and "range(2)" in ep and '_ap_archiv_merk["wert"] = None' in ep
+    # M3b (05.11.2026): seit 39aea035 (Ein-Klick-Anlegen mit Rückgängig) liegt das Entfernen in _archiv_eintrag_entfernen — der Endpunkt ruft es
+    ep = block(app, '@app.route("/account/entarchivieren"') + block(app, "\ndef _archiv_eintrag_entfernen(")
+    check("profile = _archiv_eintrag_entfernen(kid)" in ep and 'guard["updated_at"] = f"eq.{row[\'updated_at\']}"' in ep and "range(2)" in ep and '_ap_archiv_merk["wert"] = None' in ep
           and "entarchivieren_darf(uid, admin, besitzer, gruppe)" in ep,
           "Endpunkt: Rechte geprüft, Wächter updated_at mit einem Neu-Lesen, Delta-Archiv sofort neu")
     ua = block(html, "  function unarchiveAccount(", "\n  }\n")
@@ -156,7 +157,10 @@ def main():
     check(all(x in wpe for x in (".eq('id', plan.id)", ".eq('status', 'planned')", ".is('master_account_id', null)",
                                  ".is('start_um_gestartet_at', null)", ".is('started_at', null)")),
           "waisePlanEntfernen: nur dieser Plan, nur Waise, nie gestartet")
-    pks = block(html, "  async function planKontoSperre(", "\n  }\n")
+    # M3b: seit der News-Regel (30.10.2026) ist planKontoSperre eine Hülle (Kern + News-Sperre) — Archiv/Waise/Ziel stehen in planKontoSperreKern
+    _hl = block(html, "  async function planKontoSperre(", "\n  }\n")
+    check("const sp = await planKontoSperreKern(plan, opts)" in _hl and "if(sp) return sp" in _hl, "planKontoSperre: erst der Kern (Archiv, Waise, Ziel), dann News")
+    pks = block(html, "  async function planKontoSperreKern(", "\n  }\n")
     check("if(!kid && plan && plan.status === 'planned') return { art: 'waise'" in pks, "planKontoSperre: Waise → kein Start")
     check(".from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'archive')" in pks
           and "art: 'archiv'" in pks and "isAccountArchived(kid)" in pks,

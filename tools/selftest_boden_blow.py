@@ -84,7 +84,8 @@ def main():
           and "elif blow_auto:" in src
           and src.index("blow_auto = (not blown)") < src.index("for _versuch in range(3):", src.index("blow_auto = (not blown)") - 400),
           "Erledigt-Route: Boden-Prüfung EINMAL vor der Retry-Schleife, setzt blown automatisch")
-    check("if ap_blow_ausschluss(eig, _bw[0], _bw[3]):" in src and "master_tp,blown," in src, "Planer nutzt ap_blow_ausschluss")
+    # M3b (05.11.2026): ap_planen liest seit 85d8c8e7 (Blue Guardian Gewinntage, 25.10.2026) zusätzlich master_pl — blown steht weiter im Select
+    check("if ap_blow_ausschluss(eig, _bw[0], _bw[3]):" in src and re.search(r'roh_plaene = _ap_plaene_mit_hand\(\{"select": "[^"]*\bblown,', src) is not None, "Planer nutzt ap_blow_ausschluss")
 
     # Ausschluss mit Rückweg (Hinweis Prüfer T3): frische Lesung nach dem Blow → wieder planbar
     aus = ns["ap_blow_ausschluss"]
