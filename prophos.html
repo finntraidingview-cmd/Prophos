@@ -17205,6 +17205,9 @@
       const uid0 = lauf.uid, q = lauf.q
       const standDa = () => !!admData && admDataUid === uid0 && admDataQ === q
       const veraltet = () => lauf.nr !== _admLaufNr || uid0 !== String(currentUserId || '') || q !== admQuery()   // Review LD1: nur der jüngste Lauf zeichnet
+      // jüngster Lauf, gleiche ID, aber Kapitel/Gruppe inzwischen umgestellt (kapitelFuerLogin stellt nach dem Laden auf 2): selbst neu laden — sonst bliebe
+      // „Lade Übersicht…" stehen, weil der Kapitel-Wechsel nur bei vorhandener Übersicht nachlädt (Nachprüfung LD1)
+      const nachziehen = () => { if(lauf.nr === _admLaufNr && uid0 === String(currentUserId || '') && q !== admQuery()) setTimeout(() => admLoad(), 0) }
       if(standDa()) admLaedtZeigen(true)
       else { msg.style.display = ''; msg.textContent = 'Lade Übersicht…'; body.hidden = true }
       try{
@@ -17216,11 +17219,11 @@
         const t = await r.text()
         let d = {}; try{ d = JSON.parse(t) }catch(_){ if(r.ok) throw new Error('Antwort nicht lesbar') }
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
-        if(veraltet()) return   // ID/Kapitel/Gruppe gewechselt oder ein neuerer Abruf läuft (z. B. frisch nach eigenem Schreiben): der zeichnet
+        if(veraltet()){ nachziehen(); return }   // ID/Kapitel/Gruppe gewechselt oder ein neuerer Abruf läuft (z. B. frisch nach eigenem Schreiben): der zeichnet
         admAnwenden(d, Date.now(), q, uid0, false)
         admStandSchreiben(uid0, q, t)
       }catch(e){
-        if(veraltet()) return
+        if(veraltet()){ nachziehen(); return }
         if(standDa()){   // LD1: Stand bleibt stehen, die Zeile sagt, von wann er ist
           msg.style.display = ''; msg.textContent = `Übersicht nicht aktualisiert: ${e.message || e} — angezeigt: Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'}`
           return
