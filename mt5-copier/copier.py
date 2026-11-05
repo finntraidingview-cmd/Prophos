@@ -1499,6 +1499,32 @@ def find_zwilling_deals(deals, schon_verbucht, *, magic, out_entries, reason_exp
     return out
 
 
+def find_extern_deals(deals, schon_verbucht, *, out_entries, reasons_extern):
+    """REIN RECHNEND (testbar): Close-Deals eines EXTERN geschlossenen Hedges (PL3, Master 05.11.2026, Finn: „P&L … nicht eingetragen, weil … nur der
+    Slave fehlt"). Bisher schrieb der Schwund-Waechter dafuer {note: 'extern_geschlossen', profit: None} und Prophos liess den Slave-P&L leer, obwohl
+    der Broker den Deal belegt. Gezaehlt werden nur OUT-Deals mit Grund Hand (REASON_CLIENT/MOBILE/WEB) oder Stop-Out (REASON_SO) — NIE ein
+    Copier-Close (REASON_EXPERT, eigener oder Zwilling) und nie SL/TP (Notfall-Close, eigener Zweig). schon_verbucht haelt die Doppelzaehlung fern
+    (Sidecar + RAM). deals kommen nur aus den EIGENEN Hedge-Tickets des Masters (hedge_last_tickets[ident])."""
+    out = []
+    for d in deals or []:
+        if int(getattr(d, "entry", -1)) not in out_entries:
+            continue
+        if int(getattr(d, "reason", -1)) not in reasons_extern:
+            continue
+        if int(d.ticket) in schon_verbucht:
+            continue
+        out.append(d)
+    return out
+
+
+def extern_deals_belegt(deals, schwund_vol, tol):
+    """REIN RECHNEND (testbar): decken die gefundenen Extern-Deals den Schwund GENAU (Summe Volumen = vorher − jetzt, ± tol)? Nur dann ist der
+    Slave-P&L belegt — fehlt ein Deal (Historie hinkt) oder liegt ein fremder dabei, bleibt es wie bisher leer (nie raten)."""
+    if not deals:
+        return False
+    return abs(sum(float(d.volume) for _tk, d in deals) - float(schwund_vol)) <= tol
+
+
 # ── Ein Master = eine config*.json ──────────────────────────────────────────────
 class Master:
     def __init__(self, cfg_path):
@@ -3089,12 +3115,33 @@ def main():
                                         f"derselben magic {m.magic} geschlossen (Zwilling, {n_zw}/{ZWILLING_ZU_MAX}) — "
                                         f"KEIN Hand-Close, P&L verbucht, Hedge wird wieder aufgebaut.")
                                 continue
-                            log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
-                                f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
-                                f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
-                            m.closed.append({"ident": ident_i, "note": "extern_geschlossen",
-                                             "profit": None,
-                                             "closed_at": utc_iso_ms()})   # ms + UTC (29.10.2026), kein Deal → jetzt
+                            # EXTERN GESCHLOSSEN MIT BELEG (PL3, Master 05.11.2026): Hand-Close/Stop-Out am Fusion-Konto ist ein echter
+                            # Broker-Deal — aus der Deal-Historie der EIGENEN Tickets (ds_je_tk) verbuchen, wenn die Deals den Schwund genau
+                            # decken. Nur Grund Hand/Stop-Out (nie Copier-Order/SL/TP), nur unverbuchte (geb) → kein Doppelbuchen. Sonst wie bisher.
+                            ext_ = [(tk, d) for tk, ds in ds_je_tk.items() for d in find_extern_deals(
+                                ds, geb, out_entries=(mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY),
+                                reasons_extern=(getattr(mt5, "DEAL_REASON_CLIENT", 0), getattr(mt5, "DEAL_REASON_MOBILE", 1),
+                                                getattr(mt5, "DEAL_REASON_WEB", 2), getattr(mt5, "DEAL_REASON_SO", 6)))]
+                            if extern_deals_belegt(ext_, prev_v - now_v, TOL):
+                                for tk, d in ext_:
+                                    m.booked_deals.setdefault(ident_i, set()).add(int(d.ticket))
+                                    m.closed.append({
+                                        "ident": ident_i, "ticket": tk, "deal": int(d.ticket),
+                                        "symbol": str(getattr(d, "symbol", "") or ""),
+                                        "volume": float(d.volume),
+                                        "profit": float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0) or 0.0),
+                                        "note": "extern_deal", "reason": int(getattr(d, "reason", -1)),
+                                        "closed_at": deal_closed_at(d),
+                                    })
+                                log(f"⚠ [{m.file}] Hedge von Master-Pos {ident_} extern geschlossen ({prev_v} → {now_v}, "
+                                    f"Stop-Out oder Hand-Close) — P&L aus der Deal-Historie verbucht ({len(ext_)} Deal(s)).")
+                            else:
+                                log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
+                                    f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
+                                    f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
+                                m.closed.append({"ident": ident_i, "note": "extern_geschlossen",
+                                                 "profit": None,
+                                                 "closed_at": utc_iso_ms()})   # ms + UTC (29.10.2026), kein Deal → jetzt
                             del m.closed[:-50]
                             # Hand-Close ist endgueltig (25.08.2026, Finns Ansage beim
                             # ersten Live-Kontakt: von Hand geschlossene Hedges muessen

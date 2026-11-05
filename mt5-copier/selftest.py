@@ -2619,6 +2619,7 @@ def main():
     results.append(_test_sicher(test_puls_fehlerfoto))
     results.append(_test_sicher(test_fehlerfoto_luecken))
     results.append(_test_sicher(test_magic_zwilling))
+    results.append(_test_sicher(test_extern_deal))
 
     print()
     ok = sum(1 for r in results if r)
@@ -12098,6 +12099,49 @@ def test_magic_zwilling():
         and "m.zwilling_gesperrt.add(ident_i)" in q and "m.zwilling_gesperrt.discard(ident)" in q,
         "Alt-Baseline nur beim ersten Start unklar, eigene idents fallen raus; Zwillings-Sperre gemerkt und beim eigenen Close gelöst")
     print(("✓" if ok else "✗") + " Magic-Zwilling: flacher Zwilling schließt das fremde Ticket nie, eigener Hedge geht zu, Zwillings-Close ist kein Hand-Close")
+    return ok
+
+
+def test_extern_deal():
+    """PL3 (Master 05.11.2026, Finn: „… weil … nur der Slave fehlt"): extern geschlossener Hedge (Hand/Stop-Out am Fusion-Konto) wird aus der
+    Deal-Historie der EIGENEN Tickets verbucht, wenn die Deals den Schwund genau decken — nie ein Copier-Close (EXPERT), nie SL/TP, nie doppelt.
+    Ohne MetaTrader."""
+    import copier as cp, inspect as _i
+    from types import SimpleNamespace as _NS
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Extern-Deal: " + text)
+            ok = False
+    R = (0, 1, 2, 6)   # CLIENT, MOBILE, WEB, SO
+    deals = [_NS(ticket=21, entry=1, reason=0, volume=0.5), _NS(ticket=22, entry=1, reason=6, volume=0.3),
+             _NS(ticket=23, entry=1, reason=3, volume=0.2), _NS(ticket=24, entry=1, reason=4, volume=0.2),
+             _NS(ticket=25, entry=0, reason=0, volume=0.8), _NS(ticket=26, entry=1, reason=2, volume=0.1)]
+    ex = cp.find_extern_deals(deals, {26}, out_entries=(1, 2), reasons_extern=R)
+    chk([int(d.ticket) for d in ex] == [21, 22], "nur OUT-Deals mit Grund Hand/Stop-Out, unverbucht (26 schon gebucht); EXPERT (23), SL (24), IN (25) nie")
+    chk(cp.find_extern_deals(None, set(), out_entries=(1,), reasons_extern=R) == [] and cp.find_extern_deals([], set(), out_entries=(1,), reasons_extern=R) == [],
+        "leere/fehlende Historie → nichts")
+    paare = [(900, d) for d in ex]
+    chk(cp.extern_deals_belegt(paare, 0.8, 1e-6) is True, "Deals decken den Schwund 0,8 genau → belegt")
+    chk(cp.extern_deals_belegt(paare, 1.0, 1e-6) is False and cp.extern_deals_belegt(paare[:1], 0.8, 1e-6) is False,
+        "fehlt ein Deal (Historie hinkt) oder Volumen passt nicht → nicht belegt, bleibt leer wie bisher")
+    chk(cp.extern_deals_belegt([], 0.8, 1e-6) is False, "ohne Deal nie belegt")
+    q = _i.getsource(cp.main)
+    i_zw = q.find('"note": "zwilling_geschlossen"')
+    i_ex = q.find('"note": "extern_deal"')
+    i_alt = q.find('"note": "extern_geschlossen"')
+    i_sperre = q.find("Hand-Close wird respektiert")
+    chk(0 < i_zw < i_ex < i_alt < i_sperre, "Reihenfolge: Notfall → Zwilling → Extern-Deal → sonst extern_geschlossen → Hand-Close-Sperre (bleibt in beiden Fällen)")
+    chk("find_extern_deals(\n                                ds, geb," in q and "for tk, ds in ds_je_tk.items()" in q[q.find("ext_ = "):q.find("ext_ = ") + 200],
+        "nur Deals der eigenen Tickets (ds_je_tk aus hedge_last_tickets) und nur unverbuchte (geb = Sidecar + RAM)")
+    chk("extern_deals_belegt(ext_, prev_v - now_v, TOL)" in q and "m.booked_deals.setdefault(ident_i, set()).add(int(d.ticket))" in q[i_ex - 600:i_ex],
+        "gebucht nur bei genauem Schwund; Deal-Ticket in booked_deals (kein zweites Buchen im nächsten Tick)")
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prophos.html"), encoding="utf-8").read()
+    chk("const hasExtern = real.some(e => e.note === 'extern_geschlossen' || e.profit == null)" in html,
+        "Frontend: extern_deal mit Profit zählt wie ein normaler Close (nur extern_geschlossen/Profit leer bleibt unbelegt)")
+    print(("✓" if ok else "✗") + " Extern-Deal: Hand-/Stop-Out-Close am Fusion-Konto aus der Deal-Historie verbucht, kein Doppelbuchen, nur eigene Tickets")
     return ok
 
 
