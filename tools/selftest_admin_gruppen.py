@@ -157,7 +157,7 @@ def main():
 
     # 1) Mengen-Logik
     check(menge(HT1, False, DATEN) == (None, False), "HT-Mitglied (Finn) → alle IDs (None)")
-    check(menge(NEU, False, DATEN) == (None, False), "neue ID ohne Zeile → zählt als HT, alle IDs")
+    check(menge(NEU, False, DATEN) == (frozenset({NEU}), False), "neue ID ohne Zeile → ohne Unternehmen, nur sich selbst (UNT0 05.11.2026, vorher: zählt als HT)")
     check(menge(VERW, True, DATEN) == (frozenset({VERW, MITGL}), True), "Verwalter → {Verwalter, Mitglied}, verwalter=True")
     check(menge(VERW, False, DATEN) == (frozenset({VERW, MITGL}), True), "Verwalter-Rolle hängt an id_gruppen, nicht am admin_zugang-Flag")
     check(menge(MITGL, False, DATEN) == (frozenset({MITGL}), False), "Mitglied ohne admin_zugang → nur sich selbst, kein Admin")

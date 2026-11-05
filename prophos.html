@@ -3178,6 +3178,14 @@
      Verwalter (adm-verwalter an der Admin-View): HT-weite Teile aus — Einstellungen/Würfeln/Risiko-für-alle des Farmers, Kapitel
      bearbeiten, Planer-Haken („IDs verwalten") und Bot-Schalter. Markiert mit data-ht-global bzw. über ihre vorhandenen Klassen. */
   #dashboard-view .adm-gruppe-seg{margin-right:auto;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  /* UNT0: Zeile „Ohne Unternehmen" — dezent, wie ein Hinweis, je ID Auswahl + Zuordnen */
+  #dashboard-view .adm-ohne-unt{margin:8px 0 2px;padding:8px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-tint, rgba(127,127,127,.06));font-size:12.5px}
+  #dashboard-view .adm-ohne-unt .aou-kopf{font-weight:600;margin-bottom:4px;color:var(--warn-ink, var(--warn, #b54708))}
+  #dashboard-view .adm-ohne-unt .aou-z{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--border-soft, rgba(16,24,40,.06))}
+  #dashboard-view .adm-ohne-unt .aou-z:first-of-type{border-top:0}
+  #dashboard-view .adm-ohne-unt .aou-wer{flex:1;min-width:160px} #dashboard-view .adm-ohne-unt .aou-wer small{color:var(--sub);margin-left:6px}
+  #dashboard-view .adm-ohne-unt select{height:28px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12.5px;padding:0 6px}
+  #dashboard-view .adm-ohne-unt .aou-msg{font-size:11.5px;color:var(--sub)}
   #dashboard-view .adm-gruppe-seg button{padding:3px 10px;font-size:12px;white-space:nowrap;cursor:pointer}
   #dashboard-view #kasse-sperren{white-space:nowrap;flex-shrink:0}
   #dashboard-view section.view[data-view="kasse"].adm-verwalter [data-ht-global],
@@ -12934,6 +12942,8 @@
           <button id="kasse-sperren" title="Admin wieder mit Code sperren"
                   style="border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:11.5px;padding:4px 2px">🔒 sperren</button>
         </div>
+        <!-- UNT0 (05.11.2026): neue IDs ohne Unternehmen — sichtbar nur für Admins (Server liefert die Liste nur an ADMIN_EMAILS) -->
+        <div class="adm-ohne-unt" id="adm-ohne-unt" hidden></div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <!-- Auftrag ausgeblendet (Finn 08.10.2026: „Admin → Auftrag komplett weg, brauche ich nicht") — Pane, JS (aufLaden/aufRender) und Backend bleiben, nur der Reiter ist weg; der 120-s-Takt startet erst mit _aufTabOeffnen, also nie -->
@@ -16629,7 +16639,43 @@
     // Kapitel je Login (12.10.2026): hat dieser Login einen eigenen Admin-Code (Emin)? — der Kapitel-Block stellt danach „Neue Ära" fest
     window._admEigenerCode = async () => { try{ return !!(await eigenerCodeLaden()) }catch(_){ return false } }
     window._admNurGruppeLaden = async () => { try{ await eigenerCodeLaden() }catch(_){ return true } return eigenerCodeUnklar || admEingeschraenkt() || !!eigenerCode }
+    /* OHNE UNTERNEHMEN (UNT0, Finn 05.11.2026 ~07:20: „Wenn wir eine neue ID kriegen … sage, wo sie hinkommt. Sag mir aber immer Bescheid"): eine neue
+     * Registrierung hat kein Unternehmen mehr (sql/2026-11-05_unt0_ohne_unternehmen.sql) und sieht nur sich selbst. Hier je ID Name · Mail, Auswahl des
+     * Unternehmens (id_gruppen über admData.gruppen) und „Zuordnen" (POST /admin/id-gruppe — nur Admins, nur IDs ohne Zeile; Umhängen bleibt SQL). */
+    function admOhneUntRender(){
+      const el = $('adm-ohne-unt'); if(!el) return
+      const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.ohne_unternehmen)) ? admData.ohne_unternehmen : []
+      const gr = (admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
+      if(!liste.length || !gr.length){ el.hidden = true; el.innerHTML = ''; return }
+      const opt = gr.map(x => `<option value="${escapeHtml(String(x.id))}">${escapeHtml(String(x.name || ''))}</option>`).join('')
+      el.innerHTML = `<div class="aou-kopf">Ohne Unternehmen · ${liste.length} neue ID${liste.length === 1 ? '' : 's'} — sieht nur sich selbst, bis du sie zuordnest</div>`
+        + liste.map(u => `<div class="aou-z"><span class="aou-wer">${escapeHtml(String(u.name || ''))}<small>${escapeHtml(String(u.mail || ''))}</small></span>`
+          + `<select data-aou-gruppe="${escapeHtml(String(u.id))}" aria-label="Unternehmen für ${escapeHtml(String(u.name || ''))}"><option value="">Unternehmen wählen …</option>${opt}</select>`
+          + `<button type="button" class="btn btn-ghost btn-xs" data-aou-zuordnen="${escapeHtml(String(u.id))}">Zuordnen</button><span class="aou-msg" data-aou-msg="${escapeHtml(String(u.id))}"></span></div>`).join('')
+      el.hidden = false
+    }
+    document.getElementById('adm-ohne-unt')?.addEventListener('click', async ev => {
+      const b = ev.target.closest('[data-aou-zuordnen]'); if(!b || b.disabled) return
+      const uid = b.dataset.aouZuordnen, box = document.getElementById('adm-ohne-unt')
+      const sel = box && [...box.querySelectorAll('select[data-aou-gruppe]')].find(x => x.dataset.aouGruppe === uid)
+      const msg = box && [...box.querySelectorAll('[data-aou-msg]')].find(x => x.dataset.aouMsg === uid)
+      const gid = sel && sel.value
+      if(!gid){ if(msg) msg.textContent = 'erst Unternehmen wählen'; return }
+      const gname = sel.options[sel.selectedIndex]?.textContent || ''
+      if(!confirm(`Diese ID „${gname}“ zuordnen? Danach sieht sie, was dieses Unternehmen sieht.`)) return
+      b.disabled = true; if(msg) msg.textContent = 'speichert …'
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const r = await fetch(`${WATCHER_HOME}/admin/id-gruppe`, { method: 'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: uid, gruppe_id: gid }), cache: 'no-store' })
+        const d = await r.json().catch(() => ({}))
+        if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
+        if(msg) msg.textContent = `✓ ${d.gruppe || gname}`
+        admLoad()
+      }catch(e){ if(msg) msg.textContent = 'nicht gespeichert: ' + ((e && e.message) || e); b.disabled = false }
+    })
     function admGruppeChips(){
+      try{ admOhneUntRender() }catch(_){}   // UNT0
       const el = $('adm-gruppe-seg'); if(!el) return
       const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
       if(liste.length < 2){ el.hidden = true; el.innerHTML = ''; return }

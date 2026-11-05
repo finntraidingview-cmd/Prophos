@@ -56,10 +56,11 @@ app._auth_liste_anfrage = lambda: Antw({"users": [{"id": u, "email": MAIL.get(u,
 
 
 def sel(t, p):
+    # UNT0 (05.11.2026): eine ID ohne Zeile ist jetzt „ohne Unternehmen" (nur sich) — die Fixture bildet wie live HT als eigene Gruppe mit Zeilen ab
     if t == "id_gruppen":
-        return [{"id": "g-e", "name": "Emin", "verwalter_user_id": EMIN}]
+        return [{"id": "g-h", "name": "Hermann Technologies", "verwalter_user_id": None}, {"id": "g-e", "name": "Emin", "verwalter_user_id": EMIN}]
     if t == "id_gruppe_mitglied":
-        return [{"user_id": MITGL, "gruppe_id": "g-e"}, {"user_id": MITGL2, "gruppe_id": "g-e"}]
+        return [{"user_id": u, "gruppe_id": "g-h"} for u in (HT, HT2, FINN)] + [{"user_id": MITGL, "gruppe_id": "g-e"}, {"user_id": MITGL2, "gruppe_id": "g-e"}]
     if t == "accounts":
         b = BESITZ.get(str(p.get("id") or "").replace("eq.", ""))
         return [{"user_id": b}] if b else []

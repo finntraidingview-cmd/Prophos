@@ -3415,7 +3415,7 @@ def admin_sicht_menge(uid, nur_eigene, daten):
     """REIN RECHNEND (testbar): (sicht, verwalter) eines Logins. sicht None = alle IDs (HT wie bisher); sonst frozenset der user_ids,
     die er im Admin sieht. Verwalter einer Gruppe = er + ihre Mitglieder (verwalter True). Sonst eingeschränkt auf sich selbst
     (verwalter False → kein Admin): admin_zugang.nur_eigene ohne eigene Gruppe oder Mitglied einer Gruppe MIT Verwalter.
-    HT-Mitglieder und IDs ohne Zeile → None."""
+    HT-Mitglieder → None. IDs OHNE Zeile (= ohne Unternehmen, UNT0 05.11.2026) → nur sich selbst, sobald es Gruppen gibt."""
     uid = str(uid)
     daten = daten or {}
     gruppen, mitglieder = daten.get("gruppen") or (), daten.get("mitglieder") or ()
@@ -3427,7 +3427,29 @@ def admin_sicht_menge(uid, nur_eigene, daten):
     mit_verwalter = {str(x.get("id")) for x in gruppen if x.get("verwalter_id")}
     if any(str(m.get("user_id")) == uid and str(m.get("gruppe_id")) in mit_verwalter for m in mitglieder):
         return frozenset({uid}), False
+    # OHNE UNTERNEHMEN (UNT0, Finn 05.11.2026 ~07:20: „Wenn wir eine neue ID kriegen, stelle ich den PC auf und sage, wo sie hinkommt. Sag mir aber
+    # immer Bescheid"): bis 05.11. legte der Trigger id_gruppe_neu_ht jede neue Registrierung in HT, und „ohne Zeile" zählte hier als HT = alle IDs.
+    # Jetzt bekommt eine neue ID kein Unternehmen (sql/2026-11-05_unt0_ohne_unternehmen.sql) und sieht nur sich selbst, bis ein Admin sie zuordnet.
+    # Ohne Gruppen-Tabellen (gruppen leer) wie bisher alles. Live 05.11.: alle 21 IDs haben eine Zeile — HT-Mitglieder bleiben bitgleich (None).
+    if gruppen and uid not in {str(m.get("user_id")) for m in mitglieder}:
+        return frozenset({uid}), False
     return None, False
+
+
+def admin_ohne_unternehmen(daten, user_ids):
+    """REIN RECHNEND (testbar, UNT0): IDs ohne Unternehmen — keine Zeile in id_gruppe_mitglied und nicht Verwalter einer Gruppe — in der
+    Reihenfolge von user_ids. Ohne Gruppen (Tabellen fehlen) → [] (dann gilt alles wie vor den Gruppen)."""
+    daten = daten or {}
+    gruppen = daten.get("gruppen") or ()
+    if not gruppen:
+        return []
+    drin = {str(m.get("user_id")) for m in daten.get("mitglieder") or ()} | {str(x.get("verwalter_id")) for x in gruppen if x.get("verwalter_id")}
+    out = []
+    for u in user_ids or ():
+        u = str(u or "")
+        if u and u not in drin and u not in out:
+            out.append(u)
+    return out
 
 
 def admin_lese_gruppe_menge(uid, daten):
@@ -3477,6 +3499,131 @@ def admin_sicht_filter(sicht):
         return f"eq.{sicht}"
     ids = sorted(str(u) for u in sicht)
     return "in.(" + ",".join(ids) + ")" if ids else "eq.00000000-0000-0000-0000-000000000000"
+
+
+def unt0_darf_zuordnen(uid, mail):
+    """UNT0: darf dieser Login IDs ohne Unternehmen sehen und zuordnen? ADMIN_EMAILS oder admin_voll („Finn + Pascal", Fremd-Review UNT0: die
+    Arbeits-ID steht nicht in ADMIN_EMAILS). admin_voll nicht lesbar → nein."""
+    if mail and str(mail).strip().lower() in ADMIN_EMAILS:
+        return True
+    try:
+        return bool(uid) and str(uid) in admin_voll_uids()
+    except Exception:
+        return False
+
+
+def admin_ohne_unternehmen_zeilen(daten, uid_aufrufer, mail_aufrufer):
+    """UNT0: [{id, name, mail, seit}] der IDs ohne Unternehmen — nur für unt0_darf_zuordnen (sonst []): Name/Mail sind persönliche Daten, und
+    zuordnen darf ohnehin nur ein Admin (POST /admin/id-gruppe)."""
+    if not unt0_darf_zuordnen(uid_aufrufer, mail_aufrufer):
+        return []
+    r = _auth_liste_anfrage()
+    if getattr(r, "status_code", 0) != 200:
+        return []
+    users = (r.json() or {}).get("users") or []
+    ohne = set(admin_ohne_unternehmen(daten, [u.get("id") for u in users]))
+    return [{"id": str(u.get("id")), "name": str((u.get("user_metadata") or {}).get("name") or "").strip() or str(u.get("id"))[:8],
+             "mail": str(u.get("email") or ""), "seit": u.get("created_at")} for u in users if str(u.get("id")) in ohne]
+
+
+def _wd_login_ich():
+    """(user_id, E-Mail) des eingeloggten Aufrufers dieser Anfrage oder ("", "")."""
+    try:
+        r0 = _auth_user_anfrage((request.headers.get("sb-token") or "").strip())
+        u = (r0.json() or {}) if r0.status_code == 200 else {}
+        return str(u.get("id") or ""), str(u.get("email") or "").strip().lower()
+    except Exception:
+        return "", ""
+
+
+# MELDUNG „NEUE ID OHNE UNTERNEHMEN" (UNT0, Finn 05.11.2026: „Sag mir aber immer Bescheid"): alle 5 min im ap_loop die Nutzerliste gegen
+# id_gruppe_mitglied — jede ID ohne Unternehmen einmal 🟠 an die Master-IDs (alarm_senden, Entprellung über alarm_log.schluessel
+# „ohne_unternehmen|<uid>", übersteht Railway-Neustarts). Lesefehler → nichts melden, nächster Takt versucht es wieder.
+UNT0_TAKT_S = 300
+UNT0_LOG_TAGE = 400
+_unt0 = {"at": 0.0, "gemeldet": set(), "fehler": ""}
+
+
+def ohne_unternehmen_tick():
+    if time.time() - _unt0["at"] < UNT0_TAKT_S:
+        return
+    _unt0["at"] = time.time()
+    if not _alarm_empfaenger():
+        return                                # Fremd-Review UNT0: ohne lesbare Empfänger nie „gemeldet" ins alarm_log schreiben
+    daten = admin_gruppen_daten()
+    if not (daten or {}).get("gruppen"):
+        return
+    r = _auth_liste_anfrage()
+    if getattr(r, "status_code", 0) != 200:
+        return
+    users = {str(u.get("id")): u for u in ((r.json() or {}).get("users") or []) if u.get("id")}
+    neu = [u for u in admin_ohne_unternehmen(daten, list(users)) if u not in _unt0["gemeldet"]]
+    if not neu:
+        return
+    keys = {f"ohne_unternehmen|{u}": u for u in neu}
+    schon = alarm_im_log(keys, UNT0_LOG_TAGE * 86400)
+    if schon is None:
+        return                                # alarm_log nicht lesbar: lieber im nächsten Takt als doppelt
+    for k, u in keys.items():
+        _unt0["gemeldet"].add(u)
+        if k in schon:
+            continue
+        x = users.get(u) or {}
+        name = str((x.get("user_metadata") or {}).get("name") or "").strip()
+        wer = " · ".join(v for v in (name, str(x.get("email") or "")) if v) or u[:8]
+        alarm_senden(2, "ohne_unternehmen", "Neue ID ohne Unternehmen — bitte zuordnen",
+                     f"{wer} hat sich registriert und sieht nur sich selbst. Admin → „Ohne Unternehmen“ → Unternehmen wählen → Zuordnen.",
+                     uid=u, schluessel=k, tag=f"unt0-{u[:8]}")
+
+
+@app.route("/admin/id-gruppe", methods=["POST", "OPTIONS"])
+def admin_id_gruppe_zuordnen():
+    """UNT0: POST {user_id, gruppe_id} → eine ID OHNE Unternehmen einem bestehenden Unternehmen (id_gruppen) zuordnen — eine neue Zeile in
+    id_gruppe_mitglied (Service-Key). Nur Admins (ADMIN_EMAILS) ohne eigene Einschränkung. Umhängen einer schon zugeordneten ID bleibt der
+    SQL-Weg (sql/2026-10-08_admin_gruppen.sql oben) — hier 409, damit ein Fehlklick nie eine ID aus Emins Gruppe zieht. Recht: unt0_darf_zuordnen
+    (ADMIN_EMAILS oder admin_voll) und keine eigene Einschränkung."""
+    if request.method == "OPTIONS":
+        return "", 200
+    ich, err = _wd_login()
+    if err:
+        return err
+    _i, mail = _wd_login_ich()
+    if not unt0_darf_zuordnen(ich, mail):
+        return jsonify({"ok": False, "error": "Nur für Admins (Finn + Pascal)"}), 403
+    try:
+        sicht, _v = admin_sicht_lesen(ich)
+    except Exception:
+        return jsonify({"ok": False, "error": "Rechte nicht prüfbar"}), 502
+    if sicht is not None:
+        return jsonify({"ok": False, "error": "Nur ohne eigene Einschränkung (Finn + Pascal)"}), 403
+    body = request.get_json(silent=True) or {}
+    uid, gid = str(body.get("user_id") or "").strip().lower(), str(body.get("gruppe_id") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f-]{36}", uid) or not re.fullmatch(r"[0-9a-f-]{36}", gid):
+        return jsonify({"ok": False, "error": "user_id und gruppe_id (uuid) nötig"}), 400
+    with _kurz_cache_lock:
+        _admin_gruppe_cache.update(bis=0.0)   # frisch lesen: keine Zuordnung auf einem 60-s-alten Stand
+    try:
+        daten = admin_gruppen_daten()
+    except Exception:
+        return jsonify({"ok": False, "error": "Unternehmen nicht lesbar"}), 502
+    gr = next((x for x in daten.get("gruppen") or () if str(x.get("id")).lower() == gid), None)
+    if not gr:
+        return jsonify({"ok": False, "error": "Unternehmen unbekannt"}), 400
+    r = _auth_liste_anfrage()
+    ids = [str(u.get("id")) for u in ((r.json() or {}).get("users") or [])] if getattr(r, "status_code", 0) == 200 else []
+    if uid not in ids:
+        return jsonify({"ok": False, "error": "ID unbekannt"}), 404
+    if uid not in admin_ohne_unternehmen(daten, [uid]):
+        return jsonify({"ok": False, "error": "ID hat schon ein Unternehmen — umhängen nur per SQL"}), 409
+    try:
+        sb_insert("id_gruppe_mitglied", {"user_id": uid, "gruppe_id": gr["id"],
+                                         "notiz": f"UNT0: im Admin zugeordnet von {mail} ({datetime.now(timezone.utc).isoformat(timespec='minutes')})"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"nicht gespeichert ({type(e).__name__})"}), 502
+    with _kurz_cache_lock:
+        _admin_gruppe_cache.update(bis=0.0)
+    print(f"[unt0] ✅ {uid[:8]} → {gr.get('name')} (von {mail})", flush=True)
+    return jsonify({"ok": True, "gruppe": gr.get("name")})
 
 
 def _admin_verwalter_gruppen_ids(daten):
@@ -8152,6 +8299,12 @@ def admin_build_overview(kapitel_id=None):
         else:
             gruppen_info = {"gruppen": admin_gruppen_liste(admin_gruppen_daten()),
                             "gruppe_aktiv": str(request.args.get("gruppe") or "").strip().lower() or None}
+            # UNT0 (05.11.2026): IDs ohne Unternehmen mit Name + Mail — nur für Admins (ADMIN_EMAILS), damit Finn sie im Admin zuordnen kann
+            try:
+                _uid_a, _mail_a = _wd_login_ich()
+                gruppen_info["ohne_unternehmen"] = admin_ohne_unternehmen_zeilen(admin_gruppen_daten(), _uid_a, _mail_a)
+            except Exception as e3:
+                print(f"[admin] ⚠️ ohne Unternehmen: {type(e3).__name__}: {e3}", flush=True)
     except Exception as e:
         print(f"[admin] ⚠️ gruppen: {type(e).__name__}: {e}", flush=True)
         gruppen_info = {"gruppen": [], "gruppen_fehler": f"{type(e).__name__}"}
@@ -40763,6 +40916,12 @@ def ap_loop():
         except Exception as e:
             _alarm["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[alarm] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            ohne_unternehmen_tick()           # UNT0 (05.11.2026): neue ID ohne Unternehmen → 🟠 einmal an die Master-IDs
+            _unt0["fehler"] = ""
+        except Exception as e:
+            _unt0["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[unt0] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
             _ap_bal_auto["fehler"] = ""
