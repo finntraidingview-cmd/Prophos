@@ -13385,17 +13385,14 @@ LIQ_VERLAUF_CACHE_S = 60
 _liq_verlauf_cache = {}
 
 
-# PB1 (S2/Master 05.11.2026, Emins FNF Futures 50k …3807: +1.000 $ am 04.11. über Duplikum, Verlauf leer → Boden 48.500 statt 49.498): der Verlauf liest
-# auch tvplus (Duplikum, Futures über TradingView). Zeilen ohne Balance-Beleg zählen in keinem Höchststand, machen aber den beendeten Trade für
-# ah_eod_beleg sichtbar. Routen direkt im Select (die Selbsttest-Lader ziehen die Funktion als Block, ohne Modul-Konstanten).
 def liq_verlauf_nach_reset(zeilen, reset_at=None, ext_id=None):
     """REIN RECHNEND (testbar, SA3 05.11.2026, Hinweis S6/MO1b: „Ein Lucid-Reset auf derselben Konto-Zeile behält alte EOD-Hochs, auch im Radar"):
     nur Verlaufs-Zeilen NACH dem letzten Reset des Kontos. Reset = (1) reset_at: jüngste AUSDRÜCKLICHE Reset-Buchung auf dieser Konto-Zeile
-    (transactions account_purchase mit „Reset" in der Notiz, wie /konto-reset-bestaetigen „Reset von <alte ID> (auto)" bucht — ein Add-on oder eine Gebühr
-    als Kauf ist KEIN Reset, Master/S4 05.11.2026) — Zeilen, die davor starteten (bzw. ohne Start davor endeten), zählen nicht; (2) neue External ID: der Plan-Name (master_name,
+    (transactions account_purchase mit der Notiz „Reset von <alte ID> …", wie /konto-reset-bestaetigen bucht — ein Erst-, Nachtrags-, Add-on- oder Gebühren-
+    Kauf ist KEIN Reset, Master/S6/S4 05.11.2026) — Zeilen, die davor starteten (bzw. ohne Start davor endeten), zählen nicht; (2) neue External ID: der Plan-Name (master_name,
     Namensregel „<Größe> <External ID> → <Phase>") nennt ausdrücklich eine ANDERE Kontonummer derselben Form (Präfix der aktuellen ID + ≥ 6 Ziffern,
     z. B. Lucid LFE…/LFF…) und nicht die aktuelle. Ohne erkennbare Form (Topstep 150KTC-…, Namen ohne Nummer) bleibt die Zeile — im Zweifel zählt
-    das alte Hoch (höherer Boden = vorsichtig). Live 05.11.2026 bitgleich: kein Plan vor der letzten Kaufbuchung seines Kontos."""
+    das alte Hoch (höherer Boden = vorsichtig). Live 05.11.2026 bitgleich: kein Plan vor einer Reset-Buchung seines Kontos."""
     rs = _ap_ts(reset_at) if reset_at else None
     ext = str(ext_id or "").strip()
     m = re.match(r"[A-Za-z]{2,}", ext)
@@ -13413,11 +13410,13 @@ def liq_verlauf_nach_reset(zeilen, reset_at=None, ext_id=None):
     return out
 
 
-LIQ_RESET_NOTIZ = re.compile(r"(?<![A-Za-z])reset(?![A-Za-z])", re.I)   # ausdrücklich als Reset gebucht (Notiz), nie ein bloßer Kauf
+# Endgültige Regel (Master/S6/S4 05.11.2026): nur die Notiz, die der konto-reset-Weg schreibt („Reset von <alte ID> (auto)") — kein anderer Text mit „Reset",
+# kein Erst-/Nachtrags-/Add-on-Kauf; „ab der 2. Kaufbuchung" allein reicht nicht
+LIQ_RESET_NOTIZ = re.compile(r"^\s*Reset von\s+\S", re.I)
 
 
 def liq_reset_buchung(t):
-    """REIN RECHNEND (testbar): ist diese Buchung ein ausdrücklicher Reset? Nur account_purchase mit „Reset" als Wort in der Notiz."""
+    """REIN RECHNEND (testbar): ist diese Buchung ein ausdrücklicher Reset? Nur account_purchase mit der Notiz „Reset von …" (konto-reset-Weg)."""
     t = t or {}
     return str(t.get("kind") or "account_purchase") == "account_purchase" and bool(LIQ_RESET_NOTIZ.search(str(t.get("notes") or "")))
 
@@ -13445,6 +13444,9 @@ def _liq_reset_infos(acc_ids):
     return {k: tuple(v) for k, v in out.items()}
 
 
+# PB1 (S2/Master 05.11.2026, Emins FNF Futures 50k …3807: +1.000 $ am 04.11. über Duplikum, Verlauf leer → Boden 48.500 statt 49.498): der Verlauf liest
+# auch tvplus (Duplikum, Futures über TradingView). Zeilen ohne Balance-Beleg zählen in keinem Höchststand, machen aber den beendeten Trade für
+# ah_eod_beleg sichtbar. Routen direkt im Select (die Selbsttest-Lader ziehen die Funktion als Block, ohne Modul-Konstanten).
 def _liq_verlauf_laden(acc_ids, streng=False):
     """Belegte Balances (tv.balance_start, final.balance_end) aller Orbit-/Topstep-V2-Pläne der Konten, ohne Zeitgrenze (der Höchststand
     kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance).
