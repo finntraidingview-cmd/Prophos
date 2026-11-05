@@ -103,7 +103,8 @@ def sb_insert(tabelle, zeile):
 def main():
     rq = _Requests()
     gate = {"err": None}
-    ns, app = lade({"requests": rq, "_admin_mail_auth": lambda: gate["err"], "_rw_pc_namen": lambda: dict(PCS["namen"]), "sb_insert": sb_insert})
+    # RB1 (2) (05.11.2026): Storage läuft über die gemeinsame Supabase-Session — dieselbe Attrappe als _SB_SESSION
+    ns, app = lade({"requests": rq, "_SB_SESSION": rq, "_admin_mail_auth": lambda: gate["err"], "_rw_pc_namen": lambda: dict(PCS["namen"]), "sb_insert": sb_insert})
     P = ns["puls_fehlerbild_pfad"]
 
     # (A)

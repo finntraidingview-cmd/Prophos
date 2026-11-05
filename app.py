@@ -18781,7 +18781,9 @@ def puls_fehlerbild_hochladen(pc_id):
     if not SUPABASE_SERVICE_KEY:
         return jsonify({"ok": False, "msg": "Server nicht konfiguriert"}), 503
     try:
-        r = requests.post(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{pfad}", data=roh, timeout=20,
+        # RB1 (2) (Master 05.11.2026, Befund RT1 sb_get_wiederholung): Storage über die gemeinsame Supabase-Session (Pool, keine Cookies,
+        # keine urllib3-Wiederholung) statt einer neuen Verbindung je Aufruf — Zeitlimit, Kopfzeilen und Fehlerwege unverändert, keine Bremse.
+        r = _SB_SESSION.post(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{pfad}", data=roh, timeout=20,
                           headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                    "Content-Type": typ[1], "x-upsert": "false"})
     except Exception as e:
@@ -18826,7 +18828,7 @@ def admin_puls_fehlerbild():
     for endung, _mime, _kopf in PULS_FEHLERBILD_TYPEN:   # JPEG (Tab, alte Bilder) oder PNG (Bildschirm seit dem GDI-Weg)
         pfad = f"{m.group(0)}-{art}.{endung}"
         try:
-            r = requests.post(f"{SUPABASE_URL}/storage/v1/object/sign/{PULS_FEHLERBILD_BUCKET}/{pfad}", json={"expiresIn": 300}, timeout=10,
+            r = _SB_SESSION.post(f"{SUPABASE_URL}/storage/v1/object/sign/{PULS_FEHLERBILD_BUCKET}/{pfad}", json={"expiresIn": 300}, timeout=10,   # RB1 (2): gemeinsamer Pool
                               headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
             d = r.json() if r.status_code == 200 else {}
         except Exception as e:
@@ -18855,7 +18857,7 @@ def puls_fehlerbild_datei():
         return Response("pfad/art ungültig", status=400, mimetype="text/plain")
     for endung, mime, _kopf in PULS_FEHLERBILD_TYPEN:
         try:
-            r = requests.get(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{m.group(0)}-{art}.{endung}", timeout=20,
+            r = _SB_SESSION.get(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{m.group(0)}-{art}.{endung}", timeout=20,   # RB1 (2): gemeinsamer Pool
                              headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
         except Exception as e:
             print(f"[puls-fehlerbild] ⚠️ nicht lesbar ({type(e).__name__})", flush=True)   # bewusst ohne URL/Token

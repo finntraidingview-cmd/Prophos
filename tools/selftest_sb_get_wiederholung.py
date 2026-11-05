@@ -170,6 +170,11 @@ def main():
     # 7) Quelltext: kein Supabase-Aufruf mehr am Pool vorbei
     roh = [z for z in SRC.splitlines() if "SUPABASE_URL}" in z and "requests." in z]
     check(not roh, f"kein requests.get/post direkt gegen SUPABASE_URL ({len(roh)} gefunden)")
+    # RB1 (2) (05.11.2026, Befund RT1): Fehlerfoto-Storage (Upload, signierter Link, Datei) über die gemeinsame Session — Zeitlimits wie vorher
+    st = [z.strip() for z in SRC.splitlines() if "/storage/v1/object" in z and "SUPABASE_URL}" in z]
+    check(len(st) == 3 and all(z.startswith(("r = _SB_SESSION.post(", "r = _SB_SESSION.get(")) for z in st)
+          and sum("timeout=20" in z for z in st) == 2 and sum("timeout=10" in z for z in st) == 1,
+          f"Fehlerfoto-Storage: 3 Aufrufe über _SB_SESSION, Zeitlimits 20/10/20 s unverändert ({len(st)})")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)
