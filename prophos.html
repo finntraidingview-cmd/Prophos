@@ -28842,7 +28842,7 @@
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
   // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
   // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
-  const TVTM_VERSION_SOLL = '0.10.9', TVTM_TSX_VERSION_SOLL = '0.3.3'   // TSX = SCRIPT im Auge (02.11.2026: 2.4.32-Fassung kommt sonst nie an)
+  const TVTM_VERSION_SOLL = '0.10.9', TVTM_TSX_VERSION_SOLL = '0.3.4'   // TSX = SCRIPT im Auge (02.11.2026: 2.4.32-Fassung kommt sonst nie an)
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
   const tvTmVersionSoll = art => art === 'tsx' ? TVTM_TSX_VERSION_SOLL : TVTM_VERSION_SOLL
   const tvTmKey = art => (art === 'tsx' ? 'prophos_tvtm_tsx_l' : 'prophos_tvtm_l') + tvTmSoll(art) + '_v' + tvTmVersionSoll(art)
@@ -59472,6 +59472,9 @@
         .update({ status, ergebnis: res || {}, updated_at: new Date().toISOString() })
         .eq('id', sigId)
     }catch(e){ console.warn('[signal] Ergebnis-Write:', e) }
+    // SW3 (Prüfer 05.11.2026): ein Signal, das WÄHREND dieses Laufs kam, weckte den Tick, der aber mit „lauf-aktiv" umkehrte — bisher holte es
+    // der 5-s-Poll, mit der langsameren Reserve läge es bis 20 s (Frische-Gate 180 s ab created_at). Darum nach jedem Lauf einmal nachsehen.
+    try{ osWecken(0) }catch(_){}
   }
 
   let _osStartAufgeraeumt = false   // F24: Aufräumen beim Tab-Start genau einmal
@@ -60049,7 +60052,7 @@
    *    fällig, offener Puls-Plan (Orbit V2/V3, Topstep mit Puls — planIstPuls). Ein offener Echo-Plan allein hält ihn nur noch
    *    ohne Wecker (sein „Schließen" vom Mac ist ein INSERT und weckt).
    *  - Fehler-Bremse: DB-Fehler/5xx beim Poll → 10/20/40/60 s Pause statt weiter im 5-s-Takt auf eine hängende DB. */
-  const OS_TAKT_LEERLAUF_MS = 15000, OS_TAKT_RESERVE_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000, OS_START_NACHLAUF_MS = 15 * 60000
+  const OS_TAKT_LEERLAUF_MS = 15000, OS_TAKT_RESERVE_MS = 15000 /* seit SW3 osReserveMs */, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000, OS_START_NACHLAUF_MS = 15 * 60000
   let _osAktivAt = Date.now(), _osPollAt = 0, _osFehlerN = 0, _osFehlerBis = 0
   // mitAllenOffenen: true = jeder offene Plan zählt (alter Maßstab, nur ohne Wecker); sonst nur offene Puls-Pläne
   function osPipelineAktiv(mitAllenOffenen){
@@ -60113,9 +60116,14 @@
     }catch(e){ console.warn('[signal] Wecker', e); _osRt.fehler = Math.min(_osRt.fehler + 1, 6); osWeckerAbbauen() }
   }
   window._osWecker = () => ({ status: _osRt.status, fehler: _osRt.fehler, takt_ms: osTaktMs() })   // Diagnose
+  /* SW3 (05.11.2026, Finn: „PCs ruhig, vor allem MT5/Puls sauber"): Signale kommen über den Wecker — gemessen 05.11. 09–14 UTC: 16 von 16 Claims
+   * 0,4–1,6 s nach dem Anlegen. Der Poll ist dabei nur Reserve, lief aber mit Pipeline alle 5 s (Edge-Logs: ~600–800 Abrufe/h je PC für ~150
+   * Signale am Tag über ALLE PCs). Mit verbundenem Wecker jetzt Reserve 15 s bei Pipeline, 30 s sonst (still toter Kanal: höchstens ~35 s) (localStorage prophos_os_reserve_aktiv_s /
+   * prophos_os_reserve_s); ohne Wecker unverändert 5 s / 15 s. Fällt der Wecker (CHANNEL_ERROR/CLOSED, Heartbeat), gilt sofort wieder der alte Takt. Nach jedem Lauf weckt _osErgebnis einmal (Prüfer SW3). */
+  const osReserveMs = (key, std) => { try{ const v = Number(localStorage.getItem(key)); return (localStorage.getItem(key) !== null && isFinite(v) && v >= 5) ? v * 1000 : std }catch(_){ return std } }
   function osTaktMs(){
+    if(osWeckerLebt()) return osPipelineAktiv() ? osReserveMs('prophos_os_reserve_aktiv_s', 15000) : osReserveMs('prophos_os_reserve_s', 30000)
     if(osPipelineAktiv()) return 5000
-    if(osWeckerLebt()) return OS_TAKT_RESERVE_MS
     return osPipelineAktiv(true) ? 5000 : OS_TAKT_LEERLAUF_MS
   }
   // 28.10.2026 (Finn: „alles aus Zufall"): Takt 4–6,5 s gewürfelt statt fest 5 s — Signale werden nicht mehr im 5-s-Raster übernommen
@@ -84782,6 +84790,10 @@
   setInterval(codeSchluesselTick, 5 * 60000)
 
   async function epBrueckeTick(){
+    // SW3 (05.11.2026): ein „nur ansehen"-Tab (?neben=1) brückt nicht — Edge-Logs 05.11. 13–14 UTC, Marco pc-t8wg97: die zweite Sitzung schrieb
+    // dieselbe echoplus_live-Zeile 473×/h und las den lokalen Reader jede Sekunde mit. Stirbt der Haupt-Tab, wird der Neben-Tab binnen ~70 s
+    // selbst Haupt-Tab (nebenPruefen) und brückt dann wieder — dieselbe Lücke wie für alle anderen PC-Rollen.
+    if(TAB_NEBEN) return
     const jetzt = Date.now()
     if(jetzt - _epTickLetzter < 700) return   // Worker + setInterval: höchstens ein Tick je Sekunde
     if(_epPushBusy && jetzt - _epTickSeit < EP_TICK_TOT_MS){ epHeilPruefen(); return }

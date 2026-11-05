@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.3.3
+// @version      0.3.4
 // @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
-// @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.7.1
+// @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.7.2
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -68,7 +68,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   // 0.3.0 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
   if (unsafeWindow.__prophosTsxKernAn) return;
   unsafeWindow.__prophosTsxKernAn = true;
-  var SCRIPT = '0.3.3';   // 0.3.3 (02.11.2026): augen_tsx 0.7.1 für TopstepX 2.4.32; kam über @require nie an, der Lader ist per eval gesperrt
+  var SCRIPT = '0.3.4';   // 0.3.4 (05.11.2026, SW3): augen_tsx 0.7.2 — billigere Lesung, gleiches Ergebnis · 0.3.3 (02.11.2026): augen_tsx 0.7.1 für TopstepX 2.4.32; kam über @require nie an, der Lader ist per eval gesperrt
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
   var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
@@ -241,7 +241,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.3.3';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.3.4';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8770/userscript/tsx-kern.json';
   const MERK = 'prophos_tsx_kern_v1';         // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.7.1';   // 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
+  var VERSION = 'tsx-0.7.2';   // 0.7.2 (05.11.2026, SW3 „PCs ruhig“): billige Prüfungen vor sichtbar() (Rohliste, Kopf-Filter, „No Active Position“-Text) — gleiches Ergebnis, viel weniger getComputedStyle/Layout bei 10 Lesungen/s; Meldungs-Merker räumt > 60 s alte Einträge · 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -234,6 +234,8 @@ var PROPHOS_AUGEN_TSX = (function () {
         if (!e || typeof e !== 'object' || jetzt - e.zuletzt > 15000) e = merk[s] = { erst: jetzt, zuletzt: jetzt };
         e.zuletzt = jetzt; m.erst_gesehen = e.erst;
       });
+      // 0.7.2: Einträge > 60 s ohne Blick gelten beim Wiederkommen ohnehin als neu (15-s-Regel oben) — weg damit, sonst wächst der Merker je Preis bis zum Neuladen
+      if (Object.keys(merk).length > 200) Object.keys(merk).forEach(function (s) { var e = merk[s]; if (!e || typeof e !== 'object' || jetzt - e.zuletzt > 60000) delete merk[s]; });
     } catch (_) {}
     return { gruppen: gruppen, meldungen: meldungen.slice(0, 20), bracket: bracketAus(meldungen) };
   }
@@ -605,7 +607,7 @@ var PROPHOS_AUGEN_TSX = (function () {
     if (!karten.length) return [];
     // Abschnitts-Überschriften (kurze, kinderlose Texte wie „Ineligible Accounts (2)")
     var koepfe = alle('span,div,p,h1,h2,h3,h4,h5,h6,b,strong,label').filter(function (e) {
-      return !e.children.length && sichtbar(e) && !e.closest(SEL_NIE) && RX_ABSCHNITT.test(txt(e)) && txt(e).length <= 40;
+      return !e.children.length && RX_ABSCHNITT.test(txt(e)) && txt(e).length <= 40 && sichtbar(e) && !e.closest(SEL_NIE);   // 0.7.2: Text vor sichtbar(), gleiches Ergebnis
     });
     function abschnittVon(karte) {
       var best = null, kr = karte.getBoundingClientRect();
@@ -642,9 +644,10 @@ var PROPHOS_AUGEN_TSX = (function () {
     try {
       var ar = ausloeser ? ausloeser.getBoundingClientRect() : null;
       alle('span,div,p,td,li,b,strong,a,button,h1,h2,h3,h4,h5,h6,label').some(function (b) {
-        if (b.children.length || !sichtbar(b)) return false;
+        // 0.7.2: Text-Test VOR sichtbar() — dieselbe UND-Bedingung, aber getComputedStyle/Layout nur noch für Kandidaten (läuft bei zuer Liste in JEDER Lesung)
+        if (b.children.length) return false;
         var s = txt(b);
-        if (!s || s.length > 80 || !/ACCT|Combine|Express|Funded|Ineligible|Accounts|…|\.{3}|\d+\s*K\b/i.test(s)) return false;
+        if (!s || s.length > 80 || !/ACCT|Combine|Express|Funded|Ineligible|Accounts|…|\.{3}|\d+\s*K\b/i.test(s) || !sichtbar(b)) return false;
         if (ar && b === ausloeser) return false;
         var o = { tag: b.tagName.toLowerCase(), text: s.slice(0, 60), rect: rect(b) };
         var ti = testid(b); if (ti) o.tid = ti.slice(0, 40);
@@ -705,9 +708,9 @@ var PROPHOS_AUGEN_TSX = (function () {
     if (kand.length) return kand[0];
     var treffer = null;
     alle('span,div,p').some(function (e) {
-      if (e.children.length || !sichtbar(e)) return false;
-      var t = txt(e);
-      if (t.length <= 30 && /^(no active position|no open position|no positions?)$/i.test(t)) { treffer = e; return true; }
+      if (e.children.length) return false;
+      var t = txt(e);   // 0.7.2: Text vor sichtbar(), gleiches Ergebnis
+      if (t.length <= 30 && /^(no active position|no open position|no positions?)$/i.test(t) && sichtbar(e)) { treffer = e; return true; }
       return false;
     });
     return treffer;
