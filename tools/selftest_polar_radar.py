@@ -62,7 +62,9 @@ z4 = F(dict(plan, slave_account_id=None, polar_slave_user_id=None), None, disp)
 check(z4["slave_person"] is None and z4["slave_konto"]["name"] == "alt" and z4["slave_konto"]["firma"] == "alt" and z4["slave_konto"]["currency"] is None,
       "ohne Slave-Konto: Rückfall auf slave_name/slave_firm am Plan, keine Person")
 i = APP.find('@app.route("/admin/live-trades"')
-R = APP[i:i + 16000]
+# RT1 (05.11.2026): die Route wuchs über 16.000 Zeichen (22dafb13, 02.11.2026 Topstep-Tag u. a.) — der Polar-Kurs-Riegel lag dahinter.
+# Geprüft wird weiter nur DIESE Route: bis zur nächsten @app.route.
+R = APP[i:APP.find("\n@app.route", i + 10)]
 check('"in.(tvv2,tsv2,mt5v2,mt5,polar)" if mit_echo else "in.(tvv2,tsv2)"' in R, "/admin/live-trades: route polar nur mit ?echo=1 (PC-Tab-Takt bleibt ohne)")
 check("slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier" in R, "/admin/live-trades: Polar-Felder im Select")
 check("slave_ids = sorted(" in R and "currency" in R and "_lt_polar_zeile(p, acc, accs.get(str(p.get(\"slave_account_id\") or \"\")), disp, vorher)" in R,
@@ -138,7 +140,12 @@ check("? polarAblaufHtml(st, { richtung: t.richtung" in HTML, "Radar-Popup zeigt
 # (3) Radar-Zeile + Popup + Mobil
 check("function wdlIstPolar(t){ return !!t && (t.plattform === 'polar' || t.route === 'polar') }" in HTML, "wdlIstPolar")
 check("if(wdlIstPolar(t)) return 'Polar'" in HTML, "wdlWeg: Sticker „Polar\"")
-check("['Mit Hedge', ['Echo', 'Orbit', 'Nova', 'Winning Day', 'Polar']]" in HTML and "'Polar': 'var(--teal-soft, var(--teal))'" in HTML, "Modell-Chip + Blockfarbe Polar")
+# RT1 (05.11.2026): MO1/MK1b (f18d7219, 6912b90f, 05.11.2026) setzten „Orbit Prio 2“ vor Polar in die Mit-Hedge-Liste — geprüft wird,
+# dass Polar weiter in WDL_MODELLE unter „Mit Hedge“ steht (nicht unter „Ohne Hedge“), plus Blockfarbe
+_wm = re.search(r"const WDL_MODELLE = \[\['Mit Hedge', \[([^\]]*)\]\], \['Ohne Hedge', \[([^\]]*)\]\]\]", HTML)
+check(bool(_wm) and "'Polar'" in _wm.group(1) and "'Polar'" not in _wm.group(2)
+      and all(f"'{m}'" in _wm.group(1) for m in ("Echo", "Orbit", "Nova", "Winning Day"))
+      and "'Polar': 'var(--teal-soft, var(--teal))'" in HTML, "Modell-Chip + Blockfarbe Polar")
 check("if(wdlIstPolar(t)) return null   // Polar (20.10.2026): keine Puls-Nachlesung" in HTML, "wdlWartet: Polar kennt kein Wartet")
 check("if(offen && polar){" in HTML and 'data-wdl-polar="${escapeHtml(wdlTid(t))}"' in HTML, "Läuft-Zeile Polar mit „Stand\"-Knopf")
 check("polSlaveWer" in HTML and "<span class=\"wdl-pol-s\"><b>${escapeHtml(String(t.slave_person || '?'))}</b>" in HTML, "Zeile zeigt Slave-ID + Slave-Konto als zweite Zeile")
