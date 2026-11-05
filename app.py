@@ -4465,7 +4465,7 @@ def echo_frost_faellig(merk, pid, jetzt_ts):
 # ECHO OFFEN, MASTER + HEDGE FLACH (TC1b, Master 05.11.2026 „Bau B jetzt“; Fall Chris Tradeify CFD 100k …7785 Phase 1, 70af3250): der Trade ging um
 # 07:46 Dubai am TP zu, der Plan stand bis abends auf „open“ und sperrte die Schwesterkonten am Riegel Gegenrichtung. Ursache: das Konto meldet nach
 # dem Phasen-Ziel Balance 0, die Login-Lesung der Ende-Erkennung im PC-Tab (nur bei Balance > 0) gelingt nie; die Snapshot-Wache oben meldet nur
-# „eingefroren“/alt, die Zeile war aber frisch. Jetzt: zeigt die jüngste Copier-Zeile des Master-Logins (nicht älter als ECHO_FROST_ALT_S) weder eine
+# „eingefroren“/alt, die Zeile war aber frisch. Jetzt: zeigt die jüngste Copier-Zeile des Master-Logins (frisch, ohne note, nicht älter als ECHO_FROST_ALT_S) weder eine
 # Master-Position noch einen Hedge, und das ununterbrochen ECHO_FLACH_S lang (Railway-Takt, nur im Speicher), und läuft der Plan selbst so lange, dann
 # 🟠 an die Master-IDs („von Hand abhaken“, Erinnerung nach ECHO_FLACH_ERINNERN_S) und eine Zeile in „Manuelle Arbeit“ (/admin/handarbeit). Nur Meldung:
 # kein Schreibweg in den Plan, nichts wird beendet (die Sperre fällt, sobald Finn abhakt).
@@ -4476,10 +4476,11 @@ _echo_flach_stand = {}   # plan_id → Zeile für „Manuelle Arbeit“ (admin_h
 
 
 def echo_flach_urteil(z, jetzt_ts):
-    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile {updated_at, note, pos, hd} → True, wenn der Copier für den Master weder Position noch Hedge
-    meldet und die Zeile höchstens ECHO_FROST_ALT_S alt ist (frisch ODER eingefroren/Standby — beides „nichts mehr offen“). Ältere Zeile, fehlende
-    Zeile oder unbekannte Form → False (PC/Tab still meldet echo_blind)."""
-    if not isinstance(z, dict):
+    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile {updated_at, note, pos, hd} → True, wenn der Copier für den Master FRISCH (ohne note) weder
+    Position noch Hedge meldet und die Zeile höchstens ECHO_FROST_ALT_S alt ist. Mit note („warte auf Snapshot“, „Snapshot eingefroren“) ist pos []
+    nur unbekannt, nicht zu (S2-Stopp zu 37ba5b49: Echo V2 mit offenem Trade bei zugefahrenem Terminal sähe sonst „wohl zu“ aus) — diese Fälle
+    meldet die Frost-Wache (echo_frost_urteil/echo_frost_stufe). Ältere Zeile, fehlende Zeile oder unbekannte Form → False."""
+    if not isinstance(z, dict) or z.get("note"):
         return False
     try:
         alter = jetzt_ts - datetime.fromisoformat(str(z.get("updated_at")).replace("Z", "+00:00")).timestamp()

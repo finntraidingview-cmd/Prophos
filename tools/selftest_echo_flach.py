@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Selbsttest TC1b (05.11.2026): offener Echo-Plan, Master + Hedge ≥ 60 min flach → 🟠 an die Master-IDs + Zeile in „Manuelle Arbeit“, nur Meldung.
 Fälle: Chris Tradeify CFD 100k …7785 Phase 1 (70af3250, frisch, Balance 0, 0 Positionen, 0 Hedges) und drei Geist-Pläne der letzten Tage
-(27cde17e Marco, c4db1e61 Mike, 114a10de Marco — Lese-EA eingefroren/Standby, letzter Stand flach) lösen aus; ein normaler offener Trade
-(1aaa8823 Marc, Position + Hedge), ein frischer Plan (< 60 min), eine alte Copier-Zeile (PC still) und ein Plan nach 59 min nicht.
+(27cde17e Marco, c4db1e61 Mike, 114a10de Marco — Terminal von der Geist-Prüfung wieder geöffnet, frischer flacher Stand) lösen aus; ein normaler
+offener Trade (1aaa8823 Marc, Position + Hedge), ein frischer Plan (< 60 min), eine alte Copier-Zeile (PC still), ein Plan nach 59 min und — S2-Stopp
+zu 37ba5b49 — Zeilen MIT note („warte auf Snapshot“ bei Echo V2, „Snapshot eingefroren“) nicht: dort ist pos [] nur unbekannt, das meldet die Frost-Wache.
 Läuft die echte echo_frost_tick mit Attrappen für Supabase und Versand. Ohne Netz. Aufruf: python3 tools/selftest_echo_flach.py"""
 import ast
 import os
@@ -51,21 +52,27 @@ PLAENE = [
      "master_name": "100k 14367821 → Funded · On Demand", "started_at": "2026-11-05T02:00:00+00:00", "eg": "2026-11-05T02:01:00+00:00"},
     {"id": "frisch01-aaaa", "user_id": "u-ina", "status": "open", "route": "mt5v2", "master_account_id": "kneu1", "master_firm": "FTMO",
      "master_name": "100k 5550001 → Phase 1", "started_at": iso(T0 + 20 * 60), "eg": None},   # beim Prüfen nach 61 min erst 41 min alt
+    {"id": "note0001-aaaa", "user_id": "u-ina", "status": "open", "route": "mt5v2", "master_account_id": "knot1", "master_firm": "FTMO",
+     "master_name": "100k 5550003 → Funded", "started_at": "2026-11-05T01:00:00+00:00", "eg": "2026-11-05T01:01:00+00:00"},   # Echo V2, Terminal zu
+    {"id": "note0002-aaaa", "user_id": "u-mike", "status": "open", "route": "mt5", "master_account_id": "knot2", "master_firm": "FundingPips",
+     "master_name": "100k 5550004 → Phase 1", "started_at": "2026-11-05T01:00:00+00:00", "eg": "2026-11-05T01:01:00+00:00"},   # eingefroren
     {"id": "still001-aaaa", "user_id": "u-jacob", "status": "open", "route": "mt5", "master_account_id": "kstil", "master_firm": "FTMO",
      "master_name": "100k 5550002 → Phase 1", "started_at": "2026-11-05T01:00:00+00:00", "eg": "2026-11-05T01:01:00+00:00"},
 ]
 ACCS = [{"id": "k7785", "external_id": "117785"}, {"id": "k4755", "external_id": "26774755"}, {"id": "k8534", "external_id": "21178534"},
         {"id": "k3615", "external_id": "14353615"}, {"id": "k7821", "external_id": "14367821"}, {"id": "kneu1", "external_id": "5550001"},
-        {"id": "kstil", "external_id": "5550002"}]
+        {"id": "kstil", "external_id": "5550002"}, {"id": "knot1", "external_id": "5550003"}, {"id": "knot2", "external_id": "5550004"}]
 EINGEFROREN = "Snapshot eingefroren — Lese-EA im Master-Terminal pruefen! (Chart mit ProphosHedgeReader offen? …)"
 
 
 def live(jetzt):
     return [
         {"master_login": "117785", "pc_name": "pc-c19p2l", "updated_at": iso(jetzt - 2), "note": None, "pos": [], "hd": {}},           # frisch, Balance 0
-        {"master_login": "26774755", "pc_name": "pc-t8wg97", "updated_at": iso(jetzt - 5), "note": EINGEFROREN, "pos": [], "hd": {}},   # Geist: Standby
-        {"master_login": "21178534", "pc_name": "pc-l5o8bv", "updated_at": iso(jetzt - 3), "note": EINGEFROREN, "pos": [], "hd": {}},
-        {"master_login": "14353615", "pc_name": "pc-t8wg97", "updated_at": iso(jetzt - 4), "note": "warte auf Snapshot des Master-Terminals", "pos": [], "hd": {}},
+        {"master_login": "26774755", "pc_name": "pc-t8wg97", "updated_at": iso(jetzt - 5), "note": None, "pos": [], "hd": {}},   # Geist: wieder offen, flach
+        {"master_login": "21178534", "pc_name": "pc-l5o8bv", "updated_at": iso(jetzt - 3), "note": None, "pos": [], "hd": {}},
+        {"master_login": "14353615", "pc_name": "pc-t8wg97", "updated_at": iso(jetzt - 4), "note": None, "pos": [], "hd": {}},
+        {"master_login": "5550003", "pc_name": "pc-xc5c52", "updated_at": iso(jetzt - 2), "note": "warte auf Snapshot des Master-Terminals", "pos": [], "hd": {}},
+        {"master_login": "5550004", "pc_name": "pc-l5o8bv", "updated_at": iso(jetzt - 2), "note": EINGEFROREN, "pos": [], "hd": {}},
         {"master_login": "14367821", "pc_name": "pc-7ftp5l", "updated_at": iso(jetzt - 1), "note": None,
          "pos": [{"ident": 290266974, "volume": 0.22}], "hd": {"290266974": [{"ticket": 246120936, "volume": 1.29}]}},             # normaler Trade
         {"master_login": "5550001", "pc_name": "pc-xc5c52", "updated_at": iso(jetzt - 2), "note": None, "pos": [], "hd": {}},          # Plan erst 10 min alt
@@ -116,6 +123,10 @@ c = next(g for g in flach() if g["plan_id"].startswith("70af3250"))
 check("Chris · Tradeify CFD …7785 (Echo)" in c["text"] and "PC von Chris (pc-c19p2l)" in c["text"] and "61 min" in c["text"], f"Text 117785: {c['text'][:120]}")
 check(not any(g["plan_id"].startswith(("1aaa8823", "frisch01", "still001")) for g in flach()),
       "kein Alarm: normaler Trade mit Position + Hedge, Plan < 60 min, PC still (alte Zeile → echo_blind-Weg)")
+check(not any(g["plan_id"].startswith(("note0001", "note0002")) for g in flach()) and not any(k.startswith("note") for k in ns["_echo_flach_seit"]),
+      "S2: Zeile mit note (Echo V2 „warte auf Snapshot“, „Snapshot eingefroren“) + pos [] → kein „wohl zu“, keine Flach-Uhr")
+fz = [g for g in GESENDET if g["plan_id"].startswith("note0002") and g["art"] in ("echo_terminal_zu", "echo_blind")]
+check(len(fz) == 1 and fz[0]["art"] == "echo_terminal_zu", "eingefroren + Position gesehen → meldet die Frost-Wache (⚪ Terminal zu), wie bisher")
 check(not [g for g in GESENDET if g["art"] in ("echo_blind", "echo_terminal_zu") and g["plan_id"].startswith(("70af3250", "1aaa8823"))],
       "frischer flacher Stand (117785) und normaler Trade lösen keinen echo_blind aus")
 st = ns["_echo_flach_stand"]
@@ -147,6 +158,8 @@ j = T0
 check(U({"updated_at": iso(j), "pos": [], "hd": {}}, j) and U({"updated_at": iso(j), "pos": [], "hd": {"1": []}}, j), "flach: keine Position, Hedge-Liste leer")
 check(not U({"updated_at": iso(j), "pos": [], "hd": {"1": [{"t": 1}]}}, j) and not U({"updated_at": iso(j), "pos": [{"x": 1}], "hd": {}}, j),
       "nicht flach: Hedge offen oder Master-Position")
+check(not U({"updated_at": iso(j), "note": "warte auf Snapshot des Master-Terminals", "pos": [], "hd": {}}, j)
+      and not U({"updated_at": iso(j), "note": EINGEFROREN, "pos": [], "hd": {}}, j), "S2: mit note nie flach (pos [] ist dann unbekannt)")
 check(not U({"updated_at": iso(j - 10 * 60), "pos": [], "hd": {}}, j) and not U(None, j) and not U({"updated_at": "kaputt", "pos": []}, j)
       and not U({"updated_at": iso(j), "pos": None, "hd": {}}, j), "nicht flach: Zeile älter als 9 min, fehlt, kaputt oder ohne Positionsliste")
 N = ns["echo_flach_n"]
