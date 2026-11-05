@@ -9,8 +9,10 @@
 --   • nie gestartet: started_at und orbit_gesendet_at leer, status planned oder review, master_pl leer oder 0
 --   • Puls-Antwort dieses Claims (puls_spur.at ≥ Claim − 5 s) mit ok = false und leerer Spur (kein Klick-Protokoll), deren KOPF ein Panel-Abbruch VOR
 --     dem Bot ist: „Riegel-Prüfung (Gegenrichtung) nicht erreichbar|möglich … nichts gesendet“ oder „Gegenrichtung gesperrt:“ (panel.py richtung_frei)
---   • keine Spur einer Order: kein order_signale-Eintrag mit gesendet/ok true, keine puls_ergebnisse-Order mit gesendet/ok true, kein ticket, hedge,
+--   • keine Spur einer Order: kein order_signale-Eintrag mit gesendet/ok, wartet/laeuft oder neuer als die Spur, KEINE puls_ergebnisse-Order-Zeile, kein ticket, hedge,
 --     puls_unklar, live, echo_pos_gesehen_at, schon_zu am Plan
+-- Rest-Lücke (Prüfer-Hinweis): ein Hand-Neustart OHNE neuen Claim und ohne Signal (lokaler Echo-Lauf) ist bis zu seiner eigenen Spur unsichtbar —
+-- das gilt für Hand-Starts ohne Claim im Riegel schon heute allgemein.
 -- Kein Beleg (z. B. Chris …117784 am 04.11.: „keine Order-Antwort und Master-Konto nicht lesbar“, keine puls_spur) → bleibt UNKLAR und sperrt wie bisher.
 -- Idempotent (create or replace). Rückbau: sql/2026-11-05_gegenrichtung_nichts_gesendet_rueckbau.sql (Live-Fassung, md5 05.11.2026 d6c1f7d508a4d0d2fad8def2994834dd —
 -- vor dem Einspielen pg_get_functiondef sichern). NICHT vom Slave eingespielt.
@@ -30,10 +32,12 @@ language sql stable security definer set search_path = public as $$
        and (   (p.mt5_baseline->'puls_spur'->>'msg') ~* '^Riegel-Prüfung \(Gegenrichtung\) nicht (erreichbar|möglich):.*nichts gesendet'
             or (p.mt5_baseline->'puls_spur'->>'msg') ~ '^Gegenrichtung gesperrt:')
        and not (p.mt5_baseline ?| array['ticket', 'hedge', 'puls_unklar', 'live', 'echo_pos_gesehen_at', 'schon_zu'])
+       -- Prüfer-Hinweis R4c: jedes Signal, das gesendet/ok meldet, noch wartet/läuft oder NACH der Abbruch-Spur kam (neuer Lauf ohne neuen Claim),
+       -- und jede Puls-Order-Meldung (auch „geklickt“ ohne ok) nimmt den Beleg
        and not exists (select 1 from public.order_signale o where o.plan_id = p.id::text
-                        and (o.ergebnis->>'gesendet' = 'true' or o.ergebnis->>'ok' = 'true'))
-       and not exists (select 1 from public.puls_ergebnisse e where e.plan_id = p.id::text and e.art = 'order'
-                        and (e.ergebnis->>'gesendet' = 'true' or e.ergebnis->>'ok' = 'true'))
+                        and (o.ergebnis->>'gesendet' = 'true' or o.ergebnis->>'ok' = 'true' or o.status in ('wartet', 'laeuft')
+                             or o.created_at > (p.mt5_baseline->'puls_spur'->>'at')::timestamptz - interval '5 seconds'))
+       and not exists (select 1 from public.puls_ergebnisse e where e.plan_id = p.id::text and e.art = 'order')
       from public.trade_plans p where p.id = p_plan), false)
 $$;
 

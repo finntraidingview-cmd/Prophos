@@ -67,11 +67,13 @@ def beleg(p, krit):
          bool(re.search(r"^Riegel-Prüfung \(Gegenrichtung\) nicht (erreichbar|möglich):.*nichts gesendet", msg, re.I)) or msg.startswith("Gegenrichtung gesperrt:")),
         ("array['ticket', 'hedge', 'puls_unklar', 'live', 'echo_pos_gesehen_at', 'schon_zu']",
          not any(k in b for k in ("ticket", "hedge", "puls_unklar", "live", "echo_pos_gesehen_at", "schon_zu"))),
-        ("from public.order_signale o where o.plan_id = p.id::text",
-         not any(str((o.get("ergebnis") or {}).get("gesendet")).lower() == "true" or str((o.get("ergebnis") or {}).get("ok")).lower() == "true" for o in p.get("order_signale") or ())),
-        ("from public.puls_ergebnisse e where e.plan_id = p.id::text and e.art = 'order'",
-         not any(e.get("art") == "order" and (str((e.get("ergebnis") or {}).get("gesendet")).lower() == "true" or str((e.get("ergebnis") or {}).get("ok")).lower() == "true")
-                 for e in p.get("puls_ergebnisse") or ())),
+        ("or o.status in ('wartet', 'laeuft')\n                             or o.created_at > (p.mt5_baseline->'puls_spur'->>'at')::timestamptz - interval '5 seconds'",
+         not any(str((o.get("ergebnis") or {}).get("gesendet")).lower() == "true" or str((o.get("ergebnis") or {}).get("ok")).lower() == "true"
+                 or o.get("status") in ("wartet", "laeuft")
+                 or (o.get("created_at") and isinstance(sp, dict) and sp.get("at") and ts(o["created_at"]) > ts(sp["at"]) - timedelta(seconds=5))
+                 for o in p.get("order_signale") or ())),
+        ("from public.puls_ergebnisse e where e.plan_id = p.id::text and e.art = 'order')",
+         not any(e.get("art") == "order" for e in p.get("puls_ergebnisse") or ())),
     ]
     fehlt = [t for t, _ in teile if t not in krit]
     return all(ok for _, ok in teile), fehlt
@@ -101,6 +103,9 @@ def main():
         "Echo-Position gesehen": lambda p: p["mt5_baseline"].update(echo_pos_gesehen_at="2026-11-04T05:00:00Z"),
         "order_signale gesendet": lambda p: p.update(order_signale=[{"ergebnis": {"gesendet": True}}]),
         "puls_ergebnisse ok": lambda p: p.update(puls_ergebnisse=[{"art": "order", "ergebnis": {"ok": True}}]),
+        "puls_ergebnisse geklickt (ohne ok)": lambda p: p.update(puls_ergebnisse=[{"art": "order", "stufe": "geklickt", "ergebnis": {"bestaetigt": True}}]),
+        "Signal läuft noch": lambda p: p.update(order_signale=[{"status": "laeuft", "created_at": "2026-11-04T04:40:00Z", "ergebnis": None}]),
+        "Signal nach der Spur (neuer Lauf)": lambda p: p.update(order_signale=[{"status": "fehler", "created_at": "2026-11-04T05:10:00Z", "ergebnis": {"ok": False}}]),
         "Status open": lambda p: p.update(status="open"),
     }
     falsch = []
