@@ -15499,15 +15499,35 @@ def pc_namen_zuordnen(tabelle, live, namen):
     return out
 
 
+def pc_namen_besitzer(live):
+    """REIN RECHNEND (testbar, UNT5): {pc_id: user_id} — Besitzer = ID der jüngsten mt5_live-Meldung des PCs."""
+    zuletzt = {}
+    for z in live or ():
+        pc, uid = str(z.get("pc_name") or "").strip(), str(z.get("user_id") or "").strip()
+        if pc and uid:
+            at = str(z.get("updated_at") or "")
+            if pc not in zuletzt or at > zuletzt[pc][0]:
+                zuletzt[pc] = (at, uid)
+    return {pc: uid for pc, (_at, uid) in zuletzt.items()}
+
+
+def pc_namen_sicht(daten, besitzer, gehoert):
+    """REIN RECHNEND (testbar, UNT5): nur PCs, deren Besitzer zum Unternehmen des Logins gehört — PC ohne bekannten Besitzer fällt weg (fail-closed)."""
+    return {pc: e for pc, e in (daten or {}).items() if (besitzer or {}).get(pc) and gehoert((besitzer or {})[pc])}
+
+
 @app.route("/pc-namen", methods=["GET", "OPTIONS"])
 def pc_namen_route():
-    """GET → {ok, namen: {pc_id: {name, quelle}}}. Gate: eingeloggt (wie /admin/pc-stand). Fehlt die Tabelle pc_namen noch, nur der Login-Rückfall."""
+    """GET → {ok, namen: {pc_id: {name, quelle}}}. Gate: eingeloggt (wie /admin/pc-stand). Fehlt die Tabelle pc_namen noch, nur der Login-Rückfall.
+    UNT5 (05.11.2026): nur PCs des eigenen Unternehmens (Besitzer = jüngste mt5_live-Meldung) — vorher bekam jeder Login alle PC-Namen
+    aller Unternehmen. Gruppen nicht lesbar → nur die PCs der eigenen ID."""
     if request.method == "OPTIONS":
         return "", 200
-    _me, err = _wd_login()
+    me, err = _wd_login()
     if err:
         return err
-    return jsonify({"ok": True, "namen": _pc_namen_daten()})
+    daten = _pc_namen_daten()
+    return jsonify({"ok": True, "namen": pc_namen_sicht(daten, _pc_namen_cache.get("besitzer") or {}, unt_sicht_login(me))})
 
 
 def _pc_namen_daten():
@@ -15527,10 +15547,12 @@ def _pc_namen_daten():
             mail = str(u.get("email") or "")
             disp[str(u.get("id"))] = str((u.get("user_metadata") or {}).get("name") or "").strip() or (mail.split("@")[0] if "@" in mail else "")
         daten = pc_namen_zuordnen(tabelle, live, disp)
+        besitzer = pc_namen_besitzer(live)     # UNT5: Besitzer je PC für die Sicht der Route (Reader-Meldungen nutzen ihn nicht)
     except Exception as e:
         print(f"[pc-namen] ⚠️ {type(e).__name__}: {e}", flush=True)
         daten = _pc_namen_cache["daten"] or {}
-    _pc_namen_cache.update(bis=jetzt + PC_NAMEN_CACHE_S, daten=daten)
+        besitzer = _pc_namen_cache.get("besitzer") or {}
+    _pc_namen_cache.update(bis=jetzt + PC_NAMEN_CACHE_S, daten=daten, besitzer=besitzer)
     return daten
 
 

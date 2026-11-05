@@ -155,6 +155,29 @@ def teil_wd_konten_alle():
     check("revoke execute on function public.wd_konten_alle() from anon;" in neu and "begin;" in neu and "commit;" in neu, "3c anon ohne EXECUTE, eine Transaktion")
 
 
+# ── 4) pc_namen_route ──
+def teil_pc_namen():
+    n = lade(NEU_SRC, HELFER + ("pc_namen_zuordnen", "pc_namen_besitzer", "pc_namen_sicht"))
+    live = [{"pc_name": "pc-ht0001", "user_id": M, "updated_at": "2"}, {"pc_name": "pc-ht0001", "user_id": A, "updated_at": "1"},
+            {"pc_name": "pc-em0001", "user_id": X, "updated_at": "3"}, {"pc_name": "pc-oh0001", "user_id": O, "updated_at": "3"}]
+    tabelle = [{"pc_id": "pc-ht0001", "name": "Mike"}, {"pc_id": "pc-em0001", "name": "Ahaj"}, {"pc_id": "pc-nix001", "name": "Unbekannt"}]
+    disp = {A: "Finn + Pascal", M: "Mike", X: "Amir", O: "Neu"}
+    daten = n["pc_namen_zuordnen"](tabelle, live, disp)
+    bes = n["pc_namen_besitzer"](live)
+    check(bes == {"pc-ht0001": M, "pc-em0001": X, "pc-oh0001": O}, "4a Besitzer = jüngste Meldung je PC")
+    s = n["pc_namen_sicht"]
+    ht = s(daten, bes, n["ap_unternehmen_von_login"](A, DATEN))
+    em = s(daten, bes, n["ap_unternehmen_von_login"](E, DATEN))
+    check(set(daten) == {"pc-ht0001", "pc-em0001", "pc-oh0001", "pc-nix001"}, "4b vorher: jeder Login bekam alle PC-Namen (auch Emins, ohne Besitzer)")
+    check(ht == {k: v for k, v in daten.items() if k == "pc-ht0001"}, "4c HT-Admin: nur HT-PCs, Einträge unverändert (Name + Quelle)")
+    check(set(em) == {"pc-em0001"}, "4d Emin: nur Emins PCs")
+    check(set(s(daten, bes, lambda u: str(u) == O)) == {"pc-oh0001"}, "4e fail-closed/ohne Unternehmen: nur PCs der eigenen ID; PC ohne Besitzer nie")
+    i = NEU_SRC.index("\ndef pc_namen_route(")
+    r = NEU_SRC[i:NEU_SRC.index("\n\n\n", i)]
+    check("pc_namen_sicht(daten, _pc_namen_cache.get(\"besitzer\") or {}, unt_sicht_login(me))" in r and "besitzer=besitzer" in NEU_SRC,
+          "4f Route filtert je Login, Besitzer im Cache von _pc_namen_daten (Reader-Meldungen _rw_pc_namen unverändert)")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")
