@@ -15907,6 +15907,18 @@ def admin_wd_plaene():
             return jsonify({"error": "plaene fehlt"}), 400
         angelegt, uebersprungen, verknuepft = [], [], []
         sperren = _ap_sperren()   # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein neuer Farmer-Plan; Lesefehler → leer (wie bisher)
+        # PAYOUT OFFEN (R2c, 05.11.2026 — Vorfall Jacob 04.11.: der Mac legte bei offener Anfrage zweimal je 3 WD-Pläne an, W1 zog sie wieder zurück):
+        # dieselbe Regel wie wd_payout_abgleich — Konto mit offener Anfrage (pending_payouts status pending) bekommt keinen Plan; der Grund ist genau
+        # WD_HINWEIS_PAYOUT, der Mac schreibt ihn als Hinweis in die Tageszeile, und W1 holt das Konto nach dem Abhaken von selbst zurück.
+        try:
+            _mids = sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""})
+            po_offen = set()
+            for i in range(0, len(_mids), 80):
+                po_offen |= {str(p.get("account_id")) for p in sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending",
+                                                                                           "account_id": "in.(" + ",".join(_mids[i:i + 80]) + ")"}) or []}
+        except Exception as e:
+            print(f"[wd] ⚠️ Payout offen (anlegen): {type(e).__name__}: {e}", flush=True)
+            po_offen = set()          # wie bisher; der Tab (wdPlaeneAnlegen) und W1 prüfen weiter
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -15922,6 +15934,8 @@ def admin_wd_plaene():
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
                 if ap_firma_gesperrt(acc[0], sperren):
                     uebersprungen.append({"master_account_id": mid, "grund": AP_GRUND_GESPERRT}); continue
+                if mid in po_offen:
+                    uebersprungen.append({"master_account_id": mid, "grund": WD_HINWEIS_PAYOUT}); continue
                 offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
                                                   "status": "in.(planned,open)", "limit": "5"})
                 # 23.09.2026 (Finn: „alle Accounts sind einfach off — hat schon einen Plan"): ein Farmer-Plan eines

@@ -70670,6 +70670,10 @@
       const ok = new Set(rail.konten.map(k => String(k.id)))
       const heute = new Map(rail.konten.filter(k => k && k.heute_gestartet).map(k => [String(k.id), k.heute_gestartet]))   // heute schon getradet (03.11.2026, app.py)
       for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false; if(heute.has(k.id)) k.heute_gestartet = heute.get(k.id) }
+      // PAYOUT OFFEN (R2c, 05.11.2026): Railway liefert payout_offen je Konto (app.py, 03.11.2026) — mit RPC kam es bisher nie in diese Liste, wdErwartet
+      // und die Hand-Wege sahen die offene Anfrage am Mac nicht. Jetzt wie heute_gestartet mitnehmen (nur true setzen, fehlt es: wie bisher).
+      const poOffen = new Set(rail.konten.filter(k => k && k.payout_offen).map(k => String(k.id)))
+      for(const k of konten) if(poOffen.has(k.id)) k.payout_offen = true
       // WD-STAND WIE DER FARMER (W3, 03.11.2026): die RPC zählt den alten Zähler goal_done_offset — Railway liefert den automatischen Stand (wd_stand)
       const stand = new Map(rail.konten.filter(k => k && k.wd_stand != null).map(k => [String(k.id), Number(k.wd_stand)]))
       for(const k of konten) if(stand.has(k.id)) k.winning_days = stand.get(k.id)
@@ -70756,6 +70760,12 @@
   const WD_HINWEIS_PAYOUT_MORGEN = 'Payout erhalten – ab morgen wieder drin'
   const wdPayoutHinweis = h => h === WD_HINWEIS_PAYOUT || h === WD_HINWEIS_PAYOUT_MORGEN
   const wdPayoutOffen = id => !!(_wd.payoutOffen && _wd.payoutOffen.has(String(id)))
+  /* PAYOUT OFFEN AUCH VON HAND (R2c, 05.11.2026 — Vorfall Jacob 04.11.: „nur heute rein“/„heute dazu“ am Mac schaltete drei Konten mit offener Anfrage
+   * wieder an, wdPlaeneAnlegen legte zweimal je 3 WD-Pläne an, W1 zog sie wieder zurück): dieselbe Regel wie W1 (app.py wd_payout_abgleich) — offene
+   * Anfrage = kein WD; der Hinweis in der Zeile bleibt genau WD_HINWEIS_PAYOUT (sonst holt W1 das Konto nach dem Abhaken nicht zurück). Quellen: Hinweis
+   * der Zeile, eigener Cache (PC-Tab) und payout_offen aus GET /admin/wd-plaene (Mac); POST /admin/wd-plaene prüft zusätzlich frisch. */
+  const WD_PAYOUT_KEIN_WD = 'Payout angefragt – kein WD bis abgehakt'
+  const wdKontoPayoutOffen = k => !!k && (k.hinweis === WD_HINWEIS_PAYOUT || wdPayoutOffen(k.id) || !!(wdKontoDaten(k.id) || {}).payout_offen)
   const wdCmeTagStart = tag => { try{ return wdZeitpunkt(wdTagPlus(tag, -1), '17:00', 'America/Chicago').getTime() }catch(_){ return 0 } }
   function wdHeuteGestartet(accId, tag){
     if(!tag) return false
@@ -71015,6 +71025,7 @@
         if(!wdAktiv(k)){ if(k.farm && k.ext && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true } else continue }
         const kd = wdKontoDaten(k.id)
         if(!kd || kd.archiviert){ k.aktiv = false; k.hinweis = kd ? WD_HINWEIS_ARCHIV : 'Konto nicht (mehr) gefunden'; ge = true; continue }
+        if(wdKontoPayoutOffen(k)){ k.aktiv = false; k.hinweis = WD_HINWEIS_PAYOUT; delete k.nach_start; ge = true; continue }   // PAYOUT OFFEN (R2c): nie ein Plan
         if(wdZyklusUngeklaert(k)){ wdRecovererAlarm(k.id, 'stand', 0); continue }   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026); Mac = Hand-Aktion, sofort melden
         const accLike = wdAccLike(kd)
         const z = tpVorplanZeile(accLike, { live: kd.live_balance, slaveCurrency: sPreset.currency, fx: d.fx, regeln: vp.regeln })
@@ -71389,6 +71400,10 @@
           }catch(e){ console.warn('[wd] Selbstheilung', e) }
         }
       }
+      // ALTE KOPIE (R2c, 05.11.2026, Jacob 04.11.): W1 zog den Plan wegen offener Anfrage zurück, dieser Tab hatte die Zeile davor gelesen und schrieb
+      // „weg · Plan wurde gelöscht" mit aktiv true zurück — W1s Hinweis war weg, nach dem Abhaken kam das Konto am selben Tag nicht zurück. Bei offener
+      // Anfrage daher genau W1s Zustand (plan_id/status/start_um leer, aktiv false, WD_HINWEIS_PAYOUT) statt „weg".
+      if(!plan && wdPayoutOffen(k.id)){ set(k, 'plan_id', null); set(k, 'status', null); set(k, 'start_um', null); set(k, 'aktiv', false); set(k, 'hinweis', WD_HINWEIS_PAYOUT); continue }
       if(!plan){ set(k, 'status', 'weg'); set(k, 'hinweis', 'Plan wurde gelöscht'); continue }
       const zuSpaet = plan.status === 'planned' && plan.startUmGestartetAt && !plan.orbitGesendetAt && Date.now() - new Date(plan.startUm || 0).getTime() > 15 * 60000
       const st = zuSpaet ? 'verpasst' : plan.status
@@ -72168,6 +72183,7 @@
     if(!(await wdDarf(uid))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k || !k.farm) return
+    if(rein && wdKontoPayoutOffen(k)) return wdSay(`${k.name || 'Konto'}: ${WD_PAYOUT_KEIN_WD} — fährt danach von selbst wieder mit.`, 'err')   // R2c
     k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''; delete k.naechster_lauf   // „heute wieder rein" = bewusst sofort (21.10.2026)
     x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
     wdRender()
@@ -73062,6 +73078,8 @@
     const tag = _wd.tag || document.getElementById('wd-tag')?.value; if(!tag) return { fehler: 'kein Tag gewählt' }
     const kd = wdKontoDaten(kontoId); if(!kd) return { fehler: 'Konto nicht in der Kontenliste' }
     const ext = String(kd.ext || '').trim(); if(!ext) return { fehler: WD_HINWEIS_EXT }
+    { const xk = ((_wd.rows || []).find(q => String(q.user_id) === uid) || {}).konten || []   // PAYOUT OFFEN (R2c): vor Haken und Zeile — nichts wird angeschaltet
+      if(wdKontoPayoutOffen((xk.find(q => q && String(q.id) === kontoId)) || { id: kontoId })) return { fehler: WD_PAYOUT_KEIN_WD } }
     const r = _wd.regeln || {}, vpW = wdVorplanRegeln(), fxW = (_wd.daten && _wd.daten.fx) || window._fxUsdEur || 0.85, name = kd.name || 'Konto'
     const wuerfel = k => { try{ wdKontoWuerfel(k, kd, vpW, tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance, slaveCurrency: '€', fx: fxW, regeln: vpW.regeln, zufall: 0.5 })) }catch(_){} }
     // 1) Haken aus → dauerhaft setzen (nur einzeln, nie über „Alle würfeln“)
