@@ -50389,6 +50389,9 @@
   const DEFAULT_FIRM_SPECS = [
     { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
+    // FS1b (05.11.2026, Master): Blue Guardian fehlte im Seed — kam nur per sql/2026-10-04_blue_guardian_firma.sql + _punktwert.sql für den Bestand,
+    // neue Logins seit 08.10. hatten keine Zeile (Rückfall je Unternehmen nach UNT2). Werte = DB (alle 13 Zeilen gleich): NAS100 10 $/Pkt je Lot
+    { name:'Blue Guardian', symbol:'NAS100', unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NAS100', server:'BlueGuardian-Server' },
     // FS1 (05.11.2026, Befund S2 HX1): 1,00 statt 0,85 — MT5 US100.cash Kontraktgröße 1 = 1 $ je Punkt und Lot (wie sql/2026-10-08_ftmo_kernwerte.sql:34).
     // Der alte Wert legte seit 08.10. bei 7 neuen Logins FTMO mit 0,85 an (Railway-Anzeigen × 0,85 zu klein) — Bestand: sql/2026-11-05_ftmo_ppl_seed_fix.sql
     { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'US100.cash' },

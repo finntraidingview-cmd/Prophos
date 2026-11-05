@@ -27,7 +27,7 @@ for m in re.finditer(r"\{ name:'([^']+)',\s*symbol:'([^']*)',\s*unit:'([^']+)',\
 check(seed.get("FTMO") == ("NAS100", "Lots", 1.0, "$"), f"Seed FTMO NAS100 Lots 1,00 $ ({seed.get('FTMO')})")
 
 # Stand laut Kernwert-/Firmen-SQLs (und DB-Mehrheit 05.11.2026) — (unit, ppl, currency)
-SOLL = {"Alpha Future": ("Kontrakte", 2.0, "$"), "Apex Trader": ("Kontrakte", 2.0, "$"), "FTMO": ("Lots", 1.0, "$"),
+SOLL = {"Alpha Future": ("Kontrakte", 2.0, "$"), "Apex Trader": ("Kontrakte", 2.0, "$"), "Blue Guardian": ("Lots", 10.0, "$"), "FTMO": ("Lots", 1.0, "$"),
         "FTMO Futures": ("Kontrakte", 2.0, "$"), "FundedNext": ("Lots", 10.0, "$"), "FundedNext Futures": ("Kontrakte", 2.0, "$"),
         "FundingPips": ("Lots", 20.0, "$"), "Fusion Markets": ("Lots", 0.85, "€"), "Lucid Trading": ("Kontrakte", 2.0, "$"),
         "MyFundedFutures": ("Kontrakte", 2.0, "$"), "The5%ers": ("Lots", 1.0, "$"), "Tradeify": ("Kontrakte", 2.0, "$"),
@@ -39,6 +39,14 @@ for name, (unit, ppl, cur) in SOLL.items():
 SQL = open(os.path.join(WURZEL, "sql", "2026-11-05_ftmo_ppl_seed_fix.sql"), encoding="utf-8").read()
 check("set ppl = 1.0\n where name = 'FTMO' and symbol = 'NAS100' and ppl = 0.85;" in SQL, "SQL: nur FTMO + NAS100 + 0,85 → 1,0 (idempotent)")
 check("-- update public.firm_specs set ppl = 0.85" in SQL and "-- Kontrolle" in SQL, "SQL: Rückbau und Kontroll-Abfrage als Kommentar")
+
+# FS1b: Blue Guardian im Seed mit Server und dup wie die 13 Bestands-Zeilen; SQL legt nur fehlende Zeilen an
+check("{ name:'Blue Guardian', symbol:'NAS100', unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NAS100', server:'BlueGuardian-Server' }" in blk,
+      "Seed Blue Guardian NAS100 10 $ · dup NAS100 · BlueGuardian-Server")
+check("select u.user_id, 'Blue Guardian', 'NAS100', 'Lots', 10.0, '$', 'NAS100', 'BlueGuardian-Server'" in SQL
+      and "where not exists (select 1 from public.firm_specs f where f.user_id = u.user_id and f.name = 'Blue Guardian');" in SQL
+      and "-- delete from public.firm_specs where name = 'Blue Guardian' and user_id in (" in SQL, "SQL: BG-Insert nur ohne Zeile (idempotent) + Rückbau nur der 7 IDs")
+check(set(SOLL) <= set(seed), f"jede Kernwert-Firma steht im Seed (fehlt: {sorted(set(SOLL) - set(seed))})")
 
 print("ALLES GRÜN" if not fehler else f"{fehler} FEHLER")
 sys.exit(1 if fehler else 0)
