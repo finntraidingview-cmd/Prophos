@@ -48,6 +48,21 @@ ok(j > 0 and 'if mid in po_offen:' in APP[j:j + 4000] and '"grund": WD_HINWEIS_P
    "#4 POST /admin/wd-plaene prüft pending_payouts frisch und gibt WD_HINWEIS_PAYOUT als Grund zurück")
 ok("if(rein && wdKontoPayoutOffen(k)) return wdSay(" in HTML, "#4 Hand-Weg „heute rein“ behält die strenge Prüfung (sicher in die richtige Richtung)")
 
+# ── #5 Patch-Route: on_demand.* nur für FundedNext ──
+import app  # noqa: E402
+FIRMEN = [{"name": "FundedNext", "namen": ["fundednext"], "je_groesse": {"100000": {"ziel": [5000, 5500]}}},
+          {"name": "FTMO", "namen": ["ftmo"], "je_groesse": {"100000": {"ziel": [5000, 5500]}},
+           "on_demand": {"consistency_pct": 30}}]               # Alt-Override zum Aufräumen
+Z = {"id": 1, "firmen": FIRMEN}
+u, f = app.fcp_regel_patch(Z, {"firma": "FundedNext", "feld": "on_demand.consistency_pct", "wert": 35})
+ok(f is None and u["firmen"][0]["on_demand"] == {"consistency_pct": 35}, "#5 FundedNext: on_demand.consistency_pct setzbar")
+for feld, wert in (("on_demand.consistency_pct", 35), ("on_demand.ziel_je_100k", [2000, 2200])):
+    u, f = app.fcp_regel_patch(Z, {"firma": "FTMO", "feld": feld, "wert": wert})
+    ok(u is None and f == "On Demand gibt es nur bei FundedNext", f"#5 FTMO: {feld} setzen → abgelehnt ({f})")
+u, f = app.fcp_regel_patch(Z, {"firma": "FTMO", "feld": "on_demand.consistency_pct", "wert": None})
+ok(f is None and "on_demand" not in u["firmen"][1], "#5 FTMO: alten Override leeren bleibt erlaubt")
+ok(list(app.FCP_ON_DEMAND_STANDARD) == ["fundednext"], "#5 On Demand gibt es heute nur bei FundedNext (FCP_ON_DEMAND_STANDARD)")
+
 if __name__ == "__main__":
     print("\n" + ("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER"))
     sys.exit(1 if FEHLER else 0)

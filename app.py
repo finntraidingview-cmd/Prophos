@@ -43142,6 +43142,10 @@ def fcp_regel_patch(zeile, body):
         # O1b (Finn 05.11.2026: „füg da irgendwie noch das On Demand dazu, was das ist bei FundedNext"): Add-on On Demand je Firma —
         # leer = Feld weg (Code-Standard FCP_ON_DEMAND_STANDARD); beide leer → kein Override mehr
         teil = feld.split(".", 1)[1]
+        # SA1 #5 (Prüfer-Hinweis O1c, NK1 05.11.2026): bisher beschränkte nur die UI auf FundedNext — die Route nahm on_demand.* für jede Firma an.
+        # Setzen nur, wo es On Demand gibt (FCP_ON_DEMAND_STANDARD, heute nur FundedNext); Leeren bleibt überall erlaubt (alte Overrides aufräumen)
+        if v not in (None, "") and ((f.get("namen") or [""])[0]) not in FCP_ON_DEMAND_STANDARD:
+            return None, "On Demand gibt es nur bei FundedNext"
         od = dict(f.get("on_demand")) if isinstance(f.get("on_demand"), dict) else {}
         if v is None or v == "":
             od.pop(teil, None)
