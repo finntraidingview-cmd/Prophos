@@ -43234,7 +43234,7 @@
     const arch = getArchive()
     delete arch[accountId]
     saveArchive(arch)
-    delete _archNeu[accountId]
+    delete archNeu()[accountId]
     archivUeberallEntfernen(accountId)
   }
   /* ENTARCHIVIEREN ÜBERALL (Master 09.10.2026, Hinweis Prüfer Slave 2): der Archiv-Sweep (app.py, alle 5 min) liest das Archiv ALLER
@@ -43256,22 +43256,30 @@
   /* ARCHIVIEREN MIT CLOUD-ABGLEICH (09.10.2026): jeder Schreibvorgang lädt den GANZEN lokalen Blob hoch (Write-through). Ein Tab, der seit
    * dem Login nicht neu geladen hat, kennt einen inzwischen überall entfernten Eintrag noch — beim nächsten Archivieren käme er zurück und
    * der Sweep löschte wieder Pläne. Deshalb: lokal sofort (ohne Upload), dann Cloud-Stand + dieser Eintrag hochladen (Cloud gewinnt wie beim
-   * Login). Cloud nicht lesbar → seit AC2 (05.11.2026) KEIN Upload (nur lokal, _archNeu nimmt den Eintrag beim nächsten Mal mit). _archNeu: alles, was DIESER Tab archiviert hat — zwei Archivierungen kurz
+   * Login). Cloud nicht lesbar → seit AC2 (05.11.2026) KEIN Ganz-Upload; der Eintrag wird als Änderung vorgemerkt (archivCloudMerge, 20-s-Wiederholer, an die ID gebunden). _archNeu: alles, was DIESER Tab archiviert hat — zwei Archivierungen kurz
    * hintereinander lesen sonst denselben alten Cloud-Stand und die zweite überschriebe die erste. */
   const _archNeu = {}
+  // AC3b (S5 05.11.2026): _archNeu gehört der ID, unter der archiviert wurde — wechselt die ID ohne Neuladen, ist es leer (nie A's Einträge in B's Archiv)
+  let _archNeuUid = null
+  function archNeu(){
+    let uid = null; try{ uid = currentUserId ? String(currentUserId) : null }catch(_){}
+    if(uid !== _archNeuUid){ for(const k of Object.keys(_archNeu)) delete _archNeu[k]; _archNeuUid = uid }
+    return _archNeu
+  }
   function archivSchreibenAbgeglichen(accountId, eintrag){
-    _archNeu[accountId] = eintrag
+    archNeu()[accountId] = eintrag
     const lokal = getArchive(); lokal[accountId] = eintrag
     try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(lokal)) }catch(_){ saveArchive(lokal); return }
     ;(async () => {
       // AC2: Cloud nicht lesbar → kein Upload des lokalen Stands (er könnte veraltet sein und Server-Einträge überschreiben). Lokal steht der Eintrag
-      // schon, _archNeu behält ihn — die nächste Archivierung mit lesbarer Cloud lädt ihn mit hoch.
+      // schon; er wird nur als Änderung vorgemerkt (unten, archivCloudMerge) und nachgeschrieben, sobald die Cloud lesbar ist.
       const gelesen = await fetchSettingGenau('archive').catch(() => ({ ok: false }))
-      if(!gelesen.ok){ console.warn('[archiv] Cloud-Archiv nicht lesbar — nur lokal archiviert, Upload beim nächsten Mal'); return }
+      // S2 (05.11.2026): sonst ginge der Eintrag beim nächsten Neuladen verloren („Cloud gewinnt") → als Änderung vormerken, der Wiederholer (20 s) schreibt nach
+      if(!gelesen.ok){ console.warn('[archiv] Cloud-Archiv nicht lesbar — vorgemerkt, wird nachgeschrieben'); archivCloudMerge({ setzen: { [accountId]: eintrag }, entfernen: [] }); return }
       let cloud = gelesen.value
       if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return } }   // kaputt gelesen → nicht überschreiben
       const basis = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? cloud : getArchive()   // keine Zeile/leer → lokaler Stand (wie bisher)
-      saveArchive({ ...basis, ..._archNeu })   // lokal + Upload (Write-through)
+      saveArchive({ ...basis, ...archNeu() })   // lokal + Upload (Write-through)
     })()
   }
   /* OFFENE TABS (Finn 30.10.2026): das Archiv kam nur beim Laden. Ein Konto, das ein anderer Tab, das Handy oder der Server archiviert hat (Abhaken „Phase bestanden"), stand
@@ -43284,7 +43292,7 @@
     if(currentUserId !== uidVor || localStorage.getItem(ARCH_LS) !== standVor) return false   // ID gewechselt oder Archiv hier geändert (Entarchivieren) während des Lesens: verwerfen, nächster Takt
     if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return false } }
     if(!cloud || typeof cloud !== 'object' || Array.isArray(cloud)) return false
-    const neu = { ...cloud, ..._archNeu }
+    const neu = { ...cloud, ...archNeu() }
     if(archivStandGleich(getArchive(), neu)) return false
     try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(neu)) }catch(_){ return false }
     try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
@@ -78858,7 +78866,7 @@
     }catch(e){ if(typeof atToast === 'function') atToast(`Nicht rückgängig: ${(e && e.message) || e}`, 'end'); return }
     if(!o.fremd){
       try{ let c = await fetchSetting('archive'); if(typeof c === 'string') c = JSON.parse(c)
-        if(c && typeof c === 'object' && !Array.isArray(c)){ delete _archNeu[String(o.id)]; if(o.altId) delete _archNeu[String(o.altId)]; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(c)) } }catch(_){}
+        if(c && typeof c === 'object' && !Array.isArray(c)){ delete archNeu()[String(o.id)]; if(o.altId) delete archNeu()[String(o.altId)]; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(c)) } }catch(_){}
       try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase(); if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
     }
     try{ window._admLaden?.() }catch(_){}
@@ -79443,7 +79451,7 @@
    * nichts schreiben, Änderung bleibt vorgemerkt (_archMergeOffen) und geht mit dem nächsten Mal bzw. nach 20 s mit. Kein RPC/SQL nötig.
    * Nur 'archive' schreiben Server UND Tab; die übrigen SYNC_KEYS schreibt nur der Tab (konto_verworfen, fx_usd_eur nur der Server). */
   const ARCH_SYNC_LS = 'prophos_account_archive'
-  const _archMergeOffen = { setzen: {}, entfernen: new Set() }
+  const _archMergeOffen = { setzen: {}, entfernen: new Set(), uid: null }   // uid: ID, der die vorgemerkten Änderungen gehören (AC3b)
   let _archMergeKette = Promise.resolve(), _archMergeWieder = null
   function archivDiff(vorherRaw, nachRaw){
     const lies = r => { try{ const o = JSON.parse(r || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {} }catch(_){ return {} } }
@@ -79453,6 +79461,9 @@
     return { setzen, entfernen }
   }
   function archivCloudMerge(diff){
+    // AC3b (S5 05.11.2026): vorgemerkte Änderungen gehören einer ID — eine andere ID (Wechsel ohne Neuladen) beginnt leer, nie A's Änderung in B's Archiv
+    let uid = null; try{ uid = currentUserId ? String(currentUserId) : null }catch(_){}
+    if(_archMergeOffen.uid !== uid){ _archMergeOffen.setzen = {}; _archMergeOffen.entfernen = new Set(); _archMergeOffen.uid = uid }
     for(const [k, v] of Object.entries(diff.setzen || {})){ _archMergeOffen.setzen[k] = v; _archMergeOffen.entfernen.delete(k) }
     for(const k of (diff.entfernen || [])){ delete _archMergeOffen.setzen[k]; _archMergeOffen.entfernen.add(k) }
     _archMergeKette = _archMergeKette.then(archivCloudMergeLauf).catch(e => console.warn('[archiv] Merge:', (e && e.message) || e))
@@ -79461,7 +79472,8 @@
   async function archivCloudMergeLauf(){
     const setzen = { ..._archMergeOffen.setzen }, entfernen = [..._archMergeOffen.entfernen]
     if(!Object.keys(setzen).length && !entfernen.length) return true
-    const uid = currentUserId; if(!uid) return false
+    const uid = _archMergeOffen.uid
+    if(!uid || String(currentUserId || '') !== uid) return false   // AC3b: ID gewechselt → nie unter der neuen ID schreiben
     const nochmal = () => { if(!_archMergeWieder) _archMergeWieder = setTimeout(() => { _archMergeWieder = null; archivCloudMerge({}) }, 20000); return false }
     for(let versuch = 0; versuch < 4; versuch++){
       const { data, error } = await supabase.from('user_settings').select('value,updated_at').eq('user_id', uid).eq('key', 'archive').maybeSingle()

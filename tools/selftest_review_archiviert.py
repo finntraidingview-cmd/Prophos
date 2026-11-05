@@ -66,6 +66,7 @@ check(w[10:] == [False, True, True], f"Assistent: mit Nachfolger zu, passed_pend
 # Rennen im Abgleich (S2 zu 9f3788bb): echte Funktion mit nachgebautem Lesen, das während des await etwas ändert
 renn = fn("archivStandGleich") + fn("archivCloudAbgleich").replace("function archivCloudAbgleich", "async function ab") + r"""
 const ARCH_LS = 'k', _archNeu = {}, speicher = {}
+const archNeu = () => _archNeu   // AC3b: Zugriff über archNeu() (an die ID gebunden)
 const localStorage = { getItem: k => speicher[k] ?? null }
 const _origLocalStorageSetItem = { call: (_, k, v) => { speicher[k] = v } }
 const getArchive = () => JSON.parse(speicher.k || '{}')
@@ -95,7 +96,7 @@ check("nachfolgerRadarNachziehen()" in ok and "nachfolgerRadarNachziehen()" in d
 hl = html[html.index("async function handLaden("):html.index("function handZielAbgleich(")]
 check("archivCloudAbgleich()" in hl and "wdlAktiv()" in hl, "offener Radar gleicht das Archiv im Handarbeit-Takt ab")
 ab = fn("archivCloudAbgleich")
-check("_archNeu" in ab and "_origLocalStorageSetItem" in ab and "saveArchive" not in ab, "Abgleich schreibt nur lokal, ohne Upload, eigene Einträge bleiben")
+check("archNeu()" in ab and "_origLocalStorageSetItem" in ab and "saveArchive" not in ab, "Abgleich schreibt nur lokal, ohne Upload, eigene Einträge bleiben")
 sp = html[html.index("async function mklWdErledigtSpeichern("):html.index("document.getElementById('mwdErledigtClose')")] if "async function mklWdErledigtSpeichern(" in html else ""
 check("kontoStatus === 'passed'" in sp and "if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => openSuccessorWizard(ar.konto_id)" in sp and "await archivCloudAbgleich()" in sp and "reason: 'passed_pending'" in sp, "Abhaken „Phase bestanden“ am eigenen Konto öffnet den Assistenten")
 check("archivieren" not in fn("nachfolgerRadarNachziehen").lower() and "erledigt" not in fn("nachfolgerRadarNachziehen").lower(), "Nachziehen ist nur Anzeige: kein Abhaken, kein P&L")

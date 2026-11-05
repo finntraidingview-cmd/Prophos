@@ -128,9 +128,9 @@ def main():
           and "entarchivieren_darf(uid, admin, besitzer, gruppe)" in ep,
           "Endpunkt: Rechte geprüft, Wächter updated_at mit einem Neu-Lesen, Delta-Archiv sofort neu")
     ua = block(html, "  function unarchiveAccount(", "\n  }\n")
-    check("archivUeberallEntfernen(accountId)" in ua and "delete _archNeu[accountId]" in ua, "unarchiveAccount ruft das Backend (alle Profile)")
+    check("archivUeberallEntfernen(accountId)" in ua and "delete archNeu()[accountId]" in ua, "unarchiveAccount ruft das Backend (alle Profile)")
     asa = block(html, "  function archivSchreibenAbgeglichen(", "\n  }\n")
-    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSettingGenau('archive')" in asa and "if(!gelesen.ok)" in asa and "{ ...basis, ..._archNeu }" in asa
+    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSettingGenau('archive')" in asa and "if(!gelesen.ok)" in asa and "{ ...basis, ...archNeu() }" in asa and "archivCloudMerge({ setzen: { [accountId]: eintrag }" in asa
           and "archivSchreibenAbgeglichen(accountId, arch[accountId])" in block(html, "  function archiveAccount(", "\n  /* ARCHIVIERT"),
           "Archivieren: lokal ohne Upload, dann Cloud-Stand + eigene neue Einträge hochladen (kein alter Tab-Stand); Cloud nicht lesbar → kein Upload (AC2)")
 

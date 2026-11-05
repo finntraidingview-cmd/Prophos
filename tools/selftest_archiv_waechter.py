@@ -45,6 +45,13 @@ class DB:
 
             def raise_for_status(self):
                 return None
+        if "user_settings" in url and getattr(self, "post_409", False):
+            # gleichzeitig angelegt (Tab legt die Zeile mit tab-1 an, AC3b): POST → 409, danach steht die Zeile da
+            self.post_409 = False
+            self.schreiben.append(("POST 409", None, sorted(kw["json"]["value"])))
+            self.zeile = {"value": {"tab-1": {"archived": True, "reason": "hand"}}, "updated_at": "T5"}
+            r = R(); r.status_code = 409
+            return r
         if "user_settings" in url:
             self.schreiben.append(("POST", None, sorted(kw["json"]["value"])))
             self.zeile = {"value": kw["json"]["value"], "updated_at": kw["json"]["updated_at"]}
@@ -64,6 +71,10 @@ ok(lauf(db) is True and set(db.zeile["value"]) == {"alt-1", "tab-1", "neu-1"} an
    f"Konflikt: Tab schreibt dazwischen tab-1 → neu gelesen, tab-1 bleibt {sorted(db.zeile['value'])}")
 db = DB(None)
 ok(lauf(db) is True and db.schreiben[0][0] == "POST" and set(db.zeile["value"]) == {"neu-1"}, "keine Zeile → angelegt")
+db = DB(None); db.post_409 = True
+ok(lauf(db) is True and [w[0] for w in db.schreiben] == ["POST 409", "PATCH"] and set(db.zeile["value"]) == {"tab-1", "neu-1"}
+   and db.schreiben[1][1]["updated_at"] == "eq.T5",
+   f"keine Zeile, aber gleichzeitig angelegt (POST 409) → neu gelesen, mit Wächter ergänzt, tab-1 bleibt {db.schreiben}")
 db = DB({"value": {"neu-1": {"archived": True, "reason": "passed_pending"}}, "updated_at": "T1"})
 ok(lauf(db) is False and not db.schreiben, "schon archiviert → nichts geschrieben, False")
 db = DB({"value": {"alt-1": {"archived": True}}, "updated_at": "T1"}, konflikte=5)
