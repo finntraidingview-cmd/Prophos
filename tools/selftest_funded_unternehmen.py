@@ -45,7 +45,13 @@ e1 = app.fd_unt_reg(FDP, "futures", EMIN, K1)
 check(app.fd_unt_reg(FDP, "futures", HT, K1) is FDP and app.fd_unt_reg(FDP, "futures", EMIN, K1) is e1, "HT bleibt Standard; Emins Regel je Takt gemerkt")
 check([f["name"] for f in app.fd_unt_an(FDP, "futures", EMIN, ktx({"futures": {"firmen": {"tradeify": {"an": True}}}}))] == ["Apex Trader", "Tradeify", "FTMO Futures"],
       "fd_unt_an: Emin schaltet Tradeify Funded an (HT nicht)")
-check(app.fd_unt_reg(FDP, "futures", EMIN, dict(ktx(AB), ok=False)) is FDP, "Kontext nicht lesbar → Standard (wie vor UNT4)")
+check(app.fd_unt_reg(FDP, "futures", EMIN, dict(ktx(AB), ok=False)) is FDP, "Kontext nicht lesbar → Anzeige rechnet Standard")
+_fh = dict(FDP, user_ids=[HT, EMIN])   # live: funded_cfd_plan_regeln.user_ids enthält auch Emin-IDs (S4)
+check(app.fd_unt_an(_fh, "futures", EMIN, dict(ktx(AB), ok=False), True) == [] and app.fd_unt_reg(_fh, "futures", HT, dict(ktx(AB), ok=False), True) is _fh,
+      "Prüfer S2/S4: Kontext nicht lesbar → Planer (streng) schlägt für Emin nichts vor, auch wenn er in user_ids der Regel steht; HT (Kontext ht) plant weiter")
+_src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
+check('fd_unt_reg(reg, "futures", u, _ktx, True)' in _src and 'fd_unt_reg(reg, "cfd", uid, _ktx, True)' in _src
+      and 'fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {}).get("firmen") or []' in _src, "beide Planer und die Funded-Ziel-Wache lesen streng (kein Rückfall `or firmen`)")
 
 print("2) Schreiben = Prüfung des Standards auf der wirksamen Regel, gespeichert nur die Differenz")
 fa = lambda eff, b: app.fdp_regeln_aendern(dict(eff, updated_at=FDP["updated_at"]), dict(b, updated_at=FDP["updated_at"]))   # noqa: E731
@@ -159,7 +165,7 @@ check(r.status_code == 200 and (d.get("unternehmen") or {}).get("gruppe_id") == 
       "GET CFD im Login Emin: wirksame Werte + Markierung")
 src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 fn_src = lambda n: src[src.index("\ndef " + n + "("):src.index("\ndef ", src.index("\ndef " + n + "(") + 5)]   # noqa: E731
-LESER = {"fdp_planen": "an_von(a.get(\"user_id\"))", "fcp_planen": "fd_unt_reg(reg, \"cfd\", uid, _ktx)", "zw_funded_cfd": "fd_unt_reg(reg, \"cfd\"",
+LESER = {"fdp_planen": "an_von(a.get(\"user_id\"))", "fcp_planen": "fd_unt_reg(reg, \"cfd\", uid, _ktx, True)", "zw_funded_cfd": "fd_unt_reg(reg, \"cfd\"",
          "konto_ziele": "fd_unt_reg(_fcp_regeln_laden()", "ap_bal_auto_gruppen_tick": "fd_unt_reg(_r, \"futures\""}
 fehlt = [k for k, m in LESER.items() if m not in fn_src(k)] + ([] if '"id,user_id,name,firm,starting_balance,created_at"' in fn_src("zw_funded_cfd") else ["zw_funded_cfd liest user_id"])
 check(not fehlt, f"{len(LESER)} Funded-Leser lesen die Regel des Unternehmens ({fehlt or 'alle'})")

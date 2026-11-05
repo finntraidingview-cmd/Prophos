@@ -31350,13 +31350,18 @@ def fd_unt_reg_von(reg, abw):
     return eff
 
 
-def fd_unt_reg(reg, art, uid, ktx=None):
+def fd_unt_reg(reg, art, uid, ktx=None, streng=False):
     """Funded-Regel (Zeile funded_plan_regeln / funded_cfd_plan_regeln) für eine ID = Standard + Abweichung ihres Unternehmens. HT / ohne
-    Unternehmen / ohne Abweichung / Kontext nicht lesbar → reg selbst (wie vor UNT4; die Funded-Planer legen nur Vorschläge an)."""
+    Unternehmen / ohne Abweichung → reg selbst. Kontext nicht lesbar (> 15 min): Anzeige → reg; streng (Planer, Ziel-Wache; Prüfer S2/S4 zu UNT4) → reg
+    nur für sicher bekannte HT-IDs (Kontext ht), sonst None — eine Firma, die ein Unternehmen abgeschaltet hat, wird nie still wieder vorgeschlagen."""
     if not reg:
         return reg
     k = ktx if ktx is not None else ap_unt_kontext()
     if not k.get("ok"):
+        # streng: nur sicher bekannte HT-IDs (k["ht"] = auto_plan_regeln.user_ids, bleibt bei Lesefehlern stehen) — NICHT reg.user_ids, dort stehen live
+        # auch IDs aus Emins Gruppe (S4-Stopp UNT4b)
+        if streng and str(uid or "") not in (k.get("ht") or ()):
+            return None
         return reg
     gid = (k.get("gid_von") or {}).get(str(uid or ""))
     if not gid:
@@ -31373,9 +31378,9 @@ def fd_unt_reg(reg, art, uid, ktx=None):
     return eff
 
 
-def fd_unt_an(reg, art, uid, ktx=None):
-    """Eingeschaltete Firmen (an) der Funded-Regel im Unternehmen der ID."""
-    return [f for f in ((fd_unt_reg(reg, art, uid, ktx) or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")]
+def fd_unt_an(reg, art, uid, ktx=None, streng=False):
+    """Eingeschaltete Firmen (an) der Funded-Regel im Unternehmen der ID (streng: Unternehmen unbekannt → keine)."""
+    return [f for f in ((fd_unt_reg(reg, art, uid, ktx, streng) or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")]
 
 
 FD_UNT_NICHT_FREI = ("Einstellungen je Unternehmen noch nicht freigeschaltet — es gilt der Standard. "
@@ -40466,7 +40471,7 @@ def zw_funded_cfd():
     n = fcp_payouts_zaehlen(pend, verw, buch)
     # GEWINNTAGE (Blue Guardian, BG1 Gegenprüfung): fehlen im Zyklus noch Tage, gibt es kein Radar-Ziel — sonst schlüge das Abhak-Popup „Waiting for Payout“ vor
     # (zwei Phase-A-Tage à ~600 $ liegen schon über 1.000), der Planer hielte an und Blue Guardian zahlte nicht aus. Der Boden bleibt.
-    firmen_von = lambda a: (fd_unt_reg(reg, "cfd", a.get("user_id")) or {}).get("firmen") or firmen   # noqa: E731 — UNT4: Regel des Unternehmens
+    firmen_von = lambda a: (fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {}).get("firmen") or []   # noqa: E731 — UNT4: Regel des Unternehmens; streng (S4-Stopp): unbekannt → keine Regel, nie still der Standard
     gt_konten = [a for a in konten if isinstance((fcp_je_groesse(ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)) or {}).get("gewinntage"), dict)]
     gt_plaene, zyk = {}, fcp_zyklus_start(pend, verw, buch)
     if gt_konten:
@@ -42183,7 +42188,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
            "geplant": [], "ziel": [], "ausgelassen": [], "ids": []}
-    if not uids or not (an or any(fd_unt_an(reg, "futures", u) for u in uids)):   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
+    if not uids or not (an or any(fd_unt_an(reg, "futures", u, None, True) for u in uids)):   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
         erg["msg"] = "keine ID bzw. keine Firma an"
         return erg
     if datetime.strptime(cme_heute, "%Y-%m-%d").weekday() >= 5:
@@ -42193,7 +42198,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                             "max_drawdown,waiting_payout_since,starting_balance,created_at",
                                   "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
-    an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx) is reg else fd_unt_an(reg, "futures", u, _ktx)   # noqa: E731
+    an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
     konten = [a for a in ap_deaktiviert_anwenden(konten) or [] if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
     archiv = _ap_archiviert()
     konten = [a for a in konten if str(a.get("id")) not in archiv]
@@ -44198,7 +44203,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         return erg
     # Ohne Firma an bzw. am Wochenende plant der Lauf nichts Neues, liefert aber die bestehenden Pläne (plaene) — der Reiter zeigt sonst
     # „Zu bestätigen"/„Läuft" leer (S3, 30.10.2026). ruhe = Grund, warum nicht geplant wird.
-    ruhe = ("keine Firma an" if not (an or any(fd_unt_an(reg, "cfd", u, _ktx) for u in uids)) else
+    ruhe = ("keine Firma an" if not (an or any(fd_unt_an(reg, "cfd", u, _ktx, True) for u in uids)) else
             "Wochenende — kein Handelstag" if datetime.strptime(plan_tag, "%Y-%m-%d").weekday() >= 5 else None)   # wie fdp_planen: NAS100 zu
     in_uids = "in.(" + ",".join(uids) + ")"
     # O1 (05.11.2026): on_demand + fcp_ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten noch, läuft der Planer genau wie bisher
@@ -44268,7 +44273,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     heute_tag = plan_tag if n_tag > 1 else None
     for a in ([] if ruhe else konten):
         aid, uid, pl = str(a["id"]), str(a.get("user_id")), je_plan.get(str(a["id"]), [])
-        reg_u = fd_unt_reg(reg, "cfd", uid, _ktx)   # UNT4: Regel des Unternehmens der ID (Standard + Abweichung)
+        reg_u = fd_unt_reg(reg, "cfd", uid, _ktx, True) or {"firmen": []}   # UNT4: Regel des Unternehmens der ID; streng: unbekannt → keine Firma an (S2)
         regel = ap_regel_finden(an if reg_u is reg else [f for f in (reg_u.get("firmen") or []) if isinstance(f, dict) and f.get("an")], a.get("firm"))
         param_u = param if reg_u is reg else fcp_param(reg_u)
         if not regel:
@@ -44529,7 +44534,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         k = km.get(str(p.get("master_account_id"))) or {}
         # Größe, DD und Live-Balance für Boden/Rest im Reiter (S3, 30.10.2026)
         g_k = _wd_konto_groesse(k)
-        jg_k = fcp_je_groesse(ap_regel_finden((fd_unt_reg(reg, "cfd", k.get("user_id"), _ktx) or {}).get("firmen") or firmen, k.get("firm")), g_k) or {}   # UNT4
+        jg_k = fcp_je_groesse(ap_regel_finden((fd_unt_reg(reg, "cfd", k.get("user_id"), _ktx) or reg or {}).get("firmen") or [], k.get("firm")), g_k) or {}   # UNT4
         bal_k = acc_balance_wahl(k, echo_bal, dup_bal)[0] if k else None
         erg["plaene"].append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or k.get("user_id") or ""), "konto_id": str(p.get("master_account_id")),
                               "groesse": g_k, "dd": _wd_num(jg_k.get("dd")), "balance": round(float(bal_k), 2) if bal_k else None,
