@@ -122,6 +122,12 @@ VP = {"regeln": {"fu": {"apex": [370, 390], "apex100": [320, 330]}}}
 JETZT = "2026-11-05T03:30:00+00:00"
 
 
+for _n in ("fcp_eins_prozent", "fcp_gewinne", "fcp_tage_zyklus_w", "fcp_param"):
+    lade(_n)
+ruf("fcp_konto_rechnen", FCP["firmen"][0]["je_groesse"]["100000"], 95989.54, 100000.0, 1, False, 1.0, 1.0, None, FCP["firmen"][0],
+    param=ruf("fcp_param", FCP), tage={"b": 0, "w": 0, "n": 0, "serie": 0, "serie_n": 0}, gewinne=None, gewinntage=(0, 3), ziel_fest={"usd": 1000, "zyklus": 1})
+
+
 def ctx_fuer(a):
     plaene = [p for p in PL if p["master_account_id"] == a["id"]]
     verlauf = [dict(p, id=str(i), bal_end=p["fin"]["balance_end"], bal_start=p["tv"]["balance_start"]) for i, p in enumerate(plaene) if p["route"] in ("tvv2", "tsv2")]
@@ -178,6 +184,16 @@ check(o["zyklus"]["nr"] == 1 and o["balance"]["wert"] == 95989.54, "Funded CFD: 
 check([p["bal"] for p in o["chart"]["punkte"]] == [99199.61, 97724.85, 95989.54], "Funded CFD: Chart aus final.master_balance (Echo)")
 kt = kachel(o, "trades")
 check(len(o["kacheln"]) == 6 and kt["wert"] == "3" and "04.11." in kt["unter"] and "−1.735 $" in kt["unter"], f"Funded CFD: sechs Kacheln, Trades im Zyklus 3 · {kt['unter']}")
+
+# AB1 (Abhak-Karte): dieselben Zahlen + nächster Trade aus fcp_konto_rechnen (Mitte, Ziel aus Zeile 1)
+ab = o["abhak"]
+nx_soll = ruf("fcp_konto_rechnen", FCP["firmen"][0]["je_groesse"]["100000"], 95989.54, 100000.0, 1, False, 1.0, 1.0, None, FCP["firmen"][0],
+              param=ruf("fcp_param", FCP), tage=ruf("fcp_tage_zyklus_w", c["plaene"], "2026-10-28"), gewinne=ruf("fcp_gewinne", c["plaene"], "2026-10-28"),
+              gewinntage=(0, 3), ziel_fest={"usd": 1000.0, "zyklus": 1})
+check(ab["ziel_bal"] == 101000.0 and abs(ab["rest"] - 5010.46) < .01 and ab["erreicht"] is False and ab["cons"] is None and ab["gewinntage"] == [0, 3]
+      and ab["bereit"] is False and ab["wartet"] is False, f"AB1 Blue Guardian: Ziel 101.000, Rest 5.010,46, keine Consistency, Gewinntage 0/3, nicht bereit ({ab})")
+check(ab["naechster"] and ab["naechster"]["aktion"] == nx_soll["aktion"] == "planen" and ab["naechster"]["tp"] == nx_soll["tp"] == 600.0,
+      f"AB1 Blue Guardian: nächster Trade = fcp_konto_rechnen (Gewinntag-Phase A, TP Mitte 550–650 = {ab['naechster']})")
 
 # ── 3. Apex 150k Winning Days …0002: Werte = wd_auto_stand + wd_zyklus_stand + liq (Stufen) ──
 c = ctx_fuer(AX)

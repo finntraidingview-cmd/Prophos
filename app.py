@@ -37464,6 +37464,23 @@ def kz_rechnen(a, ctx):
             frei = str(a["payout_ready_at"])[:10] <= str(ctx.get("jetzt") or datetime.now(timezone.utc).isoformat())[:10]
             checks.append(["ok" if frei else "nein", "Payout ab", kz_tag(a["payout_ready_at"])])
         ok = bool(freg) and erreicht and cons_ok and (not gt or bool(gti and gti[0] >= gti[1]))
+        # ABHAK-KARTE (AB1, Finn 05.11.2026 ~06:00 Dubai, Ja zur Vorschau): dieselben Zahlen wie oben + der nächste Trade aus fcp_konto_rechnen
+        # (die Planer-Rechnung, ohne Zufall = Mitte der Spannen, mit dem Ziel aus Zeile 1). Nur Anzeige; nie Teil des Urteils.
+        nx = None
+        try:
+            z_eff_ab = z_fest if z_fest is not None else (bereich[0] if bereich else None)
+            if freg and jg and bal and groesse and not wartet:
+                nx = fcp_konto_rechnen(jg, float(bal), float(groesse), zyklus, fcp_eins_prozent(a), 1.0, 1.0, None, freg,
+                                       param=fcp_param(ctx.get("fcp_regel") or {}), tage=tzw,
+                                       gewinne=fcp_gewinne(plaene, seit), gewinntage=gti,
+                                       ziel_fest=({"usd": z_eff_ab, "zyklus": zyklus} if z_eff_ab is not None else None))
+        except Exception as e:
+            print(f"[konto-ziele] ⚠️ nächster Trade {aid[:8]}: {type(e).__name__}: {e}", flush=True)
+        out["abhak"] = {"bal": bal, "ziel_bal": zb[0] if zb else None, "rest": round(zb[0] - bal, 2) if (zb and bal) else None, "erreicht": erreicht,
+                        "cons": ({"p": p_cons, "b": (tzw or {}).get("b"), "w": (tzw or {}).get("w"), "anteil": an, "ok": cons_ok} if p_cons else None),
+                        "gewinntage": list(gti) if (gt and gti) else None,
+                        "naechster": ({"aktion": nx.get("aktion"), "tp": nx.get("tp"), "grund": nx.get("grund")} if isinstance(nx, dict) else None),
+                        "bereit": bool(ok), "wartet": wartet}
         fehlt = [c[1] for c in checks if c[0] == "nein"]
         out["urteil"] = {"art": "payout", "titel": "Payout", "ok": ok if freg else None, "sub": f"Zyklus {zyklus}" + (f" · seit {kz_tag(seit)}" if seit else ""),
                          "text": "Payout möglich" if ok else "Noch kein Payout" if freg else "keine Planer-Regel",
