@@ -820,6 +820,39 @@ def refresh_duplikum_token(email):
 # Railway haelt ueber den Auto-Connect-Daemon ohnehin einen frischen Token —
 # dieser Endpoint reicht ihn an EINGELOGGTE Prophos-User weiter (sb-token-
 # Pruefung wie /admin/overview; ohne Login gibt es nichts).
+# DU1 (Master 05.11.2026, Sicherheit): bis .2066 gab /duplikum/session ohne eigene Zeile „irgendeine" — rows[0] war live Emins Zugang, d. h.
+# jede ID ohne eigene Creds (7 HT-IDs, 4 aus Emins Gruppe) bekam einen fremden Duplikium-Token (voller Zugriff über /duplikum/<path>).
+# Jetzt: (1) eigene Zeile der ID; (2) sonst — weil ein Duplikium-Konto innerhalb eines Unternehmens bewusst geteilt wird (HT: 5 IDs auf einem
+# Zugang, Emin: 2) — der Zugang, den die meisten IDs DESSELBEN Unternehmens (id_gruppe_mitglied / Verwalter) hinterlegt haben, Gleichstand →
+# Reihenfolge der Tabelle; (3) sonst nichts (404). Ohne Unternehmen (UNT0) oder Gruppen nicht lesbar → nur die eigene Zeile. Kein Env-Rückfall
+# (DUP_EMAIL wäre ein Zugang für jeden Login; auf Railway nie gesetzt).
+def dup_creds_fuer(uid, rows, daten):
+    """REIN RECHNEND (testbar, DU1): (creds | None, quelle 'eigen' | 'unternehmen' | None) für diesen Login. rows = duplikum_credentials,
+    daten = admin_gruppen_daten() oder None (nicht lesbar → nur eigene)."""
+    uid = str(uid or "")
+    rows = [c for c in rows or () if (c.get("email") or "").strip()]
+    eigen = next((c for c in rows if str(c.get("user_id")) == uid), None)
+    if eigen or not uid:
+        return eigen, ("eigen" if eigen else None)
+    daten = daten or {}
+    gruppen, mitglieder = daten.get("gruppen") or (), daten.get("mitglieder") or ()
+    gid = next((str(m.get("gruppe_id")) for m in mitglieder if str(m.get("user_id")) == uid), None) \
+        or next((str(x.get("id")) for x in gruppen if x.get("verwalter_id") and str(x.get("verwalter_id")) == uid), None)
+    if not gid:
+        return None, None
+    firma = {str(m.get("user_id")) for m in mitglieder if str(m.get("gruppe_id")) == gid} \
+        | {str(x.get("verwalter_id")) for x in gruppen if str(x.get("id")) == gid and x.get("verwalter_id")}
+    kand = [c for c in rows if str(c.get("user_id")) in firma]
+    if not kand:
+        return None, None
+    zahl = {}
+    for c in kand:
+        k = (c.get("email") or "").strip().lower()
+        zahl[k] = zahl.get(k, 0) + 1
+    best = max(zahl.values())
+    return next(c for c in kand if zahl[(c.get("email") or "").strip().lower()] == best), "unternehmen"
+
+
 @app.route("/duplikum/session", methods=["GET", "OPTIONS"])
 def duplikum_session():
     if request.method == "OPTIONS":
@@ -836,23 +869,24 @@ def duplikum_session():
     except Exception:
         return jsonify({"ok": False, "error": "Anmeldung nicht pruefbar"}), 502
     # Token-Quelle ist DIESELBE wie beim Waechter: duplikum_credentials aus
-    # Supabase (ueberlebt Restarts). Der erste Wurf nahm DUP_EMAIL-Env-Creds —
-    # die sind auf Railway aber nie gesetzt (Fund 25.08.: Endpoint gab 503,
-    # waehrend der Waechter munter pollte). Bevorzugt die Zeile des anfragenden
-    # Users, sonst irgendeine — es ist EIN geteiltes Duplikium-Konto.
-    creds = None
-    if SUPABASE_SERVICE_KEY:
-        try:
-            rows = [c for c in dup_creds_lesen()   # 60-s-Cache, geteilt mit dem Wächter (01.10.2026)
-                    if (c.get("email") or "").strip()]
-            creds = next((c for c in rows if str(c.get("user_id")) == uid), None) \
-                or (rows[0] if rows else None)
-        except Exception as e:
-            print(f"[duplikum] ⚠️ session creds: {type(e).__name__}: {e}", flush=True)
-    if not creds and DUP_EMAIL:
-        creds = {"email": DUP_EMAIL, "password": DUP_PASSWORD}
+    # Supabase (ueberlebt Restarts). DU1 (05.11.2026): nur die eigene Zeile bzw. der geteilte Zugang DESSELBEN Unternehmens (dup_creds_fuer),
+    # nie „irgendeine" Zeile, kein Env-Rückfall.
+    if not SUPABASE_SERVICE_KEY:
+        return jsonify({"ok": False, "error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503
+    try:
+        rows = dup_creds_lesen()   # 60-s-Cache, geteilt mit dem Wächter (01.10.2026)
+    except Exception as e:
+        print(f"[duplikum] ⚠️ session creds: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": "Duplikium-Zugaenge nicht lesbar"}), 502
+    try:
+        daten = admin_gruppen_daten()
+    except Exception as e:
+        print(f"[duplikum] ⚠️ session Unternehmen nicht lesbar ({type(e).__name__}) — nur eigene Zeile", flush=True)
+        daten = None
+    creds, _quelle = dup_creds_fuer(uid, rows, daten)
     if not creds:
-        return jsonify({"ok": False, "error": "Keine Duplikium-Zugaenge hinterlegt"}), 503
+        return jsonify({"ok": False, "error": "Für diese ID sind keine Duplikium-Zugänge hinterlegt (auch nicht im eigenen Unternehmen) — "
+                                              "im Tab unter Duplikium verbinden"}), 404
     tok = wt_email_token(creds)
     if not tok:
         return jsonify({"ok": False, "error": "Duplikium-Login fehlgeschlagen"}), 502
