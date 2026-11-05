@@ -37061,7 +37061,7 @@
     if(m != null){ /* aus dem Abgleich */ }
     else if(num(pw.master_pl_plan) != null){
       m = num(pw.master_pl_plan)
-      mq = pw.pl_quelle === 'tv' ? "Today's P&L"
+      mq = pw.pl_quelle === 'tv' ? "Today's P&L" : pw.pl_quelle === 'balance_vortrag' ? 'aus Vortrag (Balance nach dem letzten Trade)'   // AB3b
         : (pw.final_quelle === 'level' && num(pw.master_pl_schaetzung) != null && Math.abs(m - num(pw.master_pl_schaetzung)) < 0.005) ? 'aus TP-Level geschätzt'
         : pw.final_quelle === 'puls' ? 'aus TradingView gelesen' : pw.final_quelle === 'auge' ? 'aus dem TopstepX-Auge' : 'eingetragen'
     } else if(pw.master_pl && num(pw.master_pl.wert) != null){
@@ -37463,6 +37463,7 @@
   let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false, _mwdErlPolar = false
   let _mwdErlSicht = false   // aus dem Radar geöffnet (27.10.2026): Speichern mit ?ansicht=admin — Verwalter hakt Pläne seiner Gruppe ab
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
+  let _mwdErlVorQuelle = null   // AB3b: Herkunft der Vorbelegung, die beim unveränderten Speichern als pl_quelle mitgeht ('balance_vortrag' | null)
   let _mwdErlWd = false, _mwdErlWdKonto = null   // Winning-Day-Plan + Konto für die Good-Day-Vorschau (23.10.2026)
   let _mwdErlAb2 = null   // AB2 (05.11.2026): {konto_id, typ, name, unter} eines Funded-CFD-Plans des Funded-Planers (AB2c) → Abhak-Strahl nach dem Klick
   let _mwdErlChallenge = false   // AB2c (05.11.2026): Challenge/Phase → still abhaken, kein „Erledigt"-Toast unten rechts
@@ -37514,10 +37515,16 @@
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.plattform === 'echo' || ((pw.route === 'tvv2' || pw.route === 'tsv2') && !mitHedge))
     // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
     const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
+    // AB3b (05.11.2026, Hand-Nachtrade 7869ea6c ohne Start-Balance: Feld leer, Finn tippte 50,00 statt +86,88): fehlt pl_balance, belegt der Balance-Vortrag
+    // vom Server (app.py echo_vortrag: Endbalance − Endbalance des letzten Trades desselben Kontos, nur ohne Lücke) vor — unverändert gespeichert = 'balance_vortrag'
+    // nur, wenn weder Balance-Sprung, pl_balance noch master_pl.wert (Plan/Rundgang/final) etwas liefern — der Vortrag verdrängt nie einen Wert (S9-Gegenprüfung)
+    const _mplWert = (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
+    const _vt = (!_mwdErlPolar && !_sp && !(pw.pl_balance != null && isFinite(Number(pw.pl_balance))) && _mplWert == null && pw.vortrag && _fz(pw.vortrag.pl) != null) ? pw.vortrag : null
     const plVor = _mwdErlPolar ? (_fz(pw.master_pl_plan) ?? (pw.polar ? _fz(pw.polar.master_pl) : null))
       : _sp ? _sp.tages
       : (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
-      : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
+      : _mplWert != null ? _mplWert
+      : _vt ? _fz(_vt.pl) : null
     // Konto weg (05.10.2026): P&L nicht mehr lesbar — steht keiner am Plan, Vorschlag ≈ Start-Balance bis Liquidation (überschreibbar)
     const _kw = (typeof wdlKontoWeg === 'function') && wdlKontoWeg(pw)
     // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): P&L = TP-Schätzung, Status „Phase bestanden" (unten)
@@ -37527,9 +37534,11 @@
     const _kwSch = _ts ? _ts.pl : (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : (_tw && plVor == null) ? _tw.pl : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
     _mwdErlVor = plVor != null ? plVor : _kwSch
+    _mwdErlVorQuelle = (_vt && plVor != null) ? 'balance_vortrag' : null   // AB3b
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
     if(mHilfe) mHilfe.textContent = _mwdErlPolar ? (plVor != null ? 'aus der Polar-Abrechnung (TradingView)' : 'aus TradingView eintragen')
       : _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
+      : _vt ? ab3VortragText(_vt)
       : _ts ? '≈ ' + WDL_TSX_SCHAETZ_TIP + ' — MLL − Start-Balance, bitte prüfen'
       : (_tw && plVor == null) ? '≈ geschätzt: TP laut Radar-Chart (Konto nicht mehr im Dropdown) — bitte prüfen'
       : _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
@@ -37681,6 +37690,7 @@
     if(spl != null && !isFinite(spl)) return say(_mwdErlPolar ? 'Slave-P&L ist keine Zahl.' : 'Fusion-P&L ist keine Zahl.', 'err')
     const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
+    const plQuelleVor = plHand ? null : _mwdErlVorQuelle   // AB3b: unverändert übernommener Vortrag → 'balance_vortrag'
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
     const ab2Info = (still || !['none', 'waiting', 'passed'].includes(kontoStatus)) ? null : _mwdErlAb2   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
     const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
@@ -37708,7 +37718,7 @@
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus, ...(wdHand ? { wd_zaehlen: true } : {}), ...(einKlick ? { nur_review: true } : {}),
                                // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
-                               ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
+                               ...((plHand) ? { pl_quelle: 'hand' } : plQuelleVor ? { pl_quelle: plQuelleVor } : {}) }) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw Object.assign(new Error(d.error || ('HTTP ' + r.status)), { status: r.status })
       const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
@@ -76211,8 +76221,11 @@
     if(tcSlaveField) tcSlaveField.style.display = (tcV2 && !tcGehedgt) ? 'none' : ''
     if(tcMasterField) tcMasterField.style.gridColumn = (tcV2 && !tcGehedgt) ? 'span 2' : ''
     document.getElementById('tc-slave-cur').textContent = tcGehedgt ? '€' : slavePreset.currency
-    document.getElementById('tc-master-pl').value = plFeldText(p.masterPl)
+    // AB3b (05.11.2026): ohne P&L und ohne Start-Balance → Vortrag aus den eigenen Plänen desselben Kontos (ab3Vortrag), sonst leer wie bisher
+    const _tcVt = (p.masterPl == null) ? ab3Vortrag(p, tradePlans) : null
+    document.getElementById('tc-master-pl').value = plFeldText(_tcVt ? _tcVt.pl : p.masterPl)
     plFeldRuhe('tc-master-pl', 'tc-master-hinweis'); plFeldRuhe('tc-slave-pl', 'tc-slave-hinweis')
+    if(_tcVt){ const h = document.getElementById('tc-master-hinweis'); if(h) h.textContent = ab3VortragText(_tcVt) }
     tcLesungZeichnen(p.id)   // Endlesung-Stand unter dem Master-Feld (25.09.2026)
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
@@ -76221,6 +76234,7 @@
     const _tcSchaetzung = !!(_tcFin && (_tcFin.quelle === 'level' || _tcFin.quelle === 'demo') && typeof _tcFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _tcFin.master_pl_schaetzung) < 0.005)
     _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: _tcSchaetzung ? null : plQuellePlan(p) }
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
+            : _tcVt ? { wert: Number(_tcVt.pl), quelle: 'balance_vortrag' }   // AB3b: unverändert gespeichert → pl_quelle 'balance_vortrag'
             : null
     document.getElementById('tc-slave-pl').value  = tcGehedgt
       ? (() => { const h = p.mt5Baseline && p.mt5Baseline.hedge; return (h && h.status === 'geschlossen' && h.pl != null) ? Number((window.hedgePlGesamt || ((b, x) => x))(p.mt5Baseline, h.pl)).toFixed(2) : plFeldText(p.slavePl) })()   // + versuche_alt (08.10.2026)
@@ -77017,6 +77031,39 @@
     if(route === 'tsv2') return 'hand'   // Topstep V2 von Hand; mit Puls ruft der Aufrufer plQuellePlan (F23)
     return 'duplikum'   // dup, tvplus, topstep (Mirror) und alles Unbekannte
   }
+  /* BALANCE-VORTRAG (AB3b, Master 05.11.2026 nach AB3, Fall Blue Guardian 100k …7770, Hand-Nachtrade 7869ea6c): ein von Hand gestarteter Echo-Trade ohne
+   * Start-Balance (Master-Terminal im Standby → mt5_baseline.master_balance null, „Beweis oder leer") hatte beim Abhaken kein P&L vorbelegt — Finn tippte
+   * 50,00, richtig waren +86,88 = Endbalance 100.534,71 − Endbalance des Vortrags e8fa35d4 100.447,83. REIN RECHNEND, dieselbe Regel wie app.py echo_vortrag:
+   * nur ohne P&L am Plan, ohne Start-Balance und mit final.master_balance; Vortrag = der zuletzt VOR diesem Trade begonnene Trade desselben Kontos, beendet
+   * vor dessen Start und mit gelesener Endbalance (final.master_balance → bal_nach.balance → final.balance_end) — nie auf einen älteren ausweichen; kein
+   * anderer Trade des Kontos begann zwischen Start und Ende dieses Trades. Sonst null (Feld bleibt leer). -> {pl, balance_vorher, balance_nachher, plan_id, ended_at} | null */
+  function ab3Vortrag(p, alle){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!p || n(p.masterPl) != null) return null
+    const b = (p.mt5Baseline && typeof p.mt5Baseline === 'object') ? p.mt5Baseline : {}
+    const fin = (b.final && typeof b.final === 'object') ? b.final : {}
+    const be = n(fin.master_balance), t0 = p.startedAt ? new Date(p.startedAt).getTime() : NaN
+    if(n(b.master_balance) != null || be == null || !isFinite(t0) || !p.masterAccountId) return null
+    const t1 = new Date(p.endedAt || fin.at || '').getTime()
+    const ms = x => x ? new Date(x).getTime() : NaN
+    const gleiche = (alle || []).filter(x => x && String(x.id) !== String(p.id) && String(x.masterAccountId || '') === String(p.masterAccountId) && isFinite(ms(x.startedAt)))
+    const vor = gleiche.filter(x => ms(x.startedAt) < t0)
+    if(!vor.length) return null
+    const v = vor.reduce((a, x) => ms(x.startedAt) > ms(a.startedAt) ? x : a)
+    if(!isFinite(ms(v.endedAt)) || ms(v.endedAt) > t0) return null            // Vortrag offen oder überlappt
+    const vb = (v.mt5Baseline && typeof v.mt5Baseline === 'object') ? v.mt5Baseline : {}
+    const bv = n(vb.final && vb.final.master_balance) ?? n(vb.bal_nach && vb.bal_nach.balance) ?? n(vb.final && vb.final.balance_end)
+    if(bv == null) return null
+    if(gleiche.some(x => x !== v && ms(x.startedAt) > t0 && (!isFinite(t1) || ms(x.startedAt) <= t1))) return null   // anderer Trade dazwischen
+    return { pl: Math.round((be - bv) * 100) / 100, balance_vorher: bv, balance_nachher: be, plan_id: String(v.id), ended_at: v.endedAt || null }
+  }
+  window._ab3Vortrag = ab3Vortrag   // Test-Haken
+  function ab3VortragText(vt){
+    const f = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return (vt && vt.balance_vorher != null && vt.balance_nachher != null)
+      ? `aus Vortrag: Balance ${f(vt.balance_nachher)} − ${f(vt.balance_vorher)} (nach dem letzten Trade) — bitte prüfen` : 'aus Vortrag (Balance nach dem letzten Trade) — bitte prüfen'
+  }
+  window._ab3VortragText = ab3VortragText
   function plQuelleErmitteln(mPl){
     if(_tcAuto && _tcAuto.wert != null && isFinite(mPl) && Math.abs(mPl - _tcAuto.wert) < 0.005) return _tcAuto.quelle   // null = unbekannt, nicht anfassen
     return 'hand'

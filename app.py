@@ -13113,7 +13113,7 @@ def admin_wd_heute():
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
             z.pop("_tsx", None)
             if _wd_heute_behalten(z, tag):
-                zeilen.append(z)
+                zeilen.append(_vortrag_anhaengen(z, p))   # AB3b: Echo ohne Start-Balance → Vortrag für den Abhak-Dialog (nur behaltene Zeilen)
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
         for z in zeilen:
             z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
@@ -14277,6 +14277,66 @@ def lt_echo_felder(p, live, jetzt_ts, panel=None):
     return out
 
 
+# BALANCE-VORTRAG (AB3b, Finn/Master 05.11.2026, Fall Blue Guardian 100k …7770, Hand-Nachtrade 7869ea6c): ein von Hand gestarteter Echo-Trade startet ohne
+# Start-Balance, wenn das Master-Terminal im Standby ist („Beweis oder leer“, mt5_baseline.master_balance null) — der Abhak-Dialog hatte dann nichts vorzubelegen,
+# Finn tippte 50,00, richtig waren +86,88 (Endbalance 100.534,71 − Endbalance des Vortrags 100.447,83). Jetzt: fehlt die Start-Balance und steht
+# final.master_balance, ist der P&L = Endbalance − Endbalance des letzten Trades DESSELBEN Kontos, aber nur ohne Lücke: der Vortrag begann vor diesem Trade,
+# war vor dessen Start beendet und hat eine gelesene Endbalance; kein anderer Trade des Kontos begann zwischen Start und Ende dieses Trades. Sonst nichts
+# (Feld bleibt leer wie bisher). Nur Vorbelegung; gespeichert wird mit pl_quelle 'balance_vortrag', wenn der Wert unverändert übernommen wird.
+def _vortrag_bal(f):
+    """Endbalance eines beendeten Plans: final.master_balance (Echo) → bal_nach.balance (Nachlesung) → final.balance_end (TradingView)."""
+    for k in ("bal_echo", "bal_nach", "bal_tv"):
+        v = _wd_num((f or {}).get(k))
+        if v is not None:
+            return v
+    return None
+
+
+def echo_vortrag(p, andere):
+    """REIN RECHNEND (testbar). p = Plan (trade_plans-Zeile), andere = Pläne desselben Kontos [{id, started_at, ended_at, bal_echo, bal_nach, bal_tv}]
+    (auch offene). → {pl, balance_vorher, balance_nachher, plan_id, ended_at} | None (s. Block oben)."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    be = _wd_num(fin.get("master_balance"))
+    t0 = str(p.get("started_at") or "")
+    if _wd_num(base.get("master_balance")) is not None or be is None or not t0 or _wd_num(p.get("master_pl")) is not None:
+        return None
+    t1 = str(p.get("ended_at") or fin.get("at") or "")
+    gleiche = [f for f in (andere or []) if str(f.get("id")) != str(p.get("id")) and f.get("started_at")]
+    vor = [f for f in gleiche if str(f["started_at"]) < t0]
+    if not vor:
+        return None
+    v = max(vor, key=lambda f: str(f["started_at"]))
+    if not v.get("ended_at") or str(v["ended_at"]) > t0:
+        return None                                   # Vortrag noch offen oder überlappt
+    bv = _vortrag_bal(v)
+    if bv is None:
+        return None                                   # nie auf einen älteren Trade ausweichen
+    if any(t0 < str(f["started_at"]) and (not t1 or str(f["started_at"]) <= t1) for f in gleiche if f is not v):
+        return None                                   # anderer Trade dazwischen
+    return {"pl": round(be - bv, 2), "balance_vorher": bv, "balance_nachher": be, "plan_id": str(v.get("id")), "ended_at": v.get("ended_at")}
+
+
+def _vortrag_anhaengen(z, p):
+    """Hängt z['vortrag'] an eine Echo-Zeile — nur im seltenen Fall „Start-Balance fehlt, Endbalance da, noch kein P&L“ eine Abfrage (Konto, 14 Tage). Fehler → nichts."""
+    try:
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+        if (str(p.get("route") or "") not in LT_ECHO_ROUTEN or _wd_num(base.get("master_balance")) is not None
+                or _wd_num(fin.get("master_balance")) is None or _wd_num(p.get("master_pl")) is not None
+                or not p.get("master_account_id") or not p.get("started_at")):
+            return z
+        # ohne Parsen (S9-Gegenprüfung: fromisoformat scheitert vor Python 3.11 an gekürzten Nachkommastellen „…51.5+00:00“) — 21 Tage ab jetzt reichen
+        seit = (datetime.now(timezone.utc) - timedelta(days=21)).isoformat()
+        andere = sb_select("trade_plans", {"select": "id,started_at,ended_at,bal_echo:mt5_baseline->final->master_balance,"
+                                                     "bal_nach:mt5_baseline->bal_nach->balance,bal_tv:mt5_baseline->final->balance_end",
+                                           "master_account_id": f"eq.{p['master_account_id']}", "started_at": f"gte.{seit}"}) or []
+        z["vortrag"] = echo_vortrag(p, andere)
+    except Exception as e:
+        print(f"[vortrag] ⚠️ {str(p.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+    return z
+
+
 def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None):
     """Eine Echo-V2-Zeile im Live-Trades-Format: Rahmen aus _wd_heute_zeile (Person, Konto, Farbe, Status, master_pl …),
     NQ-Felder bleiben leer, dazu lt_echo_felder. Symbol ohne Position: Firmen-Standard (symbol_quelle 'firma')."""
@@ -14296,7 +14356,7 @@ def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None)
         s = firm_sym.get(_firm_norm(acc.get("firm")))
         if s:
             z["symbol"], z["symbol_quelle"] = s, "firma"
-    return z
+    return _vortrag_anhaengen(z, p)   # AB3b: P&L-Vorbelegung aus dem Balance-Vortrag (nur ohne Start-Balance)
 
 
 # LETZTER GUTER STAND (09.10.2026, Befund Prüfer T3: drei Netz-Aussetzer im Railway-Container, 6–13 s ohne ausgehenden Verkehr →
@@ -16824,6 +16884,8 @@ def admin_wd_plaene():
                             upd["blown"] = True
                         if daten.get("pl_quelle") == "hand":
                             upd["pl_quelle"] = "hand"   # Hand-Betrag im Erledigt-Popup (08.10.2026, Fall ea91e359: −600 ohne Herkunft)
+                        elif daten.get("pl_quelle") == "balance_vortrag":
+                            upd["pl_quelle"] = "balance_vortrag"   # AB3b (05.11.2026): unverändert übernommene Vorbelegung aus dem Balance-Vortrag
                         if uid is None:
                             # Welle 2: was den Plan braucht — Good-Day-Konto, Konten der ID, Hedge-Login
                             if plan.get("master_account_id"):
@@ -25894,7 +25956,7 @@ def admin_hypo_bilanz():
 AP_HB_TZ = "Asia/Dubai"
 AP_HB_CACHE_S = 30
 AP_HB_BLOW_ANTEIL = 0.95                               # wie ap_letzter_trade_geblasen: ≥ 95 % verloren = geblowt
-AP_HB_ECHT_QUELLEN = ("tv", "reader", "puls", "hand")  # pl_quelle eines echten Ergebnisses (ap_letzter_trade_geblasen)
+AP_HB_ECHT_QUELLEN = ("tv", "reader", "puls", "hand", "balance_vortrag")  # pl_quelle eines echten Ergebnisses; balance_vortrag = zwei gelesene Balancen (AB3b)
 _ap_hb_cache = {"bis": 0.0, "tag": None, "zeilen": None, "ab": None}   # HT („ht"); Gruppen in _ap_hb_cache_je (UNT2)
 _ap_hb_cache_je = {}
 _ap_hb_lock = threading.Lock()
