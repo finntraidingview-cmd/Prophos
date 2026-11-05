@@ -87379,6 +87379,7 @@
   // LINKS Firmen | MITTE „Ziel & Trade" der gewählten Firma | RECHTS „Planer & Hedge" (globale Planer-Werte oben + Firma an/aus, Modell,
   // Slider-Blöcke, Hedge). Jede Karte speichert, was in ihr geändert ist (Firmenwerte über /kernwert, Planer-Werte über /ablaufwert).
   function e3ZielTradeKarte(D, art, admin, sel){
+    if(D.gruppe_sicht) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', sel ? e3Name(sel) : '—')}<div class="e3-leer">Die Gruppe plant mit denselben Regeln wie Hermann Technologies (Ziel, Trade, Consistency) — ändert der Admin. Hier wählst du das Modell je Firma.</div></div>`
     if(!sel) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', '—')}<div class="e3-leer">keine Firma</div></div>`
     const n = (sel.namen || [])[0], knopf = admin ? `<span class="e3-k4">${(_e3.msg[n] || {}).text ? `<span class="e3-msg ${_e3.msg[n].ok ? 'ok' : 'fehler'}">${e3E(_e3.msg[n].text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-xs" data-e3-speichern="${e3E(n)}">Speichern</button></span>` : ''
     return `<div class="wd-set-card e3-zt-karte">${e3Kopf4(`Ziel & Trade · ${e3Name(sel)}`, (sel.groessen || []).map(e3Gr).join(' · ') || 'Ziel, Consistency, Trade', knopf)}${e3DetailHtml(sel, D, art, admin)}</div>`
@@ -87396,6 +87397,8 @@
       <div class="wd-felder">${feld('Bestätigen', admin ? `<select class="input mono e3-in" data-e3-ort="best" data-e3-pfad='["auto_bestaetigen"]' data-e3-alt="${best}">${Object.entries(bestTxt).map(([k, t]) => `<option value="${k}"${k === best ? ' selected' : ''}>${t}</option>`).join('')}</select>` : `<div class="wd-abl-wert">${bestTxt[best]}</div>`)}
         ${nb ? feld(`Neue Konten bis <small>· ${e3E(e3Tz(nb.tz))}</small>`, uhr(['neu_bis', 'uhr'], nb.uhr)) : ''}
         ${fe ? feld(`Start ab <small>· ${e3E(tz)}</small>`, uhr(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhr(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1])) : ''}</div></div>`
+    const gs = D.gruppe_sicht
+    const planerG = gs ? `<div><label class="wd-abl-schalter"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · an/aus oben in der Planer-Leiste</small></span><b>${gs.aktiv ? 'an' : 'aus'}</b></label></div>` : ''
     let firma = ''
     if(sel){
       const n = (sel.namen || [])[0], m = e3Modell(sel, D)
@@ -87407,18 +87410,34 @@
       const md = e3ModellWert(sel, D)
       if(!cfd && sel.route !== 'tsv2' && md === 'orbit_prio2') bl += slider('Orbit Prio 2 · Fusion-Hedge (Schalter für alle Prio-2-Firmen)', !!(D.apex_hedge || {}).an, 'apex_hedge', '')
       if(cfd) bl += slider('Echo mit Fusion-Hedge', !!(D.echo_hedge || {}).an, 'echo_hedge', '')
-      // MODELL (MO1): Futures wählbar (nicht Topstep V2 — eigener Weg in TopstepX), CFD fest Echo mit Hedge
-      const modell = cfd ? `<label class="wd-abl-schalter"><span><b>Modell</b><small>fest</small></span><b>Echo mit Hedge</b></label>`
-        : (sel.route === 'tsv2' || n === 'tradeify') ? '' : `<label class="wd-abl-schalter"><span><b>Modell</b><small>Orbit V2 ohne Hedge · Orbit Prio 2 mit Fusion-Hedge</small></span>${admin
-          ? `<select class="input mono e3-modell" data-e3-modell="${e3E(n)}" aria-label="Modell">${E3_MODELLE.map(([k, t]) => `<option value="${k}"${k === md ? ' selected' : ''}>${t}</option>`).join('')}</select>`
-          : `<b>${md === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}</b>`}</label>`
+      // MODELL (MO1): Futures wählbar, CFD fest Echo mit Hedge. MO1b (Finn 05.11.2026: „unter Challenge-Planer, zum Beispiel bei Emin, die Option, das Modell zu
+      // ändern“): eine Zeile für Hermann Technologies (regeln.firmen[].modell) und je Verwalter-Gruppe eine (auto_plan_gruppe.firmen_modell, POST /admin/gruppen-plan
+      // aktion modell). Tradeify (eigener Final-Hedge) und Topstep V2 (eigener Weg) ausgegraut mit Grund.
+      const nichtGrund = sel.route === 'tsv2' ? 'Topstep V2 — eigener Weg in TopstepX' : (D.modell_nicht || {})[n] || ''
+      const mSel = (attr, wert, aus, opts) => `<select class="input mono e3-modell" ${attr} aria-label="Modell"${aus ? ` disabled title="${e3E(aus)}"` : ''}>${(opts || E3_MODELLE).map(([k, t]) => `<option value="${k}"${k === wert ? ' selected' : ''}>${t}</option>`).join('')}</select>`
+      // MO1c (Finn: Emins FundedNext Futures 50k): in der Gruppe auch „aus" — ein Modell schaltet die Firma für die Gruppe AN, auch wenn HT sie nicht plant
+      const E3_MODELLE_G = [['aus', 'aus'], ...E3_MODELLE]
+      const mZeile = (titel, unter, inhalt) => `<label class="wd-abl-schalter"><span><b>${e3E(titel)}</b><small>${e3E(unter)}</small></span>${inhalt}</label>`
+      let modell = ''
+      if(cfd) modell = mZeile('Modell', 'fest', '<b>Echo mit Hedge</b>')
+      else {
+        // Gruppen-Sicht (Verwalter): nur die Zeile SEINER Gruppe, änderbar (Rechte wie die übrigen Gruppen-Felder); Admin: HT + jede Gruppe
+        if(!gs) modell = mZeile('Modell · Hermann Technologies', nichtGrund || 'Orbit V2 ohne Hedge · Orbit Prio 2 mit Fusion-Hedge',
+          admin ? mSel(`data-e3-modell="${e3E(n)}"`, md, nichtGrund) : `<b>${md === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}</b>`)
+        const darfG = admin || D.gruppe_admin === true
+        for(const g of (D.gruppen_modelle || [])){
+          const gw = (g.an && g.an[n] === false) ? 'aus' : ((g.modelle || {})[n] || md), ohneSp = g.spalte === false ? 'Spalte fehlt — sql/2026-11-05_orbit_prio2.sql einspielen' : ''
+          modell += mZeile(gs ? 'Modell' : `Modell · Gruppe ${g.name || '?'}`, nichtGrund || ohneSp || (gs ? 'Orbit V2 ohne Hedge · Orbit Prio 2 mit Fusion-Hedge' : 'eigene Einstellung der Gruppe'),
+            darfG ? mSel(`data-e3-modell="${e3E(n)}" data-e3-gruppe="${e3E(g.gruppe_id)}"`, gw, nichtGrund || ohneSp, E3_MODELLE_G) : `<b>${gw === 'aus' ? 'aus' : gw === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}</b>`)
+        }
+      }
       firma = `<div class="wd-abl-abschnitt">${e3E(e3Name(sel))}</div><div data-e3-firma="${e3E(n)}">
         <div class="e3-fkopf"><span class="e3-weg"><i class="e3-mod ${m.kl}"></i>${e3E(m.text)}</span></div>
         <label class="wd-abl-schalter"><span><b>Im Planer</b><small>Firma automatisch planen</small></span>${e3Wert(sel.planen !== false, ['planen'], 'planen', admin, '')}</label>
         ${modell}${bl}</div>`
     }
     const knopf = admin ? `<span class="e3-k4"><span class="e3-msg" data-e3-ablauf-msg></span><button type="button" class="btn btn-ghost btn-xs" data-e3-rechts-speichern${sel ? ` data-e3-firma-n="${e3E((sel.namen || [])[0])}"` : ''}>Speichern</button></span>` : ''
-    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, knopf)}${planer}${firma}</div>`
+    return `<div class="wd-set-card e3-ph-karte">${e3Kopf4('Planer & Hedge', gs ? `${cfd ? 'CFD' : 'Futures'} · Gruppe ${gs.name || ''}` : `${cfd ? 'CFD' : 'Futures'} · Zeiten, Bestätigen, Firma`, gs ? '' : knopf)}${gs ? planerG : planer}${firma}</div>`
   }
   function e3Html(D, art){
     const admin = D.admin === true, firmen = (D.firmen || []).filter(f => e3ArtVon(f) === art)
@@ -87426,7 +87445,8 @@
     const hat = n => firmen.some(f => (f.namen || [])[0] === n)
     if(!hat(w.firma)){ const m = e3Merk('firma.' + art); w.firma = hat(m) ? m : (firmen.length ? (firmen[0].namen || [])[0] : null); w.tab = 'std' }
     const sel = firmen.find(f => (f.namen || [])[0] === w.firma)
-    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${admin ? '' : ' · nur ansehen'}</span></div></div>
+    const gs = D.gruppe_sicht   // MO1b: Login eines Gruppen-Verwalters (Emin) — Werte SEINER Gruppe statt der HT-Regel
+    return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · Gruppe ' + e3E(gs.name || '') : admin ? '' : ' · nur ansehen'}</span></div></div>
       <div class="wd-set-grid">${e3FirmenKarte(D, art, admin, firmen, w)}${e3ZielTradeKarte(D, art, admin, sel)}${e3PlanerHedgeKarte(D, art, admin, sel)}</div></div>`
   }
   async function e3Laden(){
@@ -87558,13 +87578,22 @@
     }catch(e){ zeig(false, 'nicht gespeichert: ' + ((e && e.message) || e)) }
     finally{ knopf.disabled = false }
   }
-  async function e3ModellSetzen(sl){   // ORBIT PRIO 2 (MO1): Modell der Firma sofort speichern (POST /admin/auto-plan/modell, nur Admin)
-    const firma = sl.dataset.e3Modell, modell = sl.value
+  async function e3ModellSetzen(sl){   // ORBIT PRIO 2 (MO1): Modell der Firma sofort speichern (POST /admin/auto-plan/modell, nur Admin; MO1b Gruppe: /admin/gruppen-plan)
+    const firma = sl.dataset.e3Modell, modell = sl.value, gid = sl.dataset.e3Gruppe || ''
     sl.disabled = true
     try{
-      const d = await apdApi('POST', '/modell', { firma, modell })
-      if(_e3.d){ _e3.d.modelle = Object.assign({}, _e3.d.modelle, { [firma]: d.modell || modell }); const f = (_e3.d.firmen || []).find(x => (x.namen || [])[0] === firma); if(f) f.modell = modell }
-      if(typeof atToast === 'function') atToast(`✓ ${firma}: ${modell === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}`, 'end')
+      if(gid){
+        const d = await apdApi('POST', '', { gruppe_id: gid, aktion: 'modell', firma, modell }, '/admin/gruppen-plan')
+        const g = ((_e3.d && _e3.d.gruppen_modelle) || []).find(x => String(x.gruppe_id) === gid)
+        if(g){ if(modell === 'aus') g.an = Object.assign({}, g.an, { [firma]: false })
+          else { g.an = Object.assign({}, g.an, { [firma]: true }); g.modelle = Object.assign({}, g.modelle, { [firma]: (d.firmen_modell || {})[firma] || modell }) }
+          if(_e3.d && _e3.d.gruppe_sicht && modell !== 'aus') _e3.d.modelle = Object.assign({}, _e3.d.modelle, { [firma]: modell }) }
+      } else {
+        const d = await apdApi('POST', '/modell', { firma, modell })
+        if(_e3.d){ _e3.d.modelle = Object.assign({}, _e3.d.modelle, { [firma]: d.modell || modell }); const f = (_e3.d.firmen || []).find(x => (x.namen || [])[0] === firma); if(f) f.modell = modell }
+      }
+      const gn = gid ? ' · Gruppe ' + ((((_e3.d && _e3.d.gruppen_modelle) || []).find(x => String(x.gruppe_id) === gid) || {}).name || '') : ''
+      if(typeof atToast === 'function') atToast(`✓ ${firma}${gn}: ${modell === 'aus' ? 'aus' : modell === 'orbit_prio2' ? 'Orbit Prio 2' : 'Orbit V2'}`, 'end')
     }catch(e){ if(typeof atToast === 'function') atToast('Modell nicht gespeichert: ' + ((e && e.message) || e), 'end') }
     finally{ sl.disabled = false; e3EinstZeichnen() }
   }

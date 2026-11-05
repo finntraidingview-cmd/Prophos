@@ -27524,6 +27524,13 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 else "Keine IDs im Auto-Planer (auto_plan_regeln.user_ids leer)"}
     zeiten = ap_zeiten_mit_zufall(reg)          # E3b (05.11.2026): + _zufall aus regeln.zufall (Rückfall Code) — nur im Speicher
     firmen = (reg.get("regeln") or {}).get("firmen") or []
+    _fm_gruppe = None                                  # MO1c: Gruppen-Lauf — firmen_modell der Gruppe schaltet Firmen an/aus (ap_gruppe_firma_an)
+    if gruppe:
+        try:
+            _fm_gruppe = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in (gruppe.get("ids") or ())}), {})
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Firmen der Gruppe: {type(e).__name__}: {e} — wie HT", flush=True)
+            _fm_gruppe = {}
     jetzt = datetime.now(timezone.utc)
     tag = tag or jetzt.astimezone(_ap_tz(AP_TZ_LAUF)).strftime("%Y-%m-%d")
     tag_d = datetime.strptime(tag, "%Y-%m-%d")
@@ -27652,8 +27659,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 ausgelassen.append(dict(zeile, grund="Ziel erreicht (Ziel-Wache) — Phase umstellen, der Bot plant hier nie"))
                 continue
         regel = ap_regel_finden(firmen, a.get("firm"))
-        if not regel or regel.get("planen") is False:      # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO
-            ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))
+        # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO; MO1c: eine Gruppe schaltet über firmen_modell ein/aus
+        if not regel or not (ap_gruppe_firma_an(regel, _fm_gruppe) if _fm_gruppe is not None else regel.get("planen") is not False):
+            _aus_g = bool(regel) and _fm_gruppe is not None and (_fm_gruppe or {}).get((regel.get("namen") or [""])[0]) == AP_GRUPPE_AUS
+            ausgelassen.append(dict(zeile, grund="in der Gruppe aus (Einstellungen → Modell)" if _aus_g else "keine Regel für diese Firma"))
             continue
         if ap_ext_fehlt(a, regel):                         # Puls-Weg ohne External ID → sichtbar ausgelassen statt roter Start (08.10.2026)
             ausgelassen.append(dict(zeile, grund=AP_GRUND_EXT))
@@ -27723,6 +27732,13 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     stand = _ap_stand_laden(reg, jetzt, tag, ersetzt=lambda p: str(p.get("user_id")) in uids and _vorschlag(p),
                             extra_konten=[k["a"]["id"] for k in kandidaten], echo_bal=echo_bal, dup_bal=dup_bal,
                             namen=namen, ausgeblendet=ausgeblendet)
+    if gruppe:   # ORBIT PRIO 2 AUS DER WAAGE (MO1b): die Gruppe wiegt mit IHREN Modellen — Prio-2-Firmen der Gruppe raus, HT-Einträge gelten ihr nicht
+        try:
+            _fm_g = _fm_gruppe or {}
+            param = ap_waage_param_gruppe(param, (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
+            stand["param"] = ap_waage_param_gruppe(stand.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Waage der Gruppe (Orbit Prio 2): {type(e).__name__}: {e}", flush=True)
     # TAGES-WAAGE AUCH BEIM PLANEN (.1556, Finn 14.10.2026: „nicht nur am Ende vom Tag, auch die ganze Zeit ein gutes Long-Short-
     # Verhältnis"): plant dieser Lauf den HEUTIGEN Tag (Nachplan-Takt, „Plan heute", Gruppen-Planer), verteilt ap_richtungen_delta die neuen
     # Tranchen gegen das Eröffnungs-Gewicht aller heute gestarteten Trades (ap_tages_saldo), nicht nur gegen das laufende Buch — sonst
@@ -30449,6 +30465,7 @@ _ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt
 # Verwalter-Gruppe = auto_plan_gruppe.firmen_modell {Firmen-Schlüssel namen[0]: modell} (sql/2026-11-05_orbit_prio2.sql). Fehlt der Wert: wie bisher —
 # Apex → orbit_prio2, jede andere Firma → orbit_v2 (Apex bitgleich).
 AP_MODELLE = ("orbit_v2", "orbit_prio2")
+AP_GRUPPE_AUS = "aus"   # MO1c: Gruppen-Eintrag firmen_modell[firma] = 'aus' (Firma in der Gruppe aus) | Modell (Firma in der Gruppe an, auch bei HT planen=false)
 AP_MODELL_NAME = {"orbit_v2": "Orbit V2", "orbit_prio2": "Orbit Prio 2"}
 AP_MODELL_NICHT_WAEHLBAR = ("tradeify",)   # Firmen-Schlüssel namen[0]: finaler Tradeify fährt über tfh_tick (hedge_art 'tradeify_final') — nie zusätzlich Prio 2
 
@@ -30469,26 +30486,59 @@ def ap_firma_modell(regel, firm, gruppe_modell=None):
     return "orbit_prio2" if ist_apex else "orbit_v2"
 
 
-def ap_gruppen_modelle():
+def ap_gruppen_modelle(mit_fehler=False):
     """{user_id: {namen[0]: modell}} für alle IDs der Verwalter-Gruppen mit Planer-Zeile (auto_plan_gruppe.firmen_modell). Spalte fehlt (SQL noch nicht
-    eingespielt) oder Lesefehler → die Gruppe bekommt {} (= Standard je Firma, wie bisher). HT-IDs kommen nicht vor."""
+    eingespielt) oder Lesefehler → die Gruppe bekommt {} (= Standard je Firma, wie bisher). HT-IDs kommen nicht vor.
+    mit_fehler=True → (Zuordnung, Lesefehler bool) — ah_tick räumt bei einem Lesefehler keine Marken weg (Prüfer MO1)."""
     out = {}
     try:
         gruppen = ap_planer_gruppen()
     except Exception as e:
         print(f"[orbit-prio2] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
-        return out
+        return (out, True) if mit_fehler else out
     try:
         zeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+        fehler = False
     except Exception as e:
         print(f"[orbit-prio2] ⚠️ auto_plan_gruppe: {type(e).__name__}: {e}", flush=True)
-        zeilen = {}
+        zeilen, fehler = {}, True
     for g in gruppen:
         fm = (zeilen.get(str(g.get("gruppe_id"))) or {}).get("firmen_modell")
-        fm = {str(k): v for k, v in fm.items() if v in AP_MODELLE} if isinstance(fm, dict) else {}
+        fm = {str(k): v for k, v in fm.items() if v in AP_MODELLE + (AP_GRUPPE_AUS,)} if isinstance(fm, dict) else {}
         for u in g.get("ids") or ():
             out[str(u)] = fm
+    return (out, fehler) if mit_fehler else out
+
+
+def ap_gruppen_modell_sicht(firmen):
+    """[{gruppe_id, name, spalte, modelle: {namen[0]: wirksames Modell}}] je Verwalter-Gruppe mit Planer-Zeile — für die Einstellungen. Fehler → []."""
+    try:
+        gruppen = ap_planer_gruppen()
+        zeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+    except Exception as e:
+        print(f"[orbit-prio2] ⚠️ Gruppen-Sicht: {type(e).__name__}: {e}", flush=True)
+        return []
+    out = []
+    for g in gruppen:
+        z = zeilen.get(str(g.get("gruppe_id"))) or {}
+        fm = z.get("firmen_modell") if isinstance(z.get("firmen_modell"), dict) else {}
+        out.append({"gruppe_id": str(g.get("gruppe_id")), "name": g.get("name"), "spalte": "firmen_modell" in z,
+                    "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None, fm) for f in firmen if isinstance(f, dict)},
+                    "an": {(f.get("namen") or [""])[0]: ap_gruppe_firma_an(f, fm) for f in firmen if isinstance(f, dict)}})
     return out
+
+
+def ap_gruppe_firma_an(regel, fm):
+    """REIN RECHNEND (testbar): plant eine Verwalter-Gruppe diese Firma? (MO1c, Finn: Emins FundedNext-Futures-50k „keine Regel für diese Firma", weil die
+    HT-Regel planen=false hat — HT bleibt aus.) Eintrag firmen_modell[namen[0]]: 'aus' → nein, ein Modell → ja (auch bei HT planen=false), fehlt → wie HT."""
+    if not regel:
+        return False
+    v = (fm or {}).get(((regel.get("namen") or [""])[0])) if isinstance(fm, dict) else None
+    if v == AP_GRUPPE_AUS:
+        return False
+    if v in AP_MODELLE:
+        return True
+    return regel.get("planen") is not False
 
 
 def ap_plan_modell(p, firmen, gruppen_modelle):
@@ -30640,6 +30690,37 @@ def ah_abstand(bal, polster, acc):
     return round(float(pol), 2), "boden"
 
 
+def ah_eod_polster(bal, polster, boden):
+    """REIN RECHNEND (testbar): Polster bis zum ECHTEN Boden einer EOD-trailing-Firma (MO1b, Master 05.11.2026: „Lucid-Boden am EOD-Hoch — so liquidiert Lucid
+    wirklich") → Balance − Boden | None (Balance am/unter dem Boden). In BEIDE Richtungen: unter dem EOD-Hoch kleiner, über ihm (heutiger Gewinn) größer
+    als das Polster der Kontowert-Rechnung — sonst schlösse der Hedge vor der echten Liquidation. boden None (statisch/kein DD) → Polster unverändert."""
+    if boden is None:
+        return polster
+    p = round(float(bal) - float(boden), 2)
+    return p if p > 0 else None
+
+
+def _ah_boden_eod(a, firmen):
+    """Konto-Boden am EOD-Hoch wie Radar/Live-Trades (liq_regel_waehlen + liq_boden_kernwerte + liq_konto_boden mit liq_peak eod): nur für
+    maxdd_art eod_trailing, Höchststand nur aus ABGESCHLOSSENEN Handelstagen (heutiger Intraday-Stand zählt nie — ein zu hoher Boden schlösse den
+    Hedge vor der echten Liquidation). → Boden | None (statisch, kein DD, nicht lesbar)."""
+    try:
+        typ = str(a.get("account_type") or "challenge").lower()
+        regel, _w = liq_regel_waehlen(_liq_regeln_laden(), a.get("firm"), typ, _wd_konto_groesse(a))
+        b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, False, firmen)
+        if (b_regel or {}).get("maxdd_art") != "eod_trailing":
+            return None
+        pk = liq_peak({"started_at": _wt_now_iso(), "master_account_id": a.get("id")}, a, None, _liq_verlauf_laden([a.get("id")]), eod=True)
+        boden = liq_konto_boden(b_regel, b_acc, b_gr, pk, None)[0]
+        kw = ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}
+        if boden is not None and kw.get("lock_bei_start") is True and b_gr:   # Kernwerte: Boden höchstens bis zum Start (Lucid, FundedNext Futures)
+            boden = min(boden, float(b_gr))
+        return boden
+    except Exception as e:
+        _ah_spur(f"⚠️ {str(a.get('id'))[:8]} Boden am EOD-Hoch nicht rechenbar ({type(e).__name__}: {e}) — Polster aus dem Kontowert")
+        return None
+
+
 def ah_vorschau(h, wert, polster, liq, master_tp):
     """REIN RECHNEND (testbar): Vorschau für den Bestätigen-Block (Admin → Challenge-Planer, S4): Hedge-Lots, Kontowert €, was der Fusion-Hedge
     beim Blow bringt (+slave_risk ≈ Kontowert ÷ netto_faktor) und was er am Master-TP kostet (−TP $ × q)."""
@@ -30684,14 +30765,14 @@ def ah_tick(jetzt=None, force=False):
         roh = _sb_all("trade_plans", {"select": felder, **filt})
         freigabe_da = False
     # ORBIT PRIO 2 (MO1): statt fest „Apex Trader" jede Firma, deren Modell orbit_prio2 ist (HT-Regel bzw. Gruppen-Feld); ohne Feld genau wie bisher nur Apex
-    _gm = ap_gruppen_modelle() if roh else {}
+    _gm, _gm_fehler = ap_gruppen_modelle(mit_fehler=True) if roh else ({}, False)
     if roh:                                            # Fremd-Review MO1: Gruppen-IDs nie auf die HT-Regel fallen lassen (Lesefehler → {} = Standard je Firma)
         for _u in ap_planer_gruppen_ids():
             _gm.setdefault(str(_u), {})
     _fm = regeln.get("firmen") or []
     # MODELL ZURÜCK AUF ORBIT V2 (Fremd-Review MO1): vorgemerkte, noch nicht umgestellte Pläne verlieren Marke + Vorschau (wie ah_zurueck) — sonst hielte
     # der Riegel trade_plans_a1_apex_hedge sie für immer („wartet auf Hedge"), weil ah_tick sie nicht mehr sieht. Umgestellte (status 'mit') bleiben bis zum Start.
-    for p in roh:
+    for p in ([] if _gm_fehler else roh):     # Prüfer MO1: Gruppen nicht lesbar → in diesem Takt nichts wegräumen (nie eine Marke wegen eines Lesefehlers)
         base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
         if (p.get("_ah_nach") or base.get("hedge_art") != "apex" or (base.get("apex_hedge") or {}).get("status") == "mit"
                 or ap_plan_modell(p, _fm, _gm) == "orbit_prio2"):
@@ -30749,6 +30830,14 @@ def ah_tick(jetzt=None, force=False):
                 return None, None, None, bal, None, ("polster", f"kein Polster: Balance {_ap_de(float(bal), 0)} $ steht am Boden — Konto prüfen, Balance neu lesen")
             return None, None, None, bal, None, ("groesse", "kein Kontowert-Satz (Kaufpreis ÷ Max DD)" + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""))
         satz, wert, polster = werte                        # polster: $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
+        # BODEN AM EOD-HOCH (MO1b): nachziehende Firmen (Lucid …) liquidieren am höchsten Tagesschluss − Max DD, nicht an Balance − DD — steht das
+        # Konto unter seinem EOD-Hoch, ist das Polster kleiner; Wert = Satz × Polster wie bei Apex. Statische Firmen (Apex) unverändert.
+        if (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("boden") == "nachziehend":
+            pol_eod = ah_eod_polster(bal, polster, _ah_boden_eod(dict(a, **(dll_konto.get(str(a["id"])) or {})), firmen))
+            if pol_eod is None:
+                return None, None, None, bal, None, ("polster", f"kein Polster: Balance {_ap_de(float(bal), 0)} $ steht am Boden (EOD-Hoch − Max DD) — Konto prüfen")
+            if pol_eod != polster:
+                polster, wert = pol_eod, round(satz * pol_eod, 2)
         abstand, art = ah_abstand(bal, polster, dll_konto.get(str(a["id"])) or a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
         # Satz auf den Abstand bis zum Ende des Trades (ah_abstand): Ein Ende am Tageslimit bringt so den ganzen Kontowert, slave_risk bleibt der Kontowert
@@ -34047,6 +34136,11 @@ def ap_waage_tick(regeln_param=None):
         namen, _aus = _ap_namen()
         for gr in (ap_planer_gruppen(nur_aktiv=True) if namen else []):   # ohne Nutzerliste keine Gruppen-Waage (nie gegen HT wiegen)
             st_g = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+            try:     # ORBIT PRIO 2 (MO1b): wie ap_planen — die Gruppe wiegt mit ihren eigenen Modellen
+                _fm_g = next((v for u, v in ap_gruppen_modelle().items() if u in {str(x) for x in (gr.get("ids") or ())}), {})
+                st_g["param"] = ap_waage_param_gruppe(st_g.get("param"), (reg.get("regeln") or {}).get("ausgleich"), (reg.get("regeln") or {}).get("firmen"), _fm_g)
+            except Exception as e:
+                print(f"[waage] ⚠️ Gruppe {str(gr.get('gruppe_id'))[:8]} Orbit Prio 2: {type(e).__name__}: {e}", flush=True)
             w_g = ap_klassen_waage(st_g, pc_lebt=pc)
             a_g, i_g = ap_waage_nachschub(st_g, w_g, random.SystemRandom(), pc_lebt=pc, dubai_min=_ap_dubai_versatz(st_g["mitternacht"]))
             u_g, f_g = _ap_aenderungen_anwenden(st_g, a_g, "bot") if a_g else ([], None)
@@ -35495,8 +35589,24 @@ def admin_gruppen_plan():
                                                                            "updated_at": datetime.now(timezone.utc).isoformat()})
                 print(f"[gruppen-plan] {gid[:8]} Takt {'an' if body.get('an') else 'aus'} ({'Admin' if admin else 'uid ' + str(uid)[:8]})", flush=True)
                 return jsonify({"ok": True, "aktiv": bool(body.get("an"))})
+            if aktion == "modell":
+                # ORBIT PRIO 2 JE GRUPPE (MO1b, Finn 05.11.2026: „unter Challenge-Planer, zum Beispiel bei Emin, die Option, das Modell zu ändern“):
+                # auto_plan_gruppe.firmen_modell {namen[0]: modell}, Rechte wie die übrigen Gruppen-Felder (Admin oder Verwalter dieser Gruppe)
+                firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+                zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gid}"}) or [None])[0]
+                if not zeile:
+                    return jsonify({"ok": False, "msg": "Gruppe ohne Planer-Zeile"}), 404
+                if "firmen_modell" not in zeile:
+                    return jsonify({"ok": False, "msg": "Spalte firmen_modell fehlt — sql/2026-11-05_orbit_prio2.sql einspielen"}), 503
+                fm, grund = ap_gruppe_modell_setzen(zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {}, firmen,
+                                                    str(body.get("firma") or ""), str(body.get("modell") or ""))
+                if grund:
+                    return jsonify({"ok": False, "msg": grund}), 400
+                sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gid}"}, {"firmen_modell": fm, "updated_at": datetime.now(timezone.utc).isoformat()})
+                print(f"[gruppen-plan] {gid[:8]} Modell {body.get('firma')} → {body.get('modell')} ({'Admin' if admin else 'uid ' + str(uid)[:8]})", flush=True)
+                return jsonify({"ok": True, "gruppe_id": gid, "firmen_modell": fm})
             if aktion not in ("planen", "probe"):
-                return jsonify({"ok": False, "msg": "aktion = planen | probe | aktiv"}), 400
+                return jsonify({"ok": False, "msg": "aktion = planen | probe | aktiv | modell"}), 400
             # GRUPPE WIE HT (30.10.2026): „Jetzt planen"/„Probelauf" rechnen mit dem HT-Planer (ap_gruppe_planen), nicht mehr gp_planen
             return jsonify(ap_gruppe_planen(gid, trocken=aktion == "probe", quelle="hand", tag=body.get("tag")))   # tag: heute | morgen
         # Finn 13.10.2026: „nur bei Emin ändern, bei meinem Hermann-Technologies-Account bitte nix" — die Zeile im Admin-Reiter sieht nur
@@ -36608,6 +36718,32 @@ def ap_regel_info():
     return _ap_regel_info_cache["daten"]
 
 
+def ap_einst_gruppen_sicht(uid, daten, gruppen_zeilen, regeln):
+    """REIN RECHNEND (testbar): Einstellungen im Login eines GRUPPEN-VERWALTERS (MO1b, Finn-Foto Login Emin: „⚠ Einstellungen: Diese ID ist nicht im
+    Auto-Planer") → Antwort | None (kein Verwalter einer Gruppe mit Planer-Zeile). Werte SEINER Gruppe: Planer an/aus (auto_plan_gruppe.aktiv) und das Modell
+    je Futures-Firma (firmen_modell, änderbar über POST /admin/gruppen-plan aktion modell). Die HT-Kernwerte bleiben verborgen (S6-Review E3) — die Firmen
+    kommen nur mit Name/Weg/Größen; die Gruppe plant mit denselben Regeln wie Hermann Technologies."""
+    eigene = [g for g in (daten or {}).get("gruppen") or () if g.get("verwalter_id") and str(g["verwalter_id"]) == str(uid)
+              and str(g.get("id")) in (gruppen_zeilen or {})]
+    if not eigene:
+        return None
+    g = eigene[0]
+    z = gruppen_zeilen[str(g["id"])] or {}
+    fm = z.get("firmen_modell") if isinstance(z.get("firmen_modell"), dict) else {}
+    firmen = [{k: f.get(k) for k in ("namen", "route", "groessen", "planen") if k in f} for f in (regeln.get("firmen") or []) if isinstance(f, dict)]
+    an = lambda fn: {"an": bool((fn(regeln) or {}).get("an"))}   # noqa: E731
+    return {"ok": True, "admin": False, "gruppe_admin": True,
+            "gruppe_sicht": {"gruppe_id": str(g["id"]), "name": g.get("name"), "aktiv": z.get("aktiv") is True, "spalte": "firmen_modell" in z},
+            "firmen": firmen, "aktiv": z.get("aktiv") is True, "zeiten": {}, "schalter": {}, "fest": {},
+            "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
+            "gruppen_modelle": [{"gruppe_id": str(g["id"]), "name": g.get("name"), "spalte": "firmen_modell" in z,
+                                 "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
+                                 "an": {(f.get("namen") or [""])[0]: ap_gruppe_firma_an(f, fm) for f in (regeln.get("firmen") or []) if isinstance(f, dict)}}],
+            "modell_nicht": {k: "finaler Tradeify fährt mit eigenem Gegenhedge" for k in AP_MODELL_NICHT_WAEHLBAR}, "modell_namen": AP_MODELL_NAME,
+            "echo_hedge": an(eh_param), "apex_hedge": an(ah_param), "tradeify_final_hedge": an(tfh_param), "ausgleich": {}, "zufall": {}, "zufall_code": {},
+            "zufall_db": [], "zeiten_db": {}, "regel_info": {}}
+
+
 @app.route("/admin/auto-plan/einstellungen", methods=["GET", "OPTIONS"])
 def admin_auto_plan_einstellungen():
     """GET → {ok, admin, firmen, zeiten, aktiv, schalter, echo_hedge, apex_hedge, tradeify_final_hedge, ausgleich, fest, updated_at} — nur lesen.
@@ -36616,6 +36752,18 @@ def admin_auto_plan_einstellungen():
         return "", 200
     admin, uid, reg, err = _ap_zugang()
     if err:
+        # GRUPPEN-VERWALTER (MO1b): statt „Diese ID ist nicht im Auto-Planer" die Einstellungen SEINER Gruppe (ap_einst_gruppen_sicht)
+        if uid and not admin and reg and err[1] == 403:
+            try:
+                gzeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
+                gs = ap_einst_gruppen_sicht(uid, admin_gruppen_daten(), gzeilen, reg.get("regeln") if isinstance(reg.get("regeln"), dict) else {})
+            except Exception as e:
+                print(f"[einstellungen] ⚠️ Gruppen-Sicht {str(uid)[:8]}: {type(e).__name__}: {e}", flush=True)
+                gs = None
+            if gs:
+                resp = jsonify(json.loads(json.dumps(gs, default=str)))
+                resp.headers["Cache-Control"] = "no-store"
+                return resp
         return err
     regeln = reg.get("regeln") if isinstance(reg.get("regeln"), dict) else {}
     zeiten = reg.get("zeiten") if isinstance(reg.get("zeiten"), dict) else {}
@@ -36636,6 +36784,9 @@ def admin_auto_plan_einstellungen():
            # ORBIT PRIO 2 (MO1): wirksames Modell je Futures-Firma der HT-Regel (ohne Feld: Apex → orbit_prio2, sonst orbit_v2)
            "modelle": {(f.get("namen") or [""])[0]: ap_firma_modell(f, None) for f in (regeln.get("firmen") or []) if isinstance(f, dict)},
            "modell_namen": AP_MODELL_NAME,
+           # MO1b: Modelle je Verwalter-Gruppe (auto_plan_gruppe.firmen_modell; spalte False = SQL noch nicht eingespielt) — nur für Admins
+           "gruppen_modelle": ap_gruppen_modell_sicht(regeln.get("firmen") or []) if admin else [],
+           "modell_nicht": {k: "finaler Tradeify fährt mit eigenem Gegenhedge" for k in AP_MODELL_NICHT_WAEHLBAR},
            # E3b: Zufall-Parameter (wirksam, Code-Rückfall, welche aus der Tabelle) + Firmen-Regeln aus firm_rules.json
            "zufall": ap_zufall(regeln), "zufall_code": ap_zufall_code(),
            "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
@@ -36696,6 +36847,54 @@ def ap_modell_setzen(firmen, firma, modell):
     return neu, None
 
 
+def ap_waage_schluessel(regel):
+    """Teilstrings einer Firma für regeln.ausgleich.waage_ohne: Regel-Schlüssel namen[0] (Planer: firma_key) und der Firmenname klein (DB-Riegel
+    prophos_waage_deckel_lage vergleicht mit lower(prophos_firma_key(firm) | firm), z. B. 'lucid trading')."""
+    n = ((regel or {}).get("namen") or [""])[0]
+    return [k for k in dict.fromkeys([str(n).strip().lower(), str(_firm_norm(n) or "").strip().lower()]) if k]
+
+
+def ap_waage_ohne_modell(ausgleich, firmen):
+    """REIN RECHNEND (testbar): ORBIT PRIO 2 AUS DER WAAGE WIE APEX (MO1b, Master 05.11.2026) → neues regeln.ausgleich: waage_ohne = bisherige Liste
+    (fehlt sie: AP_WAAGE_OHNE_FIRMEN) ohne die früher vom Modell gesetzten Einträge (waage_ohne_modell) + Schlüssel jeder HT-Firma mit Modell
+    orbit_prio2 außer Apex (steht schon drin). Von Hand gesetzte Einträge bleiben. Dieselbe Liste liest der DB-Claim-Riegel (prophos_waage_deckel_param)."""
+    a = dict(ausgleich or {})
+    wo = a.get("waage_ohne")
+    basis = [str(x).strip().lower() for x in wo if str(x).strip()] if isinstance(wo, list) else list(AP_WAAGE_OHNE_FIRMEN)
+    vorher = {str(x).strip().lower() for x in (a.get("waage_ohne_modell") or []) if str(x).strip()}
+    basis = [x for x in basis if x not in vorher]
+    neu = []
+    for f in firmen or []:
+        if not isinstance(f, dict) or ap_regel_finden([f], AH_FIRMA) is f or ap_firma_modell(f, None) != "orbit_prio2":
+            continue
+        neu += [k for k in ap_waage_schluessel(f) if k not in basis and k not in neu]
+    a["waage_ohne"] = basis + neu
+    a["waage_ohne_modell"] = neu
+    return a
+
+
+def ap_waage_param_gruppe(param, ausgleich_roh, firmen, fm):
+    """REIN RECHNEND (testbar): Waage-Parameter für den Lauf EINER Verwalter-Gruppe (MO1b): waage_ohne ohne die Einträge, die das HT-Modell gesetzt hat
+    (ausgleich.waage_ohne_modell), plus die Schlüssel der Firmen, die in DIESER Gruppe orbit_prio2 fahren (außer Apex). Der DB-Claim-Riegel wiegt
+    Gruppen nicht (prophos_waage_ausgeblendet) — dort wirkt nur dieser Parameter. Ohne Gruppen-Feld (fm leer): nur die HT-Einträge fallen weg."""
+    p = dict(param or {})
+    ht = {str(x).strip().lower() for x in ((ausgleich_roh or {}).get("waage_ohne_modell") or []) if str(x).strip()}
+    ohne = [x for x in (p.get("waage_ohne") or []) if x not in ht]
+    for f in firmen or []:
+        if isinstance(f, dict) and ap_regel_finden([f], AH_FIRMA) is not f and ap_firma_modell(f, None, fm or {}) == "orbit_prio2":
+            ohne += [k for k in ap_waage_schluessel(f) if k not in ohne]
+    p["waage_ohne"] = ohne
+    return p
+
+
+def ap_gruppe_modell_setzen(fm, firmen, firma, modell):
+    """REIN RECHNEND (testbar): {namen[0]: modell} einer Gruppe → (neue Zuordnung, None) | (None, Grund). Gleiche Grenzen wie die HT-Firma (ap_modell_setzen)."""
+    _neu, grund = ap_modell_setzen(firmen, firma, "orbit_v2" if modell == AP_GRUPPE_AUS else modell)   # gleiche Grenzen (CFD/Topstep/Tradeify/unbekannt)
+    if grund:
+        return None, grund
+    return dict({str(k): v for k, v in (fm or {}).items() if v in AP_MODELLE + (AP_GRUPPE_AUS,)}, **{firma: modell}), None
+
+
 @app.route("/admin/auto-plan/modell", methods=["POST", "OPTIONS"])
 def admin_auto_plan_modell():
     """POST {firma: namen[0], modell: orbit_v2 | orbit_prio2} → regeln.firmen[].modell (HT). ORBIT PRIO 2 (MO1, 05.11.2026): ein neues Feld,
@@ -36716,13 +36915,14 @@ def admin_auto_plan_modell():
     if grund:
         return jsonify({"ok": False, "msg": grund}), 400
     regeln["firmen"] = neu
+    regeln["ausgleich"] = ap_waage_ohne_modell(regeln.get("ausgleich"), neu)   # MO1b: Prio-2-Firmen aus der Waage wie Apex (Planer + DB-Riegel)
     try:
         sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
     print(f"[einstellungen] Modell {body.get('firma')} → {body.get('modell')} ({uid})", flush=True)
     f = next((x for x in neu if (x.get("namen") or [None])[0] == body.get("firma")), None)
-    return jsonify({"ok": True, "firma": f, "modell": ap_firma_modell(f, None)})
+    return jsonify({"ok": True, "firma": f, "modell": ap_firma_modell(f, None), "waage_ohne": regeln["ausgleich"].get("waage_ohne")})
 
 
 # KONTEN JE FIRMA (E3b Zusatz 4, Finn 05.11.2026: „Genau das Gleiche auch für den Challenge-Planer … mit Zielen, Consistency, alles. Bei
