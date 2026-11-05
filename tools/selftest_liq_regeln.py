@@ -41,7 +41,7 @@ def lade():
         "_wd_num", "_wd_level", "_wd_konto_groesse", "_ist_tradeify_cfd", "_firm_norm", "_cme_handelstag", "liq_regel_waehlen", "liq_stufe", "_liq_de",
         "plan_ist_wd", "plan_ist_apex_hedge", "ah_dll_balance", "liq_aus_regel", "liq_tagesstart", "liq_tagesstart_eod", "_liq_peak_eod", "liq_regel_felder", "lt_demo_liq", "_lt_demo",
         "ist_topstep_express", "plan_balance_relativ", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de",
-        "_ap_norm", "ap_regel_finden", "ap_kw_param", "liq_boden_kernwerte")]), ns)
+        "_ap_norm", "ap_regel_finden", "ap_kw_param", "liq_boden_kernwerte", "liq_kw_daily")]), ns)   # liq_kw_daily: LQ1 05.11.2026
     return ns
 
 

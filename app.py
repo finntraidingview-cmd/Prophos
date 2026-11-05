@@ -13784,6 +13784,18 @@ def _liq_pl_de(v):
     return None if v is None else f"{'−' if v < 0 else '+'}{_liq_de(abs(v))} $"
 
 
+def liq_kw_daily(kw_firmen, firma, groesse):
+    """REIN RECHNEND (testbar, LQ1): Tagesverlust der Firma aus den Planer-Kernwerten (auto_plan_regeln.regeln.firmen[]: daily_usd, je Größe
+    je_groesse[Größe].daily_usd zuerst) → (betrag_usd, weich) | (None, False). weich = Kernwert soft (Apex: Tagesstopp, Konto lebt)."""
+    r = ap_regel_finden(kw_firmen, firma) if kw_firmen else None
+    if not r:
+        return None, False
+    jg = (r.get("je_groesse") or {}).get(str(int(float(groesse)))) if (groesse and isinstance(r.get("je_groesse"), dict)) else None
+    d = _wd_num((jg or {}).get("daily_usd")) if isinstance(jg, dict) else None
+    d = d if d else _wd_num(r.get("daily_usd"))
+    return (d, r.get("soft") is True) if d and d > 0 else (None, False)
+
+
 def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None, kw_firmen=None,
                      peak_eod=None, tagesstart_eod=None):
     """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile → {liq_regel_balance, liq_regel_level_nq,
@@ -13806,6 +13818,19 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
         d_bal, d_text = ah_dll_balance(a, tagesstart if tagesstart is not None else start_bal)
         if d_bal is not None and (r_bal is None or d_bal > r_bal):
             r_bal, r_text, r_art = d_bal, d_text + " (Konto)", "tagesstart"
+    # DAILY LOSS AUS DEN PLANER-KERNWERTEN (LQ1, Finn 05.11.2026 21:35 Dubai, Lucid 150k Flex Eval: „Der Max Drawdown ist 4k, aber wir haben hier ein Daily
+    # von 2,7k“ — „also im Radar dann auch 2.700 Daily“): Radar-Linie/Demo/„Konto weg“ standen bei Lucid ohne Hedge am Max Loss (145.500), weil liq_regeln
+    # für Lucid nur den Drawdown kennt. Kennt die Regel selbst kein Tageslimit (art nicht tagesstart/stufen), zählt der Tagesverlust der Firma aus den
+    # Planer-Einstellungen (daily_usd, je Größe) ab Tagesstart als dritte Grenze — die engere gilt, also min(Daily, Max Loss). Hart (Kernwert ohne soft) →
+    # art 'tageslimit' (Konto weg am Daily); weich → 'tagesstart' wie Apex. Winning Days (Größe + 100) und Orbit Prio 2 (ah_dll_balance oben) unverändert.
+    if not ah and not wd and kw_firmen is not None and r_art not in ("tagesstart", "stufen"):
+        d_usd, d_weich = liq_kw_daily(kw_firmen, a.get("firm"), groesse)
+        ts_d = tagesstart if tagesstart is not None else start_bal
+        if d_usd and ts_d is not None:
+            d_bal = round(float(ts_d) - d_usd, 2)
+            if r_bal is None or d_bal > r_bal:
+                r_bal, r_art = d_bal, ("tagesstart" if d_weich else "tageslimit")
+                r_text = f"Daily Loss {_liq_de(d_usd)} $ ab Tagesstart {_liq_de(float(ts_d), 2)} $ (Planer-Einstellung)"
     if weg:
         r_text = f"{r_text} ({weg})"
     if mll is not None:
