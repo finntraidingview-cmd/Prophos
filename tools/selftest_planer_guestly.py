@@ -94,8 +94,12 @@ def main():
     # UI1d (05.11.2026, Master + S2-Hinweis): Block „Planer · alle Firmen" — vor geladener Sicht nur Platzhalter, nie ein alter Knoten
     j = s.index("  function apgAlleEinsetzen(){")
     ein = s[j:s.index("\n  }\n", j)]
-    ok("if(!(typeof _e3 !== 'undefined' && _e3.d)) return '<div class=\"apg-alle-warte\" data-apg-alle-warte></div>'" in s,
-       "Sicht noch unbekannt → leerer Platzhalter statt HT-Block (kein Aufblitzen in der Gruppen-Sicht)")
+    ok("if(apgSichtOffen()) return '<div class=\"apg-alle-warte\" data-apg-alle-warte></div>'" in s
+       and "const apgSichtOffen = () => { try{ return !_e3.d && (!!_e3.laeuft || !_e3.at) }catch(_){ return false } }" in s,
+       "Sicht noch unbekannt (Laden läuft / noch keins fertig) → leerer Platzhalter statt HT-Block (kein Aufblitzen in der Gruppen-Sicht)")
+    ok("if(warte && !_e3.d && !apgSichtOffen() && _apg.alleX)" in ein and "warte.replaceWith(b)" in ein
+       and "try{ window._apgAlleEinsetzen?.() }catch(_){}   // S4-Stopp UI1d" in s,
+       "S4-Stopp: Laden ohne Daten (Fehler/403/404) → Platzhalter wird zum Block, e3EinstZeichnen-Fehlerzweig setzt ein")
     ok("_apg.alleKnoten = null; _apg.alleKnopf = null" in ein and "|| _apg.alleKnoten" not in ein and "t.innerHTML = apgAlleHtml(v, _apg.alleX)" in ein
        and "v = apdDaten() || {}" in ein, "Einsetzen nach e3Neu baut frisch aus dem aktuellen Stand (apdDaten), nie den abgehängten alten Knoten")
     for t in f:

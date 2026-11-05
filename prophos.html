@@ -85626,12 +85626,14 @@
    * hängt in #ap-ids-root, die Ereignisse kommen dort an. Nur der Ort und der Stil (Schalter wie die übrigen e3-Schalter) sind neu.
    * S4-Stopp (05.11.2026): in der Gruppen-Sicht (Verwalter, D.gruppe_sicht — Unternehmen getrennt) gibt es den HT-Block nicht. */
   const apgGruppenSicht = () => { try{ return !!(_e3.d && _e3.d.gruppe_sicht) }catch(_){ return false } }
+  const apgSichtOffen = () => { try{ return !_e3.d && (!!_e3.laeuft || !_e3.at) }catch(_){ return false } }   // Einstellungen laden noch (noch kein Ergebnis)
   function apgAlleHtml(v, x){
     _apg.alleX = { lzAt: x && x.lzAt, admin: !!(x && x.admin) }   // für das frische Einsetzen nach e3Neu (apgAlleEinsetzen)
     if(apgGruppenSicht()) return ''
     // Sauber (b), Master 05.11.2026: solange die Sicht nicht feststeht (_e3.d noch nicht geladen), nichts von HT zeichnen — sonst blitzte der HT-Block in der
     // Gruppen-Sicht kurz über dem Zeitstrahl auf. Leerer Platzhalter; e3Neu setzt den Block danach ein (apgAlleEinsetzen baut ihn frisch).
-    if(!(typeof _e3 !== 'undefined' && _e3.d)) return '<div class="apg-alle-warte" data-apg-alle-warte></div>'
+    // S4-Stopp: nur solange ein Laden läuft oder noch keins fertig ist — endet es ohne Daten (Fehler/403/404), steht der Block wie früher über dem Zeitstrahl
+    if(apgSichtOffen()) return '<div class="apg-alle-warte" data-apg-alle-warte></div>'
     const admin = apdAdmin(), sperr = k => (!admin || _apd.busy.has(k)) ? ' disabled' : ''
     const zeile = (k, an, titel, sub, tip) => `<label class="wd-abl-schalter" title="${escapeHtml(admin ? tip : 'nur Admin')}"><span><b>${escapeHtml(titel)}</b>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</span>`
       + `<input type="checkbox" class="e3-schalt" data-apd-schalter="${k}"${an ? ' checked' : ''}${sperr(k)} aria-label="${escapeHtml(titel)}"></label>`
@@ -85656,6 +85658,10 @@
     const root = document.getElementById('ap-ids-root'), box = document.getElementById('e3-einst')
     _apg.alleKnoten = null; _apg.alleKnopf = null
     if(apgGruppenSicht()){ root && root.querySelectorAll('[data-apg-alle], [data-apg-alle-warte]').forEach(b => b.remove()); return }
+    // S4-Stopp: Laden ohne Daten beendet (Fehler/403/404) → kein Platz in #e3-einst; den Platzhalter über dem Zeitstrahl durch den frischen Block ersetzen
+    const warte = root && root.querySelector('[data-apg-alle-warte]')
+    if(warte && !_e3.d && !apgSichtOffen() && _apg.alleX){ let v = {}; try{ v = apdDaten() || {} }catch(_){}
+      const t = document.createElement('div'); t.innerHTML = apgAlleHtml(v, _apg.alleX); const b = t.querySelector('[data-apg-alle]'); if(b) warte.replaceWith(b); return }
     if(!box || !root || !root.contains(box)) return
     const platz = box.querySelector('[data-e3-alle-platz]'), kopf = box.querySelector('[data-e3-kopf-platz]')
     if(!platz) return
@@ -87938,7 +87944,9 @@
     // Eingaben schützen: mit ungespeicherten Änderungen oder Fokus im Kasten nicht neu zeichnen (der Planer zeichnet im Takt)
     const offen = e3Offen(box) || box.contains(document.activeElement)
     if(!_e3.laeuft && (!_e3.at || Date.now() - _e3.at > E3_FRISCH_MS) && !offen){ e3Laden(); if(!_e3.d){ box.hidden = false; box.innerHTML = '<div class="e3-leer">Einstellungen laden …</div>' } return }
-    if(!_e3.d){ box.hidden = !_e3.fehler; if(_e3.fehler) box.innerHTML = `<div class="e3-leer" style="color:var(--danger)">⚠ Einstellungen: ${e3E(_e3.fehler)}</div>`; return }
+    if(!_e3.d){ box.hidden = !_e3.fehler; if(_e3.fehler) box.innerHTML = `<div class="e3-leer" style="color:var(--danger)">⚠ Einstellungen: ${e3E(_e3.fehler)}</div>`
+      try{ window._apgAlleEinsetzen?.() }catch(_){}   // S4-Stopp UI1d: Platzhalter → Block „Planer · alle Firmen" (Laden ohne Daten beendet)
+      return }
     if(offen && !nachLaden && _e3.art === art) return
     e3Neu(box, art)
   }
