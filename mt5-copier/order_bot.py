@@ -13654,8 +13654,24 @@ def run(cfg_path, cmd):
         except Exception:
             pass
         if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail, rahmen=dlg):
+            # GR1 (05.11.2026, Marco pc-t8wg97 Tradeify CFD …5448, 3× 12:58–13:54 UTC): die Spur zeigte „Volumen-Versuch 1–3 abgebrochen:
+            # ElementNotEnabled" — das Feld war im F9-Dialog GESPERRT, kein Tipp-Problem (ES3 ändert daran nichts). MT5 sperrt es, wenn der
+            # Server den Handel am Konto/Symbol nicht erlaubt. Dieselbe reine API-Lesung wie bei „F9 ohne Dialog" (_order_api_zustand →
+            # order_grund_bestimmen) nennt jetzt die EINE Ursache am Ende der Meldung; der Meldungsanfang (Muster-Schlüssel) bleibt.
+            # Nur lesen, nach dem Abbruch VOR dem Order-Knopf — es wird nichts gesendet.
+            v_zusatz = ""
+            try:
+                v_api = _order_api_zustand(path, expected, symbol)
+                v_g = order_grund_bestimmen(None, "", v_api)
+                if v_g:
+                    trail.append(f"Volumen-Ursache (API): {v_g[0]} → {v_g[1]}")
+                    v_zusatz = f" — Grund: {v_g[0]} ({v_g[2]}) → {v_g[1]}"
+                elif v_api.get("verbunden") is not None or v_api.get("handel_konto") is not None:
+                    trail.append("Volumen-Ursache (API): Terminal verbunden, Handel am Konto erlaubt, Symbol handelbar — kein Grund aus der API")
+            except Exception as e:
+                trail.append(f"Volumen-Ursache (API): nicht lesbar ({type(e).__name__})")
             raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
-                               f"Abbruch VOR dem Order-Knopf.")
+                               f"Abbruch VOR dem Order-Knopf.{v_zusatz}")
         _echo_pause(seit)              # Takt Volumen → SL/TP bzw. Knopf, Maus wandert (07.10.2026)
         seit = time.time()
 
