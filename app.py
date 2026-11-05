@@ -23098,7 +23098,10 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     # Kontowert und Vorrat; die alten Felder in phasen{} gelten nur noch, wenn die Firma die Kernwerte nicht hat
     zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
-    _zmin = _wd_num(regel.get("_ziel_min"))   # Consistency-Ziel (M2 05.11.2026, zw_cons_ziel): Rest bis „Required profit"
+    try:   # Consistency-Ziel (M2 05.11.2026, zw_cons_ziel): Rest bis „Required profit" — ohne _wd_num (Selftest-Lader ziehen diesen Block allein, S1-Stopp)
+        _zmin = float(regel["_ziel_min"]) if regel.get("_ziel_min") is not None else None
+    except (TypeError, ValueError):
+        _zmin = None
     _ctxt = ""
     if _zmin and _zmin > ziel:
         ziel = float(_zmin)
@@ -38599,8 +38602,11 @@ def zw_ziel(regel, phase, balance):
     if not zp:
         return None
     ziel = round(groesse * (1 + float(zp) / 100.0), 2)
-    zm = _wd_num(regel.get("_ziel_min"))   # Consistency-Ziel (zw_cons_ziel, M2 05.11.2026) — nur von zw_tick/ap_planen gesetzt
-    return (max(ziel, round(float(zm), 2)) if zm else ziel), groesse
+    try:   # Consistency-Ziel (zw_cons_ziel, M2 05.11.2026) — nur von zw_tick/ap_planen gesetzt; ohne _wd_num wie ap_konto_rechnen (Selftest-Lader)
+        zm = float(regel["_ziel_min"]) if regel.get("_ziel_min") is not None else None
+    except (TypeError, ValueError):
+        zm = None
+    return (max(ziel, round(zm, 2)) if zm else ziel), groesse
 
 
 # ══ CONSISTENCY VOR „ZIEL ERREICHT" (M2, 05.11.2026 — Vorfall 04.11. EzPoker Tradeify 150k: Balance über dem Ziel, aber der größte Tag lag über
