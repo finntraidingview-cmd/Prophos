@@ -85,12 +85,14 @@ def main():
     r = lies("C:\\MT5-x\\terminal64.exe", 26747348)
     check("fehler" in r and geduld <= uhr.t - t0 <= geduld + 25, f"ohne Erfolg: Abbruch nach der Gesamtgeduld ({uhr.t - t0:.0f} s, {len(welt['aufrufe'])} Runden)")
     # modus_loginok: nur invoke
+    # RT1 (05.11.2026): modus_loginok übergibt seit 89144626 (23.10.) nur_pids und seit be7d9f30 (29.10.) eigene={} an
+    # _mt5_login_bestaetigen — der Stub nimmt beide an, geprüft wird weiter „nur invoke"
     rufe = []
-    ns["_mt5_login_bestaetigen"] = lambda exp, trail=None, wege=None: (rufe.append(wege), "bestaetigt" if len(rufe) >= 3 else "keiner")[1]
+    ns["_mt5_login_bestaetigen"] = lambda exp, trail=None, wege=None, nur_pids=None, eigene=None: (rufe.append(wege), "bestaetigt" if len(rufe) >= 3 else "keiner")[1]
     exec(fn(src, "modus_loginok"), ns)
     r = ns["modus_loginok"]("26747348", "90")
     check(r.get("ok") and "bestätigt" in r.get("msg", "") and all(w == ("invoke",) for w in rufe), f"loginok: nur invoke, beim 3. Blick bestätigt ({rufe})")
-    rufe.clear(); ns["_mt5_login_bestaetigen"] = lambda exp, trail=None, wege=None: (rufe.append(wege), "keiner")[1]
+    rufe.clear(); ns["_mt5_login_bestaetigen"] = lambda exp, trail=None, wege=None, nur_pids=None, eigene=None: (rufe.append(wege), "keiner")[1]
     r = ns["modus_loginok"]("26747348", "10")
     check(r.get("ok") and r.get("msg") == "kein Login-Dialog" and 2 <= len(rufe) <= 8, f"loginok: ohne Dialog nach Ablauf zurück ({len(rufe)} Blicke)")
     check(ns["modus_loginok"]("abc", "90").get("ok") is False, "loginok: ungültiges Konto → ok:false")
@@ -98,10 +100,12 @@ def main():
     # Panel
     ps = open(PANEL, encoding="utf-8").read()
     st = ps[ps.index("\ndef start_terminal("):ps.index("\nPAGE = r")]
-    check(re.search(r"if expected:\s+threading\.Thread\(target=_login_ok_wache, args=\(fname, expected\)", st) is not None
+    # RT1 (05.11.2026): seit 075ce9a7 (23.10.2026, Login-Wache dauerhaft in Runden) bekommt die Wache auch install_dir und ruft den Bot
+    # je Runde mit timeout=LOGIN_WACHE_RUNDE_S + 60 statt einmal mit sekunden + 30 — Regel (nur nach Kaltstart, nur mit Konto, Zeitlimit) gleich
+    check(re.search(r"if expected:\s+threading\.Thread\(target=_login_ok_wache, args=\(fname, expected, install_dir\)", st) is not None
           and st.find("_login_ok_wache") > st.find("subprocess.Popen"), "Panel: Wache nur nach dem Kaltstart und nur mit bekanntem Konto")
     w = fn(ps, "_login_ok_wache")
-    check('"loginok"' in w and "timeout=sekunden + 30" in w, "Panel: Wache ruft den Bot im Modus loginok mit Zeitlimit")
+    check('"loginok"' in w and "timeout=LOGIN_WACHE_RUNDE_S + 60" in w, "Panel: Wache ruft den Bot im Modus loginok mit Zeitlimit")
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1
 
