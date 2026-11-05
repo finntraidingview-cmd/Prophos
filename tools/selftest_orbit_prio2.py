@@ -197,11 +197,12 @@ erg, vs = lauf()
 app.sb_select = _sel0
 check(not [u for pid, u in ZUSTAND["geschrieben"] if str(pid)[3:] == LEM], "auto_plan_gruppe nicht lesbar → Emins vorgemerkte Marke bleibt stehen")
 PLAENE[:] = _alt2
-check(app.ap_modell_setzen(FIRMEN, "tradeify", "orbit_prio2")[1] and app.ap_firma_modell(dict(FIRMEN[0], modell="orbit_prio2"), "Tradeify") == "orbit_v2",
-      "Tradeify nicht wählbar (eigener Final-Hedge) — auch ein Hand-Feld wirkt nicht")
+# TM1 (05.11.2026): Tradeify wählbar — Prio 2 nimmt die nicht-finalen Trades, der finale bleibt bei tfh_tick (tools/selftest_tradeify_prio2.py)
+check(app.ap_modell_setzen(FIRMEN, "tradeify", "orbit_prio2")[1] is None and app.ap_firma_modell(dict(FIRMEN[0], modell="orbit_prio2"), "Tradeify") == "orbit_prio2",
+      "Tradeify wählbar (TM1) — Feld orbit_prio2 wirkt")
 check(app.ap_modell_setzen([{"namen": ["topstep"], "route": "tsv2"}], "topstep", "orbit_prio2")[1], "Topstep V2 nicht wählbar")
 erg, vs = lauf(firmen=mit_modell(FIRMEN, "tradeify", "orbit_prio2"))
-check(TF not in vs, "Tradeify mit Hand-Feld orbit_prio2 wird nicht vorgemerkt")
+check(TF in vs, "Tradeify mit orbit_prio2: nicht-finaler Trade (Notiz „Auto-Planer“, TP 3.500) wird vorgemerkt")
 
 print("3c) MO1b: Boden am EOD-Hoch (nachziehend), Waage, Gruppen-Route")
 # Lucid 50k: EOD-Hoch 50.800 (gestern Ende), jetzt 50.300 → echter Boden 48.800 → Polster 1.500, Wert = 78/2.000 × 1.500 = 58,50 €
@@ -278,7 +279,7 @@ c = app.app.test_client()
 r = c.post("/admin/gruppen-plan", json={"gruppe_id": "gr-emin", "aktion": "modell", "firma": "lucidtrading", "modell": "orbit_prio2"})
 check(r.status_code == 200 and _upd and _upd[-1][2]["firmen_modell"] == {"lucidtrading": "orbit_prio2"}, f"Admin setzt Emins Lucid → firmen_modell ({r.get_json()})")
 r = c.post("/admin/gruppen-plan", json={"gruppe_id": "gr-emin", "aktion": "modell", "firma": "tradeify", "modell": "orbit_prio2"})
-check(r.status_code == 400, "Gruppe: Tradeify abgelehnt (eigener Final-Hedge)")
+check(r.status_code == 200 and _upd[-1][2]["firmen_modell"] == {"tradeify": "orbit_prio2"}, f"Gruppe: Tradeify = Prio 2 gespeichert (TM1) ({r.get_json()})")
 app._planer_admin_auth = lambda: (None, _verboten)
 app._wd_login = lambda: (EMIN, None)
 _upd.clear()
@@ -359,7 +360,7 @@ check(app.ap_gruppe_firma_an(_fnf, {"fundednextfutures": "orbit_v2"}) is True an
 check(app.ap_gruppe_firma_an(_fnf, {}) is False and app.ap_gruppe_firma_an(_fnf, None) is False, "ohne Eintrag wie HT (aus)")
 check(app.ap_gruppe_firma_an(FIRMEN[2], {"lucidtrading": "aus"}) is False and app.ap_gruppe_firma_an(FIRMEN[2], {}) is True, "„aus“ schaltet eine HT-Firma nur in der Gruppe aus")
 check(app.ap_gruppe_modell_setzen({}, FIRMEN, "lucidtrading", "aus") == ({"lucidtrading": "aus"}, None)
-      and app.ap_gruppe_modell_setzen({}, FIRMEN, "tradeify", "aus")[1], "„aus“ gespeichert; Tradeify bleibt nicht wählbar")
+      and app.ap_gruppe_modell_setzen({}, FIRMEN, "tradeify", "aus") == ({"tradeify": "aus"}, None), "„aus“ gespeichert, auch für Tradeify (TM1)")
 _src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 _ap = _src[_src.index("\ndef ap_planen("):_src.index("\ndef ", _src.index("\ndef ap_planen(") + 10)]
 check("ap_gruppe_firma_an(regel, _fm_gruppe) if _fm_gruppe is not None else regel.get(\"planen\") is not False" in _ap and "_fm_gruppe = None" in _ap,

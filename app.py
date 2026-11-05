@@ -30398,6 +30398,22 @@ def ap_plan_final_text(notes, tp):
     return bool(t and t > 0 and t >= rest)
 
 
+def tfh_ist_final(p, a):
+    """REIN RECHNEND (testbar): ist der Plan p (Konto a mit ziel_usd/tv_balance) der finale Trade? Wie prophos_plan_final in der DB: erst die Planer-Notiz,
+    ohne Notiz TP ≥ Ziel − Konto-Balance. EINE Erkennung für tfh_tick UND ah_tick (TM1): Prio 2 hedgt genau die Pläne, die hier False sind."""
+    f = ap_plan_final_text(p.get("notes"), p.get("master_tp"))
+    if f is None:
+        z, tb, t = _wd_num((a or {}).get("ziel_usd")), _wd_num((a or {}).get("tv_balance")), _wd_num(p.get("master_tp"))
+        f = bool(z is not None and tb is not None and t and t > 0 and t >= z - tb)
+    return bool(f)
+
+
+def ah_tradeify_final(p, a):
+    """REIN RECHNEND (testbar): finaler Tradeify-Futures-Plan (nicht Tradeify CFD) → gehört tfh_tick, nie Orbit Prio 2 (TM1, ein Hedge je Plan)."""
+    firm = str(p.get("master_firm") or "")
+    return "tradeify" in firm.lower() and not _ist_tradeify_cfd(firm) and tfh_ist_final(p, a)
+
+
 def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01):
     """REIN RECHNEND (testbar): Fusion-Gegenhedge des finalen Tradeify-Trades → (dict, None) | (None, grund).
     satz = Kontowert ÷ Polster (€ je $), polster $ (Balance − Liq), kt Kontrakte, ppl $/Pkt je Kontrakt (NQ 20, MNQ 2), tp $.
@@ -30557,11 +30573,11 @@ def tfh_tick(jetzt=None, force=False):
         a = konten.get(str(p.get("master_account_id")))
         if not a or (a.get("account_type") or "") not in EH_TYPEN:
             continue
-        f = ap_plan_final_text(p.get("notes"), p.get("master_tp"))
-        if f is None:                                     # wie prophos_plan_final: Plan ohne Notiz → TP ≥ Ziel − Konto-Balance
-            z, tb, t = _wd_num(a.get("ziel_usd")), _wd_num(a.get("tv_balance")), _wd_num(p.get("master_tp"))
-            f = bool(z is not None and tb is not None and t and t > 0 and t >= z - tb)
-        if f:
+        # EIN HEDGE JE PLAN (TM1): schon auf Orbit Prio 2 umgestellt (ah_tick, apex_hedge 'mit') → nie zusätzlich dieser Gegenhedge
+        _b = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if ((_b.get("apex_hedge") or {}) if isinstance(_b.get("apex_hedge"), dict) else {}).get("status") == "mit":
+            continue
+        if tfh_ist_final(p, a):                           # wie prophos_plan_final: Notiz, ohne Notiz TP ≥ Ziel − Konto-Balance
             finale.append((p, a))
     if not finale:
         return erg
@@ -31217,15 +31233,17 @@ _ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt
 AP_MODELLE = ("orbit_v2", "orbit_prio2")
 AP_GRUPPE_AUS = "aus"   # MO1c: Gruppen-Eintrag firmen_modell[firma] = 'aus' (Firma in der Gruppe aus) | Modell (Firma in der Gruppe an, auch bei HT planen=false)
 AP_MODELL_NAME = {k: MODELL_NAME[k] for k in ("orbit_v2", "orbit_prio2")}   # MK1b: aus der zentralen Tabelle
-AP_MODELL_NICHT_WAEHLBAR = ("tradeify",)   # Firmen-Schlüssel namen[0]: finaler Tradeify fährt über tfh_tick (hedge_art 'tradeify_final') — nie zusätzlich Prio 2
+# TRADEIFY ÜBER ORBIT PRIO 2 (TM1, Finn 05.11.2026 über den Master: „du kannst ja machen bei Tradeify, auch über Orbit, Prio 2 bei ihm“ — Emin): Tradeify ist
+# jetzt wie jede Futures-Firma im Modell-Dropdown wählbar (vorher AP_MODELL_NICHT_WAEHLBAR = ("tradeify",)). EIN HEDGE JE PLAN (Vorfall Duplikum-Doppelhedge
+# 05.11.2026): Prio 2 (ah_tick, hedge_art 'apex') nimmt nur die NICHT-finalen Tradeify-Challenge-Trades; der finale Trade bleibt beim eigenen Gegenhedge
+# (tfh_tick, hedge_art 'tradeify_final', Orbit V3) — beide teilen dieselbe Final-Erkennung tfh_ist_final. ah_tick lässt finale Tradeify-Pläne aus (und räumt
+# eine alte Prio-2-Marke weg), tfh_tick lässt einen schon auf Prio 2 umgestellten Plan aus; DB-Riegel trade_plans_a1_ein_hedge (sql/2026-11-05_tradeify_prio2.sql).
 
 
 def ap_firma_modell(regel, firm, gruppe_modell=None):
     """REIN RECHNEND (testbar): Modell einer Futures-Firma → 'orbit_v2' | 'orbit_prio2'. gruppe_modell = {namen[0]: modell} einer Verwalter-Gruppe
     (None = HT: regel['modell']). Fehlt/ungültig → Standard nach Firmenname (Apex → orbit_prio2, sonst orbit_v2) — genau die alte Regel."""
-    if ((regel or {}).get("namen") or [""])[0] in AP_MODELL_NICHT_WAEHLBAR:
-        v = None                                       # Tradeify: nie Prio 2, auch wenn jemand das Feld per Hand setzt (Fremd-Review MO1)
-    elif gruppe_modell is not None:
+    if gruppe_modell is not None:
         v = (gruppe_modell or {}).get(((regel or {}).get("namen") or [""])[0]) if isinstance(gruppe_modell, dict) else None
     else:
         v = (regel or {}).get("modell") if isinstance(regel, dict) else None
@@ -31872,8 +31890,8 @@ def ap_unt_kernwert(std_firmen, abw, fm, firma, aenderungen, standard=None):
                 fm.pop(firma, None)                        # wieder wie der Standard (an)
             else:
                 # Standard plant die Firma nicht → in der Gruppe an mit Standard-Modell (FNF: Orbit V2) — nur, wo ein Modell wählbar ist (wie
-                # /admin/gruppen-plan ap_modell_setzen): CFD, Topstep V2 und Tradeify bleiben wie der Standard (Fremd-Review)
-                if std.get("route") in AP_CFD_ROUTEN or std.get("route") == "tsv2" or firma in AP_MODELL_NICHT_WAEHLBAR:
+                # /admin/gruppen-plan ap_modell_setzen): CFD und Topstep V2 bleiben wie der Standard (Fremd-Review; Tradeify seit TM1 wählbar)
+                if std.get("route") in AP_CFD_ROUTEN or std.get("route") == "tsv2":
                     return None, None, None, f"{firma}: im Unternehmen nicht anschaltbar (Standard plant sie nicht, Weg ohne Modell-Wahl)"
                 fm[firma] = ap_firma_modell(std, None)
         else:
@@ -32227,9 +32245,28 @@ def ah_tick(jetzt=None, force=False):
     if not plaene:
         return erg
     firmen = regeln.get("firmen") or []
-    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",ziel_usd", "id": "in.(" + ",".join(   # ziel_usd: tfh_ist_final (TM1)
         sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
     plaene = [p for p in plaene if (konten.get(str(p.get("master_account_id"))) or {}).get("account_type") == "challenge"]
+    # EIN HEDGE JE PLAN (TM1, Tradeify über Orbit Prio 2): der finale Tradeify-Trade gehört tfh_tick (eigener Gegenhedge, Orbit V3) — hier nie vormerken
+    # oder umstellen. Eine Prio-2-Marke von früher (vorgemerkt, nicht umgestellt) kommt weg wie beim Rückweg auf Orbit V2, sonst hielte der Riegel
+    # trade_plans_a1_apex_hedge den Plan und tfh_tick überschriebe hedge_art je Minute. Schon umgestellte (status 'mit') bleiben unangetastet — tfh_tick
+    # lässt sie aus, der DB-Riegel trade_plans_a_final_halten hält sie (nie ohne, nie doppelt).
+    _tf_final = [p for p in plaene if ah_tradeify_final(p, konten.get(str(p.get("master_account_id"))))]
+    for p in _tf_final:
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if p.get("_ah_nach") or base.get("hedge_art") != "apex" or (base.get("apex_hedge") or {}).get("status") == "mit":
+            continue
+        try:
+            if sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
+                                         "mt5_baseline->>hedge_art": "eq.apex"},
+                         {"mt5_baseline": {k: v for k, v in base.items() if k not in ("hedge_art", "hedge_vorschau")}}):
+                _ah_spur(f"{p.get('master_name') or '—'}: finaler Tradeify — Marke {MODELL_NAME['orbit_prio2']} entfernt (Gegenhedge über den Final-Weg)")
+        except Exception as e:
+            _ah_spur(f"⚠️ {str(p['id'])[:8]} Marke nicht entfernt: {type(e).__name__}: {e}")
+    if _tf_final:
+        _weg = {id(p) for p in _tf_final}
+        plaene = [p for p in plaene if id(p) not in _weg]
     if not plaene:
         return erg
     uids = sorted({str(p["user_id"]) for p in plaene})
@@ -35249,6 +35286,12 @@ def ap_waage_ohne(z, ohne):
     if not ohne:
         return False
     t = f"{z.get('firma_key') or ''}|{z.get('firma') or ''}".lower()
+    # TM1 (Fremd-Review 05.11.2026): Tradeify Futures auf Orbit Prio 2 legt den Schlüssel 'tradeify' in waage_ohne — als Teilstring träfe er auch
+    # „Tradeify CFD“ und nähme sie aus der CFD-Waage. Für eine Tradeify-CFD-Zeile zählen nur Schlüssel, die selbst „cfd“ enthalten (Erkennung wie
+    # _ist_tradeify_cfd, hier ohne Aufruf, weil die Waage-Selbsttests ap_waage_ohne einzeln laden)
+    _tn = "".join(c for c in t if c.isascii() and c.isalnum())
+    if "tradeify" in _tn and "cfd" in _tn:
+        return any(k and k in t and "cfd" in k for k in ohne)
     return any(k and k in t for k in ohne)
 
 
@@ -38258,7 +38301,7 @@ def admin_auto_plan_einstellungen():
            "modell_namen": AP_MODELL_NAME,
            # MO1b: Modelle je Verwalter-Gruppe (auto_plan_gruppe.firmen_modell; spalte False = SQL noch nicht eingespielt) — nur für Admins
            "gruppen_modelle": ap_gruppen_modell_sicht(regeln.get("firmen") or []) if admin else [],
-           "modell_nicht": {k: "finaler Tradeify fährt mit eigenem Gegenhedge" for k in AP_MODELL_NICHT_WAEHLBAR},
+           "modell_nicht": {},   # TM1: Tradeify wählbar (Prio 2 nur nicht-finale Trades); Schlüssel bleibt fürs Frontend (Topstep-Grund kommt aus der Route)
            # E3b: Zufall-Parameter (wirksam, Code-Rückfall, welche aus der Tabelle) + Firmen-Regeln aus firm_rules.json
            "zufall": ap_zufall(regeln), "zufall_code": ap_zufall_code(),
            "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
@@ -38383,8 +38426,7 @@ def ap_modell_setzen(firmen, firma, modell):
                 return None, f"CFD-Firma — fährt immer {MODELL_NAME['echo']}"
             if f.get("route") == "tsv2":                 # Topstep V2: eigener Weg in TopstepX, ah_tick nimmt nur tvv2
                 return None, f"{MODELL_NAME['topstep_v2']} — eigener Weg, kein Modell wählbar"
-            if firma in AP_MODELL_NICHT_WAEHLBAR:      # Fremd-Review MO1: finaler Tradeify hat seinen eigenen Hedge (tfh_tick) — beide würden hedge_art je Minute überschreiben
-                return None, "Tradeify — finaler Trade hat einen eigenen Gegenhedge, kein Modell wählbar"
+            # Tradeify seit TM1 wählbar: Prio 2 nimmt nur die nicht-finalen Trades, der finale bleibt bei tfh_tick (ah_tradeify_final) — nie beide
             f = dict(f, modell=modell)
             treffer = True
         neu.append(f)

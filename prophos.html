@@ -56389,7 +56389,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2085'
+  const OS_TAB_BUILD = '2026-09-22.2086'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -88120,7 +88120,8 @@
     // MK1 05.11.2026: Namen aus modellName („Echo“ statt „Echo mit Hedge“; finaler Tradeify-Trade läuft als Orbit)
     if(e3ArtVon(f) === 'cfd') return { text: eh.an ? modellName('echo') : modellName('echo_v2'), kl: 'echo' }
     if(f.route === 'tsv2') return { text: modellName('topstep_v2'), kl: 'topstep' }
-    if(e3ModellWert(f, D) === 'orbit_prio2') return { text: ah.an ? modellName('orbit_prio2') : `${modellName('orbit_v2')} · ${modellName('orbit_prio2')} aus`, kl: 'orbit' }
+    // TM1 (Finn 05.11.2026, Emin): Tradeify mit Prio 2 — die nicht-finalen Trades fahren Prio 2, der finale bleibt beim eigenen Gegenhedge (Orbit), nie beide
+    if(e3ModellWert(f, D) === 'orbit_prio2') return { text: (ah.an ? modellName('orbit_prio2') : `${modellName('orbit_v2')} · ${modellName('orbit_prio2')} aus`) + (n === 'tradeify' && tf.an ? ` · Final als ${modellName('orbit')}` : ''), kl: 'orbit' }
     if(n === 'tradeify') return { text: tf.an ? `${modellName('orbit_v2')} · Final als ${modellName('orbit')}` : modellName('orbit_v2'), kl: 'orbit' }
     return { text: modellName('orbit_v2'), kl: 'orbit' }
   }
@@ -88319,7 +88320,7 @@
       if(cfd) bl += slider('Echo statt Echo V2', !!(D.echo_hedge || {}).an, 'echo_hedge', '')   // MK1: Schalter heißt nach dem Modell
       // MODELL (MO1): Futures wählbar, CFD fest Echo mit Hedge. MO1b (Finn 05.11.2026: „unter Challenge-Planer, zum Beispiel bei Emin, die Option, das Modell zu
       // ändern“): eine Zeile für Hermann Technologies (regeln.firmen[].modell) und je Verwalter-Gruppe eine (auto_plan_gruppe.firmen_modell, POST /admin/gruppen-plan
-      // aktion modell). Tradeify (eigener Final-Hedge) und Topstep V2 (eigener Weg) ausgegraut mit Grund.
+      // aktion modell). Topstep V2 (eigener Weg) ausgegraut mit Grund; Tradeify seit TM1 (05.11.2026) wählbar — Prio 2 nur für die nicht-finalen Trades.
       const nichtGrund = sel.route === 'tsv2' ? 'Topstep V2 — eigener Weg in TopstepX' : (D.modell_nicht || {})[n] || ''
       const mSel = (attr, wert, aus, opts) => `<select class="input mono e3-modell" ${attr} aria-label="Modell"${aus ? ` disabled title="${e3E(aus)}"` : ''}>${(opts || E3_MODELLE).map(([k, t]) => `<option value="${k}"${k === wert ? ' selected' : ''}>${t}</option>`).join('')}</select>`
       // MO1c (Finn: Emins FundedNext Futures 50k): in der Gruppe auch „aus" — ein Modell schaltet die Firma für die Gruppe AN, auch wenn HT sie nicht plant
