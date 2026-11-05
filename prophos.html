@@ -31973,9 +31973,10 @@
     if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
-    // Orbit V3 (01.10.2026, Finn): P&L kommt aus dem Userscript (hedgeV3BalanceNachtrag) — Puls liest nur als Notlösung, 10 min nach dem Ende
+    // Orbit V3 (01.10.2026, Finn): P&L kommt aus dem Userscript (hedgeV3BalanceNachtrag) — Puls liest nur als Notlösung. PL3-A (06.11.2026): Frist =
+    // dieselbe gestreute Nachlese-Zeit des Plans (2–10 min bei Trades mit Hedge) statt fest 10 min — sonst käme Puls frühestens nach 10 min
     if(planPlUserscript(p) && !force && !steht && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
-       && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < 10 * 60000) return 'Orbit/Winning Day: P&L kommt aus dem Userscript (Puls erst nach 10 min als Notlösung)'
+       && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < tvV2NachleseMs(p.id, p)) return 'Orbit/Winning Day: P&L kommt aus dem Userscript (Puls nach 2–10 min Zufall als Notlösung)'
     // Topstep V2 (01.10.2026, TSV2-PNL): today_pnl ist dort der RP&L des ganzen Tages — erst die Balance macht das Ende „gelesen"
     if(p.route === 'tsv2' ? (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
        : ((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls')) return 'Ende ist schon gelesen'
@@ -31987,7 +31988,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && !steht && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : '1–120 min Zufall'})`
+    if(!vers0 && !steht && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id, p)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id, p)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : tvV2HedgeTrade(p) ? 'Trade mit Hedge: 2–10 min Zufall' : '1–120 min Zufall'})`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
@@ -32032,15 +32033,28 @@
   }, 60000)
   // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–7.200 s (1–120 min, Finn 29.09.2026: „1 bis 120 Minuten nach dem Trade loggt
   // Puls sich ein und überprüft den Profit"; vorher 1–200, 1–150, 1–30 min), fest aus der Plan-ID (FNV-Hash) — gleich auf allen Tabs
-  function tvV2NachleseMs(id){
+  // HEDGE-TRADES (PL3-A, Finn 06.11.2026: „ja dann bau den scheiß" — Auswertung PL3: Orbit Prio 2 hatte bei 10 von 41 Trades erst nach > 1 h einen
+  // Master-P&L, weil eine misslungene Ende-Lesung auf 1–120 min Zufall wartete): Orbit V3, Orbit Prio 2, Winning Day mit Fusion-Hedge (tvv2 + hedge_eur)
+  // und Nova (Topstep + Hedge) lesen nach 2–10 min, weiter je Plan gestreut (FNV-Hash, Jitter-Regel), nie eine feste Zeit. Orbit V2 ohne Hedge
+  // bleibt 1–120 min, die Topstep-Kette 1–35 min. plan = optionaler Plan (camel oder snake, z. B. Live-Trades-Zeile fremder IDs)
+  function tvV2HedgeTrade(p){
+    if(!p) return false
+    const he = Number(p.hedgeEur != null ? p.hedgeEur : p.hedge_eur) || 0, v3 = !!(p.orbitV3 || p.orbit_v3)
+    return (p.route === 'tvv2' && (v3 || he > 0)) || (p.route === 'tsv2' && he > 0)
+  }
+  window._tvV2HedgeTrade = tvV2HedgeTrade   // Test-Haken
+  function tvV2NachleseMs(id, plan){
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
     // TOPSTEP-KETTE (08.10.2026, Finn: „nachdem Trade 1 abgeschlossen ist, muss die Balance ganz genau gelesen werden, und dann von der
     // Balance der nächste geplant werden"): Trade 2 wartet auf genau diese Lesung — Ketten-Trade 1 liest nach 30–120 s statt 1–120 min
     // Finn 08.10.2026 später: „wird dann innerhalb von 1 bis 35 Minuten per Zufallsprinzip überprüft" — Kettentrades (1 und 2) 1–35 min,
     // danach hakt das Backend sie selbst ab (ap_kette_abhaken) und plant Trade 2
-    let k = null; try{ const pk = tradePlans.find(x => String(x.id) === String(id)); k = tpKetteNr(pk) }catch(_){ k = null }
-    return k ? (60 + (h % 2041)) * 1000 : (60 + (h % 7141)) * 1000
+    let k = null, pk = null; try{ pk = tradePlans.find(x => String(x.id) === String(id)) || null; k = tpKetteNr(pk) }catch(_){ k = null }
+    if(k) return (60 + (h % 2041)) * 1000
+    if(tvV2HedgeTrade(pk || plan)) return (120 + (h % 481)) * 1000   // PL3-A: 120–600 s gestreut
+    return (60 + (h % 7141)) * 1000
   }
+  window._tvV2NachleseMs = tvV2NachleseMs   // Test-Haken
   // Topstep-Kette: 1 = Trade 1, 2 = Trade 2 (vom Backend aus Trade 1 gerechnet), sonst null — Marke mt5_baseline.kette (app.py ap_planen/ap_kette_tick)
   function tpKetteNr(p){
     const k = p && p.mt5Baseline && p.mt5Baseline.kette
@@ -32118,7 +32132,7 @@
   }
   window._tpKetteSchritt = tpKetteSchritt   // Test-Haken
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
-  const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
+  const tvV2NachleseAb = (id, endeIso, plan) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id, plan) : 0 }   // plan: PL3-A (fremde Pläne)
   /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
    * balance_end dieses Trades"). Die Start-Balance des nächsten Trades IST die End-Balance dieses — exakter als eine Nachlesung, die
    * nach bis zu 150 min schon den nächsten Trade mitzählen würde. REIN RECHNEND: frühester Orbit-V2-Plan desselben Kontos, der NACH
@@ -36921,7 +36935,7 @@
   const _elBusy = new Set()
   // REIN RECHNEND (window._endlesungStatus): Stand einer Endlesung → {art, text, tip, bisMs, knopf} oder null (nichts zu zeigen)
   // route / mitStartBalance (optional, T1-B 05.10.2026): nur für den Handelstag-Zweig unten — ohne sie alles wie bisher
-  function endlesungStatus(fin, planStatus, jetzt, pid, route, mitStartBalance){
+  function endlesungStatus(fin, planStatus, jetzt, pid, route, mitStartBalance, zeile){   // zeile: Plan/DB-Zeile für die Hedge-Nachlesezeit (PL3-A)
     if(!fin || typeof fin !== 'object') return null
     jetzt = jetzt == null ? Date.now() : jetzt
     const cfg = window._tvV2Endlesung || {}
@@ -36964,7 +36978,7 @@
     // Warte auf Puls (F21, Finn 27.09.2026: „Warte auf Puls. Wird so und so viele Minuten später abgecheckt, je nach Zufall"): vor dem
     // ersten Versuch bis zur zufälligen Nachlese-Zeit (tvV2NachleseAb ab final.at — beim Demo-Ende = Demo-Zeitpunkt)
     if(!versuche && pid && fin.at && typeof tvV2NachleseAb === 'function'){
-      const ab = tvV2NachleseAb(pid, fin.at)
+      const ab = tvV2NachleseAb(pid, fin.at, zeile)
       if(ab > jetzt) return { art: 'laeuft', text: `Profit geschätzt aus Radar · Puls bestätigt ab ${uhr(ab)} (noch ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
     }
     // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern liest Puls nicht mehr von selbst — „Jetzt lesen" bleibt
@@ -36985,7 +36999,7 @@
     const bis = (versuche > 0 && letzte) ? letzte + pause[Math.min(versuche - 1, pause.length - 1)] * 1000 : null
     if(lb) return { art: 'laeuft', text: `Login-/Verbindungsfehler · nächster Versuch ab ${uhr(lb.bis)}`, tip: tip.join('\n'), bisMs: lb.bis, knopf: true }
     // Lesung verloren (08.10.2026, s. wdlLesungVerloren): 20 min nach Nachlese-Zeit bzw. letztem Versuch ohne neue Spur — nie endlos „liest …"
-    const ab0 = (pid && fin.at && typeof tvV2NachleseAb === 'function') ? tvV2NachleseAb(pid, fin.at) : 0
+    const ab0 = (pid && fin.at && typeof tvV2NachleseAb === 'function') ? tvV2NachleseAb(pid, fin.at, zeile) : 0
     const spur = Math.max(ab0, letzte, bis || 0)
     if(spur && jetzt - spur > 20 * 60000){
       const m = Math.max(1, Math.round((jetzt - spur) / 60000)), seit = m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`
@@ -36997,9 +37011,9 @@
   const elRest = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s <= 0 ? 'gleich' : 'in ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
   // HTML der Zeile; attr = Datenattribut des Knopfs der jeweiligen Stelle (eigener Handler je Stelle). plan (nur eigene Pläne):
   // hilft „Jetzt lesen" nicht (window._tvV2Endlesung.grund mit force ≠ ''), ist der Knopf grau und nennt den Grund im Tooltip
-  function endlesungZeileHtml(pid, fin, planStatus, attr, plan){
+  function endlesungZeileHtml(pid, fin, planStatus, attr, plan, zeile){   // zeile: WD-Zeile fremder IDs ohne Plan im Tab (PL3-A)
     const st = endlesungStatus(fin, planStatus, null, pid, plan ? plan.route : undefined,
-      plan ? !!(plan.mt5Baseline && plan.mt5Baseline.tv && typeof plan.mt5Baseline.tv.balance_start === 'number') : undefined)
+      plan ? !!(plan.mt5Baseline && plan.mt5Baseline.tv && typeof plan.mt5Baseline.tv.balance_start === 'number') : undefined, zeile || plan)
     if(!st) return ''
     // P&L exakt aus Balance nachher − vorher, wenn die Start-Balance am eigenen Plan steht (F21)
     try{ const tvb = (plan && plan.mt5Baseline && plan.mt5Baseline.tv) || {}, bs = tvb.balance_start
@@ -37128,7 +37142,7 @@
         // Handstart (29.09.2026): Start-Balance kam aus der Konto-Lesung vor dem Start, nicht aus Puls beim Platzieren.
         // /admin/wd-plaene liefert tv nur gekürzt — sonst aus dem eigenen Plan-Cache (eigene IDs)
         + ((art === 'm' && tvBs && tvBs.balance_start_quelle === 'konto_balance') ? `<span class="mwd-box-s">Start-Balance aus Konto-Lesung ${tvBs.balance_start_at ? new Date(tvBs.balance_start_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>` : '') + `</label>`
-      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${(x.route === 'tvv2' || x.route === 'tsv2') ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen') : ''}<div class="mwd-abh-werte">`
+      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${(x.route === 'tvv2' || x.route === 'tsv2') ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen', undefined, x) : ''}<div class="mwd-abh-werte">`
         + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
         + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
         + `<button type="button" class="btn btn-primary mwd-btn mwd-abh-knopf" data-mwd-abhaken="${escapeHtml(pid)}" title="Plan erledigt setzen — Fusion-P&L wird in Finanzen als Winning-Days-Hedge gebucht"${busy ? ' disabled' : ''}>${busy ? 'bucht…' : 'Abhaken'}</button>`
@@ -38887,7 +38901,7 @@
     const lb = tvV2LoginBremse(e, Date.now())
     const kette = wdlKetteT1Offen(t, Date.now())   // Topstep-Tag: Trade 1 liest bis zum Fensterende weiter (tpKetteLesenWeiter)
     if(versuche >= TV_ENDLESUNG_MAX && !(lb && lb.pruefen) && !kette) return null
-    return { kette: kette ? 'lesen' : null, ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, letzte: Date.parse(e.puls_at || '') || 0, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
+    return { kette: kette ? 'lesen' : null, ab: tvV2NachleseAb(t.id, e.at || t.ended_at, t), versuche, letzte: Date.parse(e.puls_at || '') || 0, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
   }
   /* LESUNG VERLOREN (08.10.2026, Finn-Screenshot Radar: Mike · Tradeify …3962 stand 20 h auf „wird gelesen · seit 20 h"): die Zeile
    * zählte stumpf ab der Nachlese-Zeit hoch, obwohl Puls nie gelesen hatte (puls_versuche leer, beide Endlesungs-Signale seit 06./07.10.
@@ -56809,7 +56823,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2104'
+  const OS_TAB_BUILD = '2026-09-22.2105'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
