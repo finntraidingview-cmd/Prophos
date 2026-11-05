@@ -52,8 +52,14 @@ def main():
     ns = EH.lade({
         "sb_select": db.sb_select, "_sb_all": db._sb_all, "sb_update": db.sb_update, "_wt_now_iso": lambda: "2026-10-29T12:00:00+00:00",
         "_ap_namen": lambda: ({"U1": "Mike", "U2": "Ina", "UE": "Emin"}, set()), "gp_verwalter_karte": lambda: {"UE": "UE"},
+        # RT1 (05.11.2026): ehv_tick nimmt seit 69bc38e4 (GRUPPE WIE HT, 30.10.2026) Verwalter-Gruppen mit Planer-Zeile über
+        # ap_planer_gruppen_ids NICHT mehr aus — der Lader stellt die Funktion bereit (wie selftest_echo_hedge)
+        "ap_planer_gruppen_ids": lambda: {"UE"},
         "AP_KONTO_FELDER": "id", "GP_HEDGE_KEY": "echo_hedge_account", "GP_SLAVE_PPL": 0.85,
-        "ap_ppl_karte": lambda rows, norm=None: ({}, {}), "_ap_norm": lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower()),
+        "ap_ppl_karte": lambda rows, norm=None: ({}, {}),
+        # RT1 (05.11.2026): seit 55f97f5f (UNT2) holt ehv_tick den Punktwert-Kontext über ap_ppl_ctx_unternehmen (wie selftest_echo_hedge)
+        "ap_ppl_ctx_unternehmen": lambda rows, norm=None: {"ppl": {}, "ppl_firma": {}},
+        "_ap_norm": lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower()),
         "_firm_norm": lambda s: s, "_ap_balance_karten": lambda: ({}, {}), "_ap_kauf_echt": lambda ids: {},
         "ap_regel_finden": lambda firmen, fi: next((r for r in firmen if re.sub(r"[^a-z0-9]", "", fi.lower()) in r["namen"]), None),
         "acc_balance_wahl": lambda a, e, d: (100000.0, "USD", "Echo", ""),
@@ -70,8 +76,10 @@ def main():
     ok(p1["route"] == "mt5v2" and not p1.get("slave_account_id") and "hedge_art" not in p1["mt5_baseline"], "nicht umgestellt, keine hedge_art")
     ok(all(set(u) == {"mt5_baseline"} for u in um.values()), "schreibt nur mt5_baseline")
     ok("kein Echo-Hedge-Konto" in vs("P6").get("grund", ""), "ID ohne Fusion-Konto → Grund")
-    ok(not ({"P4", "P5", "P7", "P8", "P9"} & set(um)), "Futures, Verwalter-Gruppe, geclaimt, Hand-Werte, Tage-Mini → nicht angefasst")
-    ok(erg == {"geschrieben": 3}, f"Ergebnis {erg}")
+    # RT1 (05.11.2026): seit 69bc38e4 läuft Emins Gruppe (Planer-Zeile) durch ehv_tick wie HT — ohne Fusion-Konto: Vorschau mit Grund
+    ok("P5" in um and "kein Echo-Hedge-Konto" in vs("P5").get("grund", ""), "Verwalter-Gruppe (Emin) → wie HT (ohne Fusion-Konto: Grund)")
+    ok(not ({"P4", "P7", "P8", "P9"} & set(um)), "Futures, geclaimt, Hand-Werte, Tage-Mini → nicht angefasst")
+    ok(erg == {"geschrieben": 4}, f"Ergebnis {erg}")
     n = len(db.updates)
     ns["ehv_tick"](jetzt=jetzt, force=True)
     ok(len(db.updates) == n, "zweiter Takt, gleiche Zahlen → nichts geschrieben")
