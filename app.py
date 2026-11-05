@@ -4462,12 +4462,86 @@ def echo_frost_faellig(merk, pid, jetzt_ts):
     return None
 
 
+# ECHO OFFEN, MASTER + HEDGE FLACH (TC1b, Master 05.11.2026 „Bau B jetzt“; Fall Chris Tradeify CFD 100k …7785 Phase 1, 70af3250): der Trade ging um
+# 07:46 Dubai am TP zu, der Plan stand bis abends auf „open“ und sperrte die Schwesterkonten am Riegel Gegenrichtung. Ursache: das Konto meldet nach
+# dem Phasen-Ziel Balance 0, die Login-Lesung der Ende-Erkennung im PC-Tab (nur bei Balance > 0) gelingt nie; die Snapshot-Wache oben meldet nur
+# „eingefroren“/alt, die Zeile war aber frisch. Jetzt: zeigt die jüngste Copier-Zeile des Master-Logins (nicht älter als ECHO_FROST_ALT_S) weder eine
+# Master-Position noch einen Hedge, und das ununterbrochen ECHO_FLACH_S lang (Railway-Takt, nur im Speicher), und läuft der Plan selbst so lange, dann
+# 🟠 an die Master-IDs („von Hand abhaken“, Erinnerung nach ECHO_FLACH_ERINNERN_S) und eine Zeile in „Manuelle Arbeit“ (/admin/handarbeit). Nur Meldung:
+# kein Schreibweg in den Plan, nichts wird beendet (die Sperre fällt, sobald Finn abhakt).
+ECHO_FLACH_S, ECHO_FLACH_ERINNERN_S = 60 * 60, 3 * 3600
+ECHO_FLACH_TXT = "Plan offen, Master + Hedge ≥ 60 min flach → von Hand abhaken"
+_echo_flach_seit = {}    # plan_id → seit wann die Copier-Zeile flach ist
+_echo_flach_stand = {}   # plan_id → Zeile für „Manuelle Arbeit“ (admin_handarbeit)
+
+
+def echo_flach_urteil(z, jetzt_ts):
+    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile {updated_at, note, pos, hd} → True, wenn der Copier für den Master weder Position noch Hedge
+    meldet und die Zeile höchstens ECHO_FROST_ALT_S alt ist (frisch ODER eingefroren/Standby — beides „nichts mehr offen“). Ältere Zeile, fehlende
+    Zeile oder unbekannte Form → False (PC/Tab still meldet echo_blind)."""
+    if not isinstance(z, dict):
+        return False
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(z.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return False
+    if alter > ECHO_FROST_ALT_S:
+        return False
+    pos, hd = z.get("pos"), z.get("hd")
+    if not isinstance(pos, list) or pos:
+        return False
+    if hd is not None and not isinstance(hd, dict):
+        return False
+    return not any((len(v) if isinstance(v, list) else bool(v)) for v in (hd or {}).values())
+
+
+def echo_flach_n(seit, started_ts, jetzt_ts):
+    """REIN RECHNEND (testbar): 0 = erste Meldung (flach UND Plan laufend ≥ ECHO_FLACH_S), 1 = Erinnerung (≥ ECHO_FLACH_S + ECHO_FLACH_ERINNERN_S),
+    None = (noch) nichts. Gezählt ab dem späteren von Flach-Beginn und Plan-Start — sonst bekäme ein später gestarteter Plan gleich die Erinnerung."""
+    if seit is None:
+        return None
+    ab = max(seit, started_ts or seit)
+    if jetzt_ts - ab < ECHO_FLACH_S:
+        return None
+    return 1 if jetzt_ts - ab >= ECHO_FLACH_S + ECHO_FLACH_ERINNERN_S else 0
+
+
+def echo_flach_schritt(r, z, login, namen, pc_namen, jetzt_ts, started_ts):
+    """Ein Takt für einen offenen Echo-Plan: Flach-Uhr führen, „Manuelle Arbeit“-Zeile setzen/löschen, fällige Meldung → (key, text, daten) | None."""
+    pid = str(r["id"])
+    if not echo_flach_urteil(z, jetzt_ts):
+        _echo_flach_seit.pop(pid, None)
+        _echo_flach_stand.pop(pid, None)
+        return None
+    seit = _echo_flach_seit.setdefault(pid, jetzt_ts)
+    n = echo_flach_n(seit, started_ts, jetzt_ts)
+    if n is None:
+        return None
+    uid = str(r.get("user_id") or "")
+    wer = namen.get(uid, uid[:8])
+    konto = f"{r.get('master_firm') or ''} …{login[-4:]}".strip() if login else str(r.get("master_name") or "")
+    pc = str((z or {}).get("pc_name") or "")
+    pc_txt = f"PC von {(pc_namen.get(pc) or {}).get('name') or '?'} ({pc})" if pc else "PC unbekannt"
+    minuten = int((jetzt_ts - seit) // 60)
+    seit_iso = datetime.fromtimestamp(seit, timezone.utc).isoformat()
+    _echo_flach_stand[pid] = {"art": "offen_flach", "user_id": uid, "user": wer, "konto_id": str(r.get("master_account_id") or "") or None,
+                              "firma": r.get("master_firm") or "", "konto": r.get("master_name") or "", "ende4": login[-4:] if login else "",
+                              "typ": None, "start_balance": None, "plan_id": pid, "seit": seit_iso, "text": ECHO_FLACH_TXT, "pc": pc}
+    modell = MODELL_NAME["echo"] if str(r.get("route")) == "mt5" else MODELL_NAME["echo_v2"]
+    text = (f"{wer} · {konto} ({modell}): Plan steht offen, der Copier meldet seit {minuten} min weder Master-Position noch Hedge ({pc_txt}) — "
+            f"Trade ist wohl zu. Im MT5 prüfen und von Hand abhaken (sperrt sonst Gegenrichtung/Nachplanen).")
+    return f"echo_flach|{pid}|{n}", text, {"pc": pc, "route": r.get("route"), "login4": login[-4:] if login else None, "flach_min": minuten}
+
+
 def echo_frost_tick(rows, namen, jetzt_ts):
     echo = [r for r in rows or [] if str(r.get("status")) == "open" and str(r.get("route") or "") in ("mt5", "mt5v2") and r.get("master_account_id")]
     for pid in [k for k in _echo_frost if k not in {str(r.get("id")) for r in echo}]:
         _echo_frost.pop(pid, None)
     for pid in [k for k in _echo_frost_seit if k not in {str(r.get("id")) for r in echo}]:
         _echo_frost_seit.pop(pid, None)
+    for d in (_echo_flach_seit, _echo_flach_stand):   # TC1b: abgehakt/beendet → Uhr und „Manuelle Arbeit“-Zeile weg
+        for pid in [k for k in d if k not in {str(r.get("id")) for r in echo}]:
+            d.pop(pid, None)
     if not echo:
         return
     ids = sorted({str(r["master_account_id"]) for r in echo})
@@ -4495,6 +4569,16 @@ def echo_frost_tick(rows, namen, jetzt_ts):
                 _echo_gesehen.add(pid)
             except Exception as e:
                 print(f"[alarm] ⚠️ echo_pos_gesehen_at {pid[:8]}: {type(e).__name__}: {e}", flush=True)
+        try:   # TC1b: offen, aber Master + Hedge ≥ 60 min flach → 🟠 + „Manuelle Arbeit“ (nur Meldung)
+            fl = echo_flach_schritt(r, z, login, namen, pc_namen, jetzt_ts, started_ts)
+            if fl and fl[0] not in _alarm["gemeldet"]:
+                _alarm["gemeldet"][fl[0]] = jetzt_ts
+                schon_fl = alarm_im_log([fl[0]], 86400)   # nach einem Railway-Neustart nicht noch einmal
+                if not (schon_fl and fl[0] in schon_fl):
+                    alarm_senden(2, "echo_offen_flach", ("Erinnerung: " if fl[0].endswith("|1") else "") + "Echo-Plan offen, Master flach — abhaken",
+                                 fl[1], uid=str(r.get("user_id") or ""), plan_id=pid, schluessel=fl[0], tag=f"alarm-echo-flach-{pid[:8]}", daten=fl[2])
+        except Exception as e:
+            print(f"[alarm] ⚠️ Echo flach {pid[:8]}: {type(e).__name__}: {e}", flush=True)
         gestoert, grund = echo_frost_urteil(z, jetzt_ts)
         if not gestoert:
             _echo_frost.pop(pid, None)
@@ -15768,6 +15852,21 @@ def _hand_mit_recht(antwort):
         return antwort
 
 
+def hand_echo_flach(manuell, flach, sicht, std_aus, ausgeblendet):
+    """REIN RECHNEND (testbar, TC1b): hängt die Zeilen „Plan offen, Master + Hedge ≥ 60 min flach“ (alarm_tick, _echo_flach_stand) an die Gruppe
+    „Manuelle Arbeit“ — nur in der Sicht des Logins, ohne ausgeblendete IDs, kein Plan doppelt. Neueste zuerst wie die Gruppe."""
+    out = list(manuell or [])
+    schon = {str(z.get("plan_id")) for z in out if z.get("plan_id")}
+    for z in flach or ():
+        uid = str((z or {}).get("user_id") or "")
+        if not z or str(z.get("plan_id")) in schon or not admin_in_sicht(uid, sicht) or uid in (std_aus or ()) or uid in (ausgeblendet or ()):
+            continue
+        out.append(dict(z))
+        schon.add(str(z.get("plan_id")))
+    out.sort(key=lambda z: str(z.get("seit") or ""), reverse=True)
+    return out
+
+
 def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None, tage_je=None):
     """REIN RECHNEND (testbar): die vier Handarbeit-Gruppen. konten_ziel = accounts mit ziel_erreicht_at; reviews = trade_plans review
     (mit manuell); blown = trade_plans blown=true; letzte = {konto_id: (plan_id, started_at)} jüngster gestarteter Plan je Konto;
@@ -15956,6 +16055,7 @@ def admin_handarbeit():
             ausgeblendet = set(namen) - set(lese_g)
         gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf, tage_je)
         gelesen = gr.pop("planer_gelesen", 0)
+        gr["manuell"] = hand_echo_flach(gr.get("manuell"), list(_echo_flach_stand.values()), sicht, std_aus, ausgeblendet)   # TC1b
         # Radar Bestanden: Sicht wie Läuft (Gruppe des Logins, HT ohne Verwalter-Gruppen), nie der Admin-Chip
         _n_r, aus_radar = _wd_personen(radar=True)
         if lese_g:

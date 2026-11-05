@@ -38687,6 +38687,9 @@
           return zeile(z, was, (eigen || adm) ? `<button type="button" class="btn btn-ghost" data-hand-arch="${escapeHtml(z.konto_id || '')}" title="Wie unter Accounts: archivieren mit Grund geblowt (Duplikum/Echo räumen auf)">Als geblowt archivieren</button>` : fremdTxt(z))
         }
         if(k === 'manuell'){
+          // TC1b (05.11.2026): Railway hängt „Plan offen, Master + Hedge ≥ 60 min flach → von Hand abhaken“ an (art offen_flach, Text vom Server)
+          if(z.art === 'offen_flach') return zeile(z, `<b>${escapeHtml(String(z.text || 'Plan offen, Master + Hedge flach → von Hand abhaken'))}</b>`,
+            `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Läuft: Trade abhaken">Im Radar →</button>`)
           const st = typeof wdlManSchrittText === 'function' ? wdlManSchrittText(z.schritt) : (z.schritt || '')
           const was = `${st ? '<b>' + escapeHtml(st) + '</b>' : ''}${st && z.notiz ? ' · ' : ''}${z.notiz ? escapeHtml(String(z.notiz)) : (st ? '' : 'ohne Notiz')}`
           return zeile(z, was, `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Manuelle Arbeit">Im Radar →</button>`)
