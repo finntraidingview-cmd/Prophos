@@ -45712,6 +45712,10 @@ def _wb_antwort():
                 mails[str(u.get("id"))] = str(u.get("email") or "")
         except Exception as e:
             print(f"[dauerbuchung] ⚠️ Nutzerliste: {type(e).__name__}: {e}", flush=True)
+        # UNT5 (05.11.2026): nur Zahlungen von Personen aus dem Unternehmen des Logins (Gate = HT-Voll-Admins → HT); vorher alle Zeilen aller IDs.
+        # Gruppen nicht lesbar → nur die eigenen Zeilen des Logins.
+        gehoert = unt_sicht_login(request.environ.get("prophos.admin_uid"))
+        rows = [z for z in rows if gehoert(z.get("user_id"))]
         for z in rows:
             z["email"] = mails.get(str(z.get("user_id")), "")
         return jsonify({"ok": True, "zahlungen": rows, "takt": _wb_info})

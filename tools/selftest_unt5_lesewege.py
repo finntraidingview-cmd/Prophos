@@ -116,6 +116,28 @@ def teil_liquide():
     check(not fz["sheets"] and not fz["pending"] and set(fz["kunde"]) <= {A}, "1d Gruppen nicht lesbar → nur der Login selbst (nichts Fremdes)")
 
 
+# ── 2) Kundenzahlungen ──
+def kz_lauf(src, login, daten_fehler=False):
+    rows = [{"id": 1, "user_id": M, "kind": "einzahlung", "amount": 300}, {"id": 2, "user_id": X, "kind": "einzahlung", "amount": 200},
+            {"id": 3, "user_id": A, "kind": "einzahlung", "amount": 100}]
+    req = types.SimpleNamespace(environ={"prophos.admin_uid": login})
+    extra = {"_sb_all": lambda tab, q: [dict(r) for r in rows], "_auth_liste_anfrage": lambda: _Antwort({"users": USERS}), "request": req,
+             "jsonify": lambda d: d, "_wb_info": {}}
+    ns = lade(src, HELFER + ("_wb_antwort",), extra)
+    if daten_fehler:
+        ns["admin_gruppen_daten"] = lambda: (_ for _ in ()).throw(RuntimeError("weg"))
+    return ns["_wb_antwort"]()
+
+
+def teil_kundenzahlungen():
+    alt, neu = kz_lauf(ALT_SRC, A), kz_lauf(NEU_SRC, A)
+    ids = lambda d: sorted(z["user_id"] for z in d["zahlungen"])  # noqa: E731
+    check(X in ids(alt), "2a vorher: Kundenzahlung von Emins Mitglied in HTs Liste — Lücke belegt")
+    check(ids(neu) == sorted([M, A]) and [z for z in neu["zahlungen"]] == [z for z in alt["zahlungen"] if z["user_id"] != X],
+          "2b nachher: HT-Admin-Sicht = vorher ohne Emins Zeile (Reihenfolge, Felder, E-Mail gleich)")
+    check(ids(kz_lauf(NEU_SRC, A, daten_fehler=True)) == [A], "2c Gruppen nicht lesbar → nur die eigenen Zeilen des Logins")
+
+
 def main():
     if not ALT_SRC:
         check(False, f"Basis {BASIS}:app.py nicht lesbar")
@@ -123,7 +145,7 @@ def main():
     teil_helfer()
     teil_liquide()
     for name, f in list(globals().items()):
-        if name.startswith("teil_") and name not in ("teil_helfer", "teil_liquide") and callable(f):
+        if name.startswith("teil_") and name not in ("teil_helfer", "teil_liquide") and callable(f):   # weitere Wege in Reihenfolge
             f()
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 1 if FEHLER else 0
