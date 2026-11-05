@@ -9,6 +9,9 @@ Tradeify-150k ohne Lesung, ein Nachfolger ohne External ID, ein FTMO-Konto mit L
 Fix, nie „oder"; (2) _ap_bewerten nennt „kein Kontowert — <Grund>" + Code/Fix; (3) der Stand nimmt für frische Konten den Startwert wie
 der Planer → kein Hinweis mehr, der verwaiste Plan zeigt „Konto gelöscht" + „Diesen Plan löschen"; (4) ap_grund_ohne_balance je Ursache;
 (5) die Delta-Antwort trägt hinweis_code/hinweis_fix."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

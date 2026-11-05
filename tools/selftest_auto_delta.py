@@ -9,6 +9,9 @@ Teil A rein rechnend: Delta je Trade (Tradeify frisch 3 NQ ≈ 2,8 €/Pkt bei K
 erlaubte Pläne, manueller Eingriff lehnt nur Richtungsschutz/PC-Überlappung ab.
 Teil B Rauch-Lauf ohne Netz: ap_planen (Probelauf), _ap_stand_laden, ap_delta_antwort und ap_ausgleichen gegen eine
 nachgebaute DB (Fixture im Test, keine echten Konten) — prüft die Verdrahtung und die Antwortfelder des Vertrags."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import hashlib
 import json
 import os

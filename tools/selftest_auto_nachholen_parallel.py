@@ -9,6 +9,9 @@ Stands wartet künstlich 0,3 s, damit sich zwei Threads sicher überlappen. Gepr
   3 Gegenprobe OHNE Lock: dieselben zwei Aufrufe landen < 5 min auseinander — der Test misst also wirklich die Serialisierung
   4 der Lock steht im Quelltext genau um _ap_nachholen_kern
 Aufruf: python3 tools/selftest_auto_nachholen_parallel.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import contextlib
 import os
 import random

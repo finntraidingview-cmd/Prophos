@@ -10,6 +10,9 @@ und ap_planen mit ids="alle" gegen eine nachgebaute DB (Platzhalter-IDs, keine e
 ids_benutzt[] mit Namen, nichts geschrieben (kein Plan, kein Protokoll); ohne ids wie bisher; trocken:false ignoriert ids.
 Dazu (B2) ap_eingriff_sicht: Bestätigen/Zurücknehmen/Löschen für alle IDs durch Admin und jeden Planer-Login, „nur eigene“ und
 Fremde nur die eigene ID; Guard-Bedingungen von ap_eingriff_filter unverändert."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

@@ -5,6 +5,9 @@ Rein rechnend bzw. gegen eine nachgebaute DB (Platzhalter-IDs, keine echten Kont
 Geprüft: € = genau hypo_bilanz_zeile (P&L $ × Kontowert-Satz), Ergebnis nicht gelesen → offen (nicht geraten), geblowt → −Kontowert vor
 dem Trade, bestanden (Ziel / ziel_pct_konto / Ziel-Wache / Archiv), Dubai-Tag, WD/Funded raus, Sicht-Filter wie offen[]/geplant[].
 Aufruf: python3 tools/selftest_auto_heute.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import json
 import os
 import re

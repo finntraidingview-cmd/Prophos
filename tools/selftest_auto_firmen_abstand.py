@@ -13,6 +13,9 @@ Gruppe je Lauf, Richtung nie, gegen gestartete und Hand-Pläne; (3) SQL-Riegel �
 dasselbe wie app.py _firm_norm (Bedingungen direkt aus dem SQL-Text ausgewertet), Trigger sitzt auf dem Claim und gibt NULL zurück.
 Seit 08.10.2026 ~17:00 Dubai (Finn: „kann natürlich eine ANDERE ID Tradeify short gehen") prüft 2b die Gegenrichtung über IDs nur noch
 ±AP_GEGEN_FIRMA_MIN am Start (keine Laufzeit-Sperre mehr)."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import re

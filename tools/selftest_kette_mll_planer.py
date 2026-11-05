@@ -9,6 +9,9 @@ ohne Verlauf → Plan mit MLL 145.500, Verlustgrenze 3.200, SL 1.250–1.750; (3
 angefressen ab der Startgröße → seit Weg B (Finn 08.10.2026 ~22:15 Dubai) normaler Kettenplan (Tagesziel 4.500); (4) _ap_peaks ohne streng
 schluckt den Fehler weiter (kein Höchststand), mit streng → None; (5) Weg B: Balance 147.000 ohne Verlauf (MLL 145.500) → Reparatur-Tag
 „Reparatur auf 150.000", SL ≤ 1.700, TP ≤ Tagesziel."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

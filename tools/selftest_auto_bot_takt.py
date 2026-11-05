@@ -6,6 +6,9 @@ Aufruf:  python3 tools/selftest_auto_bot_takt.py
 Ohne Netz (Fake sb_select/ap_ausgleichen). Geprüft: Samstag 22:00 und Montag 20:00 dt laufen (früher Mo–Fr bis 19:30 gesperrt);
 ohne geplante/laufende Trades nur die Vorab-Abfrage, kein ap_ausgleichen; nicht fällig vor dem Takt; Abfrage = open ODER planned ab
 jetzt − 30 min, limit 1; Abfrage kaputt → Lauf trotzdem; Schalter aus → nichts; bot{}.naechster_lauf = letzter + Takt auch am Wochenende."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

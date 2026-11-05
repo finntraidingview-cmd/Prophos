@@ -9,6 +9,9 @@ den Tag verteilt. Geprüft: drei Bot-Läufe ziehen drei Longs nacheinander vor (
 Bestätigung bleibt = nur Startzeit), keiner gegen einen laufenden Short derselben ID × Firma, Firmen-Abstand zu anderen IDs, je ID
 ≥ 20 min, kein Short wird vorgezogen, Ruhezeit, Grund „Ausgleich: Long vorgezogen, … (Netto … → …)". Band ok → nichts. Netto long
 zu viel → Shorts werden vorgezogen."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

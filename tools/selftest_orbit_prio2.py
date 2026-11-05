@@ -374,7 +374,7 @@ neu, g = app.ap_modell_setzen(FIRMEN, "lucidtrading", "orbit_prio2")
 check(g is None and [f.get("modell") for f in neu] == [None, None, "orbit_prio2"] and FIRMEN[2].get("modell") is None,
       "ap_modell_setzen: nur Lucid bekommt das Feld, Original unverändert")
 check(app.ap_modell_setzen(FIRMEN, "lucidtrading", "orbit_v3")[1] and app.ap_modell_setzen(FIRMEN, "gibtsnicht", "orbit_v2")[1], "falscher Wert / unbekannte Firma → Grund")
-check(app.ap_modell_setzen([{"namen": ["ftmo"], "route": "mt5v2"}], "ftmo", "orbit_prio2")[1] == "CFD-Firma — fährt immer Echo mit Hedge", "CFD fest")
+check(app.ap_modell_setzen([{"namen": ["ftmo"], "route": "mt5v2"}], "ftmo", "orbit_prio2")[1] == "CFD-Firma — fährt immer Echo", "CFD fest")
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 check("data-e3-modell=" in html and "apdApi('POST', '/modell', { firma, modell })" in html and "mSel(`data-e3-modell=\"${e3E(n)}\"`, md, nichtGrund)" in html,
       "Einstellungen: Dropdown „Modell“ speichert über /admin/auto-plan/modell, Tradeify/Topstep ausgegraut mit Grund")

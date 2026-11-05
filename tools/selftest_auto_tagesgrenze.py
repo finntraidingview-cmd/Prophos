@@ -8,6 +8,9 @@ Ohne Netz (Fake-DB aus selftest_auto_delta). Geprüft: Stand 23:20 dt → Plan m
 (start_min ≥ 1440, nicht änderbar, nicht in geplant[]), Plan morgen 05:00 dt (nach jetzt + 60 + Laufzeit) nicht; _ap_stand_plaene
 reicht ihn fest weiter; Delta-Szenario +60 rechnet ihn mit; Bot: Vorziehen respektiert den Gegenhedge gegen den Folgetag-Plan (ohne ihn
 → Zug), bewegt ihn nie; Hinausschieben nur, wenn Start + Laufzeit im Fenster bleibt."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

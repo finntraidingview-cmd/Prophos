@@ -5,6 +5,9 @@ Aufruf:  python3 tools/selftest_live_trades.py
 Laedt die Funktionen per Quelltext aus app.py (wie selftest_reader_wacht: app.py zieht beim Import Flask und Threads).
 Prueft Finns Regel „Der Max-Drawdown ist quasi der SL": Nicht-WD-Konten bekommen das Level aus max_drawdown auch ohne
 Start-Balance (BUY/SELL, NQ/MNQ, mehrere Kontrakte), ohne max_drawdown keins; Winning Days unveraendert."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

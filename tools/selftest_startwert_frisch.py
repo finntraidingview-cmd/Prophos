@@ -7,6 +7,9 @@ Geprüft: (1) rein: Größe aus Name/Kürzel/starting_balance/account_size, nie 
 (selftest_auto_delta): frisches 150k-Tradeify → Plan mit 150.000 und Quelle „Startwert", CFD FN 100k Phase 1 → 100.000, Konto mit
 früherem Trade ohne Lesung → weiter „keine Balance bekannt", echte Lesung schlägt den Startwert, Verlauf nicht lesbar → kein Startwert.
 Platzhalter-IDs, keine echten Konten. Aufruf: python3 tools/selftest_startwert_frisch.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

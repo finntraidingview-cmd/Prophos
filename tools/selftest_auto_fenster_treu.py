@@ -6,6 +6,9 @@ Aufruf:  python3 tools/selftest_auto_fenster_treu.py
 Ohne Netz, Platzhalter-IDs, Planmischung wie am 08.10.2026 (36 Pläne, 7 IDs, Firmen-Mix). Geprüft über 40 Seeds: Ø Opening ≥ 17 von
 18 (vorher Ø 15,7), nie unter 15; alle 36 platziert; Abstand je ID × Firma ≥ 60 min (volle Stufe) in ≥ 95 % der Paare, nie unter der
 ¼-Stufe; gleicher Seed → gleiches Ergebnis (Probelauf = Anlegen); info je Key gefüllt."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import collections
 import os
 import random

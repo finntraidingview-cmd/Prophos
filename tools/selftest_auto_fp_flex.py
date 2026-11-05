@@ -8,6 +8,9 @@ Ohne Netz, Platzhalter-Konten. Regel wie nach sql/2026-10-08_fundingpips_flex_st
 (SL 1.250–1.500, 0,5–0,7 Lots, Ziel 10 %); 50k mit 5.000 DD (10 %) → „50k Standard: Werte fehlen"; 100k mit 12.000 DD und
 starting_balance 100.000 (account_size 150.000) → Flex → „100k Flex: Werte fehlen"; nur account_size 150.000 → Anfangsgröße 150k → kein
 Flex; 100k mit 10.000 DD → Standard-Werte; Boden Flex 12 % / Standard 10 %; ohne max_drawdown → Standard; Regel ohne flex unverändert."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 

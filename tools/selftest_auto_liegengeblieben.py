@@ -7,6 +7,9 @@ Konto geplant (Ausgangslage); (2) Auto-Plan vom Vortag, bestätigt + geclaimt, n
 erg.verfallen; (3) Handplan vom Vortag blockiert weiter (Finns Entscheidung); (4) heutiger Auto-Plan (Start am geplanten Tag) blockiert
 weiter; (5) Auto-Plan vom Vortag mit Order draußen (orbit_gesendet_at) blockiert weiter; (6) Lauf für morgen übergeht heutige Pläne
 nicht; (7) „Neu starten" (Backend _ap_neu_starten, Tab sfNeuEinplanen) lehnt verfallene Auto-Pläne ab (Prüfer Slave 2). Aufruf: python3 tools/selftest_auto_liegengeblieben.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

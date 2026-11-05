@@ -2,6 +2,9 @@
 """Selbsttest: delta.geplant[] trägt notes + balance (app.py _ap_stand_laden / ap_delta_antwort / _ap_notes_kurz, 08.10.2026, Vertrag
 Slave 7 „Wartet auf Start" bei fremden IDs) — nur Durchreichen. Nachgebaute DB aus selftest_auto_delta.
 Aufruf: python3 tools/selftest_auto_notes_balance.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

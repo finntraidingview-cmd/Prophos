@@ -7,6 +7,9 @@ Nutzt den Lader und die nachgebaute DB aus selftest_auto_delta.py. Geprüft: Ein
 Klumpen (|Netto| 1.440 €, Große-Folge 1); der Optimierer gleicht in € aus (€/Pkt zählt nicht mehr), trennt eine aufgeteilte
 Tranche mit Gegengewicht dazwischen, nichts wird hart ausgelassen; Bot greift über dem €-Band; Schwelle „groß" = 300 € bzw.
 oberes Viertel; kein Start nach 16:30 dt (auch nicht das letzte Konto einer Tranche), kein Rückfall auf 20:00."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import importlib.util
 import os
 import random

@@ -8,6 +8,9 @@ geplante Gegenrichtung zählt, später geplante nicht, außerhalb 60 min / Hedge
 gelöscht, wenn der Konflikt weg ist. Teil B Rauch-Lauf ohne Netz (nachgebaute DB aus selftest_auto_delta): ap_ausgleichen dreht
 den unbestätigten Plan mit Guard auto_bestaetigt_at IS NULL + Protokoll „Richtungsschutz: läuft schon short", markiert den
 bestätigten per RPC mt5_baseline_patch, ändert im Trockenlauf nichts. Teil C: Protokollzeile des PC-Tabs (quelle 'start')."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

@@ -12,6 +12,9 @@ Ohne Netz, Platzhalter-IDs. Geprüft:
 (D) 23:49 UTC: zwei leichte Longs laufen, ein schwerer Hand-Short startet in 8 min → ein Long von später wird an den SHORT gezogen
     (Anker = Start der Gegenrichtung), nicht an die früheste freie Minute; der Hand-Short selbst bleibt (fest);
 (E) Hand-Werte (aenderbar false) fasst der Bot nie an."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

@@ -9,6 +9,9 @@ gehedgt 0 / ohne Satz 0; Finns Lage (3× Apex short 5 NQ, Tageslimit 2.000 $ →
 short) → Kurve stürzt bei +20 senkrecht ab (Punktpaar), Steigung bei 0 negativ (netto short), schlimmster Fall rechts; der Bot zieht
 den geplanten Long vor, der genau dort hilft, und nennt den schlimmsten Fall im Grund; ausgeglichenes Buch → nichts; Verteilung und
 Mischung verschlechtern das Minimum nie."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

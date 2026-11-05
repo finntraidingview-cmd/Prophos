@@ -8,6 +8,9 @@ Ohne Netz. Geprüft:
            an Trade 1, lt_kette_teil/lt_kette_teile (Richtung, Ende, P&L gelesen/eingetragen/geschätzt, Trade 1 über kette.vor oder kette.e1).
   Radar    wdlKetteT1Offen / wdlWartet (Trade 1 bleibt in „Wartet", auch nach 8 Versuchen und gelesen ohne Trade 2), wdlKetteTagChip (je Trade eine Zeile,
            ≈ bei Schätzung, Summe ohne Tagesergebnis), tpKetteLesenWeiter (PC-Tab liest bis zum Fensterende weiter)."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import json
 import os
 import re

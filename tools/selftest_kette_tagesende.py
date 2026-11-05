@@ -7,6 +7,9 @@ Aufruf:  python3 tools/selftest_kette_tagesende.py
 Ohne Netz, Platzhalter-IDs. Geprüft: 1/2 bleibt automatisch (kein review), 2/2 / Reparatur-Tag / 1/2 geblowt / 1/2 am Tagesziel bleiben in
 review mit Tagesergebnis; kein minütliches Neuschreiben; Regel-Lesefehler stoppt die Kette nicht; der echte Planer-Lauf plant am Folgetag
 trotz offenem Haken, am selben Tag nicht, geblowt nicht; Nachplanen ebenso; ohne Tagesergebnis sperrt review weiter."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

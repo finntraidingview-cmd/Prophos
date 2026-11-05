@@ -6,6 +6,9 @@ Laedt die Funktionen per Quelltext aus app.py (app.py selbst zieht beim Import F
 Umgebungsvariablen — das braucht kein Rechen-Test). Prueft: CME-Handelstag, Level aus
 $-Distanz (BUY und SELL, NQ und MNQ, ohne Einstieg = null), Kontogroesse, Zeilenaufbau aus
 mt5_baseline (Hedge, Rundgang-P&L, Ende-Differenz) und die Sortierung open → planned → Rest."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

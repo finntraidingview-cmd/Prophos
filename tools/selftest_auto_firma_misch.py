@@ -21,6 +21,9 @@ Ohne Netz, Platzhalter-IDs, nachgebaute DB (Lader/Stubs aus selftest_auto_delta)
     („Firmen-Mischung"), nie eine ID mit laufendem Trade dort (Richtungsschutz); Band-Drehung macht eine gemischte Firma nie einseitig
     (Fall 08.10.2026 10:22 Dubai: Tradeify short → long, danach 100 % long) und kein gemischtes Fenster einseitig; Tradeify morgens 3×
     long / Opening 3× short → nach zwei Läufen je Fenster beide Richtungen; Gegenrichtung über IDs nur nicht ±3 min am Start."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

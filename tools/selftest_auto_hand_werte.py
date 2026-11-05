@@ -2,6 +2,9 @@
 """Selbsttest: Werte von Hand (trade_plans.hand_werte_at, 08.10.2026, Master/Finn) — aktion „werte" setzt die Spalte, _ap_stand_laden
 macht den Plan für den Bot fest („Werte von Hand geändert"), Hand-Eingriffe bleiben möglich, ohne Spalte läuft alles wie vorher.
 Rein rechnend auf der nachgebauten DB aus selftest_auto_delta. Aufruf: python3 tools/selftest_auto_hand_werte.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

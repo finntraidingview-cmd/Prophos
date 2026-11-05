@@ -2,6 +2,9 @@
 """Selbsttest: Ausgleichs-Bot stellt die ID-Mischung auch ohne Band-Anlass her (app.py ap_umplanen, 08.10.2026; Finn: „warum ist bei
 Chris immer noch alles long?" — 7 Pläne vor .1220 angelegt, Bot drehte nur bei Band-Überschreitung). Rein rechnend, ohne Netz.
 Aufruf: python3 tools/selftest_auto_bot_misch.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

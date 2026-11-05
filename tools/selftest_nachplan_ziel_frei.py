@@ -5,6 +5,9 @@ Update mit „nur noch X $ bis zum Ziel — von Hand prüfen" im Protokoll; „b
 Geprüft: (1) CFD phase1/phase2 mit Rest ≥ 10 $ → frei, Rest < 10 $ / Challenge / ohne typ / anderer Tag → fest; (2) Kandidaten mit ziel_frei;
 (3) Takt: das Konto wird genau EINMAL je Tag neu gerechnet — kommt der Grund wieder (z. B. „kein Punktwert"), bleibt es danach fest.
 Konten frei erfunden. Aufruf: python3 tools/selftest_nachplan_ziel_frei.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import json
 import os
 import sys

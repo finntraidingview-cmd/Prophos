@@ -4,6 +4,9 @@ Chris 7 Pläne alle long, Aurel 2× short — „dass eine ID komplett long und 
 ist das zu viel. Nicht so hart.") — ohne Netz. Aufruf: python3 tools/selftest_auto_id_misch.py
 Fälle: Chris 7 Pläne über 3 Firmen → 4/3 (keine Seite > 67 %) · 2 Pläne → keine Vorgabe · eine Firma → keine Vorgabe · globales Band
 hält weiter (Band vor Mischung) · Bot dreht nie so, dass die ID-Mischung schlechter wird."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

@@ -7,6 +7,9 @@ Ohne Netz. Geprüft: CFD 0,01 Lot, TP/SL 1–3 $ (in Punkten aufgerundet, Punkt-
 auf Balance − Ziel − Puffer; zu wenig Luft → Grund statt Plan; Tage voll → wieder „Ziel erreicht"; ohne Mindesttage unverändert; seit
 12.10.2026 (Finn: jeden Tag farmen) Mini auch UNTER dem Ziel, wenn der Bot sonst nichts plant (Rest < Klein-Trade-Grenze, Handarbeit) — SL
 dann über Boden + Puffer, sofort_zu am Plan; Zählung wie zielFortschritt (Berlin-Tage mit Start ab goal_since + goal_done_offset)."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 

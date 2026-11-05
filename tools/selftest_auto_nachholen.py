@@ -7,6 +7,9 @@ Geprüft: frühestens jetzt + 2–4 min; Firmen-Abstand (seit 08.10.2026 1 min, 
 PC-Abstand auseinander (abstand_id_min 3 + 2 = 5 min — 20/60 min je ID seit 08.10.2026 weg, Finn: „Nur eben nicht gleichzeitig"); Richtungsschutz derselben ID × Firma; über IDs nur kein
 gegenläufiger Start derselben Firma ±AP_GEGEN_FIRMA_MIN (seit 08.10.2026 ~17:00 Dubai keine Laufzeit-Sperre mehr, Finn: „kann natürlich eine
 ANDERE ID Tradeify short gehen"); verpasste Pläne mit Start in der Vergangenheit blockieren nicht; nach start_bis → Klartext statt Minute."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import re

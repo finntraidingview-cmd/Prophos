@@ -9,6 +9,9 @@ einem Lauf zweimal in den Änderungen (Gegenprobe beim Bau: der Stand 47a7dfe dr
 Band-Schritt nimmt keine Tranche einer ID mit totem PC-Tab (pc_lebt ohne die ID → nichts, mit der ID → Drehung, None → wie bisher);
 Rückfall: ein vom Band-Schritt nach VORN gelegter Plan zählt wie „vorgezogen" (_ap_zug_nach_vorn) und fällt ungeclaimt nach
 AP_VORZIEHEN_RUECKFALL_MIN auf seine alte Zeit zurück; nach hinten / Verteilung zählen nicht."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import collections
 import os
 import random

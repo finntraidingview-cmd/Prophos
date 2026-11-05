@@ -216,7 +216,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     return marke === '1';
   }
   try {
-    GM_registerMenuCommand(PULS_CHROME ? '✓ Puls-Chrome (Orbit V3) — ausschalten' : 'Puls-Chrome (Orbit V3) — einschalten', () => {
+    // MK1b (05.11.2026, Master: ein Modell = ein Name): „Orbit“ statt „Orbit V3“ — nur Text; VERSION bewusst NICHT angehoben, wirkt mit dem nächsten Rollout
+    GM_registerMenuCommand(PULS_CHROME ? '✓ Puls-Chrome (Orbit) — ausschalten' : 'Puls-Chrome (Orbit) — einschalten', () => {
       try { GM_setValue('prophos_puls_chrome', !PULS_CHROME); } catch (_) {}
       location.reload();   // bewusst nur auf Handklick: der Socket-Haken haengt an document-start
     });
@@ -2006,10 +2007,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
         else if (feedLogin)  setBadge(`⚠ Feed-Tab: Broker-Konto angemeldet (${feedLogin}) — hier nie handeln, bitte abmelden`, 'warn');   // 0.8.8
-        else if (rolle !== 'broker') setBadge(PULS_CHROME ? `● Orbit V3 · Puls-Chrome · kein Konto angemeldet` : `● Feed-Tab ohne Konto — nur Kurse`, PULS_CHROME ? 'warn' : 'ok');   // 0.8.7: keine Warnung ohne Konto
+        else if (rolle !== 'broker') setBadge(PULS_CHROME ? `● Orbit · Puls-Chrome · kein Konto angemeldet` : `● Feed-Tab ohne Konto — nur Kurse`, PULS_CHROME ? 'warn' : 'ok');   // 0.8.7: keine Warnung ohne Konto
         else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen${postMs(ENDPOINT)}`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
-        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos${postMs(ENDPOINT)}`, 'ok');
+        else if (PULS_CHROME) setBadge(`● Orbit · Puls-Chrome · ${positionen.length} Pos${postMs(ENDPOINT)}`, 'ok');
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),

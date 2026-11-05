@@ -26203,8 +26203,8 @@
    * Zeitstrahl-Tooltips). Echo = mt5 mit Fusion-Hedge · Echo V2 = ohne Hedge · Orbit = tvv2 + Hedge (früher „Orbit V3“) · Orbit V2 = ohne Hedge ·
    * Orbit Prio 2 = Apex-Weg, WD-Logik + Fusion-Hedge (früher „WD-Weg + Hedge“) · Nova = Topstep + Hedge · Topstep V2 = ohne Hedge · Winning Day =
    * WD-Farmer. Der Name sagt den Hedge schon — kein „mit Hedge“/„Fusion-Gegenhedge“ dahinter. NUR ANZEIGE: die Radar-Filter/-Gruppen (WDL_MODELLE,
-   * WDL_HEDGE_GRUPPEN) nutzen genau diese Texte als Schlüssel und bleiben unverändert; Userscript-/Tampermonkey-Texte („Orbit V3 · Puls-Chrome“)
-   * stehen so im Userscript-Menü und bleiben, sonst findet man sie dort nicht. Funktions-Deklaration (gehoben) — Radar und Karten zeichnen vor dieser Zeile.
+   * WDL_HEDGE_GRUPPEN) nutzen genau diese Texte als Schlüssel und bleiben unverändert; Userscript-Menü/-Abzeichen heißen seit MK1b
+   * „Orbit“ (wirkt erst mit dem nächsten Userscript-Rollout — bis dahin nennen die Hilfen beide Namen); app.py hat dieselbe Tabelle MODELL_NAME. Funktions-Deklaration (gehoben) — Radar und Karten zeichnen vor dieser Zeile.
    * modellName(x): x = Schlüssel ('orbit_prio2'), Route ('mt5', 'tvv2', 'tsv2' …), schon ein Name, ein Plan (tradePlans, camelCase → wegLabel)
    * oder eine Radar-Zeile (snake_case → wdlWeg). Unbekannt → der Text selbst. */
   function modellName(x){
@@ -34182,7 +34182,7 @@
       try{ localStorage.setItem('prophos_pulsmodus_gemeldet_at', String(jetzt)) }catch(_){ return }
       const msg = `Tab ${String(tab.tab_id || '?').slice(0, 8)} · Rolle ${tab.rolle || '?'} · Script ${tab.version || '?'}${tab.login_im_feed ? ' · Konto ' + String(tab.login_im_feed).slice(0, 24) : ''}`
       console.warn('[puls-modus] Userscript nicht im Puls-Chrome-Modus —', msg)
-      if(typeof atToast === 'function') atToast(`Userscript nicht im Puls-Chrome-Modus (${msg}) — im Puls-Chrome im TradingView-Tab: Tampermonkey-Symbol → „Puls-Chrome (Orbit V3) — einschalten“. Sonst schließt Fusion nicht übers Userscript.`, 'end')
+      if(typeof atToast === 'function') atToast(`Userscript nicht im Puls-Chrome-Modus (${msg}) — im Puls-Chrome im TradingView-Tab: Tampermonkey-Symbol → „Puls-Chrome (${modellName('orbit')}) — einschalten“ (ältere Userscript-Fassung: „Orbit V3“). Sonst schließt Fusion nicht übers Userscript.`, 'end')
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
       await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ art: 'tv', puls_modus_fehlt: true, pc: hedgePcId() || '', msg: msg.slice(0, 180) }) })
@@ -60669,7 +60669,7 @@
       const frisch = !!(rs && (typeof rs.positionen_alter_s === 'number' ? rs.positionen_alter_s <= 10 : Date.now() - (epLokal.ab || 0) <= 10000))
       const puls = !!(rs && /^puls-/.test(String(rs.positionen_tab || '')))
       add('reader', 'Userscript im Puls-Chrome', (frisch && puls) ? 'ok' : 'warn', (frisch && puls) ? 'sieht das Puls-Chrome' : 'Das Userscript meldet nichts — der Trade startet trotzdem, Radar schließt als Backup.',
-        (frisch && puls) ? '' : 'Puls-Chrome offen? Fenster „Prophos TV-Reader“ offen? Unten rechts im Puls-Chrome muss grün „Orbit V3 · Puls-Chrome“ stehen.')
+        (frisch && puls) ? '' : `Puls-Chrome offen? Fenster „Prophos TV-Reader“ offen? Unten rechts im Puls-Chrome muss grün „${modellName('orbit')} · Puls-Chrome“ stehen (ältere Userscript-Fassung: „Orbit V3 · Puls-Chrome“).`)
     }catch(_){ add('reader', 'Userscript im Puls-Chrome', 'warn', 'Nicht prüfbar — Radar schließt als Backup.') }
     return fertig()
   }
@@ -86062,7 +86062,7 @@
     const D = _fcfdR.d
     if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
     const g = D.gemeinsam || {}, C = D.code || {}, z = D.zeiten || {}, ad = fcrAdmin()
-    const wegText = (C.weg && C.weg.text) || 'klassisches Echo mit Fusion-Gegenhedge (route mt5)'
+    const wegText = (C.weg && C.weg.text) || `${modellName('echo')} (route mt5, Fusion-Gegenhedge)`   // MK1b 05.11.2026: Modellname
     const fenEigen = !!z.fenster_eigen, fenCh = String(z.fenster_challenge || '').split('–'), zone = String(z.tz || 'Asia/Dubai').replace(/^.*\//, '')
     const news = fcrNewsInfo()
     const firmen = D.firmen || []

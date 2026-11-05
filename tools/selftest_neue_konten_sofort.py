@@ -6,6 +6,9 @@ Aufruf:  python3 tools/selftest_neue_konten_sofort.py
 Finn-Korrektur 16.10.2026: in ≤ 10 min erkannt, gelesen, eingeplant und bestätigt — die Startzeit bleibt normal im Fenster verteilt.
 Geprüft: ap_cfd_ab/ap_cfd_bis rechnen 02:15/18:00 Dubai je Tag in deutsche Minuten (Sommer/Winter), ohne Schlüssel wie bisher;
 ap_klasse_bis CFD/Futures; ap_wecker_pruefen weckt bei neuem Konto/frischer Balance, nie beim ersten Blick; bis_min hält CFD vor 18:00 Dubai."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

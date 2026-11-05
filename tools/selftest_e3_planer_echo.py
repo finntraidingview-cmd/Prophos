@@ -3,6 +3,9 @@
 (ap_echo_hedge_zeile / ap_echo_hedge_anlegen), eh_tick rechnet nur nach und stellt nie zurück auf Echo V2, der Claim-Riegel hält Echo mit echo_hedge
 „ohne". Minis „Tage sammeln" bleiben Echo V2 (E2). Ohne Netz: nutzt lade() und die nachgebaute Datenbank aus selftest_echo_hedge.py.
 Aufruf: python3 tools/selftest_e3_planer_echo.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys
@@ -49,7 +52,7 @@ def planer():
         art, grund = f(z, a)
         eh_ = (z.get("mt5_baseline") or {}).get("echo_hedge") or {}
         ok(art == "echo" and z["route"] == "mt5" and z["slave_account_id"] == "H1" and z["multiplier"] > 0 and z["slave_risk"] > 0
-           and eh_.get("status") == "geplant" and eh_.get("login") == "488579" and "Echo mit Hedge" in z["notes"],
+           and eh_.get("status") == "geplant" and eh_.get("login") == "488579" and "Echo: " in z["notes"],   # MK1b: Notiz „Echo: x Lot Fusion …“
            f"{firma}: route mt5, Slave Fusion, ×{z.get('multiplier')}, echo_hedge geplant")
     z, a = zeile("FTMO", typ="phase2")
     ok(f(z, a)[0] == "echo" and z["route"] == "mt5", "Phase 2 ebenso")

@@ -7,6 +7,9 @@ rechnend, Stand nachgebaut. Geprüft:
 - Planer unverändert: ap_planen und die Richtungs-/Zeit-Rechnung sind Byte für Byte wie vor dem 30.10. (kein Würfeln), die Waage
   ändert Richtungen nie (von = nach)
 Aufruf: python3 tools/selftest_waage_echo_hedge.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import re

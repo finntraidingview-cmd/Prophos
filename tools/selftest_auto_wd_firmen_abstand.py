@@ -7,6 +7,9 @@ Geprüft: (1) ap_wd_block_starts — Zeiten wie wdKontoZeiten (Blockstart + 80 s
 Konten mit bekanntem Plan entfallen, leere/ungewürfelte Blöcke und Zeiten außerhalb des Tags nicht; (2) _ap_firma_konflikt — ein
 änderbarer Auto-Plan einer anderen ID bei derselben Firma 2 min neben einem Farmer-Konto weicht, 8 min nicht, gleiche ID / andere
 Firma nicht; (3) Probelauf ap_planen mit dichten Farmer-Blöcken einer dritten ID bei Tradeify: kein Tradeify-Auto-Plan < 5 min daneben."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

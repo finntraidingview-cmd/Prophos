@@ -13,6 +13,9 @@ Trade 1 2–3 NQ, Trade 2 3–4 NQ; Finns Beispiele für Trade 2 (−2.500 → T
 Blow / Tagesziel schon erreicht → kein Trade 2; nur genaue Puls-Nachlesung in TopstepX zählt; ap_kette_tick legt Trade 2 an (Start ≥ Ende
 + 5 min und ≥ 11:00, ≤ 19:30 dt, Bestätigung geerbt, nie doppelt, ohne Nachlesung nichts), Richtung ohne Gegenhedge über IDs; Trade 1
 nur bis 11:00 in ap_zeiten_verteilen; Firmen ohne Kette unverändert."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import sys

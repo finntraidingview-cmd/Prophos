@@ -5,6 +5,9 @@ mit Satz = Kaufpreis ÷ Max DD und Polster als master_risk (Finns Beispiel 100k/
 Teil B am Quelltext: ah_tick-Guard (tvv2, ungeclaimt, ohne Hedge, kein Orbit V3), Marke + winning_day false + Boden, gemeinsame
 Vorgemerkt-Zählung, Schalter-Route, SQL-Ausnahme im Kontoart-Riegel, Tab: Liq-Weiche am Boden, tpWdZaehlt, Admin-Schalter.
 Aufruf:  python3 tools/selftest_apex_hedge.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys
@@ -152,7 +155,7 @@ soll("SQL: kontoart_weg Zeichen für Zeichen wie S4s Datei",
      _kw(SQL) == _kw(open(os.path.join(W, "sql", "2026-10-29_tradeify_final_hedge.sql"), encoding="utf-8").read()))
 soll("Tab: Kennung + zählt-als-WD", "const tpIstApexHedge = p =>" in HTML and "const tpWdZaehlt = p => tpIstWdPlan(p) && !tpIstApexHedge(p)" in HTML)
 soll("Tab: Liq am Challenge-Boden statt Größe + 100", "if(ahLiq > 0){ liq = ahLiq; art = 'apex_boden' }" in HTML)
-soll("Liq am Boden auch im Backend (_lt_liq_balance)", "Orbit Prio 2: Challenge-Boden" in block("_lt_liq_balance"))
+soll("Liq am Boden auch im Backend (_lt_liq_balance)", "{MODELL_NAME['orbit_prio2']}: Challenge-Boden" in block("_lt_liq_balance"))   # MK1b: Name aus MODELL_NAME
 soll("Zählstellen: wd-heute, Overview, konto_typ, Good Day nehmen Apex aus",
      "or plan_ist_apex_hedge(p):" in APP and "ah_status:mt5_baseline->apex_hedge->>status" in APP
      and 'and not plan_ist_apex_hedge(plan) else None' in APP and "if f_kk is None or (plan_ist_apex_hedge(plan) and not wd_hand):" in APP)   # seit 0c5022dc (30.10.): Hand-Haken darf den Apex-Hedge zählen

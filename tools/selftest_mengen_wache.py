@@ -3,6 +3,9 @@
 Aufruf:  python3 tools/selftest_mengen_wache.py
 Geprüft mit der echten Apex-Regel (menge [3,3]; seit 17.10.2026 Puffer 20 $ je Kontrakt, Finn): 4/5 NQ → 3 NQ und TP 9.060 $;
 3 NQ bleibt; Etappe (TP aus der Spanne) → nur die Menge; ohne Menge → nichts."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 

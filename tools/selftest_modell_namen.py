@@ -72,5 +72,18 @@ for alt in ["['WD-Weg + Hedge'", "'Orbit + Hedge'", "'Orbit + Hedge · Final'", 
 check("return [modellName('orbit_prio2'), 'hedge']" in HTML, "Planer-Chip Prio-2-Plan = „Orbit Prio 2“")
 check("wc.textContent = hedgeAn ? modellName('winning_day')" in HTML, "WD-Farmer-Kopf = „Winning Day“")
 
+# 5) MK1b: app.py hat dieselbe Tabelle (gleiche Schlüssel, gleiche Namen) und keine alten Abweichler mehr in Texten
+import ast
+APP = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
+py = ast.literal_eval(re.search(r"^MODELL_NAME = (\{.*\})\s*$", APP, re.M).group(1))
+js = dict(re.findall(r"(\w+): '([^']+)'", fn[fn.index("Object.freeze({"):fn.index("}))")]))
+check(py == js, f"app.py MODELL_NAME = JS-Tabelle ({sorted(set(py.items()) ^ set(js.items()))})")
+for alt in ["'Echo mit Hedge' if mit_hedge", "fährt immer Echo mit Hedge\"", "(f\"Echo mit Hedge: {h['lots']", "(f\"Orbit V3 (finaler Tradeify",
+            "Orbit V3 mit Gegenhedge {h", "Orbit Prio 2 (Fusion-Hedge, WD-Weg): {h", '"Apex-Challenge", {"apex_hedge": True}']:
+    check(alt not in APP, f"app.py-Abweichler weg: {alt}")
+US = open(os.path.join(WURZEL, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
+check("'Puls-Chrome (Orbit) — einschalten'" in US and "● Orbit · Puls-Chrome" in US and "`● Orbit V3 ·" not in US and "'Puls-Chrome (Orbit V3)" not in US,
+      "Userscript: Menü und Abzeichen „Orbit“ (Version bewusst nicht angehoben)")
+
 print("ALLES GRÜN" if not fehler else f"{fehler} FEHLER")
 raise SystemExit(1 if fehler else 0)

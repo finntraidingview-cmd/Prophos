@@ -10,6 +10,9 @@ Konto-Gründe bleiben fest; je Tag und Regel-Stand nur EINMAL nachrechnen: ap_na
 nachgebauter DB), ap_nachplan_letzter (Laufzeit aus Ergebnis/Zeile), ap_planen(nur_konten) gegen die nachgebaute DB: nur das genannte Konto
 wird angelegt, bestehender Vorschlag bleibt (kein DELETE), Protokoll quelle 'nachplanen' nur bei Treffer, Startzeit ≥ jetzt + 15 min,
 ohne nur_konten unverändert (DELETE + Protokoll). Platzhalter-IDs, keine echten Konten."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

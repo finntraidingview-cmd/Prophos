@@ -74,7 +74,7 @@ def main():
     i = app.index('if not tsx and d.get("puls_modus_fehlt") is True:')
     blk = app[i:i + 1500]
     check('key = f"tm|{pc}|tv|pulsmodus"' in blk and "_tm_melde_frei(key)" in blk, "Route: 24-h-Drossel je PC")
-    check('alarm_senden(2, "userscript_pulsmodus"' in blk and "PC von" in blk and "Puls-Chrome (Orbit V3) — einschalten" in blk,
+    check('alarm_senden(2, "userscript_pulsmodus"' in blk and "PC von" in blk and "„Puls-Chrome ({MODELL_NAME['orbit']}) — einschalten“" in blk and "noch „Orbit V3“" in blk,
           "Route: 🟠 an die Master-IDs mit PC-Namen und dem Klick")
     check(app.index('if not tsx and d.get("puls_modus_fehlt") is True:') > app.index('if str(uid) in _aus or _alarm_fremd_verwaltet(uid):'),
           "Route: nach dem HT-Filter (Emin-Gruppe nie)")

@@ -7,6 +7,9 @@ nachgebauter Datenbank (kein Netz). Geprüft:
 - Takt: nur HT, nur CFD-Challenges auf mt5v2 im Fenster, Guard am Update, Gründe ohne Hedge einmal mit ⚪-Meldung,
   Schalter aus → zurück auf Echo V2
 Aufruf: python3 tools/selftest_echo_hedge.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys
@@ -208,7 +211,7 @@ def takt():
     ok("P1" in um and p1["route"] == "mt5" and p1["slave_account_id"] == "H1" and p1["multiplier"] == 0.059 and p1["slave_risk"] == 50.11,
        f"P1 (Start +10 min) → Echo mit Hedge, Slave Fusion, ×{p1.get('multiplier')}")
     ok(p1["mt5_baseline"]["echo_hedge"]["lots"] == 1.18 and p1["mt5_baseline"]["echo_hedge"]["login"] == "488579", "Spur am Plan: 1,18 Lot, Login")
-    ok("0,18 Lots" in p1["notes"] and "Echo mit Hedge: 1,18 Lot" in p1["notes"], "Notiz ergänzt, alte Notiz unverändert (0,18 Lots bleibt mit Komma)")
+    ok("0,18 Lots" in p1["notes"] and "Echo: 1,18 Lot" in p1["notes"], "Notiz ergänzt, alte Notiz unverändert (0,18 Lots bleibt mit Komma)")
     ok("P2" in um, "Start in 1 min (vorgezogen) → auch umgestellt")
     ok("P3" not in um and "P12" not in um, "Start in 40 min bzw. vor 45 min → nicht angefasst (Fenster −30 … +20 min)")
     ok("P13" not in um, "unbestätigter Vorschlag → nicht angefasst")

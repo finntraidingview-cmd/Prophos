@@ -12,6 +12,9 @@ Geprüft:
   - DB-Riegel (check_violation) → 409 mit Grund
   - Live-Konto → 400
 Aufruf: python3 tools/selftest_admin_plan.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import json
 import os
 import re

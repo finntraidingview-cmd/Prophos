@@ -2,6 +2,9 @@
 """Selbsttest: ausgelassen[]-Zeilen mit den beiden geblowt-Gründen tragen boden, boden_min, boden_art, balance, bal_stand (app.py
 ap_planen + ap_boden_zeile, Vertrag Slave 6, 08.10.2026) — Planer-Lauf ohne Netz auf der nachgebauten DB aus selftest_auto_alle_ids.
 Aufruf: python3 tools/selftest_auto_geblowt_felder.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timedelta, timezone

@@ -2756,6 +2756,14 @@ def debug_account():
 #   - P&L wird im Moment des Trade-Endes geholt und persistiert; für Review-
 #     Pläne mit fehlendem P&L wird jede Runde nachversucht (max. 10x)
 # ════════════════════════════════════════════════════════════════════════════
+# MODELL-NAMEN (MK1b, Master 05.11.2026: „Ein Modell = ein Name überall“, Variante A): dieselbe Tabelle wie modellName() in prophos.html, gleiche
+# Schlüssel. Nur für Texte (Alarme, Handy-Meldungen, Planer-Stufen/Gründe, Notizen, Spuren) — keine Logik und keine Schlüssel hängen daran.
+# Echo = mt5 mit Fusion-Hedge · Echo V2 = ohne · Orbit = tvv2 + Hedge (früher „Orbit V3“) · Orbit V2 = ohne · Orbit Prio 2 = Apex-Weg (WD-Logik +
+# Fusion-Hedge, früher „WD-Weg + Hedge“/„Apex-Challenge“) · Nova = Topstep + Hedge · Topstep V2 = ohne · Winning Day = WD-Farmer. Der Name sagt
+# den Hedge schon — kein „mit Hedge“ dahinter.
+# Eine Zeile mit Absicht: Selbsttests, die nur einzelne Funktionen ausführen, holen sie per exec(re.search(r"^MODELL_NAME = .*$", …)).
+MODELL_NAME = {"echo": "Echo", "echo_v2": "Echo V2", "orbit": "Orbit", "orbit_v2": "Orbit V2", "orbit_prio2": "Orbit Prio 2", "nova": "Nova", "topstep_v2": "Topstep V2", "winning_day": "Winning Day", "polar": "Polar", "duplikum": "Duplikum"}
+
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "https://gxhkannmzpyuepxlepta.supabase.co").rstrip("/")
 SUPABASE_SERVICE_KEY = (os.environ.get("SUPABASE_SERVICE_KEY")
                         or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
@@ -4147,8 +4155,8 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
         if st == "planned" and ss.get("art") == "apex_hedge" and str(ss.get("at") or "") > seit_iso and not ahm.get("gemeldet"):
             nx = _alarm_ts(ss.get("naechster"))
             nx_txt = nx.astimezone(_ap_tz("Asia/Dubai")).strftime("%H:%M") if nx else "?"
-            out.append((f"{pid}|apex_hedge", 3, "apex_hedge_ohne", "Orbit Prio 2 wartet auf Hedge",
-                        f"{wer} · {konto}: {str(ss.get('text') or 'Orbit Prio 2 wartet auf Gegenhedge')[:160]} — startet nie ohne Hedge, "
+            out.append((f"{pid}|apex_hedge", 3, "apex_hedge_ohne", f"{MODELL_NAME['orbit_prio2']} wartet auf Hedge",
+                        f"{wer} · {konto}: {str(ss.get('text') or (MODELL_NAME['orbit_prio2'] + ' wartet auf Gegenhedge'))[:160]} — startet nie ohne Hedge, "
                         f"nächster Versuch {nx_txt} Dubai.", uid, pid))
         tfh = p.get("tfh") if isinstance(p.get("tfh"), dict) else {}
         if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso and not tfh.get("gemeldet"):
@@ -4172,7 +4180,7 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             dlg = f" (Dialog „{bf['dialog']}“)" if bf.get("dialog") else ""
             # Fehlerfoto (S5): der Push öffnet Prophos mit …#fehlerbild=<pfad> → Radar + Bild (pulsFehlerbildZeigen, Admin-Bildroute)
             # höchstens 2 Meldungen je Plan (Triage 30.10.2026: Marc …0038 9× in 3 h) — erste sofort, eine Erinnerung nach 15 min
-            out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 1)}", 1, "nova_ohne_sltp", "Nova ohne SL/TP",
+            out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 1)}", 1, "nova_ohne_sltp", f"{MODELL_NAME['nova']} ohne SL/TP",
                         f"{wer} · {konto}: {menge} @ {preis} — {fehlt} nicht gesetzt{dlg} — in TopstepX setzen." + (" Foto: antippen." if bf.get("bild") else ""),
                         uid, pid) + ((f"https://prophos.pages.dev/prophos#fehlerbild={bf['bild']}",) if bf.get("bild") else ()))
         # WIEDER OFFEN (29.10.2026): die Endlesung sah die Position nach dem Ende noch offen, der PC-Tab hat den Plan zurück auf open gesetzt
@@ -4447,13 +4455,13 @@ def echo_frost_tick(rows, namen, jetzt_ts):
             prio, grund = 1, roh   # die Erinnerung zu einem 🔴 bleibt 🔴 — nie nachträglich ⚪ (S2-Fund 30.10.2026)
         if prio == 3:
             # ⚪ einmal, keine Erinnerung (30.10.2026, Master: „Master-Terminal zu, Trade wohl beendet — Plan prüfen/abhaken")
-            text = f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, Plan noch offen): {grund}. Am {pc_txt} ist das Master-Terminal ohne Position und ohne Hedge."
+            text = f"{wer} · {konto} ({MODELL_NAME['echo'] if mit_hedge else MODELL_NAME['echo_v2']}, Plan noch offen): {grund}. Am {pc_txt} ist das Master-Terminal ohne Position und ohne Hedge."
             alarm_senden(3, "echo_terminal_zu", f"Echo: Master-Terminal zu — Plan prüfen"[:70], text, uid=uid, plan_id=pid,
                          schluessel=f"echo_blind|{pid}|{n}", tag=f"alarm-echo-zu-{pid[:8]}",
                          daten={"grund": grund, "pc": pc, "route": r.get("route"), "login4": login[-4:] if login else None})
             _echo_frost[pid] = {"erst": (_echo_frost.get(pid) or {}).get("erst", jetzt_ts), "n": 2}
             continue
-        text = (f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, offen): {grund}"
+        text = (f"{wer} · {konto} ({MODELL_NAME['echo'] if mit_hedge else MODELL_NAME['echo_v2']}, offen): {grund}"
                 + (" — Copier sieht keine Master-Position, Hedge evtl. nicht offen." if mit_hedge else " — kein Live-P&L, Copier blind.")
                 + f" Am {pc_txt} das Master-Terminal prüfen (EA ProphosHedgeReader auf dem Chart?).")
         alarm_senden(1, "echo_blind", ("Erinnerung: " if n else "") + f"Echo blind: {grund}"[:70], text, uid=uid, plan_id=pid,
@@ -4725,7 +4733,7 @@ def alarm_userscript_update():
         pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
         wer_pc = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
         alarm_senden(2, "tsx_auge_fehlt", f"TopstepX-Auge fehlt: {wer_pc}"[:120],
-                     f"TopstepX-Auge auf {wer_pc} nicht installiert — Nova dort nicht startbar. Bitte im Puls-Chrome {link} öffnen und in "
+                     f"TopstepX-Auge auf {wer_pc} nicht installiert — {MODELL_NAME['nova']} dort nicht startbar. Bitte im Puls-Chrome {link} öffnen und in "
                      f"Tampermonkey installieren; danach startet der Plan von selbst ({msg or 'kein Stand seit dem Panel-Start'}).",
                      uid=uid, daten=daten, schluessel=key)
         return jsonify({"ok": True})
@@ -4741,7 +4749,8 @@ def alarm_userscript_update():
         alarm_senden(2, "userscript_pulsmodus", f"Userscript nicht im Puls-Chrome-Modus: {wer_pc}"[:120],
                      f"Auf {wer_pc} läuft das Userscript im Puls-Chrome im normalen Modus ({msg or 'kein Tab puls-…'}) — der Hedge-Wächter sieht dort "
                      f"keine Positionen, Fusion schließt nicht übers Userscript. Bitte im Puls-Chrome im TradingView-Tab auf das Tampermonkey-Symbol → "
-                     f"„Puls-Chrome (Orbit V3) — einschalten“; danach steht unten rechts „● Orbit V3 · Puls-Chrome“.",
+                     f"„Puls-Chrome ({MODELL_NAME['orbit']}) — einschalten“ (bis zum nächsten Userscript-Update noch „Orbit V3“); danach steht unten rechts "
+                     f"„● {MODELL_NAME['orbit']} · Puls-Chrome“.",
                      uid=uid, daten=daten, schluessel=key)
         return jsonify({"ok": True})
     key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}" + ("" if d.get("ok") is True else "|fehl")
@@ -13005,11 +13014,11 @@ def _lt_liq_balance(acc, plan, balance_start):
     if wd and ah_liq and ah_liq > 0:               # Apex mit Hedge: max(Challenge-Boden, Daily Loss) — Tagesstart ≈ Start-Balance (der Tab
         d_bal, d_text = ah_dll_balance(acc, balance_start)   # rechnet das Hedge-Level mit dem echten Tagesstart, wd_sl_zeile nimmt es dann)
         if d_bal is not None and d_bal > ah_liq:
-            return d_bal, f"Orbit Prio 2: {d_text} (über dem Challenge-Boden {ah_liq:,.0f} $)".replace(",", ".")
-        return round(ah_liq, 2), f"Orbit Prio 2: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
+            return d_bal, f"{MODELL_NAME['orbit_prio2']}: {d_text} (über dem Challenge-Boden {ah_liq:,.0f} $)".replace(",", ".")
+        return round(ah_liq, 2), f"{MODELL_NAME['orbit_prio2']}: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
-        return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
+        return (g + LT_WD_BLOW_PLUS, f"{MODELL_NAME['winning_day']}: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
     dd = _wd_num((acc or {}).get("max_drawdown"))
     if balance_start is None:
         return None, "keine Start-Balance"
@@ -13430,7 +13439,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
         b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, pk, start_bal, plan_balance_relativ(plan))
         ah_boden = _wd_num((((plan or {}).get("mt5_baseline") or {}).get("apex_hedge") or {}).get("liq_balance")) if ah else None
         if ah_boden and (b_bal is None or ah_boden > b_bal):
-            b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ (Orbit Prio 2)"
+            b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ ({MODELL_NAME['orbit_prio2']})"
     kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
     bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
     text = b_text if gilt == "boden" else r_text
@@ -15145,7 +15154,7 @@ def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     if route not in WD_ERLEDIGT_ROUTEN or st not in ("open", "review", "completed"):
         return None, (409, "nicht offen")
     if slave_pl is not None and route not in ("tvv2",) + WD_FUSION_AM_PLAN and not (route == "tsv2" and _wd_plan_mit_hedge(plan)):
-        return None, (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum")
+        return None, (400, f"Fusion-P&L gibt es nur bei {MODELL_NAME['orbit']}, Winning Days, {MODELL_NAME['echo']} und {MODELL_NAME['duplikum']}")
     upd = {"status": "completed", "master_pl": master_pl, "slave_pl": slave_pl}
     if st != "completed" or not plan.get("completed_at"):
         upd["completed_at"] = jetzt_iso
@@ -19425,8 +19434,8 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
                 return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
                         "grund": f"Big Trade {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
         # Apex-Challenge (02.11.2026) vor den Winning Days; beide: eigene 100-$-Grenze, nicht prüfbar = frei (s. oben)
-        for p, schw, art_name, art_info in ([(x, apex_schw, "Apex-Challenge", {"apex_hedge": True}) for x in apexe]
-                                            + [(x, wd_schw, "Winning Day", {"winning_day": True}) for x in wds]):
+        for p, schw, art_name, art_info in ([(x, apex_schw, MODELL_NAME["orbit_prio2"], {"apex_hedge": True}) for x in apexe]
+                                            + [(x, wd_schw, MODELL_NAME["winning_day"], {"winning_day": True}) for x in wds]):
             acc = accs.get(str(p.get("master_account_id") or ""))
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
                           kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
@@ -20656,23 +20665,23 @@ def admin_plan_weg(konto, route, orbit_v3, hedge_eur, winning_day):
     ext = str(konto.get("external_id") or "").strip()
     topstep = "topstep" in str(konto.get("firm") or "").lower()
     if typ in ADMIN_PLAN_CFD_TYPEN:
-        return ("echo_v2", None) if route == "mt5v2" else (None, "CFD-Konto: nur Echo V2 (MT5)")
+        return ("echo_v2", None) if route == "mt5v2" else (None, f"CFD-Konto: nur {MODELL_NAME['echo_v2']} (MT5)")
     if route == "mt5v2":
-        return None, "Futures-Konto: Echo V2 gibt es nur für CFD — Orbit V2, Orbit oder Winning Day wählen"
+        return None, f"Futures-Konto: {MODELL_NAME['echo_v2']} gibt es nur für CFD — {MODELL_NAME['orbit_v2']}, {MODELL_NAME['orbit']} oder {MODELL_NAME['winning_day']} wählen"
     if not ext:
         return None, "Konto ohne External ID — Puls findet es in TradingView/TopstepX nicht (unter Accounts eintragen)"
     if topstep:
         if route != "tsv2" or winning_day is not True or orbit_v3 is True or not (hedge_eur and hedge_eur > 0):
-            return None, "Topstep-Konto: für andere IDs nur Winning Day (Topstep V2/Nova von Hand startet nur ein Klick am PC)"
+            return None, f"Topstep-Konto: für andere IDs nur {MODELL_NAME['winning_day']} ({MODELL_NAME['topstep_v2']}/{MODELL_NAME['nova']} von Hand startet nur ein Klick am PC)"
         if typ not in ("funded", "winning_days"):
             return None, "Topstep-Winning-Day nur auf Funded/Winning-Days-Konten (Challenges plant die Topstep-Kette selbst)"
         return "wd", None
     if route != "tvv2":
-        return None, "Topstep V2 nur für Topstep-Konten"
+        return None, f"{MODELL_NAME['topstep_v2']} nur für Topstep-Konten"
     if orbit_v3 is True:
         return ("orbit", None) if hedge_eur and hedge_eur > 0 else (None, "Orbit ohne Hedge-Betrag — Take Profit, Kontrakte und Risiko prüfen")
     if hedge_eur and hedge_eur > 0:
-        return ("wd", None) if typ == "winning_days" else (None, "Winning Day nur auf Winning-Days-Konten")
+        return ("wd", None) if typ == "winning_days" else (None, f"{MODELL_NAME['winning_day']} nur auf Winning-Days-Konten")
     return "orbit_v2", None
 
 
@@ -20684,7 +20693,7 @@ def admin_plan_zeile(b, konto, jetzt):
     r = (b or {}).get("row") if isinstance((b or {}).get("row"), dict) else {}
     route = str(r.get("route") or "")
     if route not in ADMIN_PLAN_ROUTEN:
-        return None, "Weg nicht erlaubt — für andere IDs nur Echo V2, Orbit V2, Orbit oder Winning Day (startet der PC selbst)"
+        return None, f"Weg nicht erlaubt — für andere IDs nur {MODELL_NAME['echo_v2']}, {MODELL_NAME['orbit_v2']}, {MODELL_NAME['orbit']} oder {MODELL_NAME['winning_day']} (startet der PC selbst)"
     z = {"user_id": konto["user_id"], "master_account_id": konto["id"], "route": route, "status": "planned",
          "master_name": konto.get("name"), "master_firm": konto.get("firm"),
          "priority": r.get("priority") if r.get("priority") in ("low", "medium", "high") else "medium"}
@@ -23116,7 +23125,7 @@ def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, pp
     cfd = route in AP_CFD_ROUTEN and phase != "challenge"
     vor = f"Tage sammeln {ist}/{soll}"
     if route == "tsv2":
-        return None, f"{vor}: Topstep — Mini-Trade von Hand (Topstep V2 ohne Kette startet nicht automatisch)"
+        return None, f"{vor}: Topstep — Mini-Trade von Hand ({MODELL_NAME['topstep_v2']} ohne Kette startet nicht automatisch)"
     art = "cfd" if cfd else "futures"
     puffer = AP_TAGE_PUFFER[art]
     if cfd:
@@ -29366,7 +29375,7 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     base["hedge_vorschau"] = ehv_vorschau(h, None, z.get("master_tp"), jetzt_iso)
     z.update({"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
               "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": base,
-              "notes": (str(z.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+              "notes": (str(z.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                         f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()})
     return "echo", None
 
@@ -29492,7 +29501,7 @@ def eh_rot_start_pruefen(jetzt, firmen, aus, namen):
     for p in eh_rot_kandidaten(roh, konten, lambda a: ap_unt_firmen((a or {}).get("user_id"), firmen, streng=False), aus, ap_regel_finden):   # UNT3
         if _eh_rot_schon(f"eh-rot-faellig-{p['id']}"):
             continue                                      # schon vor dem Start mit Grund 🔴 gemeldet
-        n += _eh_rot(p, "start", "als Echo V2 OHNE Fusion-Hedge gestartet — die Umstellung kam nicht vor dem Claim (kein Grund am Plan). "
+        n += _eh_rot(p, "start", f"als {MODELL_NAME['echo_v2']} OHNE Fusion-Hedge gestartet — die Umstellung kam nicht vor dem Claim (kein Grund am Plan). "
                      "→ Hedge in Fusion von Hand prüfen/öffnen", namen.get(str(p["user_id"]), str(p["user_id"])[:8]))
     return n
 
@@ -29517,7 +29526,7 @@ def _eh_zurueck_alt():
             if sb_update("trade_plans", g, {"route": "mt5v2", "slave_account_id": None, "slave_name": None, "slave_firm": None,
                                             "multiplier": None, "slave_risk": None, "mt5_baseline": base}):
                 n += 1
-                _eh_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf Echo V2")
+                _eh_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf {MODELL_NAME['echo_v2']}")
         except Exception as e:
             _eh_spur(f"⚠️ {str(p['id'])[:8]} zurück: {type(e).__name__}: {e}")
     _eh["zurueck"] += n
@@ -29657,7 +29666,7 @@ def _eh_tick_lauf(jetzt):
                     "netto_faktor": par["netto_faktor"]}
             upd = {"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
                    "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, echo_hedge=info),
-                   "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                   "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                              f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()}
             try:
                 if not sb_update("trade_plans", _eh_guard(p, route=p.get("route") or "mt5v2"), upd):   # E3: Echo aus dem Planer nachrechnen
@@ -29670,7 +29679,7 @@ def _eh_tick_lauf(jetzt):
             vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
             erg["umgestellt"] += 1
             _eh["umgestellt"] += 1
-            _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Echo mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
+            _eh_spur(f"{wer} · {p.get('master_name') or '—'}: {MODELL_NAME['echo']} {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
             ab = ehv_abweichung(base.get("hedge_vorschau"), h["lots"])   # ECHO-VORSCHAU (30.10.2026): > 5 % anders als die Vorschau → Spur
             if ab:
                 _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Umstellung weicht von der Vorschau ab — {ab}")
@@ -29683,7 +29692,7 @@ def _eh_tick_lauf(jetzt):
         except (TypeError, ValueError):
             nah = True
         if nah:
-            erg["rot"] = erg.get("rot", 0) + _eh_rot(p, "faellig", f"startet gleich als Echo V2 ohne Fusion-Hedge — {grund}",
+            erg["rot"] = erg.get("rot", 0) + _eh_rot(p, "faellig", f"startet gleich als {MODELL_NAME['echo_v2']} ohne Fusion-Hedge — {grund}",
                                                      namen.get(str(p["user_id"]), str(p["user_id"])[:8]))
     return erg
 
@@ -29957,7 +29966,7 @@ def tfh_zurueck():
             if sb_update("trade_plans", _tfh_guard(p, orbit_v3=True), {"orbit_v3": False, "hedge_eur": None, "hedge_faktor": None, "multiplier": None,
                                                                          "master_risk": None, "slave_risk": None, "mt5_baseline": base}):
                 n += 1
-                _tfh_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf Orbit V2")
+                _tfh_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf {MODELL_NAME['orbit_v2']}")
         except Exception as e:
             _tfh_spur(f"⚠️ {str(p['id'])[:8]} zurück: {type(e).__name__}: {e}")
     _tfh["zurueck"] += n
@@ -30117,7 +30126,7 @@ def tfh_tick(jetzt=None, force=False):
                 "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"]}
         upd = {"orbit_v3": True, "hedge_eur": h["hedge_eur"], "hedge_faktor": h["hedge_faktor"], "multiplier": h["multiplier"],
                "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, tradeify_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Orbit V3 (finaler Tradeify, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit']} (finaler Tradeify, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ",")).strip()}
         try:
             if not sb_update("trade_plans", _tfh_guard(p), upd):
@@ -30128,7 +30137,7 @@ def tfh_tick(jetzt=None, force=False):
         vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
         erg["umgestellt"] += 1
         _tfh["umgestellt"] += 1
-        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: Orbit V3 mit Gegenhedge {h['lots']:.2f} Lot (q {h['q']}, Blow +{h['slave_risk']:.0f} €)")
+        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: {MODELL_NAME['orbit']} (finaler Tradeify) {h['lots']:.2f} Lot (q {h['q']}, Blow +{h['slave_risk']:.0f} €)")
     return erg
 
 
@@ -30684,7 +30693,7 @@ _ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt
 # Apex → orbit_prio2, jede andere Firma → orbit_v2 (Apex bitgleich).
 AP_MODELLE = ("orbit_v2", "orbit_prio2")
 AP_GRUPPE_AUS = "aus"   # MO1c: Gruppen-Eintrag firmen_modell[firma] = 'aus' (Firma in der Gruppe aus) | Modell (Firma in der Gruppe an, auch bei HT planen=false)
-AP_MODELL_NAME = {"orbit_v2": "Orbit V2", "orbit_prio2": "Orbit Prio 2"}
+AP_MODELL_NAME = {k: MODELL_NAME[k] for k in ("orbit_v2", "orbit_prio2")}   # MK1b: aus der zentralen Tabelle
 AP_MODELL_NICHT_WAEHLBAR = ("tradeify",)   # Firmen-Schlüssel namen[0]: finaler Tradeify fährt über tfh_tick (hedge_art 'tradeify_final') — nie zusätzlich Prio 2
 
 
@@ -31176,7 +31185,7 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
     neu = {"status": "ohne", "code": code, "grund": grund, "at": _wt_now_iso(), "gemeldet": bool((alt or {}).get("gemeldet")) or melden}
     upd = {"mt5_baseline": dict(base, apex_hedge=neu)}
     if not (alt and alt.get("status") == "ohne"):
-        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nOrbit Prio 2: wartet auf Hedge, weil {grund}").strip()
+        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\n{MODELL_NAME['orbit_prio2']}: wartet auf Hedge, weil {grund}").strip()
     try:
         if not sb_update("trade_plans", _ah_guard(p), upd):
             return
@@ -31187,7 +31196,7 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
         _ah["ohne"] += 1
         _ah_spur(f"{wer} · {p.get('master_name') or '—'}: wartet auf Hedge — {grund}")
     if melden:
-        alarm_senden(3, "apex_hedge_ohne", "Orbit Prio 2 wartet auf Hedge",
+        alarm_senden(3, "apex_hedge_ohne", f"{MODELL_NAME['orbit_prio2']} wartet auf Hedge",
                      f"{wer} · {p.get('master_name') or '—'}: startet nie ohne Hedge — wartet, bis er rechenbar ist ({grund}); "
                      f"Start rückt je 15–30 min weiter",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"ah-ohne-{p['id']}")
@@ -31208,7 +31217,7 @@ def ah_zurueck():
             if sb_update("trade_plans", g, {"hedge_eur": None, "hedge_faktor": vor.get("hedge_faktor"), "multiplier": vor.get("multiplier"),
                                             "slave_risk": vor.get("slave_risk"), "master_risk": vor.get("master_risk"), "mt5_baseline": base}):
                 n += 1
-                _ah_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf Orbit V2 ohne Hedge")
+                _ah_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf {MODELL_NAME['orbit_v2']} ohne Hedge")
         except Exception as e:
             _ah_spur(f"⚠️ {str(p['id'])[:8]} zurück: {type(e).__name__}: {e}")
     # nur vorgemerkte (hedge_art 'apex', noch nicht umgestellt): Marke + Vorschau weg, damit der Bestätigen-Block sie nicht mehr zeigt
@@ -31412,7 +31421,7 @@ def ah_tick(jetzt=None, force=False):
         try:
             if sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
                                          "mt5_baseline->>hedge_art": "eq.apex"}, {"mt5_baseline": neu}):
-                _ah_spur(f"{p.get('master_name') or '—'}: Modell Orbit V2 — Marke Orbit Prio 2 entfernt")
+                _ah_spur(f"{p.get('master_name') or '—'}: Modell {MODELL_NAME['orbit_v2']} — Marke {MODELL_NAME['orbit_prio2']} entfernt")
         except Exception as e:
             _ah_spur(f"⚠️ {str(p['id'])[:8]} Marke nicht entfernt: {type(e).__name__}: {e}")
     roh = [p for p in roh if ap_plan_modell(p, _fm, _gm) == "orbit_prio2"]
@@ -31556,7 +31565,7 @@ def ah_tick(jetzt=None, force=False):
                 "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Orbit Prio 2 (Fusion-Hedge, WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit_prio2']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · "
                          + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ",")).strip()}
         g = _ah_guard(p)
@@ -31570,7 +31579,7 @@ def ah_tick(jetzt=None, force=False):
         vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
         erg["umgestellt"] += 1
         _ah["umgestellt"] += 1
-        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: Orbit Prio 2 {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: {MODELL_NAME['orbit_prio2']} {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
 
     # (3) NACHZIEHEN — umgestellt, nicht geclaimt: Lots auf den Abstand bis zum Trade-Ende (ah_abstand). Gleiche Marge-Prüfung wie (2), die eigenen alten Lots
     # zählen dabei nicht doppelt. Passt die Marge nicht, bleibt der Plan wie er ist (kleinerer Hedge) und die Spur sagt warum.
@@ -33928,7 +33937,7 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
 # und Start bleiben unberührt. Fehlt die Spalte noch, läuft alles wie vorher (_ap_hand_spalte_fehlt).
 AP_FEST_HAND = "Werte von Hand geändert"
 AP_FEST_KETTE = "Topstep-Kette (fest)"
-AP_FEST_TSV2 = "Topstep V2 startet nur von Hand"
+AP_FEST_TSV2 = f"{MODELL_NAME['topstep_v2']} startet nur von Hand"
 # RICHTUNG VON HAND (Master 16.10.2026 nach Prüfung Slave 2): Klick im Admin-Planer (richtung_plan) setzt mt5_baseline.richtung_hand —
 # Bot-Richtungsschutz und Ausgleich drehen Finns Klick nicht still zurück. Harte Riegel (Saldo am Start, DB-Claim-Trigger) bleiben.
 AP_FEST_RICHTUNG_HAND = "Richtung von Hand gedreht"
@@ -37527,9 +37536,9 @@ def ap_modell_setzen(firmen, firma, modell):
     for f in firmen or []:
         if isinstance(f, dict) and ((f.get("namen") or [None])[0] == firma):
             if f.get("route") in AP_CFD_ROUTEN:          # wie e3ArtVon im Frontend: route mt5/mt5v2 = CFD
-                return None, "CFD-Firma — fährt immer Echo mit Hedge"
+                return None, f"CFD-Firma — fährt immer {MODELL_NAME['echo']}"
             if f.get("route") == "tsv2":                 # Topstep V2: eigener Weg in TopstepX, ah_tick nimmt nur tvv2
-                return None, "Topstep V2 — eigener Weg, kein Modell wählbar"
+                return None, f"{MODELL_NAME['topstep_v2']} — eigener Weg, kein Modell wählbar"
             if firma in AP_MODELL_NICHT_WAEHLBAR:      # Fremd-Review MO1: finaler Tradeify hat seinen eigenen Hedge (tfh_tick) — beide würden hedge_art je Minute überschreiben
                 return None, "Tradeify — finaler Trade hat einen eigenen Gegenhedge, kein Modell wählbar"
             f = dict(f, modell=modell)
@@ -42569,7 +42578,7 @@ _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 # im Code stecken, sollen unten visuell und änderbar stehen"). Alles, was in funded_cfd_plan_regeln steht, ist über POST /admin/funded-cfd-plan/regel
 # änderbar (nur Admin, eine Änderung je Aufruf, geprüft, mit Konfliktschutz über updated_at). Was nur im Code steht, liefert fcp_code_werte zum
 # Anzeigen („fest im Code"). Am Verhalten des Planers ändert das nichts: er liest dieselben Felder wie bisher. ══
-FCP_WEG = {"route": "mt5", "name": "Echo", "text": "klassisches Echo mit Fusion-Gegenhedge (route mt5, Slave = Echo-Hedge-Konto der ID)"}
+FCP_WEG = {"route": "mt5", "name": MODELL_NAME["echo"], "text": f"{MODELL_NAME['echo']} (route mt5, Fusion-Gegenhedge auf dem Echo-Hedge-Konto der ID)"}
 FCP_SCHALTER = ("aktiv", "auto_bestaetigen", "ziel_auto_wartet")
 FCP_ZEIT_FELDER = ("firma_abstand_min", "abstand_id_min", "vorlauf_min")
 FCP_GROESSE_FELDER = {"ziel": "bereich", "sl": "bereich", "sl_1pct": "bereich", "lots": "bereich", "hedge_eur": "zahl", "dd": "zahl",

@@ -6,6 +6,9 @@ Laedt _wd_ende_upd, _wd_erledigt_upd, _wd_hedge_konto, _wd_hedge_buchung, _wd_he
 Quelltext aus app.py. Prueft: erledigt aus open und review (final nur ergaenzt, wenn keins da), Korrektur auf
 completed (completed_at bleibt), 409 fuer planned/falsche Route, 404; Zielkonto nach der Regel der Koordination
 (Login-Treffer live vor Demo, Rueckfall Fusion-live, sonst ohne Konto); Buchungszeile EUR, notes-Schluessel."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

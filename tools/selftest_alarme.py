@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Selbsttest: Alarme an die Master-IDs (app.py alarm_prio_aus_titel / alarm_ereignisse, 22.10.2026 — Finn: „Notifications ans Handy …
 mit den Prioritäten, wenn irgendwas schiefgeht"). Rein rechnend, ohne Netz. Zahlen frei erfunden.  Aufruf: python3 tools/selftest_alarme.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import sys

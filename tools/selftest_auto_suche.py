@@ -9,6 +9,9 @@ mindestens so gut wie ein Zug allein und wie Greedy (Breite 1); in der Kombinati
 Firma ≥ ½-Stufe) und kein gegenläufiger Start einer anderen ID derselben Firma ±3 min (seit 08.10.2026 ~17:00 Dubai, vorher Laufzeit); Hinausschieben eines Shorts aus den 60 min; Hand-Plan, toter PC, ruhender Plan nie;
 Pingpong (heute hinausgeschoben → nicht vorziehen, heute vorgezogen → nicht hinausschieben); ein Zug je Plan; Laufzeit < 6 s bei 40
 Plänen; ausgeglichenes Buch → nichts."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import collections
 import os
 import random

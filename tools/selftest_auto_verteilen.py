@@ -14,6 +14,9 @@ Seit 08.10.2026 ~12:00 Dubai (Slave-Terminal 4, Finn: „Die zwei Regeln mit 60/
 60 min je ID × Firma und 20 min je ID sind weg (Konstanten 0). Geprüft wird jetzt: 1 min je Firma über alle IDs (AP_FIRMA_ABSTAND_MIN)
 und beim Planen die PC-Regel je Tranche (Dauer + abstand_id_min). Der Ausgleichs-Bot zieht nur noch Starts derselben Firma auseinander,
 die näher als 1 min liegen (gleiche Minute) — 1–2 min nacheinander (Konten einer Tranche, zeiten.abstand_konto_s) ist gewollt."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import random
 import re

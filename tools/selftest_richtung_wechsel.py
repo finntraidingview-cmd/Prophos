@@ -5,6 +5,9 @@ alle Trades des Tages in EINER Richtung, „Genau das will ich ja vermeiden … 
 später kann z. B. einer short gehen"; ~03:45 nachgeschärft: „Mach diese 90-Minuten-Regel weg … Zufallsprinzip. Es darf halt nur
 nie gleichzeitig sein"). Regel: Richtung je Trade frei (AP_RICHTUNG_WECHSEL_MIN = 0), Strafe „ID × Firma ganz einseitig" mischt; nur
 laufende bzw. geclaimte Trades legen Teile in den 90 min nach ihrem Start fest; geplante nie. Platzhalter-IDs, ohne Netz. Aufruf: python3 tools/selftest_richtung_wechsel.py"""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import re
 import random

@@ -5,6 +5,9 @@ Trades (TP ~1.000 $, SL und Lots wie die Regel), erst bei höchstens einem fehle
 
 Aufruf:  python3 tools/selftest_gewinntage.py
 Ohne Netz."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 

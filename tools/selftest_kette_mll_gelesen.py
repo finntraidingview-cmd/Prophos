@@ -10,6 +10,9 @@ Tagesschluss (150.000 → 145.500); (3) ohne Lesung, Tagesschluss 152.000 an ein
 einer älteren Lesung 145.500 → 147.500; (5) laufender Handelstag zählt nicht; (6) Express-Lesung (0-basiert) fällt raus;
 (7) alte Rechnung ap_kette_mll bleibt für Aufrufer ohne Lesung erhalten; (8) ohne Lesung UND ohne Tagesschluss Rückfall auf den
 Hochpunkt max(Größe, peak, balance) − dd, Grund endet auf „— geblowt?" (16.10.2026)."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import os
 import sys
 from datetime import datetime, timezone

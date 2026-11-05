@@ -2,6 +2,9 @@
 """Selbsttest MINDESTTAGE FTMO (prophos.html kontoMindesttage + app.py ap_konto_rechnen tage=, 30.10.2026 — Finn: „Bei FTMO gibt's ab jetzt auch 4, in Phase 1 4
 und in Phase 2 4"). Aufruf:  python3 tools/selftest_mindesttage_ftmo.py   (ohne Netz; Firmenregel läuft echt in JavaScriptCore, Planer per Quelltext-Lader).
 Geprüft: FTMO P1/P2 = 4, FundedNext unverändert 5, FTMO Futures und Funded ohne; am Planer: FTMO-Mini mit ganzen Lots (1 Lot, 20–40 Pkt), ohne goal_kind wie heute."""
+import os as _os_mk, sys as _sys_mk
+_sys_mk.path.insert(0, _os_mk.path.dirname(_os_mk.path.abspath(__file__)))
+import modell_name_test  # noqa: F401 — MK1b 05.11.2026: MODELL_NAME aus app.py für die exec-Ausschnitte
 import json
 import os
 import subprocess
