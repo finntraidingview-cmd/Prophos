@@ -22,7 +22,8 @@ def check(bed, text):
 
 
 check('"rest_hedge": p.get("rest_hedge") is True, "auto_plan": p.get("auto_plan"), "created_at": p.get("created_at")' in app, "Radar-Zeile trägt rest_hedge, auto_plan, created_at")
-check('polar_slave_user_id,multiplier,auto_plan,rest_hedge"' in app, "/admin/live-trades lädt auto_plan und rest_hedge")
+check('polar_slave_user_id,multiplier,auto_plan,rest_hedge,slave_risk"' in app,   # HP1b (05.11.2026): + slave_risk (Fusion € am SL/Liq)
+      "/admin/live-trades lädt auto_plan und rest_hedge")
 check("const wdlAktiveKonten = () =>" in html and "if(t.konto_id && aktiv.has(String(t.konto_id))) continue" in html, "Rest von Hand lässt Konten mit aktivem Plan weg")
 check(".filter(x => x.fehlt || !x.kid || !aktiv.has(String(x.kid)))" in html, "Review lässt Konten mit aktivem Plan weg, Tage sammeln bleibt")
 check("x.rest_hedge !== true || x.auto_plan === true" in html, "Tick nur bei rest_hedge-Plänen, nie Auto-Planer")

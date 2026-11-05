@@ -12613,6 +12613,29 @@ def wd_tsx_master_pl(tv, final):
     return None
 
 
+def lt_fusion_paar(p, base):
+    """REIN RECHNEND (testbar, HP1b, Finn 05.11.2026: „Bei jedem Modell, wo ich einen Trade sehe, der mit Hedgen zu tun hat, IMMER beide P&Ls“):
+    Fusion € am Master-TP (≤ 0) und am Master-SL bzw. bei der Liquidation (≥ 0) aus den Werten, die am Plan schon stehen — dieselbe Reihenfolge wie die
+    Planer-Karten im Tab (fcpQuelleBauen / wdPlanFusion): mt5_baseline.funded_plan.hedge_tp_eur/hedge_sl_eur (Funded CFD/Futures) → hedge_vorschau
+    pass_eur|tp_eur / blow_eur (Echo-Hedge, Orbit Prio 2, Tradeify-Final) → hedge_eur / slave_risk (Winning Day, Orbit). Keine neue Rechnung.
+    Ohne Wert → None (Echo V2, Orbit V2, Topstep V2 ohne Hedge). → (tp_eur, sl_eur)"""
+    p, base = p or {}, base if isinstance(base, dict) else {}
+    fp = base.get("funded_plan") if isinstance(base.get("funded_plan"), dict) else {}
+    vs = base.get("hedge_vorschau") if isinstance(base.get("hedge_vorschau"), dict) else {}
+    pos = lambda v: abs(float(_wd_num(v))) if _wd_num(v) is not None and float(_wd_num(v)) != 0 else None   # noqa: E731
+    tp = pos(fp.get("hedge_tp_eur"))
+    if tp is None:
+        tp = pos(vs.get("pass_eur")) if vs.get("pass_eur") is not None else pos(vs.get("tp_eur"))
+    if tp is None:
+        tp = pos(p.get("hedge_eur"))
+    sl = pos(fp.get("hedge_sl_eur"))
+    if sl is None:
+        sl = pos(vs.get("blow_eur"))
+    if sl is None and (tp is not None or fp or vs):
+        sl = pos(p.get("slave_risk"))          # nur bei einem Hedge-Plan — Echo V2 hat kein slave_risk-Paar
+    return (-round(tp, 2) if tp is not None else None), (round(sl, 2) if sl is not None else None)
+
+
 def _wd_heute_zeile(p, acc, disp, vorher=None):
     """Eine Plan-Zeile für /admin/wd-heute — der JSON-Vertrag steht in der Route. vorher = letzter beendeter Trade
     desselben Kontos vor diesem Plan ({ended_at, balance_end_da}) für den Balance-Vorläufer (B14)."""
@@ -12690,6 +12713,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "hedge_eur": _wd_num(p.get("hedge_eur")), "hedge_faktor": _wd_num(p.get("hedge_faktor")),
         # Plan-Gewinn von Fusion beim Blow aus der Vorschau (tfh_tick/ah_tick, z. B. 1650a0e3 675 €) — Overshoot gegen Plan im Radar (30.10.2026)
         "hedge_plan_sl_eur": _wd_num((base.get("hedge_vorschau") or {}).get("blow_eur")) if isinstance(base.get("hedge_vorschau"), dict) else None,
+        # HP1b (05.11.2026): Fusion € an Master-TP / Master-SL bzw. Liq — Radar und „Läuft“ zeigen sie neben den Master-$ (lt_fusion_paar)
+        **dict(zip(("fusion_tp_eur", "fusion_sl_eur"), lt_fusion_paar(p, base))),
         "quelle": "farmer" if (p.get("notes") or "") == "Winning-Day-Farmer" else "manuell",
         "verknuepft": bool(p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at")),
         "handelstag": _cme_handelstag(p.get("started_at") or p.get("start_um") or p.get("planned_for") or p.get("created_at")),
@@ -14184,7 +14209,7 @@ def admin_live_trades():
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown,"
-                  "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier,auto_plan,rest_hedge")   # Polar-Seite (20.10.2026); auto_plan/rest_hedge → hand_plan (02.11.2026)
+                  "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier,auto_plan,rest_hedge,slave_risk")   # slave_risk: HP1b Fusion € am SL/Liq · Polar-Seite (20.10.2026); auto_plan/rest_hedge → hand_plan (02.11.2026)
         # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
         # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live).
         # Polar (20.10.2026, Finn: „auch unter Radar hinzufügen"): mit ?echo=1 (Radar/Planer) auch route polar — eine Zeile je Lauf

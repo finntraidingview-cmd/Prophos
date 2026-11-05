@@ -5962,6 +5962,12 @@
   #dashboard-view .wdl-sp small b{margin-left:4px;font-weight:600;letter-spacing:0}
   #dashboard-view .wdl-sp-l b{color:rgba(185,28,28,.72)}
   #dashboard-view .wdl-sp-r b{color:rgba(21,128,61,.78)}
+  /* HP1b (05.11.2026): Fusion € neben dem Master-Betrag an beiden Enden — kleiner, gedämpft, gleiche Farblogik wie pzPaarZelle */
+  /* zweite Zeile unter dem Master-Betrag: die Spalte ist nur 256 px breit — inline schob sich das TP-Ende in die P&L-Spalte (Sichtprüfung HP1b) */
+  #dashboard-view .wdl-sp small .wdl-sp-fus{display:block;margin-top:1px;font-style:normal;font-weight:500;letter-spacing:0;line-height:1.1;opacity:.85}
+  #dashboard-view .wdl-sp small .wdl-sp-fus i{margin-right:3px;color:var(--sub-2);font-style:normal}
+  #dashboard-view .wdl-sp-fus.rot{color:rgba(185,28,28,.62)}
+  #dashboard-view .wdl-sp-fus.gut{color:rgba(21,128,61,.66)}
   #dashboard-view .wdl-mehr{display:block;width:100%;padding:8px 16px;border:none;border-top:1px solid var(--border-soft);background:transparent;color:var(--sub);font:inherit;font-size:12px;text-align:center;cursor:pointer}
   #dashboard-view .wdl-mehr:hover{background:var(--bg);color:var(--ink-2)}
   /* MANUELLE ARBEIT (08.10.2026, Finn am Radar „Überprüfen"): Gruppe zwischen Überprüfen und Erledigt — Zeile aus Überprüfen
@@ -38344,7 +38350,9 @@
     // Echo: echter SL und TP der MT5-Position (CFD-Preis) — eine Liquidation gibt es dort nicht
     // Beträge an den Enden (30.09.2026, Finn: „Bei TP und bei Stop Loss/Liquidation soll stehen, wie viel es dann wäre") — ganze $
     const d0 = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Math.round(Number(v))
-    if(wdlIstEcho(t)){ const l = n(t.sl_level), r = n(t.tp_level); return (l == null || r == null || l === r) ? null : { links: l, rechts: r, ein: n(t.einstieg), art: 'SL', plLinks: d0(t.pl_bei_sl), plRechts: d0(t.pl_bei_tp) } }
+    // HP1b (Finn 05.11.2026: „bei jedem Hedge-Trade IMMER beide P&Ls“): Fusion € an beiden Enden vom Backend (lt_fusion_paar) — links am SL/Liq (+), rechts am TP (−)
+    const fus = sp => sp && Object.assign(sp, { fusLinks: d0(t.fusion_sl_eur), fusRechts: d0(t.fusion_tp_eur) })
+    if(wdlIstEcho(t)){ const l = n(t.sl_level), r = n(t.tp_level); return (l == null || r == null || l === r) ? null : fus({ links: l, rechts: r, ein: n(t.einstieg), art: 'SL', plLinks: d0(t.pl_bei_sl), plRechts: d0(t.pl_bei_tp) }) }
     // LIQ-REGELN (30.09.2026): Liquidation nach der Tabelle liq_regeln (Backend liq_regel_level_nq, z. B. Apex-Daily-Loss-Stufe) vor der
     // alten Rechnung (Kontogröße + 100 $ bzw. Max-Drawdown); ein echter SL bleibt vorn. Nur Anzeige — der Fusion-Hedge rechnet wie bisher.
     const slE = wdlSlEcht(t), lqR = n(t.liq_regel_level_nq), lqA = n(t.liq_level_nq)
@@ -38370,10 +38378,10 @@
     // MLL/DLL des Kontos auch hinter einem SL (21.10.2026): der Vergleich Boden/Regel vom Backend, sonst die eine Grenze — als „Konto: …"
     const konto = vgl || String(t.liq_regel_text || t.liq_boden_text || '')
     // APEX-EVAL-SOFTBREACH (07.10.2026): gilt der weiche Tagesstopp (Apex Daily Loss), heißt das linke Ende „Tageslimit", nicht „Liq"
-    return { links, rechts, ein, art: istSl ? 'SL' : (lqR != null && wdlLiqIstTag(t)) ? 'Tag' : 'Liq',
+    return fus({ links, rechts, ein, art: istSl ? 'SL' : (lqR != null && wdlLiqIstTag(t)) ? 'Tag' : 'Liq',
              plLinks: istSl && slPlan != null ? -Math.round(slPlan) : pl(links), plRechts: tpPlan != null ? Math.round(tpPlan) : pl(rechts),
              regel: istSl ? (konto ? 'Konto: ' + konto : '') : lqR != null ? (vgl || String(t.liq_regel_text || '')) : '',
-             regelPur: istSl || !!vgl || t.liq_gilt === 'boden' }
+             regelPur: istSl || !!vgl || t.liq_gilt === 'boden' })
   }
   // Betrag kompakt für die Enden der Spanne: „−3.000 $", „+272 $", ab 10.000 „−10,5k $"; lang (Tooltip) immer ganze $
   function wdlSpBetrag(v, lang){
@@ -38427,9 +38435,11 @@
     // blasses Rot bis zum Einstieg, blasses Grün ab dem Einstieg (wie mwd-bar); ohne Einstieg nur der graue Track
     const bahn = pE != null ? `background:linear-gradient(90deg,color-mix(in srgb, var(--danger) 14%, transparent) 0 ${pE.toFixed(2)}%,color-mix(in srgb, var(--good) 22%, transparent) ${pE.toFixed(2)}% 100%)` : ''
     const betrag = v => (v != null && isFinite(v)) ? `<b>${wdlSpBetrag(v)}</b>` : ''   // fehlt der Betrag: nur das Label
-    return `<span class="${opt && opt.klasse ? opt.klasse : 'wdl-z-mi wdl-sp'}"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${opt && opt.l != null ? opt.l : sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
+    // HP1b: Fusion € daneben („Master $ ↔ Fusion €“ wie pzPaarZelle) — nur mit Wert, ohne Hedge bleibt die Spanne wie bisher
+    const fusB = v => (v != null && isFinite(v)) ? `<em class="wdl-sp-fus${v < 0 ? ' rot' : ' gut'}" title="Fusion, wenn der Master hier rausgeht"><i aria-hidden="true">↔</i>${v < 0 ? '−' : '+'}${Math.abs(Math.round(v)).toLocaleString('de-DE')} €</em>` : ''
+    return `<span class="${opt && opt.klasse ? opt.klasse : 'wdl-z-mi wdl-sp'}"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${opt && opt.l != null ? opt.l : sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}${fusB(sp.fusLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
-      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>${opt && opt.r != null ? opt.r : 'TP'}</i>${betrag(sp.plRechts)}</small></span>`
+      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>${opt && opt.r != null ? opt.r : 'TP'}</i>${betrag(sp.plRechts)}${fusB(sp.fusRechts)}</small></span>`
   }
 
   /* HANDARBEIT (09.10.2026, Finn: „eine Liste mit allen Accounts, die gepasst wurden oder irgendwas manuell Hilfe brauchen … in einem Popup:
@@ -91437,6 +91447,8 @@
 :where([data-theme=dark]) #dashboard-view .wdl-sp small{color:var(--sub-2)}
 :where([data-theme=dark]) #dashboard-view .wdl-sp-l b{color:rgba(232,104,104,0.72)}
 :where([data-theme=dark]) #dashboard-view .wdl-sp-r b{color:rgba(106,231,153,0.78)}
+:where([data-theme=dark]) #dashboard-view .wdl-sp-fus.rot{color:rgba(232,104,104,0.62)}
+:where([data-theme=dark]) #dashboard-view .wdl-sp-fus.gut{color:rgba(106,231,153,0.66)}
 :where([data-theme=dark]) #dashboard-view .wdl-mehr{border-right-color:currentcolor;border-bottom-color:currentcolor;border-left-color:currentcolor;border-top-color:var(--border-soft);background-color:transparent;color:var(--sub)}
 :where([data-theme=dark]) #dashboard-view .wdl-mehr:hover{background-color:var(--bg);color:var(--ink-2)}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-manuell.is-ziel{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet) inset;background-color:var(--surface-tint)}
