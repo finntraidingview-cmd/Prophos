@@ -56799,7 +56799,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2099'
+  const OS_TAB_BUILD = '2026-09-22.2100'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62398,6 +62398,42 @@
     return null
   }
   window._deVergleichsBalance = deVergleichsBalance
+  /* NIE GELAUFEN = WEG, NICHT ABHAKEN (NG1, Finn 05.11.2026: „Warum sind Trades nicht gelaufen und wurden trotzdem hier gestartet? Was ist da
+   * schiefgelaufen? Fix es."). Befund 7 Tage HT: 4 Echo-Pläne (Tradeify CFD …6895, …7783, …7785, …7784) — geclaimt, Start brach ohne Order-Antwort ab
+   * (m5still unklar: Master nicht lesbar bzw. „keine Bestätigung binnen 12 s"), started_at blieb leer, der Tagesreset (app.py ap_tagesreset) schob sie
+   * als „unklar" nach Überprüfen (er löscht nur mit Beleg „nichts platziert"), N2 bewies danach über die Deals „nicht gelaufen" — und ließ sie mit
+   * +0,00 $ zum Abhaken liegen, als wäre ein Trade gelaufen. Jetzt: ist das bewiesen (kein Deal, keine Position, keine Order, Balance = Vergleichs-
+   * Balance ±0,01 $ — deUrteil), wird der Plan gelöscht wie im Tagesreset „weg" (dort reicht schon „Bot: nichts platziert"). Nachholen wäre falsch:
+   * der Plan ist von einem früheren Tag, der Planer plant das Konto neu. Spur: puls_fehlstarts (wenn der Start-Fehler gemeldet wurde) + Konsole. Nie bei Hedge/Ticket/Leer-Versuchen/
+   * Position/Fusion-P&L/Manueller Arbeit, nie wenn der Plan seit dem Lesen geändert wurde (updated_at) oder schon einen P&L ≠ 0 hat. REIN. */
+  function deWegUrteil(r){
+    if(!r) return 'kein Plan'
+    if(r.status !== 'review') return 'nicht in Überprüfen'
+    if(r.route !== 'mt5' && r.route !== 'mt5v2') return 'kein Echo-Plan'
+    if(r.started_at || r.orbit_gesendet_at) return 'Plan war gestartet'
+    if(r.master_pl != null && Number(r.master_pl) !== 0) return 'Master-P&L am Plan'
+    if(r.slave_pl != null && Number(r.slave_pl) !== 0) return 'Fusion-P&L am Plan'
+    const b = (r.mt5_baseline && typeof r.mt5_baseline === 'object') ? r.mt5_baseline : {}
+    const f = (b.final && typeof b.final === 'object') ? b.final : {}
+    if(f.art !== 'nicht_gelaufen' || f.quelle !== 'deals_leer') return 'kein Deal-Beleg „nicht gelaufen"'
+    if(b.manuell) return 'Manuelle Arbeit'
+    if(b.hedge || b.ticket || b.versuche_alt || (b.live && b.live.offen) || b.polar) return 'Hedge/Ticket/Position am Plan'
+    // Gegenprüfung NG1: Marken, nach denen der Tagesreset „Order kann raus sein" sagt und die der Deal-Beweis nicht selbst klärt — bleiben zum Abhaken
+    // (start_fehler.unklar dagegen ist genau der Fall, den der Deal-Beweis klärt)
+    if(b.puls_unklar || b.puls_pause || (b.tv && typeof b.tv === 'object' && Object.keys(b.tv).length)) return 'Puls-Marke am Plan (unklar/Pause/TradingView)'
+    return ''
+  }
+  window._deWegUrteil = deWegUrteil   // Test-Haken
+  async function deWeg(r, warum){
+    let q = supabase.from('trade_plans').delete().eq('id', r.id).eq('status', 'review').is('started_at', null)
+    q = r.master_pl == null ? q.is('master_pl', null) : q.eq('master_pl', 0)
+    if(r.updated_at) q = q.eq('updated_at', r.updated_at)
+    const { data, error } = await q.select('id')
+    const ok = !error && !!(data && data.length)
+    if(ok){ try{ const i = (tradePlans || []).findIndex(x => String(x.id) === String(r.id)); if(i >= 0) tradePlans.splice(i, 1) }catch(_){} }
+    console.log('[endlesung-deals]', String(r.id).slice(0, 8), 'nicht gelaufen → gelöscht (NG1)', warum, ok ? 'ok' : ('nicht gelöscht: ' + ((error && error.message) || 'Plan inzwischen geändert')))
+    return ok
+  }
   async function deTick(){
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || window._tabNebenSofort || _deLaeuft || Date.now() - _deAt < DE_TAKT_MS) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
@@ -62414,6 +62450,12 @@
       const { data: rows, error } = await supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'review').is('master_pl', null)
         .in('route', ['mt5', 'mt5v2']).gte('ended_at', ab).limit(30)
       if(error) throw error
+      // NG1: schon als „nicht gelaufen" gebuchte (vor NG1, master_pl 0, Deal-Beleg am Plan) — kein Abhaken, weg
+      try{
+        const { data: alt0 } = await supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'review').eq('master_pl', 0)
+          .in('route', ['mt5', 'mt5v2']).is('started_at', null).gte('ended_at', ab).limit(30)
+        for(const r of (alt0 || [])) if(!deWegUrteil(r)) await deWeg(r, (r.mt5_baseline.final.hinweis || '').slice(0, 120))
+      }catch(e){ console.warn('[endlesung-deals] NG1 Aufräumen', (e && e.message) || e) }
       const kand = (rows || []).filter(r => deKandidat(r) && !((_deVersucht.get(String(r.id)) || 0) > Date.now() - DE_PLAN_MS))
       if(!kand.length) return
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
@@ -62438,6 +62480,11 @@
         if(res && res._httpFail) continue   // Panel alt (Route fehlt) oder weg → nächster Versuch in 30 min
         const u = deUrteil(res, refBal), jetzt = new Date().toISOString(), fin = Object.assign({}, r.mt5_baseline.final)
         if(u.art === 'offen') continue
+        // NG1: bewiesen nicht gelaufen → löschen statt mit 0,00 $ zum Abhaken stellen; spricht etwas am Plan dagegen, wie bisher buchen
+        if(u.art === 'nicht_gelaufen'){
+          const probe = Object.assign({}, r, { master_pl: null, mt5_baseline: Object.assign({}, r.mt5_baseline || {}, { final: Object.assign({}, fin, { art: 'nicht_gelaufen', quelle: 'deals_leer' }) }) })
+          if(!deWegUrteil(probe) && await deWeg(r, u.grund)) continue
+        }
         if(u.art === 'unklar'){
           if(fin.unklar_grund !== u.grund) await baselinePatchIn(r.id, 'final', { unklar_grund: u.grund, deals_at: jetzt }, 'review')   // nur zwei Felder, final bleibt
           continue
