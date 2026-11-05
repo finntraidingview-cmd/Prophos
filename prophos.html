@@ -87696,7 +87696,7 @@
       const n = (f.namen || [])[0], m = e3Modell(f, D), an = n === w.firma
       const ph = Object.values(f.phasen || {})[0] || {}, zp = f.ziel_pct && typeof f.ziel_pct === 'object' ? Object.values(f.ziel_pct) : Object.values(f.phasen || {}).map(x => (x || {}).ziel_pct)
       const nk = konten.filter(k => k.firma === n).length
-      const fk = [f.planen === false ? 'aus' : `${nk} im Planer`, zp.filter(v => v != null).length ? 'Ziel ' + zp.filter(v => v != null).map(v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 1 })).join(' / ') + ' %' : ''].filter(Boolean).join(' · ')
+      const fk = [f.planen === false ? 'aus' : `${nk} ${nk === 1 ? 'Konto' : 'Konten'} im Planer`, zp.filter(v => v != null).length ? 'Ziel ' + zp.filter(v => v != null).map(v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 1 })).join(' / ') + ' %' : ''].filter(Boolean).join(' · ')
       // kompakt wie WD („268–280 $ · 2–3 Kt"): ohne Leerzeichen, Lots/Kontrakte auf eine Nachkommastelle
       const kz = (v, d) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: d }), sp = (v, d) => e3Spanne(v) ? (v[0] === v[1] ? kz(v[0], d) : `${kz(v[0], d)}–${kz(v[1], d)}`) : ''
       const fz = [ph.tp ? `${sp(ph.tp, 0)} $` : '', ph.menge ? `${sp(ph.menge, 1)} ${cfd ? 'Lot' : 'Kt'}` : ''].filter(Boolean).join(' · ')
@@ -87705,7 +87705,7 @@
           <span class="fl"><span class="fn">${e3E(e3Name(f))}</span><span class="fk">${e3E(fk)}</span></span>
           <span class="fz">${fz}</span><span class="kf pfeil">›</span></div>`
     }
-    return `<div class="wd-set-card e3-firmen-karte">${e3Kopf4('Firmen', `${firmen.filter(f => f.planen !== false).length} im Planer · anklicken`)}
+    return `<div class="wd-set-card e3-firmen-karte">${e3Kopf4('Firmen', `${firmen.filter(f => f.planen !== false).length} von ${firmen.length} Firmen an · anklicken`)}
       <div>${firmen.map(zeile).join('') || '<div class="e3-leer">keine Firma</div>'}</div></div>`
   }
   // NACHTRAG 10 (Finn 05.11.2026: „Erste Spalte: Firma … zwei Spalten mit den ganzen Inputs — eine mit Zielen, eine mit Planer/Hedge"):

@@ -30725,6 +30725,15 @@ def ap_unt_wache_reg(reg, uid, je_uid, gesperrt):
     return je_uid.get(uid, reg)
 
 
+def ap_unt_stempel(zeile, jetzt_iso):
+    """Schreibwege der Unternehmens-Regel (Prüfer S2): eigener Stempel regeln_at statt updated_at — den setzt jeder Planer-Lauf (letzter_lauf), sonst
+    zählte jeder Lauf als „Regel geändert" und das Speichern gäbe 409. → (Guard-Filter, Patch). Spalte fehlt (SQL nicht eingespielt) → kein Guard."""
+    if "regeln_at" not in (zeile or {}):
+        return {}, {}
+    alt = zeile.get("regeln_at")
+    return ({"regeln_at": f"eq.{alt}"} if alt else {"regeln_at": "is.null"}), {"regeln_at": jetzt_iso}
+
+
 def ap_unt_kernwert(std_firmen, abw, fm, firma, aenderungen, standard=None):
     """REIN RECHNEND (testbar): Änderungen eines Unternehmens an einer Firma → (abw_neu, fm_neu, firma_wirksam, None) | (None, None, None, Grund).
     aenderungen [{pfad, wert}] wie /kernwert; standard [Pfad…] = diese Felder auf den Standard zurück. Gleiche Grenzen/Typen wie der Standard
@@ -35950,7 +35959,8 @@ def admin_gruppen_plan():
                                                     str(body.get("firma") or ""), str(body.get("modell") or ""))
                 if grund:
                     return jsonify({"ok": False, "msg": grund}), 400
-                sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gid}"}, {"firmen_modell": fm, "updated_at": datetime.now(timezone.utc).isoformat()})
+                _j = datetime.now(timezone.utc).isoformat()
+                sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gid}"}, dict({"firmen_modell": fm, "updated_at": _j}, **ap_unt_stempel(zeile, _j)[1]))   # Modell = Teil der Regel
                 print(f"[gruppen-plan] {gid[:8]} Modell {body.get('firma')} → {body.get('modell')} ({'Admin' if admin else 'uid ' + str(uid)[:8]})", flush=True)
                 return jsonify({"ok": True, "gruppe_id": gid, "firmen_modell": fm})
             if aktion not in ("planen", "probe"):
@@ -37175,14 +37185,14 @@ def admin_auto_plan_kernwert():
                                                 str(body.get("firma") or ""), body.get("aenderungen") or [], body.get("standard") or [])
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
-        upd = {"regeln": abw, "updated_at": datetime.now(timezone.utc).isoformat()}
+        jetzt_iso = datetime.now(timezone.utc).isoformat()
+        g_flt, g_upd = ap_unt_stempel(zeile, jetzt_iso)       # gleichzeitiges Speichern (Modell-Dropdown, zweiter Tab) überschreibt sich nicht
+        upd = dict({"regeln": abw, "updated_at": jetzt_iso}, **g_upd)
         if "firmen_modell" in zeile:
             upd["firmen_modell"] = fm
         elif fm != (zeile.get("firmen_modell") or {}):
             return jsonify({"ok": False, "msg": "Spalte firmen_modell fehlt — sql/2026-11-05_orbit_prio2.sql einspielen"}), 503
-        flt = {"gruppe_id": f"eq.{gid}"}
-        if zeile.get("updated_at"):
-            flt["updated_at"] = f"eq.{zeile['updated_at']}"    # gleichzeitiges Speichern (Modell-Dropdown, zweiter Tab) überschreibt sich nicht
+        flt = dict({"gruppe_id": f"eq.{gid}"}, **g_flt)
         try:
             rows = sb_update("auto_plan_gruppe", flt, upd)
         except Exception as e:
@@ -38110,11 +38120,11 @@ def admin_auto_plan_ablaufwert():
         abw, z_neu, grund = ap_unt_zeiten_aendern(reg.get("zeiten"), zeile.get("regeln"), body.get("zeiten") or [], body.get("standard") is True)
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
-        flt = {"gruppe_id": f"eq.{gid}"}
-        if zeile.get("updated_at"):
-            flt["updated_at"] = f"eq.{zeile['updated_at']}"    # gleichzeitiges Speichern überschreibt die Firmen-Abweichungen nicht
+        jetzt_iso = datetime.now(timezone.utc).isoformat()
+        g_flt, g_upd = ap_unt_stempel(zeile, jetzt_iso)       # gleichzeitiges Speichern überschreibt die Firmen-Abweichungen nicht
+        flt = dict({"gruppe_id": f"eq.{gid}"}, **g_flt)
         try:
-            rows = sb_update("auto_plan_gruppe", flt, {"regeln": abw, "updated_at": datetime.now(timezone.utc).isoformat()})
+            rows = sb_update("auto_plan_gruppe", flt, dict({"regeln": abw, "updated_at": jetzt_iso}, **g_upd))
         except Exception as e:
             return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
         if not rows:
@@ -38697,18 +38707,21 @@ def ap_gruppen_nachplan_tick(jetzt, zustand):
         return None
     # REGEL JE UNTERNEHMEN (Fremd-Review): Fenster und „Regel geändert" je Gruppe aus Standard + ihrer Abweichung (zeiten.fenster, updated_at
     # der Gruppen-Zeile); ohne Abweichung wie bisher. Zeilen nicht lesbar → kein Gruppen-Nachplanen in diesem Takt (Planer wäre fail-closed).
+    # select * (Prüfer S2): ohne Spalte regeln (SQL nicht eingespielt) gäbe ein select mit „regeln" PostgREST 400 → kein Gruppen-Nachplanen; fehlt die
+    # Spalte, fehlt nur die Abweichung (= Standard). Lesefehler → Standard für alle Gruppen, das Nachplanen läuft weiter (ap_planen liest selbst fail-closed).
     try:
-        zeilen_g = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id,regeln,updated_at"}) or []}
+        zeilen_g = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "*"}) or []}
     except Exception as e:
-        print(f"[gruppen-plan] ⚠️ Nachplanen: auto_plan_gruppe nicht lesbar ({type(e).__name__}: {e})", flush=True)
-        return None
+        print(f"[gruppen-plan] ⚠️ Nachplanen: auto_plan_gruppe nicht lesbar ({type(e).__name__}: {e}) — Fenster wie Standard", flush=True)
+        zeilen_g = {}
 
     def _reg_g(gid):
         z = zeilen_g.get(str(gid)) or {}
         abw = z.get("regeln") if isinstance(z.get("regeln"), dict) else {}
         if not abw:
             return reg
-        ua = max(str(reg.get("updated_at") or ""), str(z.get("updated_at") or "")) or None
+        # „Regel geändert" = eigener Stempel regeln_at (nicht updated_at — den setzt jeder Planer-Lauf)
+        ua = max(str(reg.get("updated_at") or ""), str(z.get("regeln_at") or "")) or None
         return dict(reg, zeiten=ap_unt_zeiten(reg.get("zeiten") or {}, abw), updated_at=ua)
     gruppen = [gr for gr in ap_planer_gruppen(nur_aktiv=True) if ap_nachplan_fenster(d, _reg_g(gr["gruppe_id"]).get("zeiten"))]
     if not gruppen:
