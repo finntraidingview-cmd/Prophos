@@ -59,8 +59,8 @@ for alt in ["'Orbit V2'", "'Echo'", "'Echo V2'", "'Orbit Prio 2'", "'Nova'", "'W
     check(re.search(r"return[^\n]*" + re.escape(alt), ww) is None, f"wdlWeg: {alt} kommt aus modellName")
 
 # 3) Radar-Filter/-Gruppen unverändert (Schlüssel = Tabellen-Namen)
-check("const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Nova', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]" in HTML,
-      "WDL_MODELLE unverändert")
+check("const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Nova', 'Winning Day', 'Orbit Prio 2', 'Polar']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]" in HTML,
+      "WDL_MODELLE: Namen der Tabelle, seit MK1b mit „Orbit Prio 2“ (Filter-Knopf)")
 check("const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Nova', 'Echo', 'Winning Day', 'Orbit Prio 2', 'Polar']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]" in HTML,
       "WDL_HEDGE_GRUPPEN unverändert")
 
