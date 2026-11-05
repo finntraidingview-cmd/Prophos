@@ -106,7 +106,16 @@ check(app._unt_hol(lu, LU)[1] == [1300, 1400] and LU in (d.get("abweichung") or 
       "GET zeigt die Abweichung wirksam und markiert sie")
 ZEILE.pop("regeln")
 r = c.post("/admin/auto-plan/kernwert", json={"gruppe_id": "gr-emin", "firma": "lucidtrading", "aenderungen": [{"pfad": LU, "wert": [1300, 1400]}]})
-check(r.status_code == 503 and "regel_unternehmen" in (r.get_json() or {}).get("msg", ""), "Spalte regeln fehlt → 503 mit Hinweis auf die SQL-Datei")
+check(r.status_code == 409 and "noch nicht freigeschaltet" in (r.get_json() or {}).get("msg", ""), f"Spalte regeln fehlt → klare Meldung „noch nicht freigeschaltet“ ({r.status_code})")
+UPD.clear()
+r = c.post("/admin/auto-plan/kernwert", json={"gruppe_id": "gr-emin", "firma": "fundednextfutures", "aenderungen": [{"pfad": ["planen"], "wert": True}]})
+check(r.status_code == 200 and UPD and "regeln" not in UPD[-1][2] and UPD[-1][2].get("firmen_modell") == {"fundednextfutures": "orbit_v2"},
+      f"ohne Spalte regeln: Firma an/aus geht trotzdem (nur firmen_modell geschrieben) ({r.status_code})")
+r = c.post("/admin/auto-plan/ablaufwert", json={"gruppe_id": "gr-emin", "zeiten": [{"pfad": ["fenster", "0", "0"], "wert": "04:00"}]})
+check(r.status_code == 409 and "noch nicht freigeschaltet" in (r.get_json() or {}).get("msg", ""), "ohne Spalte regeln: Startfenster → klare Meldung")
+_h = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
+check("Einstellungen je Unternehmen noch nicht freigeschaltet</b>" in _h and "spalte_regeln === false) ? [] : (D.unt_felder" in _h,
+      "Frontend: ohne Spalte nur Anzeige + Hinweis „noch nicht freigeschaltet“")
 ZEILE["regeln"] = abw
 src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 ap = src[src.index("\ndef ap_planen("):src.index("\ndef ", src.index("\ndef ap_planen(") + 10)]

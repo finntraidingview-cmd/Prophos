@@ -87715,7 +87715,7 @@
     if(D.unternehmen && sel) _e3.abwAkt = new Set((((D.abweichung || {}).firmen || {})[(sel.namen || [])[0]] || []).map(x => JSON.stringify(x)))
     if(!sel) return `<div class="wd-set-card">${e3Kopf4('Ziel & Trade', '—')}<div class="e3-leer">keine Firma</div></div>`
     const n = (sel.namen || [])[0], knopf = admin ? `<span class="e3-k4">${(_e3.msg[n] || {}).text ? `<span class="e3-msg ${_e3.msg[n].ok ? 'ok' : 'fehler'}">${e3E(_e3.msg[n].text)}</span>` : ''}<button type="button" class="btn btn-ghost btn-xs" data-e3-speichern="${e3E(n)}">Speichern</button></span>` : ''
-    const untHinweis = D.unternehmen ? `<div class="e3-unt-hinweis">TP, Kontrakte, Puffer und Schritt änderst du nur für ${e3E((D.unternehmen || {}).name || 'dieses Unternehmen')} — <span class="e3-abw-m">markiert</span> = eigene Änderung, ↺ = zurück auf Standard. Ziel, Drawdown und Consistency folgen dem Standard (änderbar ab Phase 2).${(D.unternehmen || {}).spalte_regeln === false ? ' ⚠ Spalte regeln fehlt — sql/2026-11-05_regel_unternehmen.sql einspielen.' : ''}</div>` : ''
+    const untHinweis = D.unternehmen ? `<div class="e3-unt-hinweis">TP, Kontrakte, Puffer und Schritt änderst du nur für ${e3E((D.unternehmen || {}).name || 'dieses Unternehmen')} — <span class="e3-abw-m">markiert</span> = eigene Änderung, ↺ = zurück auf Standard. Ziel, Drawdown und Consistency folgen dem Standard (änderbar ab Phase 2).${(D.unternehmen || {}).spalte_regeln === false ? ' <b>Einstellungen je Unternehmen noch nicht freigeschaltet</b> — es gilt der Standard; Firma an/aus und Modell gehen schon.' : ''}</div>` : ''
     return `<div class="wd-set-card e3-zt-karte">${e3Kopf4(`Ziel & Trade · ${e3Name(sel)}`, (sel.groessen || []).map(e3Gr).join(' · ') || 'Ziel, Consistency, Trade', knopf)}${untHinweis}${e3DetailHtml(sel, D, art, admin)}</div>`
   }
   function e3PlanerHedgeKarte(D, art, admin, sel){
@@ -87732,9 +87732,10 @@
         ${nb ? feld(`Neue Konten bis <small>· ${e3E(e3Tz(nb.tz))}</small>`, uhr(['neu_bis', 'uhr'], nb.uhr)) : ''}
         ${fe ? feld(`Start ab <small>· ${e3E(tz)}</small>`, uhr(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhr(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1])) : ''}</div></div>`
     const gs = D.gruppe_sicht
+    const uhrG = (pfad, wert) => (gs && (D.unternehmen || {}).spalte_regeln === false) ? `<div class="wd-abl-wert">${e3E(wert || '—')}</div>` : uhr(pfad, wert)   // ohne Spalte regeln: Startfenster nur Anzeige
     const feAbw = ((D.abweichung || {}).zeiten || []).some(x => JSON.stringify(x) === '["fenster"]')
     const planerG = gs ? `<div data-e3-ablauf><label class="wd-abl-schalter"><span><b>Gruppen-Planer ${e3E(gs.name || '')}</b><small>Nachtlauf wie Hermann Technologies · an/aus oben in der Planer-Leiste</small></span><b>${gs.aktiv ? 'an' : 'aus'}</b></label>
-      ${fe ? `<div class="wd-felder${feAbw ? ' e3-abw' : ''}">${feld(`Start ab <small>· ${e3E(tz)}</small>`, uhr(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhr(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1]))}${feAbw && admin ? '<button type="button" class="e3-std" data-e3-std-zeiten title="Startfenster auf Standard zurück">↺</button>' : ''}</div>` : ''}
+      ${fe ? `<div class="wd-felder${feAbw ? ' e3-abw' : ''}">${feld(`Start ab <small>· ${e3E(tz)}</small>`, uhrG(['fenster', '0', '0'], fe[0][0])) + feld(`Spätestens <small>· ${e3E(tz)}</small>`, uhrG(['fenster', String(fe.length - 1), '1'], fe[fe.length - 1][1]))}${feAbw && admin ? '<button type="button" class="e3-std" data-e3-std-zeiten title="Startfenster auf Standard zurück">↺</button>' : ''}</div>` : ''}
       <div class="e3-unt-hinweis">Bestätigen, Neue-Konten-Zeit und die Hedge-Schalter gelten für alle Unternehmen — ändern unter „Hermann Technologies (Standard)“.</div></div>` : ''
     let firma = ''
     if(sel){
@@ -87786,7 +87787,8 @@
     const sel = firmen.find(f => (f.namen || [])[0] === w.firma)
     const gs = D.gruppe_sicht   // MO1b: Login eines Gruppen-Verwalters (Emin) — Werte SEINER Gruppe statt der HT-Regel
     // REGEL JE UNTERNEHMEN: Modus für e3Wert; Admin wählt oben das Unternehmen (Standard = Hermann Technologies · Emin · …)
-    _e3.untFelder = D.unternehmen ? new Set(D.unt_felder || []) : null
+    // Spalte regeln fehlt (SQL nicht eingespielt): im Unternehmen nur „im Planer" + Modell änderbar, alles andere Anzeige (Master: klare Meldung statt Fehler)
+    _e3.untFelder = D.unternehmen ? new Set((D.unternehmen.spalte_regeln === false) ? [] : (D.unt_felder || [])) : null
     const unt = (D.unternehmen_liste || []).length > 1 ? `<span class="e3-unt">${D.unternehmen_liste.map(u => `<button type="button" class="e3-unt-b${String(u.gruppe_id || '') === String((D.unternehmen || {}).gruppe_id || '') ? ' an' : ''}" data-e3-unt="${e3E(u.gruppe_id || '')}">${e3E(u.name || '?')}</button>`).join('')}</span>` : ''
     return `<div class="panel e3-gruppe"><div class="wd-panel-kopf"><div class="panel-title">Einstellungen <span class="e3-psub">· Challenge-Planer ${art === 'cfd' ? 'CFD' : 'Futures'}${gs ? ' · ' + e3E(gs.name || '') + ' · Standard + eigene Änderungen' : admin ? '' : ' · nur ansehen'}</span></div>${unt}</div>
       <div class="wd-set-grid">${e3FirmenKarte(D, art, admin, firmen, w)}${e3ZielTradeKarte(D, art, admin, sel)}${e3PlanerHedgeKarte(D, art, admin, sel)}</div></div>`

@@ -30579,6 +30579,8 @@ def ap_gruppe_firma_an(regel, fm):
 # „im Planer" der Gruppe stehen weiter in firmen_modell (MO1b/c) und gehen in dieselbe wirksame Regel ein (modell, planen). Ein 3. Unternehmen =
 # neue Zeile mit leerer Abweichung = alles Standard. Phase 1 änderbar: Firma an/aus, Modell, TP, Lots/Kontrakte, Puffer, Schritt, Startfenster;
 # Ziel %, Drawdown, Boden, Kauf, Consistency bleiben Standard (folgt in Phase 2, wenn auch Ziel-Wache/Boden/Kontowert je Unternehmen lesen). ══
+AP_UNT_NICHT_FREI = ("Einstellungen je Unternehmen noch nicht freigeschaltet — es gilt der Standard (Firma an/aus und Modell gehen schon). "
+                     "Admin: sql/2026-11-05_regel_unternehmen.sql einspielen.")
 AP_UNT_FELDER = ("tp", "menge", "puffer", "puffer_je_menge", "menge_schritt")
 AP_UNT_NIE = ("kette", "gewinntage")   # Fremd-Review: Topstep-Kette (Trade 2 legt ap_kette_tick aus dem Standard an) und Mindesttage bleiben Standard
 
@@ -37161,8 +37163,8 @@ def _ap_unt_zugang(gid):
     zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gid}"}) or [None])[0]
     if not zeile:
         return uid, None, None, (jsonify({"ok": False, "msg": "Unternehmen ohne Planer-Zeile"}), 404)
-    if "regeln" not in zeile:
-        return uid, None, None, (jsonify({"ok": False, "msg": "Spalte regeln fehlt — sql/2026-11-05_regel_unternehmen.sql einspielen"}), 503)
+    # Spalte regeln fehlt (SQL noch nicht eingespielt): Firma an/aus + Modell gehen über firmen_modell trotzdem; eine Abweichung je Feld meldet
+    # der Schreibweg klar mit AP_UNT_NICHT_FREI (Master 05.11.2026: statt rohem 400/503-Text)
     return uid, reg, zeile, None
 
 
@@ -37185,9 +37187,11 @@ def admin_auto_plan_kernwert():
                                                 str(body.get("firma") or ""), body.get("aenderungen") or [], body.get("standard") or [])
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
+        if "regeln" not in zeile and abw:
+            return jsonify({"ok": False, "msg": AP_UNT_NICHT_FREI, "code": "unt_nicht_frei"}), 409
         jetzt_iso = datetime.now(timezone.utc).isoformat()
         g_flt, g_upd = ap_unt_stempel(zeile, jetzt_iso)       # gleichzeitiges Speichern (Modell-Dropdown, zweiter Tab) überschreibt sich nicht
-        upd = dict({"regeln": abw, "updated_at": jetzt_iso}, **g_upd)
+        upd = dict({"regeln": abw, "updated_at": jetzt_iso} if "regeln" in zeile else {"updated_at": jetzt_iso}, **g_upd)
         if "firmen_modell" in zeile:
             upd["firmen_modell"] = fm
         elif fm != (zeile.get("firmen_modell") or {}):
@@ -38117,6 +38121,8 @@ def admin_auto_plan_ablaufwert():
             return err
         if any(body.get(k) is not None for k in ("zufall", "auto_bestaetigen", "bloecke", "schalter", "aktiv")):
             return jsonify({"ok": False, "msg": "im Unternehmen ist nur das Startfenster änderbar (Schalter gelten für alle; Rest folgt in Phase 2)"}), 400
+        if "regeln" not in zeile:
+            return jsonify({"ok": False, "msg": AP_UNT_NICHT_FREI, "code": "unt_nicht_frei"}), 409
         abw, z_neu, grund = ap_unt_zeiten_aendern(reg.get("zeiten"), zeile.get("regeln"), body.get("zeiten") or [], body.get("standard") is True)
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
