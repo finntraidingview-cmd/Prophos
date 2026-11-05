@@ -43384,6 +43384,23 @@
     const zusatz = alt.includes(' · ') ? alt.slice(alt.indexOf(' · ') + 3).trim() : ((alt.match(/\(([^()]+)\)\s*$/) || ['', ''])[1]).trim()
     return { groesse, zusatz }
   }
+  /* ADD-ONS IM NAMEN (O1b, Finn 05.11.2026: „mach die Add-ons immer in den Namen mit rein, wie bei Jacobs 1 % Rule Acc"): „<Größe> <External ID> → <Phase>"
+   * + je aktivem Add-on „ · 1% Rule" / „ · On Demand" (Reihenfolge fest: 1% Rule vor On Demand), danach andere Zusätze unverändert (z. B. „ONESIDE BETTING!!").
+   * EINE Quelle: der Zusatz hinter „ · ". opts.eins / opts.od: true = rein, false = raus, undefined = so lassen. Idempotent (kein zweiter Zusatz bei Mehrfachklick).
+   * „1% RULE" in anderer Schreibweise bleibt erkennbar (accEinsProzentName / fcp_eins_prozent) und wird beim Einschalten nicht verdoppelt. */
+  const ADDON_EINS_RE = /^1\s*%\s*-?\s*rule$/i, ADDON_OD_RE = /^on[\s-]*demand$/i
+  function kontoZusatzMitAddons(zusatz, opts = {}){
+    const teile = String(zusatz || '').split(' · ').map(x => x.trim()).filter(Boolean)
+    const einsAlt = teile.find(x => ADDON_EINS_RE.test(x)), odAlt = teile.find(x => ADDON_OD_RE.test(x))
+    const rest = teile.filter(x => !ADDON_EINS_RE.test(x) && !ADDON_OD_RE.test(x))
+    const eins = opts.eins === undefined ? !!einsAlt : !!opts.eins, od = opts.od === undefined ? !!odAlt : !!opts.od
+    return [eins ? (einsAlt || '1% Rule') : '', od ? 'On Demand' : '', ...rest].filter(Boolean).join(' · ')
+  }
+  function kontoNameMitAddons(name, opts = {}){
+    const n = String(name || ''), i = n.indexOf(' · ')
+    const kopf = (i >= 0 ? n.slice(0, i) : n).trim(), z = kontoZusatzMitAddons(i >= 0 ? n.slice(i + 3) : '', opts)
+    return z ? `${kopf} · ${z}` : kopf
+  }
   function kontoNameBauen(altName, typ, ext){
     const t = kontoNameTeile(altName)
     return kontoNameRegel(t.groesse, ext, typ, t.zusatz)
@@ -44756,15 +44773,17 @@
     if(art === 'eins' && a.type !== 'funded_cfd') return   // nie bei anderen Kontoarten (Hedge-Risiko, Prüfer O1)
     if(art === 'eins' && !accIstFundedNextCfd(a) && !(a.maxRisikoTrade > 0) && !accEinsProzentName(a)) return   // O1b: anschalten nur bei FundedNext
     let upd = null, msg = ''
-    if(art === 'od'){ upd = { on_demand: !a.onDemand }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
+    if(art === 'od'){ upd = { on_demand: !a.onDemand, name: kontoNameMitAddons(a.name, { od: !a.onDemand }) }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
     else if(art === 'eins'){
-      if(a.maxRisikoTrade > 0){ upd = { max_risiko_trade: null }; msg = accEinsProzentName(a) ? '1 % Rule: max Risiko geleert — steht aber im Namen und gilt weiter (Name im Bearbeiten ändern)' : '1 % Rule aus' }
-      else if(accEinsProzentName(a)){ if(typeof atToast === 'function') atToast('1 % Rule steht im Namen — zum Ausschalten den Namen im Bearbeiten ändern', 'end'); return }
+      if(a.maxRisikoTrade > 0 || accEinsProzentName(a)){
+        const n2 = kontoNameMitAddons(a.name, { eins: false })   // O1b: aus = max Risiko leer + „ · 1% Rule" raus aus dem Namen
+        if(accEinsProzentName({ name: n2 })){ if(typeof atToast === 'function') atToast('„1% Rule" steht anders im Namen — zum Ausschalten den Namen im Bearbeiten ändern', 'end'); return }
+        upd = { max_risiko_trade: null, name: n2 }; msg = '1 % Rule aus' }
       else {
         const gN = parseFloat(String(kontoNameTeile(a.name).groesse || '').replace(',', '.'))   // Kontogröße: Starting Balance, sonst „100k" aus dem Namen
         const g = Number(a.startingBalance) > 0 ? Number(a.startingBalance) : (gN > 0 ? gN * 1000 : 0)
         if(!(g > 0)){ if(typeof atToast === 'function') atToast('1 % Rule: Kontogröße unbekannt — max Risiko im Bearbeiten eintragen', 'end'); return }
-        upd = { max_risiko_trade: Math.round(g / 100) }; msg = `1 % Rule an — max ${Math.round(g / 100).toLocaleString('de-DE')} $ je Trade`
+        upd = { max_risiko_trade: Math.round(g / 100), name: kontoNameMitAddons(a.name, { eins: true }) }; msg = `1 % Rule an — max ${Math.round(g / 100).toLocaleString('de-DE')} $ je Trade`
       }
     }
     if(!upd) return
@@ -44775,6 +44794,7 @@
       if(!data) throw new Error('nicht gespeichert (fremdes Konto?)')
       if('on_demand' in upd) a.onDemand = data.on_demand === true
       if('max_risiko_trade' in upd) a.maxRisikoTrade = data.max_risiko_trade != null ? Number(data.max_risiko_trade) : null
+      if('name' in upd && data.name) a.name = data.name
       if(typeof atToast === 'function') atToast('Add-on · ' + msg, 'start')
       renderAccounts()
     }catch(e){ if(btn) btn.disabled = false; if(typeof atToast === 'function') atToast('Add-on nicht gespeichert: ' + ((e && e.message) || e), 'end') }
@@ -46236,6 +46256,7 @@
       maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
       maxRisikoTrade: !isNaN(maxRisiko) && maxRisiko > 0 ? maxRisiko : null,
       onDemand: accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? accEls.onDemand.checked : undefined,   // O1: nur wenn der Schalter sichtbar war
+      ...(accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? { name: kontoNameMitAddons(name, { od: !!accEls.onDemand.checked }) } : {}),   // O1b: Add-on im Namen
       autoPlaner: accEls.autoPlaner ? accEls.autoPlaner.checked : true,   // Auto-Planer-Haken (08.10.2026)
       // Ziel-Felder je nach sichtbarem Block: Winning Days (Futures-Funded,
       // manuell) / Fortschritts-Ziel (CFD-Phase, automatisch) / sonst Bestand.
@@ -46564,6 +46585,8 @@
   accEls.maxDd?.addEventListener('input', () => { _acDdAuto = null; _acDdLauf++; const h = document.getElementById('ac-maxdd-hint'); if(h) h.hidden = true })   // Hand-Eingabe gewinnt
   accEls.groesse?.addEventListener('input', acNameVorschlag)
   accEls.zusatz?.addEventListener('input', acNameVorschlag)
+  accEls.onDemand?.addEventListener('change', () => {   // O1b: Add-on im Namen — Zusatz-Feld nachführen, Name neu vorschlagen
+    if(accEls.zusatz){ accEls.zusatz.value = kontoZusatzMitAddons(accEls.zusatz.value, { od: !!accEls.onDemand.checked }); try{ acNameVorschlag() }catch(_){} } })
   accEls.extId?.addEventListener('input', acNameVorschlag)
   // Consistency (07.10.2026): „Andere Zahl …" blendet das Zahlenfeld ein (eigene Verdrahtung, nur dieses Popup)
   accEls.cons?.addEventListener('change', () => {
