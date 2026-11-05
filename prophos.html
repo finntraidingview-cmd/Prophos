@@ -55496,6 +55496,9 @@
   let _tpWd = false               // Winning Day (24.09.2026 abends): tvv2 + hedge_eur aus der Staffel, nur Funded-Futures
   let _tpChHedge = false          // „Challenges mit Hedge" (09.10.2026): Schalter im Popup-Kopf, je ID, s. tpChHedgeLaden
   let _tpO3 = false               // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge mit der Farm-Rechnung, jedes Futures-Konto, Master-SL = Risiko Master
+  // Nova gewählt (06.11.2026, Finn: „bei Nova nur die Topstep-Accounts anzeigen und nicht von anderen"): derselbe Orbit-Zustand (tvv2 + _tpO3),
+  // nur merkt sich das Popup, dass der Nova-Knopf gedrückt wurde — dann zeigt das Master-Dropdown nur Topstep. Orbit bleibt wie es war.
+  let _tpNova = false
   // Rest von Hand mit Hedge (26.10.2026): Konto-ID, für die DIESES Popup Orbit auf einem Challenge-Konto erlaubt — nur über den Radar-Knopf
   // „Trade planen" (tpRestHedgeOeffnen) bzw. beim Bearbeiten eines solchen Plans; jedes andere Öffnen setzt sie auf null
   let _tpRestHedge = null, _tpRestHedgeNaechst = null
@@ -55743,8 +55746,9 @@
     document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2' && !_tpWd && !_tpO3)
     // Orbit vs. Nova (27.10.2026): derselbe Zustand (tvv2 + _tpO3) — auf einem Topstep-Konto heißt der Weg Nova (wird tsv2 beim Speichern)
     const _novaKonto = tpMasterIstTopstep()
-    document.getElementById('tp-route-o3')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && !_novaKonto)
-    document.getElementById('tp-route-nova')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && _novaKonto)
+    // Nova gedrückt (06.11.2026): Knopf bleibt Nova, auch solange noch kein Konto gewählt ist
+    document.getElementById('tp-route-o3')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && !_novaKonto && !_tpNova)
+    document.getElementById('tp-route-nova')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && (_novaKonto || _tpNova))
     document.getElementById('tp-route-wd')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpWd)
     document.getElementById('tp-route-tsv2')?.classList.toggle('active', _tpRoute === 'tsv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
@@ -56823,7 +56827,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2106'
+  const OS_TAB_BUILD = '2026-09-22.2107'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -67623,11 +67627,13 @@
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
+    // Nova (06.11.2026): beim Bearbeiten ein tsv2-Plan mit Orbit-Hedge (Topstep Big Trade), neu = letzte Wahl
+    _tpNova = _tpO3 && (_editPlan ? (_editPlan.route === 'tsv2' && !!_editPlan.orbitV3) : localStorage.getItem('prophos_tp_nova') === '1')
     // Rest von Hand mit Hedge (26.10.2026): nur der Radar-Knopf (tpRestHedgeOeffnen) bzw. ein so angelegter Plan öffnet die Ausnahme —
     // vorgewählt Orbit, ohne die gemerkte Weg-Wahl (localStorage) des normalen Popups anzufassen
     _tpRestHedge = _tpRestHedgeNaechst || (_editPlan && _editPlan.restHedge && _editPlan.masterAccountId ? String(_editPlan.masterAccountId) : null)
     _tpRestHedgeNaechst = null
-    if(_tpRestHedge && !_editPlan){ _tpRoute = 'tvv2'; _tpO3 = true; _tpWd = false }
+    if(_tpRestHedge && !_editPlan){ _tpRoute = 'tvv2'; _tpO3 = true; _tpWd = false; _tpNova = false }
     // Schalter „Challenges mit Hedge" (09.10.2026): sofort aus dem Komfort-Speicher, danach frisch aus user_settings
     tpChHedgeLaden()
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
@@ -67932,6 +67938,9 @@
         const isProtected = protectedIds.has(String(a.id)) && !orbitSlaveStreng
         if(orbitSlaveStreng && !(_dupSlaveIds && _dupSlaveIds.has(String(a.id)))) return false
         if(archive[a.id]?.archived && !isProtected) return false
+        // Nova gewählt (06.11.2026, Finn: „bei Nova nur die Topstep-Accounts anzeigen und nicht von anderen"): nur Firma Topstep — auch
+        // ein geschützter Master (Orbit-Plan bearbeitet, dann Nova gedrückt) fällt raus; ein Nova-Plan hat ohnehin einen Topstep-Master
+        if(_tpRoute === 'tvv2' && _tpO3 && _tpNova && role === 'master' && !/topstep/i.test(String(a.firm || ''))) return false
         if(!isProtected){
           // Kontoart je Weg (06.10.2026): mit Hedge nur Fundeds/Winning Days, ohne Hedge nur Challenges — s. tpKontoartPasstZumWeg
           if(role === 'master' && !tpKontoartPasstZumWeg(a)) return false
@@ -68224,12 +68233,14 @@
         b.addEventListener('click', () => {
           const wd = id === 'tp-route-wd'   // Winning Day = tvv2 + Staffel-Hedge, Dropdown nur Funded-Futures (24.09.2026 abends)
           const o3 = id === 'tp-route-o3' || id === 'tp-route-nova'   // Orbit V3 = tvv2 + Fusion-Hedge, jedes Futures-Konto (01.10.2026); Nova = derselbe Zustand (27.10.2026)
-          if(id === 'tp-route-nova') tpNovaKontoWaehlen()
-          if(_tpRoute === r && _tpWd === wd && _tpO3 === o3){ tpRouteUpdateSeg(); return }
-          _tpRoute = r; _tpWd = wd; _tpO3 = o3
+          const nova = id === 'tp-route-nova'   // Nova (06.11.2026): Master-Dropdown nur Topstep, s. _tpNova
+          if(nova) tpNovaKontoWaehlen()
+          if(_tpRoute === r && _tpWd === wd && _tpO3 === o3 && _tpNova === nova){ tpRouteUpdateSeg(); return }
+          _tpRoute = r; _tpWd = wd; _tpO3 = o3; _tpNova = nova
           localStorage.setItem(TP_ROUTE_LS, r)
           localStorage.setItem('prophos_tp_wd', wd ? '1' : '0')
           localStorage.setItem('prophos_tp_o3', o3 ? '1' : '0')
+          localStorage.setItem('prophos_tp_nova', nova ? '1' : '0')
           tpRouteApply()
           if(wd){
             // TP-Vorschlag aus der Firmen-Spanne des gewählten Kontos (wie der Farmer), nur wenn das Feld leer ist
@@ -68388,7 +68399,7 @@
   let _tpFuer = null   // {uid, name, acc, ls:{…gemerkte Weg-Wahl}, wache}
   // Topstep V2 und Nova von Hand startet nur ein Klick am PC (suStartetNichtWeil) — im Fremd-Modus weg; Topstep über Winning Day
   const TP_FUER_KLASSISCH = ['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-tsv2', 'tp-route-nova', 'tp-route-polar']
-  const tpFuerLsKeys = () => [TP_ROUTE_LS, 'prophos_tp_wd', 'prophos_tp_o3']
+  const tpFuerLsKeys = () => [TP_ROUTE_LS, 'prophos_tp_wd', 'prophos_tp_o3', 'prophos_tp_nova']
   function tpFuerEnde(){
     const f = _tpFuer
     if(!f) return
