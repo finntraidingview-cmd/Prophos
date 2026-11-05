@@ -79,8 +79,13 @@ check("const wdKontoPayoutOffen = k => !!k && (k.hinweis === WD_HINWEIS_PAYOUT |
       "Helfer wdKontoPayoutOffen: Zeilen-Hinweis, eigener Cache, payout_offen vom Server")
 i = html.index("async function wdPlaeneAnlegen(")
 blk = html[i:html.index("// 2) Ein Aufruf", i)]
-check(blk.index("if(wdKontoPayoutOffen(k)){ k.aktiv = false; k.hinweis = WD_HINWEIS_PAYOUT") < blk.index("allePlaene.push(pr)"),
-      "wdPlaeneAnlegen: offene Anfrage → kein Plan, Hinweis = W1-Hinweis (vor dem Anlegen)")
+# SA1 #4 (05.11.2026): wdPlaeneAnlegen wertet NUR den Hinweis der frisch geladenen Zeile (kein alter Mac-/PC-Stand); die offene Anfrage selbst prüft
+# POST /admin/wd-plaene frisch und gibt WD_HINWEIS_PAYOUT als Grund zurück, der Tab schreibt ihn in die Zeile
+check(blk.index("if(k.hinweis === WD_HINWEIS_PAYOUT){ k.aktiv = false; delete k.nach_start; ge = true; continue }") < blk.index("allePlaene.push(pr)")
+      and "wdKontoPayoutOffen(" not in blk and "wdPayoutOffen(" not in blk,
+      "wdPlaeneAnlegen: Payout-Hinweis der Zeile → kein Plan (vor dem Anlegen), kein alter Cache-Stand")
+i2 = html.index("for(const u of ((res && res.uebersprungen) || [])){", i)
+check("k.aktiv = false; k.hinweis = u.grund" in html[i2:i2 + 600], "wdPlaeneAnlegen: Server-Grund (frisch geprüfte offene Anfrage) wird zum Zeilen-Hinweis")
 i = html.index("async function wdKontoHeute(")
 blk = html[i:html.index("wdRender()", i)]
 check(blk.index("if(rein && wdKontoPayoutOffen(k)) return wdSay(") < blk.index("k.aktiv = !!(rein"), "wdKontoHeute: „heute rein“ bei offener Anfrage abgelehnt, bevor aktiv gesetzt wird")

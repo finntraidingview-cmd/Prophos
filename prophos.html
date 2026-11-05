@@ -71555,7 +71555,10 @@
         if(!wdAktiv(k)){ if(k.farm && k.ext && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true } else continue }
         const kd = wdKontoDaten(k.id)
         if(!kd || kd.archiviert){ k.aktiv = false; k.hinweis = kd ? WD_HINWEIS_ARCHIV : 'Konto nicht (mehr) gefunden'; ge = true; continue }
-        if(wdKontoPayoutOffen(k)){ k.aktiv = false; k.hinweis = WD_HINWEIS_PAYOUT; delete k.nach_start; ge = true; continue }   // PAYOUT OFFEN (R2c): nie ein Plan
+        // PAYOUT OFFEN (R2c): nie ein Plan. SA1 #4 (Prüfer-Hinweis R2c, NK1 05.11.2026): hier NUR der Hinweis der frisch geladenen Tageszeile — ein alter Stand
+        // (Mac payout_offen vom letzten Laden, PC-Cache ≤ 60 s) setzte ein nach dem Abhaken von W1 zurückgeholtes Konto wieder auf „Payout angefragt“. Eine
+        // wirklich offene Anfrage fängt POST /admin/wd-plaene frisch ab (pending_payouts) und gibt WD_HINWEIS_PAYOUT als Grund zurück → Hinweis unten in der Zeile.
+        if(k.hinweis === WD_HINWEIS_PAYOUT){ k.aktiv = false; delete k.nach_start; ge = true; continue }
         if(wdZyklusUngeklaert(k)){ wdRecovererAlarm(k.id, 'stand', 0); continue }   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026); Mac = Hand-Aktion, sofort melden
         const accLike = wdAccLike(kd)
         const z = tpVorplanZeile(accLike, { live: kd.live_balance, slaveCurrency: sPreset.currency, fx: d.fx, regeln: vp.regeln })
