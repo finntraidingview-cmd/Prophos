@@ -54276,19 +54276,25 @@
    * Jeder Ausstieg ohne Order nimmt das Fenster deshalb sofort zurück: panel.py /api/plan-delete?id= (delete_plan, derselbe Weg wie der
    * Löschen-Knopf der Panel-Ansicht). Nur ein Fenster, das DIESER Check als „geplant" bekam und das laut Panel (instances → plans) noch
    * genau so steht: nie „laufend" (dann liegt eine Position), nie mit neuerem armed_at (ein anderer Start auf demselben Master hat es
-   * inzwischen erneuert — upsert_plan hält ein Fenster je Config), nie, wenn der frische Snapshot eine Master-Position zeigt.
+   * inzwischen erneuert — upsert_plan hält ein Fenster je Config) und nur, wenn ein frischer Snapshot ohne note beweist: keine Master-Position
+   * (geschlossen, Prüfer S2 — ohne Beweis bleibt es stehen, z. B. bei zugefahrenem Terminal nach einem gescheiterten Start).
    * REIN bis auf die zwei Panel-Aufrufe; wirft nie. → { ok, grund } */
   function echoFensterZuruecknehmenUrteil(fenR, inst, aktuell){   // REIN: darf das Fenster weg? → '' = ja, sonst der Grund
     const p = (fenR && fenR.plan) || {}
     if(!(fenR && fenR.ok === true) || !(Number(p.id) > 0)) return 'kein Fenster von diesem Check'
     if(String(p.status || '') !== 'geplant') return `Fenster steht auf „${String(p.status || 'leer')}"`
     if(aktuell === null) return 'Fenster schon weg'
-    if(aktuell){
-      if(String(aktuell.status || '') !== 'geplant') return `Fenster steht inzwischen auf „${String(aktuell.status || 'leer')}"`
-      if(String(aktuell.armed_at || '') !== String(p.armed_at || '')) return 'Fenster inzwischen von einem anderen Start erneuert'
-    }
-    const st = (inst && inst.status) || {}
-    if(inst && inst.alive && !st.note && (Array.isArray(st.master_positions) ? st.master_positions : []).length) return 'Master-Position offen'
+    // GESCHLOSSEN (Prüfer S2, 05.11.2026): gelöscht wird nur mit Beweis — Plan-Liste lesbar, Fenster unverändert, Instanz frisch ohne note und
+    // OHNE Master-Position. Fehlt einer davon (Panel nicht lesbar, Terminal zu → note „warte auf Snapshot", Snapshot eingefroren), bleibt das Fenster
+    // stehen: lieber 6 h scharf als einen laufenden Trade ungehedgt lassen
+    if(aktuell === undefined) return 'Plan-Liste des Panels nicht lesbar — ohne Beweis bleibt das Fenster'
+    if(String(aktuell.status || '') !== 'geplant') return `Fenster steht inzwischen auf „${String(aktuell.status || 'leer')}"`
+    if(String(aktuell.armed_at || '') !== String(p.armed_at || '')) return 'Fenster inzwischen von einem anderen Start erneuert'
+    if(!inst) return 'Instanz nicht lesbar — ohne Beweis bleibt das Fenster'
+    const st = inst.status || {}
+    if(!inst.alive || st.note) return 'kein frischer Snapshot des Masters (keine Position beweisbar) — Fenster bleibt'
+    if(!Array.isArray(st.master_positions)) return 'Positionsliste fehlt — Fenster bleibt'
+    if(st.master_positions.length) return 'Master-Position offen'
     return ''
   }
   async function echoFensterZuruecknehmen(file, fenR, planId){
@@ -56610,7 +56616,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2092'
+  const OS_TAB_BUILD = '2026-09-22.2093'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
