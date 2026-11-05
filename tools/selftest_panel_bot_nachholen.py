@@ -31,6 +31,11 @@ def stueck(src, anfang, ende):
 
 SRC = open(PANEL, encoding="utf-8").read()
 CODE = stueck(SRC, "\ndef ensure_bot_source(", "\ndef ensure_pywinauto(") + stueck(SRC, "\ndef _version_watcher(", "\ndef _selbst_auffrischen(")
+# RT1 (05.11.2026): der Watcher nutzt seit UPDATE-SCHUTZ (0d2c20be, 29.10.2026) UPDATE_STREU_S/UPDATE_DECKEL_S + update_neustart_entscheiden,
+# seit e8bc2ff4 (30.10.2026) VERSION_NACHZIEHEN_S — der Ausschnitt-Lader kannte sie nicht (NameError). Echte Werte/Funktion aus panel.py.
+KONST = "\n".join(re.search(rf"^{k} = .*$", SRC, re.M).group(0)
+                  for k in ("UPDATE_DECKEL_S", "UPDATE_STREU_S", "UPDATE_LEERLAUF_S", "VERSION_NACHZIEHEN_S"))
+CODE = KONST + "\n" + stueck(SRC, "\ndef update_neustart_entscheiden(", "\ndef panel_lauf_gruende(") + CODE
 GUT = b"def run(cfg, cmd):\n    return 1\n" + b"# " + b"x" * 600 + b"\n"
 NEU = GUT.replace(b"return 1", b"return 2")
 
@@ -62,7 +67,9 @@ def umgebung(ordner, dateien, shas, sleep_log, runden, version=b"2026-09-22.9999
         if s == 15 and len([x for x in sleep_log if x == 15]) > runden:
             raise Stopp()
 
-    zeit = type("Zeit", (), {"sleep": staticmethod(schlafen), "time": staticmethod(time.time)})
+    # RT1 (05.11.2026): Uhr läuft mit den Attrappen-Pausen mit — sonst wartet die Update-Streuung (0–UPDATE_STREU_S, 0d2c20be) echte Sekunden
+    t0 = time.time()
+    zeit = type("Zeit", (), {"sleep": staticmethod(schlafen), "time": staticmethod(lambda: t0 + sum(sleep_log))})
     log = log if log is not None else {}
     log.setdefault("geaendert", []); log.setdefault("uebernommen", []); log.setdefault("print", [])
 
@@ -79,6 +86,9 @@ def umgebung(ordner, dateien, shas, sleep_log, runden, version=b"2026-09-22.9999
           "BOT_STAND": {"sha": None, "version": None, "geholt_sha": None}, "repo_datei": repo_datei,
           "repo_sha": lambda timeout=8: sha_folge.pop(0) if sha_folge else "b" * 40,
           "PROV_JOB": None, "TV_ORDER_LOCK": __import__("threading").Lock(), "MASTER_ORDER_LOCKS": {},
+          # RT1 (05.11.2026): UPDATE-SCHUTZ (0d2c20be) — Panel frei, Schließen gelingt, keine Spur nach außen; _GELADEN (e8bc2ff4)
+          "panel_beschaeftigt_gruende": lambda: [], "_panel_zu_und_leeren": lambda erzwingen: True,
+          "update_spur_melden": lambda *a, **k: None, "_GELADEN": {},
           "polar_panel": None}   # Polar (.1531, 138095d3): panel.py importiert polar_panel optional — None = PC ohne Polar, wie bisher
     exec(compile(CODE, "panel_ausschnitt", "exec"), ns)
     return ns, abrufe
@@ -138,7 +148,8 @@ with tempfile.TemporaryDirectory() as d:
 
     # (6) Prüfer T3: Abruf scheitert, VERSION neu, panel.py im NEUEN Stand anders → Neustart, VERSION nicht still übernommen
     log = {}
-    ns, abrufe = umgebung(d, [ConnectionResetError("weg"), ConnectionResetError("weg")], ["f" * 40, "f" * 40], [], 3,
+    # RT1 (05.11.2026): seit 0d2c20be wartet der Neustart erst die Streuung (bis UPDATE_STREU_S = 60 s) ab — mehr Takte, Stand bleibt „f…“
+    ns, abrufe = umgebung(d, [ConnectionResetError("weg"), ConnectionResetError("weg")], ["f" * 40] * 30, [], 12,
                           version=b"2026-09-22.9999\n", panel_neu="f" * 40, log=log)
     ns["BOT_STAND"].update(sha="a" * 40, geholt_sha="a" * 40)
     raus = False
