@@ -37382,7 +37382,7 @@
       // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
       wdlSofortErledigt(pid)   // Plan ist zu (auch bei Buchungsfehler) → Live Trades sofort nach „Erledigt"
-      if(ab1Konto && !d.buchung_fehler){ try{ ab1Karte(ab1Konto) }catch(_){} }   // AB1: Abhak-Karte (eigene Abfrage, ein Fehler stört das Abhaken nie)
+      if(ab1Konto && !d.buchung_fehler){ try{ ab1Karte(ab1Konto, { planId: pid, mpl, spl, sicht, plHand }) }catch(_){} }   // AB1: Abhak-Karte (eigene Abfrage, ein Fehler stört das Abhaken nie)
       if(d.buchung_fehler){ if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
       const ar = d.archiv || null
@@ -44330,7 +44330,7 @@
     if(k === document.getElementById('ab1-karte')){ clearTimeout(_ab1Timer); _ab1Timer = null }   // nie den Timer einer neueren Karte löschen
     k.classList.add('weg'); setTimeout(() => k.remove(), 220)
   }
-  async function ab1Karte(kontoId){
+  async function ab1Karte(kontoId, radar){
     const id = String(kontoId || ''); if(!id) return
     const nr = ++_ab1Nr
     let d = null
@@ -44343,9 +44343,23 @@
       _k1.cache[id] = { at: Date.now(), d }                 // die Detailseite hat damit gleich den frischen Stand
     }catch(_){ return }
     const ab = d.abhak; if(!ab || d.typ !== 'funded_cfd' || nr !== _ab1Nr) return   // nur das jüngste Abhaken zeichnet
-    ab1Zeichnen(id, d)
+    ab1Zeichnen(id, d, radar)
   }
-  function ab1Zeichnen(id, d){
+  /* „→ Waiting for Payout" (S4/Master 05.11.2026): eigenes Konto → accWartetUmstellen wie bisher; fremdes Konto (Admin im Radar, z. B. Finn + Pascal) → derselbe
+   * Radar-Weg wie das Popup: PATCH /admin/wd-plaene erledigt mit konto_status 'waiting', gleiche plan_id und dieselben P&L-Werte (zweites „Erledigt" ist auf dem
+   * Server eine idempotente Korrektur, die Buchung wird nur nachgezogen), ?ansicht=admin wie mklWdErledigtSpeichern. Ohne wd_zaehlen (nie ein zweiter WD) und
+   * ohne nur_review (Plan ist schon abgehakt). */
+  async function ab1WartetRadar(r){
+    const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+    const res = await fetch(`${WATCHER_HOME}/admin/wd-plaene${r.sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aktion: 'erledigt', plan_id: r.planId, master_pl: r.mpl, slave_pl: r.spl, konto_status: 'waiting', ...(r.plHand ? { pl_quelle: 'hand' } : {}) }) })
+    const d = await res.json().catch(() => ({}))
+    if(!res.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + res.status))
+    const um = d.konto_umstellen || null
+    if(!(um && um.umgestellt)) throw new Error((um && (um.fehler || um.grund)) || 'Konto nicht umgestellt')
+    return true
+  }
+  function ab1Zeichnen(id, d, radar){
     const ab = d.abhak
     document.getElementById('ab1-karte')?.remove()
     const usd = v => (v == null || !isFinite(Number(v))) ? '—' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
@@ -44378,7 +44392,8 @@
       : nx && nx.aktion === 'planen' && nx.tp ? ['', 'Payout', `nächster Trade ≈ ${usd(nx.tp)}`]
       : ab.gewinntage ? ['', 'Payout', `Gewinntage ${ab.gewinntage[0]}/${ab.gewinntage[1]}`]
       : ['', 'Payout', '—', '', nx && nx.grund ? String(nx.grund) : ''])
-    const knopf = ab.bereit && !ab.wartet && acc && acc.type === 'funded_cfd' && !acc.waitingPayoutSince
+    const radarOk = !!(radar && radar.planId && radar.mpl != null && isFinite(Number(radar.mpl)))
+    const knopf = ab.bereit && !ab.wartet && (acc ? (acc.type === 'funded_cfd' && !acc.waitingPayoutSince) : radarOk)   // fremd: nur mit Radar-Kontext
     const k = document.createElement('div')
     k.id = 'ab1-karte'; k.className = 'ab1'; k.setAttribute('role', 'status')
     k.innerHTML = `<div class="ab1-kopf"><b>${escapeHtml(name)}</b><small>${escapeHtml((d.urteil && d.urteil.sub) || 'Funded CFD')}</small></div>${svg}`
@@ -44390,9 +44405,18 @@
       if(!b){ ab1Zu(k); return }
       e.stopPropagation(); if(b.disabled) return
       const jetzt = (accounts || []).find(a => String(a.id) === id)   // frisch: inzwischen woanders umgestellt → nichts schreiben
-      if(!jetzt || jetzt.type !== 'funded_cfd' || jetzt.waitingPayoutSince){ ab1Zu(k); return }
+      if(jetzt){
+        if(jetzt.type !== 'funded_cfd' || jetzt.waitingPayoutSince){ ab1Zu(k); return }
+        b.disabled = true
+        accWartetUmstellen(id, true).then(() => { delete _k1.cache[id]; ab1Zu(k) })
+        return
+      }
+      if(!radarOk){ ab1Zu(k); return }
       b.disabled = true
-      accWartetUmstellen(id, true).then(() => { delete _k1.cache[id]; ab1Zu(k) })
+      ab1WartetRadar(radar)
+        .then(() => { if(typeof atToast === 'function') atToast(`⏳ ${name}: Waiting for Payout`, 'ok') })
+        .catch(err => { if(typeof atToast === 'function') atToast('Nicht umgestellt: ' + ((err && err.message) || err), 'end') })
+        .finally(() => { delete _k1.cache[id]; ab1Zu(k) })
     })
     // ~3 s, mit Knopf 6 s (ein Knopf, der nach 3 s weg ist, ist kaum zu treffen); Maus darüber hält die Karte
     const dauer = knopf ? 6000 : 3000
