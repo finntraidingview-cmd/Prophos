@@ -10336,7 +10336,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             if (stufen.get("challenge") or {}).get("modell") == "trades":
                 stufen_k = dict(stufen, challenge=dict(stufen["challenge"], etappe_usd=cp_et))
             if kw:
-                kw_k = dict(kw, etappe_usd=cp_et)
+                kw_k = dict(kw, etappe_usd=cp_et, etappe_je_groesse={})   # Konto-Consistency geht auch vor der Etappe des Größen-Blocks
         if kw_k and bal is not None:
             kv = ap_kontowert(typ, bal, kw_k, peak=k.get("peak"))
             z["wert_eur"] = kv["wert"] if kv else None
@@ -25182,6 +25182,11 @@ def ap_kw_param(regel):
                                  if any("apex" in str(n).lower() for n in (regel.get("namen") or ())) else {}),   # globals(): die Selftest-Lader ziehen ap_kw_param als Block, nicht jede Konstante
                               **{str(g): float(j["dd_usd"]) for g, j in (regel.get("je_groesse") or {}).items()
                                  if isinstance(j, dict) and j.get("dd_usd")}},
+            # Etappe je Kontogröße (LF1 Nebenbefund, 06.11.2026): trägt die Größe eigene phasen.challenge.tp_max (Lucid 50k 1.200, FundedNext Futures
+            # 50k 1.000), gilt die — sonst rechnete der Kontowert mit der Etappe der großen Größe (3.600 / 3.200); ohne Block: etappe_usd wie bisher
+            "etappe_je_groesse": {str(g): float(j["phasen"]["challenge"]["tp_max"]) for g, j in (regel.get("je_groesse") or {}).items()
+                                  if isinstance(j, dict) and isinstance(j.get("phasen"), dict) and isinstance(j["phasen"].get("challenge"), dict)
+                                  and _wd_num(j["phasen"]["challenge"].get("tp_max")) and float(j["phasen"]["challenge"]["tp_max"]) > 0},
             # Topstep-Kette mit DLL (09.10.2026): Tagesmodell für Vorrat/Kontowert (kette_dll_chance); Tagesziel-Rückfall = AP_KETTE_STANDARD
             "kette_daily": ((regel.get("kette") or {}).get("daily_usd") if isinstance(regel.get("kette"), dict) else None),
             "kette_tagesziel": ((regel.get("kette") or {}).get("tagesziel_usd") or 4500) if isinstance(regel.get("kette"), dict) else None}
@@ -25251,7 +25256,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
         kauf = float(kauf_eur)      # echter Kauf nur, wenn plausibel (0,5–2× Firmenwert) — sonst Gebühr/Sammelbuchung, Firmenwert gilt
     nachz = p.get("boden") == "nachziehend"
     lock = nachz and p.get("lock_bei_start") is True      # 07.10.2026 FundedNext Futures: Boden höchstens bis zum Start
-    etappe = float(p.get("etappe_usd") or dd)
+    etappe = float((p.get("etappe_je_groesse") or {}).get(str(int(groesse))) or p.get("etappe_usd") or dd)   # Größen-Block vor Firma (LF1)
     zp = p.get("ziel_pct") or {}
     phasen = [x for x in AP_KW_PHASEN if x in zp]
     if typ not in phasen and typ in AP_KW_PHASEN and phasen:   # z. B. Topstep-Konto als phase1 geführt → erste Phase
@@ -25820,7 +25825,7 @@ def ap_kw_stufe(typ, balance, p, kv):
         return f"{name} · {'bestanden' if typ in AP_KW_FUNDED else 'frisch'}"
     if g > 0 and p.get("boden") == "nachziehend" and typ not in AP_KW_FUNDED:
         dd = float(p.get("dd_usd") or 0) or float(kv.get("groesse") or 0) * float(p.get("dd_pct") or 0) / 100.0
-        etappe = float(p.get("etappe_usd") or dd or 0)
+        etappe = float((p.get("etappe_je_groesse") or {}).get(str(int(float(kv.get("groesse") or 0)))) or p.get("etappe_usd") or dd or 0)   # wie ap_kontowert
         n = int((g + 1e-9) // etappe) if etappe > 0 else 0
         if n >= 1:
             return f"{name} · nach Etappe {n}"
