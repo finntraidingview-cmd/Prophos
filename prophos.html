@@ -63541,6 +63541,25 @@
     apLeisteZeichnen()
     try{ _apd.d = null; _apd.vorschau = null; _apd.edit = null; apdLaden(true) }catch(_){}   // Delta-Monitor (06.10.2026): je Login frisch, nie Daten der vorigen ID
   }
+  /* EIN KLICK = BESTÄTIGT + FREIGEGEBEN (HF2, Finn 06.11.2026: „einfach einmal ‚Bestätigen', fertig … so, wie es eigentlich bei jedem einzelnen
+   * Modell ist"): eigene Hedge-Pläne (mt5_baseline.hedge_art 'apex' = Orbit Prio 2, 'tradeify_final' = Tradeify-/Lucid-Final) bekommen beim
+   * Bestätigen per supabase-js gleich hedge_freigabe_at/_von — wie Railway _ap_hedge_mit_freigeben für Admin-/Gruppen-Bestätigungen und
+   * Auto-Bestätigen. Guard wie dort (planned, ungeclaimt, noch ohne Freigabe). Fehler → nur Spur: der Plan bleibt dann im Block „Hedge-Freigabe
+   * offen" und der Claim-Riegel trade_plans_a0_hedge_freigabe hält ihn (nie ein Start ohne Freigabe). → rows mit den frisch freigegebenen Zeilen. */
+  const AP_HEDGE_ARTEN = ['apex', 'tradeify_final']
+  async function apHedgeMitFreigeben(rows){
+    rows = rows || []
+    const ids = rows.filter(r => r && !r.hedge_freigabe_at && r.mt5_baseline && AP_HEDGE_ARTEN.includes(r.mt5_baseline.hedge_art)).map(r => String(r.id))
+    if(!ids.length) return rows
+    try{
+      let von = ''; try{ von = String(currentUserId || '').slice(0, 80) }catch(_){}
+      const { data, error } = await supabase.from('trade_plans').update({ hedge_freigabe_at: new Date().toISOString(), hedge_freigabe_von: von || null })
+        .in('id', ids).eq('status', 'planned').is('start_um_gestartet_at', null).is('hedge_freigabe_at', null).select('*')
+      if(error) throw error
+      const neu = new Map((data || []).map(r => [String(r.id), r]))
+      return rows.map(r => neu.get(String(r && r.id)) || r)
+    }catch(e){ console.warn('[hf2] Hedge-Freigabe beim Bestätigen', (e && e.message) || e); return rows }
+  }
   async function apBestaetigen(ids){
     ids = (ids || []).map(String)
     if(!ids.length) return
@@ -63549,7 +63568,7 @@
       const { data, error } = await supabase.from('trade_plans').update({ auto_bestaetigt_at: new Date().toISOString() })
         .in('id', ids).eq('status', 'planned').eq('auto_plan', true).is('auto_bestaetigt_at', null).select('*')
       if(error) throw error
-      for(const row of (data || [])){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }
+      for(const row of (await apHedgeMitFreigeben(data))){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }   // HF2
       renderTradePlans()
       if(typeof atToast === 'function') atToast((data || []).length
         ? `✓ ${(data || []).length} Auto-Plan${(data || []).length === 1 ? '' : 'e'} bestätigt — startet zur Startzeit`
@@ -67343,7 +67362,7 @@
           .eq('id', t.plan_id).eq('status', 'planned').eq('auto_plan', true).is('auto_bestaetigt_at', null).select('*')
         if(error) throw error
         if(!(data || []).length) throw new Error('nicht bestätigt — schon bestätigt, gestartet oder nicht mehr geplant')
-        for(const row of data){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }
+        for(const row of (await apHedgeMitFreigeben(data))){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }   // HF2
         try{ renderTradePlans() }catch(_){}
         if(typeof atToast === 'function') atToast('✓ Vorschlag bestätigt — startet zur Startzeit', 'start')
       } else {
