@@ -46141,8 +46141,13 @@ def _ap_eingriff(aktion):
     if params is None:
         return jsonify({"ok": False, "msg": art}), 400
     try:
+        if sicht is not None:   # eine ID oder die Gruppe des Verwalters (Menge)
+            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
+            if fremd:
+                return jsonify({"ok": False, "msg": "nur eigene Pläne" if isinstance(sicht, str) else "nur Pläne der eigenen Gruppe"}), 403
         # JEDER NUR SEINE COMPANY (Finn 06.11.2026 zu HF2: „wenn ich als Admin-ID in HT acc bestätige, werden nur HT-acc bestätigt. Wenn Emin
-        # bei sich acc bestätigt, nur bei sich. Jeder nur seine Company"): Bestätigen nimmt nur Pläne aus dem Unternehmen des Logins
+        # bei sich acc bestätigt, nur bei sich. Jeder nur seine Company"): Bestätigen nimmt nur Pläne aus dem Unternehmen des Logins. Steht NACH dem
+        # Sicht-Riegel (403 für fremde IDs/Gruppen bleibt wie vor HF2, selftest_emin_bestaetigen), greift also vor allem in der HT-Admin-Sicht
         # (unt_sicht_login: HT / Verwalter-Gruppe / ohne Unternehmen = nur er selbst; Gruppen nicht lesbar → nur die eigene ID, fail-closed)
         gehoert = unt_sicht_login(uid)
         if aktion == "bestaetigen":
@@ -46151,10 +46156,6 @@ def _ap_eingriff(aktion):
                 return jsonify({"ok": True, "aktion": aktion, "n": 0, "zeilen": [], "alle": sicht is None or not isinstance(sicht, str), "hedge_frei": 0,
                                 "msg": "nichts bestätigt — Pläne gehören zu einem anderen Unternehmen"})
             params = dict(params, id=("eq." + ids_ok[0]) if len(ids_ok) == 1 else ("in.(" + ",".join(ids_ok) + ")"))
-        if sicht is not None:   # eine ID oder die Gruppe des Verwalters (Menge)
-            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
-            if fremd:
-                return jsonify({"ok": False, "msg": "nur eigene Pläne" if isinstance(sicht, str) else "nur Pläne der eigenen Gruppe"}), 403
         if aktion == "bestaetigen":
             # BALANCE NICHT LIVE (08.10.2026, Finn: „nur bestätigen, wenn es perfekt ist"): Konto-Balance muss jünger sein als das Ende des
             # letzten Trades dieses Kontos (ap_balance_live) — sonst 400 mit Konto-Namen, nichts geändert. Lesefehler → 503, nicht
