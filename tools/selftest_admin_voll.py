@@ -78,7 +78,7 @@ soll("Hedge-Freigabe-Route über _admin_voll", "uid, err = _admin_voll()" in hf)
 ei = block("_ap_eingriff")
 # HF2 (06.11.2026, Finn: „einfach einmal ‚Bestätigen', fertig"): das ✓ gibt für jeden frei, der bestätigen darf — die Liste admin_voll zählt dort nicht mehr
 soll("HF2: ✓ gibt den Hedge bei jedem Bestätigen frei (ohne admin_voll-Liste)",
-     'admin_voll_frei(' not in ei and '_ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" else 0' in ei)
+     'admin_voll_frei(' not in ei and '_ap_hedge_mit_freigeben(zeilen, uid, ohne_gruppen=sicht is None) if aktion == "bestaetigen" else 0' in ei)
 soll("Rechnungen bleiben bei _admin_auth (ADMIN_EMAILS)", "Rechnungen gesperrt" in block("_admin_auth"))
 soll("SQL: Tabelle mit RLS ohne Policy, Befüllung aus admin_mail_leser, keine E-Mail",
      "create table if not exists public.admin_voll" in SQL and "enable row level security" in SQL and "create policy" not in SQL
