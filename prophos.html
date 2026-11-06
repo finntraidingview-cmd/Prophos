@@ -32649,9 +32649,13 @@
     // RP&L noch nicht gebucht (Prüfer 29.10.2026): Flach-Beweis vor dem RP&L-Update → Delta 0 bei einem Trade, den der Radar ≠ 0 schätzt
     if(Math.abs(delta) < 0.005 && !(sz != null && Math.abs(sz) < 0.005)) gruende.push('RP&L seit dem Klick unverändert — Buchung in TopstepX noch nicht sichtbar')
     if(bal == null) gruende.push('Balance im TopstepX-Kopf nicht lesbar')
-    if(sz == null) gruende.push('keine Radar-Schätzung zum Vergleich')
-    else if(Math.abs(delta - sz) > tsxAugeToleranz(sz)) gruende.push(`RP&L-Delta ${delta} weicht von der Radar-Schätzung ${sz} um mehr als ${tsxAugeToleranz(sz)} $ ab`)
     const bs = num(tv.balance_start)
+    // NOVA OHNE RADAR-SCHÄTZUNG (NV3, Finn 06.11.2026 „P&L sofort aus dem Auge", Test Marco adc10fd9: Hedge schloss über den Reader
+    // (master_ende_reader) → final.master_pl_schaetzung fehlte → nur Vorschlag, obwohl Balance-Differenz = RP&L-Delta auf den Cent): bei Nova
+    // genügt dann der harte Balance-Beweis (≤ TSX_AUGE_BAL_TOL, gleiche Basis). Fehlt er, bleibt der alte Grund. Andere Wege unverändert.
+    const balBeweis = bs != null && bal != null && tvBalanceBasisGleich(tv, { balance_relativ: rel }) && Math.abs((bal - bs) - delta) <= TSX_AUGE_BAL_TOL
+    if(sz == null){ if(!(tpIstNova(p) && balBeweis)) gruende.push('keine Radar-Schätzung zum Vergleich') }
+    else if(Math.abs(delta - sz) > tsxAugeToleranz(sz)) gruende.push(`RP&L-Delta ${delta} weicht von der Radar-Schätzung ${sz} um mehr als ${tsxAugeToleranz(sz)} $ ab`)
     if(bs != null && bal != null && tvBalanceBasisGleich(tv, { balance_relativ: rel }) && Math.abs((bal - bs) - delta) > TSX_AUGE_BAL_TOL)
       gruende.push(`Balance-Differenz ${Math.round((bal - bs) * 100) / 100} ≠ RP&L-Delta ${delta}`)
     const startMs = Date.parse(p.startedAt || '') || 0
