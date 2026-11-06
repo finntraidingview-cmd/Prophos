@@ -31195,7 +31195,6 @@ def tfh_tick(jetzt=None, force=False):
                                   "status": "eq.planned", "route": "eq.tvv2", "orbit_v3": "not.is.true", "auto_plan": "is.true",
                                   "start_um_gestartet_at": "is.null", **firmen_filter, "order": "start_um.asc"})
     namen, aus = _ap_namen()
-    hf_aus = set(aus)   # HF2 Prüfer-Stopp: Emins Gruppe bekommt die Freigabe nie aus dem Takt (hf_frei_bei_kennung)
     _gids = {str(u) for u in ap_planer_gruppen_ids()}
     aus = set(aus) - _gids   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     if par["firmen"] == ("tradeify",):
@@ -31241,7 +31240,7 @@ def tfh_tick(jetzt=None, force=False):
             vs = tfh_vorschau(a, p, echo_bal, dup_bal, ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf, par)
             if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
                 try:
-                    sb_update("trade_plans", _tfh_guard(p), dict({"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p, aus=hf_aus)))
+                    sb_update("trade_plans", _tfh_guard(p), dict({"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p)))
                 except Exception as e:
                     _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
         return erg
@@ -31271,10 +31270,10 @@ def tfh_tick(jetzt=None, force=False):
         vs = tfh_vorschau(a, p, echo_bal, dup_bal, ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf, par)
         if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
             try:
-                sb_update("trade_plans", _tfh_guard(p), dict({"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p, aus=hf_aus)))
+                sb_update("trade_plans", _tfh_guard(p), dict({"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p)))
                 if base.get("hedge_art") != "tradeify_final":
                     _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler {tfh_name(p)} erkannt — "
-                              + ("schon bestätigt, Hedge mit freigegeben (HF2)" if hf_frei_bei_kennung(p, aus=hf_aus) else "wartet auf Bestätigung im Challenge-Planer"))
+                              + ("schon bestätigt, Hedge mit freigegeben (HF2)" if hf_frei_bei_kennung(p) else "wartet auf Bestätigung im Challenge-Planer"))
             except Exception as e:
                 _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
             continue
@@ -31691,13 +31690,13 @@ def ap_ids_hedge_felder(p):
             "hedge_frei": bool(p.get("hedge_freigabe_at")), "hedge_weg": "echo" if echo else None}
 
 
-def hf_frei_bei_kennung(p, jetzt=None, aus=()):
+def hf_frei_bei_kennung(p, jetzt=None):
     """REIN RECHNEND (testbar, HF2 06.11.2026, Finn: „einfach einmal ‚Bestätigen', fertig"): bekommt ein SCHON BESTÄTIGTER Plan
     (auto_bestaetigt_at gesetzt) erst danach die Hedge-Kennung (tfh_tick/ah_tick markieren im Takt, Auto-Bestätigen kann vorher gelaufen sein),
     zählt die Bestätigung als Freigabe → Felder hedge_freigabe_at/_von fürs selbe Update. Unbestätigt, schon freigegeben oder die Spalte nicht
-    mitgelesen (ah_tick-Rückfall ohne hedge_freigabe_at) → {}. aus = ADMIN_EXCLUDE (Emins Gruppe, Prüfer-Stopp S2 zu HF2: „Zwei Unternehmen
-    getrennt" — wer bestätigt hat, weiß der Takt nicht; dort gibt nur der eigene Bestätigen-Klick frei) → {}."""
-    if "hedge_freigabe_at" not in p or not p.get("auto_bestaetigt_at") or p.get("hedge_freigabe_at") or str(p.get("user_id")) in {str(x) for x in aus}:
+    mitgelesen (ah_tick-Rückfall ohne hedge_freigabe_at) → {}. Unternehmen: seit „Jeder nur seine Company" (06.11.2026) bestätigt jeder nur
+    Pläne seines Unternehmens (_ap_eingriff, Auto-Bestätigen nur HT-IDs) — eine Bestätigung kam also immer aus dem eigenen Unternehmen."""
+    if "hedge_freigabe_at" not in p or not p.get("auto_bestaetigt_at") or p.get("hedge_freigabe_at"):
         return {}
     return {"hedge_freigabe_at": (jetzt or datetime.now(timezone.utc)).isoformat(), "hedge_freigabe_von": "bestaetigt"}
 
@@ -31773,26 +31772,37 @@ def _hedge_freigabe_schreiben(ids, basis, uid):
     return n, stehen
 
 
-def _ap_hedge_mit_freigeben(zeilen, uid, ohne_gruppen=True):
+def hf_ids_im_unternehmen(zeilen, gehoert):
+    """REIN RECHNEND (testbar, HF2 06.11.2026 „Jeder nur seine Company"): Plan-IDs der Zeilen {id, user_id}, deren ID zum Unternehmen gehört
+    (gehoert(u) → bool, z. B. unt_sicht_login). Reihenfolge bleibt, ohne Doppelte."""
+    out = []
+    for z in zeilen or []:
+        i = str(z.get("id") or "")
+        if i and i not in out and gehoert(str(z.get("user_id"))):
+            out.append(i)
+    return out
+
+
+def _ap_hedge_mit_freigeben(zeilen, uid, gehoert=None):
     """EIN BESTÄTIGEN JE TRADE (Finn 30.10.2026, über Master: „Ich werde die Trades einmal bestätigen … dann werden sie abgespielt"):
     „Bestätigen" eines Hedge-Plans im Admin → Challenge-Planer setzt auto_bestaetigt_at UND hedge_freigabe_at/_von in einem Schritt.
     Nur Admin-Sicht (wie POST /admin/auto-plan/hedge-freigabe); Guard wie dort (planned, ungeclaimt, ohne Freigabe, hedge_art in der Liste).
     Der Claim-Riegel trade_plans_a0_hedge_freigabe bleibt unverändert. Fehler → 0 + Log: der Plan bleibt dann im Altlast-Block
     „Hedge-Freigabe offen" und hält am Riegel (nie ein Start ohne Freigabe)."""
     # HF2 (Finn 06.11.2026: „einfach einmal ‚Bestätigen', fertig … so, wie es eigentlich bei jedem einzelnen Modell ist"): gilt für JEDEN, der
-    # bestätigen darf. ohne_gruppen (Standard): ADMIN_EXCLUDE (Emins Gruppe) bleibt draußen — ein HT-Klick („✓ alle" in der Admin-Sicht) oder ein
-    # HT-Takt gibt Emins Hedges nie frei („Zwei Unternehmen getrennt", HF1 05.11.2026, Prüfer-Stopp S2). Bestätigt die Gruppe selbst (Verwalter-
-    # oder eigene Sicht), ruft _ap_eingriff mit ohne_gruppen=False: dann geht die Freigabe mit.
+    # bestätigen darf — aber nur im EIGENEN Unternehmen (Finn zum Prüfer-Stopp S2: „Jeder nur seine Company"). gehoert(u) = gleiches Unternehmen
+    # wie der Klick (unt_sicht_login); ohne Angabe (Takt, uid kein Login) = HT. Unternehmen nicht lesbar → keine Freigabe (fail-closed, Plan
+    # bleibt im Block „Hedge-Freigabe offen").
     ids = ap_hedge_freigabe_ids(zeilen)
     if not ids:
         return 0
     try:
-        if ohne_gruppen:
-            _namen, aus = _ap_namen()
-            uid_je = {str(z.get("id")): str(z.get("user_id")) for z in zeilen or []}
-            ids = [i for i in ids if uid_je.get(i) not in {str(x) for x in aus}]
-            if not ids:
-                return 0
+        if gehoert is None:
+            gehoert = ap_unternehmen_filter(None, admin_gruppen_daten())   # HT
+        uid_je = {str(z.get("id")): str(z.get("user_id")) for z in zeilen or []}
+        ids = [i for i in ids if gehoert(uid_je.get(i, ""))]
+        if not ids:
+            return 0
         return _hedge_freigabe_schreiben(ids, {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
                                                "auto_bestaetigt_at": "not.is.null",   # HF2-Gegenprüfung: nie an einem inzwischen zurückgenommenen Plan
                                                "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}, uid)[0]
@@ -31847,12 +31857,15 @@ def admin_auto_plan_hedge_freigabe():
             return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows], "wd_firmen": firmen})
         body = request.get_json(silent=True) or {}
         frei = {str(r["id"]) for r in rows}
+        # JEDER NUR SEINE COMPANY (Finn 06.11.2026 zu HF2): freigegeben wird nur im Unternehmen des Logins (unt_sicht_login, fail-closed) —
+        # HT gibt nie Emins Pläne frei, der Verwalter nur seine Gruppe; sehen darf die Liste weiter, was sie bisher zeigte
+        frei = set(hf_ids_im_unternehmen(rows, unt_sicht_login(uid)))
         if body.get("alle") is True:
             ids = sorted(frei)
         else:
             ids = [str(x) for x in (body.get("ids") or []) if str(x) in frei]
         if not ids:
-            return jsonify({"ok": False, "msg": "nichts zu bestätigen (schon freigegeben, gestartet oder nicht in der Liste)"}), 400
+            return jsonify({"ok": False, "msg": "nichts zu bestätigen (schon freigegeben, gestartet, nicht in der Liste oder anderes Unternehmen)"}), 400
         n, stehen = _hedge_freigabe_schreiben(ids, basis, uid)
         print(f"[hedge-freigabe] {n} Plan/Pläne freigegeben ({str(uid or '')[:8]})", flush=True)
         return jsonify({"ok": True, "freigegeben": n, "nicht_neu_gestartet": stehen})
@@ -32901,7 +32914,6 @@ def ah_tick(jetzt=None, force=False):
             _ah_spur(f"⚠️ {str(p['id'])[:8]} Marke nicht entfernt: {type(e).__name__}: {e}")
     roh = [p for p in roh if ap_plan_modell(p, _fm, _gm) == "orbit_prio2"]
     namen, aus = _ap_namen()
-    hf_aus = set(aus)   # HF2 Prüfer-Stopp: Emins Gruppe bekommt die Freigabe nie aus dem Takt (hf_frei_bei_kennung)
     aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
     erg = {"umgestellt": 0, "ohne": 0, "vorgemerkt": 0}
@@ -33007,7 +33019,7 @@ def ah_tick(jetzt=None, force=False):
                 and alt.get("polster_usd") == vs.get("polster_usd"):   # Boden und Blow-€ stimmen auch bei gleichen Lots (02.11.2026, s. ah_werte)
             continue
         try:
-            neu = sb_update("trade_plans", _ah_guard(p), dict({"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p, aus=hf_aus)))
+            neu = sb_update("trade_plans", _ah_guard(p), dict({"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p)))
             if neu:
                 erg["vorgemerkt"] += 1
                 # Stand der geschriebenen Zeile übernehmen (return=representation): der Umstell-Guard unten hält im selben Takt mit
@@ -46034,6 +46046,16 @@ def _ap_eingriff(aktion):
     if params is None:
         return jsonify({"ok": False, "msg": art}), 400
     try:
+        # JEDER NUR SEINE COMPANY (Finn 06.11.2026 zu HF2: „wenn ich als Admin-ID in HT acc bestätige, werden nur HT-acc bestätigt. Wenn Emin
+        # bei sich acc bestätigt, nur bei sich. Jeder nur seine Company"): Bestätigen nimmt nur Pläne aus dem Unternehmen des Logins
+        # (unt_sicht_login: HT / Verwalter-Gruppe / ohne Unternehmen = nur er selbst; Gruppen nicht lesbar → nur die eigene ID, fail-closed)
+        gehoert = unt_sicht_login(uid)
+        if aktion == "bestaetigen":
+            ids_ok = hf_ids_im_unternehmen(sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) or [], gehoert)
+            if not ids_ok:
+                return jsonify({"ok": True, "aktion": aktion, "n": 0, "zeilen": [], "alle": sicht is None or not isinstance(sicht, str), "hedge_frei": 0,
+                                "msg": "nichts bestätigt — Pläne gehören zu einem anderen Unternehmen"})
+            params = dict(params, id=("eq." + ids_ok[0]) if len(ids_ok) == 1 else ("in.(" + ",".join(ids_ok) + ")"))
         if sicht is not None:   # eine ID oder die Gruppe des Verwalters (Menge)
             fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
             if fremd:
@@ -46047,9 +46069,9 @@ def _ap_eingriff(aktion):
                 return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
         # Hedge-Freigabe beim ✓ (30.10.2026; HF2 06.11.2026): wer bestätigen darf, gibt damit auch frei — einzeln, „✓ alle", jede Sicht
-        # (Admin, Verwalter, eigene ID). Vorher nur voller Admin mit sicht None; Finn: „einfach einmal ‚Bestätigen', fertig". In der HT-Admin-Sicht
-        # (sicht None) nie Emins Gruppe (ADMIN_EXCLUDE) — die gibt nur ihr eigener Klick frei (Prüfer-Stopp S2)
-        frei = _ap_hedge_mit_freigeben(zeilen, uid, ohne_gruppen=sicht is None) if aktion == "bestaetigen" else 0   # HT-Admin-Sicht: nie Emins Gruppe
+        # (Admin, Verwalter, eigene ID). Vorher nur voller Admin mit sicht None; Finn: „einfach einmal ‚Bestätigen', fertig". Nur im eigenen
+        # Unternehmen (Prüfer-Stopp S2 + Finn „Jeder nur seine Company")
+        frei = _ap_hedge_mit_freigeben(zeilen, uid, gehoert) if aktion == "bestaetigen" else 0   # nur das eigene Unternehmen
         wer = "Admin" if sicht is None else ("ID " + sicht[:8]) if isinstance(sicht, str) else ("Verwalter " + str(uid)[:8])
         print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {wer}" + (f", {frei} Hedge-Freigabe(n)" if frei else ""), flush=True)
         return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None or not isinstance(sicht, str),
