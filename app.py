@@ -39837,13 +39837,14 @@ def kz_rechnen(a, ctx):
         kach.append(kz_dl_kachel(dl, dl_grund))
         p_cons = fcp_consistency_pct(freg) if freg else None
         # O1 (Finn 05.11.2026 ~07:45): Basis = Summe der Gewinn-Tage im Zyklus (fcp_tage_zyklus_w, wie fcp_cons_finn im Planer), nicht der Netto-Gewinn
-        tzw = fcp_tage_zyklus_w(plaene, seit)
+        tzw = fcp_tw_broker(plaene, seit, None, a.get("fcp_ziel"), z_ab)   # CS1: Basis laut Broker (fcp_ziel.broker), sonst wie der Planer
         cons_ok = True
         an = None
         if p_cons:
             an = (tzw["b"] / tzw["w"]) if (tzw and tzw["w"] > 0) else None
             cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzw and tzw["w"] == 0 and gewinn and gewinn > 0)
-            kach.append(kz_cons_kachel(p_cons, an, tzw["b"] if tzw else None, tzw["w"] if tzw else None, "Summe der Gewinn-Tage",
+            kach.append(kz_cons_kachel(p_cons, an, tzw["b"] if tzw else None, tzw["w"] if tzw else None,
+                                       "Summe der Gewinn-Tage" + (" (Basis laut Broker)" if tzw and tzw.get("broker") else ""),
                                        "Consistency je Zyklus: größter Tag ÷ Summe der Gewinn-Tage (wie der Funded-CFD-Planer)",
                                        "Zyklus nicht lesbar" if tzw is None else "noch kein Gewinn-Tag"))
         else:
@@ -44992,6 +44993,47 @@ def fcp_tage_zyklus_w(plaene, seit_tag=None, heute_tag=None):
             "heute": round(je_tag.get(str(heute_tag), 0.0), 2) if heute_tag else 0.0}   # E1e: Tagessumme heute (mehrere Trades = EIN Tag)
 
 
+# CONSISTENCY LAUT BROKER (CS1, Finn 06.11.2026, The5%ers-Screenshots: Hand-Trades → DB-Historie stimmt nicht): accounts.fcp_ziel.broker =
+# {at, bester_tag, zyklus_gewinn, balance, quelle} — ohne neue Spalte im bestehenden jsonb (Master 06.11.2026). Gilt, solange seit `at` kein neuer
+# Payout kam (Zyklus-Beginn ≤ Berlin-Tag von `at`); dann B = max(bester_tag, bester Tag NACH at), W = zyklus_gewinn + Gewinn-Tage NACH at, Serie und
+# heute nur aus Trades nach at. Nach dem nächsten Payout wieder die DB-Zählung. Die Balance nimmt der Planer weiter aus der Lesung (balance = Beleg).
+def fcp_broker_basis(fcp_ziel, zyklus_ab):
+    """REIN RECHNEND (testbar): (at datetime, B, W) aus accounts.fcp_ziel.broker, wenn gültig — sonst None (kein Eintrag, kaputt, Zahl < 0, oder
+    der Zyklus begann nach dem Berlin-Tag von `at`: zyklus_ab = Tag NACH dem jüngsten Payout, fcp_zyklus_start)."""
+    br = (fcp_ziel or {}).get("broker") if isinstance(fcp_ziel, dict) else None
+    if not isinstance(br, dict):
+        return None
+    at, b, w = _ap_ts(br.get("at")), _wd_num(br.get("bester_tag")), _wd_num(br.get("zyklus_gewinn"))
+    if at is None or b is None or w is None or b < 0 or w < 0:
+        return None
+    if zyklus_ab and str(zyklus_ab) > at.astimezone(_ap_tz("Europe/Berlin")).date().isoformat():
+        return None                                   # Payout am/nach dem Eintrag → neuer Zyklus, Broker-Werte gelten nicht mehr
+    return at, float(b), float(w)
+
+
+def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab):
+    """Zyklus-Werte wie fcp_tage_zyklus_w, mit Broker-Basis (fcp_broker_basis) falls gültig — dann gezählt nur Trades, die NACH `at` endeten
+    (Ende ended_at/completed_at/started_at; ohne Zeit → None, fail-closed wie fcp_tage_zyklus_w). Ergebnis trägt broker=True. REIN RECHNEND."""
+    bb = fcp_broker_basis(fcp_ziel, zyklus_ab)
+    if bb is None:
+        return fcp_tage_zyklus_w(plaene, seit_tag, heute_tag)
+    at, b, w = bb
+    nach = []
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
+        if ts is None:
+            return None
+        if ts > at:
+            nach.append(p)
+    tn = fcp_tage_zyklus_w(nach, None, heute_tag)
+    if tn is None:
+        return None
+    return {"b": round(max(b, tn["b"]), 2), "w": round(w + tn["w"], 2), "n": tn["n"], "serie": tn["serie"], "serie_n": tn["serie_n"],
+            "heute": tn["heute"], "broker": True}
+
+
 FCP_CONS_ANTEIL_SPANNE = 5.0     # TP je Trade = Zufall (p − 5 %) … p der Distanz (Finn 05.11.2026 ~07:50: „35–40 % davon, per Zufall bei jedem Trade")
 
 
@@ -45511,12 +45553,14 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 _rk, _jg = fcp_on_demand_anwenden(regel, _jg, _g) or (regel, _jg)
             _bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
             _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None
-            _tw = fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None   # O1: Summe der Gewinn-Tage
+            _tw = fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), None, a.get("fcp_ziel"),
+                                zyklus_ab.get(aid)) if payouts_ok else None   # O1: Summe der Gewinn-Tage; CS1: Basis laut Broker
             _zb = fcp_bereich(_jg.get("ziel"))
             erg["konten_stand"].append(dict(zeile, groesse=_g, balance=_bal, gewinn=round(float(_bal) - float(_g), 2) if _bal is not None and _g else None,
                                             ziel_von=_zb[0] if _zb else None, ziel_bis=_zb[1] if _zb else None, wartet=bool(a.get("waiting_payout_since")),
-                                            bester_tag=_tz[0] if _tz else None, trades=_tz[1] if _tz else None, consistency_pct=fcp_consistency_pct(_rk),
-                                            summe_gewinntage=_tw["w"] if _tw else None,
+                                            bester_tag=(_tw["b"] if _tw and _tw.get("broker") else _tz[0] if _tz else None), trades=_tz[1] if _tz else None,
+                                            consistency_pct=fcp_consistency_pct(_rk), summe_gewinntage=_tw["w"] if _tw else None,
+                                            consistency_broker=bool(_tw and _tw.get("broker")),
                                             on_demand=od_an, ziel_fest=(a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)))
         except Exception as e:
             print(f"[funded-cfd] ⚠️ Kontostand {aid[:8]}: {type(e).__name__}: {e}", flush=True)
@@ -45572,7 +45616,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
                               max_sl=a.get("max_risiko_trade"), param=param_u,      # E1b: Planer-Parameter aus der DB (fcp_param)
-                              tage=fcp_tage_zyklus_w(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag) if payouts_ok else None,   # O1/E1e
+                              tage=fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag, a.get("fcp_ziel"),
+                                                 zyklus_ab.get(aid)) if payouts_ok else None,   # O1/E1e; CS1: Basis laut Broker (fcp_ziel.broker)
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None))
@@ -45725,6 +45770,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     w_["fcp_ziel"] = "is.null"
                 elif alt.get("at"):
                     w_["fcp_ziel->>at"] = f"eq.{alt['at']}"
+                elif isinstance(alt.get("broker"), dict) and alt["broker"].get("at"):
+                    w_["fcp_ziel->broker->>at"] = f"eq.{alt['broker']['at']}"   # CS1: nur Broker-Eintrag da → sein Stand als Guard
+                if isinstance(alt, dict) and isinstance(alt.get("broker"), dict):
+                    zf = dict(zf, broker=alt["broker"])   # CS1: Broker-Werte am selben jsonb nie beim Würfeln verlieren
                 sb_update("accounts", w_, {"fcp_ziel": zf})
             except Exception as e:
                 print(f"[funded-cfd] ⚠️ festes Ziel {aid[:8]}: {e}", flush=True)
