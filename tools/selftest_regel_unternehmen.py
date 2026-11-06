@@ -237,7 +237,7 @@ LESER = {"zw_tick": "ap_regel_unternehmen(a.get(\"user_id\")", "_ap_blow_beim_ab
          "ap_normal_auto_tick": "ap_regel_unternehmen(", "admin_build_kontowerte": "ap_unt_firmen(a.get(\"user_id\")", "ah_tick": "fa = ap_unt_firmen(",
          "_eh_tick_lauf": "ap_unt_firmen(", "ehv_tick": "ap_unt_firmen(", "tfh_tick": "ap_unt_firmen(", "ap_echo_hedge_anlegen": "ap_unt_firmen(",
          "ap_kette_tick": "ap_regel_unternehmen(t1.get(\"user_id\")", "ap_kette_abhaken": "ap_regel_unternehmen(", "vorrat2_rechnen_lauf": "ap_unt_firmen(uid",
-         "konto_dd_vorschlag": "ap_unt_firmen(", "admin_live_trades": "ap_unt_firmen(p.get(\"user_id\")", "_ap_stand_laden": "ap_unt_firmen(",
+         "konto_dd_vorschlag": "_konto_dd_regeln(", "_konto_dd_regeln": "ap_unt_firmen(uid", "admin_live_trades": "ap_unt_firmen(p.get(\"user_id\")", "_ap_stand_laden": "ap_unt_firmen(",
          "_ap_bewerten": "ap_regel_unternehmen(", "admin_hypo_bilanz": "ap_unt_firmen(", "konto_ziele": "ap_unt_firmen(a.get(\"user_id\")",
          "admin_build_overview": "ap_unt_firmen(a_.get(\"user_id\")", "puls_heim_pruefen": "ap_unt_firmen(", "admin_auto_plan_hedge_freigabe": "ap_unt_firmen(",
          "gp_planen": "ap_unt_regeln({\"firmen\": firmen}"}

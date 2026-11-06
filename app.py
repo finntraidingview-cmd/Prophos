@@ -21300,6 +21300,15 @@ def admin_konto_anlegen():
     if doppel:
         return jsonify({"ok": False, "msg": f"Gibt es schon: {doppel.get('name') or zeile['external_id']} — nicht doppelt angelegt",
                         "konto": {"id": doppel.get("id"), "name": doppel.get("name")}}), 409
+    # DD1 (06.11.2026): ohne Max DD aus dem Modal → Schablone Firma × Typ × Größe, sonst Firmen-Kernwert; Lesefehler → Feld bleibt leer wie bisher
+    try:
+        if not _wd_num(zeile.get("max_drawdown")):
+            _m = re.search(r"(\d{2,3})\s*k\b", str(zeile.get("name") or ""), re.I)
+            _vl = konto_vorlage_finden(sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true"}) or [], zeile.get("firm"), zeile.get("account_type"),
+                                       float(_m.group(1)) * 1000) if _m else None   # ohne Größe keine Schablone (sonst die erste beliebiger Größe)
+            konto_dd_ergaenzen(zeile, _vl, *_konto_dd_regeln(ziel, zeile.get("account_type")))
+    except Exception as e:
+        print(f"[admin-konto] ⚠️ Max DD nicht ergänzt: {type(e).__name__}: {e}", flush=True)
     hinweis = []
     try:
         try:
@@ -21926,9 +21935,19 @@ def konto_reset_bestaetigen():
         return jsonify({"ok": False, "msg": f"Alte Zeile {alt_ext} gibt es bei dieser ID nicht — als Kauf anlegen"}), 404
     if (alt.get("account_type") or "challenge") not in ADMIN_KONTO_TYPEN:
         return jsonify({"ok": False, "msg": f"Alte Zeile ist {alt.get('account_type')} — Reset nur für Prop-Firm-Konten"}), 400
-    vorlage = konto_vorlage_finden(vorlagen, alt.get("firm"), konto_reset_typ(alt.get("account_type")),
-                                   alt.get("account_size") or alt.get("starting_balance"))
+    # Größe der alten Zeile, sonst aus ihrem Namen (DD1-Gegenprüfung 06.11.2026: 725 von 1.605 Konten ohne account_size/starting_balance — ohne Größe nahm
+    # konto_vorlage_finden die erste Schablone der Firma, ein „100k" wurde zum „150k" mit dessen Max DD)
+    _m_alt = re.search(r"(\d{2,3})\s*k\b", str(alt.get("name") or ""), re.I)
+    _gr_alt = alt.get("account_size") or alt.get("starting_balance") or (float(_m_alt.group(1)) * 1000 if _m_alt else None)
+    vorlage = konto_vorlage_finden(vorlagen, alt.get("firm"), konto_reset_typ(alt.get("account_type")), _gr_alt)
     zeile = konto_reset_zeile(alt, neu_ext, vorlage)
+    # DD1 (06.11.2026): alte Zeile ohne Max DD → Schablone, sonst Firmen-Kernwert (vorher erbte der Reset die Lücke); Lesefehler → Feld bleibt leer.
+    # Ohne bekannte Größe gar nicht (die Zeile trüge sonst die Größe einer beliebigen Schablone), Flex am alten Namen zählt
+    try:
+        if _gr_alt:
+            konto_dd_ergaenzen(zeile, vorlage, *_konto_dd_regeln(ziel, zeile.get("account_type")), namen=(alt.get("name"),))
+    except Exception as e:
+        print(f"[konto-reset] ⚠️ Max DD nicht ergänzt: {type(e).__name__}: {e}", flush=True)
     hinweis = []
     try:
         try:
@@ -23637,15 +23656,60 @@ def ap_regel_finden(firmen, firm):
     return None
 
 
-def konto_dd_aus_regel(firmen, firm, groesse):
-    """REIN RECHNEND (testbar): Max Drawdown in $ aus der Firmen-Regel für den Nachfolger-Assistenten (Finn 30.10.2026 14:5x): Größe × dd_pct, nur CFD-Firmen (dd_pct).
-    Firma mit Standard/Flex (FundingPips, regel.flex) → None: welcher Wert gilt, hängt am Konto, lieber leer als falsch."""
-    regel = ap_regel_finden(firmen, firm)
-    if not regel or regel.get("flex") or not (float(groesse or 0) > 0):
+def konto_dd_aus_regel(firmen, firm, groesse, typ=None, fcp_firmen=None):
+    """REIN RECHNEND (testbar): Max Drawdown in $ aus dem Firmen-Kernwert für Nachfolger-Assistent, Account-Modal, Bulk und Reset (Finn 30.10.2026 14:5x;
+    DD1 06.11.2026, Finn: „Schablone und Nachfolger-Anlegen IMMER mit Max Drawdown" — Simons FundingPips Phase 2 entstand mit leerem Feld). Reihenfolge:
+    Funded CFD zuerst funded_cfd_plan_regeln je_groesse.dd (fcp_firmen); dann auto_plan_regeln je_groesse.dd_usd → (je_groesse.dd_pct | dd_pct) × Größe →
+    dd_usd der Firma nur für eine Größe aus groessen (Tradeify 4.500 gilt für 150k, nicht für 300k). Jetzt auch Futures (dd_usd).
+    Standard/Flex (FundingPips, regel.flex): der Standard-Wert (dd_pct der Firma, 10 %) — ap_konto_flex wertet ein leeres Feld genauso als Standard,
+    der Planer rechnet also gleich wie vorher; Flex-Konten (Name mit „Flex") lässt der Browser leer. Ohne Größe, Firma oder Wert → None."""
+    g = _wd_num(groesse) or 0.0
+    if not g > 0:
         return None
-    jg = (regel.get("je_groesse") or {}).get(str(int(float(groesse))))
-    pct = (jg.get("dd_pct") if isinstance(jg, dict) else None) or regel.get("dd_pct")
-    return round(float(groesse) * float(pct) / 100.0) if pct else None
+    if typ == "funded_cfd":
+        fr = ap_regel_finden(fcp_firmen, firm)
+        jg = ((fr or {}).get("je_groesse") or {}).get(str(int(g)))
+        dd = _wd_num(jg.get("dd")) if isinstance(jg, dict) else None
+        if dd and dd > 0:
+            return round(dd)
+    regel = ap_regel_finden(firmen, firm)
+    if not regel:
+        return None
+    jg = (regel.get("je_groesse") or {}).get(str(int(g)))
+    jg = jg if isinstance(jg, dict) else {}
+    usd = _wd_num(jg.get("dd_usd"))
+    if usd and usd > 0:
+        return round(usd)
+    pct = _wd_num(jg.get("dd_pct")) or _wd_num(regel.get("dd_pct"))
+    if pct and pct > 0:
+        return round(g * pct / 100.0)
+    usd = _wd_num(regel.get("dd_usd"))
+    if usd and usd > 0 and any(_wd_num(x) == g for x in (regel.get("groessen") or ())):
+        return round(usd)
+    return None
+
+
+def konto_dd_ergaenzen(zeile, vorlage, firmen, fcp_firmen=None, namen=()):
+    """REIN RECHNEND (testbar, DD1 06.11.2026): neue Konto-Zeile (dict, wird geändert) ohne max_drawdown → Schablone (bulk_vorlagen Firma × Typ × Größe) →
+    Firmen-Kernwert (konto_dd_aus_regel). Ein Wert in der Zeile bleibt immer. Live/Winning Days nie (Fusion ohne DD; WD rechnet mit Größe + 100 $).
+    FundingPips Flex (Name der Zeile oder einer der namen — Reset baut den Namen neu, dann zählt der alte) nie: 12 % weiß nur Finn, 10 % gäbe falsche Liq-
+    und Hedge-Werte (wie sucDdNieRaten im Browser). Größe aus account_size/starting_balance, sonst aus dem Namen („100k …"). → Quelle oder None."""
+    if _wd_num(zeile.get("max_drawdown")) or zeile.get("account_type") not in ("challenge", "phase1", "phase2", "funded", "funded_cfd"):
+        return None
+    if _ap_norm(zeile.get("firm")) == "fundingpips" and any(re.search(r"flex", str(n or ""), re.I) for n in (zeile.get("name"), *namen)):
+        return None
+    m = re.search(r"(\d{2,3})\s*k\b", str(zeile.get("name") or ""), re.I)
+    gr = _wd_num(zeile.get("account_size")) or _wd_num(zeile.get("starting_balance")) or (float(m.group(1)) * 1000 if m else None)
+    v = _wd_num((vorlage or {}).get("max_drawdown"))
+    vg = _wd_num((vorlage or {}).get("account_size")) or _wd_num((vorlage or {}).get("starting_balance"))
+    if v and v > 0 and gr and (not vg or vg == gr):   # Schablone nur bei bekannter, gleicher Größe (konto_vorlage_finden ohne Größe nimmt die erste)
+        zeile["max_drawdown"] = v
+        return "schablone"
+    dd = konto_dd_aus_regel(firmen, zeile.get("firm"), gr, zeile.get("account_type"), fcp_firmen)
+    if dd:
+        zeile["max_drawdown"] = dd
+        return "kernwert"
+    return None
 
 
 def ap_groesse(groessen, balance):
@@ -37400,19 +37464,30 @@ def _ap_zugang(admin_reiter=False):
     return admin, uid, reg, None
 
 
+def _konto_dd_regeln(uid, typ):
+    """(firmen, fcp_firmen) für konto_dd_aus_regel: auto_plan_regeln.firmen nach dem Unternehmen der ID (UNT3), bei Funded CFD dazu funded_cfd_plan_regeln.firmen
+    (UNT4, fd_unt_reg). Wirft bei Lesefehlern — die Aufrufer fangen das ab und lassen das Feld dann leer."""
+    reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+    fs = ap_unt_firmen(uid, (reg.get("regeln") or {}).get("firmen") or [], streng=False)
+    fcp = None
+    if typ == "funded_cfd":
+        fcp = (fd_unt_reg((sb_select("funded_cfd_plan_regeln", {"select": "firmen", "id": "eq.1"}) or [{}])[0], "cfd", uid) or {}).get("firmen")
+    return fs, fcp
+
+
 @app.route("/konto/dd-vorschlag", methods=["GET", "OPTIONS"])
 def konto_dd_vorschlag():
-    """GET ?firma=&groesse= → {ok, dd} aus der Firmen-Regel (konto_dd_aus_regel). auto_plan_regeln liest nur der Server, jeder Login darf diese eine Zahl."""
+    """GET ?firma=&groesse=&typ= → {ok, dd} aus dem Firmen-Kernwert (konto_dd_aus_regel). auto_plan_regeln liest nur der Server, jeder Login darf diese eine Zahl."""
     if request.method == "OPTIONS":
         return "", 200
     _uid, err = _wd_login()
     if err:
         return err
     try:
-        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
-        # UNT3: Max DD nach der Regel des Unternehmens der ID, für die das Konto angelegt wird (?user_id=, sonst der Login)
-        fs = ap_unt_firmen(request.args.get("user_id") or _uid, (reg.get("regeln") or {}).get("firmen") or [], streng=False)
-        dd = konto_dd_aus_regel(fs, request.args.get("firma"), _wd_num(request.args.get("groesse")))
+        # UNT3: Max DD nach der Regel des Unternehmens der ID, für die das Konto angelegt wird (?user_id=, sonst der Login); ?typ= (DD1): Funded CFD erst die Funded-CFD-Regel
+        typ = str(request.args.get("typ") or "").strip() or None
+        fs, fcp = _konto_dd_regeln(request.args.get("user_id") or _uid, typ)
+        dd = konto_dd_aus_regel(fs, request.args.get("firma"), _wd_num(request.args.get("groesse")), typ, fcp)
         return jsonify({"ok": True, "dd": dd})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502

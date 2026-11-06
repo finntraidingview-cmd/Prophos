@@ -66,7 +66,12 @@ class _Resp:
     text = '{"code":"PGRST205","message":"Could not find the table public.tv_konten"}'
 
 
+VORLAGEN = []   # DD1 (06.11.2026): bulk_vorlagen für den Max-DD-Rückfall
+
+
 def sb_select(tabelle, params):
+    if tabelle == "bulk_vorlagen":
+        return list(VORLAGEN)
     assert tabelle == "accounts"
     return KONTEN.get(params["user_id"][3:], [])
 
@@ -93,7 +98,8 @@ def sb_update(tabelle, params, body):
 def lade():
     src = open(APP, encoding="utf-8").read()
     teile = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("ADMIN_KONTO_TYPEN", "ADMIN_KONTO_ZIELE", "ADMIN_KONTO_APEX_RE", "ADMIN_MAIL_UID_RE")]
-    for name in ("admin_gruppen_tabelle_fehlt", "admin_konto_ext_norm", "admin_konto_doppel", "admin_konto_zeile", "_admin_konto_gate"):
+    for name in ("admin_gruppen_tabelle_fehlt", "admin_konto_ext_norm", "admin_konto_doppel", "admin_konto_zeile", "_admin_konto_gate",
+                 "_wd_num", "_ap_norm", "ap_regel_finden", "konto_dd_aus_regel", "konto_dd_ergaenzen", "konto_vorlage_finden"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     i = src.index('@app.route("/admin/konto-anlegen"')
@@ -101,7 +107,9 @@ def lade():
     app = Flask("selftest")
     ns = {"re": re, "requests": requests, "g": g, "jsonify": jsonify, "request": request, "datetime": datetime, "timezone": timezone, "app": app,
           "_wd_login": _wd_login, "_admin_auth": _admin_auth, "admin_mail_leser_uids": lambda: frozenset({FP}),
-          "_auth_liste_anfrage": lambda: _Antwort(), "sb_select": sb_select, "sb_insert": sb_insert, "sb_update": sb_update}
+          "_auth_liste_anfrage": lambda: _Antwort(), "sb_select": sb_select, "sb_insert": sb_insert, "sb_update": sb_update,
+          # DD1: Firmen-Kernwert-Attrappe (Tradeify 150k = 4.500 $), ohne Funded-CFD-Regel
+          "_konto_dd_regeln": lambda uid, typ: ([{"namen": ["tradeify"], "dd_usd": 4500, "groessen": [150000]}], None)}
     exec("\n".join(teile), ns)
     return ns, app
 
@@ -130,6 +138,19 @@ def main():
     check(r.status_code == 200 and LOG["insert"][0][1]["user_id"] == AMIR, "A6 Emin mit ?ansicht=admin legt für Amir (seine Gruppe) an")
     r = post("emin", dict(basis, user_id=MARC), "?ansicht=admin")
     check(r.status_code == 403 and not LOG["insert"], "A7 Emin für Marc (nicht seine Gruppe) → 403")
+
+    # (DD1, 06.11.2026) Max DD nie leer: Modal-Wert bleibt → Schablone gleicher Größe → Firmen-Kernwert; ohne Treffer leer wie bisher
+    b150 = dict(basis, name="150k TDFYSL150000000124 → Challenge", external_id="TDFYSL150000000124", tv_name="", user_id=MARC)
+    post("finn", b150)
+    check(LOG["insert"] and LOG["insert"][0][1].get("max_drawdown") == 4500, "DD1-a ohne Max DD → Firmen-Kernwert 4.500 (150k)")
+    VORLAGEN[:] = [{"firm": "Tradeify", "account_type": "challenge", "account_size": 150000, "max_drawdown": 4400, "aktiv": True}]
+    post("finn", b150)
+    check(LOG["insert"] and LOG["insert"][0][1].get("max_drawdown") == 4400, "DD1-b Schablone gleicher Firma × Typ × Größe vor dem Kernwert")
+    post("finn", dict(b150, max_drawdown="3000"))
+    check(LOG["insert"] and LOG["insert"][0][1].get("max_drawdown") == 3000, "DD1-c Wert aus dem Modal bleibt")
+    VORLAGEN[:] = []
+    post("finn", dict(basis, user_id=MARC))
+    check(LOG["insert"] and LOG["insert"][0][1].get("max_drawdown") is None, "DD1-d 100k ohne Kernwert (nicht in groessen) → leer wie bisher")
 
     # (B) Whitelist
     post("finn", dict(basis, user_id=MARC, cred_password="geheim", cred_login="123", wd_farm=True, id="fremd", meta_api_token="x",

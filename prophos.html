@@ -43916,15 +43916,19 @@
   document.getElementById('suc-firm')?.addEventListener('input', sucPayoutVorschlag)
   document.getElementById('suc-name')?.addEventListener('input', () => { _sucNameHand = true })
   /* MAX DRAWDOWN OHNE WERT AM VORGÄNGER (Finn 30.10.2026 14:5x: „Max Drawdown ist bei CFDs von Phase 1 zu Phase 2 immer genau das Gleiche, auch wenn es noch nicht
-   * hinterlegt ist"; Reihenfolge Master): nur CFD-Firmen, nur wenn der Vorgänger leer ist. Erst die Schablone Firma × Größe × Zieltyp; für Phase 2 (nicht Funded) auch die der
-   * anderen Phase, jeweils nur wenn sie sich einig sind — dann die Firmen-Regel Größe × % (regelWert vom Server). FundingPips bleibt immer leer. → { wert, quelle } | null */
+   * hinterlegt ist"; Reihenfolge Master): nur wenn der Vorgänger leer ist (sein Wert ist Wissen je Konto, z. B. Flex 12 %, und geht vor). Erst die Schablone
+   * Firma × Größe × Zieltyp; für Phase 2 (nicht Funded) auch die der anderen Phase, jeweils nur wenn sie sich einig sind — dann der Firmen-Kernwert (regelWert vom
+   * Server, konto_dd_aus_regel). → { wert, quelle } | null */
   const sucFirmaKey = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')   // accounts „The5%ers", Schablone ggf. „The5ers"
-  const sucIstCfd = acc => !(tpFirmIstFutures(acc.firm) && !istTradeifyCfd(acc.firm))
-  // FundingPips (S2 30.10.2026): max_drawdown schaltet die Planer-Regel Standard/Flex um (app.py ap_konto_flex) — der Wert ist Wissen je Konto, nie vorbelegen
-  const sucDdNieRaten = acc => sucFirmaKey(acc.firm) === 'fundingpips'
+  /* IMMER MIT MAX DD (DD1, Finn 06.11.2026: Simons FundingPips Phase 2 entstand über „Review" mit leerem Feld — „Schablone und Nachfolger-Anlegen IMMER mit
+   * Max Drawdown"): jetzt auch Futures (Kernwert dd_usd je Größe) und FundingPips. Nur Prop-Firm-Typen; Live (Fusion) und Winning Days nie (WD: Größe + 100 $).
+   * FundingPips (S2 30.10.2026): max_drawdown schaltet Standard/Flex um (app.py ap_konto_flex). Schablone und Kernwert tragen den Standard-Wert (10 %), den der
+   * Planer bei leerem Feld ohnehin nimmt — nur ein Flex-Konto (Name mit „Flex") bleibt leer, dort gilt 12 % und das weiß nur Finn. */
+  const SUC_DD_TYPEN = ['challenge', 'phase1', 'phase2', 'funded', 'funded_cfd']
+  const sucDdNieRaten = acc => sucFirmaKey(acc.firm) === 'fundingpips' && /flex/i.test(String(acc.name || ''))
   function sucDdVorschlag(acc, zielTyp, vorlagen, regelWert){
     const pos = v => (Number(v) > 0 ? Number(v) : null), firma = sucFirmaKey(acc && acc.firm)
-    if(!firma || pos(acc.maxDrawdown) || !sucIstCfd(acc) || sucDdNieRaten(acc)) return null
+    if(!firma || pos(acc.maxDrawdown) || !SUC_DD_TYPEN.includes(zielTyp) || sucDdNieRaten(acc)) return null
     const gr = Number(kontoGroesseAnzeige(acc.name, acc.startingBalance)) || 0
     const sch = (vorlagen || []).filter(v => gr && sucFirmaKey(v.firm) === firma && Number(v.account_size || v.starting_balance) === gr && pos(v.max_drawdown))
     const ziel = sch.filter(v => v.account_type === zielTyp)
@@ -43932,18 +43936,18 @@
     const liste = ziel.length ? ziel : phasen, einig = new Set(liste.map(x => pos(x.max_drawdown))).size === 1
     if(liste.length && !einig) return null   // Schablonen uneinig: dann ist auch die Regel kein sicherer Wert
     if(einig) return { wert: pos(liste[0].max_drawdown), quelle: `Schablone „${liste[0].name || liste[0].firm}"` }
-    return pos(regelWert) ? { wert: pos(regelWert), quelle: 'Firmen-Regel (Größe × Drawdown-%)' } : null
+    return pos(regelWert) ? { wert: pos(regelWert), quelle: 'Firmen-Kernwert (Max DD je Größe)' } : null
   }
   window._sucDdVorschlag = sucDdVorschlag   // Test-Haken
   // Schablone, sonst Regel vom Server — gemeinsam für Nachfolger und Account-Modal. Ohne Antwort null, das Feld bleibt dann leer
   async function sucDdErmitteln(acc, zielTyp){
-    if(Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc) || sucDdNieRaten(acc)) return null
+    if(Number(acc.maxDrawdown) > 0 || !SUC_DD_TYPEN.includes(zielTyp) || sucDdNieRaten(acc)) return null
     let vorlagen = []; try{ vorlagen = await kontoVorlagenLaden() }catch(_){}
     const d = sucDdVorschlag(acc, zielTyp, vorlagen, null)
     if(d) return d
     try{
       const tok = await _pushTok()
-      const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}${(acc.userId || acc.user_id) ? '&user_id=' + encodeURIComponent(acc.userId || acc.user_id) : ''}`   /* UNT3: Max DD nach dem Unternehmen der Konto-ID */, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}&typ=${encodeURIComponent(zielTyp || '')}${(acc.userId || acc.user_id) ? '&user_id=' + encodeURIComponent(acc.userId || acc.user_id) : ''}`   /* UNT3: Max DD nach dem Unternehmen der Konto-ID */, { headers: { 'sb-token': tok }, cache: 'no-store', signal: AbortSignal.timeout(8000) })   // DD1: Bulk wartet hier je Konto — Backend hängt → nach 8 s leer statt Knopf gesperrt
       const j = r.ok ? await r.json() : null
       return sucDdVorschlag(acc, zielTyp, vorlagen, j && j.dd)
     }catch(_){ return null }
@@ -46730,7 +46734,7 @@
     const el = accEls.maxDd, hint = document.getElementById('ac-maxdd-hint')
     if(!el || _editingAccountId || acDdFremd()) return
     const typ = accEls.type?.value || '', gr = parseFloat(accEls.groesse?.value), firm = String(accEls.firm?.value || '').trim(), lauf = ++_acDdLauf
-    const d = firm && gr > 0 && ['phase1', 'phase2', 'funded_cfd'].includes(typ)
+    const d = firm && gr > 0 && SUC_DD_TYPEN.includes(typ)   // DD1 (06.11.2026): auch Futures-Challenge/Funded
       ? await sucDdErmitteln({ firm, name: accEls.name?.value || '', startingBalance: gr * 1000, maxDrawdown: null }, typ) : null
     if(lauf !== _acDdLauf || _editingAccountId || acDdFremd()) return   // Felder inzwischen anders oder von Hand gefüllt
     el.value = d ? d.wert : ''; _acDdAuto = d ? String(d.wert) : null
@@ -48629,6 +48633,7 @@
       const credList = zugang ? getBulkCreds() : [], cfdIdx = new Map(bulkCfdBloecke(wahl).map((x, k) => [x.id, k]))
       let created = 0, errors = 0, anyExtId = false, ohneQuelle = false
       const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
+      const ddCache = new Map()   // DD1: Max-DD-Rückfall je Firma × Größe × Typ
       for(let i = 0; i < wahl.length; i++){
         const x = wahl[i], cred = bulkCredAusZeile(x.id) || (cfdIdx.has(x.id) ? (credList[cfdIdx.get(x.id)] || null) : null)
         // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > Formular > 150.000 (F14)
@@ -48646,6 +48651,13 @@
           wd_farm: typRow === 'winning_days',   // F17 (27.09.2026): nie beim Anlegen — außer Typ Winning Days (Finn 03.11.2026: Haken von selbst), wie der DB-Trigger
           ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null }
             : (() => { const mt = kontoMindesttage(firm, typRow); return mt ? { goal_kind: mt.kind, goal_target: mt.target, goal_min_profit: mt.minProfit } : {} })()),   // Firmenregel (20.10.2026): FundedNext-Phasen ohne Vorlage
+        }
+        // DD1 (06.11.2026, Finn: „IMMER mit Max Drawdown"): weder Vorlage noch Formular → Schablone/Firmen-Kernwert wie Nachfolger und Account-Modal (sucDdErmitteln),
+        // einmal je Firma × Größe × Typ; ohne Antwort bleibt das Feld leer wie bisher
+        if(!(Number(row.max_drawdown) > 0) && typeof sucDdErmitteln === 'function'){
+          const ddKey = `${firm}|${gr}|${typRow}`
+          if(!ddCache.has(ddKey)) ddCache.set(ddKey, sucDdErmitteln({ firm, name, startingBalance: gr, maxDrawdown: null, userId: currentUserId }, typRow).catch(() => null))
+          const dd = await ddCache.get(ddKey); if(dd && dd.wert > 0) row.max_drawdown = dd.wert
         }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
         if(x.tvUebernehmen !== false && x.balance != null && isFinite(x.balance) && (x.balance > 1000 || kontoIstTopstepExpress({ firm, ext: x.id, name, type: row.account_type }))) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
@@ -56831,7 +56843,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2108'
+  const OS_TAB_BUILD = '2026-09-22.2109'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
