@@ -37,14 +37,21 @@ ok(app.fcp_broker_basis({"broker": {"at": AT, "bester_tag": -1, "zyklus_gewinn":
 ok(app.fcp_broker_basis({"broker": {"bester_tag": 1, "zyklus_gewinn": 5}}, None) is None, "ohne at → DB")
 
 # Werte: vor at nichts, nach at dazu
-tw = app.fcp_tw_broker(DB, "2026-11-04", "2026-11-06", BROKER, "2026-11-04")
-ok(tw == {"b": 1476.59, "w": 1476.59, "n": 0, "serie": 0.0, "serie_n": 0, "heute": 0.0, "broker": True}, f"Basis = Broker, DB-Trade vor at zählt nicht ({tw})")
+tw = app.fcp_tw_broker(DB, "2026-11-04", "2026-11-07", BROKER, "2026-11-04")
+ok(tw == {"b": 1476.59, "w": 1476.59, "n": 0, "serie": 0.0, "serie_n": 0, "heute": 0.0, "broker": True}, f"Basis = Broker (Folgetag), DB-Trade vor at zählt nicht ({tw})")
 tw_db = app.fcp_tw_broker(DB, "2026-11-04", "2026-11-06", None, "2026-11-04")
 ok(tw_db["b"] == 1194.04 and tw_db["w"] == 1194.04 and "broker" not in tw_db, "ohne Eintrag = DB-Zählung unverändert (fcp_tage_zyklus_w)")
 nach = DB + [plan("2026-11-07T10:00:00+00:00", 729.0)]
 tw2 = app.fcp_tw_broker(nach, "2026-11-04", "2026-11-07", BROKER, "2026-11-04")
 ok(tw2["b"] == 1476.59 and tw2["w"] == 2205.59 and tw2["serie"] == 729.0 and tw2["heute"] == 729.0, f"Trade nach at zählt dazu ({tw2})")
 ok(app.fcp_tw_broker(DB + [{"status": "completed", "master_pl": 5}], None, None, BROKER, None) is None, "Trade ohne Zeit → None (fail-closed)")
+# Tag des Eintrags (06.11. Berlin): Trade danach am selben Tag zählt zum Broker-Tag, heute gilt als belegt → kein weiterer Trade an diesem Tag
+gleich = DB + [plan("2026-11-06T15:00:00+00:00", 300.0)]
+tw3 = app.fcp_tw_broker(gleich, "2026-11-04", "2026-11-06", BROKER, "2026-11-04")
+ok(tw3["b"] == 1776.59 and tw3["w"] == 1776.59 and tw3["heute"] == 1776.59, f"at-Tag: B = Broker-Tag + danach, heute belegt ({tw3})")
+tw4 = app.fcp_tw_broker(DB, "2026-11-04", "2026-11-06", BROKER, "2026-11-04")
+r_at = app.fcp_cons_finn(50, 1500, 1476.59, tw4)
+ok(tw4["heute"] == 1476.59 and r_at["tp"] is None and r_at.get("tages_deckel"), "am at-Tag selbst plant der Planer keinen Trade (Tagesdeckel)")
 ok(app.fcp_tw_broker(DB + [plan("2026-11-07T10:00:00+00:00", None)], None, None, BROKER, None) is None, "Trade nach at ohne P&L → None")
 
 

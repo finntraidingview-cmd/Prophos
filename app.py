@@ -45030,8 +45030,19 @@ def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab):
     tn = fcp_tage_zyklus_w(nach, None, heute_tag)
     if tn is None:
         return None
-    return {"b": round(max(b, tn["b"]), 2), "w": round(w + tn["w"], 2), "n": tn["n"], "serie": tn["serie"], "serie_n": tn["serie_n"],
-            "heute": tn["heute"], "broker": True}
+    # TAG DES EINTRAGS (Gegenprüfung CS1): der Broker-Tag von `at` kann noch laufen — Trades nach at am selben Berlin-Tag gehören zum selben Tag
+    # wie die Broker-Werte. Vorsichtig: B mindestens bester_tag + Tagessumme danach, und heute (Tagesdeckel E1e) gilt am at-Tag als mit bester_tag
+    # belegt — so plant der Planer am Tag des Eintrags keinen Trade, der zusammen mit dem Broker-Tag über p % liegen könnte.
+    tz = _ap_tz("Europe/Berlin")
+    at_tag = at.astimezone(tz).date().isoformat()
+    am_at_tag = sum(float(_wd_num(p.get("master_pl")) or 0) for p in nach
+                    if _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at")).astimezone(tz).date().isoformat() == at_tag)
+    b_neu = max(b, tn["b"], b + am_at_tag if am_at_tag > 0 else 0.0)
+    heute = tn["heute"]
+    if heute_tag and str(heute_tag) == at_tag:
+        heute = max(heute, b + max(am_at_tag, 0.0))
+    return {"b": round(b_neu, 2), "w": round(w + tn["w"], 2), "n": tn["n"], "serie": tn["serie"], "serie_n": tn["serie_n"],
+            "heute": round(heute, 2), "broker": True}
 
 
 FCP_CONS_ANTEIL_SPANNE = 5.0     # TP je Trade = Zufall (p − 5 %) … p der Distanz (Finn 05.11.2026 ~07:50: „35–40 % davon, per Zufall bei jedem Trade")
