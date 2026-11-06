@@ -37,6 +37,7 @@ still ignoriert. Vor dem Start Duplikum fuer die Paare abschalten.
 import hashlib
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -1418,6 +1419,20 @@ def find_notfall_deals(deals, schon_verbucht, *, out_entries, reason_sl, reason_
 # nach dem Neustart weiter zumacht. magic_base je PC kommt spaeter (Master 30.10.2026) — das hier schuetzt auch ohne.
 EIGENE_DECKEL = 500   # so viele idents je Instanz merken (jede Master-Position einmal) — reicht fuer Monate, Sidecar bleibt klein
 ZWILLING_ZU_MAX = 3   # so oft darf ein Zwilling (alter Copier auf einem anderen PC) den Hedge schliessen, dann Sperre (Pingpong-Kosten)
+# NOTFALL-HALT (06.11.2026, DO2 — Doppel-Hedge Tradeify CFD, eine Master-Order, zwei Hedges à 1,26 Lot): der Hedge-SL (Notfall-Level) fuellte
+# 09:12:26.723, der Master-TP erst 09:12:27.060 (Fusion-Kurs lief dem Master-Broker voraus). Der naechste Tick sah den Master noch offen und
+# baute 09:12:27.217 einen neuen Hedge auf, der 09:12:27.727 wieder zuging (−2,87 €, doppelter Spread). Nach einem Notfall-Close wartet der
+# Wiederaufbau deshalb gestreut 6–9 s: ist der Master bis dahin zu (Normalfall), entsteht kein zweiter Hedge; laeuft er wirklich weiter,
+# kommt der Schutz-Hedge wie bisher zurueck.
+NOTFALL_HALT_S = (6.0, 9.0)
+
+
+def notfall_halt_aktiv(halt, ident, jetzt):
+    """REIN RECHNEND (testbar): wartet der Wiederaufbau des Hedges von ident noch (Notfall-Halt)? halt = {ident: bis}."""
+    try:
+        return float((halt or {}).get(ident, 0) or 0) > float(jetzt)
+    except (TypeError, ValueError):
+        return False
 
 
 def solo_haelt_auf(solo):
@@ -1574,6 +1589,7 @@ class Master:
         self.sltp_last = {}
         self.broker_abstand = {}   # Hedge-Ticket → Kursabstand Hedge − Master in Punkten (01.10.2026)
         self.blocked = set()
+        self.notfall_halt = {}     # ident -> Zeitpunkt, bis zu dem nach einem Notfall-Close kein neuer Hedge aufgebaut wird (DO2 06.11.2026)
         self.last_status = 0.0
         # closed_hedges (15.08.2026, Etappe 3): Beweisquelle fuer den Hedge-P&L in
         # Prophos. Beim Init aus dem Sidecar geladen — neustart-fest.
@@ -3080,8 +3096,12 @@ def main():
                                     f"sind die Notfall-Level da.")
                                 # KEIN m.blocked: laeuft der Master wider Erwarten noch
                                 # (Notfall-Level liegt HINTER dem Master-Level, also ist
-                                # er praktisch sicher auch zu), stellt der naechste Tick
-                                # den Schutz-Hedge bewusst wieder her.
+                                # er praktisch sicher auch zu), stellt der Copier den
+                                # Schutz-Hedge bewusst wieder her — seit DO2 (06.11.2026)
+                                # erst nach dem Notfall-Halt (6–9 s), damit ein Master,
+                                # der Sekundenbruchteile spaeter zugeht, keinen zweiten
+                                # Hedge bekommt.
+                                m.notfall_halt[ident_i] = time.monotonic() + random.uniform(*NOTFALL_HALT_S)   # monotonic: Uhr-Sprung egal
                                 continue
                             # ZWILLINGS-CLOSE (30.10.2026, Befund ECHO-FENSTER-FEHLT): hat ein ANDERER Copier mit derselben magic
                             # (anderer PC am selben Fusion-Konto, alter Stand ohne Zwillings-Schutz) den Hedge zugemacht, ist das
@@ -3213,6 +3233,8 @@ def main():
                     ident = a["ident"]
                     if a["kind"] == "open":
                         if ident in m.blocked:
+                            continue
+                        if notfall_halt_aktiv(m.notfall_halt, ident, time.monotonic()):   # DO2: Master geht vermutlich gerade auch zu
                             continue
                         # Echo pausiert (28.08.2026, Finns Not-Aus): keine neuen
                         # Hedges. Wie das Trade-Fenster ein reines OPEN-Gate —

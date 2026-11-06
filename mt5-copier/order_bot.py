@@ -11272,6 +11272,134 @@ def order_journal_grund(zeilen, symbol, richtung, jetzt_s, max_alter_s=180):
     return None
 
 
+def order_anfrage_im_journal(zeilen, login, symbol, richtung, ab_s, max_alter_s=900):
+    """REIN RECHNEND (testbar): hat das Terminal seit ab_s (Sekunden seit Mitternacht, Ortszeit des PCs) eine Order-ANFRAGE dieses Kontos
+    zu Symbol + Richtung ins Journal geschrieben? → Zeile oder None.
+    DOPPEL-ORDER (06.11.2026, DO1/DO2, The5%ers 200k: Journal „11:08:13.128 '…': market sell 54 NAS100 …" und „11:08:21.800 … market sell 54"
+    — beide erst 11:08:28 ausgeführt, 6–15 s Ausführung; die Leertaste hatte die Order längst geschickt, die nächste Stufe schickte die zweite).
+    Das Terminal schreibt „market sell …" beim Absenden, „accepted …"/„deal #… sell"/„order #… sell" danach, „failed market sell … [..]" bei
+    Ablehnung — jede dieser Zeilen heißt: die Stufe hat gesendet. „modify #…" zählt nicht. 1 s vor ab_s gilt noch (Uhr-Rundung; run() setzt ab_s schon 1 s vor den Klick)."""
+    sym, ri = str(symbol or "").lower(), str(richtung or "").lower()
+    lg = f"'{login}':" if login else ""
+    if not sym or ri not in ("buy", "sell"):
+        return None
+    # market/instant/request/exchange: je nach Ausführungsart des Brokers (Gegenprüfung DO2); „…, close #…“ = Schließen einer anderen Position
+    rx = re.compile(rf"\b((market|instant|request|exchange) {ri}|deal #\d+ {ri}|order #\d+ {ri})\b")
+    for z in reversed(list(zeilen or ())):
+        zl = str(z or "").lower()
+        if sym not in zl or (lg and lg not in zl) or not rx.search(zl) or "close #" in zl:
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zl)
+        if not m:
+            continue
+        d = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 - float(ab_s)) % 86400
+        if d <= max_alter_s or d >= 86400 - 1:
+            return str(z).strip()
+    return None
+
+
+# Dialog-Texte, die zeigen, dass eine Anfrage unterwegs ist (DO2 06.11.2026) — dann nie die nächste Stufe
+ORDER_UNTERWEGS_RX = re.compile(r"in progress|processing|placed for execution|request (is )?(sent|accepted)|wird (bearbeitet|ausgef)|in bearbeitung"
+                                r"|\bdone\b|executed|ausgef(ü|ue)hrt", re.I)
+
+
+def stufe_urteil(position_da, dialog_weg, anfrage_zeile, dialog_text, journal_lesbar, frist_um):
+    """REIN RECHNEND (testbar): nach einer Auslöse-Stufe am Buy/Sell-Knopf — darf die nächste Stufe gedrückt werden?
+    → 'bestaetigt' (Position da / Dialog zu) · 'gesendet' (Journal- oder Dialog-Beleg für eine Anfrage: nie eine weitere Stufe, nur noch
+    auf die Position warten) · 'antwort' (Server-Antwort rot im Dialog bzw. „failed market …“ im Journal: abgelehnt, keine weitere Stufe) · 'warten' (Frist läuft) · 'nichts' (Frist um, Journal lesbar, keine
+    Anfrage: die Stufe hat nachweislich nichts gesendet → nächste Stufe) · 'kein_beweis' (Frist um, Journal nicht lesbar: lieber unklar als
+    eine zweite Order → keine weitere Stufe). DO2 06.11.2026, Master: „Lieber ein ehrliches unklar als eine zweite Order.\""""
+    if position_da or dialog_weg:
+        return "bestaetigt"
+    if anfrage_zeile and re.search(r"failed (market|instant|request|exchange) ", str(anfrage_zeile).lower()):
+        return "antwort"           # Server hat abgelehnt („failed market sell … [Market closed]“) — nichts unterwegs, aber keine weitere Stufe
+    if anfrage_zeile or ORDER_UNTERWEGS_RX.search(str(dialog_text or "")):
+        return "gesendet"
+    if order_grund_aus_text(dialog_text):
+        return "antwort"
+    if not frist_um:
+        return "warten"
+    return "nichts" if journal_lesbar else "kein_beweis"
+
+
+class StufeNichtGesendet(RuntimeError):
+    """Eine Auslöse-Stufe hat nachweislich NICHTS gesendet (Knopf ohne Fokus, SendInput abgelehnt) — nur dann sofort zur nächsten Stufe."""
+
+
+def stufen_ausloesen(wege, lesen, frist_s, trail, muster, jetzt_s, uhr=None, schlafen=None, ruhe=None, zeit_ok=None):
+    """Buy/Sell-Knopf in Stufen auslösen, OHNE je eine zweite Order (DO2 06.11.2026). wege = [(name, tu)], lesen(ab_s, mit_journal) →
+    (position_da, dialog_weg, anfrage_zeile, dialog_text, journal_lesbar) — nur lesen. Nach jeder Stufe bis frist_s warten (Urteil
+    stufe_urteil); die nächste Stufe nur bei 'nichts'. uhr/schlafen/ruhe von außen (Test: virtuelle Uhr, Fake-Terminal).
+    Gegenprüfung DO2: wirft eine Stufe etwas anderes als StufeNichtGesendet, kann der Druck trotzdem angekommen sein → wie gedrückt warten;
+    Anfragen zählen ab der ERSTEN Stufe (ab_erst), nicht je Stufe; zeit_ok(frist_s) False → keine weitere Stufe (Panel bricht nach 300 s ab).
+    → (ausgeloest = Name der letzten gedrückten Stufe | None, anfrage_gesehen)"""
+    import contextlib
+    uhr = uhr or time.time
+    schlafen = schlafen or (lambda: _warte(0.25, 0.4))
+    ruhe = ruhe or contextlib.nullcontext
+    ausgeloest, anfrage_gesehen = None, False
+    ab_erst = jetzt_s() - 1.0
+    erste = True
+    for name, tu in wege:
+        if not erste and zeit_ok is not None and not zeit_ok(frist_s):
+            trail.append(f"{name}: keine weitere Stufe — Zeitbudget des Laufs reicht nicht mehr für Frist + Bestätigung")
+            break
+        ab_s = ab_erst
+        try:
+            tu()
+        except StufeNichtGesendet:
+            continue
+        except Exception as e:
+            trail.append(f"{muster}-Knopf: {name} warf {type(e).__name__} — gilt als gedrückt (vielleicht gesendet)")
+        erste = False
+        trail.append(f"{muster}-Knopf: {name}")
+        ausgeloest = name
+        ende, naechstes = uhr() + frist_s, 0.0
+        anfrage, lesbar, beleg = None, False, ""
+        with ruhe():                   # nur lesen — die Maus wandert derweil (07.10.2026)
+            while True:
+                jetzt = uhr()
+                um = jetzt >= ende
+                mit_j = not anfrage and (um or jetzt >= naechstes)   # Journal ~1×/s und genau an der Frist
+                pos, weg, a, dtext, lb = lesen(ab_s, mit_j)
+                if mit_j:
+                    anfrage, lesbar, naechstes = a, lb, jetzt + random.uniform(0.6, 1.0)
+                u = stufe_urteil(pos, weg, anfrage, dtext, lesbar, um)
+                if u != "warten":
+                    beleg = anfrage or (dtext if u == "antwort" else str(dtext or "")[:80] if u == "gesendet" else "")
+                    break
+                schlafen()
+        if u == "bestaetigt":
+            if not pos:
+                # Dialog zu, Position noch nicht da: steht die Anfrage im Journal, wartet Schritt 5 die langsame Ausführung ab (40 s)
+                try:
+                    _z = lesen(ab_erst, True)[2]
+                    if _z and not re.search(r"failed (market|instant|request|exchange) ", str(_z).lower()):
+                        anfrage_gesehen = True
+                except Exception:
+                    pass
+            break
+        if u == "gesendet":
+            anfrage_gesehen = True
+            trail.append(f"Anfrage unterwegs ({str(beleg or '')[-90:]}) — keine weitere Stufe, warte auf die Position")
+            break
+        if u == "kein_beweis":
+            anfrage_gesehen = True     # nicht bewiesen, dass nichts gesendet wurde → wie gesendet (kein Neustart, keine Stufe)
+            trail.append(f"nach {frist_s:.0f} s keine Position, Journal nicht lesbar — kein Beweis, dass nichts gesendet wurde: keine weitere Stufe")
+            break
+        # ABLEHNUNG IM DIALOG → KEIN WEITERER WEG (Puls-Fehler 08.10.2026 23:48 UTC, pc-xxxxxx, FundedNext 1c3f7ecd, NDX100: der
+        # Buy-Knopf wurde auf allen vier Wegen gedrueckt, je ~4 s, keine Position, Dialog blieb offen). Steht nach einem Weg bereits
+        # eine Server-Antwort rot im Dialog (ORDER_GRUND_REGELN: Invalid stops, Not enough money, Trade disabled …), ist der Druck
+        # angekommen — jeder weitere Weg schickte dieselbe abgelehnte Order noch einmal. Den Grund fuer die Meldung bestimmt am Ende
+        # wie bisher _keine_bestaetigung_grund (Journal vor Dialog vor API).
+        if u == "antwort":
+            g_dlg = order_grund_aus_text(beleg)
+            trail.append(f"Dialog zeigt die Antwort des Servers ({g_dlg[0] if g_dlg else beleg}) — kein weiterer Ausloese-Weg")
+            break
+        trail.append(f"{name}: nach {frist_s:.0f} s keine Position, Journal ohne Anfrage — naechste Stufe")
+    return ausgeloest, anfrage_gesehen
+
+
 def order_grund_bestimmen(journal, dialog_text, api):
     """REIN RECHNEND (testbar): EIN Grund für „keine Bestätigung" — Journal (Antwort des Servers) vor Dialog-Text vor API-Zustand.
     journal = (antwort, zeile) | None, api = dict aus _order_api_zustand. -> (grund, fix, quelle) oder None"""
@@ -11339,11 +11467,15 @@ def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
     return out
 
 
-def _mt5_journal_zeilen(data_path, n=400):
-    """Letzte n Zeilen des Terminal-Journals (logs/JJJJMMTT.log, UTF-16) von heute, sonst gestern — nur lesen, nie werfen."""
+def _mt5_journal_zeilen(data_path, n=400, beide=False):
+    """Letzte n Zeilen des Terminal-Journals (logs/JJJJMMTT.log, UTF-16) von heute, sonst gestern — nur lesen, nie werfen.
+    beide=True (DO2 06.11.2026, kurz nach Mitternacht): gestern + heute zusammen, damit eine Zeile von 23:59 nicht fehlt."""
     if not data_path:
         return []
     import datetime as _dtm
+    if beide:
+        gestern = _mt5_journal_zeilen_tag(data_path, 1, n)
+        return (gestern + _mt5_journal_zeilen_tag(data_path, 0, n))[-n:]
     for tage in (0, 1):
         pfad = os.path.join(data_path, "logs", (_dtm.datetime.now() - _dtm.timedelta(days=tage)).strftime("%Y%m%d") + ".log")
         try:
@@ -11359,6 +11491,23 @@ def _mt5_journal_zeilen(data_path, n=400):
         except Exception:
             continue
     return []
+
+
+def _mt5_journal_zeilen_tag(data_path, tage, n):
+    """Letzte n Zeilen der Journal-Datei von heute − tage (nur lesen, nie werfen)."""
+    import datetime as _dtm
+    pfad = os.path.join(data_path, "logs", (_dtm.datetime.now() - _dtm.timedelta(days=tage)).strftime("%Y%m%d") + ".log")
+    try:
+        with open(pfad, "rb") as f:
+            f.seek(0, 2)
+            groesse = f.tell()
+            f.seek(max(0, groesse - 200000))
+            roh = f.read()
+        if len(roh) % 2:
+            roh = roh[1:]
+        return roh.decode("utf-16-le", "replace").lstrip("\ufeff").splitlines()[-n:]
+    except Exception:
+        return []
 
 
 def journal_befund(zeilen, symbol, api=None):
@@ -13833,30 +13982,6 @@ def run(cfg_path, cmd):
         except Exception:
             return True
 
-    def _schnell_bestaetigt(sekunden=4.0):
-        """Kurzer LESE-Check nach jedem Ausloese-Versuch: neue Position da oder
-        Dialog zu? Nur wenn BEIDES ausbleibt, darf der naechste Weg probiert
-        werden — sonst feuern zwei Wege ZWEI Orders."""
-        # ERST pruefen, DANN warten (31.08.2026, Finns Tempo-Frage): die Order
-        # ist beim ersten Blick meistens schon da. Die alte Reihenfolge legte
-        # trotzdem jedes Mal die volle Wartezeit davor — und weil _api_lesen
-        # damals pro Aufruf neu ans Terminal andockte, war der erste Blick
-        # ohnehin ueber eine Sekunde entfernt. Der Takt darunter ist jetzt
-        # kurz, weil ein Lesen auf offener Verbindung nur noch Millisekunden
-        # kostet. Was NICHT kuerzer wird: das Zeitfenster insgesamt.
-        ende_s = time.time() + sekunden
-        with _EchoUnruhe():            # nur lesen — die Maus wandert derweil (07.10.2026)
-            while True:
-                st = _api_lesen(path, expected)
-                if "fehler" not in st and finde_neue_position(
-                        vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
-                    return True
-                if _dialog_weg():
-                    return True
-                if time.time() >= ende_s:
-                    return False
-                _warte(0.12, 0.15)
-
     # ECHTE Eingabe zuerst (18.08.2026, Live-Fund — dieselbe Lehre wie beim
     # set_text: MT5 reagiert auf echte Events. Das Volumen stand korrekt im
     # Dialog, der .click()-Weg verpuffte, der Dialog blieb einfach stehen).
@@ -13871,39 +13996,52 @@ def run(cfg_path, cmd):
             hat_fokus = False
         if not hat_fokus:
             # sonst tippte die Leertaste in das gerade fokussierte FELD
-            raise RuntimeError("Knopf nimmt keinen Tastatur-Fokus an")
+            raise StufeNichtGesendet("Knopf nimmt keinen Tastatur-Fokus an")
         _el_tasten(knopf, "{SPACE}", set_foreground=False)
 
     def _weg_sendinput():
         if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
-            raise RuntimeError("SendInput abgelehnt")
+            raise StufeNichtGesendet("SendInput abgelehnt")
 
-    ausgeloest = None
-    for weg, tu in (("Fokus+Leertaste", _weg_leertaste),
-                    ("SendInput-Klick", _weg_sendinput),
-                    (".click()", lambda: knopf.click()),
-                    ("click_input", lambda: knopf.click_input())):
+    # STUFEN OHNE ZWEITE ORDER (06.11.2026, DO2 — Doppel-Order The5%ers 200k/100k: die Leertaste HATTE gesendet, die Ausführung dauerte
+    # 6–23 s, nach 4 s ohne Position drückte der Bot die nächste Stufe → zweite Order, je 54 bzw. 26 Lots). Jetzt nach JEDER Stufe:
+    # bis zur Frist (24–30 s gestreut, Jitter-Regel; der 100k-Fall brauchte 22,8 s) auf Position / Dialog zu warten und dabei Journal + Dialog lesen; ein Beleg für eine
+    # Anfrage (Journal „market sell …“, „accepted …“, „deal #…“, Dialog „in progress“) beendet die Stufen sofort. Die nächste Stufe nur,
+    # wenn nach der Frist das Journal lesbar ist und KEINE Anfrage zeigt; Journal nicht lesbar = kein Beweis = keine weitere Stufe.
+    _stufe_frist = random.uniform(24.0, 30.0)
+    try:
+        _stufe_daten = _order_api_zustand(path, expected, symbol).get("data_path") or ""
+    except Exception:
+        _stufe_daten = ""
+
+    def _jetzt_s():
+        lt = time.localtime()
+        return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (time.time() % 1)
+
+    def _stufe_lesen(ab_s, mit_journal):
+        """Nur lesen: (neue Position?, Dialog zu?, Journal-Anfrage seit ab_s, Dialog-Text, Journal lesbar?)"""
+        st = _api_lesen(path, expected)
+        pos = "fehler" not in st and bool(finde_neue_position(vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol))
+        weg = _dialog_weg()
         try:
-            tu()
+            dtext = "" if (pos or weg) else " | ".join((t.window_text() or "") for t in dlg.descendants(control_type="Text"))
         except Exception:
-            continue
-        trail.append(f"{muster}-Knopf: {weg}")
-        ausgeloest = weg
-        if _schnell_bestaetigt():
-            break
-        # ABLEHNUNG IM DIALOG → KEIN WEITERER WEG (Puls-Fehler 08.10.2026 23:48 UTC, pc-xxxxxx, FundedNext 1c3f7ecd, NDX100: der
-        # Buy-Knopf wurde auf allen vier Wegen gedrueckt, je ~4 s, keine Position, Dialog blieb offen). Steht nach einem Weg bereits
-        # eine Server-Antwort rot im Dialog (ORDER_GRUND_REGELN: Invalid stops, Not enough money, Trade disabled …), ist der Druck
-        # angekommen — jeder weitere Weg schickte dieselbe abgelehnte Order noch einmal. Nur lesen; den Grund fuer die Meldung
-        # bestimmt am Ende wie bisher _keine_bestaetigung_grund (Journal vor Dialog vor API).
-        try:
-            dlg_text = " | ".join((t.window_text() or "") for t in dlg.descendants(control_type="Text"))
-        except Exception:
-            dlg_text = ""
-        g_dlg = order_grund_aus_text(dlg_text)
-        if g_dlg:
-            trail.append(f"Dialog zeigt die Antwort des Servers ({g_dlg[0]}) — kein weiterer Ausloese-Weg")
-            break
+            dtext = ""
+        anfrage, lesbar = None, False
+        if mit_journal:
+            _lt = time.localtime()
+            zeilen = _mt5_journal_zeilen(_stufe_daten, beide=(_lt.tm_hour == 0 and _lt.tm_min < 5)) if _stufe_daten else []
+            lesbar = bool(zeilen)
+            anfrage = order_anfrage_im_journal(zeilen, expected, symbol, cmd["richtung"], ab_s)
+        return pos, weg, anfrage, dtext, lesbar
+
+    ausgeloest, anfrage_gesehen = stufen_ausloesen(
+        (("Fokus+Leertaste", _weg_leertaste),
+         ("SendInput-Klick", _weg_sendinput),
+         (".click()", lambda: knopf.click()),
+         ("click_input", lambda: knopf.click_input())),
+        _stufe_lesen, _stufe_frist, trail, muster, _jetzt_s, ruhe=_EchoUnruhe,
+        zeit_ok=lambda f: trail.sekunden() + f + 40 + 30 < 270)   # Panel-Timeout 300 s: Frist + Schritt 5 (40 s) + SL/TP-Nachtrag
     if ausgeloest is None:
         try:
             _el_tasten(dlg, "{ESC}", set_foreground=False)
@@ -13916,7 +14054,9 @@ def run(cfg_path, cmd):
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     # Erster Blick sofort, erst danach im kurzen Takt nachfassen (31.08.2026) —
     # das 12-s-Fenster bleibt unveraendert, nur die Leerzeit davor faellt weg.
-    ende = time.time() + 12
+    # DO2 (06.11.2026): ist eine Anfrage nachweislich unterwegs (oder nicht beweisbar nichts gesendet), bis 40 s — Ausführung dauerte 6–23 s
+    _bestaetig_s = 40 if anfrage_gesehen else 12
+    ende = time.time() + _bestaetig_s
     _erster_blick = True
     unruhe = _EchoUnruhe().start()     # Maus wandert, bis die Position gelesen ist — stop() vor jedem ESC/Klick (07.10.2026)
     while time.time() < ende:
@@ -14093,7 +14233,7 @@ def run(cfg_path, cmd):
         _el_tasten(dlg, "{ESC}", set_foreground=False)
     except Exception:
         pass
-    if markt_zu:
+    if markt_zu and not anfrage_gesehen:   # DO2: mit Anfrage unterwegs nie retry_ok — sonst startet der Tab dieselbe Order neu
         return {"ok": False, "retry_ok": True,
                 "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
                        "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + _spur(trail) + "]",
@@ -14110,6 +14250,12 @@ def run(cfg_path, cmd):
     befund = []
     grund = _keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte), vol, befund)
     trail.append(f"Befund: {muster}-Knopf aktiv {knopf_aktiv}" + ("".join(" · " + b for b in befund)))   # 21.10.2026, nur lesen
+    if anfrage_gesehen and not grund:
+        # DO2 (06.11.2026): Anfrage gesendet (bzw. nicht beweisbar nichts), aber keine Position — ehrlich UNKLAR, nie neu starten
+        return {"ok": False, "retry_ok": False, "unklar": True, "code": "unklar",
+                "msg": f"⚠ Ergebnis UNKLAR — Order-Anfrage ging raus (bzw. nicht beweisbar nichts), aber binnen {_bestaetig_s} s keine Position am "
+                       "Konto. Im Terminal (Handel/Journal) nachsehen, NICHT erneut starten. Spur: [" + _spur(trail) + "] · Dialog: " + struktur,
+                "trail": _spur(trail)}
     if grund:
         trail.append(f"Grund: {grund[0]} ({grund[2]})")
         return {"ok": False, "retry_ok": False, "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],
