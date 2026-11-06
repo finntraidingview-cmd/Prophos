@@ -194,7 +194,7 @@ def main():
         test = """function run(){
 var window = {}; var _tpNqMode = 'mnq', TP_WD_SLAVE_FIRM = 'Fusion';
 var FIRM_PRESETS = { projectx: { ppl: 2 } }; function firmToPreset(){ return 'projectx' }
-function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') ? 20 : 0 } function tpWdSlavePpl(){ return 0.85 }
+function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') ? 20 : 0 } function tpWdSlavePpl(){ return 0.85 } var FUSION_EUR_PKT_RUECKFALL = 0.85;   // EU1 (06.11.2026)
 function tpCalcMultiplier(f, s, risk, kt, eur){ return tpMultiplierAusRisiko(risk, kt, eur, tpMasterPpl(f), 0.85) }
 """ + code_ppl + code + """
 var plan = { status: 'planned', winningDay: true, route: 'tvv2', hedgeEur: 170.99, multiplier: 1.0695, slaveRisk: 175, masterTp: 376, masterContracts: 3, masterRisk: 376, masterFirm: 'Apex', masterSymbol: 'MNQZ6' };

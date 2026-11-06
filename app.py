@@ -29376,13 +29376,86 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 #  • nie bestätigt — der Verwalter bestätigt im Admin-Reiter „Trade-Planer"; erst dann startet der PC-Tab (suStartetNichtWeil)
 # Kein Ersetzen: jeder Lauf plant nur Konten ohne Plan für heute; unbestätigte/nie gestartete Vorschläge früherer Tage löscht er.
 GP_ZEITEN_STANDARD = {"tz": "Europe/Berlin", "von": "07:00", "bis": "17:20", "lauf": "06:00", "abstand_id_min": 3}
-GP_SLAVE_PPL = 0.85          # € je NAS100-Punkt und Lot bei Fusion (FIRM_PRESETS.fusion), wenn firm_specs der ID nichts sagt
+GP_SLAVE_PPL = 0.85          # € je NAS100-Punkt und Lot bei Fusion — seit EU1 (06.11.2026) nur noch Rückfall, s. fusion_eur_pkt
 GP_MIN_LOT = 0.01            # kleinster Fusion-Auftrag — darunter gäbe es keinen Hedge
 GP_VORLAUF_MIN = 15          # Startzeiten frühestens jetzt + 15 min (wie Nachplanen)
 GP_TAKT_S = 900              # Takt auf Railway: alle 15 min Konten ohne Plan nachplanen (ab zeiten.lauf bis bis − Vorlauf)
 GP_DD_PLAUSIBEL = 0.3        # Max-DD am Konto über 30 % der Größe (Tippfehler wie 100.000 auf 100k) → Kernwert der Firma
 GP_HEDGE_KEY = "echo_hedge_account"
 _gp_hedge_fremd = {}   # uid → Grund, warum die Hedge-Einstellung verworfen wurde (Spur, gp_hedge_settings_eigen)
+
+
+# ── FUSION €/PUNKT AUS DEM ECHTEN KURS (EU1 06.11.2026, Befund OV1 S5) ─────────────────────────────────────────────────────
+# Fusion NAS100 = 1 $ je Punkt und Lot, in € also der USD→EUR-Kurs. Der Copier misst ihn bei jedem Hedge (tick_value/tick_size →
+# mt5_baseline.hedge.wert_pro_punkt, 25.10.–06.11.2026: 0,887–0,900 €). Gerechnet wurde fest mit 0,85 (GP_SLAVE_PPL, TFH_SLAVE_PPL,
+# firm_specs „Fusion Markets" ppl 0,85 bei 17 IDs) → Hedge-Lots ~5 % zu groß. Quelle jetzt: jüngster gemessener Wert (≤ 3 Tage) →
+# Live-Kurs fx_usd_eur → 0,85. firm_specs-Werte, die jemand bewusst anders gesetzt hat (≠ 0,85 oder $-Zeile), bleiben.
+FUSION_EUR_PKT_RUECKFALL = 0.85
+_FUSION_EUR_PKT = {"at": 0.0, "wert": None, "quelle": None, "je_id": {}}
+
+
+def fusion_eur_pkt_waehlen(gemessen, fx, rueckfall=FUSION_EUR_PKT_RUECKFALL):
+    """REIN RECHNEND (testbar): (€ je NAS100-Punkt und Lot bei Fusion, Quelle). gemessen = jüngster hedge.wert_pro_punkt (EUR),
+    fx = USD→EUR live; je nur, wenn plausibel (0,6–1,2), sonst der nächste; zuletzt rueckfall."""
+    for quelle, v in (("gemessen", gemessen), ("fx", fx)):
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0.6 <= x <= 1.2:
+            return round(x, 5), quelle
+    return float(rueckfall), "rueckfall"
+
+
+def fusion_sppl_wahl(spec_ppl, aktuell):
+    """REIN RECHNEND (testbar): firm_specs-Wert der ID für „Fusion Markets" → wirksamer €/Pkt. Fehlt er oder ist er der alte Festwert
+    0,85 → aktuell (gemessen/FX). Sonst (bewusst anders gesetzt, z. B. 0,852) bleibt er. Die Währung der Zeile zählt nicht (Gegenprüfung EU1):
+    der Tab behandelt jede Fusion-Zeile als € (mergeCustomFirmsIntoPresets), Railway genauso."""
+    x = _wd_num(spec_ppl)
+    if not x or x <= 0:
+        return aktuell
+    if abs(x - FUSION_EUR_PKT_RUECKFALL) < 0.0005:
+        return aktuell
+    return x
+
+
+def fusion_eur_pkt():
+    """€ je NAS100-Punkt und Lot bei Fusion jetzt — (wert, quelle), 5 min zwischengespeichert, wirft nie."""
+    c = _FUSION_EUR_PKT
+    if c["wert"] is not None and time.time() - c["at"] < 300:
+        return c["wert"], c["quelle"]
+    gemessen = fx = None
+    try:
+        from datetime import timedelta
+        seit = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        z = sb_select("trade_plans", {"select": "w:mt5_baseline->hedge->>wert_pro_punkt,started_at",
+                                      "mt5_baseline->hedge->>wert_pro_punkt": "not.is.null", "mt5_baseline->hedge->>waehrung": "eq.EUR",
+                                      "started_at": f"gte.{seit}",
+                                      "order": "started_at.desc", "limit": "1"})
+        if isinstance(z, list) and z:
+            gemessen = z[0].get("w")
+    except Exception as e:
+        print(f"[fusion-ppl] ⚠️ gemessen nicht lesbar: {type(e).__name__}: {e}", flush=True)
+    try:
+        fx = _wd_fx()
+        fx = fx.get("rate") if isinstance(fx, dict) else fx
+    except Exception as e:
+        print(f"[fusion-ppl] ⚠️ FX nicht lesbar: {type(e).__name__}: {e}", flush=True)
+    try:   # firm_specs „Fusion Markets" je ID — für Stellen ohne eigene ppl-Karte (TFH, FDP), z. B. 0,852 bei einer ID bleibt 0,852
+        zeilen = sb_select("firm_specs", {"select": "user_id,ppl", "name": "ilike.*fusion*"})
+        je_id = {str(x.get("user_id")): x.get("ppl") for x in (zeilen or []) if isinstance(zeilen, list)}
+    except Exception:
+        je_id = c["je_id"]
+    wert, quelle = fusion_eur_pkt_waehlen(gemessen, fx)
+    c.update(at=time.time(), wert=wert, quelle=quelle, je_id=je_id)
+    return wert, quelle
+
+
+def fusion_sppl(ppl_map, uid):
+    """Wirksamer Fusion-€/Pkt für diese ID: firm_specs der ID über fusion_sppl_wahl gegen fusion_eur_pkt()."""
+    aktuell = fusion_eur_pkt()[0]
+    spec = ((ppl_map or {}).get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0] if ppl_map else _FUSION_EUR_PKT["je_id"].get(str(uid))
+    return fusion_sppl_wahl(spec, aktuell)
 
 
 def gp_hedge_settings_eigen_rechnen(rows, konten, eigene, links=None):
@@ -29787,7 +29860,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
                     print(f"[gruppen-plan] ⚠️ Kaufpreis-Kette: {type(e).__name__}: {e}", flush=True)
                     kauf_kette = {}
             kauf = kauf_kette.get(aid)
-        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        sppl = fusion_sppl(ppl, uid)
         h, grund = gp_hedge(gp_dd(a, regel_k, w.get("groesse")), kauf, w["menge"], mppl, sppl)
         if grund:
             aus(grund)
@@ -30578,7 +30651,7 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     if bal is None:
         return "v2", "Balance des Kontos nicht lesbar"
     kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
-    sppl = (((ctx_ppl.get("ppl") or {}).get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+    sppl = fusion_sppl(ctx_ppl.get("ppl"), uid)
     h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), z.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, z.get("master_risk"),
                         par["netto_faktor"], par["min_lot"])
     if grund or not h:
@@ -30862,7 +30935,7 @@ def _eh_tick_lauf(jetzt):
                 _eh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
                 continue
             kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))
-            sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+            sppl = fusion_sppl(ppl, uid)
             h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
                                 par["netto_faktor"], par["min_lot"])
             if grund:
@@ -31027,7 +31100,7 @@ def ehv_tick(jetzt=None, force=False):
                 grund = "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)"
             else:
                 kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))
-                sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+                sppl = fusion_sppl(ppl, uid)
                 h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
                                     par["netto_faktor"], par["min_lot"])
         vs = ehv_vorschau(h, grund, p.get("master_tp"), _wt_now_iso())
@@ -31138,12 +31211,13 @@ def ah_tradeify_final(p, a):
     return "tradeify" in firm.lower() and not _ist_tradeify_cfd(firm) and tfh_ist_final(p, a)
 
 
-def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01):
+def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01, sppl=None):
     """REIN RECHNEND (testbar): Fusion-Gegenhedge des finalen Tradeify-Trades → (dict, None) | (None, grund).
     satz = Kontowert ÷ Polster (€ je $), polster $ (Balance − Liq), kt Kontrakte, ppl $/Pkt je Kontrakt (NQ 20, MNQ 2), tp $.
     q = satz ÷ faktor; slave_risk = q × Polster (Hedge-Gewinn am Blow), Lots wie hedgeMultAusRisiko: slave_risk ÷ (0,85 × Polster-Punkte);
-    hedge_eur = Lots × 0,85 × TP-Punkte (Hedge-Verlust am Master-TP)."""
+    hedge_eur = Lots × €/Pkt × TP-Punkte (Hedge-Verlust am Master-TP). sppl (EU1 06.11.2026) = € je Punkt und Lot Fusion (fusion_sppl), None → TFH_SLAVE_PPL 0,85."""
     s, pol, k, pp, t = (_wd_num(x) for x in (satz, polster, kt, ppl, tp))
+    sp = _wd_num(sppl) or TFH_SLAVE_PPL
     if not s or s <= 0:
         return None, "kein Kontowert-Satz (Kontowert ÷ Polster) für dieses Konto"
     if not pol or pol <= 0:
@@ -31155,12 +31229,12 @@ def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01):
     q = s / float(faktor or TFH_STANDARD["netto_faktor"])
     slave_risk = q * pol
     pkt = pol / (pp * k)
-    lots = slave_risk / (TFH_SLAVE_PPL * pkt)
+    lots = slave_risk / (sp * pkt)
     mult = lots / k
     if round(lots, 2) < float(min_lot) - 1e-9:
         return None, f"Hedge {lots:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
     return {"q": round(q, 5), "master_risk": round(pol, 2), "slave_risk": round(slave_risk, 2), "lots": round(lots, 2),
-            "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * TFH_SLAVE_PPL * t / (pp * k), 2)}, None
+            "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * sp * t / (pp * k), 2)}, None
 
 
 def tfh_stand(regeln=None):
@@ -31250,7 +31324,7 @@ def tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par):
     satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
     ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
     h, grund = tfh_hedge(satz, (wert / satz) if (satz and wert) else None, p.get("master_contracts"), ppl, p.get("master_tp"),
-                         par["netto_faktor"], par["min_lot"])
+                         par["netto_faktor"], par["min_lot"], fusion_sppl(None, (a or {}).get("user_id") or p.get("user_id")))   # EU1
     if grund:
         return {"grund": grund, "at": _wt_now_iso()}
     return {"lots": h["lots"], "hedge_eur": h["hedge_eur"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"], "q": h["q"], "at": _wt_now_iso()}
@@ -31387,7 +31461,8 @@ def tfh_tick(jetzt=None, force=False):
         satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
         polster = (wert / satz) if (satz and wert) else None
         ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
-        h, grund = tfh_hedge(satz, polster, p.get("master_contracts"), ppl, p.get("master_tp"), par["netto_faktor"], par["min_lot"])
+        h, grund = tfh_hedge(satz, polster, p.get("master_contracts"), ppl, p.get("master_tp"), par["netto_faktor"], par["min_lot"],
+                             fusion_sppl(None, p.get("user_id")))   # EU1: € je Punkt aus dem echten Kurs
         if grund:
             _tfh_ohne(p, "groesse", grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
             continue
@@ -33093,7 +33168,7 @@ def ah_tick(jetzt=None, force=False):
             if pol_eod != polster:
                 polster, wert = pol_eod, round(satz * pol_eod, 2)
         abstand, art = ah_abstand(bal, polster, dll_konto.get(str(a["id"])) or a)
-        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        sppl = fusion_sppl(ppl, uid)
         # Satz auf den Abstand bis zum Ende des Trades (ah_abstand): Ein Ende am Tageslimit bringt so den ganzen Kontowert, slave_risk bleibt der Kontowert
         h, grund = eh_hedge(wert / abstand, p.get("master_contracts"), ah_master_ppl(p), sppl, abstand, par["netto_faktor"], par["min_lot"])
         if grund:
@@ -43186,7 +43261,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
         kt = int(kt_fest) if kt_fest else fdp_kontrakte(jg.get("kontrakte") or {"1": 1}, None, rnd)
         he, ddj = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("dd"))
         offen_r = round(he / ddj * (balance - liq), 2) if he and ddj else offen       # € je $ Abstand fest (450 € auf 3.000 $)
-        h = fdp_hedge(offen_r, balance, liq, tp, sl, kt)
+        h = fdp_hedge(offen_r, balance, liq, tp, sl, kt, sppl=K.get("sppl") or FDP_SLAVE_PPL)   # EU1: € je Punkt von außen (konto_rechnen)
         if not h:
             return dict(basis, aktion="aus", grund="Hedge nicht rechenbar (hedge_eur / dd der Regel)")
         dl = _wd_num(jg.get("daily_usd"))
@@ -43199,7 +43274,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if not sl or sl < k_slmin:
         return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
     kt = min(int(minis or kt_fest), int(kt_fest)) if kt_fest else fdp_kontrakte(jg.get("kontrakte"), minis, rnd)
-    h = fdp_hedge(offen, balance, liq, tp, sl, kt)
+    h = fdp_hedge(offen, balance, liq, tp, sl, kt, sppl=K.get("sppl") or FDP_SLAVE_PPL)   # EU1
     if not h:
         return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} €)")
     return dict(basis, aktion="planen", grund="", tp=tp, sl=sl, kontrakte=kt, tp_art=art, stufe=nr, dll=dll, minis=minis,
@@ -43437,6 +43512,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         peak = liq_peak({}, a, balance, verlauf)
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
+        # EU1 (06.11.2026): € je Punkt Fusion dieser ID in konst mitgeben (fdp_konto_rechnen bleibt rein rechnend); ohne fusion_sppl (Ausschnitt-Selbsttests) → 0,85
+        if isinstance(konst, dict):
+            konst["sppl"] = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
                                  konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy
 
@@ -43970,7 +44048,7 @@ FDP_FEST = [   # (Schlüssel, Bezeichnung, Wert, Einheit, wo, Grund) — nur Anz
     ("takt", "Nachplanen alle", FDP_TAKT_S // 60, "min", "code", "Technik — Takt des Railway-Laufs"),
     ("firma_abstand", "Firmen-Abstand beim Start", 15, "min", "db", "DB-Riegel: der Trigger trade_plans_firmen_abstand setzt 15 min beim Start durch"),
     ("nq_ppl", "NQ je Punkt und Kontrakt", FDP_NQ_PPL, "$", "code", "Kontraktwert der CME, keine Einstellung"),
-    ("fusion_ppl", "Fusion je NAS100-Punkt und Lot", FDP_SLAVE_PPL, "€", "code", "Kontraktwert bei Fusion (wie tpWdSlavePpl)"),
+    ("fusion_ppl", "Fusion je NAS100-Punkt und Lot", FDP_SLAVE_PPL, "€", "code", "Rückfall — gerechnet wird mit dem echten Kurs (fusion_eur_pkt, EU1 06.11.2026)"),
 ]
 FDP_KONST_TEXT = {   # Anzeige der änderbaren Grenzen (Bezeichnung, Einheit, Erklärung)
     "breakeven_tol": ("Break-even ab", "$", "so weit unter dem Start ist das Konto noch „frisch“, darunter TP = zurück auf den Start"),
@@ -45619,7 +45697,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if bal is None:
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
-        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        sppl = fusion_sppl(ppl, uid)
         # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
         gti = (fcp_gewinntage_ist(jg.get("gewinntage"), aid, pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")),
                                   fcp_gt_korrektur(gt_korr.get(aid), payout_n.get(aid, 0) + 1)) if payouts_ok else None) \

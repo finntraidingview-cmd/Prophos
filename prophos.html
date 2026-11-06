@@ -30665,7 +30665,7 @@
     if(typeof tpIstApexHedge === 'function' && tpIstApexHedge(plan) && Number(plan.multiplier) > 0) return null
     const sr = Number(plan && plan.slaveRisk); if(!(sr > 0 && kt > 0 && ppl > 0)) return null
     const q = hedgeRisikoMaster(plan); if(!q) return null
-    const pkt = q.risk / (ppl * kt), lots = sr / (0.85 * pkt), mult = lots / kt
+    const pkt = q.risk / (ppl * kt), lots = sr / (tpWdSlavePpl() * pkt), mult = lots / kt   // EU1 (06.11.2026): € je Punkt aus dem echten Kurs statt 0,85
     return (isFinite(mult) && mult > 0) ? { mult, lots: Math.round(kt * mult * 100) / 100, quelle: q.quelle, risk: q.risk } : null
   }
   window._hedgeMultAusRisiko = hedgeMultAusRisiko   // Prüf-Haken
@@ -40045,7 +40045,9 @@
     // Satz = Lots × €/Pkt und Lot (wie die Lots-Formel) ÷ (Kontrakte × $/Pkt des Master-Symbols). WD …0431: 2,82 × 0,85 ÷ 6 = 0,3995 = 111,06 ÷ 278. Ohne Lots/Kontrakte eur ÷ TP, nur nicht bei Apex-Challenges
     const lots = n(h.lots), kt = n(t.kt ?? t.kontrakte), ppl = hedgePplFuer(t.symbol_root || h.symbol_nq || '')
     const apexChallenge = /apex/i.test(String((t.konto && t.konto.firma) || t.master_firm || '')) && t.konto_typ === 'challenge'
-    const satz = (lots > 0 && kt > 0 && ppl > 0) ? lots * tpWdSlavePpl() / (kt * ppl) : (!apexChallenge && eur && mTp > 0) ? Math.abs(eur) / mTp : null
+    // EU1 (06.11.2026): € je Punkt des Trades selbst (hedge.wert_pro_punkt, vom Copier beim Öffnen gemessen), sonst der aktuelle
+    const wpp = n(h.wert_pro_punkt), sPplT = (wpp >= 0.6 && wpp <= 1.2) ? wpp : tpWdSlavePpl()
+    const satz = (lots > 0 && kt > 0 && ppl > 0) ? lots * sPplT / (kt * ppl) : (!apexChallenge && eur && mTp > 0) ? Math.abs(eur) / mTp : null
     const mitPlan = !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende'
     const planEur = (mitPlan && satz != null && mPl != null) ? Math.round(-satz * mPl * 100) / 100 : null
     const diffEur = (planEur != null && ist != null) ? Math.round((ist - planEur) * 100) / 100 : null
@@ -55542,7 +55544,43 @@
   // multiplier, master_risk = master_sl, slave_risk, hedge_faktor = multiplier und hedge_eur = Lots × 0,85 × TP-Punkte (der
   // Fusion-Verlust am Master-TP — die Bedeutung, die Copier-Lots-Rechnung und Farmer-Abgleich schon kennen).
   const TP_WD_SLAVE_FIRM = 'Fusion Markets'
-  const tpWdSlavePpl = () => { const p = FIRM_PRESETS[firmToPreset(TP_WD_SLAVE_FIRM)] || FIRM_PRESETS.fusion; return (p && p.ppl > 0) ? p.ppl : 0.85 }
+  /* FUSION €/PUNKT AUS DEM ECHTEN KURS (EU1 06.11.2026, Befund OV1 S5): Fusion NAS100 = 1 $ je Punkt und Lot, in € also der USD→EUR-Kurs.
+   * Der Copier misst ihn bei jedem Hedge (mt5_baseline.hedge.wert_pro_punkt, 25.10.–06.11.: 0,887–0,900 €). Gerechnet wurde fest mit 0,85:
+   * firm_specs „Fusion Markets" ppl 0,85 (17 IDs) gewinnt in firmToPreset vor dem FX-abhängigen Standard-Preset → Hedge-Lots ~5 % zu groß.
+   * Quelle jetzt: jüngster gemessener Wert (≤ 3 Tage) → Live-Kurs window._fxUsdEur → 0,85. Gleiche Regel wie app.py fusion_eur_pkt. */
+  const FUSION_EUR_PKT_RUECKFALL = 0.85
+  const _fusionEurPktC = { at: 0, v: FUSION_EUR_PKT_RUECKFALL, q: 'rueckfall' }
+  function fusionEurPktWaehlen(gemessen, fx){
+    for(const [q, v] of [['gemessen', gemessen], ['fx', fx]]){ const x = Number(v); if(v != null && v !== '' && x >= 0.6 && x <= 1.2) return { v: Math.round(x * 1e5) / 1e5, q } }
+    return { v: FUSION_EUR_PKT_RUECKFALL, q: 'rueckfall' }
+  }
+  function fusionEurPkt(){
+    if(Date.now() - _fusionEurPktC.at < 60000) return _fusionEurPktC.v
+    let best = null, bestT = 0
+    try{
+      for(const p of (typeof tradePlans !== 'undefined' && tradePlans) || []){
+        const h = p && p.mt5Baseline && p.mt5Baseline.hedge, w = Number(h && h.wert_pro_punkt)
+        if(h && h.waehrung && String(h.waehrung).toUpperCase() !== 'EUR') continue   // Messung in Kontowährung — nur EUR-Konten zählen
+        const t = Date.parse((h && h.opened_at) || (p && p.startedAt) || '') || 0
+        if(w >= 0.6 && w <= 1.2 && t > bestT && Date.now() - t < 3 * 864e5){ best = w; bestT = t }
+      }
+    }catch(_){}
+    const fxLive = (window._fxInfo || Number(window._fxUsdEur) !== 0.85) ? window._fxUsdEur : null   // nur ein geladener/eingetragener Kurs zählt als FX
+    const r = fusionEurPktWaehlen(best, fxLive)
+    Object.assign(_fusionEurPktC, { at: Date.now(), v: r.v, q: r.q })
+    return r.v
+  }
+  window._fusionEurPkt = () => ({ wert: fusionEurPkt(), quelle: _fusionEurPktC.q })   // Prüf-Haken
+  // Preset → wirksamer Punktwert: Fusion (Standard-Preset oder eigene Firmen-Zeile mit dem alten Festwert 0,85) → fusionEurPkt; bewusst anders
+  // gesetzte Werte (≠ 0,85, z. B. 0,852) bleiben. Die Währung der Zeile zählt nicht — mergeCustomFirmsIntoPresets macht jede Fusion-Zeile zu €,
+  // Railway rechnet genauso (app.py fusion_sppl_wahl, Gegenprüfung EU1)
+  function tpPresetPpl(p){
+    if(!p) return null
+    const fusion = /fusion/i.test(String(p.label || ''))
+    if(fusion && (!(p.ppl > 0) || !p._custom || Math.abs(Number(p.ppl) - FUSION_EUR_PKT_RUECKFALL) < 0.0005)) return fusionEurPkt()
+    return p.ppl
+  }
+  const tpWdSlavePpl = () => { const p = FIRM_PRESETS[firmToPreset(TP_WD_SLAVE_FIRM)] || FIRM_PRESETS.fusion; const v = tpPresetPpl(p); return v > 0 ? v : fusionEurPkt() }
   // tpWdAktiv = „Fusion-Hedge-Rechnung im Popup an" (Risiko Master/Slave, Multiplikator-Box, Slave fix Fusion) — seit 01.10.2026
   // auch für Orbit V3; alles Winning-Day-Eigene (Staffel, Kontoart-Filter, TP-Spanne, kein SL) hängt an _tpWd allein.
   const tpWdAktiv = () => _tpRoute === 'tvv2' && (_tpWd || _tpO3)
@@ -56843,7 +56881,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2111'
+  const OS_TAB_BUILD = '2026-09-22.2112'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -69980,7 +70018,7 @@
   window.tpMultiplierAusRisiko = tpMultiplierAusRisiko
   window.tpFirmPpl = firm => {
     const p = FIRM_PRESETS[firmToPreset(firm)]
-    return p ? p.ppl : null
+    return p ? tpPresetPpl(p) : null   // EU1 (06.11.2026): Fusion aus dem echten Kurs
   }
 
   /* Punktwert der Master-Firma ($ je Punkt und Lot/Kontrakt) — EINE Quelle fuer
@@ -69999,7 +70037,7 @@
     const s = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
     return tpMultiplierAusRisiko(masterRisk, masterQty, slaveRisk,
       tpMasterPpl(masterFirm),
-      tpNqGetSlavePpl(slaveFirm)  ?? s.ppl)
+      tpNqGetSlavePpl(slaveFirm)  ?? tpPresetPpl(s))   // EU1 (06.11.2026): Fusion aus dem echten Kurs
   }
 
   // Wire Master toggle buttons
@@ -72141,8 +72179,9 @@
     const pplAlt = hedgePplFuer(plan.masterSymbol)
     if(!(pplAlt > 0)) return null   // ohne Symbol rechnete wdFarmHedge mit der Tab-Pille (Vorfall Marc 32 statt 3,2 Lot, .1712)
     // Hand-Betrag (S9 02.11.2026): das Plan-Popup ändert nur hedge_eur. Der Betrag muss zur eigenen Rechnung des Plans passen wie in wdFarmHedgeKern, sonst bleibt der Plan
-    const ktAlt = Number(plan.masterContracts), rechnung = (Math.round(ktAlt * Number(plan.multiplier) * 100) / 100) * tpWdSlavePpl() * (Number(plan.masterTp) / (pplAlt * ktAlt))
-    if(!(Math.abs(rechnung - Number(plan.hedgeEur)) <= 1)) return null
+    // EU1 (06.11.2026): der Betrag kann mit dem €/Pkt seines Planungstags gerechnet sein (alt 0,85, sonst Messung/FX) — jeder passt, Hand-Beträge weiter nicht
+    const ktAlt = Number(plan.masterContracts), rechnungMit = sp => (Math.round(ktAlt * Number(plan.multiplier) * 100) / 100) * sp * (Number(plan.masterTp) / (pplAlt * ktAlt))
+    if(![tpWdSlavePpl(), FUSION_EUR_PKT_RUECKFALL, Number(window._fxUsdEur)].some(sp => sp > 0 && Math.abs(rechnungMit(sp) - Number(plan.hedgeEur)) <= 1)) return null
     if(plan.status !== 'planned' || plan.startUmGestartetAt || plan.orbitGesendetAt || plan.winningDay !== true) return null
     if(plan.hedgeFreigabeAt || plan.autoBestaetigtAt || plan.handWerteAt || Number(acc.wdTp) > 0) return null
     if((plan.route !== 'tvv2' && plan.route !== 'tsv2') || !(Number(plan.hedgeEur) > 0)) return null
