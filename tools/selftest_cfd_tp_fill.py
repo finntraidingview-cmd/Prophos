@@ -168,8 +168,15 @@ def main():
 
     # PC-Tab: Urteil echoV2Final (jsc) + es reist im Befehl mit
     html = open(HTML, encoding="utf-8").read()
-    check("final: _fin.final, final_grund: _fin.grund" in html and html.count("const _fin = echoV2Final(plan, po)") == 2
-          and "volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,\n                                             final: _fin.final, final_grund: _fin.grund }) })" in html,
+    # RT (06.11.2026, ST3): seit ES2d (02b01476) folgt im Echo-mit-Hedge-Befehl hinter final_grund noch der Scharf-Beweis
+    # (…imBot ? { scharf_pflicht, scharf_max_s }) — geprüft wird je echoV2Final-Aufruf, dass der NÄCHSTE master-order-Befehl final + final_grund trägt
+    def _fin_im_befehl(i):
+        j = html.find("master-order?file=", i)
+        k = html.find("JSON.stringify(", j)
+        return j > i and k > j and "final: _fin.final, final_grund: _fin.grund" in html[k:k + 700]
+    _fin_at = [m.start() for m in re.finditer(re.escape("const _fin = echoV2Final(plan, po)"), html)]
+    check(len(_fin_at) == 2 and all(_fin_im_befehl(i) for i in _fin_at)
+          and "volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,\n                                             final: _fin.final, final_grund: _fin.grund," in html,
           "PC-Tab: /api/master-order trägt final + final_grund aus echoV2Final — Echo V2 UND Echo mit Hedge (JU1)")
     if not os.path.exists(JSC):
         check(False, "jsc fehlt — Urteil im PC-Tab nicht ausführbar")
