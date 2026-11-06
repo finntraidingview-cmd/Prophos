@@ -60,11 +60,11 @@ else:
     print("… osascript fehlt — nur Textprüfungen")
 
 # (2) Markup, Chip, Klick, Lader, Mobil
-TH = HTML.find('— Klick öffnet den Radar mit dieser ID">Trade</th>')
+TH = HTML.find('Klick auf den Chip öffnet den Radar mit dieser ID">Trade</th>')   # AL1 (06.11.2026): Trade + Letzter Trade in einer Spalte, Kopf sortiert
 # RT1 (05.11.2026): seit c9d2447d (.1760, 27.10.2026) steht die Spalte „Letzter Trade“ zwischen Trade und Planer — „Trade“ bleibt die
 # erste Spalte nach Balance (nur Kommentar dazwischen), Planer weiter dahinter; Zelle direkt nach ${balCell}, ${planer} folgt später
 _th_bal = HTML.rfind("<th>Balance</th>", 0, TH)
-check(TH > 0 and _th_bal > 0 and TH - _th_bal < 600 and "<th" not in HTML[_th_bal + 4:HTML.rfind("<th", 0, TH)]
+check(TH > 0 and _th_bal > 0 and TH - _th_bal < 900 and "<th" not in HTML[_th_bal + 4:HTML.rfind("<th", 0, TH)]
       and 0 < HTML.find('>Planer</th>', TH) - TH < 900, "Spaltenkopf „Trade\" zwischen Balance und Planer (Admin → Alle Accounts)")
 _zl = HTML.find("          <td>${balCell}</td>\n          <td>${trade}</td>\n")
 check(_zl > 0 and 0 < HTML.find('<td style="padding-right:20px">${planer}</td>', _zl) - _zl < 300, "Zelle rechts neben Balance, vor Planer")

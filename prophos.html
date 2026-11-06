@@ -5608,6 +5608,15 @@
   #dashboard-view .adm-k-trade.is-plan{color:var(--ink-2)}
   #dashboard-view .adm-k-trade:hover{filter:brightness(.97)}
   #dashboard-view .adm-k-trade-leer{color:var(--sub-2)}
+  /* AL1 (06.11.2026): eine Spalte „Trade“ — mehrere Chips nebeneinander (läuft · heute ±$ · geplant), heutige Bilanz grün/rot wie is-lauf, „zuletzt“ klein und grau */
+  #dashboard-view .adm-k-trade-zeile{display:inline-flex;flex-wrap:wrap;gap:4px}
+  #dashboard-view .adm-k-trade.is-plus{background:color-mix(in srgb, var(--good) 12%, transparent);border-color:color-mix(in srgb, var(--good) 30%, transparent);color:var(--good-ink, #15803d)}
+  #dashboard-view .adm-k-trade.is-minus{background:color-mix(in srgb, var(--danger, #dc2626) 10%, transparent);border-color:color-mix(in srgb, var(--danger, #dc2626) 28%, transparent);color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .adm-k-trade.is-plus small,#dashboard-view .adm-k-trade.is-minus small{color:var(--warn-ink, #b45309);font-weight:600}
+  #dashboard-view .adm-k-lt.adm-k-lt-zuletzt,#dashboard-view .adm-k-lt.adm-k-lt-zuletzt.is-amber,#dashboard-view .adm-k-lt.adm-k-lt-zuletzt.is-rot{font-size:11.5px;color:var(--sub)}   /* Punkt behält amber/rot */
+  #dashboard-view .adm-k-trade.is-nicht{color:var(--ink-2);font-weight:500}
+  #dashboard-view .adm-k-ap{color:var(--sub-2);font-weight:600}
+  #dashboard-view .adm-k-ap.is-an{color:var(--good-ink, #15803d)}
   /* Admin → Alle Accounts, Spalte „Letzter Trade" (27.10.2026): Text + kleiner Punkt, Farbe nur ab 5 T (amber) bzw. 10 T (rot) — dezent */
   #dashboard-view .adm-k-lt{white-space:nowrap;font-size:12.5px;color:var(--ink-2)}
   #dashboard-view .adm-k-lt i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background:var(--border-soft)}
@@ -13975,10 +13984,9 @@
                       <th>Balance</th>
                       <!-- Trade (20.10.2026, Finn: „hinschreiben, ob der Trade aktuell gerade aktiv ist, schon läuft, damit ich weiß, welchen ich noch
                            abarbeiten muss") — nur der Zustand aus /admin/live-trades (dieselbe Quelle wie der Radar), Klick öffnet den Radar mit der ID -->
-                      <th title="Stand aus dem Radar: läuft (offener Plan) · geplant (nächster Start) · Überprüfen (zu, noch nicht abgehakt) — Klick öffnet den Radar mit dieser ID">Trade</th>
-                      <!-- Letzter Trade (27.10.2026): Klick auf den Kopf sortiert — aus → älteste zuerst → neueste zuerst -->
-                      <th id="adm-k-lt-kopf" class="adm-k-lt-kopf" title="Wann zuletzt ein Trade lief (Master oder Slave) — Klick: sortieren (älteste zuerst · neueste zuerst · aus)">Letzter Trade</th>
-                      <th style="padding-right:20px" title="Auto-Planer: Stand des letzten Laufs (Dubai) oder der Grund, warum nicht — umschalten bei der jeweiligen ID unter Accounts">Planer</th>
+                      <!-- AL1 (06.11.2026): Trade + Letzter Trade in EINER Spalte (Finn: „das einfach in eine Spalte machen“), Kopf sortiert nach letztem Trade -->
+                      <th id="adm-k-lt-kopf" class="adm-k-lt-kopf" title="läuft · heute ±$ (Planer-Tag) · geplant · sonst wann zuletzt — Klick auf den Kopf: nach letztem Trade sortieren · Klick auf den Chip öffnet den Radar mit dieser ID">Trade</th>
+                      <th style="padding-right:20px" title="✓ = Konto im Planer und heute (Planer-Tag) von ihm geplant · — mit Grund im Tooltip">Planer</th>
                     </tr>
                   </thead>
                   <tbody id="adm-k-tv"></tbody>   <!-- zu bestätigende TV-Konten aller IDs (29.10.2026), Modul-Sektion „NEUE KONTEN AUS TRADINGVIEW" -->
@@ -19859,6 +19867,115 @@
       const zeichen = info.art === 'lauf' ? '●' : info.art === 'plan' ? '◐' : '◔'
       return `<span class="adm-k-trade is-${info.art}" data-adm-k-radar="${escapeHtml(info.uid || String(r && r.user_id || ''))}" title="${escapeHtml(info.tip)}">${zeichen} ${escapeHtml(info.text)}</span>`
     }
+    /* AL1 (06.11.2026, Finn: „Bei ‚Trade‘ immer, wenn heute schon getradet wurde: der heutige Profit und/oder der heutige Verlust, und wenn er noch gemacht wird:
+     * geplant dann und dann … das einfach in eine Spalte machen. Bei ‚Planer‘ immer einen Haken, ob der gerade im Planer drin ist und aktiv geplant wurde.“)
+     * Quelle wie die Trade-Spalte: _tpl.lt (/admin/live-trades, heute + gestern). Heute = Planer-Tag (Berliner Kalendertag, tplDatum) — der Tag, auf den die Planer planen.
+     * REIN RECHNEND (window._admKontoHeute): → { pl, n, pruef, geplant[], planer } — pl = Summe master_pl der heute beendeten Pläne (completed/review, Master-Seite),
+     * planer = heute ein Plan vom Planer (auto_plan = Challenge-Planer, planer_plan = Funded-/Funded-CFD-Planer). */
+    const admPlanerTag = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
+    function admKontoHeute(accId, zeilen, jetztIso){
+      const id = String(accId || ''), heute = admPlanerTag(jetztIso || new Date().toISOString())
+      const out = { pl: 0, n: 0, pruef: 0, offenPl: 0, planer: null, vorschlag: 0 }
+      if(!id || !heute) return out
+      const wert = v => { const x = v && typeof v === 'object' ? v.wert : v; return (x == null || x === '' || !isFinite(Number(x))) ? null : Number(x) }
+      // P&L wie der Radar (wdlPlTrade: Balance-Sprung → Balance nachher − vorher, z. B. Echo), sonst master_pl; Polar-Slave-Konto: slave_pl (Gegenprüfung AL1)
+      const plVon = (t, slave) => { if(slave) return wert(t.slave_pl); let v = null; try{ v = wdlPlTrade(t) }catch(_){ v = null }
+        return (v != null && isFinite(Number(v))) ? Number(v) : wert(t.master_pl) }
+      const Q_NAME = { challenge: 'Challenge-Planer', ffut: 'Funded-Planer (Futures)', fcfd: 'Funded-CFD-Planer', wd: 'Winning-Day-Farmer' }
+      for(const t of zeilen || []){
+        const slave = !!t && t.plattform === 'polar' && String(t.slave_account_id || '') === id
+        if(!t || (String(t.konto_id || '') !== id && !slave)) continue
+        const fertig = t.status === 'completed' || t.status === 'review'
+        const ende = t.ended_at || t.completed_at || (t.master_pl && t.master_pl.at) || null
+        if(fertig && admPlanerTag(ende || t.started_at) === heute){
+          const w = plVon(t, slave)
+          out.n++; if(t.status === 'review') out.pruef++
+          if(w != null) out.pl += w; else out.offenPl++
+        }
+        const tagT = admPlanerTag(t.start_um || t.started_at || t.created_at)
+        // aus welchem Planer (planer_quelle wie der Radar-Chip: notes „Auto-Planer …“ / „Funded-Planer …“ / „Funded-CFD-Planer …“ / „Winning-Day-Farmer“)
+        const q = Q_NAME[t.planer_quelle] ? t.planer_quelle : t.auto_plan === true ? 'challenge' : t.planer_plan === true ? 'ffut' : null
+        if(t.status === 'planned' && !t.start_um && q && tagT === heute) out.vorschlag++   // Vorschlag des Planers, noch nicht bestätigt
+        const rang = { open: 4, planned: 3, review: 2, completed: 1 }[t.status] || 0   // der aktivste Plan des Tages steht im Tooltip
+        if(q && tagT === heute && rang && !(t.status === 'planned' && !t.start_um) && (!out.planer || rang > out.planer.rang))   // Vorschlag ohne Start = ◐, nicht ✓
+          out.planer = { art: Q_NAME[q], status: t.status, rang }
+      }
+      out.pl = Math.round(out.pl * 100) / 100
+      return out
+    }
+    window._admKontoHeute = admKontoHeute   // Test-Haken
+    function admKontoTradeZelleHtml(a, r, jetztIso){
+      const zeilen = [..._tpl.lt.values()], info = admKontoTradeInfo(a && a.id, zeilen, jetztIso), h = admKontoHeute(a && a.id, zeilen, jetztIso)
+      const uid = escapeHtml((info && info.uid) || String((r && r.user_id) || ''))
+      const chip = (art, zeichen, text, tip, klein) => `<span class="adm-k-trade is-${art}" data-adm-k-radar="${uid}" title="${escapeHtml(tip)}">${zeichen ? zeichen + ' ' : ''}${escapeHtml(text)}${klein ? ` <small>${escapeHtml(klein)}</small>` : ''}</span>`
+      const teile = []
+      if(info && info.art === 'lauf') teile.push(chip('lauf', '●', info.text, info.tip))
+      if(h.n){
+        const f = Math.abs(h.pl).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+        const txt = (h.offenPl === h.n) ? 'heute erledigt · P&L offen' : `heute ${h.pl > 0 ? '+' : h.pl < 0 ? '−' : '±'}${f} $`   // kein P&L gelesen ≠ ±0
+        const tip = `${h.n} Trade${h.n === 1 ? '' : 's'} heute (Planer-Tag) beendet · ${h.offenPl === h.n ? 'P&L noch nicht gelesen' : 'Summe P&L ' + txt.replace(/^heute /, '')}${h.offenPl ? ` · ${h.offenPl} ohne gelesenen P&L` : ''}${h.pruef ? ` · ${h.pruef} noch nicht abgehakt` : ''} — klicken: Radar mit dieser ID`
+        teile.push(chip(h.pl > 0 ? 'plus' : h.pl < 0 ? 'minus' : 'plan', '', txt, tip, h.pruef ? 'Überprüfen' : ''))
+      }
+      if(info && info.art === 'plan') teile.push(chip('plan', '◐', info.text, info.tip))
+      if(!teile.length && info && info.art === 'pruef') teile.push(chip('pruef', '◔', info.text, info.tip))   // ältere Überprüfen-Pläne (nicht von heute) wie bisher
+      if(!(info && info.art === 'plan') && h.vorschlag) teile.push(chip('plan', '◐', 'Vorschlag · wartet auf Bestätigung', 'Vorschlag des Funded-Planers für heute — im Funded Planer bestätigen (bzw. bestätigt der Bot)'))
+      if(teile.length) return `<span class="adm-k-trade-zeile">${teile.join('')}</span>`
+      const li = admLetzterTradeInfo(r && r.letzter_trade, jetztIso)
+      // Funded CFD ohne Plan heute (AL1-Nachtrag): EINE klare Aussage mit Grund, „zuletzt“ klein dahinter
+      if(a && a.type === 'funded_cfd'){
+        const g = admKontoNichtGrund(a, r, _admFcp), k0 = g.split(' — ')[0].split(' (')[0], kurz = k0.length > 46 ? k0.slice(0, 45) + '…' : k0   // Zelle kurz, voller Grund im Tooltip
+        return `<span class="adm-k-trade-zeile"><span class="adm-k-trade is-nicht" title="${escapeHtml('Heute nicht geplant: ' + g + (li ? ' · ' + li.tip : ''))}">nicht geplant · ${escapeHtml(kurz)}</span>${li ? `<span class="adm-k-lt adm-k-lt-zuletzt is-${li.stufe}" title="${escapeHtml(li.tip)}"><i></i>${li.stufe === 'nie' ? 'noch nie' : li.stufe === 'lauf' ? escapeHtml(li.text) : 'zuletzt: ' + escapeHtml(li.text)}</span>` : ''}</span>`
+      }
+      if(!li) return '<span class="adm-k-trade-leer" title="kein laufender, geplanter oder heutiger Trade — kein Stand zum letzten Trade (archiviert oder älteres Backend)">–</span>'
+      return `<span class="adm-k-lt adm-k-lt-zuletzt is-${li.stufe}" title="${escapeHtml(li.tip)}"><i></i>${li.stufe === 'nie' ? 'noch nie getradet' : li.stufe === 'lauf' ? escapeHtml(li.text) : 'zuletzt: ' + escapeHtml(li.text)}</span>`
+    }
+    /* JEDES FUNDED-CFD-KONTO BEHANDELT (AL1, Finn: „Mir geht es darum, dass ich sehe, dass jeder einzelne Funded-CFD-Account behandelt wird“): ohne Plan heute
+     * steht der EINE Grund in der Trade-Spalte — vom Konto selbst (archiviert, Waiting, Flex, Haken aus, Ziel, keine Balance), sonst aus dem Lauf des
+     * Funded-CFD-Planers (GET /admin/funded-cfd-plan, Trockenlauf wie der Reiter Funded Planer → CFD, höchstens alle 5 min): ausgelassen mit Grund · würde
+     * planen (Vorschlag kommt im nächsten Lauf) · nicht dabei (Firma aus bzw. ID nicht im Planer). Nie ein leeres „—“. */
+    const _admFcp = { at: 0, laedt: false, fehler: '', aus: new Map(), plant: new Set(), dabei: new Set() }
+    async function admFcpLaden(){
+      if(_admFcp.laedt || Date.now() - _admFcp.at < 5 * 60000) return
+      _admFcp.laedt = true
+      try{
+        const d = await apdApi('GET', '', null, '/admin/funded-cfd-plan')
+        _admFcp.aus = new Map((d.ausgelassen || []).filter(z => z && z.konto_id).map(z => [String(z.konto_id), String(z.grund || 'ausgelassen')]))
+        _admFcp.plant = new Set((d.geplant || []).filter(z => z && z.konto_id).map(z => String(z.konto_id)))
+        _admFcp.dabei = new Set([...(d.konten_stand || []), ...(d.ausgelassen || []), ...(d.geplant || []), ...(d.ziel || [])].filter(z => z && z.konto_id).map(z => String(z.konto_id)))
+        _admFcp.fehler = ''
+      }catch(e){ _admFcp.fehler = String((e && e.message) || e).slice(0, 120) }
+      finally{ _admFcp.at = Date.now(); _admFcp.laedt = false; try{ if(!$('adm-pane-konten')?.hidden) admKontenRender() }catch(_){} }
+    }
+    // REIN RECHNEND (window._admKontoNichtGrund): Grund, warum heute kein Plan da ist — Konto zuerst, dann der Planer-Lauf (fcp = _admFcp-Form)
+    function admKontoNichtGrund(a, r, fcp){
+      const typ = String((a && a.type) || ''), id = String((a && a.id) || '')
+      if(r && r.archived) return 'archiviert'
+      if(typ === 'funded_cfd' && a.waitingPayoutSince) return 'Waiting for Payout — Payout anfragen, danach plant der Planer wieder'
+      if(typ === 'funded_cfd' && /flex/i.test(String(a.name || ''))) return 'Flex-Konto — plant der Funded-CFD-Planer noch nicht'
+      if(a && a.autoPlaner === false) return 'Haken „Auto-Planer“ am Konto aus'
+      if(a && a.zielErreichtAt) return 'Ziel erreicht — wird nicht mehr geplant'
+      if(r && r.balance == null && ['funded_cfd', 'funded', 'challenge', 'phase1', 'phase2', 'winning_days'].includes(typ)) return 'keine Balance — ↻ Balance lesen'
+      if(!['funded_cfd', 'funded', 'challenge', 'phase1', 'phase2', 'winning_days'].includes(typ)) return 'kein Planer für diese Kontoart'
+      if(typ === 'funded_cfd' && fcp && fcp.at){
+        if(fcp.aus && fcp.aus.has(id)) return fcp.aus.get(id)
+        if(fcp.plant && fcp.plant.has(id)) return 'würde geplant — Vorschlag kommt mit dem nächsten Planer-Lauf'
+        if(fcp.dabei && !fcp.dabei.has(id)) return 'nicht im Funded-CFD-Planer (Firma aus oder ID nicht im Planer)'
+      }
+      if(typ === 'funded_cfd' && fcp && fcp.fehler) return 'Planer-Stand nicht lesbar: ' + fcp.fehler
+      return 'heute (Planer-Tag) kein Plan vom Planer'
+    }
+    window._admKontoNichtGrund = admKontoNichtGrund   // Test-Haken
+    // PLANER-HAKEN (AL1): ✓ = heute (Planer-Tag) ein Plan des Planers für dieses Konto (geplant · läuft · Überprüfen · fertig). Sonst „—“ mit dem EINEN Grund,
+    // den das Konto selbst zeigt (archiviert · Waiting for Payout · Flex · Haken aus · Ziel erreicht · keine Balance), sonst der Stand des letzten Laufs (alte Zelle).
+    function admKontoPlanerHtml(a, r, jetztIso, alt){
+      const h = admKontoHeute(a && a.id, [..._tpl.lt.values()], jetztIso)
+      if(h.planer){ const st = { planned: 'geplant', open: 'läuft', review: 'Überprüfen', completed: 'fertig' }[h.planer.status] || h.planer.status
+        return `<span class="adm-k-ap is-an" title="${escapeHtml(`Im ${h.planer.art} — heute geplant (${st})`)}">✓</span>` }
+      if(h.vorschlag) return `<span class="adm-k-ap" title="Vorschlag des Funded-Planers für heute — wartet auf Bestätigung">◐</span>`
+      const grund = admKontoNichtGrund(a, r, _admFcp)
+      const altTip = /title="([^"]*)"/.exec(String(alt || ''))
+      return `<span class="adm-k-ap" title="${escapeHtml(grund)}${altTip && altTip[1] && !/^—$/.test(altTip[1]) ? ' · ' + altTip[1] : ''}">—</span>`
+    }
     // Live-Trades frisch holen (tplLiveLaden hat seinen 50-s-Riegel) und die Liste danach einmal neu zeichnen
     let _admKTradesBusy = false
     async function admKontenTradesLaden(){
@@ -19901,7 +20018,7 @@
     // Sortierung über den Spaltenkopf: '' (aus) → 'alt' (älteste zuerst, „nie" ganz oben) → 'neu' (neueste zuerst) — gemerkt wie die Haken
     const ADM_LT_SORT_LS = 'prophos_adm_lt_sort'
     admK.ltSort = (() => { try{ const v = localStorage.getItem(ADM_LT_SORT_LS); return v === 'alt' || v === 'neu' ? v : '' }catch(_){ return '' } })()
-    function admLtKopfZeichnen(){ const th = $('adm-k-lt-kopf'); if(th) th.textContent = 'Letzter Trade' + (admK.ltSort === 'alt' ? ' ↑' : admK.ltSort === 'neu' ? ' ↓' : '') }
+    function admLtKopfZeichnen(){ const th = $('adm-k-lt-kopf'); if(th) th.textContent = 'Trade' + (admK.ltSort === 'alt' ? ' ↑' : admK.ltSort === 'neu' ? ' ↓' : '') }   // AL1: eine Spalte „Trade“
     $('adm-k-lt-kopf')?.addEventListener('click', () => {
       admK.ltSort = admK.ltSort === '' ? 'alt' : admK.ltSort === 'alt' ? 'neu' : ''
       try{ localStorage.setItem(ADM_LT_SORT_LS, admK.ltSort) }catch(_){}
@@ -19960,6 +20077,7 @@
       admLtKopfZeichnen()
       const heuteN = sortiert.filter(a => heuteOffen(heuteR(a))).length
       if(Date.now() - (_tpl.ltAt || 0) > 50000) admKontenTradesLaden()   // Trade-Spalte (20.10.2026): Live-Trades nachziehen, zeichnet danach neu
+      if(Date.now() - _admFcp.at > 5 * 60000 && (admData.accounts || []).some(x => x && x.type === 'funded_cfd' && !x.archived)) admFcpLaden()   // AL1: Gründe des Funded-CFD-Planers
       $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}${heuteN ? ` · ${heuteN} Funded Futures heute offen` : ''}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
       // „Trade planen" für andere IDs nie auf einem PC-Tab (S2/Master 29.10.2026): das fremde Konto stünde sonst, solange das Popup offen ist,
@@ -20003,9 +20121,11 @@
         : '<span class="mono" style="color:var(--sub-2)">—</span>'
       let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRecovererChipHtml(a)) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accOnDemandChipHtml(a) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
       let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
-      let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
+      let trade = ''; try{ trade = admKontoTradeZelleHtml(a, r, jetztIso) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026, AL1 06.11.2026)
       // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
       try{ if(a.type === 'funded' && !r.archived && r.heute_traden){ const h = heuteKompaktHtml(r.heute_traden); if(h) planer = h } }catch(_){}
+      // AL1 (06.11.2026): ✓ = im Planer und heute geplant, sonst — mit Grund; der bisherige Stand (Lauf bzw. Heute traden) steht im Tooltip
+      try{ planer = admKontoPlanerHtml(a, r, jetztIso, planer) }catch(_){}
       return `
         <tr style="${r.archived ? 'opacity:.55' : ''}">
           <td style="padding-left:20px">
@@ -20017,7 +20137,6 @@
           <td>${typ}</td>
           <td>${balCell}</td>
           <td>${trade}</td>
-          <td>${admLetzterTradeHtml(r, jetztIso)}</td>
           <td style="padding-right:20px">${planer}</td>
         </tr>`
     }
@@ -20026,7 +20145,7 @@
     window._admKontenTabelleHtml = paare => {
       // Kopf ohne Sortier-Bedienung des Admins (Klasse/Titel von „Letzter Trade“, Pfeile) — hier sortiert die Waiting-Reihenfolge
       const kopf = (document.getElementById('adm-k-table')?.closest('table')?.querySelector('thead')?.outerHTML || '').replace(/ id="[^"]*"/g, '')
-        .replace(/ class="adm-k-lt-kopf"/g, '').replace(/ title="Wann zuletzt ein Trade lief[^"]*"/g, '').replace(/Letzter Trade [↑↓]/g, 'Letzter Trade')
+        .replace(/ class="adm-k-lt-kopf"/g, '').replace(/ — Klick auf den Kopf: nach letztem Trade sortieren/g, '').replace(/>Trade [↑↓]</g, '>Trade<')   // AL1
       const jetztIso = new Date().toISOString(), pcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       return `<div class="table-wrap"><table class="t">${kopf}<tbody>${paare.map(x => admKontoZeileHtml(admKontoAusZeile(x.r), x.r, jetztIso, { pcTab, poGer: x.poGer })).join('')}</tbody></table></div>`
     }
@@ -56881,7 +57000,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2112'
+  const OS_TAB_BUILD = '2026-09-22.2113'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80442,7 +80561,7 @@
       const tr = document.createElement('tr')
       tr.style.background = 'var(--surface-tint)'
       tr.innerHTML = '<td style="padding-left:20px"></td><td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span><span></span></td>'
-        + '<td></td><td></td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td><td style="padding-right:20px"></td>'
+        + '<td></td><td></td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td><td style="padding-right:20px"></td>'   // AL1: Trade + Letzter Trade = eine Spalte
       tvZelleAccount(tr.children[0], z)
       tr.children[1].children[0].style.background = idFarbe(uid)
       tr.children[1].children[1].textContent = name
@@ -80450,8 +80569,8 @@
       z.schonDa = (uid === String(currentUserId) && _tvNeu.schonDa.has(extIdNorm(z.ext))) || _admKTv.schonDa.has(`${uid}|${extIdNorm(z.ext)}`)
       tvZelleTyp(tr.children[3], z)
       if(z.schonDa) { /* Doppel-Schutz hat das Konto gefunden — keine Knöpfe */ }
-      else if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[7], z)
-      else if(uid) tvKnoepfe(tr.children[7], z, { uid, name, tvName: (z.quellen || []).includes('TV') ? ((z.tv && z.tv.name) || z.ext) : '', ext: z.ext })
+      else if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[6], z)
+      else if(uid) tvKnoepfe(tr.children[6], z, { uid, name, tvName: (z.quellen || []).includes('TV') ? ((z.tv && z.tv.name) || z.ext) : '', ext: z.ext })
       tb.appendChild(tr)
     }
   }
