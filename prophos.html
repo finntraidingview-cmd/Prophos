@@ -63553,10 +63553,27 @@
     if(!ids.length) return rows
     try{
       let von = ''; try{ von = String(currentUserId || '').slice(0, 80) }catch(_){}
-      const { data, error } = await supabase.from('trade_plans').update({ hedge_freigabe_at: new Date().toISOString(), hedge_freigabe_von: von || null })
-        .in('id', ids).eq('status', 'planned').is('start_um_gestartet_at', null).is('hedge_freigabe_at', null).select('*')
-      if(error) throw error
-      const neu = new Map((data || []).map(r => [String(r.id), r]))
+      const jetzt = Date.now(), jetztIso = new Date(jetzt).toISOString(), wert = { hedge_freigabe_at: jetztIso, hedge_freigabe_von: von || null }
+      // Guard in der DB (Gegenprüfung HF2): Hedge-Art und Bestätigung auch dort, nicht nur in den eben gelesenen Zeilen
+      const guard = q => q.eq('status', 'planned').is('start_um_gestartet_at', null).is('hedge_freigabe_at', null)
+        .not('auto_bestaetigt_at', 'is', null).in('mt5_baseline->>hedge_art', AP_HEDGE_ARTEN)
+      // ÜBERFÄLLIGER START (wie Railway hedge_freigabe_start, Fall S5 Marc …7231): liegt start_um schon bis 2 h zurück, rückt er auf jetzt + 3–6 min
+      // (gestreut, Jitter-Regel) — sonst läge er außerhalb des Umstell-Fensters und liefe in final_halten (+1 Tag). Nie vorgezogen, nie älter als 2 h.
+      const spaet = id => { const r = rows.find(x => String(x && x.id) === id), t = Date.parse((r && r.start_um) || ''); return isFinite(t) && t <= jetzt && jetzt - t <= 2 * 3600000 }
+      const neu = new Map()
+      const normal = ids.filter(id => !spaet(id))
+      if(normal.length){
+        const { data, error } = await guard(supabase.from('trade_plans').update(wert).in('id', normal)).select('*')
+        if(error) throw error
+        for(const r of (data || [])) neu.set(String(r.id), r)
+      }
+      for(const id of ids.filter(spaet)){
+        const st = new Date(jetzt + (180 + Math.random() * 180) * 1000).toISOString()
+        let { data, error } = await guard(supabase.from('trade_plans').update(Object.assign({ start_um: st }, wert)).eq('id', id)).lte('start_um', jetztIso).select('*')
+        if(!error && !(data || []).length) ({ data, error } = await guard(supabase.from('trade_plans').update(wert).eq('id', id)).select('*'))   // Start inzwischen anders: nur freigeben
+        if(error) throw error
+        for(const r of (data || [])) neu.set(String(r.id), r)
+      }
       return rows.map(r => neu.get(String(r && r.id)) || r)
     }catch(e){ console.warn('[hf2] Hedge-Freigabe beim Bestätigen', (e && e.message) || e); return rows }
   }

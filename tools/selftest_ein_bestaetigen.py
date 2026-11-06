@@ -68,7 +68,7 @@ def main():
     ok(src.count("**hf_frei_bei_kennung(p))") == 3, "HF2: Kennung tfh (2×) + ah (1×) gibt schon bestätigte Pläne mit frei")
     j = src.index("\ndef _hedge_freigabe_schreiben(")
     schreib = src[j:src.find("\n\n\n", j)]
-    ok("_hedge_freigabe_schreiben(" in mit and "hedge_freigabe_von" in schreib and '"auto_bestaetigt_at"' not in schreib and "auto_bestaetigt_at" not in mit.split('"""')[2],
+    ok("_hedge_freigabe_schreiben(" in mit and "hedge_freigabe_von" in schreib and '"auto_bestaetigt_at"' not in schreib and mit.split('"""')[2].count("auto_bestaetigt_at") == 1 and '"auto_bestaetigt_at": "not.is.null"' in mit,   # HF2: nur als Guard, nie geschrieben
        "setzt nur die Freigabe-Spalten (start_um nur bei überfälligem Plan, FINAL-FREIGABE-SPAET)")
     ok("hvs:mt5_baseline->hedge_vorschau" in src and "**ap_ids_hedge_felder(p)" in src, "/ids liefert die Hedge-Felder")
     for t in f:

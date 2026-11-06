@@ -31208,7 +31208,8 @@ def tfh_tick(jetzt=None, force=False):
             try:
                 sb_update("trade_plans", _tfh_guard(p), dict({"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)}, **hf_frei_bei_kennung(p)))
                 if base.get("hedge_art") != "tradeify_final":
-                    _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler {tfh_name(p)} erkannt — wartet auf Bestätigung im Challenge-Planer")
+                    _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler {tfh_name(p)} erkannt — "
+                              + ("schon bestätigt, Hedge mit freigegeben (HF2)" if hf_frei_bei_kennung(p) else "wartet auf Bestätigung im Challenge-Planer"))
             except Exception as e:
                 _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
             continue
@@ -31719,6 +31720,7 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
         return 0
     try:
         return _hedge_freigabe_schreiben(ids, {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
+                                               "auto_bestaetigt_at": "not.is.null",   # HF2-Gegenprüfung: nie an einem inzwischen zurückgenommenen Plan
                                                "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}, uid)[0]
     except Exception as e:
         print(f"[auto-plan] ⚠️ Hedge-Freigabe beim Bestätigen: {type(e).__name__}: {e}", flush=True)
