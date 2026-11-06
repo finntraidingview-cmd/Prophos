@@ -4060,30 +4060,35 @@ def _alarm_fremd_verwaltet(uid):
 
 
 def alarm_senden(prio, art, titel, text, uid=None, plan_id=None, schluessel=None, url=None, tag=None, renotify=False, daten=None,
-                 ausser=()):
-    """Eine Meldung an alle Master-IDs mit min_prio ≥ prio + eine Zeile alarm_log. ausser = Empfänger, die sie schon haben. Wirft nie."""
+                 ausser=(), zeichen=None, push_prio=None):
+    """Eine Meldung an alle Master-IDs mit min_prio ≥ prio + eine Zeile alarm_log. ausser = Empfänger, die sie schon haben. UA1 (06.11.2026):
+    zeichen ersetzt das Prio-Zeichen im Titel, push_prio die Stufe für Push (Ton/Stehenbleiben) und alarm_log — „✅ erledigt" erreicht so mit
+    prio 1 dieselben Empfänger wie das 🔴, kommt aber leise wie ⚪ und steht im Verlauf nicht als 🔴. Ohne beides wie bisher. Wirft nie."""
     zu = n = 0
+    stufe = None
     try:
         prio = max(1, min(3, int(prio or 3)))
-        titel_m = (ALARM_ZEICHEN[prio] + str(titel or "Prophos"))[:80]
+        stufe = max(1, min(3, int(push_prio))) if push_prio else prio
+        titel_m = ((ALARM_ZEICHEN[prio] if zeichen is None else str(zeichen)) + str(titel or "Prophos"))[:80]
         for ziel, schwelle in _alarm_empfaenger().items():
             if ziel in ausser or prio > schwelle:
                 continue
             a, b = push_an_user(ziel, titel_m, text, url=url or ALARM_LINK, tag=tag or f"alarm-{art}-{plan_id or ''}"[:60],
-                                renotify=renotify or prio == 1, prio=prio, _weiter=False)
+                                renotify=renotify or stufe == 1, prio=stufe, _weiter=False)
             zu, n = zu + a, n + b
     except Exception as e:
         print(f"[alarm] ⚠️ senden {art}: {type(e).__name__}: {e}", flush=True)
     try:
         _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/alarm_log",
-                    json={"prio": prio, "art": str(art)[:40], "titel": str(titel or "")[:120], "text": str(text or "")[:400],
+                    json={"prio": stufe or prio, "art": str(art)[:40], "titel": str(titel or "")[:120], "text": str(text or "")[:400],
                           "uid": uid if uid and re.fullmatch(r"[0-9a-f-]{36}", str(uid)) else None, "plan_id": plan_id,
                           "schluessel": schluessel, "daten": daten or {}, "zugestellt": zu, "geraete": n},
                     headers=_sb_headers("return=minimal"), timeout=10)
     except Exception as e:
         print(f"[alarm] ⚠️ alarm_log: {type(e).__name__}: {e}", flush=True)
-    _alarm["letzt"] = (_alarm["letzt"] + [{"at": _wt_now_iso(), "prio": prio, "art": art, "titel": titel, "zugestellt": zu}])[-30:]
-    print(f"[alarm] {ALARM_ZEICHEN.get(prio, '') or '⚪ '}{titel} — {str(text or '')[:160]} ({zu}/{n} Geräte)", flush=True)
+    _st = stufe or prio
+    _alarm["letzt"] = (_alarm["letzt"] + [{"at": _wt_now_iso(), "prio": _st, "art": art, "titel": titel, "zugestellt": zu}])[-30:]
+    print(f"[alarm] {(zeichen if zeichen is not None else ALARM_ZEICHEN.get(_st, '')) or '⚪ '}{titel} — {str(text or '')[:160]} ({zu}/{n} Geräte)", flush=True)
     return zu, n
 
 
@@ -5218,6 +5223,96 @@ def pc_tab_heil_spur():
                  f"PC Chrome/Prophos ansehen (Login? Internet?). Laufende Trades sind davon nicht betroffen.",
                  uid=uid, daten={"pc": pc, "grund": grund}, schluessel=f"tab_heil|{pc}")
     return jsonify({"ok": True})
+
+
+# ══ WINDOWS-ABFRAGE OFFEN (UA1, 06.11.2026 — Finn: „Wenn die Windows-Abfrage kommt, kannst du mir kurz Bescheid geben, dann kann ich es kurz
+# hinklicken."). Das Panel meldet offene Sicherheitsabfragen (consent.exe, F9A: MT5-Update 6230 blockierte stundenlang jedes F9 eines PCs):
+# 🔴 an die Master-IDs je Abfrage einmal, nach UAC_ALARM_WIEDER_S erneut solange offen, ✅ wenn weg. Nur HT-IDs (wie /pc/tab-heil-spur).
+# Entprellung über alarm_log (Schlüssel je PC × Abfrage), damit ein Railway-Neustart nichts doppelt meldet; Lesefehler → Merker im Speicher.
+UAC_ALARM_WIEDER_S, UAC_ALARM_MAX = 1800, 5
+_UAC_ALARM_MERK = {}   # schluessel → Zeitpunkt des letzten 🔴 (Rückfall, wenn alarm_log nicht lesbar ist)
+
+
+def uac_spur_eintraege(liste):
+    """REIN RECHNEND (testbar): Body-Liste → [{pid, seit, ausloeser}] (höchstens UAC_ALARM_MAX, nur ganze pid > 0 und plausible seit)."""
+    out = []
+    for e in (liste if isinstance(liste, list) else [])[:50]:
+        if len(out) >= UAC_ALARM_MAX:
+            break
+        if not isinstance(e, dict):
+            continue
+        pid, seit, ges = _wd_num(e.get("pid")), _wd_num(e.get("seit")), _wd_num(e.get("gesehen"))
+        if not pid or not 0 < pid <= 2 ** 32 or pid != int(pid):   # Bereich zuerst: inf/nan nie in int() (Gegenprüfung UA1)
+            continue
+        ok = lambda v: int(v) if v and 1.6e9 < v < 4.1e9 else 0   # noqa: E731
+        out.append({"pid": int(pid), "seit": ok(seit), "gesehen": ok(ges) or ok(seit),
+                    "ausloeser": re.sub(r"\s+", " ", str(e.get("ausloeser") or ""))[:160]})
+    return out
+
+
+def uac_alarm_schluessel(pc, e):
+    """REIN: alarm_log-Schlüssel einer Abfrage — PC × PID × Startzeit (eine neue Abfrage mit derselben PID ist eine neue). Startzeit nicht
+    lesbar → 0, nie das „gesehen" des Panels (das ändert sich bei einem Panel-Neustart und gäbe ein zweites 🔴 und nie ein ✅)."""
+    return f"uac|{pc}|{e['pid']}|{e['seit']}"
+
+
+def uac_alarm_texte(wer_txt, e, erneut):
+    """REIN RECHNEND (testbar): (titel, text) des 🔴. seit in Dubai-Zeit; ohne lesbare Startzeit „seit spätestens" = erstes Sehen des Panels."""
+    from zoneinfo import ZoneInfo
+    t = e.get("seit") or e.get("gesehen")
+    seit = (("" if e.get("seit") else "spätestens ") + datetime.fromtimestamp(t, ZoneInfo("Asia/Dubai")).strftime("%H:%M")) if t else ""
+    titel = f"Windows-Abfrage {'noch ' if erneut else ''}offen: {wer_txt}"[:120]
+    text = (f"Windows-Abfrage {'noch ' if erneut else ''}offen · {wer_txt}" + (f" seit {seit}" if seit else "")
+            + f" · Auslöser: {e.get('ausloeser') or 'unbekannt — Text der Abfrage am PC lesen'}"
+            + " · bitte per Parsec mit Ja bestätigen (bis dahin kommt auf diesem PC kein F9/keine Order an)")
+    return titel, text
+
+
+@app.route("/pc/uac-spur", methods=["POST"])
+def pc_uac_spur():
+    """POST {offen: [{pid, seit, ausloeser}], weg: [...]} vom Panel (X-Code-Token, PC aus dem Schlüssel). Siehe Block oben."""
+    wer = _code_zugang()
+    if not wer:
+        return jsonify({"ok": False, "error": "kein gültiger Schlüssel"}), 403
+    uid = str(wer[0])
+    pc = str(wer[1] or "")[:20]
+    d = request.get_json(silent=True) or {}
+    namen, aus = _ap_namen()
+    if uid in aus or _alarm_fremd_verwaltet(uid):
+        return jsonify({"ok": True})
+    offen, weg = uac_spur_eintraege(d.get("offen")), uac_spur_eintraege(d.get("weg"))
+    if not offen and not weg:
+        return jsonify({"ok": True})
+    pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
+    wer_txt = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
+    k_off = {uac_alarm_schluessel(pc, e): e for e in offen}
+    k_weg = {uac_alarm_schluessel(pc, e): e for e in weg}
+    erl = {k + "|erledigt" for k in k_weg}
+    frisch = alarm_im_log(list(k_off), UAC_ALARM_WIEDER_S)            # in den letzten 30 min schon gemeldet
+    je = alarm_im_log(list(k_off) + list(k_weg) + list(erl), 86400)  # überhaupt gemeldet / schon erledigt
+    jetzt, gesendet = time.time(), 0
+    for k, e in k_off.items():
+        # beides zählt (Gegenprüfung UA1): alarm_log für Railway-Neustarts, der Merker, falls das Schreiben ins alarm_log scheiterte
+        if (frisch is not None and k in frisch) or jetzt - _UAC_ALARM_MERK.get(k, 0) < UAC_ALARM_WIEDER_S:
+            continue
+        erneut = (je is not None and k in je) or k in _UAC_ALARM_MERK
+        titel, text = uac_alarm_texte(wer_txt, e, erneut)
+        _UAC_ALARM_MERK[k] = jetzt
+        alarm_senden(1, "uac_offen", titel, text, uid=uid, schluessel=k, tag=f"uac-{pc}-{e['pid']}"[:60], renotify=True,
+                     daten={"pc": pc, "pid": e["pid"], "seit": e["seit"], "ausloeser": e["ausloeser"]})
+        gesendet += 1
+    for k, e in k_weg.items():
+        war = (je is not None and k in je) or k in _UAC_ALARM_MERK
+        if not war or (je is not None and k + "|erledigt" in je):
+            continue
+        _UAC_ALARM_MERK.pop(k, None)
+        alarm_senden(1, "uac_erledigt", f"Windows-Abfrage erledigt: {wer_txt}"[:120],
+                     f"{wer_txt}: die Windows-Abfrage ist weg — der PC nimmt wieder Orders an.", uid=uid, schluessel=k + "|erledigt",
+                     tag=f"uac-{pc}-{e['pid']}"[:60], zeichen="✅ ", push_prio=3, daten={"pc": pc, "pid": e["pid"]})
+        gesendet += 1
+    for k in [k for k, t in _UAC_ALARM_MERK.items() if jetzt - t > 86400]:
+        _UAC_ALARM_MERK.pop(k, None)
+    return jsonify({"ok": True, "gesendet": gesendet})
 
 
 @app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])

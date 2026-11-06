@@ -297,6 +297,158 @@ def _pc_last_waechter():
         time.sleep((60.0 if runde == 1 else PC_LAST_TAKT_S) + random.uniform(0, 15))
 
 
+# ── WINDOWS-ABFRAGE MELDEN (UA1, 06.11.2026 — Finn: „Wenn die Windows-Abfrage kommt, kannst du mir kurz Bescheid geben, dann kann ich es
+# kurz hinklicken."). Anlass F9A: MT5-Build 6230 wollte erhöht eingespielt werden, consent.exe stand auf pc-c19p2l stundenlang offen und
+# blockierte jedes F9 des PCs. Alle UAC_ALARM_TAKT_S eine reine Namensliste (ein Toolhelp-Snapshot, kein Unterprozess, kein Öffnen fremder
+# Prozesse); nur wenn consent.exe darin steht, Startzeit der Abfrage und der Pfad laufender terminal64.exe (liveupdate = MT5-Update →
+# origin.txt nennt die Installation). Railway (POST /pc/uac-spur) alarmiert 🔴 an die Master-IDs, nach 30 min erneut, ✅ wenn weg.
+# Gesendet wird bei jeder Änderung und solange offen alle UAC_ALARM_HALTEN_S. Wegklicken kann kein Programm (sicherer Desktop) — nur melden.
+UAC_ALARM_TAKT_S, UAC_ALARM_HALTEN_S, UAC_ALARM_FEHL_S = 30.0, 300.0, 300.0
+UAC_ALARM = {"gemeldet": None, "gesendet_at": 0.0, "erst_gesehen": {}, "fehl_bis": 0.0}
+# Gemeldeter Stand übersteht einen Panel-Neustart (Gegenprüfung UA1): sonst ginge ein „weg" zwischen Neustart und nächster Runde verloren (kein ✅)
+UAC_ALARM_DATEI = os.path.join(HERE, "uac_alarm.json")
+
+
+def uac_alarm_senden_noetig(vorher, jetzt, zuletzt_s, now, halten_s=UAC_ALARM_HALTEN_S):
+    """REIN RECHNEND (testbar): POST an Railway nötig? vorher/jetzt = Schlüssel der offenen Abfragen. Änderung (neu oder weg) sofort,
+    solange etwas offen ist zusätzlich alle halten_s (Railway alarmiert nach 30 min erneut). Nichts offen und nichts weg → nie."""
+    return set(vorher) != set(jetzt) or (bool(jetzt) and now - float(zuletzt_s or 0) >= halten_s)
+
+
+def uac_ausloeser_waehlen(consent_seit, updater):
+    """REIN RECHNEND (testbar): welcher MT5-Updater gehört zu dieser Abfrage? updater = [(start_s|None, installation)]. Der, der ≤ 20 s vor
+    der Abfrage startete (MT5 startet den Updater, 1 s danach kommt consent.exe — F9A); sonst genau einer → der; sonst ''."""
+    nah = [i for s, i in updater if s and consent_seit and -20 <= consent_seit - s <= 5]
+    if nah:
+        return nah[-1]
+    return updater[0][1] if len(updater) == 1 else ""
+
+
+def _uac_abfragen_lesen():
+    """[{pid, seit, ausloeser}] der offenen Windows-Abfragen, [] wenn keine, None ohne lesbare Liste. Wirft nie."""
+    if os.name != "nt":
+        return None
+    try:
+        w = _pc_w32()
+        ctypes, wt, k32 = w["ctypes"], w["wt"], w["k32"]
+        snap = k32.CreateToolhelp32Snapshot(0x2, 0)
+        if snap == ctypes.c_void_p(-1).value or not snap:
+            return None
+        roh = []
+        try:
+            pe = w["PE32"]()
+            pe.dwSize = ctypes.sizeof(pe)
+            ok = k32.Process32FirstW(snap, ctypes.byref(pe))
+            while ok:
+                n = str(pe.szExeFile).lower()
+                if n in ("consent.exe", "terminal64.exe"):
+                    roh.append((int(pe.th32ProcessID), n))
+                ok = k32.Process32NextW(snap, ctypes.byref(pe))
+        finally:
+            k32.CloseHandle(snap)
+        if not any(n == "consent.exe" for _, n in roh):
+            return []
+
+        def start_und_pfad(pid, pfad_auch):
+            # nur PROCESS_QUERY_LIMITED_INFORMATION (wie _pc_prozesse_lesen); consent.exe (SYSTEM) kann verweigern → None
+            h = k32.OpenProcess(0x1000, False, pid)
+            if not h:
+                return None, ""
+            try:
+                c_, e_, kz, uz = wt.FILETIME(), wt.FILETIME(), wt.FILETIME(), wt.FILETIME()
+                s = (_ft(c_) - 116444736000000000) / 1e7 if k32.GetProcessTimes(h, ctypes.byref(c_), ctypes.byref(e_), ctypes.byref(kz),
+                                                                               ctypes.byref(uz)) and _ft(c_) else None
+                p = ""
+                if pfad_auch:
+                    buf, ln = ctypes.create_unicode_buffer(1024), wt.DWORD(1024)
+                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(h), 0, buf, ctypes.byref(ln)):
+                        p = buf.value
+                return s, p
+            finally:
+                k32.CloseHandle(h)
+
+        updater = []
+        for pid, n in roh:
+            if n != "terminal64.exe":
+                continue
+            s, p = start_und_pfad(pid, True)
+            if "\\liveupdate\\" in os.path.normcase(p or "").replace("/", "\\"):
+                inst = ""
+                try:   # <Datenordner>\liveupdate\terminal64.exe → <Datenordner>\origin.txt = Installation (wie das Update-Skript)
+                    with open(os.path.join(os.path.dirname(os.path.dirname(p)), "origin.txt"), encoding="utf-8-sig", errors="replace") as f:
+                        inst = f.read().strip()[:80]
+                except OSError:
+                    pass
+                updater.append((s, inst or "unbekannte Installation"))
+        updater.sort(key=lambda x: x[0] or 0)
+        jetzt, out = time.time(), []
+        for pid, n in roh:
+            if n != "consent.exe":
+                continue
+            s, _p = start_und_pfad(pid, False)
+            # seit = echte Startzeit oder 0 (consent.exe läuft als SYSTEM, ohne Adminrechte oft nicht lesbar) — gehört in den Schlüssel bei Railway;
+            # gesehen = erstes Sehen dieses Panels, nur für die Anzeige (ändert sich bei einem Panel-Neustart, darf den Schlüssel also nicht bilden)
+            gesehen = UAC_ALARM["erst_gesehen"].setdefault(pid, s or jetzt)
+            inst = uac_ausloeser_waehlen(s, updater)
+            out.append({"pid": pid, "seit": int(s or 0), "gesehen": int(gesehen),
+                        "ausloeser": (f"MT5-Update terminal64.exe für {inst}" if inst else "")[:160]})
+        for pid in [p for p in UAC_ALARM["erst_gesehen"] if p not in {e["pid"] for e in out}]:
+            UAC_ALARM["erst_gesehen"].pop(pid, None)
+        return out
+    except Exception as e:
+        print(f"[uac-alarm] Lesen: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def _uac_spur_melden(offen, weg):
+    """POST /pc/uac-spur (X-Code-Token, wie /pc/tab-heil-spur). → True wenn angekommen. Wirft nie, blockiert höchstens 5 s."""
+    import urllib.request
+    tok = code_token()
+    if not tok:
+        return False
+    try:
+        body = json.dumps({"offen": offen, "weg": weg}).encode("utf-8")
+        req = urllib.request.Request(CODE_QUELLE + "/pc/uac-spur", data=body, method="POST",
+                                     headers={"X-Code-Token": tok, "Content-Type": "application/json", "User-Agent": "prophos-panel"})
+        urllib.request.urlopen(req, timeout=5).read()
+        return True
+    except Exception as e:
+        print(f"[uac-alarm] nicht gemeldet ({type(e).__name__})", flush=True)
+        return False
+
+
+def _uac_alarm_waechter():
+    """Thread: alle ~30 s offene Windows-Abfragen lesen und Änderungen an Railway melden. Wirft nie; ohne Windows nichts."""
+    if os.name != "nt":
+        return
+    time.sleep(30 + random.uniform(0, 30))
+    if UAC_ALARM["gemeldet"] is None:
+        g = read_json(UAC_ALARM_DATEI, {})
+        UAC_ALARM["gemeldet"] = {str(k): v for k, v in g.items() if isinstance(v, dict)} if isinstance(g, dict) else {}
+    while True:
+        try:
+            offen = _uac_abfragen_lesen()
+            if offen is not None and time.time() >= UAC_ALARM["fehl_bis"]:
+                jetzt = {f"{e['pid']}|{e['seit']}": e for e in offen}
+                vorher = UAC_ALARM["gemeldet"]
+                if uac_alarm_senden_noetig(vorher, jetzt, UAC_ALARM["gesendet_at"], time.time()):
+                    weg = [vorher[k] for k in vorher if k not in jetzt]
+                    if _uac_spur_melden(list(jetzt.values()), weg):   # nicht angekommen → nach UAC_ALARM_FEHL_S nochmal (weg bleibt im Merker)
+                        UAC_ALARM.update(gemeldet=jetzt, gesendet_at=time.time())
+                        try:
+                            tmp = UAC_ALARM_DATEI + ".tmp"
+                            with open(tmp, "w", encoding="utf-8") as f:
+                                json.dump(jetzt, f)
+                            os.replace(tmp, UAC_ALARM_DATEI)
+                        except OSError:
+                            pass
+                    else:
+                        UAC_ALARM["fehl_bis"] = time.time() + UAC_ALARM_FEHL_S   # Railway weg/403: nicht alle 30 s, sondern alle 5 min
+        except Exception as e:
+            print(f"[uac-alarm] {type(e).__name__}: {e}", flush=True)
+        time.sleep(UAC_ALARM_TAKT_S + random.uniform(-5, 5))
+
+
 def panel_lauf_info():
     """Was dieser Panel-Prozess WIRKLICH fährt (für mt5_live.status.panel_lauf über den Prophos-Tab): Version, deren Code nachweislich läuft (Start bzw.
     nachgezogen nach Vergleich mit dem Abbild), Startzeit, PID, Datei (panel.py / panel_frisch.py), sha12 des geladenen Quelltexts."""
@@ -8182,6 +8334,7 @@ def main():
     threading.Thread(target=_scharf_wache, daemon=True).start()   # Schließ-Wache (02.11.2026, s. SCHLIESSEN AUF DEM PC)
     threading.Thread(target=_ea_frost_waechter, daemon=True).start()   # F2 (30.10.2026): EA-Selbstheilung ohne Knopf
     threading.Thread(target=_pc_last_waechter, daemon=True).start()   # SW1 (05.11.2026): Last des PCs messen, s. LAST DES PCs MESSEN
+    threading.Thread(target=_uac_alarm_waechter, daemon=True).start()   # UA1 (06.11.2026): offene Windows-Abfrage an Railway melden
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die
