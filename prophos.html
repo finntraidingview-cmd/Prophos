@@ -56831,7 +56831,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2107'
+  const OS_TAB_BUILD = '2026-09-22.2108'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57269,10 +57269,24 @@
     for(const f of faelle){ try{ if(await tsxGeblowtKonto(f.id, f.beweis, quelle)) n++ }catch(e){ console.warn('[tsx-geblowt]', f.id, (e && e.message) || e) } }
     return n
   }
+  /* TESTKONTEN OHNE GEBLOWT-AUGE (NV1 §4b, Finn 06.11.2026: Nova-Testkonto Marco Combine …24551329 ist „Ineligible“ und wurde bei jeder
+   * TopstepX-Lesung wieder archiviert, zuletzt 03:59:52 nach Plan adc10fd9). Konto-IDs in wd_farmer_regeln.tsx_test_konten (text[],
+   * sql/2026-11-06_tsx_test_konten.sql) — eigene Spalte wie hedge_toast_schluss, weil „Hedge-Tabelle speichern" vorplan ganz neu baut und
+   * einen fremden Schlüssel still verlöre. Frisch gelesen je Fall (selten, einmal je Konto und Tab); Spalte fehlt / nicht lesbar → false,
+   * also archivieren wie bisher. Nur diese Stelle: der Bot liest und meldet unverändert, jedes andere Konto läuft wie bisher. */
+  async function tsxTestKonto(id){
+    try{
+      const { data, error } = await supabase.from('wd_farmer_regeln').select('tsx_test_konten').eq('id', 1).maybeSingle()
+      if(error || !data || !Array.isArray(data.tsx_test_konten)) return false
+      const ziel = String(id || '').trim().toLowerCase()
+      return !!ziel && data.tsx_test_konten.some(x => String(x || '').trim().toLowerCase() === ziel)
+    }catch(_){ return false }
+  }
   async function tsxGeblowtKonto(id, beweis, quelle){
     if(!id || _tsxGeblowtErledigt.has(id)) return false
     const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return false
-    _tsxGeblowtErledigt.add(id)
+    _tsxGeblowtErledigt.add(id)   // vor dem await: zwei gleichzeitige Lesungen archivieren nie doppelt
+    if(await tsxTestKonto(id)){ console.info('[tsx-geblowt] Testkonto — Geblowt-Auge übersprungen (kein Archiv, kein blown)', id, beweis && beweis.art, quelle); return false }
     const e4 = String(acc.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
     const name = `${acc.firm || 'Konto'}${e4 ? ' …' + e4 : ''}`
     const grundTxt = String((beweis && (beweis.text || beweis.art)) || 'Violation').slice(0, 80)
