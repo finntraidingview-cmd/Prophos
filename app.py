@@ -18319,6 +18319,18 @@ def cme_markt_offen(dt_utc):
     return _cme_offen_seit_s(dt_utc) is not None
 
 
+def cme_wochenende(dt_utc):
+    """REIN RECHNEND (testbar): Markt-Wochenende? CME/Globex Fr 16:00 CT (für Starts ab 15:55 CT, 5 min Puffer) bis So 17:00 CT (Sommer/Winter über zoneinfo; Winter: Sa 02:00 – Mo 03:00 Dubai).
+    Nur das Wochenende, nicht die tägliche Pause. WE1 (07.11.2026, Vorfall Sa 07:18 Dubai: finaler Tradeify Moritz …9823 startete bei geschlossenem
+    Markt, kein Fill) — gleiche Regel wie prophos_markt_wochenende in der DB und cmeWochenende im Tab."""
+    from zoneinfo import ZoneInfo
+    if isinstance(dt_utc, (int, float)):
+        dt_utc = datetime.fromtimestamp(float(dt_utc), timezone.utc)
+    ct = dt_utc.astimezone(ZoneInfo("America/Chicago"))
+    wt, hm = ct.weekday(), ct.hour * 60 + ct.minute
+    return wt == 5 or (wt == 4 and hm >= 16 * 60 - 5) or (wt == 6 and hm < 17 * 60)   # 5 min Puffer vor dem Freitagsschluss (Gegenprüfung WE1)
+
+
 def _cme_offen_seit_s(dt_utc):
     """REIN RECHNEND: Sekunden seit der letzten Öffnung (17:00 CT), None bei geschlossenem Markt.
     Dient dem Deckel „Alter höchstens seit Öffnung" — sonst wäre um 17:00 CT jede Zeile eine
@@ -31398,6 +31410,9 @@ def tfh_tick(jetzt=None, force=False):
         try:
             st_ = datetime.fromisoformat(str(p.get("start_um")).replace("Z", "+00:00"))
         except (TypeError, ValueError):
+            return False
+        # WE1 (07.11.2026): am Markt-Wochenende nie auf Hedge „mit“ umstellen — weder jetzt noch für einen Start im Wochenende
+        if cme_wochenende(jetzt) or cme_wochenende(st_):
             return False
         return von <= st_ <= bis and bool(p.get("auto_bestaetigt_at")) and bool(p.get("hedge_freigabe_at"))
     kauf = _ap_kauf_echt(sorted({str(a["id"]) for _p, a in finale}))

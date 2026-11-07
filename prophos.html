@@ -37363,6 +37363,20 @@
     }catch(_){ return true }
   }
   window._cmeMarktOffen = cmeMarktOffen
+  /* MARKT-WOCHENENDE (WE1, 07.11.2026 — Vorfall Sa 07:18 Dubai: finaler Tradeify Moritz …9823 startete bei geschlossenem Markt, kein Fill, Plan auf review mit 0):
+   * Fr 15:55 CT (5 min Puffer vor dem Schluss 16:00) bis So 17:00 CT (Winter Sa 01:55 – Mo 03:00 Dubai). Am Wochenende startet KEIN Plan — weder zur Startzeit (suStartetNichtWeil) noch von Hand
+   * (faVorStart); der Plan bleibt geplant. Gleiche Regel wie app.py cme_wochenende und die DB (prophos_markt_wochenende, Claim-Riegel trade_plans_a00_wochenende). */
+  function cmeWochenende(ms){
+    try{
+      const teile = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(new Date(ms == null ? Date.now() : ms))
+      const w = (teile.find(t => t.type === 'weekday') || {}).value
+      const m = Number((teile.find(t => t.type === 'hour') || {}).value) * 60 + Number((teile.find(t => t.type === 'minute') || {}).value)
+      return w === 'Sat' || (w === 'Fri' && m >= 16 * 60 - 5) || (w === 'Sun' && m < 17 * 60)   // 5 min Puffer vor Freitagsschluss: Puls braucht bis zur Order Sekunden–Minuten
+    }catch(_){ return false }
+  }
+  window._cmeWochenende = cmeWochenende   // Test-Haken
+  const WOCHENENDE_GRUND = 'Markt-Wochenende (CME zu bis So 17:00 Chicago) — kein Start, der Plan bleibt geplant'
   // REIN RECHNEND (testbar über window._feedLuecken): je = {wurzel: [{t: Minuten-Start ms, ticks}] oder [ms]}. Zwei Arten Ausfall:
   // 'luecke' = zwischen zwei Kerzen fehlen ≥ minFehlend Minuten der Handelszeit; 'aussetzer' = Minuten mit ticks < minTicks
   // (Pakete des Readers je Minute, voll = 240 bei 4/s) — gezählt erst AB der ersten Minute mit ticks > 0 dieser Wurzel (ältere
@@ -54262,6 +54276,8 @@
   }
   window._echoV2Gesperrt = echoV2Gesperrt   // Test-Haken
   async function tpPreflightMt5V2(plan){
+    // WE1 (07.11.2026, Gegenprüfung): Fern-Signal (Handy/Mac → order_signale) springt direkt hierher, ohne faVorStart und ohne Claim — am Wochenende nie
+    if(cmeWochenende()){ const t = `„${plan.masterName || '—'}": ${WOCHENENDE_GRUND}`; _pfRemoteMelde(plan.id, { ok:false, msg: t }); if(typeof atToast === 'function') atToast('⏳ ' + t, 'end'); return }
     _pfMt5StopTimer()
     if(_pfRemoteHook && !_pfRemoteHook.armed && String(_pfRemoteHook.planId) !== String(plan.id)){
       if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(_pfRemoteHook.planId)) _tpPendingOrder = null
@@ -54646,6 +54662,11 @@
     // ES2 (05.11.2026, Prüf-Fund): Merker „Check lebt" VOR dem ersten await — tpJetztStarten ruft diesen Check ohne await, sonst sähe der
     // nächste Echo-Start während der Lots-Deckel-Lesung keinen laufenden Check (echoVorlaufAktiv) und übernähme das Popup
     pfLebt(plan.id, 120000)
+    // WE1 (07.11.2026, Gegenprüfung): Fern-Signal und Hand-Weg springen direkt hierher, ohne faVorStart und ohne Claim — am Wochenende nie
+    if(cmeWochenende()){ pfLebt(plan.id, 0); const t = `„${plan.masterName || '—'}": ${WOCHENENDE_GRUND}`; _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
+      if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
+      if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
+      return }
     // LOTS-DECKEL (S9 02.11.2026): Fern-Signal und Hand-Weg springen direkt hierher. Vor allem anderen, es läuft noch kein Copier
     if(await tpLotsDeckelFrisch(plan)){ pfLebt(plan.id, 0); const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
       if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
@@ -57505,6 +57526,11 @@
   async function faVorStart(plan){
     if(!plan || !plan.id) return null
     if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
+    if(cmeWochenende()){   // WE1 (07.11.2026): auch von Hand / fern kein Start am Markt-Wochenende
+      const t = `„${plan.masterName || '—'}": ${WOCHENENDE_GRUND}`
+      if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
+      return t
+    }
     if(planKontoDeaktiviert(plan)){   // Hand-Start (kein Claim): 30.10.2026, Konto deaktiviert
       const t = `„${plan.masterName || '—'}": Konto ist deaktiviert — erst unter Accounts am Stift ausschalten`
       if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
@@ -61772,7 +61798,7 @@
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
     // R4b (05.11.2026): aufgegeben (Gegenrichtung / Index-Pause) gilt bis zum Ablauf des Plans, nicht nur 30 min
     const _aufg = cfdAufgegeben(p)
-    if(!s || !['index_pause', 'richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt'].includes(s.art) || !(_aufg || Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !(['index_pause', 'richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge', 'zweit', 'firma', 'markt'].includes(s.art) || s.art === 'wochenende') || !(_aufg || Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
@@ -61792,6 +61818,8 @@
         voll: /von Hand geändert/.test(text) ? `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — nach Hand-Werten stellt der Takt nicht mehr um.`
           : `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — startet von selbst, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`,
         versuche: Number(s.versuche) || 1, at: s.at } }
+    // WE1 (07.11.2026): Claim-Riegel trade_plans_a00_wochenende — kein Start am Markt-Wochenende, der Plan bleibt geplant
+    if(s.art === 'wochenende') return { kurz: '⏳ Markt-Wochenende — kein Start', marke: '⏳ Wochenende', voll: `Wartet: ${text || WOCHENENDE_GRUND}.`, versuche: Number(s.versuche) || 1, at: s.at }
     // ZWEI ORBIT (03.11.2026, Z4, Lücke 3 S3): DB-Sperre am Claim (trade_plans_big_trade / prophos_big_trade_halten) — Grund je Art statt unsichtbar
     if(s.art === 'zweit' || s.art === 'firma' || s.art === 'markt'){ const zg = zweitGrund(s) || { kurz: text || 'zweiter Big Trade wartet', pille: 'zweiter wartet' }
       return { kurz: `⏳ Wartet: ${zg.kurz}${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`, marke: `⏳ ${zg.pille}`,
@@ -63121,6 +63149,7 @@
   const POLAR_AUTO = true
   function suStartetNichtWeil(p, scharf){
     if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')) return 'kein Puls-Weg'   // polar (13.10.2026): startet am Master-PC
+    if(cmeWochenende()) return WOCHENENDE_GRUND   // WE1 (07.11.2026): am Wochenende nie eine Order
     if(p.route === 'polar' && !POLAR_AUTO) return 'Polar manuell — startet nur von Hand („Läuft")'   // 16.10.2026: kein Bot, bis die Logik geprüft ist
     if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
