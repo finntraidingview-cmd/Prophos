@@ -82,7 +82,7 @@ check("lots_stops" in app and "D.lotsStops" in html, "Braucht dich: Stops auch f
 okr = app[app.index("def admin_auto_plan_lots_ok"):app.index('@app.route("/alarm/lots-deckel"')]
 check("laufend and stop is None" in okr and '"p_status": p.get("status")' in okr, "OK-Route: auch für laufende Pläne mit Stop, sonst 409")
 for name in ("async function tpPreflightAndStart(", "async function tpPreflightMt5("):
-    kopf = html[html.index(name):][:600]
+    kopf = html[html.index(name):][:1200]   # WE1 (07.11.2026): davor steht jetzt die Wochenend-Sperre (tpPreflightMt5), der Lots-Deckel bleibt am Kopf
     check("await tpLotsDeckelFrisch(plan)" in kopf and "_pfRemoteMelde(plan.id" in kopf, name[15:-1] + ": Sperre am Kopf, Fern bekommt Antwort")
 fr = html[html.index("async function tpLotsDeckelFrisch("):][:900]
 check(".select('*')" in fr and "plan.status !== 'planned'" in fr and "start_um_gestartet_at: null" in fr, "Frisch: liest immer die DB, nur vor dem Start, gibt einen Claim zurück")
