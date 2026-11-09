@@ -46038,6 +46038,41 @@ def fcp_zyklus_start(pending, managed, buchungen):
     return {aid: (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") for aid, d in tag.items()}
 
 
+# ANFRAGE OHNE TRADE (Finn 10.11.2026 ~03:25 Dubai, Moritz FundedNext 100k …3608 On Demand: „Sobald ich Payout anfrage, auch bei On Demand, soll es
+# eben ja resetet werden“ — stand nach der Anfrage wieder auf „Payout jetzt“). Vorfall (UTC): 23:09 angefragt → 23:14 liest der Planer noch die alte
+# Balance 102.205,69 (die Firma hatte die Auszahlung noch nicht abgezogen) und rechnet sie als Gewinn des NEUEN Zyklus 4 → „Ziel erreicht“: Waiting +
+# „anfragbar ab heute“ → 23:25 Balance 100.000 = richtig, aber das Datum blieb. Regel: im neuen Zyklus gibt es kein Ziel ohne Trade — ist seit der
+# jüngsten Anfrage (pending_payouts.created_at, in Prophos angelegt) kein Plan des Kontos zu Ende gegangen, zählt ein „Ziel erreicht“ nicht (Balance von
+# vor der Auszahlung). Nur FCP_ANFRAGE_OHNE_TRADE_H lang: danach rechnet der Planer wieder normal (Hand-Trades ohne Plan sperren das Konto nie ewig).
+FCP_ANFRAGE_OHNE_TRADE_H = 72
+
+
+def fcp_anfrage_ohne_trade(anfrage_at, plaene, jetzt):
+    """REIN RECHNEND (testbar): True = jüngste Payout-Anfrage (datetime | ISO-Text | None) ist jünger als FCP_ANFRAGE_OHNE_TRADE_H und seither ist
+    kein Plan des Kontos zu Ende gegangen (status completed, ended_at/completed_at nach der Anfrage) → ein „Ziel erreicht“ ist die alte Balance."""
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if a is None or jetzt - a > timedelta(hours=FCP_ANFRAGE_OHNE_TRADE_H):
+        return False
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        e = _ap_ts(str(p.get("ended_at") or p.get("completed_at") or "")) if (p.get("ended_at") or p.get("completed_at")) else None
+        if e is not None and e > a:
+            return False
+    return True
+
+
+def fcp_anfrage_zuletzt(pending):
+    """REIN RECHNEND (testbar): {account_id: jüngste pending_payouts.created_at als datetime} — nur in Prophos angelegte Anfragen (Zeitpunkt genau)."""
+    out = {}
+    for z in pending or ():
+        aid = str(z.get("account_id") or "")
+        t = _ap_ts(str(z["created_at"])) if z.get("created_at") else None
+        if aid and t is not None and (aid not in out or t > out[aid]):
+            out[aid] = t
+    return out
+
+
 FCP_CONS_TP_MIN_USD = 50       # Weg A: kleinster TP eines Consistency-Trades (technisch, nicht im Panel — Finn 05.11.2026 ~04:20)
 FCP_CONS_PUFFER_ZIEL = 1.02    # Endziel mindestens größter Tag ÷ p × 1,02
 FCP_CONS_PUFFER_DECKEL = 0.95  # Deckel je Trade = p × Endziel × 0,95 (5 % Sicherheitsabstand)
@@ -46665,6 +46700,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             print(f"[funded-cfd] ⚠️ Payouts nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — kein Refund-Modus in diesem Lauf", flush=True)
     payout_n = fcp_payouts_zaehlen(pend, verw, buch)
     zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}
+    anfrage_zuletzt = fcp_anfrage_zuletzt(pend) if payouts_ok else {}   # Anfrage ohne Trade (10.11.2026, Moritz …3608)
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -46786,6 +46822,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
+        if r.get("aktion") == "ziel" and fcp_anfrage_ohne_trade(anfrage_zuletzt.get(aid), pl, jetzt):
+            # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn
+            aus("Payout angefragt — Balance noch von vor der Auszahlung (seitdem kein Trade), plant wieder, sobald die Firma sie abgezogen hat",
+                balance=round(float(bal), 2)); continue
         if od_an:
             r["on_demand"] = True
         if _heute_n >= 1 and r.get("aktion") == "planen" and r.get("tp_art") == "gewinntag":
