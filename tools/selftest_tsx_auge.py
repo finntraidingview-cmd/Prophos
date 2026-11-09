@@ -67,7 +67,7 @@ def frontend_test():
     k = s.index("  const tsxKontoGleich = ")
     # RT1 (05.11.2026): 2cc2e33c (29.10.2026, finaler Tradeify Orbit V3) — hedgeLiqLevel ruft hedgeIstTradeifyFinal (const-Pfeil), Lader holt die Zeile mit
     kf = s.index("  const hedgeIstTradeifyFinal = ")
-    code = "\n".join(fn(s, n) for n in ("tvSymbolWurzel", "hedgeKontoPasst", "hedgeMasterWegEntscheid", "hedgeMasterTeilweise", "tsxStandListe", "hedgeLiqLevel"))
+    code = "\n".join(fn(s, n) for n in ("tvSymbolWurzel", "hedgeKontoPasst", "hedgeMasterWegEntscheid", "hedgeMasterTeilweise", "tsxStandListe", "hedgeLiqLevel", "planWdSlUsd"))   # WS1 09.11.2026: hedgeLiqLevel fragt nach dem Würfel-SL
     code = ("var window = {}, accounts = [], _liqRegeln = null; function liqRegelnLaden(){ return { catch(){} } } function tpKontoGroesseAusName(){ return 0 }\n"
             + code + "\n" + s[k:s.index("\n", k)] + "\n" + s[kf:s.index("\n", kf)] + r"""
 var aus = [], f = (b, t) => aus.push((b ? 'OK ' : 'ROT ') + t)

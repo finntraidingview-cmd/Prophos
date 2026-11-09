@@ -68,7 +68,8 @@ def main():
              js_zeile(src, "const hedgeIstTradeifyFinal"), js_zeile(src, "const tpIstApexHedge")]
     # istTradeifyCfd: firmNormRichtung fragt seit .1726 danach (Tradeify CFD eigene Firma)
     teile += [js_funktion(src, n) for n in ("istTradeifyCfd", "firmNormRichtung", "tvV2Handelstag", "liqRegelWaehlen", "liqDailyLoss", "hedgeTagesstart",
-                                            "hedgeLiqDll", "hedgeLiqDllApex", "hedgeLiqStart", "hedgeLiqLevel")]
+                                            "hedgeLiqDll", "hedgeLiqDllApex", "hedgeLiqStart", "hedgeLiqLevel",
+                                            "planWdSlUsd")]   # WS1 (09.11.2026): hedgeLiqLevel fragt nach dem Würfel-SL des Plans
     acc = [
         {"id": "marc", "name": "150k PAAPEX6843320000001 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": None},
         {"id": "a100", "name": "100k PAAPEX0000000000099 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": 100000},
