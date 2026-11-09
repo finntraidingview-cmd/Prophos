@@ -13096,6 +13096,11 @@ def wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher=N
         if hedge.get("liq_art") == "daily_loss" and h_lvl:
             return {"sl_level_nq": h_lvl, "sl_art": "liquidation", "liq_balance": _wd_num(hedge.get("liq_balance")) or liq["balance"],
                     "liq_quelle": hedge.get("liq_quelle") or "hedge", "sl_hinweis": None}
+        # WS1 ZUFALLS-SL (Finn 09.11.2026, Rally zur Eröffnung, 4 WDs zerbröselt): hat der Plan einen gewürfelten Master-SL, schließt der Hedge
+        # dort (PC-Tab hedgeLiqLevel, sl_art 'master_sl_wuerfel') — Radar/Demo zeigen dann diesen SL, nicht die Liq. Ohne wd_sl wie bisher.
+        if hedge.get("sl_art") == "master_sl_wuerfel" and h_lvl:
+            return {"sl_level_nq": h_lvl, "sl_art": "master_sl", "liq_balance": _wd_num(hedge.get("liq_balance")) or liq["balance"],
+                    "liq_quelle": hedge.get("liq_quelle") or "hedge", "sl_hinweis": None}
         if liq_quelle == "balance_start" and liq["level"] is not None:
             lvl, q = liq["level"], "balance_start"
         elif h_lvl:
