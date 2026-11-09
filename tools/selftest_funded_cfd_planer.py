@@ -451,6 +451,43 @@ check(_grund(e4, KONTEN[0]["id"]) == "läuft gerade", "nie gleichzeitig: läuft 
 del REG["zeiten"]["trades_je_tag"]
 app._sb_all = _alt2
 
+print("2i) WP3-Zusatz (10.11.2026): POST /admin/funded-cfd-plan/waiting-zurueck — nur Admin, Gruppe beachten, nur funded_cfd mit Waiting")
+_K = {"id": KONTEN[7]["id"], "user_id": E1, "name": KONTEN[7]["name"], "firm": "FundedNext", "account_type": "funded_cfd",
+      "waiting_payout_since": "2026-10-30T00:00:00+00:00"}
+_UPD = []
+_s0, _u0, _g0, _l0 = app.sb_select, app.sb_update, app._planer_schreib_gate, app._fcp_login
+app.sb_select = lambda t, p: [dict(_K)] if t == "accounts" and p.get("id") == f"eq.{_K['id']}" else []
+app.sb_update = lambda t, f, u: _UPD.append((t, f, u)) or [dict(_K, **u)]
+app._planer_schreib_gate = lambda: None
+_LOGIN = {"v": (True, "admin-uid", None, None, None)}
+app._fcp_login = lambda: _LOGIN["v"]
+_c = app.app.test_client()
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+_j = _r.get_json() or {}
+check(_r.status_code == 200 and _j.get("ok") and _j["konto"]["waiting_payout_since"] is None and _j["konto"]["war_seit"] == _K["waiting_payout_since"]
+      and _UPD == [("accounts", {"id": f"eq.{_K['id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"}, {"waiting_payout_since": None})],
+      f"Admin setzt Waiting zurück (Guard funded_cfd + Waiting gesetzt) → {{ok, konto}} ({_r.status_code})")
+_UPD.clear()
+_LOGIN["v"] = (True, "admin-uid", None, frozenset({H1, H2}), None)      # HT-Admin: Schreib-Sicht nur HT
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+check(_r.status_code == 403 and not _UPD, "HT-Admin darf kein Konto aus Emins Gruppe zurücksetzen (Zwei Unternehmen getrennt)")
+_LOGIN["v"] = (False, H1, None, H1, None)
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+check(_r.status_code == 403 and not _UPD, "ohne Admin: 403")
+_LOGIN["v"] = (True, "admin-uid", None, None, None)
+for _feld, _wert, _code, _txt in (("account_type", "funded", 400, "nur funded_cfd"), ("waiting_payout_since", None, 409, "ohne Waiting: 409")):
+    _alt = _K[_feld]
+    _K[_feld] = _wert
+    _r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+    check(_r.status_code == _code and not _UPD, f"{_txt} ({_r.status_code})")
+    _K[_feld] = _alt
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": "x"})
+check(_r.status_code == 400 and not _UPD, "ungültige account_id: 400")
+app.sb_update = lambda t, f, u: []
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+check(_r.status_code == 409, "Guard griff (inzwischen geändert): 409")
+app.sb_select, app.sb_update, app._planer_schreib_gate, app._fcp_login = _s0, _u0, _g0, _l0
+
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)

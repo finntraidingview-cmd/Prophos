@@ -47159,6 +47159,50 @@ def admin_funded_cfd_plan_loeschen():
     return _fcp_eingriff("loeschen")
 
 
+@app.route("/admin/funded-cfd-plan/waiting-zurueck", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_waiting_zurueck():
+    """POST {account_id} — WP3-Zusatz (10.11.2026, Master mit S3): seit WP3 stellt der Planer am Ziel ohne Schalter auf Waiting for Payout um; damit Finn
+    ein falsch umgestelltes Konto (auch einer fremden ID) im Funded Planer → CFD zurücksetzen kann. Gate wie /einstellung: nur Admin, dazu die
+    Schreib-Sicht der Gruppe (Zwei Unternehmen getrennt: HT nur HT-Konten). Nur account_type funded_cfd mit gesetztem waiting_payout_since → null.
+    → {ok, konto}. Hinweis: steht das Konto beim nächsten Lauf weiter am echten Ziel, stellt der Planer es wieder um (gewollt: dann war es richtig)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
+    admin, uid, _lese, sicht, err = _fcp_login()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Waiting for Payout zurücksetzen — nur Admin"}), 403
+    body = request.get_json(silent=True) or {}
+    aid = str(body.get("account_id") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", aid):
+        return jsonify({"ok": False, "msg": "account_id fehlt oder ungültig"}), 400
+    try:
+        a = (sb_select("accounts", {"select": "id,user_id,name,firm,account_type,waiting_payout_since", "id": f"eq.{aid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Konto nicht lesbar ({type(e).__name__})"}), 502
+    if not a:
+        return jsonify({"ok": False, "msg": "Konto nicht gefunden"}), 404
+    if sicht is not None and not admin_in_sicht(a.get("user_id"), sicht):
+        return jsonify({"ok": False, "msg": "nur Konten der eigenen Gruppe"}), 403
+    if a.get("account_type") != "funded_cfd":
+        return jsonify({"ok": False, "msg": "nur Funded-CFD-Konten"}), 400
+    if not a.get("waiting_payout_since"):
+        return jsonify({"ok": False, "msg": "Konto steht nicht auf Waiting for Payout"}), 409
+    try:
+        zeilen = sb_update("accounts", {"id": f"eq.{aid}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"},
+                           {"waiting_payout_since": None})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {str(e)[:160]}"}), 502
+    if not zeilen:
+        return jsonify({"ok": False, "msg": "inzwischen geändert — neu laden"}), 409
+    print(f"[funded-cfd] Waiting for Payout zurückgesetzt: {a.get('name')} (war seit {a.get('waiting_payout_since')}) durch Admin {str(uid)[:8]}", flush=True)
+    return jsonify({"ok": True, "konto": {"id": aid, "user_id": a.get("user_id"), "name": a.get("name"), "firm": a.get("firm"),
+                                          "waiting_payout_since": None, "war_seit": a.get("waiting_payout_since")}})
+
+
 @app.route("/admin/funded-cfd-plan/einstellung", methods=["POST", "OPTIONS"])
 def admin_funded_cfd_plan_einstellung():
     """POST {news_regel: bool} — Kachel „News-Regel (rote USD-News)" im Funded Planer → CFD (S8 8427eda9). Der Schalter gilt für alle Gruppen
