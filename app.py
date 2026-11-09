@@ -4027,7 +4027,7 @@ ALARM_ERINNERN_S = 900                      # anhaltender 🔴-Zustand: alle 15 
 ALARM_RADAR_GRUENDE = {"tp_feed": "am TP", "sl_feed": "am SL", "master_nie_da": "— Master-Position kam nie an"}
 # ABGLEICH MASTER ↔ HEDGE (AB1, Finn 10.11.2026): der PC-Tab schreibt das Ergebnis nach mt5_baseline.abgleich (prophos.html abPlanPruefen);
 # Status → (Prio, Titel). „ok"/„unklar_still"/„warten_*" melden nichts. Je Plan × Status höchstens einmal je Stunde (Schlüssel mit at[:13]).
-ALARM_ABGLEICH = {"master_offen_tsx": (1, "Hedge zu, Master offen (TopstepX)"), "echo_hedge_offen": (1, "Echo-Master zu, Hedge offen"), "master_ohne_hedge": (1, "Echo-Hedge extern zu, Master offen"), "fehler": (1, "Abgleich: Schließen fehlgeschlagen"), "master_geschlossen": (2, "Abgleich hat den Master geschlossen"), "hedge_geschlossen": (2, "Abgleich hat den Hedge geschlossen"), "unklar": (2, "Abgleich: Abweichung nicht bestätigt")}
+ALARM_ABGLEICH = {"master_offen_tsx": (1, "Hedge zu, Master offen (TopstepX)"), "echo_hedge_offen": (1, "Echo-Master zu, Hedge offen"), "master_ohne_hedge": (1, "Master ohne Hedge"), "fehler": (1, "Abgleich: Schließen fehlgeschlagen"), "master_geschlossen": (2, "Abgleich hat den Master geschlossen"), "hedge_geschlossen": (2, "Abgleich hat den Hedge geschlossen"), "unklar": (2, "Abgleich: Abweichung nicht bestätigt")}
 _alarm = {"at": 0.0, "start": time.time(), "gemeldet": {}, "fehler": "", "empf": None, "empf_at": 0.0, "letzt": []}
 
 
