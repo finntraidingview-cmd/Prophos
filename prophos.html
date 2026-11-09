@@ -57512,7 +57512,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2123'
+  const OS_TAB_BUILD = '2026-09-22.2124'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61504,6 +61504,8 @@
    *   → nur den Master schließen (v2SchliessenAmPc ohneEnde), kein neues Ende.
    * NIE: Topstep (tsv2 hat kein tsx-close — nur mit zschluss.topstep === true wird es versucht und endet ehrlich als fehler), Winning Days,
    *   Funded (der Planer würfelt dort nie; hier zusätzlich über die Kontoart geprüft), Pläne, die länger als 12 h fällig sind.
+   *   Orbit mit Hedge (orbit_v3) und finaler Pass-Trade mit Kontowert-Hedge (mt5_baseline.tradeify_hedge): nie schließen, sondern
+   *   zschluss.status 'uebersprungen' + grund ('orbit_v3' | 'tradeify_hedge_<status>'), kein 🔴 (Master 10.11.2026, doppelte Sicherung).
    * NEWS-SPERRE (Standard an, aus mit zschluss.news_sperre === false): kein Schluss von 11 min vor bis 6 min nach einem roten Termin (Tradeify
    *   verbietet Schließen ±5 min; Echo-Close läuft bis 300 s). Kalender fehlt/alt → bis 20 min nach Fälligkeit warten, dann schließen
    *   (Schließen ist die sichere Seite).
@@ -61532,6 +61534,11 @@
     if(!start) return null
     const faellig = start + Number(z.nach_min) * 60000
     if(now < faellig || now - faellig > ZS.max_alter_h * 3600000) return null
+    // NIE bei Orbit mit Hedge (orbit_v3) oder finalem Pass-Trade mit Kontowert-Hedge (mt5_baseline.tradeify_hedge, jeder Status) — doppelte
+    // Sicherung zum Planer (Vorschlag S1, Master 10.11.2026): zschluss bekommt dann status 'uebersprungen' mit Grund, kein Klick, kein 🔴
+    const th = b.tradeify_hedge
+    if(p.orbitV3 === true || th) return { art: 'uebersprungen', faellig,
+      grund: p.orbitV3 === true ? 'orbit_v3' : 'tradeify_hedge' + (th && typeof th === 'object' && th.status ? '_' + th.status : '') }
     if(p.status === 'open') return { art: 'normal', faellig }
     // HX1 (Gegenprüfung 09.11.2026, Fehler 1): puls_offen_n wird nie zurückgesetzt und „noch offen" heißt meist: auf dem Konto läuft schon der
     // FOLGE-Trade — tv-close schließt nach Konto + Symbol und wüsste nichts vom Plan. Darum nur: Status review (nie completed), mindestens 2 „offen"-
@@ -61715,7 +61722,16 @@
       if((_zs.naechster[pid] || 0) > now) continue
       let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) }catch(_){}
       const st = zsStand(p, now, acc && acc.type, _tp)
-      if(!st || !zsMeinPc(p)) continue
+      if(!st) continue
+      if(st.art === 'uebersprungen'){
+        // kein Klick, keine Maus, kein Riegel nötig (schreibt nur den Status; jeder PC-Tab schreibt dasselbe), danach lokal Ruhe
+        _zs.naechster[pid] = now + ZS.pause_nach_lauf_ms
+        await zsSchreiben(pid, { status: 'uebersprungen', at: new Date().toISOString(), grund: st.grund })
+        console.info('[zschluss] übersprungen', p.masterName || pid, st.grund)
+        try{ loadTradePlansFromSupabase() }catch(_){}
+        return   // ein Plan je Tick
+      }
+      if(!zsMeinPc(p)) continue
       if(termine === undefined) termine = zsTermine(now)
       const sperre = zsNewsSperre(p.mt5Baseline.zschluss, now, st.faellig, termine)
       if(sperre){
