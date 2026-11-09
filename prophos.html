@@ -4186,6 +4186,16 @@
   #ap-ids-root.ap-guestly .fcr-grid.fcr-news{flex-basis:100%;margin:4px 0 6px;grid-template-columns:minmax(0,560px)}   /* News-Kachel im Regelteil (30.10.2026) */
   #ap-ids-root.ap-guestly .fcr-news-schalter{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
   #ap-ids-root.ap-guestly .fcfd-wartet-tab{margin-top:12px;overflow-x:auto}   /* Waiting for Payout als Accounts-Tabelle (30.10.2026) */
+  /* WP3b (10.11.2026): „Neu auf Waiting for Payout (letzte 48 h)“ oben im Reiter Funded Planer → CFD — klein, Stil der Waiting-Tabelle */
+  #ap-ids-root.ap-guestly .wp3-tab{margin-top:8px}
+  #ap-ids-root.ap-guestly .wp3-tab td{padding-top:7px;padding-bottom:7px;vertical-align:top}
+  #ap-ids-root.ap-guestly .wp3-konto{all:unset;cursor:pointer;font-weight:600;color:var(--ink)}
+  #ap-ids-root.ap-guestly .wp3-konto:hover,#ap-ids-root.ap-guestly .wp3-konto:focus-visible{text-decoration:underline}
+  #ap-ids-root.ap-guestly .wp3-firma,#ap-ids-root.ap-guestly .wp3-fehlt{display:block;font-size:11px;color:var(--sub);margin-top:1px}
+  #ap-ids-root.ap-guestly .wp3-ziel{font-family:var(--mono);font-weight:600;color:var(--ink);white-space:nowrap}
+  #ap-ids-root.ap-guestly .wp3-ziel.ok{color:var(--good-ink, #15803d)}
+  #ap-ids-root.ap-guestly .wp3-ziel.nein{color:var(--danger-ink, #b91c1c)}
+  #ap-ids-root.ap-guestly tr.wp3-blink td{background:color-mix(in srgb, #817CE9 16%, transparent);transition:background .4s}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-top:12px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-karte{background:var(--g-kpi);border-radius:14px;padding:12px 14px;min-width:0}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-kopf{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--g-text);margin-bottom:4px}
@@ -17073,7 +17083,7 @@
     const PR_SCHREIB = [
       // Challenge / Funded (Futures + CFD)
       '[data-ap-ok]', '[data-ap-ok-id]', '#ap-ids-alle-ok', '[data-ap-zur]', '[data-ap-ri]', '[data-ap-id]', '[data-tpl-nachplan]', '[data-tpl-probe]', '[data-tpl-probe-alle]',
-      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-fcr-in]', '[data-fcr-sw]', '[data-fcr-edit]', '[data-fcr-save]',
+      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-wp3-zurueck]', '[data-fcr-in]', '[data-fcr-sw]', '[data-fcr-edit]', '[data-fcr-save]',
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
       '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]',
@@ -57576,7 +57586,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2126'
+  const OS_TAB_BUILD = '2026-09-22.2127'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -88533,7 +88543,8 @@
     // direkt unter dem Zeitstrahl, die alte Leiste darüber entfällt (ihr „Nachplanen"/„Jetzt planen" zieht mit)
     if(fc){ const np = x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''}>${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''
       let einst = ''; try{ einst = fcrLeisteHtml(np) }catch(e){ console.warn('[fcr] Einstellungen', e) }
-      return kopf + kpis + charts + zs + einst + listen + unten }
+      let wp3 = ''; try{ wp3 = fcfdNeuWartetHtml(u) }catch(e){ console.warn('[wp3] Neu auf Waiting', e) }   // WP3b (10.11.2026): oben zum Gegenprüfen
+      return kopf + kpis + wp3 + charts + zs + einst + listen + unten }
     // UI1b (Finn 05.11.2026: „Diese obere Einstellungsgruppe mit Bot an, Echo-Hedge … bitte alles runter in die Einstellungen packen"): im Challenge-Planer
     // steht statt der Leiste der Block „Planer · alle Firmen" — apIdsRender hängt ihn in die Karte „Planer & Hedge" (#e3-einst), solange die steht
     const oben = (!fd && !x.funded) ? apgAlleHtml(v, x) : leiste
@@ -89214,7 +89225,9 @@
       ${fcrWKopf('Planer & Hedge', 'alle Firmen · ' + (sel ? escapeHtml(sel.firma) : '–'), 'planer')}
       ${fcrWSchalter('aktiv', !!D.aktiv, 'Planer', fcrTradesText(), fcrInfo('regeln', 'Uhrzeit im Startfenster und Long/Short je Konto gewürfelt · Ziel bis Waiting = Gewinn über der Starting Balance · Konten in Waiting for Payout bekommen keinen Trade · 1-%-Regel: max_risiko_trade am Konto oder „1% RULE“ im Namen'))}
       ${fcrWSchalter('auto_bestaetigen', !!g.auto_bestaetigen, 'Selbst bestätigen', 'Vorschläge ohne Klick')}
-      ${''/* E1e (Finn 05.11.2026 ~08:30): kein Schalter „Ziel → Waiting" — Waiting setzt das Abhaken nach geprüften Ziel-Regeln; ziel_auto_wartet bleibt im Code aus */}
+      ${''/* E1e (Finn 05.11.2026 ~08:30): kein Schalter „Ziel → Waiting". WP3b (Finn 10.11.2026: „kein Schalter, wenn Ziel erreicht → ab zu Waiting for Payout,
+           kurz anzeigen zum Crosschecken“): fester Hinweis statt Schalter — gegenprüfen in der Liste „Neu auf Waiting for Payout“ oben im Reiter */}
+      <div class="wd-abl-schalter lesen" data-fcr-wp3><span><b>Ziel erreicht → Waiting for Payout${fcrInfo('wp3', 'immer, ohne Schalter — erreicht ein Konto sein Ziel, steht es danach auf Waiting for Payout und bekommt keinen Trade mehr. Die letzten 48 h stehen oben im Reiter unter „Neu auf Waiting for Payout“, dort je Konto „zurück auf Funded CFD“, falls es falsch war.')}</b><small>immer · ohne Schalter</small></span><span class="fcr-e-stand an"><i></i>immer</span></div>
       ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
       <div class="fcr-e-felder drei fcr-w-zeiten">${ad ? fcrFeld('Trades je Tag', z.trades_je_tag ?? null, { zeit: 'trades_je_tag' }, { einheit: 'je Konto', leer: '1', titel: 'bis zu so viele Trades je Konto und Tag (1–5), nie gleichzeitig; leer = 1' })
         : `<div class="fcr-e-feld"><label>Trades je Tag <small>· je Konto</small></label><div class="fcr-e-wert">${fcrTradesJeTag()}</div></div>`}${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
@@ -89552,6 +89565,113 @@
       w.length ? `<div class="fcfd-wartet-tab">${tabelle || '<div class="apg-leer" style="padding:18px 0">Tabelle nicht verfügbar</div>'}</div>` : '<div class="apg-leer" style="padding:18px 0">kein Konto wartet auf den Payout</div>',
       'Dieselbe Ansicht wie Admin → Alle Accounts, nur Funded-CFD-Konten mit „Waiting for Payout“ — Payout-Termin aus „Payout anfragbar ab“; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 1. Payout nach 21 Tagen')}</div>`
   }
+  /* NEU AUF WAITING FOR PAYOUT (WP3b, Finn 10.11.2026: „kein Schalter, wenn Ziel erreicht → ab zu Waiting for Payout, kurz anzeigen zum Crosschecken“):
+   * oben im Reiter Funded Planer → CFD alle Funded-CFD-Konten der Sicht mit accounts.waiting_payout_since in den letzten 48 h, neueste zuerst —
+   * Konto · ID · Gewinn/Ziel · seit wann · „↩ zurück auf Funded CFD“. Gewinn/Ziel aus GET /konto-ziele (dieselbe Prüfung wie Konto-Kachel/WP1:
+   * Zeile „Ziel bis Waiting“ + abhak.bereit), je Konto höchstens alle 5 min; bis dahin Gewinn = Balance − Start aus der Admin-Übersicht.
+   * Zurück: eigene ID über accWartetUmstellen (Supabase, RLS nur eigene Konten), fremde ID über POST /admin/funded-cfd-plan/waiting-zurueck. */
+  const WP3_FENSTER_MS = 48 * 3600000, WP3_TTL_MS = 5 * 60000
+  const _wp3 = { cache: {}, laeuft: {}, zurueck: {}, weg: {}, login: '', neuUhr: null }
+  // Gegenprüfung: ein Neuzeichnen für alle Antworten zusammen (nicht je Konto ein voller apIdsRender)
+  const wp3NeuZeichnen = () => { if(_wp3.neuUhr) return; _wp3.neuUhr = setTimeout(() => { _wp3.neuUhr = null; try{ if(fcfdReiterOffen()) window._apIdsRender?.() }catch(_){} }, 400) }
+  function wp3ZielLaden(id){
+    // Gegenprüfung: Antworten gelten nur für den Login, der sie geholt hat (ID-Wechsel → alles neu)
+    const login = String(currentUserId || ''); if(_wp3.login !== login){ _wp3.login = login; for(const k of Object.keys(_wp3.cache)) delete _wp3.cache[k] }
+    id = String(id || ''); if(!id || _wp3.laeuft[id]) return
+    const alt = _wp3.cache[id]; if(alt && Date.now() - alt.at < WP3_TTL_MS) return
+    _wp3.laeuft[id] = true
+    ;(async () => {
+      let neu
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+        const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        const d = await r.json().catch(() => ({}))
+        if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+        const ch = ((d.urteil && d.urteil.checks) || []).find(c => Array.isArray(c) && /^Ziel bis Waiting/.test(String(c[1] || '')))
+        const ab = d.abhak || {}
+        const wert = ch ? String(ch[2] || '').trim() : ''
+        neu = { at: Date.now(), wert: wert === '—' ? '' : wert, zielOk: ch ? ch[0] === 'ok' : null, bereit: typeof ab.bereit === 'boolean' ? ab.bereit : null,
+                grund: String((d.urteil && d.urteil.grund) || '') }
+      }catch(e){ neu = { at: Date.now(), wert: '', zielOk: null, bereit: null, grund: '', fehler: String((e && e.message) || e) } }
+      finally{ _wp3.laeuft[id] = false }
+      if(_wp3.login !== String(currentUserId || '')) return   // Login gewechselt, während die Antwort unterwegs war
+      _wp3.cache[id] = neu
+      wp3NeuZeichnen()
+    })()
+  }
+  function fcfdNeuWartetHtml(u){
+    const ad = window._admData
+    if(!ad || !Array.isArray(ad.accounts)) return ''
+    const jetzt = Date.now()
+    const w = ad.accounts.filter(r => r && r.type === 'funded_cfd' && !r.archived && r.waiting_payout_since && (!u || String(r.user_id) === String(u)))
+      .map(r => ({ r, t: Date.parse(r.waiting_payout_since) })).filter(x => isFinite(x.t) && x.t >= jetzt - WP3_FENSTER_MS && !(_wp3.weg[String(x.r.id)] && x.t <= _wp3.weg[String(x.r.id)]))
+      .sort((a, b) => b.t - a.t)
+    if(!w.length) return `<div data-apg-anker="wp3">${apgKarte('Neu auf Waiting for Payout', 'letzte 48 h · keins', '', 'Konten, die in den letzten 48 h auf Waiting for Payout gesprungen sind (Ziel erreicht) — zum Gegenprüfen')}</div>`
+    const zeile = ({ r, t }) => {
+      wp3ZielLaden(r.id)   // Gegenprüfung: immer anstoßen — TTL (5 min) und laeuft drosseln selbst, so heilt auch ein einmaliger Fehler
+      const id = String(r.id), uid = String(r.user_id || ''), z = _wp3.cache[id]
+      const bal = Number(r.balance), start = Number(r.start)
+      const gew = isFinite(bal) && bal > 0 && isFinite(start) && start > 0 ? bal - start : null
+      const gewTxt = gew == null ? '—' : `${gew < 0 ? '−' : '+'}${Math.abs(Math.round(gew)).toLocaleString('de-DE')} $`
+      const zielZelle = z && z.wert
+        ? `<span class="wp3-ziel ${z.zielOk ? 'ok' : 'nein'}">${escapeHtml(z.wert)} ${z.zielOk ? '✓' : '✗'}</span>${z.bereit === false && z.grund ? `<small class="wp3-fehlt">${escapeHtml(z.grund)}</small>` : ''}`
+        : `<span class="wp3-ziel">${escapeHtml(gewTxt)}</span><small class="wp3-fehlt">${z && z.fehler ? 'Ziel nicht lesbar: ' + escapeHtml(z.fehler.slice(0, 60)) : z ? 'kein Ziel hinterlegt' : 'Ziel lädt …'}</small>`
+      const h = Math.max(0, Math.round((jetzt - t) / 3600000))
+      const rel = h < 1 ? 'vor < 1 h' : `vor ${h} h`
+      const um = new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+      const laeuft = !!_wp3.zurueck[id]
+      return `<tr data-wp3-zeile="${escapeHtml(id)}"><td style="padding-left:20px"><button type="button" class="wp3-konto" data-wp3-oeffnen="${escapeHtml(id)}" data-wp3-uid="${escapeHtml(uid)}" title="Konto öffnen">${escapeHtml(r.name || '–')}</button><small class="wp3-firma">${escapeHtml(r.firm || '')}</small></td>
+        <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(uid)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
+        <td>${zielZelle}</td>
+        <td style="white-space:nowrap" title="Waiting for Payout seit ${escapeHtml(um)} Dubai">${escapeHtml(rel)}<small class="wp3-fehlt">${escapeHtml(um)} Dubai</small></td>
+        <td style="padding-right:20px;text-align:right;white-space:nowrap"><button type="button" class="btn btn-ghost btn-xs" data-wp3-zurueck="${escapeHtml(id)}" data-wp3-uid="${escapeHtml(uid)}"${laeuft ? ' disabled' : ''} title="Waiting for Payout leeren — Konto wieder Funded CFD, der Planer plant es wieder ein">${laeuft ? 'stellt um …' : '↩ zurück auf Funded CFD'}</button></td></tr>`
+    }
+    const tab = `<div class="fcfd-wartet-tab wp3-tab"><div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Gewinn / Ziel</th><th>Seit</th><th style="padding-right:20px"></th></tr></thead>
+      <tbody>${w.map(zeile).join('')}</tbody></table></div></div>`
+    return `<div data-apg-anker="wp3">${apgKarte(`Neu auf Waiting for Payout · ${w.length}`, 'letzte 48 h · neueste zuerst · zum Gegenprüfen', tab,
+      'Ziel erreicht → immer Waiting for Payout (kein Schalter). Gewinn / Ziel = Prüfung „Ziel bis Waiting“ der Konto-Seite (✓ erreicht, ✗ nicht) — war es falsch, „↩ zurück auf Funded CFD“')}</div>`
+  }
+  async function wp3Zurueck(btn){
+    const id = String(btn.dataset.wp3Zurueck || ''), uid = String(btn.dataset.wp3Uid || '')
+    const r = ((window._admData && window._admData.accounts) || []).find(x => String(x.id) === id)
+    if(!id || !r || _wp3.zurueck[id]) return
+    if(!confirm(`${r.name || 'Konto'} (${r.person || 'ID'}) zurück auf Funded CFD?\n\n„Waiting for Payout“ wird geleert — der Planer plant das Konto wieder ein.`)) return
+    _wp3.zurueck[id] = true; btn.disabled = true; btn.textContent = 'stellt um …'
+    let ok = false
+    try{
+      const eigen = uid === String(currentUserId) && (accounts || []).some(a => String(a.id) === id)
+      if(eigen) ok = await accWartetUmstellen(id, false)   // zeigt selbst Toast/Fehler
+      else{
+        await apdApi('POST', '/waiting-zurueck', { account_id: id }, '/admin/funded-cfd-plan')
+        ok = true
+        if(typeof atToast === 'function') atToast(`${r.name || 'Konto'}: wieder Funded CFD`)
+      }
+    }catch(e){
+      // Gegenprüfung: fehlt die Route, scheitert schon der CORS-Preflight → TypeError ohne status statt 404
+      const t = e && (e.status === 404 || e instanceof TypeError) ? `Nicht umgestellt: Backend nicht erreichbar oder Weg fehlt noch (POST /admin/funded-cfd-plan/waiting-zurueck) — ${(e && e.message) || e}` : 'Nicht umgestellt: ' + ((e && e.message) || e)
+      if(typeof atToast === 'function') atToast(t, 'end'); else alert(t)
+    }finally{
+      _wp3.zurueck[id] = false
+      if(ok){ r.waiting_payout_since = null; delete _wp3.cache[id]; _wp3.weg[id] = Date.now() }
+      try{ window._apIdsRender?.() }catch(_){}
+    }
+  }
+  function wp3Oeffnen(btn){
+    const id = String(btn.dataset.wp3Oeffnen || ''), uid = String(btn.dataset.wp3Uid || '')
+    // eigene ID: Konto-Seite; fremde ID (die Konto-Seite kennt nur eigene Konten): Zeile in „Waiting for Payout“ unten zeigen
+    if(uid === String(currentUserId) && (accounts || []).some(a => String(a.id) === id) && typeof renderAccountDetail === 'function'){
+      _detailAccountId = id; switchView('account-detail'); renderAccountDetail(); return
+    }
+    const r = ((window._admData && window._admData.accounts) || []).find(x => String(x.id) === id), name = String((r && r.name) || '').trim()
+    const root = document.getElementById('ap-ids-root'), tab = root && root.querySelector('[data-apg-anker="wartet"]')
+    // exakter Name (erster Textknoten der Namens-div, ohne Knopf/Archiv-Chip) — kein Präfix-Treffer („…1234“ gegen „…12345“)
+    const tr = name && tab ? [...tab.querySelectorAll('tbody tr')].find(z => { const d = z.querySelector('td div'); return !!d && String((d.firstChild && d.firstChild.textContent) || '').trim() === name }) : null
+    const ziel = tr || tab; if(!ziel) return
+    ziel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if(tr){ tr.classList.add('wp3-blink'); setTimeout(() => tr.classList.remove('wp3-blink'), 2400) }
+  }
+  window._wp3 = { html: fcfdNeuWartetHtml, cache: _wp3.cache, zurueck: wp3Zurueck }   // Test-Haken (Stub)
   // Unter den Listen im Reiter Funded Planer → CFD: Waiting for Payout · Firmen · Regeln (ganz unten, klappbar wie bei Winning Days)
   function fcfdUnterHtml(u){
     const ad = window._admData
@@ -89723,6 +89843,8 @@
       const t = ((window._admData && window._admData.pending_payouts) || []).find(x => String(x.id) === b.dataset.fcfdErhalten); if(!t) return
       window._admPayoutErhaltenOeffnen?.(t, { naechsterTage: 14, waitingLeeren: true, nachher: () => window._apIdsRender?.() }) }))
     root.querySelector('[data-fcfd-news]')?.addEventListener('change', e => { e.stopPropagation(); fcfdNewsSchalten(e.target.checked) })   // News-Regel (nur Admin)
+    root.querySelectorAll('[data-wp3-zurueck]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); wp3Zurueck(b) }))   // WP3b
+    root.querySelectorAll('[data-wp3-oeffnen]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); wp3Oeffnen(b) }))
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })
