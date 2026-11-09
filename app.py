@@ -17060,7 +17060,13 @@ def admin_wd_plaene():
                     body["mt5_baseline"] = {"wd_ausgleich": True}
                 # WD-SL-WÜRFEL (WS1a, 09.11.2026): JE Plan gewürfelt, NACH _wd_ohne_master_sl — ein vom Tab mitgeschickter master_sl ist oben schon verworfen,
                 # einen SL aus einer anderen Regel gibt es auf diesem Weg nicht (WD_PLAN_FELDER trägt kein mt5_baseline). Würfel-Fehler → Plan wie bisher ohne SL.
-                if sl_regel:
+                # Recoverer (Apex-WD auf NQ) und Tradeify-Ausgleich würfeln NICHT (Master 09.11.2026 ~20:15: „bestehende Regeln nicht anfassen“, Finns
+                # Antwort steht noch aus) — sie bekommen ehrlich wd_sl ohne mit Grund; soll der Würfel dort gelten, nur diesen Zweig entfernen
+                if sl_regel and (wd_ist_recoverer_plan(body) or (r or {}).get("wd_ausgleich") is True):
+                    body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl={
+                        "ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None, "regel": "sl_wuerfel",
+                        "grund": "Recoverer — kein Würfel" if wd_ist_recoverer_plan(body) else "Ausgleich — kein Würfel"})
+                elif sl_regel:
                     try:
                         wd_sl = wd_sl_fuer_plan(sl_regel, body, sl_konten.get(mid), sl_liq, sl_frueher)
                     except Exception as e:
