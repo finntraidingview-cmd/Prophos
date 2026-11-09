@@ -19183,6 +19183,23 @@ TSX_LADEN_K2_S = 10.0               # so lange wartet K2 selbst noch (die Bereit
 # die Liste des Laufs 14:44 stand noch offen, und darin las dasselbe Auge 2 Zeilen. Darum: offene Liste ohne Karten nach eigenem Klick bis
 # so lange in kurzen Schritten neu lesen, dann entscheidet die Runde wie bisher (Beweise unverändert, nur später gelesen).
 TSX_LISTE_KARTEN_S = 6.0
+# TX1: Beleg, wenn die Liste offen bleibt und das Auge trotzdem 0 Karten sieht — je Punkt unter dem Auslöser die Kette bis 8 Vorfahren
+# (tag.klasse{role}[testid]#höhe) und der Text des 4. Vorfahren, dazu alle Popover/Menü/Listbox-Container. Nur lesen, kein Klick.
+TSX_LISTE_DOM_JS = r"""(function(){
+  function k(e){ if(!e||!e.tagName) return ''; var r=e.getBoundingClientRect(); return e.tagName.toLowerCase()+'.'+String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className||'').slice(0,28)
+    +(e.getAttribute('role')?'{'+e.getAttribute('role')+'}':'')+(e.getAttribute('data-testid')?'['+e.getAttribute('data-testid').slice(0,28)+']':'')+'#'+Math.round(r.height); }
+  var b=document.querySelector('[data-testid="account-selector-input-select-account"]'), r=b?b.getBoundingClientRect():{left:60,bottom:40};
+  var out={exp:b?b.getAttribute('aria-expanded'):null, punkte:[], container:[]}, gesehen=[];
+  [[40,30],[120,60],[200,110],[120,180],[200,260]].forEach(function(d){
+    var e=document.elementFromPoint(r.left+d[0], r.bottom+d[1]); if(!e) return;
+    var kette=[], x=e, t=e; for(var i=0;i<8&&x;i++){ kette.push(k(x)); if(i===4) t=x; x=x.parentElement; }
+    out.punkte.push({d:d, kette:kette.slice(0,8), text:String(t.innerText||'').replace(/\s+/g,' ').slice(0,160)});
+  });
+  document.querySelectorAll('[role="menu"],[role="listbox"],[role="presentation"],.MuiPopover-paper,.MuiMenu-paper,.MuiPopper-root,[data-radix-popper-content-wrapper]').forEach(function(e){
+    if(out.container.length>=5) return; var rr=e.getBoundingClientRect(); if(rr.width<20||rr.height<20) return;
+    out.container.push(k(e)+':'+String(e.innerText||'').replace(/\s+/g,' ').slice(0,140));
+  });
+  return out; })()"""
 
 
 def tsx_ladeschirm(ko):
@@ -19232,6 +19249,13 @@ def tsx_konto_urteil(ko, ext):
         return "ja"
     # abgekürzt beweist nichts — auch nicht, wenn der sichtbare Teil zufällig genau die External ID ist (K1-Prüfer: …-1 vs …-1…)
     return "vielleicht" if ko.get("abgekuerzt") and _nur_alnum(ext).startswith(nr) else "nein"
+
+
+def tsx_liste_signatur(liste):
+    """REIN RECHNEND (testbar, TX1 09.11.2026): Fingerabdruck einer gelesenen Konto-Liste — Anzahl + je Karte Kennung/Endung/Abschnitt in
+    Reihenfolge. Zwei gleiche hintereinander = Liste fertig aufgebaut (der Endungs-Beweis braucht die ganze Liste). Leer → ()."""
+    return tuple((str(x.get("id") or ""), str(x.get("endung") or ""), str(x.get("abschnitt") or ""), bool(x.get("ineligible")))
+                 for x in (liste or []) if isinstance(x, dict))
 
 
 def tsx_k2_eintrag(liste, ext):
@@ -19683,19 +19707,38 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} gedrückt, Liste blieb offen, Konto nicht gewechselt — Esc, nichts gelesen.",
                              st, konto_zeilen=_zeilen(ko))
             if geklickt and not ko.get("liste") and not karten_gewartet:
-                # TX1 (09.11.2026): Liste offen, aber noch keine Karte — TopstepX füllt sie seit dem Wochen-Update erst nach dem Öffnen.
-                # Neu lesen, bis Karten da sind, die Liste zugeht oder TSX_LISTE_KARTEN_S um sind; dann die Runde von vorn (kein Klick hier).
+                # TX1 (09.11.2026): Liste offen, aber noch keine Karte — TopstepX füllt sie seit dem Wochen-Update evtl. erst nach dem Öffnen.
+                # Neu lesen, bis ZWEI Lesungen hintereinander dieselben Karten zeigen (Prüfer aa3f60cb: eine halb aufgebaute Liste — z. B. ohne
+                # den Abschnitt „Ineligible" — darf nie den Endungs-Beweis von tsx_k2_eintrag tragen), die Liste zugeht oder TSX_LISTE_KARTEN_S um
+                # sind. Kein Klick hier; danach entscheidet die Runde wie bisher.
                 karten_gewartet = True
-                t_k = time.time()
+                t_k, sig_alt, stabil = time.time(), None, False
                 while time.time() - t_k < TSX_LISTE_KARTEN_S:
                     _warte(0.5, 0.25)
                     st = s.stand()
                     k_neu = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-                    if k_neu.get("liste") or not k_neu.get("liste_offen"):
+                    if not k_neu.get("liste_offen"):
                         break
+                    sig = tsx_liste_signatur(k_neu.get("liste"))
+                    if sig and sig == sig_alt:
+                        stabil = True
+                        break
+                    sig_alt = sig
                 k_neu = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-                trail.append(f"K2: Liste offen ohne Karten — {time.time() - t_k:.1f} s neu gelesen: {len(k_neu.get('liste') or [])} Karte(n)"
-                             + ("" if k_neu.get("liste_offen") else ", Liste zu"))
+                n_k = len(k_neu.get("liste") or [])
+                trail.append(f"K2: Liste offen ohne Karten — {time.time() - t_k:.1f} s neu gelesen: {n_k} Karte(n)"
+                             + (" (zweimal gleich)" if stabil else "") + ("" if k_neu.get("liste_offen") else ", Liste zu"))
+                if k_neu.get("liste_offen") and n_k and not stabil:
+                    _cdp_esc(s, st, trail, "Konto-Liste schließen (baut sich noch auf)")
+                    return _raus("konto_nicht_erreicht", f"Konto-Liste baute sich in {TSX_LISTE_KARTEN_S:.0f} s nicht fertig auf ({n_k} Karten, "
+                                 "zwei Lesungen nie gleich) — nichts gewählt, Esc.", st, konto_zeilen=_zeilen(k_neu))
+                if k_neu.get("liste_offen") and not n_k:
+                    # Beleg für den Leser-Umbau: was liegt unter dem Auslöser, wenn die Liste offen ist (nur lesen)
+                    try:
+                        dom = s.lese_js(TSX_LISTE_DOM_JS, timeout=5)
+                        trail.append("K2 DOM offen: " + json.dumps(dom, ensure_ascii=False)[:1800])
+                    except Exception as e_dom:
+                        trail.append(f"K2 DOM offen: nicht lesbar ({type(e_dom).__name__})")
                 continue
             x, n, grund = tsx_k2_eintrag(ko.get("liste"), ext)
             if not x:

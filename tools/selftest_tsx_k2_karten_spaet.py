@@ -69,12 +69,25 @@ def main():
     ob.TSX_LISTE_KARTEN_S = 0.3
     liste = [zeile(ALT, 50), zeile(EXT, 85)]
 
-    # zu, (stabil) zu, nach Klick offen+leer, offen+leer, offen+Karten, nach Zeilen-Klick Ziel steht
-    spaet = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True), konto(ALT, True), konto(ALT, True, liste), konto(EXT), konto(EXT)]
+    # zu, (stabil) zu, nach Klick offen+leer, offen+leer, offen+Karten, offen+Karten (zweimal gleich), nach Zeilen-Klick Ziel steht
+    spaet = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True), konto(ALT, True), konto(ALT, True, liste), konto(ALT, True, liste),
+             konto(EXT), konto(EXT)]
     ok, code, msg, s, sp = lauf(ob, spaet, [(True, ""), (True, "")])
     namen = [k[0] for k in s.klicks]
-    check(ok and namen == ["Konto-Auslöser", f"Konto {EXT}"] and "Liste offen ohne Karten" in sp,
-          f"Karten kommen spät → gewartet, Zeile gedrückt, Konto gewechselt ({namen}, {code}: {msg})")
+    check(ok and namen == ["Konto-Auslöser", f"Konto {EXT}"] and "zweimal gleich" in sp,
+          f"Karten kommen spät → gewartet bis zweimal gleich, Zeile gedrückt, Konto gewechselt ({namen}, {code}: {msg})")
+
+    # Prüfer aa3f60cb: zwei Schübe — erst nur ALT, dann ALT+EXT; gewählt wird erst, wenn die volle Liste zweimal gleich gelesen ist
+    schub = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True), konto(ALT, True, [zeile(ALT, 50)]), konto(ALT, True, liste),
+             konto(ALT, True, liste), konto(EXT), konto(EXT)]
+    ok, code, msg, s, sp = lauf(ob, schub, [(True, ""), (True, "")])
+    namen = [k[0] for k in s.klicks]
+    check(ok and namen == ["Konto-Auslöser", f"Konto {EXT}"] and "2 Karte(n) (zweimal gleich)" in sp,
+          f"Karten in zwei Schüben → erst die volle Liste zählt ({namen}, {sp[-160:]})")
+
+    sig = ob.tsx_liste_signatur
+    check(sig([]) == () and sig([zeile(ALT, 50)]) != sig(liste) and sig(liste) == sig([dict(x) for x in liste]),
+          "tsx_liste_signatur: leer = (), Anzahl/Kennung zählen, gleiche Liste = gleich")
 
     nie = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True)]
     ok, code, msg, s, sp = lauf(ob, nie, [(True, "")])
