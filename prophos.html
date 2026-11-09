@@ -90374,7 +90374,7 @@
     if(_e3.laeuft) return
     _e3.laeuft = true
     // Kontoliste parallel (blockiert die Einstellungen nicht, S6-Review E3c); zeichnet nach, sobald sie da ist
-    apdApi('GET', '/konten-stand' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')).then(k => { _e3.konten = (k && k.konten) || [] })   // je Unternehmen (Finn-Foto Emin: „0 im Planer").catch(() => { _e3.konten = _e3.konten || [] }).finally(() => { try{ e3EinstZeichnen() }catch(_){} try{ const kt = document.querySelector('#e3-einst [data-e3-tt]'); if(kt) ttKontenZeichnen(kt) }catch(_){} })   // WS2b: Testkonten-Auswahl
+    apdApi('GET', '/konten-stand' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')).then(k => { _e3.konten = (k && k.konten) || [] }).catch(() => { _e3.konten = _e3.konten || [] }).finally(() => { try{ e3EinstZeichnen() }catch(_){} try{ const kt = document.querySelector('#e3-einst [data-e3-tt]'); if(kt) ttKontenZeichnen(kt) }catch(_){} })   // je Unternehmen (Finn-Foto Emin: „0 im Planer"); WS2b-Nachzug (Prüfer 09.11.2026): Kommentar stand mitten in der Zeile, .catch/.finally liefen nie → Testkonten-Auswahl blieb bei „Kontoliste lädt …"
     try{ _e3.d = await apdApi('GET', '/einstellungen' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')); _e3.fehler = '' }
     catch(e){ _e3.fehler = (e && e.status === 404) ? '' : ((e && e.message) || String(e)); if(e && e.status === 404) _e3.d = null }
     finally{ _e3.laeuft = false; _e3.at = Date.now(); e3EinstZeichnen() }   // ohne Zwang: offene Eingaben bleiben stehen (S6-Review)
