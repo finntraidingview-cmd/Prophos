@@ -19706,13 +19706,14 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 _cdp_esc(s, st, trail, "Konto-Liste nach dem Zeilen-Klick noch offen")
                 return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} gedrückt, Liste blieb offen, Konto nicht gewechselt — Esc, nichts gelesen.",
                              st, konto_zeilen=_zeilen(ko))
-            if geklickt and not ko.get("liste") and not karten_gewartet:
-                # TX1 (09.11.2026): Liste offen, aber noch keine Karte — TopstepX füllt sie seit dem Wochen-Update evtl. erst nach dem Öffnen.
+            if geklickt and not karten_gewartet:
+                # TX1 (09.11.2026): Liste nach dem EIGENEN Klick offen — TopstepX füllt sie seit dem Wochen-Update erst nach dem Öffnen (leer oder
+                # halb). Prüfer ebcdf7ec: immer erst zwei gleiche, nicht-leere Lesungen, auch wenn die erste schon Karten zeigt.
                 # Neu lesen, bis ZWEI Lesungen hintereinander dieselben Karten zeigen (Prüfer aa3f60cb: eine halb aufgebaute Liste — z. B. ohne
                 # den Abschnitt „Ineligible" — darf nie den Endungs-Beweis von tsx_k2_eintrag tragen), die Liste zugeht oder TSX_LISTE_KARTEN_S um
                 # sind. Kein Klick hier; danach entscheidet die Runde wie bisher.
                 karten_gewartet = True
-                t_k, sig_alt, stabil = time.time(), None, False
+                t_k, sig_alt, stabil = time.time(), (tsx_liste_signatur(ko.get("liste")) or None), False
                 while time.time() - t_k < TSX_LISTE_KARTEN_S:
                     _warte(0.5, 0.25)
                     st = s.stand()
@@ -19726,7 +19727,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
                     sig_alt = sig
                 k_neu = st.get("konto") if isinstance(st.get("konto"), dict) else {}
                 n_k = len(k_neu.get("liste") or [])
-                trail.append(f"K2: Liste offen ohne Karten — {time.time() - t_k:.1f} s neu gelesen: {n_k} Karte(n)"
+                trail.append(f"K2: Liste offen ({len(ko.get('liste') or [])} Karten beim ersten Lesen) — {time.time() - t_k:.1f} s neu gelesen: {n_k} Karte(n)"
                              + (" (zweimal gleich)" if stabil else "") + ("" if k_neu.get("liste_offen") else ", Liste zu"))
                 if k_neu.get("liste_offen") and n_k and not stabil:
                     _cdp_esc(s, st, trail, "Konto-Liste schließen (baut sich noch auf)")

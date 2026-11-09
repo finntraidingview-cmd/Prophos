@@ -85,6 +85,19 @@ def main():
     check(ok and namen == ["Konto-Auslöser", f"Konto {EXT}"] and "2 Karte(n) (zweimal gleich)" in sp,
           f"Karten in zwei Schüben → erst die volle Liste zählt ({namen}, {sp[-160:]})")
 
+    # Prüfer ebcdf7ec: erste Lesung nach dem Klick schon HALB gefüllt (nur ALT) → trotzdem warten, bis die volle Liste zweimal gleich ist
+    halb = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True, [zeile(ALT, 50)]), konto(ALT, True, liste), konto(ALT, True, liste),
+            konto(EXT), konto(EXT)]
+    ok, code, msg, s, sp = lauf(ob, halb, [(True, ""), (True, "")])
+    namen = [k[0] for k in s.klicks]
+    check(ok and namen == ["Konto-Auslöser", f"Konto {EXT}"] and "1 Karten beim ersten Lesen" in sp and "2 Karte(n) (zweimal gleich)" in sp,
+          f"erste Lesung halb gefüllt → nicht sofort wählen, erst volle Liste zweimal gleich ({namen}, {code}: {msg})")
+    # halb gefüllt, und die volle Liste kommt nie → Ziel nie gesehen, ehrlich raus
+    halb_nie = [konto(ALT), konto(ALT), konto(ALT), konto(ALT, True, [zeile(ALT, 50)])]
+    ok, code, msg, s, sp = lauf(ob, halb_nie, [(True, "")])
+    namen = [k[0] for k in s.klicks]
+    check(not ok and code == "konto_nicht_erreicht" and namen == ["Konto-Auslöser"], f"halbe Liste ohne Ziel → raus, kein Zeilen-Klick ({namen}, {msg})")
+
     sig = ob.tsx_liste_signatur
     check(sig([]) == () and sig([zeile(ALT, 50)]) != sig(liste) and sig(liste) == sig([dict(x) for x in liste]),
           "tsx_liste_signatur: leer = (), Anzahl/Kennung zählen, gleiche Liste = gleich")
