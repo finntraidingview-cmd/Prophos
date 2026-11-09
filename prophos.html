@@ -31142,6 +31142,23 @@
   const hedgeLiqDllFelder = lq => lq ? { liq_art: lq.liq_art || null, liq_regeln_geladen: !!lq.liq_regeln_geladen, liq_vor_pkt: lq.liq_vor_pkt || null, liq_dll: lq.liq_dll || null } : {}
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
+    // ZUFALLS-SL (WS1b-Nachzug 09.11.2026, Finn: „Fusion-Hedge schließt mit dem Master am SL wie bisher"): hat der Planer einen SL gewürfelt (mt5_baseline.wd_sl.usd)
+    // und steht master_sl am Plan, schließt der Hedge am Master-SL-Level = Einstieg ∓ master_sl ÷ (Punktwert × Kontrakte) — master_sl ist der Betrag, den Puls
+    // wirklich setzt (= wd_sl.usd). Eigene Art 'master_sl_wuerfel' (nicht 'liquidation'): Texte, Radar und hedgeSlNqEcht behandeln ihn wie einen Master-SL.
+    // Ohne wd_sl oder ohne master_sl: alles unten unverändert (Liquidation).
+    const wSlUsd = planWdSlUsd(plan), wMsl = Number(plan && plan.masterSl)
+    if(wSlUsd > 0 && wMsl > 0){
+      const wB = (plan.mt5Baseline || plan.mt5_baseline || {}).wd_sl || {}, wz = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+      const felderW = { liq_art: 'master_sl_wuerfel', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
+      if(!(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Punktwert/Kontrakte fehlen — Hedge schließt nur am TP', liq_balance: wz(wB.liq_balance) }, felderW)
+      const pktW = Math.round(wMsl / (ppl * kt) * 100) / 100
+      // das NÄHERE Level gilt (Gegenprüfung WS1b-Nachzug): der Puffer stammt aus der Planung — kamen am selben Tag Verluste dazu, kann Daily Loss/Liq vor dem SL
+      // liegen; dann schließt der Hedge wie bisher dort. Vergleich über denselben Weg ohne SL (Klon mit masterSl null → Zweig hier übersprungen).
+      const liqN = hedgeLiqLevel(Object.assign({}, plan, { masterSl: null }), einstieg, ppl, kt)
+      if(liqN && Number(liqN.sl_punkte) > 0 && Number(liqN.sl_punkte) < pktW) return liqN
+      const lvlW = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktW : einstieg + pktW) * 100) / 100 : null
+      return Object.assign({ sl_punkte: pktW, sl_level_nq: lvlW, sl_art: 'master_sl_wuerfel', liq_balance: wz(wB.liq_balance), sl_usd_hedge: wMsl, liq_quelle: 'wd_sl', liq_balance_start: wz(wB.balance) }, felderW)
+    }
     // TOPSTEP: LIQUIDATION = MLL AUS TOPSTEPX (27.10.2026, Finn: „Liq aus TopstepX-MLL statt Größe + 100"). Befund 13.–27.10.: alle 24 Topstep-
     // Winning-Days mit Fusion-Hedge standen OHNE Liq-Level („Kontogröße unbekannt" bzw. 150.100 gegen eine 0-basierte Express-Balance von
     // 7.369) — der Hedge schloss nur am TP. Express zählt 0-basiert (BAL relativ, MLL z. B. 0 bzw. −4.500), Combine absolut; MLL und Start-
@@ -31322,8 +31339,10 @@
     const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
     if(liqWd) slPunkte = liqWd.sl_punkte > 0 ? liqWd.sl_punkte : 0
     const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
-    const liqFelder = liqWd ? Object.assign(liqWd.sl_art ? { sl_art: 'liquidation', liq_balance: liqWd.liq_balance, sl_usd_hedge: liqWd.sl_usd_hedge, liq_quelle: liqWd.liq_quelle, liq_balance_start: liqWd.liq_balance_start, sl_hinweis: null }
-                                                         : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis },
+    // Zufalls-SL (WS1b-Nachzug 09.11.2026): gewürfelter Master-SL → sl_art 'master_sl_wuerfel' (Level am Master-SL), sonst wie bisher 'liquidation'
+    const slArtWd = liqWd && liqWd.liq_art === 'master_sl_wuerfel' ? 'master_sl_wuerfel' : 'liquidation'
+    const liqFelder = liqWd ? Object.assign(liqWd.sl_art ? { sl_art: slArtWd, liq_balance: liqWd.liq_balance, sl_usd_hedge: liqWd.sl_usd_hedge, liq_quelle: liqWd.liq_quelle, liq_balance_start: liqWd.liq_balance_start, sl_hinweis: null }
+                                                         : { sl_art: slArtWd, liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis },
                                             hedgeLiqDllFelder(liqWd)) : {}
     if(liqWd && liqWd.hinweis && typeof atToast === 'function') atToast(`⚠ Fusion-Hedge: ${liqWd.hinweis} (Wächter trägt das Level nach, sobald die Start-Balance gelesen ist)`, 'end')
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
@@ -35154,10 +35173,28 @@
             // Daily Loss (21.10.2026): Level ohne geladene liq_regeln gerechnet (Open vor dem ersten Laden) → einmal neu, sobald sie da sind
             if(hedgeIstWd(p)) liqRegelnLaden().catch(() => {})   // höchstens alle 60 s
             const ohneRegeln = h.liq_quelle === 'balance_start' && !h.liq_regeln_geladen && !!_liqRegeln
-            if(hedgeIstWd(p) && (h.liq_quelle !== 'balance_start' || ohneRegeln) && tvS && typeof tvS.balance_start === 'number' && Number(h.einstieg_nq) > 0){
+            // ZUFALLS-SL (WS1b-Nachzug 09.11.2026): gewürfelter Master-SL → Level am Master-SL (hedgeLiqLevel, sl_art 'master_sl_wuerfel'), nachtragen bzw. ein altes
+            // Liq-Level (Hedge von einem Tab vor diesem Stand) umstellen. hedgeLiqLevel nimmt das nähere Level — liegt Daily Loss/Liq näher, läuft der Liq-Nachtrag
+            // darunter wie bisher. Fertig = Würfel-Level steht und ist mit Start-Balance gegen die Liq geprüft (sl_wuerfel_liq_geprueft) bzw. sie fehlt noch.
+            // Ohne wd_sl: wSlW false, alles wie bisher.
+            const wSlW = hedgeIstWd(p) && planWdSlUsd(p) > 0 && Number(p.masterSl) > 0
+            const balDa = !!(tvS && typeof tvS.balance_start === 'number')
+            let wSlFertig = wSlW && h.sl_art === 'master_sl_wuerfel' && Number(h.sl_level_nq) > 0 && (h.sl_wuerfel_liq_geprueft === true || !balDa)
+            if(wSlW && !wSlFertig && Number(h.einstieg_nq) > 0){
+              const wzW = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
+              const lqW = hedgeLiqLevel(p, Number(h.einstieg_nq), wzW === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
+              if(lqW && lqW.sl_art === 'master_sl_wuerfel' && lqW.sl_level_nq > 0){
+                const steht = h.sl_art === 'master_sl_wuerfel' && Math.abs(Number(h.sl_level_nq) - lqW.sl_level_nq) < 0.005 && h.sl_wuerfel_liq_geprueft === balDa
+                if(!steht) await hedgeAmPlanSchreiben(p.id, Object.assign({ sl_level_nq: lqW.sl_level_nq, sl_punkte: lqW.sl_punkte, sl_art: 'master_sl_wuerfel', liq_balance: lqW.liq_balance, sl_usd_hedge: lqW.sl_usd_hedge,
+                  liq_quelle: 'wd_sl', liq_balance_start: lqW.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString(), sl_wuerfel_liq_geprueft: balDa,
+                  sl_level_vor_wuerfel: (h.sl_art !== 'master_sl_wuerfel' && Number(h.sl_level_nq) > 0) ? Number(h.sl_level_nq) : (h.sl_level_vor_wuerfel ?? null) }, hedgeLiqDllFelder(lqW)))
+                slL = lqW.sl_level_nq; wSlFertig = true
+              }
+            }
+            if(!wSlFertig && hedgeIstWd(p) && (h.liq_quelle !== 'balance_start' || ohneRegeln) && tvS && typeof tvS.balance_start === 'number' && Number(h.einstieg_nq) > 0){
               const wz2 = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
               const lq = hedgeLiqLevel(p, Number(h.einstieg_nq), wz2 === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
-              if(lq && lq.sl_level_nq > 0){
+              if(lq && lq.sl_level_nq > 0 && lq.sl_art !== 'master_sl_wuerfel'){   // Würfel-Level schreibt nur der Zweig oben (nie als 'liquidation')
                 await hedgeAmPlanSchreiben(p.id, Object.assign({ sl_level_nq: lq.sl_level_nq, sl_punkte: lq.sl_punkte, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() },
                   hedgeLiqDllFelder(lq), ohneRegeln ? { sl_level_vor_dll: Number(h.sl_level_nq) || null } : {}))
                 slL = lq.sl_level_nq
@@ -45951,7 +45988,7 @@
     const de = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }), zahl = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const puf = zahl(w.puffer), bal = zahl(w.balance), liq = zahl(w.liq_balance)
     const herk = puf != null ? ` · Puffer ${de(puf)} $${bal != null && liq != null ? ` (Balance ${de(bal)} − Liq ${de(liq)})` : ''}` : ''
-    if(w.ohne === true) return { ohne: true, text: 'ohne SL (Würfel)', tip: 'Zufalls-SL: diesmal kein SL gewürfelt' + herk }
+    if(w.ohne === true) return { ohne: true, text: 'ohne SL (Würfel)', tip: 'Zufalls-SL: ' + (w.grund ? String(w.grund) : 'diesmal kein SL gewürfelt') + herk }
     const usd = zahl(w.usd), pct = zahl(w.pct)
     if(!(usd > 0)) return null
     return { ohne: false, usd, pct, text: `SL ${de(usd)} $` + (pct != null ? ` (${Math.round(pct)} % Puffer)` : ''),
@@ -45960,6 +45997,14 @@
   const planWdSlChipHtml = p => { const s = planWdSl(p); return s ? ` <em class="wd-slw-chip${s.ohne ? ' ohne' : ''}" title="${escapeHtml(s.tip)}">${escapeHtml(s.text)}</em>` : '' }
   window._planWdSl = planWdSl
   window._planWdSlChipHtml = planWdSlChipHtml
+  /* GEWÜRFELTER SL AM PLAN? (WS1b-Nachzug 09.11.2026, Befund WS1a: das Frontend löschte master_sl bei WD-Plänen am Server-Schutz vorbei) → $ | null.
+   * Nur mt5_baseline.wd_sl des Plans selbst (kein Rückgriff über tradePlans): ohne=false und usd > 0. Alte WD-Pläne ohne wd_sl → null = wie bisher. */
+  function planWdSlUsd(p){
+    const b = p && (p.mt5Baseline || p.mt5_baseline), w = b && typeof b === 'object' ? b.wd_sl : null
+    const usd = w && typeof w === 'object' && w.ohne !== true ? Number(w.usd) : NaN
+    return usd > 0 ? usd : null
+  }
+  window._planWdSlUsd = planWdSlUsd   // Test-Haken
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
   let _recKonto = null
   function recovererZeichnen(){
@@ -57111,7 +57156,10 @@
     // Orbit: leerer SL wird als NULL gespeichert — sonst würde ein alter SL vom letzten
     // Trade stillschweigend mitgehen (Puls liest master_sl; NULL = Schalter AUS).
     if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
-    if((typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026)
+    if((typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)){
+      // Winning Days: nie ein SL (25.09.2026) — außer der Planer hat ihn gewürfelt (WS1b-Nachzug 09.11.2026): dann bleibt master_sl unangetastet
+      if(planWdSlUsd(plan) > 0) delete upd.master_sl; else upd.master_sl = null
+    }
     // Geplante Startzeit (22.09.2026): leer = NULL; eine neue Zeit setzt den Claim zurück.
     const _suVal = document.getElementById('tp-order-start-um')?.value || ''
     const _suDate = _suVal ? tpStartUmAusZeit(_suVal) : null
@@ -71113,7 +71161,9 @@
       // beim Planen nur einen Take Profit an"). Risiko Master bleibt reines Rechenfeld für den Multiplikator (master_risk).
       // Orbit V3 (01.10.2026, Finn: „neben Take Profit Stop Loss optional“): der Stop in TradingView ist das SL-Feld (leer = kein SL);
       // Risiko Master bleibt reine Stop-Distanz für die Lot-Rechnung (vorher war es zugleich der SL)
-      masterSl: wd ? null : v2 ? masterSlV2 : (_editingPlanId
+      // WS1b-Nachzug (09.11.2026): gewürfelter SL (mt5_baseline.wd_sl.usd) am bearbeiteten WD-Plan bleibt stehen — sonst löschte jedes Bearbeiten ihn
+      masterSl: wd ? ((p0 => (p0 && planWdSlUsd(p0) > 0) ? (p0.masterSl ?? null) : null)(_editingPlanId ? tradePlans.find(x => String(x.id) === String(_editingPlanId)) : null))
+        : v2 ? masterSlV2 : (_editingPlanId
         ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
         : null),
       // Richtung nur auf den Routen mit Jetzt-starten-Flow (28.08.2026) —
@@ -73070,7 +73120,13 @@
         }
         if(soll && wdStartUmNachziehbar(p.start_um, soll)) upd.start_um = soll   // nie in die Vergangenheit zurückziehen (14.10.2026)
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
-        if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
+        // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen. WS1b-Nachzug (09.11.2026, Befund WS1a): NICHT, wenn der Planer ihn
+        // gewürfelt hat (mt5_baseline.wd_sl.usd). _wd.daten.plaene trägt die Baseline nicht → frisch aus der DB; Lesefehler = stehen lassen (lieber ein SL zu viel)
+        if(p.master_sl != null){
+          let wdSlG = 'fehler'
+          try{ const { data: fs, error: es } = await supabase.from('trade_plans').select('wd_sl:mt5_baseline->wd_sl').eq('id', k.plan_id).maybeSingle(); if(!es) wdSlG = (fs && fs.wd_sl) || null }catch(_){}
+          if(wdSlG !== 'fehler' && !(planWdSlUsd({ mt5_baseline: { wd_sl: wdSlG } }) > 0)) upd.master_sl = null
+        }
         if(!Object.keys(upd).length) continue
         try{
           const x = await wdApi('PATCH', { id: k.plan_id, upd })
@@ -73149,6 +73205,8 @@
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_heil:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })   // wartet auf Finns Bestätigung (03.11.2026)
+    // Zufalls-SL (WS1b-Nachzug 09.11.2026): Rückfall und Selbstheilung (der alte Plan ist dann gelöscht, seine Würfel-Werte gibt es nirgends mehr) ehrlich ohne SL
+    { const wSl = wdSlwRueckfall(_wd.regeln); if(wSl) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_sl: wSl }) }
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
     if(error){ supabase.from('user_settings').delete().eq('user_id', currentUserId).eq('key', claimKey).then(() => {}, () => {}); return { fehler: error.message } }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
@@ -73859,7 +73917,8 @@
       if(s.anteil == null || s.anteil < 0 || s.anteil > 100) return `Zeile ${i + 1}: Anteil muss zwischen 0 und 100 % liegen.`
       if(s.ohne) continue
       if(s.von == null || s.bis == null) return `Zeile ${i + 1}: von und bis % des Puffers eintragen.`
-      if(!(s.von > 0) || s.bis > 100 || !(s.von < s.bis)) return `Zeile ${i + 1}: SL von muss größer als 0 und kleiner als bis sein (bis höchstens 100 % des Puffers).`   // von 0 = Stopp fast am Einstieg
+      // von 0 = Stopp fast am Einstieg; bis 100 = SL genau an der Liq — das Backend nimmt nur bis < 100 an (WS1a-Prüfer 09.11.2026)
+      if(!(s.von > 0) || !(s.bis < 100) || !(s.von < s.bis)) return `Zeile ${i + 1}: SL von muss größer als 0 und kleiner als bis sein, bis höchstens 99 % des Puffers.`
     }
     const su = wdSlwSumme(regel)
     return Math.abs(su - 100) > 0.05 ? `Anteile ergeben ${su.toLocaleString('de-DE')} % — sie müssen zusammen genau 100 % ergeben.` : ''
@@ -73883,7 +73942,7 @@
     if(hinweis == null) hinweis = _wd.slwHinweis || ''   // „SQL fehlt" bleibt stehen, auch wenn Zeilen dazukommen/wegfallen
     const an = document.getElementById('wd-slw-an'); if(an) an.checked = !!regel.an
     const n = regel.stufen.length, farbe = i => i === 0 ? 'var(--sub-2)' : `hsl(${Math.round(40 - 40 * (n > 2 ? (i - 1) / (n - 2) : 0))} 70% 52%)`
-    const feld = (a, i, v, tip) => `<input type="number" class="input mono" data-wd-slw-${a}="${i}" value="${v == null ? '' : v}" min="0" max="100" step="1" title="${tip}">`
+    const feld = (a, i, v, tip) => `<input type="number" class="input mono" data-wd-slw-${a}="${i}" value="${v == null ? '' : v}" min="0" max="${a === 'a' ? 100 : 99}" step="1" title="${tip}">`
     box.innerHTML = `${hinweis ? `<div class="kf" style="margin-bottom:8px;color:var(--warn-ink, #b45309)">${escapeHtml(hinweis)}</div>` : ''}<table class="wd-staffel-tab"><thead><tr class="wd-stufe kopf"><th></th><th>Anteil %</th><th>SL von %</th><th>bis %</th><th title="Beispiel: Puffer ${wdDe(WD_SLW_BSP.balance - WD_SLW_BSP.liq)} $">bei ${wdDe(WD_SLW_BSP.balance - WD_SLW_BSP.liq)} $</th><th></th></tr></thead><tbody>`
       + regel.stufen.map((s, i) => { const ohne = i === 0
         return `<tr class="wd-stufe"${ohne ? ' data-wd-slw-ohne="1"' : ''}><td><span class="balken" style="background:${farbe(i)}"></span></td>
@@ -73902,7 +73961,7 @@
   document.getElementById('wd-slw-add')?.addEventListener('click', () => {
     const r = wdSlwLesen(), letzte = r.stufen.filter(s => !s.ohne).pop(), ab = letzte && letzte.bis != null ? letzte.bis : 10
     if(!r.stufen.length) return   // Tabelle noch nicht gezeichnet — sonst würde die neue Zeile zur „kein SL"-Zeile
-    r.stufen.push({ anteil: 0, von: ab, bis: Math.min(100, ab + 10) }); _wd.slwDirty = true; wdSlwRender(r)
+    r.stufen.push({ anteil: 0, von: Math.min(98, ab), bis: Math.min(99, ab + 10) }); _wd.slwDirty = true; wdSlwRender(r)
   })
   async function wdSlwSpeichern(){
     if(await wdNurGruppe()) return wdSay('Zufalls-SL gilt für alle IDs — nur Hermann Technologies.', 'err')   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
@@ -73920,6 +73979,22 @@
   }
   document.getElementById('wdSlwSave')?.addEventListener('click', () => wdSlwSpeichern().catch(e => wdSay('Zufalls-SL: ' + (e.message || e), 'err')))
   window._wdSlwRender = wdSlwRender   // Test-Haken (Stub ohne Login)
+  /* ZUFALLS-SL IM RÜCKFALL DES PC-TABS (WS1b-Nachzug 09.11.2026, Befund WS1a: wdPlanAnlegen legt den Plan selbst an, am Server-Würfel vorbei). Der Puffer müsste
+   * exakt app.py wd_sl_fuer_plan sein (hf_wd_master_verlust über liq_regel_felder inkl. Konto-Boden, Balance nur nach der Nachlesung, frühere Trades des Tages) —
+   * die Hedge-Rechnung des Tabs (hedgeLiqLevel: Größe + 100 bzw. Daily Loss) ist nicht dieselbe. Lieber ehrlich ohne SL als ein SL auf anderem Puffer:
+   * Würfel an → wd_sl {ohne: true, grund 'Rückfall ohne Würfel'}; Würfel aus (Spalte fehlt/null/an aus) → nichts, wie bisher. An/Aus wie app.py wd_sl_wuerfel_regel. */
+  function wdSlwRegelAn(roh){
+    if(roh == null) return false
+    if(typeof roh === 'string'){ try{ roh = JSON.parse(roh) }catch(_){ return true } if(roh == null) return false }   // kaputter Text → Standard = an
+    if(typeof roh !== 'object' || Array.isArray(roh) || !('an' in roh)) return true                                        // kein Objekt → Standard; ohne Schlüssel = gemeint = an
+    const an = roh.an
+    return !(an === null || an === false || an === 0 || (typeof an === 'string' && ['false', 'aus', 'nein', '0', 'off', 'no', ''].includes(an.trim().toLowerCase())))
+  }
+  function wdSlwRueckfall(regeln){
+    if(!regeln || !wdSlwRegelAn(regeln.sl_wuerfel)) return null
+    return { ohne: true, stufe: null, pct: null, usd: null, puffer: null, balance: null, liq_balance: null, regel: 'sl_wuerfel', grund: 'Rückfall ohne Würfel' }
+  }
+  window._wdSlwRueckfall = wdSlwRueckfall   // Test-Haken
   // Kopfzeile: Chip AN/AUS + ein Satz mit dem nächsten Schritt
   function wdStatus(){
     const r = _wd.regeln || {}, chip = document.getElementById('wd-auto-chip'), txt = document.getElementById('wd-status-text')
