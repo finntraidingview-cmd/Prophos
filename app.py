@@ -13232,6 +13232,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # B14/F22 (27.09.2026): Winning Days → Liquidations-Level als „SL" (100 %, Start-Balance − (Größe + 100 $)), sonst master_sl
         "sl_level_nq": slz["sl_level_nq"], "sl_art": slz["sl_art"], "liq_balance": slz["liq_balance"], "liq_quelle": slz["liq_quelle"],
         "sl_hinweis": slz["sl_hinweis"],
+        # WD-SL-WÜRFEL (WS1a, 09.11.2026, Bitte WS1b): gewürfelter SL des Plans für den Chip „SL … $ (… % Puffer)" bzw. „ohne SL (Würfel)" — auch fremde IDs
+        "wd_sl": base.get("wd_sl") if isinstance(base.get("wd_sl"), dict) else None,
         "schliesst_bei_nq": _wd_num((hedge or {}).get("schliesst_bei_nq")) or None,
         "level_quelle": ("hedge" if _wd_num((hedge or {}).get("tp_level_nq")) else ("einstieg" if einstieg is not None else None)),
         "master_pl": mpl,
@@ -16888,7 +16890,8 @@ def admin_wd_plaene():
                                   # richtung_konflikt (30.10.2026, S7 Richtung je Konto): am Start gedrehte Pläne dreht wdPlaeneNachziehen
                                   # nicht auf die Konto-Richtung zurück
                                   "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt,"
-                                  "hand_werte_at,master_firm,anz_frei:hedge_freigabe_at",   # WD-Zeile von Hand (02.11.2026): Sperre fürs Nachziehen + Popup
+                                  "hand_werte_at,master_firm,anz_frei:hedge_freigabe_at,"   # WD-Zeile von Hand (02.11.2026): Sperre fürs Nachziehen + Popup
+                                  "wd_sl:mt5_baseline->wd_sl",   # WD-SL-WÜRFEL (WS1a, 09.11.2026): Chip „SL … $ (… % Puffer)" in den WD-Zeilen, auch fremde IDs
                         "id": f"in.({chunk})"})
             # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
             # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
@@ -16904,7 +16907,7 @@ def admin_wd_plaene():
                 offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,route,notes,planned_for,start_um,start_um_gestartet_at,"
                                                           "orbit_gesendet_at,ended_at,master_pl,master_tp,master_sl,master_risk,slave_risk,"
                                                           "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at,"
-                                                          "master_firm,auto_plan,auto_bestaetigt_at",
+                                                          "master_firm,auto_plan,auto_bestaetigt_at,wd_sl:mt5_baseline->wd_sl",
                                                 "status": "in.(planned,open)"})
                 if sicht_get is not None:   # Admin-Gruppen (08.10.2026): belegt/plaene_tag/richtung_fest/Aufräumen nur in der Sicht
                     offen = [o for o in offen if str(o.get("user_id")) in sicht_get]
