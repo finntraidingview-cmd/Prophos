@@ -15161,7 +15161,7 @@
                    kann"): Regeln wie der Haken im Trades-Dialog (tcKontoUmPrepare), sichtbar nur, wenn sie passen; das Backend stellt um -->
               <label class="tc-status-opt" id="mwd-erl-status-waiting" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="waiting">
-                <span style="color:var(--ink)">⏳ Waiting for Payout — Konto bleibt, wartet auf Payout</span>
+                <span style="color:var(--ink)">⏳ Waiting for Payout — Konto bleibt, wartet auf Payout <span id="mwd-erl-waiting-hint" style="font-size:11px;color:var(--sub-2)"></span></span>
               </label>
               <label class="tc-status-opt" id="mwd-erl-status-wd" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="winning_days">
@@ -37710,6 +37710,27 @@
   let _mwdErlAb2 = null   // AB2 (05.11.2026): {konto_id, typ, name, unter} eines Funded-CFD-Plans des Funded-Planers (AB2c) → Abhak-Strahl nach dem Klick
   let _mwdErlChallenge = false   // AB2c (05.11.2026): Challenge/Phase → still abhaken, kein „Erledigt"-Toast unten rechts
   let _mwdErlWdhAn = false, _mwdErlWdhAngefasst = false   // „Dieser Trade war ein Winning Day" (30.10.2026): sichtbar / von Hand angefasst
+  // WP1 (09.11.2026): Payout-Urteil zum offenen Popup (Promise aus window._wpUrteil oder null), Zähler je Öffnen (eine späte Antwort gilt nur für genau dieses Öffnen,
+  // auch wenn derselbe Plan zweimal geöffnet wird) und ob Finn die Konto-Status-Wahl selbst angefasst hat (dann ändert das Urteil nichts mehr)
+  let _mwdErlWp = null, _mwdErlNr = 0, _mwdErlStatusAngefasst = false
+  // Ein Klick wartet gerade auf das Urteil (bis wann, ms): die Takte (wdlVorgemerktTick/wdlRestVorgaengerTick) öffnen solange nichts Neues — sonst verfiele die wartende
+  // Abhakung still (Fremd-Review). Läuft von selbst ab (wpUrteil gibt nach WP_URTEIL_MS spätestens null zurück).
+  let _mwdErlWpLaeuftBis = 0
+  // click statt change: auch ein Klick auf die schon gewählte Zeile („Nichts ändern" bewusst bestätigt) zählt als Finns Wahl
+  document.querySelectorAll('input[name="mwd-erl-status"]').forEach(rb => rb.addEventListener('click', e => { if(e.isTrusted) _mwdErlStatusAngefasst = true }))
+  /* Urteil anwenden: nur zwischen „Nichts ändern" und „⏳ Waiting for Payout", nie über geblowt/bestanden/Winning Days und nie über eine Wahl von Finn.
+   * bereit → ⏳ vorausgewählt; nicht bereit → zurück auf „Nichts ändern" (die schnelle Rechnung Balance ≥ ziel_usd kennt weder das feste Ziel des Zyklus noch
+   * Consistency/Gewinntage — ein zu frühes Waiting hält den Funded-CFD-Planer an), mit dem fehlenden Punkt als Hinweis. u null → nichts ändern. */
+  function mwdErlWpAnwenden(u){
+    if(!u || u.wartet || _mwdErlStatusAngefasst) return
+    const z = document.getElementById('mwd-erl-status-waiting'); if(!z || z.style.display === 'none') return
+    const akt = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+    if(akt !== 'none' && akt !== 'waiting') return
+    const rb = document.querySelector(`input[name="mwd-erl-status"][value="${u.bereit ? 'waiting' : 'none'}"]`); if(rb) rb.checked = true
+    const h = document.getElementById('mwd-erl-waiting-hint')
+    if(h) h.textContent = u.bereit ? '· Payout-Ziel erreicht — vorausgewählt' : (u.grund ? '· ' + u.grund : '')
+    mwdErlStatusUI()
+  }
   function mklWdErledigtOeffnen(pid, extra, opts){
     _mwdErlSicht = !!(opts && opts.sicht)   // jedes Öffnen setzt neu — nur die Radar-Knöpfe geben sicht mit
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
@@ -37725,6 +37746,7 @@
     const eigen = mklWdEigenerPlan(pid)
     // Ein Klick auf einem eigenen Plan (A1 03.11.2026): erst die Vorbelegung des Radar-Dialogs prüfen, gebucht wird über Railway wie bei fremden Plänen; passt sie nicht, Trades-Dialog wie bisher
     const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
+    _mwdErlNr++; _mwdErlWpLaeuftBis = 0   // WP1 (Fremd-Review): jedes Öffnen — auch der Trades-Dialog unten — macht ein noch wartendes Urteil eines früheren Ein Klicks ungültig
     if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
     // AB2: Abhak-Strahl (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person) — seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
@@ -37822,6 +37844,12 @@
       const rb = z.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
       if(!an && rb && rb.checked && keins) keins.checked = true
     })
+    // WP1 (09.11.2026): Payout-Urteil nachladen (mwdErlWpAnwenden) — nur Funded CFD (Zeile ⏳ sichtbar), noch nicht auf Waiting
+    const _wpNr = ++_mwdErlNr
+    _mwdErlStatusAngefasst = false
+    { const h = document.getElementById('mwd-erl-waiting-hint'); if(h) h.textContent = '' }
+    _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function') ? window._wpUrteil(pw.konto_id) : null
+    if(_mwdErlWp) _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
     // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
     _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
     const wdh = document.getElementById('mwd-erl-wdh'), wdhCb = document.getElementById('mwd-erl-wdh-cb')
@@ -37843,7 +37871,23 @@
     // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
     if(opts && opts.einKlick){
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
-      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
+      const ruhig = (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked
+      // WP1 (09.11.2026): Funded CFD — erst das Payout-Urteil abwarten. Am Ziel nie still abhaken: Popup mit ⏳ vorausgewählt (eigener Plan: Trades-Dialog, der fragt
+      // selbst), still ohne Klick gar nicht (die Zeile bleibt für Finns Klick). Nicht am Ziel oder nicht lesbar → Ein Klick wie bisher.
+      if(ruhig && _mwdErlWp){
+        _mwdErlWpLaeuftBis = Date.now() + 8000
+        _mwdErlWp.then(u => {
+          if(_wpNr !== _mwdErlNr || _mwdErlId !== String(pid)) return
+          _mwdErlWpLaeuftBis = 0
+          _wdlEinKlickAt = Date.now()   // Doppelklick-Sperre (600 ms) ab dem Moment, in dem die Zeile wirklich wandert — nicht ab dem Klick vor dem Urteil
+          if(!(u && u.bereit && !u.wartet)){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
+          if(opts.nurStill){ _mwdErlId = null; return }
+          if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }
+          document.getElementById('mwdErledigtModal')?.classList.add('open')
+        })
+        return
+      }
+      if(ruhig){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
       if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
     }
@@ -39986,6 +40030,7 @@
   let _wdlRestRecht = { at: 0, ok: false }
   function wdlRestVorgaengerTick(){
     if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    if(Date.now() < _mwdErlWpLaeuftBis) return   // WP1: ein Ein Klick wartet noch auf das Payout-Urteil
     if(Date.now() - _wdlRestRecht.at > 300000){
       _wdlRestRecht.at = Date.now()
       Promise.resolve().then(() => typeof window._planerSchreiben === 'function' ? window._planerSchreiben() : false).then(ok => { _wdlRestRecht.ok = ok === true }, () => { _wdlRestRecht.ok = false })
@@ -40019,6 +40064,7 @@
   window._wdlRestVorgaengerTick = wdlRestVorgaengerTick   // Test-Haken
   function wdlVorgemerktTick(){
     if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    if(Date.now() < _mwdErlWpLaeuftBis) return   // WP1: ein Ein Klick wartet noch auf das Payout-Urteil
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
     if(!t) return
     _wdlVmVersuch.set(wdlTid(t), Date.now())
@@ -44902,6 +44948,36 @@
     else { const el = document.getElementById('k1-ziele'); if(el) el.innerHTML = `<div class="k1-karte"><div class="k1-leer">Ziele nicht ladbar — ${escapeHtml(c.fehler || '')}</div></div>` }
     k1BalNachtragen(id)
   }
+  /* WP1 PAYOUT-URTEIL BEIM ABHAKEN (Finn 09.11.2026: „Wenn ich einen Funded-Account, der sein Ziel erreicht hat, abhake, dann will ich, dass der automatisch zu
+   * ‚Waiting for Payouts' kommt … allgemein, wenn man Accounts abhakt, die ihr Ziel erreicht haben“). Belegt 09.11.2026: von 11 Funded-CFD-Abhakungen am Ziel
+   * (14 Tage) liefen 4 ohne Waiting durch — der Trades-Dialog wählte nur mit geladenem Radar vor (window._wdlFcfdZielVonPlan), der Radar nur über Balance ≥ ziel_usd
+   * (unterer Wert der Spanne, ohne Consistency). Jetzt fragen beide Dialoge zusätzlich dasselbe Urteil wie Konto-Kachel, Abhak-Strahl und Admin → Payouts:
+   * GET /konto-ziele → abhak.bereit (Ziel + Consistency + Gewinntage, app.py kz_rechnen). Immer frisch (der Trade ist gerade zu Ende, ein 60-s-Stand wäre vor dem
+   * Trade), Ergebnis landet für die Konto-Seite in _k1.cache. Nur Vorauswahl — geschrieben wird erst beim Abhaken über die bestehenden Wege.
+   * → Promise<{bereit, wartet} | null> (null = nicht lesbar oder kein Funded CFD → die bisherige Vorauswahl gilt). */
+  // Zeitgrenze (Fremd-Review): hängt Railway, gilt nach WP_URTEIL_MS „nicht lesbar" (null) — der Ein Klick speichert dann wie bisher statt still zu verpuffen
+  const WP_URTEIL_MS = 5000
+  function wpUrteil(id){
+    const ctrl = new AbortController()
+    let uhr = null
+    const zeit = new Promise(r => { uhr = setTimeout(() => { try{ ctrl.abort() }catch(_){}; r(null) }, WP_URTEIL_MS) })
+    return Promise.race([wpUrteilHolen(id, ctrl.signal), zeit]).finally(() => clearTimeout(uhr))
+  }
+  async function wpUrteilHolen(id, signal){
+    id = String(id || ''); if(!id) return null
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return null
+      const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal })
+      const d = await r.json().catch(() => null)
+      if(!r.ok || !d || d.ok === false) return null
+      _k1.cache[id] = { at: Date.now(), d }
+      const ab = d.abhak
+      if(!ab || String(d.typ || '') !== 'funded_cfd') return null
+      return { bereit: !!ab.bereit, wartet: !!ab.wartet, grund: ab.bereit ? '' : String((d.urteil && d.urteil.grund) || '') }   // grund z. B. „fehlt: Consistency ≤ 40 %“
+    }catch(_){ return null }
+  }
+  window._wpUrteil = wpUrteil
   // Balance „—" in der alten Stats-Reihe: die Detailseite las nur TSX/MT5/Duplikum/Copier — Railway wählt wie überall (acc_balance_wahl, inkl. TradingView)
   function k1BalNachtragen(id){
     const d = _k1.cache[id] && _k1.cache[id].d, w = document.getElementById('ad-bal-wert')
@@ -76506,9 +76582,13 @@
    * Wert; nie gesetzt → Faustregel wie im Backend (_hq_typ_trade): Master-Risiko < 1.000 $, ohne Risiko |Master-P&L|. */
   /* Konto gleich umstellen (29.10.2026): Bedingung wie accWdToggleHtml — Funded einer Futures-Firma → Winning Days, Funded CFD ohne
    * Waiting → Waiting for Payout; Master-Konto des Plans, nie bei Polar. Haken steht immer aus. */
+  // WP1 (09.11.2026): Zähler je Vorbereiten (eine späte Urteils-Antwort gilt nur für genau dieses Öffnen) + ob Finn den Haken selbst angefasst hat
+  let _tcKuNr = 0, _tcKuAngefasst = false
+  document.getElementById('tc-konto-um')?.addEventListener('change', e => { if(e.isTrusted) _tcKuAngefasst = true })
   function tcKontoUmPrepare(p){
     const wrap = document.getElementById('tc-konto-um-wrap'), cb = document.getElementById('tc-konto-um')
     const lbl = document.getElementById('tc-konto-um-label'), hint = document.getElementById('tc-konto-um-hint')
+    const nr = ++_tcKuNr; _tcKuAngefasst = false
     if(!wrap || !cb || !lbl) return
     cb.checked = false; cb.dataset.ziel = ''; wrap.hidden = true
     const a = p && p.route !== 'polar' ? (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) : null
@@ -76519,9 +76599,19 @@
       if(hint) hint.textContent = `${a.name} — Big Trade gewonnen, dieselbe Konto-Zeile wird zum Winning-Days-Konto.`
     }else if(a.type === 'funded_cfd' && !a.waitingPayoutSince){
       cb.dataset.ziel = 'waiting'; lbl.textContent = 'Konto jetzt zu Waiting for Payout'
-      if(hint) hint.textContent = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
+      const basis = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
+      if(hint) hint.textContent = basis
       // Ziel erreicht (30.10.2026): vorausgewählt wie im Radar-Popup; ohne Radar-Daten bleibt der Haken aus
       try{ if(window._wdlFcfdZielVonPlan(p.id)){ cb.checked = true; if(hint) hint.textContent += ' Ziel erreicht — vorausgewählt.' } }catch(_){}
+      // WP1 (09.11.2026, belegt: 4 von 11 Ziel-Abhakungen ohne Waiting, weil hier ohne geladenen Radar nie vorausgewählt wurde): dasselbe Payout-Urteil wie
+      // Konto-Kachel/Abhak-Strahl (window._wpUrteil → /konto-ziele abhak.bereit, Ziel + Consistency + Gewinntage) entscheidet, sobald es da ist — auch ohne Radar.
+      // Nie über Finns eigenen Klick, nur solange dasselbe Popup für denselben Plan offen ist; nicht lesbar → die Vorauswahl oben bleibt.
+      if(typeof window._wpUrteil === 'function') window._wpUrteil(a.id).then(u => {
+        if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
+        if(!document.getElementById('tradeCompleteModal')?.classList.contains('open')) return
+        cb.checked = u.bereit
+        if(hint) hint.textContent = basis + (u.bereit ? ' Payout-Ziel erreicht (Ziel + Consistency) — vorausgewählt.' : (u.grund ? ` Payout-Ziel noch nicht erreicht (${u.grund}).` : ''))
+      })
     }else return
     wrap.hidden = false
   }
@@ -77682,6 +77772,7 @@
 
   document.getElementById('tradeCompleteSave')?.addEventListener('click', async () => {
     if(!_completingPlanId) return
+    _tcKuNr++   // WP1 (Fremd-Review): ein spätes Payout-Urteil ändert den Haken „Waiting for Payout" nach dem Klick nie mehr — es gilt, was Finn beim Klick sah
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
     if(!p) return
 
