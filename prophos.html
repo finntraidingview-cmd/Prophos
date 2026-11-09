@@ -4951,6 +4951,15 @@
   #adm-pane-wd .wd-staffel-tab td:first-child,#adm-pane-wd .wd-staffel-tab th:first-child{width:5px;padding-right:10px}
   #adm-pane-wd .wd-staffel-tab td:last-child,#adm-pane-wd .wd-staffel-tab th:last-child{width:24px;padding-right:0;text-align:right}
   #adm-pane-wd .wd-staffel-tab td.bis{color:var(--sub);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;width:100%}
+  /* ZUFALLS-SL (WS1b, Finn 09.11.2026): Karte unter den Einstellungen nutzt die Staffel-Tabelle; Eingaben schmaler, „aus" blass wie die Hedge-Felder */
+  #adm-pane-wd #wd-slw-karte{margin-top:14px}
+  #adm-pane-wd #wd-slw-karte .wd-stufe .input{width:70px}
+  #adm-pane-wd #wd-slw-body.aus{opacity:.5}
+  #adm-pane-wd .wd-slw-summe{font-size:12px;color:var(--sub)}
+  #adm-pane-wd .wd-slw-summe.falsch{color:var(--danger);font-weight:600}
+  /* Zufalls-SL am Plan (Radar, Plan-Karte, WD-Zeilen): „SL 2.280 $ (15 % Puffer)" rot, „ohne SL (Würfel)" grau — Maße wie .wdl-rot */
+  .wd-slw-chip{display:inline-block;margin:0 0 0 6px;padding:1px 6px;border-radius:4px;background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger-ink, #b91c1c);font-size:10px;font-weight:600;font-style:normal;letter-spacing:.02em;vertical-align:1px;white-space:nowrap}
+  .wd-slw-chip.ohne{background:color-mix(in srgb, var(--sub) 12%, transparent);color:var(--sub)}
   #adm-pane-wd .wd-stufe .balken{display:block;width:5px;height:26px;border-radius:3px}
   #adm-pane-wd .wd-stufe .input{font-size:13px;padding:0 8px;text-align:right;width:92px;height:30px;box-sizing:border-box}
   #adm-pane-wd .wd-stufe .input[data-wd-se]{width:76px}
@@ -13427,6 +13436,19 @@
               </div>
               </div>
             </div>
+            <!-- ZUFALLS-SL JE TRADE (WS1b, Finn 09.11.2026 abends „bau das Ganze" — Anlass: Rally zur Eröffnung, 4 Winning Days zerbröselt): der Planer würfelt je
+                 WD-Trade eine Zeile (Anteil %) und darin den SL zufällig zwischen von und bis % des Puffers (Balance vor dem Trade − Liq-Balance).
+                 Speichert wd_farmer_regeln.sl_wuerfel (id 1) — eigene Verdrahtung (wdSlwRender / wdSlwSpeichern), außerhalb von .wd-set-grid. -->
+            <div class="wd-set-card" id="wd-slw-karte">
+              <h4><span>Zufalls-SL (je Trade gewürfelt)<span class="h4sub">Anteil % · SL von–bis % des Puffers (Puffer = Balance − Liq)</span></span> <button class="btn btn-ghost btn-xs" id="wdSlwSave">Speichern</button></h4>
+              <label class="wd-abl-schalter"><span><b>Zufalls-SL</b><small>aus = wie bisher, Winning Days laufen ohne SL</small></span><input type="checkbox" id="wd-slw-an"></label>
+              <div id="wd-slw-body"></div>
+              <div style="display:flex;gap:10px;margin-top:8px;align-items:center">
+                <button type="button" class="btn btn-ghost btn-xs" id="wd-slw-add">+ Zeile</button>
+                <span class="wd-slw-summe mono" id="wd-slw-summe"></span>
+              </div>
+              <div class="kf wd-fuss" id="wd-slw-bsp"></div>
+            </div>
           </div>
           <!-- Verlauf ausgeblendet (Finn 08.10.2026: „‚Verlauf (7 Tage)' … ist hässlich und bringt nichts, weg") — Funktion wdVerlauf und Daten bleiben, nur der Kasten ist versteckt und wird nicht mehr geladen -->
           <div class="panel" hidden>
@@ -16907,7 +16929,8 @@
       '#wdWuerfel', '#wdSave', '#wdRiskAlle', '#wdRegelnSave', '#wdNdAlle', '#wdHedgeSave', '#wdHedgeSave2', '#wd-staffel-reset', '#wd-staffel-add', '#ws-knopf',
       '[data-wd-dir]', '[data-wd-flip]', '[data-wd-zeit]', '[data-wd-tp]', '[data-wd-sl]', '[data-wd-sx]', '[data-wd-se]', '[data-wd-sv]', '[data-wd-konto]', '[data-wd-id-alle]',
       '[data-wd-heute]', '[data-wd-heute-rein]', '[data-wd-rauf]', '[data-wd-runter]', '[data-wd-drag]', '[data-wd-aus-weg]', '[data-wd-nd-rein]', '[data-wd-ueb-rein]', '[data-wd-ue-alle]',
-      '[data-wd-fu]', '[data-wd-kt]', '[data-wd-staffel-wahl]', '#wd-aus-add', '#wd-aus-wahl', '#adm-pane-wd .wd-set-grid input', '#adm-pane-wd .wd-set-grid select'
+      '[data-wd-fu]', '[data-wd-kt]', '[data-wd-staffel-wahl]', '#wd-aus-add', '#wd-aus-wahl', '#adm-pane-wd .wd-set-grid input', '#adm-pane-wd .wd-set-grid select',
+      '#wd-slw-karte input', '#wd-slw-karte button'   // Zufalls-SL (WS1b 09.11.2026) liegt unter .wd-set-grid, nicht darin
     ].join(', ')
     // Rückfall über den Knopftext (Knöpfe ohne eigenes Merkmal: Würfeln je ID, Abhaken, Manuell, Rest zurück, Hedge zu …)
     const PR_TEXT = /^(🎲|✓ ?bestätig|bestätig|↶|zurück|🗑|lösch|jetzt planen|nachplanen|so planen|jetzt ausgleichen|neu starten|erledigt|abhaken|manuell|rest zurück|hedge zu|würfeln|speichern|freigeben)/i
@@ -40626,7 +40649,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlHerkunftChip(t, 'n')}${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${window._kontoRecoveryChipHtml?.(t.konto_id, (t.konto || {}).name) || ''}${wdlHerkunftChip(t, 'u')}${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlHerkunftChip(t, 'n')}${wdlSltpChip(t)}${window._planWdSlChipHtml?.(t) || ''}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${window._kontoRecoveryChipHtml?.(t.konto_id, (t.konto || {}).name) || ''}${wdlHerkunftChip(t, 'u')}${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -45915,6 +45938,28 @@
     : kontoRecoveryChipHtml(p && (p.masterAccountId || p.master_account_id || p.konto_id), p && (p.masterName || p.master_name))
   window._planRecovererChipHtml = planRecovererChipHtml
   window._planIstRecoverer = planIstRecoverer
+  /* ZUFALLS-SL AM PLAN (WS1b, Finn 09.11.2026 abends — Anlass: Rally zur Eröffnung, 4 Winning Days zerbröselt): der Planer würfelt je WD-Trade aus
+   * wd_farmer_regeln.sl_wuerfel und schreibt das Ergebnis nach mt5_baseline.wd_sl = {ohne, stufe, pct, usd, puffer, balance, liq_balance, regel}.
+   * Liest beide Schreibweisen (Plan im Tab p.mt5Baseline, Server-Zeile mt5_baseline bzw. wd_sl direkt). Radar-Zeilen von /admin/live-trades tragen
+   * die Baseline nicht — dort der eigene Plan aus tradePlans, sonst nichts. Fehlt wd_sl (alte Pläne) → null, die Anzeige bleibt wie bisher. */
+  function planWdSl(p){
+    if(!p || typeof p !== 'object') return null
+    const vonPlan = x => { const b = x && (x.mt5Baseline || x.mt5_baseline); return (b && typeof b === 'object' && b.wd_sl && typeof b.wd_sl === 'object') ? b.wd_sl : null }
+    let w = vonPlan(p) || ((p.wd_sl && typeof p.wd_sl === 'object') ? p.wd_sl : null)   // Zahl wd_sl = Konto-Spalte „Risiko Master", nie ein Plan-SL
+    if(!w && !p.mt5Baseline && !p.mt5_baseline){ try{ const id = String(p.plan_id || p.id || ''); if(id) w = vonPlan((tradePlans || []).find(x => String(x.id) === id)) }catch(_){} }
+    if(!w) return null
+    const de = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }), zahl = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    const puf = zahl(w.puffer), bal = zahl(w.balance), liq = zahl(w.liq_balance)
+    const herk = puf != null ? ` · Puffer ${de(puf)} $${bal != null && liq != null ? ` (Balance ${de(bal)} − Liq ${de(liq)})` : ''}` : ''
+    if(w.ohne === true) return { ohne: true, text: 'ohne SL (Würfel)', tip: 'Zufalls-SL: diesmal kein SL gewürfelt' + herk }
+    const usd = zahl(w.usd), pct = zahl(w.pct)
+    if(!(usd > 0)) return null
+    return { ohne: false, usd, pct, text: `SL ${de(usd)} $` + (pct != null ? ` (${Math.round(pct)} % Puffer)` : ''),
+             tip: `Zufalls-SL gewürfelt${zahl(w.stufe) != null ? ' · Stufe ' + zahl(w.stufe) : ''}: ${de(usd)} $${pct != null ? ' = ' + pct.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' % vom Puffer' : ''}${herk}` }
+  }
+  const planWdSlChipHtml = p => { const s = planWdSl(p); return s ? ` <em class="wd-slw-chip${s.ohne ? ' ohne' : ''}" title="${escapeHtml(s.tip)}">${escapeHtml(s.text)}</em>` : '' }
+  window._planWdSl = planWdSl
+  window._planWdSlChipHtml = planWdSlChipHtml
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
   let _recKonto = null
   function recovererZeichnen(){
@@ -52089,7 +52134,7 @@
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}${window._planRecovererChipHtml?.(p) || ''}</span><small class="pz-k2">${k2}</small>${o.unterKonto || ''}</span>
+        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}${window._planRecovererChipHtml?.(p) || ''}${window._planWdSlChipHtml?.(p) || ''}</span><small class="pz-k2">${k2}</small>${o.unterKonto || ''}</span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${fuZelle || artZelle}
@@ -52102,7 +52147,7 @@
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}${window._planRecovererChipHtml?.(p) || ''}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}${window._planRecovererChipHtml?.(p) || ''}${window._planWdSlChipHtml?.(p) || ''}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
         ${artZelle}
@@ -52955,7 +53000,7 @@
       + (window._planRecovererChipHtml?.(p) || '')
       + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : 'var(--good-ink, #15803d)'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
       + (p.masterTp > 0 ? ` · TP <b style="color:var(--good-ink, #15803d)">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
-      + (((typeof tpIstWdPlan === 'function') && tpIstWdPlan(p)) ? ''   // Winning Days: nie ein SL (25.09.2026)
+      + (((typeof tpIstWdPlan === 'function') && tpIstWdPlan(p)) ? (window._planWdSlChipHtml?.(p) || '')   // Winning Days: nie ein SL (25.09.2026) — seit WS1b (09.11.2026) gewürfelter SL aus mt5_baseline.wd_sl, alte Pläne wie bisher
          : p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
       + (sDup ? ` · <span style="color:var(--violet)">${fmtDupBalance(sDup)}</span>` : '')
 
@@ -65005,7 +65050,7 @@
     }
     return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
       <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
-      <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}${window._planRecovererChipHtml?.(z) || ''}</td><td>${ri}</td>
+      <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}${window._planRecovererChipHtml?.(z) || ''}${window._planWdSlChipHtml?.(z) || ''}</td><td>${ri}</td>
       <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
       ${opt && opt.paare ? '' : `<td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>`}
       <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
@@ -73750,6 +73795,7 @@
     if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el){ el.classList.toggle('aus', !k); el.classList.remove('leer') } if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${pcLabel(k.pc)}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
     wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
     wdFirmenRender(fu, vp)
+    wdSlwRender()   // Zufalls-SL (WS1b 09.11.2026): eigene Karte, behält ungespeicherte Eingaben
     wdStatus()
   }
   async function wdHedgeSpeichern(auto){
@@ -73776,6 +73822,104 @@
     wdGespeichertZeigen(['wdHedgeSave', 'wdHedgeSave2'])
     if(!auto) wdSay('Hedge-Tabelle gespeichert — gilt für alle PC-Tabs und „Futures vorplanen". Schon angelegte Pläne behalten ihre Zahlen.', 'ok')
   }
+  /* ZUFALLS-SL JE WD-TRADE (WS1b, Finn 09.11.2026 abends „bau das Ganze" — Anlass: Rally zur Eröffnung, 4 Winning Days zerbröselt): der Planer würfelt je
+   * Trade eine Zeile nach ihrem Anteil und darin den SL zufällig zwischen von und bis % des Puffers (Balance vor dem Trade − Liq-Balance, nicht Max DD).
+   * Hier nur die Tabelle: wd_farmer_regeln.sl_wuerfel (id 1, eigene Spalte — wdHedgeSpeichern baut vorplan neu und ließe fremde Schlüssel fallen).
+   * Wie der Planer liest: Spalte fehlt / null / an=false → kein SL wie bisher; Anteile ≠ 100 → Standard. Darum speichert der Knopf nur bei genau 100 %.
+   * Ungespeicherte Eingaben überleben das Neuzeichnen (_wd.slwDirty) — die Karte liegt außerhalb von .wd-set-grid, der Fokus-Riegel dort greift nicht. */
+  const WD_SLW_STD = { an: true, stufen: [{ anteil: 50, von: null, bis: null }, { anteil: 10, von: 10, bis: 20 }, { anteil: 10, von: 20, bis: 30 }, { anteil: 30, von: 30, bis: 40 }] }
+  const WD_SLW_BSP = { name: 'Tradeify 150k', balance: 165000, liq: 150100 }   // Finns Beispiel 09.11.2026 → Puffer 14.900 $
+  const wdSlwZahl = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Math.round(Number(v) * 10) / 10
+  const wdSlwKopie = (r, an) => ({ an, stufen: r.stufen.map(s => ({ ...s })) })
+  const wdSlwSumme = r => Math.round(r.stufen.reduce((a, s) => a + (Number(s.anteil) || 0), 0) * 10) / 10
+  // gespeicherte Regel → Tabelle: „kein SL" immer als erste Zeile (fehlt sie, mit 0 %), SL-Zeilen nach von sortiert
+  function wdSlwAusDb(){
+    const r = _wd.regeln || {}, v = r.sl_wuerfel
+    if(!_wd.regeln) return { regel: wdSlwKopie(WD_SLW_STD, false), hinweis: 'Regeln noch nicht geladen — Standard angezeigt.' }
+    if(!('sl_wuerfel' in r)) return { regel: wdSlwKopie(WD_SLW_STD, false), hinweis: 'SQL fehlt: Spalte wd_farmer_regeln.sl_wuerfel ist noch nicht eingespielt (sql/2026-11-09_wd_sl_wuerfel.sql) — bis dahin laufen Winning Days ohne SL.' }
+    if(!v || typeof v !== 'object' || !Array.isArray(v.stufen) || !v.stufen.length) return { regel: wdSlwKopie(WD_SLW_STD, false), hinweis: 'Noch keine Regel gespeichert — Winning Days laufen ohne SL.' }
+    const roh = v.stufen.filter(s => s && typeof s === 'object').map(s => ({ anteil: wdSlwZahl(s.anteil) ?? 0, von: wdSlwZahl(s.von), bis: wdSlwZahl(s.bis) }))
+    const ohne = roh.filter(s => s.von == null && s.bis == null), mit = roh.filter(s => !(s.von == null && s.bis == null)).sort((a, b) => (a.von ?? 0) - (b.von ?? 0))
+    const regel = { an: v.an !== false, stufen: [{ anteil: Math.round(ohne.reduce((a, s) => a + s.anteil, 0) * 10) / 10, von: null, bis: null }].concat(mit) }
+    const su = wdSlwSumme(regel)
+    if(Math.abs(su - 100) > 0.05) return { regel: wdSlwKopie(WD_SLW_STD, regel.an), hinweis: `Gespeicherte Anteile ergeben ${su.toLocaleString('de-DE')} % — der Planer rechnet mit dem Standard (angezeigt).` }
+    return { regel, hinweis: '' }
+  }
+  function wdSlwLesen(){
+    const box = document.getElementById('wd-slw-body'), stufen = []
+    box?.querySelectorAll('tr.wd-stufe:not(.kopf)').forEach(z => {
+      const q = a => z.querySelector(`[data-wd-slw-${a}]`), ohne = z.dataset.wdSlwOhne === '1'
+      stufen.push({ anteil: wdSlwZahl(q('a')?.value), von: ohne ? null : wdSlwZahl(q('v')?.value), bis: ohne ? null : wdSlwZahl(q('b')?.value), ohne })
+    })
+    return { an: !!document.getElementById('wd-slw-an')?.checked, stufen }
+  }
+  // '' = speicherbar, sonst der Grund (klarer Satz für wdSay und die Summenzeile)
+  function wdSlwPruefen(regel){
+    for(const [i, s] of regel.stufen.entries()){
+      if(s.anteil == null || s.anteil < 0 || s.anteil > 100) return `Zeile ${i + 1}: Anteil muss zwischen 0 und 100 % liegen.`
+      if(s.ohne) continue
+      if(s.von == null || s.bis == null) return `Zeile ${i + 1}: von und bis % des Puffers eintragen.`
+      if(!(s.von > 0) || s.bis > 100 || !(s.von < s.bis)) return `Zeile ${i + 1}: SL von muss größer als 0 und kleiner als bis sein (bis höchstens 100 % des Puffers).`   // von 0 = Stopp fast am Einstieg
+    }
+    const su = wdSlwSumme(regel)
+    return Math.abs(su - 100) > 0.05 ? `Anteile ergeben ${su.toLocaleString('de-DE')} % — sie müssen zusammen genau 100 % ergeben.` : ''
+  }
+  // Summe + Beispiel live aus der Tabelle (Finns Beispiel: Tradeify 150k, Balance 165.000, Liq 150.100 → Puffer 14.900 → SL 1.490–2.980 / 2.980–4.470 / 4.470–5.960 $)
+  function wdSlwLiveZeigen(){
+    const regel = wdSlwLesen(), fehler = wdSlwPruefen(regel), su = wdSlwSumme(regel), puf = WD_SLW_BSP.balance - WD_SLW_BSP.liq
+    const summe = document.getElementById('wd-slw-summe')
+    if(summe){ summe.textContent = fehler ? (Math.abs(su - 100) > 0.05 ? `Summe ${su.toLocaleString('de-DE')} % — muss 100 % ergeben` : fehler) : 'Summe 100 %'; summe.classList.toggle('falsch', !!fehler) }
+    const sp = s => (s.von != null && s.bis != null) ? `${wdDe(puf * s.von / 100)}–${wdDe(puf * s.bis / 100)}` : '–'
+    document.querySelectorAll('#wd-slw-body [data-wd-slw-bsp]').forEach(td => { const s = regel.stufen[+td.dataset.wdSlwBsp]; if(s) td.textContent = s.ohne ? 'kein SL' : sp(s) + ' $' })
+    const bsp = document.getElementById('wd-slw-bsp'), mit = regel.stufen.filter(s => !s.ohne)
+    if(bsp) bsp.textContent = `Beispiel ${WD_SLW_BSP.name}: Balance ${wdDe(WD_SLW_BSP.balance)}, Liq ${wdDe(WD_SLW_BSP.liq)} → Puffer ${wdDe(puf)} → SL ${mit.length ? mit.map(sp).join(' / ') + ' $' : '—'}`
+      + (regel.an ? '' : ' · Schalter aus: Winning Days laufen ohne SL')
+    document.getElementById('wd-slw-body')?.classList.toggle('aus', !regel.an)
+  }
+  function wdSlwRender(regel, hinweis){
+    const box = document.getElementById('wd-slw-body'); if(!box) return
+    // ungespeicherte Eingaben behalten — aber nur, wenn die Tabelle schon steht (Gegenprüfung: Schalter vor dem ersten Zeichnen ließ sie sonst leer)
+    if(!regel){ if(_wd.slwDirty && box.querySelector('tr.wd-stufe:not(.kopf)')) return wdSlwLiveZeigen(); const d = wdSlwAusDb(); regel = d.regel; _wd.slwHinweis = d.hinweis }
+    if(hinweis == null) hinweis = _wd.slwHinweis || ''   // „SQL fehlt" bleibt stehen, auch wenn Zeilen dazukommen/wegfallen
+    const an = document.getElementById('wd-slw-an'); if(an) an.checked = !!regel.an
+    const n = regel.stufen.length, farbe = i => i === 0 ? 'var(--sub-2)' : `hsl(${Math.round(40 - 40 * (n > 2 ? (i - 1) / (n - 2) : 0))} 70% 52%)`
+    const feld = (a, i, v, tip) => `<input type="number" class="input mono" data-wd-slw-${a}="${i}" value="${v == null ? '' : v}" min="0" max="100" step="1" title="${tip}">`
+    box.innerHTML = `${hinweis ? `<div class="kf" style="margin-bottom:8px;color:var(--warn-ink, #b45309)">${escapeHtml(hinweis)}</div>` : ''}<table class="wd-staffel-tab"><thead><tr class="wd-stufe kopf"><th></th><th>Anteil %</th><th>SL von %</th><th>bis %</th><th title="Beispiel: Puffer ${wdDe(WD_SLW_BSP.balance - WD_SLW_BSP.liq)} $">bei ${wdDe(WD_SLW_BSP.balance - WD_SLW_BSP.liq)} $</th><th></th></tr></thead><tbody>`
+      + regel.stufen.map((s, i) => { const ohne = i === 0
+        return `<tr class="wd-stufe"${ohne ? ' data-wd-slw-ohne="1"' : ''}><td><span class="balken" style="background:${farbe(i)}"></span></td>
+          <td>${feld('a', i, s.anteil, 'so viele % der Winning-Day-Trades bekommen diese Zeile')}</td>
+          ${ohne ? '<td colspan="2" class="mono" style="color:var(--sub);font-size:12px">kein SL</td>' : `<td>${feld('v', i, s.von, 'SL ab … % des Puffers (Balance − Liq)')}</td><td>${feld('b', i, s.bis, 'SL bis … % des Puffers — gewürfelt wird zufällig dazwischen')}</td>`}
+          <td class="bis" data-wd-slw-bsp="${i}"></td>
+          <td>${ohne ? '' : `<button type="button" class="wd-sx" data-wd-slw-x="${i}" title="Zeile entfernen">✕</button>`}</td></tr>` }).join('') + `</tbody></table>`
+    box.querySelectorAll('input').forEach(el => el.addEventListener('input', () => { _wd.slwDirty = true; wdSlwLiveZeigen() }))
+    box.querySelectorAll('[data-wd-slw-x]').forEach(b => b.addEventListener('click', () => {
+      const r = wdSlwLesen(); r.stufen.splice(+b.dataset.wdSlwX, 1); _wd.slwDirty = true; wdSlwRender(r)
+    }))
+    wdSlwLiveZeigen()
+  }
+  document.getElementById('wd-slw-an')?.addEventListener('change', () => { _wd.slwDirty = true; wdSlwLiveZeigen() })
+  document.getElementById('wdReload')?.addEventListener('click', () => { _wd.slwDirty = false; wdSlwRender() })   // „Neu laden" verwirft ungespeicherte Zufalls-SL-Eingaben und zeigt den gespeicherten Stand
+  document.getElementById('wd-slw-add')?.addEventListener('click', () => {
+    const r = wdSlwLesen(), letzte = r.stufen.filter(s => !s.ohne).pop(), ab = letzte && letzte.bis != null ? letzte.bis : 10
+    if(!r.stufen.length) return   // Tabelle noch nicht gezeichnet — sonst würde die neue Zeile zur „kein SL"-Zeile
+    r.stufen.push({ anteil: 0, von: ab, bis: Math.min(100, ab + 10) }); _wd.slwDirty = true; wdSlwRender(r)
+  })
+  async function wdSlwSpeichern(){
+    if(await wdNurGruppe()) return wdSay('Zufalls-SL gilt für alle IDs — nur Hermann Technologies.', 'err')   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
+    const regel = wdSlwLesen(), fehler = wdSlwPruefen(regel)
+    if(fehler){ wdSlwLiveZeigen(); return wdSay('Zufalls-SL nicht gespeichert: ' + fehler, 'err') }
+    const neu = { an: regel.an, stufen: regel.stufen.map(s => ({ anteil: s.anteil, von: s.ohne ? null : s.von, bis: s.ohne ? null : s.bis })) }
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: getroffen, error } = await supabase.from('wd_farmer_regeln').update({ sl_wuerfel: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1).select('id')
+    // nur „Spalte unbekannt" heißt SQL fehlt (PostgREST PGRST204 / Postgres 42703) — ein anderer Fehler, der die Spalte nennt, kommt im Wortlaut
+    if(error) return wdSay((error.code === 'PGRST204' || error.code === '42703' || /could not find.*sl_wuerfel|sl_wuerfel.*does not exist/i.test(String(error.message || ''))) ? 'Zufalls-SL nicht gespeichert — SQL fehlt: Spalte wd_farmer_regeln.sl_wuerfel ist noch nicht eingespielt (sql/2026-11-09_wd_sl_wuerfel.sql).' : 'Zufalls-SL nicht gespeichert: ' + (error.message || error), 'err')
+    if(Array.isArray(getroffen) && !getroffen.length) return wdSay('Zufalls-SL nicht gespeichert: keine Zeile geändert (Recht?)', 'err')
+    if(_wd.regeln) _wd.regeln.sl_wuerfel = neu
+    _wd.slwDirty = false; wdSlwRender(); wdGespeichertZeigen(['wdSlwSave'])
+    wdSay(`Zufalls-SL gespeichert (${neu.an ? 'an' : 'aus'}) — gilt für die nächsten gewürfelten Winning Days, schon angelegte Pläne behalten ihren SL.`, 'ok')
+  }
+  document.getElementById('wdSlwSave')?.addEventListener('click', () => wdSlwSpeichern().catch(e => wdSay('Zufalls-SL: ' + (e.message || e), 'err')))
+  window._wdSlwRender = wdSlwRender   // Test-Haken (Stub ohne Login)
   // Kopfzeile: Chip AN/AUS + ein Satz mit dem nächsten Schritt
   function wdStatus(){
     const r = _wd.regeln || {}, chip = document.getElementById('wd-auto-chip'), txt = document.getElementById('wd-status-text')
@@ -74222,7 +74366,7 @@
     const tp = (p && Number(p.master_tp) > 0) ? Number(p.master_tp) : Number(k.tp) > 0 ? Number(k.tp) : null
     const wann = art === 'laeuft' ? (p && p.started_at ? 'seit ' + wdHhmm(p.started_at) : '–') : wdHhmm((p && p.start_um) || k.start_um) || '–'
     const konto = `${escapeHtml(String(k.firm || ''))} · ${escapeHtml(String(k.name || (p && p.master_name) || '').slice(0, 34))}`
-    return `<tr><td class="zahl">${escapeHtml(wann)}</td><td title="${escapeHtml(String((p && p.master_name) || k.name || ''))}">${konto}${wdKontoDrehHtml(x, k)}${(p ? window._planRecovererChipHtml?.({ ...p, winning_day: true, master_firm: k.firm }) : '') || ''}</td><td>${pfeil}</td>
+    return `<tr><td class="zahl">${escapeHtml(wann)}</td><td title="${escapeHtml(String((p && p.master_name) || k.name || ''))}">${konto}${wdKontoDrehHtml(x, k)}${(p ? window._planRecovererChipHtml?.({ ...p, winning_day: true, master_firm: k.firm }) : '') || ''}${(p ? window._planWdSlChipHtml?.(p) : '') || ''}</td><td>${pfeil}</td>
       <td class="zahl">${escapeHtml(String(kt))}</td><td class="zahl">${tp != null ? Math.round(tp).toLocaleString('de-DE') + ' $' : '–'}</td>
       ${art === 'braucht' ? `<td class="wd-ue-grund">${escapeHtml(e.grund || '')}</td>` : ''}</tr>`
   }
