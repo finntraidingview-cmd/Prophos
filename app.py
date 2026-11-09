@@ -37844,7 +37844,10 @@ def _ap_kette_takt():
 TT_FIRMEN_STANDARD = ("tradeify", "lucidtrading", "topstep", "fundednext", "fundingpips", "the5ers", "ftmo", "blueguardian", "tradeifycfd")
 TT_STANDARD = {"an": False, "firmen": list(TT_FIRMEN_STANDARD), "anteile": [80.0, 12.0, 6.0, 2.0], "haupt_pct": [70.0, 90.0], "neben_pkt": [10.0, 25.0],
                "neben_sl_faktor": [1.0, 2.0], "neben_menge_max": 0.5, "min_tp_usd": 300.0, "abstand_min": [1.0, 180.0], "schluss_pct": [5.0, 10.0],
-               "schluss_min": [2.0, 120.0], "gruppen": [], "nur_konten": [], "test_n": None}
+               "schluss_min": [2.0, 120.0], "gruppen": [], "nur_konten": [], "test_n": None,
+               # WS2c (S5 dbc95340, 09.11.2026): Zufalls-Schluss auch bei Topstep (Standard aus) und Sperre rund um News (Standard an) — der Planer kopiert
+               # beide Schalter in mt5_baseline.zschluss, WS2c entscheidet am Plan
+               "schluss_topstep": False, "schluss_news_sperre": True}
 # Spannen [lo, hi]: Grenzen je Feld (Leser und Schreibweg gleich, sonst verwirft der Leser still — Lehre S6-Review E3b)
 TT_SPANNEN = {"haupt_pct": (50.0, 100.0), "neben_pkt": (1.0, 100.0), "neben_sl_faktor": (0.5, 5.0), "abstand_min": (1.0, 600.0),
               "schluss_pct": (0.0, 50.0), "schluss_min": (1.0, 600.0)}
@@ -37881,6 +37884,9 @@ def tt_param(regeln):
     roh = roh if isinstance(roh, dict) else {}
     out = json.loads(json.dumps(TT_STANDARD))
     out["an"] = roh.get("an") is True
+    for k in ("schluss_topstep", "schluss_news_sperre"):
+        if isinstance(roh.get(k), bool):
+            out[k] = roh[k]
     if isinstance(roh.get("gruppen"), list):           # Unternehmen (id_gruppen.id) zusätzlich zu HT — leer = nur HT (Master 09.11.2026, mit WS2b abgestimmt)
         out["gruppen"] = [str(x) for x in roh["gruppen"] if isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)]
     if isinstance(roh.get("firmen"), list):
@@ -37932,7 +37938,7 @@ def tt_einst_anwenden(regeln, aenderungen, firmen_keys=None, gruppen_ids=None):
     neu = json.loads(json.dumps(regeln if isinstance(regeln, dict) else {}))
     blk = neu.get("tagesteilung") if isinstance(neu.get("tagesteilung"), dict) else json.loads(json.dumps(TT_STANDARD))
     for k, v in aenderungen.items():
-        if k == "an":
+        if k in ("an", "schluss_topstep", "schluss_news_sperre"):
             if not isinstance(v, bool):
                 return None, f"{k} = true | false"
         elif k == "anteile":
@@ -38145,7 +38151,8 @@ def tt_zschluss(param, rnd):
     p = _ap_spanne(param["schluss_pct"], rnd.random()) / 100.0
     if rnd.random() >= p:
         return None
-    return {"nach_min": int(round(_ap_spanne(param["schluss_min"], rnd.random())))}
+    return {"nach_min": int(round(_ap_spanne(param["schluss_min"], rnd.random()))),
+            "topstep": param.get("schluss_topstep") is True, "news_sperre": param.get("schluss_news_sperre") is not False}
 
 
 def tt_echt(plan):
@@ -38338,8 +38345,9 @@ def tt_tick(jetzt=None, rnd=None):
                 ende_code, ende_text = "geloescht", TT_ENDE_TXT["geloescht"]
             elif int(k.get("nr") or 1) >= int(k.get("von") or 1):
                 ende_code, ende_text = "alle", TT_ENDE_TXT["alle"]
-            elif zs.get("status") == "geschlossen":
-                ende_code, ende_text = "zschluss", TT_ENDE_TXT["zschluss"]
+            elif zs.get("status") in ("geschlossen", "war_flach", "fehler"):
+                # WS2c (S5 09.11.2026): der Tag zählt über zschluss.status — nach jedem Schluss-Versuch kein Folge-Teil (final.quelle 'close' ist kein Signal)
+                ende_code, ende_text = "zschluss", f"{TT_ENDE_TXT['zschluss']} ({zs.get('status')})"
             elif not param.get("an"):
                 ende_code, ende_text = "aus", TT_ENDE_TXT["aus"]
             elif ap_firma_gesperrt({"user_id": p.get("user_id"), "firm": p.get("master_firm")}, sperren):

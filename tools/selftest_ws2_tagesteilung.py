@@ -182,6 +182,12 @@ def main():
     treffer = [z for z in zs if z]
     check(0.06 <= len(treffer) / len(zs) <= 0.09 and all(2 <= z["nach_min"] <= 120 for z in treffer), f"Zufalls-Schluss ≈ 7,5 %, 2–120 min ({len(treffer)}/20000)")
 
+    check(all(z.get("topstep") is False and z.get("news_sperre") is True for z in treffer)
+          and all(z.get("topstep") is True and z.get("news_sperre") is False
+                  for z in filter(None, (a["tt_zschluss"](dict(std, schluss_topstep=True, schluss_news_sperre=False), random.Random(i)) for i in range(500))))
+          and std["schluss_topstep"] is False and std["schluss_news_sperre"] is True
+          and E({}, {"schluss_topstep": True}, keys)[0]["tagesteilung"]["schluss_topstep"] is True and E({}, {"schluss_news_sperre": "ja"}, keys)[0] is None,
+          "Schalter schluss_topstep (aus) / schluss_news_sperre (an): Standard, Schreibweg, Kopie in zschluss")
     # ── 5 Genaue Lesung je Weg ─────────────────────────────────────────────────────────────────────────────────────────
     EC = a["tt_echt"]
     check(EC({"route": "tvv2", "mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"quelle": "puls", "balance_end": 151000}}}) == (150000.0, 151000.0)
@@ -296,6 +302,10 @@ def main():
     db.update(plaene=[dict(t1, mt5_baseline=dict(t1["mt5_baseline"], zschluss={"nach_min": 30, "status": "geschlossen"}))], ins=[], upd=[], patch=[])
     a["tt_tick"](jetzt, random.Random(16))
     check(not db["ins"] and any((p.get("tagesende") or {}).get("ende_grund") == "zschluss" for _pid, p in db["patch"]), "Zufalls-Schluss geschlossen: Tag fertig")
+    for st_ in ("war_flach", "fehler"):
+        db.update(plaene=[dict(t1, mt5_baseline=dict(t1["mt5_baseline"], zschluss={"nach_min": 30, "status": st_}))], ins=[], upd=[], patch=[])
+        a["tt_tick"](jetzt, random.Random(16))
+        check(not db["ins"] and any((p.get("tagesende") or {}).get("ende_grund") == "zschluss" for _pid, p in db["patch"]), f"Zufalls-Schluss {st_}: kein Folge-Teil")
 
     # ── 7b Gegenprüfung 09.11.2026 ─────────────────────────────────────────────────────────────────────────────────────
     t1m = dict(t1, master_symbol="MNQZ6", mt5_baseline=dict(t1["mt5_baseline"], kette=dict(k1)))

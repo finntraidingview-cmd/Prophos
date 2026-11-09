@@ -9,7 +9,9 @@
 -- haupt_pct (Anteil des Haupt-Trades am Tagesziel) · neben_pkt (TP-Abstand Neben-Trades, NQ-/Index-Punkte) · neben_sl_faktor (Neben-SL = Faktor × TP-Abstand) ·
 -- neben_menge_max (höchstens dieser Anteil der Haupt-Lots) · min_tp_usd (kleinere Teile werden zusammengelegt) · abstand_min (Pause nach der genauen Lesung) ·
 -- schluss_pct / schluss_min (Zufalls-Schluss WS2c) · gruppen (id_gruppen.id der Unternehmen, die zusätzlich zu HT teilen; leer = nur HT) ·
--- nur_konten (leer = alle; sonst NUR diese Konto-IDs — Testbetrieb, Werte nie im Repo) · test_n (null | 1–4: feste Anzahl für nur_konten).
+-- nur_konten (leer = alle; sonst NUR diese Konto-IDs — Testbetrieb, Werte nie im Repo) · test_n (null | 1–4: feste Anzahl für nur_konten) ·
+-- schluss_topstep (Zufalls-Schluss auch bei Topstep, Standard aus) · schluss_news_sperre (kein Zufalls-Schluss rund um News, Standard an) — beide kopiert der
+-- Planer in mt5_baseline.zschluss (WS2c entscheidet am Plan).
 -- Ausführen nur auf Finns Wort (Master). Rückbau: update auto_plan_regeln set regeln = regeln - 'tagesteilung' where id = 1;
 
 update public.auto_plan_regeln
@@ -27,7 +29,9 @@ update public.auto_plan_regeln
          'schluss_min', jsonb_build_array(2, 120),
          'gruppen', jsonb_build_array(),
          'nur_konten', jsonb_build_array(),
-         'test_n', null), true),
+         'test_n', null,
+         'schluss_topstep', false,
+         'schluss_news_sperre', true), true),
        updated_at = now()
  where id = 1
    and not (coalesce(regeln, '{}'::jsonb) ? 'tagesteilung');
