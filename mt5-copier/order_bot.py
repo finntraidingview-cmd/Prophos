@@ -19177,6 +19177,12 @@ def _tsx_bereit_warten(s, trail, opts=None, sek=None):
 # jede andere (echter Dialog) bleibt wie bisher ein sofortiger Abbruch.
 TSX_LADEN_RX = re.compile(r"^\s*loading the ultimate", re.I)
 TSX_LADEN_K2_S = 10.0               # so lange wartet K2 selbst noch (die Bereit-Probe davor hat schon bis TSX_K1_BEREIT_S gewartet)
+# TX1 (09.11.2026, ab 03:05 Dubai scheiterten ALLE 35 Topstep-Läufe auf 6 PCs mit „Konto nicht in der Liste (0×) … [Liste 0: ]"): nach dem
+# eigenen Klick auf den Konto-Auslöser meldet TopstepX sofort aria-expanded=true, die Konto-Karten kommen seit dem Wochen-Update aber erst
+# später (Finn: „visuell gar kein Unterschied"). K2 las nach ~1 s, sah 0 Karten UND eine leere Rohliste und gab auf. Beleg: Simon 14:46 —
+# die Liste des Laufs 14:44 stand noch offen, und darin las dasselbe Auge 2 Zeilen. Darum: offene Liste ohne Karten nach eigenem Klick bis
+# so lange in kurzen Schritten neu lesen, dann entscheidet die Runde wie bisher (Beweise unverändert, nur später gelesen).
+TSX_LISTE_KARTEN_S = 6.0
 
 
 def tsx_ladeschirm(ko):
@@ -19613,6 +19619,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
     fremd_esc = False
     gewaehlt = None
     lade_gewartet = False
+    karten_gewartet = False                      # TX1: einmal je Lauf auf die Karten der eigenen offenen Liste warten
     ko0 = st.get("konto") if isinstance(st.get("konto"), dict) else {}
     von = str(ko0.get("kontonr") or ko0.get("aktiv") or "")[:80]
 
@@ -19675,6 +19682,21 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 _cdp_esc(s, st, trail, "Konto-Liste nach dem Zeilen-Klick noch offen")
                 return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} gedrückt, Liste blieb offen, Konto nicht gewechselt — Esc, nichts gelesen.",
                              st, konto_zeilen=_zeilen(ko))
+            if geklickt and not ko.get("liste") and not karten_gewartet:
+                # TX1 (09.11.2026): Liste offen, aber noch keine Karte — TopstepX füllt sie seit dem Wochen-Update erst nach dem Öffnen.
+                # Neu lesen, bis Karten da sind, die Liste zugeht oder TSX_LISTE_KARTEN_S um sind; dann die Runde von vorn (kein Klick hier).
+                karten_gewartet = True
+                t_k = time.time()
+                while time.time() - t_k < TSX_LISTE_KARTEN_S:
+                    _warte(0.5, 0.25)
+                    st = s.stand()
+                    k_neu = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+                    if k_neu.get("liste") or not k_neu.get("liste_offen"):
+                        break
+                k_neu = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+                trail.append(f"K2: Liste offen ohne Karten — {time.time() - t_k:.1f} s neu gelesen: {len(k_neu.get('liste') or [])} Karte(n)"
+                             + ("" if k_neu.get("liste_offen") else ", Liste zu"))
+                continue
             x, n, grund = tsx_k2_eintrag(ko.get("liste"), ext)
             if not x:
                 if not ko.get("liste") and ko.get("roh"):          # 02.11.2026 (Ina 03:57: 0 Karten): DOM-Beleg in die Spur
