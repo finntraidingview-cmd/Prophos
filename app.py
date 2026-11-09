@@ -15940,8 +15940,43 @@ def wd_zyklus_route():
                        "wd_zyklus_regel": a.get("wd_zyklus_regel")})
     if not _wd_zyklus_anhaengen(konten):
         return jsonify({"error": "Recoverer-Stand nicht rechenbar"}), 502   # das Frontend behält den letzten Stand
-    return jsonify({"ok": True, "at": datetime.now(timezone.utc).isoformat(),
-                    "zyklus": {k["id"]: k["zyklus"] for k in konten if k.get("zyklus")}})
+    zyk = {k["id"]: k["zyklus"] for k in konten if k.get("zyklus")}
+    # RC2 (Finn 10.11.2026, Admin → Payouts): je Konto mit Stand der nächste Plan (nur lesend, nur Konten dieser Sicht) — Fehler = Feld fehlt, Stand bleibt
+    if zyk:
+        try:
+            ids_z = list(zyk.keys())
+            plaene = []
+            for i in range(0, len(ids_z), 60):
+                plaene += _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,started_at,winning_day,master_firm,master_symbol,master_symbol_root,"
+                                                            "wd_ausgleich:mt5_baseline->>wd_ausgleich",
+                                                  "status": "in.(planned,open)", "master_account_id": f"in.({','.join(ids_z[i:i + 60])})"}) or []
+            naechste = wd_naechster_plan(plaene)
+            for kid, z in zyk.items():
+                zyk[kid] = dict(z, naechster_plan=naechste.get(kid))   # None = kein Plan (Feld da)
+        except Exception as e:
+            print(f"[wd-zyklus] ⚠️ naechster_plan: {type(e).__name__}: {e}", flush=True)
+    return jsonify({"ok": True, "at": datetime.now(timezone.utc).isoformat(), "zyklus": zyk})
+
+
+def wd_naechster_plan(plaene):
+    """REIN RECHNEND (testbar, RC2 10.11.2026): Pläne (planned/open) → {account_id: {id, start_um, status, recoverer}} — je Konto zuerst ein Recovery-Plan,
+    darin der laufende, sonst der geplante mit dem frühesten start_um (ohne start_um zuletzt); ohne Recovery-Plan derselbe Rang über alle.
+    recoverer = Apex-WD auf NQ (wd_ist_recoverer_plan) oder Tradeify-Ausgleich (mt5_baseline.wd_ausgleich)."""
+    beste = {}
+    def ist_rec(p):
+        return bool(wd_ist_recoverer_plan(p) or str(p.get("wd_ausgleich") or "").lower() == "true")
+    def rang(p):
+        return (0 if ist_rec(p) else 1, 0 if p.get("status") == "open" else 1, str(p.get("start_um") or p.get("started_at") or "9999"))
+    for p in plaene or ():
+        kid = str(p.get("master_account_id") or "")
+        if not kid or p.get("status") not in ("planned", "open"):
+            continue
+        if kid not in beste or rang(p) < rang(beste[kid]):
+            beste[kid] = p
+    return {kid: {"id": str(p.get("id")), "start_um": p.get("start_um") or (p.get("started_at") if p.get("status") == "open" else None),
+                  "status": p.get("status"),
+                  "recoverer": ist_rec(p)}
+            for kid, p in beste.items()}
 
 
 WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus", "polar")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
