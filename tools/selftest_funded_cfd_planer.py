@@ -377,7 +377,44 @@ zeilen = [g[1] for g in GESCHRIEBEN if g[0] == "trade_plans"]   # O1: GESCHRIEBE
 check(len(zeilen) == 5 and all(z["start_um"] is None and z["auto_bestaetigt_at"] is None and z["route"] == "mt5" and z["auto_plan"] is False
                                and z["slave_account_id"] and z["mt5_baseline"]["funded_plan"]["art"] == "cfd" for z in zeilen),
       "scharf: 5 Vorschläge ohne start_um, Echo mit Slave, Kennung funded_plan.art cfd")
-check(not [g for g in GESCHRIEBEN if g[0] == "update" and "fcp_ziel" not in (g[3] if len(g) > 3 else {})], "Ziel erreicht stellt ohne ziel_auto_wartet nichts um")
+# WP3 (Finn 10.11.2026 ~01:40: „Das soll einfach kein Schalter dafür sein"): Ziel erreicht → IMMER Waiting for Payout, auch mit ziel_auto_wartet False,
+# Guard wie der Knopf (funded_cfd, waiting_payout_since leer); Meldung nur, wenn das Update eine Zeile geändert hat (der Stub liefert None → keine)
+_wu = [g for g in GESCHRIEBEN if g[0] == "update" and "waiting_payout_since" in (g[3] if len(g) > 3 else {})]
+check(REG["ziel_auto_wartet"] is False and len(_wu) == 1 and _wu[0][2] == {"id": f"eq.{KONTEN[3]['id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "is.null"}
+      and not [g for g in GESCHRIEBEN if g[0] == "update" and not ({"fcp_ziel", "waiting_payout_since"} & set(g[3] if len(g) > 3 else {}))],
+      "WP3: Ziel erreicht stellt auch mit ziel_auto_wartet aus auf Waiting for Payout um (Guard funded_cfd + waiting_payout_since leer)")
+check(erg2.get("ziel_auto_wartet") is True and erg2.get("wartet_neu") == [], "WP3: Antwort ziel_auto_wartet immer an; Guard ohne geänderte Zeile → kein Eintrag, keine Meldung")
+_MELD, _GESCH0 = [], list(GESCHRIEBEN)
+_al, _upd0 = app.alarm_senden, app.sb_update
+app.alarm_senden = lambda *a, **k: _MELD.append((a, k)) or (1, 1)
+app._alarm_fremd_verwaltet = lambda uid: str(uid) == E1
+app.sb_update = lambda t, f, u: (GESCHRIEBEN.append(("update", t, f, u)) or ([{"id": f["id"][3:]}] if "waiting_payout_since" in u else []))
+erg3 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
+_wn = erg3.get("wartet_neu") or []
+check(len(_wn) == 1 and _wn[0]["umgestellt"] is True and _wn[0]["konto_id"] == KONTEN[3]["id"] and _wn[0]["gewinn"] == 1600 and _wn[0]["ziel"]
+      and len(_MELD) == 1 and _MELD[0][0][0] == 3 and _MELD[0][0][2] == "Ziel erreicht → Waiting for Payout"
+      and "HT-2 · 100k 4 → Funded · Gewinn 1.600 $ / Ziel" in _MELD[0][0][3] and _MELD[0][1]["schluessel"].startswith(f"fcp-wartet-{KONTEN[3]['id']}-"),
+      f"WP3: umgestellt → Eintrag wartet_neu + eine ⚪-Meldung an die Master-IDs ({_MELD[0][0][3] if _MELD else '—'})")
+_lauf = [g[1] for g in GESCHRIEBEN[len(_GESCH0):] if g[0] == "auto_plan_lauf"]
+check(_lauf and _lauf[-1]["ergebnis"].get("wartet_neu") == _wn, "WP3: Eintrag auch im Planer-Lauf (auto_plan_lauf.ergebnis.wartet_neu)")
+# Emin-Konto am Ziel (Gruppe mit Verwalter): umgestellt, aber keine Meldung an die HT-Master-IDs
+KONTEN[6]["_bal"] = 104000.0
+_MELD.clear()
+erg4 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
+_wn4 = {z["konto_id"]: z for z in erg4.get("wartet_neu") or []}
+check(_wn4.get(KONTEN[6]["id"], {}).get("umgestellt") is True and all(KONTEN[6]["name"] not in m[0][3] for m in _MELD),
+      "WP3: Konto einer Gruppe mit Verwalter wird umgestellt, die Meldung bleibt aber bei der Gruppe (nur HT an die Master-IDs)")
+KONTEN[6]["_bal"] = 100000.0
+app.alarm_senden, app.sb_update = _al, _upd0
+# rein: Consistency ungeprüft (Zyklus nicht lesbar) → nicht umstellen, nur anzeigen; Gewinntage offen → nicht
+check(app.fcp_ziel_echt({"aktion": "ziel"}) == (True, None)
+      and app.fcp_ziel_echt({"aktion": "ziel", "consistency": {"p": 50, "bester_tag": 900.0, "ende": 4000}})[0] is True
+      and app.fcp_ziel_echt({"aktion": "ziel", "consistency": {"p": 50, "bester_tag": None, "ende": 4000}})[0] is False
+      and app.fcp_ziel_echt({"aktion": "ziel", "gewinntage": [2, 3]})[0] is False and app.fcp_ziel_echt({"aktion": "planen"})[0] is False,
+      "WP3 fcp_ziel_echt: nur echtes Ziel (Consistency mit lesbarem Zyklus, Gewinntage voll)")
+_t, _x, _d = app.fcp_wartet_meldung({"user": "HT-1", "konto": "100k X", "gewinn": 4100.0, "consistency": {"ende": 4000}, "zyklus": 2, "konto_id": "k"})
+check(_t == "Ziel erreicht → Waiting for Payout" and _x == "HT-1 · 100k X · Gewinn 4.100 $ / Ziel 4.000 $ · Zyklus 2" and app.alarm_prio_aus_titel(_t) == 3,
+      f"WP3 Meldungstext ⚪ ({_x})")
 # O1 (05.11.2026): festes Ziel je Konto — im echten Lauf einmal geschrieben, mit Guard „noch keins gespeichert" (fcp_ziel=is.null)
 _fz = [g for g in GESCHRIEBEN if g[0] == "update" and "fcp_ziel" in (g[3] if len(g) > 3 else {})]
 check(_fz and all(g[2].get("fcp_ziel") == "is.null" and isinstance(g[3]["fcp_ziel"].get("usd"), float) for g in _fz),

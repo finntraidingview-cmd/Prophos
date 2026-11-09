@@ -45369,7 +45369,8 @@ def admin_funded_plan_regeln():
 # VORSCHLAG: klassisches Echo mit Fusion-Gegenhedge (route mt5, Slave = echo_hedge_account der ID, wie der Gruppen-Planer), Finn bestätigt
 # von Hand (Testphase alles von Hand, 29.10.2026). Werte je Firma × Größe in public.funded_cfd_plan_regeln (sql/2026-10-30_funded_cfd_planer.sql):
 #  - Ziel = Gewinn über der Kontogröße (Starting Balance; nach dem Payout steht die Balance wieder dort). Gewinn ≥ ziel[0] → Ziel erreicht →
-#    „Waiting for Payout" (nur angezeigt, umgestellt nur mit ziel_auto_wartet; der Knopf im Konto setzt waiting_payout_since wie bisher).
+#    „Waiting for Payout": seit WP3 (Finn 10.11.2026 ~01:40) IMMER umgestellt, ohne Schalter (ziel_auto_wartet wird ignoriert), je Konto eine ⚪-Meldung
+#    zum Gegenprüfen (fcp_ziel_echt, fcp_wartet_meldung); der Knopf im Konto setzt waiting_payout_since wie bisher.
 #    Konten mit waiting_payout_since plant der Planer nie.
 #  - TP immer aufs Ziel: Ziel (je Trade gewürfelt in ziel[von, bis]) − bisheriger Gewinn — nach einem Verlusttag entsprechend höher
 #    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers: Consistency Rule (größter Tag ≤ 50 %) JE PAYOUT-ZYKLUS — sie wird beim Payout
@@ -45480,6 +45481,8 @@ _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 # änderbar (nur Admin, eine Änderung je Aufruf, geprüft, mit Konfliktschutz über updated_at). Was nur im Code steht, liefert fcp_code_werte zum
 # Anzeigen („fest im Code"). Am Verhalten des Planers ändert das nichts: er liest dieselben Felder wie bisher. ══
 FCP_WEG = {"route": "mt5", "name": MODELL_NAME["echo"], "text": f"{MODELL_NAME['echo']} (route mt5, Fusion-Gegenhedge auf dem Echo-Hedge-Konto der ID)"}
+# ziel_auto_wartet: seit WP3 (Finn 10.11.2026 ~01:40: „Das soll einfach kein Schalter dafür sein") ohne Wirkung — bleibt schreibbar, bis das Frontend (S3) den
+# Schalter entfernt hat; der Planer stellt am echten Ziel immer auf Waiting for Payout um
 FCP_SCHALTER = ("aktiv", "auto_bestaetigen", "ziel_auto_wartet")
 FCP_ZEIT_FELDER = ("firma_abstand_min", "abstand_id_min", "vorlauf_min")
 FCP_GROESSE_FELDER = {"ziel": "bereich", "sl": "bereich", "sl_1pct": "bereich", "lots": "bereich", "hedge_eur": "zahl", "dd": "zahl",
@@ -46242,6 +46245,39 @@ def fcp_gewinntage_seit(zyklus_tag, konto_created_at):
     return max([d for d in (zyklus_tag, an) if d] or [None]) if (zyklus_tag or an) else None
 
 
+def fcp_ziel_echt(r):
+    """REIN RECHNEND (testbar; WP3 Finn 10.11.2026 ~01:40): ist ein „Ziel erreicht"-Urteil des Planers (fcp_konto_rechnen aktion ziel) echt genug, um ohne
+    Schalter auf Waiting for Payout umzustellen? → (True, None) | (False, grund). Gewinntage prüft fcp_konto_rechnen schon (nicht lesbar → nie ziel).
+    Consistency-Firma mit nicht lesbarem Zyklus (consistency.bester_tag None): Consistency ungeprüft — wie /konto-ziele (cons_ok nur mit Zyklus) NICHT
+    umstellen, nur anzeigen (fail-closed)."""
+    r = r if isinstance(r, dict) else {}
+    if r.get("aktion") != "ziel":
+        return False, "kein Ziel-Urteil"
+    c = r.get("consistency")
+    if isinstance(c, dict) and c.get("bester_tag") is None:
+        return False, "Ziel erreicht, Consistency nicht prüfbar (Zyklus nicht lesbar) — nicht umgestellt, bitte von Hand prüfen"
+    if isinstance(r.get("gewinntage"), (list, tuple)) and len(r["gewinntage"]) == 2 and int(r["gewinntage"][0]) < int(r["gewinntage"][1]):
+        return False, "Gewinntage noch offen — nicht umgestellt"
+    return True, None
+
+
+def fcp_wartet_meldung(r):
+    """REIN RECHNEND (testbar; WP3): Titel/Text/Daten der ⚪-Meldung „Ziel erreicht → Waiting for Payout" für ein umgestelltes Konto.
+    Ziel = Gewinn-Ziel des Zyklus (Consistency-Ende bzw. festes Ziel, sonst Ziel-von der Größe)."""
+    c = r.get("consistency") if isinstance(r.get("consistency"), dict) else {}
+    z = _wd_num(c.get("ende"))
+    if z is None:
+        zf = r.get("ziel_fest") if isinstance(r.get("ziel_fest"), dict) else {}
+        z = _wd_num(zf.get("usd"))
+    if z is None and _wd_num(r.get("ziel_von")) is not None and _wd_num(r.get("start")) is not None:
+        z = float(r["ziel_von"]) - float(r["start"])
+    gw = _wd_num(r.get("gewinn"))
+    text = (f"{r.get('user') or '?'} · {r.get('konto') or '?'} · Gewinn {_liq_de(gw) if gw is not None else '?'} $ / Ziel {_liq_de(z) if z is not None else '?'} $"
+            + (f" · Zyklus {r.get('zyklus')}" if r.get("zyklus") else "") + (" · Refund (erster Payout)" if r.get("erster_payout") else ""))
+    return "Ziel erreicht → Waiting for Payout", text, {"konto_id": r.get("konto_id"), "gewinn": gw, "ziel": z, "zyklus": r.get("zyklus"),
+                                                       "balance": r.get("balance")}
+
+
 def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None, gewinntage=None, param=None, tage=None,
                       ziel_fest=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
@@ -46524,7 +46560,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     auto_ok = reg.get("auto_bestaetigen") is True
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "auto_bestaetigen": auto_ok,
            "news_regel": reg.get("news_regel") is not False,       # NEWS-REGEL (30.10.2026, S8): Kachel im Regelteil
-           "ziel_auto_wartet": reg.get("ziel_auto_wartet") is True, "at": jetzt.isoformat(), "tag": plan_tag,
+           "ziel_auto_wartet": True,       # WP3 (10.11.2026): immer an, der DB-Schalter wird ignoriert (Feld bleibt für ältere Frontends)
+           "at": jetzt.isoformat(), "tag": plan_tag,
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min), fenster_eigen=bool(fen_eigen),
                           fenster_challenge=f"{hhmm(fen_ch[0])}–{hhmm(fen_ch[1])}"),
            # E1b: Planer-Parameter — wirksam (wert), Code-Standard und was in der DB steht; spalte False = SQL-Datei noch nicht eingespielt
@@ -46533,7 +46570,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
            "firmen": fcp_firmen_anzeige(firmen, param),
            "code": fcp_code_werte(),
-           "geplant": [], "ziel": [], "ausgelassen": [], "plaene": [], "konten_stand": []}
+           "geplant": [], "ziel": [], "ausgelassen": [], "plaene": [], "konten_stand": [],
+           "wartet_neu": []}   # WP3: je Konto am Ziel {konto_id, konto, user, gewinn, ziel, umgestellt, grund?} — zum Gegenprüfen
     if not uids:
         erg["msg"] = "keine ID"
         return erg
@@ -46829,13 +46867,36 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 erg["ausgelassen"].append({"konto_id": z["master_account_id"], "konto": z["master_name"], "user_id": str(z["user_id"]),
                                            "aktion": "aus", "grund": f"Anlegen fehlgeschlagen: {str(e)[:160]}"})
                 print(f"[funded-cfd] ⚠️ Plan {z['master_name']}: {e}", flush=True)
-        if reg.get("ziel_auto_wartet") is True:
-            for r in erg["ziel"]:
-                try:          # wie der Knopf „→ Waiting for Payout" im Konto (accWartetUmstellen): nur waiting_payout_since
-                    sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "is.null"},
-                              {"waiting_payout_since": jetzt.isoformat()})
-                except Exception as e:
-                    print(f"[funded-cfd] ⚠️ Waiting for Payout {r.get('konto')}: {e}", flush=True)
+        # WP3 (Finn 10.11.2026 ~01:40: „Das soll einfach kein Schalter dafür sein. Wenn das Ziel erreicht ist, dann ab zu Waiting for Payout. Sollte kurz
+        # angezeigt werden, damit ich es crosschecken kann."): IMMER umstellen (reg.ziel_auto_wartet wird ignoriert), nur bei echtem Ziel (fcp_ziel_echt).
+        # Guard wie der Knopf im Konto (accWartetUmstellen): funded_cfd und waiting_payout_since leer — gemeldet wird nur, was dieser Lauf WIRKLICH
+        # umgestellt hat (sb_update liefert die geänderte Zeile), also einmal je Konto und Zyklus (nach dem Payout ist waiting_payout_since wieder leer)
+        for r in erg["ziel"]:
+            echt, warum = fcp_ziel_echt(r)
+            titel, text, daten = fcp_wartet_meldung(r)
+            eintrag = dict({k: daten.get(k) for k in ("konto_id", "gewinn", "ziel", "zyklus")}, konto=r.get("konto"), user=r.get("user"),
+                           user_id=r.get("user_id"), firma=r.get("firma"), umgestellt=False)
+            if not echt:
+                erg["wartet_neu"].append(dict(eintrag, grund=warum))
+                continue
+            try:
+                rows = sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "is.null"},
+                                 {"waiting_payout_since": jetzt.isoformat()})
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ Waiting for Payout {r.get('konto')}: {e}", flush=True)
+                erg["wartet_neu"].append(dict(eintrag, grund=f"Umstellen fehlgeschlagen: {str(e)[:120]}"))
+                continue
+            if not rows:
+                continue                 # schon Waiting (anderer Lauf / Knopf) oder keine funded_cfd mehr — nichts Neues, keine zweite Meldung
+            erg["wartet_neu"].append(dict(eintrag, umgestellt=True))
+            print(f"[funded-cfd] ⏳ {text} → Waiting for Payout", flush=True)
+            try:
+                uid_ = str(r.get("user_id") or "")
+                if not _alarm_fremd_verwaltet(uid_):     # nur HT-IDs an die Master-IDs (Standing Order); Gruppen mit Verwalter sehen es im Reiter
+                    alarm_senden(3, "fcp_wartet", titel, text, uid=uid_, schluessel=f"fcp-wartet-{r['konto_id']}-{r.get('zyklus') or ''}",
+                                 tag=f"fcp-wartet-{r['konto_id']}"[:60], daten=daten)
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ Meldung Waiting {r.get('konto')}: {e}", flush=True)
         # O1: festes Ziel einmal je Konto und Zyklus speichern (nur wenn neu gewürfelt) — danach nimmt jeder Lauf genau diesen Wert
         for aid, (zf, alt) in ziel_schreiben.items():
             try:
@@ -46862,9 +46923,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                         sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd"}, {"payout_ready_at": plan_tag})
             except Exception as e:
                 print(f"[funded-cfd] ⚠️ On Demand Payout-Termin {r.get('konto')}: {e}", flush=True)
-        if zeilen:
+        if zeilen or erg["wartet_neu"]:      # WP3: ein Lauf, der nur umgestellt hat, steht auch im Verlauf
             try:
-                sb_insert("auto_plan_lauf", {"tag": plan_tag, "quelle": "funded_cfd", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen")}})
+                sb_insert("auto_plan_lauf", {"tag": plan_tag, "quelle": "funded_cfd", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen", "wartet_neu")}})
             except Exception as e:
                 print(f"[funded-cfd] ⚠️ auto_plan_lauf: {e}", flush=True)
     # Pläne der Funded-CFD-Konten (geplant/laufend/wartend oder seit 30 h gestartet/beendet) für „Zu bestätigen", „Läuft", „Heute beendet"
