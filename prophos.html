@@ -20352,6 +20352,56 @@
       // /admin/payout-calc (Service-Key, weil die Accounts anderen Personen
       // gehören). Reine Übersicht — bucht nichts, rechnet in keine
       // Finanzen-Summe hinein.
+
+      /* PO1 ON-DEMAND-PAYOUT IN DER CFD-LISTE (Finn 09.11.2026: „Bei solchen Accounts, wo es nicht um die Mindesthandelstage geht, sondern um ein anderes
+       * Ziel, müssen mir die unter Payout auch angezeigt werden … Wenn das erfüllt ist, weiß ich: Okay, ich kann jetzt anfangen.“ Fall Moritz FundedNext
+       * 100k 14243608: Konto-Seite „Payout möglich · alles erfüllt“, hier nur „Waiting for Payout · seit heute“). On-Demand-Konten haben keinen Termin (OD1),
+       * also urteilt hier dieselbe Prüfung wie die Konto-Kachel: GET /konto-ziele → app.py kz_rechnen → urteil (Ziel + Consistency + Gewinntage) — nichts
+       * neu gerechnet. Abruf nur für On-Demand-Zeilen ohne Termin, je Konto höchstens alle 5 min; Cache am window, damit ein Neuaufbau der Admin-Seite
+       * nicht jedes Mal neu lädt. Nur Anzeige, kein Schreibweg. */
+      const _admOd = window._admOdUrteil || (window._admOdUrteil = { cache: {}, laeuft: {} })
+      const ADM_OD_TTL_MS = 5 * 60 * 1000
+      // On Demand: Zeilen aus payout_ready kennen on_demand nicht (wie OD1 in admAnfrageNextVorschlag) → Admin-Kontozeile, eigenes Konto, sonst der Name
+      // („… · On Demand“, kontoNameMitAddons hängt das Add-on an)
+      const admRowOnDemand = r => r.on_demand === true
+        || ((admData?.accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).on_demand === true
+        || ((accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).onDemand === true
+        || /·\s*On Demand\b/i.test(String(r.account_name || ''))
+      // fehlende Punkte kurz aus urteil.checks („nein“-Zeilen): „Consistency 52 % > 40 %“, „Ziel noch 180 $“, sonst Name + Wert der Zeile
+      function admOdFehlt(d){
+        const u = d && d.urteil, ab = d && d.abhak
+        if(!u || !Array.isArray(u.checks)) return ''
+        const teile = []
+        for(const c of u.checks){
+          if(!Array.isArray(c) || c[0] !== 'nein') continue
+          const lbl = String(c[1] || ''), wert = String(c[2] || '')
+          const m = /^Consistency ≤ (.+)$/.exec(lbl)
+          if(m) teile.push(`Consistency ${wert} > ${m[1]}`)
+          else if(/^Ziel/.test(lbl) && ab && Number(ab.rest) > 0) teile.push(`Ziel noch ${admGeld(Number(ab.rest), 'USD')}`)
+          else teile.push(`${lbl} ${wert}`.trim())
+        }
+        return teile.join(' · ')
+      }
+      async function admOdLaden(id){
+        if(!id || _admOd.laeuft[id]) return
+        _admOd.laeuft[id] = true
+        let neu
+        try{
+          const { data: { session } } = await supabase.auth.getSession()
+          const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+          const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+          const d = await r.json().catch(() => ({}))
+          if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+          const u = d.urteil || {}
+          // ok null = keine Planer-Regel/kein Payout-Urteil → Zeile bleibt „Waiting for Payout“ wie bisher
+          neu = { at: Date.now(), ok: u.art === 'payout' && typeof u.ok === 'boolean' ? u.ok : null, fehlt: admOdFehlt(d), grund: String(u.grund || '') }
+        }catch(e){ neu = { at: Date.now(), ok: null, fehlt: '', grund: '', fehler: String(e && e.message || e) } }
+        finally{ _admOd.laeuft[id] = false }
+        const alt = _admOd.cache[id]
+        _admOd.cache[id] = neu
+        if(!alt || alt.ok !== neu.ok || alt.fehlt !== neu.fehlt) try{ admCalRender() }catch(e){ console.warn('[PO1]', e) }
+      }
+
       admCalRender()
 
       function admCalRender(){
@@ -20380,6 +20430,13 @@
           const faellig = tag ? tage <= 0 : !!r.wd_ready
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
+          // PO1: On Demand ohne Termin — anfragbar laut Urteil von /konto-ziele (od.ok null = noch nicht geladen/nicht lesbar → wie bisher Waiting)
+          if(!istWd(r) && !tag && admRowOnDemand(r)){
+            const u = _admOd.cache[String(r.account_id)]
+            if(!u || Date.now() - u.at > ADM_OD_TTL_MS) admOdLaden(String(r.account_id))
+            r.calc.od = u || { ok: null }
+            if(r.calc.od.ok === true) r.calc.faellig = true   // zählt in „Fällig jetzt“ wie ein fälliger Termin
+          }
         }
         const addErh = (m, r) => { if(r.calc.anf.erhalten != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.anf.erhalten) }
 
@@ -20456,8 +20513,10 @@
         const gruppen = []
         const wd = cal.filter(istWd)
           .sort((a, b) => (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
+        // PO1 (Finn 09.11.2026): anfragbar oben — fällige Termine (heute/überfällig) und erfüllte On-Demand-Konten zuerst, sonst wie bisher nach Termin
+        const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!(r.calc.od && r.calc.od.ok === true)) ? 0 : 1
         const cfd = cal.filter(r => !istWd(r))
-          .sort((a, b) => String(a.calc.tag || '9999').localeCompare(String(b.calc.tag || '9999')) || String(a.person || '').localeCompare(String(b.person || '')))
+          .sort((a, b) => (cfdAnf(a) - cfdAnf(b)) || String(a.calc.tag || '9999').localeCompare(String(b.calc.tag || '9999')) || String(a.person || '').localeCompare(String(b.person || '')))
         if(wd.length) gruppen.push(['wd', wd])
         if(cfd.length) gruppen.push(['cfd', cfd])
 
@@ -20506,11 +20565,35 @@
           const st = tr.querySelector('.c-stand')
           if(c.tag) tr.dataset.calTag = c.tag
           if(!(istWd(r) && r.wd_target > 0) && !c.tag){
-            const chip = document.createElement('span'); chip.className = 'chip chip-neutral'
             const tw = r.waiting_since ? Math.max(0, -tageBis(r.waiting_since)) : null
-            chip.textContent = 'Waiting for Payout' + (tw != null ? (tw === 0 ? ' · seit heute' : ` · seit ${tw} Tag${tw === 1 ? '' : 'en'}`) : '')
-            st.appendChild(chip)
-            if(admAnfrageVon(r)) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ (P3) — nur die Anzeige, nie ein zusätzlicher Knopf
+            const wartetTxt = 'Waiting for Payout' + (tw != null ? (tw === 0 ? ' · seit heute' : ` · seit ${tw} Tag${tw === 1 ? '' : 'en'}`) : '')
+            const od = c.od && typeof c.od.ok === 'boolean' ? c.od : null, offen = !!admAnfrageVon(r)
+            if(od && od.ok){
+              // PO1: On Demand erfüllt → „jetzt anfragbar“ (grün, wie „heute anfragbar“); ohne offene Anfrage ein Knopf wie beim fälligen Termin (P3)
+              const chip = document.createElement(offen ? 'span' : 'button')
+              chip.className = 'chip chip-good'
+              chip.textContent = 'jetzt anfragbar'
+              chip.title = `On Demand · ${od.grund || 'alles erfüllt'} · ${wartetTxt}`
+              if(!offen){
+                chip.type = 'button'; chip.style.cssText = 'border:0;cursor:pointer'
+                chip.title += ` — Payout für ${admShortName(r.person || '—')} anfragen`
+                chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
+              }
+              st.appendChild(chip)
+            }else{
+              const chip = document.createElement('span'); chip.className = 'chip chip-neutral'
+              chip.textContent = wartetTxt
+              st.appendChild(chip)
+              if(od && od.fehlt){
+                // PO1: On Demand noch nicht erfüllt → der fehlende Punkt kurz darunter („Consistency 52 % > 40 %“)
+                const f = document.createElement('div')
+                f.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:3px'
+                f.textContent = 'On Demand · ' + od.fehlt
+                f.title = od.grund || ''
+                st.appendChild(f)
+              }
+            }
+            if(offen) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ (P3) — nur die Anzeige, nie ein zusätzlicher Knopf
           }else if(c.tag && !(istWd(r) && r.wd_target > 0)){
             // CFD DIREKT ANFRAGEN (P3, Finn 04.11.2026 ~02:20 Dubai: „Dass ich bei den CFDs auf ‚Anfragbar‘ gehen kann und direkt anfangen kann“): ist der Termin
             // fällig (heute/überfällig) und noch keine Anfrage offen, ist der Chip ein Knopf und öffnet dieselbe Anfrage wie „anfragbar“ bei den Futures
@@ -57021,7 +57104,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2114'
+  const OS_TAB_BUILD = '2026-09-22.2115'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
