@@ -98,6 +98,28 @@ def main():
     namen = [k[0] for k in s.klicks]
     check(not ok and code == "konto_nicht_erreicht" and namen == ["Konto-Auslöser"], f"halbe Liste ohne Ziel → raus, kein Zeilen-Klick ({namen}, {msg})")
 
+    # TX1 Ursache (Simon 17:2x, TopstepX 2.4.34.1): Karte „ACCT: 702233-29585872BAL: $146,923.54" — ohne Vorspann, „BAL" angeklebt
+    def karte(nr, y):
+        return {"text": f"150K DLL CombineACCT: {nr}BAL: $146,923.54", "id": nr + "BAL", "id_kurz": nr + "BAL", "endung": nr[-3:] + "BAL"[:1],
+                "abschnitt": "Trading Combines (2)", "format": "neu", "rect": [10, y, 300, 50], "zu": {}}
+    neu = [karte("702233-29585872", 60), karte("702233-78201817", 120)]
+    for ziel, soll in (("150KTC-SKU-V2-DLL-702233-29585872", "5872"), ("150KTC-SKU-V2-DLL-702233-78201817", "1817")):
+        ob._TSX_ENDUNG_BEWIESEN.clear()
+        x, n, g = ob.tsx_k2_eintrag(neu, ziel)
+        check(x is not None and x.get("endung") == soll and n == 1 and ob._TSX_ENDUNG_BEWIESEN.get(ob._nur_alnum(ziel)) is True,
+              f"Karte ohne Vorspann mit angeklebtem BAL → {soll} gefunden, Endung bewiesen ({(x or {}).get('id')}, {g})")
+    ob._TSX_ENDUNG_BEWIESEN.clear()
+    x, n, g = ob.tsx_k2_eintrag(neu, "150KTC-SKU-V2-DLL-702233-11111111")
+    check(x is None and n == 0, f"fremdes Konto nicht in der Liste → kein Treffer ({g})")
+    check(not ob.tsx_karte_kennung_passt("5872", "150KTC-SKU-V2-DLL-702233-29585872")
+          and not ob.tsx_karte_kennung_passt("29585872", "150KTC-SKU-V2-DLL-702233-29585872")
+          and ob.tsx_karte_kennung_passt("702233-29585872", "150KTC-SKU-V2-DLL-702233-29585872")
+          and ob.tsx_karte_kennung_passt("150KTC-SKU-V2-DLL-702233-29585872", "150KTC-SKU-V2-DLL-702233-29585872"),
+          "Kennungs-Abgleich: nur volle Kennung oder NUTZER(6)-KONTO(8), nie eine bloße Endung")
+    check(ob.tsx_karte_norm({"id": "702233-29585872BAL", "endung": "2BAL"}) == {"id": "702233-29585872", "endung": "5872"}
+          and ob.tsx_karte_norm({"id": "EXPRESS-V2-679005-57119155", "endung": "9155"})["id"] == "EXPRESS-V2-679005-57119155",
+          "tsx_karte_norm: angeklebtes BAL weg, Endung neu; saubere Kennung bleibt")
+
     sig = ob.tsx_liste_signatur
     check(sig([]) == () and sig([zeile(ALT, 50)]) != sig(liste) and sig(liste) == sig([dict(x) for x in liste]),
           "tsx_liste_signatur: leer = (), Anzahl/Kennung zählen, gleiche Liste = gleich")

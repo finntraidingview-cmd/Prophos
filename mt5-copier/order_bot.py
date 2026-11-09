@@ -19258,6 +19258,39 @@ def tsx_liste_signatur(liste):
                  for x in (liste or []) if isinstance(x, dict))
 
 
+def tsx_karte_norm(x):
+    """REIN RECHNEND (testbar, TX1 09.11.2026): Karte der TopstepX-Konto-Liste (Version 2.4.34.1) säubern. Belegt (Simon 17:2x Dubai, Spur
+    „K2 Karten"): Kartentext „150K DLL CombineACCT: 702233-29585872BAL: $146,923.54" — die Kennung steht OHNE den Vorspann „150KTC-SKU-V2-DLL-",
+    und „BAL" klebt ohne Leerzeichen dran; augen_tsx.js 0.7.2 las daraus id „702233-29585872BAL" und endung „2BAL" → 0 Treffer, alle
+    Topstep-Läufe scheiterten. Hier: angeklebtes „BAL" hinter einer Ziffer weg (id, id_kurz), endung = letzte 4 Ziffern der gesäuberten id,
+    wenn sie keine 4 Ziffern war. Kopie, das Original bleibt."""
+    if not isinstance(x, dict):
+        return x
+    y = dict(x)
+    for k in ("id", "id_kurz"):
+        v = y.get(k)
+        if isinstance(v, str):
+            y[k] = re.sub(r"(?<=\d)BAL$", "", v.strip(), flags=re.I)
+    e = str(y.get("endung") or "")
+    if not re.fullmatch(r"\d{4}", e):
+        m = re.search(r"(\d{4})$", str(y.get("id") or ""))
+        if m:
+            y["endung"] = m.group(1)
+    return y
+
+
+def tsx_karte_kennung_passt(karte_id, ext):
+    """REIN RECHNEND (testbar, TX1 09.11.2026): volle Kennung ODER der Kartenteil ohne Vorspann („702233-29585872" zu
+    „150KTC-SKU-V2-DLL-702233-29585872"): Ziel endet genau auf die Karten-Kennung, und die trägt die Topstep-Form NUTZER(6)-KONTO(8) —
+    14 Ziffern, damit eindeutig je Konto (nie eine bloße Endung)."""
+    ziel, kid = _nur_alnum(ext), _nur_alnum(karte_id)
+    if not kid or not ziel:
+        return False
+    if kid == ziel:
+        return True
+    return bool(re.fullmatch(r"\d{6}-?\d{8}", str(karte_id or "").strip())) and ziel.endswith(kid)
+
+
 def tsx_k2_eintrag(liste, ext):
     """REIN RECHNEND (testbar, K2 01.10.2026): Zeile der OFFENEN TopstepX-Konto-Liste (augen_tsx.js konto.liste: {text, label, id,
     ineligible, aus, rect, zu}) → (eintrag | None, anzahl, grund). Genau EINE Zeile, deren volle Kennung die External ID ist; „(Ineligible)"
@@ -19266,7 +19299,8 @@ def tsx_k2_eintrag(liste, ext):
     ziel = _nur_alnum(ext)
     if len(ziel) < 5:
         return None, 0, "External ID fehlt"
-    treffer = [x for x in (liste or []) if isinstance(x, dict) and _nur_alnum(x.get("id")) == ziel]
+    liste = [tsx_karte_norm(x) for x in (liste or []) if isinstance(x, dict)]   # TX1 (09.11.2026): „…5872BAL" → „…5872"
+    treffer = [x for x in liste if tsx_karte_kennung_passt(x.get("id"), ext)]
     if len(treffer) == 1 and any(isinstance(x, dict) and x.get("format") == "neu" for x in (liste or [])):
         # 2.4.32: Karte über die volle Kennung getroffen, der Kopf zeigt danach evtl. nur „(...9147)" — Endungs-Eindeutigkeit mitmerken
         e_ziel = ziel[-4:]
