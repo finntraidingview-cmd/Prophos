@@ -18004,6 +18004,11 @@ TSX_K3_WACHHUND_S = 158.0          # Panel /api/tsx-konto beendet den Bot nach 1
 # 'scharf') auf PCs in puls_topstep_pcs. False = scharf antwortet wieder cdp_folgt K4.
 TSX_K4_AKTIV = True
 TSX_K4_BRACKET_RUNDEN = 3          # Risk/To Make nach dem Fill: so viele Runden (je Zelle zwei Versuche), gestreut, Reiter neu (29.10.2026)
+# SL NACHSETZEN (09.11.2026, WS1c — Marc Topstep-Challenge …1094, Plan 272809d8: SELL 2 NQ, alle drei Runden scheiterten in 3,5 s an
+# „Risk-Zelle verdeckt, gesperrt oder ohne Rechteck", die Position lief ohne SL ins Tageslimit −3.000 $): Hat der Plan einen SL und steht
+# Risk nach den Runden nicht, folgen bis zu so viele WEITERE Runden NUR für Risk, gestreut ab 3 s auseinander (ein Zustand direkt nach dem
+# Fill, der nach 1–2 s noch nicht vorbei ist, bekommt so ~20 s statt 3,5 s). Dieselbe Hand wie die Runden, nie ein Close, nie eine Order.
+TSX_K4_SL_NACHSETZ_RUNDEN = 4
 TSX_K4_REST_S = 75.0               # so viel Zeit muss bis zum Wachhund noch sein — sonst wird NICHT gesendet (Order + Beweis + zwei Zellen)
 TSX_K4_BEWEIS_S = 15.0             # so lange nach dem Klick auf Fill-Meldung oder Position warten (wie Orbit K4)
 TSX_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}   # $ je Punkt und Kontrakt
@@ -20167,6 +20172,39 @@ def tsx_k4_wert_gleich(feldwert, usd):
     return abs(float(t) - float(usd)) < 0.005
 
 
+def tsx_k4_zelle_zu_grund(f, geo=None):
+    """REIN RECHNEND (testbar, 09.11.2026 WS1c — Plan 272809d8: die Warnung „Risk-Zelle verdeckt, gesperrt oder ohne Rechteck" nannte drei
+    mögliche Gründe in einem, die Spur keinen; WELCHER es war, ließ sich hinterher nicht mehr belegen). Die EINE festgestellte Ursache, warum
+    die Zelle nicht angeklickt wird, mit Wert: ohne Rechteck bzw. zu schmal · gesperrt · Mitte außerhalb des Fensters (Lage + Fenstergröße) ·
+    verdeckt von <was oben liegt> (zustand().oben aus augen_tsx.js). Ohne Semikolon (die Warnung wird an „; " in Teile geschnitten).
+    -> Text ('' = die Zelle wäre klickbar)"""
+    fd = f if isinstance(f, dict) else {}
+    r = cdp_rect(fd.get("rect"))
+    zu = fd.get("zu") if isinstance(fd.get("zu"), dict) else {}
+    g = geo if isinstance(geo, dict) else {}
+    try:
+        x, y, w, h = [float(v) for v in list(r)[:4]] if r and len(r) >= 4 else (None,) * 4
+    except (TypeError, ValueError):
+        x = y = w = h = None
+    if w is None:
+        return "ohne Rechteck"
+    if w < 30:
+        return f"zu schmal ({w:.0f} px)"
+    if zu.get("disabled"):
+        return "gesperrt (disabled)"
+    if zu.get("verdeckt"):
+        ob_ = zu.get("oben")
+        fen = (f"Fenster {g.get('innerWidth')}×{g.get('innerHeight')}" if g.get("innerWidth") and g.get("innerHeight") else "Fenster ?")
+        if ob_ == "ausserhalb":
+            return f"Mitte außerhalb des Fensters (Zelle y {y:.0f}–{y + h:.0f}, x {x:.0f}–{x + w:.0f}, {fen})"
+        if isinstance(ob_, dict):
+            was = " ".join(str(v) for v in (ob_.get("tag"), ob_.get("role")) if v)
+            txt_ = re.sub(r"\s+", " ", str(ob_.get("text") or "")).replace(";", ",").strip()[:40]
+            return f"verdeckt von {was or '?'}" + (f" '{txt_}'" if txt_ else "") + f" (Zelle y {y:.0f}–{y + h:.0f}, {fen})"
+        return f"verdeckt (oben unbekannt, Zelle y {y:.0f}–{y + h:.0f}, {fen})"
+    return ""
+
+
 def tsx_k4_toleranz(wurzel, menge):
     """REIN RECHNEND (testbar): Spiel der Rücklesung in $ — ein Tick der ganzen Position (TopstepX rundet den Betrag auf Ticks)."""
     return TSX_PUNKTWERT.get(str(wurzel or "").upper(), 20.0) * TSX_TICK * max(1, int(menge or 1)) + 0.01
@@ -20473,7 +20511,16 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
             r = cdp_rect(f.get("rect"))
             zu = f.get("zu") if isinstance(f.get("zu"), dict) else {}
             if not r or r[2] < 30 or zu.get("verdeckt") or zu.get("disabled"):
-                return False, None, f"{name}-Zelle verdeckt, gesperrt oder ohne Rechteck", st
+                # 09.11.2026 WS1c (Plan 272809d8): Anfang des Texts bleibt (Muster in puls_fehler_muster), dahinter die EINE festgestellte
+                # Ursache mit Wert — und jetzt auch in der Spur (vorher stand dort nichts, nur die Runden-Zeilen)
+                g_ = f"{name}-Zelle verdeckt, gesperrt oder ohne Rechteck"
+                try:
+                    d_ = tsx_k4_zelle_zu_grund(f, st.get("geo") if isinstance(st, dict) else None)
+                except Exception as e_:
+                    d_ = f"Ursache nicht lesbar ({type(e_).__name__})"
+                g_ += f" — {str(d_).replace(';', ',')}" if d_ else ""      # nie „; " (Warnungs-Parser schneidet dort)
+                trail.append(f"{g_} — kein Klick")
+                return False, None, g_, st
             r = list(r)[:4]
             # RECHTECK-BEWEIS (29.10.2026 abends, Master nach e9cf8722): Klickfläche nur im mittleren Band der Zelle, Zelle in ihrer Zeile;
             # am Druckpunkt muss die Seite GENAU diese Zelle (role=gridcell/cell, Rechteck ±3 px, Punkt ≥ 3 px vom Rand) zeigen (pruef.zelle)
@@ -20718,7 +20765,18 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
             s._k4_stift_aus = set()                            # Stift-Merker je Lauf neu (s. _tsx_k4_feld)
         except Exception:
             pass
-        for runde in range(TSX_K4_BRACKET_RUNDEN):
+        # SL NACHSETZEN (09.11.2026 WS1c, s. TSX_K4_SL_NACHSETZ_RUNDEN): nur mit Plan-SL hängen an die Runden weitere NUR für Risk;
+        # To Make wird dort nicht mehr versucht (liegen), steht aber am Ende wie bisher in Warnung und brackets_fehlen
+        liegen, n_nach = [], 0                                     # n_nach = wirklich gelaufene Nachsetz-Versuche (Spur)
+        for runde in range(TSX_K4_BRACKET_RUNDEN + (TSX_K4_SL_NACHSETZ_RUNDEN if sl else 0)):
+            nachsetz = runde >= TSX_K4_BRACKET_RUNDEN
+            if runde == TSX_K4_BRACKET_RUNDEN:
+                liegen = [x_ for x_ in offen_f if x_[0] != "risk"]
+                offen_f = [x_ for x_ in offen_f if x_[0] == "risk"]
+                if offen_f and not abbruch:
+                    trail.append(f"SL NACHSETZEN: Risk {tsx_k4_betrag_text(sl)} $ steht nach {TSX_K4_BRACKET_RUNDEN} Runden nicht "
+                                 f"({letzte.get('Risk') or '?'}) — bis zu {TSX_K4_SL_NACHSETZ_RUNDEN} weitere Versuche nur für Risk, "
+                                 "gestreut ab 3 s, nie ein Close")
             if not offen_f:
                 break
             if abbruch:
@@ -20730,13 +20788,23 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                     letzte[n_] = letzte.get(n_) or "Zeitlimit des Laufs"
                 break
             if runde:
-                _warte(1.0, 1.0)
+                if nachsetz:
+                    _warte(3.0, 2.0)                                  # Jitter-Regel: ab 3 s gestreut (ein Zustand nach dem Fill darf vergehen)
+                    if _tsx_frist(trail) - trail.sekunden() < 30.0:   # Prüfer WS1c: das längere Warten darf den Wachhund nie näher rücken lassen
+                        letzte["Risk"] = letzte.get("Risk") or "Zeitlimit des Laufs"
+                        break
+                else:
+                    _warte(1.0, 1.0)
                 try:
                     st = s.stand()
                 except Exception as e_:
                     trail.append(f"Brackets Runde {runde + 1}: Lesen {type(e_).__name__}")
                     continue
-                trail.append(f"Brackets: Runde {runde + 1} von {TSX_K4_BRACKET_RUNDEN} für {', '.join(n_ for _f, _u, n_ in offen_f)}")
+                if nachsetz:
+                    n_nach += 1
+                    trail.append(f"SL nachsetzen: Versuch {n_nach} von {TSX_K4_SL_NACHSETZ_RUNDEN} für Risk")
+                else:
+                    trail.append(f"Brackets: Runde {runde + 1} von {TSX_K4_BRACKET_RUNDEN} für {', '.join(n_ for _f, _u, n_ in offen_f)}")
             if isinstance(st, dict) and st.get("popups"):
                 res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")   # → Fehlerfoto auch bei ok true (Hülle)
                 try:
@@ -20792,6 +20860,7 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                     letzte[name] = grund_f
                     noch.append((feld, usd, name))
             offen_f = noch
+        offen_f = offen_f + liegen                                  # To Make aus den Nachsetz-Runden wieder dazu (Warnung wie bisher)
         for _f, usd, name in offen_f:
             warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt ({letzte.get(name) or 'nicht gesetzt'})")
         # RÜCKLESUNG ALS BEWEIS (29.10.2026): Zeile frisch lesen — eingetragen (ist) oder Betrag > 0 $ in der Zeile; sonst brackets_fehlen
@@ -20818,6 +20887,12 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
             res["brackets_fehlen"] = bf
             trail.append("BRACKETS FEHLEN nach der Rücklesung: " + ", ".join(k for k, v in (("Risk (SL)", bf["risk"]), ("To Make (TP)", bf["tp"])) if v)
                          + " — Position bleibt offen, NICHT automatisch geschlossen")
+            if bf.get("risk"):
+                # 09.11.2026 WS1c: Plan-SL auch nach dem Nachsetzen nicht bewiesen → ORDER OHNE SL. Der 🔴-Alarm läuft über den vorhandenen
+                # Weg (brackets_fehlen → tv.brackets_fehlen → app.py alarm_ereignisse „… ohne SL/TP", sofort + eine Erinnerung nach 15 min).
+                # Schließen entscheidet Finn — Puls schließt nie.
+                trail.append(f"ORDER OHNE SL: Risk {tsx_k4_betrag_text(sl)} $ nach {TSX_K4_BRACKET_RUNDEN} Runden + {n_nach} Nachsetz-Versuchen nicht bewiesen — "
+                             "🔴-Alarm über brackets_fehlen, Position bleibt offen")
     z, _g = tsx_k4_zeile(st, befehl)
     if not sl and isinstance(z, dict) and isinstance((z.get("risk") or {}).get("wert"), (int, float)) and z["risk"]["wert"] > 0:
         warn.append(f"Risk steht auf {z['risk']['wert']:g} $ (TopstepX-Bracket), der Plan hat keinen SL")

@@ -9612,13 +9612,16 @@ def test_tsx_k4():
         r6, _ = lauf(s6)
         chk(r6["ok"] is True and r6["gesendet"] is True and "Risk 21 $ nicht gesetzt" in r6["warnung"] and "To Make 198 $ nicht gesetzt" in r6["warnung"]
             and "sl_level" not in r6 and r6["einstieg"] == 31339.5 and sum(1 for k in s6.klicks if k[0].startswith("ORDER")) == 1
-            and sum(1 for k in s6.klicks if k[0].startswith("Risk")) == 2 * ob.TSX_K4_BRACKET_RUNDEN
+            # 09.11.2026 WS1c: mit Plan-SL folgen den Runden TSX_K4_SL_NACHSETZ_RUNDEN weitere nur für Risk (je zwei Versuche)
+            and sum(1 for k in s6.klicks if k[0].startswith("Risk")) == 2 * (ob.TSX_K4_BRACKET_RUNDEN + ob.TSX_K4_SL_NACHSETZ_RUNDEN)
+            and sum(1 for k in s6.klicks if k[0].startswith("To Make")) == 2 * ob.TSX_K4_BRACKET_RUNDEN
             and r6.get("brackets_fehlen") == {"risk": True, "tp": True},
             f"Eingabefeld geht nicht auf: je Zelle zwei Versuche in jeder der drei Runden, dann Warnung + brackets_fehlen — die Order bleibt bewiesen ({r6.get('warnung')}, {r6.get('brackets_fehlen')})")
         s6b = _T4(tipp_extra="9")
         r6b, _ = lauf(s6b)
         chk(r6b["ok"] and "nicht gesetzt" in r6b["warnung"] and s6b.werte == {"risk": None, "to_make": None} and "Enter" not in s6b.tasten
-            and s6b.tasten.count("Escape") == 4 * ob.TSX_K4_BRACKET_RUNDEN, f"falscher Wert im Feld: nie Enter, Esc, Warnung ({s6b.tasten})")
+            and s6b.tasten.count("Escape") == 4 * ob.TSX_K4_BRACKET_RUNDEN + 2 * ob.TSX_K4_SL_NACHSETZ_RUNDEN,   # + SL nachsetzen (WS1c)
+            f"falscher Wert im Feld: nie Enter, Esc, Warnung ({s6b.tasten})")
         s6c = _T4(enter_wirkt=False)
         r6c, _ = lauf(s6c)
         chk(r6c["ok"] and "nach Enter" in r6c["warnung"] and "sl_level" not in r6c, "Enter ohne Wirkung → Rücklesung scheitert, Warnung")
@@ -9764,7 +9767,7 @@ def test_tsx_k4():
         s9b = _T4(tippen_wirft=True)
         r9b, _ = lauf(s9b)
         chk(r9b["ok"] is True and r9b["gesendet"] is True and "Risk 21 $ nicht gesetzt (abgebrochen: RuntimeError" in r9b["warnung"]
-            and "To Make 198 $ nicht gesetzt (abgebrochen" in r9b["warnung"] and s9b.tasten.count("Escape") == 2 * ob.TSX_K4_BRACKET_RUNDEN and gesendet_log[-1][1] == "ende"
+            and "To Make 198 $ nicht gesetzt (abgebrochen" in r9b["warnung"] and s9b.tasten.count("Escape") == 2 * ob.TSX_K4_BRACKET_RUNDEN + ob.TSX_K4_SL_NACHSETZ_RUNDEN and gesendet_log[-1][1] == "ende"
             and any(k[0].startswith("To Make") for k in s9b.klicks) and "tp_level" not in r9b and r9b["code"] == "" and r9b["einstieg"] == 31339.5,
             f"Ausnahme in der Zelle NACH dem Fill → ok + Warnung statt cdp_fehler, Esc je Feld, zweite Zelle noch versucht, 'ende' gesendet ({r9b.get('warnung')})")
         s9c = _T4(tippen_wirft=True, tasten_wirken=False)
