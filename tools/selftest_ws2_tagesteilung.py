@@ -188,6 +188,18 @@ def main():
           and std["schluss_topstep"] is False and std["schluss_news_sperre"] is True
           and E({}, {"schluss_topstep": True}, keys)[0]["tagesteilung"]["schluss_topstep"] is True and E({}, {"schluss_news_sperre": "ja"}, keys)[0] is None,
           "Schalter schluss_topstep (aus) / schluss_news_sperre (an): Standard, Schreibweg, Kopie in zschluss")
+    # Nachzug 10.11.2026 (Master nach Prüfer-OK): finaler/Klein-Trade bekommt keinen Zufalls-Schluss und bleibt ein Trade
+    F = a["tt_ein_trade_fest"]
+    check(F(wf, "tvv2") and not F(w, "tvv2") and F({"stufe": "normal", "rest": 3000, "tp": 3500}, "tvv2") and F({"rest": -10, "tp": 3000}, "tvv2")
+          and F({"stufe": "Tage sammeln"}, "tvv2") and not F({"stufe": "Tage sammeln", "rest": 100, "tp": 3000}, "tsv2") and F({"tage_mini": True}, "tsv2") and F({"stufe": "Klein-Trade"}, "mt5v2")
+          and not F({"stufe": "Klein"}, "tsv2") and F({"stufe": "x", "rest": 2000, "tp": 4500}, "tsv2") and not F({"stufe": "x", "rest": 9000, "tp": 4500}, "tsv2"),
+          "tt_ein_trade_fest: letzter/Klein/Mini/Rest-/Tage-sammeln-Trade und TP ≥ Rest (final wie tfh/Orbit V3) fest; normale Trades nicht")
+    wr = dict(w, stufe="normal", rest=3000)
+    check(H(wr, TRADEIFY, "challenge", pa, random.Random(2), n_fest=3) is wr, "finaler Orbit-Trade über TP ≥ Rest (ohne Stufen-Text) bleibt 1 Trade")
+    src0 = open(APP, encoding="utf-8").read()
+    check('_tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))' in src0 and "_zs = None if _tt_fest else tt_zschluss(_tt_p, rnd)" in src0
+          and src0.index("_tt_fest = tt_ein_trade_fest(") < src0.index("w = tt_planer_haken(w, k[\"regel\"]"),
+          "Planer-Haken: Zufalls-Schluss nie an finalen/Klein-Trades, gemessen vor dem Haken")
     # ── 5 Genaue Lesung je Weg ─────────────────────────────────────────────────────────────────────────────────────────
     EC = a["tt_echt"]
     check(EC({"route": "tvv2", "mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"quelle": "puls", "balance_end": 151000}}}) == (150000.0, 151000.0)
@@ -274,6 +286,8 @@ def main():
     check(st is not None and st >= mitt + timedelta(hours=9, minutes=59) and st.hour * 60 + st.minute <= 16 * 60 + 30
           and bool(z.get("auto_bestaetigt_at")) and z["notes"].startswith("Auto-Planer · Tag 2/3 · Haupt"),
           f"Start nach der Lesung + Abstand, im Fenster, Bestätigung geerbt ({st and st.strftime('%H:%M')})")
+    check(any(pid == T1 and p_.get("lesen_bis") for pid, p_ in db["patch"]),
+          "Nachzug 10.11.: lesen_bis schon beim ersten Takt geschrieben, auch wenn der Teil genau gelesen ist (keine Abhak-Zeile im Radar)")
     a["tt_tick"](jetzt, random.Random(12))
     check(len(db["ins"]) == 1, "zweiter Takt: nie doppelt")
     check(any(f.get("id") == f"eq.{T1}" and u.get("status") == "completed" and u.get("master_pl") == 400 for f, u in db["upd"]),

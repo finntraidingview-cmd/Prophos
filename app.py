@@ -29336,8 +29336,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                     _tt_p = tt_param(reg.get("regeln"))
                     if tt_gilt(_tt_p, (k["regel"].get("namen") or [""])[0], (gruppe or {}).get("gruppe_id"), k["a"].get("id"), k["a"].get("account_type")):
                         _tt_n = _tt_p.get("test_n") if (_tt_p.get("nur_konten") and _tt_p.get("test_n")) else None
+                        # Nachzug 10.11.2026 (Master): finaler/Klein-Trade (Tradeify final → Orbit V3/tfh, TT_EIN_TRADE_STUFE) bekommt keinen
+                        # Zufalls-Schluss — am Plan VOR dem Haken gemessen (der Haken stellt „Tag 1/n …“ vor die Stufe)
+                        _tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))
                         w = tt_planer_haken(w, k["regel"], k["a"].get("account_type"), _tt_p, rnd, ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), n_fest=_tt_n)
-                        _zs = tt_zschluss(_tt_p, rnd)
+                        _zs = None if _tt_fest else tt_zschluss(_tt_p, rnd)
                         if _zs:
                             w = dict(w, zschluss=_zs)
                 except Exception as e:
@@ -38094,7 +38097,7 @@ def tt_planer_haken(w, regel, phase, param, rnd, ppl=None, n_fest=None):
         return w                                    # Topstep ohne Kettenregel: nie anfassen
     if k0 and (k0.get("reparatur") or k0.get("ein_trade")):
         return w                                    # Reparatur-Tag bleibt ein Trade (alter Weg)
-    if w.get("tage_mini") or w.get("symbol") or (route != "tsv2" and TT_EIN_TRADE_STUFE.search(str(w.get("stufe") or ""))):
+    if w.get("symbol") or (route != "tsv2" and tt_ein_trade_fest(w, route)):
         return w
     art = tt_teil_art(route)
     sym = str(regel.get("symbol") or "NQ")
@@ -38134,6 +38137,25 @@ def tt_planer_haken(w, regel, phase, param, rnd, ppl=None, n_fest=None):
     w2["stufe"] = f"Tag 1/{plan['n']} · {txt} (Tag: {anteile_txt}, Ziel +{round(ziel):,} $)".replace(",", ".") + " · " + str(w.get("stufe") or "")
     w2["kette"] = k
     return w2
+
+
+def tt_ein_trade_fest(w, route=None):
+    """REIN (testbar; Nachzug 10.11.2026 nach Prüfer-OK, Master): ist w ein finaler oder kleiner Trade, der EIN Trade bleibt und KEINEN Zufalls-Schluss
+    (zschluss) bekommt? Sonst schlösse WS2c einen Pass-Trade zufällig vor dem Ziel. Klein-/Mini-/Gewinntag-/Rest-/letzter Trade (tage_mini,
+    TT_EIN_TRADE_STUFE) und final wie ap_tradeify_final_halten / prophos_plan_final_text: Rest ≤ 0 oder TP ≥ Rest bis Ziel — genau die Pläne, die
+    tfh_tick kurz vor dem Start auf Orbit V3 hebt. Topstep (tsv2): Stufen-Texte der Kette zählen nicht (eigene Texte), nur tage_mini und Rest/TP."""
+    w = w if isinstance(w, dict) else {}
+    if w.get("tage_mini"):
+        return True
+    stufe = str(w.get("stufe") or "")
+    if str(route or "") != "tsv2" and TT_EIN_TRADE_STUFE.search(stufe):
+        return True
+    if stufe.startswith("Tage sammeln"):
+        return False
+    rest, tp = _wd_num(w.get("rest")), _wd_num(w.get("tp"))
+    if rest is None:
+        return False
+    return rest <= 0 or (tp is not None and tp > 0 and tp >= rest)
 
 
 def tt_bal_wache_ok(k):
@@ -38333,9 +38355,11 @@ def tt_tick(jetzt=None, rnd=None):
             bis = tt_fenster_bis(zeiten_r, route, p.get("ended_at"), tz,
                                  t2_bis=((ap_kette_regel(regel) or {}).get("t2_bis") if (route == "tsv2" and regel) else None))
             ende_ts = _ap_ts(p.get("ended_at"))
+            if bis and not k.get("lesen_bis"):
+                # Nachzug 10.11.2026 (WS2e/S4): lesen_bis IMMER beim ersten Takt schreiben, auch wenn der Teil schon genau gelesen ist — sonst zeigt der
+                # Radar 1–2 min eine Abhak-Zeile, bis Nachfolger/Tagesende stehen (die Topstep-Kette schreibt es ebenso an Trade 1)
+                _tt_patch(pid, {"lesen_bis": bis})
             if not echt:
-                if bis and not k.get("lesen_bis"):
-                    _tt_patch(pid, {"lesen_bis": bis})
                 if bis and jetzt > _ap_ts(bis):
                     ende_code, ende_text = "keine_lesung", TT_ENDE_TXT["keine_lesung"]
                 else:
