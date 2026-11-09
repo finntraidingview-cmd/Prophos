@@ -20588,6 +20588,38 @@
         if(!alt || alt.ok !== neu.ok || alt.fehlt !== neu.fehlt) try{ admCalRender() }catch(e){ console.warn('[PO1]', e) }
       }
 
+      /* RC2 RECOVERER IN PAYOUTS (Finn 10.11.2026: „Kannst du die Accounts auch so flaggen, die Recovery sind? … damit ich das auch unter Admin → Payouts sehe“).
+       * NUR ANZEIGE aus dem vorhandenen Stand (window._wdZyklusRoh, GET /wd-zyklus?ansicht=admin, gerechnet auf Railway): Apex im Recoverer (z.aktiv) bzw.
+       * Tradeify im Minus-Zyklus (z.gesperrt, Chip „Recovery“ wie im Planer). Kein Zustand → kein Chip. RC1-Logik unberührt. REIN RECHNEND (Test-Haken
+       * window._admRecInfo): → { name, fehlt, plan, tip } | null. jetzt = ms (Tag-Vergleich in Gerätezeit). */
+      function admRecInfo(id, jetzt){
+        const z = id != null ? window._wdZyklusRoh?.(id) : null
+        if(!z) return null
+        const tradeify = z.art === 'tradeify'
+        if(tradeify ? !z.gesperrt : !z.aktiv) return null
+        const de = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
+        let fehlt = ''
+        if(tradeify){
+          const min = z.min_usd != null ? Number(z.min_usd) : 1
+          // unter 10 $ mit Cent (wie das Popup — 0,40 $ nicht als „+0 $“), sonst aufgerundet
+          if(z.gewinn != null && isFinite(Number(z.gewinn))){ const f = Math.max(0, min - Number(z.gewinn)); fehlt = `fehlt: +${f < 10 ? f.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.ceil(f).toLocaleString('de-DE')} $` }
+        } else if(Number(z.rest_bis_erfuellt) > 0) fehlt = `fehlt: +${de(z.rest_bis_erfuellt)} $${Number(z.tage_geschaetzt) > 0 ? ` (~${z.tage_geschaetzt} Tag${Number(z.tage_geschaetzt) === 1 ? '' : 'e'})` : ''}`
+        // naechster_plan: Feld fehlt (älteres Backend/Lesefehler) → „Plan unbekannt“; null → „kein Plan“
+        const np = z.naechster_plan
+        let plan
+        if(np === undefined) plan = 'Plan unbekannt'
+        else if(!np) plan = 'kein Plan'
+        else{
+          const t = Date.parse(np.start_um || '') || 0, n = jetzt || Date.now()
+          const zeit = t ? (new Date(t).toDateString() === new Date(n).toDateString() ? '' : new Date(t).toLocaleDateString('de-DE', { weekday: 'short' }) + ' ')
+            + new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
+          const was = np.recoverer ? (tradeify ? 'Ausgleich' : 'Recovery-Trade') : 'Trade (normal)'
+          plan = np.status === 'open' ? `${was} läuft${zeit ? ' seit ' + zeit : ''}` : `nächster ${was}${zeit ? ' ' + zeit : ' (ohne Zeit)'}`
+        }
+        return { name: tradeify ? 'Recovery' : 'Recoverer', fehlt, plan, tip: String(z.grund || (tradeify ? 'Recovery' : 'Recoverer')) + ' · klicken für Details' }
+      }
+      window._admRecInfo = admRecInfo
+
       admCalRender()
 
       function admCalRender(){
@@ -20640,6 +20672,7 @@
         }
         const sWd = new Map(), sCfd = new Map()
         for(const r of cal) addErh(istWd(r) ? sWd : sCfd, r)
+        const nRec = new Set(cal.filter(r => admRecInfo(r.account_id)).map(r => String(r.account_id))).size   // RC2: Konten im Recoverer-/Recovery-Zustand
         for(const [lbl, m, farbe, gross] of [['Anfragbar', sAll, 'var(--good)', true], ['Fällig jetzt', sJetzt, 'var(--ink)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Winning Days', sWd, 'var(--ink)'], ['CFD', sCfd, 'var(--ink)']]){
           const d = document.createElement('div')
           d.innerHTML = `<div class="tnum" style="font-size:${gross ? 17 : 13}px;font-weight:${gross ? 800 : 700}"></div><div style="font-size:11px;color:var(--sub)"></div>`
@@ -20647,6 +20680,14 @@
           d.children[0].textContent = geldMap(m)
           d.children[1].textContent = lbl + (lbl === 'Fällig jetzt' && ueberfaellig ? ` · ${ueberfaellig} überfällig` : '')
             + (lbl === 'Anfragbar' && ohneRegel ? ` · ${ohneRegel} ohne Regel` : '')
+          sums.appendChild(d)
+        }
+        if(nRec){
+          // RC2: kleine Zählung „Recoverer: n“ im Challenge-Ton (Chip-Farbe wie im Planer)
+          const d = document.createElement('div')
+          d.innerHTML = '<div class="tnum" style="font-size:13px;font-weight:700;color:#006B7D"></div><div style="font-size:11px;color:var(--sub)">Recoverer</div>'
+          d.children[0].textContent = String(nRec)
+          d.title = 'Konten im Recoverer (Apex) bzw. Recovery (Tradeify) — Chip in der Zeile, Klick zeigt die Zahlen'
           sums.appendChild(d)
         }
 
@@ -20746,6 +20787,19 @@
           tr.querySelector('.c-acc').textContent = String(r.account_name || '').replace(/\s*→.*$/, '').trim() || '—'
           tr.querySelector('.c-acc').title = r.account_name || ''
           const ext = tr.querySelector('.c-ext'); if(r.ext) ext.textContent = '#' + r.ext; else ext.remove()
+          const ri = admRecInfo(r.account_id)
+          if(ri){
+            // RC2: Chip „Recoverer“/„Recovery“ (Stil wie Accounts/Planer, Klick → bestehendes Popup) + Zeile „fehlt … · nächster Trade …“
+            const chip = document.createElement('span')
+            chip.className = 'type-badge type-challenge acc-rec-chip'
+            chip.textContent = ri.name; chip.title = ri.tip
+            chip.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); window._recovererOeffnen?.(String(r.account_id), r.account_name || '') })
+            tr.querySelector('.c-acc').after(chip)
+            const zl = document.createElement('div')
+            zl.className = 'c-rec'; zl.style.cssText = 'font-size:11.5px;color:#006B7D;margin-top:1px'
+            zl.textContent = [ri.fehlt, ri.plan].filter(Boolean).join(' · ')
+            tr.querySelector('.c-acc').parentElement.appendChild(zl)
+          }
           tr.querySelector('.c-firm').textContent = r.account_firm || '–'
           // Stand: Winning Days = 🏆-Zähler, CFD = relativer Termin bzw. „wartet seit …" ohne Termin
           const st = tr.querySelector('.c-stand')
@@ -57586,7 +57640,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2127'
+  const OS_TAB_BUILD = '2026-09-22.2128'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
