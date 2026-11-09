@@ -13,7 +13,7 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_tz", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "_tsx_brackets_kern", "alarm_ereignisse")
 KONSTANTEN = ("PULS_BILD_PFAD_RE", "ALARM_PRIO_TITEL", "HEDGE_LEBT", "ALARM_HEDGE_OFFEN_S", "ALARM_OHNE_HEDGE_S", "ALARM_HEDGE_ZU_MASTER_S",
-              "ALARM_ERINNERN_S", "ALARM_RADAR_GRUENDE")
+              "ALARM_ERINNERN_S", "ALARM_RADAR_GRUENDE", "ALARM_ABGLEICH")
 
 
 def lade():
@@ -158,6 +158,20 @@ def main():
     ok(not any("richtungsschutz" == e[2] for e in e7), "apex_hedge als Richtungsschutz gemeldet")
     gp = ns["gp_push_ereignisse"]([dict(ap, id="a", status="planned", ss=sa)], namen, seit)
     ok(not gp, f"gp_push meldet apex_hedge: {gp}")
+
+    # ABGLEICH (AB1, 10.11.2026): Ergebnis mt5_baseline.abgleich → 🔴/🟠 nur als Übergang, still bei ok/unklar_still/warten_*
+    ab = lambda st, s_=60, msg="m": {"status": st, "at": iso(s_), "msg": msg}
+    tb = {"user_id": "u1", "master_firm": "Topstep", "master_name": "150k …9155", "route": "tsv2", "orbit_v3": False, "hedge_eur": "60"}
+    e8 = ereig([dict(tb, id="a", status="review", ab=ab("master_offen_tsx", msg="Hedge zu, Master in TopstepX offen")),
+                dict(tb, id="b", status="open", ab=ab("ok")), dict(tb, id="c", status="review", ab=ab("unklar_still")),
+                dict(tb, id="d", status="open", route="tvv2", ab=ab("master_geschlossen")), dict(tb, id="e", status="review", ab=ab("fehler", 5000)),
+                dict(tb, id="f", status="open", route="mt5", ab=ab("echo_hedge_offen")), dict(tb, id="g", status="review", ab=ab("warten_news")),
+                dict(tb, id="h", status="review", ab="kaputt")], namen, jetzt, seit)
+    k8 = {e[0].split("|")[0]: e for e in e8 if "|abgleich|" in e[0]}
+    ok(sorted(k8) == ["a", "d", "f"], f"abgleich Pläne {sorted(k8)}")
+    ok(k8.get("a", (0, 0))[1] == 1 and k8["a"][2] == "abgleich_master_offen_tsx" and "TopstepX offen" in k8["a"][4], f"abgleich tsx {k8.get('a')}")
+    ok(k8.get("d", (0, 0))[1] == 2 and k8.get("f", (0, 0))[1] == 1, "abgleich Prio master_geschlossen/echo_hedge_offen")
+    ok(k8.get("a", ("",))[0].endswith("|" + iso(60)[:13]), f"abgleich Schlüssel je Stunde {k8.get('a', ('',))[0]}")
 
     if f:
         print("ROT:\n  " + "\n  ".join(f))

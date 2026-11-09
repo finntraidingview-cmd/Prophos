@@ -4025,6 +4025,9 @@ ALARM_OHNE_HEDGE_S = 90                     # Master läuft so lange ohne offene
 ALARM_HEDGE_ZU_MASTER_S = 180               # Hedge zu, Master nach so vielen s noch offen → 🔴 (Level schließt oft ~2–9 s vor dem Reader)
 ALARM_ERINNERN_S = 900                      # anhaltender 🔴-Zustand: alle 15 min erneut, höchstens 3×
 ALARM_RADAR_GRUENDE = {"tp_feed": "am TP", "sl_feed": "am SL", "master_nie_da": "— Master-Position kam nie an"}
+# ABGLEICH MASTER ↔ HEDGE (AB1, Finn 10.11.2026): der PC-Tab schreibt das Ergebnis nach mt5_baseline.abgleich (prophos.html abPlanPruefen);
+# Status → (Prio, Titel). „ok"/„unklar_still"/„warten_*" melden nichts. Je Plan × Status höchstens einmal je Stunde (Schlüssel mit at[:13]).
+ALARM_ABGLEICH = {"master_offen_tsx": (1, "Hedge zu, Master offen (TopstepX)"), "echo_hedge_offen": (1, "Echo-Master zu, Hedge offen"), "master_ohne_hedge": (1, "Echo-Hedge extern zu, Master offen"), "fehler": (1, "Abgleich: Schließen fehlgeschlagen"), "master_geschlossen": (2, "Abgleich hat den Master geschlossen"), "hedge_geschlossen": (2, "Abgleich hat den Hedge geschlossen"), "unklar": (2, "Abgleich: Abweichung nicht bestätigt")}
 _alarm = {"at": 0.0, "start": time.time(), "gemeldet": {}, "fehler": "", "empf": None, "empf_at": 0.0, "letzt": []}
 
 
@@ -4279,6 +4282,13 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                         f"{wer} · {konto}: Prophos hatte den Trade beendet ({str(fv.get('grund') or fv.get('quelle') or '?')[:30]}), die "
                         f"Endlesung sieht die Position noch offen — Plan wieder unter Läuft. In {'TopstepX' if p.get('route') == 'tsv2' else 'TradingView'} "
                         f"prüfen und schließen.", uid, pid))
+        # ABGLEICH (AB1, 10.11.2026): Ergebnis des PC-Tab-Abgleichs Master ↔ Hedge — nur als Übergang nach seit_iso
+        ab = p.get("ab") if isinstance(p.get("ab"), dict) else {}
+        ab_st, ab_at = ab.get("status"), str(ab.get("at") or "")
+        if ab_st and ab_st in ALARM_ABGLEICH and ab_at > seit_iso:
+            prio_ab, titel_ab = ALARM_ABGLEICH[ab_st]
+            out.append((f"{pid}|abgleich|{ab_st}|{ab_at[:13]}", prio_ab, f"abgleich_{ab_st}", titel_ab,
+                        f"{wer} · {konto}: {str(ab.get('msg') or ab_st)[:240]}", uid, pid))
         if hst == "geschlossen" and h.get("grund") in ALARM_RADAR_GRUENDE and str(h.get("closed_at") or "") > seit_iso:
             # Text nur, wenn er stimmt (Auswertung 30.10.2026: bei 2 von 3 Radar-Alarmen hatte das Userscript das Ende gesehen, der Beweis lehnte ab)
             rkn = h.get("reader_kurz_nein") if isinstance(h.get("reader_kurz_nein"), dict) else None
@@ -4340,7 +4350,7 @@ def alarm_tick():
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
            "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,bal0:mt5_baseline->>master_balance,master_pl,master_sl,"
-           "rv:mt5_baseline->richtung_verstoss")
+           "rv:mt5_baseline->richtung_verstoss,ab:mt5_baseline->abgleich")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
