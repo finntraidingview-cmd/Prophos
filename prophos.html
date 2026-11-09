@@ -61376,6 +61376,7 @@
       }
       if((_acNews.naechster[pid] || 0) > now) continue
       if(frist && frist - now < NEWS_REGEL.frist_rest_s * 1000) continue   // zu knapp vor t − 6: nicht mehr anfangen, ab t + 6 weiter
+      if(_ac.laeuft) return false   // WS2c-Nachzug: der „warten“-Zweig oben wartet auf acLog bei freiem _ac.laeuft — inzwischen kann zsTick die Maus genommen haben (acTick bricht danach an seiner _ac.laeuft-Prüfung ab)
       _ac.laeuft = true
       try{
         let erg
@@ -61470,6 +61471,7 @@
         continue
       }
       if((_ac.naechster[pid] || 0) > now) continue
+      if(_ac.laeuft) break   // WS2c-Nachzug (Prüfer 10.11.2026): der tvplus-Zweig oben wartet auf acLog bei freiem _ac.laeuft — inzwischen kann zsTick die Maus genommen haben
       _ac.laeuft = true
       try{
         const erg = await acEchoSchliessen(plan)
