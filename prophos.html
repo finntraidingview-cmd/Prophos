@@ -15870,6 +15870,14 @@
       return
     }
     if(event === 'SIGNED_IN' && session){
+      /* ID-WECHSEL OHNE ZWEITEN DASHBOARD-LAUF (ID1b F1, Befund 09.11.2026, Finn: „Warum dauert es so lange, wenn ich die ID wechseln will?"):
+       * profSwitchToKern ruft setSession — auth-js 2.112.1 meldet bei noch gültigem Token SIGNED_IN, SOLANGE DIE ALTE SEITE NOCH STEHT. Hier lief dann
+       * showDashboard(neue ID) → hydrateUser sah prev = alte ID (PROF_ACTIVE wird erst nach setSession gesetzt) → profSnapshotAndClear(alte ID) schrieb
+       * den schon eingespielten localStorage der ZIEL-ID in den Bucket der Herkunfts-ID, dazu 8 Ladevorgänge, die das Neuladen gleich abbricht.
+       * Der Wechsel lädt die Seite ohnehin neu (dort zeichnet der Boot das Dashboard) → während des Wechsels nichts tun. Scheitert der Wechsel ohne
+       * Neuladen (Login nötig), kommt SIGNED_OUT, nicht SIGNED_IN. */
+      let wechsel = false; try{ wechsel = !!_profWechselLaeuft }catch(_){}   // let weiter unten im Modul — try statt typeof (TDZ)
+      if(wechsel) return
       showDashboard(session.user)
     } else if(event === 'SIGNED_OUT' || !session){
       showLogin()
@@ -16095,6 +16103,25 @@
     location.reload()
   }
 
+  /* ARCHIV DER ZIEL-ID VOR DEM NEULADEN (ID1b F3, 09.11.2026): nach setSession, vor location.reload. Dieselbe Regel wie der Initial-Sync (Cloud gewinnt,
+   * nur wenn die Cloud etwas hat; leere/fehlende Zeile → lokaler Stand bleibt, der Initial-Sync entscheidet danach wie immer). Geschrieben wird unter
+   * _profBulkWrite (der Sync-Haken lädt nichts hoch — currentUserId ist in dieser Seite noch die alte ID). Höchstens 3 s, damit der Wechsel nie hängt.
+   * → true = Archiv gelesen (kein Warten nach dem Neuladen nötig) · false = nicht lesbar (AC1-Warten bleibt der Rückfall). */
+  async function profArchivVorladen(userId){
+    const lesen = supabase.from('user_settings').select('value').eq('user_id', String(userId)).eq('key', 'archive').maybeSingle()
+    const zeitlimit = new Promise(ok => setTimeout(() => ok({ error: { message: 'Zeitlimit 3 s' } }), 3000))
+    const { data, error } = await Promise.race([lesen, zeitlimit])
+    if(error){ console.warn('[profil] Archiv vor dem Neuladen nicht lesbar — Accounts warten nach dem Neuladen (AC1):', error.message || error); return false }
+    const cloud = data ? (data.value ?? null) : null
+    if(!isEmpty(cloud)){
+      _profBulkWrite = true
+      try{ localStorage.setItem(ARCH_SYNC_LS, JSON.stringify(cloud)) }
+      catch(e){ console.warn('[profil] Archiv vor dem Neuladen nicht geschrieben:', (e && e.message) || e); return false }
+      finally{ _profBulkWrite = false }
+    }
+    return true
+  }
+
   /* ID-WECHSEL MIT RIEGEL + RÜCKMELDUNG (29.09.2026, Finn am Handy: „ID wechseln hängt/buggt"): der Wechsel wartet auf zwei
    * Supabase-Aufrufe und lädt dann die ganze Seite neu — sekundenlang sah man nichts und tippte nochmal. Ein zweiter Lauf hätte
    * profSnapshotAndClear(alte ID) mit dem schon eingespielten Bucket der ZIEL-ID gemacht → Daten zweier IDs vermischt. Jetzt:
@@ -16154,7 +16181,12 @@
       const { error } = await supabase.auth.setSession(sess)
       if(error) throw error
       localStorage.setItem(PROF_ACTIVE, userId)
-      try{ sessionStorage.setItem('prophos_arch_warten', String(userId)) }catch(_){}   // AC1: nach dem Neuladen erst das Archiv dieser ID (ARCH_WARTEN_SS)
+      // ARCHIV VOR DEM NEULADEN (ID1b F3, 09.11.2026): das Cloud-Archiv der Ziel-ID jetzt holen (Sitzung steht schon) — dann zeichnet die Accounts-
+      // Liste nach dem Neuladen sofort, statt bis zum Initial-Sync (bis 6 s) in „Lade Accounts…“ zu warten. Nur wenn das Lesen scheitert, bleibt
+      // der AC1-Merker (Warten nach dem Neuladen) wie bisher. Fehler hier brechen den Wechsel nie ab.
+      let archDa = false
+      try{ archDa = await profArchivVorladen(userId) }catch(_){ archDa = false }
+      if(!archDa){ try{ sessionStorage.setItem('prophos_arch_warten', String(userId)) }catch(_){} }   // AC1: nach dem Neuladen erst das Archiv dieser ID (ARCH_WARTEN_SS)
       // NEU LADEN statt nur die View zu wechseln: dupState, tsState, pairs, Firm-Specs u.a.
       // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
       // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
@@ -57269,7 +57301,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2121'
+  const OS_TAB_BUILD = '2026-09-22.2122'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -81131,22 +81163,38 @@
   window._admMailStub = fn => { _admMail.stub = typeof fn === 'function' ? fn : null }   // Test-Haken (Stub ohne Login): fn(pfad, opt) → Antwort
 
   // Hook in showDashboard: lade Accounts sobald wir wissen wer eingeloggt ist
+  /* BOOT LÄDT NICHT DOPPELT (ID1b F2, 09.11.2026, Befund ID-Wechsel): showDashboard läuft beim Boot zweimal für dieselbe ID — Boot-Block
+   * (getSession) und auth-js SIGNED_IN beim Wiederherstellen der Sitzung (_recoverAndRefresh) —, dazu lud der Block „Falls beim Boot schon eine Session
+   * bestand" unten dieselben Tabellen noch einmal: alle trade_plans der ID (0,8–1,3 MB bei großen IDs), Accounts, Transaktionen je 2–3×, jedes Mal neu
+   * gezeichnet. Jetzt werden Läufe derselben ID binnen BOOT_DOPPEL_MS zusammengelegt. BEWUSST NUR IM FENSTER (Gegenprüfung 09.11.2026): auth-js meldet
+   * SIGNED_IN auch bei JEDER Rückkehr in den Tab (_onVisibilityChanged → _recoverAndRefresh) — dieses Neuladen von Accounts/Archiv/Transaktionen nach
+   * Tab-Rückkehr bleibt unverändert. showLogin setzt die Merker zurück (neuer Login derselben ID lädt sofort wieder).
+   * Zwei Merker: _bootGeladen = die Tabellen, die auch der Rückfall-Block unten lädt; _dashExtra = was nur showDashboard anstößt (Kapitel, Mail,
+   * Duplikum, TopstepX) — so verschluckt der Rückfall-Block die Extras nie, falls er einmal vor showDashboard dran ist. */
+  const BOOT_DOPPEL_MS = 20000
+  function bootGeradeGeladen(m, uid){ return !!(m && uid && m.uid === uid && Date.now() - m.at < BOOT_DOPPEL_MS) }   // → true = eben schon, nicht nochmal
+  let _bootGeladen = null, _dashExtra = null
   const _origShowDashboard = showDashboard
   showDashboard = function(user){
     currentUserId = user?.id || null
     _origShowDashboard.apply(this, arguments)
-    if(currentUserId){
-      hydrateFromCache()
+    if(!currentUserId) return
+    hydrateFromCache()   // läuft ohnehin nur einmal (_cacheHydrated)
+    if(!bootGeradeGeladen(_bootGeladen, currentUserId)){
+      _bootGeladen = { uid: currentUserId, at: Date.now() }
       loadAccountsFromSupabase()
       loadTradePlansFromSupabase()
       loadTransactionsFromSupabase()
-      if(typeof kapitelLaden === 'function') kapitelLaden()   // Tabelle kapitel (24.09.2026)
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
       if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
       if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
-      if(typeof mailBadgeLaden === 'function') setTimeout(() => { mailWechselPruefen(); mailBadgeLaden() }, 1500)   // Mail-Reiter (16.10.2026)
       try{ window._planerLinkSync?.() }catch(_){}   // PLANER-TAB (30.10.2026): Link „Planer" je ID (Admin entsperrt + Recht)
       try{ window._admStandVorladen?.() }catch(_){}   // LD1: gemerkten Admin-Stand dieser ID schon jetzt lesen (Öffnen zeichnet sofort)
+    }
+    if(!bootGeradeGeladen(_dashExtra, currentUserId)){
+      _dashExtra = { uid: currentUserId, at: Date.now() }
+      if(typeof kapitelLaden === 'function') kapitelLaden()   // Tabelle kapitel (24.09.2026)
+      if(typeof mailBadgeLaden === 'function') setTimeout(() => { mailWechselPruefen(); mailBadgeLaden() }, 1500)   // Mail-Reiter (16.10.2026)
       // Duplikum automatisch verbinden, wenn für diesen Prophos-User Zugangsdaten
       // hinterlegt sind (nur falls noch kein Token da ist) — damit nach einem
       // Account-Wechsel nicht jedes Mal manuell verbunden werden muss.
@@ -81164,6 +81212,8 @@
   const _origShowLogin = showLogin
   showLogin = function(){
     try{ window._admStandLeeren?.(currentUserId) }catch(_){}   // LD1 (S4): gemerkter Admin-Stand dieser ID weg (vor currentUserId = null)
+    _bootGeladen = _dashExtra = null   // ID1b F2: nächster Login (auch derselben ID) lädt sofort wieder
+    try{ _syncGestartet = null }catch(_){}   // ID1b: Initial-Sync beim nächsten Login wieder
     accounts = []
     tradePlans = []
     transactions = []
@@ -81185,12 +81235,13 @@
   }
 
   // Falls beim Boot schon eine Session bestand und showDashboard schon aufgerufen wurde,
-  // initiale Loads nachziehen
+  // initiale Loads nachziehen — seit ID1b F2 (09.11.2026) nur noch als Rückfall: hat showDashboard für diese ID schon geladen, nichts doppelt
   ;(async () => {
     try{
       const { data: { session } } = await supabase.auth.getSession()
-      if(session && session.user){
+      if(session && session.user && !bootGeradeGeladen(_bootGeladen, session.user.id)){
         currentUserId = session.user.id
+        _bootGeladen = { uid: session.user.id, at: Date.now() }
         loadAccountsFromSupabase()
         loadTradePlansFromSupabase()
         loadTransactionsFromSupabase()
@@ -81248,6 +81299,10 @@
 
   // Verhindert Endlosschleifen wenn unser eigener Save den Storage-Event triggert
   let _syncInProgress = false
+  // ID1b (09.11.2026): {uid, at} des zuletzt gestarteten Initial-Syncs — Haken in showDashboard und Boot-Timer legen Läufe derselben ID binnen
+  // BOOT_DOPPEL_MS zusammen (vorher lief er nach dem schnellen Ein-Abfrage-Sync am 800-ms-Timer ein zweites Mal). Tab-Rückkehr (SIGNED_IN, später)
+  // synct weiter wie bisher. var: showLogin setzt ihn zurück.
+  var _syncGestartet = null
 
   /**
    * Liest einen Wert aus Supabase. Gibt null zurück wenn nicht da.
@@ -81278,6 +81333,31 @@
     } catch(e){
       console.warn('[sync] fetchSetting exception:', key, e)
       return { ok: false }
+    }
+  }
+  /* ALLE SYNC-SCHLÜSSEL IN EINER ABFRAGE (ID1b F4, 09.11.2026, Befund ID-Wechsel): der Initial-Sync las die 6 Schlüssel nacheinander — 6 Rundreisen
+   * (je 0,2–0,9 s) bis alles da war. Jetzt EINE Abfrage key in (…). AC2 bleibt je Schlüssel: Fehler/Timeout → JEDER Schlüssel { ok: false } (nicht
+   * lesbar ≠ leer), Abfrage ok → Zeile da { ok, zeile: true, value } bzw. { ok, zeile: false } — exakt der Vertrag von fetchSettingGenau.
+   * → { [cloudKey]: Ergebnis } */
+  async function fetchSettingsGenauAlle(keys){
+    const aus = (r) => Object.fromEntries(keys.map(k => [k, r(k)]))
+    if(!currentUserId || !keys.length) return aus(() => ({ ok: false }))
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('key,value')
+        .eq('user_id', currentUserId)
+        .in('key', keys)
+      if(error){
+        if(error.code === '42P01' || /relation .* does not exist/i.test(error.message||'')) console.warn('[sync] user_settings-Tabelle existiert nicht. Bitte SQL-Migration einspielen.')
+        else console.warn('[sync] fetchSettings failed:', error.message)
+        return aus(() => ({ ok: false }))
+      }
+      const zeilen = new Map((data || []).map(z => [z.key, z]))
+      return aus(k => zeilen.has(k) ? { ok: true, zeile: true, value: zeilen.get(k).value ?? null } : { ok: true, zeile: false, value: null })
+    } catch(e){
+      console.warn('[sync] fetchSettings exception:', e)
+      return aus(() => ({ ok: false }))
     }
   }
   async function fetchSetting(key){
@@ -81344,9 +81424,10 @@
     _syncInProgress = true
     try {
       let migrated = 0, downloaded = 0, uebersprungen = 0
+      const alleGelesen = await fetchSettingsGenauAlle(SYNC_KEYS.map(k => SYNC_KEY_MAP[k]))   // ID1b F4: eine Abfrage statt 6 nacheinander
       for(const lsKey of SYNC_KEYS){
         const cloudKey = SYNC_KEY_MAP[lsKey]
-        const gelesen = await fetchSettingGenau(cloudKey)
+        const gelesen = alleGelesen[cloudKey] || { ok: false }
         const cloud = gelesen.ok ? gelesen.value : null
         const local = safeParseLS(lsKey)
 
@@ -81482,10 +81563,13 @@
     const _origShowDashboardForSync = showDashboard
     showDashboard = function(user){
       const result = _origShowDashboardForSync.apply(this, arguments)
-      // Erst nach kurzer Verzögerung, damit currentUserId schon gesetzt ist
-      setTimeout(() => {
-        if(currentUserId) initialSyncFromSupabase().catch(e => console.warn('[sync] init failed:', e))
-      }, 200)
+      // ID1b F3 (09.11.2026): sofort statt nach 200 ms — die innere Hülle (Hook „lade Accounts", weiter oben im Modul) setzt currentUserId
+      // synchron vor diesem Punkt; die 200 ms verzögerten nur das Cloud-Archiv, auf das die Accounts-Liste nach einem ID-Wechsel wartet (AC1).
+      // Nicht doppelt (_syncGestartet): showDashboard läuft beim Boot zweimal (Boot-Block + SIGNED_IN beim Wiederherstellen); Tab-Rückkehr später synct wie bisher.
+      if(currentUserId && !bootGeradeGeladen(_syncGestartet, currentUserId)){
+        _syncGestartet = { uid: currentUserId, at: Date.now() }
+        initialSyncFromSupabase().catch(e => console.warn('[sync] init failed:', e))
+      }
       return result
     }
     window.showDashboard = showDashboard
@@ -81493,7 +81577,8 @@
 
   // Falls schon eine Session beim Boot existierte (User war eingeloggt)
   setTimeout(() => {
-    if(currentUserId && !_syncInProgress){
+    if(currentUserId && !_syncInProgress && !bootGeradeGeladen(_syncGestartet, currentUserId)){   // ID1b: nur, wenn der Haken oben ihn eben nicht schon gestartet hat
+      _syncGestartet = { uid: currentUserId, at: Date.now() }
       initialSyncFromSupabase().catch(e => console.warn('[sync] boot init failed:', e))
     }
   }, 800)
