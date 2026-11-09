@@ -111,6 +111,13 @@ def main():
     ob._TSX_ENDUNG_BEWIESEN.clear()
     x, n, g = ob.tsx_k2_eintrag(neu, "150KTC-SKU-V2-DLL-702233-11111111")
     check(x is None and n == 0, f"fremdes Konto nicht in der Liste → kein Treffer ({g})")
+    for fremd in ("150KTC-SKU-V2-DLL-702233-11115872", "150KTC-SKU-V2-DLL-999999-29585872"):
+        ob._TSX_ENDUNG_BEWIESEN.clear()
+        x, n, g = ob.tsx_k2_eintrag(neu, fremd)
+        check(x is None and not ob._TSX_ENDUNG_BEWIESEN.get(ob._nur_alnum(fremd)),
+              f"Prüfer 9c82201d: gleiche Endung, fremde Kennung {fremd[-15:]} → kein Treffer über die Endung ({g})")
+    check(not ob.tsx_karte_kennung_passt("702233-29585872", "150KTC-SKU-V2-DLL-1702233-29585872"),
+          "Kennungs-Abgleich mit Grenze: 7-stellige Nutzer-ID trifft nicht")
     check(not ob.tsx_karte_kennung_passt("5872", "150KTC-SKU-V2-DLL-702233-29585872")
           and not ob.tsx_karte_kennung_passt("29585872", "150KTC-SKU-V2-DLL-702233-29585872")
           and ob.tsx_karte_kennung_passt("702233-29585872", "150KTC-SKU-V2-DLL-702233-29585872")

@@ -19279,6 +19279,12 @@ def tsx_karte_norm(x):
     return y
 
 
+def tsx_karte_hat_kennung(karte_id):
+    """REIN RECHNEND (testbar, TX1 Prüfer 9c82201d): trägt die Karte eine eindeutige Kennung (Topstep-Form …NUTZER(6)-KONTO(8) bzw.
+    NUTZER(6)-KONTO(8) allein)? Dann entscheidet nur tsx_karte_kennung_passt, nie die Endung."""
+    return bool(re.search(r"(?:^|-)\d{6}-?\d{8}$", str(karte_id or "").strip()))
+
+
 def tsx_karte_kennung_passt(karte_id, ext):
     """REIN RECHNEND (testbar, TX1 09.11.2026): volle Kennung ODER der Kartenteil ohne Vorspann („702233-29585872" zu
     „150KTC-SKU-V2-DLL-702233-29585872"): Ziel endet genau auf die Karten-Kennung, und die trägt die Topstep-Form NUTZER(6)-KONTO(8) —
@@ -19288,7 +19294,9 @@ def tsx_karte_kennung_passt(karte_id, ext):
         return False
     if kid == ziel:
         return True
-    return bool(re.fullmatch(r"\d{6}-?\d{8}", str(karte_id or "").strip())) and ziel.endswith(kid)
+    k = str(karte_id or "").strip().upper()
+    # mit Grenze: das Ziel endet auf „-NUTZER-KONTO" (Prüfer 9c82201d: sonst träfe „1702233-…" auch „…-702233-…")
+    return bool(re.fullmatch(r"\d{6}-?\d{8}", k)) and bool(re.search(r"(?:^|-)" + re.escape(k) + r"$", str(ext or "").strip().upper()))
 
 
 def tsx_k2_eintrag(liste, ext):
@@ -19312,7 +19320,9 @@ def tsx_k2_eintrag(liste, ext):
         def _endung(x):
             e = str(x.get("endung") or "") or tsx_konto_endung(x.get("text"))[1]
             return _nur_alnum(e) if e else ""
-        mit_e = [x for x in (liste or []) if isinstance(x, dict) and _endung(x)]
+        # Prüfer 9c82201d: Karten MIT voller Kennung (NUTZER(6)-KONTO(8) oder ganze External ID), die oben nicht passten, sind ein fremdes
+        # Konto — nie über die Endung nehmen (sonst träfe „702233-29585872" das Ziel „…-11115872"). Der Rückfall gilt nur für gekürzte Karten.
+        mit_e = [x for x in (liste or []) if isinstance(x, dict) and _endung(x) and not tsx_karte_hat_kennung(x.get("id"))]
         kand = [x for x in mit_e if tsx_endung_passt(_endung(x), ext)]
         if len(kand) == 1:
             _TSX_ENDUNG_BEWIESEN[ziel] = True
