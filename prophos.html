@@ -32361,7 +32361,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && !steht && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id, p)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id, p)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : tvV2HedgeTrade(p) ? 'Trade mit Hedge: 2–10 min Zufall' : '1–120 min Zufall'})`
+    if(!vers0 && !steht && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id, p)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id, p)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? (p.route === 'tsv2' ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : 'Tages-Kette: 1–35 min Zufall') : tvV2HedgeTrade(p) ? 'Trade mit Hedge: 2–10 min Zufall' : '1–120 min Zufall'})`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
@@ -32421,7 +32421,7 @@
     // TOPSTEP-KETTE (08.10.2026, Finn: „nachdem Trade 1 abgeschlossen ist, muss die Balance ganz genau gelesen werden, und dann von der
     // Balance der nächste geplant werden"): Trade 2 wartet auf genau diese Lesung — Ketten-Trade 1 liest nach 30–120 s statt 1–120 min
     // Finn 08.10.2026 später: „wird dann innerhalb von 1 bis 35 Minuten per Zufallsprinzip überprüft" — Kettentrades (1 und 2) 1–35 min,
-    // danach hakt das Backend sie selbst ab (ap_kette_abhaken) und plant Trade 2
+    // danach hakt das Backend sie selbst ab (ap_kette_abhaken) und plant Trade 2. WS2d (09.11.2026): gilt für jeden Teil 1–4 jeder Tages-Kette (tpKetteNr), auch tvv2/mt5
     let k = null, pk = null; try{ pk = tradePlans.find(x => String(x.id) === String(id)) || null; k = tpKetteNr(pk) }catch(_){ k = null }
     if(k) return (60 + (h % 2041)) * 1000
     if(tvV2HedgeTrade(pk || plan)) return (120 + (h % 481)) * 1000   // PL3-A: 120–600 s gestreut
@@ -32429,10 +32429,13 @@
   }
   window._tvV2NachleseMs = tvV2NachleseMs   // Test-Haken
   // Topstep-Kette: 1 = Trade 1, 2 = Trade 2 (vom Backend aus Trade 1 gerechnet), sonst null — Marke mt5_baseline.kette (app.py ap_planen/ap_kette_tick)
+  // WS2d (Master 09.11.2026, WS2 Tages-Teilung 1–4 Trades, Schnittstelle 2026-11-09_WS2_schnittstelle.md §2): seit kette.von gibt es Teile 1–4 auf allen Wegen
+  // (tvv2, tsv2, mt5) — nr 3/4 zählen jetzt auch (tsv2-Teile 3/4 starten wie Teil 2 von selbst, Nachlese-Zeit wie Topstep-Teile). Alte Pläne tragen nur 1/2 → unverändert.
+  const KETTE_NR_MAX = 4
   function tpKetteNr(p){
     const k = p && p.mt5Baseline && p.mt5Baseline.kette
     const n = k && Number(k.nr)
-    return n === 1 || n === 2 ? n : null
+    return Number.isInteger(n) && n >= 1 && n <= KETTE_NR_MAX ? n : null
   }
   window._tpKetteNr = tpKetteNr   // Test-Haken
   // TOPSTEP-TAG (Finn 02.11.2026 ~19:15 Dubai: „ich will nur einmal abhaken"): solange nach Trade 1 noch ein Trade 2 kommen kann (Backend
@@ -32442,9 +32445,19 @@
   // Obergrenze (Gegencheck S19): höchstens TV_ENDLESUNG_KETTE_MAX Versuche insgesamt — ein bleibender Lesefehler zieht den Puls-Chrome nicht den ganzen Nachmittag
   // aus dem Konto; danach wie bisher Haken mit Schätzung
   const TV_ENDLESUNG_KETTE_MAX = 30
+  // WS2d (09.11.2026): „kommt noch ein Teil?" = nicht-letzter Teil — mit kette.von (WS2-Teile, alle Wege): von > nr (Teil 2 von 3 liest weiter, damit Teil 3
+  // aus der genauen Balance entsteht; Schnittstelle §5); ohne von (alte Topstep-2er-Kette): nur Trade 1, wie bisher
+  function tpKetteNichtLetzter(k){
+    if(!k) return false
+    const nr = Number(k.nr)
+    const von = (k.von == null || k.von === '') ? NaN : Number(k.von)
+    if(!(Number.isInteger(von) && von >= 1)) return nr === 1   // ohne bzw. ungültiges von (0, NaN, Text) → alter Weg, nie früher aufhören als bisher
+    return Number.isInteger(nr) && nr >= 1 && von > nr
+  }
+  window._tpKetteNichtLetzter = tpKetteNichtLetzter   // Test-Haken
   function tpKetteLesenWeiter(p, jetzt){
     const k = p && p.mt5Baseline && p.mt5Baseline.kette, fin = (p && p.mt5Baseline && p.mt5Baseline.final) || {}
-    if(!k || Number(k.nr) !== 1 || k.tagesende) return false
+    if(!k || !tpKetteNichtLetzter(k) || k.tagesende) return false
     if((Number(fin.puls_versuche) || 0) >= TV_ENDLESUNG_KETTE_MAX) return false
     const bis = Date.parse(k.lesen_bis || '') || 0
     return !!bis && (jetzt || Date.now()) < bis
