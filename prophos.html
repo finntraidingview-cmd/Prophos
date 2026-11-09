@@ -61840,6 +61840,11 @@
     if(!t.fehler){
       if(hedgeVon(t.ticket) === 'zu'){
         if(s.paused || !(Number(s.multiplier) > 0)) return { master: 'offen', hedge: null, ticket: t.ticket, warum: 'Copier hedgt bewusst nicht (pausiert/Multiplier 0)' }
+        // Prüfer-Stopp 10.11.2026: „kein Eintrag in hedges[ident]" beweist nicht, dass der Hedge je offen war (copier.py: kein Symbol-Mapping, Symbol
+        // fehlt, Volumen < Mindest-Lot, startup_skip, Broker-Ablehnung → nie gebaut). „Zu" nur mit Schließ-Beleg: closed_hedges-Eintrag mit
+        // ident = Master-Ticket (schreibt der Copier nur bei EXTERNEM Schluss: Notfall-Level, Stop-Out, Hand). Ohne Beleg → 'ohne' (🔴, nie klicken).
+        const beleg = Array.isArray(s.closed_hedges) && s.closed_hedges.some(x => x && x.ident != null && Number(x.ident) === Number(t.ticket))
+        if(!beleg) return { master: 'offen', hedge: 'ohne', ticket: t.ticket, warum: 'Copier hat keinen Hedge für diese Position (nie gebaut?)' }
         if(Array.isArray(s.blocked) && s.blocked.some(x => Number(x) === Number(t.ticket))) return { master: 'offen', hedge: 'zu', hgrund: 'copier_blockiert', ticket: t.ticket, warum: '' }
       }
       return { master: 'offen', hedge: hedgeVon(t.ticket), ticket: t.ticket, warum: '' }
@@ -61850,8 +61855,10 @@
   }
   window._abEcho = abEcho
 
-  // REIN RECHNEND (Test-Haken window._abAktion): was tun bei bestätigter Abweichung? → 'hedge_zu' | 'master_zu' | 'melden_tsx' | 'melden_echo' | null
+  // REIN RECHNEND (Test-Haken window._abAktion): was tun bei bestätigter Abweichung? → 'hedge_zu' | 'master_zu' | 'melden_tsx' | 'melden_echo' | 'melden_ohne' | null
+  // hedge 'ohne' (Echo: Copier hat für die offene Master-Position nie einen Hedge gebaut) → nur 🔴, nie klicken
   function abAktion(route, master, hedge){
+    if(master === 'offen' && hedge === 'ohne') return 'melden_ohne'
     if(master === 'zu' && hedge === 'offen') return route === 'mt5' ? 'melden_echo' : 'hedge_zu'
     if(master === 'offen' && hedge === 'zu') return route === 'tsv2' ? 'melden_tsx' : 'master_zu'
     return null
@@ -62035,9 +62042,11 @@
       try{ await acLog(p, false, 'Abgleich: Position passt nicht sicher zum Plan — nur gemeldet') }catch(_){}
       return
     }
-    if(aktion === 'melden_tsx' || aktion === 'melden_echo'){
-      const msg = aktion === 'melden_tsx' ? 'Hedge zu, Master in TopstepX offen (2× gelesen) — in TopstepX schließen' : 'Echo-Master zu, Copier-Hedge offen (2× gelesen) — im Hedge-Terminal schließen'
-      await abSchreiben(pid, Object.assign(basis, { status: aktion === 'melden_tsx' ? 'master_offen_tsx' : 'echo_hedge_offen', msg }))
+    if(aktion === 'melden_tsx' || aktion === 'melden_echo' || aktion === 'melden_ohne'){
+      const msg = aktion === 'melden_tsx' ? 'Hedge zu, Master in TopstepX offen (2× gelesen) — in TopstepX schließen'
+        : aktion === 'melden_ohne' ? 'Echo-Master offen, der Copier hat für diese Position keinen Hedge (nie gebaut? Symbol-Mapping/Mindest-Lot/Ablehnung, 2× gelesen) — prüfen'
+        : 'Echo-Master zu, Copier-Hedge offen (2× gelesen) — im Hedge-Terminal schließen'
+      await abSchreiben(pid, Object.assign(basis, { status: aktion === 'melden_tsx' ? 'master_offen_tsx' : aktion === 'melden_ohne' ? 'master_ohne_hedge' : 'echo_hedge_offen', msg }))
       try{ await acLog(p, false, 'Abgleich 🔴: ' + msg) }catch(_){}
       if(typeof atToast === 'function') atToast(`🔴 ${name}: ${msg}`, 'end')
       return
