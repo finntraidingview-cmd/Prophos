@@ -15842,7 +15842,11 @@
   ;(async () => {
     try{
       const { data: { session } } = await supabase.auth.getSession()
-      if(session){
+      // ID1c (Gegenprüfung 4): Boot mitten im ID-Wechsel eines anderen Tabs — der localStorage gehört schon halb der Ziel-ID → nichts zeichnen,
+      // laden oder synchronisieren, nach dem Wechsel neu laden
+      let fremd = false; try{ fremd = !!profFremdWechsel() }catch(_){}
+      if(fremd){ profFremdWechselFolgen() }
+      else if(session){
         showDashboard(session.user)
       } else {
         showLogin()
@@ -15878,6 +15882,13 @@
        * Neuladen (Login nötig), kommt SIGNED_OUT, nicht SIGNED_IN. */
       let wechsel = false; try{ wechsel = !!_profWechselLaeuft }catch(_){}   // let weiter unten im Modul — try statt typeof (TDZ)
       if(wechsel) return
+      // ID1c (09.11.2026): SIGNED_IN aus einem ANDEREN Tab, der gerade die ID wechselt (BroadcastChannel) → hier nichts zeichnen/wegsichern,
+      // nach dem Wechsel neu laden. Ohne Merker, aber andere ID als die dieser Seite (Merker schon weg) → ebenfalls neu laden statt die
+      // alte Seite (dupState/tsState/Paare der alten ID) auf die neue ID umzuzeichnen. Login/Tab-Rückkehr derselben ID unverändert.
+      let fremd = false; try{ fremd = !!profFremdWechsel() }catch(_){}
+      if(fremd){ profFremdWechselFolgen(); return }
+      let andere = false; try{ andere = !!currentUserId && currentUserId !== session.user.id && profActiveId() === session.user.id }catch(_){}
+      if(andere){ console.warn('[profil] andere ID in einem anderen Tab gewählt — lade neu'); location.reload(); return }
       showDashboard(session.user)
     } else if(event === 'SIGNED_OUT' || !session){
       showLogin()
@@ -15908,6 +15919,8 @@
     // wird vorher der lokale Zustand des alten Profils gesichert und geleert — sonst
     // würde Nutzer B die Duplikum-Links/Archiv-Daten von Nutzer A sehen.
     try{
+      // ID1c: wechselt gerade ein anderer Tab die ID, gehört der localStorage schon halb der Ziel-ID — nichts wegsichern, nach dem Wechsel neu laden
+      if(profFremdWechsel()){ profFremdWechselFolgen(); return }
       const prev = profActiveId()
       if(prev !== user.id){
         // IMMER aufräumen — auch wenn prev null ist (Bug 03.08.2026): profSnapshotAndClear
@@ -15941,13 +15954,92 @@
   const PROF_BUCKET   = 'prophos_bucket_'          // + userId → {key:value}
   const PROF_SESSION  = 'prophos_psession_'        // + userId → {access_token,refresh_token}
   // prophos_kasse_geraet (22.10.2026): Admin „Dieses Gerät merken" gilt dem Browser, nicht der ID — bleibt beim Wechsel liegen
-  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE, 'prophos_kasse_geraet']     // gehören keinem Profil
+  // prophos_profil_wechsel (ID1c, 09.11.2026): Wechsel-Merker eines Tabs — gehört dem Browser, nie einem Bucket
+  const PROF_WECHSEL_LS = 'prophos_profil_wechsel'
+  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE, 'prophos_kasse_geraet', PROF_WECHSEL_LS]     // gehören keinem Profil
 
   function profList(){
     try{ return JSON.parse(localStorage.getItem(PROF_LS) || '[]') }catch(_){ return [] }
   }
   function profSave(list){ localStorage.setItem(PROF_LS, JSON.stringify(list)) }
   function profActiveId(){ return localStorage.getItem(PROF_ACTIVE) || null }
+
+  /* ZWEITER TAB BEIM ID-WECHSEL (ID1c, Master 09.11.2026, Befund S5 zu .claude/master/berichte/2026-11-09_ID1_id_wechsel_befund.md): ID1b F1 (.2122)
+   * schützt nur den Tab, der wechselt. Ein ZWEITER Prophos-Tab im selben Browser teilt den localStorage und bekommt das SIGNED_IN der Ziel-ID über den
+   * BroadcastChannel von auth-js, solange der wechselnde Tab noch mitten im Wechsel ist (Ziel-Bucket schon eingespielt, PROF_ACTIVE noch die alte ID):
+   * showDashboard → hydrateUser sah prev = alte ID → profSnapshotAndClear(alte ID) schrieb die Keys der ZIEL-ID in den Bucket der Herkunfts-ID; dazu
+   * schrieb der zweite Tab weiter seine prophos_*-Keys (Stand der alten ID) in den localStorage, der da schon der Ziel-ID gehört.
+   * Jetzt: der wechselnde Tab setzt vor dem Wegsichern einen Merker {tab, von, nach, bis} (Ablauf PROF_WECHSEL_MS, Herzschlag hält ihn, solange der
+   * Wechsel läuft; weg vor location.reload bzw. wenn der Wechsel ohne Neuladen endet). Jeder ANDERE Tab, der den Merker sieht:
+   *  - schreibt/löscht keinen prophos_*-Key mehr (Buckets, aktive ID, Profil-Liste, App-Keys) — zentral in setItem/removeItem (profSchreibSperre);
+   *    nur der Merker selbst und prophos_psession_* (TOKEN_REFRESHED schreibt die Sitzung der richtigen ID) bleiben frei,
+   *  - zeichnet bei SIGNED_IN kein Dashboard und sichert in hydrateUser nichts weg,
+   *  - zeigt „ID wird in einem anderen Tab gewechselt …" und lädt neu, sobald der Merker weg (oder abgelaufen) ist → Boot sauber auf der neuen ID.
+   * Normales Login und Tab-Rückkehr laufen ohne Merker wie bisher. Bricht der wechselnde Tab ab, läuft der Merker nach PROF_WECHSEL_MS aus. */
+  const PROF_WECHSEL_MS = 20000
+  // Gegenprüfung 5: die Kennung überlebt nur das Neuladen DIESES Tabs (sessionStorage + Navigationsart „reload") — ein F5 mitten im eigenen Wechsel hält den
+  // eigenen Merker nicht für fremd; neue oder duplizierte Tabs (Navigationsart navigate/back_forward) bekommen eine neue Kennung
+  const PROF_TAB_ID = (() => {
+    const neu = () => { try{ return crypto.randomUUID() }catch(_){ return Math.random().toString(36).slice(2) + Date.now().toString(36) } }
+    try{ const nav = (performance.getEntriesByType('navigation') || [])[0], alt = sessionStorage.getItem('prophos_profil_tab')
+      const id = (alt && nav && nav.type === 'reload') ? alt : neu(); sessionStorage.setItem('prophos_profil_tab', id); return id }catch(_){ return neu() }
+  })()
+  const _profLsGet = k => { try{ return window.localStorage.getItem(k) }catch(_){ return null } }
+  // → Merker eines ANDEREN Tabs, solange er gilt, sonst null (eigener, abgelaufener oder kaputter Merker = null)
+  function profFremdWechsel(){
+    let m = null; try{ m = JSON.parse(_profLsGet(PROF_WECHSEL_LS) || 'null') }catch(_){ m = null }
+    if(!m || typeof m !== 'object' || m.tab === PROF_TAB_ID) return null
+    return Number(m.bis) > Date.now() ? m : null
+  }
+  let _profFremdWarten = null
+  function profSchreibSperre(k){
+    if(typeof k !== 'string' || !k.startsWith('prophos_')) return false
+    if(k === PROF_WECHSEL_LS || k.startsWith('prophos_psession_')) return false
+    // Gegenprüfung 1: hat dieser Tab einen fremden Wechsel gesehen, gehört seine Seite der alten ID — auch nach dem Lösen des Merkers bis zum
+    // Neuladen nichts mehr schreiben (späte Ladevorgänge, Echtzeit, pagehide schrieben sonst Daten der alten ID in den localStorage der neuen)
+    if(_profFremdWarten) return true
+    return !!profFremdWechsel()
+  }
+  // Eigener Merker (nur der wechselnde Tab): setzen + Herzschlag, wegräumen. → true = Merker steht · false = nicht schreibbar (Wechsel abbrechen)
+  let _profWechselHerz = null
+  function profWechselMerken(von, nach){
+    const wert = () => JSON.stringify({ tab: PROF_TAB_ID, von: von || null, nach, at: Date.now(), bis: Date.now() + PROF_WECHSEL_MS })
+    // Gegenprüfung 3: Speicher voll → erst Puffer anderer IDs werfen, nochmal; scheitert es dann noch, startet der Wechsel nicht (ohne Merker ungeschützt)
+    try{ window.localStorage.setItem(PROF_WECHSEL_LS, wert()) }
+    catch(e){
+      try{ _profCachesAusBuckets([von, nach]); window.localStorage.setItem(PROF_WECHSEL_LS, wert()) }
+      catch(e2){ console.warn('[profil] Wechsel-Merker nicht schreibbar:', (e2 && e2.message) || e2); return false }
+    }
+    clearInterval(_profWechselHerz)
+    // Herzschlag nur, solange der Merker noch der eigene ist (nie den Merker eines anderen Tabs überschreiben)
+    _profWechselHerz = setInterval(() => { let m = null; try{ m = JSON.parse(_profLsGet(PROF_WECHSEL_LS) || 'null') }catch(_){}
+      if(m && m.tab === PROF_TAB_ID){ try{ window.localStorage.setItem(PROF_WECHSEL_LS, wert()) }catch(_){} } }, 5000)
+    return true
+  }
+  function profWechselLoesen(){
+    clearInterval(_profWechselHerz); _profWechselHerz = null
+    try{ let m = null; try{ m = JSON.parse(_profLsGet(PROF_WECHSEL_LS) || 'null') }catch(_){}
+      if(m && m.tab === PROF_TAB_ID) window.localStorage.removeItem(PROF_WECHSEL_LS) }catch(_){}   // nie den Merker eines anderen Tabs löschen
+  }
+  // Anderer Tab wechselt: Hinweis zeigen, warten bis der Merker weg ist, dann neu laden (einmal angestoßen)
+  function profFremdWechselFolgen(){
+    if(_profFremdWarten) return
+    console.warn('[profil] ID wird in einem anderen Tab gewechselt — dieser Tab schreibt nichts und lädt danach neu')
+    try{ const h = document.createElement('div'); h.className = 'prof-wechsel'; h.dataset.profFremd = '1'; h.textContent = 'ID wird in einem anderen Tab gewechselt …'; document.body.appendChild(h) }catch(_){}
+    _profFremdWarten = setInterval(() => { if(!profFremdWechsel()){ clearInterval(_profFremdWarten); location.reload() } }, 250)
+  }
+  window.addEventListener('storage', e => {
+    if(e.key !== PROF_WECHSEL_LS || e.storageArea !== window.localStorage) return
+    if(profFremdWechsel()) profFremdWechselFolgen()
+    else if(_profFremdWarten) location.reload()   // Gegenprüfung 1: Merker weg → sofort neu laden, nicht erst im (gedrosselten) Takt
+  })
+  // Zentrale Sperre: jeder Schreiber (Bucket, PROF_ACTIVE, Profil-Liste, App-Keys, Sync-Haken weiter unten wickelt diese Funktion ein) prüft den Merker
+  {
+    const _setRoh = Storage.prototype.setItem, _rmRoh = Storage.prototype.removeItem
+    Storage.prototype.setItem = function(k){ if(this === window.localStorage && profSchreibSperre(k)){ profFremdWechselFolgen(); return } return _setRoh.apply(this, arguments) }
+    Storage.prototype.removeItem = function(k){ if(this === window.localStorage && profSchreibSperre(k)){ profFremdWechselFolgen(); return } return _rmRoh.apply(this, arguments) }
+  }
+  window._profWechselTest = { fremd: profFremdWechsel, sperre: profSchreibSperre, merken: profWechselMerken, loesen: profWechselLoesen, tab: PROF_TAB_ID }   // Test-Haken
 
   // Alle app-eigenen Keys (prophos_*), ohne die Profil-Systemkeys selbst
   function _profAppKeys(){
@@ -16132,7 +16224,11 @@
     if(_profWechselLaeuft || !userId || userId === profActiveId()) return
     const target = profList().find(p => p.userId === userId)
     if(!target) return
+    if(profFremdWechsel()){ if(typeof atToast === 'function') atToast('ID wird gerade in einem anderen Tab gewechselt — kurz warten', 'warn'); return }   // ID1c
+    // ID1c: Merker VOR dem Wegsichern, dann ~150 ms, damit die anderen Tabs ihn über das storage-Ereignis sehen und nichts mehr schreiben
+    if(!profWechselMerken(profActiveId(), userId)){ if(typeof atToast === 'function') atToast('ID-Wechsel nicht gestartet: Speicher voll (Wechsel-Merker) — bitte erneut versuchen', 'warn'); return }
     _profWechselLaeuft = true
+    await new Promise(ok => setTimeout(ok, 150))
     try{ document.getElementById('userDropdown')?.classList.remove('open') }catch(_){}
     const hinweis = document.createElement('div')
     hinweis.className = 'prof-wechsel'
@@ -16145,7 +16241,7 @@
       console.warn('[profil] Wechsel gescheitert', e)
       if(typeof atToast === 'function') atToast(`ID-Wechsel gescheitert: ${(e && e.message) || e}`, 'warn')
     }
-    finally{ if(!neuLaden){ hinweis.remove(); _profWechselLaeuft = false } }
+    finally{ if(!neuLaden){ hinweis.remove(); _profWechselLaeuft = false; profWechselLoesen() } }   // ID1c: ohne Neuladen Merker sofort weg
   }
   async function profSwitchToKern(userId){
     if(!userId || userId === profActiveId()) return
@@ -16190,6 +16286,7 @@
       // NEU LADEN statt nur die View zu wechseln: dupState, tsState, pairs, Firm-Specs u.a.
       // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
       // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
+      profWechselLoesen()   // ID1c: localStorage + PROF_ACTIVE gehören jetzt der Ziel-ID → andere Tabs dürfen neu laden
       location.reload()
       return 'neu_laden'   // Hinweis + Riegel bleiben bis zum Neuladen (profSwitchTo)
     }catch(e){
@@ -57301,7 +57398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2122'
+  const OS_TAB_BUILD = '2026-09-22.2123'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -81239,7 +81336,8 @@
   ;(async () => {
     try{
       const { data: { session } } = await supabase.auth.getSession()
-      if(session && session.user && !bootGeradeGeladen(_bootGeladen, session.user.id)){
+      let fremdW = false; try{ fremdW = !!(profFremdWechsel() || _profFremdWarten) }catch(_){}   // ID1c (Gegenprüfung 4): kein Rückfall-Laden während eines fremden Wechsels
+      if(session && session.user && !fremdW && !bootGeradeGeladen(_bootGeladen, session.user.id)){
         currentUserId = session.user.id
         _bootGeladen = { uid: session.user.id, at: Date.now() }
         loadAccountsFromSupabase()
@@ -81535,6 +81633,7 @@
     const archVorher = (this === window.localStorage && key === ARCH_SYNC_LS) ? this.getItem(key) : null   // AC3: Stand vor dem Schreiben (für den Unterschied)
     _origLocalStorageSetItem.apply(this, arguments)
     if(this !== window.localStorage) return
+    try{ if(profSchreibSperre(key)) return }catch(_){}   // ID1c (Gegenprüfung 2): Schreiben war gesperrt (fremder ID-Wechsel) → auch nicht hochladen
     if(_syncInProgress) return
     // Profil-Bucket wird gerade eingespielt → NICHT hochladen: die Session gehört noch
     // dem alten Profil, der Upload landete sonst in dessen Supabase-Zeile.
