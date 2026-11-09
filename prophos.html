@@ -57642,7 +57642,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2130'
+  const OS_TAB_BUILD = '2026-09-22.2131'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -75605,7 +75605,9 @@
   }
   async function wdzSpeichern(box, p, zurueck, bestaetigen, opts){
     const e = wdzWerte(box), wur = (wdzKonto(p.id) || {}).wuerfel || {}
-    if(zurueck){ e.tp = wur.tp; e.kt = wur.kt; e.start = ''; if(opts && opts.symWuerfel) e.sym = opts.symWuerfel }   // FP5: Würfel-Symbol mit zurück (Hedge rechnet damit)
+    // FP5: Würfel-Symbol mit zurück (Hedge rechnet damit). Ohne bekanntes Würfel-Symbol ist das Symbol nie von Hand geändert (sonst gäbe es den Knopf nicht) → das des
+    // Plans, nie ein eben im Wähler umgestellter Wert (Prüfer S2 zu FP5: Wähler auf NQ, dann „Würfel-Werte" → Hedge mit NQ-Punktwert, Symbol bliebe MNQ)
+    if(zurueck){ e.tp = wur.tp; e.kt = wur.kt; e.start = ''; if(opts && opts.symWuerfel) e.sym = opts.symWuerfel; else if(e.sym) e.sym = String(p.master_symbol || '').toUpperCase() }
     const start = e.start && e.start !== wdzUhr(p.start_um) ? wdzStartIso(p.start_um, e.start) : null
     if(e.start && e.start !== wdzUhr(p.start_um) && !start){ if(typeof atToast === 'function') atToast('Startzeit als HH:MM eingeben', 'end'); return }
     const r = wdzFelder(p, Object.assign({}, e, { start }))
