@@ -90192,7 +90192,9 @@
   function ttKarteHtml(D){
     const roh = D.tagesteilung && typeof D.tagesteilung === 'object' ? D.tagesteilung : null
     const tt = Object.assign({}, TT_STD, roh || {})
-    const darf = !!roh && D.admin === true && !D.unternehmen && !D.gruppe_sicht   // Phase 1: nur HT-Standard, nur Admin
+    // WS2b-Nachzug (Prüfer 10.11.2026): GET liefert tagesteilung jetzt immer (Standard, auch ohne SQL) — bearbeitbar erst, wenn der Block in der DB steht
+    const inDb = D.tagesteilung_db === true
+    const darf = inDb && !!roh && D.admin === true && !D.unternehmen && !D.gruppe_sicht   // Phase 1: nur HT-Standard, nur Admin
     const inp = (pfad, wert, i, einh, schritt) => {
       if(!darf) return `${e3Z(wert)}${einh ? ` <small>${e3E(einh)}</small>` : ''}`
       const iA = i == null ? '' : ` data-e3-i="${i}"`
@@ -90242,7 +90244,7 @@
     const schalter = darf ? `<input type="checkbox" class="e3-schalt" data-e3-ort="tt" data-e3-pfad='["an"]' data-e3-alt="${tt.an ? 1 : 0}"${tt.an ? ' checked' : ''} aria-label="Trades pro Tag an">`
       : `<b>${tt.an ? 'an' : 'aus'}</b>`
     const knopf = darf ? `<span class="e3-k4"><span class="e3-msg" data-e3-tt-msg></span><button type="button" class="btn btn-ghost btn-xs" data-e3-tt-speichern>Speichern</button></span>` : ''
-    const hinweis = !roh ? '<div class="e3-tt-hinweis">Vorschau mit dem Standard aus dem Konstrukt — änderbar, sobald der Planer die Einstellung liefert.</div>'
+    const hinweis = !inDb ? '<div class="e3-tt-hinweis">Vorschau mit dem Standard — änderbar, sobald die Einstellung in der Datenbank steht (SQL).</div>'
       : (D.unternehmen || D.gruppe_sicht) ? '<div class="e3-tt-hinweis">Gilt nur für Hermann Technologies — ändern unter „Hermann Technologies (Standard)“.</div>'
       : D.admin !== true ? '<div class="e3-tt-hinweis">nur ansehen</div>' : ''
     return `<div class="wd-set-card e3-tt-karte" data-e3-tt>${e3Kopf4('Trades pro Tag', 'Tag in Haupt- und Neben-Trades teilen · CFD + Futures · ohne Apex, Funded, Winning Days', knopf)}${hinweis}
