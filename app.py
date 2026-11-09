@@ -12590,6 +12590,176 @@ def _wd_ohne_master_sl(d):
     return d, verworfen
 
 
+# ── WD-SL-WÜRFEL (WS1a, Finn 09.11.2026 abends „bau das Ganze“; Anlass: Rally zur Eröffnung, 4 Winning Days zerbröselt) ─────────────────────────
+# Ausnahme von „Winning Days haben nie einen Master-SL" (25.09.2026, _wd_ohne_master_sl): der Server würfelt beim Anlegen JE WD-TRADE (POST
+# /admin/wd-plaene) eine Stufe nach Anteil (Standard 50 % kein SL · 10 % 10–20 % · 10 % 20–30 % · 30 % 30–40 % des Puffers), in der Spanne den Prozentwert
+# zufällig. Puffer = Balance vor dem Trade − Liq-Balance aus DERSELBEN Rechnung wie der WD-Weg (hf_wd_master_verlust: liq_regeln/Konto-Boden wie im Radar,
+# dazu Größe + 100 wie der WD-Hedge; Apex = Abstand zum Daily Loss), nie der feste Max DD. SL-$ = Puffer × Prozent auf ganze $. Ergebnis: master_sl
+# (nur wenn gewürfelt) + mt5_baseline.wd_sl (Schnittstelle WS1_schnittstelle.md). Einstellung: wd_farmer_regeln.sl_wuerfel (sql/2026-11-09_wd_sl_wuerfel.sql);
+# Spalte fehlt / null / an=false → aus = wie bisher (kein SL, kein wd_sl). Kaputte Stufen (Summe ≠ 100, von > bis, außerhalb 0–100) → Standard.
+WD_SL_WUERFEL_STD = {"an": True, "stufen": [{"anteil": 50, "von": None, "bis": None},     # kein SL
+                                            {"anteil": 10, "von": 10, "bis": 20},
+                                            {"anteil": 10, "von": 20, "bis": 30},
+                                            {"anteil": 30, "von": 30, "bis": 40}]}
+
+
+def _wd_sl_std():
+    return {"an": True, "stufen": [dict(s) for s in WD_SL_WUERFEL_STD["stufen"]]}
+
+
+def wd_sl_wuerfel_regel(roh):
+    """REIN RECHNEND (testbar): Wert der Spalte sl_wuerfel → (regel | None, quelle 'aus' | 'db' | 'standard').
+    None → aus (Spalte leer = wie bisher). an False (auch 'false'/'aus') → aus — nur ein ausdrückliches Aus schaltet ab. Jede andere kaputte Einstellung
+    (kein Objekt, Stufen fehlen/leer, Anteil oder Prozent außerhalb 0–100, von > bis, nur eins von von/bis, Summe der Anteile ≠ 100) → Standard."""
+    if roh is None:
+        return None, "aus"
+    if isinstance(roh, str):
+        try:
+            roh = json.loads(roh)
+        except (TypeError, ValueError):
+            return _wd_sl_std(), "standard"
+        if roh is None:
+            return None, "aus"
+    if not isinstance(roh, dict):
+        return _wd_sl_std(), "standard"
+    an = roh.get("an")
+    # Prüfer WS1a: auch an 0 / null / „off“ / „no“ heißt aus (fehlt der Schlüssel ganz, gilt die Zeile als gemeint = an)
+    if ("an" in roh and an is None) or an is False or (isinstance(an, (int, float)) and not isinstance(an, bool) and an == 0) \
+            or (isinstance(an, str) and an.strip().lower() in ("false", "aus", "nein", "0", "off", "no", "")):
+        return None, "aus"
+
+    def zahl(v):
+        return None if isinstance(v, bool) else _wd_num(v)
+    stufen, summe = [], 0.0
+    for s in (roh.get("stufen") if isinstance(roh.get("stufen"), list) else []):
+        if not isinstance(s, dict):
+            return _wd_sl_std(), "standard"
+        a = zahl(s.get("anteil"))
+        if a is None or not (0 <= a <= 100):
+            return _wd_sl_std(), "standard"
+        if s.get("von") is None and s.get("bis") is None:
+            stufen.append({"anteil": a, "von": None, "bis": None})
+        else:
+            v, b = zahl(s.get("von")), zahl(s.get("bis"))
+            if v is None or b is None or not (0 <= v <= b <= 100):
+                return _wd_sl_std(), "standard"
+            stufen.append({"anteil": a, "von": v, "bis": b})
+        summe += a
+    if not stufen or abs(summe - 100.0) > 1e-6:
+        return _wd_sl_std(), "standard"
+    return {"an": True, "stufen": stufen}, "db"
+
+
+def wd_sl_wuerfeln(regel, puffer, balance=None, liq_balance=None, rnd=None, grund=None):
+    """REIN RECHNEND (testbar, Zufallsquelle rnd mit .random() injizierbar): → mt5_baseline.wd_sl | None (regel None = Würfel aus, nichts schreiben).
+    Erst die Stufe nach Anteil, dann — nur bei einer SL-Stufe mit gültigem Puffer (> 0) — pct in [von, bis] zufällig (1 Nachkommastelle),
+    usd = Puffer × pct auf ganze $ (kaufmännisch). Ohne SL: ohne=True, pct/usd None, grund nennt warum (gewürfelt / Puffer ungültig, grund vom Aufrufer)."""
+    if not regel:
+        return None
+    rnd = rnd or random
+    p = _wd_num(puffer)
+    out = {"ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": (round(p, 2) if p is not None else None),
+           "balance": _wd_num(balance), "liq_balance": _wd_num(liq_balance), "regel": "sl_wuerfel"}
+    stufen = regel.get("stufen") or []
+    w, kum, idx = rnd.random() * 100.0, 0.0, None
+    for i, s in enumerate(stufen):
+        kum += s["anteil"]
+        if w < kum:
+            idx = i
+            break
+    if idx is None:                                   # Rundungsrest am oberen Ende: letzte Stufe mit Anteil > 0
+        idx = max((i for i, s in enumerate(stufen) if s["anteil"] > 0), default=None)
+    if idx is None:
+        out["grund"] = "keine Stufe mit Anteil > 0"
+        return out
+    s, out["stufe"] = stufen[idx], idx
+    if s.get("von") is None:
+        out["grund"] = "gewürfelt: ohne SL"
+        return out
+    if p is None or p <= 0:
+        out["grund"] = grund or "kein gültiger Puffer (Balance − Liq ≤ 0 oder unbekannt)"
+        return out
+    pct = round(s["von"] + rnd.random() * (s["bis"] - s["von"]), 1)
+    pct = min(max(pct, s["von"]), s["bis"])
+    usd = int(p * pct / 100.0 + 0.5)
+    if usd < 1:
+        out["grund"] = f"SL {pct} % von {p:.2f} $ unter 1 $"
+        return out
+    out.update(ohne=False, pct=pct, usd=usd)
+    return out
+
+
+def wd_sl_balance(acc, fruehere):
+    """REIN RECHNEND (testbar): Balance vor dem neuen WD-Trade → (wert | None, grund). Prüfer WS1a 09.11.2026: tv_balance gilt nur, wenn sie NACH dem Ende des
+    letzten Trades dieses Kontos gelesen wurde (wie hedgeLiqLevel im Tab); sonst die End-Balance dieses Trades (final.balance_end), fehlt die → unbekannt
+    (Plan um 02:00 nach einem Verlusttag, Nachlesung steht aus — der Puffer wäre um dessen P&L verschoben). fruehere = _wd_fruehere_trades."""
+    a = acc or {}
+    tvb, tv_at = _wd_num(a.get("tv_balance")), str(a.get("tv_balance_at") or "")
+    aid = str(a.get("id") or "")
+    letzt = max((f for f in fruehere or () if str(f.get("master_account_id") or "") == aid and f.get("ended_at")),
+                key=lambda f: str(f["ended_at"]), default=None)
+    if letzt is not None and (not tv_at or tv_at <= str(letzt["ended_at"])):
+        be = _wd_num(letzt.get("bal_end"))
+        if be is not None and be > 0:
+            return be, None
+        return None, "Balance seit dem letzten Trade nicht nachgelesen — Puffer unbekannt"
+    if tvb is None or tvb <= 0:
+        return None, "keine Balance am Konto"
+    return tvb, None
+
+
+def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
+    """REIN RECHNEND (testbar): wd_sl eines neuen WD-Plans → dict | None (Würfel aus). Puffer = hf_wd_master_verlust (Balance tv_balance − Liq wie Radar
+    und WD-Hedge, Daily Loss ab Tagesstart bei Apex). Topstep Express: Liq = MLL aus TopstepX, beim Planen unbekannt → ohne SL mit Grund."""
+    if not regel:
+        return None
+    if not acc:
+        return wd_sl_wuerfeln(regel, None, rnd=rnd, grund="Konto-Daten nicht lesbar — Puffer unbekannt")
+    if ist_topstep_express(acc):
+        return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd,
+                              grund="Topstep Express — Liq ist die MLL aus TopstepX, beim Planen unbekannt")
+    # Prüfer WS1a: ohne geladene liq_regeln fiele die Rechnung auf Größe + 100 zurück — bei Apex läge der SL dann hinter dem Daily Loss
+    if not liq_regeln:
+        return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund="liq_regeln nicht geladen — Puffer unbekannt")
+    bal, bal_grund = wd_sl_balance(acc, fruehere)
+    if bal is None:
+        return wd_sl_wuerfeln(regel, None, rnd=rnd, grund=bal_grund)
+    acc = dict(acc, tv_balance=bal)
+    mv = hf_wd_master_verlust(liq_regeln, acc, dict(plan or {}, konto_typ="winning_days", winning_day=True), None, fruehere)
+    bal, puffer = _wd_num(acc.get("tv_balance")), _wd_num(mv.get("usd"))
+    liq = round(bal - puffer, 2) if (bal is not None and puffer is not None) else None
+    return wd_sl_wuerfeln(regel, puffer, bal, liq, rnd=rnd, grund=mv.get("grund"))
+
+
+def _wd_sl_wuerfel_lesen():
+    """wd_farmer_regeln.sl_wuerfel (id 1) → (regel | None, quelle). Spalte fehlt (SQL nicht eingespielt) oder Lesefehler → (None, 'aus') = wie bisher kein SL."""
+    try:
+        rows = sb_select("wd_farmer_regeln", {"select": "sl_wuerfel", "id": "eq.1"}) or []
+    except Exception as e:
+        if "sl_wuerfel" not in str(getattr(getattr(e, "response", None), "text", "") or e):
+            print(f"[wd-sl-wuerfel] ⚠️ nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Würfel aus", flush=True)
+        return None, "aus"
+    return wd_sl_wuerfel_regel(rows[0].get("sl_wuerfel") if rows else None)
+
+
+def _wd_sl_kontext(mids):
+    """Einmal je POST /admin/wd-plaene: (regel, konten {id: acc}, liq_regeln, fruehere). Würfel aus → (None, {}, [], []). Fehlen die Konto-Daten,
+    bleibt die Regel an und jeder Plan bekommt ohne=True mit Grund (lieber kein SL als einer ohne belegten Puffer)."""
+    regel, _q = _wd_sl_wuerfel_lesen()
+    if not regel or not mids:
+        return regel, {}, [], []
+    konten = {}
+    try:
+        for i in range(0, len(mids), 80):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
+                                                      "tv_balance,tv_balance_at", "id": "in.(" + ",".join(mids[i:i + 80]) + ")"}) or []:
+                konten[str(a.get("id"))] = a
+    except Exception as e:
+        print(f"[wd-sl-wuerfel] ⚠️ Konten nicht lesbar ({type(e).__name__}) — diese Pläne ohne SL", flush=True)
+        return regel, {}, [], []
+    return regel, konten, _liq_regeln_laden(), _wd_fruehere_trades(mids)
+
+
 # ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
 # Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem
 # 24.09.2026 gibt es keinen Gegen-Hedge mehr, Duplikum fliegt komplett raus. Die
@@ -16814,6 +16984,13 @@ def admin_wd_plaene():
                                  schluessel=f"wd_payout_unlesbar|{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}")
                 except Exception as e2:
                     print(f"[wd] ⚠️ Alarm Payout unlesbar: {type(e2).__name__}", flush=True)
+        # WD-SL-WÜRFEL (WS1a, 09.11.2026): Regel + Konto-/Liq-Daten einmal je Lauf; jeder Fehler hier = Würfel aus für diesen Lauf (wie bisher kein SL)
+        try:
+            sl_regel, sl_konten, sl_liq, sl_frueher = _wd_sl_kontext(
+                sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""}))
+        except Exception as e:
+            print(f"[wd-sl-wuerfel] ⚠️ Kontext: {type(e).__name__}: {e} — Würfel in diesem Lauf aus", flush=True)
+            sl_regel, sl_konten, sl_liq, sl_frueher = None, {}, [], []
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -16872,6 +17049,19 @@ def admin_wd_plaene():
                 # verlangen, nie eine erlassen; ohne Bestätigung startet der Plan nicht (Freigabe wie Apex-WD, hedge_freigabe_at)
                 if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:
                     body["mt5_baseline"] = {"wd_ausgleich": True}
+                # WD-SL-WÜRFEL (WS1a, 09.11.2026): JE Plan gewürfelt, NACH _wd_ohne_master_sl — ein vom Tab mitgeschickter master_sl ist oben schon verworfen,
+                # einen SL aus einer anderen Regel gibt es auf diesem Weg nicht (WD_PLAN_FELDER trägt kein mt5_baseline). Würfel-Fehler → Plan wie bisher ohne SL.
+                if sl_regel:
+                    try:
+                        wd_sl = wd_sl_fuer_plan(sl_regel, body, sl_konten.get(mid), sl_liq, sl_frueher)
+                    except Exception as e:
+                        print(f"[wd-sl-wuerfel] ⚠️ {mid[:8]}: {type(e).__name__}: {e} — ohne SL", flush=True)
+                        wd_sl = {"ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None,
+                                 "regel": "sl_wuerfel", "grund": f"Rechenfehler ({type(e).__name__})"}
+                    if wd_sl:
+                        body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl=wd_sl)
+                        if not wd_sl.get("ohne") and wd_sl.get("usd"):
+                            body["master_sl"] = wd_sl["usd"]
                 angelegt.append(sb_insert("trade_plans", body))
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
@@ -17406,8 +17596,23 @@ def admin_wd_plaene():
             upd["master_contracts"] = kt
         # master_sl: nur null wird geschrieben (Winning Days ohne Master-SL, 25.09.2026) — ein Wert wird zu null
         sl_verworfen = False
+        sl_gewuerfelt = False
         if "master_sl" in upd:
-            upd, sl_verworfen = _wd_ohne_master_sl(upd)
+            # WD-SL-WÜRFEL (WS1a, 09.11.2026): trägt der Plan einen gewürfelten SL (mt5_baseline.wd_sl), bleibt master_sl in der DB stehen — Netz gegen
+            # jeden Tab-Stand, der „Winning Days: nie ein SL" per PATCH durchsetzt (wdPlaeneNachziehen schickt master_sl null, sobald sein Plan-Abbild einen
+            # SL trägt; das GET liefert master_sl heute nicht mit). Lesefehler → master_sl ebenfalls nicht anfassen (lieber stehen lassen als löschen).
+            try:
+                _ws = (sb_select("trade_plans", {"select": "ws:mt5_baseline->wd_sl", "id": f"eq.{pid}", "limit": "1"}) or [{}])[0].get("ws")
+                sl_gewuerfelt = isinstance(_ws, dict) and _ws.get("regel") == "sl_wuerfel"
+            except Exception as e:
+                print(f"[wd-sl-wuerfel] ⚠️ PATCH {pid[:8]}: wd_sl nicht lesbar ({type(e).__name__}) — master_sl bleibt unverändert", flush=True)
+                sl_gewuerfelt = True
+            if sl_gewuerfelt:
+                upd.pop("master_sl", None)
+                if not upd:
+                    return jsonify({"geaendert": False, "plan": None, "hinweis": "master_sl ist gewürfelt (wd_sl) — bleibt stehen"})
+            else:
+                upd, sl_verworfen = _wd_ohne_master_sl(upd)
         try:
             # V2-Plan (24.09.2026): Slave-Risiko/Multiplier gibt es ohne Hedge nicht — ein
             # Admin-Nachzug (Staffel) darf sie nicht wieder an einen V2-Plan schreiben.
