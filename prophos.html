@@ -38295,6 +38295,11 @@
             if(typeof renderAccounts === 'function') renderAccounts()
           }
         }catch(_){}
+        // WP2 (10.11.2026): Konfetti nur bei echtem Klick (nie Ein Klick/Takt) und nur, wenn das Backend wirklich auf Waiting umgestellt hat
+        if(um.ziel === 'waiting' && !einKlick && !still){
+          const kn = ((accounts || []).find(x => String(x.id) === String(um.konto_id)) || {}).name || (ab2Info && ab2Info.name) || 'Konto'
+          wpKonfetti(kn)
+        }
       }
       const gdH = wdHand ? (d.good_day || null) : null   // „war ein Winning Day": Stand aus der Antwort (gezaehlt/stand/ziel) oder Fehler
       const wdhTxt = !gdH ? '' : gdH.gezaehlt ? ` · 🏆 Winning Day ${gdH.stand}/${gdH.ziel}` : gdH.fehler ? '' : ' · 🏆 Winning Day heute schon gezählt'
@@ -45598,13 +45603,13 @@
         if(jetzt){
           if(jetzt.type !== 'funded_cfd' || jetzt.waitingPayoutSince){ ab2Zu(k); return }
           b.disabled = true
-          accWartetUmstellen(id, true).then(() => { delete _k1.cache[id]; ab2Zu(k) })
+          accWartetUmstellen(id, true).then(ok => { delete _k1.cache[id]; ab2Zu(k); if(ok === true) wpKonfetti(jetzt.name || info.name) })   // WP2: nur nach erfolgreichem Schreiben
           return
         }
         if(!radarOk){ ab2Zu(k); return }
         b.disabled = true
         ab1WartetRadar(radar)
-          .then(() => { if(typeof atToast === 'function') atToast(`⏳ ${info.name || 'Konto'}: Waiting for Payout`, 'ok') })
+          .then(() => { if(typeof atToast === 'function') atToast(`⏳ ${info.name || 'Konto'}: Waiting for Payout`, 'ok'); wpKonfetti(info.name) })   // WP2
           .catch(err => { if(typeof atToast === 'function') atToast('Nicht umgestellt: ' + ((err && err.message) || err), 'end') })
           .finally(() => { delete _k1.cache[id]; ab2Zu(k) })
       })
@@ -45625,6 +45630,63 @@
     if(!(um && um.umgestellt)) throw new Error((um && (um.fehler || um.grund)) || 'Konto nicht umgestellt')
     return true
   }
+  /* WP2 KONFETTI BEI WAITING FOR PAYOUT (Finn 10.11.2026: „geht das mit so Konfetti und bisschen Animation xD"): kurze Feier, wenn ein Konto beim Abhaken WIRKLICH
+   * auf Waiting for Payout geht — nur hinter einem erfolgreichen Schreiben von waiting_payout_since auf den Abhak-Wegen von WP1 (Radar-Popup, Knopf im
+   * Abhak-Strahl, Trades-Dialog), nie bei „Nichts ändern", Fehler, Ein Klick/Takt oder dem Planer (ziel_auto_wartet läuft in app.py, nicht hier).
+   * Eigener kleiner Canvas (keine Bibliothek), ~1,8 s, räumt sich selbst weg; Farben aus den Tokens. prefers-reduced-motion → nur der Hinweis.
+   * Ausgeblendeter Tab (document.hidden, z. B. ein PC-Tab im Hintergrund) → gar nichts. Reine Anzeige, ändert keinen Schreibweg. */
+  const WP_KONFETTI_MS = 1800, WP_HINWEIS_MS = 3200
+  function wpKonfetti(name){
+    try{
+      if(document.hidden) return
+      const css = getComputedStyle(document.documentElement), tok = (n, f) => (css.getPropertyValue(n) || '').trim() || f
+      // Hinweis: kleine Pille oben in der Mitte, eigenes Element (atToast würde vom folgenden „Erledigt"-Toast sofort ersetzt)
+      const ruhig = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+      document.querySelectorAll('.wp-feier-hinweis').forEach(x => x.remove())
+      const h = document.createElement('div')
+      h.className = 'wp-feier-hinweis'
+      h.setAttribute('role', 'status')
+      h.textContent = `🎉 ${String(name || 'Konto')} wartet auf Payout`
+      Object.assign(h.style, { position: 'fixed', top: '18px', left: '50%', transform: 'translate(-50%, -8px)', zIndex: '100001', pointerEvents: 'none',
+        background: tok('--surface', '#fff'), color: tok('--ink', '#111'), ...(ruhig ? { transform: 'translate(-50%, 0)' } : {}), border: '1px solid ' + tok('--violet-soft', tok('--border', '#ddd')),
+        borderRadius: '999px', padding: '7px 14px', fontSize: '13px', fontWeight: '600', boxShadow: '0 6px 24px rgba(0,0,0,.12)',
+        opacity: '0', transition: 'opacity .25s ease, transform .25s ease', whiteSpace: 'nowrap', maxWidth: 'calc(100vw - 32px)', overflow: 'hidden', textOverflow: 'ellipsis' })
+      document.body.appendChild(h)
+      requestAnimationFrame(() => { h.style.opacity = '1'; if(!ruhig) h.style.transform = 'translate(-50%, 0)' })
+      setTimeout(() => { h.style.opacity = '0'; setTimeout(() => h.remove(), 300) }, WP_HINWEIS_MS)
+      if(ruhig) return
+      const cv = document.createElement('canvas'), dpr = 1   // Konfetti braucht keine Retina-Schärfe — spart bis ~65 MB Canvas für 1,8 s
+      const W = window.innerWidth, H = window.innerHeight
+      cv.className = 'wp-feier-konfetti'
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr)
+      Object.assign(cv.style, { position: 'fixed', inset: '0', width: W + 'px', height: H + 'px', zIndex: '100000', pointerEvents: 'none' })
+      document.body.appendChild(cv)
+      const ctx = cv.getContext('2d'); if(!ctx){ cv.remove(); return }
+      ctx.scale(dpr, dpr)
+      const farben = [tok('--violet', '#5049A2'), tok('--good', '#16a34a'), tok('--warn', '#d97706'), tok('--blue', '#2563eb'), tok('--teal', '#0d9488')]
+      // zwei Schübe von links und rechts oben, schräg zur Mitte
+      const teile = Array.from({ length: 90 }, (_, i) => {
+        const links = i % 2 === 0, w = (links ? -0.35 : -Math.PI + 0.35) + (links ? -1 : 1) * Math.random() * 0.9
+        const v = 7 + Math.random() * 7
+        return { x: links ? W * 0.15 : W * 0.85, y: H * 0.22, vx: Math.cos(w) * v * (links ? 1 : 1), vy: Math.sin(w) * v - 2,
+          r: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3, b: 5 + Math.random() * 5, hh: 3 + Math.random() * 4, f: farben[i % farben.length] }
+      })
+      const t0 = performance.now()
+      const schritt = jetzt => { try{
+        const t = jetzt - t0
+        if(t > WP_KONFETTI_MS || !cv.isConnected){ cv.remove(); return }
+        ctx.clearRect(0, 0, W, H)
+        ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - WP_KONFETTI_MS * 0.6) / (WP_KONFETTI_MS * 0.4))   // letzte 40 % ausblenden
+        for(const p of teile){
+          p.vx *= 0.985; p.vy = p.vy * 0.985 + 0.32; p.x += p.vx; p.y += p.vy; p.r += p.vr
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.f; ctx.fillRect(-p.b / 2, -p.hh / 2, p.b, p.hh); ctx.restore()
+        }
+        requestAnimationFrame(schritt)
+      }catch(_){ cv.remove() } }   // ein Fehler im Bild lässt nie einen Canvas stehen
+      requestAnimationFrame(schritt)
+    }catch(e){ console.warn('[wp2] Konfetti', e) }   // Anzeige darf nie stören
+  }
+  window._wpKonfetti = wpKonfetti   // Test-Haken
   window._ab2Start = ab2Start; window._ab2Fertig = ab2Fertig; window._ab2Zeichnen = ab2Zeichnen; window._ab2PlanBal = ab2PlanBal; window._ab2Gilt = ab2Gilt   // Stub-/Selbsttest-Haken
   window._k1 = _k1   // Stub-/Selbsttest-Haken
 
@@ -57514,7 +57576,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2125'
+  const OS_TAB_BUILD = '2026-09-22.2126'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -79095,7 +79157,9 @@
       if(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked && masterAcc && statusChoice === 'none'){
         const _kuAkt = (accounts || []).find(a => String(a.id) === String(masterAcc.id)) || masterAcc   // frischer Stand: inzwischen woanders umgestellt → nichts tun
         if(_kuCb.dataset.ziel === 'winning_days' && _kuAkt.type === 'funded') await accWdUmstellen(masterAcc.id, 'winning_days')
-        else if(_kuCb.dataset.ziel === 'waiting' && _kuAkt.type === 'funded_cfd' && !_kuAkt.waitingPayoutSince) await accWartetUmstellen(masterAcc.id, true)
+        else if(_kuCb.dataset.ziel === 'waiting' && _kuAkt.type === 'funded_cfd' && !_kuAkt.waitingPayoutSince){
+          if(await accWartetUmstellen(masterAcc.id, true) === true) wpKonfetti(masterAcc.name)   // WP2: Konfetti nur nach erfolgreichem Schreiben
+        }
       }
       // AB2 (Finn 05.11.2026): Abhak-Strahl — nach dem Umstellen oben, damit er den Stand danach zeigt; nicht bei geblowt/bestanden
       // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand. Seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
