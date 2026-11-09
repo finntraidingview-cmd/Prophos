@@ -59729,7 +59729,12 @@
   // opts.frist (ms, NEWS-REGEL 30.10.2026, Prüfer-Stopp S2): bis dahin muss jeder Klick vorbei sein — 409-Warteschleife und Puls-timeout_s
   // richten sich danach; reicht der Rest nicht, wird nichts angefangen ({ retry: true }). Ohne opts unverändert.
   async function v2SchliessenAmPc(plan, opts){
-    if(!plan || plan.status !== 'open' || !routeIstV2(plan.route)) return { ok:false, msg:'Plan läuft nicht (mehr) — nichts geschlossen.', retry:false }
+    // opts.ohneEnde (WS2c Zufalls-Schluss, 09.11.2026, HX1-Fall): Plan steht schon auf review/completed, Puls sieht die Master-Position aber noch
+    // offen (final.puls_offen_n > 0) → NUR den Master schließen, kein neues Ende (tvV2EndeSetzen entfällt), nur der Puls-Weg (tvv2/tsv2 mit Puls).
+    // opts.finExtra: zusätzliche Felder fürs Ende (z. B. ende_grund 'zschluss'). Ohne opts unverändert.
+    const ohneEnde = !!(opts && opts.ohneEnde)
+    if(ohneEnde ? !(plan && ['review', 'completed'].includes(plan.status) && planIstPuls(plan)) : (!plan || plan.status !== 'open' || !routeIstV2(plan.route)))
+      return { ok:false, msg:'Plan läuft nicht (mehr) — nichts geschlossen.', retry:false }
     const frist = (opts && Number(opts.frist) > 0) ? Number(opts.frist) : 0
     const restS = () => frist ? Math.floor((frist - Date.now()) / 1000) : Infinity
     const zuKnapp = { ok:false, retry:true, msg:'Frist vor der News zu knapp — nichts angefangen, später erneut.' }
@@ -59788,8 +59793,10 @@
         if(zahl(r.balance_end) != null) finExtra.balance_end = r.balance_end
         if(zahl(r.equity_end) != null) finExtra.equity_end = r.equity_end
         if(danach) finExtra.positionen_danach = danach.slice(0, 10)   // Flach-Beweis mit am Plan (K5, 30.09.2026 — tsx-close wie tv-close)
+        if(opts && opts.finExtra && typeof opts.finExtra === 'object') Object.assign(finExtra, opts.finExtra)   // WS2c: z. B. ende_grund 'zschluss'
         let beendet = false
-        try{ beendet = await tvV2EndeSetzen(plan, todayPnl, 'close', Object.keys(finExtra).length ? finExtra : undefined) }catch(e){ console.warn('[v2-close] final', e) }
+        // WS2c ohneEnde (HX1-Fall): das Ende steht schon — nur der Master war noch offen; kein zweites Ende, kein Hedge-Schluss (der ist schon zu)
+        if(!ohneEnde){ try{ beendet = await tvV2EndeSetzen(plan, todayPnl, 'close', Object.keys(finExtra).length ? finExtra : undefined) }catch(e){ console.warn('[v2-close] final', e) } }
         // Topstep V2 (01.10.2026, TSV2-PNL): today_pnl ist dort der RP&L des ganzen Tages — Remote-Close/Auto-Close melden als Profit
         // nur Balance nachher − vorher (gleiche Basis), sonst nichts
         let profit = todayPnl, profitText = todayPnl != null ? ` · Today's P&L ${todayPnl.toLocaleString('de-DE')} $` : ''
@@ -59799,7 +59806,7 @@
             ? Number((finExtra.balance_end - tvS.balance_start).toFixed(2)) : null
           profitText = profit != null ? ` · P&L ${profit.toLocaleString('de-DE')} $ (Balance)` : ''
         }
-        return { ok:true, beendet, profit, trail: r.trail || null,
+        return { ok:true, beendet, profit, trail: r.trail || null, code: r.code || '', positionen_danach: danach,   // code/danach: WS2c (war_flach, Beleg)
           msg: (r.code === 'schon_flach' ? 'Position war schon flach — Plan beendet.' : String(r.msg || 'Position geschlossen.')) + profitText }
       }
       return { ok:false, msg: String(r.msg || r.error || r.code || 'Close fehlgeschlagen.'), code: r.code || null, trail: r.trail || null,
@@ -59816,7 +59823,7 @@
     const poss = Array.isArray(s.master_positions) ? s.master_positions : []
     if(!poss.length){
       mt5PlanPoll.wasOpen.add(pid)
-      return { ok:true, beendet:false, msg:'Master ist schon flach — die Ende-Erkennung übernimmt (2 Messungen).' }
+      return { ok:true, beendet:false, code:'schon_flach', msg:'Master ist schon flach — die Ende-Erkennung übernimmt (2 Messungen).' }   // code: WS2c (war_flach statt geschlossen)
     }
     const baseTicket = Number((plan.mt5Baseline || {}).ticket) || 0
     let ticket = 0, beschr = ''
@@ -61297,12 +61304,21 @@
     if(!dd || dd.copier_offline || dd._httpFail) return { ok: false, msg: 'Copier offline', retry: true }
     const route = mt5RouteResolve(plan, dd.instances || [])
     if(!route) return { ok: false, msg: 'Plan gehört zu keiner Copier-Instanz auf diesem PC', retry: false }
+    // opts.frischPflicht (WS2c Zufalls-Schluss, 09.11.2026): Master-Snapshot muss leben — das Panel prüft vor master-close nur die Frische des
+    // Copier-STATUS, den der Copier auch bei eingefrorenem Snapshot weiterschreibt (copier.py: dann keine Aktionen, auch kein Hedge-Close) →
+    // Master zu, Hedge bliebe offen. Ohne opts (Auto-Close, News-Regel) unverändert.
+    if(opts && opts.frischPflicht){
+      const s0 = (route.inst && route.inst.status) || {}
+      if(!route.inst.alive || s0.note) return { ok: false, code: 'snapshot_alt', retry: true,
+        msg: `Master-Snapshot nicht frisch (${s0.note ? String(s0.note).slice(0, 60) : 'Instanz nicht lebendig'}) — nichts geschlossen, der Hedge würde nicht mitgehen.` }
+    }
     const t = tpClosePosAufloesen(plan, route, symbol)
-    if(t.fehler) return { ok: false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler) }
+    if(t.fehler) return { ok: false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler),
+      keine_position: /Keine offene Master-Position/.test(t.fehler) && !(((route.inst && route.inst.status) || {}).master_positions || []).length }   // WS2c: nur bei GANZ leerem Master (Symbol-Filter kann sich irren)
     if(frist && frist - Date.now() < 30000) return { ok: false, msg: 'Frist vor der News zu knapp — nichts angefangen, später erneut.', retry: true }
     const r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: t.ticket, symbol }) })
-    if(r && r.ok) return { ok: true, msg: `#${t.ticket} ${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false }
+    if(r && r.ok) return { ok: true, msg: `#${t.ticket} ${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false, ticket: t.ticket, file: route.inst.file }
     const pausiert = (typeof _pfEchoPausiert === 'function') && _pfEchoPausiert(r)
     return { ok: false, msg: (r && (r.msg || r.error)) || 'keine Antwort vom Bot', retry: !!(r && r.retry_ok) || pausiert }
   }
@@ -61471,6 +61487,251 @@
       break   // ein Trade je Tick — es gibt genau ein Terminal und eine Maus
     }
   }
+  /* ══ ZUFALLS-SCHLUSS (WS2c, 09.11.2026 — Konstrukt WS2 Punkt 5, von Finn abgesegnet: „Ja, einfach fertig. Kein Trade mehr an dem Tag")
+   * Der Planer (WS2a, Railway) würfelt beim Anlegen eines Challenge-Plans mit 5–10 % mt5_baseline.zschluss = { nach_min } (2–120 min) — geheim,
+   * nie angezeigt. Fällig = started_at + nach_min. Ist der Trade dann noch offen, schließt Puls ihn zum Marktpreis, über dieselben Wege wie
+   * „Schließen"/Auto-Close:
+   *   tvv2 / mt5v2 → v2SchliessenAmPc (Puls tv-close: Konto bewiesen, genau eine Zeile, 2 Flach-Lesungen; Ende mit ende_grund 'zschluss')
+   *   mt5 (Echo mit Copier-Hedge) → acEchoSchliessen mit frischPflicht (eingefrorener Master-Snapshot → nichts schließen: der Copier leitet
+   *     dann keine Aktionen ab und der Hedge bliebe allein offen — Befund WS2c Punkt 4.1)
+   * Danach HEDGE-BEWEIS: zwei frische Copier-Lesungen (≥ 2 s auseinander, je eigene Abfrage) ohne den Hedge — Fusion-Solo (mt5_baseline.hedge.ticket)
+   * bzw. Copier-Hedges der Master-ident; höchstens 90 s, sonst hedge_zu false + 🔴 (die bestehenden Wächter schließen weiter).
+   * Ergebnis in mt5_baseline.zschluss = { status 'geschlossen' | 'war_flach' | 'fehler', at, grund, hedge_zu, hedge_beleg, art, pc, versuche, msg }.
+   * WS2a beendet den Tag nur an status 'geschlossen' (Schnittstelle §2b).
+   * HX1-FALL (Schnittstelle §6, Master 09.11.2026): Plan schon review/completed, Puls sah die Position danach noch offen (final.puls_offen_n > 0)
+   *   → nur den Master schließen (v2SchliessenAmPc ohneEnde), kein neues Ende.
+   * NIE: Topstep (tsv2 hat kein tsx-close — nur mit zschluss.topstep === true wird es versucht und endet ehrlich als fehler), Winning Days,
+   *   Funded (der Planer würfelt dort nie; hier zusätzlich über die Kontoart geprüft), Pläne, die länger als 12 h fällig sind.
+   * NEWS-SPERRE (Standard an, aus mit zschluss.news_sperre === false): kein Schluss von 11 min vor bis 6 min nach einem roten Termin (Tradeify
+   *   verbietet Schließen ±5 min; Echo-Close läuft bis 300 s). Kalender fehlt/alt → bis 20 min nach Fälligkeit warten, dann schließen
+   *   (Schließen ist die sichere Seite).
+   * AUSFÜHRENDER PC: Hedge-PC, solange ein Fusion-Solo offen ist (dort steht das Hedge-Terminal), sonst der Start-PC (tv.pc), bei Echo der PC
+   *   mit der Copier-Instanz; Riegel je Plan über mt5_baseline_sperre ('zschluss_lauf', 6 min) — zwei Tabs/PCs schließen nie doppelt.
+   * Läuft am PC-Tab (MT5_LOCAL, nur Haupt-Tab), eine Maus: nie neben Auto-Close, Remote-Lauf, Orbit-Lauf, Signal oder Polar; ein Plan je Tick.
+   * Kein Push bei Erfolg (nur Toast + auto_close_log), 🔴 aufs Handy bei fehler oder unbewiesenem Hedge. ══ */
+  const ZS = { takt_ms: 15000, news_vor_min: 11, news_nach_min: 6, kalender_warte_min: 20, max_versuche: 8, max_alter_h: 12,
+               hedge_frist_ms: 90000, hedge_lesungen: 2, hedge_abstand_ms: 2000, lauf_sperre_s: 600, pause_nach_lauf_ms: 600000 }
+  const ZS_KONTO_NIE = ['winning_days', 'funded', 'funded_cfd']
+  const _zs = { laeuft: false, naechster: {}, gemeldet: {}, acHalt: false }   // acHalt: zsTick hält _ac.laeuft (nur dann gibt es ihn frei)
+
+  // REIN RECHNEND (Test-Haken window._zsStand): ist der Zufalls-Schluss dieses Plans jetzt fällig? → { art: 'normal' | 'hx1', faellig } | null
+  // plaene = alle Pläne (für den HX1-Riegel: kein anderer Plan auf demselben Konto offen oder später gestartet)
+  function zsStand(p, now, kontoTyp, plaene){
+    const b = p && p.mt5Baseline, z = b && b.zschluss
+    if(!z || typeof z !== 'object' || z.status || !(Number(z.nach_min) > 0)) return null
+    if(kontoTyp && ZS_KONTO_NIE.includes(String(kontoTyp).toLowerCase())) return null
+    // Gegenprüfung 09.11.2026: nicht nur am Konto-Cache — auch die Kennungen am Plan selbst (Winning-Day-Marke, Farmer-Notiz, Funded CFD).
+    // Bewusst NICHT tpIstWdPlan: das zählt jede tvv2-Challenge mit Fusion-Hedge (hedgeEur > 0) als WD-Weg — die fielen sonst still heraus.
+    if(p.fundedCfd || String(p.kontoTyp || '').toLowerCase() === 'funded_cfd') return null
+    if(p.winningDay === true || /Winning-Day-Farmer/i.test(String(p.notes || ''))) return null
+    if(!['tvv2', 'mt5v2', 'mt5', 'tsv2'].includes(p.route)) return null
+    if(p.route === 'tsv2' && z.topstep !== true) return null   // Topstep ausgenommen (Standard bis Finns Antwort, Master 09.11.2026)
+    const start = Date.parse(p.startedAt || '') || 0
+    if(!start) return null
+    const faellig = start + Number(z.nach_min) * 60000
+    if(now < faellig || now - faellig > ZS.max_alter_h * 3600000) return null
+    if(p.status === 'open') return { art: 'normal', faellig }
+    // HX1 (Gegenprüfung 09.11.2026, Fehler 1): puls_offen_n wird nie zurückgesetzt und „noch offen" heißt meist: auf dem Konto läuft schon der
+    // FOLGE-Trade — tv-close schließt nach Konto + Symbol und wüsste nichts vom Plan. Darum nur: Status review (nie completed), mindestens 2 „offen"-
+    // Lesungen, die letzte ≤ 20 min alt, keine End-Balance gelesen, und KEIN anderer Plan auf demselben Konto offen oder später gestartet.
+    const fin = (b && b.final) || {}
+    if(p.status !== 'review' || !planIstPuls(p) || !(Number(fin.puls_offen_n) >= 2) || fin.balance_end != null) return null
+    const offenAt = Date.parse(fin.puls_offen_at || '') || 0
+    if(!offenAt || now - offenAt > 20 * 60000) return null
+    const konto = String(p.masterAccountId || '')
+    if(!konto) return null
+    const anderer = (plaene || []).some(q => q && String(q.id) !== String(p.id) && String(q.masterAccountId || '') === konto
+      && (q.status === 'open' || (Date.parse(q.startedAt || '') || 0) > start))
+    if(anderer) return null
+    return { art: 'hx1', faellig }
+  }
+  window._zsStand = zsStand
+
+  // REIN RECHNEND (Test-Haken window._zsNewsSperre): Sperrgrund-Text oder null. termine = [{t, titel}] | null (= Kalender fehlt/alt)
+  function zsNewsSperre(z, now, faellig, termine){
+    if(z && z.news_sperre === false) return null
+    if(!termine) return (now - faellig < ZS.kalender_warte_min * 60000) ? 'News-Kalender fehlt — Zufalls-Schluss wartet (höchstens 20 min)' : null
+    const M = 60000, x = termine.find(y => y && now > y.t - ZS.news_vor_min * M && now < y.t + ZS.news_nach_min * M)
+    return x ? `News ${x.titel || ''} ${newsUhr(x.t)} — kein Schließen von ${ZS.news_vor_min} min vor bis ${ZS.news_nach_min} min nach` : null
+  }
+  window._zsNewsSperre = zsNewsSperre
+  // Frist für den Klick (Gegenprüfung 09.11.2026, Risiko 6): nächster roter Termin − 6 min, wenn er in den nächsten 30 min liegt — v2SchliessenAmPc/
+  // acEchoSchliessen fangen nichts mehr an, das darüber hinaus klicken könnte (409-Warteschleife bis 150 s, tv-close bis 240 s, master-close bis 300 s)
+  function zsKlickFrist(z, now, termine){
+    if((z && z.news_sperre === false) || !termine) return 0
+    const M = 60000, f = termine.map(y => y && y.t - ZS.news_nach_min * M).filter(x => x > now && x - now < 30 * M).sort((a, b) => a - b)[0]
+    return f || 0
+  }
+  window._zsKlickFrist = zsKlickFrist
+  function zsTermine(now){
+    try{
+      if(!newsState.loaded || !newsState.fetched || now - newsState.fetched > NEWS_REGEL.alt_ms) return null
+      return newsBloecke(newsState.events).flatMap(b => b.termine)
+    }catch(_){ return null }
+  }
+
+  // REIN RECHNEND (Test-Haken window._zsHedgeLesung): eine Copier-Lesung → true = Hedge weg · false = Hedge noch da · null = kein Beweis (nicht frisch)
+  //   art 'solo': instances = [{alive, status:{hedge_solo:[{ticket}]}}], ticket = Fusion-Solo-Ticket
+  //   art 'echo': instances, file = Instanz des Masters, ticket = Master-ident (Copier-Hedges stehen unter status.hedges[ident])
+  function zsHedgeLesung(art, instances, ticket, file){
+    const inst = Array.isArray(instances) ? instances : []
+    if(art === 'solo'){
+      // Gegenprüfung 09.11.2026 (Risiko 3): hedge_solo gilt je Copier-Prozess — über ALLE lebenden Instanzen vereinigen (wie panel.py
+      // scharf_copier_solo); meldet eine lebende Instanz hedge_solo = null (positions_get-Fehler), ist nichts bewiesen
+      const lebend = inst.filter(x => x && x.alive && x.status)
+      if(lebend.some(x => x.status.hedge_solo === null)) return null
+      const listen = lebend.filter(x => Array.isArray(x.status.hedge_solo))
+      if(!listen.length) return null
+      return !listen.some(x => x.status.hedge_solo.some(q => q && Number(q.ticket) === Number(ticket)))
+    }
+    const i = inst.find(x => x && x.file === file)
+    if(!i || !i.alive || !i.status || i.status.note) return null
+    const s = i.status
+    if((s.master_positions || []).some(x => x && Number(x.ident) === Number(ticket))) return false
+    const hs = (s.hedges || {})[String(ticket)]
+    return !(Array.isArray(hs) && hs.length)
+  }
+  window._zsHedgeLesung = zsHedgeLesung
+
+  // Zwei frische Lesungen hintereinander ohne Hedge → { hedge_zu: true, beleg } · Frist um → { hedge_zu: false, beleg }
+  async function zsHedgeBeweis(art, ticket, file){
+    const t0 = Date.now(), lesungen = []
+    let n = 0
+    while(Date.now() - t0 < ZS.hedge_frist_ms){
+      let dd = null
+      try{ dd = await window.mtcApi('instances') }catch(_){ dd = null }
+      const weg = (dd && !dd.copier_offline && !dd._httpFail) ? zsHedgeLesung(art, dd.instances, ticket, file) : null
+      lesungen.push({ at: new Date().toISOString(), weg })
+      n = weg === true ? n + 1 : 0
+      if(n >= ZS.hedge_lesungen) return { hedge_zu: true, beleg: { art, ticket, lesungen: lesungen.slice(-ZS.hedge_lesungen), dauer_ms: Date.now() - t0 } }
+      await new Promise(ok => setTimeout(ok, ZS.hedge_abstand_ms + Math.random() * 800))
+    }
+    return { hedge_zu: false, beleg: { art, ticket, lesungen: lesungen.slice(-6), dauer_ms: Date.now() - t0 } }
+  }
+  window._zsHedgeBeweis = zsHedgeBeweis   // Test-Haken (liest nur, klickt nie)
+
+  // Gehört der Schluss auf DIESEN PC? Hedge-PC (Fusion-Solo offen) → Start-PC (tv.pc) → Echo: PC mit der Copier-Instanz (im Lauf geprüft)
+  function zsMeinPc(p){
+    const b = p.mt5Baseline || {}, h = b.hedge, ich = hedgePcId()
+    if(h && ['offen', 'schliesst'].includes(h.status) && h.ticket && h.pc) return h.pc === ich
+    const tvPc = b.tv && b.tv.pc
+    if((p.route === 'tvv2' || p.route === 'tsv2') && tvPc) return tvPc === ich
+    return true
+  }
+
+  async function zsSchreiben(pid, patch){
+    try{ await baselinePatchIn(pid, 'zschluss', patch) }
+    catch(e){ console.warn('[zschluss] schreiben', pid, (e && e.message) || e) }
+  }
+
+  // _ac.laeuft nur freigeben, wenn zsTick ihn selbst gesetzt hat und noch hält (Gegenprüfung 09.11.2026, Fehler 2: sonst gäbe das finally die Sperre
+  // eines Auto-Close frei, der während des Hedge-Beweises angefangen hat)
+  function zsAcFrei(){ if(_zs.acHalt){ _zs.acHalt = false; _ac.laeuft = false } }
+
+  async function zsAusfuehren(p, st, frist){
+    const pid = String(p.id)
+    const name = p.masterName || pid.slice(0, 8)
+    // Echo: nur der PC mit der Copier-Instanz (sonst still liegen lassen — ein anderer PC der Flotte hat sie)
+    if(p.route === 'mt5' || p.route === 'mt5v2'){
+      let dd = null; try{ dd = await window.mtcApi('instances') }catch(_){}
+      if(!dd || dd.copier_offline || dd._httpFail){ _zs.naechster[pid] = Date.now() + 30000; return }
+      const ok = p.route === 'mt5' ? mt5RouteResolve(p, dd.instances || []) : mt5V2Resolve(p, dd.instances || [])
+      if(!ok){ _zs.naechster[pid] = Date.now() + 120000; return }
+    }
+    if(!(await hedgeSperre(pid, 'zschluss_lauf', ZS.lauf_sperre_s))){ _zs.naechster[pid] = Date.now() + 60000; return }   // anderer Tab/PC ist dran
+    // Nach der Sperre FRISCH aus der DB (Gegenprüfung Risiko 7): ein anderer PC kann den Schluss schon erledigt haben, der lokale Plan kann alt sein
+    let frisch = null
+    try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
+    if(!frisch){ _zs.naechster[pid] = Date.now() + 60000; return }
+    let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(frisch.masterAccountId)) }catch(_){}
+    let alle; try{ alle = tradePlans }catch(_){ alle = [] }
+    const st2 = zsStand(frisch, Date.now(), acc && acc.type, alle)
+    if(!st2 || st2.art !== st.art){ _zs.naechster[pid] = Date.now() + ZS.pause_nach_lauf_ms; return }
+    p = frisch
+    const b = p.mt5Baseline || {}, z = b.zschluss || {}
+    const versuche = (Number(z.versuche) || 0) + 1
+    await zsSchreiben(pid, { versuche, letzter_versuch_at: new Date().toISOString(), pc: hedgePcId(), art: st.art })
+    let erg
+    // _ac.laeuft hält zsTick seit Tick-Beginn (Auto-Close/News-Regel fassen nichts an); nach dem Close frei — der Hedge-Beweis klickt nicht
+    try{
+      const fo = frist ? { frist } : {}
+      if(p.route === 'mt5') erg = await acEchoSchliessen(p, Object.assign({ frischPflicht: true }, fo))
+      else erg = await v2SchliessenAmPc(p, Object.assign(st.art === 'hx1' ? { ohneEnde: true } : { finExtra: { ende_grund: 'zschluss' } }, fo))
+    }catch(e){ erg = { ok: false, unklar: true, retry: false, msg: 'Zufalls-Schluss abgebrochen: ' + ((e && e.message) || e) } }
+    finally{ zsAcFrei() }
+    erg = erg || { ok: false, retry: true, msg: 'keine Antwort' }
+    // Echo: acEchoSchliessen kennt kein „unklar" — ohne retry kann der Klick raus sein (Zeitlimit, Absturz) → wie unklar melden (Gegenprüfung Risiko 8)
+    if(p.route === 'mt5' && !erg.ok && !erg.retry && !erg.keine_position) erg.unklar = true
+    const jetzt = new Date().toISOString()
+    let status = null
+    if(erg.ok) status = (erg.code === 'schon_flach') ? 'war_flach' : 'geschlossen'
+    else if(p.route === 'mt5' && erg.keine_position) status = 'war_flach'   // frischer Snapshot (frischPflicht), Master ganz ohne Position
+    if(!status){
+      const endgueltig = erg.unklar || !erg.retry || versuche >= ZS.max_versuche
+      if(!endgueltig){
+        _zs.naechster[pid] = Date.now() + (30 + Math.random() * 60) * 1000
+        await zsSchreiben(pid, { letzter_fehler: String(erg.msg || '').slice(0, 300), letzter_fehler_at: jetzt })
+        console.info('[zschluss] später erneut', name, erg.msg)
+        return
+      }
+      _zs.naechster[pid] = Date.now() + ZS.pause_nach_lauf_ms   // lokal nie gleich wieder (auch wenn das Schreiben scheitert)
+      const grund = erg.unklar ? 'unklar' : (versuche >= ZS.max_versuche ? 'versuche' : (erg.code || 'abgelehnt'))
+      await zsSchreiben(pid, { status: 'fehler', at: jetzt, grund, msg: String(erg.msg || '').slice(0, 300), trail: erg.trail ? String(erg.trail).slice(-600) : null })
+      try{ await acLog(p, false, `Zufalls-Schluss ✗ (${grund}): ${erg.msg || ''}`) }catch(_){}
+      acBenachrichtigen('🔴 Zufalls-Schluss', `${name}: ${erg.unklar ? 'Ergebnis UNKLAR — im Konto nachsehen, ob die Position noch offen ist. ' : 'nicht geschlossen — '}${String(erg.msg || '').slice(0, 160)}`)
+      return
+    }
+    _zs.naechster[pid] = Date.now() + ZS.pause_nach_lauf_ms   // lokal nie gleich wieder (Gegenprüfung Risiko 7), auch wenn das Schreiben unten scheitert
+    // Hedge-Beweis: Fusion-Solo (tvv2 mit Hedge) bzw. Copier-Hedge (Echo). Echo V2 und Orbit ohne Hedge: null (kein Hedge)
+    let hb = { hedge_zu: null, beleg: null }
+    const h = b.hedge
+    if(h && h.ticket && ['offen', 'schliesst'].includes(h.status)) hb = await zsHedgeBeweis('solo', h.ticket, null)
+    else if(p.route === 'mt5' && (erg.ticket || Number(b.ticket))){
+      let file = erg.file || null
+      if(!file){ try{ const dd = await window.mtcApi('instances'); const r = mt5RouteResolve(p, (dd && dd.instances) || []); file = r && r.inst && r.inst.file }catch(_){} }
+      if(file) hb = await zsHedgeBeweis('echo', erg.ticket || Number(b.ticket), file)
+    }
+    await zsSchreiben(pid, { status, at: new Date().toISOString(), grund: st.art === 'hx1' ? 'hx1_master_offen' : 'zufall', hedge_zu: hb.hedge_zu,
+      hedge_beleg: hb.beleg, msg: String(erg.msg || '').slice(0, 300), positionen_danach: erg.positionen_danach || null })
+    const hedgeTxt = hb.hedge_zu === true ? ' · Hedge zu (2 Lesungen)' : hb.hedge_zu === false ? ' · ⚠ Hedge NICHT bewiesen zu' : ''
+    try{ await acLog(p, true, `Zufalls-Schluss ${status === 'war_flach' ? '(war schon flach)' : '✓'}${st.art === 'hx1' ? ' · HX1: nur Master' : ''}: ${erg.msg || ''}${hedgeTxt}`) }catch(_){}
+    if(typeof atToast === 'function') atToast(`🎲 ${name}: Zufalls-Schluss ${status === 'war_flach' ? '— war schon flach' : '✓'}${hedgeTxt}`, 'end')
+    if(hb.hedge_zu === false) acBenachrichtigen('🔴 Zufalls-Schluss', `${name}: Master zu, Hedge nach 90 s noch offen — im Hedge-Terminal prüfen.`)
+    try{ loadTradePlansFromSupabase() }catch(_){}
+  }
+
+  async function zsTick(){
+    if(!MT5_LOCAL || window._tabNebenSofort || _zs.laeuft) return
+    if(_ac.laeuft || (typeof _rsAktiv !== 'undefined' && _rsAktiv) || (typeof _tpOrbitLaeuft !== 'undefined' && _tpOrbitLaeuft)
+       || (typeof _osActive !== 'undefined' && _osActive) || polarLaeuft()) return
+    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+    const now = Date.now()
+    let termine
+    for(const p of (_tp || [])){
+      if(!p || !p.mt5Baseline || !p.mt5Baseline.zschluss) continue
+      const pid = String(p.id)
+      if((_zs.naechster[pid] || 0) > now) continue
+      let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) }catch(_){}
+      const st = zsStand(p, now, acc && acc.type, _tp)
+      if(!st || !zsMeinPc(p)) continue
+      if(termine === undefined) termine = zsTermine(now)
+      const sperre = zsNewsSperre(p.mt5Baseline.zschluss, now, st.faellig, termine)
+      if(sperre){
+        if(!_zs.gemeldet[pid + '|news']){ _zs.gemeldet[pid + '|news'] = true; console.info('[zschluss]', p.masterName || pid, sperre) }
+        _zs.naechster[pid] = now + 30000
+        continue
+      }
+      _zs.laeuft = true
+      _ac.laeuft = true; _zs.acHalt = true   // synchron vor dem ersten await: Auto-Close/News-Regel (acTick) können nicht dazwischen anfangen
+      try{ await zsAusfuehren(p, st, zsKlickFrist(p.mt5Baseline.zschluss, now, termine)) }
+      catch(e){ console.warn('[zschluss]', pid, e); _zs.naechster[pid] = Date.now() + 60000 }
+      finally{ _zs.laeuft = false; zsAcFrei() }
+      return   // ein Plan je Tick — eine Maus
+    }
+  }
+
+  setInterval(() => { zsTick().catch(e => console.warn('[zschluss] tick', e)) }, ZS.takt_ms)
+
   /* ══ GEPLANTE STARTZEIT (22.09.2026, Finn: „ich plane einen Trade und gebe ihm eine Uhrzeit,
    * wann der Bot die Order losschicken soll"). Popup 2 speichert start_um am Plan; die Karte
    * zeigt „⏰ hh:mm ✕". Der PC-TAB (MT5_LOCAL) prüft jede Sekunde: Plan geplant, start_um erreicht,
