@@ -12641,7 +12641,8 @@ def wd_sl_wuerfel_regel(roh):
             stufen.append({"anteil": a, "von": None, "bis": None})
         else:
             v, b = zahl(s.get("von")), zahl(s.get("bis"))
-            if v is None or b is None or not (0 <= v <= b <= 100):
+            # Prüfer e7494039: bis < 100 — ein SL über den ganzen Puffer läge genau an der Liq (dann lieber gar keiner)
+            if v is None or b is None or not (0 <= v <= b < 100):
                 return _wd_sl_std(), "standard"
             stufen.append({"anteil": a, "von": v, "bis": b})
         summe += a
