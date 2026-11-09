@@ -389,6 +389,10 @@ _al, _upd0 = app.alarm_senden, app.sb_update
 app.alarm_senden = lambda *a, **k: _MELD.append((a, k)) or (1, 1)
 app._alarm_fremd_verwaltet = lambda uid: str(uid) == E1
 app.sb_update = lambda t, f, u: (GESCHRIEBEN.append(("update", t, f, u)) or ([{"id": f["id"][3:]}] if "waiting_payout_since" in u else []))
+# Unternehmen (Nachzug 10.11.2026): HT = Gruppe ohne Verwalter, Emin = Gruppe mit Verwalter
+_gd0 = app.admin_gruppen_daten
+app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "ht", "name": "Hermann Technologies", "verwalter_id": None}, {"id": "emin", "name": "Emin", "verwalter_id": E1}],
+                                   "mitglieder": [{"user_id": H1, "gruppe_id": "ht"}, {"user_id": H2, "gruppe_id": "ht"}, {"user_id": E1, "gruppe_id": "emin"}]}
 erg3 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
 _wn = erg3.get("wartet_neu") or []
 check(len(_wn) == 1 and _wn[0]["umgestellt"] is True and _wn[0]["konto_id"] == KONTEN[3]["id"] and _wn[0]["gewinn"] == 1600 and _wn[0]["ziel"]
@@ -397,14 +401,55 @@ check(len(_wn) == 1 and _wn[0]["umgestellt"] is True and _wn[0]["konto_id"] == K
       f"WP3: umgestellt → Eintrag wartet_neu + eine ⚪-Meldung an die Master-IDs ({_MELD[0][0][3] if _MELD else '—'})")
 _lauf = [g[1] for g in GESCHRIEBEN[len(_GESCH0):] if g[0] == "auto_plan_lauf"]
 check(_lauf and _lauf[-1]["ergebnis"].get("wartet_neu") == _wn, "WP3: Eintrag auch im Planer-Lauf (auto_plan_lauf.ergebnis.wartet_neu)")
-# Emin-Konto am Ziel (Gruppe mit Verwalter): umgestellt, aber keine Meldung an die HT-Master-IDs
+# Nachzug 10.11.2026: Emin-Konto am Ziel (Gruppe mit Verwalter) → NICHT umgestellt, nur angezeigt, keine Meldung, und ohne Umstellung keine Lauf-Zeile
 KONTEN[6]["_bal"] = 104000.0
 _MELD.clear()
+_n0 = len(GESCHRIEBEN)
+_KONTEN_ALLE = list(KONTEN)
+KONTEN[:] = [KONTEN[6], KONTEN[7]]          # nur Emins Konten: eins am Ziel, eins schon Waiting → kein Plan, keine echte Umstellung
 erg4 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
+KONTEN[:] = _KONTEN_ALLE
 _wn4 = {z["konto_id"]: z for z in erg4.get("wartet_neu") or []}
-check(_wn4.get(KONTEN[6]["id"], {}).get("umgestellt") is True and all(KONTEN[6]["name"] not in m[0][3] for m in _MELD),
-      "WP3: Konto einer Gruppe mit Verwalter wird umgestellt, die Meldung bleibt aber bei der Gruppe (nur HT an die Master-IDs)")
+_neu4 = GESCHRIEBEN[_n0:]
+check(_wn4.get(KONTEN[6]["id"], {}).get("umgestellt") is False and "nicht Hermann Technologies" in _wn4[KONTEN[6]["id"]].get("grund", "")
+      and not [g for g in _neu4 if g[0] == "update" and "waiting_payout_since" in g[3]] and not _MELD,
+      "Nachzug: Konto einer Gruppe mit Verwalter (Emin) wird nicht umgestellt, nur angezeigt, keine Meldung")
+check(not [g for g in _neu4 if g[0] == "auto_plan_lauf"] and not [g for g in _neu4 if g[0] == "trade_plans"],
+      "Nachzug: Lauf ohne Plan und ohne echte Umstellung schreibt keine auto_plan_lauf-Zeile (sonst bis 288 je Tag)")
 KONTEN[6]["_bal"] = 100000.0
+# Gruppen nicht lesbar → niemand automatisch (fail-closed)
+def _gd_kaputt():
+    raise RuntimeError("weg")
+app.admin_gruppen_daten = _gd_kaputt
+_n0 = len(GESCHRIEBEN)
+erg5 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
+check(not [g for g in GESCHRIEBEN[_n0:] if g[0] == "update" and "waiting_payout_since" in g[3]]
+      and all(not e["umgestellt"] for e in erg5["wartet_neu"]), "Nachzug: Gruppen nicht lesbar → kein Konto automatisch umgestellt")
+app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "ht", "name": "Hermann Technologies", "verwalter_id": None}, {"id": "emin", "name": "Emin", "verwalter_id": E1}],
+                                   "mitglieder": [{"user_id": H1, "gruppe_id": "ht"}, {"user_id": H2, "gruppe_id": "ht"}, {"user_id": E1, "gruppe_id": "emin"}]}
+# Merker „zurück" (Master 10.11.2026): Balance noch nicht eingetragen → Planer trägt seine Lesung ein und hält; gleiche Balance → hält; geändert → löscht + stellt um
+_MK = {}
+_a1 = app._sb_all
+app._sb_all = lambda t, p: ([{"id": k, "fcp_wartet_zurueck": v} for k, v in _MK.items()] if t == "accounts" and p.get("select") == "id,fcp_wartet_zurueck" else _a1(t, p))
+K4 = KONTEN[3]["id"]
+for _m, _soll_u, _soll_m, _txt in (({"at": "2026-11-10T01:00:00+00:00", "von": "x", "balance": None}, False, 101600.0, "Merker ohne Balance → Lesung eingetragen, nicht umgestellt"),
+                                   ({"at": "2026-11-10T01:00:00+00:00", "von": "x", "balance": 101600.0}, False, "kein", "Merker, Balance unverändert → nicht umgestellt"),
+                                   ({"at": "2026-11-10T01:00:00+00:00", "von": "x", "balance": 100900.0}, True, None, "Merker, Balance geändert (Trade lief) → Merker gelöscht, umgestellt")):
+    _MK.clear(); _MK[K4] = _m
+    _n0 = len(GESCHRIEBEN)
+    _e = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
+    _neu = GESCHRIEBEN[_n0:]
+    _mu = [g for g in _neu if g[0] == "update" and "fcp_wartet_zurueck" in g[3]]
+    _w = {z["konto_id"]: z for z in _e["wartet_neu"]}.get(K4, {})
+    ok_m = (not _mu) if _soll_m == "kein" else (len(_mu) == 1 and _mu[0][2].get("fcp_wartet_zurueck->>at") == "eq." + _m["at"]
+                                               and ((_mu[0][3]["fcp_wartet_zurueck"] or {}).get("balance") if _soll_m else _mu[0][3]["fcp_wartet_zurueck"]) == _soll_m)
+    check(ok_m and _w.get("umgestellt") is _soll_u and (_soll_u or "zurückgesetzt" in _w.get("grund", "")), f"Merker: {_txt}")
+_MK.clear()
+app._sb_all = _a1
+check(app.fcp_merker_urteil(None, 1.0) is None and app.fcp_merker_urteil({"balance": None}, 100.0) == "fuellen"
+      and app.fcp_merker_urteil({"balance": 100.0}, 100.6) == "halten" and app.fcp_merker_urteil({"balance": 100.0}, 102.0) == "loeschen"
+      and app.fcp_merker_urteil({"balance": 100.0}, None) == "halten", "fcp_merker_urteil: fuellen / halten (±1 $, keine Balance) / loeschen")
+app.admin_gruppen_daten = _gd0
 app.alarm_senden, app.sb_update = _al, _upd0
 # rein: Consistency ungeprüft (Zyklus nicht lesbar) → nicht umstellen, nur anzeigen; Gewinntage offen → nicht
 check(app.fcp_ziel_echt({"aktion": "ziel"}) == (True, None)
@@ -464,9 +509,24 @@ app._fcp_login = lambda: _LOGIN["v"]
 _c = app.app.test_client()
 _r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
 _j = _r.get_json() or {}
-check(_r.status_code == 200 and _j.get("ok") and _j["konto"]["waiting_payout_since"] is None and _j["konto"]["war_seit"] == _K["waiting_payout_since"]
-      and _UPD == [("accounts", {"id": f"eq.{_K['id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"}, {"waiting_payout_since": None})],
-      f"Admin setzt Waiting zurück (Guard funded_cfd + Waiting gesetzt) → {{ok, konto}} ({_r.status_code})")
+check(_r.status_code == 200 and _j.get("ok") and _j.get("merker") is True and _j["konto"]["waiting_payout_since"] is None and _j["konto"]["war_seit"] == _K["waiting_payout_since"]
+      and len(_UPD) == 1 and _UPD[0][1] == {"id": f"eq.{_K['id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"}
+      and _UPD[0][2]["waiting_payout_since"] is None and _UPD[0][2]["fcp_wartet_zurueck"]["balance"] is None and _UPD[0][2]["fcp_wartet_zurueck"]["at"],
+      f"Admin setzt Waiting zurück (Guard funded_cfd + Waiting gesetzt) + Merker {{at, von, balance None}} → {{ok, merker, konto}} ({_r.status_code})")
+_UPD.clear()
+class _Resp:
+    status_code, text = 400, 'column accounts.fcp_wartet_zurueck does not exist'
+def _upd_ohne_spalte(t, f, u):
+    if "fcp_wartet_zurueck" in u:
+        raise app.requests.exceptions.HTTPError("400", response=_Resp())
+    _UPD.append((t, f, u))
+    return [dict(_K, **u)]
+app.sb_update = _upd_ohne_spalte
+_r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})
+_j = _r.get_json() or {}
+check(_r.status_code == 200 and _j.get("merker") is False and "fcp_wartet_zurueck" in _j.get("hinweis", "") and _UPD and _UPD[0][2] == {"waiting_payout_since": None},
+      "Spalte fcp_wartet_zurueck fehlt → zurückgesetzt ohne Merker, Hinweis auf die SQL-Datei")
+app.sb_update = lambda t, f, u: _UPD.append((t, f, u)) or [dict(_K, **u)]
 _UPD.clear()
 _LOGIN["v"] = (True, "admin-uid", None, frozenset({H1, H2}), None)      # HT-Admin: Schreib-Sicht nur HT
 _r = _c.post("/admin/funded-cfd-plan/waiting-zurueck", json={"account_id": _K["id"]})

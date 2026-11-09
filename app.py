@@ -46261,6 +46261,22 @@ def fcp_ziel_echt(r):
     return True, None
 
 
+def fcp_merker_urteil(m, balance, toleranz=1.0):
+    """REIN RECHNEND (testbar; WP3-Merker, Master 10.11.2026: „sonst ist der Knopf nutzlos, nach 5 min wieder Waiting"): Merker accounts.fcp_wartet_zurueck
+    {at, von, balance} eines von Hand zurückgesetzten Kontos gegen die Balance dieses Laufs → None (kein Merker) | "fuellen" (Merker ohne Balance:
+    der Planer trägt seine eigene Lesung ein — dieselbe Quelle wie später der Vergleich — und hält) | "halten" (Balance unverändert ±toleranz oder
+    nicht lesbar: nicht automatisch umstellen) | "loeschen" (Balance geändert = ein Trade lief → Merker weg, ab jetzt wieder normal)."""
+    if not isinstance(m, dict):
+        return None
+    b = _wd_num(balance)
+    if b is None:
+        return "halten"
+    mb = _wd_num(m.get("balance"))
+    if mb is None:
+        return "fuellen"
+    return "halten" if abs(b - mb) <= toleranz else "loeschen"
+
+
 def fcp_wartet_meldung(r):
     """REIN RECHNEND (testbar; WP3): Titel/Text/Daten der ⚪-Meldung „Ziel erreicht → Waiting for Payout" für ein umgestelltes Konto.
     Ziel = Gewinn-Ziel des Zyklus (Consistency-Ende bzw. festes Ziel, sonst Ziel-von der Größe)."""
@@ -46871,6 +46887,45 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # angezeigt werden, damit ich es crosschecken kann."): IMMER umstellen (reg.ziel_auto_wartet wird ignoriert), nur bei echtem Ziel (fcp_ziel_echt).
         # Guard wie der Knopf im Konto (accWartetUmstellen): funded_cfd und waiting_payout_since leer — gemeldet wird nur, was dieser Lauf WIRKLICH
         # umgestellt hat (sb_update liefert die geänderte Zeile), also einmal je Konto und Zyklus (nach dem Payout ist waiting_payout_since wieder leer)
+        # Nachzug 10.11.2026 (Master nach Prüfer-OK, Standing Order „Zwei Unternehmen getrennt"): automatisch nur Konten von Hermann Technologies
+        # (ap_unternehmen_filter: Gruppe ohne Verwalter, nicht in einer Planer-Gruppe) — Emins Gruppe nur anzeigen wie vorher (dort war der globale
+        # Schalter aus, Emin legt seine Planer-Settings selbst fest). Gruppen nicht lesbar → niemand automatisch (fail-closed)
+        try:
+            _ht_f = ap_unternehmen_filter(None, admin_gruppen_daten())
+        except Exception as e:
+            _ht_f = None
+            print(f"[funded-cfd] ⚠️ Gruppen nicht lesbar ({type(e).__name__}) — Waiting for Payout heute nur angezeigt", flush=True)
+        ist_ht = lambda u: bool(_ht_f and _ht_f(str(u)) and str(u) not in gr_ids_fcp)   # noqa: E731
+        # WP3-Merker (Master 10.11.2026): „zurück" im Funded Planer (/admin/funded-cfd-plan/waiting-zurueck) merkt die Balance; solange sie sich nicht
+        # ändert (bis nach dem nächsten Trade), stellt der Planer dieses Konto nicht wieder um. Spalte fehlt (SQL 2026-11-10_fcp_wartet_zurueck.sql) →
+        # es gibt keine Merker; anderer Lesefehler → niemand automatisch (sonst stünde ein eben zurückgesetztes Konto nach 5 min wieder auf Waiting)
+        merker, merker_ok, halten = {}, True, set()
+        try:
+            for x in _sb_all("accounts", {"select": "id,fcp_wartet_zurueck", "user_id": in_uids, "account_type": "eq.funded_cfd",
+                                          "fcp_wartet_zurueck": "not.is.null"}) or []:
+                merker[str(x["id"])] = x.get("fcp_wartet_zurueck")
+        except requests.exceptions.HTTPError as e:
+            if "fcp_wartet_zurueck" not in str(getattr(e.response, "text", "") or e):
+                merker_ok = False
+        except Exception:
+            merker_ok = False
+        for r in erg["ziel"] + erg["geplant"] + erg["ausgelassen"]:
+            kid = str(r.get("konto_id") or "")
+            m = merker.get(kid)
+            if kid not in merker:
+                continue
+            u_ = fcp_merker_urteil(m, r.get("balance"))     # Zeile ohne Balance (z. B. „läuft gerade") → halten
+            if u_ in ("fuellen", "halten"):
+                halten.add(kid)
+            if u_ not in ("fuellen", "loeschen") or not isinstance(m, dict):
+                continue
+            try:          # Guard: nur der gelesene Merker (at) — „zurück" seither erneut gedrückt → nichts überschreiben
+                w_ = {"id": f"eq.{kid}", "account_type": "eq.funded_cfd"}
+                if m.get("at"):
+                    w_["fcp_wartet_zurueck->>at"] = f"eq.{m['at']}"
+                sb_update("accounts", w_, {"fcp_wartet_zurueck": dict(m, balance=round(float(r["balance"]), 2)) if u_ == "fuellen" else None})
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ Merker {r.get('konto')}: {e}", flush=True)
         for r in erg["ziel"]:
             echt, warum = fcp_ziel_echt(r)
             titel, text, daten = fcp_wartet_meldung(r)
@@ -46878,6 +46933,13 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                            user_id=r.get("user_id"), firma=r.get("firma"), umgestellt=False)
             if not echt:
                 erg["wartet_neu"].append(dict(eintrag, grund=warum))
+                continue
+            if not ist_ht(r.get("user_id")):
+                erg["wartet_neu"].append(dict(eintrag, grund="Ziel erreicht — nicht Hermann Technologies: nur angezeigt, die Gruppe stellt selbst um"))
+                continue
+            if not merker_ok or str(r.get("konto_id")) in halten:
+                erg["wartet_neu"].append(dict(eintrag, grund="Ziel erreicht — von Hand zurückgesetzt, erst nach dem nächsten Trade wieder automatisch"
+                                              if merker_ok else "Ziel erreicht — Merker „zurück“ nicht lesbar: nur angezeigt"))
                 continue
             try:
                 rows = sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "is.null"},
@@ -46892,7 +46954,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             print(f"[funded-cfd] ⏳ {text} → Waiting for Payout", flush=True)
             try:
                 uid_ = str(r.get("user_id") or "")
-                if not _alarm_fremd_verwaltet(uid_):     # nur HT-IDs an die Master-IDs (Standing Order); Gruppen mit Verwalter sehen es im Reiter
+                if not _alarm_fremd_verwaltet(uid_):     # nur HT-IDs an die Master-IDs (Standing Order; seit dem Nachzug stellt ohnehin nur HT um)
                     alarm_senden(3, "fcp_wartet", titel, text, uid=uid_, schluessel=f"fcp-wartet-{r['konto_id']}-{r.get('zyklus') or ''}",
                                  tag=f"fcp-wartet-{r['konto_id']}"[:60], daten=daten)
             except Exception as e:
@@ -46923,7 +46985,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                         sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd"}, {"payout_ready_at": plan_tag})
             except Exception as e:
                 print(f"[funded-cfd] ⚠️ On Demand Payout-Termin {r.get('konto')}: {e}", flush=True)
-        if zeilen or erg["wartet_neu"]:      # WP3: ein Lauf, der nur umgestellt hat, steht auch im Verlauf
+        # WP3: ein Lauf, der nur umgestellt hat, steht auch im Verlauf — aber nur bei WIRKLICH umgestellt (Nachzug 10.11.2026: ein Konto mit nicht
+        # prüfbarer Consistency stünde sonst alle 5 min als eigene Zeile drin, bis 288 je Tag)
+        if zeilen or any(e.get("umgestellt") for e in erg["wartet_neu"]):
             try:
                 sb_insert("auto_plan_lauf", {"tag": plan_tag, "quelle": "funded_cfd", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen", "wartet_neu")}})
             except Exception as e:
@@ -47164,7 +47228,8 @@ def admin_funded_cfd_plan_waiting_zurueck():
     """POST {account_id} — WP3-Zusatz (10.11.2026, Master mit S3): seit WP3 stellt der Planer am Ziel ohne Schalter auf Waiting for Payout um; damit Finn
     ein falsch umgestelltes Konto (auch einer fremden ID) im Funded Planer → CFD zurücksetzen kann. Gate wie /einstellung: nur Admin, dazu die
     Schreib-Sicht der Gruppe (Zwei Unternehmen getrennt: HT nur HT-Konten). Nur account_type funded_cfd mit gesetztem waiting_payout_since → null.
-    → {ok, konto}. Hinweis: steht das Konto beim nächsten Lauf weiter am echten Ziel, stellt der Planer es wieder um (gewollt: dann war es richtig)."""
+    → {ok, merker, konto}. Setzt den Merker accounts.fcp_wartet_zurueck: der Planer stellt das Konto erst nach einer Balance-Änderung (nächster Trade)
+    wieder automatisch um (fcp_merker_urteil)."""
     if request.method == "OPTIONS":
         return "", 200
     _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
@@ -47191,16 +47256,28 @@ def admin_funded_cfd_plan_waiting_zurueck():
         return jsonify({"ok": False, "msg": "nur Funded-CFD-Konten"}), 400
     if not a.get("waiting_payout_since"):
         return jsonify({"ok": False, "msg": "Konto steht nicht auf Waiting for Payout"}), 409
+    # Merker (Master 10.11.2026): {at, von, balance None} — die Balance trägt der nächste Planer-Lauf aus SEINER Lesung ein (fcp_merker_urteil
+    # „fuellen"), danach stellt er das Konto erst nach einer Balance-Änderung (nächster Trade) wieder automatisch um. Spalte fehlt → ohne Merker
+    merker_neu = {"at": datetime.now(timezone.utc).isoformat(), "von": str(uid or ""), "balance": None}
+    filt = {"id": f"eq.{aid}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"}
+    mit_merker = True
     try:
-        zeilen = sb_update("accounts", {"id": f"eq.{aid}", "account_type": "eq.funded_cfd", "waiting_payout_since": "not.is.null"},
-                           {"waiting_payout_since": None})
+        try:
+            zeilen = sb_update("accounts", filt, {"waiting_payout_since": None, "fcp_wartet_zurueck": merker_neu})
+        except requests.exceptions.HTTPError as e1:
+            if "fcp_wartet_zurueck" not in str(getattr(getattr(e1, "response", None), "text", "") or e1):
+                raise
+            mit_merker = False
+            zeilen = sb_update("accounts", filt, {"waiting_payout_since": None})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {str(e)[:160]}"}), 502
     if not zeilen:
         return jsonify({"ok": False, "msg": "inzwischen geändert — neu laden"}), 409
     print(f"[funded-cfd] Waiting for Payout zurückgesetzt: {a.get('name')} (war seit {a.get('waiting_payout_since')}) durch Admin {str(uid)[:8]}", flush=True)
-    return jsonify({"ok": True, "konto": {"id": aid, "user_id": a.get("user_id"), "name": a.get("name"), "firm": a.get("firm"),
-                                          "waiting_payout_since": None, "war_seit": a.get("waiting_payout_since")}})
+    return jsonify({"ok": True, "merker": mit_merker,
+                    **({} if mit_merker else {"hinweis": "Spalte fcp_wartet_zurueck fehlt (sql/2026-11-10_fcp_wartet_zurueck.sql) — der Planer kann das Konto beim nächsten Lauf wieder umstellen"}),
+                    "konto": {"id": aid, "user_id": a.get("user_id"), "name": a.get("name"), "firm": a.get("firm"),
+                              "waiting_payout_since": None, "war_seit": a.get("waiting_payout_since")}})
 
 
 @app.route("/admin/funded-cfd-plan/einstellung", methods=["POST", "OPTIONS"])
