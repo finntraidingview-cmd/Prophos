@@ -17333,7 +17333,7 @@ def admin_wd_plaene():
                 return jsonify({"error": "plan_id fehlt"}), 400
             try:
                 rows = sb_select("trade_plans", {"select": "id,user_id,status,notes,route,master_firm,start_um,start_um_gestartet_at,orbit_gesendet_at,started_at,"
-                                                           "hedge_freigabe_at,planned_for,winning_day", "id": f"eq.{pid}", "limit": "1"})
+                                                           "hedge_freigabe_at,planned_for,winning_day,master_symbol,slave_risk,hedge_eur", "id": f"eq.{pid}", "limit": "1"})   # FP5: Symbol + Hedge-Stand
                 p = rows[0] if rows else None
                 if not p or "Winning-Day-Farmer" not in str(p.get("notes") or ""):
                     return jsonify({"error": "Kein Winning-Day-Plan"}), 404
@@ -27825,6 +27825,25 @@ def wd_hand_upd(felder, plan, jetzt, zurueck=False):
         if f["richtung"] not in ("buy", "sell"):
             return None, "richtung muss buy oder sell sein"
         upd["richtung"] = f["richtung"]
+    # FP5 (Finn 10.11.2026 ~03:15, Funded-Planer → Winning Days → Zu bestätigen: „die Lots bearbeiten, z. B. 4 oder 5 NQ"): Symbol nur NQ ↔ MNQ, der Kontraktmonat
+    # des Plans bleibt (MNQZ6 → NQZ6, nie ein anderer Monat oder ein anderes Instrument). Den Hedge dazu rechnet der Tab mit dem neuen Punktwert (wdFarmHedge).
+    if f.get("master_symbol") is not None:
+        neu_s = str(f["master_symbol"]).strip().upper()
+        alt_s = str((plan or {}).get("master_symbol") or "").strip().upper()
+        m_neu, m_alt = re.match(r"^(M?NQ)([A-Z]\d{1,2})$", neu_s), re.match(r"^(M?NQ)([A-Z]\d{1,2})$", alt_s)
+        if not m_neu:
+            return None, "Symbol nur NQ oder MNQ mit Kontraktmonat (z. B. NQZ6)"
+        if not m_alt:                            # fail-closed (Fremd-Review): ein Nicht-NQ/MNQ-Plan bekommt nie ein NQ-Symbol
+            return None, f"Symbol des Plans ({alt_s or 'leer'}) ist kein NQ/MNQ mit Kontraktmonat — nicht änderbar"
+        if m_neu.group(2) != m_alt.group(2):
+            return None, f"Kontraktmonat bleibt {m_alt.group(2)} — nur NQ ↔ MNQ wechseln"
+        if neu_s != alt_s:
+            # Punktwert wechselt (NQ 20 $/Pkt, MNQ 2 $/Pkt): Plan mit Fusion-Hedge nur zusammen mit dem neu gerechneten Hedge (multiplier + hedge_eur derselben
+            # Anfrage), sonst stünde der alte Multiplikator am neuen Symbol (Lots × 10 bzw. ÷ 10). TP/Risiko in $ hängen nicht am Punktwert.
+            mit_hedge = (_wd_num((plan or {}).get("slave_risk")) or 0) > 0 or (_wd_num((plan or {}).get("hedge_eur")) or 0) > 0
+            if mit_hedge and not ("multiplier" in upd and "hedge_eur" in upd):
+                return None, "Symbol-Wechsel nur mit neu gerechnetem Hedge (multiplier + hedge_eur) — Kasten neu öffnen"
+            upd["master_symbol"] = neu_s
     if f.get("start_um"):
         try:
             neu = datetime.fromisoformat(str(f["start_um"]).replace("Z", "+00:00"))
