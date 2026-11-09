@@ -15058,7 +15058,13 @@ def admin_live_trades():
             # Topstep-Tag (Finn 02.11.2026 ~19:15 Dubai: „nur einmal abhaken", je Trade zusammenfassen): Nummer, Fensterende für Trade 2
             # (ap_kette_lesen_bis) und die Trades des Tages bis hier (lt_kette_teile) — Radar zeigt sie an der einen Abhak-Zeile
             _kq = ((q.get("mt5_baseline") or {}).get("kette") or {}) if isinstance(q.get("mt5_baseline"), dict) else {}
-            if q.get("route") == "tsv2" and isinstance(_kq, dict) and _kq.get("nr"):
+            if isinstance(_kq, dict) and _kq.get("von"):
+                # WS2 Trades pro Tag (09.11.2026, alle Wege): Platz/Anzahl/Rolle, Fensterende, Grund und die Teile des Tages aus kette.tagesende
+                z["kette_nr"], z["kette_von"], z["kette_rolle"], z["kette_lesen_bis"] = _kq.get("nr"), _kq.get("von"), _kq.get("rolle"), _kq.get("lesen_bis")
+                z["kette_grund"] = _kq.get("grund") or z.get("kette_grund")
+                if q.get("status") == "review" and isinstance(_kq.get("tagesende"), dict):
+                    z["kette_teile"] = _kq["tagesende"].get("teile")
+            elif q.get("route") == "tsv2" and isinstance(_kq, dict) and _kq.get("nr"):
                 z["kette_nr"], z["kette_lesen_bis"] = _kq.get("nr"), _kq.get("lesen_bis")
                 if q.get("status") == "review":
                     _vid = str(_kq.get("vor") or "")
@@ -17386,7 +17392,8 @@ def admin_wd_plaene():
                     blow_auto = (not blown) and bool(rows) and str(rows[0].get("route") or "") != "polar" and _ap_blow_beim_abhaken(rows[0], mpl)
                     # Tagesende der Topstep-Kette (30.10.2026, Gegenprüfung): ob geblowt, hat ap_kette_abhaken aus MLL und Tag entschieden. Die Boden-Rechnung hier
                     # ginge vom Start von Trade 2 aus (T1 +2.650, T2 am SL, Ende 147.225: Boden 148.150, MLL 145.500) und meldete fälschlich geblowt
-                    if blow_auto and (((rows[0].get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")):
+                    # WS2 (09.11.2026): nur Topstep entscheidet geblowt am Tagesende (MLL) — Orbit-/Echo-Tage mit tagesende prüfen den Boden weiter
+                    if blow_auto and str(rows[0].get("route") or "") == "tsv2" and (((rows[0].get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")):
                         blow_auto = False
                     for _versuch in range(3):
                         if _versuch:
@@ -28414,6 +28421,8 @@ def ap_normal_auto_pruefen(plan, acc, regel):
     bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     if bl.get("hedge") or (_wd_num(p.get("hedge_eur")) or 0) > 0:
         return None                                # Hedge-P&L gehört dazu → von Hand
+    if isinstance(bl.get("kette"), dict) and bl["kette"].get("von"):
+        return None                                # WS2-Kette (09.11.2026): Teile hakt tt_tick ab, den letzten Finn einmal am Tagesergebnis
     m = bl.get("manuell")
     if isinstance(m, dict) and m.get("at"):
         return None                                # Finn hat ihn nach „Manuelle Arbeit"/Review gelegt
@@ -29320,6 +29329,19 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                                             mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))), rest_planer=bool(k["a"].get("rest_planer_at")))
             if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
                 grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
+            if w and not grund and "tt_param" in globals():   # get: ältere Selftest-Lader ziehen ap_planen ohne die WS2-Helfer
+                # WS2 TRADES PRO TAG AUFTEILEN (Finn 09.11.2026, tt_planer_haken): Würfel 1–4 Trades, Trade 1 holt seinen Anteil; dazu der Zufalls-Schluss
+                # (WS2c) je Plan. Nur wenn tt_gilt — sonst kein rnd-Zug, der Lauf bleibt bitgleich zu vorher
+                try:
+                    _tt_p = tt_param(reg.get("regeln"))
+                    if tt_gilt(_tt_p, (k["regel"].get("namen") or [""])[0], (gruppe or {}).get("gruppe_id"), k["a"].get("id"), k["a"].get("account_type")):
+                        _tt_n = _tt_p.get("test_n") if (_tt_p.get("nur_konten") and _tt_p.get("test_n")) else None
+                        w = tt_planer_haken(w, k["regel"], k["a"].get("account_type"), _tt_p, rnd, ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), n_fest=_tt_n)
+                        _zs = tt_zschluss(_tt_p, rnd)
+                        if _zs:
+                            w = dict(w, zschluss=_zs)
+                except Exception as e:
+                    print(f"[auto-plan] ⚠️ Tagesteilung {str(k['a'].get('id'))[:8]}: {type(e).__name__}: {e} — ein Trade wie bisher", flush=True)
             if w and not grund:
                 tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
@@ -29375,7 +29397,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                              "route": r_teil[0][0]["regel"].get("route") or "mt5v2",          # Klasse CFD/Futures (08.10.2026)
                              "ab_min": ap_cfd_ab(zeiten) if (r_teil[0][0]["regel"].get("route") or "mt5v2") in AP_CFD_ROUTEN else 0,
                              "bis_min": min([x for x in (
-                                 _ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"]) if r_teil[0][1].get("kette") else None,   # Topstep-Kette: Trade 1 bis t1_bis dt
+                                 _ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"]) if (r_teil[0][1].get("kette") and ap_kette_regel(r_teil[0][0]["regel"])) else None,   # Topstep-Kette: Trade 1 bis t1_bis dt (WS2: Orbit/Echo-Ketten ohne Kettenregel)
                                  ap_klasse_bis(zeiten, r_teil[0][0]["regel"].get("route") or "mt5v2", tag_d.date())) if x is not None]),   # CFD bis zeiten.cfd_bis (16.10.2026)
                              "fest_durch": (("laufender Plan" if fest_p.get("status") == "open" else "geplanter Plan") if fest_p else None),
                              "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in r_teil),
@@ -29494,6 +29516,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             # Tausender-Punkt nur für Rest und Balance (09.10.2026): das alte .replace(",", ".") über die ganze Notiz machte aus der
             # Klein-Trade-Stufe „0,18 Lots" ein „0.18 Lots" (Stufen mit Tausendern formatieren sich selbst, z. B. Topstep-Kette)
             "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])})
+        if w.get("zschluss"):                    # WS2c Zufalls-Schluss (09.11.2026, tt_zschluss im Planer-Haken): eigener Schlüssel neben kette/tage_mini
+            zeilen[-1]["mt5_baseline"] = dict(zeilen[-1]["mt5_baseline"] or {}, zschluss=w["zschluss"])
         if param["auto_start"] and not gruppe:   # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt — Gruppe nie (Finn 30.10.: „er bestätigt sie einzeln")
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
         d = dinfo.get((key, str(a["id"]))) or {}
@@ -37450,7 +37474,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
     t2s = sb_select("trade_plans", {"select": "id,vor:mt5_baseline->kette->>vor",
                                     "mt5_baseline->kette->>vor": "in.(" + ",".join(str(p["id"]) for p in t1s) + ")"}) or []
     schon = {str(x.get("vor")) for x in t2s}
-    offen_t1 = [p for p in t1s if str(p["id"]) not in schon]
+    offen_t1 = [p for p in t1s if str(p["id"]) not in schon and not ((p.get("mt5_baseline") or {}).get("kette") or {}).get("von")]   # WS2-Ketten: tt_tick
     if not offen_t1:
         return {"neu": []}
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
@@ -37635,6 +37659,8 @@ def ap_kette_abhaken(jetzt=None):
     for p in rows:
         if ((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"):
             continue                                  # wartet schon auf Finns Haken — nicht jede Minute neu schreiben
+        if ((p.get("mt5_baseline") or {}).get("kette") or {}).get("von"):
+            continue                                  # WS2-Kette (09.11.2026): Abhaken und Tagesende macht tt_tick
         bal, grund = ap_kette_t1_fertig(p)
         if grund:
             if regeln is None:
@@ -37802,6 +37828,676 @@ def _ap_kette_takt():
     except Exception as e:
         _ap_kette["fehler"] = f"{type(e).__name__}: {e}"
         print(f"[auto-plan] ⚠️ Topstep-Kette: {e}", flush=True)
+
+
+# ══ WS2 TRADES PRO TAG AUFTEILEN (Finn 09.11.2026 abends, Konstrukt WS2 abgesegnet — Anlass: die Eröffnungs-Rally NQ ~27.300 → ~27.760 hat alle offenen
+# Shorts erwischt; Finn: „Aktuell ist es immer 1 Trade pro Tag, und dann ist es ein Pump, und dann ist der Account durch.“) ══
+# Würfel je Konto und Tag 1/2/3/4 Trades (80/12/6/2 %). Ein Haupt-Trade holt 70–90 % vom Tagesziel (= der TP, den der Planer heute für EINEN Trade rechnet;
+# Topstep 4.500 bzw. Rest + Puffer) mit normalen Lots; Neben-Trades holen den Rest klein und kurz (10–25 Pkt, höchstens halbe Haupt-Lots, mind. 1 Schritt —
+# Orbit auch MNQ, eigener SL = 1–2 × TP-Abstand). Reihenfolge zufällig. Der nächste Teil entsteht erst, wenn der vorige zu UND genau gelesen ist (wie die
+# Topstep-Kette ap_kette_trade2), rechnet aus der echten Balance (Rest = Tagesziel − bisher) und startet 1–180 min danach in der ersten regelkonformen Minute.
+# Ziel erreicht, Verlustgrenze, kein Start mehr im Fenster, Zufalls-Schluss (WS2c) → Tag fertig, nichts erzwingen. 1-Trade-Tage bleiben bitgleich zu heute
+# (Orbit/Echo ohne kette-Block). Schnittstelle: side-session-notes …/2026-11-09_WS2_schnittstelle.md. Werte: auto_plan_regeln.regeln.tagesteilung
+# (sql/2026-11-09_ws2_trades_je_tag.sql, Standard an = false). Master-Vorgaben bis Finn antwortet (09.11.2026): nur HT (tagesteilung.gruppen leer), finaler Orbit-Trade immer
+# 1 Trade (Hedge/DB-Riegel „ein finaler Tradeify je ID“), FTMO-/FundedNext-Futures nicht in der Standard-Liste, Topstep-Haupt an Platz 1 behält die
+# Trade-1-SL-Spanne von heute (1.250–1.750), das Restbudget geht an die folgenden Teile.
+TT_FIRMEN_STANDARD = ("tradeify", "lucidtrading", "topstep", "fundednext", "fundingpips", "the5ers", "ftmo", "blueguardian", "tradeifycfd")
+TT_STANDARD = {"an": False, "firmen": list(TT_FIRMEN_STANDARD), "anteile": [80.0, 12.0, 6.0, 2.0], "haupt_pct": [70.0, 90.0], "neben_pkt": [10.0, 25.0],
+               "neben_sl_faktor": [1.0, 2.0], "neben_menge_max": 0.5, "min_tp_usd": 300.0, "abstand_min": [1.0, 180.0], "schluss_pct": [5.0, 10.0],
+               "schluss_min": [2.0, 120.0], "gruppen": [], "nur_konten": [], "test_n": None}
+# Spannen [lo, hi]: Grenzen je Feld (Leser und Schreibweg gleich, sonst verwirft der Leser still — Lehre S6-Review E3b)
+TT_SPANNEN = {"haupt_pct": (50.0, 100.0), "neben_pkt": (1.0, 100.0), "neben_sl_faktor": (0.5, 5.0), "abstand_min": (1.0, 600.0),
+              "schluss_pct": (0.0, 50.0), "schluss_min": (1.0, 600.0)}
+TT_ZAHLEN = {"neben_menge_max": (0.1, 1.0), "min_tp_usd": (0.0, 5000.0)}
+TT_FUT_PV = {"NQ": 20.0, "MNQ": 2.0, "ES": 50.0, "MES": 5.0}      # $ je Punkt und Kontrakt
+TT_MIKRO = {"NQ": "MNQ", "ES": "MES"}
+TT_ZIEL_REST_USD = 50.0          # Rest bis Tagesziel ≤ 50 $ → Tag fertig (dieselbe Grenze wie ap_kette_trade2 „Tagesziel schon erreicht")
+# finaler/kleiner Trade bleibt immer EIN Trade (Hedge-Wege tfh/Lucid-Final, DB-Riegel „ein finaler Tradeify je ID“, Klein-/Mini-/Gewinntag-Trades)
+TT_EIN_TRADE_STUFE = re.compile(r"letzter Trade|Rest bis Ziel|Tage sammeln|Gewinntag|Klein|Rest zurück|Mini", re.I)
+TT_ENDE_TXT = {"ziel": "Tagesziel erreicht", "alle": "alle Trades des Tages gelaufen", "fenster": "kein Start mehr im Tagesfenster",
+               "verlust": "Verlustgrenze des Tages", "zschluss": "Zufalls-Schluss", "gesperrt": "Firma gesperrt", "aus": "Tagesteilung ausgeschaltet",
+               "keine_lesung": "keine genaue Balance-Lesung bis Fensterende", "kein_hedge": "kein Echo-Hedge stellbar", "rest_klein": "Rest unter dem Mindest-TP",
+               "geloescht": "nächster Trade gelöscht — Tag beendet"}
+
+
+def _tt_spanne(v, lo, hi):
+    """[a, b] mit lo ≤ a ≤ b ≤ hi → [float, float] | None."""
+    if not isinstance(v, (list, tuple)) or len(v) != 2 or any(isinstance(x, bool) or not isinstance(x, (int, float)) or x != x for x in v):
+        return None
+    a, b = float(v[0]), float(v[1])
+    return [a, b] if lo <= a <= b <= hi else None
+
+
+def _tt_anteile(v):
+    """[p1, p2, p3, p4] je 0–100, Summe 100 (±0,5) → [float × 4] | None."""
+    if not isinstance(v, (list, tuple)) or len(v) != 4 or any(isinstance(x, bool) or not isinstance(x, (int, float)) or x != x or x < 0 or x > 100 for x in v):
+        return None
+    return [float(x) for x in v] if abs(sum(float(x) for x in v) - 100.0) <= 0.5 else None
+
+
+def tt_param(regeln):
+    """REIN RECHNEND (testbar): regeln.tagesteilung → wirksame Parameter. Jedes Feld einzeln geprüft, Ungültiges fällt auf TT_STANDARD."""
+    roh = (regeln or {}).get("tagesteilung") if isinstance(regeln, dict) else None
+    roh = roh if isinstance(roh, dict) else {}
+    out = json.loads(json.dumps(TT_STANDARD))
+    out["an"] = roh.get("an") is True
+    if isinstance(roh.get("gruppen"), list):           # Unternehmen (id_gruppen.id) zusätzlich zu HT — leer = nur HT (Master 09.11.2026, mit WS2b abgestimmt)
+        out["gruppen"] = [str(x) for x in roh["gruppen"] if isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)]
+    if isinstance(roh.get("firmen"), list):
+        out["firmen"] = [str(x) for x in roh["firmen"] if isinstance(x, str) and x]
+    a = _tt_anteile(roh.get("anteile"))
+    if a:
+        out["anteile"] = a
+    for k, (lo, hi) in TT_SPANNEN.items():
+        s = _tt_spanne(roh.get(k), lo, hi)
+        if s:
+            out[k] = s
+    for k, (lo, hi) in TT_ZAHLEN.items():
+        v = roh.get(k)
+        if not isinstance(v, bool) and isinstance(v, (int, float)) and v == v and lo <= float(v) <= hi:
+            out[k] = float(v)
+    if isinstance(roh.get("nur_konten"), list):
+        out["nur_konten"] = [str(x) for x in roh["nur_konten"] if isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)]
+    tn = roh.get("test_n")
+    out["test_n"] = int(tn) if (not isinstance(tn, bool) and isinstance(tn, (int, float)) and float(tn).is_integer() and 1 <= tn <= 4) else None
+    return out
+
+
+def tt_firmen_auswahl(firmen, param=None):
+    """REIN RECHNEND: [{key, name, art: futures|topstep|cfd, an}] — alle Challenge-Firmen der Regel außer Apex (WS2b: Häkchen je Firma)."""
+    out, an = [], set((param or {}).get("firmen") or ())
+    for f in firmen or ():
+        if not isinstance(f, dict):
+            continue
+        key = str((f.get("namen") or [""])[0] or "")
+        if not key or key.startswith("apex"):
+            continue
+        route = str(f.get("route") or "mt5v2")
+        art = "topstep" if route == "tsv2" else "cfd" if route in AP_CFD_ROUTEN else "futures"
+        out.append({"key": key, "name": f.get("name") or key, "art": art, "an": key in an})
+    return out
+
+
+def tt_gruppen_auswahl(gruppen, param=None):
+    """REIN RECHNEND: [{gruppe_id, name, an}] aus id_gruppen (admin_gruppen_daten) — WS2b: Häkchen je Unternehmen, HT ist immer dabei."""
+    an = set((param or {}).get("gruppen") or ())
+    return [{"gruppe_id": str(g.get("id")), "name": g.get("name"), "an": str(g.get("id")) in an} for g in gruppen or () if g.get("id")]
+
+
+def tt_einst_anwenden(regeln, aenderungen, firmen_keys=None, gruppen_ids=None):
+    """REIN RECHNEND (testbar): regeln (Kopie) + {feld: wert} für den Block tagesteilung → (regeln_neu, None) | (None, grund). Alles oder nichts;
+    grund nennt die EINE Ursache mit dem Wert. Fehlt der Block, wird er aus TT_STANDARD angelegt."""
+    if not isinstance(aenderungen, dict) or not aenderungen:
+        return None, "tagesteilung = {Feld: Wert}"
+    neu = json.loads(json.dumps(regeln if isinstance(regeln, dict) else {}))
+    blk = neu.get("tagesteilung") if isinstance(neu.get("tagesteilung"), dict) else json.loads(json.dumps(TT_STANDARD))
+    for k, v in aenderungen.items():
+        if k == "an":
+            if not isinstance(v, bool):
+                return None, f"{k} = true | false"
+        elif k == "anteile":
+            if _tt_anteile(v) is None:
+                s = sum(float(x) for x in v if isinstance(x, (int, float)) and not isinstance(x, bool)) if isinstance(v, list) else None
+                return None, ("anteile: Summe {:g} statt 100".format(s) if (isinstance(v, list) and len(v) == 4 and s is not None)
+                              else "anteile = [1 Trade %, 2 Trades %, 3 Trades %, 4 Trades %], je 0–100, Summe 100")
+        elif k in TT_SPANNEN:
+            lo, hi = TT_SPANNEN[k]
+            if _tt_spanne(v, lo, hi) is None:
+                return None, f"{k} = [von, bis] mit {lo:g} ≤ von ≤ bis ≤ {hi:g}"
+        elif k in TT_ZAHLEN:
+            lo, hi = TT_ZAHLEN[k]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not (lo <= float(v) <= hi):
+                return None, f"{k} = Zahl {lo:g}–{hi:g}"
+        elif k == "firmen":
+            if not isinstance(v, list) or any(not isinstance(x, str) for x in v):
+                return None, "firmen = [Firmen-Schlüssel]"
+            fremd = [x for x in v if firmen_keys is not None and x not in firmen_keys]
+            if fremd:
+                return None, f"firmen: „{fremd[0]}“ gibt es nicht (oder Apex — nie geteilt)"
+        elif k == "gruppen":
+            if not isinstance(v, list) or any(not (isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)) for x in v):
+                return None, "gruppen = [Unternehmen-IDs] (leer = nur Hermann Technologies)"
+            fremd = [x for x in v if gruppen_ids is not None and x not in gruppen_ids]
+            if fremd:
+                return None, f"gruppen: Unternehmen {fremd[0][:8]}… gibt es nicht"
+        elif k == "nur_konten":
+            if not isinstance(v, list) or any(not (isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)) for x in v):
+                return None, "nur_konten = [Konto-IDs]"
+        elif k == "test_n":
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not float(v).is_integer() or not 1 <= v <= 4):
+                return None, "test_n = null | 1–4"
+            v = int(v) if v is not None else None
+        else:
+            return None, f"tagesteilung/{k} ist hier nicht änderbar"
+        blk[k] = v
+    neu["tagesteilung"] = blk
+    return neu, None
+
+
+def tt_gilt(param, fkey, gruppe_id, konto_id, konto_typ):
+    """REIN RECHNEND (testbar): wird für dieses Konto heute geteilt? Schalter an, Firma in der Liste (Apex nie), Unternehmen: HT (gruppe_id None)
+    immer, ein anderes nur, wenn seine id_gruppen.id in param.gruppen steht; Challenge-Typ; bei nur_konten nur diese Konten."""
+    if not (param or {}).get("an") or not fkey or str(fkey).startswith("apex") or str(fkey) not in (param.get("firmen") or ()):
+        return False
+    if gruppe_id and str(gruppe_id) not in (param.get("gruppen") or ()):
+        return False
+    if str(konto_typ or "") not in AP_TYPEN:
+        return False
+    nk = param.get("nur_konten") or []
+    return not nk or str(konto_id) in nk
+
+
+def tt_wuerfeln(param, rnd, n_fest=None):
+    """REIN RECHNEND (testbar): Würfel des Tages → {n, haupt_an, anteile} (anteile in Reihenfolge, Summe 1). n aus param.anteile (bzw. n_fest),
+    Haupt-Platz gleichverteilt, Haupt-Anteil aus haupt_pct, der Rest zufällig (Schnittpunkte) auf die Neben-Trades."""
+    if n_fest:
+        n = int(n_fest)
+    else:
+        x, summe, n = rnd.random() * sum(param["anteile"]), 0.0, 4
+        for i, p in enumerate(param["anteile"]):
+            summe += p
+            if x < summe:
+                n = i + 1
+                break
+    h = _ap_spanne(param["haupt_pct"], rnd.random()) / 100.0
+    if n == 1:
+        return {"n": 1, "haupt_an": 1, "anteile": [1.0]}
+    haupt_an = rnd.randint(1, n)
+    schnitte = sorted(rnd.random() for _ in range(n - 2))
+    teile = [b - a for a, b in zip([0.0] + schnitte, schnitte + [1.0])]
+    neben = [(1.0 - h) * t for t in teile]
+    anteile = neben[:haupt_an - 1] + [h] + neben[haupt_an - 1:]
+    return {"n": n, "haupt_an": haupt_an, "anteile": [round(a, 4) for a in anteile]}
+
+
+def tt_zusammenlegen(plan, ziel_usd, min_tp, ab=0):
+    """REIN RECHNEND (testbar): Teile ab Platz ab (0-basiert), deren erwarteter TP (Anteil × ziel_usd, auf die Restanteile gerechnet) unter min_tp liegt,
+    mit dem nächsten Teil zusammenlegen (der letzte mit dem vorigen). Haupt bleibt Haupt. → plan (Kopie)."""
+    an = list(plan["anteile"])
+    ha = int(plan["haupt_an"]) - 1
+    while len(an) - ab > 1:
+        rest = sum(an[ab:])
+        klein = [i for i in range(ab, len(an)) if rest > 0 and ziel_usd * an[i] / rest < min_tp]
+        if not klein:
+            break
+        i = klein[0]
+        j = i + 1 if i + 1 < len(an) else i - 1
+        if j < ab:
+            break
+        a, b = min(i, j), max(i, j)
+        an[a] = round(an[a] + an[b], 4)
+        del an[b]
+        if ha == b or ha == a:
+            ha = a
+        elif ha > b:
+            ha -= 1
+    return {"n": len(an), "haupt_an": ha + 1, "anteile": an}
+
+
+def tt_neben(tp_usd, art, pv, haupt_menge, param, u_pkt, u_sl, schritt=None, symbol=None):
+    """REIN RECHNEND (testbar): Neben-Trade → {menge, symbol, tp, sl, tp_pkt, sl_pkt} | None. art 'fut' (Orbit: NQ/MNQ), 'fut_nq' (Topstep: nur NQ),
+    'cfd' (Lots, Schritt). Punkte p aus neben_pkt (u_pkt); Lots = TP ÷ (p × Punktwert), höchstens neben_menge_max × Haupt-Lots, mindestens ein Schritt;
+    liegt der TP danach über neben_pkt.hi Punkten, wird er auf hi Punkte gekürzt (der Rest bleibt für spätere Teile), unter lo auf lo angehoben.
+    SL = Faktor (u_sl) × TP-Punkte."""
+    lo, hi = param["neben_pkt"]
+    p = _ap_spanne(param["neben_pkt"], u_pkt)
+    f = _ap_spanne(param["neben_sl_faktor"], u_sl)
+    mx = float(param["neben_menge_max"])
+    if not tp_usd or tp_usd <= 0 or not pv or not haupt_menge:
+        return None
+    if art == "fut":
+        mikro_pv = pv / 10.0
+        cap = max(1, int(float(haupt_menge) * mx * 10 + 1e-9))
+        n = max(1, min(cap, int(round(tp_usd / (p * mikro_pv)))))
+        if n % 10 == 0:
+            menge, wert, sym = n // 10, pv, symbol
+        else:
+            menge, wert, sym = n, mikro_pv, TT_MIKRO.get(str(symbol or "NQ"), "MNQ")
+    elif art == "fut_nq":
+        cap = max(1, int(float(haupt_menge) * mx + 1e-9))
+        menge = max(1, min(cap, int(round(tp_usd / (p * pv)))))
+        wert, sym = pv, symbol
+    else:
+        s = float(schritt or 0.01)
+        cap = max(s, int(float(haupt_menge) * mx / s + 1e-9) * s)
+        menge = max(s, min(cap, round(round(tp_usd / (p * pv) / s) * s, 4)))
+        menge = int(menge) if s >= 1 else round(menge, 4)
+        wert, sym = pv, None
+    tp_pkt = tp_usd / (float(menge) * wert)
+    if tp_pkt > hi:
+        tp_pkt = hi                                  # Lots am Deckel: TP auf hi Punkte gekürzt, der Rest bleibt für spätere Teile
+    elif tp_pkt < lo:
+        tp_pkt = lo
+    tp = round(tp_pkt * float(menge) * wert)
+    sl_pkt = tp_pkt * f
+    return {"menge": menge, "symbol": sym, "tp": tp, "sl": round(sl_pkt * float(menge) * wert), "tp_pkt": round(tp_pkt, 2), "sl_pkt": round(sl_pkt, 2)}
+
+
+def tt_teil_art(route):
+    return "fut_nq" if route == "tsv2" else "cfd" if route in AP_CFD_ROUTEN else "fut"
+
+
+def tt_planer_haken(w, regel, phase, param, rnd, ppl=None, n_fest=None):
+    """REIN RECHNEND (testbar): Trade 1 eines Tages, den ap_konto_rechnen gerechnet hat (w) → w2 (Kopie). Würfelt n; n = 1 → Orbit/Echo unverändert
+    (kein kette-Block), Topstep wird ein Ein-Trade-Tag (TP = Tagesziel, SL die Trade-1-Spanne von heute). n > 1 → Trade 1 holt seinen Anteil vom
+    Tagesziel: als Haupt mit Lots/SL von w, als Neben klein (tt_neben). Schreibt w2.kette {nr 1, von, rolle, plan, tagesziel, haupt_menge, …}.
+    Immer ein Trade: Klein-/Mini-/Gewinntag-/finaler Orbit-Trade (TT_EIN_TRADE_STUFE), Topstep-Reparatur-Tag, CFD ohne Punktwert, Futures-Symbol ohne Punktwert."""
+    route = str(regel.get("route") or "mt5v2")
+    k0 = dict(w.get("kette") or {}) if isinstance(w.get("kette"), dict) else None
+    if route == "tsv2" and not k0:
+        return w                                    # Topstep ohne Kettenregel: nie anfassen
+    if k0 and (k0.get("reparatur") or k0.get("ein_trade")):
+        return w                                    # Reparatur-Tag bleibt ein Trade (alter Weg)
+    if w.get("tage_mini") or w.get("symbol") or (route != "tsv2" and TT_EIN_TRADE_STUFE.search(str(w.get("stufe") or ""))):
+        return w
+    art = tt_teil_art(route)
+    sym = str(regel.get("symbol") or "NQ")
+    pv = float(ppl) if art == "cfd" and ppl else TT_FUT_PV.get(sym) if art != "cfd" else None
+    if not pv:
+        return w
+    ziel = float(k0["tagesziel"]) if k0 else float(w["tp"])
+    plan = tt_wuerfeln(param, rnd, n_fest)
+    if plan["n"] > 1:
+        plan = tt_zusammenlegen(plan, ziel, float(param["min_tp_usd"]))
+    if plan["n"] == 1 and not k0:
+        return w
+    w2 = dict(w)
+    haupt = plan["haupt_an"] == 1
+    a1 = plan["anteile"][0]
+    k = dict(k0 or {}, nr=1, von=plan["n"], rolle="haupt" if haupt else "neben", plan=plan, tagesziel=round(ziel), haupt_menge=w["menge"])
+    schritt = ((regel.get("phasen") or {}).get(str(phase)) or {}).get("menge_schritt")
+    if art == "cfd":
+        k.update(ppl=pv, menge_schritt=schritt)
+    if haupt:
+        w2["tp"] = round(ziel * a1) if plan["n"] > 1 else round(ziel)
+        txt = f"Haupt {round(a1 * 100)} %"
+    else:
+        sl_cap = w.get("sl")
+        if route == "tsv2":
+            sl_cap = (k0 or {}).get("verlust_grenze") or sl_cap
+        nb = tt_neben(ziel * a1, art, pv, w["menge"], param, rnd.random(), rnd.random(), schritt=schritt, symbol=sym)
+        if not nb:
+            return w
+        w2.update(menge=nb["menge"], tp=nb["tp"], sl=min(nb["sl"], int(sl_cap)) if sl_cap else nb["sl"], puffer=0)
+        w2["risiko"] = w2["sl"]
+        if nb.get("symbol") and nb["symbol"] != sym:
+            w2["symbol"] = nb["symbol"]
+        k.update(tp_pkt=nb["tp_pkt"], sl_pkt=nb["sl_pkt"])
+        txt = f"Neben {round(a1 * 100)} % · {nb['tp_pkt']:g} Pkt"
+    anteile_txt = " · ".join(("Haupt " if i + 1 == plan["haupt_an"] else "") + f"{round(x * 100)} %" for i, x in enumerate(plan["anteile"]))
+    w2["stufe"] = f"Tag 1/{plan['n']} · {txt} (Tag: {anteile_txt}, Ziel +{round(ziel):,} $)".replace(",", ".") + " · " + str(w.get("stufe") or "")
+    w2["kette"] = k
+    return w2
+
+
+def tt_bal_wache_ok(k):
+    """REIN (Gegenprüfung 09.11.2026): darf die Balance-Wache diesen Ketten-Plan prüfen? Nur Trade 1 eines Orbit-/Echo-Tags (WS2, kette.von, ohne Topstep-
+    Verlustgrenze) — er ist aus der Konto-Balance geplant wie jeder normale Plan. Topstep und Folge-Teile (aus der genauen Lesung) nie."""
+    k = k if isinstance(k, dict) else {}
+    try:
+        return bool(k.get("von")) and int(k.get("nr") or 0) == 1 and k.get("verlust_grenze") is None
+    except (TypeError, ValueError):
+        return False
+
+
+def tt_zschluss(param, rnd):
+    """REIN RECHNEND (testbar): Zufalls-Schluss je Plan (WS2c) → {nach_min} mit Wahrscheinlichkeit aus schluss_pct, sonst None."""
+    p = _ap_spanne(param["schluss_pct"], rnd.random()) / 100.0
+    if rnd.random() >= p:
+        return None
+    return {"nach_min": int(round(_ap_spanne(param["schluss_min"], rnd.random())))}
+
+
+def tt_echt(plan):
+    """REIN RECHNEND (testbar): genaue Lesung eines beendeten Teils → (vorher, nachher) | None. Orbit/Topstep/Echo V2 über ap_echte_balancen (nur
+    Puls-Endlesung bzw. Nachlesung, nie Demo/Level/Folgetrade); Echo mit Hedge (mt5): master_balance + bal_nach (ok, Nachlesung)."""
+    p = plan or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if str(p.get("route") or "") == "mt5":
+        bn = bl.get("bal_nach") if isinstance(bl.get("bal_nach"), dict) else {}
+        v, n = _wd_num(bl.get("master_balance")), _wd_num(bn.get("balance"))
+        return (float(v), float(n)) if (bn.get("ok") is True and v and n and v > 0 and n > 0) else None
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    if fin.get("balance_quelle") == "folgetrade":
+        return None
+    e = ap_echte_balancen(p)
+    return (e[0], e[1]) if e else None
+
+
+def tt_folge_rechnen(k, bal_tag0, bal_jetzt, regel, param, rnd, w_h=None, grund_h=None, kette_r=None):
+    """REIN RECHNEND (testbar): nächster Teil nach dem genau gelesenen Teil k (kette-Block des vorigen) → (werte, None) | (None, (ende_code, text)).
+    bal_tag0 = genaue Start-Balance von Trade 1, bal_jetzt = genaue End-Balance des vorigen Teils. w_h/grund_h = ap_konto_rechnen bei bal_jetzt (Orbit/Echo:
+    Lots, SL, TP-Deckel des Haupt-Trades wie heute), kette_r = Topstep-Kettenregel (SL/Lots über ap_kette_trade2). werte = {nr, rolle, plan, menge, tp,
+    sl, symbol?, tp_pkt?, sl_pkt?, e_bisher, rest}."""
+    route = str(regel.get("route") or "mt5v2")
+    nr = int(k.get("nr") or 1) + 1
+    plan = dict(k.get("plan") or {})
+    if not plan.get("anteile") or nr > int(plan.get("n") or len(plan["anteile"])):
+        return None, ("alle", TT_ENDE_TXT["alle"])
+    ziel = float(k.get("tagesziel") or 0)
+    e = round(float(bal_jetzt) - float(bal_tag0), 2)
+    rest = round(ziel - e, 2)
+    if rest <= TT_ZIEL_REST_USD:
+        return None, ("ziel", f"Tagesziel erreicht ({e:+,.0f} $ von +{ziel:,.0f} $)".replace(",", "."))
+    plan = tt_zusammenlegen(plan, rest, float(param["min_tp_usd"]), ab=nr - 1) if nr < len(plan["anteile"]) else plan
+    if nr > plan["n"]:
+        return None, ("alle", TT_ENDE_TXT["alle"])
+    s = sum(plan["anteile"][nr - 1:])
+    tp_roh = rest if nr == plan["n"] else rest * plan["anteile"][nr - 1] / s
+    if tp_roh < float(param["min_tp_usd"]):
+        return None, ("rest_klein", f"Rest {rest:,.0f} $ unter dem Mindest-TP {float(param['min_tp_usd']):,.0f} $".replace(",", "."))
+    haupt = nr == int(plan["haupt_an"])
+    art = tt_teil_art(route)
+    sym = str(regel.get("symbol") or "NQ")
+    if route == "tsv2":
+        w2, g2 = ap_kette_trade2(dict(k, e1=None), bal_tag0, bal_jetzt, regel, kette_r or AP_KETTE_STANDARD, rnd.random())
+        if g2:
+            return None, ("ziel" if "Tagesziel" in g2 else "verlust", g2)
+        tp_cap, sl_h, menge_h, sym_h = float(w2["tp"]), w2["sl"], w2["menge"], None
+    else:
+        if grund_h or not w_h:
+            g = str(grund_h or "nicht rechenbar")
+            return None, ("ziel" if "Ziel erreicht" in g else "verlust", g)
+        tp_cap, sl_h, menge_h, sym_h = float(w_h["tp"]), w_h.get("sl"), w_h["menge"], w_h.get("symbol")
+    out = {"nr": nr, "rolle": "haupt" if haupt else "neben", "plan": plan, "e_bisher": e, "rest": round(rest)}
+    if haupt:
+        # risiko wie der Planer (ap_konto_rechnen: SL, sonst DD der Phase — Orbit-Haupt ohne SL); Topstep = SL2. Symbol IMMER gesetzt (Futures: Regel-
+        # Symbol bzw. MNQ des Klein-Trades) — sonst erbte ein Haupt-Trade das MNQ eines Neben-Vorgängers (Gegenprüfung 09.11.2026: 3 MNQ statt 3 NQ)
+        out.update(menge=menge_h, tp=round(min(tp_roh, tp_cap)), sl=sl_h, symbol=(None if art == "cfd" else (sym_h or sym)),
+                   risiko=(sl_h if route == "tsv2" else (w_h.get("risiko") if w_h.get("risiko") is not None else sl_h)))
+    else:
+        pv = float(k.get("ppl") or 0) if art == "cfd" else TT_FUT_PV.get(sym)
+        nb = tt_neben(min(tp_roh, tp_cap), art, pv, k.get("haupt_menge") or menge_h, param, rnd.random(), rnd.random(),
+                      schritt=k.get("menge_schritt"), symbol=sym)
+        if not nb:
+            return None, ("verlust", "Neben-Trade nicht rechenbar (Punktwert fehlt)")
+        sl = nb["sl"]
+        if sl_h:
+            sl = min(sl, int(sl_h))
+        elif route != "tsv2" and _wd_num(regel.get("daily_usd")):
+            sl = min(sl, int(float(regel["daily_usd"]) - max(0.0, -e) - 100))
+        if sl < 50:
+            return None, ("verlust", f"SL für den Neben-Trade wäre nur {sl} $")
+        out.update(menge=nb["menge"], tp=nb["tp"], sl=sl, symbol=(None if art == "cfd" else (nb["symbol"] or sym)), tp_pkt=nb["tp_pkt"], sl_pkt=nb["sl_pkt"])
+    if route == "tsv2":
+        out["verlust_grenze"] = w2.get("verlust_grenze")
+    return out, None
+
+
+_tt = {"letzter": 0.0, "letztes": None, "fehler": ""}
+TT_TAKT_S = 60
+
+
+def _tt_patch(pid, patch, key="kette"):
+    """mt5_baseline.<key> eine Ebene tief mergen (RPC mt5_baseline_patch_in, atomar). Fehler nur loggen → bool."""
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": str(pid), "p_key": key, "p_status": None, "p_patch": patch})
+        _sb_pruefen(r)
+        return True
+    except Exception as e:
+        print(f"[tagesteilung] ⚠️ {str(pid)[:8]} {key}: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
+def _tt_tag_teile(tag_id, extra=None):
+    """Alle Teile eines Tages (Trade 1 = tag_id selbst, Folgeteile über kette.tag_id) → [Plan] nach nr."""
+    sel = "id,route,status,richtung,master_pl,ended_at,mt5_baseline"
+    rows = (sb_select("trade_plans", {"select": sel, "id": f"eq.{tag_id}"}) or []) + \
+           (sb_select("trade_plans", {"select": sel, "mt5_baseline->kette->>tag_id": f"eq.{tag_id}"}) or [])
+    je = {str(r["id"]): r for r in rows}
+    for r in extra or ():
+        je[str(r["id"])] = r
+    return sorted(je.values(), key=lambda r: int((((r.get("mt5_baseline") or {}).get("kette") or {}).get("nr")) or 0))
+
+
+def tt_tagesende(teile, ende_code, text, bal_tag0, bal_ende, blown, jetzt_iso):
+    """REIN RECHNEND (testbar): kette.tagesende am letzten Teil → {tag_pl, trades, teile, balance, blown, ende_grund, ende_text, at} (+ t1_pl/t2_pl für alte
+    Topstep-Leser)."""
+    tl = []
+    for p in teile:
+        kk = ((p.get("mt5_baseline") or {}).get("kette") or {})
+        g = tt_echt(p)
+        tl.append({"nr": int(kk.get("nr") or 0), "rolle": kk.get("rolle"), "richtung": p.get("richtung"),
+                   "pl": round(g[1] - g[0], 2) if g else _wd_num(p.get("master_pl"))})
+    out = {"tag_pl": round(float(bal_ende) - float(bal_tag0), 2) if (bal_ende is not None and bal_tag0) else None, "trades": len(tl), "teile": tl,
+           "balance": float(bal_ende) if bal_ende is not None else None, "blown": bool(blown), "ende_grund": ende_code, "ende_text": text, "at": jetzt_iso}
+    if len(tl) >= 1:
+        out["t1_pl"] = tl[0]["pl"]
+    out["t2_pl"] = tl[1]["pl"] if len(tl) >= 2 else None
+    return out
+
+
+def tt_tick(jetzt=None, rnd=None):
+    """WS2 Takt (jede Minute aus ap_loop über _tt_takt): beendete Ketten-Teile (kette.von, heute) ohne Nachfolger und ohne tagesende.
+    Genau gelesen → nächster Teil (tt_folge_rechnen, Start Lesung + abstand_min, erste regelkonforme Minute bis Fensterende, Richtung frei) oder Tag
+    fertig (tagesende am letzten Teil, bleibt in Überprüfen bis Finns einem Haken). Teile mit Nachfolger: Orbit/Topstep automatisch abhaken (P&L aus der
+    genauen Lesung), Echo mit Hedge bleibt bei Finn (Hedge-P&L). Ohne genaue Lesung: lesen_bis schreiben; nach Fensterende Tag fertig (keine_lesung)."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    rnd = rnd or random.SystemRandom()
+    jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    mitternacht = datetime(d.year, d.month, d.day, tzinfo=tz)
+    rows = sb_select("trade_plans", {
+        "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,route,status,auto_plan,auto_bestaetigt_at,"
+                  "ended_at,completed_at,planned_for,master_pl,konto_typ,updated_at,mt5_baseline",
+        "status": "in.(review,completed)", "ended_at": "gte." + (mitternacht - timedelta(hours=6)).isoformat(),
+        "mt5_baseline->kette->>von": "not.is.null"}) or []
+    rows = [p for p in rows if not (((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"))]
+    if not rows:
+        return {"neu": [], "ende": [], "abgehakt": []}
+    nf = sb_select("trade_plans", {"select": "id,status,vor:mt5_baseline->kette->>vor",
+                                   "mt5_baseline->kette->>vor": "in.(" + ",".join(str(p["id"]) for p in rows) + ")"}) or []
+    nachfolger = {str(x.get("vor")): x for x in nf}
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return {"neu": [], "fehler": "auto_plan_regeln fehlt"}
+    regeln = reg.get("regeln") or {}
+    firmen = regeln.get("firmen") or []
+    param = tt_param(regeln)
+    aparam = ap_ausgleich_param(regeln)
+    zeiten_r = reg.get("zeiten") if isinstance(reg.get("zeiten"), dict) else {}
+    sperren = _ap_sperren()
+    stand_je, neu, ende, abgehakt = {}, [], [], []
+    for p in rows:
+        pid = str(p["id"])
+        k = (p.get("mt5_baseline") or {}).get("kette") or {}
+        route = str(p.get("route") or "")
+        tag_id = str(k.get("tag_id") or pid)
+        echt = tt_echt(p)
+        try:
+            if pid in nachfolger:
+                # Nachfolger steht: Orbit/Topstep (ohne Hedge) automatisch abhaken, Echo mit Hedge bleibt bei Finn (Fusion-P&L)
+                if p.get("status") == "review" and echt and route in ("tvv2", "tsv2") and not (p.get("mt5_baseline") or {}).get("hedge"):
+                    upd, fehler = _wd_erledigt_upd(p, round(echt[1] - echt[0], 2), None, jetzt_iso, _cme_handelstag())
+                    if not fehler:
+                        upd["pl_quelle"] = "tv"
+                        filt = {"id": f"eq.{pid}", "status": "eq.review"}
+                        if p.get("updated_at"):
+                            filt["updated_at"] = f"eq.{p['updated_at']}"
+                        if sb_update("trade_plans", filt, upd):
+                            abgehakt.append(pid)
+                continue
+            regel = ap_regel_unternehmen(p.get("user_id"), firmen, p.get("master_firm"), streng=False)
+            bal_tag0 = _wd_num(k.get("balance_start_tag")) or (echt[0] if echt else None)
+            ende_code = ende_text = None
+            zs = (p.get("mt5_baseline") or {}).get("zschluss") or {}
+            bis = tt_fenster_bis(zeiten_r, route, p.get("ended_at"), tz,
+                                 t2_bis=((ap_kette_regel(regel) or {}).get("t2_bis") if (route == "tsv2" and regel) else None))
+            ende_ts = _ap_ts(p.get("ended_at"))
+            if not echt:
+                if bis and not k.get("lesen_bis"):
+                    _tt_patch(pid, {"lesen_bis": bis})
+                if bis and jetzt > _ap_ts(bis):
+                    ende_code, ende_text = "keine_lesung", TT_ENDE_TXT["keine_lesung"]
+                else:
+                    continue
+            elif k.get("folge_id"):
+                # Nachfolger war schon angelegt und ist weg (Finn hat ihn gelöscht, Gegenprüfung 09.11.2026) → Tag fertig, nie still neu anlegen
+                ende_code, ende_text = "geloescht", TT_ENDE_TXT["geloescht"]
+            elif int(k.get("nr") or 1) >= int(k.get("von") or 1):
+                ende_code, ende_text = "alle", TT_ENDE_TXT["alle"]
+            elif zs.get("status") == "geschlossen":
+                ende_code, ende_text = "zschluss", TT_ENDE_TXT["zschluss"]
+            elif not param.get("an"):
+                ende_code, ende_text = "aus", TT_ENDE_TXT["aus"]
+            elif ap_firma_gesperrt({"user_id": p.get("user_id"), "firm": p.get("master_firm")}, sperren):
+                ende_code, ende_text = "gesperrt", AP_GRUND_GESPERRT
+            elif not regel:
+                ende_code, ende_text = "verlust", "keine Regel für diese Firma"
+            elif ende_ts and ende_ts.astimezone(tz).date() != d.date():
+                ende_code, ende_text = "fenster", "Teil endete an einem früheren Tag — heute kein Folge-Trade"
+            werte = None
+            if not ende_code:
+                bal_j = echt[1]
+                kette_r = ap_kette_regel(regel) if route == "tsv2" else None
+                w_h = grund_h = None
+                if route != "tsv2":
+                    konto = (sb_select("accounts", {"select": "*", "id": f"eq.{p['master_account_id']}"}) or [None])[0]
+                    phase = str((konto or {}).get("account_type") or p.get("konto_typ") or "challenge")
+                    w_h, grund_h = ap_konto_rechnen(ap_regel_konto(regel, konto, bal_j) if konto else regel, phase, bal_j, {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")},
+                                                    ppl=_wd_num(k.get("ppl")), heute_verlust=max(0.0, float(bal_tag0) - bal_j))
+                werte, g = tt_folge_rechnen(k, bal_tag0, bal_j, regel, param, rnd, w_h=w_h, grund_h=grund_h, kette_r=kette_r)
+                if g:
+                    ende_code, ende_text = g
+            if not ende_code:
+                start, richtung, g = _tt_startplatz(p, k, reg, aparam, zeiten_r, firmen, route, stand_je, jetzt, rnd)
+                if g:
+                    ende_code, ende_text = "fenster", g
+            if not ende_code:
+                zeile = _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, jetzt)
+                if route in AP_CFD_ROUTEN:
+                    zeile["route"] = "mt5v2"                     # E3: als Echo V2 rechnen, ap_echo_hedge_anlegen hebt auf Echo + Fusion-Hedge
+                    e3 = ap_echo_hedge_anlegen([zeile], {str(p["master_account_id"]): (konto, echt[1])}, regeln)
+                    if e3["weg"] or e3.get("echo") != 1:     # E3: nie Echo V2 ohne Hedge als Ersatz (auch nicht, wenn die Zeile kein Kandidat war)
+                        ende_code, ende_text = "kein_hedge", f"{TT_ENDE_TXT['kein_hedge']}: " + (e3["weg"][0][1] if e3["weg"] else "Konto nicht lesbar oder kein CFD-Challenge-Typ")
+            if ende_code:
+                teile = _tt_tag_teile(tag_id, extra=[p])
+                blown = False
+                if route == "tsv2" and echt and _wd_num(k.get("mll")) is not None and bal_tag0:
+                    # 1:1 ap_kette_abhaken (Gegenprüfung 09.11.2026): angefressen Ende ≤ MLL + 50; gesund Ende ≤ MLL UND Tagesverlust über DLL + 50
+                    _daily, _e_tag = float(k.get("daily_usd") or 0), echt[1] - float(bal_tag0)
+                    if ap_kette_angefressen(k):
+                        blown = echt[1] <= float(k["mll"]) + AP_KETTE_MLL_TOLERANZ
+                    else:
+                        blown = echt[1] <= float(k["mll"]) and (not _daily or _e_tag < -(_daily + 50))
+                te = tt_tagesende(teile, ende_code, ende_text, bal_tag0, echt[1] if echt else None, blown, jetzt_iso)
+                if echt and route in ("tvv2", "tsv2") and p.get("status") == "review" and p.get("master_pl") is None:
+                    halb = {"master_pl": round(echt[1] - echt[0], 2), "pl_quelle": "tv"}   # Richtungs-Riegel frei (prophos_plan_gelesen), Status bleibt
+                    if blown:
+                        halb["blown"] = True
+                    sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.review"}, halb)
+                if _tt_patch(pid, {"tagesende": te, "grund": f"Tag fertig: {ende_text}", "grund_at": jetzt_iso}):
+                    ende.append(pid)
+                    print(f"[tagesteilung] {pid[:8]} Tag fertig ({ende_code}): {ende_text}", flush=True)
+                continue
+            if (sb_select("trade_plans", {"select": "id", "mt5_baseline->kette->>vor": f"eq.{pid}"}) or []):
+                continue                                         # inzwischen angelegt (zweiter Container) — nie doppelt
+            try:
+                ins = sb_insert("trade_plans", zeile)
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", 0) == 409:  # Unique-Index trade_plans_kette_vor_uniq: der andere Takt war schneller
+                    continue
+                raise
+            _neu_id = ((ins[0] if isinstance(ins, list) and ins else ins) or {}).get("id") if isinstance(ins, (list, dict)) else None
+            txt = (f"Trade {werte['nr']}/{werte['plan']['n']} angelegt: {'Haupt' if werte['rolle'] == 'haupt' else 'Neben'} {richtung} {werte['menge']} · "
+                   f"TP {werte['tp']} / SL {werte['sl']} $ · Start {start.astimezone(tz).strftime('%H:%M')} dt")
+            _tt_patch(pid, dict({"grund": txt, "grund_at": jetzt_iso}, folge_id=str(_neu_id or "angelegt")))   # folge_id: Löschen beendet den Tag
+            neu.append({"vor": pid, "nr": werte["nr"], "start": start.isoformat(), "richtung": richtung, "tp": werte["tp"], "sl": werte["sl"]})
+            print(f"[tagesteilung] {pid[:8]} → {txt}", flush=True)
+        except Exception as e:
+            print(f"[tagesteilung] ⚠️ {pid[:8]}: {type(e).__name__}: {e}", flush=True)
+    return {"neu": neu, "ende": ende, "abgehakt": abgehakt}
+
+
+def tt_fenster_bis(zeiten, route, ended_at, tz, t2_bis=None):
+    """REIN RECHNEND (testbar): Fensterende (ISO UTC) des Handelstags, an dem der Teil endete — letzte Startminute der Klasse (ap_klasse_bis),
+    Topstep t2_bis (wie ap_kette_lesen_bis)."""
+    ende = _ap_ts(ended_at)
+    if not ende:
+        return None
+    tag = ende.astimezone(tz).date()
+    m = ap_klasse_bis(dict(zeiten or {}, start_bis=t2_bis) if t2_bis else (zeiten or {}), route, tag)
+    bis = datetime(tag.year, tag.month, tag.day, tzinfo=tz) + timedelta(minutes=m)
+    return bis.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _tt_startplatz(p, k, reg, aparam, zeiten_r, firmen, route, stand_je, jetzt, rnd):
+    """Start des nächsten Teils: Lesung + abstand_min (Zufall), erste regelkonforme Minute (ap_nachhol_minute: Richtungsschutz, Firmen-Abstand,
+    Abstand je ID, Gegenhedge) bis Fensterende der Klasse (Topstep t2_bis), Richtung = früherer freier Platz von buy/sell (gemischt).
+    → (start, richtung, None) | (None, None, grund)."""
+    param = tt_param(reg.get("regeln"))
+    uk = ap_unternehmen_ids(p.get("user_id"), admin_gruppen_daten())
+    if uk not in stand_je:
+        stand_je[uk] = _ap_stand_fuer_uid(reg, p.get("user_id"), jetzt)
+    stand = stand_je[uk]
+    lesung = _ap_ts(ap_blow_lesung_at(p)) or jetzt
+    ab = (max(lesung, jetzt - timedelta(minutes=1)) - stand["mitternacht"]).total_seconds() / 60.0 + _ap_spanne(param["abstand_min"], rnd.random())
+    zeiten2 = dict(stand.get("zeiten") or zeiten_r or {})
+    if route == "tsv2":                                # Topstep: bis t2_bis wie ap_kette_tick (in zeiten.fenster_tz, falls gesetzt)
+        zeiten2["start_bis"] = (ap_kette_regel(ap_regel_unternehmen(p.get("user_id"), firmen, p.get("master_firm"), streng=False)) or AP_KETTE_STANDARD)["t2_bis"]
+    m_bis = ap_klasse_bis(zeiten2, route)              # ap_nachhol_minute rechnet dasselbe Fensterende aus p.route (CFD bis cfd_bis)
+    bis_txt = f"{int(m_bis) // 60:02d}:{int(m_bis) % 60:02d}"
+    laufend = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None} for z in stand["offen"]]
+    fkey = ap_firma_key(stand.get("firmen") or firmen, p.get("master_firm"))
+    plaene = _ap_stand_plaene(stand)
+    beste = None
+    richtungen = ["buy", "sell"]
+    rnd.shuffle(richtungen)
+    for r in richtungen:
+        m, _f = ap_nachhol_minute({"plan_id": "teil-" + str(p["id"]), "user_id": str(p["user_id"]), "firma": fkey, "richtung": r, "route": route}, plaene,
+                                  stand["starts_heute"], stand["id_fest"], stand["jetzt_min"], zeiten2, aparam.get("laufzeit_min"),
+                                  laufend, rnd=rnd, ab_min=ab)
+        if m is not None and (beste is None or m < beste[0]):
+            beste = (m, r)
+    if beste is None:
+        return None, None, f"kein regelkonformer Start mehr bis {bis_txt} dt"
+    return stand["mitternacht"] + timedelta(minutes=beste[0]), beste[1], None
+
+
+def _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, jetzt):
+    """Insert-Zeile des nächsten Teils (wie Topstep-Trade 2): Route, Konto, Symbol, Bestätigung von Trade 1; kette mit nr/von/rolle/plan/tag_id/vor."""
+    k2 = {x: k.get(x) for x in ("tagesziel", "haupt_menge", "ppl", "menge_schritt", "tag_typ", "mll", "daily_usd", "dll_puffer", "angefressen",
+                                "abstand_mll", "tag") if k.get(x) is not None}
+    k2.update(nr=werte["nr"], von=werte["plan"]["n"], rolle=werte["rolle"], plan=werte["plan"], tag_id=tag_id, vor=str(p["id"]),
+              e_bisher=werte["e_bisher"], balance_start_tag=bal_tag0, balance_vor=echt[1])
+    if werte.get("verlust_grenze") is not None:
+        k2["verlust_grenze"] = werte["verlust_grenze"]
+    for x in ("tp_pkt", "sl_pkt"):
+        if werte.get(x) is not None:
+            k2[x] = werte[x]
+    sym = p.get("master_symbol")
+    _fm = re.match(r"^[A-Z]+?([FGHJKMNQUVXZ]\d{1,2})$", str(sym or ""))
+    if werte.get("symbol") and _fm:
+        sym = str(werte["symbol"]) + _fm.group(1)                          # MNQ/NQ + derselbe Frontmonat wie Trade 1 (MNQZ6 → NQZ6, nie NQ6)
+    base = {"kette": k2}
+    zs = tt_zschluss(param, rnd)
+    if zs:
+        base["zschluss"] = zs
+    rolle = "Haupt" if werte["rolle"] == "haupt" else "Neben"
+    sl_txt = f"SL {werte['sl']:,} $" if werte.get("sl") else "ohne SL"
+    notiz = (f"Auto-Planer · Tag {werte['nr']}/{werte['plan']['n']} · {rolle} · bisher {werte['e_bisher']:+,.0f} $ → TP {werte['tp']:,} $ / "
+             f"{sl_txt} · Balance {echt[1]:,.0f} (Nachlesung)").replace(",", ".")
+    return {"user_id": p["user_id"], "master_account_id": p["master_account_id"], "master_name": p.get("master_name"), "master_firm": p.get("master_firm"),
+            "master_contracts": werte["menge"], "master_risk": werte.get("risiko") if werte.get("risiko") is not None else werte["sl"],
+            "master_tp": werte["tp"], "master_sl": werte["sl"], "richtung": richtung,
+            "route": p.get("route"), "master_symbol": sym, "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned",
+            "priority": "medium", "planned_for": p.get("planned_for"), "auto_plan": True,
+            "auto_bestaetigt_at": jetzt.isoformat() if p.get("auto_bestaetigt_at") else None, "mt5_baseline": base, "notes": notiz}
+
+
+def _tt_takt():
+    """aus ap_loop: höchstens alle TT_TAKT_S tt_tick (Fehler nur loggen)."""
+    if time.time() - _tt["letzter"] < TT_TAKT_S:
+        return
+    _tt["letzter"] = time.time()
+    try:
+        _tt["letztes"] = tt_tick()
+        _tt["fehler"] = ""
+    except Exception as e:
+        _tt["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[tagesteilung] ⚠️ Takt: {e}", flush=True)
 
 
 def _ap_bot_tick(d):
@@ -39413,7 +40109,12 @@ def admin_auto_plan_einstellungen():
            "zufall": ap_zufall(regeln), "zufall_code": ap_zufall_code(),
            "zufall_db": sorted(k for k, v in (regeln.get("zufall") or {}).items() if ap_zufall_pruefen(k, v)[1] is None)
            if isinstance(regeln.get("zufall"), dict) else [],
-           "zeiten_db": zeiten, "regel_info": sicher(lambda _r: ap_regel_info())}
+           "zeiten_db": zeiten, "regel_info": sicher(lambda _r: ap_regel_info()),
+           # WS2 Trades pro Tag (09.11.2026): wirksame Werte (tt_param) + Häkchen je Challenge-Firma; tagesteilung_db = Block steht in der DB (SQL eingespielt)
+           "tagesteilung": sicher(tt_param),
+           "tagesteilung_firmen": sicher(lambda r: tt_firmen_auswahl(r.get("firmen") or [], tt_param(r))),
+           "tagesteilung_gruppen": sicher(lambda r: tt_gruppen_auswahl(admin_gruppen_daten().get("gruppen") or [], tt_param(r))),
+           "tagesteilung_db": isinstance(regeln.get("tagesteilung"), dict)}
     if unt:
         namen_g = {str(g.get("id")): g.get("name") for g in admin_gruppen_daten().get("gruppen") or ()}
         fm = zeile.get("firmen_modell") if isinstance(zeile.get("firmen_modell"), dict) else {}
@@ -40415,7 +41116,7 @@ def konto_ziele():
 @app.route("/admin/auto-plan/ablaufwert", methods=["POST", "OPTIONS"])
 def admin_auto_plan_ablaufwert():
     """POST {zeiten?: [{pfad, wert}], zufall?: {k: wert}, auto_bestaetigen?: aus|cfd|alle, bloecke?: {block: {feld: zahl}}, schalter?: [{pfad,
-    wert}]} → Spalte zeiten und/oder regeln (E3b). Nur Admin.
+    wert}], tagesteilung?: {feld: wert} (WS2, tt_einst_anwenden)} → Spalte zeiten und/oder regeln (E3b). Nur Admin.
     Alles oder nichts (ap_einst_zeiten_anwenden, ap_einst_regeln_anwenden); ein Update für beide Spalten."""
     if request.method == "OPTIONS":
         return "", 200
@@ -40429,7 +41130,7 @@ def admin_auto_plan_ablaufwert():
         uid, reg, zeile, err = _ap_unt_zugang(gid)
         if err:
             return err
-        if any(body.get(k) is not None for k in ("zufall", "auto_bestaetigen", "bloecke", "schalter", "aktiv")):
+        if any(body.get(k) is not None for k in ("zufall", "auto_bestaetigen", "bloecke", "schalter", "aktiv", "tagesteilung")):
             return jsonify({"ok": False, "msg": "im Unternehmen ist nur das Startfenster änderbar (Schalter gelten für alle; Rest folgt in Phase 2)"}), 400
         if "regeln" not in zeile:
             return jsonify({"ok": False, "msg": AP_UNT_NICHT_FREI, "code": "unt_nicht_frei"}), 409
@@ -40465,6 +41166,13 @@ def admin_auto_plan_ablaufwert():
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
         patch["regeln"] = r_neu
+    if body.get("tagesteilung") is not None:                  # WS2 Trades pro Tag (09.11.2026): Block regeln.tagesteilung, alles oder nichts
+        _r0 = patch.get("regeln") or reg.get("regeln") or {}
+        r_neu, grund = tt_einst_anwenden(_r0, body.get("tagesteilung"), {x["key"] for x in tt_firmen_auswahl(_r0.get("firmen") or [])},
+                                         {str(g.get("id")) for g in admin_gruppen_daten().get("gruppen") or ()})
+        if grund:
+            return jsonify({"ok": False, "msg": grund}), 400
+        patch["regeln"] = r_neu
     if body.get("aktiv") is not None:                        # Planer an/aus (Spalte aktiv: Nachtlauf + Nachplanen)
         if not isinstance(body.get("aktiv"), bool):
             return jsonify({"ok": False, "msg": "aktiv = true | false"}), 400
@@ -40479,7 +41187,7 @@ def admin_auto_plan_ablaufwert():
     print(f"[einstellungen] Ablauf: {', '.join(k for k in patch if k != 'updated_at')} geändert ({uid})", flush=True)
     r = patch.get("regeln") or reg.get("regeln") or {}
     return jsonify({"ok": True, "zeiten": patch.get("zeiten", reg.get("zeiten")), "zufall": ap_zufall(r),
-                    "auto_bestaetigen": ap_auto_best_umfang(r), "aktiv": patch.get("aktiv", reg.get("aktiv") is True)})
+                    "auto_bestaetigen": ap_auto_best_umfang(r), "aktiv": patch.get("aktiv", reg.get("aktiv") is True), "tagesteilung": tt_param(r)})
 
 
 # Nachtlauf-Uhrzeit (07.10.2026, Finn: „heute Nacht schon planen" — 01:00 Dubai statt 00:00 dt, = 23:00 dt Sommer / 22:00 dt
@@ -41660,7 +42368,7 @@ def ap_plan_bal_abweichung(p, a, echo_bal, dup_bal, letzt=None):
     sonst None. Ohne Balance in den notes, ohne Konto oder ohne lebende Lesung nie; Topstep-Kette und Tage-Mini (kette/tage_mini aus
     mt5_baseline) haben ihre eigene Balance-Logik → nie (Prüfer 22.10.2026: sonst warten sie beim Bestätigen, ohne dass die Wache sie anfasst)."""
     m = _AP_BAL_PLAN.search(str((p or {}).get("notes") or ""))
-    if not m or not a or p.get("kette") or p.get("tage_mini"):
+    if not m or not a or (p.get("kette") and not tt_bal_wache_ok(p.get("kette"))) or p.get("tage_mini"):
         return None
     bal, _ccy, _q, stand = acc_balance_wahl(a, echo_bal, dup_bal)
     if bal is None or not ap_balance_live(stand, letzt):
@@ -42779,7 +43487,7 @@ def ap_bal_wache(jetzt):
                                      "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "started_at": "is.null",
                                      "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null", "mt5_baseline->puls_pause": "is.null",
                                      "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})   # Puls-Pause bleibt unberührt (Prüfer 22.10.2026)
-    plaene = [p for p in plaene if not p.get("kette") and not p.get("tage_mini") and _AP_BAL_PLAN.search(str(p.get("notes") or ""))]
+    plaene = [p for p in plaene if (not p.get("kette") or tt_bal_wache_ok(p.get("kette"))) and not p.get("tage_mini") and _AP_BAL_PLAN.search(str(p.get("notes") or ""))]
     if not plaene:
         return []
     kids = sorted({str(p.get("master_account_id")) for p in plaene if re.fullmatch(r"[0-9a-fA-F-]{36}", str(p.get("master_account_id") or ""))})
@@ -43119,6 +43827,7 @@ def ap_loop():
             _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[blow-auto/normal-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
+        _tt_takt()                            # WS2 Trades pro Tag aufteilen: nächster Teil nach genauer Lesung / Tag fertig (09.11.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:
