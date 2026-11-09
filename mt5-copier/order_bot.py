@@ -19745,6 +19745,11 @@ def _tsx_konto_sichern(s, ext, st, trail):
             if not x:
                 if not ko.get("liste") and ko.get("roh"):          # 02.11.2026 (Ina 03:57: 0 Karten): DOM-Beleg in die Spur
                     trail.append("K2 Rohliste: " + json.dumps(ko.get("roh"), ensure_ascii=False)[:900])
+                elif ko.get("liste"):
+                    # TX1 (09.11.2026 17:20, Simon .2116): 2 Karten gelesen, keine passt zur Kennung — Kartentexte + gelesene Kennung/Endung in die
+                    # Spur, damit der Abgleich an der echten Form gefixt werden kann (nur Protokoll, ändert nichts am Ablauf)
+                    trail.append("K2 Karten: " + json.dumps([{k: x.get(k) for k in ("text", "id", "id_kurz", "endung", "abschnitt", "format")}
+                                                            for x in (ko.get("liste") or [])[:6] if isinstance(x, dict)], ensure_ascii=False)[:1400])
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 return _raus("konto_nicht_erreicht", f"Konto {ext} in der TopstepX-Liste: {grund} ({n}×) — nichts gewählt, Esc.", st,
                              konto_zeilen=_zeilen(ko), konto_treffer=n)
