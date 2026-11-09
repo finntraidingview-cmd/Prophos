@@ -2607,6 +2607,8 @@
   #dashboard-view .wdz-felder input,#dashboard-view .wdz-felder select{width:100%;padding:4px 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px}
   #dashboard-view .wdz-rech{margin-top:8px;font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
   #wd-uebersicht .ap-gr-warten .pz-z[data-plan-id]:not(.pz-z-kopf){cursor:pointer}
+  /* FP5 (10.11.2026): Zeilen in „Zu bestätigen“ öffnen den Bearbeiten-Kasten */
+  #wd-uebersicht tr[data-ahf-zeile]{cursor:pointer} #wd-uebersicht tr[data-ahf-zeile]:hover td{background:var(--surface-tint, rgba(80,73,162,.04))}
   #dashboard-view .tpl-kasten .tk-hin{margin-top:8px;font-size:11.5px;color:var(--sub)} #dashboard-view .tpl-kasten .tk-hin.rot{color:var(--danger)}
   #dashboard-view .tpl-kasten .tk-liste{display:flex;flex-direction:column;margin-top:6px}
   #dashboard-view .tpl-kasten .tk-liste button{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:8px;align-items:center;width:100%;padding:7px 2px;border:0;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12.5px;color:var(--ink);text-align:left;cursor:pointer}
@@ -57640,7 +57642,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2129'
+  const OS_TAB_BUILD = '2026-09-22.2130'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66143,7 +66145,7 @@
           tip: [w.dlText, w.dlEur != null ? ca + (dlLiq ? '' : ', Fusion schließt ' + HEDGE_DLL_VOR_PKT + ' Pkt vor dem Daily Loss') : ''].filter(Boolean).join(' · ') }
           : { wo: 'sl', mText: 'Blow', fWert: vs.blow_eur, mName: 'Blow', fName: 'TP' })]
     }
-    return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
+    return `<tr data-ahf-zeile="${escapeHtml(id)}"><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
       <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
       <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}${window._planRecovererChipHtml?.(z) || ''}${window._planWdSlChipHtml?.(z) || ''}</td><td>${ri}</td>
       <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
@@ -75524,29 +75526,58 @@
   }
   // REIN RECHNEND (Test-Haken): Eingaben → Plan-Felder inkl. Hedge (wdFarmHedge, Punktwert aus der Firma wie beim Anlegen)
   function wdzFelder(p, e){
-    const pr = { master_firm: p.master_firm, master_symbol: p.master_symbol, master_contracts: Number(e.kt), master_tp: Number(e.tp), master_risk: Number(e.risk) || null }
+    const sy = wdzSymbole(p.master_symbol), symNeu = sy && e.sym && (e.sym === sy.nq || e.sym === sy.mnq) ? e.sym : p.master_symbol
+    const pr = { master_firm: p.master_firm, master_symbol: symNeu, master_contracts: Number(e.kt), master_tp: Number(e.tp), master_risk: Number(e.risk) || null }
     const an = Number(p.anz_hedge_eur) > 0 || Number(p.slave_risk) > 0
     if(an) wdFarmHedge(pr, Number(e.risk) || 0, Number(e.slave) || 0, true, [])
     const f = { master_contracts: pr.master_contracts, master_tp: pr.master_tp, master_risk: pr.master_risk }
     if(an) Object.assign(f, { slave_risk: pr.slave_risk, multiplier: pr.multiplier, hedge_faktor: pr.hedge_faktor, hedge_eur: pr.hedge_eur })
     if(e.richtung === 'buy' || e.richtung === 'sell') f.richtung = e.richtung
     if(e.start) f.start_um = e.start
+    // FP5: mit Wähler IMMER mitsenden (gleiches Symbol = keine Änderung im Backend) — sonst rechnete der Hedge mit dem Symbol des Kastens, während die DB inzwischen ein
+    // anderes trägt (Fremd-Review: veralteter Plan → NQ mit MNQ-Multiplikator); Hedge oben schon mit genau diesem Punktwert
+    if(sy && e.sym && symNeu) f.master_symbol = symNeu
     const lots = (Number(pr.multiplier) > 0 && pr.master_contracts > 0) ? Math.round(pr.master_contracts * pr.multiplier * 100) / 100 : null
     return { f, lots, minus: an ? pr.hedge_eur : null, plus: an ? pr.slave_risk : null }
   }
-  window._wdz = { startIso: wdzStartIso, felder: wdzFelder }
+  // FP5 (10.11.2026): NQ ↔ MNQ im selben Kontraktmonat („MNQZ6" → „NQZ6"); nur bei einem NQ-/MNQ-Plan, sonst null (kein Wähler)
+  function wdzSymbole(sym){
+    const m = /^(M?NQ)([A-Z]\d{1,2})$/.exec(String(sym || '').trim().toUpperCase())
+    return m ? { nq: 'NQ' + m[2], mnq: 'MNQ' + m[2], ist: m[1] === 'NQ' ? 'NQ' + m[2] : 'MNQ' + m[2] } : null
+  }
+  // FP5: hat sich gegenüber dem Plan etwas geändert? (Speichern + Bestätigen ohne Änderung = nur bestätigen, keine Hand-Marke) — REIN RECHNEND
+  // Nur die Eingaben zählen (Start, Richtung, Symbol, Kontrakte, TP, Risiko, Fusion € am Risiko) — die Hedge-Felder rechnet wdFarmHedge neu und wichen sonst schon durch Rundung ab
+  const WDZ_EINGABEN = ['start_um', 'richtung', 'master_symbol', 'master_contracts', 'master_tp', 'master_risk', 'slave_risk']
+  function wdzGeaendert(p, f, e){
+    const zahl = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) > 0.005
+    // Risiko/Fusion € aus der EINGABE (e), nicht aus f: wdFarmHedge setzt bei leerem Risiko master_risk = TP — das wäre sonst eine Änderung ohne Eingabe
+    const roh = e ? { master_risk: e.risk, slave_risk: e.slave } : {}
+    return WDZ_EINGABEN.filter(k => (k in f) || (k in roh)).filter(k => (k in roh) ? zahl(roh[k], p[k]) : k === 'start_um' ? !!f[k] : k === 'richtung' ? String(f[k] || '') !== String(p[k] || '').toLowerCase()
+      : k === 'master_symbol' ? String(f[k] || '').toUpperCase() !== String(p[k] || '').toUpperCase() : zahl(f[k], p[k]))
+  }
+  window._wdz = { startIso: wdzStartIso, felder: wdzFelder, symbole: wdzSymbole, geaendert: wdzGeaendert }
   function wdzZu(){ const k = document.getElementById('wdz-kasten'); if(k) k.remove() }
-  function wdzWerte(kasten){ const v = n => kasten.querySelector(`[data-wdz="${n}"]`)?.value; return { start: v('start'), richtung: v('richtung'), kt: v('kt'), tp: v('tp'), risk: v('risk'), slave: v('slave') } }
+  function wdzWerte(kasten){ const v = n => kasten.querySelector(`[data-wdz="${n}"]`)?.value; return { start: v('start'), richtung: v('richtung'), kt: v('kt'), tp: v('tp'), risk: v('risk'), slave: v('slave'), sym: v('sym') } }
   function wdzRechnen(kasten, p){
     const e = wdzWerte(kasten), r = wdzFelder(p, Object.assign({}, e, { start: null })), el = kasten.querySelector('.wdz-rech')
     const de = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     if(el) el.textContent = r.lots != null ? `Fusion ${de(r.lots)} Lot · −${de(r.minus)} € am TP · +${de(r.plus)} € am Risiko` : 'ohne Fusion-Hedge'
+    if(el && !(Number(e.kt) >= 1 && Number(e.kt) === Math.round(Number(e.kt)))) el.textContent = 'Kontrakte: ganze Zahl ≥ 1'
   }
-  function wdzOeffnen(pid, anker){
+  // opts (FP5, 10.11.2026, Funded-Planer → Winning Days → Zu bestätigen): { z: Zeile aus GET /hedge-freigabe (Plan steht nicht in _wd.daten), bestaetigen: Knopf „Speichern + Bestätigen" }
+  function wdzOeffnen(pid, anker, opts){
     wdzZu()
-    const p = wdzPlan(pid); if(!p) return
+    const oz = opts && opts.z
+    const p = wdzPlan(pid) || (oz ? { id: oz.id, status: 'planned', master_name: oz.master_name, master_firm: oz.master_firm, master_symbol: oz.master_symbol, start_um: oz.start_um,
+      richtung: oz.richtung, master_contracts: oz.master_contracts, master_tp: oz.master_tp, master_risk: oz.master_risk, slave_risk: oz.slave_risk, multiplier: oz.multiplier, anz_hedge_eur: oz.hedge_eur } : null)
+    if(!p) return
     if(p.status !== 'planned' || p.start_um_gestartet_at){ if(typeof atToast === 'function') atToast('Läuft schon — nichts mehr zu ändern', 'end'); return }
     const k = wdzKonto(pid) || {}, wur = k.wuerfel || {}
+    // FP5 (Fremd-Review MUSS): „Würfel-Werte" nach einem Symbol-Wechsel — das Würfel-Symbol kennt nur k.wuerfel.instr (feste Instrumente); ist das Symbol von Hand
+    // geändert (k.hand.felder) und der Würfel kennt seins nicht, gibt es den Knopf nicht (sonst würden aus 3 MNQ 3 NQ)
+    const syW = wdzSymbole(p.master_symbol), symWuerfel = syW && wur.instr === 'nq' ? syW.nq : syW && wur.instr === 'mnq' ? syW.mnq : null
+    const symHand = !!(k.hand && Array.isArray(k.hand.felder) && k.hand.felder.includes('master_symbol'))
+    const wuerfelOk = Number(wur.tp) > 0 && (!symHand || !!symWuerfel)
     const esc = v => escapeHtml(String(v == null ? '' : v))
     const box = document.createElement('div'); box.id = 'wdz-kasten'; box.className = 'tpl-kasten'
     box.innerHTML = `<div class="tk-kopf">✎ Winning Day ändern<button type="button" class="tk-x" data-wdz-zu title="Schließen">×</button></div>
@@ -75554,42 +75585,63 @@
       <div class="wdz-felder">
         <span>Start (Dubai)</span><input data-wdz="start" value="${esc(wdzUhr(p.start_um))}" placeholder="HH:MM">
         <span>Richtung</span><select data-wdz="richtung"><option value="buy"${p.richtung === 'buy' ? ' selected' : ''}>BUY</option><option value="sell"${p.richtung === 'sell' ? ' selected' : ''}>SELL</option></select>
-        <span>Kontrakte</span><input data-wdz="kt" type="number" min="1" step="1" value="${esc(p.master_contracts)}">
+        <span>Kontrakte</span><input data-wdz="kt" type="number" min="1" step="1" value="${esc(opts && opts.bestaetigen ? (Number(p.master_contracts) || '') : p.master_contracts)}">
+        ${(() => { const sy = opts && opts.bestaetigen ? wdzSymbole(p.master_symbol) : null; return sy ? `<span>Symbol</span><select data-wdz="sym"><option value="${esc(sy.mnq)}"${sy.ist === sy.mnq ? ' selected' : ''}>${esc(sy.mnq)} (Micro)</option><option value="${esc(sy.nq)}"${sy.ist === sy.nq ? ' selected' : ''}>${esc(sy.nq)}</option></select>` : '' })()}
         <span>TP Master $</span><input data-wdz="tp" type="number" min="1" step="1" value="${esc(p.master_tp)}">
         <span>Risiko Master $</span><input data-wdz="risk" type="number" min="1" step="1" value="${esc(p.master_risk || '')}">
         <span>Fusion € am Risiko</span><input data-wdz="slave" type="number" min="0" step="1" value="${esc(p.slave_risk || '')}">
       </div>
       <div class="wdz-rech"></div>
-      <div class="tk-akt"><button type="button" class="btn btn-primary" data-wdz-speichern>Speichern</button>${p.hand_werte_at && Number(wur.tp) > 0 ? `<button type="button" class="btn btn-ghost" data-wdz-zurueck title="TP ${esc(wur.tp)} $ · ${esc(wur.kt)} Kontrakte vom Würfel, danach zieht der Abgleich Zeit, Richtung und Hedge wieder nach">Würfel-Werte</button>` : ''}</div>
+      <div class="tk-akt">${opts && opts.bestaetigen ? '<button type="button" class="btn btn-primary" data-wdz-bestaetigen title="Speichert die Änderungen und bestätigt den Trade — er startet dann zur Startzeit">Speichern + Bestätigen</button><button type="button" class="btn btn-ghost" data-wdz-speichern>Speichern</button>' : '<button type="button" class="btn btn-primary" data-wdz-speichern>Speichern</button>'}${p.hand_werte_at && wuerfelOk ? `<button type="button" class="btn btn-ghost" data-wdz-zurueck title="TP ${esc(wur.tp)} $ · ${esc(wur.kt)} Kontrakte vom Würfel, danach zieht der Abgleich Zeit, Richtung und Hedge wieder nach">Würfel-Werte</button>` : ''}</div>
       <div class="tk-hin">Gilt bis zum Start. Unter 2 min vor dem Start prüft die Marge noch mit den alten Werten.</div>`
     ;(document.getElementById('dashboard-view') || document.body).appendChild(box)
     const r = anker && anker.getBoundingClientRect ? anker.getBoundingClientRect() : { left: 40, bottom: 120 }
     box.style.left = Math.max(16, Math.min(window.innerWidth - 336, r.left)) + 'px'; box.style.top = Math.max(16, Math.min(window.innerHeight - 380, r.bottom + 6)) + 'px'
     box.addEventListener('input', () => wdzRechnen(box, p)); wdzRechnen(box, p)
     box.querySelector('[data-wdz-zu]').addEventListener('click', wdzZu)
-    box.querySelector('[data-wdz-speichern]').addEventListener('click', () => wdzSpeichern(box, p, false))
-    box.querySelector('[data-wdz-zurueck]')?.addEventListener('click', () => wdzSpeichern(box, p, true))
+    box.querySelector('[data-wdz-speichern]').addEventListener('click', () => wdzSpeichern(box, p, false, false, opts))
+    box.querySelector('[data-wdz-bestaetigen]')?.addEventListener('click', () => wdzSpeichern(box, p, false, true, opts))
+    box.querySelector('[data-wdz-zurueck]')?.addEventListener('click', () => wdzSpeichern(box, p, true, false, Object.assign({}, opts, { symWuerfel })))
   }
-  async function wdzSpeichern(box, p, zurueck){
+  async function wdzSpeichern(box, p, zurueck, bestaetigen, opts){
     const e = wdzWerte(box), wur = (wdzKonto(p.id) || {}).wuerfel || {}
-    if(zurueck){ e.tp = wur.tp; e.kt = wur.kt; e.start = '' }
+    if(zurueck){ e.tp = wur.tp; e.kt = wur.kt; e.start = ''; if(opts && opts.symWuerfel) e.sym = opts.symWuerfel }   // FP5: Würfel-Symbol mit zurück (Hedge rechnet damit)
     const start = e.start && e.start !== wdzUhr(p.start_um) ? wdzStartIso(p.start_um, e.start) : null
     if(e.start && e.start !== wdzUhr(p.start_um) && !start){ if(typeof atToast === 'function') atToast('Startzeit als HH:MM eingeben', 'end'); return }
     const r = wdzFelder(p, Object.assign({}, e, { start }))
-    const knopf = box.querySelector('[data-wdz-speichern]'); if(knopf){ knopf.disabled = true; knopf.textContent = 'speichert …' }
+    if(!zurueck && !(Number(e.kt) >= 1 && Number(e.kt) === Math.round(Number(e.kt)))){ if(typeof atToast === 'function') atToast('Kontrakte als ganze Zahl ≥ 1 eingeben', 'end'); return }
+    // FP5: aus „Zu bestätigen" — ohne Änderung nichts schreiben (keine Hand-Marke); „Speichern + Bestätigen" bestätigt dann nur
+    const nichts = !!(opts && opts.bestaetigen) && !zurueck && !wdzGeaendert(p, r.f, e).length
+    // FP5 (Fremd-Review): Plan mit Hedge, „Fusion € am Risiko" leer → wdFarmHedge leert die Hedge-Felder, das Backend überspringt null — der ALTE Hedge bliebe zu neuen Werten stehen
+    if(opts && opts.bestaetigen && !nichts && !zurueck && (Number(p.anz_hedge_eur) > 0 || Number(p.slave_risk) > 0) && !(Number(e.slave) > 0)){ if(typeof atToast === 'function') atToast('„Fusion € am Risiko" eintragen — ohne Wert bliebe der alte Hedge zu den neuen Werten stehen', 'end'); return }
+    if(nichts && !bestaetigen){ wdzZu(); if(typeof atToast === 'function') atToast('Nichts geändert', 'ok'); return }
+    const knoepfe = [...box.querySelectorAll('[data-wdz-speichern],[data-wdz-bestaetigen],[data-wdz-zurueck]')]
+    const knopf = box.querySelector(bestaetigen ? '[data-wdz-bestaetigen]' : '[data-wdz-speichern]'), knopfTxt = knopf ? knopf.textContent : ''
+    knoepfe.forEach(b => { b.disabled = true }); if(knopf) knopf.textContent = 'speichert …'
     try{
-      const d = await wdApi('PATCH', { aktion: zurueck ? 'hand_zurueck' : 'hand', plan_id: String(p.id), felder: r.f })
+      const d = nichts ? {} : await wdApi('PATCH', { aktion: zurueck ? 'hand_zurueck' : 'hand', plan_id: String(p.id), felder: r.f })
       wdzZu()
-      if(typeof atToast === 'function') atToast(`✓ ${p.master_name || 'Plan'} ${zurueck ? 'auf Würfel-Werte zurück' : 'geändert'}${d.freigabe_geloescht ? ' · Apex-Freigabe aufgehoben, bitte neu bestätigen' : ''}`, 'ok')
+      if(!nichts && typeof atToast === 'function') atToast(`✓ ${p.master_name || 'Plan'} ${zurueck ? 'auf Würfel-Werte zurück' : 'geändert'}${d.freigabe_geloescht && !bestaetigen ? ' · Apex-Freigabe aufgehoben, bitte neu bestätigen' : ''}`, 'ok')
+      // FP5: derselbe ✓-Weg wie der Knopf in der Zeile (POST /admin/auto-plan/hedge-freigabe) — erst NACH dem erfolgreichen Speichern, damit nie alte Werte bestätigt werden
+      if(bestaetigen && typeof window._ahfFreigebenIds === 'function') await window._ahfFreigebenIds([String(p.id)])
+      else if(!nichts && opts && opts.bestaetigen) try{ window._ahfNeu?.() }catch(_){}   // „Zu bestätigen" zeigt sofort die neuen Werte (sonst bis 60 s die alten Kontrakte/Hedge)
       try{ await wdNeuLaden() }catch(_){}
     }catch(err){
-      if(knopf){ knopf.disabled = false; knopf.textContent = 'Speichern' }
-      if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + String((err && err.message) || err), 'end')
+      knoepfe.forEach(b => { b.disabled = false }); if(knopf) knopf.textContent = knopfTxt
+      if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + String((err && err.message) || err) + (bestaetigen ? ' — nicht bestätigt' : ''), 'end')
     }
   }
   document.addEventListener('click', ev => {
     const z = ev.target.closest && ev.target.closest('#wd-uebersicht .ap-gr-warten .pz-z[data-plan-id]:not(.pz-z-kopf)')
     if(z && !ev.target.closest('button, a, input, select')){ wdzOeffnen(z.getAttribute('data-plan-id'), z); return }
+    // FP5 (Finn 10.11.2026 ~03:15: „auf die Zeile draufdrücken … Lots bearbeiten, z. B. 4 oder 5 NQ, und auch Take Profit … weil ich den Trade sowieso bestätigen muss"):
+    // Zeile in „Zu bestätigen" (Funded-Planer → Winning Days) öffnet denselben Kasten, dazu „Speichern + Bestätigen"; der ✓-Knopf der Zeile bleibt wie er ist
+    const zb = ev.target.closest && ev.target.closest('#wd-uebersicht tr[data-ahf-zeile]')
+    if(zb && !ev.target.closest('button, a, input, select')){
+      const id = zb.getAttribute('data-ahf-zeile'), zz = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).find(x => String(x.id) === String(id))
+      // nur Farmer-Winning-Days (wd: true) — Orbit-Prio-2-Zeilen (hedge_art apex) sind keine Farmer-Pläne, der Hand-Weg lehnt sie ab
+      if(zz && (zz.wd === true || /Winning-Day-Farmer/.test(String(zz.notes || '')))){ wdzOeffnen(id, zb, { z: zz, bestaetigen: true }); return }
+    }
     if(!ev.target.closest('#wdz-kasten')) wdzZu()
   })
   document.addEventListener('keydown', ev => { if(ev.key === 'Escape') wdzZu() })
