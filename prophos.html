@@ -37713,9 +37713,6 @@
   // WP1 (09.11.2026): Payout-Urteil zum offenen Popup (Promise aus window._wpUrteil oder null), Zähler je Öffnen (eine späte Antwort gilt nur für genau dieses Öffnen,
   // auch wenn derselbe Plan zweimal geöffnet wird) und ob Finn die Konto-Status-Wahl selbst angefasst hat (dann ändert das Urteil nichts mehr)
   let _mwdErlWp = null, _mwdErlNr = 0, _mwdErlStatusAngefasst = false
-  // Ein Klick wartet gerade auf das Urteil (bis wann, ms): die Takte (wdlVorgemerktTick/wdlRestVorgaengerTick) öffnen solange nichts Neues — sonst verfiele die wartende
-  // Abhakung still (Fremd-Review). Läuft von selbst ab (wpUrteil gibt nach WP_URTEIL_MS spätestens null zurück).
-  let _mwdErlWpLaeuftBis = 0
   // click statt change: auch ein Klick auf die schon gewählte Zeile („Nichts ändern" bewusst bestätigt) zählt als Finns Wahl
   document.querySelectorAll('input[name="mwd-erl-status"]').forEach(rb => rb.addEventListener('click', e => { if(e.isTrusted) _mwdErlStatusAngefasst = true }))
   /* Urteil anwenden: nur zwischen „Nichts ändern" und „⏳ Waiting for Payout", nie über geblowt/bestanden/Winning Days und nie über eine Wahl von Finn.
@@ -37746,7 +37743,7 @@
     const eigen = mklWdEigenerPlan(pid)
     // Ein Klick auf einem eigenen Plan (A1 03.11.2026): erst die Vorbelegung des Radar-Dialogs prüfen, gebucht wird über Railway wie bei fremden Plänen; passt sie nicht, Trades-Dialog wie bisher
     const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
-    _mwdErlNr++; _mwdErlWpLaeuftBis = 0   // WP1 (Fremd-Review): jedes Öffnen — auch der Trades-Dialog unten — macht ein noch wartendes Urteil eines früheren Ein Klicks ungültig
+    _mwdErlNr++   // WP1 (Fremd-Review): jedes Öffnen — auch der Trades-Dialog unten — macht eine noch offene Urteils-Antwort eines früheren Öffnens ungültig
     if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
     // AB2: Abhak-Strahl (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person) — seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
@@ -37848,7 +37845,9 @@
     const _wpNr = ++_mwdErlNr
     _mwdErlStatusAngefasst = false
     { const h = document.getElementById('mwd-erl-waiting-hint'); if(h) h.textContent = '' }
-    _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function') ? window._wpUrteil(pw.konto_id) : null
+    // Ein Klick klar unter dem Ziel (bucht gleich still, s. unten) fragt gar nicht erst — kein /konto-ziele-Abruf je stillem Abhaken
+    _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function'
+                 && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw))) ? window._wpUrteil(pw.konto_id) : null
     if(_mwdErlWp) _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
     // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
     _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
@@ -37872,22 +37871,10 @@
     if(opts && opts.einKlick){
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
       const ruhig = (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked
-      // WP1 (09.11.2026): Funded CFD — erst das Payout-Urteil abwarten. Am Ziel nie still abhaken: Popup mit ⏳ vorausgewählt (eigener Plan: Trades-Dialog, der fragt
-      // selbst), still ohne Klick gar nicht (die Zeile bleibt für Finns Klick). Nicht am Ziel oder nicht lesbar → Ein Klick wie bisher.
-      if(ruhig && _mwdErlWp){
-        _mwdErlWpLaeuftBis = Date.now() + 8000
-        _mwdErlWp.then(u => {
-          if(_wpNr !== _mwdErlNr || _mwdErlId !== String(pid)) return
-          _mwdErlWpLaeuftBis = 0
-          _wdlEinKlickAt = Date.now()   // Doppelklick-Sperre (600 ms) ab dem Moment, in dem die Zeile wirklich wandert — nicht ab dem Klick vor dem Urteil
-          if(!(u && u.bereit && !u.wartet)){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
-          if(opts.nurStill){ _mwdErlId = null; return }
-          if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }
-          document.getElementById('mwdErledigtModal')?.classList.add('open')
-        })
-        return
-      }
-      if(ruhig){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
+      // WP1 (09.11.2026, Prüfer-Stopp 72dab884: nie auf das Urteil warten — eine wartende Zeile ohne Anzeige ließ einen zweiten Abhak-Klick ein Abhaken still verlieren):
+      // Funded CFD, bei dem das Payout-Ziel MÖGLICH ist (wdlFcfdZielMoeglich: Radar-Ziel bekannt, Balance nach dem Trade unbekannt oder ≥ Ziel) → nie still abhaken,
+      // sofort Popup (das Urteil wählt darin ⏳ vor oder ab); still ohne Klick gar nicht (Zeile bleibt für Finns Klick). Klar unter dem Ziel → Ein Klick sofort wie bisher.
+      if(ruhig && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
       if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
     }
@@ -39559,6 +39546,17 @@
     return !!(zr && zr.erreicht)
   }
   window._wdlFcfdZielErreicht = wdlFcfdZielErreicht
+  /* WP1 (Prüfer-Stopp 72dab884): kann das Payout-Ziel nach diesem Trade erreicht sein? Ja, wenn das Radar-Ziel (ziel_usd, unterer Wert; das feste Ziel des Zyklus liegt
+   * nie darunter) bekannt ist und die Balance danach unbekannt oder ≥ Ziel ist. Ohne Radar-Ziel (keine Regel, Gewinntage offen) urteilt auch /konto-ziele „nicht bereit“.
+   * Nur für den Ein Klick: möglich → Popup statt still abhaken, sonst sofort still wie bisher. */
+  function wdlFcfdZielMoeglich(t){
+    if(!t || String(t.konto_typ || '') !== 'funded_cfd' || t.konto_waiting) return false
+    if(t.ziel_usd == null || t.ziel_usd === '' || !isFinite(Number(t.ziel_usd))) return false
+    const b = wdlBlowStand(t)
+    if(b && b.geblowt) return false
+    return !(b && b.bal != null && isFinite(Number(b.bal)) && Number(b.bal) < Number(t.ziel_usd))
+  }
+  window._wdlFcfdZielMoeglich = wdlFcfdZielMoeglich
   window._wdlFcfdZielVonPlan = pid => wdlFcfdZielErreicht(((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)))
   // Konto schon archiviert (Nachfolger angelegt, Archiv der EIGENEN ID): fremde IDs kennt nur der Server (/admin/live-trades konto.archiviert), eigene das lokale Archiv
   /* NOTIZ JE KONTO IN REVIEW (Finn 30.10.2026: „Bei Review noch Notizen schreiben können, zum Beispiel bei Marc: ‚OK, warten auf KYC'"): accounts.review_notiz, gelesen aus
@@ -40030,7 +40028,6 @@
   let _wdlRestRecht = { at: 0, ok: false }
   function wdlRestVorgaengerTick(){
     if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
-    if(Date.now() < _mwdErlWpLaeuftBis) return   // WP1: ein Ein Klick wartet noch auf das Payout-Urteil
     if(Date.now() - _wdlRestRecht.at > 300000){
       _wdlRestRecht.at = Date.now()
       Promise.resolve().then(() => typeof window._planerSchreiben === 'function' ? window._planerSchreiben() : false).then(ok => { _wdlRestRecht.ok = ok === true }, () => { _wdlRestRecht.ok = false })
@@ -40064,7 +40061,6 @@
   window._wdlRestVorgaengerTick = wdlRestVorgaengerTick   // Test-Haken
   function wdlVorgemerktTick(){
     if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
-    if(Date.now() < _mwdErlWpLaeuftBis) return   // WP1: ein Ein Klick wartet noch auf das Payout-Urteil
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
     if(!t) return
     _wdlVmVersuch.set(wdlTid(t), Date.now())
@@ -57180,7 +57176,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2119'
+  const OS_TAB_BUILD = '2026-09-22.2120'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
