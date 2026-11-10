@@ -44063,6 +44063,419 @@ def pc_aus_tick(jetzt=None):
     return faelle
 
 
+# ══ FX2 FEHLSTART-DOKTOR (10.11.2026, Master; Konstrukt FX1 von S5; Finn: „Einen Terminal, der jeden einzelnen Fehlstart versucht zu fixen …“ — Antworten 10.11.:
+# Mac-Aufgabe ja, sichere Reparaturen ohne Rückfrage ja, Takt alle 10 min im Handel UND sofort bei neuem Fehlstart) ══
+# GEHIRN HIER (Railway, service role): liest neue puls_fehlstarts (nur Hermann Technologies, höchstens 2 h alt), ordnet jedem ein Rezept zu (FD_REZEPTE), prüft die
+# harten Riegel je ID (fd_riegel: offener Trade, Start ≤ 10 min, Puls läuft = Start geclaimt/Signal offen, Lesefehler = unklar) und schreibt je Fehlstart EINE
+# Protokoll-Zeile in fehlstart_doktor (sql/2026-11-10_fehlstart_doktor.sql). PC-Arbeit (Lesen am PC, sichere Reparatur) wird ein Auftrag „wartet_mac“; die HÄNDE
+# sind der Mac (pc-fernzugriff/mac/doktor.py, launchd alle 2 min, nur Befehle aus seiner festen Liste über pc.sh). Vor jedem Auftrag prüft Railway die Riegel
+# noch einmal (/doktor/auftrag/start), danach wertet es das Ergebnis aus und plant einen am PC gescheiterten Plan per Supabase nach (nur wenn der Tab ihn nicht
+# mehr selbst neu startet). Nur melden: UAC-„Ja“, TopstepX-Dialoge, Passwort/Konto, DNS-/Windows-Einstellungen, alles bei offenem Trade, UNKLAR.
+# Meldungen: 🟠 je PC und Tag gesammelt „braucht dich“, ⚪ Tagesbericht ab 20:30 Dubai. Schalter in fehlstart_doktor_regel (an / reparieren, Standard aus).
+FD_SCHNELL_S = 60            # Blick auf neue Fehlstarts (sofort-Auslöser)
+FD_TAKT_S = 600              # voller Lauf spätestens alle 10 min
+FD_FENSTER_S = 7200          # ältere Fehlstarts fasst der Doktor nicht an
+FD_AUFTRAG_S = 1200          # Auftrag verfällt, wenn der Mac ihn 20 min nicht abholt (schläft / aus)
+FD_MAX_JE_LAUF = 5           # höchstens 5 PC-Aufträge je Lauf, 1 je PC
+FD_RIEGEL_START_S = 600      # nie < 10 min vor einem Start dieser ID
+FD_BERICHT_UHR = (20, 30)    # Tagesbericht ⚪ ab 20:30 Dubai
+FD_BEFEHLE = ("dns_test", "uac_lesen", "mt5_update", "augen_neu")    # gleiche Schlüssel, fest verdrahtet, im Mac-Skript — nie Text aus der DB ausführen
+FD_LESEN = ("dns_test", "uac_lesen")                                  # nur lesend, auch ohne „reparieren“
+# (schlüssel, Muster über „schritt msg“, art, Befehle lesen, Reparatur, Text für Finn, nachplanen nach Erfolg). Reihenfolge = Vorrang.
+FD_REZEPTE = (
+    ("unklar", r"\bUNKLAR\b", "finn", (), None, "Ergebnis UNKLAR — erst im Terminal/Broker nachsehen, ob eine Order liegt (nie automatisch)", False),
+    ("konto", r"No active accounts found|No trading accounts available|Authorization failed|Invalid account|trade_allowed\s*=\s*False", "finn", (), None,
+     "Login/Konto: Passwort, Konto gesperrt oder deaktiviert — bei der Firma prüfen", False),
+    ("topstep_dialog", r"Terms of Use|Daily Loss Limit|TopstepX-Liste leer", "finn", (), None,
+     "TopstepX zeigt einen Dialog (Terms/Daily Loss) — dort klickt niemand automatisch", False),
+    ("dns", r"getaddrinfo failed|Errno 11001|Name or service not known|Temporary failure in name resolution|NameResolutionError", "pc", ("dns_test",), None,
+     "DNS am PC (Router) umstellen — die Namensauflösung fällt zeitweise aus", True),
+    ("uac", r"Windows-Sicherheitsabfrage offen|consent\.exe läuft", "pc", ("uac_lesen",), "mt5_update",
+     "Windows-Sicherheitsabfrage (UAC) am PC mit „Ja“ bestätigen", False),
+    ("auge", r"\bauge_blind\b|\bauge_fehlt\b|Auge blind|TopstepX-Auge|Puls-Fenster unklar", "pc", (), "augen_neu",
+     "TopstepX-Auge/Puls-Fenster am PC ansehen (Fenster minimiert?)", True),
+    ("tab", r"tab_nicht_erreichbar|PC-Tab antwortet nicht|Prophos-Tab am PC lief nicht", "warten", (), None, "Prophos-Tab am PC hängt", False),
+)
+_fd = {"voll_at": 0.0, "schnell_at": 0.0, "letztes": None, "fehler": ""}
+
+
+def fd_rezept(f):
+    """REIN RECHNEND (testbar): Fehlstart-Zeile (puls_fehlstarts) → Rezept {key, art, lesen, aktion, text, nachplanen} | {key 'unbekannt', art 'unbekannt'}.
+    unklar=True am Fehlstart ist immer „unklar“ (nie anfassen)."""
+    f = f or {}
+    if f.get("unklar") is True:
+        k = FD_REZEPTE[0]
+        return {"key": k[0], "art": k[2], "lesen": list(k[3]), "aktion": k[4], "text": k[5], "nachplanen": k[6]}
+    t = f"{f.get('schritt') or ''} {f.get('msg') or ''}"
+    for key, muster, art, lesen, aktion, text, nach in FD_REZEPTE:
+        if re.search(muster, t):
+            return {"key": key, "art": art, "lesen": list(lesen), "aktion": aktion, "text": text, "nachplanen": nach}
+    return {"key": "unbekannt", "art": "unbekannt", "lesen": [], "aktion": None, "text": "", "nachplanen": False}
+
+
+def fd_befehle(rez, reparieren):
+    """REIN RECHNEND (testbar): Befehls-Schlüssel für den Mac in Reihenfolge — lesen, Reparatur (nur mit „reparieren“), danach bei UAC noch einmal lesen."""
+    b = [x for x in rez.get("lesen") or [] if x in FD_LESEN]
+    if reparieren and rez.get("aktion") in FD_BEFEHLE:
+        b.append(rez["aktion"])
+        if rez["key"] == "uac":
+            b.append("uac_lesen")
+    return b
+
+
+def fd_riegel(uid, jetzt):
+    """Harte Riegel je ID (der PC einer ID): '' = frei, sonst der Grund. Lesefehler = „Zustand unklar“ (fail-closed)."""
+    if not uid or not re.fullmatch(r"[0-9a-f-]{36}", str(uid)):
+        return "Zustand unklar (keine ID am Fehlstart)"
+    try:
+        if sb_select("trade_plans", {"select": "id", "user_id": f"eq.{uid}", "status": "eq.open", "limit": "1"}):
+            return "offener Trade auf diesem PC"
+        bald = sb_select("trade_plans", {"select": "id,start_um", "user_id": f"eq.{uid}", "status": "eq.planned",
+                                         "start_um": f"gte.{(jetzt - timedelta(seconds=FD_RIEGEL_START_S)).isoformat()}",
+                                         "and": f"(start_um.lte.{(jetzt + timedelta(seconds=FD_RIEGEL_START_S)).isoformat()})", "limit": "1"})
+        if bald:
+            return "Start in ≤ 10 min"
+        if sb_select("trade_plans", {"select": "id", "user_id": f"eq.{uid}", "status": "eq.planned", "started_at": "is.null",
+                                     "start_um_gestartet_at": f"gte.{(jetzt - timedelta(minutes=15)).isoformat()}", "limit": "1"}):
+            return "Puls läuft (Start eben geclaimt)"
+        if sb_select("order_signale", {"select": "id", "user_id": f"eq.{uid}", "status": "not.in.(fertig,fehler,verfallen,verworfen)",
+                                       "created_at": f"gte.{(jetzt - timedelta(minutes=15)).isoformat()}", "limit": "1"}):
+            return "Order-Signal offen"
+    except Exception as e:
+        return f"Zustand unklar (Lesefehler {type(e).__name__})"
+    return ""
+
+
+def fd_ergebnis_urteil(rez_key, ausgabe):
+    """REIN RECHNEND (testbar): Ausgabe der Mac-Befehle → (status, ergebnis, braucht_finn, nachplanen). ausgabe = [{key, rc, text}] in Reihenfolge."""
+    a = [x for x in (ausgabe or []) if isinstance(x, dict)]
+    def letzt(k):
+        z = [x for x in a if x.get("key") == k]
+        return z[-1] if z else None
+    # Lotse erreichte den PC nicht (offline, ssh, pc.sh fehlt) → nichts entschieden, kein „braucht dich“ aus einem Verbindungsfehler
+    weg = next((x for x in a if x.get("rc") != 0 and re.search(r"offline im Tailnet|nicht im Tailnet|ssh[:_ ]|Connection (timed out|refused|closed)|"
+                                                                 r"pc\.sh nicht gefunden|nicht in der festen Liste|Timeout", str(x.get("text") or ""), re.I)), None)
+    if weg or not a:
+        return "fertig", "PC über den Lotsen nicht erreichbar — nichts entschieden", False, False
+    if rez_key == "dns":
+        d = letzt("dns_test")
+        if d and d.get("rc") == 0 and "dns_ok" in str(d.get("text") or ""):
+            return "behoben", "DNS antwortet am PC wieder", False, True
+        if d and d.get("rc") == 0 and "dns_fehlt" in str(d.get("text") or ""):
+            return "gemeldet", "DNS antwortet am PC nicht (Router)", True, False
+        return "fertig", "DNS-Test ohne klares Ergebnis", False, False
+    if rez_key == "uac":
+        u = letzt("uac_lesen")
+        m = re.search(r"consent=(\d+)", str((u or {}).get("text") or ""))
+        upd = letzt("mt5_update")
+        if m and int(m.group(1)) == 0:
+            return "behoben", ("UAC-Abfrage weg nach MT5-Update-Aufgabe" if upd else "UAC-Abfrage schon weg"), False, False
+        if not m:
+            return "fertig", "UAC-Lesung ohne klares Ergebnis", False, False
+        return "gemeldet", "UAC-Abfrage weiter offen" + (" (MT5-Update-Aufgabe angestoßen)" if upd and upd.get("rc") == 0 else ""), True, False
+    if rez_key == "auge":
+        g = letzt("augen_neu")
+        if g and g.get("rc") == 0:
+            return "behoben", "Augen neu gelesen", False, True
+        return "gemeldet", "Augen neu lesen ging nicht", True, False
+    return "fertig", "gelesen", False, False
+
+
+def fd_nachplan_urteil(p, jetzt, tz=None):
+    """REIN RECHNEND (testbar): darf der Doktor diesen Plan nachplanen? Nur wenn der PC-Tab es nicht mehr selbst tut (sfTick: Deckel 3 Fehlversuche voll oder
+    der Start hängt > 30 min), nichts gesendet (kein started_at/orbit_gesendet_at, nie UNKLAR) und am selben Dubai-Tag. → (ja, grund)."""
+    p = p or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    sf = bl.get("start_fehler") if isinstance(bl.get("start_fehler"), dict) else {}
+    if p.get("status") != "planned" or p.get("started_at") or p.get("orbit_gesendet_at"):
+        return False, "Plan nicht mehr geplant oder schon gesendet"
+    if bl.get("puls_unklar") or sf.get("unklar"):
+        return False, "Ergebnis UNKLAR — nie automatisch"
+    st = _ap_ts(p.get("start_um"))
+    if not st:
+        return False, "keine Startzeit"
+    tz = tz or _ap_tz("Asia/Dubai")
+    if st.astimezone(tz).date() != jetzt.astimezone(tz).date():
+        return False, "Start war an einem anderen Tag"
+    versuche = int(_wd_num(sf.get("versuche")) or 0) - int(_wd_num(sf.get("uac_n")) or 0)
+    if versuche < 3 and (jetzt - st).total_seconds() < 1800:
+        return False, "der PC-Tab plant ihn selbst neu (Deckel nicht voll)"
+    return True, ""
+
+
+def fd_nachplanen(plan_id, jetzt, rnd=None):
+    """Nachplanen per Supabase wie feedback-nachplanen-per-supabase: neue Startzeit jetzt + 15–30 min (gestreut, ≥ 5 min zu anderen Starts der ID), Claim zurück,
+    start_fehler.status 'neu'. Guard: planned, nichts gesendet, updated_at unverändert. → Text | None."""
+    rnd = rnd or random.SystemRandom()
+    p = (sb_select("trade_plans", {"select": "id,user_id,status,start_um,started_at,orbit_gesendet_at,start_um_gestartet_at,updated_at,mt5_baseline",
+                                   "id": f"eq.{plan_id}"}) or [None])[0]
+    ja, grund = fd_nachplan_urteil(p, jetzt)
+    if not ja:
+        return None if p is None else f"nicht nachgeplant: {grund}"
+    andere = [_ap_ts(x.get("start_um")) for x in sb_select("trade_plans", {"select": "start_um", "user_id": f"eq.{p['user_id']}", "status": "eq.planned",
+              "id": f"neq.{plan_id}", "start_um": f"gte.{jetzt.isoformat()}"}) or []]
+    neu = jetzt + timedelta(minutes=rnd.uniform(15, 30))
+    for _ in range(8):
+        if all(a is None or abs((a - neu).total_seconds()) >= 300 for a in andere):
+            break
+        neu += timedelta(minutes=rnd.uniform(5, 8))
+    else:
+        return "nicht nachgeplant: kein freier Slot (≥ 5 min zu den anderen Starts der ID)"
+    filt = {"id": f"eq.{plan_id}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null", "updated_at": f"eq.{p['updated_at']}"}
+    if not sb_update("trade_plans", filt, {"start_um": neu.isoformat(), "start_um_gestartet_at": None}):
+        return "nicht nachgeplant: Plan hat sich eben geändert"
+    try:
+        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                    json={"p_plan": str(plan_id), "p_key": "start_fehler", "p_patch": {"status": "neu", "doktor_at": jetzt.isoformat()}, "p_status": "planned"})
+    except Exception:
+        pass
+    return f"nachgeplant auf {neu.astimezone(_ap_tz('Asia/Dubai')).strftime('%H:%M')} Dubai"
+
+
+def fd_regel_lesen():
+    """fehlstart_doktor_regel id 1 → dict | None (Tabelle fehlt / Lesefehler = Doktor aus)."""
+    try:
+        return (sb_select("fehlstart_doktor_regel", {"select": "*", "id": "eq.1"}) or [None])[0]
+    except Exception:
+        return None
+
+
+def _fd_pc_label(pc, uid=None):
+    try:
+        n = (_pc_namen_daten().get(str(pc or "")) or {}).get("name")
+    except Exception:
+        n = None
+    if not n and uid:
+        try:
+            n = _ap_namen()[0].get(str(uid))
+        except Exception:
+            n = None
+    return f"PC von {n or '?'} ({pc or '?'})"
+
+
+def fd_melden(pc, uid, jetzt):
+    """🟠 einmal je PC und Dubai-Tag, gesammelt: alle „braucht dich“-Fälle dieses PCs von heute. Weitere Fälle am selben Tag stehen im Tagesbericht."""
+    tz = _ap_tz("Asia/Dubai")
+    tag = jetzt.astimezone(tz).strftime("%Y-%m-%d")
+    key = f"fehlstart_doktor|{pc}|{tag}"
+    try:
+        if sb_select("alarm_log", {"select": "id", "schluessel": f"eq.{key}", "limit": "1"}):
+            return False
+        mitt = datetime.combine(jetzt.astimezone(tz).date(), datetime.min.time(), tzinfo=tz)
+        rows = sb_select("fehlstart_doktor", {"select": "rezept,befund,ergebnis", "pc": f"eq.{pc}", "braucht_finn": "is.true",
+                                              "at": f"gte.{mitt.isoformat()}", "order": "at.asc", "limit": "50"}) or []
+    except Exception:
+        return False
+    if not rows:
+        return False
+    punkte, gesehen = [], set()
+    for r in rows:
+        t = r.get("befund") or r.get("ergebnis") or r.get("rezept")
+        if t and t not in gesehen:
+            gesehen.add(t)
+            punkte.append(t)
+    wer = _fd_pc_label(pc, uid)
+    text = f"{wer}: braucht dich — " + " ".join(f"{i}) {t}" for i, t in enumerate(punkte[:6], 1))
+    alarm_senden(2, "fehlstart_doktor", f"Braucht dich: {wer}"[:80], text[:400], uid=str(uid or "") or None, schluessel=key,
+                 daten={"pc": pc, "n": len(rows)})
+    return True
+
+
+def fd_tick(jetzt=None, rnd=None):
+    """Ein voller Doktor-Lauf → {neu, auftraege, gemeldet, gesperrt, nichts} | {aus}."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    reg = fd_regel_lesen()
+    if not reg or reg.get("an") is not True:
+        return {"aus": True}
+    rep = reg.get("reparieren") is True
+    ab = max(_ap_ts(reg.get("stand_at")) or (jetzt - timedelta(seconds=FD_FENSTER_S)), jetzt - timedelta(seconds=FD_FENSTER_S))
+    rows = sb_select("puls_fehlstarts", {"select": "id,at,user_id,plan_id,route,firma,konto,pc,schritt,msg,unklar",
+                                         "at": f"gt.{ab.isoformat()}", "order": "at.asc", "limit": "200"}) or []
+    out = {"neu": 0, "auftraege": 0, "gemeldet": 0, "gesperrt": 0, "nichts": 0}
+    if not rows:
+        return out
+    try:
+        ht = ap_unternehmen_filter(None, admin_gruppen_daten())
+    except Exception:
+        return dict(out, fehler="Gruppen nicht lesbar — nichts angefasst")
+    schon = {str(z.get("fehlstart_id")) for z in sb_select("fehlstart_doktor", {"select": "fehlstart_id", "fehlstart_id": "in.(" + ",".join(
+        str(r["id"]) for r in rows) + ")"}) or []}
+    offen_pc = {str(z.get("pc")) for z in sb_select("fehlstart_doktor", {"select": "pc", "status": "in.(wartet_mac,laeuft)"}) or []}
+    auftraege, melden, max_at = 0, {}, None
+    for f in rows:
+        max_at = f.get("at")
+        if str(f["id"]) in schon or not ht(str(f.get("user_id") or "")):
+            continue
+        rez = fd_rezept(f)
+        pc, uid = str(f.get("pc") or ""), str(f.get("user_id") or "")
+        z = {"fehlstart_id": f["id"], "fehlstart_at": f.get("at"), "plan_id": f.get("plan_id"), "user_id": uid or None, "pc": pc or None,
+             "rezept": rez["key"], "muster": str(f.get("msg") or "")[:200], "status": "nichts", "braucht_finn": False}
+        if rez["art"] == "finn":
+            z.update(status="gemeldet", braucht_finn=True, befund=rez["text"])
+            melden[pc] = uid
+        elif rez["art"] == "pc":
+            befehle = fd_befehle(rez, rep)
+            riegel = fd_riegel(uid, jetzt)
+            if not befehle:
+                z.update(befund="nur lesen: " + ("Reparatur wäre " + rez["aktion"] if rez.get("aktion") else "nichts am PC zu tun"))
+            elif riegel:
+                z.update(status="gesperrt", ergebnis=riegel, befund=rez["text"])
+            elif not pc or pc in offen_pc or auftraege >= FD_MAX_JE_LAUF:
+                z.update(befund="anderer Auftrag dieses PCs läuft / Lauf voll — nur protokolliert")
+            else:
+                z.update(status="wartet_mac", befehle=befehle, befund=rez["text"], ablauf_at=(jetzt + timedelta(seconds=FD_AUFTRAG_S)).isoformat())
+                offen_pc.add(pc)
+                auftraege += 1
+        elif rez["art"] == "warten":
+            z.update(befund="heilt von selbst (Panel/PC-Tab)")
+        try:
+            sb_insert("fehlstart_doktor", z)
+        except Exception as e:
+            print(f"[doktor] ⚠️ Protokoll {f['id']}: {type(e).__name__}", flush=True)
+            continue
+        out["neu"] += 1
+        out[{"gemeldet": "gemeldet", "gesperrt": "gesperrt", "wartet_mac": "auftraege"}.get(z["status"], "nichts")] += 1
+    if max_at:
+        try:
+            sb_update("fehlstart_doktor_regel", {"id": "eq.1"}, {"stand_at": max_at, "updated_at": jetzt.isoformat()})
+        except Exception:
+            pass
+    for pc, uid in melden.items():
+        if pc:
+            fd_melden(pc, uid, jetzt)
+    return out
+
+
+def fd_bericht(jetzt, reg):
+    """⚪ Tagesbericht einmal je Dubai-Tag ab FD_BERICHT_UHR: Fehlstarts heute / selbst behoben / brauchen dich (mit PCs)."""
+    tz = _ap_tz("Asia/Dubai")
+    d = jetzt.astimezone(tz)
+    tag = d.strftime("%Y-%m-%d")
+    if (d.hour, d.minute) < FD_BERICHT_UHR or str((reg or {}).get("bericht_tag") or "") == tag:
+        return False
+    mitt = datetime.combine(d.date(), datetime.min.time(), tzinfo=tz)
+    rows = sb_select("fehlstart_doktor", {"select": "pc,user_id,status,braucht_finn", "at": f"gte.{mitt.isoformat()}", "limit": "2000"}) or []
+    if not sb_update("fehlstart_doktor_regel", {"id": "eq.1", "or": f"(bericht_tag.is.null,bericht_tag.neq.{tag})"}, {"bericht_tag": tag}):
+        return False
+    beh = sum(1 for r in rows if r.get("status") == "behoben")
+    brauchen = sorted({_fd_pc_label(r.get("pc"), r.get("user_id")) for r in rows if r.get("braucht_finn")})
+    rest = {k: sum(1 for r in rows if r.get("status") == k) for k in ("gesperrt", "verfallen", "nichts")}
+    text = (f"Fehlstarts heute: {len(rows)} · selbst behoben: {beh} · brauchen dich: {len(brauchen)}" + (f" ({', '.join(brauchen)})" if brauchen else "")
+            + f" · Riegel: {rest['gesperrt']} · Mac nicht da: {rest['verfallen']} · heilen selbst/unbekannt: {rest['nichts']}")
+    alarm_senden(3, "fehlstart_doktor_bericht", "Doktor: Tagesbericht", text[:400], schluessel=f"fehlstart_doktor_bericht|{tag}")
+    return True
+
+
+def _fd_takt():
+    """aus ap_loop: alle FD_SCHNELL_S ein Blick (neuer Fehlstart → sofort), sonst voller Lauf alle FD_TAKT_S; verfallene Aufträge; Tagesbericht. Fehler nur loggen."""
+    if time.time() - _fd["schnell_at"] < FD_SCHNELL_S:
+        return
+    _fd["schnell_at"] = time.time()
+    try:
+        jetzt = datetime.now(timezone.utc)
+        reg = fd_regel_lesen()
+        if not reg or reg.get("an") is not True:
+            return
+        sb_update("fehlstart_doktor", {"status": "eq.wartet_mac", "ablauf_at": f"lt.{jetzt.isoformat()}"},
+                  {"status": "verfallen", "ergebnis": "Mac hat den Auftrag nicht abgeholt (schläft/aus)", "updated_at": jetzt.isoformat()})
+        neu = sb_select("puls_fehlstarts", {"select": "at", "order": "at.desc", "limit": "1"}) or []
+        frisch = bool(neu) and (_ap_ts(neu[0].get("at")) or jetzt) > (_ap_ts(reg.get("stand_at")) or jetzt - timedelta(seconds=FD_FENSTER_S))
+        if frisch or time.time() - _fd["voll_at"] >= FD_TAKT_S:
+            _fd["voll_at"] = time.time()
+            _fd["letztes"] = fd_tick(jetzt)
+        fd_bericht(jetzt, reg)
+        _fd["fehler"] = ""
+    except Exception as e:
+        _fd["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[doktor] ⚠️ {type(e).__name__}: {e}", flush=True)
+
+
+def _fd_mac_ok():
+    """Mac-Hände: Header X-Doktor-Key = Railway-Variable DOKTOR_KEY (≥ 24 Zeichen). → None ok | (antwort, code)."""
+    soll = str(os.environ.get("DOKTOR_KEY") or "")
+    if len(soll) < 24:
+        return jsonify({"ok": False, "error": "DOKTOR_KEY auf Railway nicht gesetzt"}), 503
+    if not hmac.compare_digest(str(request.headers.get("X-Doktor-Key") or ""), soll):
+        return jsonify({"ok": False, "error": "kein gültiger Schlüssel"}), 403
+    return None
+
+
+@app.route("/doktor/auftraege", methods=["GET"])
+def doktor_auftraege():
+    """Mac holt offene Aufträge (höchstens FD_MAX_JE_LAUF, einer je PC): [{id, pc, befehle}] — Befehle nur als Schlüssel aus FD_BEFEHLE."""
+    f = _fd_mac_ok()
+    if f:
+        return f
+    reg = fd_regel_lesen()
+    if not reg or reg.get("an") is not True:
+        return jsonify({"ok": True, "an": False, "auftraege": []})
+    jetzt = datetime.now(timezone.utc)
+    rows = sb_select("fehlstart_doktor", {"select": "id,pc,befehle", "status": "eq.wartet_mac", "ablauf_at": f"gt.{jetzt.isoformat()}",
+                                          "order": "at.asc", "limit": "50"}) or []
+    aus, pcs = [], set()
+    for r in rows:
+        b = [x for x in (r.get("befehle") or []) if x in FD_BEFEHLE]
+        if r.get("pc") and r["pc"] not in pcs and b and re.fullmatch(r"pc-[a-z0-9]{4,12}", str(r["pc"])):
+            pcs.add(r["pc"])
+            aus.append({"id": r["id"], "pc": r["pc"], "befehle": b})
+        if len(aus) >= FD_MAX_JE_LAUF:
+            break
+    return jsonify({"ok": True, "an": True, "auftraege": aus})
+
+
+@app.route("/doktor/auftrag/start", methods=["POST"])
+def doktor_auftrag_start():
+    """Unmittelbar vor der Ausführung: Riegel neu prüfen, dann wartet_mac → laeuft (Guard). Riegel → gesperrt, der Mac tut nichts."""
+    f = _fd_mac_ok()
+    if f:
+        return f
+    d = request.get_json(silent=True) or {}
+    aid = int(_wd_num(d.get("id")) or 0)
+    z = (sb_select("fehlstart_doktor", {"select": "id,user_id,pc,befehle,status", "id": f"eq.{aid}"}) or [None])[0]
+    if not z or z.get("status") != "wartet_mac":
+        return jsonify({"ok": False, "grund": "Auftrag nicht (mehr) offen"}), 409
+    jetzt = datetime.now(timezone.utc)
+    riegel = fd_riegel(z.get("user_id"), jetzt)
+    if riegel:
+        sb_update("fehlstart_doktor", {"id": f"eq.{aid}", "status": "eq.wartet_mac"}, {"status": "gesperrt", "ergebnis": riegel, "updated_at": jetzt.isoformat()})
+        return jsonify({"ok": False, "grund": riegel})
+    if not sb_update("fehlstart_doktor", {"id": f"eq.{aid}", "status": "eq.wartet_mac"}, {"status": "laeuft", "updated_at": jetzt.isoformat()}):
+        return jsonify({"ok": False, "grund": "Auftrag eben geändert"}), 409
+    return jsonify({"ok": True, "pc": z.get("pc"), "befehle": [x for x in (z.get("befehle") or []) if x in FD_BEFEHLE]})
+
+
+@app.route("/doktor/auftrag/ergebnis", methods=["POST"])
+def doktor_auftrag_ergebnis():
+    """Ergebnis der Mac-Befehle → Urteil, ggf. Nachplanen (nur mit „reparieren“), ggf. 🟠 je PC/Tag."""
+    f = _fd_mac_ok()
+    if f:
+        return f
+    d = request.get_json(silent=True) or {}
+    aid = int(_wd_num(d.get("id")) or 0)
+    z = (sb_select("fehlstart_doktor", {"select": "id,user_id,pc,plan_id,rezept,status", "id": f"eq.{aid}"}) or [None])[0]
+    if not z or z.get("status") != "laeuft":
+        return jsonify({"ok": False, "grund": "Auftrag läuft nicht"}), 409
+    ausgabe = [{"key": str(x.get("key")), "rc": int(_wd_num(x.get("rc")) if _wd_num(x.get("rc")) is not None else -1),
+                "text": re.sub(r"\s+", " ", str(x.get("text") or ""))[:300]}
+               for x in (d.get("ausgabe") or []) if isinstance(x, dict) and str(x.get("key")) in FD_BEFEHLE][:6]
+    jetzt = datetime.now(timezone.utc)
+    status, ergebnis, braucht, nach = fd_ergebnis_urteil(z.get("rezept"), ausgabe)
+    reg = fd_regel_lesen() or {}
+    if nach and reg.get("reparieren") is True and z.get("plan_id"):
+        try:
+            t = fd_nachplanen(str(z["plan_id"]), jetzt)
+            if t:
+                ergebnis += " · " + t
+        except Exception as e:
+            ergebnis += f" · Nachplanen ging nicht ({type(e).__name__})"
+    sb_update("fehlstart_doktor", {"id": f"eq.{aid}", "status": "eq.laeuft"},
+              {"status": status, "ergebnis": ergebnis[:300], "braucht_finn": braucht, "ausgabe": ausgabe, "aktion": ",".join(x["key"] for x in ausgabe),
+               "updated_at": jetzt.isoformat()})
+    if braucht and z.get("pc"):
+        fd_melden(z["pc"], z.get("user_id"), jetzt)
+    return jsonify({"ok": True, "status": status, "ergebnis": ergebnis})
+
+
 def ap_loop():
     """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
     auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
@@ -44234,6 +44647,7 @@ def ap_loop():
         _tt_takt()                            # WS2 Trades pro Tag aufteilen: nächster Teil nach genauer Lesung / Tag fertig (09.11.2026)
         _wd_sl_nach_takt()                    # SL1 WD-SL nachwürfeln: Rückfall-Pläne der PC-Tabs bekommen den Server-Würfel (10.11.2026)
         _kk_takt()                            # NA1 Tradovate-Login ohne Konten → Konto deaktivieren + 🟠 einmal je Konto (10.11.2026)
+        _fd_takt()                            # FX2 Fehlstart-Doktor: Rezepte, Riegel, Aufträge für den Mac, 🟠/⚪ (10.11.2026, Schalter fehlstart_doktor_regel)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:

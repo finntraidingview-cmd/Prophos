@@ -123,3 +123,19 @@ Das gilt auch für Chrome-Seiten auf den PCs: Broker- und Prop-Firm-Seiten sind 
 - Syntax der Policy-Datei: tailscale.com/docs/reference/syntax/policy-file, Stand 08.04.2026
 - Auth keys: tailscale.com/kb/1085/auth-keys, Stand 30.06.2026
 - Tags: tailscale.com/kb/1068/tags, Stand 04.12.2025
+
+---
+## Fehlstart-Doktor (FX2, 10.11.2026)
+Gehirn auf Railway (app.py `fd_*`), Hände am Mac (`mac/doktor.py`, launchd alle 2 min). Der Mac führt nur die vier Befehle aus seiner festen Liste aus
+(`dns_test`, `uac_lesen` lesen; `mt5_update`, `augen_neu` reparieren) und nur, nachdem Railway die Riegel direkt davor geprüft hat (offener Trade, Start ≤ 10 min,
+Puls läuft, Signal offen, unklar = nichts). Nachplanen und Meldungen macht Railway selbst.
+
+**Einschalten (einmal):**
+1. Railway → Variables: `DOKTOR_KEY` = ein langer Zufallswert (≥ 24 Zeichen). Denselben Wert am Mac in `~/.prophos-fernzugriff/doktor.key` (eine Zeile).
+2. SQL `sql/2026-11-10_fehlstart_doktor.sql` einspielen (legt Protokoll und Schalter an, Standard AUS).
+3. Supabase: `update public.fehlstart_doktor_regel set an = true where id = 1;` → liest, protokolliert, meldet, prüft DNS/UAC am PC.
+   Dazu Reparaturen und Nachplanen: `... set reparieren = true ...`.
+4. Am Mac: `bash pc-fernzugriff/mac/doktor-installieren.sh an` (Stand: `… stand`).
+
+**Ausschalten:** `... set an = false ...` (alles aus) · nur die Hände: `doktor-installieren.sh aus` oder `touch ~/.prophos-fernzugriff/doktor-aus`.
+Der Mac bleibt nicht wach: launchd startet nur, wenn der Mac ohnehin läuft; nur Handelszeit (So 22:00 – Fr 22:00 UTC); auf Akku nur alle ~10 min, unter 20 % nie.
