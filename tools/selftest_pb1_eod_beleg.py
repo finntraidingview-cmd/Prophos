@@ -106,7 +106,7 @@ b7, g7 = boden(dict(FNF, tv_balance=52200.0, tv_balance_at="2026-11-04T23:27:32+
 ok(g7 is None and b7 == 50100.0, f"FNF 50k über dem Lock: Boden = liq_regeln Größe + 100 = 50.100 (nicht 50.000 aus den Kernwerten) ({b7})")
 L2 = dict(LUCID, tv_balance=53000.0, tv_balance_at="2026-11-04T23:00:00+00:00")
 b8, g8 = boden(L2, [dict(TVPLUS, master_account_id=L2["id"], route="tvv2", bal_end=53000.0)])
-ok(g8 is None and b8 == 50000.0, f"Lucid ohne Lock in liq_regeln: Kernwerte-Lock beim Start bleibt (50.000) ({b8})")
+ok(g8 is None and b8 == 50100.0, f"Lucid ohne Lock in liq_regeln: Kernwerte-Lock bei Start + 100 (LH1 10.11.2026: 50.100) ({b8})")
 ok((app.ap_kw_param(app.ap_regel_finden(FIRMEN, "Apex Trader")) or {}).get("boden") == "statisch",
    "Apex: Kernwerte statisch → ah_tick ruft _ah_boden_eod nie (Weg unverändert)")
 p0 = app.liq_peak({"started_at": JETZT, "master_account_id": FNF["id"]}, FNF, None, [mit_beleg], eod=True)

@@ -80,21 +80,24 @@ LU = {"boden": "nachziehend", "namen": ["lucidtrading", "lucid"], "dd_usd": 4500
       "je_groesse": {"50000": {"dd_usd": 2000, "kauf_eur": 78, "daily_usd": 1200, "phasen": {"challenge": {"tp": [1150, 1180], "tp_max": 1200}}}}}
 
 
-def hedge(regel, bal, tp, kt, kauf=None):
+def hedge(regel, bal, tp, kt, kauf=None, mll=None):
     kv = ns["ap_kontowert"]("challenge", bal, ns["ap_kw_param"](regel), kauf)
-    h, gr = ns["tfh_hedge"](kv["satz"], kv["wert"] / kv["satz"], kt, 20.0, tp, 1.0, 0.01)
+    satz, pol = kv["satz"], kv["wert"] / kv["satz"]
+    if mll:   # LH1 10.11.2026: Lucid q = Kontowert ÷ MLL (tfh_satz_polster wird erst unten geladen → hier dieselbe Formel)
+        satz, pol = kv["wert"] / mll, float(mll)
+    h, gr = ns["tfh_hedge"](satz, pol, kt, 20.0, tp, 1.0, 0.01)
     return kv, h
 
 
 kv, h = hedge(TR, 156000, 3000, 2)
 check(kv["wert"] == 593 and h["lots"] == 6.21 and h["slave_risk"] == 593.0, f"Tradeify 150k unverändert: 593 € → 6,21 Lot ({h['lots']})")
-kv, h = hedge(LU, 156000, 3000, 2)
-check(kv["kauf"] == 170 and kv["wert"] == 469 and kv["polster"] == 6000 and h["lots"] == 3.68 and round(h["hedge_eur"]) == 235,
-      f"Lucid 150k Kernwert 170 € (Lock, Polster 6.000): 469 € → 3,68 Lot, Pass −235 € ({h['lots']}, {h['hedge_eur']})")
-kv, h = hedge(LU, 156000, 3000, 2, kauf=222)
-check(kv["wert"] == 613 and h["lots"] == 4.8, f"Lucid 150k gebuchter Kauf 222 €: 613 € → 4,80 Lot ({h['lots']})")
-check(round(h["slave_risk"] / h["master_risk"], 4) == kv["satz"], "Hedge 1:1: Blow-Gewinn je $ = Kontowert-Satz (Daily 2.700 → Hedge +q × 2.700)")
-kv, h = hedge(LU, 51800, 1200, 1)
+kv, h = hedge(LU, 156000, 3000, 2, mll=4500)
+check(kv["kauf"] == 170 and kv["wert"] == 469 and kv["polster"] == 5900 and h["lots"] == 4.9 and round(h["hedge_eur"]) == 313,
+      f"Lucid 150k Kernwert 170 € (LH1: Lock bei 150.100 → Kontowert-Polster 5.900; Hedge auf MLL 4.500): 469 € → {h['lots']} Lot, Pass −{h['hedge_eur']} €")
+kv, h = hedge(LU, 156000, 3000, 2, kauf=222, mll=4500)
+check(kv["wert"] == 613 and h["lots"] == 6.41, f"Lucid 150k gebuchter Kauf 222 €: 613 € → {h['lots']} Lot")
+check(abs(h["slave_risk"] / h["master_risk"] - kv["wert"] / 4500) < 1e-4, "LH1: Blow-Gewinn je $ = Kontowert ÷ MLL 4.500 (Daily 2.700 → Hedge +q × 2.700)")
+kv, h = hedge(LU, 51800, 1200, 1, mll=2000)
 check(kv["kauf"] == 78 and h is not None and h["lots"] > 0, f"Lucid 50k bleibt bei 78 € ({kv['wert']} € → {h['lots']} Lot)")
 
 # 5 · tfh_tick: Tradeify-Weg bitgleich, Lucid nur über die Liste
@@ -138,6 +141,34 @@ rp = re.findall(r"\('(\w+)',\s*\$a\$(.*?)\$a\$,\s*\$b\$(.*?)\$b\$\)", RUECK, re.
 check(rp == patches and "execute replace(def, r.neu, r.alt);" in RUECK, "Rückbau: dieselben 9 Stellen, neu → alt")
 check("drop function if exists public.prophos_final_hedge_firma(text, text);" in RUECK and "- 'firmen'" in RUECK and "'222'::jsonb" in RUECK,
       "Rückbau: Hilfsfunktionen weg, Firmenliste weg, Lucid 150k zurück auf 222 €")
+
+
+# LH1 (Finn 10.11.2026, Fall Simon LFE…0003 −2.817 $, Fusion +221 €): Lucid-Final rechnet q = Kontowert ÷ MLL-Betrag des Kontos (4.500), nicht ÷ (Balance − Lock)
+for f in ("_ap_de", "tfh_satz_polster"):
+    k = next((x for x in baum.body if isinstance(x, ast.FunctionDef) and x.name == f), None)
+    check(k is not None, f"Funktion {f} in app.py")
+    if k is not None:
+        exec(compile(ast.Module(body=[k], type_ignores=[]), "app.py", "exec"), ns)
+SP = ns["tfh_satz_polster"]
+# Simon Lucid 150k, Plan 9e700e16: Kontowert 561 €, vorher Polster 6.977,61 (Balance − 150.000), q 0,0804
+s_alt = 561 / 6977.61
+sz, pol, gr = SP("Lucid Trading", s_alt, 561, 4500)
+check(gr is None and pol == 4500.0 and abs(sz - 561 / 4500) < 1e-9, f"Lucid: Polster = MLL 4.500 $, Satz {sz:.4f} statt {s_alt:.4f}")
+h, g = ns["tfh_hedge"](sz, pol, 2, 20.0, 2068, 1.0, 0.01, 0.85)
+check(g is None and abs(h["q"] - 0.12467) < 1e-4 and abs(h["slave_risk"] - 561) < 0.01 and h["master_risk"] == 4500.0 and 5.8 <= h["lots"] <= 5.9,
+      f"Hedge: q {h['q']} €/$, auf 4.500 $ +{h['slave_risk']} €, {h['lots']} Lot (vorher 3,61)")
+check(abs(h["q"] * 2700 - 336.6) < 1, f"am Daily Loss 2.700 $: +{h['q'] * 2700:.0f} € (vorher q 0,0804 → +217 €)")
+check(abs(h["q"] * 6872.5 - 856.8) < 1, "voller Blow am Lock 150.100 (−6.872,50 $): bewusst mehr als der Kontowert")
+sz5, pol5, _ = SP("Lucid Trading", 0.05, 160, 2000)
+check(pol5 == 2000.0 and abs(sz5 - 0.08) < 1e-9, "Lucid 50k: Polster = MLL 2.000 $")
+sz2, pol2, gr2 = SP("Tradeify", 0.15, 675, None)
+check((sz2, pol2, gr2) == (0.15, 4500.0, None), "Tradeify unverändert: Satz und Polster aus dem Kontowert, MLL egal")
+check(SP("Tradeify CFD", 0.15, 675, 999) == (0.15, 4500.0, None), "Tradeify CFD unverändert")
+check(SP("Lucid Trading", s_alt, 561, None)[2] is not None and SP("Lucid Trading", s_alt, 561, None)[0] is None, "Lucid ohne MLL: kein Hedge, Grund")
+check(SP("Lucid Trading", s_alt, None, 4500)[2] is not None, "Lucid ohne Kontowert: kein Hedge, Grund")
+check(SP("Lucid Trading", s_alt, 520, 4500)[1] == 4500.0, "Lucid nach Verlusttag: Polster bleibt 4.500 (kein Boden-Weg)")
+check(SRC.count("tfh_satz_polster(a.get(\"firm\"), satz, wert,") == 2 and SRC.count("tfh_mll(a, ") == 3 and "def tfh_mll(a, firmen):" in SRC and "kw_lock=" not in SRC,
+      "tfh_tick und tfh_vorschau rechnen Lucid über tfh_mll, kein Boden-Weg mehr")
 
 print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

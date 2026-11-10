@@ -10334,7 +10334,8 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None, peak=N
         if lock:
             # 07.10.2026 FundedNext Futures: Boden zieht nach, aber nie über den Start (146.000 → 149.200 → 150.000 fest) —
             # über Start + DD wächst das Polster mit der Balance (156.400 → 6.400)
-            polster = bal - max(st - dd, min(st, bal - dd))
+            # LH1 (10.11.2026): Lock bei Start + lock_plus_usd (Lucid 100 $ → 150.100, lucidtrading.com 12945815), FundedNext Futures 0
+            polster = bal - max(st - dd, min(st + float(r.get("lock_plus_usd") or 0.0), bal - dd))
         out.update(boden=round(bal - polster, 2), ziel=round(st + sum(tps), 2), polster=round(polster, 2),
                    abstand=round(st + sum(tps) - bal, 2))
         if plus >= sum(tps):
@@ -10348,7 +10349,7 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None, peak=N
                 continue
             rest = cum - max(lo, plus)
             if lock and not erst:
-                bod = max(bod, min(st, st + lo - dd))       # Tagesend nach dem vorigen Trade, gedeckelt beim Start
+                bod = max(bod, min(st + float(r.get("lock_plus_usd") or 0.0), st + lo - dd))   # Tagesend nach dem vorigen Trade, gedeckelt beim Start (+ Lucid 100, LH1)
                 pol = st + lo - bod
             else:
                 pol = polster if erst else dd
@@ -10459,6 +10460,8 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
             r = {"modell": "trades", "ziel_pct": zp[ph], "risiko_usd": kw["dd_usd"], "etappe_usd": kw.get("etappe_usd")}
             if kw.get("lock_bei_start"):
                 r["lock_bei_start"] = True       # FundedNext Futures 07.10.2026: Boden höchstens bis zum Start
+                if kw.get("lock_plus_usd"):
+                    r["lock_plus_usd"] = kw["lock_plus_usd"]   # LH1 10.11.2026: Lucid Boden höchstens bis Start + 100
         elif kw.get("daily_usd") and (regel or {}).get("soft"):
             pu = (ph_reg.get(ph) or {}).get("puffer") or [0]
             r = {"modell": "tage", "ziel_pct": zp[ph], "tages_usd": kw["daily_usd"], "gesamt_usd": kw["dd_usd"],
@@ -25440,7 +25443,9 @@ def _ap_boden(regel, ph, groesse, balance):
         # 07.10.2026 FundedNext Futures: nachziehend mit Lock beim Start — aus der Balance (= Tagesend-Stand) folgt der Boden
         # Start − DD … höchstens Start (146.000 → 149.200 → 150.000 fest); Tradeify ohne Lock bleibt ohne Boden
         dd = float(regel["dd_usd"]) * f
-        boden = max(groesse - dd, min(groesse, balance - dd))
+        # LH1 (10.11.2026): Lucid sitzt bei Start + 100 fest (150.100, lucidtrading.com 12945815) — wie ap_kw_param.lock_plus_usd
+        _lp = float(regel.get("lock_plus_usd") or (100.0 if any("lucid" in str(n).lower() for n in (regel.get("namen") or ())) else 0.0))
+        boden = max(groesse - dd, min(groesse + _lp, balance - dd))
     boden_blow = boden
     if boden_blow is None and regel.get("dd_usd"):
         # 07.10.2026 (Finn: „Es wird immer nur mit Konten gearbeitet, deren Balance auf dem Live-Stand ist" — geblasene raus):
@@ -26195,6 +26200,9 @@ def ap_kw_param(regel):
             "boden": regel.get("boden") or "statisch", "ziel_pct": regel["ziel_pct"],
             "groessen": sorted(float(g) for g in (regel.get("wert_groessen") or regel["groessen"])), "etappe_usd": ch.get("tp_max") or regel.get("tp_max") or regel.get("etappe_usd"),
             "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True,
+            # LH1 (10.11.2026): Lock nicht AM Start, sondern Start + lock_plus_usd — Lucid 100 $ (150.100 / 50.100) (Quelle support.lucidtrading.com/en/articles/12945815-lucidflex-drawdown: „Once the account exceeds the trail, the MLL locks at the initial balance plus $100.“, Master 10.11.2026);
+            # eigenes Feld lock_plus_usd in den Kernwerten gewinnt; FundedNext Futures ohne Feld bleibt beim Lock am Start (0)
+            "lock_plus_usd": float(regel.get("lock_plus_usd") or (100.0 if any("lucid" in str(n).lower() for n in (regel.get("namen") or ())) else 0.0)),
             # Drawdown je Kontogröße (17.10.2026, Apex 100k EOD: 3.000 $ neben 150k mit 4.000 $) aus regel.je_groesse — wie im Planer;
             # Apex (20.10.2026): AP_APEX_DD_JE_GROESSE_USD als Rückfall je Größe, ein DB-Eintrag gewinnt
             "dd_je_groesse": {**({str(int(g)): float(d) for g, d in (globals().get("AP_APEX_DD_JE_GROESSE_USD") or {}).items()}
@@ -26231,22 +26239,25 @@ def _ap_kw_wachsen(wert, gewinn, dd, etappe):
     return wert * (1 + max(rest, 0) / dd)
 
 
-def _ap_kw_lock(wert, gewinn, dd, etappe):
+def _ap_kw_lock(wert, gewinn, dd, etappe, plus=0.0):
     """Nachziehender Boden mit Lock bei der Startgröße (lock_bei_start, FundedNext Futures, Finn 07.10.2026: „der Boden steigt
     NIE über 150.000"): Boden = Start − DD, zieht End-of-Day mit, bis er beim Start festsitzt. Solange er nachzieht, je Etappe
     × (1 + Etappe/DD) wie Tradeify; Lock, sobald der Gewinn (je abgeschlossener Etappe = Handelstag) die DD erreicht. Ab dann
     statisch: Wert_Lock × (Balance − Start) ÷ Polster zum Lock-Zeitpunkt (= Gewinn beim Lock) — r bleibt. 150k/4.000/3.200:
-    Boden 146.000 → 149.200 → 150.000 fest, Polster 6.400. → (wert, polster, gelockt)"""
+    Boden 146.000 → 149.200 → 150.000 fest, Polster 6.400. → (wert, polster, gelockt)
+    plus (LH1, 10.11.2026, Lucid 100 $): der Boden sitzt bei Start + plus fest — Lock erst ab Gewinn DD + plus (Lucid 150k: 154.600 → 150.100), Polster danach
+    Gewinn − plus. plus 0 = bitgleich wie bisher (FundedNext Futures)."""
+    plus = float(plus or 0.0)
     rest, fertig = gewinn, 0.0
     while rest >= etappe - 1e-9:
         wert *= 1 + etappe / dd
         rest -= etappe
         fertig += etappe
-        if fertig >= dd - 1e-9:
-            return wert * gewinn / fertig, gewinn, True
+        if fertig >= dd + plus - 1e-9:
+            return wert * (gewinn - plus) / (fertig - plus), gewinn - plus, True
     wert *= 1 + max(rest, 0) / dd
-    # angebrochene Etappe: Balance gilt als Tagesend-Stand — reicht der Gewinn schon für den Lock, sitzt der Boden beim Start
-    return (wert, gewinn, True) if gewinn >= dd - 1e-9 else (wert, dd, False)
+    # angebrochene Etappe: Balance gilt als Tagesend-Stand — reicht der Gewinn schon für den Lock, sitzt der Boden bei Start + plus
+    return (wert, gewinn - plus, True) if gewinn >= dd + plus - 1e-9 else (wert, dd, False)
 
 
 def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
@@ -26298,7 +26309,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
         if ph == typ:
             g = b - start
             if nachz and lock and g >= 0:
-                v, pol, fest = _ap_kw_lock(wert, g, dd, etappe)
+                v, pol, fest = _ap_kw_lock(wert, g, dd, etappe, p.get("lock_plus_usd") or 0.0)   # LH1: Lucid Lock bei Start + 100
                 return {"wert": round(v), "satz": round(v / pol, 4), "polster": round(pol), "groesse": groesse, "kauf": round(kauf),
                         "wie": (f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × (1+Etappe/{dd:,.0f}) bis Lock, "
                                 f"dann × Polster/Polster beim Lock" if fest else
@@ -26314,7 +26325,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
         if kette and ph == "challenge":
             wert = wert / k0["chance"]                # bestanden: Kauf ÷ Pass-Chance (fairer Markt, frisch 25 % → 4 × Kauf)
             continue
-        wert = (_ap_kw_lock(wert, ziel, dd, etappe)[0] if lock else _ap_kw_wachsen(wert, ziel, dd, etappe)) if nachz \
+        wert = (_ap_kw_lock(wert, ziel, dd, etappe, p.get("lock_plus_usd") or 0.0)[0] if lock else _ap_kw_wachsen(wert, ziel, dd, etappe)) if nachz \
             else wert * (dd + ziel) / dd
     if typ in AP_KW_FUNDED:
         polster = max(0.0, b - start + dd)
@@ -32395,6 +32406,32 @@ def tfh_zurueck():
     return n
 
 
+def tfh_satz_polster(firm, satz, wert, mll):
+    """REIN RECHNEND (testbar, LH1 10.11.2026): (satz, polster, grund) für den Gegenhedge des finalen Trades. Tradeify unverändert: Polster = Kontowert ÷ Satz
+    aus dem Kontowert (dort = Max DD, Boden zieht nach). LUCID (Finn 10.11.2026, Fall Simon LFE…0003 Plan 9e700e16: −2.817 $, Fusion nur +221 € — q 0,0804
+    auf 6.977 $ Polster bis zum Kontowert-Lock; Finn: „Den Hedge auf den gesamten Drawdown rechnen. Diese 550 sollen auf diese 4,5k gerechnet werden.“):
+    Polster = MLL-Betrag des Kontos (mll, 150k 4.500 / 50k 2.000), Satz = Kontowert ÷ MLL — NICHT ÷ (Balance − Lock). Nach dem Lock bringt ein voller Blow
+    bewusst mehr als den Kontowert. Ohne Kontowert oder MLL → kein Hedge mit Grund."""
+    if tfh_firma(firm, ("lucid",)) != "lucid":
+        return satz, ((wert / satz) if (satz and wert) else None), None
+    if not (wert and wert > 0):
+        return None, None, "kein Kontowert für dieses Konto"
+    if not (mll and float(mll) > 0):
+        return None, None, "kein MLL-Betrag (Max Drawdown) für dieses Konto"
+    return float(wert) / float(mll), float(mll), None
+
+
+def tfh_mll(a, firmen):
+    """MLL-Betrag ($) eines Lucid-Kontos für tfh_satz_polster (LH1, 10.11.2026): accounts.max_drawdown, Rückfall Kernwerte der Größe (dd_je_groesse, sonst
+    dd_usd). Weichen Konto und Kernwerte ab (> 0,5 $), gilt KEINER (None → kein Hedge, wie _ah_boden_eod: Konto prüfen)."""
+    kw = ap_kw_param(ap_regel_finden(firmen, (a or {}).get("firm"))) or {}
+    gr = _wd_konto_groesse(a)
+    dd_k = (_wd_num((kw.get("dd_je_groesse") or {}).get(str(int(gr)))) if gr else None) or _wd_num(kw.get("dd_usd"))
+    dd_a = _wd_num((a or {}).get("max_drawdown"))
+    if dd_a and dd_k and abs(float(dd_a) - float(dd_k)) > 0.5:
+        return None
+    return dd_a or dd_k
+
 def tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par):
     """Hedge-Vorschau eines finalen Tradeify-Plans für den Bestätigen-Block: {lots, hedge_eur, blow_eur, pass_eur, q, at} bzw. {grund, at}."""
     bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
@@ -32403,7 +32440,10 @@ def tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par):
     kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
     satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
     ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
-    h, grund = tfh_hedge(satz, (wert / satz) if (satz and wert) else None, p.get("master_contracts"), ppl, p.get("master_tp"),
+    satz, polster, grund = tfh_satz_polster(a.get("firm"), satz, wert, tfh_mll(a, firmen))   # LH1: Lucid q = Kontowert ÷ MLL
+    if grund:
+        return {"grund": grund, "at": _wt_now_iso()}
+    h, grund = tfh_hedge(satz, polster, p.get("master_contracts"), ppl, p.get("master_tp"),
                          par["netto_faktor"], par["min_lot"], fusion_sppl(None, (a or {}).get("user_id") or p.get("user_id")))   # EU1
     if grund:
         return {"grund": grund, "at": _wt_now_iso()}
@@ -32540,9 +32580,13 @@ def tfh_tick(jetzt=None, force=False):
         if bal is None:
             _tfh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
             continue
-        kw = ap_kontowert_konto(a, float(bal), ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False), kauf.get(str(a["id"])))   # UNT3
+        _fa = ap_unt_firmen(a.get("user_id") or p.get("user_id"), firmen, streng=False)
+        kw = ap_kontowert_konto(a, float(bal), _fa, kauf.get(str(a["id"])))   # UNT3
         satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
-        polster = (wert / satz) if (satz and wert) else None
+        satz, polster, grund = tfh_satz_polster(a.get("firm"), satz, wert, tfh_mll(a, _fa))   # LH1: Lucid q = Kontowert ÷ MLL
+        if grund:
+            _tfh_ohne(p, "groesse", grund, wer, jetzt)
+            continue
         ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
         h, grund = tfh_hedge(satz, polster, p.get("master_contracts"), ppl, p.get("master_tp"), par["netto_faktor"], par["min_lot"],
                              fusion_sppl(None, p.get("user_id")))   # EU1: € je Punkt aus dem echten Kurs
@@ -34094,8 +34138,11 @@ def _ah_boden_eod(a, firmen):
         # LOCK AUS EINER QUELLE (PB1-Zusatz, Befund S6 05.11.2026): liq_regeln.maxdd_lock_ueber_groesse_usd gewinnt (FNF Futures 50k: Größe + 100 = 50.100,
         # wie Radar und echte Liquidation; vorher deckelte der Kernwerte-Lock auf 50.000 → Hedge-zu ≠ Liquidation). Nur ohne Lock in liq_regeln (Lucid) der
         # Kernwerte-Lock: Boden höchstens bis zum Start
+        # LH1 (10.11.2026): Lucid sitzt bei Start + 100 fest (150.100 / 50.100, support.lucidtrading.com/en/articles/12945815-lucidflex-drawdown: „the MLL
+        # locks at the initial balance plus $100“) — Kernwerte lock_plus_usd, gleich wie Kontowert; sql/2026-11-10_lucid_mll_lock_100.sql trägt denselben Lock
+        # in liq_regeln id 12/15/16, dann gewinnt dieser. FundedNext Futures (lock_plus_usd 0) unverändert
         if kw.get("lock_bei_start") is True and _wd_num((b_regel or {}).get("maxdd_lock_ueber_groesse_usd")) is None:
-            boden = min(boden, float(b_gr))
+            boden = min(boden, float(b_gr) + float(kw.get("lock_plus_usd") or 0.0))
         return boden, None
     except Exception as e:
         _ah_spur(f"⚠️ {str(a.get('id'))[:8]} Boden am EOD-Hoch nicht rechenbar ({type(e).__name__}: {e})")
@@ -41590,7 +41637,7 @@ def kz_daily(ap_regel, liq_regel, groesse, tagesstart, bal):
     return None
 
 
-KZ_BODEN_ART = {"statisch": "statisch", "eod_trailing": "End-of-Day nachziehend", "nachziehend": "nachziehend", "nachziehend_lock": "nachziehend, Lock beim Start",
+KZ_BODEN_ART = {"statisch": "statisch", "eod_trailing": "End-of-Day nachziehend", "nachziehend": "nachziehend", "nachziehend_lock": "nachziehend, Lock beim Start (Lucid Start + 100)",
                 "nachziehend_geschaetzt": "nachziehend (geschätzt)"}
 
 

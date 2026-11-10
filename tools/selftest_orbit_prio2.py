@@ -216,9 +216,9 @@ check(_v.get("liq_balance") == 48800.0 and _v.get("polster_usd") == 1500.0 and _
 KONTEN[2]["_bal"] = 51200.0                       # heute über dem EOD-Hoch: Intraday zählt NICHT, Boden bleibt 48.800 → Polster 2.000 (Kontowert-Rechnung)
 _v = lauf(firmen=mit_modell(FIRMEN, "lucidtrading", "orbit_prio2"))[1].get(LHT) or {}
 check(_v.get("liq_balance") == 48800.0 and _v.get("polster_usd") == 2400.0, f"über dem EOD-Hoch (heute +400): Boden bleibt {_v.get('liq_balance')} (Intraday zählt nicht), Polster {_v.get('polster_usd')} $ bis zur echten Liquidation")
-VERLAUF[0]["bal_end"] = 52600.0; KONTEN[2]["_bal"] = 52000.0     # Lock bei Start: Boden höchstens 50.000 (Kernwerte lock_bei_start)
+VERLAUF[0]["bal_end"] = 52600.0; KONTEN[2]["_bal"] = 52000.0     # Lock: Boden höchstens Start + 100 = 50.100 (LH1 10.11.2026, Lucid „initial balance plus $100“)
 _v = lauf(firmen=mit_modell(FIRMEN, "lucidtrading", "orbit_prio2"))[1].get(LHT) or {}
-check(_v.get("liq_balance") == 50000.0 and _v.get("polster_usd") == 2000.0, f"EOD-Hoch 52.600 → Boden gelockt bei 50.000 (nicht 50.600) — Polster {_v.get('polster_usd')} $")
+check(_v.get("liq_balance") == 50100.0 and _v.get("polster_usd") == 1900.0, f"EOD-Hoch 52.600 → Boden gelockt bei 50.100 (LH1, nicht 50.600) — Polster {_v.get('polster_usd')} $")
 KONTEN[2]["_bal"] = 48700.0
 _e, _v = lauf(firmen=mit_modell(FIRMEN, "lucidtrading", "orbit_prio2"))
 check((_v.get(LHT) or {}).get("code") == "polster" and "lots" not in (_v.get(LHT) or {}),
