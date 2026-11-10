@@ -185,8 +185,8 @@ def e1b():
     # geänderter Wert wirkt: Mindest-TP 400 → Rest 210 $ wird 400
     f2 = ZEILE["firmen"][2]
     jg2 = app.fcp_je_groesse(f2, 100000)
-    alt = app.fcp_konto_rechnen(jg2, 100900, 100000, 2, False, 1.0, 0.85, None, f2, gewinntage=(3, 3))      # Rest bis Ziel-Mitte 1.100 = 200 $
-    neu = app.fcp_konto_rechnen(jg2, 100900, 100000, 2, False, 1.0, 0.85, None, f2, gewinntage=(3, 3), param=dict(S, tp_min_usd=400.0))
+    alt = app.fcp_konto_rechnen(jg2, 100900, 100000, 2, False, 1.0, 0.85, None, f2, gewinntage=(3, 3), param=dict(S, ziel_toleranz_pct=0.0))   # Rest bis Ziel-Mitte 1.100 = 200 $ (ZT1: ohne Toleranz)
+    neu = app.fcp_konto_rechnen(jg2, 100900, 100000, 2, False, 1.0, 0.85, None, f2, gewinntage=(3, 3), param=dict(S, tp_min_usd=400.0, ziel_toleranz_pct=0.0))
     ok(alt.get("tp") == 250.0 and neu.get("tp") == 400.0, f"geänderter Mindest-TP wirkt ({alt.get('tp')} → {neu.get('tp')})")
     fn = ZEILE["firmen"][1]
     jgn = app.fcp_je_groesse(fn, 100000)

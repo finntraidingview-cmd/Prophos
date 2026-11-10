@@ -88,7 +88,7 @@ check(app.fcp_konto_rechnen(j5, 90000, 100000, False, False, 1.0, 0.85)["aktion"
 check(app.fcp_konto_rechnen(j5, 100000, 100000, False, False, None, 0.85)["aktion"] == "aus", "ohne Punktwert → aus")
 check(app.fcp_konto_rechnen(jg("FundingPips", 50000), 100000, 50000, True, False, 20, 0.85)["aktion"] == "aus", "unplausible Balance (100k auf 50k) → aus")
 check(jg("FundingPips", 200000) is None, "FundingPips 200k gibt es nicht")
-rm = app.fcp_konto_rechnen(j5, 101290, 100000, False, False, 1.0, 0.85, random.Random(2))
+rm = app.fcp_konto_rechnen(j5, 101290, 100000, False, False, 1.0, 0.85, random.Random(2), param=dict(app.fcp_param_standard(), ziel_toleranz_pct=0.0))   # ZT1: ohne Toleranz (prüft den Mindest-TP)
 check(rm["tp"] >= app.FCP_TP_MIN_USD, f"Rest bis Ziel winzig → Mindest-TP ({rm['tp']}, {rm['tp_art']})")
 check(app.ap_regel_finden(FIRMEN, "Tradeify") is None and app.ap_regel_finden(FIRMEN, "Tradeify CFD")["namen"] == ["tradeifycfd"],
       "Tradeify-Futures trifft keine Regel, Tradeify CFD seine eigene")

@@ -53,8 +53,8 @@ check(jg["ziel"] == [1000, 2000] and jg["sl"] == [1250, 1600] and jg["hedge_eur"
       "SQL: Ziel 1.000–2.000, SL 1.250–1.600, Hedge 1.000 € auf 8.000 $, 3 Gewinntage ≥ 500 $, Phase-A-TP 550–650")
 
 
-def rechne(bal, tage, zyklus=2, rnd=None):
-    return ruf("fcp_konto_rechnen", jg, float(bal), 100000, zyklus, False, 10.0, 0.85, rnd, BG, gewinntage=tage)
+def rechne(bal, tage, zyklus=2, rnd=None, param=None):
+    return ruf("fcp_konto_rechnen", jg, float(bal), 100000, zyklus, False, 10.0, 0.85, rnd, BG, gewinntage=tage, param=param)
 
 
 # Phase A
@@ -78,7 +78,7 @@ r = rechne(100600, (3, 3))
 check(r["aktion"] == "planen" and r["tp_art"] == "rest" and r["tp"] == 1500 - 600 and r["tp_deckel"] is None, f"Phase B: Ziel Mitte 1.500, Gewinn 600 → TP 900 ohne Deckel ({r.get('tp_art')}, {r.get('tp')})")
 r = rechne(98500, (3, 3))
 check(r["tp"] == 3000 and r["tp_art"] == "rest", f"Phase B nach Verlust: TP = ganzer Rest 3.000 in einem Trade ({r.get('tp')})")
-r = rechne(100950, (3, 3), rnd=random.Random(1))
+r = rechne(100950, (3, 3), rnd=random.Random(1), param=dict(ruf("fcp_param_standard"), ziel_toleranz_pct=0.0))   # ZT1: ohne Toleranz (prüft den Mindest-TP)
 check(r["aktion"] == "planen" and r["tp"] >= 250, f"Phase B kleiner Rest: mindestens FCP_TP_MIN_USD ({r.get('tp')})")
 r = rechne(101000, (3, 3))
 check(r["aktion"] == "ziel", f"Tage erfüllt + 1.000 $ Gewinn → Ziel erreicht → Waiting for Payout ({r.get('aktion')})")

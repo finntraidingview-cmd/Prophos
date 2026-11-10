@@ -40175,8 +40175,15 @@
    * Waiting, nicht geblowt. Nur die Vorauswahl im Abhak-Popup — geschrieben wird erst beim Abhaken über den vorhandenen Weg (konto_status 'waiting'). */
   function wdlFcfdZielErreicht(t){
     if(!t || String(t.konto_typ || '') !== 'funded_cfd' || t.konto_waiting) return false
-    const b = wdlBlowStand(t), zr = b && !b.geblowt ? zielRest(b.bal, t.ziel_usd) : null
+    // ZT1 (10.11.2026): erreicht ab ziel_erreicht_ab (Ziel × (1 − Toleranz) des Funded-CFD-Planers, Railway), sonst wie bisher ziel_usd
+    const b = wdlBlowStand(t), zr = b && !b.geblowt ? zielRest(b.bal, wdlFcfdZielAb(t)) : null
     return !!(zr && zr.erreicht)
+  }
+  function wdlFcfdZielAb(t){
+    const n = v => v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null
+    // ziel_erreicht_ab kann über ziel_usd liegen (festes Ziel des Zyklus über dem unteren Wert, Prüfer S1) — dann gilt es, wie im Planer
+    const ab = n(t && t.ziel_erreicht_ab), z = n(t && t.ziel_usd)
+    return ab != null && z != null ? ab : z
   }
   window._wdlFcfdZielErreicht = wdlFcfdZielErreicht
   /* WP1 (Prüfer-Stopp 72dab884): kann das Payout-Ziel nach diesem Trade erreicht sein? Ja, wenn das Radar-Ziel (ziel_usd, unterer Wert; das feste Ziel des Zyklus liegt
@@ -40187,7 +40194,7 @@
     if(t.ziel_usd == null || t.ziel_usd === '' || !isFinite(Number(t.ziel_usd))) return false
     const b = wdlBlowStand(t)
     if(b && b.geblowt) return false
-    return !(b && b.bal != null && isFinite(Number(b.bal)) && Number(b.bal) < Number(t.ziel_usd))
+    return !(b && b.bal != null && isFinite(Number(b.bal)) && Number(b.bal) < wdlFcfdZielAb(t))   // ZT1: mit Toleranz
   }
   window._wdlFcfdZielMoeglich = wdlFcfdZielMoeglich
   window._wdlFcfdZielVonPlan = pid => wdlFcfdZielErreicht(((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)))
@@ -58228,7 +58235,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2161'
+  const OS_TAB_BUILD = '2026-09-22.2162'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -89998,6 +90005,13 @@
       ${''/* E1e (Finn 05.11.2026 ~08:30): kein Schalter „Ziel → Waiting". WP3b (Finn 10.11.2026: „kein Schalter, wenn Ziel erreicht → ab zu Waiting for Payout,
            kurz anzeigen zum Crosschecken“): fester Hinweis statt Schalter — gegenprüfen in der Liste „Neu auf Waiting for Payout“ oben im Reiter */}
       <div class="wd-abl-schalter lesen" data-fcr-wp3><span><b>Ziel erreicht → Waiting for Payout${fcrInfo('wp3', 'immer, ohne Schalter — erreicht ein Konto sein Ziel, steht es danach auf Waiting for Payout und bekommt keinen Trade mehr. Die letzten 48 h stehen oben im Reiter unter „Neu auf Waiting for Payout“, dort je Konto „zurück auf Funded CFD“, falls es falsch war.')}</b><small>immer · ohne Schalter</small></span><span class="fcr-e-stand an"><i></i>immer</span></div>
+      ${(() => {   /* ZT1 (Finn 10.11.2026: „Gib dem Ziel so grob 10 % Puffer … für mich ist der Account quasi schon gepasst“): Ziel erreicht ab Ziel × (1 − Toleranz) */
+        const PA = D.parameter || {}, tol = (PA.wert || {}).ziel_toleranz_pct ?? (PA.standard || {}).ziel_toleranz_pct ?? 10, db = (PA.db || {}).ziel_toleranz_pct
+        const tip = 'Ziel gilt als erreicht, sobald der Gewinn höchstens so viel Prozent unter dem Ziel liegt (Planer, Waiting for Payout, Account-Seite). Consistency und Gewinntage bleiben Pflicht. Leer = Standard 10 %'
+        return ad && PA.spalte !== false
+          ? `<div class="fcr-e-felder fcr-w-zt">${fcrFeld('Ziel-Toleranz', db ?? null, { param: 'ziel_toleranz_pct' }, { einheit: '% unter dem Ziel', leer: String(fcrZahl((PA.standard || {}).ziel_toleranz_pct ?? 10)), titel: tip })}</div>`
+          : fcrZeile('Ziel-Toleranz', `${fcrZahl(tol)} % unter dem Ziel zählt`, { titel: tip })
+      })()}
       ${fcrWSchalter('news', !!news.an, 'News-Pause', 'rote USD-News', newsInfo)}
       <div class="fcr-e-felder drei fcr-w-zeiten">${ad ? fcrFeld('Trades je Tag', z.trades_je_tag ?? null, { zeit: 'trades_je_tag' }, { einheit: 'je Konto', leer: '1', titel: 'bis zu so viele Trades je Konto und Tag (1–5), nie gleichzeitig; leer = 1' })
         : `<div class="fcr-e-feld"><label>Trades je Tag <small>· je Konto</small></label><div class="fcr-e-wert">${fcrTradesJeTag()}</div></div>`}${fensterFeld('von', 0, 'Start ab')}${fensterFeld('bis', 1, 'Spätestens')}</div>
@@ -90395,7 +90409,7 @@
         <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(uid)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
         <td>${zielZelle}</td>
         <td style="white-space:nowrap" title="Waiting for Payout seit ${escapeHtml(um)} Dubai">${escapeHtml(rel)}<small class="wp3-fehlt">${escapeHtml(um)} Dubai</small></td>
-        <td style="padding-right:20px;text-align:right;white-space:nowrap"><button type="button" class="btn btn-ghost btn-xs" data-wp3-zurueck="${escapeHtml(id)}" data-wp3-uid="${escapeHtml(uid)}"${laeuft ? ' disabled' : ''} title="Waiting for Payout leeren — Konto wieder Funded CFD, der Planer plant es wieder ein">${laeuft ? 'stellt um …' : '↩ zurück auf Funded CFD'}</button></td></tr>`
+        <td style="padding-right:20px;text-align:right;white-space:nowrap"><button type="button" class="btn btn-ghost btn-xs" data-wp3-zurueck="${escapeHtml(id)}" data-wp3-uid="${escapeHtml(uid)}"${laeuft ? ' disabled' : ''} title="Waiting for Payout leeren — Konto wieder Funded CFD, der Planer plant es wieder ein (liegt der Gewinn nur dank Ziel-Toleranz am Ziel, plant er keinen Rest-Trade: dafür die Ziel-Toleranz im Funded Planer → CFD senken)">${laeuft ? 'stellt um …' : '↩ zurück auf Funded CFD'}</button></td></tr>`
     }
     const tab = `<div class="fcfd-wartet-tab wp3-tab"><div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Gewinn / Ziel</th><th>Seit</th><th style="padding-right:20px"></th></tr></thead>
       <tbody>${w.map(zeile).join('')}</tbody></table></div></div>`

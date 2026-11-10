@@ -13821,6 +13821,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # ist … neue Accounts hinzufügen braucht meine Handarbeit"): Kontotyp + Ziel-Balance der Ziel-Wache (zw_tick, 5-min-Takt)
         "konto_typ": (acc or {}).get("account_type"), "konto_waiting": bool((acc or {}).get("waiting_payout_since")),
         "ziel_usd": _zw["ziele"].get(str(p.get("master_account_id") or "")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
+        # ZT1 (10.11.2026): Funded CFD — Ziel gilt ab dieser Balance als erreicht (Toleranz des Funded-CFD-Planers), sonst None (Radar nimmt ziel_usd)
+        "ziel_erreicht_ab": (_zw.get("ziele_tol") or {}).get(str(p.get("master_account_id") or "")),
         # Blow-Grenze aus den Kernwerten (Ziel-Wache, 08.10.2026) — die Ziel-Spanne in Überprüfen/Manuelle Arbeit, v. a. für Echo ohne Liq
         "boden_usd": (_zw.get("boeden") or {}).get(str(p.get("master_account_id") or "")),
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
@@ -41853,13 +41855,24 @@ def kz_rechnen(a, ctx):
         out["on_demand"] = bool(_oda)
         out["ziel_fest"] = z_fest
         wartet = bool(a.get("waiting_payout_since"))
+        _p_zt = fcp_param(ctx.get("fcp_regel") or {})   # ZT1: Ziel-Toleranz des Funded-CFD-Planers (Unternehmen der ID), dieselbe wie im Planer
+        if _oda:
+            _p_zt = dict(_p_zt, ziel_toleranz_pct=0.0)      # ZT1-Prüfer M1: On Demand = Payout-Mindestsumme der Firma, ohne Toleranz (wie der Planer)
+        zt_info = None
         if zb and gewinn is not None:
             ziel_bal, boden = zb
-            erreicht = wartet or bal >= ziel_bal
+            # ZT1 (Finn 10.11.2026): erreicht ab Ziel × (1 − Toleranz), Ziel wie bisher = Ziel-Balance − Größe (festes Ziel bzw. unterer Wert)
+            _z_rel = float(ziel_bal) - float(groesse) if groesse else None
+            _sw = fcp_ziel_schwelle(_z_rel, _p_zt) if _z_rel is not None else None
+            erreicht = wartet or bal >= ziel_bal or (_sw is not None and gewinn >= _sw - 0.005)
+            # Prüfer S2: Hinweis auch, wenn das Konto schon wartet (Planer hat es dank Toleranz umgestellt — WP3-Liste zeigt sonst Gewinn < Ziel mit ✓)
+            zt_info = None if bal >= ziel_bal else (fcp_ziel_toleranz_info(_z_rel, gewinn, _p_zt) if _z_rel is not None else None)
+            out["ziel_toleranz"] = dict(zt_info, pct_einstellung=_p_zt.get("ziel_toleranz_pct")) if zt_info else {"pct_einstellung": _p_zt.get("ziel_toleranz_pct")}
             out["chart"].update(ziel=ziel_bal, boden=boden)
             z_eff = z_fest if z_fest is not None else bereich[0]
             f = max(0.0, min(1.0, gewinn / z_eff)) if z_eff and z_eff > 0 else None
-            kach.append(kz_kachel("ziel", "Ziel", kz_pct(f, 0) if erreicht else kz_usd(ziel_bal - bal), None if erreicht else "fehlen",
+            kach.append(kz_kachel("ziel", "Ziel", kz_pct(f, 0) if erreicht else kz_usd(ziel_bal - bal),
+                                  (f"−{_liq_de(zt_info['fehlt'])} $ in Toleranz" if zt_info else None) if erreicht else "fehlen",
                                   (f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel fest {kz_usd(z_fest, 0, True)}" if z_fest is not None else
                                    f"Gewinn {kz_usd(gewinn, 0, True)} · Ziel {kz_usd(bereich[0], 0, True)}" + (f"–{_liq_de(bereich[1])} $" if bereich[1] != bereich[0] else "")),
                                   f, "gut" if erreicht else "", None, ["Erreicht", "gut"] if erreicht else ["Offen", "grau"],
@@ -41902,7 +41915,8 @@ def kz_rechnen(a, ctx):
             out["gewinntage"] = {"ist": gti[0] if gti else None, "soll": gti[1] if gti else None, "auto": gti_auto[0] if gti_auto else None,
                                  "korrektur": _gk, "zyklus": zyklus, "min": _wd_num(gt.get("min"))}
         checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting" + (" (fest)" if z_fest is not None else ""),
-                       (f"{kz_usd(gewinn, 0, True)} / {kz_usd(z_fest if z_fest is not None else bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")])
+                       (f"{kz_usd(gewinn, 0, True)} / {kz_usd(z_fest if z_fest is not None else bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")
+                       + (f" · Ziel erreicht (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)" if zt_info else "")])   # ZT1
         if _oda:
             checks.append(["info", "Add-on On Demand", "Ziel 2–2,25 % · Consistency " + (_liq_de(p_cons) + " %" if p_cons else "–")])
         if gt:
@@ -43510,7 +43524,7 @@ def ap_auto_best_tick(jetzt, reg=None):
 # accounts.ziel_erreicht_at/_bal/ziel_usd setzen (Tag in Prophos, Start-Sperre im Frontend) + Push an Inhaber und Admins, je Konto
 # einmal. Wieder darunter (Phase umgestellt, neues höheres Ziel) → Tag weg. Ohne Balance oder Regel: nichts ändern. ══
 ZW_TAKT_S = 300
-_zw = {"at": 0.0, "fehler": "", "erreicht": 0, "spalte_fehlt": False, "ziele": {}, "boeden": {}}   # ziele/boeden: konto_id → Ziel-/Blow-Balance (Radar-Zeilen)
+_zw = {"at": 0.0, "fehler": "", "erreicht": 0, "spalte_fehlt": False, "ziele": {}, "boeden": {}, "ziele_tol": {}}   # ziele/boeden: konto_id → Ziel-/Blow-Balance (Radar-Zeilen)
 
 
 def zw_ziel(regel, phase, balance):
@@ -43696,7 +43710,7 @@ def zw_funded_cfd():
     # „Waiting for Payout“ vor, obwohl FundedNext erst ab ~2.000 $ auszahlt). Fehlt die Spalte on_demand, rechnet alles wie bisher.
     _sel = "id,user_id,name,firm,starting_balance,created_at"
     try:
-        konten = _sb_all("accounts", {"select": _sel + ",on_demand", "account_type": "eq.funded_cfd"}) or []
+        konten = _sb_all("accounts", {"select": _sel + ",on_demand,fcp_ziel", "account_type": "eq.funded_cfd"}) or []   # ZT1: fcp_ziel = festes Ziel
     except requests.exceptions.HTTPError as e:
         if "on_demand" not in str(getattr(e.response, "text", "") or e):
             raise
@@ -43734,11 +43748,23 @@ def zw_funded_cfd():
         zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"), on_demand=aid in od_ids)
         if zb:
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
+            # ZT1: ab dieser Balance gilt das Ziel als erreicht (Ziel × (1 − Toleranz), Parameter des Unternehmens) — Radar-Vorauswahl „Waiting for Payout“
+            _g = _wd_konto_groesse(a)
+            if _g:
+                _zr = float(zb[0]) - float(_g)
+                _zf = a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}
+                if _wd_num(_zf.get("usd")) is not None and _wd_num(_zf.get("zyklus")) is not None and int(_wd_num(_zf.get("zyklus"))) == n.get(aid, 0) + 1:
+                    _zr = max(_zr, float(_wd_num(_zf["usd"])))      # Prüfer S1: festes Ziel des Zyklus wie Planer und /konto-ziele
+                _pz = fcp_param(fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {})
+                if aid in od_ids:
+                    _pz = dict(_pz, ziel_toleranz_pct=0.0)          # Prüfer M1: On Demand ohne Toleranz
+                _zw.setdefault("ziele_tol", {})[aid] = round(float(_g) + fcp_ziel_schwelle(_zr, _pz), 2)
             if aid in gt_ids:
                 gti = fcp_gewinntage_ist((fcp_je_groesse(regel, _wd_konto_groesse(a)) or {}).get("gewinntage"), aid, gt_plaene.get(aid, []),
                                          fcp_gewinntage_seit(zyk.get(aid), a.get("created_at")), fcp_gt_korrektur(gt_korr.get(aid), n.get(aid, 0) + 1))
                 if not gti or int(gti[0]) < int(gti[1]):
                     _zw["ziele"].pop(aid, None)
+                    _zw.get("ziele_tol", {}).pop(aid, None)
 
 
 def _zw_cons_tage_laden(ids):
@@ -47730,7 +47756,7 @@ def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab):
 FCP_CONS_ANTEIL_SPANNE = 5.0     # TP je Trade = Zufall (p − 5 %) … p der Distanz (Finn 05.11.2026 ~07:50: „35–40 % davon, per Zufall bei jedem Trade")
 
 
-def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None):
+def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None, ziel_min=None):
     """REIN RECHNEND (testbar): CONSISTENCY NACH FINN (O1, 05.11.2026 ~07:45/07:50 Dubai, ersetzt Weg A für alle Consistency-Firmen):
     „Angenommen wir machen −2.000, dann fehlen noch genau 5.000 zum Ziel. 40 % davon sind 2.000, der größte Tag darf nicht über 2.000 sein. Dann machen
     wir 1.500, 1.900, 1.600 … So wenige Trades wie möglich, immer nur das, was zum Ziel noch fehlt" · „Wir nehmen die aktuelle Balance bis zum Ziel =
@@ -47749,7 +47775,9 @@ def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None):
                 "k": None, "bester_tag": None, "summe_tage": None, "distanz": None, "anteil": None, "p": float(pct), "fertig": False, "lesbar": False}
     B, W = float(tw.get("b") or 0), float(tw.get("w") or 0)
     S, k = float(tw.get("serie") or 0), int(tw.get("serie_n") or 0)
-    if G >= Z - 0.005 and B <= q * W + 0.005:
+    # ZT1: ziel_min = Schwelle mit Toleranz (fcp_ziel_schwelle) — fertig schon dort; Consistency (B ≤ p × W) bleibt unverändert Pflicht
+    zm = float(ziel_min) if ziel_min is not None and _wd_num(ziel_min) is not None and float(ziel_min) <= Z else Z
+    if G >= zm - 0.005 and B <= q * W + 0.005:
         return {"tp": None, "ende": round(Z), "deckel": None, "rest": round(Z - G, 2), "n": 0, "k": k, "bester_tag": B, "summe_tage": W, "distanz": None,
                 "anteil": None, "p": float(pct), "fertig": True, "lesbar": True}
     R = max(Z - G, B / q * FCP_CONS_PUFFER_ZIEL - W, 0.0)
@@ -47898,12 +47926,16 @@ def fcp_wartet_meldung(r):
     c = r.get("consistency") if isinstance(r.get("consistency"), dict) else {}
     z = _wd_num(c.get("ende"))
     if z is None:
+        z = _wd_num(r.get("ziel_bezug"))    # ZT1: Bezug der Ziel-Prüfung ohne Consistency (festes Ziel des Zyklus)
+    if z is None:
         zf = r.get("ziel_fest") if isinstance(r.get("ziel_fest"), dict) else {}
         z = _wd_num(zf.get("usd"))
     if z is None and _wd_num(r.get("ziel_von")) is not None and _wd_num(r.get("start")) is not None:
         z = float(r["ziel_von"]) - float(r["start"])
     gw = _wd_num(r.get("gewinn"))
+    zt = r.get("ziel_toleranz") if isinstance(r.get("ziel_toleranz"), dict) else None   # ZT1-Prüfer S3: erreicht nur dank Toleranz → sagen
     text = (f"{r.get('user') or '?'} · {r.get('konto') or '?'} · Gewinn {_liq_de(gw) if gw is not None else '?'} $ / Ziel {_liq_de(z) if z is not None else '?'} $"
+            + (f" · −{_liq_de(zt.get('fehlt'))} $ in Toleranz ({_liq_de(zt.get('pct'))} %)" if zt else "")
             + (f" · Zyklus {r.get('zyklus')}" if r.get("zyklus") else "") + (" · Refund (erster Payout)" if r.get("erster_payout") else ""))
     return "Ziel erreicht → Waiting for Payout", text, {"konto_id": r.get("konto_id"), "gewinn": gw, "ziel": z, "zyklus": r.get("zyklus"),
                                                        "balance": r.get("balance")}
@@ -47949,6 +47981,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         basis["gewinntage"] = list(gi) if gi else None
         gt_offen = gi is None or int(gi[0]) < int(gi[1])             # Zählung nicht lesbar → Phase A (kleiner Trade), nie ein Ziel-Trade auf Verdacht
     pct = fcp_consistency_pct(regel) if not (gt and gt_offen) and not ep else None
+    # ZT1-Prüfer S1: Bezug für „Ziel erreicht" ohne Consistency = festes Ziel des Zyklus (wie /konto-ziele), ohne gespeichertes Ziel der untere Wert wie bisher
+    _zz = max(fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0])[0], ziel_b[0]) if ziel_fest is not None else ziel_b[0]
     if pct:
         # CONSISTENCY WEG A (05.11.2026): fertig erst, wenn das Ziel erreicht ist UND kein Tag größer als p % des Zyklus-Gewinns war (G ≥ max(Ziel, B ÷ p × 1,02)).
         # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht über das Ziel hinaus)
@@ -47957,14 +47991,19 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         tw0 = fcp_tw_aus(tage, gewinn)
         z_f, _n0 = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0]) if ziel_fest is not None else (ziel_b[0], True)
         z_f = max(z_f, ziel_b[0])
+        # ZT1 (Finn 10.11.2026): Ziel erreicht ab Ziel × (1 − Toleranz) — Consistency-Bedingung unverändert
+        # ZT1-Prüfer S1: Bezug ist überall das feste Ziel des Zyklus (wie /konto-ziele und Radar), sonst der untere Wert
         if tw0 is None:
-            if gewinn >= ziel_b[0] - 0.005:                  # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht)
-                return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": None, "ende": round(ziel_b[0])})
-        elif gewinn >= z_f - 0.005 and float(tw0.get("b") or 0) <= pct / 100.0 * float(tw0.get("w") or 0) + 0.005:
+            if gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005:   # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht)
+                return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": None, "ende": round(z_f)},
+                            ziel_toleranz=fcp_ziel_toleranz_info(z_f, gewinn, P))
+        elif gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005 and float(tw0.get("b") or 0) <= pct / 100.0 * float(tw0.get("w") or 0) + 0.005:
             return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout",
-                        consistency={"p": pct, "bester_tag": tw0.get("b"), "summe_tage": tw0.get("w"), "ende": round(z_f)})
-    elif gewinn >= ziel_b[0] - 0.005 and not gt_offen:
-        return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
+                        consistency={"p": pct, "bester_tag": tw0.get("b"), "summe_tage": tw0.get("w"), "ende": round(z_f)},
+                        ziel_toleranz=fcp_ziel_toleranz_info(z_f, gewinn, P))
+    elif not gt_offen and gewinn >= fcp_ziel_schwelle(_zz, P) - 0.005:
+        # ZT1: mit Toleranz; Prüfer S1: Bezug = festes Ziel des Zyklus (wie /konto-ziele), ohne gespeichertes Ziel der untere Wert wie bisher
+        return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", ziel_toleranz=fcp_ziel_toleranz_info(_zz, gewinn, P), ziel_bezug=_zz)
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     if ziel_fest is not None:            # O1: festes Ziel je Konto und Zyklus (dict = Feature an, {} = noch keins gespeichert) — None = wie bisher je Lauf
         ziel, _neu = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel)
@@ -47982,12 +48021,12 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         # CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai, ersetzt C5 „750-Start, höchstens die Zyklus-Gewinne"): Endziel, Deckel, Rest gleich verteilt
         # (fcp_cons_rechnen). Das Ziel Z bleibt das gewürfelte Ziel der Größe, G = Balance − Kontogröße, B = größter Gewinn-Tag im Zyklus
         # seit O1 (05.11.2026) nach Finn: fcp_cons_finn — Basis Summe der Gewinn-Tage, TP (p − 5 %) … p der Distanz, letzter Trade = Rest
-        cr = fcp_cons_finn(pct, ziel, gewinn, fcp_tw_aus(tage, gewinn), rnd)
+        cr = fcp_cons_finn(pct, ziel, gewinn, fcp_tw_aus(tage, gewinn), rnd, ziel_min=fcp_ziel_schwelle(ziel, P))   # ZT1: fertig ab Schwelle
         if cr.get("tages_deckel"):
             return dict(basis, aktion="aus", grund=f"Consistency: heute schon +{_liq_de(cr['heute'])} $ — Tages-Deckel {_liq_de(cr['deckel'])} $ erreicht, morgen weiter",
                         consistency=cr)
         if cr["fertig"]:
-            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency=cr)
+            return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency=cr, ziel_toleranz=fcp_ziel_toleranz_info(ziel, gewinn, P))
         tp, tp_art, deckel = cr["tp"], ("consistency" if cr["lesbar"] else "consistency_ohne_zyklus"), None
         basis["consistency"] = cr
     elif erster_zyklus and _wd_num(jg.get("tp_erster")):
@@ -48053,17 +48092,45 @@ FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = False   # aus seit .1934 (30.10.2026): fa00be
 # PARAMETER IN DER DB (E1b, Finn 05.11.2026 ~03:55 Dubai: „Nimm dir Winning Days als Beispiel … Uhrzeit, Verhältnis, Lots, alles änderbar"): Werte, die Pläne
 # beeinflussen und bis .2035 nur im Code standen, liegen in funded_cfd_plan_regeln.parameter (jsonb, sql/2026-11-05_fcp_einstellungen_db.sql). Fehlt ein
 # Schlüssel, ist er ungültig oder fehlt die Spalte noch (SQL nicht eingespielt), gilt der bisherige Code-Wert — gleiche Werte → gleiche Pläne (Selbsttest).
+# ZIEL-TOLERANZ (ZT1, Finn 10.11.2026: „Gib dem Ziel so grob 10 % Puffer. Wenn wir den Take Profit eigentlich getroffen haben, aber wegen ein paar Dollar nicht
+# hinkommen, soll es trotzdem zählen … für mich ist der Account quasi schon gepasst“; Fall FundedNext 50k Funded CFD, Ziel fest +1.566 $, Gewinn +1.442 $, fehlen 124 $):
+# Ziel erreicht, sobald Gewinn ≥ Ziel × (1 − Toleranz). Einstellung im Funded Planer → CFD (parameter.ziel_toleranz_pct, 0–50 %, Standard 10 %), keine Sonderregel.
+# Gilt NUR für den Zielbetrag — Consistency, Gewinntage, Payout-Datum bleiben wie sie sind.
+FCP_ZIEL_TOLERANZ_PCT = 10.0
+
+
+def fcp_ziel_schwelle(ziel, param=None):
+    """REIN (testbar, ZT1): Gewinn-Schwelle für „Ziel erreicht" = Ziel × (1 − ziel_toleranz_pct ÷ 100); Ziel None → None. param = fcp_param(…) (fehlt der Schlüssel:
+    Code-Standard 10 %; außerhalb 0–50 → Standard)."""
+    z = _wd_num(ziel)
+    if z is None:
+        return None
+    t = _wd_num((param or {}).get("ziel_toleranz_pct")) if isinstance(param, dict) and "ziel_toleranz_pct" in param else FCP_ZIEL_TOLERANZ_PCT
+    if t is None or not 0 <= t <= 50:
+        t = FCP_ZIEL_TOLERANZ_PCT
+    return round(float(z) * (1.0 - float(t) / 100.0), 2) if z > 0 else float(z)
+
+
+def fcp_ziel_toleranz_info(ziel, gewinn, param=None):
+    """REIN (Anzeige, ZT1): erreicht nur dank Toleranz → {"fehlt": Ziel − Gewinn, "pct": Toleranz, "schwelle"}; sonst None."""
+    z, g, sw = _wd_num(ziel), _wd_num(gewinn), fcp_ziel_schwelle(ziel, param)
+    if z is None or g is None or sw is None or g >= z - 0.005 or g < sw - 0.005:
+        return None
+    return {"fehlt": round(z - g, 2), "pct": round((1.0 - sw / z) * 100.0, 2) if z > 0 else 0.0, "schwelle": sw}   # pct = wirksame Toleranz (Prüfer H5)
+
+
 def fcp_param_standard():
     """Code-Werte der Parameter (Rückfall). Als Funktion, damit Selbsttests, die app.py stückweise laden (selftest_fcp_ftmo), die Konstanten nachladen können."""
     return {"tp_min_usd": FCP_TP_MIN_USD, "consistency_start_usd": FCP_CONSISTENCY_START_USD,
             "tp_deckel_plus_standard": FCP_TP_DECKEL_PLUS_STANDARD, "refund_tp_min_usd": FCP_ERSTER_PAYOUT_TP_MIN_USD,
             "refund_lots_verhaeltnis": 2.0, "refund_lots_rueckfall": FCP_ERSTER_PAYOUT_LOTS_FAKTOR,
-            "richtung_laufend": FCP_RICHTUNG_LAUFEND_UEBERNEHMEN}
+            "richtung_laufend": FCP_RICHTUNG_LAUFEND_UEBERNEHMEN, "ziel_toleranz_pct": FCP_ZIEL_TOLERANZ_PCT}
 
 
 FCP_PARAM_STANDARD = fcp_param_standard()
 FCP_PARAM_GRENZEN = {"tp_min_usd": (1, 5000), "consistency_start_usd": (1, 20000), "tp_deckel_plus_standard": (0, 50000),
-                     "refund_tp_min_usd": (1, 1000), "refund_lots_verhaeltnis": (0.1, 10), "refund_lots_rueckfall": (0.01, 1)}
+                     "refund_tp_min_usd": (1, 1000), "refund_lots_verhaeltnis": (0.1, 10), "refund_lots_rueckfall": (0.01, 1),
+                     "ziel_toleranz_pct": (0, 50)}   # ZT1: Puffer aufs Ziel in % (0 = genau das Ziel)
 FCP_PARAM_SCHALTER = ("richtung_laufend",)
 
 
@@ -48360,7 +48427,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if isinstance(jg.get("gewinntage"), dict) else None   # GT2: + Korrektur von Hand des laufenden Zyklus
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
-                              max_sl=a.get("max_risiko_trade"), param=param_u,      # E1b: Planer-Parameter aus der DB (fcp_param)
+                              max_sl=a.get("max_risiko_trade"), param=(dict(param_u, ziel_toleranz_pct=0.0) if od_an else param_u),   # E1b; ZT1-Prüfer M1: On Demand ohne Toleranz (Payout-Mindestsumme der Firma)
                               tage=fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag, a.get("fcp_ziel"),
                                                  zyklus_ab.get(aid)) if payouts_ok else None,   # O1/E1e; CS1: Basis laut Broker (fcp_ziel.broker)
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
