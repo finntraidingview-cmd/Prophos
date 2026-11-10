@@ -207,7 +207,7 @@ def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=(), menue_haengt_ab=No
             links[0] += 1
         return True
 
-    def _menue(timeout=0.8):
+    def _menue(timeout=0.8, klick_zuerst=False):
         zustand["punkt"] += 1
         y = maus["y"]
         if zeile_y is not None and abs(y - zeile_y) <= 9:
@@ -236,6 +236,7 @@ def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=(), menue_haengt_ab=No
         _kein_menue_offen=_kein_menue_offen,
         _el_tasten=lambda *a, **k: None,
         _finde_close_dialog=lambda w, ticket: (None, None),
+        CLOSE_NACH_MENUE_S=0.2,
     )
     vorher = {k: getattr(ob, k) for k in ersatz}
     for k, v in ersatz.items():

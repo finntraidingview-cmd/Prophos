@@ -284,6 +284,7 @@ AENDERN_MAX_PUNKTE = 10          # Band-Punkte je Scan (je Punkt Rechtsklick-Men
 # 1,2 s kein Dialog — dann ESC, das auch einen noch öffnenden Dialog schließt. Solche PCs sind träge (Marco ok-Lauf 4cedb87b: Punkt 1 braucht 23,6 s). Nach einem
 # bewiesenen Menü-Klick darum länger nur WARTEN (kein Klick): 5 s. Ein Treffer kommt sofort zurück, Kosten nur beim Fehlschlag.
 AENDERN_NACH_MENUE_S = 5.0
+CLOSE_NACH_MENUE_S = 6.0          # NZ2 (10.11.2026): Close-Dialog bzw. Ein-Klick-Schluss nach dem Menüpunkt — vorher 3 s, auf 4K-/2560er-PCs zu knapp
 AENDERN_TAB_ANRECHNUNG_MAX_S = 30.0   # J2: so viel Tab-Suche zählt höchstens nicht gegen die Frist (Spuren: bis 28 s) — der ganze Versuch bleibt begrenzt
 # TAGESGRENZE (Finn 26.10.2026: SL/TP nach dem Fill nur nachziehen, wenn „der SL so groß ist, dass das Daily Loss Limit in Gefahr ist"
 # oder der TP übers Ziel schießt): der PC-Tab schickt cmd.tages_grenze_usd = höchstens erlaubter Verlust dieses Trades bis zur Tagesgrenze
@@ -11688,6 +11689,10 @@ def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
             out.update(verbunden=bool(ti.connected), data_path=str(ti.data_path or ""))
         if ai is not None and (not expected or int(ai.login) == int(expected)):
             out.update(handel_konto=bool(ai.trade_allowed), marge_frei=float(ai.margin_free), balance=float(ai.balance))
+            try:   # NZ2 (Prüfer): Hedging-Konto? Nur dort kann ein zweiter Close-Auftrag nie eine NEUE Position eröffnen
+                out["hedging"] = int(ai.margin_mode) == int(getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2))
+            except Exception:
+                pass
         if si is not None:
             out["symbol_modus"] = int(si.trade_mode)
         if si is not None and richtung and volumen:
@@ -12089,7 +12094,7 @@ def _menue_offen():
     return False
 
 
-def _menuepunkt_ausloesen(it):
+def _menuepunkt_ausloesen(it, klick_zuerst=False):
     """Einen gefundenen Menuepunkt WIRKLICH ausloesen — mit Beweis (30.08.2026,
     Finns Fund an beiden PCs: Kontextmenue offen, 'Aendern oder Loeschen'
     markiert, und nichts passiert; genau dieser eingefrorene Zustand stand auf
@@ -12101,7 +12106,23 @@ def _menuepunkt_ausloesen(it):
     Haus-Weg _klick_absolut (EIN atomarer SendInput-Batch) auf die Punkt-Mitte;
     geklickt wird dabei nur, solange das Menue nachweislich noch offen ist
     (nie ein Streuklick in den Chart darunter). click_input bleibt letzte
-    Reserve. True = Menue zu, Klick bewiesen."""
+    Reserve. True = Menue zu, Klick bewiesen.
+
+    klick_zuerst (NZ2, 10.11.2026): der ECHTE Mausklick auf den Punkt vor invoke(). Befund JU1/CPI: auf pc-t8wg97/pc-7ftp5l (4K) und
+    pc-l5o8bv/pc-auzre5 (2560x1440) war „Ändern…“ bzw. „Position schliessen“ lesbar und aktiv, das Menü ging nach invoke() zu — aber
+    kein Dialog kam (danach öffnete der nächste Punkt sofort ein neues Kontextmenü, also stand auch kein modaler Dialog). „Menü zu“
+    beweist dort nicht, dass der Befehl lief. Der Zweitversuch geht deshalb den Weg der Hand: Klick auf den Punkt."""
+    if klick_zuerst:
+        try:
+            r = it.rectangle()
+            if _menue_offen():               # Prüfer NZ2 S5: nur in ein offenes Menü klicken (sonst träfe der Klick Chart/Liste darunter)
+                _echo_klick(r, schritte=3)
+                for _ in range(4):           # langsame PCs: bis ~1 s auf „Menü zu“ warten, bevor invoke() nachkommt
+                    _warte(0.25, 0.05)
+                    if not _menue_offen():
+                        return True
+        except Exception:
+            pass
     try:
         it.invoke()
     except Exception:
@@ -12168,7 +12189,7 @@ def _kontextmenue_aendern_klicken(timeout=2.0):
     return "kein_menue"
 
 
-def _kontextmenue_close_klicken(timeout=2.0):
+def _kontextmenue_close_klicken(timeout=2.0, klick_zuerst=False):
     """Gegenstueck zu _kontextmenue_aendern_klicken fuer den Close-Weg
     (28.08.2026, Remote-Close): ausgeloest wird AUSSCHLIESSLICH ein Menuepunkt,
     der ist_close_menuepunkt besteht — nie ein anderer, nie blind. Die Alle-/
@@ -12191,7 +12212,7 @@ def _kontextmenue_close_klicken(timeout=2.0):
                                     return "ausgegraut"
                             except Exception:
                                 pass
-                            return "geklickt" if _menuepunkt_ausloesen(it) else "kein_menue"
+                            return "geklickt" if _menuepunkt_ausloesen(it, klick_zuerst=klick_zuerst) else "kein_menue"
                 except Exception:
                     continue
         except Exception:
@@ -12859,6 +12880,17 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
             if st_menue == "geklickt":
                 weg = "Rechtsklick-Menue"
                 d = _finde_aendern_dialog(w, timeout=AENDERN_NACH_MENUE_S)
+                # NZ2 (10.11.2026, Befund JU1: 22 von 24 Justage-Abbrüchen 06.–10.11. auf 4K-/2560er-PCs genau hier — „Ändern…“ lesbar und
+                # aktiv = Positions-Zeile bewiesen, Menü zu, aber kein Dialog; der Bot ging dann zum NÄCHSTEN Punkt, bis die 20-s-Frist ablief).
+                # Jetzt an DERSELBEN Stelle der Weg, mit dem die 1080p-PCs fast immer treffen: Doppelklick auf die Zeile. Kein ESC davor — das
+                # Menü ist nachweislich zu, ein ESC träfe höchstens einen spät aufgegangenen Ändern-Dialog.
+                if d is None:
+                    d = _finde_aendern_dialog(w, timeout=0.3)     # Prüfer NZ2 S4: kam er doch noch? Dann nie in ihn hineinklicken
+                if d is None and not (bis is not None and time.time() >= bis) and _punkt_frei(w, px_, py_):
+                    notiz(pname, "Rechtsklick-Menue: kein Dialog")
+                    if _klick_absolut(px_, py_, doppel=True):
+                        weg = "Doppelklick nach Menue"
+                        d = _finde_aendern_dialog(w, timeout=AENDERN_NACH_MENUE_S)
             else:
                 try:
                     _el_tasten(w, "{ESC}", set_foreground=False)
@@ -14862,7 +14894,7 @@ def close_punkt_in_rest(x, y, reste, rand=12):
     return False
 
 
-def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
+def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=None):
     """Position per Klick schliessen — Finns Hand-Weg als Scan (28.08.2026,
     Remote-Close): Zeile markieren -> Rechtsklick -> NUR den lesbaren Punkt
     'Position schliessen' klicken. Danach zwei legitime Ausgaenge: der
@@ -14877,6 +14909,8 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
 
     Nach dem ERSTEN erfolgreichen Menuepunkt-Klick wird NIE weitergescannt
     (die Schliessung kann da schon unterwegs sein) — ein Versuch pro Lauf.
+    Ausnahme NZ2 (10.11.2026): EIN Zweitversuch an DERSELBEN Stelle mit echtem Klick, nur wenn nach CLOSE_NACH_MENUE_S weder Dialog noch
+    Schluss kam UND das Journal lesbar ist und seit dem Klick keine Anfrage zu diesem Ticket zeigt (journal_seit_klick).
     Rueckgabe: 'zu' | 'knopf' | 'ohne_wirkung' | 'kein_treffer' | 'pause' |
     'haftung' (Ein-Klick-Haftungsausschluss stand im Weg und liess sich nicht
     annehmen)."""
@@ -14929,7 +14963,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             continue
         punkte.append((f"-{off}px", gx, y))
 
-    def _punkt_klicken(px_, py_):
+    def _punkt_klicken(px_, py_, klick_zuerst=False):
         """Finns Handgriff auf EINEM Punkt: Zeile markieren -> Rechtsklick ->
         nur den LESBAREN 'Position schliessen' klicken. Als eigene Funktion,
         weil der Nachklick nach dem Haftungsausschluss exakt dasselbe tun muss
@@ -14947,7 +14981,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         if not _klick_absolut(px_, py_, taste="rechts"):
             return "kein_menue"
         _warte(0.25, 0.3)
-        return _kontextmenue_close_klicken(timeout=0.8)
+        return _kontextmenue_close_klicken(timeout=0.8, klick_zuerst=klick_zuerst)
 
     grau = 0
     if _reste:
@@ -14988,7 +15022,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         # ein Nachklick, der sich wiederholen darf, waere ein blinder
         # Mehrfach-Close.
         haftung_offen = True
-        ende = time.time() + 3.0
+        ende = time.time() + CLOSE_NACH_MENUE_S   # NZ2: 3 → 6 s (langsame 4K-/2560er-PCs)
         while time.time() < ende:
             if position_weg():
                 trail.append("Position weg (Ein-Klick-Modus)")
@@ -15017,9 +15051,72 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
                         return "ohne_wirkung"
                     trail.append(f"'Position schliessen' nach der Zustimmung "
                                  f"erneut geklickt ({pname})")
-                    ende = time.time() + 3.0
+                    ende = time.time() + CLOSE_NACH_MENUE_S   # NZ2: 3 → 6 s (langsame 4K-/2560er-PCs)
                     continue
             _warte(0.25, 0.25)
+        if knopf is None:
+            # NZ2 (10.11.2026, CPI: Jacob pc-auzre5 5× „geklickt, aber kein Close-Dialog“; dieselbe Form wie 22 Justage-Abbrüche „Ändern…“ auf
+            # 4K-/2560er-PCs): „Menü zu“ beweist dort nicht, dass der Befehl lief. EIN Zweitversuch an DERSELBEN Stelle — der Punkt hat sich eben
+            # durch den lesbaren Menüpunkt als Positions-Zeile ausgewiesen, der Aufrufer hat GENAU EINE Position bewiesen — diesmal mit echtem
+            # Mausklick auf den Menüpunkt (klick_zuerst). Vorher lesend: ist die Position inzwischen weg, war der erste Klick doch wirksam.
+            # Prüfer NZ2 (M1): Zweitversuch NUR, wenn das Terminal-Journal lesbar ist und seit dem ersten Klick NICHTS zu diesem Ticket
+            # zeigt — sonst könnte unter Server-Verzug (DO1/DO2: Ausführung 6–23 s) ein zweiter Close-Auftrag hinter dem ersten herlaufen;
+            # auf einem Netting-Konto wäre das eine NEUE Gegenposition. Journal nicht lesbar = kein Beweis = kein Zweitversuch.
+            if position_weg():
+                trail.append("Position weg (nach dem Warten)")
+                return "zu"
+            dlg, knopf = _finde_close_dialog(w, ticket)        # S1: Dialog des ersten Klicks kam doch noch
+            if knopf is None:
+                _jr = journal_seit_klick() if journal_seit_klick else (False, [], "kein Journal-Rückruf")
+                lesbar, jz = _jr[0], _jr[1]
+                if not lesbar:
+                    trail.append(f"Menü zu, nach {CLOSE_NACH_MENUE_S:g} s kein Close-Dialog — "
+                                 f"{(_jr[2] if len(_jr) > 2 and _jr[2] else 'Journal nicht lesbar')}, KEIN Zweitversuch")
+                elif jz:
+                    trail.append(f"Menü zu, kein Close-Dialog, aber das Journal zeigt eine Anfrage zu #{ticket} ('{jz[-1][:80]}') — "
+                                 f"KEIN Zweitversuch, warte {CLOSE_NACH_MENUE_S:g} s")
+                    ende = time.time() + CLOSE_NACH_MENUE_S
+                    while time.time() < ende:
+                        if position_weg():
+                            trail.append("Position weg (Anfrage aus dem ersten Klick)")
+                            return "zu"
+                        _warte(0.25, 0.25)
+                elif is_paused():
+                    trail.append("⏸ Echo pausiert — kein Zweitversuch")
+                    return "pause"
+                else:
+                    trail.append(f"Menü zu, nach {CLOSE_NACH_MENUE_S:g} s kein Close-Dialog, Journal ohne Anfrage zu #{ticket} — "
+                                 f"Zweitversuch mit echtem Klick auf den Menüpunkt ({pname})")
+                    st2 = _punkt_klicken(px_, py_, klick_zuerst=True)
+                    if st2 == "geklickt":
+                        trail.append(f"'Position schliessen' erneut geklickt, echter Klick ({pname})")
+                        haft2 = True
+                        ende = time.time() + CLOSE_NACH_MENUE_S
+                        while time.time() < ende:
+                            if position_weg():
+                                trail.append("Position weg (Ein-Klick-Modus, Zweitversuch)")
+                                return "zu"
+                            dlg, knopf = _finde_close_dialog(w, ticket)
+                            if knopf is not None:
+                                break
+                            if haft2:   # S3: erster echter Ein-Klick-Handel dieses Terminals → zustimmen, aber NICHT nachklicken
+                                st_h2 = _einklick_haftung_annehmen(w, trail)
+                                if st_h2 != "keiner":
+                                    haft2 = False
+                                if st_h2 == "gescheitert":
+                                    return "haftung"
+                                if st_h2 == "angenommen":
+                                    trail.append("Haftungsausschluss nach dem Zweitversuch angenommen — kein weiterer Klick in diesem Lauf")
+                                    return "ohne_wirkung"
+                            _warte(0.25, 0.25)
+                    else:
+                        if st2 in ("ausgegraut", "kein_menue"):   # S2: Menü nicht offen stehen lassen
+                            try:
+                                _el_tasten(w, "{ESC}", set_foreground=False)
+                            except Exception:
+                                pass
+                        trail.append(f"Zweitversuch: Menüpunkt kam nicht mehr ({st2}) — nichts weiter geklickt")
+                        dlg, knopf = _finde_close_dialog(w, ticket)   # S1: modaler Dialog des ersten Klicks blockt das Menü?
         if knopf is None:
             return "ohne_wirkung"
         try:
@@ -15205,7 +15302,27 @@ def run_close(cfg_path, cmd):
                               "anker-" + os.path.basename(cfg_path))
     _lt0 = time.localtime()
     _ab_s = _lt0.tm_hour * 3600 + _lt0.tm_min * 60 + _lt0.tm_sec - 1   # NZ1: Journal ab hier (Ortszeit des PCs, wie order_anfrage_im_journal)
-    ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg)
+    def journal_seit_klick():
+        """NZ2: (darf_zweitversuch_lesen, Zeilen zu #ticket seit dem Klick, Grund) — nur lesen. Prüfer NZ2: (1) nur auf einem HEDGING-Konto
+        (auf Netting könnte ein zweiter Close eine neue Gegenposition eröffnen), (2) „lesbar“ nur, wenn die Journal-Datei von HEUTE Zeilen
+        lieferte (der Rückfall auf gestern wäre lesbar ohne Ticket-Zeile = falscher Freibrief)."""
+        try:
+            z = _order_api_zustand(path, expected, symbol or pos["symbol"]) or {}
+            if z.get("hedging") is not True:
+                return False, [], ("kein Hedging-Konto" if z.get("hedging") is False else "Kontoart nicht lesbar")
+            dp = z.get("data_path") or ""
+            if not dp:
+                return False, [], "Journal-Ordner nicht lesbar"
+            heute = _mt5_journal_zeilen_tag(dp, 0, 400)
+            _lt = time.localtime()
+            alle = (_mt5_journal_zeilen_tag(dp, 1, 400) + heute) if (_lt.tm_hour == 0 and _lt.tm_min < 15) else heute
+            if not heute:
+                return False, [], "Journal von heute nicht lesbar"
+            return True, close_journal_zeilen(alle, ticket, _ab_s, n=5), ""
+        except Exception:
+            return False, [], "Journal nicht lesbar"
+
+    ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=journal_seit_klick)
 
     def _journal_satz():
         """NZ1 (10.11.2026): nur lesen — was sagt das Terminal-Journal zu diesem Ticket seit dem Klick? Leer, wenn nichts lesbar."""
