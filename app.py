@@ -44203,15 +44203,45 @@ def fd_nachplan_urteil(p, jetzt, tz=None):
     return True, ""
 
 
+def fd_nachplan_riegel(p, jetzt):
+    """Riegel DIREKT vor dem Nachplanen (Prüfer S2 10.11.2026, MUSS 2: der Auftrags-Riegel liegt Minuten zurück; sfTick kann den überfälligen Plan inzwischen neu
+    geclaimt haben und Puls/Echo läuft — Echo setzt kein orbit_gesendet_at). '' = frei, sonst Grund. Lesefehler = unklar (fail-closed).
+    Geprüft: Claim DIESES Plans jünger als 15 min · offenes order_signale für den Plan oder die ID · offener Trade der ID · ein anderer Start der ID in ±10 min."""
+    c = _ap_ts((p or {}).get("start_um_gestartet_at"))
+    if c and (jetzt - c).total_seconds() < 900:
+        return "Start eben geclaimt (läuft gerade)"
+    uid, pid = str((p or {}).get("user_id") or ""), str((p or {}).get("id") or "")
+    if not re.fullmatch(r"[0-9a-f-]{36}", uid):
+        return "Zustand unklar (keine ID am Plan)"
+    try:
+        seit = (jetzt - timedelta(minutes=15)).isoformat()
+        if sb_select("order_signale", {"select": "id", "status": "not.in.(fertig,fehler,verfallen,verworfen)", "created_at": f"gte.{seit}",
+                                       "or": f"(plan_id.eq.{pid},user_id.eq.{uid})", "limit": "1"}):
+            return "Order-Signal offen"
+        if sb_select("trade_plans", {"select": "id", "user_id": f"eq.{uid}", "status": "eq.open", "limit": "1"}):
+            return "offener Trade dieser ID"
+        if sb_select("trade_plans", {"select": "id", "user_id": f"eq.{uid}", "status": "eq.planned", "id": f"neq.{pid}",
+                                     "start_um": f"gte.{(jetzt - timedelta(minutes=10)).isoformat()}",
+                                     "and": f"(start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()})", "limit": "1"}):
+            return "anderer Start dieser ID in ±10 min"
+    except Exception as e:
+        return f"Zustand unklar (Lesefehler {type(e).__name__})"
+    return ""
+
+
 def fd_nachplanen(plan_id, jetzt, rnd=None):
     """Nachplanen per Supabase wie feedback-nachplanen-per-supabase: neue Startzeit jetzt + 15–30 min (gestreut, ≥ 5 min zu anderen Starts der ID), Claim zurück,
-    start_fehler.status 'neu'. Guard: planned, nichts gesendet, updated_at unverändert. → Text | None."""
+    start_fehler.status 'neu'. Riegel direkt davor (fd_nachplan_riegel). Guard: planned, nichts gesendet, Claim und updated_at genau wie gelesen. → Text | None.
+    Firmen-Abstand, Gegenrichtung und Big-Trade-Riegel prüft die DB beim Claim (Trigger) und der Tab beim Start wie bei jedem Plan — hier nur ≥ 5 min je ID."""
     rnd = rnd or random.SystemRandom()
     p = (sb_select("trade_plans", {"select": "id,user_id,status,start_um,started_at,orbit_gesendet_at,start_um_gestartet_at,updated_at,mt5_baseline",
                                    "id": f"eq.{plan_id}"}) or [None])[0]
     ja, grund = fd_nachplan_urteil(p, jetzt)
     if not ja:
         return None if p is None else f"nicht nachgeplant: {grund}"
+    riegel = fd_nachplan_riegel(p, jetzt)
+    if riegel:
+        return f"nicht nachgeplant: {riegel}"
     andere = [_ap_ts(x.get("start_um")) for x in sb_select("trade_plans", {"select": "start_um", "user_id": f"eq.{p['user_id']}", "status": "eq.planned",
               "id": f"neq.{plan_id}", "start_um": f"gte.{jetzt.isoformat()}"}) or []]
     neu = jetzt + timedelta(minutes=rnd.uniform(15, 30))
@@ -44221,7 +44251,9 @@ def fd_nachplanen(plan_id, jetzt, rnd=None):
         neu += timedelta(minutes=rnd.uniform(5, 8))
     else:
         return "nicht nachgeplant: kein freier Slot (≥ 5 min zu den anderen Starts der ID)"
-    filt = {"id": f"eq.{plan_id}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null", "updated_at": f"eq.{p['updated_at']}"}
+    filt = {"id": f"eq.{plan_id}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null", "updated_at": f"eq.{p['updated_at']}",
+            # Prüfer S2 (MUSS 2): Claim genau wie gelesen — hat sfTick seit der Lesung neu geclaimt, trifft das Update keine Zeile
+            "start_um_gestartet_at": (f"eq.{p['start_um_gestartet_at']}" if p.get("start_um_gestartet_at") else "is.null")}
     if not sb_update("trade_plans", filt, {"start_um": neu.isoformat(), "start_um_gestartet_at": None}):
         return "nicht nachgeplant: Plan hat sich eben geändert"
     try:

@@ -37,7 +37,8 @@ RAILWAY_HOST = "web-production-bec81.up.railway.app"
 #   dns_test   — lesen: löst der PC den Railway-Namen gerade auf?
 #   uac_lesen  — lesen: wie viele consent.exe (UAC-Abfragen) sind offen?
 #   mt5_update — Reparatur: stille Aufgabe „Prophos MT5-Update“ anstoßen (spielt den MT5-Build ohne UAC ein, prophos-mt5-update-ohne-uac)
-#   augen_neu  — Reparatur: Augen-Regel verwerfen und Augen (cdp) neu lesen (prophos-windows-pcs, 27.10.2026)
+#   augen_neu  — Reparatur: Augen-Regel verwerfen und Augen (cdp) neu lesen (prophos-windows-pcs, 27.10.2026). Hinweis S2: ist Railway in dem Moment nicht
+#                erreichbar, fehlt die Regel und die Augen lesen bis zur nächsten Antwort nichts — gewollt (lieber kurz blind als mit alter Regel)
 BEFEHLE = {
     "dns_test": "$r = Resolve-DnsName -Name '" + RAILWAY_HOST + "' -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue; if($r){ 'dns_ok' } else { 'dns_fehlt' }",
     "uac_lesen": "$n = @(Get-Process consent -ErrorAction SilentlyContinue).Count; \"consent=$n\"",

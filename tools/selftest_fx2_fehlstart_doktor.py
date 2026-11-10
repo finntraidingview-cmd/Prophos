@@ -101,9 +101,18 @@ PLAN = dict(p0, id="p-1", user_id=U, updated_at="u1")
 ANDERE = [{"start_um": (JETZT + timedelta(minutes=20)).isoformat()}]
 
 
+NR = {}
+
+
 def sel_plan(t, p):
     if t == "trade_plans" and p.get("id") == "eq.p-1":
         return [dict(PLAN)]
+    if t == "order_signale":
+        return [{"id": "s"}] if NR.get("signal") else []
+    if t == "trade_plans" and p.get("status") == "eq.open":
+        return [{"id": "o"}] if NR.get("open") else []
+    if t == "trade_plans" and "and" in p:
+        return [{"id": "b"}] if NR.get("bald") else []
     if t == "trade_plans":
         return list(ANDERE)
     return []
@@ -116,9 +125,27 @@ app._sb_anfrage = lambda *a, **k: RPC.append(k.get("json"))
 txt = app.fd_nachplanen("p-1", JETZT, random.Random(3))
 neu = app._ap_ts(UPD[0][2]["start_um"]) if UPD else None
 check(neu and 15 * 60 <= (neu - JETZT).total_seconds() and abs((neu - app._ap_ts(ANDERE[0]["start_um"])).total_seconds()) >= 300
-      and UPD[0][1] == {"id": "eq.p-1", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null", "updated_at": "eq.u1"}
+      and UPD[0][1] == {"id": "eq.p-1", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null", "updated_at": "eq.u1",
+                         "start_um_gestartet_at": "is.null"}
       and UPD[0][2]["start_um_gestartet_at"] is None and RPC and RPC[0]["p_key"] == "start_fehler" and RPC[0]["p_patch"]["status"] == "neu"
       and txt.startswith("nachgeplant auf"), f"Supabase-Nachplanen: ≥ 15 min, ≥ 5 min zu anderen Starts der ID, Claim zurück, start_fehler neu ({txt})")
+# Prüfer S2 (MUSS 2): Riegel direkt vor dem Nachplanen + Claim im Update-Filter
+PLAN["start_um_gestartet_at"] = (JETZT - timedelta(minutes=40)).isoformat()
+UPD.clear()
+app.fd_nachplanen("p-1", JETZT, random.Random(3))
+check(UPD and UPD[0][1].get("start_um_gestartet_at") == "eq." + PLAN["start_um_gestartet_at"],
+      "Update-Filter enthält den gelesenen Claim — hat sfTick seither neu geclaimt, trifft das Update nichts")
+PLAN["start_um_gestartet_at"] = (JETZT - timedelta(minutes=3)).isoformat()
+UPD.clear()
+t1 = app.fd_nachplanen("p-1", JETZT, random.Random(3))
+ok = not UPD and "eben geclaimt" in t1
+PLAN["start_um_gestartet_at"] = None
+for k, frag in (("signal", "Order-Signal"), ("open", "offener Trade"), ("bald", "±10 min")):
+    NR.clear(); NR[k] = True
+    tk = app.fd_nachplanen("p-1", JETZT, random.Random(3))
+    ok &= not UPD and frag in tk
+NR.clear()
+check(ok, "nicht nachgeplant bei frischem Claim (< 15 min, Puls/Echo läuft), offenem Signal, offenem Trade der ID oder anderem Start in ±10 min")
 
 print("5) Voller Lauf (Gehirn)")
 E_ = "33333333-3333-3333-3333-333333333333"
