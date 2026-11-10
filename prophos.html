@@ -18902,8 +18902,21 @@
       // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ — anfragbar 0, Railway lehnt die Anfrage dann auch ab
       const zyT = window._wdZyklusRoh?.(r.account_id)
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt)
-        return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0,
+        return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, minus: Number(zyT.gewinn) < 0 ? `Zyklus im Minus ${zyklusTxt(zyT.gewinn)} $ · erst ins Plus` : `Zyklus ${zyklusTxt(zyT.gewinn)} $ · erst ab dem Mindest-Gewinn`,
                  sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` }   // E4: Mindest-Gewinn aus den WD-Einstellungen (Railway zyklus.min_usd)
+      /* PO2 (Finn 11.11.2026, Admin → Payouts zeigte ein Tradeify-150k-WD-Konto „anfragbar 2.713 $“, die Konto-Kachel „Zyklus-Gewinn −5.416 $ · Gesperrt“): Railway
+       * (app.py tradeify_zyklus_konto) liefert grund_code „unbekannt“, wenn es den Zyklus nicht entscheiden kann — u. a. hält es einen Zyklus-Verlust über dem Max DD
+       * für unplausibel, obwohl die WD-Liq bei Größe + 100 fest steht (161.444 → 156.028 = −5.416 $ bei Max DD 4.500 $). Dann war gesperrt false und die Zeile lief in die
+       * normale Rechnung. Jetzt urteilt in diesem Fall dieselbe Quelle wie die Kachel: GET /konto-ziele (kz_rechnen, Zyklus aus den Trades), Prüfzeile
+       * „Mindest-Net-Profit“ (Schlüssel-Text aus app.py). Solange das Urteil fehlt: kein Betrag, keine Summe. Nur ab dem Zyklus, ab dem die Regel gilt (ab_zyklus). */
+      if(zyT && zyT.art === 'tradeify' && zyT.grund_code === 'unbekannt' && (Number(zyT.nr) || 1) >= (Number(zyT.ab_zyklus) || 2)){
+        const u = window._admOdUrteil && window._admOdUrteil.cache[String(r.account_id)], mn = u && u.mn
+        if(mn && mn.gesperrt)
+          return { regel: Object.assign({}, regel, { deckel: null }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, minus: /^−/.test(mn.zg || '') ? `Zyklus im Minus ${mn.zg} · erst ins Plus` : `Zyklus ${mn.zg || '—'} · erst ab dem Mindest-Gewinn`,
+                   sub: `Zyklus ${mn.zg || '—'} · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` }
+        // ohne Prüfzeile (Kachel ohne Payout-Urteil) die normale Rechnung wie vor PO2; nur „noch nicht geladen“ bzw. Ladefehler hält den Betrag zurück (Gegenprüfung)
+        if(!u || (u.fehler && !mn)) return { regel, grund: u ? `Zyklus nicht prüfbar (${zyT.grund || 'Railway: unbekannt'})` : 'Zyklus wird geprüft …', anfragbar: null, erhalten: null, zyklusOffen: true }   // nachgeladen wird in admCalRender (PO2)
+      }
       if(c.profit == null) return { regel, grund: c.size == null ? 'Größe unklar' : 'keine Balance', anfragbar: null, erhalten: null }
       // Deckel je Größe (Lucid, 29.10.2026): die Regel bekommt den Deckel ihrer Größe, damit Anzeige („max. …") und Rechnung gleich sind
       if(regel.deckelJeGroesse){
@@ -20004,7 +20017,12 @@
         chip.textContent = `angefragt ${admGeld(Number(t.amount) || 0, t.currency)}${tag ? ' · ' + tag : ''}`
         chip.title = t.liegt_bei ? 'Liegt bei ' + t.liegt_bei : 'Anfrage offen, noch nicht erhalten'
         st.appendChild(chip)
-      }else if(r.wd_ready){
+      }else if(r.calc && r.calc.anf && r.calc.anf.minus){
+        // PO2 (Finn 11.11.2026): Zyklus im Minus ab Zyklus 2 → kein „anfragbar“, dezent der Grund
+        const s = document.createElement('div'); s.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:2px;white-space:normal;max-width:220px'
+        s.textContent = r.calc.anf.minus; s.title = 'Tradeify/Lucid: Payout erst, wenn der Zyklus im Plus ist (Mindest-Net-Profit, wie die Konto-Seite)'
+        st.appendChild(s)
+      }else if(r.wd_ready && !(r.calc && r.calc.anf && r.calc.anf.zyklusOffen)){   // PO2: Zyklus noch nicht geprüft → noch kein Knopf
         const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-good'
         chip.style.cssText = 'margin-left:8px;border:0;cursor:pointer'
         chip.textContent = 'anfragbar'; chip.title = `Payout für ${admShortName(r.person || '—')} anfragen`
@@ -20707,11 +20725,14 @@
           const u = d.urteil || {}
           // ok null = keine Planer-Regel/kein Payout-Urteil → Zeile bleibt „Waiting for Payout“ wie bisher
           neu = { at: Date.now(), ok: u.art === 'payout' && typeof u.ok === 'boolean' ? u.ok : null, fehlt: admOdFehlt(d), grund: String(u.grund || '') }
+          // PO2: Prüfzeilen „Mindest-Net-Profit“ / „Zyklus-Gewinn“ der Kachel (app.py kz_rechnen, Schlüssel-Texte) — gesperrt = „nein“ wie das ✗ auf der Konto-Seite
+          const cks = Array.isArray(u.checks) ? u.checks : [], cMn = cks.find(c => Array.isArray(c) && c[1] === 'Mindest-Net-Profit'), cZg = cks.find(c => Array.isArray(c) && c[1] === 'Zyklus-Gewinn')
+          neu.mn = cMn ? { gesperrt: cMn[0] === 'nein', zg: cZg ? String(cZg[2] || '') : '' } : null
         }catch(e){ neu = { at: Date.now(), ok: null, fehlt: '', grund: '', fehler: String(e && e.message || e) } }
         finally{ _admOd.laeuft[id] = false }
         const alt = _admOd.cache[id]
         _admOd.cache[id] = neu
-        if(!alt || alt.ok !== neu.ok || alt.fehlt !== neu.fehlt) try{ admCalRender() }catch(e){ console.warn('[PO1]', e) }
+        if(!alt || alt.ok !== neu.ok || alt.fehlt !== neu.fehlt || JSON.stringify(alt.mn || null) !== JSON.stringify(neu.mn || null)) try{ admCalRender() }catch(e){ console.warn('[PO1]', e) }
       }
 
       /* RC2 RECOVERER IN PAYOUTS (Finn 10.11.2026: „Kannst du die Accounts auch so flaggen, die Recovery sind? … damit ich das auch unter Admin → Payouts sehe“).
@@ -20774,6 +20795,9 @@
           const faellig = tag ? tage <= 0 : !!r.wd_ready
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
+          // PO2: Railway kann den Tradeify-/Lucid-Zyklus nicht entscheiden → Urteil der Konto-Kachel holen (/konto-ziele, je Konto höchstens alle 5 min, nur diese Zeilen)
+          if(istWd(r)){ const zyU = window._wdZyklusRoh?.(r.account_id)
+            if(zyU && zyU.art === 'tradeify' && zyU.grund_code === 'unbekannt'){ const u = _admOd.cache[String(r.account_id)]; if(!u || Date.now() - u.at > ADM_OD_TTL_MS) admOdLaden(String(r.account_id)) } }
           // PO1: On Demand ohne Termin — anfragbar laut Urteil von /konto-ziele (od.ok null = noch nicht geladen/nicht lesbar → wie bisher Waiting)
           if(!istWd(r) && !tag && admRowOnDemand(r)){
             const u = _admOd.cache[String(r.account_id)]
@@ -20864,8 +20888,10 @@
         // Tabelle (08.10.2026): zwei Gruppen statt Tages-Gruppen — Winning Days (Futures) · CFD (Waiting for Payout, Termin aufsteigend,
         // ohne Termin zuletzt). Der Klick im Raster springt zur ersten CFD-Zeile dieses Tags (data-cal-tag an der Zeile).
         const gruppen = []
+        // PO2: Zyklus im Minus (gesperrt) nach unten — nicht anfragbar, auch wenn 5/5
+        const wdMinus = r => (r.calc && r.calc.anf && (r.calc.anf.minus || r.calc.anf.zyklusOffen)) ? 1 : 0
         const wd = cal.filter(istWd)
-          .sort((a, b) => (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
+          .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
         // PO1 (Finn 09.11.2026): anfragbar oben — fällige Termine (heute/überfällig) und erfüllte On-Demand-Konten zuerst, sonst wie bisher nach Termin
         const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!(r.calc.od && r.calc.od.ok === true)) ? 0 : 1
         const cfd = cal.filter(r => !istWd(r))
@@ -58354,7 +58380,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2170'
+  const OS_TAB_BUILD = '2026-09-22.2171'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
