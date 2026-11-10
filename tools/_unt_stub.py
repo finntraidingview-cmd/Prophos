@@ -11,4 +11,8 @@ def unt_stub(ns):
     # UNT4: Funded-Regeln je Unternehmen — im Test jede ID Standard (dieselbe Regel-Zeile)
     ns.setdefault("fd_unt_reg", lambda reg, art, uid, ktx=None, streng=False: reg)
     ns.setdefault("fd_unt_an", lambda reg, art, uid, ktx=None, streng=False: [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")])
+    # TW1 (11.11.2026): Handels-Würfel im Test aus (= 100 %, jedes Konto handelt wie vor TW1); den Würfel selbst prüft tools/selftest_tw1_handels_wuerfel.py
+    ns.setdefault("tw_pause_grund", lambda planer, a, tag, werte=None, ktx=None: None)
+    ns.setdefault("tw_werte", lambda frisch=False: {})
+    ns.setdefault("tw_nachplan_filter", lambda kand, konten, tag, firmen: kand)
     return ns

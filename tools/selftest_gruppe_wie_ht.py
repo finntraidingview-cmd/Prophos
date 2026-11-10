@@ -183,6 +183,7 @@ ok("ap_gruppe_von_uid(uid)" in fn_text("admin_auto_plan"), "GET /admin/auto-plan
 
 
 print("GRUPPE NACHPLANEN (02.11.2026)")
+ns.setdefault("tw_nachplan_filter", lambda kand, konten, tag, firmen: kand)   # TW1 (11.11.2026): Handels-Würfel im Test aus — prüft tools/selftest_tw1_handels_wuerfel.py
 for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE"):
     exec(re.search(rf"^{k} = \([^)]*\)", SRC, re.M | re.S).group(0), ns)
 for pat in (r"^AP_TYPEN = .*$", r"^AP_NACHPLAN_VORLAUF_MIN = .*$", r"^AP_NACHPLAN_REST_RE = .*$", r"^AP_REST_MIN_CFD = .*$", r"^AP_NEU_BIS_STANDARD = .*$",

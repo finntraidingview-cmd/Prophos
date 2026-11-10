@@ -16829,7 +16829,8 @@ HAND_NACH = {"challenge": "funded", "phase1": "phase2", "phase2": "funded_cfd"}
 # 5. Gruppe „Planer braucht dich" (Master 09.10.2026): Gründe des letzten Nachtlaufs, die eine Hand brauchen — ohne die, die schon eine andere
 # Gruppe zeigt (Ziel erreicht = bestanden, noch nicht erledigt = Überprüfen) und ohne „hat schon einen geplanten/laufenden Plan" (kein Fall)
 # Tagesdeckel (19.10.2026, Finn: „ich brauch nicht jeden einzelnen Apex sekundenschreiben“): kein Hand-Fall, der Bot nimmt das Konto an einem anderen Tag dran
-HAND_PLANER_OHNE = re.compile(r"Ziel erreicht|bestanden|noch nicht erledigt|Überprüfen|geplanten/laufenden Plan|Manuelle Arbeit|Tagesdeckel", re.I)
+# Pause-Tag (TW1 11.11.2026, Handels-Würfel): gewollt kein Trade heute — kein Hand-Fall, morgen wird neu gewürfelt
+HAND_PLANER_OHNE = re.compile(r"Ziel erreicht|bestanden|noch nicht erledigt|Überprüfen|geplanten/laufenden Plan|Manuelle Arbeit|Tagesdeckel|Pause-Tag", re.I)
 _hand_cache = {}
 _hand_lock = threading.Lock()
 
@@ -17681,6 +17682,11 @@ def admin_wd_plaene():
                     continue
                 if blockiert:
                     uebersprungen.append({"master_account_id": mid, "grund": blockiert}); continue
+                # TW1 HANDELS-WÜRFEL (11.11.2026, Finn: „Das geht hier um die kompletten Winning Days"): erst hier, nach dem Verknüpfen — ein schon angelegter
+                # Farmer-Plan desselben Tages bleibt. Pause-Tag → kein Plan; der Tab schreibt den Grund als Hinweis (WD_AUTO_HINWEISE: morgen wieder dabei).
+                # Fester Wurf je Konto × Plan-Tag (planned_for, sonst heute in Dubai), Lesefehler → Plan wie bisher.
+                if tw_pause_grund("winning_days", acc[0], neu_tag[:10] or datetime.now(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")):
+                    uebersprungen.append({"master_account_id": mid, "grund": TW_GRUND_WD}); continue
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
                 body["winning_day"] = True   # Farmer-Plan = Winning Day (25.09.2026, sql/2026-09-25_trade_plans_winning_day.sql)
@@ -30049,9 +30055,26 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # Unbestätigte, nie gestartete Auto-Vorschläge (Finn: „unbestätigte verfallen") ersetzt dieser Lauf — sie zählen schon beim
     # Rechnen nicht (sonst stünden ihre Konten im Probelauf als „hat schon einen Plan"); gelöscht wird erst vor dem Anlegen.
     # NACHPLANEN (nur_konten): nichts wird ersetzt — jeder bestehende Vorschlag zählt als Plan und bleibt stehen.
-    def _vorschlag(p):
+    # TW1 HANDELS-WÜRFEL (Prüfer S2 11.11.2026): einmal je Lauf gelesen — ein unbestätigter Vorschlag eines Kontos, das heute Pause-Tag hat (Wert nach dem
+    # Nachtlauf gesenkt / SQL später eingespielt), bleibt stehen statt ersetzt: der Würfel nimmt nur NEUE Pläne weg, nie bestehende
+    try:
+        _tw_w, _tw_k = tw_werte(), ap_unt_kontext()
+    except Exception as e:
+        print(f"[handels-wuerfel] ⚠️ Challenge-Planer: {type(e).__name__}: {e} — alle Konten handeln", flush=True)
+        _tw_w, _tw_k = {}, {}
+
+    def _tw_pause_plan(p):
+        if not _tw_w or not p.get("master_account_id"):
+            return False
+        pl = "challenge_futures" if ap_klasse(p.get("route"), p.get("master_firm")) == "futures" else "challenge_cfd"   # Route des Vorschlags wie die Konto-Schleife
+        return bool(tw_pause_grund(pl, {"id": p.get("master_account_id"), "user_id": p.get("user_id")}, str(p.get("planned_for") or tag)[:10], _tw_w, _tw_k))
+
+    def _vorschlag_roh(p):
         return (not nachplanen) and p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
             and not p.get("start_um_gestartet_at") and not p.get("hand_werte_at")   # Werte von Hand → bleibt stehen (08.10.2026)
+
+    def _vorschlag(p):
+        return _vorschlag_roh(p) and not _tw_pause_plan(p)   # Pause-Tag-Konto → Vorschlag bleibt stehen (TW1, Prüfer S2) — auch beim DELETE unten
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc",
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     # LIEGENGEBLIEBENE AUTO-PLÄNE (08.10.2026, Master: Jacob 72c2a073 The5%ers + 1429b717 FundingPips seit 07.10., Chris 840c8097):
@@ -30065,7 +30088,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 
     def _liegengeblieben(p):
         return ap_plan_verfallen(p, _grenze, jetzt)
-    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_pl,blown,"
+    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,route,status,richtung,master_tp,master_pl,blown,"
                                                 "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
                                                 "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler,"
                                                 "kette_te:mt5_baseline->kette->tagesende", "order": "id.asc",
@@ -30073,6 +30096,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
                   "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
     plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p) and not ap_ist_waise(p)]   # Waise: Konto gelöscht (09.10.2026)
+    # TW1 (Prüfer Runde 2): Vorschläge von Pause-Tag-Konten, die stehen bleiben — vom Lösch-Filter vor dem Anlegen ausgenommen (sonst wären sie trotzdem weg)
+    _tw_behalt_ids = sorted({str(p.get("id")) for p in roh_plaene if p.get("id") and _vorschlag_roh(p) and _tw_pause_plan(p)})
     # Letzter Topstep-Trade des Tages (kette_te, Finn 30.10.2026): Ergebnis genau gelesen, wartet nur auf Finns Haken — für den Planer wie abgehakt:
     # heute „schon gehandelt", am Folgetag frei, geblowt über blown ausgeschlossen. Nur im Speicher, in der DB bleibt er in Überprüfen
     plaene = [dict(p, status="completed", completed_at=p.get("completed_at") or p.get("ended_at"))
@@ -30216,6 +30241,21 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                            "tage": ap_tage_ist(a, eig),          # Mindesttage (ist, soll) oder None — Mini-Trade bei Ziel erreicht (09.10.2026)
                            "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
+
+    # TW1 HANDELS-WÜRFEL (11.11.2026, Finn: „Der Tag wird quasi gewürfelt … Es geht hier um jedes Konto, also alles komplett"): je Konto × Tag fester
+    # Wurf (tw_handelt) — Pause-Tag = heute kein neuer Plan, sichtbar ausgelassen. Vor dem Tagesdeckel: ein Pause-Konto belegt keinen Deckel-Platz und
+    # geht nicht in Waage/Delta. CFD bzw. Futures nach ap_klasse (Route vor Firma). Bestehende Pläne erreichen diese Stelle gar nicht (oben „schon geplant").
+    # _tw_w/_tw_k: oben einmal je Lauf gelesen (bei _vorschlag)
+    if _tw_w:
+        _tw_behalten = []
+        for k in kandidaten:
+            _tw_p = "challenge_futures" if ap_klasse((k.get("regel") or {}).get("route"), k["a"].get("firm")) == "futures" else "challenge_cfd"
+            _tw_g = tw_pause_grund(_tw_p, k["a"], tag, _tw_w, _tw_k)
+            if _tw_g:
+                ausgelassen.append(dict(k["zeile"], grund=_tw_g))
+            else:
+                _tw_behalten.append(k)
+        kandidaten = _tw_behalten
 
     # TAGESDECKEL JE FIRMA (19.10.2026, Finn: Apex 2–3 Trades je ID und Tag, bis er etwas anderes sagt; CFD weiter wie immer):
     # regel.max_konten_tag, Rest sichtbar ausgelassen — vor dem Delta, damit nur die behaltenen Konten in den Live-Stand gehen
@@ -30541,6 +30581,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     if not trocken and not nachplanen:             # NACHPLANEN löscht nie (bestehende Vorschläge/Pläne bleiben)
         weg = {"user_id": in_uids, "auto_plan": "eq.true", "status": "eq.planned",
                "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null"}
+        if _tw_behalt_ids:
+            weg["id"] = "not.in.(" + ",".join(_tw_behalt_ids) + ")"   # TW1: Vorschlag eines Pause-Tag-Kontos bleibt (beide DELETE-Zweige unten)
         try:                                       # von Hand geänderte Vorschläge bleiben (hand_werte_at, 08.10.2026)
             _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(),
                         params=dict(weg, hand_werte_at="is.null")).raise_for_status()
@@ -42856,6 +42898,190 @@ def _ap_plan_am_tag(p, tag, tz):
         return True
 
 
+# ══ TW1 HANDELS-WÜRFEL (11.11.2026, Finn ~02:00/02:05 Dubai: „Aktuell wird ja jeder Trade jeden Tag geplant … 75 % aller Trades aller Accounts machen einen
+# Trade, und die anderen 25 % nicht … Die werden einfach nicht getradet, fertig. Oder am nächsten Tag wird wieder neu gewürfelt. Es kann auch sein, dass mal
+# kurz 1, 2, 3 Tage gar nicht getradet wird … Ich kann für jedes einzelne Ding diese Wahrscheinlichkeit selber einstellen, aber das Prinzip soll für alle gelten.")
+# Je Planer × Unternehmen EIN Prozentwert (Tabelle planer_handel_wuerfel, sql/2026-11-11_tageswuerfel_75.sql): so viele Konten bekommen je Tag ihren Trade.
+# Gewürfelt wird je Konto × Tag FEST (Hash statt Zufall je Lauf): das Nachplanen (5 min) hält ein Konto nur über die „festen Gründe" des letzten Laufs
+# draußen und der Funded-Takt rechnet jedes Mal alle Konten neu — ein Würfel je Lauf hätte die Pause-Tage bis mittags wieder aufgefüllt (Befund TW1).
+# Nachtlauf, Nachplanen, Knopf, Probelauf und Takt sehen so denselben Wurf. Der Würfel greift nur, wo ein NEUER Plan entstünde — bestehende, laufende und
+# von Hand angelegte Pläne bleiben. Keine Zeile / Tabelle fehlt / Lesefehler → 100 % = wie vor TW1. Ein Unternehmen hat seine eigene Zeile; ohne sie gilt
+# 100 % — es erbt den Wert von Hermann Technologies bewusst NICHT (Master 11.11.2026: „Emins Unternehmen eigene Einstellung, dort Standard 100 %"). ══
+TW_PLANER = ("challenge_cfd", "challenge_futures", "funded_cfd", "funded_futures", "winning_days")
+TW_PLANER_NAME = {"challenge_cfd": "Challenge-Planer CFD", "challenge_futures": "Challenge-Planer Futures", "funded_cfd": "Funded-Planer CFD",
+                  "funded_futures": "Funded-Planer Futures", "winning_days": "Winning Days"}
+TW_STANDARD_PCT = 100.0
+TW_CACHE_S = 60
+TW_GRUND = "Pause-Tag (Handels-Würfel {pct} %) — heute kein Trade, morgen neu gewürfelt"   # Schlüssel-Anfang „Pause-Tag" (HAND_PLANER_OHNE) — bewusst NICHT in AP_NACHPLAN_FEST_GRUENDE: hebt Finn den Wert tagsüber, holt das Nachplanen die Konten dazu
+TW_GRUND_WD = "Pause-Tag (Handels-Würfel) – heute kein Trade, morgen neu gewürfelt"         # = prophos.html WD_HINWEIS_PAUSE — nie umbenennen
+TW_ALT_S = 900          # Prüfer S3: bei einem kurzen Lesefehler gilt der letzte gute Stand bis zu 15 min weiter (wie ap_unt_kontext), sonst füllte ein
+                        # einzelner Supabase-Aussetzer in diesem Lauf alle Pause-Tage auf
+_tw = {"bis": 0.0, "werte": None, "tabelle": True, "fehler_at": 0.0, "gut": None, "gut_at": 0.0, "fehler": ""}
+_tw_lock = threading.Lock()
+
+
+def tw_wurf(planer, konto_id, tag):
+    """REIN RECHNEND (testbar): fester Wurf in [0, 1) je Planer × Konto × Tag (sha256, gleichverteilt). Gleiches Konto am gleichen Tag → gleicher Wurf."""
+    h = hashlib.sha256(f"tw1|{planer}|{konto_id}|{str(tag)[:10]}".encode("utf-8")).hexdigest()
+    return int(h[:13], 16) / float(16 ** 13)
+
+
+def tw_handelt(planer, konto_id, tag, pct):
+    """REIN RECHNEND (testbar): bekommt das Konto heute seinen Trade? pct None/≥ 100 → immer, ≤ 0 → nie, sonst Wurf × 100 < pct."""
+    p = _wd_num(pct)
+    if p is None or p >= 100:
+        return True
+    if p <= 0:
+        return False
+    return tw_wurf(planer, konto_id, tag) * 100.0 < p
+
+
+def tw_pct_von(werte, planer, gid):
+    """REIN RECHNEND (testbar): Prozent für Planer × Unternehmen aus {(planer, gruppe): pct}; gid None/'' = Standard (HT). Fehlt die Zeile → 100."""
+    v = _wd_num((werte or {}).get((str(planer), str(gid or ""))))
+    return float(v) if v is not None and 0 <= v <= 100 else TW_STANDARD_PCT
+
+
+def tw_werte(frisch=False):
+    """{(planer, gruppe): pct} aus planer_handel_wuerfel, 60 s gemerkt. Tabelle fehlt → {} (= überall 100 %, wie vor TW1). Lesefehler → der letzte gute Stand,
+    solange er ≤ TW_ALT_S alt ist, sonst {} (Prüfer S3). Höchstens stündlich geloggt; _tw["fehler"] trägt den Grund für GET /admin/handel-wuerfel."""
+    jetzt = time.time()
+    with _tw_lock:
+        if not frisch and _tw["werte"] is not None and _tw["bis"] > jetzt:
+            return _tw["werte"]
+    try:
+        rows = sb_select("planer_handel_wuerfel", {"select": "planer,gruppe,pct"}) or []
+        werte = {(str(r.get("planer")), str(r.get("gruppe") or "")): _wd_num(r.get("pct")) for r in rows if r.get("planer") in TW_PLANER}
+        with _tw_lock:
+            _tw.update(bis=jetzt + TW_CACHE_S, werte=werte, tabelle=True, gut=werte, gut_at=jetzt, fehler="")
+        return werte
+    except Exception as e:
+        _r = getattr(e, "response", None)
+        fehlt = getattr(_r, "status_code", None) in (400, 404) and "planer_handel_wuerfel" in str(getattr(_r, "text", "") or "")
+        with _tw_lock:
+            alt = (not fehlt) and _tw.get("gut") is not None and jetzt - (_tw.get("gut_at") or 0) <= TW_ALT_S
+            werte = _tw["gut"] if alt else {}
+            _tw.update(bis=jetzt + (TW_CACHE_S if fehlt else 15), werte=werte, tabelle=not fehlt,
+                       fehler="" if fehlt else f"nicht lesbar ({type(e).__name__}){' — letzter Stand gilt' if alt else ''}")
+        if jetzt - _tw["fehler_at"] > 3600:
+            _tw["fehler_at"] = jetzt
+            print(f"[handels-wuerfel] {'Tabelle fehlt (SQL 2026-11-11_tageswuerfel_75.sql) — alle Planer 100 %' if fehlt else '⚠️ nicht lesbar: ' + type(e).__name__ + (' — letzter Stand gilt' if alt else ' — alle Planer 100 %')}", flush=True)
+        return werte
+
+
+def tw_pct(planer, uid, werte=None, ktx=None):
+    """Prozent für das Unternehmen der ID: HT/ohne Unternehmen → Standard-Zeile, Mitglied eines Unternehmens → dessen Zeile (ohne: 100).
+    Kontext nicht sicher lesbar (ap_unt_kontext ok False) → 100 für jede ID (lieber wie bisher handeln als eine fremde Regel anwenden)."""
+    w = tw_werte() if werte is None else werte
+    if not w:
+        return TW_STANDARD_PCT
+    k = ktx if ktx is not None else ap_unt_kontext()
+    if not k.get("ok"):
+        return TW_STANDARD_PCT
+    gid = (k.get("gid_von") or {}).get(str(uid or ""))
+    return tw_pct_von(w, planer, gid)
+
+
+def tw_pause_grund(planer, a, tag, werte=None, ktx=None):
+    """Konto-Zeile a (id, user_id) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher)."""
+    try:
+        pct = tw_pct(planer, (a or {}).get("user_id"), werte, ktx)
+        if pct >= 100 or tw_handelt(planer, str((a or {}).get("id") or ""), tag, pct):
+            return None
+        return TW_GRUND_WD if planer == "winning_days" else TW_GRUND.format(pct=_tw_pct_txt(pct))
+    except Exception as e:
+        print(f"[handels-wuerfel] ⚠️ {planer}: {type(e).__name__}: {e} — handelt wie bisher", flush=True)
+        return None
+
+
+def _tw_pct_txt(p):
+    return (f"{p:.1f}".rstrip("0").rstrip(".")).replace(".", ",")
+
+
+def tw_nachplan_filter(kand, konten, tag, firmen):
+    """Nachplan-Kandidaten (Konto-IDs) ohne die Konten, die heute Pause-Tag haben (Challenge-Planer). Jeder Fehler → Liste unverändert."""
+    try:
+        w = tw_werte()
+        if not w or not kand:
+            return kand
+        if firmen is None:   # Aufrufer lesen auto_plan_regeln ohne die Spalte regeln (Prüfer Runde 2) — Route je Firma hier aus dem Standard
+            firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+        k, je = ap_unt_kontext(), {str(a.get("id")): a for a in konten or []}
+        out = []
+        for kid in kand:
+            a = je.get(str(kid))
+            regel = ap_regel_finden(firmen, a.get("firm")) if a else None
+            pl = "challenge_futures" if ap_klasse((regel or {}).get("route"), (a or {}).get("firm")) == "futures" else "challenge_cfd"
+            if not (a and tw_pause_grund(pl, a, tag, w, k)):
+                out.append(kid)
+        return out
+    except Exception as e:
+        print(f"[handels-wuerfel] ⚠️ Nachplan-Filter: {type(e).__name__}: {e}", flush=True)
+        return kand
+
+
+@app.route("/admin/handel-wuerfel", methods=["GET", "POST", "OPTIONS"])
+def admin_handel_wuerfel():
+    """TW1: GET [?unternehmen=gid] → {ok, werte: {planer: pct|None}, standard_pct, unternehmen: {gruppe_id, name}|None, darf, tabelle};
+    POST {planer, pct: 0–100 | None (= Zeile weg = 100 %), gruppe_id?} → {ok, werte}. Unternehmen + Recht wie die Funded-Einstellungen (_fd_unternehmen:
+    Admin wählt über ?unternehmen= bzw. gruppe_id, ohne = Standard = HT; sonst das eigene Unternehmen, ändern nur sein Verwalter). Karte „Handels-Würfel"
+    unter den Einstellungen jedes Planers (prophos.html Sektion HANDELS-WÜRFEL)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.method == "POST":
+        _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
+    admin, uid, _lese, _schreib, err = _fcp_login()
+    if err:
+        return err
+    gid, darf = _fd_unternehmen(admin, uid)
+    if not admin and not gid:
+        darf = False                              # HT-ID ohne Admin: nur ansehen (Standard ändert nur ein HT-Admin)
+    name, bekannt = None, None
+    if gid:
+        try:
+            _g = next((g for g in ap_planer_gruppen() if str(g.get("gruppe_id")) == str(gid)), None)
+            name, bekannt = (_g or {}).get("name"), _g is not None
+        except Exception:
+            name, bekannt = None, None
+    def antwort():
+        werte = tw_werte(frisch=True)
+        return {"ok": True, "werte": {p: werte.get((p, str(gid or ""))) for p in TW_PLANER}, "standard_pct": TW_STANDARD_PCT,
+                "unternehmen": ({"gruppe_id": str(gid), "name": name} if gid else None), "darf": bool(darf), "tabelle": bool(_tw.get("tabelle", True)),
+                "planer_namen": TW_PLANER_NAME, **({"fehler": _tw["fehler"]} if _tw.get("fehler") else {})}   # Prüfer K1: Lesefehler sichtbar statt „100 %"
+    if request.method == "GET":
+        return jsonify(antwort())
+    if not darf:
+        return jsonify({"ok": False, "msg": "nur ansehen — ändern darf der Admin (Standard) bzw. der Verwalter des Unternehmens"}), 403
+    if gid and bekannt is False:
+        return jsonify({"ok": False, "msg": "Unternehmen unbekannt (keine Planer-Gruppe mit dieser gruppe_id)"}), 400   # Prüfer K3
+    if gid and bekannt is None:
+        return jsonify({"ok": False, "msg": "Unternehmen gerade nicht prüfbar — gleich noch einmal"}), 502
+    body = request.get_json(silent=True) or {}
+    planer = str(body.get("planer") or "")
+    if planer not in TW_PLANER:
+        return jsonify({"ok": False, "msg": f"planer = {' | '.join(TW_PLANER)}"}), 400
+    roh = body.get("pct")
+    pct = None if roh in (None, "") else _wd_num(roh)
+    if roh not in (None, "") and (pct is None or isinstance(roh, bool) or not 0 <= pct <= 100):
+        return jsonify({"ok": False, "msg": "pct = 0 bis 100 (leer = 100 %)"}), 400
+    try:
+        if pct is None:
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/planer_handel_wuerfel", params={"planer": f"eq.{planer}", "gruppe": f"eq.{str(gid or '')}"},
+                        headers=_sb_headers("return=minimal"), timeout=12).raise_for_status()
+        else:
+            sb_upsert("planer_handel_wuerfel", {"planer": planer, "gruppe": str(gid or ""), "pct": round(float(pct), 2),
+                                                "updated_at": datetime.now(timezone.utc).isoformat(), "updated_von": str(uid) if uid else None})
+    except Exception as e:
+        _r = getattr(e, "response", None)
+        hinweis = " — sql/2026-11-11_tageswuerfel_75.sql eingespielt?" if "planer_handel_wuerfel" in str(getattr(_r, "text", "") or "") else ""
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__}){hinweis}"}), 502
+    print(f"[handels-wuerfel] {TW_PLANER_NAME[planer]} · {name or 'Standard (HT)'} → {'100 % (Zeile weg)' if pct is None else _tw_pct_txt(pct) + ' %'} "
+          f"durch {str(uid)[:8]}", flush=True)
+    return jsonify(antwort())
+
+
 AP_GRUND_TAGESDECKEL = "Tagesdeckel der Firma — höchstens {n} Konten je ID und Tag, dieses Konto kommt an einem anderen Tag dran"
 
 
@@ -43157,6 +43383,9 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz, gruppe=None):
     # 02:00–20:00 / CFD 02:00–18:00 Dubai — passt ein neues Konto noch ins Fenster seiner Klasse, startet es heute; sonst plant der Nachtlauf)
     kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at, ziel_frei=ziel_frei,
                                   jetzt=jetzt, neu_bis=None)
+    # TW1 HANDELS-WÜRFEL (Prüfer S4 11.11.2026): Pause-Tag-Konten vorab raus — derselbe feste Wurf wie in ap_planen (Klasse über die Route der Firmen-Regel des Standards),
+    # sonst wären sie in jedem 5-min-Takt Kandidat und lösten ein volles ap_planen aus, das nichts anlegt. Hebt Finn den Wert, sind sie im nächsten Takt dabei
+    kand = tw_nachplan_filter(kand, konten, tag, (reg.get("regeln") or {}).get("firmen") if isinstance(reg.get("regeln"), dict) else None)
     if not kand:
         ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None, kand
@@ -46574,6 +46803,11 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         elif r["aktion"] != "planen":
             erg["ausgelassen"].append(r)
         else:
+            # TW1 HANDELS-WÜRFEL (11.11.2026): Pause-Tag — nur wo ein neuer Trade entstünde („Ziel → Winning Days“ oben läuft weiter); belegt keinen Tagesdeckel-Platz
+            _tw_g = tw_pause_grund("funded_futures", a, cme_heute, None, _ktx)
+            if _tw_g:
+                erg["ausgelassen"].append(dict(r, aktion="aus", grund=_tw_g))
+                continue
             # letzter Trade (gestartet) — nie getradet: seit der Anlage des Kontos (ab dann läuft die Inaktivitätsfrist)
             r["letzter_trade"] = max([str(p.get("started_at")) for p in pl if p.get("started_at")] or [str(a.get("created_at") or "")]) or None
             rech[aid] = (a, r)
@@ -48915,6 +49149,12 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             r["on_demand"] = True
         if _heute_n >= 1 and r.get("aktion") == "planen" and r.get("tp_art") == "gewinntag":
             aus("heute schon getradet — Gewinntage: ein Trade je Tag (zählt sonst nicht als neuer Tag)"); continue   # Fremd-Review E1e
+        # TW1 HANDELS-WÜRFEL (11.11.2026): nur dort, wo ein neuer Trade entstünde — „Ziel erreicht → Waiting“ und alle anderen Aktionen laufen weiter;
+        # vor dem Festschreiben des Zyklus-Ziels (ein Pause-Tag schreibt nichts). Fester Wurf je Konto × plan_tag, Lesefehler → handelt wie bisher.
+        if r.get("aktion") == "planen":
+            _tw_g = tw_pause_grund("funded_cfd", a, plan_tag, None, _ktx)
+            if _tw_g:
+                aus(_tw_g); continue
         if r.get("aktion") == "planen" and (r.get("ziel_fest") or {}).get("neu"):
             ziel_schreiben[aid] = ({"zyklus": r["ziel_fest"]["zyklus"], "usd": r["ziel_fest"]["usd"], "at": jetzt.isoformat()},
                                    a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)
