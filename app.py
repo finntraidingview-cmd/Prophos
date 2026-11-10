@@ -32562,8 +32562,8 @@ def tfh_tick(jetzt=None, force=False):
                 "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"]}
         upd = {"orbit_v3": True, "hedge_eur": h["hedge_eur"], "hedge_faktor": h["hedge_faktor"], "multiplier": h["multiplier"],
                "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, tradeify_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit']} (finaler {tfh_name(p)}, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ",")).strip()}
+               "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['orbit']} (finaler {tfh_name(p)}, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                         f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ","))}   # WZ1b: setzen statt anhängen
         try:
             if not sb_update("trade_plans", _tfh_guard(p), upd):
                 continue                                  # inzwischen geclaimt/geändert → nächster Takt
@@ -34325,9 +34325,9 @@ def ah_tick(jetzt=None, force=False):
                 "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['orbit_prio2']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+               "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['orbit_prio2']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · "
-                         + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ",")).strip()}
+                         + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ","))}   # WZ1b: setzen statt anhängen
         g = _ah_guard(p)
         g["hedge_freigabe_at"] = "not.is.null"
         try:

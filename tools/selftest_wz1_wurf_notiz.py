@@ -96,7 +96,16 @@ check(S(kopf + "\n" + v2 + "\n" + o3 + "\n" + z1, z2) == kopf + "\n" + v2 + "\n"
 check(S(None, z1) == z1 and S("", z1) == z1, "c: leere Notiz")
 check(S(kopf + "\nEcho: Hand-Hinweis", z1) == kopf + "\nEcho: Hand-Hinweis\n" + z1, "c: andere „Echo:“-Zeile ohne „Lot Fusion · q“ bleibt")
 check(S("Kopf\r\n" + z1 + "\r\nEnde", z2) == "Kopf\r\nEnde\n" + z2, "c: CRLF + Zeile in der Mitte: ersetzt, neue Zeile ans Ende")
-check(SRC.count("notiz_hedge_zeile_setzen(z.get(\"notes\")") == 1 and SRC.count("notiz_hedge_zeile_setzen(p.get(\"notes\")") == 1,
+t3a = "Orbit (finaler Tradeify, Gegenhedge): 3,20 Lot Fusion · q 0,0450 €/$ · Blow +120 € · Pass −80 €"
+t3b = "Orbit (finaler Tradeify, Gegenhedge): 3,40 Lot Fusion · q 0,0460 €/$ · Blow +125 € · Pass −82 €"
+p2a = "Orbit Prio 2: 1,10 Lot Fusion · q 0,0300 €/$ (Kontowert 90,00 € ÷ Polster 3000 $ ÷ 1,0) · Hedge zu am Boden 47000 $"
+p2b = "Orbit Prio 2: 1,20 Lot Fusion · q 0,0310 €/$ (Kontowert 93,00 € ÷ Polster 3000 $ ÷ 1,0) · Hedge zu am Boden 47000 $"
+check(S(S(kopf, t3a), t3b) == kopf + "\n" + t3b and S(S(kopf, p2a), p2b) == kopf + "\n" + p2b, "c: Orbit V3 / Orbit Prio 2 ersetzen ihre eigene Zeile")
+check(S(kopf + "\n" + z1 + "\n" + t3a, p2a) == kopf + "\n" + z1 + "\n" + t3a + "\n" + p2a, "c: verschiedene Modelle verdrängen sich nicht")
+check(SRC.count("notiz_hedge_zeile_setzen(p.get(\"notes\"), (f\"{MODELL_NAME['orbit']} (finaler") == 1
+      and SRC.count("notiz_hedge_zeile_setzen(p.get(\"notes\"), (f\"{MODELL_NAME['orbit_prio2']}:") == 1, "c: Orbit V3 (tfh) und Orbit Prio 2 nutzen den Helfer")
+check(not re.search(r'rstrip\(\) \+ "\\n" \+ \(f"\{MODELL_NAME', SRC), "c: kein Hedge-Schreiber hängt mehr direkt an")
+check(SRC.count("notiz_hedge_zeile_setzen(z.get(\"notes\")") == 1 and SRC.count("notiz_hedge_zeile_setzen(p.get(\"notes\"), (f\"{MODELL_NAME['echo']}") == 1,
       "c: ap_echo_hedge_anlegen und eh_tick setzen die Zeile über den Helfer")
 check(not re.search(r'rstrip\(\) \+ "\\n" \+ \(f"\{MODELL_NAME\[\'echo\'\]\}: \{h\[\'lots\'\]', SRC), "c: kein Echo-Schreiber hängt mehr direkt an")
 
