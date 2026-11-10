@@ -451,9 +451,52 @@ def balance_selbst(ns):
           "ap_bal_auto_tick hängt (E) vor die Sende-Schleife (eigener try, Deckel 3/Tag + 90 min gelten)")
 
 
+def im_plus(ns):
+    """AH2 (Finn 10.11.2026): Konto im Plus (offene Kosten ≤ 0) → fester Satz € je $ Abstand statt „Hedge nicht rechenbar“; offen > 0 bitgleich."""
+    print("\nAH2 · Konto im Plus → fester Satz")
+    REGEL = ns["FDP_FIRMEN_STANDARD"][0]
+    R, jg = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"]
+    j100, j150 = jg(REGEL, 100000), jg(REGEL, 150000)
+    # Chris 100k …0005: Balance 105.845,56, offene Kosten −498 € → Satz kosten_eur ÷ dd (Apex hat kein hedge_eur) = 350 / 3.000
+    r = R(REGEL, j100, ST100, 105845.56, 105845.56, -498, 100000, 100000)
+    satz = 350 / 3000
+    check(r["aktion"] == "planen" and r.get("hedge_quelle") and "kosten_eur" in r["hedge_quelle"] and r.get("offen_kosten_eur") == -498,
+          f"100k −498 €: geplant, hedge_quelle „{r.get('hedge_quelle')}“")
+    check(abs(r["offen_eur"] - round(satz * (105845.56 - r["liq"]), 2)) < 0.011 and abs(r["verhaeltnis"] - round(satz, 5)) < 1e-5,
+          f"Hedge-Basis {r['offen_eur']} € = 350/3.000 × ({_d(105845.56)} − Liq {r['liq']}) · Verhältnis {r['verhaeltnis']} € je $")
+    # Mike 150k …0001: Balance 150.238,76, offene Kosten −3.022 € → 550 / 4.000
+    m = R(REGEL, j150, ST150, 150238.76, 150238.76, -3022, 150000, 150000)
+    check(m["aktion"] == "planen" and abs(m["verhaeltnis"] - round(550 / 4000, 5)) < 1e-5 and m.get("offen_kosten_eur") == -3022,
+          f"150k −3.022 €: geplant, Verhältnis {m.get('verhaeltnis')} € je $ (550/4.000), Hedge-Basis {m.get('offen_eur')} €")
+    # offene Kosten genau 0 → ebenfalls fester Satz
+    z = R(REGEL, j100, ST100, 104000, 104000, 0, 100000, 100000)
+    check(z["aktion"] == "planen" and z.get("hedge_quelle"), "offene Kosten 0 €: fester Satz statt „nicht rechenbar“")
+    # hedge_eur in der Regel geht vor kosten_eur
+    jh = dict(j100, hedge_eur=450)
+    h = R(REGEL, jh, ST100, 104000, 104000, -10, 100000, 100000)
+    check(h["aktion"] == "planen" and abs(h["verhaeltnis"] - round(450 / 3000, 5)) < 1e-5 and "hedge_eur" in h["hedge_quelle"], "hedge_eur der Regel geht vor kosten_eur")
+    # weder hedge_eur noch kosten_eur → klarer Grund
+    jo = {k: v for k, v in j100.items() if k not in ("hedge_eur", "kosten_eur")}
+    o = R(REGEL, jo, ST100, 104000, 104000, -10, 100000, 100000)
+    check(o["aktion"] == "aus" and "fester Satz fehlt" in o["grund"], f"ohne Satz: aus mit Grund „{o.get('grund')}“")
+    # offen > 0: bitgleich wie vorher (kein hedge_quelle, offen_eur = offen)
+    p = R(REGEL, j100, ST100, 104000, 104000, 350, 100000, 100000)
+    check(p["aktion"] == "planen" and "hedge_quelle" not in p and "offen_kosten_eur" not in p and p["offen_eur"] == 350 and abs(p["slave_risk"] - 350) < 0.01,
+          "offene Kosten 350 €: unverändert (offen_eur 350, slave_risk 350, kein hedge_quelle)")
+    print(f"    Chris 100k: Liq {r['liq']} · Abstand {round(105845.56 - r['liq'], 2)} $ · Hedge-Basis {r['offen_eur']} € · {r['kontrakte']} NQ · TP {r['tp']} $ / SL {r['sl']} $"
+          f" · Lots {r['lots']} · Fusion −{r['hedge_eur']} € am TP / +{r['hedge_sl_eur']} € am SL")
+    print(f"    Mike 150k:  Liq {m['liq']} · Abstand {round(150238.76 - m['liq'], 2)} $ · Hedge-Basis {m['offen_eur']} € · {m['kontrakte']} NQ · TP {m['tp']} $ / SL {m['sl']} $"
+          f" · Lots {m['lots']} · Fusion −{m['hedge_eur']} € am TP / +{m['hedge_sl_eur']} € am SL")
+
+
+def _d(x):
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 if __name__ == "__main__":
     ns = laden()
     szenario(ns)
+    im_plus(ns)
     bausteine(ns)
     tag_13(ns)
     ziel_wd(ns)
