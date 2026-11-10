@@ -53,6 +53,9 @@ check(U([T0, T0 + timedelta(hours=1)], start_nach=T0 + timedelta(minutes=5))[0] 
 check(U([T0, T0 + timedelta(hours=1)], seit=T0 + timedelta(minutes=30))[0] is False
       and U([T0, T0 + timedelta(hours=1), T0 + timedelta(hours=2)], seit=T0 + timedelta(minutes=30))[0] is True,
       "nach eigener Sperre (Finn hat reaktiviert) zählen nur neuere Treffer")
+check(U([T0, T0 + timedelta(minutes=50)], jetzt=T0 + timedelta(minutes=80))[0] is True
+      and U([T0, T0 + timedelta(minutes=50)], jetzt=T0 + timedelta(hours=3))[0] is False,
+      "Prüfer S2 (MUSS d): letzter Treffer muss frisch sein (≤ 60 min) — alte Treffer allein sperren nie wieder")
 check(app.kk_satz(ALT) == "Failed to login: No active accounts found for this environment" and app.kk_satz("x") == "", "Satz für die Meldung")
 
 print("3) Railway: Takt gegen eine nachgebaute DB")
@@ -103,7 +106,7 @@ app.alarm_senden = lambda *a, **k: DB["alarm"].append((a, k)) or (1, 1)
 app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "ht", "name": "Hermann Technologies", "verwalter_id": None}, {"id": "emin", "name": "Emin", "verwalter_id": E}],
                                    "mitglieder": [{"user_id": J, "gruppe_id": "ht"}, {"user_id": E, "gruppe_id": "emin"}]}
 app._ap_namen = lambda: ({J: "HT-1", E: "Gruppe-E"}, set())
-t1, t2 = JETZT - timedelta(hours=27), JETZT - timedelta(hours=26)
+t1, t2 = JETZT - timedelta(hours=27), JETZT - timedelta(minutes=20)     # letzter Fehlstart frisch (KK_FRISCH_S)
 DB["fehl"] = [fz("150k T1 → Winning Days", J, t1), fz("150k T1 → Winning Days", J, t2),                                    # bestätigt, Plan gelöscht → über den Namen
               fz("150k T2 → Winning Days", J, t1), fz("150k T2 → Winning Days", J, t1 + timedelta(seconds=1)),            # nur ein Versuch
               fz("150k T3 → Winning Days", J, t1), fz("150k T3 → Winning Days", J, t2),                                    # schon deaktiviert
@@ -129,6 +132,13 @@ DB.update(upd=[], rpc=[], alarm=[])
 DB["log"] = [{"schluessel": f"keine_konten|{K1}", "at": (t2 + timedelta(minutes=5)).isoformat()}]
 app.kk_tick(JETZT)
 check(not DB["upd"], "Finn hat reaktiviert: alte Treffer vor der eigenen Sperre zählen nicht")
+# Prüfer S2 (MUSS d): Finn hat reaktiviert, die eigene Sperre fehlt im alarm_log (stummer Schreibfehler) → alte Treffer allein sperren nicht wieder
+DB.update(upd=[], rpc=[], alarm=[], log=[])
+_fehl_alt = list(DB["fehl"])
+DB["fehl"] = [dict(r, at=(JETZT - timedelta(hours=5)).isoformat()) if r["at"] == t2.isoformat() else r for r in DB["fehl"]]
+app.kk_tick(JETZT)
+check(not DB["upd"] and not DB["alarm"], "reaktiviert ohne alarm_log-Eintrag: letzte Treffer 5 h alt → bleibt aktiv, keine 🟠")
+DB["fehl"] = _fehl_alt
 DB["log"], DB["log_fehler"] = [], True
 e = app.kk_tick(JETZT)
 DB["log_fehler"] = False

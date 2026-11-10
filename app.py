@@ -26328,16 +26328,23 @@ AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts am Stift ausschalte
 KK_RE = re.compile(r"No active accounts found|No trading accounts available", re.I)
 KK_FENSTER_H = 72
 KK_MIN_ABSTAND_S = 600
+# Prüfer S2 (10.11.2026, MUSS d): der letzte Treffer muss frisch sein. Puls versucht ein deaktiviertes Konto nicht mehr — nach Finns Reaktivieren zählt also erst ein
+# NEUER Fehlstart, auch wenn die eigene Sperre im alarm_log fehlt (alarm_senden schreibt still, ein stummer Schreibfehler hätte sonst bis zu 72 h lang bei jedem
+# Reaktivieren sofort wieder deaktiviert, jedes Mal mit 🟠).
+KK_FRISCH_S = 3600
 KK_TAKT_S = (240.0, 360.0)
 _kk = {"naechster": 0.0, "letztes": None, "fehler": ""}
 
 
-def kk_urteil(treffer_at, start_nach=None, seit=None):
+def kk_urteil(treffer_at, start_nach=None, seit=None, jetzt=None):
     """REIN RECHNEND (testbar): Login ohne Konten bestätigt? treffer_at = Zeitpunkte (datetime) der Fehlstarts EINES Kontos mit dem Text, start_nach = jüngster
-    echter Start des Kontos, seit = letzte eigene Sperre (nur jüngere Treffer zählen). → (True, {n, erst, letzt}) | (False, grund)"""
+    echter Start des Kontos, seit = letzte eigene Sperre (nur jüngere Treffer zählen), jetzt = Bezug für die Frische (letzter Treffer ≤ KK_FRISCH_S alt).
+    → (True, {n, erst, letzt}) | (False, grund)"""
     t = sorted(x for x in treffer_at or () if x and (seit is None or x > seit))
     if len(t) < 2:
         return False, "weniger als zwei Treffer"
+    if jetzt is not None and (jetzt - t[-1]).total_seconds() > KK_FRISCH_S:
+        return False, "letzter Treffer nicht frisch (nach Reaktivieren erst ein neuer Fehlstart)"
     if (t[-1] - t[0]).total_seconds() < KK_MIN_ABSTAND_S:
         return False, "nur ein Startversuch (Treffer zu dicht beieinander)"
     if start_nach is not None and start_nach > t[0]:
@@ -26418,7 +26425,7 @@ def kk_tick(jetzt=None):
         out["geprueft"] += 1
         if a.get("deaktiviert_at"):
             continue
-        ja, info = kk_urteil([_ap_ts(r.get("at")) for r in treffer[aid]], starts.get(aid), seit_je.get(aid))
+        ja, info = kk_urteil([_ap_ts(r.get("at")) for r in treffer[aid]], starts.get(aid), seit_je.get(aid), jetzt=jetzt)
         if not ja:
             continue
         iso = jetzt.isoformat()
