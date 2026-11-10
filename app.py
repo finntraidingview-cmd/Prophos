@@ -41851,6 +41851,23 @@ def kz_trades_kachel(phase, seit=None):
                      "beendete Trades dieser Phase" + (f" seit {kz_tag(seit)}" if seit else ""))
 
 
+def kz_review_mitzaehlen(plaene, stand):
+    """REIN RECHNEND (testbar, WP4 10.11.2026): Pläne für die Zyklus-Zählung der Konto-Seite — ein Plan in review mit P&L, der VOR der Balance-Lesung (stand)
+    endete, zählt wie abgeschlossen (seine P&L steckt schon in der Balance). Ohne lesbare Lesezeit bleibt alles wie bisher (nur completed)."""
+    st = _ap_ts(stand) if stand else None
+    if st is None:
+        return list(plaene or [])
+    out = []
+    for p in plaene or ():
+        if p.get("status") == "review" and _wd_num(p.get("master_pl")) is not None:
+            ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
+            if ts is not None and ts <= st:
+                out.append(dict(p, status="completed"))
+                continue
+        out.append(p)
+    return out
+
+
 def kz_rechnen(a, ctx):
     """REIN RECHNEND (testbar): ein Konto + geladene Daten → {typ, groesse, balance, urteil, kacheln, chart}. ctx: bal, bal_quelle, bal_stand, plaene (alle
     Trades des Kontos, KZ_PLAN_SEL), jetzt (ISO), ap_firmen (auto_plan_regeln.regeln.firmen), fcp_regel (Zeile funded_cfd_plan_regeln), liq_regeln, peak
@@ -41972,7 +41989,11 @@ def kz_rechnen(a, ctx):
         n_pay = fcp_payouts_zaehlen(pend, verw, buch).get(aid, 0)
         zyklus = n_pay + 1
         z_ab = fcp_zyklus_start(pend, verw, buch).get(aid)
+        z_ts = fcp_zyklus_anfrage_ts(pend, verw, buch).get(aid)     # WP4: am Anfrage-Tag zählt, was nach der Anfrage endete
         seit = fcp_gewinntage_seit(z_ab, a.get("created_at"))
+        # WP4 (b): der Trade in review, der gerade abgehakt wird, steckt schon in der Balance — für Consistency/Gewinne zählt er mit, wenn er vor der Balance-Lesung
+        # endete und seinen P&L hat (sonst lag Gewinn ≥ Ziel neben einer Consistency ohne diesen Tag: Fall 67,7 % statt 41,5 %)
+        plaene_z = kz_review_mitzaehlen(plaene, ctx.get("bal_stand"))
         out["zyklus"] = {"nr": zyklus, "seit": seit, "payouts": n_pay}
         jg = fcp_je_groesse(freg, groesse) or {}
         zb = fcp_konto_ziel_boden(freg, groesse, zyklus, a.get("name")) if freg else None
@@ -42029,7 +42050,7 @@ def kz_rechnen(a, ctx):
         kach.append(kz_dl_kachel(dl, dl_grund))
         p_cons = fcp_consistency_pct(freg) if freg else None
         # O1 (Finn 05.11.2026 ~07:45): Basis = Summe der Gewinn-Tage im Zyklus (fcp_tage_zyklus_w, wie fcp_cons_finn im Planer), nicht der Netto-Gewinn
-        tzw = fcp_tw_broker(plaene, seit, None, a.get("fcp_ziel"), z_ab)   # CS1: Basis laut Broker (fcp_ziel.broker), sonst wie der Planer
+        tzw = fcp_tw_broker(plaene_z, seit, None, a.get("fcp_ziel"), z_ab, z_ts)   # CS1: Basis laut Broker (fcp_ziel.broker), sonst wie der Planer; WP4
         cons_ok = True
         an = None
         if p_cons:
@@ -42080,17 +42101,45 @@ def kz_rechnen(a, ctx):
             if freg and jg and bal and groesse and not wartet:
                 nx = fcp_konto_rechnen(jg, float(bal), float(groesse), zyklus, fcp_eins_prozent(a), 1.0, 1.0, None, freg,
                                        param=fcp_param(ctx.get("fcp_regel") or {}), tage=tzw,
-                                       gewinne=fcp_gewinne(plaene, seit), gewinntage=gti,
+                                       gewinne=fcp_gewinne(plaene_z, seit, z_ts), gewinntage=gti,
                                        ziel_fest=({"usd": z_eff_ab, "zyklus": zyklus} if z_eff_ab is not None else None))
         except Exception as e:
             print(f"[konto-ziele] ⚠️ nächster Trade {aid[:8]}: {type(e).__name__}: {e}", flush=True)
+        # WP4 (3) (Finn 10.11.2026): das Abhak-Popup wählt bei Ziel + Consistency „Waiting“ vor und sagt warum; sonst steht genau da, was fehlt — mit Zahlen.
+        # „Payout ab“ ist eine Sperre fürs Anfragen, nicht fürs Waiting (bereit prüft es nicht) → steht hier nicht.
+        ab_ok, ab_fehlt = [], []
+        _zb_rel = z_fest if z_fest is not None else (bereich[0] if bereich else None)
+        if zb and gewinn is not None and _zb_rel is not None:
+            if erreicht and not wartet:
+                ab_ok.append(f"Ziel {kz_usd(gewinn, 0, True)} / {kz_usd(_zb_rel, 0, True)}" + (f" (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)" if zt_info else ""))
+            elif not erreicht:
+                _sw_t = fcp_ziel_schwelle(_zb_rel, _p_zt)
+                ab_fehlt.append(f"Ziel {kz_usd(gewinn, 0, True)} von {kz_usd(_zb_rel, 0, True)} — zählt ab {kz_usd(_sw_t, 0, True)}, fehlen {_liq_de(max(1.0, -(-(_sw_t - gewinn) // 1)) if _sw_t > gewinn else 0.0)} $")   # aufgerundet, nie „fehlen 0 $“
+        elif not wartet:
+            ab_fehlt.append("Ziel: keine Balance-Lesung" if zb else "Ziel: keine Regel für Firma/Größe")
+        if p_cons:
+            if an is not None:
+                _ct = f"Consistency {kz_pct(an)} {'≤' if cons_ok else '>'} {_liq_de(p_cons)} % (größter Tag {_liq_de(tzw['b'])} $ / Gewinn-Tage {_liq_de(tzw['w'])} $)"
+                (ab_ok if cons_ok else ab_fehlt).append(_ct)
+            elif not cons_ok:
+                ab_fehlt.append("Consistency nicht prüfbar (Zyklus nicht lesbar)" if tzw is None else "Consistency: noch kein Gewinn-Tag")
+        if gt:
+            if gti and gti[0] >= gti[1]:
+                ab_ok.append(f"Gewinntage {gti[0]}/{gti[1]}")
+            else:
+                ab_fehlt.append(f"Gewinntage {gti[0]}/{gti[1]}" if gti else "Gewinntage nicht lesbar")
         out["abhak"] = {"bal": bal, "ziel_bal": zb[0] if zb else None, "rest": round(zb[0] - bal, 2) if (zb and bal) else None, "erreicht": erreicht,
+                        "ok_text": " · ".join(ab_ok), "fehlt_text": " · ".join(ab_fehlt),
                         "cons": ({"p": p_cons, "b": (tzw or {}).get("b"), "w": (tzw or {}).get("w"), "anteil": an, "ok": cons_ok} if p_cons else None),
                         "gewinntage": list(gti) if (gt and gti) else None,
                         "naechster": ({"aktion": nx.get("aktion"), "tp": nx.get("tp"), "grund": nx.get("grund")} if isinstance(nx, dict) else None),
                         "bereit": bool(ok), "wartet": wartet}
         fehlt = [c[1] for c in checks if c[0] == "nein"]
-        out["urteil"] = {"art": "payout", "titel": "Payout", "ok": ok if freg else None, "sub": f"Zyklus {zyklus}" + (f" · seit {kz_tag(seit)}" if seit else ""),
+        _seit_txt = (f" · seit {kz_tag(seit)}" if seit else "")
+        if z_ts is not None and seit == z_ab:   # WP4: Zyklus beginnt mit der Anfrage (Trades danach zählen schon) — genaue Zeit zeigen
+            _zb_l = z_ts.astimezone(_ap_tz("Europe/Berlin"))
+            _seit_txt = f" · seit Anfrage {kz_tag(_zb_l.date().isoformat())} {_zb_l.strftime('%H:%M')}"
+        out["urteil"] = {"art": "payout", "titel": "Payout", "ok": ok if freg else None, "sub": f"Zyklus {zyklus}" + _seit_txt,
                          "text": "Payout möglich" if ok else "Noch kein Payout" if freg else "keine Planer-Regel",
                          "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if freg else "Firma nicht im Funded-CFD-Planer", "checks": checks}
     else:
@@ -47584,7 +47633,7 @@ def fcp_eins_prozent(konto):
     return bool((_wd_num(k.get("max_risiko_trade")) or 0) > 0 or re.search(r"(?<![0-9])1\s*%\s*-?\s*rule", str(k.get("name") or ""), re.I))
 
 
-def fcp_gewinne(plaene, seit_tag=None):
+def fcp_gewinne(plaene, seit_tag=None, ab_ts=None):
     """REIN RECHNEND (testbar): Summe der Gewinn-Trades eines Kontos (status completed, master_pl > 0) — None, wenn ein beendeter Trade
     keinen master_pl hat (nicht sicher lesbar → fail-closed TP 750). seit_tag = erster Berlin-Tag des laufenden Payout-Zyklus (fcp_gewinntage_seit):
     nur Trades, deren Ende (ended_at, sonst completed_at, sonst started_at) an oder nach diesem Tag liegt (Finn 04.11.2026, Consistency je Zyklus)."""
@@ -47597,8 +47646,8 @@ def fcp_gewinne(plaene, seit_tag=None):
             ts = _ap_ts(p.get("ended_at") or p.get("completed_at") or p.get("started_at"))
             if ts is None:
                 return None         # Zyklus nicht zuordenbar → nicht lesbar → TP 750 (mitzählen machte den TP größer, Fremd-Review 04.11.2026)
-            if ts.astimezone(tz).date().isoformat() < str(seit_tag):
-                continue            # Trade aus einem früheren Zyklus (vor dem jüngsten Payout) — zählt nicht
+            if not _fcp_im_zyklus(ts, ts.astimezone(tz).date().isoformat(), seit_tag, ab_ts, p):
+                continue            # Trade aus einem früheren Zyklus (vor dem jüngsten Payout) — zählt nicht (WP4: am Anfrage-Tag nach der Anfrage schon)
         pl = _wd_num(p.get("master_pl"))
         if pl is None:
             return None
@@ -47748,6 +47797,57 @@ def fcp_zyklus_start(pending, managed, buchungen):
     return {aid: (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") for aid, d in tag.items()}
 
 
+def fcp_zyklus_anfrage_ts(pending, managed, buchungen):
+    """REIN RECHNEND (testbar, WP4 Finn 10.11.2026 ~20:20 Dubai, The5%ers 100k Funded CFD: „Der ist weit über dem Ziel“): genauer Zeitpunkt (UTC) des jüngsten
+    Payouts je Konto → {account_id: datetime}, nur wenn er sicher bekannt ist. fcp_zyklus_start beginnt den neuen Zyklus erst am Folgetag (BG1: der Ziel-Trade
+    VOR der Anfrage gehört zum alten Zyklus) — ein Trade, der am Anfrage-Tag NACH der Anfrage endet, fiel damit aus beiden Zyklen (Fall: Anfrage 06.11. 12:53 UTC,
+    Trade 14:20 UTC +328,48 $ steckt in der Balance, fehlte aber in der Consistency). Zeit = created_at (pending/managed, nur am selben Berlin-Tag wie das Datum),
+    bei Buchungen occurred_at mit Uhrzeit. Hat ein Ereignis des jüngsten Tages keine Uhrzeit → kein Eintrag (wie bisher ab dem Folgetag)."""
+    tz = _ap_tz("Europe/Berlin")
+    verbucht = {str(z["received_tx_id"]) for z in pending or () if z.get("received_tx_id")}
+    je = {}
+    for quelle, d_feld, ts_feld in ((pending, "requested_at", "created_at"), (managed, "payout_date", "created_at"), (buchungen, "occurred_at", "occurred_at")):
+        for z in quelle or ():
+            aid = str(z.get("account_id") or "")
+            if not aid or (quelle is buchungen and str(z.get("id")) in verbucht):
+                continue
+            roh_d = z.get(d_feld) or z.get(ts_feld)
+            if not roh_d:
+                continue
+            roh_d = str(roh_d)
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", roh_d):
+                d = roh_d
+            else:
+                t0 = _ap_ts(roh_d)
+                if t0 is None:
+                    continue
+                d = t0.astimezone(tz).date().isoformat()
+            roh_t = str(z.get(ts_feld) or "")
+            ts = None if (not roh_t or re.fullmatch(r"\d{4}-\d{2}-\d{2}", roh_t)) else _ap_ts(roh_t)
+            if ts is not None and ts.astimezone(tz).date().isoformat() != d:
+                ts = None                    # Zeit gehört zu einem anderen Tag (z. B. später nachgetragen) — dann unbekannt
+            je.setdefault(aid, []).append((d, ts))
+    out = {}
+    for aid, liste in je.items():
+        d_max = max(d for d, _t in liste)
+        am = [t for d, t in liste if d == d_max]
+        if am and all(t is not None for t in am):
+            out[aid] = max(am)
+    return out
+
+
+def _fcp_im_zyklus(ts, tag, seit_tag, ab_ts, p=None):
+    """WP4: gehört ein Trade-Ende (ts, Berlin-Tag tag) zum laufenden Zyklus? Ab seit_tag wie bisher; dazu am Anfrage-Tag (nur genau dieser Berlin-Tag — Prüfer S2:
+    nie vor einem späteren Anlegetag) ein Trade, der NACH ab_ts gestartet UND geendet hat (Prüfer S1: ended_at kann die späte Erkennung sein — ein Trade, der über
+    die Anfrage lief oder nur später abgehakt wurde, bleibt wie bisher im alten Zyklus; ohne started_at → nicht zählen)."""
+    if not seit_tag or tag >= str(seit_tag):
+        return True
+    if ab_ts is None or ts is None or ts <= ab_ts or tag != ab_ts.astimezone(_ap_tz("Europe/Berlin")).date().isoformat():
+        return False
+    st = _ap_ts((p or {}).get("started_at")) if p else None
+    return st is not None and st > ab_ts
+
+
 # ANFRAGE OHNE TRADE (Finn 10.11.2026 ~03:25 Dubai, Moritz FundedNext 100k …3608 On Demand: „Sobald ich Payout anfrage, auch bei On Demand, soll es
 # eben ja resetet werden“ — stand nach der Anfrage wieder auf „Payout jetzt“). Vorfall (UTC): 23:09 angefragt → 23:14 liest der Planer noch die alte
 # Balance 102.205,69 (die Firma hatte die Auszahlung noch nicht abgezogen) und rechnet sie als Gewinn des NEUEN Zyklus 4 → „Ziel erreicht“: Waiting +
@@ -47788,7 +47888,7 @@ FCP_CONS_PUFFER_ZIEL = 1.02    # Endziel mindestens größter Tag ÷ p × 1,02
 FCP_CONS_PUFFER_DECKEL = 0.95  # Deckel je Trade = p × Endziel × 0,95 (5 % Sicherheitsabstand)
 
 
-def fcp_tage_zyklus(plaene, seit_tag=None):
+def fcp_tage_zyklus(plaene, seit_tag=None, ab_ts=None):
     """REIN RECHNEND (testbar): (größter Gewinn-Tag $, Trades) im laufenden Payout-Zyklus | None (nicht sicher lesbar → fail-closed). Tag = Berlin-Tag des
     Trade-Endes (ended_at, sonst completed_at, sonst started_at), Tagessumme master_pl der beendeten Trades (completed) — wie fcp_gewinne / ap_tage_ist.
     Nur Tage > 0 zählen als größter Tag (0, wenn es keinen gibt). seit_tag = erster Berlin-Tag des Zyklus (fcp_gewinntage_seit)."""
@@ -47800,8 +47900,8 @@ def fcp_tage_zyklus(plaene, seit_tag=None):
         if ts is None:
             return None                     # Zyklus nicht zuordenbar → nicht lesbar (wie fcp_gewinne)
         d = ts.astimezone(tz).date().isoformat()
-        if seit_tag and d < str(seit_tag):
-            continue                        # früherer Zyklus — ein alter Trade ohne P&L stört nicht (Fremd-Review E1b Runde 3)
+        if not _fcp_im_zyklus(ts, d, seit_tag, ab_ts, p):
+            continue                        # früherer Zyklus — ein alter Trade ohne P&L stört nicht (Fremd-Review E1b Runde 3); WP4: ab_ts
         pl = _wd_num(p.get("master_pl"))
         if pl is None:
             return None
@@ -47810,7 +47910,7 @@ def fcp_tage_zyklus(plaene, seit_tag=None):
     return round(max([v for v in je_tag.values() if v > 0] or [0.0]), 2), n
 
 
-def fcp_tage_zyklus_w(plaene, seit_tag=None, heute_tag=None):
+def fcp_tage_zyklus_w(plaene, seit_tag=None, heute_tag=None, ab_ts=None):
     """REIN RECHNEND (testbar, O1 05.11.2026): Zyklus-Werte für die Consistency nach Finn → {b: größter Gewinn-Tag, w: Summe der Gewinn-Tage,
     n: Trades, serie: Summe der Gewinn-Trades seit dem letzten Verlust-Trade, serie_n: deren Anzahl} | None (nicht sicher lesbar, wie fcp_tage_zyklus).
     Tag = Berlin-Tag des Trade-Endes; nur beendete Trades (completed) ab seit_tag."""
@@ -47822,7 +47922,7 @@ def fcp_tage_zyklus_w(plaene, seit_tag=None, heute_tag=None):
         if ts is None:
             return None
         d = ts.astimezone(tz).date().isoformat()
-        if seit_tag and d < str(seit_tag):
+        if not _fcp_im_zyklus(ts, d, seit_tag, ab_ts, p):   # WP4: am Anfrage-Tag zählt, was nach der Anfrage lief
             continue
         pl = _wd_num(p.get("master_pl"))
         if pl is None:
@@ -47858,12 +47958,12 @@ def fcp_broker_basis(fcp_ziel, zyklus_ab):
     return at, float(b), float(w)
 
 
-def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab):
+def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab, ab_ts=None):
     """Zyklus-Werte wie fcp_tage_zyklus_w, mit Broker-Basis (fcp_broker_basis) falls gültig — dann gezählt nur Trades, die NACH `at` endeten
     (Ende ended_at/completed_at/started_at; ohne Zeit → None, fail-closed wie fcp_tage_zyklus_w). Ergebnis trägt broker=True. REIN RECHNEND."""
     bb = fcp_broker_basis(fcp_ziel, zyklus_ab)
     if bb is None:
-        return fcp_tage_zyklus_w(plaene, seit_tag, heute_tag)
+        return fcp_tage_zyklus_w(plaene, seit_tag, heute_tag, ab_ts)
     at, b, w = bb
     nach = []
     for p in plaene or ():
@@ -48451,6 +48551,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             print(f"[funded-cfd] ⚠️ Payouts nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — kein Refund-Modus in diesem Lauf", flush=True)
     payout_n = fcp_payouts_zaehlen(pend, verw, buch)
     zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}
+    zyklus_ts = fcp_zyklus_anfrage_ts(pend, verw, buch) if payouts_ok else {}   # WP4: Trades am Anfrage-Tag nach der Anfrage zählen zum neuen Zyklus
     anfrage_zuletzt = fcp_anfrage_zuletzt(pend) if payouts_ok else {}   # Anfrage ohne Trade (10.11.2026, Moritz …3608)
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
@@ -48503,9 +48604,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if od_an:
                 _rk, _jg = fcp_on_demand_anwenden(regel, _jg, _g) or (regel, _jg)
             _bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
-            _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None
+            _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None
             _tw = fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), None, a.get("fcp_ziel"),
-                                zyklus_ab.get(aid)) if payouts_ok else None   # O1: Summe der Gewinn-Tage; CS1: Basis laut Broker
+                                zyklus_ab.get(aid), zyklus_ts.get(aid)) if payouts_ok else None   # O1: Summe der Gewinn-Tage; CS1: Basis laut Broker; WP4
             _zb = fcp_bereich(_jg.get("ziel"))
             erg["konten_stand"].append(dict(zeile, groesse=_g, balance=_bal, gewinn=round(float(_bal) - float(_g), 2) if _bal is not None and _g else None,
                                             ziel_von=_zb[0] if _zb else None, ziel_bis=_zb[1] if _zb else None, wartet=bool(a.get("waiting_payout_since")),
@@ -48568,8 +48669,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
                               max_sl=a.get("max_risiko_trade"), param=(dict(param_u, ziel_toleranz_pct=0.0) if od_an else param_u),   # E1b; ZT1-Prüfer M1: On Demand ohne Toleranz (Payout-Mindestsumme der Firma)
                               tage=fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag, a.get("fcp_ziel"),
-                                                 zyklus_ab.get(aid)) if payouts_ok else None,   # O1/E1e; CS1: Basis laut Broker (fcp_ziel.broker)
-                              gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at"))) if payouts_ok else None, gewinntage=gti,
+                                                 zyklus_ab.get(aid), zyklus_ts.get(aid)) if payouts_ok else None,   # O1/E1e; CS1: Basis laut Broker (fcp_ziel.broker); WP4
+                              gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)

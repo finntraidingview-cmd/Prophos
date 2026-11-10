@@ -76,7 +76,7 @@ ok(r3["fertig"] is True, "nach beiden Trades: fertig (Ziel + bester Tag ≤ 50 %
 src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
 ok(src.count("fcp_tw_broker(") == 4, "fcp_tw_broker: Definition + Planer + Kontoliste + Konto-Kennzahlen")
 ok('tage=fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag, a.get("fcp_ziel"),' in src, "Planer: tage= über fcp_tw_broker")
-ok('tzw = fcp_tw_broker(plaene, seit, None, a.get("fcp_ziel"), z_ab)' in src, "Konto-Kennzahlen über fcp_tw_broker")
+ok('tzw = fcp_tw_broker(plaene_z, seit, None, a.get("fcp_ziel"), z_ab, z_ts)' in src, "Konto-Kennzahlen über fcp_tw_broker (WP4: mit review-Trade und genauem Zyklus-Start)")
 ok('zf = dict(zf, broker=alt["broker"])' in src and 'w_["fcp_ziel->broker->>at"]' in src, "festes Ziel würfeln: broker bleibt, Guard auf broker.at")
 ok(app.fcp_ziel_fest(BROKER, 3, [1300, 1500], 1400) == (1400.0, True), "fcp_ziel nur mit broker → Ziel wird gewürfelt wie ohne Eintrag")
 

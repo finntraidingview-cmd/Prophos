@@ -197,7 +197,7 @@ print("— Prüfer O1: Konto-Seite (kz_rechnen) rechnet wie der Planer, On Deman
 kz = SRC[SRC.index("def kz_rechnen("):SRC.index("def kz_rechnen(") + 30000]
 kz = kz[kz.index('    elif typ == "funded_cfd":'):]
 kz = kz[:kz.index("\n    else:\n")]
-ok(("fcp_tage_zyklus_w(plaene, seit)" in kz or 'fcp_tw_broker(plaene, seit, None, a.get("fcp_ziel"), z_ab)' in kz) and   # CS1: Broker-Basis, sonst wie bisher
+ok(("fcp_tage_zyklus_w(plaene, seit)" in kz or 'tzw = fcp_tw_broker(plaene_z, seit, None, a.get("fcp_ziel"), z_ab, z_ts)' in kz) and   # CS1: Broker-Basis, sonst wie bisher; WP4: review-Trade + genauer Zyklus-Start
     'tzw["b"] / tzw["w"]' in kz and "fcp_ziel_fest(a.get(\"fcp_ziel\")" in kz and "fcp_on_demand_anwenden(freg, jg, groesse)" in kz,
    "kz_rechnen Funded CFD: Consistency = größter Tag ÷ Summe der Gewinn-Tage, festes Ziel, On-Demand-Regel")
 ok("od_an = False" in fp and "On Demand ohne Regel dieser Firma → normale Regel" in fp, "On Demand bei Firma ohne Regel: normal geplant, Hinweis in der Notiz")

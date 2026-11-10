@@ -4011,6 +4011,19 @@
   #k1-ziele .k1-ck.ok i{background:var(--k-gut-bg);color:var(--k-gut)} #k1-ziele .k1-ck.nein i{background:var(--k-rot-bg);color:var(--k-rot)}
   #k1-ziele .k1-ck span{flex:1;min-width:0} #k1-ziele .k1-ck em{font-style:normal;color:var(--k-sub);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px}
   #k1-ziele .k1-ck.nein em{color:var(--k-rot)}
+  /* WP4 (Finn 10.11.2026): Payout-Checkliste im Abhak-Popup (Radar + Trades-Dialog), Stil der Payout-Karte (k1-ck), kleiner */
+  .wpck{--k-sub:#667085;--k-gitter:rgba(16,24,40,.06);--k-gut:#12a150;--k-gut-bg:#e3f6ea;--k-rot:#e5484d;--k-rot-bg:#fdecec;--k-pille:#eef0f4;
+    margin:0 0 10px;padding:4px 10px 6px;border:1px solid var(--border);border-radius:8px;font-size:12px}
+  html[data-theme="dark"] .wpck{--k-sub:#98a2b3;--k-gitter:rgba(255,255,255,.06);--k-gut:#3ccf7a;--k-gut-bg:rgba(60,207,122,.13);--k-rot:#ff6b70;--k-rot-bg:rgba(255,107,112,.13);--k-pille:#1f2636}
+  .wpck[hidden]{display:none}
+  .wpck .wpck-z{display:flex;align-items:center;gap:8px;min-height:26px;border-top:1px solid var(--k-gitter)}
+  .wpck .wpck-z:first-child{border-top:0}
+  .wpck .wpck-z i{font-style:normal;width:15px;height:15px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:800;flex:none;background:var(--k-pille);color:var(--k-sub)}
+  .wpck .wpck-z.ok i{background:var(--k-gut-bg);color:var(--k-gut)} .wpck .wpck-z.nein i{background:var(--k-rot-bg);color:var(--k-rot)}
+  .wpck .wpck-z span{flex:1;min-width:0;color:var(--ink)} .wpck .wpck-z em{font-style:normal;color:var(--k-sub);font-variant-numeric:tabular-nums;text-align:right;font-size:11.5px}
+  .wpck .wpck-z.nein em,.wpck .wpck-z.nein span{color:var(--k-rot)}
+  .wpck .wpck-erg{margin-top:4px;padding-top:6px;border-top:1px solid var(--k-gitter);font-weight:600}
+  .wpck .wpck-erg.ja{color:var(--k-gut)} .wpck .wpck-erg.nein{color:var(--k-rot)} .wpck .wpck-erg.leise{color:var(--k-sub);font-weight:500}
   #k1-ziele .k1-obj{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-top:12px}
   #k1-ziele .k1-t{background:var(--k-kpi);border-radius:13px;padding:13px 14px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
   #k1-ziele .k1-t-kopf{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;color:var(--k-sub);font-weight:500}
@@ -11184,6 +11197,8 @@
                  optional anklicken"): Master-Konto Funded (Futures) → Winning Days bzw. Funded CFD → Waiting for Payout — dieselben Bedingungen
                  und Wege wie die Knöpfe neben dem Typ-Chip in Accounts (accWdToggleHtml → accWdUmstellen / accWartetUmstellen). Standard aus,
                  gefüllt von tcKontoUmPrepare, ausgeführt beim „Erledigt" (nicht bei „geblowt"). -->
+            <!-- WP4 (Finn 10.11.2026): Funded CFD — Payout-Checkliste nach diesem Trade (/konto-ziele) -->
+            <div class="field wpck" style="grid-column:span 2" id="tc-pcheck" hidden></div>
             <div class="field" style="grid-column:span 2" id="tc-konto-um-wrap" hidden>
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
                 <input type="checkbox" id="tc-konto-um" style="width:16px;height:16px;flex-shrink:0">
@@ -15295,6 +15310,8 @@
                das Backend archiviert beim Besitzer der ID (auch fremde Trades) -->
           <div class="field" style="margin-top:12px">
             <label style="font-size:11.5px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block">Account-Status</label>
+            <!-- WP4 (Finn 10.11.2026): Funded CFD — Payout-Checkliste nach diesem Trade (/konto-ziele, wie die Payout-Karte im Account-Detail) -->
+            <div class="wpck" id="mwd-erl-pcheck" hidden></div>
             <div style="display:flex;flex-direction:column;gap:6px">
               <label class="tc-status-opt" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="none" checked>
@@ -38298,7 +38315,7 @@
     if(akt !== 'none' && akt !== 'waiting') return
     const rb = document.querySelector(`input[name="mwd-erl-status"][value="${u.bereit ? 'waiting' : 'none'}"]`); if(rb) rb.checked = true
     const h = document.getElementById('mwd-erl-waiting-hint')
-    if(h) h.textContent = u.bereit ? '· Payout-Ziel erreicht — vorausgewählt' : (u.grund ? '· ' + u.grund : '')
+    if(h) h.textContent = u.bereit ? `· Payout-Ziel erreicht — vorausgewählt${u.okText ? ' (' + u.okText + ')' : ''}` : (u.grund ? '· Nichts ändern, ' + u.grund : '')   // WP4: mit Zahlen
     mwdErlStatusUI()
   }
   function mklWdErledigtOeffnen(pid, extra, opts){
@@ -38421,9 +38438,14 @@
     _mwdErlStatusAngefasst = false
     { const h = document.getElementById('mwd-erl-waiting-hint'); if(h) h.textContent = '' }
     // Ein Klick klar unter dem Ziel (bucht gleich still, s. unten) fragt gar nicht erst — kein /konto-ziele-Abruf je stillem Abhaken
+    // WP4 (Finn 10.11.2026: „will ich immer dieses kleine Popup sehen“): Funded CFD mit Konto → Urteil IMMER holen (Checkliste), auch beim Ein Klick; nur der stille Takt nicht
+    const _wpFcfd = String(pw.konto_typ || '') === 'funded_cfd' && !!pw.konto_id && !_mwdErlPolar && typeof window._wpUrteil === 'function' && !(opts && opts.nurStill)
     _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function'
-                 && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw))) ? window._wpUrteil(pw.konto_id) : null
+                 && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw) || _wpFcfd)) ? window._wpUrteil(pw.konto_id) : null
     if(_mwdErlWp) _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
+    { const pc = document.getElementById('mwd-erl-pcheck')
+      if(pc){ pc.hidden = !_wpFcfd; pc.innerHTML = _wpFcfd ? '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>' : ''
+        if(_wpFcfd) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) pc.innerHTML = wpChecklisteHtml(u) }) } }
     // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
     _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
     const wdh = document.getElementById('mwd-erl-wdh'), wdhCb = document.getElementById('mwd-erl-wdh-cb')
@@ -38449,7 +38471,8 @@
       // WP1 (09.11.2026, Prüfer-Stopp 72dab884: nie auf das Urteil warten — eine wartende Zeile ohne Anzeige ließ einen zweiten Abhak-Klick ein Abhaken still verlieren):
       // Funded CFD, bei dem das Payout-Ziel MÖGLICH ist (wdlFcfdZielMoeglich: Radar-Ziel bekannt, Balance nach dem Trade unbekannt oder ≥ Ziel) → nie still abhaken,
       // sofort Popup (das Urteil wählt darin ⏳ vor oder ab); still ohne Klick gar nicht (Zeile bleibt für Finns Klick). Klar unter dem Ziel → Ein Klick sofort wie bisher.
-      if(ruhig && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
+      // WP4: Funded CFD per Klick → immer das Popup mit der Checkliste (nie still); der stille Takt (nurStill) bucht wie bisher
+      if(ruhig && !_wpFcfd && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
       if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
     }
@@ -45609,6 +45632,34 @@
    * → Promise<{bereit, wartet} | null> (null = nicht lesbar oder kein Funded CFD → die bisherige Vorauswahl gilt). */
   // Zeitgrenze (Fremd-Review): hängt Railway, gilt nach WP_URTEIL_MS „nicht lesbar" (null) — der Ein Klick speichert dann wie bisher statt still zu verpuffen
   const WP_URTEIL_MS = 5000
+  /* WP4 PAYOUT-CHECKLISTE (Finn 10.11.2026: „Wenn ich einen Funded-CFD-Trade abhake, will ich immer dieses kleine Popup sehen, mit dem, was noch fehlt. Wenn bestanden:
+   * Consistency ✓, Ziel erreicht ✓, dann Waiting for Payout“): Zeilen aus /konto-ziele (urteil.checks + abhak.cons) — dieselbe Quelle wie die Payout-Karte. Die Balance
+   * nach dem Trade und der Trade in review zählen schon mit (kz_review_mitzaehlen). „Payout ab“ sperrt nur das Anfragen, nicht Waiting → nie rot, nur Info. */
+  function wpCheckliste(d){
+    const ab = (d && d.abhak) || {}, ck = (d && d.urteil && Array.isArray(d.urteil.checks)) ? d.urteil.checks : [], z = []
+    const de = (v, n) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: n == null ? 0 : n })
+    const zl = ck.find(c => /^Ziel bis Waiting/.test(String(c[1])))
+    if(zl) z.push({ st: zl[0], name: 'Ziel bis Waiting', wert: String(zl[2] || '') })
+    const c = ab.cons
+    if(c && c.p != null) z.push({ st: c.ok ? 'ok' : 'nein', name: `Consistency ≤ ${de(c.p, 1)} %`,
+      wert: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} % · bester Tag ${de(c.b)} $ ÷ ${de(c.w)} $` : 'nicht prüfbar (Zyklus nicht lesbar)' })
+    const gt = ck.find(x => /^Gewinntage/.test(String(x[1])))
+    if(gt) z.push({ st: gt[0], name: String(gt[1]), wert: String(gt[2] || '') })
+    const pa = ck.find(x => x[1] === 'Payout ab')
+    if(pa) z.push({ st: pa[0] === 'ok' ? 'ok' : 'info', name: 'Payout ab', wert: String(pa[2] || '') + (pa[0] === 'nein' ? ' · Anfrage erst dann' : '') })
+    return z
+  }
+  window._wpCheckliste = wpCheckliste   // Test-Haken
+  function wpChecklisteHtml(u){
+    if(!u) return '<div class="wpck-erg leise">Payout-Stand nicht lesbar — bitte im Account prüfen</div>'
+    const sym = s => s === 'ok' ? '✓' : s === 'nein' ? '✕' : '·'
+    const zeilen = (u.liste || []).map(r => `<div class="wpck-z ${escapeHtml(r.st)}"><i>${sym(r.st)}</i><span>${escapeHtml(r.name)}</span><em>${escapeHtml(r.wert)}</em></div>`).join('')
+    const erg = u.wartet ? '<div class="wpck-erg leise">Konto steht schon auf Waiting for Payout</div>'
+      : u.bereit ? '<div class="wpck-erg ja">✓ Ziel + Consistency erreicht → Konto jetzt zu Waiting for Payout</div>'
+      : `<div class="wpck-erg nein">Nichts ändern${u.fehltText ? ' — fehlt: ' + escapeHtml(u.fehltText) : ''}</div>`
+    return zeilen + erg
+  }
+  window._wpChecklisteHtml = wpChecklisteHtml   // Test-Haken
   function wpUrteil(id){
     const ctrl = new AbortController()
     let uhr = null
@@ -45626,7 +45677,9 @@
       _k1.cache[id] = { at: Date.now(), d }
       const ab = d.abhak
       if(!ab || String(d.typ || '') !== 'funded_cfd') return null
-      return { bereit: !!ab.bereit, wartet: !!ab.wartet, grund: ab.bereit ? '' : String((d.urteil && d.urteil.grund) || '') }   // grund z. B. „fehlt: Consistency ≤ 40 %“
+      // WP4 (Finn 10.11.2026): Gründe mit Zahlen aus /konto-ziele abhak.ok_text / fehlt_text (neuer Railway-Stand); ohne sie wie bisher urteil.grund
+      return { bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
+               grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
     }catch(_){ return null }
   }
   window._wpUrteil = wpUrteil
@@ -58237,7 +58290,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2164'
+  const OS_TAB_BUILD = '2026-09-22.2165'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -78610,6 +78663,11 @@
     if(!wrap || !cb || !lbl) return
     cb.checked = false; cb.dataset.ziel = ''; wrap.hidden = true
     const a = p && p.route !== 'polar' ? (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) : null
+    // WP4 (Finn 10.11.2026): Funded CFD → Payout-Checkliste nach diesem Trade, immer (auch wenn das Konto schon wartet)
+    const _tcWp = (a && a.type === 'funded_cfd' && typeof window._wpUrteil === 'function') ? window._wpUrteil(a.id) : null   // ein Abruf für Checkliste + Vorauswahl
+    { const pc = document.getElementById('tc-pcheck')
+      if(pc){ pc.hidden = !_tcWp; pc.innerHTML = _tcWp ? '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>' : ''
+        if(_tcWp) _tcWp.then(u => { if(nr === _tcKuNr && String(_completingPlanId) === String(p.id)) pc.innerHTML = wpChecklisteHtml(u) }) } }
     if(!a) return
     const futures = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
     if(a.type === 'funded' && futures){
@@ -78624,11 +78682,11 @@
       // WP1 (09.11.2026, belegt: 4 von 11 Ziel-Abhakungen ohne Waiting, weil hier ohne geladenen Radar nie vorausgewählt wurde): dasselbe Payout-Urteil wie
       // Konto-Kachel/Abhak-Strahl (window._wpUrteil → /konto-ziele abhak.bereit, Ziel + Consistency + Gewinntage) entscheidet, sobald es da ist — auch ohne Radar.
       // Nie über Finns eigenen Klick, nur solange dasselbe Popup für denselben Plan offen ist; nicht lesbar → die Vorauswahl oben bleibt.
-      if(typeof window._wpUrteil === 'function') window._wpUrteil(a.id).then(u => {
+      if(_tcWp) _tcWp.then(u => {
         if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
         if(!document.getElementById('tradeCompleteModal')?.classList.contains('open')) return
         cb.checked = u.bereit
-        if(hint) hint.textContent = basis + (u.bereit ? ' Payout-Ziel erreicht (Ziel + Consistency) — vorausgewählt.' : (u.grund ? ` Payout-Ziel noch nicht erreicht (${u.grund}).` : ''))
+        if(hint) hint.textContent = basis + (u.bereit ? ` Payout-Ziel erreicht — vorausgewählt${u.okText ? ' (' + u.okText + ')' : ' (Ziel + Consistency)'}.` : (u.grund ? ` Payout-Ziel noch nicht erreicht (${u.grund}).` : ''))   // WP4
       })
     }else return
     wrap.hidden = false
