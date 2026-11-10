@@ -45,6 +45,144 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
+# ── DN1 DNS-RÜCKFALL (10.11.2026, Master; Fehler-Muster FA1/RD1: „getaddrinfo failed“ am PC von Marco pc-t8wg97 — der Router beantwortet DNS zeitweise
+# nicht, Riegel- und andere Railway-Aufrufe scheitern; Windows-Einstellungen (DNS am Adapter, hosts) werden bewusst nicht geändert). Scheitert die
+# System-Namensauflösung (socket.gaierror) für einen UNSERER Hosts, fragt der Prozess DNS-over-HTTPS direkt per IP (1.1.1.1, dann 8.8.8.8 — dafür
+# braucht es kein DNS) und verbindet mit der gefundenen IPv4. TLS bleibt unverändert: urllib/http.client prüfen Zertifikat und SNI am HOSTNAMEN, nicht
+# an der IP; die DoH-Server selbst werden über ihr IP-Zertifikat geprüft (nie verify aus). Antwort kurz gecacht (TTL 30–300 s, gescheitert 60 s,
+# letzte gute bis 1 h als Notnagel). Der Normalweg ist bitgleich: zuerst immer die System-Auflösung, ihr Ergebnis/ihre anderen Fehler unverändert.
+# Zeitdeckel (Gegenprüfung 10.11.2026): je DoH-Server 2 s, zusammen höchstens DNS_RUECKFALL_FRIST_S; läuft schon eine Abfrage für den Host, wartet
+# kein zweiter Thread (Notnagel oder sofort der alte Fehler) — der Rückfall verzögert kritische Pfade (Riegel, Panel) nie um mehr als ~3,5 s.
+# Gleicher Block in panel.py, order_bot.py, copier.py (jede Datei kommt über einen eigenen Update-Weg auf den PC; tools/selftest_dn1_dns_rueckfall.py
+# prüft, dass alle drei gleich sind). Log nur auf stderr (order_bot spricht über stdout JSON mit dem Panel).
+DNS_RUECKFALL_HOSTS = ("web-production-bec81.up.railway.app", "gxhkannmzpyuepxlepta.supabase.co")
+DNS_RUECKFALL_DOH = ("https://1.1.1.1/dns-query?name={}&type=A", "https://8.8.8.8/resolve?name={}&type=A")
+DNS_RUECKFALL_FRIST_S = 3.5
+_DNS_RUECK = {"cache": {}, "fehl": {}, "log": {}, "laeuft": {}}
+
+
+def dns_doh_ips(d):
+    """REIN (testbar): DoH-JSON (application/dns-json, Cloudflare/Google gleich) → (IPv4-Liste, TTL s) | ([], 0). Nur Status 0, nur A-Sätze (type 1)."""
+    import ipaddress
+    if not isinstance(d, dict) or d.get("Status") != 0:
+        return [], 0
+    ips, ttl = [], None
+    for a in d.get("Answer") or ():
+        if not isinstance(a, dict) or a.get("type") != 1:
+            continue
+        try:
+            ip = str(ipaddress.IPv4Address(str(a.get("data") or "").strip()))
+        except ValueError:
+            continue
+        if ip not in ips:
+            ips.append(ip)
+        try:
+            t = int(a.get("TTL"))
+            ttl = t if ttl is None else min(ttl, t)
+        except (TypeError, ValueError):
+            pass
+    return ips, (max(30, min(300, ttl)) if ttl is not None else 60) if ips else 0
+
+
+def dns_rueckfall_eintraege(ips, port, family=0, typ=0, proto=0):
+    """REIN (testbar): getaddrinfo-Einträge für die IPv4-Liste → [(AF_INET, typ, proto, '', (ip, port))]; leer, wenn nur IPv6 verlangt ist."""
+    import socket
+    if family not in (0, socket.AF_UNSPEC, socket.AF_INET):
+        return []
+    if port is None:
+        p = 0
+    elif isinstance(port, int):
+        p = port
+    else:
+        s = port.decode() if isinstance(port, bytes) else str(port)
+        p = int(s) if s.isdigit() else {"https": 443, "http": 80}.get(s.lower(), 0)
+    t = typ or socket.SOCK_STREAM
+    pr = proto or (socket.IPPROTO_TCP if t == socket.SOCK_STREAM else 0)
+    return [(socket.AF_INET, t, pr, "", (ip, p)) for ip in ips]
+
+
+def _dns_doh_holen(host, timeout=2.0):
+    """DoH per IP nacheinander (1.1.1.1, 8.8.8.8) → (ips, ttl), zusammen höchstens DNS_RUECKFALL_FRIST_S. Zertifikat wird geprüft (Standard-Kontext),
+    kein DNS nötig."""
+    import urllib.parse
+    import urllib.request
+    ende = time.time() + DNS_RUECKFALL_FRIST_S
+    for vorlage in DNS_RUECKFALL_DOH:
+        rest = ende - time.time()
+        if rest < 0.5:
+            break
+        try:
+            req = urllib.request.Request(vorlage.format(urllib.parse.quote(host)),
+                                         headers={"Accept": "application/dns-json", "User-Agent": "prophos-dns"})
+            with urllib.request.urlopen(req, timeout=min(timeout, rest)) as r:
+                ips, ttl = dns_doh_ips(json.loads(r.read().decode("utf-8") or "{}"))
+            if ips:
+                return ips, ttl
+        except Exception:
+            continue
+    return [], 0
+
+
+def dns_rueckfall_ips(host, jetzt=None, holen=None):
+    """Gecachte bzw. frisch per DoH geholte IPv4 für einen unserer Hosts → Liste (leer = keine). holen nur für den Selbsttest."""
+    jetzt = time.time() if jetzt is None else jetzt
+    c = _DNS_RUECK["cache"].get(host)
+    if c and c[1] > jetzt:
+        return list(c[0])
+    notnagel = list(c[0]) if c and jetzt - c[1] < 3600 else []    # letzte gute Antwort bis 1 h nach Ablauf
+    if _DNS_RUECK["fehl"].get(host, 0) > jetzt:                  # DoH gerade gescheitert: 60 s nicht erneut
+        return notnagel
+    marke = object()
+    if _DNS_RUECK["laeuft"].setdefault(host, marke) is not marke:   # nur eine Abfrage je Host (setdefault ist unter der GIL atomar)
+        return notnagel
+    try:
+        ips, ttl = (holen or _dns_doh_holen)(host)
+    finally:
+        _DNS_RUECK["laeuft"].pop(host, None)
+    if ips:
+        _DNS_RUECK["cache"][host] = (tuple(ips), jetzt + ttl)
+        _DNS_RUECK["fehl"].pop(host, None)
+        return list(ips)
+    _DNS_RUECK["fehl"][host] = jetzt + 60
+    return notnagel
+
+
+def dns_rueckfall_einbauen():
+    """socket.getaddrinfo einmal je Prozess umhüllen (Merker am Wrapper) — Normalweg zuerst und unverändert."""
+    import socket
+    if getattr(socket.getaddrinfo, "_prophos_dns_rueckfall", False):
+        return False
+    orig = socket.getaddrinfo
+
+    def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        try:
+            return orig(host, port, family, type, proto, flags)
+        except socket.gaierror:
+            try:
+                h = (host.decode() if isinstance(host, bytes) else str(host or "")).strip().lower().rstrip(".")
+                if h not in DNS_RUECKFALL_HOSTS or (flags & socket.AI_NUMERICHOST):
+                    raise LookupError
+                eintraege = dns_rueckfall_eintraege(dns_rueckfall_ips(h), port, family, type, proto)
+            except Exception:
+                eintraege = []
+            if not eintraege:
+                raise
+            try:
+                if _DNS_RUECK["log"].get(h, 0) < time.time():
+                    _DNS_RUECK["log"][h] = time.time() + 600
+                    sys.stderr.write(f"[dns] System-DNS ohne Antwort für {h} — DNS-over-HTTPS: {eintraege[0][4][0]}\n")
+            except Exception:
+                pass
+            return eintraege
+    getaddrinfo._prophos_dns_rueckfall = True
+    getaddrinfo._prophos_orig = orig
+    socket.getaddrinfo = getaddrinfo
+    return True
+
+
+dns_rueckfall_einbauen()
+# ── Ende DN1 DNS-RÜCKFALL ──
+
 TOL = 1e-6
 
 # ── Selbst-Update (15.08.2026, Finns Wunsch: kein manuelles Nachladen mehr) ─────
