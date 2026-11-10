@@ -44,15 +44,27 @@ def api(**ueber):
 u = ob.order_vorpruefung_urteil(2.7, "buy", api())
 check(u["abbruch"] is None and u["vol"] == 2.7 and not u["korrekturen"], "a1 2,7 Lot bei Step 0,01: keine Korrektur (Float sauber)")
 u = ob.order_vorpruefung_urteil(2.75, "sell", api(volume_step=0.1, volume_min=0.1))
-check(u["abbruch"] is None and abs(u["vol"] - 2.8) < 1e-9 and u["korrekturen"] and "2.75 → 2.8" in u["korrekturen"][0],
-      "a2 2,75 Lot bei Step 0,1 → 2,8 mit Grund")
+check(u["abbruch"] is None and abs(u["vol"] - 2.7) < 1e-9 and u["korrekturen"] and "2.75 → 2.7" in u["korrekturen"][0],
+      "a2 2,75 Lot bei Step 0,1 → 2,7 (abgerundet, nie über Plan-Lots) mit Grund")
 u = ob.order_vorpruefung_urteil(3.004, "buy", api())
 check(u["abbruch"] is None and u["vol"] == 3.0, "a3 3,004 Lot → 3 (Rest unter einem Step)")
 u = ob.order_vorpruefung_urteil(1.3, "buy", api(volume_step=1.0, volume_min=1.0))
 check(u["abbruch"] is None and u["vol"] == 1.0, "a4 1,3 Lot bei ganzen Lots → 1")
 check(ob.vol_auf_raster(2.5, None, None, None) == (2.5, None), "a5 ohne Step: Größe unverändert")
 check(ob.vol_auf_raster(1.15, 0.1, 0.1, 100)[0] == 1.1 and ob.vol_auf_raster(2.5, 1, 1, 100)[0] == 2.0,
-      "a6 Rundung wie copier.norm_vol (1,15 → 1,1 Float; 2,5 → 2 zur geraden Zahl) — deterministisch")
+      "a6 abrunden deterministisch (1,15 → 1,1; 2,5 → 2)")
+# M2 (Prüfer): nie über die Plan-Lots — copier.norm_vol rundete 0,17 → 0,2 und 4,66 → 5
+check(ob.vol_auf_raster(0.17, 0.1, 0.1, 100)[0] == 0.1 and ob.vol_auf_raster(4.66, 1, 1, 100)[0] == 4.0
+      and ob.vol_auf_raster(2.7, 0.01, 0.01, 100)[0] == 2.7 and ob.vol_auf_raster(0.07, 0.01, 0.01, 100)[0] == 0.07,
+      "M2 abrunden: 0,17/0,1 → 0,1 · 4,66/1 → 4 · 2,7 und 0,07 bei 0,01 unverändert (Float-Rest)")
+for vv in (0.29, 3.3, 5.2165, 26.0, 1.005):
+    n_ = ob.vol_auf_raster(vv, 0.01, 0.01, 100)[0]
+    check(n_ <= vv + 1e-12, f"M2 nie über Plan-Lots: {vv:g} → {n_:g}")
+# M3 (Prüfer): Step lesbar, Minimum fehlt/0 → abgerundet 0 Lot → nicht senden (vorher: run() tippte 0)
+check(ob.vol_auf_raster(0.04, 0.1, None, None) == (0.04, "null") and ob.vol_auf_raster(0.04, 0.1, 0, 0) == (0.04, "null"),
+      "M3 0,04 Lot bei Step 0,1 ohne Minimum → Problem „null“")
+u = ob.order_vorpruefung_urteil(0.04, "buy", api(volume_step=0.1, volume_min=None))
+check(u["abbruch"] and "0 Lot" in u["abbruch"][0] and u["vol"] == 0.04, "M3 Urteil: nicht senden, Grund „ergibt … 0 Lot“")
 
 # b) Minimum / Maximum
 u = ob.order_vorpruefung_urteil(0.4, "buy", api(volume_step=1.0, volume_min=1.0))
@@ -159,9 +171,27 @@ check(tx == [], "f5 ohne Kurs → unverändert")
 #    Der Broker prüft gegen Bid: bei 1,5 Punkten Spread bleiben 8,16 Punkte. Mit angenommenem Stops-Level 1000 Punkte (10,00) → „Invalid stops“.
 ask, bid = 26996.53, 26995.03
 sl0, tp0 = ob.berechne_sl_tp("buy", ask, 29, 1.0, 280, 5416, 2)
-sl, tp, tx = ob.sltp_mindestabstand("buy", ask, bid, sl0, tp0, 1000, 0.01, 2)
-check(sl < sl0 and abs((bid - sl) - 10.01) < 1e-6 and tp == tp0 and len(tx) == 1,
-      f"q1 Q7 11-06 The5%ers 29 Lot SL 280 $: SL auf 10,01 Punkte unter Bid geweitet (+{(sl0 - sl) * 29:.0f} $), TP unverändert → Order geht durch")
+g = ob.sl_mindest_urteil("buy", ask, bid, 29, 1.0, 280, 5416, 1000, 0.01, 2, 90230.56)
+check(bool(g) and g[0].startswith("SL-Abstand 8.16 Pkt unter dem Mindestabstand 10.01 Pkt des Brokers (Kauf gegen Bid)") and "statt Plan-SL 280.00 $" in g[0]
+      and "Kontostand 90 230.56" in g[0], "q1 Q7 11-06 The5%ers 29 Lot SL 280 $ (DD-Grenze): SL am Mindestabstand > Plan-SL → NICHT senden (Prüfer M1)")
+# M1 Beispiel des Prüfers: Kauf, ask 20000, bid 19998,5, Plan-SL 3 Pkt, Stops-Level 300 × 0,01 → SL 19995,49 wären +50 % Verlust
+g = ob.sl_mindest_urteil("buy", 20000.0, 19998.5, 1, 1.0, 3.0, 50.0, 300, 0.01, 2)
+check(bool(g) and "≈ 4.51 $ statt Plan-SL 3.00 $" in g[0], "M1 Prüfer-Beispiel: +50 % über Plan-SL → nicht senden")
+check(ob.sl_mindest_urteil("sell", 20001.5, 20000.0, 1, 1.0, 3.0, 50.0, 300, 0.01, 2) is not None, "M1 Verkauf gegen Ask: ebenso nicht senden")
+check(ob.sl_mindest_urteil("buy", 20000.0, 19998.5, 1, 1.0, 50.0, 1.0, 300, 0.01, 2) is None, "M1 nur der TP zu nah → kein Abbruch (TP rückt im F9-Dialog weiter weg)")
+check(ob.sl_mindest_urteil("buy", 20000.0, 19998.5, 1, 1.0, 50.0, 50.0, 300, 0.01, 2) is None, "M1 SL weit genug → kein Abbruch")
+check(ob.sl_mindest_urteil("buy", 20000.0, 19998.5, 1, 1.0, 0, 0, 300, 0.01, 2) is None, "M1 ohne SL/TP im Plan (F9 tippt keine) → keine Aussage")
+check(ob.sl_mindest_urteil("buy", None, None, 1, 1.0, 3, 50, 300, 0.01, 2) is None and ob.sl_mindest_urteil("buy", 20000, 19998.5, 1, 1.0, 3, 50, 0, 0.01, 2) is None,
+      "M1 ohne Kurs oder Stops-Level → keine Aussage (Stand vorher)")
+_echt2 = ob._order_api_zustand
+try:
+    ob._order_api_zustand = lambda *a, **k: dict(api(stops_level=1000.0, balance=90230.56))
+    t = Spur()
+    vp = ob._order_vorpruefung("p", 1, "NAS100", "buy", 29, t, sltp={"ask": ask, "bid": bid, "contract_size": 1.0, "digits": 2, "sl_usd": 280, "tp_usd": 5416})
+    check(vp["abbruch"] and vp["abbruch"][0].startswith("SL-Abstand") and any("nicht senden" in z for z in t),
+          "M1 _order_vorpruefung bricht VOR dem ersten Fenster ab (sltp aus run())")
+finally:
+    ob._order_api_zustand = _echt2
 # q2 Tradeify CFD 3,4 Lot Kauf, SL 1936 $ (569 Punkte): weit genug → keine Korrektur, die Vorprüfung ändert hier nichts
 sl0, tp0 = ob.berechne_sl_tp("buy", 27007.10, 3.4, 1.0, 1936, 4342, 2)
 check(ob.sltp_mindestabstand("buy", 27007.10, 27005.60, sl0, tp0, 1000, 0.01, 2)[2] == [], "q2 Q7 11-09 Tradeify CFD 3,4 Lot: Abstand groß → unverändert")
@@ -186,6 +216,10 @@ for gr in [ob.order_marge_urteil(api(marge_noetig=120000.0))[0], ob.order_vorpru
 check("f9_vorpruefung" in ob.FEHLERFOTO_CODES_OHNE, "m3 kein Fehlerfoto bei der Vorprüfung (beweisbar nichts getippt)")
 
 # h) Verdrahtung in run()
+src0 = inspect.getsource(ob.run)
+check('"sl_usd": cmd.get("sl_usd")' in src0[src0.find("_order_vorpruefung("):src0.find("_finde_terminal_geduldig(")], "h0 run() gibt Plan-SL/TP und Kurs an die Vorprüfung")
+kl = src0[src0.find("sltp_mindestabstand("):src0.find('"F9-SL"', src0.find("sltp_mindestabstand("))]
+check("_sl_k, tp_f9, _vp_st = sltp_mindestabstand(" in src0 and 'startswith("TP ")' in kl, "h7 F9-Dialog: nur der TP rückt, der SL bleibt wie geplant (Prüfer M1)")
 src = inspect.getsource(ob.run)
 i_vp, i_term = src.find("_order_vorpruefung("), src.find("_finde_terminal_geduldig(")
 check(0 < i_vp < i_term, "h1 Vorprüfung läuft vor dem ersten Fenster-Schritt (Terminal-Suche)")

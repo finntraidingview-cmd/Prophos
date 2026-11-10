@@ -11681,8 +11681,10 @@ def order_grund_bestimmen(journal, dialog_text, api):
 # Befund FS2: alle harten Order-Gründe (Konto gesperrt, close-only, Marge, Lot-Raster, Stops-Abstand) waren aus der API lesbar, aber
 # _order_api_zustand lief nur NACH einem Fehlschlag (Diagnose). Der Puls tippte die Plan-Lots roh (f"{vol:g}"), der Copier rundet dieselbe Größe
 # seit jeher auf den Broker-Raster (copier.py norm_vol). Jetzt EINE Lesung vor dem ersten Fenster-Schritt:
-#   korrigierbar  → Lots auf volume_step, F9-SL/TP auf den Mindestabstand (trade_stops_level) — mit Grund in der Spur;
-#   nicht korrigierbar (Terminal getrennt, trade_allowed aus, Symbol gesperrt/close-only/nur eine Seite, Lots unter Minimum/über Maximum, Marge zu klein)
+#   korrigierbar  → Lots auf volume_step ABGERUNDET, F9-TP auf den Mindestabstand (trade_stops_level) — mit Grund in der Spur;
+#                   ein zu naher SL wird NIE weiter weg geschoben (Prüfer M1: mehr Verlust als der Plan-SL) → nicht senden (sl_mindest_urteil);
+#   nicht korrigierbar (Terminal getrennt, trade_allowed aus, Symbol gesperrt/close-only/nur eine Seite, Lots unter Minimum/über Maximum/abgerundet 0,
+#                   SL unter dem Mindestabstand, Marge zu klein)
 #                 → nichts senden, Meldung mit der EINEN Ursache und dem Fix (Grund-Texte wie order_grund_bestimmen — sie sind Schlüssel für
 #                   sfGesperrt, FD_REZEPTE und die E1-Muster).
 # Lesefehler oder fehlendes Feld = diese Prüfung entfällt (Stand vorher), nie ein Abbruch aus einer unlesbaren API.
@@ -11691,16 +11693,17 @@ _VORPRUEF_LAUF = {}   # je Prozess ein Lauf: Korrekturen der Vorprüfung → mai
 
 
 def vol_auf_raster(vol, step, vmin, vmax):
-    """REIN RECHNEND (testbar, FS2-C): Plan-Lots → (lots, problem). Wie copier.norm_vol auf volume_step gerundet und auf dessen Stellen gebracht;
-    problem = None | 'unter_min' | 'ueber_max' (dann lots unverändert — klemmen hieße eine andere Größe handeln, als der Plan rechnet).
-    Ohne lesbaren Step bleibt die Größe wie sie ist."""
+    """REIN RECHNEND (testbar, FS2-C): Plan-Lots → (lots, problem). Auf volume_step ABGERUNDET (Prüfer M2: nie über den Plan-Lots — Hedge,
+    Endlesung und v2NachholTreffer rechnen mit den Plan-Lots; copier.norm_vol rundet zum nächsten Schritt, hier bewusst nicht) und auf dessen Stellen
+    gebracht. problem = None | 'null' (Prüfer M3: abgerundet 0 Lot, z. B. ohne lesbares Minimum) | 'unter_min' | 'ueber_max' (dann lots
+    unverändert — klemmen hieße eine andere Größe handeln, als der Plan rechnet). Ohne lesbaren Step bleibt die Größe wie sie ist."""
     v = float(vol)
     try:
         st = float(step) if step not in (None, "") else 0.0
     except (TypeError, ValueError):
         st = 0.0
     if st > 0:
-        n = round(round(v / st) * st, 8)
+        n = round(int(v / st + 1e-9) * st, 8)   # abrunden; 1e-9 fängt Float-Reste wie 2,7 / 0,01 = 269,99999…
         s_txt = f"{st:.8f}".rstrip("0")
         dec = len(s_txt.split(".")[1]) if "." in s_txt else 0
         n = round(n, dec)
@@ -11709,6 +11712,11 @@ def vol_auf_raster(vol, step, vmin, vmax):
     try:
         if vmin not in (None, "") and float(vmin) > 0 and n < float(vmin) - VORPRUEF_TOL:
             return v, "unter_min"
+    except (TypeError, ValueError):
+        pass
+    if n <= VORPRUEF_TOL:
+        return v, "null"
+    try:
         if vmax not in (None, "") and float(vmax) > 0 and n > float(vmax) + VORPRUEF_TOL:
             return v, "ueber_max"
     except (TypeError, ValueError):
@@ -11745,6 +11753,10 @@ def order_vorpruefung_urteil(vol, richtung, api):
                           f"Plan will {'Kauf' if kauf else 'Verkauf'}".replace("  ", " "), "Richtung im Plan prüfen")
         return out
     n, problem = vol_auf_raster(vol, a.get("volume_step"), a.get("volume_min"), a.get("volume_max"))
+    if problem == "null":
+        out["abbruch"] = (f"Volumen ungültig: {float(vol):g} Lot ergibt auf dem Raster {float(a['volume_step']):g} des Symbols {sym} 0 Lot".replace("  ", " "),
+                          "Lots im Plan erhöhen")
+        return out
     if problem == "unter_min":
         out["abbruch"] = (f"Volumen ungültig: {float(vol):g} Lot unter dem Minimum {float(a['volume_min']):g} des Symbols {sym}".replace("  ", " "),
                           "Lots im Plan erhöhen")
@@ -11802,13 +11814,43 @@ def sltp_mindestabstand(richtung, ask, bid, sl, tp, stops_level, point, digits=2
     return sl_n, tp_n, texte
 
 
+def sl_mindest_urteil(richtung, ask, bid, vol, contract_size, sl_usd, tp_usd, stops_level, point, digits=2, balance=None):
+    """REIN RECHNEND (testbar, FS2-C Prüfer M1): würde der F9-SL am Mindestabstand des Brokers MEHR verlieren als der Plan-SL → (grund, fix), sonst None.
+    Gerechnet wie run(): Plan-SL/TP ab Ask (Kauf) bzw. Bid (Verkauf) mit den korrigierten Lots, dann sltp_mindestabstand. Den SL weiter weg zu schieben hieße
+    über den Plan-Verlust hinaus handeln (Q7: Konten an der Max-DD-Grenze, Plan-SL 2–10 Punkte) — deshalb nicht senden, nie im offenen F9-Dialog.
+    Ein weiter entfernter TP ist kein Abbruch. Ohne SL/TP im Plan, Kurs, Stops-Level oder Kontraktgröße keine Aussage."""
+    try:
+        sl_u, tp_u, cs, v = float(sl_usd or 0), float(tp_usd or 0), float(contract_size or 0), float(vol)
+    except (TypeError, ValueError):
+        return None
+    kauf = str(richtung).lower() == "buy"
+    ref_plan = ask if kauf else bid
+    if sl_u <= 0 or tp_u <= 0 or cs <= 0 or v <= 0 or not ask or not bid:
+        return None
+    sl0, tp0 = berechne_sl_tp(richtung, ref_plan, v, cs, sl_u, tp_u, digits)
+    sl_n, _tp_n, _t = sltp_mindestabstand(richtung, ask, bid, sl0, tp0, stops_level, point, digits)
+    if abs(sl_n - sl0) <= VORPRUEF_TOL:
+        return None
+    verlust = abs(float(ref_plan) - sl_n) * v * cs
+    if verlust <= sl_u + 0.01:
+        return None
+    ref_mt = float(bid) if kauf else float(ask)
+    d_plan = (ref_mt - sl0) if kauf else (sl0 - ref_mt)
+    d_min = (float(stops_level) + 1) * float(point)
+    stand = f" — Kontostand {float(balance):,.2f}".replace(",", " ") if isinstance(balance, (int, float)) else ""
+    return (f"SL-Abstand {d_plan:.2f} Pkt unter dem Mindestabstand {d_min:.2f} Pkt des Brokers ({'Kauf gegen Bid' if kauf else 'Verkauf gegen Ask'}) — "
+            f"SL am Mindestabstand ≈ {verlust:,.2f} $ statt Plan-SL {sl_u:,.2f} $".replace(",", " ") + stand,
+            f"Plan-SL mindestens {verlust:,.0f} $ — mit diesem Plan-SL ist die Order nicht startbar".replace(",", " "))
+
+
 def vorpruefung_meldung(grund, fix, spur_text):
     """REIN RECHNEND (testbar, FS2-C): Meldung bei „nicht senden“ — Anfang fest (Muster-Schlüssel), danach die EINE Ursache und der Fix."""
     return f"Vorprüfung vor F9: {grund} — nichts gesendet. → {fix} [{spur_text}]"
 
 
-def _order_vorpruefung(path, expected, symbol, richtung, vol, trail):
-    """FS2-C: eine Lesung vor dem ersten Fenster-Schritt → {vol, api, korrekturen, abbruch}. Nie werfen; unlesbar = keine Prüfung."""
+def _order_vorpruefung(path, expected, symbol, richtung, vol, trail, sltp=None):
+    """FS2-C: eine Lesung vor dem ersten Fenster-Schritt → {vol, api, korrekturen, abbruch}. Nie werfen; unlesbar = keine Prüfung.
+    sltp = {ask, bid, contract_size, sl_usd, tp_usd, digits} aus run() (Prüfer M1: SL-Mindestabstand gegen den Plan-SL)."""
     try:
         api = _order_api_zustand(path, expected, symbol)
     except Exception as e:
@@ -11823,6 +11865,12 @@ def _order_vorpruefung(path, expected, symbol, richtung, vol, trail):
         trail.append(f"Vorprüfung: Urteil gestört ({type(e).__name__}) — ohne Prüfung weiter")
         return {"vol": vol, "api": api, "korrekturen": [], "abbruch": None}
     u["api"] = api
+    if u["abbruch"] is None and isinstance(sltp, dict):
+        try:
+            u["abbruch"] = sl_mindest_urteil(richtung, sltp.get("ask"), sltp.get("bid"), u["vol"], sltp.get("contract_size"), sltp.get("sl_usd"),
+                                             sltp.get("tp_usd"), api.get("stops_level"), api.get("point"), sltp.get("digits", 2), api.get("balance"))
+        except Exception as e:
+            trail.append(f"Vorprüfung SL-Abstand: nicht prüfbar ({type(e).__name__})")
     if u["abbruch"] is None:
         try:
             m_api = _order_api_zustand(path, expected, symbol, richtung, u["vol"])
@@ -14117,7 +14165,9 @@ def run(cfg_path, cmd):
 
     # FS2-C ORDER-VORPRÜFUNG (11.11.2026, s. order_vorpruefung_urteil): vor dem ersten Fenster-Schritt Lots aufs Symbol-Raster, Konto/Symbol/Marge
     # lesend prüfen. Nicht korrigierbar → nichts gesendet (retry_ok bleibt True: beweisbar kein Klick), Grund vorn in der Meldung.
-    _vp = _order_vorpruefung(path, expected, symbol, cmd["richtung"], vol, trail)
+    _vp = _order_vorpruefung(path, expected, symbol, cmd["richtung"], vol, trail,
+                             sltp={"ask": lese.get("ref_ask"), "bid": lese.get("ref_bid"), "contract_size": contract_size, "digits": digits,
+                                   "sl_usd": cmd.get("sl_usd"), "tp_usd": cmd.get("tp_usd")})
     _vp_api = _vp.get("api") or {}
     if _vp["abbruch"]:
         _puls_diagnose_senden(spur=trail, schritt="f9_vorpruefung")
@@ -14389,12 +14439,17 @@ def run(cfg_path, cmd):
                     sl_f9, tp_f9 = berechne_sl_tp(cmd["richtung"], ref, vol,
                                                   contract_size, cmd["sl_usd"],
                                                   cmd["tp_usd"], digits)
-                    # FS2-C (11.11.2026): zu nahe F9-Stops lehnt der Broker samt Order ab („Invalid stops“) → auf den Mindestabstand, nur weiter weg
-                    sl_f9, tp_f9, _vp_st = sltp_mindestabstand(cmd["richtung"], lese.get("ref_ask"), lese.get("ref_bid"), sl_f9, tp_f9,
+                    # FS2-C (11.11.2026): zu nahe F9-Stops lehnt der Broker samt Order ab („Invalid stops“). Nur der TP rückt hier auf den
+                    # Mindestabstand (weiter weg = kein Mehr-Verlust). Den SL nie weiter weg als der Plan (Prüfer M1) — ein zu naher SL ist schon
+                    # in der Vorprüfung abgebrochen; liegt er jetzt doch zu nah (Kurs seit der Lesung bewegt), bleibt er wie geplant (Stand vorher)
+                    _sl_k, tp_f9, _vp_st = sltp_mindestabstand(cmd["richtung"], lese.get("ref_ask"), lese.get("ref_bid"), sl_f9, tp_f9,
                                                               _vp_api.get("stops_level"), _vp_api.get("point"), digits)
                     for _t in _vp_st:
-                        trail.append("Vorprüfung korrigiert: " + _t)
-                        _VORPRUEF_LAUF.setdefault("korrekturen", []).append(_t)
+                        if _t.startswith("TP "):
+                            trail.append("Vorprüfung korrigiert: " + _t)
+                            _VORPRUEF_LAUF.setdefault("korrekturen", []).append(_t)
+                        else:
+                            trail.append("Vorprüfung: " + _t.replace(" → ", " bräuchte ") + " — SL bleibt wie geplant")
                     sl_el, tp_el = fmap.get("sl"), fmap.get("tp")   # Karte vom Volumen-Schritt (08.10.2026), kein zweiter Scan
                     if sl_el is None or tp_el is None:
                         trail.append("F9-SL/TP-Felder nicht gefunden — Nachtrag nach Fill")
