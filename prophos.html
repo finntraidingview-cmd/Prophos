@@ -46446,7 +46446,18 @@
         }
         // die WD-Spalte darf den Verlauf nie umwerfen: Fehler → ohne Spalte zeichnen
         const wdSicher = gruppen => { try{ wdRechnen(gruppen) }catch(e){ wdSpalte = null; wdZyklusText = null; console.warn('[trade-verlauf wd]', e) } }
-        if(!items.length || !grenzen.length){ if(items.length) wdSicher([items]); actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
+        /* AD1b GEWINNTAGE FUNDED CFD (Master 11.11.2026, Finn wollte AD1 „allgemein“): im Trenner des LAUFENDEN Zyklus „n/m Tage“ — genau die Zahl der
+         * Payout-Checkliste (GET /konto-ziele → gewinntage {ist, soll, korrektur, zyklus, min}, app.py kz_rechnen/fcp_gewinntage_ist inkl. Korrektur von Hand),
+         * hier nichts neu gerechnet. Keine Spalte je Trade und keine Zahl für ältere Zyklen: /konto-ziele nennt nur die Anzahl des laufenden Zyklus, nicht
+         * welche Tage zählten (Backend müsste dafür gewinntage.tage [Berlin-Tage] je Zyklus liefern). Stimmt die Zyklus-Nummer des Backends nicht mit der des
+         * Verlaufs überein, bleibt die Zahl weg. Mit Regel bekommt auch Zyklus 1 (noch kein Payout) seinen Trenner, damit die Zahl einen Platz hat. */
+        const gtK = (cfd && kz && kz.gewinntage && typeof kz.gewinntage === 'object' && kz.gewinntage.ist != null && Number(kz.gewinntage.soll) > 0) ? kz.gewinntage : null
+        const gtNr = grenzen.length ? nrVon(grenzen.length) : 1
+        const gtText = (gtK && (gtK.zyklus == null || Number(gtK.zyklus) === gtNr)) ? {
+          text: `${Number(gtK.ist)}/${Number(gtK.soll)} Tage`,
+          tip: `Gewinntage im laufenden Zyklus: ${Number(gtK.ist)} von ${Number(gtK.soll)} nötigen${gtK.min ? ` (Tage mit Summe ≥ $${Number(gtK.min).toLocaleString('de-DE')}, Berliner Tag des Trade-Endes)` : ''}`
+            + (Number(gtK.korrektur) ? ` · ${Number(gtK.korrektur) > 0 ? '+' : ''}${Number(gtK.korrektur)} von Hand` : '') + ' — wie die Payout-Checkliste' } : null
+        if(!items.length || (!grenzen.length && !gtText)){ if(items.length) wdSicher([items]); actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
         // Tag wie wd_zyklus_stand: Berliner Kalendertag des Starts (started_at, sonst Ende), Buchungen ihr Datum — ein Trade AM Anfrage-Tag zählt zum alten Zyklus
         const tagVon = d => { const x = new Date(d); return d && isFinite(x) ? x.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }) : '' }
         // Funded CFD: Tag des Trade-ENDES wie die Zyklus-Gewinne des Planers (fcp_gewinne / fcp_tage_zyklus: ended_at, sonst completed_at, sonst started_at);
@@ -46481,6 +46492,7 @@
             : (grenzen.length ? `Kontostart – ${ttmm(grenzen[0])}` : 'ab Kontostart')
           const links = [`<b style="font-weight:600;color:var(--ink-2)">Zyklus ${nrVon(z)}</b>`, zeitraum, `${trades.length} Trade${trades.length === 1 ? '' : 's'}`]
           if(wdZyklusText && wdZyklusText[z]) links.push(`<span style="color:#006F4F;font-weight:600">${wdZyklusText[z]}</span>`)   // AD1: „3/5 WD“ wie die Spalte
+          if(gtText && z === gruppen.length - 1) links.push(`<span style="color:#006F4F;font-weight:600" title="${escapeHtml(gtText.tip)}">${escapeHtml(gtText.text)}</span>`)   // AD1b
           const rechts = []
           if(trades.length) rechts.push(`${alleMaster ? 'Master' : 'P&L'} ${geldZ(master, '$')}`)   // Slave-Konto: eigene Seite heißt nicht „Master“
           Object.keys(gegen).forEach(k => { const [name, ccy] = k.split('|'); rechts.push(`${name} ${geldZ(gegen[k], ccy)}`) })
@@ -58401,7 +58413,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2173'
+  const OS_TAB_BUILD = '2026-09-22.2174'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
