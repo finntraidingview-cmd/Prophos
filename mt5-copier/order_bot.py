@@ -30882,18 +30882,29 @@ def deals_urteil(deals, positionen, richtung, lots, symbol, ohne=()):
 VORFLUG_JOURNAL_KONTO = ("Konto nimmt nur Schließen an", "Handel am Konto gesperrt")   # Anfänge der Grund-Texte aus ORDER_GRUND_REGELN
 
 
-def journal_letzte_ablehnung(zeilen, login):
+VORFLUG_JOURNAL_MAX_S = 3 * 3600   # Prüfer S2: eine Ablehnung zählt nur, wenn sie jung ist („nur Schließen“ kann vorübergehend sein)
+
+
+def journal_letzte_ablehnung(zeilen, login, symbol=None, jetzt_s=None, max_alter_s=VORFLUG_JOURNAL_MAX_S):
     """REIN RECHNEND (testbar, F-A): neueste Order-Zeile dieses Logins (failed / accepted / deal # / order # / market …, „modify #“/„close #“ zählen nicht).
     Ist sie eine „failed …“-Zeile, deren Server-Antwort eine Konto-Regel trifft (nur Schließen, Handel gesperrt) → (grund, antwort, zeile); sonst None.
-    Eine spätere erfolgreiche Order hebt eine alte Ablehnung also auf."""
+    Eine spätere erfolgreiche Order hebt eine alte Ablehnung also auf. Prüfer S2: mit jetzt_s (Sekunden seit Mitternacht, Ortszeit des PCs) nur Zeilen
+    der letzten max_alter_s; mit symbol nur, wenn die Ablehnung DIESES Symbol betrifft (sonst kann sie ein anderes, z. B. abgelaufenes Symbol meinen)."""
     lg = f"'{login}':" if login else ""
+    sym = str(symbol or "").strip().lower()
     rx = re.compile(r"\b(failed )?(market|instant|request|exchange) (buy|sell)\b|\baccepted\b|\bdeal #\d+ (buy|sell)\b|\border #\d+ (buy|sell)\b")
     for z in reversed(list(zeilen or ())):
         zl = str(z or "").lower()
         if (lg and lg not in zl) or "modify #" in zl or "close #" in zl or not rx.search(zl):
             continue
+        if jetzt_s is not None:
+            m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.\d{3}\b", zl)
+            if not m or (float(jetzt_s) - (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)))) % 86400 > max_alter_s:
+                return None          # neueste Order-Zeile zu alt (oder ohne Uhrzeit) → kein Befund
         if not re.search(r"\bfailed (market|instant|request|exchange) (buy|sell)\b", zl):
             return None
+        if sym and sym not in zl:
+            return None              # Ablehnung eines anderen Symbols
         a = re.findall(r"\[([^\]]+)\]", str(z))
         g = order_grund_aus_text(a[-1]) if a else None
         if g and g[0].startswith(VORFLUG_JOURNAL_KONTO):
@@ -30910,7 +30921,10 @@ def vorflug_urteil(api, richtung, journal_treffer=None):
     exp, ist = a.get("expected"), a.get("login")
     if exp and ist and int(ist) != int(exp):
         return {"rot": True, "art": "falsches_konto", "grund": f"Terminal ist im FALSCHEN Konto ({ist} statt {exp})"}
-    u = order_vorpruefung_urteil(1.0, richtung, {k: v for k, v in a.items() if not k.startswith("volume_")})
+    _ohne = {k: v for k, v in a.items() if not k.startswith("volume_")}
+    if str(richtung or "").lower() not in ("buy", "sell") and _ohne.get("symbol_modus") in (1, 2):
+        _ohne.pop("symbol_modus")   # Prüfer S3: ohne gültige Richtung keine Seitenprüfung (sonst „nur Kauf — Plan will Verkauf“ ohne Plan-Richtung)
+    u = order_vorpruefung_urteil(1.0, richtung, _ohne)
     if u["abbruch"]:
         g = u["abbruch"][0]
         art = ("getrennt" if g.startswith("Terminal nicht") else "konto_gesperrt" if "trade_allowed" in g
@@ -30940,7 +30954,9 @@ def modus_vorflug(auftrag):
         return {"ok": False, "lesbar": False, "grund": "MetaTrader5-Paket fehlt im Panel-Python"}
     symbol = str(auftrag.get("symbol") or "").strip()
     try:
-        if not mt5.initialize(path=path, timeout=20000):
+        if not os.path.exists(path):
+            return {"ok": False, "lesbar": False, "grund": "Terminal-Pfad nicht gefunden"}
+        if not mt5.initialize(path=path, timeout=10000):   # Prüfer S1: 10 s (Panel-Deckel 20 s)
             return {"ok": False, "lesbar": False, "grund": f"Terminal nicht lesbar ({mt5.last_error()})"}
         try:
             ai, ti = mt5.account_info(), mt5.terminal_info()
@@ -30955,7 +30971,7 @@ def modus_vorflug(auftrag):
                 api["symbol_modus"] = int(si.trade_mode)
             _lt = time.localtime()
             zeilen = _mt5_journal_zeilen(str(ti.data_path or ""), beide=(_lt.tm_hour == 0 and _lt.tm_min < 30))
-            jt = journal_letzte_ablehnung(zeilen, int(ai.login))
+            jt = journal_letzte_ablehnung(zeilen, int(ai.login), symbol, _lt.tm_hour * 3600 + _lt.tm_min * 60 + _lt.tm_sec)
             u = vorflug_urteil(api, auftrag.get("richtung"), jt)
             return {"ok": True, "lesbar": True, "login": int(ai.login), "balance": round(float(ai.balance), 2), "journal_lesbar": bool(zeilen), **u}
         finally:

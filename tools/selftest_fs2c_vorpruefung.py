@@ -128,7 +128,9 @@ u = ob.order_vorpruefung_urteil(2.0, "buy", api(handel_konto=False, balance=9000
 g = u["abbruch"][0] if u["abbruch"] else ""
 with open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8") as f:
     html = f.read()
-mg = re.search(r"const sfGesperrt = m => \{ m = String\(m \|\| ''\); if\(!/(.+?)/i\.test\(m\)\)", html)
+# sfGesperrt seit RA2 (S1, 11.11.2026) mit zweiter Regel „(Server: Only position closing|Trade disabled)“ — die trade_allowed-Regel steht in der Folgezeile
+_sg = html[html.find("const sfGesperrt = m =>"):html.find("const sfGesperrt = m =>") + 600]
+mg = re.search(r"if\(!/(trade_allowed[^/]*)/i\.test\(m\)", _sg)
 check(bool(mg), "d0 sfGesperrt-Regex in prophos.html gefunden")
 check(bool(mg) and bool(re.search(mg.group(1), g, re.I)) and "Kontostand 90 002.00" in g,
       "d1 trade_allowed False → nicht senden, Text trifft sfGesperrt (Deckel sofort voll) mit Kontostand")

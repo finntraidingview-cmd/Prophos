@@ -68,6 +68,12 @@ check(ob.journal_letzte_ablehnung([f1, mod], L) is not None, "b5 „modify #…�
 check(ob.journal_letzte_ablehnung([rq], L) is None, "b6 andere Ablehnung (Requote) → kein Konto-Befund")
 check(ob.journal_letzte_ablehnung([f1.replace(str(L), "87654321")], L) is None, "b7 anderes Login → kein Treffer")
 check(ob.journal_letzte_ablehnung([], L) is None, "b8 Journal leer/unlesbar → kein Treffer")
+jetzt_s = 8 * 3600   # 08:00
+check(ob.journal_letzte_ablehnung([f1], L, "NAS100", jetzt_s) is not None, "b9 Ablehnung 07:58, jetzt 08:00, gleiches Symbol → Treffer")
+check(ob.journal_letzte_ablehnung([f1], L, "NAS100", 12 * 3600) is None, "b10 Prüfer S2: Ablehnung älter als 3 h → kein Befund")
+check(ob.journal_letzte_ablehnung([f1], L, "US30", jetzt_s) is None, "b11 Prüfer S2: Ablehnung eines anderen Symbols → kein Befund")
+check(not ob.vorflug_urteil(z(symbol_modus=1), "")["rot"] and ob.vorflug_urteil(z(symbol_modus=1), "sell")["rot"],
+      "b12 Prüfer S3: ohne gültige Richtung keine Seitenprüfung, mit Verkauf bei LONGONLY rot")
 
 # c) Bot
 msrc = inspect.getsource(ob.main)
@@ -79,21 +85,118 @@ check("symbol_select" not in vsrc.replace("kein symbol_select", "") and "_feld_t
 check("mt5.shutdown()" in vsrc, "c4 Verbindung wird wieder gelöst")
 
 # d) Panel
+sys.path.insert(0, os.path.join(WURZEL, "mt5-copier"))
+import panel as pn_vf  # noqa: E402
 with open(os.path.join(WURZEL, "mt5-copier", "panel.py"), encoding="utf-8") as f:
     p = f.read()
 i = p.find('if path == "/api/vorflug":')
 blk = p[i:p.find('if path == "/api/haupt-tab":', i)]
 check(i > 0 and "provision.terminal_pids(" in blk and "lock.acquire(blocking=False)" in blk and "409" in blk and "VORFLUG_LESEN.add(" in blk
       and "VORFLUG_LESEN.discard(" in blk and "lock.release()" in blk and '"vorflug"' in blk, "d1 /api/vorflug wie /api/deals (laufendes Terminal, Lock, 409, aufräumen)")
+g1 = blk[blk.find("with MASTER_ORDER_GUARD:"):blk.find("if not frei:")]
+check("lock.acquire(blocking=False)" in g1 and "VORFLUG_LESEN.add(" in g1 and "vorflug_darf(" in g1,
+      "d1b Hinweis S1: Lock + Markierung in EINEM Schritt unter MASTER_ORDER_GUARD, angemeldete Order hat Vorrang")
+g2 = blk[blk.rfind("finally:"):]
+check(g2.find("with MASTER_ORDER_GUARD:") < g2.find("lock.release()") < g2.find("VORFLUG_LESEN.discard("), "d1c erst Lock frei, dann Markierung weg (unter dem Guard)")
+check(pn_vf.vorflug_darf("a.json", {"a.json": 1000.0}, 1030.0) is False and pn_vf.vorflug_darf("a.json", {"a.json": 1000.0}, 1061.0) is True
+      and pn_vf.vorflug_darf("b.json", {"a.json": 1000.0}, 1001.0) is True, "d1d angemeldete Order sperrt den Vorflug derselben Instanz 60 s")
+check("ORDER_ANGEMELDET[inst[\"config_file\"]] = time.time()" in p, "d1e Order/Close melden sich nach dem Vorab-Warten an")
 check("_instanz_heilt(inst)" in blk, "d2 nicht während einer EA-Heilung")
-check(p.count("_hat = lock.acquire(timeout=VORFLUG_WARTE_S)") == 2 and p.count("in VORFLUG_LESEN:") == 2,
-      "d3 master-order und Close warten auf einen laufenden Vorflug (statt 409 = Fehlstart)")
-check(re.search(r"VORFLUG_WARTE_S = 45\.0", p) and "timeout=40" in blk, "d4 Wartezeit der Order (45 s) > Lese-Deckel (40 s)")
+check("_hat = lock.acquire(timeout=" not in p and p.count("_vorflug_abwarten(inst[\"config_file\"])") == 1,
+      "d3 Prüfer M1: kein Warten am Lock mehr — EIN Vorab-Warten vor allen Riegeln beider Routen")
+k = p.find('if u.path in ("/api/master-order", "/api/master-close") and inst:')
+check(0 < k < p.find('if u.path == "/api/master-order":') < p.find("richtung_frei(", k), "d3b Vorab-Warten steht vor den Routen (vor Richtungs-Riegel/Copier-Frische)")
+check(re.search(r"VORFLUG_WARTE_S = 25\.0", p) and re.search(r"VORFLUG_DECKEL_S = 20\b", p) and "timeout=VORFLUG_DECKEL_S" in blk,
+      "d4 Prüfer S1: Warten 25 s, Lese-Deckel 20 s (25 + 300 s Bot < 310 s Proxy)")
+check('_ri if _ri in ("buy", "sell") else ""' in blk, "d5 Prüfer S3: Panel reicht nur buy/sell als Richtung durch")
 
-# e) Hinweis S1 (RA2 F1): reine Lesungen zählen nicht als „MT5-Order läuft“ (Tab-Heilung, Polar, Panel-Neustart)
+# d6) Verhalten (Prüfer S5): Vorab-Warten + Lock — Vorflug hält den Lock, zwei Aufträge derselben Instanz → einer läuft, der zweite bekommt sofort 409
 import threading  # noqa: E402
 sys.path.insert(0, os.path.join(WURZEL, "mt5-copier"))
 import panel as pn  # noqa: E402
+pn.VORFLUG_LESEN.clear()
+lk = threading.Lock()
+lk.acquire()
+pn.VORFLUG_LESEN.add("v.json")
+erg = []
+
+
+def auftrag(name):
+    pn._vorflug_abwarten("v.json")
+    if lk.acquire(blocking=False):
+        erg.append((name, "läuft"))
+        time.sleep(0.3)
+        lk.release()
+    else:
+        erg.append((name, "409"))
+
+
+import time  # noqa: E402
+ts = [threading.Thread(target=auftrag, args=(n,)) for n in ("A", "B")]
+for t in ts:
+    t.start()
+time.sleep(1.2)
+check(erg == [], "d6a Aufträge warten, solange der Vorflug läuft")
+pn.VORFLUG_LESEN.discard("v.json")
+lk.release()
+for t in ts:
+    t.join(5)
+check(sorted(x[1] for x in erg) == ["409", "läuft"], f"d6b danach läuft genau einer, der zweite bekommt 409 wie bisher ({erg})")
+t0 = time.time()
+check(pn._vorflug_abwarten("andere.json") < 0.05 and time.time() - t0 < 0.1, "d6c ohne Vorflug kein Warten")
+
+# d7) modus_vorflug mit nachgebautem MetaTrader5 (Prüfer S5)
+import json as _json, tempfile, types  # noqa: E401,E402
+aufr = []
+
+
+class FakeMt5(types.ModuleType):
+    def __init__(self, init_ok=True, ai=True):
+        super().__init__("MetaTrader5")
+        self.init_ok, self.ai_da = init_ok, ai
+
+    def initialize(self, path=None, timeout=None):
+        aufr.append(("initialize", timeout))
+        return self.init_ok
+
+    def last_error(self):
+        return (-1, "x")
+
+    def account_info(self):
+        return types.SimpleNamespace(login=L, balance=90040.03, trade_allowed=True) if self.ai_da else None
+
+    def terminal_info(self):
+        return types.SimpleNamespace(connected=True, data_path="")
+
+    def symbol_info(self, s):
+        return types.SimpleNamespace(trade_mode=4)
+
+    def shutdown(self):
+        aufr.append(("shutdown",))
+
+
+with tempfile.TemporaryDirectory() as td:
+    term = os.path.join(td, "terminal64.exe")
+    open(term, "w").close()
+    cfgp = os.path.join(td, "c.json")
+    with open(cfgp, "w") as f:
+        _json.dump({"master_terminal_path": term, "master_expected_login": L}, f)
+    for fake, name in ((FakeMt5(), "ok"), (FakeMt5(init_ok=False), "init"), (FakeMt5(ai=False), "ai")):
+        sys.modules["MetaTrader5"] = fake
+        aufr.clear()
+        res = ob.modus_vorflug({"cfg": cfgp, "symbol": "NAS100", "richtung": "buy"})
+        if name == "ok":
+            check(res.get("lesbar") and res.get("rot") is False and ("shutdown",) in aufr and ("initialize", 10000) in aufr,
+                  "d7a gesundes Konto → lesbar, nicht rot, initialize 10 s, shutdown")
+        elif name == "init":
+            check(res.get("lesbar") is False and ("shutdown",) not in aufr, "d7b initialize scheitert → lesbar False")
+        else:
+            check(res.get("lesbar") is False and ("shutdown",) in aufr, "d7c account_info leer → lesbar False, shutdown im finally")
+    res = ob.modus_vorflug({"cfg": cfgp.replace("c.json", "fehlt.json")})
+    check(res.get("lesbar") is False, "d7d Config fehlt → lesbar False")
+    sys.modules.pop("MetaTrader5", None)
+
+# e) Hinweis S1 (RA2 F1): reine Lesungen zählen nicht als „MT5-Order läuft“ (Tab-Heilung, Polar, Panel-Neustart)
 la, lb = threading.Lock(), threading.Lock()
 la.acquire()
 check(pn.mt5_order_belegt({"a.json": la, "b.json": lb}, set()) is True, "e1 Order hält den Lock → belegt")
@@ -102,6 +205,15 @@ lb.acquire()
 check(pn.mt5_order_belegt({"a.json": la, "b.json": lb}, {"a.json"}) is True, "e3 Lesung auf A, Order auf B → belegt")
 check("mt5_order_belegt()" in inspect.getsource(pn._browser_und_mt5_frei) and "mt5_order_belegt()" in inspect.getsource(pn._bot_lauf_aktiv),
       "e4 _browser_und_mt5_frei und _bot_lauf_aktiv (Polar, Fenster nach vorn) nutzen die neue Prüfung")
+la.release(); lb.release()
+pn.MASTER_ORDER_LOCKS.clear(); pn.DEALS_LESEN.clear(); pn.VORFLUG_LESEN.clear(); pn._PANEL_POST["n"] = 0
+lx = threading.Lock(); lx.acquire()
+pn.MASTER_ORDER_LOCKS["x.json"] = lx
+pn.DEALS_LESEN.add("x.json")
+check(not any("MT5" in g for g in pn.panel_beschaeftigt_gruende()), "e5 panel_beschaeftigt_gruende: Deal-Lesung ist kein Grund")
+pn.DEALS_LESEN.clear()
+check(any(g.startswith("MT5-Order") for g in pn.panel_beschaeftigt_gruende()), "e6 echte Order bleibt ein Grund")
+pn.MASTER_ORDER_LOCKS.clear(); lx.release()
 
 print()
 print("FEHLER: " + ", ".join(FEHLER) if FEHLER else "ALLES GRÜN")
