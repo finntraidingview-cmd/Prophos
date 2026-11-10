@@ -2730,6 +2730,8 @@ HEAL_LOCK = threading.Lock()
 MASTER_ORDER_LOCKS = {}
 MASTER_ORDER_GUARD = threading.Lock()
 DEALS_LESEN = set()   # N2 (04.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade eine Deal-Lesung (/api/deals, nur lesen) hält
+VORFLUG_LESEN = set()   # F-A (11.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade ein Konto-Vorflug (/api/vorflug, nur lesen) hält
+VORFLUG_WARTE_S = 45.0  # eine Order wartet so lange auf einen laufenden Vorflug (Lesung ≤ ~25 s) statt mit 409 zum Fehlstart zu werden
 
 # Orbit-Puls (30.08.2026): EIN Lock fuer den ganzen TradingView-Weg, nicht pro
 # Instanz. Der MT5-Bot bedient je ein eigenes Terminal, der TV-Bot bedient
@@ -6579,6 +6581,45 @@ class Handler(BaseHTTPRequestHandler):
                 DEALS_LESEN.discard(inst["config_file"])
                 lock.release()
             return self._send(200, json.dumps(res, ensure_ascii=False))
+        if path == "/api/vorflug":
+            # F-A KONTO-VORFLUG (11.11.2026, Master nach FS2): Zustand des Master-Logins 10–15 min vor dem Start — über order_bot.py „vorflug“, nur lesen
+            # (kein Fenster, kein Login-Dialog, kein Klick). Wie /api/deals: nur ein schon laufendes Terminal, nur ohne laufende Order (MASTER_ORDER_LOCKS,
+            # besetzt → 409, der Tab fragt später). Eine Order, die während der Lesung kommt, wartet bis VORFLUG_WARTE_S (s. master-order).
+            q = parse_qs(urlparse(self.path).query)
+            fname = (q.get("file") or [""])[0]
+            inst = next((i for i in instances() if i["config_file"] == fname), None)
+            if not inst:
+                return self._send(404, json.dumps({"ok": False, "lesbar": False, "grund": "Instanz unbekannt"}, ensure_ascii=False))
+            _cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+            _pfad = str(_cfg.get("master_terminal_path") or "").strip()
+            if not _pfad or not provision.terminal_pids(os.path.dirname(os.path.abspath(_pfad))):
+                return self._send(200, json.dumps({"ok": False, "lesbar": False, "grund": "Master-Terminal läuft nicht — nicht gelesen (wird nicht gestartet)"}, ensure_ascii=False))
+            if _instanz_heilt(inst):
+                return self._send(409, json.dumps({"ok": False, "lesbar": False, "grund": "Terminal wird gerade geheilt — später"}, ensure_ascii=False))
+            with MASTER_ORDER_GUARD:
+                lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
+            if not lock.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "lesbar": False, "grund": "auf dieser Instanz läuft gerade eine Order oder Lesung"}, ensure_ascii=False))
+            VORFLUG_LESEN.add(inst["config_file"])
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                auftrag = {"cfg": os.path.join(HERE, inst["config_file"]), "symbol": (q.get("symbol") or [""])[0][:32],
+                           "richtung": (q.get("richtung") or [""])[0][:4]}
+                try:
+                    p = subprocess.run([*bot_argv(bot), "vorflug", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
+                                       timeout=40, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    zeilen = (p.stdout or "").strip().splitlines()
+                    res = json.loads(zeilen[-1]) if zeilen else {"ok": False, "lesbar": False, "grund": "keine Antwort vom Bot"}
+                except Exception as e:
+                    res = {"ok": False, "lesbar": False, "grund": f"Bot-Lauf {type(e).__name__}"}
+            finally:
+                VORFLUG_LESEN.discard(inst["config_file"])
+                lock.release()
+            if isinstance(res, dict) and res.get("rot"):
+                print(f"[vorflug] {fname}: {res.get('art')} — {str(res.get('grund') or '')[:160]}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
         if path == "/api/haupt-tab":
             # Tab im „nur ansehen"-Modus (30.10.2026, HAUPT-TAB): darf er wieder Haupt-Tab werden? Nur lesen, zählt nie als Herzschlag
             q = parse_qs(urlparse(self.path).query)
@@ -8048,7 +8089,11 @@ class Handler(BaseHTTPRequestHandler):
                     "Terminal wird gerade geheilt (EA-Selbstheilung, nichts gesendet) — gleich erneut."}, ensure_ascii=False))
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
-            if not lock.acquire(blocking=False):
+            _hat = lock.acquire(blocking=False)
+            if not _hat and inst["config_file"] in VORFLUG_LESEN:
+                # F-A (11.11.2026): nur ein Konto-Vorflug (nur lesen, wenige Sekunden) hält den Lock → kurz warten statt 409 (sonst Fehlstart)
+                _hat = lock.acquire(timeout=VORFLUG_WARTE_S)
+            if not _hat:
                 if inst["config_file"] in DEALS_LESEN:   # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts gesendet, gleich erneut."}, ensure_ascii=False))
@@ -8163,7 +8208,10 @@ class Handler(BaseHTTPRequestHandler):
                     "Terminal wird gerade geheilt (EA-Selbstheilung, nichts gesendet) — gleich erneut."}, ensure_ascii=False))
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
-            if not lock.acquire(blocking=False):
+            _hat = lock.acquire(blocking=False)
+            if not _hat and inst["config_file"] in VORFLUG_LESEN:
+                _hat = lock.acquire(timeout=VORFLUG_WARTE_S)   # F-A (11.11.2026): ein Close wartet auf den kurzen Konto-Vorflug (nur lesen)
+            if not _hat:
                 if inst["config_file"] in DEALS_LESEN:   # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts geklickt, gleich erneut."}, ensure_ascii=False))
