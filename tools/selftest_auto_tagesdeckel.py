@@ -2,6 +2,7 @@
 """Selbsttest: Tagesdeckel je Firma (app.py ap_tagesdeckel, 19.10.2026 — Finn: „2 bis 3 Trades pro ID bei Apex", CFD weiter wie
 immer). Rein rechnend, ohne Netz. Konten frei erfunden.
 Aufruf: python3 tools/selftest_auto_tagesdeckel.py"""
+import hashlib
 import os
 import random
 import re
@@ -11,13 +12,13 @@ from zoneinfo import ZoneInfo
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_ap_norm", "ap_regel_finden", "_ap_plan_am_tag", "ap_tagesdeckel")
+FUNKTIONEN = ("_ap_norm", "ap_regel_finden", "_ap_plan_am_tag", "fest_wurf", "ap_tagesdeckel")
 KONSTANTEN = ("AP_GRUND_TAGESDECKEL",)
 
 
 def lade():
     src = open(APP, encoding="utf-8").read()
-    ns = {"re": re, "datetime": datetime}
+    ns = {"re": re, "datetime": datetime, "hashlib": hashlib}
     teile = []
     for k in KONSTANTEN:
         m = re.search(rf"^{k} = .*?(?=\n\S)", src, re.M | re.S)
@@ -57,9 +58,26 @@ def main():
     b2, _ = deckel(firmen, k, [], tag, tz, random.Random(7))
     ok([x["a"]["id"] for x in b1] == [x["a"]["id"] for x in b2], "Seed nicht wiederholbar")
     ok([x["a"]["id"] for x in b1] == [x["a"]["id"] for x in k if x["a"]["id"] in {y["a"]["id"] for y in b1}], "Reihenfolge verändert")
-    # über viele Seeds kommen 2 UND 3 vor
-    zahlen = {len([x for x in deckel(firmen, kand("finn", "Apex", 8), [], tag, tz, random.Random(s))[0]]) for s in range(40)}
+    # AP1 (11.11.2026): über viele TAGE kommen 2 UND 3 vor — je Tag fest, der Seed ändert nichts
+    zahlen = {len([x for x in deckel(firmen, kand("finn", "Apex", 8), [], f"2026-11-{d:02d}", tz, random.Random(d))[0]]) for d in range(1, 29)}
     ok(zahlen == {2, 3}, f"Spanne nicht gezogen: {zahlen}")
+    ok(len({tuple(x["a"]["id"] for x in deckel(firmen, kand("finn", "Apex", 8), [], tag, tz, random.Random(sd))[0]) for sd in range(30)}) == 1,
+       "AP1: Zahl UND Konten fest je ID × Firma × Tag, gleich für jeden Seed (Nachtlauf = Nachplanen = Knopf = Probelauf)")
+    # AP1: Nachtlauf zieht n = 2 → danach 20 Nachplan-Läufe mit beliebigem Seed: nie ein drittes Konto
+    tag2 = next(f"2026-11-{d:02d}" for d in range(1, 29) if len(deckel(firmen, kand("finn", "Apex", 8), [], f"2026-11-{d:02d}", tz, random.Random(0))[0]) == 2)
+    nacht, _ = deckel(firmen, kand("finn", "Apex", 8), [], tag2, tz, random.Random(1))
+    belegt = [{"user_id": "finn", "master_firm": "Apex", "status": "planned", "planned_for": tag2} for _x in nacht]
+    weg = {x["a"]["id"] for x in nacht}
+    extra = 0
+    for sd in range(20):
+        rest = [x for x in kand("finn", "Apex", 8) if x["a"]["id"] not in weg]
+        b, _r = deckel(firmen, rest, belegt, tag2, tz, random.Random(1000 + sd))
+        extra += len(b)
+    ok(len(nacht) == 2 and extra == 0, f"AP1: n = 2 im Nachtlauf, 20 Nachplan-Läufe → kein drittes Konto (extra {extra})")
+    # AP1: ~50/50 über 1.000 ID-Tage
+    drei = sum(1 for i in range(1000) if len(deckel(firmen, kand(f"id{i % 40}", "Apex", 6), [], f"2026-{1 + (i // 40) % 12:02d}-{1 + i % 28:02d}", tz,
+                                                     random.Random(i))[0]) == 3)
+    ok(430 <= drei <= 570, f"AP1: 1.000 ID-Tage → {drei} × 3 Konten (soll ~50 %)")
 
     # 2) Zwei IDs: je ID eigener Deckel
     k2 = kand("finn", "Apex", 5) + kand("pascal", "Apex", 5)

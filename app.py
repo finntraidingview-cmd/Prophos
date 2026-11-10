@@ -43050,10 +43050,15 @@ _tw = {"bis": 0.0, "werte": None, "tabelle": True, "fehler_at": 0.0, "gut": None
 _tw_lock = threading.Lock()
 
 
+def fest_wurf(text):
+    """REIN RECHNEND (testbar): fester Wurf in [0, 1) aus einem Text (sha256, erste 13 Hex-Stellen ÷ 16^13, gleichverteilt) — gleicher Text, gleicher Wurf,
+    ohne Speicher. Genutzt vom TW1-Würfel (tw_wurf, = prophos.html hwWurf) und vom Apex-Tagesdeckel (ap_tagesdeckel, AP1)."""
+    return int(hashlib.sha256(str(text).encode("utf-8")).hexdigest()[:13], 16) / float(16 ** 13)
+
+
 def tw_wurf(planer, konto_id, tag):
     """REIN RECHNEND (testbar): fester Wurf in [0, 1) je Planer × Konto × Tag (sha256, gleichverteilt). Gleiches Konto am gleichen Tag → gleicher Wurf."""
-    h = hashlib.sha256(f"tw1|{planer}|{konto_id}|{str(tag)[:10]}".encode("utf-8")).hexdigest()
-    return int(h[:13], 16) / float(16 ** 13)
+    return fest_wurf(f"tw1|{planer}|{konto_id}|{str(tag)[:10]}")
 
 
 def tw_handelt(planer, konto_id, tag, pct):
@@ -43220,9 +43225,13 @@ def ap_tagesdeckel(firmen, kandidaten, plaene, tag, tz, rnd):
     Apex nicht alle Accounts in einem Tag machen, weil da etwas schiefgeht … 2 bis 3 Trades pro ID bei Apex"). regel.max_konten_tag =
     [von, bis] (oder eine Zahl): je ID × Firma bekommen an einem Tag höchstens so viele Konten einen Plan. Pläne, die den Tag schon
     belegen (laufend, heute geplant, heute beendet — _ap_plan_am_tag), zählen mit, damit Nachplan-Takt und Hand-Lauf den Deckel nicht
-    aufstocken. Die Zahl wird je ID × Firma einmal aus der Spanne gezogen (rnd — mit dem Seed wiederholbar, Probelauf = Anlegen),
-    die Konten werden gemischt, der Rest steht sichtbar in ausgelassen[]. Reihenfolge der behaltenen Konten bleibt die der
-    Kandidatenliste. Ohne max_konten_tag (CFD-Firmen, Tradeify …): unverändert. → (kandidaten behalten, ausgelassen[])"""
+    aufstocken. Zahl und Konto-Auswahl sind seit AP1 (11.11.2026) FEST je ID × Firma × Tag (fest_wurf, ohne Speicher) — rnd wird nicht mehr benutzt
+    (Signatur bleibt). Der Rest steht sichtbar in ausgelassen[]. Reihenfolge der behaltenen Konten bleibt die der Kandidatenliste. Ohne max_konten_tag
+    (CFD-Firmen, Tradeify …): unverändert. → (kandidaten behalten, ausgelassen[])
+    AP1 (Master 11.11.2026, Befund AD2; DB 14 Tage: ID-Tage mit 3 Apex-Konten 20× gegen 2 Konten 12×, 9× kam das dritte erst mit einer späteren Anlage):
+    n wurde je Lauf neu gezogen (Seed aus SystemRandom), „Tagesdeckel“ ist kein fester Nachplan-Grund — ein späterer 5-min-Takt zog irgendwann 3 und
+    legte ein drittes Konto an, aus „2 bis 3“ wurde praktisch immer 3. Jetzt ergeben Nachtlauf, Nachplanen, Knopf und Probelauf dieselbe Zahl und
+    dieselben Konten."""
     # Schlüssel = ID × Regel (nicht Firmen-Schreibweise): „Apex" und „Apex Trader" einer ID teilen sich EINEN Deckel
     je, behalten_ids, raus = {}, set(), []
     for k in kandidaten:
@@ -43241,12 +43250,11 @@ def ap_tagesdeckel(firmen, kandidaten, plaene, tag, tz, rnd):
             continue
         if hi < lo:
             lo, hi = hi, lo
-        n = rnd.randint(lo, hi) if hi > lo else lo
+        n = min(hi, lo + int(fest_wurf(f"deckel|{uid}|{'+'.join(namen)}|{str(tag)[:10]}") * (hi - lo + 1))) if hi > lo else lo   # AP1: fest je ID × Firma × Tag
         belegt = sum(1 for p in plaene if str(p.get("user_id")) == uid and _ap_norm(p.get("master_firm")) in namen
                      and _ap_plan_am_tag(p, tag, tz))
         frei = max(0, n - belegt)
-        misch = list(liste)
-        rnd.shuffle(misch)
+        misch = sorted(liste, key=lambda k: (fest_wurf(f"deckel|{k['a'].get('id')}|{str(tag)[:10]}"), str(k["a"].get("id"))))   # AP1: feste Reihenfolge je Tag
         behalten_ids.update(id(k) for k in misch[:frei])
         for k in misch[frei:]:
             raus.append(dict(k["zeile"], grund=AP_GRUND_TAGESDECKEL.format(n=n) + (f" ({belegt} heute schon belegt)" if belegt else "")))
