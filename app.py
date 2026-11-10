@@ -12771,6 +12771,141 @@ def _wd_sl_kontext(mids):
     return regel, konten, _liq_regeln_laden(), _wd_fruehere_trades(mids)
 
 
+# ══ SL1 WD-SL NACHWÜRFELN (10.11.2026, Master; Befund DB 10.11.: von 10 WD-Farmer-Plänen seit dem Einschalten trugen 9 wd_sl „Rückfall ohne Würfel“, nur einer
+# war gewürfelt). Ursache: die PC-Tabs legen die Tagespläne über den Rückfall wdPlanAnlegen (prophos.html) direkt in trade_plans an; der Tab setzt dort bewusst
+# ohne SL (wdSlwRueckfall), weil er den Puffer nicht exakt wie wd_sl_fuer_plan rechnen kann. Dieser Railway-Takt (alle 45–75 s, gestreut) würfelt solche Pläne
+# mit DENSELBEN Daten wie POST /admin/wd-plaene nach — ohne Pflicht-Update der Tabs. Sicherheit am Start:
+#  - geändert wird nur ein Plan, der noch nicht geclaimt ist (status planned, start_um_gestartet_at / started_at / orbit_gesendet_at leer), dessen wd_sl noch der
+#    Rückfall ist, und nur in EINEM Update (master_sl + mt5_baseline zusammen) mit Guard auf updated_at (Trigger trade_plans_set_updated_at) — der Claim des Tabs
+#    (suClaimSetzen, Guard start_um_gestartet_at is null) sieht also entweder den alten oder den ganz neuen Plan, nie einen halben; tpOrbitStartenKern liest den
+#    Plan nach dem Claim frisch aus der DB, Echo nimmt die Claim-Zeile.
+#  - nur Pläne mit Start ≥ WD_SL_NACH_VORLAUF_S entfernt (Polster; Ketten-WDs können vor ihrer Zeit starten, dort hält der Claim-Guard)
+#  - Konto-/Liq-Daten nicht lesbar → in diesem Takt nichts schreiben (nächster Takt versucht es wieder); Rechenfehler → ohne SL mit Grund, nie stoppen
+#  - Recoverer / Tradeify-Ausgleich würfeln nicht (wie der POST-Weg), Topstep Express ohne SL mit Grund (wd_sl_fuer_plan); Würfel aus → nichts
+WD_SL_RUECKFALL_GRUND = "Rückfall ohne Würfel"
+WD_SL_NACH_VORLAUF_S = 120
+WD_SL_NACH_TAKT_S = (45.0, 75.0)
+_wd_sl_nach = {"naechster": 0.0, "letztes": None, "fehler": ""}
+
+
+def _wd_sl_ohne(grund):
+    return {"ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None, "regel": "sl_wuerfel", "grund": grund}
+
+
+def wd_sl_nach_kandidat(p, jetzt):
+    """REIN RECHNEND (testbar): darf SL1 diesen Plan nachwürfeln? Farmer-Plan, geplant, nie geclaimt/gestartet/gesendet, wd_sl noch der Tab-Rückfall,
+    Start mindestens WD_SL_NACH_VORLAUF_S entfernt."""
+    p = p or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    ws = bl.get("wd_sl") if isinstance(bl.get("wd_sl"), dict) else {}
+    if p.get("status") != "planned" or not str(p.get("notes") or "").startswith("Winning-Day-Farmer") or ws.get("grund") != WD_SL_RUECKFALL_GRUND:
+        return False
+    if p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
+        return False
+    st = _ap_ts(p.get("start_um"))
+    return bool(st and (st - jetzt).total_seconds() >= WD_SL_NACH_VORLAUF_S)
+
+
+def wd_sl_nach_rechnen(regel, p, acc, liq_regeln, fruehere, rnd=None, jetzt_iso=None):
+    """REIN RECHNEND (testbar): neues wd_sl (+ master_sl | None) für einen Rückfall-Plan — genau wie POST /admin/wd-plaene: Recoverer/Ausgleich ohne Würfel,
+    sonst wd_sl_fuer_plan; Rechenfehler → ohne SL mit Grund. Markiert die Herkunft (quelle 'nachgewuerfelt', at). Der Grund ist danach nie mehr der Rückfall."""
+    p = p or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if wd_ist_recoverer_plan(p):
+        ws = _wd_sl_ohne("Recoverer — kein Würfel")
+    elif bl.get("wd_ausgleich") is True:
+        ws = _wd_sl_ohne("Ausgleich — kein Würfel")
+    else:
+        try:
+            ws = wd_sl_fuer_plan(regel, p, acc, liq_regeln, fruehere, rnd=rnd)
+        except Exception as e:
+            ws = _wd_sl_ohne(f"Rechenfehler ({type(e).__name__})")
+    if not ws:
+        return None, None
+    ws = dict(ws, quelle="nachgewuerfelt", nach_at=jetzt_iso)
+    if ws.get("grund") == WD_SL_RUECKFALL_GRUND:
+        ws["grund"] = "nachgewürfelt: ohne SL"
+    usd = ws.get("usd") if (not ws.get("ohne") and ws.get("usd")) else None
+    return ws, usd
+
+
+def wd_sl_nach_tick(jetzt=None, rnd=None):
+    """SL1-Takt: Rückfall-Pläne der Tabs nachwürfeln → {geaendert: [...], gewuerfelt, ohne, uebersprungen} | {aus: True}."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    regel, _q = _wd_sl_wuerfel_lesen()
+    if not regel:
+        return {"aus": True}
+    rows = sb_select("trade_plans", {"select": "*", "status": "eq.planned", "mt5_baseline->wd_sl->>grund": f"eq.{WD_SL_RUECKFALL_GRUND}",
+                                     "start_um_gestartet_at": "is.null", "started_at": "is.null",
+                                     "start_um": "gte." + (jetzt + timedelta(seconds=WD_SL_NACH_VORLAUF_S)).isoformat(), "limit": "200"}) or []
+    rows = [p for p in rows if wd_sl_nach_kandidat(p, jetzt)]
+    out = {"geaendert": [], "gewuerfelt": 0, "ohne": 0, "uebersprungen": []}
+    if not rows:
+        return out
+    mids = sorted({str(p.get("master_account_id") or "") for p in rows} - {""})
+    konten = {}
+    try:
+        for i in range(0, len(mids), 80):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
+                                                      "tv_balance,tv_balance_at", "id": "in.(" + ",".join(mids[i:i + 80]) + ")"}) or []:
+                konten[str(a.get("id"))] = a
+        liq = _liq_regeln_laden()
+        frueher = _wd_fruehere_trades(mids)
+    except Exception as e:
+        out["fehler"] = f"Konto-/Liq-Daten nicht lesbar ({type(e).__name__}) — nächster Takt"
+        return out
+    if not liq:
+        out["fehler"] = "liq_regeln nicht geladen — nächster Takt"
+        return out
+    jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
+    for p in rows:
+        pid = str(p["id"])
+        acc = konten.get(str(p.get("master_account_id") or ""))
+        if acc is None:
+            out["uebersprungen"].append({"id": pid, "grund": "Konto nicht gelesen"})
+            continue
+        ws, usd = wd_sl_nach_rechnen(regel, p, acc, liq, frueher, rnd=rnd, jetzt_iso=jetzt_iso)
+        if not ws:
+            continue
+        bl = dict(p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}, wd_sl=ws)
+        upd = {"mt5_baseline": bl}
+        if usd:
+            upd["master_sl"] = usd
+        filt = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                "mt5_baseline->wd_sl->>grund": f"eq.{WD_SL_RUECKFALL_GRUND}"}
+        if p.get("updated_at"):
+            filt["updated_at"] = f"eq.{p['updated_at']}"
+        else:
+            out["uebersprungen"].append({"id": pid, "grund": "updated_at fehlt — kein sicherer Guard"})
+            continue
+        try:
+            z = sb_update("trade_plans", filt, upd)
+        except Exception as e:
+            out["uebersprungen"].append({"id": pid, "grund": f"{type(e).__name__}: {str(e)[:100]}"})
+            continue
+        if not z:
+            out["uebersprungen"].append({"id": pid, "grund": "inzwischen geändert/geclaimt — nächster Takt"})
+            continue
+        out["geaendert"].append({"id": pid, "konto": p.get("master_name"), "usd": usd, "pct": ws.get("pct"), "grund": ws.get("grund")})
+        out["gewuerfelt" if usd else "ohne"] += 1
+        print(f"[wd-sl-nach] {pid[:8]} {p.get('master_name')}: " + (f"SL {usd} $ ({ws.get('pct')} % von {ws.get('puffer')} $)" if usd
+                                                                     else f"ohne SL — {ws.get('grund')}"), flush=True)
+    return out
+
+
+def _wd_sl_nach_takt():
+    """aus ap_loop: gestreut alle WD_SL_NACH_TAKT_S (Jitter-Regel), Fehler nur loggen."""
+    if time.time() < _wd_sl_nach["naechster"]:
+        return
+    _wd_sl_nach["naechster"] = time.time() + random.uniform(*WD_SL_NACH_TAKT_S)
+    try:
+        _wd_sl_nach["letztes"] = wd_sl_nach_tick()
+        _wd_sl_nach["fehler"] = ""
+    except Exception as e:
+        _wd_sl_nach["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[wd-sl-nach] ⚠️ {type(e).__name__}: {e}", flush=True)
+
+
 # ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
 # Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem
 # 24.09.2026 gibt es keinen Gegen-Hedge mehr, Duplikum fliegt komplett raus. Die
@@ -43924,6 +44059,7 @@ def ap_loop():
             print(f"[blow-auto/normal-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         _tt_takt()                            # WS2 Trades pro Tag aufteilen: nächster Teil nach genauer Lesung / Tag fertig (09.11.2026)
+        _wd_sl_nach_takt()                    # SL1 WD-SL nachwürfeln: Rückfall-Pläne der PC-Tabs bekommen den Server-Würfel (10.11.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:
