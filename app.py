@@ -13833,6 +13833,10 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle",
                                             "balance_end", "balance_relativ", "plattform",
                                             "hinweis", "unklar_grund") if k in final},   # N2 (04.11.2026): Radar zeigt „nicht gelaufen"/Grund statt „–"
+        # RA2/F3 (Master 11.11.2026, Befund RA1: zwei Echo-Pläne standen als „⚠ unklar: Plan … nie fertig“, der eigentliche Grund — Server „Only position
+        # closing is allowed“ — stand nur in mt5_baseline.start_fehler): nur lesend, das Radar zeigt „nie gestartet · Grund: <msg>“. Fehlt start_fehler → kein Feld
+        **({"start_fehler": {"msg": str(base["start_fehler"].get("msg") or "")[:200], "schritt": base["start_fehler"].get("schritt"),
+                             "unklar": base["start_fehler"].get("unklar")}} if isinstance(base.get("start_fehler"), dict) else {}),
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
         # MANUELLE ARBEIT (08.10.2026, Finn: Plan aus „Überprüfen" parken — „noch ein paar Winning Days mit 0,01 fahren, Notiz dran,
