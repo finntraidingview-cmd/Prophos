@@ -68,15 +68,50 @@ klein = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 161810.0, FRISCH)
 check(klein["aktiv"] and klein["ziel"] == 280, f"kleiner Fehlbetrag: TP = max(normaler WD-TP 280, 8,12 + 1 + 20) = 280 ({klein['ziel']})")
 z1 = ruf("tradeify_zyklus_konto", JACOB, PL, [], 5, 5, VP, 159964.95, FRISCH)
 check(z1["nr"] == 1 and not z1["gesperrt"] and not z1["aktiv"], "1. Zyklus (noch kein Payout): Regel gilt nicht")
-check(ruf("tradeify_zyklus_konto", JACOB, [], PAY, 5, 5, VP, 159964.95, FRISCH)["grund_code"] == "unbekannt", "kein Trade seit der Anfrage: Stand unbekannt, keine Sperre")
+check(ruf("tradeify_zyklus_konto", JACOB, [], PAY, 5, 5, VP, 159964.95, FRISCH)["grund_code"] == "unbekannt", "kein Trade seit der Anfrage: Stand unbekannt (PO2b: Trade-Summe 0 $ < 1 $ → gesperrt)")
 # Stopp S9 zu 7388c5f4 (a) Deckel, (b) Frische
 za = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 150000.0, FRISCH)
-check(za["grund_code"] == "unbekannt" and not za["aktiv"] and not za["gesperrt"], "(a) Fehlbetrag über Max DD (−11.818 $ bei 4.500 $) → unbekannt: kein Ausgleich, keine Sperre")
+# PO2b (11.11.2026): „unbekannt“ urteilt über die Trade-Summe seit der Anfrage wie die Kachel — Jacobs Trades seit dem 22.10.: −1.475,37 $ → gesperrt, nie ein Ausgleich
+check(za["grund_code"] == "unbekannt" and not za["aktiv"] and za["gesperrt"] and za["gewinn_quelle"] == "trades" and za["gewinn"] == -1475.37,
+      f"(a) Fehlbetrag über Max DD (−11.818 $ bei 4.500 $) → unbekannt: kein Ausgleich, Sperre aus der Trade-Summe ({za.get('gewinn')})")
 za2 = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 180000.0, FRISCH)
-check(za2["grund_code"] == "unbekannt" and not za2["gesperrt"], "(a) Plus über 3 × Max DD unplausibel → unbekannt")
+check(za2["grund_code"] == "unbekannt" and za2["gesperrt"] and not za2["aktiv"], "(a) Plus über 3 × Max DD unplausibel → unbekannt, Urteil aus der Trade-Summe (PO2b)")
 check(ruf("tradeify_zyklus_konto", dict(JACOB, max_drawdown=None), PL, PAY, 5, 5, VP, 159964.95, FRISCH)["grund_code"] == "unbekannt", "(a) ohne Max DD am Konto → unbekannt")
 zb = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
-check(zb["grund_code"] == "unbekannt" and not zb["aktiv"] and not zb["gesperrt"], "(b) Balance vor dem Ende des letzten Trades gelesen → unbekannt, keine Sperre")
+check(zb["grund_code"] == "unbekannt" and not zb["aktiv"] and zb["gesperrt"] and zb["fehl"] == 1475.37,
+      "(b) Balance vor dem Ende des letzten Trades gelesen → unbekannt, kein Ausgleich, Sperre aus der Trade-Summe (PO2b)")
+# PO2b: Trade-Summe im Plus → bei unbekannt nicht gesperrt
+_plus = [dict(x, master_pl=abs(x["master_pl"])) for x in PL]
+zbp = ruf("tradeify_zyklus_konto", JACOB, _plus, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
+check(zbp["grund_code"] == "unbekannt" and not zbp["gesperrt"] and zbp["gewinn"] > 0, "PO2b: unbekannt + Trade-Summe im Plus → nicht gesperrt")
+# PO2b Moritz (Befund PO2 §2): WD-Liq fest bei Größe + 100 → Puffer 11.344 $ statt Max DD 4.500 $ — Start 161.444, Balance 156.028 → −5.416 $ gesperrt
+MORITZ = {"id": "mz", "name": "150k Tradeify WD", "firm": "Tradeify", "user_id": "u", "max_drawdown": 4500, "account_type": "winning_days"}
+PLM = [{"status": "completed", "started_at": "2026-11-06T08:00:00+00:00", "ended_at": "2026-11-06T09:00:00+00:00", "master_pl": -5416.0, "tv": {"balance_start": 161444.0}}]
+PAYM = [{"requested_at": "2026-11-05", "status": "received"}]
+zm = ruf("tradeify_zyklus_konto", MORITZ, PLM, PAYM, 3, 5, VP, 156028.0, "2026-11-06T10:00:00+00:00", wd_lock=100)
+check(zm["grund_code"] == "minus" and zm["gesperrt"] and zm["gewinn"] == -5416.0 and zm["fehl"] == 5416.0,
+      f"PO2b Moritz: 161.444 → 156.028 bei Max DD 4.500 + WD-Lock 100 = gesperrt, Fehlbetrag 5.416 ({zm.get('grund_code')}, {zm.get('fehl')})")
+zm0 = ruf("tradeify_zyklus_konto", MORITZ, PLM, PAYM, 3, 5, VP, 156028.0, "2026-11-06T10:00:00+00:00")
+check(zm0["grund_code"] == "unbekannt" and zm0["gesperrt"] and zm0["gewinn"] == -5416.0, "PO2b Moritz ohne Lock (liq_regeln nicht lesbar): unbekannt, trotzdem gesperrt über die Trade-Summe")
+zmf = ruf("tradeify_zyklus_konto", dict(MORITZ, account_type="funded"), PLM, PAYM, 3, 5, VP, 156028.0, "2026-11-06T10:00:00+00:00", wd_lock=100)
+check(zmf["grund_code"] == "unbekannt", "PO2b: Tradeify Funded nutzt den WD-Lock nicht (Deckel bleibt Max DD)")
+# Prüfer PO2b MUSS b: Fehlbetrag über Max DD → gesperrt, aber nie ein automatischer Ausgleichs-Trade (TP ohne SL), auch nicht bei 4/5 WD
+zm4 = ruf("tradeify_zyklus_konto", MORITZ, PLM, PAYM, 4, 5, VP, 156028.0, "2026-11-06T10:00:00+00:00", wd_lock=100)
+check(zm4["gesperrt"] and not zm4["aktiv"] and zm4.get("ausgleich_hand") and zm4["ziel"] is None, "PO2b: −5.416 $ > Max DD bei 4/5 → gesperrt, kein Auto-Ausgleich (von Hand)")
+PLF = [dict(PLM[0], tv={"balance_start": 170000.0}, master_pl=-14000.0)]
+zf = ruf("tradeify_zyklus_konto", MORITZ, PLF, PAYM, 5, 5, VP, 156000.0, "2026-11-06T10:00:00+00:00", wd_lock=100)
+check(zf["gesperrt"] and not zf["aktiv"] and zf["ziel"] is None, "PO2b: falscher Zyklus-Start 170.000 → kein Ausgleich mit TP 14.037 $ ohne SL")
+check(klein["aktiv"], "kleiner Fehlbetrag (≤ Max DD) bleibt automatischer Ausgleich")
+# Prüfer PO2b MUSS a: Lucid Zyklus 1 (ohne Anfrage) + unbekannt → kein Urteil aus der (leeren) Trade-Summe
+LUC = {"id": "lu", "name": "150k Lucid WD", "firm": "Lucid Trading", "user_id": "u", "max_drawdown": 4500, "account_type": "winning_days"}
+zl = ruf("tradeify_zyklus_konto", LUC, PLM, [], 3, 5, VP, 151200.0, "2026-11-06T08:30:00+00:00", regel={"an": True, "usd": 1, "ab_zyklus": 1})
+check(zl["grund_code"] == "unbekannt" and not zl["gesperrt"] and zl["gewinn"] is None, f"PO2b: Lucid Zyklus 1 + Balance nicht frisch → keine Sperre ({zl.get('grund')})")
+# Prüfer PO2b SOLLTE: Trade im Zyklus ohne P&L → kein Urteil
+PLN = PLM + [{"status": "review", "started_at": "2026-11-07T08:00:00+00:00", "ended_at": "2026-11-07T09:00:00+00:00", "master_pl": None, "tv": {}}]
+zn = ruf("tradeify_zyklus_konto", MORITZ, PLN, PAYM, 3, 5, VP, 156028.0, "2026-11-06T10:00:00+00:00")
+check(zn["grund_code"] == "unbekannt" and not zn["gesperrt"], "PO2b: P&L eines Trades fehlt noch → kein Urteil aus der Trade-Summe")
+zmb = ruf("tradeify_zyklus_konto", MORITZ, PLM, PAYM, 3, 5, VP, 150050.0, "2026-11-06T10:00:00+00:00", wd_lock=100)
+check(zmb["grund_code"] == "unbekannt", "PO2b: Verlust über den echten Puffer (unter 150.100) bleibt unplausibel → unbekannt")
 check(ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, None)["grund_code"] == "unbekannt", "(b) ohne Lesezeit → unbekannt")
 ohne_bs = [dict(PL[1], tv={})] + PL[2:]
 check(ruf("tradeify_zyklus_start_bal", ohne_bs, "2026-10-22") is None, "erster Trade nach der Anfrage ohne balance_start → Start unbekannt (kein späterer Trade als Ersatz)")
@@ -160,7 +195,7 @@ if m:
           "Frontend-Standard = app.py WD_FIRMEN_REGELN_STD (alle Firmen)")
 check("${e4RegelnHtml(k)}" in html and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
       "Einstellungen → Firmen: Payout-Regeln je Firma, Speichern in firmen_regeln, nur HT-weit (wdNurGruppe)")
-check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"))" in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid)
+check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"), wd_lock=_lock(k))" in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid); PO2b: WD-Lock
       "Railway liest firmen_regeln (Rückfall Standard) und gibt die Regel an tradeify_zyklus_konto")
 
 # ── LZ1 (Finn 10.11.2026): Lucid „Zyklus im Plus“ in jedem Payout-Zyklus, auch im 1. — derselbe Weg (art 'tradeify', firma_key 'lucid') ──

@@ -16274,10 +16274,11 @@ def tradeify_zyklus_start_bal(plaene, start):
     return bs if (bs is not None and bs > 0) else None
 
 
-def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None, regel=None):
+def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None, regel=None, wd_lock=None):
     """REIN RECHNEND (testbar): `zyklus` eines Tradeify-Winning-Days-Kontos → {art, nr, start, start_bal, gewinn, gesperrt, fehl, aktiv, ziel, satz, hedge_eur,
     ziel_normal, satz_normal, puffer, grund, grund_code, min_usd, ab_zyklus}. aktiv = Ausgleichs-Trade fällig (Zyklus ≥ ab_zyklus, Gewinn < min_usd, WD-Stand ≥ Ziel − 1).
-    regel = wd_firmen_regel(…, "tradeify")["min_netto"] (E4); ohne → Standard (an, 1 $, ab Zyklus 2 = das Verhalten von vorher). Regel aus → nie gesperrt, kein Ausgleich."""
+    regel = wd_firmen_regel(…, "tradeify")["min_netto"] (E4); ohne → Standard (an, 1 $, ab Zyklus 2 = das Verhalten von vorher). Regel aus → nie gesperrt, kein Ausgleich.
+    wd_lock (PO2b) = Lock der liq_regeln-Zeile winning_days (Liq fest bei Größe + Lock) — nur für Winning-Days-Konten; None = wie vorher nur der Max DD."""
     fk = zyklus_plus_key(konto) or "tradeify"   # LZ1: Lucid über denselben Weg
     mn = regel if isinstance(regel, dict) else WD_FIRMEN_REGELN_STD[fk]["min_netto"]
     min_usd = float(_wd_num(mn.get("usd")) if _wd_num(mn.get("usd")) is not None else TRADEIFY_ZYKLUS_MIN_USD)
@@ -16288,6 +16289,22 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
            "start_bal": None, "gewinn": None, "fehl": None, "ziel": None, "satz": None, "hedge_eur": None, "verlust": 0.0, "min_usd": min_usd, "ab_zyklus": ab}
     d0 = lambda x: f"{abs(x):,.0f}".replace(",", ".")
     m_txt = f"{min_usd:,.0f}".replace(",", ".") if float(min_usd).is_integer() else f"{min_usd:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def unbekannt(grund):
+        # PO2b (Master 11.11.2026, Befund PO2 §2, Moritz Tradeify WD: Kachel „Zyklus-Gewinn −5.416 $ · Gesperrt“, Admin → Payouts zeigte „anfragbar“): ist der Stand
+        # aus der Balance nicht rechenbar, urteilt die Trade-Summe seit der Anfrage — dieselbe Quelle wie die Kachel (/konto-ziele kz_rechnen, wd_zyklus_stand.profit).
+        # Dann sagen Kachel, Payouts-Liste, Payout-Anfrage und Planer dasselbe. Kein Ausgleichs-Trade daraus (aktiv bleibt False: der TP bräuchte die echte Balance)
+        pt = _wd_num(st.get("profit"))
+        # Prüfer (MUSS a): ohne Payout-Anfrage (Zyklus 1, z. B. Lucid ab Zyklus 1) zählt wd_zyklus_stand keine Tage, profit wäre fest 0 → falsche Sperre;
+        # (SOLLTE) fehlt einem Trade im Zyklus noch der P&L, fiele er still aus der Summe — in beiden Fällen kein Urteil (wie vor PO2b)
+        im_zyklus = [x for x in (plaene or ()) if str(x.get("status") or "") in ("completed", "review")
+                     and (_wd_berlin_tag(x.get("started_at") or x.get("ended_at") or x.get("completed_at")) or "") > str(st.get("start") or "9")]
+        if pt is None or not st.get("start") or any(wd_plan_pnl(x) is None for x in im_zyklus):
+            return dict(out, grund_code="unbekannt", grund=grund)
+        pt = round(float(pt), 2)
+        gs = pt < min_usd
+        return dict(out, grund_code="unbekannt", grund=grund + (f" · Trades seit der Anfrage {pt:+,.0f} $ → gesperrt".replace(",", ".") if gs else ""),
+                    gesperrt=gs, gewinn=pt, gewinn_quelle="trades", profit_trades=pt, fehl=round(max(0.0, -pt), 2))
     if not mn.get("an"):
         return dict(out, grund_code="regel_aus", grund=f"Mindest-Gewinn je Zyklus aus (Winning Days → Einstellungen → {fname})")
     if st["nr"] < ab:
@@ -16300,22 +16317,28 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
         sb = float(_g1) if _g1 and _g1 > 0 else None
     lv = _wd_num(live)
     if sb is None or lv is None or lv <= 0:
-        return dict(out, grund_code="unbekannt", grund="Zyklus-Start oder Live-Balance unbekannt (noch kein Trade seit der Payout-Anfrage)")
+        return unbekannt("Zyklus-Start oder Live-Balance unbekannt (noch kein Trade seit der Payout-Anfrage)")
     # FRISCHE (Stopp S9 zu 7388c5f4): die Live-Balance zählt nur, wenn sie NACH dem Ende des letzten beendeten Trades gelesen wurde (wie ap_balance_live) — sonst
     # rechnete eine alte Lesung einen falschen Fehlbetrag. Unbekannt = kein Ausgleich (normaler WD) und keine Payout-Sperre
     letzt = max([_wd_iso_ts(p.get("ended_at") or p.get("completed_at")) or 0 for p in (plaene or ()) if p.get("status") in ("completed", "review")] or [0])
     lt = _wd_iso_ts(live_at)
     if letzt and (lt is None or lt < letzt):
-        return dict(out, grund_code="unbekannt", grund="Balance nicht frisch (vor dem Ende des letzten Trades gelesen) — ↻ Balance lesen")
+        return unbekannt("Balance nicht frisch (vor dem Ende des letzten Trades gelesen) — ↻ Balance lesen")
     gewinn = round(lv - sb, 2)
     # DECKEL (Stopp S9 zu 7388c5f4: alte Endlesung, falsches Konto oder kaputtes balance_start ergäben einen beliebig großen TP ohne SL): ein Fehlbetrag über dem Max DD
     # des Kontos hieße „geblowt“, ein Plus über 3 × Max DD ist für einen WD-Zyklus unplausibel → unbekannt. Ohne Max DD am Konto ebenfalls unbekannt
     dd = _wd_num((konto or {}).get("max_drawdown"))
     if not dd or dd <= 0:
-        return dict(out, grund_code="unbekannt", grund="kein Max DD am Konto — Zyklus nicht prüfbar")
+        return unbekannt("kein Max DD am Konto — Zyklus nicht prüfbar")
     # LZ1-Nachzug: im 1. Zyklus ist ein großes Plus echt (Big Trades vor den WD, z. B. +13.609 $ bei 4.500 DD) — dort nur die Verlust-Seite deckeln
-    if -gewinn > dd or (gewinn > 3 * dd and not (st["nr"] == 1 and st["start"] is None)):
-        return dict(out, grund_code="unbekannt", grund=f"Zyklus {gewinn:+,.0f} $ unplausibel bei Max DD {dd:,.0f} $ — ↻ Balance lesen".replace(",", "."))
+    # PO2b (Master 11.11.2026, Befund PO2 §2): bei Winning Days steht die Liq fest bei Größe + Lock (liq_regeln winning_days, z. B. 150.100) — der Puffer ist
+    # Zyklus-Start − (Größe + Lock), nicht der Max DD (Moritz: Start 161.444, Balance 156.028 → −5.416 $ bei Max DD 4.500 war „unplausibel“, also nie gesperrt)
+    g0 = _wd_konto_groesse(konto)
+    wd_konto = str((konto or {}).get("account_type") or "winning_days") == "winning_days"
+    lk = _wd_num(wd_lock)
+    deckel = max(dd, sb - (g0 + lk)) if (wd_konto and g0 and lk is not None) else dd
+    if -gewinn > deckel or (gewinn > 3 * dd and not (st["nr"] == 1 and st["start"] is None)):
+        return unbekannt(f"Zyklus {gewinn:+,.0f} $ unplausibel bei {'Puffer' if deckel > dd else 'Max DD'} {deckel:,.0f} $ — ↻ Balance lesen".replace(",", "."))
     gesperrt = gewinn < min_usd
     fehl = round(max(0.0, -gewinn), 2)
     regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
@@ -16332,7 +16355,10 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     import random as _rnd
     puffer = float(_rnd.Random(f"tradeify-ausgleich|{(konto or {}).get('id')}|{_cme_handelstag(None)}").randint(*TRADEIFY_ZYKLUS_PUFFER))   # Saat unverändert (Tradeify bitgleich)
     stand, ziel_tage = int(_wd_num(wd_stand) or 0), int(_wd_num(wd_ziel) or 5)
-    aktiv = gesperrt and stand >= ziel_tage - 1
+    # Prüfer (MUSS b): der Ausgleichs-Trade (TP ohne SL) nur bei einem Fehlbetrag bis zum Max DD — der größere WD-Puffer (PO2b) gilt nur für die Sperre;
+    # darüber (z. B. −5.416 $ bei 4.500 $ DD, oder ein zu hoher Zyklus-Start) gesperrt, Ausgleich von Hand
+    gross = fehl > dd
+    aktiv = gesperrt and stand >= ziel_tage - 1 and not gross
     # aufgerundet auf ganze $; E4: max(Fehlbetrag + 1 $, Mindest-Gewinn − Gewinn) — bei 1 $ genau die alte Formel, bei mehr reicht der TP bis zum Mindest-Gewinn
     tp = max(float(ziel_normal), float(-(-(max(fehl + TRADEIFY_ZYKLUS_MIN_USD, min_usd - gewinn) + puffer) // 1))) if aktiv else None
     out.update({"start_bal": sb, "gewinn": gewinn, "gesperrt": gesperrt, "fehl": fehl, "aktiv": aktiv, "ziel_normal": ziel_normal, "satz_normal": satz_normal,
@@ -16340,6 +16366,9 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     if aktiv:
         out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
+    elif gesperrt and gross:
+        out.update({"grund_code": "minus", "ausgleich_hand": True,
+                    "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ (mehr als Max DD {d0(dd)} $) · Payout erst ab +{m_txt} $ — kein automatischer Ausgleichs-Trade, von Hand planen"})
     elif gesperrt:
         out.update({"grund_code": "minus", "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Payout erst ab +{m_txt} $ — normale WD bis {ziel_tage - 1}/{ziel_tage} (jetzt {stand})"})
     else:
@@ -16356,6 +16385,21 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None)
     ids = [str(k["id"]) for k in tr]
     auto = wd_auto_staende(ids)
     alt = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,goal_done_offset,goal_target,max_drawdown,starting_balance", "id": f"in.({','.join(ids)})"})}
+    try:   # PO2b: Lock der WD-Liq (liq_regeln winning_days) je Firma × Größe — nicht lesbar → None = Deckel wie vorher (Max DD)
+        _lr = _liq_regeln_laden()
+    except Exception as e:
+        print(f"[tradeify-zyklus] ⚠️ liq_regeln: {type(e).__name__}: {e} — Deckel = Max DD", flush=True)
+        _lr = None
+
+    def _lock(k):
+        if not _lr:
+            return None
+        try:
+            r, _w = liq_regel_waehlen(_lr, k.get("firm"), "winning_days", _wd_konto_groesse(k))
+            # Zeile art 'boden' (Tradeify WD: Liq = Größe + lock_ueber_start_usd, sql/2026-09-30_liq-regeln-2.sql), sonst der Max-DD-Lock der Zeile
+            return _wd_num((r or {}).get("lock_ueber_start_usd")) if (r or {}).get("art") == "boden" else _wd_num((r or {}).get("maxdd_lock_ueber_groesse_usd"))
+        except Exception:
+            return None
     for k in tr:
         a = alt.get(str(k["id"])) or {}
         stand = (auto.get(str(k["id"])) or {}).get("stand", _wd_num(a.get("goal_done_offset")) or 0)
@@ -16364,7 +16408,7 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None)
         k["zyklus"] = tradeify_zyklus_konto(dict(k, max_drawdown=k.get("max_drawdown") if k.get("max_drawdown") is not None else a.get("max_drawdown"),
                                                  starting_balance=k.get("starting_balance") if k.get("starting_balance") is not None else a.get("starting_balance")),
                                             plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at,
-                                            regel=mn_je.get(zyklus_plus_key(k) or "tradeify"))
+                                            regel=mn_je.get(zyklus_plus_key(k) or "tradeify"), wd_lock=_lock(k))
 
 
 def _wd_zyklus_anhaengen(konten):
@@ -18669,7 +18713,8 @@ def admin_payout_anfragen():
     _zp_typen = ("winning_days",) if _zp == "lucid" else ("funded", "winning_days")
     if _zp and str(konto.get("account_type") or "") in _zp_typen and not trotzdem:
         kz = {"id": aid, "user_id": besitzer, "name": konto.get("name"), "firm": konto.get("firm"), "starting_balance": konto.get("starting_balance"),
-              "live_balance": _wd_num(konto.get("tv_balance")), "live_at": konto.get("tv_balance_at"), "max_drawdown": konto.get("max_drawdown")}
+              "live_balance": _wd_num(konto.get("tv_balance")), "live_at": konto.get("tv_balance_at"), "max_drawdown": konto.get("max_drawdown"),
+              "account_type": konto.get("account_type")}   # PO2b: WD-Lock nur für Winning Days
         if _wd_zyklus_anhaengen([kz]) and (kz.get("zyklus") or {}).get("gesperrt"):
             z = kz["zyklus"]
             _m = _wd_num(z.get("min_usd"))   # E4: Mindest-Gewinn aus den WD-Einstellungen (fehlt → 1 $)
