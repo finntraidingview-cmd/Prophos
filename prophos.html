@@ -57177,7 +57177,7 @@
       // PLAN-POPUP (o.geplanteHand, 09.10.2026 — Finn über Master, Jacob: zweiter Winning Day derselben ID × Firma gegenläufig geplant,
       // ohne Hinweis): dort zählen auch GEPLANTE Hand-Pläne bzw. Winning Day/Orbit V3 von heute mit (laufen stundenlang = praktisch
       // gleichzeitig) — Auto-Vorschläge nicht (deren Mischung über den Tag bleibt, Finn 03:45). Start-Wächter/DB: weiter nur laufend.
-      const geplantHand = !zaehlt && !!(o && o.geplanteHand) && p.status === 'planned' && p.hand && p.heute && !(p.sf && p.sf.status !== 'behoben')
+      const geplantHand = !zaehlt && !!(o && o.geplanteHand) && p.status === 'planned' && p.hand && p.heute && !(p.sf && (p.sf.status !== 'behoben' || (p.sf.beleg && p.sf.beleg.quelle === 'deals_leer')))   // UK1: per Deals gelöst = nie gelaufen, bleibt Leiche
       if(!zaehlt && !geplantHand) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
       // 'review' zählt als LAUFEND, solange nicht gelesen (Finn 13.10.2026, Mike: Topstep-Short war zu Ende, aber noch nicht nachgelesen — der
       // Long wurde trotzdem gestartet; seit 19.10.2026 gibt die erfolgreiche Endlesung frei, nicht erst das Abhaken). Dieselbe Regel in der
@@ -57681,7 +57681,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2136'
+  const OS_TAB_BUILD = '2026-09-22.2137'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -64074,6 +64074,59 @@
     console.log('[endlesung-deals]', String(r.id).slice(0, 8), 'nicht gelaufen → gelöscht (NG1)', warum, ok ? 'ok' : ('nicht gelöscht: ' + ((error && error.message) || 'Plan inzwischen geändert')))
     return ok
   }
+  /* UNKLAR-START AM SCHWESTERKONTO SCHNELL KLÄREN (UK1, Master 10.11.2026, Befund FA1: schwerster Planer-Blocker — 17 Pläne, 312 Verschiebungen, nur 4 gestartet,
+   * 11 gelöscht, im Schnitt +10,6 h). Ein Echo-Plan (mt5/mt5v2), dessen Start ohne klare Antwort endete (sfStillUrteil → start_fehler.unklar, Schritt m5still:
+   * „KEINE Bestätigung binnen 12 s“, „Master-Konto nicht lesbar“, „Authorization failed“ …), sperrt über den DB-Riegel prophos_gegenrichtung_frei_konto die
+   * Gegenrichtung aller Konten derselben Firma dieser ID — so lange, bis jemand die Marke löst. Selbst gelöst wurde sie nie (sfBehoben gibt bei unklar auf); erst der
+   * Tagesreset schob den Plan nachts nach Überprüfen, und dort klärte ihn N2 über die Deals. Jetzt klärt N2 solche GEPLANTEN Pläne schon ≥ 20 min nach dem Claim
+   * mit genau demselben Beweis (deUrteil: kein Deal des Plans, keine offene Position, keine schwebende Order, Balance = Vergleichs-Balance ±0,01 $; Terminal zu →
+   * MT1 öffnet es zum Lesen) und setzt nur dann start_fehler.status = 'behoben' mit Beleg (quelle deals_leer). Damit gibt der Riegel die Gegenrichtung frei
+   * (Selbst-Hedge-Schutz unverändert: nur die bewiesen leere Marke zählt nicht mehr). Deal gefunden, Position offen oder unklar → nichts geschrieben, die Marke
+   * bleibt und sperrt wie bisher. Der Plan selbst bleibt geplant (kein Neustart — sfTick holt nur 'rot' nach); nachts räumt ihn der Tagesreset + N2/NG1 wie bisher. */
+  const UK_CLAIM_MIN_MS = 20 * 60000, UK_CLAIM_MAX_MS = 24 * 3600000
+  function ukKandidat(r, jetzt){
+    if(!r || r.status !== 'planned' || (r.route !== 'mt5' && r.route !== 'mt5v2') || r.started_at || r.orbit_gesendet_at || !r.start_um_gestartet_at) return false
+    if(r.master_pl != null && Number(r.master_pl) !== 0) return false
+    if(r.slave_pl != null && Number(r.slave_pl) !== 0) return false
+    const b = (r.mt5_baseline && typeof r.mt5_baseline === 'object') ? r.mt5_baseline : {}, sf = b.start_fehler
+    if(!sf || typeof sf !== 'object' || sf.unklar !== true || sf.status === 'behoben') return false
+    // jede Spur einer gelaufenen Order oder Hand-Arbeit → nie per Deals „lösen" (wie deWegUrteil)
+    if(b.puls_unklar || b.manuell || b.ticket || b.hedge || b.echo_pos_gesehen_at || b.schon_zu || b.polar || b.versuche_alt || (b.live && b.live.offen)) return false
+    const c = Date.parse(r.start_um_gestartet_at) || 0
+    if(b.puls_spur && b.puls_spur.ok === true && (Date.parse(b.puls_spur.at) || 0) >= c - 5000) return false   // Puls/Bot meldete nach dem Claim „ok" (Prüfer UK1)
+    return c > 0 && jetzt - c >= UK_CLAIM_MIN_MS && jetzt - c <= UK_CLAIM_MAX_MS
+  }
+  window._ukKandidat = ukKandidat   // Test-Haken
+  // REIN (Test-Haken): neue start_fehler-Marke bei bewiesen „nicht gelaufen" — Original bleibt erhalten (unklar, msg, at), dazu Status + Beleg
+  function ukGeloest(sf, u, res, jetztIso, pc){
+    return Object.assign({}, sf, { status: 'behoben', behoben: `Deal-Prüfung am Master-Terminal: ${String(u.grund || '').slice(0, 160)} — keine Order raus (UK1)`,
+      beleg: { quelle: 'deals_leer', at: jetztIso, balance: Number(res && res.balance) > 0 ? Number(res.balance) : null, pc: pc || null } })
+  }
+  window._ukGeloest = ukGeloest
+  async function ukErgebnis(r, u, res, jetzt){
+    // Prüfer UK1: ein Bot ohne Felder positionen/orders würde als 0 gelesen → dann nie lösen
+    if(u.art === 'nicht_gelaufen' && (!res || res.positionen == null || res.orders == null)) u = { art: 'unklar', grund: 'Bot meldet Positionen/Orders nicht — Panel/Bot zu alt' }
+    if(u.art !== 'nicht_gelaufen'){ console.log('[unklar-start]', String(r.id).slice(0, 8), 'bleibt unklar —', u.art, String(u.grund || '').slice(0, 140)); return false }
+    // Prüfer UK1: läuft dieser Plan JETZT in diesem Tab (Kette/Hand/Fern ohne neuen Claim) oder ging seit dem Claim etwas raus → nicht lösen (die Marke deckt genau das)
+    try{ const pp = rowToPlan(r); if((typeof sfLaeuftHier === 'function' && sfLaeuftHier(pp)) || (typeof sfHier === 'function' && sfHier(r.id).gesendet)){ console.log('[unklar-start]', String(r.id).slice(0, 8), 'läuft/gesendet in diesem Tab — nicht lösen'); return false } }catch(_){ return false }
+    const claim = r.start_um_gestartet_at
+    const { data: sig, error: eSig } = await supabase.from('order_signale').select('id,status,ergebnis,created_at').eq('plan_id', String(r.id)).limit(20)
+    if(eSig) return false
+    if((sig || []).some(o => o && (['wartet', 'laeuft'].includes(o.status) || (o.ergebnis && (o.ergebnis.gesendet === true || o.ergebnis.ok === true)) || Date.parse(o.created_at) > Date.parse(claim)))){
+      console.log('[unklar-start]', String(r.id).slice(0, 8), 'Signal seit dem Claim — nicht lösen'); return false }
+    const { data: pe, error: ePe } = await supabase.from('puls_ergebnisse').select('id').eq('plan_id', String(r.id)).eq('art', 'order').limit(1)
+    if(ePe || (pe && pe.length)){ console.log('[unklar-start]', String(r.id).slice(0, 8), ePe ? 'Puls-Ergebnisse nicht lesbar' : 'Puls-Order-Meldung am Plan', '— nicht lösen'); return false }
+    const b = Object.assign({}, r.mt5_baseline || {})
+    b.start_fehler = ukGeloest(b.start_fehler, u, res, jetzt, (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null)
+    // nur solange der Plan unverändert geplant und nie gestartet ist (updated_at wie N2) — sonst nächster Takt
+    let q = supabase.from('trade_plans').update({ mt5_baseline: b }).eq('id', r.id).eq('status', 'planned').is('started_at', null).is('orbit_gesendet_at', null)
+    if(r.updated_at) q = q.eq('updated_at', r.updated_at)
+    const { data: up, error } = await q.select('id')
+    const ok = !error && !!(up && up.length)
+    console.log('[unklar-start]', String(r.id).slice(0, 8), r.master_name || '', 'UNKLAR gelöst (nicht gelaufen):', u.grund, ok ? 'geschrieben' : ('nicht geschrieben: ' + ((error && error.message) || 'Plan inzwischen geändert')))
+    if(ok){ try{ const i = (tradePlans || []).findIndex(x => String(x.id) === String(r.id)); if(i >= 0 && tradePlans[i].mt5Baseline) tradePlans[i].mt5Baseline.start_fehler = b.start_fehler }catch(_){} }
+    return ok
+  }
   async function deTick(){
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || window._tabNebenSofort || _deLaeuft || Date.now() - _deAt < DE_TAKT_MS) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
@@ -64097,6 +64150,15 @@
         for(const r of (alt0 || [])) if(!deWegUrteil(r)) await deWeg(r, (r.mt5_baseline.final.hinweis || '').slice(0, 120))
       }catch(e){ console.warn('[endlesung-deals] NG1 Aufräumen', (e && e.message) || e) }
       const kand = (rows || []).filter(r => deKandidat(r) && !((_deVersucht.get(String(r.id)) || 0) > Date.now() - DE_PLAN_MS))
+      // UK1: geplante Echo-Pläne mit UNKLAR-Startmarke (≥ 20 min nach dem Claim) gehen durch dieselbe Deal-Prüfung
+      try{
+        const { data: pl, error: ePl } = await supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'planned').in('route', ['mt5', 'mt5v2'])
+          .is('started_at', null).not('start_um_gestartet_at', 'is', null).gte('start_um_gestartet_at', new Date(Date.now() - UK_CLAIM_MAX_MS).toISOString())
+          .eq('mt5_baseline->start_fehler->>unklar', 'true').order('start_um_gestartet_at', { ascending: false }).limit(20)
+        if(ePl) throw ePl
+        const jt = Date.now()
+        for(const r of (pl || [])) if(ukKandidat(r, jt) && !((_deVersucht.get(String(r.id)) || 0) > jt - DE_PLAN_MS)) kand.push(r)
+      }catch(e){ console.warn('[unklar-start] Laden', (e && e.message) || e) }
       if(!kand.length) return
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
       if(!dd || dd.copier_offline || dd._httpFail) return
@@ -64140,6 +64202,7 @@
             u.grund = `Master-Terminal war zu — ${lb && lb.ok ? 'zum Lesen geöffnet (Balance ' + Number(lb.balance).toLocaleString('de-DE') + ' $), Deals in ~6 min' : 'Öffnen nicht geklappt: ' + String((lb && lb.msg) || '—').slice(0, 80)}`.slice(0, 160)
           }
         }
+        if(r.status === 'planned'){ await ukErgebnis(r, u, res, jetzt); continue }   // UK1: geplant → nur die Marke (mit Beleg) lösen, nie buchen/löschen
         if(u.art === 'offen') continue
         // NG1: bewiesen nicht gelaufen → löschen statt mit 0,00 $ zum Abhaken stellen; spricht etwas am Plan dagegen, wie bisher buchen
         if(u.art === 'nicht_gelaufen'){
