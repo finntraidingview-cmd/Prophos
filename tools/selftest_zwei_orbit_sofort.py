@@ -26,7 +26,7 @@ def check(ok, name):
 
 
 # ── Panel: richtung_frei mit gestellter Railway-Antwort ──
-code = PANEL[PANEL.index("def richtung_frei("):PANEL.index("def riegel_pflicht_fehlt(")]
+code = PANEL[PANEL.index("RIEGEL_NETZ_WIEDERHOLEN = "):PANEL.index("def riegel_pflicht_fehlt(")]   # RD1 (10.11.2026): mit riegel_netzfehler
 ANTWORT = {}
 
 
@@ -49,8 +49,11 @@ fake_req = types.ModuleType("urllib.request")
 fake_req.urlopen = _urlopen
 fake_req.Request = lambda *a, **k: None
 fake_urllib.request = fake_req
-sys.modules["urllib"], sys.modules["urllib.request"] = fake_urllib, fake_req
-ns = {"re": re, "json": json, "code_token": lambda: "tok", "CODE_QUELLE": "http://x"}
+import urllib.error as _ue   # noqa: E402  RD1: riegel_netzfehler braucht die echten Fehlerklassen
+fake_urllib.error = _ue
+sys.modules["urllib"], sys.modules["urllib.request"], sys.modules["urllib.error"] = fake_urllib, fake_req, _ue
+ns = {"re": re, "json": json, "code_token": lambda: "tok", "CODE_QUELLE": "http://x", "time": types.SimpleNamespace(sleep=lambda s: None),
+      "random": __import__("random")}
 exec(code, ns)
 RF = ns["richtung_frei"]
 PID = "12345678-1234-1234-1234-123456789012"

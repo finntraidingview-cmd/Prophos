@@ -664,6 +664,28 @@ def tab_wache_antwort(pid, pong, ping, jetzt):
     return felder, zeile
 
 
+# RD1 (10.11.2026, Master; Standing Order Fehler-Muster, FA1): „Riegel-Prüfung (Gegenrichtung) nicht erreichbar: <urlopen error [Errno 11001] getaddrinfo
+# failed>" 20× in 7 Tagen auf einem PC — der Router (DNS) antwortet dort zeitweise nicht, zwei sofortige Versuche fielen beide in dieselbe Lücke. Nur bei einem
+# NETZfehler (DNS, Zeitlimit, Verbindung) jetzt bis zu RIEGEL_NETZ_WIEDERHOLEN weitere Versuche nach gestreuter Pause (Jitter-Regel). HTTP-Fehler (4xx/5xx),
+# unklare Antworten und echte Sperren (gegenrichtung, big_trade_*) bleiben genau wie bisher. Fail-closed bleibt: ohne Antwort nie frei.
+RIEGEL_NETZ_WIEDERHOLEN = 2
+RIEGEL_NETZ_PAUSE_S = ((1.0, 2.5), (2.5, 5.0))
+
+
+def riegel_netzfehler(e):
+    """REIN (testbar): ist die Ausnahme ein Netzfehler (DNS/Zeitlimit/Verbindung) und kein HTTP-Status? -> bool. HTTPError (Railway hat geantwortet) nie."""
+    import socket
+    import urllib.error
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, (socket.gaierror, socket.timeout, TimeoutError, ConnectionError)):
+        return True
+    if isinstance(e, urllib.error.URLError):
+        r = getattr(e, "reason", None)
+        return isinstance(r, (socket.gaierror, socket.timeout, TimeoutError, ConnectionError, OSError)) or "getaddrinfo" in str(r)
+    return False
+
+
 def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
     """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
     fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
@@ -685,7 +707,9 @@ def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
         return False, ("Riegel-Prüfung (Gegenrichtung) nicht möglich: code_token.txt fehlt — den Prophos-Tab an diesem PC einmal "
                        "neu laden (legt den Schlüssel ab). Nichts gesendet."), "riegel_unerreichbar"
     fehler = ""
-    for _ in range(2):
+    netz_n = sonst_n = 0
+    while True:
+        netz = False
         try:
             req = urllib.request.Request(CODE_QUELLE + "/richtung/frei",
                                          data=json.dumps({"plan_id": pid, "richtung": r}).encode("utf-8"),
@@ -710,6 +734,19 @@ def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
             fehler = str((d or {}).get("msg") or "unklare Antwort")[:160]
         except Exception as e:
             fehler = str(e)[:160]
+            netz = riegel_netzfehler(e)
+        if netz and netz_n < RIEGEL_NETZ_WIEDERHOLEN:
+            pause = random.uniform(*RIEGEL_NETZ_PAUSE_S[min(netz_n, len(RIEGEL_NETZ_PAUSE_S) - 1)])
+            netz_n += 1
+            print(f"[riegel] Netzfehler ({fehler[:80]}) — Versuch {netz_n + 1} in {pause:.1f} s", flush=True)
+            time.sleep(pause)
+            continue
+        if not netz and sonst_n < 1:
+            sonst_n += 1                                 # wie bisher: ein sofortiger zweiter Versuch bei HTTP-Fehler/unklarer Antwort
+            continue
+        break
+    if netz_n:
+        fehler = f"{fehler} (nach {netz_n + 1} Versuchen mit Pause)"
     return False, f"Riegel-Prüfung (Gegenrichtung) nicht erreichbar: {fehler} — nichts gesendet, der Start wird später erneut versucht.", "riegel_unerreichbar"
 
 
