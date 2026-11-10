@@ -2809,6 +2809,106 @@ def _desktop_sperre_hinweis(path=None):
         return "unbekannt", _UAC_HINWEIS
 
 
+# F9A DESKTOP-BEREITSCHAFT VOR F9 (Master 10.11.2026, Auswertung FA1 „F9-Dialog nicht gefunden": 31 Pläne in 7 Handelstagen auf 7 PCs, täglich).
+# Befund aus puls_fehlerbild_log (Fehlerfoto zur selben Minute am selben PC): seit 06.11. lag bei 11 von 13 Fällen der Eingabe-Desktop auf dem
+# sicheren Desktop — „Eingabe-Desktop nicht lesbar (Fehler 5) — UAC/Sperrbildschirm? · Sitzung aktiv"; alle 11 Fälle mit „Terminal erst n s alt
+# (frisch gestartet)" gehören dazu, das Warm-Warten (TERMINAL_WARM_S) half dort nichts. Dazu alarm_log uac_offen/uac_erledigt: die Abfragen stehen
+# 25 s bis 2 min (Windows schließt eine unbeantwortete nach 120 s). Bisher drückte der Bot F9 blind in den gesperrten Desktop, brach ab, und die
+# Ursache stand nur am Ende der langen Meldung — der Tab kürzt auf 220/600 Zeichen, erkannte die Abfrage nie (start_fehler.uac false) und holte
+# den Plan erst ~20 min später nach. Jetzt: VOR dem Betreten des Terminals Bereitschaft belegen (Eingabe-Desktop lesbar), sonst gestreut warten
+# (Jitter-Regel), höchstens DESKTOP_WARTE_MAX_S und nie über TERMINAL_SUCHE_BIS − DESKTOP_WARTE_RESERVE_S. Bleibt er gesperrt: Abbruch OHNE Taste,
+# Ursache VORN in der Meldung („Windows-Sicherheitsabfrage offen (consent.exe läuft) … nichts gesendet") — sfIstUacText erkennt sie, der Fehlstart
+# zählt nicht als Fehlversuch, sfTick plant neu, sobald das Panel consent.exe weg meldet. Normaler Lauf: eine Lesung (OpenInputDesktop), kein Warten.
+DESKTOP_WARTE_MAX_S = 130.0       # > 120 s Windows-Frist: eine gerade erschienene Abfrage kann in dieser Zeit verschwinden
+DESKTOP_WARTE_RESERVE_S = 15.0    # so viel bleibt vor TERMINAL_SUCHE_BIS für Fenster-Suche und Betreten
+
+
+def desktop_warte_budget(lauf_s, max_s=None, bis_s=None, reserve_s=None):
+    """REIN RECHNEND (testbar): so viele Sekunden darf run() vor F9 auf einen freien Desktop warten (s. Block-Kopf F9A) — nie negativ."""
+    max_s = DESKTOP_WARTE_MAX_S if max_s is None else max_s
+    bis_s = TERMINAL_SUCHE_BIS if bis_s is None else bis_s
+    reserve_s = DESKTOP_WARTE_RESERVE_S if reserve_s is None else reserve_s
+    try:
+        return max(0.0, min(float(max_s), float(bis_s) - float(reserve_s) - float(lauf_s)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def desktop_vor_f9_meldung(code, text, gewartet_s):
+    """REIN RECHNEND (testbar): Meldung für „Desktop vor F9 gesperrt" — Ursache und „nichts gesendet" VORN (der Tab kürzt die Antwort auf
+    220 Zeichen: sfIstUacText und sfVorOrderBeleg sehen nur den Anfang). code/text aus desktop_sperre_ursache bzw. _desktop_sperre_hinweis."""
+    g = f"Desktop {int(round(float(gewartet_s or 0)))} s gesperrt"
+    if code == "uac_offen":
+        kopf = f"Windows-Sicherheitsabfrage offen (consent.exe läuft) — vor F9 abgebrochen, nichts gesendet ({g})."
+    elif code == "gesperrt":
+        kopf = f"PC gesperrt (Sperr-/Anmeldebildschirm, LogonUI.exe) — vor F9 abgebrochen, nichts gesendet ({g})."
+    else:
+        kopf = f"Eingabe-Desktop gesperrt (UAC/Sperrbildschirm?) — vor F9 abgebrochen, nichts gesendet ({g})."
+        text = _UAC_HINWEIS   # desktop_sperre_ursache „unbekannt" spricht von „kein Fenster vorn nach F9" — hier kam kein F9
+    return kopf + (" " + str(text) if text else "")
+
+
+def _eingabe_desktop_gesperrt():
+    """True = Eingabe-Desktop ist nicht der normale (OpenInputDesktop scheitert = sicherer UAC-/Sperr-Desktop, oder er heißt Winlogon /
+    Screen-saver); False = normaler Desktop; None = nicht lesbar (kein Windows, Fehler) → gilt als frei, run() wartet dann nie. Nur lesen."""
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        u32 = ctypes.WinDLL("user32", use_last_error=True)
+        u32.OpenInputDesktop.argtypes, u32.OpenInputDesktop.restype = [wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE
+        u32.GetUserObjectInformationW.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        u32.CloseDesktop.argtypes = [wt.HANDLE]
+        h = u32.OpenInputDesktop(0, False, 0x0001)   # DESKTOP_READOBJECTS — wie _fehlerfoto_desktop_diag
+        if not h:
+            return True
+        try:
+            puf, n = ctypes.create_unicode_buffer(64), wt.DWORD(0)
+            if u32.GetUserObjectInformationW(h, 2, puf, ctypes.sizeof(puf), ctypes.byref(n)):   # UOI_NAME
+                return str(puf.value or "").strip().lower() in ("winlogon", "screen-saver")
+            return False
+        finally:
+            u32.CloseDesktop(h)
+    except Exception:
+        return None
+
+
+def desktop_frei_abwarten(budget_s, trail=None, lesen=None, schlafen=None, uhr=None, aufgeben=None):
+    """Vor F9 (F9A, s. Block-Kopf): Desktop gesperrt → gestreut warten, bis er frei ist oder budget_s um ist. → (frei, gewartete Sekunden).
+    lesen/schlafen/uhr nur für den Selbsttest (Standard _eingabe_desktop_gesperrt, _warte(1.2, 1.8), time.time). Erste Lesung frei oder
+    unbekannt = (True, 0.0) ohne Spur-Zeile — der normale Lauf ändert sich nicht. aufgeben() (einmal, nur wenn gesperrt) True = gar nicht
+    warten (Gegenprüfung 10.11.2026: ein Sperrbildschirm/LogonUI heilt nicht von selbst — nur eine Sicherheitsabfrage verschwindet). Wirft nie."""
+    lesen = lesen or _eingabe_desktop_gesperrt
+    schlafen = schlafen or (lambda: _warte(1.2, 1.8))   # Jitter-Regel: nie im festen Takt
+    uhr = uhr or time.time
+    try:
+        if lesen() is not True:
+            return True, 0.0
+        t0 = uhr()
+        if aufgeben is not None:
+            try:
+                if aufgeben():
+                    if trail is not None:
+                        trail.append("Desktop gesperrt (Sperrbildschirm) vor F9 — heilt nicht von selbst, kein Warten, keine Taste")
+                    return False, 0.0
+            except Exception:
+                pass
+        if trail is not None:
+            trail.append(f"Desktop gesperrt (UAC/Sperrbildschirm) vor F9 — warte bis ~{int(budget_s)} s auf freien Desktop, keine Taste")
+        while uhr() - t0 < float(budget_s):
+            schlafen()
+            if lesen() is not True:
+                g = uhr() - t0
+                if trail is not None:
+                    trail.append(f"Desktop frei nach {g:.0f} s")
+                return True, g
+        g = uhr() - t0
+        if trail is not None:
+            trail.append(f"Desktop nach {g:.0f} s weiter gesperrt")
+        return False, g
+    except Exception:
+        return True, 0.0
+
+
 def _ist_verbindungsfehler(txt):
     """Riecht der Lese-Fehler nach 'Terminal nicht erreichbar' (dann passt der
     UAC/Update-Hinweis) statt nach Konto-/Symbol-Sachfehler (dann waere er
@@ -13646,6 +13746,30 @@ def run(cfg_path, cmd):
     # Laeufe von Beginn an auseinander.
     # ES3 (05.11.2026): Streuung als Einstellung versatz_s (heute 1,2 s, Vorschlag 0,6 s); 0 = kein Versatz
     _warte(0.0, float(_ECHO_TEMPO_LAUF.get("versatz_s", 1.2)))
+
+    # F9A (10.11.2026, s. DESKTOP_WARTE_MAX_S): Bereitschaft belegen, bevor das Terminal angefasst wird — auf dem sicheren Desktop (Windows-
+    # Sicherheitsabfrage / Sperrbildschirm) käme weder Fokus noch F9 an. Gesperrt → gestreut warten; bleibt er gesperrt, Abbruch ohne Taste mit der
+    # Ursache vorn in der Meldung. Normaler Lauf: eine Lesung, kein Warten, keine Spur-Zeile.
+    _d_frei, _d_s = desktop_frei_abwarten(desktop_warte_budget(trail.sekunden()), trail,
+                                          aufgeben=lambda: _desktop_sperre_hinweis(path)[0] == "gesperrt")
+    if not _d_frei:
+        _d_code, _d_text = _desktop_sperre_hinweis(path)
+        return {"ok": False, "retry_ok": True, "code": "desktop_gesperrt", "grund": _d_code,
+                "msg": desktop_vor_f9_meldung(_d_code, _d_text, _d_s) + " [" + _spur(trail) + "]"}
+    if _d_s > 0:
+        # Gegenprüfung F9A (10.11.2026): Kurs und Positionen sind nach bis zu ~130 s Warten alt — F9-SL/TP rechnen ab ref_ask/ref_bid, neue
+        # Positionen erkennt der Bot an vorher_tickets. Nur nach einem Warten frisch lesen (der normale Lauf liest nicht zweimal); nicht lesbar
+        # oder fremdes Konto → Abbruch ohne Taste.
+        _lese2 = _api_lesen(path, expected, symbol=symbol)
+        _l2 = _lese2.get("login")
+        if "fehler" in _lese2 or (_l2 is not None and str(_l2).strip() != str(expected)):
+            return {"ok": False, "retry_ok": True, "code": "desktop_gesperrt",
+                    "msg": f"Nach {int(_d_s)} s Warten auf den Desktop nicht neu lesbar ({str(_lese2.get('fehler') or 'anderes Konto ' + str(_l2))[:120]}) "
+                           "— vor F9 abgebrochen, nichts gesendet. [" + _spur(trail) + "]"}
+        lese = _lese2
+        digits, contract_size = lese["digits"], lese["contract_size"]
+        vorher_tickets = {p["ticket"] for p in lese["positionen"]}
+        trail.append("Kurs/Positionen nach dem Warten neu gelesen")
 
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     # F1 (04.11.2026): bis 30 s gestreut neu suchen statt einmal — höchstens bis Sekunde TERMINAL_SUCHE_BIS des Laufs (Gegenprüfung: Login/Warm-Warten

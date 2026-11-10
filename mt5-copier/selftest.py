@@ -2620,6 +2620,7 @@ def main():
     results.append(_test_sicher(test_fehlerfoto_luecken))
     results.append(_test_sicher(test_magic_zwilling))
     results.append(_test_sicher(test_extern_deal))
+    results.append(_test_sicher(test_f9a_desktop_bereit))
 
     print()
     ok = sum(1 for r in results if r)
@@ -12145,6 +12146,87 @@ def test_extern_deal():
     chk("const hasExtern = real.some(e => e.note === 'extern_geschlossen' || e.profit == null)" in html,
         "Frontend: extern_deal mit Profit zählt wie ein normaler Close (nur extern_geschlossen/Profit leer bleibt unbelegt)")
     print(("✓" if ok else "✗") + " Extern-Deal: Hand-/Stop-Out-Close am Fusion-Konto aus der Deal-Historie verbucht, kein Doppelbuchen, nur eigene Tickets")
+    return ok
+
+
+def test_f9a_desktop_bereit():
+    """F9A (Master 10.11.2026, FA1 „F9-Dialog nicht gefunden"): vor F9 Desktop-Bereitschaft belegen — gesperrt (UAC/Sperrbildschirm) → gestreut
+    warten bis frei oder Budget um, sonst Abbruch OHNE Taste mit Ursache vorn (der Tab erkennt die Windows-Abfrage an den ersten 220 Zeichen).
+    Normaler Lauf: eine Lesung, kein Warten. Ohne MetaTrader/Windows."""
+    import order_bot as ob, inspect as _i, re as _re
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ F9A: " + text)
+            ok = False
+    # (1) Budget: höchstens DESKTOP_WARTE_MAX_S, nie über TERMINAL_SUCHE_BIS − Reserve, nie negativ
+    B = ob.desktop_warte_budget
+    chk(B(1.0) == ob.DESKTOP_WARTE_MAX_S and B(172.0) == ob.TERMINAL_SUCHE_BIS - ob.DESKTOP_WARTE_RESERVE_S - 172.0 and B(199.0) == 0.0 and B("x") == 0.0,
+        f"Budget 1 s → {B(1.0)}, 172 s → {B(172.0)}, 199 s → {B(199.0)}")
+    # (2) Warten mit Attrappen-Uhr: frei → (True, 0) ohne Spur; gesperrt dann frei → True; immer gesperrt → False nach Budget; unbekannt = frei
+    class _Uhr:
+        def __init__(self): self.t = 0.0
+        def __call__(self): return self.t
+    def lauf(folge, budget, schritt=2.0):
+        u, it, spur, n = _Uhr(), iter(folge), [], {"schlaf": 0}
+        def les():
+            try: return next(it)
+            except StopIteration: return folge[-1]
+        def schl():
+            n["schlaf"] += 1; u.t += schritt
+        r = ob.desktop_frei_abwarten(budget, spur, lesen=les, schlafen=schl, uhr=u)
+        return r, spur, n["schlaf"]
+    r, sp, n = lauf([False], 100)
+    chk(r == (True, 0.0) and sp == [] and n == 0, f"frei → sofort weiter, keine Spur-Zeile ({r}, {sp})")
+    r, sp, n = lauf([None], 100)
+    chk(r == (True, 0.0) and sp == [] and n == 0, f"nicht lesbar (kein Windows) → wie frei ({r})")
+    r, sp, n = lauf([True, True, True, False], 100)
+    chk(r[0] is True and r[1] == 6.0 and n == 3 and "warte bis ~100 s" in sp[0] and sp[-1] == "Desktop frei nach 6 s", f"gesperrt → frei nach 3 Takten ({r}, {sp})")
+    r, sp, n = lauf([True], 10)
+    chk(r[0] is False and r[1] >= 10 and n == 5 and "weiter gesperrt" in sp[-1], f"immer gesperrt → nach dem Budget aufgeben ({r}, {sp})")
+    r, sp, n = lauf([True], 0)
+    chk(r == (False, 0.0) and n == 0, f"Budget 0 → gleich aufgeben, keine Taste ({r})")
+    def _wirft(): raise OSError("x")
+    chk(ob.desktop_frei_abwarten(50, [], lesen=_wirft) == (True, 0.0), "Lese-Fehler → wie bisher weiter (wirft nie)")
+    sp2, n2 = [], {"s": 0}
+    r2 = ob.desktop_frei_abwarten(100, sp2, lesen=lambda: True, schlafen=lambda: n2.__setitem__("s", n2["s"] + 1), uhr=_Uhr(), aufgeben=lambda: True)
+    chk(r2 == (False, 0.0) and n2["s"] == 0 and "Sperrbildschirm" in sp2[-1], f"Sperrbildschirm (aufgeben) → kein Warten ({r2}, {sp2})")
+    r3, sp3, n3 = lauf([True, False], 100)
+    chk(r3[0] is True, "ohne aufgeben wie bisher")
+    # Fehlsperre ausgeschlossen: ohne Windows liefert die Lesung None (= frei), nie True — sonst würde jede Order blockiert
+    chk(sys.platform == "win32" or ob._eingabe_desktop_gesperrt() is None, "_eingabe_desktop_gesperrt ohne Windows → None (gilt als frei)")
+    # (3) Meldung: Ursache + „nichts gesendet" in den ersten 220 Zeichen (m5still kürzt so), Erkennung wie prophos.html sfIstUacText/sfVorOrderBeleg
+    m_uac = ob.desktop_vor_f9_meldung("uac_offen", "Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — " + "x" * 400, 95.4)
+    m_lock = ob.desktop_vor_f9_meldung("gesperrt", "Der PC ist gesperrt …", 30)
+    m_unb = ob.desktop_vor_f9_meldung("unbekannt", "kein Fenster vorn, aber weder …", 12)
+    uac = lambda m: bool(_re.search(r"Windows-Sicherheitsabfrage offen|\(consent\.exe läuft\)", m, _re.I))
+    chk(uac(m_uac[:220]) and "nichts gesendet" in m_uac[:220] and "Desktop 95 s gesperrt" in m_uac[:220], f"UAC: Ursache + nichts gesendet vorn ({m_uac[:120]})")
+    chk(not uac(m_lock) and not uac(m_unb) and "nichts gesendet" in m_lock[:220] and "nichts gesendet" in m_unb[:220],
+        "Sperrbildschirm/unbekannt: nichts gesendet vorn, nie als Windows-Abfrage gezählt")
+    chk("kein Fenster vorn" not in m_unb and ob._UAC_HINWEIS in m_unb, "unbekannt: Handgriff statt „kein Fenster vorn nach F9“")
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prophos.html"), encoding="utf-8").read()
+    chk("const sfIstUacText = m => /Windows-Sicherheitsabfrage offen|\\(consent\\.exe läuft\\)/i.test(String(m || ''))" in html
+        and "/nichts gesendet/i" in html and "String(sp.msg).slice(0, 220)" in html,
+        "prophos.html: Erkennung der Abfrage und des Belegs „nichts gesendet“ unverändert (220 Zeichen)")
+    # (4) Einbau in run(): nach Versatz, VOR der Fenster-Suche und vor jedem F9; Abbruch ohne Taste mit Spur; F9-Block unverändert
+    q = _i.getsource(ob.run)
+    i_d, i_s = q.find("desktop_frei_abwarten(desktop_warte_budget(trail.sekunden()), trail,"), q.find("_finde_terminal_geduldig(")
+    i_v, i_f9 = q.find('_warte(0.0, float(_ECHO_TEMPO_LAUF.get("versatz_s", 1.2)))'), q.find('_el_tasten(w, "{F9}")')
+    block = q[i_d:i_s]
+    chk(0 < i_v < i_d < i_s < i_f9 and "_el_tasten" not in block and "_fenster_betreten" not in block and "desktop_vor_f9_meldung(" in block
+        and '"retry_ok": True' in block and '"code": "desktop_gesperrt"' in block and '_spur(trail)' in block,
+        "run(): Desktop-Prüfung nach dem Versatz, vor Fenster-Suche/Betreten/F9; Abbruch ohne Taste, retry_ok, Spur")
+    nach = q[i_d:i_s]
+    chk("if _d_s > 0:" in nach and "_api_lesen(path, expected, symbol=symbol)" in nach and "vorher_tickets = {p[\"ticket\"] for p in lese[\"positionen\"]}" in nach
+        and 'aufgeben=lambda: _desktop_sperre_hinweis(path)[0] == "gesperrt"' in nach and nach.index("if _d_s > 0:") > nach.index("if not _d_frei:"),
+        "nach einem Warten Kurs/Positionen frisch lesen (nur dann), Sperrbildschirm ohne Warten")
+    chk(q.count('_el_tasten(w, "{F9}")') == 2 and q.count('"F9-Dialog nicht gefunden — Abbruch, nichts gesendet. ["') == 1,
+        "F9-Pfad selbst unverändert (zwei F9 höchstens, Meldungsschlüssel einmal)")
+    qw = _i.getsource(ob.desktop_frei_abwarten)
+    chk("_warte(1.2, 1.8)" in qw and "time.sleep" not in qw, "Warten gestreut über _warte (Jitter-Regel), kein fester Takt")
+    print(("✓" if ok else "✗") + " F9A: Desktop-Bereitschaft vor F9 — gesperrt = gestreut warten, sonst Abbruch ohne Taste mit Ursache vorn")
     return ok
 
 
