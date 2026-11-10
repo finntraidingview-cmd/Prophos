@@ -28739,6 +28739,14 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
             return "login_formular", text + " Tradovate ist NICHT verbunden.", ""
         if ort == "abgebrochen":
             code = "abgebrochen"
+            kk = tv_login_keine_konten(text)
+            if kk:
+                # NA1 (10.11.2026, Master; Fehler-Muster FA1-2a): Tradovate meldet für diesen Login KEINE Konten („No active accounts found for this
+                # environment" bei Tradeify im Live-Rahmen, „No trading accounts available" bei Apex) — ein zweiter/dritter Connect und ein frischer Tab
+                # ändern daran nichts (115 Versuche in 7 Tagen auf einem PC). Sofort aufhören; der Text bleibt drin, Railway (kk_tick) sperrt das Konto.
+                trail.append(f"[Login] Tradovate: keine Konten für diesen Login ('{kk}') — kein weiterer Versuch")
+                return "abgebrochen", (f"Tradovate meldet für diesen Login keine Konten ('{kk}') — Konten bei der Firma deaktiviert/geschlossen? "
+                                       "Kein weiterer Versuch, Tradovate ist NICHT verbunden."), ""
         else:
             code = "?"
             try:
@@ -28883,9 +28891,22 @@ def cdp_tab_frisch_noetig(ok, code, cmd, schon, verstrichen_s, bis_s=CDP_TAB_FRI
     return True, "Konto-Schritt gescheitert — TradingView-Tab einmal frisch öffnen, neu anmelden, Schritt wiederholen"
 
 
+TV_LOGIN_KEINE_KONTEN_RE = re.compile(r"(?:Failed to login:\s*)?(No active accounts found[^.'\n\]]*|No trading accounts available[^.'\n\]]*)", re.I)
+
+
+def tv_login_keine_konten(text):
+    """REIN RECHNEND (testbar, NA1 10.11.2026): meldet Tradovate beim Login, dass es für diesen Login keine Konten gibt? → der gefundene Satz | ''.
+    Nur diese zwei Texte — jeder andere Login-Abbruch („The login operation has been canceled", „An error has occurred …") bleibt beim alten Weg."""
+    m = TV_LOGIN_KEINE_KONTEN_RE.search(str(text or ""))
+    return m.group(0).strip()[:120] if m else ""
+
+
 def _cdp_konto_mit_login_frisch(sitz, ext, opts, cmd, trail, res):
     """_cdp_konto_mit_login + EIN frischer TradingView-Tab bei konto_nicht_erreicht (cdp_tab_frisch_noetig, 27.10.2026)."""
     erg = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+    if not erg[0] and tv_login_keine_konten(erg[2]):
+        trail.append("[Tab frisch] nein: Tradovate meldet keine Konten für diesen Login — ein frischer Tab ändert nichts (NA1)")
+        return erg
     ja, grund = cdp_tab_frisch_noetig(erg[0], erg[1], cmd, _CDP_TAB_FRISCH["versucht"], time.time() - _PULS_PROZESS_T0)
     if not ja:
         if not erg[0] and erg[1] == "konto_nicht_erreicht":

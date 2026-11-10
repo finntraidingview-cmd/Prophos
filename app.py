@@ -26317,6 +26317,163 @@ def ap_deaktiviert_anwenden(konten, ids=None):
 AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts am Stift ausschalten"
 
 
+# ══ NA1 TRADOVATE-LOGIN OHNE KONTEN (10.11.2026, Master; Standing Order „Fehler-Muster an der Ursache fixen", FA1-Ursache 2a) ══
+# Befund: drei Tradeify-WD-Konten einer ID (ein Login) scheiterten seit 04.11. bei jedem Start am Tradovate-Login „Failed to login: No active accounts found for
+# this environment" — 115 Versuche in 7 Tagen auf einem PC, der Farmer plante sie täglich neu (auto_planer an, nichts deaktiviert). Laut Finn (05.11.2026) heißt der
+# Text: Konten bei der Firma deaktiviert (Tradeify Live-Rahmen); Demo ist richtig. Dasselbe bei Apex: „No trading accounts available" (Login ohne Konten).
+# Dieser Takt liest puls_fehlstarts (alle PC-Stände, auch alte Bots), und wenn ein Konto den Text in mindestens zwei Startversuchen ≥ KK_MIN_ABSTAND_S auseinander
+# zeigt und seit dem ersten Treffer nicht gestartet ist, setzt er accounts.deaktiviert_at (vorhandener Riegel: kein Farmer, kein Planer, Claim gesperrt — Finn
+# aktiviert am Stift), markiert geplante Pläne (mt5_baseline.keine_konten) und meldet 🟠 einmal je Konto an die Master-IDs. Nur Hermann Technologies.
+# Nach Finns Reaktivieren zählen nur Treffer NACH der letzten eigenen Sperre (alarm_log art keine_konten) — nie sofort wieder aus alten Zeilen.
+KK_RE = re.compile(r"No active accounts found|No trading accounts available", re.I)
+KK_FENSTER_H = 72
+KK_MIN_ABSTAND_S = 600
+KK_TAKT_S = (240.0, 360.0)
+_kk = {"naechster": 0.0, "letztes": None, "fehler": ""}
+
+
+def kk_urteil(treffer_at, start_nach=None, seit=None):
+    """REIN RECHNEND (testbar): Login ohne Konten bestätigt? treffer_at = Zeitpunkte (datetime) der Fehlstarts EINES Kontos mit dem Text, start_nach = jüngster
+    echter Start des Kontos, seit = letzte eigene Sperre (nur jüngere Treffer zählen). → (True, {n, erst, letzt}) | (False, grund)"""
+    t = sorted(x for x in treffer_at or () if x and (seit is None or x > seit))
+    if len(t) < 2:
+        return False, "weniger als zwei Treffer"
+    if (t[-1] - t[0]).total_seconds() < KK_MIN_ABSTAND_S:
+        return False, "nur ein Startversuch (Treffer zu dicht beieinander)"
+    if start_nach is not None and start_nach > t[0]:
+        return False, "Konto ist seit dem ersten Treffer gestartet"
+    return True, {"n": len(t), "erst": t[0], "letzt": t[-1]}
+
+
+def kk_satz(msg):
+    """REIN RECHNEND (testbar): der gemeldete Tradovate-Satz aus der Fehlstart-Meldung (für die Meldung) | ''."""
+    m = re.search(r"(?:Failed to login:\s*)?(?:No active accounts found[^.'\n\]]*|No trading accounts available[^.'\n\]]*)", str(msg or ""), re.I)
+    return m.group(0).strip()[:120] if m else ""
+
+
+def kk_tick(jetzt=None):
+    """NA1-Takt → {gesperrt: [...], geprueft, fehler?}. Liest nur, schreibt nur bei bestätigtem Urteil (Guard deaktiviert_at is null)."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    ab = (jetzt - timedelta(hours=KK_FENSTER_H)).isoformat()
+    rows = []
+    for muster in ("*No active accounts found*", "*No trading accounts available*"):
+        rows += sb_select("puls_fehlstarts", {"select": "at,user_id,plan_id,konto,firma,msg", "at": f"gte.{ab}", "msg": f"ilike.{muster}"}) or []
+    rows = [r for r in rows if KK_RE.search(str(r.get("msg") or ""))]
+    out = {"gesperrt": [], "geprueft": 0}
+    if not rows:
+        return out
+    try:
+        ht = ap_unternehmen_filter(None, admin_gruppen_daten())
+    except Exception as e:
+        out["fehler"] = f"Gruppen nicht lesbar ({type(e).__name__}) — nichts gesperrt"
+        return out
+    uids = sorted({str(r.get("user_id") or "") for r in rows if r.get("user_id")})
+    pids = sorted({str(r.get("plan_id") or "") for r in rows if r.get("plan_id")})
+    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,deaktiviert_at", "user_id": "in.(" + ",".join(uids) + ")"}) if uids else []
+    je_name = {(str(a.get("user_id")), str(a.get("name") or "")): a for a in konten or []}
+    je_id = {str(a.get("id")): a for a in konten or []}
+    plan_konto = {}
+    for i in range(0, len(pids), 80):
+        for p in sb_select("trade_plans", {"select": "id,master_account_id", "id": "in.(" + ",".join(pids[i:i + 80]) + ")"}) or []:
+            plan_konto[str(p.get("id"))] = str(p.get("master_account_id") or "")
+    treffer = {}
+    for r in rows:
+        aid = plan_konto.get(str(r.get("plan_id") or ""))
+        if not aid or aid not in je_id:
+            a = je_name.get((str(r.get("user_id") or ""), str(r.get("konto") or "")))
+            aid = str(a.get("id")) if a else ""
+        if aid and aid in je_id and ht(str(je_id[aid].get("user_id"))):
+            treffer.setdefault(aid, []).append(r)
+    if not treffer:
+        return out
+    ids = sorted(treffer)
+    try:
+        log = sb_select("alarm_log", {"select": "schluessel,at", "art": "eq.keine_konten", "order": "at.desc", "limit": "500"}) or []
+    except Exception as e:
+        out["fehler"] = f"alarm_log nicht lesbar ({type(e).__name__}) — nichts gesperrt"
+        return out
+    seit_je = {}
+    for z in log:
+        k = str(z.get("schluessel") or "")
+        if k.startswith("keine_konten|"):
+            aid = k.split("|")[1]
+            t = _ap_ts(z.get("at"))
+            if t and (aid not in seit_je or t > seit_je[aid]):
+                seit_je[aid] = t
+    starts = {}
+    for i in range(0, len(ids), 80):
+        for p in _sb_all("trade_plans", {"select": "master_account_id,started_at", "master_account_id": "in.(" + ",".join(ids[i:i + 80]) + ")",
+                                         "started_at": f"gte.{ab}"}) or []:
+            t = _ap_ts(p.get("started_at"))
+            k = str(p.get("master_account_id"))
+            if t and (k not in starts or t > starts[k]):
+                starts[k] = t
+    namen = {}
+    try:
+        namen = _ap_namen()[0]
+    except Exception:
+        pass
+    for aid in ids:
+        a = je_id[aid]
+        out["geprueft"] += 1
+        if a.get("deaktiviert_at"):
+            continue
+        ja, info = kk_urteil([_ap_ts(r.get("at")) for r in treffer[aid]], starts.get(aid), seit_je.get(aid))
+        if not ja:
+            continue
+        iso = jetzt.isoformat()
+        try:
+            z = sb_update("accounts", {"id": f"eq.{aid}", "deaktiviert_at": "is.null"}, {"deaktiviert_at": iso})
+        except Exception as e:
+            print(f"[keine-konten] ⚠️ {aid[:8]} nicht deaktiviert: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            continue
+        if not z:
+            continue
+        _ap_deakt_merk["bis"] = 0.0
+        satz = next((kk_satz(r.get("msg")) for r in treffer[aid] if kk_satz(r.get("msg"))), "keine Konten")
+        firma = a.get("firm") or next((r.get("firma") for r in treffer[aid] if r.get("firma")), "")
+        text_plan = f"Tradovate-Login ohne Konten („{satz}“) — Konto deaktiviert, startet erst nach „Aktivieren“"
+        markiert = []
+        try:
+            for p in sb_select("trade_plans", {"select": "id", "master_account_id": f"eq.{aid}", "status": "eq.planned",
+                                               "start_um_gestartet_at": "is.null", "started_at": "is.null"}) or []:
+                try:
+                    _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                                json={"p_plan": str(p["id"]), "p_key": "keine_konten", "p_patch": {"at": iso, "text": text_plan, "satz": satz},
+                                      "p_status": "planned"})
+                    markiert.append(str(p["id"]))
+                except Exception as e:
+                    print(f"[keine-konten] ⚠️ Plan {str(p.get('id'))[:8]} nicht markiert: {type(e).__name__}", flush=True)
+        except Exception as e:
+            print(f"[keine-konten] ⚠️ Pläne von {aid[:8]} nicht lesbar: {type(e).__name__}", flush=True)
+        de = lambda t: t.astimezone(timezone.utc).strftime("%d.%m. %H:%M")   # noqa: E731
+        wer = namen.get(str(a.get("user_id")), "")
+        text = (f"{wer + ': ' if wer else ''}{a.get('name')} ({firma}) — Tradovate meldet beim Login „{satz}“ ({info['n']}× seit {de(info['erst'])} UTC, zuletzt "
+                f"{de(info['letzt'])}). Prophos hat das Konto deaktiviert: kein Plan, kein Start, keine Login-Versuche mehr. Bei der Firma prüfen — weg: archivieren; "
+                f"wieder da: unter Accounts am Stift aktivieren.")
+        try:
+            alarm_senden(2, "keine_konten", "Konto weg? Tradovate-Login ohne Konten — deaktiviert", text, uid=str(a.get("user_id")),
+                         schluessel=f"keine_konten|{aid}", daten={"konto_id": aid, "satz": satz, "n": info["n"], "plaene": markiert})
+        except Exception as e:
+            print(f"[keine-konten] ⚠️ Meldung {aid[:8]}: {type(e).__name__}", flush=True)
+        out["gesperrt"].append({"konto_id": aid, "konto": a.get("name"), "n": info["n"], "plaene": markiert})
+        print(f"[keine-konten] {a.get('name')}: deaktiviert ({info['n']} Fehlstarts „{satz}“), {len(markiert)} Plan/Pläne markiert", flush=True)
+    return out
+
+
+def _kk_takt():
+    """aus ap_loop: gestreut alle KK_TAKT_S (Jitter-Regel), Fehler nur loggen."""
+    if time.time() < _kk["naechster"]:
+        return
+    _kk["naechster"] = time.time() + random.uniform(*KK_TAKT_S)
+    try:
+        _kk["letztes"] = kk_tick()
+        _kk["fehler"] = ""
+    except Exception as e:
+        _kk["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[keine-konten] ⚠️ {type(e).__name__}: {e}", flush=True)
+
+
 def _ap_konten_laden(params):
     return ap_deaktiviert_anwenden(_ap_konten_lesen(params))
 
@@ -44067,6 +44224,7 @@ def ap_loop():
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         _tt_takt()                            # WS2 Trades pro Tag aufteilen: nächster Teil nach genauer Lesung / Tag fertig (09.11.2026)
         _wd_sl_nach_takt()                    # SL1 WD-SL nachwürfeln: Rückfall-Pläne der PC-Tabs bekommen den Server-Würfel (10.11.2026)
+        _kk_takt()                            # NA1 Tradovate-Login ohne Konten → Konto deaktivieren + 🟠 einmal je Konto (10.11.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:
