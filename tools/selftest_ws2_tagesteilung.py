@@ -197,7 +197,7 @@ def main():
     wr = dict(w, stufe="normal", rest=3000)
     check(H(wr, TRADEIFY, "challenge", pa, random.Random(2), n_fest=3) is wr, "finaler Orbit-Trade über TP ≥ Rest (ohne Stufen-Text) bleibt 1 Trade")
     src0 = open(APP, encoding="utf-8").read()
-    check('_tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))' in src0 and "_zs = None if _tt_fest else tt_zschluss(_tt_p, rnd)" in src0
+    check('_tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))' in src0 and '_zs, _wurf = (None, {"aus": "fest"}) if _tt_fest else tt_zschluss_wurf(_tt_p, rnd)' in src0
           and src0.index("_tt_fest = tt_ein_trade_fest(") < src0.index("w = tt_planer_haken(w, k[\"regel\"]"),
           "Planer-Haken: Zufalls-Schluss nie an finalen/Klein-Trades, gemessen vor dem Haken")
     # ── 5 Genaue Lesung je Weg ─────────────────────────────────────────────────────────────────────────────────────────

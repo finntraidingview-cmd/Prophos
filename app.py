@@ -30144,9 +30144,12 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                         # Zufalls-Schluss — am Plan VOR dem Haken gemessen (der Haken stellt „Tag 1/n …“ vor die Stufe)
                         _tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))
                         w = tt_planer_haken(w, k["regel"], k["a"].get("account_type"), _tt_p, rnd, ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), n_fest=_tt_n)
-                        _zs = None if _tt_fest else tt_zschluss(_tt_p, rnd)
+                        # WZ1 (10.11.2026): Wurf immer belegen, auch Nieten — in kette.zs_wurf, ohne Kette (1-Trade-Tag) in mt5_baseline.zs_wurf;
+                        # finaler/Klein-Trade: kein Zug (bitgleich), Beleg „fest“
+                        _zs, _wurf = (None, {"aus": "fest"}) if _tt_fest else tt_zschluss_wurf(_tt_p, rnd)
                         if _zs:
                             w = dict(w, zschluss=_zs)
+                        w = dict(w, kette=dict(w["kette"], zs_wurf=_wurf)) if (isinstance(w.get("kette"), dict) and w["kette"]) else dict(w, zs_wurf=_wurf)   # leere Kette nie zur Schein-Kette machen (Prüfer WZ1)
                 except Exception as e:
                     print(f"[auto-plan] ⚠️ Tagesteilung {str(k['a'].get('id'))[:8]}: {type(e).__name__}: {e} — ein Trade wie bisher", flush=True)
             if w and not grund:
@@ -30325,6 +30328,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])})
         if w.get("zschluss"):                    # WS2c Zufalls-Schluss (09.11.2026, tt_zschluss im Planer-Haken): eigener Schlüssel neben kette/tage_mini
             zeilen[-1]["mt5_baseline"] = dict(zeilen[-1]["mt5_baseline"] or {}, zschluss=w["zschluss"])
+        if w.get("zs_wurf") and not w.get("kette"):   # WZ1: Wurf-Beleg ohne Kette (mit Kette steht er in kette.zs_wurf)
+            zeilen[-1]["mt5_baseline"] = dict(zeilen[-1]["mt5_baseline"] or {}, zs_wurf=w["zs_wurf"])
         if param["auto_start"] and not gruppe:   # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt — Gruppe nie (Finn 30.10.: „er bestätigt sie einzeln")
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
         d = dinfo.get((key, str(a["id"]))) or {}
@@ -31547,6 +31552,18 @@ def eh_param(regeln):
     return out
 
 
+def notiz_hedge_zeile_setzen(notes, zeile):
+    """REIN RECHNEND (testbar, WZ1 10.11.2026): Hedge-Zeile „<Modell>: x Lot Fusion · q …“ in der Plan-Notiz SETZEN statt anhängen — der Planer
+    (ap_echo_hedge_anlegen) schrieb sie beim Anlegen, eh_tick vor dem Start noch einmal (165 von 209 Echo-Plänen 08.–10.11. mit Doppel-Zeile).
+    Entfernt jede Zeile mit demselben Modell-Präfix (Text bis zum ersten „:“) und „ Lot Fusion · q “, hängt die neue einmal an; Rest unverändert."""
+    z = str(zeile or "").strip()
+    kopf = z.split(":", 1)[0].strip() + ":" if ":" in z else None
+    alt = [x for x in str(notes or "").split("\n")]
+    if kopf:
+        alt = [x for x in alt if not (x.strip().startswith(kopf) and " Lot Fusion · q " in x)]
+    return ("\n".join(alt).rstrip() + "\n" + z).strip()
+
+
 def eh_hedge(satz, menge, master_ppl, slave_ppl, master_risk, faktor=0.89, min_lot=0.01):
     """REIN RECHNEND (testbar): Fusion-Hedge B2 eines Plans → ({q, multiplier, lots, slave_risk}, None) | (None, grund).
     satz = Kontowert ÷ Polster (€ je $), menge = Master-Lots, master_ppl $/Pkt je Lot, slave_ppl €/Pkt je Lot Fusion,
@@ -31726,8 +31743,8 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     base["hedge_vorschau"] = ehv_vorschau(h, None, z.get("master_tp"), jetzt_iso)
     z.update({"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
               "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": base,
-              "notes": (str(z.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                        f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()})
+              "notes": notiz_hedge_zeile_setzen(z.get("notes"), (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                        f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ","))})   # WZ1: setzen statt anhängen
     return "echo", None
 
 
@@ -32017,8 +32034,8 @@ def _eh_tick_lauf(jetzt):
                     "netto_faktor": par["netto_faktor"]}
             upd = {"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
                    "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, echo_hedge=info),
-                   "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                             f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()}
+                   "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                             f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ","))}   # WZ1: setzen statt anhängen
             try:
                 if not sb_update("trade_plans", _eh_guard(p, route=p.get("route") or "mt5v2"), upd):   # E3: Echo aus dem Planer nachrechnen
                     # inzwischen geändert → eh_schnell_tick sieht das neue updated_at gleich wieder; geclaimt → eh_rot_start_pruefen (🔴)
@@ -38976,11 +38993,23 @@ def tt_bal_wache_ok(k):
 
 def tt_zschluss(param, rnd):
     """REIN RECHNEND (testbar): Zufalls-Schluss je Plan (WS2c) → {nach_min} mit Wahrscheinlichkeit aus schluss_pct, sonst None."""
+    return tt_zschluss_wurf(param, rnd)[0]
+
+
+def tt_zschluss_wurf(param, rnd):
+    """REIN RECHNEND (testbar): wie tt_zschluss, dazu der Wurf als Beleg (WZ1, Master 10.11.2026 nach dem WS2-Test: „0 von 3 ausgelöst“ war
+    nicht prüfbar, weil nur Treffer gespeichert wurden) → (zschluss | None, {p, zug, treffer[, nach_min]}). p = gewürfelte Wahrscheinlichkeit
+    aus schluss_pct (0..1), zug = Zufallszahl dagegen; Treffer bei zug < p. Dieselben rnd-Züge in derselben Reihenfolge wie bisher — der
+    Planer-Lauf bleibt bitgleich."""
     p = _ap_spanne(param["schluss_pct"], rnd.random()) / 100.0
-    if rnd.random() >= p:
-        return None
-    return {"nach_min": int(round(_ap_spanne(param["schluss_min"], rnd.random()))),
-            "topstep": param.get("schluss_topstep") is True, "news_sperre": param.get("schluss_news_sperre") is not False}
+    zug = rnd.random()
+    wurf = {"p": round(p, 4), "zug": round(zug, 4), "treffer": zug < p}
+    if zug >= p:
+        return None, wurf
+    zs = {"nach_min": int(round(_ap_spanne(param["schluss_min"], rnd.random()))),
+          "topstep": param.get("schluss_topstep") is True, "news_sperre": param.get("schluss_news_sperre") is not False}
+    wurf["nach_min"] = zs["nach_min"]
+    return zs, wurf
 
 
 def tt_echt(plan):
@@ -39424,8 +39453,8 @@ def _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, 
     _fm = re.match(r"^[A-Z]+?([FGHJKMNQUVXZ]\d{1,2})$", str(sym or ""))
     if werte.get("symbol") and _fm:
         sym = str(werte["symbol"]) + _fm.group(1)                          # MNQ/NQ + derselbe Frontmonat wie Trade 1 (MNQZ6 → NQZ6, nie NQ6)
+    zs, k2["zs_wurf"] = tt_zschluss_wurf(param, rnd)   # WZ1 (10.11.2026): Wurf immer belegen, auch Nieten
     base = {"kette": k2}
-    zs = tt_zschluss(param, rnd)
     if zs:
         base["zschluss"] = zs
     rolle = "Haupt" if werte["rolle"] == "haupt" else "Neben"
