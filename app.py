@@ -611,7 +611,10 @@ def _copier_proxy_lauf(path):
         # erneuter Start hätte ein zweites Mal platziert: derselbe Doppel-Order-Pfad wie master-order.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close",
                                 "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close", "tv-konten-liste")   # tv-konten-liste (29.10.2026): Panel bis 260 s
-                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 100 if path == "tv-neuladen" else 160 if path == "tv-tm-update" else 25)   # 29.10.2026: Panel bis 90 / 150 s
+                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 100 if path == "tv-neuladen" else 160 if path == "tv-tm-update"
+                else 50 if path == "vorflug" else 25)   # 29.10.2026: Panel bis 90 / 150 s
+        # vorflug (F-A, 11.11.2026, Slave 1 FS3 / Slave 4 98c62e41): das Panel liest bis 40 s (Lese-Deckel, nur MetaTrader5-API) — mit 25 s kam ein 502, der Tab
+        # wiederholte im nächsten Takt. 50 s = Lese-Deckel + Luft (≥ 45 s, Master). Nur lesend, kein Doppel-Order-Pfad
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,
@@ -23316,9 +23319,29 @@ def _pc_neustart_laden(uids, sig, jetzt, pc):
     return laden
 
 
+TAB_NEXT_START_S = 600   # F-B: Startzeiten bis jetzt + 10 min (der Plan-Abruf unten reicht genau so weit; das Panel prüft 2–3 min vorher)
+
+
+def tab_stand_next_starts(plaene, jetzt):
+    """REIN RECHNEND (testbar, F-B Tab-Vorflug, Slave 4 8e292a66): nächste Startzeiten der IDs dieses PCs für das Panel (/code/tab-stand „next_start_um“,
+    ISO-Liste, aufsteigend, höchstens 20). Nur Pläne, die wirklich von selbst starten: geplant, Startzeit in (jetzt, jetzt + TAB_NEXT_START_S], noch nicht
+    geclaimt, kein unbestätigter Auto-Vorschlag (tpStartUmTick startet die nie)."""
+    out = set()
+    for x in plaene or ():
+        if str(x.get("status") or "") != "planned" or x.get("start_um_gestartet_at"):
+            continue
+        if x.get("auto_plan") is True and not x.get("auto_bestaetigt_at"):
+            continue
+        t = _ap_ts(x.get("start_um"))
+        if t is None or not (jetzt < t <= jetzt + timedelta(seconds=TAB_NEXT_START_S)):
+            continue
+        out.add(t.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
+    return sorted(out)[:20]
+
+
 @app.route("/code/tab-stand/<pc>", methods=["GET"])
 def code_tab_stand(pc):
-    """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel}. Nur Lesen."""
+    """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel, …, next_start_um}. Nur Lesen."""
     if not _code_zugang():
         return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
     pc = str(pc or "").strip().lower()
@@ -23386,6 +23409,7 @@ def code_tab_stand(pc):
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
                     "tages_neustart": tn, "offen_n": offen_n,
+                    "next_start_um": tab_stand_next_starts(plaene, jetzt),   # F-B (11.11.2026): Panel prüft den Tab 2–3 min vor jedem Start
                     **lotse_plan_stand(sig, plaene, uids, pc, jetzt),
                     "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 
@@ -26946,6 +26970,55 @@ def kk_satz(msg):
     return m.group(0).strip()[:120] if m else ""
 
 
+def kk_vorflug_zeilen(plaene, ab):
+    """REIN RECHNEND (testbar, F-A 11.11.2026): rote Vorflüge (mt5_baseline.vorflug.{a|b} = {at, lesbar, rot, art, grund, …}, PC-Tab vfTick, Slave 1 FS3) als
+    Treffer-Zeilen wie puls_fehlstarts {at, user_id, plan_id, konto, firma, msg, pc, quelle 'vorflug'} — nur gelesene (lesbar nicht False), rote, mit Grund und
+    Zeit ab `ab`. Die E1-Regeln (KK_ARTEN) zählen sie wie einen Fehlstart: ein kaputtes Konto fällt schon vor der Startzeit auf (T−15 / T−5 min) statt erst
+    nach 2–3 Fehlstarts. Mindestzahl, Abstand, Frische, Breite und Deckel bleiben die der Regel."""
+    a0 = _ap_ts(ab)
+    out = []
+    for p in plaene or ():
+        vf = p.get("vf") if isinstance(p.get("vf"), dict) else {}
+        for slot in ("a", "b"):
+            z = vf.get(slot) if isinstance(vf.get(slot), dict) else None
+            if not z or z.get("rot") is not True or z.get("lesbar") is False or not str(z.get("grund") or "").strip():
+                continue
+            t = _ap_ts(z.get("at"))
+            if t is None or (a0 is not None and t < a0):
+                continue
+            out.append({"at": z.get("at"), "user_id": p.get("user_id"), "plan_id": p.get("id"), "konto": p.get("master_name"),
+                        "firma": p.get("master_firm"), "msg": str(z.get("grund"))[:400], "pc": None, "quelle": "vorflug",
+                        "login": str(z.get("login") or "").strip() or None,
+                        "journal": "letzte Order im Journal" in str(z.get("grund") or "")})
+    return out
+
+
+def kk_vorflug_filtern(zeilen, ext_von):
+    """REIN RECHNEND (testbar, Prüfer F-A MUSS a): Treffer-Zeilen EINER Regel × EINES Kontos (puls_fehlstarts + Vorflüge) → die, die zählen.
+    Vorflug eines anderen Logins als das Konto (ext_von = accounts.external_id) fällt weg. Ein Journal-Vorflug („letzte Order im Journal abgelehnt“) meldet
+    die jüngste abgelehnte Order des Logins — dieselbe Zeile liest jeder weitere Vorflug wieder, auch nach dem Reaktivieren. Darum zählt er nicht, wenn in den
+    24 h davor ein Fehlstart dieser Regel liegt (dann ist die Journal-Zeile meist genau dieser Fehlstart), und höchstens ein Journal-Vorflug je 24 h.
+    Rollend statt je Kalendertag (Prüfer Runde 2): das MT5-Journal gilt je lokalem Tag des PCs (Dubai ab 20:00 UTC) — ein UTC-Tag hätte einen Fehlstart
+    um 21:00 UTC vom Vorflug am nächsten Morgen getrennt und aus einem Ereignis zwei Treffer gemacht."""
+    ext = str(ext_von or "").strip()
+    fern = datetime.min.replace(tzinfo=timezone.utc)
+    zeit = lambda r: _ap_ts(r.get("at")) or fern   # noqa: E731
+    fehl = [r for r in zeilen or () if r.get("quelle") != "vorflug"]
+    vf = [r for r in zeilen or () if r.get("quelle") == "vorflug" and not (ext and r.get("login") and str(r.get("login")) != ext)]
+    fehl_t = [zeit(r) for r in fehl if _ap_ts(r.get("at")) is not None]
+    out, zuletzt = list(fehl), None
+    for r in sorted(vf, key=zeit):
+        if not r.get("journal"):
+            out.append(r)
+            continue
+        t = zeit(r)
+        if t == fern or any(t - timedelta(hours=24) <= f <= t for f in fehl_t) or (zuletzt is not None and t - zuletzt < timedelta(hours=24)):
+            continue
+        zuletzt = t
+        out.append(r)
+    return out
+
+
 def kk_tick(jetzt=None):
     """NA1-Takt (+ E1: alle Regeln aus KK_ARTEN) → {gesperrt: [...], geprueft, fehler?}. Liest nur, schreibt nur bei bestätigtem Urteil (Guard deaktiviert_at
     is null). Je Konto höchstens eine Sperre je Lauf (erste passende Regel in KK_ARTEN-Reihenfolge, NA1 zuerst)."""
@@ -26953,6 +27026,14 @@ def kk_tick(jetzt=None):
     ab = (jetzt - timedelta(hours=KK_FENSTER_H)).isoformat()
     roh = {}
     out = {"gesperrt": [], "geprueft": 0}
+    # F-A KONTO-VORFLUG (11.11.2026, Master: „kk nimmt vorflug-Treffer an“): rote Vorflüge der Pläne im Fenster als zusätzliche Treffer; eigener try —
+    # nicht lesbar = wie bisher nur puls_fehlstarts
+    try:
+        vf_zeilen = kk_vorflug_zeilen(_sb_all("trade_plans", {"select": "id,user_id,master_name,master_firm,vf:mt5_baseline->vorflug",
+                                                              "mt5_baseline->vorflug": "not.is.null", "start_um": f"gte.{ab}"}) or [], ab)
+    except Exception as e:
+        vf_zeilen = []
+        out.setdefault("fehler_regeln", []).append(f"vorflug: {type(e).__name__}")
     for regel in KK_ARTEN:
         rows = []
         try:
@@ -26963,7 +27044,7 @@ def kk_tick(jetzt=None):
                 raise                                    # NA1 wie bisher (der Takt fängt und loggt)
             rows = []                                    # Prüfer FS1 (SOLLTE 7): eine neue Regel ohne Lesung sperrt nichts, NA1 läuft weiter
             out.setdefault("fehler_regeln", []).append(f"{regel['art']}: {type(e).__name__}")
-        roh[regel["art"]] = [r for r in rows if regel["re"].search(str(r.get("msg") or ""))
+        roh[regel["art"]] = [r for r in rows + vf_zeilen if regel["re"].search(str(r.get("msg") or ""))
                              and not (regel.get("ohne") and regel["ohne"].search(str(r.get("msg") or "")))]
     alle = [r for art in KK_ART_NAMEN for r in roh[art]]
     if not alle:
@@ -26975,7 +27056,7 @@ def kk_tick(jetzt=None):
         return out
     uids = sorted({str(r.get("user_id") or "") for r in alle if r.get("user_id")})
     pids = sorted({str(r.get("plan_id") or "") for r in alle if r.get("plan_id")})
-    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,deaktiviert_at", "user_id": "in.(" + ",".join(uids) + ")"}) if uids else []
+    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,deaktiviert_at,external_id", "user_id": "in.(" + ",".join(uids) + ")"}) if uids else []
     je_name = {(str(a.get("user_id")), str(a.get("name") or "")): a for a in konten or []}
     je_id = {str(a.get("id")): a for a in konten or []}
     plan_konto = {}
@@ -26991,6 +27072,10 @@ def kk_tick(jetzt=None):
                 aid = str(a.get("id")) if a else ""
             if aid and aid in je_id and ht(str(je_id[aid].get("user_id"))):
                 treffer[art].setdefault(aid, []).append(r)
+        for aid in list(treffer[art]):   # Prüfer F-A MUSS a: Journal-Vorflüge nie mehrfach, anderer Login nie
+            treffer[art][aid] = kk_vorflug_filtern(treffer[art][aid], je_id[aid].get("external_id"))
+            if not treffer[art][aid]:
+                treffer[art].pop(aid)
     ids = sorted({aid for art in KK_ART_NAMEN for aid in treffer[art]})
     if not ids:
         return out
