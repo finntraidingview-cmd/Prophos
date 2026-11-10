@@ -4884,6 +4884,339 @@ def zwilling_tick(aus, jetzt_ts):
                      daten=daten)
 
 
+# ══ FUSION-BLINDGÄNGER (FW1, 10.11.2026, Finn: „Sobald eine Order keinen Master hat, aber einfach quasi ein Blindgänger im Fusion Market ist,
+# instant eine Meldung ans Handy."). Bisher meldete Prophos Fusion-Positionen nur ÜBER den Plan (alarm_ereignisse hedge_offen: Plan review/
+# completed + Hedge lebt ≥ 60 s). Ohne Wache blieben: Solo-Position ohne Plan, Plan-Hedge laut DB „geschlossen" (o. ä.) aber Position noch da,
+# zweite Solo-Position zum selben Plan (Doppel-Order), Position mit fremder magic (Hand-Order, Duplikum-Kopie wie Vorfall 05.11. Emin
+# 10,43 Lot) und Echo-Hedge ohne Master-Position (Waise). Quelle: jeder Copier liest das GANZE Fusion-Konto (positions_get) und lädt es über
+# den PC-Tab alle ~10 s nach mt5_live (status.hedge_solo / hedge_fremde, Echo: hedges + master_positions je Config). Mehrere PCs teilen sich
+# ein Fusion-Konto (10.11.2026: 488579 = 12 PCs, 430095 = Emin-Gruppe) → Positionen je Fusion-Login × Ticket vereinigt.
+# KARENZ (gemessen 10.11.2026, 92 Hedge-Schlüsse in 3 Tagen: Hedge zu im Median 4,3 s VOR dem Plan-Ende, Panel schließt Fusion ≤ 1 s nach dem
+# Master-Exit; mt5_live kommt alle ~10 s): eine Position zählt erst, wenn sie in ≥ 2 neuen Lesungen steht UND die Karenz der Art um ist —
+# bei „Hedge laut Prophos zu" zählen nur Lesungen ≥ FB_NACH_ZU_S nach hedge.closed_at (sonst wäre die 10-s-Verzögerung von mt5_live ein Alarm).
+# Plan planned/open mit lebendem Hedge = normal; Plan review/completed + Hedge lebt meldet weiter hedge_offen (kein Doppel). Solo eines offenen
+# Plans ohne Ticket (Öffnen läuft / Tab übernimmt per Kennung binnen 60 s, prophos.html Selbstheilung) erst nach FB_KARENZ_S["ohne_ticket"] —
+# 75 s, also VOR „Master läuft ohne Hedge“ (ALARM_OHNE_HEDGE_S 90 s, Prüfer 10.11.2026), und mit dem Hinweis, keinen zweiten Hedge zu öffnen.
+# Je Position genau EINE 🔴 (Schlüssel fusion_blind|<login>|<ticket>, alarm_log, neustartfest), ✅ leise, wenn sie in 2 neuen Lesungen fehlt.
+# REINE MELDUNG — Prophos schließt hier nichts. Läuft nur auf Railway (start_auto_planer).
+# NUR HT: Emins Fusion-Konto 430095 und alle IDs einer Verwalter-Gruppe bleiben draußen (Standing Order „zwei Unternehmen getrennt“, 05.11.2026 —
+# Emins Positionen gehören Emin): Zeilen dieser IDs zählen nicht, Pläne dieser IDs nehmen ihre Positionen ganz heraus (fb_tick).
+# LAST (Master 10.11.2026): je Takt EIN schlanker Select auf mt5_live (nur die nötigen JSON-Teile); Pläne nur gezielt über plan8/Ticket und nur,
+# wenn eine noch nicht gemeldete Position da ist. Supabase antwortet nicht → still 30 s Pause, nie ein Alarm aus einem Lesefehler.
+FB_TAKT_S = 10
+FB_FRISCH_S = 45                 # ältere mt5_live-Zeilen zählen nicht (Tab schreibt alle ~10 s)
+FB_NACH_ZU_S = 5                 # Lesung muss so viel jünger sein als hedge.closed_at
+FB_WEG_N = 2                     # so viele neue Lesungen ohne die Position → ✅ erledigt
+FB_KARENZ_S = {"ohne_plan": 20, "plan_zu": 20, "ohne_ticket": 75, "doppelt": 60, "fremd": 20, "echo_waise": 60}
+# Kurzwort zur Art im Titel (Master 10.11.2026: „dann sieht Finn sofort, was los ist")
+FB_TITEL = {"ohne_plan": "Fusion-Blindgänger · ohne Plan", "plan_zu": "Fusion-Blindgänger · Hedge laut DB zu",
+            "ohne_ticket": "Fusion-Blindgänger · Hedge laut DB fehlt", "doppelt": "Fusion-Blindgänger · Doppel",
+            "fremd": "Fusion-Blindgänger · fremde Magic", "echo_waise": "Fusion-Blindgänger · Echo-Waise"}
+_fb = {"started": False, "at": 0.0, "fehler": "", "kand": {}, "gemeldet": None, "letzt": []}
+
+
+def _fb_ts(v):
+    """ISO-Zeit → Unix-Sekunden oder None."""
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp() if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _fb_plan8(s):
+    """REIN RECHNEND (testbar): plan8 aus einem Solo-Kommentar „PXsolo:<plan8>" bzw. die ersten 8 Zeichen einer plan_id — sonst None."""
+    m = re.search(r"PXsolo:([0-9a-f]{8})", str(s or ""))
+    return m.group(1) if m else None
+
+
+def fb_positionen(rows, jetzt_ts, aus=()):
+    """REIN RECHNEND (testbar): mt5_live-Zeilen {pc_name, config_file, master_login, hedge_login, alive, updated_at, user_id, login (hedge_konto),
+    solo, fr, hd, pos, note} → (positionen, lesbar).
+    positionen: {(login, ticket): {quelle solo|fremd|echo, ticket, login, symbol, richtung, lots, plan8, plan_id, pcs[], lesung (jüngste Zeile mit
+    der Position, Unix-s), lkey, echo{pc, config, master_login, ident}}}; lesbar: {lkey: jüngste lesbare Zeile} — „Position fehlt" zählt nur dort,
+    wo die Liste wirklich gelesen wurde (None = Lesefehler des Copiers zählt nie als flach). Nur frische Zeilen lebender Copier (alive)."""
+    aus = set(aus or ())
+    pos_out, lesbar = {}, {}
+    for r in rows or []:
+        ts = _fb_ts(r.get("updated_at"))
+        if ts is None or jetzt_ts - ts > FB_FRISCH_S or r.get("alive") is False or str(r.get("user_id") or "") in aus:
+            continue
+        login = str(r.get("hedge_login") or r.get("login") or "").strip()
+        if not login:
+            continue                             # Fusion-Konto unbekannt → nicht zuordenbar (Prüfer 10.11.2026: sonst Konten vermischt, falsches ✅)
+        pc = str(r.get("pc_name") or "")
+
+        def dazu(key, eintrag):
+            alt = pos_out.get(key)
+            if alt is None:
+                pos_out[key] = dict(eintrag, pcs=[pc] if pc else [], lesung=ts)
+                return
+            if pc and pc not in alt["pcs"]:
+                alt["pcs"].append(pc)
+            alt["lesung"] = max(alt["lesung"], ts)
+            for k in ("plan_id", "plan8"):
+                alt[k] = alt.get(k) or eintrag.get(k)
+
+        konto_ok = isinstance(r.get("solo"), list) and isinstance(r.get("fr"), list)
+        if konto_ok:
+            lesbar[("konto", login)] = max(lesbar.get(("konto", login), 0), ts)
+        for p in (r.get("solo") if isinstance(r.get("solo"), list) else []):
+            try:
+                tk = int(p.get("ticket") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if tk:
+                dazu((login, tk), {"quelle": "solo", "ticket": tk, "login": login, "symbol": p.get("symbol"),
+                                   "richtung": p.get("richtung") or ("buy" if p.get("type") == 0 else "sell"), "lots": p.get("lots", p.get("volume")),
+                                   "plan8": p.get("plan8") or _fb_plan8(p.get("comment")), "plan_id": p.get("plan_id"), "lkey": ("konto", login)})
+        for p in (r.get("fr") if isinstance(r.get("fr"), list) else []):
+            try:
+                tk = int(p.get("ticket") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if tk:
+                dazu((login, tk), {"quelle": "fremd", "ticket": tk, "login": login, "symbol": p.get("symbol"),
+                                   "richtung": "buy" if p.get("type") == 0 else "sell", "lots": p.get("volume"), "lkey": ("konto", login)})
+        # Echo-Waise: nur bei frischem Master-Snapshot (note leer) — ein eingefrorener Lese-EA sieht keine Master-Position (meldet echo_blind)
+        hd, mp = r.get("hd"), r.get("pos")
+        if isinstance(hd, dict) and isinstance(mp, list) and not r.get("note"):
+            rk = ("row", pc, str(r.get("config_file") or ""))
+            lesbar[rk] = max(lesbar.get(rk, 0), ts)
+            idents = {str(m.get("ident")) for m in mp if isinstance(m, dict)}
+            for ident, hs in hd.items():
+                if str(ident) in idents:
+                    continue
+                for h in hs if isinstance(hs, list) else []:
+                    try:
+                        tk = int((h or {}).get("ticket") or 0)
+                    except (TypeError, ValueError, AttributeError):
+                        continue
+                    if tk:
+                        dazu((login, tk), {"quelle": "echo", "ticket": tk, "login": login, "symbol": h.get("symbol"),
+                                           "richtung": "buy" if h.get("type") == 0 else "sell", "lots": h.get("volume"), "lkey": rk,
+                                           "echo": {"pc": pc, "config": str(r.get("config_file") or ""), "master_login": str(r.get("master_login") or ""),
+                                                    "ident": str(ident)}})
+    return pos_out, lesbar
+
+
+def fb_urteil(e, plaene, plan_tickets):
+    """REIN RECHNEND (testbar): eine Position aus fb_positionen → (art, plan) für einen Blindgänger, sonst (None, plan).
+    plaene: {plan_id: Plan {id, user_id, status, master_firm, master_name, final_at, hedge{status, ticket, closed_at, pc, …}}} — gesucht über
+    plan_id, sonst plan8 (erste 8 Zeichen der id). plan_tickets: Fusion-Tickets, die ein Plan als lebenden Hedge führt (für Fremd-Magic)."""
+    if e.get("quelle") == "echo":
+        return "echo_waise", None
+    if e.get("quelle") == "fremd":
+        return (None, None) if str(e.get("ticket")) in plan_tickets else ("fremd", None)
+    if str(e.get("ticket")) in plan_tickets:
+        return None, None                        # irgendein Plan führt genau dieses Ticket als lebenden Hedge (auch ohne/abweichende Kennung)
+    p = plaene.get(str(e.get("plan_id") or "")) if e.get("plan_id") else None
+    if p is None and e.get("plan8"):
+        tr = [q for q in plaene.values() if str(q.get("id") or "")[:8] == e["plan8"]]
+        p = tr[0] if len(tr) == 1 else None
+    if p is None:
+        return "ohne_plan", None
+    h = p.get("hedge") if isinstance(p.get("hedge"), dict) else {}
+    hst, htk = h.get("status"), str(h.get("ticket") or "")
+    if hst in HEDGE_LEBT:
+        if htk and htk != str(e.get("ticket")):
+            return "doppelt", p                  # Plan führt einen ANDEREN lebenden Hedge → diese Position ist zu viel
+        return None, p                           # normal (open) bzw. review/completed → bestehender hedge_offen-Alarm
+    if p.get("status") in ("planned", "open") and hst != "geschlossen" and not htk:
+        return "ohne_ticket", p                  # Öffnen lief/scheiterte laut Tab, Position liegt aber — Tab übernimmt sonst binnen 60 s
+    return "plan_zu", p
+
+
+def fb_schritt(positionen, lesbar, plaene, plan_tickets, kand, gemeldet, jetzt_ts):
+    """REIN RECHNEND (testbar): ein Takt. kand {key: {art, erst, n, lesung}} und gemeldet {key: {…, weg, lesung}} werden fortgeschrieben.
+    → (neu [(key, art, e, plan, erst)], erledigt [(key, info)]). key = „<login>|<ticket>"."""
+    neu, erledigt, jetzt_blind = [], [], set()
+    for (login, tk), e in positionen.items():
+        key = f"{login}|{tk}"
+        if key in gemeldet:
+            g = gemeldet[key]
+            g["weg"], g["lesung"] = 0, max(g.get("lesung") or 0, e["lesung"])
+            continue
+        art, p = fb_urteil(e, plaene, plan_tickets)
+        if not art:
+            continue
+        ab = 0.0
+        if art == "plan_zu":
+            zu = _fb_ts(((p or {}).get("hedge") or {}).get("closed_at")) or _fb_ts((p or {}).get("final_at"))
+            ab = (zu + FB_NACH_ZU_S) if zu else 0.0
+        if e["lesung"] < ab:
+            continue                             # mt5_live noch von vor dem Schluss — zählt nicht
+        jetzt_blind.add(key)
+        k = kand.get(key)
+        if k is None or k.get("art") != art:
+            k = kand[key] = {"art": art, "erst": jetzt_ts, "n": 0, "lesung": 0.0}
+        if e["lesung"] > k["lesung"]:
+            k["n"], k["lesung"] = k["n"] + 1, e["lesung"]
+        if k["n"] >= 2 and jetzt_ts - k["erst"] >= FB_KARENZ_S.get(art, 30):
+            neu.append((key, art, e, p, k["erst"]))
+    for key in [k for k in kand if k not in jetzt_blind]:
+        kand.pop(key, None)
+    for key, _a, e, _p, erst in neu:
+        kand.pop(key, None)
+        gemeldet[key] = {"art": _a, "lkey": list(e["lkey"]), "weg": 0, "lesung": e["lesung"], "erst": erst,
+                         "login": e["login"], "ticket": e["ticket"], "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung")}
+    gesehen = {f"{lg}|{t}" for (lg, t) in positionen}
+    for key, g in list(gemeldet.items()):
+        if key in gesehen:
+            continue
+        ls = lesbar.get(tuple(g.get("lkey") or ()))
+        if not ls or ls <= (g.get("lesung") or 0):
+            continue                             # keine NEUE Lesung des Kontos bzw. der Echo-Zeile → nichts beweisbar
+        g["weg"], g["lesung"] = (g.get("weg") or 0) + 1, ls
+        if g["weg"] >= FB_WEG_N:
+            erledigt.append((key, gemeldet.pop(key)))
+    return neu, erledigt
+
+
+def fb_texte(art, e, p, erst_ts, pc_namen, namen):
+    """REIN RECHNEND (testbar): (titel, text) einer Blindgänger-Meldung — PC mit Namen, Fusion-Konto, Richtung/Lots/Symbol/Ticket, seit, letzter Master."""
+    pc_namen, namen = pc_namen or {}, namen or {}
+    pc_txt = lambda pc: f"PC von {(pc_namen.get(pc) or {}).get('name') or '?'} ({pc})"
+    dub = _ap_tz("Asia/Dubai")
+    uhr = lambda ts: datetime.fromtimestamp(ts, timezone.utc).astimezone(dub).strftime("%H:%M:%S") if ts else "?"
+    h = ((p or {}).get("hedge") if isinstance((p or {}).get("hedge"), dict) else None) or {}
+    if h.get("pc"):
+        wo = pc_txt(str(h["pc"]))
+    elif e.get("echo"):
+        wo = pc_txt(e["echo"]["pc"])
+    elif e.get("pcs"):
+        pcs = sorted(e["pcs"])
+        wo = (pc_txt(pcs[0]) if len(pcs) == 1 else f"Hedge-PC unbekannt (sichtbar auf {len(pcs)} PCs, u. a. {pc_txt(pcs[0])})")
+    else:
+        wo = "Hedge-PC unbekannt"
+    try:
+        lots = f"{float(e.get('lots')):g}".replace(".", ",")
+    except (TypeError, ValueError):
+        lots = "?"
+    pos = f"{str(e.get('richtung') or '?').upper()} {lots} Lot {e.get('symbol') or ''}".strip()
+    offen = _fb_ts(h.get("opened_at")) if h else None
+    seit = f"offen seit {uhr(offen)} Dubai" if offen else f"zuerst gesehen {uhr(erst_ts)} Dubai"
+    if p:
+        konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip() or "?"
+        wer = namen.get(str(p.get("user_id") or ""), str(p.get("user_id") or "")[:8])
+        zu = _fb_ts(h.get("closed_at")) or _fb_ts(p.get("final_at"))
+        master = (f"letzter Master: {wer} · {konto} (Plan {str(p.get('id'))[:8]}, {p.get('status') or '?'}"
+                  + (f", Hedge laut Prophos „{h.get('status')}“" if h.get("status") else ", ohne Hedge-Eintrag")
+                  + (f" um {uhr(zu)}" if zu and h.get("status") == "geschlossen" else "")
+                  + (f", Plan-Ticket {h.get('ticket')}" if art == "doppelt" and h.get("ticket") else "") + ")")
+    elif e.get("echo"):
+        master = f"Echo-Master …{e['echo']['master_login'][-4:]} ({e['echo']['config']}): Master-Position {e['echo']['ident']} steht nicht mehr im Snapshot"
+    elif e.get("plan8"):
+        master = f"kein Plan zu Kennung {e['plan8']} gefunden"
+    elif art == "fremd":
+        master = "keine Prophos-Order (fremde magic: Hand-Order oder Kopie über eine fremde Verbindung, z. B. Duplikum)"
+    else:
+        master = "kein Master bekannt"
+    tun = ("im Fusion-Terminal prüfen — KEINEN zweiten Hedge öffnen, diese Position ist der Hedge des laufenden Masters, ggf. auf der Karte "
+           "übernehmen lassen" if art == "ohne_ticket" else "im Fusion-Terminal prüfen und von Hand schließen")
+    zusatz = " (der Abgleich meldet denselben Fall ggf. zusätzlich)" if art == "echo_waise" else ""
+    text = f"Fusion {e.get('login')} · {pos} · Ticket {e.get('ticket')} · {seit} · {wo} · {master}{zusatz} — {tun}. Prophos schließt nichts."
+    return FB_TITEL.get(art, "Fusion-Blindgänger"), text
+
+
+def _fb_gemeldet_laden():
+    """Nach einem Railway-Neustart: gemeldete, noch nicht erledigte Blindgänger der letzten 24 h aus alarm_log — damit das ✅ trotzdem kommt."""
+    out = {}
+    try:
+        ab = datetime.fromtimestamp(time.time() - 86400, timezone.utc).isoformat()
+        rows = sb_select("alarm_log", {"select": "schluessel,daten", "art": "in.(fusion_blind,fusion_blind_zu)", "at": f"gte.{ab}", "limit": "500"}) or []
+        zu = {str(r.get("schluessel"))[:-len("|erledigt")] for r in rows if str(r.get("schluessel") or "").endswith("|erledigt")}
+        for r in rows:
+            s, d = str(r.get("schluessel") or ""), r.get("daten") if isinstance(r.get("daten"), dict) else {}
+            if s.startswith("fusion_blind|") and not s.endswith("|erledigt") and s not in zu and d.get("lkey"):
+                out[s[len("fusion_blind|"):]] = dict(d, weg=0, lesung=time.time())
+    except Exception as e:
+        print(f"[fusion-blind] ⚠️ alarm_log nicht lesbar ({type(e).__name__}) — ✅ nur für neue Meldungen", flush=True)
+    return out
+
+
+def _fb_plaene(plan8s, plan_ids, tickets):
+    """Nur die passenden Pläne lesen: je plan8 der uuid-Bereich <plan8>-0000…–<plan8>-ffff…, plan_ids direkt, dazu Pläne, die eines der Fusion-
+    Tickets (Solo + fremde magic) als Hedge führen. → {id: Plan} (Hedge als Teil-JSON)."""
+    sel = ("id,user_id,status,master_firm,master_name,started_at,updated_at,hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at")
+    out = {}
+    ors = [f"and(id.gte.{p8}-0000-0000-0000-000000000000,id.lte.{p8}-ffff-ffff-ffff-ffffffffffff)" for p8 in sorted(plan8s) if re.fullmatch(r"[0-9a-f]{8}", p8)]
+    ors += [f"id.eq.{pid}" for pid in sorted(plan_ids) if re.fullmatch(r"[0-9a-f-]{36}", str(pid))]
+    if ors:
+        for p in sb_select("trade_plans", {"select": sel, "or": f"({','.join(ors)})", "limit": "200"}) or []:
+            out[str(p.get("id"))] = p
+    tks = sorted({str(int(t)) for t in tickets})
+    if tks:
+        for p in sb_select("trade_plans", {"select": sel, "mt5_baseline->hedge->>ticket": f"in.({','.join(tks)})", "limit": "200"}) or []:
+            out[str(p.get("id"))] = p
+    return out
+
+
+def fb_tick():
+    """Ein Takt der Blindgänger-Wache: mt5_live lesen, passende Pläne lesen, fb_schritt, 🔴/✅ über alarm_senden. Wirft nur bei Lesefehlern."""
+    if not _alarm_empfaenger():
+        return
+    jetzt = time.time()
+    if _fb["gemeldet"] is None:
+        _fb["gemeldet"] = _fb_gemeldet_laden()
+    ab = datetime.fromtimestamp(jetzt - FB_FRISCH_S, timezone.utc).isoformat()
+    rows = sb_select("mt5_live", {"select": "pc_name,config_file,master_login,hedge_login,alive,updated_at,user_id:status->>user_id,login:status->hedge_konto->>login,"
+                                            "solo:status->hedge_solo,fr:status->hedge_fremde,hd:status->hedges,pos:status->master_positions,note:status->>note",
+                                  "updated_at": f"gte.{ab}", "limit": "2000"}) or []
+    namen, aus = _ap_namen()
+    aus = set(aus) | {str(r.get("user_id")) for r in rows if r.get("user_id") and _alarm_fremd_verwaltet(r.get("user_id"))}
+    positionen, lesbar = fb_positionen(rows, jetzt, aus)
+    offen = [e for k, e in positionen.items() if f"{k[0]}|{k[1]}" not in _fb["gemeldet"]]
+    plaene = _fb_plaene({e["plan8"] for e in offen if e.get("quelle") == "solo" and e.get("plan8")},
+                        {e["plan_id"] for e in offen if e.get("quelle") == "solo" and e.get("plan_id")},
+                        [e["ticket"] for e in offen if e.get("quelle") in ("solo", "fremd")]) if offen else {}
+    # Pläne einer Verwalter-Gruppe (Emin) gehören nicht hierher — ihre Positionen fallen ganz raus
+    fremd_pl = {pid for pid, p in plaene.items() if str(p.get("user_id") or "") in aus or _alarm_fremd_verwaltet(p.get("user_id"))}
+    if fremd_pl:
+        p8_fremd = {pid[:8] for pid in fremd_pl}
+        tk_fremd = {str((plaene[pid].get("hedge") or {}).get("ticket")) for pid in fremd_pl if isinstance(plaene[pid].get("hedge"), dict)}
+        positionen = {k: e for k, e in positionen.items() if not (e.get("plan_id") in fremd_pl or (e.get("plan8") and e["plan8"] in p8_fremd)
+                                                                   or str(e.get("ticket")) in tk_fremd)}
+        plaene = {pid: p for pid, p in plaene.items() if pid not in fremd_pl}
+    plan_tickets = {str((p.get("hedge") or {}).get("ticket")) for p in plaene.values()
+                    if isinstance(p.get("hedge"), dict) and (p["hedge"].get("status") in HEDGE_LEBT) and p["hedge"].get("ticket")}
+    neu, erledigt = fb_schritt(positionen, lesbar, plaene, plan_tickets, _fb["kand"], _fb["gemeldet"], jetzt)
+    if neu:
+        schon = alarm_im_log([f"fusion_blind|{k}" for k, *_ in neu], 86400) or set()
+        pcn = _pc_namen_daten()
+        for key, art, e, p, erst in neu:
+            if f"fusion_blind|{key}" in schon:
+                continue
+            titel, text = fb_texte(art, e, p, erst, pcn, namen)
+            g = _fb["gemeldet"].get(key) or {}
+            alarm_senden(1, "fusion_blind", titel, text, uid=(p or {}).get("user_id"), plan_id=(p or {}).get("id"),
+                         schluessel=f"fusion_blind|{key}", tag=f"fblind-{key}"[:60], renotify=True,
+                         daten={k: g.get(k) for k in ("art", "lkey", "login", "ticket", "symbol", "lots", "richtung", "erst")})
+            _fb["letzt"] = (_fb["letzt"] + [{"at": _wt_now_iso(), "art": art, "key": key}])[-20:]
+    for key, g in erledigt:
+        try:
+            lots = f"{float(g.get('lots')):g}".replace(".", ",")
+        except (TypeError, ValueError):
+            lots = "?"
+        alarm_senden(1, "fusion_blind_zu", "Fusion-Blindgänger zu",
+                     f"Fusion {g.get('login')} · {str(g.get('richtung') or '?').upper()} {lots} Lot {g.get('symbol') or ''} · Ticket {g.get('ticket')} "
+                     f"ist nicht mehr offen.", schluessel=f"fusion_blind|{key}|erledigt", tag=f"fblind-{key}"[:60],
+                     zeichen="✅ ", push_prio=3, daten={"login": g.get("login"), "ticket": g.get("ticket")})
+
+
+def fb_loop():
+    """Blindgänger-Wache alle FB_TAKT_S (nur Railway). Lesefehler → 30 s Pause, nie still beenden."""
+    print(f"[fusion-blind] 👁 Fusion-Blindgänger-Wache bereit (alle {FB_TAKT_S} s, nur Meldung)", flush=True)
+    while True:
+        try:
+            fb_tick()
+            _fb["fehler"], _fb["at"] = "", time.time()
+            _schleife_schlafen(FB_TAKT_S)
+        except Exception as e:
+            _fb["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[fusion-blind] ⚠️ {_fb['fehler']}", flush=True)
+            _schleife_schlafen(30, db_pause=True)
+
+
 def heimweg_wache_daten(w):
     """REIN RECHNEND (testbar): Wache-Grund aus dem PC-Tab (30.10.2026, Chris pc-c19p2l: sechs Heim-Wache-Rundläufe à ~100 s, aus alarm_log
     nicht erklärbar) → nur bekannte Felder, Texte gekürzt, Zahlen als int — None, wenn nichts Brauchbares kam."""
@@ -48588,6 +48921,9 @@ def start_auto_planer():
     if not _fp["started"]:                    # Fremd-Positionen-Wache (08.10.2026) — eigener Takt, nur Railway wie der Planer
         _fp["started"] = True
         threading.Thread(target=fp_loop, daemon=True).start()
+    if not _fb["started"]:                    # Fusion-Blindgänger-Wache (FW1, 10.11.2026) — eigener 10-s-Takt, nur Railway
+        _fb["started"] = True
+        threading.Thread(target=fb_loop, daemon=True).start()
 
 
 def _ap_eingriff(aktion):
