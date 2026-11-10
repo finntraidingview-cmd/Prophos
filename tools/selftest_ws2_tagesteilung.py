@@ -159,8 +159,13 @@ def main():
         if kx.get("rolle") == "haupt":
             ok_h = wx["menge"] == w["menge"] and wx["sl"] is None and abs(wx["tp"] - w["tp"] * kx["plan"]["anteile"][0]) <= 1
         else:
-            ok_n = wx["sl"] and wx["tp"] < w["tp"] * 0.31 and 10 <= kx["tp_pkt"] <= 25
-    check(ok_h and ok_n, "Orbit 2 Trades: Haupt mit normalen Lots, ohne SL, TP = Anteil; Neben klein mit eigenem SL")
+            # WS3b (10.11.2026): Lots = Haupt-Lots × Anteil (MNQ-Zehntel), TP-Punkte = Haupt-TP-Punkte ÷ 4, eigener SL (Orbit-Haupt ohne SL)
+            a1, ah = kx["plan"]["anteile"][0], kx["plan"]["anteile"][kx["plan"]["haupt_an"] - 1]
+            n_mnq = max(1, round(w["menge"] * a1 * kx["lots_streu"] * 10))          # WS3d: × Lots-Würfel 0,7–1,3 (Beleg in kette)
+            pkt = w["tp"] * ah / (w["menge"] * 20.0) / kx["tp_teiler"]          # WS3c: Teiler gewürfelt 3–5
+            ok_n = (wx["sl"] and 3.0 <= kx["tp_teiler"] <= 5.0 and abs(kx["tp_pkt"] - pkt) < 0.15 and 0.7 <= kx["lots_streu"] <= 1.3 and kx["lots_roh"] == round(w["menge"] * a1 * kx["lots_streu"], 4)
+                    and (wx["menge"] == n_mnq if wx.get("symbol") == "MNQ" else wx["menge"] * 10 == n_mnq))
+    check(ok_h and ok_n, "Orbit 2 Trades: Haupt mit normalen Lots, ohne SL, TP = Anteil; Neben Lots = Haupt × Anteil, TP-Punkte = Haupt ÷ Teiler 3–5, eigener SL")
     wf, _ = R(TRADEIFY, "challenge", 156500.0, U)                       # Rest bis Ziel 2.500 → letzter Trade
     check("letzter Trade" in wf["stufe"] and H(wf, TRADEIFY, "challenge", pa, random.Random(3), n_fest=3) is wf, "finaler Orbit-Trade bleibt 1 Trade")
     wt, _ = R(TOPSTEP, "challenge", 150000.0, U)
@@ -228,7 +233,9 @@ def main():
     v, g = F(k2, 150000.0, 150000.0, TRADEIFY, pa, random.Random(1), w_h=None, grund_h="Balance auf/unter dem Boden — geblowt?")
     check(v is None and g[0] == "verlust", f"Planer-Grund Boden → Verlust-Stopp ({g})")
     v, g = F(k2, 150000.0, 150600.0, TRADEIFY, pa, random.Random(3), w_h=wh, grund_h=gh)
-    check(g is None and v["nr"] == 3 and v["rolle"] == "neben" and v["sl"] and 10 <= v["tp_pkt"] <= 25, f"Orbit Teil 3 (Neben, letzter) ({v})")
+    check(g is None and v["nr"] == 3 and v["rolle"] == "neben" and v["sl"]
+          and 3.0 <= v["tp_teiler"] <= 5.0 and abs(v["tp_pkt"] - k2["tagesziel"] * 0.7 / (k2["haupt_menge"] * 20.0) / v["tp_teiler"]) < 0.15   # TP in ganzen $
+          and 0.7 <= v["lots_streu"] <= 1.3 and v["lots_roh"] == round(k2["haupt_menge"] * 0.18 * v["lots_streu"], 4), f"Orbit Teil 3 (Neben, letzter): Lots = Haupt × 18 %, TP-Punkte = Haupt ÷ Teiler 3–5 ({v})")
     v, g = F(dict(k1, nr=3), 150000.0, 150600.0, TRADEIFY, pa, random.Random(3), w_h=wh, grund_h=gh)
     check(v is None and g[0] == "alle", "nach dem letzten Teil: alle Trades gelaufen")
     kt2 = dict(wt1["kette"], von=2, rolle="haupt", plan={"n": 2, "haupt_an": 2, "anteile": [0.2, 0.8]})
