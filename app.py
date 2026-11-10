@@ -36145,7 +36145,9 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
     for p in plaene or ():
         sf = p.get("start_fehler")
         if p.get("fest_durch") == "schon gestartet" and p.get("richtung") in ("buy", "sell") \
-                and not (isinstance(sf, dict) and sf.get("status") != "behoben"):      # Start-Fehler-Leiche zählt nicht (09.10.2026)
+                and not (isinstance(sf, dict) and (sf.get("status") != "behoben"
+                         # UK1 (10.11.2026): per Deal-Prüfung gelöste UNKLAR-Marke = bewiesen NIE gelaufen → bleibt eine Leiche, kein „läuft" (Prüfer UK1)
+                         or (isinstance(sf.get("beleg"), dict) and sf["beleg"].get("quelle") == "deals_leer"))):      # Start-Fehler-Leiche zählt nicht (09.10.2026)
             lauf.append((f"{p['user_id']}|{p['firma']}", p["richtung"], p.get("start_min")))
     eff = {p["plan_id"]: p.get("richtung") for p in plaene or ()}
     reihe = sorted([p for p in plaene or () if p.get("start_min") is not None], key=lambda p: (float(p["start_min"]), str(p["plan_id"])))
