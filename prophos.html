@@ -7945,6 +7945,12 @@
     #dashboard-view #ad-activity-list > div{border-bottom:1px solid var(--border-soft) !important}
     #dashboard-view #ad-data-list > div:last-child,
     #dashboard-view #ad-activity-list > div:last-child{border-bottom:none !important}
+    /* AD1 (11.11.2026): mit der Spalte „WD n/5“ wird die Trade-Zeile auf dem Handy zu breit (P&L rechts abgeschnitten) — WD-Zelle nur „n/5“,
+       P&L-Spalte und Abstände schmaler; Desktop unverändert. */
+    #dashboard-view #ad-activity-list > div:not(.ad-zyklus){gap:8px !important}
+    #dashboard-view #ad-activity-list [data-ad-wd]{min-width:26px !important}
+    #dashboard-view #ad-activity-list .ad-wd-w{display:none}
+    #dashboard-view #ad-activity-list [data-ad-pl]{min-width:62px !important}
     #dashboard-view #ad-links-list > div[style*="--bg2"]{
       background:var(--surface-tint) !important;border-radius:10px;
     }
@@ -46287,6 +46293,16 @@
       const txTotal = txs.reduce((s,t)=>s+Number(t.amount||0),0)
       if(actSumEl) actSumEl.textContent = `${acPlans.filter(p=>p.status==='completed').length} Trades · ${txs.length} Buchungen`
 
+      /* AD1 SPALTE „WD n/5“ (Finn 11.11.2026: „wie viele der Winning Days es waren, auch im jeweiligen Zyklus … Das ist der Trade, der 1 von 5 Winning Days war“):
+       * nur Winning-Days-Konten mit WD-Ziel (zielKonfig). Laufender Zyklus = dieselbe Zählung wie Radar/Konto-Kachel (zielWdAuto: CME-Tag, Tagessumme ≥ zielWdMin,
+       * Hand-Tage, Korrektur), ältere Zyklen nach derselben Regel aus ihren WD-Plänen. Die Nummer steht am letzten Trade des Tages (die Tagessumme zählt, nicht der
+       * einzelne Trade); andere Trades „–“. wdSpalte = Map planId → Text, null = keine Spalte; gesetzt von zeichneVerlauf vor dem Zeichnen. */
+      let wdSpalte = null, wdZyklusText = null
+      const wdZelle = id => {
+        if(!wdSpalte) return ''
+        const t = wdSpalte.get(String(id))
+        return `<span data-ad-wd style="min-width:44px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;${t ? 'color:#006F4F;font-weight:600' : 'color:var(--sub-2)'}"${t ? ` title="${escapeHtml(t.tip)}"` : ' title="kein Winning Day (Tagessumme unter dem Mindestgewinn bzw. kein WD-Trade)"'}>${t ? '<span class="ad-wd-w">WD </span>' + escapeHtml(t.text) : '–'}</span>`
+      }
       const zeile = item=>{
         if(item.type==='trade'){
           const p = item.obj
@@ -46321,7 +46337,8 @@
             <span style="color:var(--sub);font-size:11.5px;min-width:62px;font-variant-numeric:tabular-nums">${escapeHtml(kurzDatum)}</span>
             <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(gegen)}${p.status==='completed' ? '' : ' <span style="color:var(--sub);font-size:11px">· offen</span>'}</span>
             ${otherHasPl ? `<span style="font-size:11px;${otherCls};white-space:nowrap">${otherLabel}${(otherIsLive || wdHedge)?' 🔴':''} ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</span>` : ''}
-            <span style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${plCls}">${pl>=0?'+':'−'}$${Math.abs(pl).toLocaleString('de-DE',{minimumFractionDigits:0})}</span>
+            ${wdZelle(p.id)}
+            <span data-ad-pl style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${plCls}">${pl>=0?'+':'−'}$${Math.abs(pl).toLocaleString('de-DE',{minimumFractionDigits:0})}</span>
           </div>`
         } else {
           const t = item.obj
@@ -46332,7 +46349,8 @@
             <span style="width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex-shrink:0"></span>
             <span style="color:var(--sub);font-size:11.5px;min-width:62px;font-variant-numeric:tabular-nums">${escapeHtml(kurzDatum)}</span>
             <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.description||t.kind||'Buchung')} <span style="color:var(--sub);font-size:11px">· ${t.kind==='account_purchase'?'Kauf':'Buchung'}</span></span>
-            <span style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${amtCls}">${amt>=0?'+':'−'}${Math.abs(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+            ${wdSpalte ? '<span data-ad-wd style="min-width:44px"></span>' : ''}
+            <span data-ad-pl style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${amtCls}">${amt>=0?'+':'−'}${Math.abs(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
           </div>`
         }
       }
@@ -46353,7 +46371,41 @@
         const grenzen = [...new Set(anfAlle)]
         // Nummer wie wd_zyklus_stand (nr = Anfragen + 1, ohne Entdoppeln): zwei Anfragen am selben Tag zählen doppelt, der Abschnitt bleibt einer
         const nrVon = z => z ? anfAlle.filter(a => a <= grenzen[z - 1]).length + 1 : 1
-        if(!items.length || !grenzen.length){ actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
+        // AD1 WD-Spalte (s. wdZelle): gruppen[i] = Einträge eines Zyklus, letzte Gruppe = laufender Zyklus → setzt wdSpalte / wdZyklusText[i] („3/5 WD“)
+        const wdRechnen = gruppen => {
+          wdSpalte = null; wdZyklusText = null
+          const k = acc.type === 'winning_days' ? zielKonfig(acc) : null
+          // nur wenn Radar/Konto-Kachel selbst über zielWdAuto zählen (zielFortschritt: manuell + Spalte goal_wd_korrektur gelesen) — sonst wiche die Zahl ab.
+          // Trades in review stehen nicht im Verlauf (nur completed), zählen in zielWdAuto aber mit: ihr Tag zählt, hat hier nur keine Zeile.
+          if(!k || k.kind !== 'winning_days' || !k.manual || (acc.goalWdKorrektur === undefined && acc.goalWdStand == null)) return
+          const ziel = Number(k.target) || 5, minP = zielWdMin(acc), laufend = zielWdAuto(acc)
+          wdSpalte = new Map(); wdZyklusText = []
+          gruppen.forEach((g, i) => {
+            const jetzt = i === gruppen.length - 1
+            // je CME-Tag (Trade-Ende, wie zielWdAuto) die Master-Trades dieses Zyklus; ältere Zyklen nur WD-Pläne (der Big Trade vor den WDs zählt nie)
+            const jeTag = {}
+            g.filter(it => it.type === 'trade').map(it => it.obj).forEach(p => {
+              const ende = p.endedAt || p.completedAt
+              if(String(p.masterAccountId) !== String(acc.id) || p.masterPl == null || !isFinite(Number(p.masterPl)) || !ende) return
+              if(!jetzt && !(p.winningDay === true || p.kontoTyp === 'winning_days')) return
+              const t = tvV2Handelstag(ende); (jeTag[t] = jeTag[t] || { summe: 0, plaene: [] })
+              jeTag[t].summe += Number(p.masterPl); jeTag[t].plaene.push(p)
+            })
+            // laufender Zyklus: die Tage genau wie Radar/Konto-Kachel (zielWdAuto, inkl. Hand-Tage + Korrektur); ältere: Tagessumme ≥ Mindestgewinn
+            const tage = jetzt ? [...laufend.tage].sort() : Object.keys(jeTag).filter(t => minP ? jeTag[t].summe >= minP : jeTag[t].summe > 0).sort()
+            const plus = jetzt ? (Number(acc.goalWdKorrektur) || 0) : 0
+            tage.forEach((t, j) => {
+              const e = jeTag[t]; if(!e) return   // Hand-Tag ohne Plan: zählt mit, hat aber keine Zeile
+              const letzter = e.plaene.slice().sort((a, b) => String(a.endedAt || a.completedAt).localeCompare(String(b.endedAt || b.completedAt))).pop()
+              const n = Math.max(1, j + 1 + plus)
+              wdSpalte.set(String(letzter.id), { text: `${n}/${ziel}`, tip: `Winning Day ${n} von ${ziel} in diesem Zyklus · Tagessumme ${e.summe >= 0 ? '+' : '−'}$${Math.abs(Math.round(e.summe)).toLocaleString('de-DE')}${minP ? ` (ab $${minP.toLocaleString('de-DE')})` : ''}` })
+            })
+            wdZyklusText[i] = `${jetzt ? laufend.count : tage.length}/${ziel} WD`
+          })
+        }
+        // die WD-Spalte darf den Verlauf nie umwerfen: Fehler → ohne Spalte zeichnen
+        const wdSicher = gruppen => { try{ wdRechnen(gruppen) }catch(e){ wdSpalte = null; wdZyklusText = null; console.warn('[trade-verlauf wd]', e) } }
+        if(!items.length || !grenzen.length){ if(items.length) wdSicher([items]); actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
         // Tag wie wd_zyklus_stand: Berliner Kalendertag des Starts (started_at, sonst Ende), Buchungen ihr Datum — ein Trade AM Anfrage-Tag zählt zum alten Zyklus
         const tagVon = d => { const x = new Date(d); return d && isFinite(x) ? x.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }) : '' }
         // Funded CFD: Tag des Trade-ENDES wie die Zyklus-Gewinne des Planers (fcp_gewinne / fcp_tage_zyklus: ended_at, sonst completed_at, sonst started_at);
@@ -46364,6 +46416,7 @@
         const geldZ = (v, ccy) => { const r = Math.round(v); return `${r >= 0 ? '+' : '−'}${ccy === '$' ? '$' : ''}${Math.abs(r).toLocaleString('de-DE')}${ccy !== '$' ? ' ' + ccy : ''}` }
         const gruppen = grenzen.map(() => []).concat([[]])   // Index 0 = Zyklus 1 (ab Kontostart) … n = seit dem letzten Payout
         items.forEach(it => gruppen[zyklusVon(it)].push(it))
+        wdSicher(gruppen)
         let html = ''
         for(let z = gruppen.length - 1; z >= 0; z--){
           const g = gruppen[z], trades = g.filter(it => it.type === 'trade')
@@ -46379,10 +46432,18 @@
             const name = ccy === '€' ? 'Fusion' : isM ? 'Slave' : 'Master'
             const k = name + '|' + ccy; gegen[k] = (gegen[k] || 0) + (Number(isM ? q.slavePl : q.masterPl) || 0)
           })
-          const teile = [`<b style="font-weight:600;color:var(--ink-2)">Zyklus ${nrVon(z)}</b>`, z ? `seit Payout ${ttmm(grenzen[z - 1])}` : 'ab Kontostart', `${trades.length} Trade${trades.length === 1 ? '' : 's'}`]
-          if(trades.length) teile.push(`${alleMaster ? 'Master' : 'P&L'} ${geldZ(master, '$')}`)   // Slave-Konto: eigene Seite heißt nicht „Master“
-          Object.keys(gegen).forEach(k => { const [name, ccy] = k.split('|'); teile.push(`${name} ${geldZ(gegen[k], ccy)}`) })
-          html += `<div class="ad-zyklus" style="font-size:11.5px;color:var(--sub);padding:${z === gruppen.length - 1 ? '4px' : '12px'} 0 5px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(z ? 'Zyklus ' + nrVon(z) + ' beginnt nach der Payout-Anfrage vom ' + ttmm(grenzen[z - 1]) + (z < grenzen.length ? ' und endet mit der Payout-Anfrage vom ' + ttmm(grenzen[z]) : ' — läuft') : 'Erster Zyklus ab Kontostart' + (grenzen.length ? ' bis zur Payout-Anfrage vom ' + ttmm(grenzen[0]) : ''))}">${teile.join(' · ')}</div>`
+          // AD1 (Finn 11.11.2026 zum Screenshot Tradeify-WD-Konto: „die jeweiligen Zyklen immer schön visuell abgetrennt … sieht voll scheiße aus“): die Trenner-Zeile
+          // war abgeschnitten und lag halb unter den Trades. Ursache: #ad-activity-list ist eine Flex-Spalte mit max-height 340 px + overflow-y auto, die Zeile trug
+          // overflow:hidden — damit fällt ihre automatische Mindesthöhe auf 0 und Flexbox quetschte genau sie (10–18 px statt 26–34 px), sobald der Verlauf länger
+          // als 340 px ist. Jetzt flex-shrink 0 und kein overflow mehr an der Zeile; links Zyklus + Zeitraum + Trades, rechts die Summen (bricht auf dem Handy um).
+          const zeitraum = z ? (z < grenzen.length ? `${ttmm(grenzen[z - 1])} – ${ttmm(grenzen[z])}` : `seit Payout ${ttmm(grenzen[z - 1])}`)
+            : (grenzen.length ? `Kontostart – ${ttmm(grenzen[0])}` : 'ab Kontostart')
+          const links = [`<b style="font-weight:600;color:var(--ink-2)">Zyklus ${nrVon(z)}</b>`, zeitraum, `${trades.length} Trade${trades.length === 1 ? '' : 's'}`]
+          if(wdZyklusText && wdZyklusText[z]) links.push(`<span style="color:#006F4F;font-weight:600">${wdZyklusText[z]}</span>`)   // AD1: „3/5 WD“ wie die Spalte
+          const rechts = []
+          if(trades.length) rechts.push(`${alleMaster ? 'Master' : 'P&L'} ${geldZ(master, '$')}`)   // Slave-Konto: eigene Seite heißt nicht „Master“
+          Object.keys(gegen).forEach(k => { const [name, ccy] = k.split('|'); rechts.push(`${name} ${geldZ(gegen[k], ccy)}`) })
+          html += `<div class="ad-zyklus" style="flex-shrink:0;display:flex;flex-wrap:wrap;align-items:baseline;column-gap:12px;row-gap:2px;font-size:11.5px;line-height:1.45;color:var(--sub);padding:${z === gruppen.length - 1 ? '4px' : '16px'} 0 6px;border-bottom:1px solid var(--line, var(--border-soft))" title="${escapeHtml(z ? 'Zyklus ' + nrVon(z) + ' beginnt nach der Payout-Anfrage vom ' + ttmm(grenzen[z - 1]) + (z < grenzen.length ? ' und endet mit der Payout-Anfrage vom ' + ttmm(grenzen[z]) : ' — läuft') : 'Erster Zyklus ab Kontostart' + (grenzen.length ? ' bis zur Payout-Anfrage vom ' + ttmm(grenzen[0]) : ''))}"><span style="white-space:nowrap">${links.join(' · ')}</span>${rechts.length ? `<span style="margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums">${rechts.join(' · ')}</span>` : ''}</div>`
             + g.map(zeile).join('')
         }
         actEl.innerHTML = html
@@ -58293,7 +58354,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2169'
+  const OS_TAB_BUILD = '2026-09-22.2170'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
