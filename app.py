@@ -12724,7 +12724,7 @@ def wd_sl_balance(acc, fruehere, null_basiert=False):
 TX2_MLL_VOR = 100.0    # wie der WD-Hedge (hedgeLiqLevel tsv2: Liquidation = MLL + 100 $)
 
 
-def wd_sl_express_mll(acc, fruehere):
+def wd_sl_express_mll(acc, fruehere, bal=None):
     """REIN RECHNEND (testbar, TX2 10.11.2026, Master: „Topstep Express in den WD-Zufalls-SL aufnehmen“): MLL eines Topstep-Express-Kontos (XFA, TopstepX zeigt
     es 0-basiert) aus BELEGTEN Werten → (mll, quelle) | (None, grund). Wie ap_kette_mll_belegt, nur 0-basiert:
       (1) jüngste TopstepX-Lesung tv.mll_start dieses Kontos (Puls liest sie bei jedem Start mit; nur 0-basierte Werte < 1.000 — absolute fallen raus),
@@ -12733,6 +12733,8 @@ def wd_sl_express_mll(acc, fruehere):
           Gegenprüfung TX2 10.11.2026: zuerst zählten nur abgeschlossene CME-Tage NACH der Lesung — die Planung um 02:00 Dubai (22:00 UTC, noch CME-Tag D) für
           Starts an D+1 sah den Tagesschluss von D nicht; bei großen Würfel-Stufen lag der SL dann hinter der echten MLL. Auch der laufende Tag und Trades vor
           der Lesung zählen jetzt mit (zu hoch ist sicher, nur der Puffer wird kleiner); nachgezogen wird nur nach oben.
+          bal = die für den Puffer benutzte Balance (Prüfer TX2, Empfehlung a): zählt wie ein Schluss NACH der Lesung — ein Gewinn- oder Hand-Trade ohne
+          bal_end, der den Stand hob, zieht die MLL damit trotzdem nach.
     Ohne Lesung → unbekannt (kein Raten über Größe/Hochpunkt); Schluss-Balance nach der Lesung, aber Max DD fehlt → unbekannt."""
     a = acc or {}
     aid = str(a.get("id") or "")
@@ -12756,6 +12758,8 @@ def wd_sl_express_mll(acc, fruehere):
             schluss.append((_t(f.get("ended_at")), be))
     if lesung is None:
         return None, "Topstep Express — noch keine MLL-Lesung aus TopstepX (Puls liest sie beim ersten Start mit)"
+    if _wd_num(bal) is not None:
+        schluss.append((None, float(_wd_num(bal))))   # ohne Zeit = jetzt, also nach der Lesung
     quelle = f"TopstepX-MLL {lesung:,.0f} $ (Lesung {lesung_at.strftime('%d.%m. %H:%M')} UTC)".replace(",", ".")
     if schluss:
         if dd is None or dd <= 0:
@@ -12778,10 +12782,12 @@ def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
     if not acc:
         return wd_sl_wuerfeln(regel, None, rnd=rnd, grund="Konto-Daten nicht lesbar — Puffer unbekannt")
     if ist_topstep_express(acc):
-        mll, mll_text = wd_sl_express_mll(acc, fruehere)
+        # Prüfer TX2 (Empfehlung a, 10.11.2026): die Puffer-Balance zählt mit ins MLL-Nachziehen (Gewinn-/Hand-Trade ohne bal_end hob den Stand) —
+        # sonst hinge die Sicherheit nur an der Stufen-Obergrenze (DB-änderbar). Reihenfolge der Gründe wie bisher: erst MLL-Lesung, dann Balance.
+        bal, bal_grund = wd_sl_balance(acc, fruehere, null_basiert=True)
+        mll, mll_text = wd_sl_express_mll(acc, fruehere, bal)
         if mll is None:
             return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund=mll_text)
-        bal, bal_grund = wd_sl_balance(acc, fruehere, null_basiert=True)
         if bal is None:
             return wd_sl_wuerfeln(regel, None, rnd=rnd, grund=bal_grund)
         liq = round(mll + TX2_MLL_VOR, 2)
