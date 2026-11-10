@@ -1237,7 +1237,8 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # ═══════════════════════════════════════════════════════════════════════════
 FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus", "deals"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl",
-                                   "nicht_scharf"})   # ES2/ES3: Copier nicht scharf = beweisbar nichts getippt, kein Bildschirm-Foto
+                                   "nicht_scharf",    # ES2/ES3: Copier nicht scharf = beweisbar nichts getippt, kein Bildschirm-Foto
+                                   "f9_vorpruefung"})  # FS2-C: Vorprüfung vor dem ersten Fenster-Schritt = beweisbar nichts getippt
 FEHLERFOTO_GLEICH_S = 600.0
 FEHLERFOTO_STUNDE = 12
 FEHLERFOTO_QUALITAET = 60   # nur noch das CDP-Tab-Foto (JPEG)
@@ -11675,6 +11676,170 @@ def order_grund_bestimmen(journal, dialog_text, api):
     return None
 
 
+# ══ FS2-C ORDER-VORPRÜFUNG VOR F9 (Master 11.11.2026 nach FS2; Finn: „Es muss auch eine Möglichkeit geben, dass wir immer diese Fehlerklassen
+# mit so was wie Lots eliminieren können.“) ══
+# Befund FS2: alle harten Order-Gründe (Konto gesperrt, close-only, Marge, Lot-Raster, Stops-Abstand) waren aus der API lesbar, aber
+# _order_api_zustand lief nur NACH einem Fehlschlag (Diagnose). Der Puls tippte die Plan-Lots roh (f"{vol:g}"), der Copier rundet dieselbe Größe
+# seit jeher auf den Broker-Raster (copier.py norm_vol). Jetzt EINE Lesung vor dem ersten Fenster-Schritt:
+#   korrigierbar  → Lots auf volume_step, F9-SL/TP auf den Mindestabstand (trade_stops_level) — mit Grund in der Spur;
+#   nicht korrigierbar (Terminal getrennt, trade_allowed aus, Symbol gesperrt/close-only/nur eine Seite, Lots unter Minimum/über Maximum, Marge zu klein)
+#                 → nichts senden, Meldung mit der EINEN Ursache und dem Fix (Grund-Texte wie order_grund_bestimmen — sie sind Schlüssel für
+#                   sfGesperrt, FD_REZEPTE und die E1-Muster).
+# Lesefehler oder fehlendes Feld = diese Prüfung entfällt (Stand vorher), nie ein Abbruch aus einer unlesbaren API.
+VORPRUEF_TOL = 1e-9
+_VORPRUEF_LAUF = {}   # je Prozess ein Lauf: Korrekturen der Vorprüfung → main hängt sie als res["vorpruefung"] an
+
+
+def vol_auf_raster(vol, step, vmin, vmax):
+    """REIN RECHNEND (testbar, FS2-C): Plan-Lots → (lots, problem). Wie copier.norm_vol auf volume_step gerundet und auf dessen Stellen gebracht;
+    problem = None | 'unter_min' | 'ueber_max' (dann lots unverändert — klemmen hieße eine andere Größe handeln, als der Plan rechnet).
+    Ohne lesbaren Step bleibt die Größe wie sie ist."""
+    v = float(vol)
+    try:
+        st = float(step) if step not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        st = 0.0
+    if st > 0:
+        n = round(round(v / st) * st, 8)
+        s_txt = f"{st:.8f}".rstrip("0")
+        dec = len(s_txt.split(".")[1]) if "." in s_txt else 0
+        n = round(n, dec)
+    else:
+        n = v
+    try:
+        if vmin not in (None, "") and float(vmin) > 0 and n < float(vmin) - VORPRUEF_TOL:
+            return v, "unter_min"
+        if vmax not in (None, "") and float(vmax) > 0 and n > float(vmax) + VORPRUEF_TOL:
+            return v, "ueber_max"
+    except (TypeError, ValueError):
+        pass
+    return n, None
+
+
+def order_vorpruefung_urteil(vol, richtung, api):
+    """REIN RECHNEND (testbar, FS2-C): Plan-Lots + Richtung + Spec/Zustand (dict aus _order_api_zustand, OHNE Marge) →
+    {vol, korrekturen: [Text], abbruch: None | (grund, fix)}. Reihenfolge wie order_grund_bestimmen: Verbindung, Konto, Symbol, dann Lots.
+    Die Marge prüft order_marge_urteil danach mit den korrigierten Lots."""
+    a = api if isinstance(api, dict) else {}
+    out = {"vol": float(vol), "korrekturen": [], "abbruch": None}
+    stand = f" — Kontostand {a['balance']:,.2f}".replace(",", " ") if isinstance(a.get("balance"), (int, float)) else ""
+    sym = str(a.get("symbol") or "")
+    kauf = str(richtung).lower() == "buy"
+    if a.get("verbunden") is False:
+        out["abbruch"] = ("Terminal nicht mit dem Server verbunden", "Internet/Login des Terminals prüfen")
+        return out
+    if a.get("handel_konto") is False:
+        out["abbruch"] = ("Handel am Konto gesperrt (account_info.trade_allowed = False)" + stand,
+                          "Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten")
+        return out
+    modus = a.get("symbol_modus")
+    if modus == 0:
+        out["abbruch"] = (f"Symbol {sym} für den Handel gesperrt (trade_mode DISABLED)".replace("  ", " "), "Symbol/Konto prüfen")
+        return out
+    if modus == 3:
+        out["abbruch"] = (f"Symbol {sym} nur Schließen erlaubt (Close only)".replace("  ", " "), "später neu starten")
+        return out
+    if (modus == 1 and not kauf) or (modus == 2 and kauf):
+        seite = "nur Kauf" if modus == 1 else "nur Verkauf"
+        out["abbruch"] = (f"Symbol {sym} erlaubt {seite} (trade_mode {'LONGONLY' if modus == 1 else 'SHORTONLY'}) — "
+                          f"Plan will {'Kauf' if kauf else 'Verkauf'}".replace("  ", " "), "Richtung im Plan prüfen")
+        return out
+    n, problem = vol_auf_raster(vol, a.get("volume_step"), a.get("volume_min"), a.get("volume_max"))
+    if problem == "unter_min":
+        out["abbruch"] = (f"Volumen ungültig: {float(vol):g} Lot unter dem Minimum {float(a['volume_min']):g} des Symbols {sym}".replace("  ", " "),
+                          "Lots im Plan erhöhen")
+        return out
+    if problem == "ueber_max":
+        out["abbruch"] = (f"Volumen ungültig: {float(vol):g} Lot über dem Maximum {float(a['volume_max']):g} des Symbols {sym}".replace("  ", " "),
+                          "Lots im Plan senken")
+        return out
+    if abs(n - float(vol)) > VORPRUEF_TOL:
+        out["vol"] = n
+        out["korrekturen"].append(f"Lots {float(vol):g} → {n:g} (Raster {float(a['volume_step']):g} des Symbols {sym})".replace("  ", " "))
+    return out
+
+
+def order_marge_urteil(api):
+    """REIN RECHNEND (testbar, FS2-C): Marge mit den korrigierten Lots → None | (grund, fix). Ohne beide Zahlen keine Aussage."""
+    a = api if isinstance(api, dict) else {}
+    noetig, frei = a.get("marge_noetig"), a.get("marge_frei")
+    if isinstance(noetig, (int, float)) and isinstance(frei, (int, float)) and noetig > 0 and noetig > frei:
+        stand = f" — Kontostand {a['balance']:,.2f}".replace(",", " ") if isinstance(a.get("balance"), (int, float)) else ""
+        n_s, f_s = f"{noetig:,.2f}".replace(",", " "), f"{frei:,.2f}".replace(",", " ")
+        # Klammer „(Vorprüfung: …)“, nie „(API: …)“ (Prüfer S2): sfVorOrderBeleg (prophos.html) liest „(API:“ als Rechnung NACH dem Klick
+        return (f"zu wenig freie Marge für dieses Volumen (Vorprüfung: nötig {n_s}, frei {f_s})" + stand, "Volumen senken oder Marge prüfen")
+    return None
+
+
+def sltp_mindestabstand(richtung, ask, bid, sl, tp, stops_level, point, digits=2):
+    """REIN RECHNEND (testbar, FS2-C): F9-SL/TP auf den Mindestabstand des Brokers (trade_stops_level × point) → (sl, tp, [Texte]).
+    MT5 prüft Kauf-Stops gegen Bid, Verkauf-Stops gegen Ask; dazu 1 point Rand. Nur weiter WEG vom Kurs, nie näher. Ohne Stops-Level,
+    Point oder Kurs bleibt alles wie es ist (Stand vorher)."""
+    try:
+        lv, pt = float(stops_level or 0), float(point or 0)
+    except (TypeError, ValueError):
+        return sl, tp, []
+    if lv <= 0 or pt <= 0 or sl is None or tp is None or not ask or not bid:
+        return sl, tp, []
+    d = (lv + 1) * pt
+    kauf = str(richtung).lower() == "buy"
+    ref = float(bid) if kauf else float(ask)
+    texte, sl_n, tp_n = [], float(sl), float(tp)
+    if kauf:
+        if sl_n > ref - d:
+            sl_n = round(ref - d, int(digits))
+        if tp_n < ref + d:
+            tp_n = round(ref + d, int(digits))
+    else:
+        if sl_n < ref + d:
+            sl_n = round(ref + d, int(digits))
+        if tp_n > ref - d:
+            tp_n = round(ref - d, int(digits))
+    if abs(sl_n - float(sl)) > VORPRUEF_TOL:
+        texte.append(f"SL {float(sl):g} → {sl_n:g} (Mindestabstand {lv:g} Punkte)")
+    if abs(tp_n - float(tp)) > VORPRUEF_TOL:
+        texte.append(f"TP {float(tp):g} → {tp_n:g} (Mindestabstand {lv:g} Punkte)")
+    return sl_n, tp_n, texte
+
+
+def vorpruefung_meldung(grund, fix, spur_text):
+    """REIN RECHNEND (testbar, FS2-C): Meldung bei „nicht senden“ — Anfang fest (Muster-Schlüssel), danach die EINE Ursache und der Fix."""
+    return f"Vorprüfung vor F9: {grund} — nichts gesendet. → {fix} [{spur_text}]"
+
+
+def _order_vorpruefung(path, expected, symbol, richtung, vol, trail):
+    """FS2-C: eine Lesung vor dem ersten Fenster-Schritt → {vol, api, korrekturen, abbruch}. Nie werfen; unlesbar = keine Prüfung."""
+    try:
+        api = _order_api_zustand(path, expected, symbol)
+    except Exception as e:
+        trail.append(f"Vorprüfung: nicht lesbar ({type(e).__name__}) — ohne Prüfung weiter")
+        return {"vol": vol, "api": {}, "korrekturen": [], "abbruch": None}
+    if api.get("fehler") or (api.get("verbunden") is None and api.get("handel_konto") is None):
+        trail.append("Vorprüfung: API ohne Zustand — ohne Prüfung weiter")
+        return {"vol": vol, "api": api, "korrekturen": [], "abbruch": None}
+    try:
+        u = order_vorpruefung_urteil(vol, richtung, api)
+    except Exception as e:   # Prüfer H2: nie werfen — ein Wurf hier käme in main als „absturz“ (UNKLAR) an
+        trail.append(f"Vorprüfung: Urteil gestört ({type(e).__name__}) — ohne Prüfung weiter")
+        return {"vol": vol, "api": api, "korrekturen": [], "abbruch": None}
+    u["api"] = api
+    if u["abbruch"] is None:
+        try:
+            m_api = _order_api_zustand(path, expected, symbol, richtung, u["vol"])
+            u["abbruch"] = order_marge_urteil(m_api)
+            if isinstance(m_api.get("marge_noetig"), (int, float)) and isinstance(m_api.get("marge_frei"), (int, float)):
+                trail.append(f"Vorprüfung Marge: nötig {m_api['marge_noetig']:.2f} / frei {m_api['marge_frei']:.2f}")
+        except Exception as e:
+            trail.append(f"Vorprüfung Marge: nicht lesbar ({type(e).__name__})")
+    for k in u["korrekturen"]:
+        trail.append("Vorprüfung korrigiert: " + k)
+    if u["abbruch"]:
+        trail.append(f"Vorprüfung: {u['abbruch'][0]} → nicht senden")
+    elif not u["korrekturen"]:
+        trail.append("Vorprüfung ok")
+    return u
+
+
 def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
     """Zustand für die Diagnose (nur lesen, nie werfen): verbunden, Handel am Konto, Symbol-Modus, freie Marge, Datenordner.
     Mit richtung + volumen (21.10.2026, s. order_grund_bestimmen) dazu marge_noetig: order_calc_margin ist eine reine Rechnung des
@@ -11695,6 +11860,15 @@ def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
                 pass
         if si is not None:
             out["symbol_modus"] = int(si.trade_mode)
+            # FS2-C (11.11.2026): Lot-Raster und Stops-Abstand des Symbols für die Order-Vorprüfung (order_vorpruefung_urteil) — nur lesen
+            for _k, _a in (("volume_step", "volume_step"), ("volume_min", "volume_min"), ("volume_max", "volume_max"),
+                           ("stops_level", "trade_stops_level"), ("point", "point")):
+                try:
+                    _w = getattr(si, _a, None)
+                    if _w is not None:
+                        out[_k] = float(_w)
+                except Exception:
+                    pass
         if si is not None and richtung and volumen:
             try:
                 kauf = str(richtung).lower() == "buy"
@@ -13941,6 +14115,21 @@ def run(cfg_path, cmd):
         vorher_tickets = {p["ticket"] for p in lese["positionen"]}
         trail.append("Kurs/Positionen nach dem Warten neu gelesen")
 
+    # FS2-C ORDER-VORPRÜFUNG (11.11.2026, s. order_vorpruefung_urteil): vor dem ersten Fenster-Schritt Lots aufs Symbol-Raster, Konto/Symbol/Marge
+    # lesend prüfen. Nicht korrigierbar → nichts gesendet (retry_ok bleibt True: beweisbar kein Klick), Grund vorn in der Meldung.
+    _vp = _order_vorpruefung(path, expected, symbol, cmd["richtung"], vol, trail)
+    _vp_api = _vp.get("api") or {}
+    if _vp["abbruch"]:
+        _puls_diagnose_senden(spur=trail, schritt="f9_vorpruefung")
+        return {"ok": False, "retry_ok": True, "code": "f9_vorpruefung", "grund": "f9_vorpruefung",   # nicht „vorpruefung“: belegt bei Polar
+                "msg": vorpruefung_meldung(_vp["abbruch"][0], _vp["abbruch"][1], _spur(trail))}
+    if _vp["korrekturen"]:
+        # Ergebnis trägt Plan- und Ist-Lots (main hängt _VORPRUEF_LAUF als res["vorpruefung"] an). OFFEN (Prüfer S1): noch liest sie niemand —
+        # Endlesung (deals_urteil ±0,001), v2NachholTreffer und Fusion-Hedge rechnen mit den Plan-Lots; der Tab muss die Ist-Lots am Plan festhalten
+        _VORPRUEF_LAUF.update(plan_lots=vol, lots=_vp["vol"], korrekturen=list(_vp["korrekturen"]))
+        vol = _vp["vol"]
+        _puls_diagnose_senden(spur=trail, schritt="f9_vorpruefung")
+
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     # F1 (04.11.2026): bis 30 s gestreut neu suchen statt einmal — höchstens bis Sekunde TERMINAL_SUCHE_BIS des Laufs (Gegenprüfung: Login/Warm-Warten
     # vorher können lang sein, der Order-Knopf muss weit vor dem 300-s-Deckel des Panels liegen, sonst stürbe der Lauf nach dem Klick = „unklar")
@@ -14200,6 +14389,12 @@ def run(cfg_path, cmd):
                     sl_f9, tp_f9 = berechne_sl_tp(cmd["richtung"], ref, vol,
                                                   contract_size, cmd["sl_usd"],
                                                   cmd["tp_usd"], digits)
+                    # FS2-C (11.11.2026): zu nahe F9-Stops lehnt der Broker samt Order ab („Invalid stops“) → auf den Mindestabstand, nur weiter weg
+                    sl_f9, tp_f9, _vp_st = sltp_mindestabstand(cmd["richtung"], lese.get("ref_ask"), lese.get("ref_bid"), sl_f9, tp_f9,
+                                                              _vp_api.get("stops_level"), _vp_api.get("point"), digits)
+                    for _t in _vp_st:
+                        trail.append("Vorprüfung korrigiert: " + _t)
+                        _VORPRUEF_LAUF.setdefault("korrekturen", []).append(_t)
                     sl_el, tp_el = fmap.get("sl"), fmap.get("tp")   # Karte vom Volumen-Schritt (08.10.2026), kein zweiter Scan
                     if sl_el is None or tp_el is None:
                         trail.append("F9-SL/TP-Felder nicht gefunden — Nachtrag nach Fill")
@@ -30875,6 +31070,8 @@ def main():
             res = run_close(sys.argv[1], cmd)
         else:
             res = run(sys.argv[1], cmd)
+            if _VORPRUEF_LAUF and isinstance(res, dict):
+                res["vorpruefung"] = dict(_VORPRUEF_LAUF)   # FS2-C: Plan-Lots, Ist-Lots, Korrekturen (Lots-Raster, Stops-Abstand)
     except Exception as e:
         # Muster „signal: keine antwort vom bot: … pywinauto … ElementNotEnabled" (Routine „Puls-Fehler" 19.10.2026, 1 Fall
         # 14:03 UTC, Echo-Order nach drei sauberen Orders am selben PC): ein unerwarteter Fehler in run()/run_close() lief als
