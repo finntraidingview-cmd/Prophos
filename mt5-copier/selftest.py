@@ -2548,6 +2548,7 @@ def main():
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
     results.append(_test_sicher(test_terminal_pids_ohne_wmic))
     results.append(_test_sicher(test_mt5_update_still))
+    results.append(_test_sicher(test_mt5_build_angleichen))   # MU1 (10.11.2026)
     results.append(_test_sicher(test_vordergrund_waechter_ohne_windows))
     results.append(_test_sicher(test_kerze_fortschreiben))
     results.append(_test_sicher(test_solo_level_und_grund))
@@ -2691,6 +2692,164 @@ def test_mt5_update_still():
             print("✗ update_abwarten wartet nicht auf einen frischen Merker"); ok = False
     if ok:
         print("✓ MT5-Update still: Ordner-Regel, nur neuere Builds, Schutz im Skript, Admin-only-Einrichtung, Merker-Warten")
+    return ok
+
+
+def test_mt5_build_angleichen():
+    """MU1 (10.11.2026): älteren MT5-Build ohne Adminrechte aus der neuesten Installation desselben PCs angleichen (statt UAC durch
+    liveupdate\\terminal64.exe /update), veraltete liveupdate-Pakete löschen; vor jedem Kaltstart, Hedge-Start, Vorlage vor dem Klonen, Wächter."""
+    import inspect
+    import tempfile
+    import panel
+    import provision as pv
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ MT5-Build angleichen: " + name); ok = False
+    V = lambda b: (5, 0, 0, b)
+    # Plan: höchster Build DERSELBEN Art = Quelle; Programme-Ordner/Unterordner nie; normcase-Pfade (c:\\mt5-…) zählen; None ignoriert
+    P = panel.build_angleich_plan
+    pl = P({"C:\\MT5-A": V(6230), "C:\\MT5-Master": V(6191), "c:\\mt5-b": V(6140), "C:\\MT5-C": V(6230),
+            "C:\\Program Files\\MetaTrader 5": V(6097), "C:\\MT5-D": None, "C:\\MT5-E\\x": V(6000)})
+    chk(sorted(pl) == sorted(["C:\\MT5-Master", "c:\\mt5-b"]) and set(pl.values()) <= {"C:\\MT5-A", "C:\\MT5-C"}, f"Plan ohne Art ({pl})")
+    chk(P({"C:\\MT5-A": V(6230), "C:\\MT5-B": V(6230)}) == {}, "Gleichstand → nichts")
+    chk(P({"C:\\MT5-A": (6, 0, 0, 1), "C:\\MT5-B": V(6230)}) == {}, "andere Hauptversion → nie")
+    chk(P({}) == {} and P(None) == {}, "leer → nichts")
+    # pc-2zc2we: Grid 6231 mit anderer uninstall.exe ist nie Quelle der übrigen; 6191 → 6230 derselben Art; Art unlesbar → nie
+    st_ = {"C:\\MT5-Grid-Short": V(6231), "C:\\MT5-Grid-Long": V(6231), "C:\\MT5-X": V(6230), "C:\\MT5-Y": V(6191),
+           "C:\\MT5-Master": V(6191), "C:\\MT5-Z": V(6191)}
+    art = {"C:\\MT5-Grid-Short": "u2", "C:\\MT5-Grid-Long": "u2", "C:\\MT5-X": "u1", "C:\\MT5-Y": "u1", "C:\\MT5-Master": "u1",
+           "C:\\MT5-Z": None}
+    pl = P(st_, art)
+    chk(pl == {"C:\\MT5-Y": "C:\\MT5-X", "C:\\MT5-Master": "C:\\MT5-X"}, f"Plan je Art (2zc2we) ({pl})")
+    # Pakete
+    chk(panel.paket_veraltet("mt5clw64.6230", 6230) and panel.paket_veraltet("MT5ONNX64.6191", 6230)
+        and not panel.paket_veraltet("mt5clw64.6231", 6230) and not panel.paket_veraltet("terminal64.exe", 6230)
+        and not panel.paket_veraltet("notiz.txt", 6230) and not panel.paket_veraltet("mt5clw64.6230", None)
+        and not panel.paket_veraltet(None, 6230), "paket_veraltet")
+
+    def fver(p):   # Test-Version aus dem Dateiinhalt „V:6230“
+        try:
+            with open(p, encoding="utf-8") as f:
+                t = f.read()
+            return V(int(t[2:].rstrip("x"))) if t.startswith("V:") else None
+        except OSError:
+            return None
+
+    def schreib(p, b):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(f"V:{b}" + ("x" * (b % 7)))   # Größe je Build anders
+
+    with tempfile.TemporaryDirectory() as td:
+        lu = os.path.join(td, "daten", "liveupdate")
+        for n, b in (("mt5clw64.6230", 1), ("mt5onnx64.6230", 1), ("mt5clw64.6231", 1), ("terminal64.exe", 6191), ("notiz.txt", 1)):
+            schreib(os.path.join(lu, n), b)
+        chk(panel._liveupdate_rest(os.path.join(td, "daten"), V(6230)), "_liveupdate_rest sieht Reste")
+        weg = panel.liveupdate_aufraeumen(os.path.join(td, "daten"), V(6230), ver=fver)
+        chk(sorted(weg) == ["mt5clw64.6230", "mt5onnx64.6230"]
+            and sorted(os.listdir(lu)) == ["mt5clw64.6231", "notiz.txt", "terminal64.exe"],
+            f"Aufräumen: nur ≤ Build; Updater bleibt, solange ein NEUERES Paket wartet ({weg})")
+        chk(not panel._liveupdate_rest(os.path.join(td, "daten"), V(6230)), "_liveupdate_rest danach leer (neueres Paket + Updater bleiben)")
+        os.remove(os.path.join(lu, "mt5clw64.6231"))
+        weg = panel.liveupdate_aufraeumen(os.path.join(td, "daten"), V(6230), ver=fver)
+        chk(weg == ["terminal64.exe"] and os.listdir(lu) == ["notiz.txt"], f"ohne neueres Paket: alter Updater weg ({weg})")
+        chk(panel.liveupdate_aufraeumen(None, V(6230), ver=fver) == [] and panel.liveupdate_aufraeumen(td, None, ver=fver) == [],
+            "Aufräumen ohne Ordner/Version → nichts")
+
+        quelle, ziel = os.path.join(td, "MT5-neu"), os.path.join(td, "MT5-alt")
+
+        def frisch():
+            for n in panel.BUILD_DATEIEN:
+                schreib(os.path.join(quelle, n), 6230)
+                schreib(os.path.join(ziel, n), 6191)
+            schreib(os.path.join(ziel, "uninstall.exe"), 1)
+            schreib(os.path.join(quelle, "uninstall.exe"), 1)
+
+        def zustand():
+            return {n: fver(os.path.join(ziel, n)) for n in panel.BUILD_DATEIEN}, \
+                [f for f in os.listdir(ziel) if f.endswith(".prophos-neu")]
+        nie = lambda d: []
+        frisch()
+        st, txt = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=nie, sig_ok=lambda p: True)
+        bld, rest = zustand()
+        chk(st == "angeglichen" and all(v == V(6230) for v in bld.values()) and not rest
+            and fver(os.path.join(ziel, "uninstall.exe")) == V(1), f"Kopieren: drei Dateien gehoben, Rest unberührt ({st}: {txt})")
+        frisch()
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=lambda d: [42], sig_ok=lambda p: True)
+        chk(st == "laeuft" and all(v == V(6191) for v in zustand()[0].values()), "läuft → nichts angefasst")
+        frisch()
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=nie, sig_ok=lambda p: False)
+        chk(st == "fehler" and all(v == V(6191) for v in zustand()[0].values()), "Signatur falsch → nichts kopiert")
+        frisch()
+        schreib(os.path.join(quelle, "MetaEditor64.exe"), 6191)
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=nie, sig_ok=lambda p: True)
+        chk(st == "fehler" and all(v == V(6191) for v in zustand()[0].values()), "Quelle mit gemischtem Build → nichts kopiert")
+        frisch()
+        n = {"i": 0}
+
+        def spaet(d):   # erst frei, beim zweiten Blick (nach den Temp-Kopien) läuft das Terminal
+            n["i"] += 1
+            return [7] if n["i"] > 1 else []
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=spaet, sig_ok=lambda p: True)
+        bld, rest = zustand()
+        chk(st == "laeuft" and all(v == V(6191) for v in bld.values()) and not rest, "während des Kopierens gestartet → nichts ersetzt, Temp weg")
+        os.remove(os.path.join(ziel, "terminal64.exe"))
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=nie, sig_ok=lambda p: True)
+        chk(st == "fehler", "Ziel ohne terminal64.exe → nichts")
+        frisch()
+        schreib(os.path.join(quelle, "neu.dll"), 1)
+        st, _ = panel.build_kopieren(quelle, ziel, V(6230), ver=fver, pids=nie, sig_ok=lambda p: True)
+        chk(st == "fehler" and all(v == V(6191) for v in zustand()[0].values()), "weitere Programmdatei weicht ab → nichts kopiert")
+        os.remove(os.path.join(quelle, "neu.dll"))
+        schreib(os.path.join(ziel, "terminal64.exe.prophos-neu"), 1)
+        chk(panel.temp_reste_weg(ziel) == 1 and not zustand()[1], "liegengebliebene .prophos-neu weg")
+        chk(panel.programm_rest(ziel) == panel.programm_rest(quelle) and "uninstall.exe" in (panel.programm_rest(ziel) or {})
+            and panel.programm_rest(os.path.join(td, "fehlt")) is None, "programm_rest: übrige .exe/.dll, unlesbar None")
+    if os.name != "nt":
+        chk(panel.build_angleichen("C:\\MT5-A") == ("aus", "") and panel.build_angleichen("C:\\MT5-A", schnell=True) == ("aus", "")
+            and panel._build_installationen() == {} and panel._signatur_metaquotes(["x"]) is False and panel.ordner_pids(["C:\\x"]) == [],
+            "ohne Windows: nichts")
+    # Einhängepunkte + Grenzen
+    chk("build_angleichen(install_dir, schnell=True)" in inspect.getsource(panel._vor_kaltstart), "_vor_kaltstart gleicht an (schnell)")
+    q = inspect.getsource(panel)
+    hs = q.index("_st, _txt = build_angleichen(install_dir, schnell=True)")
+    chk(hs < q.index("subprocess.Popen([hpath], cwd=install_dir)", hs), "Hedge-Start gleicht an (schnell, vor dem Popen)")
+    ba = inspect.getsource(panel.build_angleichen)
+    chk("BUILD_LOCK.acquire(blocking=not schnell)" in ba and "nur_gemerkt=schnell" in ba and "BUILD_LOCK.release()" in ba
+        and "_stilles_update_dran(install_dir)" in ba and "ordner_pids([d, lu])" in ba,
+        "Startweg wartet nie (Sperre/PowerShell), Riegel gegen stilles Update + Updater/MetaEditor im Ordner")
+    chk("nur_gemerkt" in inspect.getsource(panel._signatur_metaquotes)
+        and inspect.getsource(panel._signatur_metaquotes).index("if nur_gemerkt") < inspect.getsource(panel._signatur_metaquotes).index("powershell"),
+        "schnell: kein PowerShell")
+    chk("build_angleichen(os.path.dirname(os.path.abspath(template)))" in q
+        and q.index("build_angleichen(os.path.dirname(os.path.abspath(template)))") < q.index("provision.run_provision(name=name"),
+        "Vorlage vor dem Klonen")
+    chk("threading.Thread(target=_build_angleich_waechter, daemon=True).start()" in q, "Wächter gestartet")
+    w = inspect.getsource(panel._build_angleich_waechter)
+    chk(w.count("_bot_lauf_aktiv()") >= 2 and w.count("PROV_JOB") >= 2, "Wächter pausiert bei Lauf/Provisionierung (auch je Ziel)")
+    blk = "".join(inspect.getsource(f) for f in (panel.build_angleich_plan, panel.paket_veraltet, panel.liveupdate_aufraeumen,
+                                                  panel._build_installationen, panel._signatur_metaquotes, panel.build_kopieren,
+                                                  panel.build_angleichen, panel._build_angleich_waechter, panel._liveupdate_rest, panel.ordner_pids,
+                                                  panel.programm_rest, panel.temp_reste_weg, panel._stilles_update_dran))
+    for verboten in ("runas", "EnableLUA", "ConsentPrompt", "schtasks", "_MT5_UPDATE_PS", "rmtree", "Set-ExecutionPolicy", "icacls"):
+        chk(verboten not in blk, f"keine Rechte-/Windows-Einstellung ({verboten})")
+    chk(panel.BUILD_DATEIEN[-1] == "terminal64.exe", "terminal64.exe wird zuletzt ersetzt")
+    chk('"build_angleich": dict(BUILD_ANGLEICH)' in inspect.getsource(panel._mt5_update_stand), "Status meldet build_angleich")
+    chk(pv._MT5_UPDATE_PS.count("$neu -le $alt") == 1, "Aufgaben-Skript unverändert (keine neue Ja-Abfrage)")
+    # Melder (Finns Handy-Meldung): origin.txt UTF-16 richtig lesen, mehrere Updater derselben Installation, „unbekannt“ → wartender Build
+    uq = inspect.getsource(panel._uac_abfragen_lesen)
+    chk("provision.read_origin(" in uq and 'encoding="utf-8-sig"' not in uq, "Auslöser: origin.txt per read_origin (keine ��-Zeichen)")
+    chk(panel.uac_ausloeser_waehlen(None, [(1.0, "C:\\MT5-x"), (2.0, "C:\\MT5-x")]) == "C:\\MT5-x"
+        and panel.uac_ausloeser_waehlen(None, [(1.0, "C:\\MT5-x"), (2.0, "C:\\MT5-y")]) == "", "Auslöser: zwei Updater derselben Installation = einer")
+    t = panel.update_wartet_text([("C:\\MT5-A", 6230), ("C:\\MT5-B", 6230), ("C:\\MT5-C", 6231), ("C:\\MT5-A", 6230)])
+    chk(t.startswith("vermutlich MT5-Update (Build 6231 wartet) für C:\\MT5-A, C:\\MT5-B (+1)") and panel.update_wartet_text([]) == ""
+        and panel.update_wartet_text(None) == "", f"Auslöser-Rückfall: wartender Build ({t})")
+    chk("_uac_update_wartet_text()" in uq, "Auslöser-Rückfall eingehängt")
+    if ok:
+        print("✓ MT5-Build angleichen: Plan, Pakete aufräumen, sicheres Kopieren (läuft/Signatur/Build), Einhängepunkte, keine Rechte-Änderung")
     return ok
 
 

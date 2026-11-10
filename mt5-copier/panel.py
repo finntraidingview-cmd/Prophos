@@ -321,7 +321,38 @@ def uac_ausloeser_waehlen(consent_seit, updater):
     nah = [i for s, i in updater if s and consent_seit and -20 <= consent_seit - s <= 5]
     if nah:
         return nah[-1]
-    return updater[0][1] if len(updater) == 1 else ""
+    # MU1 (10.11.2026): mehrere Updater-Prozesse derselben Installation (/update startet sich erhöht neu) sind EIN Auslöser
+    return updater[0][1] if len({i for _s, i in updater}) == 1 else ""
+
+
+def update_wartet_text(wartend):
+    """REIN (testbar): [(Installation, Build)] mit wartendem neuerem Paket → Auslöser-Text für die Handy-Meldung, '' wenn keine."""
+    w = sorted({(str(i), int(b)) for i, b in (wartend or []) if i and b})
+    if not w:
+        return ""
+    namen = ", ".join(i for i, _b in w[:2]) + (f" (+{len(w) - 2})" if len(w) > 2 else "")
+    return f"vermutlich MT5-Update (Build {max(b for _i, b in w)} wartet) für {namen}"
+
+
+def _uac_update_wartet_text():
+    """Installationen, deren liveupdate-Ordner ein Paket mit höherem Build als installiert hat (MT5 will beim Start erhöht einspielen).
+    Nur listdir + Versionslesen, nur wenn consent.exe offen ist. Wirft nie."""
+    try:
+        wartend = []
+        for _k, (pfad, dd, v, _art) in _build_installationen().items():
+            if not (dd and v):
+                continue
+            try:
+                for f in os.listdir(os.path.join(dd, "liveupdate")):
+                    m = _PAKET_RE.match(f)
+                    if m and int(m.group(1)) > v[3]:
+                        wartend.append((pfad, int(m.group(1))))
+                        break
+            except OSError:
+                pass
+        return update_wartet_text(wartend)
+    except Exception:
+        return ""
 
 
 def _uac_abfragen_lesen():
@@ -375,9 +406,9 @@ def _uac_abfragen_lesen():
             if "\\liveupdate\\" in os.path.normcase(p or "").replace("/", "\\"):
                 inst = ""
                 try:   # <Datenordner>\liveupdate\terminal64.exe → <Datenordner>\origin.txt = Installation (wie das Update-Skript)
-                    with open(os.path.join(os.path.dirname(os.path.dirname(p)), "origin.txt"), encoding="utf-8-sig", errors="replace") as f:
-                        inst = f.read().strip()[:80]
-                except OSError:
+                    # MU1 (10.11.2026): origin.txt ist UTF-16 — als utf-8 gelesen kamen „��C:\MT5-…“ in Finns Handy-Meldung; read_origin kann beides
+                    inst = str(provision.read_origin(os.path.dirname(os.path.dirname(p))) or "").strip()[:80]
+                except Exception:
                     pass
                 updater.append((s, inst or "unbekannte Installation"))
         updater.sort(key=lambda x: x[0] or 0)
@@ -390,8 +421,10 @@ def _uac_abfragen_lesen():
             # gesehen = erstes Sehen dieses Panels, nur für die Anzeige (ändert sich bei einem Panel-Neustart, darf den Schlüssel also nicht bilden)
             gesehen = UAC_ALARM["erst_gesehen"].setdefault(pid, s or jetzt)
             inst = uac_ausloeser_waehlen(s, updater)
-            out.append({"pid": pid, "seit": int(s or 0), "gesehen": int(gesehen),
-                        "ausloeser": (f"MT5-Update terminal64.exe für {inst}" if inst else "")[:160]})
+            # MU1 (10.11.2026): Updater oft schon weg, wenn consent.exe gelesen wird („Auslöser: unbekannt“, Chris 10.11. 06:05/06:08 Dubai —
+            # Journal belegt liveupdate /update) → Installationen mit wartendem neuerem Build-Paket nennen
+            ausl = f"MT5-Update terminal64.exe für {inst}" if inst else _uac_update_wartet_text()
+            out.append({"pid": pid, "seit": int(s or 0), "gesehen": int(gesehen), "ausloeser": ausl[:160]})
         for pid in [p for p in UAC_ALARM["erst_gesehen"] if p not in {e["pid"] for e in out}]:
             UAC_ALARM["erst_gesehen"].pop(pid, None)
         return out
@@ -1883,6 +1916,388 @@ def _vor_kaltstart(fname, install_dir):
         getattr(provision, "uac_haken_entfernen", lambda: None)()
     except Exception as e:
         print(f"[windows] {fname}: Vorbeugen übersprungen ({type(e).__name__}: {e})", flush=True)
+    # MU1 (10.11.2026): älteren MT5-Build dieser Installation still auf den neuesten Build des PCs heben, bevor MT5 selbst per UAC
+    # einspielen will — eigener try, wirft nie, verhindert nie einen Start
+    try:
+        st, txt = build_angleichen(install_dir, schnell=True)
+        if st in ("angeglichen", "fehler"):
+            print(f"[mt5-build] {fname}: {txt}", flush=True)
+    except Exception as e:
+        print(f"[mt5-build] {fname}: übersprungen ({type(e).__name__}: {e})", flush=True)
+
+
+# ── MT5-BUILD ANGLEICHEN OHNE ADMINRECHTE (MU1, 10.11.2026 — Master: Handy-Meldung „Windows-Abfrage offen … bitte per Parsec mit Ja
+# bestätigen“ 42× in 7 Tagen, Finn musste jedes Mal per Parsec „Ja“ klicken; „an der Ursache beheben“). Befund per Lotse (nur lesend):
+#  1. MetaQuotes legt einen neuen Build NICHT als neuere liveupdate\terminal64.exe ab, sondern als Pakete <Datenordner>\liveupdate\
+#     mt5clw64.<build> (+ mt5clwide64/mt5clwtst64/mt5onnx64). liveupdate\terminal64.exe ist die ALTE Exe als Updater; MT5 startet sie beim
+#     nächsten Kaltstart mit /update /path:X:\MT5-… und sie fordert Adminrechte an = Windows-Abfrage (Chris pc-c19p2l, MT5-100k117783Phase1:
+#     Installation 6191, Updater 6191, Pakete .6230). update_ausstehend()/das Aufgaben-Skript vergleichen genau diese Exe mit der Installation
+#     → immer „nichts zu tun“ (zudem liefert map_installs normcase-Pfade „c:\mt5-…“, die ist_mt5_ordner nie trifft): auf KEINEM der 12 PCs
+#     gibt es ein mt5-update.log, die stille Aufgabe hat nie etwas eingespielt.
+#  2. Die Vorlage C:\MT5-Master bleibt auf dem alten Build (läuft nie mit Netz) — jeder neue Klon startet alt, lädt den neuen Build und fragt.
+#     Genau die 5 PCs mit gemischten Builds und alter Vorlage alarmierten (2zc2we 23, c19p2l 26, usq1i6 8, l5o8bv 10, pw1put 7), die 6 PCs
+#     mit einheitlichem Build nie.
+#  3. Zwischen zwei Builds unterscheiden sich nur terminal64.exe, MetaEditor64.exe und metatester64.exe (6140→6230 und 6191→6230 belegt,
+#     alle übrigen 41 Dateien byte-gleich), alle MetaQuotes-signiert; X:\MT5-… ist für „Authentifizierte Benutzer“ beschreibbar.
+# Fix: Liegt auf DIESEM PC eine X:\MT5-…-Installation mit neuerem Build, kopiert Echo deren drei Programmdateien (Signatur MetaQuotes geprüft)
+# in jede ältere, NICHT laufende X:\MT5-…-Installation — vor jedem Kaltstart (_vor_kaltstart: start_terminal + Heil-Neustart, Hedge-Start)
+# und im Hintergrund alle 2–3 min (auch die Vorlage → neue Klone starten aktuell). Danach im Datenordner die veralteten liveupdate-Pakete
+# (Build ≤ installiert) und den alten Updater löschen, damit MT5 beim Start nichts mehr einspielen will. Ohne Adminrechte, keine
+# Windows-Einstellung, UAC bleibt an; _MT5_UPDATE_PS und provision.py unverändert (keine neue Ja-Abfrage, kein Copier-Neustart).
+# Bleibt: ein WIRKLICH neuer MetaQuotes-Build fragt höchstens einmal je PC (die erste Instanz) — danach gleichen sich alle anderen still an.
+BUILD_DATEIEN = ("metatester64.exe", "MetaEditor64.exe", "terminal64.exe")   # terminal64.exe zuletzt: bricht vorher etwas ab, bleibt sie alt
+BUILD_LOCK = threading.Lock()
+BUILD_ANGLEICH = {}            # Stand für mt5_live.status.mt5_update.build_angleich
+BUILD_TAKT_S = (120.0, 180.0)
+_BUILD_SIG_OK = {}             # (pfad, größe, mtime) → True: Signatur je Datei-Stand nur einmal prüfen (PowerShell ~1–2 s)
+_MT5_ORDNER_I = re.compile(r'^[A-Za-z]:\\MT5-[^\\/:*?"<>|]+$', re.I)   # wie provision._MT5_ORDNER_RE, aber auch für normcase-Pfade
+_PAKET_RE = re.compile(r"^[a-z0-9_]+\.(\d{3,6})$", re.I)                # liveupdate\mt5clw64.6230 usw.
+
+
+def build_angleich_plan(stand, art=None):
+    """REIN (testbar): stand = {Installation: Versions-Tupel|None}, art = {Installation: Kennung der übrigen Programmdateien} →
+    {ältere Installation: Quelle}. Nur X:\\MT5-…-Ordner; Quelle = höchster Build DERSELBEN Art und Hauptversion (pc-2zc2we: zwei
+    MT5-Grid-Installationen 6231 mit anderer uninstall.exe = andere Ausgabe → nie Quelle für die übrigen). art fehlt/None → nie dabei,
+    außer art wird gar nicht übergeben (dann eine Art für alle). Gleichstand → nichts."""
+    g = {i: tuple(v) for i, v in (stand or {}).items() if v and len(tuple(v)) == 4 and _MT5_ORDNER_I.match(str(i or ""))}
+    if art is not None:
+        g = {i: v for i, v in g.items() if art.get(i) is not None}
+    a = (lambda i: art.get(i)) if art is not None else (lambda i: 0)
+    out = {}
+    for i, v in g.items():
+        q = max((j for j in g if a(j) == a(i) and g[j][0] == v[0]), key=lambda j: (g[j], str(j)))
+        if g[q] > v:
+            out[i] = q
+    return out
+
+
+def paket_veraltet(name, build):
+    """REIN (testbar): ist diese liveupdate-Datei ein Build-Paket (mt5clw64.6230) mit Build ≤ build? Alles andere → False."""
+    m = _PAKET_RE.match(str(name or ""))
+    return bool(m and build and int(m.group(1)) <= int(build))
+
+
+def liveupdate_aufraeumen(data_dir, version, ver=None):
+    """Veraltete Pakete (Build ≤ installiert) und den alten Updater (liveupdate\\terminal64.exe, Version ≤ installiert) im Datenordner
+    löschen → [gelöschte Namen]. Nur bei NICHT laufendem Terminal aufrufen. Neuere Pakete bleiben (echter neuer Build). Wirft nie."""
+    ver = ver or getattr(provision, "_datei_version", lambda p: None)
+    lu = os.path.join(data_dir or "", "liveupdate")
+    weg = []
+    if not data_dir or not version or not os.path.isdir(lu):
+        return weg
+    try:
+        namen = os.listdir(lu)
+        # Gegenprüfung MU1: wartet ein NEUERES Paket (echter neuer Build), braucht MT5 den Updater — dann bleibt er liegen
+        neuer_wartet = any((m := _PAKET_RE.match(f)) and int(m.group(1)) > version[3] for f in namen)
+        for f in namen:
+            p = os.path.join(lu, f)
+            if not os.path.isfile(p):
+                continue
+            try:   # je Datei: eine unlesbare Datei hält das Aufräumen der übrigen nicht auf
+                if f.lower() == "terminal64.exe":
+                    v = ver(p)
+                    alt = bool(v and tuple(v) <= tuple(version)) and not neuer_wartet
+                else:
+                    alt = paket_veraltet(f, version[3])
+                if alt:
+                    os.remove(p)
+                    weg.append(f)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return weg
+
+
+def _liveupdate_rest(data_dir, version):
+    """Liegt im liveupdate-Ordner etwas, das liveupdate_aufraeumen löschen würde (Paket ≤ Build oder ein Updater)? Nur listdir. Wirft nie."""
+    try:
+        namen = os.listdir(os.path.join(data_dir, "liveupdate"))
+        neuer = any((m := _PAKET_RE.match(f)) and int(m.group(1)) > version[3] for f in namen)
+        return any((f.lower() == "terminal64.exe" and not neuer) or paket_veraltet(f, version[3]) for f in namen)
+    except Exception:
+        return False
+
+
+def _build_installationen():
+    """{normcase(Installation): (Installation, Datenordner|None, Versions-Tupel|None, Art|None)} — Datenordner per origin.txt, dazu die
+    Terminal-Pfade aller Instanz-Configs (Master + Hedge) und der Vorlage. Nur X:\\MT5-…; ohne Windows {}. Wirft nie."""
+    if os.name != "nt":
+        return {}
+    ver = getattr(provision, "_datei_version", lambda p: None)
+    out = {}
+
+    def dazu(inst, data_dir=None):
+        inst = os.path.normpath(str(inst or "").strip())
+        if not _MT5_ORDNER_I.match(inst):
+            return
+        k = os.path.normcase(inst)
+        alt = out.get(k)
+        if alt and (alt[1] or not data_dir):
+            return
+        pr = programm_rest(inst)
+        out[k] = (inst, data_dir or (alt[1] if alt else None), ver(os.path.join(inst, "terminal64.exe")),
+                  tuple(sorted(pr.items())) if pr is not None else None)
+
+    try:
+        root = provision.terminals_root()
+        for e in (os.listdir(root) if root and os.path.isdir(root) else []):
+            dd = os.path.join(root, e)
+            if e.lower() != "common" and os.path.isdir(dd):
+                origin = provision.read_origin(dd)
+                if origin:
+                    dazu(origin, dd)
+    except Exception:
+        pass
+    try:
+        cfgs = [read_json(os.path.join(HERE, i["config_file"]), {}) or {} for i in instances()]
+        cfgs.append(read_json(os.path.join(HERE, "config.vorlage.json"), {}) or {})
+        for c in cfgs:
+            for k in ("master_terminal_path", "hedge_terminal_path"):
+                p = str(c.get(k) or "").strip()
+                if p:
+                    dazu(os.path.dirname(os.path.abspath(p)))
+    except Exception:
+        pass
+    return out
+
+
+BUILD_PROZESSE = {n.lower() for n in BUILD_DATEIEN}
+
+
+def ordner_pids(ordner):
+    """PIDs von terminal64/MetaEditor64/metatester64, deren Programm in GENAU einem dieser Ordner liegt (Installation, aber auch
+    <Datenordner>\\liveupdate = MetaQuotes-Updater läuft). Gegenprüfung MU1: nicht nur terminal64.exe — ein laufender MetaEditor
+    (EA-Kompilieren) oder Updater darf nie unter dem Kopieren/Aufräumen liegen. Unlesbar → [-1] (gilt als „läuft“). Ohne Windows []."""
+    if os.name != "nt":
+        return []
+    try:
+        w = _pc_w32()
+        ctypes, k32 = w["ctypes"], w["k32"]
+        ziele = {os.path.normcase(os.path.normpath(o)) for o in ordner if o}
+        snap = k32.CreateToolhelp32Snapshot(0x2, 0)
+        if snap == ctypes.c_void_p(-1).value or not snap:
+            return [-1]
+        out = []
+        try:
+            pe = w["PE32"]()
+            pe.dwSize = ctypes.sizeof(pe)
+            ok = k32.Process32FirstW(snap, ctypes.byref(pe))
+            while ok:
+                if str(pe.szExeFile).lower() in BUILD_PROZESSE:
+                    pfad = provision.prozess_pfad(int(pe.th32ProcessID))
+                    if not pfad:
+                        out.append(-1)   # Pfad unlesbar → vorsichtshalber „läuft“
+                    elif os.path.normcase(os.path.dirname(os.path.normpath(pfad))) in ziele:
+                        out.append(int(pe.th32ProcessID))
+                ok = k32.Process32NextW(snap, ctypes.byref(pe))
+        finally:
+            k32.CloseHandle(snap)
+        return out
+    except Exception:
+        return [-1]
+
+
+def _signatur_metaquotes(pfade, nur_gemerkt=False):
+    """Alle Dateien gültig von MetaQuotes signiert? Ein PowerShell-Aufruf (Get-AuthenticodeSignature, wie das Aufgaben-Skript), Ergebnis
+    je Datei-Stand gemerkt. Fehler/kein Windows → False (dann wird nichts kopiert). nur_gemerkt: kein PowerShell (Startweg, ≤ 20 s)."""
+    if os.name != "nt":
+        return False
+    try:
+        offen = []
+        for p in pfade:
+            s = os.stat(p)
+            if not _BUILD_SIG_OK.get((os.path.normcase(p), s.st_size, int(s.st_mtime))):
+                offen.append((p, (os.path.normcase(p), s.st_size, int(s.st_mtime))))
+        if not offen:
+            return True
+        if nur_gemerkt:
+            return False
+        liste = ",".join("'" + p.replace("'", "''") + "'" for p, _ in offen)
+        ps = ("$ok=$true; foreach($p in @(" + liste + ")){ $s=Get-AuthenticodeSignature -LiteralPath $p; "
+              "if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=MetaQuotes'){ $ok=$false } }; if($ok){exit 0}else{exit 3}")
+        import base64
+        enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+        # Bytes statt Text: PowerShell schreibt Fortschritt mit Umlauten in OEM-Codepage nach stderr — text=True warf im Lesethread
+        # UnicodeDecodeError (Trockenlauf pc-c19p2l 10.11.2026). Gebraucht wird nur der Exit-Code.
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+                           capture_output=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode != 0:
+            return False
+        for _p, k in offen:
+            _BUILD_SIG_OK[k] = True
+        return True
+    except Exception:
+        return False
+
+
+def programm_rest(ordner):
+    """{name: größe} der übrigen .exe/.dll direkt im Installationsordner (ohne die drei Build-Programme). Unlesbar → None."""
+    try:
+        return {f.lower(): os.path.getsize(os.path.join(ordner, f)) for f in os.listdir(ordner)
+                if f.lower().endswith((".exe", ".dll")) and f.lower() not in BUILD_PROZESSE and os.path.isfile(os.path.join(ordner, f))}
+    except OSError:
+        return None
+
+
+def temp_reste_weg(ordner):
+    """Liegengebliebene *.prophos-neu (Panel starb mitten im Kopieren) löschen → Anzahl. Nur bei nicht laufender Installation."""
+    n = 0
+    try:
+        for f in os.listdir(ordner):
+            if f.endswith(".prophos-neu"):
+                try:
+                    os.remove(os.path.join(ordner, f))
+                    n += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return n
+
+
+def build_kopieren(quelle, ziel, q_ver, *, ver, pids, sig_ok):
+    """Die drei Programmdateien von quelle nach ziel (beide X:\\MT5-…, ziel läuft nicht) → (status, text). Erst alle in Temp-Dateien
+    neben dem Ziel kopieren und Größe prüfen, dann je Datei atomar ersetzen (terminal64.exe zuletzt). Funktionen injiziert (testbar)."""
+    src = [os.path.join(quelle, n) for n in BUILD_DATEIEN]
+    for p in src:
+        if tuple(ver(p) or ()) != tuple(q_ver):
+            return "fehler", f"Quelle {quelle}: {os.path.basename(p)} hat nicht Build {'.'.join(map(str, q_ver))} — nichts kopiert"
+    if not os.path.isfile(os.path.join(ziel, "terminal64.exe")):
+        return "fehler", f"{ziel}: terminal64.exe fehlt — nichts kopiert"
+    if programm_rest(quelle) != programm_rest(ziel):
+        # Gegenprüfung MU1: ändert ein künftiger Build mehr als die drei Programme (neue/andere .exe/.dll), lieber gar nicht als halb
+        return "fehler", f"{ziel}: weitere Programmdateien weichen von {quelle} ab — nichts kopiert (MT5 spielt selbst ein)"
+    if pids(ziel):
+        return "laeuft", f"{ziel} läuft — beim nächsten Leerlauf/Kaltstart"
+    if not sig_ok(src):
+        return "fehler", f"Quelle {quelle}: Signatur nicht MetaQuotes/ungültig — nichts kopiert"
+    import shutil
+    tmp = []
+    try:
+        for p in src:
+            t = os.path.join(ziel, os.path.basename(p) + ".prophos-neu")
+            shutil.copy2(p, t)
+            tmp.append(t)
+            if os.path.getsize(t) != os.path.getsize(p):
+                return "fehler", f"{os.path.basename(t)}: Größe weicht ab — nichts ersetzt"
+        if pids(ziel):   # während des Kopierens gestartet (z. B. Provisionierung) → nichts ersetzen
+            return "laeuft", f"{ziel} wurde gestartet — nichts ersetzt"
+        for t in tmp:
+            os.replace(t, t[:-len(".prophos-neu")])
+        tmp = []
+    except OSError as e:
+        return "fehler", f"{ziel}: Kopieren gescheitert ({type(e).__name__}: {e})"[:200]
+    finally:
+        for t in tmp:
+            try:
+                os.remove(t)
+            except OSError:
+                pass
+    neu = tuple(ver(os.path.join(ziel, "terminal64.exe")) or ())
+    if neu != tuple(q_ver):
+        return "fehler", f"{ziel}: nach dem Kopieren Build {neu or '?'} statt {'.'.join(map(str, q_ver))}"
+    return "angeglichen", f"{ziel} auf Build {q_ver[3]} gehoben (aus {quelle}, ohne Windows-Abfrage)"
+
+
+def _build_merken(status, text, ziel, version=None):
+    BUILD_ANGLEICH["at"] = datetime.now().isoformat(timespec="seconds")
+    if status == "angeglichen":
+        BUILD_ANGLEICH["angeglichen"] = BUILD_ANGLEICH.get("angeglichen", 0) + 1
+        BUILD_ANGLEICH["letzte"] = ([f"{os.path.basename(ziel)}→{version[3]}"] + list(BUILD_ANGLEICH.get("letzte") or []))[:10]
+    elif status == "fehler":
+        BUILD_ANGLEICH["fehler"] = text[:200]
+
+
+def _stilles_update_dran(install_dir):
+    """Läuft für diese Installation gerade das alte stille Update (UPDATE_LAEUFT, normcase-Vergleich) oder liegt sein frischer Merker
+    prophos-update.lock (< 10 min, wie update_abwarten)? Dann nichts anfassen (Gegenprüfung MU1)."""
+    k = os.path.normcase(os.path.normpath(os.path.abspath(install_dir)))
+    if any(os.path.normcase(os.path.normpath(os.path.abspath(u))) == k for u in list(UPDATE_LAEUFT)):
+        return True
+    try:
+        return time.time() - os.path.getmtime(os.path.join(install_dir, getattr(provision, "UPDATE_LOCK", "prophos-update.lock"))) < 600
+    except OSError:
+        return False
+
+
+def build_angleichen(install_dir, schnell=False):
+    """Diese Installation still auf den neuesten Build des PCs heben (s. Block oben) → (status, text). status: aus | aktuell | laeuft |
+    belegt | angeglichen | fehler. Auch wenn aktuell: veraltete liveupdate-Pakete weg. Darf einen Start nie verhindern, wirft nie.
+    schnell (synchrone Startwege, PC-Tab bricht nach 20 s ab — Gegenprüfung MU1): Sperre nicht abwarten, Signatur nur aus dem Merker
+    (fehlt sie → „belegt“, der Wächter erledigt es); kopiert wird dann nur, was in wenigen Sekunden geht."""
+    if os.name != "nt" or not install_dir:
+        return "aus", ""
+    try:
+        ziel_k = os.path.normcase(os.path.normpath(os.path.abspath(install_dir)))
+        if not _MT5_ORDNER_I.match(ziel_k) or _stilles_update_dran(install_dir):
+            return "aus", ""
+        if not BUILD_LOCK.acquire(blocking=not schnell):
+            return "belegt", ""
+        try:
+            inst = _build_installationen()
+            plan = build_angleich_plan({k: v[2] for k, v in inst.items()}, {k: v[3] for k, v in inst.items()})
+            eintrag = inst.get(ziel_k)
+            if not eintrag:
+                return "aus", ""
+            lu = os.path.join(eintrag[1], "liveupdate") if eintrag[1] else ""
+            belegt = lambda d: ordner_pids([d, lu])   # Installation (alle drei Programme) + MetaQuotes-Updater
+            st, txt = "aktuell", ""
+            if ziel_k in plan:
+                quelle = plan[ziel_k]
+                q_ver = inst[quelle][2]
+                st, txt = build_kopieren(inst[quelle][0], eintrag[0], q_ver, ver=provision._datei_version, pids=belegt,
+                                         sig_ok=lambda ps: _signatur_metaquotes(ps, nur_gemerkt=schnell))
+                if schnell and st == "fehler" and "Signatur" in txt:
+                    st, txt = "belegt", ""   # Signatur noch nicht gemerkt → Wächter prüft (PowerShell ~1–2 s, im Startweg zu riskant)
+                else:
+                    _build_merken(st, txt, eintrag[0], q_ver)
+            if st == "aktuell" and not belegt(eintrag[0]):
+                temp_reste_weg(eintrag[0])   # sonst erbt ein Klon der Vorlage die Reste
+            if st in ("aktuell", "angeglichen") and eintrag[1] and not belegt(eintrag[0]):
+                v = provision._datei_version(os.path.join(eintrag[0], "terminal64.exe"))
+                weg = liveupdate_aufraeumen(eintrag[1], v)
+                if weg:
+                    txt = (txt + "; " if txt else "") + f"liveupdate: {', '.join(weg)} gelöscht"
+                    if st == "aktuell":
+                        print(f"[mt5-build] {eintrag[0]}: veraltete liveupdate-Dateien gelöscht ({', '.join(weg)})", flush=True)
+            return st, txt
+        finally:
+            BUILD_LOCK.release()
+    except Exception as e:
+        return "fehler", f"{type(e).__name__}: {e}"[:200]
+
+
+def _build_angleich_waechter():
+    """Thread: alle 2–3 min jede ältere, nicht laufende X:\\MT5-…-Installation (auch die Vorlage) angleichen und veraltete
+    liveupdate-Pakete löschen. Pausiert, solange ein Puls/Order-/Polar-Lauf auf diesem PC läuft (kein Plattendruck mitten im Klick)."""
+    if os.name != "nt":
+        return
+    time.sleep(60 + random.uniform(0, 60))
+    while True:
+        try:
+            # Provisionierung läuft → Vorlage/Klon nicht anfassen (copytree könnte eine halbe .prophos-neu mitnehmen)
+            if not _bot_lauf_aktiv() and not (PROV_JOB and not PROV_JOB.get("done")):
+                with BUILD_LOCK:
+                    inst = _build_installationen()
+                ziele = build_angleich_plan({k: v[2] for k, v in inst.items()}, {k: v[3] for k, v in inst.items()})
+                offen = []
+                for k, (pfad, dd, v, _art) in inst.items():
+                    if k in ziele or (v and _liveupdate_rest(dd, v)):
+                        # Gegenprüfung MU1: je Ziel neu — ein Lauf/eine Provisionierung kann mitten in der Runde beginnen
+                        if _bot_lauf_aktiv() or (PROV_JOB and not PROV_JOB.get("done")):
+                            break
+                        st, txt = build_angleichen(pfad)
+                        if st in ("angeglichen", "fehler"):
+                            print(f"[mt5-build] {txt}", flush=True)
+                        if st in ("laeuft", "fehler"):
+                            offen.append(os.path.basename(pfad))
+                builds = sorted({v[2][3] for v in inst.values() if v[2]})
+                BUILD_ANGLEICH.update(at=datetime.now().isoformat(timespec="seconds"), installationen=len(inst), builds=builds[-4:],
+                                      offen=offen[:20])
+        except Exception as e:
+            print(f"[mt5-build] {type(e).__name__}: {e}", flush=True)
+        time.sleep(random.uniform(*BUILD_TAKT_S))
 
 
 def _windows_abfrage_vorbeugen():
@@ -1948,7 +2363,7 @@ def _mt5_update_stand():
         aus = provision.update_ausstehend()
         w = {"aufgabe_ok": bool(provision.update_aufgabe_ok()), "ausstehend": len(aus),
              "ordner": [os.path.basename(x[0]) for x in aus][:20], "abgelehnt": os.path.exists(UPDATE_ABGELEHNT),
-             "laeuft": len(UPDATE_LAEUFT)}
+             "laeuft": len(UPDATE_LAEUFT), "build_angleich": dict(BUILD_ANGLEICH) or None}   # MU1 (10.11.2026)
     except Exception as e:
         w = {"fehler": f"{type(e).__name__}: {e}"[:120]}
     _MT5_UPD_STAND.update(t=time.time(), wert=w)
@@ -2138,6 +2553,13 @@ def prov_start(name, login, password, server, owner=None, display=None):
                     _ensure_ea_compiled("vorlage", os.path.dirname(os.path.abspath(template)))
                 except Exception as e:
                     print(f"[prov] Vorlage-EA-Vorlauf uebersprungen ({type(e).__name__}: {e})", flush=True)
+            if template:   # MU1 (10.11.2026): Vorlage auf den neuesten Build des PCs heben → der Klon startet ohne MT5-Update/UAC
+                try:
+                    _st, _txt = build_angleichen(os.path.dirname(os.path.abspath(template)))
+                    if _st in ("angeglichen", "fehler"):
+                        print(f"[mt5-build] Vorlage: {_txt}", flush=True)
+                except Exception:
+                    pass
             provision.run_provision(name=name, login=login, password=password,
                                     server=server, template_exe=template,
                                     folder=HERE, report=report, owner=owner, display=display,
@@ -7049,6 +7471,12 @@ class Handler(BaseHTTPRequestHandler):
                 for pid in provision.terminal_pids(install_dir):
                     provision._taskkill(pid, grace_s=5)
             _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
+            try:   # MU1 (10.11.2026): älteren Build still angleichen, bevor MT5 per UAC einspielen will — verhindert den Start nie
+                _st, _txt = build_angleichen(install_dir, schnell=True)   # synchroner HTTP-Weg (20 s) → nie warten
+                if _st in ("angeglichen", "fehler"):
+                    print(f"[mt5-build] Hedge: {_txt}", flush=True)
+            except Exception:
+                pass
             subprocess.Popen([hpath], cwd=install_dir)
             _front_when_up(install_dir)
             print(f"[panel] Hedge-Terminal gestartet: {hpath}", flush=True)
@@ -8368,6 +8796,7 @@ def main():
     threading.Thread(target=_boot_terminals, daemon=True).start()   # 01.10.2026: Master mit laufendem Trade nach PC-Start
     # MT5-Update ohne UAC-Abfrage (01.10.2026) — Details bei _mt5_update_waechter
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
+    threading.Thread(target=_build_angleich_waechter, daemon=True).start()   # MU1 (10.11.2026): MT5-Build ohne UAC angleichen
     # Tab selbst neu laden (16.10.2026) — Details bei _tab_neulade_waechter
     threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
     threading.Thread(target=_tages_neustart_waechter, daemon=True).start()   # DR1 (05.11.2026): täglicher Neustart je PC, Standard aus
