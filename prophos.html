@@ -2170,14 +2170,10 @@
   #addAccountModal .acz-haken{flex:none;width:14px;height:14px;border:1.5px solid var(--border);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:#fff}
   #addAccountModal .acz-opt[aria-selected="true"] .acz-haken{background:var(--violet);border-color:var(--violet)}
   #addAccountModal .acz-opt[aria-selected="true"]{color:var(--ink)}
-  #addAccountModal .acz-opt small{margin-left:auto;font-size:10.5px;color:var(--sub)}
   #addAccountModal .acz-trenn{height:1px;margin:4px 6px;background:var(--border)}
-  #addAccountModal .acz-eigen{display:flex;gap:6px;padding:4px 4px 2px}
-  #addAccountModal .acz-eigen[hidden]{display:none}
-  #addAccountModal .acz-eigen .input{flex:1;min-width:0;height:30px;padding:4px 8px;font-size:12.5px}
-  #addAccountModal .acz-eigen .btn{padding:4px 10px;font-size:12px}
+  #addAccountModal .acz-rest{margin:4px 2px 0;padding:6px 8px 2px;border-top:1px solid var(--border);font-size:11px;color:var(--sub);overflow-wrap:anywhere}
   @media (prefers-reduced-motion: reduce){ #addAccountModal .acz-liste{animation:none} }
-  @media (max-width:640px){ #addAccountModal .acz-opt{min-height:36px} #addAccountModal .acz-eigen .input{font-size:16px;height:36px} }   /* Handy: Tippziel, kein iOS-Zoom beim Fokus */
+  @media (max-width:640px){ #addAccountModal .acz-opt{min-height:36px} }   /* Handy: Tippziel */
   #polarModal .pol-gruppe{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--sub);margin-top:4px}
   /* Eigene Blöcke Multiplikator / TP·SL (21.10.2026): zarter Rahmen, Akzent links (violet = Größe, grün = Ziele), Kopf mit Erklärung */
   #polarModal .pol-block{grid-column:1 / -1;border:1px solid var(--border-soft);border-left:3px solid var(--violet);border-radius:var(--r-sm);padding:12px 14px 14px;background:color-mix(in srgb, var(--violet) 3%, transparent)}
@@ -15282,9 +15278,9 @@
           <label>Größe <span style="font-weight:400;color:var(--sub)">(k)</span></label>
           <input class="input mono" id="ac-groesse" type="number" step="25" min="1" placeholder="z.B. 150" autocomplete="off">
         </div>
-        <!-- ZD1 (10.11.2026, Finn: „Kannst du das mit Dropdown machen?“): Zusatz als Mehrfachauswahl (Add-ons 1 % Rule / On Demand, Bogo, Flex, dazu die Zusätze der
-             eigenen Konten, „keiner“, „Eigener …“). #ac-zusatz bleibt (versteckt) die Wertquelle im gleichen Format „A · B“ — Speichern, Namensregel und
-             On-Demand-Haken lesen/schreiben es unverändert. -->
+        <!-- ZD1 (10.11.2026, Finn: „Kannst du das mit Dropdown machen?“): Zusatz als Mehrfachauswahl — seit ZD1b nur „keiner“, „1 % Rule“, „On Demand“ (Finn:
+             „nur die zwei“); andere Zusätze eines bestehenden Kontos bleiben fest im Namen. #ac-zusatz bleibt (versteckt) die Wertquelle im gleichen Format
+             „A · B“ — Speichern, Namensregel und On-Demand-Haken lesen/schreiben es unverändert. -->
         <div class="field" id="ac-zusatz-row">
           <label id="ac-zusatz-lbl">Zusatz <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
           <div class="acz-wahl"><button type="button" class="input acz-knopf" id="ac-zusatz-wahl" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="ac-zusatz-lbl"></button>
@@ -48276,49 +48272,42 @@
    * Wertquelle bleibt #ac-zusatz (versteckt) im Format „1% Rule · On Demand · Rest“ wie bisher — alle Leser (Speichern über kontoNameRegel, kontoNameTeile,
    * On-Demand-Haken über kontoZusatzMitAddons, accEinsProzentName im Namen) bleiben gleich. Mehrfachauswahl, weil ein Konto mehrere Add-ons tragen kann
    * (Memory Add-ons 05.11.2026: 1 % Rule + On Demand); die Reihenfolge ordnet kontoZusatzMitAddons (1% Rule vor On Demand, dann der Rest).
-   * Optionen: feste Add-ons/Varianten + alle Zusätze der geladenen Konten + der aktuelle Wert, gleiche Einträge nur einmal (Groß/klein egal, „1% RULE“ = 1% Rule);
-   * ein gewählter Eintrag behält seine Schreibweise aus dem Namen. „Eigener …“ nimmt Freitext auf (ohne „ · “, damit das Format hält). */
-  const ACZ_FEST = ['1% Rule', 'On Demand', 'Bogo', 'Flex']
-  const aczKey = x => { const t = String(x || '').trim(); return ADDON_EINS_RE.test(t) ? '1%rule' : ADDON_OD_RE.test(t) ? 'ondemand' : t.toLowerCase().replace(/\s+/g, ' ') }
+   * ZD1b (Finn 10.11.2026 nach .2147: „Mach nur bisher 1 % Rule und On Demand. Mehr gibt's eigentlich nicht. Die anderen sind nicht besprochen, nur die zwei.“):
+   * nur noch „keiner“, „1 % Rule“, „On Demand“ — kein Bogo/Flex, keine Zusätze aus Kontonamen, kein Freitext. Andere Zusätze eines bestehenden Kontos (z. B.
+   * „#1“) gehen nie still verloren: sie bleiben als fester Teil im Namen (kontoZusatzMitAddons lässt den Rest unverändert), die Liste zeigt sie nur als Hinweis;
+   * „keiner“ nimmt nur die beiden Add-ons raus. Gewählte Add-ons behalten ihre Schreibweise aus dem Namen (z. B. „1% RULE“). */
+  const ACZ_ADDONS = [{ k: 'eins', re: ADDON_EINS_RE, label: '1 % Rule' }, { k: 'od', re: ADDON_OD_RE, label: 'On Demand' }]
   const aczTeile = v => String(v || '').split(' · ').map(x => x.trim()).filter(Boolean)
+  const aczRest = v => aczTeile(v).filter(t => !ADDON_EINS_RE.test(t) && !ADDON_OD_RE.test(t))
   const aczEls = { b: document.getElementById('ac-zusatz-wahl'), liste: document.getElementById('ac-zusatz-liste') }
   let _aczOffen = false
-  function aczKnopf(){   // Knopf zeigt den aktuellen Wert des versteckten Feldes
+  function aczKnopf(){   // Knopf zeigt den aktuellen Wert des versteckten Feldes (Add-ons + fester Rest, wie er in den Namen geht)
     if(!aczEls.b || !accEls.zusatz) return
     const v = accEls.zusatz.value
     aczEls.b.innerHTML = `<span class="acz-txt${v ? '' : ' is-leer'}">${escapeHtml(v || 'keiner')}</span><i class="acz-pfeil" aria-hidden="true"></i>`
     aczEls.b.title = v ? 'Zusatz: ' + v : 'kein Zusatz'
     if(_aczOffen) aczListe()
   }
-  function aczOptionen(){
-    const m = new Map()
-    const rein = t => { const k = aczKey(t); if(k && !m.has(k)) m.set(k, t) }
-    ACZ_FEST.forEach(rein)
-    for(const a of (accounts || [])){ for(const t of aczTeile(kontoNameTeile(a && a.name).zusatz)) rein(t) }
-    aczTeile(accEls.zusatz?.value).forEach(rein)
-    return [...m.entries()].map(([k, t]) => ({ k, t, fest: ACZ_FEST.some(f => aczKey(f) === k) }))
-  }
-  function aczSetzen(teile){
+  // opts wie kontoZusatzMitAddons: { eins: true|false } bzw. { od: true|false } — der Rest des Zusatzes bleibt unverändert
+  function aczSetzen(opts){
     if(!accEls.zusatz) return
     const istOd = w => aczTeile(w).some(t => ADDON_OD_RE.test(t))
-    const odVorher = istOd(accEls.zusatz.value), v = kontoZusatzMitAddons(teile.join(' · '))
+    const odVorher = istOd(accEls.zusatz.value), v = kontoZusatzMitAddons(accEls.zusatz.value, opts)
     accEls.zusatz.value = v
     // On-Demand-Haken (O1) nur mitziehen, wenn sich GENAU „On Demand“ ändert und er sichtbar ist (gespeichert wird er nur dann, saveAccount) — Gegenprüfung ZD1:
-    // sonst hätte ein Klick auf „Bogo“ ein abweichendes Flag still umgestellt. Unsichtbar → wie früher beim Freitext nur im Namen.
+    // sonst hätte ein Klick auf das andere Add-on ein abweichendes Flag still umgestellt. Unsichtbar → wie früher beim Freitext nur im Namen.
     if(accEls.onDemand && accEls.odFeld && !accEls.odFeld.hidden && istOd(v) !== odVorher) accEls.onDemand.checked = istOd(v)
     accEls.zusatz.dispatchEvent(new Event('input'))   // → acNameVorschlag
   }
   function aczListe(){
     const L = aczEls.liste; if(!L) return
-    const gew = new Map(aczTeile(accEls.zusatz?.value).map(t => [aczKey(t), t]))
-    const opt = (attr, haken, text, klein) => `<button type="button" class="acz-opt" role="option" ${attr}><span class="acz-haken" aria-hidden="true">${haken ? '✓' : ''}</span><span>${escapeHtml(text)}</span>${klein ? `<small>${escapeHtml(klein)}</small>` : ''}</button>`
-    L.innerHTML = opt(`data-acz="keiner" aria-selected="${gew.size ? 'false' : 'true'}"`, !gew.size, 'keiner')
+    const teile = aczTeile(accEls.zusatz?.value), rest = aczRest(accEls.zusatz?.value)
+    const gew = a => teile.some(t => a.re.test(t)), keins = !ACZ_ADDONS.some(gew)
+    const opt = (attr, haken, text) => `<button type="button" class="acz-opt" role="option" ${attr}><span class="acz-haken" aria-hidden="true">${haken ? '✓' : ''}</span><span>${escapeHtml(text)}</span></button>`
+    L.innerHTML = opt(`data-acz="keiner" aria-selected="${keins}"`, keins, 'keiner')
       + '<div class="acz-trenn" role="separator"></div>'
-      + aczOptionen().map(o => opt(`data-acz-k="${escapeHtml(o.k)}" data-acz-t="${escapeHtml(o.t)}" aria-selected="${gew.has(o.k)}"`, gew.has(o.k), gew.get(o.k) || o.t,
-          o.k === '1%rule' || o.k === 'ondemand' ? 'Add-on' : '')).join('')
-      + '<div class="acz-trenn" role="separator"></div>'
-      + opt('data-acz="eigen" aria-selected="false"', false, 'Eigener …')
-      + '<div class="acz-eigen" hidden><input class="input" maxlength="40" placeholder="eigener Zusatz" autocomplete="off" aria-label="eigener Zusatz"><button type="button" class="btn btn-ghost" data-acz="eigen-ok">Hinzufügen</button></div>'
+      + ACZ_ADDONS.map(a => opt(`data-acz-k="${a.k}" aria-selected="${gew(a)}"`, gew(a), a.label)).join('')
+      + (rest.length ? `<div class="acz-rest" title="steht schon im Namen dieses Kontos und bleibt erhalten">bleibt im Namen: ${escapeHtml(rest.join(' · '))}</div>` : '')
   }
   function aczZu(fokus){
     if(!_aczOffen) return
@@ -48330,18 +48319,8 @@
   function aczAuf(){
     if(!aczEls.liste) return
     _aczOffen = true; aczListe(); aczEls.liste.hidden = false; aczEls.b?.setAttribute('aria-expanded', 'true')
-    // Fokus auf den ersten gewählten bzw. ersten echten Eintrag (nicht „keiner“ — ein zweites Enter hätte sonst alles gelöscht)
-    ;(aczEls.liste.querySelector('[data-acz-k][aria-selected="true"]') || aczEls.liste.querySelector('[data-acz-k]') || aczEls.liste.querySelector('.acz-opt'))?.focus()
-  }
-  function aczEigenNehmen(){
-    const inp = aczEls.liste?.querySelector('.acz-eigen input')
-    const t = String(inp?.value || '').replace(/[·→]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)
-    if(!t) return
-    const teile = aczTeile(accEls.zusatz?.value)
-    if(!teile.some(x => aczKey(x) === aczKey(t))) teile.push(t)
-    aczSetzen(teile)
-    // Liste ist neu gezeichnet, das Eingabefeld weg → Fokus auf den neuen Eintrag (sonst landet er auf body und Escape schlösse das ganze Modal)
-    const k = aczKey(t); for(const o of aczEls.liste.querySelectorAll('[data-acz-k]')){ if(o.getAttribute('data-acz-k') === k){ o.focus(); break } }
+    // Fokus auf den ersten gewählten bzw. ersten Add-on-Eintrag (nicht „keiner“ — ein zweites Enter hätte sonst alles abgewählt)
+    ;(aczEls.liste.querySelector('[data-acz-k][aria-selected="true"]') || aczEls.liste.querySelector('[data-acz-k]'))?.focus()
   }
   if(accEls.zusatz && aczEls.b){
     // Jeder Schreibweg auf .value (Vorbefüllen beim Bearbeiten, Reset beim Öffnen, Mail-/TV-Vorbefüllung, On-Demand-Haken) zeichnet den Knopf neu
@@ -48353,19 +48332,16 @@
       const el = ev.target.closest('[data-acz],[data-acz-k]'); if(!el) return
       ev.preventDefault()
       const art = el.getAttribute('data-acz')
-      if(art === 'keiner'){ aczSetzen([]); aczZu(true); return }
-      if(art === 'eigen'){ const f = aczEls.liste.querySelector('.acz-eigen'); if(f){ f.hidden = false; f.querySelector('input')?.focus() } return }
-      if(art === 'eigen-ok'){ aczEigenNehmen(); return }
-      const k = el.getAttribute('data-acz-k'), t = el.getAttribute('data-acz-t') || ''
-      const teile = aczTeile(accEls.zusatz.value), hat = teile.some(x => aczKey(x) === k)
-      aczSetzen(hat ? teile.filter(x => aczKey(x) !== k) : [...teile, t])
+      if(art === 'keiner'){ aczSetzen({ eins: false, od: false }); aczZu(true); return }   // nur die Add-ons raus, fester Rest bleibt
+      const k = el.getAttribute('data-acz-k'), a = ACZ_ADDONS.find(x => x.k === k); if(!a) return
+      const hat = aczTeile(accEls.zusatz.value).some(t => a.re.test(t))
+      aczSetzen({ [k]: !hat })
       // die Liste wurde neu gezeichnet — Fokus zurück auf denselben Eintrag (Tastatur)
       for(const o of aczEls.liste.querySelectorAll('[data-acz-k]')){ if(o.getAttribute('data-acz-k') === k){ o.focus(); break } }
     })
     aczEls.liste?.addEventListener('keydown', ev => {
       if(ev.key === 'Escape'){ ev.preventDefault(); ev.stopPropagation(); aczZu(true); return }
       if(ev.key === 'Tab'){ aczZu(); return }   // wie Polar: Weiter-Tabben schließt die Liste (sie läge sonst über Name/Firm)
-      if(ev.key === 'Enter' && ev.target.closest('.acz-eigen input')){ ev.preventDefault(); aczEigenNehmen(); return }
       if(ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
         const o = [...aczEls.liste.querySelectorAll('.acz-opt')], i = o.indexOf(document.activeElement)
         if(o.length){ ev.preventDefault(); o[Math.max(0, Math.min(o.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))].focus() }
@@ -57952,7 +57928,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2147'
+  const OS_TAB_BUILD = '2026-09-22.2148'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
