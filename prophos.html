@@ -45469,6 +45469,7 @@
    * Alle Zahlen und Texte rechnet Railway (GET /konto-ziele → app.py kz_rechnen, dieselben Funktionen wie Planer/Radar) — hier nur zeichnen.
    * 60 s je Konto gemerkt (renderAccountDetail läuft bei jedem Plan-Speichern neu). Eigene Verdrahtung, kein Sammel-Handler. ══ */
   const _k1 = { cache: {}, laeuft: {} }
+  var _adVerlaufNeu = null   // ZV1 (10.11.2026): { id, f } — Trade-Verlauf des offenen Kontos neu zeichnen, sobald /konto-ziele die Payouts liefert
   const K1_TTL_MS = 60000
   function k1Anzeigen(acc){
     const el = document.getElementById('k1-ziele'); if(!el || !acc) return
@@ -45616,6 +45617,7 @@
         <b>${escapeHtml(geld(x.betrag, x.waehrung))}</b></div>`).join('')
       : '<div style="padding:14px 0 6px;color:var(--sub);font-size:12.5px">Noch kein Payout auf diesem Konto.</div>'
     box.hidden = false
+    if(_adVerlaufNeu && _adVerlaufNeu.id === String(id)){ try{ _adVerlaufNeu.f() }catch(e){ console.warn('[trade-verlauf zyklen]', e) } }   // ZV1
   }
   /* ABHAK-STRAHL (AB2, Finn 05.11.2026 ~18:00 Dubai, ersetzt die AB1-Karte unten rechts und für diese Konten den Toast „Erledigt · Fusion … am Trade“):
    * „Dieses Popper unten rechts ist voll kacke … Erstmal so ein Strahl, wo sich der Balken auflädt, wie viele jetzt vom Profit Target entfernt sind, wie sich
@@ -46130,7 +46132,7 @@
       const txTotal = txs.reduce((s,t)=>s+Number(t.amount||0),0)
       if(actSumEl) actSumEl.textContent = `${acPlans.filter(p=>p.status==='completed').length} Trades · ${txs.length} Buchungen`
 
-      actEl.innerHTML = items.length ? items.map(item=>{
+      const zeile = item=>{
         if(item.type==='trade'){
           const p = item.obj
           const isMaster = String(p.masterAccountId)===String(acc.id)
@@ -46178,13 +46180,62 @@
             <span style="font-weight:650;min-width:84px;text-align:right;font-variant-numeric:tabular-nums;${amtCls}">${amt>=0?'+':'−'}${Math.abs(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
           </div>`
         }
-      }).join('') : '<div style="padding:24px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Aktivität für diesen Account.</div>'
+      }
+      const leer = '<div style="padding:24px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Aktivität für diesen Account.</div>'
+      /* ZYKLEN IM TRADE-VERLAUF (ZV1, Finn 10.11.2026: „Trades pro Zyklus, sodass im Tradeverlauf immer ein neuer Abschnitt kommt, wenn der neue Zyklus
+       * beginnt"): Grenzen = Anfrage-Tag jedes Payouts (payout.anfrage aus /konto-ziele = requested_at, wie wd_zyklus_stand — ZV1b). Zyklus 1 läuft ab
+       * Kontostart; ein Eintrag NACH dem Anfrage-Tag gehört zum neuen Zyklus, einer AM Anfrage-Tag noch zum alten (der Payout schließt den Zyklus ab, den er
+       * auszahlt). Neuester Zyklus oben, je Abschnitt eine schlichte Zeile im Stil der Kopfzeile: Zyklus n · seit Payout TT.MM. · k Trades · Master ± $ ·
+       * Fusion ± € (Gegenseite wie in den Zeilen; andere Währung bzw. Slave/Master mit eigenem Namen). Ohne Payouts (oder noch nicht geladen): wie bisher. */
+      const zeichneVerlauf = () => {
+        const kz = _k1.cache[String(acc.id)] && _k1.cache[String(acc.id)].d
+        // ZV1b (Master 10.11.2026): Grenze = Anfrage-Tag (payout.anfrage = requested_at, nur pending/received — app.py kz_payouts), genau wie wd_zyklus_stand,
+        // damit die Nummer mit Radar/Recoverer übereinstimmt; Buchungen und managed_payouts desselben Payouts tragen kein „anfrage“ → keine zweite Grenze
+        const anfAlle = ((kz && Array.isArray(kz.payouts)) ? kz.payouts : []).map(x => String(x && x.anfrage || '').slice(0, 10)).filter(t => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort()
+        const grenzen = [...new Set(anfAlle)]
+        // Nummer wie wd_zyklus_stand (nr = Anfragen + 1, ohne Entdoppeln): zwei Anfragen am selben Tag zählen doppelt, der Abschnitt bleibt einer
+        const nrVon = z => z ? anfAlle.filter(a => a <= grenzen[z - 1]).length + 1 : 1
+        if(!items.length || !grenzen.length){ actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
+        // Tag wie wd_zyklus_stand: Berliner Kalendertag des Starts (started_at, sonst Ende), Buchungen ihr Datum — ein Trade AM Anfrage-Tag zählt zum alten Zyklus
+        const tagVon = d => { const x = new Date(d); return d && isFinite(x) ? x.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }) : '' }
+        const itemTag = it => it.type === 'trade' ? (it.obj.startedAt || it.obj.endedAt || it.obj.completedAt || it.date) : it.date
+        const zyklusVon = it => { const t = tagVon(itemTag(it)); return t ? grenzen.filter(g => t > g).length : grenzen.length }   // ohne Datum: laufender Zyklus
+        const ttmm = g => g.slice(8, 10) + '.' + g.slice(5, 7) + '.'
+        const geldZ = (v, ccy) => { const r = Math.round(v); return `${r >= 0 ? '+' : '−'}${ccy === '$' ? '$' : ''}${Math.abs(r).toLocaleString('de-DE')}${ccy !== '$' ? ' ' + ccy : ''}` }
+        const gruppen = grenzen.map(() => []).concat([[]])   // Index 0 = Zyklus 1 (ab Kontostart) … n = seit dem letzten Payout
+        items.forEach(it => gruppen[zyklusVon(it)].push(it))
+        let html = ''
+        for(let z = gruppen.length - 1; z >= 0; z--){
+          const g = gruppen[z], trades = g.filter(it => it.type === 'trade')
+          let master = 0, alleMaster = true; const gegen = {}
+          trades.forEach(it => {
+            const q = it.obj, isM = String(q.masterAccountId) === String(acc.id)
+            if(!isM) alleMaster = false
+            master += Number(isM ? (q.masterPl || 0) : (q.slavePl || 0)) || 0
+            const hat = isM ? q.slavePl != null : q.masterPl != null
+            if(!hat) return
+            const wd = isM && planHatWdFusionHedge(q)
+            const ccy = wd ? '€' : isM ? ((FIRM_PRESETS[firmToPreset(q.slaveFirm)] || FIRM_PRESETS.projectx).currency) : '$'
+            const name = ccy === '€' ? 'Fusion' : isM ? 'Slave' : 'Master'
+            const k = name + '|' + ccy; gegen[k] = (gegen[k] || 0) + (Number(isM ? q.slavePl : q.masterPl) || 0)
+          })
+          const teile = [`<b style="font-weight:600;color:var(--ink-2)">Zyklus ${nrVon(z)}</b>`, z ? `seit Payout ${ttmm(grenzen[z - 1])}` : 'ab Kontostart', `${trades.length} Trade${trades.length === 1 ? '' : 's'}`]
+          if(trades.length) teile.push(`${alleMaster ? 'Master' : 'P&L'} ${geldZ(master, '$')}`)   // Slave-Konto: eigene Seite heißt nicht „Master“
+          Object.keys(gegen).forEach(k => { const [name, ccy] = k.split('|'); teile.push(`${name} ${geldZ(gegen[k], ccy)}`) })
+          html += `<div class="ad-zyklus" style="font-size:11.5px;color:var(--sub);padding:${z === gruppen.length - 1 ? '4px' : '12px'} 0 5px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(z ? 'Zyklus ' + nrVon(z) + ' beginnt nach der Payout-Anfrage vom ' + ttmm(grenzen[z - 1]) + (z < grenzen.length ? ' und endet mit der Payout-Anfrage vom ' + ttmm(grenzen[z]) : ' — läuft') : 'Erster Zyklus ab Kontostart' + (grenzen.length ? ' bis zur Payout-Anfrage vom ' + ttmm(grenzen[0]) : ''))}">${teile.join(' · ')}</div>`
+            + g.map(zeile).join('')
+        }
+        actEl.innerHTML = html
+        binden()
+      }
       // Trade-Zeilen → „Trade bearbeiten" (16.09.2026, s. Kommentar oben)
-      actEl.querySelectorAll('[data-ad-plan]').forEach(el => {
+      const binden = () => actEl.querySelectorAll('[data-ad-plan]').forEach(el => {
         el.addEventListener('click', () => {
           if(typeof openTradeCompleteModal === 'function') openTradeCompleteModal(el.dataset.adPlan)
         })
       })
+      _adVerlaufNeu = { id: String(acc.id), f: zeichneVerlauf }
+      zeichneVerlauf()
     }
   }
 
@@ -58082,7 +58133,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2153'
+  const OS_TAB_BUILD = '2026-09-22.2154'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

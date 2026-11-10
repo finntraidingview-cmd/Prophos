@@ -41947,18 +41947,28 @@ def kz_rechnen(a, ctx):
 def kz_payouts(pend, verw, buch):
     """REIN (testbar, K2 Finn 05.11.2026: „darunter ein Payout-Verlauf"): Payouts eines Kontos → [{datum, betrag, waehrung, status}] neueste zuerst.
     pending_payouts: status pending → „angefragt", received → „erhalten" (Datum = received_at, sonst requested_at), sonst der Status selbst;
-    transactions kind payout ohne Anfrage, die auf sie zeigt (received_tx_id) → „erhalten"; managed_payouts → „verbucht". Nichts gerechnet."""
+    transactions kind payout ohne Anfrage, die auf sie zeigt (received_tx_id) → „erhalten"; managed_payouts → „verbucht". Nichts gerechnet.
+    ZV1b: Anfragen (pending/received) tragen zusätzlich "anfrage" = requested_at-Tag, Buchungen ohne Anfrage den occurred_at-Tag — dieselben Grenzen
+    wie ctx["wd_pay"] → wd_zyklus_stand (managed_payouts zählen dort nicht, hier also auch nicht)."""
     verknuepft = {str(z.get("received_tx_id")) for z in pend or () if z.get("received_tx_id")}
     out = []
     for z in pend or ():
         st = str(z.get("status") or "pending")
         d = (z.get("received_at") if st == "received" else None) or z.get("requested_at") or z.get("created_at")
-        out.append({"datum": str(d or "")[:10], "betrag": _wd_num(z.get("amount")), "waehrung": z.get("currency") or "USD",
-                    "status": {"pending": "angefragt", "received": "erhalten"}.get(st, st)})
+        e = {"datum": str(d or "")[:10], "betrag": _wd_num(z.get("amount")), "waehrung": z.get("currency") or "USD",
+             "status": {"pending": "angefragt", "received": "erhalten"}.get(st, st)}
+        # ZV1b (Finn 10.11.2026): Zyklusgrenze für den Trade-Verlauf der Konto-Seite — derselbe Tag wie wd_zyklus_stand (requested_at, nur pending/received),
+        # damit die Zyklus-Nummer mit Radar und Recoverer übereinstimmt. Buchungen und managed_payouts bekommen keins (kein zweiter Grenz-Tag je Payout)
+        if st in ("pending", "received") and z.get("requested_at"):
+            e["anfrage"] = str(z.get("requested_at"))[:10]
+        out.append(e)
     for t in buch or ():
         if str(t.get("id")) in verknuepft:
             continue
-        out.append({"datum": str(t.get("occurred_at") or "")[:10], "betrag": _wd_num(t.get("amount")), "waehrung": t.get("currency") or "EUR", "status": "erhalten"})
+        e = {"datum": str(t.get("occurred_at") or "")[:10], "betrag": _wd_num(t.get("amount")), "waehrung": t.get("currency") or "EUR", "status": "erhalten"}
+        if t.get("occurred_at"):   # ZV1b: Buchung ohne Anfrage = eigene Grenze, wie ctx["wd_pay"] / _wd_zyklus_anhaengen (verknüpfte sind oben schon raus)
+            e["anfrage"] = str(t.get("occurred_at"))[:10]
+        out.append(e)
     for z in verw or ():
         out.append({"datum": str(z.get("payout_date") or z.get("created_at") or "")[:10], "betrag": _wd_num(z.get("amount")), "waehrung": "USD", "status": "verbucht"})
     return sorted(out, key=lambda x: x["datum"], reverse=True)

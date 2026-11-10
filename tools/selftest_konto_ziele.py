@@ -219,7 +219,7 @@ check(o["urteil"]["ok"] is False and "Winning Days" in o["urteil"]["grund"] and 
 # ── K2 (Finn 05.11.2026): Payout-Verlauf, „Payout ab" nur CFD ──
 c = ctx_fuer(TX)
 o = ergebnisse["winning_days_tradeify"] = ruf("kz_rechnen", TX, c)
-check(o["payouts"] == [{"datum": "2026-10-30", "betrag": 3633.0, "waehrung": "EUR", "status": "erhalten"}], f"Tradeify WD …3058: Payout-Verlauf = Buchung 30.10. 3.633 € erhalten ({o['payouts']})")
+check(o["payouts"] == [{"datum": "2026-10-30", "betrag": 3633.0, "waehrung": "EUR", "status": "erhalten", "anfrage": "2026-10-30"}], f"Tradeify WD …3058: Payout-Verlauf = Buchung 30.10. 3.633 € erhalten, ZV1b-Grenze 30.10. ({o['payouts']})")
 check(not any(c_[1] == "Payout ab" for c_ in o["urteil"]["checks"]), "Futures/WD: keine Zeile „Payout ab“ (gibt es nur bei CFD), obwohl payout_ready_at gesetzt ist")
 check(o["zyklus"]["nr"] == 2, f"Tradeify WD: Zyklus 2 nach dem Payout ({o['urteil']['sub']})")
 bg_r = ruf("kz_rechnen", dict(BG, payout_ready_at="2026-11-20"), ctx_fuer(BG))
@@ -229,6 +229,10 @@ pv = ruf("kz_payouts", [{"id": "p1", "amount": 2500, "currency": "USD", "request
          [{"amount": 1000, "payout_date": "2026-09-01"}], [{"id": "t1", "amount": 2700, "currency": "EUR", "occurred_at": "2026-10-14"}, {"id": "t2", "amount": 900, "currency": "EUR", "occurred_at": "2026-10-20"}])
 check([(x["datum"], x["status"]) for x in pv] == [("2026-11-01", "angefragt"), ("2026-10-20", "erhalten"), ("2026-10-14", "erhalten"), ("2026-09-01", "verbucht")],
       f"kz_payouts: angefragt/erhalten/verbucht, verknüpfte Buchung nicht doppelt, neueste zuerst ({[(x['datum'], x['status']) for x in pv]})")
+check([x.get("anfrage") for x in pv] == ["2026-11-01", "2026-10-20", "2026-10-10", None],
+      f"ZV1b kz_payouts: Zyklusgrenze „anfrage“ = requested_at an Anfragen (auch erhalten), freie Buchung ihr Tag, verknüpfte Buchung keine, verbucht keine ({[x.get('anfrage') for x in pv]})")
+pv2 = ruf("kz_payouts", [{"id": "p3", "amount": 1, "requested_at": "2026-10-01", "status": "rejected"}], [], [])
+check("anfrage" not in pv2[0], "ZV1b kz_payouts: abgelehnte Anfrage ist keine Zyklusgrenze (wie wd_zyklus_stand)")
 check(ruf("kz_rechnen", TF, ctx_fuer(TF) | {"payouts": None})["payouts"] is None, "Challenge: kein Payout-Verlauf")
 
 # ── Fremd-Review K1: Randfälle ──
