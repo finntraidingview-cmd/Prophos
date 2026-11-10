@@ -15282,6 +15282,8 @@ def admin_live_trades():
                 # WS2 Trades pro Tag (09.11.2026, alle Wege): Platz/Anzahl/Rolle, Fensterende, Grund und die Teile des Tages aus kette.tagesende
                 z["kette_nr"], z["kette_von"], z["kette_rolle"], z["kette_lesen_bis"] = _kq.get("nr"), _kq.get("von"), _kq.get("rolle"), _kq.get("lesen_bis")
                 z["kette_grund"] = _kq.get("grund") or z.get("kette_grund")
+                # WS2E (10.11.2026, Gegenprüfung): genau gelesen wie tt_tick (tt_echt) — der Radar hält einen Echo-Teil nur dann in „Wartet"
+                z["kette_gelesen"] = bool(tt_echt(q)) if "tt_echt" in globals() else None
                 if q.get("status") == "review" and isinstance(_kq.get("tagesende"), dict):
                     z["kette_teile"] = _kq["tagesende"].get("teile")
             elif q.get("route") == "tsv2" and isinstance(_kq, dict) and _kq.get("nr"):
@@ -38633,6 +38635,41 @@ def tt_echt(plan):
     return (e[0], e[1]) if e else None
 
 
+def tt_abhak_werte(plan, echt):
+    """REIN RECHNEND (testbar): darf tt_tick einen Teil MIT Nachfolger selbst abhaken? → (master_pl, slave_pl, pl_quelle) | None (bleibt bei Finn).
+    Orbit/Topstep ohne Fusion-Solo-Hedge wie bisher (slave_pl None, Quelle tv). WS2E (Master 10.11.2026, Finn „einmal abhaken“ auch bei Echo): Echo mit
+    Copier-Hedge (mt5) nur mit BELEGTEM Fusion-P&L — slave_pl am Plan (atMoveToReview schreibt ihn aus final.closed_sum) bzw. final.closed_sum selbst
+    (Σ closed_hedges.profit des Copiers im Trade-Fenster; null = Hedge extern zu / Ring gekürzt / kein Beleg → Finn trägt ein). Echo V2 (mt5v2) bleibt wie
+    bisher bei Finn (Gegenprüfung: Folge-Teile sind immer mt5, und _wd_erledigt_upd würde sein slave_pl 0 mit null überschreiben).
+    master_pl immer aus der genauen Lesung (echt = tt_echt)."""
+    p = plan or {}
+    if not echt:
+        return None
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    route = str(p.get("route") or "")
+    mpl = round(float(echt[1]) - float(echt[0]), 2)
+    if route in ("tvv2", "tsv2"):
+        return None if bl.get("hedge") else (mpl, None, "tv")
+    if route == "mt5":
+        fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+        spl = _wd_num(p.get("slave_pl"))
+        if spl is None:
+            spl = _wd_num(fin.get("closed_sum"))
+        return (mpl, round(float(spl), 2), "echo") if spl is not None else None
+    return None
+
+
+def tt_zschluss_versucht(zs):
+    """REIN (testbar): hat der Zufalls-Schluss (WS2c) an diesem Teil schon gegriffen bzw. begonnen? status geschlossen/war_flach/fehler — oder (WS2E
+    10.11.2026) der PC-Tab hat den Versuch begonnen (zsAusfuehren schreibt versuche/letzter_versuch_at VOR dem Klick), status steht noch aus.
+    'uebersprungen' (Orbit mit Hedge, finaler Pass-Trade) ist kein Versuch."""
+    zs = zs if isinstance(zs, dict) else {}
+    st = zs.get("status")
+    if st in ("geschlossen", "war_flach", "fehler"):
+        return True
+    return not st and bool(zs.get("letzter_versuch_at") or zs.get("versuche"))
+
+
 def tt_folge_rechnen(k, bal_tag0, bal_jetzt, regel, param, rnd, w_h=None, grund_h=None, kette_r=None):
     """REIN RECHNEND (testbar): nächster Teil nach dem genau gelesenen Teil k (kette-Block des vorigen) → (werte, None) | (None, (ende_code, text)).
     bal_tag0 = genaue Start-Balance von Trade 1, bal_jetzt = genaue End-Balance des vorigen Teils. w_h/grund_h = ap_konto_rechnen bei bal_jetzt (Orbit/Echo:
@@ -38741,7 +38778,8 @@ def tt_tick(jetzt=None, rnd=None):
     """WS2 Takt (jede Minute aus ap_loop über _tt_takt): beendete Ketten-Teile (kette.von, heute) ohne Nachfolger und ohne tagesende.
     Genau gelesen → nächster Teil (tt_folge_rechnen, Start Lesung + abstand_min, erste regelkonforme Minute bis Fensterende, Richtung frei) oder Tag
     fertig (tagesende am letzten Teil, bleibt in Überprüfen bis Finns einem Haken). Teile mit Nachfolger: Orbit/Topstep automatisch abhaken (P&L aus der
-    genauen Lesung), Echo mit Hedge bleibt bei Finn (Hedge-P&L). Ohne genaue Lesung: lesen_bis schreiben; nach Fensterende Tag fertig (keine_lesung)."""
+    genauen Lesung), Echo mit Hedge seit WS2E nur mit belegtem Fusion-P&L (tt_abhak_werte), sonst bei Finn. Ohne genaue Lesung: lesen_bis schreiben; nach
+    Fensterende Tag fertig (keine_lesung)."""
     jetzt = jetzt or datetime.now(timezone.utc)
     rnd = rnd or random.SystemRandom()
     jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
@@ -38750,7 +38788,7 @@ def tt_tick(jetzt=None, rnd=None):
     mitternacht = datetime(d.year, d.month, d.day, tzinfo=tz)
     rows = sb_select("trade_plans", {
         "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,route,status,auto_plan,auto_bestaetigt_at,"
-                  "ended_at,completed_at,planned_for,master_pl,konto_typ,updated_at,mt5_baseline",
+                  "ended_at,completed_at,planned_for,master_pl,slave_pl,konto_typ,updated_at,mt5_baseline",
         "status": "in.(review,completed)", "ended_at": "gte." + (mitternacht - timedelta(hours=6)).isoformat(),
         "mt5_baseline->kette->>von": "not.is.null"}) or []
     rows = [p for p in rows if not (((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"))]
@@ -38777,11 +38815,13 @@ def tt_tick(jetzt=None, rnd=None):
         echt = tt_echt(p)
         try:
             if pid in nachfolger:
-                # Nachfolger steht: Orbit/Topstep (ohne Hedge) automatisch abhaken, Echo mit Hedge bleibt bei Finn (Fusion-P&L)
-                if p.get("status") == "review" and echt and route in ("tvv2", "tsv2") and not (p.get("mt5_baseline") or {}).get("hedge"):
-                    upd, fehler = _wd_erledigt_upd(p, round(echt[1] - echt[0], 2), None, jetzt_iso, _cme_handelstag())
+                # Nachfolger steht: Orbit/Topstep (ohne Hedge) automatisch abhaken; Echo (WS2E 10.11.2026) nur mit belegtem Fusion-P&L (tt_abhak_werte),
+                # sonst bleibt der Teil bei Finn
+                aw = tt_abhak_werte(p, echt) if p.get("status") == "review" else None
+                if aw:
+                    upd, fehler = _wd_erledigt_upd(p, aw[0], aw[1], jetzt_iso, _cme_handelstag())
                     if not fehler:
-                        upd["pl_quelle"] = "tv"
+                        upd["pl_quelle"] = aw[2]
                         filt = {"id": f"eq.{pid}", "status": "eq.review"}
                         if p.get("updated_at"):
                             filt["updated_at"] = f"eq.{p['updated_at']}"
@@ -38809,9 +38849,11 @@ def tt_tick(jetzt=None, rnd=None):
                 ende_code, ende_text = "geloescht", TT_ENDE_TXT["geloescht"]
             elif int(k.get("nr") or 1) >= int(k.get("von") or 1):
                 ende_code, ende_text = "alle", TT_ENDE_TXT["alle"]
-            elif zs.get("status") in ("geschlossen", "war_flach", "fehler"):
-                # WS2c (S5 09.11.2026): der Tag zählt über zschluss.status — nach jedem Schluss-Versuch kein Folge-Teil (final.quelle 'close' ist kein Signal)
-                ende_code, ende_text = "zschluss", f"{TT_ENDE_TXT['zschluss']} ({zs.get('status')})"
+            elif tt_zschluss_versucht(zs):
+                # WS2c (S5 09.11.2026): der Tag zählt über zschluss.status — nach jedem Schluss-Versuch kein Folge-Teil (final.quelle 'close' ist kein Signal).
+                # WS2E (10.11.2026): auch schon, wenn der PC-Tab den Versuch begonnen hat (versuche/letzter_versuch_at, VOR dem Klick geschrieben) und status
+                # noch fehlt — bei Echo steht die Nachlesung oft vor dem Status (Hedge-Beweis bis 90 s), sonst entstand dazwischen ein Folge-Teil
+                ende_code, ende_text = "zschluss", f"{TT_ENDE_TXT['zschluss']} ({zs.get('status') or 'Versuch'})"
             elif not param.get("an"):
                 ende_code, ende_text = "aus", TT_ENDE_TXT["aus"]
             elif ap_firma_gesperrt({"user_id": p.get("user_id"), "firm": p.get("master_firm")}, sperren):

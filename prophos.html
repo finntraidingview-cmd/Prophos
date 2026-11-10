@@ -39511,7 +39511,8 @@
   /* WS2e (Master 09.11.2026, WS2 Tages-Teilung 1–4 Trades): „nicht-letzter Teil" der Radar-Zeile — mit kette_von (Backend /admin/live-trades, S1)
    * von > nr auf Orbit (tvv2) und Topstep (tsv2) (Teil 2 von 3 wartet wie Topstep-Trade 1); ohne bzw. ungültiges kette_von genau der alte Weg: Topstep (tsv2) Trade 1. -> bool */
   // Echo-Teile (mt5/mt5v2) nie: Schnittstelle §9 — Teile mit Fusion-Hedge hakt Finn einzeln ab, Einmal-Abhaken am Tagesergebnis nur Orbit (tvv2) und Topstep (tsv2);
-  // Echo-Zeilen kommen ohnehin nie nach „Wartet" (wdlIstEcho), ein Wartet-Urteil hier sperrte nur Ein-Klick/Popup (Fremd-Review WS2e)
+  // Echo-Zeilen kommen hier nie nach „Wartet" (wdlIstEcho), ein Wartet-Urteil hier sperrte nur Ein-Klick/Popup (Fremd-Review WS2e); seit WS2E (10.11.2026)
+  // wartet ein nicht-letzter Echo-Teil über den eigenen Weg wdlEchoKetteWartet (genau gelesen + Fusion-P&L belegt, tt_tick hakt ihn selbst ab)
   function wdlKetteNichtLetzter(t){
     if(!t || t.route === 'mt5' || t.route === 'mt5v2') return false
     const nr = Number(t.kette_nr), von = (t.kette_von == null || t.kette_von === '') ? NaN : Number(t.kette_von)
@@ -39519,6 +39520,25 @@
     return Number.isInteger(nr) && nr >= 1 && von > nr
   }
   window._wdlKetteNichtLetzter = wdlKetteNichtLetzter   // Test-Haken
+  /* WS2E (Master 10.11.2026, Finn „einmal abhaken" auch bei Echo): ein nicht-letzter Echo-Teil (route mt5, kette_von > kette_nr) steht wie ein Orbit-Teil in
+   * „Wartet" („Trade n+1 folgt"), solange app.py tt_tick ihn selbst abhakt (tt_abhak_werte): Fusion-P&L belegt (slave_pl, aus final.closed_sum des Copiers),
+   * Start-Balance da, Fenster bis kette_lesen_bis offen, kein Tagesende, nicht geblowt, kein „von Hand"-Grund. Fehlt der Fusion-P&L, bleibt er Abhak-Zeile
+   * (Finn trägt ihn ein). Ohne gültiges kette_von und alle anderen Echo-Zeilen: null wie bisher. → Wartet-Stand ('t2', ohne „Jetzt lesen") | null */
+  function wdlEchoKetteWartet(t, jetzt){
+    if(!t || !wdlIstEcho(t) || t.route !== 'mt5' || t.status !== 'review' || t.kette_tag || t.blown === true) return null
+    const nr = Number(t.kette_nr), von = (t.kette_von == null || t.kette_von === '') ? NaN : Number(t.kette_von)
+    if(!(Number.isInteger(nr) && nr >= 1 && Number.isInteger(von) && von > nr)) return null
+    const bis = Date.parse(t.kette_lesen_bis || '') || 0
+    if(!bis || (jetzt || Date.now()) >= bis) return null
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(n(t.balance_start) == null || n(t.slave_pl) == null) return null
+    // Gegenprüfung WS2E: nur GENAU gelesen (Backend kette_gelesen = tt_echt: bal_nach.ok) — sonst stünde eine gescheiterte Nachlesung bis Fensterende
+    // versteckt in „Wartet" mit falschem „ist gelesen"; ohne Lesung bleibt die Zeile in Überprüfen wie bisher
+    if(t.kette_gelesen !== true) return null
+    if(/unplausibel|Balance-Sprung|von Hand|ohne Start-Balance/i.test(String(t.kette_grund || ''))) return null
+    return { ab: null, versuche: 0, letzte: 0, login: null, bis: null, loginN: 0, loginCode: '', kette: 't2' }
+  }
+  window._wdlEchoKetteWartet = wdlEchoKetteWartet   // Test-Haken (WS2E)
   window._wdlKetteTagChip = (...a) => wdlKetteTagChip(...a)   // Test-Haken (WS2e)
   window._wdlWartet = (...a) => wdlWartet(...a)   // Test-Haken (WS2e)
   // Kopf der Ketten-Texte im Radar: Topstep-Tag wie bisher, sonst Tages-Kette (Orbit/Echo-Teile, WS2)
@@ -40849,7 +40869,7 @@
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
       const echo = wdlIstEcho(t), polar = wdlIstPolar(t)
-      const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
+      const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? wdlEchoKetteWartet(t) : wdlWartet(t)   // WS2E: Echo nur als nicht-letzter Ketten-Teil
       // KONTOGRÖSSE IN DER ZEILE (08.10.2026, Finn am Radar: „schreib dazu, ob es ein 100k- oder 200k-Account war — sieht man hier
       // nie"): groesse kommt vom Backend (starting_balance, sonst „150k" aus dem Namen); fehlt beides, Rückfall wie im Planer auf die
       // Standardgröße, die der Start-Balance am nächsten liegt. „FundedNext 100k …0795" — keine Größe bekannt → wie bisher.
@@ -41100,7 +41120,8 @@
       // Manuelle Arbeit (08.10.2026) geht vor Wartet/Überprüfen — das Kennzeichen zieht die Zeile aus beiden heraus (Zähler mit)
       // Geparkt (12.10.2026) bleibt in Überprüfen (eigene Untergruppe) und fällt nie nach Wartet
       const ma = rv.filter(t => !!wdlManuell(t) && !wdlGeparkt(t)), rest = rv.filter(t => !ma.includes(t))
-      const wa = rest.filter(t => !wdlGeparkt(t) && !wdlIstEcho(t) && wdlWartet(t)), pr = rest.filter(t => !wa.includes(t))
+      // WS2E (10.11.2026): Echo wartet nur als nicht-letzter Ketten-Teil, den tt_tick selbst abhakt (wdlEchoKetteWartet) — sonst wie bisher direkt Überprüfen
+      const wa = rest.filter(t => !wdlGeparkt(t) && (wdlIstEcho(t) ? !!wdlEchoKetteWartet(t) : wdlWartet(t))), pr = rest.filter(t => !wa.includes(t))
       return { la, fe, wa, pr, ma, er }
     }
     // MANUELLE ARBEIT (08.10.2026): zwischen Überprüfen und Erledigt, neueste Ablage oben. Leer, aber Überprüfen hat Zeilen → ein
@@ -57799,7 +57820,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2144'
+  const OS_TAB_BUILD = '2026-09-22.2145'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
