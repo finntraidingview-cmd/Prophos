@@ -2584,7 +2584,7 @@ def _bot_lauf_aktiv():
             return True
         if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():   # Maus-Test × parkt die Maus 10 s (20.10.2026, S1-Prüfung)
             return True
-        if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+        if TV_ORDER_LOCK.locked() or mt5_order_belegt():   # reine Deal-/Vorflug-Lesungen zählen nicht (S1, RA2 F1)
             return True
         return time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900
     except OSError:
@@ -2732,6 +2732,16 @@ MASTER_ORDER_GUARD = threading.Lock()
 DEALS_LESEN = set()   # N2 (04.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade eine Deal-Lesung (/api/deals, nur lesen) hält
 VORFLUG_LESEN = set()   # F-A (11.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade ein Konto-Vorflug (/api/vorflug, nur lesen) hält
 VORFLUG_WARTE_S = 45.0  # eine Order wartet so lange auf einen laufenden Vorflug (Lesung ≤ ~25 s) statt mit 409 zum Fehlstart zu werden
+
+
+def mt5_order_belegt(locks=None, lesen=None):
+    """REIN (testbar, Hinweis S1 zu RA2 F1, 11.11.2026): hält eine Instanz ihren MASTER_ORDER_LOCK für eine ORDER bzw. einen Close? Reine Lesungen
+    (/api/deals, /api/vorflug — DEALS_LESEN/VORFLUG_LESEN) fassen weder Fenster noch Maus an: sie zählen für die PC-weiten Belegt-Prüfungen
+    (Tab-Heilung/Fenster nach vorn, Panel-Neustart) nicht mit — sonst wartete dort alles bis zu 90 s auf die Deal-Lesung einer ANDEREN Instanz.
+    Der Lock je Instanz selbst bleibt unverändert (Order gegen Lesung derselben Instanz)."""
+    locks = MASTER_ORDER_LOCKS if locks is None else locks
+    lesen = (DEALS_LESEN | VORFLUG_LESEN) if lesen is None else lesen
+    return any(l.locked() and f not in lesen for f, l in list(locks.items()))
 
 # Orbit-Puls (30.08.2026): EIN Lock fuer den ganzen TradingView-Weg, nicht pro
 # Instanz. Der MT5-Bot bedient je ein eigenes Terminal, der TV-Bot bedient
@@ -4254,7 +4264,7 @@ def panel_beschaeftigt_gruende():
             g.append("TradingView-/TopstepX-Lauf (TV_ORDER_LOCK)")
         for f, l in list(MASTER_ORDER_LOCKS.items()):
             if l.locked():
-                g.append(f"MT5-Order {str(f)[:40]}")
+                g.append(f"{'MT5-Lesung' if f in (DEALS_LESEN | VORFLUG_LESEN) else 'MT5-Order'} {str(f)[:40]}")
         if polar_panel and polar_panel.aktiv():
             g.append("Polar-Lauf")
         if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():
@@ -4339,7 +4349,7 @@ def _browser_und_mt5_frei(tv_eigen=False):
             return False
         if not tv_eigen and TV_ORDER_LOCK.locked():
             return False
-        return not any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))
+        return not mt5_order_belegt()   # reine Deal-/Vorflug-Lesungen zählen nicht (S1, RA2 F1)
     except Exception:
         return False
 
@@ -8770,7 +8780,7 @@ def _version_watcher(my_version):
             if upd["seit"] is None:       # Wartezeit ab dem ersten anstehenden Update — eine neue VERSION beim Warten setzt sie nicht zurück
                 upd.update(streu_bis=time.time() + random.uniform(0, UPDATE_STREU_S), seit=time.time(), gemeldet="")
             upd["auf"] = remote
-            if (TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))) and time.time() - upd["seit"] < UPDATE_DECKEL_S:
+            if (TV_ORDER_LOCK.locked() or mt5_order_belegt()) and time.time() - upd["seit"] < UPDATE_DECKEL_S:   # Lesungen zählen nicht (S1, RA2 F1)
                 continue
             if polar_panel and polar_panel.aktiv():   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten — auch nach dem Deckel nicht (S2 29.10.2026)
                 continue

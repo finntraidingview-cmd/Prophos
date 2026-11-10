@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory() as d:
     check(argv(bot)[:2] == [sys.executable, "-c"] and argv(bot)[-1] == bot, "ohne Schalter → [python, -c, Starter, bot]")
 
 check(block(PANEL) == block(BOT), "Starter in panel.py und order_bot.py zeichengleich")
-check("subprocess.run([sys.executable, bot, " not in PANEL and PANEL.count("subprocess.run([*bot_argv(bot), ") == 15, "panel.py: alle 15 Bot-Starts über bot_argv")
+check("subprocess.run([sys.executable, bot, " not in PANEL and PANEL.count("subprocess.run([*bot_argv(bot), ") == 16, "panel.py: alle 16 Bot-Starts über bot_argv (F-A 11.11.2026: + /api/vorflug)")
 check("subprocess.Popen([sys.executable, os.path.abspath(__file__), " not in BOT and BOT.count("subprocess.Popen([*bot_argv(os.path.abspath(__file__)), ") == 4,
       "order_bot.py: Selbststarts (fehlerfoto, nachreichen, augen, tsxbleiben) über bot_argv")
 check("py_compile.PycInvalidationMode.CHECKED_HASH" in CODE and "runpy.run_path(bot, run_name='__main__')" in CODE
