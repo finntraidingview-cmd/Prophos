@@ -27268,7 +27268,11 @@
         // sb nur mit Copier-Zeilen (ohne Zeilen schreibt der Tab nie — keine Aussage, S2 30.10.2026)
         sb: (_fleetPushAt && !window._fleetZeilenLeer) ? String(Math.round((Date.now() - _fleetPushAt) / 1000)) : '', rt: window._rtAusSeit ? String(Math.round((Date.now() - window._rtAusSeit) / 1000)) : '0',
         // FS1 (10.11.2026): Sichtbarkeit + Ladezeit für den Tab-Zustand in der Puls-Spur (panel.py /api/tab-zustand)
-        vis: document.visibilityState === 'visible' ? 'v' : 'h', geladen: String(Math.round((performance.timeOrigin || 0) / 1000)) })
+        vis: document.visibilityState === 'visible' ? 'v' : 'h', geladen: String(Math.round((performance.timeOrigin || 0) / 1000)),
+        // F-B TAB-PING (FS3, Master 11.11.2026; K4 „Prophos-Tab antwortet nicht“): das Panel gibt vor einem Start eine Marke mit (vorflug_ping) und
+        // verlangt sie binnen 20 s zurück — der Tab schickt die zuletzt gesehene Marke bei jedem Herzschlag (alle 5 s) als vpong. Ohne Marke „0“: sagt
+        // dem Panel nur „dieser Tab kann antworten“ (kann_pong). Altes Panel: Parameter wird ignoriert
+        vpong: (window._tabNebenSofort ? '' : window._vfPingMarke) || (window._tabNebenSofort ? '' : '0') })
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
       // HAUPT-TAB (30.10.2026): ein zweiter Tab meldet nichts mehr (kein mt5_live) und wechselt auf „nur ansehen"
@@ -27279,7 +27283,9 @@
       // ~10 s still): in den ersten TAB_NEBEN_ANLAUF_MS nach dem Laden nie als ?neben=1 neu laden, nur gesperrt weiter fragen (alle 5 s).
       // Bleibt die alte Kennung 60 s still, macht das Panel diesen Tab zum Haupt-Tab und die Sperre fällt — ohne Neuladen. Ein echter
       // zweiter Tab (der andere fragt weiter) wird nach dem Anlauf wie bisher „nur ansehen".
-      if(dd.haupt_tab === false){ if(performance.now() >= TAB_NEBEN_ANLAUF_MS) tabNebenWerden(); return }
+      if(dd.haupt_tab === false){ window._vfPingMarke = null; if(performance.now() >= TAB_NEBEN_ANLAUF_MS) tabNebenWerden(); return }
+      // F-B: Marke nur im Haupt-Tab merken (ein zweiter Tab darf den Ping nie für einen hängenden Haupt-Tab beantworten)
+      if(typeof dd.vorflug_ping === 'string' && /^[0-9a-f-]{3,40}$/.test(dd.vorflug_ping)) window._vfPingMarke = dd.vorflug_ping
       // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein
       // Update ist" — der Bot wird per Commit getauscht, ohne dass die Seite neu lädt; die Build-Nummer allein sagt also nichts über
       // den Bot): neben „Build …" steht am PC-Tab „· Bot .1630" aus /api/instances bot_version (VERSION des Bot-Stands, Panel BOT_STAND).
@@ -58427,7 +58433,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2176'
+  const OS_TAB_BUILD = '2026-09-22.2177'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -65208,6 +65214,7 @@
         if(r === 'tagesende'){ try{ await baselinePatch(p.id, { start_fehler: Object.assign({}, f, { status: 'tagesende' }) }, 'planned') }catch(_){} }
       }
       await sfStillPruefen()   // geclaimt + still → Start-Fehler (30.10.2026)
+      vfTick().catch(e => console.warn('[vorflug] tick', (e && e.message) || e))   // FS3 F-A: eigener Lauf, nicht abgewartet (Lesung bis 40 s)
     }catch(e){ console.warn('[start-fehler] tick', (e && e.message) || e) }
     finally{ _sfLaeuft = false }
   }
@@ -65222,6 +65229,81 @@
       'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
+  /* F-A KONTO-VORFLUG (FS3, Master 11.11.2026 nach FS2, Finn „Ja“; K1 Konto-Zustand: 44 Pläne in 7 Tagen — ein kaputtes Konto fiel erst zur Startzeit
+   * auf, E1 sperrt erst nach 2–3 Fehlstarts). Je geplantem Echo-Plan (mt5/mt5v2) dieses Tabs zwei Lesungen VOR dem Start, T−15 und T−5 min (je ±2 min,
+   * einmal je Plan gewürfelt): Panel GET /api/vorflug (order_bot „vorflug“, nur MetaTrader5-API: Konto, trade_allowed, Symbol, letzte Server-Ablehnung im
+   * Journal — kein Fenster, kein Login, kein Klick; nur ein schon laufendes Terminal; besetzt → 409). Nur wenn an diesem PC kein Echo-Lauf tippt
+   * (Tipp-Sperre frei: kein Start, kein Echo-Bot, kein Echo-Check vor der Order, kein Vorwärmen, kein Deal-Abgleich, kein Polar). Ergebnis nur als Spur
+   * mt5_baseline.vorflug.{a|b} = {at, rot, art, grund, balance, login | nicht_gelesen} — die E1-Wache (app.py kk, S5) nimmt rote Vorflüge später an; bis
+   * dahin Diagnose, kein Fehlstart-Eintrag (puls_fehlstarts bleibt unberührt), kein Eingriff in den Start. Panel ohne /api/vorflug → 30 min nichts. */
+  const VF_SLOTS = [{ k: 'a', vor_min: 15 }, { k: 'b', vor_min: 5 }], VF_STREU_MIN = 2, VF_ZEIT_MS = 50000, VF_AUS_MS = 30 * 60000
+  const _vf = { ziel: new Map(), laeuft: false, ausBis: 0 }
+  // REIN (Test-Haken): Zielzeiten je Plan, einmal gestreut; neue Startzeit → neu gewürfelt
+  function vfZiele(alt, startMs, rnd){
+    if(alt && alt.st === startMs) return alt
+    const z = { st: startMs, erledigt: {}, at: {} }
+    for(const sl of VF_SLOTS) z.at[sl.k] = startMs - (sl.vor_min + (rnd() * 2 - 1) * VF_STREU_MIN) * 60000
+    return z
+  }
+  // REIN (Test-Haken): welcher Vorflug ist jetzt dran? Der späteste fällige; frühere, die dabei übersprungen werden, gelten als verpasst. Nie in der
+  // letzten Minute vor dem Start (dann startet der Plan gleich selbst). → { slot, verpasst: [...] } | null
+  function vfFaellig(z, jetzt){
+    if(!z || !(jetzt < z.st - 60000)) return null
+    const offen = VF_SLOTS.filter(sl => !z.erledigt[sl.k] && jetzt >= z.at[sl.k])
+    if(!offen.length) return null
+    return { slot: offen[offen.length - 1].k, verpasst: offen.slice(0, -1).map(sl => sl.k) }
+  }
+  function vfFrei(){
+    try{
+      if(_suLaeuft || _pfV2Laeuft || _echoVorwaermenLaeuft || _deLaeuft) return false
+      if(typeof echoVorlaufAktiv === 'function' && echoVorlaufAktiv()) return false
+      if(typeof polarLaeuft === 'function' && polarLaeuft()) return false
+    }catch(_){ return false }
+    return true
+  }
+  async function vfTick(){
+    if(window._tabNebenSofort || !MT5_LOCAL || _vf.laeuft || Date.now() < _vf.ausBis || typeof window.mtcApi !== 'function') return
+    const heute = sfTagDt(new Date().toISOString()), t0 = Date.now()
+    const kand = (tradePlans || []).filter(p => p && routeIstEcho(p.route) && p.status === 'planned' && !p.startUmGestartetAt && !p.startedAt
+      && p.startUm && sfTagDt(p.startUm) === heute && Date.parse(p.startUm) > t0)
+    for(const id of [..._vf.ziel.keys()]) if(!kand.some(p => String(p.id) === id)) _vf.ziel.delete(id)   // gestartet/gelöscht → vergessen
+    if(!kand.length) return
+    _vf.laeuft = true
+    try{
+      let dd = null
+      for(const p of kand){
+        const id = String(p.id), z = vfZiele(_vf.ziel.get(id), Date.parse(p.startUm), Math.random); _vf.ziel.set(id, z)
+        const f = vfFaellig(z, Date.now()); if(!f) continue
+        for(const k of f.verpasst) z.erledigt[k] = 'verpasst'
+        if(!vfFrei()) break   // Tipp-Sperre: nächster Takt
+        if(!dd){ dd = await window.mtcApi('instances'); if(!dd || dd.copier_offline || dd._httpFail) return }
+        const ri = mt5V2Resolve(p, dd.instances || [])
+        if(!ri || !ri.inst || !ri.inst.file){ z.erledigt[f.slot] = 'anderer_pc'; continue }   // Instanz an einem anderen PC — dessen Tab liest
+        // Prüfer FS3 (MUSS): nie auf einer Instanz, auf der ein ANDERER Echo-Plan offen/geclaimt ist oder in ≤ 2 min startet — die Lesung hält den
+        // Instanz-Lock bis 40 s; ein Schließen (master-close) bzw. ein fremder Start wartete so lange (bei Echo mit Hedge stünde der Master ungehedgt).
+        // Je Kandidat frisch (wie deTick/deBelegt); nicht erledigt → nächster Takt im Fenster
+        const jm = Date.now()
+        const andere = (tradePlans || []).filter(q => q && String(q.id) !== id && routeIstEcho(q.route) && (q.status === 'open'
+          || (q.status === 'planned' && !q.startedAt && (q.startUmGestartetAt || (q.startUm && Math.abs(Date.parse(q.startUm) - jm) <= 2 * 60000)))))
+        const belegt = deBelegt(andere, q => { const x = mt5V2Resolve(q, dd.instances || []); return x && x.inst && x.inst.file ? String(x.inst.file) : null })
+        if(belegt.has(String(ri.inst.file))) continue
+        const qs = new URLSearchParams({ file: ri.inst.file, symbol: p.masterSymbol || '', richtung: p.richtung || '' })
+        const res = await window.mtcApi('vorflug?' + qs.toString(), { timeoutMs: VF_ZEIT_MS })
+        if(!res || res._httpFail || res.copier_offline) continue                 // Panel/Proxy kurz weg, Zeitlimit, 502 → nächster Takt im Fenster (Prüfer FS3)
+        if(typeof res.lesbar !== 'boolean'){ _vf.ausBis = Date.now() + VF_AUS_MS; return }   // Panel ohne /api/vorflug (alter Stand, 404 JSON) → wie heute
+        const grund = String(res.grund || '').slice(0, 200)
+        // nur „belegt“ (409: Order/Lesung läuft, Heilung) wird im Fenster wiederholt; jede andere Nicht-Lesung (Terminal zu, Instanz unbekannt, Bot-Fehler)
+        // schließt den Vorflug mit Grund ab — sonst bis ~14 Lesungen je Plan unter dem Lock ohne Spur (Prüfer FS3)
+        if(res.lesbar === false && /gerade eine Order oder Lesung|geheilt|später/i.test(grund)) continue
+        z.erledigt[f.slot] = res.lesbar === false ? 'nicht_gelesen' : res.rot ? 'rot' : 'ok'
+        const spur = { at: new Date().toISOString(), lesbar: res.lesbar !== false, rot: !!res.rot, art: res.art || null, grund: grund || null,
+          balance: Number.isFinite(Number(res.balance)) ? Number(res.balance) : null, login: res.login != null ? String(res.login) : null }
+        if(res.rot) console.warn(`[vorflug] ${p.masterName || id}: ${res.art || 'rot'} — ${grund}`)
+        try{ await baselinePatchIn(p.id, 'vorflug', { [f.slot]: spur }, 'planned') }catch(e){ console.warn('[vorflug] Spur', (e && e.message) || e) }
+      }
+    }finally{ _vf.laeuft = false }
+  }
+  window._vf = { ziele: vfZiele, faellig: vfFaellig }   // Test-Haken
   // Sofort-Start-Wächter (03.11.2026, Z4): nur Zweit-Wartezeilen, eigener gestreuter Takt (Puls-Jitter-Regel), teilt sich _sfLaeuft mit sfTick
   async function sfZweitRunde(){
     if(window._tabNebenSofort || !MT5_LOCAL || _sfLaeuft) return
