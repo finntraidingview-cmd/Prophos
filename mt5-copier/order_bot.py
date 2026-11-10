@@ -14216,6 +14216,7 @@ def run(cfg_path, cmd):
             _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
+        _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC mit Beweis — ein stehen gebliebener Order-Dialog mit aktivem Buy/Sell blockt später den Close
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
                        f"Knoepfe: {', '.join(inventar) or 'keine'} [" + _spur(trail) + "]"}
@@ -14229,6 +14230,7 @@ def run(cfg_path, cmd):
                 _el_tasten(dlg, "{ESC}", set_foreground=False)
             except Exception:
                 pass
+            _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC mit Beweis — ein stehen gebliebener Order-Dialog mit aktivem Buy/Sell blockt später den Close
             trail.append(f"vor dem {muster}-Knopf nicht mehr scharf: {_sch_grund}")
             return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
                     "msg": (f"Copier vor dem {muster}-Knopf nicht mehr scharf ({_sch_grund}) — Dialog geschlossen, nichts gesendet. [" + _spur(trail) + "]")}
@@ -14309,6 +14311,7 @@ def run(cfg_path, cmd):
             _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
+        _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC mit Beweis — ein stehen gebliebener Order-Dialog mit aktivem Buy/Sell blockt später den Close
         return {"ok": False, "retry_ok": True,
                 "msg": "Buy/Sell-Knopf liess sich auf keinem Weg ausloesen "
                        "[" + _spur(trail) + "]"}
@@ -14343,6 +14346,7 @@ def run(cfg_path, cmd):
                     _el_tasten(dlg, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
+                _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC ungeprüft ließ „Order: …“ stundenlang offen — s. _f9_dialog_zu
                 trail.append("SL/TP: manuell (Schalter aus)")
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                         "msg": "per Klick platziert — SL/TP bewusst NICHT gesetzt "
@@ -14362,6 +14366,7 @@ def run(cfg_path, cmd):
                     _el_tasten(dlg, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
+                _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC ungeprüft ließ „Order: …“ stundenlang offen — s. _f9_dialog_zu
                 trail.append(f"SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)} "
                              f"direkt im F9-Dialog gesetzt")
                 # grobe F9-Level (ab Kurs VOR dem Klick) am echten Fill nachziehen (21.10.2026, s. sltp_vom_fill). Echo V2 wie bisher; Echo mit Fusion-Hedge
@@ -14417,6 +14422,7 @@ def run(cfg_path, cmd):
                 _el_tasten(dlg, "{ESC}", set_foreground=False)
             except Exception:
                 pass
+            _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC ungeprüft ließ „Order: …“ stundenlang offen — s. _f9_dialog_zu
             _warte(0.2, 0.25)
             # Anker-Datei: gemerkte Treffer-Stelle des Zeilen-Scans. BEWUSST
             # mit 'anker-'-Praefix, damit sie NIE ins config-*.json-Muster
@@ -14495,6 +14501,7 @@ def run(cfg_path, cmd):
         _el_tasten(dlg, "{ESC}", set_foreground=False)
     except Exception:
         pass
+    _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): auch hier mit Beweis — ein stehen gebliebener halber Order-Dialog blockt später den Close
     if markt_zu and not anfrage_gesehen:   # DO2: mit Anfrage unterwegs nie retry_ok — sonst startet der Tab dieselbe Order neu
         return {"ok": False, "retry_ok": True,
                 "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
@@ -14531,6 +14538,238 @@ def run(cfg_path, cmd):
             "trail": _spur(trail)}
 
 
+# NZ1 LIEGENGEBLIEBENE DIALOGE VOR DEM CLOSE (10.11.2026, CPI 14:30: News-Schließung bei Moritz 4× „Zeilen-Scan ohne Treffer“, bei Jacob 5× „geklickt,
+# aber kein Close-Dialog“, bei Artur 1× „Zeile nicht gefunden“ — in JEDER dieser Spuren, auch im Auto-Close-Fehler vom 09.11., stand im Terminal-Prozess
+# ein offenes Fenster „Order: NAS100 - …“ bzw. „Order: NDX100 - …“, Stunden nach der Eröffnung; bei Moritz ab dem 2. Versuch zusätzlich „Drucken“).
+# _fremde_dialoge_schliessen sieht nur TOP-LEVEL-Fenster und schickt ESC ungeprüft — MT5 hängt seine Dialoge aber als KIND ans Hauptfenster (Fund
+# 15.08.2026, s. _finde_order_dialog), so ein Rest überlebte jeden Lauf. Jetzt räumt der Close-Weg vor dem Zeilen-Scan in BEIDEN Quellen weg, was
+# close_rest_art erkennt, und prüft lesend, dass es weg ist: Abbrechen-Knopf → ESC an das Fenster selbst → WM_CLOSE (= das X). Nie OK, nie Enter,
+# nie Kauf/Verkauf. Haftungsausschluss, Login-Dialog und Charts sind nie ein Rest.
+def close_rest_art(titel, knoepfe):
+    """REIN RECHNEND (testbar): ist dieses Fenster im MT5-Prozess ein Rest, den der Close-Weg vor dem Zeilen-Scan wegräumen darf?
+    → 'order' (F9-/Order-Dialog, Titel „Order…“), 'aendern' (Ändern-Dialog einer Position), 'drucken' (Druckdialog) oder None."""
+    t = (titel or "").strip().lower()
+    kn = [str(k or "") for k in (knoepfe or [])]
+    if any(ist_einklick_akzeptieren_knopf(k) for k in kn) or ist_einklick_dialog(t):
+        return None   # der Haftungsausschluss wird angenommen, nie abgebrochen (_einklick_haftung_annehmen)
+    if t.startswith(("einloggen", "login", "anmeld")):
+        return None   # MT5-Login-Dialog: _mt5_login_bestaetigen
+    if t.startswith("order"):
+        return "order"
+    if any(ist_bestaetigen_knopf(k) for k in kn):
+        return "aendern"   # nur der LANGE Knopf mit Ticket/SL/TP — „change“/„modify“ allein träfe auch „Exchange“ (Prüfer zu NZ1)
+    if t in ("drucken", "print", "seite einrichten", "page setup"):
+        return "drucken"
+    return None
+
+
+def _close_reste_raeumen(hauptfenster, trail):
+    """NZ1 (10.11.2026): liegengebliebene Order-/Ändern-/Druck-Fenster des Terminal-Prozesses wegräumen, BEVOR der Close-Weg die Handel-Liste
+    anklickt (Top-Level UND Kind-Fenster, wie _finde_close_dialog). Jeder Fund und sein Ausgang gehen in die Spur. Rückgabe: Anzahl SICHTBARER
+    Reste, die stehen blieben (> 0 = der Aufrufer scannt nicht). WM_CLOSE nur an echte Dialoge (Klasse #32770): an einem Kind-Fenster, das
+    kein Dialog ist, zerstörte das Default-Verhalten das Fenster (Chart mit Reader-EA). Unsichtbare Order-Fenster kommen nur in die Spur —
+    MT5 kann sein Dialog-Objekt versteckt behalten (Prüfer zu NZ1: die Liste „Fenster im Prozess“ zählt Kind-Fenster ohne Sichtbarkeit)."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return 0   # Mac/Selbsttest ohne pywinauto: nichts zu räumen
+    try:
+        pid = hauptfenster.element_info.process_id
+    except Exception:
+        return 0
+    kandidaten = []
+    try:
+        for d in Desktop(backend="uia").windows():
+            try:
+                if d.element_info.process_id == pid and d.element_info.class_name != MT5_KLASSE:
+                    kandidaten.append(d)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    kandidaten.extend(_kind_fenster(hauptfenster))
+
+    def _weg(d):
+        try:
+            return not d.is_visible()
+        except Exception:
+            return True   # nicht mehr ansprechbar = weg
+
+    def _warte_weg(d, s=1.2):
+        ende = time.time() + s
+        while time.time() < ende:
+            if _weg(d):
+                return True
+            _warte(0.15, 0.15)
+        return _weg(d)
+
+    gesehen, blieb = set(), 0
+    for d in kandidaten:
+        try:
+            h = getattr(d, "handle", None) or getattr(d.element_info, "handle", None)
+            if h and h in gesehen:
+                continue
+            titel = (d.window_text() or "").strip()
+            if _weg(d):
+                if titel.lower().startswith("order"):
+                    if h:
+                        gesehen.add(h)
+                    trail.append(f"'{titel[:30]}' im Prozess, aber unsichtbar — übersprungen")
+                continue
+            knoepfe = []
+            try:
+                knoepfe = list(d.descendants(control_type="Button"))
+            except Exception:
+                pass
+            art = close_rest_art(titel, [b.window_text() for b in knoepfe])
+            if not art:
+                continue
+            if h:
+                gesehen.add(h)
+            weg_name = None
+            for b in knoepfe:
+                if (b.window_text() or "").strip().lower() in ("abbrechen", "cancel"):
+                    try:
+                        b.click()
+                        if _warte_weg(d):
+                            weg_name = "Abbrechen"
+                    except Exception:
+                        pass
+                    break
+            if weg_name is None:
+                try:
+                    d.set_focus()
+                    _warte(0.1, 0.15)
+                    _el_tasten(d, "{ESC}", set_foreground=False)
+                    if _warte_weg(d):
+                        weg_name = "ESC"
+                except Exception:
+                    pass
+            if weg_name is None and h and (getattr(d.element_info, "class_name", "") or "") == "#32770":
+                try:
+                    import ctypes
+                    ctypes.windll.user32.PostMessageW(int(h), 0x0010, 0, 0)   # WM_CLOSE = das X des Fensters
+                    if _warte_weg(d, 2.0):
+                        weg_name = "Fenster-X"
+                except Exception:
+                    pass
+            if weg_name:
+                trail.append(f"Rest-Fenster '{titel[:30]}' ({art}) weggeräumt ({weg_name})")
+            else:
+                blieb += 1
+                trail.append(f"Rest-Fenster '{titel[:30]}' ({art}) blieb stehen")
+        except Exception:
+            continue
+    return blieb
+
+
+def _f9_dialog_zu(dlg, trail):
+    """NZ1 (10.11.2026): der F9-Dialog nach dem Fill — das ESC davor ging ungeprüft raus (set_foreground=False: die Taste landet im gerade
+    fokussierten Fenster, nicht zwingend im Dialog). Blieb er stehen, lag „Order: …“ bis zum Close vor der Handel-Liste (CPI 10.11.: alle drei
+    gescheiterten News-Schließungen). Jetzt lesend nachsehen; steht er noch: Fokus + ESC an den Dialog, dann WM_CLOSE (= das X). Nie OK/Enter —
+    die Position ist an dieser Stelle schon lesend bewiesen, der Dialog löst nichts mehr aus. → True, wenn er zu ist."""
+    def _weg():
+        try:
+            return not dlg.is_visible()
+        except Exception:
+            return True
+    ende = time.time() + 1.5
+    while time.time() < ende:
+        if _weg():
+            return True
+        _warte(0.15, 0.15)
+    try:
+        dlg.set_focus()
+        _warte(0.1, 0.15)
+        _el_tasten(dlg, "{ESC}", set_foreground=False)
+    except Exception:
+        pass
+    ende = time.time() + 1.2
+    while time.time() < ende:
+        if _weg():
+            trail.append("F9-Dialog blieb nach ESC offen — mit Fokus + ESC zu")
+            return True
+        _warte(0.15, 0.15)
+    try:
+        import ctypes
+        h = getattr(dlg, "handle", None) or getattr(dlg.element_info, "handle", None)
+        if h:
+            ctypes.windll.user32.PostMessageW(int(h), 0x0010, 0, 0)   # WM_CLOSE
+            ende = time.time() + 2.0
+            while time.time() < ende:
+                if _weg():
+                    trail.append("F9-Dialog blieb nach ESC offen — per Fenster-X zu")
+                    return True
+                _warte(0.15, 0.15)
+    except Exception:
+        pass
+    trail.append("⚠ F9-Dialog blieb offen (ESC + Fenster-X ohne Wirkung) — räumt der nächste Close-Lauf weg")
+    return False
+
+
+def _menue_offen_bei(pid):
+    """NZ1b: offenes Popup-Menü (#32768/Menu) — mit pid nur eins DIESES Prozesses (Prüfer zu NZ1b: _menue_offen ist PC-weit; ein Menü einer
+    Hintergrund-App erreicht das ESC nie und hätte so jeden Echo-Close am PC blockiert). → Titel des ersten Funds oder None."""
+    from pywinauto import Desktop
+    for m in Desktop(backend="uia").windows():
+        try:
+            if m.element_info.class_name != "#32768" and m.element_info.control_type != "Menu":
+                continue
+            if pid and m.element_info.process_id != pid:
+                continue
+            return (m.window_text() or "Menü").strip()[:30] or "Menü"
+        except Exception:
+            continue
+    return None
+
+
+def _kein_menue_offen(pid=None):
+    """NZ1 (10.11.2026): True, wenn kein Popup-Menü (des Terminal-Prozesses pid) offen ist — sonst ESC (gestreut, an den Vordergrund =
+    das Terminal nach _fenster_betreten) und bis zu 2× nachsehen. False = es bleibt offen; dann kein weiterer Klick.
+    Ohne pywinauto (Mac/Selbsttest) True."""
+    try:
+        import pywinauto  # noqa: F401
+    except ImportError:
+        return True
+    for _ in range(3):
+        try:
+            if not _menue_offen_bei(pid):
+                return True
+        except Exception:
+            return True
+        try:
+            _tasten_gestreut("{ESC}")
+        except Exception:
+            pass
+        _warte(0.35, 0.2)
+    try:
+        return not _menue_offen_bei(pid)
+    except Exception:
+        return True
+
+
+def close_journal_zeilen(zeilen, ticket, ab_s, max_alter_s=600, n=1):
+    """REIN RECHNEND (testbar, NZ1 10.11.2026): Journal-Zeilen seit ab_s (Sekunden seit Mitternacht, Ortszeit), die das Ticket nennen
+    („market buy 17.99 NAS100, close #627122537 …“, „failed …, close #… [Off quotes]“) → die letzten n. Für die Meldung „geklickt, aber kein
+    Close-Dialog“: im Ein-Klick-Modus schließt MT5 OHNE Dialog — lehnt der Server ab, steht der Grund nur im Journal (Prüfer zu NZ1)."""
+    out, tk = [], str(int(ticket)) if str(ticket or "").strip().isdigit() else ""
+    if not tk:
+        return out
+    for z in (zeilen or ()):
+        zs = str(z or "")
+        if not re.search(r"#" + tk + r"(?!\d)", zs):
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zs)
+        if not m:
+            continue
+        d = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 - float(ab_s)) % 86400
+        if d <= max_alter_s or d >= 86400 - 1:
+            t_ = " ".join(zs.split())
+            i_ = t_.find("': ")
+            out.append((t_[i_ + 3:] if i_ >= 0 else t_)[:140])   # ohne Spalten-Vorspann/Konto, sonst fiele der Grund durch die 400er-Kürzung (acLog)
+    return out[-n:]
+
+
 def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     """Position per Klick schliessen — Finns Hand-Weg als Scan (28.08.2026,
     Remote-Close): Zeile markieren -> Rechtsklick -> NUR den lesbaren Punkt
@@ -14555,11 +14794,20 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     except Exception:
         return "kein_treffer"
     gx = hr.left + int((hr.right - hr.left) * 0.4)
+    try:
+        _pid = w.element_info.process_id
+    except Exception:
+        _pid = None
     # Haftungsausschluss ZUERST, dann erst die Abbrechen/ESC-Runde: ein Rest
     # aus einem frueheren Lauf soll angenommen werden, nicht abgebrochen —
     # sonst steht er beim naechsten Close-Klick sofort wieder da.
     _einklick_haftung_annehmen(w, trail, melden=True)
     _fremde_dialoge_schliessen(w)
+    # NZ1 (10.11.2026): auch Kind-Fenster, mit Beweis — s. close_rest_art. Bleibt ein Rest SICHTBAR stehen, wird nicht gescannt: der Scan
+    # setzt vor jedem Rechtsklick einen Links-Klick, und ein mittig stehender Order-Dialog mit aktivem Buy/Sell läge genau im Band
+    # (Prüfer-MUSS zu NZ1) — ein Links-Klick dort wäre eine ORDER.
+    if _close_reste_raeumen(w, trail):
+        return "rest_offen"
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
     # Mit anker_pfad: der gemerkte Tab-Punkt erspart die Baum-Suche (01.09.2026).
@@ -14594,8 +14842,13 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         weil der Nachklick nach dem Haftungsausschluss exakt dasselbe tun muss
         (01.09.2026) — zwei Kopien derselben Klickfolge waeren genau die Art
         Stelle, an der spaeter nur eine von beiden gepflegt wird."""
+        # NZ1 (10.11.2026, Prüfer zu CPI 14:30): kein Links-Klick, solange irgendwo noch ein Menü offen ist — ein verspätet geöffnetes
+        # Kontextmenü des VORIGEN Punkts (Tick-Last vor News) fing sonst diesen Klick (Indiz: „Drucken“ bei Moritz ab Versuch 2; im
+        # Handel-Menü wäre „Neue Order“ genauso nah).
         _maus_fahren(px_, py_, schritte=3)
         _warte(*klick_zoegern())          # 28.10.2026: kurz stehen vor dem Druck
+        if not _kein_menue_offen(_pid):   # direkt VOR dem Links-Klick (Prüfer NZ1b: sonst Lücke durch Anfahrt + Zögern)
+            return "menue_haengt"
         _klick_absolut(px_, py_)          # Finns Schritt 1: Zeile markieren
         _warte(0.15, 0.2)
         if not _klick_absolut(px_, py_, taste="rechts"):
@@ -14609,6 +14862,9 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             trail.append("⏸ Echo pausiert — Close-Scan abgebrochen")
             return "pause"
         st_menue = _punkt_klicken(px_, py_)
+        if st_menue == "menue_haengt":
+            trail.append(f"Kontextmenü blieb offen (auch nach ESC) — Scan vor Punkt {pname} abgebrochen, nichts geklickt")
+            return "menue_haengt"
         if st_menue != "geklickt":
             # Punkt lag neben der Zeile (Menue da, Eintrag ausgegraut) oder
             # gar kein Menue — Chart/Marktuebersicht haben den Eintrag nicht.
@@ -14849,7 +15105,20 @@ def run_close(cfg_path, cmd):
 
     anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
                               "anker-" + os.path.basename(cfg_path))
+    _lt0 = time.localtime()
+    _ab_s = _lt0.tm_hour * 3600 + _lt0.tm_min * 60 + _lt0.tm_sec - 1   # NZ1: Journal ab hier (Ortszeit des PCs, wie order_anfrage_im_journal)
     ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg)
+
+    def _journal_satz():
+        """NZ1 (10.11.2026): nur lesen — was sagt das Terminal-Journal zu diesem Ticket seit dem Klick? Leer, wenn nichts lesbar."""
+        dp = ""
+        try:
+            dp = (_order_api_zustand(path, expected, symbol or pos["symbol"]) or {}).get("data_path") or ""
+            _lt = time.localtime()
+            z = close_journal_zeilen(_mt5_journal_zeilen(dp, beide=(_lt.tm_hour == 0 and _lt.tm_min < 15)) if dp else [], ticket, _ab_s)
+        except Exception:
+            z = []
+        return (" Journal: " + " / ".join(z) + ".") if z else (" Journal: nichts zu #" + str(ticket) + " seit dem Klick." if dp else "")
 
     if ausgang == "pause":
         return {"ok": False, "retry_ok": True,
@@ -14866,6 +15135,16 @@ def run_close(cfg_path, cmd):
                        "Hand eine Position per Rechtsklick schliessen und dabei zustimmen, "
                        "danach fragt MT5 nie wieder. [" + _spur(trail) + "]",
                 "trail": _spur(trail)}
+    if ausgang == "rest_offen":
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Im Terminal blieb ein Order-/Ändern-/Druck-Fenster stehen (ließ sich nicht wegräumen) — Positions-Zeile #{ticket} "
+                       f"bewusst NICHT angeklickt (ein Klick im Order-Fenster wäre eine Order). Im Terminal von Hand schließen. "
+                       f"[" + _spur(trail) + "]", "trail": _spur(trail)}
+    if ausgang == "menue_haengt":
+        _fremde_dialoge_schliessen(w)
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Im Terminal blieb ein Kontextmenü offen (ESC ohne Wirkung) — Scan nach Positions-Zeile #{ticket} abgebrochen, "
+                       f"nichts weiter geklickt. Wiederholen ist ungefaehrlich. [" + _spur(trail) + "]", "trail": _spur(trail)}
     if ausgang == "kein_treffer":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,
@@ -14891,15 +15170,17 @@ def run_close(cfg_path, cmd):
                        f"per Klick geschlossen{pl}",
                 "trail": _spur(trail), "ticket": ticket, "profit": profit}
     if ausgang == "ohne_wirkung":
+        js = _journal_satz()
         return {"ok": False, "retry_ok": True,
                 "msg": f"'Position schliessen' geklickt, aber Position #{ticket} liegt noch "
                        f"und kein Close-Dialog kam — im Terminal nachsehen. Wiederholen ist "
-                       f"ungefaehrlich (der Bot prueft vorher lesend). [" + _spur(trail) + "]",
+                       f"ungefaehrlich (der Bot prueft vorher lesend).{js} [" + _spur(trail) + "]",
                 "trail": _spur(trail)}
+    js = _journal_satz()
     return {"ok": False, "retry_ok": True,
             "msg": f"Close-Dialog war offen, aber Position #{ticket} ist nach 12 s weiter "
                    f"offen — im Terminal pruefen (Dialog wurde geschlossen). Wiederholen ist "
-                   f"ungefaehrlich. [" + _spur(trail) + "]",
+                   f"ungefaehrlich.{js} [" + _spur(trail) + "]",
             "trail": _spur(trail)}
 
 
