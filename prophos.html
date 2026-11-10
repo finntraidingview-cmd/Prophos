@@ -39929,6 +39929,12 @@
   // nur einmal abhaken."): darunter je Trade eine Zeile Richtung · Ende (TP/SL/Liq/Hand) · P&L aus app.py lt_kette_teile (Feld kette_teile). Geschätzte Werte
   // (keine Puls-Lesung, nur Demo) tragen ≈. Fehlt das Tagesergebnis (letzter Trade ungelesen), rechnet der Chip die Summe aus den Teilen — dann immer mit ≈,
   // solange ein Teil nur geschätzt ist. Trade 1, nach dem noch ein Trade 2 kommen kann, zeigt keinen Chip (er wartet, wdlKetteT1Offen). Nur Anzeige.
+  // „Fusion −12 €" / „Fusion fehlt" (WS2E-Tag) — v = Zahl € oder null (Teil mit Hedge ohne Beleg)
+  function wdlKetteFusionTxt(v){
+    if(v == null || v === '' || !isFinite(Number(v))) return 'Fusion fehlt'
+    const z = Math.sign(Number(v)) * Math.round(Math.abs(Number(v)))   // symmetrisch gerundet vor dem Vorzeichen (−16,5 → −17) — nie „−0 €"
+    return `Fusion ${z < 0 ? '−' : '+'}${Math.abs(z).toLocaleString('de-DE')} €`
+  }
   function wdlKetteTeilZeile(x, sg){
     if(!x || typeof x !== 'object') return ''
     const ri = x.richtung === 'buy' ? 'Long' : x.richtung === 'sell' ? 'Short' : ''
@@ -39936,7 +39942,10 @@
     const pl = (x.pl == null || !isFinite(Number(x.pl))) ? '–' : (x.art === 'geschaetzt' ? '≈ ' : '') + sg(Number(x.pl))
     const tip = (x.art === 'geschaetzt' ? 'P&L geschätzt aus dem Kurs — keine Balance-Lesung' : x.art === 'eingetragen' ? 'P&L am Plan eingetragen' : x.art === 'gelesen' ? 'P&L aus der Balance-Lesung' : '')
       + (en ? ` · Ende ${en} laut Kurs-Verlauf (Minutenkerzen), nicht gelesen` : '')
-    return `<br><span title="${escapeHtml(tip)}">T${Number(x.nr) || '?'}${ri ? ' ' + ri : ''}${en ? ' · ' + en : ''} · ${pl}</span>`
+    // WS2E-Tag (Finn 10.11.2026: „nur den letzten Trade abhaken, aber die Resultate aller Trades sehen"): Fusion-P&L je Teil aus tagesende.teile[].fusion
+    // (app.py tt_fusion_pl) — nur wenn der Schlüssel da ist (Teil mit Hedge); null = noch nicht belegt. Topstep/Orbit ohne Hedge: unverändert
+    const fu = ('fusion' in x) ? wdlKetteFusionTxt(x.fusion) : ''
+    return `<br><span title="${escapeHtml(tip + (fu ? ' · Fusion-Gegenhedge des Teils' : ''))}">T${Number(x.nr) || '?'}${ri ? ' ' + ri : ''}${en ? ' · ' + en : ''} · ${pl}${fu ? ' · ' + fu : ''}</span>`
   }
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
@@ -39964,7 +39973,11 @@
     const weg = ktOk ? `${kt.map((x, i) => (i ? (Number(x.pl) < 0 ? ' − ' : ' + ') + de(Number(x.pl)) + ' $' : sg(Number(x.pl)))).join('')} = ${summe}`
       : (t1 != null && t2 != null && !(nTr > 2)) ? `${sg(t1)} ${t2 < 0 ? '−' : '+'} ${de(t2)} $ = ${summe}`
       : nTr >= 2 ? `(${nTr} Trades) ${summe}` : `(1 Trade) ${summe}`
-    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart">Tag ${weg}${jeTrade}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
+    // WS2E-Tag: Fusion-Summe des Tages hinter der Master-Summe (nur wenn das Tagesende fusion_sum trägt, also Teile mit Hedge); fehlt ein Teil-Wert, sagt es das
+    const fuOffen = Number(k.fusion_offen) > 0 ? Number(k.fusion_offen) : 0
+    const fuSum = n(k.fusion_sum) != null ? ` · ${wdlKetteFusionTxt(k.fusion_sum)}${fuOffen ? ` (${fuOffen} ${fuOffen === 1 ? 'fehlt' : 'fehlen'})` : ''}`
+      : fuOffen ? ' · Fusion fehlt' : ''
+    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart${fuSum ? ' · Fusion = Summe der Gegenhedges aller Teile' : ''}">Tag ${weg}${fuSum}${jeTrade}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
   }
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
@@ -58053,7 +58066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2149'
+  const OS_TAB_BUILD = '2026-09-22.2150'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

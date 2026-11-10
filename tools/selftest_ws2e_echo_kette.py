@@ -184,6 +184,62 @@ def main():
     src = open(os.path.join(HIER, "..", "app.py"), encoding="utf-8").read()
     check('z["kette_gelesen"] = bool(tt_echt(q)) if "tt_echt" in globals() else None' in src, "/admin/live-trades: kette_gelesen aus tt_echt (wie tt_tick)")
 
+    # ── 5 WS2E-Tag: Fusion je Teil im Tagesende + Tag-Chip ──────────────────────────────────────────────────────────
+    FP, TE = a["tt_fusion_pl"], a["tt_tagesende"]
+    check(FP({"route": "mt5", "slave_pl": -12.345, "mt5_baseline": {"final": {"closed_sum": 5}}}) == -12.35
+          and FP({"route": "mt5", "slave_pl": None, "mt5_baseline": {"final": {"closed_sum": 7.1}}}) == 7.1
+          and FP({"route": "mt5", "mt5_baseline": {}}) is None and FP({"route": "tvv2", "mt5_baseline": {}}) is None
+          and FP({"route": "tvv2", "slave_pl": 3, "mt5_baseline": {"hedge": {"pl": -40, "status": "geschlossen", "ticket": 5}}}) == 3.0
+          and FP({"route": "tvv2", "slave_pl": None, "mt5_baseline": {"hedge": {"pl": -40, "status": "geschlossen", "ticket": 5}}}) == -40.0
+          and FP({"route": "tvv2", "slave_pl": None, "mt5_baseline": {"hedge": {"status": "fehler"}}}) is None
+          and not a["tt_hat_fusion"]({"route": "tvv2", "mt5_baseline": {"hedge": {"status": "fehler"}}})
+          and FP({"route": "tsv2", "mt5_baseline": {}, "slave_pl": 9}) is None, "tt_fusion_pl: Echo slave_pl → closed_sum, Fusion-Solo slave_pl (Summe aller Versuche) → hedge.pl, nie geöffneter Hedge zählt nicht")
+    def teil(nr, mb, mbal, nb, spl, cs):
+        return {"route": "mt5", "richtung": "buy" if nr % 2 else "sell", "slave_pl": spl, "master_pl": None,
+                "mt5_baseline": {"kette": {"nr": nr, "rolle": "haupt" if nr == 1 else "neben"}, "master_balance": mbal,
+                                 "final": {"closed_sum": cs}, "bal_nach": {"ok": True, "balance": nb}}}
+    te = TE([teil(1, 0, 100000, 100500, -20.0, -20.0), teil(2, 0, 100500, 100560, None, 3.5), teil(3, 0, 100560, 100530, None, None)],
+            "alle", "alle", 100000, 100530, False, "x")
+    fl = [x.get("fusion", "—") for x in te["teile"]]
+    check(fl == [-20.0, 3.5, None] and te["fusion_sum"] == -16.5 and te["fusion_offen"] == 1 and te["tag_pl"] == 530 and [x["pl"] for x in te["teile"]] == [500, 60, -30],
+          f"Tagesende Echo: Master je Teil 500/60/−30, Fusion −20/3,5/fehlt, Summe −16,5, 1 offen ({fl})")
+    te0 = TE([teil(1, 0, 100000, 100500, None, None), teil(2, 0, 100500, 100560, None, None)], "alle", "alle", 100000, 100560, False, "x")
+    check(te0["fusion_sum"] is None and te0["fusion_offen"] == 2, "keine Fusion belegt → fusion_sum None (nie „+0 €“), 2 offen")
+    NZ = a["tt_fusion_nachziehen"]
+    neu = NZ(te, [teil(1, 0, 100000, 100500, -20.0, -20.0), teil(2, 0, 100500, 100560, None, 3.5), teil(3, 0, 100560, 100530, 11.0, 11.0)])
+    check(neu and [x.get("fusion") for x in neu["teile"]] == [-20.0, 3.5, 11.0] and neu["fusion_sum"] == -5.5 and neu["fusion_offen"] == 0
+          and neu["tag_pl"] == te["tag_pl"] and [x["pl"] for x in neu["teile"]] == [x["pl"] for x in te["teile"]] and neu["ende_grund"] == te["ende_grund"],
+          "Fusion nachziehen: fehlender Wert kommt nach, Master-P&L/Summe/Grund unverändert")
+    check(NZ(neu, [teil(1, 0, 100000, 100500, -20.0, -20.0), teil(2, 0, 100500, 100560, None, 3.5), teil(3, 0, 100560, 100530, 11.0, 11.0)]) is None
+          and NZ(None, []) is None, "Fusion nachziehen: nichts geändert → None (kein Schreiben)")
+    te_o = TE([dict(teil(1, 0, 1, 1, None, None), route="tvv2", mt5_baseline={"kette": {"nr": 1}, "tv": {"balance_start": 150000},
+                                                                             "final": {"quelle": "puls", "balance_end": 150400}})], "alle", "alle", 150000, 150400, False, "x")
+    check("fusion" not in te_o["teile"][0] and "fusion_sum" not in te_o, "Orbit ohne Hedge: Tagesende bitgleich (kein fusion/fusion_sum)")
+    i = html.index("  function wdlKetteFusionTxt(v){")
+    j = html.index("\n  function wdlKetteTagChip(t){", i)
+    k_ = html.index("\n  function wdlBlowErg(t){", j)
+    js2 = ("const escapeHtml = s => String(s); const wdlKetteT1Offen = () => false;\n" + html[i:j] + html[j:k_] +
+           "\nconst T = { status: 'review', kette_tag: " + json.dumps(te) + ", kette_teile: " + json.dumps(te["teile"]) + " };" +
+           "\nconst O = { status: 'review', kette_tag: " + json.dumps(te_o) + ", kette_teile: " + json.dumps(te_o["teile"]) + " };" +
+           "\nprint(JSON.stringify([wdlKetteTagChip(T), wdlKetteTagChip(O)]));")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
+        d.write(js2)
+    r = subprocess.run([JSC, d.name], capture_output=True, text=True)
+    os.unlink(d.name)
+    out = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else ["", ""]
+    check(r.returncode == 0 and "Fusion −17 € (1 fehlt)" in out[0] and "T1 Long · +500 $ · Fusion −20 €" in out[0] and "T2 Short · +60 $ · Fusion +4 €" in out[0]
+          and "T3 Long · −30 $ · Fusion fehlt" in out[0] and "+500 $ + 60 $ − 30 $ = " in out[0], f"Tag-Chip Echo: Teile mit Fusion, Summe + fehlt ({r.stderr[:200]} {out[0][:400]})")
+    check("Fusion" not in out[1] and "(1 Trade)" in out[1], f"Tag-Chip Orbit ohne Hedge: ohne Fusion, wie bisher ({out[1][:200]})")
+    js3 = js2.replace("print(JSON.stringify([wdlKetteTagChip(T), wdlKetteTagChip(O)]));",
+                      "const Z = { status: 'review', kette_tag: " + json.dumps(te0) + ", kette_teile: " + json.dumps(te0["teile"]) + " };" +
+                      "print(JSON.stringify([wdlKetteTagChip(Z), wdlKetteFusionTxt(-0.4)]));")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
+        d.write(js3)
+    r = subprocess.run([JSC, d.name], capture_output=True, text=True)
+    os.unlink(d.name)
+    o3 = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else ["", ""]
+    check("Fusion fehlt" in o3[0] and "+0 €" not in o3[0] and o3[1] == "Fusion +0 €", f"Chip ohne Fusion-Beleg: „Fusion fehlt“; −0,4 € → „+0 €“ statt „−0 €“ ({o3})")
+
     print(f"\n{'selftest_ws2e_echo_kette: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
     return 1 if FEHLER else 0
 

@@ -38635,6 +38635,35 @@ def tt_echt(plan):
     return (e[0], e[1]) if e else None
 
 
+def tt_hat_fusion(plan):
+    """REIN (testbar): läuft dieser Teil mit Fusion-Gegenhedge? Echo mit Copier-Hedge (route mt5) oder ein Fusion-Solo-Hedge am Plan (mt5_baseline.hedge)."""
+    p = plan or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    h = bl.get("hedge")
+    # Fusion-Solo nur, wenn er wirklich offen war (Ticket bzw. offen/schließt/geschlossen) — status 'fehler' (nie geöffnet) hat keinen Fusion-P&L
+    return str(p.get("route") or "") == "mt5" or (isinstance(h, dict) and bool(h.get("ticket") or h.get("status") in ("offen", "schliesst", "geschlossen")))
+
+
+def tt_fusion_pl(plan):
+    """REIN RECHNEND (testbar, WS2E-Tag 10.11.2026): belegter Fusion-P&L (€) eines Teils | None. Echo (mt5): slave_pl am Plan, sonst final.closed_sum
+    (Σ closed_hedges.profit des Copiers). Fusion-Solo (mt5_baseline.hedge): hedge.pl, sonst slave_pl. Ohne Hedge oder ohne Beleg None."""
+    p = plan or {}
+    if not tt_hat_fusion(p):
+        return None
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if str(p.get("route") or "") == "mt5":
+        fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+        v = _wd_num(p.get("slave_pl"))
+        if v is None:
+            v = _wd_num(fin.get("closed_sum"))
+    else:
+        # Gegenprüfung: slave_pl zuerst — es ist die Summe aller Versuche (hedgePlGesamt mit versuche_alt), hedge.pl nur der letzte (wie der Radar)
+        v = _wd_num(p.get("slave_pl"))
+        if v is None:
+            v = _wd_num((bl.get("hedge") or {}).get("pl"))
+    return round(float(v), 2) if v is not None else None
+
+
 def tt_abhak_werte(plan, echt):
     """REIN RECHNEND (testbar): darf tt_tick einen Teil MIT Nachfolger selbst abhaken? → (master_pl, slave_pl, pl_quelle) | None (bleibt bei Finn).
     Orbit/Topstep ohne Fusion-Solo-Hedge wie bisher (slave_pl None, Quelle tv). WS2E (Master 10.11.2026, Finn „einmal abhaken“ auch bei Echo): Echo mit
@@ -38651,11 +38680,8 @@ def tt_abhak_werte(plan, echt):
     if route in ("tvv2", "tsv2"):
         return None if bl.get("hedge") else (mpl, None, "tv")
     if route == "mt5":
-        fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
-        spl = _wd_num(p.get("slave_pl"))
-        if spl is None:
-            spl = _wd_num(fin.get("closed_sum"))
-        return (mpl, round(float(spl), 2), "echo") if spl is not None else None
+        spl = tt_fusion_pl(p)
+        return (mpl, spl, "echo") if spl is not None else None
     return None
 
 
@@ -38748,13 +38774,48 @@ def _tt_patch(pid, patch, key="kette"):
 
 def _tt_tag_teile(tag_id, extra=None):
     """Alle Teile eines Tages (Trade 1 = tag_id selbst, Folgeteile über kette.tag_id) → [Plan] nach nr."""
-    sel = "id,route,status,richtung,master_pl,ended_at,mt5_baseline"
+    sel = "id,route,status,richtung,master_pl,slave_pl,ended_at,mt5_baseline"   # slave_pl: Fusion je Teil im Tagesende (WS2E-Tag, 10.11.2026)
     rows = (sb_select("trade_plans", {"select": sel, "id": f"eq.{tag_id}"}) or []) + \
            (sb_select("trade_plans", {"select": sel, "mt5_baseline->kette->>tag_id": f"eq.{tag_id}"}) or [])
     je = {str(r["id"]): r for r in rows}
     for r in extra or ():
         je[str(r["id"])] = r
     return sorted(je.values(), key=lambda r: int((((r.get("mt5_baseline") or {}).get("kette") or {}).get("nr")) or 0))
+
+
+def _tt_fusion_feld(eintrag, p):
+    """teile[]-Eintrag: fusion = belegter Fusion-P&L (€); Teil mit Hedge ohne Beleg → fusion None (Chip „fehlt"); ohne Hedge kein Schlüssel."""
+    fu = tt_fusion_pl(p)
+    if fu is not None:
+        eintrag["fusion"] = fu
+    elif tt_hat_fusion(p):
+        eintrag["fusion"] = None
+
+
+def _tt_fusion_summe(tl):
+    """{fusion_sum, fusion_offen} für das Tagesende, nur wenn ein Teil einen Hedge hat. fusion_sum None, solange KEIN Teil belegt ist (nie „+0 €" aus Lücken)."""
+    if not any("fusion" in x for x in tl):
+        return {}
+    werte = [x["fusion"] for x in tl if x.get("fusion") is not None]
+    return {"fusion_sum": round(sum(werte), 2) if werte else None, "fusion_offen": sum(1 for x in tl if "fusion" in x and x["fusion"] is None)}
+
+
+def tt_fusion_nachziehen(te, teile):
+    """REIN RECHNEND (testbar): Tagesende mit fehlendem Fusion-P&L → neues Tagesende mit frischen Fusion-Feldern je Teil (nach nr), alles andere unverändert;
+    None, wenn sich nichts ändert. Master-P&L, Summe, Grund bleiben, wie sie beim Tagesende geschrieben wurden."""
+    if not isinstance(te, dict) or not isinstance(te.get("teile"), list):
+        return None
+    je = {int((((p.get("mt5_baseline") or {}).get("kette") or {}).get("nr")) or 0): p for p in teile or ()}
+    tl = []
+    for x in te["teile"]:
+        y = dict(x)
+        p = je.get(int(y.get("nr") or 0))
+        if p is not None:
+            y.pop("fusion", None)
+            _tt_fusion_feld(y, p)
+        tl.append(y)
+    neu = dict(te, teile=tl, **_tt_fusion_summe(tl))
+    return neu if neu != te else None
 
 
 def tt_tagesende(teile, ende_code, text, bal_tag0, bal_ende, blown, jetzt_iso):
@@ -38766,8 +38827,10 @@ def tt_tagesende(teile, ende_code, text, bal_tag0, bal_ende, blown, jetzt_iso):
         g = tt_echt(p)
         tl.append({"nr": int(kk.get("nr") or 0), "rolle": kk.get("rolle"), "richtung": p.get("richtung"),
                    "pl": round(g[1] - g[0], 2) if g else _wd_num(p.get("master_pl"))})
+        _tt_fusion_feld(tl[-1], p)               # WS2E-Tag (Finn 10.11.2026): Fusion-P&L je Teil (€) für den Tag-Chip im Radar
     out = {"tag_pl": round(float(bal_ende) - float(bal_tag0), 2) if (bal_ende is not None and bal_tag0) else None, "trades": len(tl), "teile": tl,
            "balance": float(bal_ende) if bal_ende is not None else None, "blown": bool(blown), "ende_grund": ende_code, "ende_text": text, "at": jetzt_iso}
+    out.update(_tt_fusion_summe(tl))
     if len(tl) >= 1:
         out["t1_pl"] = tl[0]["pl"]
     out["t2_pl"] = tl[1]["pl"] if len(tl) >= 2 else None
@@ -38791,6 +38854,18 @@ def tt_tick(jetzt=None, rnd=None):
                   "ended_at,completed_at,planned_for,master_pl,slave_pl,konto_typ,updated_at,mt5_baseline",
         "status": "in.(review,completed)", "ended_at": "gte." + (mitternacht - timedelta(hours=6)).isoformat(),
         "mt5_baseline->kette->>von": "not.is.null"}) or []
+    # WS2E-Tag (Gegenprüfung 10.11.2026): fehlte beim Schreiben des Tagesendes noch ein Fusion-P&L (Echo: closed_sum/slave_pl kommen oft erst nach der
+    # Nachlesung, oder Finn trägt ihn später ein), zieht der Takt NUR die Fusion-Felder nach, solange der letzte Teil in Überprüfen steht
+    for p in rows:
+        _te = (((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"))
+        if isinstance(_te, dict) and int(_te.get("fusion_offen") or 0) > 0 and p.get("status") == "review":
+            try:
+                _k = (p.get("mt5_baseline") or {}).get("kette") or {}
+                _neu = tt_fusion_nachziehen(_te, _tt_tag_teile(str(_k.get("tag_id") or p["id"]), extra=[p]))
+                if _neu:
+                    _tt_patch(str(p["id"]), {"tagesende": _neu})
+            except Exception as e:
+                print(f"[tagesteilung] ⚠️ {str(p.get('id'))[:8]} Fusion nachziehen: {type(e).__name__}: {e}", flush=True)
     rows = [p for p in rows if not (((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"))]
     if not rows:
         return {"neu": [], "ende": [], "abgehakt": []}
