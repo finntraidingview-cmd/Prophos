@@ -5345,6 +5345,15 @@
      der Platz, an dem später der Start-Zustand („startet 08:44") steht. */
   #dashboard-view .pz-ok{border:1px solid var(--border);color:var(--ink-2);font-weight:500}
   #dashboard-view .pz-ok.is-ok{border-color:transparent;color:#15803d}
+  /* TU1 (10.11.2026, Finn: „überall die Übersicht wie bei Lucid“): Hedge-Pläne als Zeile — Weg-Sticker der Karte als kleiner Chip hinter
+     dem Phasen-Chip, Hedge-Zelle in „Schritt · Hedge“ (Fusion-Hedge violett wie der alte Karten-Chip), Auto-Zustand ohne Knopf als Wort */
+  #dashboard-view .pz-konto .tc2-sys.pz-weg{position:static;margin-left:6px;padding:1px 6px;border-radius:5px;font-size:9.5px;vertical-align:1px}
+  #dashboard-view .pz-art-hedge b{color:var(--violet, #6D28D9)}
+  #dashboard-view .pz-ok-txt{font-size:11.5px;color:var(--sub);padding:0 4px;white-space:nowrap} #dashboard-view .pz-ok-txt.is-ok{color:#15803d}
+  @media (max-width:820px){ #dashboard-view .pz-z > .pz-art.pz-art-hedge{display:flex;order:6;flex:none} }
+  /* Trades → Geplant (pz-geplant, nur ab 1360 px): „Schritt · Hedge“ 112 px (×0,414 · €104 passt), Knöpfe 272 px — ✎ 🗑 Läuft Starten Erledigt
+     in EINER Reihe wie bei Lucid; in jedem Firmen-Block gleich, damit die Spalten untereinander stehen */
+  @media (min-width:1360px){ #dashboard-view .pz-tab.pz-geplant{grid-template-columns:84px minmax(150px,1.2fr) 84px minmax(220px,1fr) 112px 64px 76px 76px 272px} }
   /* Schmales Fenster (Tabelle unter ~1060 px): Art-Spalte und „· Rest" weichen, damit nichts über den Rand läuft */
   @media (max-width:1359px){
     #dashboard-view .pz-tab{grid-template-columns:84px minmax(150px,1fr) 80px 200px 64px 76px 76px 160px}
@@ -26988,11 +26997,12 @@
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto'],
     polar:  ['Polar',     'Polar — Funded-Futures gegen Funded-CFD einer anderen ID; „Starten" (Prüf-Tabelle → beide PCs feuern gemeinsam) oder „Läuft" von Hand, „Erledigt" mit beiden P&Ls']
   }
-  function sysStickerHtml(key){
+  // klasse/tipZusatz (TU1, 10.11.2026): derselbe Sticker als kleiner Chip in der Konto-Spalte der Geplant-Tabelle (pz-weg) — ohne Angabe unverändert
+  function sysStickerHtml(key, klasse, tipZusatz){
     const cfg = SYS_STICKER[key]
     if(!cfg) return ''
     const sym = wegSymbol(key)   // Weg-Symbol statt Punkt (21.10.2026)
-    return `<span class="tc2-sys tc2-sys-${key}${sym ? ' has-sym' : ''}" title="${esc(cfg[1])}">${sym}${esc(cfg[0])}</span>`
+    return `<span class="tc2-sys tc2-sys-${key}${sym ? ' has-sym' : ''}${klasse ? ' ' + klasse : ''}" title="${esc(cfg[1] + (tipZusatz || ''))}">${sym}${esc(cfg[0])}</span>`
   }
   function planSysKey(p){
     if(!p) return 'dup'
@@ -52397,6 +52407,7 @@
   }
   window._pzBahnHtml = pzBahnHtml
   const AP_FUS_AM_BALKEN = false   // true = alte Fusion-Marken am Balken zurück (vor 30.10.2026)
+  const TU1_ALLE_ZEILEN = true   // TU1 (10.11.2026): Trades → Geplant zeigt alle Wege als Tabellen-Zeile; false = Hedge-Pläne wieder als Karte
   function planZeileBoden(p, konto, o, groesse){
     const ok = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
     if(ok(o && o.boden) != null) return ok(o.boden)
@@ -52553,6 +52564,7 @@
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tmIst} von ${tmSoll} Tagen mit Trade)${tm.sofort_zu ? ' — wird nach dem Start sofort wieder geschlossen' : ''}. ${tm.unter_ziel ? 'Konto noch unter dem Ziel' : `Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht`} — der SL hält die Balance über ${tm.unter_ziel ? 'Boden' : 'Ziel'} + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage ${Math.min(tmIst, tmSoll)}/${tmSoll}</b></span><small>${tmIst >= tmSoll ? 'voll · Mini' : `${tmIst + 1}. Tag · Mini`}</small></span>`
       : ks
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>${typeof ks.nr === 'number' ? 'Trade ' + ks.nr : escapeHtml(String(ks.nr))}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
+      : !notiz && o.artHtml ? o.artHtml   // TU1 (10.11.2026): Hedge-Plan ohne Schritt → Hedge-Zelle (Fusion-Hedge / → Slave ×Multiplikator)
       : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
     // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
     // zweizeilig (Firma + Typ-Chip oben, „150k …0530" darunter), Richtung als BUY/SELL-Chip mit „3 × NQ" / „1,5 × Lot" (Mini-Popup der Größe
@@ -52589,7 +52601,7 @@
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}${window._planRecovererChipHtml?.(p) || ''}${window._planWdSlChipHtml?.(p) || ''}${ttZ}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}${o.weg || ''}${window._planRecovererChipHtml?.(p) || ''}${window._planWdSlChipHtml?.(p) || ''}${ttZ}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
         ${artZelle}
@@ -52637,7 +52649,12 @@
         const b = routeIstV2(p.route) ? planKontoBalance(accounts.find(a => String(a.id) === String(p.masterAccountId))) : null
         if(b && !planBalanceLive(p.masterAccountId, b.at).live) nichtLive++
       }
-      const zeilen = opt.zeile ? ps : ps.filter(planIstZeile), karten = opt.zeile ? [] : ps.filter(p => !planIstZeile(p))
+      // TU1 ALLE WEGE ALS ZEILE (Finn 10.11.2026, Trades → Geplant: „Das ist so eine hässliche Übersicht. Mach überall die Übersicht, wie sie bei
+      // Lucid Trading gerade ist"): ohne opt auch die Hedge-Pläne (Echo, Winning Day, Nova, Orbit V3, Duplikum) als Zeile — renderTradePlanCard
+      // mit { zeile: true } liefert dieselben Knöpfe wie die Karte. TU1_ALLE_ZEILEN = false → alte Karten zurück. Polar hat seinen eigenen Block.
+      const alsZeile = p => planIstZeile(p) || (TU1_ALLE_ZEILEN && !opt.zeile && !!p && p.status === 'planned' && p.route !== 'polar')
+      const zeilen = opt.zeile ? ps : ps.filter(alsZeile), karten = opt.zeile ? [] : ps.filter(p => !alsZeile(p))
+      const mitHedgeZ = !opt.zeile && zeilen.some(p => !planIstZeile(p))   // Spalte „Schritt" trägt dann auch die Hedge-Zelle
       const sep = '<i>·</i>'
       return `<div class="pz-kopf plan-firma-kopf">
           <span class="pz-firma"${knapp ? ` title="${escapeHtml(wege)}"` : ''}>${escapeHtml(g.firma)}</span>
@@ -52649,9 +52666,9 @@
         + (zeilen.length && opt.stil === 'radar' ? `<div class="pz-tab pz-radar${opt.ohneAkt ? ' pz-ohne-akt' : ''}">
           <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">${opt.kopfFusion ? 'Fusion' : 'Schritt'}</span><span class="pz-tp">${opt.kopfFusion ? 'TP Master ↔ Fusion SL' : 'TP'}</span><span class="pz-sl">${opt.kopfFusion ? 'SL Master ↔ Fusion TP' : 'SL'}</span>${opt.ohneAkt ? '' : '<span></span>'}</div>`
           + zeilen.map(p => opt.zeile(p)).join('') + `</div>`
-        : zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
-          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
-          + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p)).join('') + `</div>` : '')
+        : zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}${!opt.zeile && TU1_ALLE_ZEILEN ? ' pz-geplant' : ''}">
+          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">${mitHedgeZ ? 'Schritt · Hedge' : 'Schritt'}</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p, planIstZeile(p) ? undefined : { zeile: true })).join('') + `</div>` : '')
         + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
   }
@@ -53370,7 +53387,8 @@
     return `<div class="tc-zl">` + (og ? og(bloecke, block) : bloecke.map(([k, b]) => block(k, b)).join('')) + `</div>`
   }
 
-  function renderTradePlanCard(p){
+  // opt.zeile (TU1, 10.11.2026): geplanter Hedge-Plan als Zeile der Geplant-Tabelle statt Karte (nur aus planFirmenBloecke, Trades → Geplant)
+  function renderTradePlanCard(p, opt){
     const isPlanned   = p.status === 'planned'
     const isOpen      = p.status === 'open'
     const isReview    = p.status === 'review'
@@ -53449,6 +53467,7 @@
     // Rechte Metrik je Status
     let metric = ''
     let zeileChips = '', zeileAkt = '', zeileAkt2 = ''   // nur für die Geplant-Tabelle (planIstZeile), siehe planZeileHtml; zeileAkt2 = Slave-Teilzeile Polar
+    let zeileAktK = '', zeileZeitK = ''   // TU1 (10.11.2026): Knöpfe + Start-Zelle eines Hedge-Plans als Zeile (opt.zeile)
     if(isPlanned){
       const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
       const pf = _pfCheckStatus[String(p.id)]
@@ -53649,12 +53668,13 @@
       // Geplant-Tabelle (AP-DESIGN 05.10.2026): die Uhrzeit hat dort ihre eigene Spalte — steht sie noch aus, bleibt hier nur ein
       // etwaiger Vorprüf-Hinweis; sonst derselbe Knopf wie auf der Karte (Starten / Warteschlange / gestartet · Neu starten).
       // Auto-Plan: ✎ 🗑 + Zustand (Bestätigen klein bzw. „✓ bestätigt", Klick nimmt zurück). Von Hand: wie die V2-Karte.
+      // AP-FIX 05.10.2026: frisch gestartet (≤ 15 min, nichts zurück) zeigt die Start-Spalte selbst („03:36 gestartet") — der
+      // gleichlautende Chip „⏰ gestartet …" aus der Karte entfiele hier doppelt und ließ die 168-px-Spalte auf vier Reihen
+      // umbrechen (119 px hohe Zeile). In der Zeile bleibt davon nur „Neu starten" (erscheint wie bisher nach 2 min).
+      // (TU1 10.11.2026: vor das if gezogen — die Hedge-Zeilen unten brauchen denselben Wert)
+      const gestartetFrisch = !!(p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs
+                                 && !(vorcheckChip && _vc.status === 'verpasst_slave'))
       if(planIstZeile(p)){
-        // AP-FIX 05.10.2026: frisch gestartet (≤ 15 min, nichts zurück) zeigt die Start-Spalte selbst („03:36 gestartet") — der
-        // gleichlautende Chip „⏰ gestartet …" aus der Karte entfiele hier doppelt und ließ die 168-px-Spalte auf vier Reihen
-        // umbrechen (119 px hohe Zeile). In der Zeile bleibt davon nur „Neu starten" (erscheint wie bisher nach 2 min).
-        const gestartetFrisch = !!(p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs
-                                   && !(vorcheckChip && _vc.status === 'verpasst_slave'))
         const rest = (p.startUm && !p.startUmGestartetAt) ? vorcheckChip : gestartetFrisch ? neuBtn : jetztBtn
         const kopf = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
@@ -53666,6 +53686,52 @@
               : `<button class="btn btn-ghost tc2-btn pz-ok is-ok" data-plan-auto-zurueck="${p.id}" title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">✓ bestätigt</button>`}</span>`
           : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button>${rest}`
             + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>`)
+      }
+      // TU1 HEDGE-PLAN ALS ZEILE (Finn 10.11.2026: „Mach überall die Übersicht, wie sie bei Lucid Trading gerade ist"): dieselben Knöpfe wie
+      // auf der Karte oben (actions) — gleiche data-plan-*-Attribute, gleiche Bedingungen, gleiche Titel. Nur die Uhrzeit wandert wie bei den
+      // V2-Zeilen in die Start-Spalte (Klick = ändern, ✕ = raus); wo die Karte statt „⏰ Zeit" einen anderen Knopf zeigt (Startzeit aus,
+      // gestartet, Warteschlange), steht genau dieser Knopf hier (restK). Topstep V2 ohne Kette: Zeit nur Erinnerung → Start-Zelle ohne
+      // Ändern-Klick, „von Hand" darunter, „Starten" bleibt wie auf der Karte daneben.
+      if(opt && opt.zeile && !planIstZeile(p) && p.route !== 'polar'){
+        const zeitOffen = !!(p.startUm && !p.startUmGestartetAt)
+        const tsHand = p.route === 'tsv2' && !tpKetteNr(p)
+        const restK = zeitOffen ? vorcheckChip + (tsHand ? orbitBtn : '') : gestartetFrisch ? neuBtn : jetztBtn
+        const kopfK = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
+          + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
+        const erledigtK = `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>`
+        if(istV2Karte && p.autoPlan){
+          // Karte: ✎ 🗑 jetztBtn (nicht beim Funded-Vorschlag) + Bestätigen / ✓ Bestätigt / „im Funded-Planer bestätigen"
+          zeileAktK = kopfK + (p.fundedVorschlag ? '' : restK) + `<span class="pz-zustand">${p.fundedVorschlag
+            ? `<span class="btn btn-ghost tc2-btn pz-ok" style="cursor:default" title="Funded-Vorschlag — bestätigt wird nur unter Admin → Funded-Planer; erst dann bekommt er eine Startzeit">im Funded-Planer bestätigen</span>`
+            : !p.autoBestaetigtAt
+            ? `<button class="btn btn-ghost tc2-btn pz-ok" data-plan-auto-ok="${p.id}" title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
+            : `<button class="btn btn-ghost tc2-btn pz-ok is-ok" data-plan-auto-zurueck="${p.id}" title="Bestätigt — Klick nimmt die Freigabe zurück">✓ bestätigt</button>`}</span>`
+        } else if(istV2Karte){
+          // Karte: ✎ 🗑 (Topstep V2 + Puls aus: nur „Läuft") bzw. „Läuft" + jetztBtn, dann „Erledigt"
+          zeileAktK = kopfK + ((p.route === 'tsv2' && tsPulsModus() === 'aus')
+            ? `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>`
+            : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button>${restK}`)
+            + erledigtK
+        } else {
+          // Hedge-Wege mit Slave (Echo, Orbit/Duplikum, Mirror): Karte ✎ 🗑 „Läuft" jetztBtn „Erledigt" — auch bei Auto-Plänen ohne Bestätigen-Knopf
+          // (die Karte zeigte dort nur den roten/grünen Rand; hier steht der Zustand als ruhiges Wort)
+          zeileAktK = kopfK + `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>${restK}`
+            + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
+            + (p.autoPlan ? `<span class="pz-zustand"><span class="pz-ok-txt${p.autoBestaetigtAt ? ' is-ok' : ''}" title="${p.autoBestaetigtAt ? 'Auto-Plan bestätigt' : 'Auto-Plan wartet auf Bestätigung'}">${p.autoBestaetigtAt ? '✓ bestätigt' : 'unbestätigt'}</span></span>` : '')
+        }
+        if(zeitOffen && istV2Karte && !p.autoPlan && p.route === 'tsv2' && tsPulsModus() === 'aus'){
+          // Karte zeigte bei Topstep V2 mit Puls aus keine Zeit-Knöpfe (nur „Läuft") — Zeile: Uhrzeit nur lesen, ohne Ändern/✕ (Prüfer-Befund TU1)
+          const d = new Date(p.startUm)
+          zeileZeitK = `<span class="pz-zeit-t" title="${escapeHtml(tpStartUmText(p.startUm))} — Puls für Topstep ist aus: in TopstepX platzieren, dann „Läuft“">${isFinite(d) ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'}<small>von Hand</small></span>`
+        } else if(zeitOffen && tsHand){
+          const d = new Date(p.startUm), tag = isFinite(d) && d.toDateString() !== new Date().toDateString() ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' · ' : ''
+          zeileZeitK = `<span class="pz-zeit-t" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung (${escapeHtml(tpStartUmText(p.startUm))})">${isFinite(d) ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'}<small${isFinite(d) && d.getTime() < Date.now() - 10 * 60 * 1000 ? ' class="is-verpasst"' : ''}>${tag}${isFinite(d) && d.getTime() < Date.now() - 10 * 60 * 1000 ? 'verpasst · ' : ''}von Hand</small>${_ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">${_ss.marke || '⛔ Richtungsschutz'}</small>` : ''}</span>`
+            + `<button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">✕</button>`
+        } else if(!p.startUm && !p.autoPlan && p.plannedFor){
+          // Karte zeigte das Plan-Datum („10. Nov.") — ohne Startzeit steht es klein in der Start-Spalte
+          const dateStr = new Date(p.plannedFor).toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
+          zeileZeitK = `<span class="pz-zeit-t" title="Geplant für ${escapeHtml(dateStr)} — ohne Startzeit">${escapeHtml(dateStr)}<small>ohne Zeit</small></span>`
+        }
       }
       // GEPLANTE TRADES FÜR POLAR (21.10.2026): Knöpfe der Paar-Zeile — Master-Teilzeile ✎ 🗑 + „Starten" (Prüf-Tabelle; immer da wie seit .1670,
       // gesperrt nur über polarStartSperre — nach einem Abbruch sofort wieder klickbar), Slave-Teilzeile „Läuft" (Hand-Weg) + „Erledigt"
@@ -53713,7 +53779,30 @@
     }
 
     // Geplant-Tabelle (AP-DESIGN 05.10.2026): V2-Plan ohne Hedge als schlanke Zeile statt Karte
-    if(planIstZeile(p)) return planZeileHtml(p, _m, { name: masterName, ext: _mTsxName ? '' : mExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt })
+    // TU1 (10.11.2026): Topstep-verlinkt → letztes Segment des TopstepX-Namens als Nummer (wie mExt der Karte). Vorher '' — die Zeile nahm dann
+    // die ERSTE 6-stellige Zahl des Namens („EXPRESS-V2-DLL-688698-61616610" → …8698 bei jedem Konto derselben Serie)
+    const _zExt = _mTsxName ? (_mTsxName.split('-').pop() || '') : mExt
+    if(planIstZeile(p)) return planZeileHtml(p, _m, { name: masterName, ext: _zExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt })
+    // TU1 HEDGE-PLAN ALS ZEILE (10.11.2026): Weg-Chip (Echo / Winning Day / Nova / Orbit …) hinter dem Konto, in der Spalte „Schritt · Hedge"
+    // die Hedge-Angaben der Karte — V2 mit Fusion: „Fusion-Hedge" + € + ×Multiplikator; Weg mit Slave: „→ Slave" + ×Multiplikator + Slave-Risiko.
+    // Hat der Plan einen Schritt (Auto-Planer-Notiz, Topstep-Kette, Tage sammeln), steht der dort und der Hedge im Tooltip des Weg-Chips.
+    if(opt && opt.zeile && isPlanned && p.route !== 'polar'){
+      const de2 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+      const fusionV2 = istV2Karte && (Number(p.hedgeEur) > 0 || p.orbitV3)
+      const multTxt = p.multiplier != null && isFinite(Number(p.multiplier)) ? '×' + Number(p.multiplier).toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''
+      let hedgeTip = '', artHtml = ''
+      if(fusionV2){
+        hedgeTip = `Fusion-Gegenhedge${Number(p.hedgeEur) > 0 ? ': ' + de2(p.hedgeEur) + ' € Verlust am Master-TP' : ''}${multTxt ? ' · Multiplikator ' + multTxt.slice(1) : ''} — beide Schließ-Level in MetaTrader`
+        artHtml = `<span class="pz-art pz-art-kette pz-art-hedge" title="${escapeHtml(hedgeTip)}"><span><b>Fusion-Hedge</b></span><small>${Number(p.hedgeEur) > 0 ? de2(p.hedgeEur) + ' €' : ''}${Number(p.hedgeEur) > 0 && multTxt ? ' · ' : ''}${multTxt}</small></span>`
+      } else if(!istV2Karte){
+        const sDupTxt = sDup ? String(fmtDupBalance(sDup)).replace(/<[^>]*>/g, '').trim() : ''
+        hedgeTip = `Hedge → ${slaveName}${p.slaveFirm ? ' (' + p.slaveFirm + ')' : ''}${multTxt ? ' · Multiplikator ' + multTxt.slice(1) : ''} · Risiko Master ${de2(p.masterRisk || 0)} $ / Slave ${sCur}${de2(p.slaveRisk || 0)}${sDupTxt ? ' · Slave-Balance ' + sDupTxt : ''}`
+        artHtml = `<span class="pz-art pz-art-kette pz-art-hedge" title="${escapeHtml(hedgeTip)}"><span><b>→ ${escapeHtml(slaveName)}</b></span><small>${multTxt}${multTxt ? ' · ' : ''}${sCur}${Math.round(Number(p.slaveRisk) || 0).toLocaleString('de-DE')}</small></span>`
+      }
+      const weg = sysStickerHtml(planSysKey(p), 'pz-weg', hedgeTip ? ' · ' + hedgeTip : '')
+      return planZeileHtml(p, _m, { name: masterName, ext: _zExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAktK,
+        zeit: zeileZeitK || undefined, weg, artHtml: artHtml || undefined })
+    }
     // Polar geplant (21.10.2026): Paar Master/Slave im Block „Geplante Trades für Polar" (polarGeplantBlock)
     if(isPlanned && p.route === 'polar') return polarGzPaarHtml(p, _m, { name: masterName, ext: _mTsxName ? '' : mExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt, akt2: zeileAkt2 })
     const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}${sysBadge ? ' tc2-has-sys' : ''}`
@@ -57681,7 +57770,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2138'
+  const OS_TAB_BUILD = '2026-09-22.2139'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
