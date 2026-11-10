@@ -176,7 +176,8 @@ check("if markt_zu and not anfrage_gesehen:" in run_src, "Markt zu: retry_ok nur
 m = re.search(r"if anfrage_gesehen and not grund:\n.*?return \{(.*?)\}\n", run_src, re.S)
 check(bool(m) and '"retry_ok": False' in m.group(1) and '"unklar": True' in m.group(1) and "NICHT erneut starten" in m.group(1),
       "keine Position trotz Anfrage → UNKLAR, retry_ok False")
-check(run_src.count('"KEINE Bestaetigung binnen 12 s') == 2, "Schlüssel-Texte „KEINE Bestaetigung binnen 12 s“ unverändert")
+# B2 (RA1 11.11.2026): dritter Ausgang mit demselben Schlüssel-Anfang — vom Server abgelehnt + Journal-Beleg (server_abgelehnt)
+check(run_src.count('"KEINE Bestaetigung binnen 12 s') == 3, "Schlüssel-Texte „KEINE Bestaetigung binnen 12 s“ unverändert")
 
 # ── Nachträge aus der Gegenprüfung ───────────────────────────────────────────────────────────────────────────
 t = Terminal(wirksam=WEGE, ausf_s=15.0)

@@ -11465,6 +11465,12 @@ def _dialog_struktur(dlg):
 # sagte nur „Dialog geschlossen", der Dialog-Teil fiel beim Speichern (400 Zeichen) weg. Jetzt liest der Bot die Antwort des Servers
 # selbst: Journal-Zeile des Terminals (logs/JJJJMMTT.log), Texte des Order-Dialogs, Konto-/Symbol-Zustand der API — der Grund steht vorn.
 ORDER_GRUND_REGELN = (
+    # B1 (RA1, Master 11.11.2026; Moritz/Marc The5%ers 100k am 10.11.: Journal „[Only position closing is allowed]“ — unbekannter Text wurde zu
+    # „Server antwortete …“ ohne Quelle „Journal: […]“, der Tab hielt die Ablehnung für UNKLAR, der Tages-Reset schob die Pläne nach Überprüfen).
+    # Der Satz „Only position closing is allowed“ bleibt wörtlich im Grund: E1 (app.py KK_ARTEN nur_schliessen) erkennt das Konto daran.
+    (r"only position closing( is allowed)?|nur (das )?schlie(ß|ss)en (von positionen )?(ist )?erlaubt",
+     "Konto nimmt nur Schließen an (Server: Only position closing is allowed)",
+     "Konto bei der Firma prüfen (bestanden/verletzt/gesperrt?) — nicht neu starten"),
     (r"trad(e|ing) (is )?disabled|handel (ist )?(deaktiviert|gesperrt)|account (is )?disabled|konto (ist )?(deaktiviert|gesperrt)",
      "Handel am Konto gesperrt (Server: Trade disabled)",
      "Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten"),
@@ -11536,6 +11542,72 @@ def order_anfrage_im_journal(zeilen, login, symbol, richtung, ab_s, max_alter_s=
         if d <= max_alter_s or d >= 86400 - 1:
             return str(z).strip()
     return None
+
+
+def journal_order_zaehlung(zeilen, login, symbol, richtung, ab_s, max_alter_s=900):
+    """REIN RECHNEND (testbar, B2 RA1 11.11.2026): Order-Zeilen dieses Kontos zu Symbol + Richtung seit ab_s →
+    {anfragen, abgelehnt, erfolg, failed_zeile}. abgelehnt = „failed market|instant|request|exchange <richtung> …“; erfolg = „accepted“,
+    „deal #… <richtung>“, „order #… <richtung>“, „done“, „placed for execution“; anfragen = übrige „market|… <richtung>“. „close #…“/„modify #…“ zählen nicht."""
+    out = {"anfragen": 0, "abgelehnt": 0, "erfolg": 0, "failed_zeile": None, "zeilen_seit_klick": 0, "failed_unbekannt": 0}
+    sym, ri = str(symbol or "").lower(), str(richtung or "").lower()
+    lg = f"'{login}':" if login else ""
+    if not sym or ri not in ("buy", "sell"):
+        return out
+    rx_anfr = re.compile(rf"\b(market|instant|request|exchange) {ri}\b")
+    rx_ok = re.compile(rf"\baccepted\b|\bdeal #\d+ {ri}\b|\border #\d+ {ri}\b|\bdone\b|placed for execution")
+    for z in list(zeilen or ()):
+        zl = str(z or "").lower()
+        _m0 = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zl)
+        if _m0:   # Prüfer (B1/B2) S1: belegt, dass das gelesene Journal den Klick überhaupt abdeckt (nicht still die Datei von gestern)
+            _d0 = (int(_m0.group(1)) * 3600 + int(_m0.group(2)) * 60 + int(_m0.group(3)) + int(_m0.group(4)) / 1000.0 - float(ab_s)) % 86400
+            if _d0 <= max_alter_s:
+                out["zeilen_seit_klick"] += 1
+        if sym not in zl or (lg and lg not in zl) or "close #" in zl or "modify #" in zl:
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zl)
+        if not m:
+            continue
+        d = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 - float(ab_s)) % 86400
+        if not (d <= max_alter_s or d >= 86400 - 1):
+            continue
+        if re.search(rf"\bfailed (market|instant|request|exchange) {ri}\b", zl):
+            # Prüfer (B1/B2): nur eine Ablehnung mit BEKANNTEM Grund zählt — „[Request canceled by timeout]“/„[No connection]“ heißt nicht „nicht ausgeführt“
+            _a = re.findall(r"\[([^\]]+)\]", str(z))
+            if _a and order_grund_aus_text(_a[-1]):
+                out["abgelehnt"] += 1
+                out["failed_zeile"] = str(z).strip()
+            else:
+                out["failed_unbekannt"] += 1
+        elif rx_ok.search(zl):
+            out["erfolg"] += 1
+        elif rx_anfr.search(zl):
+            out["anfragen"] += 1
+    return out
+
+
+# Prüfer (B1/B2) S2: als Dialog-Beleg nur echte Server-Antworten — „Algo Trading“ und „zu viele“ können statische Beschriftungen im F9-Dialog sein
+SERVER_ANTWORT_DIALOG = ("Konto nimmt nur Schließen an", "Handel am Konto gesperrt", "SL/TP ungültig", "Markt geschlossen",
+                         "zu wenig freie Marge", "Volumen ungültig", "Kurs vom Server abgelehnt")
+
+
+def server_abgelehnt_urteil(quelle, zaehlung, journal_lesbar, grund_text="", stufen=1):
+    """REIN RECHNEND (testbar, B1+B2 RA1, Schnittstelle mit S1 11.11.2026): hat der Server die Anfrage NACHWEISLICH abgelehnt? (Aufrufer: keine
+    Position am Konto.) quelle = dritte Stelle von order_grund_bestimmen. Belege: „Journal: […]“ (bekannte Regel aus ORDER_GRUND_REGELN) bzw.
+    „Order-Dialog“ (roter Server-Text im Dialog per Regel) — beide NUR mit lesbarem Journal, das seit dem Klick keine Erfolgszeile und nicht mehr
+    Anfragen als Ablehnungen zeigt (beim Journal-Beleg zusätzlich mindestens eine „failed …“-Zeile). „Journal“ ohne Regel (unbekannter Text), API-
+    Rechnung (Marge, Konto-Zustand) und unlesbares Journal = kein Beleg → False, dann bleibt alles wie heute.
+    Prüfer-Nachzug: das Journal muss Zeilen SEIT dem Klick zeigen (zeilen_seit_klick), eine eigene failed-Zeile mit unbekanntem Grund ist kein Beleg,
+    beim Journal-Beleg müssen so viele bekannte Ablehnungen stehen wie Auslöse-Stufen gedrückt wurden, der Dialog-Beleg zählt nur für echte
+    Server-Antworten (SERVER_ANTWORT_DIALOG)."""
+    q = str(quelle or "")
+    z = zaehlung if isinstance(zaehlung, dict) else {}
+    ab, anfr = int(z.get("abgelehnt") or 0), int(z.get("anfragen") or 0)
+    if not journal_lesbar or int(z.get("zeilen_seit_klick") or 0) < 1 or int(z.get("erfolg") or 0) > 0 or anfr > ab \
+            or int(z.get("failed_unbekannt") or 0) > 0:
+        return False
+    if q.startswith("Journal: ["):
+        return ab >= max(1, int(stufen or 1))
+    return q == "Order-Dialog" and str(grund_text or "").startswith(SERVER_ANTWORT_DIALOG)
 
 
 # Dialog-Texte, die zeigen, dass eine Anfrage unterwegs ist (DO2 06.11.2026) — dann nie die nächste Stufe
@@ -14581,6 +14653,8 @@ def run(cfg_path, cmd):
             anfrage = order_anfrage_im_journal(zeilen, expected, symbol, cmd["richtung"], ab_s)
         return pos, weg, anfrage, dtext, lesbar
 
+    _klick_ab_s = _jetzt_s() - 1.0   # B2: Journal-Beleg „vom Server abgelehnt“ nur für Zeilen ab diesem Klick
+    _klick_spur_i = len(trail)       # B2 (Prüfer S3): ab hier zählen die gedrückten Auslöse-Stufen („<muster>-Knopf: …“)
     ausgeloest, anfrage_gesehen = stufen_ausloesen(
         (("Fokus+Leertaste", _weg_leertaste),
          ("SendInput-Klick", _weg_sendinput),
@@ -14809,6 +14883,27 @@ def run(cfg_path, cmd):
                 "trail": _spur(trail)}
     if grund:
         trail.append(f"Grund: {grund[0]} ({grund[2]})")
+        # B1+B2 (RA1, 11.11.2026, Schnittstelle mit S1): vom Server NACHWEISLICH abgelehnt (server_abgelehnt_urteil) + keine Position →
+        # server_abgelehnt True; der Tab setzt dann unklar = false (Tages-Reset löscht statt „prüfen“). retry_ok bleibt wie bisher False (kein Neustart
+        # derselben Order). Ohne Beleg kommt das Feld nicht — alles wie heute.
+        _sa, _sa_z = False, {}
+        if str(grund[2]).startswith("Journal: [") or grund[2] == "Order-Dialog":
+            try:
+                _lt = time.localtime()
+                _jz = _mt5_journal_zeilen(_stufe_daten, beide=(_lt.tm_hour == 0 and _lt.tm_min < 5)) if _stufe_daten else []
+                _sa_z = journal_order_zaehlung(_jz, expected, symbol, cmd["richtung"], _klick_ab_s)
+                _stufen = sum(1 for _e in list(trail)[_klick_spur_i:] if f"{muster}-Knopf: " in str(_e))
+                _sa = server_abgelehnt_urteil(grund[2], _sa_z, bool(_jz), grund[0], _stufen)
+            except Exception as e:
+                trail.append(f"Journal-Beleg nicht lesbar ({type(e).__name__})")
+        if _sa:
+            trail.append("vom Server abgelehnt (Journal seit Klick: " + f"{_sa_z.get('abgelehnt')} failed, {_sa_z.get('anfragen')} offen, 0 Erfolg)"
+                         + (" · " + str(_sa_z.get("failed_zeile"))[-140:] if _sa_z.get("failed_zeile") else ""))
+            return {"ok": False, "retry_ok": False, "server_abgelehnt": True,
+                    "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],
+                    "msg": f"KEINE Bestaetigung binnen 12 s — Grund: {grund[0]} ({grund[2]}) → {grund[1]}. Position nicht am Konto, "
+                           "vom Server abgelehnt — nichts platziert. Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
+                    "trail": _spur(trail)}
         return {"ok": False, "retry_ok": False, "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],
                 "msg": f"KEINE Bestaetigung binnen 12 s — Grund: {grund[0]} ({grund[2]}) → {grund[1]}. Position nicht am Konto, "
                        "Dialog geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
