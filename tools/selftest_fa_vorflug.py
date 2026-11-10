@@ -90,6 +90,19 @@ check(p.count("_hat = lock.acquire(timeout=VORFLUG_WARTE_S)") == 2 and p.count("
       "d3 master-order und Close warten auf einen laufenden Vorflug (statt 409 = Fehlstart)")
 check(re.search(r"VORFLUG_WARTE_S = 45\.0", p) and "timeout=40" in blk, "d4 Wartezeit der Order (45 s) > Lese-Deckel (40 s)")
 
+# e) Hinweis S1 (RA2 F1): reine Lesungen zählen nicht als „MT5-Order läuft“ (Tab-Heilung, Polar, Panel-Neustart)
+import threading  # noqa: E402
+sys.path.insert(0, os.path.join(WURZEL, "mt5-copier"))
+import panel as pn  # noqa: E402
+la, lb = threading.Lock(), threading.Lock()
+la.acquire()
+check(pn.mt5_order_belegt({"a.json": la, "b.json": lb}, set()) is True, "e1 Order hält den Lock → belegt")
+check(pn.mt5_order_belegt({"a.json": la, "b.json": lb}, {"a.json"}) is False, "e2 nur eine Deal-/Vorflug-Lesung hält den Lock → nicht belegt")
+lb.acquire()
+check(pn.mt5_order_belegt({"a.json": la, "b.json": lb}, {"a.json"}) is True, "e3 Lesung auf A, Order auf B → belegt")
+check("mt5_order_belegt()" in inspect.getsource(pn._browser_und_mt5_frei) and "mt5_order_belegt()" in inspect.getsource(pn._bot_lauf_aktiv),
+      "e4 _browser_und_mt5_frei und _bot_lauf_aktiv (Polar, Fenster nach vorn) nutzen die neue Prüfung")
+
 print()
 print("FEHLER: " + ", ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)
