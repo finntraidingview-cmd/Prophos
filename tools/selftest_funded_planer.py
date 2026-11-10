@@ -452,41 +452,48 @@ def balance_selbst(ns):
 
 
 def im_plus(ns):
-    """AH2 (Finn 10.11.2026): Konto im Plus (offene Kosten ≤ 0) → fester Satz € je $ Abstand statt „Hedge nicht rechenbar“; offen > 0 bitgleich."""
-    print("\nAH2 · Konto im Plus → fester Satz")
+    """AH2 (Finn 10.11.2026): Konto im Plus (offene Kosten ≤ 0) → fester Satz € je $ Abstand statt „Hedge nicht rechenbar“; offen > 0 bitgleich.
+    Seit FH1 B (Finn 10.11.2026): Balance ≥ Zyklus-Start → max(echte Kosten, Pump-Kosten bis Balance B); der AH2-Satz greift nur noch unter dem Start
+    (oder ohne Simulationsdaten)."""
+    print("\nAH2 · Konto im Plus → fester Satz (unter dem Start) · FH1 B darüber")
     REGEL = ns["FDP_FIRMEN_STANDARD"][0]
-    R, jg = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"]
+    R, jg, KB = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"], ns["fdp_kosten_theorie"]
     j100, j150 = jg(REGEL, 100000), jg(REGEL, 150000)
-    # Chris 100k …0005: Balance 105.845,56, offene Kosten −498 € → Satz kosten_eur ÷ dd (Apex hat kein hedge_eur) = 350 / 3.000
+    # Chris 100k …0005: Balance 105.845,56, offene Kosten −498 € → seit FH1 B: Pump-Kosten bis Balance statt AH2-Satz
     r = R(REGEL, j100, ST100, 105845.56, 105845.56, -498, 100000, 100000)
-    satz = 350 / 3000
-    check(r["aktion"] == "planen" and r.get("hedge_quelle") and "kosten_eur" in r["hedge_quelle"] and r.get("offen_kosten_eur") == -498,
-          f"100k −498 €: geplant, hedge_quelle „{r.get('hedge_quelle')}“")
-    check(abs(r["offen_eur"] - round(satz * (105845.56 - r["liq"]), 2)) < 0.011 and abs(r["verhaeltnis"] - round(satz, 5)) < 1e-5,
-          f"Hedge-Basis {r['offen_eur']} € = 350/3.000 × ({_d(105845.56)} − Liq {r['liq']}) · Verhältnis {r['verhaeltnis']} € je $")
-    # Mike 150k …0001: Balance 150.238,76, offene Kosten −3.022 € → 550 / 4.000
+    kb = KB(j100, 100000, 105845.56, 100000)
+    check(r["aktion"] == "planen" and r.get("hedge_basis") == "pump_b" and abs(r["offen_eur"] - kb) < 0.011 and r.get("offen_kosten_eur") == -498
+          and "Pump-Kosten bis Balance (B)" in r["hedge_quelle"], f"100k −498 € über dem Start: Hedge-Basis B {r['offen_eur']} € („{r.get('hedge_quelle')}“)")
+    # Mike 150k …0001: Balance 150.238,76, offene Kosten −3.022 € → B = 550 + 550/4.000 × 238,76
     m = R(REGEL, j150, ST150, 150238.76, 150238.76, -3022, 150000, 150000)
-    check(m["aktion"] == "planen" and abs(m["verhaeltnis"] - round(550 / 4000, 5)) < 1e-5 and m.get("offen_kosten_eur") == -3022,
-          f"150k −3.022 €: geplant, Verhältnis {m.get('verhaeltnis')} € je $ (550/4.000), Hedge-Basis {m.get('offen_eur')} €")
-    # offene Kosten genau 0 → ebenfalls fester Satz
-    z = R(REGEL, j100, ST100, 104000, 104000, 0, 100000, 100000)
-    check(z["aktion"] == "planen" and z.get("hedge_quelle"), "offene Kosten 0 €: fester Satz statt „nicht rechenbar“")
-    # hedge_eur in der Regel geht vor kosten_eur
+    check(m["aktion"] == "planen" and m.get("hedge_basis") == "pump_b" and abs(m["offen_eur"] - round(550 + 550 / 4000 * 238.76, 2)) < 0.011,
+          f"150k −3.022 € knapp über dem Start: Hedge-Basis B {m.get('offen_eur')} € (550 + 0,1375 × 238,76)")
+    # AH2 unter dem Start: offene Kosten ≤ 0 → fester Satz kosten_eur ÷ dd (Apex hat kein hedge_eur) = 350 / 3.000
+    u = R(REGEL, j100, ST100, 99500, 99500, -498, 100000, 100000)
+    satz = 350 / 3000
+    check(u["aktion"] == "planen" and u.get("hedge_basis") == "ah2" and "kosten_eur" in u["hedge_quelle"] and u.get("offen_kosten_eur") == -498
+          and abs(u["offen_eur"] - round(satz * (99500 - u["liq"]), 2)) < 0.011 and abs(u["verhaeltnis"] - round(satz, 5)) < 1e-5,
+          f"unter dem Start, offen −498 €: AH2-Satz 350/3.000 × Abstand = {u.get('offen_eur')} €")
+    z = R(REGEL, j100, ST100, 99800, 99800, 0, 100000, 100000)
+    check(z["aktion"] == "planen" and z.get("hedge_basis") == "ah2", "offene Kosten 0 € unter dem Start: fester Satz statt „nicht rechenbar“")
+    # hedge_eur in der Regel geht vor kosten_eur (AH2, unter dem Start)
     jh = dict(j100, hedge_eur=450)
-    h = R(REGEL, jh, ST100, 104000, 104000, -10, 100000, 100000)
+    h = R(REGEL, jh, ST100, 99800, 99800, -10, 100000, 100000)
     check(h["aktion"] == "planen" and abs(h["verhaeltnis"] - round(450 / 3000, 5)) < 1e-5 and "hedge_eur" in h["hedge_quelle"], "hedge_eur der Regel geht vor kosten_eur")
-    # weder hedge_eur noch kosten_eur → klarer Grund
+    # weder hedge_eur noch kosten_eur → keine Simulation, kein Satz → klarer Grund
     jo = {k: v for k, v in j100.items() if k not in ("hedge_eur", "kosten_eur")}
     o = R(REGEL, jo, ST100, 104000, 104000, -10, 100000, 100000)
-    check(o["aktion"] == "aus" and "fester Satz fehlt" in o["grund"], f"ohne Satz: aus mit Grund „{o.get('grund')}“")
-    # offen > 0: bitgleich wie vorher (kein hedge_quelle, offen_eur = offen)
-    p = R(REGEL, j100, ST100, 104000, 104000, 350, 100000, 100000)
-    check(p["aktion"] == "planen" and "hedge_quelle" not in p and "offen_kosten_eur" not in p and p["offen_eur"] == 350 and abs(p["slave_risk"] - 350) < 0.01,
-          "offene Kosten 350 €: unverändert (offen_eur 350, slave_risk 350, kein hedge_quelle)")
+    check(o["aktion"] == "aus" and "fester Satz fehlt" in o["grund"], f"ohne Satz und ohne Simulationsdaten: aus mit Grund „{o.get('grund')}“")
+    # echte Kosten ≥ B: bitgleich wie vorher (kein hedge_quelle, offen_eur = offen) — am Start (B = Kauf) und über B
+    p = R(REGEL, j100, ST100, 100000, 100000, 350, 100000, 100000)
+    q = R(REGEL, j100, ST100, 104000, 104000, 2000, 100000, 100000)
+    check(p["aktion"] == "planen" and "hedge_quelle" not in p and "offen_kosten_eur" not in p and p["offen_eur"] == 350 and abs(p["slave_risk"] - 350) < 0.01
+          and "hedge_quelle" not in q and q["offen_eur"] == 2000, "echte Kosten ≥ B (am Start 350 €, bei 104k 2.000 € > B 817 €): unverändert, kein hedge_quelle")
+    # unter dem Start mit echten Kosten > 0: wie heute
+    w = R(REGEL, j100, ST100, 98081.4, 98081.4, 144.94, 100000, 100000)
+    check(w["aktion"] == "planen" and "hedge_quelle" not in w and w["offen_eur"] == 144.94, "Jacob 98.081 (unter dem Start), echt 144,94 €: wie heute")
     print(f"    Chris 100k: Liq {r['liq']} · Abstand {round(105845.56 - r['liq'], 2)} $ · Hedge-Basis {r['offen_eur']} € · {r['kontrakte']} NQ · TP {r['tp']} $ / SL {r['sl']} $"
           f" · Lots {r['lots']} · Fusion −{r['hedge_eur']} € am TP / +{r['hedge_sl_eur']} € am SL")
-    print(f"    Mike 150k:  Liq {m['liq']} · Abstand {round(150238.76 - m['liq'], 2)} $ · Hedge-Basis {m['offen_eur']} € · {m['kontrakte']} NQ · TP {m['tp']} $ / SL {m['sl']} $"
-          f" · Lots {m['lots']} · Fusion −{m['hedge_eur']} € am TP / +{m['hedge_sl_eur']} € am SL")
 
 
 def _d(x):

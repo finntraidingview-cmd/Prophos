@@ -44275,6 +44275,34 @@ def fdp_hedge(offen, balance, liq, tp, sl, kt, ppl=FDP_NQ_PPL, sppl=FDP_SLAVE_PP
             "hedge_tp_eur": round(v * tp, 2), "hedge_sl_eur": round(v * (sl or 0), 2)}
 
 
+def fdp_kosten_theorie(jg, start, balance, groesse, lock=100.0, max_schritte=60):
+    """REIN RECHNEND (testbar; FH1 Variante B, Finn 10.11.2026): was es den Planer normalerweise kostet, das Konto vom Zyklus-Start bis zur Balance hochzupumpen.
+    Start mit den Kontokosten (kosten_eur), Schritte wie fdp_tp (je höchstens max_trade, der letzte bis genau zur Balance), jeder Schritt gewinnt; der Fusion-Hedge
+    verliert dabei offen ÷ (Balance − Liq) × TP (fdp_hedge: hedge_tp_eur). Die Liq zieht nach jedem Schritt EOD nach wie fdp_liq (Größe − DD bzw. Höchststand − DD,
+    fest bei Größe + lock, sobald der Höchststand Größe + DD + lock erreicht) — das Nachziehen ändert den Abstand und damit den Satz des nächsten Schritts.
+    → € (gerundet) | None (keine Daten: kosten_eur/dd/max_trade/Größe fehlen, Balance unter Start, Abstand ≤ 0)."""
+    jg = jg or {}
+    kosten, dd, mt = _wd_num(jg.get("kosten_eur")), _wd_num(jg.get("dd")), _wd_num(jg.get("max_trade"))
+    g = float(groesse or 0)
+    if not (kosten and kosten > 0 and dd and dd > 0 and mt and mt > 0 and g > 0) or balance is None or start is None:
+        return None
+    bal = peak = float(start)
+    bis, offen = float(balance), float(kosten)
+    if bis < bal - 0.005:
+        return None
+    for _ in range(max_schritte):
+        if bal >= bis - 0.005:
+            return round(offen, 2)
+        liq, _txt = fdp_liq(g, dd, peak, bal, lock)
+        if liq is None or bal - liq <= 0:
+            return None
+        tp = min(mt, bis - bal)
+        offen += offen / (bal - liq) * tp
+        bal += tp
+        peak = max(peak, bal)
+    return None
+
+
 def fdp_offen(kosten, hedge_pls):
     """REIN RECHNEND (testbar): offene Kosten = Kontokosten − Summe der Hedge-Ergebnisse (Verlust negativ → erhöht, Gewinn senkt)."""
     return round(float(kosten or 0) - sum(float(x) for x in (hedge_pls or ()) if x is not None), 2)
@@ -44462,22 +44490,31 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     # offene Kosten ≤ 0 → fester Satz € je $ Abstand zur Liquidation statt offen ÷ Abstand. Satz = hedge_eur ÷ dd der Regel (wie rest_modus, FTMO 450 € auf
     # 3.000 $), fehlt hedge_eur: kosten_eur ÷ dd = das Verhältnis eines frischen Kontos (offen = Kontokosten, Abstand = Max DD; Apex 100k 350 € auf 3.000 $).
     # offen > 0 rechnet bitgleich wie bisher.
-    offen_h, h_quelle = offen, None
-    if not (offen and offen > 0):
+    # FH1 VARIANTE B (Finn 10.11.2026: „ja top, dann bau das mal so"; Anlass Chris Apex 100k …0006: 108.363 $, offene Kosten nur 515 €, weil ein Winning Day
+    # 1.604 € im Hedge zurückgeholt hat — „nicht mit den echten offenen Kosten rechnen, sondern mit dem, was es normalerweise kosten würde, den Account auf
+    # 108.000 hochzukriegen"): Balance ≥ Zyklus-Start → Hedge-Basis = max(echte offene Kosten, fdp_kosten_theorie = Planer-Weg simuliert, mit EOD-Nachziehen
+    # der Liq bis Größe + lock). Balance < Start → wie bisher echte Kosten, ≤ 0 → AH2-Satz unten. Ohne Simulationsdaten (kosten_eur/dd/max_trade) → wie bisher.
+    offen_h, h_quelle, h_basis = offen, None, None
+    kb = fdp_kosten_theorie(jg, start, balance, g, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0) \
+        if balance >= start - 0.005 else None
+    if kb is not None and kb > (offen if (offen and offen > 0) else 0.0) + 0.005:
+        offen_h, h_basis = kb, "pump_b"
+        h_quelle = f"Pump-Kosten bis Balance (B) {_liq_de(kb)} € · echt {_liq_de(offen)} €"
+    elif not (offen and offen > 0):
         ddj = _wd_num(jg.get("dd"))
         he, satz_art = _wd_num(jg.get("hedge_eur")), "hedge_eur"
         if not (he and he > 0):
             he, satz_art = _wd_num(jg.get("kosten_eur")), "kosten_eur"
         if not (he and he > 0 and ddj and ddj > 0):
             return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} € — Konto im Plus, fester Satz fehlt: hedge_eur bzw. kosten_eur / dd der Regel)")
-        offen_h = round(he / ddj * (balance - liq), 2)
+        offen_h, h_basis = round(he / ddj * (balance - liq), 2), "ah2"
         h_quelle = f"fester Satz (Konto im Plus): {_liq_de(he)} € je {_liq_de(ddj)} $ ({satz_art}) × {_liq_de(balance - liq)} $ Abstand"
     h = fdp_hedge(offen_h, balance, liq, tp, sl, kt, sppl=K.get("sppl") or FDP_SLAVE_PPL)   # EU1
     if not h:
         return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} €)" if h_quelle is None
                     else f"Hedge nicht rechenbar ({h_quelle})")
     if h_quelle is not None:
-        basis = dict(basis, offen_eur=round(offen_h, 2), offen_kosten_eur=round(offen, 2), hedge_quelle=h_quelle)
+        basis = dict(basis, offen_eur=round(offen_h, 2), offen_kosten_eur=round(offen, 2), hedge_quelle=h_quelle, hedge_basis=h_basis)
     return dict(basis, aktion="planen", grund="", tp=tp, sl=sl, kontrakte=kt, tp_art=art, stufe=nr, dll=dll, minis=minis,
                 tp_pkt=round(tp / (FDP_NQ_PPL * kt), 2), sl_pkt=round(sl / (FDP_NQ_PPL * kt), 2), **h)
 
@@ -44747,7 +44784,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     if felder:
                         fp_neu = dict(lauf[0]["funded_plan"], **{k: r_neu.get(k) for k in ("liq", "stufe", "dll", "minis", "offen_eur", "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")})
                         # AH2-Nachzug (Gegenprüfung): Konto-im-Plus-Felder mit neu rechnen — gesetzt nur bei festem Satz, sonst raus (kein alter Text, offen > 0 ohne neue Schlüssel)
-                        for _k in ("hedge_quelle", "offen_kosten_eur"):
+                        for _k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis"):
                             if r_neu.get(_k) is not None:
                                 fp_neu[_k] = r_neu[_k]
                             else:
@@ -44826,6 +44863,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
         notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · " + (f"offene Kosten {_liq_de(r['offen_eur'])} €" if not r.get("hedge_quelle") else
+                 # FH1 B (10.11.2026): Hedge-Basis = Pump-Kosten bis zur Balance, echte offene Kosten daneben
+                 f"Hedge-Basis {_liq_de(r['offen_eur'])} € = Pump-Kosten bis Balance (B) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
                  # AH2 (10.11.2026): Konto im Plus — Hedge-Basis aus dem festen Satz, offene Kosten daneben
                  f"Konto im Plus (offene Kosten {_liq_de(r.get('offen_kosten_eur'))} €) · Hedge-Basis {_liq_de(r['offen_eur'])} € = {r['hedge_quelle']}")) if r.get("tp_art") != "rest" else (
                  # FTMO Futures (03.11.2026): keine Stufe, TP = Rest bis zum Ziel, Hedge fest € je $ Abstand zur Liquidation
@@ -44841,7 +44880,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("zyklus", "start", "ziel", "liq", "stufe", "dll", "minis", "offen_eur",
                                                                          "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")},
-                                                 **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur") if r.get(k) is not None},   # AH2: nur bei Konto im Plus
+                                                 **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis") if r.get(k) is not None},   # AH2 / FH1 B
                                                  start_um=start.astimezone(timezone.utc).isoformat())}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start.astimezone(timezone.utc).isoformat(), richtung=richtung,
                                    vorschlag=not auto_k))
@@ -44891,7 +44930,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                       "vorschlag": bool(p.get("funded_plan")) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
                       "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance")),
                       # Werte des Planers beim Anlegen (Ziel, Liq, Stufe, Hedge, offene Kosten) — Spalte Balance → Ziel und Stufe wie beim Challenge-Planer
-                      **{k: (p.get("funded_plan") or {}).get(k) for k in ("ziel", "liq", "stufe", "dll", "hedge_sl_eur", "hedge_tp_eur", "offen_eur", "hedge_quelle", "offen_kosten_eur")
+                      **{k: (p.get("funded_plan") or {}).get(k) for k in ("ziel", "liq", "stufe", "dll", "hedge_sl_eur", "hedge_tp_eur", "offen_eur", "hedge_quelle", "offen_kosten_eur", "hedge_basis")
                          if isinstance(p.get("funded_plan"), dict)}}
                      for p in plaene
                      if p.get("status") in ("planned", "open", "review") or str(p.get("started_at") or p.get("ended_at") or "") >= seit]

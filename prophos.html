@@ -52566,7 +52566,7 @@
       // Funded-Planer (o.fusion, 28.10.2026): Spalte „Fusion" = Lots + gedeckte Kosten statt Stufe; unter TP/SL, wo Fusion dabei steht —
       // der Fusion-SL liegt auf dem Master-TP, der Fusion-TP auf dem Master-SL (der Schließer macht Fusion mit dem Master zu)
       const fu = o.fusion, eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €', pkt = v => v != null ? Math.round(v).toLocaleString('de-DE') + ' Pkt' : ''
-      const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? (fu.imPlus ? ` Hedge-Basis ${eur(fu.gedeckt)} — Konto im Plus, fester Satz € je $ Abstand zur Liquidation (AH2) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.`) : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
+      const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? (fu.pumpB ? ` Hedge-Basis ${eur(fu.gedeckt)} — was der Planer normalerweise bis zu dieser Balance kostet (Pump-Weg simuliert, echt offen ${eur(fu.echt)}) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : fu.imPlus ? ` Hedge-Basis ${eur(fu.gedeckt)} — Konto im Plus, fester Satz € je $ Abstand zur Liquidation (AH2) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.`) : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
       // AUSGÄNGE ALS PAARE (30.10.2026, Finn ~07:10: „was gehört zusammen?"): je Ausgang eine Zeile über die volle Breite —
       // Master TP ↔ Fusion SL, Master SL ↔ Fusion TP; Master immer $, Fusion immer €, dieselben Felder wie vorher (fu.minus / fu.plus)
       // KARTE EINZEILIG (Finn 30.10.2026 ~08:25): die Paare stehen jetzt IN den Spalten TP / SL (pzPaarZelle) statt als zweite Zeile darunter
@@ -57681,7 +57681,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2133'
+  const OS_TAB_BUILD = '2026-09-22.2134'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -90736,7 +90736,9 @@
         x.liq != null ? 'Liq ' + Math.round(x.liq).toLocaleString('de-DE') + ' $' : '',
         x.hedge_sl_eur != null ? `Hedge +${Math.round(x.hedge_sl_eur)} / −${Math.round(x.hedge_tp_eur)} €` : '',
         // AH2 (Finn 10.11.2026): Konto im Plus — Hedge-Basis aus dem festen Satz (app.py fdp_konto_rechnen hedge_quelle), offene Kosten daneben
-        x.hedge_quelle ? `im Plus (offen ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €) · Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € fester Satz`
+        // FH1 B (Finn 10.11.2026): Hedge-Basis = Pump-Kosten bis zur Balance (Planer-Weg simuliert), echte offene Kosten daneben
+        x.hedge_basis === 'pump_b' ? `Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € Pump-Kosten bis Balance · echt ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €`
+        : x.hedge_quelle ? `im Plus (offen ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €) · Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € fester Satz`
           : x.offen_eur != null ? 'offen ' + Math.round(x.offen_eur).toLocaleString('de-DE') + ' €' : ''].filter(Boolean).join(' · ') : null
       // FUSION-GEGENHEDGE SICHTBAR (28.10.2026, Finn am Screenshot „Zu bestätigen": „wie viel gehedged wird, wo mein Fusion-TP und -SL sind,
       // auf dem Zeitstrahl drüber und drunter Fusion Plus und Fusion Minus, die Lotanzahl von Fusion"). Werte aus app.py fdp_hedge: minus =
@@ -90747,7 +90749,8 @@
       const fusLots = Number(x.lots) > 0 ? Number(x.lots) : (Number(fusMinus) > 0 && tpPkt ? Math.round(Number(fusMinus) / (fusPpl * tpPkt) * 100) / 100 : null)
       const fusion = (fusMinus != null || x.hedge_sl_eur != null) ? { lots: fusLots, minus: fusMinus != null ? Number(fusMinus) : null,
         plus: x.hedge_sl_eur != null ? Number(x.hedge_sl_eur) : null, gedeckt: x.offen_eur != null ? Number(x.offen_eur) : null,
-        imPlus: !!x.hedge_quelle,   // AH2 (10.11.2026): gedeckt ist dann die Hedge-Basis aus dem festen Satz, nicht die offenen Kosten (Tooltip)
+        imPlus: !!x.hedge_quelle && x.hedge_basis !== 'pump_b',   // AH2 (10.11.2026): gedeckt ist dann die Hedge-Basis aus dem festen Satz, nicht die offenen Kosten (Tooltip)
+        pumpB: x.hedge_basis === 'pump_b', echt: x.offen_kosten_eur != null ? Number(x.offen_kosten_eur) : null,   // FH1 B (10.11.2026)
         tpPkt, slPkt: kt && Number(x.sl) > 0 ? Number(x.sl) / usd : null } : null
       return Object.assign({ fusion, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '',
         firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: 'tvv2', start_um: x.start_um || null, start: x.start_um || null,
