@@ -10,7 +10,8 @@ Ziel: wiederkehrende Fehlstarts erkennen und an der Ursache abstellen, nicht ein
 | `puls_fehlstarts` | jeder rote Start zur Startzeit (Echo-V2-Check, Puls ohne Order, Start-Fenster verpasst, Ziel erreicht) | `prophos.html` `sfMelden` (PC-Tab) |
 | `order_signale` status `fehler` | jeder gescheiterte Puls-Lauf über Signal (Orbit, Topstep, Endlesung, Balance lesen …) | PC-Tab beim Abschluss |
 | View `puls_fehler_ereignisse` | beide zusammen, eine Zeile je Ereignis | — |
-| View `puls_fehler_muster` | gebündelt nach Muster (Schritt + Meldung ohne Zahlen/Kontonummern) | — |
+| View `puls_fehler_muster` | gebündelt nach Muster (Schritt + Meldung ohne Zahlen/Kontonummern), seit FS1 nur `art = 'fehler'` | — |
+| View `puls_wartet_muster` | wie oben, nur `art = 'wartet'` (Big-Trade-Warten `big_trade_nah`/`big_trade_unklar`: kein Fehlstart, der Plan startet später) — FS1 10.11.2026, `sql/2026-11-10_fs1_wartet_zaehlung.sql` | — |
 
 Muster-Funktion: `puls_fehler_muster_text(schritt, msg)`. SQL: `sql/2026-10-07_puls_fehler_muster.sql`.
 

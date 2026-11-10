@@ -26600,6 +26600,40 @@ def _tab_wache_pruefen(cmd, trail, stufe):
     return None if ok else text
 
 
+def tab_zustand_kurz(z):
+    """REIN RECHNEND (testbar, FS1 10.11.2026): Panel-Antwort /api/tab-zustand → kurzer Satz für die Meldung (Beleg der Ursache) | ''."""
+    if not isinstance(z, dict) or not z.get("ok"):
+        return ""
+    teile = []
+    if z.get("still_s") is not None:
+        teile.append(f"letzte Abfrage vor {float(z['still_s']):.0f} s")
+    teile.append({"v": "sichtbar", "h": "im Hintergrund"}.get(str(z.get("vis") or ""), "Sichtbarkeit unbekannt"))
+    if z.get("geladen_vor_s") is not None:
+        g = int(z["geladen_vor_s"])
+        teile.append(f"geladen vor {g // 60} min" if g >= 120 else f"geladen vor {g} s")
+    if z.get("puls_abfrage_vor_s") is not None:
+        teile.append(f"Puls-Abfrage vor {float(z['puls_abfrage_vor_s']):.0f} s")
+    if z.get("heil_stufe"):
+        teile.append(f"Heil-Stufe {int(z['heil_stufe'])}")
+    if z.get("login") is False:
+        teile.append("nicht angemeldet")
+    return "Tab: " + ", ".join(teile)
+
+
+def _tab_zustand_lesen(plan_id, anlass=""):
+    """GET http://127.0.0.1:<PANEL_PORT>/api/tab-zustand (nur lokal) → dict; Fehler → {ok: False, grund}. anlass=tab_nicht_erreichbar startet im Panel die
+    Stufen-Heilung sofort (FS1)."""
+    import urllib.parse
+    import urllib.request
+    try:
+        port = int(os.environ.get("PANEL_PORT") or 8770)
+        q = urllib.parse.urlencode({"anlass": anlass, "plan_id": str(plan_id or "")[:36]})
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tab-zustand?{q}", timeout=1.5) as r:
+            return json.loads(r.read().decode("utf-8", "replace") or "{}")
+    except Exception as e:
+        return {"ok": False, "grund": type(e).__name__}
+
+
 def modus_tvkette_cdp(cmd):
     """tvkonto über das Puls-Chrome (CDP): Konto (mit Auto-Login) → Ticket ausfüllen und beweisen → mit Marke 'scharf' EIN Klick
     auf den Senden-Knopf + Beweis (K4, Block-Kopf). Ohne 'scharf' Probelauf wie K2."""
@@ -26644,8 +26678,12 @@ def modus_tvkette_cdp(cmd):
 
     def tab_abbruch(text):
         # Der Tab bekommt die Antwort womöglich nie: Railway alarmiert aus dieser Zeile, der neu geladene Tab legt daraus den Start-Fehler an
+        # FS1 (10.11.2026): Tab-Zustand aus dem Panel in Spur und Meldung (Beleg der Ursache) — dieselbe Abfrage startet dort die Stufen-Heilung sofort
+        tz = _tab_zustand_lesen(cmd.get("plan_id"), "tab_nicht_erreichbar")
+        trail.append("Tab-Zustand (Panel): " + json.dumps(tz, ensure_ascii=False)[:500])
+        kurz = tab_zustand_kurz(tz)
         res.update(code="tab_nicht_erreichbar", schritt="tab_nicht_erreichbar", gesendet=False, retry_ok=True,
-                   msg=f"{text} — nichts gesendet, Plan bleibt Geplant.")
+                   msg=f"{text} — nichts gesendet, Plan bleibt Geplant." + (f" [{kurz}]" if kurz else ""))
         res["trail"] = " > ".join(trail)
         _puls_ergebnis_senden("order", "ende", cmd, res, trail)
         _puls_diagnose_senden(spur=trail, schritt="tab_nicht_erreichbar")

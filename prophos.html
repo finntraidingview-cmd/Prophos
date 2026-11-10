@@ -27200,7 +27200,9 @@
       const herz = new URLSearchParams({ tab: '1', login: currentUserId ? '1' : '0', url: location.origin + location.pathname,
         build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: window._tabHerzId,
         // sb nur mit Copier-Zeilen (ohne Zeilen schreibt der Tab nie — keine Aussage, S2 30.10.2026)
-        sb: (_fleetPushAt && !window._fleetZeilenLeer) ? String(Math.round((Date.now() - _fleetPushAt) / 1000)) : '', rt: window._rtAusSeit ? String(Math.round((Date.now() - window._rtAusSeit) / 1000)) : '0' })
+        sb: (_fleetPushAt && !window._fleetZeilenLeer) ? String(Math.round((Date.now() - _fleetPushAt) / 1000)) : '', rt: window._rtAusSeit ? String(Math.round((Date.now() - window._rtAusSeit) / 1000)) : '0',
+        // FS1 (10.11.2026): Sichtbarkeit + Ladezeit für den Tab-Zustand in der Puls-Spur (panel.py /api/tab-zustand)
+        vis: document.visibilityState === 'visible' ? 'v' : 'h', geladen: String(Math.round((performance.timeOrigin || 0) / 1000)) })
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
       // HAUPT-TAB (30.10.2026): ein zweiter Tab meldet nichts mehr (kein mt5_live) und wechselt auf „nur ansehen"
@@ -58235,7 +58237,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2163'
+  const OS_TAB_BUILD = '2026-09-22.2164'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -64223,7 +64225,8 @@
       const uacAlt = (alt && Number(alt.uac_n)) || 0, uacNeu = sfIstUacText(roh) && uacAlt < SF_UAC_MAX
       const flag = { schritt: f.schritt || '', msg: msgK, unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
-        versuche: (alt && Number(alt.versuche)) || 0, uac_n: uacAlt + (uacNeu ? 1 : 0), uac: uacNeu }   // Windows-Abfrage ≠ Fehlversuch (23.10.2026)
+        versuche: (alt && Number(alt.versuche)) || 0, uac_n: uacAlt + (uacNeu ? 1 : 0), uac: uacNeu,   // Windows-Abfrage ≠ Fehlversuch (23.10.2026)
+        tab_n: ((alt && Number(alt.tab_n)) || 0) + (f.schritt === 'tab_nicht_erreichbar' ? 1 : 0) }   // FS1 (10.11.2026): schneller Neustart nur beim 1. Mal (sfBehoben)
       // ZWEI ORBIT (03.11.2026, Z4): Zweit-Sperre am Code (Panel reicht zweit/zweit_art von Railway durch) — Sofort-Start-Wächter + Texte je Grund
       if(f.zweit === true){ flag.zweit = true; if(ZWEIT_ARTEN.includes(f.zweit_art)) flag.zweit_art = f.zweit_art
         if(ZWEIT_CODE_ART[f.zweit_code]) flag.zweit_code = f.zweit_code; if(f.bis && Number.isFinite(Date.parse(f.bis))) flag.bis = String(f.bis) }
@@ -64347,6 +64350,12 @@
     return Math.min(bis || 1440, sb != null ? sb : 1440, cb != null ? cb : 1440)
   }
   // Ist die Ursache weg? → Klartext (warum neu eingeplant) oder null
+  // FS1 (10.11.2026): Wartezeit vor dem einen schnellen Neustart nach tab_nicht_erreichbar — gestreut 2–4 min, je Plan fest (sfTick fragt jede Minute)
+  const sfTabSchnellMs = id => 120000 + (parseInt(String(id || '').replace(/[^0-9a-f]/gi, '').slice(0, 6) || '0', 16) % 120000)
+  // REIN: lebt dieser Tab laut Panel? (/api/tab-zustand: letzte Abfrage ≤ 15 s, angemeldet nicht verneint) UND ist er sichtbar oder hat die Stufen-Heilung
+  // des Panels nach dem Abbruch schon gegriffen (Prüfer FS1 SOLLTE 6: ein gedrosselter Hintergrund-Tab scheiterte sonst gleich wieder)
+  const sfTabLebt = z => !!(z && z.ok === true && typeof z.still_s === 'number' && z.still_s <= 15 && z.login !== false && (z.vis === 'v' || z.sofort_geheilt === true))
+  window._sfTab = { schnellMs: sfTabSchnellMs, lebt: sfTabLebt }   // Test-Haken
   async function sfBehoben(plan, f){
     if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'riegel_aufgegeben' || f.schritt === 'index_pause') return null   // R4b: Startfenster zu Ende — nie von selbst neu einplanen (neue Uhrzeit von Hand geht)
@@ -64414,6 +64423,16 @@
       const ri = (dd && !dd.copier_offline && !dd._httpFail) ? mt5RouteResolve(plan, dd.instances || []) : null
       const st = (ri && ri.inst && ri.inst.status) || {}
       if(!(ri && ri.inst.alive && !st.note && Array.isArray(st.master_positions) && st.master_positions.length === 0)) return null
+    }
+    // FS1 (10.11.2026, Master nach FS1: „Panel lädt den hängenden Tab neu, Puls startet genau einmal neu“): Tab antwortete beim Start nicht. Beim ERSTEN Mal je
+    // Plan (tab_n 1) nach gestreut 2–4 min einmal neu, wenn das Panel diesen Tab jetzt als lebendig meldet (letzte Abfrage ≤ 15 s); der Bot verlangt vor dem
+    // Senden wieder zwei Antworten ≤ 5 s. Ab dem 2. Mal, ohne Panel-Antwort oder alter Panel-Stand: wie bisher 15 min.
+    if(f.schritt === 'tab_nicht_erreichbar' && Number(f.tab_n) === 1){
+      const w2 = sfTabSchnellMs(plan.id)
+      if(Date.now() - (Date.parse(f.at) || 0) >= w2){
+        const tz = (typeof window.mtcApi === 'function') ? await window.mtcApi('tab-zustand', { timeoutMs: 1500 }).catch(() => null) : null
+        if(sfTabLebt(tz)) return `Prophos-Tab antwortet wieder — einmal nach ${Math.round(w2 / 60000)} min neu`
+      }
     }
     // EA-Selbstheilung lief noch (08.10.2026, ff8c2412): nichts gesendet, das Terminal ist meist Sekunden später gesund → 3 statt 15 min
     const warte = /Selbstheilung|terminal_heilt/i.test(String(f.msg || '')) ? 3 * 60000 : SF_WARTE_MS
@@ -64515,6 +64534,18 @@
     try{ claim = (window._sfClaimHier && window._sfClaimHier.get(String(id))) || null; gesendet = !!(window._sfSendetHier && window._sfSendetHier.has(String(id))) }catch(_){}
     return { claim, gesendet }
   }
+  // FS1 (10.11.2026): REIN bis auf performance/document — „ [Tab: nach dem Claim neu geladen (14:03) | seit vor dem Claim offen, Claim hier/anderswo, Hintergrund]“
+  function sfTabZustandText(claim, hier){
+    try{
+      const geladen = Math.round(performance.timeOrigin || 0)
+      if(!geladen || !claim) return ''
+      const hm = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+      const teile = [geladen > claim ? `nach dem Claim neu geladen (${hm(geladen)} Dubai)` : 'seit vor dem Claim offen']
+      teile.push(hier && hier.claim != null && Math.abs(Number(hier.claim) - claim) < 5000 ? 'Claim aus diesem Tab' : 'Claim nicht aus diesem Tab')
+      if(document.visibilityState !== 'visible') teile.push('im Hintergrund')
+      return ` [Tab: ${teile.join(', ')}]`
+    }catch(_){ return '' }
+  }
   function sfStillUrteil(p, jetzt, laeuftHier, masterFlach, hier){
     if(!p || !SF_STILL_ROUTEN.includes(p.route) || p.status !== 'planned' || !p.startUmGestartetAt || p.startedAt || p.orbitGesendetAt || laeuftHier) return null
     const claim = Date.parse(p.startUmGestartetAt) || 0
@@ -64529,16 +64560,18 @@
     const spNach = !!(sp && (Date.parse(sp.at) || 0) >= claim)
     const spNichts = spNach && !sp.ok && sfVorOrderBeleg(sp.msg)   // N2 (04.11.2026): Beleg auch in anderen Worten, nur der Kopf der Antwort
     const min = Math.round((jetzt - claim) / 60000)
+    // FS1 (10.11.2026): Tab-Zustand als Beleg hinten an (Schlüssel-Text vorne unverändert) — wurde dieser Tab nach dem Claim neu geladen, lief er durch?
+    const tabZ = sfTabZustandText(claim, hier)
     if(spNichts) return { unklar: false, msg: `Geclaimt vor ${min} min, danach still — letzte Order-Antwort: ${String(sp.msg).slice(0, 220)}` }
-    if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.` }
+    if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.${tabZ}` }
     if(!spNach && hierBeleg) return { unklar: false, msg: `Geclaimt vor ${min} min, der Start endete in diesem Tab ohne Ergebnis, bevor etwas an ${p.route === 'mt5' || p.route === 'mt5v2' ? 'den Bot' : 'Puls'} ging — nichts gesendet.` }
     const wo = p.route === 'mt5v2' ? 'im Master-Terminal' : 'in ' + pulsPlattform(p)
     if(p.route !== 'mt5') return { unklar: true, msg: spNach
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → ${wo} prüfen, ob eine Order liegt.`
-      : `Geclaimt vor ${min} min, danach kein Ergebnis (Tab neu geladen oder Start lief woanders) → ${wo} prüfen, ob eine Order liegt.` }
+      : `Geclaimt vor ${min} min, danach kein Ergebnis (Tab neu geladen oder Start lief woanders) → ${wo} prüfen, ob eine Order liegt.${tabZ}` }
     return { unklar: true, msg: spNach
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Order-Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → im Master-Terminal prüfen, ob eine Order liegt.`
-      : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.` }
+      : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.${tabZ}` }
   }
   /* ENDLESUNG UNKLARER ECHO-PLÄNE ÜBER DIE DEALS (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L aus irgendeinem Grund nicht erkannt wird …
    * der P&L wird nie angezeigt. Bug fixen."): Echo-Pläne (mt5/mt5v2), die der Tagesreset als „unklar" nach Überprüfen schob (final.art unklar, kein P&L),

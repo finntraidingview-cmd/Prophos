@@ -2889,6 +2889,12 @@ def tab_gesehen(user_agent, query=None):
                 _TAB_OEFFNEN[feld] = int(w(k)) if w(k) != "" else None
             except ValueError:
                 _TAB_OEFFNEN[feld] = None
+        # FS1 (10.11.2026): Sichtbarkeit (v/h) und Ladezeit (Unix-s) des Tabs — für den Tab-Zustand in der Spur (/api/tab-zustand); leer = alter Tab
+        _TAB_OEFFNEN["vis"] = w("vis") if w("vis") in ("v", "h") else ""
+        try:
+            _TAB_OEFFNEN["geladen"] = int(w("geladen")) if w("geladen") else None
+        except ValueError:
+            _TAB_OEFFNEN["geladen"] = None
     return True
 
 
@@ -4493,6 +4499,53 @@ TAB_HEIL_OEFFNEN_NACH_S = 3 * 60
 TAB_HEIL_MELDEN_NACH_S = 3 * 60
 TAB_HEIL_ABSTAND_S = 10 * 60
 TAB_HEIL = {"ep": None, "letzte": 0.0, "grund": ""}
+# ══ FS1 TAB ANTWORTET BEIM START NICHT (10.11.2026, Master nach FS1: „Prophos-Tab antwortet nicht / Tab neu geladen“ 27 Pläne auf 10 PCs in 7 Handelstagen,
+# von keinem Fix erfasst, Ursache nicht belegt). (a) Puls fragt bei tab_nicht_erreichbar GET /api/tab-zustand und schreibt den Zustand in Spur und Meldung
+# (letzte Abfrage, sichtbar/Hintergrund, Ladezeit, letzte Puls-Abfrage, Heil-Stufe, letztes Neuladen). (b) Dieselbe Abfrage mit anlass=tab_nicht_erreichbar
+# startet die VORHANDENE Stufen-Heilung sofort (TAB_HEIL: wecken → nach 60 s neu laden → neu öffnen → melden), auch wenn der Tab noch fragt (dann greift die
+# 3-min-Schwelle nie) und ohne den 10-min-Abstand vor Stufe 1. Neu laden/öffnen in diesem Weg NUR ohne offenen Trade der IDs dieses PCs (Railway offen_n,
+# fehlt = nicht) — wecken (Tab kurz nach vorn, TradingView zurück) darf immer, mit den bisherigen Riegeln. Fertig, sobald eine Stufe gelingt, spätestens
+# TAB_HEIL_SOFORT_S. Den einen schnellen Neustart des Plans macht der Tab (prophos.html sfBehoben, tab_n).
+TAB_HEIL_SOFORT_S = 10 * 60
+TAB_HEIL_SOFORT = {"at": 0.0, "plan": "", "erledigt": False, "geheilt": False}   # geheilt = eine Stufe gelang (nicht: nur gemeldet)
+
+
+def tab_heil_sofort_lage(sofort, jetzt):
+    """REIN RECHNEND (testbar): (Dauer in s | None, Klartext) des Sofort-Auslösers aus Puls (tab_nicht_erreichbar)."""
+    at = float((sofort or {}).get("at") or 0.0)
+    if not at or (sofort or {}).get("erledigt") or jetzt - at > TAB_HEIL_SOFORT_S or jetzt < at:
+        return None, ""
+    pl = str((sofort or {}).get("plan") or "")[:8]
+    return jetzt - at, f"Prophos-Tab antwortete beim Puls-Start nicht{' (Plan ' + pl + ')' if pl else ''}"
+
+
+def tab_heil_sofort_riegel(stufe_jetzt, stand):
+    """REIN RECHNEND (testbar): zusätzlicher Riegel im Sofort-Weg. Stufe 1 (wecken) frei; ab Stufe 2 (neu laden/öffnen) nur, wenn Railway für die IDs dieses
+    PCs offen_n == 0 meldet. Fehlt die Zahl (alter Railway-Stand, nicht lesbar) → gesperrt (fail-closed)."""
+    if int(stufe_jetzt or 0) < 1:
+        return ""
+    n = (stand or {}).get("offen_n") if isinstance(stand, dict) else None
+    if not isinstance(n, int) or isinstance(n, bool):
+        return "offene Trades nicht lesbar — kein Neuladen (nur wecken)"
+    return f"Trade offen ({n}) — kein Neuladen (nur wecken)" if n > 0 else ""
+
+
+def tab_zustand_ausgabe(jetzt, oeffnen, heil, sofort, nl, klick_at):
+    """REIN RECHNEND (testbar): Tab-Zustand für die Puls-Spur (GET /api/tab-zustand). Nur Zahlen/Wörter, keine Kennungen."""
+    o = oeffnen or {}
+    z = float(o.get("zuletzt") or 0.0)
+    ep = (heil or {}).get("ep") or {}
+    ka = float(klick_at or 0.0)
+    gel = o.get("geladen")
+    return {"ok": True, "still_s": round(jetzt - z, 1) if z else None, "login": o.get("login"), "sb_s": o.get("sb_s"), "rt_aus_s": o.get("rt_aus_s"),
+            "vis": o.get("vis") or "", "geladen_vor_s": int(jetzt - gel) if isinstance(gel, int) and 0 < gel <= jetzt else None,
+            "puls_abfrage_vor_s": round(jetzt - ka, 1) if ka else None, "heil_stufe": int(ep.get("stufe") or 0) if ep else 0,
+            "heil_grund": str((heil or {}).get("grund") or "")[:160],
+            "neuladen": str((nl or {}).get("ergebnis") or "")[:120],
+            "neuladen_vor_s": int(jetzt - float((nl or {}).get("ergebnis_at") or 0)) if (nl or {}).get("ergebnis_at") else None,
+            "sofort_vor_s": int(jetzt - float((sofort or {}).get("at") or 0)) if (sofort or {}).get("at") else None,
+            # Prüfer FS1 Runde 2 (S2): nur eine GELUNGENE Stufe der jüngsten Folge (≤ TAB_HEIL_SOFORT_S alt), nie „nur gemeldet“
+            "sofort_geheilt": bool((sofort or {}).get("at") and (sofort or {}).get("geheilt") and 0 <= jetzt - float((sofort or {}).get("at") or 0) <= TAB_HEIL_SOFORT_S)}
 
 
 def tab_heil_lage(still_s, login, sb_s, rt_aus_s):
@@ -4727,6 +4780,10 @@ def _tab_heil_schritt(pc, still0):
     Prophos-Tab im Puls-Chrome (dann der bisherige Weg: Fenster-Neuladen / Öffnen / „anklicken")."""
     jetzt = time.time()
     dauer, problem = tab_heil_lage(still0, _TAB_OEFFNEN.get("login"), _TAB_OEFFNEN.get("sb_s"), _TAB_OEFFNEN.get("rt_aus_s"))
+    sofort = False
+    if dauer is None:
+        dauer, problem = tab_heil_sofort_lage(TAB_HEIL_SOFORT, jetzt)      # FS1: Puls meldete tab_nicht_erreichbar
+        sofort = dauer is not None
     if dauer is None:
         if TAB_HEIL["ep"]:
             g = "Prophos-Tab wieder gesund" + (f" (nach Stufe {TAB_HEIL['ep'].get('stufe')})" if TAB_HEIL["ep"].get("stufe") else "")
@@ -4749,11 +4806,19 @@ def _tab_heil_schritt(pc, still0):
     if isinstance(stand, dict) and stand.get("ok"):
         TAB_NL.update(stand=stand, stand_at=time.time())
     riegel = str((stand or {}).get("riegel") or "").strip() if isinstance(stand, dict) else "Tab-Stand von Railway nicht lesbar"
+    if sofort and not riegel:
+        riegel = tab_heil_sofort_riegel(int((TAB_HEIL["ep"] or {}).get("stufe") or 0), stand)
     aktion, grund, ep_neu = tab_heil_stufe(TAB_HEIL["ep"], dauer, problem, jetzt, riegel, _browser_und_mt5_frei(), _win_leerlauf_s(),
-                                           TAB_HEIL["letzte"])
+                                           0.0 if sofort and int((TAB_HEIL["ep"] or {}).get("stufe") or 0) == 0 else TAB_HEIL["letzte"])
     if aktion == "wecken":
         TAB_HEIL["letzte"] = jetzt
     TAB_HEIL["ep"] = ep_neu or {"stufe": 0, "at": 0.0, "start": jetzt}
+    if sofort and not aktion:
+        # Prüfer FS1 (SOLLTE 4): wartet der Sofort-Weg (Riegel, Lock, Eingabe, Stufen-Takt), läuft der übrige Wächter weiter (Haupt-Tab, Öffnen, Build-Neuladen)
+        if grund and grund != TAB_HEIL["grund"]:
+            print(f"[tab-heilen] {grund}", flush=True)
+            TAB_HEIL["grund"] = grund
+        return False
     if aktion:
         tun = {"wecken": _prophos_tab_wecken, "neuladen": lambda: _prophos_tab_neuladen_cdp(stand),
                "neu_oeffnen": lambda: _prophos_tab_neu_oeffnen(still0)}.get(aktion)
@@ -4762,8 +4827,12 @@ def _tab_heil_schritt(pc, still0):
             grund = f"{grund} → {'ok' if ok else 'NICHT ok'}: {msg}"
             if not ok:
                 grund += " — " + _panel_fehlerfoto(f"panel_tab_{aktion}", "tab_heilen")
+            elif sofort:
+                TAB_HEIL_SOFORT.update(erledigt=True, geheilt=True)   # FS1: eine Stufe gelang — der Tab startet den Plan selbst einmal neu
         else:
             _tab_heil_melden(grund)
+            if sofort:
+                TAB_HEIL_SOFORT["erledigt"] = True
     if grund and grund != TAB_HEIL["grund"]:
         print(f"[tab-heilen] {grund}", flush=True)
         TAB_HEIL["grund"] = grund
@@ -6519,6 +6588,15 @@ class Handler(BaseHTTPRequestHandler):
                 _TABS.setdefault(tid, {"at": 0.0, "puls": None}).update(login=login, neben_at=time.time())
             frei = neben_tab_frei(_TABS, tid, login, time.time(), _TAB_HAUPT["tid"])
             return self._send(200, json.dumps({"ok": True, "frei": frei}))
+        if path == "/api/tab-zustand":
+            # FS1 (10.11.2026): Tab-Zustand für die Puls-Spur; anlass=tab_nicht_erreichbar startet die Stufen-Heilung sofort (s. TAB_HEIL_SOFORT). Nur lokal.
+            q = parse_qs(urlparse(self.path).query)
+            if (q.get("anlass") or [""])[0] == "tab_nicht_erreichbar":
+                TAB_HEIL_SOFORT.update(at=time.time(), plan=re.sub(r"[^0-9a-f-]", "", (q.get("plan_id") or [""])[0])[:36], erledigt=False, geheilt=False)
+                print(f"[tab-heilen] Puls: Tab antwortete beim Start nicht — Stufen-Heilung sofort", flush=True)
+            return self._send(200, json.dumps(tab_zustand_ausgabe(time.time(), _TAB_OEFFNEN, TAB_HEIL, TAB_HEIL_SOFORT,
+                                                                  {"ergebnis": TAB_NL.get("ergebnis"), "ergebnis_at": TAB_NL.get("ergebnis_at")},
+                                                                  _TAB_OEFFNEN.get("klick_at")), ensure_ascii=False, default=str))
         if path == "/api/tsx-stand":
             # TopstepX-Auge (27.10.2026, s. tsx_stand_merken): jüngster Stand des Userscripts im Puls-Chrome — nur lesen
             return self._send(200, json.dumps(tsx_stand_ausgabe(), ensure_ascii=False, default=str))
@@ -6528,6 +6606,7 @@ class Handler(BaseHTTPRequestHandler):
             # während eines Laufs alle 0,1 s hier statt alle 0,6 s in Supabase (puls_ergebnisse via Railway) — nur lesen, nie schreiben.
             q = parse_qs(urlparse(self.path).query)
             pid = (q.get("plan_id") or [""])[0].strip()
+            _TAB_OEFFNEN["klick_at"] = time.time()      # FS1 (10.11.2026): letzte Puls-Abfrage des Tabs (Tab-Zustand in der Spur)
             d = read_json(os.path.join(HERE, "puls_ergebnisse", "letzt_order.json"), None)
             # TAB-WÄCHTER (30.10.2026, order_bot tab_wache_warten): Marke des Bots mitgeben, Antwort des Tabs für den Bot ablegen; tab_wache:1 = dieses Panel kann es
             wache, pong = tab_wache_antwort(pid, (q.get("pong") or [""])[0].strip(), read_json(os.path.join(HERE, "puls_ergebnisse", "tab_ping.json"), None), time.time())

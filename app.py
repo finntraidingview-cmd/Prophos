@@ -23129,6 +23129,13 @@ def pc_tab_auftrag_quittung():
     return jsonify({"ok": True})
 
 
+def tab_stand_offen_n(plaene, hedge_hier):
+    """REIN RECHNEND (testbar, FS1 10.11.2026): Zahl offener Trades für den Neulade-Riegel im Sofort-Weg — offene Pläne der IDs dieses PCs plus offene
+    Pläne anderer IDs, deren Hedge dieser PC hält (je Plan einmal)."""
+    ids = {str(x.get("id") or f"#{i}") for i, x in enumerate(plaene or ()) if str(x.get("status")) == "open"}
+    return len(ids | {str(x.get("id") or f"h#{i}") for i, x in enumerate(hedge_hier or ())})
+
+
 def lotse_plan_stand(signale_laeuft, plaene, uids, pc, jetzt):
     """REIN RECHNEND (testbar): Felder für den Lotse-Agenten (Finn 02.11.2026: „MT5 Trades sind ja nicht unser Problem“). Es zählen alle Routen außer Echo (LT_ECHO_ROUTEN), also auch
     eine leere Route (Orbit) und jede unbekannte: Im Zweifel sperrt das mehr. Ein Plan nennt keinen PC, darum die IDs dieses PCs. plaene_offen_tv None = IDs unbekannt, gilt beim Agenten als unklar."""
@@ -23285,6 +23292,17 @@ def code_tab_stand(pc):
                                                "or": f"(start_um.is.null,start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()},status.eq.open)",
                                                "order": "start_um.desc.nullslast", "limit": "300"}) or []
         riegel = tab_stand_riegel(sig, plaene, pc, jetzt)
+        # FS1 (10.11.2026): offene Trades der IDs dieses PCs + offene Pläne, deren Hedge dieser PC hält — das Panel lädt im Sofort-Weg (Puls meldete
+        # tab_nicht_erreichbar) nur bei 0 neu. Ohne IDs unbekannt (None = Panel lädt nicht neu).
+        offen_n = None
+        if uids:
+            try:   # Prüfer FS1 (SOLLTE 2/3): eigene Abfragen, eigenes try — Fehler kosten den Tab-Stand nie, offen_n bleibt dann None (= nicht neu laden)
+                offene = sb_select("trade_plans", {"select": "id,status", "status": "eq.open", "user_id": "in.(" + ",".join(uids) + ")", "limit": "50"}) or []
+                hedge_hier = sb_select("trade_plans", {"select": "id", "status": "in.(open,review)", "mt5_baseline->hedge->>pc": f"eq.{pc}",
+                                                       "mt5_baseline->hedge->>status": "in.(offen,oeffnet,schliesst,unklar)", "limit": "20"}) or []
+                offen_n = tab_stand_offen_n(offene, hedge_hier)
+            except Exception as e:
+                print(f"[tab-stand] {pc}: offene Trades nicht lesbar ({type(e).__name__})", flush=True)
         # EA-SELBSTHEILUNG IM PANEL (30.10.2026, Befund ECHO-AUSSETZER: Jacob …2655 Lese-EA eingefroren, offener Echo-Plan, Snapshot ohne
         # Position → der Copier wusste nicht, dass die Instanz gebraucht wird): Master-Logins OFFENER Echo-Pläne (mt5/mt5v2) der IDs dieses PCs
         echo_ids = sorted({str(x.get("master_account_id")) for x in plaene
@@ -23312,7 +23330,7 @@ def code_tab_stand(pc):
         tn = {"an": False, "grund": f"nicht lesbar ({type(e).__name__})"}
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
-                    "tages_neustart": tn,
+                    "tages_neustart": tn, "offen_n": offen_n,
                     **lotse_plan_stand(sig, plaene, uids, pc, jetzt),
                     "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 
@@ -26782,17 +26800,85 @@ KK_FRISCH_S = 3600
 KK_TAKT_S = (240.0, 360.0)
 _kk = {"naechster": 0.0, "letztes": None, "fehler": ""}
 
+# ══ E1 KONTO-ZUSTÄNDE WIE NA1 (10.11.2026, Master nach FS1; Finn: „Ich will die Ursache fixen, damit ich nicht jeden Tag wieder zehn Fehlstarts habe.“) ══
+# FS1-Befund (7 Handelstage, nur HT): nach NA1 blieben Konten, die bei jedem Start mit einem festen Text der Firma/des Terminals scheitern und die der Planer
+# täglich neu einplant — heute von Hand deaktiviert (NP1): MT5 „Authorization failed“ (Login/Passwort), Server „Only position closing is allowed“ (Konto nimmt nur
+# noch Schließungen an) und Tradovate „Nach dem Login zeigt TradingView kein Konto“ (Add-ons/Konto abgelaufen). Derselbe Takt, derselbe Riegel, dieselben Wachen
+# (HT only, frischer letzter Treffer, nie nach einem Start, nach Reaktivieren nur neue Treffer, Lesefehler = nichts) — je Text eine eigene Regel:
+#   min_n/min_abstand_s: Simulation über 30 Tage — „kein Konto nach Login“ war am 02.11. bei einem FTMO-Konto 3× in 40 min vorübergehend (lief 20 min später),
+#   darum dort 3 Treffer über ≥ 60 min; die echten Fälle (FTMO 05.–10.11.) hatten 3–4 Treffer über 60–113 min. Auth/Only-closing: 2 Treffer ≥ 10 min (wie NA1).
+#   prio: NA1 bleibt 🟠 (bitgleich), die neuen melden ⚪ mit Beleg; „Authorization failed“ kommt zusätzlich auf die Liste „Nur du“ (daten.liste) für die Konten-Pflege.
+# Die Muster sind enge Schlüssel-Texte aus order_bot.py / dem MT5-Server (nie umbenennen, ohne diese Stelle anzupassen).
+KK_ARTEN = (
+    {"art": "keine_konten", "re": KK_RE, "ilike": ("*No active accounts found*", "*No trading accounts available*"),
+     "min_n": 2, "min_abstand_s": KK_MIN_ABSTAND_S, "prio": 2},
+    {"art": "auth_failed", "re": re.compile(r"Terminal-Verbindung fehlgeschlagen:[^\n]{0,40}Authorization failed", re.I),
+     "ilike": ("*Authorization failed*",), "min_n": 2, "min_abstand_s": KK_MIN_ABSTAND_S, "prio": 3, "liste": "nur_du", "fuer": "konten",
+     "ohne": re.compile(r"Selbstheilung|terminal_heilt", re.I), "breit": ("firma", "pc"),
+     "satz": "Authorization failed", "titel": "Login kaputt? MT5 „Authorization failed“ — deaktiviert",
+     "plan": "MT5 meldet „Authorization failed“ (Login/Passwort) — Konto deaktiviert, startet erst nach „Aktivieren“",
+     "was": "MT5 meldet beim Verbinden mit dem Konto „Authorization failed“",
+     "tun": "Für die Konten-Pflege (Liste „Nur du“): Login/Passwort bei der Firma prüfen — neues Passwort im Terminal eintragen, dann unter Accounts am Stift "
+            "aktivieren; Konto weg: archivieren."},
+    {"art": "nur_schliessen", "re": re.compile(r"Only position closing is allowed", re.I), "ilike": ("*Only position closing*",),
+     "min_n": 2, "min_abstand_s": KK_MIN_ABSTAND_S, "prio": 3, "satz": "Only position closing is allowed", "breit": ("firma",),
+     "titel": "Konto gesperrt? „Only position closing is allowed“ — deaktiviert",
+     "plan": "Server: „Only position closing is allowed“ — Konto deaktiviert, startet erst nach „Aktivieren“",
+     "was": "der Server lehnt jede neue Order ab: „Only position closing is allowed“ (Konto nimmt nur noch Schließungen an)",
+     "tun": "Bei der Firma prüfen (bestanden, verletzt oder abgelaufen?) — weg: archivieren; wieder frei: unter Accounts am Stift aktivieren."},
+    {"art": "login_ohne_konto", "re": re.compile(r"Nach dem Login zeigt TradingView kein Konto", re.I), "ilike": ("*zeigt TradingView kein Konto*",),
+     "min_n": 3, "min_abstand_s": 3600, "prio": 3, "satz": "Nach dem Login zeigt TradingView kein Konto", "breit": ("firma", "pc"),
+     "titel": "Konto weg? Tradovate-Login zeigt kein Konto — deaktiviert",
+     "plan": "Tradovate-Login zeigt kein Konto — Konto deaktiviert, startet erst nach „Aktivieren“",
+     "was": "nach dem Tradovate-Login zeigt TradingView kein Konto",
+     "tun": "Bei der Firma prüfen (Add-on/Konto abgelaufen?) — weg: archivieren; wieder da: unter Accounts am Stift aktivieren."},
+)
+KK_ART_NAMEN = tuple(r["art"] for r in KK_ARTEN)
+# Prüfer FS1/E1 (MUSS 1, 10.11.2026): „Only position closing“ setzt der Server oft je Symbol (Rollover/Feiertag/Wartung), „kein Konto nach Login“ und MT5 -6 haben
+# auch firmen-/PC-weite Ursachen (Plattform-Wartung, Passwort-Speicher nach Update). Zeigt im Fenster ±KK_BREIT_S ein ANDERES Konto derselben Firma (bzw.
+# desselben PCs, je Regel „breit“) denselben Text, sperrt E1 nicht, sondern meldet ⚪ „breit“ (einmal je Regel × Firma/PC × Tag und Container). Dazu höchstens
+# KK_DECKEL_JE_LAUF neue Sperren je Regel und Lauf (der Rest im nächsten Lauf). NA1 (keine_konten) hat beides nicht — bitgleich.
+KK_BREIT_S = 2 * 3600
+KK_DECKEL_JE_LAUF = 2
+_kk_breit_gemeldet = set()
+# Prüfer FS1 Runde 2 (S1): nach einer „breiten“ Phase zählen nur Treffer DANACH (sonst sperrte ein einziger neuer Fehlstart mit den alten Treffern) — je
+# (Regel, Konto) der letzte Treffer der breiten Phase, wirkt wie „seit“ in kk_urteil. Nur im Speicher (Container-Neustart: vorsichtig genug, Frische + Breite bleiben).
+_kk_breit_seit = {}
 
-def kk_urteil(treffer_at, start_nach=None, seit=None, jetzt=None):
+
+def kk_breit(art_treffer, aid, je_id, felder, jetzt_t):
+    """REIN RECHNEND (testbar): (Feld, Wert, andere Konten) | None. art_treffer = {konto_id: [Fehlstart-Zeilen]} EINER Regel, felder = ('firma', 'pc').
+    Breit = ein anderes Konto mit demselben Feldwert hat einen Treffer im Fenster ±KK_BREIT_S um jetzt_t (letzter Treffer des Kontos)."""
+    a = je_id.get(aid) or {}
+    for feld in felder or ():
+        eigen = ({str(a.get("firm") or "")} - {""}) if feld == "firma" else ({str(r.get("pc") or "") for r in art_treffer.get(aid) or ()} - {""})
+        if not eigen:
+            continue
+        andere = []
+        for k, rows in (art_treffer or {}).items():
+            if k == aid:
+                continue
+            for r in rows:
+                t = _ap_ts(r.get("at"))
+                wert = str((je_id.get(k) or {}).get("firm") or "") if feld == "firma" else str(r.get("pc") or "")
+                if t and wert in eigen and abs((t - jetzt_t).total_seconds()) <= KK_BREIT_S:
+                    andere.append(k)
+                    break
+        if andere:
+            return feld, sorted(eigen)[0], sorted(set(andere))
+    return None
+
+
+def kk_urteil(treffer_at, start_nach=None, seit=None, jetzt=None, min_n=2, min_abstand_s=None):
     """REIN RECHNEND (testbar): Login ohne Konten bestätigt? treffer_at = Zeitpunkte (datetime) der Fehlstarts EINES Kontos mit dem Text, start_nach = jüngster
     echter Start des Kontos, seit = letzte eigene Sperre (nur jüngere Treffer zählen), jetzt = Bezug für die Frische (letzter Treffer ≤ KK_FRISCH_S alt).
     → (True, {n, erst, letzt}) | (False, grund)"""
     t = sorted(x for x in treffer_at or () if x and (seit is None or x > seit))
-    if len(t) < 2:
-        return False, "weniger als zwei Treffer"
+    if len(t) < max(2, int(min_n or 2)):
+        return False, ("weniger als zwei Treffer" if len(t) < 2 else f"weniger als {int(min_n)} Treffer")   # E1: Regel je Text (KK_ARTEN)
     if jetzt is not None and (jetzt - t[-1]).total_seconds() > KK_FRISCH_S:
         return False, "letzter Treffer nicht frisch (nach Reaktivieren erst ein neuer Fehlstart)"
-    if (t[-1] - t[0]).total_seconds() < KK_MIN_ABSTAND_S:
+    if (t[-1] - t[0]).total_seconds() < (KK_MIN_ABSTAND_S if min_abstand_s is None else min_abstand_s):
         return False, "nur ein Startversuch (Treffer zu dicht beieinander)"
     if start_nach is not None and start_nach > t[0]:
         return False, "Konto ist seit dem ersten Treffer gestartet"
@@ -26806,23 +26892,34 @@ def kk_satz(msg):
 
 
 def kk_tick(jetzt=None):
-    """NA1-Takt → {gesperrt: [...], geprueft, fehler?}. Liest nur, schreibt nur bei bestätigtem Urteil (Guard deaktiviert_at is null)."""
+    """NA1-Takt (+ E1: alle Regeln aus KK_ARTEN) → {gesperrt: [...], geprueft, fehler?}. Liest nur, schreibt nur bei bestätigtem Urteil (Guard deaktiviert_at
+    is null). Je Konto höchstens eine Sperre je Lauf (erste passende Regel in KK_ARTEN-Reihenfolge, NA1 zuerst)."""
     jetzt = jetzt or datetime.now(timezone.utc)
     ab = (jetzt - timedelta(hours=KK_FENSTER_H)).isoformat()
-    rows = []
-    for muster in ("*No active accounts found*", "*No trading accounts available*"):
-        rows += sb_select("puls_fehlstarts", {"select": "at,user_id,plan_id,konto,firma,msg", "at": f"gte.{ab}", "msg": f"ilike.{muster}"}) or []
-    rows = [r for r in rows if KK_RE.search(str(r.get("msg") or ""))]
+    roh = {}
     out = {"gesperrt": [], "geprueft": 0}
-    if not rows:
+    for regel in KK_ARTEN:
+        rows = []
+        try:
+            for muster in regel["ilike"]:
+                rows += sb_select("puls_fehlstarts", {"select": "at,user_id,plan_id,konto,firma,msg,pc", "at": f"gte.{ab}", "msg": f"ilike.{muster}"}) or []
+        except Exception as e:
+            if regel["art"] == "keine_konten":
+                raise                                    # NA1 wie bisher (der Takt fängt und loggt)
+            rows = []                                    # Prüfer FS1 (SOLLTE 7): eine neue Regel ohne Lesung sperrt nichts, NA1 läuft weiter
+            out.setdefault("fehler_regeln", []).append(f"{regel['art']}: {type(e).__name__}")
+        roh[regel["art"]] = [r for r in rows if regel["re"].search(str(r.get("msg") or ""))
+                             and not (regel.get("ohne") and regel["ohne"].search(str(r.get("msg") or "")))]
+    alle = [r for art in KK_ART_NAMEN for r in roh[art]]
+    if not alle:
         return out
     try:
         ht = ap_unternehmen_filter(None, admin_gruppen_daten())
     except Exception as e:
         out["fehler"] = f"Gruppen nicht lesbar ({type(e).__name__}) — nichts gesperrt"
         return out
-    uids = sorted({str(r.get("user_id") or "") for r in rows if r.get("user_id")})
-    pids = sorted({str(r.get("plan_id") or "") for r in rows if r.get("plan_id")})
+    uids = sorted({str(r.get("user_id") or "") for r in alle if r.get("user_id")})
+    pids = sorted({str(r.get("plan_id") or "") for r in alle if r.get("plan_id")})
     konten = _sb_all("accounts", {"select": "id,user_id,name,firm,deaktiviert_at", "user_id": "in.(" + ",".join(uids) + ")"}) if uids else []
     je_name = {(str(a.get("user_id")), str(a.get("name") or "")): a for a in konten or []}
     je_id = {str(a.get("id")): a for a in konten or []}
@@ -26830,26 +26927,28 @@ def kk_tick(jetzt=None):
     for i in range(0, len(pids), 80):
         for p in sb_select("trade_plans", {"select": "id,master_account_id", "id": "in.(" + ",".join(pids[i:i + 80]) + ")"}) or []:
             plan_konto[str(p.get("id"))] = str(p.get("master_account_id") or "")
-    treffer = {}
-    for r in rows:
-        aid = plan_konto.get(str(r.get("plan_id") or ""))
-        if not aid or aid not in je_id:
-            a = je_name.get((str(r.get("user_id") or ""), str(r.get("konto") or "")))
-            aid = str(a.get("id")) if a else ""
-        if aid and aid in je_id and ht(str(je_id[aid].get("user_id"))):
-            treffer.setdefault(aid, []).append(r)
-    if not treffer:
+    treffer = {art: {} for art in KK_ART_NAMEN}
+    for art in KK_ART_NAMEN:
+        for r in roh[art]:
+            aid = plan_konto.get(str(r.get("plan_id") or ""))
+            if not aid or aid not in je_id:
+                a = je_name.get((str(r.get("user_id") or ""), str(r.get("konto") or "")))
+                aid = str(a.get("id")) if a else ""
+            if aid and aid in je_id and ht(str(je_id[aid].get("user_id"))):
+                treffer[art].setdefault(aid, []).append(r)
+    ids = sorted({aid for art in KK_ART_NAMEN for aid in treffer[art]})
+    if not ids:
         return out
-    ids = sorted(treffer)
     try:
-        log = sb_select("alarm_log", {"select": "schluessel,at", "art": "eq.keine_konten", "order": "at.desc", "limit": "500"}) or []
+        log = sb_select("alarm_log", {"select": "schluessel,at", "art": "in.(" + ",".join(KK_ART_NAMEN) + ")", "order": "at.desc", "limit": "500"}) or []
     except Exception as e:
         out["fehler"] = f"alarm_log nicht lesbar ({type(e).__name__}) — nichts gesperrt"
         return out
+    # nach Reaktivieren zählen nur Treffer nach der letzten eigenen Sperre — gleich, aus welcher Regel (E1: vorsichtig, eine Sperre je Konto)
     seit_je = {}
     for z in log:
         k = str(z.get("schluessel") or "")
-        if k.startswith("keine_konten|"):
+        if k.split("|")[0] in KK_ART_NAMEN and "|" in k:
             aid = k.split("|")[1]
             t = _ap_ts(z.get("at"))
             if t and (aid not in seit_je or t > seit_je[aid]):
@@ -26867,51 +26966,91 @@ def kk_tick(jetzt=None):
         namen = _ap_namen()[0]
     except Exception:
         pass
-    for aid in ids:
-        a = je_id[aid]
-        out["geprueft"] += 1
-        if a.get("deaktiviert_at"):
-            continue
-        ja, info = kk_urteil([_ap_ts(r.get("at")) for r in treffer[aid]], starts.get(aid), seit_je.get(aid), jetzt=jetzt)
-        if not ja:
-            continue
-        iso = jetzt.isoformat()
-        try:
-            z = sb_update("accounts", {"id": f"eq.{aid}", "deaktiviert_at": "is.null"}, {"deaktiviert_at": iso})
-        except Exception as e:
-            print(f"[keine-konten] ⚠️ {aid[:8]} nicht deaktiviert: {type(e).__name__}: {str(e)[:120]}", flush=True)
-            continue
-        if not z:
-            continue
-        _ap_deakt_merk["bis"] = 0.0
-        satz = next((kk_satz(r.get("msg")) for r in treffer[aid] if kk_satz(r.get("msg"))), "keine Konten")
-        firma = a.get("firm") or next((r.get("firma") for r in treffer[aid] if r.get("firma")), "")
-        text_plan = f"Tradovate-Login ohne Konten („{satz}“) — Konto deaktiviert, startet erst nach „Aktivieren“"
-        markiert = []
-        try:
-            for p in sb_select("trade_plans", {"select": "id", "master_account_id": f"eq.{aid}", "status": "eq.planned",
-                                               "start_um_gestartet_at": "is.null", "started_at": "is.null"}) or []:
-                try:
-                    _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
-                                json={"p_plan": str(p["id"]), "p_key": "keine_konten", "p_patch": {"at": iso, "text": text_plan, "satz": satz},
-                                      "p_status": "planned"})
-                    markiert.append(str(p["id"]))
-                except Exception as e:
-                    print(f"[keine-konten] ⚠️ Plan {str(p.get('id'))[:8]} nicht markiert: {type(e).__name__}", flush=True)
-        except Exception as e:
-            print(f"[keine-konten] ⚠️ Pläne von {aid[:8]} nicht lesbar: {type(e).__name__}", flush=True)
-        de = lambda t: t.astimezone(timezone.utc).strftime("%d.%m. %H:%M")   # noqa: E731
-        wer = namen.get(str(a.get("user_id")), "")
-        text = (f"{wer + ': ' if wer else ''}{a.get('name')} ({firma}) — Tradovate meldet beim Login „{satz}“ ({info['n']}× seit {de(info['erst'])} UTC, zuletzt "
-                f"{de(info['letzt'])}). Prophos hat das Konto deaktiviert: kein Plan, kein Start, keine Login-Versuche mehr. Bei der Firma prüfen — weg: archivieren; "
-                f"wieder da: unter Accounts am Stift aktivieren.")
-        try:
-            alarm_senden(2, "keine_konten", "Konto weg? Tradovate-Login ohne Konten — deaktiviert", text, uid=str(a.get("user_id")),
-                         schluessel=f"keine_konten|{aid}", daten={"konto_id": aid, "satz": satz, "n": info["n"], "plaene": markiert})
-        except Exception as e:
-            print(f"[keine-konten] ⚠️ Meldung {aid[:8]}: {type(e).__name__}", flush=True)
-        out["gesperrt"].append({"konto_id": aid, "konto": a.get("name"), "n": info["n"], "plaene": markiert})
-        print(f"[keine-konten] {a.get('name')}: deaktiviert ({info['n']} Fehlstarts „{satz}“), {len(markiert)} Plan/Pläne markiert", flush=True)
+    out["geprueft"] = len(ids)
+    for regel in KK_ARTEN:
+        art = regel["art"]
+        neu_gesperrt = 0
+        for aid in sorted(treffer[art]):
+            a = je_id[aid]
+            if a.get("deaktiviert_at"):
+                continue
+            seit = max([t for t in (seit_je.get(aid), _kk_breit_seit.get((art, aid))) if t is not None], default=None)
+            ja, info = kk_urteil([_ap_ts(r.get("at")) for r in treffer[art][aid]], starts.get(aid), seit, jetzt=jetzt,
+                                 min_n=regel["min_n"], min_abstand_s=regel["min_abstand_s"])
+            if not ja:
+                continue
+            if regel.get("breit"):
+                b = kk_breit(treffer[art], aid, je_id, regel["breit"], info["letzt"])
+                if b:
+                    _kk_breit_seit[(art, aid)] = info["letzt"]
+                    out.setdefault("breit", []).append({"konto_id": aid, "art": art, "feld": b[0], "andere": len(b[2])})
+                    key = (art, b[0], b[1], jetzt.astimezone(timezone.utc).date().isoformat())
+                    if key not in _kk_breit_gemeldet:
+                        _kk_breit_gemeldet.add(key)
+                        wo = f"Firma {b[1]}" if b[0] == "firma" else f"PC {b[1]}"
+                        try:
+                            alarm_senden(3, f"{art}_breit", f"Breit: „{regel['satz']}“ — nichts deaktiviert"[:80],
+                                         f"„{regel['satz']}“ bei {len(b[2]) + 1} Konten ({wo}) binnen {KK_BREIT_S // 3600} h — vermutlich Firma/Plattform, kein "
+                                         f"einzelnes totes Konto. Prophos deaktiviert deshalb nichts; Starts laufen weiter wie bisher.",
+                                         schluessel=f"{art}_breit|{b[0]}|{b[1]}|{key[3]}"[:120], daten={"art": art, "feld": b[0], "wert": b[1], "n": len(b[2]) + 1})
+                        except Exception as e:
+                            print(f"[keine-konten] ⚠️ Breit-Meldung {art}: {type(e).__name__}", flush=True)
+                    continue
+                if neu_gesperrt >= KK_DECKEL_JE_LAUF:
+                    out.setdefault("deckel", []).append({"konto_id": aid, "art": art})
+                    continue
+            iso = jetzt.isoformat()
+            try:
+                z = sb_update("accounts", {"id": f"eq.{aid}", "deaktiviert_at": "is.null"}, {"deaktiviert_at": iso})
+            except Exception as e:
+                print(f"[keine-konten] ⚠️ {aid[:8]} nicht deaktiviert: {type(e).__name__}: {str(e)[:120]}", flush=True)
+                continue
+            if not z:
+                continue
+            a["deaktiviert_at"] = iso                    # E1: in diesem Lauf keine zweite Regel für dasselbe Konto
+            neu_gesperrt += 1
+            _ap_deakt_merk["bis"] = 0.0
+            if art == "keine_konten":
+                satz = next((kk_satz(r.get("msg")) for r in treffer[art][aid] if kk_satz(r.get("msg"))), "keine Konten")
+                text_plan = f"Tradovate-Login ohne Konten („{satz}“) — Konto deaktiviert, startet erst nach „Aktivieren“"
+            else:
+                satz, text_plan = regel["satz"], regel["plan"]
+            firma = a.get("firm") or next((r.get("firma") for r in treffer[art][aid] if r.get("firma")), "")
+            markiert = []
+            try:
+                for p in sb_select("trade_plans", {"select": "id", "master_account_id": f"eq.{aid}", "status": "eq.planned",
+                                                   "start_um_gestartet_at": "is.null", "started_at": "is.null"}) or []:
+                    try:
+                        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                                    json={"p_plan": str(p["id"]), "p_key": art, "p_patch": {"at": iso, "text": text_plan, "satz": satz},
+                                          "p_status": "planned"})
+                        markiert.append(str(p["id"]))
+                    except Exception as e:
+                        print(f"[keine-konten] ⚠️ Plan {str(p.get('id'))[:8]} nicht markiert: {type(e).__name__}", flush=True)
+            except Exception as e:
+                print(f"[keine-konten] ⚠️ Pläne von {aid[:8]} nicht lesbar: {type(e).__name__}", flush=True)
+            de = lambda t: t.astimezone(timezone.utc).strftime("%d.%m. %H:%M")   # noqa: E731
+            wer = namen.get(str(a.get("user_id")), "")
+            daten = {"konto_id": aid, "satz": satz, "n": info["n"], "plaene": markiert}
+            if art == "keine_konten":
+                titel = "Konto weg? Tradovate-Login ohne Konten — deaktiviert"
+                text = (f"{wer + ': ' if wer else ''}{a.get('name')} ({firma}) — Tradovate meldet beim Login „{satz}“ ({info['n']}× seit {de(info['erst'])} UTC, "
+                        f"zuletzt {de(info['letzt'])}). Prophos hat das Konto deaktiviert: kein Plan, kein Start, keine Login-Versuche mehr. Bei der Firma prüfen — "
+                        f"weg: archivieren; wieder da: unter Accounts am Stift aktivieren.")
+            else:
+                titel = regel["titel"]
+                beleg = str(next((r.get("msg") for r in reversed(treffer[art][aid]) if r.get("msg")), ""))[:160]
+                text = (f"{wer + ': ' if wer else ''}{a.get('name')} ({firma}) — {regel['was']} ({info['n']}× seit {de(info['erst'])} UTC, zuletzt "
+                        f"{de(info['letzt'])}). Prophos hat das Konto deaktiviert: kein Plan, kein Start. {regel['tun']}")
+                daten["beleg"] = beleg
+                if regel.get("liste"):
+                    daten.update(liste=regel["liste"], fuer=regel.get("fuer") or "")
+            try:
+                alarm_senden(regel["prio"], art, titel, text, uid=str(a.get("user_id")), schluessel=f"{art}|{aid}", daten=daten)
+            except Exception as e:
+                print(f"[keine-konten] ⚠️ Meldung {aid[:8]}: {type(e).__name__}", flush=True)
+            out["gesperrt"].append({"konto_id": aid, "konto": a.get("name"), "n": info["n"], "plaene": markiert, "art": art})
+            print(f"[keine-konten] {a.get('name')}: deaktiviert ({info['n']} Fehlstarts „{satz}“, Regel {art}), {len(markiert)} Plan/Pläne markiert", flush=True)
     return out
 
 
