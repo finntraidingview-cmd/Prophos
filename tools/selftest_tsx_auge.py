@@ -98,9 +98,10 @@ print(aus.join('\n'))
     # die Flach-Folge des Auges (flach_folge ≥ 3 über ≥ 200 ms); FAIL-SAFE ohne flach_folge / mehrere Tabs bleibt ≥ 5 s (TSX_FLACH_ALT_MS).
     # Geprüft wird dieselbe Regel am neuen Ort: Sperre (Folge bzw. 5-s-Rückfall) steht vor hedgeMasterWegEntscheid
     i = s.index("  async function hedgeTsxSchnellTick("); t = s[i:s.index("\n  setInterval(hedgeTsxSchnellTick", i)]
-    g, e = t.find("if(fs ? !fs.ok : jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_ALT_MS) continue"), t.find("hedgeMasterWegEntscheid(")
-    check("const TSX_FLACH_FOLGE = 3, TSX_FLACH_FOLGE_MS = 200, TSX_FLACH_ALT_MS = 5000," in s and "const fs = tsxFlachSchnell(st, r.tabs)" in t
-          and 0 < g < e, "Frontend: Topstep schließt erst nach Flach-Folge ≥ 3 / ≥ 200 ms, sonst ≥ 5 s durchgehend flach (Variante B, Auge 0.3.1)")
+    # NV3 (10.11.2026, Finn „sobald das Auge erkennt, direkt schließen"): zwei flach-Lesungen (flach_folge ≥ TSX_FLACH_FOLGE_SOFORT), bei mehreren Tabs ≥ 5 s
+    g, e = t.find("Number(st.flach_folge) >= TSX_FLACH_FOLGE_SOFORT"), t.find("await hedgeMasterWegAusfuehren(")
+    check("TSX_FLACH_ALT_MS = 5000" in s and "TSX_FLACH_FOLGE_SOFORT = 2" in s and "jetzt - flachSeit >= TSX_FLACH_ALT_MS" in t
+          and 0 < g < e, "Frontend: Topstep schließt nach zwei flach-Lesungen, bei mehreren Tabs ≥ 5 s durchgehend flach (NV3)")
     for z in (jsc(code) or "ROT JavaScriptCore lieferte nichts").strip().splitlines():
         check(z.startswith("OK "), z[3:] if z.startswith("OK ") else z)
 

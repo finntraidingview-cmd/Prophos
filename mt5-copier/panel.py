@@ -3552,6 +3552,134 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
     return False, e, "flach, noch nicht bestätigt"
 
 
+
+# ══ ZWEITER SCHLIESSWEG FÜR TOPSTEP / NOVA (NV3, Finn 10.11.2026: „Das Auge erkennt es ja. Sobald das Auge erkennt, direkt schließen.“; Master: „Den zweiten Weg
+# über Railway/Panel als Netz baust du trotzdem“). Zwei Fälle auf dem PC von Marco (pc-t8wg97): 937e9256 (Fusion blieb bis zum Hand-Ende offen) und 3d0c3e06 (Fusion
+# 71,9 s nach dem Flach des Auges) — beide Male sah das TopstepX-Auge den Master flach, nur der Tab schloss nicht. Der Tab meldet seinen tsv2-Hedge jetzt wie Orbit
+# scharf (quelle „tsx“), und diese Wache liest das Auge direkt aus dem Speicher des Panels (tsx_stand_ausgabe, ohne HTTP, gleiche PC-Uhr wie st.ts). Sie ist das
+# Netz hinter dem Tab (der schließt nach ~0,25 s), deshalb etwas strenger: Auge ≥ 0.3.1, genau ein TopstepX-Tab, Stand ≤ 3 s, Messung ≤ 2,5 s, nicht ausgeloggt,
+# Kontoliste zu, genau das Plan-Konto (tsxKontoPasst des Tabs), Master im Plan-Konto gesehen (Panel selbst oder Tab: Sichtung/Fill-Beleg), danach flach_folge ≥ 3,
+# flach seit ≥ 2 s, ≥ 3 eigene flache Messungen, Hedge ≥ 3 s offen. Kein Exit-Fill nötig (anders als TradingView, Vorfall e72df7a0): Finns Vorgabe „Auge flach =
+# zu“, das Auge meldet flach nur mit Beweis im gezeigten Konto. Kein Puls-Riegel. Schließen, Wiederholen und Lösen wie bei Orbit (Ticket einmal, cmd_id).
+SCHARF_TSX_STAND_MAX_S = 3.0
+SCHARF_TSX_MESSUNG_MAX_S = 2.5
+SCHARF_TSX_FLACH_S = 2.0
+SCHARF_TSX_FLACH_FOLGE = 3
+SCHARF_TSX_LESUNGEN = 3
+SCHARF_TSX_MIN_SCRIPT = (0, 3, 1)
+SCHARF_TSX_SICHT_NEU_S = 5.0   # Sichtungszeit (gesehen_ts) höchstens so oft neu → Datei höchstens alle 5 s geschrieben, solange der Master steht
+
+
+def _tsx_norm(s):
+    return re.sub(r"[^A-Za-z0-9]", "", str(s or "")).upper()
+
+
+def scharf_tsx_konto_passt(k, ext, ext_ids):
+    """REIN RECHNEND (testbar) — wie tsxKontoPasst im Tab: volle, nicht gekürzte Kennung gleich der External ID, sonst die Kopf-Endung (…1234), wenn genau ein
+    TopstepX-Konto der ID so endet und es das Plan-Konto ist. Offene Kontoliste nie."""
+    if not isinstance(k, dict) or k.get("liste_offen") or not _tsx_norm(ext):
+        return False
+    if k.get("kontonr"):
+        return k.get("abgekuerzt") is False and _tsx_norm(k.get("kontonr")) == _tsx_norm(ext)
+    e = str(k.get("endung") or "")
+    if not re.fullmatch(r"\d{4}", e):
+        m = re.search(r"\(\s*(?:\.{3}|…)\s*(\d{4})\s*\)", str(k.get("aktiv") or ""))
+        e = m.group(1) if m else ""
+    if not e:
+        return False
+    treffer = {_tsx_norm(x) for x in (ext_ids or []) if _tsx_norm(x).endswith(e)}
+    return len(treffer) == 1 and next(iter(treffer)) == _tsx_norm(ext)
+
+
+def _tsx_wurzel(sym):
+    """REIN RECHNEND — wie tvSymbolWurzel im Tab (MNQZ6 → MNQ, CME_MINI:NQZ2026 → NQ, MNQ1! → MNQ)."""
+    s = str(sym or "").upper().strip()
+    s = s[s.rfind(":") + 1:].lstrip("/")
+    m = re.match(r"[A-Z]+", s)
+    if not m:
+        return ""
+    w, rest = m.group(0), s[len(m.group(0)):]
+    if re.match(r"\d+!", rest):
+        return w
+    if re.match(r"\d", rest) and len(w) > 1 and w[-1] in "FGHJKMNQUVXZ":
+        w = w[:-1]
+    return w
+
+
+def _tsx_position_da(st, wurzel, richtung):
+    for x in (st.get("positionen") or []) if isinstance(st, dict) else []:
+        if not isinstance(x, dict) or not x.get("symbol") or not isinstance(x.get("menge"), (int, float)) or not abs(x.get("menge")):
+            continue
+        seite = x.get("seite") if x.get("seite") in ("buy", "sell") else None
+        if _tsx_wurzel(x.get("symbol")) == wurzel and (not richtung or not seite or seite == richtung):
+            return True
+    return False
+
+
+def _tsx_script_ok(v):
+    try:
+        return tuple(int(x) for x in str(v or "").split(".")[:3]) >= SCHARF_TSX_MIN_SCRIPT
+    except ValueError:
+        return False
+
+
+def scharf_entscheid_tsx(e, aus, jetzt):
+    """REIN RECHNEND (testbar): scharfer Topstep-Eintrag + tsx_stand_ausgabe() → (zu, e_neu, grund). e: {at, ext_id, wurzel, richtung, nachbarn, gesehen,
+    gesehen_ts, flach_ts[]}. Jede unsichere Lesung setzt die eigenen flachen Messungen zurück; die Sichtung bleibt (Schutz 2 wie im Tab)."""
+    e = dict(e)
+    aus = aus if isinstance(aus, dict) else {}
+    st = aus.get("stand") if isinstance(aus.get("stand"), dict) else None
+
+    def nein(grund, **neu):
+        e.update(flach_ts=[], **neu)
+        return False, e, grund
+    if not aus.get("ok") or st is None:
+        return nein("kein Stand vom TopstepX-Auge")
+    alter = aus.get("alter_s")
+    if not isinstance(alter, (int, float)) or alter > SCHARF_TSX_STAND_MAX_S:
+        return nein("Auge-Stand zu alt")
+    if int(aus.get("tabs") or 0) != 1:
+        return nein("mehrere TopstepX-Tabs melden")
+    if not _tsx_script_ok(aus.get("script")):
+        return nein("Auge älter als 0.3.1 (keine Flach-Folge)")
+    if st.get("ausgeloggt") is True:
+        return nein("TopstepX ausgeloggt")
+    if not scharf_tsx_konto_passt(st.get("konto"), e.get("ext_id"), e.get("nachbarn")):
+        return nein("Auge zeigt nicht das Plan-Konto")
+    ts = st.get("ts")
+    if not isinstance(ts, (int, float)) or jetzt * 1000.0 - ts > SCHARF_TSX_MESSUNG_MAX_S * 1000.0:
+        return nein("Messung des Auges nicht frisch")
+    if _tsx_position_da(st, e.get("wurzel"), e.get("richtung")):
+        # Sichtungszeit höchstens alle SCHARF_TSX_SICHT_NEU_S neu (Prüfer SOLLTE 1: sonst schreibt die Wache hedge_scharf.json bei jeder Messung, die ganze Nova lang)
+        g0 = e.get("gesehen_ts")
+        if e.get("gesehen") and isinstance(g0, (int, float)) and 0 <= ts - g0 < SCHARF_TSX_SICHT_NEU_S * 1000.0 and not e.get("flach_ts"):
+            return False, e, "Position da"
+        return nein("Position da", gesehen=True, gesehen_ts=ts)
+    if st.get("flach") is not True:
+        return nein("keine flach-Aussage")
+    if not e.get("gesehen"):
+        return nein("Master im Plan-Konto nie gesehen und kein Fill-Beleg")
+    fs, folge = st.get("flach_seit"), st.get("flach_folge")
+    # die Flach-Serie muss NACH der letzten Sichtung beginnen (bzw. nach dem Hedge-Open − 5 s, wenn nur der Tab den Master sah) — nie ein alter Flach-Stand
+    grenze = float(e.get("gesehen_ts")) if isinstance(e.get("gesehen_ts"), (int, float)) else (float(e.get("at") or 0) - 5.0) * 1000.0
+    if not isinstance(fs, (int, float)) or fs <= grenze:
+        return nein("Flach-Serie älter als die Sichtung")
+    lesungen = list(e.get("flach_ts") or [])
+    if ts not in lesungen:
+        lesungen.append(ts)
+    e.update(flach_ts=lesungen[-5:])
+    if not isinstance(folge, (int, float)) or folge < SCHARF_TSX_FLACH_FOLGE:
+        return False, e, "flach, Folge zu kurz"
+    if jetzt * 1000.0 - fs < SCHARF_TSX_FLACH_S * 1000.0:
+        return False, e, "flach, noch keine 2 s"
+    if len(lesungen) < SCHARF_TSX_LESUNGEN:
+        return False, e, "flach, zu wenige eigene Messungen"
+    if jetzt - float(e.get("at") or 0) < SCHARF_OFFEN_MIN_S:
+        return False, e, "Hedge jünger als 3 s"
+    return True, e, (f"Master weg laut TopstepX-Auge im Konto {e.get('ext_id')} (flach seit {(jetzt * 1000.0 - fs) / 1000.0:.1f} s, Folge {int(folge)}, "
+                     f"{len(lesungen)} eigene Messungen)")
+
+
 def scharf_laden():
     l = read_json(SCHARF_PFAD, []) or []
     return [x for x in l if isinstance(x, dict) and x.get("ticket")] if isinstance(l, list) else []
@@ -3576,7 +3704,8 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
     """Nach der Open-Quittung: Eintrag anlegen (gleiches Ticket ersetzt). sch = body.scharf vom Tab. → True, wenn gemerkt."""
     if not isinstance(sch, dict):
         return False
-    if not scharf_puls_reader_ok(reader_stand):
+    tsx = sch.get("quelle") == "tsx"   # NV3: Topstep — die Wache liest das TopstepX-Auge im Panel-Speicher, kein TradingView-Reader nötig
+    if not tsx and not scharf_puls_reader_ok(reader_stand):
         print(f"[scharf] nicht gemerkt (Ticket {ticket}): kein Puls-Chrome-Reader ≥ 0.10.8", flush=True)
         scharf_spur(ticket, "NICHT gemerkt", "kein Puls-Chrome-Reader ≥ 0.10.8")
         return False
@@ -3597,12 +3726,14 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
          # für die angeklebte Balance muss die Liste vollständig sein → höher kappen und Kappung merken (dann zählt nur der volle Text)
          "nachbarn": [str(x).strip()[:60] for x in nb][:SCHARF_NACHBARN_MAX] if isinstance(nb, list) else [],
          "nachbarn_gekappt": isinstance(nb, list) and len(nb) > SCHARF_NACHBARN_MAX, "at": time.time(),
-         "gesehen": False, "flach_seit": None, "flach_ts": [], "status": "offen"}
+         "gesehen": bool(tsx and sch.get("gesehen") is True), "flach_seit": None, "flach_ts": [], "status": "offen"}
+    if tsx:
+        e["quelle"] = "tsx"
     with SCHARF_LOCK:
         liste = [x for x in scharf_laden() if int(x.get("ticket") or 0) != int(ticket)]
         liste.append(e)
         scharf_speichern(liste)
-    print(f"[scharf] gemerkt: Plan {e['plan_id'][:8]} Ticket {ticket} Konto {ext} {wurzel}", flush=True)
+    print(f"[scharf] gemerkt: Plan {e['plan_id'][:8]} Ticket {ticket} Konto {ext} {wurzel}{' (TopstepX-Auge)' if tsx else ''}", flush=True)
     scharf_spur(ticket, "gemerkt", f"Plan {e['plan_id'][:8]} · Konto {ext} · {wurzel} · {len(e['nachbarn'])} Konten der ID")
     return True
 
@@ -3633,7 +3764,7 @@ def scharf_lebt(e, jetzt):
 def scharf_konto_fest():
     """Offene scharfe Einträge → [ext_id] (für „kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge“)."""
     jetzt = time.time()
-    return [str(x.get("ext_id")) for x in scharf_laden() if scharf_lebt(x, jetzt)]
+    return [str(x.get("ext_id")) for x in scharf_laden() if scharf_lebt(x, jetzt) and x.get("quelle") != "tsx"]   # NV3: Topstep-Einträge ändern hier nichts
 
 
 def _scharf_close_senden(e):
@@ -3697,9 +3828,9 @@ def _scharf_stand_lesen():
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
-def _scharf_runde(st, jetzt, offene_tickets=None):
+def _scharf_runde(st, jetzt, offene_tickets=None, tsx=None):
     """Eine Runde der Schließ-Wache (testbar mit Attrappen): Einträge laden, je Eintrag entscheiden, Close senden bzw. Quittung prüfen, zurückschreiben.
-    st = Reader-Stand oder None (nicht lesbar). → Anzahl gesendeter Close-Aufträge."""
+    st = Reader-Stand oder None (nicht lesbar); tsx = tsx_stand_ausgabe() für Topstep-Einträge (quelle „tsx“, NV3) oder None. → Anzahl gesendeter Close-Aufträge."""
     liste = scharf_laden()
     if not liste:
         return 0
@@ -3728,6 +3859,21 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
                 e = dict(e, cmd_id=_scharf_close_senden(e), zu_at=jetzt)
                 liste[i], geaendert, n = e, True, n + 1
             continue
+        if e.get("quelle") == "tsx":   # NV3: Topstep — das TopstepX-Auge entscheidet (scharf_entscheid_tsx), kein Puls-Beleg
+            if tsx is None:
+                continue
+            zu, e2, grund = scharf_entscheid_tsx(e, tsx, jetzt)
+            if zu:
+                e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
+                n += 1
+                print(f"[scharf] {grund} → close Ticket {e2['ticket']}", flush=True)
+                scharf_spur(e2["ticket"], "CLOSE gesendet", f"{grund} · cmd {e2['cmd_id']}")
+            _k = (tsx.get("stand") or {}).get("konto") if isinstance(tsx.get("stand"), dict) else None
+            _k = _k if isinstance(_k, dict) else {}
+            scharf_spur(e.get("ticket"), "Lage", f"{grund} · Auge-Konto {str(_k.get('kontonr') or _k.get('endung') or '-')[:40]} · Auge {str(tsx.get('script') or '-')[:12]}", nur_bei_wechsel=True)
+            if e2 != e:
+                liste[i], geaendert = e2, True
+            continue
         if st is None:
             continue
         try:
@@ -3752,6 +3898,8 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
             for e in liste:
                 t = int(e.get("ticket") or 0)
                 if t in frisch:                       # inzwischen gelöste Einträge nicht zurückschreiben
+                    if e.get("quelle") == "tsx" and frisch[t].get("gesehen") is True and not e.get("gesehen"):
+                        e = dict(e, gesehen=True)      # NV3: Sichtung, die der Tab in derselben Runde nachgetragen hat (/api/hedge-scharf), nicht überschreiben
                     frisch[t] = e
             scharf_speichern(list(frisch.values()))
     return n
@@ -3770,18 +3918,25 @@ def _scharf_wache():
     """Thread: die Schließ-Wache (s. Block-Kopf). Wirft nie. Ohne scharfen Eintrag nur 1× je Sekunde ein Blick in die Datei."""
     while True:
         try:
-            if not scharf_laden():
+            _l = scharf_laden()
+            if not _l:
                 time.sleep(1.0)
                 continue
+            st = None
+            if any(x.get("quelle") != "tsx" for x in _l):   # NV3: nur Topstep-Einträge → kein HTTP zum TradingView-Reader
+                try:
+                    st = _scharf_stand_lesen()
+                except Exception:
+                    st = None
             try:
-                st = _scharf_stand_lesen()
+                tsx = tsx_stand_ausgabe() if any(x.get("quelle") == "tsx" for x in _l) else None
             except Exception:
-                st = None
+                tsx = None
             try:
                 tickets = scharf_copier_tickets()
             except Exception:
                 tickets = None
-            _scharf_runde(st, time.time(), tickets)
+            _scharf_runde(st, time.time(), tickets, tsx)
         except Exception as ex:
             print(f"[scharf] Fehler: {type(ex).__name__}: {ex}", flush=True)
             time.sleep(1.0)
@@ -7398,7 +7553,18 @@ class Handler(BaseHTTPRequestHandler):
                 ticket = int(body.get("ticket") or 0)
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            _sch = body.get("scharf") if isinstance(body.get("scharf"), dict) else {}
             if any(int(x.get("ticket") or 0) == ticket for x in scharf_laden()):
+                # NV3: Topstep — der Tab sah den Master (oder Fill-Beleg) erst nach dem Open → Sichtung am Eintrag nachtragen (nur dasselbe Ticket, nur true)
+                if _sch.get("quelle") == "tsx" and _sch.get("gesehen") is True:
+                    with SCHARF_LOCK:
+                        _l = scharf_laden()
+                        for x in _l:
+                            if int(x.get("ticket") or 0) == ticket and x.get("quelle") == "tsx" and not x.get("gesehen"):
+                                x["gesehen"] = True
+                                scharf_speichern(_l)
+                                scharf_spur(ticket, "Sichtung vom Tab", "Master im Plan-Konto gesehen bzw. Fill-Beleg")
+                                break
                 return self._send(200, json.dumps({"ok": True, "schon": True}))
             offen = scharf_copier_solo()
             if offen is None or ticket not in offen:
@@ -7409,7 +7575,7 @@ class Handler(BaseHTTPRequestHandler):
                 scharf_spur(ticket, "NICHT gemerkt (Nachholen)", f"Ticket gehört laut Copier zu {offen[ticket] or '?'}, nicht zu {str(body.get('plan_id') or '')[:8]}")
                 return self._send(200, json.dumps({"ok": False, "code": "fremd", "msg": "Ticket gehört laut Copier zu einem anderen Plan"}))
             try:
-                rs = _scharf_stand_lesen()
+                rs = _scharf_stand_lesen() if _sch.get("quelle") != "tsx" else None
             except Exception:
                 rs = None
             ok = scharf_setzen(body.get("scharf"), str(body.get("plan_id") or "")[:64], ticket, rs)
@@ -7565,7 +7731,7 @@ class Handler(BaseHTTPRequestHandler):
             try:   # SCHARF SCHALTEN / LÖSEN (02.11.2026, s. SCHLIESSEN AUF DEM PC)
                 if aktion == "open" and erg.get("ok") and erg.get("ticket"):
                     try:
-                        _rs = _scharf_stand_lesen() if body.get("scharf") else None
+                        _rs = _scharf_stand_lesen() if (isinstance(body.get("scharf"), dict) and body["scharf"].get("quelle") != "tsx") else None
                     except Exception:
                         _rs = None
                     erg["scharf"] = scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"), _rs)

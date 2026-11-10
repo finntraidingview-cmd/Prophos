@@ -103,7 +103,7 @@ check("const TVTM_VERSION_SOLL = '0.10.9'" in HTML and "const VERSION    = '0.10
 check("if(hedgeTvUnterwegs()){ verwerfen(); return }" in t, "Puls unterwegs setzt Konto-Zeitraum zurück")
 check("jetzt - _hedgeSchnellKonto.get(pid) >= 5000){ _hedgeSchnellGesehenAt.set(pid, jetzt)" in t, "Sichtung zählt ab 5 s im Konto")   # seit 87f62cca mit Block: dieselbe Regel, dazu hedgeSichtMerken
 i = HTML.index("async function hedgeTsxSchnellTick(")
-check("hedgeMasterWegEntscheid({" in HTML[i:i + 12000], "TopstepX unverändert")
+check("TSX_FLACH_FOLGE_SOFORT" in HTML[i:i + 12000] and "tsxKontoPasst(k, kontoPlan" in HTML[i:i + 12000] and "!tsxFillBeleg(p, wz, richtung)" in HTML[i:i + 12000], "TopstepX: NV3-Sofortregel (Plan-Konto, Sichtung/Fill, zwei flach-Lesungen)")   # NV3 10.11.2026: ohne hedgeMasterWegEntscheid
 check("st.leer_beweis === false ? false : st.positionen_ok" in HTML and "st.positionen_ok === false || st.leer_beweis === false" in HTML and "st.positionen_ok !== true || st.leer_beweis === false" in HTML, "1-s-Wächter, Master-nie-da, Neuladen bleiben beim Leer-Text")
 check("leer_beweis: leerBeweisMerk" in US, "Userscript meldet leer_beweis")
 print("\nSCHLUSS EINFACH: alles grün" if not FEHLER else f"\n{len(FEHLER)} FEHLER")

@@ -31557,6 +31557,7 @@
   window._hedgeLiqLevel = hedgeLiqLevel   // Test-Haken
   // SCHARF SCHALTEN (02.11.2026): Konto, Wurzel und Konten der ID für die Schließ-Wache im Panel — nur TradingView-Trades (tvv2). REIN bis auf accounts.
   function hedgeScharfDaten(plan){
+    if(plan && plan.route === 'tsv2') return (typeof hedgeScharfDatenTsx === 'function') ? hedgeScharfDatenTsx(plan) : null   // NV3: Topstep über das TopstepX-Auge im Panel
     if(!plan || plan.route !== 'tvv2') return null
     try{
       const acc = (accounts || []).find(a => a && String(a.id) === String(plan.masterAccountId))
@@ -31577,10 +31578,13 @@
     const pc = (typeof hedgePcId === 'function') ? hedgePcId() : ''
     for(const p of (_tp || [])){
       const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
-      if(!p || p.status !== 'open' || p.route !== 'tvv2' || !hx || hx.status !== 'offen' || !hx.ticket || (hx.pc && pc && hx.pc !== pc)) continue
-      const key = String(p.id) + '|' + String(hx.ticket), alt = _hedgeScharfNach.get(key)
-      if(alt === true || (alt && Date.now() - alt < 60000)) continue
-      const sch = hedgeScharfDaten(p); if(!sch){ _hedgeScharfNach.set(key, true); continue }
+      // NV3 (10.11.2026): auch Topstep (tsv2) — schon im eigenen Lauf (Plan noch „planned"), und noch einmal, sobald der Tab den Master gesehen hat (Sichtung fürs Panel)
+      const tsx = !!p && p.route === 'tsv2'
+      if(!p || !(p.status === 'open' || (tsx && p.status === 'planned')) || !(p.route === 'tvv2' || tsx) || !hx || hx.status !== 'offen' || !hx.ticket || (hx.pc && pc && hx.pc !== pc)) continue
+      const sch = hedgeScharfDaten(p)
+      const key = String(p.id) + '|' + String(hx.ticket) + (tsx && sch && sch.gesehen ? '|g' : ''), alt = _hedgeScharfNach.get(key)
+      if(alt === true || (alt && Date.now() - alt < (tsx ? 10000 : 60000))) continue
+      if(!sch){ _hedgeScharfNach.set(key, true); continue }
       _hedgeScharfNach.set(key, Date.now())
       try{
         const r = await window.mtcApi('hedge-scharf', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -35166,69 +35170,155 @@
     return { ok: false, grund: (r && r.ok) ? (('auge_ok' in r) ? 'Neuladen + neuer Tab ohne Erfolg' : 'Puls-Bot zu alt für die Reparatur')
       : String((r && (r.msg || r.code)) || 'Reparatur-Lauf ohne Antwort').slice(0, 120) }
   }
+  /* NV3 SOFORT-SCHLUSS ÜBER DAS AUGE (Finn 10.11.2026: „Das Auge erkennt es ja. Sobald das Auge erkennt, direkt schließen. Es ist doch so simpel.“). Zwei Fälle
+   * auf dem PC von Marco (pc-t8wg97): 937e9256 — Finn schloss den Master ~14:29:56 UTC, als Puls noch die Brackets eintrug: Fusion blieb offen bis zum Hand-Ende;
+   * 3d0c3e06 — Auge flach ab 14:39:10,5, Fusion erst 14:40:22,4 (Puls galt nach dem Order-Ende noch ~60 s als unterwegs, danach 30-s-Wechselfenster, Stände > 1 s
+   * löschten die Konto-Uhr). Jetzt entscheidet der Tab nur noch nach dem Auge:
+   *   (1) das Auge zeigt das PLAN-Konto (tsxKontoPasst, keine offene Kontoliste) und die Messung ist frisch (tsxMessungJung, ≤ TSX_MESSUNG_MAX_MS),
+   *   (2) der Master war gefüllt: einmal im Plan-Konto gesehen (auch während Puls läuft und im eigenen Lauf) ODER Fill von Puls belegt (tsxFillBeleg),
+   *   (3) mindestens zwei aufeinanderfolgende flach-Lesungen desselben Kontos (flach_folge ≥ TSX_FLACH_FOLGE_SOFORT; bei mehreren TopstepX-Tabs wie bisher
+   *       ≥ TSX_FLACH_ALT_MS durchgehend flach — ein abgerissener Tab könnte den echten überdecken).
+   * Dann sofort schließen — ohne Konto-Uhr, ohne 30-s-Wechselfenster, ohne „Puls unterwegs"-Verwerfen, auch wenn der Plan noch „planned" ist (eigener Lauf).
+   * Ausgeloggt, kein Konto, Stand > TSX_STAND_MAX_S: nie schließen, Blind-/Relogin-Reparatur wie bisher (nur außerhalb eines Puls-Laufs).
+   * Zweiter, unabhängiger Weg: das Panel schließt selbst (panel.py tsx_scharf), der Tab meldet ihm dafür die offenen Topstep-Hedges. */
+  const TSX_STAND_MAX_S = 3.0, TSX_FLACH_FOLGE_SOFORT = 2
+  // REIN RECHNEND (Test-Haken window._tsxFillBeleg): Fill von Puls belegt und an DIESEN Hedge gebunden? tv.einstieg_beleg 'fill', Zeile der Plan-Wurzel/-Richtung in
+  // tv.positionen, Klick höchstens 60 s vor bis 10 s nach dem Hedge-Open (alter tv eines früheren Versuchs zählt nicht, nachgeholte Order-Ergebnisse auch nicht)
+  function tsxFillBeleg(p, wz, richtung){
+    const b = p && p.mt5Baseline, tv = b && b.tv, h = b && b.hedge
+    if(!tv || typeof tv !== 'object' || tv.nachgeholt || !(tv.einstieg_beleg === 'fill' || tv.einstieg_quelle === 'fill')) return false
+    const klick = Date.parse(tv.klick_at || '') || 0, open = Date.parse((h && (h.opened_at || h.at)) || '') || 0
+    if(!klick || !open || klick < open - 60000 || klick > open + 10000) return false
+    return (Array.isArray(tv.positionen) ? tv.positionen : []).some(x => {
+      if(!x) return false
+      const w = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(x.symbol || '')) : String(x.symbol || '')
+      const m = Math.abs(Number(x.menge_zahl != null ? x.menge_zahl : x.menge) || 0), seite = (x.seite === 'buy' || x.seite === 'sell') ? x.seite : null
+      return w === wz && m > 0 && (!richtung || !seite || seite === richtung)
+    })
+  }
+  window._tsxFillBeleg = tsxFillBeleg
+  // NV3 SICHTUNG AN DEN HEDGE GEBUNDEN (Prüfer MUSS 2, 10.11.2026): _hedgeMasterGesehen gilt nur je Plan-ID und wird nie geleert — ein zweiter Lauf desselben Plans
+  // (Fehlstart, Nachplanen) hätte die alte Sichtung geerbt und Fusion vor dem neuen Fill geschlossen. Für den Topstep-Schluss zählt deshalb nur eine Sichtung zu
+  // GENAU diesem Hedge-Ticket (der Tick merkt sie nur, solange dieser Hedge offen ist). REIN bis auf die Map.
+  const _tsxSichtung = new Map()   // plan-id → { ticket, at }
+  function tsxSichtungGilt(p){
+    const h = p && p.mt5Baseline && p.mt5Baseline.hedge, g = p ? _tsxSichtung.get(String(p.id)) : null
+    return !!(g && h && h.ticket != null && String(g.ticket) === String(h.ticket))
+  }
+  window._tsxSichtungGilt = tsxSichtungGilt   // Test-Haken
+  // NV3 ZWEITER WEG: Daten für die Schließ-Wache im Panel (panel.py scharf_entscheid_tsx) — Plan-Konto, Wurzel/Richtung wie im Tick, alle TopstepX-Konten der ID
+  // (Endungs-Regel), Sichtung des Tabs zu diesem Hedge oder Fill-Beleg. Das Panel prüft das Auge selbst; null → kein Eintrag (der Tab-Weg bleibt).
+  function hedgeScharfDatenTsx(plan){
+    try{
+      const acc = (accounts || []).find(a => a && String(a.id) === String(plan.masterAccountId))
+      const ext = acc ? String(acc.externalId || '').trim() : ''
+      if(!ext) return null
+      const h = (plan.mt5Baseline && plan.mt5Baseline.hedge) || {}
+      const wurzel = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || plan.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+      const richtung = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
+      let gesehen = false
+      try{ gesehen = tsxSichtungGilt(plan) || tsxFillBeleg(plan, wurzel, richtung) }catch(_){ gesehen = false }
+      return { quelle: 'tsx', ext_id: ext, wurzel, richtung, menge: Number(plan.masterContracts) || null, nachbarn: tsxKontoExtIdsJetzt(), gesehen: gesehen === true }
+    }catch(_){ return null }
+  }
+  /* NV3 PLAN-ENDE NACH DEM PANEL-SCHLUSS (Prüfer MUSS 1, 10.11.2026): das Panel schließt über einen Copier-Auftrag; der Tab erfährt das nur über den Ring, und der
+   * Copier trägt dort den MT5-Grund ein — für jeden eigenen Close „close" (EXPERT), nie master_ende_panel. hedgeZuAusRing bucht daraus level_mt5 mit grund_copier
+   * 'close' und ohne close_at des Tabs. Für tsv2 beendete den Plan danach kein Weg. Jetzt: tsv2-Plan „open" auf diesem PC, Hedge aus diesem Lauf zu mit grund_copier
+   * 'close' ohne eigenen Schließbefehl (kein close_at; oder ein künftiges master_ende_panel), noch kein final → der Tab liest das Auge SELBST und beendet den Plan
+   * nur mit denselben Schutzregeln wie beim eigenen Schluss: Plan-Konto (tsxKontoPasst), Stand ≤ TSX_STAND_MAX_S, Messung frisch, nicht ausgeloggt, flach mit
+   * flach_folge ≥ TSX_FLACH_FOLGE_SOFORT, keine Position der Wurzel. Zeigt das Auge den Master noch, bleibt der Plan offen (Fusion war dann aus anderem Grund zu).
+   * Je Plan höchstens alle 15 s ein Versuch, bis 15 min nach dem Hedge-Schluss; Ende über hedgeMasterWegAusfuehren (Hedge schon zu → nur Plan-Ende + Überprüfen). */
+  const _tsxPanelEndeVersuch = new Map()   // plan-id → Zeit des letzten Versuchs
+  let _tsxPanelEndeBusy = false
+  function tsxPanelEndeKandidat(p, pc, jetzt){
+    const h = p && p.mt5Baseline && p.mt5Baseline.hedge
+    if(!p || p.route !== 'tsv2' || p.status !== 'open' || !h || h.status !== 'geschlossen' || h.pc !== pc || p.mt5Baseline.final) return false
+    if(!(h.grund === 'master_ende_panel' || (String(h.grund_copier || '') === 'close' && !h.close_at))) return false
+    const zu = Date.parse(h.closed_at || '') || 0, start = Date.parse(p.startedAt || '') || 0
+    return !!(zu && start && zu >= start && jetzt - zu <= 15 * 60000)
+  }
+  window._tsxPanelEndeKandidat = tsxPanelEndeKandidat   // Test-Haken (rein rechnend)
+  async function hedgeTsxPanelEndeTick(){
+    if(_tsxPanelEndeBusy || window._tabNebenSofort || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
+    let tp; try{ tp = tradePlans }catch(_){ return }
+    const pc = hedgePcId(), jetzt = Date.now()
+    const kand = (tp || []).filter(p => tsxPanelEndeKandidat(p, pc, jetzt) && !_hedgeWegLaeuft.has(String(p.id)) && jetzt - (_tsxPanelEndeVersuch.get(String(p.id)) || 0) >= 15000)
+    if(!kand.length) return
+    _tsxPanelEndeBusy = true
+    try{
+      let r = null
+      try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 800 }) }catch(_){ r = null }
+      const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
+      if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= TSX_STAND_MAX_S) || st.ausgeloggt === true || Number(r.tabs) > 1) return
+      const t = Date.now()
+      if(st.flach !== true || !(Number(st.flach_folge) >= TSX_FLACH_FOLGE_SOFORT) || !tsxMessungJung(st, t)) return
+      const liste = tsxStandListe(st)
+      for(const p of kand){
+        const pid = String(p.id), h = p.mt5Baseline.hedge
+        const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+        if(!kontoPlan || !tsxKontoPasst(st.konto || {}, kontoPlan, tsxKontoExtIdsJetzt())) continue
+        const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+        if(hedgeMasterTeilweise(liste, wz, null, 1e9) != null) continue   // Master steht noch (gleich welche Richtung) → nie beenden
+        _tsxPanelEndeVersuch.set(pid, t)
+        console.info(`[hedgeTsx] Fusion vom Copier/Panel geschlossen (${h.grund || '?'} / ${h.grund_copier || '?'}), Auge flach im Plan-Konto (flach_folge ${st.flach_folge}) — Plan wird beendet`, p.masterName || pid)
+        try{ await hedgeMasterWegAusfuehren(p, kontoPlan, null) }catch(e){ console.warn('[hedgeTsx] Plan-Ende nach Panel-Schluss', e) }
+      }
+    }catch(e){ console.warn('[hedgeTsx] Panel-Ende', e) }
+    finally{ _tsxPanelEndeBusy = false }
+  }
+  setInterval(() => { hedgeTsxPanelEndeTick().catch(() => {}) }, 1000)
   async function hedgeTsxSchnellTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_tsxSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId()
-    const meine = (tp || []).filter(p => p && p.route === 'tsv2' && p.status === 'open' && p.mt5Baseline && p.mt5Baseline.hedge
+    // auch der eigene Lauf (Plan noch „planned", Hedge schon offen): Finn kann schon während Puls die Brackets einträgt schließen (937e9256)
+    const meine = (tp || []).filter(p => p && p.route === 'tsv2' && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && p.mt5Baseline.hedge
       && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
     if(!meine.length){ tsxBlindZurueck(); _tsxTraege = { ab: 0, max: 0 }; return }   // kein offener Topstep-Hedge: Blind-Uhr zurück (sonst wäre der nächste sofort „fällig")
-    const verwerfen = () => { for(const p of meine){ _tsxSchnellKonto.delete(String(p.id)); _tsxSchnellLeer.delete(String(p.id)) } }
-    if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // Puls unterwegs → Auge blind (wie beim Orbit-Reader), keine Reparatur
     _tsxSchnellBusy = true
     try{
       let r = null
       try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 800 }) }catch(_){ r = null }
       const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
       if(st) tsxTraegeMerken(r.alter_s, st)
+      const pulsLaeuft = hedgePulsUnterwegs()   // nur noch für die Reparaturen (Blind/Relogin), nie für den Schluss
       const blindTick = (grund) => {   // Auge blind (29.10.2026): nie schließen; nach TSX_BLIND_MS Reparatur über den Heimweg
+        if(pulsLaeuft){ tsxBlindZurueck(); return }
         if(!tsxBlindReparaturErlaubt(meine.some(tpIstNova), tsxLs.get('prophos_tsx_auge_gesehen_at'), tsxLs.get('prophos_tsx_auge_fehlt_at'), r && r.jemals_s != null ? r.jemals_s : null, Date.now())){ tsxBlindZurueck(); return }   // WD ohne Auge: Radar/Notfall schließen wie bis 29.10.
         const u = tsxBlindUrteil(_tsxBlindSeit, _tsxBlindN, true, Date.now()); _tsxBlindSeit = u.seit; _tsxBlindN = u.n
         if(u.faellig && tsxReloginAnstossen(meine[0], 'blind')) console.info('[hedgeTsx] Auge blind seit', Math.round((Date.now() - u.seit) / 100) / 10, 's (', u.n, 'Abfragen) —', grund)
       }
-      if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1.0)){
-        verwerfen(); if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)')
-        if(!hedgePulsUnterwegs()) blindTick(st ? `Stand ${r.alter_s} s alt` : 'kein Stand')
+      if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= TSX_STAND_MAX_S)){
+        if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)')
+        blindTick(st ? `Stand ${r.alter_s} s alt` : 'kein Stand')
         return
       }
-      _tsxStandFehler = 0
-      if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // während des Holens losgelaufen
-      if(st.ausgeloggt === true){ verwerfen(); tsxBlindZurueck(); tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
-      if(!(st.konto && (st.konto.kontonr || tsxKontoEndung(st.konto)))){ verwerfen(); blindTick('kein Konto im Auge'); return }   // frisch, aber ohne Konto = blind
-      tsxBlindZurueck(); tsxAugeGesehenMerken()
+      if(st.ausgeloggt === true){ tsxBlindZurueck(); if(!pulsLaeuft) tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
+      if(!(st.konto && (st.konto.kontonr || tsxKontoEndung(st.konto)))){ blindTick('kein Konto im Auge'); return }   // ohne Konto = blind
+      if(r.alter_s <= 1.0){ _tsxStandFehler = 0; tsxBlindZurueck(); tsxAugeGesehenMerken() }
       const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || !tsxKontoPasst(k, kontoPlan, tsxKontoExtIdsJetzt())){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
-        if(!_tsxSchnellKonto.has(pid)) _tsxSchnellKonto.set(pid, jetzt)
+        if(!kontoPlan || !tsxKontoPasst(k, kontoPlan, tsxKontoExtIdsJetzt())) continue   // (1) nur das Plan-Konto zählt
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-        if(hedgeMasterTeilweise(liste, wz, richtung, 1e9) != null){
-          _hedgeMasterGesehen.add(pid); _tsxSchnellLeer.delete(pid)
-          if(jetzt - _tsxSchnellKonto.get(pid) >= 5000) _tsxGesehenAt.set(pid, jetzt)   // Sichtung im Konto-Zeitraum (wie .1801)
+        if(hedgeMasterTeilweise(liste, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pid); _tsxSichtung.set(pid, { ticket: h.ticket, at: jetzt }); continue }   // Master im Plan-Konto gesehen (an DIESEN Hedge gebunden)
+        if(st.flach !== true) continue   // flach nur mit Beweis — sonst keine Aussage
+        if(!tsxMessungJung(st, jetzt)) continue   // (1) Messung frisch (Nachzügler zählen nie)
+        if(!tsxSichtungGilt(p) && !tsxFillBeleg(p, wz, richtung)){   // (2) Schutz „Master nie gefüllt" — Sichtung nur zu diesem Hedge-Ticket (Prüfer MUSS 2)
+          if(typeof hedgeReaderWartetMelden === 'function') hedgeReaderWartetMelden(p, 'Auge flach, Master nie gesehen und kein Fill-Beleg — Fusion bleibt offen', { flach_seit: Number(st.flach_seit) || null })
           continue
         }
-        if(st.flach !== true){ _tsxSchnellLeer.delete(pid); continue }   // flach nur mit Beweis — sonst keine Aussage
-        if(!_hedgeMasterGesehen.has(pid)) continue
-        if(!tsxMessungJung(st, jetzt)) continue   // Nachzügler (s. tsxMessungJung): keine Aussage, Konto-Uhr und Sichtung bleiben, nicht blind
-        if(!_tsxSchnellLeer.has(pid)) _tsxSchnellLeer.set(pid, jetzt)
-        const fs = tsxFlachSchnell(st, r.tabs)   // Flach-Folge des Auges (≥ 0.3.1); null → alte 5-s-Regel (s. o.)
-        if(fs ? !fs.ok : jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_ALT_MS) continue
-        const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
-        const weg = hedgeMasterWegEntscheid({ liste, positionenOk: true, alterMs: r.alter_s * 1000, sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung,
-          kontoPlan, kontoAktiv: kontoPlan, kontenAnzahl: 99, kontoStabilMs: jetzt - _tsxSchnellKonto.get(pid), leerSeitMs: jetzt - _tsxSchnellLeer.get(pid),
-          schnell: true, gesehen: true, flachMinMs: TSX_FLACH_MIN_MS,
-          gesehenImZeitraum: (_tsxGesehenAt.get(pid) || 0) >= _tsxSchnellKonto.get(pid) })
-        if(weg && p.status === 'open'){
-          const flachS = (jetzt - _tsxSchnellLeer.get(pid)) / 1000
-          hedgeMasterWegStempeln(p, 'auge', fs ? Number(st.flach_seit) : _tsxSchnellLeer.get(pid))   // Master-Ende ab „flach seit" (29.10.2026) — mit Flach-Folge die erste flache Messung des Auges (gleiche PC-Uhr)
-          _tsxSchnellLeer.delete(pid)
-          console.info(`[hedgeTsx] Master weg laut TopstepX-Auge (${fs ? `flach_folge ${fs.folge} (${fs.ms} ms, ` : `alte Regel: flach seit ${Math.round(flachS * 1000)} ms (`}Auge ${r.script || '?'}), Konto ruhig seit ${((jetzt - _tsxSchnellKonto.get(pid)) / 1000).toFixed(0)} s, Stand ${r.alter_s} s alt) — Fusion wird geschlossen`, p.masterName || pid)
-          await hedgeMasterWegAusfuehren(p, kontoPlan, null)
-        }
+        const mehrTabs = Number(r.tabs) > 1, flachSeit = Number(st.flach_seit) || 0
+        if(mehrTabs ? !(flachSeit && jetzt - flachSeit >= TSX_FLACH_ALT_MS) : !(Number(st.flach_folge) >= TSX_FLACH_FOLGE_SOFORT)) continue   // (3) zwei flach-Lesungen
+        if(_hedgeWegLaeuft.has(pid)) continue
+        hedgeMasterWegStempeln(p, 'auge', flachSeit > 0 && flachSeit <= jetzt ? flachSeit : jetzt)   // Master-Ende ab „flach seit" des Auges (gleiche PC-Uhr)
+        console.info(`[hedgeTsx] Master weg laut TopstepX-Auge (flach_folge ${st.flach_folge}, flach seit ${flachSeit ? ((jetzt - flachSeit) / 1000).toFixed(1) + ' s' : '?'}, Auge ${r.script || '?'}, Stand ${r.alter_s} s alt${pulsLaeuft ? ', Puls unterwegs: ' + pulsLaeuft : ''}${p.status !== 'open' ? ', eigener Lauf' : ''}) — Fusion wird geschlossen`, p.masterName || pid)
+        await hedgeMasterWegAusfuehren(p, kontoPlan, null)
       }
     }catch(e){ console.warn('[hedgeTsx]', e) }
     finally{ _tsxSchnellBusy = false }
@@ -58138,7 +58228,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2159'
+  const OS_TAB_BUILD = '2026-09-22.2160'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
