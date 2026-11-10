@@ -12700,7 +12700,7 @@ def wd_sl_wuerfeln(regel, puffer, balance=None, liq_balance=None, rnd=None, grun
     return out
 
 
-def wd_sl_balance(acc, fruehere):
+def wd_sl_balance(acc, fruehere, null_basiert=False):
     """REIN RECHNEND (testbar): Balance vor dem neuen WD-Trade → (wert | None, grund). Prüfer WS1a 09.11.2026: tv_balance gilt nur, wenn sie NACH dem Ende des
     letzten Trades dieses Kontos gelesen wurde (wie hedgeLiqLevel im Tab); sonst die End-Balance dieses Trades (final.balance_end), fehlt die → unbekannt
     (Plan um 02:00 nach einem Verlusttag, Nachlesung steht aus — der Puffer wäre um dessen P&L verschoben). fruehere = _wd_fruehere_trades."""
@@ -12711,24 +12711,85 @@ def wd_sl_balance(acc, fruehere):
                 key=lambda f: str(f["ended_at"]), default=None)
     if letzt is not None and (not tv_at or tv_at <= str(letzt["ended_at"])):
         be = _wd_num(letzt.get("bal_end"))
-        if be is not None and be > 0:
+        if be is not None and (be > 0 or null_basiert):   # TX2: Topstep Express zählt 0-basiert, dort sind 0 und negativ echte Stände
             return be, None
         return None, "Balance seit dem letzten Trade nicht nachgelesen — Puffer unbekannt"
-    if tvb is None or tvb <= 0:
+    if tvb is None or (tvb <= 0 and not null_basiert):
         return None, "keine Balance am Konto"
+    if null_basiert and not tv_at:
+        return None, "keine gelesene Balance am Konto"   # 0-basiert: ohne Lesezeit könnte 0 auch „nie gelesen“ heißen
     return tvb, None
+
+
+TX2_MLL_VOR = 100.0    # wie der WD-Hedge (hedgeLiqLevel tsv2: Liquidation = MLL + 100 $)
+
+
+def wd_sl_express_mll(acc, fruehere):
+    """REIN RECHNEND (testbar, TX2 10.11.2026, Master: „Topstep Express in den WD-Zufalls-SL aufnehmen“): MLL eines Topstep-Express-Kontos (XFA, TopstepX zeigt
+    es 0-basiert) aus BELEGTEN Werten → (mll, quelle) | (None, grund). Wie ap_kette_mll_belegt, nur 0-basiert:
+      (1) jüngste TopstepX-Lesung tv.mll_start dieses Kontos (Puls liest sie bei jedem Start mit; nur 0-basierte Werte < 1.000 — absolute fallen raus),
+      (2) „MLL lieber zu hoch“: JEDE bekannte Schluss-Balance (bal_end) − Max DD liegt nie über der echten MLL (die zieht am Tagesschluss vom Hochpunkt nach) →
+          MLL = max(Lesung, max(bal_end) − Max DD), höchstens 0 (die XFA-MLL hört am Startwert 0 auf — belegt: alle Express-WD-Konten lesen 0).
+          Gegenprüfung TX2 10.11.2026: zuerst zählten nur abgeschlossene CME-Tage NACH der Lesung — die Planung um 02:00 Dubai (22:00 UTC, noch CME-Tag D) für
+          Starts an D+1 sah den Tagesschluss von D nicht; bei großen Würfel-Stufen lag der SL dann hinter der echten MLL. Auch der laufende Tag und Trades vor
+          der Lesung zählen jetzt mit (zu hoch ist sicher, nur der Puffer wird kleiner); nachgezogen wird nur nach oben.
+    Ohne Lesung → unbekannt (kein Raten über Größe/Hochpunkt); Schluss-Balance nach der Lesung, aber Max DD fehlt → unbekannt."""
+    a = acc or {}
+    aid = str(a.get("id") or "")
+    dd = _wd_num(a.get("max_drawdown"))
+
+    def _t(x):
+        try:
+            t = datetime.fromisoformat(str(x).replace("Z", "+00:00").replace(" ", "T"))
+            return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+    lesung, lesung_at, schluss = None, None, []
+    for f in fruehere or ():
+        if str(f.get("master_account_id") or "") != aid:
+            continue
+        m, st = _wd_num(f.get("mll_start")), _t(f.get("started_at"))
+        if m is not None and m < 1000 and st and (lesung_at is None or st > lesung_at):
+            lesung, lesung_at = float(m), st
+        be = _wd_num(f.get("bal_end"))
+        if be is not None:
+            schluss.append((_t(f.get("ended_at")), be))
+    if lesung is None:
+        return None, "Topstep Express — noch keine MLL-Lesung aus TopstepX (Puls liest sie beim ersten Start mit)"
+    quelle = f"TopstepX-MLL {lesung:,.0f} $ (Lesung {lesung_at.strftime('%d.%m. %H:%M')} UTC)".replace(",", ".")
+    if schluss:
+        if dd is None or dd <= 0:
+            # ohne Max DD nicht nachziehbar: nach der Lesung (oder ohne Zeit) geschlossen → unbekannt; nur ältere Schlüsse → steckten schon in der Lesung
+            if any(en is None or en > lesung_at for (en, _be) in schluss):
+                return None, "Topstep Express — Max DD am Konto fehlt, MLL nach der Lesung nicht nachziehbar"
+        else:
+            neu = min(0.0, max(be for (_en, be) in schluss) - float(dd))
+            if neu > lesung:
+                return round(neu, 2), f"MLL {neu:,.0f} $ = höchste Schluss-Balance − Max DD, über der {quelle}".replace(",", ".")
+    return round(min(lesung, 0.0), 2), quelle
 
 
 def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
     """REIN RECHNEND (testbar): wd_sl eines neuen WD-Plans → dict | None (Würfel aus). Puffer = hf_wd_master_verlust (Balance tv_balance − Liq wie Radar
-    und WD-Hedge, Daily Loss ab Tagesstart bei Apex). Topstep Express: Liq = MLL aus TopstepX, beim Planen unbekannt → ohne SL mit Grund."""
+    und WD-Hedge, Daily Loss ab Tagesstart bei Apex). Topstep Express (TX2, 10.11.2026): Liq = MLL aus TopstepX (wd_sl_express_mll) + 100 $ wie der WD-Hedge,
+    Balance 0-basiert wie TopstepX (wd_sl_balance) — fehlt eins davon → ohne SL mit Grund."""
     if not regel:
         return None
     if not acc:
         return wd_sl_wuerfeln(regel, None, rnd=rnd, grund="Konto-Daten nicht lesbar — Puffer unbekannt")
     if ist_topstep_express(acc):
-        return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd,
-                              grund="Topstep Express — Liq ist die MLL aus TopstepX, beim Planen unbekannt")
+        mll, mll_text = wd_sl_express_mll(acc, fruehere)
+        if mll is None:
+            return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund=mll_text)
+        bal, bal_grund = wd_sl_balance(acc, fruehere, null_basiert=True)
+        if bal is None:
+            return wd_sl_wuerfeln(regel, None, rnd=rnd, grund=bal_grund)
+        liq = round(mll + TX2_MLL_VOR, 2)
+        w = wd_sl_wuerfeln(regel, round(bal - liq, 2), bal, liq, rnd=rnd,
+                           grund=f"Topstep Express — Balance {bal:,.2f} $ an/unter MLL + 100 ({liq:,.2f} $)".replace(",", "X").replace(".", ",").replace("X", "."))
+        if isinstance(w, dict):
+            w["liq_quelle"] = mll_text
+        return w
     # Prüfer WS1a: ohne geladene liq_regeln fiele die Rechnung auf Größe + 100 zurück — bei Apex läge der SL dann hinter dem Daily Loss
     if not liq_regeln:
         return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund="liq_regeln nicht geladen — Puffer unbekannt")
@@ -12781,7 +12842,7 @@ def _wd_sl_kontext(mids):
 #    Plan nach dem Claim frisch aus der DB, Echo nimmt die Claim-Zeile.
 #  - nur Pläne mit Start ≥ WD_SL_NACH_VORLAUF_S entfernt (Polster; Ketten-WDs können vor ihrer Zeit starten, dort hält der Claim-Guard)
 #  - Konto-/Liq-Daten nicht lesbar → in diesem Takt nichts schreiben (nächster Takt versucht es wieder); Rechenfehler → ohne SL mit Grund, nie stoppen
-#  - Recoverer / Tradeify-Ausgleich würfeln nicht (wie der POST-Weg), Topstep Express ohne SL mit Grund (wd_sl_fuer_plan); Würfel aus → nichts
+#  - Recoverer / Tradeify-Ausgleich würfeln nicht (wie der POST-Weg), Topstep Express seit TX2 mit MLL aus TopstepX, ohne Lesung ohne SL mit Grund (wd_sl_fuer_plan); Würfel aus → nichts
 WD_SL_RUECKFALL_GRUND = "Rückfall ohne Würfel"
 WD_SL_NACH_VORLAUF_S = 120
 WD_SL_NACH_TAKT_S = (45.0, 75.0)
@@ -13221,7 +13282,8 @@ def _wd_fruehere_trades(acc_ids):
         for i in range(0, len(ids), 80):
             # started_at + bal_start seit 30.09.2026 für liq_tagesstart (Tagesstart-Balance je CME-Handelstag)
             out += _sb_all("trade_plans", {"select": "id,master_account_id,ended_at,started_at,bal_end:mt5_baseline->final->balance_end,"
-                                                     "bal_start:mt5_baseline->tv->balance_start",
+                                                     "bal_start:mt5_baseline->tv->balance_start,"
+                                                     "mll_start:mt5_baseline->tv->mll_start",   # TX2 (10.11.2026): TopstepX-MLL je Start für den Express-Zufalls-SL
                                            "master_account_id": f"in.({','.join(ids[i:i + 80])})", "ended_at": f"gte.{seit}"})
     except Exception as e:
         print(f"[wd-heute] ⚠️ frühere Trades: {type(e).__name__}: {e}", flush=True)

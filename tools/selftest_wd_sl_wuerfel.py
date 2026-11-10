@@ -16,14 +16,14 @@ APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_cme_handelstag", "_wd_level", "_wd_konto_groesse", "liq_konto_groesse", "ist_topstep_express", "plan_balance_relativ",
               "plan_ist_wd", "plan_ist_apex_hedge", "ah_dll_balance", "liq_regel_waehlen", "liq_stufe", "_liq_de", "liq_aus_regel", "liq_tagesstart",
               "liq_boden_kernwerte", "liq_konto_boden", "_liq_pl_de", "liq_kw_daily", "liq_regel_felder", "hf_wd_master_verlust",
-              "_wd_sl_std", "wd_sl_wuerfel_regel", "wd_sl_wuerfeln", "wd_sl_balance", "wd_sl_fuer_plan")
+              "_wd_sl_std", "wd_sl_wuerfel_regel", "wd_sl_wuerfeln", "wd_sl_balance", "wd_sl_express_mll", "wd_sl_fuer_plan")
 
 
 def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "json": json, "random": random, "datetime": datetime, "timezone": timezone,
           "_firm_norm": lambda n: (n or "").strip() or "—"}
-    for k in ("MODELL_NAME", "LT_WD_BLOW_PLUS"):
+    for k in ("MODELL_NAME", "LT_WD_BLOW_PLUS", "TX2_MLL_VOR"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     i = src.index("\nWD_SL_WUERFEL_STD = ")
     exec(src[i:src.index("\n\n\ndef _wd_sl_std(", i)], ns)
