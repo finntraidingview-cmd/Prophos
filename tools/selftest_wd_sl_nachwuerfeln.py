@@ -4,8 +4,11 @@ Server-Würfel (app.py wd_sl_nach_kandidat / wd_sl_nach_rechnen / wd_sl_nach_tic
 DB-Aufrufe sind nachgebaut. Prüft Kandidaten, Recoverer/Ausgleich/Topstep Express, ein einziges Update mit Guards (Claim, updated_at, Rückfall-Grund), andere
 Baseline-Schlüssel bleiben, Lesefehler = nichts schreiben, Würfel aus = nichts, und dass der PC-Tab beim Start die frische Zeile nimmt.
 Aufruf: python3 tools/selftest_wd_sl_nachwuerfeln.py"""
+import json
 import os
 import random
+import subprocess
+import tempfile
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -67,6 +70,10 @@ def main():
     check(not K(plan(status="open"), JETZT) and not K(plan(notes="Hand"), JETZT), "nicht geplant oder kein Farmer-Plan → nie")
     check(not K(plan(mt5_baseline={"wd_sl": dict(RUECK, grund="gewürfelt: ohne SL")}), JETZT) and not K(plan(mt5_baseline={}), JETZT),
           "schon gewürfelt oder ohne wd_sl → nie (kein zweiter Würfel)")
+    # Prüfer S2 (MUSS): Sperr-Marke eines laufenden Hand-/Fern-Starts
+    check(not K(plan(mt5_baseline={"wd_sl": dict(RUECK), "sl_lauf_at": (JETZT - timedelta(minutes=5)).isoformat()}), JETZT)
+          and K(plan(mt5_baseline={"wd_sl": dict(RUECK), "sl_lauf_at": (JETZT - timedelta(minutes=31)).isoformat()}), JETZT),
+          "frische Sperr-Marke sl_lauf_at (Hand-/Fern-Start läuft) → nie; älter als 30 min (abgebrochen) → wieder Kandidat")
 
     print("2) Rechnen wie der POST-Weg")
     R = ns["wd_sl_nach_rechnen"]
@@ -158,6 +165,11 @@ def main():
     check(len(DB["upd"]) == 400 and 160 <= e["gewuerfelt"] <= 240 and e["gewuerfelt"] + e["ohne"] == 400,
           f"Verteilung wie WS1: ≈ 50 % mit SL ({e['gewuerfelt']} von 400)")
 
+    DB["upd"].clear()
+    DB["plaene"] = [plan(mt5_baseline={"wd_sl": dict(RUECK), "sl_lauf_at": (JETZT - timedelta(seconds=20)).isoformat()})]
+    e = T(JETZT, rnd=Folge(0.59, 0.53))
+    check(not DB["upd"] and not e["geaendert"], "Takt: Plan mit frischer Sperr-Marke bleibt unberührt")
+
     print("4) Einbau + Annahmen am PC-Tab")
     check("_wd_sl_nach_takt()                    # SL1" in src and "random.uniform(*WD_SL_NACH_TAKT_S)" in src,
           "Takt in ap_loop, Abstand gestreut (Jitter-Regel)")
@@ -172,6 +184,73 @@ def main():
     j = src.index("if sl_gewuerfelt:")
     check('_ws.get("regel") == "sl_wuerfel"' in src[j - 900:j] and 'upd.pop("master_sl", None)' in src[j:j + 200],
           "PATCH /admin/wd-plaene (Tab-Nachziehen) löscht einen nachgewürfelten master_sl nie (wd_sl.regel sl_wuerfel)")
+
+    print("5) PC-Tab: Sperr-Marke vor dem Senden (Prüfer S2 MUSS, 10.11.2026)")
+    i0 = html.index("async function tpOrbitStartenKern(")
+    k_ende = html.index("\n  async function ", i0 + 10)
+    kern = html[i0:k_ende]
+    # das frühere _tpOrbitLaeuft der Topstep-Probe „nur lesen“ (scharf:false, keine Order) zählt nicht — geprüft wird der scharfe Weg
+    a = kern.find("await wdSlStartSperre(plan)")
+    b = kern.find("_tpOrbitLaeuft = true", a)
+    probe = kern.find("scharf: false")
+    check(0 < probe < kern.find("slaveBereitPruefen(plan)") < a < b < kern.find("const _tvBody") < kern.find("window.mtcApi('tsx-konto'", b)
+          and kern.count("scharf: true") == kern[a:].count("scharf: true") >= 1
+          and "sl = sp.sl" in kern[a:b] and "_nichtGesendet: true" in kern[a:b],
+          "Orbit/Topstep: Sperre nach allen Vorprüfungen, vor _tpOrbitLaeuft und vor jedem Senden; SL aus der frischen Zeile; Fehler = nichts gesendet")
+    j0 = html.index("async function tpPreflightMt5V2(plan)")
+    v2 = html[j0:html.index("\n  // REIN RECHNEND (window._mt5OrderWiederholen", j0)]
+    a2 = v2.find("await wdSlStartSperre(plan)")
+    check(0 < a2 < v2.find("sfSendetHier(plan.id)") < v2.find("master-order?file=") and "po.sl_usd = sp.sl > 0 ? sp.sl : null" in v2[a2:a2 + 1200],
+          "Echo V2: Sperre vor sfSendetHier/master-order, SL der Order aus der frischen Zeile")
+    check("if(planWdSlUsd(plan) > 0 || wdSlIstRueckfall(plan)) delete upd.master_sl; else upd.master_sl = null" in html,
+          "Order-Panel speichern: Rückfall im Speicher → master_sl nicht anfassen (Hinweis S2)")
+    jsc = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc"
+    if os.path.exists(jsc):
+        f0 = html.index("  const WD_SL_RUECKFALL_GRUND = ")
+        fn = html[f0:html.index("  window._wdSlStartSperre = ", f0)]
+        js = """
+var LOG = [], DBROW = null, MARKE_FEHLT = false, tradePlans = [{ id: 'p-1', masterSl: null }];
+function tpIstWdPlan(p){ return !!p.wd }
+async function baselinePatch(id, patch, st){ LOG.push(['marke', id, Object.keys(patch).join(','), st]); if(MARKE_FEHLT) throw new Error('rpc weg'); return {} }
+var supabase = { from: function(t){ return { select: function(){ return { eq: function(){ return { maybeSingle: async function(){ LOG.push(['lesen']); return { data: DBROW, error: null } } } } } } } } };
+function rowToPlan(r){ return { id: r.id, status: r.status, masterSl: r.master_sl, mt5Baseline: r.mt5_baseline } }
+""" + fn + """
+var R = { grund: 'Rückfall ohne Würfel' }, erg = {};
+(async function(){
+  erg.nichtWd = await wdSlStartSperre({ id: 'p-1', wd: false, mt5Baseline: { wd_sl: R } });
+  erg.gewuerfelt = await wdSlStartSperre({ id: 'p-1', wd: true, mt5Baseline: { wd_sl: { grund: 'gewürfelt: ohne SL' } } });
+  erg.logLeer = LOG.length;
+  DBROW = { id: 'p-1', status: 'planned', master_sl: 2280, mt5_baseline: { wd_sl: { usd: 2280 } } };
+  erg.rueck = await wdSlStartSperre({ id: 'p-1', wd: true, mt5Baseline: { wd_sl: R } });
+  erg.log = LOG.slice(); erg.tp = tradePlans[0].masterSl;
+  LOG = []; MARKE_FEHLT = true;
+  erg.markeWeg = await wdSlStartSperre({ id: 'p-1', wd: true, mt5Baseline: { wd_sl: R } }); erg.logMarkeWeg = LOG.slice();
+  MARKE_FEHLT = false; DBROW = { id: 'p-1', status: 'open', master_sl: 2280, mt5_baseline: {} };
+  erg.offen = await wdSlStartSperre({ id: 'p-1', wd: true, mt5Baseline: { wd_sl: R } });
+  erg.rueckOhne = await (async function(){ DBROW = { id: 'p-1', status: 'planned', master_sl: null, mt5_baseline: {} }; return wdSlStartSperre({ id: 'p-1', wd: true, mt5Baseline: { wd_sl: R } }) })();
+  print(JSON.stringify(erg, function(k, v){ return k === 'plan' ? undefined : v }));
+})().catch(function(e){ print('FEHLER ' + e) });
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as t:
+            t.write(js)
+        aus = subprocess.run([jsc, t.name], capture_output=True, text=True, timeout=30).stdout.strip()
+        os.unlink(t.name)
+        try:
+            e = json.loads(aus.splitlines()[-1])
+        except Exception:
+            e = {}
+            print("    jsc:", aus[:300])
+        check(e.get("nichtWd", {}).get("ohneSperre") and e.get("gewuerfelt", {}).get("ohneSperre") and e.get("logLeer") == 0,
+              "JS wdSlStartSperre: kein WD bzw. schon gewürfelt → keine Marke, kein Lesen (alle anderen Starts unverändert)")
+        check(e.get("rueck", {}).get("ok") and e["rueck"].get("sl") == 2280 and e.get("tp") == 2280
+              and e.get("log") == [["marke", "p-1", "sl_lauf_at", "planned"], ["lesen"]],
+              "JS: Rückfall-WD → erst Marke (nur planned), DANN frisch lesen; SL 2.280 aus der DB, Plan im Speicher ersetzt")
+        check(e.get("markeWeg", {}).get("ok") is False and e.get("logMarkeWeg") == [["marke", "p-1", "sl_lauf_at", "planned"]],
+              "JS: Marke scheitert → nicht senden, nichts gelesen")
+        check(e.get("offen", {}).get("ok") is False and e.get("rueckOhne", {}).get("ok") and e["rueckOhne"].get("sl") == 0,
+              "JS: Plan nicht mehr geplant → nicht senden; nicht nachgewürfelt → Order ohne SL wie bisher")
+    else:
+        print("  · jsc nicht vorhanden — JS-Funktionstest übersprungen")
 
     print()
     print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")

@@ -46376,6 +46376,30 @@
     return usd > 0 ? usd : null
   }
   window._planWdSlUsd = planWdSlUsd   // Test-Haken
+  /* SL1-NACHZUG (Prüfer S2 10.11.2026): Railway würfelt Rückfall-Pläne der Tabs nach (app.py wd_sl_nach_tick: wd_sl „Rückfall ohne Würfel“, nicht geclaimt).
+   * Ein Start OHNE Claim (Karten-Klick, Fern-Signal, „Neu starten“) setzt bis zum Senden keine DB-Marke — würfelte Railway genau dann, schickte Puls die alten
+   * Werte (ohne SL), die DB hätte aber master_sl + wd_sl.usd, und der Hedge-Wächter stellte Fusion auf das Würfel-Level (Master ohne SL, Hedge zu).
+   * Darum vor dem Senden: Sperr-Marke mt5_baseline.sl_lauf_at schreiben (Railway lässt Pläne mit frischer Marke aus; ein Würfel, der die Zeile vorher gelesen
+   * hat, scheitert an seinem updated_at-Guard), DANACH den Plan frisch lesen und den SL von dort nehmen. Nur bei WD-Plänen, deren wd_sl noch der Rückfall ist —
+   * alle anderen Starts bleiben unverändert. Marke oder Lesen scheitern → nicht senden (nichts gesendet, erneut starten).
+   * → { ok, plan, sl } (sl = frischer master_sl oder 0) | { ok: true, ohneSperre: true } | { ok: false, grund } */
+  const WD_SL_RUECKFALL_GRUND = 'Rückfall ohne Würfel'
+  function wdSlIstRueckfall(p){
+    const b = p && (p.mt5Baseline || p.mt5_baseline), w = b && typeof b === 'object' ? b.wd_sl : null
+    return !!(w && typeof w === 'object' && w.grund === WD_SL_RUECKFALL_GRUND)
+  }
+  async function wdSlStartSperre(plan){
+    if(!plan || !(typeof tpIstWdPlan === 'function' && tpIstWdPlan(plan)) || !wdSlIstRueckfall(plan)) return { ok: true, ohneSperre: true }
+    try{ await baselinePatch(plan.id, { sl_lauf_at: new Date().toISOString() }, 'planned') }
+    catch(e){ return { ok: false, grund: 'Sperr-Marke für den Zufalls-SL nicht gesetzt (' + String((e && e.message) || e).slice(0, 80) + ')' } }
+    let row = null
+    try{ const { data, error } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle(); if(error) throw error; row = data || null }
+    catch(e){ return { ok: false, grund: 'Plan nach der Sperr-Marke nicht lesbar' } }
+    if(!row || row.status !== 'planned') return { ok: false, grund: 'Plan ist nicht (mehr) „Geplant“' }
+    const frisch = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch
+    return { ok: true, plan: frisch, sl: Number(frisch.masterSl) > 0 ? Number(frisch.masterSl) : 0 }
+  }
+  window._wdSlStartSperre = wdSlStartSperre; window._wdSlIstRueckfall = wdSlIstRueckfall   // Test-Haken
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
   let _recKonto = null
   function recovererZeichnen(){
@@ -55067,6 +55091,20 @@
     // es später eben keine Übernahme, sicher)
     if(vorherP){ try{ await Promise.race([vorherP, new Promise(r => setTimeout(r, 5000))]) }catch(_){} }
     if(!offenUndMeiner()) return
+    // SL1-Nachzug (Prüfer S2 10.11.2026, s. wdSlStartSperre): Rückfall-WD auf Echo V2 → Sperr-Marke, dann SL frisch aus der DB in die Order
+    { const sp = await wdSlStartSperre(plan)
+      if(!sp.ok){
+        _pfSet('v2order', 'err', escapeHtml(sp.grund + ' — nichts gesendet.'))
+        _pfRemoteMelde(plan.id, { ok:false, retry_ok: true, msg: sp.grund + ' — nichts gesendet, Plan bleibt Geplant.' })
+        abschluss(false, '✗ Nichts platziert — ' + sp.grund + '. „Erneut versuchen" startet neu.', true)
+        return
+      }
+      if(!sp.ohneSperre){
+        plan = sp.plan
+        const slAlt = Number(po.sl_usd) > 0 ? Number(po.sl_usd) : 0
+        if(sp.sl !== slAlt){ console.warn('[wd-sl] Echo V2: SL eben nachgewürfelt —', slAlt, '→', sp.sl, plan.id); po.sl_usd = sp.sl > 0 ? sp.sl : null }
+      }
+    }
     _tpPendingOrder = null
     if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)){
       _pfRemoteHook.armed = true
@@ -57531,7 +57569,8 @@
     if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
     if((typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)){
       // Winning Days: nie ein SL (25.09.2026) — außer der Planer hat ihn gewürfelt (WS1b-Nachzug 09.11.2026): dann bleibt master_sl unangetastet
-      if(planWdSlUsd(plan) > 0) delete upd.master_sl; else upd.master_sl = null
+      // SL1-Nachzug (Prüfer-Hinweis S2 10.11.2026): steht im Speicher noch der Rückfall, kann Railway inzwischen nachgewürfelt haben — dann master_sl gar nicht anfassen
+      if(planWdSlUsd(plan) > 0 || wdSlIstRueckfall(plan)) delete upd.master_sl; else upd.master_sl = null
     }
     // Geplante Startzeit (22.09.2026): leer = NULL; eine neue Zeit setzt den Claim zurück.
     const _suVal = document.getElementById('tp-order-start-um')?.value || ''
@@ -57642,7 +57681,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2132'
+  const OS_TAB_BUILD = '2026-09-22.2133'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58517,6 +58556,18 @@
         try{ await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund, vc.checks) }catch(_){}
         await fehler(`✗ Slave-Terminal (Fusion-Copier) nicht bereit — ${vc.grund}. Nichts geklickt, Plan bleibt Geplant. Copier auf diesem PC starten, dann erneut.`)
         return
+      }
+    }
+    // SL1-Nachzug (Prüfer S2 10.11.2026, s. wdSlStartSperre): Rückfall-WD → Sperr-Marke, dann SL frisch aus der DB — Puls und Hedge-Wächter sehen denselben SL
+    { const sp = await wdSlStartSperre(plan)
+      if(!sp.ok){ await fehler(`⛔ ${sp.grund} — nichts gesendet, Plan bleibt Geplant. Bitte erneut starten.`, { ok: false, code: 'wd_sl_sperre', retry_ok: true, _nichtGesendet: true }); return }
+      if(!sp.ohneSperre){
+        plan = sp.plan
+        if(sp.sl !== sl){
+          console.warn('[wd-sl] SL eben nachgewürfelt —', sl, '→', sp.sl, plan.id)
+          sl = sp.sl
+          if(typeof atToast === 'function') atToast(`🎲 „${plan.masterName || '—'}": Zufalls-SL eben nachgewürfelt — Order ${sl > 0 ? 'mit SL ' + sl + ' $' : 'ohne SL'}.`, 'start')
+        }
       }
     }
     _tpOrbitLaeuft = true

@@ -12785,6 +12785,10 @@ def _wd_sl_kontext(mids):
 WD_SL_RUECKFALL_GRUND = "Rückfall ohne Würfel"
 WD_SL_NACH_VORLAUF_S = 120
 WD_SL_NACH_TAKT_S = (45.0, 75.0)
+# Prüfer S2 (10.11.2026, MUSS): ein Start OHNE Claim (Karten-Klick, Fern-Signal, „Neu starten“) setzt bis zum Senden keine DB-Marke. Der Tab schreibt darum vor dem
+# Senden mt5_baseline.sl_lauf_at (prophos.html wdSlStartSperre) und liest danach den SL frisch; solange die Marke jünger als WD_SL_NACH_SPERRE_S ist, würfelt
+# dieser Takt den Plan nicht (ein Lauf, der die Zeile vor der Marke gelesen hat, scheitert an seinem updated_at-Guard). Ältere Marke = abgebrochener Start.
+WD_SL_NACH_SPERRE_S = 1800
 _wd_sl_nach = {"naechster": 0.0, "letztes": None, "fehler": ""}
 
 
@@ -12794,7 +12798,7 @@ def _wd_sl_ohne(grund):
 
 def wd_sl_nach_kandidat(p, jetzt):
     """REIN RECHNEND (testbar): darf SL1 diesen Plan nachwürfeln? Farmer-Plan, geplant, nie geclaimt/gestartet/gesendet, wd_sl noch der Tab-Rückfall,
-    Start mindestens WD_SL_NACH_VORLAUF_S entfernt."""
+    keine frische Sperr-Marke sl_lauf_at eines laufenden Hand-/Fern-Starts, Start mindestens WD_SL_NACH_VORLAUF_S entfernt."""
     p = p or {}
     bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     ws = bl.get("wd_sl") if isinstance(bl.get("wd_sl"), dict) else {}
@@ -12802,6 +12806,9 @@ def wd_sl_nach_kandidat(p, jetzt):
         return False
     if p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
         return False
+    lauf = _ap_ts(bl.get("sl_lauf_at"))
+    if lauf and (jetzt - lauf).total_seconds() < WD_SL_NACH_SPERRE_S:
+        return False                                 # ein Hand-/Fern-Start läuft gerade (Sperr-Marke des Tabs)
     st = _ap_ts(p.get("start_um"))
     return bool(st and (st - jetzt).total_seconds() >= WD_SL_NACH_VORLAUF_S)
 
