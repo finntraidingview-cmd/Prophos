@@ -1,3 +1,4 @@
+-- ÜBERHOLT 11.11.2026 (FS2 K3): NICHT einspielen — ersetzt durch sql/2026-11-11_fs2_k3_wartet.sql (gleiche Views, mehr Warte-Gründe).
 -- 2026-11-10 — FS1 Zählung (Master nach FS1; Finn: „Ich will die Ursache fixen, damit ich nicht jeden Tag wieder zehn Fehlstarts habe.“)
 -- Big-Trade-Warten ist kein Fehlstart: Puls bleibt im Konto, weil der Big Trade dieses PCs nah an TP/Liq steht (Regel puls_heim_regel), nichts gesendet,
 -- der Plan startet später (FS1: 19 von 21 Plänen in 7 Handelstagen, im Schnitt 68 min später). Bisher zählten diese Zeilen in puls_fehler_muster
