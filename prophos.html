@@ -46191,14 +46191,19 @@
         const kz = _k1.cache[String(acc.id)] && _k1.cache[String(acc.id)].d
         // ZV1b (Master 10.11.2026): Grenze = Anfrage-Tag (payout.anfrage = requested_at, nur pending/received — app.py kz_payouts), genau wie wd_zyklus_stand,
         // damit die Nummer mit Radar/Recoverer übereinstimmt; Buchungen und managed_payouts desselben Payouts tragen kein „anfrage“ → keine zweite Grenze
-        const anfAlle = ((kz && Array.isArray(kz.payouts)) ? kz.payouts : []).map(x => String(x && x.anfrage || '').slice(0, 10)).filter(t => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort()
+        // ZV1c (Master 10.11.2026): Funded CFD wie der Funded-CFD-Planer (fcp_zyklus_start / fcp_payouts_zaehlen: jede Anfrage, managed_payouts, freie Buchungen,
+        // Berliner Tag → payout.fcp); alle anderen Kontoarten wie wd_zyklus_stand (payout.anfrage)
+        const cfd = String(acc.type || '').toLowerCase() === 'funded_cfd', grenzFeld = cfd ? 'fcp' : 'anfrage'
+        const anfAlle = ((kz && Array.isArray(kz.payouts)) ? kz.payouts : []).map(x => String(x && x[grenzFeld] || '').slice(0, 10)).filter(t => /^\d{4}-\d{2}-\d{2}$/.test(t)).sort()
         const grenzen = [...new Set(anfAlle)]
         // Nummer wie wd_zyklus_stand (nr = Anfragen + 1, ohne Entdoppeln): zwei Anfragen am selben Tag zählen doppelt, der Abschnitt bleibt einer
         const nrVon = z => z ? anfAlle.filter(a => a <= grenzen[z - 1]).length + 1 : 1
         if(!items.length || !grenzen.length){ actEl.innerHTML = items.length ? items.map(zeile).join('') : leer; return binden() }
         // Tag wie wd_zyklus_stand: Berliner Kalendertag des Starts (started_at, sonst Ende), Buchungen ihr Datum — ein Trade AM Anfrage-Tag zählt zum alten Zyklus
         const tagVon = d => { const x = new Date(d); return d && isFinite(x) ? x.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }) : '' }
-        const itemTag = it => it.type === 'trade' ? (it.obj.startedAt || it.obj.endedAt || it.obj.completedAt || it.date) : it.date
+        // Funded CFD: Tag des Trade-ENDES wie die Zyklus-Gewinne des Planers (fcp_gewinne / fcp_tage_zyklus: ended_at, sonst completed_at, sonst started_at);
+        // sonst Start wie wd_zyklus_stand
+        const itemTag = it => it.type === 'trade' ? (cfd ? (it.obj.endedAt || it.obj.completedAt || it.obj.startedAt || it.date) : (it.obj.startedAt || it.obj.endedAt || it.obj.completedAt || it.date)) : it.date
         const zyklusVon = it => { const t = tagVon(itemTag(it)); return t ? grenzen.filter(g => t > g).length : grenzen.length }   // ohne Datum: laufender Zyklus
         const ttmm = g => g.slice(8, 10) + '.' + g.slice(5, 7) + '.'
         const geldZ = (v, ccy) => { const r = Math.round(v); return `${r >= 0 ? '+' : '−'}${ccy === '$' ? '$' : ''}${Math.abs(r).toLocaleString('de-DE')}${ccy !== '$' ? ' ' + ccy : ''}` }
@@ -58133,7 +58138,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2155'
+  const OS_TAB_BUILD = '2026-09-22.2156'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

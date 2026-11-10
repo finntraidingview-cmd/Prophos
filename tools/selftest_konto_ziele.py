@@ -219,7 +219,7 @@ check(o["urteil"]["ok"] is False and "Winning Days" in o["urteil"]["grund"] and 
 # ── K2 (Finn 05.11.2026): Payout-Verlauf, „Payout ab" nur CFD ──
 c = ctx_fuer(TX)
 o = ergebnisse["winning_days_tradeify"] = ruf("kz_rechnen", TX, c)
-check(o["payouts"] == [{"datum": "2026-10-30", "betrag": 3633.0, "waehrung": "EUR", "status": "erhalten", "anfrage": "2026-10-30"}], f"Tradeify WD …3058: Payout-Verlauf = Buchung 30.10. 3.633 € erhalten, ZV1b-Grenze 30.10. ({o['payouts']})")
+check(o["payouts"] == [{"datum": "2026-10-30", "betrag": 3633.0, "waehrung": "EUR", "status": "erhalten", "anfrage": "2026-10-30", "fcp": "2026-10-30"}], f"Tradeify WD …3058: Payout-Verlauf = Buchung 30.10. 3.633 € erhalten, ZV1b-/ZV1c-Grenze 30.10. ({o['payouts']})")
 check(not any(c_[1] == "Payout ab" for c_ in o["urteil"]["checks"]), "Futures/WD: keine Zeile „Payout ab“ (gibt es nur bei CFD), obwohl payout_ready_at gesetzt ist")
 check(o["zyklus"]["nr"] == 2, f"Tradeify WD: Zyklus 2 nach dem Payout ({o['urteil']['sub']})")
 bg_r = ruf("kz_rechnen", dict(BG, payout_ready_at="2026-11-20"), ctx_fuer(BG))
@@ -233,6 +233,18 @@ check([x.get("anfrage") for x in pv] == ["2026-11-01", "2026-10-20", "2026-10-10
       f"ZV1b kz_payouts: Zyklusgrenze „anfrage“ = requested_at an Anfragen (auch erhalten), freie Buchung ihr Tag, verknüpfte Buchung keine, verbucht keine ({[x.get('anfrage') for x in pv]})")
 pv2 = ruf("kz_payouts", [{"id": "p3", "amount": 1, "requested_at": "2026-10-01", "status": "rejected"}], [], [])
 check("anfrage" not in pv2[0], "ZV1b kz_payouts: abgelehnte Anfrage ist keine Zyklusgrenze (wie wd_zyklus_stand)")
+# ZV1c: Funded CFD — „fcp“ je Eintrag ergibt genau fcp_zyklus_start (Tag nach dem jüngsten) und fcp_payouts_zaehlen (Anzahl)
+_p3 = [{"id": "q1", "account_id": "k", "amount": 1, "requested_at": "2026-10-01", "status": "rejected"},
+       {"id": "q2", "account_id": "k", "amount": 1, "requested_at": "2026-10-10", "received_at": "2026-10-14", "status": "received", "received_tx_id": "b1"},
+       {"id": "q3", "account_id": "k", "amount": 1, "created_at": "2026-11-02T22:30:00+00:00", "status": "pending"}]
+_v3 = [{"id": "m1", "account_id": "k", "amount": 1, "payout_date": "2026-09-03"}, {"id": "m2", "account_id": "k", "amount": 1, "created_at": "2026-08-20T10:00:00+00:00"}]
+_b3 = [{"id": "b1", "account_id": "k", "amount": 1, "occurred_at": "2026-10-14T09:00:00+00:00"}, {"id": "b2", "account_id": "k", "amount": 1, "occurred_at": "2026-10-20T23:30:00+00:00"}]
+_pv3 = ruf("kz_payouts", _p3, _v3, _b3)
+_f3 = sorted(x["fcp"] for x in _pv3 if x.get("fcp"))
+_start = ruf("fcp_zyklus_start", _p3, _v3, _b3).get("k")
+_naechst = (datetime.strptime(_f3[-1], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+check(_f3 == ["2026-08-20", "2026-09-03", "2026-10-01", "2026-10-10", "2026-10-21", "2026-11-02"] and _naechst == _start and len(_f3) == ruf("fcp_payouts_zaehlen", _p3, _v3, _b3).get("k"),
+      f"ZV1c kz_payouts „fcp“: alle Anfragen (auch abgelehnt), managed, freie Buchung, verknüpfte nicht, Berliner Tag (20.10. 23:30 UTC = 21.10. Berlin) = fcp_zyklus_start {_start} / Anzahl ({_f3})")
 check(ruf("kz_rechnen", TF, ctx_fuer(TF) | {"payouts": None})["payouts"] is None, "Challenge: kein Payout-Verlauf")
 
 # ── Fremd-Review K1: Randfälle ──
