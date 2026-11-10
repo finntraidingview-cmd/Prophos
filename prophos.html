@@ -4198,6 +4198,8 @@
   #e3-einst .e3-tt-konto{display:inline-flex;align-items:center;gap:4px;background:var(--e3-lila-bg);color:var(--e3-lila);border-radius:999px;padding:2px 4px 2px 9px;font-size:12px}
   #e3-einst .e3-tt-konto button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:0 4px;line-height:1}
   #e3-einst .e3-tt-sp select.e3-in{width:100%;max-width:100%}
+  #e3-einst .e3-tt-warn{font-size:12px;color:var(--danger);margin:2px 0 8px}
+  #e3-einst .e3-tt-warn[hidden]{display:none}
   #e3-einst .e3-tt-hinweis{font-size:12px;color:var(--e3-sub);margin:-4px 0 10px}
   @media (max-width:1180px){#e3-einst .e3-tt-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
   @media (max-width:640px){#e3-einst .e3-tt-grid{grid-template-columns:1fr}}
@@ -58290,7 +58292,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2165'
+  const OS_TAB_BUILD = '2026-09-22.2166'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -91926,7 +91928,7 @@
    * erscheinen, sobald das Backend tagesteilung_gruppen [{gruppe_id, name, an}] liefert (Feld „gruppen" = Liste der gruppe_id). */
   const TT_STD = { an: false, firmen: ['tradeify', 'lucidtrading', 'topstep', 'fundednext', 'fundingpips', 'the5ers', 'ftmo', 'blueguardian', 'tradeifycfd'],
     anteile: [80, 12, 6, 2], haupt_pct: [70, 90], neben_pkt: [10, 25], neben_sl_faktor: [1, 2], neben_menge_max: 0.5, min_tp_usd: 300,
-    abstand_min: [1, 180], schluss_pct: [5, 10], schluss_min: [2, 120], nur_konten: [], test_n: null }
+    abstand_min: [1, 180], schluss_pct: [5, 10], schluss_min: [2, 120], nur_konten: [], test_n: null, test_ids: [] }
   const TT_ART = { futures: 'Futures', topstep: 'Topstep', cfd: 'CFD' }
   function ttFirmen(D, tt){
     if(Array.isArray(D.tagesteilung_firmen)) return D.tagesteilung_firmen.filter(f => f && f.key)
@@ -91974,25 +91976,34 @@
         return darf ? `<label><input type="checkbox" data-e3-ort="tt" data-e3-pfad='["gruppen"]' data-e3-i="${e3E(g.gruppe_id)}" data-e3-alt="${c ? 1 : 0}"${c ? ' checked' : ''}>${e3E(g.name || '?')}</label>`
           : `<label>${c ? '✓' : '·'} ${e3E(g.name || '?')}</label>` }).join('')}</div>`
       : `<div class="e3-tt-bsp">Hermann Technologies · andere Unternehmen bleiben bei 1 Trade am Tag</div>`
-    const nk = Array.isArray(tt.nur_konten) ? tt.nur_konten.map(String) : []
+    // TEST-IDS statt Testkonten (TT1, Finn 11.11.2026: „Nein, ich will keine Testkonten mehr. Ich will jetzt Test-IDs“ + „erstmal nur für Echo-Konten“):
+    // Häkchen je HT-Planer-ID (GET …/einstellungen → tagesteilung_ids). Angehakt → nur die Echo-Konten (Challenge CFD, Firma angehakt) dieser IDs werden
+    // geteilt, alle anderen IDs bleiben bei 1 Trade. Die Zahl Echo-Konten je ID zeichnet ttIdsZeichnen aus /konten-stand nach.
+    const nk = Array.isArray(tt.nur_konten) ? tt.nur_konten.map(String) : []   // nur noch für den Hinweis unten (Weg entfällt)
+    const ti = Array.isArray(tt.test_ids) ? tt.test_ids.map(String) : []
+    const il = Array.isArray(D.tagesteilung_ids) && D.tagesteilung_ids.length ? D.tagesteilung_ids.filter(x => x && x.user_id) : ti.map(u => ({ user_id: u, name: null, an: true }))   // Nicht-Admin bekommt [] → gesetzte IDs trotzdem zeigen
+    const idName = x => x.name || ('…' + String(x.user_id).slice(-6))
     const testN = ['1', '2', '3', '4'].includes(String(tt.test_n)) ? String(tt.test_n) : ''   // nur 1–4, sonst „gewürfelt" (kein Dauer-„geändert")
-    const testH = darf ? `<input type="hidden" data-e3-ort="tt" data-e3-pfad='["nur_konten"]' data-e3-alt="${e3E(JSON.stringify(nk))}" value="${e3E(JSON.stringify(nk))}">
-        <div class="e3-tt-chips" data-e3-tt-konten></div>
-        <select class="input e3-in" data-e3-tt-konto-neu aria-label="Testkonto hinzufügen"></select>`
-      : `<div class="e3-tt-chips">${nk.length ? nk.map(id => `<span class="e3-tt-konto">${e3E(ttKontoName(id))}</span>`).join('') : '<span class="e3-tt-bsp">alle Konten der Firmen</span>'}</div>`
+    const testH = darf ? `<div class="e3-tt-chips" data-e3-tt-ids>${il.length ? il.map(x => { const c = ti.includes(String(x.user_id))
+        return `<label${x.im_planer === false ? ' title="nicht mehr im Challenge-Planer"' : ''}><input type="checkbox" data-e3-ort="tt" data-e3-pfad='["test_ids"]' data-e3-i="${e3E(x.user_id)}" data-e3-alt="${c ? 1 : 0}"${c ? ' checked' : ''}>${e3E(idName(x))} <small data-e3-tt-idn="${e3E(x.user_id)}"></small></label>` }).join('')
+        : '<span class="e3-tt-bsp">keine ID im Challenge-Planer</span>'}</div>`
+      : `<div class="e3-tt-chips">${ti.length ? il.filter(x => ti.includes(String(x.user_id))).map(x => `<span class="e3-tt-konto">${e3E(idName(x))}</span>`).join('') : '<span class="e3-tt-bsp">keine — alle Konten der angehakten Firmen</span>'}</div>`
+    // alter Testkonten-Eintrag (nur_konten, Test 10.11.): der Weg ist raus — ohne Test-IDs sperrt er nur (es wird nichts geteilt), Speichern der Test-IDs leert ihn
+    const altH = nk.length && !ti.length ? `<div class="e3-tt-bsp">Noch ${nk.length} alte${nk.length === 1 ? 's' : ''} Testkonto${nk.length === 1 ? '' : 'en'} eingetragen — solange keine Test-ID gespeichert ist, wird nichts geteilt</div>` : ''
     const testNH = darf ? `<select class="input e3-in" data-e3-ort="tt" data-e3-pfad='["test_n"]' data-e3-alt="${e3E(testN)}" aria-label="Feste Anzahl">${[['', 'gewürfelt'], ['1', '1 Trade'], ['2', '2 Trades'], ['3', '3 Trades'], ['4', '4 Trades']].map(([k, t]) => `<option value="${k}"${k === testN ? ' selected' : ''}>${t}</option>`).join('')}</select>`
       : e3E(testN ? testN + ' Trades' : 'gewürfelt')
     const wo = `<div class="e3-tt-chips">${firmenH || '<span class="e3-tt-bsp">keine Firma</span>'}</div>
       <div class="e3-block-t">Unternehmen</div>${gruppenH}
-      <div class="e3-block-t">Testkonten <i class="e3-info" title="leer = alle Konten der angehakten Firmen. Sonst teilt der Planer NUR diese Konten (Testbetrieb)." tabindex="0">i</i></div>${testH}
-      ${e3R('Anzahl bei Testkonten', testNH, 'nur für Testkonten: Würfel fest auf diese Anzahl (z. B. 3 Trades an einem Testkonto)')}`
+      <div class="e3-block-t">Test-IDs <i class="e3-info" title="Angehakte IDs: nur ihre Echo-Konten (Challenge CFD, Firma angehakt) werden geteilt, alle anderen IDs bleiben bei 1 Trade am Tag. Keine ID angehakt = alle Konten der angehakten Firmen. Mit Test-IDs wirken die Unternehmen-Häkchen nicht (nur Hermann Technologies)." tabindex="0">i</i></div>${testH}${altH}
+      <div class="e3-tt-warn" data-e3-tt-alle hidden>⚠ Keine Test-ID angehakt: Speichern mit „Tag aufteilen“ an teilt ALLE Konten der angehakten Firmen</div>
+      ${e3R('Anzahl bei Test-IDs', testNH, 'nur für Test-IDs: Würfel fest auf diese Anzahl (z. B. 3 Trades je Echo-Konto der Test-ID)')}`
     const schalter = darf ? `<input type="checkbox" class="e3-schalt" data-e3-ort="tt" data-e3-pfad='["an"]' data-e3-alt="${tt.an ? 1 : 0}"${tt.an ? ' checked' : ''} aria-label="Trades pro Tag an">`
       : `<b>${tt.an ? 'an' : 'aus'}</b>`
     const knopf = darf ? `<span class="e3-k4"><span class="e3-msg" data-e3-tt-msg></span><button type="button" class="btn btn-ghost btn-xs" data-e3-tt-speichern>Speichern</button></span>` : ''
     const hinweis = !inDb ? '<div class="e3-tt-hinweis">Vorschau mit dem Standard — änderbar, sobald die Einstellung in der Datenbank steht (SQL).</div>'
       : (D.unternehmen || D.gruppe_sicht) ? '<div class="e3-tt-hinweis">Gilt nur für Hermann Technologies — ändern unter „Hermann Technologies (Standard)“.</div>'
       : D.admin !== true ? '<div class="e3-tt-hinweis">nur ansehen</div>' : ''
-    return `<div class="wd-set-card e3-tt-karte" data-e3-tt>${e3Kopf4('Trades pro Tag', 'Tag in Haupt- und Neben-Trades teilen · CFD + Futures · ohne Apex, Funded, Winning Days', knopf)}${hinweis}
+    return `<div class="wd-set-card e3-tt-karte" data-e3-tt>${e3Kopf4('Trades pro Tag', 'Tag in Haupt- und Neben-Trades teilen · Test-IDs: nur Echo-Konten · ohne Apex, Funded, Winning Days', knopf)}${hinweis}
       <label class="wd-abl-schalter"><span><b>Tag aufteilen</b><small>aus = jeder Tag 1 Trade wie bisher</small></span>${schalter}</label>
       <div class="e3-tt-grid">
         <div class="e3-tt-sp"><div class="e3-block-t">Würfel je Konto und Tag</div>${wuerfel}</div>
@@ -92001,30 +92012,18 @@
         <div class="e3-tt-sp"><div class="e3-block-t">Firmen</div>${wo}</div>
       </div></div>`
   }
-  // Konto-Name für Testkonten aus der Kontoliste der Einstellungen (/konten-stand): „Tradeify 50k …1234 · Jacob", sonst die gekürzte id
-  function ttKontoName(id){
-    const k = (_e3.konten || []).find(x => String(x.id) === String(id))
-    if(!k) return '…' + String(id).slice(-6)
-    const ext = String(k.external_id || '').trim(), f = (_e3.d && (_e3.d.firmen || []).find(x => (x.namen || [])[0] === k.firma)) || null
-    return [f ? e3Name(f) : k.firma, k.groesse ? e3Gr(k.groesse) : '', ext ? '…' + ext.slice(-4) : (k.name || ''), k.user ? '· ' + k.user : ''].filter(Boolean).join(' ')
-  }
-  // Testkonten-Chips + Auswahl aus dem versteckten Feld zeichnen (auch nach e3Neu, das die offene Liste wiederherstellt)
-  function ttKontenZeichnen(karte){
-    const h = karte.querySelector('[data-e3-pfad=\'["nur_konten"]\']'), box = karte.querySelector('[data-e3-tt-konten]'), sel = karte.querySelector('[data-e3-tt-konto-neu]')
-    if(!h || !box || !sel) return
-    let ids = []; try{ ids = JSON.parse(h.value || '[]').map(String) }catch(_){ ids = [] }
-    box.innerHTML = ids.length ? ids.map(id => `<span class="e3-tt-konto">${e3E(ttKontoName(id))}<button type="button" data-e3-tt-konto-weg="${e3E(id)}" aria-label="Testkonto entfernen">×</button></span>`).join('')
-      : '<span class="e3-tt-bsp">alle Konten der angehakten Firmen</span>'
+  // Echo-Konto im Sinn von tt_gilt (app.py): Firmen-Route mt5v2/mt5, ohne Route = mt5v2 (wie tt_planer_haken)
+  function ttEchoFirma(key){ const f = ((_e3.d && _e3.d.firmen) || []).find(x => (x.namen || [])[0] === key); return !!f && (!f.route || f.route === 'mt5v2' || f.route === 'mt5') }
+  // Test-IDs nachzeichnen (TT1): Zahl der Echo-Konten je ID in den angehakten Firmen (/konten-stand, ohne deaktivierte) und die Warnung „gilt für ALLE“
+  function ttIdsZeichnen(karte){
     const an = new Set([...karte.querySelectorAll('[data-e3-pfad=\'["firmen"]\']')].filter(c => c.checked).map(c => c.dataset.e3I))
-    const frei = (_e3.konten || []).filter(k => k && k.id && !ids.includes(String(k.id)) && !k.deaktiviert && (!an.size || an.has(k.firma)))
-      .sort((a, b) => ttKontoName(a.id).localeCompare(ttKontoName(b.id)))
-    sel.innerHTML = `<option value="">＋ Testkonto hinzufügen${(_e3.konten || []).length ? '' : ' (Kontoliste lädt …)'}</option>` + frei.map(k => `<option value="${e3E(k.id)}">${e3E(ttKontoName(k.id))}</option>`).join('')
-    h.classList.toggle('geaendert', e3Geaendert(h))
+    const kn = _e3.konten || [], n = {}
+    kn.forEach(k => { if(k && k.user_id && !k.deaktiviert && ttEchoFirma(k.firma) && (!an.size || an.has(k.firma))) n[k.user_id] = (n[k.user_id] || 0) + 1 })
+    karte.querySelectorAll('[data-e3-tt-idn]').forEach(el => { const z = n[el.dataset.e3TtIdn] || 0; el.textContent = kn.length ? `· ${z} Echo` : '' })
+    const w = karte.querySelector('[data-e3-tt-alle]'), sw = karte.querySelector('[data-e3-pfad=\'["an"]\']')
+    if(w) w.hidden = !(sw && sw.checked && !ttTestIdsAn(karte).length)
   }
-  function ttKontenSetzen(karte, ids){
-    const h = karte.querySelector('[data-e3-pfad=\'["nur_konten"]\']'); if(!h) return
-    h.value = JSON.stringify(ids); ttKontenZeichnen(karte)
-  }
+  const ttTestIdsAn = karte => [...karte.querySelectorAll('[data-e3-pfad=\'["test_ids"]\']')].filter(c => c.checked).map(c => c.dataset.e3I)
   // Geänderte Felder der Karte → {feld: wert} (Spanne/Anteile = alle Felder zusammen, Firmen/Unternehmen = Liste der Häkchen)
   function ttAus(karte){
     const je = new Map()
@@ -92037,8 +92036,7 @@
       if(!x.geaendert) continue
       const e0 = x.els[0]
       if(feld === 'an') body.an = e0.checked
-      else if(feld === 'firmen' || feld === 'gruppen') body[feld] = x.els.filter(c => c.checked).map(c => c.dataset.e3I)
-      else if(feld === 'nur_konten'){ try{ body.nur_konten = JSON.parse(e0.value || '[]') }catch(_){ body.nur_konten = [] } }
+      else if(feld === 'firmen' || feld === 'gruppen' || feld === 'test_ids') body[feld] = x.els.filter(c => c.checked).map(c => c.dataset.e3I)
       else if(feld === 'test_n') body.test_n = zahl(e0.value)
       else if(x.els.length > 1 || e0.dataset.e3I != null){ const w = []; x.els.forEach(el => { w[Number(el.dataset.e3I)] = zahl(el.value) }); body[feld] = w }
       else body[feld] = zahl(e0.value)
@@ -92048,7 +92046,7 @@
   // Vorprüfung im Browser (die eigentliche Prüfung macht das Backend, tt_einst_anwenden) — eine klare Ursache statt eines 400
   function ttPruefen(body){
     for(const [k, v] of Object.entries(body)){
-      if(Array.isArray(v) && !['firmen', 'gruppen', 'nur_konten'].includes(k) && v.some(x => x == null || !isFinite(x))) return `${k}: alle Felder ausfüllen`
+      if(Array.isArray(v) && !['firmen', 'gruppen', 'test_ids'].includes(k) && v.some(x => x == null || !isFinite(x))) return `${k}: alle Felder ausfüllen`
       if(!Array.isArray(v) && typeof v !== 'boolean' && k !== 'test_n' && (v == null || !isFinite(v))) return `${k}: Wert fehlt`
     }
     if(body.anteile){ const s = body.anteile.reduce((a, x) => a + x, 0); if(Math.abs(s - 100) > 0.5) return `Würfel: Summe ${e3Z(s)} statt 100 %` }
@@ -92061,16 +92059,24 @@
     const body = ttAus(karte)
     if(!Object.keys(body).length){ zeig(true, 'nichts geändert'); return }
     const f = ttPruefen(body); if(f){ zeig(false, f); return }
+    // TT1: ergibt das Speichern „an“ ohne Test-ID, gilt es für ALLE Konten — nur nach ausdrücklicher Bestätigung (Backend prüft dasselbe)
+    const swE = karte.querySelector('[data-e3-pfad=\'["an"]\']'), idsNeu = ttTestIdsAn(karte)
+    if(('an' in body || 'test_ids' in body) && swE && swE.checked && !idsNeu.length){
+      if(!window.confirm('Keine Test-ID angehakt: „Trades pro Tag“ gilt dann für ALLE Konten der angehakten Firmen. Wirklich so speichern?')){ zeig(false, 'nicht gespeichert — Test-ID anhaken'); return }
+      body.alle_ok = true
+    }
     knopf.disabled = true
     try{
       const antw = await apdApi('POST', '/ablaufwert', { tagesteilung: body })
       if(antw && antw.tagesteilung && _e3.d) _e3.d.tagesteilung = antw.tagesteilung
       if(_e3.d && Array.isArray(_e3.d.tagesteilung_firmen) && body.firmen) _e3.d.tagesteilung_firmen = _e3.d.tagesteilung_firmen.map(x => Object.assign({}, x, { an: body.firmen.includes(x.key) }))
+      if(_e3.d && Array.isArray(_e3.d.tagesteilung_ids) && body.test_ids) _e3.d.tagesteilung_ids = _e3.d.tagesteilung_ids.map(x => Object.assign({}, x, { an: body.test_ids.includes(String(x.user_id)) }))
       if(_e3.d && Array.isArray(_e3.d.tagesteilung_gruppen) && body.gruppen) _e3.d.tagesteilung_gruppen = _e3.d.tagesteilung_gruppen.map(x => Object.assign({}, x, { an: body.gruppen.includes(String(x.gruppe_id)) }))
       // Gespeichertes gilt als neuer Stand (kein Neuzeichnen: offene Eingaben der anderen Karten bleiben stehen)
       karte.querySelectorAll('[data-e3-ort="tt"]').forEach(el => { el.dataset.e3Alt = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value; el.classList.remove('geaendert') })
       _e3.at = 0
-      zeig(true, `✓ gespeichert (${Object.keys(body).length} ${Object.keys(body).length === 1 ? 'Wert' : 'Werte'})`)
+      const nW = Object.keys(body).filter(k => k !== 'alle_ok').length
+      zeig(true, `✓ gespeichert (${nW} ${nW === 1 ? 'Wert' : 'Werte'})`); ttIdsZeichnen(karte)
     }catch(e){ zeig(false, 'nicht gespeichert: ' + ((e && e.message) || e)) }
     finally{ knopf.disabled = false }
   }
@@ -92084,15 +92090,8 @@
     anteilFelder.forEach(el => el.addEventListener('input', summe)); if(anteilFelder.length) summe()   // ohne Eingaben (nur ansehen) bleibt die gerenderte Summe
     const msgWeg = () => { const m = karte.querySelector('[data-e3-tt-msg]'); if(m && m.textContent){ m.textContent = ''; m.className = 'e3-msg' } }   // alte Meldung nach jeder Änderung weg
     karte.addEventListener('input', msgWeg); karte.addEventListener('change', msgWeg)
-    karte.querySelectorAll('[data-e3-pfad=\'["firmen"]\']').forEach(el => el.addEventListener('change', () => ttKontenZeichnen(karte)))
-    karte.addEventListener('click', ev => { const b = ev.target.closest('[data-e3-tt-konto-weg]'); if(!b) return; ev.preventDefault()
-      const h = karte.querySelector('[data-e3-pfad=\'["nur_konten"]\']'); let ids = []; try{ ids = JSON.parse(h.value || '[]').map(String) }catch(_){}
-      ttKontenSetzen(karte, ids.filter(x => x !== b.dataset.e3TtKontoWeg)) })
-    const sel = karte.querySelector('[data-e3-tt-konto-neu]')
-    if(sel) sel.addEventListener('change', () => { if(!sel.value) return
-      const h = karte.querySelector('[data-e3-pfad=\'["nur_konten"]\']'); let ids = []; try{ ids = JSON.parse(h.value || '[]').map(String) }catch(_){}
-      if(!ids.includes(sel.value)) ids.push(sel.value); ttKontenSetzen(karte, ids) })
-    ttKontenZeichnen(karte)
+    karte.querySelectorAll('[data-e3-pfad=\'["firmen"]\'], [data-e3-pfad=\'["test_ids"]\'], [data-e3-pfad=\'["an"]\']').forEach(el => el.addEventListener('change', () => ttIdsZeichnen(karte)))
+    ttIdsZeichnen(karte)
     const k = karte.querySelector('[data-e3-tt-speichern]'); if(k) k.addEventListener('click', () => ttSpeichern(k))
   }
   window._tt = { html: ttKarteHtml, aus: ttAus, pruefen: ttPruefen, tagText: ttTagText, verdrahten: ttVerdrahten }   // Test-Haken
@@ -92121,7 +92120,7 @@
     if(_e3.laeuft) return
     _e3.laeuft = true
     // Kontoliste parallel (blockiert die Einstellungen nicht, S6-Review E3c); zeichnet nach, sobald sie da ist
-    apdApi('GET', '/konten-stand' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')).then(k => { _e3.konten = (k && k.konten) || [] }).catch(() => { _e3.konten = _e3.konten || [] }).finally(() => { try{ e3EinstZeichnen() }catch(_){} try{ const kt = document.querySelector('#e3-einst [data-e3-tt]'); if(kt) ttKontenZeichnen(kt) }catch(_){} })   // je Unternehmen (Finn-Foto Emin: „0 im Planer"); WS2b-Nachzug (Prüfer 09.11.2026): Kommentar stand mitten in der Zeile, .catch/.finally liefen nie → Testkonten-Auswahl blieb bei „Kontoliste lädt …"
+    apdApi('GET', '/konten-stand' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')).then(k => { _e3.konten = (k && k.konten) || [] }).catch(() => { _e3.konten = _e3.konten || [] }).finally(() => { try{ e3EinstZeichnen() }catch(_){} try{ const kt = document.querySelector('#e3-einst [data-e3-tt]'); if(kt) ttIdsZeichnen(kt) }catch(_){} })   // je Unternehmen (Finn-Foto Emin: „0 im Planer"); WS2b-Nachzug (Prüfer 09.11.2026): Kommentar stand mitten in der Zeile, .catch/.finally liefen nie → Testkonten-Auswahl blieb bei „Kontoliste lädt …"
     try{ _e3.d = await apdApi('GET', '/einstellungen' + (_e3.untWahl ? '?unternehmen=' + encodeURIComponent(_e3.untWahl) : '')); _e3.fehler = '' }
     catch(e){ _e3.fehler = (e && e.status === 404) ? '' : ((e && e.message) || String(e)); if(e && e.status === 404) _e3.d = null }
     finally{ _e3.laeuft = false; _e3.at = Date.now(); e3EinstZeichnen() }   // ohne Zwang: offene Eingaben bleiben stehen (S6-Review)

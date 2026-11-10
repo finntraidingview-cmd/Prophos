@@ -72,7 +72,7 @@ def main():
           "tt_param: Kaputtes fällt einzeln auf den Standard, Gültiges (abstand 5–30) gilt")
     E = a["tt_einst_anwenden"]
     keys = {"tradeify", "topstep", "fundednext"}
-    r, g = E({"firmen": []}, {"anteile": [70, 20, 8, 2], "an": True}, keys)
+    r, g = E({"firmen": []}, {"anteile": [70, 20, 8, 2], "an": True, "alle_ok": True}, keys)   # TT1: „an“ ohne Test-ID nur mit alle_ok
     check(g is None and r["tagesteilung"]["anteile"] == [70, 20, 8, 2] and r["tagesteilung"]["an"] is True and r["tagesteilung"]["haupt_pct"] == [70, 90],
           "tt_einst_anwenden: legt den Block aus dem Standard an und setzt nur die Felder")
     check(E({}, {"anteile": [80, 12, 6, 0]}, keys) == (None, "anteile: Summe 98 statt 100"), "Anteile ≠ 100 → eine Ursache mit Wert")

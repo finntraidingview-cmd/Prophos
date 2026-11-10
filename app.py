@@ -30290,8 +30290,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 # (WS2c) je Plan. Nur wenn tt_gilt — sonst kein rnd-Zug, der Lauf bleibt bitgleich zu vorher
                 try:
                     _tt_p = tt_param(reg.get("regeln"))
-                    if tt_gilt(_tt_p, (k["regel"].get("namen") or [""])[0], (gruppe or {}).get("gruppe_id"), k["a"].get("id"), k["a"].get("account_type")):
-                        _tt_n = _tt_p.get("test_n") if (_tt_p.get("nur_konten") and _tt_p.get("test_n")) else None
+                    if tt_gilt(_tt_p, (k["regel"].get("namen") or [""])[0], (gruppe or {}).get("gruppe_id"), k["a"].get("id"), k["a"].get("account_type"),
+                               user_id=k["a"].get("user_id"), route=k["regel"].get("route")):          # TT1: Test-IDs nur Echo
+                        _tt_n = _tt_p.get("test_n") if (_tt_p.get("test_ids") and _tt_p.get("test_n")) else None
                         # Nachzug 10.11.2026 (Master): finaler/Klein-Trade (Tradeify final → Orbit V3/tfh, TT_EIN_TRADE_STUFE) bekommt keinen
                         # Zufalls-Schluss — am Plan VOR dem Haken gemessen (der Haken stellt „Tag 1/n …“ vor die Stufe)
                         _tt_fest = tt_ein_trade_fest(w, k["regel"].get("route"))
@@ -38859,6 +38860,10 @@ TT_FIRMEN_STANDARD = ("tradeify", "lucidtrading", "topstep", "fundednext", "fund
 TT_STANDARD = {"an": False, "firmen": list(TT_FIRMEN_STANDARD), "anteile": [80.0, 12.0, 6.0, 2.0], "haupt_pct": [70.0, 90.0], "neben_pkt": [10.0, 25.0],
                "neben_sl_faktor": [1.0, 2.0], "neben_menge_max": 0.5, "min_tp_usd": 300.0, "abstand_min": [1.0, 180.0], "schluss_pct": [5.0, 10.0],
                "schluss_min": [2.0, 120.0], "gruppen": [], "nur_konten": [], "test_n": None,
+               # TT1 (Finn 11.11.2026: „Nein, ich will keine Testkonten mehr. Ich will jetzt Test-IDs“): Liste von HT-IDs (user_id). Gesetzt → nur die
+               # Echo-Konten (Challenge CFD, Firma angehakt) DIESER IDs werden geteilt, alle anderen bleiben bei 1 Trade. Der Testkonten-Weg (nur_konten)
+               # ist raus; ein alter Eintrag dort sperrt nur noch (tt_gilt), damit ohne Test-IDs nie still alle Konten geteilt werden
+               "test_ids": [],
                # WS2c (S5 dbc95340, 09.11.2026): Zufalls-Schluss auch bei Topstep (Standard aus) und Sperre rund um News (Standard an) — der Planer kopiert
                # beide Schalter in mt5_baseline.zschluss, WS2c entscheidet am Plan
                "schluss_topstep": False, "schluss_news_sperre": True}
@@ -38918,6 +38923,8 @@ def tt_param(regeln):
             out[k] = float(v)
     if isinstance(roh.get("nur_konten"), list):
         out["nur_konten"] = [str(x) for x in roh["nur_konten"] if isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)]
+    if isinstance(roh.get("test_ids"), list):           # TT1 (11.11.2026): Test-IDs
+        out["test_ids"] = [str(x) for x in roh["test_ids"] if isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)]
     tn = roh.get("test_n")
     out["test_n"] = int(tn) if (not isinstance(tn, bool) and isinstance(tn, (int, float)) and float(tn).is_integer() and 1 <= tn <= 4) else None
     return out
@@ -38944,10 +38951,26 @@ def tt_gruppen_auswahl(gruppen, param=None):
     return [{"gruppe_id": str(g.get("id")), "name": g.get("name"), "an": str(g.get("id")) in an} for g in gruppen or () if g.get("id")]
 
 
-def tt_einst_anwenden(regeln, aenderungen, firmen_keys=None, gruppen_ids=None):
+def tt_ids_auswahl(user_ids, namen, param=None):
+    """REIN RECHNEND (TT1, 11.11.2026): [{user_id, name, an}] — alle IDs des HT-Challenge-Planers (auto_plan_regeln.user_ids), nach Name sortiert;
+    an = in param.test_ids. Test-IDs, die nicht mehr im Planer sind, bleiben sichtbar (an, name None), damit man sie abhaken kann."""
+    an = [str(x) for x in (param or {}).get("test_ids") or ()]
+    planer = [str(u) for u in user_ids or ()]
+    out = [{"user_id": u, "name": (namen or {}).get(u), "an": u in an, "im_planer": u in planer} for u in dict.fromkeys(planer + an)]
+    return sorted(out, key=lambda x: (str(x["name"] or "~").lower(), x["user_id"]))
+
+
+def tt_einst_anwenden(regeln, aenderungen, firmen_keys=None, gruppen_ids=None, ids_bekannt=None):
     """REIN RECHNEND (testbar): regeln (Kopie) + {feld: wert} für den Block tagesteilung → (regeln_neu, None) | (None, grund). Alles oder nichts;
-    grund nennt die EINE Ursache mit dem Wert. Fehlt der Block, wird er aus TT_STANDARD angelegt."""
+    grund nennt die EINE Ursache mit dem Wert. Fehlt der Block, wird er aus TT_STANDARD angelegt.
+    TT1 (11.11.2026): test_ids nur bekannte HT-Planer-IDs (ids_bekannt); jedes Speichern von test_ids leert den alten Testkonten-Eintrag
+    (nur_konten, Weg entfällt). Ergäbe die Änderung „an“ ohne Test-ID (= ALLE Konten der angehakten Firmen), nur mit alle_ok = true
+    (Finn 10.11.2026: „nicht dass das gleich direkt alle auf einmal sprengt“)."""
     if not isinstance(aenderungen, dict) or not aenderungen:
+        return None, "tagesteilung = {Feld: Wert}"
+    aenderungen = dict(aenderungen)
+    alle_ok = aenderungen.pop("alle_ok", None) is True
+    if not aenderungen:
         return None, "tagesteilung = {Feld: Wert}"
     neu = json.loads(json.dumps(regeln if isinstance(regeln, dict) else {}))
     blk = neu.get("tagesteilung") if isinstance(neu.get("tagesteilung"), dict) else json.loads(json.dumps(TT_STANDARD))
@@ -38987,24 +39010,43 @@ def tt_einst_anwenden(regeln, aenderungen, firmen_keys=None, gruppen_ids=None):
             if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not float(v).is_integer() or not 1 <= v <= 4):
                 return None, "test_n = null | 1–4"
             v = int(v) if v is not None else None
+        elif k == "test_ids":
+            if not isinstance(v, list) or any(not (isinstance(x, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", x)) for x in v):
+                return None, "test_ids = [IDs]"
+            _bek = None if ids_bekannt is None else set(ids_bekannt) | {str(x) for x in (blk.get("test_ids") or ())}   # schon gespeicherte bleiben erlaubt
+            fremd = [x for x in v if _bek is not None and x not in _bek]
+            if fremd:
+                return None, f"test_ids: ID {fremd[0][:8]}… ist nicht im Challenge-Planer (Hermann Technologies)"
+            v = list(dict.fromkeys(v))
         else:
             return None, f"tagesteilung/{k} ist hier nicht änderbar"
         blk[k] = v
+    if "test_ids" in aenderungen and "nur_konten" not in aenderungen:
+        blk["nur_konten"] = []                          # TT1: Test-IDs ersetzen die Testkonten ganz (der alte Eintrag sperrte sonst weiter, tt_gilt)
+    if any(k in aenderungen for k in ("an", "test_ids", "nur_konten")) and blk.get("an") is True and not blk.get("test_ids"):
+        if not alle_ok:
+            return None, "ohne Test-ID gilt „Trades pro Tag“ für ALLE Konten der angehakten Firmen — Test-ID anhaken oder ausdrücklich bestätigen (alle_ok)"
+        blk["nur_konten"] = []                          # bestätigt „alle“: der alte Testkonten-Eintrag darf das nicht still wieder auf „nichts“ drehen
     neu["tagesteilung"] = blk
     return neu, None
 
 
-def tt_gilt(param, fkey, gruppe_id, konto_id, konto_typ):
+def tt_gilt(param, fkey, gruppe_id, konto_id, konto_typ, user_id=None, route=None):
     """REIN RECHNEND (testbar): wird für dieses Konto heute geteilt? Schalter an, Firma in der Liste (Apex nie), Unternehmen: HT (gruppe_id None)
-    immer, ein anderes nur, wenn seine id_gruppen.id in param.gruppen steht; Challenge-Typ; bei nur_konten nur diese Konten."""
+    immer, ein anderes nur, wenn seine id_gruppen.id in param.gruppen steht; Challenge-Typ; bei nur_konten nur diese Konten.
+    TT1 (Finn 11.11.2026, „erstmal nur für Echo-Konten“ / „ich will keine Testkonten mehr“): stehen Test-IDs in param.test_ids, gilt es NUR für
+    Konten dieser IDs und nur auf Echo-Wegen (route der Firma mt5v2/mt5, wie tt_planer_haken ohne route = mt5v2). Der Testkonten-Weg (nur_konten)
+    ist raus: steht dort ohne Test-IDs noch ein alter Eintrag (Test 10.11.), wird NICHTS geteilt — nie still alle Konten."""
     if not (param or {}).get("an") or not fkey or str(fkey).startswith("apex") or str(fkey) not in (param.get("firmen") or ()):
         return False
     if gruppe_id and str(gruppe_id) not in (param.get("gruppen") or ()):
         return False
     if str(konto_typ or "") not in AP_TYPEN:
         return False
-    nk = param.get("nur_konten") or []
-    return not nk or str(konto_id) in nk
+    ti = param.get("test_ids") or []
+    if ti:
+        return user_id is not None and str(user_id) in ti and str(route or "mt5v2") in AP_CFD_ROUTEN
+    return not (param.get("nur_konten") or [])
 
 
 def tt_wuerfeln(param, rnd, n_fest=None):
@@ -41284,6 +41326,8 @@ def admin_auto_plan_einstellungen():
            "tagesteilung": sicher(tt_param),
            "tagesteilung_firmen": sicher(lambda r: tt_firmen_auswahl(r.get("firmen") or [], tt_param(r))),
            "tagesteilung_gruppen": sicher(lambda r: tt_gruppen_auswahl(admin_gruppen_daten().get("gruppen") or [], tt_param(r))),
+           # TT1 (11.11.2026): HT-Planer-IDs für die Häkchen „Test-IDs“ (Echo-Konten je ID zählt die Seite aus /konten-stand)
+           "tagesteilung_ids": (sicher(lambda r: tt_ids_auswahl(reg.get("user_ids") or [], _ap_namen()[0], tt_param(r))) if (admin and not unt) else []),
            "tagesteilung_db": isinstance(regeln.get("tagesteilung"), dict)}
     if unt:
         namen_g = {str(g.get("id")): g.get("name") for g in admin_gruppen_daten().get("gruppen") or ()}
@@ -42433,7 +42477,8 @@ def admin_auto_plan_ablaufwert():
     if body.get("tagesteilung") is not None:                  # WS2 Trades pro Tag (09.11.2026): Block regeln.tagesteilung, alles oder nichts
         _r0 = patch.get("regeln") or reg.get("regeln") or {}
         r_neu, grund = tt_einst_anwenden(_r0, body.get("tagesteilung"), {x["key"] for x in tt_firmen_auswahl(_r0.get("firmen") or [])},
-                                         {str(g.get("id")) for g in admin_gruppen_daten().get("gruppen") or ()})
+                                         {str(g.get("id")) for g in admin_gruppen_daten().get("gruppen") or ()},
+                                         {str(u) for u in (reg.get("user_ids") or ())})      # TT1: Test-IDs nur aus dem HT-Planer
         if grund:
             return jsonify({"ok": False, "msg": grund}), 400
         patch["regeln"] = r_neu
