@@ -31369,6 +31369,20 @@
   window._hedgeLiqDllApex = hedgeLiqDllApex   // Test-Haken
   // Daily-Loss-Felder fürs Hedge-Objekt (Open + Wächter-Nachtrag), damit Radar/Spur zeigen, woher das Level kommt
   const hedgeLiqDllFelder = lq => lq ? { liq_art: lq.liq_art || null, liq_regeln_geladen: !!lq.liq_regeln_geladen, liq_vor_pkt: lq.liq_vor_pkt || null, liq_dll: lq.liq_dll || null } : {}
+  // TX2 (10.11.2026, Gegenprüfung M1): darf der Hedge am gewürfelten Master-SL schließen? Nicht-Topstep: ja (MT5/Orbit senden den SL mit der Order).
+  // Topstep (tsv2): Puls setzt den Risk erst NACH dem Fill — der Fusion-Hedge öffnet aber schon beim Senden-Klick (hedgeFruehWache/v2AufOpen), vor dem
+  // Start-Ergebnis. Ohne Beleg lief der Hedge zuerst am Würfel-Level (Broker-TP am Hedge inklusive) und blieb dort, wenn danach kein MLL-Level ging
+  // (Risk fehlt + MLL nicht gelesen) → Master ohne SL, Hedge zu. Darum fail-closed: nur mit Start-Ergebnis von Puls (tv.puls 'tsx') und ohne fehlenden Risk
+  // (tsxBracketsFehlen: Rücklesung, Warnungstext alter Bots; tv.brackets_ok_at = von Hand/Rücklesung nachgewiesen → wieder erlaubt).
+  function hedgeWdSlRiskBelegt(plan){
+    if(!plan || plan.route !== 'tsv2') return true
+    const b = plan.mt5Baseline || plan.mt5_baseline || null, tv = b && b.tv
+    // nur das Start-Ergebnis aus der Order (tsxBaselineAusOrder, auch beim Nachholen aus puls_ergebnisse: quelle 'tsx_order') — der Rückfall tvV2BaselineLesen
+    // setzt auch puls 'tsx', trägt aber weder brackets_fehlen noch warnung (2. Gegenprüfung TX2)
+    if(!tv || typeof tv !== 'object' || tv.puls !== 'tsx' || tv.quelle !== 'tsx_order') return false
+    const f = tsxBracketsFehlen(plan.mt5Baseline ? plan : Object.assign({}, plan, { mt5Baseline: b }))
+    return !(f && f.risk)
+  }
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
     // ZUFALLS-SL (WS1b-Nachzug 09.11.2026, Finn: „Fusion-Hedge schließt mit dem Master am SL wie bisher"): hat der Planer einen SL gewürfelt (mt5_baseline.wd_sl.usd)
@@ -31376,7 +31390,9 @@
     // wirklich setzt (= wd_sl.usd). Eigene Art 'master_sl_wuerfel' (nicht 'liquidation'): Texte, Radar und hedgeSlNqEcht behandeln ihn wie einen Master-SL.
     // Ohne wd_sl oder ohne master_sl: alles unten unverändert (Liquidation).
     const wSlUsd = planWdSlUsd(plan), wMsl = Number(plan && plan.masterSl)
-    if(wSlUsd > 0 && wMsl > 0){
+    // TX2 (10.11.2026, Topstep Express würfelt jetzt auch): bei Topstep setzt Puls den Risk erst NACH dem Fill — Würfel-Level nur, wenn das belegt ist
+    // (hedgeWdSlRiskBelegt). Sonst wie ohne Würfel (MLL-Zweig unten); der Wächter stellt auf das Würfel-Level um, sobald das Start-Ergebnis ihn belegt.
+    if(wSlUsd > 0 && wMsl > 0 && hedgeWdSlRiskBelegt(plan)){
       const wB = (plan.mt5Baseline || plan.mt5_baseline || {}).wd_sl || {}, wz = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
       const felderW = { liq_art: 'master_sl_wuerfel', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
       if(!(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Punktwert/Kontrakte fehlen — Hedge schließt nur am TP', liq_balance: wz(wB.liq_balance) }, felderW)
@@ -35274,7 +35290,10 @@
       const tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}
       const ein = Number(tv.einstieg_nq)
       const sym = tv.einstieg_symbol || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p).symbol : p.masterSymbol) || ''
-      const ppl = hedgePplFuer(sym), kt = Number(p.masterContracts) || 0, tp = Number(p.masterTp) || 0, sl = Number(p.masterSl) || 0
+      // TX2 (2. Gegenprüfung 10.11.2026): gewürfelter WD-SL bei Topstep erst, wenn Puls den Risk belegt hat (hedgeWdSlRiskBelegt) — sonst kein SL-Level
+      // aus dem Plan (Hedge ohne Einstieg/übernommen nähme es sonst als slL und schlösse am Master-SL, den es vielleicht nicht gibt). Andere Pläne unverändert.
+      const slSperre = planWdSlUsd(p) > 0 && !hedgeWdSlRiskBelegt(p)
+      const ppl = hedgePplFuer(sym), kt = Number(p.masterContracts) || 0, tp = Number(p.masterTp) || 0, sl = slSperre ? 0 : (Number(p.masterSl) || 0)
       const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
       const slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
       const out = { punkte, sl_punkte: slPunkte, puffer_punkte: hedgePuffer() }
@@ -35474,7 +35493,9 @@
             // Ohne wd_sl: wSlW false, alles wie bisher.
             const wSlW = hedgeIstWd(p) && planWdSlUsd(p) > 0 && Number(p.masterSl) > 0
             const balDa = !!(tvS && typeof tvS.balance_start === 'number')
-            let wSlFertig = wSlW && h.sl_art === 'master_sl_wuerfel' && Number(h.sl_level_nq) > 0 && (h.sl_wuerfel_liq_geprueft === true || !balDa)
+            // TX2: bei Topstep nie „fertig“, solange der Risk nicht belegt ist — ein Würfel-Level von früher (alter Tab) wird unten auf die MLL umgestellt bzw. entfernt
+            const wRiskOk = hedgeWdSlRiskBelegt(p)
+            let wSlFertig = wSlW && wRiskOk && h.sl_art === 'master_sl_wuerfel' && Number(h.sl_level_nq) > 0 && (h.sl_wuerfel_liq_geprueft === true || !balDa)
             if(wSlW && !wSlFertig && Number(h.einstieg_nq) > 0){
               const wzW = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
               const lqW = hedgeLiqLevel(p, Number(h.einstieg_nq), wzW === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
@@ -35496,6 +35517,14 @@
               } else if(ohneRegeln && lq && lq.liq_regeln_geladen){
                 await hedgeAmPlanSchreiben(p.id, { liq_regeln_geladen: true })   // geprüft, kein neues Level → nicht jede Runde neu rechnen (Art bleibt die des stehenden Levels)
               }
+            }
+            // TX2 (Gegenprüfung M1): Topstep-Master ohne belegten Risk, am Hedge steht noch ein Würfel-Level und es gibt kein MLL-Level (MLL nicht gelesen bzw.
+            // Start-Balance ≤ MLL + 100) → Level entfernen: lieber nur am TP schließen als am Master-SL, den es nicht gibt. Erst wenn tv da ist (sonst wartet es).
+            const tvR = p.route === 'tsv2' && tvS && typeof tvS === 'object' && tvS.puls === 'tsx'   // jedes Start-Ergebnis (auch Rückfall ohne Bracket-Infos): unbelegt → entfernen
+            if(wSlW && tvR && !wRiskOk && h.sl_art === 'master_sl_wuerfel' && Number(h.sl_level_nq) > 0 && !(Number(slL) > 0 && slL !== Number(h.sl_level_nq))){
+              await hedgeAmPlanSchreiben(p.id, { sl_level_nq: null, sl_punkte: null, sl_art: null, liq_art: null, sl_usd_hedge: null, sl_wuerfel_liq_geprueft: null,
+                sl_level_vor_risk_fehlt: Number(h.sl_level_nq), sl_hinweis: 'Topstep: Risk nicht gesetzt — Master ohne SL, kein MLL-Level → Hedge schließt nur am TP', sl_nachgetragen_at: new Date().toISOString() })
+              slL = 0
             }
           }catch(e){ console.warn('[hedge] Liq-Level nachtragen', e) }
           // Terminal-Level an den echten TradingView-Fill/TP-Limit anpassen (01.10.2026) — ohne await, bremst das Schließen nie
@@ -57770,7 +57799,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2142'
+  const OS_TAB_BUILD = '2026-09-22.2143'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
