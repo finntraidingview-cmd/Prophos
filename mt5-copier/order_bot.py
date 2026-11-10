@@ -14545,6 +14545,47 @@ def run(cfg_path, cmd):
 # 15.08.2026, s. _finde_order_dialog), so ein Rest überlebte jeden Lauf. Jetzt räumt der Close-Weg vor dem Zeilen-Scan in BEIDEN Quellen weg, was
 # close_rest_art erkennt, und prüft lesend, dass es weg ist: Abbrechen-Knopf → ESC an das Fenster selbst → WM_CLOSE (= das X). Nie OK, nie Enter,
 # nie Kauf/Verkauf. Haftungsausschluss, Login-Dialog und Charts sind nie ein Rest.
+def fenster_sichtbar_urteil(ist_fenster, ist_sichtbar, rechteck, uia_sichtbar):
+    """REIN RECHNEND (testbar, NZ1b 10.11.2026): ist ein Fenster WIRKLICH sichtbar? Lotse-Foto 15:25 UTC (pc-usq1i6, Terminal 26762352): kein
+    Order-Dialog zu sehen — pywinauto-UIA meldete is_visible() für das versteckte MT5-Order-Dialog-Objekt trotzdem True (MT5 behält den Dialog
+    versteckt als Kind-Fenster). Win32 zuerst: ist_fenster/ist_sichtbar = IsWindow/IsWindowVisible am Handle (None = nicht lesbar), rechteck =
+    (b, h) oder None; uia_sichtbar = pywinauto is_visible() (None = nicht lesbar). Kein Handle-Urteil → UIA UND Rechteck > 0."""
+    if ist_fenster is False or ist_sichtbar is False:
+        return False
+    if rechteck is not None and (rechteck[0] <= 0 or rechteck[1] <= 0):
+        return False
+    if ist_fenster and ist_sichtbar:
+        return True
+    return bool(uia_sichtbar)
+
+
+def _fenster_sichtbar(el):
+    """NZ1b: wirklich sichtbar? (s. fenster_sichtbar_urteil) — nie werfen; nicht ansprechbar = nicht sichtbar."""
+    h = getattr(el, "handle", None) or getattr(getattr(el, "element_info", None), "handle", None)
+    ist_f = ist_s = rect = uia = None
+    if h:
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            ist_f, ist_s = bool(u.IsWindow(int(h))), bool(u.IsWindowVisible(int(h)))
+        except Exception:
+            ist_f = ist_s = None
+    if ist_f is False or ist_s is False:
+        return False                       # Win32 sagt klar „weg/versteckt“ — UIA gar nicht erst fragen (Prüfer NZ1b: Zeit je Kandidat)
+    try:
+        r = el.rectangle()
+        rect = (r.right - r.left, r.bottom - r.top)
+    except Exception:
+        rect = None
+    if ist_f and ist_s:
+        return fenster_sichtbar_urteil(ist_f, ist_s, rect, None)
+    try:
+        uia = bool(el.is_visible())
+    except Exception:
+        return False
+    return fenster_sichtbar_urteil(ist_f, ist_s, rect, uia)
+
+
 def close_rest_art(titel, knoepfe):
     """REIN RECHNEND (testbar): ist dieses Fenster im MT5-Prozess ein Rest, den der Close-Weg vor dem Zeilen-Scan wegräumen darf?
     → 'order' (F9-/Order-Dialog, Titel „Order…“), 'aendern' (Ändern-Dialog einer Position), 'drucken' (Druckdialog) oder None."""
@@ -14565,18 +14606,18 @@ def close_rest_art(titel, knoepfe):
 
 def _close_reste_raeumen(hauptfenster, trail):
     """NZ1 (10.11.2026): liegengebliebene Order-/Ändern-/Druck-Fenster des Terminal-Prozesses wegräumen, BEVOR der Close-Weg die Handel-Liste
-    anklickt (Top-Level UND Kind-Fenster, wie _finde_close_dialog). Jeder Fund und sein Ausgang gehen in die Spur. Rückgabe: Anzahl SICHTBARER
-    Reste, die stehen blieben (> 0 = der Aufrufer scannt nicht). WM_CLOSE nur an echte Dialoge (Klasse #32770): an einem Kind-Fenster, das
+    anklickt (Top-Level UND Kind-Fenster, wie _finde_close_dialog). Jeder Fund und sein Ausgang gehen in die Spur. Rückgabe: Rechtecke
+    (l, t, r, b) der SICHTBAREN Reste, die stehen blieben (None = Lage unbekannt) — der Aufrufer spart sie beim Scan aus (NZ1b). WM_CLOSE nur an echte Dialoge (Klasse #32770): an einem Kind-Fenster, das
     kein Dialog ist, zerstörte das Default-Verhalten das Fenster (Chart mit Reader-EA). Unsichtbare Order-Fenster kommen nur in die Spur —
     MT5 kann sein Dialog-Objekt versteckt behalten (Prüfer zu NZ1: die Liste „Fenster im Prozess“ zählt Kind-Fenster ohne Sichtbarkeit)."""
     try:
         from pywinauto import Desktop
     except ImportError:
-        return 0   # Mac/Selbsttest ohne pywinauto: nichts zu räumen
+        return []   # Mac/Selbsttest ohne pywinauto: nichts zu räumen
     try:
         pid = hauptfenster.element_info.process_id
     except Exception:
-        return 0
+        return []
     kandidaten = []
     try:
         for d in Desktop(backend="uia").windows():
@@ -14590,10 +14631,7 @@ def _close_reste_raeumen(hauptfenster, trail):
     kandidaten.extend(_kind_fenster(hauptfenster))
 
     def _weg(d):
-        try:
-            return not d.is_visible()
-        except Exception:
-            return True   # nicht mehr ansprechbar = weg
+        return not _fenster_sichtbar(d)   # NZ1b: Win32 IsWindowVisible statt UIA is_visible (versteckter MT5-Dialog blieb dort „sichtbar“)
 
     def _warte_weg(d, s=1.2):
         ende = time.time() + s
@@ -14603,7 +14641,7 @@ def _close_reste_raeumen(hauptfenster, trail):
             _warte(0.15, 0.15)
         return _weg(d)
 
-    gesehen, blieb = set(), 0
+    gesehen, blieb = set(), []
     for d in kandidaten:
         try:
             h = getattr(d, "handle", None) or getattr(d.element_info, "handle", None)
@@ -14656,11 +14694,58 @@ def _close_reste_raeumen(hauptfenster, trail):
             if weg_name:
                 trail.append(f"Rest-Fenster '{titel[:30]}' ({art}) weggeräumt ({weg_name})")
             else:
-                blieb += 1
-                trail.append(f"Rest-Fenster '{titel[:30]}' ({art}) blieb stehen")
+                lage = None
+                try:
+                    r = d.rectangle()
+                    lage = (r.left, r.top, r.right, r.bottom)
+                except Exception:
+                    try:   # Rückfall Win32 GetWindowRect (Prüfer NZ1b S3)
+                        import ctypes
+                        from ctypes import wintypes
+                        rc = wintypes.RECT()
+                        if h and ctypes.windll.user32.GetWindowRect(int(h), ctypes.byref(rc)):
+                            lage = (rc.left, rc.top, rc.right, rc.bottom)
+                    except Exception:
+                        lage = None
+                blieb.append(lage)   # None = Lage unbekannt — der Aufrufer meldet laut, spart nichts aus (Stand vor NZ1, Master: nie still aufgeben)
+                trail.append(f"Rest-Fenster '{titel[:30]}' ({art}) blieb stehen ({_dlg_befund(d)})")
         except Exception:
             continue
     return blieb
+
+
+def _dlg_knoepfe(dlg):
+    """NZ1b: [(knopf, text, aktiv, sichtbar)] eines Dialogs — nur lesen, nie werfen."""
+    out = []
+    try:
+        for b in dlg.descendants(control_type="Button"):
+            try:
+                t = b.window_text() or ""
+            except Exception:
+                t = ""
+            try:
+                a = bool(b.is_enabled())
+            except Exception:
+                a = False
+            try:
+                v = bool(b.is_visible())
+            except Exception:
+                v = False
+            out.append((b, t, a, v))
+    except Exception:
+        pass
+    return out
+
+
+def _dlg_befund(dlg):
+    """NZ1b: kurzer Befund für die Spur, wenn ein Dialog nicht zugeht — Klasse, Handle, Knöpfe (Text/aktiv/sichtbar)."""
+    try:
+        kl = getattr(dlg.element_info, "class_name", "") or "?"
+    except Exception:
+        kl = "?"
+    h = getattr(dlg, "handle", None) or getattr(getattr(dlg, "element_info", None), "handle", None)
+    kn = ", ".join(f"'{t[:18]}'{'' if a else ' aus'}{'' if v else ' unsichtbar'}" for _, t, a, v in _dlg_knoepfe(dlg)[:5])
+    return f"Klasse {kl}, Handle {'ja' if h else 'nein'}, Knöpfe: {kn or 'keine'}"
 
 
 def _f9_dialog_zu(dlg, trail):
@@ -14669,10 +14754,7 @@ def _f9_dialog_zu(dlg, trail):
     gescheiterten News-Schließungen). Jetzt lesend nachsehen; steht er noch: Fokus + ESC an den Dialog, dann WM_CLOSE (= das X). Nie OK/Enter —
     die Position ist an dieser Stelle schon lesend bewiesen, der Dialog löst nichts mehr aus. → True, wenn er zu ist."""
     def _weg():
-        try:
-            return not dlg.is_visible()
-        except Exception:
-            return True
+        return not _fenster_sichtbar(dlg)   # NZ1b: s. fenster_sichtbar_urteil — UIA allein meldete den versteckten Dialog als offen
     ende = time.time() + 1.5
     while time.time() < ende:
         if _weg():
@@ -14690,6 +14772,7 @@ def _f9_dialog_zu(dlg, trail):
             trail.append("F9-Dialog blieb nach ESC offen — mit Fokus + ESC zu")
             return True
         _warte(0.15, 0.15)
+    h = None
     try:
         import ctypes
         h = getattr(dlg, "handle", None) or getattr(dlg.element_info, "handle", None)
@@ -14703,7 +14786,7 @@ def _f9_dialog_zu(dlg, trail):
                 _warte(0.15, 0.15)
     except Exception:
         pass
-    trail.append("⚠ F9-Dialog blieb offen (ESC + Fenster-X ohne Wirkung) — räumt der nächste Close-Lauf weg")
+    trail.append(f"⚠ F9-Dialog blieb offen (ESC{'' if not h else ' + Fenster-X'} ohne Wirkung; {_dlg_befund(dlg)}) — räumt der nächste Close-Lauf weg")
     return False
 
 
@@ -14770,6 +14853,15 @@ def close_journal_zeilen(zeilen, ticket, ab_s, max_alter_s=600, n=1):
     return out[-n:]
 
 
+def close_punkt_in_rest(x, y, reste, rand=12):
+    """REIN RECHNEND (testbar, NZ1b): liegt der Scan-Punkt (x, y) in einem stehen gebliebenen Rest-Fenster (l, t, r, b) + rand? None-Einträge
+    (Lage unbekannt) sparen nichts aus."""
+    for r in (reste or ()):
+        if r and r[0] - rand <= x <= r[2] + rand and r[1] - rand <= y <= r[3] + rand:
+            return True
+    return False
+
+
 def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     """Position per Klick schliessen — Finns Hand-Weg als Scan (28.08.2026,
     Remote-Close): Zeile markieren -> Rechtsklick -> NUR den lesbaren Punkt
@@ -14803,11 +14895,12 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     # sonst steht er beim naechsten Close-Klick sofort wieder da.
     _einklick_haftung_annehmen(w, trail, melden=True)
     _fremde_dialoge_schliessen(w)
-    # NZ1 (10.11.2026): auch Kind-Fenster, mit Beweis — s. close_rest_art. Bleibt ein Rest SICHTBAR stehen, wird nicht gescannt: der Scan
-    # setzt vor jedem Rechtsklick einen Links-Klick, und ein mittig stehender Order-Dialog mit aktivem Buy/Sell läge genau im Band
-    # (Prüfer-MUSS zu NZ1) — ein Links-Klick dort wäre eine ORDER.
-    if _close_reste_raeumen(w, trail):
-        return "rest_offen"
+    # NZ1 (10.11.2026): auch Kind-Fenster, mit Beweis — s. close_rest_art. NZ1b (10.11.2026, Master): bleibt ein Rest stehen, gibt der Close-Weg
+    # NICHT auf (sonst schlechter als vor NZ1) — er scannt wie vorher, spart aber das Rechteck jedes stehen gebliebenen Rests aus (ein
+    # Links-Klick in einen Order-Dialog mit aktivem Buy/Sell wäre eine ORDER, Prüfer-MUSS zu NZ1) und sagt es laut in der Spur.
+    _reste = _close_reste_raeumen(w, trail) or []
+    if _reste:
+        trail.append(f"⚠ {len(_reste)} Rest-Fenster blieb stehen — Scan trotzdem, ihr Bereich wird ausgespart")
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
     # Mit anker_pfad: der gemerkte Tab-Punkt erspart die Baum-Suche (01.09.2026).
@@ -14857,6 +14950,11 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         return _kontextmenue_close_klicken(timeout=0.8)
 
     grau = 0
+    if _reste:
+        _vorher = len(punkte)
+        punkte = [p_ for p_ in punkte if not close_punkt_in_rest(p_[1], p_[2], _reste)]
+        if len(punkte) < _vorher:
+            trail.append(f"{_vorher - len(punkte)} Scan-Punkte im Rest-Fenster ausgespart")
     for pname, px_, py_ in punkte:
         if is_paused():
             trail.append("⏸ Echo pausiert — Close-Scan abgebrochen")
@@ -15135,11 +15233,6 @@ def run_close(cfg_path, cmd):
                        "Hand eine Position per Rechtsklick schliessen und dabei zustimmen, "
                        "danach fragt MT5 nie wieder. [" + _spur(trail) + "]",
                 "trail": _spur(trail)}
-    if ausgang == "rest_offen":
-        return {"ok": False, "retry_ok": True,
-                "msg": f"Im Terminal blieb ein Order-/Ändern-/Druck-Fenster stehen (ließ sich nicht wegräumen) — Positions-Zeile #{ticket} "
-                       f"bewusst NICHT angeklickt (ein Klick im Order-Fenster wäre eine Order). Im Terminal von Hand schließen. "
-                       f"[" + _spur(trail) + "]", "trail": _spur(trail)}
     if ausgang == "menue_haengt":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,

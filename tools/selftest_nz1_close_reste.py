@@ -58,6 +58,12 @@ class Knopf:
     def window_text(self):
         return self.text
 
+    def is_enabled(self):
+        return True
+
+    def is_visible(self):
+        return True
+
     def click(self):
         self.geklickt += 1
         if self.wirkt and self.fenster is not None:
@@ -145,7 +151,7 @@ check(haftung.sichtbar and haftung.esc == 0 and all(k.geklickt == 0 for k in haf
 check(chart.sichtbar and chart.esc == 0, "b: Chart unberührt")
 check(fremd.esc == 0 and unsichtbar.esc == 0, "b: fremder Prozess + unsichtbares Fenster übersprungen")
 check(not stur.sichtbar and posted == [(107, 0x0010)], "b: sturer Dialog (#32770) per WM_CLOSE zu")
-check(blieb == 1 and stur_kind.sichtbar and all(h != 108 for h, _ in posted), "b: Kind-Fenster ohne Dialogklasse nie WM_CLOSE, als stehen geblieben gezählt")
+check(len(blieb) == 1 and stur_kind.sichtbar and all(h != 108 for h, _ in posted), "b: Kind-Fenster ohne Dialogklasse nie WM_CLOSE, als stehen geblieben gezählt")
 check("'Order: NAS100' im Prozess, aber unsichtbar — übersprungen" in spur, "b: unsichtbares Order-Fenster steht in der Spur")
 check("'Order: NAS100 - NASDAQ 100 I' (order) weggeräumt (ESC)" in spur and "(drucken) weggeräumt (Abbrechen)" in spur
       and "'Order: NAS100 - zweiter' (order) weggeräumt (Fenster-X)" in spur and "'Order: NAS100 - Kind' (order) blieb stehen" in spur,
@@ -168,7 +174,7 @@ def _ohne_pw(name, *a, **k):
 import builtins  # noqa: E402
 builtins.__import__ = _ohne_pw
 try:
-    check(ob._close_reste_raeumen(haupt, Spur()) == 0, "b: ohne pywinauto → 0, kein Absturz")
+    check(ob._close_reste_raeumen(haupt, Spur()) == [], "b: ohne pywinauto → [], kein Absturz")
 finally:
     builtins.__import__ = _imp
 
@@ -186,7 +192,7 @@ class Haupt:
         return self.r
 
 
-def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=0, menue_haengt_ab=None):
+def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=(), menue_haengt_ab=None):
     """liste_von..liste_bis = y-Bereich der Handel-Liste (Menü, Eintrag ausgegraut); zeile_y ± 9 = Positions-Zeile (Eintrag klickbar);
     außerhalb: Chart (kein_menue). reste = Rückgabe von _close_reste_raeumen; menue_haengt_ab = ab dem n-ten Punkt bleibt ein Menü offen.
     Rückgabe (ausgang, rechtsklick-y-Liste, links-klick-Zahl, spur)."""
@@ -217,7 +223,7 @@ def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=0, menue_haengt_ab=Non
     ersatz = dict(
         _einklick_haftung_annehmen=lambda w, trail, melden=False: "keiner",
         _fremde_dialoge_schliessen=lambda w: None,
-        _close_reste_raeumen=lambda w, trail: reste,
+        _close_reste_raeumen=lambda w, trail: list(reste),
         _handel_tab_aktivieren=lambda w, trail, mg, anker_pfad=None: "suche",
         is_paused=lambda: False,
         _anker_lesen=lambda p: {},
@@ -243,8 +249,16 @@ def lauf(liste_von, liste_bis, zeile_y, hoehe=1000, reste=0, menue_haengt_ab=Non
     return aus, klicks, links[0], " | ".join(t)
 
 
-aus, kl, li, sp = lauf(600, 1000, 700, reste=1)
-check(aus == "rest_offen" and not kl and li == 0, "c1: Rest bleibt stehen → rest_offen, kein einziger Klick")
+aus, kl, li, sp = lauf(600, 1000, 700, reste=[(0, 660, 1600, 740)])
+check(aus == "kein_treffer" and kl and all(not (648 <= y <= 752) for y in kl) and "Rest-Fenster blieb stehen — Scan trotzdem" in sp
+      and "Scan-Punkte im Rest-Fenster ausgespart" in sp, "c1: Rest bleibt stehen → Scan trotzdem, NIE ein Klick in seinem Bereich (NZ1b)")
+aus, kl, li, sp = lauf(600, 1000, 900, reste=[(0, 660, 1600, 740)])
+check(aus == "zu" and all(not (648 <= y <= 752) for y in kl), "c1: Zeile außerhalb des Rests → zu wie vor NZ1")
+aus, kl, li, sp = lauf(600, 1000, 900, reste=[None])
+check(aus == "zu" and "Scan trotzdem" in sp and "Scan-Punkte im Rest-Fenster ausgespart" not in sp, "c1: Rest ohne Lage → laut, aber nichts ausgespart")
+P = ob.close_punkt_in_rest
+check(P(10, 700, [(0, 660, 1600, 740)]) and not P(10, 800, [(0, 660, 1600, 740)]) and P(10, 650, [(0, 660, 1600, 740)])
+      and not P(10, 700, [None]) and not P(10, 700, []), "c1: close_punkt_in_rest (mit 12-px-Rand)")
 aus, kl, li, sp = lauf(600, 1000, 700)
 check(aus == "zu" and kl and all(y >= 500 for y in kl), "c2: Zeile im Band wie bisher → zu, nie über der Mitte")
 aus, kl, li, sp = lauf(200, 1000, 230)
@@ -256,8 +270,13 @@ _i = _qk.find("def _punkt_klicken")
 _blk = _qk[_i:_qk.find("return _kontextmenue_close_klicken", _i)]
 check(_blk.find("klick_zoegern()") < _blk.find("_kein_menue_offen(_pid)") < _blk.find("_klick_absolut(px_, py_)"),
       "c4: Menü-Beweis direkt vor dem Links-Klick (nach Anfahrt + Zögern), nur Menüs des Terminal-Prozesses")
-check("rest_offen" in inspect_src if (inspect_src := __import__("inspect").getsource(ob.run_close)) else False,
-      "c5: run_close meldet rest_offen eigens (nichts geklickt)")
+check("rest_offen" not in __import__("inspect").getsource(ob.run_close) and "rest_offen" not in __import__("inspect").getsource(ob._close_klicken),
+      "c5: kein stilles Aufgeben mehr (rest_offen gibt es nicht mehr)")
+U = ob.fenster_sichtbar_urteil
+check(U(True, False, (500, 400), True) is False, "c6: versteckter MT5-Dialog (IsWindowVisible False, UIA True) = NICHT sichtbar (Lotse-Foto 15:25)")
+check(U(False, None, None, True) is False and U(True, True, (0, 0), True) is False, "c6: kein Fenster / Rechteck 0 = nicht sichtbar")
+check(U(True, True, (500, 400), False) is True and U(None, None, (500, 400), True) is True and U(None, None, None, False) is False,
+      "c6: Win32 sichtbar = sichtbar; ohne Win32-Urteil zählt UIA")
 
 # ── d) Quelltext ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 import inspect  # noqa: E402
@@ -282,7 +301,13 @@ t2 = Spur()
 check(ob._f9_dialog_zu(d2, t2) is True and d2.fokus == 1 and d2.esc == 1 and "mit Fokus + ESC zu" in " ".join(t2), "e: offen → Fokus + ESC, Spur")
 d3 = Fenster("Order: NAS100", esc_wirkt=False, handle=None)
 t3 = Spur()
-check(ob._f9_dialog_zu(d3, t3) is False and "⚠ F9-Dialog blieb offen" in " ".join(t3), "e: stur → False + Warnung")
+check(ob._f9_dialog_zu(d3, t3) is False and "⚠ F9-Dialog blieb offen (ESC ohne Wirkung; Klasse #32770, Handle nein, Knöpfe: keine)" in " ".join(t3),
+      "e: stur → False + Warnung mit Befund (Klasse, Handle, Knöpfe)")
+d4 = Fenster("Order: NAS100", ["OK"], esc_wirkt=False)
+t4 = Spur()
+check(ob._f9_dialog_zu(d4, t4) is False and d4.knoepfe[0].geklickt == 0 and "Knöpfe: 'OK'" in " ".join(t4),
+      "e: NIE „OK“ drücken (Prüfer NZ1b M1/M2) — nur Befund mit Knöpfen in der Spur")
+check(not hasattr(ob, "rest_ok_knopf") and not hasattr(ob, "_rest_ok_druecken"), "e: OK-Druck-Weg ist ganz raus")
 # ── f) Journal + Menü ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 J = ["CS\t0\t13:11:40.100\tTrades\t'26696076': market sell 17.99 NAS100, close #627122537 sl: 0 tp: 0",
      "CS\t0\t13:11:41.200\tTrades\t'26696076': failed market sell 17.99 NAS100, close #627122537 [Off quotes]",
