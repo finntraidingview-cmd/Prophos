@@ -4336,6 +4336,9 @@
   #ap-ids-root.ap-guestly #e2-einst .wd-fuss{margin-top:auto;padding-top:10px;font-size:11.5px;color:var(--g-sub);line-height:1.4}
   #ap-ids-root.ap-guestly #e2-einst .wd-abl-abschnitt{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--g-sub);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--g-rand)}
   #ap-ids-root.ap-guestly #e2-einst .e2-abs .btn{margin-left:auto;text-transform:none;letter-spacing:0} #ap-ids-root.ap-guestly #e2-einst .e2-modus{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;display:inline-flex;align-items:center}
+  /* FF2 (11.11.2026): Modell „Pump in 2 Trades“ — Hinweis „noch nicht aktiv“ dezent amber, Vorschau-Block mit Abstand */
+  #ap-ids-root.ap-guestly #e2-einst .e2-p2-aus{color:var(--warn-ink, #b45309)} #ap-ids-root.ap-guestly #e2-einst .e2-p2-vorschau{margin-top:10px}
+  @media (max-width:820px){ #ap-ids-root.ap-guestly #e2-einst .wd-felder > .wd-feld:has(.wd-spanne){grid-column:1 / -1} }   /* FF2: von–bis auf dem Handy volle Breite (sonst „4000“ angeschnitten) */
   #ap-ids-root.ap-guestly #e2-einst .e2-sch{border-top:0;min-height:40px}
   #ap-ids-root.ap-guestly #e2-einst .wd-firma{display:grid;grid-template-columns:10px minmax(90px,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;cursor:pointer;border-bottom:1px solid var(--g-rand);transition:background .12s;outline:none}
   #ap-ids-root.ap-guestly #e2-einst .wd-firma:hover,#ap-ids-root.ap-guestly #e2-einst .wd-firma:focus-visible{background:var(--g-pille)} #ap-ids-root.ap-guestly #e2-einst .wd-firma.offen{border-bottom-color:transparent}
@@ -89141,6 +89144,8 @@
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge,
         masterSymbol: pzwIstLot({ route: z.route || t.route || null, masterFirm: z.firma }) ? '' : (z.symbol || 'NQ'),   // 20.10.2026: mt5 (Echo mit Hedge) ist Lot, nicht NQ
         autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null,
+        // FF2 (11.11.2026): Pump-Tag des Funded-Planers Futures — kette {von 2, nr} → „Trade 1/2“ + ⛓ (tpKetteSchritt in planZeileHtml); nur Funded-Zeilen, Challenge unverändert
+        ...(z.typ === 'funded' && z.kette && typeof z.kette === 'object' ? { mt5Baseline: { kette: z.kette } } : {}),
         recoverer: !!window._planIstRecoverer?.({ wd: z.winning_day === true || /winning/i.test(String(z.typ || '') + ' ' + String(z.konto || '')), master_firm: z.firma, master_symbol: z.symbol || z.symbol_root || '' }) }   // z.symbol ohne den NQ-Rückfall der Zeile darüber
       jeZ.set(p.id, { z, t, pl: e.pl, grund: e.grund }); return p })
       .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
@@ -90911,6 +90916,56 @@
   const E2_FELD = { ziel_gewinn: ['Ziel-Gewinn', '$', 'über dem Zyklus-Start'], max_trade: ['TP höchstens je Trade', '$', 'Deckel je Trade'], kosten_eur: ['Kontokosten', '€', 'offene Kosten zu Zyklusbeginn'],
     dd: ['Max Drawdown', '$', 'Abstand Start → Liquidation'], daily_usd: ['Daily Loss', '$', 'SL höchstens Daily Loss − Puffer'], hedge_eur: ['Hedge auf den Max DD', '€', 'Fusion-Betrag je voller DD'],
     sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'] }
+  /* FF2 MODELL „PUMP IN 2 TRADES“ (Finn 11.11.2026, Tradeify 150k: „Hochpumpen in einem einzigen Tag, weil danach das End of Day Draw anzieht … zu 70 % ein einziger
+   * Trade, zu 30 % zwei Trades“; Konstrukt side-session-notes 2026-11-11_FF2_tradeify_pump_konstrukt.md, FINAL). SCHNITTSTELLE ZUM BACKEND (1:1 so übernehmen):
+   * funded_plan_regeln.firmen[Tradeify] = { …, tp_modus: 'pump2', symbol: 'NQ', lock_usd: 100, je_groesse: { '150000': { ziel_gewinn, dd, kosten_eur, hedge_eur, + die Schlüssel
+   * von E2_P2 } } } — Uhrzeiten HH:MM Asia/Dubai, Spannen [von, bis], Kontrakte {Anzahl: Anteil 0–1, Summe 1}, Prozente 0–100, sl_hinter_liq bool. GET /admin/funded-plan
+   * liefert sie in regeln.firmen[].je_groesse (fdp_regeln_anzeige gibt je_groesse schon ganz durch), POST /admin/funded-plan/regeln schickt geänderte Schlüssel wie bisher
+   * unter firma.je_groesse.<Größe>.<Schlüssel> (fdp_regeln_aendern muss sie mit den Grenzen unten annehmen). Pläne tragen mt5_baseline.kette = {von: 2, nr: 1|2, rolle: 'haupt'}
+   * (WS2-Schnittstelle) und /admin/funded-plan gibt kette in plaene[] und geplant[] mit → „Trade 1/2“ + ⛓ (ttSchritt). Ohne tp_modus 'pump2' zeigt die Karte das Modell
+   * als „noch nicht aktiv“ mit diesen Standardwerten (nur Anzeige). Einträge: [Bezeichnung, Einheit, Info, Art, Untergrenze, Obergrenze]. */
+  const E2_P2 = {
+    pump2_pct: ['Zwei Trades', '%', 'so viele Pump-Tage laufen mit Trade 1 + Trade 2, der Rest mit einem Trade bis zum ganzen Ziel', 'zahl', 0, 100],
+    ein_kontrakte: ['Kontrakte · ein Trade', '', '', 'kt'],
+    ein_sl: ['SL · ein Trade', '$', 'gewürfelt, wenn der SL-Würfel einen SL setzt', 'spanne', 1, 20000],
+    t1_von: ['Start ab · Dubai', '', 'Trade 1 startet zufällig zwischen „ab“ und „bis“', 'zeit'],
+    t1_bis: ['Start bis · Dubai', '', 'Trade 1 startet spätestens hier', 'zeit'],
+    t1_tp: ['TP · Trade 1', '$', 'gewürfelt, unabhängig vom Ziel — Trade 2 holt den Rest', 'spanne', 1, 50000],
+    t1_kontrakte: ['Kontrakte · Trade 1', '', '', 'kt'],
+    t1_sl: ['SL · Trade 1', '$', 'gewürfelt, wenn der SL-Würfel einen SL setzt', 'spanne', 1, 20000],
+    sl_kein_pct: ['ohne SL', '%', 'ein Trade und Trade 1: so oft ohne SL (Risiko bis zur Liquidation), sonst SL aus der Spanne', 'zahl', 0, 100],
+    sl_hinter_liq: ['SL hinter der Liq erlaubt', '', 'an = SL darf auf oder hinter der Liquidation liegen (die Liq schließt zuerst); aus = höchstens Abstand zur Liq − Puffer', 'bool'],
+    t2_bis: ['Start spätestens · Dubai', '', 'Trade 2 startet zufällig zwischen dem Ende von Trade 1 und dieser Uhrzeit', 'zeit'],
+    t2_abstand_min: ['Abstand nach Trade 1', 'min', 'nach der genauen Balance-Lesung, gewürfelt (Jitter)', 'spanne', 0, 120],
+    t2_min_fenster_min: ['Mindestfenster', 'min', 'bleibt weniger Zeit bis „spätestens“: kein Trade 2, der Tag ist zu (⚪-Meldung)', 'zahl', 0, 240],
+    t2_kontrakte: ['Kontrakte · Trade 2', '', '', 'kt'],
+    t2_sl_be_pct: ['Break-even-SL', '%', 'Trade 2: so oft SL = Gewinn aus Trade 1 (schlimmstenfalls zurück auf den Tagesstart), sonst kein SL', 'zahl', 0, 100],
+    hedge_auf_usd: ['je Master-Risiko', '$', 'Fusion-Hedge = Hedge € × Risiko des Trades ÷ diesen Betrag (Risiko = Abstand zum SL, ohne SL zur Liq)', 'zahl', 1, 20000],
+  }
+  // Standardwerte aus dem Konstrukt (Finn 11.11.2026) — nur für die Anzeige „noch nicht aktiv“ und als Vorlage der SQL-Datei; der Planer liest nie von hier
+  const E2_P2_STD_TRADEIFY = { ziel_gewinn: [13000, 19000], dd: 4500, pump2_pct: 30, ein_kontrakte: { 3: 1 }, ein_sl: [4500, 4700], t1_von: '03:00', t1_bis: '16:00', t1_tp: [4000, 8000],
+    t1_kontrakte: { 2: 0.5, 3: 0.5 }, t1_sl: [4500, 4700], sl_kein_pct: 50, sl_hinter_liq: true, t2_bis: '18:30', t2_abstand_min: [2, 5], t2_min_fenster_min: 10, t2_kontrakte: { 3: 1 },
+    t2_sl_be_pct: 50, hedge_eur: 850, hedge_auf_usd: 4500 }
+  /* LUCID (Finn 11.11.2026 02:33: „eins zu eins die gleiche Logik, nur bei Lucid halt Daily Drawdown … von 2,7k“): Daily Loss 2.700 $ ab Tagesstart, weich (Tagespause, Konto lebt;
+   * liq_regeln Lucid 150k 'tagesstart' 2.700 bisher nur für challenge). „Mit SL“ nie über den Daily Loss → eigene Spanne 2.600–2.700; „ohne SL“ endet der Tag am Daily Loss.
+   * Hedge: kein Wert von Finn → leer, das Modell darf dann nicht eingeschaltet werden (e2Body). Ziel, TP, NQ wie Tradeify = Annahme, markiert (E2_P2_ANNAHME). */
+  const E2_P2_STD_LUCID = Object.assign({}, E2_P2_STD_TRADEIFY, { daily_usd: 2700, ein_sl: [2600, 2700], t1_sl: [2600, 2700], sl_hinter_liq: false, hedge_eur: null })
+  const E2_P2_ANNAHME = { lucid: new Set(['ziel_gewinn', 'pump2_pct', 'ein_kontrakte', 't1_von', 't1_bis', 't1_tp', 't1_kontrakte', 't2_bis', 't2_abstand_min', 't2_min_fenster_min', 't2_kontrakte', 't2_sl_be_pct', 'sl_kein_pct', 'hedge_auf_usd']) }
+  const E2_P2_ABS = [['Weg je Pump-Tag', ['pump2_pct']], ['Ein Trade', ['ein_kontrakte', 'ein_sl']], ['Trade 1', ['t1_von', 't1_bis', 't1_tp', 't1_kontrakte', 't1_sl']],
+    ['SL-Würfel · ein Trade + Trade 1', ['sl_kein_pct', 'sl_hinter_liq']], ['Trade 2 · gleicher Tag', ['t2_bis', 't2_abstand_min', 't2_min_fenster_min', 't2_kontrakte', 't2_sl_be_pct']]]
+  // Firmen mit vorbereitetem Pump-Modell → 'tradeify' | 'lucid' | null (Tradeify CFD heißt „tradeifycfd“ und trifft nie)
+  const e2PumpFirma = f => { if(!f) return null; const n = (f.namen || []).concat(f.name || '').map(x => String(x).toLowerCase().replace(/\s+/g, ''))
+    return n.includes('tradeify') ? 'tradeify' : n.some(x => x === 'lucid' || x === 'lucidtrading') ? 'lucid' : null }
+  const e2P2Std = fk => fk === 'lucid' ? E2_P2_STD_LUCID : E2_P2_STD_TRADEIFY
+  // Wert für die Anzeige (Vorschau und gesperrte Felder): Spanne „a–b“, Kontrakte „2 NQ 50 % · 3 NQ 50 %“, bool an/aus
+  const e2P2Txt = (k, v, sym) => {
+    const art = (E2_P2[k] || [])[3], ein = (E2_P2[k] || E2_FELD[k] || [])[1] || ''
+    if(v == null) return '–'
+    if(art === 'kt' && typeof v === 'object') return Object.keys(v).sort((a, b) => Number(a) - Number(b)).map(n => `${n} ${sym || 'NQ'}${Object.keys(v).length > 1 ? ' ' + e2De(Number(v[n]) * 100) + ' %' : ''}`).join(' · ')
+    if(art === 'bool') return v ? 'an' : 'aus'
+    if(Array.isArray(v)) return `${e2De(v[0])}–${e2De(v[1])}${ein ? ' ' + ein : ''}`
+    return `${art === 'zeit' ? v : e2De(v)}${ein && art !== 'zeit' ? ' ' + ein : ''}`
+  }
   // Gruppen je Größe (Finn: „erst Firma, dann Größe", ruhige Gliederung statt Chip-Wüste)
   const E2_GRUPPEN = [['Ziel', ['ziel_gewinn', 'max_trade']], ['Risiko', ['dd', 'daily_usd', 'sl']], ['Kosten · Hedge', ['kosten_eur', 'hedge_eur']]]
   const E2_ZEIT = { max_je_id_tag: ['Funded-Trades je ID und Tag', '', 'höchstens, älteste Konten zuerst'], abstand_id_min: ['Abstand je ID', 'min', 'zwischen zwei Funded derselben ID'],
@@ -90994,6 +91049,16 @@
     const text = m ? m.text : sp || (darf && n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : '')
     return `<div class="wd-fuss e2-fuss"><small class="${m ? m.art : sp ? 'fehler' : ''}">${escapeHtml(text)}</small></div>`
   }
+  // FF2: Tradeify ohne Modell-Werte → das Modell mit den Standardwerten aus dem Konstrukt, nur Anzeige, klar „noch nicht aktiv“
+  function e2P2Vorschau(sym, fk){
+    const S = e2P2Std(fk), ann = E2_P2_ANNAHME[fk] || new Set(), name = fk === 'lucid' ? 'Lucid 150k' : 'Tradeify 150k'
+    const z = (k, l) => `<div class="e2-zeile">${e2L(l || (E2_P2[k] || E2_FELD[k] || [k])[0], (E2_P2[k] || E2_FELD[k] || [])[2] || '', null, ann.has(k) ? 'wie Tradeify · Annahme' : '')}<em>${S[k] == null ? '<span class="e2-p2-aus">fehlt — Finn</span>' : escapeHtml(e2P2Txt(k, S[k], sym))}</em></div>`
+    return `<div class="e2-p2-vorschau"><div class="wd-abl-abschnitt">Modell Pump in 2 Trades<span class="e2-modus e2-p2-aus">noch nicht aktiv</span></div>
+      <div class="wd-fuss">Standardwerte aus dem Konstrukt (Finn 11.11.2026) — nur Anzeige. Änderbar, sobald Planer und SQL für ${escapeHtml(name)} eingespielt sind.${fk === 'lucid' ? ' Lucid: Daily Loss 2.700 $ ab Tagesstart (Tagespause, Konto lebt) — „mit SL“ bleibt darunter, „ohne SL“ endet der Tag am Daily Loss.' : ''}</div>
+      ${z('ziel_gewinn', 'Ziel-Gewinn')}${E2_P2_ABS.map(([titel, ks]) => `<div class="wd-abl-abschnitt">${escapeHtml(titel === 'Ein Trade' ? `Ein Trade · ${100 - S.pump2_pct} %` : titel === 'Trade 1' ? `Trade 1 · ${S.pump2_pct} %` : titel)}</div>${ks.map(k => z(k)).join('')}`).join('')}
+      <div class="wd-abl-abschnitt">Konto</div>${z('dd')}${S.daily_usd != null ? z('daily_usd') : ''}
+      <div class="wd-abl-abschnitt">Hedge</div>${z('hedge_eur', 'Fusion-Hedge')}${z('hedge_auf_usd')}</div>`
+  }
   function e2EinstHtml(Q, darf){
     // Fokus merken, bevor der Reiter neu gezeichnet wird (Cursor bleibt beim Tippen, s. oben)
     try{ const a = document.activeElement; _e2.fokus = a && a.dataset && a.dataset.e2Pfad ? { pfad: a.dataset.e2Pfad, pos: a.type === 'range' ? null : a.selectionStart } : null
@@ -91049,18 +91114,19 @@
       return k.length ? (k[0] === k[k.length - 1] ? k[0] : k[0] + '–' + k[k.length - 1]) + ' Kt' : '' }
     const kernwerte = x => { const grs = Object.keys(x.je_groesse || {}).sort((a, b) => Number(a) - Number(b)); if(!grs.length) return 'keine Werte'
       const w = x.je_groesse[_e2.gr[firmen.indexOf(x)] || grs[grs.length - 1]] || {}
-      const t = x.tp_modus === 'rest' ? (Array.isArray(w.sl) ? `SL ${e2De(w.sl[0])}–${e2De(w.sl[1])} $` : 'Rest bis Ziel') : (w.max_trade != null ? `TP ≤ ${e2De(w.max_trade)} $` : '')
+      const t = x.tp_modus === 'pump2' ? `Pump · ${e2De(w.pump2_pct)} % zwei Trades` : x.tp_modus === 'rest' ? (Array.isArray(w.sl) ? `SL ${e2De(w.sl[0])}–${e2De(w.sl[1])} $` : 'Rest bis Ziel') : (w.max_trade != null ? `TP ≤ ${e2De(w.max_trade)} $` : '')
       return [t, ktText(w)].filter(Boolean).join(' · ') }
     let zielT = '', hedgeT = '', g = null, w = {}, grs = []
     if(f){
       grs = Object.keys(f.je_groesse || {}).sort((a, b) => Number(a) - Number(b))
       if(!grs.includes(_e2.gr[fi])) _e2.gr[fi] = grs[grs.length - 1]
       g = _e2.gr[fi]; w = (f.je_groesse || {})[g] || {}
-      const bt = (R.konst || {}).breakeven_tol, rest = f.tp_modus === 'rest'
-      const modusInfo = rest ? 'TP = Rest bis zum Ziel (kein Deckel, kein Break-even), SL je Trade gewürfelt, Hedge fester Satz auf den Max DD'
+      const bt = (R.konst || {}).breakeven_tol, rest = f.tp_modus === 'rest', pump = f.tp_modus === 'pump2' && grs.length > 0   // FF2
+      const modusInfo = pump ? 'je Pump-Tag gewürfelt: ein Trade bis zum ganzen Ziel oder Trade 1 (eigener TP) + Trade 2 (Rest zum Ziel) am selben Tag; Hedge fester Satz je Master-Risiko'
+        : rest ? 'TP = Rest bis zum Ziel (kein Deckel, kein Break-even), SL je Trade gewürfelt, Hedge fester Satz auf den Max DD'
         : `TP bis „TP höchstens je Trade“, mehr als ${e2De(bt)} $ unter dem Start zurück auf Break-even, SL = Daily Loss der Stufe (liq_regeln), Hedge aus den offenen Kosten`
       const p = k => `f.${fi}.g.${g}.${k}`
-      const feld = k => { const v0 = w[k], [l, e, u] = E2_FELD[k]
+      const feld = (k, ueber) => { const v0 = w[k], [l, e, u] = Array.isArray(ueber) ? ueber : E2_FELD[k]
         // E2h (Finn 05.11.2026 zum Foto Apex 100k: „mach hier bei Ziel immer von – bis"): Ziel-Gewinn immer als Spanne — eine alte Zahl zeigt von = bis
         const v = k === 'ziel_gewinn' && !Array.isArray(v0) && v0 != null ? [v0, v0] : v0
         const zw = i => { const x = e2Zahl(e2Wert(p(k) + '.' + i, e2Txt(v[i]))); return x == null ? Number(v[i]) : x }   // Endwert aus dem Entwurf (merke() zieht ihn beim Tippen nach)
@@ -91080,7 +91146,25 @@
         return `<div class="e2-kt${alt ? '' : ' neu'}">${name}<span class="e2-balken"><b style="width:${Math.max(0, Math.min(100, ist == null ? Number(pct) || 0 : ist))}%"></b></span>${e2In(pk, pct, darfR, { kurz: true, einheit: '%', label: k + ' Kontrakte Anteil' })}${weg}</div>` }).join('')
       const ktHin = ktV ? e2KtHinweis(fi, g, ktV) : '', ktSum = ktV && e2KtBeruehrt(fi, g, ktV) ? e2KtSumme(fi, g, ktV) : null
       const ktFuss = ktV && (darfR || ktHin) ? `<div class="e2-ktfuss">${darfR && ktK.length < 10 ? `<button type="button" class="btn btn-ghost btn-xs" data-e2-ktadd="${fi}:${escapeHtml(g)}">+ Zeile</button>` : ''}<small class="e2-ktsum${ktHin ? ' fehler' : ''}" data-e2-ktsum="${fi}:${escapeHtml(g)}">${escapeHtml(ktHin || (ktSum != null ? `Summe ${e2De(ktSum)} %` : ''))}</small></div>` : ''
-      const weitere = Object.keys(w).filter(k => k !== 'kontrakte' && !E2_FELD[k])
+      const weitere = Object.keys(w).filter(k => k !== 'kontrakte' && !E2_FELD[k] && !(pump && E2_P2[k]))
+      /* FF2: Felder des Pump-Modells je Art (E2_P2) — Pfade f.i.g.G.<Schlüssel> wie alle anderen (Kontrakte: …<Schlüssel>.<Anzahl>), e2Body schickt sie mit */
+      const p2Feld = k => { const d = E2_P2[k], v = w[k]; if(!d || v === undefined) return ''
+        const [l, e, info, art] = d, lab = l + (e ? ' · ' + e : '')
+        if(art === 'spanne' && Array.isArray(v)) return e2WF(lab, info + ' · von – bis', e2Spanne(e2In(p(k) + '.0', v[0], darfR, { label: l + ' von' }), e2In(p(k) + '.1', v[1], darfR, { label: l + ' bis' })))
+        if(art === 'zeit') return e2WF(lab, info, e2In(p(k), v, darfR, { label: l, zeit: true }))
+        if(art === 'zahl') return e2WF(lab, info, e2In(p(k), v, darfR, { label: l }))
+        return '' }
+      const p2Rest = k => { const d = E2_P2[k], v = w[k]; if(!d || v === undefined) return ''
+        if(d[3] === 'bool') return e2Sch(p(k), !!v, darfR, d[0], d[2])
+        if(d[3] === 'kt' && v && typeof v === 'object') return `<div class="wd-abl-abschnitt e2-p2-kt">${escapeHtml(d[0])} · Anteil</div>` + Object.keys(v).sort((a, b) => Number(a) - Number(b)).map(n => {
+          const pct = Math.round(Number(v[n]) * 1000) / 10, ist = e2Zahl(e2Wert(p(k) + '.' + n, String(pct)))
+          return `<div class="e2-kt"><span>${escapeHtml(n)} ${sym}</span><span class="e2-balken"><b style="width:${Math.max(0, Math.min(100, ist == null ? pct : ist))}%"></b></span>${e2In(p(k) + '.' + n, pct, darfR, { kurz: true, einheit: '%', label: d[0] + ' ' + n + ' Anteil' })}</div>` }).join('')
+        return '' }
+      const p2Pct = e2Zahl(e2Wert(p('pump2_pct'), e2Txt(w.pump2_pct)))
+      const p2P = p2Pct == null ? null : Math.max(0, Math.min(100, p2Pct))
+      const p2Titel = t => t === 'Ein Trade' && p2P != null ? `Ein Trade · ${e2De(100 - p2P)} %` : t === 'Trade 1' && p2P != null ? `Trade 1 · ${e2De(p2P)} %` : t
+      const pumpT = !pump ? '' : E2_P2_ABS.map(([titel, ks]) => `<div class="wd-abl-abschnitt">${escapeHtml(p2Titel(titel))}</div><div class="wd-felder">${ks.map(p2Feld).join('')}</div>${ks.map(p2Rest).join('')}`).join('')
+        + `<div class="wd-abl-abschnitt">Konto</div><div class="wd-felder">${['dd', 'daily_usd'].filter(k => w[k] != null).map(k => feld(k)).join('')}</div>`
       const pille = grs.length > 1 ? `<div class="apg-zeitraum e2-gr" role="tablist" aria-label="Kontogröße">${grs.map(x => `<button type="button" class="${x === g ? 'on' : ''}" data-e2-gr="${fi}:${escapeHtml(x)}" role="tab" aria-selected="${x === g}">${escapeHtml(fcfdGroesse(x))}</button>`).join('')}</div>` : ''
       zielT = `<div class="e2-fdetail">
         ${pille ? `<div class="e2-fedit-kopf">${pille}</div>` : ''}
@@ -91088,17 +91172,18 @@
         <div class="wd-felder">${w.ziel_gewinn != null ? feld('ziel_gewinn') : ''}</div>
         ${e2Sch(`f.${fi}.cons.an`, consOrig != null, darfR, 'Consistency', 'größter Tag höchstens x % des Gewinns im Zyklus — nur Parameter, der Funded-Planer prüft keine Consistency (Finn 27.10.2026)')}
         ${consAn ? `<div class="e2-zeile e2-cons"><input type="range" class="e2-range" min="10" max="100" step="5" data-e2-pfad="f.${fi}.cons" data-e2-orig="${consOrig != null ? consOrig : ''}" value="${consW}"${darfR ? '' : ' disabled'} aria-label="Consistency in %"><output class="e2-range-w">${e2De(consW)} %</output></div>` : ''}
-        <div class="wd-abl-abschnitt">Trade<span class="e2-modus">${rest ? 'Rest bis Ziel' : 'normal'}${e2I(modusInfo)}</span></div>
-        <div class="wd-felder">${['max_trade', 'sl', 'dd', 'daily_usd'].filter(k => w[k] != null).map(feld).join('')}</div>
-        ${ktZeilen ? `<div class="wd-abl-abschnitt">Kontrakte ${sym} · Anteil</div>${ktZeilen}${ktFuss}` : ''}
+        <div class="wd-abl-abschnitt">Trade<span class="e2-modus">${pump ? 'Pump in 2 Trades' : rest ? 'Rest bis Ziel' : 'normal'}${e2I(modusInfo)}</span></div>
+        ${pump ? pumpT : `<div class="wd-felder">${['max_trade', 'sl', 'dd', 'daily_usd'].filter(k => w[k] != null).map(k => feld(k)).join('')}</div>
+        ${ktZeilen ? `<div class="wd-abl-abschnitt">Kontrakte ${sym} · Anteil</div>${ktZeilen}${ktFuss}` : ''}`}
         ${weitere.map(k => `<div class="e2-zeile">${e2L(k, null, null, 'nur per SQL')}<em>${escapeHtml(typeof w[k] === 'object' ? JSON.stringify(w[k]) : String(w[k]))}</em></div>`).join('')}`
-        : '<div class="wd-fuss">noch keine Werte hinterlegt — neue Größen per SQL</div>'}</div>`
+        : '<div class="wd-fuss">noch keine Werte hinterlegt — neue Größen per SQL</div>'}${!pump && e2PumpFirma(f) ? e2P2Vorschau(sym, e2PumpFirma(f)) : ''}</div>`
       // rechts: Firma im Planer + Kosten · Hedge (Größe wie in der Mitte gewählt)
-      const kh = ['kosten_eur', 'hedge_eur'].filter(k => w[k] != null)
+      const kh = ['kosten_eur', 'hedge_eur'].filter(k => w[k] != null || (pump && k === 'hedge_eur' && k in w))   // FF2 Lucid: Hedge leer steht trotzdem zur Eingabe da
       hedgeT = `<div class="wd-abl-abschnitt">${escapeHtml(f.name)}</div>
         <label class="e2-sch">${e2L('im Planer', grs.length ? 'an = ihre Funded-Konten werden geplant' : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}<input type="checkbox" class="e2-sw" data-e2-pfad="f.${fi}.an" data-e2-orig="${f.an ? '1' : ''}"${e2Wert(`f.${fi}.an`, !!f.an) ? ' checked' : ''}${darfR && grs.length ? '' : ' disabled'}></label>
-        ${kh.length || f.lock_usd != null ? `<div class="wd-abl-abschnitt">Kosten · Hedge${grs.length > 1 ? `<span class="e2-modus">${escapeHtml(fcfdGroesse(g))}</span>` : ''}</div>
-        <div class="wd-felder">${kh.map(feld).join('')}
+        ${kh.length || f.lock_usd != null || pump ? `<div class="wd-abl-abschnitt">Kosten · Hedge${grs.length > 1 ? `<span class="e2-modus">${escapeHtml(fcfdGroesse(g))}</span>` : ''}</div>
+        <div class="wd-felder">${kh.map(k => pump && k === 'hedge_eur' ? feld(k, ['Fusion-Hedge', '€', 'fester Satz je Master-Risiko, für ein Trade, Trade 1 und Trade 2 (Finn 11.11.2026: Tradeify 850 € auf 4.500 $)']) : feld(k)).join('')}${pump ? p2Feld('hedge_auf_usd') : ''}</div>
+          ${pump && w.hedge_eur == null ? '<div class="wd-fuss"><span class="e2-p2-aus">Hedge-Satz fehlt — ohne ihn lässt sich die Firma nicht einschalten</span></div>' : ''}<div class="wd-felder">
           ${f.lock_usd != null ? e2WF('Liq-Lock · $', 'Liquidation EOD-trailing, fest bei Größe + Lock (0 = fest ab dem Start)', e2In(`f.${fi}.lock`, f.lock_usd, darfR, { label: 'Liq-Lock' })) : ''}</div>` : ''}`
     }
     const firmenK = `<div class="wd-set-card"><h4><span>Firmen<span class="h4sub">${an.length} von ${firmen.length} im Planer · Klick zeigt die Details</span></span></h4>
@@ -91186,6 +91271,11 @@
     if(!f) return { fehler: 'Firma nicht gefunden — neu laden' }
     const fa = { name: f.name }
     if(hat(`f.${i}.an`) && !!ent[`f.${i}.an`] !== !!f.an) fa.an = !!ent[`f.${i}.an`]
+    // FF2 (Lucid ohne Hedge-Satz, Finn hat keinen genannt): Pump-Modell nur mit Hedge je Größe einschalten — Entwurf zählt mit
+    if(fa.an === true && f.tp_modus === 'pump2'){
+      const ohne = Object.entries(f.je_groesse || {}).filter(([g, w]) => { const pp = `f.${i}.g.${g}.hedge_eur`, x = hat(pp) ? e2Zahl(ent[pp]) : (w && w.hedge_eur != null ? Number(w.hedge_eur) : null); return !(x > 0) })
+      if(ohne.length) return { fehler: `${ohne.map(([g]) => fcfdGroesse(g)).join(', ')}: Fusion-Hedge fehlt — erst eintragen, dann einschalten` }
+    }
     // Consistency (E2d): Schalter aus → null, an → Zahl 10–100
     if(hat(`f.${i}.cons.an`) || hat(`f.${i}.cons`)){
       const orig = f.consistency_pct != null ? Number(f.consistency_pct) : null
@@ -91212,6 +91302,40 @@
           if(!Object.keys(kt).length || Math.abs(sum - 100) > 1) return { fehler: `${fcfdGroesse(g)}: Summe ${e2De(Math.round(sum * 10) / 10)} % — muss 100 % sein` }
           const norm = o => JSON.stringify(Object.entries(o).map(([kk, ww]) => [Number(kk), Math.round(Number(ww) * 1000) / 1000]).filter(x => x[1] > 0).sort((a, b) => a[0] - b[0]))
           if(norm(kt) !== norm(v)) neu[k] = kt
+          continue
+        }
+        // FF2: Felder des Pump-Modells (E2_P2) — Art und Grenzen wie dort; der Server prüft dieselben Grenzen (Schnittstelle oben)
+        const p2 = E2_P2[k]
+        if(p2){
+          const [l, , , art, lo, hi] = p2, gl = `${fcfdGroesse(g)} ${l}`
+          if(art === 'kt'){
+            if(!v || typeof v !== 'object' || !Object.keys(v).some(n => hat(p + '.' + n))) continue
+            const kt = {}; let sum = 0
+            for(const n of Object.keys(v)){ const x = hat(p + '.' + n) ? e2Zahl(ent[p + '.' + n]) : Math.round(Number(v[n]) * 1000) / 10
+              if(x == null || x < 0 || x > 100) return { fehler: `${gl} ${n}×: Anteil 0–100 %` }
+              if(x > 0) kt[n] = Math.round(x * 10) / 1000; sum += Math.round(x * 10) / 10 }
+            if(!Object.keys(kt).length || Math.abs(Math.round(sum * 10) / 10 - 100) > 1) return { fehler: `${gl}: Summe ${e2De(Math.round(sum * 10) / 10)} % — muss 100 % sein` }
+            const norm = o => JSON.stringify(Object.entries(o).map(([n, x]) => [Number(n), Math.round(Number(x) * 1000) / 1000]).filter(x => x[1] > 0).sort((a, b) => a[0] - b[0]))
+            if(norm(kt) !== norm(v)) neu[k] = kt
+            continue
+          }
+          if(art === 'bool'){ if(hat(p) && !!ent[p] !== !!v) neu[k] = !!ent[p]; continue }
+          if(art === 'zeit'){
+            if(!hat(p) || String(ent[p]).trim() === e2Txt(v)) continue
+            const s = String(ent[p]).trim()
+            if(!/^\d{2}:\d{2}$/.test(s) || +s.slice(0, 2) > 23 || +s.slice(3) > 59) return { fehler: `${gl}: Uhrzeit als HH:MM` }
+            neu[k] = s; continue
+          }
+          if(art === 'spanne' && Array.isArray(v)){
+            if(!hat(p + '.0') && !hat(p + '.1')) continue
+            const a = hat(p + '.0') ? e2Zahl(ent[p + '.0']) : Number(v[0]), e = hat(p + '.1') ? e2Zahl(ent[p + '.1']) : Number(v[1])
+            if(a == null || e == null || a < lo || e > hi || a > e) return { fehler: `${gl}: ${e2De(lo)}–${e2De(hi)}, von ≤ bis` }
+            if(a !== Number(v[0]) || e !== Number(v[1])) neu[k] = [a, e]
+            continue
+          }
+          if(!hat(p) || String(ent[p]) === e2Txt(v)) continue
+          const x = e2Zahl(ent[p]); if(x == null || x < lo || x > hi) return { fehler: `${gl}: Zahl ${e2De(lo)}–${e2De(hi)}` }
+          if(x !== Number(v)) neu[k] = x
           continue
         }
         if(!E2_FELD[k]) continue
@@ -91327,6 +91451,7 @@
           const mz = /^f\.\d+\.g\.(\d+)\.ziel_gewinn\.[01]$/.exec(p)   // E2h: „Ziel von – bis $“ unter dem Feld sofort mitziehen
           if(mz){ const wf = el.closest('.wd-feld'), kl = wf && wf.querySelector('.e2-wf-klein'), ins = wf ? [...wf.querySelectorAll('input[data-e2-pfad]')] : []
             if(kl && ins.length === 2){ const zz = ins.map(x => e2Zahl(x.value)); if(zz.every(x => x != null)) kl.textContent = `Ziel ${e2De(Number(mz[1]) + zz[0])} – ${e2De(Number(mz[1]) + zz[1])} $` } }
+          if(/^f\.\d+\.g\.[^.]+\.(ein|t1|t2)_kontrakte\.\d+$/.test(p)){ const b2 = el.closest('.e2-kt')?.querySelector('.e2-balken > b'), x2 = e2Zahl(el.value); if(b2) b2.style.width = Math.max(0, Math.min(100, x2 || 0)) + '%' }   // FF2
           const mk = /^f\.(\d+)\.g\.([^.]+)\.kontrakte\.\d+$/.exec(p)   // E2g: Balken + Summe sofort mitziehen
           if(mk){ const b = el.closest('.e2-kt')?.querySelector('.e2-balken > b'), x = e2Zahl(el.value); if(b) b.style.width = Math.max(0, Math.min(100, x || 0)) + '%'
             const v = ktOrig(mk[1], mk[2]), sm2 = box.querySelector(`[data-e2-ktsum="${mk[1]}:${CSS.escape(mk[2])}"]`), h = e2KtHinweis(mk[1], mk[2], v)
@@ -91647,7 +91772,9 @@
         firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: 'tvv2', start_um: x.start_um || null, start: x.start_um || null,
         menge: kt, tp: x.tp ?? null, sl: x.sl ?? null, notes: stufe ? 'Funded-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
         konto_id: String(x.konto_id || ''), balance_live: true, boden: x.liq ?? null, boden_min: x.liq ?? null, boden_art: x.liq != null ? 'nachziehend_lock' : null,
-        auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd }, extra || {})
+        auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd,
+        // FF2: Pump-Tag mit zwei Trades — kette {von: 2, nr} aus /admin/funded-plan (plaene[]/geplant[]) → „Trade 1/2“ + ⛓ wie die Tages-Kette (ttSchritt); fehlt = wie bisher
+        kette: x.kette && typeof x.kette === 'object' ? x.kette : null }, extra || {})
     }
     const plaene = d.plaene || []
     // Vorschläge des Funded-Planers (ohne start_um, Zeit aus mt5_baseline.funded_plan — Backend gibt sie als start_um) = „Zu bestätigen"
