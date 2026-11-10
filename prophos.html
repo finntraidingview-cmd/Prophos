@@ -4198,6 +4198,7 @@
   #e3-einst .e3-tt-konto{display:inline-flex;align-items:center;gap:4px;background:var(--e3-lila-bg);color:var(--e3-lila);border-radius:999px;padding:2px 4px 2px 9px;font-size:12px}
   #e3-einst .e3-tt-konto button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:0 4px;line-height:1}
   #e3-einst .e3-tt-sp select.e3-in{width:100%;max-width:100%}
+  #e3-einst .e3-tt-formel{font-size:12px;color:var(--e3-sub);margin-right:2px}
   #e3-einst .e3-tt-warn{font-size:12px;color:var(--danger);margin:2px 0 8px}
   #e3-einst .e3-tt-warn[hidden]{display:none}
   #e3-einst .e3-tt-hinweis{font-size:12px;color:var(--e3-sub);margin:-4px 0 10px}
@@ -58292,7 +58293,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2166'
+  const OS_TAB_BUILD = '2026-09-22.2167'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -91928,7 +91929,8 @@
    * erscheinen, sobald das Backend tagesteilung_gruppen [{gruppe_id, name, an}] liefert (Feld „gruppen" = Liste der gruppe_id). */
   const TT_STD = { an: false, firmen: ['tradeify', 'lucidtrading', 'topstep', 'fundednext', 'fundingpips', 'the5ers', 'ftmo', 'blueguardian', 'tradeifycfd'],
     anteile: [80, 12, 6, 2], haupt_pct: [70, 90], neben_pkt: [10, 25], neben_sl_faktor: [1, 2], neben_menge_max: 0.5, min_tp_usd: 300,
-    abstand_min: [1, 180], schluss_pct: [5, 10], schluss_min: [2, 120], nur_konten: [], test_n: null, test_ids: [] }
+    abstand_min: [1, 180], schluss_pct: [5, 10], schluss_min: [2, 120], nur_konten: [], test_n: null, test_ids: [],
+    neben_tp_teiler: [3, 5], neben_lots_streu: [0.7, 1.3], lots_bezug: 'tagesziel' }   // WS3 (app.py TT_STANDARD) — Rückfall, wenn GET die Felder noch nicht liefert
   const TT_ART = { futures: 'Futures', topstep: 'Topstep', cfd: 'CFD' }
   function ttFirmen(D, tt){
     if(Array.isArray(D.tagesteilung_firmen)) return D.tagesteilung_firmen.filter(f => f && f.key)
@@ -91957,10 +91959,16 @@
       <div class="e3-tt-summe${Math.abs(summe - 100) > 0.5 ? ' falsch' : ''}" data-e3-tt-summe>Summe ${e3Z(summe)} %${Math.abs(summe - 100) > 0.5 ? ' — muss 100 sein' : ''}</div>
       <div class="e3-tt-bsp">Beim Planen würfelt der Planer je Konto und Tag die Anzahl. Der Haupt-Trade steht zufällig an Platz 1 bis n.</div>`
     // 2) Haupt- und Neben-Trades
+    const lb = tt.lots_bezug === 'haupt' ? 'haupt' : 'tagesziel'
+    const lbH = darf ? `<select class="input e3-in" data-e3-ort="tt" data-e3-pfad='["lots_bezug"]' data-e3-alt="${lb}" aria-label="Lots-Bezug">${[['tagesziel', 'Tagesziel'], ['haupt', 'Haupt']].map(([k, t]) => `<option value="${k}"${k === lb ? ' selected' : ''}>${t}</option>`).join('')}</select>`
+      : e3E(lb === 'haupt' ? 'Haupt' : 'Tagesziel')
     const hn = e3R('Haupt-Anteil am Tagesziel', sp('haupt_pct', '%', '1'), 'Der Haupt-Trade holt zufällig diesen Anteil vom Tagesziel (TP-Wert wie heute), normale Lots')
-      + e3R('Neben-Ziel', sp('neben_pkt', 'Pkt', '1'), 'TP-Abstand der Neben-Trades in NQ- bzw. Index-Punkten — klein und kurz, den Rest des Tagesziels teilen sie sich')
-      + e3R('Neben-SL', sp('neben_sl_faktor', '× Ziel', '0.1'), 'Eigener kleiner SL der Neben-Trades = Faktor × ihr TP-Abstand, nie hinter das Restbudget')
-      + e3R('Neben-Lots höchstens', inp(['neben_menge_max'], tt.neben_menge_max, null, '× Haupt', '0.05'), 'Neben-Trades höchstens diesen Anteil der Haupt-Lots, mindestens 1 Kontrakt (Micro erlaubt)')
+      // WS3b (11.11.2026, Regel seit WS3 e25fb921, Finn 10.11.: „Lots klein halten … Take Profit runterholen … TP und Lots sollen beide Varianz kriegen“):
+      // statt „Neben-Ziel 10–25 Pkt“ / „Neben-Lots höchstens 0,5 × Haupt“ (tt_neben, alt) die drei WS3-Werte aus GET …/einstellungen → tagesteilung
+      + e3R('Neben-Lots', `<span class="e3-tt-formel">Haupt × Anteil ×</span> ${sp('neben_lots_streu', '', '0.05')}`, `Lots je Neben-Trade = Haupt-Lots × sein Anteil am Tagesziel × Würfel aus dieser Spanne (je Trade neu), auf die Lot-Stufe der Firma gerundet, mindestens das kleinste Lot${lb === 'haupt' ? ' — Bezug „Haupt“: Anteil ÷ Haupt-Anteil' : ''}`)
+      + e3R('Neben-TP und -SL', `<span class="e3-tt-formel">Haupt ÷</span> ${sp('neben_tp_teiler', '', '0.1')}`, 'TP- und SL-Abstand in Punkten = Abstand des Haupt-Trades ÷ Würfel aus dieser Spanne (je Neben-Trade neu, derselbe für TP und SL). TP höchstens der Rest bis Tagesziel und Konto-Ziel.')
+      + e3R('Lots-Bezug', lbH, 'Tagesziel (Standard) = Haupt-Lots × Anteil. Haupt = Haupt-Lots × Anteil ÷ Haupt-Anteil (mehr Lots, derselbe Punkt-Abstand vor dem Teiler)')
+      + e3R('Neben-SL ohne Haupt-SL', sp('neben_sl_faktor', '× TP', '0.1'), 'Nur wenn der Haupt-Trade keinen SL hat: SL = Faktor × TP-Abstand des Neben-Trades, nie hinter das Restbudget')
       + e3R('Mindest-TP je Trade', inp(['min_tp_usd'], tt.min_tp_usd, null, '$', '10'), 'kleinerer Teil wird mit dem nächsten zusammengelegt')
     // 3) Abstand + Zufalls-Schluss
     const az = e3R('Abstand zum nächsten Trade', sp('abstand_min', 'min', '1'), 'Uhr startet erst, wenn der vorige Trade zu und genau gelesen ist; Richtung je Trade neu gewürfelt')
@@ -92038,6 +92046,7 @@
       if(feld === 'an') body.an = e0.checked
       else if(feld === 'firmen' || feld === 'gruppen' || feld === 'test_ids') body[feld] = x.els.filter(c => c.checked).map(c => c.dataset.e3I)
       else if(feld === 'test_n') body.test_n = zahl(e0.value)
+      else if(feld === 'lots_bezug') body.lots_bezug = e0.value === 'haupt' ? 'haupt' : 'tagesziel'   // WS3b: Text, keine Zahl
       else if(x.els.length > 1 || e0.dataset.e3I != null){ const w = []; x.els.forEach(el => { w[Number(el.dataset.e3I)] = zahl(el.value) }); body[feld] = w }
       else body[feld] = zahl(e0.value)
     }
@@ -92047,10 +92056,10 @@
   function ttPruefen(body){
     for(const [k, v] of Object.entries(body)){
       if(Array.isArray(v) && !['firmen', 'gruppen', 'test_ids'].includes(k) && v.some(x => x == null || !isFinite(x))) return `${k}: alle Felder ausfüllen`
-      if(!Array.isArray(v) && typeof v !== 'boolean' && k !== 'test_n' && (v == null || !isFinite(v))) return `${k}: Wert fehlt`
+      if(!Array.isArray(v) && typeof v !== 'boolean' && k !== 'test_n' && k !== 'lots_bezug' && (v == null || !isFinite(v))) return `${k}: Wert fehlt`
     }
     if(body.anteile){ const s = body.anteile.reduce((a, x) => a + x, 0); if(Math.abs(s - 100) > 0.5) return `Würfel: Summe ${e3Z(s)} statt 100 %` }
-    for(const k of ['haupt_pct', 'neben_pkt', 'neben_sl_faktor', 'abstand_min', 'schluss_pct', 'schluss_min']) if(body[k] && body[k][0] > body[k][1]) return `${k}: von größer als bis`
+    for(const k of ['haupt_pct', 'neben_pkt', 'neben_sl_faktor', 'abstand_min', 'schluss_pct', 'schluss_min', 'neben_tp_teiler', 'neben_lots_streu']) if(body[k] && body[k][0] > body[k][1]) return `${k}: von größer als bis`
     return ''
   }
   async function ttSpeichern(knopf){
