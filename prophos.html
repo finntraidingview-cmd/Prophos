@@ -5632,6 +5632,8 @@
   #dashboard-view .mwd-card.mwd-done:hover,#dashboard-view .mwd-card.mwd-planned:hover{opacity:1}
   #dashboard-view .mwd-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:12.5px}
   #dashboard-view .mwd-person{font-weight:700;color:var(--ink)}
+  #mwdErledigtModal .mwd-erl-grund{margin:6px 0 2px;padding:5px 9px;border-radius:7px;font-size:11.5px;color:var(--warn-ink, #b45309);background:color-mix(in srgb, var(--warn-ink, #b45309) 8%, transparent)}
+  #mwdErledigtModal .mwd-erl-grund[hidden]{display:none}
   #dashboard-view .mwd-konto{color:var(--sub)}
   #dashboard-view .mwd-chip{font-family:var(--mono);font-weight:700;font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--surface-tint);color:var(--sub)}
   #dashboard-view .mwd-chip.mwd-buy{background:rgba(18,183,106,.12);color:#0E9757}
@@ -15256,6 +15258,8 @@
       <div class="modal-body">
           <!-- Kopf im Stil der Winning-Days-Karte (25.09.2026, Finn: „komplett hässlich" — der lange Kontoname im Titel brach um) -->
           <div class="mwd-erl-kopf" id="mwd-erl-info"></div>
+          <!-- AB1 (10.11.2026): warum das Popup statt Ein-Klick kommt (wdlEinKlickGrund) — nur vom Radar-Knopf „Abhaken“ -->
+          <div class="mwd-erl-grund" id="mwd-erl-grund" hidden></div>
           <div class="mwd-erl-felder">
             <div class="field">
               <label>Master ($)</label>
@@ -38230,6 +38234,8 @@
       unter: pw.person ? String(pw.person) : '', base: pw.mt5_baseline || null } : null   // base: AB2b Plan-Balance (ab2PlanBal)
     const k = pw.konto || {}
     const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = 'Trade erledigt'
+    { const g = document.getElementById('mwd-erl-grund'), gr = opts && !opts.einKlick && opts.grund ? String(opts.grund) : ''   // AB1: Grund fürs Popup
+      if(g){ g.hidden = !gr; g.textContent = gr ? 'Nicht direkt abgehakt: ' + gr : '' } }
     const info = document.getElementById('mwd-erl-info')
     if(info){
       const buy = pw.richtung === 'buy', sell = pw.richtung === 'sell', f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
@@ -40458,9 +40464,19 @@
     // (a) geblowt / Konto weg — Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026)
     if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
     const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
+    /* AB1 (Finn 10.11.2026, genervt: „haben wir schon mal besprochen, immer noch der Bug“; Fall Mike Lucid 150k …0002, Orbit, BUY 2 NQ, TP 3.451 $, −2.757 $,
+     * Ergebnis „⏸ Tageslimit“): die Demo endet am Tageslimit mit grund 'demo_liq' — das galt hier als „Blow-Beweis oder unklares Ende“ und öffnete JEDES Mal das Popup,
+     * obwohl die echte Puls-Lesung das Konto lebend zeigt. Tageslimit (weicher Tagesstopp, Lucid/Apex/Topstep) = Konto lebt, „Nichts ändern“. Beleg: dieselbe Prüfung, die
+     * im Radar „⏸ Tageslimit“ schreibt (wdlBlowStand softBreach: Balance am Tageslimit, nicht am Konto-Boden) aus einer ECHTEN Lesung (nicht geschätzt). Nur dann zählt
+     * demo_liq nicht als Blow-Verdacht; alle Prüfungen danach (Boden unbekannt, Balance an der Liq, unplausibel, Hedge-P&L …) bleiben. */
+    // Prüfer AB1 (MUSS): nur wenn die Liq der Zeile wirklich das Tageslimit ist (wdlLiqIstTag: liq_gilt 'regel', nicht der Konto-Boden) und der Boden BEKANNT ist und die
+    // Lesung darüber liegt — sonst könnte softBreach (Toleranz 10 % des Daily) auch neben einem knapp darüber liegenden Trailing-Boden stehen (echter Blow)
+    const _stTag = wdlBlowStand(t)
+    const tagLebt = !!(_stTag && !_stTag.geschaetzt && !_stTag.geblowt && _stTag.softBreach && wdlLiqIstTag(t) && Number(_stTag.liq) > 0 && Number(_stTag.bal) > Number(_stTag.liq)
+      && zahl(t.pl_balance) && Number(t.balance_end) > 0)
     if(e.konto_geblowt || e.konto_weg || e.konto_weg_vermutet || /^konto_(nicht_erreicht|weg|geblowt)/.test(String(e.puls_fehler || ''))
        || ['tsx_geblowt', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes(String(e.grund || ''))
-       || (['demo_liq', 'demo_beide', 'demo_unklar'].includes(String(e.grund || '')) && !wdlLesungAmTp(t))) return 'Blow-Beweis oder unklares Ende'
+       || (['demo_liq', 'demo_beide', 'demo_unklar'].includes(String(e.grund || '')) && !wdlLesungAmTp(t) && !(tagLebt && String(e.grund) === 'demo_liq'))) return 'Blow-Beweis oder unklares Ende'
     // (b) Ziel erreicht / bestanden / Phasenwechsel
     if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlZielMarkiert(t)) return 'Ziel erreicht'
     const ka = t.konto_aktuell, typ = String(t.konto_typ || (ka && ka.typ) || '')
@@ -40493,7 +40509,7 @@
     if(pl < 0 && (!ka || (['challenge', 'phase1', 'phase2', 'funded', 'funded_cfd'].includes(typ) && !(Number(stand.liq) > 0)))) return 'Verlust, Boden unbekannt'
     if(pl < 0 && Number(stand.liq) > 0 && Number(t.balance_end) > 0 && Number(t.balance_end) <= Number(stand.liq)) return 'Balance an der Liq'   // Blow ohne Beweis oben
     const dm = t.demo || {}
-    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t) && !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'   // Lesung am TP: s. wdlLesungAmTp
+    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t) && !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'   // Lesung am TP: s. wdlLesungAmTp   // Lesung am TP: s. wdlLesungAmTp
     const liqAbstand = Number(t.balance_start) > 0 && Number(stand.liq) > 0 && Number(t.balance_start) > Number(stand.liq) ? Number(t.balance_start) - Number(stand.liq) : 0
     const grenze = pl > 0 ? 2 * Math.max(Math.abs(Number(t.master_tp)) || 0, 1000)   // Gewinn: nur der TP (Winning Day TP 300 + 4.500 $ bis zur Liq ließe sonst +9.000 $ durch)
       : (Number(stand.liq) > 0 ? 2 : 1.5) * Math.max(Math.abs(Number(t.master_sl)) || 0, Math.abs(Number(t.master_risk)) || 0, liqAbstand, 1000)
@@ -41593,7 +41609,7 @@
       const grund = t ? wdlEinKlickGrund(t) : 'kein Trade'
       if(t && wdlVormerkbar(t, grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }   // ohne Lesung: vormerken, nie schätzen (02.11.2026)
       const ein = !!t && !grund; if(ein) _wdlEinKlickAt = Date.now()
-      if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: ein })   // Radar = Admin-Ansicht (27.10.2026)
+      if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: ein, grund: grund || '' })   // Radar = Admin-Ansicht (27.10.2026); AB1: Grund steht im Popup
       return
     }
     // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen (nicht auf Knöpfe/Notiz) öffnet das Popup des Admin-Trade-Planers
@@ -58066,7 +58082,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2152'
+  const OS_TAB_BUILD = '2026-09-22.2153'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

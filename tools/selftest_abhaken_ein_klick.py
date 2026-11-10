@@ -45,7 +45,7 @@ const flag = n => t => !!(t && t['_' + n]);
 const wdlIstPolar = flag('polar'), mklWdEigenerPlan = () => false, wdlAbhakenSperre = () => '', wdlManuell = flag('man'), wdlGeblowtUrteil = flag('blow'), wdlKontoWeg = flag('weg'),
   wdlKontoWegErg = () => '', wdlTpUndWeg = flag('tpweg'), wdlBestandenChip = flag('best'), wdlFehltChip = flag('fehlt'), wdlZielMarkiert = flag('ziel'), wdlFcfdZielErreicht = flag('fz'),
   wdlWartet = flag('wart'), wdlPlGesch = flag('gesch'), wdlLiqIstTag = flag('tag'), wdlTid = t => t.id;
-const wdlBlowStand = t => t._ohneLiq ? { liq: null } : { liq: 90000 };
+const wdlBlowStand = t => Object.assign(t._ohneLiq ? { liq: null, bal: t.balance_end } : { liq: 90000, bal: t.balance_end }, t._soft ? { softBreach: true } : {}, t._sgesch ? { geschaetzt: true } : {}, t._sblow ? { geblowt: true } : {});
 const WDL_UEBERGANG = { challenge: 'x', phase1: 'x', phase2: 'x' };
 """
 BASIS = {"id": "p", "status": "review", "route": "mt5v2", "konto_typ": "phase1", "konto_aktuell": {"typ": "phase1", "ziel_erreicht_at": None}, "ziel_usd": 110000,
@@ -82,6 +82,17 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("Verlust ohne SL über dem Doppelten des Risikos", {"master_sl": None, "master_risk": 1500, "pl_balance": -4000}, False),
           ("Verlust ohne SL und Risiko, Abstand Start → Liq", {"master_sl": None, "pl_balance": -2900, "balance_start": 103000}, True),
           ("Verlust ohne SL, Risiko und Start (A1)", {"master_sl": None, "pl_balance": -700}, True),
+          # AB1 (Finn 10.11.2026, Mike Lucid 150k …0002: Orbit, TP 3.451 $, Demo endet am Tageslimit grund demo_liq, Lesung −2.757 $, Radar „⏸ Tageslimit“) → Ein Klick
+          ("AB1 Mike: demo_liq am Tageslimit, Lesung lebt", {"route": "tvv2", "konto_typ": "challenge", "konto_aktuell": {"typ": "challenge"}, "master_tp": 3451, "master_sl": None, "master_risk": 4500,
+                                                               "pl_balance": -2757, "balance_start": 153483, "balance_end": 150726, "endlesung": {"grund": "demo_liq", "quelle": "puls", "today_pnl": -2757}, "_soft": True, "_tag": True}, True),
+          ("AB1: demo_liq ohne Tageslimit (Liq am Boden) → Popup wie bisher", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}}, False),
+          ("AB1: demo_liq am Tageslimit, Stand nur geschätzt → Popup", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}, "_soft": True, "_sgesch": True}, False),
+          ("AB1: demo_liq am Tageslimit, aber geblowt → Popup", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}, "_soft": True, "_sblow": True}, False),
+          ("AB1: demo_beide (TP/Liq dieselbe Minute) am Tageslimit → Popup wie bisher", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_beide", "quelle": "puls"}, "_soft": True}, False),
+          ("AB1: demo_liq am Tageslimit, Boden unbekannt → Popup", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}, "_soft": True, "_ohneLiq": True}, False),
+          # Prüfer AB1 (MUSS): softBreach neben dem Konto-Boden (liq_gilt 'boden') ist kein Beleg — Popup wie bisher
+          ("AB1: demo_liq, softBreach, aber Liq gilt Boden → Popup", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}, "_soft": True}, False),
+          ("AB1: Demo liquidiert, softBreach, Liq gilt Boden → Popup wie bisher", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "demo": {"status": "liquidiert", "stop": "liq"}, "_soft": True}, False),
           ("Funded-CFD-Ziel", {"_fz": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
 js = STUBS + fn + "\nconst F = " + json.dumps([dict(BASIS, **f[1]) for f in FAELLE], ensure_ascii=False) + "; print(JSON.stringify(F.map(wdlEinKlickGrund)));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -91,6 +102,30 @@ os.unlink(d.name)
 check(r.returncode == 0, f"jsc läuft ({r.stderr[:200]})")
 erg = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else []
 for (name, _f, soll), g in zip(FAELLE, erg):
+    check((g == "") is soll, f"{name}: {'Ein Klick' if not g else 'Popup: ' + g}")
+check("grund: grund || ''" in html and "'Nicht direkt abgehakt: ' + gr" in html and 'id="mwd-erl-grund"' in html, "AB1: Popup vom Radar-Knopf nennt den Grund")
+# ── AB1 mit den ECHTEN wdlBlowStand / wdlLiqIstTag (Prüfer AB1): Mikes Zeile mit Backend-Feldern wie liq_regel_felder sie liefert ──
+def _schnitt(a, e):
+    i = html.index(a); return html[i:html.index(e, i)]
+echt = (_schnitt("  function wdlTsxBlowSchaetzung(", "  window._wdlTsxBlowSchaetzung") + _schnitt("  function wdlBlowStand(", "  /* APEX-EVAL-SOFTBREACH")
+        + "  const wdlLiqIstTag = t => !!(t && t.liq_regel_soft && t.liq_gilt === 'regel')\n")
+STUBS2 = STUBS.replace("wdlLiqIstTag = flag('tag'), ", "").replace("const wdlBlowStand = t => ", "const _wdlBlowStandStub = t => ") + "const WDL_TSX_SCHAETZ_TIP = 'x';\n"
+MIKE = dict(BASIS, route="tvv2", konto_typ="challenge", konto_aktuell={"typ": "challenge"}, master_tp=3451, master_sl=None, master_risk=4500, ziel_usd=159000,
+            balance_start=153483, balance_end=150726, pl_balance=-2757, endlesung={"grund": "demo_liq", "quelle": "puls", "today_pnl": -2757},
+            liq_regel_soft=True, liq_gilt="regel", liq_regel_nur_balance=150783, liq_boden_balance=148983, liq_regel_balance=150783)
+F2 = [("echt: Mike Lucid Tageslimit (gilt regel, Boden bekannt)", MIKE, True),
+      ("echt: hartes Daily (liq_regel_soft false) → Popup", dict(MIKE, liq_regel_soft=False, liq_regel_balance=150783, liq_balance=150783), False),
+      ("echt: Trailing-Boden knapp über dem Tageslimit (gilt boden) → Popup", dict(MIKE, liq_gilt="boden", liq_boden_balance=150800, liq_regel_balance=150800, balance_end=150850, pl_balance=-2633), False),
+      ("echt: Tageslimit, Boden unbekannt (Winning Days) → Popup", dict(MIKE, konto_typ="winning_days", konto_aktuell={"typ": "winning_days"}, liq_boden_balance=None), False),
+      ("echt: kette_tag nicht geblowt, Lesung am Boden → Popup", dict(MIKE, kette_tag={"blown": False}, liq_boden_balance=150740), False),
+      ("echt: demo_unklar am Tageslimit → Popup wie bisher", dict(MIKE, endlesung={"grund": "demo_unklar", "quelle": "puls"}), False)]
+js2 = STUBS2 + echt + fn + "\nconst F2 = " + json.dumps([f[1] for f in F2], ensure_ascii=False) + "; print(JSON.stringify(F2.map(wdlEinKlickGrund)));"
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d3:
+    d3.write(js2)
+r3 = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", d3.name], capture_output=True, text=True)
+os.unlink(d3.name)
+check(r3.returncode == 0, f"jsc (echte Funktionen) läuft ({r3.stderr[:300]})")
+for (name, _f, soll), g in zip(F2, json.loads(r3.stdout.strip().splitlines()[-1]) if r3.returncode == 0 else []):
     check((g == "") is soll, f"{name}: {'Ein Klick' if not g else 'Popup: ' + g}")
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
 # ── VORMERKEN statt Popup ohne Lesung (Finn 02.11.2026): Abhaken ohne Lesung → vorgemerkt, versteckt → Lesung kommt → Ein-Klick-Weg mit echtem Wert ──

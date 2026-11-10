@@ -39,7 +39,8 @@ check("erledigt" in ns["WD_ABHAK_EIGEN"] and "hand" not in ns["WD_ABHAK_EIGEN"],
 check("_akt in WD_ABHAK_EIGEN and wd_plan_eigen(_wd_login_uid_still()" in app and "_gs[1] == 403" in app, "Gate in /admin/wd-plaene nutzt die Ausnahme nur bei 403")
 check('msg += f" (angemeldet: {_nm})"' in app, "Rechte-Toast nennt die angemeldete ID")
 
-check("function wdlLesungAmTp(t)" in html and "!wdlLesungAmTp(t))) return 'Blow-Beweis oder unklares Ende'" in html, "demo_liq/beide/unklar nur ohne Lesung am TP")
+# AB1 (10.11.2026): dazu demo_liq nicht, wenn die echte Lesung am Tageslimit steht und das Konto lebt (tagLebt)
+check("function wdlLesungAmTp(t)" in html and "&& !wdlLesungAmTp(t) && !(tagLebt && String(e.grund) === 'demo_liq'))) return 'Blow-Beweis oder unklares Ende'" in html, "demo_liq/beide/unklar nur ohne Lesung am TP (AB1: demo_liq auch nicht am Tageslimit mit lebendem Konto)")
 check("['tsx_geblowt', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes" in html, "Konto weg / TopstepX-Blow bleiben immer Popup")
 check("&& !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'" in html, "„Demo an der Liq“ entfällt bei Lesung am TP")
 check("if(typ === 'funded' && (!zahl(t.pl_balance) || (Number(t.pl_balance) > 0" in html, "Funded: Popup nur am TP oder ohne Lesung")
