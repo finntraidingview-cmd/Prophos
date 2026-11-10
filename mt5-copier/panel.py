@@ -686,7 +686,7 @@ def riegel_netzfehler(e):
     return False
 
 
-def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
+def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None, netz_wiederholen=True):
     """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
     fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
     läuft bei derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? Seit 19.10.2026 auch: ist ein Big Trade
@@ -696,7 +696,9 @@ def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
     gibt es nichts zu prüfen -> frei.
     zweit_aus (dict, optional): bekommt {zweit: True, zweit_art?} bei einer Zweit-Sperre (ZWEI ORBIT, 03.11.2026, Z4 — Lücke 2 der Prüfung S3:
     Railway meldet „zweiter Start wartet“ als big_trade_nah mit zweit: true, das Panel gab nur code weiter; der PC-Tab unterscheidet jetzt am Flag
-    statt am Text und fragt dann alle 20–40 s /admin/zweit-frei statt 15 min zu warten)."""
+    statt am Text und fragt dann alle 20–40 s /admin/zweit-frei statt 15 min zu warten).
+    netz_wiederholen (RD1b, 10.11.2026, Prüfer zu RD1 081fd667): False = genau das alte Verhalten vor RD1 — zwei sofortige Versuche, keine Pause,
+    dann nicht frei. Für polar-start: der Slave wird unabhängig ausgelöst, ein bis ~25 s späterer Master hieße Slave offen ohne Master."""
     import urllib.request
     pid = str(plan_id or "").strip().lower()
     r = str(richtung or "").strip().lower()
@@ -735,14 +737,14 @@ def richtung_frei(plan_id, richtung, timeout=6, zweit_aus=None):
         except Exception as e:
             fehler = str(e)[:160]
             netz = riegel_netzfehler(e)
-        if netz and netz_n < RIEGEL_NETZ_WIEDERHOLEN:
+        if netz and netz_wiederholen and netz_n < RIEGEL_NETZ_WIEDERHOLEN:
             pause = random.uniform(*RIEGEL_NETZ_PAUSE_S[min(netz_n, len(RIEGEL_NETZ_PAUSE_S) - 1)])
             netz_n += 1
             print(f"[riegel] Netzfehler ({fehler[:80]}) — Versuch {netz_n + 1} in {pause:.1f} s", flush=True)
             time.sleep(pause)
             continue
-        if not netz and sonst_n < 1:
-            sonst_n += 1                                 # wie bisher: ein sofortiger zweiter Versuch bei HTTP-Fehler/unklarer Antwort
+        if (not netz or not netz_wiederholen) and sonst_n < 1:
+            sonst_n += 1                                 # wie bisher: ein sofortiger zweiter Versuch bei HTTP-Fehler/unklarer Antwort (RD1b: ohne netz_wiederholen auch bei Netzfehler)
             continue
         break
     if netz_n:
@@ -5905,7 +5907,8 @@ class Handler(BaseHTTPRequestHandler):
                 _pid = str(body.get("plan_id") or "").strip()
                 _ri = str(body.get("richtung") or "").strip().lower()
                 _fehlt = riegel_pflicht_fehlt(_pid, _ri)
-                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, _ri)
+                # RD1b (10.11.2026): ohne Netz-Pausen — der Slave feuert unabhängig, der Master darf nie bis ~25 s später starten
+                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, _ri, netz_wiederholen=False)
                 if not _frei:
                     print(f"[panel] polar-start master RIEGEL {_code} {_ri}: {_msg[:160]}", flush=True)
                     return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg},

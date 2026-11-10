@@ -35,7 +35,7 @@ class Antwort(io.BytesIO):
         return False
 
 
-def lauf(folge):
+def lauf(folge, **kw):
     """folge = Liste aus Ausnahmen oder dict-Antworten, je Aufruf eins. -> (Ergebnis, Aufrufe, Pausen)"""
     q, n, pausen = list(folge), [0], []
 
@@ -49,7 +49,7 @@ def lauf(folge):
     alt_u, alt_s, alt_t = urllib.request.urlopen, panel.time.sleep, panel.code_token
     urllib.request.urlopen, panel.time.sleep, panel.code_token = urlopen, (lambda s: pausen.append(s)), (lambda: "tok")
     try:
-        return panel.richtung_frei(PID, "buy"), n[0], pausen
+        return panel.richtung_frei(PID, "buy", **kw), n[0], pausen
     finally:
         urllib.request.urlopen, panel.time.sleep, panel.code_token = alt_u, alt_s, alt_t
 
@@ -79,6 +79,22 @@ check(r == (True, "", "") and n == 2 and not p, "unklare Antwort: wie bisher ein
 (r, n, p) = lauf([{"ok": True, "frei": True}])
 check(r == (True, "", "") and n == 1 and not p, "frei beim ersten Mal: ein Aufruf, keine Pause (bitgleich)")
 check(panel.richtung_frei("probe", "buy") == (True, "", ""), "ohne Plan-UUID (Probe): frei wie bisher, keine Abfrage")
+
+print("3) Polar-Master ohne Netz-Pausen (RD1b, 10.11.2026: der Slave feuert unabhängig — der Master darf nie bis ~25 s später starten)")
+(r, n, p) = lauf([DNS, DNS, {"ok": True, "frei": True}], netz_wiederholen=False)
+check(r[0] is False and r[2] == "riegel_unerreichbar" and n == 2 and not p and "Versuchen mit Pause" not in r[1],
+      "zweimal DNS: wie vor RD1 zwei sofortige Versuche, keine Pause, dann nicht gestartet")
+(r, n, p) = lauf([DNS, {"ok": True, "frei": True}], netz_wiederholen=False)
+check(r == (True, "", "") and n == 2 and not p, "DNS, dann frei: sofortiger zweiter Versuch ohne Pause")
+(r, n, p) = lauf([urllib.error.HTTPError("u", 503, "x", {}, None), {"ok": False, "msg": "x"}, {"ok": True, "frei": True}], netz_wiederholen=False)
+check(r[0] is False and n == 2 and not p, "HTTP/unklar: zwei sofortige Versuche wie bisher")
+(r, n, p) = lauf([{"ok": True, "frei": False, "grund": "Gegenrichtung"}], netz_wiederholen=False)
+check(r[0] is False and r[2] == "gegenrichtung" and n == 1 and not p, "echte Sperre: sofort")
+q = open(os.path.join(os.path.dirname(HIER), "mt5-copier", "panel.py"), encoding="utf-8").read()
+i = q.index('if u.path == "/api/polar-start" and str(body.get("seite") or "") == "master":')
+polar = q[i:q.index("polar_panel.behandle_post(", i)]
+check("richtung_frei(_pid, _ri, netz_wiederholen=False)" in polar and q.count("netz_wiederholen=False") == 1,
+      "panel.py: nur polar-start (Master) ohne Netz-Pausen, alle anderen Aufrufer wie in RD1")
 
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
