@@ -45072,6 +45072,37 @@ def fdp_vorschlag_neu(plan, r):
     return {"master_tp": r["tp"], "master_sl": r["sl"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"], "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"]}
 
 
+def fdp_vorschlag_basis_neu(plan, r, toleranz=1.0):
+    """REIN RECHNEND (testbar; FH1b, Master 10.11.2026 — Finn wartete: Chris' Vorschlag von 01:31 stand nach FH1 weiter mit der alten Hedge-Basis 515 € / 2,79 Lot in
+    „Zu bestätigen"): Hedge-Felder eines unbestätigten Vorschlags neu, wenn sich NUR die Hedge-Basis geändert hat (neue Regel wie FH1 B, neue Hedge-Ergebnisse).
+    Guards wie fdp_vorschlag_neu (geplant, unbestätigt, ohne Startzeit/Claim, nie gestartet, keine Hand-Werte); TP, SL und Kontrakte des Plans = neue Rechnung
+    (sonst hat jemand von Hand geändert oder die Balance ist weiter — dann nicht); die Basis am Plan (slave_risk) ist noch genau die vom Planer geschriebene
+    (funded_plan.offen_eur — ein im Popup geänderter Hedge bleibt); neue Basis weicht ≥ toleranz € ab. → Felder | None. master_tp/sl/contracts bleiben."""
+    p, fp = plan or {}, (plan or {}).get("funded_plan")
+    if (p.get("status") != "planned" or p.get("auto_bestaetigt_at") or p.get("start_um") or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("hand_werte_at")
+            or not isinstance(fp, dict) or (r or {}).get("aktion") != "planen"):
+        return None
+    tp, sl, kt = _wd_num(p.get("master_tp")), _wd_num(p.get("master_sl")), _wd_num(p.get("master_contracts"))
+    if tp is None or kt is None or abs(tp - float(r.get("tp") or 0)) >= 0.01 or abs(float(sl or 0) - float(r.get("sl") or 0)) >= 0.01 \
+            or abs(kt - float(r.get("kontrakte") or 0)) > 1e-6:
+        return None
+    alt, gespeichert, neu = _wd_num(p.get("slave_risk")), _wd_num(fp.get("offen_eur")), _wd_num(r.get("slave_risk"))
+    if alt is None or gespeichert is None or neu is None or abs(alt - gespeichert) >= 0.011 or abs(neu - alt) < toleranz:
+        return None
+    return {"master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"], "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"]}
+
+
+def fdp_notiz_basis(notes, r):
+    """REIN RECHNEND (testbar): Ende der Planer-Notiz („· offene Kosten …“ / „· Konto im Plus …“ / „· Hedge-Basis …“) auf die neue Basis umschreiben, sonst None."""
+    n = str(notes or "")
+    if not re.search(r" · (offene Kosten |Konto im Plus |Hedge-Basis )", n):
+        return None
+    tail = (f"Hedge-Basis {_liq_de(r['offen_eur'])} € = Pump-Kosten bis Balance (B) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
+            f"Konto im Plus (offene Kosten {_liq_de(r.get('offen_kosten_eur'))} €) · Hedge-Basis {_liq_de(r['offen_eur'])} € = {r['hedge_quelle']}" if r.get("hedge_quelle") else
+            f"offene Kosten {_liq_de(r['offen_eur'])} €")
+    return re.sub(r" · (offene Kosten |Konto im Plus |Hedge-Basis ).*$", " · " + tail, n)
+
+
 # FTMO FUTURES FUNDED (Finn 03.11.2026 ~02:30 Dubai über den Eingang): eigener Modus der Firmen-Regel (tp_modus „rest“, Werte je Größe in funded_plan_regeln,
 # sql/2026-11-03_funded_ftmo_futures.sql). Ziel = Start + ziel_gewinn [4.750, 5.000] je Konto fest gewürfelt (fdp_ziel_gewinn), 1 NQ, SL [750, 850] je Trade
 # gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens Abstand zur Liquidation − FDP_LIQ_PUFFER (unter FDP_LIQ_MIN_ABSTAND kein Trade) —, TP immer der Rest bis zum Ziel (kein Deckel,
@@ -45434,7 +45465,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
                                                     "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
-                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
+                                                    "richtung,master_contracts,master_tp,master_sl,slave_risk,notes,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
                                                     "fp_start:mt5_baseline->funded_plan->>start_um",
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
@@ -45499,11 +45530,20 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
         if lauf:
             # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
-            if not trocken and (not FDP_NACHRECHNEN_NUR_HT or str(a.get("user_id")) in ht_uids) and lauf[0].get("status") == "planned" and (lauf[0].get("funded_plan") or {}).get("tp_art") == "break_even" and zeile["balance"] is not None \
+            # FH1b (10.11.2026): dazu jeder unbestätigte Vorschlag, dessen Hedge-Basis sich geändert hat (fdp_vorschlag_basis_neu) — nie alte Werte bestätigen
+            if not trocken and (not FDP_NACHRECHNEN_NUR_HT or str(a.get("user_id")) in ht_uids) and lauf[0].get("status") == "planned" and isinstance(lauf[0].get("funded_plan"), dict) \
+                    and not lauf[0].get("auto_bestaetigt_at") and not lauf[0].get("start_um") and zeile["balance"] is not None \
                     and ap_balance_live(a.get("tv_balance_at"), max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None):
                 try:
                     r_neu, _zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg, int(_wd_num(lauf[0].get("master_contracts")) or 0) or None)
-                    felder = fdp_vorschlag_neu(lauf[0], r_neu)
+                    felder = fdp_vorschlag_neu(lauf[0], r_neu) if (lauf[0].get("funded_plan") or {}).get("tp_art") == "break_even" else None
+                    nur_basis = False
+                    if not felder:
+                        felder, nur_basis = fdp_vorschlag_basis_neu(lauf[0], r_neu), True
+                        if felder:
+                            _nz = fdp_notiz_basis(lauf[0].get("notes"), r_neu)
+                            if _nz:
+                                felder["notes"] = _nz
                     if felder:
                         fp_neu = dict(lauf[0]["funded_plan"], **{k: r_neu.get(k) for k in ("liq", "stufe", "dll", "minis", "offen_eur", "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")})
                         # AH2-Nachzug (Gegenprüfung): Konto-im-Plus-Felder mit neu rechnen — gesetzt nur bei festem Satz, sonst raus (kein alter Text, offen > 0 ohne neue Schlüssel)
@@ -45516,7 +45556,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                         if sb_update("trade_plans", {"id": f"eq.{lauf[0]['id']}", "status": "eq.planned", "auto_bestaetigt_at": "is.null", "start_um": "is.null", "start_um_gestartet_at": "is.null", "hand_werte_at": "is.null"}, felder):
                             _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
                                                     json={"p_plan": str(lauf[0]["id"]), "p_patch": {"funded_plan": fp_neu}, "p_status": "planned"}))
-                            print(f"[funded-plan] Vorschlag {str(lauf[0]['id'])[:8]} nach ±500 $ neu: TP {lauf[0].get('master_tp')} → {felder['master_tp']} $, Hedge → {felder['hedge_eur']} €", flush=True)
+                            print(f"[funded-plan] Vorschlag {str(lauf[0]['id'])[:8]} " + (f"Hedge-Basis neu: {lauf[0].get('slave_risk')} → {felder['slave_risk']} €, Hedge → {felder['hedge_eur']} €"
+                                  if nur_basis else f"nach ±500 $ neu: TP {lauf[0].get('master_tp')} → {felder['master_tp']} $, Hedge → {felder['hedge_eur']} €"), flush=True)
                 except Exception as e:
                     print(f"[funded-plan] ⚠️ Vorschlag neu rechnen {str(lauf[0].get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
             erg["ausgelassen"].append(dict(zeile, grund={"planned": "schon geplant", "open": "läuft gerade", "review": "wartet auf Nachlesung"}
