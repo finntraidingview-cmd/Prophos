@@ -78,12 +78,30 @@ check(o["symbol"] == "NQ" and o["menge"] == 1 and o["tp"] == 300, f"Orbit: 3 × 
 o = T(0.02, 0.8, "fut", 20.0, 2, 60.0, None, std, 0.5, 0.5, symbol="NQ")
 check(o["symbol"] == "MNQ" and o["menge"] == 1 and o["aufgerundet"], f"Orbit: 2 × 2 % = 0,04 NQ = 0,4 MNQ → Mindest 1 MNQ, Vermerk ({o})")
 t = T(0.2, 0.8, "fut_nq", 20.0, 3, 75.0, SP(1500, 3, "fut_nq", 20.0), std, 0.5, 0.5, symbol="NQ")
-check(t["symbol"] == "NQ" and t["menge"] == 1 and t["tp_pkt"] == 18.75 and t["sl_pkt"] == 6.25 and t["sl"] == 125,
-      f"Topstep: 3 × 20 % = 0,6 → 1 NQ, TP 75 ÷ 4, SL 25 ÷ 4 Pkt ({t})")
+check(t["symbol"] == "NQ" and t["menge"] == 1 and t["tp_pkt"] == 18.75 and t["sl_pkt"] == 10.0 and t["sl"] == 200,
+      f"Topstep: 3 × 20 % = 0,6 → 1 NQ, TP 75 ÷ 4, SL 25 ÷ 4 = 6,25 → Mindest 10 Pkt (WS3c) ({t})")
 check(SP(300, 15, "fut", 20.0, "MNQ") == 10.0 and SP(None, 3, "fut", 20.0) is None and SP(100, 0, "cfd", 1.0) is None, "SL-Punkte: MNQ mit 2 $/Pkt, ohne SL None")
 check(T(0, 0.8, "cfd", 1, 10, 40, None, std, 0.5, 0.5) is None and T(0.1, 0.8, "cfd", 0, 10, 40, None, std, 0.5, 0.5) is None
       and T(0.1, 0, "cfd", 1, 10, 40, None, hp, 0.5, 0.5) is None and T(0.1, 0.8, "cfd", 1, 10, None, None, std, 0.5, 0.5) is None,
       "ohne Anteil/Punktwert/Haupt-TP bzw. ohne Haupt-Anteil (Variante haupt) → None")
+
+print("2b) WS3c: Deckel Haupt-Lots, Mindest-Punkte, Lot-Schritt")
+gr = P({"tagesteilung": {"neben_tp_teiler": 4, "neben_lots_streu": 3, "lots_bezug": "haupt"}})
+d = T(0.3, 0.6, "cfd", 1.0, 10, 160.0, 72.0, gr, 0.5, 0.5, schritt=1, u_l=0.5)
+check(d["menge"] == 10 and d["gedeckelt"] and d["lots_roh"] == 10, f"Lots nie über den Haupt-Lots: 10 × 0,3/0,6 × 3 = 15 → 10, Vermerk gedeckelt ({d})")
+o = T(0.9, 0.1, "fut", 20.0, 2, 60.0, None, gr, 0.5, 0.5, symbol="NQ", u_l=0.5)
+check(o["menge"] == 2 and o["symbol"] == "NQ" and o["gedeckelt"], f"Orbit: Deckel in NQ (2 NQ, nicht 20 MNQ) ({o})")
+check(T(0.01, 0.8, "fut_nq", 20.0, 0.5, 75.0, None, std, 0.5, 0.5, symbol="NQ") is None, "Mindest-Lot (1 NQ) größer als der Haupt-Trade → kein Neben-Trade")
+check(std0["neben_min_pkt"] == 10.0 and P({"tagesteilung": {"neben_min_pkt": 5}})["neben_min_pkt"] == 5.0 and P({"tagesteilung": {"neben_min_pkt": 0}})["neben_min_pkt"] == 10.0
+      and a["tt_einst_anwenden"]({}, {"neben_min_pkt": 12})[0]["tagesteilung"]["neben_min_pkt"] == 12 and a["tt_einst_anwenden"]({}, {"neben_min_pkt": 0})[0] is None,
+      "neben_min_pkt: Standard 10 Pkt, 1–100, Unsinn → Standard, Schreibweg prüft")
+e = T(0.08, H, "cfd", 1.0, LH, 30.0, 12.0, std, 0.5, 0.5, schritt=1)
+check(e["tp_pkt"] == 10.0 and e["sl_pkt"] == 10.0 and e["tp"] == 40.0, f"Haupt 30/12 Pkt ÷ 4 = 7,5/3 Pkt → beide auf Mindest 10 Pkt ({e})")
+zk = T(0.08, H, "cfd", 1.0, LH, TPH, slp, std, 0.5, 0.5, schritt=1, tp_max_usd=30)
+check(zk and zk.get("zu_eng") and "Mindest 10 Pkt" in zk["grund"], f"Rest bis Ziel 30 $ bei 4 Lot = 7,5 Pkt → kein Neben-Trade (zu_eng) ({zk})")
+_kg = [T(0.08, 0.8, "cfd", 0.85, x / 100, 40.0, 30.0, std, 0.5, 0.5, schritt=0.01) for x in range(10, 300)]
+check(not any(x and x.get("zu_eng") for x in _kg), "ppl 0,85 / Schritt 0,01: Cent-Rundung allein ist nie „zu eng“ (Prüfer WS3c)")
+check(T(0.1, 0.8, "cfd", 10.0, 26, 40, None, std, 0.5, 0.5, schritt=None)["menge"] == 3, "CFD ohne Lot-Schritt → Schritt 1 wie beim Haupt (26 × 10 % = 2,6 → 3)")
 
 print("3) Planer-Haken und Folge-Teil")
 CFD5 = {"namen": ["the5ers"], "route": "mt5", "boden": "statisch", "dd_pct": 10, "groessen": [200000], "ziel_pct": {"phase1": 8},
@@ -139,6 +157,15 @@ w1c = a["tt_planer_haken"](dict(w, tp=11193), CFD5, "phase1", P({"tagesteilung":
                            random.Random(5), ppl=1.0, n_fest=2)
 check(w1c["tp"] <= 11193, f"Trade 1 als Neben mit Teiler 1 / Streuung 3: TP nie über den Ein-Trade-TP ({w1c['tp']})")
 check("Auto-Planer · Tag 4/4" in z["notes"] and __import__("re").search(r"→ TP \d+ \$ / SL \d+ \$ ·", z["notes"]) is not None, f"Notiz ganzzahlig ({z['notes'][:90]})")
+# WS3c: Folge-Neben mit zu kleinem Rest → Tag fertig (rest_klein) statt eines zu engen Trades
+v, g = a["tt_folge_rechnen"](k1, 194903.91, 190986.15, CFD5, std, random.Random(1), w_h=dict(wh, tp=30), grund_h=None)
+check(v is None and g[0] == "rest_klein" and "Pkt" in g[1], f"Folge-Neben: TP-Deckel 30 $ = 7,5 Pkt < 10 → kein Neben-Trade ({g})")
+k30 = dict(k1, plan={"n": 4, "haupt_an": 1, "anteile": [0.6, 0.3, 0.05, 0.05]})   # Teil 2: 53 × 30 % = 16 Lot, 10 Pkt = 160 $; Tagesgrenze kürzt auf 100 $ = 6,25 Pkt
+v, g = a["tt_folge_rechnen"](k30, 194903.91, 190986.15, dict(CFD5, daily_usd=4118), std, random.Random(1), w_h=dict(wh, sl=None), grund_h=None)
+check(v is None and g[0] == "verlust" and "Mindest" in g[1], f"Folge-Neben: SL von der Tagesgrenze unter 10 Pkt gekürzt → Stopp ({g})")
+wz = a["tt_planer_haken"](dict(w, sl=200, risiko=200), CFD5, "phase1", std, random.Random(3), ppl=1.0, n_fest=2)
+_kz = wz.get("kette") or {}
+check(_kz.get("rolle") != "neben" or (wz["sl"] / wz["menge"]) >= 10 - 1e-6, f"Trade 1 als Neben nie mit SL unter 10 Pkt ({_kz.get('rolle')}, {wz.get('sl')}/{wz.get('menge')})")
 # Kürzung durch die Tagesgrenze (Haupt ohne SL, daily_usd 4.050 $ nach −3.918 $ → Rest 32 $ < 50 $) → Stopp wie bisher
 v, g = a["tt_folge_rechnen"](k1, 194903.91, 190986.15, dict(CFD5, daily_usd=4050), std, random.Random(1), w_h=dict(wh, sl=None), grund_h=None)
 check(v is None and g[0] == "verlust", f"von der Tagesgrenze unter 50 $ gekürzt → Stopp wie bisher ({g})")

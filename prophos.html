@@ -58293,7 +58293,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2167'
+  const OS_TAB_BUILD = '2026-09-22.2168'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -91930,7 +91930,7 @@
   const TT_STD = { an: false, firmen: ['tradeify', 'lucidtrading', 'topstep', 'fundednext', 'fundingpips', 'the5ers', 'ftmo', 'blueguardian', 'tradeifycfd'],
     anteile: [80, 12, 6, 2], haupt_pct: [70, 90], neben_pkt: [10, 25], neben_sl_faktor: [1, 2], neben_menge_max: 0.5, min_tp_usd: 300,
     abstand_min: [1, 180], schluss_pct: [5, 10], schluss_min: [2, 120], nur_konten: [], test_n: null, test_ids: [],
-    neben_tp_teiler: [3, 5], neben_lots_streu: [0.7, 1.3], lots_bezug: 'tagesziel' }   // WS3 (app.py TT_STANDARD) — Rückfall, wenn GET die Felder noch nicht liefert
+    neben_tp_teiler: [3, 5], neben_lots_streu: [0.7, 1.3], lots_bezug: 'tagesziel', neben_min_pkt: 10 }   // WS3 (app.py TT_STANDARD) — Rückfall, wenn GET die Felder noch nicht liefert
   const TT_ART = { futures: 'Futures', topstep: 'Topstep', cfd: 'CFD' }
   function ttFirmen(D, tt){
     if(Array.isArray(D.tagesteilung_firmen)) return D.tagesteilung_firmen.filter(f => f && f.key)
@@ -91967,6 +91967,8 @@
       // statt „Neben-Ziel 10–25 Pkt“ / „Neben-Lots höchstens 0,5 × Haupt“ (tt_neben, alt) die drei WS3-Werte aus GET …/einstellungen → tagesteilung
       + e3R('Neben-Lots', `<span class="e3-tt-formel">Haupt × Anteil ×</span> ${sp('neben_lots_streu', '', '0.05')}`, `Lots je Neben-Trade = Haupt-Lots × sein Anteil am Tagesziel × Würfel aus dieser Spanne (je Trade neu), auf die Lot-Stufe der Firma gerundet, mindestens das kleinste Lot${lb === 'haupt' ? ' — Bezug „Haupt“: Anteil ÷ Haupt-Anteil' : ''}`)
       + e3R('Neben-TP und -SL', `<span class="e3-tt-formel">Haupt ÷</span> ${sp('neben_tp_teiler', '', '0.1')}`, 'TP- und SL-Abstand in Punkten = Abstand des Haupt-Trades ÷ Würfel aus dieser Spanne (je Neben-Trade neu, derselbe für TP und SL). TP höchstens der Rest bis Tagesziel und Konto-Ziel.')
+      // WS3c (11.11.2026, FS2 „Invalid stops“ bei 2–10 Pkt): TP/SL der Neben-Trades nie enger; passt es nicht, kein Neben-Trade
+      + e3R('Neben-Mindestabstand', inp(['neben_min_pkt'], tt.neben_min_pkt, null, 'Pkt', '1'), 'TP und SL eines Neben-Trades nie enger als so viele Punkte. Ist der Rest bis Ziel dafür zu klein, kommt kein Neben-Trade statt eines zu engen. Lots nie über den Haupt-Lots.')
       + e3R('Lots-Bezug', lbH, 'Tagesziel (Standard) = Haupt-Lots × Anteil. Haupt = Haupt-Lots × Anteil ÷ Haupt-Anteil (mehr Lots, derselbe Punkt-Abstand vor dem Teiler)')
       + e3R('Neben-SL ohne Haupt-SL', sp('neben_sl_faktor', '× TP', '0.1'), 'Nur wenn der Haupt-Trade keinen SL hat: SL = Faktor × TP-Abstand des Neben-Trades, nie hinter das Restbudget')
       + e3R('Mindest-TP je Trade', inp(['min_tp_usd'], tt.min_tp_usd, null, '$', '10'), 'kleinerer Teil wird mit dem nächsten zusammengelegt')

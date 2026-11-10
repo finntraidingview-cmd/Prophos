@@ -38880,13 +38880,17 @@ TT_STANDARD = {"an": False, "firmen": list(TT_FIRMEN_STANDARD), "anteile": [80.0
                "neben_tp_teiler": [3.0, 5.0],
                # WS3d (Finn 10.11.2026: „TP und Lots sollen beide Varianz kriegen, als Spielball“): Lots je Neben-Teil zusätzlich × Würfel aus dieser Spanne
                # (gleichverteilt je Teil, ein einzelner Wert = fest), danach auf den Lot-Schritt gerundet, mindestens das kleinste Lot
-               "neben_lots_streu": [0.7, 1.3]}
+               "neben_lots_streu": [0.7, 1.3],
+               # WS3c (Master 11.11.2026, Prüfer WS3 + FS2: „Invalid stops“ bei SL/TP 2–10 Pkt ist eine der Haupt-Fehlstart-Ursachen): TP und SL eines
+               # Neben-Trades nie enger als so viele Punkte (alte Regel tt_neben hob auf ≥ neben_pkt.lo = 10 Pkt). Passt das nicht (Rest bis Ziel zu
+               # klein), gibt es keinen Neben-Trade statt eines zu engen
+               "neben_min_pkt": 10.0}
 TT_LOTS_BEZUG = ("tagesziel", "haupt")
 # Spannen [lo, hi]: Grenzen je Feld (Leser und Schreibweg gleich, sonst verwirft der Leser still — Lehre S6-Review E3b)
 TT_SPANNEN = {"haupt_pct": (50.0, 100.0), "neben_pkt": (1.0, 100.0), "neben_sl_faktor": (0.5, 5.0), "abstand_min": (1.0, 600.0),
               "schluss_pct": (0.0, 50.0), "schluss_min": (1.0, 600.0), "neben_tp_teiler": (1.0, 20.0),
               "neben_lots_streu": (0.1, 3.0)}
-TT_ZAHLEN = {"neben_menge_max": (0.1, 1.0), "min_tp_usd": (0.0, 5000.0)}
+TT_ZAHLEN = {"neben_menge_max": (0.1, 1.0), "min_tp_usd": (0.0, 5000.0), "neben_min_pkt": (1.0, 100.0)}
 TT_FUT_PV = {"NQ": 20.0, "MNQ": 2.0, "ES": 50.0, "MES": 5.0}      # $ je Punkt und Kontrakt
 TT_MIKRO = {"NQ": "MNQ", "ES": "MES"}
 TT_ZIEL_REST_USD = 50.0          # Rest bis Tagesziel ≤ 50 $ → Tag fertig (dieselbe Grenze wie ap_kette_trade2 „Tagesziel schon erreicht")
@@ -39175,7 +39179,10 @@ def tt_teil(anteil, anteil_haupt, art, pv, haupt_menge, tp_pkt_haupt, sl_pkt_hau
     """REIN RECHNEND (testbar): Neben-Teil → {menge, symbol, tp, sl, tp_pkt, sl_pkt, lots_roh, aufgerundet, teiler} | None. art 'fut' (Orbit: NQ, sonst MNQ in
     Zehnteln), 'fut_nq' (Topstep: nur NQ), 'cfd' (Lots im Schritt). tp_pkt_haupt / sl_pkt_haupt = Punkte des Haupt-Trades (pv-Einheit des Regel-Symbols).
     u_t = Zufallszahl für den Teiler (WS3c, gleichverteilt in neben_tp_teiler), u_sl = Zufallszahl für den SL-Faktor (nur ohne Haupt-SL),
-    u_l = Zufallszahl für die Lots-Streuung (WS3d, gleichverteilt in neben_lots_streu; None = Streuung 1, ohne Würfel)."""
+    u_l = Zufallszahl für die Lots-Streuung (WS3d, gleichverteilt in neben_lots_streu; None = Streuung 1, ohne Würfel).
+    WS3c (Master 11.11.2026, Prüfer-SOLLTE): Lots nie über den Haupt-Lots (auch bei geänderten Einstellungen, Vermerk gedeckelt); TP- und SL-Abstand
+    mindestens neben_min_pkt (Standard 10 Pkt, „Invalid stops“ FS2) — drückt der Rest bis Ziel (tp_max_usd) den TP darunter, kommt
+    {"zu_eng": True, "grund": …} statt eines Teils (lieber kein Neben-Trade als ein zu enger); CFD ohne Lot-Schritt = 1 wie beim Haupt."""
     try:
         anteil, haupt_menge, pv, tph = float(anteil or 0), float(haupt_menge or 0), float(pv or 0), float(tp_pkt_haupt or 0)
         sp_t = (param or {}).get("neben_tp_teiler") or [4.0, 4.0]
@@ -39203,11 +39210,16 @@ def tt_teil(anteil, anteil_haupt, art, pv, haupt_menge, tp_pkt_haupt, sl_pkt_hau
         if not streu > 0:
             return None
     roh = haupt_menge * faktor * streu
+    gedeckelt = roh > haupt_menge
+    if gedeckelt:
+        roh = haupt_menge                            # WS3c: nie mehr Lots als der Haupt-Trade
     auf = False
+    menge_nq = None                                  # Lots in Haupt-Einheit (Orbit: NQ) für den Deckel
     if art == "fut":
         n = int(round(roh * 10))                     # MNQ-Kontrakte (1 NQ = 10 MNQ)
         if n < 1:
             n, auf = 1, True
+        menge_nq = n / 10.0
         if n % 10 == 0:
             menge, wert, sym = n // 10, pv, symbol
         else:
@@ -39218,15 +39230,21 @@ def tt_teil(anteil, anteil_haupt, art, pv, haupt_menge, tp_pkt_haupt, sl_pkt_hau
             menge, auf = 1, True
         wert, sym = pv, symbol
     else:
-        st = float(schritt or 0.01)
+        st = float(schritt or 1)                     # WS3c: ohne Lot-Schritt 1 wie beim Haupt (ap_konto_rechnen menge_schritt or 1)
         if st <= 0:
-            st = 0.01
+            st = 1.0
         menge = round(round(roh / st) * st, 4)
         if menge < st:
             menge, auf = st, True
         menge = int(round(menge)) if st >= 1 else round(menge, 4)
         wert, sym = pv, None
-    tp_pkt = tph / teiler
+    if (menge_nq if menge_nq is not None else float(menge)) > haupt_menge + 1e-9:
+        return None                                  # Mindest-Lot größer als der Haupt-Trade → kein Neben-Trade (WS3c-Deckel)
+    try:
+        min_pkt = float((param or {}).get("neben_min_pkt") or 0)
+    except (TypeError, ValueError):
+        min_pkt = 0.0
+    tp_pkt = max(tph / teiler, min_pkt)
     tp = round(tp_pkt * float(menge) * wert, 2)      # Prüfer WS3 (S2): auf Cent, nie still auf 0 $ (kleine Lots)
     try:
         cap = float(tp_max_usd) if tp_max_usd is not None else None
@@ -39237,16 +39255,18 @@ def tt_teil(anteil, anteil_haupt, art, pv, haupt_menge, tp_pkt_haupt, sl_pkt_hau
     if tp <= 0:
         return None
     tp_pkt = tp / (float(menge) * wert)
+    if min_pkt and tp < round(min_pkt * float(menge) * wert, 2) - 0.005:   # in Cent verglichen (Prüfer WS3c: Cent-Rundung allein ist nie „zu eng“)
+        return {"zu_eng": True, "grund": f"Neben-TP wäre nur {tp_pkt:.1f} Pkt (Mindest {min_pkt:g} Pkt) — Rest bis Ziel {tp:,.0f} $ zu klein".replace(",", ".")}
     try:
         slh = float(sl_pkt_haupt) if sl_pkt_haupt is not None and float(sl_pkt_haupt) > 0 else None
     except (TypeError, ValueError):
         slh = None
-    sl_pkt = slh / teiler if slh else tp_pkt * _ap_spanne(param["neben_sl_faktor"], u_sl)
+    sl_pkt = max(slh / teiler if slh else tp_pkt * _ap_spanne(param["neben_sl_faktor"], u_sl), min_pkt)   # WS3c: nie enger als neben_min_pkt
     sl = round(sl_pkt * float(menge) * wert, 2)
     if tp < 0.01 or sl < 0.01:
         return None                                  # nie ein Teil mit TP/SL 0 $ (Prüfer WS3 S2)
     return {"menge": menge, "symbol": sym, "tp": tp, "sl": sl, "tp_pkt": round(tp_pkt, 2),
-            "sl_pkt": round(sl_pkt, 2), "lots_roh": round(roh, 4), "aufgerundet": auf, "teiler": teiler, "lots_streu": streu}
+            "sl_pkt": round(sl_pkt, 2), "lots_roh": round(roh, 4), "aufgerundet": auf, "teiler": teiler, "lots_streu": streu, "gedeckelt": gedeckelt}
 
 
 def tt_sl_pkt(sl_usd, menge, art, pv, symbol=None):
@@ -39318,14 +39338,17 @@ def tt_planer_haken(w, regel, phase, param, rnd, ppl=None, n_fest=None):
         nb = tt_teil(a1, ah, art, pv, w["menge"], tt_tp_pkt_haupt(ziel, ah, w["menge"], pv), tt_sl_pkt(w.get("sl"), w["menge"], art, pv, sym),
                      param, rnd.random(), rnd.random(), schritt=schritt, symbol=sym, u_l=rnd.random(),     # WS3d: Lots-Würfel als dritter Zug
                      tp_max_usd=(float(w["tp"]) if _wd_num(w.get("tp")) else None))
-        if not nb:
-            return w
-        w2.update(menge=nb["menge"], tp=nb["tp"], sl=min(nb["sl"], int(sl_cap)) if sl_cap else nb["sl"], puffer=0)
+        if not nb or nb.get("zu_eng"):
+            return w                                # WS3c: zu eng / nicht rechenbar → Trade 1 bleibt ein Trade wie heute
+        _sl1 = min(nb["sl"], round(float(sl_cap), 2)) if sl_cap else nb["sl"]   # auf Cent wie tt_folge_rechnen (Prüfer WS3c)
+        if _sl1 < nb["sl"] and nb["sl_pkt"] * _sl1 / nb["sl"] < float(param.get("neben_min_pkt") or 0) - 1e-6:
+            return w                                # WS3c: von der Grenze unter den Mindest-Abstand gekürzt → kein Neben-Trade
+        w2.update(menge=nb["menge"], tp=nb["tp"], sl=_sl1, puffer=0)
         w2["risiko"] = w2["sl"]
         if nb.get("symbol") and nb["symbol"] != sym:
             w2["symbol"] = nb["symbol"]
         k.update(tp_pkt=nb["tp_pkt"], sl_pkt=nb["sl_pkt"], lots_roh=nb["lots_roh"], lots_bezug=param.get("lots_bezug"), tp_teiler=nb["teiler"],
-                 lots_streu=nb["lots_streu"])
+                 lots_streu=nb["lots_streu"], lots_gedeckelt=nb["gedeckelt"])
         txt = f"Neben {round(a1 * 100)} % · {nb['menge']:g} Lot{' (Mindest-Lot)' if nb['aufgerundet'] else ''} · {nb['tp_pkt']:g} Pkt"
     anteile_txt = " · ".join(("Haupt " if i + 1 == plan["haupt_an"] else "") + f"{round(x * 100)} %" for i, x in enumerate(plan["anteile"]))
     w2["stufe"] = f"Tag 1/{plan['n']} · {txt} (Tag: {anteile_txt}, Ziel +{round(ziel):,} $)".replace(",", ".") + " · " + str(w.get("stufe") or "")
@@ -39515,6 +39538,10 @@ def tt_folge_rechnen(k, bal_tag0, bal_jetzt, regel, param, rnd, w_h=None, grund_
                      rnd.random(), schritt=k.get("menge_schritt"), symbol=sym, tp_max_usd=min(rest, tp_cap), u_l=rnd.random())   # WS3d: Lots-Würfel
         if not nb:
             return None, ("verlust", "Neben-Trade nicht rechenbar (Punktwert fehlt)")
+        if nb.get("zu_eng"):
+            # WS3c: lieber kein Neben-Trade als einer mit „Invalid stops“. Auch vor dem Haupt (nr < haupt_an) endet der Tag: derselbe TP-Deckel
+            # (Rest bis Konto-Ziel) machte den Haupt-TP ebenso klein (Prüfer WS3c)
+            return None, ("rest_klein", nb["grund"])
         sl = nb["sl"]
         if sl_h:
             sl = min(sl, round(float(sl_h), 2))         # Prüfer WS3: auf Cent statt int — sonst gälte ein SL knapp unter sl_h schon als „gekürzt“
@@ -39526,8 +39553,11 @@ def tt_folge_rechnen(k, bal_tag0, bal_jetzt, regel, param, rnd, w_h=None, grund_
             return None, ("verlust", f"SL für den Neben-Trade wäre nur {sl} $")
         if sl <= 0:
             return None, ("verlust", "SL für den Neben-Trade wäre 0 $")
+        if sl < nb["sl"] and nb["sl_pkt"] * sl / nb["sl"] < float(param.get("neben_min_pkt") or 0) - 1e-6:
+            return None, ("verlust", f"SL für den Neben-Trade wäre nur {nb['sl_pkt'] * sl / nb['sl']:.1f} Pkt (Mindest {float(param['neben_min_pkt']):g} Pkt)")
         out.update(menge=nb["menge"], tp=nb["tp"], sl=sl, symbol=(None if art == "cfd" else (nb["symbol"] or sym)), tp_pkt=nb["tp_pkt"], sl_pkt=nb["sl_pkt"],
-                   lots_roh=nb["lots_roh"], aufgerundet=nb["aufgerundet"], tp_teiler=nb["teiler"], lots_streu=nb["lots_streu"])
+                   lots_roh=nb["lots_roh"], aufgerundet=nb["aufgerundet"], tp_teiler=nb["teiler"], lots_streu=nb["lots_streu"],
+                   lots_gedeckelt=nb["gedeckelt"])
     if route == "tsv2":
         out["verlust_grenze"] = w2.get("verlust_grenze")
     return out, None
@@ -39830,7 +39860,7 @@ def _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, 
               e_bisher=werte["e_bisher"], balance_start_tag=bal_tag0, balance_vor=echt[1])
     if werte.get("verlust_grenze") is not None:
         k2["verlust_grenze"] = werte["verlust_grenze"]
-    for x in ("tp_pkt", "sl_pkt", "lots_roh", "aufgerundet", "tp_teiler", "lots_streu"):   # WS3: Lots-Rechnung + Würfe (Teiler, Streuung) als Beleg am Teil
+    for x in ("tp_pkt", "sl_pkt", "lots_roh", "aufgerundet", "tp_teiler", "lots_streu", "lots_gedeckelt"):   # WS3: Lots-Rechnung + Würfe (Teiler, Streuung) als Beleg am Teil
         if werte.get(x) is not None:
             k2[x] = werte[x]
     if werte["rolle"] == "neben":
