@@ -15,6 +15,9 @@
 --      ohne die beiden Felder fiele der EOD-Boden mit Lock weg. WIRKUNG auch heute schon: Radar/Liq der laufenden Lucid-150k-Fundeds zeigen das Daily weich (2.700 ab
 --      Tagesstart), Blow weiter nur am Max Loss. Vor dem Einspielen die Kontrolle unten an den Master geben (fehlt die Zeile wirklich? Gibt es eine allgemeine funded-Zeile?).
 -- Einschalten (an = true) nur auf Finns Wort, in der Karte Funded-Planer → Futures → Einstellungen.
+-- DB-LESUNG 11.11.2026 (Master): funded_plan_regeln id 1 Tradeify [tradeify] und Lucid Trading [lucidtrading, lucid] je an=false, tp_modus null, je_groesse null →
+-- der erste Lauf überschreibt nur leere Einträge. liq_regeln Lucid: id 12 (kontotyp null) eod_trailing Lock +100, id 14 winning_days, id 15/16 challenge 150k 2.700 / 50k 1.200 —
+-- funded fehlt wirklich → Abschnitt 3. Nur 150k: für 50k Funded gibt es keinen Beleg (firm_rules.json kennt Lucid nicht), und HT hat Lucid-Fundeds nur in 150k.
 -- Erster Lauf ersetzt je_groesse und setzt an = false: laut Seed (sql/2026-10-27_funded_planer.sql) tragen Tradeify und Lucid heute nur {name, namen, an: false} —
 -- vor dem Einspielen mit der zweiten Kontrollabfrage unten bestätigen. Danach greift die not-exists-Wache (tp_modus pump2) und nichts wird mehr überschrieben.
 
