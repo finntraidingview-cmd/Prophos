@@ -11,7 +11,7 @@ Ziel: wiederkehrende Fehlstarts erkennen und an der Ursache abstellen, nicht ein
 | `order_signale` status `fehler` | jeder gescheiterte Puls-Lauf über Signal (Orbit, Topstep, Endlesung, Balance lesen …) | PC-Tab beim Abschluss |
 | View `puls_fehler_ereignisse` | beide zusammen, eine Zeile je Ereignis | — |
 | View `puls_fehler_muster` | gebündelt nach Muster (Schritt + Meldung ohne Zahlen/Kontonummern), seit FS1 nur `art = 'fehler'` | — |
-| View `puls_wartet_muster` | wie oben, nur `art = 'wartet'` — gewolltes Warten, kein Fehlstart: Big Trade/WD-/Apex-Riegel (`big_trade_nah`/`big_trade_unklar`), Zwei-Orbit (`zweit_wartet`/`firma_laeuft`/`markt_oeffnung`, „zweiter Start wartet“), `index_pause`, `ziel_erreicht`, `manuelle_arbeit`; Einordnung in Funktion `puls_fehler_art(schritt, msg)`, UNKLAR immer Fehler — FS2 K3 11.11.2026, `sql/2026-11-11_fs2_k3_wartet.sql` (ersetzt die nie eingespielte FS1-Datei `sql/2026-11-10_fs1_wartet_zaehlung.sql`) | — |
+| View `puls_wartet_muster` | wie oben, nur `art = 'wartet'` — gewolltes Warten, kein Fehlstart: Big Trade/WD-/Apex-Riegel (`big_trade_nah`/`big_trade_unklar`), Zwei-Orbit (`zweit_wartet`/`firma_laeuft`/`markt_oeffnung`, „zweiter Start wartet“), `ziel_erreicht`, `manuelle_arbeit` (`index_pause` bleibt Fehler: Startfenster zu Ende, Trade fiel aus; WD-/Apex-Text nur ohne Schritt bzw. bei `big_trade_*`); Einordnung in Funktion `puls_fehler_art(schritt, msg)`, UNKLAR immer Fehler — FS2 K3 11.11.2026, `sql/2026-11-11_fs2_k3_wartet.sql` (ersetzt die nie eingespielte FS1-Datei `sql/2026-11-10_fs1_wartet_zaehlung.sql`) | — |
 
 Muster-Funktion: `puls_fehler_muster_text(schritt, msg)`. SQL: `sql/2026-10-07_puls_fehler_muster.sql`.
 

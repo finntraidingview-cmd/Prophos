@@ -7,11 +7,13 @@
 --   big_trade_nah / big_trade_unklar  Puls bleibt im Konto, Big Trade bzw. Winning-Day-/Apex-Riegel nah an TP/Liq (app.py PULS_HEIM_CODE_NAH/UNKLAR;
 --                                     der WD-/Apex-Riegel nutzt denselben Code, Text beginnt mit „Winning Day“ bzw. „Apex-Challenge“)
 --   zweit_wartet / firma_laeuft / markt_oeffnung  Zwei-Orbit-Regel, je Firma einer, Markteröffnung 09:28–09:35 NY (app.py PULS_HEIM_CODE_ZWEIT/FIRMA/MARKT)
---   index_pause                       Index-Pause/News-Sperre der Firma (prophos.html sfMelden index_pause)
 --   ziel_erreicht                     Konto hat sein Ziel — bewusst kein Start
 --   manuelle_arbeit                   Konto steht auf „Manuelle Arbeit“ — bewusst kein Start
---   Text „zweiter Start wartet“ bzw. Anfang „Winning Day …“/„Apex-Challenge …“ (auch mit „⛔ “ davor) — ältere Zeilen ohne Code
--- Bewusst 'fehler' bleiben: riegel_aufgegeben (der Trade fiel aus, Finn muss ran), zu_spaet, unklar und alles andere.
+--   Text „zweiter Start wartet“; Anfang „Winning Day …“/„Apex-Challenge …“ (auch mit „⛔ “ davor) NUR bei schritt big_trade_* oder ohne schritt
+--                                     (Prüfer-Stopp 610ae82c: sonst fielen echte Fehler wie „Winning Day nicht gezählt — …“ darunter)
+-- Bewusst 'fehler' bleiben: index_pause (Prüfer-Stopp 610ae82c: sfMelden schreibt es nur im Aufgeben-Zweig — „Startfenster zu Ende, nicht gestartet“,
+-- der Plan ist verbraucht, das Frontend behandelt es wie riegel_aufgegeben), riegel_aufgegeben (der Trade fiel aus, Finn muss ran), zu_spaet, unklar
+-- und alles andere.
 --
 -- Wirkung: puls_fehler_muster (Routine „Puls-Fehler“, fehler-analyse.md) zählt nur art = 'fehler'; die Warte-Zeilen stehen in puls_wartet_muster (gleiche
 -- Spalten). Nichts wird gelöscht, puls_fehlstarts/order_signale bleiben unverändert; puls_fehler_ereignisse bekommt hinten die Spalte art.
@@ -25,9 +27,10 @@ create or replace function public.puls_fehler_art(schritt text, msg text)
 returns text language sql immutable as $$
   select case
     when coalesce(schritt, '') in ('big_trade_nah', 'big_trade_unklar', 'zweit_wartet', 'firma_laeuft', 'markt_oeffnung',
-                                   'index_pause', 'ziel_erreicht', 'manuelle_arbeit') then 'wartet'
+                                   'ziel_erreicht', 'manuelle_arbeit') then 'wartet'
     when coalesce(msg, '') ~* 'zweiter Start wartet' then 'wartet'
-    when coalesce(msg, '') ~ '^\W*(Winning Day|Apex-Challenge)\M' then 'wartet'
+    when coalesce(schritt, '') in ('', 'big_trade_nah', 'big_trade_unklar')
+         and coalesce(msg, '') ~ '^\W*(Winning Day|Apex-Challenge)\M' then 'wartet'
     else 'fehler' end
 $$;
 
