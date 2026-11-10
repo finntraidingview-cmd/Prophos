@@ -46576,7 +46576,7 @@
     const tagTxt = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : ''
     const kopf = document.querySelector('#recovererModal .modal-head h3'), sch = document.querySelector('#recovererModal [data-rec-sch]')?.parentElement
     if(kopf) kopf.textContent = z.art === 'tradeify' ? 'Recovery' : 'Recoverer'
-    if(sch) sch.hidden = z.art === 'tradeify'   // Tradeify: kein Schalter, die Regel gilt immer ab dem 2. Zyklus
+    if(sch) sch.hidden = z.art === 'tradeify'   // Tradeify/Lucid (art 'tradeify', firma_key): kein Schalter, die Regel gilt laut WD-Einstellungen (Tradeify ab Zyklus 2, Lucid ab 1)
     if(z.art === 'tradeify'){
       // RECOVERY (Finn 03.11.2026): klein und sachlich, was fehlt — Zyklus seit dem letzten Payout, Fehlbetrag bis +1 $, WD-Stand, nächster Trade
       const zeilenT = [
@@ -46587,7 +46587,7 @@
         ['Nächster Trade', z.aktiv ? `Ausgleich · TP ${de(z.ziel)} $ · Hedge ${de(z.hedge_eur)} €` : `normaler WD (Ausgleich ab ${Math.max(0, Number(z.ziel_tage || 5) - 1)}/${z.ziel_tage || 5})`],
       ]
       box.innerHTML = zeilenT.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--sub)">${escapeHtml(k)}</span><span class="tnum" style="font-weight:600">${escapeHtml(v)}</span></div>`).join('')
-        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">Tradeify zahlt erst aus, wenn der Zyklus seit dem letzten Payout im Plus ist (mind. +${(z.min_usd != null ? Number(z.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $).</div>`
+        + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">${z.firma_key === 'lucid' ? 'Lucid' : 'Tradeify'} zahlt erst aus, wenn der Zyklus seit dem letzten Payout${z.firma_key === 'lucid' && Number(z.nr) === 1 ? ' (im 1. Zyklus seit Kontostart)' : ''} im Plus ist (mind. +${(z.min_usd != null ? Number(z.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $).</div>`
       return
     }
     const handTp = Number(((accounts || []).find(a => String(a.id) === _recKonto.id) || {}).wdTp) || 0   // nur am eigenen Konto bekannt
@@ -58066,7 +58066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2150'
+  const OS_TAB_BUILD = '2026-09-22.2151'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -73284,7 +73284,7 @@
   function wdZyklusEigene(o){
     if(!window._wdZyklusLaden) return Promise.resolve(false)
     // + Tradeify „Zyklus im Plus“ (03.11.2026): derselbe Stand von Railway (zyklus.art 'tradeify'), nie Tradeify CFD
-    return window._wdZyklusLaden(Object.assign({ ids: (accounts || []).filter(a => a && a.type === 'winning_days' && (/apex/i.test(String(a.firm || '')) || (/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm)))).map(a => String(a.id)) }, o || {}))
+    return window._wdZyklusLaden(Object.assign({ ids: (accounts || []).filter(a => a && a.type === 'winning_days' && (/apex/i.test(String(a.firm || '')) || (/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm)) || /lucid/i.test(String(a.firm || '')))).map(a => String(a.id)) }, o || {}))   // + Lucid (LZ1 10.11.2026)
   }
   function tpVorplanZeile(acc, opt){
     const o = opt || {}
@@ -75128,11 +75128,12 @@
    * Mindest-Net-Profit, den man in jedem Zyklus machen muss — bei Tradeify und Topstep nach dem ersten Payout, bei Lucid genauso."): zwei Parameter je Firma in
    * wd_farmer_regeln.firmen_regeln (eigene Spalte — wdHedgeSpeichern baut vorplan neu und ließe fremde Schlüssel fallen). Standard = app.py WD_FIRMEN_REGELN_STD
    * (gleich halten). „wirkt": heute nur Tradeify Mindest-Gewinn (Zyklus im Plus, Railway tradeify_zyklus_konto); der Rest ist Parameter ohne Farmer-Logik. */
+  // LZ1 (Finn 10.11.2026): Lucid min_netto an, +1 $, ab Zyklus 1 — „in jedem Payout-Zyklus muss der Profit mindestens im Plus sein“ (gleich app.py WD_FIRMEN_REGELN_STD)
   const E4_WD_FIRMEN_STD = {
     apex:      { konsistenz: { an: true,  pct: 50 },   min_netto: { an: false, usd: null, ab_zyklus: 1 } },
     apex100:   { konsistenz: { an: true,  pct: 50 },   min_netto: { an: false, usd: null, ab_zyklus: 1 } },
     tradeify:  { konsistenz: { an: false, pct: null }, min_netto: { an: true,  usd: 1,    ab_zyklus: 2 } },
-    lucid:     { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
+    lucid:     { konsistenz: { an: false, pct: null }, min_netto: { an: true,  usd: 1,    ab_zyklus: 1 } },
     fnfutures: { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
     topstep:   { konsistenz: { an: true,  pct: 40 },   min_netto: { an: false, usd: null, ab_zyklus: 2 } },
     sonst:     { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } } }
@@ -75140,8 +75141,8 @@
     apex100: 'firm_rules.json Apex PA: kein Tag über 50 % des Net Profit seit dem letzten Payout · Min Payout 500 $',
     tradeify: 'Consistency: Select Funded keine, Growth Funded 35 % (firm_rules.json) · Mindest-Gewinn: Zyklus im Plus ab dem 2. Zyklus (Finn 03.11.2026), Min Payout 250 $',
     topstep: 'firm_rules.json Topstep XFA Consistency Path: bester Tag ≤ 40 % · Mindest-Gewinn je Zyklus noch nicht hinterlegt',
-    lucid: 'noch nicht hinterlegt (nicht in firm_rules.json)', fnfutures: 'noch nicht hinterlegt', sonst: 'noch nicht hinterlegt' }
-  const E4_WIRKT = { tradeify: { min_netto: true } }   // Rest: nur Parameter (Konstrukt im Bericht S7_E4)
+    lucid: 'Mindest-Gewinn: Zyklus im Plus in jedem Payout-Zyklus, auch im 1. (Finn 10.11.2026; nicht in firm_rules.json) · Consistency noch nicht hinterlegt', fnfutures: 'noch nicht hinterlegt', sonst: 'noch nicht hinterlegt' }
+  const E4_WIRKT = { tradeify: { min_netto: true }, lucid: { min_netto: true } }   // Rest: nur Parameter (Konstrukt im Bericht S7_E4); Lucid seit LZ1 (10.11.2026) über denselben Railway-Weg
   function e4Regel(k){
     const std = E4_WD_FIRMEN_STD[k] || E4_WD_FIRMEN_STD.sonst, db = ((_wd.regeln && _wd.regeln.firmen_regeln) || {})[k] || {}
     const teil = (t, felder) => { const s0 = std[t], d = (db[t] && typeof db[t] === 'object') ? db[t] : {}, z = { an: typeof d.an === 'boolean' ? d.an : s0.an }
@@ -81023,7 +81024,7 @@
       // TRADEIFY ZYKLUS IM PLUS (Finn 03.11.2026, Jacob …6016 −1.853,17 $): ab dem 2. Zyklus erst ab +1 $ seit dem letzten Payout — Stand von Railway (window._wdZyklus)
       const zyT = accountId ? window._wdZyklusRoh?.(accountId) : null
       if(zyT && zyT.art === 'tradeify' && zyT.gesperrt){
-        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $ — Tradeify zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return   // E4: zyklus.min_usd
+        msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE', { maximumFractionDigits: 2 })} $ — ${zyT.firma_key === 'lucid' ? 'Lucid' : 'Tradeify'} zahlt erst aus, wenn der Zyklus im Plus ist.`; msgEl.className = 'modal-msg err'; return   // E4: zyklus.min_usd · LZ1: auch Lucid
       }
       try{
         const row = {

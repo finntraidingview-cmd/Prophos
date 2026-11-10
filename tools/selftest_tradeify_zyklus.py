@@ -114,7 +114,7 @@ check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true'" in sql, "DB-Net
 check("if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id))" in html and "if(ziel && ziel.done && !wdAusgleichFaellig(acc.id))" in html, "Ziel voll + Zyklus im Minus: Konto bleibt im Farmer (Ausgleich wird angelegt)")
 check("Math.max(Number(zy.ziel), tpVor || 0)" in html, "TP-Vorgabe am Konto schlägt den Ausgleich nicht (max)")
 check("document.addEventListener('click', e => {\n    const el = e.target && e.target.closest && e.target.closest('.acc-rec-chip" not in html and "window._recoveryChipKlick" in html, "kein Sammel-Klick-Handler, Klick nur am Chip")
-check('if tradeify_zyklus_firma(konto) and str(konto.get("account_type") or "") in ("funded", "winning_days") and not trotzdem:' in app
+check('if _zp and str(konto.get("account_type") or "") in _zp_typen and not trotzdem:' in app   # LZ1: Tradeify funded + WD, Lucid nur WD
       and "Payout erst ab +{_m_txt} $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < Mindest-Gewinn (Standard +1 $) abgelehnt (409)")
 check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count("Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE'") == 2,
       "Frontend: Anfragbar-Zelle und Finanzen-Payout zeigen „Zyklus −X $ · Payout erst ab +<Mindest-Gewinn> $“ (Standard 1 $, E4)")
@@ -160,7 +160,67 @@ if m:
           "Frontend-Standard = app.py WD_FIRMEN_REGELN_STD (alle Firmen)")
 check("${e4RegelnHtml(k)}" in html and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
       "Einstellungen → Firmen: Payout-Regeln je Firma, Speichern in firmen_regeln, nur HT-weit (wdNurGruppe)")
-check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn)" in app,
+check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"))" in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid)
       "Railway liest firmen_regeln (Rückfall Standard) und gibt die Regel an tradeify_zyklus_konto")
+
+# ── LZ1 (Finn 10.11.2026): Lucid „Zyklus im Plus“ in jedem Payout-Zyklus, auch im 1. — derselbe Weg (art 'tradeify', firma_key 'lucid') ──
+print("\nLZ1 · Lucid")
+lade("WD_FIRMEN_REGELN_STD"); lade("wd_firmen_regel")
+for n in ("zyklus_plus_key", "tradeify_zyklus_firma", "_wd_konto_groesse"):
+    try:
+        lade(n)
+    except Exception:
+        pass
+ns.setdefault("_ist_tradeify_cfd", lambda f: "cfd" in str(f or "").lower())
+ML = ruf("wd_firmen_regel", {}, "lucid")["min_netto"]
+check(ML == {"an": True, "usd": 1.0, "ab_zyklus": 1}, f"Standard Lucid: min_netto an, +1 $, ab Zyklus 1 ({ML})")
+check(ruf("wd_firmen_regel", {}, "tradeify")["min_netto"] == {"an": True, "usd": 1.0, "ab_zyklus": 2}, "Tradeify unverändert: ab Zyklus 2")
+check(ruf("tradeify_zyklus_firma", {"firm": "Lucid Trading"}) and ruf("zyklus_plus_key", {"firm": "Lucid Trading"}) == "lucid"
+      and ruf("zyklus_plus_key", {"firm": "Tradeify"}) == "tradeify" and not ruf("tradeify_zyklus_firma", {"firm": "Tradeify CFD"})
+      and not ruf("tradeify_zyklus_firma", {"firm": "Apex Trader"}), "Firmen: Tradeify (ohne CFD) und Lucid, sonst keine")
+# Finns Konto Lucid 150k LFF…0001 (952df577): Payouts 28.10./04.11. → Zyklus 3 ab 05.11., Start 158.987,50, Live 157.096,50 (10.11. 07:37 Dubai) = −1.891 $
+FINN = {"id": "952df577", "name": "150k LFF15084019460001 → Winning Days", "firm": "Lucid Trading", "user_id": "48f272b4", "max_drawdown": 4500}
+PAYL = [{"requested_at": "2026-10-28", "status": "received"}, {"requested_at": "2026-11-04", "status": "received"}]
+TL = [("2026-11-05T01:25:00+00:00", 264, 158987.5), ("2026-11-06T00:43:00+00:00", 281, 159251.5), ("2026-11-09T02:52:00+00:00", -2712, 159532.5),
+      ("2026-11-10T01:49:00+00:00", 276, 156820.5)]
+PLL = [{"status": "completed", "started_at": s_, "ended_at": s_, "master_pl": pl, "tv": {"balance_start": bs}} for s_, pl, bs in TL]
+FR = "2026-11-10T03:37:36+00:00"
+zl = ruf("tradeify_zyklus_konto", FINN, PLL, PAYL, 3, 5, VP, 157096.5, FR, regel=ML)
+check(zl["art"] == "tradeify" and zl["firma_key"] == "lucid" and zl["nr"] == 3 and zl["gewinn"] == -1891.0 and zl["gesperrt"] and not zl["aktiv"]
+      and zl["grund_code"] == "minus", f"Finn Lucid: Zyklus 3, −1.891 $, Payout gesperrt, 3/5 → noch normaler WD ({zl['grund']})")
+zl4 = ruf("tradeify_zyklus_konto", FINN, PLL, PAYL, 4, 5, VP, 157096.5, FR, regel=ML)
+check(zl4["aktiv"] and 1922 <= zl4["ziel"] <= 1952 and zl4["bestaetigen"] is True and zl4["hedge_eur"] > 0,
+      f"4/5 im Minus: Ausgleichs-Trade TP = 1.891 + 1 + 30–60 → {zl4['ziel']} $, einzeln bestätigen, Hedge {zl4['hedge_eur']} €")
+# 1. Zyklus (noch keine Anfrage): Start = Start-Balance bzw. Kontogröße
+NEU = dict(FINN, id="lneu", name="150k LFF999 → Winning Days")
+z1p = ruf("tradeify_zyklus_konto", NEU, [], [], 2, 5, VP, 151200.0, None, regel=ML)
+z1m = ruf("tradeify_zyklus_konto", NEU, [], [], 4, 5, VP, 149500.0, None, regel=ML)
+check(z1p["nr"] == 1 and z1p["start_bal"] == 150000.0 and z1p["gewinn"] == 1200.0 and not z1p["gesperrt"] and z1p["grund_code"] == "plus",
+      f"Lucid Zyklus 1 im Plus: Start = Kontogröße 150.000, +1.200 $ ({z1p['grund']})")
+check(z1m["nr"] == 1 and z1m["gesperrt"] and z1m["aktiv"] and z1m["fehl"] == 500.0, f"Lucid Zyklus 1 im Minus (−500 $, 4/5): gesperrt, Ausgleich ({z1m['grund']})")
+zt1 = ruf("tradeify_zyklus_konto", dict(JACOB, id="tneu"), [], [], 4, 5, VP, 149500.0, None)
+check(zt1["grund_code"] == "zyklus_1" and not zt1["gesperrt"] and zt1["firma_key"] == "tradeify", "Tradeify Zyklus 1: unverändert ohne Regel")
+check(ruf("tradeify_zyklus_konto", FINN, PLL, PAYL, 3, 5, VP, 157096.5, FR, regel={"an": False, "usd": None, "ab_zyklus": 1})["grund_code"] == "regel_aus",
+      "Lucid-Regel in den Einstellungen aus → nie gesperrt")
+check('"or": "(firm.ilike.*apex*,firm.ilike.*tradeify*,firm.ilike.*lucid*)"' in app and "|| /lucid/i.test(String(a.firm || ''))" in html,
+      "/wd-zyklus und der eigene Tab laden Lucid-WD-Konten mit")
+# Nachzug Gegenprüfung: Größe aus dem Namen vor starting_balance; großes Plus im 1. Zyklus nicht „unplausibel“; Frische im 1. Zyklus; Lucid Funded ohne Payout-Sperre
+z1s = ruf("tradeify_zyklus_konto", dict(NEU, starting_balance=100000), [], [], 2, 5, VP, 151200.0, None, regel=ML)
+check(z1s["start_bal"] == 150000.0, f"Zyklus 1: Größe aus dem Namen (150k) vor einer abweichenden starting_balance ({z1s['start_bal']})")
+z1g = ruf("tradeify_zyklus_konto", NEU, [], [], 2, 5, VP, 163609.5, None, regel=ML)
+check(z1g["grund_code"] == "plus" and z1g["gewinn"] == 13609.5, f"Zyklus 1 mit Big-Trade-Plus +13.609,50 $ (> 3 × DD): echt, nicht unplausibel ({z1g['grund']})")
+z1v = ruf("tradeify_zyklus_konto", NEU, [], [], 2, 5, VP, 140000.0, None, regel=ML)
+check(z1v["grund_code"] == "unbekannt", "Zyklus 1 Verlust über Max DD: weiter unplausibel/unbekannt (keine Sperre, kein Riesen-TP)")
+PL1 = [{"status": "completed", "started_at": "2026-11-09T02:00:00+00:00", "ended_at": "2026-11-09T03:00:00+00:00", "master_pl": -500, "tv": {"balance_start": 150000}}]
+z1f = ruf("tradeify_zyklus_konto", NEU, PL1, [], 4, 5, VP, 149500.0, "2026-11-09T02:30:00+00:00", regel=ML)
+check(z1f["grund_code"] == "unbekannt" and not z1f["aktiv"], "Zyklus 1: Balance vor dem Ende des letzten Trades gelesen → unbekannt, kein Ausgleich")
+zt_vorher = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, FRISCH)
+check({k: v for k, v in zt_vorher.items() if k != "firma_key"} == {k: v for k, v in z.items() if k != "firma_key"} and zt_vorher["firma_key"] == "tradeify",
+      "Tradeify: Ergebnis bis auf das neue Feld firma_key gleich dem Lauf oben (Jacob)")
+check('_zp_typen = ("winning_days",) if _zp == "lucid" else ("funded", "winning_days")' in app,
+      "Payout-Anfrage: Lucid nur bei Winning Days gesperrt, Tradeify wie bisher Funded + WD")
+check("E4_WIRKT = { tradeify: { min_netto: true }, lucid: { min_netto: true } }" in html and "z.firma_key === 'lucid' ? 'Lucid' : 'Tradeify'" in html,
+      "Frontend: Lucid-Regel wirkt, Texte nennen Lucid")
+
 print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)
