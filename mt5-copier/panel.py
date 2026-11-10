@@ -2893,6 +2893,11 @@ def tab_gesehen(user_agent, query=None):
                 _TAB_OEFFNEN[feld] = None
         # FS1 (10.11.2026): Sichtbarkeit (v/h) und Ladezeit (Unix-s) des Tabs — für den Tab-Zustand in der Spur (/api/tab-zustand); leer = alter Tab
         _TAB_OEFFNEN["vis"] = w("vis") if w("vis") in ("v", "h") else ""
+        # F-B (11.11.2026): Antwort auf die Vorflug-Marke (nur der Haupt-Tab; ein Tab ohne dieses Feld bleibt „kann_pong“ False)
+        if w("vpong") and TAB_VORFLUG.get("marke") and w("vpong") == TAB_VORFLUG["marke"]:
+            TAB_VORFLUG.update(pong_at=time.time(), kann_pong=True)
+        elif w("vpong"):
+            TAB_VORFLUG["kann_pong"] = True
         try:
             _TAB_OEFFNEN["geladen"] = int(w("geladen")) if w("geladen") else None
         except ValueError:
@@ -4371,6 +4376,10 @@ def _tab_neulade_waechter():
             except Exception as e:
                 print(f"[tab-auftrag] Fehler: {type(e).__name__}: {e}", flush=True)
             _puls_wache_schritt(pc)   # PULS-WACHE (02.11.2026): fehlender Prophos-Tab im Puls-Chrome → nach 60 s neu, auch bei offenem Trade
+            try:
+                _tab_vorflug_schritt(pc)   # F-B (11.11.2026): 2–3 min vor einem Start Lebenszeichen prüfen, bei rot Stufen-Heilung sofort
+            except Exception as e:
+                print(f"[tab-vorflug] Fehler: {type(e).__name__}: {e}", flush=True)
             jetzt0 = time.time()
             tag = datetime.now().strftime("%Y-%m-%d")
             if _TAB_OEFFNEN["tag"] != tag:
@@ -4518,7 +4527,99 @@ def tab_heil_sofort_lage(sofort, jetzt):
     if not at or (sofort or {}).get("erledigt") or jetzt - at > TAB_HEIL_SOFORT_S or jetzt < at:
         return None, ""
     pl = str((sofort or {}).get("plan") or "")[:8]
+    if (sofort or {}).get("grund"):   # F-B (11.11.2026): Tab-Vorflug vor dem Start nennt seinen eigenen Befund
+        return jetzt - at, str(sofort["grund"])[:200]
     return jetzt - at, f"Prophos-Tab antwortete beim Puls-Start nicht{' (Plan ' + pl + ')' if pl else ''}"
+
+
+# ══ F-B TAB-VORFLUG (11.11.2026, Master nach FS2; K4 „Prophos-Tab antwortet nicht“ 27 Pläne/7 Tage auf 10 PCs) ══
+# Heute merkt erst der Puls-Lauf selbst (order_bot _tab_wache_pruefen „vor dem Lauf“), dass der Tab schläft — dann ist der Start verloren und kommt frühestens
+# 2–4 min später (FS1 sfBehoben). Jetzt prüft das Panel 2–3 min (gewürfelt) VOR jedem Start der IDs dieses PCs die Lebenszeichen des Tabs mit strengeren
+# Schwellen als die Stufen-Heilung (still ≥ 30 s statt 3 min, ohne Login, Supabase ≥ 90 s, Realtime ≥ 2 min) und startet bei rot die VORHANDENE Heilung
+# sofort (TAB_HEIL_SOFORT, Riegel wie FS1: wecken immer, neu laden/öffnen nur ohne offenen Trade). Startzeiten: Railway /code/tab-stand „next_start_um“
+# (ISO oder Liste); fehlt das Feld (Railway noch ohne), passiert nichts. ECHTER PING: /api/instances gibt „vorflug_ping“ mit; schickt der Tab die Marke als
+# vpong zurück, verlangt der Vorflug sie binnen TAB_VF_PONG_S. Ein Tab, der das (noch) nicht kann, wird nur an den Lebenszeichen gemessen.
+TAB_VF_FENSTER_S = (120.0, 180.0)   # Ziel-Abstand vor dem Start, je Start gewürfelt (Jitter-Regel)
+TAB_VF_ZU_SPAET_S = 45.0            # näher am Start nie mehr (der Puls-Lauf beginnt gleich)
+TAB_VF_STILL_S = 30.0               # der Tab fragt sonst alle ~5 s
+TAB_VF_SB_S = 90
+TAB_VF_RT_S = 120
+TAB_VF_PONG_S = 20.0
+TAB_VORFLUG = {"ziel": {}, "erledigt": {}, "marke": None, "marke_at": 0.0, "pong_at": 0.0, "kann_pong": False}
+
+
+def tab_vorflug_starts(stand):
+    """REIN RECHNEND (testbar): /code/tab-stand → Startzeiten (Unix-s) aus „next_start_um“ (ISO-Text oder Liste); ungültig/fehlend → []."""
+    roh = (stand or {}).get("next_start_um") if isinstance(stand, dict) else None
+    liste = roh if isinstance(roh, list) else [roh] if roh else []
+    out = []
+    for x in liste[:20]:
+        try:
+            out.append(datetime.fromisoformat(str(x).replace("Z", "+00:00")).timestamp())
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def tab_vorflug_faellig(starts, jetzt, erledigt, ziele):
+    """REIN RECHNEND (testbar): der erste Start, dessen Vorflug JETZT dran ist → Startzeit | None. Dran: noch nicht erledigt, Abstand ≤ gewürfeltes Ziel
+    (ziele[start], sonst Fenster-Mitte) und ≥ TAB_VF_ZU_SPAET_S."""
+    for st in starts or ():
+        d = float(st) - float(jetzt)
+        ziel = float((ziele or {}).get(st) or sum(TAB_VF_FENSTER_S) / 2)
+        if st not in (erledigt or {}) and TAB_VF_ZU_SPAET_S <= d <= ziel:
+            return st
+    return None
+
+
+def tab_vorflug_urteil(still_s, login, sb_s, rt_aus_s, pong):
+    """REIN RECHNEND (testbar): Lebenszeichen des Haupt-Tabs → (rot, Klartext). pong: True/False = Vorflug-Marke beantwortet/nicht, None = Tab kann es nicht."""
+    if still_s is None:
+        return True, "kein Prophos-Tab hat sich beim Panel gemeldet"
+    if still_s >= TAB_VF_STILL_S:
+        return True, f"Prophos-Tab fragt seit {int(still_s)} s nicht (sonst alle ~5 s)"
+    if login is False:
+        return True, "Prophos-Tab nicht angemeldet (claimt keine Starts)"
+    if login and sb_s is not None and sb_s >= TAB_VF_SB_S:
+        return True, f"Prophos-Tab ohne Supabase-Verbindung seit {int(sb_s)} s"
+    if login and rt_aus_s is not None and rt_aus_s >= TAB_VF_RT_S:
+        return True, f"Prophos-Tab ohne Realtime seit {int(rt_aus_s)} s"
+    if pong is False:
+        return True, f"Prophos-Tab beantwortet die Vorflug-Marke nicht binnen {int(TAB_VF_PONG_S)} s"
+    return False, "Prophos-Tab antwortet" + (" (Vorflug-Marke beantwortet)" if pong else "")
+
+
+def _tab_vorflug_schritt(pc):
+    """F-B: eine Runde im Tab-Wächter. Nie werfen; ohne frischen Tab-Stand oder ohne Startzeiten nichts."""
+    stand, at = TAB_NL.get("stand"), float(TAB_NL.get("stand_at") or 0.0)
+    jetzt = time.time()
+    if not isinstance(stand, dict) or jetzt - at > 180:
+        return
+    starts = tab_vorflug_starts(stand)
+    for k in [k for k in list(TAB_VORFLUG["ziel"]) if k < jetzt - 3600]:
+        TAB_VORFLUG["ziel"].pop(k, None)
+        TAB_VORFLUG["erledigt"].pop(k, None)
+    for st in starts:
+        TAB_VORFLUG["ziel"].setdefault(st, random.uniform(*TAB_VF_FENSTER_S))
+    st = tab_vorflug_faellig(starts, jetzt, TAB_VORFLUG["erledigt"], TAB_VORFLUG["ziel"])
+    if st is None or not _browser_und_mt5_frei():   # nie während eines Puls-Laufs / einer MT5-Order — dann die nächste Runde
+        return
+    TAB_VORFLUG["erledigt"][st] = jetzt
+    pong = None
+    if TAB_VORFLUG.get("kann_pong"):
+        TAB_VORFLUG.update(marke=f"{int(jetzt * 1000):x}-{random.randint(0, 1 << 30):x}", marke_at=jetzt, pong_at=0.0)
+        while time.time() - jetzt < TAB_VF_PONG_S and TAB_VORFLUG["pong_at"] < TAB_VORFLUG["marke_at"]:
+            time.sleep(0.8 + random.random() * 0.6)
+        pong = TAB_VORFLUG["pong_at"] >= TAB_VORFLUG["marke_at"]
+        TAB_VORFLUG["marke"] = None
+    still = time.time() - max(float(_TAB_OEFFNEN.get("zuletzt") or 0.0), float(_TAB_OEFFNEN.get("start") or 0.0))   # wie der Wächter (still0)
+    rot, grund = tab_vorflug_urteil(still, _TAB_OEFFNEN.get("login"), _TAB_OEFFNEN.get("sb_s"), _TAB_OEFFNEN.get("rt_aus_s"), pong)
+    txt = f"Vorflug Tab (Start in {int(st - time.time())} s): {grund}"
+    print(f"[tab-vorflug] {txt}", flush=True)
+    if rot:
+        TAB_HEIL_SOFORT.update(at=time.time(), plan="", erledigt=False, geheilt=False, grund=f"Vorflug: {grund}")
+        if pc:
+            _tab_stand_holen(pc, txt[:200])
 
 
 def tab_heil_sofort_riegel(stufe_jetzt, stand):
@@ -6542,7 +6643,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
             haupt = tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
-            return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt), ensure_ascii=False))
+            return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt, **({"vorflug_ping": TAB_VORFLUG["marke"]} if TAB_VORFLUG.get("marke") else {})),
+                                              ensure_ascii=False))
         if path == "/api/deals":
             # ENDLESUNG UNKLARER ECHO-PLÄNE (N2, Finn 04.11.2026 ~04:15 Dubai: „der P&L wird nie angezeigt"): Deal-Historie + Balance des Master-Logins
             # über order_bot.py „deals" — nur lesen, nie ein Klick. Nur wenn auf dieser Instanz gerade keine Order läuft (MASTER_ORDER_LOCKS): ein
@@ -6633,7 +6735,7 @@ class Handler(BaseHTTPRequestHandler):
             # FS1 (10.11.2026): Tab-Zustand für die Puls-Spur; anlass=tab_nicht_erreichbar startet die Stufen-Heilung sofort (s. TAB_HEIL_SOFORT). Nur lokal.
             q = parse_qs(urlparse(self.path).query)
             if (q.get("anlass") or [""])[0] == "tab_nicht_erreichbar":
-                TAB_HEIL_SOFORT.update(at=time.time(), plan=re.sub(r"[^0-9a-f-]", "", (q.get("plan_id") or [""])[0])[:36], erledigt=False, geheilt=False)
+                TAB_HEIL_SOFORT.update(at=time.time(), plan=re.sub(r"[^0-9a-f-]", "", (q.get("plan_id") or [""])[0])[:36], erledigt=False, geheilt=False, grund="")
                 print(f"[tab-heilen] Puls: Tab antwortete beim Start nicht — Stufen-Heilung sofort", flush=True)
             return self._send(200, json.dumps(tab_zustand_ausgabe(time.time(), _TAB_OEFFNEN, TAB_HEIL, TAB_HEIL_SOFORT,
                                                                   {"ergebnis": TAB_NL.get("ergebnis"), "ergebnis_at": TAB_NL.get("ergebnis_at")},
