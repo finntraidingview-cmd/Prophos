@@ -40071,6 +40071,21 @@
     const f = (t && t.final) || null; if(!f) return ''
     if(f.art === 'nicht_gelaufen') return `<span style="color:var(--sub)" title="${escapeHtml(String(f.hinweis || 'nicht gelaufen'))}">nicht gelaufen</span>`
     if(f.art === 'unklar' && f.grund === 'tagesende_unklar'){
+      // RA2 F3 (Finn 11.11.2026 „Ja“, Befund RA1: zwei Echo-Pläne standen als „⚠ unklar: Plan … nie fert…“, der eigentliche Grund — Server „Only position
+      // closing is allowed“ — stand nur in mt5_baseline.start_fehler): Tages-Reset-Zeilen sind nie gestartete Pläne. Liefert /admin/live-trades start_fehler
+      // {msg, schritt, unklar} (app.py 8e6a5f4e), heißt die Zeile „nie gestartet · Grund: <msg>“ — weiter mit ⚠ und „Order am Konto prüfen“. Dass am
+      // Konto nichts liegt, sagt der Chip nur mit dem Beleg des Order-Bots (server_abgelehnt, RA2 B), nie aus dem Text. Ohne start_fehler genau wie bisher
+      const sf = (t.start_fehler && typeof t.start_fehler === 'object') ? t.start_fehler : null
+      if(!t.started_at && sf && String(sf.msg || sf.grund || '').trim()){
+        const sicher = sf.server_abgelehnt === true
+        const hw = String(f.hinweis || ''), tagM = hw.match(/(\d{4})-(\d{2})-(\d{2})/), tag = tagM ? `${tagM[3]}.${tagM[2]}.` : ''
+        const g = String(sf.grund || sf.msg).trim(), kurz = g.length > 60 ? g.slice(0, 58) + '…' : g
+        const tip = (sicher ? 'Server lehnte die Order ab — am Konto liegt nichts aus diesem Plan' : 'Plan nie gestartet — Order am Konto prüfen')
+          + `${tag ? ' (Plan vom ' + tag + ')' : ''}: ${g}` + (sf.msg && String(sf.msg) !== g ? ` · Start-Fehler: ${sf.msg}` : '')
+          + (!sicher && f.unklar_grund ? ` · Deal-Prüfung: ${f.unklar_grund}` : '') + (!sicher && hw ? ` · ${hw}` : '')
+          + ' · Das Konto bekommt keinen neuen Trade, solange diese Zeile in Überprüfen steht.'
+        return `<span style="color:${sicher ? 'var(--sub)' : 'var(--warn-ink, #b45309)'}" title="${escapeHtml(tip)}">${sicher ? '' : '⚠ '}nie gestartet${tag ? ' (' + escapeHtml(tag) + ')' : ''} · Grund: ${escapeHtml(kurz)}</span>`
+      }
       const g = String(f.unklar_grund || f.hinweis || 'Order am Konto prüfen')
       return `<span style="color:var(--warn-ink, #b45309)" title="${escapeHtml(g)}">⚠ unklar: ${escapeHtml(g.length > 48 ? g.slice(0, 46) + '…' : g)}</span>`
     }
@@ -56598,6 +56613,11 @@
                   // zum erneuten Versuch raten — Timeout/unklar heißt: erst ins
                   // Terminal schauen, sonst droht die Doppel-Order (Review-Blocker).
                   const retryOk = !!(r && r.retry_ok)
+                  // RA2 B (Finn 11.11.2026 „Ja“, Befund RA1): hat der Server die Anfrage BELEGT abgelehnt (order_bot: server_abgelehnt — Journal „failed … [Grund]“
+                  // bzw. roter Dialog-Text nach ORDER_GRUND_REGELN, z. B. „Only position closing is allowed“, Invalid stops) und liegt keine Position, ist das
+                  // Ergebnis nicht unklar: nichts liegt am Konto → unklar = false (der Tages-Reset räumt den Plan dann weg statt „nie fertig“ ins Radar)
+                  // Nur das Feld des Bots zählt (S4), nie ein Text-Raten im Tab; mit Position (price + ticket) nie — dort liegt etwas am Konto
+                  const sicherAbgelehnt = !!(r && r.server_abgelehnt === true && !(r.price && r.ticket) && !r.ok)
                   const echoAus = _pfEchoPausiert(r)
                   const nichtScharf = echoBotNichtScharf(r)   // ES2d: Bot meldet „Copier nicht scharf" — wie der Scharf-Fehler im Tab
                   _pfSet('m5term', 'err', (echoAus || nichtScharf ? 'Nichts platziert: ' : 'Order fehlgeschlagen: ')
@@ -56624,7 +56644,7 @@
                     _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // wie der Scharf-Fehler im Tab
                     _pfStatusSave()
                     try{ renderTradePlans() }catch(_){}
-                  } else _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
+                  } else _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !(retryOk || sicherAbgelehnt),
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                   // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
@@ -56633,7 +56653,8 @@
                   if(!(r && r.price && r.ticket) && (retryOk || echoAus)) await fensterWeg()
                   if(!(r && r.price && r.ticket) && echoAus) await sfEinmal({ schritt: 'm5pause', msg: 'Echo ist pausiert (Not-Aus) — nichts gesendet.', unklar: false })
                   if(!(r && r.price && r.ticket) && nichtScharf) await sfEinmal({ schritt: 'm5scharf', msg: String(r.msg || 'Copier nicht scharf — nichts gesendet.'), unklar: false })
-                  if(!(r && r.price && r.ticket) && !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
+                  if(!(r && r.price && r.ticket) && !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !(retryOk || sicherAbgelehnt), bild: r && r.fehlerbild,
+                    ...(sicherAbgelehnt ? { server_abgelehnt: true, grund: String(r.grund || '').slice(0, 160) || undefined } : {}) })
                 }
               }catch(e){
                 _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))
@@ -58380,7 +58401,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2172'
+  const OS_TAB_BUILD = '2026-09-22.2173'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -64322,13 +64343,20 @@
   // GESPERRT = DECKEL SOFORT VOLL (Finn 26.10.2026, „Fehlstarts von heute alles fixen"): Jacob FundingPips …6925/…6924 und Marco FTMO …0116
   // liefen je 4× in „F9-Dialog nicht gefunden … trade_allowed = False" (13 Fehlstarts) — der Bot schreibt selbst „nicht neu starten", sfTick
   // plante trotzdem dreimal neu. Ein gesperrtes Konto heilt nicht in 15 min → kein Neuversuch, „Braucht dich" + Handy schon beim ersten Mal.
-  const sfDeckelVoll = sf => !!sf && (!!sfGesperrt(sf.msg) || (!SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX))
+  const sfDeckelVoll = sf => !!sf && (!!sfGesperrtSf(sf) || (!SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX))
   // URSACHE STATT HAND-SPUR (Finn 26.10.2026): „Braucht dich" zeigte bei Jacob FundingPips …6925/…6924 und Marco FTMO …0116 nur
   // „F9-Dialog nicht gefunden — … [0.0s·Hand: Tempo … Zug …" — 13 Fehlstarts, der Grund (MT5 trade_allowed = False, Firma hat den Handel
   // gesperrt, Balance ~89,8k/93,5k/90,1k) stand abgeschnitten hinten. Die msg ist gekürzt (sfMelden: Anfang + „ … " + Ende), das Ende überlebt.
-  const sfGesperrt = m => { m = String(m || ''); if(!/trade_allowed\s*=\s*False/i.test(m)) return null
+  // RA2 B (11.11.2026, Master nach Hinweis S4): seit Server-Ablehnungen unklar = false sind, plante sfTick sie bis SF_MAX neu — bei „nur Schließen
+  // erlaubt“ / „Trade disabled“ hieße das bis zu 3 weitere abgelehnte Orders. Diese Server-Antworten (order_bot ORDER_GRUND_REGELN, Text „(Server: …“)
+  // zählen deshalb wie trade_allowed = False: Deckel sofort voll, kein Neuversuch. quelle = was die Meldung belegt (Anzeige)
+  const sfGesperrt = m => { m = String(m || ''); const server = /\(Server: (Only position closing[^)]*|Trade disabled[^)]*)/i.exec(m)
+    if(!/trade_allowed\s*=\s*False/i.test(m) && !server) return null
     const k = /Kontostand\s+(-?\d[\d\s  ]*(?:[.,]\d+)?)/.exec(m), b = k ? Number(k[1].replace(/[\s  ]/g, '').replace(',', '.')) : NaN
-    return { bal: Number.isFinite(b) ? b.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '' } }
+    return { bal: Number.isFinite(b) ? b.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '',
+      quelle: /trade_allowed\s*=\s*False/i.test(m) ? 'MT5: trade_allowed = False' : 'Server: ' + server[1].trim() } }
+  // Fehlstart-Flag → Sperre: der Klartext des Bots (start_fehler.grund, bei server_abgelehnt) vor der gekürzten msg
+  const sfGesperrtSf = sf => sf ? (sfGesperrt(sf.grund) || sfGesperrt(sf.msg)) : null
   // Spur „[0.0s·Hand: …]" raus; volle Bot-Meldungen tragen hinten „— Grund: …" (die eigentliche Diagnose), sonst bleibt der letzte
   // Spur-Schritt („F9 ohne Dialog: kein Fenster vorn"); gekürzte Meldungen nur Anfang + Ende
   const sfOhneSpur = m => { m = String(m || '').replace(/\s+/g, ' ').trim(); const g = /— Grund: (.+)$/.exec(m); if(g) return g[1]
@@ -64371,6 +64399,7 @@
         versuche: (alt && Number(alt.versuche)) || 0, uac_n: uacAlt + (uacNeu ? 1 : 0), uac: uacNeu,   // Windows-Abfrage ≠ Fehlversuch (23.10.2026)
         tab_n: ((alt && Number(alt.tab_n)) || 0) + (f.schritt === 'tab_nicht_erreichbar' ? 1 : 0) }   // FS1 (10.11.2026): schneller Neustart nur beim 1. Mal (sfBehoben)
       // ZWEI ORBIT (03.11.2026, Z4): Zweit-Sperre am Code (Panel reicht zweit/zweit_art von Railway durch) — Sofort-Start-Wächter + Texte je Grund
+      if(f.server_abgelehnt === true){ flag.server_abgelehnt = true; if(f.grund) flag.grund = String(f.grund).slice(0, 160) }   // RA2 B: Beleg „Server lehnte ab, nichts am Konto“
       if(f.zweit === true){ flag.zweit = true; if(ZWEIT_ARTEN.includes(f.zweit_art)) flag.zweit_art = f.zweit_art
         if(ZWEIT_CODE_ART[f.zweit_code]) flag.zweit_code = f.zweit_code; if(f.bis && Number.isFinite(Date.parse(f.bis))) flag.bis = String(f.bis) }
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
@@ -64857,16 +64886,27 @@
     if(ok){ try{ const i = (tradePlans || []).findIndex(x => String(x.id) === String(r.id)); if(i >= 0 && tradePlans[i].mt5Baseline) tradePlans[i].mt5Baseline.start_fehler = b.start_fehler }catch(_){} }
     return ok
   }
+  // RA2 F1 (11.11.2026): REIN — welche Instanzen (config_file) sind durch offene/nahe Echo-Pläne belegt? datei(p) → file | null (null = anderer PC)
+  function deBelegt(plaene, datei){
+    const out = new Set()
+    for(const p of plaene || []){ let f = null; try{ f = datei(p) }catch(_){ f = null } if(f) out.add(String(f)) }
+    return out
+  }
   async function deTick(){
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || window._tabNebenSofort || _deLaeuft || Date.now() - _deAt < DE_TAKT_MS) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
-    // Gegenprüfung N2: die Lesung hält den Order-Lock der Instanz bis 90 s — nie, solange auf diesem PC ein Echo-Start fällig oder gerade geclaimt ist
-    const jetztMs = Date.now()
-    const startNah = (tradePlans || []).some(p => p && (p.route === 'mt5' || p.route === 'mt5v2') && (p.status === 'open'   // offener Echo-Trade: Schließen nie verzögern
-      || (p.status === 'planned' && !p.startedAt
-      && ((p.startUm && Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000) || (p.startUmGestartetAt && jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000)))))
-    if(startNah || _suLaeuft) return
+    // Gegenprüfung N2: die Lesung hält den Order-Lock der Instanz bis 90 s — nie auf einer Instanz, auf der gerade ein Echo-Trade offen ist oder ein
+    // Echo-Start fällig/geclaimt ist. RA2 F1 (Finn 11.11.2026 „Ja“, Befund RA1: zwei nie gestartete Echo-Pläne vom 10.11. blieben in Radar → Erledigt
+    // stehen, weil der Riegel bisher für die GANZE ID galt — Moritz/Marc haben über Stunden offene Funded-CFD-Trades, dann lief die Klärung nie):
+    // der Riegel gilt jetzt je Instanz (Panel: MASTER_ORDER_LOCKS je config_file, /api/deals liest als eigener Unterprozess unter genau diesem Lock).
+    // Belegte Instanzen = deBelegt (unten, nach dem Instanzen-Abruf); ein offener Trade auf Konto A hält die Prüfung von Konto B nicht mehr an.
+    // Prüfer RA2: je Kandidat frisch aus tradePlans (die Schleife kann viele Minuten laufen — ein Start, der beim Takt-Beginn noch > 15 min weg war, zählt dann)
+    const nahPlaene = () => { const jetztMs = Date.now()
+      return (tradePlans || []).filter(p => p && (p.route === 'mt5' || p.route === 'mt5v2') && (p.status === 'open'   // offener Echo-Trade: Schließen nie verzögern
+        || (p.status === 'planned' && !p.startedAt
+        && ((p.startUm && Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000) || (p.startUmGestartetAt && jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000))))) }
+    if(_suLaeuft) return
     _deAt = Date.now(); _deLaeuft = true
     try{
       const ab = new Date(Date.now() - DE_TAGE * 86400000).toISOString()
@@ -64892,9 +64932,14 @@
       if(!kand.length) return
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
       if(!dd || dd.copier_offline || dd._httpFail) return
+      // RA2 F1: Instanzen dieses PCs mit offenem Echo-Trade bzw. nahem Start. Lässt sich ein solcher Plan keiner Instanz zuordnen, läuft er an einem anderen
+      // PC (mt5V2Resolve = nur Instanzen dieses Panels) und hält hier keinen Order-Lock
+      const instDatei = p => { const x = mt5V2Resolve(p, dd.instances || []); return x && x.inst && x.inst.file ? String(x.inst.file) : null }
       for(const r of kand){
+        const belegt = deBelegt(nahPlaene(), instDatei)
         const p = rowToPlan(r), ri = mt5V2Resolve(p, dd.instances || [])
         if(!ri || !ri.inst || !ri.inst.file) continue   // Instanz hängt an einem anderen PC — dessen Tab klärt
+        if(belegt.has(String(ri.inst.file))) continue    // RA2 F1: auf DIESER Instanz läuft/startet gerade ein Echo-Trade — nächster Takt (Plan nicht als versucht merken)
         _deVersucht.set(String(r.id), Date.now())
         // Einstieg nur binnen 2 h nach dem Claim (die Order fällt Sekunden danach); die Ausstiege holt der Bot über die Position (Prüfer N2)
         const claim = r.start_um_gestartet_at, bis = new Date(Date.parse(claim) + 2 * 3600000).toISOString()
@@ -64919,7 +64964,9 @@
          * ansteht (ebnStartNah) oder Polar läuft. Das Urteil selbst bleibt deUrteil (NG1-Weg). */
         if(u.art === 'unklar' && res && res.lesbar === false && /Master-Terminal läuft nicht/.test(String(res.grund || ''))){
           const n = _deOeffnet.get(String(r.id)) || 0
-          let frei = false; try{ frei = !(typeof ebnStartNah === 'function' && ebnStartNah()) && !(typeof polarLaeuft === 'function' && polarLaeuft()) && typeof mt5KontoBalanceJetzt === 'function' }catch(_){ frei = false }
+          // RA2 F1: ein Terminal zum Lesen ÖFFNEN (Login am Bildschirm) nur, wenn auf diesem PC keine Instanz belegt ist — sonst könnte es einem
+          // laufenden Echo-Schließen einer anderen Instanz (Klicks im MT5-Fenster) das Fenster wegziehen; die reine Deal-Lesung oben läuft je Instanz
+          let frei = false; try{ frei = !belegt.size && !(typeof ebnStartNah === 'function' && ebnStartNah()) && !(typeof polarLaeuft === 'function' && polarLaeuft()) && typeof mt5KontoBalanceJetzt === 'function' }catch(_){ frei = false }
           if(n < DE_OEFFNEN_MAX && frei){
             let lb = null; try{ lb = await mt5KontoBalanceJetzt(r.master_account_id, ri.masterLogin, {}) }catch(e){ lb = { ok: false, msg: String((e && e.message) || e) } }
             if(lb && lb.ok){
@@ -68039,7 +68086,7 @@
     const bis = tplUhr(sfTagesEnde(), D.v), n = sfFehlversuche(sf)   // Windows-Abfragen zählen nicht (23.10.2026)
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
-    if(sfGesperrt(sf.msg)) return 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll)
+    if(sfGesperrtSf(sf)) return 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll; RA2: auch Server-Sperre)
     if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
     if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
@@ -68371,8 +68418,8 @@
       }
       // 2b) Handel am Konto gesperrt (26.10.2026): MT5 meldet trade_allowed = False — schon ab dem ersten Fehlstart zeigen, ohne ↻ (Neuversuche
       // scheitern genauso, Jacob …6925 lief heute 5×). Vor dem Deckel, damit die Sperre statt „3 Fehlstarts … F9-Dialog" dasteht
-      const gs = sf && (sf.status === 'rot' || sf.status === 'neu') ? sfGesperrt(sf.msg) : null
-      if(gs) return { text: `kann nicht starten (${uhr}) — Handel am Konto gesperrt${gs.bal ? `, Balance ${gs.bal}` : ''} (MT5: trade_allowed = False)`,
+      const gs = sf && (sf.status === 'rot' || sf.status === 'neu') ? sfGesperrtSf(sf) : null
+      if(gs) return { text: `kann nicht starten (${uhr}) — Handel am Konto gesperrt${gs.bal ? `, Balance ${gs.bal}` : ''} (${gs.quelle})`,
         tun: 'Im Dashboard der Firma nachsehen (geblowt/gesperrt?) — dann unter Accounts abschließen bzw. archivieren und den Plan löschen. Erneut versuchen bringt nichts.', neu: false }
       // 3) Deckel voll: SF_MAX Fehlstarts → sfTick plant nicht mehr neu (Memory prophos-nachholen-luecke-claim-zu-spaet, Marc/Mike 19.10.)
       if(sf && sf.status === 'rot' && sfDeckelVoll(sf))   // Windows-Abfragen zählen nicht mit (23.10.2026, sfFehlversuche)
