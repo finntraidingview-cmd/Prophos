@@ -4393,6 +4393,10 @@ def alarm_tick():
     except Exception as e:
         print(f"[alarm] ⚠️ Zwei Orbit: {type(e).__name__}: {e}", flush=True)
     try:
+        hedge_jenseits_tick(jetzt)   # DL2 (11.11.2026): Hedge offen, Kurs ≥ 5 min jenseits seines Schließ-Levels → 🟠
+    except Exception as e:
+        print(f"[alarm] ⚠️ Hedge jenseits: {type(e).__name__}: {e}", flush=True)
+    try:
         echo_frost_tick(rows, namen, jetzt.timestamp())
     except Exception as e:
         print(f"[alarm] ⚠️ Echo-Snapshot-Wache: {type(e).__name__}: {e}", flush=True)
@@ -4409,6 +4413,89 @@ def alarm_tick():
             sb_delete("alarm_log", {"at": f"lt.{(jetzt - timedelta(days=ALARM_LOG_TAGE)).isoformat()}"})
         except Exception as e:
             print(f"[alarm] ⚠️ aufräumen: {type(e).__name__}: {e}", flush=True)
+
+
+# HEDGE JENSEITS DES SCHLIESS-LEVELS (DL2, 11.11.2026 — Fall WH1 Emin Tradeify 150k …0887, Plan 51c33a09): WD SELL 3 MNQ ohne SL, Tradeify schloss den
+# Master am Daily Loss, der Fusion-Hedge blieb offen, der Reader war blind, kein Alarm. Steht der Kurs (tv_kurs_1m, Plan-Wurzel) HEDGE_JENSEITS_S lang
+# jenseits des Schließ-Levels des Hedges (hedge.sl_level_nq: Master-SL, Daily Loss oder Liquidation — das nähere, s. prophos.html hedgeLiqLevel) und ist der
+# Hedge laut Plan noch offen, hätte er längst zu sein müssen (Tab-Wächter, Terminal-Level) → 🟠 einmal je Plan. HT-IDs an die Master-IDs (alarm_senden), IDs
+# einer Verwalter-Gruppe an ihren Verwalter (wie gp_push_tick, Zwei Unternehmen getrennt). Nur lesen, schließt nichts.
+HEDGE_JENSEITS_S = 300
+HEDGE_JENSEITS_KURS_MAX_S = 300       # Reader-Minute höchstens so alt — ein alter Kurs ist kein Beleg
+_hedge_jenseits = {"seit": {}, "gemeldet": {}}
+
+
+def hedge_jenseits_urteil(richtung, kurs, level):
+    """REIN RECHNEND (testbar): steht der Kurs jenseits des Hedge-Schließ-Levels? Master buy → Kurs ≤ Level, sell → Kurs ≥ Level."""
+    k, l = _wd_num(kurs), _wd_num(level)
+    if k is None or l is None or l <= 0 or richtung not in ("buy", "sell"):
+        return False
+    return k <= l if richtung == "buy" else k >= l
+
+
+def hedge_jenseits_ereignisse(rows, kurse, seit, jetzt_ts, warte_s=HEDGE_JENSEITS_S, kurs_max_s=HEDGE_JENSEITS_KURS_MAX_S):
+    """REIN RECHNEND (testbar): offene Pläne mit offenem Hedge → [(plan_id, user_id, text)] für die, deren Kurs seit ≥ warte_s jenseits des Levels steht.
+    seit = {plan_id: erster Zeitpunkt jenseits} wird hier gepflegt (zurückgesetzt, sobald der Kurs wieder diesseits ist oder kein Beleg da ist)."""
+    out, aktiv = [], set()
+    for r in rows or ():
+        h = r.get("hedge") if isinstance(r.get("hedge"), dict) else None
+        pid = str(r.get("id") or "")
+        if not pid or r.get("status") != "open" or not h or h.get("status") != "offen":
+            continue
+        lvl = _wd_num(h.get("sl_level_nq"))
+        wz = str(r.get("master_symbol_root") or "").upper()
+        if wz not in ("NQ", "MNQ"):
+            wz = "MNQ" if str(h.get("symbol_nq") or "").upper().startswith("MNQ") else "NQ"
+        kz = (kurse or {}).get(wz) or {}
+        try:
+            alter = jetzt_ts - datetime.fromisoformat(str(kz.get("minute") or "").replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            alter = None
+        if alter is None or alter > kurs_max_s or not hedge_jenseits_urteil(r.get("richtung"), kz.get("kurs"), lvl):
+            continue
+        aktiv.add(pid)
+        erst = seit.setdefault(pid, jetzt_ts)
+        if jetzt_ts - erst < warte_s:
+            continue
+        art = {"daily_loss": "Daily-Loss-Level", "master_sl_wuerfel": "Master-SL", "liquidation": "Liquidations-Level"}.get(
+            str(h.get("liq_art") or h.get("sl_art") or ""), "Schließ-Level")
+        out.append((pid, str(r.get("user_id") or ""), f"{r.get('master_firm') or ''} {r.get('master_name') or ''}".strip()
+                    + f": Kurs {wz} {_liq_de(kz.get('kurs'))} seit {int((jetzt_ts - erst) // 60)} min jenseits des {art} {_liq_de(lvl)}, Fusion-Hedge"
+                    + (f" #{h.get('ticket')}" if h.get("ticket") else "") + " laut Plan noch offen — Master wohl zu (Firma/Daily Loss), Tab-Wächter oder Reader blind."
+                    + " Im Puls-Chrome nachsehen, Fusion von Hand schließen, wenn der Master flach ist."))
+    for pid in list(seit):
+        if pid not in aktiv:
+            del seit[pid]
+    return out
+
+
+def hedge_jenseits_tick(jetzt):
+    """Im alarm_tick: eigene Abfrage der offenen Pläne ALLER IDs (auch Verwalter-Gruppen, die alarm_tick sonst herausfiltert)."""
+    rows = _sb_all("trade_plans", {"select": "id,user_id,status,richtung,master_name,master_firm,master_symbol_root,hedge:mt5_baseline->hedge",
+                                   "status": "eq.open", "hedge_eur": "gt.0"}) or []
+    if not rows:
+        _hedge_jenseits["seit"].clear()
+        return
+    evs = hedge_jenseits_ereignisse(rows, _kurs_jetzt(), _hedge_jenseits["seit"], jetzt.timestamp())
+    if not evs:
+        return
+    namen, aus = _ap_namen()
+    karte = gp_verwalter_karte() or {}
+    schon = alarm_im_log([f"hedge_jenseits:{pid}" for pid, _u, _t in evs], 86400)
+    for pid, uid, text in evs:
+        key = f"hedge_jenseits:{pid}"
+        if key in _hedge_jenseits["gemeldet"] or (schon and key in schon):   # alarm_im_log → None bei Lesefehler (Prüfer DL2)
+            continue
+        _hedge_jenseits["gemeldet"][key] = time.time()
+        wer = namen.get(uid, uid[:8])
+        if uid in karte:          # Verwalter-Gruppe (Emin): an den Verwalter, nie an die Master-IDs
+            push_an_user(karte[uid], ALARM_ZEICHEN[2] + "Hedge offen jenseits des Levels", f"{wer} · {text}"[:400], tag=f"alarm-hedge-jenseits-{pid[:8]}", renotify=True, prio=2)
+            continue
+        if uid in aus:
+            continue
+        alarm_senden(2, "hedge_jenseits", "Hedge offen jenseits des Levels", f"{wer} · {text}", uid=uid, plan_id=pid, schluessel=key,
+                     tag=f"alarm-hedge-jenseits-{pid[:8]}", renotify=True)
+    _hedge_jenseits["gemeldet"] = {k: t for k, t in _hedge_jenseits["gemeldet"].items() if time.time() - t < 86400}
 
 
 # ECHO BLIND (30.10.2026, Befund RADAR-PNL-FEHLT: Jacob pc-auzre5 …2655, Echo MIT Fusion-Hedge offen, Lese-EA eingefroren → der Copier sah
@@ -13269,7 +13356,26 @@ def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
     mv = hf_wd_master_verlust(liq_regeln, acc, dict(plan or {}, konto_typ="winning_days", winning_day=True), None, fruehere)
     bal, puffer = _wd_num(acc.get("tv_balance")), _wd_num(mv.get("usd"))
     liq = round(bal - puffer, 2) if (bal is not None and puffer is not None) else None
-    return wd_sl_wuerfeln(regel, puffer, bal, liq, rnd=rnd, grund=mv.get("grund"))
+    return wd_sl_dll_pflicht(wd_sl_wuerfeln(regel, puffer, bal, liq, rnd=rnd, grund=mv.get("grund")), mv)
+
+
+WD_SL_DLL_PUFFER = 100.0    # DL2: so weit vor dem Tageslimit sitzt der Pflicht-SL (Gebühren/Schlupf; Tradeify zählt die Kommission mit)
+
+
+def wd_sl_dll_pflicht(w, mv):
+    """REIN RECHNEND (testbar, DL2 11.11.2026, Master: „WD ohne SL … trotzdem ein SL knapp vor dem DLL“; Fall …0887: WD ohne SL, Tradeify schloss den Master am Daily
+    Loss): hat der Würfel „ohne SL“ ergeben und ist der Puffer ein Tageslimit (mv.art daily_loss, Soft Breach — die Firma schließt den Master), bekommt der Plan
+    einen SL = Puffer − WD_SL_DLL_PUFFER. Darunter WD_SL_FEST_MIN_USD → bleibt ohne (der Fusion-Hedge schließt am DLL-Level). Sonst unverändert."""
+    if not isinstance(w, dict) or not w.get("ohne") or w.get("sperre") or (mv or {}).get("art") != "daily_loss":
+        return w
+    p = _wd_num((mv or {}).get("usd"))
+    if p is None:
+        return w
+    usd = int(p - WD_SL_DLL_PUFFER)
+    if usd < WD_SL_FEST_MIN_USD:
+        return dict(w, grund=f"{w.get('grund') or 'ohne SL'} — Daily Loss nur {p:,.0f} $ entfernt, kein Pflicht-SL".replace(",", "."))
+    return dict(w, ohne=False, usd=usd, pflicht_dll=True,
+                grund=f"ohne SL gewürfelt — Daily Loss: SL {usd} $ = {p:,.0f} $ bis zum Tageslimit − {WD_SL_DLL_PUFFER:.0f} $".replace(",", "."))
 
 
 def _wd_sl_wuerfel_lesen():
@@ -13283,6 +13389,16 @@ def _wd_sl_wuerfel_lesen():
     return wd_sl_wuerfel_regel(rows[0].get("sl_wuerfel") if rows else None)
 
 
+def _wd_sl_konten_select(params):
+    """accounts für den WD-SL mit DL2-Konto-Limit dll_usd (11.11.2026); fehlt die Spalte noch (sql/2026-11-11_dl2_konto_dll.sql nicht eingespielt) → ohne sie wie bisher."""
+    try:
+        return sb_select("accounts", dict(params, select=params["select"] + ",dll_usd"))
+    except Exception as e:
+        if "dll_usd" not in str(getattr(getattr(e, "response", None), "text", "") or e):
+            raise
+        return sb_select("accounts", params)
+
+
 def _wd_sl_kontext(mids, mit_fest=False):
     """Einmal je POST /admin/wd-plaene: (regel, konten {id: acc}, liq_regeln, fruehere). Würfel aus → (None, {}, [], []). Fehlen die Konto-Daten,
     bleibt die Regel an und jeder Plan bekommt ohne=True mit Grund (lieber kein SL als einer ohne belegten Puffer). mit_fest (FT2): feste SL je Firma
@@ -13293,7 +13409,7 @@ def _wd_sl_kontext(mids, mit_fest=False):
     konten = {}
     try:
         for i in range(0, len(mids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
+            for a in _wd_sl_konten_select({"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
                                                       "tv_balance,tv_balance_at", "id": "in.(" + ",".join(mids[i:i + 80]) + ")"}) or []:
                 konten[str(a.get("id"))] = a
     except Exception as e:
@@ -13395,7 +13511,7 @@ def wd_sl_nach_tick(jetzt=None, rnd=None):
     konten = {}
     try:
         for i in range(0, len(mids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
+            for a in _wd_sl_konten_select({"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,"
                                                       "tv_balance,tv_balance_at", "id": "in.(" + ",".join(mids[i:i + 80]) + ")"}) or []:
                 konten[str(a.get("id"))] = a
         liq = _liq_regeln_laden()
@@ -33644,16 +33760,25 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
     ts, ts_quelle = liq_tagesstart(dict(plan or {}, started_at=(plan or {}).get("started_at") or (plan or {}).get("start_um")), bal, fruehere)
     f = liq_regel_felder(regeln, a, plan, bal, ts if ts is not None else bal, None, None, None, None, kw_firmen=kw_firmen)
     regel, gr = f.get("liq_regel_nur_balance"), _wd_konto_groesse(a)
+    regel_text, regel_soft = f.get("liq_regel_text"), f.get("liq_regel_soft")
+    # DL2 (11.11.2026, Anlass …0887): Tagesverlust-Limit JE KONTO (accounts.dll_usd > 0) — die Firma schließt den Master dort (Soft Breach);
+    # das engere von Konto-Limit und Regel gilt. 0/NULL = wie bisher nur liq_regeln (Daily/Flex steht nur am Konto).
+    kd = _wd_num(a.get("dll_usd"))
+    if kd and kd > 0:
+        k_lvl = round((ts if ts is not None else bal) - kd, 2)
+        if regel is None or k_lvl > regel:
+            regel, regel_soft = k_lvl, True
+            regel_text = f"Daily Loss {_liq_de(kd)} $ (Konto) ab Tagesstart {_liq_de(ts if ts is not None else bal, 2)} $"
     boden = max([v for v in (f.get("liq_boden_balance"), gr + 100 if gr else None) if v is not None], default=None)
     liq = max([v for v in (regel, boden) if v is not None], default=None)
     if liq is None:
-        return {"grund": f.get("liq_regel_text") or "keine Liq-Regel für dieses Konto"}
+        return {"grund": regel_text or "keine Liq-Regel für dieses Konto"}
     usd = round(bal - liq, 2)
     if usd <= 0:
         return {"grund": f"Balance {bal:.2f} $ liegt nicht über der Liq {liq:.2f} $"}
-    tages = regel is not None and liq == regel and f.get("liq_regel_soft")
+    tages = regel is not None and liq == regel and regel_soft
     return {"usd": usd, "art": "daily_loss" if tages else "liq", "tagesstart": ts, "tagesstart_quelle": ts_quelle,
-            "text": f.get("liq_regel_text") if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss"}
+            "text": regel_text if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss"}
 
 
 def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):

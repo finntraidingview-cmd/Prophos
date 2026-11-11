@@ -74,8 +74,10 @@ if shutil.which("osascript"):
         i = html.index("function " + name + "(")
         return html[i:html.index("\n  }\n", i) + 5]
     code = fn("hedgeMultAusRisiko") + fn("hedgeRisikoMaster") + fn("hedgeLotsSoll") + fn("ahfWdPaare")
+    # DL2 (11.11.2026): Puffer vor dem Daily Loss ≥ 100 $ (hedgeDllVorPkt), Kante „zu nah“ (hedgeDllVorEff) — einzeilige Funktionen aus prophos.html
+    code += "".join(html[html.index("function " + n + "("):html.index("\n", html.index("function " + n + "("))] + "\n" for n in ("hedgeDllVorPkt", "hedgeDllVorEff"))
     test = """function run(){
-var window = {}, accounts = [], HEDGE_DLL_VOR_PKT = 5; function tpIstApexHedge(){ return false } function tpWdSlavePpl(){ return 0.85 } function hedgePplFuer(s){ return /^M/.test(s) ? 2 : /^NQ/.test(s) ? 20 : 0 }
+var window = {}, accounts = [], HEDGE_DLL_VOR_PKT = 5, HEDGE_DLL_VOR_USD = 100; function tpIstApexHedge(){ return false } function tpWdSlavePpl(){ return 0.85 } function hedgePplFuer(s){ return /^M/.test(s) ? 2 : /^NQ/.test(s) ? 20 : 0 }
 """ + code + """
 var M = { master_contracts: '1.000', multiplier: '7.0624', master_tp: '1499.00', slave_risk: '449.93', master_risk: '1499.00', master_symbol: 'NQZ6', master_verlust: { usd: 4000, art: 'daily_loss' } };
 var C = { master_contracts: '3.000', multiplier: '1.0893', master_tp: '324.00', slave_risk: '150.00', master_risk: '324.00', master_symbol: 'MNQZ6', master_verlust: { usd: 1500, art: 'daily_loss' } };
@@ -93,7 +95,9 @@ return JSON.stringify({ m: ahfWdPaare(M), c: ahfWdPaare(C), o: ahfWdPaare(O) });
         r = json.loads(aus.stdout)
         check(r["m"]["lots"] == 7.06 and round(r["m"]["tpEur"]) == 450, f"Mike 1 NQ, 7,06 Lot, TP 1.499 $ → −450 € ({r['m']['tpEur']})")
         check(round(r["m"]["dlEur"]) == 1170, f"Mike Daily Loss 4.000 $ = 200 Pkt, Fusion 5 Pkt vorher → +1.170 € obere Kante ({r['m']['dlEur']})")
-        check(round(r["c"]["tpEur"]) == 150 and round(r["c"]["dlEur"]) == 681, f"3 MNQ: Punktwert aus dem Plan-Symbol, TP −150 €, 1.500 $ = 250 Pkt − 5 → +681 € ({r['c']['tpEur']}, {r['c']['dlEur']})")
+        # DL2: 3 MNQ → Puffer 16,75 Pkt (= ≥ 100 $) statt 5: 250 − 16,75 = 233,25 Pkt
+        check(round(r["c"]["tpEur"]) == 150 and abs(r["c"]["dlEur"] - r["c"]["lots"] * 0.85 * 233.25) < 0.01 and r["c"].get("dlVorPkt") == 16.75,
+              f"3 MNQ: Punktwert aus dem Plan-Symbol, TP −150 €, 1.500 $ = 250 Pkt − 16,75 (DL2: ≥ 100 $) → +{round(r['c']['dlEur'])} € ({r['c']['tpEur']}, {r['c']['dlEur']})")
         check(r["o"]["dlEur"] is None and r["o"]["dlUsd"] is None and r["o"]["dlText"] == "keine Balance", "ohne Master-Verlust: Strich und Grund im Tooltip, keine erfundene Zahl")
 
 print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
