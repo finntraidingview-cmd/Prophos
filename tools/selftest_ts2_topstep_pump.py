@@ -154,6 +154,21 @@ check(ruf("fdp_express_vor_t1", [L1, T1], None) == [L1, T1], "Start von Trade 1 
 wb, gb = ruf("fdp_pump_trade2", A2, {"tp": 6000}, bs, 145620.0, liq2, 166000.0, random.Random(5))
 check(wb is None and "geblowt" in gb, "Trade 1 bis an die Liq → kein Trade 2")
 
+# ── 40-%-Consistency (Topstep RTP): nur Hinweis, blockt nie
+h = ruf("fdp_topstep_cons_hinweis", {}, 16000.0, "Topstep")
+check(h.startswith("Hinweis Topstep-Consistency") and "100 %" in h and "40.000" in h, f"Pump 16.000 im frischen Zyklus → Hinweis 100 % > 40 %, Payout ab ≈ 40.000 ({h})")
+check(ruf("fdp_topstep_cons_hinweis", {"2026-11-03": 9000.0, "2026-11-04": 9000.0, "2026-11-05": 9000.0}, 6000.0, "Topstep") == "",
+      "bester Tag 9.000 von 33.000 (27 %) → kein Hinweis")
+check(ruf("fdp_topstep_cons_hinweis", {}, 16000.0, "Tradeify") == "", "Tradeify → nie ein Hinweis")
+check(ruf("fdp_topstep_cons_hinweis", {}, 0.0, "Topstep") == "" and ruf("fdp_topstep_cons_hinweis", {"t": -5000.0}, 3000.0, "Topstep") == "",
+      "kein Gewinn bzw. Netto ≤ 0 → kein Hinweis")
+
+# ── SQL (T5): Topstep = Tradeify-Einstellung, an bleibt false, idempotent
+sq = open(os.path.join(W, "sql", "2026-11-11_ts2_topstep_pump.sql"), encoding="utf-8").read()
+code = "\n".join(z for z in sq.splitlines() if not z.strip().startswith("--"))
+check("t->'namen' ? 'tradeify' and t->>'tp_modus' = 'pump2'" in code and "'an', false" in code, "SQL: Werte von Tradeify (pump2), an = false")
+check("not (f ? 'tp_modus')" in code and code.count("where r.id = 1") == 1, "SQL: nur solange Topstep noch kein Modell hat (überschreibt Finns Änderungen nie)")
+
 # ── Einbau-Anker
 planen = quelle("fdp_planen")
 tick = quelle("fdp_pump_tick")
@@ -168,6 +183,8 @@ check('p.get("route") if p.get("route") in ("tvv2", "tsv2") else fdp_route(a.get
 check("fdp_pump_echt(p, basis)" in tick and "fdp_express_liq(a, fdp_express_vor_t1(verlauf, p.get(\"started_at\")), bs - basis, basis, dd)" in tick,
       "fdp_pump_tick: 0-basierte Lesung + Liq aus der MLL nach Tagesend-Logik")
 check('"route": "in.(tvv2,tsv2)"' in offen, "fdp_pump_offen_tick: 18:00-Alarm auch für Topstep")
+check('fdp_topstep_cons_hinweis(fdp_tage(pl, ab), (r_p.get("ziel") or 0) - balance, a.get("firm"))' in planen and 'notiz += " · " + r["hinweis"]' in planen
+      and 'aktion="aus"' not in planen.split("fdp_topstep_cons_hinweis(")[1][:400], "fdp_planen: Consistency-Hinweis in die Plan-Notiz, kein Block")
 check("fdp_express_basis(a, g)" in quelle("kz_fdp_abhak"), "kz_fdp_abhak (Abhak-Popup): Topstep Express absolut wie der Planer")
 
 print()

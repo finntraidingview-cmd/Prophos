@@ -47658,9 +47658,15 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if (regel or {}).get("tp_modus") == "pump2":
             # FF2: Pump-Modell — Liq nach Tagesend-Logik (EOD-Trailing zieht erst am Tagesende nach), Würfel fest je Konto × Zyklus × CME-Tag
             peak_e = liq_peak({}, a, balance, verlauf, eod=True)
-            return fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
-                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None,
-                                  liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd")) if basis else None), zy
+            r_p = fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
+                                 sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None,
+                                 liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd")) if basis else None)
+            if r_p.get("aktion") == "planen":
+                # TS2: Topstep-RTP-Consistency nur als Hinweis (blockt nie) — Pump-Tag = Rest bis zum Zielniveau (beide Wege zielen auf das ganze Niveau)
+                _h = fdp_topstep_cons_hinweis(fdp_tage(pl, ab), (r_p.get("ziel") or 0) - balance, a.get("firm"))
+                if _h:
+                    r_p["hinweis"] = _h
+            return r_p, zy
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
                                  konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy
 
@@ -47837,6 +47843,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if _eb:   # TS2: Nova in TopstepX — dort steht das Konto 0-basiert, die Werte auch so zeigen
                 notiz += (f" · Nova (TopstepX, Express ab 0: Balance {_liq_de(r['balance'] - _eb)} $ · Ziel {_liq_de(r['ziel'] - _eb)} $ · "
                           f"Liq {_liq_de(r['liq'] - _eb)} $)")
+            if r.get("hinweis"):
+                notiz += " · " + r["hinweis"]   # TS2: 40-%-Consistency (Topstep RTP), nur Hinweis
             mb_pump = {"pump": dict(pm, express_basis=_eb) if _eb else pm}
             if r.get("kette"):
                 lb = fdp_pump_minute(pm.get("t2_bis") or "18:30", mitternacht)
