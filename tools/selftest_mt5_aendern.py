@@ -159,7 +159,8 @@ def lade():
     ns = {"re": re, "time": uhr, "os": os}
     # RT1 (05.11.2026): AENDERN_NACH_MENUE_S + AENDERN_TAB_ANRECHNUNG_MAX_S kamen mit J2 (ac2dc5f2, 31.10.2026) dazu — aus dem Quelltext nachladen.
     for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE", "NACHZIEH_SL_TOLERANZ",
-              "AENDERN_NACH_MENUE_S", "AENDERN_TAB_ANRECHNUNG_MAX_S"):
+              "AENDERN_NACH_MENUE_S", "AENDERN_TAB_ANRECHNUNG_MAX_S",
+              "AENDERN_BEWEIS_S", "AENDERN_SERVER_S"):   # MT1 (11.11.2026): Beweis-Fristen der Ändern-Kaskade
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for name in ("fmt_preis", "berechne_sl_tp", "sltp_vom_fill", "sltp_abweichung_usd", "kommission_runde", "nachzieh_seiten",
                  "tagesgrenze_pruefen", "sl_ausloeser", "sl_tagesgrenze_vom_fill", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
@@ -168,7 +169,10 @@ def lade():
                  # RT1 (05.11.2026): neue Hilfen im Ändern-Weg nachladen — _el_tasten (851ab5a2, 28.10.2026: ESC/Tippen statt
                  # el.type_keys, ohne pywinauto-Tastatur fällt es auf el.type_keys zurück), _fenster_zustand_text + _aendern_vorn
                  # (J2 ac2dc5f2, 31.10.2026: Spur + Terminal nach vorn; ohne Windows-u32 → „unbekannt“, kein Abbruch)
-                 "_el_tasten", "_fenster_zustand_text", "_aendern_vorn"):
+                 "_el_tasten", "_fenster_zustand_text", "_aendern_vorn",
+                 # MT1 (11.11.2026): _sltp_klicken drückt den Ändern-Knopf über aendern_kaskade (Beweis API + Journal), _sltp_nachziehen
+                 # baut den Beweis-Rückruf (_aendern_beweis, nur lesen) und schreibt den Ergebnis-Code (aendern_ergebnis_code)
+                 "lokal_sek", "aendern_journal_urteil", "aendern_kaskade", "_aendern_beweis", "aendern_ergebnis_code"):
         exec(fn(src, name), ns)
     ns.update(_warte=lambda a=0, b=0: uhr.sleep(a), tipp_takt=lambda n, **_k: [0.01] * n, _echo_klick=lambda r, schritte=0: True,
               _echo_klickziel=lambda r: (r.left + 1, r.top + 1), _maus_fahren=lambda *a, **k: None, is_paused=lambda: False,
@@ -317,7 +321,7 @@ def main():
     def lauf(final, api_folge, klick_erg=({"ok": True, "msg": "geklickt"},), grund="test", sl_usd=None):
         klick_args, pausen, stand = [], [], {"i": 0}
         ergebnisse = list(klick_erg)
-        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: klick_args.append((sl_t, tp_t)) or \
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None, beweis=None: klick_args.append((sl_t, tp_t)) or \
             ergebnisse[min(len(klick_args), len(ergebnisse)) - 1]
         ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: api_folge(len(klick_args))
         ns["_kommission_lesen"] = lambda path, exp, t: 0.0
@@ -439,7 +443,7 @@ def main():
 
     def lauf2(cmd_extra, api, klick_erg, sl_alt=None):
         ka = []
-        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or klick_erg
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None, beweis=None: ka.append((sl_t, tp_t)) or klick_erg
         ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: api
         ns["_kommission_lesen"] = lambda path, exp, t: 0.0
 
@@ -479,7 +483,7 @@ def main():
     SL_ALT_GROSS = round(FILL + 740.0, 2)        # grober F9-SL lag mit Schlupf 2.960 $ weg
     def lauf3(sl_alt, grenze):
         ka = []
-        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or gut
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None, beweis=None: ka.append((sl_t, tp_t)) or gut
         ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: pos(float(ka[-1][0]) if ka else sl_alt, TP_F9)
         sp = []
         e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, final=None, tages_grenze_usd=grenze), "NAS100", FILL, VOL, CS, 2, sl_alt, TP_F9, sp, None)
@@ -506,7 +510,7 @@ def main():
         if grenze is not None:
             extra["tages_grenze_usd"] = grenze
         ka = []
-        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or gut
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None, beweis=None: ka.append((sl_t, tp_t)) or gut
         ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: pos(float(ka[-1][0]) if ka else sl_alt, TP_F9)
         sp = []
         e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, **extra), "NAS100", FILL, VOL, CS, 2, sl_alt, TP_F9, sp, None)

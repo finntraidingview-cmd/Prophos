@@ -3053,7 +3053,7 @@ def test_echo_hedge_sl_nachziehen():
         def __exit__(self, *a):
             return False
 
-    def klick(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
+    def klick(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None, beweis=None):   # MT1: Beweis-Rückruf
         klicks.append((sl_text, tp_text))
         if lage["klick"] == "wirft":
             raise RuntimeError("Fenster weg")

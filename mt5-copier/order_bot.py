@@ -12990,6 +12990,10 @@ def _u32_aendern():
         u.GetWindowThreadProcessId.restype, u.GetWindowThreadProcessId.argtypes = wt.DWORD, [ctypes.c_void_p, ctypes.POINTER(wt.DWORD)]
         u.IsIconic.restype, u.IsIconic.argtypes = wt.BOOL, [ctypes.c_void_p]
         u.IsZoomed.restype, u.IsZoomed.argtypes = wt.BOOL, [ctypes.c_void_p]
+        try:   # MT1 Punkt 2: ab Windows 10 1607 — fehlt sie, bleibt die DPI nur aus der Spur weg
+            u.GetDpiForWindow.restype, u.GetDpiForWindow.argtypes = wt.UINT, [ctypes.c_void_p]
+        except Exception:
+            pass
         _U32_AENDERN = u
     return _U32_AENDERN
 
@@ -13037,6 +13041,12 @@ def _fenster_zustand_text(w):
         h = int(w.handle)
         teile.append("minimiert" if u32.IsIconic(h) else "maximiert" if u32.IsZoomed(h) else "nicht maximiert")
         teile.append(f"Bildschirm {u32.GetSystemMetrics(0)}x{u32.GetSystemMetrics(1)}")
+        try:   # MT1 Punkt 2 (11.11.2026): DPI des Terminal-Fensters in die Spur — NZ2-Befund „4K-/2560er-PCs“ je PC belegbar (96 = 100 %)
+            dpi = int(u32.GetDpiForWindow(h) or 0)
+            if dpi:
+                teile.append(f"DPI {dpi} ({round(dpi * 100 / 96)} %)")
+        except Exception:
+            pass
         vorn = u32.GetForegroundWindow() or 0
         u = f9_tipp_vorn_urteil(_hwnd_pid(vorn), _terminal_pid(w), vorn)
         teile.append("Terminal vorn" if u == "ok" else "Vordergrund unbekannt" if u == "unbekannt"
@@ -13352,7 +13362,158 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
     return False
 
 
-def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
+AENDERN_BEWEIS_S = 4.0      # MT1 (11.11.2026): so lange nach einem Ändern-Klick auf den Beweis (API trägt SL/TP bzw. Journal-Zeile) warten, bevor der nächste Weg kommt
+AENDERN_SERVER_S = 10.0     # MT1: zeigt das Journal die Anfrage, so lange auf die Server-Antwort warten — dann KEIN weiterer Klick
+
+
+def lokal_sek():
+    """Sekunden seit Mitternacht in Ortszeit des PCs (wie die Journal-Zeilen), 1 s früher (Uhr-Rundung, wie run())."""
+    lt = time.localtime()
+    return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec - 1
+
+
+def aendern_journal_urteil(zeilen, ticket, ab_s, max_alter_s=180):
+    """REIN RECHNEND (testbar, MT1 1b, 11.11.2026): Journal-Zeilen zur ÄNDERUNG dieses Tickets seit ab_s (Ortszeit-Sekunden) → (art, text) | (None, "").
+    art 'abgelehnt' = jüngste modify-Zeile ist „failed modify #… […]“ (Grund = letzte eckige Klammer), 'gesendet' = eine modify-Zeile ohne „failed“
+    (die Anfrage ging raus — nie ein zweiter Klick). Close-/Order-Zeilen zählen nicht. Hintergrund MT1-Abfrage A: in 61 Läufen galt der Ändern-Dialog nie
+    als zu, alle vier Klick-Wege gingen jedes Mal ab; 31 von 57 Nachzügen saßen erst im 2. Versuch — der Grund stand nur im Journal."""
+    tk = str(int(ticket)) if str(ticket or "").strip().isdigit() else ""
+    if not tk:
+        return None, ""
+    letzte = None
+    for z in (zeilen or ()):
+        zs = str(z or "")
+        zl = zs.lower()
+        if "modify" not in zl or not re.search(r"#" + tk + r"(?!\d)", zs):
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zs)
+        if not m:
+            continue
+        d = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 - float(ab_s)) % 86400
+        if d <= max_alter_s or d >= 86400 - 1:
+            letzte = " ".join(zs.split())
+    if not letzte:
+        return None, ""
+    kurz = letzte[letzte.find("': ") + 3:] if "': " in letzte else letzte
+    if re.search(r"\bfailed modify\b", letzte, re.I):
+        gr = re.findall(r"\[([^\]]+)\]", letzte)
+        return "abgelehnt", (gr[-1].strip() if gr else kurz[:120])
+    return "gesendet", kurz[:140]
+
+
+def aendern_kaskade(wege, beweis, dialog_zu, ergebnis_zu, esc, trail, uhr=None, warte=None, noch_offen=None):
+    """Klick-Kaskade des Ändern-Knopfs (testbar mit Stubs: wege = ((name, klick), …), beweis(ab_s) → (art, text), dialog_zu() → bool, ergebnis_zu(),
+    esc(), uhr() → Sekunden, warte(a, b)). MT1 (11.11.2026): mit beweis wird der Erfolg BEWIESEN (API trägt SL/TP bzw. Journal) — ist die Anfrage gesendet
+    oder abgelehnt, kommt KEIN weiterer Weg; nur „weder API noch Journal“ führt zum nächsten Weg. Ohne beweis (Polar) wie bisher „Dialog zu“.
+    Prüfer MT1 (11.11.2026): das Journal-Fenster beginnt EINMAL vor dem ersten Weg (eine spät geschriebene Zeile von Weg 1 zählt auch beim Blick nach
+    Weg 2 noch), und mit noch_offen() (Win32-Sichtbarkeit) kommt kein weiterer Weg, wenn der Dialog nicht mehr sichtbar ist — der SendInput-Weg träfe sonst
+    das alte Knopf-Rechteck, also was darunter liegt.
+    → {ok, msg, beleg?, abgelehnt?, gesendet?, dialog_weg?, klicks}"""
+    uhr = uhr or time.time
+    warte = warte or _warte
+    klicks = 0
+    ab_s = lokal_sek() if beweis is not None else None   # ohne Beweis (Polar) nichts Neues
+    for name, weg in wege:
+        if beweis is not None and klicks and noch_offen is not None and not noch_offen():
+            trail.append(f"Ändern-Dialog nicht mehr sichtbar (Win32) — kein weiterer Weg ({name}), die Lesung danach entscheidet")
+            return {"ok": False, "msg": "Dialog zu, nicht belegt — kein weiterer Klick", "dialog_weg": True, "klicks": klicks}
+        try:
+            weg()
+        except Exception:
+            continue
+        klicks += 1
+        if beweis is None:
+            ende_k = uhr() + 2.5
+            while uhr() < ende_k and not dialog_zu():
+                warte(0.3, 0.3)
+            if dialog_zu():
+                trail.append(f"Aendern-Knopf ausgeloest ({name}) — Dialog zu")
+                return {"ok": True, "msg": "geklickt"}     # ohne Beweis (Polar): Rückgabe wie vor MT1
+            trail.append(f"Aendern-Knopf: {name} ohne Wirkung")
+            continue
+        # MT1: vorher galt in 61 von 61 Läufen der Dialog nie als zu (MT5 lässt ihn als Ergebnis-Seite stehen, UIA meldet versteckte Dialoge als sichtbar)
+        # — alle vier Wege gingen jedes Mal ab, obwohl der erste oft schon gewirkt hatte
+        ende_k, gesendet = uhr() + AENDERN_BEWEIS_S, ""
+        while uhr() < ende_k:
+            art, txt = beweis(ab_s)
+            if art in ("api_ok", "weg"):
+                trail.append(f"Ändern bestätigt ({name}): {txt}")
+                ergebnis_zu()
+                return {"ok": True, "msg": "bestätigt", "beleg": art, "klicks": klicks}
+            if art == "abgelehnt":
+                trail.append(f"Ändern vom Server abgelehnt ({name}): [{txt}] — kein weiterer Klick in diesem Versuch")
+                ergebnis_zu()
+                return {"ok": False, "msg": f"abgelehnt [{txt}]", "abgelehnt": txt, "klicks": klicks}
+            if art == "gesendet" and not gesendet:
+                gesendet = txt
+                ende_k = max(ende_k, uhr() + AENDERN_SERVER_S)
+                trail.append(f"Ändern-Anfrage im Journal ({name}): '{txt[:80]}' — warte auf die Bestätigung, kein weiterer Klick")
+            warte(0.25, 0.25)
+        if gesendet:
+            trail.append(f"Ändern gesendet, aber binnen {AENDERN_SERVER_S:g} s nicht bestätigt — kein weiterer Klick")
+            ergebnis_zu()
+            return {"ok": False, "msg": "gesendet, nicht bestätigt", "gesendet": True, "klicks": klicks}
+        trail.append(f"Aendern-Knopf: {name} ohne Wirkung (weder API noch Journal)")
+    esc()
+    aus = {"ok": False, "msg": "Aendern-Knopf reagiert auf keinen Weg"}
+    if beweis is not None:
+        aus["klicks"] = klicks
+    return aus
+
+
+def aendern_ergebnis_code(k, bestaetigt, grund=""):
+    """REIN RECHNEND (testbar, MT1 Punkt 5, 11.11.2026): Ergebnis-Code eines Ändern-Laufs für Spur und Antwort („Messen bis 0“) →
+    'api' (Klick lesend über die API bewiesen) | 'journal' (Anfrage im Journal, danach bestätigt) | 'dialog_ok' (ohne Beweis-Rückruf: Dialog zu, danach
+    bestätigt) | 'api_spaet' (erst die Lesung danach bestätigte, der Klick war nicht belegt) | 'offen: <Grund>'. k = Rückgabe von _sltp_klicken (None = Echo pausiert)."""
+    if k is None:
+        return "offen: Echo pausiert"
+    if bestaetigt:
+        if k.get("beleg") == "api_ok":
+            return "api"
+        if k.get("gesendet"):
+            return "journal"
+        if k.get("msg") == "geklickt":
+            return "dialog_ok"
+        return "api_spaet"     # Prüfer MT1: erst die spätere Lesung bestätigte — der Klick selbst war nicht belegt
+    return "offen: " + (str(grund or k.get("msg") or "?").strip()[:120])
+
+
+CLOSE_OFFEN_TEXT = {"ohne_wirkung": "Menüpunkt geklickt, weder Dialog noch Schluss", "knopf": "Schließen-Knopf gedrückt, Position weiter offen",
+                    "kein_treffer": "Positions-Zeile nicht gefunden", "menue_haengt": "Kontextmenü blieb offen", "haftung": "Haftungsausschluss",
+                    "pause": "Echo pausiert"}
+
+
+def close_ergebnis_code(ausgang, zu):
+    """REIN RECHNEND (testbar, MT1 Punkt 5): Ergebnis-Code eines Close-Laufs → 'api' (Position lesend weg) | 'offen: <Grund>'."""
+    if zu:
+        return "api"
+    return "offen: " + CLOSE_OFFEN_TEXT.get(str(ausgang or ""), str(ausgang or "?"))
+
+
+def _aendern_beweis(path, expected, ticket, sl, tp, digits, data_path):
+    """MT1 (11.11.2026): Beweis-Rückruf für den Ändern-Klick — NUR LESEN (Finn 11.11.2026 07:05: am Master nur Klicks, die API bleibt lesend).
+    beweis(ab_s) → (art, text): 'api_ok' (Position trägt SL/TP), 'weg' (Position nicht mehr offen), 'abgelehnt' / 'gesendet' (Journal), (None, '')."""
+    def beweis(ab_s):
+        try:
+            st = _api_lesen(path, expected)
+            if "fehler" not in st:
+                q = next((x for x in st["positionen"] if x["ticket"] == ticket), False)
+                if q is False:
+                    return "weg", "Position nicht mehr offen"
+                if sltp_bestaetigt(q["sl"], q["tp"], sl, tp, digits):
+                    return "api_ok", f"Position trägt SL {q['sl']} / TP {q['tp']}"
+        except Exception:
+            pass
+        if data_path:
+            try:
+                return aendern_journal_urteil(_mt5_journal_zeilen_tag(data_path, 0, 300), ticket, ab_s)
+            except Exception:
+                pass
+        return None, ""
+    return beweis
+
+
+def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None, beweis=None):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
     oeffnen, die vom echten Fill gerechneten Kurse eintippen, Aendern klicken.
@@ -13717,26 +13878,25 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
             raise RuntimeError("SendInput abgelehnt")
 
-    for name, weg in (("Fokus+Leertaste", _k_leertaste),
-                      ("SendInput-Klick", _k_sendinput),
-                      (".click()", lambda: knopf.click()),
-                      ("click_input", lambda: knopf.click_input())):
+    def _ergebnis_zu():
+        # MT1: nach dem Beweis die Ergebnis-Seite des Dialogs schließen (MT5 schließt ihn nach „Ändern“ nicht selbst) — ESC, nur wenn wirklich sichtbar (Win32)
         try:
-            weg()
+            if _fenster_sichtbar(dlg):
+                _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
-            continue
-        ende_k = time.time() + 2.5
-        while time.time() < ende_k and not _dialog_zu():
-            _warte(0.3, 0.3)
-        if _dialog_zu():
-            trail.append(f"Aendern-Knopf ausgeloest ({name}) — Dialog zu")
-            return {"ok": True, "msg": "geklickt"}
-        trail.append(f"Aendern-Knopf: {name} ohne Wirkung")
-    try:
-        _el_tasten(dlg, "{ESC}", set_foreground=False)
-    except Exception:
-        pass
-    return {"ok": False, "msg": "Aendern-Knopf reagiert auf keinen Weg"}
+            pass
+
+    def _esc():
+        try:
+            _el_tasten(dlg, "{ESC}", set_foreground=False)
+        except Exception:
+            pass
+
+    return aendern_kaskade((("Fokus+Leertaste", _k_leertaste),
+                            ("SendInput-Klick", _k_sendinput),
+                            (".click()", lambda: knopf.click()),
+                            ("click_input", lambda: knopf.click_input())),
+                           beweis, _dialog_zu, _ergebnis_zu, _esc, trail, noch_offen=lambda: _fenster_sichtbar(dlg))
 
 
 def pywinauto_import_fehler(e):
@@ -13964,12 +14124,19 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     trail.append(f"Nachziehen am Fill {fill}: SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} statt "
                  f"{fmt_preis(sl_alt, digits)} / {fmt_preis(tp_alt, digits)} ({abw:g} $ daneben, {ktxt})")
     stand, k = None, None
+    try:   # MT1 (11.11.2026): Journal-Ordner einmal lesen — Beweis des Ändern-Klicks über API + Journal (nur lesen)
+        _dp = (_order_api_zustand(path, expected, symbol) or {}).get("data_path") or ""
+    except Exception:
+        _dp = ""
+    beweis = _aendern_beweis(path, expected, p["ticket"], sl, tp, digits, _dp)
     for versuch in range(1, NACHZIEHEN_VERSUCHE + 1):
         erg["versuche"] = versuch
         if versuch > 1:
             _warte(1.0, 1.5)                   # gewürfelte Pause vor dem nächsten Anlauf (Jitter-Regel)
+            if k and k.get("abgelehnt"):
+                _warte(1.5, 2.5)               # MT1: Server lehnte ab (z. B. Kurs zu nah am Fill) — etwas länger warten, dann mit frischem Kurs
             trail.append(f"Nachziehen Versuch {versuch}/{NACHZIEHEN_VERSUCHE}")
-        k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits), fmt_preis(tp, digits), trail, anker_pfad=anker_pfad)
+        k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits), fmt_preis(tp, digits), trail, anker_pfad=anker_pfad, beweis=beweis)
         if k is None:                          # Echo pausiert — kein Klick, kein zweiter Anlauf
             break
         if k.get("dialog") is False:           # Dialog ging in der Frist nicht auf (26.10.2026) — ein zweiter Anlauf wäre derselbe blinde Scan
@@ -13996,7 +14163,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
                         break
                 _warte(0.15, 0.2)
         if stand and sltp_bestaetigt(stand["sl"], stand["tp"], sl, tp, digits):
-            erg.update(sl=sl, tp=tp, nachgezogen=True)
+            erg.update(sl=sl, tp=tp, nachgezogen=True, ergebnis_code=aendern_ergebnis_code(k, True))
+            trail.append(f"Ergebnis Ändern: {erg['ergebnis_code']}")   # MT1 Punkt 5 — vor der Schlusszeile (die bleibt die letzte der Spur)
             trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} am Fill nachgezogen ({seiten}, Versuch {versuch})")
             return erg
         if stand is False or (stand and (not float(stand["sl"]) or not float(stand["tp"]))):
@@ -14013,6 +14181,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
         erg["grund"] = ("Echo pausiert — kein Ändern-Klick" if k is None else
                         f"Ändern nach {erg['versuche']} Versuch(en) nicht bestätigt (Klick: {(k or {}).get('msg') or '?'}; {traegt})") + \
                        " — grobe F9-Level bleiben"
+    erg["ergebnis_code"] = aendern_ergebnis_code(k, False, erg["grund"])   # MT1 Punkt 5 — vor der Schlusszeile (die bleibt die letzte der Spur)
+    trail.append(f"Ergebnis Ändern: {erg['ergebnis_code']}")
     trail.append("Nachziehen: " + erg["grund"])
     return erg
 
@@ -14785,8 +14955,13 @@ def run(cfg_path, cmd):
             # des Copiers faellt.
             anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
                                       "anker-" + os.path.basename(cfg_path))
+            try:   # MT1 (11.11.2026): Beweis des Ändern-Klicks über API + Journal (nur lesen)
+                _dp = (_order_api_zustand(path, expected, symbol) or {}).get("data_path") or ""
+            except Exception:
+                _dp = ""
             k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits),
-                              fmt_preis(tp, digits), trail, anker_pfad=anker_pfad)
+                              fmt_preis(tp, digits), trail, anker_pfad=anker_pfad,
+                              beweis=_aendern_beweis(path, expected, p["ticket"], sl, tp, digits, _dp))
             # Bestaetigung NUR lesend: traegt die Position die Werte wirklich?
             bestaetigt = False
             ende2 = time.time() + 10
@@ -14806,10 +14981,12 @@ def run(cfg_path, cmd):
                         bestaetigt = True
                         break
             unruhe2.stop()
+            _code = aendern_ergebnis_code(k, bestaetigt)   # MT1 Punkt 5 (offen: mit der Klick-Antwort als Grund)
+            trail.append(f"Ergebnis Ändern: {_code}")
             if bestaetigt:
                 trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} "
                              f"per Klick gesetzt")
-                return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
+                return {"ok": True, "retry_ok": False, "verified": True, "mode": "click", "ergebnis_code": _code,
                         # Dauer in der Meldung (02.09.2026, Finns '10 sec pro
                         # Step, total 1-2 min'): die Sekunde steht damit direkt
                         # im Prophos-Toast, die Stationen in der Panel-Spur.
@@ -14823,12 +15000,12 @@ def run(cfg_path, cmd):
             # melden, NICHT erneut platzieren (retry_ok False), von Hand nachtragen.
             return {"ok": False, "retry_ok": False,
                     "msg": f"Position ist OFFEN @ {fill}, aber SL/TP-Klick nicht bestaetigt "
-                           f"({k.get('msg')}) — im Terminal SL {fmt_preis(sl, digits)} / "
+                           f"({(k or {}).get('msg') or 'Echo pausiert'}) — im Terminal SL {fmt_preis(sl, digits)} / "
                            f"TP {fmt_preis(tp, digits)} SOFORT von Hand nachtragen! "
                            f"Spur: [" + _spur(trail) + "]",
                     "trail": _spur(trail), "symbol": symbol,
                     "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
-                    "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
+                    "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"], "ergebnis_code": _code}
     unruhe.stop()
     # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
     # kam nicht an. Dialog-Text auf 'geschlossen' pruefen, sonst Struktur mitgeben.
@@ -15230,6 +15407,86 @@ def close_journal_zeilen(zeilen, ticket, ab_s, max_alter_s=600, n=1):
     return out[-n:]
 
 
+CLOSE_KNOPF_SERVER_S = 10.0     # MT1 Punkt 3 (11.11.2026): zeigt das Journal nach dem Schließen-Knopf die Anfrage, so lange auf den Schluss warten — KEIN weiterer Weg
+
+
+def close_dialog_rueckfall_urteil(lesbar, zeilen, pausiert):
+    """REIN RECHNEND (testbar, MT1 Punkt 3, 11.11.2026): darf nach „Position schließen geklickt, weder Dialog noch Schluss“ (und nach NZ2) der
+    Rückfall über den Positionsdialog laufen? Nur mit Journal-Beweis, dass seit dem ersten Klick KEINE Anfrage zu diesem Ticket rausging (wie NZ2,
+    Prüfer M1: unter Server-Verzug liefe sonst ein zweiter Close-Auftrag hinter dem ersten her) — dann auch auf Netting-Konten, dort ist es der
+    EINZIGE Zweitversuch (nie ein zweiter Menü-Close). → (ja, grund)"""
+    if pausiert:
+        return False, "Echo pausiert"
+    if not lesbar:
+        return False, "Journal nicht lesbar — kein Beweis, kein Rückfall"
+    if zeilen:
+        return False, f"Journal zeigt eine Anfrage ('{str(zeilen[-1])[:80]}') — kein Rückfall"
+    return True, "Journal ohne Anfrage zum Ticket"
+
+
+HANDEL_WORTE = ("market", "close", "order", "deal", "failed", "accepted", "buy", "sell", "rejected", "requote")
+
+
+def journal_symbol_handel_zeilen(zeilen, symbol, ab_s, max_alter_s=600):
+    """REIN RECHNEND (testbar, Prüfer MT1 11.11.2026): Handels-Zeilen zum SYMBOL seit ab_s (Ortszeit-Sekunden) — unabhängig vom Ticket. Grund: dass MT5
+    auf einem NETTING-Konto die Close-Anfrage mit „close #<Ticket>“ schreibt, ist nirgends belegt; „market sell 1 NAS100“ ohne Ticket muss als
+    Anfrage zählen, sonst liefe der Rückfall-Close hinter dem ersten her (= neue Gegenposition)."""
+    sym = str(symbol or "").strip().lower()
+    out = []
+    if not sym:
+        return out
+    for z in (zeilen or ()):
+        zs = str(z or "")
+        zl = zs.lower()
+        if sym not in zl or not any(w in zl for w in HANDEL_WORTE):
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.(\d{3})\b", zs)
+        if not m:
+            continue
+        d = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 - float(ab_s)) % 86400
+        if d <= max_alter_s or d >= 86400 - 1:
+            t_ = " ".join(zs.split())
+            i_ = t_.find("': ")
+            out.append((t_[i_ + 3:] if i_ >= 0 else t_)[:140])
+    return out
+
+
+def close_rueckfall_beweis(journal_lesbar, ticket_zeilen, symbol_zeilen, orders_vorher, orders_jetzt):
+    """REIN RECHNEND (testbar, Prüfer MT1): Beweis „seit dem Klick nichts gesendet“ für Positionsdialog-Rückfall und Knopf-Kaskade → (lesbar, zeilen, grund).
+    Zwei unabhängige Lesungen müssen BEIDE „nichts“ sagen: das Journal (Ticket- UND Symbol-Zeilen) und der Order-Zähler der API (history_orders_get zur
+    Position + offene Orders zum Symbol, vorher/jetzt — reine Lesung, zeitzonenfrei; schreibt das Journal spät, fällt der Zähler trotzdem). Nicht lesbar
+    (Journal oder Zähler) = kein Beweis. Ein gestiegener Zähler kommt als Zeile „order-zähler … close-anfrage unterwegs“ zurück."""
+    zeilen = list(ticket_zeilen or []) + [z for z in (symbol_zeilen or []) if z not in (ticket_zeilen or [])]
+    if not journal_lesbar:
+        return False, zeilen, "Journal von heute nicht lesbar"
+    if orders_vorher is None or orders_jetzt is None:
+        return False, zeilen, "Order-Zähler (API) nicht lesbar"   # 2. Prüfer MT1: gesehene Zeilen bleiben (die Knopf-Kaskade stoppt an ihnen)
+    v = orders_vorher if isinstance(orders_vorher, (tuple, list)) else (orders_vorher,)
+    j = orders_jetzt if isinstance(orders_jetzt, (tuple, list)) else (orders_jetzt,)
+    if len(v) != len(j):
+        return False, zeilen, "Order-Zähler (API) nicht vergleichbar"
+    if any(int(b) > int(a) for a, b in zip(v, j)):
+        zeilen.append(f"order-zähler {'/'.join(str(int(a)) for a in v)} → {'/'.join(str(int(b)) for b in j)}: close-anfrage unterwegs")
+    return True, zeilen, ""
+
+
+def close_knopf_journal_urteil(zeilen):
+    """REIN RECHNEND (testbar, MT1 Punkt 3): Journal-Zeilen zu DIESEM Ticket seit dem Klick (close_journal_zeilen) → 'gesendet' | 'abgelehnt' | None.
+    Jede Handels-Zeile außer Ändern-Zeilen („market sell 3.4 NAS100, close #…“, Netting evtl. nur „market sell 1 NAS100“, „failed … [Off quotes]“);
+    die JÜNGSTE entscheidet.
+    Anlass: die Schließen-Knopf-Kaskade galt nur als fertig, wenn der Dialog zu ist (UIA is_visible) — MT5 lässt ihn als Ergebnis-Seite stehen
+    (MT1-Befund Ändern-Knopf: 61 von 61), also gingen bei Server-Verzug alle vier Wege ab."""
+    for z in reversed(list(zeilen or ())):
+        zl = str(z or "").lower()
+        if zl.startswith("order-zähler"):
+            return "gesendet"            # Prüfer MT1: der Order-Zähler der API stieg (close_rueckfall_beweis)
+        if "modify" in zl or not zl.strip():
+            continue
+        # 2. Prüfer MT1: JEDE andere Handels-Zeile zählt — auf Netting heißt die Anfrage evtl. nur „market sell 1 NAS100“ (ohne „close #“)
+        return "abgelehnt" if re.search(r"\bfailed\b", zl) else "gesendet"
+    return None
+
+
 def close_punkt_in_rest(x, y, reste, rand=12):
     """REIN RECHNEND (testbar, NZ1b): liegt der Scan-Punkt (x, y) in einem stehen gebliebenen Rest-Fenster (l, t, r, b) + rand? None-Einträge
     (Lage unbekannt) sparen nichts aus."""
@@ -15239,7 +15496,103 @@ def close_punkt_in_rest(x, y, reste, rand=12):
     return False
 
 
-def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=None):
+def rueckfall_fenster_ist_dialog(klasse, titel):
+    """REIN RECHNEND (testbar, 2. Prüfer MT1): zählt dieses sichtbare Fenster des Terminals als offener DIALOG (dann kein Doppelklick)? Echte Dialoge
+    (#32770, wie NZ1) oder alles, was close_rest_art als Order-/Ändern-/Druck-Rest kennt. Charts („NAS100,M1“) sind MDI-Kinder und zählen nie — sonst
+    wäre am Master immer etwas „offen“ und der Rückfall liefe nie."""
+    if str(klasse or "") == "#32770":
+        return True
+    return close_rest_art(titel, []) is not None
+
+
+def _prozess_fenster_offen(hauptfenster):
+    """Prüfer MT1 (11.11.2026): Titel der SICHTBAREN Dialoge des Terminal-Prozesses außer dem Hauptfenster (Top-Level UND Kind-Fenster, Win32-Sichtbarkeit
+    wie NZ1b, nur rueckfall_fenster_ist_dialog — keine Charts). Nur lesen, wirft nie; ohne pywinauto leer."""
+    try:
+        from pywinauto import Desktop
+        pid = hauptfenster.element_info.process_id
+    except Exception:
+        return []
+    kand = []
+    try:
+        for d in Desktop(backend="uia").windows():
+            try:
+                if d.element_info.process_id == pid and d.element_info.class_name != MT5_KLASSE:
+                    kand.append(d)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        kand.extend(_kind_fenster(hauptfenster))
+    except Exception:
+        pass
+    out = []
+    for d in kand:
+        try:
+            titel = (d.window_text() or "").strip()
+            if rueckfall_fenster_ist_dialog(getattr(d.element_info, "class_name", "") or "", titel) and _fenster_sichtbar(d):
+                out.append(titel[:40] or "?")
+        except Exception:
+            continue
+    return out
+
+
+def _close_positionsdialog(w, ticket, pname, px_, py_, pid, trail, position_weg):
+    """MT1 Punkt 3 (11.11.2026): Rückfall, wenn „Position schließen“ im Menü griff, aber weder Dialog noch Schluss kam (auch nach NZ2) — Doppelklick
+    auf DIESELBE, eben durch den lesbaren Menüpunkt bewiesene Positions-Zeile öffnet den Positionsdialog; geklickt wird darin NUR der gelbe Knopf,
+    der das Ticket trägt (ist_schliessen_knopf — Teil der Erkennung in _finde_close_dialog). Zeigt der Dialog nur die Ändern-Ansicht (kein solcher
+    Knopf), wird er per ESC geschlossen, nichts geklickt. Den Beweis „nichts gesendet“ (Journal) prüft der Aufrufer VORHER.
+    → ('zu' | 'knopf' | 'kein_dialog' | 'kein_knopf', dlg, knopf)"""
+    dlg0, knopf0 = _finde_close_dialog(w, ticket)   # Prüfer MT1 (MUSS): kam der Dialog des Menü-Klicks doch noch? Dann nie daneben doppelklicken
+    if knopf0 is not None:
+        trail.append("Positionsdialog-Rückfall: der Close-Dialog ist schon offen — kein Doppelklick")
+        return "knopf", dlg0, knopf0
+    offen = _prozess_fenster_offen(w)
+    if offen:
+        # Prüfer MT1 (MUSS): _punkt_frei sieht nur FREMDE Prozesse — ein spät/unerkannt geöffneter Order-/Close-Dialog des Terminals über der Zeile fing
+        # sonst zwei Links-Klicks (Sell/Buy oder zweimal der gelbe Knopf). Steht irgendein sichtbares Fenster des Terminals offen: kein Klick.
+        trail.append(f"Positionsdialog-Rückfall: Fenster des Terminals offen ({', '.join(offen)[:80]}) — kein Doppelklick")
+        return "kein_dialog", None, None
+    if not _punkt_frei(w, px_, py_):
+        trail.append(f"Positionsdialog-Rückfall: an der Zeile ({pname}) liegt ein fremdes Fenster — kein Doppelklick")
+        return "kein_dialog", None, None
+    _maus_fahren(px_, py_, schritte=3)
+    _warte(*klick_zoegern())
+    if not _kein_menue_offen(pid):        # direkt VOR dem Klick (wie _punkt_klicken, NZ1b): ein offenes Menü finge den Klick
+        trail.append("Positionsdialog-Rückfall: ein Kontextmenü steht offen — kein Doppelklick")
+        return "kein_dialog", None, None
+    offen = _prozess_fenster_offen(w)      # 2. Prüfer MT1: auch direkt vor dem Klick (Lücke Mausfahrt + Zögern)
+    if offen:
+        trail.append(f"Positionsdialog-Rückfall: Dialog des Terminals ging eben auf ({', '.join(offen)[:80]}) — kein Doppelklick")
+        return "kein_dialog", None, None
+    if not _klick_absolut(px_, py_, doppel=True):
+        trail.append("Positionsdialog-Rückfall: Doppelklick abgelehnt")
+        return "kein_dialog", None, None
+    trail.append(f"Positionsdialog-Rückfall: Doppelklick auf die Zeile ({pname})")
+    ende = time.time() + CLOSE_NACH_MENUE_S
+    while time.time() < ende:
+        if position_weg():
+            trail.append("Position weg (nach dem Doppelklick)")
+            return "zu", None, None
+        dlg, knopf = _finde_close_dialog(w, ticket)
+        if knopf is not None:
+            return "knopf", dlg, knopf
+        _warte(0.25, 0.25)
+    d = _finde_aendern_dialog(w, timeout=0.3)
+    if d is not None:
+        trail.append(f"Positionsdialog offen, aber ohne Schließen-Knopf mit #{ticket} (Ändern-Ansicht) — per ESC zu, nichts geklickt")
+        try:
+            _el_tasten(d, "{ESC}", set_foreground=False)
+        except Exception:
+            pass
+        return "kein_knopf", None, None
+    trail.append(f"Positionsdialog-Rückfall: nach {CLOSE_NACH_MENUE_S:g} s kein Dialog mit Schließen-Knopf")
+    _fremde_dialoge_schliessen(w)          # Prüfer MT1: ein unerkannter Dialog bleibt nicht stehen (Abbrechen/ESC, nie OK)
+    return "kein_dialog", None, None
+
+
+def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=None, journal_beweis=None):
     """Position per Klick schliessen — Finns Hand-Weg als Scan (28.08.2026,
     Remote-Close): Zeile markieren -> Rechtsklick -> NUR den lesbaren Punkt
     'Position schliessen' klicken. Danach zwei legitime Ausgaenge: der
@@ -15256,6 +15609,9 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
     (die Schliessung kann da schon unterwegs sein) — ein Versuch pro Lauf.
     Ausnahme NZ2 (10.11.2026): EIN Zweitversuch an DERSELBEN Stelle mit echtem Klick, nur wenn nach CLOSE_NACH_MENUE_S weder Dialog noch
     Schluss kam UND das Journal lesbar ist und seit dem Klick keine Anfrage zu diesem Ticket zeigt (journal_seit_klick).
+    Ausnahme MT1 Punkt 3 (11.11.2026, journal_beweis — jede Kontoart): bleibt es danach bei „weder Dialog noch Schluss“ und zeigt das Journal
+    weiter KEINE Anfrage, EIN Rückfall über den Positionsdialog (_close_positionsdialog); auf Netting-Konten ist das der einzige Zweitversuch.
+    Mit journal_beweis endet auch die Schließen-Knopf-Kaskade, sobald das Journal die Anfrage zeigt (kein weiterer Weg).
     Rueckgabe: 'zu' | 'knopf' | 'ohne_wirkung' | 'kein_treffer' | 'pause' |
     'haftung' (Ein-Klick-Haftungsausschluss stand im Weg und liess sich nicht
     annehmen)."""
@@ -15362,6 +15718,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
                          x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
                          y_off=hr.bottom - py_)
         dlg = knopf = None
+        aus_rueckfall = False              # MT1 Punkt 3: Knopf über den Positionsdialog-Rückfall erreicht (dort: Journal unlesbar = kein weiterer Weg)
         # Der Haftungsausschluss wird pro Lauf genau EINMAL behandelt: MT5
         # zeigt ihn nur beim allerersten Ein-Klick-Handel eines Terminals, und
         # ein Nachklick, der sich wiederholen darf, waere ein blinder
@@ -15462,6 +15819,29 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
                                 pass
                         trail.append(f"Zweitversuch: Menüpunkt kam nicht mehr ({st2}) — nichts weiter geklickt")
                         dlg, knopf = _finde_close_dialog(w, ticket)   # S1: modaler Dialog des ersten Klicks blockt das Menü?
+        if knopf is None and journal_beweis is not None:
+            # MT1 Punkt 3 (11.11.2026, Finn ~06:55: „MetaTrader muss fehlerfrei laufen“): weder Dialog noch Schluss — auch nach NZ2. Netting-Konten
+            # bekamen bisher gar keinen Zweitversuch. Jetzt EIN Rückfall über den Positionsdialog, nur mit Journal-Beweis „nichts gesendet“
+            # (seit dem ERSTEN Klick, deckt also auch den NZ2-Zweitversuch ab) und nur an DERSELBEN bewiesenen Zeile.
+            if position_weg():
+                trail.append("Position weg (vor dem Positionsdialog-Rückfall)")
+                return "zu"
+            try:
+                _jb = journal_beweis()
+            except Exception:
+                _jb = (False, [], "Journal nicht lesbar")
+            if is_paused():
+                trail.append("⏸ Echo pausiert — kein Positionsdialog-Rückfall")
+                return "pause"
+            ja_r, grund_r = close_dialog_rueckfall_urteil(_jb[0], _jb[1], False)
+            if not ja_r:
+                trail.append(f"Kein Positionsdialog-Rückfall: {(_jb[2] if not _jb[0] and len(_jb) > 2 and _jb[2] else grund_r)}")
+            else:
+                st_r, dlg_r, knopf_r = _close_positionsdialog(w, ticket, pname, px_, py_, _pid, trail, position_weg)
+                if st_r == "zu":
+                    return "zu"
+                if st_r == "knopf":
+                    dlg, knopf, aus_rueckfall = dlg_r, knopf_r, True
         if knopf is None:
             return "ohne_wirkung"
         try:
@@ -15474,6 +15854,16 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
         except Exception:
             pass
 
+        if aus_rueckfall and journal_beweis is not None:
+            # 2. Prüfer MT1: zwischen Beweis und Knopf lagen Doppelklick + bis zu CLOSE_NACH_MENUE_S — zeigt sich die erste Anfrage jetzt, nie drücken
+            try:
+                _jv = journal_beweis()
+            except Exception:
+                _jv = (False, [], "Journal nicht lesbar")
+            if not _jv[0] or close_knopf_journal_urteil(_jv[1]):
+                trail.append("Positionsdialog offen, aber " + ("die erste Anfrage zeigt sich jetzt" if _jv[0] else (_jv[2] or "Beweis nicht lesbar"))
+                             + " — Knopf NICHT gedrückt")
+                return "ohne_wirkung"
         # Kaskade wie Buy-/Aendern-Knopf (.52/.64): echte Eingabe zuerst, nach
         # jedem Weg lesend pruefen — nie zwei Wege blind hintereinander.
         def _weg_leertaste():
@@ -15505,6 +15895,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
                 continue
             trail.append(f"Schliessen-Knopf: {wegname}")
             ende2 = time.time() + 4.0
+            gesendet = None
             while time.time() < ende2:
                 _warte(0.35, 0.3)
                 if position_weg():
@@ -15514,6 +15905,25 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klic
                         return "knopf"
                 except Exception:
                     return "knopf"
+                if journal_beweis is not None and gesendet is None:
+                    # MT1 Punkt 3: der Dialog bleibt als Ergebnis-Seite stehen — das Journal beweist, dass DIESER Weg die Anfrage gesendet hat
+                    try:
+                        _jk = journal_beweis()
+                    except Exception:
+                        _jk = (False, [], "Journal nicht lesbar")
+                    gesendet = close_knopf_journal_urteil(_jk[1])
+                    if gesendet is None and aus_rueckfall and not _jk[0]:
+                        # Prüfer MT1: nach dem Rückfall (auch Netting) ohne lesbaren Beweis nie ein zweiter Knopf-Druck — der erste kann unterwegs sein
+                        gesendet = "unbelegt"
+                    if gesendet:
+                        trail.append((f"Close-Anfrage im Journal ({wegname}, {gesendet}) — kein weiterer Weg" if gesendet != "unbelegt" else
+                                      f"Journal/Order-Zähler nach dem Rückfall nicht lesbar ({wegname}) — kein weiterer Weg")
+                                     + (f", warte bis {CLOSE_KNOPF_SERVER_S:g} s auf den Schluss" if gesendet == "gesendet" else ""))
+                        if gesendet == "abgelehnt":
+                            return "knopf"
+                        ende2 = max(ende2, time.time() + CLOSE_KNOPF_SERVER_S)
+            if gesendet:
+                return "knopf"   # Anfrage ging raus — den Ausgang entscheidet der Aufrufer lesend, nie ein zweiter Knopf-Druck
         return "knopf"   # alle Wege durch — den Ausgang entscheidet der Aufrufer lesend
     trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
                  f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
@@ -15554,6 +15964,26 @@ def _deal_profit_lesen(path, expected, ticket):
                              + float(getattr(d, "commission", 0) or 0) for d in raus), 2)
         finally:
             mt5.shutdown()
+    except Exception:
+        return None
+
+
+def _orders_zaehlen(path, expected, ticket, symbol):
+    """Prüfer MT1 (11.11.2026): NUR LESEN — Zahl der Orders zur Position (history_orders_get(position=…)) + offene Orders zum Symbol (orders_get). Steigt sie
+    nach einem Close-Klick, ist eine Anfrage unterwegs, egal wie (oder ob schon) das Journal sie schreibt. → (Historie zur Position, offene zum Symbol)
+    | None = nicht lesbar (dann kein Beweis)."""
+    try:
+        import MetaTrader5 as mt5
+        if not _api_verbinden(mt5, path, None):
+            return None
+        ai = mt5.account_info()
+        if ai is None or (expected and int(ai.login) != int(expected)):
+            return None
+        h = mt5.history_orders_get(position=int(ticket))
+        o = mt5.orders_get(symbol=symbol) if symbol else mt5.orders_get()
+        if h is None or o is None:       # 2. Prüfer MT1: EINE Abfrage ohne Antwort = nicht lesbar (sonst „0“ = scheinbar nichts gesendet)
+            return None
+        return (len(h), len(o))          # getrennt: wechselt eine fremde offene Order in die Historie, verdeckt das keinen Anstieg
     except Exception:
         return None
 
@@ -15681,13 +16111,15 @@ def run_close(cfg_path, cmd):
                               "anker-" + os.path.basename(cfg_path))
     _lt0 = time.localtime()
     _ab_s = _lt0.tm_hour * 3600 + _lt0.tm_min * 60 + _lt0.tm_sec - 1   # NZ1: Journal ab hier (Ortszeit des PCs, wie order_anfrage_im_journal)
-    def journal_seit_klick():
+    _orders_vorher = _orders_zaehlen(path, expected, ticket, pos["symbol"])   # Prüfer MT1: Order-Zähler VOR dem ersten Klick (nur lesen)
+    def _journal_lesen(nur_hedging):
         """NZ2: (darf_zweitversuch_lesen, Zeilen zu #ticket seit dem Klick, Grund) — nur lesen. Prüfer NZ2: (1) nur auf einem HEDGING-Konto
         (auf Netting könnte ein zweiter Close eine neue Gegenposition eröffnen), (2) „lesbar“ nur, wenn die Journal-Datei von HEUTE Zeilen
-        lieferte (der Rückfall auf gestern wäre lesbar ohne Ticket-Zeile = falscher Freibrief)."""
+        lieferte (der Rückfall auf gestern wäre lesbar ohne Ticket-Zeile = falscher Freibrief).
+        MT1 Punkt 3 (11.11.2026): nur_hedging=False für den Positionsdialog-Rückfall und den Beweis der Schließen-Knopf-Kaskade — jede Kontoart."""
         try:
             z = _order_api_zustand(path, expected, symbol or pos["symbol"]) or {}
-            if z.get("hedging") is not True:
+            if nur_hedging and z.get("hedging") is not True:
                 return False, [], ("kein Hedging-Konto" if z.get("hedging") is False else "Kontoart nicht lesbar")
             dp = z.get("data_path") or ""
             if not dp:
@@ -15701,7 +16133,27 @@ def run_close(cfg_path, cmd):
         except Exception:
             return False, [], "Journal nicht lesbar"
 
-    ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=journal_seit_klick)
+    def journal_seit_klick():
+        return _journal_lesen(True)        # NZ2-Zweitversuch: nur Hedging (unverändert)
+
+    def journal_beweis():
+        """MT1 Punkt 3: jede Kontoart. Prüfer MT1: Journal (Ticket- UND Symbol-Zeilen) und Order-Zähler der API müssen BEIDE „nichts gesendet“ sagen."""
+        lesbar, tz, grund = _journal_lesen(False)
+        if not lesbar:
+            return lesbar, tz, grund
+        try:
+            z_ = _order_api_zustand(path, expected, symbol or pos["symbol"]) or {}
+            dp_ = z_.get("data_path") or ""
+            _lt = time.localtime()
+            roh = (_mt5_journal_zeilen_tag(dp_, 1, 400) if (_lt.tm_hour == 0 and _lt.tm_min < 15) else []) + _mt5_journal_zeilen_tag(dp_, 0, 400)
+            sz = journal_symbol_handel_zeilen(roh, pos["symbol"], _ab_s)
+        except Exception:
+            return False, [], "Journal nicht lesbar"
+        return close_rueckfall_beweis(True, tz, sz, _orders_vorher, _orders_zaehlen(path, expected, ticket, pos["symbol"]))
+
+    ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg, journal_seit_klick=journal_seit_klick, journal_beweis=journal_beweis)
+    if ausgang in ("pause", "haftung", "menue_haengt", "kein_treffer"):   # MT1 Punkt 5: Ergebnis-Code auch für die frühen Ausgänge
+        trail.append(f"Ergebnis Schließen: {close_ergebnis_code(ausgang, False)}")
 
     def _journal_satz():
         """NZ1 (10.11.2026): nur lesen — was sagt das Terminal-Journal zu diesem Ticket seit dem Klick? Leer, wenn nichts lesbar."""
@@ -15717,7 +16169,7 @@ def run_close(cfg_path, cmd):
     if ausgang == "pause":
         return {"ok": False, "retry_ok": True,
                 "msg": "Echo ist pausiert — nichts geklickt. Fortsetzen, dann erneut. "
-                       "[" + _spur(trail) + "]", "trail": _spur(trail)}
+                       "[" + _spur(trail) + "]", "trail": _spur(trail), "ergebnis_code": close_ergebnis_code(ausgang, False)}
     if ausgang == "haftung":
         # Der Dialog wird trotzdem weggeraeumt (Abbrechen/ESC): ein stehendes
         # modales Fenster blockiert das Terminal, an dem das Lesen haengt.
@@ -15728,18 +16180,18 @@ def run_close(cfg_path, cmd):
                        "sich nicht druecken — nichts geschlossen. Einmal im Terminal von "
                        "Hand eine Position per Rechtsklick schliessen und dabei zustimmen, "
                        "danach fragt MT5 nie wieder. [" + _spur(trail) + "]",
-                "trail": _spur(trail)}
+                "trail": _spur(trail), "ergebnis_code": close_ergebnis_code(ausgang, False)}
     if ausgang == "menue_haengt":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,
                 "msg": f"Im Terminal blieb ein Kontextmenü offen (ESC ohne Wirkung) — Scan nach Positions-Zeile #{ticket} abgebrochen, "
-                       f"nichts weiter geklickt. Wiederholen ist ungefaehrlich. [" + _spur(trail) + "]", "trail": _spur(trail)}
+                       f"nichts weiter geklickt. Wiederholen ist ungefaehrlich. [" + _spur(trail) + "]", "trail": _spur(trail), "ergebnis_code": close_ergebnis_code(ausgang, False)}
     if ausgang == "kein_treffer":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,
                 "msg": f"Positions-Zeile #{ticket} nicht gefunden (Zeilen-Scan ohne Treffer) — "
                        f"nichts geklickt. [" + _spur(trail) + "]",
-                "trail": _spur(trail)}
+                "trail": _spur(trail), "ergebnis_code": close_ergebnis_code(ausgang, False)}
 
     # 3) LESEND bestaetigen: Position weg = zu (bis 12 s, wie die Order-Seite).
     zu = (ausgang == "zu")
@@ -15750,6 +16202,8 @@ def run_close(cfg_path, cmd):
             zu = True
     # Result-/Restdialog nie stehen lassen (Abbrechen/ESC, nie OK)
     _fremde_dialoge_schliessen(w)
+    _code = close_ergebnis_code(ausgang, zu)   # MT1 Punkt 5 („Messen bis 0“)
+    trail.append(f"Ergebnis Schließen: {_code}")
     if zu:
         profit = _deal_profit_lesen(path, expected, ticket)
         pl = f" · P&L {profit:+,.2f}" if profit is not None else ""
@@ -15757,20 +16211,20 @@ def run_close(cfg_path, cmd):
         return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                 "msg": f"Position #{ticket} ({pos['symbol']}, {pos['volumen']:g} Lots) "
                        f"per Klick geschlossen{pl}",
-                "trail": _spur(trail), "ticket": ticket, "profit": profit}
+                "trail": _spur(trail), "ticket": ticket, "profit": profit, "ergebnis_code": _code}
     if ausgang == "ohne_wirkung":
         js = _journal_satz()
         return {"ok": False, "retry_ok": True,
                 "msg": f"'Position schliessen' geklickt, aber Position #{ticket} liegt noch "
                        f"und kein Close-Dialog kam — im Terminal nachsehen. Wiederholen ist "
                        f"ungefaehrlich (der Bot prueft vorher lesend).{js} [" + _spur(trail) + "]",
-                "trail": _spur(trail)}
+                "trail": _spur(trail), "ergebnis_code": _code}
     js = _journal_satz()
     return {"ok": False, "retry_ok": True,
             "msg": f"Close-Dialog war offen, aber Position #{ticket} ist nach 12 s weiter "
                    f"offen — im Terminal pruefen (Dialog wurde geschlossen). Wiederholen ist "
                    f"ungefaehrlich.{js} [" + _spur(trail) + "]",
-            "trail": _spur(trail)}
+            "trail": _spur(trail), "ergebnis_code": _code}
 
 
 def modus_inspect(cfg_path):
