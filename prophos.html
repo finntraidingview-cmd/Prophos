@@ -94211,8 +94211,9 @@
   /* ========== RANGE-WÜRFEL ========== */
   /* RV1 (Finn 11.11.2026 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und
    * Lotanzahl, alles drei … für alle drei wird einzeln gewürfelt“): je Planer × Unternehmen der Anteil „klein“ (%) und die Faktor-Spanne von–bis (%). Railway
-   * würfelt je Konto × Tag fest (app.py rv_faktoren: Anteil, dann drei eigene Faktoren für TP, SL, Lots) und wendet sie NUR auf die Etappe an (letzter Trade,
-   * Klein-, Mini-, Gewinntag-Trade bleiben), nach Boden-/Tagesgrenze-Kappung — nie größer als der normale Trade, TP/SL nie enger als 10 Pkt. Speicher: Tabelle
+   * würfelt je Konto × Tag fest (app.py rv_faktoren: Anteil, dann drei eigene Faktoren für TP, SL, Lots) und wendet sie auf Etappe und letzten Trade an
+   * (Klein-, Mini-, Gewinntag-Trade bleiben), nach Boden-/Tagesgrenze-Kappung — nie größer als der normale Trade, TP/SL-Punkte zwischen 10 Pkt und dem
+   * normalen Trade bei maximaler Spanne (Master 11.11.2026). Speicher: Tabelle
    * planer_range_wuerfel, GET/POST /admin/range-wuerfel. Kein Wert = aus. Nur Challenge-Planer CFD. Eigene Klasse .rw-karte (nicht .hw-karte), sonst zeichnete
    * hwAlleZeichnen die Karte als Handels-Würfel neu. */
   const RW_PLANER = { challenge_cfd: 'Challenge-Planer CFD' }
@@ -94246,7 +94247,7 @@
       : `<span>Haupt-Trades klein</span><b class="mono">${ist.pct === '' ? 'aus' : hwPct(ist.pct) + ' %'}</b><span>· Faktor ${escapeHtml(hwPct(ist.von))}–${escapeHtml(hwPct(ist.bis))} %</span>`
     const p = hwZahl(ist.pct)
     const fuss = (p == null || p <= 0) ? 'aus — jeder Haupt-Trade normal'
-      : `≈ ${hwPct(p)} von 100 Haupt-Trades werden klein: TP, SL und Lots je ${hwPct(ist.von)}–${hwPct(ist.bis)} % des normalen Werts (einzeln gewürfelt, nie größer), TP/SL mindestens ${hwPct(D.min_pkt || 10)} Pkt — nur die Etappe, der letzte Trade bis zum Ziel bleibt`
+      : `≈ ${hwPct(p)} von 100 Haupt-Trades werden klein: TP, SL und Lots je ${hwPct(ist.von)}–${hwPct(ist.bis)} % des normalen Werts (einzeln gewürfelt, nie größer), TP/SL mindestens ${hwPct(D.min_pkt || 10)} Pkt und nie weiter als der normale Trade · auch der letzte Trade (das Ziel kommt dann evtl. erst später), Klein-/Mini-/Gewinntag-Trade bleiben`
     const ohneTab = D.tabelle === false ? `<div class="hw-msg fehler">Tabelle planer_range_wuerfel fehlt — sql/2026-11-11_rv1_range_wuerfel.sql einspielen (bis dahin aus)</div>` : ''
       + (D.fehler ? `<div class="hw-msg fehler">⚠ ${escapeHtml(String(D.fehler))}</div>` : '')
     const m = msg ? `<span class="hw-msg ${msg.ok ? 'ok' : 'fehler'}">${escapeHtml(msg.text)}</span>` : ''
@@ -94280,7 +94281,7 @@
     const knopf = el.querySelector('[data-rw-speichern]'); if(knopf) knopf.disabled = true
     try{
       const d = await apdApi('POST', '/range-wuerfel', Object.assign({ planer, pct, von, bis }, gid ? { gruppe_id: gid } : {}), '/admin')
-      _rw.d[gid] = Object.assign({}, _rw.d[gid] || {}, d.werte ? { werte: d.werte } : {})
+      _rw.d[gid] = Object.assign({}, _rw.d[gid] || {}, d.werte ? { werte: d.werte } : {}, { fehler: d.fehler })   // alter Lesefehler weg (Prüfer RV1)
       delete _rw.entwurf[k]; _rw.at[gid] = Date.now()
       const w = ((_rw.d[gid] || {}).werte || {})[planer]
       _rw.msg[k] = { ok: true, text: w && w.pct != null ? `✓ gespeichert: ${hwPct(w.pct)} % klein, Faktor ${hwPct(w.von)}–${hwPct(w.bis)} %` : '✓ gespeichert: aus' }

@@ -46,8 +46,8 @@ def ruf(fn, *a, **k):
 
 
 for n in ("RV_MIN_PKT", "RV_STANDARD", "RV_STUFE", "AP_SL_HINTER_BODEN", "AP_TAGES_PUFFER", "AP_CFD_ROUTEN",   # Konstanten zuerst (Standard-Argumente)
-          "rv_wurf", "rv_faktoren", "rv_anwenden", "rv_einstellung", "rv_planer_haken", "fest_wurf", "tw_wurf", "_wd_num", "ap_konto_rechnen",
-          "ap_klein_normal", "ap_tagesgrenze", "eh_hedge"):
+          "RV_FINAL_RE", "rv_wurf", "rv_faktoren", "rv_punkte_deckel", "rv_anwenden", "_ap_runden", "_ap_spanne", "rv_einstellung", "rv_planer_haken", "fest_wurf", "tw_wurf", "_wd_num", "ap_konto_rechnen", "ap_plan_final_text",
+          "ap_klein_normal", "ap_tagesgrenze", "eh_hedge", "TT_EIN_TRADE_STUFE", "AP_PUFFER_PKT"):
     try:
         lade(n)
     except LookupError:
@@ -72,8 +72,11 @@ def normal(regel, bal, u=MITTE, phase="phase1", ppl=10.0):
     return w
 
 
-def fk(tp, sl, lots):
-    return {"f_tp": tp, "f_sl": sl, "f_lots": lots, "pct": 25, "von": 10, "bis": 100}
+def fk(tp, sl, lots, regel=None, ppl=None, gr=100000.0):
+    d = {"f_tp": tp, "f_sl": sl, "f_lots": lots, "pct": 25, "von": 10, "bis": 100}
+    if regel:
+        d["tp_max_pkt"], d["sl_max_pkt"] = ruf("rv_punkte_deckel", regel, "phase1", gr, ppl)
+    return d
 
 
 MIN = ns["RV_MIN_PKT"]
@@ -113,32 +116,54 @@ _sd = (_m([x["f_tp"] ** 2 for x in fs]) - _m([x["f_tp"] for x in fs]) ** 2) ** 0
 check(abs(_kov / _sd) < 0.12, f"TP- und SL-Faktor unkorreliert (r = {_kov / _sd:+.3f})")
 check(0.5 < _m([x["f_lots"] for x in fs]) < 0.6, f"Faktor im Mittel ≈ 55 % ({_m([x['f_lots'] for x in fs]):.3f})")
 
-print("── 2. Zahlenbeispiele (Normal-Trade = Spannen-Mitte) ──")
+print("── 2. Zahlenbeispiele (Normal-Trade = Spannen-Mitte, Punkte-Deckel = normaler Trade bei maximaler Spanne) ──")
+dk = {n: ruf("rv_punkte_deckel", r, "phase1", 100000.0, pv) for n, r, pv in (("fn", FN, 10.0), ("t5", T5, 1.0), ("ft", FT, 1.0))}
+check(dk["fn"] == (342.86, 150.0), f"Deckel FundedNext 100k: TP 7.200 ÷ (2,1 × 10) = 342,86 Pkt, SL 3.150 ÷ 21 = 150 Pkt ({dk['fn']})")
+check(dk["t5"] == (315.0, 108.0) and dk["ft"] == (288.0, 99.0), f"Deckel The5%ers 315 / 108 Pkt, FTMO 288 / 99 Pkt ({dk['t5']}, {dk['ft']})")
+check(ruf("rv_punkte_deckel", T5, "phase1", 200000.0, 1.0) == (315.0, 108.0), "The5%ers 200k (skaliert ×2): Deckel in Punkten gleich")
+check(ruf("rv_punkte_deckel", FN, "phase1", 100000.0, None) == (None, None), "ohne Punktwert → kein Deckel")
 w = normal(FN, 100000.0, ppl=PPL["fn"])
 check((w["menge"], w["tp"], w["sl"], w["stufe"]) == (2.7, 6300, 2700, "Etappe"), f"FundedNext Ph1 100k normal: 2,7 Lots · TP 6.300 · SL 2.700 ({w['menge']}, {w['tp']}, {w['sl']})")
-a = ruf("rv_anwenden", w, fk(0.2, 0.9, 0.5), 0.1, PPL["fn"])
-check((a["menge"], a["tp"], a["sl"], a["risiko"]) == (1.3, 1260, 2430, 2430), f"FN TP 20 / SL 90 / Lots 50 % → 1,35 abgerundet 1,3 Lots · TP 1.260 · SL 2.430 ({a['menge']}, {a['tp']}, {a['sl']})")
-check(a["range"]["tp_pkt"] == 96.9 and a["range"]["sl_pkt"] == 186.9, f"   Punkte ändern sich: TP 96,9 / SL 186,9 Pkt ({a['range']['tp_pkt']} / {a['range']['sl_pkt']})")
-check(a["stufe"] == "Etappe · Range-Würfel TP 20 % · SL 90 % · Lots 48 %", f"   Stufe zeigt die wirklichen Anteile (Lots 1,3 ÷ 2,7 = 48 %): {a['stufe']}")
-b = ruf("rv_anwenden", w, fk(1.0, 0.1, 0.1), 0.1, PPL["fn"])
-check((b["menge"], b["tp"], b["sl"]) == (0.2, 6300, 270), f"FN TP 100 / SL 10 / Lots 10 % → 0,27 abgerundet 0,2 Lots · TP 6.300 · SL 270 ({b['menge']}, {b['tp']}, {b['sl']})")
+a = ruf("rv_anwenden", w, fk(0.2, 0.9, 0.5, FN, 10.0), 0.1, PPL["fn"])
+check((a["menge"], a["tp"], a["sl"], a["risiko"]) == (1.3, 1260, 1950, 1950) and a["range"]["sl_geklemmt"] == "max",
+      f"FN TP 20 / SL 90 / Lots 50 % → 1,35 abgerundet 1,3 Lots · TP 1.260 · SL 2.430 wären 187 Pkt > 150 → 1.950 ({a['menge']}, {a['tp']}, {a['sl']})")
+check(a["range"]["tp_pkt"] == 96.9 and a["range"]["sl_pkt"] == 150.0, f"   Punkte: TP 96,9 / SL 150 ({a['range']['tp_pkt']} / {a['range']['sl_pkt']})")
+check(a["stufe"] == "Etappe · Range-Würfel TP 20 % · SL 72 % · Lots 48 %", f"   Stufe zeigt die wirklichen Anteile: {a['stufe']}")
+b = ruf("rv_anwenden", w, fk(1.0, 0.1, 0.1, FN, 10.0), 0.1, PPL["fn"])
+check((b["menge"], b["tp"], b["sl"]) == (0.2, 685, 270) and b["range"]["tp_geklemmt"] == "max",
+      f"FN TP 100 / SL 10 / Lots 10 % → 0,2 Lots · TP 6.300 wären 3.150 Pkt → 342,86 Pkt = 685 $ · SL 270 ({b['menge']}, {b['tp']}, {b['sl']})")
 w5 = normal(T5, 100000.0, ppl=PPL["t5"])
 check((w5["menge"], w5["tp"], w5["sl"]) == (25, 5850, 1980), f"The5%ers 100k normal: 25 Lots · TP 5.850 · SL 1.980 ({w5['menge']}, {w5['tp']}, {w5['sl']})")
-c = ruf("rv_anwenden", w5, fk(0.1, 0.1, 1.0), 1, PPL["t5"])
-check((c["menge"], c["tp"], c["sl"]) == (25, 585, 250) and c["range"]["sl_angehoben"] and not c["range"]["tp_angehoben"],
+c = ruf("rv_anwenden", w5, fk(0.1, 0.1, 1.0, T5, 1.0), 1, PPL["t5"])
+check((c["menge"], c["tp"], c["sl"]) == (25, 585, 250) and c["range"]["sl_geklemmt"] == "min" and c["range"]["tp_geklemmt"] is None,
       f"The5%ers TP 10 / SL 10 / Lots 100 % → SL 198 $ wären 7,9 Pkt → auf 10 Pkt = 250 $ angehoben ({c['menge']}, {c['tp']}, {c['sl']})")
-c2 = ruf("rv_anwenden", w5, fk(0.5, 0.5, 0.13), 1, PPL["t5"])
-check(c2["menge"] == 3 and isinstance(c2["menge"], int), f"The5%ers Lots 13 % → 3,25 abgerundet 3 (Raster 1, ganzzahlig) ({c2['menge']!r})")
+c2 = ruf("rv_anwenden", w5, fk(0.5, 0.5, 0.13, T5, 1.0), 1, PPL["t5"])
+check((c2["menge"], c2["tp"], c2["sl"]) == (3, 945, 324) and isinstance(c2["menge"], int),
+      f"The5%ers 50/50/13 % → 3 Lots (Raster 1) · TP 2.925 → 315 Pkt = 945 $ · SL 990 → 108 Pkt = 324 $ ({c2['menge']!r}, {c2['tp']}, {c2['sl']})")
 wf = normal(FT, 100000.0, ppl=PPL["ft"])
 check((wf["menge"], wf["tp"], wf["sl"]) == (30, 5850, 2272), f"FTMO 100k normal: 30 Lots · TP 5.850 · SL 2.272 ({wf['menge']}, {wf['tp']}, {wf['sl']})")
-d = ruf("rv_anwenden", wf, fk(0.5, 0.5, 0.5), 1, PPL["ft"])
-check((d["menge"], d["tp"], d["sl"]) == (15, 2925, 1136), f"FTMO alle 50 % → 15 Lots · TP 2.925 · SL 1.136 ({d['menge']}, {d['tp']}, {d['sl']})")
-d2 = ruf("rv_anwenden", wf, fk(0.1, 0.1, 0.01), 1, PPL["ft"])
-check(d2["menge"] == 1, f"FTMO Lots 1 % → mindestens ein Schritt (1 Lot) ({d2['menge']})")
+d = ruf("rv_anwenden", wf, fk(0.5, 0.5, 0.5, FT, 1.0), 1, PPL["ft"])
+check((d["menge"], d["tp"], d["sl"]) == (15, 2925, 1136), f"FTMO alle 50 % → 15 Lots · TP 2.925 (195 Pkt) · SL 1.136 (75,7 Pkt) ({d['menge']}, {d['tp']}, {d['sl']})")
+d2 = ruf("rv_anwenden", wf, fk(0.1, 0.1, 0.01, FT, 1.0), 1, PPL["ft"])
+check((d2["menge"], d2["tp"], d2["sl"]) == (1, 288, 99), f"FTMO Lots 1 % → mindestens 1 Lot · TP/SL auf 288 / 99 Pkt geklemmt ({d2['menge']}, {d2['tp']}, {d2['sl']})")
 
 print("── 3. Nur die Etappe, Boden, Hedge ──")
 wl = normal(FN, 106000.0, ppl=PPL["fn"])
-check(wl["stufe"].startswith("letzter Trade") and ruf("rv_anwenden", wl, fk(0.1, 0.1, 0.1), 0.1, PPL["fn"]) is wl, f"letzter Trade (Rest bis Ziel) bleibt ({wl['stufe']})")
+l1 = ruf("rv_anwenden", wl, fk(0.5, 0.6, 0.7, FN, 10.0), 0.1, PPL["fn"])
+check(wl["stufe"] == "letzter Trade (Rest bis Ziel)" and l1["tp"] < wl["rest"] and l1["stufe"].startswith("Etappe · Range-Würfel") and l1["stufe"].endswith("(Ziel erst später)")
+      and l1["range"]["statt_letzter"], f"letzter Trade klein, TP {l1['tp']} < Rest {wl['rest']} → „Etappe … (Ziel erst später)“ ({l1['stufe']})")
+check(not ns["TT_EIN_TRADE_STUFE"].search(l1["stufe"]) and ns["TT_EIN_TRADE_STUFE"].search(wl["stufe"]),
+      "Prüfer-MUSS: kleiner letzter Trade ist für Trades pro Tag eine Etappe (TT_EIN_TRADE_STUFE trifft nicht), der normale bleibt Ein-Trade")
+_pf = round(ns["AP_PUFFER_PKT"] * 2.7 * 10.0 / 3)
+for _ft, _soll in ((round((wl["rest"] + 5) / wl["tp"], 4), True), (round((wl["rest"] + _pf + 2) / wl["tp"], 4), False)):
+    _l = ruf("rv_anwenden", wl, fk(_ft, 0.5, 1.0, FN, 10.0), 0.1, PPL["fn"])
+    check(_l["range"]["statt_letzter"] is _soll, f"Prüfer-SOLL Puffer: TP {_l['tp']} bei Rest {wl['rest']} + Puffer {_pf:.0f} → {'kein' if _soll else 'weiter'} letzter Trade")
+l2 = ruf("rv_anwenden", wl, fk(1.0, 0.5, 1.0, FN, 10.0), 0.1, PPL["fn"])
+check(l2["tp"] >= wl["rest"] and l2["stufe"].startswith("letzter Trade (Rest bis Ziel) · Range-Würfel"), f"TP erreicht das Ziel noch → bleibt letzter Trade ({l2['tp']}, {l2['stufe']})")
+nf = ns["ap_plan_final_text"]
+_notiz = lambda st, rest: f"Auto-Planer · {st} · Rest {rest:,} $ bis Ziel · Balance 106.000".replace(",", ".")   # noqa: E731
+check(nf(_notiz(wl["stufe"], wl["rest"]), wl["tp"]) is True and nf(_notiz(l1["stufe"], wl["rest"]), l1["tp"]) is False,
+      "ap_plan_final_text: normaler letzter Trade final, kleiner (statt letzter Trade) nicht final")
 wk, _g = ruf("ap_konto_rechnen", FN, "phase1", 107950.0, dict(MITTE), ppl=PPL["fn"])
 check(bool(wk) and ruf("rv_anwenden", wk, fk(0.1, 0.1, 0.1), 0.1, PPL["fn"]) is wk, f"Klein-Trade bleibt ({(wk or {}).get('stufe')})")
 check(ruf("rv_anwenden", w, None, 0.1, PPL["fn"]) is w and ruf("rv_anwenden", w, fk(0.5, 0.5, 0.5), 0.1, None) is w, "ohne Faktoren / ohne Punktwert → unverändert")
@@ -149,8 +174,10 @@ e1 = ruf("rv_anwenden", wb, fk(0.5, 0.5, 0.5), 0.1, PPL["fn"])
 check(e1["sl"] == 775 and hb not in e1["stufe"], f"SL 50 % = 775 liegt vor dem Boden → Zusatz „hinter den Boden“ weg ({e1['stufe']})")
 e2 = ruf("rv_anwenden", wb, fk(0.5, 0.99, 0.5), 0.1, PPL["fn"])
 check(e2["sl"] > 1500 and hb in e2["stufe"], f"SL 99 % = {e2['sl']} weiter hinter dem Boden → Zusatz bleibt")
+e3 = ruf("rv_anwenden", wb, fk(0.5, 1500 / 1550, 0.5), 0.1, PPL["fn"])
+check(e3["sl"] == 1500 and hb in e3["stufe"], f"Prüfer-SOLL: SL genau auf dem Boden (1.500) → Zusatz bleibt (Blow-Abgleich) ({e3['sl']})")
 # (d) Fusion-Hedge folgt dem Master: Lots ∝ Master-Lots, slave_risk ∝ Master-SL (Multiplier aus Plänen der letzten 5 Tage: The5%ers 0,0082, FN 0,28)
-for name, mult, wn, an in (("The5%ers", 0.0082, w5, ruf("rv_anwenden", w5, fk(0.3, 1.0, 0.1), 1, 1.0)), ("FundedNext", 0.28, w, b)):
+for name, mult, wn, an in (("The5%ers", 0.0082, w5, ruf("rv_anwenden", w5, fk(0.3, 1.0, 0.1, T5, 1.0), 1, 1.0)), ("FundedNext", 0.28, w, b)):
     hn, _ = ruf("eh_hedge", mult, wn["menge"], 1.0, 1.0, wn["sl"], 1.0, 0.01)
     hk, gk = ruf("eh_hedge", mult, an["menge"], 1.0, 1.0, an["sl"], 1.0, 0.01)
     check(hk is not None and hk["lots"] >= 0.01, f"{name}: kleinster Trade {an['menge']} Lots → Hedge {hk and hk['lots']} Lot ≥ 0,01 ({gk or 'ok'})")
@@ -164,6 +191,7 @@ a_ht = {"id": "konto-ht", "user_id": "uid-ht", "account_type": "phase1"}
 h1 = ruf("rv_planer_haken", w, a_ht, FN, "2026-11-12", PPL["fn"], WERTE, KTX)
 fx = ruf("rv_faktoren", "challenge_cfd", "konto-ht", "2026-11-12", 100, 10, 100)
 check(h1 is not w and h1["range"]["f_tp"] == fx["f_tp"] and h1["menge"] <= w["menge"], f"HT 100 % → klein mit den Konto-Faktoren ({h1['stufe']})")
+check((h1["range"]["tp_max_pkt"], h1["range"]["sl_max_pkt"]) == dk["fn"], f"Punkte-Deckel im Beleg (für den Folge-Haupt) {h1['range']['tp_max_pkt']} / {h1['range']['sl_max_pkt']}")
 check(ruf("rv_planer_haken", w, dict(a_ht, user_id="uid-emin"), FN, "2026-11-12", PPL["fn"], WERTE, KTX) is w, "Unternehmen ohne eigene Zeile → aus (erbt HT nicht)")
 check(ruf("rv_planer_haken", w, dict(a_ht, account_type="challenge"), FN, "2026-11-12", PPL["fn"], WERTE, KTX) is w, "Futures-Challenge (Kontoart challenge) → unverändert")
 check(ruf("rv_planer_haken", w, a_ht, dict(FN, route="tvv2"), "2026-11-12", PPL["fn"], WERTE, KTX) is w, "Route Orbit (tvv2) → unverändert")
@@ -173,27 +201,37 @@ w50 = dict(normal(dict(FN, je_groesse={"50000": {"phasen": {"phase1": dict(FN["p
 h50 = ruf("rv_planer_haken", w50, a_ht, dict(FN, je_groesse={"50000": {"phasen": {"phase1": dict(FN["phasen"]["phase1"], menge=[1, 1.5], menge_schritt=0.5)}}}),
           "2026-11-12", PPL["fn"], WERTE, KTX)
 check(abs(h50["menge"] / 0.5 - round(h50["menge"] / 0.5)) < 1e-9, f"Raster je Kontogröße (je_groesse 50k, Schritt 0,5) → {h50['menge']} Lots")
+_jg1 = {"50000": {"phasen": {"phase1": {k: v for k, v in dict(FN["phasen"]["phase1"], menge=[2, 3]).items() if k != "menge_schritt"}}}}
+_w1 = normal(dict(FN, je_groesse=_jg1), 50000.0, ppl=PPL["fn"])
+_h1 = ruf("rv_planer_haken", _w1, a_ht, dict(FN, je_groesse=_jg1), "2026-11-12", PPL["fn"], WERTE, KTX)
+check(isinstance(_h1["menge"], int), f"Prüfer-SOLL: je_groesse ohne menge_schritt → Raster 1 wie ap_konto_rechnen ({_w1['menge']!r} → {_h1['menge']!r})")
 # Folge-Haupt (tt_folge_rechnen): der Beleg am Plan (kette.range) taugt als Faktoren und gibt bei gleicher Balance dieselben Werte
 h2 = ruf("rv_anwenden", w, h1["range"], 0.1, PPL["fn"])
 check((h2["menge"], h2["tp"], h2["sl"]) == (h1["menge"], h1["tp"], h1["sl"]), "kette.range als Faktoren → derselbe Haupt-Trade (Folge-Teil)")
 
 print("── 5. Zufalls-Prüfung je Firma (je Lauf neue Stichprobe) ──")
 rnd = random.Random()
-for name, regel, ppl, schritt, bal_von, bal_bis in (("FundedNext", FN, 10.0, 0.1, 90500, 101000), ("The5%ers", T5, 1.0, 1, 90500, 101000),
-                                                     ("FTMO", FT, 1.0, 1, 90500, 103000)):
-    verstoss, n_et = [], 0
+for name, regel, ppl, schritt, bal_von, bal_bis in (("FundedNext", FN, 10.0, 0.1, 90500, 107500), ("The5%ers", T5, 1.0, 1, 90500, 107500),
+                                                     ("FTMO", FT, 1.0, 1, 90500, 109500)):
+    verstoss, n_et, n_fin = [], 0, 0
     for _ in range(1500):
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         bal = round(rnd.uniform(bal_von, bal_bis), 2)
         w0, g0 = ruf("ap_konto_rechnen", regel, "phase1", bal, u, ppl=ppl)
         if not w0:
             continue
-        f = fk(round(rnd.uniform(0.1, 1), 4), round(rnd.uniform(0.1, 1), 4), round(rnd.uniform(0.1, 1), 4))
+        f = fk(round(rnd.uniform(0.1, 1), 4), round(rnd.uniform(0.1, 1), 4), round(rnd.uniform(0.1, 1), 4), regel, ppl, w0["groesse"])
         w1 = ruf("rv_anwenden", w0, f, schritt, ppl)
-        if not str(w0["stufe"]).startswith("Etappe"):
+        st0 = str(w0["stufe"])
+        if not (st0.startswith("Etappe") or ns["RV_FINAL_RE"].match(st0)):
             if w1 is not w0:
-                verstoss.append(("nicht-Etappe verändert", w0["stufe"]))
+                verstoss.append(("Klein/Mini/Gewinntag verändert", st0))
             continue
+        if ns["RV_FINAL_RE"].match(st0):
+            n_fin += 1
+            _statt = w1["tp"] < w0["rest"] + round(ns["AP_PUFFER_PKT"] * float(w1["menge"]) * ppl / 3)
+            if _statt != w1["stufe"].startswith("Etappe") or _statt != w1["stufe"].endswith("(Ziel erst später)") or (_statt and ns["TT_EIN_TRADE_STUFE"].search(w1["stufe"])):
+                verstoss.append(("letzter Trade Stufe", w0["rest"], w1["tp"], w1["stufe"]))
         n_et += 1
         m = float(w1["menge"])
         tpp, slp = w1["tp"] / (m * ppl), w1["sl"] / (m * ppl)
@@ -205,19 +243,22 @@ for name, regel, ppl, schritt, bal_von, bal_bis in (("FundedNext", FN, 10.0, 0.1
             verstoss.append(("über dem normalen Wert", w0["tp"], w1["tp"], w0["sl"], w1["sl"]))
         if (tpp < MIN - 1e-6 and w1["tp"] != w0["tp"]) or (slp < MIN - 1e-6 and w1["sl"] != w0["sl"]):
             verstoss.append(("enger als Mindest-Pkt", tpp, slp))
-        if not w1["range"]["tp_angehoben"] and abs(w1["tp"] - w0["tp"] * f["f_tp"]) > 0.51:
+        if tpp > f["tp_max_pkt"] + 1e-6 or slp > f["sl_max_pkt"] + 1e-6:
+            verstoss.append(("weiter als der Deckel", tpp, f["tp_max_pkt"], slp, f["sl_max_pkt"]))
+        if not w1["range"]["tp_geklemmt"] and abs(w1["tp"] - w0["tp"] * f["f_tp"]) > 0.51:
             verstoss.append(("TP ≠ Faktor", w0["tp"], f["f_tp"], w1["tp"]))
-        if not w1["range"]["sl_angehoben"] and abs(w1["sl"] - w0["sl"] * f["f_sl"]) > 0.51:
+        if not w1["range"]["sl_geklemmt"] and abs(w1["sl"] - w0["sl"] * f["f_sl"]) > 0.51:
             verstoss.append(("SL ≠ Faktor", w0["sl"], f["f_sl"], w1["sl"]))
-        if hb in w1["stufe"] and w1["sl"] <= w0["sl"] - ns["AP_SL_HINTER_BODEN"]:
+        if hb in w1["stufe"] and w1["sl"] < w0["sl"] - ns["AP_SL_HINTER_BODEN"]:
             verstoss.append(("Boden-Zusatz falsch", w0["sl"], w1["sl"]))
         if ns["RV_STUFE"] not in w1["stufe"]:
             verstoss.append(("Stufe ohne Range-Würfel", w1["stufe"]))
-    check(n_et > 300 and not verstoss, f"{name}: {n_et} Etappen × Zufalls-Faktoren — nie über dem Normal-Trade, Raster, ≥ {MIN:g} Pkt, Boden-Zusatz {verstoss[:2]}")
+    check(n_et > 300 and n_fin > 20 and not verstoss, f"{name}: {n_et} Trades ({n_fin} letzte) × Zufalls-Faktoren — nie über dem Normal-Trade, Raster, {MIN:g} Pkt bis Deckel, Boden-Zusatz, Stufe {verstoss[:2]}")
 
 print("── 6. Einbau in app.py ──")
 ap = re.search(r"^def ap_planen\(.*?(?=^def )", app, re.S | re.M).group(0)
 i_rv, i_tt, i_tf = ap.find("rv_planer_haken("), ap.find("tt_planer_haken("), ap.find("ap_tradeify_final_halten(")
+check("rv_punkte_deckel(" in re.search(r"^def rv_planer_haken\(.*?(?=^\S)", app, re.S | re.M).group(0), "Planer-Haken gibt den Punkte-Deckel mit")
 check(0 < i_rv < i_tf < i_tt, "ap_planen: Range-Würfel nach dem Rechnen, vor Tradeify-final und Trades pro Tag")
 check('range=w["range"]' in ap and '_b["kette"] = dict(_b["kette"], range=w["range"])' in ap, "Plan-Zeile: mt5_baseline.range und kette.range")
 check(re.search(r'"abstand_mll", "tag", "range"\)', app) is not None, "Folge-Teil trägt kette.range weiter (_tt_zeile)")

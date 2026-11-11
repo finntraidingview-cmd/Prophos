@@ -30194,9 +30194,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         _tw_w, _tw_k = {}, {}
     try:   # RV1 RANGE-WÜRFEL (11.11.2026): Einstellung einmal je Lauf; get: ältere Selftest-Lader ziehen ap_planen ohne den RV1-Block
         _rv_w = globals()["rv_werte"]() if "rv_werte" in globals() else {}
+        _rv_k = (_tw_k or ap_unt_kontext()) if _rv_w else {}   # eigener Kontext, falls der Handels-Würfel ihn nicht lesen konnte (Prüfer RV1)
     except Exception as e:
         print(f"[range-wuerfel] ⚠️ Challenge-Planer: {type(e).__name__}: {e} — normale Trades", flush=True)
-        _rv_w = {}
+        _rv_w, _rv_k = {}, {}
 
     def _tw_pause_plan(p):
         if not _tw_w or not p.get("master_account_id"):
@@ -30466,7 +30467,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 # RV1 RANGE-WÜRFEL (Finn 11.11.2026 07:35: „nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und Lotanzahl … für alle drei wird
                 # einzeln gewürfelt“): Etappe × drei feste Faktoren je Konto × Tag, NACH Boden-/Tagesgrenze-Kappung, VOR Trades pro Tag (Tagesziel, Haupt-Lots
                 # und SL der Neben-Teile kommen so schon vom kleinen Trade). Kein Wert / kein Treffer / Fehler → w unverändert
-                w = rv_planer_haken(w, k["a"], k["regel"], tag, ap_cfd_ppl(stand.get("ctx"), k["a"]), _rv_w, _tw_k)
+                w = rv_planer_haken(w, k["a"], k["regel"], tag, ap_cfd_ppl(stand.get("ctx"), k["a"]), _rv_w, _rv_k)
             if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
                 grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
             if w and not grund and "tt_param" in globals():   # get: ältere Selftest-Lader ziehen ap_planen ohne die WS2-Helfer
@@ -43245,7 +43246,9 @@ def admin_handel_wuerfel():
 # NUR Challenge-Planer CFD (Echo, ap_planen; der Gruppen-Planer gp_planen wie TW1 nicht). Je Haupt-Trade FEST gewürfelt: der Challenge-Planer gibt einem
 # Konto höchstens EINEN Trade je Tag (08.10.2026 „maximal ein Trade pro Tag pro Account“, Trades pro Tag teilt ihn nur auf) → Schlüssel Konto × Tag.
 # Nachtlauf, Nachplanen, Probelauf und der Folge-Teil des Tages (tt_folge_rechnen über kette.range) sehen dieselben Faktoren.
-# Wirkt NUR auf die Etappe (Stufe beginnt mit „Etappe“): der letzte Trade (Rest bis Ziel), Klein-, Mini-, Gewinntag-Trade bleiben, wie sie sind.
+# Wirkt auf die Etappe und den letzten Trade (Rest bis Ziel; Master 11.11.2026: „auch klein erlaubt — Ziel nicht erreicht = morgen neu“, dann Stufe „Etappe …
+# (statt letzter Trade)“); Klein-, Mini-, Gewinntag-Trade bleiben, wie sie sind. Punkte-Deckel: TP/SL nie weiter als der normale Trade bei maximaler Spanne
+# (rv_punkte_deckel), nie enger als RV_MIN_PKT.
 # Reihenfolge: ap_konto_rechnen würfelt und kappt (Boden, Tagesgrenze) wie immer, DANACH × Faktor — jeder Faktor ≤ 100 %, also nie über dem heutigen Wert.
 # Weil die drei Faktoren unabhängig sind, ändern sich die Punkte (TP Pkt = TP $ ÷ (Lots × $/Pkt)): Lots ABgerundet aufs Raster der Phase (mindestens
 # ein Schritt), TP- und SL-Punkte nie unter RV_MIN_PKT (wie WS3c „Invalid stops“) — sonst wird der Faktor so weit angehoben, höchstens auf 100 %.
@@ -43286,12 +43289,43 @@ def rv_faktoren(planer, konto_id, tag, pct, von=None, bis=None):
     return dict(fk, pct=round(p, 2), von=lo, bis=hi)
 
 
+def rv_punkte_deckel(regel, phase, groesse, ppl):
+    """REIN RECHNEND (testbar): (tp_max_pkt, sl_max_pkt) — so viele Punkte hätte der normale Trade dieses Kontos höchstens: oberes Ende der TP- bzw. SL-Spanne
+    (tp_max geht vor) ÷ (kleinste Lots der Spanne, aufs Raster gerundet × $/Pkt). Je Kontogröße wie ap_konto_rechnen (je_groesse ohne, sonst skaliert × Größe/100k).
+    Master 11.11.2026 (RV1, gegen TP bis 2.333 Pkt bei unabhängigen Faktoren): „TP- und SL-Punkte nie über die Punkte, die der normale Trade dieses Kontos bei
+    maximaler Spanne hätte“. Nicht rechenbar → (None, None) = kein Deckel."""
+    try:
+        jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if (groesse and regel.get("je_groesse")) else None
+        ph = ((jg.get("phasen") or {}) if jg else (regel.get("phasen") or {})).get(str(phase)) or {}
+        f = 1.0 if jg else (float(groesse) / 100000.0 if regel.get("skaliert") else 1.0)
+        lots = _ap_runden(_ap_spanne(ph.get("menge"), 0.0, f, gewichte=ph.get("menge_gewichte")), ph.get("menge_schritt") or 1)
+        pv = float(ppl or 0)
+        if not lots or float(lots) <= 0 or pv <= 0:
+            return None, None
+        tp_hi = float(ph["tp_max"]) * f if ph.get("tp_max") else (float(ph["tp"][1]) * f if ph.get("tp") else None)
+        sl_hi = float(ph["sl"][1]) * f if ph.get("sl") else None
+        nenner = float(lots) * pv
+        return (round(tp_hi / nenner, 2) if tp_hi else None), (round(sl_hi / nenner, 2) if sl_hi else None)
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+        return None, None
+
+
+RV_STATT_FINAL = "Ziel erst später"   # Zusatz eines klein gewürfelten letzten Trades, dessen TP das Ziel nicht mehr sicher erreicht
+RV_FINAL_RE = re.compile(r"^letzter Trade \((?:Rest bis Ziel|auf Tageshöchstwert gedeckelt)\)")
+
+
 def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
-    """REIN RECHNEND (testbar): Plan-Werte w aus ap_konto_rechnen × Range-Faktoren fk → w2 (Kopie) mit range-Beleg, oder w unverändert (kein fk, keine
-    Etappe, CFD ohne SL/Punktwert). Lots = Lots × f_lots ABgerundet auf schritt, mindestens ein Schritt, höchstens die alten Lots; TP/SL = Wert × f, aber
-    nie enger als min_pkt Punkte bei den neuen Lots (Faktor dann angehoben, höchstens auf den alten Wert). Stand der SL „hinter dem Boden“ (Stufe) und
-    liegt jetzt davor, fällt der Zusatz weg — sonst läse echoV2Final den SL-Treffer als Blow."""
-    if not w or not fk or not str(w.get("stufe") or "").startswith("Etappe"):
+    """REIN RECHNEND (testbar): Plan-Werte w aus ap_konto_rechnen × Range-Faktoren fk → w2 (Kopie) mit range-Beleg, oder w unverändert (kein fk, nicht Etappe/
+    letzter Trade, CFD ohne SL/Punktwert). Lots = Lots × f_lots ABgerundet auf schritt (Raster der Phase), mindestens ein Schritt, höchstens die alten Lots.
+    TP/SL = Wert × f, bei den neuen Lots aber nie enger als min_pkt und nie weiter als fk tp_max_pkt / sl_max_pkt (rv_punkte_deckel) — der Faktor wird auf die
+    Grenze geklemmt, nie über den alten Wert. Stand der SL „hinter dem Boden“ (Stufe) und liegt jetzt davor, fällt der Zusatz weg — sonst läse echoV2Final
+    den SL-Treffer als Blow.
+    LETZTER TRADE (Master 11.11.2026: „letzter Trade (Ziel-Rest) auch klein erlaubt — Ziel nicht erreicht = morgen neu“): liegt sein TP danach unter dem Rest
+    bis Ziel, ist er kein finaler Trade mehr → Stufe „Etappe … (statt letzter Trade)“. Sonst hielten ihn prophos_plan_final_text / ap_plan_final_text
+    („Auto-Planer · letzter Trade“ = final), der Schritt „Finale“ und Trades pro Tag (ein Trade) weiter für den Pass-Trade. Klein-, Mini-, Gewinntag-Trade bleiben."""
+    st0 = str((w or {}).get("stufe") or "")
+    final = bool(RV_FINAL_RE.match(st0))
+    if not w or not fk or not (st0.startswith("Etappe") or final):
         return w
     try:
         m0, tp0, sl0, pv = float(w["menge"]), float(w["tp"]), float(w.get("sl") or 0), float(ppl or 0)
@@ -43304,27 +43338,44 @@ def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
     m = min(round(max(1, int(m0 * min(1.0, max(0.0, fl)) / s + 1e-9)) * s, 4), m0)
     m = int(round(m)) if s >= 1 else m
 
-    def skal(wert, f):
+    def skal(wert, f, max_pkt):
+        """→ (Wert $, 'min'|'max'|None): Wert × f, auf [min_pkt, max_pkt] Punkte bei den neuen Lots geklemmt, nie über wert."""
+        je_pkt = float(m) * pv
         roh = wert * min(1.0, max(0.0, f))
-        mind = min_pkt * float(m) * pv
-        if roh + 1e-9 >= mind:
-            return int(round(roh)), False
-        return int(min(wert, -((-(mind - 1e-9)) // 1))), True   # aufrunden ohne math (nicht importiert)
+        try:
+            hoch = float(max_pkt) * je_pkt if max_pkt else None
+        except (TypeError, ValueError):
+            hoch = None
+        if hoch is not None and roh > hoch + 1e-9:
+            return int(min(wert, hoch // 1)), "max"                     # abrunden: nie über den Deckel
+        tief = min_pkt * je_pkt
+        if roh + 1e-9 >= tief and round(roh) + 1e-9 >= tief:   # auch nach dem Runden nicht enger als min_pkt (Prüfer RV1)
+            return int(round(roh)), None
+        return int(min(wert, -((-(tief - 1e-9)) // 1))), "min"         # aufrunden ohne math (nicht importiert)
 
-    tp, tp_auf = skal(tp0, ft)
-    sl, sl_auf = skal(sl0, fs)
-    stufe = str(w["stufe"])
+    tp, tp_kl = skal(tp0, ft, fk.get("tp_max_pkt"))
+    sl, sl_kl = skal(sl0, fs, fk.get("sl_max_pkt"))
+    stufe = st0
     hb = f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
-    if hb in stufe and sl <= sl0 - AP_SL_HINTER_BODEN:
+    if hb in stufe and sl < sl0 - AP_SL_HINTER_BODEN:   # genau auf dem Boden bleibt „hinter den Boden“ (Blow-Abgleich am Fill, Prüfer RV1)
         stufe = stufe.replace(hb, "")
+    rest = _wd_num(w.get("rest"))
+    # Prüfer RV1: final bleibt er nur mit dem Puffer der NEUEN Lots über dem Rest (wie ap_konto_rechnen AP_PUFFER_PKT × Lots × $/Pkt ÷ 3) — TP 3.007 bei Rest
+    # 3.000 hätte sonst als Pass-Trade gegolten, ohne Platz für Spread/Schlupf
+    puffer_neu = round(float(globals().get("AP_PUFFER_PKT", 4.5)) * float(m) * pv / 3)   # gerundet wie dort — unveränderte Lots + TP = alter letzter Trade
+    statt = final and (rest is None or tp < rest + puffer_neu)
+    if statt:
+        stufe = RV_FINAL_RE.sub("Etappe", stufe, count=1)
     pz = lambda x: f"{round(x * 100):d}"   # noqa: E731
-    stufe += f" · {RV_STUFE} TP {pz(tp / tp0)} % · SL {pz(sl / sl0)} % · Lots {pz(float(m) / m0)} %"
+    # Zusatz bewusst OHNE die Wörter „letzter Trade“: TT_EIN_TRADE_STUFE sucht sie unverankert und machte den Tag sonst wieder zum Ein-Trade-Tag (Prüfer RV1)
+    stufe += f" · {RV_STUFE} TP {pz(tp / tp0)} % · SL {pz(sl / sl0)} % · Lots {pz(float(m) / m0)} %" + (f" ({RV_STATT_FINAL})" if statt else "")
     beleg = {"f_tp": ft, "f_sl": fs, "f_lots": fl, "pct": fk.get("pct"), "von": fk.get("von"), "bis": fk.get("bis"),
-             "tp_angehoben": tp_auf, "sl_angehoben": sl_auf, "normal": {"menge": w["menge"], "tp": w["tp"], "sl": w.get("sl")},
+             "tp_max_pkt": fk.get("tp_max_pkt"), "sl_max_pkt": fk.get("sl_max_pkt"),
+             "tp_geklemmt": tp_kl, "sl_geklemmt": sl_kl, "statt_letzter": statt, "normal": {"menge": w["menge"], "tp": w["tp"], "sl": w.get("sl")},
              "tp_pkt": round(tp / (float(m) * pv), 1), "sl_pkt": round(sl / (float(m) * pv), 1)}
     w2 = dict(w, menge=m, tp=tp, sl=sl, stufe=stufe, range=beleg)
     if w.get("risiko") is not None:
-        w2["risiko"] = sl            # CFD-Etappe: risiko = SL (ap_konto_rechnen) — der Hedge (slave_risk) folgt dem neuen SL
+        w2["risiko"] = sl            # CFD: risiko = SL (ap_konto_rechnen) — der Hedge (slave_risk) folgt dem neuen SL
     return w2
 
 
@@ -43379,11 +43430,11 @@ def rv_planer_haken(w, a, regel, tag, ppl, werte, ktx):
         fk = rv_faktoren("challenge_cfd", str((a or {}).get("id") or ""), tag, (e or {}).get("pct"), (e or {}).get("von"), (e or {}).get("bis"))
         if not fk:
             return w
-        schritt = ((regel.get("phasen") or {}).get(str(a.get("account_type"))) or {}).get("menge_schritt")
+        # Raster genau wie ap_konto_rechnen: Phase der Kontogröße (je_groesse), sonst die Firmen-Phase; ohne menge_schritt 1 (Prüfer RV1)
         jg = (regel.get("je_groesse") or {}).get(str(int(w.get("groesse") or 0))) if regel.get("je_groesse") else None
-        if jg:
-            schritt = (((jg.get("phasen") or {}).get(str(a.get("account_type")))) or {}).get("menge_schritt") or schritt
-        return rv_anwenden(w, fk, schritt, ppl)
+        schritt = (((jg.get("phasen") if jg else regel.get("phasen")) or {}).get(str(a.get("account_type"))) or {}).get("menge_schritt") or 1
+        tp_max_pkt, sl_max_pkt = rv_punkte_deckel(regel, a.get("account_type"), w.get("groesse"), ppl)
+        return rv_anwenden(w, dict(fk, tp_max_pkt=tp_max_pkt, sl_max_pkt=sl_max_pkt), schritt, ppl)   # Deckel reist im Beleg (kette.range) zum Folge-Haupt
     except Exception as e:
         print(f"[range-wuerfel] ⚠️ {str((a or {}).get('id'))[:8]}: {type(e).__name__}: {e} — normaler Trade", flush=True)
         return w
