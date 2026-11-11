@@ -110,38 +110,73 @@ check(re.search(r"VORFLUG_WARTE_S = 25\.0", p) and re.search(r"VORFLUG_DECKEL_S 
       "d4 Prüfer S1: Warten 25 s, Lese-Deckel 20 s (25 + 300 s Bot < 310 s Proxy)")
 check('_ri if _ri in ("buy", "sell") else ""' in blk, "d5 Prüfer S3: Panel reicht nur buy/sell als Richtung durch")
 
-# d6) Verhalten (Prüfer S5): Vorab-Warten + Lock — Vorflug hält den Lock, zwei Aufträge derselben Instanz → einer läuft, der zweite bekommt sofort 409
+# d6) Verhalten (Prüfer S5; deterministisch seit dem Rückruf .2177, Master 11.11.2026): Vorab-Warten + Lock wie in der Route — Vorflug hält den Lock,
+#     N Aufträge derselben Instanz warten; danach läuft GENAU EINER, alle anderen bekommen sofort 409, nie zwei gleichzeitig.
+#     Früher hielt der Test-Auftrag den Lock nur 0,3 s — wachte der zweite durch die Streuung (0,5–1 s) erst danach auf, lief er NACH dem ersten
+#     (nacheinander, nie gleichzeitig: acquire(blocking=False) ist atomar). Im Betrieb hält eine Order den Lock den ganzen Bot-Lauf (≥ 10 s).
+#     Jetzt hält der laufende Auftrag den Lock, bis alle anderen entschieden haben — so wie ein echter Bot-Lauf, der länger dauert als die Streuung.
 import threading  # noqa: E402
+import time  # noqa: E402
 sys.path.insert(0, os.path.join(WURZEL, "mt5-copier"))
 import panel as pn  # noqa: E402
-pn.VORFLUG_LESEN.clear()
-lk = threading.Lock()
-lk.acquire()
-pn.VORFLUG_LESEN.add("v.json")
-erg = []
 
 
-def auftrag(name):
-    pn._vorflug_abwarten("v.json")
-    if lk.acquire(blocking=False):
-        erg.append((name, "läuft"))
-        time.sleep(0.3)
+def d6_lauf(n_auftraege, halten=True):
+    pn.VORFLUG_LESEN.clear()
+    pn.ORDER_ANGEMELDET.clear()
+    lk = threading.Lock()
+    with pn.MASTER_ORDER_GUARD:          # wie /api/vorflug: Lock + Markierung in einem Schritt
+        lk.acquire()
+        pn.VORFLUG_LESEN.add("v.json")
+    erg, zaehl = [], {"aktiv": 0, "max": 0}
+    zl = threading.Lock()
+    alle_da = threading.Event()
+
+    def auftrag(name):
+        pn._vorflug_abwarten("v.json")                       # wie die Route: vor allen Riegeln
+        with pn.MASTER_ORDER_GUARD:
+            pn.ORDER_ANGEMELDET["v.json"] = time.time()
+        if lk.acquire(blocking=False):
+            with zl:
+                zaehl["aktiv"] += 1
+                zaehl["max"] = max(zaehl["max"], zaehl["aktiv"])
+                erg.append((name, "läuft"))
+            if halten:
+                alle_da.wait(10)                              # der „Bot-Lauf“ dauert, bis alle anderen entschieden haben
+            else:
+                time.sleep(0.05)                              # alter Test: sehr kurzer „Bot-Lauf“
+            with zl:
+                zaehl["aktiv"] -= 1
+            lk.release()
+        else:
+            with zl:
+                erg.append((name, "409"))
+        with zl:
+            if len(erg) == n_auftraege:
+                alle_da.set()
+
+    ts = [threading.Thread(target=auftrag, args=(f"A{k}",)) for k in range(n_auftraege)]
+    for t in ts:
+        t.start()
+    time.sleep(1.2)
+    gewartet = erg == []
+    with pn.MASTER_ORDER_GUARD:                               # wie /api/vorflug finally: erst Lock frei, dann Markierung weg
         lk.release()
-    else:
-        erg.append((name, "409"))
+        pn.VORFLUG_LESEN.discard("v.json")
+    for t in ts:
+        t.join(15)
+    return gewartet, erg, zaehl["max"], all(not t.is_alive() for t in ts)
 
 
-import time  # noqa: E402
-ts = [threading.Thread(target=auftrag, args=(n,)) for n in ("A", "B")]
-for t in ts:
-    t.start()
-time.sleep(1.2)
-check(erg == [], "d6a Aufträge warten, solange der Vorflug läuft")
-pn.VORFLUG_LESEN.discard("v.json")
-lk.release()
-for t in ts:
-    t.join(5)
-check(sorted(x[1] for x in erg) == ["409", "läuft"], f"d6b danach läuft genau einer, der zweite bekommt 409 wie bisher ({erg})")
+gew, erg, mx, fertig = d6_lauf(2)
+check(gew, "d6a Aufträge warten, solange der Vorflug läuft")
+check(fertig and sorted(x[1] for x in erg) == ["409", "läuft"] and mx == 1, f"d6b danach läuft genau einer, der zweite bekommt 409 wie bisher ({erg})")
+gew, erg, mx, fertig = d6_lauf(12)
+check(fertig and [x[1] for x in erg].count("läuft") == 1 and [x[1] for x in erg].count("409") == 11 and mx == 1,
+      f"d6d 12 gleichzeitig wartende Aufträge: genau einer läuft, 11 × 409, nie zwei gleichzeitig (max {mx})")
+gew, erg, mx, fertig = d6_lauf(12, halten=False)
+check(fertig and mx == 1, f"d6e auch mit sehr kurzem Lauf (alter Test) nie zwei gleichzeitig — höchstens nacheinander (max {mx})")
+pn.ORDER_ANGEMELDET.clear()
 t0 = time.time()
 check(pn._vorflug_abwarten("andere.json") < 0.05 and time.time() - t0 < 0.1, "d6c ohne Vorflug kein Warten")
 
