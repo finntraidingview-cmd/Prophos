@@ -200,7 +200,7 @@ if m:
           "Frontend-Standard = app.py WD_FIRMEN_REGELN_STD (alle Firmen)")
 check("${e4RegelnHtml(k)}" in html and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
       "Einstellungen → Firmen: Payout-Regeln je Firma, Speichern in firmen_regeln, nur HT-weit (wdNurGruppe)")
-check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"), wd_lock=_lock(k))" in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid); PO2b: WD-Lock
+check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"), wd_lock=_lock(k)," in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid); PO2b: WD-Lock; RC3: danach rc_regel
       "Railway liest firmen_regeln (Rückfall Standard) und gibt die Regel an tradeify_zyklus_konto")
 
 # ── LZ1 (Finn 10.11.2026): Lucid „Zyklus im Plus“ in jedem Payout-Zyklus, auch im 1. — derselbe Weg (art 'tradeify', firma_key 'lucid') ──

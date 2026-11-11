@@ -4353,7 +4353,7 @@ def alarm_tick():
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
            "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,bal0:mt5_baseline->>master_balance,master_pl,master_sl,"
-           "rv:mt5_baseline->richtung_verstoss,ab:mt5_baseline->abgleich")
+           "rv:mt5_baseline->richtung_verstoss,ab:mt5_baseline->abgleich,wd_recoverer:mt5_baseline->>wd_recoverer")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
@@ -4361,7 +4361,7 @@ def alarm_tick():
     try:                                       # APEX-WD BESTÄTIGEN (02.11.2026): eigene Abfrage — Farmer-Pläne von nachts fallen aus „updated_at ≤ 3 h" heraus
         firmen_wd = wd_bestaetigen_firmen()
         if firmen_wd or TRADEIFY_AUSGLEICH_BESTAETIGEN:   # + Tradeify-Ausgleich (03.11.2026)
-            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art,aus:mt5_baseline->>wd_ausgleich",
+            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art,aus:mt5_baseline->>wd_ausgleich,wd_recoverer:mt5_baseline->>wd_recoverer",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
             gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
             wd_offen = [r for r in wd_offen if (hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id")))
@@ -16113,10 +16113,11 @@ def wd_zyklus_bis(profit, bester, ziel):
     return None, None
 
 
-def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts):
+def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts, rc_regel=None):
     """REIN RECHNEND (testbar): das Feld `zyklus` eines Kontos. Aktiv = wd_farm ∧ Apex ∧ Nr ≥ ab_zyklus ∧ Verlust > 0 ∧ Profit < 2 × bester;
     Schalter accounts.wd_zyklus_regel: 'aus' → nie, 'an' → auch ohne Automatik-Bedingungen (außer wd_farm + Apex), null = automatisch.
-    regel None = Spalte zyklus_regel fehlt (SQL nicht eingespielt) → aktiv False mit Grund, Zahlen trotzdem da (Anzeige)."""
+    regel None = Spalte zyklus_regel fehlt (SQL nicht eingespielt) → aktiv False mit Grund, Zahlen trotzdem da (Anzeige).
+    rc_regel (RC3) = wd_farmer_regeln.recovery_lots.apex — Menge nach dem Recoverer-Ziel statt fest 1 NQ; None = wie bisher."""
     st = wd_zyklus_stand(plaene, payouts)
     key = wd_zyklus_firma_key(konto)
     live = _wd_num((konto or {}).get("live_balance") if "live_balance" in (konto or {}) else (konto or {}).get("tv_balance"))
@@ -16163,6 +16164,17 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts):
                 "instr": (WD_ZYKLUS_INSTR if (w and r) else None), "instr_kt": (WD_ZYKLUS_KT if (w and r) else None),
                 "ziel_normal": norm["ziel_normal"], "satz_normal": norm["satz_normal"], "staffel_eur": norm["staffel_eur"], "plus": norm["plus"],
                 "rest_bis_erfuellt": rest, "tage_geschaetzt": n_tage})
+    if w and r and aktiv and rc_regel:
+        # RC3 (Finn 11.11.2026 19:27, alle Recovery-Trades): Menge nach dem Recoverer-Ziel ($) statt fest 1 NQ — Stufe aus recovery_lots.apex; eigenes try, Fehler = 1 NQ
+        try:
+            _rc = rc3_recovery_lots(w["ziel"], rc_regel, _wd_konto_groesse(konto), "apex")
+        except Exception as e:
+            print(f"[recovery-lots] ⚠️ Apex {str((konto or {}).get('id') or '')[:8]}: {type(e).__name__}: {e} — 1 NQ wie bisher", flush=True)
+            _rc = None
+        if _rc:
+            out["recovery_lots"] = _rc
+            out.update(rc3_felder(_rc))
+            out["grund"] += rc3_grund(_rc)
     return out
 
 
@@ -16191,6 +16203,112 @@ TRADEIFY_ZYKLUS_PUFFER = (30, 60)
 # BESTÄTIGEN (Stopp S9 zu 7388c5f4, 03.11.2026): ob der Ausgleichs-Trade wie der Apex-Recoverer einzeln bestätigt werden muss, fragt der Eingang bei Finn. Vorbereitet als
 # Feld zyklus.bestaetigen; scharf (Pflicht im Farmer) erst nach Finns Antwort — bis dahin False
 TRADEIFY_AUSGLEICH_BESTAETIGEN = True   # Finn 03.11.2026 (über den Eingang): „yes“ — jeder Ausgleichs-Trade einzeln bestätigen, normale Tradeify-WD nicht   # Finn 03.11.2026 Nachtrag: Puffer des Ausgleichs-Trades je Trade gewürfelt 30–60 $ (Jitter-Regel), ersetzt „normaler TP − Linie“
+
+
+# RC3 LOTS DER RECOVERY-TRADES NACH TP (Finn 11.11.2026 19:24 über den Master: „Bei Recovery Trades sind die standardmäßig alle mit 3 MNQ … weil bei Recovery
+# Trades manchmal die Take Profits sehr groß werden“; Fall Tradeify 150k: Ausgleichs-Trade TP +3.023 $ mit 3 MNQ = 504 Pkt). Staffel nach TP in $ (Master):
+# < 500 → 3 MNQ · 500 bis < 1.000 → 4 MNQ · 1.000 bis 2.000 → 7 MNQ · über 2.000 → 1 NQ („davor immer nur MNQ, außer beim letzten Step NQ“). TP/SL in $ bleiben,
+# nur die Punkte ergeben sich aus Lots × Punktwert (NQ 20 $/Pkt, MNQ 2 $/Pkt). Einstellung je Firma in wd_farmer_regeln.recovery_lots (EIGENE Spalte,
+# sql/2026-11-11_rc3_recovery_lots.sql — firmen_regeln[firma] schreibt e4Speichern im Frontend jedes Mal ganz neu und ließe einen weiteren Schlüssel fallen).
+# Code-Standard = aus = wie heute (Menge aus der Firmen-Spanne des Farmers, Tradeify 3 MNQ). Wirkt nur auf den Ausgleichs-Trade („Recovery“, zyklus.aktiv) der
+# Firmen auf dem Weg tradeify_zyklus_konto (Tradeify, Lucid) und auf den Apex-Recoverer (wd_zyklus_konto; Finn 19:27: „für alle Recovery-Trades Apex /
+# Tradeify / Lucid / Topstep, alles“ — Topstep hat heute keinen Recovery-Weg). Ohne Einstellung fährt der Apex-Recoverer wie bisher 1 NQ (WD_ZYKLUS_INSTR).
+# Max-Kontrakte je Kontogröße in MNQ-Äquivalent (1 NQ = 10 MNQ): Tradeify Select laut firm_rules.json „Position Sizing“ 25K 2/20 · 50K 4/40 · 100K 8/80 ·
+# 150K 12/120; Apex laut firm_rules.json die Half-Size-Phase des PA (50K 2 · 100K 3 · 150K 4 Mini bis zum Safety Net — die kleinere Grenze, damit es auch
+# vor dem Safety Net passt); Lucid steht nicht in firm_rules.json → kein Code-Wert, nur über die Einstellung (recovery_lots.lucid.max_mnq). Je Firma
+# überschreibbar ({größe: n}). Größe unbekannt → Staffel greift nicht (nie über ein unbekanntes Limit). Passt eine Stufe nicht unter das Limit, gilt die
+# nächstkleinere (Master 11.11.2026), mit Hinweis im Grund; passt keine → wie bisher.
+# MNQ-Stufen tragen instr 'mnq' AUSDRÜCKLICH (Prüfer RC3 SOLLTE 1): sonst nähme das Frontend das Symbol aus vorplan.instr — ein bis 5 min alter zyklus-Stand mit
+# kt 7 und ein inzwischen auf NQ gestellter Farmer ergäben 7 NQ.
+# RECOVERER-MARKE (Master 11.11.2026): mt5_baseline.wd_recoverer = true setzt der Farmer an jedem Plan aus einem aktiven Apex-Recoverer-Zyklus (wie
+# wd_ausgleich bei Tradeify) — die Erkennung (kein SL-Würfel, Freigabe-Meldung, Rang, Chips) hängt nicht mehr am NQ-Symbol; alte Pläne ohne Marke: NQ wie bisher.
+RC3_STUFEN_STD = ({"ab": 0, "ab_inkl": True, "kt": 3, "instr": "mnq"}, {"ab": 500, "ab_inkl": True, "kt": 4, "instr": "mnq"},
+                  {"ab": 1000, "ab_inkl": True, "kt": 7, "instr": "mnq"}, {"ab": 2000, "ab_inkl": False, "kt": 1, "instr": "nq"})
+RC3_MAX_MNQ_STD = {"tradeify": {25000: 20, 50000: 40, 100000: 80, 150000: 120}, "apex": {50000: 20, 100000: 30, 150000: 40}}
+RC3_CACHE_S = 60
+_rc3_cache = {"bis": 0.0, "wert": {}}
+
+
+def rc3_recovery_lots(tp, regel, groesse, firma="tradeify"):
+    """REIN RECHNEND (testbar, RC3): Menge des Recovery-Trades nach seinem TP ($) → {kt, instr ('mnq'|'nq'), stufe (Index der gewählten Stufe), stufe_tp
+    (Index nach dem TP), tp, max_mnq, kleiner (bool), hinweis} oder None (= wie bisher). regel = wd_farmer_regeln.recovery_lots[firma] = {an, stufen?: [{ab,
+    ab_inkl, kt, instr}], max_mnq?: {größe: n}}; ohne stufen gilt RC3_STUFEN_STD, ohne max_mnq RC3_MAX_MNQ_STD[firma]. Stufe = die letzte, deren Untergrenze
+    erreicht ist (ab_inkl True: tp ≥ ab, False: tp > ab). Über dem Limit (MNQ-Äquivalent kt × 10 bei NQ) → die nächstkleinere Stufe, die passt (Hinweis);
+    passt keine → None. None auch bei: Regel aus/fehlt/kaputt, TP ≤ 0, Größe ohne bekanntes Limit."""
+    r = regel if isinstance(regel, dict) else None
+    if not r or r.get("an") is not True:
+        return None
+    try:
+        t = float(tp)
+    except (TypeError, ValueError):
+        return None
+    if not t > 0:
+        return None
+    stufen = r.get("stufen") if isinstance(r.get("stufen"), list) and r.get("stufen") else list(RC3_STUFEN_STD)
+    gut = []
+    for x in stufen:
+        if not isinstance(x, dict):
+            return None
+        ab, kt, ins = _wd_num(x.get("ab")), _wd_num(x.get("kt")), str(x.get("instr") or "").lower()
+        if ab is None or ab < 0 or kt is None or kt < 1 or int(kt) != kt or ins not in ("mnq", "nq"):
+            return None                                   # kaputte Stufe → ganze Staffel aus (lieber wie bisher als eine halbe Staffel)
+        gut.append((float(ab), x.get("ab_inkl") is not False, int(kt), ins))
+    gut.sort(key=lambda z: (z[0], not z[1]))
+    wahl = None
+    for idx, (ab, inkl, _kt, _ins) in enumerate(gut):
+        if t > ab or (inkl and t >= ab):
+            wahl = idx
+    if wahl is None:
+        return None
+    mx_tab = r.get("max_mnq") if isinstance(r.get("max_mnq"), dict) else RC3_MAX_MNQ_STD.get(str(firma or "")) or {}
+    g = _wd_num(groesse)
+    mx = None
+    for k, v in mx_tab.items():
+        if _wd_num(k) is not None and g is not None and abs(float(_wd_num(k)) - float(g)) < 0.5:
+            mx = _wd_num(v)
+    if not mx or mx < 1:
+        return None
+    mx = int(mx)
+    aeq = lambda z: z[2] * (10 if z[3] == "nq" else 1)   # noqa: E731 — MNQ-Äquivalent
+    for idx in range(wahl, -1, -1):
+        if aeq(gut[idx]) <= mx:
+            kt, ins = gut[idx][2], gut[idx][3]
+            kleiner = idx != wahl
+            g_txt = f"{int(g) // 1000}k" if g else "?"
+            hinweis = (f"Max-Kontrakte {g_txt} = {mx} MNQ: statt {gut[wahl][2]} {gut[wahl][3].upper()} die kleinere Stufe {kt} {ins.upper()}"
+                       if kleiner else "")
+            return {"kt": int(kt), "instr": ins, "stufe": idx, "stufe_tp": wahl, "tp": t, "max_mnq": mx, "kleiner": kleiner, "hinweis": hinweis}
+    return None
+
+
+def rc3_felder(rc):
+    """REIN (RC3): Ergebnis von rc3_recovery_lots → Felder am zyklus-Dict, die das Frontend liest (wdRecovererKt / wdRecovererSymbol): NQ → instr 'nq' +
+    instr_kt, kt leer (ein alter Tab ohne instr machte sonst aus kt 1 einen MNQ-Trade, Gegenprüfung 02.11.2026); MNQ → instr 'mnq' + instr_kt + kt (ein
+    alter Tab, der nur kt kennt, fährt dieselbe Menge auf dem MNQ des Farmers)."""
+    if rc["instr"] == "nq":
+        return {"instr": "nq", "instr_kt": rc["kt"], "kt": None}
+    return {"instr": "mnq", "instr_kt": rc["kt"], "kt": rc["kt"]}
+
+
+def rc3_grund(rc):
+    """Zusatz am Grund: „ · 7 MNQ“ bzw. „ · 3 MNQ (Max-Kontrakte …)“."""
+    return f" · {rc['kt']} {rc['instr'].upper()}" + (f" ({rc['hinweis']})" if rc.get("hinweis") else "")
+
+
+def _rc3_regeln_lesen():
+    """wd_farmer_regeln.recovery_lots (RC3) → {firma: regel} | {} — 60 s gemerkt. Spalte fehlt (SQL nicht eingespielt) oder Lesefehler → {} = aus (wie heute)."""
+    if _rc3_cache["bis"] > time.time():
+        return _rc3_cache["wert"]
+    wert = {}
+    try:
+        rows = sb_select("wd_farmer_regeln", {"select": "recovery_lots", "id": "eq.1"}) or []
+        v = rows[0].get("recovery_lots") if rows else None
+        wert = v if isinstance(v, dict) else {}
+    except Exception as e:
+        if "recovery_lots" not in str(getattr(getattr(e, "response", None), "text", "") or e):
+            print(f"[recovery-lots] ⚠️ nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — aus (Menge wie heute)", flush=True)
+    _rc3_cache.update(bis=time.time() + RC3_CACHE_S, wert=wert)
+    return wert
 
 
 # WD-FIRMEN-REGELN (E4, Finn 05.11.2026 ~05:30 Dubai: „Bei Winning Days die Consistency Rule hinzufügen, z. B. bei Apex, und das Minimum-Payout bzw. den
@@ -16277,11 +16395,12 @@ def tradeify_zyklus_start_bal(plaene, start):
     return bs if (bs is not None and bs > 0) else None
 
 
-def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None, regel=None, wd_lock=None):
+def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, live_at=None, regel=None, wd_lock=None, rc_regel=None):
     """REIN RECHNEND (testbar): `zyklus` eines Tradeify-Winning-Days-Kontos → {art, nr, start, start_bal, gewinn, gesperrt, fehl, aktiv, ziel, satz, hedge_eur,
     ziel_normal, satz_normal, puffer, grund, grund_code, min_usd, ab_zyklus}. aktiv = Ausgleichs-Trade fällig (Zyklus ≥ ab_zyklus, Gewinn < min_usd, WD-Stand ≥ Ziel − 1).
     regel = wd_firmen_regel(…, "tradeify")["min_netto"] (E4); ohne → Standard (an, 1 $, ab Zyklus 2 = das Verhalten von vorher). Regel aus → nie gesperrt, kein Ausgleich.
-    wd_lock (PO2b) = Lock der liq_regeln-Zeile winning_days (Liq fest bei Größe + Lock) — nur für Winning-Days-Konten; None = wie vorher nur der Max DD."""
+    wd_lock (PO2b) = Lock der liq_regeln-Zeile winning_days (Liq fest bei Größe + Lock) — nur für Winning-Days-Konten; None = wie vorher nur der Max DD.
+    rc_regel (RC3) = wd_farmer_regeln.recovery_lots[firma] — Ausgleichs-Trade mit Menge nach TP (kt bzw. instr/instr_kt wie der Apex-Recoverer); None = wie vorher."""
     fk = zyklus_plus_key(konto) or "tradeify"   # LZ1: Lucid über denselben Weg
     mn = regel if isinstance(regel, dict) else WD_FIRMEN_REGELN_STD[fk]["min_netto"]
     min_usd = float(_wd_num(mn.get("usd")) if _wd_num(mn.get("usd")) is not None else TRADEIFY_ZYKLUS_MIN_USD)
@@ -16369,6 +16488,17 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     if aktiv:
         out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
+        # RC3 (Finn 11.11.2026): Menge nach TP — Felder wie der Apex-Recoverer, die das Frontend liest (rc3_felder). TP, Satz und hedge_eur bleiben
+        # unverändert (rechnen in $). Eigenes try: ein Fehler lässt den Ausgleichs-Trade wie bisher
+        try:
+            _rc = rc3_recovery_lots(tp, rc_regel, _wd_konto_groesse(konto), fk)
+        except Exception as e:
+            print(f"[recovery-lots] ⚠️ {str((konto or {}).get('id') or '')[:8]}: {type(e).__name__}: {e} — Menge wie bisher", flush=True)
+            _rc = None
+        if _rc:
+            out["recovery_lots"] = _rc
+            out.update(rc3_felder(_rc))
+            out["grund"] += rc3_grund(_rc)
     elif gesperrt and gross:
         out.update({"grund_code": "minus", "ausgleich_hand": True,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ (mehr als Max DD {d0(dd)} $) · Payout erst ab +{m_txt} $ — kein automatischer Ausgleichs-Trade, von Hand planen"})
@@ -16385,6 +16515,8 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None)
     if not tr:
         return
     mn_je = {fk: wd_firmen_regel(firmen_regeln, fk)["min_netto"] for fk in ("tradeify", "lucid")}   # LZ1: Regel je Firma
+    _rc_alle = _rc3_regeln_lesen()   # RC3: Menge des Ausgleichs-Trades nach TP (eigene Spalte recovery_lots; fehlt → aus = wie heute)
+    rc_je = {fk: (_rc_alle.get(fk) if isinstance(_rc_alle.get(fk), dict) else None) for fk in ("tradeify", "lucid")}
     ids = [str(k["id"]) for k in tr]
     auto = wd_auto_staende(ids)
     alt = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,goal_done_offset,goal_target,max_drawdown,starting_balance", "id": f"in.({','.join(ids)})"})}
@@ -16411,7 +16543,8 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None)
         k["zyklus"] = tradeify_zyklus_konto(dict(k, max_drawdown=k.get("max_drawdown") if k.get("max_drawdown") is not None else a.get("max_drawdown"),
                                                  starting_balance=k.get("starting_balance") if k.get("starting_balance") is not None else a.get("starting_balance")),
                                             plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at,
-                                            regel=mn_je.get(zyklus_plus_key(k) or "tradeify"), wd_lock=_lock(k))
+                                            regel=mn_je.get(zyklus_plus_key(k) or "tradeify"), wd_lock=_lock(k),
+                                            rc_regel=rc_je.get(zyklus_plus_key(k) or "tradeify"))
 
 
 def _wd_zyklus_anhaengen(konten):
@@ -16448,9 +16581,14 @@ def _wd_zyklus_anhaengen(konten):
                                              "master_account_id": f"in.({','.join(ids)})", "status": "in.(completed,review)",
                                              "started_at": f"gte.{seit}"}):
                 plaene.setdefault(str(p.get("master_account_id")), []).append(p)
+        try:   # RC3: Menge des Recoverers nach dem Ziel (eigene Spalte recovery_lots; fehlt/Fehler → 1 NQ wie bisher, der Apex-Stand bleibt)
+            _rc_apex = (_rc3_regeln_lesen() or {}).get("apex")
+        except Exception:
+            _rc_apex = None
+        _rc_apex = _rc_apex if isinstance(_rc_apex, dict) else None
         for k in apex:
             if wd_zyklus_firma_key(k):
-                k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []))
+                k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), rc_regel=_rc_apex)
         try:   # eigener try (Gegenprüfung 03.11.2026): ein Fehler im Tradeify-Teil darf den Apex-Stand nie mitreißen
             _tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())
         except Exception as e:
@@ -16577,7 +16715,7 @@ def wd_zyklus_route():
             plaene = []
             for i in range(0, len(ids_z), 60):
                 plaene += _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,started_at,winning_day,master_firm,master_symbol,master_symbol_root,"
-                                                            "wd_ausgleich:mt5_baseline->>wd_ausgleich",
+                                                            "wd_ausgleich:mt5_baseline->>wd_ausgleich,wd_recoverer:mt5_baseline->>wd_recoverer",
                                                   "status": "in.(planned,open)", "master_account_id": f"in.({','.join(ids_z[i:i + 60])})"}) or []
             naechste = wd_naechster_plan(plaene)
             for kid, z in zyk.items():
@@ -17578,7 +17716,8 @@ def admin_wd_plaene():
                                   # nicht auf die Konto-Richtung zurück
                                   "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt,"
                                   "hand_werte_at,master_firm,anz_frei:hedge_freigabe_at,"   # WD-Zeile von Hand (02.11.2026): Sperre fürs Nachziehen + Popup
-                                  "wd_sl:mt5_baseline->wd_sl",   # WD-SL-WÜRFEL (WS1a, 09.11.2026): Chip „SL … $ (… % Puffer)" in den WD-Zeilen, auch fremde IDs
+                                  "wd_sl:mt5_baseline->wd_sl,"   # WD-SL-WÜRFEL (WS1a, 09.11.2026): Chip „SL … $ (… % Puffer)" in den WD-Zeilen, auch fremde IDs
+                                  "wd_recoverer:mt5_baseline->>wd_recoverer",   # RC3 (Prüfer SOLLTE 1): Chip „Recoverer“ in der Farmer-Tabelle auch für MNQ-Recoverer
                         "id": f"in.({chunk})"})
             # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
             # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
@@ -17743,7 +17882,11 @@ def admin_wd_plaene():
                 # TRADEIFY-AUSGLEICH BESTÄTIGEN (Finn 03.11.2026 „yes“): der Farmer meldet den Ausgleichs-Trade mit wd_ausgleich — die Marke kann nur eine Bestätigung
                 # verlangen, nie eine erlassen; ohne Bestätigung startet der Plan nicht (Freigabe wie Apex-WD, hedge_freigabe_at)
                 if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:
-                    body["mt5_baseline"] = {"wd_ausgleich": True}
+                    body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_ausgleich=True)
+                # RC3 RECOVERER-MARKE (Master 11.11.2026): der Farmer meldet einen Plan aus dem aktiven Apex-Recoverer-Zyklus mit wd_recoverer — die Erkennung
+                # (kein SL-Würfel unten, Freigabe-Meldung, Rang, Chips) hängt nicht mehr am NQ-Symbol (der Recoverer fährt seit RC3 auch MNQ)
+                if (r or {}).get("wd_recoverer") is True:
+                    body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_recoverer=True)
                 # WD-SL-WÜRFEL (WS1a, 09.11.2026): JE Plan gewürfelt, NACH _wd_ohne_master_sl — ein vom Tab mitgeschickter master_sl ist oben schon verworfen,
                 # einen SL aus einer anderen Regel gibt es auf diesem Weg nicht (WD_PLAN_FELDER trägt kein mt5_baseline). Würfel-Fehler → Plan wie bisher ohne SL.
                 # Recoverer (Apex-WD auf NQ) und Tradeify-Ausgleich würfeln NICHT (Master 09.11.2026 ~20:15: „bestehende Regeln nicht anfassen“, Finns
@@ -33006,8 +33149,16 @@ def hf_basis(firmen):
 
 
 def wd_ist_recoverer_plan(p):
-    """REIN RECHNEND (testbar): Apex-Winning-Day auf NQ = Recoverer (Finn 02.11.2026). Normale Apex-WDs fahren MNQ (wd_farmer_regeln.vorplan.instr). Gegenstück: planIstRecoverer im Frontend."""
+    """REIN RECHNEND (testbar): Recoverer-Plan? RC3 (Master 11.11.2026): zuerst die Marke mt5_baseline.wd_recoverer (bzw. Alias wd_recoverer aus einem Select) —
+    true → Recoverer, false → nicht; seit der Menge nach TP fährt ein Recoverer auch 3/4/7 MNQ. Ohne Marke (Pläne von vorher) wie bis RC3: Apex-Winning-Day auf
+    NQ (Finn 02.11.2026). Gegenstück: planIstRecoverer im Frontend."""
     p = p or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    m = p.get("wd_recoverer") if p.get("wd_recoverer") is not None else bl.get("wd_recoverer")
+    if m is True or str(m).lower() == "true":
+        return True                        # die Marke setzt nur der Farmer an Plänen aus einem aktiven Recoverer-Zyklus
+    if m is False or str(m).lower() == "false":
+        return False
     wurzel = str(p.get("master_symbol_root") or p.get("master_symbol") or "").upper()
     return p.get("winning_day") is True and "apex" in str(p.get("master_firm") or "").lower() and bool(re.match(r"^NQ", wurzel))
 
@@ -33477,7 +33628,7 @@ def admin_auto_plan_hedge_freigabe():
         rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
                                                       "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
                                                       "winning_day,notes,slave_risk,master_risk,multiplier,"
-                                                      "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre,aus:mt5_baseline->>wd_ausgleich",
+                                                      "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre,aus:mt5_baseline->>wd_ausgleich,wd_recoverer:mt5_baseline->>wd_recoverer",
                                                       order="start_um.asc.nullslast"))
                 if hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids)]   # Ausgleich: auch Gruppen, Verwalter nur seine Gruppe (03.11.2026)
         for r in rows:

@@ -37244,7 +37244,7 @@
       // Würfel aus der Zeile (.1487): steht in wd_tagesplan, braucht keine Farmer-Sicht
       const k = t.konto || {}, w = (k.wuerfel && num(k.wuerfel.tp) > 0 && num(k.wuerfel.kt) >= 1) ? k.wuerfel : null, vor = k.vor || null
       if(w){
-        out.ktTxt = `${f0(w.kt)} × ${w.instr === 'nq' ? 'NQ' : rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : w.quelle === 'recoverer' ? 'Recoverer' : 'gewürfelt'
+        out.ktTxt = `${f0(w.kt)} × ${w.instr === 'nq' ? 'NQ' : w.instr === 'mnq' ? 'MNQ' : rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : w.quelle === 'recoverer' ? 'Recoverer' : 'gewürfelt'
         if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
         else if(vor && num(vor.lots) > 0){ out.lotsTxt = f2(vor.lots) + ' Lot'; out.lotsSub = `×${num(vor.mult) != null ? f3(vor.mult) : '–'}${num(vor.eur) != null ? ` · −${f0(vor.eur)} € am TP` : ''}` }
         else if(vor && num(vor.staffel) > 0){ out.lotsTxt = f0(vor.staffel) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
@@ -47046,8 +47046,13 @@
   window._accRecovererChipHtml = accRecovererChipHtml   // Test-Haken
   /* RECOVERER AM PLAN (Finn 02.11.2026: „die Recovery Trades … immer markieren“): Apex-Winning-Day auf NQ = Recoverer, normale Apex-WDs fahren MNQ. Gegenstück wd_ist_recoverer_plan
    * (app.py). Liest Plan-Felder in beiden Schreibweisen (Plan im Tab, Zeile vom Server). Hand-Umstellung eines Apex-WD auf NQ zeigt den Chip ebenfalls. */
+  // RC3 (Master 11.11.2026): zuerst die Marke mt5_baseline.wd_recoverer (Plan im Tab: mt5Baseline, Server-Zeile: Alias wd_recoverer) — seit der Menge nach TP
+  // fährt ein Recoverer auch 3/4/7 MNQ. Ohne Marke (Pläne von vorher) wie bisher: Apex-Winning-Day auf NQ
   function planIstRecoverer(p){
     if(p && typeof p.recoverer === 'boolean') return p.recoverer
+    const bl = p && (p.mt5Baseline || p.mt5_baseline), mk = p && (p.wd_recoverer != null ? p.wd_recoverer : (bl && typeof bl === 'object' ? bl.wd_recoverer : undefined))
+    if(mk === true || String(mk) === 'true') return true
+    if(mk === false || String(mk) === 'false') return false
     if(!p || !(p.winningDay === true || p.winning_day === true || p.wd === true)) return false
     return /apex/i.test(String(p.masterFirm || p.master_firm || '')) && /^NQ/i.test(String(p.masterSymbol || p.master_symbol || p.master_symbol_root || p.symbol_root || ''))
   }
@@ -47060,7 +47065,7 @@
   }
   window._kontoRecoveryChipHtml = kontoRecoveryChipHtml
   window._recoveryChipKlick = el => window._recovererOeffnen?.(el.dataset.recId, el.dataset.recName)
-  const planRecovererChipHtml = p => planIstRecoverer(p) ? ' <span class="type-badge type-challenge" title="Recoverer: Apex-Winning-Day nach Verlusttag, 1 NQ">Recoverer</span>'
+  const planRecovererChipHtml = p => planIstRecoverer(p) ? ' <span class="type-badge type-challenge" title="Recoverer: Apex-Winning-Day nach Verlusttag (Menge nach TP)">Recoverer</span>'
     : kontoRecoveryChipHtml(p && (p.masterAccountId || p.master_account_id || p.konto_id), p && (p.masterName || p.master_name))
   window._planRecovererChipHtml = planRecovererChipHtml
   window._planIstRecoverer = planIstRecoverer
@@ -58624,7 +58629,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2187'
+  const OS_TAB_BUILD = '2026-09-22.2188'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74716,7 +74721,8 @@
     // hielte den Rückfall-Plan zurück (Gegenprüfung 02.11.2026)
     if(!window._wdZyklus?.geladen && (k.wuerfel || {}).quelle === 'recoverer') return false
     // RECOVERER (02.11.2026): Regel-Ziel statt Würfel, Hand-Vorgabe schlägt die Regel. Endet die Regel, liegt der alte Wert außerhalb der Spanne → neu gewürfelt
-    const zy = wdZyklusVon(kd.id), ktFest = wdRecovererKt(zy), instrFest = (zy && zy.instr === 'nq') ? 'nq' : null   // 1 NQ (Finn 02.11.2026)
+    // RC3 (11.11.2026): Menge nach TP — instr 'nq' bzw. ausdrücklich 'mnq' (dann nie das Instrument des Farmers: ein alter Stand mit kt 7 ergäbe sonst 7 NQ)
+    const zy = wdZyklusVon(kd.id), ktFest = wdRecovererKt(zy), instrFest = (zy && (zy.instr === 'nq' || zy.instr === 'mnq')) ? zy.instr : null
     // Tradeify-Ausgleich (03.11.2026): TP = max(Vorgabe, Ausgleich) — sonst bliebe ein Konto mit wd_tp 280 gesperrt; beim Apex-Recoverer schlägt die Vorgabe wie bisher
     const tp = (zy && zy.art === 'tradeify') ? Math.max(Number(zy.ziel), tpVor || 0) : tpVor != null ? tpVor : zy ? Number(zy.ziel) : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
     const kt = ktFest != null ? ktFest : (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
@@ -74727,7 +74733,7 @@
       const h = { master_firm: kd.firm, master_contracts: kt, master_tp: tp, master_risk: null }
       // .1493 (Vorfall Aurel 13.10.2026, „23,19 Lot ×7,729"): tpMasterPpl liest den Instrument-Modus aus _tpNqMode (Pillen MNQ/NQ,
       // localStorage) — stand der PC-Tab auf NQ, rechnete der Würfel mit 20 $/Pkt statt 2. Wie wdPlanAnlegen: Modus aus den Farmer-Regeln.
-      const modusAlt = _tpNqMode; _tpNqMode = (instrFest === 'nq' || vp.instr === 'nq') ? 'nq' : 'mnq'
+      const modusAlt = _tpNqMode; _tpNqMode = instrFest ? instrFest : (vp.instr === 'nq' ? 'nq' : 'mnq')   // RC3: festes Instrument zuerst
       let hin = ''
       try{ hin = wdFarmHedge(h, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, !!vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]) }
       finally{ _tpNqMode = modusAlt }
@@ -74801,7 +74807,8 @@
   function wdRecovererKt(zy){ return !zy ? null : (zy.instr === 'nq' && Number(zy.instr_kt) >= 1) ? Number(zy.instr_kt) : Number(zy.kt) >= 1 ? Number(zy.kt) : null }
   // NQ nur mit bewiesener Menge (S9 02.11.2026: k.kt ist in den meisten Tageszeilen leer, die Firmen-Spanne machte daraus NQ + 3 Kontrakte, TP 1.499 $ = 25 Pkt, ~21 Lot). REIN RECHNEND
   const wdNqOhneMenge = (instr, menge) => instr === 'nq' && !(Number(menge) >= 1)
-  const wdRecovererSymbol = (symbol, instr) => instr === 'nq' ? String(symbol || '').replace(/^M?NQ/i, 'NQ') : symbol
+  // RC3 (11.11.2026): 'mnq' ausdrücklich → „NQZ6“ → „MNQZ6“ (Frontmonat bleibt); ohne instr das Symbol des Farmers wie bisher
+  const wdRecovererSymbol = (symbol, instr) => instr === 'nq' ? String(symbol || '').replace(/^M?NQ/i, 'NQ') : instr === 'mnq' ? String(symbol || '').replace(/^M?NQ/i, 'MNQ') : symbol
   /* RECOVERER-ALTPLAN (02.11.2026, Finn 05:34, Mike 150k PAAPEX…0001, Plan a5e60a7f von 20:11 UTC, vor dem Einspielen der Regel 01:13 UTC): der unbestätigte
    * Plan trug 376 $ / 175 €, Popup und Regel sagten 1.499 $ / 450 €. REIN RECHNEND: noch nicht freigegebener Farmer-Plan mit Hedge, keine Hand-Werte, keine
    * TP-Vorgabe am Konto, Regel aktiv → die Felder für die Regelwerte, sonst null. master_risk bewusst leer in die Rechnung: wdFarmHedgeKern nähme sonst den alten
@@ -74810,7 +74817,7 @@
    * noch genau dem gewürfelten Eintrag entspricht (k: quelle wuerfel, TP, Kontrakte, Hedge-Basis). Danach steht quelle auf recoverer: der Schritt greift je Plan nur einmal. */
   function wdRecovererAltplanUpd(plan, acc, zy, z, hedgeAn, ddListe, k){
     if(!plan || !acc || !zy || !z || z.basis !== 'recoverer' || !(z.slaveEur > 0) || !hedgeAn) return null
-    const w = k && k.wuerfel, instr = zy.instr === 'nq' ? 'nq' : null
+    const w = k && k.wuerfel, instr = (zy.instr === 'nq' || zy.instr === 'mnq') ? zy.instr : null   // RC3: auch MNQ-Stufen ziehen den Altplan einmal nach
     // 1 NQ (Finn 02.11.2026): ein schon umgestellter Recoverer (quelle recoverer) ohne instr geht einmal mit; danach steht instr im Eintrag, eine Hand-Änderung bleibt
     const stufe = w && (w.quelle === 'wuerfel' || (w.quelle === 'recoverer' && instr && !w.instr))
     if(!w || !stufe || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
@@ -75299,6 +75306,7 @@
         const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), wdRecovererSymbol(symbol, (k.wuerfel || {}).instr), wdKontoRichtung(k, row.richtung), tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         if(ausgleich) pr.wd_ausgleich = true   // Railway legt ihn mit mt5_baseline.wd_ausgleich an → wartet auf Finns Bestätigung
+        if(zyT && zyT.art !== 'tradeify') pr.wd_recoverer = true   // RC3: Apex-Recoverer → mt5_baseline.wd_recoverer (Railway), Erkennung ohne NQ-Symbol
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
@@ -75413,7 +75421,7 @@
     try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
     // 1 NQ (Finn 02.11.2026): mit extra (Rückfall, Selbstheilung) gehören Symbol und Menge zusammen zur Tageszeile, sonst entstünden 3 NQ; der Altplan-Weg stellt danach um. Ohne extra die Regel
-    const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null) : (zyA && zyA.instr === 'nq' ? 'nq' : null)
+    const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null) : (zyA && (zyA.instr === 'nq' || zyA.instr === 'mnq') ? zyA.instr : null)
     if(wdNqOhneMenge(instrA, extra ? extra.master_contracts : wdRecovererKt(zyA))) return { fehler: 'Recoverer: Menge für NQ nicht bekannt, kein Plan angelegt' }
     const symbol = wdRecovererSymbol((vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : ''), instrA)
     // TW1b (Prüfer TW1, 11.11.2026): ohne Tag das heutige DUBAI-Datum wie app.py (POST /admin/wd-plaene: planned_for, sonst heute in Dubai) — das lokale
@@ -75455,6 +75463,10 @@
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_heil:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })   // wartet auf Finns Bestätigung (03.11.2026)
+    // RC3 RECOVERER-MARKE (Master 11.11.2026): Plan aus dem aktiven Apex-Recoverer-Zyklus — Erkennung nicht mehr am NQ-Symbol (fährt seit RC3 auch MNQ)
+    // Selbstheilung/Rückfall mit festem Instrument aus dem Würfel (extra.instr — gibt es nur aus einem Recovery-Stand) bei Apex ebenso (Prüfer RC3 KANN 3)
+    if((zyAus && zyAus.art !== 'tradeify') || (extra && extra.instr && /apex/i.test(String(acc.firm || ''))))
+      row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_recoverer: true })
     // Zufalls-SL (WS1b-Nachzug 09.11.2026): Rückfall und Selbstheilung (der alte Plan ist dann gelöscht, seine Würfel-Werte gibt es nirgends mehr) ehrlich ohne SL
     { const wSl = wdSlwRueckfall(_wd.regeln); if(wSl) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_sl: wSl }) }
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
@@ -75585,6 +75597,8 @@
           if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
           // Tradeify-Ausgleich (03.11.2026): ERST die Bestätigungs-Marke, dann den TP hochziehen — scheitert die Marke, bleibt der Plan, wie er ist (nie ein großer TP ohne Bestätigung)
           if(alt && altFrei && alt.zyArt === 'tradeify'){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Ausgleich-Marke', e) } }
+          // RC3: Apex-Recoverer — ERST die Marke, dann auf MNQ/NQ umstellen (sonst stünde ein MNQ-Recoverer ohne Erkennung da: SL-Würfel, kein Chip)
+          else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Recoverer-Marke', e) } }
           if(alt && altFrei){
             // Alte Werte im Riegel (S9 02.11.2026): Pläne haben hier kein Realtime, eine Hand-Änderung am Mac sähe der Tab nicht. 0 Zeilen → frisch lesen, sonst schriebe er bis zum Start vergeblich
             const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)
@@ -75905,7 +75919,7 @@
     if(k !== 'apex' && k !== 'apex100') return ''
     const z = _wd.regeln && _wd.regeln.zyklus_regel, da = e4bIstRegel(z), an = da && e4bAktiv(z) && e4bFirmen(z).includes(k)
     const zz = da ? z : E4B_ZYKLUS_STD, ab = Number(zz.ab_zyklus) || 2, de = v => Number(v || 0).toLocaleString('de-DE')
-    const tip = escapeHtml('nach einem Verlusttag im Payout-Zyklus WD-Ziel und Hedge linear nach dem Verlust (dazwischen linear, darüber Deckel), bis der Zyklus-Profit ≥ 2 × bester Tag ist (Apex 50 %) · 1 NQ · '
+    const tip = escapeHtml('nach einem Verlusttag im Payout-Zyklus WD-Ziel und Hedge linear nach dem Verlust (dazwischen linear, darüber Deckel), bis der Zyklus-Profit ≥ 2 × bester Tag ist (Apex 50 %) · Menge nach TP (wd_farmer_regeln.recovery_lots, ohne Einstellung 1 NQ) · '
       + 'ab Zyklus und Staffel gelten für Apex 150k und 100k gemeinsam · wd_farmer_regeln.zyklus_regel' + (da ? '' : ' fehlt — Schalter an legt sie an'))
     const zeilen = e4bStuetz(zz).map((s, i) => `<div class="e4b-z e4b-st">
           <span class="e4-feld"><i>bei −</i><input type="number" class="input mono" data-e4b-v="${k}|${i}" min="1" step="100" value="${s.v}" title="Verlust im Zyklus (schlechtester Tag), $"><i>$</i></span><i class="e4b-pf">→</i>
@@ -75915,7 +75929,7 @@
         <div class="e4-zeile">
           <label class="e4-schalter" title="${tip}"><input type="checkbox" data-e4b-an="${k}" ${an ? 'checked' : ''}><span>Recoverer</span></label>
           <span class="e4b-z e4-z2"><span class="e4-feld"><i>ab Zyklus</i><input type="number" class="input mono" data-e4b-ab="${k}" min="1" max="20" step="1" value="${ab}" title="Zyklus 1 = vor dem ersten Payout"></span>
-            <span class="e4-feld" title="${tip}">bis Profit ≥ 2 × bester Tag · 1 NQ</span></span>
+            <span class="e4-feld" title="${tip}">bis Profit ≥ 2 × bester Tag · Menge nach TP</span></span>
         </div>
         ${zeilen}
       </div>`
@@ -89383,6 +89397,7 @@
         const ab = p.anz_started_at || p.started_at; if(art === 'laeuft' && ab) z.start_um = ab
         if(z.balance == null && e.balance != null) z.balance = e.balance
         z.fusion = e.fusion || null; z.symbol = p.master_symbol || null
+        z.wd_recoverer = p.wd_recoverer ?? null   // RC3: Recoverer-Marke (Alias aus GET /admin/wd-plaene) — Chip auch für MNQ-Recoverer
         return { z, t, pl: plJe.get(id) ?? null, grund: e.grund } }
       const block = art => apIdsBlockHtml(art, (listen[art] || []).map(e => zeile(e, art)), koepfe[art], { karten: true })
       return { laeuft: block('laeuft'), warten: block('warten'), braucht: block('braucht') }
@@ -89439,7 +89454,7 @@
         autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null,
         // FF2 (11.11.2026): Pump-Tag des Funded-Planers Futures — kette {von 2, nr} → „Trade 1/2“ + ⛓ (tpKetteSchritt in planZeileHtml); nur Funded-Zeilen, Challenge unverändert
         ...(z.typ === 'funded' && z.kette && typeof z.kette === 'object' ? { mt5Baseline: { kette: z.kette } } : {}),
-        recoverer: !!window._planIstRecoverer?.({ wd: z.winning_day === true || /winning/i.test(String(z.typ || '') + ' ' + String(z.konto || '')), master_firm: z.firma, master_symbol: z.symbol || z.symbol_root || '' }) }   // z.symbol ohne den NQ-Rückfall der Zeile darüber
+        recoverer: !!window._planIstRecoverer?.({ wd: z.winning_day === true || /winning/i.test(String(z.typ || '') + ' ' + String(z.konto || '')), master_firm: z.firma, master_symbol: z.symbol || z.symbol_root || '', wd_recoverer: z.wd_recoverer ?? null }) }   // z.symbol ohne den NQ-Rückfall der Zeile darüber
       jeZ.set(p.id, { z, t, pl: e.pl, grund: e.grund }); return p })
       .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
     const zeile = p => {
