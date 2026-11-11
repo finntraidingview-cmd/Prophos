@@ -58898,7 +58898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2189'
+  const OS_TAB_BUILD = '2026-09-22.2190'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -79405,25 +79405,56 @@
   /* Konto gleich umstellen (29.10.2026): Bedingung wie accWdToggleHtml — Funded einer Futures-Firma → Winning Days, Funded CFD ohne
    * Waiting → Waiting for Payout; Master-Konto des Plans, nie bei Polar. Haken steht immer aus. */
   // WP1 (09.11.2026): Zähler je Vorbereiten (eine späte Urteils-Antwort gilt nur für genau dieses Öffnen) + ob Finn den Haken selbst angefasst hat
-  let _tcKuNr = 0, _tcKuAngefasst = false
+  let _tcKuNr = 0, _tcKuAngefasst = false, _tcStAngefasst = false
   document.getElementById('tc-konto-um')?.addEventListener('change', e => { if(e.isTrusted) _tcKuAngefasst = true })
+  // AP7: Finns eigener Klick auf eine Konto-Status-Zeile — dann wählt das Urteil „Phase bestanden“ nie mehr vor (click: auch die schon gewählte Zeile zählt)
+  document.querySelectorAll('input[name="tc-status"]').forEach(rb => rb.addEventListener('click', e => { if(e.isTrusted) _tcStAngefasst = true }))
   function tcKontoUmPrepare(p){
     const wrap = document.getElementById('tc-konto-um-wrap'), cb = document.getElementById('tc-konto-um')
     const lbl = document.getElementById('tc-konto-um-label'), hint = document.getElementById('tc-konto-um-hint')
-    const nr = ++_tcKuNr; _tcKuAngefasst = false
+    const nr = ++_tcKuNr; _tcKuAngefasst = false; _tcStAngefasst = false
     if(!wrap || !cb || !lbl) return
     cb.checked = false; cb.dataset.ziel = ''; wrap.hidden = true
     const a = p && p.route !== 'polar' ? (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) : null
+    const futures = !!a && (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
+    /* AP7 (Master 11.11.2026, AP6 offen (3)): dieselbe Vorauswahl je Kontoart wie das Radar-Popup — eine Zuordnung (window._wpSchritt), ein Urteil (window._wpUrteil):
+     * Funded CFD → Haken „Waiting for Payout“ (wie bisher), Funded Futures → Haken „Winning Days“, Challenge/Phase → „Phase bestanden“, Winning Days → nur Checkliste.
+     * Nur Vorauswahl + Anzeige — geschrieben wird beim Bestätigen über die bestehenden Wege (tc-status, accWdUmstellen/accWartetUmstellen). */
+    const _tcS = a && typeof window._wpSchritt === 'function' ? window._wpSchritt(a.type) : null
+    const _tcArt = _tcS && (_tcS.art !== 'fd' || futures) ? _tcS.art : null
     // WP4 (Finn 10.11.2026): Funded CFD → Payout-Checkliste nach diesem Trade, immer (auch wenn das Konto schon wartet)
-    const _tcWp = (a && a.type === 'funded_cfd' && typeof window._wpUrteil === 'function') ? window._wpUrteil(a.id) : null   // ein Abruf für Checkliste + Vorauswahl
+    const _tcWp = (a && _tcArt && typeof window._wpUrteil === 'function') ? window._wpUrteil(a.id) : null   // ein Abruf für Checkliste + Vorauswahl
     { const pc = document.getElementById('tc-pcheck')
-      if(pc){ pc.hidden = !_tcWp; pc.innerHTML = _tcWp ? '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>' : ''
-        if(_tcWp) _tcWp.then(u => { if(nr === _tcKuNr && String(_completingPlanId) === String(p.id)) pc.innerHTML = wpChecklisteHtml(u) }) } }
+      if(pc){
+        // AP7: gemerkter Stand (Radar-Vorladen, nach dem Trade-Ende gelesen) sofort, sonst Platzhalter; ohne Quelle (null) außer bei Funded CFD keine Liste
+        const gem = _tcWp && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(a.id, Date.parse(p.endedAt || '') || 0) : null
+        pc.hidden = !_tcWp
+        pc.innerHTML = !_tcWp ? '' : gem ? wpChecklisteHtml(gem) : (typeof window._wpPlatzhalterHtml === 'function' ? window._wpPlatzhalterHtml() : '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>')
+        if(_tcWp) _tcWp.then(u => { if(nr !== _tcKuNr || String(_completingPlanId) !== String(p.id)) return
+          if(!u && _tcArt !== 'cfd'){ if(!gem) pc.hidden = true; return }
+          if(u || !gem) pc.innerHTML = wpChecklisteHtml(u) }) } }
+    // AP7: Challenge/Phase → „Phase bestanden“ nur aus „Nichts ändern“ heraus, nie gegen Finns Klick, geblowt oder TP + Konto weg; nicht im Winning-Day-Kompakt
+    if(_tcWp && _tcArt === 'phase') _tcWp.then(u => {
+      // Prüfer-MUSS: nie beim „Trade bearbeiten“ eines erledigten Plans — der ändert den Kontostatus nie von selbst
+      if(nr !== _tcKuNr || _tcStAngefasst || !u || !u.bereit || u.schritt !== 'passed' || String(_completingPlanId) !== String(p.id) || p.status === 'completed') return
+      if(!document.getElementById('tradeCompleteModal')?.classList.contains('open') || (typeof tcWdKompaktAn === 'function' && tcWdKompaktAn())) return
+      if((document.querySelector('input[name="tc-status"]:checked')?.value || 'none') !== 'none') return
+      const rb = document.querySelector('input[name="tc-status"][value="passed"]'); if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+    })
     if(!a) return
-    const futures = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
     if(a.type === 'funded' && futures){
       cb.dataset.ziel = 'winning_days'; lbl.textContent = 'Konto jetzt zu Winning Days verschieben'
-      if(hint) hint.textContent = `${a.name} — Big Trade gewonnen, dieselbe Konto-Zeile wird zum Winning-Days-Konto.`
+      const basisWd = `${a.name} — Big Trade gewonnen, dieselbe Konto-Zeile wird zum Winning-Days-Konto.`
+      // AP7: wie Funded CFD (AP5) — Vortext nur bei erreichtem Ziel, sonst die kurze Zeile; Haken = Urteil (Ziel des Funded-Planers), nie gegen Finns Klick
+      if(hint) hint.textContent = _tcWp ? 'Ziel wird gelesen …' : basisWd
+      if(_tcWp) _tcWp.then(u => {
+        if(nr !== _tcKuNr || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'winning_days') return
+        if(!u){ if(hint) hint.textContent = basisWd; return }   // Firma nicht im Funded-Planer / nicht lesbar → wie bisher
+        const e = wpErgText(u, true)
+        if(hint) hint.textContent = (e.art === 'ja' ? basisWd + ' ' : '') + e.text + '.'
+        if(_tcKuAngefasst || u.schritt !== 'winning_days' || p.status === 'completed' || !document.getElementById('tradeCompleteModal')?.classList.contains('open')) return   // Prüfer-MUSS
+        cb.checked = !!u.bereit
+      })
     }else if(a.type === 'funded_cfd' && !a.waitingPayoutSince){
       cb.dataset.ziel = 'waiting'; lbl.textContent = 'Konto jetzt zu Waiting for Payout'
       const basis = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
@@ -79442,7 +79473,7 @@
       // Konto-Kachel/Abhak-Strahl (window._wpUrteil → /konto-ziele abhak.bereit, Ziel + Consistency + Gewinntage) entscheidet, sobald es da ist — auch ohne Radar.
       // Nie über Finns eigenen Klick, nur solange dasselbe Popup für denselben Plan offen ist; nicht lesbar → die Vorauswahl oben bleibt.
       if(_tcWp) _tcWp.then(u => {
-        if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
+        if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting' || p.status === 'completed') return   // AP7 Prüfer: nie bei „Trade bearbeiten“
         if(!document.getElementById('tradeCompleteModal')?.classList.contains('open')) return
         cb.checked = u.bereit   // Hinweis-Text setzt seit AP5 der Handler oben (auch wenn Finn den Haken angefasst hat)
       })
@@ -80799,16 +80830,18 @@
       }
       // AB2 (Finn 05.11.2026): Abhak-Strahl — nach dem Umstellen oben, damit er den Stand danach zeigt; nicht bei geblowt/bestanden
       // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand. Seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
-      if(masterAcc && ab2Gilt(masterAcc.type, p.mt5Baseline) && statusChoice === 'none' && !blown){
+      if(masterAcc && (ab2Gilt(masterAcc.type, p.mt5Baseline) || AB2_KARTE_TYPEN.includes(String(masterAcc.type || ''))) && statusChoice === 'none' && !blown){   // AP7: alle Arten mit Ziel-Quelle
         try{
           // AP3 (Finn 11.11.2026): Karte nur, wenn das Ziel nach dem Trade erreicht ist (Checkliste des Dialogs = gemerkter /konto-ziele-Stand); sonst kleiner Hinweis
           const _gu = typeof window._wpGemerkt === 'function' ? window._wpGemerkt(masterAcc.id) : null
-          const _zr = ((_gu && _gu.liste) || []).find(r => r.name === 'Ziel bis Waiting')
+          const _zr = ((_gu && _gu.liste) || []).find(r => r.name === 'Ziel bis Waiting' || r.titel === 'Ziel')   // AP7: Ziel-Zeile jeder Kontoart
+          const _kuWd = !!(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked && _kuCb.dataset.ziel === 'winning_days')
           const h = ab2Start(Object.assign({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null,
-                                             zielOk: !!(_gu && (_gu.wartet || (_zr && _zr.st === 'ok'))), status: 'none' },
+                                             zielOk: !!(_gu && (_gu.wartet || (_zr && _zr.st === 'ok'))), status: _kuWd ? 'winning_days' : 'none',
+                                             vorAbhak: ((((window._k1 || {}).cache || {})[masterAcc.id] || {}).d || {}).abhak || null },
                                            ab2PlanBal(p.id, p.mt5Baseline)))   // AB2b: Stand vor/nach diesem Trade aus dem Plan
           if(h) ab2Fertig(h, 'gespeichert', null)
-          else if(!(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked) && typeof atToast === 'function') atToast('✓ Erledigt gespeichert', 'ok')   // Prüfer S3: nie über eine Umstell-Meldung
+          else if(ab2Gilt(masterAcc.type, p.mt5Baseline) && !(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked) && typeof atToast === 'function') atToast('✓ Erledigt gespeichert', 'ok')   // Prüfer S3: nie über eine Umstell-Meldung; AP7: nur wie bisher (Funded-Planer CFD), Challenges still (AB2c)
         }catch(_){}
       }
 
