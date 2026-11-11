@@ -4016,13 +4016,20 @@
     margin:0 0 10px;padding:4px 10px 6px;border:1px solid var(--border);border-radius:8px;font-size:12px}
   html[data-theme="dark"] .wpck{--k-sub:#98a2b3;--k-gitter:rgba(255,255,255,.06);--k-gut:#3ccf7a;--k-gut-bg:rgba(60,207,122,.13);--k-rot:#ff6b70;--k-rot-bg:rgba(255,107,112,.13);--k-pille:#1f2636}
   .wpck[hidden]{display:none}
-  .wpck .wpck-z{display:flex;align-items:center;gap:8px;min-height:26px;border-top:1px solid var(--k-gitter)}
+  /* AP2 (Finn 11.11.2026, Foto Marc FundedNext 100k …7821: „Da kennt man ja echt gar nichts.“): je Check eine Zeile — Punkt · Name · rechts der Ist-Wert groß,
+   * darunter klein Soll + was fehlt (vorher alles in einer Zeile gequetscht, „Payout ab“ brach um und lag über dem Wert). Nur Anzeige. */
+  .wpck .wpck-z{display:grid;grid-template-columns:15px minmax(0,1fr) auto;column-gap:9px;row-gap:2px;align-items:center;padding:7px 0;border-top:1px solid var(--k-gitter)}
   .wpck .wpck-z:first-child{border-top:0}
   .wpck .wpck-z i{font-style:normal;width:15px;height:15px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:800;flex:none;background:var(--k-pille);color:var(--k-sub)}
   .wpck .wpck-z.ok i{background:var(--k-gut-bg);color:var(--k-gut)} .wpck .wpck-z.nein i{background:var(--k-rot-bg);color:var(--k-rot)}
-  .wpck .wpck-z span{flex:1;min-width:0;color:var(--ink)} .wpck .wpck-z em{font-style:normal;color:var(--k-sub);font-variant-numeric:tabular-nums;text-align:right;font-size:11.5px}
-  .wpck .wpck-z.nein em,.wpck .wpck-z.nein span{color:var(--k-rot)}
-  .wpck .wpck-erg{margin-top:4px;padding-top:6px;border-top:1px solid var(--k-gitter);font-weight:600}
+  .wpck .wpck-z span{min-width:0;color:var(--ink);font-weight:500}
+  .wpck .wpck-z b{font-weight:650;font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .wpck .wpck-z.nein b{color:var(--k-rot)} .wpck .wpck-z.ok b{color:var(--k-gut)}
+  .wpck .wpck-z small{grid-column:2 / 4;font-size:11px;line-height:1.35;color:var(--k-sub);font-variant-numeric:tabular-nums}
+  .wpck .wpck-bar{grid-column:2 / 4;height:3px;border-radius:2px;background:var(--k-pille);overflow:hidden;margin-top:3px}
+  .wpck .wpck-bar u{display:block;height:100%;border-radius:2px;background:var(--k-rot)} .wpck .wpck-z.ok .wpck-bar u{background:var(--k-gut)}
+  .wpck .wpck-z.wird span,.wpck .wpck-z.wird b{color:var(--k-sub)}   /* AP2b: Platzhalter in Endgröße */
+  .wpck .wpck-erg{margin-top:2px;padding-top:7px;border-top:1px solid var(--k-gitter);font-weight:600;font-size:11.5px}
   .wpck .wpck-erg.ja{color:var(--k-gut)} .wpck .wpck-erg.nein{color:var(--k-rot)} .wpck .wpck-erg.leise{color:var(--k-sub);font-weight:500}
   #k1-ziele .k1-obj{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-top:12px}
   #k1-ziele .k1-t{background:var(--k-kpi);border-radius:13px;padding:13px 14px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -6341,6 +6348,10 @@
   #dashboard-view .mwd-abh-erl summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
   #dashboard-view .mwd-abh-erl-zeile{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 2px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-abh-erl-zeile .mono{margin-left:auto}
+  /* AP2 (Finn 11.11.2026, Foto: Knöpfe unten abgeschnitten): Kopf und Fuß fest, nur der Körper scrollt */
+  #dashboard-view #mwdErledigtModal .modal{display:flex;flex-direction:column;overflow:hidden}
+  #dashboard-view #mwdErledigtModal .modal-head,#dashboard-view #mwdErledigtModal .modal-foot{flex:none}
+  #dashboard-view #mwdErledigtModal .modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0 -6px;padding:18px 6px 4px}
   #dashboard-view .mwd-erl-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12.5px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-erl-felder{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
   #dashboard-view .mwd-erl-felder .field[hidden]{display:none}   /* Echo/Topstep ohne Fusion-Feld (30.09.2026) */
@@ -15356,7 +15367,7 @@
                    kann"): Regeln wie der Haken im Trades-Dialog (tcKontoUmPrepare), sichtbar nur, wenn sie passen; das Backend stellt um -->
               <label class="tc-status-opt" id="mwd-erl-status-waiting" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="waiting">
-                <span style="color:var(--ink)">⏳ Waiting for Payout — Konto bleibt, wartet auf Payout <span id="mwd-erl-waiting-hint" style="font-size:11px;color:var(--sub-2)"></span></span>
+                <span style="color:var(--ink)">⏳ Waiting for Payout — Konto bleibt, wartet auf Payout <span id="mwd-erl-waiting-hint" style="display:block;font-size:11px;color:var(--sub-2);margin-top:1px"></span></span>
               </label>
               <label class="tc-status-opt" id="mwd-erl-status-wd" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="winning_days">
@@ -38362,6 +38373,7 @@
   // WP1 (09.11.2026): Payout-Urteil zum offenen Popup (Promise aus window._wpUrteil oder null), Zähler je Öffnen (eine späte Antwort gilt nur für genau dieses Öffnen,
   // auch wenn derselbe Plan zweimal geöffnet wird) und ob Finn die Konto-Status-Wahl selbst angefasst hat (dann ändert das Urteil nichts mehr)
   let _mwdErlWp = null, _mwdErlNr = 0, _mwdErlStatusAngefasst = false
+  let _mwdErlU = null   // AP2b: Payout-Stand, den die Checkliste gerade zeigt (gemerkt oder frisch)
   // click statt change: auch ein Klick auf die schon gewählte Zeile („Nichts ändern" bewusst bestätigt) zählt als Finns Wahl
   document.querySelectorAll('input[name="mwd-erl-status"]').forEach(rb => rb.addEventListener('click', e => { if(e.isTrusted) _mwdErlStatusAngefasst = true }))
   /* Urteil anwenden: nur zwischen „Nichts ändern" und „⏳ Waiting for Payout", nie über geblowt/bestanden/Winning Days und nie über eine Wahl von Finn.
@@ -38374,7 +38386,8 @@
     if(akt !== 'none' && akt !== 'waiting') return
     const rb = document.querySelector(`input[name="mwd-erl-status"][value="${u.bereit ? 'waiting' : 'none'}"]`); if(rb) rb.checked = true
     const h = document.getElementById('mwd-erl-waiting-hint')
-    if(h) h.textContent = u.bereit ? `· Payout-Ziel erreicht — vorausgewählt${u.okText ? ' (' + u.okText + ')' : ''}` : (u.grund ? '· Nichts ändern, ' + u.grund : '')   // WP4: mit Zahlen
+    // AP2 (Finn 11.11.2026): ein kurzer Satz — die Zahlen stehen in der Checkliste darüber (vorher dieselbe Textwand wie dort ein zweites Mal)
+    if(h) h.textContent = u.bereit ? 'alles erfüllt — vorausgewählt' : (u.grund ? 'erst, wenn oben alles ✓ ist' : '')
     mwdErlStatusUI()
   }
   function mklWdErledigtOeffnen(pid, extra, opts){
@@ -38410,8 +38423,9 @@
       info.innerHTML = `<span class="mwd-person">${escapeHtml(String(pw.person || '?'))}</span>`
         + `<span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>`
         + ((buy || sell) ? `<span class="mwd-chip ${buy ? 'mwd-buy' : 'mwd-sell'}">${buy ? 'BUY' : 'SELL'}</span>` : '')
-        + ((pw.route === 'mt5v2' && pw.lots != null) ? `<span class="mwd-kt mono">${Number(pw.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot ${escapeHtml(String(pw.symbol || ''))}</span>`
-           : pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)} × ${escapeHtml(String(pw.symbol_root || '?'))}</span>` : '')
+        // AP2 (11.11.2026, Foto „1 × ?“): Echo-Pläne (mt5/mt5v2, Railway leert symbol_root) zeigen Lot + Symbol; ohne Symbol kein „?“, ohne Lots kein Chip
+        + (((pw.route === 'mt5v2' || pw.route === 'mt5') && (pw.lots ?? pw.kt) != null) ? `<span class="mwd-kt mono">${Number(pw.lots ?? pw.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot${pw.symbol ? ' ' + escapeHtml(String(pw.symbol)) : ''}</span>`
+           : pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)}${pw.symbol_root ? ' × ' + escapeHtml(String(pw.symbol_root)) : ' Kt'}</span>` : '')
         + (pw.master_tp != null ? `<span class="mwd-chip">TP ${f0(pw.master_tp)} $</span>` : '')
         + (pw.master_sl != null ? `<span class="mwd-chip">SL ${f0(pw.master_sl)} $</span>` : '')
         + (_mwdErlPolar ? `<span class="mwd-chip" title="Slave-Seite (CFD, MT5)">⇄ ${escapeHtml(String(pw.slave_person || '?'))} · ${escapeHtml(String((pw.slave_konto || {}).firma || '?'))}${(pw.slave_konto || {}).kontonr_ende ? ' …' + escapeHtml(String(pw.slave_konto.kontonr_ende)) : ''}</span>` : '')
@@ -38496,15 +38510,23 @@
     const _wpNr = ++_mwdErlNr
     _mwdErlStatusAngefasst = false
     { const h = document.getElementById('mwd-erl-waiting-hint'); if(h) h.textContent = '' }
+    _mwdErlU = null   // AP2b: zuletzt gezeigter Payout-Stand (gemerkt, dann frisch) — Grundlage der lokalen Rechnung beim Tippen
     // Ein Klick klar unter dem Ziel (bucht gleich still, s. unten) fragt gar nicht erst — kein /konto-ziele-Abruf je stillem Abhaken
     // WP4 (Finn 10.11.2026: „will ich immer dieses kleine Popup sehen“): Funded CFD mit Konto → Urteil IMMER holen (Checkliste), auch beim Ein Klick; nur der stille Takt nicht
     const _wpFcfd = String(pw.konto_typ || '') === 'funded_cfd' && !!pw.konto_id && !_mwdErlPolar && typeof window._wpUrteil === 'function' && !(opts && opts.nurStill)
     _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function'
                  && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw) || _wpFcfd)) ? window._wpUrteil(pw.konto_id) : null
     if(_mwdErlWp) _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
+    // AP2b (Finn 11.11.2026: „dann sollte es direkt kommen“): gemerkter Stand aus dem Radar-Vorladen sofort, sonst Platzhalter in Endgröße; der frische ersetzt ihn still.
+    // Antwortet der frische nicht (null), bleibt ein gemerkter Stand stehen statt „nicht lesbar“
     { const pc = document.getElementById('mwd-erl-pcheck')
-      if(pc){ pc.hidden = !_wpFcfd; pc.innerHTML = _wpFcfd ? '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>' : ''
-        if(_wpFcfd) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) pc.innerHTML = wpChecklisteHtml(u) }) } }
+      if(pc){
+        const gem = _wpFcfd && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id) : null
+        _mwdErlU = gem; pc.hidden = !_wpFcfd
+        if(!_wpFcfd) pc.innerHTML = ''
+        else if(gem) mwdErlPcheckZeichnen()
+        else pc.innerHTML = typeof window._wpPlatzhalterHtml === 'function' ? window._wpPlatzhalterHtml() : '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>'
+        if(_wpFcfd) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)){ if(u || !_mwdErlU){ _mwdErlU = u; mwdErlPcheckZeichnen() } } }) } }
     // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
     _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
     const wdh = document.getElementById('mwd-erl-wdh'), wdhCb = document.getElementById('mwd-erl-wdh-cb')
@@ -38581,6 +38603,15 @@
   window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
   window._mklWdErledigtOeffnen = mklWdErledigtOeffnen   // Test-Haken (Stub, 20.10.2026: Vorbelegung „geblowt" ohne Login prüfen)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
+  // AP2b: Checkliste aus dem zuletzt gelesenen Stand zeichnen, Ziel lokal mit dem Master-Feld (Eingabe − Vorbelegung) — nur Anzeige
+  function mwdErlPcheckZeichnen(){
+    const pc = document.getElementById('mwd-erl-pcheck'); if(!pc || pc.hidden) return
+    if(!_mwdErlU){ pc.innerHTML = wpChecklisteHtml(null); return }
+    const mpl = plZahl(document.getElementById('mwd-erl-master')?.value), vor = Number(_mwdErlVor)
+    const delta = (mpl != null && isFinite(mpl) && _mwdErlVor != null && isFinite(vor)) ? mpl - vor : 0
+    pc.innerHTML = wpChecklisteHtml(typeof window._wpLokal === 'function' ? window._wpLokal(_mwdErlU, delta) : _mwdErlU)
+  }
+  document.getElementById('mwd-erl-master')?.addEventListener('input', () => { if(_mwdErlU) mwdErlPcheckZeichnen() })
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
     if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep/Orbit ohne Hedge
@@ -41102,6 +41133,8 @@
     // Trade-Planung") — Liste, ID-Chips und Auswahl sehen status planned nicht mehr; das Backend liefert sie weiter
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     try{ _wdlPaare = wdlKontoPaare(alleTrades) }catch(_){ _wdlPaare = new Map() }   // Konto-Paar Läuft ⇄ Erledigt (30.10.2026)
+    // AP2b (11.11.2026): Payout-Stand der Funded-CFD-Trades in review vorladen (nur lesend), damit „Abhaken“ den Status sofort zeigt
+    try{ if(typeof window._wpVorladen === 'function') window._wpVorladen(alleTrades.filter(t => t.status === 'review' && String(t.konto_typ || '') === 'funded_cfd' && t.konto_id).map(t => t.konto_id)) }catch(_){}
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     try{ polarRadarLeiste(alleTrades) }catch(_){}   // Polar über alle IDs oben (21.10.2026), unabhängig von Modell-/ID-Filter
@@ -45712,28 +45745,112 @@
   function wpCheckliste(d){
     const ab = (d && d.abhak) || {}, ck = (d && d.urteil && Array.isArray(d.urteil.checks)) ? d.urteil.checks : [], z = []
     const de = (v, n) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: n == null ? 0 : n })
+    // AP2 (11.11.2026): neben name/wert (unverändert, Selbsttest) die Anzeige-Felder titel · gross (Ist rechts) · klein (Soll + was fehlt) · balken (0–1)
+    const zahl = t => { const x = Number(String(t || '').replace(/−/g, '-').replace(/\s|\$/g, '').replace(/\./g, '').replace(',', '.')); return isFinite(x) ? x : null }
     const zl = ck.find(c => /^Ziel bis Waiting/.test(String(c[1])))
-    if(zl) z.push({ st: zl[0], name: 'Ziel bis Waiting', wert: String(zl[2] || '') })
+    if(zl){
+      const w = String(zl[2] || ''), m = w.match(/^\s*([−+-]?[\d.,]+)\s*\$\s*\/\s*([−+-]?[\d.,]+)\s*\$/), r = { st: zl[0], name: 'Ziel bis Waiting', wert: w,
+        titel: 'Ziel' + (/\(fest\)/.test(String(zl[1])) ? ' (fest)' : '') }
+      if(m){
+        const g = zahl(m[1]), zi = zahl(m[2]), zTxt = m[2].replace(/^\+/, '') + ' $'
+        r.gross = m[1] + ' $'
+        if(zl[0] === 'ok') r.klein = `Ziel ${zTxt} erreicht` + (w.includes('Toleranz') ? ' · ' + w.slice(w.indexOf('(') + 1).replace(/\)\s*$/, '') : '')
+        else {
+          const ft = String(ab.fehlt_text || ''), fm = ft.match(/fehlen ([\d.,]+) \$/), sw = ft.match(/zählt ab ([−+-]?[\d.,]+) \$/)
+          const fehlen = fm ? fm[1] : (g != null && zi != null && zi > g) ? de(Math.ceil(zi - g)) : null
+          r.klein = `von ${zTxt}` + (sw && zahl(sw[1]) !== zi ? ` · zählt ab ${sw[1].replace(/^\+/, '')} $` : '') + (fehlen ? ` · fehlen ${fehlen} $` : '')
+        }
+        if(g != null && zi > 0) r.balken = Math.max(0, Math.min(1, g / zi))
+        // AP2b: Zahlen für die lokale Rechnung beim Tippen im Master-Feld (wpLokal) — Schwelle = „zählt ab“, bei ✓ in Toleranz der Gewinn selbst
+        const swz = zl[0] === 'ok' ? Math.min(zi, g) : ((String(ab.fehlt_text || '').match(/zählt ab ([−+-]?[\d.,]+) \$/) || [])[1])
+        r.zahlen = { g, zi, sw: typeof swz === 'number' ? swz : (swz != null ? zahl(swz) : zi), zTxt }
+      } else r.gross = w || '—'
+      z.push(r)
+    }
     const c = ab.cons
     if(c && c.p != null) z.push({ st: c.ok ? 'ok' : 'nein', name: `Consistency ≤ ${de(c.p, 1)} %`,
-      wert: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} % · bester Tag ${de(c.b)} $ ÷ ${de(c.w)} $` : 'nicht prüfbar (Zyklus nicht lesbar)' })
+      wert: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} % · bester Tag ${de(c.b)} $ ÷ ${de(c.w)} $` : 'nicht prüfbar (Zyklus nicht lesbar)',
+      titel: 'Consistency', gross: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} %` : '–',
+      klein: `erlaubt ≤ ${de(c.p, 1)} %` + (c.anteil != null ? ` · bester Tag ${de(c.b)} $ von ${de(c.w)} $ Gewinn-Tagen` : ' · nicht prüfbar (Zyklus nicht lesbar)') })
     const gt = ck.find(x => /^Gewinntage/.test(String(x[1])))
-    if(gt) z.push({ st: gt[0], name: String(gt[1]), wert: String(gt[2] || '') })
+    if(gt){
+      const mm = String(gt[2] || '').match(/^(\d+)\s*\/\s*(\d+)$/), grenze = String(gt[1]).replace(/^Gewinntage\s*/, '')
+      z.push({ st: gt[0], name: String(gt[1]), wert: String(gt[2] || ''), titel: 'Gewinntage', gross: String(gt[2] || '—'),
+        klein: (grenze ? `Tage ${grenze}` : '') + (mm && Number(mm[1]) < Number(mm[2]) ? (grenze ? ' · ' : '') + `fehlen ${Number(mm[2]) - Number(mm[1])}` : '') })
+    }
     const pa = ck.find(x => x[1] === 'Payout ab')
-    if(pa) z.push({ st: pa[0] === 'ok' ? 'ok' : 'info', name: 'Payout ab', wert: String(pa[2] || '') + (pa[0] === 'nein' ? ' · Anfrage erst dann' : '') })
+    if(pa){
+      const w = String(pa[2] || ''), i = w.indexOf(' — ')
+      z.push({ st: pa[0] === 'ok' ? 'ok' : 'info', name: 'Payout ab', wert: w + (pa[0] === 'nein' ? ' · Anfrage erst dann' : ''), titel: 'Payout ab',
+        gross: i > 0 ? w.slice(0, i) : (w || '—'),
+        klein: i > 0 ? w.slice(i + 3).replace(/\s*\([^)]*\)\s*$/, '') : pa[0] === 'nein' ? 'Anfrage erst dann — Waiting geht schon vorher' : pa[0] === 'ok' ? 'anfragbar' : '' })
+    }
     return z
   }
   window._wpCheckliste = wpCheckliste   // Test-Haken
   function wpChecklisteHtml(u){
     if(!u) return '<div class="wpck-erg leise">Payout-Stand nicht lesbar — bitte im Account prüfen</div>'
     const sym = s => s === 'ok' ? '✓' : s === 'nein' ? '✕' : '·'
-    const zeilen = (u.liste || []).map(r => `<div class="wpck-z ${escapeHtml(r.st)}"><i>${sym(r.st)}</i><span>${escapeHtml(r.name)}</span><em>${escapeHtml(r.wert)}</em></div>`).join('')
+    // AP2 (11.11.2026): Ist rechts groß, Soll/fehlt klein darunter, beim Ziel ein dünner Balken; ohne Anzeige-Felder wie vorher name + wert
+    const zeilen = (u.liste || []).map(r => `<div class="wpck-z ${escapeHtml(r.st)}"><i>${sym(r.st)}</i><span>${escapeHtml(r.titel || r.name)}</span><b>${escapeHtml(r.gross != null ? r.gross : r.wert)}</b>`
+      + (r.klein ? `<small>${escapeHtml(r.klein)}</small>` : '')
+      + (r.balken != null ? `<div class="wpck-bar"><u style="width:${(Math.max(0, Math.min(1, Number(r.balken))) * 100).toFixed(1)}%"></u></div>` : '') + '</div>').join('')
+    // AP2: statt der roten Textwand (wiederholte fehlt_text) nur, welche Punkte fehlen — die Zahlen stehen in den Zeilen darüber
+    const fehlt = (u.liste || []).filter(r => r.st === 'nein').map(r => r.titel || r.name)
     const erg = u.wartet ? '<div class="wpck-erg leise">Konto steht schon auf Waiting for Payout</div>'
-      : u.bereit ? '<div class="wpck-erg ja">✓ Ziel + Consistency erreicht → Konto jetzt zu Waiting for Payout</div>'
-      : `<div class="wpck-erg nein">Nichts ändern${u.fehltText ? ' — fehlt: ' + escapeHtml(u.fehltText) : ''}</div>`
+      : (u.bereit && !fehlt.length) ? '<div class="wpck-erg ja">✓ Alles erfüllt → Konto jetzt zu Waiting for Payout</div>'
+      : `<div class="wpck-erg nein">Noch nicht fertig${fehlt.length ? ': ' + escapeHtml(fehlt.join(', ')) : u.fehltText ? ': ' + escapeHtml(u.fehltText) : ''} — Konto bleibt</div>`
     return zeilen + erg
   }
   window._wpChecklisteHtml = wpChecklisteHtml   // Test-Haken
+  /* AP2b SOFORT SICHTBAR (Finn 11.11.2026, Fall FundedNext 100k …0246: „Ich muss draufklicken, dann sollte es direkt kommen.“ — der Block kam 1–2 s nach dem Öffnen
+   * und schob das Popup um). Der Radar lädt /konto-ziele für die Funded-CFD-Zeilen in review vor (wpVorladen, nur lesend, je Konto höchstens alle 60 s, ≤ 6 je Takt);
+   * das Popup zeigt den gemerkten Stand sofort (wpGemerkt, bis 30 min) und zieht den frischen still nach. Ohne gemerkten Stand: Platzhalter in Endgröße.
+   * Nur Anzeige — die Vorauswahl („Waiting“) kommt weiter allein aus der frischen Antwort (mwdErlWpAnwenden). */
+  const WP_VORLADEN_MS = 60000, WP_GEMERKT_MS = 30 * 60000
+  const _wpVl = new Set()
+  function wpAusD(d){
+    const ab = d && d.abhak
+    if(!ab || String(d.typ || '') !== 'funded_cfd') return null
+    // WP4 (Finn 10.11.2026): Gründe mit Zahlen aus /konto-ziele abhak.ok_text / fehlt_text (neuer Railway-Stand); ohne sie wie bisher urteil.grund
+    return { bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
+             grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
+  }
+  function wpGemerkt(id){
+    const c = _k1.cache[String(id || '')]
+    return (c && c.d && Date.now() - c.at < WP_GEMERKT_MS) ? wpAusD(c.d) : null
+  }
+  window._wpGemerkt = wpGemerkt
+  function wpVorladen(ids){
+    let n = 0
+    for(const id of new Set((ids || []).map(String).filter(Boolean))){
+      const c = _k1.cache[id]
+      if(_wpVl.has(id) || (c && c.d && Date.now() - c.at < WP_VORLADEN_MS)) continue
+      if(++n > 6) break
+      _wpVl.add(id); wpUrteil(id).finally(() => _wpVl.delete(id))
+    }
+  }
+  window._wpVorladen = wpVorladen
+  /* Ziel nach dem Trade lokal neu, wenn Finn das Master-Feld ändert: gemerkter Gewinn + (Eingabe − Vorbelegung) — der Server hat den Trade mit der Vorbelegung
+   * (Balance nachher − vorher) schon drin (kz_review_mitzaehlen). Consistency/Gewinntage bleiben wie gelesen (brauchen die Tage, die hier fehlen). */
+  function wpLokal(u, delta){
+    if(!u || !(Math.abs(Number(delta)) > 0.005)) return u
+    const de0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const liste = (u.liste || []).map(r => {
+      const z = r.zahlen; if(!z || z.g == null || !(z.zi > 0)) return r
+      const g = z.g + Number(delta), ok = u.wartet || g >= (z.sw ?? z.zi) - 0.005, sg = g < -0.5 ? '−' : g > 0.5 ? '+' : ''
+      return Object.assign({}, r, { st: ok ? 'ok' : 'nein', gross: `${sg}${de0(Math.abs(Math.round(g)))} $`, balken: Math.max(0, Math.min(1, g / z.zi)),
+        klein: (ok ? `Ziel ${z.zTxt} erreicht` : `von ${z.zTxt} · fehlen ${de0(Math.max(1, Math.ceil((z.sw ?? z.zi) - g)))} $`) + ' · mit deiner Eingabe' })
+    })
+    return Object.assign({}, u, { liste })
+  }
+  window._wpLokal = wpLokal
+  // Platzhalter in Endgröße (drei Zeilen wie Ziel · Consistency · Payout ab + Ergebnis-Zeile), damit nichts springt, wenn die Zahlen kommen
+  function wpPlatzhalterHtml(){
+    return ['Ziel', 'Consistency', 'Payout ab'].map(n => `<div class="wpck-z wird"><i>·</i><span>${n}</span><b>…</b><small>wird gelesen …</small>${n === 'Ziel' ? '<div class="wpck-bar"><u style="width:0"></u></div>' : ''}</div>`).join('')
+      + '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>'
+  }
+  window._wpPlatzhalterHtml = wpPlatzhalterHtml
   function wpUrteil(id){
     const ctrl = new AbortController()
     let uhr = null
@@ -45749,11 +45866,7 @@
       const d = await r.json().catch(() => null)
       if(!r.ok || !d || d.ok === false) return null
       _k1.cache[id] = { at: Date.now(), d }
-      const ab = d.abhak
-      if(!ab || String(d.typ || '') !== 'funded_cfd') return null
-      // WP4 (Finn 10.11.2026): Gründe mit Zahlen aus /konto-ziele abhak.ok_text / fehlt_text (neuer Railway-Stand); ohne sie wie bisher urteil.grund
-      return { bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
-               grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
+      return wpAusD(d)   // AP2b: dieselbe Umrechnung wie der gemerkte Stand
     }catch(_){ return null }
   }
   window._wpUrteil = wpUrteil

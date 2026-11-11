@@ -146,9 +146,13 @@ check([r["name"] for r in L] == ["Ziel bis Waiting", "Consistency ≤ 50 %", "Pa
       f"Checkliste: Ziel ✓, Consistency ✓, Payout ab nur Info ({[(r['name'], r['st']) for r in L]} {rr.stderr[:200]})")
 check(L and L[1]["wert"] == "41,5 % · bester Tag 722 $ ÷ 1.740 $" and "+1.803 $ / +1.454 $" in L[0]["wert"] and "20.11" in L[2]["wert"], f"Werte: {[r['wert'] for r in L]}")
 check("→ Konto jetzt zu Waiting for Payout" in (e.get("h") or "") and "✓" in (e.get("h") or ""), "alles ✓ → „Konto jetzt zu Waiting for Payout“")
+# AP2 (11.11.2026): Anzeige-Felder — Ist groß rechts, Soll/fehlt klein darunter; keine Textwand mehr
+check(L and str(L[0].get("titel") or "").startswith("Ziel") and L[0].get("gross") == "+1.803 $" and "erreicht" in (L[0].get("klein") or "") and L[1].get("gross") == "41,5 %"
+      and L[1].get("klein") == "erlaubt ≤ 50 % · bester Tag 722 $ von 1.740 $ Gewinn-Tagen" and "<b>+1.803 $</b>" in (e.get("h") or ""), f"AP2 Anzeige: {[(r.get('titel'), r.get('gross'), r.get('klein')) for r in L]}")
 L2 = e.get("L2") or []
-check(L2 and L2[1]["st"] == "nein" and "Nichts ändern — fehlt: Consistency 67,7 % &gt; 50 %" in (e.get("h2") or "") and 'wpck-z nein' in (e.get("h2") or ""),
-      "fehlt → „Nichts ändern — fehlt: …“, Zeile rot")
+check(L2 and L2[1]["st"] == "nein" and "Noch nicht fertig: Consistency — Konto bleibt" in (e.get("h2") or "") and 'wpck-z nein' in (e.get("h2") or "")
+      and "67,7 %" in (e.get("h2") or "") and "Nichts ändern — fehlt" not in (e.get("h2") or ""),
+      "fehlt → „Noch nicht fertig: Consistency“ (AP2: keine Textwand), Zeile rot")
 check("nicht lesbar" in (e.get("h0") or ""), "Urteil nicht lesbar → Hinweis statt Liste")
 check("ruhig && !_wpFcfd && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))" in html and "!(opts && opts.nurStill)" in html,
       "Ein Klick bei Funded CFD öffnet immer das Popup, der stille Takt nie")
@@ -156,7 +160,7 @@ check('id="mwd-erl-pcheck"' in html and 'id="tc-pcheck"' in html, "Checkliste in
 
 # Frontend: Popup-Texte
 check("okText: String(ab.ok_text || '')" in html and "'fehlt: ' + String(ab.fehlt_text)" in html, "wpUrteil liest ok_text/fehlt_text")
-check("· Payout-Ziel erreicht — vorausgewählt${u.okText ? ' (' + u.okText + ')' : ''}" in html and "'· Nichts ändern, ' + u.grund" in html, "Radar-Popup: Grund bei Waiting, Fehlendes bei „Nichts ändern“")
+check("u.bereit ? 'alles erfüllt — vorausgewählt' : (u.grund ? 'erst, wenn oben alles ✓ ist' : '')" in html, "Radar-Popup: kurzer Satz bei Waiting (AP2, Zahlen stehen in der Checkliste)")
 check("zyklus_ts.get(aid)" in app and app.count("zyklus_ts.get(aid)") >= 4, "Planer zählt mit dem genauen Zyklus-Start")
 
 print("ALLES GRÜN" if not fehler else f"{len(fehler)} FEHLER")
