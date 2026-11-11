@@ -45818,14 +45818,21 @@
     const zeilen = (u.liste || []).map(r => `<div class="wpck-z ${escapeHtml(r.st)}"><i>${sym(r.st)}</i><span>${escapeHtml(r.titel || r.name)}</span><b>${escapeHtml(r.gross != null ? r.gross : r.wert)}</b>`
       + (r.klein ? `<small>${escapeHtml(r.klein)}</small>` : '')
       + (r.balken != null ? `<div class="wpck-bar"><u style="width:${(Math.max(0, Math.min(1, Number(r.balken))) * 100).toFixed(1)}%"></u></div>` : '') + '</div>').join('')
-    // AP2: statt der roten Textwand (wiederholte fehlt_text) nur, welche Punkte fehlen — die Zahlen stehen in den Zeilen darüber
+    const e = wpErgText(u)
+    return zeilen + `<div class="wpck-erg ${e.art}">${escapeHtml(e.text)}</div>`
+  }
+  /* AP2: statt der roten Textwand (wiederholte fehlt_text) nur, welche Punkte fehlen — die Zahlen stehen in den Zeilen darüber.
+   * AP4 (Master 11.11.2026): EINE Quelle für diesen Satz — Ergebnis-Zeile der Checkliste (Radar-Popup + Trades-Dialog) und Hinweis am Haken im Trades-Dialog.
+   * kurz = Fassung für den Haken („Alles erfüllt — vorausgewählt“ statt „→ Konto jetzt zu …“, der Haken sagt das schon). → { art: leise|ja|nein, text } */
+  function wpErgText(u, kurz){
+    if(!u) return { art: 'leise', text: 'Payout-Stand nicht lesbar — bitte im Account prüfen' }
     const fehlt = (u.liste || []).filter(r => r.st === 'nein').map(r => r.titel || r.name)
-    const erg = u.wartet ? '<div class="wpck-erg leise">Konto steht schon auf Waiting for Payout</div>'
-      : (u.bereit && !fehlt.length) ? '<div class="wpck-erg ja">✓ Alles erfüllt → Konto jetzt zu Waiting for Payout</div>'
-      : `<div class="wpck-erg nein">Noch nicht fertig${fehlt.length ? ': ' + escapeHtml(fehlt.join(', ')) : (u.fehltText && !(u.liste || []).length) ? ': ' + escapeHtml(u.fehltText) : ''} — Konto bleibt</div>`
-    return zeilen + erg
+    if(u.wartet) return { art: 'leise', text: 'Konto steht schon auf Waiting for Payout' }
+    if(u.bereit && !fehlt.length) return { art: 'ja', text: kurz ? '✓ Alles erfüllt — vorausgewählt' : '✓ Alles erfüllt → Konto jetzt zu Waiting for Payout' }
+    return { art: 'nein', text: `Noch nicht fertig${fehlt.length ? ': ' + fehlt.join(', ') : (u.fehltText && !(u.liste || []).length) ? ': ' + u.fehltText : ''} — Konto bleibt` }
   }
   window._wpChecklisteHtml = wpChecklisteHtml   // Test-Haken
+  window._wpErgText = wpErgText   // Test-Haken (nach _wpChecklisteHtml: der Selbsttest schneidet bis dorthin aus)
   /* AP2b SOFORT SICHTBAR (Finn 11.11.2026, Fall FundedNext 100k …0246: „Ich muss draufklicken, dann sollte es direkt kommen.“ — der Block kam 1–2 s nach dem Öffnen
    * und schob das Popup um). Der Radar lädt /konto-ziele für die Funded-CFD-Zeilen in review vor (wpVorladen, nur lesend, je Konto höchstens alle 60 s, ≤ 6 je Takt);
    * das Popup zeigt den gemerkten Stand sofort (wpGemerkt, bis 30 min) und zieht den frischen still nach. Ohne gemerkten Stand: Platzhalter in Endgröße.
@@ -46194,8 +46201,10 @@
       if(tk){ tIst = ab2Num(tk.wert); tSoll = ab2Num(String(tk.klein || '').replace(/[^\d]/g, '')); tTitel = String(tk.titel || 'Tage'); tUnter = String(tk.unter || '') }
     }
     if(tIst != null && tSoll && tSoll <= 20){
-      const punkte = Array.from({ length: tSoll }, (_, j) => `<i class="${j < tIst ? 'an' : ''}" style="--j:${j}"></i>`).join('')   // AB2c: Punkte nacheinander
-      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>${escapeHtml(tTitel)}${tUnter ? ` <small>${escapeHtml(tUnter)}</small>` : ''}</span><em>${tIst}/${tSoll}</em></div>`
+      // AP4 (Master 11.11.2026, „Gewinntage 5/3“ mit nur 3 Punkten): mehr als Soll → alle Ist-Punkte (höchstens 20), Text „5 / mind. 3“
+      const nP = Math.min(20, Math.max(tSoll, tIst))
+      const punkte = Array.from({ length: nP }, (_, j) => `<i class="${j < tIst ? 'an' : ''}" style="--j:${j}"></i>`).join('')   // AB2c: Punkte nacheinander
+      teile.push(`<div class="ab2-block" style="--i:${i++}"><div class="ab2-zk"><span>${escapeHtml(tTitel)}${tUnter ? ` <small>${escapeHtml(tUnter)}</small>` : ''}</span><em>${tIst > tSoll ? `${tIst} / mind. ${tSoll}` : `${tIst}/${tSoll}`}</em></div>`
         + `<div class="ab2-tage">${punkte}</div></div>`)
     }
     // 4 · Payout (Funded CFD) bzw. Phase (Challenge) — eine Zeile
@@ -58615,7 +58624,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2185'
+  const OS_TAB_BUILD = '2026-09-22.2186'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -79125,7 +79134,7 @@
         if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
         if(!document.getElementById('tradeCompleteModal')?.classList.contains('open')) return
         cb.checked = u.bereit
-        if(hint) hint.textContent = basis + (u.bereit ? ` Payout-Ziel erreicht — vorausgewählt${u.okText ? ' (' + u.okText + ')' : ' (Ziel + Consistency)'}.` : (u.grund ? ` Payout-Ziel noch nicht erreicht (${u.grund}).` : ''))   // WP4
+        if(hint) hint.textContent = basis + ' ' + wpErgText(u, true).text + '.'   // AP4 (Master 11.11.2026): derselbe kurze Satz wie im Radar-Popup (wpErgText), keine Textwand
       })
     }else return
     wrap.hidden = false
