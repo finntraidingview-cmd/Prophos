@@ -58430,7 +58430,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2179'
+  const OS_TAB_BUILD = '2026-09-22.2180'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -90943,18 +90943,20 @@
     t2_kontrakte: ['Kontrakte · Trade 2', '', '', 'kt'],
     t2_sl_be_pct: ['Break-even-SL', '%', 'Trade 2: so oft SL = Gewinn aus Trade 1 (schlimmstenfalls zurück auf den Tagesstart), sonst kein SL', 'zahl', 0, 100],
     hedge_auf_usd: ['je Master-Risiko', '$', 'Fusion-Hedge = Hedge € × Risiko des Trades ÷ diesen Betrag (Risiko = Abstand zum SL, ohne SL zur Liq)', 'zahl', 1, 20000],
+    // FF2c (Finn 11.11.2026 07:14: „Wenn der zweite Trade noch läuft bis 18:00 Uhr Dubai-Zeit … kriege ich eine Nachricht auf mein Handy“): app.py fdp_pump_offen_tick
+    alarm_offen: ['Meldung ab · Dubai', '', 'läuft ein Trade des 2-Trade-Wegs um diese Uhrzeit noch, kommt einmal 🔴 aufs Handy (alle IDs) — nichts wird geschlossen', 'zeit'],
   }
   // Standardwerte aus dem Konstrukt (Finn 11.11.2026) — nur für die Anzeige „noch nicht aktiv“ und als Vorlage der SQL-Datei; der Planer liest nie von hier
   const E2_P2_STD_TRADEIFY = { ziel_gewinn: [13000, 19000], dd: 4500, pump2_pct: 30, ein_kontrakte: { 3: 1 }, ein_sl: [4500, 4700], t1_von: '03:00', t1_bis: '16:00', t1_tp: [4000, 8000],
     t1_kontrakte: { 2: 0.5, 3: 0.5 }, t1_sl: [4500, 4700], sl_kein_pct: 50, sl_hinter_liq: true, t2_bis: '18:30', t2_abstand_min: [2, 5], t2_min_fenster_min: 10, t2_kontrakte: { 3: 1 },
-    t2_sl_be_pct: 50, hedge_eur: 850, hedge_auf_usd: 4500 }
+    t2_sl_be_pct: 50, hedge_eur: 850, hedge_auf_usd: 4500, alarm_offen: '18:00' }
   /* LUCID (Finn 11.11.2026 02:33: „eins zu eins die gleiche Logik, nur bei Lucid halt Daily Drawdown … von 2,7k“): Daily Loss 2.700 $ ab Tagesstart, weich (Tagespause, Konto lebt;
    * liq_regeln Lucid 150k 'tagesstart' 2.700 bisher nur für challenge). „Mit SL“ nie über den Daily Loss → eigene Spanne 2.600–2.700; „ohne SL“ endet der Tag am Daily Loss.
    * Hedge: kein Wert von Finn → leer, das Modell darf dann nicht eingeschaltet werden (e2Body). Ziel, TP, NQ wie Tradeify = Annahme, markiert (E2_P2_ANNAHME). */
   const E2_P2_STD_LUCID = Object.assign({}, E2_P2_STD_TRADEIFY, { daily_usd: 2700, ein_sl: [2600, 2700], t1_sl: [2600, 2700], sl_hinter_liq: false, hedge_eur: null })
   const E2_P2_ANNAHME = { lucid: new Set(['ziel_gewinn', 'pump2_pct', 'ein_kontrakte', 't1_von', 't1_bis', 't1_tp', 't1_kontrakte', 't2_bis', 't2_abstand_min', 't2_min_fenster_min', 't2_kontrakte', 't2_sl_be_pct', 'sl_kein_pct', 'hedge_auf_usd']) }
   const E2_P2_ABS = [['Weg je Pump-Tag', ['pump2_pct']], ['Ein Trade', ['ein_kontrakte', 'ein_sl']], ['Trade 1', ['t1_von', 't1_bis', 't1_tp', 't1_kontrakte', 't1_sl']],
-    ['SL-Würfel · ein Trade + Trade 1', ['sl_kein_pct', 'sl_hinter_liq']], ['Trade 2 · gleicher Tag', ['t2_bis', 't2_abstand_min', 't2_min_fenster_min', 't2_kontrakte', 't2_sl_be_pct']]]
+    ['SL-Würfel · ein Trade + Trade 1', ['sl_kein_pct', 'sl_hinter_liq']], ['Trade 2 · gleicher Tag', ['t2_bis', 't2_abstand_min', 't2_min_fenster_min', 't2_kontrakte', 't2_sl_be_pct']], ['Meldung · 2-Trade-Weg', ['alarm_offen']]]
   // Firmen mit vorbereitetem Pump-Modell → 'tradeify' | 'lucid' | null (Tradeify CFD heißt „tradeifycfd“ und trifft nie)
   const e2PumpFirma = f => { if(!f) return null; const n = (f.namen || []).concat(f.name || '').map(x => String(x).toLowerCase().replace(/\s+/g, ''))
     return n.includes('tradeify') ? 'tradeify' : n.some(x => x === 'lucid' || x === 'lucidtrading') ? 'lucid' : null }

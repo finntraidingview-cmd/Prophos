@@ -342,6 +342,41 @@ if not os.environ.get("SELFTEST_APP"):
     w, g = ruf("fdp_pump_trade2", A, {"tp": 6000}, START, 156000, LIQ, START + 6300, R())
     check(w is None and "Mini" in str(g), f"Rest zum Ziel unter 500 $ → kein Mini-Trade 2 ({g})")
 
+    # FF2c: offener Trade des 2-Trade-Wegs ab 18:00 Dubai → einmal 🔴 (Push), Ein-Trade-Weg nie, nichts schließen
+    def offen(pid, weg="zwei", nr=2, start="2026-11-12T11:00:00Z", status="open"):
+        return {"id": pid, "user_id": "u-1", "master_account_id": "konto-1", "master_firm": "Tradeify", "master_name": KONTO["name"], "status": status,
+                "started_at": start, "mt5_baseline": {"tv": {"balance_start": 156000}, "funded_plan": {"pump": {"weg": weg, "nr": nr}}}}
+    d = lambda h, m: datetime(2026, 11, 12, h - 4, m, tzinfo=timezone.utc)   # noqa: E731 — Dubai-Zeit
+    check(not ruf("fdp_pump_offen_faellig", offen("o1"), d(17, 59)) and ruf("fdp_pump_offen_faellig", offen("o1"), d(18, 0)), "Meldung ab 18:00 Dubai, nicht 17:59")
+    check(not ruf("fdp_pump_offen_faellig", offen("o2", weg="ein", nr=None), d(18, 30)), "Ein-Trade-Weg meldet nie")
+    check(not ruf("fdp_pump_offen_faellig", offen("o3", status="completed"), d(18, 30)), "beendeter Trade meldet nicht")
+    check(ruf("fdp_pump_offen_faellig", offen("o4", nr=1), d(18, 5)), "Trade 1 noch offen um 18:05 → meldet auch")
+    check(not ruf("fdp_pump_offen_faellig", offen("o5"), d(18, 5), "18:30") and ruf("fdp_pump_offen_faellig", offen("o5"), d(18, 31), "18:30"), "eigene Uhrzeit aus der Einstellung (18:30)")
+    def offen_lauf(plaene, jetzt, frei=True):
+        log = {"alarm": []}
+        ns.update({"sb_select": lambda tab, prm: copy.deepcopy(plaene) if tab == "trade_plans" else [dict(KONTO)] if tab == "accounts" else [],
+                   "_fdp_regeln_laden": lambda: REG_T, "_ap_namen": lambda: ({"u-1": "ID A"}, set()), "_tm_melde_frei": lambda key: frei,
+                   "alarm_senden": lambda *a, **k: log["alarm"].append((a, k))})
+        import contextlib, io
+        for _ in range(40):
+            log["alarm"].clear()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                res = ruf("fdp_pump_offen_tick", jetzt)
+            m = re.search(r"NameError: name '(\w+)' is not defined", buf.getvalue())
+            if not m:
+                break
+            lade(m.group(1))
+        return res, log
+    res, log = offen_lauf([offen("o6"), offen("o7", weg="ein", nr=None)], d(18, 10))
+    check(res == ["o6"] and len(log["alarm"]) == 1 and log["alarm"][0][0][0] == 1 and "T2" in log["alarm"][0][0][3] and "ID A" in log["alarm"][0][0][3],
+          f"Takt: genau ein 🔴 (Prio 1) für den offenen Trade 2, mit ID und T2 ({log['alarm'][0][0][3] if log['alarm'] else '–'})")
+    res, log = offen_lauf([offen("o6")], d(18, 10), frei=False)
+    check(not log["alarm"], "Takt: schon gemeldet (alarm_log) → keine zweite Meldung")
+    res, log = offen_lauf([offen("o6")], d(17, 30))
+    check(not log["alarm"], "Takt: vor 18:00 keine Meldung")
+    check("fdp_pump_offen_tick(jetzt)" in app and "close" not in re.search(r"def fdp_pump_offen_tick.*?\n\n\n", app, re.S).group(0).lower(), "Alarm-Takt in fdp_tick, schließt nie")
+
     # Textanker: Takt, Tagesteilung, Auto-Close
     check("fdp_pump_tick(jetzt)" in app and 'rows = [p for p in rows if not (isinstance((p.get("mt5_baseline") or {}).get("funded_plan"), dict))]' in app,
           "fdp_tick ruft fdp_pump_tick; tt_tick lässt Funded-Planer-Pläne aus")

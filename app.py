@@ -47522,12 +47522,86 @@ def fdp_pump_tick(jetzt=None, rnd=None):
     return erg
 
 
+FDP_PUMP_ALARM_OFFEN = "18:00"           # FF2c Standard: ab dieser Dubai-Uhrzeit meldet ein noch offener Pump-Trade des 2-Trade-Wegs (Einstellung alarm_offen je Größe)
+
+
+def fdp_pump_offen_faellig(plan, jetzt, alarm_hhmm=None):
+    """REIN RECHNEND (testbar): FF2c (Finn 11.11.2026 07:14: „Wenn der zweite Trade noch läuft bis 18:00 Uhr Dubai-Zeit, scheißegal welche ID, kriege ich eine Nachricht
+    auf mein Handy, und dann greife ich da ein“) — ist dieser Plan ein noch offener Trade des 2-Trade-Wegs (Trade 1 oder Trade 2, funded_plan.pump.weg 'zwei') und ist es
+    am Dubai-Tag seines Starts schon alarm_hhmm (Standard 18:00) oder später? Der Ein-Trade-Weg meldet nie. Nur Meldung, nie schließen. → bool"""
+    p = plan or {}
+    if p.get("status") != "open":
+        return False
+    fp = ((p.get("mt5_baseline") or {}).get("funded_plan") or {}) if isinstance(p.get("mt5_baseline"), dict) else {}
+    if not isinstance(fp, dict) or (fp.get("pump") or {}).get("weg") != "zwei":
+        return False
+    st = _ap_ts(p.get("started_at"))
+    if st is None:
+        return False
+    tz = _ap_tz(FDP_PUMP_TZ)
+    try:
+        hh, mm = (int(x) for x in str(alarm_hhmm or FDP_PUMP_ALARM_OFFEN).split(":"))
+    except (TypeError, ValueError):
+        hh, mm = 18, 0
+    s = st.astimezone(tz)
+    grenze = s.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if s.hour < FDP_PUMP_TAG_AB_H:   # Start vor 03:00 Dubai gehört zum alten CME-Tag → Grenze am Vortag
+        grenze -= timedelta(days=1)
+    return jetzt.astimezone(tz) >= grenze
+
+
+def fdp_pump_offen_tick(jetzt=None):
+    """FF2c Takt (aus fdp_tick, eigener try, auch bei ausgeschaltetem Planer): offene Pump-Trades des 2-Trade-Wegs ab alarm_offen Dubai → einmal je Plan 🔴 mit Push an
+    die Master-IDs (alarm_senden prio 1, entprellt über alarm_log, Schlüssel je Plan), egal welche ID bzw. welches Unternehmen. Schließt nie. → [plan_id]"""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    rows = sb_select("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,status,started_at,mt5_baseline",
+                                     "status": "eq.open", "route": "eq.tvv2", "mt5_baseline->funded_plan->pump->>weg": "eq.zwei"}) or []
+    faellig = []
+    if not rows:
+        return faellig
+    reg = _fdp_regeln_laden() or {}
+    firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
+    ids = sorted({str(p.get("master_account_id")) for p in rows if p.get("master_account_id")})
+    konten = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,starting_balance,tv_balance,tv_balance_at",
+                                                              "id": "in.(" + ",".join(ids) + ")"}) or [])} if ids else {}
+    try:
+        namen = _ap_namen()[0]
+    except Exception:
+        namen = {}
+    for p in rows:
+        try:
+            a = konten.get(str(p.get("master_account_id"))) or {}
+            regel = ap_regel_finden(firmen, p.get("master_firm")) or {}
+            jg = fdp_je_groesse(regel, _wd_konto_groesse(a)) if a else None
+            if not fdp_pump_offen_faellig(p, jetzt, (jg or {}).get("alarm_offen")):
+                continue
+            key = f"fdp_pump_offen|{p['id']}"
+            if not _tm_melde_frei(key):
+                continue
+            mb = p.get("mt5_baseline") or {}
+            nr = ((mb.get("funded_plan") or {}).get("pump") or {}).get("nr")
+            bs, tvb = _wd_num(((mb.get("tv") or {}) if isinstance(mb.get("tv"), dict) else {}).get("balance_start")), _wd_num(a.get("tv_balance"))
+            pl = f" · zuletzt {tvb - bs:+,.0f} $".replace(",", ".") if (bs and tvb and _ap_ts(a.get("tv_balance_at")) and _ap_ts(a.get("tv_balance_at")) > (_ap_ts(p.get("started_at")) or jetzt)) else ""
+            wer = namen.get(str(p.get("user_id"))) or str(p.get("user_id") or "")[:8]
+            alarm_senden(1, "fdp_pump_offen", "Pump-Trade noch offen",
+                         f"{wer} · {p.get('master_name') or a.get('name') or 'Konto'} · T{nr or '?'}{pl} → ggf. von Hand beenden"[:300],
+                         uid=p.get("user_id"), plan_id=str(p["id"]), schluessel=key)
+            faellig.append(str(p["id"]))
+        except Exception as e:
+            print(f"[funded-pump] ⚠️ Alarm offen {str(p.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+    return faellig
+
+
 def fdp_tick(jetzt=None):
     """Takt aus ap_loop: alle FDP_TAKT_S, nur wenn funded_plan_regeln.aktiv. Legt Pläne an (scharf); außerhalb des Fensters plant fdp_planen
     nichts (kein Slot), Ziel-Konten wechseln trotzdem auf Winning Days."""
     if time.time() - (_fdp_info.get("at") or 0) < FDP_TAKT_S:
         return None
     _fdp_info["at"] = time.time()
+    try:   # FF2c: offene Pump-Trades ab 18:00 Dubai melden — auch wenn der Planer inzwischen aus ist (der Trade läuft trotzdem)
+        fdp_pump_offen_tick(jetzt)
+    except Exception as e:
+        print(f"[funded-pump] ⚠️ Alarm-Takt: {type(e).__name__}: {e}", flush=True)
     reg = _fdp_regeln_laden()
     if not reg or not reg.get("aktiv"):
         return None
@@ -47904,7 +47978,7 @@ _FDP_GR_FELDER = {"ziel_gewinn": (1, 50000), "max_trade": (1, 50000), "kosten_eu
                   "pump2_pct": (0, 100), "sl_kein_pct": (0, 100), "t2_sl_be_pct": (0, 100), "t2_min_fenster_min": (0, 240), "hedge_auf_usd": (1, 20000),
                   "ein_sl": (1, 20000), "t1_sl": (1, 20000), "t1_tp": (1, 50000), "t2_abstand_min": (0, 120)}
 _FDP_GR_KT = ("kontrakte", "ein_kontrakte", "t1_kontrakte", "t2_kontrakte")   # {Anzahl: Anteil}, Summe 1
-_FDP_GR_ZEIT = ("t1_von", "t1_bis", "t2_bis")                                # HH:MM Dubai
+_FDP_GR_ZEIT = ("t1_von", "t1_bis", "t2_bis", "alarm_offen")                 # HH:MM Dubai (alarm_offen: FF2c)
 _FDP_GR_BOOL = ("sl_hinter_liq",)
 
 
