@@ -30192,6 +30192,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     except Exception as e:
         print(f"[handels-wuerfel] ⚠️ Challenge-Planer: {type(e).__name__}: {e} — alle Konten handeln", flush=True)
         _tw_w, _tw_k = {}, {}
+    try:   # RV1 RANGE-WÜRFEL (11.11.2026): Einstellung einmal je Lauf; get: ältere Selftest-Lader ziehen ap_planen ohne den RV1-Block
+        _rv_w = globals()["rv_werte"]() if "rv_werte" in globals() else {}
+    except Exception as e:
+        print(f"[range-wuerfel] ⚠️ Challenge-Planer: {type(e).__name__}: {e} — normale Trades", flush=True)
+        _rv_w = {}
 
     def _tw_pause_plan(p):
         if not _tw_w or not p.get("master_account_id"):
@@ -30457,6 +30462,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
                                             ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),
                                             mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))), rest_planer=bool(k["a"].get("rest_planer_at")))
+            if w and not grund and _rv_w:
+                # RV1 RANGE-WÜRFEL (Finn 11.11.2026 07:35: „nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und Lotanzahl … für alle drei wird
+                # einzeln gewürfelt“): Etappe × drei feste Faktoren je Konto × Tag, NACH Boden-/Tagesgrenze-Kappung, VOR Trades pro Tag (Tagesziel, Haupt-Lots
+                # und SL der Neben-Teile kommen so schon vom kleinen Trade). Kein Wert / kein Treffer / Fehler → w unverändert
+                w = rv_planer_haken(w, k["a"], k["regel"], tag, ap_cfd_ppl(stand.get("ctx"), k["a"]), _rv_w, _tw_k)
             if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
                 grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
             if w and not grund and "tt_param" in globals():   # get: ältere Selftest-Lader ziehen ap_planen ohne die WS2-Helfer
@@ -30657,6 +30667,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             zeilen[-1]["mt5_baseline"] = dict(zeilen[-1]["mt5_baseline"] or {}, zschluss=w["zschluss"])
         if w.get("zs_wurf") and not w.get("kette"):   # WZ1: Wurf-Beleg ohne Kette (mit Kette steht er in kette.zs_wurf)
             zeilen[-1]["mt5_baseline"] = dict(zeilen[-1]["mt5_baseline"] or {}, zs_wurf=w["zs_wurf"])
+        if w.get("range"):                       # RV1: Beleg (Faktoren, Normal-Werte, Punkte) am Plan; mit Kette auch dort — tt_folge_rechnen skaliert den Haupt-Teil damit
+            _b = dict(zeilen[-1]["mt5_baseline"] or {}, range=w["range"])
+            if isinstance(_b.get("kette"), dict) and _b["kette"]:
+                _b["kette"] = dict(_b["kette"], range=w["range"])
+            zeilen[-1]["mt5_baseline"] = _b
         if param["auto_start"] and not gruppe:   # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt — Gruppe nie (Finn 30.10.: „er bestätigt sie einzeln")
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
         d = dinfo.get((key, str(a["id"]))) or {}
@@ -39929,6 +39944,10 @@ def tt_tick(jetzt=None, rnd=None):
                     phase = str((konto or {}).get("account_type") or p.get("konto_typ") or "challenge")
                     w_h, grund_h = ap_konto_rechnen(ap_regel_konto(regel, konto, bal_j) if konto else regel, phase, bal_j, {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")},
                                                     ppl=_wd_num(k.get("ppl")), heute_verlust=max(0.0, float(bal_tag0) - bal_j))
+                    if w_h and not grund_h and isinstance(k.get("range"), dict) and "rv_anwenden" in globals():
+                        # RV1 (11.11.2026): der Tag ist ein Range-Tag → Haupt-Lots/-SL (und TP-Deckel) mit DENSELBEN Faktoren wie Trade 1, sonst wäre ein
+                        # späterer Haupt-Teil wieder groß (Master: „Neben-Trades rechnen wie bisher vom veränderten Haupt“)
+                        w_h = rv_anwenden(w_h, k["range"], k.get("menge_schritt"), _wd_num(k.get("ppl")))
                 werte, g = tt_folge_rechnen(k, bal_tag0, bal_j, regel, param, rnd, w_h=w_h, grund_h=grund_h, kette_r=kette_r)
                 if g:
                     ende_code, ende_text = g
@@ -40030,7 +40049,7 @@ def _tt_startplatz(p, k, reg, aparam, zeiten_r, firmen, route, stand_je, jetzt, 
 def _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, jetzt):
     """Insert-Zeile des nächsten Teils (wie Topstep-Trade 2): Route, Konto, Symbol, Bestätigung von Trade 1; kette mit nr/von/rolle/plan/tag_id/vor."""
     k2 = {x: k.get(x) for x in ("tagesziel", "haupt_menge", "ppl", "menge_schritt", "tag_typ", "mll", "daily_usd", "dll_puffer", "angefressen",
-                                "abstand_mll", "tag") if k.get(x) is not None}
+                                "abstand_mll", "tag", "range") if k.get(x) is not None}   # range: RV1-Faktoren des Tages (Folge-Haupt)
     k2.update(nr=werte["nr"], von=werte["plan"]["n"], rolle=werte["rolle"], plan=werte["plan"], tag_id=tag_id, vor=str(p["id"]),
               e_bisher=werte["e_bisher"], balance_start_tag=bal_tag0, balance_vor=echt[1])
     if werte.get("verlust_grenze") is not None:
@@ -43217,6 +43236,223 @@ def admin_handel_wuerfel():
         return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__}){hinweis}"}), 502
     print(f"[handels-wuerfel] {TW_PLANER_NAME[planer]} · {name or 'Standard (HT)'} → {'100 % (Zeile weg)' if pct is None else _tw_pct_txt(pct) + ' %'} "
           f"durch {str(uid)[:8]}", flush=True)
+    return jsonify(antwort())
+
+
+# ══ RV1 RANGE-WÜRFEL (11.11.2026, Finn 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss,
+# Take Profit und Lotanzahl, alles drei … für alle drei wird einzeln gewürfelt“; davor: Faktor 10–100 % der aktuellen Spanne, „nie über dem jetzigen Max,
+# sonst Daily Loss“, das Tagesziel zu verfehlen ist egal). Konstrukt: side-session-notes 2026-11-11_RV1_range_wuerfel_konstrukt.md.
+# NUR Challenge-Planer CFD (Echo, ap_planen; der Gruppen-Planer gp_planen wie TW1 nicht). Je Haupt-Trade FEST gewürfelt: der Challenge-Planer gibt einem
+# Konto höchstens EINEN Trade je Tag (08.10.2026 „maximal ein Trade pro Tag pro Account“, Trades pro Tag teilt ihn nur auf) → Schlüssel Konto × Tag.
+# Nachtlauf, Nachplanen, Probelauf und der Folge-Teil des Tages (tt_folge_rechnen über kette.range) sehen dieselben Faktoren.
+# Wirkt NUR auf die Etappe (Stufe beginnt mit „Etappe“): der letzte Trade (Rest bis Ziel), Klein-, Mini-, Gewinntag-Trade bleiben, wie sie sind.
+# Reihenfolge: ap_konto_rechnen würfelt und kappt (Boden, Tagesgrenze) wie immer, DANACH × Faktor — jeder Faktor ≤ 100 %, also nie über dem heutigen Wert.
+# Weil die drei Faktoren unabhängig sind, ändern sich die Punkte (TP Pkt = TP $ ÷ (Lots × $/Pkt)): Lots ABgerundet aufs Raster der Phase (mindestens
+# ein Schritt), TP- und SL-Punkte nie unter RV_MIN_PKT (wie WS3c „Invalid stops“) — sonst wird der Faktor so weit angehoben, höchstens auf 100 %.
+# Der Fusion-Hedge (ap_echo_hedge_zeile → eh_hedge) rechnet aus master_contracts/master_risk des Plans, folgt also von selbst.
+# Einstellung je Planer × Unternehmen (Tabelle planer_range_wuerfel, sql/2026-11-11_rv1_range_wuerfel.sql): pct = Anteil „klein“, von/bis = Faktor-Spanne.
+# Keine Zeile / Tabelle fehlt / Lesefehler → 0 % = aus (wie vor RV1). Ein Unternehmen erbt den HT-Wert NICHT (wie TW1). ══
+RV_PLANER = ("challenge_cfd",)
+RV_PLANER_NAME = {"challenge_cfd": "Challenge-Planer CFD"}
+RV_STANDARD = {"pct": 0.0, "von": 10.0, "bis": 100.0}
+RV_MIN_PKT = 10.0       # Mindestabstand TP/SL in Punkten (= tt_param neben_min_pkt, WS3c FS2 „Invalid stops“)
+RV_CACHE_S = 60
+RV_ALT_S = 900          # wie TW_ALT_S: bei einem kurzen Lesefehler gilt der letzte gute Stand bis zu 15 min
+RV_STUFE = "Range-Würfel"   # Stufen-Zusatz „· Range-Würfel TP x % · SL y % · Lots z %“ — Schlüssel-Anfang, nie umbenennen (Anzeige im Planer)
+_rv = {"bis": 0.0, "werte": None, "tabelle": True, "fehler_at": 0.0, "gut": None, "gut_at": 0.0, "fehler": ""}
+_rv_lock = threading.Lock()
+
+
+def rv_wurf(planer, konto_id, tag, teil):
+    """REIN RECHNEND (testbar): fester Wurf in [0, 1) je Teil ('klein' | 'tp' | 'sl' | 'lots') × Planer × Konto × Tag — eigenes Salz „rv1“, also
+    unabhängig vom Handels-Würfel (tw1) und untereinander."""
+    return fest_wurf(f"rv1|{teil}|{planer}|{konto_id}|{str(tag)[:10]}")
+
+
+def rv_faktoren(planer, konto_id, tag, pct, von=None, bis=None):
+    """REIN RECHNEND (testbar): None = normaler Trade, sonst {f_tp, f_sl, f_lots (0,1–1,0), pct, von, bis}. pct None/≤ 0 → nie, ≥ 100 → immer klein.
+    von/bis in % (Standard 10–100), auf 1–100 begrenzt, vertauscht → sortiert. Jeder Faktor = von + (bis − von) × eigener Wurf."""
+    p = _wd_num(pct)
+    if p is None or p <= 0 or not konto_id:
+        return None
+    if p < 100 and rv_wurf(planer, konto_id, tag, "klein") * 100.0 >= p:
+        return None
+    lo = _wd_num(von)
+    hi = _wd_num(bis)
+    lo = min(100.0, max(1.0, RV_STANDARD["von"] if lo is None else lo))
+    hi = min(100.0, max(1.0, RV_STANDARD["bis"] if hi is None else hi))
+    lo, hi = min(lo, hi), max(lo, hi)
+    fk = {f"f_{t}": round((lo + (hi - lo) * rv_wurf(planer, konto_id, tag, t)) / 100.0, 4) for t in ("tp", "sl", "lots")}
+    return dict(fk, pct=round(p, 2), von=lo, bis=hi)
+
+
+def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
+    """REIN RECHNEND (testbar): Plan-Werte w aus ap_konto_rechnen × Range-Faktoren fk → w2 (Kopie) mit range-Beleg, oder w unverändert (kein fk, keine
+    Etappe, CFD ohne SL/Punktwert). Lots = Lots × f_lots ABgerundet auf schritt, mindestens ein Schritt, höchstens die alten Lots; TP/SL = Wert × f, aber
+    nie enger als min_pkt Punkte bei den neuen Lots (Faktor dann angehoben, höchstens auf den alten Wert). Stand der SL „hinter dem Boden“ (Stufe) und
+    liegt jetzt davor, fällt der Zusatz weg — sonst läse echoV2Final den SL-Treffer als Blow."""
+    if not w or not fk or not str(w.get("stufe") or "").startswith("Etappe"):
+        return w
+    try:
+        m0, tp0, sl0, pv = float(w["menge"]), float(w["tp"]), float(w.get("sl") or 0), float(ppl or 0)
+        fl, ft, fs = float(fk["f_lots"]), float(fk["f_tp"]), float(fk["f_sl"])
+    except (KeyError, TypeError, ValueError):
+        return w
+    if m0 <= 0 or tp0 <= 0 or sl0 <= 0 or pv <= 0:
+        return w
+    s = float(schritt or 1)
+    m = min(round(max(1, int(m0 * min(1.0, max(0.0, fl)) / s + 1e-9)) * s, 4), m0)
+    m = int(round(m)) if s >= 1 else m
+
+    def skal(wert, f):
+        roh = wert * min(1.0, max(0.0, f))
+        mind = min_pkt * float(m) * pv
+        if roh + 1e-9 >= mind:
+            return int(round(roh)), False
+        return int(min(wert, -((-(mind - 1e-9)) // 1))), True   # aufrunden ohne math (nicht importiert)
+
+    tp, tp_auf = skal(tp0, ft)
+    sl, sl_auf = skal(sl0, fs)
+    stufe = str(w["stufe"])
+    hb = f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
+    if hb in stufe and sl <= sl0 - AP_SL_HINTER_BODEN:
+        stufe = stufe.replace(hb, "")
+    pz = lambda x: f"{round(x * 100):d}"   # noqa: E731
+    stufe += f" · {RV_STUFE} TP {pz(tp / tp0)} % · SL {pz(sl / sl0)} % · Lots {pz(float(m) / m0)} %"
+    beleg = {"f_tp": ft, "f_sl": fs, "f_lots": fl, "pct": fk.get("pct"), "von": fk.get("von"), "bis": fk.get("bis"),
+             "tp_angehoben": tp_auf, "sl_angehoben": sl_auf, "normal": {"menge": w["menge"], "tp": w["tp"], "sl": w.get("sl")},
+             "tp_pkt": round(tp / (float(m) * pv), 1), "sl_pkt": round(sl / (float(m) * pv), 1)}
+    w2 = dict(w, menge=m, tp=tp, sl=sl, stufe=stufe, range=beleg)
+    if w.get("risiko") is not None:
+        w2["risiko"] = sl            # CFD-Etappe: risiko = SL (ap_konto_rechnen) — der Hedge (slave_risk) folgt dem neuen SL
+    return w2
+
+
+def rv_werte(frisch=False):
+    """{(planer, gruppe): {pct, von, bis}} aus planer_range_wuerfel, 60 s gemerkt. Tabelle fehlt → {} (= aus). Lesefehler → letzter guter Stand ≤ RV_ALT_S,
+    sonst {} (aus — lieber normale Trades als ein ungewollter Range-Würfel). Höchstens stündlich geloggt."""
+    jetzt = time.time()
+    with _rv_lock:
+        if not frisch and _rv["werte"] is not None and _rv["bis"] > jetzt:
+            return _rv["werte"]
+    try:
+        rows = sb_select("planer_range_wuerfel", {"select": "planer,gruppe,pct,von,bis"}) or []
+        werte = {(str(r.get("planer")), str(r.get("gruppe") or "")): {"pct": _wd_num(r.get("pct")), "von": _wd_num(r.get("von")), "bis": _wd_num(r.get("bis"))}
+                 for r in rows if r.get("planer") in RV_PLANER}
+        with _rv_lock:
+            _rv.update(bis=jetzt + RV_CACHE_S, werte=werte, tabelle=True, gut=werte, gut_at=jetzt, fehler="")
+        return werte
+    except Exception as e:
+        _r = getattr(e, "response", None)
+        fehlt = getattr(_r, "status_code", None) in (400, 404) and "planer_range_wuerfel" in str(getattr(_r, "text", "") or "")
+        with _rv_lock:
+            alt = (not fehlt) and _rv.get("gut") is not None and jetzt - (_rv.get("gut_at") or 0) <= RV_ALT_S
+            werte = _rv["gut"] if alt else {}
+            _rv.update(bis=jetzt + (RV_CACHE_S if fehlt else 15), werte=werte, tabelle=not fehlt,
+                       fehler="" if fehlt else f"nicht lesbar ({type(e).__name__}){' — letzter Stand gilt' if alt else ''}")
+        if jetzt - _rv["fehler_at"] > 3600:
+            _rv["fehler_at"] = jetzt
+            print(f"[range-wuerfel] {'Tabelle fehlt (sql/2026-11-11_rv1_range_wuerfel.sql) — aus' if fehlt else '⚠️ nicht lesbar: ' + type(e).__name__ + (' — letzter Stand gilt' if alt else ' — aus')}", flush=True)
+        return werte
+
+
+def rv_einstellung(planer, uid, werte=None, ktx=None):
+    """{pct, von, bis} für das Unternehmen der ID (HT/ohne Unternehmen → Standard-Zeile '', Mitglied → dessen Zeile) oder None (= aus). Kontext nicht sicher
+    lesbar → None (lieber normale Trades als eine fremde Einstellung)."""
+    w = rv_werte() if werte is None else werte
+    if not w:
+        return None
+    k = ktx if ktx is not None else ap_unt_kontext()
+    if not k.get("ok"):
+        return None
+    gid = (k.get("gid_von") or {}).get(str(uid or ""))
+    return w.get((str(planer), str(gid or "")))
+
+
+def rv_planer_haken(w, a, regel, tag, ppl, werte, ktx):
+    """ap_planen: Plan-Werte w eines Kontos a → w (unverändert) oder w × Range-Faktoren. Nur Echo-CFD-Challenges (Route mt5v2/mt5, Phase 1/2), nur Etappe.
+    Jeder Fehler → w unverändert (normaler Trade)."""
+    try:
+        if not w or not werte or ((regel or {}).get("route") or "mt5v2") not in AP_CFD_ROUTEN or str((a or {}).get("account_type") or "") not in ("phase1", "phase2"):
+            return w
+        e = rv_einstellung("challenge_cfd", (a or {}).get("user_id"), werte, ktx)
+        fk = rv_faktoren("challenge_cfd", str((a or {}).get("id") or ""), tag, (e or {}).get("pct"), (e or {}).get("von"), (e or {}).get("bis"))
+        if not fk:
+            return w
+        schritt = ((regel.get("phasen") or {}).get(str(a.get("account_type"))) or {}).get("menge_schritt")
+        jg = (regel.get("je_groesse") or {}).get(str(int(w.get("groesse") or 0))) if regel.get("je_groesse") else None
+        if jg:
+            schritt = (((jg.get("phasen") or {}).get(str(a.get("account_type")))) or {}).get("menge_schritt") or schritt
+        return rv_anwenden(w, fk, schritt, ppl)
+    except Exception as e:
+        print(f"[range-wuerfel] ⚠️ {str((a or {}).get('id'))[:8]}: {type(e).__name__}: {e} — normaler Trade", flush=True)
+        return w
+
+
+@app.route("/admin/range-wuerfel", methods=["GET", "POST", "OPTIONS"])
+def admin_range_wuerfel():
+    """RV1: GET [?unternehmen=gid] → {ok, werte: {planer: {pct, von, bis}|None}, standard, unternehmen, darf, tabelle}; POST {planer, pct: 0–100 | None (= Zeile
+    weg = aus), von, bis (1–100), gruppe_id?} → {ok, werte}. Recht und Unternehmen wie /admin/handel-wuerfel. Karte „Range-Würfel“ unter dem Handels-Würfel
+    des Challenge-Planers CFD (prophos.html Sektion RANGE-WÜRFEL)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.method == "POST":
+        _gs = _planer_schreib_gate()
+        if _gs is not None:
+            return _gs
+    admin, uid, _lese, _schreib, err = _fcp_login()
+    if err:
+        return err
+    gid, darf = _fd_unternehmen(admin, uid)
+    if not admin and not gid:
+        darf = False
+    name, bekannt = None, None
+    if gid:
+        try:
+            _g = next((g for g in ap_planer_gruppen() if str(g.get("gruppe_id")) == str(gid)), None)
+            name, bekannt = (_g or {}).get("name"), _g is not None
+        except Exception:
+            name, bekannt = None, None
+
+    def antwort():
+        werte = rv_werte(frisch=True)
+        return {"ok": True, "werte": {p: werte.get((p, str(gid or ""))) for p in RV_PLANER}, "standard": RV_STANDARD,
+                "unternehmen": ({"gruppe_id": str(gid), "name": name} if gid else None), "darf": bool(darf), "tabelle": bool(_rv.get("tabelle", True)),
+                "planer_namen": RV_PLANER_NAME, "min_pkt": RV_MIN_PKT, **({"fehler": _rv["fehler"]} if _rv.get("fehler") else {})}
+    if request.method == "GET":
+        return jsonify(antwort())
+    if not darf:
+        return jsonify({"ok": False, "msg": "nur ansehen — ändern darf der Admin (Standard) bzw. der Verwalter des Unternehmens"}), 403
+    if gid and bekannt is False:
+        return jsonify({"ok": False, "msg": "Unternehmen unbekannt (keine Planer-Gruppe mit dieser gruppe_id)"}), 400
+    if gid and bekannt is None:
+        return jsonify({"ok": False, "msg": "Unternehmen gerade nicht prüfbar — gleich noch einmal"}), 502
+    body = request.get_json(silent=True) or {}
+    planer = str(body.get("planer") or "")
+    if planer not in RV_PLANER:
+        return jsonify({"ok": False, "msg": f"planer = {' | '.join(RV_PLANER)}"}), 400
+    roh = body.get("pct")
+    pct = None if roh in (None, "") else _wd_num(roh)
+    if roh not in (None, "") and (pct is None or isinstance(roh, bool) or not 0 <= pct <= 100):
+        return jsonify({"ok": False, "msg": "Anteil = 0 bis 100 (leer = aus)"}), 400
+    von = _wd_num(body.get("von")) if body.get("von") not in (None, "") else RV_STANDARD["von"]
+    bis = _wd_num(body.get("bis")) if body.get("bis") not in (None, "") else RV_STANDARD["bis"]
+    if von is None or bis is None or isinstance(body.get("von"), bool) or isinstance(body.get("bis"), bool) or not (1 <= von <= bis <= 100):
+        return jsonify({"ok": False, "msg": "Faktor-Spanne: 1 ≤ von ≤ bis ≤ 100 %"}), 400
+    try:
+        if pct is None:
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/planer_range_wuerfel", params={"planer": f"eq.{planer}", "gruppe": f"eq.{str(gid or '')}"},
+                        headers=_sb_headers("return=minimal"), timeout=12).raise_for_status()
+        else:
+            sb_upsert("planer_range_wuerfel", {"planer": planer, "gruppe": str(gid or ""), "pct": round(float(pct), 2), "von": round(float(von), 2),
+                                               "bis": round(float(bis), 2), "updated_at": datetime.now(timezone.utc).isoformat(),
+                                               "updated_von": str(uid) if uid else None})
+    except Exception as e:
+        _r = getattr(e, "response", None)
+        hinweis = " — sql/2026-11-11_rv1_range_wuerfel.sql eingespielt?" if "planer_range_wuerfel" in str(getattr(_r, "text", "") or "") else ""
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__}){hinweis}"}), 502
+    print(f"[range-wuerfel] {RV_PLANER_NAME[planer]} · {name or 'Standard (HT)'} → "
+          f"{'aus (Zeile weg)' if pct is None else _tw_pct_txt(pct) + ' % klein, Faktor ' + _tw_pct_txt(von) + '–' + _tw_pct_txt(bis) + ' %'} durch {str(uid)[:8]}", flush=True)
     return jsonify(antwort())
 
 

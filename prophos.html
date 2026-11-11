@@ -8876,18 +8876,19 @@
   }
   /* HANDELS-WÜRFEL (TW1, 11.11.2026): kleine Karte unter den Einstellungen jedes Planers (JS-Sektion HANDELS-WÜRFEL). Steht NEBEN dem Host —
      ist er versteckt oder zugeklappt, verschwindet sie mit (kein eigener Zustand). */
-  .hw-karte{margin:12px 0 0;padding:12px 16px;border:1px solid var(--border-soft, var(--border));border-radius:12px;background:var(--surface);font-size:12.5px;color:var(--ink)}
-  [hidden] + .hw-karte, .fcr-w.zu + .hw-karte, .e2-wdgr.zu + .hw-karte{display:none}
-  .hw-karte .hw-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-  .hw-karte .hw-titel{font-weight:600;font-size:13.5px}
-  .hw-karte .hw-titel small{display:block;font-weight:400;font-size:11.5px;color:var(--sub);margin-top:1px}
-  .hw-karte .hw-zeile{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .hw-karte .hw-zeile .input{width:72px;height:28px;padding:0 8px;text-align:right}
-  .hw-karte .hw-zeile .input.geaendert{border-color:var(--violet)}
-  .hw-karte .hw-fuss{margin-top:6px;font-size:11.5px;color:var(--sub);line-height:1.4}
-  .hw-karte .hw-msg{font-size:11.5px}
-  .hw-karte .hw-msg.ok{color:var(--good-ink, var(--good))}
-  .hw-karte .hw-msg.fehler{color:var(--danger-ink, var(--danger))}
+  .hw-karte, .rw-karte{margin:12px 0 0;padding:12px 16px;border:1px solid var(--border-soft, var(--border));border-radius:12px;background:var(--surface);font-size:12.5px;color:var(--ink)}
+  [hidden] + .hw-karte, .fcr-w.zu + .hw-karte, .e2-wdgr.zu + .hw-karte, [hidden] + .hw-karte + .rw-karte{display:none}
+  .hw-karte .hw-kopf, .rw-karte .hw-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .hw-karte .hw-titel, .rw-karte .hw-titel{font-weight:600;font-size:13.5px}
+  .hw-karte .hw-titel small, .rw-karte .hw-titel small{display:block;font-weight:400;font-size:11.5px;color:var(--sub);margin-top:1px}
+  .hw-karte .hw-zeile, .rw-karte .hw-zeile{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .hw-karte .hw-zeile .input, .rw-karte .hw-zeile .input{width:72px;height:28px;padding:0 8px;text-align:right}
+  .rw-karte .hw-zeile .input.rw-klein{width:58px}
+  .hw-karte .hw-zeile .input.geaendert, .rw-karte .hw-zeile .input.geaendert{border-color:var(--violet)}
+  .hw-karte .hw-fuss, .rw-karte .hw-fuss{margin-top:6px;font-size:11.5px;color:var(--sub);line-height:1.4}
+  .hw-karte .hw-msg, .rw-karte .hw-msg{font-size:11.5px}
+  .hw-karte .hw-msg.ok, .rw-karte .hw-msg.ok{color:var(--good-ink, var(--good))}
+  .hw-karte .hw-msg.fehler, .rw-karte .hw-msg.fehler{color:var(--danger-ink, var(--danger))}
 </style>
 </head>
 <body>
@@ -92545,6 +92546,7 @@
     const offen = [...box.querySelectorAll('[data-e3-pfad]')].filter(e3Geaendert).map(el => [schl(el), el.type === 'checkbox' ? el.checked : el.value])
     box.innerHTML = e3Html(_e3.d, art)
     try{ hwPlatz(box, art === 'futures' ? 'challenge_futures' : 'challenge_cfd', ((_e3.d || {}).unternehmen || {}).gruppe_id || '') }catch(e){ console.warn('[hw] Challenge', e) }   // TW1: Handels-Würfel neben den Einstellungen
+    try{ rwPlatz(box.nextElementSibling, art === 'futures' ? null : 'challenge_cfd', ((_e3.d || {}).unternehmen || {}).gruppe_id || '') }catch(e){ console.warn('[rw] Challenge', e) }   // RV1: Range-Würfel unter dem Handels-Würfel (nur CFD)
     try{ window._apgAlleEinsetzen?.() }catch(_){}   // UI1b: Block „Planer · alle Firmen" + „Nachplanen" wieder hinein (nicht in der Gruppen-Sicht)
     try{ gpVerdrahten(box) }catch(_){}                // S4-Stopp UI1b: Gruppen-Planer an/aus (data-gp) im Gruppen-Block — derselbe Handler wie die alte Leiste
     if(offen.length){ const je = new Map(offen); box.querySelectorAll('[data-e3-pfad]').forEach(el => { const k = schl(el)
@@ -94205,6 +94207,98 @@
     }catch(e){ console.warn('[hw] WD-Rückfall', e); return false }
   }
   window._hw = { innen: hwInnenHtml, platz: hwPlatz, wurf: hwWurf, wdPause: hwWdPause, stand: _hw }   // Test-Haken (Stub)
+
+  /* ========== RANGE-WÜRFEL ========== */
+  /* RV1 (Finn 11.11.2026 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und
+   * Lotanzahl, alles drei … für alle drei wird einzeln gewürfelt“): je Planer × Unternehmen der Anteil „klein“ (%) und die Faktor-Spanne von–bis (%). Railway
+   * würfelt je Konto × Tag fest (app.py rv_faktoren: Anteil, dann drei eigene Faktoren für TP, SL, Lots) und wendet sie NUR auf die Etappe an (letzter Trade,
+   * Klein-, Mini-, Gewinntag-Trade bleiben), nach Boden-/Tagesgrenze-Kappung — nie größer als der normale Trade, TP/SL nie enger als 10 Pkt. Speicher: Tabelle
+   * planer_range_wuerfel, GET/POST /admin/range-wuerfel. Kein Wert = aus. Nur Challenge-Planer CFD. Eigene Klasse .rw-karte (nicht .hw-karte), sonst zeichnete
+   * hwAlleZeichnen die Karte als Handels-Würfel neu. */
+  const RW_PLANER = { challenge_cfd: 'Challenge-Planer CFD' }
+  const _rw = { d: {}, at: {}, laeuft: {}, entwurf: {}, msg: {}, fokus: null }
+  const rwSchl = (planer, gid) => planer + '|' + (gid || '')
+  function rwLaden(gid){
+    const g = gid || ''
+    if(_rw.laeuft[g]) return _rw.laeuft[g]
+    _rw.laeuft[g] = (async () => {
+      try{ _rw.d[g] = await apdApi('GET', '/range-wuerfel' + (g ? '?unternehmen=' + encodeURIComponent(g) : ''), null, '/admin') }
+      catch(e){ _rw.d[g] = (e && (e.status === 404 || e.status === 405)) ? { fehlt: true } : Object.assign({}, _rw.d[g] || {}, { fehler: (e && e.message) || String(e) }) }
+      finally{ _rw.laeuft[g] = null; _rw.at[g] = Date.now(); try{ rwAlleZeichnen(g) }catch(_){} }
+    })()
+    return _rw.laeuft[g]
+  }
+  // REIN (Test-Haken): Innenleben aus Antwort D, Entwurf {pct, von, bis} und Meldung
+  function rwInnenHtml(planer, D, entwurf, msg){
+    const titel = `<div class="hw-titel">Range-Würfel<small>${escapeHtml(RW_PLANER[planer] || planer)} · je Konto und Tag gewürfelt · TP, SL und Lots je eigener Faktor</small></div>`
+    if(!D || (!D.werte && !D.fehlt && !D.fehler)) return `<div class="hw-kopf">${titel}<span class="hw-fuss">lädt …</span></div>`
+    if(D.fehlt) return `<div class="hw-kopf">${titel}<span class="hw-fuss">kommt mit dem nächsten Backend-Stand — bis dahin normale Trades</span></div>`
+    if(!D.werte) return `<div class="hw-kopf">${titel}<span class="hw-msg fehler">⚠ nicht lesbar: ${escapeHtml(String(D.fehler || '?'))}</span></div>`
+    const w = (D.werte || {})[planer] || null, std = D.standard || { von: 10, bis: 100 }
+    const ist = { pct: w && w.pct != null ? String(hwZahl(w.pct)) : '', von: String(hwZahl(w && w.von) ?? std.von), bis: String(hwZahl(w && w.bis) ?? std.bis) }
+    const e = Object.assign({}, ist, entwurf || {})
+    const darf = D.darf === true && D.tabelle !== false
+    const unt = D.unternehmen && D.unternehmen.gruppe_id ? String(D.unternehmen.name || 'Unternehmen') : 'Hermann Technologies (Standard)'
+    const ein = (f, label, cls) => `<input type="number" class="input mono${cls ? ' ' + cls : ''}${e[f] !== ist[f] ? ' geaendert' : ''}" data-rw-in="${f}" min="${f === 'pct' ? 0 : 1}" max="100" step="1" inputmode="numeric" value="${escapeHtml(e[f])}" aria-label="${escapeHtml(label)}">`
+    const feld = darf
+      ? `<span>Haupt-Trades klein</span>${ein('pct', 'Anteil kleiner Haupt-Trades in Prozent', 'rw-klein')} % <span>· Faktor</span>${ein('von', 'Faktor von in Prozent', 'rw-klein')}–${ein('bis', 'Faktor bis in Prozent', 'rw-klein')} %`
+        + `<button type="button" class="btn btn-ghost btn-xs" data-rw-speichern>Speichern</button>`
+      : `<span>Haupt-Trades klein</span><b class="mono">${ist.pct === '' ? 'aus' : hwPct(ist.pct) + ' %'}</b><span>· Faktor ${escapeHtml(hwPct(ist.von))}–${escapeHtml(hwPct(ist.bis))} %</span>`
+    const p = hwZahl(ist.pct)
+    const fuss = (p == null || p <= 0) ? 'aus — jeder Haupt-Trade normal'
+      : `≈ ${hwPct(p)} von 100 Haupt-Trades werden klein: TP, SL und Lots je ${hwPct(ist.von)}–${hwPct(ist.bis)} % des normalen Werts (einzeln gewürfelt, nie größer), TP/SL mindestens ${hwPct(D.min_pkt || 10)} Pkt — nur die Etappe, der letzte Trade bis zum Ziel bleibt`
+    const ohneTab = D.tabelle === false ? `<div class="hw-msg fehler">Tabelle planer_range_wuerfel fehlt — sql/2026-11-11_rv1_range_wuerfel.sql einspielen (bis dahin aus)</div>` : ''
+      + (D.fehler ? `<div class="hw-msg fehler">⚠ ${escapeHtml(String(D.fehler))}</div>` : '')
+    const m = msg ? `<span class="hw-msg ${msg.ok ? 'ok' : 'fehler'}">${escapeHtml(msg.text)}</span>` : ''
+    return `<div class="hw-kopf">${titel}<div class="hw-zeile">${feld}${m}</div></div>`
+      + `<div class="hw-fuss">${escapeHtml(fuss)} · gilt für ${escapeHtml(unt)}${darf ? ' · Anteil leer = aus' : ' · nur ansehen'}</div>${ohneTab}`
+  }
+  function rwZeichnen(el){
+    const planer = el.dataset.rwPlaner, gid = el.dataset.rwGid || '', k = rwSchl(planer, gid)
+    el.innerHTML = rwInnenHtml(planer, _rw.d[gid], _rw.entwurf[k], _rw.msg[k])
+    el.querySelectorAll('[data-rw-in]').forEach(inp => {
+      const f = inp.dataset.rwIn, fk = k + '|' + f
+      inp.addEventListener('input', () => { _rw.entwurf[k] = Object.assign({}, _rw.entwurf[k] || {}, { [f]: inp.value }); _rw.msg[k] = null; inp.classList.add('geaendert') })
+      inp.addEventListener('focus', () => { _rw.fokus = fk })
+      inp.addEventListener('blur', () => setTimeout(() => { if(el.isConnected && _rw.fokus === fk && !el.contains(document.activeElement)) _rw.fokus = null }, 0))
+      inp.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); rwSpeichern(el) } else if(ev.key === 'Escape'){ delete _rw.entwurf[k]; rwZeichnen(el) } })
+      if(_rw.fokus === fk){ try{ inp.focus({ preventScroll: true }); const n = inp.value.length; inp.setSelectionRange?.(n, n) }catch(_){} }
+    })
+    const knopf = el.querySelector('[data-rw-speichern]')
+    if(knopf) knopf.addEventListener('click', () => rwSpeichern(el))
+  }
+  function rwAlleZeichnen(gid){
+    document.querySelectorAll('.rw-karte').forEach(el => { if((el.dataset.rwGid || '') === (gid || '')) rwZeichnen(el) })
+  }
+  async function rwSpeichern(el){
+    const planer = el.dataset.rwPlaner, gid = el.dataset.rwGid || '', k = rwSchl(planer, gid)
+    const wert = f => String(((el.querySelector(`[data-rw-in="${f}"]`) || {}).value) ?? '').trim().replace(',', '.')
+    const pR = wert('pct'), vR = wert('von'), bR = wert('bis')
+    const pct = pR === '' ? null : Number(pR), von = vR === '' ? 10 : Number(vR), bis = bR === '' ? 100 : Number(bR)
+    if(pct != null && (!isFinite(pct) || pct < 0 || pct > 100)){ _rw.msg[k] = { ok: false, text: 'Anteil 0 bis 100 (leer = aus)' }; rwZeichnen(el); return }
+    if(!isFinite(von) || !isFinite(bis) || von < 1 || bis > 100 || von > bis){ _rw.msg[k] = { ok: false, text: 'Faktor: 1 ≤ von ≤ bis ≤ 100' }; rwZeichnen(el); return }
+    const knopf = el.querySelector('[data-rw-speichern]'); if(knopf) knopf.disabled = true
+    try{
+      const d = await apdApi('POST', '/range-wuerfel', Object.assign({ planer, pct, von, bis }, gid ? { gruppe_id: gid } : {}), '/admin')
+      _rw.d[gid] = Object.assign({}, _rw.d[gid] || {}, d.werte ? { werte: d.werte } : {})
+      delete _rw.entwurf[k]; _rw.at[gid] = Date.now()
+      const w = ((_rw.d[gid] || {}).werte || {})[planer]
+      _rw.msg[k] = { ok: true, text: w && w.pct != null ? `✓ gespeichert: ${hwPct(w.pct)} % klein, Faktor ${hwPct(w.von)}–${hwPct(w.bis)} %` : '✓ gespeichert: aus' }
+    }catch(e){ _rw.msg[k] = { ok: false, text: 'nicht gespeichert: ' + ((e && e.message) || e) } }
+    rwAlleZeichnen(gid)
+  }
+  // Karte hinter host setzen (idempotent); planer null → eine vorhandene Karte entfernen (Challenge-Planer Futures)
+  function rwPlatz(host, planer, gid){
+    if(!host || !host.parentElement || !host.classList.contains('hw-karte')) return   // nur direkt unter dem Handels-Würfel
+    let el = host.nextElementSibling
+    const da = el && el.classList.contains('rw-karte')
+    if(!planer || !RW_PLANER[planer]){ if(da) el.remove(); return }
+    const g = gid || ''
+    if(!da){ el = document.createElement('div'); el.className = 'rw-karte'; host.after(el) }
+    if(el.dataset.rwPlaner !== planer || (el.dataset.rwGid || '') !== g || !el.firstChild){ el.dataset.rwPlaner = planer; el.dataset.rwGid = g; rwZeichnen(el) }
+    if(!_rw.d[g] || Date.now() - (_rw.at[g] || 0) > HW_FRISCH_MS) rwLaden(g)
+  }
+  window._rw = { innen: rwInnenHtml, platz: rwPlatz, stand: _rw }   // Test-Haken (Stub)
 
   /* ========== SUPPORT-CHAT „LOTSE“ ========== */
   /* Finn 27.10.2026: „Alle Leute, die Prophos nutzen, sollen mich nicht alle 10 Minuten fragen müssen … beschränkter Zugriff auf die
