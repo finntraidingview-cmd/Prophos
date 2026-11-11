@@ -48296,7 +48296,7 @@
       if(accEls.wdCount)  accEls.wdCount.value  = _wdF && _wdF.auto ? _wdF.count : editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
       if(accEls.wdTarget) accEls.wdTarget.value = editAccount.goalTarget > 0 ? editAccount.goalTarget : ''
       if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
-      if(accEls.wartetPayout) accEls.wartetPayout.checked = !!editAccount.waitingPayoutSince
+      if(accEls.wartetPayout){ accEls.wartetPayout.checked = !!editAccount.waitingPayoutSince; accEls.wartetPayout.dataset.start = accEls.wartetPayout.checked ? '1' : '0' }   // KE1: Stand beim Öffnen
       accConsSetzen(accEls.cons, accEls.consFrei, editAccount.consistencyPct)   // Consistency (07.10.2026), null = Standard
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
@@ -48333,7 +48333,7 @@
       if(accEls.wdCount)  accEls.wdCount.value  = ''
       if(accEls.wdTarget) accEls.wdTarget.value = ''
       if(accEls.payoutReady){ accEls.payoutReady.value = ''; accEls.payoutReady.dataset.vorschlag = '' }   // P1: toggleAcBloecke belegt nach Firma/Typ vor
-      if(accEls.wartetPayout) accEls.wartetPayout.checked = false
+      if(accEls.wartetPayout){ accEls.wartetPayout.checked = false; accEls.wartetPayout.dataset.start = '0' }   // KE1
       accConsSetzen(accEls.cons, accEls.consFrei, null)
     }
     // Passwort-Feld immer verdeckt starten
@@ -48678,7 +48678,17 @@
     // PF2 (05.11.2026): Futures (funded/winning_days) speichern nie ein Datum — ein Alt-Termin fällt beim Speichern weg
     const payoutReadyVal = !payoutAbErlaubt(type) ? null : payoutSecOn ? (accEls.payoutReady?.value || null) : (vorher?.payoutReadyAt || null)
     // Waiting for Payout (29.09.2026): nur Funded CFD; der alte Zeitstempel bleibt, solange der Haken bleibt
-    const wartetPayoutVal = (type === 'funded_cfd' && accEls.wartetPayout?.checked) ? (vorher?.waitingPayoutSince || new Date().toISOString()) : null
+    /* KE1 (Master 11.11.2026, Fund S3 aus FT2): vorher wurde waiting_payout_since bei JEDEM Speichern eines Nicht-CFD-Kontos (Winning Days, Funded, Challenge)
+     * auf null geschrieben — der Haken steht nur bei Funded CFD, außerhalb galt „nicht angehakt“. Jetzt schreibt der Editor das Feld nur noch, wenn Finn es
+     * selbst ändert: beim Neu-Anlegen, beim Umschalten des sichtbaren Hakens (Funded CFD) und beim Wechsel des Typs WEG von Funded CFD (wie bisher → leer).
+     * Sonst wird das Feld gar nicht gesendet — der DB-Wert bleibt, auch wenn der Server ihn inzwischen gesetzt hat (Payout-Anfrage, Abhaken). */
+    const wpVorher = vorher?.waitingPayoutSince || null
+    const wpHaken = !!accEls.wartetPayout?.checked, wpSichtbar = !!accEls.wartetPayoutRow && !accEls.wartetPayoutRow.hidden
+    // Prüfer KE1 (SOLLTE): verglichen wird mit dem Haken beim ÖFFNEN (dataset.start), nicht mit dem frisch gelesenen Bestand — lädt der Tab die Konten neu, während
+    // der Editor offen ist (Server hat Waiting gesetzt), zählt ein unberührter Haken sonst als „umgestellt“ und schriebe null
+    const wpStart = accEls.wartetPayout?.dataset?.start != null ? accEls.wartetPayout.dataset.start === '1' : !!wpVorher
+    const wartetSchreiben = !isEdit || (type === 'funded_cfd' && wpSichtbar && wpHaken !== wpStart) || (String(vorher?.type || '') === 'funded_cfd' && type !== 'funded_cfd')
+    const wartetPayoutVal = !wartetSchreiben ? wpVorher : (type === 'funded_cfd' && wpHaken) ? (wpVorher || new Date().toISOString()) : null
     const wdCountNum  = parseInt(accEls.wdCount?.value, 10)
     const _wdV = (vorher && vorher.goalWdKorrektur !== undefined) ? zielFortschritt(vorher) : null
     const wdAuto = _wdV && _wdV.auto ? _wdV : null   // automatische WD-Zählung (03.11.2026)
@@ -48865,7 +48875,7 @@
           goal_manual_last: acc.goalManualLast,
           ...(acc.goalWdKorrektur !== undefined ? { goal_wd_korrektur: acc.goalWdKorrektur } : {}),   // WD-Korrektur aus dem Modal (03.11.2026, Gegenprüfung: fehlte beim Bearbeiten)
           payout_ready_at:  acc.payoutReadyAt,
-          waiting_payout_since: acc.waitingPayoutSince,
+          ...(wartetSchreiben ? { waiting_payout_since: acc.waitingPayoutSince } : {}),   // KE1: nur bei eigener Änderung, sonst bleibt der DB-Wert
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
           cred_password: acc.creds?.password || null,
@@ -58768,7 +58778,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2195'
+  const OS_TAB_BUILD = '2026-09-22.2196'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
