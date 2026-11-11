@@ -1641,6 +1641,61 @@ def terminal_schliessbar(cfg, st, age, plan_status=None, lese=None):
     return True, "kein Trade aktiv"
 
 
+# ══ PL1 TERMINAL-ZU NIE WÄHREND EINES BOT-LAUFS (11.11.2026, Master nach Hinweis S2 aus VF3): terminal_schliessbar sah nur den Panel-Plan-Status — ein
+# Start, eine Deal-Lesung oder ein Konto-Vorflug derselben Instanz hielt den Zu-Worker nicht auf (Plan noch nicht „geplant/laufend“ im Panel, Echo V2
+# ohne Panel-Plan, Fern-Start). Jetzt schließen alle drei Zu-Wege (Trade-Ende-Worker, Leerlauf-Wächter, Knopf „Terminals ohne Trade schliessen“) nur
+# über _terminal_kill_riegel: kein Kill, solange der MASTER_ORDER_LOCK der Instanz gehalten wird, DEALS_LESEN/VORFLUG_LESEN sie führt oder eine
+# Order/ein Close angemeldet ist (ORDER_ANGEMELDET < ORDER_ANGEMELDET_S). Der Lock wird nur OHNE Warten genommen (blocking=False, sonst nächster Takt)
+# und während des Schließens gehalten — eine Order, die genau dann kommt, bekommt 409 retry_ok (grund terminal_zu, nichts gesendet) statt eines
+# Klicks in ein sterbendes Terminal. ══
+TERMINAL_ZU_HAELT = set()   # config_files, deren MASTER_ORDER_LOCK gerade ein Terminal-Zu hält (Sekunden, nichts gesendet)
+
+
+def terminal_zu_order_riegel(fname, locks, angemeldet, lesen, jetzt, angemeldet_s=60.0):
+    """REIN RECHNEND (testbar, PL1): '' = kein Bot-Lauf auf dieser Instanz, sonst der Grund, warum das Master-Terminal jetzt nicht zugeht.
+    locks = MASTER_ORDER_LOCKS, angemeldet = ORDER_ANGEMELDET, lesen = DEALS_LESEN | VORFLUG_LESEN."""
+    if fname in (lesen or ()):
+        return "Lese-Lauf (Deal-Historie/Konto-Vorflug) auf dieser Instanz"
+    lk = (locks or {}).get(fname)
+    if lk is not None and lk.locked():
+        return "Order/Close läuft (MASTER_ORDER_LOCK der Instanz gehalten)"
+    try:
+        an = float((angemeldet or {}).get(fname) or 0.0)
+    except (TypeError, ValueError):
+        an = 0.0
+    if an and jetzt - an < float(angemeldet_s):
+        return f"Order/Close angemeldet (vor {max(0, int(jetzt - an))} s)"
+    return ""
+
+
+def _terminal_kill_riegel(fname, install_dir):
+    """PL1 → (geschlossen: bool, pids: int, grund): Master-Terminal der Instanz schließen, nur ohne Bot-Lauf (terminal_zu_order_riegel) und unter dem
+    eigenen MASTER_ORDER_LOCK (ohne Warten). pids 0 + geschlossen True = war schon zu. Wirft nicht für die Riegel; Kill-Fehler gehen an den Aufrufer."""
+    grund = terminal_zu_order_riegel(fname, MASTER_ORDER_LOCKS, ORDER_ANGEMELDET, DEALS_LESEN | VORFLUG_LESEN, time.time(), ORDER_ANGEMELDET_S)
+    if grund:
+        return False, 0, grund
+    # Merker VOR dem acquire setzen und NACH dem release entfernen (Prüfer PL1 SOLLTE, wie EA_FROST_HAELT): eine Order, deren acquire genau dazwischen
+    # scheitert, sähe sonst keinen Merker und bekäme „läuft schon eine Order“ (retry_ok False) statt terminal_zu
+    with MASTER_ORDER_GUARD:
+        lock = MASTER_ORDER_LOCKS.setdefault(fname, threading.Lock())
+        TERMINAL_ZU_HAELT.add(fname)
+        if not lock.acquire(blocking=False):
+            TERMINAL_ZU_HAELT.discard(fname)
+            return False, 0, "MASTER_ORDER_LOCK der Instanz gerade belegt"
+    try:
+        # zwischen Prüfung und acquire angemeldet? (die Route meldet vor ihrem acquire an) — dann nicht schließen
+        grund = terminal_zu_order_riegel(fname, {}, ORDER_ANGEMELDET, DEALS_LESEN | VORFLUG_LESEN, time.time(), ORDER_ANGEMELDET_S)
+        if grund:
+            return False, 0, grund
+        pids = provision.terminal_pids(install_dir)
+        for pid in pids:
+            provision._taskkill(pid, grace_s=5)
+        return True, len(pids), ""
+    finally:
+        lock.release()
+        TERMINAL_ZU_HAELT.discard(fname)
+
+
 def loesch_terminal_dir(cfg, andere_cfgs):
     """Reine Entscheidung (testbar, ohne I/O): welcher Master-Terminal-Ordner
     darf nach dem Loeschen DIESER Config mit geschlossen werden? None = keiner.
@@ -1770,14 +1825,13 @@ def _terminal_zu_worker(fname, ausloeser):
             ok, grund = terminal_schliessbar(cfg, st, age, plan_status, lese)
             if ok:
                 install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
-                pids = provision.terminal_pids(install_dir)
-                if not pids:
-                    print(f"[panel] {fname}: Terminal war schon zu ({ausloeser}).", flush=True)
+                # PL1: nie während eines Bot-Laufs dieser Instanz (Lock ohne Warten, sonst nächster Takt)
+                zu, n, grund_r = _terminal_kill_riegel(fname, install_dir)
+                if zu:
+                    print(f"[panel] {fname}: " + (f"Master-Terminal geschlossen ({ausloeser})." if n else f"Terminal war schon zu ({ausloeser})."),
+                          flush=True)
                     return
-                for pid in pids:
-                    provision._taskkill(pid, grace_s=5)
-                print(f"[panel] {fname}: Master-Terminal geschlossen ({ausloeser}).", flush=True)
-                return
+                grund = grund_r
             time.sleep(5)
         # Ehrlich benennen statt still aufgeben (Muster TronGrid-429, 25.08.2026)
         print(f"[panel] {fname}: Terminal-Zu nach {ausloeser} aufgegeben — zuletzt: {grund}.",
@@ -1926,8 +1980,10 @@ def _leerlauf_waechter():
                 if fname in _TERMINAL_ZU_AKTIV:
                     continue  # der Trade-Ende-Worker ist schon dran
                 anzeige = cfg.get("display_name") or i["name"]
-                for pid in provision.terminal_pids(install_dir):
-                    provision._taskkill(pid, grace_s=5)
+                zu_ok, _n, grund_r = _terminal_kill_riegel(fname, install_dir)   # PL1: nie während eines Bot-Laufs, sonst nächster Takt (Zähler bleibt)
+                if not zu_ok:
+                    print(f"[panel] {fname}: Leerlauf-Waechter wartet — {grund_r}.", flush=True)
+                    continue
                 print(f"[panel] {fname}: Master-Terminal geschlossen (Leerlauf-Waechter: {anzeige}, "
                       f"seit {round((time.time() - seit) / 60)} min kein Trade — {grund}).", flush=True)
                 _LEERLAUF_SEIT.pop(fname, None)
@@ -8411,6 +8467,11 @@ class Handler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError):
                     pass
                 ok, grund = terminal_schliessbar(cfg, st, age, plans_akt.get(i["config_file"]))
+                if ok:   # PL1: läuft gerade ein Bot-Lauf, gleich hier als übersprungen melden (der Killer prüft beim Schließen noch einmal)
+                    _r = terminal_zu_order_riegel(i["config_file"], MASTER_ORDER_LOCKS, ORDER_ANGEMELDET, DEALS_LESEN | VORFLUG_LESEN,
+                                                  time.time(), ORDER_ANGEMELDET_S)
+                    if _r:
+                        ok, grund = False, _r
                 if ok:
                     geschlossen.append(anzeige)
                     zu_killen.append((i["config_file"], install_dir))
@@ -8420,9 +8481,9 @@ class Handler(BaseHTTPRequestHandler):
                 def _killer(kandidaten=zu_killen):
                     for kf, kdir in kandidaten:
                         try:
-                            for pid in provision.terminal_pids(kdir):
-                                provision._taskkill(pid, grace_s=5)
-                            print(f"[panel] {kf}: Master-Terminal geschlossen (Knopf).", flush=True)
+                            zu_ok, _n, grund_r = _terminal_kill_riegel(kf, kdir)   # PL1
+                            print(f"[panel] {kf}: " + ("Master-Terminal geschlossen (Knopf)." if zu_ok else f"Terminal bleibt offen (Knopf) — {grund_r}."),
+                                  flush=True)
                         except Exception as e:
                             print(f"[panel] {kf}: Terminal-Zu-Fehler: {type(e).__name__}: {e}", flush=True)
                 threading.Thread(target=_killer, daemon=True).start()
@@ -8570,6 +8631,9 @@ class Handler(BaseHTTPRequestHandler):
                 if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts gesendet, gleich erneut."}, ensure_ascii=False))
+                if inst["config_file"] in TERMINAL_ZU_HAELT:   # PL1: Terminal-Zu hält den Lock (Sekunden) — nichts gesendet, gleich erneut
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "terminal_zu", "msg":
+                        "Master-Terminal wird gerade geschlossen (kein Trade) — nichts gesendet, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
                     "Fuer diese Instanz laeuft gerade schon eine Order — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))
@@ -8690,6 +8754,9 @@ class Handler(BaseHTTPRequestHandler):
                 if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts geklickt, gleich erneut."}, ensure_ascii=False))
+                if inst["config_file"] in TERMINAL_ZU_HAELT:   # PL1: Terminal-Zu hält den Lock (Sekunden) — nichts geklickt, gleich erneut
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "terminal_zu", "msg":
+                        "Master-Terminal wird gerade geschlossen (kein Trade) — nichts geklickt, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
                     "Fuer diese Instanz laeuft gerade schon ein Bot-Lauf — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))
