@@ -550,8 +550,10 @@ def main():
         aufrufe = [m.start() for m in _re.finditer(r"(?<![\w.])" + kopf.group(1) + r"\(", html)
                    if not html[max(0, m.start() - 9):m.start()].endswith("function ")]
         return bool(aufrufe) and all(gesperrt(a, riegel, tiefe - 1) for a in aufrufe)
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 2cec1ca2 WS1b Zufalls-SL — neue Schreibstelle wdSlwSpeichern (sl_wuerfel),
+    # Rumpf beginnt mit `if(await wdNurGruppe()) return …` → gesperrt; wd_farmer_regeln 7 → 8
     stellen = [m.start() for m in _re.finditer(r"supabase\.from\('wd_farmer_regeln'\)\.update", html)]
-    check(len(stellen) == 7 and all(gesperrt(k, ("wdNurGruppe()", "_admNurGruppeLaden()")) for k in stellen),
+    check(len(stellen) == 8 and all(gesperrt(k, ("wdNurGruppe()", "_admNurGruppeLaden()")) for k in stellen),
           f"M1: alle {len(stellen)} Schreibstellen in wd_farmer_regeln für Eingeschränkte gesperrt")
     rpc = [m.start() for m in _re.finditer(r"supabase\.rpc\('wd_konto_setzen'", html)]
     check(len(rpc) == 6 and all(gesperrt(k, ("wdDarf(", "wdNurGruppe()")) for k in rpc),

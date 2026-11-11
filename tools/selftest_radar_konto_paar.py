@@ -71,7 +71,8 @@ soll("gleiche Kontonummer, andere ID → kein Chip", erg["andere_id_gleiche_nr"]
 soll("zwei alte Trades: Läuft-Chip springt zum jüngsten, beide alten springen zum laufenden",
      erg["zwei_alte"]["o"]["ziel"] == "r2" and erg["zwei_alte"]["r1"] == {"art": "naechster", "ziel": "o"})
 
-soll("Chip in der Zeile neben SL/TP-Chip", "${wdlSltpChip(t)}${wdlPaarChip(t)}" in HTML)
+# nachgezogen 11.11.2026 (ST1, Slave 2): 2cec1ca2 WS1b setzt den WD-Zufalls-SL-Chip (_planWdSlChipHtml) gewollt zwischen SL/TP- und Paar-Chip
+soll("Chip in der Zeile neben SL/TP-Chip (dazwischen nur der WD-SL-Chip)", "${wdlSltpChip(t)}${window._planWdSlChipHtml?.(t) || ''}${wdlPaarChip(t)}" in HTML)
 soll("Paare je Render aus allen sichtbaren Trades", "_wdlPaare = wdlKontoPaare(alleTrades)" in HTML)
 i_pa, i_tr = HTML.index("closest('[data-wdl-paar]')"), HTML.index("closest('[data-wdl-trade]'); if(!c) return")
 soll("Klick auf den Chip vor dem Zeilen-Klick (Chart-Linien), mit return", i_pa < i_tr and "wdlPaarSpringen(pa.getAttribute('data-wdl-paar')); return" in HTML)

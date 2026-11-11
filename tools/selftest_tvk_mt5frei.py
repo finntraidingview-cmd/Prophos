@@ -41,7 +41,11 @@ def main():
 
         @staticmethod
         def run(*a, **k):
-            gestartet.append(a[0][2] if a and len(a[0]) > 2 else "?")
+            # nachgezogen 11.11.2026 (ST1, Slave 2): 39596cc7 SW1b — der Bot startet über bot_argv() = [python, -c, BOT_STARTER_CODE, bot, modus, …]
+            # (mit bot_ohne_cache.flag wie früher [python, bot, modus, …]); der Modus steht direkt hinter dem Bot-Pfad
+            cmd = list(a[0]) if a else []
+            i = 4 if len(cmd) > 1 and cmd[1] == "-c" else 2
+            gestartet.append(cmd[i] if len(cmd) > i else "?")
             return type("R", (), {"stdout": json.dumps({"ok": True, "konten": ["APEX-1"], "trail": "x"}), "stderr": ""})()
     try:
         panel.subprocess = _Sub

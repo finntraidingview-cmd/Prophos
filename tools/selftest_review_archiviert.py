@@ -98,7 +98,8 @@ check("archivCloudAbgleich()" in hl and "wdlAktiv()" in hl, "offener Radar gleic
 ab = fn("archivCloudAbgleich")
 check("archNeu()" in ab and "_origLocalStorageSetItem" in ab and "saveArchive" not in ab, "Abgleich schreibt nur lokal, ohne Upload, eigene Einträge bleiben")
 sp = html[html.index("async function mklWdErledigtSpeichern("):html.index("document.getElementById('mwdErledigtClose')")] if "async function mklWdErledigtSpeichern(" in html else ""
-check("kontoStatus === 'passed'" in sp and "if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => openSuccessorWizard(ar.konto_id)" in sp and "await archivCloudAbgleich()" in sp and "reason: 'passed_pending'" in sp, "Abhaken „Phase bestanden“ am eigenen Konto öffnet den Assistenten")
+# nachgezogen 11.11.2026 (ST1, Slave 2): 4f5ff5e2 AB2 schließt vor dem Assistenten gewollt erst den Abhak-Strahl (ab2Zu) — Assistent öffnet weiter
+check("kontoStatus === 'passed'" in sp and "if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => { if(ab2) ab2Zu(ab2.el); openSuccessorWizard(ar.konto_id) }" in sp and "await archivCloudAbgleich()" in sp and "reason: 'passed_pending'" in sp, "Abhaken „Phase bestanden“ am eigenen Konto öffnet den Assistenten")
 check("archivieren" not in fn("nachfolgerRadarNachziehen").lower() and "erledigt" not in fn("nachfolgerRadarNachziehen").lower(), "Nachziehen ist nur Anzeige: kein Abhaken, kein P&L")
 print(f"\n{'selftest_review_archiviert: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
 sys.exit(1 if FEHLER else 0)

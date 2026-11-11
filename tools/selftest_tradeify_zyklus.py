@@ -151,7 +151,12 @@ check("Math.max(Number(zy.ziel), tpVor || 0)" in html, "TP-Vorgabe am Konto schl
 check("document.addEventListener('click', e => {\n    const el = e.target && e.target.closest && e.target.closest('.acc-rec-chip" not in html and "window._recoveryChipKlick" in html, "kein Sammel-Klick-Handler, Klick nur am Chip")
 check('if _zp and str(konto.get("account_type") or "") in _zp_typen and not trotzdem:' in app   # LZ1: Tradeify funded + WD, Lucid nur WD
       and "Payout erst ab +{_m_txt} $ — nichts angelegt" in app, "Payout-Anfrage über Railway wird bei Zyklus < Mindest-Gewinn (Standard +1 $) abgelehnt (409)")
-check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count("Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE'") == 2,
+# nachgezogen 11.11.2026 (ST1, Slave 2): cc413c54 PO2 bringt gewollt eine dritte Stelle (Railway „unbekannt“ → Urteil aus /konto-ziele) mit demselben Text;
+# die beiden alten Stellen (Anfragbar-Zelle, Finanzen-Payout) werden weiter einzeln geprüft
+_po_txt = "Payout erst ab +${(zyT.min_usd != null ? Number(zyT.min_usd) : 1).toLocaleString('de-DE'"
+check("zyT.art === 'tradeify' && zyT.gesperrt" in html and html.count(_po_txt) == 3
+      and ("sub: `Zyklus ${zyklusTxt(zyT.gewinn)} $ · " + _po_txt) in html and ("msgEl.textContent = `Zyklus ${zyklusTxt(zyT.gewinn)} $ · " + _po_txt) in html
+      and ("sub: `Zyklus ${mn.zg || '—'} · " + _po_txt) in html,
       "Frontend: Anfragbar-Zelle und Finanzen-Payout zeigen „Zyklus −X $ · Payout erst ab +<Mindest-Gewinn> $“ (Standard 1 $, E4)")
 check("(/tradeify/i.test(String(a.firm || '')) && !istTradeifyCfd(a.firm))" in html, "Zyklus-Stand lädt auch für Tradeify-WD-Konten (nie Tradeify CFD)")
 check(html.count("window._kontoRecoveryChipHtml?.(t.konto_id") == 2 and "function kontoRecoveryChipHtml(kid, name)" in html and ">Recovery</span>" in html,

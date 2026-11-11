@@ -48,7 +48,9 @@ def main():
     # UI1b (05.11.2026): im Challenge-Planer steht statt der Leiste der Block „Planer · alle Firmen" (oben), der in die Einstellungs-Gruppe umzieht
     ok("return kopf + kpis + charts + oben + zs + (x.funded ? '' : '<div class=\"e3-platz\" data-e3-platz></div>') + listen + unten" in g
        and "const oben = (!fd && !x.funded) ? apgAlleHtml(v, x) : leiste" in g
-       and "return kopf + kpis + charts + zs + einst + listen + unten }" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · (E3-Platz) · Listen; Funded CFD: Zeitstrahl · Einstellungen · Listen")
+       # nachgezogen 11.11.2026 (ST1, Slave 2): 81305adc WP3b setzt im Funded-CFD-Zweig die Liste „Neu auf Waiting for Payout" (wp3) gewollt hinter die KPIs
+       and "return kopf + kpis + wp3 + charts + zs + einst + listen + unten }" in g
+       and "let wp3 = ''; try{ wp3 = fcfdNeuWartetHtml(u) }" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · (E3-Platz) · Listen; Funded CFD: KPI · Neu auf Waiting · Zeitstrahl · Einstellungen · Listen")
     ok('<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button>' in g, "7/30 Tage ausgegraut mit „kommt“")
     ok("data-ap-tag" in g and "data-apg-id" in g and "data-apg-firma" in g, "Zeitraum + Filter ID/Firma")
     ok(g.count("apgKpi({ gross: true") >= 2 and g.count("apgKpi({ icon:") >= 3, "2 große + 3 kleine KPI-Karten")
@@ -56,7 +58,8 @@ def main():
         ok(f"name: '{n}'" in g or (n == "Zu bestätigen" and "name: vorschau ? 'Vorschau' : 'Zu bestätigen'" in g), "KPI " + n)   # Funded Futures: „Vorschau", solange der Funded-Planer aus ist (30.10.2026)
     ok('id="apg-c-ls"' in g and 'id="apg-c-std"' in g, "Chart-Reihe Long/Short + Starts je Stunde")
     # zwei Stellen, je Zweig genau ein Knopf: Funded CFD (if(fc){ … return }) gibt ihn in die Einstellungen-Gruppe, alle anderen in die Leiste
-    _fc = g[g.index("    if(fc){ const np = "):g.index("return kopf + kpis + charts + zs + einst + listen + unten }")]
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 81305adc WP3b — Zweig-Ende heißt jetzt „… kpis + wp3 + charts …"
+    _fc = g[g.index("    if(fc){ const np = "):g.index("return kopf + kpis + wp3 + charts + zs + einst + listen + unten }")]
     ok(g.count('data-tpl-nachplan="1"') == 2 and _fc.count('data-tpl-nachplan="1"') == 1 and 'class="apg-haupt"' in g, "EIN Hauptknopf Nachplanen je Zweig (bestehender Handler)")
     ok("apdBotSchalterHtml(v, apdAdmin())" in g and "<details class=\"apg-schalter\"" in g, "bestehende Schalter aufklappbar, nicht entfernt")
     ok("x.ow.offen" in g and "x.ow.laeuft" in g and "T.braucht" in g and "x.ow.warten" in g and "T.zeitstrahl" in g, "Zeitstrahl + Listen aus den bestehenden Bausteinen")

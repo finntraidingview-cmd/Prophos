@@ -48,6 +48,12 @@ FakeLS.prototype = {
 }
 var localStorage = null, sessionStorage = { m: {}, setItem(k, v){ this.m[k] = String(v) }, getItem(k){ return k in this.m ? this.m[k] : null }, removeItem(k){ delete this.m[k] } }
 var console = { warn(){}, log(){} }, atToast = null
+// nachgezogen 11.11.2026 (ST1, Slave 2): 8972eb4d ID1c legt gewollt den Wechsel-Merker (zweiter Tab) in den Profil-Block — oberste Ebene braucht jetzt
+// window (addEventListener, window.localStorage = der Fake), Storage.prototype (Sperre wickelt setItem/removeItem ein) und Takt-Stubs; JXA kennt sie nicht.
+// Wegsichern/Einspielen selbst rufen den Merker nicht — die Prüfungen unten bleiben dieselben.
+function Storage(){}
+var window = { addEventListener(){}, get localStorage(){ return localStorage } }
+var setInterval = () => 0, clearInterval = () => {}, document = { createElement(){ return { dataset: {} } }, body: { appendChild(){} } }, location = { reload(){} }
 function fuellen(ls, keys){ for(const [k, v] of Object.entries(keys)) ls.m.set(k, v) }
 const X = n => 'x'.repeat(n)
 """

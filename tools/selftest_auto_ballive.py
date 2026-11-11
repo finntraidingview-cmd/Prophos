@@ -14,7 +14,8 @@ def lade():
     i = src.index("def ap_balance_live(")
     j = src.index("\n\n\ndef _ap_konten_laden(", i)
     # acc_balance_wahl als Attrappe: Stand = Feld „stand" am Konto (die echte Wahl hat eigene Tests)
-    ns = {"acc_balance_wahl": lambda a, e, d: (1, "USD", "TV", (a or {}).get("stand") or "")}
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 4f48fd19 NA1 legte KK_RE = re.compile(…) in den Ausschnitt → re im Namensraum
+    ns = {"re": re, "acc_balance_wahl": lambda a, e, d: (1, "USD", "TV", (a or {}).get("stand") or "")}
     for k in ("AP_GRUND_BAL_LIVE", "AP_GRUND_BAL_FEHLER"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     exec(src[i:j], ns)

@@ -44,7 +44,11 @@ ok("if(k.hinweis === WD_HINWEIS_PAYOUT){ k.aktiv = false; delete k.nach_start; g
    and "wdKontoPayoutOffen(" not in blk and "_wd.payoutOffen" not in blk, "#4 wdPlaeneAnlegen: nur Zeilen-Hinweis, kein alter Mac-/PC-Stand")
 APP = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 j = APP.find("# PAYOUT OFFEN (R2c, 05.11.2026")
-ok(j > 0 and 'if mid in po_offen:' in APP[j:j + 4000] and '"grund": WD_HINWEIS_PAYOUT' in APP[j:j + 4000],
+# nachgezogen 11.11.2026 (ST1, Slave 2): 92e8578b WS1a schob den WD-SL-Würfel-Kontext zwischen Payout-Lesung und Schleife — der Ausschnitt
+# reicht jetzt bis zur ersten trade_plans-Lesung in der Schleife statt fester 4.000 Zeichen (Prüfung unverändert, plus frische pending_payouts-Lesung)
+_po = APP[j:APP.find('offen = sb_select("trade_plans"', j)] if j > 0 else ""
+ok(j > 0 and 'sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending"' in _po
+   and 'if mid in po_offen:' in _po and '"grund": WD_HINWEIS_PAYOUT' in _po,
    "#4 POST /admin/wd-plaene prüft pending_payouts frisch und gibt WD_HINWEIS_PAYOUT als Grund zurück")
 ok("if(rein && wdKontoPayoutOffen(k)) return wdSay(" in HTML, "#4 Hand-Weg „heute rein“ behält die strenge Prüfung (sicher in die richtige Richtung)")
 

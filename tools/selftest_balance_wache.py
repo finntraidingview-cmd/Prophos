@@ -24,7 +24,8 @@ def lade():
     # acc_balance_wahl als Attrappe: Balance/Stand aus den Feldern bal/stand am Konto
     ns = {"re": re, "datetime": datetime, "timezone": timezone,
           "acc_balance_wahl": lambda a, e, d: ((a or {}).get("bal"), "USD", "TV", (a or {}).get("stand") or "")}
-    for fn in ("_ap_ts", "ap_balance_live"):
+    # nachgezogen 11.11.2026 (ST1, Slave 2): cc2cdcce WS2a — ap_plan_bal_abweichung fragt tt_bal_wache_ok (Trade 1 einer Kette darf geprüft werden)
+    for fn in ("_ap_ts", "ap_balance_live", "tt_bal_wache_ok"):
         i = src.index(f"def {fn}(")
         exec(src[i:src.index("\n\n\ndef ", i)], ns)
     i = src.index("AP_AUTO_BEST_TAKT_S = ")

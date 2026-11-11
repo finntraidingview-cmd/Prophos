@@ -4,6 +4,7 @@
 Aufruf:  python3 tools/selftest_auto_ext.py
 Lädt die Funktion per Quelltext aus app.py (Muster selftest_reader_wacht: app.py zieht beim Import Flask und Threads)."""
 import os
+import re
 import sys
 
 HIER = os.path.dirname(os.path.abspath(__file__))
@@ -12,7 +13,8 @@ APP = os.path.join(os.path.dirname(HIER), "app.py")
 
 def lade():
     src = open(APP, encoding="utf-8").read()
-    ns = {}
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 4f48fd19 NA1 legte KK_RE = re.compile(…) in den Ausschnitt → re im Namensraum
+    ns = {"re": re}
     i = src.index("AP_GRUND_EXT = ")
     j = src.index("\n\n\ndef _ap_konten_laden(", i)
     exec(src[i:j], ns)

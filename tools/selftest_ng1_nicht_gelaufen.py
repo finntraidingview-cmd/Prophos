@@ -61,7 +61,17 @@ def main():
     au = t[t.index("// NG1: schon als"):t.index("const kand = (rows || [])")]
     check(".eq('status', 'review').eq('master_pl', 0)" in au and ".is('started_at', null)" in au and "if(!deWegUrteil(r)) await deWeg(" in au,
           "Altfälle (vor NG1 mit 0,00 $ gebucht) werden mit derselben Regel aufgeräumt")
-    check("finally{ _deLaeuft = false }" in t and "if(startNah || _suLaeuft) return" in t, "wie N2: nie während ein Echo-Start fällig/geclaimt ist")
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 718fd022 RA2 F1 — der Riegel „Echo-Start fällig/geclaimt“ gilt jetzt je Instanz statt je ID
+    # (startNah fiel weg; nahPlaene → deBelegt, je Kandidat frisch, belegte Instanz → continue); _suLaeuft bleibt ID-weit
+    check("finally{ _deLaeuft = false }" in t and "if(_suLaeuft) return" in t
+          and "(p.route === 'mt5' || p.route === 'mt5v2') && (p.status === 'open'" in t
+          and "(p.status === 'planned' && !p.startedAt" in t
+          and "Math.abs(Date.parse(p.startUm) - jetztMs) < 15 * 60000" in t
+          and "jetztMs - Date.parse(p.startUmGestartetAt) < 20 * 60000" in t
+          and "const belegt = deBelegt(nahPlaene(), instDatei)" in t
+          and "if(belegt.has(String(ri.inst.file))) continue" in t
+          and t.index("if(belegt.has(String(ri.inst.file))) continue") < t.index("_deVersucht.set(String(r.id), Date.now())"),
+          "wie N2: nie während ein Echo-Start fällig/geclaimt ist (je Instanz, RA2)")
 
     base = {"status": "review", "route": "mt5", "started_at": None, "master_pl": 0, "slave_pl": None,
             "mt5_baseline": {"final": {"art": "nicht_gelaufen", "quelle": "deals_leer", "grund": "nie_gefuellt_tagesende"}, "start_fehler": {"unklar": True}}}

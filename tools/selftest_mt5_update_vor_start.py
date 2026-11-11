@@ -53,7 +53,8 @@ class Prov:
 def main():
     src, teil = lade()
     starts = []
-    ns = {"os": os, "time": time, "threading": threading, "HEAL_LOCK": threading.Lock(), "HEAL_ACTIVE": set(),
+    # nachgezogen 11.11.2026 (ST1, Slave 2): 8cd6abf7 MU1 legte panel.py _MT5_ORDNER_I = re.compile(…) in den Ausschnitt → re im Namensraum
+    ns = {"re": re, "os": os, "time": time, "threading": threading, "HEAL_LOCK": threading.Lock(), "HEAL_ACTIVE": set(),
           "UPDATE_ABGELEHNT": "/nicht/da", "print": lambda *a, **k: None,
           "start_terminal": lambda f, c=None, ohne_update=False: (starts.append((f, c, ohne_update)), (True, "gestartet"))[1]}
     exec(teil, ns)

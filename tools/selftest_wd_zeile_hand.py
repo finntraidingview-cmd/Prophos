@@ -59,7 +59,9 @@ check(ge and "hand" not in k[0], "Würfel-Werte: k.hand entfernt")
 check('not in PLANER_WD_AUTOMATIK + WD_HAND_AKTIONEN' in app and '"vormerken", "vormerken_weg") + WD_HAND_AKTIONEN' in app and "recht = wd_hand_darf(me, p.get(\"user_id\")" in app, "Route: eigene Rechte-Prüfung statt Planer-Gate, Gruppen-Besitz für eingeschränkte Logins")
 check("if(k.hand || plan.handWerteAt) continue" in html and ".is('start_um_gestartet_at', null).is('hand_werte_at', null).select('*')" in html and "if(p.hand_werte_at || k.hand) continue" in html,
       "Abgleich (PC, auch in der DB) und Nachziehen (Mac) drehen Hand-Werte nicht zurück")
-check('"hand_werte_at,master_firm,anz_frei:hedge_freigabe_at"' in app, "GET liefert Hand-Marke, Firma, Freigabe")
+# nachgezogen 11.11.2026 (ST1, Slave 2): 543756bd WS1a-Nachtrag hängt "wd_sl:mt5_baseline->wd_sl" als nächste Zeile an die select-Liste —
+# das Teilstück endet jetzt auf Komma statt Anführungszeichen; dieselben drei Felder
+check(re.search(r'"hand_werte_at,master_firm,anz_frei:hedge_freigabe_at,?"', app) is not None, "GET liefert Hand-Marke, Firma, Freigabe")
 
 js = "const window = {};\n" + html[html.index("  function wdzStartIso("):html.index("  // REIN RECHNEND (Test-Haken): Eingaben")] + """
 const wdFarmHedge = (pr, risk, slave, an) => { pr.multiplier = 1.5; pr.hedge_faktor = 1.5; pr.slave_risk = slave; pr.hedge_eur = 99; pr.master_risk = risk }

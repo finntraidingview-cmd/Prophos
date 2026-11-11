@@ -165,7 +165,7 @@ def main():
 
     # ── (D) Railway claimt nie selbst ──────────────────────────────────────────────────────────────────────────────────────
     setzt = [m.group(0) for m in re.finditer(r'"start_um_gestartet_at":\s*([^,}\n]+)', src)
-             if not re.match(r'(?:f?"(?:is|eq|gte|gt|lte|lt|not)\.|None\b)', m.group(1).strip())]   # nur Filter (is./eq./gte. …) und Zurücksetzen (None) — gte. seit eh_rot (M3 05.11.2026: Lese-Filter, kein Claim)
+             if not re.match(r'\(?\s*(?:f?"(?:is|eq|gte|gt|lte|lt|not)\.|None\b)', m.group(1).strip())]   # nachgezogen 11.11.2026 (ST1, Slave 2): fc40da0e FX2 schreibt den Filter in Klammern — (f"eq.{…}" if … else "is.null"), weiter nur ein Filter   # nur Filter (is./eq./gte. …) und Zurücksetzen (None) — gte. seit eh_rot (M3 05.11.2026: Lese-Filter, kein Claim)
     check(not setzt, f"app.py setzt den Claim nie selbst — jeder automatische Start geht über den DB-Riegel ({setzt})")
 
     # ── (E) PC-Tab ─────────────────────────────────────────────────────────────────────────────────────────────────────────

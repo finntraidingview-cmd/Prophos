@@ -129,7 +129,10 @@ const escapeHtml = s => String(s), TV_ENDLESUNG_MAX = 8, TV_ENDLESUNG_KETTE_MAX 
 const tvV2LoginBremse = () => null, tvV2NachleseAb = () => 1;
 """
 JETZT = "Date.parse('2026-11-02T12:00:00Z')"
-js = STUBS + "\n".join(fn(n) for n in ("tpKetteLesenWeiter", "wdlKetteT1Offen", "wdlWartet", "wdlWartetLesung", "wdlKetteTeilZeile", "wdlKetteTagChip"))
+# nachgezogen 11.11.2026 (ST1, Slave 2): ff1f685a WS2e zieht die Topstep-Trade-1-Bedingung gewollt in die neue Hilfsfunktion wdlKetteNichtLetzter
+# (ohne kette_von genau der alte Weg: tsv2 + kette_nr 1) — sie gehört mit in den Ausschnitt; ebenso a1b47aa9 WS2d tpKetteNichtLetzter
+# (PC-Tab-Seite, ohne kette.von genau der alte Weg: nur Trade 1) für tpKetteLesenWeiter
+js = STUBS + "\n".join(fn(n) for n in ("tpKetteNichtLetzter", "tpKetteLesenWeiter", "wdlKetteNichtLetzter", "wdlKetteT1Offen", "wdlWartet", "wdlWartetLesung", "wdlKetteTeilZeile", "wdlKetteTagChip"))
 js += f"\nDate.now = () => {JETZT};\n"
 BIS, VORBEI = "2026-11-02T18:30:00Z", "2026-11-02T11:00:00Z"
 T1 = {"id": "a", "route": "tsv2", "status": "review", "kette_nr": 1, "kette_lesen_bis": BIS, "balance_start": 150000, "balance_end": None,
