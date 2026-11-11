@@ -58427,7 +58427,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2175'
+  const OS_TAB_BUILD = '2026-09-22.2176'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -75141,7 +75141,10 @@
     const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null) : (zyA && zyA.instr === 'nq' ? 'nq' : null)
     if(wdNqOhneMenge(instrA, extra ? extra.master_contracts : wdRecovererKt(zyA))) return { fehler: 'Recoverer: Menge für NQ nicht bekannt, kein Plan angelegt' }
     const symbol = wdRecovererSymbol((vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : ''), instrA)
-    const row = tpVorplanPlanRow(acc, slave, z, wdRecovererKt(zyA) || wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
+    // TW1b (Prüfer TW1, 11.11.2026): ohne Tag das heutige DUBAI-Datum wie app.py (POST /admin/wd-plaene: planned_for, sonst heute in Dubai) — das lokale
+    // PC-Datum (en-CA ohne Zeitzone) wich davon ab, und der Handels-Wurf (planer|konto|tag) wäre ein anderer als am Server
+    const tagDubai = tag || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
+    const row = tpVorplanPlanRow(acc, slave, z, wdRecovererKt(zyA) || wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tagDubai)
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
     wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an, [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk])   // wie der Mac: Popup-Rechnung (26.09.2026)
@@ -75159,10 +75162,10 @@
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
      * → den übernehmen; (b) Claim per Insert in user_settings (eindeutig user_id + key 'wd_rueckfall:<tag>:<konto>', Muster .563):
      * nur wer den Insert gewinnt, legt an. Scheitert das Anlegen, wird der Claim wieder freigegeben. */
-    const tagKey = row.planned_for || tag || new Date().toLocaleDateString('en-CA')
+    const tagKey = row.planned_for || tagDubai
     // TW1 HANDELS-WÜRFEL (Prüfer MUSS 11.11.2026): dieser Rückfall schreibt DIREKT in trade_plans — derselbe feste Wurf wie app.py (POST /admin/wd-plaene) mit dem Wert
     // des eigenen Unternehmens (GET /admin/handel-wuerfel). Selbstheilung (extra.id = Ersatz eines bestehenden Plans) würfelt nicht. Fehler → handelt wie bisher
-    if(!(extra && extra.id) && await hwWdPause(acc, tagKey)) return { fehler: WD_HINWEIS_PAUSE }
+    if(!(extra && extra.id) && await hwWdPause(acc, tagKey, currentUserId)) return { fehler: WD_HINWEIS_PAUSE }   // Besitzer = diese ID (accounts = eigene Konten)
     try{
       const { data: schon } = await supabase.from('trade_plans').select('*').eq('master_account_id', acc.id).eq('planned_for', tagKey)
         .eq('notes', 'Winning-Day-Farmer').limit(1)
@@ -93964,13 +93967,25 @@
     const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
     return parseInt(hex.slice(0, 13), 16) / 16 ** 13
   }
-  // WD-Rückfall am PC-Tab (wdPlanAnlegen, Prüfer MUSS TW1): Pause-Tag für dieses Konto? Wert des eigenen Unternehmens (GET ohne ?unternehmen= = das der ID bzw.
-  // beim Admin der Standard). Kein Wert / Route fehlt / Fehler → false (handelt wie bisher, wie app.py)
-  async function hwWdPause(acc, tag){
+  // WD-Rückfall am PC-Tab (wdPlanAnlegen, Prüfer MUSS TW1): Pause-Tag für dieses Konto? Kein Wert / Route fehlt / Fehler → false (handelt wie bisher, wie app.py)
+  // TW1b (Prüfer TW1, 11.11.2026): Wert des Unternehmens des KONTO-BESITZERS (uid), nicht des Logins — GET ohne ?unternehmen= ist auf einem Admin-Tab immer der
+  // HT-Standard, auch für ein Konto aus einem anderen Unternehmen. Wie app.py tw_pct: Mitglied eines Unternehmens MIT eigenem Planer (ap_unt_kontext.gid_von =
+  // ap_planer_gruppen) → dessen Zeile; HT bzw. ohne Planer-Unternehmen → Standard (''). Unternehmen per prophos_gruppe_von (wdUnternehmenVon); ob es ein
+  // Planer-Unternehmen ist, sagt die Antwort von /admin/handel-wuerfel?unternehmen= (unternehmen.name kommt nur aus ap_planer_gruppen)
+  async function hwWdGid(uid){
+    const g = await wdUnternehmenVon(uid)
+    if(!g) return ''
+    if(!_hw.d[g] || !_hw.d[g].werte || Date.now() - (_hw.at[g] || 0) > HW_FRISCH_MS) await hwLaden(g)
+    const d = _hw.d[g] || {}
+    if(!d.werte) throw new Error('Handels-Würfel des Unternehmens nicht lesbar')
+    return (d.unternehmen && String(d.unternehmen.gruppe_id) === g && d.unternehmen.name != null) ? g : ''
+  }
+  async function hwWdPause(acc, tag, uid){
     try{
       if(!acc || !acc.id) return false
-      if(!_hw.d[''] || !_hw.d[''].werte || Date.now() - (_hw.at[''] || 0) > HW_FRISCH_MS) await hwLaden('')
-      const pct = hwZahl((((_hw.d[''] || {}).werte) || {}).winning_days)
+      const g = uid ? await hwWdGid(String(uid)) : ''
+      if(!_hw.d[g] || !_hw.d[g].werte || Date.now() - (_hw.at[g] || 0) > HW_FRISCH_MS) await hwLaden(g)
+      const pct = hwZahl((((_hw.d[g] || {}).werte) || {}).winning_days)
       if(pct == null || pct >= 100) return false
       if(pct <= 0) return true
       return (await hwWurf('winning_days', String(acc.id), tag)) * 100 >= pct

@@ -114,8 +114,14 @@ check(PG("winning_days", {"id": K, "user_id": HT}, "2026-11-12", WE(frisch=True)
 check(f"const WD_HINWEIS_PAUSE = '{wd}'" in html and wd not in html.split("const WD_AUTO_HINWEISE")[1].split("]")[0],
       "WD-Grund = prophos.html WD_HINWEIS_PAUSE und NICHT in WD_AUTO_HINWEISE (Prüfer MUSS: sonst heilt die Zeile alle 30 s und der Rückfall legt an)")
 rf = html[html.index("  async function wdPlanAnlegen("):html.index("\n  }\n", html.index("  async function wdPlanAnlegen("))]
-check(0 < rf.find("await hwWdPause(acc, tagKey)") < rf.find("supabase.from('trade_plans').insert(row)") and "!(extra && extra.id)" in rf,
+check(0 < rf.find("await hwWdPause(acc, tagKey, currentUserId)") < rf.find("supabase.from('trade_plans').insert(row)") and "!(extra && extra.id)" in rf,
       "WD-Rückfall am PC-Tab würfelt vor dem direkten Insert (Selbstheilung nicht)")
+# TW1b (Prüfer TW1, 11.11.2026): Tag ohne planned_for = heute in DUBAI wie app.py; Wert des Unternehmens des Konto-Besitzers (nicht des Logins)
+check("const tagDubai = tag || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })" in rf and "const tagKey = row.planned_for || tagDubai" in rf
+      and "toLocaleDateString('en-CA'))" not in rf, "TW1b: Rückfall-Tag (Plan + Wurf) in Dubai, nie das lokale PC-Datum")
+_hw = html[html.index("  async function hwWdGid("):html.index("  window._hw = {")]
+check("await wdUnternehmenVon(uid)" in _hw and "hwLaden(g)" in _hw and "d.unternehmen.name != null" in _hw and "(_hw.d[g] || {}).werte" in _hw,
+      "TW1b: hwWdPause liest den Wert des Unternehmens des Konto-Besitzers (Planer-Unternehmen → eigene Zeile, sonst Standard wie tw_pct)")
 check("return parseInt(hex.slice(0, 13), 16) / 16 ** 13" in html and "`tw1|${planer}|${kontoId}|${String(tag || '').slice(0, 10)}`" in html,
       "Frontend-Wurf = app.py tw_wurf (gleicher Text, 13 Hex-Stellen)")
 m = re.search(r'HAND_PLANER_OHNE = re\.compile\(r"([^"]+)"', src)
