@@ -37,15 +37,37 @@ rc = BOT[BOT.index("def run_close("):BOT.index("\n\n\ndef ", BOT.index("def run_
 check('aufloesen = ticket <= 0 and cmd.get("aufloesen") is True' in rc and '"ticket fehlt — nichts geklickt"' in rc, "run_close: ticket 0 nur mit aufloesen")
 k_auf, k_pos, k_schutz = rc.index("close_ticket_aufloesen(lese"), rc.index('pos = next((p for p in lese["positionen"] if p["ticket"] == ticket)'), rc.index("f\"Verwechslungs-Schutz: {len(")
 check(rc.index("lese = _login_dann_lesen(") < k_auf < k_pos < k_schutz, "Auflösung nach der Login-Guard-Lesung, vor Ticket-Prüfung und Verwechslungs-Schutz")
-check('"schon_zu": True, "aufgeloest": "keins"' in rc and "nichts geklickt, im Terminal von Hand schliessen" in rc, "keins → schon_zu (ok), mehrere → Fehler ohne Klick")
+_k = rc[rc.index('if art_ == "keins":'):rc.index('if art_ != "eins":')]
+check('"ok": False, "retry_ok": True, "aufgeloest": "keins"' in _k and '"schon_zu"' not in _k and "Keine offene Master-Position gefunden" in _k
+      and "nichts geklickt, im Terminal von Hand schliessen" in rc,
+      "Prüfer MT1: keins → sichtbarer Fehler mit dem alten Schlüssel-Text (nie ok/schon_zu), mehrere → Fehler ohne Klick")
 check(rc.count("_close_klicken(") == 1 and rc.index("_close_klicken(") > k_schutz, "geklickt wird erst nach allen Lese-Prüfungen")
 mc = PANEL[PANEL.index('if u.path == "/api/master-close":'):PANEL.index('if u.path == "/api/start-terminal":')]
 check('aufloesen_c = ticket <= 0 and body.get("aufloesen") is True and richtung_c in ("buy", "sell") and bool(symbol)' in mc
       and "if ticket <= 0 and not aufloesen_c:" in mc and "cmd.update(aufloesen=True, richtung=richtung_c)" in mc,
       "Panel: ticket 0 nur mit aufloesen + Richtung + Symbol, an den Bot weitergereicht")
 check(mc.index("aufloesen_c =") < mc.index('"grund": "copier_alt"') < mc.index("cmd = {"), "Panel: Frische-Riegel (Hedge geht mit) bleibt vor dem Bot-Start")
-check("if(!poss.length && opts && opts.lesend && (plan.richtung === 'buy' || plan.richtung === 'sell') && sym)" in HTML,
-      "Tab: Auflösung nur bei leerem Treffer, mit opts.lesend und Richtung")
+check("const rohLeer = !(Array.isArray(st.master_positions) && st.master_positions.length)" in HTML
+      and "if(!poss.length && rohLeer && opts && opts.lesend && (plan.richtung === 'buy' || plan.richtung === 'sell') && sym)" in HTML,
+      "Prüfer MT1: Tab löst nur bei GANZ leerem Schnappschuss lesend auf (Positionen da, keine zum Symbol → sichtbarer Fehler)")
+# Verhalten von tpClosePosAufloesen wirklich ausführen (Funktionstext aus prophos.html, ohne Browser: kleine JS→Python-Nachbildung ist zu fragil —
+# stattdessen der Ablauf in Python mit denselben Bedingungen, gegen die Textprüfung oben verankert)
+def aufl(master_positions, symbol, richtung, lesend=True):
+    roh = master_positions if isinstance(master_positions, list) else []
+    sym = (symbol or "").strip().lower()
+    poss = [x for x in roh if sym in str(x.get("symbol") or "").lower()] if sym else list(roh)
+    if richtung in ("buy", "sell"):
+        gef = [x for x in poss if int(x.get("type", -1)) == (0 if richtung == "buy" else 1)]
+        if gef:
+            poss = gef
+    if len(poss) != 1:
+        if not poss and not roh and lesend and richtung in ("buy", "sell") and sym:
+            return "lesend"
+        return "fehler"
+    return "ticket"
+check(aufl([], "NAS100", "buy") == "lesend", "leerer Schnappschuss → lesend im Bot")
+check(aufl([{"symbol": "US100", "type": 0, "ident": 5}], "NAS100", "buy") == "fehler", "Positionen da, keine zum Symbol (falsches dup_symbol) → sichtbarer Fehler, NICHT lesend")
+check(aufl([{"symbol": "NAS100", "type": 0, "ident": 5}], "NAS100", "buy") == "ticket", "passende Position im Schnappschuss → Ticket wie bisher")
 check("return !!(route && route.inst && route.inst.alive && !st.note)" in HTML and "if(ohneHedge) return true" in HTML,
       "Tab: mit Hedge nur bei frischem, lebendigem Schnappschuss; Echo V2 immer")
 check(HTML.count("tpCloseLesendErlaubt(route, false)") == 2 and HTML.count("tpCloseLesendErlaubt(routeC, false)") == 1
@@ -53,6 +75,8 @@ check(HTML.count("tpCloseLesendErlaubt(route, false)") == 2 and HTML.count("tpCl
 check(HTML.count("JSON.stringify(tpCloseBody(") == 3 and "Object.assign({ ticket, symbol, login: route.masterLogin, ohne_hedge: true }, aufl || {})" in HTML,
       "Tab: alle vier Close-Aufrufe senden aufloesen + richtung mit")
 check("const tk = Number(r && r.ticket) || t.ticket" in HTML, "Auto-Close übernimmt das vom Bot gelesene Ticket")
+check("const keinePos = !!(r && r.aufgeloest === 'keins' && t.aufloesen)" in HTML and "...(keinePos ? { keine_position: true } : {})" in HTML,
+      "Prüfer MT1: Bot-„keins“ nach lesender Auflösung → keine_position (WS2c: war_flach wie vor MT1-4), sonst sichtbarer Fehler")
 print()
 print("FEHLER: " + ", ".join(FEHLER) if FEHLER else "alles grün")
 sys.exit(1 if FEHLER else 0)

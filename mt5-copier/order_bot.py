@@ -16060,9 +16060,11 @@ def run_close(cfg_path, cmd):
     if aufloesen:
         t_, art_, grund_ = close_ticket_aufloesen(lese["positionen"], symbol, cmd.get("richtung"))
         if art_ == "keins":
-            # API-Lesung (Login-Guard bestanden) zeigt die Position nicht → Ziel-Zustand erreicht, wie „nicht (mehr) offen“ unten
-            return {"ok": True, "retry_ok": False, "schon_zu": True, "aufgeloest": "keins",
-                    "msg": f"{grund_} — nichts zu tun (lesend geprüft, Copier-Daten hatten keine Position)."}
+            # Prüfer MT1 (SOLLTE vor dem Push, 11.11.2026): NIE ok/schon_zu — gleicher Teilstring-Vergleich wie im Tab; bei falschem Symbol stünde sonst
+            # eine offene Position still als „zu“ da. Sichtbarer Fehler mit dem Schlüssel-Text von vorher (Muster/Tab greifen ihn), Wiederholen wie bisher.
+            return {"ok": False, "retry_ok": True, "aufgeloest": "keins",
+                    "msg": f"Keine offene Master-Position gefunden — {grund_} (lesend im Terminal, Copier-Daten hatten auch keine). "
+                           f"Nichts geklickt — im Terminal prüfen (Symbol der Firma richtig?)."}
         if art_ != "eins":
             return {"ok": False, "retry_ok": art_ == "ungueltig", "aufgeloest": art_,
                     "msg": f"{grund_} — nichts geklickt, im Terminal von Hand schliessen."}

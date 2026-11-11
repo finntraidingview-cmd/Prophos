@@ -60616,7 +60616,10 @@
       if(gef.length) poss = gef
     }
     if(poss.length !== 1){
-      if(!poss.length && opts && opts.lesend && (plan.richtung === 'buy' || plan.richtung === 'sell') && sym)
+      // Prüfer MT1 (SOLLTE vor dem Push): lesend NUR bei GANZ leerem Schnappschuss (wie WS2c keine_position) — hat er Positionen, aber keine zum
+      // Symbol (falsches dup_symbol), bleibt es der sichtbare Fehler unten; sonst käme vom Bot still „schon zu“ und die Position läge über Market Close
+      const rohLeer = !(Array.isArray(st.master_positions) && st.master_positions.length)
+      if(!poss.length && rohLeer && opts && opts.lesend && (plan.richtung === 'buy' || plan.richtung === 'sell') && sym)
         return { ticket: 0, aufloesen: true, richtung: plan.richtung, beschr: `${symbol} ${plan.richtung} — Ticket liest Puls im Terminal` }
       return { fehler: poss.length
         ? `Position nicht eindeutig (${poss.length} Kandidaten am Master) — im Terminal von Hand schließen.`
@@ -62463,7 +62466,10 @@
     const tk = Number(r && r.ticket) || t.ticket   // MT1: lesend aufgelöstes Ticket kommt vom Bot zurück
     if(r && r.ok) return { ok: true, msg: `${tk ? '#' + tk + ' ' : ''}${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false, ticket: tk, file: route.inst.file }
     const pausiert = (typeof _pfEchoPausiert === 'function') && _pfEchoPausiert(r)
-    return { ok: false, msg: (r && (r.msg || r.error)) || 'keine Antwort vom Bot', retry: !!(r && r.retry_ok) || pausiert }
+    // Prüfer MT1: Bot las bei GANZ leerem Schnappschuss lesend im Terminal und fand nichts („keins“, nie mehr ok) — für WS2c dasselbe wie vorher
+    // keine_position (Master ganz ohne Position → war_flach); Auto-Close/News sehen den sichtbaren Fehler
+    const keinePos = !!(r && r.aufgeloest === 'keins' && t.aufloesen)
+    return { ok: false, msg: (r && (r.msg || r.error)) || 'keine Antwort vom Bot', retry: !!(r && r.retry_ok) || pausiert, ...(keinePos ? { keine_position: true } : {}) }
   }
 
   /* NEWS-REGEL FUNDED CFD — SCHLIESSEN (30.10.2026, Finn ~07:28 über den Master: „laufende Funded-CFD-Trades spätestens 10 min vor der
