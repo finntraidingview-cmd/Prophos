@@ -46507,11 +46507,13 @@
        * nur Winning-Days-Konten mit WD-Ziel (zielKonfig). Laufender Zyklus = dieselbe Zählung wie Radar/Konto-Kachel (zielWdAuto: CME-Tag, Tagessumme ≥ zielWdMin,
        * Hand-Tage, Korrektur), ältere Zyklen nach derselben Regel aus ihren WD-Plänen. Die Nummer steht am letzten Trade des Tages (die Tagessumme zählt, nicht der
        * einzelne Trade); andere Trades „–“. wdSpalte = Map planId → Text, null = keine Spalte; gesetzt von zeichneVerlauf vor dem Zeichnen. */
-      let wdSpalte = null, wdZyklusText = null
+      // AD1d (Master 11.11.2026): dieselbe Spalte für Funded CFD mit Gewinntagen — wdArt 'gt' = „Tag n/m“ statt „WD n/m“ (gtSpalteRechnen unten)
+      let wdSpalte = null, wdZyklusText = null, wdArt = 'wd', gtLeerTip = ''
       const wdZelle = id => {
         if(!wdSpalte) return ''
-        const t = wdSpalte.get(String(id))
-        return `<span data-ad-wd style="min-width:44px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;${t ? 'color:#006F4F;font-weight:600' : 'color:var(--sub-2)'}"${t ? ` title="${escapeHtml(t.tip)}"` : ' title="kein Winning Day (Tagessumme unter dem Mindestgewinn bzw. kein WD-Trade)"'}>${t ? '<span class="ad-wd-w">WD </span>' + escapeHtml(t.text) : '–'}</span>`
+        const t = wdSpalte.get(String(id)), gt = wdArt === 'gt'
+        const leerTip = gt ? gtLeerTip : 'kein Winning Day (Tagessumme unter dem Mindestgewinn bzw. kein WD-Trade)'
+        return `<span data-ad-wd style="min-width:44px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;${t && !t.aus ? 'color:#006F4F;font-weight:600' : 'color:var(--sub-2)'}" title="${escapeHtml(t ? t.tip : leerTip)}">${t ? `<span class="ad-wd-w">${gt ? 'Tag' : 'WD'} </span>` + escapeHtml(t.text) : '–'}</span>`
       }
       const zeile = item=>{
         if(item.type==='trade'){
@@ -46614,7 +46616,38 @@
           })
         }
         // die WD-Spalte darf den Verlauf nie umwerfen: Fehler → ohne Spalte zeichnen
-        const wdSicher = gruppen => { try{ wdRechnen(gruppen) }catch(e){ wdSpalte = null; wdZyklusText = null; console.warn('[trade-verlauf wd]', e) } }
+        /* AD1d SPALTE „Tag n/m“ FUNDED CFD (Master 11.11.2026 nach AD1c): welche Tage zählten, liefert jetzt das Backend — GET /konto-ziele → gewinntage.zyklen
+         * [{nr, seit, bis, laufend, tage: [{tag, summe, plaene, n}]}] (app.py fcp_gewinntage_zyklen, dieselbe Zählung wie die Payout-Checkliste: Berliner Tag
+         * des Trade-Endes, Tagessumme ≥ min, Korrektur von Hand nur im laufenden Zyklus). Hier nichts neu gezählt: die Nummer steht am letzten Trade des Tages
+         * (plaene nach Trade-Ende aufsteigend — die Tagessumme zählt, nicht der einzelne Trade), m = Mindest-Gewinntage (gewinntage.soll). n null = der Tag
+         * zählt wegen einer Korrektur von Hand nicht → grau „–/m“. Ohne zyklen (altes Backend, Regel ohne Gewinntage, Lesefehler): keine Spalte, wie bisher. */
+        const gtSpalteRechnen = () => {
+          const gk = (cfd && kz && kz.gewinntage && typeof kz.gewinntage === 'object') ? kz.gewinntage : null
+          const soll = gk ? Number(gk.soll) : 0
+          if(!gk || !Array.isArray(gk.zyklen) || !(soll > 0)) return
+          const minP = Number(gk.min) || 0
+          const m = new Map()
+          // Prüfer AD1d (KANN): das Backend zählt auch Trades in review, der Verlauf zeigt nur abgeschlossene — die Nummer an den letzten SICHTBAREN Trade des Tages
+          const sichtbar = new Set(items.filter(it => it.type === 'trade').map(it => String(it.obj.id)))
+          gk.zyklen.forEach(z => (Array.isArray(z && z.tage) ? z.tage : []).forEach(t => {
+            const alle = Array.isArray(t && t.plaene) ? t.plaene : []
+            const ids = alle.filter(x => sichtbar.has(String(x)))
+            if(!ids.length) return
+            const summe = Number(t.summe) || 0, aus = t.n == null
+            const datum = /^\d{4}-\d{2}-\d{2}$/.test(String(t.tag || '')) ? String(t.tag).slice(8, 10) + '.' + String(t.tag).slice(5, 7) + '.' : String(t.tag || '')
+            m.set(String(ids[ids.length - 1]), { aus, text: `${aus ? '–' : Number(t.n)}/${soll}`,
+              tip: (aus ? `Gewinntag am ${datum}, zählt wegen der Korrektur von Hand nicht` : `Gewinntag ${Number(t.n)} von ${soll} in Zyklus ${Number(z.nr) || '?'} (${datum})`)
+                + ` · Tagessumme ${summe >= 0 ? '+' : '−'}$${Math.abs(Math.round(summe)).toLocaleString('de-DE')}${minP ? ` (ab $${minP.toLocaleString('de-DE')})` : ''}`
+                + (alle.length > 1 ? ` · ${alle.length} Trades an dem Tag` : '') + ' — wie die Payout-Checkliste' })
+          }))
+          wdSpalte = m; wdArt = 'gt'
+          gtLeerTip = `kein Gewinntag (Tagessumme unter $${minP.toLocaleString('de-DE')}) bzw. die Nummer steht am letzten Trade des Tages`
+        }
+        const wdSicher = gruppen => {
+          wdArt = 'wd'
+          try{ wdRechnen(gruppen) }catch(e){ wdSpalte = null; wdZyklusText = null; console.warn('[trade-verlauf wd]', e) }
+          if(!wdSpalte) try{ gtSpalteRechnen() }catch(e){ wdSpalte = null; wdArt = 'wd'; console.warn('[trade-verlauf gt]', e) }   // AD1d, nie den Verlauf umwerfen
+        }
         /* AD1b GEWINNTAGE FUNDED CFD (Master 11.11.2026, Finn wollte AD1 „allgemein“): im Trenner des LAUFENDEN Zyklus „n/m Tage“ — genau die Zahl der
          * Payout-Checkliste (GET /konto-ziele → gewinntage {ist, soll, korrektur, zyklus, min}, app.py kz_rechnen/fcp_gewinntage_ist inkl. Korrektur von Hand),
          * hier nichts neu gerechnet. Keine Spalte je Trade und keine Zahl für ältere Zyklen: /konto-ziele nennt nur die Anzahl des laufenden Zyklus, nicht
@@ -58582,7 +58615,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2183'
+  const OS_TAB_BUILD = '2026-09-22.2184'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

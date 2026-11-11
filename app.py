@@ -30473,6 +30473,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 # einzeln gewürfelt“): Etappe × drei feste Faktoren je Konto × Tag, NACH Boden-/Tagesgrenze-Kappung, VOR Trades pro Tag (Tagesziel, Haupt-Lots
                 # und SL der Neben-Teile kommen so schon vom kleinen Trade). Kein Wert / kein Treffer / Fehler → w unverändert
                 w = rv_planer_haken(w, k["a"], k["regel"], tag, ap_cfd_ppl(stand.get("ctx"), k["a"]), _rv_w, _rv_k)
+                # RV1d (Prüfer-SOLLTE zu 6bc12ab7): die Gleichstand-Schleife oben sah nur den TP VOR dem Würfel — skalierten TP noch einmal gegen die Tranche
+                # prüfen (deterministisch ±1 $, kein Zufallszug); get: ältere Selftest-Lader ziehen ap_planen ohne rv_tp_frei
+                if w and "rv_tp_frei" in globals():
+                    w = rv_tp_frei(w, tps_tranche, ap_cfd_ppl(stand.get("ctx"), k["a"]))
             if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
                 grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
             if w and not grund and "tt_param" in globals():   # get: ältere Selftest-Lader ziehen ap_planen ohne die WS2-Helfer
@@ -43363,6 +43367,10 @@ def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
         tief = min_pkt * je_pkt
         if hoch is not None and roh > hoch + 1e-9 and hoch + 1e-9 >= tief:   # Deckel unter dem Mindestabstand → der Mindestabstand gewinnt (Prüfer RV1b)
             return int(min(wert, hoch // 1)), "max"                     # abrunden: nie über den Deckel
+        if hoch is not None and hoch + 1e-9 < tief:
+            # RV1d (Prüfer-SOLLTE zu 6bc12ab7, Master 11.11.2026): Deckel UNTER dem Mindestabstand — vorher fiel roh in den zweiten Zweig und kam UNgedeckelt
+            # zurück (z. B. Faktor 1,0 → voller alter TP bei Deckel 8 Pkt). Jetzt genau der Mindestabstand (min_pkt bei den neuen Lots), nie über den alten Wert
+            return int(min(wert, -((-(tief - 1e-9)) // 1))), "min"
         if roh + 1e-9 >= tief and round(roh) + 1e-9 >= tief:   # auch nach dem Runden nicht enger als min_pkt (Prüfer RV1)
             return int(round(roh)), None
         return int(min(wert, -((-(tief - 1e-9)) // 1))), "min"         # aufrunden ohne math (nicht importiert)
@@ -43391,6 +43399,47 @@ def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
     if w.get("risiko") is not None:
         w2["risiko"] = sl            # CFD: risiko = SL (ap_konto_rechnen) — der Hedge (slave_risk) folgt dem neuen SL
     return w2
+
+
+RV_TP_FREI_SCHRITTE = 50   # RV1d: höchstens ±50 $ vom skalierten TP weg, um einen TP-Gleichstand in der Tranche zu lösen
+
+
+def rv_tp_frei(w, belegt, ppl, min_pkt=RV_MIN_PKT):
+    """REIN RECHNEND (testbar, RV1d Prüfer-SOLLTE zu 6bc12ab7, Master 11.11.2026): „keine zwei gleichen TP je ID × Firma“ (Planer, Finn 09.10.2026) prüft den
+    TP VOR dem Range-Würfel — der skalierte TP (rv_anwenden) konnte danach wieder auf einem TP der Tranche landen. Gleichstand → TP in 1-$-Schritten weg
+    (erst −1, dann +1, −2, +2 … höchstens RV_TP_FREI_SCHRITTE), deterministisch (kein Zufallszug, der Lauf bleibt sonst bitgleich), innerhalb der Grenzen von
+    rv_anwenden: nicht enger als min_pkt bei den neuen Lots, nicht über den normalen TP und den Punkte-Deckel (tp_max_pkt); ein klein gewürfelter letzter
+    Trade („Ziel erst später“) nur nach unten. Gekappte TP (letzter Trade / Rest bis Ziel / Tage sammeln) bleiben wie in der Planer-Schleife. Kein Beleg,
+    kein Gleichstand oder kein freier Wert → w unverändert."""
+    if not w or not isinstance(w.get("range"), dict) or w.get("tp") not in (belegt or ()):
+        return w
+    if re.search(r"letzter Trade|Rest bis Ziel|Tage sammeln", str(w.get("stufe") or "")):
+        return w
+    rb = w["range"]
+    try:
+        tp, je_pkt, tp0 = int(w["tp"]), float(w["menge"]) * float(ppl or 0), float((rb.get("normal") or {})["tp"])
+    except (KeyError, TypeError, ValueError):
+        return w
+    if je_pkt <= 0 or tp0 <= 0:
+        return w
+    tief = -((-(float(min_pkt) * je_pkt - 1e-9)) // 1)
+    hoch = tp0
+    try:
+        if rb.get("tp_max_pkt"):
+            hoch = min(hoch, float(rb["tp_max_pkt"]) * je_pkt // 1)
+    except (TypeError, ValueError):
+        pass
+    if hoch < tief:
+        hoch = tief                  # Deckel unter dem Mindestabstand: der Mindestabstand gilt (wie skal), nur nach unten frei
+    hoch = min(hoch, tp0)            # Prüfer RV1d (KANN): nie über den Normal-TP — Normal-TP schon unter min_pkt → kein freier Wert, w bleibt
+    hoch = min(hoch, tp) if rb.get("statt_letzter") else hoch
+    for d in range(1, RV_TP_FREI_SCHRITTE + 1):
+        for c in (tp - d, tp + d):
+            if tief - 1e-9 <= c <= hoch + 1e-9 and c not in belegt:
+                rb2 = dict(rb, tp_pkt=round(c / je_pkt, 1), tp_gleichstand=tp)
+                stufe = re.sub(re.escape(RV_STUFE) + r" TP \d+ %", f"{RV_STUFE} TP {round(c / tp0 * 100):d} %", str(w.get("stufe") or ""), count=1)
+                return dict(w, tp=int(c), stufe=stufe, range=rb2)
+    return w
 
 
 def rv_werte(frisch=False):

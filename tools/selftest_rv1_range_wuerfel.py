@@ -266,6 +266,36 @@ check(re.search(r'w_h = rv_anwenden\(w_h, k\["range"\]', app) is not None, "Folg
 check("rv_" not in re.search(r"^def gp_planen\(.*?(?=^def )", app, re.S | re.M).group(0), "Gruppen-Planer (gp_planen) unberührt (wie TW1)")
 check("planer_range_wuerfel" not in re.search(r"^def tw_werte\(.*?(?=^def )", app, re.S | re.M).group(0), "Handels-Würfel liest seine Tabelle unverändert")
 
+print("── 7. RV1d: Deckel unter dem Mindestabstand, kein TP-Gleichstand nach dem Würfel ──")
+for n in ("RV_TP_FREI_SCHRITTE", "rv_tp_frei"):
+    lade(n)
+e1 = ruf("rv_anwenden", w5, {"f_tp": 1.0, "f_sl": 1.0, "f_lots": 1.0, "tp_max_pkt": 8.0, "sl_max_pkt": 5.0}, 1, PPL["t5"])
+check((e1["tp"], e1["sl"], e1["range"]["tp_geklemmt"], e1["range"]["sl_geklemmt"]) == (250, 250, "min", "min"),
+      f"Deckel 8 / 5 Pkt unter 10 Pkt, Faktor 100 % → TP/SL genau 10 Pkt = 250 $ (vorher ungedeckelt 5.850 / 1.980) ({e1['tp']}, {e1['sl']})")
+e2 = ruf("rv_anwenden", w5, {"f_tp": 0.02, "f_sl": 0.02, "f_lots": 1.0, "tp_max_pkt": 8.0, "sl_max_pkt": 5.0}, 1, PPL["t5"])
+check((e2["tp"], e2["sl"]) == (250, 250), f"Deckel unter 10 Pkt, Faktor klein → ebenfalls 10 Pkt ({e2['tp']}, {e2['sl']})")
+w_klein = dict(w5, tp=200, sl=150)
+e3 = ruf("rv_anwenden", w_klein, {"f_tp": 1.0, "f_sl": 1.0, "f_lots": 1.0, "tp_max_pkt": 8.0, "sl_max_pkt": 5.0}, 1, PPL["t5"])
+check((e3["tp"], e3["sl"]) == (200, 150), f"nie über den alten Wert (alt schon unter 10 Pkt → bleibt) ({e3['tp']}, {e3['sl']})")
+F = lambda w, b: ruf("rv_tp_frei", w, set(b), PPL["ft"])   # noqa: E731
+check(F(d, []) is d and F(wf, [wf["tp"]]) is wf, "kein Gleichstand bzw. kein Range-Beleg → unverändert")
+f1 = F(d, [2925])
+check(f1["tp"] == 2924 and f1["range"]["tp_gleichstand"] == 2925 and f1["range"]["tp_pkt"] == round(2924 / 15, 1) and f1["sl"] == d["sl"] and f1["menge"] == d["menge"],
+      f"Gleichstand 2.925 → 2.924 (−1 $), Beleg nachgezogen, SL/Lots gleich ({f1['tp']})")
+check(f1["stufe"] == "Etappe · Range-Würfel TP 50 % · SL 50 % · Lots 50 %" and d["tp"] == 2925, f"   Stufe mit echtem Anteil, Eingabe unverändert ({f1['stufe']})")
+check(F(d, [2925, 2924])["tp"] == 2926, "−1 auch belegt → +1")
+check(F(d2, [288])["tp"] == 287, "TP genau am Deckel (288 Pkt bei 1 Lot) → nach unten")
+w_min = dict(d2, tp=10, range=dict(d2["range"], statt_letzter=True))
+check(F(w_min, [10])["tp"] == 10, "am Mindestabstand und klein gewürfelter letzter Trade (nur nach unten) → kein freier Wert, unverändert")
+check(F(dict(d, range=dict(d["range"], statt_letzter=True)), [2925, 2924])["tp"] == 2923, "„Ziel erst später“: nur nach unten (−2 statt +1)")
+check(F(dict(d, stufe="letzter Trade (Rest bis Ziel) · Range-Würfel TP 50 % · SL 50 % · Lots 50 %"), [2925])["tp"] == 2925, "gekappter letzter Trade bleibt (wie die Planer-Schleife)")
+check(F(d, list(range(2875, 2976)))["tp"] == 2925 and F(d, list(range(2876, 2976)))["tp"] == 2875 and F(d, list(range(2875, 2975)))["tp"] == 2975,
+      "höchstens ±50 $ — alles belegt → unverändert; −50 bzw. +50 frei → genommen")
+w_u = {"menge": 1, "tp": 230, "sl": 300, "stufe": "Etappe · Range-Würfel TP 100 % · SL 100 % · Lots 100 %", "range": {"normal": {"menge": 1, "tp": 230, "sl": 300}}}
+check(ruf("rv_tp_frei", w_u, {230}, 25.0)["tp"] == 230, "Normal-TP schon unter 10 Pkt (230 $ bei 25 $/Pkt) → nie darüber (Prüfer RV1d KANN), bleibt")
+i_frei, i_add =ap.find("rv_tp_frei(w, tps_tranche"), ap.find("tps_tranche.add(w.get(\"tp\"))")
+check(i_rv < i_frei < i_tf < i_add, "ap_planen: Gleichstand-Prüfung direkt nach dem Range-Würfel, vor Tradeify-final und dem Eintrag in tps_tranche")
+
 print()
 if fehler:
     print(f"ROT: {len(fehler)} Prüfung(en) fehlgeschlagen")
