@@ -71,6 +71,7 @@ check(ruf("wd_sl_fuer_plan", None, {}, acc, [], None) is None, "Würfel aus → 
 
 # ── _wd_sl_kontext ──
 lade("_wd_sl_kontext")
+lade("_wd_sl_konten_select")   # DL2 (11.11.2026): Konto-Abfrage des WD-SL mit dll_usd (Rückfall ohne Spalte)
 ns["_wd_sl_wuerfel_lesen"] = lambda: (regel, "db")
 ns["sb_select"] = lambda _t, _p: [acc]
 ns["_liq_regeln_laden"] = lambda: [{"id": 1}]

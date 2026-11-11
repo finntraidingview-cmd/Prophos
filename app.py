@@ -13359,6 +13359,32 @@ def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
     return wd_sl_dll_pflicht(wd_sl_wuerfeln(regel, puffer, bal, liq, rnd=rnd, grund=mv.get("grund")), mv)
 
 
+WD_GRUND_DLL_OHNE_SL = "Tageslimit-Firma: kein WD-Plan ohne SL"   # DL2b: Übersprungen-Grund (Präfix) im POST /admin/wd-plaene
+
+
+def wd_sl_dll_firma(regeln, acc):
+    """REIN RECHNEND (testbar, DL2b 11.11.2026, Master/Finn: Firmen MIT Tageslimit — Lucid 2.700, FTMO Futures 1.000 — bekommen nie einen WD-Plan ohne SL; Firmen
+    ohne (Tradeify: „nie ein Daily Loss Limit“, Apex mit Stufen-Regel) bleiben wie heute). → True | False | None (unbekannt: Konto oder Regeln fehlen).
+    True: Konto dll_usd > 0, sonst liq_regeln-Zeile der Kontoart winning_days mit art 'tagesstart', hat die WD-Zeile kein Tageslimit (boden), die Funded-Zeile
+    derselben Firma/Größe mit 'tagesstart' (wie hedgeLiqDll im Tab). dll_usd 0 → False. 'stufen' (Apex) zählt hier bewusst nicht."""
+    if not acc:
+        return None
+    kd = _wd_num(acc.get("dll_usd"))
+    if kd is not None:
+        return kd > 0
+    if not regeln:
+        return None
+    firma, gr = acc.get("firm"), _wd_konto_groesse(acc)
+    r = liq_regel_waehlen(regeln, firma, "winning_days", gr)[0]
+    art = (r or {}).get("art")
+    if art == "tagesstart":
+        return True
+    if art in (None, "boden"):
+        rf = liq_regel_waehlen(regeln, firma, "funded", gr)[0]
+        return (rf or {}).get("art") == "tagesstart"
+    return False
+
+
 WD_SL_DLL_PUFFER = 100.0    # DL2: so weit vor dem Tageslimit sitzt der Pflicht-SL (Gebühren/Schlupf; Tradeify zählt die Kommission mit)
 
 
@@ -18114,6 +18140,8 @@ def admin_wd_plaene():
             print(f"[wd-sl-wuerfel] ⚠️ Kontext: {type(e).__name__}: {e} — Würfel in diesem Lauf aus", flush=True)
             sl_regel, sl_konten, sl_liq, sl_frueher = None, {}, [], []
             sl_fest_fehler = f"Kontext nicht lesbar ({type(e).__name__})"
+        # DL2b: war der Würfel an und der Kontext scheiterte → Firmen mit Tageslimit legen keinen Plan an (unten vor dem Anlegen); Würfel absichtlich aus → wie heute
+        sl_kontext_fehler = sl_fest_fehler
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -18224,6 +18252,20 @@ def admin_wd_plaene():
                         body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl=wd_sl)
                         if not wd_sl.get("ohne") and wd_sl.get("usd"):
                             body["master_sl"] = wd_sl["usd"]
+                # DL2b (Master 11.11.2026 nach S2/KK1b, Finns Linie seit Emin …0887): ein WD-Plan OHNE SL entsteht bei einer Firma mit Tageslimit (Lucid, FTMO
+                # Futures — wd_sl_dll_firma) nie mehr — gleich ob der Kontext scheiterte (Konten/Liq nicht lesbar), wd_sl_fuer_plan warf oder der Puffer nicht
+                # reichte (DL2-Pflicht-SL < 100 $). Kein Plan + Grund, der nächste Lauf versucht es wieder. Nur wenn der Würfel an ist bzw. sein Kontext scheiterte;
+                # Recoverer/Tradeify-Ausgleich (würfeln bewusst nicht) und Firmen ohne Tageslimit (Tradeify, Apex) wie heute. Regeln unbekannt → fail-closed.
+                if not body.get("master_sl") and (sl_regel or sl_kontext_fehler) and not wd_ist_recoverer_plan(body) and (r or {}).get("wd_ausgleich") is not True:
+                    try:
+                        _dll = wd_sl_dll_firma(sl_liq or _liq_regeln_laden(), sl_konten.get(mid) or acc[0])
+                    except Exception:
+                        _dll = None
+                    if _dll is not False:
+                        _g = ((body.get("mt5_baseline") or {}).get("wd_sl") or {}).get("grund") or sl_kontext_fehler or "kein SL"
+                        print(f"[wd-sl-dll] {mid[:8]}: {_g} — kein Plan ({'Tageslimit' if _dll else 'Tageslimit unbekannt'})", flush=True)
+                        uebersprungen.append({"master_account_id": mid, "grund": f"{WD_GRUND_DLL_OHNE_SL}{'' if _dll else ' (Regeln nicht lesbar)'} — {str(_g)[:120]}"
+                                              + WD_SL_FRUEHER_NAECHSTER}); continue
                 angelegt.append(sb_insert("trade_plans", body))
             _n_fr = sum(1 for u in uebersprungen if str(u.get("grund") or "").startswith(WD_SL_GRUND_FRUEHER))
             if _n_fr:
@@ -18233,6 +18275,14 @@ def admin_wd_plaene():
                                  schluessel=f"wd_frueher_unlesbar|{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}")
                 except Exception as e2:
                     print(f"[wd] ⚠️ Alarm frühere Trades unlesbar: {type(e2).__name__}", flush=True)
+            _n_dll = sum(1 for u in uebersprungen if str(u.get("grund") or "").startswith(WD_GRUND_DLL_OHNE_SL))
+            if _n_dll and sl_kontext_fehler:
+                try:   # DL2b: Kontext gescheitert → Tageslimit-Firmen ohne Plan sichtbar machen (wie KK1b), höchstens einmal je Stunde; ein knapper DLL-Rest meldet nichts
+                    alarm_senden(2, "wd_dll_ohne_sl", "WD-Pläne nicht angelegt",
+                                 f"SL-Daten nicht lesbar ({sl_kontext_fehler}) — {_n_dll} Konto(s) mit Tageslimit ohne WD-Plan, der nächste Lauf versucht es wieder.",
+                                 schluessel=f"wd_dll_ohne_sl|{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}")
+                except Exception as e2:
+                    print(f"[wd] ⚠️ Alarm DL2b: {type(e2).__name__}", flush=True)
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
             print(f"[wd] ⚠️ anlegen: {type(e).__name__}: {e}", flush=True)
