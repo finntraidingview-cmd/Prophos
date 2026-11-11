@@ -13113,6 +13113,8 @@ def wd_sl_express_mll(acc, fruehere, bal=None):
 
 
 WD_SL_GRUND_FRUEHER = "frühere Trades nicht lesbar — Puffer unbekannt"
+WD_SL_FRUEHER_WARTE_S = (1.0, 3.0)          # KK1b: Pause vor dem einen Wiederholungsversuch (_wd_sl_kontext)
+WD_SL_FRUEHER_NAECHSTER = " — nächster Lauf"  # Zusatz am Übersprungen-Grund im POST /admin/wd-plaene
 
 
 def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
@@ -13180,10 +13182,16 @@ def _wd_sl_kontext(mids):
     except Exception as e:
         print(f"[wd-sl-wuerfel] ⚠️ Konten nicht lesbar ({type(e).__name__}) — diese Pläne ohne SL", flush=True)
         return regel, {}, [], []
-    try:
-        fruehere = _wd_fruehere_trades(mids, streng=True)
-    except Exception:
-        fruehere = None           # KK1: nicht „keine früheren Trades“ — wd_sl_fuer_plan würfelt diese Pläne ohne SL mit Grund (WD_SL_GRUND_FRUEHER)
+    fruehere = None
+    for versuch in range(2):
+        try:
+            fruehere = _wd_fruehere_trades(mids, streng=True)
+            break
+        except Exception:
+            # KK1b (S2-Stopp, 11.11.2026): ein kurzer Aussetzer um 01:30 soll nicht alle WDs kosten — EINMAL nach 1–3 s (gestreut, Puls-Jitter-Regel) neu lesen
+            if versuch == 0:
+                time.sleep(random.uniform(*WD_SL_FRUEHER_WARTE_S))
+    # weiter nicht lesbar → None: POST /admin/wd-plaene legt gewürfelte Pläne dann NICHT an (DL2-Linie: kein WD-Plan ohne belegten SL-Puffer)
     return regel, konten, _liq_regeln_laden(), fruehere
 
 
@@ -17910,6 +17918,11 @@ def admin_wd_plaene():
                     body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl={
                         "ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None, "regel": "sl_wuerfel",
                         "grund": "Recoverer — kein Würfel" if wd_ist_recoverer_plan(body) else "Ausgleich — kein Würfel"})
+                elif sl_regel and sl_frueher is None:
+                    # KK1b (S2-Stopp 11.11.2026, Finns Linie seit DL2 / Vorfall Emin …0887: kein WD ohne belegten SL): frühere Trades auch nach der Wiederholung
+                    # nicht lesbar → Puffer (Tagesstart-Balance, MLL-Start) unbekannt → diesen Plan NICHT anlegen, nicht „ohne SL“. Alle Firmen, solange der
+                    # Würfel an ist; Recoverer/Ausgleich (oben, ohne Würfel, brauchen fruehere nicht) bleiben wie bisher.
+                    uebersprungen.append({"master_account_id": mid, "grund": WD_SL_GRUND_FRUEHER + WD_SL_FRUEHER_NAECHSTER}); continue
                 elif sl_regel:
                     try:
                         wd_sl = wd_sl_fuer_plan(sl_regel, body, sl_konten.get(mid), sl_liq, sl_frueher)
@@ -17922,6 +17935,14 @@ def admin_wd_plaene():
                         if not wd_sl.get("ohne") and wd_sl.get("usd"):
                             body["master_sl"] = wd_sl["usd"]
                 angelegt.append(sb_insert("trade_plans", body))
+            _n_fr = sum(1 for u in uebersprungen if str(u.get("grund") or "").startswith(WD_SL_GRUND_FRUEHER))
+            if _n_fr:
+                try:   # KK1b: sichtbar machen (wie „Payout unlesbar“ oben), höchstens einmal je Stunde
+                    alarm_senden(2, "wd_frueher_unlesbar", "WD-Pläne nicht angelegt",
+                                 f"Frühere Trades nicht lesbar — {_n_fr} Konto(s) ohne WD-Plan (SL-Puffer unbekannt), der nächste Lauf versucht es wieder.",
+                                 schluessel=f"wd_frueher_unlesbar|{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}")
+                except Exception as e2:
+                    print(f"[wd] ⚠️ Alarm frühere Trades unlesbar: {type(e2).__name__}", flush=True)
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
             print(f"[wd] ⚠️ anlegen: {type(e).__name__}: {e}", flush=True)
@@ -48697,6 +48718,7 @@ def admin_funded_plan_ids():
     alt = [str(x) for x in (reg.get("user_ids") or [])]
     neu = [x for x in alt if x != u] + ([u] if body.get("drin") else [])
     sb_update("funded_plan_regeln", {"id": "eq.1"}, {"user_ids": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
+    _fdp_reg_cache["at"] = 0.0     # KK1b: /konto-ziele liest danach frisch
     print(f"[funded-plan] IDs: {u[:8]} {'rein' if body.get('drin') else 'raus'} ({len(neu)} IDs)", flush=True)
     return jsonify({"ok": True, "user_id": u, "drin": bool(body.get("drin")), "n": len(neu)})
 
@@ -49068,6 +49090,7 @@ def admin_funded_plan_regeln():
         return jsonify({"ok": False, "msg": fehler}), (503 if not reg else 409 if fehler.startswith("inzwischen") else 400)
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     neu = sb_update("funded_plan_regeln", {"id": "eq.1", "updated_at": f"eq.{reg.get('updated_at')}"}, patch)
+    _fdp_reg_cache["at"] = 0.0     # KK1b: /konto-ziele liest danach frisch (auch bei 409 harmlos)
     if not neu:
         return jsonify({"ok": False, "msg": "inzwischen geändert — neu laden, dann erneut speichern"}), 409
     print(f"[funded-plan] Regeln geändert ({', '.join(k for k in patch if k != 'updated_at')}) von {str(uid or 'admin')[:8]}", flush=True)

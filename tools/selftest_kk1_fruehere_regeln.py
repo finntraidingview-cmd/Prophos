@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Selbsttest KK1 (Master 11.11.2026): (1) _wd_fruehere_trades schluckt Lesefehler nicht mehr auf den Schreib-/Sperr-Wegen — streng=True wirft,
-_wd_sl_kontext gibt dann fruehere=None, wd_sl_fuer_plan würfelt ohne SL mit Grund, SL1-Nachwürfeln schreibt im Takt nichts, Heim-Wache bleibt zu;
+_wd_sl_kontext versucht es einmal nach 1–3 s erneut, dann fruehere=None → POST /admin/wd-plaene legt den Plan NICHT an (KK1b), SL1-Nachwürfeln schreibt im Takt nichts, Heim-Wache bleibt zu;
 Anzeigen wie bisher []. (2) _fdp_regeln_gemerkt: 60 s gemerkt, Lesefehler → letzter guter Stand ≤ 15 min, nur in /konto-ziele benutzt.
 Echte Funktionen aus app.py, ohne Netz/DB (Supabase-Aufrufe als Stubs).
 
@@ -75,10 +75,47 @@ ns["_wd_sl_wuerfel_lesen"] = lambda: (regel, "db")
 ns["sb_select"] = lambda _t, _p: [acc]
 ns["_liq_regeln_laden"] = lambda: [{"id": 1}]
 ns["_wd_fruehere_trades"] = lambda ids, streng=False: kaputt() if streng else []
+for n in ("WD_SL_FRUEHER_WARTE_S",):
+    lade(n)
+schlaf = []
+ns["time"] = type("T", (), {"sleep": staticmethod(lambda x: schlaf.append(x)), "time": staticmethod(time.time)})
 r, konten, liq, fr = ruf("_wd_sl_kontext", ["a1"])
-check(r == regel and "a1" in konten and liq and fr is None, "Kontext: Lesefehler → fruehere None (Konten und liq_regeln bleiben)")
+check(r == regel and "a1" in konten and liq and fr is None, "Kontext: zweimal Lesefehler → fruehere None (Konten und liq_regeln bleiben)")
+check(len(schlaf) == 1 and 1.0 <= schlaf[0] <= 3.0, f"genau EINE Wiederholung nach 1–3 s gestreuter Pause ({schlaf})")
+versuche = {"n": 0}
+
+
+def einmal_kaputt(ids, streng=False):
+    versuche["n"] += 1
+    if versuche["n"] == 1:
+        raise ConnectionError("kurzer Aussetzer")
+    return [{"id": "ok"}]
+
+
+ns["_wd_fruehere_trades"], schlaf[:] = einmal_kaputt, []
+fr2 = ruf("_wd_sl_kontext", ["a1"])[3]
+check(fr2 == [{"id": "ok"}] and versuche["n"] == 2 and len(schlaf) == 1, "kurzer Aussetzer: Wiederholung klappt → Zeilen da (Plan wird mit SL gewürfelt)")
 ns["_wd_fruehere_trades"] = lambda ids, streng=False: [{"id": "x"}]
 check(ruf("_wd_sl_kontext", ["a1"])[3] == [{"id": "x"}], "Kontext ohne Fehler: Zeilen wie bisher")
+
+# ── POST /admin/wd-plaene: Lesefehler → KEIN Plan (KK1b, S2-Stopp) ──
+i = app.index("@app.route(\"/admin/wd-plaene\"")
+post = app[i:app.index("\n@app.route", i + 10)]
+z_rec = post.index("if sl_regel and (wd_ist_recoverer_plan(body)")
+z_none = post.index("elif sl_regel and sl_frueher is None:")
+z_wurf = post.index("elif sl_regel:\n")
+z_ins = post.index('angelegt.append(sb_insert("trade_plans", body))')
+blk = post[z_none:z_wurf]
+check(z_rec < z_none < z_wurf < z_ins, "Reihenfolge: Recoverer/Ausgleich → frühere Trades nicht lesbar → Würfel → Anlegen")
+check('uebersprungen.append({"master_account_id": mid, "grund": WD_SL_GRUND_FRUEHER + WD_SL_FRUEHER_NAECHSTER}); continue' in blk,
+      "Lesefehler: übersprungen mit Grund „frühere Trades nicht lesbar — Puffer unbekannt — nächster Lauf“, continue vor dem Anlegen")
+check(ns["WD_SL_GRUND_FRUEHER"] + " — nächster Lauf" == "frühere Trades nicht lesbar — Puffer unbekannt — nächster Lauf", "Grundtext")
+check('"wd_frueher_unlesbar"' in post and "WD_SL_GRUND_FRUEHER" in post[post.index('"wd_frueher_unlesbar"') - 400:], "Alarm (höchstens stündlich), wenn Pläne deshalb fehlen")
+ex = post.index("print(f\"[wd-sl-wuerfel] ⚠️ Kontext:")
+check("sl_regel, sl_konten, sl_liq, sl_frueher = None, {}, [], []" in post[ex:ex + 300], "Kontext-Ausnahme: Würfel aus, sl_frueher [] (nicht None) — wie bisher")
+
+# ── KANN: Merker nach dem Speichern leeren ──
+check(app.count('_fdp_reg_cache["at"] = 0.0') == 2, "Einstellungs-POST (Regel + IDs) leeren den /konto-ziele-Merker")
 
 # ── Einbau an den Schreib-/Sperr-Wegen, Anzeigen unverändert ──
 nach = re.search(r"^def wd_sl_nach_tick\(.*?(?=^\S)", app, re.S | re.M).group(0)
