@@ -43574,10 +43574,13 @@ def tw_pct(planer, uid, werte=None, ktx=None):
 
 
 def tw_pause_grund(planer, a, tag, werte=None, ktx=None):
-    """Konto-Zeile a (id, user_id) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher)."""
+    """Konto-Zeile a (id, user_id) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher).
+    TW2: von Hand reingenommen (Marke tw_hand je Konto × Tag, tw_hand_konten) → None — die Hand überstimmt den Wurf, nur an diesem Tag."""
     try:
         pct = tw_pct(planer, (a or {}).get("user_id"), werte, ktx)
         if pct >= 100 or tw_handelt(planer, str((a or {}).get("id") or ""), tag, pct):
+            return None
+        if "tw_hand_konten" in globals() and str((a or {}).get("id") or "") in tw_hand_konten(tag):   # get: ältere Selftest-Lader ziehen tw_pause_grund ohne TW2
             return None
         return TW_GRUND_WD if planer == "winning_days" else TW_GRUND.format(pct=_tw_pct_txt(pct))
     except Exception as e:
@@ -43671,6 +43674,142 @@ def admin_handel_wuerfel():
     print(f"[handels-wuerfel] {TW_PLANER_NAME[planer]} · {name or 'Standard (HT)'} → {'100 % (Zeile weg)' if pct is None else _tw_pct_txt(pct) + ' %'} "
           f"durch {str(uid)[:8]}", flush=True)
     return jsonify(antwort())
+
+
+# ══ TW2 HAND ÜBERSTIMMT DEN PAUSE-TAG (Finn 11.11.2026 21:30 über den Master: „Wenn ein Konto per Würfel einen Pause-Tag hat, soll es überstimmt werden, wenn
+# ich es von Hand reinnehme"). Marke je Konto × Plan-Tag in user_settings (keine neue Tabelle): user_id = Besitzer des Kontos, key „tw_hand:<YYYY-MM-DD>:<konto>",
+# value {at, von}. Geschrieben NUR über POST /admin/handel-wuerfel/hand (Planer-Rechte + wd_hand_darf) — Knopf „heute rein" am Pause-Chip im Trade-Planer
+# (Challenge, Funded CFD, Funded Futures) und „heute wieder rein" bei Winning Days. Gelesen in tw_pause_grund, also überall, wo der Würfel greift (5 Planer,
+# Nachplan-Filter, WD-POST); der WD-Rückfall am PC-Tab liest dieselbe Zeile selbst (hwWdPause, eigene user_settings). Nachtlauf/Takt würfeln weiter wie bisher —
+# nur dieses Konto an diesem Tag ist ausgenommen; der nächste Tag hat einen anderen Schlüssel = neu gewürfelt. Lesefehler → keine Marke (Pause bleibt, wie TW1). ══
+TW_HAND_PREFIX = "tw_hand:"
+TW_HAND_LIKE = "tw\\_hand:"      # für LIKE: „_“ ist sonst ein Platzhalter (Prüfer TW2 KANN 8)
+TW_HAND_CACHE_S = 20
+TW_HAND_TAGE_ALT = 7          # Marken älter als 7 Tage räumt das Schreiben mit weg
+_tw_hand = {}                 # tag → (bis, set(konto_id))
+_tw_hand_lock = threading.Lock()
+
+
+def tw_hand_key(tag, konto_id):
+    """REIN RECHNEND (testbar): Schlüssel der Marke je Konto × Tag."""
+    return f"{TW_HAND_PREFIX}{str(tag)[:10]}:{konto_id}"
+
+
+def tw_hand_aus_zeilen(rows, tag):
+    """REIN RECHNEND (testbar): user_settings-Zeilen (key) → Menge der Konto-IDs mit Marke für genau diesen Tag."""
+    vor = f"{TW_HAND_PREFIX}{str(tag)[:10]}:"
+    return {str(r.get("key"))[len(vor):] for r in rows or [] if isinstance(r, dict) and str(r.get("key") or "").startswith(vor) and len(str(r.get("key"))) > len(vor)}
+
+
+def tw_hand_tag_ok(tag, heute):
+    """REIN RECHNEND (testbar): Plan-Tag für eine Marke erlaubt? Format YYYY-MM-DD, gestern bis übermorgen (Dubai) — der Funded-Planer plant auf Wunsch den
+    nächsten Handelstag, ein CME-Tag kann einen Tag neben dem Dubai-Tag liegen."""
+    try:
+        t = datetime.strptime(str(tag or "")[:10], "%Y-%m-%d").date()
+        h = datetime.strptime(str(heute)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return len(str(tag)) == 10 and -1 <= (t - h).days <= 2
+
+
+def tw_hand_konten(tag, frisch=False):
+    """Konto-IDs, die am Plan-Tag `tag` von Hand reingenommen wurden (TW2). 20 s gemerkt je Tag; POST /admin/handel-wuerfel/hand leert den Merker.
+    Fehler → leere Menge (der Würfel gilt wie bisher), höchstens einmal je Minute geloggt."""
+    t = str(tag or "")[:10]
+    if not t:
+        return set()
+    jetzt = time.time()
+    with _tw_hand_lock:
+        z = _tw_hand.get(t)
+        if not frisch and z and z[0] > jetzt:
+            return z[1]
+    try:
+        rows = _sb_all("user_settings", {"select": "key", "key": f"like.{TW_HAND_LIKE}{t}:*"}) or []
+        menge = tw_hand_aus_zeilen(rows, t)
+    except Exception as e:
+        with _tw_hand_lock:
+            z = _tw_hand.get(t)
+            if not z or jetzt - z[0] > 60:
+                print(f"[handels-wuerfel] ⚠️ Hand-Marken {t} nicht lesbar ({type(e).__name__}) — Würfel gilt", flush=True)
+            _tw_hand[t] = (jetzt + 15, set())
+        return set()
+    with _tw_hand_lock:
+        for k in [k for k, v in _tw_hand.items() if v[0] < jetzt - 3600]:
+            _tw_hand.pop(k, None)
+        _tw_hand[t] = (jetzt + TW_HAND_CACHE_S, menge)
+    return menge
+
+
+def tw_pause_dazu(erg, basis):
+    """REIN RECHNEND (testbar, Prüfer TW2 SOLLTE 4): der neueste Lauf ist ein Nachplan-Lauf (enthält nur seine nur_konten) → die „Pause-Tag“-Zeilen des
+    Haupt-Laufs DESSELBEN Tags (basis) wieder dazu, damit der Knopf „heute rein“ am Chip bleibt. Nur Konten, die der neue Lauf nicht selbst führt."""
+    if not isinstance(erg, dict) or not isinstance(basis, dict) or erg.get("quelle_lauf") != "nachplanen" or str(basis.get("tag") or "")[:10] != str(erg.get("tag") or "")[:10]:
+        return erg
+    drin = {str((z or {}).get("konto_id") or "") for f in ("geplant", "ausgelassen", "ziel") for z in (erg.get(f) or []) if isinstance(z, dict)}
+    drin |= {str(k) for k in (erg.get("nur_konten") or [])}
+    dazu = [z for z in (basis.get("ausgelassen") or []) if isinstance(z, dict) and str(z.get("grund") or "").startswith("Pause-Tag")
+            and z.get("konto_id") and str(z.get("konto_id")) not in drin]
+    return dict(erg, ausgelassen=list(erg.get("ausgelassen") or []) + dazu) if dazu else erg
+
+
+@app.route("/admin/handel-wuerfel/hand", methods=["POST", "OPTIONS"])
+def admin_handel_wuerfel_hand():
+    """TW2: POST {konto_id, tag?: YYYY-MM-DD (Standard heute Dubai), rein?: true | false} → {ok, konto_id, tag, rein}. rein true = Marke setzen (Pause-Tag dieses
+    Kontos an diesem Tag überstimmt), false = Marke weg (der Wurf gilt wieder). Rechte: Planer-Schreib-Gate (HT nur „Finn + Pascal“/„Pascal“) und wd_hand_darf
+    (eigene Konten, Verwalter seine Gruppe, voller Admin HT). Plant selbst nichts — der nächste Nachplan-/Funded-Takt bzw. der WD-Weg legt den Plan an."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    me, err = _wd_login()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    kid = str(body.get("konto_id") or "").strip()
+    if not re.match(r"^[0-9a-f-]{36}$", kid):
+        return jsonify({"ok": False, "msg": "konto_id fehlt"}), 400
+    heute = datetime.now(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")
+    tag = str(body.get("tag") or heute).strip()[:10]
+    if not tw_hand_tag_ok(tag, heute):
+        return jsonify({"ok": False, "msg": "tag = YYYY-MM-DD, gestern bis übermorgen"}), 400
+    rein = body.get("rein", True) is not False
+    try:
+        acc = (sb_select("accounts", {"select": "id,user_id,name", "id": f"eq.{kid}", "limit": "1"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Konto nicht lesbar ({type(e).__name__})"}), 502
+    if not acc or not acc.get("user_id"):
+        return jsonify({"ok": False, "msg": "Konto nicht gefunden"}), 404
+    try:
+        recht = wd_hand_darf(me, acc.get("user_id"), getattr(g, "admin_sicht", None) if _admin_verwalter() else None, _admin_voll()[1] is None,
+                             _admin_verwalter_gruppen_ids(admin_gruppen_daten()))
+    except Exception:
+        return jsonify({"ok": False, "msg": "Rechte nicht prüfbar — nichts geändert"}), 502
+    if not recht:
+        return jsonify({"ok": False, "msg": "Dieses Konto darfst du hier nicht reinnehmen (nur eigene, Admins ihre Gruppe)"}), 403
+    key, jetzt = tw_hand_key(tag, kid), datetime.now(timezone.utc)
+    try:
+        if rein:
+            _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
+                        json={"user_id": str(acc["user_id"]), "key": key, "value": {"at": jetzt.isoformat(), "von": str(me)}, "updated_at": jetzt.isoformat()},
+                        headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+        else:
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/user_settings", params={"user_id": f"eq.{acc['user_id']}", "key": f"eq.{key}"},
+                        headers=_sb_headers("return=minimal"), timeout=12).raise_for_status()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    with _tw_hand_lock:
+        _tw_hand.pop(tag, None)
+    tw_hand_konten(tag, frisch=True)   # Prüfer KANN 7: ein Lesen, das vor dem Schreiben begann, legt sonst bis zu 20 s die alte Menge in den Merker
+    try:   # alte Marken (> 7 Tage) mit wegräumen — Fehler egal
+        alt = (jetzt - timedelta(days=TW_HAND_TAGE_ALT)).isoformat()
+        _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/user_settings", params={"key": f"like.{TW_HAND_LIKE}*", "updated_at": f"lt.{alt}"},
+                    headers=_sb_headers("return=minimal"), timeout=12)
+    except Exception:
+        pass
+    print(f"[handels-wuerfel] ✋ {acc.get('name') or kid[:8]} am {tag} {'von Hand rein (Pause-Tag überstimmt)' if rein else 'Hand-Marke weg (Wurf gilt)'} "
+          f"durch {str(me)[:8]}", flush=True)
+    return jsonify({"ok": True, "konto_id": kid, "tag": tag, "rein": rein})
 
 
 # ══ RV1 RANGE-WÜRFEL (11.11.2026, Finn 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss,
@@ -51723,6 +51862,16 @@ def admin_auto_plan():
         else:
             rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", order="at.desc", limit="1"))
         erg = (rows[0].get("ergebnis") if rows else None) or {}
+        if not gr_lauf and rows and rows[0].get("quelle") == "nachplanen" and isinstance(erg, dict) and "tw_pause_dazu" in globals():
+            # TW2 (Prüfer SOLLTE 4): Nachplan-Lauf zeigt nur seine Konten — Pause-Tag-Zeilen des Haupt-Laufs desselben Tags dazu (Knopf „heute rein“ bleibt)
+            try:
+                _b = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,ergebnis", tag=f"eq.{rows[0].get('tag')}", quelle="neq.nachplanen",
+                                                      order="at.desc", limit="1"))
+                if _b and isinstance(_b[0].get("ergebnis"), dict):
+                    erg = tw_pause_dazu(dict(erg, tag=erg.get("tag") or rows[0].get("tag"), quelle_lauf="nachplanen"), dict(_b[0]["ergebnis"], tag=_b[0].get("tag")))
+                    erg.pop("quelle_lauf", None)
+            except Exception as e:
+                print(f"[auto-plan] ⚠️ Pause-Zeilen zum Nachplan-Lauf: {type(e).__name__}: {e}", flush=True)
         try:
             erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)
         except Exception as e:

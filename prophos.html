@@ -2694,6 +2694,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-chip.gut em{color:var(--good)}
   :is(#tpl-view,#adm-pane-planer) .tpl-chip.lauf{border-color:color-mix(in srgb,var(--violet) 45%,var(--border));background:var(--violet-tint);color:var(--ink)}
   :is(#tpl-view,#adm-pane-planer) .tpl-chip.lauf em{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tw-hand-btn{font:inherit;font-size:10.5px;font-weight:600;line-height:1.2;padding:1px 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--violet) 45%,var(--border));background:var(--violet-tint);color:var(--violet-dark);cursor:pointer}
+  :is(#tpl-view,#adm-pane-planer) .tw-hand-btn:disabled{opacity:.55;cursor:default} :is(#tpl-view,#adm-pane-planer) .tw-hand-ok{font-size:10.5px;font-weight:600;color:var(--good)}
   :is(#tpl-view,#adm-pane-planer) .tpl-chip.grau{background:var(--surface-tint);border-color:var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-chip.grau em{font-weight:500}
   /* HEUTE JE ID (Finn 12.10.2026: „bei der jeweiligen ID kurz sehen, welcher Account heute schon getradet wurde und welcher noch dran
@@ -17252,7 +17254,7 @@
       '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-wp3-zurueck]', '[data-fcr-in]', '[data-fcr-sw]', '[data-fcr-edit]', '[data-fcr-save]',
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
-      '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]',
+      '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]', '[data-tw-hand]',
       '[data-e2-pfad]', '[data-e2-save]', '[data-e2-ktadd]', '[data-e2-ktx]', '[data-e2-ktsel]',   // E2 Einstellungen Funded Futures (04.11.2026), E2g Kontrakte-Zeilen
       // Winning Days
       '#wdWuerfel', '#wdSave', '#wdRiskAlle', '#wdRegelnSave', '#wdNdAlle', '#wdHedgeSave', '#wdHedgeSave2', '#wd-staffel-reset', '#wd-staffel-add', '#ws-knopf',
@@ -58795,7 +58797,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2198'
+  const OS_TAB_BUILD = '2026-09-22.2199'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68440,7 +68442,7 @@
       const t = findeT(a)
       let w = tplGrund(a.grund), kl = 'grau', plan = false
       if(/geplanten\/laufenden Plan/.test(a.grund || '')){ if(t){ [w, kl] = zustand(t); plan = true } else w = 'alter Vorschlag offen' }
-      id(a.user_id, a.user).chips.push({ r: a, t, wort: w, kl, titel: [a.firma, a.konto, a.grund].filter(Boolean).join(' · '), plan })
+      id(a.user_id, a.user).chips.push({ r: a, t, wort: w, kl, titel: [a.firma, a.konto, a.grund].filter(Boolean).join(' · '), plan, tag: a.plan_tag || (roh && roh.tag) })   // TW2: Funded-Planer tragen ihren Plan-Tag (CME-Tag / plan_tag), Challenge den Lauf-Tag
     }
     if(currentUserId && (ids.has(String(currentUserId)) || (_ap.imPlaner && !apdAdmin()))){
       const ich = id(currentUserId, _ap.ich && _ap.ich.name)
@@ -68457,6 +68459,23 @@
     for(const o of ids.values()) o.chips.sort((a, b) => (rang[a.kl] - rang[b.kl]) || String(a.r.firma || '').localeCompare(String(b.r.firma || '')))
     return [...ids.values()]
   }
+  /* TW2 HAND ÜBERSTIMMT DEN PAUSE-TAG (Finn 11.11.2026 21:30: „Wenn ein Konto per Würfel einen Pause-Tag hat, soll es überstimmt werden, wenn ich es von Hand
+   * reinnehme"): am Chip eines Kontos mit Grund „Pause-Tag (Handels-Würfel …)" (Challenge, Funded CFD, Funded Futures — alle im selben Lauf-Format) ein Knopf
+   * „heute rein" → POST /admin/handel-wuerfel/hand {konto_id, tag} setzt die Marke je Konto × Tag; der nächste Nachplan-/Funded-Takt plant das Konto dann.
+   * Nur Anzeige-Merker hier (_twHand), die Wahrheit steht in user_settings (app.py tw_hand_konten). */
+  const _twHand = new Map()   // `${tag}|${konto}` → 'laeuft' | 'ok' | Fehlertext
+  function twHandKnopf(c){
+    const r = (c && c.r) || {}, kid = String(r.konto_id || ''), tag = String((c && c.tag) || '').slice(0, 10)
+    if(!kid || !tag || !/^Pause-Tag \(Handels-Würfel \d/.test(String(r.grund || ''))) return ''   // Planer-Format mit Prozent (TW_GRUND); WD hat „heute wieder rein“
+    const st = _twHand.get(tag + '|' + kid)
+    if(st === 'ok') return ' <small class="tw-hand-ok" title="von Hand reingenommen — der nächste Takt plant das Konto">✋ rein</small>'
+    return ` <button type="button" class="tw-hand-btn" data-tw-hand="${escapeHtml(kid)}" data-tw-tag="${escapeHtml(tag)}"${st === 'laeuft' ? ' disabled' : ''} title="${escapeHtml(st && st !== 'laeuft' ? 'nicht gespeichert: ' + st : 'Pause-Tag überstimmen: dieses Konto am ' + tag + ' trotzdem planen (nur dieser Tag)')}">${st === 'laeuft' ? '…' : 'heute rein'}</button>`
+  }
+  async function twHandRein(kid, tag, rein){
+    const d = await apdApi('POST', '/handel-wuerfel/hand', { konto_id: String(kid), tag: String(tag || '').slice(0, 10) || undefined, rein: rein !== false, sicht: 'admin' }, '/admin')   // sicht: Verwalter darf seine Gruppe (_admin_ansicht)
+    return d
+  }
+  window._tw2 = { knopf: twHandKnopf, rein: twHandRein, stand: _twHand }   // Test-Haken (Stub)
   function tplAbdeckungHtml(D, liste){
     // JE ID EIN BLOCK, AUFKLAPPBAR (07.10.2026): Kopfzeile = ID, Balken läuft/geplant/fertig/offen, Zahlen; Chips erst beim Aufklappen.
     // Offen ist der Block, den der Nutzer aufgeklappt hat (_tpl.abAuf), die per Chip gewählte ID oder die einzige ID der Liste.
@@ -68468,7 +68487,7 @@
       const auf = _tpl.abAuf.has(o.uid) ? !!_tpl.abAuf.get(o.uid) : (_tpl.sicht === o.uid || liste.length === 1)
       const chips = o.chips.map(c => {
         const e4 = tplEnde4(c.r)
-        return `<span class="tpl-chip ${c.kl}"${c.t ? ` data-tpl-t="${escapeHtml(c.t.key)}"` : ''} title="${escapeHtml(c.titel)}"><i style="background:${apdFirmaTon(c.r.firma)}"></i>${escapeHtml(apPrKurz(c.r.firma))}${e4 ? ' …' + escapeHtml(e4) : ''} <em>${escapeHtml(c.wort)}</em></span>`
+        return `<span class="tpl-chip ${c.kl}"${c.t ? ` data-tpl-t="${escapeHtml(c.t.key)}"` : ''} title="${escapeHtml(c.titel)}"><i style="background:${apdFirmaTon(c.r.firma)}"></i>${escapeHtml(apPrKurz(c.r.firma))}${e4 ? ' …' + escapeHtml(e4) : ''} <em>${escapeHtml(c.wort)}</em>${twHandKnopf(c)}</span>`
       })
       if(o.archiv.length) chips.push(`<span class="tpl-chip grau" title="${escapeHtml(o.archiv.slice(0, 30).map(a => `${a.firm} · ${a.name}`).join('\n'))}"><em>archiviert ×${o.archiv.length}</em></span>`)
       const seg = (n, kl, t) => n ? `<i class="${kl}" style="flex:${n}" title="${n} ${t}"></i>` : ''
@@ -68494,7 +68513,7 @@
       const chips = o.chips.map(c => {
         const art = c.kl === 'lauf' ? 'lauf' : (c.plan && c.kl === 'grau') ? 'fertig' : c.kl === 'gut' ? 'dran' : 'grau'
         const wort = art === 'fertig' ? '✓ fertig' : art === 'lauf' ? '● läuft' : art === 'dran' ? '○ ' + c.wort.replace(/^geplant /, 'dran ') : '– ' + c.wort
-        return { art, html: `<span class="tpl-chip ${art}"${c.t ? ` data-tpl-t="${escapeHtml(c.t.key)}"` : ''} title="${escapeHtml(c.titel)}"><i style="background:${apdFirmaTon(c.r.firma)}"></i>${escapeHtml(apPrKurz(c.r.firma))}${tplEnde4(c.r) ? ' …' + escapeHtml(tplEnde4(c.r)) : ''} <em>${escapeHtml(wort)}</em></span>` }
+        return { art, html: `<span class="tpl-chip ${art}"${c.t ? ` data-tpl-t="${escapeHtml(c.t.key)}"` : ''} title="${escapeHtml(c.titel)}"><i style="background:${apdFirmaTon(c.r.firma)}"></i>${escapeHtml(apPrKurz(c.r.firma))}${tplEnde4(c.r) ? ' …' + escapeHtml(tplEnde4(c.r)) : ''} <em>${escapeHtml(wort)}</em>${twHandKnopf(c)}</span>` }
       }).sort((a, b) => rang[a.art] - rang[b.art])
       const n = { fertig: chips.filter(c => c.art === 'fertig').length, lauf: chips.filter(c => c.art === 'lauf').length, dran: chips.filter(c => c.art === 'dran').length }
       return `<div class="tpl-hk-z${i ? '' : ' erste'}"><b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}<small>${n.fertig} fertig · ${n.lauf} läuft · ${n.dran} dran</small></b>
@@ -70455,6 +70474,16 @@
         }
         finally{ setTimeout(tplSpaeter, 300) }
       })(); tplSpaeter(); return }
+    const twh = e.target.closest('[data-tw-hand]')   // TW2: Pause-Tag von Hand überstimmen
+    if(twh){ e.stopPropagation(); const kid = twh.dataset.twHand, tag = twh.dataset.twTag, key = tag + '|' + kid
+      if(_twHand.get(key) === 'laeuft') return
+      _twHand.set(key, 'laeuft'); tplZeichnen(); try{ window._apIdsRender?.() }catch(_){}
+      ;(async () => {
+        try{ await twHandRein(kid, tag, true); _twHand.set(key, 'ok')
+          if(typeof atToast === 'function') atToast(`✋ Pause-Tag überstimmt (${tag}) — Challenge: nächster Nachplan-Takt, solange das Fenster offen ist (sonst Nachtlauf); Funded: nächster 5-min-Takt.`, 'start') }
+        catch(err){ const m = (err && err.message) || String(err); _twHand.set(key, m); if(typeof atToast === 'function') atToast('Nicht reingenommen: ' + m, 'end') }
+        finally{ tplZeichnen(); try{ window._apIdsRender?.() }catch(_){} }   // Admin-Reiter zeichnet sich selbst
+      })(); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen in „Geplant" öffnet das Popup des Admin-Reiters (apKontoOeffnen
@@ -76835,6 +76864,13 @@
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k || !k.farm) return
     if(rein && wdKontoPayoutOffen(k)) return wdSay(`${k.name || 'Konto'}: ${WD_PAYOUT_KEIN_WD} — fährt danach von selbst wieder mit.`, 'err')   // R2c
+    // TW2 (Finn 11.11.2026 21:30: „Wenn ein Konto per Würfel einen Pause-Tag hat, soll es überstimmt werden, wenn ich es von Hand reinnehme"): „heute wieder rein"
+    // auf einem Pause-Tag setzt ZUERST die Marke je Konto × Tag (POST /admin/handel-wuerfel/hand) — sonst lehnte POST /admin/wd-plaene den Plan gleich wieder ab
+    // und die Zeile stünde nach dem Anlegen erneut auf Pause. Marke nicht gespeichert → nichts geändert, Fehler sichtbar
+    if(rein && k.hinweis === WD_HINWEIS_PAUSE){
+      try{ await apdApi('POST', '/handel-wuerfel/hand', { konto_id: String(k.id), tag: String(x.tag || '').slice(0, 10), rein: true, sicht: 'admin' }, '/admin') }
+      catch(e){ return wdSay(`${k.name || 'Konto'}: Pause-Tag nicht überstimmt — ${(e && e.message) || e}`, 'err') }
+    }
     k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''; delete k.naechster_lauf   // „heute wieder rein" = bewusst sofort (21.10.2026)
     x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
     wdRender()
@@ -92389,7 +92425,7 @@
       geplant: (d.geplant || []).filter(g => String(g.user_id) === u).length + geplantEcht.filter(g => g.user_id === u).length,
       ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
     const ausg = [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Winning Days' }))]
-      .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded', grund: x.grund || '' }))
+      .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded', grund: x.grund || '', plan_tag: d.tag || null }))   // TW2: Plan-Tag des Planers (CME-Tag)
     const ids = new Set(plaene.map(p => String(p.plan_id)))
     return {
       vorschau, aktiv: !!d.aktiv, regelnQuelle: d.regeln_quelle, zeiten: d.zeiten || {}, regeln: d.regeln || null,   // regeln: E2-Einstellungen (04.11.2026)
@@ -92451,7 +92487,7 @@
       geplant: (d.geplant || []).filter(g => String(g.user_id) === u).length + geplantEcht.filter(g => g.user_id === u).length,
       ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
     const ausg = [...(d.ausgelassen || []).filter(x => !FCP_AUSG_LEISE.test(String(x.grund || ''))), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Waiting for Payout' }))]
-      .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded_cfd', grund: x.grund || '' }))
+      .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded_cfd', grund: x.grund || '', plan_tag: d.tag || null }))   // TW2: Plan-Tag des Planers
     return {
       vorschau: false, aktiv, regelnQuelle: null, zeiten: d.zeiten || {}, fcfd: true, zielAutoWartet: !!d.ziel_auto_wartet,
       newsRegel: typeof d.news_regel === 'boolean' ? d.news_regel : null,   // NEWS-KACHEL (30.10.2026): S4 6583d221, älteres Backend → null
@@ -94712,11 +94748,20 @@
       if(!_hw.d[g] || !_hw.d[g].werte || Date.now() - (_hw.at[g] || 0) > HW_FRISCH_MS) await hwLaden(g)
       const pct = hwZahl((((_hw.d[g] || {}).werte) || {}).winning_days)
       if(pct == null || pct >= 100) return false
-      if(pct <= 0) return true
-      return (await hwWurf('winning_days', String(acc.id), tag)) * 100 >= pct
+      if(!(pct <= 0 || (await hwWurf('winning_days', String(acc.id), tag)) * 100 >= pct)) return false
+      return !(await hwHandMarke(acc, tag, uid))   // TW2: von Hand reingenommen → kein Pause-Tag
     }catch(e){ console.warn('[hw] WD-Rückfall', e); return false }
   }
-  window._hw = { innen: hwInnenHtml, platz: hwPlatz, wurf: hwWurf, wdPause: hwWdPause, stand: _hw }   // Test-Haken (Stub)
+  // TW2: Marke „von Hand rein" je Konto × Tag (app.py tw_hand_key, user_settings des Konto-Besitzers = diese ID). Nicht lesbar → keine Marke (Pause bleibt, wie app.py)
+  async function hwHandMarke(acc, tag, uid){
+    try{
+      if(!acc || !acc.id || !uid) return false
+      const { data, error } = await supabase.from('user_settings').select('key').eq('user_id', String(uid)).eq('key', `tw_hand:${String(tag || '').slice(0, 10)}:${acc.id}`).limit(1)
+      if(error) throw error
+      return !!(data && data.length)
+    }catch(e){ console.warn('[hw] Hand-Marke', e); return false }
+  }
+  window._hw = { innen: hwInnenHtml, platz: hwPlatz, wurf: hwWurf, wdPause: hwWdPause, handMarke: hwHandMarke, stand: _hw }   // Test-Haken (Stub)
 
   /* ========== RANGE-WÜRFEL ========== */
   /* RV1 (Finn 11.11.2026 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und
