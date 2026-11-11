@@ -58615,7 +58615,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2184'
+  const OS_TAB_BUILD = '2026-09-22.2185'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -83215,9 +83215,18 @@
     if((!_tvNeu.at || _tvNeu.uid !== String(currentUserId || '')) && !_tvNeu.laedt){ tvNeuLaden(); return }   // erster Aufruf bzw. andere ID lädt einmal
     const eigene = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts : []
     const uidJetzt = String(currentUserId || '')
-    const offen = kontoZuBestaetigen(tvOffen(_tvNeu.rows, eigene, currentUserId).filter(z => !_tvNeu.verworfen.has(kontoKey(z.ext))),
-      mailOffen(_tvNeu.mails.filter(m => !m.user_id || String(m.user_id) === uidJetzt).map(m => Object.assign({ user_id: uidJetzt }, m)), eigene, () => _tvNeu.verworfen))
+    // MV1 (Finn 11.11.2026 19:24 über den Master zu „14389689 · FundedNext · zu bestätigen · aus Mail“: „Ja, einfach verwerfen. Das habe ich nie genutzt,
+    // wegmachen.“): unter Accounts keine Mail-Vorschläge mehr — nur noch die TV-Zeilen. Das Laden (/konto-mails/mein, liefert auch die Verworfen-Liste für die
+    // TV-Zeilen), Admin → Konten aus Mail & TV / Alle Accounts und der Mail-Leser im Backend bleiben, wie sie sind.
+    const offen = kontoZuBestaetigen(tvOffen(_tvNeu.rows, eigene, currentUserId).filter(z => !_tvNeu.verworfen.has(kontoKey(z.ext))), [])
       .filter(z => !_admKTv.angelegt.has(`${uidJetzt}|${extIdNorm(z.ext)}`))
+      // MV1 (Master 11.11.2026, Screenshot Finn 19:21 bei Chris: Filter „Firma: FTMO Futures“, darüber trotzdem „14389689 · FundedNext · Funded · zu bestätigen“):
+      // die Vorschläge standen über der Liste, ohne den Firmen- und Typ-Filter. Die TV-Zeilen, die bleiben, folgen jetzt denselben zwei Vergleichen wie
+      // renderAccounts (a.firm / a.type exakt) — Firma „?“ (unbekannt) trifft keinen gesetzten Firmen-Filter. Nur Anzeige: Bestätigen/Verwerfen bleiben.
+      // try: accFilters ist ein let weiter oben — ein sehr früher Aufruf (TDZ) zeigt dann ungefiltert statt zu werfen (Prüfer MV1, KANN)
+      .filter(z => { let f = null; try{ f = accFilters }catch(_){}
+        f = f || { firm: '', type: '' }
+        return (!f.firm || z.firma === f.firm) && (!f.type || z.typ === f.type) })
     tb.innerHTML = ''
     if(!offen.length) return
     if(TV_KONTEN_AUTO) console.warn('[tv-konten] TV_KONTEN_AUTO = true, automatisches Anlegen ist aber nicht gebaut — Bestätigen bleibt nötig')
