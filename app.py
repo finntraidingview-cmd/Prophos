@@ -43321,7 +43321,7 @@ def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
     Grenze geklemmt, nie über den alten Wert. Stand der SL „hinter dem Boden“ (Stufe) und liegt jetzt davor, fällt der Zusatz weg — sonst läse echoV2Final
     den SL-Treffer als Blow.
     LETZTER TRADE (Master 11.11.2026: „letzter Trade (Ziel-Rest) auch klein erlaubt — Ziel nicht erreicht = morgen neu“): liegt sein TP danach unter dem Rest
-    bis Ziel, ist er kein finaler Trade mehr → Stufe „Etappe … (statt letzter Trade)“. Sonst hielten ihn prophos_plan_final_text / ap_plan_final_text
+    bis Ziel + Puffer der neuen Lots, ist er kein finaler Trade mehr → Stufe „Etappe … (Ziel erst später)“. Sonst hielten ihn prophos_plan_final_text / ap_plan_final_text
     („Auto-Planer · letzter Trade“ = final), der Schritt „Finale“ und Trades pro Tag (ein Trade) weiter für den Pass-Trade. Klein-, Mini-, Gewinntag-Trade bleiben."""
     st0 = str((w or {}).get("stufe") or "")
     final = bool(RV_FINAL_RE.match(st0))
@@ -43346,9 +43346,9 @@ def rv_anwenden(w, fk, schritt, ppl, min_pkt=RV_MIN_PKT):
             hoch = float(max_pkt) * je_pkt if max_pkt else None
         except (TypeError, ValueError):
             hoch = None
-        if hoch is not None and roh > hoch + 1e-9:
-            return int(min(wert, hoch // 1)), "max"                     # abrunden: nie über den Deckel
         tief = min_pkt * je_pkt
+        if hoch is not None and roh > hoch + 1e-9 and hoch + 1e-9 >= tief:   # Deckel unter dem Mindestabstand → der Mindestabstand gewinnt (Prüfer RV1b)
+            return int(min(wert, hoch // 1)), "max"                     # abrunden: nie über den Deckel
         if roh + 1e-9 >= tief and round(roh) + 1e-9 >= tief:   # auch nach dem Runden nicht enger als min_pkt (Prüfer RV1)
             return int(round(roh)), None
         return int(min(wert, -((-(tief - 1e-9)) // 1))), "min"         # aufrunden ohne math (nicht importiert)
