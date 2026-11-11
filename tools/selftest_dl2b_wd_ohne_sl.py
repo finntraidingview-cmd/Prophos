@@ -23,6 +23,9 @@ def check(ok, text):
 
 
 ns = ws1.lade()
+for _n in ("liq_dll_schutz",):
+    _i = APP.index(f"\ndef {_n}(") + 1
+    exec(APP[_i:APP.index("\n\n\n", _i)], ns)
 i = APP.index("\ndef wd_sl_dll_firma(") + 1
 exec(APP[i:APP.index("\n\n\n", i)], ns)
 D = ns["wd_sl_dll_firma"]
@@ -45,7 +48,11 @@ check(D([r for r in REGELN if r["id"] != 18], konto("Lucid Trading", "150k LFF00
 check(D(REGELN, konto("Lucid Trading", "50k LFF0000000002 → Winning Days")) is False, "Lucid 50k WD: weder WD- noch Funded-Zeile mit Tageslimit → wie heute")
 check(D(REGELN, konto("FTMO Futures", "50k FTMOF0000001 → Winning Days")) is True, "FTMO Futures 50k WD → Tageslimit 1.000")
 check(D(REGELN, konto("Tradeify", "150k FTDFYSLX150000000000887 → Winning Days")) is False, "Tradeify → NIE Tageslimit (WD boden, Funded fest) — wie heute")
-check(D(REGELN, konto("Apex Trader", "150k PAAPEX0000000000001 → Funded")) is False, "Apex (Stufen-Regel) → zählt hier nicht — wie heute")
+check(D(REGELN, konto("Apex Trader", "150k PAAPEX0000000000001 → Funded")) is False, "Apex (Stufen-Regel, dll_schutz leer) → zählt hier nicht — wie heute")
+check(D([dict(r, dll_schutz=True) if r["id"] == 4 else r for r in REGELN], konto("Apex Trader", "150k PAAPEX0000000000001 → Funded")) is True,
+      "Apex mit dll_schutz true (Finns Entscheid) → Tageslimit-Firma")
+check(D([dict(r, dll_schutz=False) if r["id"] == 18 else r for r in REGELN], konto("Lucid Trading", "150k LFF0000000001 → Winning Days")) is False,
+      "Lucid mit dll_schutz false → ausgeschaltet")
 check(D(REGELN, konto("Tradeify", "150k X", dll_usd=1750)) is True and D(REGELN, konto("Lucid Trading", "150k Y", dll_usd=0)) is False,
       "Konto-Feld dll_usd gewinnt (> 0 ja, 0 nein)")
 check(D([], konto("Lucid Trading", "150k Z")) is None and D(REGELN, None) is None, "Regeln oder Konto fehlen → unbekannt (None, Aufrufer sperrt)")

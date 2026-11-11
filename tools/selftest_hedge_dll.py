@@ -73,7 +73,7 @@ def main():
     # istTradeifyCfd: firmNormRichtung fragt seit .1726 danach (Tradeify CFD eigene Firma)
     teile += [js_funktion(src, n) for n in ("istTradeifyCfd", "firmNormRichtung", "tvV2Handelstag", "liqRegelWaehlen", "liqDailyLoss", "hedgeTagesstart",
                                             "hedgeLiqDll", "hedgeLiqDllApex", "hedgeLiqStart", "hedgeLiqLevel",
-                                            "planWdSlUsd", "hedgeDllVorPkt", "hedgeDllVorEff", "hedgeFeedEntscheidDetail")]   # DL2 (11.11.2026): Puffer ≥ 100 $ vor dem Daily Loss   # WS1 (09.11.2026): hedgeLiqLevel fragt nach dem Würfel-SL des Plans
+                                            "planWdSlUsd", "hedgeDllVorPkt", "hedgeDllVorEff", "liqDllSchutz", "hedgeFeedEntscheidDetail")]   # DL2 (11.11.2026): Puffer ≥ 100 $ vor dem Daily Loss   # WS1 (09.11.2026): hedgeLiqLevel fragt nach dem Würfel-SL des Plans
     acc = [
         {"id": "marc", "name": "150k PAAPEX6843320000001 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": None},
         {"id": "a100", "name": "100k PAAPEX0000000000099 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": 100000},
@@ -84,7 +84,9 @@ def main():
         {"id": "flex", "name": "150k FTDFYSLX150600000000001 → Winning Days", "firm": "Tradeify", "type": "winning_days", "startingBalance": 150000, "dllUsd": 0},
         {"id": "lucid", "name": "150k LUCID0000000001 → Winning Days", "firm": "Lucid Trading", "type": "winning_days", "startingBalance": 150000},
     ]
+    regeln_schutz = [dict(r, dll_schutz=True) if r["id"] in (4, 13) else r for r in REGELN]
     stub = f"""
+const REGELN_SCHUTZ = {json.dumps(regeln_schutz)}
 let _liqRegeln = null, tradePlans = []
 const accounts = {json.dumps(acc)}
 const REGELN = {json.dumps(REGELN)}
@@ -105,6 +107,8 @@ function tpKontoGroesseAusName(n){{ const m = /^(\\d+)k/i.exec(String(n || ''));
         "tdfy": ("REGELN", plan("p6", "tdfy", "buy", 152000), 30000, 2, 3, []),
         "ohne_regeln": ("null", plan("p7", "marc", "buy", 165735.2), 30000, 2, 3, []),
         "zu_nah": ("REGELN", plan("p8", "a100", "buy", 103800), 30000, 20, 20, []),
+        # DL2-Schalter: Apex-Zeile mit dll_schutz true → DL2-Puffer
+        "marc_schutz": ("REGELN_SCHUTZ", plan("p1s", "marc", "buy", 165735.2), 30000, 2, 3, []),
         # DL2: 0887 SELL 3 MNQ @ 28.092,50, Start-Balance 160.329 (−2.980 $ bei 28.589 → ~157.350)
         "d0887": ("REGELN", plan("p9", "d0887", "sell", 160329), 28092.5, 2, 3, []),
         "d0887_ohne_regeln": ("null", plan("p10", "d0887", "sell", 160329), 28092.5, 2, 3, []),
@@ -136,14 +140,18 @@ function tpKontoGroesseAusName(n){{ const m = /^(\\d+)k/i.exec(String(n || ''));
     r = json.loads(aus.stdout.strip().splitlines()[-1])
 
     m = r["marc_buy"]
-    vor = 16.75   # DL2: max(5 Pkt, 100 $ ÷ (2 $ × 3 MNQ) = 16,67 → auf Viertelpunkte 16,75)
+    vor = 5   # DL2-Schalter: Apex (stufen, dll_schutz leer) exakt wie vor DL2 — 5 Pkt
     pkt = round(4000 / 6 - vor, 2)
     check(m.get("liq_art") == "daily_loss" and m["liq_dll"]["stufe"] == 5 and m["liq_dll"]["usd"] == 4000,
           f"Marc 165.735: Stufe 5, Daily Loss 4.000 ({m.get('liq_dll')})")
     check(abs(m["liq_balance"] - 161735.2) < 0.01, f"Marc Liq-Balance 161.735,20 ({m['liq_balance']})")
     check(abs(m["sl_punkte"] - pkt) < 0.01 and abs(m["sl_level_nq"] - round(30000 - pkt, 2)) < 0.01,
           f"Marc buy 3 MNQ: {pkt} Pkt unter Einstieg = {round(30000 - pkt, 2)} ({m['sl_level_nq']})")
-    check(abs(m["sl_usd_hedge"] - 4000) < 0.01 and m["liq_vor_pkt"] == vor, "Marc: Hedge-$ 4.000, 16,75 Pkt (= ≥ 100 $) davor (DL2)")
+    check(abs(m["sl_usd_hedge"] - 4000) < 0.01 and m["liq_vor_pkt"] == vor and m["liq_dll"].get("dll_schutz") is False,
+          "Marc: Hedge-$ 4.000, 5 Pkt davor — Apex ohne DL2-Schalter bitgleich wie vor DL2")
+    ms = r["marc_schutz"]
+    check(ms["liq_vor_pkt"] == 16.75 and abs(ms["sl_punkte"] - round(4000 / 6 - 16.75, 2)) < 0.01 and ms["liq_dll"].get("dll_schutz") is True,
+          f"Apex mit dll_schutz true (Finns Entscheid): 16,75 Pkt (≥ 100 $) davor ({ms.get('sl_punkte')})")
     check(abs(r["marc_sell"]["sl_level_nq"] - round(30000 + pkt, 2)) < 0.01, f"Marc sell: Level über dem Einstieg ({r['marc_sell']['sl_level_nq']})")
     a = r["a100"]
     check(a.get("liq_art") == "daily_loss" and a["liq_dll"]["stufe"] == 3 and abs(a["liq_balance"] - 102550) < 0.01

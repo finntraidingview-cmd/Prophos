@@ -13377,11 +13377,11 @@ def wd_sl_dll_firma(regeln, acc):
     firma, gr = acc.get("firm"), _wd_konto_groesse(acc)
     r = liq_regel_waehlen(regeln, firma, "winning_days", gr)[0]
     art = (r or {}).get("art")
-    if art == "tagesstart":
-        return True
+    if art in ("tagesstart", "stufen"):
+        return liq_dll_schutz(r)        # DL2-Schalter: tagesstart an, stufen (Apex) nur mit dll_schutz true
     if art in (None, "boden"):
         rf = liq_regel_waehlen(regeln, firma, "funded", gr)[0]
-        return (rf or {}).get("art") == "tagesstart"
+        return (rf or {}).get("art") in ("tagesstart", "stufen") and liq_dll_schutz(rf)
     return False
 
 
@@ -13392,8 +13392,8 @@ def wd_sl_dll_pflicht(w, mv):
     """REIN RECHNEND (testbar, DL2 11.11.2026, Master: „WD ohne SL … trotzdem ein SL knapp vor dem DLL“; Fall …0887: WD ohne SL, Tradeify schloss den Master am Daily
     Loss): hat der Würfel „ohne SL“ ergeben und ist der Puffer ein Tageslimit (mv.art daily_loss, Soft Breach — die Firma schließt den Master), bekommt der Plan
     einen SL = Puffer − WD_SL_DLL_PUFFER. Darunter WD_SL_FEST_MIN_USD → bleibt ohne (der Fusion-Hedge schließt am DLL-Level). Sonst unverändert."""
-    if not isinstance(w, dict) or not w.get("ohne") or w.get("sperre") or (mv or {}).get("art") != "daily_loss":
-        return w
+    if not isinstance(w, dict) or not w.get("ohne") or w.get("sperre") or (mv or {}).get("art") != "daily_loss" or (mv or {}).get("dll_schutz") is not True:
+        return w   # DL2-Schalter: ohne dll_schutz (Apex 'stufen' ohne Freigabe) wie vor DL2
     p = _wd_num((mv or {}).get("usd"))
     if p is None:
         return w
@@ -14613,8 +14613,12 @@ def _liq_regeln_laden():
         return _liq_regeln_cache["zeilen"]
     try:
         try:
-            zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp,"
-                                                      "maxdd_art,maxdd_lock_ueber_groesse_usd,maxdd_usd"})
+            try:   # DL2-Schalter (11.11.2026): dll_schutz mitlesen; fehlt die Spalte (sql/2026-11-11_dl2_apex_schalter.sql), wie bisher ohne
+                zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp,"
+                                                          "maxdd_art,maxdd_lock_ueber_groesse_usd,maxdd_usd,dll_schutz"})
+            except Exception:
+                zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp,"
+                                                          "maxdd_art,maxdd_lock_ueber_groesse_usd,maxdd_usd"})
         except Exception:
             # Spalten des Konto-Bodens (sql/2026-09-30_liq-kontoboden.sql) noch nicht da → Regeln wie bisher, Boden statisch
             zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp"})
@@ -33797,6 +33801,18 @@ def hf_wd_sichtbar(zeile, firmen, gruppen_ids):
     return hf_ist_wd(zeile, firmen) and str(zeile.get("user_id")) not in {str(u) for u in gruppen_ids or ()}
 
 
+def liq_dll_schutz(regel):
+    """REIN (DL2-Schalter, Master 11.11.2026 nach Prüfer S7 — Finn hat zu Apex noch nicht entschieden): gelten die DL2-Verschärfungen (Puffer ≥ 100 $, Pflicht-SL vor
+    dem DLL, kein WD-Plan ohne SL) für diese liq_regeln-Zeile? dll_schutz true/false; NULL = an bei art 'tagesstart' (Lucid, FTMO Futures), aus bei 'stufen' (Apex,
+    exakt wie vor DL2). Dieselbe Regel wie prophos.html liqDllSchutz."""
+    if not regel:
+        return False
+    ds = regel.get("dll_schutz")
+    if ds is not None:
+        return ds is True
+    return regel.get("art") == "tagesstart"
+
+
 def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
     """REIN RECHNEND (testbar, Finn 02.11.2026: „wenn der Master in Stop Loss geht, quasi sein Daily Ding hittet“): WD-Pläne haben keinen SL, darum Master-Verlust = Abstand zur Liq wie im Radar (liq_regel_felder), dazu
     Größe + 100 wie der WD-Hedge (hedgeLiqLevel). → {usd, art: daily_loss | liq, tagesstart, tagesstart_quelle, text} oder {grund}. Die engere Grenze gilt: fällt die Liq früher als der Daily Loss, dann die. Verlust ab der
@@ -33814,10 +33830,15 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
     # DL2 (11.11.2026, Anlass …0887): Tagesverlust-Limit JE KONTO (accounts.dll_usd > 0) — die Firma schließt den Master dort (Soft Breach);
     # das engere von Konto-Limit und Regel gilt. 0/NULL = wie bisher nur liq_regeln (Daily/Flex steht nur am Konto).
     kd = _wd_num(a.get("dll_usd"))
+    try:   # DL2-Schalter: Zeile, aus der das Tageslimit kommt (wie liq_regel_felder: Kontoart des Plans, wie_kontotyp aufgelöst)
+        _kt = str((plan or {}).get("konto_typ") or a.get("account_type") or "")
+        dll_schutz = liq_dll_schutz(liq_regel_waehlen(regeln, a.get("firm"), _kt, _wd_konto_groesse(a))[0])
+    except Exception:
+        dll_schutz = False
     if kd and kd > 0:
         k_lvl = round((ts if ts is not None else bal) - kd, 2)
         if regel is None or k_lvl > regel:
-            regel, regel_soft = k_lvl, True
+            regel, regel_soft, dll_schutz = k_lvl, True, True   # Konto-Limit: DL2 immer an
             regel_text = f"Daily Loss {_liq_de(kd)} $ (Konto) ab Tagesstart {_liq_de(ts if ts is not None else bal, 2)} $"
     boden = max([v for v in (f.get("liq_boden_balance"), gr + 100 if gr else None) if v is not None], default=None)
     liq = max([v for v in (regel, boden) if v is not None], default=None)
@@ -33828,7 +33849,7 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
         return {"grund": f"Balance {bal:.2f} $ liegt nicht über der Liq {liq:.2f} $"}
     tages = regel is not None and liq == regel and regel_soft
     return {"usd": usd, "art": "daily_loss" if tages else "liq", "tagesstart": ts, "tagesstart_quelle": ts_quelle,
-            "text": regel_text if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss"}
+            "text": regel_text if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss", "dll_schutz": bool(tages and dll_schutz)}
 
 
 def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):

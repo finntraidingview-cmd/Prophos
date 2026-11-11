@@ -17,7 +17,7 @@ FUNKTIONEN = ("_wd_num", "_cme_handelstag", "_wd_level", "_wd_konto_groesse", "l
               "plan_ist_wd", "plan_ist_apex_hedge", "ah_dll_balance", "liq_regel_waehlen", "liq_stufe", "_liq_de", "liq_aus_regel", "liq_tagesstart",
               "liq_boden_kernwerte", "liq_konto_boden", "_liq_pl_de", "liq_kw_daily", "liq_regel_felder", "hf_wd_master_verlust",
               "_wd_sl_std", "wd_sl_wuerfel_regel", "wd_sl_wuerfeln", "wd_sl_balance", "wd_sl_express_mll", "wd_sl_fuer_plan",
-              "wd_sl_dll_pflicht", "_wd_sl_konten_select")   # DL2 (11.11.2026): Pflicht-SL vor dem Daily Loss, Konto-Abfrage mit dll_usd
+              "wd_sl_dll_pflicht", "_wd_sl_konten_select", "liq_dll_schutz")   # DL2 (11.11.2026): Pflicht-SL vor dem Daily Loss, Konto-Abfrage mit dll_usd
 
 
 def lade():

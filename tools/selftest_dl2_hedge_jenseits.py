@@ -82,18 +82,20 @@ for k in ("WD_SL_FEST_MIN_USD", "WD_SL_DLL_PUFFER"):
 exec(block("wd_sl_dll_pflicht"), ns)
 P = ns["wd_sl_dll_pflicht"]
 ohne = {"ohne": True, "stufe": 0, "usd": None, "puffer": 1750.0, "grund": "gewürfelt: ohne SL"}
-r = P(ohne, {"usd": 1750.0, "art": "daily_loss"})
+r = P(ohne, {"usd": 1750.0, "art": "daily_loss", "dll_schutz": True})
 check(r["ohne"] is False and r["usd"] == 1650 and r.get("pflicht_dll") and "1.750" in r["grund"], f"0887: ohne SL + Daily Loss 1.750 $ → SL 1.650 $ ({r})")
 check(P(ohne, {"usd": 9000.0, "art": "liq"}) is ohne, "Puffer ist die Liquidation (kein Tageslimit) → ohne SL bleibt (WD-Regel)")
-check(P(dict(ohne), {"usd": 150.0, "art": "daily_loss"})["ohne"] is True, "Daily Loss nur 150 $ entfernt → kein Pflicht-SL (< 100 $), Hedge schließt am DLL-Level")
+check(P(ohne, {"usd": 1750.0, "art": "daily_loss", "dll_schutz": False}) is ohne, "DL2-Schalter aus (Apex 'stufen') → ohne SL bleibt wie vor DL2")
+check(P(dict(ohne), {"usd": 150.0, "art": "daily_loss", "dll_schutz": True})["ohne"] is True, "Daily Loss nur 150 $ entfernt → kein Pflicht-SL (< 100 $), Hedge schließt am DLL-Level")
 mit = {"ohne": False, "usd": 900, "stufe": 2}
-check(P(mit, {"usd": 1750.0, "art": "daily_loss"}) is mit, "gewürfelter SL bleibt, wie er ist")
-check(P({"ohne": True, "sperre": True}, {"usd": 1750.0, "art": "daily_loss"}).get("sperre"), "Sperre (FT2 fest) bleibt Sperre")
-check(P(None, {"usd": 1750.0, "art": "daily_loss"}) is None, "Würfel aus (None) → nichts")
+check(P(mit, {"usd": 1750.0, "art": "daily_loss", "dll_schutz": True}) is mit, "gewürfelter SL bleibt, wie er ist")
+check(P({"ohne": True, "sperre": True}, {"usd": 1750.0, "art": "daily_loss", "dll_schutz": True}).get("sperre"), "Sperre (FT2 fest) bleibt Sperre")
+check(P(None, {"usd": 1750.0, "art": "daily_loss", "dll_schutz": True}) is None, "Würfel aus (None) → nichts")
 fp = block("wd_sl_fuer_plan")
 check("return wd_sl_dll_pflicht(wd_sl_wuerfeln(regel, puffer, bal, liq, rnd=rnd, grund=mv.get(\"grund\")), mv)" in fp, "wd_sl_fuer_plan hängt den Pflicht-SL an")
 hv = block("hf_wd_master_verlust")
-check('kd = _wd_num(a.get("dll_usd"))' in hv and "regel is None or k_lvl > regel" in hv and "regel, regel_soft = k_lvl, True" in hv,
+check('kd = _wd_num(a.get("dll_usd"))' in hv and "regel is None or k_lvl > regel" in hv and "regel, regel_soft, dll_schutz = k_lvl, True, True" in hv
+      and '"dll_schutz": bool(tages and dll_schutz)' in hv and "liq_dll_schutz(liq_regel_waehlen(" in hv,
       "hf_wd_master_verlust: Konto-Limit dll_usd (engeres gilt, Soft Breach → art daily_loss)")
 check(APP.count("_wd_sl_konten_select({") == 2 and ',dll_usd"' in block("_wd_sl_konten_select"), "beide Konto-Abfragen des WD-SL lesen dll_usd (mit Rückfall ohne Spalte)")
 

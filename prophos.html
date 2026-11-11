@@ -31490,6 +31490,11 @@
   // sofort, der Master liefe ~100 $ ungesichert. Der Puffer wird darum höchstens so groß, dass das Level ≥ HEDGE_DLL_VOR_PKT vom Einstieg liegt; reicht auch
   // das nicht (gesamt ≤ 5 Pkt), gilt der DLL-Punkt selbst (nie gar kein Level). gesamtPkt = $ bis zum DLL ÷ ($/Pkt × Kontrakte).
   function hedgeDllVorEff(gesamtPkt, vor){ if(!(vor > 0) || !(gesamtPkt > 0)) return 0; return gesamtPkt - vor >= HEDGE_DLL_VOR_PKT ? vor : Math.max(0, Math.min(vor, gesamtPkt - HEDGE_DLL_VOR_PKT)) }
+  /* DL2-SCHALTER (Master 11.11.2026, Prüfer S7: Apex ist mit DL2 nicht bitgleich, Finn hat zu Apex noch nicht entschieden): die DL2-Verschärfungen — Puffer ≥ 100 $ mit
+   * geglätteter Kante hier, Pflicht-SL vor dem DLL im WD-Planer (app.py wd_sl_dll_pflicht) — gelten je liq_regeln-Zeile über dll_schutz: true an, false aus,
+   * NULL = an bei art 'tagesstart' (Lucid, FTMO Futures), aus bei 'stufen' (Apex → exakt wie vor DL2). Konto-Limit (accounts.dll_usd) ist immer an. */
+  function liqDllSchutz(regel){ return !!regel && (regel.dll_schutz === true || (regel.dll_schutz == null && regel.art === 'tagesstart')) }
+  window._liqDllSchutz = liqDllSchutz
   window._hedgeDllVorPkt = hedgeDllVorPkt   // Test-Haken
   window._hedgeDllVorEff = hedgeDllVorEff
   let _liqRegeln = null, _liqRegelnAt = 0, _liqRegelnLaeuft = false
@@ -31497,7 +31502,8 @@
     if(_liqRegelnLaeuft || Date.now() - _liqRegelnAt < 60000) return _liqRegeln
     _liqRegelnLaeuft = true
     try{
-      const { data, error } = await supabase.from('liq_regeln').select('id,firma,kontotyp,groesse,art,betrag_usd,stufen,wie_kontotyp')
+      // '*' (DL2-Apex-Schalter 11.11.2026): liest dll_schutz mit, sobald die Spalte da ist — ohne Spalte wie bisher (kein Fehler durch eine fehlende Spalte)
+      const { data, error } = await supabase.from('liq_regeln').select('*')
       if(error) console.warn('[hedge] liq_regeln:', error.message)
       else if(Array.isArray(data) && data.length) _liqRegeln = data   // leere Antwort = nicht geladen (Rückfall Kontogröße + 100)
     }catch(e){ console.warn('[hedge] liq_regeln', e) }
@@ -31566,12 +31572,13 @@
     const ts = hedgeTagesstart(plan, startBal)
     const kontoDl = acc && acc.dllUsd != null && isFinite(Number(acc.dllUsd)) ? Number(acc.dllUsd) : null
     if(kontoDl === 0) return null                                    // Konto ohne Tageslimit (z. B. Tradeify Flex)
-    if(kontoDl > 0) return { liq_balance: Math.round((ts.balance - kontoDl) * 100) / 100, dl: kontoDl, stufe: null, ab: null, tagesstart: ts.balance, quelle: ts.quelle, regel_id: null, dl_quelle: 'konto' }
+    if(kontoDl > 0) return { liq_balance: Math.round((ts.balance - kontoDl) * 100) / 100, dl: kontoDl, stufe: null, ab: null, tagesstart: ts.balance, quelle: ts.quelle, regel_id: null, dl_quelle: 'konto', dll_schutz: true }
     if(!Array.isArray(regeln)) return null
     const firma = (acc && acc.firm) || (plan && plan.masterFirm) || ''
     let r = liqRegelWaehlen(regeln, firma, 'winning_days', groesse), d = liqDailyLoss(r, ts.balance), dq = 'liq_regeln'
     if(!d){ const rf = liqRegelWaehlen(regeln, firma, 'funded', groesse), df = liqDailyLoss(rf, ts.balance); if(df){ r = rf; d = df; dq = 'liq_regeln_funded' } }
-    return d ? { liq_balance: Math.round((ts.balance - d.dl) * 100) / 100, dl: d.dl, stufe: d.stufe, ab: d.ab, tagesstart: ts.balance, quelle: ts.quelle, regel_id: r.id, dl_quelle: dq } : null
+    return d ? { liq_balance: Math.round((ts.balance - d.dl) * 100) / 100, dl: d.dl, stufe: d.stufe, ab: d.ab, tagesstart: ts.balance, quelle: ts.quelle, regel_id: r.id, dl_quelle: dq,
+                 dll_schutz: liqDllSchutz(r) } : null
   }
   // APEX-CHALLENGE-WD-HEDGE Daily Loss (S2/Master 30.10.2026): Apex-Challenges haben ein Tageslimit (Konto max_daily_drawdown, live 1.500 $ bei
   // 100k / 2.000 $ bei 150k; liq_regeln Apex challenge 'tagesstart'). Schließt Apex den Master am Daily Loss und ist der Reader blind, darf die
@@ -31585,7 +31592,8 @@
     if(!(dl > 0) || !(ts.balance > 0)) return null
     const ausKonto = dl === dlKonto
     return { liq_balance: Math.round((ts.balance - dl) * 100) / 100, dl, stufe: ausKonto ? null : d.stufe, ab: ausKonto ? null : d.ab,
-             tagesstart: ts.balance, quelle: ts.quelle, regel_id: ausKonto ? null : (r && r.id), dl_quelle: ausKonto ? 'konto' : 'liq_regeln' }
+             tagesstart: ts.balance, quelle: ts.quelle, regel_id: ausKonto ? null : (r && r.id), dl_quelle: ausKonto ? 'konto' : 'liq_regeln',
+             dll_schutz: !!(r && r.dll_schutz === true) }   // DL2-Schalter: Apex-Challenge nur bei ausdrücklichem true (max_daily_drawdown ist kein DL2-Konto-Limit)
   }
   window._hedgeLiqDllApex = hedgeLiqDllApex   // Test-Haken
   // Daily-Loss-Felder fürs Hedge-Objekt (Open + Wächter-Nachtrag), damit Radar/Spur zeigen, woher das Level kommt
@@ -31666,15 +31674,18 @@
     if(!st) return { hinweis: 'keine Start-Balance — Hedge schließt nur am TP', liq_balance: liq }
     // Apex: liq = max(Boden, Daily-Loss-Level) — art 'daily_loss' wie bei WD-Konten (wd_sl_zeile übernimmt dann das Hedge-Level)
     const dll = art === 'apex_boden' ? hedgeLiqDllApex(plan, acc, groesse, st.balance, regeln) : hedgeLiqDll(plan, acc, groesse, st.balance, regeln)
-    if(dll && dll.liq_balance > liq){ liq = dll.liq_balance; vorPkt = hedgeDllVorPkt(ppl, kt); art = 'daily_loss' }   // DL2: ≥ 100 $ davor
+    // DL2: ≥ 100 $ davor — nur mit dll_schutz (DL2-Schalter), sonst wie vor DL2 HEDGE_DLL_VOR_PKT
+    if(dll && dll.liq_balance > liq){ liq = dll.liq_balance; vorPkt = dll.dll_schutz ? hedgeDllVorPkt(ppl, kt) : HEDGE_DLL_VOR_PKT; art = 'daily_loss' }
     // liq_regeln_geladen auch mit Konto-Limit (DL2): das Konto-Feld braucht keine Regeln — sonst rechnete der Wächter das Level nach dem Laden noch einmal
     const dllFelder = { liq_art: art, liq_regeln_geladen: !!regeln || !!(dll && dll.dl_quelle === 'konto'), liq_vor_pkt: vorPkt || null,
-      liq_dll: dll ? { usd: dll.dl, stufe: dll.stufe, ab_balance: dll.ab, tagesstart: dll.tagesstart, quelle: dll.quelle, regel_id: dll.regel_id, dl_quelle: dll.dl_quelle || null } : null }
+      liq_dll: dll ? { usd: dll.dl, stufe: dll.stufe, ab_balance: dll.ab, tagesstart: dll.tagesstart, quelle: dll.quelle, regel_id: dll.regel_id, dl_quelle: dll.dl_quelle || null,
+                       dll_schutz: !!dll.dll_schutz } : null }
     const usd = Math.round((st.balance - liq) * 100) / 100
     if(!(usd > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Start-Balance nicht über dem Liquidations-Level — Hedge schließt nur am TP', liq_balance: liq }, dllFelder)
     // Liegt das Daily Loss näher als HEDGE_DLL_VOR_PKT (viele NQ in Stufe 1–3, zweiter Trade nach Verlust), gilt der DLL-Punkt selbst —
     // nie gar kein Level, sonst liefe die Fusion nach Apex' Liquidation nackt weiter (Prüf-Agent 21.10.2026)
-    if(vorPkt){ vorPkt = Math.round(hedgeDllVorEff(usd / (ppl * kt), vorPkt) * 100) / 100; dllFelder.liq_vor_pkt = vorPkt || null }   // DL2: Kante „zu nah“ geglättet
+    if(vorPkt && dll && dll.dll_schutz){ vorPkt = Math.round(hedgeDllVorEff(usd / (ppl * kt), vorPkt) * 100) / 100; dllFelder.liq_vor_pkt = vorPkt || null }   // DL2: Kante „zu nah“ geglättet
+    else if(vorPkt && !(usd / (ppl * kt) - vorPkt > 0)){ vorPkt = 0; dllFelder.liq_vor_pkt = null }   // ohne DL2-Schalter wie vor DL2
     const pkt = Math.round((usd / (ppl * kt) - vorPkt) * 100) / 100
     const lvl = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pkt : einstieg + pkt) * 100) / 100 : null
     return Object.assign({ sl_punkte: pkt, sl_level_nq: lvl, sl_art: 'liquidation', liq_balance: liq, sl_usd_hedge: usd, liq_quelle: st.quelle, liq_balance_start: st.balance }, dllFelder)
@@ -58824,7 +58835,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2199'
+  const OS_TAB_BUILD = '2026-09-22.2200'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -67570,8 +67581,12 @@
     // OBERE KANTE (S9-Hinweis zu 9a97ee8e, 02.11.2026, Mike ~1.170 statt 1.200 €): am Daily Loss schließt die Fusion HEDGE_DLL_VOR_PKT vorher (hedgeLiqLevel),
     // liegt das Daily Loss näher als der Puffer, am DLL-Punkt selbst; an der Liq ohne Puffer. Wert bleibt „ca.“ (Slippage, Balance bis zum Start)
     // DL2 (Prüfer): derselbe Puffer wie hedgeLiqLevel (≥ 100 $, Kante „zu nah“ geglättet)
-    const eur = (usd, vor) => { if(!(lots > 0 && kt > 0 && ppl > 0 && usd > 0)) return null; const pkt = usd / (ppl * kt); return lots * tpWdSlavePpl() * (pkt - (vor ? hedgeDllVorEff(pkt, vor) : 0)) }
-    return { lots, tpUsd: tpUsd || null, tpEur: eur(tpUsd), dlUsd: dlUsd || null, dlEur: eur(dlUsd, mv.art === 'daily_loss' ? hedgeDllVorPkt(ppl, kt) : 0), dlArt: mv.art || null, dlText: mv.text || mv.grund || '', dlVorPkt: mv.art === 'daily_loss' ? hedgeDllVorPkt(ppl, kt) : null }
+    // DL2-Schalter: mv.dll_schutz (Railway hf_wd_master_verlust) — ohne wie vor DL2 (5 Pkt, alte Kante)
+    const schutz = mv.dll_schutz === true
+    const eur = (usd, vor) => { if(!(lots > 0 && kt > 0 && ppl > 0 && usd > 0)) return null; const pkt = usd / (ppl * kt)
+      return lots * tpWdSlavePpl() * (schutz ? pkt - (vor ? hedgeDllVorEff(pkt, vor) : 0) : (vor && pkt - vor > 0 ? pkt - vor : pkt)) }
+    const vorDl = mv.art === 'daily_loss' ? (schutz ? hedgeDllVorPkt(ppl, kt) : HEDGE_DLL_VOR_PKT) : 0
+    return { lots, tpUsd: tpUsd || null, tpEur: eur(tpUsd), dlUsd: dlUsd || null, dlEur: eur(dlUsd, vorDl), dlArt: mv.art || null, dlText: mv.text || mv.grund || '', dlVorPkt: vorDl || null }
   }
   window._ahfWdPaare = ahfWdPaare   // Prüf-Haken
   function ahfZeileHtml(z, opt){
@@ -67595,7 +67610,7 @@
       const ca = 'Fusion-€ ca. (Lots × €/Pkt × Punkte, ohne Slippage)'
       paare = [pzPaarZelle({ wo: 'tp', mWert: Number(z.master_tp) || null, fWert: w ? w.tpEur : passTp, mName: 'TP', fName: 'SL', tip: w ? ca : '' }),
         pzPaarZelle(w ? { wo: 'sl', mWert: w.dlUsd, fWert: w.dlEur, mName: dlLiq ? 'Liquidation' : 'Daily Loss', fName: 'TP',
-          tip: [w.dlText, w.dlEur != null ? ca + (dlLiq ? '' : ', Fusion schließt ' + String(w.dlVorPkt || HEDGE_DLL_VOR_PKT).replace('.', ',') + ' Pkt (≥ 100 $) vor dem Daily Loss') : ''].filter(Boolean).join(' · ') }
+          tip: [w.dlText, w.dlEur != null ? ca + (dlLiq ? '' : ', Fusion schließt ' + String(w.dlVorPkt || HEDGE_DLL_VOR_PKT).replace('.', ',') + ' Pkt vor dem Daily Loss') : ''].filter(Boolean).join(' · ') }
           : { wo: 'sl', mText: 'Blow', fWert: vs.blow_eur, mName: 'Blow', fName: 'TP' })]
     }
     return `<tr data-ahf-zeile="${escapeHtml(id)}"><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
