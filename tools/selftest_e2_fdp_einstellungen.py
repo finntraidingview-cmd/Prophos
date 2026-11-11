@@ -87,7 +87,10 @@ def nein(body, text):
 nein({"updated_at": "alt", "zeiten": {"vorlauf_min": 10}}, "veraltetes updated_at")
 nein({"updated_at": U, "zeiten": {"firma_abstand_min": 10}}, "firma_abstand_min (fest in der DB)")
 nein({"updated_at": U, "zeiten": {"max_je_id_tag": 2.5}}, "max_je_id_tag nicht ganz")
-nein({"updated_at": U, "zeiten": {"max_je_id_tag": 0}}, "max_je_id_tag 0")
+nein({"updated_at": U, "zeiten": {"max_je_id_tag": 7}}, "max_je_id_tag 7 (über 6)")
+# FE1b (Finn 11.11.2026 20:45): 0 = Tagesdeckel je ID aus — jetzt erlaubt
+_p0, _f0 = aend(REG, {"updated_at": U, "zeiten": {"max_je_id_tag": 0}})
+check(_f0 is None and _p0 and _p0["zeiten"]["max_je_id_tag"] == 0, f"FE1b: max_je_id_tag 0 (= aus) wird gespeichert ({_f0})")
 nein({"updated_at": U, "zeiten": {"neu": 1}}, "unbekanntes Zeit-Feld")
 nein({"updated_at": U, "schalter": {"aktiv": "ja"}}, "Schalter kein bool")
 nein({"updated_at": U, "user_ids": []}, "user_ids (nur über /ids)")

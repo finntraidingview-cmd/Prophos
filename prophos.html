@@ -90097,7 +90097,7 @@
       teile.push(Q ? (Q.aktiv ? nm + ' an' : nm + (fc ? ' aus' : ' aus · Vorschau')) : nm)
       if(z.von || z.bis) teile.push(`Start ${escapeHtml(String(z.von || ''))}–${escapeHtml(String(z.bis || ''))} Dubai, zufällig`)
       if(fc) teile.push(fcrTradesText(), `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`, `${Number(z.abstand_id_min) || 10} min je ID`, `Bestätigen ${Q && Q.apIds && _ap.info && _ap.info.auto_bestaetigen && _ap.info.auto_bestaetigen.aktiv ? 'automatisch' : 'von Hand'}`)
-      else teile.push(`max. ${Number(z.max_je_id_tag) || 2} Funded-Trades je ID und Tag`, `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`)
+      else teile.push(Number(z.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID' : `max. ${Number(z.max_je_id_tag) || 2} Funded-Trades je ID und Tag`, `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`)   // FE1b: 0 = aus
       if(Q && Q.regelnQuelle === 'standard') teile.push('Standard-Regeln')
     }else{
       if(v.echo_hedge && typeof v.echo_hedge.an === 'boolean') teile.push(`Echo-Hedge ${an(v.echo_hedge.an)}`)
@@ -91446,7 +91446,9 @@
   const _e2 = { ktNeu: {}, offen: null, letzte: null, zu: (() => { try{ return sessionStorage.getItem('prophos_e2_zu') === '1' }catch(_){ return false } })(), gr: {}, entwurf: {}, meldung: {}, laeuft: '', fokus: null, basis: {} }   // basis: updated_at beim ersten Entwurf je Karte (Gegenprüfung: sonst überschreibt ein alter Entwurf still)
   const E2_FELD = { ziel_gewinn: ['Ziel-Gewinn', '$', 'über dem Zyklus-Start'], max_trade: ['TP höchstens je Trade', '$', 'Deckel je Trade'], kosten_eur: ['Kontokosten', '€', 'offene Kosten zu Zyklusbeginn'],
     dd: ['Max Drawdown', '$', 'Abstand Start → Liquidation'], daily_usd: ['Daily Loss', '$', 'SL höchstens Daily Loss − Puffer'], hedge_eur: ['Hedge auf den Max DD', '€', 'Fusion-Betrag je voller DD'],
-    sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'] }
+    sl: ['Stop-Loss je Trade', '$', 'je Trade gewürfelt'],
+    // FE1b (Finn 11.11.2026 20:45: „Wenn ein Account bei Tradeify auf 12.000 geht, ist er auch durch“): erreicht ab Untergrenze des Ziels × (1 − %), 0 = genau das Ziel
+    ziel_toleranz_pct: ['Ziel-Toleranz', '%', 'erreicht ab der Untergrenze des Ziel-Gewinns minus so viel % (0 = genau das Ziel)'] }
   /* FF2 MODELL „PUMP IN 2 TRADES“ (Finn 11.11.2026, Tradeify 150k: „Hochpumpen in einem einzigen Tag, weil danach das End of Day Draw anzieht … zu 70 % ein einziger
    * Trade, zu 30 % zwei Trades“; Konstrukt side-session-notes 2026-11-11_FF2_tradeify_pump_konstrukt.md, FINAL). SCHNITTSTELLE ZUM BACKEND (1:1 so übernehmen):
    * funded_plan_regeln.firmen[Tradeify] = { …, tp_modus: 'pump2', symbol: 'NQ', lock_usd: 100, je_groesse: { '150000': { ziel_gewinn, dd, kosten_eur, hedge_eur, + die Schlüssel
@@ -91501,7 +91503,7 @@
   }
   // Gruppen je Größe (Finn: „erst Firma, dann Größe", ruhige Gliederung statt Chip-Wüste)
   const E2_GRUPPEN = [['Ziel', ['ziel_gewinn', 'max_trade']], ['Risiko', ['dd', 'daily_usd', 'sl']], ['Kosten · Hedge', ['kosten_eur', 'hedge_eur']]]
-  const E2_ZEIT = { max_je_id_tag: ['Funded-Trades je ID und Tag', '', 'höchstens, älteste Konten zuerst'], abstand_id_min: ['Abstand je ID', 'min', 'zwischen zwei Funded derselben ID'],
+  const E2_ZEIT = { max_je_id_tag: ['Funded-Trades je ID und Tag', '', 'höchstens, älteste Konten zuerst · 0 = kein Tagesdeckel (FE1b)'], abstand_id_min: ['Abstand je ID', 'min', 'zwischen zwei Funded derselben ID'],
     vorlauf_min: ['Vorlauf', 'min', 'frühester Start ab jetzt'] }
   const e2De = v => v == null || v === '' || !isFinite(Number(v)) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
   const e2Txt = v => v == null ? '' : String(v)
@@ -91583,6 +91585,13 @@
     return `<div class="wd-fuss e2-fuss"><small class="${m ? m.art : sp ? 'fehler' : ''}">${escapeHtml(text)}</small></div>`
   }
   // FF2: Tradeify ohne Modell-Werte → das Modell mit den Standardwerten aus dem Konstrukt, nur Anzeige, klar „noch nicht aktiv“
+  // FE1b: Feld „Ziel-Toleranz“ je Größe + Schwelle in $ (wie app.py fdp_ziel_schwelle: Untergrenze × (1 − %), höchstens 50 %)
+  function e2ZtFeld(p, w, darfR, g){
+    const d = E2_FELD.ziel_toleranz_pct, v0 = w.ziel_toleranz_pct != null ? Number(w.ziel_toleranz_pct) : 0
+    const pct = e2Zahl(e2Wert(p('ziel_toleranz_pct'), e2Txt(v0))), z = w.ziel_gewinn, lo = Number(Array.isArray(z) ? z[0] : z)
+    const klein = pct > 0 && pct <= 50 && lo > 0 ? `erreicht ab ${e2De(Math.round(lo * (1 - pct / 100)))} $ Gewinn` : pct > 50 ? 'höchstens 50 %' : 'genau das Ziel'
+    return e2WF(d[0] + ' · ' + d[1], d[2], e2In(p('ziel_toleranz_pct'), v0, darfR, { label: d[0] }), klein)
+  }
   function e2P2Vorschau(sym, fk){
     const S = e2P2Std(fk), ann = E2_P2_ANNAHME[fk] || new Set(), name = fk === 'lucid' ? 'Lucid 150k' : 'Tradeify 150k'
     const z = (k, l) => `<div class="e2-zeile">${e2L(l || (E2_P2[k] || E2_FELD[k] || [k])[0], (E2_P2[k] || E2_FELD[k] || [])[2] || '', null, ann.has(k) ? 'wie Tradeify · Annahme' : '')}<em>${S[k] == null ? '<span class="e2-p2-aus">fehlt — Finn</span>' : escapeHtml(e2P2Txt(k, S[k], sym))}</em></div>`
@@ -91702,7 +91711,7 @@
       zielT = `<div class="e2-fdetail">
         ${pille ? `<div class="e2-fedit-kopf">${pille}</div>` : ''}
         ${grs.length ? `<div class="wd-abl-abschnitt">Ziel</div>
-        <div class="wd-felder">${w.ziel_gewinn != null ? feld('ziel_gewinn') : ''}</div>
+        <div class="wd-felder">${w.ziel_gewinn != null ? feld('ziel_gewinn') : ''}${w.ziel_gewinn != null ? e2ZtFeld(p, w, darfR, g) : ''}</div>
         ${e2Sch(`f.${fi}.cons.an`, consOrig != null, darfR, 'Consistency', 'größter Tag höchstens x % des Gewinns im Zyklus — nur Parameter, der Funded-Planer prüft keine Consistency (Finn 27.10.2026)')}
         ${consAn ? `<div class="e2-zeile e2-cons"><input type="range" class="e2-range" min="10" max="100" step="5" data-e2-pfad="f.${fi}.cons" data-e2-orig="${consOrig != null ? consOrig : ''}" value="${consW}"${darfR ? '' : ' disabled'} aria-label="Consistency in %"><output class="e2-range-w">${e2De(consW)} %</output></div>` : ''}
         <div class="wd-abl-abschnitt">Trade<span class="e2-modus">${pump ? 'Pump in 2 Trades' : rest ? 'Rest bis Ziel' : 'normal'}${e2I(modusInfo)}</span></div>
@@ -91821,7 +91830,8 @@
     const jg = {}
     for(const [g, w] of Object.entries(f.je_groesse || {})){
       const neu = {}
-      for(const [k, v] of Object.entries(w)){
+      // FE1b: Ziel-Toleranz steht vor dem ersten Speichern nicht in der Größe — als 0 mitführen (unverändert 0 = nichts gesendet)
+      for(const [k, v] of Object.entries(w && !('ziel_toleranz_pct' in w) && w.ziel_gewinn != null ? Object.assign({}, w, { ziel_toleranz_pct: 0 }) : w)){
         const p = `f.${i}.g.${g}.${k}`
         if(k === 'kontrakte' && v && typeof v === 'object'){
           // E2g: Zeilen aus dem Entwurf (neu/entfernt), gesendet wird das ganze Dict (Server ersetzt es); 0 % fällt weg wie im Server
@@ -92435,7 +92445,7 @@
     root.querySelectorAll('.ap-ids-kopf span').forEach(s => { if(!/Nachtlauf/.test(s.textContent)) return
       s.textContent = (Q.aktiv ? A.name + ' an' : A.name + (Q.fcfd ? ' aus' : ' aus · Vorschau')) + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
       s.title = Q.fcfd ? `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${fcrTradesText()} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand · ${Q.zeiten.abstand_id_min || 10} min je ID`
-        : `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
+        : `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${Number(Q.zeiten.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID' : `max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag`} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
         + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
     // „Jetzt planen" (27.10.2026, Finn: alle Funded-Konten einmal geplant sehen, ohne zu bestätigen): statt „Nachplanen" des Challenge-Planers
     // POST /admin/funded-plan/planen {tag:'auto'} — nach dem heutigen Fenster für den nächsten Handelstag; Vorschläge ohne Startzeit

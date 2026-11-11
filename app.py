@@ -42847,10 +42847,10 @@ def kz_fdp_abhak(a, fdp, bal, plaene):
         # erreicht ab Rest < FDP_PUMP_TP_TOL_USD (fdp_pump_trade1)
         ziel = round(start + fdp_pump_tag_wurf(jg, str(a.get("id")), zy.get("nr"), "")["ziel_gewinn"], 2)
         plaus = float(bal) <= ziel + float(dd or 0)
-        erreicht = plaus and ziel - float(bal) < FDP_PUMP_TP_TOL_USD
+        erreicht = plaus and (ziel - float(bal) < FDP_PUMP_TP_TOL_USD or fdp_ziel_tol_erreicht(jg, bal, start))   # FE1b wie fdp_pump_trade1
     else:
         plaus = float(bal) <= ziel + float(jg.get("max_trade") or (dd if regel.get("tp_modus") == "rest" else 0) or 0)
-        erreicht = plaus and ziel - float(bal) <= 0.005
+        erreicht = plaus and (ziel - float(bal) <= 0.005 or (float(bal) >= start - 0.005 and fdp_ziel_tol_erreicht(jg, bal, start)))   # FE1b wie fdp_konto_rechnen
     gew, z_rel = round(float(bal) - start, 2), round(ziel - start, 2)
     wert = f"{kz_usd(gew, 0, True)} / {kz_usd(z_rel, 0, True)}"
     fehlt = "" if erreicht else (f"Balance {_liq_de(bal)} $ unplausibel (Ziel {_liq_de(ziel)} $) — Balance neu lesen" if not plaus
@@ -47072,6 +47072,31 @@ def fdp_ziel_gewinn(jg, konto_id=None, zyklus=None):
     return float(_wd_num(z) or 0)
 
 
+def fdp_ziel_schwelle(jg):
+    """REIN RECHNEND (testbar, FE1b, Finn 11.11.2026 20:45: „Wenn ein Account bei Tradeify auf 12.000 geht, ist er auch durch“): Gewinn-Schwelle im Zyklus, ab der
+    das Ziel als erreicht gilt = untere Grenze von ziel_gewinn × (1 − ziel_toleranz_pct ÷ 100) (Tradeify 13.000 × 0,9 = 11.700). Einstellung je Firma × Größe
+    (jg.ziel_toleranz_pct, 0–50, Standard 0 = wie bisher genau das Ziel) → $ | None (aus / keine Untergrenze)."""
+    pct = _wd_num((jg or {}).get("ziel_toleranz_pct"))
+    if not pct or pct <= 0:
+        return None
+    z = (jg or {}).get("ziel_gewinn")
+    lo = _wd_num(z[0]) if isinstance(z, (list, tuple)) and len(z) == 2 else _wd_num(z)
+    if not lo or lo <= 0:
+        return None
+    return round(float(lo) * (1.0 - min(float(pct), 50.0) / 100.0), 2)
+
+
+def fdp_ziel_tol_erreicht(jg, balance, start):
+    """REIN RECHNEND (testbar, FE1b): Ziel dank Toleranz erreicht? Gewinn im Zyklus (Balance − Zyklus-Start) ≥ fdp_ziel_schwelle → bool (Toleranz aus → False)."""
+    sw = fdp_ziel_schwelle(jg)
+    return sw is not None and balance is not None and start is not None and float(balance) - float(start) >= sw - 0.005
+
+
+def fdp_ziel_tol_grund(jg):
+    """Grund-Text „Ziel erreicht (Toleranz …) → Winning Days“ (FE1b)."""
+    return (f"Ziel erreicht (Toleranz {_ap_de(_wd_num(jg.get('ziel_toleranz_pct')), 0)} %: Gewinn ≥ {_liq_de(fdp_ziel_schwelle(jg))} $) → Winning Days")
+
+
 def fdp_sl_rest(jg, balance, liq, rnd=None, tages_puffer=FDP_TAGES_PUFFER, liq_puffer=FDP_LIQ_PUFFER):
     """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_LIQ_PUFFER,
     ganze Dollar abgerundet. Ohne rnd die Mitte."""
@@ -47178,6 +47203,8 @@ def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
     rest = round(ziel - balance, 2)
     if rest < FDP_PUMP_TP_TOL_USD:   # FF2b (Gegenprüfung): knapp unter dem Niveau (Schlupf am TP) gilt als erreicht — nie ein Mini-Trade über ein paar Dollar
         return {"aktion": "ziel", "grund": "Ziel erreicht → Winning Days"}
+    if fdp_ziel_tol_erreicht(jg, balance, start):   # FE1b: Gewinn im Zyklus ≥ Untergrenze × (1 − Toleranz) → kein weiterer Pump, weiter mit WD
+        return {"aktion": "ziel", "grund": fdp_ziel_tol_grund(jg)}
     d = _wd_num((jg or {}).get("daily_usd"))
     daily_rest = (d - max(0.0, float(tag_verlust or 0))) if d else None
     if daily_rest is not None and daily_rest <= FDP_LIQ_PUFFER:
@@ -47201,7 +47228,7 @@ def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
     return {"aktion": "planen", "tp": tp, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "kette": kette}
 
 
-def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd):
+def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, start=None):
     """REIN RECHNEND (testbar): Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund). liq_eod = Liq nach Tagesend-Logik
     (liq_peak eod=True). balance_start = Balance beim Start von Trade 1 = Tagesstart (Trade 1 ist der erste Trade des Pump-Tags) — darum gilt bei Daily Loss:
     Verlust höchstens E1 + daily_usd. Trade 1 nicht am TP (Hand, Abgleich am Master) → „Tag zu“ (Finn: „Die Trades werden nicht geschlossen durch Zufall“)."""
@@ -47211,7 +47238,7 @@ def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd):
     tp1 = _wd_num((t1 or {}).get("tp"))
     if tp1 is not None and e1 > tp1 + FDP_PUMP_PLAUSI_USD:
         return None, f"Ergebnis von Trade 1 unplausibel ({e1:+.0f} $ bei TP {tp1:,.0f} $) — Tag zu, Balance prüfen".replace(",", ".")
-    if balance_end >= ziel - 0.005:
+    if balance_end >= ziel - 0.005 or fdp_ziel_tol_erreicht(jg, balance_end, start):   # FE1b: start = Zyklus-Start (Toleranz), None = ohne Toleranz
         return None, "Ziel schon mit Trade 1 erreicht — kein Trade 2"
     if tp1 is None or e1 < tp1 - FDP_PUMP_TP_TOL_USD:
         return None, f"Trade 1 endete nicht am TP ({e1:+.0f} $) — Tag zu, morgen neu"
@@ -47348,13 +47375,16 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
         tp, art = (round(ziel - balance, 2), "rest") if ziel - balance > 0.005 else (None, "ziel")   # kein Deckel, kein Break-even
     else:
         tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0, k_tol)
+    tol_hit = art != "ziel" and fdp_ziel_tol_erreicht(jg, balance, start)   # FE1b: Ziel-Toleranz je Firma × Größe (Standard aus)
+    if tol_hit:
+        tp, art = None, "ziel"
     gew = round(balance - start, 2)
     max_tag = max([v for v in (tage or {}).values() if v > 0], default=0.0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
              "offen_eur": round(offen, 2), "gewinn": gew, "max_tag": round(max_tag, 2),
              "consistency_pct": round(max_tag / gew * 100, 1) if gew > 0 and max_tag > 0 else None}
     if art == "ziel":
-        return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
+        return dict(basis, aktion="ziel", grund=fdp_ziel_tol_grund(jg) if tol_hit else "Ziel erreicht → Winning Days")
     if rest_modus:
         if balance - liq < k_lmin:
             return dict(basis, aktion="aus", grund=f"zu nah an der Liquidation ({_liq_de(balance - liq)} $ Abstand, unter {_liq_de(k_lmin)} $)")
@@ -47469,7 +47499,8 @@ def fdp_auswahl(kand, schon, max_je_id, rnd, letzt=None):
         konten = list(konten)
         rnd.shuffle(konten)
         konten.sort(key=lambda k: str(letzt.get(k) or ""))          # stabil: Zufall nur zwischen gleich alten
-        frei = max(0, int(max_je_id) - int(schon.get(u) or 0))
+        # FE1b: max_je_id ≤ 0 = kein Tagesdeckel (alle Konten der ID, Reihenfolge wie oben bleibt für die Startzeiten)
+        frei = len(konten) if int(max_je_id) <= 0 else max(0, int(max_je_id) - int(schon.get(u) or 0))
         gew += [(u, k) for k in konten[:frei]]
         ueber += konten[frei:]
     return gew, ueber
@@ -47578,7 +47609,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     mitternacht, ab_min = fd_fenster_basis(mitternacht, ab_min, von_min, cme_heute, tz)
     if mitternacht != _mn_vor:
         ab_jetzt = 0.0   # FF2: Plan-Tag liegt noch in der Zukunft (Fenster in deutscher Zeit, Nachtlauf) — dort ist jede Minute ab Mitternacht frei
-    max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
+    # FE1b (Finn 11.11.2026 20:45): 0 = Tagesdeckel je ID aus (fdp_auswahl ohne Deckel); fehlt → 2 wie bisher. Zwei-Orbit-Regel/2.-Big-Trade-Sperre (Puls-Heim) bleiben
+    _mj = _wd_num(zeiten.get("max_je_id_tag"))
+    max_je_id = 2 if _mj is None else max(0, int(_mj))
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
@@ -47759,7 +47792,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             kand.append((str(a.get("user_id")), aid))
     # Tagesdeckel je ID (längste Pause zuerst), dann Startzeiten zufällig im Fenster (Minuten ab Mitternacht der Fenster-Zone)
     letzt_je = {aid: r.get("letzter_trade") for aid, (_a, r) in rech.items()}
-    gewaehlt, ueber = fdp_auswahl(kand, schon, max_je_id, rnd, letzt_je)
+    gewaehlt, ueber = fdp_auswahl(kand, schon, max_je_id, rnd, letzt_je)   # FE1b: max_je_id 0 → ueber leer
     for aid in ueber:
         erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund=f"Tagesdeckel {max_je_id} Funded-Trades je ID erreicht — andere Konten der ID waren länger nicht dran, morgen"))
     belegt_id, belegt_firma = {}, {}
@@ -48124,7 +48157,7 @@ def fdp_pump_tick(jetzt=None, rnd=None):
                 ende(p, pm, f"Trade 1 hat das Konto geblowt ({be - bs:+.0f} $) — kein Trade 2")
                 continue
             ziel = _wd_num(fp.get("ziel")) or ((_wd_num(fp.get("start")) or bs) + (_wd_num(pm.get("ziel_gewinn")) or 0))   # FF2b: Niveau über dem Zyklus-Start
-            w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd)
+            w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd, start=_wd_num(fp.get("start")))   # FE1b: Toleranz ab Zyklus-Start
             if grund:
                 ende(p, pm, grund, melden=not grund.startswith("Ziel schon"))
                 continue
@@ -48648,9 +48681,10 @@ FDP_FEST_TEXT = [   # Regeln ohne Zahl, fest im Code (fdp_planen / fdp_konto_rec
     "1 Trade je Konto und CME-Handelstag · Ziel erreicht → Konto auf Winning Days",
 ]
 # Untergrenze 1 (Gegenprüfung 04.11.2026): 0 rechnet der Planer nicht als 0 — vorlauf_min „or 15", abstand_id_min beim Bestätigen „or 90"
-_FDP_ZEIT_FELDER = {"max_je_id_tag": (1, 6, True), "abstand_id_min": (1, 600, False), "vorlauf_min": (1, 120, False)}
+_FDP_ZEIT_FELDER = {"max_je_id_tag": (0, 6, True),   # FE1b: 0 = Tagesdeckel je ID aus
+                     "abstand_id_min": (1, 600, False), "vorlauf_min": (1, 120, False)}
 _FDP_GR_FELDER = {"ziel_gewinn": (1, 50000), "max_trade": (1, 50000), "kosten_eur": (0, 5000), "dd": (1, 20000), "daily_usd": (1, 20000),
-                  "hedge_eur": (0, 10000), "sl": (1, 20000),
+                  "hedge_eur": (0, 10000), "sl": (1, 20000), "ziel_toleranz_pct": (0, 50),   # FE1b: Ziel-Toleranz in % (0 = genau das Ziel)
                   # FF2 Pump-Modell (Grenzen wie prophos.html E2_P2): Zahlen bzw. Spannen [von, bis]
                   "pump2_pct": (0, 100), "sl_kein_pct": (0, 100), "t2_sl_be_pct": (0, 100), "t2_min_fenster_min": (0, 240), "hedge_auf_usd": (1, 20000),
                   "ein_sl": (1, 20000), "t1_sl": (1, 20000), "t1_tp": (1, 50000), "t2_abstand_min": (0, 120)}
@@ -48791,7 +48825,7 @@ def fdp_regeln_aendern(reg, body):
                     return None, f"Größe {gr}: leer"
                 z = jg[str(gr)]
                 for k, v in werte.items():
-                    if k not in z:
+                    if k not in z and k != "ziel_toleranz_pct":   # FE1b: Ziel-Toleranz darf neu dazukommen (Standard 0 = nicht hinterlegt)
                         return None, f"{gr}.{k}: bei dieser Größe nicht hinterlegt"
                     if k in _FDP_GR_BOOL:   # FF2
                         if not isinstance(v, bool):
@@ -48822,7 +48856,7 @@ def fdp_regeln_aendern(reg, body):
                         return None, f"{gr}.{k}: nicht änderbar"
                     lo, hi = _FDP_GR_FELDER[k]
                     # E2h (Finn 05.11.2026: „bei Ziel immer von – bis"): Ziel-Gewinn darf von der Zahl zur Spanne werden (alte Zahl = von = bis)
-                    if isinstance(z[k], (list, tuple)) or (k == "ziel_gewinn" and isinstance(v, (list, tuple))):
+                    if isinstance(z.get(k), (list, tuple)) or (k == "ziel_gewinn" and isinstance(v, (list, tuple))):
                         if not isinstance(v, (list, tuple)) or len(v) != 2:
                             return None, f"{gr}.{k}: Spanne [von, bis]"
                         a, e = _fdp_zahl(v[0], lo, hi), _fdp_zahl(v[1], lo, hi)
