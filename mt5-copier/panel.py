@@ -8261,7 +8261,8 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
-                if inst["config_file"] in DEALS_LESEN:   # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet
+                # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet; F-A (Prüfer S2, 11.11.2026): ebenso ein Konto-Vorflug
+                if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts gesendet, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
@@ -8376,7 +8377,8 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
-                if inst["config_file"] in DEALS_LESEN:   # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut
+                # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut; F-A (Prüfer S2, 11.11.2026): ebenso ein Konto-Vorflug
+                if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts geklickt, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
