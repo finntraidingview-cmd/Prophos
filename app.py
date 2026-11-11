@@ -42834,6 +42834,10 @@ def kz_fdp_abhak(a, fdp, bal, plaene):
     if not jg or not g or bal is None:
         return None
     pl = [dict(p, bal_start=((p.get("tv") or {}) if isinstance(p.get("tv"), dict) else {}).get("balance_start")) for p in (plaene or [])]
+    _eb = fdp_express_basis(a, g)
+    if _eb:   # TS2: Topstep Express 0-basiert — absolut rechnen wie fdp_planen (Größe + TopstepX-Stand), sonst stünde jedes Konto „unplausibel“/weit vom Ziel
+        bal = float(bal) + _eb
+        pl = [dict(p, bal_start=_wd_num(p["bal_start"]) + _eb) if _wd_num(p.get("bal_start")) is not None else p for p in pl]
     zy = fdp_zyklus(g, (fdp or {}).get("pay"), pl)
     an = fdp_konto_anzeige(g, jg, float(bal), zy, fdp_tage, pl, str(a.get("id")))
     start, ziel = an["start"], an["ziel"]
@@ -47259,16 +47263,24 @@ def fdp_pump_minute(hhmm, mitternacht):
     return (dt - mitternacht).total_seconds() / 60.0
 
 
-def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklus, tag, rnd, sppl=None, tag_verlust=0.0):
+def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklus, tag, rnd, sppl=None, tag_verlust=0.0, liq_fest=None):
     """REIN RECHNEND (testbar): nächster Trade eines Kontos im Pump-Modell → dict wie fdp_konto_rechnen (aktion planen|ziel|aus, Plan-Felder aus fdp_hedge) plus
-    pump {weg, nr, ziel_gewinn, tag} und kette. Liq aus dem Tagesend-Höchststand (peak_eod), Ziel = Zyklus-Start + Ziel-Gewinn (Niveau fest je Konto × Zyklus, FF2b)."""
+    pump {weg, nr, ziel_gewinn, tag} und kette. Liq aus dem Tagesend-Höchststand (peak_eod), Ziel = Zyklus-Start + Ziel-Gewinn (Niveau fest je Konto × Zyklus, FF2b).
+    liq_fest (TS2, Topstep Express) = (liq | None, text) aus fdp_express_liq statt fdp_liq — liq None → aus mit dem Grund; Balance nicht über der Liq → aus."""
     g = float(groesse or 0)
     dd = _wd_num((jg or {}).get("dd"))
     if not jg or not g or not dd:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer (Pump-Modell)"}
     if balance is None:
         return {"aktion": "aus", "grund": "keine Balance"}
-    liq, liq_text = fdp_liq(g, dd, peak_eod, balance, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0)
+    if liq_fest is not None:
+        liq, liq_text = liq_fest
+        if liq is None:
+            return {"aktion": "aus", "grund": f"Liquidation unbekannt — {liq_text}", "liq_text": liq_text}
+        if balance <= liq:
+            return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
+    else:
+        liq, liq_text = fdp_liq(g, dd, peak_eod, balance, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0)
     if liq is None:
         return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
     start = float(start) if start else g
@@ -47640,11 +47652,15 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # EU1 (06.11.2026): € je Punkt Fusion dieser ID in konst mitgeben (fdp_konto_rechnen bleibt rein rechnend); ohne fusion_sppl (Ausschnitt-Selbsttests) → 0,85
         if isinstance(konst, dict):
             konst["sppl"] = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None
+        basis = fdp_express_basis(a, g)   # TS2: Topstep Express — balance/pl kommen schon absolut (Kontogröße + TopstepX-Stand) aus der Schleife
+        if basis and (regel or {}).get("tp_modus") != "pump2":
+            return {"aktion": "aus", "grund": "Topstep Express plant der Funded-Planer nur im Pump-Modell (TopstepX 0-basiert)"}, zy
         if (regel or {}).get("tp_modus") == "pump2":
             # FF2: Pump-Modell — Liq nach Tagesend-Logik (EOD-Trailing zieht erst am Tagesende nach), Würfel fest je Konto × Zyklus × CME-Tag
             peak_e = liq_peak({}, a, balance, verlauf, eod=True)
             return fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
-                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None), zy
+                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None,
+                                  liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd")) if basis else None), zy
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
                                  konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy
 
@@ -47655,6 +47671,13 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         regel = ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))   # UNT4
         g = _wd_konto_groesse(a)
         jg = fdp_je_groesse(regel, g)
+        _basis = fdp_express_basis(a, g)
+        if _basis:
+            # TS2: Topstep Express — TopstepX zeigt 0-basiert; der Planer rechnet absolut (Größe + Stand), auch die Start-Balancen früherer Pläne (Zyklus-Start)
+            zeile["balance_topstepx"] = zeile["balance"]
+            if zeile["balance"] is not None:
+                zeile["balance"] = round(zeile["balance"] + _basis, 2)
+            pl = [dict(p, bal_start=round(_wd_num(p.get("bal_start")) + _basis, 2)) if _wd_num(p.get("bal_start")) is not None else p for p in pl]
         if a.get("auto_planer") is False:
             erg["ausgelassen"].append(dict(zeile, grund=AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus")); continue
         if a.get("waiting_payout_since"):
@@ -47810,15 +47833,19 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Pump {'Trade 1 von 2' if r.get('kette') else 'ein Trade'} · Zyklus {r['zyklus']} · "
                      f"Ziel {_liq_de(r['ziel'])} $ (Niveau +{_liq_de(pm.get('ziel_gewinn'))} $ im Zyklus) · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
                      f"{('SL ' + _liq_de(r['sl']) + ' $') if r.get('sl') is not None else 'ohne SL'} · Hedge {_ap_de(r['verhaeltnis'], 3)} € je $ Risiko")
-            mb_pump = {"pump": pm}
+            _eb = fdp_express_basis(a, r.get("groesse"))
+            if _eb:   # TS2: Nova in TopstepX — dort steht das Konto 0-basiert, die Werte auch so zeigen
+                notiz += (f" · Nova (TopstepX, Express ab 0: Balance {_liq_de(r['balance'] - _eb)} $ · Ziel {_liq_de(r['ziel'] - _eb)} $ · "
+                          f"Liq {_liq_de(r['liq'] - _eb)} $)")
+            mb_pump = {"pump": dict(pm, express_basis=_eb) if _eb else pm}
             if r.get("kette"):
                 lb = fdp_pump_minute(pm.get("t2_bis") or "18:30", mitternacht)
                 mb_pump["kette"] = dict(r["kette"], lesen_bis=(mitternacht + timedelta(minutes=lb)).astimezone(timezone.utc).isoformat() if lb is not None else None)
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
-            "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"], "orbit_v3": True, "route": "tvv2",
-            "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "master_symbol": "NQ" + frontcode,
+            "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"], "orbit_v3": True, "route": fdp_route(a.get("firm")),   # TS2: Topstep → tsv2 (Nova)
+            "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "master_symbol": "NQ" + frontcode,   # TopstepX-Contract NQ + Frontmonat wie die Hand-Novas
             # Vorschlag (Standard): ohne start_um startet kein PC-Tab den Plan — erst „Bestätigen" setzt die Startzeit
             "start_um": start.astimezone(timezone.utc).isoformat() if auto_k else None, "status": "planned", "priority": "high",
             "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
@@ -47911,11 +47938,91 @@ def fdp_pump_t2_platz(jg, t1_ende_utc, belegt, rnd, abstand_firma_min=15, abstan
     return None
 
 
-def fdp_pump_echt(plan):
+# ── TS2 TOPSTEP IM PUMP-MODELL (Finn 11.11.2026 20:35/21:12: „Topstep kommt genau wie bei Tradeify, ganz genau alles gleich“; Befund TS1 side-session-notes
+# 2026-11-11_TS1_*). Topstep hängt seit 24.09.2026 nicht an TradingView: der Pump läuft als Nova (tsv2 + orbit_v3 + Fusion-Hedge, Puls in TopstepX), Symbol NQ +
+# Frontmonat wie die Hand-Novas. TopstepX zeigt ein Express-Konto (XFA) 0-basiert — die Pump-Rechnung bleibt absolut (Kontogröße + TopstepX-Stand), damit jede
+# Prüfung von FF2 unverändert gilt; die Liquidation kommt aus der belegten MLL (wd_sl_express_mll, TX2) + TX2_MLL_VOR wie der WD-Hedge im Tab (hedgeLiqLevel tsv2).
+FDP_TOPSTEP_CONS_PCT = 40.0   # Topstep RTP: bester Tag ≤ 40 % des Nettogewinns im Payout-Fenster (firm_rules.json) — nur Hinweis im Plan-Grund, blockt nie (Master TS2)
+
+
+def fdp_route(firm):
+    """REIN RECHNEND (testbar, TS2): Weg eines Funded-Futures-Plans → 'tsv2' (Topstep: TopstepX über Puls) | 'tvv2' (alle anderen: TradingView, wie bisher)."""
+    return "tsv2" if "topstep" in str(firm or "").lower() else "tvv2"
+
+
+def fdp_express_basis(acc, groesse):
+    """REIN RECHNEND (testbar, TS2): Verschiebung TopstepX-Stand → absolute Balance in $: Kontogröße bei Topstep Express (ist_topstep_express, XFA 0-basiert),
+    sonst 0 (alles wie bisher). Größe unbekannt → 0 (dann plant der Pump nicht, s. fdp_pump_konto „keine Werte“)."""
+    g = float(groesse or 0)
+    return g if g > 0 and ist_topstep_express(acc) else 0.0
+
+
+def fdp_express_liq(acc, fruehere, bal_rel, basis, dd=None):
+    """REIN RECHNEND (testbar, TS2): Liquidation eines Topstep-Express-Kontos ABSOLUT → (liq | None, text). MLL aus belegten Werten (wd_sl_express_mll: jüngste
+    TopstepX-Lesung tv.mll_start, nachgezogen über jede Schluss-Balance − Max DD, höchstens 0), Liq = Basis + MLL + TX2_MLL_VOR. Max DD des Kontos fehlt → dd der
+    Größe (jg.dd). Ganz frisches XFA (kein Plan im Verlauf, TopstepX-Stand genau 0): MLL = −DD laut Topstep-Regel (XFA startet bei 0, MLL bei −Max DD) — sonst
+    plante der Pump nie, weil die erste MLL-Lesung erst beim ersten Start kommt. Alles andere ohne Lesung → None mit Grund (nie raten)."""
+    a = dict(acc or {})
+    if not _wd_num(a.get("max_drawdown")) and _wd_num(dd):
+        a["max_drawdown"] = _wd_num(dd)
+    mll, q = wd_sl_express_mll(a, fruehere, bal=bal_rel)
+    if mll is None:
+        eigene = [f for f in fruehere or () if str(f.get("master_account_id") or "") == str(a.get("id") or "")]
+        d = _wd_num(a.get("max_drawdown"))
+        if not eigene and bal_rel is not None and abs(float(bal_rel)) < 0.005 and d and d > 0:
+            mll, q = -float(d), f"Start-MLL −{_liq_de(d)} $ (frisches Express-Konto, noch keine TopstepX-Lesung)"
+        else:
+            return None, q
+    liq = round(float(basis) + float(mll) + TX2_MLL_VOR, 2)
+    return liq, f"{q} + {int(TX2_MLL_VOR)} $ = Liq {_liq_de(liq - float(basis))} $ in TopstepX"
+
+
+def fdp_express_vor_t1(verlauf, t1_start):
+    """REIN RECHNEND (testbar, TS2): Verlauf für die Liq von Trade 2 nach Tagesend-Logik (wie Tradeify liq_peak eod=True) — die XFA-MLL trailt erst am Tagesschluss:
+    Schluss-Balancen (bal_end), die NACH dem Start von Trade 1 endeten, fallen weg (Trade 1 selbst); MLL-Lesungen bis zum Start bleiben (die Lesung beim Start von
+    Trade 1 ist die echte MLL des Tages). Start unbekannt → Verlauf unverändert (vorsichtig: höhere MLL, kleinerer Abstand)."""
+    st = str(t1_start or "")
+    if not st:
+        return list(verlauf or ())
+    out = []
+    for f in verlauf or ():
+        if str(f.get("started_at") or "") > st:
+            continue
+        out.append(dict(f, bal_end=None) if str(f.get("ended_at") or "") > st else f)
+    return out
+
+
+def fdp_topstep_cons_hinweis(tage, gewinn_heute, firm, pct=FDP_TOPSTEP_CONS_PCT):
+    """REIN RECHNEND (testbar, TS2, Master: „40-%-RTP-Consistency nur als Hinweis in den Plan-Grund, wenn ein Pump-Tag sie reißen würde, blocke nichts“):
+    tage = {CME-Tag: $} im Zyklus (fdp_tage), gewinn_heute = geplanter Gewinn des Pump-Tags. → Hinweistext | '' (keine Topstep-Firma, kein Gewinn, Regel hält)."""
+    if "topstep" not in str(firm or "").lower() or not gewinn_heute or gewinn_heute <= 0:
+        return ""
+    netto = sum((tage or {}).values()) + float(gewinn_heute)
+    bester = max([v for v in (tage or {}).values() if v > 0] + [float(gewinn_heute)])
+    if netto <= 0 or bester / netto * 100.0 <= pct:
+        return ""
+    return (f"Hinweis Topstep-Consistency: bester Tag {bester / netto * 100.0:.0f} % > {pct:.0f} % des Gewinns im Zyklus — Payout erst, "
+            f"wenn der Gewinn ≈ {_liq_de(round(bester / (pct / 100.0)))} $ erreicht")
+
+
+def fdp_pump_echt(plan, basis=0.0):
     """REIN RECHNEND (testbar): genaue Lesung von Trade 1 eines Pump-Tags → (vorher, nachher) | None. Wie tt_echt (Puls-Endlesung, nie Folgetrade/Schätzung),
     zusätzlich bei Orbit V3 (tvv2 + orbit_v3) die Userscript-Endlesung final.balance_quelle 'reader' (Account Balance = Equity, zwei gleiche Lesungen, Konto flach —
     hedgeReaderEndBalance, .921): Puls liest bei V3 nur nach, wenn das Userscript scheitert. Ohne diese Ausnahme käme Trade 2 bei Orbit V3 nie zustande.
-    Relative Balance (balance_relativ) zählt nie."""
+    Relative Balance (balance_relativ) zählt sonst nie.
+    TS2 (Topstep Express, basis = fdp_express_basis > 0): NUR der eigene Zweig — tsv2, Endlesung final.quelle 'puls' oder 'auge' (wie ap_echte_balancen), nie
+    Folgetrade, Start UND Ende 0-basiert (tv.balance_relativ und final.balance_relativ beide true) → (basis + vorher, basis + nachher). Gemischte oder unbekannte
+    Basis → None (tt_echt nähme einen positiven 0-basierten Stand sonst als absolute Balance)."""
+    if basis and float(basis) > 0:
+        p = plan or {}
+        bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+        tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+        if (str(p.get("route") or "") != "tsv2" or fin.get("quelle") not in ("puls", "auge") or fin.get("balance_quelle") == "folgetrade"
+                or tv.get("balance_relativ") is not True or fin.get("balance_relativ") is not True):
+            return None
+        v, n = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
+        return (round(float(basis) + v, 2), round(float(basis) + n, 2)) if (v is not None and n is not None) else None
     e = tt_echt(plan)
     if e:
         return e
@@ -47983,7 +48090,8 @@ def fdp_pump_tick(jetzt=None, rnd=None):
             if regel.get("tp_modus") != "pump2" or not jg:
                 ende(p, pm, "Pump-Modell für diese Firma inzwischen aus — kein Trade 2")
                 continue
-            echt = fdp_pump_echt(p)
+            basis = fdp_express_basis(a, g)   # TS2: Topstep Express — Lesung 0-basiert, gerechnet wird absolut wie beim Anlegen von Trade 1
+            echt = fdp_pump_echt(p, basis)
             if not echt:
                 bis = _ap_ts(((mb.get("kette") or {}) if isinstance(mb.get("kette"), dict) else {}).get("lesen_bis"))
                 if bis and jetzt > bis:
@@ -47992,8 +48100,18 @@ def fdp_pump_tick(jetzt=None, rnd=None):
             bs, be = echt[0], echt[1]
             dd = _wd_num(jg.get("dd"))
             lock = _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0
-            peak = liq_peak({"id": pid, "started_at": jetzt.isoformat()}, a, be, verlauf, eod_tagesstart=bs, eod=True)
-            liq, _lt = fdp_liq(g, dd, peak, be, lock)
+            if basis:
+                # TS2: Liq aus der belegten TopstepX-MLL wie bei Trade 1, nach Tagesend-Logik wie Tradeify (liq_peak eod=True): die XFA-MLL trailt erst am
+                # Tagesschluss — Trade 1 und alles nach seinem Start zählt nicht, der Tagesstart (bal = bs − basis) schon
+                liq, _lt = fdp_express_liq(a, fdp_express_vor_t1(verlauf, p.get("started_at")), bs - basis, basis, dd)
+                if liq is None:
+                    ende(p, pm, f"Liquidation unbekannt — {_lt} — kein Trade 2")
+                    continue
+                if be <= liq:
+                    liq = None
+            else:
+                peak = liq_peak({"id": pid, "started_at": jetzt.isoformat()}, a, be, verlauf, eod_tagesstart=bs, eod=True)
+                liq, _lt = fdp_liq(g, dd, peak, be, lock)
             if liq is None:
                 ende(p, pm, f"Trade 1 hat das Konto geblowt ({be - bs:+.0f} $) — kein Trade 2")
                 continue
@@ -48043,19 +48161,21 @@ def fdp_pump_tick(jetzt=None, rnd=None):
             zeile = {
                 "user_id": a["user_id"], "master_account_id": str(a["id"]), "master_name": a.get("name"), "master_firm": a.get("firm"),
                 "master_contracts": w["kontrakte"], "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "multiplier": h["multiplier"],
-                "hedge_faktor": h["hedge_faktor"], "hedge_eur": h["hedge_eur"], "orbit_v3": True, "route": "tvv2",
+                "hedge_faktor": h["hedge_faktor"], "hedge_eur": h["hedge_eur"], "orbit_v3": True,
+                "route": p.get("route") if p.get("route") in ("tvv2", "tsv2") else fdp_route(a.get("firm")),   # TS2: Trade 2 auf dem Weg von Trade 1 (Topstep: tsv2)
                 "master_tp": w["tp"], "master_sl": w["sl"], "richtung": rnd.choice(("buy", "sell")), "master_symbol": "NQ" + _wd_futures_frontcode(jetzt),
                 "start_um": st_iso if auto else None, "status": "planned", "priority": "high",
                 "planned_for": start.astimezone(_ap_tz(FDP_PUMP_TZ)).strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto else None,
                 "notes": (f"Funded-Planer{'' if auto else ' · Vorschlag'} · Pump Trade 2 von 2 · Trade 1 {w['e1']:+,.0f} $".replace(",", ".")
                           + f" · Ziel {_liq_de(ziel)} $ · Liq {_liq_de(liq)} $ (Tagesend) · "
                           + (f"SL Break-even {_liq_de(w['sl'])} $" if w["sl"] is not None else "ohne SL")
-                          + f" · Hedge {_ap_de(h['verhaeltnis'], 3)} € je $ Risiko"),
+                          + f" · Hedge {_ap_de(h['verhaeltnis'], 3)} € je $ Risiko"
+                          + (f" · Nova (TopstepX, Express ab 0: Ziel {_liq_de(ziel - basis)} $ · Liq {_liq_de(liq - basis)} $)" if basis else "")),   # TS2
                 "mt5_baseline": {"funded_plan": {"zyklus": fp.get("zyklus"), "start": fp.get("start"), "ziel": round(ziel, 2), "liq": round(liq, 2), "tp_art": "pump",
                                                  "offen_eur": round(he / auf * (be - liq), 2), "verhaeltnis": h["verhaeltnis"], "hedge_sl_eur": h["hedge_sl_eur"],
                                                  "hedge_tp_eur": h["hedge_tp_eur"], "start_um": st_iso,
                                                  "pump": {"weg": "zwei", "nr": 2, "t1_plan_id": pid, "ziel_gewinn": pm.get("ziel_gewinn"), "tag": pm.get("tag"),
-                                                          "e1": w["e1"], "risiko": w["risiko"]}},
+                                                          "e1": w["e1"], "risiko": w["risiko"], **({"express_basis": basis} if basis else {})}},
                                  "kette": dict(w["kette"], vor=pid)}}
             neu = sb_insert("trade_plans", zeile)
             neu_id = str(((neu or [{}])[0] if isinstance(neu, list) else (neu or {})).get("id") or "")
@@ -48104,7 +48224,7 @@ def fdp_pump_offen_tick(jetzt=None):
     die Master-IDs (alarm_senden prio 1, entprellt über alarm_log, Schlüssel je Plan), egal welche ID bzw. welches Unternehmen. Schließt nie. → [plan_id]"""
     jetzt = jetzt or datetime.now(timezone.utc)
     rows = sb_select("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,status,started_at,mt5_baseline",
-                                     "status": "eq.open", "route": "eq.tvv2", "mt5_baseline->funded_plan->pump->>weg": "eq.zwei"}) or []
+                                     "status": "eq.open", "route": "in.(tvv2,tsv2)", "mt5_baseline->funded_plan->pump->>weg": "eq.zwei"}) or []   # TS2: + tsv2 (Topstep)
     faellig = []
     if not rows:
         return faellig
