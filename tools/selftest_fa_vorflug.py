@@ -215,6 +215,21 @@ pn.DEALS_LESEN.clear()
 check(any(g.startswith("MT5-Order") for g in pn.panel_beschaeftigt_gruende()), "e6 echte Order bleibt ein Grund")
 pn.MASTER_ORDER_LOCKS.clear(); lx.release()
 
+# f) Prüfer S2 (Master 11.11.2026): hält ein Vorflug den Lock noch (Deckel/Bot-Start bzw. Fenster vor ORDER_ANGEMELDET), antworten Order UND Close
+#    409 retry_ok True „nichts gesendet“ wie bei einer Deal-Lesung — nie retry_ok False („läuft gerade schon eine Order“ = UNKLAR/Fehlstart)
+hsrc = inspect.getsource(pn.Handler)
+treffer = [m.start() for m in re.finditer(re.escape('if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):'), hsrc)]
+check(len(treffer) == 2 and all('"retry_ok": True, "grund": "deals_lesen"' in hsrc[t:t + 260] for t in treffer),
+      "f1 Order- und Close-Route: Lock von Vorflug oder Deal-Lesung → 409 retry_ok True")
+check('if inst["config_file"] in DEALS_LESEN:' not in hsrc, "f2 kein Zweig prüft mehr nur DEALS_LESEN")
+for t in treffer:
+    vor = hsrc[max(0, t - 400):t]
+    check("if not lock.acquire(blocking=False):" in vor, "f3 der Zweig gehört zum besetzten Lock")
+pn.VORFLUG_LESEN.clear(); pn.DEALS_LESEN.clear()
+pn.VORFLUG_LESEN.add("v.json")
+check("v.json" in (pn.DEALS_LESEN | pn.VORFLUG_LESEN) and "w.json" not in (pn.DEALS_LESEN | pn.VORFLUG_LESEN), "f4 Mengen-Vereinigung trifft nur die lesende Instanz")
+pn.VORFLUG_LESEN.clear()
+
 print()
 print("FEHLER: " + ", ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)
