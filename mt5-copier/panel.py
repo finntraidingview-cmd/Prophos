@@ -3297,6 +3297,304 @@ def _prophos_tab_neu_laden():
         TV_ORDER_LOCK.release()
 
 
+# ══ NL2 TABSTREIFEN-WEG (11.11.2026, Master nach NL1/S2: Jona pc-b97zc7 + Ahaj pc-na1q6b hingen seit 19:12 Dubai auf .2181, Julian pc-6qnjpu seit
+# 20:05 auf .2187 — alle 15 min „→ NICHT neu geladen: kein Chrome-Fenster mit aktivem Prophos-Tab gefunden“, der CDP-Rückfall fand nichts, die Puls-Wache
+# meldete nie: auf diesen Echo-PCs läuft kein Puls-Chrome (:9333 zu), Prophos liegt im NORMALEN Chrome hinter einem anderen Tab, und ein verdeckter Tab
+# lädt bewusst nicht selbst (prophos.html bwGrund „Tab im Hintergrund — Panel lädt neu“). Jetzt, NUR wenn Fenster-Weg UND CDP leer sind und :9333 nicht
+# erreichbar ist: das Panel liest per UIA die Tabstreifen der Chrome-Fenster (Webinhalt wird nie betreten), wählt GENAU EINEN Tab „Prophos …“ per
+# SelectionItem (Rückfall Invoke) — keine Maus —, prüft, dass das Fenster vorn steht und sein Titel jetzt „Prophos …“ ist, drückt Strg+F5, wartet wie der
+# CDP-Weg auf die erste Abfrage des Tabs und wählt danach den vorher aktiven Tab wieder (minimiert bleibt minimiert, voriges Fenster zurück). Riegel wie
+# beim Fenster-Weg (Server-Riegel Start ≤ 5 min/Signal/Hedge, keine Eingabe ≥ 120 s, 1 Versuch je 15 min — tab_neuladen_entscheiden) plus TV_ORDER_LOCK,
+# keine MT5-Order/Polar und die PC-Tipp-Sperre der Echo-Läufe (Mutex, ohne Warten). Zwei oder mehr Prophos-Tabs, kein eindeutig aktiver Tab, Tabstreifen
+# geändert → nichts gedrückt, Grund in die Spur. Kein CDP, kein zweites Chrome, kein neuer Tab. Aus mit „tab_streifen“: false in der Basis-Config. ══
+ECHO_TIPP_MUTEX_PANEL = "Local\\ProphosEchoTipp"   # derselbe Name wie order_bot.ECHO_TIPP_MUTEX (PC-Tipp-Sperre um jeden Echo-Lauf)
+
+
+# Walker als EINE Quelle für Panel und UIA-Prozess (nicht inspect.getsource: nach einem Code-Sync läse das die neue Datei an alten Zeilen)
+_TAB_STREIFEN_WALKER = r'''
+_PROPHOS_TAB_MUSTER = r"^Prophos\b(?!-Backend)"   # wie order_bot.prophos_tab_wahl: die Backend-Konsole „Prophos-Backend“ zählt nie
+
+def tabstreifen_tabs(wurzel, max_tiefe=14, max_knoten=900):
+    """REIN (testbar; läuft auch im UIA-Prozess, _TAB_STREIFEN_WALKER): TabItem-Elemente unter wurzel (Objekte mit .children() und
+    .control_type, z. B. pywinauto UIAElementInfo), Breitensuche in Tabstreifen-Reihenfolge. Webinhalt (control_type Document) wird nie betreten,
+    höchstens max_knoten Elemente — Chrome baut sonst den ganzen Barrierefreiheits-Baum der Seite."""
+    out, q, n = [], [(wurzel, 0)], 0
+    while q and n < max_knoten:
+        el, d = q.pop(0)
+        n += 1
+        try:
+            kinder = list(el.children())
+        except Exception:
+            continue
+        for k in kinder:
+            try:
+                ct = str(k.control_type or "")
+            except Exception:
+                continue
+            if ct == "TabItem":
+                out.append(k)
+            elif ct != "Document" and d + 1 < max_tiefe:
+                q.append((k, d + 1))
+    return out
+'''
+exec(_TAB_STREIFEN_WALKER, globals())   # definiert _PROPHOS_TAB_MUSTER + tabstreifen_tabs
+_PROPHOS_TAB_RE = re.compile(_PROPHOS_TAB_MUSTER)
+
+
+def tabstreifen_ziel(fenster):
+    """REIN RECHNEND (testbar): UIA-Lesung [{hwnd, titel, klasse, tabs: [{name, sel}]}] → (ziel | None, grund). Nur sichtbare Chrome-Hauptfenster
+    (Klasse Chrome_WidgetWin_1, Titel „… - Google Chrome“). Ziel nur bei GENAU EINEM Tab „Prophos …“ über alle Fenster, der NICHT vorn ist, und genau
+    einem sicher aktiven Tab (sel True) in seinem Fenster: {hwnd, idx, name, vorher_idx, vorher_name}."""
+    chrome = [f for f in (fenster or []) if isinstance(f, dict) and f.get("klasse") == "Chrome_WidgetWin_1"
+              and str(f.get("titel") or "").endswith("Google Chrome")]
+    if not chrome:
+        return None, "kein Chrome-Fenster im UIA-Baum"
+    treffer = []
+    for f in chrome:
+        tabs = [t for t in (f.get("tabs") or []) if isinstance(t, dict)]
+        for i, t in enumerate(tabs):
+            if _PROPHOS_TAB_RE.match(str(t.get("name") or "")):
+                treffer.append((f, i, tabs))
+    if not treffer:
+        return None, "kein Tab „Prophos …“ im Tabstreifen eines Chrome-Fensters (Prophos-Tab zu?)"
+    if len(treffer) > 1:
+        return None, f"{len(treffer)} Tabs „Prophos …“ in den Tabstreifen — welcher der Haupt-Tab ist, ist per UIA nicht sicher, nichts gedrückt"
+    f, i, tabs = treffer[0]
+    if f.get("gesperrt") is None or str(f.get("gesperrt")):
+        # Prüfer NL2 (SOLLTE): Reader-Profil und Puls-Chrome fasst das Panel nie an (order_bot._fenster_gesperrt); nicht lesbar → auch nicht
+        return None, f"Prophos-Tab liegt in einem gesperrten Fenster ({str(f.get('gesperrt') or 'Sperre nicht lesbar')[:40]}) — nichts gedrückt"
+    if tabs[i].get("sel") is True:
+        return None, "Prophos-Tab ist in seinem Fenster schon vorn — das ist der Fenster-Weg, nichts gedrückt"
+    sel = [j for j, t in enumerate(tabs) if t.get("sel") is True]
+    if len(sel) != 1:
+        return None, "aktiver Tab im Prophos-Fenster nicht eindeutig lesbar — nichts gedrückt"
+    try:
+        hwnd = int(f.get("hwnd"))
+    except (TypeError, ValueError):
+        hwnd = 0
+    if hwnd <= 0:
+        return None, "Fenster-Kennung fehlt — nichts gedrückt"
+    return {"hwnd": hwnd, "idx": i, "name": str(tabs[i].get("name") or ""), "vorher_idx": sel[0],
+            "vorher_name": str(tabs[sel[0]].get("name") or ""), "anzahl": len(tabs)}, ""
+
+
+def streifen_weg_noetig(msg_fenster, cdp_erreichbar, pro, schalter=None):
+    """REIN RECHNEND (testbar): Tabstreifen-Weg nur, wenn der Fenster-Weg kein Fenster mit aktivem Prophos-Tab fand, :9333 NICHT erreichbar ist (mit
+    Puls-Chrome zuständig: CDP-Rückfall bzw. Puls-Wache) und kein Prophos per CDP da ist. schalter = base_config „tab_streifen“ (False = aus)."""
+    if schalter is False:
+        return False
+    return "kein Chrome-Fenster mit aktivem Prophos-Tab" in str(msg_fenster or "") and cdp_erreichbar is False and not pro
+
+
+_TAB_STREIFEN_HAUPT = r'''
+import sys, json, re
+def _gesperrt(hwnd):
+    try:
+        import order_bot
+        return str(order_bot._fenster_gesperrt(hwnd) or "")
+    except Exception:
+        return None
+def _sichtbar(hwnd):
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.IsWindowVisible(int(hwnd)))
+    except Exception:
+        return True
+def _main():
+    from pywinauto import Desktop
+    from pywinauto.uia_element_info import UIAElementInfo
+    from pywinauto.controls.uiawrapper import UIAWrapper
+    modus = sys.argv[1]
+    if modus == "lesen":
+        out = []
+        # visible_only=False (Prüfer NL2): sonst fehlen minimierte Fenster (UIA offscreen) — sichtbar prüft IsWindowVisible
+        for w in Desktop(backend="uia").windows(class_name="Chrome_WidgetWin_1", visible_only=False):
+            try:
+                info = w.element_info
+                titel = str(info.name or "")
+                if not titel.endswith("Google Chrome") or not _sichtbar(info.handle):
+                    continue
+                tabs = []
+                for t in tabstreifen_tabs(info):
+                    try:
+                        sel = bool(UIAWrapper(t).is_selected())
+                    except Exception:
+                        sel = None
+                    tabs.append({"name": str(t.name or "")[:120], "sel": sel})
+                out.append({"hwnd": int(info.handle or 0), "titel": titel[:160], "klasse": str(info.class_name or ""), "tabs": tabs,
+                            "gesperrt": _gesperrt(info.handle) if any(re.match(_PROPHOS_TAB_MUSTER, x["name"]) for x in tabs) else ""})
+            except Exception:
+                continue
+        print(json.dumps(out))
+        return
+    if modus in ("waehlen", "zurueck"):
+        hwnd, idx = int(sys.argv[2]), int(sys.argv[3])
+        tabs = tabstreifen_tabs(UIAElementInfo(hwnd))
+        if modus == "waehlen" and (idx >= len(tabs) or str(tabs[idx].name or "")[:120] != sys.argv[4]):
+            print(json.dumps({"ok": False, "msg": "Tabstreifen hat sich geändert — nichts gewählt"}))
+            return
+        # zurueck (Prüfer NL2 MUSS): Titel wie TradingView („MNQ1! 21 034 ▲ …“) wechseln laufend — gleiche Tab-Zahl + derselbe Platz, kein Prophos-Tab
+        if modus == "zurueck" and (len(tabs) != int(sys.argv[4]) or idx >= len(tabs) or re.match(_PROPHOS_TAB_MUSTER, str(tabs[idx].name or ""))):
+            print(json.dumps({"ok": False, "msg": "Tabstreifen hat sich geändert (Tab-Zahl/Platz) — nichts gewählt"}))
+            return
+        w = UIAWrapper(tabs[idx])
+        try:
+            w.select()
+            weg = "SelectionItem"
+        except Exception:
+            try:
+                w.invoke()
+                weg = "Invoke"
+            except Exception as e:
+                print(json.dumps({"ok": False, "msg": "Tab nicht wählbar (weder SelectionItem noch Invoke: %s)" % type(e).__name__}))
+                return
+        print(json.dumps({"ok": True, "weg": weg}))
+_main()
+'''
+
+
+def _streifen_lauf(*args, timeout=20):
+    """UIA-Teil in einem frischen Prozess (pywinauto/COM nie im Panel-Thread) → letzte JSON-Zeile oder None. Wirft bei Zeitlimit/Startfehler."""
+    code = _TAB_STREIFEN_WALKER + _TAB_STREIFEN_HAUPT
+    r = subprocess.run([sys.executable, "-c", code, *[str(a) for a in args]], cwd=HERE, capture_output=True, text=True, timeout=timeout,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    zeilen = (r.stdout or "").strip().splitlines()
+    try:
+        return json.loads(zeilen[-1]) if zeilen else None
+    except ValueError:
+        return None
+
+
+def _fenster_titel(hwnd):
+    import ctypes
+    u32 = ctypes.windll.user32
+    n = u32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    u32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value or ""
+
+
+def _tipp_sperre_versuchen():
+    """PC-Tipp-Sperre der Echo-Läufe OHNE Warten → ('frei', handle) | ('belegt', None) | ('unbekannt', None). Wirft nie."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateMutexW(None, False, ECHO_TIPP_MUTEX_PANEL)
+        if not h:
+            return "unbekannt", None
+        rc = k32.WaitForSingleObject(h, 0)
+        if rc in (0, 0x80):                       # frei bzw. Vorbesitzer tot
+            return "frei", h
+        k32.CloseHandle(h)
+        return ("belegt", None) if rc == 0x102 else ("unbekannt", None)
+    except Exception:
+        return "unbekannt", None
+
+
+def _tipp_sperre_frei(h):
+    if not h:
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.ReleaseMutex(h)
+        k32.CloseHandle(h)
+    except Exception:
+        pass
+
+
+def _prophos_tab_neuladen_streifen():
+    """NL2 → (ok, Klartext): Prophos-Tab im Tabstreifen des normalen Chrome per UIA wählen, Strg+F5, auf die erste Abfrage warten, vorherigen Tab
+    zurück (Block oben). Nur Tasten ins nachweislich vordere Fenster mit Titel „Prophos …“, keine Maus."""
+    import ctypes
+    u32 = ctypes.windll.user32
+    # Prüfer NL2 (SOLLTE): ein einzelnes /json/list mit 2 s ist kein Beweis — antwortet :9333 doch (ausgelastetes Puls-Chrome), ist es zuständig
+    try:
+        _cdp_get("/json/version", timeout=5.0)
+        return False, "Puls-Chrome (:9333) antwortet doch — dort zuständig (CDP/Puls-Wache), nichts gedrückt"
+    except Exception:
+        pass
+    # Lesen VOR den Sperren (Prüfer NL2 KANN: Haltezeit) — gewählt wird unten nur, wenn Name und Platz noch stimmen
+    try:
+        fenster = _streifen_lauf("lesen")
+    except Exception as e:
+        return False, f"Tabstreifen per UIA nicht lesbar ({type(e).__name__})"
+    if not isinstance(fenster, list):
+        return False, "Tabstreifen per UIA nicht lesbar (keine Antwort — pywinauto da?)"
+    ziel, grund = tabstreifen_ziel(fenster)
+    if not ziel:
+        return False, grund
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    tipp = None
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order/Polar läuft gerade — nächster Versuch später"
+        art, tipp = _tipp_sperre_versuchen()
+        if art != "frei":   # Prüfer NL2 (KANN): ein Weg, der Tasten drückt, rät nie — „unbekannt“ bricht auch ab
+            return False, ("PC-Tipp-Sperre belegt (ein Echo-Lauf tippt gerade)" if art == "belegt" else "PC-Tipp-Sperre nicht lesbar") + \
+                " — nichts gedrückt, nächster Versuch später"
+        hwnd = ziel["hwnd"]
+        vorher_fg = int(u32.GetForegroundWindow() or 0)
+        mini = bool(u32.IsIconic(hwnd))
+        gewaehlt, ergebnis, zurueck = False, (False, "nichts gedrückt"), ""
+        try:
+            if mini:
+                u32.ShowWindow(ctypes.c_void_p(hwnd), 9)               # SW_RESTORE
+                time.sleep(0.3 + random.random() * 0.2)
+            if not _fenster_vorn(hwnd):
+                ergebnis = (False, "Chrome-Fenster mit dem Prophos-Tab kam nicht nach vorn — nichts gewählt, nichts gedrückt")
+            else:
+                w1 = _streifen_lauf("waehlen", hwnd, ziel["idx"], ziel["name"])
+                if not (isinstance(w1, dict) and w1.get("ok")):
+                    ergebnis = (False, str((w1 or {}).get("msg") or "Prophos-Tab nicht gewählt (keine Antwort)") + " — nichts gedrückt")
+                else:
+                    gewaehlt = True
+                    time.sleep(0.4 + random.random() * 0.4)            # Jitter wie Puls
+                    titel = _fenster_titel(hwnd)
+                    if not _PROPHOS_TAB_RE.match(titel):
+                        ergebnis = (False, f"nach dem Wählen steht „{titel[:40]}“ im Fenster statt Prophos — nichts gedrückt")
+                    elif int(u32.GetForegroundWindow() or 0) != hwnd and not _fenster_vorn(hwnd):
+                        ergebnis = (False, "Fenster verlor den Vordergrund — nichts gedrückt")
+                    elif int(u32.GetForegroundWindow() or 0) != hwnd:   # Beweis direkt vor dem Druck
+                        ergebnis = (False, "Fenster verlor den Vordergrund — nichts gedrückt")
+                    else:
+                        u32.keybd_event(0x11, 0, 0, 0)                    # Strg
+                        time.sleep(0.04 + random.random() * 0.04)
+                        u32.keybd_event(0x74, 0, 0, 0); u32.keybd_event(0x74, 0, 2, 0)   # F5
+                        time.sleep(0.04 + random.random() * 0.04)
+                        u32.keybd_event(0x11, 0, 2, 0)
+                        t0 = time.time()
+                        # wie der CDP-Weg: Tab vorn lassen, bis er wieder beim Panel fragt (Beweis), dann erst zurück
+                        time.sleep(6 + random.random() * 4)
+                        if _TAB_OEFFNEN["zuletzt"] < t0:
+                            time.sleep(5 + random.random() * 4)
+                        wach = _TAB_OEFFNEN["zuletzt"] >= t0
+                        ergebnis = (wach, f"Strg+F5 im Prophos-Tab (per {w1.get('weg') or 'UIA'}), "
+                                          f"{'fragt wieder' if wach else 'fragt noch nicht'} ({time.time() - t0:.0f} s)")
+        finally:
+            if gewaehlt:
+                try:
+                    w2 = _streifen_lauf("zurueck", hwnd, ziel["vorher_idx"], ziel["anzahl"])
+                    zurueck = (f", „{ziel['vorher_name'][:30]}“ wieder vorn" if isinstance(w2, dict) and w2.get("ok")
+                               else f", vorheriger Tab NICHT zurück ({str((w2 or {}).get('msg') or 'keine Antwort')[:60]})")
+                except Exception as e:
+                    zurueck = f", vorheriger Tab NICHT zurück ({type(e).__name__})"
+            if mini:
+                u32.ShowWindow(ctypes.c_void_p(hwnd), 6)               # SW_MINIMIZE
+            if vorher_fg and vorher_fg != hwnd:
+                try:
+                    _fenster_vorn(vorher_fg)
+                except Exception:
+                    pass
+        return ergebnis[0], ergebnis[1] + zurueck
+    except Exception as e:
+        return False, f"Tabstreifen-Weg fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        _tipp_sperre_frei(tipp)
+        TV_ORDER_LOCK.release()
+
+
 def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
     """Öffnet den Prophos-Tab IM PULS-CHROME (Port 9333) in einem eigenen Fenster, unter der Adresse, die der Tab zuletzt selbst gemeldet
     hat (localhost ≠ 127.0.0.1 = eigener Login), sonst TAB_URL → (ok, Klartext). lock_gehalten = der Aufrufer hält TV_ORDER_LOCK schon.
@@ -4486,14 +4784,21 @@ def _tab_neulade_waechter():
                     if weg != "cdp" and not ok and "kein Chrome-Fenster mit aktivem Prophos-Tab" in str(msg):
                         # kein eigenes Prophos-Fenster (Tab liegt im Puls-Chrome hinter TradingView, 30.10.2026) → per CDP neu laden;
                         # nicht im Puls-Chrome → bleibt beim bisherigen Hinweis
+                        cdp_da = True
                         try:
-                            pro = cdp_prophos_ziele(_cdp_get("/json/list") or [], _TAB_OEFFNEN.get("url") or "")[0]
+                            liste_c = _cdp_get("/json/list")        # antwortet :9333 überhaupt, ist das Puls-Chrome zuständig (Puls-Wache)
+                            pro = cdp_prophos_ziele(liste_c if isinstance(liste_c, list) else [], _TAB_OEFFNEN.get("url") or "")[0]
                         except Exception:
-                            pro = None
+                            pro, cdp_da = None, False
                         if pro:
                             time.sleep(random.random() * 10)        # gestreut
                             ok, msg = _prophos_tab_neuladen_cdp(stand)
                             msg = f"per CDP im Puls-Chrome: {msg}"
+                        elif streifen_weg_noetig(msg, cdp_da, pro, (base_config() or {}).get("tab_streifen")):
+                            # NL2 (11.11.2026): kein Puls-Chrome (:9333 zu), Prophos verdeckt im normalen Chrome → Tabstreifen per UIA
+                            time.sleep(random.random() * 10)        # gestreut
+                            ok, msg = _prophos_tab_neuladen_streifen()
+                            msg = f"per Tabstreifen im normalen Chrome (kein Puls-Chrome): {msg}"
                     grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
                     TAB_NL.update(ergebnis=grund, ergebnis_at=jetzt)
                 elif puls_da:
