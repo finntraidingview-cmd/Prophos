@@ -26983,6 +26983,11 @@ def kk_vorflug_zeilen(plaene, ab):
             z = vf.get(slot) if isinstance(vf.get(slot), dict) else None
             if not z or z.get("rot") is not True or z.get("lesbar") is False or not str(z.get("grund") or "").strip():
                 continue
+            # H5 (Slave 4 3814e641 „Offen für den Railway-Teil“, Master VF1 11.11.2026): „getrennt“ (Terminal nicht mit dem Server verbunden) ist ein
+            # Verbindungs-/PC-Zustand, kein Konto-Zustand — nie als Treffer wie gesperrt / nur schließen / falsches Konto. Heute trifft der Text keine
+            # KK_ARTEN-Regel; der Riegel hält das auch, wenn eine Regel später breiter wird.
+            if str(z.get("art") or "") == "getrennt":
+                continue
             t = _ap_ts(z.get("at"))
             if t is None or (a0 is not None and t < a0):
                 continue
@@ -42501,6 +42506,15 @@ def kz_rechnen(a, ctx):
                                        + (" + Korrektur von Hand (Account bearbeiten → Gewinntage)" if _gk else "")))
             out["gewinntage"] = {"ist": gti[0] if gti else None, "soll": gti[1] if gti else None, "auto": gti_auto[0] if gti_auto else None,
                                  "korrektur": _gk, "zyklus": zyklus, "min": _wd_num(gt.get("min"))}
+            # AD1c (Master 11.11.2026): WELCHE Tage zählten — tage = Gewinn-Tage des laufenden Zyklus, zyklen = alle Zyklen (ältester zuerst), je Tag
+            # {tag, summe, plaene, n}; dieselbe Zählung wie ist/auto (fcp_gewinntage_zyklen). Nur Felder dazu: nicht rechenbar → beide None, Rest unverändert
+            try:
+                _gz = fcp_gewinntage_zyklen(gt, aid, plaene, fcp_zyklus_grenz_tage(pend, verw, buch, aid), a.get("created_at"), _gk)
+            except Exception as e:
+                print(f"[konto-ziele] ⚠️ Gewinn-Tage-Liste {aid[:8]}: {type(e).__name__}: {e}", flush=True)
+                _gz = None
+            out["gewinntage"]["tage"] = _gz[-1]["tage"] if _gz else None
+            out["gewinntage"]["zyklen"] = _gz
         checks.append(["ok" if erreicht else "nein", "Ziel bis Waiting" + (" (fest)" if z_fest is not None else ""),
                        (f"{kz_usd(gewinn, 0, True)} / {kz_usd(z_fest if z_fest is not None else bereich[0], 0, True)}" if (bereich and gewinn is not None) else "—")
                        + (f" · Ziel erreicht (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)" if zt_info else "")])   # ZT1
@@ -49527,6 +49541,66 @@ def fcp_gewinntage_ist(gt, konto_id, plaene, seit_tag=None, korrektur=0):
         return None
     return ap_tage_ist({"id": konto_id, "goal_kind": "winning_days", "goal_min_profit": mn, "goal_target": int(anz), "goal_done_offset": int(korrektur or 0),
                         "goal_since": seit_tag or None}, plaene)
+
+
+# GEWINN-TAGE JE ZYKLUS ALS LISTE (AD1c, Master 11.11.2026 zu AD1b .2174: „Tag n/m“ je Trade im Funded-CFD-Verlauf der Account-Detail-Seite). /konto-ziele
+# nannte nur die Anzahl des laufenden Zyklus (gewinntage.ist), nicht WELCHE Tage zählten — das Frontend hätte selbst zählen müssen (zweite Zählung, weicht
+# ab). Jetzt dieselbe Zählung wie fcp_gewinntage_ist/ap_tage_ist (Berlin-Tag aus ended_at → started_at → completed_at, Status completed/review, Tagessumme
+# master_pl ≥ min), nur als Liste mit Datum und Plan-IDs. Zyklus-Grenzen wie fcp_zyklus_start / kz_payouts „fcp“: Zyklus k endet am Berlin-Tag des k-ten
+# Payouts (inklusive — der Ziel-Trade vom Anfrage-Tag gehört zum alten Zyklus), der nächste beginnt am Folgetag; im 1. Zyklus ab dem Anlegetag des Kontos.
+def fcp_zyklus_grenz_tage(pending, managed, buchungen, konto_id):
+    """REIN RECHNEND (testbar, AD1c): ALLE Payout-Tage eines Kontos (Berlin, aufsteigend, doppelte bleiben — Zyklus-Nummer = Anzahl + 1 wie
+    fcp_payouts_zaehlen), dieselben Quellen und Felder wie fcp_zyklus_start (dessen Ergebnis = Folgetag des letzten Eintrags) und _kz_fcp_tag."""
+    verbucht = {str(z["received_tx_id"]) for z in pending or () if z.get("received_tx_id")}
+    out = []
+    for quelle, felder in ((pending, ("requested_at", "created_at")), (managed, ("payout_date", "created_at")), (buchungen, ("occurred_at",))):
+        for z in quelle or ():
+            if str(z.get("account_id") or "") != str(konto_id) or (quelle is buchungen and str(z.get("id")) in verbucht):
+                continue
+            d = _kz_fcp_tag(z, felder)
+            if d:
+                out.append(d)
+    return sorted(out)
+
+
+def fcp_gewinntage_zyklen(gt, konto_id, plaene, grenz_tage, konto_created_at, korrektur=0):
+    """REIN RECHNEND (testbar, AD1c): Gewinn-Tage je Payout-Zyklus → [{nr, seit, bis, tage: [{tag, summe, plaene, n}]}] (ältester Zyklus zuerst, der letzte
+    ist der laufende) oder None (Regel ohne gewinntage, wie fcp_gewinntage_ist). grenz_tage = fcp_zyklus_grenz_tage. Je Tag: Berlin-Datum, Tagessumme der
+    abgeschlossenen Trades, Plan-IDs (nach Trade-Ende aufsteigend) und n = Nummer des Tages im Zyklus. Nur im laufenden Zyklus zählt die Korrektur von Hand
+    (GT2, korrektur = fcp_gt_korrektur) mit: n = Platz + korrektur, ≤ 0 → None (der Tag zählt wegen der Korrektur nicht); die Anzahl im laufenden Zyklus
+    + korrektur = gewinntage.ist. Ältere Zyklen ohne Korrektur (sie gilt nur in ihrem Zyklus) und mit der heutigen Regel (min)."""
+    g = gt or {}
+    anz, mn = _wd_num(g.get("anzahl")), _wd_num(g.get("min"))
+    if not anz or int(anz) <= 0 or not mn or mn <= 0:      # Prüfer KANN 2: wie ap_tage_konto (int(goal_target)) — 0 < anzahl < 1 → None wie ist
+        return None
+    tz = _ap_tz("Europe/Berlin")
+    je_tag = {}
+    for p in plaene or ():
+        if str(p.get("master_account_id")) != str(konto_id) or p.get("status") not in ("completed", "review"):
+            continue
+        pl, t = _wd_num(p.get("master_pl")), _ap_ts(p.get("ended_at") or p.get("started_at") or p.get("completed_at"))
+        if pl is None or t is None:
+            continue
+        e = je_tag.setdefault(t.astimezone(tz).date().isoformat(), {"summe": 0.0, "plaene": []})
+        e["summe"] += float(pl)
+        e["plaene"].append((t, str(p.get("id") or "")))
+    grenzen = sorted(set(d for d in grenz_tage or () if d))
+    alle = sorted(d for d in grenz_tage or () if d)
+    folge = lambda d: (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")   # noqa: E731
+    out = []
+    for i in range(len(grenzen) + 1):
+        seit = fcp_gewinntage_seit(folge(grenzen[i - 1]) if i else None, konto_created_at)
+        bis = grenzen[i] if i < len(grenzen) else None
+        laufend = bis is None
+        tage = []
+        for d in sorted(je_tag):
+            if (seit and d < seit) or (bis and d > bis) or je_tag[d]["summe"] < mn:
+                continue
+            n = len(tage) + 1 + (int(korrektur or 0) if laufend else 0)
+            tage.append({"tag": d, "summe": round(je_tag[d]["summe"], 2), "plaene": [x[1] for x in sorted(je_tag[d]["plaene"], key=lambda x: x[0]) if x[1]],
+                         "n": n if n > 0 else None})
+        out.append({"nr": (sum(1 for a in alle if a <= grenzen[i - 1]) + 1) if i else 1, "seit": seit, "bis": bis, "laufend": laufend, "tage": tage})
+    return out
 
 
 # GEWINNTAGE VON HAND (GT2, Finn 05.11.2026, Blue Guardian 100k …7770 Funded CFD: „Ich wollte jetzt gerade unter Settings dem quasi +1 Tag hinzufügen, aber ich

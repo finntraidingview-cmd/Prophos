@@ -44,6 +44,12 @@ z = app.kk_vorflug_zeilen(PL, m(72 * 60))
 check([(r["plan_id"], r["quelle"]) for r in z] == [("p1", "vorflug"), ("p1", "vorflug")] and z[0]["msg"] == NUR and z[0]["konto"] == "100k N → Funded",
       "nur gelesene, rote Vorflüge mit Grund im Fenster (lesbar False / grün / zu alt fallen raus)")
 check(app.kk_vorflug_zeilen([{"id": "q", "vf": "kaputt"}, {"id": "r"}], None) == [], "kaputte/fehlende Spur → nichts")
+# VF1/H5 (11.11.2026): „getrennt“ ist kein Konto-Zustand — nie ein Treffer, auch mit einem Grund, den eine Regel treffen würde
+_GT = {"at": m(9), "lesbar": True, "rot": True, "art": "getrennt", "grund": "Terminal nicht mit dem Server verbunden"}
+check(app.kk_vorflug_zeilen([{"id": "g", "vf": {"a": _GT, "b": dict(_GT, grund=NUR)}}], m(72 * 60)) == [],
+      "Vorflug „getrennt“ zählt nie (H5), auch nicht mit Regel-Text")
+_ZT = [{"id": "z", "vf": {"a": {"at": m(9), "lesbar": True, "rot": True, "art": a, "grund": NUR}}} for a in ("konto_gesperrt", "nur_schliessen", "falsches_konto")]
+check(len(app.kk_vorflug_zeilen(_ZT, m(72 * 60))) == 3, "gesperrt / nur schließen / falsches Konto bleiben Treffer-Zeilen")
 
 # Prüfer F-A MUSS a: Journal-Vorflüge (dieselbe alte Ablehnung) zählen höchstens einmal je Tag, nie nach einem Fehlstart desselben Tags, anderer Login nie
 F = app.kk_vorflug_filtern
@@ -119,6 +125,9 @@ ns = app.tab_stand_next_starts(pl, JETZT)
 check(ns == ["2026-11-11T06:03:00Z", "2026-11-11T06:06:00Z", "2026-11-11T06:08:00Z"],
       f"nur geplante, ungeclaimte, startbare Pläne in (jetzt, +10 min], doppelt einmal, aufsteigend, Z-Format ({ns})")
 check("\"next_start_um\": tab_stand_next_starts(plaene, jetzt)" in SRC, "Route liefert next_start_um")
+# VF1 (11.11.2026, offen aus 3814e641): auch eine Startzeit mit anderer Zone / Bruchteil kommt als UTC MIT Zone („Z“) raus
+ns2 = app.tab_stand_next_starts([{"status": "planned", "start_um": "2026-11-11T10:04:30.25+04:00"}], JETZT)
+check(ns2 == ["2026-11-11T06:04:30.250000Z"], f"Startzeit +04:00 mit Bruchteil → UTC mit „Z“ ({ns2})")
 # Panel-Leser (8e292a66 tab_vorflug_starts) liest ISO-Liste
 check(all(datetime.fromisoformat(x.replace("Z", "+00:00")).tzinfo for x in ns), "Format passt zu panel.tab_vorflug_starts (fromisoformat nach Z → +00:00)")
 

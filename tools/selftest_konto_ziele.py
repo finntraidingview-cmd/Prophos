@@ -168,8 +168,14 @@ check(o["urteil"]["ok"] is True and o["urteil"]["text"] == "Bestanden", f"Challe
 check([p["bal"] for p in o["chart"]["punkte"]] == [153358.52, 156851.3, 158999.82, 159005.44] and o["chart"]["ziel"] == 159000.0, "Challenge: Chart = Endbalances der vier Trades, Ziel-Linie 159.000")
 
 # ── 2. Blue Guardian 100k Funded CFD …8631: Werte = fcp_konto_ziel_boden + fcp_gewinntage_ist ──
+# AD1c: die Gewinn-Tage-Liste läuft in kz_rechnen in eigenem try — ihre Helfer vorher laden (ein NameError dort käme nie beim Lader an)
+ruf("fcp_zyklus_grenz_tage", [{"account_id": "x", "requested_at": "2026-10-01T10:00:00Z"}], [], [], "x")
+ruf("fcp_gewinntage_zyklen", {"anzahl": 3, "min": 500}, "x", [{"id": "p", "master_account_id": "x", "status": "completed", "master_pl": 600,
+                                                               "ended_at": "2026-11-01T10:00:00Z"}], ["2026-10-01"], "2026-09-01T00:00:00Z")
 c = ctx_fuer(BG)
 o = ergebnisse["funded_cfd"] = ruf("kz_rechnen", BG, c)
+check(o["gewinntage"]["tage"] == [] and [(z["nr"], z["seit"], z["laufend"]) for z in o["gewinntage"]["zyklen"]] == [(1, "2026-10-28", True)]
+      and o["gewinntage"]["ist"] == 0, f"AD1c Funded CFD: gewinntage.tage leer (0/3), ein laufender Zyklus ab 28.10. ({o['gewinntage'].get('zyklen')})")
 zb = ruf("fcp_konto_ziel_boden", FCP["firmen"][0], 100000.0, 1, BG["name"])
 check(zb == (101000.0, 92000.0) and o["chart"]["ziel"] == 101000.0 and o["chart"]["boden"] == 92000.0, f"Funded CFD: Ziel/Boden = fcp_konto_ziel_boden {zb} (wie Radar)")
 check(kachel(o, "max_loss")["wert"] == "3.990 $" and kachel(o, "max_loss")["farbe"] == "warn", f"Funded CFD: Max Loss 3.989,54 → „3.990 $“ übrig, warn ({kachel(o, 'max_loss')['wert']})")
