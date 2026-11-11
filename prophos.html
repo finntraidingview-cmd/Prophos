@@ -6351,7 +6351,7 @@
   /* AP2 (Finn 11.11.2026, Foto: Knöpfe unten abgeschnitten): Kopf und Fuß fest, nur der Körper scrollt */
   #dashboard-view #mwdErledigtModal .modal{display:flex;flex-direction:column;overflow:hidden}
   #dashboard-view #mwdErledigtModal .modal-head,#dashboard-view #mwdErledigtModal .modal-foot{flex:none}
-  #dashboard-view #mwdErledigtModal .modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0 -6px;padding:18px 6px 4px}
+  #dashboard-view #mwdErledigtModal .modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -6px;padding:18px 6px 4px}   /* Prüfer-KANN: iOS scrollt sonst die Seite dahinter */
   #dashboard-view .mwd-erl-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12.5px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-erl-felder{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
   #dashboard-view .mwd-erl-felder .field[hidden]{display:none}   /* Echo/Topstep ohne Fusion-Feld (30.09.2026) */
