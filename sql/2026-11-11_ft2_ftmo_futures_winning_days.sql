@@ -39,22 +39,26 @@ select 'FTMO Futures', 'winning_days', 50000, 'tagesstart', 1000, 'eod_trailing'
 
 -- 4) DB-RIEGEL (Prüfer FT2 MUSS 1–5): ein FTMO-Futures-Winning-Day startet NIE ohne Master-SL — egal über welchen Weg er angelegt wurde (Mac/Railway,
 --    PC-Tab-Rückfall, alter Tab, PATCH). Angelegt werden darf er (der Tab-Rückfall legt ohne SL an, SL1 würfelt den festen SL ≥ 120 s vor dem Start nach);
---    der Claim/Start (start_um_gestartet_at bzw. orbit_gesendet_at wird gesetzt, oder status planned → open) wird abgelehnt, solange master_sl leer/0 ist.
---    Verbrauchs-Claims (start_claim_art 'verbrauch') gehen durch. Firma: master_firm, sonst accounts.firm. Zusätzlich bricht der PC-Tab vor dem ersten Klick ab
---    (wdSlFestPflicht) — Hand- und Fern-Starts setzen keinen Claim, der Riegel ist das Netz dahinter.
+--    der Claim/Start (start_um_gestartet_at bzw. orbit_gesendet_at wird gesetzt) wird abgelehnt, solange master_sl leer/0 ist.
+--    NICHT beim Übergang planned → open (Prüfer S2, STOPP 11.11.2026): den schreibt der Tab erst NACH dem Fill — eine Exception dort ließe das ganze open-Update
+--    (started_at, Ticket, Baseline) scheitern → offene Position ohne Plan-Status, keine Ende-Erkennung, kein Hedge-Abbau. Hand-/Fern-Starts über Orbit V2 setzen
+--    keinen Claim; die harte Sperre vor dem Klick macht der PC-Tab (wdSlFestPflicht in tpOrbitStartenKern).
+--    Verbrauchs-Claims (start_claim_art 'verbrauch') gehen durch. Firma: master_firm, sonst accounts.firm.
 --    Gilt nur, solange sl_wuerfel.firmen.ftmofutures eingerichtet ist (aus = wie bisher). Firma wie app.py fdp_wd_schluessel: „ftmo“ + „futur“.
+--    Reihenfolge (Prüfer S2 KANN): erst die billigen Feld-Prüfungen, die Unterabfragen (accounts, wd_farmer_regeln) nur, wenn ein Claim gerade gesetzt wird —
+--    der Trigger läuft vor JEDEM trade_plans-UPDATE.
 create or replace function public.trade_plans_wd_sl_pflicht() returns trigger language plpgsql as $$
 begin
   if (new.winning_day is true or coalesce(new.notes, '') like '%Winning-Day-Farmer%')
      and coalesce(new.master_sl, 0) <= 0                                                    -- auch 0: der Tab sendet bei SL ≤ 0 ohne SL (Prüfer 2 KANN 5)
-     and lower(coalesce(nullif(new.master_firm, ''), (select a.firm from public.accounts a where a.id = new.master_account_id), '')) like '%ftmo%futur%'
      and coalesce(new.start_claim_art, '') <> 'verbrauch'                                   -- Verbrauch (verpasst, Archiv, „passt heute nicht“) sendet nichts
      and ((old.start_um_gestartet_at is null and new.start_um_gestartet_at is not null)
-          or (old.orbit_gesendet_at is null and new.orbit_gesendet_at is not null)
-          or (old.status = 'planned' and new.status = 'open'))
-     and exists (select 1 from public.wd_farmer_regeln w where w.id = 1 and jsonb_typeof(w.sl_wuerfel) = 'object' and (w.sl_wuerfel->'firmen') ? 'ftmofutures') then
-    raise exception 'WD-SL-Pflicht: FTMO-Futures-Winning-Day ohne Master-SL startet nicht (Daily Loss = Hard Breach) — SL setzen oder Plan löschen'
-      using errcode = 'P0001';
+          or (old.orbit_gesendet_at is null and new.orbit_gesendet_at is not null)) then
+    if lower(coalesce(nullif(new.master_firm, ''), (select a.firm from public.accounts a where a.id = new.master_account_id), '')) like '%ftmo%futur%'
+       and exists (select 1 from public.wd_farmer_regeln w where w.id = 1 and jsonb_typeof(w.sl_wuerfel) = 'object' and (w.sl_wuerfel->'firmen') ? 'ftmofutures') then
+      raise exception 'WD-SL-Pflicht: FTMO-Futures-Winning-Day ohne Master-SL startet nicht (Daily Loss = Hard Breach) — SL setzen oder Plan löschen'
+        using errcode = 'P0001';
+    end if;
   end if;
   return new;
 end $$;

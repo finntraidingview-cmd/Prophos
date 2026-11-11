@@ -17985,7 +17985,7 @@ def admin_wd_plaene():
                     print(f"[wd] ⚠️ Alarm Payout unlesbar: {type(e2).__name__}", flush=True)
         # WD-SL-WÜRFEL (WS1a, 09.11.2026): Regel + Konto-/Liq-Daten einmal je Lauf; jeder Fehler hier = Würfel aus für diesen Lauf (wie bisher kein SL)
         # FT2 (11.11.2026): feste SL je Firma (sl_wuerfel.firmen) eigens gelesen — ein Kontext-Fehler sperrt diese Firmen (sl_fest_fehler), statt ohne SL zu planen
-        sl_fest = _wd_sl_fest_lesen()
+        sl_fest = _wd_sl_fest_lesen() if "_wd_sl_fest_lesen" in globals() else {}   # get: ältere Selftest-Lader ziehen admin_wd_plaene ohne die FT2-Helfer (Prüfer S2)
         sl_fest_fehler = None
         try:
             sl_regel, sl_konten, sl_liq, sl_frueher = _wd_sl_kontext(

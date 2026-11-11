@@ -158,7 +158,9 @@ check(lu["groessen"][0]["min_usd"] == 250 and lu["groessen"][0]["tp"] == [260, 2
 check(W({"name": "Topstep", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] == 150, "Topstep: 150 $")
 check(W({"name": "FundedNext Futures", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] == 250, "FundedNext Futures: 250 $")
 ft = W(REG["firmen"][-1], {}, None, [])
-check(ft["fehlt"] is True and ft["groessen"][0]["min_usd"] is None and ft["groessen"][0]["schluessel"] == "sonst", "FTMO Futures: noch nicht hinterlegt (kein Raten)")
+# FT2 (Finn 11.11.2026 21:05): FTMO Futures hat jetzt eigene WD-Werte (Farmer-Schlüssel ftmofutures, Gewinntag 200 $, TP 220–240 $; Kontrakte 2–3 kommen per SQL)
+check(ft["fehlt"] is False and ft["groessen"][0]["min_usd"] == 200 and ft["groessen"][0]["schluessel"] == "ftmofutures" and ft["groessen"][0]["tp"] == [220, 240],
+      "FTMO Futures: eigener Schlüssel ftmofutures, 200 $, TP 220–240 $ (FT2)")
 check(W({"name": "Tradeify CFD", "je_groesse": {}}, {}, None, [])["groessen"][0]["min_usd"] is None, "Tradeify CFD zählt nie als Tradeify-WD")
 gt2 = SRC[SRC.index("def admin_funded_plan():"):SRC.index("def fdp_vorschlaege_aufraeumen(")]
 check('_f["wd"] = fdp_wd_anzeige(_f, _vp, _zr, _best, _fr)' in gt2 and "_fr = _wd_firmen_regeln_lesen()" in gt2 and "_wd_zyklus_regelzeile()" in gt2, "GET hängt WD je Firma an (Farmer-Zeile + Bestätigen-Firmen)")
