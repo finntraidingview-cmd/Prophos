@@ -60595,7 +60595,18 @@
    * IMMER der ausführende PC frisch aus seinen lokalen Instanz-Daten auf
    * (nie aus womöglich alten Cloud-Daten — Beweis-Doktrin), und Puls prüft
    * es lesend nochmal und verlangt GENAU EINE offene Position. */
-  function tpClosePosAufloesen(plan, route, symbol){
+  /* MT1 Punkt 4 (11.11.2026, Abfrage E: 3× „Keine offene Master-Position“, alle drei Positionen waren offen, eine 2,5 h über Market Close): steht die
+   * Position NICHT im Copier-Schnappschuss, darf der Aufrufer mit opts.lesend das Ticket von Puls LESEND im Terminal auflösen lassen (master-close
+   * {ticket: 0, aufloesen: true, richtung}; order_bot close_ticket_aufloesen: Login-Guard, Symbol + Richtung, genau EINE Position). Mit Hedge nur bei
+   * frischem, lebendigem Schnappschuss (sonst ginge der Hedge nicht mit — der Panel-Riegel bleibt zusätzlich). Mehrdeutig bleibt ein Fehler. */
+  function tpCloseLesendErlaubt(route, ohneHedge){
+    if(ohneHedge) return true
+    const st = (route && route.inst && route.inst.status) || {}
+    return !!(route && route.inst && route.inst.alive && !st.note)
+  }
+  const tpCloseBody = (t, symbol, extra) => Object.assign({ ticket: t.ticket, symbol }, t.aufloesen ? { aufloesen: true, richtung: t.richtung } : {}, extra || {})
+  window._tpCloseAuf = { body: (t, s, e) => tpCloseBody(t, s, e) }   // Test-Haken
+  function tpClosePosAufloesen(plan, route, symbol, opts){
     const st = (route.inst && route.inst.status) || {}
     let poss = Array.isArray(st.master_positions) ? st.master_positions.slice() : []
     const sym = String(symbol || '').trim().toLowerCase()
@@ -60605,6 +60616,8 @@
       if(gef.length) poss = gef
     }
     if(poss.length !== 1){
+      if(!poss.length && opts && opts.lesend && (plan.richtung === 'buy' || plan.richtung === 'sell') && sym)
+        return { ticket: 0, aufloesen: true, richtung: plan.richtung, beschr: `${symbol} ${plan.richtung} — Ticket liest Puls im Terminal` }
       return { fehler: poss.length
         ? `Position nicht eindeutig (${poss.length} Kandidaten am Master) — im Terminal von Hand schließen.`
         : 'Keine offene Master-Position gefunden (Copier-Daten frisch? Trade evtl. schon zu).' }
@@ -60689,13 +60702,13 @@
         if(!dd || dd.copier_offline || dd._httpFail) throw new Error('Copier-Backend nicht erreichbar.')
         const route = mt5RouteResolve(plan, dd.instances || [])
         if(!route) throw new Error('Plan gehört zu keiner Copier-Instanz auf diesem PC.')
-        const t = tpClosePosAufloesen(plan, route, symbol)
+        const t = tpClosePosAufloesen(plan, route, symbol, { lesend: tpCloseLesendErlaubt(route, false) })
         if(t.fehler) throw new Error(t.fehler)
-        _pfSet('cl-pos', 'ok', `#${t.ticket} <span class="mono">${escapeHtml(t.beschr)}</span>`)
+        _pfSet('cl-pos', 'ok', `${t.aufloesen ? '' : '#' + t.ticket + ' '}<span class="mono">${escapeHtml(t.beschr)}</span>`)
         _pfSet('cl-bot', 'warn', '⏳ Puls klickt im Terminal — HÄNDE WEG, bis die Bestätigung kommt!')
         const r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ ticket: t.ticket, symbol }) })
+          body: JSON.stringify(tpCloseBody(t, symbol)) })
         if(r && r.ok){
           _pfSet('cl-bot', 'ok', escapeHtml(String(r.msg || 'Position geschlossen.')))
           fertigUi(true, '✓ Position geschlossen — Auto-Erkennung übernimmt, der Plan wandert zu „Beendet".')
@@ -60955,20 +60968,20 @@
       return { ok:true, beendet:false, code:'schon_flach', msg:'Master ist schon flach — die Ende-Erkennung übernimmt (2 Messungen).' }   // code: WS2c (war_flach statt geschlossen)
     }
     const baseTicket = Number((plan.mt5Baseline || {}).ticket) || 0
-    let ticket = 0, beschr = ''
+    let ticket = 0, beschr = '', aufl = null
     const p0 = baseTicket ? poss.find(x => Number(x.ident) === baseTicket) : null
     if(p0){ ticket = baseTicket; beschr = `${p0.symbol || ''} ${Number(p0.type) === 0 ? 'buy' : 'sell'} ${p0.volume || ''}`.trim() }
     else {
-      const t = tpClosePosAufloesen(plan, route, symbol)
+      const t = tpClosePosAufloesen(plan, route, symbol, { lesend: tpCloseLesendErlaubt(route, true) })
       if(t.fehler) return { ok:false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler) }
-      ticket = t.ticket; beschr = t.beschr
+      ticket = t.ticket; beschr = t.beschr; aufl = t.aufloesen ? { aufloesen: true, richtung: t.richtung } : null
     }
     let r = null
     if(restS() < 15) return zuKnapp   // Frist (News): Instanz-Abfrage hat gedauert
     try{
       r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
         headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ ticket, symbol, login: route.masterLogin, ohne_hedge: true }) })
+        body: JSON.stringify(Object.assign({ ticket, symbol, login: route.masterLogin, ohne_hedge: true }, aufl || {})) })
     }catch(e){ return { ok:false, unklar:true, retry:false, msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' } }
     if(r && r.ok){
       mt5PlanPoll.wasOpen.add(pid)
@@ -61763,7 +61776,7 @@
           }
           const routeC = mt5RouteResolve(plan, dd.instances || [])
           if(!routeC) continue   // gehört einem anderen PC der Flotte
-          const t = tpClosePosAufloesen(plan, routeC, pcp.symbol || '')
+          const t = tpClosePosAufloesen(plan, routeC, pcp.symbol || '', { lesend: tpCloseLesendErlaubt(routeC, false) })
           if(t.fehler){
             await supabase.from('order_signale')
               .update({ status:'fehler', updated_at: new Date().toISOString(),
@@ -61787,17 +61800,17 @@
                 msg:'Keine Rückmeldung vom Close binnen 8 Minuten — am PC im Terminal prüfen, ob die Position noch offen ist.' })
             }
           }, 8 * 60 * 1000)
-          if(typeof atToast === 'function') atToast(`📡 Remote-Close: ${plan.masterName || '—'} #${t.ticket} — Puls schließt`, 'end')
+          if(typeof atToast === 'function') atToast(`📡 Remote-Close: ${plan.masterName || '—'} ${t.aufloesen ? '(Ticket liest Puls)' : '#' + t.ticket} — Puls schließt`, 'end')
           try{
             const r = await window.mtcApi(`master-close?file=${encodeURIComponent(routeC.inst.file)}`, { method:'POST',
               headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ ticket: t.ticket, symbol: pcp.symbol || '' }) })
+              body: JSON.stringify(tpCloseBody(t, pcp.symbol || '')) })
             _osErgebnis(sig.id, (r && typeof r === 'object')
               ? { ok: !!r.ok, retry_ok: !!r.retry_ok, profit: (r.profit ?? null), trail: r.trail || null, schon_zu: r.schon_zu === true || undefined,
                   msg: String(r.msg || (r.ok ? 'Position geschlossen.' : 'Close fehlgeschlagen.')) }
               : { ok:false, unklar:true, msg:'keine Antwort vom Close-Bot' })
             // „nicht (mehr) offen" (30.10.2026, Julian 688a4554: Antwort kam, Plan blieb 1 T 5 h open) → Beleg + frische Lesung, Ende über 2 frische Messungen
-            if(r && r.ok && r.schon_zu === true) echoSchonZuNachfassen(plan, r, t.ticket)
+            if(r && r.ok && r.schon_zu === true) echoSchonZuNachfassen(plan, r, Number(r.ticket) || t.ticket)
           }catch(e){
             _osErgebnis(sig.id, { ok:false, unklar:true,
               msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' })
@@ -62441,13 +62454,14 @@
       if(!route.inst.alive || s0.note) return { ok: false, code: 'snapshot_alt', retry: true,
         msg: `Master-Snapshot nicht frisch (${s0.note ? String(s0.note).slice(0, 60) : 'Instanz nicht lebendig'}) — nichts geschlossen, der Hedge würde nicht mitgehen.` }
     }
-    const t = tpClosePosAufloesen(plan, route, symbol)
+    const t = tpClosePosAufloesen(plan, route, symbol, { lesend: tpCloseLesendErlaubt(route, false) })
     if(t.fehler) return { ok: false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler),
       keine_position: /Keine offene Master-Position/.test(t.fehler) && !(((route.inst && route.inst.status) || {}).master_positions || []).length }   // WS2c: nur bei GANZ leerem Master (Symbol-Filter kann sich irren)
     if(frist && frist - Date.now() < 30000) return { ok: false, msg: 'Frist vor der News zu knapp — nichts angefangen, später erneut.', retry: true }
     const r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: t.ticket, symbol }) })
-    if(r && r.ok) return { ok: true, msg: `#${t.ticket} ${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false, ticket: t.ticket, file: route.inst.file }
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tpCloseBody(t, symbol)) })
+    const tk = Number(r && r.ticket) || t.ticket   // MT1: lesend aufgelöstes Ticket kommt vom Bot zurück
+    if(r && r.ok) return { ok: true, msg: `${tk ? '#' + tk + ' ' : ''}${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false, ticket: tk, file: route.inst.file }
     const pausiert = (typeof _pfEchoPausiert === 'function') && _pfEchoPausiert(r)
     return { ok: false, msg: (r && (r.msg || r.error)) || 'keine Antwort vom Bot', retry: !!(r && r.retry_ok) || pausiert }
   }

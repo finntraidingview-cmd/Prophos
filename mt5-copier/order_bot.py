@@ -15558,6 +15558,23 @@ def _deal_profit_lesen(path, expected, ticket):
         return None
 
 
+def close_ticket_aufloesen(positionen, symbol, richtung):
+    """REIN RECHNEND (testbar, MT1 Punkt 4, 11.11.2026): Ziel-Ticket fürs Schließen aus der LESENDEN API-Liste (statt aus dem Copier-Schnappschuss)
+    → (ticket | None, art, grund). art: 'eins' | 'keins' | 'mehrere' | 'ungueltig'. Kandidat = Symbol enthält das Plan-Symbol (Groß/Klein egal) UND Typ passt
+    (buy = 0, sell = 1). Anlass (MT1-Abfrage E): Auto-Close meldete 3× „Keine offene Master-Position“ (Copier-Schnappschuss leer), alle drei Positionen
+    waren offen, eine 2,5 h über Market Close. Der Verwechslungs-Schutz danach (genau EINE offene Position am Konto) bleibt unverändert."""
+    sym, ri = str(symbol or "").strip().lower(), str(richtung or "").strip().lower()
+    if not sym or ri not in ("buy", "sell"):
+        return None, "ungueltig", "Symbol oder Richtung fehlt — Ticket nicht lesend auflösbar"
+    typ = 0 if ri == "buy" else 1
+    kand = [p for p in positionen or () if sym in str(p.get("symbol") or "").lower() and int(p.get("typ", -1)) == typ]
+    if not kand:
+        return None, "keins", f"laut Terminal keine offene {symbol} {ri}-Position"
+    if len(kand) > 1:
+        return None, "mehrere", f"{len(kand)} offene {symbol} {ri}-Positionen ({', '.join('#' + str(p['ticket']) for p in kand)}) — nicht eindeutig"
+    return int(kand[0]["ticket"]), "eins", f"Ticket #{kand[0]['ticket']} lesend aufgelöst ({kand[0].get('symbol')} {ri} {kand[0].get('volumen')})"
+
+
 def run_close(cfg_path, cmd):
     """Position schliessen (28.08.2026, Finns Remote-Close) — derselbe Rahmen
     wie run(), aber der unumkehrbare Schritt ist der 'Position schliessen'-
@@ -15591,8 +15608,12 @@ def run_close(cfg_path, cmd):
     except Exception:
         pass
 
-    ticket = int(cmd["ticket"])
+    ticket = int(cmd.get("ticket") or 0)
     symbol = str(cmd.get("symbol") or "").strip()
+    # MT1 Punkt 4 (11.11.2026): ohne Ticket (Copier-Schnappschuss ohne die Position) löst der Bot es selbst LESEND auf — nur mit aufloesen + Richtung
+    aufloesen = ticket <= 0 and cmd.get("aufloesen") is True
+    if ticket <= 0 and not aufloesen:
+        return {"ok": False, "retry_ok": True, "msg": "ticket fehlt — nichts geklickt"}
 
     # PC-TIPP-SPERRE (30.10.2026, s. echo_tipp_sperre_urteil): auch der Close tippt/klickt ins Vordergrund-Fenster
     _sperre_t0 = time.time()
@@ -15605,6 +15626,17 @@ def run_close(cfg_path, cmd):
         if _ist_verbindungsfehler(msg):
             msg += " — " + _verbindung_hinweis(path)   # festgestellte Ursache statt Vermutung (16.10.2026, s. verbindung_ursache)
         return {"ok": False, "retry_ok": True, "msg": msg}
+    aufgeloest = ""
+    if aufloesen:
+        t_, art_, grund_ = close_ticket_aufloesen(lese["positionen"], symbol, cmd.get("richtung"))
+        if art_ == "keins":
+            # API-Lesung (Login-Guard bestanden) zeigt die Position nicht → Ziel-Zustand erreicht, wie „nicht (mehr) offen“ unten
+            return {"ok": True, "retry_ok": False, "schon_zu": True, "aufgeloest": "keins",
+                    "msg": f"{grund_} — nichts zu tun (lesend geprüft, Copier-Daten hatten keine Position)."}
+        if art_ != "eins":
+            return {"ok": False, "retry_ok": art_ == "ungueltig", "aufgeloest": art_,
+                    "msg": f"{grund_} — nichts geklickt, im Terminal von Hand schliessen."}
+        ticket, aufgeloest = t_, grund_
     pos = next((p for p in lese["positionen"] if p["ticket"] == ticket), None)
     if pos is None:
         # Ziel-Zustand erreicht, nichts zu tun — ehrlich als eigener Fall
@@ -15625,6 +15657,8 @@ def run_close(cfg_path, cmd):
 
     trail = _StempelSpur()
     _spur_wache(trail, "close_zeit")     # Spur-Wache (23.10.2026): auch /api/master-close hat den 300-s-Deckel, s. _spur_wache
+    if aufgeloest:
+        trail.append(aufgeloest + " — Copier-Daten hatten keine Position (MT1)")
     _warte(0.0, 1.2)   # Start-Versatz wie run() (28.08.2026, Flotten-Streuung)
 
     # 2) Ins Terminal gehen -> Guard

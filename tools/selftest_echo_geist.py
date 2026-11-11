@@ -190,7 +190,7 @@ print(JSON.stringify(out))
     check("schon_zu: {" in sz and "'open')" in sz and "atMoveToReview" not in sz and "status: 'review'" not in sz,
           "schon_zu: Beleg am Plan (Guard open) + Lesung, kein Ende aus der Antwort allein")
     rc = HTML[HTML.index("const r = await window.mtcApi(`master-close?file=${encodeURIComponent(routeC.inst.file)}`"):][:1400]
-    check("schon_zu: r.schon_zu === true || undefined" in rc and "if(r && r.ok && r.schon_zu === true) echoSchonZuNachfassen(plan, r, t.ticket)" in rc,
+    check("schon_zu: r.schon_zu === true || undefined" in rc and "if(r && r.ok && r.schon_zu === true) echoSchonZuNachfassen(plan, r, Number(r.ticket) || t.ticket)" in rc,   # MT1 (11.11.2026): lesend aufgelöstes Ticket kommt vom Bot
           "Remote-Close Echo: schon_zu im Signal-Ergebnis + nachfassen")
     wt = HTML[HTML.index("  async function hedgeWacheTick(){"):HTML.index("  function hedgeMasterWegStatus(")]
     check("if(hedgeHandFlachFaellig(p, Date.now())){ try{ await hedgeHandFlachPruefen(p) }" in wt, "Hedge-Wächter ruft den Hand-Flach-Weg (nur am Hedge-PC, Liste 'meine')")

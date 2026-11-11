@@ -8335,7 +8335,11 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 ticket = 0
             symbol = str(body.get("symbol") or "").strip()
-            if ticket <= 0:
+            # MT1 Punkt 4 (11.11.2026): ohne Ticket (Copier-Schnappschuss ohne die Position) mit aufloesen + Symbol + Richtung — der Bot löst das Ticket
+            # LESEND über die Terminal-API auf (Login-Guard, genau EINE Position); die Frische-Riegel unten bleiben unverändert
+            richtung_c = str(body.get("richtung") or "").strip().lower()
+            aufloesen_c = ticket <= 0 and body.get("aufloesen") is True and richtung_c in ("buy", "sell") and bool(symbol)
+            if ticket <= 0 and not aufloesen_c:
                 return self._send(400, json.dumps({"ok": False, "msg": "ticket fehlt"}))
             if symbol and not SYMBOL_RE.fullmatch(symbol):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
@@ -8393,6 +8397,8 @@ class Handler(BaseHTTPRequestHandler):
                     "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
                     "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
             cmd = {"aktion": "close", "ticket": ticket, "symbol": symbol}
+            if aufloesen_c:
+                cmd.update(aufloesen=True, richtung=richtung_c)   # MT1 Punkt 4
             try:
                 p = subprocess.run([*bot_argv(bot), os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
