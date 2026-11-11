@@ -58624,7 +58624,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2186'
+  const OS_TAB_BUILD = '2026-09-22.2187'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -79124,17 +79124,24 @@
     }else if(a.type === 'funded_cfd' && !a.waitingPayoutSince){
       cb.dataset.ziel = 'waiting'; lbl.textContent = 'Konto jetzt zu Waiting for Payout'
       const basis = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
-      if(hint) hint.textContent = basis
+      // AP5 (Master 11.11.2026): der Vortext („im Plus und wartet nur auf den Payout“) nur, wenn das Urteil alles ✓ meldet — sonst nur die kurze Zeile aus wpErgText.
+      // Bis das Urteil da ist: „wird gelesen …“; nicht lesbar → wie bisher (Vortext + Radar-Vorauswahl). Nur Text — Haken und Vorauswahl wie vorher.
+      if(hint) hint.textContent = _tcWp ? 'Payout-Stand wird gelesen …' : basis
       // Ziel erreicht (30.10.2026): vorausgewählt wie im Radar-Popup; ohne Radar-Daten bleibt der Haken aus
-      try{ if(window._wdlFcfdZielVonPlan(p.id)){ cb.checked = true; if(hint) hint.textContent += ' Ziel erreicht — vorausgewählt.' } }catch(_){}
+      try{ if(window._wdlFcfdZielVonPlan(p.id)){ cb.checked = true; if(hint) hint.textContent = _tcWp ? 'Ziel erreicht — vorausgewählt · Payout-Stand wird gelesen …' : basis + ' Ziel erreicht — vorausgewählt.' } }catch(_){}
+      if(_tcWp) _tcWp.then(u => {
+        if(!hint || nr !== _tcKuNr || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
+        if(!u){ hint.textContent = basis + (cb.checked ? ' Ziel erreicht — vorausgewählt.' : ''); return }
+        const e = wpErgText(u, true)
+        hint.textContent = (e.art === 'ja' ? basis + ' ' : '') + e.text + '.'
+      })
       // WP1 (09.11.2026, belegt: 4 von 11 Ziel-Abhakungen ohne Waiting, weil hier ohne geladenen Radar nie vorausgewählt wurde): dasselbe Payout-Urteil wie
       // Konto-Kachel/Abhak-Strahl (window._wpUrteil → /konto-ziele abhak.bereit, Ziel + Consistency + Gewinntage) entscheidet, sobald es da ist — auch ohne Radar.
       // Nie über Finns eigenen Klick, nur solange dasselbe Popup für denselben Plan offen ist; nicht lesbar → die Vorauswahl oben bleibt.
       if(_tcWp) _tcWp.then(u => {
         if(nr !== _tcKuNr || _tcKuAngefasst || !u || u.wartet || String(_completingPlanId) !== String(p.id) || cb.dataset.ziel !== 'waiting') return
         if(!document.getElementById('tradeCompleteModal')?.classList.contains('open')) return
-        cb.checked = u.bereit
-        if(hint) hint.textContent = basis + ' ' + wpErgText(u, true).text + '.'   // AP4 (Master 11.11.2026): derselbe kurze Satz wie im Radar-Popup (wpErgText), keine Textwand
+        cb.checked = u.bereit   // Hinweis-Text setzt seit AP5 der Handler oben (auch wenn Finn den Haken angefasst hat)
       })
     }else return
     wrap.hidden = false
