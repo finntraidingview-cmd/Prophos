@@ -3976,6 +3976,15 @@
   @keyframes ab2-laden{from{transform:scaleX(var(--v))}to{transform:scaleX(var(--n))}}
   .ab2-ach{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--k-sub);font-variant-numeric:tabular-nums;margin-top:5px}
   .ab2-ach span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  /* AP3 (11.11.2026): „Ziel erreicht ✓“ im Kopf, grüner Strahl, beschriftete Zahlen unter dem Strahl (Start/Boden · vorher → jetzt · Ziel) */
+  .ab2-ok{display:inline-block;margin-top:6px;font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;color:var(--k-gut);background:color-mix(in srgb,var(--k-gut) 14%,transparent)}
+  .ab2-zk em.gut{color:var(--k-gut)}
+  .ab2-bar.gut > i{background:var(--k-gut)} .ab2-bar.gut > b{background:var(--k-gut);opacity:.25}
+  .ab2-bar > s.leise{opacity:.3}
+  .ab2-ach3 > span{display:flex;flex-direction:column;gap:1px;color:var(--k-text);font-weight:550}
+  .ab2-ach3 > span:nth-child(2){text-align:center;align-items:center} .ab2-ach3 > span:last-child{text-align:right;align-items:flex-end}
+  .ab2-ach3 em{font-style:normal;white-space:nowrap}
+  .ab2-ach3 small{font-size:9.5px;font-weight:500;color:var(--k-sub);text-transform:uppercase;letter-spacing:.4px}
   .ab2-tage{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
   .ab2-tage i{width:11px;height:11px;border-radius:50%;background:var(--k-pille)}
   .ab2-tage i.an{background:var(--k-lila)}
@@ -38521,7 +38530,7 @@
     // Antwortet der frische nicht (null), bleibt ein gemerkter Stand stehen statt „nicht lesbar“
     { const pc = document.getElementById('mwd-erl-pcheck')
       if(pc){
-        const gem = _wpFcfd && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id) : null
+        const gem = _wpFcfd && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id, Date.parse(pw.ended_at || '') || 0) : null
         _mwdErlU = gem; pc.hidden = !_wpFcfd
         if(!_wpFcfd) pc.innerHTML = ''
         else if(gem) mwdErlPcheckZeichnen()
@@ -38603,6 +38612,14 @@
   window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
   window._mklWdErledigtOeffnen = mklWdErledigtOeffnen   // Test-Haken (Stub, 20.10.2026: Vorbelegung „geblowt" ohne Login prüfen)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
+  // AP3: Ziel-Zeile des gelesenen Stands ✓? → true/false; ohne gelesenen Stand false (keine Karte). Prüfer S2: nur das Server-Urteil — Railway rechnet den Gewinn
+  // aus der Balance (gewinn = Balance − Größe), eine Korrektur im Master-Feld ändert die Balance nicht (die lokale Rechnung bleibt reine Anzeige)
+  function mwdErlZielOk(){
+    if(!_mwdErlU) return false
+    if(_mwdErlU.wartet) return true
+    const z = (_mwdErlU.liste || []).find(r => r.name === 'Ziel bis Waiting')
+    return !!(z && z.st === 'ok')
+  }
   // AP2b: Checkliste aus dem zuletzt gelesenen Stand zeichnen, Ziel lokal mit dem Master-Feld (Eingabe − Vorbelegung) — nur Anzeige
   function mwdErlPcheckZeichnen(){
     const pc = document.getElementById('mwd-erl-pcheck'); if(!pc || pc.hidden) return
@@ -38654,6 +38671,9 @@
     const plQuelleVor = plHand ? null : _mwdErlVorQuelle   // AB3b: unverändert übernommener Vortrag → 'balance_vortrag'
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
     const ab2Info = (still || !['none', 'waiting', 'passed'].includes(kontoStatus)) ? null : _mwdErlAb2   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
+    // AP3 (Finn 11.11.2026: „Dieses Ding soll nicht jedes Mal kommen … sondern nur, wenn ich das Ziel erreicht habe“): Ziel nach diesem Trade aus der Checkliste
+    // im Popup (gelesener Stand + Eingabe im Master-Feld, wie sie Finn gerade sah) bzw. Waiting/bestanden gewählt — sonst keine Karte, nur der kleine Hinweis
+    const ab2ZielOk = kontoStatus === 'waiting' || kontoStatus === 'passed' || mwdErlZielOk()
     const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
     const stillAbhak = _mwdErlChallenge   // AB2c: Challenge — keine „Erledigt"-Toasts (Fehler bleiben rot)
     const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
@@ -38667,7 +38687,8 @@
     // AB2 (Finn 05.11.2026): Abhak-Strahl sofort (Kopf + Trade-P&L), die Strahlen kommen mit dem Stand nach dem Buchen. Er zeigt „bestanden“ selbst —
     // dann ohne die Bestanden-Pille unten (geblowt hat keinen Strahl und behält sie)
     let ab2 = null
-    try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, ab2PlanBal(pid, ab2Info.base), { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden' })) : null }catch(_){ ab2 = null }
+    try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, ab2PlanBal(pid, ab2Info.base), { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden',
+                                                 zielOk: ab2ZielOk || abArt === 'bestanden', status: kontoStatus })) : null }catch(_){ ab2 = null }   // AP3
     try{ abNach(); if(!ab2) abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
@@ -41134,7 +41155,7 @@
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     try{ _wdlPaare = wdlKontoPaare(alleTrades) }catch(_){ _wdlPaare = new Map() }   // Konto-Paar Läuft ⇄ Erledigt (30.10.2026)
     // AP2b (11.11.2026): Payout-Stand der Funded-CFD-Trades in review vorladen (nur lesend), damit „Abhaken“ den Status sofort zeigt
-    try{ if(typeof window._wpVorladen === 'function') window._wpVorladen(alleTrades.filter(t => t.status === 'review' && String(t.konto_typ || '') === 'funded_cfd' && t.konto_id).map(t => t.konto_id)) }catch(_){}
+    try{ if(typeof window._wpVorladen === 'function') window._wpVorladen(alleTrades.filter(t => t.status === 'review' && String(t.konto_typ || '') === 'funded_cfd' && t.konto_id && !t.konto_waiting).map(t => t.konto_id)) }catch(_){}
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     try{ polarRadarLeiste(alleTrades) }catch(_){}   // Polar über alle IDs oben (21.10.2026), unabhängig von Modell-/ID-Filter
@@ -45762,7 +45783,9 @@
         }
         if(g != null && zi > 0) r.balken = Math.max(0, Math.min(1, g / zi))
         // AP2b: Zahlen für die lokale Rechnung beim Tippen im Master-Feld (wpLokal) — Schwelle = „zählt ab“, bei ✓ in Toleranz der Gewinn selbst
-        const swz = zl[0] === 'ok' ? Math.min(zi, g) : ((String(ab.fehlt_text || '').match(/zählt ab ([−+-]?[\d.,]+) \$/) || [])[1])
+        // Prüfer S4: im ✓-Fall die Schwelle wie app.py fcp_ziel_schwelle (Ziel × (1 − Toleranz), Standard 10 %, On Demand 0 %), höchstens der Gewinn selbst
+        const tp = Number(d && d.ziel_toleranz && d.ziel_toleranz.pct_einstellung), tpz = d && d.on_demand ? 0 : (isFinite(tp) && tp >= 0 && tp <= 50 ? tp : 10)
+        const swz = zl[0] === 'ok' ? (zi != null && g != null ? Math.min(zi * (1 - tpz / 100), g) : zi) : ((String(ab.fehlt_text || '').match(/zählt ab ([−+-]?[\d.,]+) \$/) || [])[1])
         r.zahlen = { g, zi, sw: typeof swz === 'number' ? swz : (swz != null ? zahl(swz) : zi), zTxt }
       } else r.gross = w || '—'
       z.push(r)
@@ -45799,7 +45822,7 @@
     const fehlt = (u.liste || []).filter(r => r.st === 'nein').map(r => r.titel || r.name)
     const erg = u.wartet ? '<div class="wpck-erg leise">Konto steht schon auf Waiting for Payout</div>'
       : (u.bereit && !fehlt.length) ? '<div class="wpck-erg ja">✓ Alles erfüllt → Konto jetzt zu Waiting for Payout</div>'
-      : `<div class="wpck-erg nein">Noch nicht fertig${fehlt.length ? ': ' + escapeHtml(fehlt.join(', ')) : u.fehltText ? ': ' + escapeHtml(u.fehltText) : ''} — Konto bleibt</div>`
+      : `<div class="wpck-erg nein">Noch nicht fertig${fehlt.length ? ': ' + escapeHtml(fehlt.join(', ')) : (u.fehltText && !(u.liste || []).length) ? ': ' + escapeHtml(u.fehltText) : ''} — Konto bleibt</div>`
     return zeilen + erg
   }
   window._wpChecklisteHtml = wpChecklisteHtml   // Test-Haken
@@ -45808,7 +45831,7 @@
    * das Popup zeigt den gemerkten Stand sofort (wpGemerkt, bis 30 min) und zieht den frischen still nach. Ohne gemerkten Stand: Platzhalter in Endgröße.
    * Nur Anzeige — die Vorauswahl („Waiting“) kommt weiter allein aus der frischen Antwort (mwdErlWpAnwenden). */
   const WP_VORLADEN_MS = 60000, WP_GEMERKT_MS = 30 * 60000
-  const _wpVl = new Set()
+  const _wpVl = new Set(), _wpVlFehl = {}   // Prüfer S1: Fehlversuch je Konto (Zeit) — 60 s Pause, sonst feuert jeder Radar-Takt neu auf ein langsames Railway
   function wpAusD(d){
     const ab = d && d.abhak
     if(!ab || String(d.typ || '') !== 'funded_cfd') return null
@@ -45816,18 +45839,18 @@
     return { bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
              grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
   }
-  function wpGemerkt(id){
+  function wpGemerkt(id, nachMs){   // nachMs: nur ein Stand, der nach dem Trade-Ende gelesen wurde (Prüfer: die Konto-Seite kann ihn vorher geschrieben haben)
     const c = _k1.cache[String(id || '')]
-    return (c && c.d && Date.now() - c.at < WP_GEMERKT_MS) ? wpAusD(c.d) : null
+    return (c && c.d && Date.now() - c.at < WP_GEMERKT_MS && !(Number(nachMs) > c.at)) ? wpAusD(c.d) : null
   }
   window._wpGemerkt = wpGemerkt
   function wpVorladen(ids){
     let n = 0
     for(const id of new Set((ids || []).map(String).filter(Boolean))){
       const c = _k1.cache[id]
-      if(_wpVl.has(id) || (c && c.d && Date.now() - c.at < WP_VORLADEN_MS)) continue
+      if(_wpVl.has(id) || (c && c.d && Date.now() - c.at < WP_VORLADEN_MS) || Date.now() - (_wpVlFehl[id] || 0) < WP_VORLADEN_MS) continue
       if(++n > 6) break
-      _wpVl.add(id); wpUrteil(id).finally(() => _wpVl.delete(id))
+      _wpVl.add(id); wpUrteil(id).then(u => { if(u) delete _wpVlFehl[id]; else _wpVlFehl[id] = Date.now() }, () => { _wpVlFehl[id] = Date.now() }).finally(() => _wpVl.delete(id))
     }
   }
   window._wpVorladen = wpVorladen
@@ -46047,6 +46070,7 @@
   }
   function ab2Start(info){
     if(!info || !info.konto_id || String(info.typ || '') !== 'funded_cfd') return null   // AB2c: nur Funded CFD (Aufrufer prüfen ab2Gilt)
+    if(info.zielOk !== true) return null   // AP3 (Finn 11.11.2026): nur, wenn das Ziel nach dem Trade erreicht ist — sonst der kleine Hinweis des Aufrufers
     const nr = ++_ab2Nr
     const mpl = ab2Num(info.mpl)
     const art = 'Funded CFD'
@@ -46066,8 +46090,8 @@
     liste.querySelectorAll('.ab2-eintrag').forEach(x => { if(x.dataset.konto === String(info.konto_id)) x.remove() })   // dasselbe Konto noch einmal → nur die neue Zeile
     const e = document.createElement('div')
     e.className = 'ab2-eintrag'; e.dataset.konto = String(info.konto_id); e.dataset.nr = String(nr)
-    e.innerHTML = `<div class="ab2-kopf"><div><b>${escapeHtml(String(info.name || 'Konto'))}</b><small data-ab2-art>${escapeHtml([info.unter, art].filter(Boolean).join(' · '))}`
-      + `${info.bestanden ? ' · bestanden' : ''}</small></div>`
+    e.innerHTML = `<div class="ab2-kopf"><div><b>${escapeHtml(String(info.name || 'Konto'))}</b><small data-ab2-art>${escapeHtml([info.unter, art].filter(Boolean).join(' · '))}</small>`
+      + `<span class="ab2-ok">${info.bestanden ? '✓ Phase bestanden' : '✓ Ziel erreicht'}</span></div>`   // AP3
       + (mpl == null ? '' : `<div class="ab2-pl ${mpl < 0 ? 'rot' : mpl > 0 ? 'gut' : ''}"><span data-ab2-z data-von="0" data-bis="${mpl}" data-fmt="pl">${escapeHtml(_ab2Fmt.pl(mpl))}</span><small>Trade</small></div>`) + '</div>'
       + '<div data-ab2-inhalt></div><div class="ab2-fuss"><span data-ab2-fuss>wird gebucht …</span></div>'
     liste.prepend(e)
@@ -46112,27 +46136,30 @@
     const ziel = ab2Num(ab && ab.ziel_bal) ?? ab2Num(d.chart && d.chart.ziel)
     const teile = []
     let i = 0
-    // 1 · Profit Target: Kontogröße → Ziel, blass = Stand vor dem Trade, kräftig lädt sich auf den Stand danach
+    // 1 · Profit Target (AP3, Finn 11.11.2026: „voll scheiße … schöner, klarer“; Befund Fall BG 100k …8631: „0 % geschafft“ rechnete Start → Ziel, der Balken lief
+    // ab dem Boden — beides zusammen widersprach sich, und die vier Zahlen darunter hatten keine Namen). Jetzt EIN Maßstab: Balken und Text auf derselben Strecke,
+    // jede Zahl beschriftet (Start/Boden · vorher → jetzt · Ziel), Strich = Ziel, wenn die Balance darüber liegt. Zahlen weiter nur aus /konto-ziele + Plan.
     if(bal != null && start != null && ziel != null && ziel > start){
       const spanne = ziel - start, vor = ab2Num(info.start) ?? (bal - mpl)   // AB2b: Plan-Start, sonst nach − Trade-P&L
       const zk = kach('ziel')
-      const erreicht = !!info.bestanden || (ab ? !!ab.erreicht : !!(zk && zk.pill && zk.pill[0] === 'Erreicht')) || bal >= ziel - 0.005
-      const rest = Math.max(0, ziel - bal), restVor = Math.max(0, ziel - vor)
-      // MASSSTAB AB DEM BODEN (AB2c, Finn: „bei diesem Popup passiert einfach gar nichts" — Fall Jacob 95.683 → 93.643 bei Start 100.000: vorher und nachher
-      // lagen unter dem Start, beide Balken standen auf 0). Liegt ein Stand unter dem Start und kennt /konto-ziele den Boden (chart.boden), läuft der
-      // Strahl vom Boden zum Ziel, der Start ist ein Strich — so bewegt er sich bei jedem Trade sichtbar. Sonst wie bisher Start → Ziel.
+      // Prüfer S2: der frische Stand entscheidet (nicht info.zielOk) — sagt er „nicht erreicht“, zeigt die Karte „noch X bis Ziel“ und nimmt die Pille weg
+      const erreicht = !!info.bestanden || info.status === 'waiting' || (ab ? !!ab.erreicht : !!(zk && zk.pill && zk.pill[0] === 'Erreicht')) || bal >= ziel - 0.005
+      if(!erreicht) k.querySelector('.ab2-ok')?.remove()
+      const rest = Math.max(0, ziel - bal)
       const boden = ab2Num(d.chart && d.chart.boden)
-      // links bis zum Boden, höchstens ein Viertel der Ziel-Spanne unter dem tieferen Stand (sonst wäre der Weg zum Ziel nur ein Rest am rechten Rand)
+      // links: Start; liegt ein Stand darunter (Konto im Minus), ab dem Boden bzw. höchstens ein Viertel der Ziel-Spanne unter dem tieferen Stand (AB2c)
       const lo = (boden != null && boden < start && Math.min(vor, bal) < start) ? Math.max(boden, Math.min(vor, bal) - spanne * 0.25) : start
-      const breite = ziel - lo
-      const geschafft = Math.max(0, 1 - rest / spanne)
-      const rechts = erreicht ? `Ziel ${escapeHtml(ab2Usd(ziel))} erreicht`
-        : `noch <span data-ab2-z data-von="${restVor}" data-bis="${rest}" data-ab="${300 + (i * 160)}">${escapeHtml(ab2Usd(rest))}</span> · ${escapeHtml(ab2Pct(geschafft))} geschafft`
-      teile.push(`<div class="ab2-block" style="--i:${i}"><div class="ab2-zk"><span>Profit Target</span><em>${rechts}</em></div>`
-        + `<div class="ab2-bar" style="--v:${ab2Fr((vor - lo) / breite)};--n:${erreicht ? 1 : ab2Fr((bal - lo) / breite)}"><b></b><i></i>`
-        + (lo < start ? `<s style="left:${(100 * (start - lo) / breite).toFixed(2)}%" title="Start ${escapeHtml(ab2Usd(start))}"></s>` : '') + '</div>'
-        + `<div class="ab2-ach"><span>${lo < start ? (boden != null && lo <= boden + 0.5 ? 'Boden ' : '') + escapeHtml(ab2Usd(lo)) : escapeHtml(ab2Usd(start))}</span>`
-        + `<span>${escapeHtml(ab2Usd(vor))} → <span data-ab2-z data-von="${vor}" data-bis="${bal}" data-ab="${300 + (i * 160)}">${escapeHtml(ab2Usd(bal))}</span></span><span>${escapeHtml(ab2Usd(ziel))}</span></div></div>`)
+      const hi = Math.max(ziel, bal, vor), breite = hi - lo
+      const pos = v => ab2Fr((v - lo) / breite)
+      const loTxt = lo < start ? ((boden != null && lo <= boden + 0.5) ? 'Boden ' : '') + ab2Usd(lo) : 'Start ' + ab2Usd(start)
+      const rechts = erreicht ? (bal > ziel + 0.5 ? `+${escapeHtml(ab2Usd(bal - ziel))} über Ziel` : 'erreicht') : `noch ${escapeHtml(ab2Usd(rest))} bis Ziel`
+      teile.push(`<div class="ab2-block" style="--i:${i}"><div class="ab2-zk"><span>Profit Target</span><em class="${erreicht ? 'gut' : ''}">${rechts}</em></div>`
+        + `<div class="ab2-bar${erreicht ? ' gut' : ''}" style="--v:${pos(vor)};--n:${pos(bal)}"><b></b><i></i>`
+        + (hi > ziel + 0.5 ? `<s style="left:${(100 * (ziel - lo) / breite).toFixed(2)}%" title="Ziel ${escapeHtml(ab2Usd(ziel))}"></s>` : '')
+        + (lo < start ? `<s class="leise" style="left:${(100 * (start - lo) / breite).toFixed(2)}%" title="Start ${escapeHtml(ab2Usd(start))}"></s>` : '') + '</div>'
+        + `<div class="ab2-ach ab2-ach3"><span><small>${lo < start ? (loTxt.startsWith('Boden') ? 'Boden' : 'Skala ab') : 'Start'}</small><em>${escapeHtml(ab2Usd(lo))}</em></span>`
+        + `<span><small>vorher → jetzt</small><em>${escapeHtml(ab2Usd(vor))} → <span data-ab2-z data-von="${vor}" data-bis="${bal}" data-ab="${300 + (i * 160)}">${escapeHtml(ab2Usd(bal))}</span></em></span>`
+        + `<span><small>Ziel</small><em>${escapeHtml(ab2Usd(ziel))}</em></span></div></div>`)
       i++
     }
     // 2 · Consistency: Skala bis 1,5 × Grenze (wie die K1-Kachel), Strich = Grenze
@@ -46174,15 +46201,20 @@
     // 4 · Payout (Funded CFD) bzw. Phase (Challenge) — eine Zeile
     if(ab){
       const nx = ab.naechster
-      const txt = ab.wartet ? '⏳ Waiting for Payout' : ab.bereit ? 'Payout bereit' : (nx && nx.aktion === 'planen' && nx.tp) ? `nächster Trade ≈ ${ab2Usd(nx.tp)}` : '—'
-      teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Payout${d.urteil && d.urteil.sub ? ` <small>${escapeHtml(d.urteil.sub)}</small>` : ''}</span>`
+      // AP3: was als Nächstes passiert — Waiting / Nachfolger / Payout bereit / was für den Payout noch fehlt (statt „nächster Trade ≈ …“)
+      const cn = ab.cons, gtn = Array.isArray(ab.gewinntage) ? ab.gewinntage : null
+      const fehltN = [cn && cn.ok === false ? `Consistency ${ab2Pct(cn.anteil, true)} > ${ab2Pct(Number(cn.p) / 100)}` : '', gtn && gtn[0] < gtn[1] ? `Gewinntage ${gtn[0]}/${gtn[1]}` : ''].filter(Boolean)
+      const txt = info.bestanden ? '✅ Nachfolger anlegen' : (ab.wartet || info.status === 'waiting') ? '⏳ geht auf Waiting for Payout' : ab.bereit ? 'Payout bereit'
+        : fehltN.length ? 'fehlt noch: ' + fehltN.join(' · ') : (nx && nx.aktion === 'planen' && nx.tp) ? `nächster Trade ≈ ${ab2Usd(nx.tp)}` : '—'
+      teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Als Nächstes${d.urteil && d.urteil.sub ? ` <small>${escapeHtml(d.urteil.sub)}</small>` : ''}</span>`
         + `<em${nx && nx.grund && !ab.bereit ? ` title="${escapeHtml(String(nx.grund))}"` : ''}>${escapeHtml(txt)}</em></div></div>`)
     }
     const inhalt = k.querySelector('[data-ab2-inhalt]'); if(inhalt){ inhalt.innerHTML = teile.join(''); ab2Zaehlen(inhalt) }   // AB2c: Zahlen zählen mit dem Strahl
     // Knopf „→ Waiting for Payout" — dieselbe Regel wie AB1: nur Funded CFD, Ziel UND Consistency erfüllt, eigenes Konto oder Radar-Kontext
     const acc = (accounts || []).find(a => String(a.id) === id)
     const radarOk = !!(radar && radar.planId && radar.mpl != null && isFinite(Number(radar.mpl)))
-    const knopf = typ === 'funded_cfd' && !!(ab && ab.bereit && !ab.wartet) && (acc ? (acc.type === 'funded_cfd' && !acc.waitingPayoutSince) : radarOk)
+    const knopf = typ === 'funded_cfd' && !!(ab && ab.bereit && !ab.wartet) && info.status !== 'waiting' && (acc ?   // AP3: Waiting schon gewählt → kein zweiter Knopf
+       (acc.type === 'funded_cfd' && !acc.waitingPayoutSince) : radarOk)
     if(knopf){
       k.insertAdjacentHTML('beforeend', '<button type="button" class="btn btn-primary" data-ab2-wartet>→ Waiting for Payout</button>')
       const b = k.querySelector('[data-ab2-wartet]')
@@ -58550,7 +58582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2182'
+  const OS_TAB_BUILD = '2026-09-22.2183'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80417,9 +80449,14 @@
       // (bestanden öffnet hier den Nachfolger-Assistenten). Gebucht ist schon — die Karte holt nur noch den Stand. Seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
       if(masterAcc && ab2Gilt(masterAcc.type, p.mt5Baseline) && statusChoice === 'none' && !blown){
         try{
-          const h = ab2Start(Object.assign({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null },
+          // AP3 (Finn 11.11.2026): Karte nur, wenn das Ziel nach dem Trade erreicht ist (Checkliste des Dialogs = gemerkter /konto-ziele-Stand); sonst kleiner Hinweis
+          const _gu = typeof window._wpGemerkt === 'function' ? window._wpGemerkt(masterAcc.id) : null
+          const _zr = ((_gu && _gu.liste) || []).find(r => r.name === 'Ziel bis Waiting')
+          const h = ab2Start(Object.assign({ konto_id: masterAcc.id, typ: masterAcc.type, name: masterAcc.name || masterAcc.firm || 'Konto', unter: masterAcc.firm || '', mpl: isFinite(mPl) ? mPl : null,
+                                             zielOk: !!(_gu && (_gu.wartet || (_zr && _zr.st === 'ok'))), status: 'none' },
                                            ab2PlanBal(p.id, p.mt5Baseline)))   // AB2b: Stand vor/nach diesem Trade aus dem Plan
           if(h) ab2Fertig(h, 'gespeichert', null)
+          else if(!(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked) && typeof atToast === 'function') atToast('✓ Erledigt gespeichert', 'ok')   // Prüfer S3: nie über eine Umstell-Meldung
         }catch(_){}
       }
 
