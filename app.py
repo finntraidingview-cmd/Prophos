@@ -12997,7 +12997,119 @@ def wd_sl_wuerfel_regel(roh):
         summe += a
     if not stufen or abs(summe - 100.0) > 1e-6:
         return _wd_sl_std(), "standard"
-    return {"an": True, "stufen": stufen}, "db"
+    out = {"an": True, "stufen": stufen}
+    fest = wd_sl_firmen_fest(roh.get("firmen")) if roh.get("firmen") else {}   # FT2: nur mit Eintrag (ältere Selftest-Lader kennen die Helfer nicht)
+    if fest:
+        out["firmen"] = fest
+    return out, "db"
+
+
+# FESTER SL JE FIRMA (FT2, Finn 11.11.2026 21:05 zu FTMO Futures: „Bei Winning Days … SL 750 bis 850 … beim Winning-Day-Farm aufpassen, dass wir auch wieder
+# dieses Daily Loss mit haben, was ein Hard Breach ist“): wd_farmer_regeln.sl_wuerfel.firmen = {Farmer-Schlüssel (fdp_wd_schluessel): {usd: [von, bis]}}. Für
+# diese Firma gilt statt der Prozent-Stufen IMMER ein SL, $ gleichverteilt in [von, bis] — höchstens Puffer − WD_SL_FEST_LIQ_PUFFER (Puffer = dieselbe Rechnung wie
+# der Würfel: hf_wd_master_verlust, mit liq_regeln-Zeile „tagesstart“ der Abstand zum Daily Loss ab Tagesstart). Ist der Puffer unbekannt oder bleibt nach dem
+# Kappen weniger als WD_SL_FEST_MIN_USD, wird der Trade NICHT geplant (sperre, Grund im POST-Ergebnis) — ohne SL könnte er die harte Tagesgrenze reißen.
+# Kaputter Eintrag (von > bis, ≤ 0, keine Zahl) → diese Firma fällt auf die Stufen zurück; andere Firmen sind nicht betroffen.
+WD_SL_FEST_LIQ_PUFFER = 50.0    # wie FDP_LIQ_PUFFER: nie genau an die Grenze (Schlupf am Fill)
+WD_SL_FEST_MIN_USD = 100.0      # darunter kein Plan: ein SL so nah am Einstieg wäre nur noch Rauschen
+
+
+def wd_sl_firmen_fest(roh):
+    """REIN RECHNEND (testbar, FT2): sl_wuerfel.firmen → {schlüssel: {"usd": [von, bis]}} nur mit gültigen Einträgen (0 < von ≤ bis), sonst {}."""
+    out = {}
+    for k, v in (roh.items() if isinstance(roh, dict) else ()):
+        b = v.get("usd") if isinstance(v, dict) else None
+        if not isinstance(b, (list, tuple)) or len(b) != 2 or any(isinstance(x, bool) for x in b):
+            continue
+        lo, hi = _wd_num(b[0]), _wd_num(b[1])
+        if lo is None or hi is None or not (0 < lo <= hi):
+            continue
+        out[str(k)] = {"usd": [float(lo), float(hi)]}
+    return out
+
+
+_wd_sl_fest_cache = {"wert": None, "at": 0.0}
+WD_SL_FEST_ALT_S = 3600     # Lesefehler: der letzte gute Stand gilt bis zu 1 h (danach {} — der DB-Riegel trade_plans_wd_sl_pflicht hält den Start trotzdem)
+
+
+def _wd_sl_fest_lesen():
+    """wd_farmer_regeln.sl_wuerfel.firmen → {schlüssel: {"usd": [von, bis]}} — UNABHÄNGIG von sl_wuerfel.an und den Stufen (Prüfer FT2 MUSS 5: „SL immer“ darf
+    nicht am globalen Schalter hängen). Lesefehler → letzter guter Stand (≤ WD_SL_FEST_ALT_S), sonst {}."""
+    try:
+        rows = sb_select("wd_farmer_regeln", {"select": "sl_wuerfel", "id": "eq.1"}) or []
+        roh = rows[0].get("sl_wuerfel") if rows else None
+        if isinstance(roh, str):
+            roh = json.loads(roh)
+        wert = wd_sl_firmen_fest((roh or {}).get("firmen") if isinstance(roh, dict) else None)
+        _wd_sl_fest_cache.update(wert=wert, at=time.time())
+        return wert
+    except Exception as e:
+        print(f"[wd-sl-fest] ⚠️ nicht lesbar ({type(e).__name__}) — letzter Stand", flush=True)
+        if _wd_sl_fest_cache["wert"] is not None and time.time() - _wd_sl_fest_cache["at"] <= WD_SL_FEST_ALT_S:
+            return _wd_sl_fest_cache["wert"]
+        return {}
+
+
+def wd_sl_fest_schluessel(fest, acc):
+    """REIN (FT2): feste Spanne für dieses Konto oder None — Schlüssel wie der Farmer (fdp_wd_schluessel, Größe aus dem Namen)."""
+    if not fest or not acc:
+        return None
+    return fest.get(fdp_wd_schluessel(acc.get("firm"), _wd_konto_groesse(acc)))
+
+
+def wd_sl_fest_fuer_plan(spanne, plan, acc, liq_regeln, fruehere, rnd=None):
+    """REIN RECHNEND (testbar, FT2 + Prüfer MUSS 1/SOLLTE 1): fester SL eines WD-Plans — FAIL-CLOSED. Jede Unsicherheit → sperre (kein Plan bzw. kein Start):
+    Konto nicht gelesen, liq_regeln fehlen, Balance seit dem letzten Trade nicht nachgelesen, ein früherer Trade DESSELBEN CME-Tags ohne Start-Balance (dann ist
+    der Tagesstart unbekannt und das Daily Loss nicht sicher messbar), Puffer unbekannt oder zu klein (wd_sl_fest). sperre_art 'daten' (nächster Takt versucht es
+    wieder) | 'puffer' (heute nichts mehr). Sonst wie wd_sl_fuer_plan: Puffer aus hf_wd_master_verlust (Tagesstart → Tagesgrenze)."""
+    lo, hi = float(spanne[0]), float(spanne[1])
+
+    def zu(grund, art="daten"):
+        return {"ohne": True, "sperre": True, "sperre_art": art, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None,
+                "regel": "sl_fest", "spanne": [lo, hi], "grund": f"fester SL {lo:.0f}–{hi:.0f} $: {grund} — kein Plan (Daily Loss = Hard Breach)"}
+    if not acc:
+        return zu("Konto-Daten nicht lesbar")
+    if not liq_regeln:
+        return zu("liq_regeln nicht geladen")
+    bal, bal_grund = wd_sl_balance(acc, fruehere)
+    if bal is None:
+        return zu(bal_grund or "keine Balance")
+    st = str((plan or {}).get("started_at") or (plan or {}).get("start_um") or "")
+    tag = _cme_handelstag(st) if st else None
+    aid = str(acc.get("id") or "")
+    if tag and any(str(f.get("master_account_id") or "") == aid and f.get("started_at") and str(f["started_at"]) < st and _cme_handelstag(f["started_at"]) == tag
+                   and _wd_num(f.get("bal_start")) is None for f in fruehere or ()):
+        return zu("früherer Trade heute ohne Start-Balance — Tagesstart unbekannt")
+    acc2 = dict(acc, tv_balance=bal)
+    mv = hf_wd_master_verlust(liq_regeln, acc2, dict(plan or {}, konto_typ="winning_days", winning_day=True), None, fruehere)
+    puffer = _wd_num(mv.get("usd"))
+    liq = round(bal - puffer, 2) if puffer is not None else None
+    w = wd_sl_fest([lo, hi], puffer, bal, liq, rnd=rnd, grund=mv.get("grund"))
+    if w.get("sperre"):
+        w["sperre_art"] = "daten" if puffer is None else "puffer"
+    return w
+
+
+def wd_sl_fest(spanne, puffer, balance=None, liq_balance=None, rnd=None, grund=None):
+    """REIN RECHNEND (testbar, FT2): fester SL einer Firma → mt5_baseline.wd_sl. $ gleichverteilt in spanne [von, bis] (ganze $), gekappt auf
+    Puffer − WD_SL_FEST_LIQ_PUFFER. Puffer unbekannt/≤ 0 oder gekappter SL < WD_SL_FEST_MIN_USD → {ohne: True, sperre: True, grund} (kein Plan)."""
+    rnd = rnd or random
+    lo, hi = float(spanne[0]), float(spanne[1])
+    p = _wd_num(puffer)
+    out = {"ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": (round(p, 2) if p is not None else None), "balance": _wd_num(balance),
+           "liq_balance": _wd_num(liq_balance), "regel": "sl_fest", "spanne": [lo, hi]}
+    if p is None or p <= 0:
+        return dict(out, sperre=True, grund=f"fester SL {lo:.0f}–{hi:.0f} $: Puffer bis zur Tagesgrenze unbekannt ({grund or 'kein gültiger Puffer'}) — kein Plan")
+    usd = int(lo + rnd.random() * (hi - lo) + 0.5)
+    usd = min(max(usd, int(lo)), int(hi))
+    deckel = int(p - WD_SL_FEST_LIQ_PUFFER)
+    gekappt = usd > deckel
+    if gekappt:
+        usd = deckel
+    if usd < WD_SL_FEST_MIN_USD:
+        return dict(out, sperre=True, grund=f"fester SL {lo:.0f}–{hi:.0f} $: nur {p:,.0f} $ bis zur Tagesgrenze — kein Plan (Daily Loss = Hard Breach)".replace(",", "."))
+    return dict(out, ohne=False, usd=usd, gekappt=gekappt,
+                grund=(f"auf {usd} $ gekappt (Puffer {p:,.0f} $ − {WD_SL_FEST_LIQ_PUFFER:.0f} $)".replace(",", ".") if gekappt else None))
 
 
 def wd_sl_wuerfeln(regel, puffer, balance=None, liq_balance=None, rnd=None, grund=None):
@@ -13167,11 +13279,12 @@ def _wd_sl_wuerfel_lesen():
     return wd_sl_wuerfel_regel(rows[0].get("sl_wuerfel") if rows else None)
 
 
-def _wd_sl_kontext(mids):
+def _wd_sl_kontext(mids, mit_fest=False):
     """Einmal je POST /admin/wd-plaene: (regel, konten {id: acc}, liq_regeln, fruehere). Würfel aus → (None, {}, [], []). Fehlen die Konto-Daten,
-    bleibt die Regel an und jeder Plan bekommt ohne=True mit Grund (lieber kein SL als einer ohne belegten Puffer)."""
+    bleibt die Regel an und jeder Plan bekommt ohne=True mit Grund (lieber kein SL als einer ohne belegten Puffer). mit_fest (FT2): feste SL je Firma
+    eingerichtet → Konten/Liq/Trades auch bei ausgeschaltetem Würfel laden (der feste SL sperrt ohne Daten, statt still ohne SL zu planen)."""
     regel, _q = _wd_sl_wuerfel_lesen()
-    if not regel or not mids:
+    if (not regel and not mit_fest) or not mids:
         return regel, {}, [], []
     konten = {}
     try:
@@ -13264,7 +13377,8 @@ def wd_sl_nach_tick(jetzt=None, rnd=None):
     """SL1-Takt: Rückfall-Pläne der Tabs nachwürfeln → {geaendert: [...], gewuerfelt, ohne, uebersprungen} | {aus: True}."""
     jetzt = jetzt or datetime.now(timezone.utc)
     regel, _q = _wd_sl_wuerfel_lesen()
-    if not regel:
+    fest = _wd_sl_fest_lesen() if "_wd_sl_fest_lesen" in globals() else {}   # FT2: feste SL je Firma auch bei Würfel aus; get: ältere Selftest-Lader
+    if not regel and not fest:
         return {"aus": True}
     rows = sb_select("trade_plans", {"select": "*", "status": "eq.planned", "mt5_baseline->wd_sl->>grund": f"eq.{WD_SL_RUECKFALL_GRUND}",
                                      "start_um_gestartet_at": "is.null", "started_at": "is.null",
@@ -13295,13 +13409,36 @@ def wd_sl_nach_tick(jetzt=None, rnd=None):
         if acc is None:
             out["uebersprungen"].append({"id": pid, "grund": "Konto nicht gelesen"})
             continue
-        ws, usd = wd_sl_nach_rechnen(regel, p, acc, liq, frueher, rnd=rnd, jetzt_iso=jetzt_iso)
+        _fest = wd_sl_fest_schluessel(fest, acc) if fest else None
+        if _fest:
+            # FT2 (Prüfer MUSS 3): fester SL fail-closed. Daten unklar → nichts schreiben (nächster Takt); Puffer zu klein → Grund schreiben, master_sl bleibt leer —
+            # der DB-Riegel trade_plans_wd_sl_pflicht lässt den Plan dann nicht starten
+            try:
+                ws = wd_sl_fest_fuer_plan(_fest["usd"], p, acc, liq, frueher, rnd=rnd)
+            except Exception as e:
+                out["uebersprungen"].append({"id": pid, "grund": f"fester SL: {type(e).__name__} — nächster Takt"})
+                continue
+            if ws.get("sperre") and ws.get("sperre_art") != "puffer":
+                out["uebersprungen"].append({"id": pid, "grund": ws.get("grund")})
+                continue
+            ws = dict(ws, quelle="nachgewuerfelt", nach_at=jetzt_iso)
+            usd = None if ws.get("sperre") else ws.get("usd")
+            if ws.get("sperre"):
+                # Prüfer 2 SOLLTE 2: Puffer heute zu klein → den Plan VERBRAUCHEN (Claim-Art 'verbrauch' wie „verpasst“) statt ihn ungestartet stehen zu lassen —
+                # er hielte sonst die Kette der ID (suKetteFrei) den ganzen Tag auf; der DB-Riegel lässt Verbrauchs-Claims durch
+                ws = dict(ws, verbraucht_at=jetzt_iso)
+        elif not regel:
+            continue
+        else:
+            ws, usd = wd_sl_nach_rechnen(regel, p, acc, liq, frueher, rnd=rnd, jetzt_iso=jetzt_iso)
         if not ws:
             continue
         bl = dict(p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}, wd_sl=ws)
         upd = {"mt5_baseline": bl}
         if usd:
             upd["master_sl"] = usd
+        if ws.get("verbraucht_at"):
+            upd.update(start_um_gestartet_at=ws["verbraucht_at"], start_claim_art="verbrauch")   # FT2: fester SL passt heute nicht → nie starten
         filt = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
                 "mt5_baseline->wd_sl->>grund": f"eq.{WD_SL_RUECKFALL_GRUND}"}
         if p.get("updated_at"):
@@ -15775,7 +15912,7 @@ def _wd_zahl(v):
 # Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
-WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}}   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}, "ftmo futures": 200.0}   # FT2 (Finn 11.11.2026 21:05: „5 Winning Days, je Winning Day 200+“, zählt schon in der Funded-Phase)   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
 
 
 def hedge_grund_echt(p):
@@ -16350,6 +16487,7 @@ WD_FIRMEN_REGELN_STD = {
     # Keine Kappung des Ausgleichs-TP (Consistency gilt bei LucidFlex Funded nicht, Master 10.11.2026).
     "lucid":     {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": True, "usd": 1.0, "ab_zyklus": 1}},
     "fnfutures": {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},  # noch nicht hinterlegt
+    "ftmofutures": {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},  # FT2: noch nicht hinterlegt (wie sonst)
     "topstep":   {"konsistenz": {"an": True, "pct": 40}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}},    # firm_rules.json Topstep XFA Consistency Path: bester Tag ≤ 40 %
     "sonst":     {"konsistenz": {"an": False, "pct": None}, "min_netto": {"an": False, "usd": None, "ab_zyklus": 2}}}
 
@@ -16791,15 +16929,18 @@ def wd_erl_konto_umstellen_upd(konto, ziel, jetzt_iso, heute_de):
     hier direkt zu ‚Waiting for Payout' oder ‚Winning Day' den Typ ändern kann"). Dieselben Regeln wie der Haken im Trades-Dialog
     (tcKontoUmPrepare) und dieselben Felder wie accWartetUmstellen/accWdUmstellen im Frontend — nur serverseitig, weil der Radar auch
     fremde IDs abhakt (RLS: der Mac schreibt nur eigene Konten).
-    ziel 'waiting'      → nur Funded CFD ohne waiting_payout_since: {waiting_payout_since: jetzt}
-    ziel 'winning_days' → nur Funded einer Futures-Firma: {account_type: 'winning_days', notes: ohne alte „Winning Days seit …" + neue Zeile}
+    ziel 'waiting'      → Funded CFD oder (FT2/AP6a, 11.11.2026) Winning Days ohne waiting_payout_since: {waiting_payout_since: jetzt}
+    ziel 'winning_days' → nur Funded einer Futures-Firma: {account_type: 'winning_days', notes: ohne alte „Winning Days seit …" + neue Zeile,
+                          name „→ Funded“ → „→ Winning Days“ wie fdp_planen (AP6b)}
     -> (upd | None, grund)"""
     if not konto:
         return None, "Konto nicht gefunden"
     typ = str(konto.get("account_type") or "").strip().lower()
     if ziel == "waiting":
-        if typ != "funded_cfd":
-            return None, "nur bei Funded CFD"
+        # AP6a (S1 11.11.2026, Master FT2): auch Winning Days — WD-Ziel erreicht → Waiting for Payout; der Farmer plant das Konto dann nicht mehr
+        # (POST /admin/wd-plaene, WD_GRUND_WAITING), die Payout-Anfrage leert das Feld wieder (payout_anfrage_konto_felder)
+        if typ not in ("funded_cfd", "winning_days"):
+            return None, "nur bei Funded CFD oder Winning Days"
         if str(konto.get("waiting_payout_since") or "").strip():
             return None, "steht schon auf Waiting for Payout"
         return {"waiting_payout_since": jetzt_iso}, ""
@@ -16808,7 +16949,10 @@ def wd_erl_konto_umstellen_upd(konto, ziel, jetzt_iso, heute_de):
             return None, "nur bei Funded einer Futures-Firma"
         alt = [z for z in str(konto.get("notes") or "").split("\n") if not z.strip().startswith("Winning Days seit ")]
         # wd_farm (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden“), wie der DB-Trigger
-        return {"account_type": "winning_days", "wd_farm": True, "notes": "\n".join(alt + [f"Winning Days seit {heute_de}"]).strip() or None}, ""
+        upd = {"account_type": "winning_days", "wd_farm": True, "notes": "\n".join(alt + [f"Winning Days seit {heute_de}"]).strip() or None}
+        if "→ Funded" in str(konto.get("name") or ""):
+            upd["name"] = str(konto["name"]).replace("→ Funded", "→ Winning Days")   # AP6b: wie fdp_planen beim „Ziel erreicht“
+        return upd, ""
     return None, "Ziel unbekannt"
 
 
@@ -17333,6 +17477,9 @@ def wd_cme_tag_start(tag):
 # Rein: nur Railway hebt den Hinweis auf — heute mit eigener Startzeit (nach_start, jetzt + 10–20 min), solange das Fenster (wd_farmer_regeln.bis_hhmm)
 # offen ist und heute auf dem Konto nichts gestartet/geplant ist; sonst „ab morgen". Die PC-Tabs setzen den Hinweis selbst nur (wdAbgleich), nie zurück. ══
 WD_HINWEIS_PAYOUT = "Payout angefragt – wartet auf Auszahlung"
+WD_GRUND_WAITING = "Waiting for Payout — Payout anfragen, danach plant der Farmer wieder"   # FT2/AP6a (11.11.2026)
+# FT2 (Prüfer 2 SOLLTE 4): fester SL wegen fehlender Daten gesperrt — FESTER Text, steht in WD_AUTO_HINWEISE (prophos.html): der nächste Lauf versucht es wieder
+WD_GRUND_SL_DATEN = "fester SL: Daten fehlen (Balance, Tagesstart oder Liq) – nächster Lauf versucht es wieder"
 # SA1c (S6-Hinweis zu SA1 #4, Master 05.11.2026): ist pending_payouts beim Anlegen nicht lesbar, legt POST /admin/wd-plaene für KEIN Konto an (fail-closed) —
 # der Tab prüft seit SA1 #4 nur noch den Zeilen-Hinweis. Der Grund ist vorübergehend: der Tab (WD_AUTO_HINWEISE) nimmt das Konto beim nächsten Lauf wieder mit.
 WD_GRUND_PAYOUT_UNLESBAR = "Payout-Stand nicht lesbar – nächster Lauf versucht es wieder"
@@ -17837,12 +17984,16 @@ def admin_wd_plaene():
                 except Exception as e2:
                     print(f"[wd] ⚠️ Alarm Payout unlesbar: {type(e2).__name__}", flush=True)
         # WD-SL-WÜRFEL (WS1a, 09.11.2026): Regel + Konto-/Liq-Daten einmal je Lauf; jeder Fehler hier = Würfel aus für diesen Lauf (wie bisher kein SL)
+        # FT2 (11.11.2026): feste SL je Firma (sl_wuerfel.firmen) eigens gelesen — ein Kontext-Fehler sperrt diese Firmen (sl_fest_fehler), statt ohne SL zu planen
+        sl_fest = _wd_sl_fest_lesen()
+        sl_fest_fehler = None
         try:
             sl_regel, sl_konten, sl_liq, sl_frueher = _wd_sl_kontext(
-                sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""}))
+                sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""}), mit_fest=bool(sl_fest))
         except Exception as e:
             print(f"[wd-sl-wuerfel] ⚠️ Kontext: {type(e).__name__}: {e} — Würfel in diesem Lauf aus", flush=True)
             sl_regel, sl_konten, sl_liq, sl_frueher = None, {}, [], []
+            sl_fest_fehler = f"Kontext nicht lesbar ({type(e).__name__})"
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -17853,7 +18004,7 @@ def admin_wd_plaene():
                 if not _admin_darf_uid(uid):   # Admin-Gruppen (08.10.2026): Verwalter legt nur für IDs seiner Gruppe an
                     uebersprungen.append({"master_account_id": mid, "grund": "ID nicht in deiner Gruppe"}); continue
                 # Konto muss dieser Person gehören — sonst landet ein Plan im falschen Profil
-                acc = sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{mid}"})
+                acc = sb_select("accounts", {"select": "id,user_id,name,firm,waiting_payout_since", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
                 if ap_firma_gesperrt(acc[0], sperren):
@@ -17862,6 +18013,10 @@ def admin_wd_plaene():
                     uebersprungen.append({"master_account_id": mid, "grund": WD_GRUND_PAYOUT_UNLESBAR}); continue   # SA1c fail-closed
                 if mid in po_offen:
                     uebersprungen.append({"master_account_id": mid, "grund": WD_HINWEIS_PAYOUT}); continue
+                if str(acc[0].get("waiting_payout_since") or "").strip():
+                    # FT2/AP6a (11.11.2026): WD-Ziel erreicht und beim Abhaken auf Waiting for Payout gestellt → kein weiterer WD, bis die Anfrage steht
+                    # (payout_anfrage_konto_felder leert waiting_payout_since wieder)
+                    uebersprungen.append({"master_account_id": mid, "grund": WD_GRUND_WAITING}); continue
                 offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
                                                   "status": "in.(planned,open)", "limit": "5"})
                 # 23.09.2026 (Finn: „alle Accounts sind einfach off — hat schon einen Plan"): ein Farmer-Plan eines
@@ -17914,7 +18069,22 @@ def admin_wd_plaene():
                 # einen SL aus einer anderen Regel gibt es auf diesem Weg nicht (WD_PLAN_FELDER trägt kein mt5_baseline). Würfel-Fehler → Plan wie bisher ohne SL.
                 # Recoverer (Apex-WD auf NQ) und Tradeify-Ausgleich würfeln NICHT (Master 09.11.2026 ~20:15: „bestehende Regeln nicht anfassen“, Finns
                 # Antwort steht noch aus) — sie bekommen ehrlich wd_sl ohne mit Grund; soll der Würfel dort gelten, nur diesen Zweig entfernen
-                if sl_regel and (wd_ist_recoverer_plan(body) or (r or {}).get("wd_ausgleich") is True):
+                _fest = wd_sl_fest_schluessel(sl_fest, sl_konten.get(mid) or acc[0])
+                if _fest:
+                    # FT2 FESTER SL (Finn 11.11.2026: FTMO Futures „SL 750 bis 850 … Daily Loss … Hard Breach“): vor Recoverer/Ausgleich/Würfel, unabhängig vom
+                    # globalen Schalter — jede Unsicherheit (Kontext, Konto, Liq, Balance, Tagesstart, Puffer, Rechenfehler) = kein Plan mit Grund
+                    try:
+                        wd_sl = (wd_sl_fest_fuer_plan(_fest["usd"], body, sl_konten.get(mid), sl_liq, sl_frueher) if not sl_fest_fehler
+                                 else {"ohne": True, "sperre": True, "grund": f"fester SL: {sl_fest_fehler} — kein Plan (Daily Loss = Hard Breach)"})
+                    except Exception as e:
+                        wd_sl = {"ohne": True, "sperre": True, "grund": f"fester SL: Rechenfehler ({type(e).__name__}) — kein Plan (Daily Loss = Hard Breach)"}
+                    if wd_sl.get("sperre") or not wd_sl.get("usd"):
+                        if wd_sl.get("sperre_art") != "puffer":
+                            print(f"[wd-sl-fest] {mid[:8]}: {wd_sl.get('grund')}", flush=True)
+                        uebersprungen.append({"master_account_id": mid, "grund": (wd_sl.get("grund") if wd_sl.get("sperre_art") == "puffer" else WD_GRUND_SL_DATEN)}); continue
+                    body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl=wd_sl)
+                    body["master_sl"] = wd_sl["usd"]
+                elif sl_regel and (wd_ist_recoverer_plan(body) or (r or {}).get("wd_ausgleich") is True):
                     body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_sl={
                         "ohne": True, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None, "regel": "sl_wuerfel",
                         "grund": "Recoverer — kein Würfel" if wd_ist_recoverer_plan(body) else "Ausgleich — kein Würfel"})
@@ -18417,7 +18587,7 @@ def admin_wd_plaene():
                         if not aid:
                             return {"fehler": "Konto nicht umgestellt (Plan ohne Master-Konto) — im Account von Hand umstellen"}
                         try:
-                            kr = sb_select("accounts", {"select": "id,account_type,firm,notes,waiting_payout_since", "id": f"eq.{aid}", "limit": "1"})
+                            kr = sb_select("accounts", {"select": "id,name,account_type,firm,notes,waiting_payout_since", "id": f"eq.{aid}", "limit": "1"})
                             heute_de = datetime.strptime(_berlin_heute(), "%Y-%m-%d").strftime("%d.%m.%Y")
                             k_upd, grund = wd_erl_konto_umstellen_upd(kr[0] if kr else None, konto_status, jetzt_iso, heute_de)
                             if not k_upd:
@@ -18484,7 +18654,7 @@ def admin_wd_plaene():
             # SL trägt; das GET liefert master_sl heute nicht mit). Lesefehler → master_sl ebenfalls nicht anfassen (lieber stehen lassen als löschen).
             try:
                 _ws = (sb_select("trade_plans", {"select": "ws:mt5_baseline->wd_sl", "id": f"eq.{pid}", "limit": "1"}) or [{}])[0].get("ws")
-                sl_gewuerfelt = isinstance(_ws, dict) and _ws.get("regel") == "sl_wuerfel"
+                sl_gewuerfelt = isinstance(_ws, dict) and _ws.get("regel") in ("sl_wuerfel", "sl_fest")   # FT2 (Prüfer MUSS 4): fester SL ebenso
             except Exception as e:
                 print(f"[wd-sl-wuerfel] ⚠️ PATCH {pid[:8]}: wd_sl nicht lesbar ({type(e).__name__}) — master_sl bleibt unverändert", flush=True)
                 sl_gewuerfelt = True
@@ -48965,12 +49135,14 @@ def fdp_regeln_aendern(reg, body):
 #  - TP und Kontrakte je WD-Trade: wd_farmer_regeln.vorplan.regeln.fu / .kt (Winning Days → Einstellungen → Firmen); fehlt die Firma dort, der Standard des
 #    Farmers (WD_FU_STANDARD = TP_VP_VORGABE.fu im Frontend; Lucid nimmt die Tradeify-Werte wie tpVpLucidWieTradeify)
 #  - Besonderheiten aus dem Code: Apex-Recoverer (wd_farmer_regeln.zyklus_regel, sonst WD_ZYKLUS_VORGABE), Tradeify Zyklus im Plus (TRADEIFY_ZYKLUS_*)
-WD_FU_STANDARD = {"tradeify": [270, 290], "lucid": [270, 290], "fnfutures": [270, 290], "apex": [370, 390], "apex100": [320, 340], "topstep": [220, 240], "sonst": [270, 290]}
+WD_FU_STANDARD = {"tradeify": [270, 290], "lucid": [270, 290], "fnfutures": [270, 290], "apex": [370, 390], "apex100": [320, 340], "topstep": [220, 240], "sonst": [270, 290], "ftmofutures": [220, 240]}   # FT2: FTMO Futures „TP so 220 bis 240“
 
 
 def fdp_wd_schluessel(name, groesse=None):
     """REIN RECHNEND (testbar): Firmen-Schlüssel des WD-Farmers wie tpVorplanFirmaKey im Frontend (fnfutures, apex/apex100 nach Größe, lucid, tradeify, topstep, sonst)."""
     f = str(name or "").lower()
+    if "ftmo" in f and "futur" in f:
+        return "ftmofutures"   # FT2 (11.11.2026): eigener Schlüssel wie tpVorplanFirmaKey — FTMO CFD bleibt „sonst“
     if "fundednext" in f and "futur" in f:
         return "fnfutures"
     if "apex" in f:

@@ -47,7 +47,8 @@ def main():
     upd, g = f({"account_type": "funded", "firm": "Tradeify"}, "waiting", T, H)
     check(upd is None, "Waiting nur bei Funded CFD (nicht Funded Futures)")
     upd, g = f({"account_type": "winning_days", "firm": "Tradeify"}, "waiting", T, H)
-    check(upd is None, "Waiting nicht bei Winning Days")
+    # AP6a (Master FT2, 11.11.2026): WD-Ziel erreicht → Waiting for Payout jetzt auch bei Winning Days (der Farmer überspringt das Konto, Payout-Anfrage leert es)
+    check(upd == {"waiting_payout_since": T}, "Waiting auch bei Winning Days (AP6a)")
 
     upd, g = f({"account_type": "funded", "firm": "Apex Trader", "notes": None}, "winning_days", T, H)
     check(upd == {"account_type": "winning_days", "wd_farm": True, "notes": f"Winning Days seit {H}"}, "Funded Apex → Winning Days + notes + Haken (03.11.2026)")

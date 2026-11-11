@@ -10454,6 +10454,7 @@
               <span style="margin-left:6px">Apex 150k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex-von" min="0" step="5" value="370"> – <input type="number" class="input mono vp-in" data-vp-fu="apex-bis" min="0" step="5" value="390">
               <span style="margin-left:6px">Apex 100k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex100-von" min="0" step="5" value="320"> – <input type="number" class="input mono vp-in" data-vp-fu="apex100-bis" min="0" step="5" value="340">
               <span style="margin-left:6px">Topstep</span> <input type="number" class="input mono vp-in" data-vp-fu="topstep-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="topstep-bis" min="0" step="5" value="240">
+              <span style="margin-left:6px">FTMO Futures</span> <input type="number" class="input mono vp-in" data-vp-fu="ftmofutures-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="ftmofutures-bis" min="0" step="5" value="240">
               <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
             </div>
             <div class="vp-zeile" data-vp-nur-alt><b>Funded · Slave (€)</b>
@@ -47262,6 +47263,22 @@
     return { ok: true, plan: frisch, sl: Number(frisch.masterSl) > 0 ? Number(frisch.masterSl) : 0 }
   }
   window._wdSlStartSperre = wdSlStartSperre; window._wdSlIstRueckfall = wdSlIstRueckfall   // Test-Haken
+  // FT2: { ok, grund } — WD-Plan ohne SL (sl ≤ 0) einer Firma mit festem SL → nicht senden. Schlüssel wie tpVorplanFirmaKey / app.py fdp_wd_schluessel.
+  async function wdSlFestPflicht(plan, sl){
+    if(!plan || !(typeof tpIstWdPlan === 'function' && tpIstWdPlan(plan)) || Number(sl) > 0) return { ok: true }
+    let firmen = (typeof _wd !== 'undefined' && _wd && _wd.regeln && _wd.regeln.sl_wuerfel && typeof _wd.regeln.sl_wuerfel === 'object') ? _wd.regeln.sl_wuerfel.firmen : undefined
+    if(firmen === undefined){
+      try{ const { data, error } = await supabase.from('wd_farmer_regeln').select('sl_wuerfel').eq('id', 1).maybeSingle(); if(error) throw error
+           firmen = (data && data.sl_wuerfel && typeof data.sl_wuerfel === 'object') ? (data.sl_wuerfel.firmen || null) : null }
+      catch(e){ return { ok: false, grund: 'Winning Day ohne SL: Einstellung „fester SL je Firma“ nicht lesbar (' + String((e && e.message) || e).slice(0, 60) + ')' } }
+    }
+    const k = (typeof tpVorplanFirmaKey === 'function') ? tpVorplanFirmaKey(plan.masterFirm, { name: plan.masterName }) : ''
+    const f = firmen && typeof firmen === 'object' ? firmen[k] : null
+    if(!f) return { ok: true }
+    const b = Array.isArray(f.usd) ? f.usd : []
+    return { ok: false, grund: `${plan.masterFirm || 'Firma'}: Winning Day ohne SL startet nicht (fester SL ${b[0] || '?'}–${b[1] || '?'} $, Daily Loss = Hard Breach) — Railway setzt den SL vor dem Start, sonst Plan löschen` }
+  }
+  window._wdSlFestPflicht = wdSlFestPflicht   // Test-Haken
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
   let _recKonto = null
   function recovererZeichnen(){
@@ -59667,6 +59684,11 @@
         }
       }
     }
+    // FT2 PFLICHT-SL (Prüfer 2 MUSS 1, 11.11.2026): Winning Day einer Firma mit festem SL (wd_farmer_regeln.sl_wuerfel.firmen, z. B. FTMO Futures — Daily Loss =
+    // Hard Breach) startet NIE ohne SL. Der DB-Riegel trade_plans_wd_sl_pflicht greift erst beim Claim/„open“, Hand- und Fern-Starts setzen den Claim nicht → hier
+    // hart vor dem ersten Klick. Einstellung frisch aus der DB, wenn der Tab sie nicht hat; Lesefehler bei einem WD ohne SL → nicht senden.
+    { const fp = await wdSlFestPflicht(plan, sl)
+      if(!fp.ok){ await fehler(`⛔ ${fp.grund} — nichts gesendet, Plan bleibt Geplant.`, { ok: false, code: 'wd_sl_pflicht', retry_ok: false, _nichtGesendet: true }); return } }
     _tpOrbitLaeuft = true
     sfSendetHier(plan.id)   // CL1: ab hier kann Puls klicken — nie „nichts gesendet" aus dem Speicher
     // KONTO-BELEG AUS DER ORDER (29.10.2026, Marc pc-7ftp5l 28.10. abends, Apex-Big-Trades 130ef370/744eb925/c06e02a5): die Order bewies das
@@ -73883,7 +73905,9 @@
    *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
    *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
    *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
-  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], lucid: [270, 290], fnfutures: [270, 290], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], lucid: [270, 290], fnfutures: [270, 290], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], ftmofutures: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  // ftmofutures = FTMO Futures (FT2, Finn 11.11.2026 21:05: „Winning Days, genau die gleiche Logik wie immer … TP so 220 bis 240 … je Winning Day 200+“) —
+  // eigener Schlüssel wie app.py fdp_wd_schluessel; FTMO CFD bleibt unter „sonst“
   // fnfutures = FundedNext Futures (Finn 16.10.2026: „genau gleich wie bei Tradeify“, Gewinntag 250 $) — eigener Schlüssel, damit
   // die CFD-Konten von FundedNext weiter unter „sonst“ laufen
   // Apex nach Kontogröße (17.10.2026, Finn: „Winning Days unterscheiden zwischen 150k und 100k — 100k braucht nur 300 $, 150k 350 $"):
@@ -73891,7 +73915,7 @@
   // lucid = Lucid Trading (Finn 23.10.2026: „Lucid ist 1:1 die gleichen Regeln wie Tradeify, alles ganz genau gleich“) — eigener Schlüssel
   // statt „sonst“ (MFFU & Co. bleiben dort). Solange die gespeicherten Regeln für Lucid nichts tragen, gelten die Tradeify-Werte
   // (tpVpLucidWieTradeify) — das nächste „Speichern“ im Admin schreibt sie als eigene Lucid-Werte fest.
-  const TP_VP_FIRMEN = ['tradeify', 'lucid', 'fnfutures', 'apex', 'apex100', 'topstep', 'sonst']
+  const TP_VP_FIRMEN = ['tradeify', 'lucid', 'fnfutures', 'apex', 'apex100', 'topstep', 'ftmofutures', 'sonst']
   function tpVpLucidWieTradeify(regeln){
     if(!regeln || typeof regeln !== 'object') return regeln
     const r = { ...regeln }
@@ -73913,6 +73937,7 @@
   }
   function tpVorplanFirmaKey(firm, konto){
     const f = String(firm || '').toLowerCase()
+    if(f.includes('ftmo') && f.includes('futur')) return 'ftmofutures'   // FT2 (11.11.2026): „FTMO Futures“, vor den anderen; FTMO CFD bleibt „sonst“
     if(f.includes('fundednext') && f.includes('futur')) return 'fnfutures'   // vor den anderen: „FundedNext Futures“ (16.10.2026)
     if(f.includes('apex')) return tpVpApex100(konto) ? 'apex100' : 'apex'
     if(f.includes('lucid')) return 'lucid'   // 23.10.2026: Lucid wie Tradeify, eigener Schlüssel
@@ -75187,7 +75212,8 @@
   // SA1c (05.11.2026): + „Payout-Stand nicht lesbar …" (app.py WD_GRUND_PAYOUT_UNLESBAR, POST fail-closed) — vorübergehend, beim nächsten Lauf wieder dabei
   // TW1 (11.11.2026, Prüfer MUSS): „Pause-Tag (Handels-Würfel) …“ steht bewusst NICHT hier — sonst setzte wdZeilenHeilen das Konto alle 30 s wieder aktiv und der
   // PC-Tab-Rückfall legte den Plan an. Die Tageszeile ist je Tag neu, morgen ist das Konto ohnehin wieder dabei (neu gewürfelt)
-  const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden', 'Payout-Stand nicht lesbar – nächster Lauf versucht es wieder']   // vom Server gesetzt, nicht von Finn
+  const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden', 'Payout-Stand nicht lesbar – nächster Lauf versucht es wieder',
+                            'fester SL: Daten fehlen (Balance, Tagesstart oder Liq) – nächster Lauf versucht es wieder']   // FT2: = app.py WD_GRUND_SL_DATEN   // vom Server gesetzt, nicht von Finn
   const WD_HINWEIS_PAUSE = 'Pause-Tag (Handels-Würfel) – heute kein Trade, morgen neu gewürfelt'   // = app.py TW_GRUND_WD — Schlüssel-Text, nie umbenennen
   /* HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden. Für den
    * heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht wurde, aber für die zukünftigen ja."): ein Konto, auf dem im
@@ -75615,6 +75641,8 @@
   /* ── PC-Tab: Plan für ein Konto anlegen (Rückfall, wenn der Mac es nicht konnte — z.B. Railway aus) ── */
   // extra (28.09.2026, Selbstheilung): { id, master_tp, master_contracts } — gleicher Plan mit derselben ID neu, eigener Claim wd_heil:<id>
   async function wdPlanAnlegen(acc, richtung, vp, startIso, tag, extra){
+    // AP6a (FT2, 11.11.2026): WD-Ziel erreicht und auf Waiting for Payout gestellt → kein weiterer WD (wie POST /admin/wd-plaene, WD_GRUND_WAITING)
+    if(acc && acc.waitingPayoutSince) return { fehler: 'Waiting for Payout — Payout anfragen, danach plant der Farmer wieder' }
     const sl = wdFusionGegenstueck()   // fest Fusion statt Duplikum-Slave (26.09.2026)
     const slave = sl.slave, sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx: window._fxUsdEur || 0.85, regeln: vp.regeln })
@@ -76033,7 +76061,7 @@
     box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
-  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], lucid: ['Lucid', '#e84393', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU …'] }
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], lucid: ['Lucid', '#e84393', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], ftmofutures: ['FTMO Futures', '#00a8a8', 'Gewinntag 200 $'], sonst: ['andere Firmen', '#636e72', 'MFFU …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
     const ges = konten.filter(q => tpVorplanFirmaKey(q.firm, q) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
@@ -76055,13 +76083,14 @@
     tradeify:  { konsistenz: { an: false, pct: null }, min_netto: { an: true,  usd: 1,    ab_zyklus: 2 } },
     lucid:     { konsistenz: { an: false, pct: null }, min_netto: { an: true,  usd: 1,    ab_zyklus: 1 } },
     fnfutures: { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
+    ftmofutures: { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } },
     topstep:   { konsistenz: { an: true,  pct: 40 },   min_netto: { an: false, usd: null, ab_zyklus: 2 } },
     sonst:     { konsistenz: { an: false, pct: null }, min_netto: { an: false, usd: null, ab_zyklus: 2 } } }
   const E4_QUELLE = { apex: 'firm_rules.json Apex PA: kein Tag über 50 % des Net Profit seit dem letzten Payout · Min Payout 500 $',
     apex100: 'firm_rules.json Apex PA: kein Tag über 50 % des Net Profit seit dem letzten Payout · Min Payout 500 $',
     tradeify: 'Consistency: Select Funded keine, Growth Funded 35 % (firm_rules.json) · Mindest-Gewinn: Zyklus im Plus ab dem 2. Zyklus (Finn 03.11.2026), Min Payout 250 $',
     topstep: 'firm_rules.json Topstep XFA Consistency Path: bester Tag ≤ 40 % · Mindest-Gewinn je Zyklus noch nicht hinterlegt',
-    lucid: 'Mindest-Gewinn: Zyklus im Plus in jedem Payout-Zyklus, auch im 1. (Finn 10.11.2026; nicht in firm_rules.json) · Consistency noch nicht hinterlegt', fnfutures: 'noch nicht hinterlegt', sonst: 'noch nicht hinterlegt' }
+    lucid: 'Mindest-Gewinn: Zyklus im Plus in jedem Payout-Zyklus, auch im 1. (Finn 10.11.2026; nicht in firm_rules.json) · Consistency noch nicht hinterlegt', fnfutures: 'noch nicht hinterlegt', ftmofutures: 'noch nicht hinterlegt', sonst: 'noch nicht hinterlegt' }
   const E4_WIRKT = { tradeify: { min_netto: true }, lucid: { min_netto: true } }   // Rest: nur Parameter (Konstrukt im Bericht S7_E4); Lucid seit LZ1 (10.11.2026) über denselben Railway-Weg
   function e4Regel(k){
     const std = E4_WD_FIRMEN_STD[k] || E4_WD_FIRMEN_STD.sonst, db = ((_wd.regeln && _wd.regeln.firmen_regeln) || {})[k] || {}
@@ -76438,6 +76467,12 @@
     const regel = wdSlwLesen(), fehler = wdSlwPruefen(regel)
     if(fehler){ wdSlwLiveZeigen(); return wdSay('Zufalls-SL nicht gespeichert: ' + fehler, 'err') }
     const neu = { an: regel.an, stufen: regel.stufen.map(s => ({ anteil: s.anteil, von: s.ohne ? null : s.von, bis: s.ohne ? null : s.bis })) }
+    // FT2 (11.11.2026): feste SL-Spanne je Firma (sl_wuerfel.firmen, z. B. FTMO Futures 750–850 $, app.py wd_sl_fest) wird hier nicht bearbeitet — FRISCH aus
+    // der DB mitnehmen (Prüfer FT2: ein vor dem Einspielen geladener Tab oder der localStorage-Stand würde sie sonst still löschen). Lesefehler → nicht speichern.
+    const { data: frischSl, error: frischFehler } = await supabase.from('wd_farmer_regeln').select('sl_wuerfel').eq('id', 1).maybeSingle()
+    if(frischFehler) return wdSay('Zufalls-SL nicht gespeichert: aktueller Stand nicht lesbar (' + (frischFehler.message || frischFehler) + ')', 'err')
+    const altF = frischSl && frischSl.sl_wuerfel && typeof frischSl.sl_wuerfel === 'object' ? frischSl.sl_wuerfel.firmen : null
+    if(altF && typeof altF === 'object') neu.firmen = altF
     const { data: { user } } = await supabase.auth.getUser()
     const { data: getroffen, error } = await supabase.from('wd_farmer_regeln').update({ sl_wuerfel: neu, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1).select('id')
     // nur „Spalte unbekannt" heißt SQL fehlt (PostgREST PGRST204 / Postgres 42703) — ein anderer Fehler, der die Spalte nennt, kommt im Wortlaut
@@ -76461,7 +76496,10 @@
     return !(an === null || an === false || an === 0 || (typeof an === 'string' && ['false', 'aus', 'nein', '0', 'off', 'no', ''].includes(an.trim().toLowerCase())))
   }
   function wdSlwRueckfall(regeln){
-    if(!regeln || !wdSlwRegelAn(regeln.sl_wuerfel)) return null
+    // FT2 (Prüfer 2 SOLLTE 3): Würfel aus, aber feste SL je Firma eingerichtet → Marke trotzdem setzen, sonst findet das Nachwürfeln (SL1) den Plan nie
+    const festDa = !!(regeln && regeln.sl_wuerfel && typeof regeln.sl_wuerfel === 'object' && regeln.sl_wuerfel.firmen && typeof regeln.sl_wuerfel.firmen === 'object'
+                      && Object.keys(regeln.sl_wuerfel.firmen).length)
+    if(!regeln || (!wdSlwRegelAn(regeln.sl_wuerfel) && !festDa)) return null
     return { ohne: true, stufe: null, pct: null, usd: null, puffer: null, balance: null, liq_balance: null, regel: 'sl_wuerfel', grund: 'Rückfall ohne Würfel' }
   }
   window._wdSlwRueckfall = wdSlwRueckfall   // Test-Haken
@@ -78863,7 +78901,7 @@
     if(a && Number(a.goalMinProfit) > 0) return Number(a.goalMinProfit)
     const firma = String((a && a.firm) || '').toLowerCase()
     if(/tradeify/.test(firma) && /cfd/.test(firma)) return null
-    const t = [['tradeify', 250], ['lucid', 250], ['fundednext futures', 250], ['topstep', 150]]
+    const t = [['tradeify', 250], ['lucid', 250], ['fundednext futures', 250], ['topstep', 150], ['ftmo futures', 200]]   // FT2: FTMO Futures 200 $ (Finn 11.11.2026)
     for(const [k, v] of t) if(firma.includes(k)) return v
     if(firma.includes('apex')){ const m = String((a && a.name) || '').match(/(\d{2,3})\s*k\b/i); return m && Number(m[1]) === 100 ? 300 : 350 }
     return null
@@ -79429,7 +79467,7 @@
   /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
    * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
    * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
-  const TC_GOOD_DAY_MIN = { tradeify: 250, lucid: 250, 'fundednext futures': 250, topstep: 150, apex: { 100000: 300, 150000: 350 } }   // Lucid 250 $ wie Tradeify (Finn 23.10.2026), Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
+  const TC_GOOD_DAY_MIN = { tradeify: 250, lucid: 250, 'fundednext futures': 250, topstep: 150, 'ftmo futures': 200, apex: { 100000: 300, 150000: 350 } }   // Lucid 250 $ wie Tradeify (Finn 23.10.2026), Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
   // Schwelle des Kontos: Zahl je Firma, bei Apex je Größe (unbekannte Größe = 150k-Wert, zählt also nie zu früh)
   function tcGoodDayGrenze(a){
     if(istTradeifyCfd(a && a.firm)) return null   // Tradeify CFD (23.10.2026): keine Winning-Day-Linie

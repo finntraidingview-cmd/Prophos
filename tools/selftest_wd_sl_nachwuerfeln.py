@@ -182,7 +182,7 @@ def main():
     i = html.index("const { data, error: eClaim } = await suClaimSetzen(plan.id")
     check("tradePlans[i] = rowToPlan(data[0])" in html[i:i + 800], "nach dem Claim ersetzt der Tab den Plan durch die Claim-Zeile (Echo-Start)")
     j = src.index("if sl_gewuerfelt:")
-    check('_ws.get("regel") == "sl_wuerfel"' in src[j - 900:j] and 'upd.pop("master_sl", None)' in src[j:j + 200],
+    check('_ws.get("regel") in ("sl_wuerfel", "sl_fest")' in src[j - 900:j] and 'upd.pop("master_sl", None)' in src[j:j + 200],
           "PATCH /admin/wd-plaene (Tab-Nachziehen) löscht einen nachgewürfelten master_sl nie (wd_sl.regel sl_wuerfel)")
 
     print("5) PC-Tab: Sperr-Marke vor dem Senden (Prüfer S2 MUSS, 10.11.2026)")
