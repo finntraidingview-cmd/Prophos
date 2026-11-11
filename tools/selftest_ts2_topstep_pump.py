@@ -199,6 +199,8 @@ check("function tpIstFundedPump(p)" in HTML and "!tpIstWdPlan(p) && !tpIstFunded
 check('bal_quelle != "TSX"' in quelle("kz_fdp_abhak") and 'kz_fdp_abhak(a, ctx["fdp"], bal, plaene, ctx.get("bal_quelle"))' in app, "Abhak-Popup: alter TSX-Sync (absolut) wird nicht verschoben")
 check("fdp_express_basis(a, g)" in quelle("kz_fdp_abhak"), "kz_fdp_abhak (Abhak-Popup): Topstep Express absolut wie der Planer")
 
+check("route: x.route || (/topstep/i.test(String(x.firma || '')) ? 'tsv2' : 'tvv2')" in HTML and "typ: 'funded', richtung: x.richtung || null, route: 'tvv2'" not in HTML,
+      "Funded-Reiter: Weg aus dem Plan bzw. Topstep → tsv2 (Nova statt „Orbit“)")
 print()
 if fehler:
     print(f"ROT: {len(fehler)} Prüfung(en) fehlgeschlagen")

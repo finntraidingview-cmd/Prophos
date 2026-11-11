@@ -58768,7 +58768,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2194'
+  const OS_TAB_BUILD = '2026-09-22.2195'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -92316,7 +92316,9 @@
         pumpB: x.hedge_basis === 'pump_b', echt: x.offen_kosten_eur != null ? Number(x.offen_kosten_eur) : null,   // FH1 B (10.11.2026)
         tpPkt, slPkt: kt && Number(x.sl) > 0 ? Number(x.sl) / usd : null } : null
       return Object.assign({ fusion, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '',
-        firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: 'tvv2', start_um: x.start_um || null, start: x.start_um || null,
+        // TS2 (S7 KANN, 11.11.2026): Weg aus dem Plan (plaene[].route), sonst wie app.py fdp_route — Topstep plant als Nova (tsv2), vorher stand hier fest tvv2 („Orbit“)
+        firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: x.route || (/topstep/i.test(String(x.firma || '')) ? 'tsv2' : 'tvv2'),
+        start_um: x.start_um || null, start: x.start_um || null,
         menge: kt, tp: x.tp ?? null, sl: x.sl ?? null, notes: stufe ? 'Funded-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
         konto_id: String(x.konto_id || ''), balance_live: true, boden: x.liq ?? null, boden_min: x.liq ?? null, boden_art: x.liq != null ? 'nachziehend_lock' : null,
         auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd,
