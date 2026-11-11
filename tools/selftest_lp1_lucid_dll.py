@@ -124,8 +124,19 @@ check(ruf("fdp_tag_verlust", None, T, T, V, A) == (0.0, None), "ohne Balance →
 check(ruf("fdp_tag_verlust", 146500.0, T, T, [dict(V[0], bal_end=-4000.0)], A, 150000.0)[0] == 0.0
       and ruf("fdp_tag_verlust", 150000.0 - 1500, T, T, [dict(V[0], bal_end=-500.0)], A, 150000.0)[0] == 1000.0,
       "Topstep Express: 0-basierte Schlüsse + Basis (−500 → 149.500; jetzt 148.500 → 1.000)")
+# Prüfer-Nachzug: Payout nach dem Beleg ist kein Verlust; Trade 2 kennt den Verlust vor Trade 1; SL ≤ 0 → kein Plan
+check(ruf("fdp_tag_verlust", 154000.0, T, T, V, A, payout_ab=T + "T00:30:00Z") == (0.0, None), "Payout nach dem Vortags-Schluss → kein Tagesverlust (Abzug ≠ Verlust)")
+check(ruf("fdp_tag_verlust", 156000.0, T, T, V, A, payout_ab="2026-11-01T00:00:00Z")[0] == 1000.0, "älterer Payout ändert nichts")
+w, g = ruf("fdp_pump_trade2", dict(LU, t2_sl_be_pct=0), {"tp": 1500}, BAL - 1000, BAL + 500, LIQ, Z + 5000, random.Random(2), tag_verlust=1000)
+check(w and w["sl"] == 1500 + 2700 - 1000 - 100 and abs(w["risiko"] - 3100) < 0.01, f"Hand −1.000 vor Trade 1, Trade 1 +1.500 → Trade-2-SL 3.100 (Limit 3.200 − 100) ({w and w['sl']}, {g})")
+w, g = ruf("fdp_pump_trade2", dict(LU, t2_sl_be_pct=0), {"tp": 1500}, BAL - 1000, BAL + 500, LIQ, Z + 5000, random.Random(2))
+check(w and w["sl"] == 4100, "ohne gemerkten Verlust wie bisher (4.100)")
+r = ruf("fdp_pump_trade1", dict(LU, sl_kein_pct=100, sl_hinter_liq=False), "ein", LIQ + 50.5, START, LIQ, Z, random.Random(1))
+check(r.get("aktion") == "aus", f"Liq-Abstand 50,5 $ → SL wäre 0 → kein Plan ({r})")
+check('r_p["pump"] = dict(r_p["pump"], tag_verlust=_tv)' in quelle("fdp_planen") and 'tag_verlust=_wd_num(pm.get("tag_verlust")) or 0.0' in quelle("fdp_pump_tick")
+      and "payout_ab=ab" in quelle("fdp_planen"), "Anker: Verlust in funded_plan.pump → Trade 2; Payout-Grenze aus dem Zyklus")
 planen = quelle("fdp_planen")
-check('fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, str(a["id"]), basis)' in planen and "tag_verlust=_tv," in planen,
+check('fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, str(a["id"]), basis, payout_ab=ab)' in planen and "tag_verlust=_tv," in planen,
       "fdp_planen gibt den Tagesverlust an fdp_pump_konto (nur Firmen mit daily_usd)")
 check('if _wd_num((jg or {}).get("daily_usd")) else (0.0, None)' in planen, "ohne daily_usd (Tradeify) kein Tagesverlust — bitgleich")
 

@@ -47400,12 +47400,14 @@ def fdp_vortag(tag):
     return t.strftime("%Y-%m-%d")
 
 
-def fdp_tag_verlust(balance, tag, jetzt_tag, verlauf, konto_id, basis=0.0):
+def fdp_tag_verlust(balance, tag, jetzt_tag, verlauf, konto_id, basis=0.0, payout_ab=None):
     """REIN RECHNEND (testbar, LP1 3, Master 11.11.2026): heutiger Verlust des Kontos für den Daily-Loss-Rest im Pump-Modell → (verlust ≥ 0, quelle | None).
     Nur, wenn der Plan-Tag schon der laufende CME-Tag ist (tag == jetzt_tag; nachts vor dem neuen Tag ist das Tageslimit neu → 0). Tagesstart wie liq_tagesstart:
     Start-Balance des frühesten Plans dieses CME-Tags; sonst der Tagesschluss des Vortags (jüngste End-Balance eines Plans, der am vorigen Werktag endete) —
     so mindert auch ein Hand-Trade ohne Plan heute den Rest (balance = live gelesen). Nichts belegt → 0 (wie bisher). verlauf = _liq_verlauf_laden
-    ({master_account_id, started_at, ended_at, bal_start, bal_end}), basis = fdp_express_basis (Topstep Express 0-basiert → absolut)."""
+    ({master_account_id, started_at, ended_at, bal_start, bal_end}), basis = fdp_express_basis (Topstep Express 0-basiert → absolut).
+    payout_ab (Prüfer LP1, SOLLTE): jüngster Payout (fdp_zyklus ab) — liegt er nach dem Tagesstart-Beleg, ist der Abzug kein Verlust → 0 (sonst blockte ein
+    über Nacht ausgezahlter Payout den Tag mit „Daily Loss heute schon erreicht“)."""
     if balance is None or not tag or tag != jetzt_tag:
         return 0.0, None
     b = float(basis or 0)
@@ -47413,14 +47415,16 @@ def fdp_tag_verlust(balance, tag, jetzt_tag, verlauf, konto_id, basis=0.0):
     heute = [f for f in eigene if f.get("started_at") and _wd_num(f.get("bal_start")) is not None and _cme_handelstag(str(f["started_at"])) == tag]
     if heute:
         f = min(heute, key=lambda x: str(x["started_at"]))
-        ts, q = float(_wd_num(f["bal_start"])) + b, "Start-Balance des ersten Trades heute"
+        ts, q, beleg_at = float(_wd_num(f["bal_start"])) + b, "Start-Balance des ersten Trades heute", str(f["started_at"])
     else:
         vt = fdp_vortag(tag)
         vor = [f for f in eigene if f.get("ended_at") and _wd_num(f.get("bal_end")) is not None and _cme_handelstag(str(f["ended_at"])) == vt]
         if not vor:
             return 0.0, None
         f = max(vor, key=lambda x: str(x["ended_at"]))
-        ts, q = float(_wd_num(f["bal_end"])) + b, "Tagesschluss des Vortags"
+        ts, q, beleg_at = float(_wd_num(f["bal_end"])) + b, "Tagesschluss des Vortags", str(f["ended_at"])
+    if payout_ab and str(payout_ab) > beleg_at:
+        return 0.0, None   # Payout nach dem Beleg: die Differenz ist (auch) der Payout, kein Tagesverlust
     return round(max(0.0, ts - float(balance)), 2), q
 
 
@@ -47476,13 +47480,15 @@ def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
     if not kt:
         return {"aktion": "aus", "grund": "Kontrakte fehlen in den Einstellungen (Pump-Modell)"}
     sl, risiko = _fdp_pump_sl(jg, slk, balance, liq, daily_rest, rnd, kein)
+    if sl is not None and sl <= 0:   # Prüfer LP1 (KANN): Rest/Abstand knapp über dem Puffer → int() ergäbe SL 0
+        return {"aktion": "aus", "grund": "kein Platz für einen SL (Daily-Loss-Rest bzw. Liq-Abstand zu klein)"}
     h = fdp_pump_hedge(jg, risiko)
     if h is None:
         return {"aktion": "aus", "grund": "Hedge-Satz fehlt (Fusion-Hedge je Master-Risiko in den Einstellungen)"}
     return {"aktion": "planen", "tp": tp, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "kette": kette}
 
 
-def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, start=None):
+def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, start=None, tag_verlust=0.0):
     """REIN RECHNEND (testbar): Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund). liq_eod = Liq nach Tagesend-Logik
     (liq_peak eod=True). balance_start = Balance beim Start von Trade 1 = Tagesstart (Trade 1 ist der erste Trade des Pump-Tags) — darum gilt bei Daily Loss:
     Verlust höchstens E1 + daily_usd. Trade 1 nicht am TP (Hand, Abgleich am Master) → „Tag zu“ (Finn: „Die Trades werden nicht geschlossen durch Zufall“)."""
@@ -47501,10 +47507,11 @@ def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, star
     sl = float(e1) if rnd.random() * 100 < be else None
     abstand = balance_end - liq_eod
     d = _wd_num((jg or {}).get("daily_usd"))
-    grenze = min(abstand, e1 + d) if d else abstand
+    tv = max(0.0, float(tag_verlust or 0))   # Prüfer LP1 (SOLLTE): Verlust vor Trade 1 (beim Anlegen von Trade 1 gemerkt, funded_plan.pump.tag_verlust)
+    grenze = min(abstand, e1 + d - tv) if d else abstand
     if d and sl is None:
         # LP1 (2): mit Tageslimit nie „ohne SL“ — SL knapp vor dem Tageslimit ab Tagesstart (E1 + daily_usd − Puffer), höchstens bis kurz vor die Liq
-        sl = e1 + d - FDP_TAGES_PUFFER
+        sl = e1 + d - tv - FDP_TAGES_PUFFER
         if not (jg or {}).get("sl_hinter_liq"):
             sl = min(sl, abstand - FDP_LIQ_PUFFER)   # wie _fdp_pump_sl
         sl = float(int(sl))
@@ -47975,13 +47982,15 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             # FF2: Pump-Modell — Liq nach Tagesend-Logik (EOD-Trailing zieht erst am Tagesende nach), Würfel fest je Konto × Zyklus × CME-Tag
             peak_e = liq_peak({}, a, balance, verlauf, eod=True)
             # LP1 (3): heutiger Verlust mindert den Daily-Loss-Rest (nur Firmen mit daily_usd, Lucid) — auch ein Hand-Trade ohne Plan (balance ist live)
-            _tv, _tvq = fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, str(a["id"]), basis) \
+            _tv, _tvq = fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, str(a["id"]), basis, payout_ab=ab) \
                 if _wd_num((jg or {}).get("daily_usd")) else (0.0, None)
             r_p = fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None, tag_verlust=_tv,
                                  liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd"), frisch_ok=not pl) if basis else None)
             if _tv > 0 and r_p.get("aktion") == "planen":
                 r_p["tag_verlust"], r_p["tag_verlust_quelle"] = _tv, _tvq   # LP1: in die Plan-Notiz
+                if isinstance(r_p.get("pump"), dict):
+                    r_p["pump"] = dict(r_p["pump"], tag_verlust=_tv)   # Prüfer LP1 (SOLLTE): Trade 2 zieht ihn vom Tageslimit ab (fdp_pump_tick)
             if r_p.get("aktion") == "planen":
                 # TS2: Topstep-RTP-Consistency nur als Hinweis (blockt nie) — Pump-Tag = Rest bis zum Zielniveau (beide Wege zielen auf das ganze Niveau)
                 _h = fdp_topstep_cons_hinweis(fdp_tage(pl, ab), (r_p.get("ziel") or 0) - balance, a.get("firm"))
@@ -48461,7 +48470,8 @@ def fdp_pump_tick(jetzt=None, rnd=None):
                 ende(p, pm, f"Trade 1 hat das Konto geblowt ({be - bs:+.0f} $) — kein Trade 2")
                 continue
             ziel = _wd_num(fp.get("ziel")) or ((_wd_num(fp.get("start")) or bs) + (_wd_num(pm.get("ziel_gewinn")) or 0))   # FF2b: Niveau über dem Zyklus-Start
-            w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd, start=_wd_num(fp.get("start")))   # FE1b: Toleranz ab Zyklus-Start
+            w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd, start=_wd_num(fp.get("start")),   # FE1b: Toleranz ab Zyklus-Start
+                                       tag_verlust=_wd_num(pm.get("tag_verlust")) or 0.0)   # LP1-Prüfer: Verlust vor Trade 1
             if grund:
                 ende(p, pm, grund, melden=not grund.startswith("Ziel schon"))
                 continue
