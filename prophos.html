@@ -58898,7 +58898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2190'
+  const OS_TAB_BUILD = '2026-09-22.2191'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -65723,20 +65723,30 @@
    * (Tipp-Sperre frei: kein Start, kein Echo-Bot, kein Echo-Check vor der Order, kein Vorwärmen, kein Deal-Abgleich, kein Polar). Ergebnis nur als Spur
    * mt5_baseline.vorflug.{a|b} = {at, rot, art, grund, balance, login | nicht_gelesen} — die E1-Wache (app.py kk, S5) nimmt rote Vorflüge später an; bis
    * dahin Diagnose, kein Fehlstart-Eintrag (puls_fehlstarts bleibt unberührt), kein Eingriff in den Start. Panel ohne /api/vorflug → 30 min nichts. */
+  /* VF3 (Master 11.11.2026, Bericht VF2: 98 von 102 Lesungen „Terminal läuft nicht“ — Master-Terminals sind zwischen den Trades absichtlich zu, panel.py
+   * Terminal-Zu/Leerlauf-Wächter, und gingen erst beim Vorwärmen bei T−75 s auf; Vorflug b lag spätestens bei T−3 min, beide überschnitten sich nie).
+   * Jetzt bei Echo mit Hedge (Route mt5, Vorwärmen an): Slot b hängt am VORWÄRMEN statt an der Uhr — erst VF_NACH_VW (30–60 s, je Plan gewürfelt) nach dem
+   * Vorwärm-Versuch und erst bei frischem Snapshot (Copier alive, keine note „warte auf Snapshot“), spätestens bis T−60 s. Slot a (T−15) liest nur noch ein
+   * schon offenes Terminal (sonst still erledigt, kein /api/vorflug, keine Spur „Terminal läuft nicht“). echo_vorwaermen_s dazu 75 → 240 s
+   * (sql/2026-11-11_vf3_vorwaermen_240.sql). mt5v2 hat kein Vorwärmen: dort beide Slots nach Uhr wie bisher. Nur MetaTrader5-API lesen, kein Klick. */
   const VF_SLOTS = [{ k: 'a', vor_min: 15 }, { k: 'b', vor_min: 5 }], VF_STREU_MIN = 2, VF_ZEIT_MS = 50000, VF_AUS_MS = 30 * 60000
+  const VF_NACH_VW = { von: 30000, bis: 60000 }
   const _vf = { ziel: new Map(), laeuft: false, ausBis: 0 }
-  // REIN (Test-Haken): Zielzeiten je Plan, einmal gestreut; neue Startzeit → neu gewürfelt
+  // REIN (Test-Haken): Zielzeiten je Plan, einmal gestreut; neue Startzeit → neu gewürfelt. nachVw: Abstand Slot b nach dem Vorwärmen (VF3)
   function vfZiele(alt, startMs, rnd){
     if(alt && alt.st === startMs) return alt
     const z = { st: startMs, erledigt: {}, at: {} }
     for(const sl of VF_SLOTS) z.at[sl.k] = startMs - (sl.vor_min + (rnd() * 2 - 1) * VF_STREU_MIN) * 60000
+    z.nachVw = VF_NACH_VW.von + rnd() * (VF_NACH_VW.bis - VF_NACH_VW.von)
     return z
   }
   // REIN (Test-Haken): welcher Vorflug ist jetzt dran? Der späteste fällige; frühere, die dabei übersprungen werden, gelten als verpasst. Nie in der
-  // letzten Minute vor dem Start (dann startet der Plan gleich selbst). → { slot, verpasst: [...] } | null
-  function vfFaellig(z, jetzt){
+  // letzten Minute vor dem Start (dann startet der Plan gleich selbst). vw (VF3): { an, at } — an = Plan wird vorgewärmt (Route mt5, Vorwärmen an),
+  // at = Zeitpunkt des Vorwärm-Versuchs (null = noch nicht). Bei an ist Slot b erst ab at + nachVw fällig, nie nach Uhr. → { slot, verpasst: [...] } | null
+  function vfFaellig(z, jetzt, vw){
     if(!z || !(jetzt < z.st - 60000)) return null
-    const offen = VF_SLOTS.filter(sl => !z.erledigt[sl.k] && jetzt >= z.at[sl.k])
+    const ab = sl => (sl.k === 'b' && vw && vw.an) ? (vw.at ? vw.at + (z.nachVw || VF_NACH_VW.von) : Infinity) : z.at[sl.k]
+    const offen = VF_SLOTS.filter(sl => !z.erledigt[sl.k] && jetzt >= ab(sl))
     if(!offen.length) return null
     return { slot: offen[offen.length - 1].k, verpasst: offen.slice(0, -1).map(sl => sl.k) }
   }
@@ -65758,14 +65768,33 @@
     _vf.laeuft = true
     try{
       let dd = null
+      let vwS = 0; try{ vwS = echoTempo().vorwaermenS }catch(_){ vwS = 0 }
+      const scharf = (() => { try{ return !!(_suScharf && _suScharf.an) }catch(_){ return false } })()
       for(const p of kand){
         const id = String(p.id), z = vfZiele(_vf.ziel.get(id), Date.parse(p.startUm), Math.random); _vf.ziel.set(id, z)
-        const f = vfFaellig(z, Date.now()); if(!f) continue
+        // VF3: wird dieser Plan vorgewärmt (wie echoVorwaermenTick: Route mt5, startet von selbst, Vorwärmen an)? Dann Slot b am Vorwärm-Versuch
+        let vwAn = false; try{ vwAn = p.route === 'mt5' && vwS > 0 && suStartetVonSelbst(p, scharf) }catch(_){ vwAn = false }
+        const vw = { an: vwAn, at: vwAn ? (_echoVorgewaermt.get(id + '|' + p.startUm) || null) : null }
+        // VF3 (Prüfer KANN): Slot b nach dem Vorwärmen bis T−60 s nicht gelesen → einmal eine Spur mit Grund (Messung „wie oft blind“), dann nichts mehr
+        if(vw.an && vw.at && !z.erledigt.b && Date.now() >= z.st - 60000){
+          z.erledigt.b = 'nicht_gelesen'
+          const g = z.bGrund === 'zu' ? 'Master-Terminal nach dem Vorwärmen bis T−60 s nicht frisch (Snapshot fehlt)' : 'Vorflug nach dem Vorwärmen bis T−60 s nicht gelaufen (PC oder Instanz belegt)'
+          try{ await baselinePatchIn(p.id, 'vorflug', { b: { at: new Date().toISOString(), lesbar: false, rot: false, art: null, grund: g, balance: null, login: null } }, 'planned') }catch(e){ console.warn('[vorflug] Spur', (e && e.message) || e) }
+          continue
+        }
+        const f = vfFaellig(z, Date.now(), vw); if(!f) continue
         for(const k of f.verpasst) z.erledigt[k] = 'verpasst'
         if(!vfFrei()) break   // Tipp-Sperre: nächster Takt
         if(!dd){ dd = await window.mtcApi('instances'); if(!dd || dd.copier_offline || dd._httpFail) return }
         const ri = mt5V2Resolve(p, dd.instances || [])
         if(!ri || !ri.inst || !ri.inst.file){ z.erledigt[f.slot] = 'anderer_pc'; continue }   // Instanz an einem anderen PC — dessen Tab liest
+        // VF3: Route mt5 — offen = Copier alive und keine note („warte auf Snapshot“ = Master-Terminal zu), wie das Vorwärmen urteilt. Slot a nur bei offenem
+        // Terminal (sonst still erledigt, keine Lesung); Slot b am Vorwärmen wartet auf den frischen Snapshot (nächster Takt, bis T−60 s)
+        if(p.route === 'mt5'){
+          const offen = !!ri.inst.alive && !String(((ri.inst.status || {}).note) || '')
+          if(!offen && f.slot === 'a'){ z.erledigt.a = 'zu'; continue }
+          if(!offen && vw.an){ z.bGrund = 'zu'; continue }
+        }
         // Prüfer FS3 (MUSS): nie auf einer Instanz, auf der ein ANDERER Echo-Plan offen/geclaimt ist oder in ≤ 2 min startet — die Lesung hält den
         // Instanz-Lock bis 40 s; ein Schließen (master-close) bzw. ein fremder Start wartete so lange (bei Echo mit Hedge stünde der Master ungehedgt).
         // Je Kandidat frisch (wie deTick/deBelegt); nicht erledigt → nächster Takt im Fenster
@@ -65790,7 +65819,7 @@
       }
     }finally{ _vf.laeuft = false }
   }
-  window._vf = { ziele: vfZiele, faellig: vfFaellig }   // Test-Haken
+  window._vf = { ziele: vfZiele, faellig: vfFaellig, NACH_VW: VF_NACH_VW }   // Test-Haken
   // Sofort-Start-Wächter (03.11.2026, Z4): nur Zweit-Wartezeilen, eigener gestreuter Takt (Puls-Jitter-Regel), teilt sich _sfLaeuft mit sfTick
   async function sfZweitRunde(){
     if(window._tabNebenSofort || !MT5_LOCAL || _sfLaeuft) return
@@ -66212,6 +66241,10 @@
           ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(route.inst, mc.login, mc.server) }
           : {}) })
       console.info('[echo-vorwärmen]', plan.masterName || String(plan.id).slice(0, 8), Math.round(bis / 1000) + ' s vor Start →', (ts && (ts.msg || ts.error)) || (ts && ts.ok ? 'ok' : 'keine Antwort'))
+      // VF3: Vorflug b gezielt nach dem Vorwärmen (sonst erst im 60-s-Takt von sfTick) — Abstand wie vfFaellig (nachVw) + 1–6 s gestreut; vfTick prüft selbst
+      // Tipp-Sperre, frischen Snapshot und T−60 s. Kein Klick, nur MetaTrader5-API
+      try{ const zv = _vf.ziel.get(String(plan.id)), nach = (zv && zv.st === Date.parse(plan.startUm) && zv.nachVw) || VF_NACH_VW.bis
+        setTimeout(() => { try{ vfTick().catch(() => {}) }catch(_){} }, nach + 1000 + Math.random() * 5000) }catch(_){}
     }catch(e){ console.warn('[echo-vorwärmen]', (e && e.message) || e) }
     finally{ _echoVorwaermenLaeuft = false }
   }
