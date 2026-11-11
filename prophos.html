@@ -6078,6 +6078,23 @@
   #dashboard-view .wdl-og3-lauf{--wdl-og:var(--blue,#2563eb)}
   #dashboard-view .wdl-og3-erledigt{--wdl-og:#ea580c}
   #dashboard-view .wdl-og3-bestanden{--wdl-og:#15803d}
+  /* RB1 (11.11.2026): Unterfelder in „Bestanden" — Challenges · Funded · Winning Days; nur Farbpunkt, Rest wie die Untergruppen */
+  #dashboard-view .wdl-og3 > .wdl-ug-rb{border-top:0;border-radius:10px;overflow:hidden}
+  #dashboard-view .wdl-og3 > .wdl-ug-rb + .wdl-ug-rb{margin-top:18px;border-top:0}
+  #dashboard-view .wdl-ug-rb > .wdl-ug-kopf{background:transparent;padding:4px 4px 8px}
+  #dashboard-view .wdl-ug-rb > .wdl-tab + .wdl-tab{margin-top:12px}
+  #dashboard-view .wdl-ug-challenges{--wdl-ug:#15803d}
+  #dashboard-view .wdl-ug-funded{--wdl-ug:#5A51BA}
+  #dashboard-view .wdl-ug-wd{--wdl-ug:#B45309}
+  /* eigenes Raster: Balance braucht keine 216 px (kein „→ Ziel“), Status trägt „Waiting for Payout“ ganz (S. Chips ganz, 21.10.2026) */
+  @media (min-width:821px){ #dashboard-view .wdl-tab-bst.wdl-tab-rb .wdl-z{grid-template-columns:minmax(120px,1fr) 120px 104px 52px 84px 156px 84px} }
+  /* Handy: WDs bleiben sichtbar (rechts neben dem Namen), Status bekommt die halbe Breite neben dem Datum — „Waiting for Payout“ ganz */
+  @media (max-width:820px){
+    #dashboard-view .wdl-tab-bst.wdl-tab-rb .wdl-z{grid-template-areas:"wer wer wer konto" "datum datum pl pl" "ri mi mi zeit"}
+    #dashboard-view .wdl-tab-bst.wdl-tab-rb .wdl-z-konto{display:block;text-align:right}
+    #dashboard-view .wdl-tab-bst.wdl-tab-rb .wdl-z-kopf .wdl-z-konto{display:none}
+    #dashboard-view .wdl-tab-rb .wdl-z-pl{justify-self:end}
+  }
   #dashboard-view .wdl-og3-leer{padding:10px 4px;font-size:12.5px;color:var(--sub)}
   /* VERLAUF ganz unten (19.10.2026, Finn am Radar .1627: „ganz unten die vergangenen Trades sehen, nach Personen und nach IDs
      filtern, eher optional, mit einem Schalter alle ausblenden"): vierte Übergruppe unter Bestanden statt des gestrichelten Knopfs
@@ -41731,7 +41748,21 @@
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage', 'Heute getradet')
         + bstTab([...rev, ...zz.filter(z => !z.fehlt)].sort(bstTsSort), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
-      return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
+      const nCh = (bestTr || []).length + rvh.length + zz.length + rev.length
+      // RB1 (Finn 11.11.2026 20:15): „Bestanden" in drei Unterfelder — Challenges (alles oben, unverändert) · Funded (Ziel erreicht: CFD → Waiting for
+      // Payout, Futures → Winning Days) · Winning Days (alle WD-Konten mit Stand und Zyklus). Daten nur lesend (rbStand, /admin/overview), Filter nach ID wie oben.
+      let rb = { funded: [], wd: [] }; try{ rb = rbZeilen(rbStand(), wdl.person) }catch(e){ console.warn('[radar] Funded/WD', (e && e.message) || e) }
+      const ug = (cls, titel, n, hint, inhalt) => `<div class="wdl-ug wdl-ug-rb ${cls}"><div class="wdl-ug-kopf"><b>${titel}</b><span>${n}</span><small>${hint}</small></div>${inhalt || `<div class="wdl-og3-leer">${titel === 'Challenges' ? 'Keine bestandene Challenge offen.' : 'Keine Konten.'}</div>`}</div>`
+      const fHtml = rb.funded.length ? rbTab(rb.funded, 'funded', zelle) : '', wHtml = rb.wd.length ? rbTab(rb.wd, 'wd', zelle) : ''
+      // Kopfzahl je Konto einmal (Prüfer RB1): ein WD-Konto steht in Funded (→ Winning Days) UND in Winning Days
+      const n = nCh + new Set([...rb.funded, ...rb.wd].map(x => x.kid)).size
+      if(!n) return { html: '', n: 0 }
+      return { html: ug('wdl-ug-challenges', 'Challenges', nCh, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', kaesten)
+          + ug('wdl-ug-funded', 'Funded', rb.funded.length, 'Ziel erreicht — CFD: Waiting for Payout · Futures: Mindestsumme erreicht → Winning Days', fHtml)
+          + ug('wdl-ug-wd', 'Winning Days', rb.wd.length, 'alle Konten im Winning-Days-Status — Stand je Zyklus', wHtml)
+          + (rb.fehler ? `<div class="wdl-og3-leer" title="${escapeHtml(rb.fehler)}">Funded/Winning Days: ${rb.quelle === 'eigen' ? 'nur eigene Konten — ' : ''}Übersicht nicht ladbar</div>`
+            : rb.laedt ? '<div class="wdl-og3-leer">Funded/Winning Days aller IDs: lädt … (bis dahin nur eigene Konten)</div>' : ''),
+        n }
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto · Boden → Ziel', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -41811,13 +41842,15 @@
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
         + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · <button type="button" class="wdl-vm-weg" data-wdl-vm-weg="1" title="Alle zurück nach „Erledigt" — dann öffnet der Klick wieder das Popup">${vorgemerktN} vorgemerkt ×</button> P&L vorläufig, wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
-        + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
+        + og3('Bestanden', best.n, 'Challenges · Funded · Winning Days', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
     // Bestanden-Zeilen (08.10.2026, seit 09.10.2026 eigener Abschnitt) auch ohne Trades im Zeitraum zeigen — sonst stünde nur „Keine Trades"
-    liste.innerHTML = (trades.length || bstZeilen().length) ? gruppen(trades, modellTrades)
+    // RB1: auch Funded/Winning Days aller IDs halten den Block (vorher nur bestandene Challenges)
+    let rbDa = false; try{ const _r = rbZeilen(rbStand(), wdl.person); rbDa = !!(_r.funded.length || _r.wd.length) }catch(_){ rbDa = false }
+    liste.innerHTML = (trades.length || bstZeilen().length || rbDa) ? gruppen(trades, modellTrades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
@@ -42046,6 +42079,129 @@
     document.querySelectorAll('#wdl-tage [data-wdl-tage]').forEach(x => x.classList.toggle('active', x === b))
     wdl.daten = null; wdlRender(); wdlLaden(true)
   }))
+  /* RB1 BESTANDEN → FUNDED + WINNING DAYS (Finn 11.11.2026 20:15: „Unter Radar bei ‚Bestanden' noch so ‚Funded', wo dann automatisch alle Fundeds
+   * reinkommen, die ihr Ziel erreicht haben — bei CFD … Waiting for Payout, bei Futures … Mindestsumme … Winning Days. Und noch ein Feld ‚Winning Days',
+   * wo ich alle Winning-Days-Konten sehe"). NUR LESEN aus GET /admin/overview (Railway, alle IDs der Sicht, dieselbe Antwort wie Admin → Payouts):
+   * payout_ready = Funded CFD mit waiting_payout_since + Konten Typ winning_days (WD-Stand wd_count/wd_target aus wd_auto_staende, payouts_n);
+   * accounts = Größe, goal_since/ziel_erreicht_at für das Datum. Höchstens alle 5 min und nur, wenn der Radar zeichnet; Fehler → alter Stand bleibt.
+   * Ohne Server-Stand (fremde Sicht, Railway weg) die eigenen Konten aus `accounts`. Recoverer-Marke aus window._wdZyklusRoh, nur wenn schon geladen. */
+  const RB_ALTER_MS = 5 * 60000
+  const _rb = { d: null, at: 0, laeuft: false, fehler: '', stub: false }
+  async function rbLaden(){
+    if(_rb.laeuft || _rb.stub) return
+    _rb.laeuft = true; _rb.at = Date.now()
+    const uid = String(currentUserId || '')
+    try{
+      const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token
+      if(!tok) return
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
+      let d = null
+      try{
+        const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+        d = await r.json().catch(() => null)
+        if(!r.ok || !d) throw new Error((d && d.error) || ('HTTP ' + r.status))
+      }finally{ clearTimeout(tm) }
+      if(uid !== String(currentUserId || '')) return   // ID gewechselt, während geladen wurde — nie den Stand der alten ID zeigen
+      _rb.d = { uid, payout_ready: Array.isArray(d.payout_ready) ? d.payout_ready : [], accounts: Array.isArray(d.accounts) ? d.accounts : [] }
+      _rb.fehler = ''
+      // nicht mitten in eine offene Notiz / ein laufendes Ziehen zeichnen (Riegel wie wdlLiveTick) — dann kommt es mit dem nächsten Laden
+      const tippt = !!(_wdlManNotiz && document.querySelector('#wdl-liste [data-wdl-man-notiz]')), zieht = !!document.querySelector('#wdl-liste.is-ziehen')
+      if(!tippt && !zieht) try{ wdlRender() }catch(_){}
+    }catch(e){ _rb.fehler = (e && e.message) || String(e); console.warn('[radar] Funded/WD laden', _rb.fehler) }
+    finally{ _rb.laeuft = false }
+  }
+  function rbStand(){
+    const uid = String(currentUserId || '')
+    if(_rb.d && _rb.d.uid !== uid){ _rb.d = null; _rb.at = 0 }   // ID-Wechsel
+    if(!_rb.stub && Date.now() - _rb.at > RB_ALTER_MS) rbLaden()
+    if(_rb.d) return _rb.d
+    const a = window._admData   // Admin-Übersicht dieses Tabs (dieselbe Antwort), solange kein eigener Stand da ist
+    return (a && Array.isArray(a.payout_ready)) ? { uid, payout_ready: a.payout_ready, accounts: a.accounts || [], aus: 'admin' } : null
+  }
+  /* REIN RECHNEND (testbar, window._rbZeilen): Stand → { funded, wd, quelle, fehler }. funded = CFD mit Waiting for Payout (seit = waiting_since) + Futures im
+   * WD-Status (seit = goal_since bzw. ziel_erreicht_at); wd = alle WD-Konten mit ist/soll, Zyklus = Payouts + 1, bereit = ist ≥ soll. person = Radar-Filter. */
+  function rbZeilen(stand, person, o){
+    o = o || {}
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const e4 = x => String(x || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
+    const zyk = typeof window._wdZyklusRoh === 'function' ? window._wdZyklusRoh : () => null
+    let roh = []
+    if(stand && Array.isArray(stand.payout_ready)){
+      const acc = new Map((stand.accounts || []).map(a => [String(a && a.id), a]))
+      roh = stand.payout_ready.map(r => {
+        const a = acc.get(String(r.account_id)) || {}
+        return { kid: String(r.account_id || ''), uid: String(r.user_id || ''), user: String(r.person || '?'), firma: r.account_firm || a.firm || '', e4: e4(r.ext || a.ext),
+          // Größe aus dem Kontonamen (Prüfer RB1: die accounts-Zeilen von /admin/overview tragen weder groesse noch starting_balance)
+          name: r.account_name || a.name || '', gr: (() => { try{ return Number(kontoGroesseAnzeige(r.account_name || a.name, null, null)) || 0 }catch(_){ return 0 } })(), typ: String(r.type || ''), waiting: String(r.waiting_since || ''), bal: n(r.balance),
+          ist: n(r.wd_count), soll: n(r.wd_target), readyAt: String(r.ready_at || ''), payouts: n(r.payouts_n) || 0, wdSeit: a.goal_since || a.ziel_erreicht_at || '',
+          archiviert: !!a.archived }
+      })
+    } else {
+      // Rückfall: nur die eigenen Konten (RLS) — ohne Übersicht der Sicht
+      let arch = {}; try{ arch = getArchive() || {} }catch(_){}
+      const ich = String(currentUserId || ''), name = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich'
+      roh = (o.konten || (typeof accounts !== 'undefined' ? accounts : []) || []).filter(a => a && !(arch[String(a.id)] && arch[String(a.id)].archived)).map(a => {
+        let gr = 0; try{ gr = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
+        // Prüfer RB1: WD-Stand wie die Accounts-Kachel (zielFortschritt), nicht goalDoneOffset; Payout-Zyklus kennt der Rückfall nicht (payouts null)
+        let tf = null; try{ tf = a.type === 'winning_days' && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
+        return { kid: String(a.id), uid: ich, user: name, firma: a.firm || '', e4: e4(a.externalId), name: a.name || '', gr, typ: String(a.type || ''),
+          waiting: a.type === 'funded_cfd' ? String(a.waitingPayoutSince || '') : '', bal: n(a.tvBalance ?? a.balance), ist: tf && tf.kind === 'winning_days' ? n(tf.count) : null,
+          soll: (tf && n(tf.target)) || n(a.goalTarget) || (a.type === 'winning_days' ? 5 : null), readyAt: a.type === 'funded_cfd' ? String(a.payoutReadyAt || '').slice(0, 10) : '',
+          payouts: null, wdSeit: a.goalSince || a.zielErreichtAt || '' }
+      })
+    }
+    roh = roh.filter(x => !x.archiviert && (!person || x.uid === person))
+    const ts = v => Date.parse(v || '') || 0
+    const funded = roh.filter(x => (x.typ === 'funded_cfd' && x.waiting) || x.typ === 'winning_days')
+      .map(x => Object.assign({}, x, { art: x.typ === 'winning_days' ? 'futures' : 'cfd', seit: x.typ === 'winning_days' ? x.wdSeit : x.waiting }))
+      .sort((a, b) => ts(b.seit) - ts(a.seit))
+    const wd = roh.filter(x => x.typ === 'winning_days').map(x => {
+      const z = zyk(x.kid), rec = z ? (z.art === 'tradeify' ? (z.gesperrt ? 'Recovery' : '') : (z.aktiv ? 'Recoverer' : '')) : ''
+      const soll = x.soll || 5, ist = x.ist != null ? x.ist : 0
+      // Prüfer RB1: im Recovery/Recoverer nie „Payout bereit“ (Admin → Payouts führt 5/5 im Minus-Zyklus als nicht anfragbar)
+      return Object.assign({}, x, { ist, soll, bereit: ist >= soll && !rec, zyklus: x.payouts == null ? null : x.payouts + 1, rec })
+    }).sort((a, b) => (Number(b.bereit) - Number(a.bereit)) || ((b.ist / b.soll) - (a.ist / a.soll)) || String(a.user).localeCompare(String(b.user), 'de'))
+    const quelle = !stand ? 'eigen' : (stand.aus || 'server')
+    return { funded, wd, quelle, fehler: (!stand || quelle === 'eigen') ? _rb.fehler : '', laedt: !stand && _rb.laeuft }
+  }
+  window._rbZeilen = rbZeilen
+  /* Tabelle wie bstTab (gleiches Raster wdl-tab-bst, Zeilen wdl-z-bst): art 'funded' | 'wd'. zelle = Zellen-Bauer aus wdlRender. */
+  function rbTab(zz, art, zelle){
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || x
+    const tag = v => { const d = new Date(v || ''); return isNaN(d) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) }
+    const kopf = art === 'funded' ? ['Typ', 'Balance', 'WDs', 'Seit', 'Status', 'Payout ab'] : ['Typ', 'Balance', 'WDs', 'Zyklus', 'Status', 'Payout ab']
+    const zeilen = zz.map(x => {
+      const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
+      const typ = x.typ   // Funded CFD bzw. Winning Days — „Waiting for Payout“ steht im Status (keine eigene Kontoart, typeLabel kennt sie nicht)
+      const wds = x.typ === 'winning_days' ? zelle('konto', `${x.ist != null ? x.ist : 0}/${x.soll || 5}`, { tip: `Winning Days im Zyklus: ${x.ist != null ? x.ist : 0} von ${x.soll || 5}` }) : zelle('konto', '–')
+      let status, datum
+      if(art === 'funded'){
+        datum = zelle('datum', escapeHtml(tag(x.seit) || '–'), { tip: x.art === 'cfd' ? 'Waiting for Payout seit' : 'Winning Days seit (Zähl-Beginn laut Konto)' })
+        status = x.art === 'cfd' ? `<span class="type-badge acc-ziel-chip" title="Ziel erreicht — wartet auf den Payout">Waiting for Payout</span>`
+          : `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindestsumme erreicht — sammelt Winning Days">→ Winning Days</span>`
+      } else {
+        datum = x.zyklus == null ? zelle('datum', '–', { tip: 'Payout-Zyklus nur in der Übersicht aller IDs sichtbar' })
+          : zelle('datum', `Zyklus ${x.zyklus}`, { tip: `${x.payouts} Payout(s) bisher — Zyklus ${x.zyklus}` })
+        status = x.bereit ? `<span class="type-badge acc-ziel-chip" title="Winning Days voll — Payout anfragbar">Payout bereit</span>`
+          : (x.rec && x.ist >= x.soll) ? `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Winning Days voll, aber ${escapeHtml(x.rec)} — erst ausgleichen, dann Payout">${escapeHtml(x.rec)}</span>`
+          : `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Es fehlen ${Math.max(0, x.soll - x.ist)} Winning Day(s)">sammelt</span>`
+        if(x.rec && !(x.ist >= x.soll)) status += `<small class="wdl-bst-mini" title="${escapeHtml(x.rec === 'Recovery' ? 'Tradeify: Zyklus im Minus — erst ausgleichen' : 'Apex: Verlusttag im Zyklus — Recoverer-Ziel')}">${x.rec}</small>`
+      }
+      return `<div class="wdl-z wdl-z-bst wdl-z-rb" style="--wdl-id:${idFarbe(x.uid)}">`
+        + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-ri"><span class="wdl-bst-phase type-${escapeHtml(typ)}">${escapeHtml(typW(typ) || typ)}</span></span>`
+        + zelle('mi', x.bal != null ? de(x.bal) + ' $' : '–', { tip: 'letzte bekannte Balance' })
+        + wds + datum
+        + `<span class="wdl-z-pl wdl-bst-ok">${status}</span>`
+        + zelle('zeit', escapeHtml(x.readyAt ? tag(x.readyAt) : '–'), { tip: x.readyAt ? 'Payout anfragbar ab' : 'kein Payout-Datum hinterlegt' })
+        + '</div>'
+    }).join('')
+    return `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-rb wdl-tab-sek-rb-${art}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Konto</span>`
+      + kopf.map((k, i) => `<span class="wdl-z-${['ri', 'mi', 'konto', 'datum', 'pl', 'zeit'][i]}">${k}</span>`).join('') + `</div>${zeilen}</div>`
+  }
+  window._rbStub = d => { _rb.stub = true; _rb.d = Object.assign({ uid: String(currentUserId || '') }, d); _rb.fehler = ''; try{ wdlRender() }catch(e){ console.warn('[rb stub]', e) } }   // Stub ohne Login (Design-Prüfung)
+
   // Stub ohne Login: window._wdlStub({trades:[…]}) zeichnet die View mit Testdaten
   window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlLokalAnwenden(); wdlRender() }   // wie ein Abruf: lokale Merker gelten (08.10.2026)
   window._wdlLokal = () => [..._wdlLokal.keys()]   // Test-Haken
@@ -58742,7 +58898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2188'
+  const OS_TAB_BUILD = '2026-09-22.2189'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
