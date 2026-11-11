@@ -87,8 +87,11 @@ fehler_faelle = {
     "früherer Trade heute ohne Start-Balance": FF(SP, dict(PLAN, start_um="2026-11-12T07:00:00Z"), dict(ACC, tv_balance_at="2026-11-12T04:00:00Z"), LIQ,
                                                   [dict(FR[0], bal_start=None)]),
 }
+fehler_faelle["frühere Trades nicht lesbar (None, KK1b)"] = FF(SP, PLAN, ACC, LIQ, None, rnd=random.Random(5))
 check(all(v.get("sperre") is True and v.get("sperre_art") == "daten" and v.get("ohne") is True and not v.get("usd") for v in fehler_faelle.values()),
       f"jede Unsicherheit sperrt (nie ohne SL geplant): {', '.join(fehler_faelle)}")
+check(app.WD_SL_GRUND_FRUEHER in fehler_faelle["frühere Trades nicht lesbar (None, KK1b)"]["grund"],
+      "FT2c: fruehere None (KK1b, unlesbar) ≠ „keine früheren Trades“ → Daten-Sperre mit WD_SL_GRUND_FRUEHER, kein Plan mit geratenem Puffer")
 w4 = FF(SP, dict(PLAN, start_um="2026-11-12T07:00:00Z"), dict(ACC, tv_balance=54300.0, tv_balance_at="2026-11-12T04:00:00Z"), LIQ,
         [dict(FR[0], started_at="2026-11-11T03:00:00Z", bal_start=None)], rnd=random.Random(5))
 check(w4.get("sperre") is None and w4["ohne"] is False, "Trade von GESTERN ohne Start-Balance stört nicht (nur derselbe CME-Tag)")
@@ -132,7 +135,7 @@ def sb_select_fake(t, p):
 app.sb_select = sb_select_fake
 _alt = (app._liq_regeln_laden, app._wd_fruehere_trades, app.sb_update)
 app._liq_regeln_laden = lambda *a, **k: LIQ
-app._wd_fruehere_trades = lambda mids: FR2
+app._wd_fruehere_trades = lambda mids, streng=False: FR2   # KK1b: Aufrufer fragen streng=True
 app.sb_update = lambda t, f, u: DBU.append((f["id"], u)) or [dict(u)]
 if hasattr(app, "wd_sl_nach_kandidat"):
     _kand = app.wd_sl_nach_kandidat

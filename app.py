@@ -13067,6 +13067,10 @@ def wd_sl_fest_fuer_plan(spanne, plan, acc, liq_regeln, fruehere, rnd=None):
     def zu(grund, art="daten"):
         return {"ohne": True, "sperre": True, "sperre_art": art, "stufe": None, "pct": None, "usd": None, "puffer": None, "balance": None, "liq_balance": None,
                 "regel": "sl_fest", "spanne": [lo, hi], "grund": f"fester SL {lo:.0f}–{hi:.0f} $: {grund} — kein Plan (Daily Loss = Hard Breach)"}
+    if fruehere is None:
+        # FT2c (Prüfer S2 zu KK1b): _wd_sl_kontext/_wd_fruehere_trades(streng) liefern bei unlesbaren früheren Trades None — das ist NICHT „keine früheren Trades“
+        # (sonst Tagesstart = Balance jetzt → womöglich falscher Puffer). Art „daten“ → POST übersprungen mit WD_GRUND_SL_DATEN, nächster Lauf versucht es wieder
+        return zu(WD_SL_GRUND_FRUEHER)
     if not acc:
         return zu("Konto-Daten nicht lesbar")
     if not liq_regeln:
