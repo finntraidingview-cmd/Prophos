@@ -89,7 +89,6 @@ def umgebung(ordner, dateien, shas, sleep_log, runden, version=b"2026-09-22.9999
           # RT1 (05.11.2026): UPDATE-SCHUTZ (0d2c20be) — Panel frei, Schließen gelingt, keine Spur nach außen; _GELADEN (e8bc2ff4)
           "panel_beschaeftigt_gruende": lambda: [], "_panel_zu_und_leeren": lambda erzwingen: True,
           "update_spur_melden": lambda *a, **k: None, "_GELADEN": {},
-          "mt5_order_belegt": lambda *a, **k: False,   # 11.11.2026 (S1-Hinweis RA2 F1): Belegt-Prüfung ohne reine Lesungen — hier keine Order
           "polar_panel": None}   # Polar (.1531, 138095d3): panel.py importiert polar_panel optional — None = PC ohne Polar, wie bisher
     exec(compile(CODE, "panel_ausschnitt", "exec"), ns)
     return ns, abrufe

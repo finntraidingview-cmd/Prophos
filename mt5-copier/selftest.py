@@ -3539,8 +3539,7 @@ def test_panel_tab_wecken_ea_frost():
         and q.index("if not weg:") < q.index("_tab_oeffnen(") and "still_s < TAB_HEIL_START_S" in q,
         "Neu öffnen: unter TV_ORDER_LOCK, erst nach bewiesenem Schließen bzw. ohne alten Tab nur, wenn keiner mehr fragt")
     q = inspect.getsource(panel.Handler)
-    # F-A (11.11.2026): /api/vorflug (nur lesen) prüft die EA-Heilung ebenfalls → 3 Stellen; Order und Close antworten weiter terminal_heilt
-    chk(q.count("if _instanz_heilt(inst):") == 3 and q.count('"retry_ok": True, "grund": "terminal_heilt"') >= 2,
+    chk(q.count("if _instanz_heilt(inst):") == 2 and q.count('"retry_ok": True, "grund": "terminal_heilt"') >= 2,
         "laufende EA-Heilung: Master-Order und Master-Close antworten 409 retry_ok:true (alle Routen), nie „unklar\"")
     q = inspect.getsource(panel._ea_frost_waechter)
     chk("lock.acquire(blocking=False)" in q and "lock.release()" in q and "_heal_ea(" in q and "random.random()" in q

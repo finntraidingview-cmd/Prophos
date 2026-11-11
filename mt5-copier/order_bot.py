@@ -1235,7 +1235,7 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # GDI-Fehler, Bild zu groß, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
 # Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
-FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus", "deals", "vorflug"})
+FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus", "deals"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl",
                                    "nicht_scharf",    # ES2/ES3: Copier nicht scharf = beweisbar nichts getippt, kein Bildschirm-Foto
                                    "f9_vorpruefung"})  # FS2-C: Vorprüfung vor dem ersten Fenster-Schritt = beweisbar nichts getippt
@@ -30875,111 +30875,6 @@ def deals_urteil(deals, positionen, richtung, lots, symbol, ohne=()):
     return {"treffer": treffer, "offen": offen, "pl": pl, "mehrdeutig": len(treffer) > 1}
 
 
-# ══ F-A KONTO-VORFLUG (Master 11.11.2026 nach FS2, Finn „Ja“ zu den Fehlstart-Fixes) ══
-# FS2-Befund K1: ein kaputtes Konto (gesperrt, nur Schließen, Terminal getrennt, falsches Konto) fiel erst zur Startzeit auf; E1 sperrt es erst nach 2–3
-# Fehlstarts. Der Vorflug liest 10–15 min VOR dem Start nur lesend (wie „deals“: kein Fenster, kein Login-Dialog, kein Klick) und meldet „rot“ mit der EINEN
-# Ursache. Was daraus folgt (E1-Treffer, Konto deaktivieren), entscheidet Railway — hier nur das Urteil. Rot nur bei harten Befunden; Lesefehler = lesbar False.
-VORFLUG_JOURNAL_KONTO = ("Konto nimmt nur Schließen an", "Handel am Konto gesperrt")   # Anfänge der Grund-Texte aus ORDER_GRUND_REGELN
-
-
-VORFLUG_JOURNAL_MAX_S = 3 * 3600   # Prüfer S2: eine Ablehnung zählt nur, wenn sie jung ist („nur Schließen“ kann vorübergehend sein)
-
-
-def journal_letzte_ablehnung(zeilen, login, symbol=None, jetzt_s=None, max_alter_s=VORFLUG_JOURNAL_MAX_S):
-    """REIN RECHNEND (testbar, F-A): neueste Order-Zeile dieses Logins (failed / accepted / deal # / order # / market …, „modify #“/„close #“ zählen nicht).
-    Ist sie eine „failed …“-Zeile, deren Server-Antwort eine Konto-Regel trifft (nur Schließen, Handel gesperrt) → (grund, antwort, zeile); sonst None.
-    Eine spätere erfolgreiche Order hebt eine alte Ablehnung also auf. Prüfer S2: mit jetzt_s (Sekunden seit Mitternacht, Ortszeit des PCs) nur Zeilen
-    der letzten max_alter_s; mit symbol nur, wenn die Ablehnung DIESES Symbol betrifft (sonst kann sie ein anderes, z. B. abgelaufenes Symbol meinen)."""
-    lg = f"'{login}':" if login else ""
-    sym = str(symbol or "").strip().lower()
-    rx = re.compile(r"\b(failed )?(market|instant|request|exchange) (buy|sell)\b|\baccepted\b|\bdeal #\d+ (buy|sell)\b|\border #\d+ (buy|sell)\b")
-    for z in reversed(list(zeilen or ())):
-        zl = str(z or "").lower()
-        if (lg and lg not in zl) or "modify #" in zl or "close #" in zl or not rx.search(zl):
-            continue
-        if jetzt_s is not None:
-            m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.\d{3}\b", zl)
-            if not m or (float(jetzt_s) - (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)))) % 86400 > max_alter_s:
-                return None          # neueste Order-Zeile zu alt (oder ohne Uhrzeit) → kein Befund
-        if not re.search(r"\bfailed (market|instant|request|exchange) (buy|sell)\b", zl):
-            return None
-        if sym and sym not in zl:
-            return None              # Ablehnung eines anderen Symbols
-        a = re.findall(r"\[([^\]]+)\]", str(z))
-        g = order_grund_aus_text(a[-1]) if a else None
-        if g and g[0].startswith(VORFLUG_JOURNAL_KONTO):
-            return g[0], a[-1].strip(), str(z).strip()
-        return None
-    return None
-
-
-def vorflug_urteil(api, richtung, journal_treffer=None):
-    """REIN RECHNEND (testbar, F-A): Zustand (dict wie _order_api_zustand, dazu login/expected) + Richtung + journal_letzte_ablehnung → {rot, art, grund}.
-    Reihenfolge: falsches Konto, getrennt, trade_allowed aus, Symbol (gesperrt/close-only/Seite), letzte Ablehnung im Journal. Grund-Texte wörtlich wie
-    order_vorpruefung_urteil bzw. ORDER_GRUND_REGELN (Schlüssel für sfGesperrt, FD_REZEPTE, E1)."""
-    a = api if isinstance(api, dict) else {}
-    exp, ist = a.get("expected"), a.get("login")
-    if exp and ist and int(ist) != int(exp):
-        return {"rot": True, "art": "falsches_konto", "grund": f"Terminal ist im FALSCHEN Konto ({ist} statt {exp})"}
-    _ohne = {k: v for k, v in a.items() if not k.startswith("volume_")}
-    if str(richtung or "").lower() not in ("buy", "sell") and _ohne.get("symbol_modus") in (1, 2):
-        _ohne.pop("symbol_modus")   # Prüfer S3: ohne gültige Richtung keine Seitenprüfung (sonst „nur Kauf — Plan will Verkauf“ ohne Plan-Richtung)
-    u = order_vorpruefung_urteil(1.0, richtung, _ohne)
-    if u["abbruch"]:
-        g = u["abbruch"][0]
-        art = ("getrennt" if g.startswith("Terminal nicht") else "konto_gesperrt" if "trade_allowed" in g
-               else "nur_schliessen_symbol" if "Close only" in g else "symbol")
-        return {"rot": True, "art": art, "grund": g}
-    if journal_treffer:
-        art = "nur_schliessen" if journal_treffer[0].startswith("Konto nimmt nur") else "konto_gesperrt"
-        return {"rot": True, "art": art, "grund": f"{journal_treffer[0]} — letzte Order im Journal abgelehnt: [{journal_treffer[1]}]"}
-    return {"rot": False, "art": "ok", "grund": ""}
-
-
-def modus_vorflug(auftrag):
-    """NUR LESEN (F-A): Zustand des Master-Logins einer Echo-Instanz vor dem Start. Kein Fenster, kein Klick, kein Login-Dialog — wie modus_deals.
-    auftrag = {cfg, symbol, richtung}. → {ok, lesbar, grund?, login, balance, rot, art}."""
-    try:
-        with open(str(auftrag.get("cfg") or ""), encoding="utf-8") as f:
-            cfg = json.load(f)
-    except Exception as e:
-        return {"ok": False, "lesbar": False, "grund": f"Config nicht lesbar ({type(e).__name__})"}
-    path = str(cfg.get("master_terminal_path") or "").strip()
-    expected = int(cfg.get("master_expected_login") or 0)
-    if not path:
-        return {"ok": False, "lesbar": False, "grund": "Terminal-Pfad fehlt in der Config"}
-    try:
-        import MetaTrader5 as mt5
-    except ImportError:
-        return {"ok": False, "lesbar": False, "grund": "MetaTrader5-Paket fehlt im Panel-Python"}
-    symbol = str(auftrag.get("symbol") or "").strip()
-    try:
-        if not os.path.exists(path):
-            return {"ok": False, "lesbar": False, "grund": "Terminal-Pfad nicht gefunden"}
-        if not mt5.initialize(path=path, timeout=10000):   # Prüfer S1: 10 s (Panel-Deckel 20 s)
-            return {"ok": False, "lesbar": False, "grund": f"Terminal nicht lesbar ({mt5.last_error()})"}
-        try:
-            ai, ti = mt5.account_info(), mt5.terminal_info()
-            if ai is None or ti is None:
-                return {"ok": False, "lesbar": False, "grund": "Terminal ohne Konto/Zustand (account_info leer)"}
-            api = {"symbol": symbol, "expected": expected or None, "login": int(ai.login), "verbunden": bool(ti.connected),
-                   "balance": float(ai.balance)}
-            if not expected or int(ai.login) == expected:
-                api["handel_konto"] = bool(ai.trade_allowed)
-            si = mt5.symbol_info(symbol) if symbol else None    # nur lesen — kein symbol_select (Marktübersicht bleibt, wie sie ist)
-            if si is not None:
-                api["symbol_modus"] = int(si.trade_mode)
-            _lt = time.localtime()
-            zeilen = _mt5_journal_zeilen(str(ti.data_path or ""), beide=(_lt.tm_hour == 0 and _lt.tm_min < 30))
-            jt = journal_letzte_ablehnung(zeilen, int(ai.login), symbol, _lt.tm_hour * 3600 + _lt.tm_min * 60 + _lt.tm_sec)
-            u = vorflug_urteil(api, auftrag.get("richtung"), jt)
-            return {"ok": True, "lesbar": True, "login": int(ai.login), "balance": round(float(ai.balance), 2), "journal_lesbar": bool(zeilen), **u}
-        finally:
-            mt5.shutdown()
-    except Exception as e:
-        return {"ok": False, "lesbar": False, "grund": f"Lesen abgebrochen ({type(e).__name__}: {str(e)[:120]})"}
-
-
 def modus_deals(auftrag):
     """NUR LESEN (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L … nie angezeigt wird"): Deal-Historie + Balance des Master-Logins
     einer Echo-Instanz für die Endlesung unklarer Pläne (Tagesreset „unklar", Radar „–"). Kein Schreibaufruf, kein Klick, kein Fenster.
@@ -31065,13 +30960,6 @@ def main():
             fehlerfoto_nachreichen()
         except Exception as e:
             _fehlerfoto_log(f"nachreichen abgebrochen: {type(e).__name__}: {e}")
-        return 0
-    if len(sys.argv) >= 3 and sys.argv[1] == "vorflug":
-        # F-A (11.11.2026): nur lesen — Konto-Zustand vor dem Start (Panel /api/vorflug), nie ein Fehlerfoto
-        try:
-            print(json.dumps(modus_vorflug(json.loads(sys.argv[2])), ensure_ascii=False))
-        except Exception as e:
-            print(json.dumps({"ok": False, "lesbar": False, "grund": f"vorflug: {type(e).__name__}: {e}"}, ensure_ascii=False))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "deals":
         # N2 (04.11.2026): nur lesen — Deal-Historie für die Endlesung unklarer Echo-Pläne (Panel /api/deals), nie ein Fehlerfoto

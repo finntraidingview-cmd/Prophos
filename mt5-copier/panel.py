@@ -30,7 +30,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime, timezone
+from datetime import datetime
 
 # ── DN1 DNS-RÜCKFALL (10.11.2026, Master; Fehler-Muster FA1/RD1: „getaddrinfo failed“ am PC von Marco pc-t8wg97 — der Router beantwortet DNS zeitweise
 # nicht, Riegel- und andere Railway-Aufrufe scheitern; Windows-Einstellungen (DNS am Adapter, hosts) werden bewusst nicht geändert). Scheitert die
@@ -2584,7 +2584,7 @@ def _bot_lauf_aktiv():
             return True
         if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():   # Maus-Test × parkt die Maus 10 s (20.10.2026, S1-Prüfung)
             return True
-        if TV_ORDER_LOCK.locked() or mt5_order_belegt():   # reine Deal-/Vorflug-Lesungen zählen nicht (S1, RA2 F1)
+        if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
             return True
         return time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900
     except OSError:
@@ -2730,38 +2730,6 @@ HEAL_LOCK = threading.Lock()
 MASTER_ORDER_LOCKS = {}
 MASTER_ORDER_GUARD = threading.Lock()
 DEALS_LESEN = set()   # N2 (04.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade eine Deal-Lesung (/api/deals, nur lesen) hält
-VORFLUG_LESEN = set()   # F-A (11.11.2026): Instanzen, deren MASTER_ORDER_LOCK gerade ein Konto-Vorflug (/api/vorflug, nur lesen) hält
-VORFLUG_WARTE_S = 25.0  # eine Order/ein Close wartet so lange VOR allen Riegeln auf einen laufenden Vorflug (Lese-Deckel 20 s) statt 409 = Fehlstart
-VORFLUG_DECKEL_S = 20   # Deckel des Bot-Laufs „vorflug“ (Prüfer S1: 25 + 300 s Bot bleibt unter dem Proxy-Deckel 310 s / mtcApi 320 s)
-
-
-ORDER_ANGEMELDET = {}   # F-A (Hinweis S1): config_file → Zeitpunkt, zu dem eine Order/ein Close in die Route kam (nach dem Vorab-Warten)
-ORDER_ANGEMELDET_S = 60.0   # so lange startet auf dieser Instanz kein Vorflug (deckt die Riegel bis zum acquire; danach hält die Order den Lock)
-
-
-def vorflug_darf(fname, angemeldet, jetzt):
-    """REIN RECHNEND (testbar): darf ein Vorflug auf dieser Instanz jetzt den Lock nehmen? Nein, solange eine Order/ein Close angemeldet ist."""
-    return jetzt - float((angemeldet or {}).get(fname) or 0.0) >= ORDER_ANGEMELDET_S
-
-
-def _vorflug_abwarten(fname):
-    """F-A (Prüfer M1): läuft auf DIESER Instanz gerade ein Konto-Vorflug (nur lesen), gestreut warten, bis er fertig ist — VOR allen Riegeln (Richtung,
-    Echo-Fenster, Copier-Frische, Heilung), damit sie beim Senden frisch sind. Danach unverändert acquire(blocking=False): ein zweiter Auftrag bekommt
-    wie bisher sofort 409. → gewartete Sekunden."""
-    t0 = time.time()
-    while fname in VORFLUG_LESEN and time.time() - t0 < VORFLUG_WARTE_S:
-        time.sleep(0.5 + random.random() * 0.5)
-    return time.time() - t0
-
-
-def mt5_order_belegt(locks=None, lesen=None):
-    """REIN (testbar, Hinweis S1 zu RA2 F1, 11.11.2026): hält eine Instanz ihren MASTER_ORDER_LOCK für eine ORDER bzw. einen Close? Reine Lesungen
-    (/api/deals, /api/vorflug — DEALS_LESEN/VORFLUG_LESEN) fassen weder Fenster noch Maus an: sie zählen für die PC-weiten Belegt-Prüfungen
-    (Tab-Heilung/Fenster nach vorn, Panel-Neustart) nicht mit — sonst wartete dort alles bis zu 90 s auf die Deal-Lesung einer ANDEREN Instanz.
-    Der Lock je Instanz selbst bleibt unverändert (Order gegen Lesung derselben Instanz)."""
-    locks = MASTER_ORDER_LOCKS if locks is None else locks
-    lesen = (DEALS_LESEN | VORFLUG_LESEN) if lesen is None else lesen
-    return any(l.locked() and f not in lesen for f, l in list(locks.items()))
 
 # Orbit-Puls (30.08.2026): EIN Lock fuer den ganzen TradingView-Weg, nicht pro
 # Instanz. Der MT5-Bot bedient je ein eigenes Terminal, der TV-Bot bedient
@@ -2923,13 +2891,6 @@ def tab_gesehen(user_agent, query=None):
                 _TAB_OEFFNEN[feld] = None
         # FS1 (10.11.2026): Sichtbarkeit (v/h) und Ladezeit (Unix-s) des Tabs — für den Tab-Zustand in der Spur (/api/tab-zustand); leer = alter Tab
         _TAB_OEFFNEN["vis"] = w("vis") if w("vis") in ("v", "h") else ""
-        # F-B (11.11.2026): Antwort auf die Vorflug-Marke (nur der Haupt-Tab; ein Tab ohne dieses Feld bleibt „kann_pong“ False)
-        # Prüfer S4: „kann_pong“ gilt nur für DIESEN Tab und nur, solange er vpong schickt (≤ TAB_VF_PONG_FRISCH_S) — ein späterer Haupt-Tab ohne
-        # vpong wird wieder nur an den Lebenszeichen gemessen. Der Tab schickt vpong=<Marke> bzw. vpong=- ohne Marke.
-        if w("vpong"):
-            TAB_VORFLUG.update(vpong_tid=w("tid")[:16], vpong_at=time.time())
-            if TAB_VORFLUG.get("marke") and w("vpong") == TAB_VORFLUG["marke"]:
-                TAB_VORFLUG["pong_at"] = time.time()
         try:
             _TAB_OEFFNEN["geladen"] = int(w("geladen")) if w("geladen") else None
         except ValueError:
@@ -4285,8 +4246,7 @@ def panel_beschaeftigt_gruende():
         if TV_ORDER_LOCK.locked():
             g.append("TradingView-/TopstepX-Lauf (TV_ORDER_LOCK)")
         for f, l in list(MASTER_ORDER_LOCKS.items()):
-            # LK1 (Master 11.11.2026 nach RA2): eine reine Deal-/Vorflug-Lesung klickt nichts und bewegt keine Maus → kein Grund, den Neustart zu vertagen
-            if l.locked() and f not in (DEALS_LESEN | VORFLUG_LESEN):
+            if l.locked():
                 g.append(f"MT5-Order {str(f)[:40]}")
         if polar_panel and polar_panel.aktiv():
             g.append("Polar-Lauf")
@@ -4372,7 +4332,7 @@ def _browser_und_mt5_frei(tv_eigen=False):
             return False
         if not tv_eigen and TV_ORDER_LOCK.locked():
             return False
-        return not mt5_order_belegt()   # reine Deal-/Vorflug-Lesungen zählen nicht (S1, RA2 F1)
+        return not any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))
     except Exception:
         return False
 
@@ -4409,10 +4369,6 @@ def _tab_neulade_waechter():
             except Exception as e:
                 print(f"[tab-auftrag] Fehler: {type(e).__name__}: {e}", flush=True)
             _puls_wache_schritt(pc)   # PULS-WACHE (02.11.2026): fehlender Prophos-Tab im Puls-Chrome → nach 60 s neu, auch bei offenem Trade
-            try:
-                _tab_vorflug_schritt(pc)   # F-B (11.11.2026): 2–3 min vor einem Start Lebenszeichen prüfen, bei rot Stufen-Heilung sofort
-            except Exception as e:
-                print(f"[tab-vorflug] Fehler: {type(e).__name__}: {e}", flush=True)
             jetzt0 = time.time()
             tag = datetime.now().strftime("%Y-%m-%d")
             if _TAB_OEFFNEN["tag"] != tag:
@@ -4559,123 +4515,8 @@ def tab_heil_sofort_lage(sofort, jetzt):
     at = float((sofort or {}).get("at") or 0.0)
     if not at or (sofort or {}).get("erledigt") or jetzt - at > TAB_HEIL_SOFORT_S or jetzt < at:
         return None, ""
-    if (sofort or {}).get("bis") and jetzt > float(sofort["bis"]):   # F-B: Vorflug-Befund nur bis zum Start
-        return None, ""
     pl = str((sofort or {}).get("plan") or "")[:8]
-    if (sofort or {}).get("grund"):   # F-B (11.11.2026): Tab-Vorflug vor dem Start nennt seinen eigenen Befund
-        return jetzt - at, str(sofort["grund"])[:200]
     return jetzt - at, f"Prophos-Tab antwortete beim Puls-Start nicht{' (Plan ' + pl + ')' if pl else ''}"
-
-
-# ══ F-B TAB-VORFLUG (11.11.2026, Master nach FS2; K4 „Prophos-Tab antwortet nicht“ 27 Pläne/7 Tage auf 10 PCs) ══
-# Heute merkt erst der Puls-Lauf selbst (order_bot _tab_wache_pruefen „vor dem Lauf“), dass der Tab schläft — dann ist der Start verloren und kommt frühestens
-# 2–4 min später (FS1 sfBehoben). Jetzt prüft das Panel 2–3 min (gewürfelt) VOR jedem Start der IDs dieses PCs die Lebenszeichen des Tabs mit strengeren
-# Schwellen als die Stufen-Heilung (still ≥ 30 s statt 3 min, ohne Login, Supabase ≥ 90 s, Realtime ≥ 2 min) und startet bei rot die VORHANDENE Heilung
-# sofort (TAB_HEIL_SOFORT, Riegel wie FS1: wecken immer, neu laden/öffnen nur ohne offenen Trade). Startzeiten: Railway /code/tab-stand „next_start_um“
-# (ISO oder Liste); fehlt das Feld (Railway noch ohne), passiert nichts. ECHTER PING: /api/instances gibt „vorflug_ping“ mit; schickt der Tab die Marke als
-# vpong zurück, verlangt der Vorflug sie binnen TAB_VF_PONG_S. Ein Tab, der das (noch) nicht kann, wird nur an den Lebenszeichen gemessen.
-TAB_VF_FENSTER_S = (120.0, 180.0)   # Ziel-Abstand vor dem Start, je Start gewürfelt (Jitter-Regel)
-TAB_VF_ZU_SPAET_S = 45.0            # näher am Start nie mehr (der Puls-Lauf beginnt gleich)
-TAB_VF_STILL_S = 30.0               # der Tab fragt sonst alle ~5 s
-TAB_VF_SB_S = 90
-TAB_VF_RT_S = 120
-TAB_VF_PONG_S = 20.0
-TAB_VF_PONG_FRISCH_S = 60.0
-TAB_VORFLUG = {"ziel": {}, "erledigt": {}, "marke": None, "marke_at": 0.0, "pong_at": 0.0, "vpong_tid": "", "vpong_at": 0.0}
-
-
-def tab_kann_pong(vf, haupt_tid, jetzt):
-    """REIN RECHNEND (testbar, Prüfer S4): schickt der AKTUELLE Haupt-Tab vpong (zuletzt ≤ TAB_VF_PONG_FRISCH_S)?"""
-    return bool(haupt_tid) and str((vf or {}).get("vpong_tid") or "") == str(haupt_tid) and jetzt - float((vf or {}).get("vpong_at") or 0) <= TAB_VF_PONG_FRISCH_S
-
-
-def tab_vorflug_riegel(riegel, sofort, stufe_jetzt):
-    """REIN RECHNEND (testbar, F-B Prüfer M2): Railway meldet ±5 min um jeden Start „Start in ≤ 5 min“ — damit hätte der Vorflug (T−2…3 min) nie geweckt.
-    Nur im Vorflug-Sofort-Weg und nur für Stufe 1 (wecken: Tab kurz nach vorn, kein Neuladen) fällt GENAU dieser Riegel weg; jeder andere Riegel
-    (Puls/Signal läuft, Hedge, Claim …) und alle weiteren Stufen bleiben gesperrt."""
-    r = str(riegel or "").strip()
-    if r == "Start in ≤ 5 min" and int(stufe_jetzt or 0) == 0 and str((sofort or {}).get("grund") or "").startswith("Vorflug:"):
-        return ""
-    return r
-
-
-def tab_vorflug_starts(stand):
-    """REIN RECHNEND (testbar): /code/tab-stand → Startzeiten (Unix-s) aus „next_start_um“ (ISO-Text oder Liste); ungültig/fehlend → []."""
-    roh = (stand or {}).get("next_start_um") if isinstance(stand, dict) else None
-    liste = roh if isinstance(roh, list) else [roh] if roh else []
-    out = []
-    for x in liste[:20]:
-        try:
-            t = re.sub(r"(\.\d{1,6})\d*", lambda m: m.group(1).ljust(7, "0"), str(x).strip().replace("Z", "+00:00"))   # Prüfer H8: Bruchteile 1–6 Stellen
-            d = datetime.fromisoformat(t)
-            out.append((d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp())   # ohne Zone = UTC (Railway)
-        except (TypeError, ValueError):
-            continue
-    return sorted(set(out))
-
-
-def tab_vorflug_faellig(starts, jetzt, erledigt, ziele):
-    """REIN RECHNEND (testbar): der erste Start, dessen Vorflug JETZT dran ist → Startzeit | None. Dran: noch nicht erledigt, Abstand ≤ gewürfeltes Ziel
-    (ziele[start], sonst Fenster-Mitte) und ≥ TAB_VF_ZU_SPAET_S."""
-    for st in starts or ():
-        d = float(st) - float(jetzt)
-        ziel = float((ziele or {}).get(st) or sum(TAB_VF_FENSTER_S) / 2)
-        if st not in (erledigt or {}) and TAB_VF_ZU_SPAET_S <= d <= ziel:
-            return st
-    return None
-
-
-def tab_vorflug_urteil(still_s, login, sb_s, rt_aus_s, pong):
-    """REIN RECHNEND (testbar): Lebenszeichen des Haupt-Tabs → (rot, Klartext). pong: True/False = Vorflug-Marke beantwortet/nicht, None = Tab kann es nicht."""
-    if still_s is None:
-        return True, "kein Prophos-Tab hat sich beim Panel gemeldet"
-    if still_s >= TAB_VF_STILL_S:
-        return True, f"Prophos-Tab fragt seit {int(still_s)} s nicht (sonst alle ~5 s)"
-    if login is False:
-        return True, "Prophos-Tab nicht angemeldet (claimt keine Starts)"
-    if login and sb_s is not None and sb_s >= TAB_VF_SB_S:
-        return True, f"Prophos-Tab ohne Supabase-Verbindung seit {int(sb_s)} s"
-    if login and rt_aus_s is not None and rt_aus_s >= TAB_VF_RT_S:
-        return True, f"Prophos-Tab ohne Realtime seit {int(rt_aus_s)} s"
-    if pong is False:
-        return True, f"Prophos-Tab beantwortet die Vorflug-Marke nicht binnen {int(TAB_VF_PONG_S)} s"
-    return False, "Prophos-Tab antwortet" + (" (Vorflug-Marke beantwortet)" if pong else "")
-
-
-def _tab_vorflug_schritt(pc):
-    """F-B: eine Runde im Tab-Wächter. Nie werfen; ohne frischen Tab-Stand oder ohne Startzeiten nichts."""
-    stand, at = TAB_NL.get("stand"), float(TAB_NL.get("stand_at") or 0.0)
-    jetzt = time.time()
-    if not isinstance(stand, dict) or jetzt - at > 180:
-        return
-    starts = tab_vorflug_starts(stand)
-    for k in [k for k in list(TAB_VORFLUG["ziel"]) if k < jetzt - 3600]:
-        TAB_VORFLUG["ziel"].pop(k, None)
-        TAB_VORFLUG["erledigt"].pop(k, None)
-    for st in starts:
-        TAB_VORFLUG["ziel"].setdefault(st, random.uniform(*TAB_VF_FENSTER_S))
-    st = tab_vorflug_faellig(starts, jetzt, TAB_VORFLUG["erledigt"], TAB_VORFLUG["ziel"])
-    if st is None or not _browser_und_mt5_frei():   # nie während eines Puls-Laufs / einer MT5-Order — dann die nächste Runde
-        return
-    TAB_VORFLUG["erledigt"][st] = jetzt
-    pong = None
-    if tab_kann_pong(TAB_VORFLUG, _TAB_OEFFNEN.get("tid"), jetzt):
-        TAB_VORFLUG.update(marke=f"{int(jetzt * 1000):x}-{random.randint(0, 1 << 30):x}", marke_at=jetzt, pong_at=0.0)
-        while time.time() - jetzt < TAB_VF_PONG_S and TAB_VORFLUG["pong_at"] < TAB_VORFLUG["marke_at"]:
-            time.sleep(0.8 + random.random() * 0.6)
-        pong = TAB_VORFLUG["pong_at"] >= TAB_VORFLUG["marke_at"]
-        TAB_VORFLUG["marke"] = None
-    still = time.time() - max(float(_TAB_OEFFNEN.get("zuletzt") or 0.0), float(_TAB_OEFFNEN.get("start") or 0.0))   # wie der Wächter (still0)
-    rot, grund = tab_vorflug_urteil(still, _TAB_OEFFNEN.get("login"), _TAB_OEFFNEN.get("sb_s"), _TAB_OEFFNEN.get("rt_aus_s"), pong)
-    txt = f"Vorflug Tab (Start in {int(st - time.time())} s): {grund}"
-    print(f"[tab-vorflug] {txt}", flush=True)
-    if rot:
-        # Prüfer H7: „nicht angemeldet“ heilt kein Wecken/Neuladen → nur melden. Prüfer H6: einen offenen FS1-Eintrag nie überschreiben.
-        # bis = Startzeit: nach dem Start gilt der Vorflug-Befund nicht mehr (dann übernimmt FS1, falls der Tab beim Start nicht antwortet).
-        if _TAB_OEFFNEN.get("login") is not False and tab_heil_sofort_lage(TAB_HEIL_SOFORT, time.time())[0] is None:
-            TAB_HEIL_SOFORT.update(at=time.time(), plan="", erledigt=False, geheilt=False, grund=f"Vorflug: {grund}", bis=float(st))
-        if pc:
-            _tab_stand_holen(pc, txt[:200])
 
 
 def tab_heil_sofort_riegel(stufe_jetzt, stand):
@@ -4965,8 +4806,6 @@ def _tab_heil_schritt(pc, still0):
     if isinstance(stand, dict) and stand.get("ok"):
         TAB_NL.update(stand=stand, stand_at=time.time())
     riegel = str((stand or {}).get("riegel") or "").strip() if isinstance(stand, dict) else "Tab-Stand von Railway nicht lesbar"
-    if sofort:
-        riegel = tab_vorflug_riegel(riegel, TAB_HEIL_SOFORT, int((TAB_HEIL["ep"] or {}).get("stufe") or 0))   # F-B (Prüfer M2)
     if sofort and not riegel:
         riegel = tab_heil_sofort_riegel(int((TAB_HEIL["ep"] or {}).get("stufe") or 0), stand)
     aktion, grund, ep_neu = tab_heil_stufe(TAB_HEIL["ep"], dauer, problem, jetzt, riegel, _browser_und_mt5_frei(), _win_leerlauf_s(),
@@ -6701,8 +6540,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
             haupt = tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
-            return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt, **({"vorflug_ping": TAB_VORFLUG["marke"]} if TAB_VORFLUG.get("marke") else {})),
-                                              ensure_ascii=False))
+            return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt), ensure_ascii=False))
         if path == "/api/deals":
             # ENDLESUNG UNKLARER ECHO-PLÄNE (N2, Finn 04.11.2026 ~04:15 Dubai: „der P&L wird nie angezeigt"): Deal-Historie + Balance des Master-Logins
             # über order_bot.py „deals" — nur lesen, nie ein Klick. Nur wenn auf dieser Instanz gerade keine Order läuft (MASTER_ORDER_LOCKS): ein
@@ -6741,51 +6579,6 @@ class Handler(BaseHTTPRequestHandler):
                 DEALS_LESEN.discard(inst["config_file"])
                 lock.release()
             return self._send(200, json.dumps(res, ensure_ascii=False))
-        if path == "/api/vorflug":
-            # F-A KONTO-VORFLUG (11.11.2026, Master nach FS2): Zustand des Master-Logins 10–15 min vor dem Start — über order_bot.py „vorflug“, nur lesen
-            # (kein Fenster, kein Login-Dialog, kein Klick). Wie /api/deals: nur ein schon laufendes Terminal, nur ohne laufende Order (MASTER_ORDER_LOCKS,
-            # besetzt → 409, der Tab fragt später). Eine Order, die während der Lesung kommt, wartet bis VORFLUG_WARTE_S (s. master-order).
-            q = parse_qs(urlparse(self.path).query)
-            fname = (q.get("file") or [""])[0]
-            inst = next((i for i in instances() if i["config_file"] == fname), None)
-            if not inst:
-                return self._send(404, json.dumps({"ok": False, "lesbar": False, "grund": "Instanz unbekannt"}, ensure_ascii=False))
-            _cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
-            _pfad = str(_cfg.get("master_terminal_path") or "").strip()
-            if not _pfad or not provision.terminal_pids(os.path.dirname(os.path.abspath(_pfad))):
-                return self._send(200, json.dumps({"ok": False, "lesbar": False, "grund": "Master-Terminal läuft nicht — nicht gelesen (wird nicht gestartet)"}, ensure_ascii=False))
-            if _instanz_heilt(inst):
-                return self._send(409, json.dumps({"ok": False, "lesbar": False, "grund": "Terminal wird gerade geheilt — später"}, ensure_ascii=False))
-            # Hinweis S1: Lock nehmen und als Lesung markieren in EINEM Schritt unter MASTER_ORDER_GUARD (kein Fenster „Lock gehalten, nicht markiert“);
-            # eine angemeldete Order/ein Close (ORDER_ANGEMELDET) hat Vorrang
-            with MASTER_ORDER_GUARD:
-                lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
-                frei = vorflug_darf(inst["config_file"], ORDER_ANGEMELDET, time.time()) and lock.acquire(blocking=False)
-                if frei:
-                    VORFLUG_LESEN.add(inst["config_file"])
-            if not frei:
-                return self._send(409, json.dumps({"ok": False, "lesbar": False, "grund": "auf dieser Instanz läuft gerade eine Order oder Lesung"}, ensure_ascii=False))
-            try:
-                bot = os.path.join(HERE, "order_bot.py")
-                if not os.path.exists(bot):
-                    ensure_bot_source()
-                _ri = (q.get("richtung") or [""])[0].strip().lower()
-                auftrag = {"cfg": os.path.join(HERE, inst["config_file"]), "symbol": (q.get("symbol") or [""])[0][:32],
-                           "richtung": _ri if _ri in ("buy", "sell") else ""}   # Prüfer S3: unbekannt = ohne Seitenprüfung
-                try:
-                    p = subprocess.run([*bot_argv(bot), "vorflug", json.dumps(auftrag)], capture_output=True, text=True, errors="replace",
-                                       timeout=VORFLUG_DECKEL_S, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-                    zeilen = (p.stdout or "").strip().splitlines()
-                    res = json.loads(zeilen[-1]) if zeilen else {"ok": False, "lesbar": False, "grund": "keine Antwort vom Bot"}
-                except Exception as e:
-                    res = {"ok": False, "lesbar": False, "grund": f"Bot-Lauf {type(e).__name__}"}
-            finally:
-                with MASTER_ORDER_GUARD:   # erst den Lock frei, dann die Markierung weg: wer die Markierung nicht mehr sieht, bekommt den Lock
-                    lock.release()
-                    VORFLUG_LESEN.discard(inst["config_file"])
-            if isinstance(res, dict) and res.get("rot"):
-                print(f"[vorflug] {fname}: {res.get('art')} — {str(res.get('grund') or '')[:160]}", flush=True)
-            return self._send(200, json.dumps(res, ensure_ascii=False))
         if path == "/api/haupt-tab":
             # Tab im „nur ansehen"-Modus (30.10.2026, HAUPT-TAB): darf er wieder Haupt-Tab werden? Nur lesen, zählt nie als Herzschlag
             q = parse_qs(urlparse(self.path).query)
@@ -6799,7 +6592,7 @@ class Handler(BaseHTTPRequestHandler):
             # FS1 (10.11.2026): Tab-Zustand für die Puls-Spur; anlass=tab_nicht_erreichbar startet die Stufen-Heilung sofort (s. TAB_HEIL_SOFORT). Nur lokal.
             q = parse_qs(urlparse(self.path).query)
             if (q.get("anlass") or [""])[0] == "tab_nicht_erreichbar":
-                TAB_HEIL_SOFORT.update(at=time.time(), plan=re.sub(r"[^0-9a-f-]", "", (q.get("plan_id") or [""])[0])[:36], erledigt=False, geheilt=False, grund="", bis=None)
+                TAB_HEIL_SOFORT.update(at=time.time(), plan=re.sub(r"[^0-9a-f-]", "", (q.get("plan_id") or [""])[0])[:36], erledigt=False, geheilt=False)
                 print(f"[tab-heilen] Puls: Tab antwortete beim Start nicht — Stufen-Heilung sofort", flush=True)
             return self._send(200, json.dumps(tab_zustand_ausgabe(time.time(), _TAB_OEFFNEN, TAB_HEIL, TAB_HEIL_SOFORT,
                                                                   {"ergebnis": TAB_NL.get("ergebnis"), "ergebnis_at": TAB_NL.get("ergebnis_at")},
@@ -8131,11 +7924,6 @@ class Handler(BaseHTTPRequestHandler):
         if not inst:
             return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{fname}' unbekannt"}))
 
-        if u.path in ("/api/master-order", "/api/master-close") and inst:
-            if inst["config_file"] in VORFLUG_LESEN:
-                _vorflug_abwarten(inst["config_file"])   # F-A (Prüfer M1): vor allen Riegeln beider Routen auf einen laufenden Vorflug warten
-            with MASTER_ORDER_GUARD:   # Hinweis S1: anmelden — ein Vorflug, der jetzt käme, nähme sonst den Lock zwischen Riegeln und acquire (→ 409)
-                ORDER_ANGEMELDET[inst["config_file"]] = time.time()
         if u.path == "/api/master-order":
             # Order-Bot (15.08.2026, Finns Ansage): platziert die Master-Order als
             # kurzlebiger Subprozess. WICHTIG (Korrektur 28.08.2026, Detection-
@@ -8261,8 +8049,7 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
-                # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet; F-A (Prüfer S2, 11.11.2026): ebenso ein Konto-Vorflug
-                if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
+                if inst["config_file"] in DEALS_LESEN:   # N2 (04.11.2026): nur eine Deal-Lesung hält den Lock — beweisbar nichts gesendet
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts gesendet, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
@@ -8377,8 +8164,7 @@ class Handler(BaseHTTPRequestHandler):
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
-                # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut; F-A (Prüfer S2, 11.11.2026): ebenso ein Konto-Vorflug
-                if inst["config_file"] in (DEALS_LESEN | VORFLUG_LESEN):
+                if inst["config_file"] in DEALS_LESEN:   # N2 (Prüfer 04.11.2026): nur eine Deal-Lesung — nichts geklickt, gleich erneut
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "deals_lesen", "msg":
                         "Lese-Lauf (Deal-Historie) auf dieser Instanz — nichts geklickt, gleich erneut."}, ensure_ascii=False))
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
@@ -8834,7 +8620,7 @@ def _version_watcher(my_version):
             if upd["seit"] is None:       # Wartezeit ab dem ersten anstehenden Update — eine neue VERSION beim Warten setzt sie nicht zurück
                 upd.update(streu_bis=time.time() + random.uniform(0, UPDATE_STREU_S), seit=time.time(), gemeldet="")
             upd["auf"] = remote
-            if (TV_ORDER_LOCK.locked() or mt5_order_belegt()) and time.time() - upd["seit"] < UPDATE_DECKEL_S:   # Lesungen zählen nicht (S1, RA2 F1)
+            if (TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))) and time.time() - upd["seit"] < UPDATE_DECKEL_S:
                 continue
             if polar_panel and polar_panel.aktiv():   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten — auch nach dem Deckel nicht (S2 29.10.2026)
                 continue
