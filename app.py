@@ -42814,7 +42814,7 @@ def kz_rechnen(a, ctx):
                          "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if bekannt else "am Konto kein Ziel (goal_target)", "checks": checks}
     if typ == "funded" and isinstance(ctx.get("fdp"), dict):
         try:
-            out["abhak"] = kz_fdp_abhak(a, ctx["fdp"], bal, plaene)
+            out["abhak"] = kz_fdp_abhak(a, ctx["fdp"], bal, plaene, ctx.get("bal_quelle"))
         except Exception as e:
             print(f"[konto-ziele] ⚠️ Funded-Futures-Ziel {aid[:8]}: {type(e).__name__}: {e}", flush=True)
     kach.append(kz_trades_kachel(phase, (out.get("zyklus") or {}).get("seit")))
@@ -42823,7 +42823,7 @@ def kz_rechnen(a, ctx):
     return out
 
 
-def kz_fdp_abhak(a, fdp, bal, plaene):
+def kz_fdp_abhak(a, fdp, bal, plaene, bal_quelle=None):
     """REIN RECHNEND (testbar, AP6 11.11.2026): Abhak-Stand eines Funded-Futures-Kontos (Typ funded) — Ziel wie der Funded-Planer Futures (fdp_konto_anzeige:
     Zyklus-Start aus fdp_zyklus, Ziel = Start + fdp_ziel_gewinn, je Konto × Zyklus fest), erreicht wie fdp_konto_rechnen (Rest ≤ 0,005 $; mehr als ein Trade über dem
     Ziel = unplausibel → nicht erreicht, wie dort). Das Popup wählt dann „→ Winning Days“ vor — dieselbe Umstellung, die fdp_planen am Ziel macht.
@@ -42836,8 +42836,10 @@ def kz_fdp_abhak(a, fdp, bal, plaene):
     pl = [dict(p, bal_start=((p.get("tv") or {}) if isinstance(p.get("tv"), dict) else {}).get("balance_start")) for p in (plaene or [])]
     _eb = fdp_express_basis(a, g)
     if _eb:   # TS2: Topstep Express 0-basiert — absolut rechnen wie fdp_planen (Größe + TopstepX-Stand), sonst stünde jedes Konto „unplausibel“/weit vom Ziel
-        bal = float(bal) + _eb
-        pl = [dict(p, bal_start=_wd_num(p["bal_start"]) + _eb) if _wd_num(p.get("bal_start")) is not None else p for p in pl]
+        if bal_quelle != "TSX":   # TS2-Prüfer: der alte TSX-Sync (acc_balance_wahl) ist schon absolut
+            bal = float(bal) + _eb
+        pl = [dict(p, bal_start=fdp_bal_start_abs(p.get("bal_start"), ((p.get("tv") or {}) if isinstance(p.get("tv"), dict) else {}).get("balance_relativ"), _eb, g))
+              for p in pl]
     zy = fdp_zyklus(g, (fdp or {}).get("pay"), pl)
     an = fdp_konto_anzeige(g, jg, float(bal), zy, fdp_tage, pl, str(a.get("id")))
     start, ziel = an["start"], an["ziel"]
@@ -47639,7 +47641,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     for i in range(0, len(ids), 80):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
-                                                    "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
+                                                    "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,bal_rel:mt5_baseline->tv->balance_relativ,"
                                                     "richtung,master_contracts,master_tp,master_sl,slave_risk,notes,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
                                                     "fp_start:mt5_baseline->funded_plan->>start_um,kette:mt5_baseline->kette",   # FF2: kette für „Trade 1/2“ im Reiter
                                           "master_account_id": f"in.({teil})",
@@ -47693,7 +47695,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             peak_e = liq_peak({}, a, balance, verlauf, eod=True)
             r_p = fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None,
-                                 liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd")) if basis else None)
+                                 liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd"), frisch_ok=not pl) if basis else None)
             if r_p.get("aktion") == "planen":
                 # TS2: Topstep-RTP-Consistency nur als Hinweis (blockt nie) — Pump-Tag = Rest bis zum Zielniveau (beide Wege zielen auf das ganze Niveau)
                 _h = fdp_topstep_cons_hinweis(fdp_tage(pl, ab), (r_p.get("ziel") or 0) - balance, a.get("firm"))
@@ -47716,7 +47718,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             zeile["balance_topstepx"] = zeile["balance"]
             if zeile["balance"] is not None:
                 zeile["balance"] = round(zeile["balance"] + _basis, 2)
-            pl = [dict(p, bal_start=round(_wd_num(p.get("bal_start")) + _basis, 2)) if _wd_num(p.get("bal_start")) is not None else p for p in pl]
+            pl = [dict(p, bal_start=fdp_bal_start_abs(p.get("bal_start"), p.get("bal_rel"), _basis, g)) for p in pl]   # TS2-Prüfer: nur 0-basierte Lesungen
         if a.get("auto_planer") is False:
             erg["ausgelassen"].append(dict(zeile, grund=AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus")); continue
         if a.get("waiting_payout_since"):
@@ -47998,11 +48000,25 @@ def fdp_express_basis(acc, groesse):
     return g if g > 0 and ist_topstep_express(acc) else 0.0
 
 
-def fdp_express_liq(acc, fruehere, bal_rel, basis, dd=None):
+def fdp_bal_start_abs(v, relativ, basis, groesse):
+    """REIN RECHNEND (testbar, TS2-Prüfer KANN): Start-Balance eines früheren Plans absolut → $ | None. Basis 0 → unverändert. Verschoben wird nur eine 0-basierte
+    Lesung: tv.balance_relativ true → + Basis, false → unverändert (absolut gelesen, z. B. alter tvv2-Plan), unbekannt → nur ein Wert unter der halben Größe."""
+    x = _wd_num(v)
+    if x is None or not basis:
+        return x
+    if relativ is True:
+        return round(x + float(basis), 2)
+    if relativ is False:
+        return x
+    return round(x + float(basis), 2) if abs(x) < float(groesse or basis) / 2.0 else x
+
+
+def fdp_express_liq(acc, fruehere, bal_rel, basis, dd=None, frisch_ok=False):
     """REIN RECHNEND (testbar, TS2): Liquidation eines Topstep-Express-Kontos ABSOLUT → (liq | None, text). MLL aus belegten Werten (wd_sl_express_mll: jüngste
     TopstepX-Lesung tv.mll_start, nachgezogen über jede Schluss-Balance − Max DD, höchstens 0), Liq = Basis + MLL + TX2_MLL_VOR. Max DD des Kontos fehlt → dd der
     Größe (jg.dd). Ganz frisches XFA (kein Plan im Verlauf, TopstepX-Stand genau 0): MLL = −DD laut Topstep-Regel (XFA startet bei 0, MLL bei −Max DD) — sonst
-    plante der Pump nie, weil die erste MLL-Lesung erst beim ersten Start kommt. Alles andere ohne Lesung → None mit Grund (nie raten)."""
+    plante der Pump nie, weil die erste MLL-Lesung erst beim ersten Start kommt — nur mit frisch_ok (Aufrufer weiß aus trade_plans: das Konto hat keinen Plan;
+    ein Lesefehler des Verlaufs ergäbe sonst still [] = „frisch“, TS2-Prüfer). Alles andere ohne Lesung → None mit Grund (nie raten)."""
     a = dict(acc or {})
     if not _wd_num(a.get("max_drawdown")) and _wd_num(dd):
         a["max_drawdown"] = _wd_num(dd)
@@ -48010,7 +48026,7 @@ def fdp_express_liq(acc, fruehere, bal_rel, basis, dd=None):
     if mll is None:
         eigene = [f for f in fruehere or () if str(f.get("master_account_id") or "") == str(a.get("id") or "")]
         d = _wd_num(a.get("max_drawdown"))
-        if not eigene and bal_rel is not None and abs(float(bal_rel)) < 0.005 and d and d > 0:
+        if frisch_ok and not eigene and bal_rel is not None and abs(float(bal_rel)) < 0.005 and d and d > 0:
             mll, q = -float(d), f"Start-MLL −{_liq_de(d)} $ (frisches Express-Konto, noch keine TopstepX-Lesung)"
         else:
             return None, q

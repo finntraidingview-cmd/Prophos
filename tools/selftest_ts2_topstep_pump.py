@@ -91,13 +91,20 @@ liq, txt = ruf("fdp_express_liq", TS, [L1, {"master_account_id": TS["id"], "bal_
 check(liq == 147600.0, f"Schluss-Balance +2.000 nach der Lesung zieht die MLL auf −2.500 → Liq 147.600 ({liq})")
 liq, txt = ruf("fdp_express_liq", TS, [L1, {"master_account_id": TS["id"], "bal_end": 16000.0, "ended_at": "2026-11-10T09:00:00Z"}], 16000.0, 150000.0, 4500)
 check(liq == 150100.0, f"XFA-MLL lockt bei 0 → Liq 150.100 ({liq})")
-liq, txt = ruf("fdp_express_liq", TS, [], 0.0, 150000.0, 4500)
+liq, txt = ruf("fdp_express_liq", TS, [], 0.0, 150000.0, 4500, frisch_ok=True)
 check(liq == 145600.0 and "frisch" in txt, f"frisches Express-Konto (kein Plan, Stand 0) → Start-MLL −4.500 laut Regel, Liq 145.600 ({liq}, {txt})")
 liq, txt = ruf("fdp_express_liq", TS, [{"master_account_id": TS["id"], "bal_end": 500.0, "ended_at": "2026-11-10T09:00:00Z"}], 500.0, 150000.0, 4500)
 check(liq is None and txt, f"Trades ohne MLL-Lesung → unbekannt, nie raten ({txt})")
-liq, txt = ruf("fdp_express_liq", TS, [], -50.0, 150000.0, 4500)
+liq, txt = ruf("fdp_express_liq", TS, [], -50.0, 150000.0, 4500, frisch_ok=True)
 check(liq is None, "ohne Plan, aber Stand ≠ 0 (Hand-Trades) → unbekannt")
-liq, txt = ruf("fdp_express_liq", TS, [{"master_account_id": "anderes-konto", "mll_start": -1000.0, "started_at": "2026-11-10T08:00:00Z"}], 0.0, 150000.0, 4500)
+liq, txt = ruf("fdp_express_liq", TS, [], 0.0, 150000.0, 4500)
+check(liq is None, "leerer Verlauf ohne frisch_ok (Lesefehler = stilles []) → unbekannt, nie −DD (Prüfer TS2)")
+check(ruf("fdp_bal_start_abs", 0.0, True, 150000.0, 150000.0) == 150000.0 and ruf("fdp_bal_start_abs", 151000.0, False, 150000.0, 150000.0) == 151000.0,
+      "Start-Balance früherer Pläne: 0-basiert → + Größe, absolut gelesen → unverändert")
+check(ruf("fdp_bal_start_abs", 2000.0, None, 150000.0, 150000.0) == 152000.0 and ruf("fdp_bal_start_abs", 150500.0, None, 150000.0, 150000.0) == 150500.0,
+      "Basis unbekannt: kleiner Wert = 0-basiert, Wert ≈ Größe = absolut")
+check(ruf("fdp_bal_start_abs", 5.0, True, 0.0, 150000.0) == 5.0 and ruf("fdp_bal_start_abs", None, True, 150000.0, 150000.0) is None, "Basis 0 / leer → unverändert")
+liq, txt = ruf("fdp_express_liq", TS, [{"master_account_id": "anderes-konto", "mll_start": -1000.0, "started_at": "2026-11-10T08:00:00Z"}], 0.0, 150000.0, 4500, frisch_ok=True)
 check(liq == 145600.0, "Lesungen anderer Konten zählen nicht")
 
 # ── Genaue Lesung von Trade 1 (0-basiert)
@@ -127,7 +134,7 @@ TRW = {"ziel_gewinn": [13000, 19000], "dd": 4500, "hedge_eur": 850, "hedge_auf_u
        "t1_sl": [4500, 4700], "sl_kein_pct": 50, "sl_hinter_liq": True, "t2_bis": "18:20", "t2_abstand_min": [2, 5], "t2_min_fenster_min": 10,
        "t2_kontrakte": {"3": 1}, "t2_sl_be_pct": 50}
 REG = {"name": "Topstep", "namen": ["topstep"], "tp_modus": "pump2", "lock_usd": 100, "je_groesse": {"150000": TRW}}
-liq_f = ruf("fdp_express_liq", TS, [], 0.0, 150000.0, 4500)
+liq_f = ruf("fdp_express_liq", TS, [], 0.0, 150000.0, 4500, frisch_ok=True)
 r = ruf("fdp_pump_konto", REG, TRW, 150000.0, None, 150000.0, 150000.0, TS["id"], 1, "2026-11-12", random.Random(3), liq_fest=liq_f)
 check(r.get("aktion") == "planen" and r["liq"] == 145600.0 and 163000 <= r["ziel"] <= 169000, f"frisches XFA: Pump plant, Liq 145.600, Ziel 163–169k absolut ({r.get('aktion')}, {r.get('liq')}, {r.get('ziel')})")
 check(r.get("tp") and r["tp"] <= r["ziel"] - 150000.0 and r.get("kontrakte") in (2, 3), f"TP ≤ Rest bis Ziel, 2–3 NQ ({r.get('tp')}, {r.get('kontrakte')})")
@@ -175,8 +182,9 @@ tick = quelle("fdp_pump_tick")
 offen = quelle("fdp_pump_offen_tick")
 check('"route": fdp_route(a.get("firm"))' in planen and '"route": "tvv2"' not in planen, "fdp_planen: Weg nach Firma, kein festes tvv2 mehr")
 check('"master_symbol": "NQ" + frontcode' in planen, "fdp_planen: Symbol NQ + Frontmonat (TopstepX-Contract wie die Hand-Novas)")
-check("liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis" in planen and "fdp_express_basis(a, g)" in planen, "fdp_planen: Express-Adapter (Basis + Liq aus der MLL)")
-check('zeile["balance"] = round(zeile["balance"] + _basis, 2)' in planen and "bal_start=round(_wd_num(p.get(\"bal_start\")) + _basis, 2)" in planen,
+check('liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd"), frisch_ok=not pl)' in planen and "fdp_express_basis(a, g)" in planen, "fdp_planen: Express-Adapter (Basis + Liq aus der MLL)")
+check('zeile["balance"] = round(zeile["balance"] + _basis, 2)' in planen and 'fdp_bal_start_abs(p.get("bal_start"), p.get("bal_rel"), _basis, g)' in planen
+      and "bal_rel:mt5_baseline->tv->balance_relativ" in planen,
       "fdp_planen: Balance und Start-Balancen früherer Pläne absolut (Zyklus-Start nach Payout)")
 check("nur im Pump-Modell" in planen, "fdp_planen: Topstep Express ohne Pump-Modell → nie geplant")
 check('p.get("route") if p.get("route") in ("tvv2", "tsv2") else fdp_route(a.get("firm"))' in tick and '"route": "tvv2"' not in tick, "fdp_pump_tick: Trade 2 auf dem Weg von Trade 1")
@@ -185,6 +193,10 @@ check("fdp_pump_echt(p, basis)" in tick and "fdp_express_liq(a, fdp_express_vor_
 check('"route": "in.(tvv2,tsv2)"' in offen, "fdp_pump_offen_tick: 18:00-Alarm auch für Topstep")
 check('fdp_topstep_cons_hinweis(fdp_tage(pl, ab), (r_p.get("ziel") or 0) - balance, a.get("firm"))' in planen and 'notiz += " · " + r["hinweis"]' in planen
       and 'aktion="aus"' not in planen.split("fdp_topstep_cons_hinweis(")[1][:400], "fdp_planen: Consistency-Hinweis in die Plan-Notiz, kein Block")
+HTML = open(os.path.join(W, "prophos.html"), encoding="utf-8").read()
+check("function tpIstFundedPump(p)" in HTML and "!tpIstWdPlan(p) && !tpIstFundedPump(p)) return 'Topstep V2 — startet nur von Hand'" in HTML
+      and HTML.count("!tpIstWdPlan(p) && !tpIstFundedPump(p))") == 2, "PC-Tab: Nova-Pump (auch Ein-Trade-Weg ohne kette) startet zur Zeit wie die Kette (Prüfer TS2)")
+check('bal_quelle != "TSX"' in quelle("kz_fdp_abhak") and 'kz_fdp_abhak(a, ctx["fdp"], bal, plaene, ctx.get("bal_quelle"))' in app, "Abhak-Popup: alter TSX-Sync (absolut) wird nicht verschoben")
 check("fdp_express_basis(a, g)" in quelle("kz_fdp_abhak"), "kz_fdp_abhak (Abhak-Popup): Topstep Express absolut wie der Planer")
 
 print()

@@ -32748,6 +32748,8 @@
   // WS2d (Master 09.11.2026, WS2 Tages-Teilung 1–4 Trades, Schnittstelle 2026-11-09_WS2_schnittstelle.md §2): seit kette.von gibt es Teile 1–4 auf allen Wegen
   // (tvv2, tsv2, mt5) — nr 3/4 zählen jetzt auch (tsv2-Teile 3/4 starten wie Teil 2 von selbst, Nachlese-Zeit wie Topstep-Teile). Alte Pläne tragen nur 1/2 → unverändert.
   const KETTE_NR_MAX = 4
+  // TS2 (11.11.2026): Pump-Plan des Funded-Planers Futures (Trade 1/2 oder Ein-Trade-Weg; Kennung mt5_baseline.funded_plan.pump, app.py fdp_planen/fdp_pump_tick)
+  function tpIstFundedPump(p){ const fp = p && p.mt5Baseline && p.mt5Baseline.funded_plan; return !!(fp && typeof fp === 'object' && fp.pump && typeof fp.pump === 'object') }
   function tpKetteNr(p){
     const k = p && p.mt5Baseline && p.mt5Baseline.kette
     const n = k && Number(k.nr)
@@ -54583,7 +54585,7 @@
         : _rk.status === 'konflikt' ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt: ${escapeHtml(String(_rk.gegen === 'sell' ? 'SHORT' : _rk.gegen === 'buy' ? 'LONG' : '?'))} ${_rk.durch === 'geplant' ? 'vorher geplant' : 'läuft'}</span>`
         : ''
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
-        ? vorcheckChip + rkChip + (p.route === 'tsv2' && !tpKetteNr(p)
+        ? vorcheckChip + rkChip + (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFundedPump(p)   // TS2: Nova-Pump startet zur Zeit
           // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt.
           // Ausnahme Topstep-Kette (08.10.2026): startet zur Zeit über Puls in TopstepX wie Orbit
           ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">⏰ ${tpStartUmText(p.startUm)} · von Hand ✕</button> ${orbitBtn}`
@@ -54673,7 +54675,7 @@
       // Ändern-Klick, „von Hand" darunter, „Starten" bleibt wie auf der Karte daneben.
       if(opt && opt.zeile && !planIstZeile(p) && p.route !== 'polar'){
         const zeitOffen = !!(p.startUm && !p.startUmGestartetAt)
-        const tsHand = p.route === 'tsv2' && !tpKetteNr(p)
+        const tsHand = p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFundedPump(p)   // TS2: Nova-Pump startet zur Zeit
         const restK = zeitOffen ? vorcheckChip + (tsHand ? orbitBtn : '') : gestartetFrisch ? neuBtn : jetztBtn
         const kopfK = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
@@ -65835,8 +65837,10 @@
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
     // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
     // Winning-Days-Farmer auf Topstep (.1488, 13.10.2026): startet wie die Kette über Puls in TopstepX, sobald der Schalter scharf steht
-    if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) return 'Topstep V2 — startet nur von Hand'
-    if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
+    // TS2 (Finn 11.11.2026 „Topstep … ganz genau alles gleich wie Tradeify“): Pump-Pläne des Funded-Planers (Nova, mt5_baseline.funded_plan.pump) starten wie die Kette —
+    // auch der Ein-Trade-Weg ohne kette (Prüfer TS2: sonst startete er nie von selbst)
+    if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p) && !tpIstFundedPump(p)) return 'Topstep V2 — startet nur von Hand'
+    if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpIstFundedPump(p) ? 'Nova (Funded-Planer)' : tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(tpLotsDeckelFehlt(p)){ tpLotsDeckelMelden(p); return tpLotsDeckelText(p) }   // LOTS-DECKEL (02.11.2026): weder Puls-Order noch Hedge, kein Countdown, kein Claim
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung im Funded-Planer → Winning Days'   // APEX-WD BESTÄTIGEN (02.11.2026)
@@ -66027,7 +66031,7 @@
     const heute = new Date(now).toISOString().slice(0, 10), m = suVorschlagGemeldetLaden()
     let neu = false
     for(const p of (plaene || [])){
-      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
+      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p) && !tpIstFundedPump(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
       if(new Date(p.startUm).getTime() > now || m.get(String(p.id)) === heute) continue
       m.set(String(p.id), heute); neu = true
       if(typeof atToast === 'function') atToast(`🤖 Vorschlag „${p.masterName || '—'}" (${tpStartUmText(p.startUm)}) ist unbestätigt — nicht gestartet, nicht geclaimt. Im Trade-Planer bestätigen oder löschen.`, 'end')

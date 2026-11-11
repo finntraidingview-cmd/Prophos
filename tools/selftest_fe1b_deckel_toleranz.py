@@ -32,7 +32,7 @@ def block(name):
 
 
 HILFEN = ("_ist_tradeify_cfd", "wd_min_gewinn", "wd_firmen_regel", "_wd_num", "_liq_de", "_ap_de", "_cme_handelstag", "ist_topstep_express", "liq_konto_boden", "liq_stufe",
-          "_ap_norm", "ap_regel_finden", "_wd_konto_groesse", "liq_regel_waehlen", "_ap_tz", "kz_usd", "kz_fdp_abhak")
+          "_ap_norm", "ap_regel_finden", "_wd_konto_groesse", "liq_regel_waehlen", "_ap_tz", "kz_usd", "kz_fdp_abhak")  # fdp_bal_start_abs kommt mit dem fdp-Block
 ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "random": random, "time": time, "GP_SLAVE_PPL": 0.85,
       "_firm_norm": lambda x: str(x or ""), "hashlib": hashlib}
 i, j = SRC.index("FDP_TAKT_S = 300"), SRC.index('@app.route("/admin/funded-plan"')

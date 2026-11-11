@@ -32,7 +32,7 @@ def lade(name):
 
 for n in ("_wd_num", "_liq_de", "kz_usd", "_wd_konto_groesse", "fdp_je_groesse", "fdp_ziel_gewinn", "fdp_zyklus", "fdp_tage", "fdp_konto_anzeige", "kz_fdp_abhak",
           "FDP_PUMP_TP_TOL_USD", "_fdp_pump_u", "_fdp_pump_spanne", "fdp_pump_tag_wurf",
-          "ist_topstep_express", "fdp_express_basis", "fdp_ziel_schwelle", "fdp_ziel_tol_erreicht"):   # TS2 + FE1b
+          "ist_topstep_express", "fdp_express_basis", "fdp_ziel_schwelle", "fdp_ziel_tol_erreicht", "fdp_bal_start_abs"):   # TS2 + FE1b
     lade(n)
 ns["_cme_handelstag"] = lambda st: str(st)[:10]
 
