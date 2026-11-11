@@ -116,7 +116,7 @@ app._sb_all = lambda t, p: [dict(z) for z in pc_zeilen]
 gesehen = []
 app._puls_heim_naehe = lambda plaene, schw: gesehen.append([p["id"] for p in plaene]) or []
 app.sb_select = lambda t, p: []
-app._wd_fruehere_trades = lambda ids: {}
+app._wd_fruehere_trades = lambda ids, streng=False: {}
 app._liq_regeln_laden = app._liq_kw_laden = lambda: []
 app._liq_verlauf_laden = lambda ids: []
 app._kurs_jetzt = lambda: {}

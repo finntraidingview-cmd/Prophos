@@ -13112,6 +13112,9 @@ def wd_sl_express_mll(acc, fruehere, bal=None):
     return round(min(lesung, 0.0), 2), quelle
 
 
+WD_SL_GRUND_FRUEHER = "frühere Trades nicht lesbar — Puffer unbekannt"
+
+
 def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
     """REIN RECHNEND (testbar): wd_sl eines neuen WD-Plans → dict | None (Würfel aus). Puffer = hf_wd_master_verlust (Balance tv_balance − Liq wie Radar
     und WD-Hedge, Daily Loss ab Tagesstart bei Apex). Topstep Express (TX2, 10.11.2026): Liq = MLL aus TopstepX (wd_sl_express_mll) + 100 $ wie der WD-Hedge,
@@ -13120,6 +13123,9 @@ def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
         return None
     if not acc:
         return wd_sl_wuerfeln(regel, None, rnd=rnd, grund="Konto-Daten nicht lesbar — Puffer unbekannt")
+    if fruehere is None:
+        # KK1: frühere Trades nicht lesbar (_wd_sl_kontext) — ohne sie fehlen Tagesstart-Balance/MLL-Start; wie „Konto-Daten nicht lesbar“: lieber kein SL
+        return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund=WD_SL_GRUND_FRUEHER)
     if ist_topstep_express(acc):
         # Prüfer TX2 (Empfehlung a, 10.11.2026): die Puffer-Balance zählt mit ins MLL-Nachziehen (Gewinn-/Hand-Trade ohne bal_end hob den Stand) —
         # sonst hinge die Sicherheit nur an der Stufen-Obergrenze (DB-änderbar). Reihenfolge der Gründe wie bisher: erst MLL-Lesung, dann Balance.
@@ -13174,7 +13180,11 @@ def _wd_sl_kontext(mids):
     except Exception as e:
         print(f"[wd-sl-wuerfel] ⚠️ Konten nicht lesbar ({type(e).__name__}) — diese Pläne ohne SL", flush=True)
         return regel, {}, [], []
-    return regel, konten, _liq_regeln_laden(), _wd_fruehere_trades(mids)
+    try:
+        fruehere = _wd_fruehere_trades(mids, streng=True)
+    except Exception:
+        fruehere = None           # KK1: nicht „keine früheren Trades“ — wd_sl_fuer_plan würfelt diese Pläne ohne SL mit Grund (WD_SL_GRUND_FRUEHER)
+    return regel, konten, _liq_regeln_laden(), fruehere
 
 
 # ══ SL1 WD-SL NACHWÜRFELN (10.11.2026, Master; Befund DB 10.11.: von 10 WD-Farmer-Plänen seit dem Einschalten trugen 9 wd_sl „Rückfall ohne Würfel“, nur einer
@@ -13263,9 +13273,9 @@ def wd_sl_nach_tick(jetzt=None, rnd=None):
                                                       "tv_balance,tv_balance_at", "id": "in.(" + ",".join(mids[i:i + 80]) + ")"}) or []:
                 konten[str(a.get("id"))] = a
         liq = _liq_regeln_laden()
-        frueher = _wd_fruehere_trades(mids)
+        frueher = _wd_fruehere_trades(mids, streng=True)    # KK1: Lesefehler → dieser Takt schreibt nichts (except unten)
     except Exception as e:
-        out["fehler"] = f"Konto-/Liq-Daten nicht lesbar ({type(e).__name__}) — nächster Takt"
+        out["fehler"] = f"Konto-/Liq-Daten oder frühere Trades nicht lesbar ({type(e).__name__}) — nächster Takt"
         return out
     if not liq:
         out["fehler"] = "liq_regeln nicht geladen — nächster Takt"
@@ -13619,8 +13629,11 @@ def wd_vorher_waehlen(p, fruehere):
     return {"ended_at": f["ended_at"], "balance_end_da": _wd_num(f.get("bal_end")) is not None}
 
 
-def _wd_fruehere_trades(acc_ids):
-    """Beendete Pläne der Konten (14 Tage) für wd_vorher_waehlen — eine Abfrage je 80 Konten, Fehler → []."""
+def _wd_fruehere_trades(acc_ids, streng=False):
+    """Beendete Pläne der Konten (14 Tage) für wd_vorher_waehlen — eine Abfrage je 80 Konten, Fehler → [] (Anzeigen).
+    streng=True (KK1, 11.11.2026, Fund S3: ein Lesefehler sah aus wie „keine früheren Trades“ — Tagesstart-Balance und Puffer fielen dann still auf
+    tv_balance bzw. die Größe zurück): Fehler wird weitergeworfen. Für die Wege, die damit schreiben oder sperren (SL-Würfel POST /admin/wd-plaene,
+    SL1-Nachwürfeln, Heim-Wache) — jeder hat dort schon seinen fail-closed-Zweig (ohne SL mit Grund / nächster Takt / Puls bleibt im Konto)."""
     out, ids = [], sorted({str(x) for x in acc_ids if x})
     seit = datetime.fromtimestamp(time.time() - 14 * 86400, timezone.utc).isoformat()
     try:
@@ -13632,6 +13645,8 @@ def _wd_fruehere_trades(acc_ids):
                                            "master_account_id": f"in.({','.join(ids[i:i + 80])})", "ended_at": f"gte.{seit}"})
     except Exception as e:
         print(f"[wd-heute] ⚠️ frühere Trades: {type(e).__name__}: {e}", flush=True)
+        if streng:
+            raise
     return out
 
 
@@ -20982,7 +20997,7 @@ def _puls_heim_naehe(plaene, schwellen_je):
     ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
     accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at",
                                                                  "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
-    fruehere = _wd_fruehere_trades(ids)
+    fruehere = _wd_fruehere_trades(ids, streng=True)   # KK1 (Prüfer SOLLTE): Lesefehler → die Aufrufer fangen ihn (Zweit-Prüfung: nicht frei)
     liq_regeln, liq_verlauf, liq_kw = _liq_regeln_laden(), _liq_verlauf_laden(ids), _liq_kw_laden()
     kurse = _kurs_jetzt()
     out = []
@@ -21279,7 +21294,7 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
         ids = sorted({str(p.get("master_account_id")) for p in big + apexe + wds if p.get("master_account_id")})
         accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at",
                                                                      "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
-        fruehere = _wd_fruehere_trades(ids)
+        fruehere = _wd_fruehere_trades(ids, streng=True)   # KK1: Lesefehler → except unten = nicht frei (fail-closed wie jeder Rechenfehler hier)
         liq_regeln, liq_verlauf, liq_kw = _liq_regeln_laden(), _liq_verlauf_laden(ids), _liq_kw_laden()
         kurse = _kurs_jetzt()
         for p in big:
@@ -33638,7 +33653,7 @@ def admin_auto_plan_hedge_freigabe():
                 kids = sorted({str(r.get("master_account_id")) for r in rows if r.get("wd") and r.get("master_account_id")})
                 if kids:
                     konten = {str(k.get("id")): k for k in _sb_all("accounts", {"select": "id,user_id,firm,name,external_id,account_type,starting_balance,max_drawdown,tv_balance", "id": "in.(" + ",".join(kids) + ")"})}
-                    regeln, kw, fruehere = _liq_regeln_laden(), _liq_kw_laden(), _wd_fruehere_trades(kids)
+                    regeln, kw, fruehere = _liq_regeln_laden(), _liq_kw_laden(), _wd_fruehere_trades(kids, streng=True)   # KK1: Lesefehler → Spalte „–“ statt falschem Puffer
                     for r in rows:
                         if r.get("wd"):
                             r["master_verlust"] = hf_wd_master_verlust(regeln, konten.get(str(r.get("master_account_id"))), r,
@@ -42993,7 +43008,7 @@ def konto_ziele():
                 # AP6 (Finn 11.11.2026: „Ziel erreicht → Winning Days“ beim Abhaken): Regel des Funded-Planers Futures für Firma + Unternehmen der ID — dieselbe
                 # Auswahl wie fdp_planen (fd_unt_an → ap_regel_finden), nur lesen; Firma nicht im Planer → kein Ziel (kz_rechnen lässt abhak weg)
                 try:
-                    _freg = _fdp_regeln_laden() or {}
+                    _freg = _fdp_regeln_gemerkt() or {}   # KK1: 60 s gemerkt (je Funded-Konto sonst eine DB-Abfrage)
                     _fr = ap_regel_finden(fd_unt_an(_freg, "futures", a.get("user_id"), None, True), a.get("firm")) if _freg else None   # streng wie fdp_planen (an_von)
                     if _fr:
                         ctx["fdp"] = {"regel": _fr, "pay": [z.get("requested_at") or z.get("created_at") for z in pend] + [z.get("payout_date") or z.get("created_at") for z in verw]}
@@ -47550,6 +47565,27 @@ def _fdp_regeln_laden():
             _fdp_info["regeln_fehlt_at"] = time.time()
             print(f"[funded-plan] funded_plan_regeln nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — SQL eingespielt?", flush=True)
         return None
+
+
+FDP_REGELN_CACHE_S = 60          # KK1 (AP6-Prüfung KANN): /konto-ziele lädt die Regel je Funded-Konto — 60 s merken wie andere Regel-Lader
+FDP_REGELN_ALT_S = 900           # Lesefehler: letzter guter Stand bis 15 min (wie TW_ALT_S/RV_ALT_S), danach None
+_fdp_reg_cache = {"at": 0.0, "zeile": None, "gut_at": 0.0}   # ohne Lock: ein paralleler Doppel-Lesezugriff ist harmlos (Selbsttest-Lader laden diesen Block ohne threading)
+
+
+def _fdp_regeln_gemerkt(jetzt=None):
+    """_fdp_regeln_laden, höchstens alle FDP_REGELN_CACHE_S gelesen — NUR für Lese-Anzeigen (/konto-ziele). Planer, Einstellungen und Schreibwege lesen weiter
+    frisch (_fdp_regeln_laden: updated_at-Konfliktschutz, Nachtlauf). Lesefehler / Tabelle fehlt → letzter guter Stand ≤ FDP_REGELN_ALT_S, sonst None."""
+    t = time.time() if jetzt is None else float(jetzt)
+    c = _fdp_reg_cache
+    if c["at"] and t - c["at"] < FDP_REGELN_CACHE_S:
+        return c["zeile"]
+    z = _fdp_regeln_laden()
+    c["at"] = t
+    if z is not None:
+        c["zeile"], c["gut_at"] = z, t
+    elif not (c["gut_at"] and t - c["gut_at"] <= FDP_REGELN_ALT_S):
+        c["zeile"] = None
+    return c["zeile"]
 
 
 def _fdp_ids_aus():

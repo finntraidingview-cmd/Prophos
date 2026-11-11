@@ -119,7 +119,7 @@ def main():
     def sb_update(t, f, u):
         DB["upd"].append((t, f, u))
         return DB["upd_antwort"] if DB["upd_antwort"] is not None else [dict(u, id=f["id"][3:])]
-    ns.update(sb_select=sb_select, sb_update=sb_update, _liq_regeln_laden=lambda: DB["liq"], _wd_fruehere_trades=lambda mids: [],
+    ns.update(sb_select=sb_select, sb_update=sb_update, _liq_regeln_laden=lambda: DB["liq"], _wd_fruehere_trades=lambda mids, streng=False: [],
               _wd_sl_wuerfel_lesen=lambda: (std, "db"))
     T = ns["wd_sl_nach_tick"]
     DB["plaene"] = [plan()]
