@@ -63,7 +63,7 @@ check(src.count("fusion_sppl(ppl, uid)") + src.count('fusion_sppl(ctx_ppl.get("p
 check(src.count('sppl=K.get("sppl") or FDP_SLAVE_PPL)') == 2 and 'konst["sppl"] = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None' in src,
       "FDP: rein rechnend, € je Punkt kommt von außen (konto_rechnen)")
 check('"mt5_baseline->hedge->>waehrung": "eq.EUR"' in src, "Messung nur aus EUR-Hedges")
-check(src.count("fusion_sppl(None,") == 3, "TFH-Aufrufe (Vorschau + Takt) und FDP mit dem Wert der ID")
+check(src.count("fusion_sppl(None,") == 4, "TFH-Aufrufe (Vorschau + Takt), FDP und FF2-Pump-Takt (Trade 2) mit dem Wert der ID")   # FF2 11.11.2026: + fdp_pump_tick
 check("lots = slave_risk / (TFH_SLAVE_PPL * pkt)" not in src, "TFH rechnet nicht mehr fest")
 
 # ── Frontend (jsc) ─────────────────────────────────────────────────────────────────────────────────────────

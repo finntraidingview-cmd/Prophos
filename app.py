@@ -39846,6 +39846,9 @@ def tt_tick(jetzt=None, rnd=None):
             except Exception as e:
                 print(f"[tagesteilung] ⚠️ {str(p.get('id'))[:8]} Fusion nachziehen: {type(e).__name__}: {e}", flush=True)
     rows = [p for p in rows if not (((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"))]
+    # FF2 (11.11.2026): Pump-Ketten des Funded-Planers (mt5_baseline.funded_plan) führt fdp_pump_tick — nie hier (sonst schriebe die ausgeschaltete Tagesteilung
+    # „aus“ als Tagesende an Trade 1, der PC-Tab hörte auf nachzulesen und Trade 2 entstünde nie)
+    rows = [p for p in rows if not (isinstance((p.get("mt5_baseline") or {}).get("funded_plan"), dict))]
     if not rows:
         return {"neu": [], "ende": [], "abgehakt": []}
     nf = sb_select("trade_plans", {"select": "id,status,vor:mt5_baseline->kette->>vor",
@@ -46531,6 +46534,220 @@ def fdp_sl_rest(jg, balance, liq, rnd=None, tages_puffer=FDP_TAGES_PUFFER, liq_p
     return float(int(sl)) if sl > 0 else None
 
 
+# ── FF2 „PUMP IN 2 TRADES“ (Finn 11.11.2026 ~01:50–02:33 Dubai, Tradeify 150k: „Hochpumpen in einem einzigen Tag, weil danach das End of Day Draw anzieht … zu
+# 70 % ein einziger Trade, zu 30 % zwei Trades“; Lucid „eins zu eins die gleiche Logik, nur bei Lucid halt Daily Drawdown … von 2,7k“). Modell der Firmen-Regel
+# tp_modus 'pump2' (Werte je Größe, Schlüssel und Grenzen wie prophos.html E2_P2; Konstrukt + Schnittstelle side-session-notes 2026-11-11_FF2_*). Je Konto × Zyklus ×
+# CME-Tag fest gewürfelt (sha256, kein Speicher): Ziel-Gewinn und Weg — „ein“ = ein Trade bis zum ganzen Ziel, „zwei“ = Trade 1 (eigener TP, Fenster t1_von–t1_bis
+# Dubai) und danach am selben Tag Trade 2 (Rest zum Ziel, fdp_pump_tick nach der genauen Lesung, Start bis t2_bis Dubai). SL-Würfel: sl_kein_pct % ohne SL, sonst aus der
+# Spanne; Trade 2 zu t2_sl_be_pct % SL = Gewinn aus Trade 1 (Break-even auf den Tagesstart), sonst ohne. Hedge = fester Satz hedge_eur ÷ hedge_auf_usd je $ Risiko
+# (nicht „offene Kosten“). Lucid: daily_usd (2.700 ab Tagesstart, weich) begrenzt SL und Risiko. Liquidation für Trade 2 nach Tagesend-Logik (liq_peak eod=True).
+FDP_PUMP_TP_TOL_USD = 100                 # Trade 1 gilt als am TP, wenn E1 ≥ TP − 100 (Schlupf am Fill)
+FDP_PUMP_BLOW_TOL_USD = 50                # Ende ≤ Liq + 50 = geblowt
+FDP_PUMP_TZ = "Asia/Dubai"                # t1_von / t1_bis / t2_bis sind Dubai-Zeiten (Finn: „3:00 Dubai … bis 16:00“, „vor 18:30 Dubai-Zeit“)
+FDP_PUMP_T2_MIN_TP_USD = 500              # bliebe für Trade 2 weniger Rest, ist es ein Trade bis zum Ziel (kein Mini-Trade 2)
+FDP_PUMP_PLAUSI_USD = 500                 # Trade 1 mehr als 500 $ über seinem TP = Lesung zweifelhaft (Gegenprüfung) → Tag zu mit ⚪
+FDP_PUMP_TAG_AB_H = 3                     # CME-Tag beginnt im Winter 03:00 Dubai — ein Ende davor gehört zum alten Tag (dann kein Trade 2)
+
+
+def _fdp_pump_u(*teile):
+    """0..1 fest aus den Teilen (sha256) — gleiche Eingabe, gleicher Wert (kein Hin und Her zwischen den 5-min-Takten)."""
+    return int(hashlib.sha256("|".join(str(t) for t in teile).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+
+
+def _fdp_pump_spanne(sp, u):
+    if not (isinstance(sp, (list, tuple)) and len(sp) == 2) or _wd_num(sp[0]) is None or _wd_num(sp[1]) is None:
+        return None
+    lo, hi = float(sp[0]), float(sp[1])
+    return lo + (hi - lo) * u if hi > lo else lo
+
+
+def _fdp_pump_kt(kt, rnd):
+    """Kontrakte aus {Anzahl: Anteil} gewürfelt (aufsteigend kumuliert)."""
+    try:
+        z = sorted((int(k), float(v)) for k, v in (kt or {}).items() if float(v) > 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not z:
+        return None
+    x, s = rnd.random() * sum(v for _k, v in z), 0.0
+    for k, v in z:
+        s += v
+        if x < s:
+            return k
+    return z[-1][0]
+
+
+def fdp_pump_tag_wurf(jg, konto_id, zyklus, tag):
+    """REIN RECHNEND (testbar): Weg und Ziel eines Pump-Tags, fest je Konto × Zyklus × CME-Tag → {weg: ein|zwei, ziel_gewinn}. Ein Break-even-Tag endet ohne Ziel —
+    am nächsten Tag würfelt ein neuer Tag neu (Finn: „am nächsten Tag weitergenutzt … wieder komplett hoch zurück auf Gesamtzielwürfel“)."""
+    pct = _wd_num((jg or {}).get("pump2_pct"))
+    pct = 30.0 if pct is None else max(0.0, min(100.0, pct))
+    weg = "zwei" if _fdp_pump_u("pump-weg", konto_id, zyklus, tag) * 100 < pct else "ein"
+    zg = _fdp_pump_spanne((jg or {}).get("ziel_gewinn"), _fdp_pump_u("pump-ziel", konto_id, zyklus, tag))
+    if zg is None:
+        zg = _wd_num((jg or {}).get("ziel_gewinn")) or 0.0
+    return {"weg": weg, "ziel_gewinn": float(round(zg))}
+
+
+def fdp_pump_hedge(jg, risiko):
+    """REIN RECHNEND (testbar): Fusion-Hedge € am Risiko = hedge_eur ÷ hedge_auf_usd × Risiko; Satz fehlt → None (Lucid: Finn hat keinen genannt)."""
+    he, auf = _wd_num((jg or {}).get("hedge_eur")), _wd_num((jg or {}).get("hedge_auf_usd"))
+    if not (he and he > 0 and auf and auf > 0) or risiko is None or risiko <= 0:
+        return None
+    return round(he / auf * float(risiko), 2)
+
+
+def _fdp_pump_sl(jg, schluessel, balance, liq, daily_rest, rnd, kein_pct):
+    """SL-Würfel → (sl | None, risiko). Risiko = SL; ohne SL bzw. SL hinter der Liq = Liq-Abstand; mit Daily-Rest höchstens der."""
+    abstand = balance - liq
+    grenze = min(abstand, daily_rest) if daily_rest is not None else abstand
+    if rnd.random() * 100 < kein_pct:
+        return None, grenze
+    sl = _fdp_pump_spanne((jg or {}).get(schluessel), rnd.random())
+    if sl is None:
+        return None, grenze
+    if daily_rest is not None:
+        sl = min(sl, daily_rest)
+    if not (jg or {}).get("sl_hinter_liq"):
+        sl = min(sl, abstand - FDP_LIQ_PUFFER)
+    sl = float(int(sl))
+    return sl, min(sl, grenze)
+
+
+def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
+    """REIN RECHNEND (testbar): Ein-Trade-Weg bzw. Trade 1 eines Pump-Tags → {aktion: planen, tp, sl, risiko, kontrakte, hedge_eur, kette} | {aktion: aus|ziel, grund}.
+    ziel = Ziel-Balance (Zyklus-Start + ziel_gewinn), tag_verlust = heutiger Verlust des Kontos (Daily-Rest bei Lucid)."""
+    if balance is None or liq is None or balance - liq <= FDP_LIQ_PUFFER:
+        return {"aktion": "aus", "grund": "zu nah an der Liquidation"}
+    rest = round(ziel - balance, 2)
+    if rest <= 0.005:
+        return {"aktion": "ziel", "grund": "Ziel erreicht → Winning Days"}
+    d = _wd_num((jg or {}).get("daily_usd"))
+    daily_rest = (d - max(0.0, float(tag_verlust or 0))) if d else None
+    if daily_rest is not None and daily_rest <= FDP_LIQ_PUFFER:
+        return {"aktion": "aus", "grund": "Daily Loss heute schon erreicht"}
+    kein = _wd_num((jg or {}).get("sl_kein_pct"))
+    kein = 50.0 if kein is None else kein
+    if weg == "zwei":
+        tp = _fdp_pump_spanne((jg or {}).get("t1_tp"), rnd.random())
+        tp = min(float(round(tp)), rest) if tp else rest
+        kt, slk, kette = _fdp_pump_kt((jg or {}).get("t1_kontrakte"), rnd), "t1_sl", {"von": 2, "nr": 1, "rolle": "haupt"}
+        if rest - tp < FDP_PUMP_T2_MIN_TP_USD:   # Trade 2 hätte fast nichts mehr zu tun → ein Trade bis zum Ziel, ohne kette
+            tp, kette = rest, None
+    else:
+        tp, kt, slk, kette = rest, _fdp_pump_kt((jg or {}).get("ein_kontrakte"), rnd), "ein_sl", None
+    if not kt:
+        return {"aktion": "aus", "grund": "Kontrakte fehlen in den Einstellungen (Pump-Modell)"}
+    sl, risiko = _fdp_pump_sl(jg, slk, balance, liq, daily_rest, rnd, kein)
+    h = fdp_pump_hedge(jg, risiko)
+    if h is None:
+        return {"aktion": "aus", "grund": "Hedge-Satz fehlt (Fusion-Hedge je Master-Risiko in den Einstellungen)"}
+    return {"aktion": "planen", "tp": tp, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "kette": kette}
+
+
+def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd):
+    """REIN RECHNEND (testbar): Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund). liq_eod = Liq nach Tagesend-Logik
+    (liq_peak eod=True). balance_start = Balance beim Start von Trade 1 = Tagesstart (Trade 1 ist der erste Trade des Pump-Tags) — darum gilt bei Daily Loss:
+    Verlust höchstens E1 + daily_usd. Trade 1 nicht am TP (Hand, Abgleich am Master) → „Tag zu“ (Finn: „Die Trades werden nicht geschlossen durch Zufall“)."""
+    e1 = round(float(balance_end) - float(balance_start), 2)
+    if balance_end <= liq_eod + FDP_PUMP_BLOW_TOL_USD:
+        return None, f"Trade 1 hat das Konto geblowt ({e1:+.0f} $) — kein Trade 2"
+    tp1 = _wd_num((t1 or {}).get("tp"))
+    if tp1 is not None and e1 > tp1 + FDP_PUMP_PLAUSI_USD:
+        return None, f"Ergebnis von Trade 1 unplausibel ({e1:+.0f} $ bei TP {tp1:,.0f} $) — Tag zu, Balance prüfen".replace(",", ".")
+    if balance_end >= ziel - 0.005:
+        return None, "Ziel schon mit Trade 1 erreicht — kein Trade 2"
+    if tp1 is None or e1 < tp1 - FDP_PUMP_TP_TOL_USD:
+        return None, f"Trade 1 endete nicht am TP ({e1:+.0f} $) — Tag zu, morgen neu"
+    be = _wd_num((jg or {}).get("t2_sl_be_pct"))
+    be = 50.0 if be is None else be
+    sl = float(e1) if rnd.random() * 100 < be else None
+    abstand = balance_end - liq_eod
+    d = _wd_num((jg or {}).get("daily_usd"))
+    grenze = min(abstand, e1 + d) if d else abstand
+    risiko = min(sl, grenze) if sl is not None else grenze
+    h = fdp_pump_hedge(jg, risiko)
+    if h is None:
+        return None, "Hedge-Satz fehlt — kein Trade 2"
+    kt = _fdp_pump_kt((jg or {}).get("t2_kontrakte"), rnd)
+    if not kt:
+        return None, "Kontrakte Trade 2 fehlen in den Einstellungen — kein Trade 2"
+    if ziel - balance_end < FDP_PUMP_T2_MIN_TP_USD:
+        return None, f"Rest zum Ziel nur {ziel - balance_end:,.0f} $ — kein Mini-Trade 2, Tag zu".replace(",", ".")
+    return {"tp": round(ziel - balance_end, 2), "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "e1": e1,
+            "kette": {"von": 2, "nr": 2, "rolle": "haupt", "e_bisher": e1}}, None
+
+
+def fdp_pump_t2_start(jg, t1_ende_utc, rnd):
+    """REIN RECHNEND (testbar): Startzeit von Trade 2 (UTC), gleichverteilt in [Ende + t2_abstand_min, t2_bis Dubai am selben Dubai-Tag]; Fenster kleiner als
+    t2_min_fenster_min, Ende nach t2_bis oder nach Mitternacht Dubai (CME-Tag noch der alte) → None (Tag zu). Ende ohne Zone = UTC."""
+    tz = _ap_tz(FDP_PUMP_TZ)
+    ende = (t1_ende_utc if t1_ende_utc.tzinfo else t1_ende_utc.replace(tzinfo=timezone.utc)).astimezone(tz)
+    if ende.hour < FDP_PUMP_TAG_AB_H:
+        return None
+    ab = ende + timedelta(minutes=_fdp_pump_spanne((jg or {}).get("t2_abstand_min") or [2, 5], rnd.random()) or 2)
+    try:
+        hh, mm = (int(x) for x in str((jg or {}).get("t2_bis") or "18:30").split(":"))
+    except (TypeError, ValueError):
+        hh, mm = 18, 30
+    bis = ende.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    mindest = _wd_num((jg or {}).get("t2_min_fenster_min"))
+    if (bis - ab).total_seconds() / 60.0 < (10.0 if mindest is None else mindest):
+        return None
+    return (ab + (bis - ab) * rnd.random()).astimezone(timezone.utc)
+
+
+def fdp_pump_minute(hhmm, mitternacht):
+    """REIN RECHNEND (testbar): Dubai-Uhrzeit HH:MM am Kalendertag von mitternacht (Zone des Planer-Fensters) → Minuten ab mitternacht | None."""
+    try:
+        hh, mm = (int(x) for x in str(hhmm).split(":"))
+        dt = datetime(mitternacht.year, mitternacht.month, mitternacht.day, hh, mm, tzinfo=_ap_tz(FDP_PUMP_TZ))
+    except (TypeError, ValueError):
+        return None
+    return (dt - mitternacht).total_seconds() / 60.0
+
+
+def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklus, tag, rnd, sppl=None, tag_verlust=0.0):
+    """REIN RECHNEND (testbar): nächster Trade eines Kontos im Pump-Modell → dict wie fdp_konto_rechnen (aktion planen|ziel|aus, Plan-Felder aus fdp_hedge) plus
+    pump {weg, nr, ziel_gewinn, tag} und kette. Liq aus dem Tagesend-Höchststand (peak_eod), Ziel = Zyklus-Start + gewürfelter Ziel-Gewinn des Tages."""
+    g = float(groesse or 0)
+    dd = _wd_num((jg or {}).get("dd"))
+    if not jg or not g or not dd:
+        return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer (Pump-Modell)"}
+    if balance is None:
+        return {"aktion": "aus", "grund": "keine Balance"}
+    liq, liq_text = fdp_liq(g, dd, peak_eod, balance, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0)
+    if liq is None:
+        return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
+    start = float(start) if start else g
+    w = fdp_pump_tag_wurf(jg, konto_id, zyklus, tag)
+    ziel = start + w["ziel_gewinn"]
+    basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text, "gewinn": round(balance - start, 2),
+             "pump": {"weg": w["weg"], "ziel_gewinn": w["ziel_gewinn"], "tag": tag}}
+    if balance > ziel + dd:
+        return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance lesen")
+    # Ziel über die Tage: der Würfel ist je Tag neu — ab der Untergrenze der Spanne gilt das Konto als hochgepumpt (Finn: „Das Ziel ist … erreicht, wenn er +13 bis
+    # … +19.000 gemacht hat“), sonst pumpte ein Konto mit gestern +16.000 heute bei Würfel 19.000 noch einmal
+    zg_sp = jg.get("ziel_gewinn")
+    lo = _wd_num(zg_sp[0]) if isinstance(zg_sp, (list, tuple)) and zg_sp else _wd_num(zg_sp)
+    if lo is not None and balance - start >= min(lo, w["ziel_gewinn"]) - 0.005:
+        return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
+    t = fdp_pump_trade1(jg, w["weg"], balance, start, liq, ziel, rnd, tag_verlust)
+    if t["aktion"] != "planen":
+        return dict(basis, **t)
+    he, auf = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("hedge_auf_usd"))
+    h = fdp_hedge(he / auf * (balance - liq), balance, liq, t["tp"], t["sl"] if t["sl"] is not None else min(balance - liq, t["risiko"]), t["kontrakte"],
+                  sppl=sppl or FDP_SLAVE_PPL)
+    if not h:
+        return dict(basis, aktion="aus", grund="Hedge nicht rechenbar (Pump-Modell: hedge_eur / hedge_auf_usd)")
+    kt = t["kontrakte"]
+    pump = dict(basis["pump"], nr=1 if t["kette"] else None, risiko=t["risiko"], t1_von=jg.get("t1_von") or "03:00", t1_bis=jg.get("t1_bis") or "16:00",
+                t2_bis=jg.get("t2_bis") or "18:30")
+    return dict(basis, **h, aktion="planen", grund="", tp=t["tp"], sl=t["sl"], kontrakte=kt, tp_art="pump", stufe=None, dll=_wd_num(jg.get("daily_usd")), minis=None,
+                offen_eur=round(he / auf * (balance - liq), 2), tp_pkt=round(t["tp"] / (FDP_NQ_PPL * kt), 2),
+                sl_pkt=round(t["sl"] / (FDP_NQ_PPL * kt), 2) if t["sl"] is not None else None, pump=pump, kette=t["kette"])
+
+
 def fdp_konto_anzeige(groesse, jg, balance, zy, tage_fn, plaene, konto_id):
     """REIN RECHNEND (testbar): Werte für die Kontoliste im Reiter (E2d) → {groesse, start, ziel, gewinn, max_tag}. Dieselbe Rechnung wie fdp_konto_rechnen
     (Zyklus-Start, sonst Balance, sonst Größe; Ziel = Start + fdp_ziel_gewinn; größter Tag aus fdp_tage) — nur Anzeige, kein Würfel."""
@@ -46796,8 +47013,12 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     # Plan-Tag = CME-Handelstag des Fensters (ab jetzt): nachts vor dem Fenster plant der Lauf schon den kommenden Handelstag
     jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
+    ab_jetzt = jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15)   # FF2: Pump-Fenster ab jetzt + Vorlauf, nie ab dem Fensterbeginn des Planers
     cme_heute = fd_plan_tag(jetzt, _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat()), ap_zeiten)   # 03.11.2026, s. fd_plan_tag
+    _mn_vor = mitternacht
     mitternacht, ab_min = fd_fenster_basis(mitternacht, ab_min, von_min, cme_heute, tz)
+    if mitternacht != _mn_vor:
+        ab_jetzt = 0.0   # FF2: Plan-Tag liegt noch in der Zukunft (Fenster in deutscher Zeit, Nachtlauf) — dort ist jede Minute ab Mitternacht frei
     max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
@@ -46828,7 +47049,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
                                                     "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
                                                     "richtung,master_contracts,master_tp,master_sl,slave_risk,notes,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
-                                                    "fp_start:mt5_baseline->funded_plan->>start_um",
+                                                    "fp_start:mt5_baseline->funded_plan->>start_um,kette:mt5_baseline->kette",   # FF2: kette für „Trade 1/2“ im Reiter
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
         for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
@@ -46852,6 +47073,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     schon = {}
     for a in konten:
         for p in je_plan.get(str(a["id"]), []):
+            _fp = p.get("funded_plan") if isinstance(p.get("funded_plan"), dict) else {}
+            if str((_fp.get("pump") or {}).get("nr") or "") == "2":
+                continue   # FF2: Trade 2 eines Pump-Tags zählt nicht in den Tagesdeckel je ID (die Kette zählt als einer)
             t = p.get("started_at") or ((p.get("start_um") or p.get("fp_start")) if p.get("status") in ("planned", "open") else None)
             if t and _cme_handelstag(t) == cme_heute:
                 schon[str(a.get("user_id"))] = schon.get(str(a.get("user_id")), 0) + 1
@@ -46869,6 +47093,11 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # EU1 (06.11.2026): € je Punkt Fusion dieser ID in konst mitgeben (fdp_konto_rechnen bleibt rein rechnend); ohne fusion_sppl (Ausschnitt-Selbsttests) → 0,85
         if isinstance(konst, dict):
             konst["sppl"] = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None
+        if (regel or {}).get("tp_modus") == "pump2":
+            # FF2: Pump-Modell — Liq nach Tagesend-Logik (EOD-Trailing zieht erst am Tagesende nach), Würfel fest je Konto × Zyklus × CME-Tag
+            peak_e = liq_peak({}, a, balance, verlauf, eod=True)
+            return fdp_pump_konto(regel, jg, balance, peak_e, start, g, str(a["id"]), zy.get("nr"), cme_heute, rnd,
+                                  sppl=(konst or {}).get("sppl") if isinstance(konst, dict) else None), zy
         return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
                                  konto_id=str(a["id"]), konst=konst, zyklus=zy.get("nr")), zy
 
@@ -46893,7 +47122,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if lauf:
             # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
             # FH1b (10.11.2026): dazu jeder unbestätigte Vorschlag, dessen Hedge-Basis sich geändert hat (fdp_vorschlag_basis_neu) — nie alte Werte bestätigen
+            # FF2: Pump-Pläne nie nachrechnen — ihr TP/SL kommt aus dem Tages-Würfel bzw. (Trade 2) aus der genauen Lesung von Trade 1
             if not trocken and (not FDP_NACHRECHNEN_NUR_HT or str(a.get("user_id")) in ht_uids) and lauf[0].get("status") == "planned" and isinstance(lauf[0].get("funded_plan"), dict) \
+                    and not lauf[0]["funded_plan"].get("pump") \
                     and not lauf[0].get("auto_bestaetigt_at") and not lauf[0].get("start_um") and zeile["balance"] is not None \
                     and ap_balance_live(a.get("tv_balance_at"), max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None):
                 try:
@@ -46980,8 +47211,31 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             belegt_id.setdefault(str(b.get("user_id")), []).append(m)
     # nur Startzeiten im Plan-Handelstag (Winterzeit: 02:00–03:00 Dubai ist noch der alte CME-Tag bzw. die Pause)
     im_tag = lambda m: _cme_handelstag((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc).isoformat()) == cme_heute
-    minuten, ohne = fdp_zeiten([(u, k, gk(u, rech[k][1]["firma_key"])) for u, k in gewaehlt], belegt_id, belegt_firma,
-                               ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag, letzt=letzt_je)
+    # FF2: Pump-Konten zuerst, je Fenster t1_von–t1_bis (Dubai; Finn: „3:00 Dubai … bis 16:00“) statt des Planer-Fensters; ihre Minuten belegen danach Firmen- und
+    # ID-Abstand für die übrigen Konten (fdp_zeiten arbeitet auf Kopien). Ohne Pump-Konten bitgleich wie bisher.
+    minuten, ohne = {}, []
+    pump_fe = {}
+    for u, k in gewaehlt:
+        pm = rech[k][1].get("pump")
+        if pm:
+            pump_fe.setdefault((pm.get("t1_von") or "03:00", pm.get("t1_bis") or "16:00"), []).append((u, k))
+    for (fv, fb), gruppe in pump_fe.items():
+        lo, hi = fdp_pump_minute(fv, mitternacht), fdp_pump_minute(fb, mitternacht)
+        if lo is None or hi is None:
+            ohne += [k for _u, k in gruppe]
+            continue
+        m_p, o_p = fdp_zeiten([(u, k, gk(u, rech[k][1]["firma_key"])) for u, k in gruppe], belegt_id, belegt_firma,
+                              max(ab_jetzt, lo), hi, id_abst, f_abst, rnd, erlaubt=im_tag, letzt=letzt_je)
+        minuten.update(m_p)
+        ohne += o_p
+        for k, m in m_p.items():
+            u = str(rech[k][0].get("user_id"))
+            belegt_firma.setdefault(gk(u, rech[k][1]["firma_key"]), []).append(m)
+            belegt_id.setdefault(u, []).append(m)
+    m_n, o_n = fdp_zeiten([(u, k, gk(u, rech[k][1]["firma_key"])) for u, k in gewaehlt if not rech[k][1].get("pump")], belegt_id, belegt_firma,
+                          ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag, letzt=letzt_je)
+    minuten.update(m_n)
+    ohne += o_n
     frontcode = _wd_futures_frontcode(jetzt)
     auto_ok = reg.get("auto_bestaetigen") is True
     zeilen = []
@@ -46992,7 +47246,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         auto_k = auto_ok and str(a["user_id"]) in ht_uids     # Auto-Bestätigen nur für die HT-Liste — eine Gruppe bestätigt immer selbst (S4)
         start = mitternacht + timedelta(minutes=m)
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
-        notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
+        notiz = "" if r.get("pump") else (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · " + (f"offene Kosten {_liq_de(r['offen_eur'])} €" if not r.get("hedge_quelle") else
                  # FH1 B (10.11.2026): Hedge-Basis = Pump-Kosten bis zur Balance, echte offene Kosten daneben
                  f"Hedge-Basis {_liq_de(r['offen_eur'])} € = Pump-Kosten bis Balance (B) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
@@ -47001,6 +47255,18 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  # FTMO Futures (03.11.2026): keine Stufe, TP = Rest bis zum Ziel, Hedge fest € je $ Abstand zur Liquidation
                  f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · "
                  f"Daily Loss {_liq_de(r['dll'])} $ · TP = Rest bis Ziel · Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r['verhaeltnis'], 3)} € je $)")
+        mb_pump = {}
+        if r.get("pump"):
+            # FF2: eigene Notiz; Kennung funded_plan.pump; Trade 1 von zwei trägt kette {von 2, nr 1} (WS2-Schnittstelle) mit lesen_bis = t2_bis Dubai, damit der
+            # PC-Tab die End-Balance genau nachliest (tpKetteLesenWeiter) — daraus entsteht Trade 2 (fdp_pump_tick)
+            pm = r["pump"]
+            notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Pump {'Trade 1 von 2' if r.get('kette') else 'ein Trade'} · Zyklus {r['zyklus']} · "
+                     f"Ziel {_liq_de(r['ziel'])} $ (heute +{_liq_de(pm.get('ziel_gewinn'))} $) · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
+                     f"{('SL ' + _liq_de(r['sl']) + ' $') if r.get('sl') is not None else 'ohne SL'} · Hedge {_ap_de(r['verhaeltnis'], 3)} € je $ Risiko")
+            mb_pump = {"pump": pm}
+            if r.get("kette"):
+                lb = fdp_pump_minute(pm.get("t2_bis") or "18:30", mitternacht)
+                mb_pump["kette"] = dict(r["kette"], lesen_bis=(mitternacht + timedelta(minutes=lb)).astimezone(timezone.utc).isoformat() if lb is not None else None)
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
@@ -47012,7 +47278,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("zyklus", "start", "ziel", "liq", "stufe", "dll", "minis", "offen_eur",
                                                                          "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")},
                                                  **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis") if r.get(k) is not None},   # AH2 / FH1 B
-                                                 start_um=start.astimezone(timezone.utc).isoformat())}})
+                                                 **({"pump": mb_pump["pump"]} if mb_pump.get("pump") else {}),   # FF2
+                                                 start_um=start.astimezone(timezone.utc).isoformat()),
+                             **({"kette": mb_pump["kette"]} if mb_pump.get("kette") else {})}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start.astimezone(timezone.utc).isoformat(), richtung=richtung,
                                    vorschlag=not auto_k))
     if not trocken:
@@ -47058,6 +47326,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                       # bestätigt = auto_bestaetigt_at, oder ein Hand-Plan (ohne Funded-Planer-Kennung); Vorschlag = Funded-Planer, noch nicht bestätigt
                       "pl": _wd_num(p.get("master_pl")), "hedge_eur": _wd_num(p.get("hedge_eur")),
                       "bestaetigt": bool(p.get("auto_bestaetigt_at")) or not p.get("funded_plan"),
+                      "kette": p.get("kette") if isinstance(p.get("kette"), dict) else None,   # FF2: Pump-Tag mit zwei Trades → „Trade 1/2“ + ⛓ (prophos.html tpKetteSchritt)
                       "vorschlag": bool(p.get("funded_plan")) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
                       "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance")),
                       # Werte des Planers beim Anlegen (Ziel, Liq, Stufe, Hedge, offene Kosten) — Spalte Balance → Ziel und Stufe wie beim Challenge-Planer
@@ -47073,6 +47342,185 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     gr_ids = [u for u in uids if u not in ht_uids]
     alle = list(dict.fromkeys(_fdp_ht_ids() + ht_uids + gr_ids))
     erg["alle_ids"] = [{"user_id": u, "name": namen.get(u) or u[:8], "drin": u in ht_uids or u in gr_ids, "fest": u in gr_ids} for u in alle]
+    return erg
+
+
+def fdp_pump_t2_platz(jg, t1_ende_utc, belegt, rnd, abstand_firma_min=15, abstand_id_min=90, versuche=60):
+    """REIN RECHNEND (testbar): Startzeit von Trade 2 mit Abständen → datetime (UTC) | None. belegt = [(zeit_utc, art)] der anderen geplanten/laufenden Pläne der ID,
+    art 'firma' (dieselbe Firma: ≥ abstand_firma_min, wie trade_plans_firmen_abstand) bzw. 'big' (Big Trade der ID: ≥ abstand_id_min, wie fdp_planen) bzw. 'beides'.
+    Würfelt fdp_pump_t2_start bis zu versuche-mal — passt nichts bis t2_bis, None (Tag zu). Gegenprüfung: sonst schöben die DB-Riegel Trade 2 hinter t2_bis."""
+    for _ in range(versuche):
+        s = fdp_pump_t2_start(jg, t1_ende_utc, rnd)
+        if s is None:
+            return None
+        ok = True
+        for b, art in belegt or ():
+            d = abs((s - b).total_seconds()) / 60.0
+            if (art in ("firma", "beides") and d < abstand_firma_min) or (art in ("big", "beides") and d < abstand_id_min):
+                ok = False
+                break
+        if ok:
+            return s
+    return None
+
+
+def fdp_pump_echt(plan):
+    """REIN RECHNEND (testbar): genaue Lesung von Trade 1 eines Pump-Tags → (vorher, nachher) | None. Wie tt_echt (Puls-Endlesung, nie Folgetrade/Schätzung),
+    zusätzlich bei Orbit V3 (tvv2 + orbit_v3) die Userscript-Endlesung final.balance_quelle 'reader' (Account Balance = Equity, zwei gleiche Lesungen, Konto flach —
+    hedgeReaderEndBalance, .921): Puls liest bei V3 nur nach, wenn das Userscript scheitert. Ohne diese Ausnahme käme Trade 2 bei Orbit V3 nie zustande.
+    Relative Balance (balance_relativ) zählt nie."""
+    e = tt_echt(plan)
+    if e:
+        return e
+    p = plan or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+    if str(p.get("route") or "") != "tvv2" or not p.get("orbit_v3") or fin.get("balance_quelle") != "reader" or fin.get("balance_relativ"):
+        return None
+    v, n = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
+    return (float(v), float(n)) if (v and n and v > 0 and n > 0) else None
+
+
+def fdp_pump_tick(jetzt=None, rnd=None):
+    """FF2 Trade 2 eines Pump-Tags (Takt aus fdp_tick, alle FDP_TAKT_S, nur bei funded_plan_regeln.aktiv). Sucht beendete Trade-1-Pläne (funded_plan.pump.nr 1, letzte
+    20 h) ohne Entscheidung (pump.t2), wartet auf die GENAUE Lesung (tt_echt: Puls-Endlesung bzw. Userscript, nie Folgetrade/Schätzung; der PC-Tab liest bis
+    kette.lesen_bis = t2_bis Dubai weiter) und legt dann Trade 2 an: TP = Ziel − Balance, SL-Würfel Break-even/ohne, Liq nach Tagesend-Logik, Start gestreut bis t2_bis
+    Dubai, bestätigt, wenn Trade 1 bestätigt war (wie die Topstep-Kette). Kein Trade 2 (geblowt, nicht am TP, Fenster zu, keine Lesung, Firma aus) → Entscheidung an
+    Trade 1 (pump.t2, kette.tagesende + grund) und einmal ⚪ — außer „Ziel schon erreicht“ (der Planer stellt auf Winning Days). Nie ein zweiter Trade 2: die Entscheidung
+    steht vor dem nächsten Takt, angelegt wird nur ohne offenen Plan am Konto. → {neu: [plan_id], ende: [(plan_id, grund)]}"""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    rnd = rnd or random.SystemRandom()
+    rows = sb_select("trade_plans", {
+        "select": "id,user_id,master_account_id,master_firm,master_name,status,route,orbit_v3,started_at,ended_at,completed_at,master_tp,auto_bestaetigt_at,mt5_baseline",
+        "status": "in.(review,completed)", "ended_at": "gte." + (jetzt - timedelta(hours=20)).isoformat(),
+        "mt5_baseline->funded_plan->pump->>nr": "eq.1"}) or []
+    rows = [p for p in rows if not ((((p.get("mt5_baseline") or {}).get("funded_plan") or {}).get("pump") or {}).get("t2"))]
+    erg = {"neu": [], "ende": []}
+    if not rows:
+        return erg
+    reg = _fdp_regeln_laden() or {}
+    try:
+        _ktx = ap_unt_kontext()
+    except Exception:
+        _ktx = None
+    an = [f for f in (reg.get("firmen") or []) if isinstance(f, dict) and f.get("an")]
+    an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — wie fdp_planen
+    ids = sorted({str(p.get("master_account_id")) for p in rows if p.get("master_account_id")})
+    konten = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,user_id,name,firm,account_type,max_drawdown,starting_balance,tv_balance,tv_balance_at",
+                                                              "id": "in.(" + ",".join(ids) + ")"}) or [])}
+    verlauf = _liq_verlauf_laden(ids)
+
+    def ende(p, pm, grund, melden=True):
+        pid = str(p["id"])
+        ok = _tt_patch(pid, {"pump": dict(pm, t2={"status": "kein", "grund": grund, "at": jetzt.isoformat()})}, key="funded_plan")
+        if ok:
+            _tt_patch(pid, {"tagesende": True, "grund": grund})   # PC-Tab hört auf nachzulesen (tpKetteLesenWeiter), Radar zeigt den Grund
+            erg["ende"].append((pid, grund))
+            if melden:
+                alarm_senden(3, "fdp_pump_tag_zu", "Pump-Tag zu — kein Trade 2", f"{p.get('master_name') or 'Konto'}: {grund}"[:300], uid=p.get("user_id"), plan_id=pid)
+
+    for p in rows:
+        pid = str(p["id"])
+        mb = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        fp = mb.get("funded_plan") if isinstance(mb.get("funded_plan"), dict) else {}
+        pm = fp.get("pump") if isinstance(fp.get("pump"), dict) else {}
+        try:
+            a = konten.get(str(p.get("master_account_id")))
+            if not a or str(a.get("account_type") or "") != "funded":
+                ende(p, pm, "Konto ist nicht mehr Funded — kein Trade 2")
+                continue
+            regel = ap_regel_finden(an_von(a.get("user_id")), a.get("firm")) or {}
+            g = _wd_konto_groesse(a)
+            jg = fdp_je_groesse(regel, g)
+            if regel.get("tp_modus") != "pump2" or not jg:
+                ende(p, pm, "Pump-Modell für diese Firma inzwischen aus — kein Trade 2")
+                continue
+            echt = fdp_pump_echt(p)
+            if not echt:
+                bis = _ap_ts(((mb.get("kette") or {}) if isinstance(mb.get("kette"), dict) else {}).get("lesen_bis"))
+                if bis and jetzt > bis:
+                    ende(p, pm, "keine genaue Balance-Lesung von Trade 1 bis zum Fensterende — Tag zu, morgen neu")
+                continue   # sonst warten: der PC-Tab liest bis lesen_bis nach
+            bs, be = echt[0], echt[1]
+            dd = _wd_num(jg.get("dd"))
+            lock = _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0
+            peak = liq_peak({"id": pid, "started_at": jetzt.isoformat()}, a, be, verlauf, eod_tagesstart=bs, eod=True)
+            liq, _lt = fdp_liq(g, dd, peak, be, lock)
+            if liq is None:
+                ende(p, pm, f"Trade 1 hat das Konto geblowt ({be - bs:+.0f} $) — kein Trade 2")
+                continue
+            ziel = _wd_num(fp.get("ziel")) or (bs + (_wd_num(pm.get("ziel_gewinn")) or 0))
+            w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd)
+            if grund:
+                ende(p, pm, grund, melden=not grund.startswith("Ziel schon"))
+                continue
+            ende_ts = _ap_ts(p.get("ended_at") or p.get("completed_at")) or jetzt
+            # Gegenprüfung (MUSS): Trade 2 nur am CME-Tag von Trade 1 — lief der Takt erst am Folgetag wieder (Planer aus/an, Ausfall), ist der Pump-Tag vorbei
+            if pm.get("tag") and _cme_handelstag(jetzt.isoformat()) != str(pm.get("tag")):
+                ende(p, pm, "Pump-Tag vorbei, bevor Trade 2 angelegt werden konnte — Tag zu, morgen neu")
+                continue
+            # Nachfolger schon da (jeder Status, z. B. Patch nach dem Anlegen gescheitert)? Dann nur die Entscheidung nachtragen, nie ein zweiter Trade 2
+            schon = sb_select("trade_plans", {"select": "id,status", "mt5_baseline->kette->>vor": f"eq.{pid}", "limit": "1"}) or []
+            if schon:
+                _tt_patch(pid, {"pump": dict(pm, t2={"status": "angelegt", "plan_id": str(schon[0].get("id")), "at": jetzt.isoformat()})}, key="funded_plan")
+                continue
+            if sb_select("trade_plans", {"select": "id", "master_account_id": f"eq.{a['id']}", "status": "in.(planned,open)", "limit": "1"}):
+                ende(p, pm, "am Konto liegt schon ein anderer Plan — kein Trade 2", melden=True)
+                continue
+            # Startplatz mit Firmen-Abstand und Big-Trade-Abstand der ID (wie fdp_planen), sonst schöben die DB-Riegel hinter t2_bis
+            zt = dict(FDP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
+            belegt = []
+            for b in sb_select("trade_plans", {"select": "start_um,started_at,status,master_firm,route,orbit_v3,hedge_eur,winning_day",
+                                               "user_id": f"eq.{a['user_id']}", "status": "in.(planned,open)"}) or []:
+                bt = _ap_ts(b.get("started_at") if b.get("status") == "open" else b.get("start_um"))
+                if not bt:
+                    continue
+                gleich = _ap_norm(b.get("master_firm")) in [_ap_norm(x) for x in (regel.get("namen") or [a.get("firm")])]
+                big = b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day") and (b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0)
+                if gleich or big:
+                    belegt.append((bt, "beides" if (gleich and big) else "firma" if gleich else "big"))
+            start = fdp_pump_t2_platz(jg, max(ende_ts, jetzt), belegt, rnd, float(_wd_num(zt.get("firma_abstand_min")) or 15),
+                                      float(_wd_num(zt.get("abstand_id_min")) if zt.get("abstand_id_min") is not None else 90))
+            if not start:
+                ende(p, pm, f"kein Startplatz für Trade 2 bis {jg.get('t2_bis') or '18:30'} Dubai (Ende Trade 1 zu spät oder Abstände) — Tag zu, morgen neu")
+                continue
+            he, auf = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("hedge_auf_usd"))
+            h = fdp_hedge(he / auf * (be - liq), be, liq, w["tp"], w["sl"] if w["sl"] is not None else w["risiko"], w["kontrakte"],
+                          sppl=(fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None) or FDP_SLAVE_PPL)
+            if not h:
+                ende(p, pm, "Hedge nicht rechenbar — kein Trade 2")
+                continue
+            auto = bool(p.get("auto_bestaetigt_at"))   # Trade 2 ist bestätigt, wenn Trade 1 bestätigt war (Konstrukt Frage 11, wie die Topstep-Kette)
+            st_iso = start.isoformat()
+            zeile = {
+                "user_id": a["user_id"], "master_account_id": str(a["id"]), "master_name": a.get("name"), "master_firm": a.get("firm"),
+                "master_contracts": w["kontrakte"], "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "multiplier": h["multiplier"],
+                "hedge_faktor": h["hedge_faktor"], "hedge_eur": h["hedge_eur"], "orbit_v3": True, "route": "tvv2",
+                "master_tp": w["tp"], "master_sl": w["sl"], "richtung": rnd.choice(("buy", "sell")), "master_symbol": "NQ" + _wd_futures_frontcode(jetzt),
+                "start_um": st_iso if auto else None, "status": "planned", "priority": "high",
+                "planned_for": start.astimezone(_ap_tz(FDP_PUMP_TZ)).strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto else None,
+                "notes": (f"Funded-Planer{'' if auto else ' · Vorschlag'} · Pump Trade 2 von 2 · Trade 1 {w['e1']:+,.0f} $".replace(",", ".")
+                          + f" · Ziel {_liq_de(ziel)} $ · Liq {_liq_de(liq)} $ (Tagesend) · "
+                          + (f"SL Break-even {_liq_de(w['sl'])} $" if w["sl"] is not None else "ohne SL")
+                          + f" · Hedge {_ap_de(h['verhaeltnis'], 3)} € je $ Risiko"),
+                "mt5_baseline": {"funded_plan": {"zyklus": fp.get("zyklus"), "start": fp.get("start"), "ziel": round(ziel, 2), "liq": round(liq, 2), "tp_art": "pump",
+                                                 "offen_eur": round(he / auf * (be - liq), 2), "verhaeltnis": h["verhaeltnis"], "hedge_sl_eur": h["hedge_sl_eur"],
+                                                 "hedge_tp_eur": h["hedge_tp_eur"], "start_um": st_iso,
+                                                 "pump": {"weg": "zwei", "nr": 2, "t1_plan_id": pid, "ziel_gewinn": pm.get("ziel_gewinn"), "tag": pm.get("tag"),
+                                                          "e1": w["e1"], "risiko": w["risiko"]}},
+                                 "kette": dict(w["kette"], vor=pid)}}
+            neu = sb_insert("trade_plans", zeile)
+            neu_id = str(((neu or [{}])[0] if isinstance(neu, list) else (neu or {})).get("id") or "")
+            if not neu_id:   # Gegenprüfung: ohne Zeile zurück nie stumm „angelegt“ — die Nachfolger-Suche oben findet ihn beim nächsten Takt, falls er doch steht
+                ende(p, pm, "Trade 2 anlegen ohne Antwort der DB — bitte im Funded-Planer prüfen")
+                continue
+            _tt_patch(pid, {"pump": dict(pm, t2={"status": "angelegt", "plan_id": neu_id, "at": jetzt.isoformat()})}, key="funded_plan")
+            _tt_patch(pid, {"grund": f"Trade 2 angelegt · Start {start.astimezone(_ap_tz(FDP_PUMP_TZ)).strftime('%H:%M')} Dubai"})
+            erg["neu"].append(neu_id or pid)
+            print(f"[funded-pump] Trade 2 für {a.get('name')}: TP {w['tp']:.0f} $ · {'SL ' + str(int(w['sl'])) if w['sl'] is not None else 'ohne SL'} · Start {st_iso}", flush=True)
+        except Exception as e:
+            print(f"[funded-pump] ⚠️ {pid[:8]}: {type(e).__name__}: {e}", flush=True)
     return erg
 
 
@@ -47095,6 +47543,10 @@ def fdp_tick(jetzt=None):
                     fehler="" if erg.get("ok") else str(erg.get("msg") or ""))
     if erg.get("geplant") or erg.get("ziel"):
         print(f"[funded-plan] {len(erg['geplant'])} geplant, {len(erg['ziel'])} Ziel erreicht → Winning Days", flush=True)
+    try:   # FF2: Trade 2 der Pump-Tage — eigener try, ein Fehler hier hält den Planer nie an
+        fdp_pump_tick(jetzt)
+    except Exception as e:
+        print(f"[funded-pump] ⚠️ Takt: {type(e).__name__}: {e}", flush=True)
     return erg
 
 
@@ -47449,7 +47901,13 @@ FDP_FEST_TEXT = [   # Regeln ohne Zahl, fest im Code (fdp_planen / fdp_konto_rec
 # Untergrenze 1 (Gegenprüfung 04.11.2026): 0 rechnet der Planer nicht als 0 — vorlauf_min „or 15", abstand_id_min beim Bestätigen „or 90"
 _FDP_ZEIT_FELDER = {"max_je_id_tag": (1, 6, True), "abstand_id_min": (1, 600, False), "vorlauf_min": (1, 120, False)}
 _FDP_GR_FELDER = {"ziel_gewinn": (1, 50000), "max_trade": (1, 50000), "kosten_eur": (0, 5000), "dd": (1, 20000), "daily_usd": (1, 20000),
-                  "hedge_eur": (0, 10000), "sl": (1, 20000)}
+                  "hedge_eur": (0, 10000), "sl": (1, 20000),
+                  # FF2 Pump-Modell (Grenzen wie prophos.html E2_P2): Zahlen bzw. Spannen [von, bis]
+                  "pump2_pct": (0, 100), "sl_kein_pct": (0, 100), "t2_sl_be_pct": (0, 100), "t2_min_fenster_min": (0, 240), "hedge_auf_usd": (1, 20000),
+                  "ein_sl": (1, 20000), "t1_sl": (1, 20000), "t1_tp": (1, 50000), "t2_abstand_min": (0, 120)}
+_FDP_GR_KT = ("kontrakte", "ein_kontrakte", "t1_kontrakte", "t2_kontrakte")   # {Anzahl: Anteil}, Summe 1
+_FDP_GR_ZEIT = ("t1_von", "t1_bis", "t2_bis")                                # HH:MM Dubai
+_FDP_GR_BOOL = ("sl_hinter_liq",)
 
 
 def fdp_regeln_anzeige(reg, quelle="db"):
@@ -47586,18 +48044,29 @@ def fdp_regeln_aendern(reg, body):
                 for k, v in werte.items():
                     if k not in z:
                         return None, f"{gr}.{k}: bei dieser Größe nicht hinterlegt"
-                    if k == "kontrakte":
+                    if k in _FDP_GR_BOOL:   # FF2
+                        if not isinstance(v, bool):
+                            return None, f"{gr}.{k}: true/false"
+                        z[k] = v
+                        continue
+                    if k in _FDP_GR_ZEIT:   # FF2
+                        m_z = re.fullmatch(r"(\d{2}):(\d{2})", str(v or ""))
+                        if not m_z or int(m_z.group(1)) > 23 or int(m_z.group(2)) > 59:
+                            return None, f"{gr}.{k}: Uhrzeit HH:MM"
+                        z[k] = str(v)
+                        continue
+                    if k in _FDP_GR_KT:
                         if not isinstance(v, dict) or not v or not isinstance(z[k], dict):
-                            return None, f"{gr}.kontrakte: {{Kontrakte: Anteil}}"
+                            return None, f"{gr}.{k}: {{Kontrakte: Anteil}}"
                         kt = {}
                         for kk, w in v.items():
                             n, ww = _fdp_zahl(kk, 1, 10, True), _fdp_zahl(w, 0, 1, nk=3)   # Anteile auf 3 Stellen wie das Frontend (Gegenprüfung)
                             if n is None or ww is None:
-                                return None, f"{gr}.kontrakte: Kontrakte 1–10, Anteil 0–1"
+                                return None, f"{gr}.{k}: Kontrakte 1–10, Anteil 0–1"
                             if ww > 0:
                                 kt[str(n)] = ww
                         if not kt or abs(sum(kt.values()) - 1) > 0.011:
-                            return None, f"{gr}.kontrakte: Anteile müssen zusammen 100 % ergeben"
+                            return None, f"{gr}.{k}: Anteile müssen zusammen 100 % ergeben"
                         z[k] = kt
                         continue
                     if k not in _FDP_GR_FELDER:
@@ -47617,6 +48086,14 @@ def fdp_regeln_aendern(reg, body):
                             return None, f"{gr}.{k}: Zahl {lo}–{hi}"
                         z[k] = x
             f["je_groesse"] = jg
+        # FF2: Pump-Modell — Startfenster von < bis, und nur mit Fusion-Hedge je Größe einschalten (Lucid: Finn hat keinen Satz genannt)
+        if f.get("tp_modus") == "pump2":
+            for gr, z in (f.get("je_groesse") or {}).items():
+                if isinstance(z, dict) and z.get("t1_von") and z.get("t1_bis") and str(z["t1_von"]) >= str(z["t1_bis"]):
+                    return None, f"{gr}: Start ab muss vor Start bis liegen"
+            if f.get("an") and any(isinstance(z, dict) and not ((_wd_num(z.get("hedge_eur")) or 0) > 0 and (_wd_num(z.get("hedge_auf_usd")) or 0) > 0)
+                                   for z in (f.get("je_groesse") or {}).values()):
+                return None, "Pump-Modell: Fusion-Hedge fehlt — erst eintragen, dann einschalten"
         firmen[idx[0]] = f
         patch["firmen"] = firmen
     if not patch:

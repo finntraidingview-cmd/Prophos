@@ -58430,7 +58430,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2178'
+  const OS_TAB_BUILD = '2026-09-22.2179'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62354,7 +62354,9 @@
     // (ab 01.11. liegt die FOMC-Pressekonferenz 14:30 ET auf 23:30 Dubai = Fensterbeginn)
     const _nk = newsKeinKlick(Date.now())
     const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)) && !(_nk && newsIstFundedCfd(p))
-      && !((_acNews.naechster[String(p.id)] || 0) > Date.now()))   // eben von der News-Regel geschlossen: _ac.naechster setzt der Fensterwechsel zurück, diese Map nicht
+      && !((_acNews.naechster[String(p.id)] || 0) > Date.now())   // eben von der News-Regel geschlossen: _ac.naechster setzt der Fensterwechsel zurück, diese Map nicht
+      // FF2 (Finn 11.11.2026: „Auto Close vor Market Close wird's nicht geben“): Pump-Trades des Funded-Planers (mt5_baseline.funded_plan.pump) schließt nie der Auto-Close
+      && !(p.mt5Baseline && p.mt5Baseline.funded_plan && p.mt5Baseline.funded_plan.pump))
     if(!offen.length) return
     const now = Date.now()
     // V2 (24.09.2026, Vollumstieg): Echo V2 über master-close (ohne Hedge), Orbit V2 über tv-close —

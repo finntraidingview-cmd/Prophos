@@ -190,6 +190,154 @@ check(lw is not None and lw["sl"] == 6000 and abs(lw["risiko"] - 6000) < 0.01, "
 lx = ruf("fdp_pump_trade1", LU, "ein", START, START, LIQ, z16, R())
 check(lx.get("aktion") == "aus" and "Hedge" in str(lx.get("grund")), f"Lucid ohne Hedge-Satz → kein Plan, Grund nennt den Hedge ({lx})")
 
+# ── EINBAU in fdp_planen / Regeln / Takte (nur gegen app.py; die Referenz kennt diese Funktionen nicht)
+if not os.environ.get("SELFTEST_APP"):
+    for _n in ("GP_SLAVE_PPL", "FDP_NQ_PPL", "FDP_SLAVE_PPL", "FDP_TAGES_PUFFER", "FDP_BREAKEVEN_TOL_USD", "FDP_SL_MIN_USD", "FDP_LIQ_MIN_ABSTAND"):
+        lade(_n)   # Standardwerte von Funktionsargumenten (fdp_hedge, fdp_sl_rest) — vor dem Laden der Funktionen
+    REG_TR = {"name": "Tradeify", "namen": ["tradeify"], "an": False, "tp_modus": "pump2", "lock_usd": 100, "je_groesse": {"150000": dict(TR, kosten_eur=200)}}
+    k = ruf("fdp_pump_konto", REG_TR, fest(TR, pump2_pct=100, ziel_gewinn=[16000, 16000], t1_tp=[6000, 6000], t1_kontrakte={"3": 1}, sl_kein_pct=100),
+            START, START, START, 150000, "konto-0001", 1, "2026-11-12", R())
+    check(k.get("aktion") == "planen" and k["tp"] == 6000 and k["kontrakte"] == 3 and k["sl"] is None, f"fdp_pump_konto: Trade 1 geplant ({k.get('aktion')}, {k.get('grund')})")
+    check(abs(k.get("liq", 0) - 145500) < 0.01 and abs(k.get("master_risk", 0) - 4500) < 0.01, "fdp_pump_konto: Liq 145.500, Master-Risiko 4.500 (Liq-Abstand)")
+    check(abs(k.get("slave_risk", 0) - 850) < 0.01 and abs(k.get("verhaeltnis", 0) - 850 / 4500) < 1e-4, "fdp_pump_konto: Fusion 850 € auf 4.500 $ (Satz 0,189 je $)")
+    check(abs(k.get("hedge_tp_eur", 0) - 6000 * 850 / 4500) < 0.05, "fdp_pump_konto: Fusion am Master-TP = Satz × 6.000")
+    check((k.get("kette") or {}).get("nr") == 1 and (k.get("pump") or {}).get("nr") == 1 and (k.get("pump") or {}).get("t2_bis") == "18:30", "fdp_pump_konto: kette + pump (nr 1, t2_bis)")
+    k2 = ruf("fdp_pump_konto", REG_TR, fest(TR, pump2_pct=0, ziel_gewinn=[16000, 16000]), START + 16000, START + 16000, START, 150000, "konto-0001", 1, "2026-11-12", R())
+    check(k2.get("aktion") == "ziel", f"fdp_pump_konto: Ziel erreicht → Winning Days ({k2.get('aktion')})")
+    k2b = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[13000, 19000]), START + 13500, START + 13500, START, 150000, "konto-0001", 1, "2026-11-13", R())
+    check(k2b.get("aktion") == "ziel", f"Folgetag: +13.500 ≥ Untergrenze 13.000 → Ziel erreicht, nie ein zweites Pumpen ({k2b.get('aktion')})")
+    k2c = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[13000, 19000], pump2_pct=0), START + 8000, START + 8000, START, 150000, "konto-0001", 1, "2026-11-13", R())
+    check(k2c.get("aktion") == "planen" and k2c["tp"] >= 5000, f"Folgetag nach Teil-Tag (+8.000, Tag zu) → neuer Würfel, Rest bis zum neuen Ziel ({k2c.get('aktion')}, TP {k2c.get('tp')})")
+    # Liq nach Tagesend-Logik: Tageshoch intraday (156.000) zieht die Liq NICHT nach — peak_eod = Tagesstart 150.000
+    k3 = ruf("fdp_pump_konto", REG_TR, fest(TR, pump2_pct=0, ziel_gewinn=[16000, 16000]), 156000, START, START, 150000, "konto-0001", 1, "2026-11-12", R())
+    check(abs(k3.get("liq", 0) - 145500) < 0.01, f"Liq mit Tagesend-Hoch 150.000 bleibt 145.500 (nicht 151.500) ({k3.get('liq')})")
+    from datetime import datetime as _dt
+    mn = _dt(2026, 11, 12, 0, 0, tzinfo=ZoneInfo("Asia/Dubai"))
+    check(ruf("fdp_pump_minute", "03:00", mn) == 180 and ruf("fdp_pump_minute", "16:00", mn) == 960, "fdp_pump_minute: 03:00 / 16:00 Dubai → 180 / 960 min")
+    mb = _dt(2026, 11, 12, 0, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+    check(ruf("fdp_pump_minute", "03:00", mb) == 0, "fdp_pump_minute: Fenster in deutscher Zeit — 03:00 Dubai = 00:00 Berlin (Winter)")
+    # Regeln ändern: neue Schlüssel mit Grenzen, Einschalten ohne Hedge gesperrt
+    REG = {"updated_at": "x", "firmen": [dict(REG_TR, je_groesse={"150000": dict(LU)})]}
+    REG["firmen"][0]["name"] = "Lucid Trading"; REG["firmen"][0]["namen"] = ["lucidtrading", "lucid"]
+    pa, f1 = ruf("fdp_regeln_aendern", REG, {"updated_at": "x", "firma": {"name": "Lucid Trading", "je_groesse": {"150000": {
+        "pump2_pct": 25, "t1_tp": [4000, 7500], "t1_kontrakte": {"2": 0.4, "3": 0.6}, "sl_hinter_liq": True, "t2_bis": "18:15", "hedge_eur": 900}}}})
+    z = (pa or {}).get("firmen", [{}])[0].get("je_groesse", {}).get("150000", {}) if pa else {}
+    check(f1 is None and z.get("pump2_pct") == 25 and z.get("t1_tp") == [4000, 7500] and z.get("t1_kontrakte") == {"2": 0.4, "3": 0.6}
+          and z.get("sl_hinter_liq") is True and z.get("t2_bis") == "18:15" and z.get("hedge_eur") == 900, f"Regeln ändern: Pump-Schlüssel angenommen ({f1})")
+    for body, was in [({"t2_bis": "25:00"}, "Uhrzeit 25:00"), ({"pump2_pct": 120}, "Prozent 120"), ({"t1_tp": [9000, 8000]}, "von > bis"),
+                      ({"t1_kontrakte": {"2": 0.4, "3": 0.4}}, "Summe 80 %"), ({"sl_hinter_liq": "ja"}, "bool als Text"), ({"t1_von": "17:00"}, "Start ab nach Start bis")]:
+        _p, f = ruf("fdp_regeln_aendern", REG, {"updated_at": "x", "firma": {"name": "Lucid Trading", "je_groesse": {"150000": body}}})
+        check(_p is None and f, f"Regeln ändern lehnt ab: {was} ({f})")
+    _p, f = ruf("fdp_regeln_aendern", REG, {"updated_at": "x", "firma": {"name": "Lucid Trading", "an": True}})
+    check(_p is None and "Hedge" in str(f), f"Lucid ohne Hedge-Satz lässt sich nicht einschalten ({f})")
+    # fdp_pump_echt: Puls-Endlesung wie tt_echt, bei Orbit V3 auch die Userscript-Endlesung (reader), nie relativ
+    pv3 = {"route": "tvv2", "orbit_v3": True, "mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"balance_end": 156000, "balance_quelle": "reader"}}}
+    check(ruf("fdp_pump_echt", pv3) == (150000.0, 156000.0), "Orbit V3: Userscript-Endlesung (reader) gilt als genau")
+    check(ruf("fdp_pump_echt", dict(pv3, orbit_v3=False)) is None, "Orbit V2 ohne Puls-Endlesung: reader zählt nicht")
+    check(ruf("fdp_pump_echt", {"route": "tvv2", "orbit_v3": True, "mt5_baseline": {"tv": {"balance_start": 150000},
+                                "final": {"balance_end": 6000, "balance_quelle": "reader", "balance_relativ": True}}}) is None, "relative Balance zählt nie")
+    check(ruf("fdp_pump_echt", {"route": "tvv2", "orbit_v3": True, "mt5_baseline": {"tv": {"balance_start": 150000},
+                                "final": {"balance_end": 156000, "quelle": "puls"}}}) == (150000.0, 156000.0), "Puls-Endlesung gilt wie bisher")
+
+    # fdp_pump_tick mit Platzhaltern für DB, Patch und Alarm (Takt für Trade 2)
+    import copy
+    J = datetime(2026, 11, 12, 8, 0, tzinfo=timezone.utc)   # 12:00 Dubai
+    REG_T = {"aktiv": True, "firmen": [dict(REG_TR, an=True, je_groesse={"150000": fest(TR, t2_sl_be_pct=0, t2_abstand_min=[2, 2])})]}
+    KONTO = {"id": "konto-1", "user_id": "u-1", "name": "150k FTDFYSLX0000000001 → Funded", "firm": "Tradeify", "account_type": "funded", "max_drawdown": 4500,
+             "starting_balance": 150000, "tv_balance": 156000, "tv_balance_at": "2026-11-12T07:51:00Z"}
+    def t1(pid, ende_utc, be, lesen_bis="2026-11-12T14:30:00Z", t2=None, quelle="reader", auto=True):
+        fin = {"balance_end": be, "balance_quelle": quelle} if be else {}
+        return {"id": pid, "user_id": "u-1", "master_account_id": "konto-1", "master_firm": "Tradeify", "master_name": KONTO["name"], "status": "review",
+                "route": "tvv2", "orbit_v3": True, "started_at": "2026-11-12T06:40:00Z", "ended_at": ende_utc, "completed_at": None, "master_tp": 6000,
+                "auto_bestaetigt_at": "2026-11-12T00:10:00Z" if auto else None,
+                "mt5_baseline": {"tv": {"balance_start": 150000}, "final": fin, "kette": {"von": 2, "nr": 1, "rolle": "haupt", "lesen_bis": lesen_bis},
+                                 "funded_plan": {"zyklus": 1, "start": 150000, "ziel": 166000,
+                                                 "pump": dict({"weg": "zwei", "nr": 1, "ziel_gewinn": 16000, "tag": "2026-11-12"}, **({"t2": t2} if t2 else {}))}}}
+    def lauf(plaene, jetzt=J, offen=(), nachfolger=(), belegt=(), insert_id="neu-1"):
+        log = {"insert": [], "patch": [], "alarm": []}
+        def sb_select(tab, prm):
+            if tab == "trade_plans" and "mt5_baseline->kette->>vor" in prm:
+                return list(nachfolger)
+            if tab == "trade_plans" and prm.get("status") == "in.(planned,open)" and "user_id" in prm:
+                return list(belegt)
+            if tab == "trade_plans" and prm.get("status") == "in.(planned,open)":
+                return list(offen)
+            if tab == "trade_plans":
+                return copy.deepcopy(plaene)
+            if tab == "accounts":
+                return [dict(KONTO)]
+            return []
+        ns.update({"sb_select": sb_select, "sb_insert": lambda tab, z: (log["insert"].append(z), {"id": insert_id} if insert_id else {})[1],
+                   "_tt_patch": lambda pid, patch, key="kette": (log["patch"].append((pid, key, patch)), True)[1],
+                   "alarm_senden": lambda *a, **k: log["alarm"].append((a, k)), "_fdp_regeln_laden": lambda: REG_T, "ap_unt_kontext": lambda frisch=False: None,
+                   "fd_unt_reg": lambda reg, art, uid, ktx=None, streng=False: reg, "_liq_verlauf_laden": lambda ids, streng=False: [],
+                   "fusion_sppl": lambda m, u: 0.85, "_wd_futures_frontcode": lambda j=None: "Z6"})
+        import contextlib, io
+        for _ in range(60):   # fdp_pump_tick fängt Fehler je Plan selbst ab → fehlende Hilfen aus der Meldung nachladen und den Lauf wiederholen
+            for v in log.values():
+                v.clear()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                res = ruf("fdp_pump_tick", jetzt, random.Random(3))
+            m = re.search(r"NameError: name '(\w+)' is not defined", buf.getvalue())
+            if not m:
+                break
+            lade(m.group(1))
+        return res, log
+    e, log = lauf([t1("t1-a", "2026-11-12T07:50:00Z", 156000)])
+    z = log["insert"][0] if log["insert"] else {}
+    zf = ((z.get("mt5_baseline") or {}).get("funded_plan") or {})
+    check(len(log["insert"]) == 1 and z.get("master_tp") == 10000 and z.get("master_contracts") == 3 and z.get("master_sl") is None,
+          f"Takt: Trade 2 angelegt, TP 10.000, 3 NQ, ohne SL ({len(log['insert'])} · {z.get('master_tp')} · {z.get('master_sl')})")
+    check(((z.get("mt5_baseline") or {}).get("kette") or {}).get("nr") == 2 and ((z.get("mt5_baseline") or {}).get("kette") or {}).get("vor") == "t1-a"
+          and (zf.get("pump") or {}).get("nr") == 2 and (zf.get("pump") or {}).get("t1_plan_id") == "t1-a", "Takt: Trade 2 trägt kette {nr 2, vor T1} und pump {nr 2, t1_plan_id}")
+    check(z.get("start_um") and z.get("auto_bestaetigt_at") and "2026-11-12T08:" <= str(z.get("start_um")) <= "2026-11-12T14:30", f"Takt: bestätigt wie Trade 1, Start bis 18:30 Dubai ({z.get('start_um')})")
+    check(abs((z.get("slave_risk") or 0) - 850 / 4500 * 10500) < 0.05 and z.get("orbit_v3") is True and z.get("route") == "tvv2", f"Takt: Fusion auf 10.500 $ Risiko (Satz × Liq-Abstand) ({z.get('slave_risk')})")
+    check(any(k == "funded_plan" and (pa.get("pump") or {}).get("t2", {}).get("status") == "angelegt" for _p, k, pa in log["patch"]) and not log["alarm"],
+          "Takt: Entscheidung an Trade 1 (pump.t2 angelegt), keine Meldung")
+    e, log = lauf([t1("t1-b", "2026-11-12T07:50:00Z", 152000)])
+    check(not log["insert"] and any(k == "kette" and pa.get("tagesende") for _p, k, pa in log["patch"]) and len(log["alarm"]) == 1,
+          "Takt: Trade 1 nicht am TP → kein Trade 2, Tagesende an Trade 1, eine ⚪-Meldung")
+    e, log = lauf([t1("t1-c", "2026-11-12T07:50:00Z", None)])
+    check(not log["insert"] and not log["patch"] and not log["alarm"], "Takt: Lesung fehlt noch (lesen_bis in der Zukunft) → warten, nichts schreiben")
+    e, log = lauf([t1("t1-d", "2026-11-12T07:50:00Z", None, lesen_bis="2026-11-12T07:55:00Z")])
+    check(not log["insert"] and any(k == "kette" and pa.get("tagesende") for _p, k, pa in log["patch"]) and len(log["alarm"]) == 1, "Takt: keine Lesung bis lesen_bis → Tag zu + ⚪")
+    e, log = lauf([t1("t1-e", "2026-11-12T14:40:00Z", 156000)], jetzt=datetime(2026, 11, 12, 14, 45, tzinfo=timezone.utc))
+    check(not log["insert"] and len(log["alarm"]) == 1, "Takt: Trade 1 endete nach 18:30 Dubai → kein Trade 2, ⚪")
+    e, log = lauf([t1("t1-f", "2026-11-12T07:50:00Z", 156000, t2={"status": "angelegt"})])
+    check(not log["insert"] and not log["patch"], "Takt: schon entschieden (pump.t2) → nie ein zweiter Trade 2")
+    e, log = lauf([t1("t1-g", "2026-11-12T07:50:00Z", 156000)], offen=[{"id": "x"}])
+    check(not log["insert"], "Takt: anderer offener Plan am Konto → kein Trade 2")
+
+    e, log = lauf([t1("t1-h", "2026-11-12T07:50:00Z", 156000)], jetzt=datetime(2026, 11, 13, 6, 0, tzinfo=timezone.utc))
+    check(not log["insert"] and len(log["alarm"]) == 1, "Takt läuft erst am Folgetag wieder → Pump-Tag vorbei, kein Trade 2 aus der gestrigen Balance")
+    e, log = lauf([t1("t1-i", "2026-11-12T07:50:00Z", 156000)], nachfolger=[{"id": "t2-da", "status": "review"}])
+    check(not log["insert"] and any(k == "funded_plan" and (pa.get("pump") or {}).get("t2", {}).get("plan_id") == "t2-da" for _p, k, pa in log["patch"]) and not log["alarm"],
+          "Nachfolger steht schon (Patch war gescheitert) → nur Entscheidung nachtragen, nie ein zweiter Trade 2")
+    e, log = lauf([t1("t1-j", "2026-11-12T07:50:00Z", 156000)], insert_id=None)
+    check(len(log["insert"]) == 1 and len(log["alarm"]) == 1 and not any((pa.get("pump") or {}).get("t2", {}).get("status") == "angelegt" for _p, k, pa in log["patch"]),
+          "Anlegen ohne Antwort der DB → nie stumm „angelegt“, ⚪")
+    # Abstände: Firmen-Plan derselben ID um 12:30 Dubai (08:30 UTC) und Big Trade um 15:00 Dubai → Trade 2 hält 15 bzw. 90 min Abstand
+    bel = [{"start_um": "2026-11-12T08:30:00Z", "status": "planned", "master_firm": "Tradeify", "route": "tvv2", "orbit_v3": False, "hedge_eur": 0},
+           {"start_um": "2026-11-12T11:00:00Z", "status": "planned", "master_firm": "Apex Trader", "route": "tvv2", "orbit_v3": True, "hedge_eur": 400}]
+    ok_ab = True
+    for s in range(15):
+        e, log = lauf([t1(f"t1-k{s}", "2026-11-12T07:50:00Z", 156000)], belegt=bel)
+        st = ns["_ap_ts"](log["insert"][0]["start_um"]) if log["insert"] else None
+        if st and (abs((st - datetime(2026, 11, 12, 8, 30, tzinfo=timezone.utc)).total_seconds()) < 15 * 60 or abs((st - datetime(2026, 11, 12, 11, 0, tzinfo=timezone.utc)).total_seconds()) < 90 * 60):
+            ok_ab = False
+    check(ok_ab, "Trade 2 hält Firmen-Abstand (15 min) und Big-Trade-Abstand der ID (90 min)")
+    w, g = ruf("fdp_pump_trade2", A, {"tp": 6000}, START, 162000, LIQ, z16, R())
+    check(w is None and "unplausibel" in str(g), f"Trade 1 deutlich über dem TP (+12.000 bei TP 6.000) → Tag zu, nie still „Ziel erreicht“ ({g})")
+    w, g = ruf("fdp_pump_trade2", A, {"tp": 6000}, START, 156000, LIQ, START + 6300, R())
+    check(w is None and "Mini" in str(g), f"Rest zum Ziel unter 500 $ → kein Mini-Trade 2 ({g})")
+
+    # Textanker: Takt, Tagesteilung, Auto-Close
+    check("fdp_pump_tick(jetzt)" in app and 'rows = [p for p in rows if not (isinstance((p.get("mt5_baseline") or {}).get("funded_plan"), dict))]' in app,
+          "fdp_tick ruft fdp_pump_tick; tt_tick lässt Funded-Planer-Pläne aus")
+    html = open(os.path.join(W, "prophos.html"), encoding="utf-8").read()
+    check("p.mt5Baseline.funded_plan.pump))" in html, "Auto-Close am PC-Tab lässt Pump-Trades aus")
+
 print()
 if fehler:
     print(f"ROT: {len(fehler)} Prüfung(en) fehlgeschlagen")
