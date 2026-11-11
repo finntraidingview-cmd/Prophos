@@ -115,7 +115,8 @@ check(p is None and "nicht hinterlegt" in (f or ""), "andere neue Schlüssel wei
 # ── Frontend
 check("ziel_toleranz_pct: ['Ziel-Toleranz', '%'" in HTML and "function e2ZtFeld(" in HTML and "e2ZtFeld(p, w, darfR, g)" in HTML, "UI: Feld Ziel-Toleranz je Größe mit Schwelle in $")
 check("Object.assign({}, w, { ziel_toleranz_pct: 0 })" in HTML, "UI: Speichern schickt eine neue Toleranz auch ohne gespeicherten Wert")
-check(HTML.count("Number(z.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID'") == 1 and "Number(Q.zeiten.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID'" in HTML,
+check(HTML.count("(z.max_je_id_tag === 0 || z.max_je_id_tag === '0') ? 'kein Tagesdeckel je ID'") == 1
+      and "(Q.zeiten.max_je_id_tag === 0 || Q.zeiten.max_je_id_tag === '0') ? 'kein Tagesdeckel je ID'" in HTML,
       "UI: 0 zeigt „kein Tagesdeckel je ID“ statt 2")
 check("0 = kein Tagesdeckel (FE1b)" in HTML, "UI: Hinweis 0 = aus am Feld")
 

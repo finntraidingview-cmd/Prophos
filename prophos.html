@@ -58768,7 +58768,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2193'
+  const OS_TAB_BUILD = '2026-09-22.2194'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -90101,7 +90101,7 @@
       teile.push(Q ? (Q.aktiv ? nm + ' an' : nm + (fc ? ' aus' : ' aus · Vorschau')) : nm)
       if(z.von || z.bis) teile.push(`Start ${escapeHtml(String(z.von || ''))}–${escapeHtml(String(z.bis || ''))} Dubai, zufällig`)
       if(fc) teile.push(fcrTradesText(), `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`, `${Number(z.abstand_id_min) || 10} min je ID`, `Bestätigen ${Q && Q.apIds && _ap.info && _ap.info.auto_bestaetigen && _ap.info.auto_bestaetigen.aktiv ? 'automatisch' : 'von Hand'}`)
-      else teile.push(Number(z.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID' : `max. ${Number(z.max_je_id_tag) || 2} Funded-Trades je ID und Tag`, `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`)   // FE1b: 0 = aus
+      else teile.push((z.max_je_id_tag === 0 || z.max_je_id_tag === '0') ? 'kein Tagesdeckel je ID' : `max. ${Number(z.max_je_id_tag) || 2} Funded-Trades je ID und Tag`, `${Number(z.firma_abstand_min) || 15} min Firmen-Abstand`)   // FE1b: 0 = aus
       if(Q && Q.regelnQuelle === 'standard') teile.push('Standard-Regeln')
     }else{
       if(v.echo_hedge && typeof v.echo_hedge.an === 'boolean') teile.push(`Echo-Hedge ${an(v.echo_hedge.an)}`)
@@ -92449,7 +92449,7 @@
     root.querySelectorAll('.ap-ids-kopf span').forEach(s => { if(!/Nachtlauf/.test(s.textContent)) return
       s.textContent = (Q.aktiv ? A.name + ' an' : A.name + (Q.fcfd ? ' aus' : ' aus · Vorschau')) + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
       s.title = Q.fcfd ? `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${fcrTradesText()} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand · ${Q.zeiten.abstand_id_min || 10} min je ID`
-        : `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${Number(Q.zeiten.max_je_id_tag) === 0 ? 'kein Tagesdeckel je ID' : `max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag`} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
+        : `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · ${(Q.zeiten.max_je_id_tag === 0 || Q.zeiten.max_je_id_tag === '0') ? 'kein Tagesdeckel je ID' : `max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag`} · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
         + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
     // „Jetzt planen" (27.10.2026, Finn: alle Funded-Konten einmal geplant sehen, ohne zu bestätigen): statt „Nachplanen" des Challenge-Planers
     // POST /admin/funded-plan/planen {tag:'auto'} — nach dem heutigen Fenster für den nächsten Handelstag; Vorschläge ohne Startzeit
