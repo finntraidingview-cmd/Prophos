@@ -179,9 +179,10 @@ check(s2 is not None and s2.tzinfo is not None and datetime(2026, 11, 12, 7, 2, 
 # ── Lucid: Daily Loss 2.700 ab Tagesstart
 L = fest(LU, hedge_eur=850, t1_tp=[6000, 6000], t1_kontrakte={"3": 1}, t1_sl=[2650, 2650], sl_kein_pct=0)
 l1 = ruf("fdp_pump_trade1", L, "zwei", START, START, LIQ, z16, R())
-check(l1.get("aktion") == "planen" and l1["sl"] == 2650 and abs(l1["risiko"] - 2650) < 0.01, f"Lucid T1: SL 2.650 unter dem Daily Loss, Risiko 2.650 ({l1})")
+# LP1 (Master 11.11.2026): SL höchstens Daily Loss − 100 $ Puffer (wie FTMO), „ohne SL“ bei Daily Loss → SL = Rest − 100
+check(l1.get("aktion") == "planen" and l1["sl"] == 2600 and abs(l1["risiko"] - 2600) < 0.01, f"Lucid T1: SL 2.650 gekappt auf Daily Loss − Puffer = 2.600, Risiko 2.600 ({l1})")
 l1b = ruf("fdp_pump_trade1", fest(L, sl_kein_pct=100), "zwei", START, START, LIQ, z16, R())
-check(l1b["sl"] is None and abs(l1b["risiko"] - 2700) < 0.01, "Lucid T1 ohne SL: Risiko = Daily Loss 2.700 (nicht Liq 4.500)")
+check(l1b["sl"] == 2600 and abs(l1b["risiko"] - 2600) < 0.01, f"Lucid T1 Würfel „ohne SL“: SL = Daily Loss − Puffer 2.600 (LP1), nicht Liq 4.500 ({l1b})")
 l1c = ruf("fdp_pump_trade1", fest(L, t1_sl=[3000, 3000]), "zwei", START, START, LIQ, z16, R())
 check(l1c["sl"] is not None and l1c["sl"] <= 2700, f"Lucid: SL nie über dem Daily Loss ({l1c.get('sl')})")
 l1d = ruf("fdp_pump_trade1", L, "zwei", START, START, LIQ, z16, R(), tag_verlust=1000)
@@ -189,7 +190,7 @@ check(l1d.get("aktion") == "planen" and l1d["sl"] is not None and l1d["sl"] <= 1
 l1e = ruf("fdp_pump_trade1", L, "zwei", START, START, LIQ, z16, R(), tag_verlust=2700)
 check(l1e.get("aktion") == "aus", f"Lucid: Daily Loss heute schon ausgeschöpft → kein Plan ({l1e})")
 lw, lg = ruf("fdp_pump_trade2", fest(L, t2_sl_be_pct=0), {"tp": 6000}, START, 156000, LIQ, z16, R())
-check(lw is not None and lw["sl"] is None and abs(lw["risiko"] - 8700) < 0.01, f"Lucid T2 ohne SL: höchstens E1 + 2.700 = 8.700 Verlust ({lw or lg})")
+check(lw is not None and lw["sl"] == 8600 and abs(lw["risiko"] - 8600) < 0.01, f"Lucid T2 Würfel „ohne SL“: SL = E1 + 2.700 − 100 = 8.600 (LP1) ({lw or lg})")
 lw, lg = ruf("fdp_pump_trade2", fest(L, t2_sl_be_pct=100), {"tp": 6000}, START, 156000, LIQ, z16, R())
 check(lw is not None and lw["sl"] == 6000 and abs(lw["risiko"] - 6000) < 0.01, "Lucid T2 Break-even: SL = E1 6.000")
 lx = ruf("fdp_pump_trade1", LU, "ein", START, START, LIQ, z16, R())
