@@ -38383,13 +38383,28 @@
   // auch wenn derselbe Plan zweimal geöffnet wird) und ob Finn die Konto-Status-Wahl selbst angefasst hat (dann ändert das Urteil nichts mehr)
   let _mwdErlWp = null, _mwdErlNr = 0, _mwdErlStatusAngefasst = false
   let _mwdErlU = null   // AP2b: Payout-Stand, den die Checkliste gerade zeigt (gemerkt oder frisch)
+  let _mwdErlGemVorwahl = ''   // AP6 (Prüfer K3): Schritt, den der GEMERKTE Stand vorgewählt hat — nur diesen darf der frische zurücknehmen
   // click statt change: auch ein Klick auf die schon gewählte Zeile („Nichts ändern" bewusst bestätigt) zählt als Finns Wahl
   document.querySelectorAll('input[name="mwd-erl-status"]').forEach(rb => rb.addEventListener('click', e => { if(e.isTrusted) _mwdErlStatusAngefasst = true }))
-  /* Urteil anwenden: nur zwischen „Nichts ändern" und „⏳ Waiting for Payout", nie über geblowt/bestanden/Winning Days und nie über eine Wahl von Finn.
+  /* Urteil anwenden (Funded CFD): nur zwischen „Nichts ändern" und „⏳ Waiting for Payout", nie über geblowt/bestanden/Winning Days und nie über eine Wahl von Finn.
+   * AP6: Challenge/Phase → „Phase bestanden“, Funded Futures → „→ Winning Days“ — nur aus „Nichts ändern“ heraus vorwählen; zurückgenommen wird nur eine Vorwahl
+   * aus dem gemerkten Stand (_mwdErlGemVorwahl), nie eine andere Vorbelegung (TP + Konto weg …) oder Finns Klick.
    * bereit → ⏳ vorausgewählt; nicht bereit → zurück auf „Nichts ändern" (die schnelle Rechnung Balance ≥ ziel_usd kennt weder das feste Ziel des Zyklus noch
    * Consistency/Gewinntage — ein zu frühes Waiting hält den Funded-CFD-Planer an), mit dem fehlenden Punkt als Hinweis. u null → nichts ändern. */
   function mwdErlWpAnwenden(u){
     if(!u || u.wartet || _mwdErlStatusAngefasst) return
+    // AP6: Phase/Challenge → „Phase bestanden“ nur hinzuwählen (nie zurück auf „Nichts ändern“: TP + Konto weg o. Ä. wählt bestanden schon vor, die Balance kann alt sein)
+    // AP6: Funded Futures → „→ Winning Days“ genauso nur hinzuwählen (Zeile nur bei Funded einer Futures-Firma sichtbar)
+    if(u.schritt === 'passed' || u.schritt === 'winning_days'){
+      const zp = document.getElementById(u.schritt === 'passed' ? 'mwd-erl-status-passed' : 'mwd-erl-status-wd'); if(!zp || zp.style.display === 'none') return
+      const akt = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+      if(u.bereit && akt === 'none'){ const rb = document.querySelector(`input[name="mwd-erl-status"][value="${u.schritt}"]`); if(rb) rb.checked = true; mwdErlStatusUI() }
+      else if(!u.bereit && akt === u.schritt && _mwdErlGemVorwahl === u.schritt){   // frisch „nicht erreicht“ → die Vorwahl des gemerkten Stands zurück
+        const rb = document.querySelector('input[name="mwd-erl-status"][value="none"]'); if(rb) rb.checked = true; mwdErlStatusUI()
+      }
+      return
+    }
+    if(u.schritt !== 'waiting') return   // Winning Days: kein Schreibweg zu Waiting — nur die Checkliste
     const z = document.getElementById('mwd-erl-status-waiting'); if(!z || z.style.display === 'none') return
     const akt = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
     if(akt !== 'none' && akt !== 'waiting') return
@@ -38419,7 +38434,9 @@
     _mwdErlId = String(pid)
     // AB2: Abhak-Strahl (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person) — seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
     _mwdErlChallenge = AB2_STILL_TYPEN.includes(String(pw.konto_typ || ''))
-    _mwdErlAb2 = (ab2Gilt(pw.konto_typ, pw.mt5_baseline) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
+    // AP6 (11.11.2026): Karte für Funded CFD UND Challenge/Phase — sie kommt seit AP3 ohnehin nur bei erreichtem Ziel; ab2Gilt (mt5_baseline.funded_plan) griff im Radar
+    // nie, weil /admin/live-trades und /admin/wd-plaene kein mt5_baseline liefern (nur planer_plan)
+    _mwdErlAb2 = ((ab2Gilt(pw.konto_typ, pw.mt5_baseline) || pw.planer_plan === true || AB2_KARTE_TYPEN.includes(String(pw.konto_typ || ''))) && pw.konto_id) ? { konto_id: String(pw.konto_id), typ: String(pw.konto_typ),
       name: [String((pw.konto || {}).firma || ''), (pw.konto || {}).groesse ? String(pw.konto.groesse) : '', (pw.konto || {}).kontonr_ende ? '…' + pw.konto.kontonr_ende : ''].filter(Boolean).join(' ') || 'Konto',
       unter: pw.person ? String(pw.person) : '', base: pw.mt5_baseline || null } : null   // base: AB2b Plan-Balance (ab2PlanBal)
     const k = pw.konto || {}
@@ -38523,19 +38540,34 @@
     // Ein Klick klar unter dem Ziel (bucht gleich still, s. unten) fragt gar nicht erst — kein /konto-ziele-Abruf je stillem Abhaken
     // WP4 (Finn 10.11.2026: „will ich immer dieses kleine Popup sehen“): Funded CFD mit Konto → Urteil IMMER holen (Checkliste), auch beim Ein Klick; nur der stille Takt nicht
     const _wpFcfd = String(pw.konto_typ || '') === 'funded_cfd' && !!pw.konto_id && !_mwdErlPolar && typeof window._wpUrteil === 'function' && !(opts && opts.nurStill)
-    _mwdErlWp = (umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function'
-                 && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw) || _wpFcfd)) ? window._wpUrteil(pw.konto_id) : null
+    // AP6: Challenge/Phase und Winning Days zeigen dieselbe Checkliste, wenn das Popup ohnehin aufgeht; der Ein Klick bleibt still (Finn: „die ganzen Challenges …“),
+    // außer der gemerkte Stand (Radar-Vorladen) meldet schon „Ziel erreicht“ → Popup mit „Phase bestanden“ vorgewählt. Nie auf ein Urteil warten (WP1-Stopp).
+    const _wpS = typeof window._wpSchritt === 'function' ? window._wpSchritt(pw.konto_typ) : null
+    const _wpAndere = !!(_wpS && _wpS.art !== 'cfd') && !!pw.konto_id && !_mwdErlPolar && typeof window._wpUrteil === 'function' && !(opts && opts.nurStill)
+    const _wpGemA = _wpAndere && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id, Date.parse(pw.ended_at || '') || 0) : null
+    const _wpZiel = !!(_wpGemA && _wpGemA.bereit && _wpGemA.schritt)
+    const _wpZeigen = _wpFcfd || (_wpAndere && (!(opts && opts.einKlick) || _wpZiel))
+    _mwdErlWp = ((umZeilen['mwd-erl-status-waiting'] && pw.konto_id && !pw.konto_waiting && typeof window._wpUrteil === 'function'
+                 && (!(opts && opts.einKlick) || wdlFcfdZielMoeglich(pw) || _wpFcfd)) || (_wpZeigen && !_wpFcfd)) ? window._wpUrteil(pw.konto_id) : null
+    _mwdErlGemVorwahl = ''
+    if(_wpZiel){   // AP6: gemerkter Stand sagt schon „Ziel erreicht“ → sofort vorwählen; nimmt der frische es zurück, dann nur diese Vorwahl (Prüfer K3)
+      const vor = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+      mwdErlWpAnwenden(_wpGemA)
+      if(vor === 'none' && (document.querySelector('input[name="mwd-erl-status"]:checked')?.value) === _wpGemA.schritt) _mwdErlGemVorwahl = _wpGemA.schritt
+    }
     if(_mwdErlWp) _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
     // AP2b (Finn 11.11.2026: „dann sollte es direkt kommen“): gemerkter Stand aus dem Radar-Vorladen sofort, sonst Platzhalter in Endgröße; der frische ersetzt ihn still.
     // Antwortet der frische nicht (null), bleibt ein gemerkter Stand stehen statt „nicht lesbar“
-    { const pc = document.getElementById('mwd-erl-pcheck')
+    // AP6 (Prüfer K5): als Funktion — ein Ein Klick, der doch das Popup öffnet (unten), startet die Checkliste dann noch
+    const _wpListe = an => { const pc = document.getElementById('mwd-erl-pcheck')
       if(pc){
-        const gem = _wpFcfd && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id, Date.parse(pw.ended_at || '') || 0) : null
-        _mwdErlU = gem; pc.hidden = !_wpFcfd
-        if(!_wpFcfd) pc.innerHTML = ''
+        const gem = an && typeof window._wpGemerkt === 'function' ? window._wpGemerkt(pw.konto_id, Date.parse(pw.ended_at || '') || 0) : null
+        _mwdErlU = gem; pc.hidden = !an
+        if(!an) pc.innerHTML = ''
         else if(gem) mwdErlPcheckZeichnen()
         else pc.innerHTML = typeof window._wpPlatzhalterHtml === 'function' ? window._wpPlatzhalterHtml() : '<div class="wpck-erg leise">Payout-Stand wird gelesen …</div>'
-        if(_wpFcfd) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)){ if(u || !_mwdErlU){ _mwdErlU = u; mwdErlPcheckZeichnen() } } }) } }
+        if(an) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)){ if(u || !_mwdErlU){ _mwdErlU = u; mwdErlPcheckZeichnen() } } }) } }
+    _wpListe(_wpZeigen)
     // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
     _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
     const wdh = document.getElementById('mwd-erl-wdh'), wdhCb = document.getElementById('mwd-erl-wdh-cb')
@@ -38562,9 +38594,16 @@
       // Funded CFD, bei dem das Payout-Ziel MÖGLICH ist (wdlFcfdZielMoeglich: Radar-Ziel bekannt, Balance nach dem Trade unbekannt oder ≥ Ziel) → nie still abhaken,
       // sofort Popup (das Urteil wählt darin ⏳ vor oder ab); still ohne Klick gar nicht (Zeile bleibt für Finns Klick). Klar unter dem Ziel → Ein Klick sofort wie bisher.
       // WP4: Funded CFD per Klick → immer das Popup mit der Checkliste (nie still); der stille Takt (nurStill) bucht wie bisher
-      if(ruhig && !_wpFcfd && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
+      // AP6: _wpZiel = gemerkter Stand meldet das Ziel (Challenge/Phase) → Popup statt Ein Klick
+      if(ruhig && !_wpFcfd && !_wpZiel && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
       if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
+    }
+    // AP6 (Prüfer K5): Ein Klick auf Challenge/Phase/Funded Futures, der doch aufgeht (nicht ruhig) → Checkliste + Vorwahl jetzt nachladen
+    if(opts && opts.einKlick && !_wpZeigen && _wpAndere){
+      _mwdErlWp = window._wpUrteil(pw.konto_id)
+      _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
+      _wpListe(true)
     }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -38617,7 +38656,7 @@
   function mwdErlZielOk(){
     if(!_mwdErlU) return false
     if(_mwdErlU.wartet) return true
-    const z = (_mwdErlU.liste || []).find(r => r.name === 'Ziel bis Waiting')
+    const z = (_mwdErlU.liste || []).find(r => r.name === 'Ziel bis Waiting' || r.titel === 'Ziel')   // AP6: auch Challenge/Phase („Ziel 105.000 $“)
     return !!(z && z.st === 'ok')
   }
   // AP2b: Checkliste aus dem zuletzt gelesenen Stand zeichnen, Ziel lokal mit dem Master-Feld (Eingabe − Vorbelegung) — nur Anzeige
@@ -38670,10 +38709,10 @@
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     const plQuelleVor = plHand ? null : _mwdErlVorQuelle   // AB3b: unverändert übernommener Vortrag → 'balance_vortrag'
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
-    const ab2Info = (still || !['none', 'waiting', 'passed'].includes(kontoStatus)) ? null : _mwdErlAb2   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
+    const ab2Info = (still || !['none', 'waiting', 'passed', 'winning_days'].includes(kontoStatus)) ? null : _mwdErlAb2   // AP6: auch → Winning Days   // AB2: nur bei einem echten Klick, nie beim stillen Takt, nie bei geblowt
     // AP3 (Finn 11.11.2026: „Dieses Ding soll nicht jedes Mal kommen … sondern nur, wenn ich das Ziel erreicht habe“): Ziel nach diesem Trade aus der Checkliste
     // im Popup (gelesener Stand + Eingabe im Master-Feld, wie sie Finn gerade sah) bzw. Waiting/bestanden gewählt — sonst keine Karte, nur der kleine Hinweis
-    const ab2ZielOk = kontoStatus === 'waiting' || kontoStatus === 'passed' || mwdErlZielOk()
+    const ab2ZielOk = kontoStatus === 'waiting' || kontoStatus === 'passed' || kontoStatus === 'winning_days' || mwdErlZielOk()
     const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
     const stillAbhak = _mwdErlChallenge   // AB2c: Challenge — keine „Erledigt"-Toasts (Fehler bleiben rot)
     const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
@@ -38688,7 +38727,8 @@
     // dann ohne die Bestanden-Pille unten (geblowt hat keinen Strahl und behält sie)
     let ab2 = null
     try{ ab2 = ab2Info ? ab2Start(Object.assign({}, ab2Info, ab2PlanBal(pid, ab2Info.base), { mpl, bestanden: kontoStatus === 'passed' || abArt === 'bestanden',
-                                                 zielOk: ab2ZielOk || abArt === 'bestanden', status: kontoStatus })) : null }catch(_){ ab2 = null }   // AP3
+                                                 zielOk: ab2ZielOk || abArt === 'bestanden', status: kontoStatus,
+                                                 vorAbhak: ((((window._k1 || {}).cache || {})[ab2Info.konto_id] || {}).d || {}).abhak || null })) : null }catch(_){ ab2 = null }   // AP3; AP6: Stand vor dem Umstellen
     try{ abNach(); if(!ab2) abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
@@ -41155,7 +41195,12 @@
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     try{ _wdlPaare = wdlKontoPaare(alleTrades) }catch(_){ _wdlPaare = new Map() }   // Konto-Paar Läuft ⇄ Erledigt (30.10.2026)
     // AP2b (11.11.2026): Payout-Stand der Funded-CFD-Trades in review vorladen (nur lesend), damit „Abhaken“ den Status sofort zeigt
-    try{ if(typeof window._wpVorladen === 'function') window._wpVorladen(alleTrades.filter(t => t.status === 'review' && String(t.konto_typ || '') === 'funded_cfd' && t.konto_id && !t.konto_waiting).map(t => t.konto_id)) }catch(_){}
+    try{ if(typeof window._wpVorladen === 'function'){
+      const _rv = alleTrades.filter(t => t.status === 'review' && t.konto_id && !t.konto_waiting && !wdlIstPolar(t))   // Prüfer S2: Polar nutzt die Checkliste nie
+      window._wpVorladen([..._rv.filter(t => String(t.konto_typ || '') === 'funded_cfd').map(t => t.konto_id),
+        // AP6: Challenge/Phase/Funded Futures nur mit Gewinn (nur so kann das Ziel fallen) und nur bis ein Stand nach dem Trade-Ende da ist (Railway-Last)
+        ..._rv.filter(t => ['challenge', 'phase1', 'phase2', 'funded'].includes(String(t.konto_typ || '')) && Number(t.pl_balance) > 0)
+             .map(t => ({ id: t.konto_id, ende: Date.parse(t.ended_at || '') || 0 }))]) } }catch(_){}
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     try{ polarRadarLeiste(alleTrades) }catch(_){}   // Polar über alle IDs oben (21.10.2026), unabhängig von Modell-/ID-Filter
@@ -45828,7 +45873,10 @@
     if(!u) return { art: 'leise', text: 'Payout-Stand nicht lesbar — bitte im Account prüfen' }
     const fehlt = (u.liste || []).filter(r => r.st === 'nein').map(r => r.titel || r.name)
     if(u.wartet) return { art: 'leise', text: 'Konto steht schon auf Waiting for Payout' }
-    if(u.bereit && !fehlt.length) return { art: 'ja', text: kurz ? '✓ Alles erfüllt — vorausgewählt' : '✓ Alles erfüllt → Konto jetzt zu Waiting for Payout' }
+    if(u.bereit && !fehlt.length) return { art: 'ja', text: kurz ? '✓ Alles erfüllt — vorausgewählt'
+      : u.art === 'phase' ? '✓ Alles erfüllt → Phase bestanden — Nachfolger anlegen' : u.art === 'wd' ? '✓ Payout möglich — im Konto anfragen'   // AP6: Schritt je Kontoart
+      : u.art === 'fd' ? '✓ Ziel erreicht → Winning Days'
+      : '✓ Alles erfüllt → Konto jetzt zu Waiting for Payout' }
     return { art: 'nein', text: `Noch nicht fertig${fehlt.length ? ': ' + fehlt.join(', ') : (u.fehltText && !(u.liste || []).length) ? ': ' + u.fehltText : ''} — Konto bleibt` }
   }
   window._wpChecklisteHtml = wpChecklisteHtml   // Test-Haken
@@ -45836,26 +45884,81 @@
   /* AP2b SOFORT SICHTBAR (Finn 11.11.2026, Fall FundedNext 100k …0246: „Ich muss draufklicken, dann sollte es direkt kommen.“ — der Block kam 1–2 s nach dem Öffnen
    * und schob das Popup um). Der Radar lädt /konto-ziele für die Funded-CFD-Zeilen in review vor (wpVorladen, nur lesend, je Konto höchstens alle 60 s, ≤ 6 je Takt);
    * das Popup zeigt den gemerkten Stand sofort (wpGemerkt, bis 30 min) und zieht den frischen still nach. Ohne gemerkten Stand: Platzhalter in Endgröße.
-   * Nur Anzeige — die Vorauswahl („Waiting“) kommt weiter allein aus der frischen Antwort (mwdErlWpAnwenden). */
+   * Nur Anzeige — die Vorauswahl („Waiting“) kommt weiter allein aus der frischen Antwort (mwdErlWpAnwenden). AP6: bei Challenge/Phase/Funded Futures wählt schon der
+   * gemerkte Stand vor (nur wenn er nach dem Trade-Ende gelesen wurde), der frische darf diese Vorwahl zurücknehmen. */
   const WP_VORLADEN_MS = 60000, WP_GEMERKT_MS = 30 * 60000
   const _wpVl = new Set(), _wpVlFehl = {}   // Prüfer S1: Fehlversuch je Konto (Zeit) — 60 s Pause, sonst feuert jeder Radar-Takt neu auf ein langsames Railway
+  /* AP6 „NÄCHSTER SCHRITT BEI ZIEL“ (Finn 11.11.2026 20:02: „sobald ein Typ sein Ziel erreicht hat: ‚Yo, Ziel erreicht‘ → entweder Waiting for Payout oder Winning Days“):
+   * EINE Zuordnung je Kontoart, welche Quelle das Abhak-Popup liest und welche Konto-Status-Zeile es bei erreichtem Ziel vorwählt — keine Regel je Firma im Code.
+   *   cfd    Funded CFD          /konto-ziele abhak (WP4)          → „waiting“ (Waiting for Payout)
+   *   phase  Challenge/Phase 1/2 /konto-ziele urteil art „phase“   → „passed“ (Phase bestanden — Nachfolger anlegen)
+   *   wd     Winning Days        /konto-ziele urteil art „payout“  → nur anzeigen: der Server stellt nur Funded CFD auf Waiting um (wd_erl_konto_umstellen_upd)
+   *   fd     Funded Futures      /konto-ziele abhak (app.py kz_fdp_abhak: Ziel des Funded-Planers Futures) → „winning_days“ (→ Winning Days, wie fdp_planen am Ziel);
+   *                              Firma nicht im Funded-Planer → kein abhak → Popup wie bisher („Nichts ändern“)
+   * → { art, schritt } | null. Nur Anzeige + Vorauswahl; geschrieben wird über die bestehenden Wege. */
+  const WP_SCHRITT = { funded_cfd: { art: 'cfd', schritt: 'waiting' }, funded: { art: 'fd', schritt: 'winning_days' }, challenge: { art: 'phase', schritt: 'passed' }, phase1: { art: 'phase', schritt: 'passed' },
+                       phase2: { art: 'phase', schritt: 'passed' }, winning_days: { art: 'wd', schritt: null } }
+  function wpSchritt(typ){ return WP_SCHRITT[String(typ || '')] || null }
+  window._wpSchritt = wpSchritt
   function wpAusD(d){
-    const ab = d && d.abhak
-    if(!ab || String(d.typ || '') !== 'funded_cfd') return null
-    // WP4 (Finn 10.11.2026): Gründe mit Zahlen aus /konto-ziele abhak.ok_text / fehlt_text (neuer Railway-Stand); ohne sie wie bisher urteil.grund
-    return { bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
-             grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
+    const typ = String((d && d.typ) || ''), sch = wpSchritt(typ)
+    if(!sch) return null
+    if(sch.art === 'cfd'){
+      const ab = d && d.abhak
+      if(!ab) return null
+      // WP4 (Finn 10.11.2026): Gründe mit Zahlen aus /konto-ziele abhak.ok_text / fehlt_text (neuer Railway-Stand); ohne sie wie bisher urteil.grund
+      return { art: 'cfd', schritt: sch.schritt, bereit: !!ab.bereit, wartet: !!ab.wartet, okText: String(ab.ok_text || ''), liste: wpCheckliste(d), fehltText: String(ab.fehlt_text || ''),
+               grund: ab.bereit ? '' : (ab.fehlt_text ? 'fehlt: ' + String(ab.fehlt_text) : String((d.urteil && d.urteil.grund) || '')) }   // z. B. „fehlt: Consistency 51,2 % > 50 % (…)“
+    }
+    if(sch.art === 'fd'){   // AP6: Funded Futures — abhak aus kz_fdp_abhak (Ziel des Funded-Planers), sonst keine Quelle
+      const ab = d && d.abhak
+      if(!ab || !Array.isArray(ab.checks)) return null
+      return { art: 'fd', schritt: sch.schritt, bereit: !!ab.bereit, wartet: false, okText: String(ab.ok_text || ''), liste: wpChecklisteAllg(ab.checks),
+               fehltText: String(ab.fehlt_text || ''), grund: ab.bereit ? '' : String(ab.fehlt_text || '') }
+    }
+    // AP6: Challenge/Phase und Winning Days — Urteil der Konto-Seite (kz_rechnen), ok null = Ziel unbekannt → keine Checkliste
+    const ur = d && d.urteil
+    if(!ur || !Array.isArray(ur.checks) || ur.ok == null) return null
+    const bereit = ur.ok === true
+    return { art: sch.art, schritt: sch.schritt, bereit, wartet: false, okText: '', liste: wpChecklisteAllg(ur.checks), fehltText: '', grund: bereit ? '' : String(ur.grund || '') }
+  }
+  /* AP6: Zeilen aus urteil.checks ([st, name, wert]) für Challenge/Phase und Winning Days — dieselben Anzeige-Felder wie die CFD-Checkliste (titel · gross · klein ·
+   * balken); Info-Zeilen bleiben weg (außer Zyklus-Gewinn). name/wert bleiben wie geliefert. */
+  function wpChecklisteAllg(checks){
+    const de = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const zahl = t => { const x = Number(String(t || '').replace(/−/g, '-').replace(/\s|\$/g, '').replace(/\./g, '').replace(',', '.')); return isFinite(x) ? x : null }
+    return (checks || []).filter(c => Array.isArray(c) && (c[0] !== 'info' || c[1] === 'Zyklus-Gewinn')).map(c => {
+      const st = String(c[0]), name = String(c[1] || ''), w = String(c[2] || ''), r = { st, name, wert: w, titel: name, gross: w || '—' }
+      const zm = /^Ziel\b/.test(name) ? w.match(/^\s*([−+-]?[\d.,]+)\s*\$\s*\/\s*([−+-]?[\d.,]+)\s*\$/) : null
+      const tm = w.match(/^(\d+)\s*\/\s*(\d+)$/)
+      if(zm){
+        const g = zahl(zm[1]), zi = zahl(zm[2]), zTxt = zm[2].replace(/^\+/, '') + ' $'
+        r.titel = 'Ziel'; r.gross = zm[1] + ' $'
+        r.klein = st === 'ok' ? `Ziel ${zTxt} erreicht` : `von ${zTxt}` + (g != null && zi != null && zi > g ? ` · fehlen ${de(Math.ceil(zi - g))} $` : '')
+        if(g != null && zi > 0) r.balken = Math.max(0, Math.min(1, g / zi))
+      } else if(tm){
+        r.klein = Number(tm[1]) < Number(tm[2]) ? `fehlen ${Number(tm[2]) - Number(tm[1])}` : ''
+      } else if(/^Consistency\s*≤/.test(name)){
+        r.titel = 'Consistency'; r.klein = 'erlaubt ' + name.replace(/^Consistency\s*/, '')
+      }
+      return r
+    })
   }
   function wpGemerkt(id, nachMs){   // nachMs: nur ein Stand, der nach dem Trade-Ende gelesen wurde (Prüfer: die Konto-Seite kann ihn vorher geschrieben haben)
     const c = _k1.cache[String(id || '')]
     return (c && c.d && Date.now() - c.at < WP_GEMERKT_MS && !(Number(nachMs) > c.at)) ? wpAusD(c.d) : null
   }
   window._wpGemerkt = wpGemerkt
+  // ids: Konto-IDs (Funded CFD, alle 60 s frisch wie AP2b) oder { id, ende } (AP6 übrige Kontoarten, Prüfer S2: genügt EIN Stand nach dem Trade-Ende, danach
+  // höchstens alle 5 min — sonst holte jede Challenge in review jede Minute /konto-ziele)
   function wpVorladen(ids){
     let n = 0
-    for(const id of new Set((ids || []).map(String).filter(Boolean))){
-      const c = _k1.cache[id]
-      if(_wpVl.has(id) || (c && c.d && Date.now() - c.at < WP_VORLADEN_MS) || Date.now() - (_wpVlFehl[id] || 0) < WP_VORLADEN_MS) continue
+    const ende = {}
+    const liste = (ids || []).map(x => { if(x && typeof x === 'object'){ ende[String(x.id)] = Number(x.ende) || 0; return String(x.id || '') } return String(x || '') })
+    for(const id of new Set(liste.filter(Boolean))){
+      const c = _k1.cache[id], e = ende[id]
+      const frisch = c && c.d && (e != null ? (c.at > e && Date.now() - c.at < WP_GEMERKT_MS) || Date.now() - c.at < 5 * WP_VORLADEN_MS : Date.now() - c.at < WP_VORLADEN_MS)
+      if(_wpVl.has(id) || frisch || Date.now() - (_wpVlFehl[id] || 0) < WP_VORLADEN_MS) continue
       if(++n > 6) break
       _wpVl.add(id); wpUrteil(id).then(u => { if(u) delete _wpVlFehl[id]; else _wpVlFehl[id] = Date.now() }, () => { _wpVlFehl[id] = Date.now() }).finally(() => _wpVl.delete(id))
     }
@@ -45995,8 +46098,11 @@
    * keine Empfehlung. Strahl 1 Profit Target (Kontogröße → Ziel; Stand vorher = Balance − Trade-P&L), Strahl 2 Consistency (größter Tag ÷ Basis, Strich =
    * Grenze der Firma), dazu Gewinn-/Mindesttage als Punkte und bei Funded CFD der Payout. Fusion nur als Fußzeile. Gilt für Challenge (challenge/phase1/phase2)
    * und Funded CFD; Funded Futures / Winning Days behalten den WD-Flug. Knopf „→ Waiting for Payout“ wie AB1 (Ziel UND Consistency erfüllt). Nur Anzeige:
+   * AP3/AP6 (Finn 11.11.2026: nur bei erreichtem Ziel; „sobald ein Typ sein Ziel erreicht hat … ‚Yo, Ziel erreicht‘“): die Karte kommt nur noch mit Ziel, dafür für
+   * jede Kontoart mit Ziel-Quelle (AB2_KARTE_TYPEN: Challenge/Phase, Funded CFD — auch ohne Funded-Planer —, Funded Futures). AB2c unten ist damit überholt.
    * ein Fehler hier stört das Abhaken nie (Aufrufer in try). */
   const AB2_TYPEN = ['challenge', 'phase1', 'phase2', 'funded_cfd']
+  const AB2_KARTE_TYPEN = [...AB2_TYPEN, 'funded']   // AP6: Ziel-Karte (nur bei erreichtem Ziel) auch für Challenge/Phase und Funded Futures
   /* NUR FUNDED-PLANER (AB2c, Finn 05.11.2026: „mir geht's hier nicht um jeden einzelnen Trade, sondern nur um die Funded CFDs, also nur um alle Funded
    * Trades, die über den Funded Planner gemacht werden. Die ganzen Challenges, das sind ja so viele, das kann ich vergessen."): Karte nur für Funded CFD
    * mit mt5_baseline.funded_plan (Kennung des Funded-CFD-Planers, bleibt über den Echo-Start erhalten — DB 7 Tage: 50 von 61 erledigten Funded-CFD-
@@ -46076,11 +46182,11 @@
     return { start: (s != null && s > 0) ? s : null, ende: (e != null && e > 0) ? e : null }
   }
   function ab2Start(info){
-    if(!info || !info.konto_id || String(info.typ || '') !== 'funded_cfd') return null   // AB2c: nur Funded CFD (Aufrufer prüfen ab2Gilt)
+    if(!info || !info.konto_id || !AB2_KARTE_TYPEN.includes(String(info.typ || ''))) return null   // AP6: Funded CFD + Challenge/Phase (nur bei erreichtem Ziel, unten)
     if(info.zielOk !== true) return null   // AP3 (Finn 11.11.2026): nur, wenn das Ziel nach dem Trade erreicht ist — sonst der kleine Hinweis des Aufrufers
     const nr = ++_ab2Nr
     const mpl = ab2Num(info.mpl)
-    const art = 'Funded CFD'
+    const art = ({ funded_cfd: 'Funded CFD', funded: 'Funded Futures', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2' })[String(info.typ)] || 'Konto'
     // AB2c: steht die Karte noch (mehrere Funded hintereinander abgehakt), kommt der neue Trade als Zeile oben dazu statt die Karte zu ersetzen
     let k = ab2Karte()
     if(!k){
@@ -46134,12 +46240,13 @@
   /* Strahlen in die Karte zeichnen. → true, wenn der Waiting-Knopf steht (Karte bleibt länger). */
   function ab2Zeichnen(h, d, radar){
     const k = h.el, info = h.info, id = String(info.konto_id)
-    const typ = String(d.typ || info.typ || ''), ab = d.abhak || null
+    // Prüfer AP6 (SOLLTE): nach „→ Winning Days“ ist das Konto beim Nachladen schon winning_days (ohne abhak) — dann der Stand von vor der Umstellung (info.vorAbhak)
+    const typ = String(d.typ || info.typ || ''), ab = d.abhak || (info.status === 'winning_days' && info.vorAbhak) || null
     const kach = key => ((d.kacheln || []).find(x => x && x.key === key && !x.leer)) || null
     const mpl = ab2Num(info.mpl) ?? 0
     // AB2b: Stand nach DIESEM Trade aus dem Plan (ab2PlanBal), nur ohne Plan-Lesung die Konto-Balance jetzt
     const bal = ab2Num(info.ende) ?? ab2Num(ab && ab.bal) ?? ab2Num(d.balance && d.balance.wert)
-    const start = ab2Num(d.groesse) ?? ab2Num(d.chart && d.chart.start)
+    const start = ab2Num(ab && ab.start) ?? ab2Num(d.groesse) ?? ab2Num(d.chart && d.chart.start)   // AP6: Funded Futures Zyklus-Start (kz_fdp_abhak)
     const ziel = ab2Num(ab && ab.ziel_bal) ?? ab2Num(d.chart && d.chart.ziel)
     const teile = []
     let i = 0
@@ -46213,10 +46320,16 @@
       // AP3: was als Nächstes passiert — Waiting / Nachfolger / Payout bereit / was für den Payout noch fehlt (statt „nächster Trade ≈ …“)
       const cn = ab.cons, gtn = Array.isArray(ab.gewinntage) ? ab.gewinntage : null
       const fehltN = [cn && cn.ok === false ? `Consistency ${ab2Pct(cn.anteil, true)} > ${ab2Pct(Number(cn.p) / 100)}` : '', gtn && gtn[0] < gtn[1] ? `Gewinntage ${gtn[0]}/${gtn[1]}` : ''].filter(Boolean)
-      const txt = info.bestanden ? '✅ Nachfolger anlegen' : (ab.wartet || info.status === 'waiting') ? '⏳ geht auf Waiting for Payout' : ab.bereit ? 'Payout bereit'
+      const txt = info.bestanden ? '✅ Nachfolger anlegen' : info.status === 'winning_days' ? '🏆 geht auf Winning Days'   // AP6
+        : (ab.wartet || info.status === 'waiting') ? '⏳ geht auf Waiting for Payout' : ab.bereit ? (ab.schritt === 'winning_days' ? '🏆 Ziel erreicht → Winning Days' : 'Payout bereit')
         : fehltN.length ? 'fehlt noch: ' + fehltN.join(' · ') : (nx && nx.aktion === 'planen' && nx.tp) ? `nächster Trade ≈ ${ab2Usd(nx.tp)}` : '—'
       teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Als Nächstes${d.urteil && d.urteil.sub ? ` <small>${escapeHtml(d.urteil.sub)}</small>` : ''}</span>`
         + `<em${nx && nx.grund && !ab.bereit ? ` title="${escapeHtml(String(nx.grund))}"` : ''}>${escapeHtml(txt)}</em></div></div>`)
+    } else if(d.urteil && d.urteil.art === 'phase'){
+      // AP6: Challenge/Phase — bestanden gewählt → Nachfolger; sonst was laut Urteil noch fehlt
+      const fehltP = (d.urteil.checks || []).filter(c => Array.isArray(c) && c[0] === 'nein').map(c => String(c[1]))
+      const txt = info.bestanden ? '✅ Nachfolger anlegen' : d.urteil.ok ? '✅ bestanden — Konto umstellen' : fehltP.length ? 'fehlt noch: ' + fehltP.join(' · ') : '—'
+      teile.push(`<div class="ab2-block ab2-zeile" style="--i:${i++}"><div class="ab2-zk"><span>Als Nächstes</span><em>${escapeHtml(txt)}</em></div></div>`)
     }
     const inhalt = k.querySelector('[data-ab2-inhalt]'); if(inhalt){ inhalt.innerHTML = teile.join(''); ab2Zaehlen(inhalt) }   // AB2c: Zahlen zählen mit dem Strahl
     // Knopf „→ Waiting for Payout" — dieselbe Regel wie AB1: nur Funded CFD, Ziel UND Consistency erfüllt, eigenes Konto oder Radar-Kontext

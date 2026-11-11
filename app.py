@@ -42812,10 +42812,48 @@ def kz_rechnen(a, ctx):
                          "sub": f"Zyklus {st['nr']}" + (f" · seit {kz_tag(out['zyklus']['seit'])}" if out["zyklus"]["seit"] else ""),
                          "text": "Payout möglich" if ok else "Noch kein Payout" if bekannt else "kein WD-Ziel",
                          "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if bekannt else "am Konto kein Ziel (goal_target)", "checks": checks}
+    if typ == "funded" and isinstance(ctx.get("fdp"), dict):
+        try:
+            out["abhak"] = kz_fdp_abhak(a, ctx["fdp"], bal, plaene)
+        except Exception as e:
+            print(f"[konto-ziele] ⚠️ Funded-Futures-Ziel {aid[:8]}: {type(e).__name__}: {e}", flush=True)
     kach.append(kz_trades_kachel(phase, (out.get("zyklus") or {}).get("seit")))
     out["kacheln"] = kach
     out["payouts"] = kz_payouts(*ctx["payouts"]) if ctx.get("payouts") else None
     return out
+
+
+def kz_fdp_abhak(a, fdp, bal, plaene):
+    """REIN RECHNEND (testbar, AP6 11.11.2026): Abhak-Stand eines Funded-Futures-Kontos (Typ funded) — Ziel wie der Funded-Planer Futures (fdp_konto_anzeige:
+    Zyklus-Start aus fdp_zyklus, Ziel = Start + fdp_ziel_gewinn, je Konto × Zyklus fest), erreicht wie fdp_konto_rechnen (Rest ≤ 0,005 $; mehr als ein Trade über dem
+    Ziel = unplausibel → nicht erreicht, wie dort). Das Popup wählt dann „→ Winning Days“ vor — dieselbe Umstellung, die fdp_planen am Ziel macht.
+    → {bal, start, ziel_bal, rest, erreicht, bereit, wartet, schritt, ok_text, fehlt_text, checks} | None (keine Werte für die Größe / keine Balance)."""
+    regel = (fdp or {}).get("regel") or {}
+    g = _wd_konto_groesse(a)
+    jg = fdp_je_groesse(regel, g)
+    if not jg or not g or bal is None:
+        return None
+    pl = [dict(p, bal_start=((p.get("tv") or {}) if isinstance(p.get("tv"), dict) else {}).get("balance_start")) for p in (plaene or [])]
+    zy = fdp_zyklus(g, (fdp or {}).get("pay"), pl)
+    an = fdp_konto_anzeige(g, jg, float(bal), zy, fdp_tage, pl, str(a.get("id")))
+    start, ziel = an["start"], an["ziel"]
+    dd = _wd_num(jg.get("dd"))
+    if regel.get("tp_modus") == "pump2":
+        # Prüfer-MUSS: Pump-Modell (Tradeify/Lucid) wie fdp_pump_konto — Ziel-Niveau aus fdp_pump_tag_wurf (fest je Konto × Zyklus, ohne Tag), plausibel bis Ziel + dd,
+        # erreicht ab Rest < FDP_PUMP_TP_TOL_USD (fdp_pump_trade1)
+        ziel = round(start + fdp_pump_tag_wurf(jg, str(a.get("id")), zy.get("nr"), "")["ziel_gewinn"], 2)
+        plaus = float(bal) <= ziel + float(dd or 0)
+        erreicht = plaus and ziel - float(bal) < FDP_PUMP_TP_TOL_USD
+    else:
+        plaus = float(bal) <= ziel + float(jg.get("max_trade") or (dd if regel.get("tp_modus") == "rest" else 0) or 0)
+        erreicht = plaus and ziel - float(bal) <= 0.005
+    gew, z_rel = round(float(bal) - start, 2), round(ziel - start, 2)
+    wert = f"{kz_usd(gew, 0, True)} / {kz_usd(z_rel, 0, True)}"
+    fehlt = "" if erreicht else (f"Balance {_liq_de(bal)} $ unplausibel (Ziel {_liq_de(ziel)} $) — Balance neu lesen" if not plaus
+                                 else f"Ziel {kz_usd(gew, 0, True)} von {kz_usd(z_rel, 0, True)} — fehlen {_liq_de(max(1.0, -(-(ziel - float(bal)) // 1)))} $")
+    return {"bal": bal, "start": start, "ziel_bal": ziel, "rest": round(ziel - float(bal), 2), "erreicht": erreicht, "bereit": erreicht, "wartet": False,
+            "schritt": "winning_days", "zyklus": zy.get("nr"), "ok_text": f"Ziel {wert}" if erreicht else "", "fehlt_text": fehlt,
+            "checks": [["ok" if erreicht else "nein", "Ziel bis Winning Days", wert]]}
 
 
 def _kz_fcp_tag(z, felder):
@@ -42945,6 +42983,16 @@ def konto_ziele():
             ctx["fcp_gt"] = fcp_gt_korr_laden([kid]).get(kid)   # GT2: Gewinntage von Hand (kz_rechnen bleibt rein rechnend)
         elif typ in ("funded", "winning_days"):
             ctx["wd_firmen_regeln"] = _wd_firmen_regeln_lesen()
+            if typ == "funded":
+                # AP6 (Finn 11.11.2026: „Ziel erreicht → Winning Days“ beim Abhaken): Regel des Funded-Planers Futures für Firma + Unternehmen der ID — dieselbe
+                # Auswahl wie fdp_planen (fd_unt_an → ap_regel_finden), nur lesen; Firma nicht im Planer → kein Ziel (kz_rechnen lässt abhak weg)
+                try:
+                    _freg = _fdp_regeln_laden() or {}
+                    _fr = ap_regel_finden(fd_unt_an(_freg, "futures", a.get("user_id"), None, True), a.get("firm")) if _freg else None   # streng wie fdp_planen (an_von)
+                    if _fr:
+                        ctx["fdp"] = {"regel": _fr, "pay": [z.get("requested_at") or z.get("created_at") for z in pend] + [z.get("payout_date") or z.get("created_at") for z in verw]}
+                except Exception as e:
+                    print(f"[konto-ziele] ⚠️ Funded-Planer-Regel {kid[:8]}: {type(e).__name__}: {e}", flush=True)
             pay, verkn = [], set()
             for t in pend:                             # wie bisher: nur pending/received zählen für den Zyklus
                 if str(t.get("status") or "") not in ("pending", "received"):

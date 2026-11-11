@@ -154,7 +154,7 @@ check(L2 and L2[1]["st"] == "nein" and "Noch nicht fertig: Consistency — Konto
       and "67,7 %" in (e.get("h2") or "") and "Nichts ändern — fehlt" not in (e.get("h2") or ""),
       "fehlt → „Noch nicht fertig: Consistency“ (AP2: keine Textwand), Zeile rot")
 check("nicht lesbar" in (e.get("h0") or ""), "Urteil nicht lesbar → Hinweis statt Liste")
-check("ruhig && !_wpFcfd && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))" in html and "!(opts && opts.nurStill)" in html,
+check("ruhig && !_wpFcfd && !_wpZiel && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))" in html and "!(opts && opts.nurStill)" in html,
       "Ein Klick bei Funded CFD öffnet immer das Popup, der stille Takt nie")
 check('id="mwd-erl-pcheck"' in html and 'id="tc-pcheck"' in html, "Checkliste in Radar-Popup und Trades-Dialog")
 
