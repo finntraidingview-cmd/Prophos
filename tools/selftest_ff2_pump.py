@@ -98,8 +98,13 @@ check(500 <= n_zwei <= 700, f"Weg „zwei“ bei ~30 % der Konten ({n_zwei} von 
 check(sum(ruf("fdp_pump_tag_wurf", fest(TR, pump2_pct=0), f"konto-{i:04d}", 1, "2026-11-12")["weg"] == "zwei" for i in range(200)) == 0, "pump2_pct 0 → immer ein Trade")
 check(sum(ruf("fdp_pump_tag_wurf", fest(TR, pump2_pct=100), f"konto-{i:04d}", 1, "2026-11-12")["weg"] == "zwei" for i in range(200)) == 200, "pump2_pct 100 → immer zwei Trades")
 # Break-even-Tag → am nächsten Tag von vorn: neuer Tag = neuer Würfel (Ziel und Weg), bei vielen Konten mindestens einmal anders
-anders = sum(ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-12") != ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-13") for i in range(50))
-check(anders >= 45, f"Folgetag würfelt neu (BE-Tag → morgen von vorn: {anders} von 50 Konten anders)")
+# FF2b: Zielniveau fest je Konto × Zyklus (bleibt bis erreicht), Weg je Tag neu; neuer Payout-Zyklus = neues Niveau
+gleich = sum(ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-12")["ziel_gewinn"] == ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-13")["ziel_gewinn"] for i in range(50))
+check(gleich == 50, f"Zielniveau bleibt über die Tage gleich (FF2b: {gleich} von 50 Konten)")
+weg_anders = sum(ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-12")["weg"] != ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-13")["weg"] for i in range(200))
+check(weg_anders >= 40, f"Weg 70/30 je Tag neu ({weg_anders} von 200 Konten anders)")
+z_neu = sum(ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 1, "2026-11-12")["ziel_gewinn"] != ruf("fdp_pump_tag_wurf", TR, f"konto-{i:04d}", 2, "2026-11-12")["ziel_gewinn"] for i in range(50))
+check(z_neu >= 45, f"neuer Payout-Zyklus → neues Zielniveau ({z_neu} von 50)")
 
 # ── Hedge-Satz
 check(abs(ruf("fdp_pump_hedge", TR, 4500) - 850) < 0.01, "Hedge 850 € auf 4.500 $ Risiko")
@@ -204,10 +209,15 @@ if not os.environ.get("SELFTEST_APP"):
     check((k.get("kette") or {}).get("nr") == 1 and (k.get("pump") or {}).get("nr") == 1 and (k.get("pump") or {}).get("t2_bis") == "18:30", "fdp_pump_konto: kette + pump (nr 1, t2_bis)")
     k2 = ruf("fdp_pump_konto", REG_TR, fest(TR, pump2_pct=0, ziel_gewinn=[16000, 16000]), START + 16000, START + 16000, START, 150000, "konto-0001", 1, "2026-11-12", R())
     check(k2.get("aktion") == "ziel", f"fdp_pump_konto: Ziel erreicht → Winning Days ({k2.get('aktion')})")
-    k2b = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[13000, 19000]), START + 13500, START + 13500, START, 150000, "konto-0001", 1, "2026-11-13", R())
-    check(k2b.get("aktion") == "ziel", f"Folgetag: +13.500 ≥ Untergrenze 13.000 → Ziel erreicht, nie ein zweites Pumpen ({k2b.get('aktion')})")
+    # FF2b: Niveau 16.000 fest — +13.500 ist NICHT erreicht (Rest 2.500), nach einem Verlusttag (−2.700) ist der TP Niveau − Balance = 18.700
+    k2b = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START + 13500, START + 13500, START, 150000, "konto-0001", 1, "2026-11-13", R())
+    check(k2b.get("aktion") == "planen" and k2b["tp"] == 2500, f"Niveau 16.000 bei +13.500 → weiter, TP 2.500 (keine Untergrenzen-Regel mehr) ({k2b.get('aktion')}, {k2b.get('tp')})")
+    k2d = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START - 2700, START, START, 150000, "konto-0001", 1, "2026-11-13", R())
+    check(k2d.get("aktion") == "planen" and k2d["tp"] == 18700 and abs(k2d["ziel"] - 166000) < 0.01, f"nach Verlusttag −2.700: Niveau 166.000 bleibt, TP 18.700 ({k2d.get('tp')})")
+    k2e = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START + 15920, START + 15920, START, 150000, "konto-0001", 1, "2026-11-13", R())
+    check(k2e.get("aktion") == "ziel", f"80 $ unter dem Niveau (Schlupf am TP) → Ziel erreicht, kein Mini-Trade ({k2e.get('aktion')})")
     k2c = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[13000, 19000], pump2_pct=0), START + 8000, START + 8000, START, 150000, "konto-0001", 1, "2026-11-13", R())
-    check(k2c.get("aktion") == "planen" and k2c["tp"] >= 5000, f"Folgetag nach Teil-Tag (+8.000, Tag zu) → neuer Würfel, Rest bis zum neuen Ziel ({k2c.get('aktion')}, TP {k2c.get('tp')})")
+    check(k2c.get("aktion") == "planen" and k2c["tp"] >= 5000, f"nach Teil-Tag (+8.000, Tag zu) → Rest bis zum festen Niveau ({k2c.get('aktion')}, TP {k2c.get('tp')})")
     # Liq nach Tagesend-Logik: Tageshoch intraday (156.000) zieht die Liq NICHT nach — peak_eod = Tagesstart 150.000
     k3 = ruf("fdp_pump_konto", REG_TR, fest(TR, pump2_pct=0, ziel_gewinn=[16000, 16000]), 156000, START, START, 150000, "konto-0001", 1, "2026-11-12", R())
     check(abs(k3.get("liq", 0) - 145500) < 0.01, f"Liq mit Tagesend-Hoch 150.000 bleibt 145.500 (nicht 151.500) ({k3.get('liq')})")

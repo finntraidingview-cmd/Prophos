@@ -46578,12 +46578,15 @@ def _fdp_pump_kt(kt, rnd):
 
 
 def fdp_pump_tag_wurf(jg, konto_id, zyklus, tag):
-    """REIN RECHNEND (testbar): Weg und Ziel eines Pump-Tags, fest je Konto × Zyklus × CME-Tag → {weg: ein|zwei, ziel_gewinn}. Ein Break-even-Tag endet ohne Ziel —
-    am nächsten Tag würfelt ein neuer Tag neu (Finn: „am nächsten Tag weitergenutzt … wieder komplett hoch zurück auf Gesamtzielwürfel“)."""
+    """REIN RECHNEND (testbar): Weg und Ziel eines Pump-Tags → {weg: ein|zwei, ziel_gewinn}. Weg fest je Konto × Zyklus × CME-Tag (jeden Tag neu 70/30).
+    ZIELNIVEAU fest je Konto × Payout-Zyklus (FF2b, Finn 11.11.2026 07:15: „Am dritten Tag bleibt das Hedge-Verhältnis trotzdem gleich, und dann pumpen wir trotzdem
+    insgesamt auf dieses 13.000 bis 18.000 hoch. Nur wird dann das Ziel … gefühlt höher, weil wir erst mal 2,5K rauskommen müssen“): das Gesamtziel über dem
+    Zyklus-Start bleibt, bis es erreicht ist — nach einem Verlusttag (Soft Breach, Break-even, „Tag zu“) ist der TP = Niveau − Balance, also höher. Vorher (FF2)
+    wurde es je Tag neu gewürfelt. Ein neuer Payout-Zyklus würfelt ein neues Niveau."""
     pct = _wd_num((jg or {}).get("pump2_pct"))
     pct = 30.0 if pct is None else max(0.0, min(100.0, pct))
     weg = "zwei" if _fdp_pump_u("pump-weg", konto_id, zyklus, tag) * 100 < pct else "ein"
-    zg = _fdp_pump_spanne((jg or {}).get("ziel_gewinn"), _fdp_pump_u("pump-ziel", konto_id, zyklus, tag))
+    zg = _fdp_pump_spanne((jg or {}).get("ziel_gewinn"), _fdp_pump_u("pump-ziel", konto_id, zyklus))   # FF2b: ohne Tag — Niveau je Zyklus
     if zg is None:
         zg = _wd_num((jg or {}).get("ziel_gewinn")) or 0.0
     return {"weg": weg, "ziel_gewinn": float(round(zg))}
@@ -46620,7 +46623,7 @@ def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
     if balance is None or liq is None or balance - liq <= FDP_LIQ_PUFFER:
         return {"aktion": "aus", "grund": "zu nah an der Liquidation"}
     rest = round(ziel - balance, 2)
-    if rest <= 0.005:
+    if rest < FDP_PUMP_TP_TOL_USD:   # FF2b (Gegenprüfung): knapp unter dem Niveau (Schlupf am TP) gilt als erreicht — nie ein Mini-Trade über ein paar Dollar
         return {"aktion": "ziel", "grund": "Ziel erreicht → Winning Days"}
     d = _wd_num((jg or {}).get("daily_usd"))
     daily_rest = (d - max(0.0, float(tag_verlust or 0))) if d else None
@@ -46709,7 +46712,7 @@ def fdp_pump_minute(hhmm, mitternacht):
 
 def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklus, tag, rnd, sppl=None, tag_verlust=0.0):
     """REIN RECHNEND (testbar): nächster Trade eines Kontos im Pump-Modell → dict wie fdp_konto_rechnen (aktion planen|ziel|aus, Plan-Felder aus fdp_hedge) plus
-    pump {weg, nr, ziel_gewinn, tag} und kette. Liq aus dem Tagesend-Höchststand (peak_eod), Ziel = Zyklus-Start + gewürfelter Ziel-Gewinn des Tages."""
+    pump {weg, nr, ziel_gewinn, tag} und kette. Liq aus dem Tagesend-Höchststand (peak_eod), Ziel = Zyklus-Start + Ziel-Gewinn (Niveau fest je Konto × Zyklus, FF2b)."""
     g = float(groesse or 0)
     dd = _wd_num((jg or {}).get("dd"))
     if not jg or not g or not dd:
@@ -46726,12 +46729,7 @@ def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklu
              "pump": {"weg": w["weg"], "ziel_gewinn": w["ziel_gewinn"], "tag": tag}}
     if balance > ziel + dd:
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance lesen")
-    # Ziel über die Tage: der Würfel ist je Tag neu — ab der Untergrenze der Spanne gilt das Konto als hochgepumpt (Finn: „Das Ziel ist … erreicht, wenn er +13 bis
-    # … +19.000 gemacht hat“), sonst pumpte ein Konto mit gestern +16.000 heute bei Würfel 19.000 noch einmal
-    zg_sp = jg.get("ziel_gewinn")
-    lo = _wd_num(zg_sp[0]) if isinstance(zg_sp, (list, tuple)) and zg_sp else _wd_num(zg_sp)
-    if lo is not None and balance - start >= min(lo, w["ziel_gewinn"]) - 0.005:
-        return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
+    # FF2b: Zielniveau fest je Zyklus — erreicht erst, wenn die Balance das Niveau erreicht (fdp_pump_trade1 → „ziel“); die Untergrenzen-Regel von FF2 ist raus
     t = fdp_pump_trade1(jg, w["weg"], balance, start, liq, ziel, rnd, tag_verlust)
     if t["aktion"] != "planen":
         return dict(basis, **t)
@@ -47261,7 +47259,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             # PC-Tab die End-Balance genau nachliest (tpKetteLesenWeiter) — daraus entsteht Trade 2 (fdp_pump_tick)
             pm = r["pump"]
             notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Pump {'Trade 1 von 2' if r.get('kette') else 'ein Trade'} · Zyklus {r['zyklus']} · "
-                     f"Ziel {_liq_de(r['ziel'])} $ (heute +{_liq_de(pm.get('ziel_gewinn'))} $) · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
+                     f"Ziel {_liq_de(r['ziel'])} $ (Niveau +{_liq_de(pm.get('ziel_gewinn'))} $ im Zyklus) · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
                      f"{('SL ' + _liq_de(r['sl']) + ' $') if r.get('sl') is not None else 'ohne SL'} · Hedge {_ap_de(r['verhaeltnis'], 3)} € je $ Risiko")
             mb_pump = {"pump": pm}
             if r.get("kette"):
@@ -47450,7 +47448,7 @@ def fdp_pump_tick(jetzt=None, rnd=None):
             if liq is None:
                 ende(p, pm, f"Trade 1 hat das Konto geblowt ({be - bs:+.0f} $) — kein Trade 2")
                 continue
-            ziel = _wd_num(fp.get("ziel")) or (bs + (_wd_num(pm.get("ziel_gewinn")) or 0))
+            ziel = _wd_num(fp.get("ziel")) or ((_wd_num(fp.get("start")) or bs) + (_wd_num(pm.get("ziel_gewinn")) or 0))   # FF2b: Niveau über dem Zyklus-Start
             w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd)
             if grund:
                 ende(p, pm, grund, melden=not grund.startswith("Ziel schon"))
