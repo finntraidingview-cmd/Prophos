@@ -10382,7 +10382,7 @@ def kette_dll_chance(balance, peak, start, dd, daily, ziel_usd, tagesziel, repar
     def kanon(b, pk):
         b = round(b, 2)
         pk = round(max(float(pk or 0), b, st), 2)
-        return (b, pk)    # kein Lock mehr (13.10.2026): der Höchststand zählt immer, MLL = Höchststand − dd
+        return (b, pk)    # TL1 (12.11.2026, Topstep-Support): MLL = min(Start, Höchststand − dd) in zug() — Lock bei der Startgröße wie oben im Modell
 
     def zug(z):
         b, pk = z
@@ -25443,6 +25443,17 @@ AP_KETTE_DD_STANDARD = 4500.0           # Rückfall für den Blow-Vergleich beim
 AP_KETTE_MLL_TOLERANZ = 50.0
 
 
+def ap_kette_mll_urteil(k, tv=None):
+    """REIN RECHNEND (testbar, TL1 12.11.2026): MLL für das Blow-Urteil eines Ketten-Plans. Die TopstepX-Lesung beim Start DIESES Plans (tv.mll_start, Puls
+    liest sie mit) ist die neueste Wahrheit und geht dem beim Planen gerechneten kette.mll vor (Vorfall Marc …22631094: Plan trug 152.587, gelesen 150.000,
+    Ende 152.352 → fälschlich blown). Nur Combine-Lesungen (größer als die Hälfte des gerechneten MLL — Express ist 0-basiert). → float | None."""
+    m = _wd_num((k or {}).get("mll"))
+    lz = _wd_num((tv or {}).get("mll_start"))
+    if lz is not None and lz > 0 and (m is None or lz > m * 0.5):
+        return float(lz)
+    return m
+
+
 def ap_kette_regel(regel):
     """Kettenwerte der Firmen-Regel (Standard + regel.kette) oder None, wenn die Firma keine Kette hat."""
     k = (regel or {}).get("kette")
@@ -25451,16 +25462,20 @@ def ap_kette_regel(regel):
     return dict(AP_KETTE_STANDARD, **k)
 
 
+# TL1 TOPSTEP-MLL-LOCK (Master 12.11.2026, Antwort des Topstep-Supports an Finn): „Once the MLL reaches the starting balance (e.g. $150,000 on a 150K
+# account), it locks permanently and will not trail any higher.“ — Combine: MLL = min(Startgröße, Höchststand am Tagesschluss − dd). Überholt Finns
+# Ansage vom 13.10.2026 („Das lockt nie, immer 4,5k“) für das Combine. Vorfall Marc …22631094 (11.11.2026): Prophos rechnete MLL 152.587 (Tagesschluss
+# 157.087 − 4.500), TopstepX zeigte 150.000 — der Plan wurde bei 152.352 als blown abgehakt und das Konto archiviert, obwohl es lebte.
+# Express (XFA, 0-basiert): „locks at $0 once the balance reaches the threshold“ — wd_sl_express_mll rechnet schon min(…, 0).
 def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
     """REIN RECHNEND (testbar): Maximum Loss Limit (Topstep Combine) → Balance-Level. EOD-trailing dd hinter dem höchsten bekannten
     Tagesschluss (peak = liq_peak, sonst die Balance selbst = Tagesstart), nie unter Größe − dd, nie nach unten.
-    KEIN Festfrieren mehr (Finn 13.10.2026: „Das lockt nie, immer 4,5k" — vorher Lock bei Größe + lock; der Parameter lock bleibt
-    nur für alte Aufrufer stehen und wird ignoriert). Ohne Lock liegt das gerechnete MLL höher = die sichere Seite: SL2 endet nie
-    hinter dem echten MLL."""
+    TL1 (12.11.2026, Topstep-Support): Lock bei der Startgröße — das MLL steigt nie über groesse (150.000 bei 150K). Der Parameter lock bleibt
+    nur für alte Aufrufer stehen und wird ignoriert."""
     if not groesse or not dd:
         return None
     hoch = max(float(groesse), float(peak or 0), float(balance or 0))
-    return round(hoch - float(dd), 2)
+    return round(min(float(groesse), hoch - float(dd)), 2)
 
 
 def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balance=None):
@@ -25471,9 +25486,13 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
     Rangfolge: (1) die jüngste TopstepX-Lesung tv.mll_start derselben Phase (Puls liest sie bei jedem Start — „wir können es ablesen"),
     (2) darüber nur, was NACH dieser Lesung an abgeschlossenen Handelstagen belegt ist: letzter balance_end je Handelstag = Tagesschluss,
     minus dd. Ohne Lesung: max(Größe, Tagesschlüsse) − dd. Der laufende Handelstag zählt nie (sein Schluss steht noch nicht).
-    Weder Lesung noch Tagesschluss: wie früher ap_kette_mll aus dem Hochpunkt (peak/balance) — lieber zu hoch als zu tief."""
+    Weder Lesung noch Tagesschluss: wie früher ap_kette_mll aus dem Hochpunkt (peak/balance) — lieber zu hoch als zu tief.
+    TL1 (12.11.2026, Topstep-Support: Lock bei der Startgröße): jede GERECHNETE MLL höchstens groesse; die Lesung selbst gilt wie gelesen. Pläne OHNE
+    konto_typ (Vorfall Marc …22631094: Plan 272809d8 vom 09.11. trug keinen, seine Lesung 150.000 fiel raus — es zählte die ältere Lesung vom 06.11. plus
+    Tagesschluss 157.087) zählen wie dieselbe Phase; nur ein ANDERER Typ wird übersprungen (Express-Lesungen fallen ohnehin über „> Hälfte der Größe“ raus)."""
     if not groesse or not dd:
         return None, None
+    lock = float(groesse)
     a = acc or {}
     typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or "")
 
@@ -25487,7 +25506,7 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
     lesung, lesung_at = None, None
     schluss = {}                                            # Handelstag → (ended_at, balance_end) des letzten Endes an diesem Tag
     for f in verlauf or ():
-        if str(f.get("master_account_id") or "") != aid or not f.get("konto_typ") or str(f["konto_typ"]).lower() != typ:
+        if str(f.get("master_account_id") or "") != aid or (f.get("konto_typ") and str(f["konto_typ"]).lower() != typ):   # TL1: ohne konto_typ = dieselbe Phase
             continue
         m, st = _wd_num(f.get("mll_start")), _t(f.get("started_at"))
         if m is not None and m > float(groesse) * 0.5 and st and (lesung_at is None or st > lesung_at):   # Express (0-basiert) fällt raus
@@ -25502,20 +25521,24 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
         quelle = f"TopstepX-Lesung {lesung_at.strftime('%d.%m. %H:%M')} UTC"
         if nach:
             tag, hoch = max(nach, key=lambda x: x[1])
-            if hoch - float(dd) > lesung:
-                return round(hoch - float(dd), 2), f"Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.) nach der {quelle}"
+            neu = min(lock, hoch - float(dd))                # TL1: nie über der Startgröße
+            if neu > lesung:
+                return round(neu, 2), (f"Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.) nach der {quelle}"
+                                       + (f", gelockt bei der Startgröße {de(lock)}" if neu < hoch - float(dd) else ""))
         return round(lesung, 2), quelle
     if schluss:
         tag, (_en, hoch) = max(schluss.items(), key=lambda x: x[1][1])
         if hoch > float(groesse):
-            return round(hoch - float(dd), 2), f"gerechnet ab Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.)"
+            neu = min(lock, hoch - float(dd))
+            return round(neu, 2), (f"gerechnet ab Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.)"
+                                   + (f", gelockt bei der Startgröße {de(lock)}" if neu < hoch - float(dd) else ""))
         return round(float(groesse) - float(dd), 2), "gerechnet ab Startgröße (keine TopstepX-Lesung)"
     # 16.10.2026 (Prüfer S2 zu .1570): ohne Lesung UND ohne Tagesschluss fiel das MLL auf Startgröße − dd — tiefer als die alte
     # Rechnung max(Größe, peak, balance) − dd. Doktrin „MLL lieber zu hoch": SL2 darf nie hinter dem echten MLL enden, also hier
     # wieder der alte Hochpunkt. Lesung und Tagesschlüsse gehen weiter vor (oben), Zwischenstände zählen dort nie.
     hoch = max(float(groesse), float(peak or 0), float(balance or 0))
     if hoch > float(groesse):
-        return round(hoch - float(dd), 2), "gerechnet aus dem Hochpunkt, ohne TopstepX-Lesung und Tagesschluss"
+        return round(min(lock, hoch - float(dd)), 2), "gerechnet aus dem Hochpunkt, ohne TopstepX-Lesung und Tagesschluss"   # TL1: Lock
     return round(float(groesse) - float(dd), 2), "gerechnet ab Startgröße (keine TopstepX-Lesung)"
 
 
@@ -39549,7 +39572,9 @@ def ap_kette_abhaken(jetzt=None):
         if fehler:
             continue
         upd["pl_quelle"] = "tv"
-        if _wd_num(k.get("mll")) is not None:
+        _mll_u = ((ap_kette_mll_urteil(k, _kb.get("tv")) if "ap_kette_mll_urteil" in globals() else float(k["mll"]))   # TL1: neueste TopstepX-Lesung vor dem Plan-MLL
+                  if _wd_num(k.get("mll")) is not None else None)                                                     # get: ältere Selftest-Lader ohne TL1
+        if _mll_u is not None:
             # DLL 3.000 (08.10.2026): ein Tag am Daily Loss Limit ist Tageslimit (soft, Konto lebt) — geblowt nur am MLL. Sichere Variante
             # (Prüfung Slave 2 / Master): Ende ≤ MLL (ohne Toleranz) UND Tagesverlust über DLL + 50 — ein reiner DLL-Tag ist nie geblowt.
             # Weg B (Finn 08.10.2026 ~22:15 Dubai): begann der Tag angefressen (Abstand MLL < DLL, Reparatur-Tag oder ab 150.000 mit
@@ -39558,9 +39583,9 @@ def ap_kette_abhaken(jetzt=None):
             # Gebühren/Schlupf bzw. Topstep schließt knapp darüber). Gesunde Tage (Abstand ≥ DLL): Ende ≤ MLL UND Tagesverlust > DLL + 50
             daily_k = float(k.get("daily_usd") or 0)
             if ap_kette_angefressen(k):
-                if float(bal[1]) <= float(k["mll"]) + AP_KETTE_MLL_TOLERANZ:
+                if float(bal[1]) <= _mll_u + AP_KETTE_MLL_TOLERANZ:
                     upd["blown"] = True
-            elif float(bal[1]) <= float(k["mll"]) and (not daily_k or e_tag < -(daily_k + 50)):
+            elif float(bal[1]) <= _mll_u and (not daily_k or e_tag < -(daily_k + 50)):
                 upd["blown"] = True
         else:
             dd = AP_KETTE_DD_STANDARD
@@ -40611,11 +40636,14 @@ def tt_tick(jetzt=None, rnd=None):
                 blown = False
                 if route == "tsv2" and echt and _wd_num(k.get("mll")) is not None and bal_tag0:
                     # 1:1 ap_kette_abhaken (Gegenprüfung 09.11.2026): angefressen Ende ≤ MLL + 50; gesund Ende ≤ MLL UND Tagesverlust über DLL + 50
+                    # TL1: MLL = neueste TopstepX-Lesung dieses Teils (tv.mll_start) vor dem Plan-MLL
                     _daily, _e_tag = float(k.get("daily_usd") or 0), echt[1] - float(bal_tag0)
+                    _mll_u = (ap_kette_mll_urteil(k, (p.get("mt5_baseline") or {}).get("tv")) if "ap_kette_mll_urteil" in globals()
+                              else float(k["mll"]))                                                   # get: ältere Selftest-Lader ohne TL1
                     if ap_kette_angefressen(k):
-                        blown = echt[1] <= float(k["mll"]) + AP_KETTE_MLL_TOLERANZ
+                        blown = echt[1] <= _mll_u + AP_KETTE_MLL_TOLERANZ
                     else:
-                        blown = echt[1] <= float(k["mll"]) and (not _daily or _e_tag < -(_daily + 50))
+                        blown = echt[1] <= _mll_u and (not _daily or _e_tag < -(_daily + 50))
                 te = tt_tagesende(teile, ende_code, ende_text, bal_tag0, echt[1] if echt else None, blown, jetzt_iso)
                 if echt and route in ("tvv2", "tsv2") and p.get("status") == "review" and p.get("master_pl") is None:
                     halb = {"master_pl": round(echt[1] - echt[0], 2), "pl_quelle": "tv"}   # Richtungs-Riegel frei (prophos_plan_gelesen), Status bleibt

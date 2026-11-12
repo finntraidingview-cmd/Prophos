@@ -111,9 +111,10 @@ def main():
     wg, gg = R(KETTE, "challenge", 147400.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
     check(wg is None and gg == "Balance 147.400 auf/unter dem MLL 147.500 (gerechnet aus dem Hochpunkt), Balance lesen, dann Nachplanen — geblowt?",
           f"Balance unter dem nachgezogenen MLL → geblowt, kein Plan ({gg})")
-    # KEIN Lock mehr (Finn 13.10.2026: „Das lockt nie, immer 4,5k"): Höchststand 156.000 → MLL 151.500 (vorher 150.000)
-    check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 151500.0
-          and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, Höchststand 156.000 → 151.500 (kein Lock), nachgezogen 147.500")
+    # TL1 (12.11.2026, Topstep-Support: „Once the MLL reaches the starting balance … it locks permanently“ — überholt „Das lockt nie“ vom 13.10.2026):
+    # Höchststand 156.000 → MLL 150.000 (gelockt bei der Startgröße), nachgezogen unter dem Lock wie bisher
+    check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 150000.0
+          and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, Höchststand 156.000 → 150.000 (Lock bei der Startgröße), nachgezogen 147.500")
     ALT = dict(TOPSTEP, kette={"daily_usd": 0, "t1_sl": [1950, 2650]})
     wo, _ = R(ALT, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(wo and wo["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700, "tag_typ": "normal"} and 1950 <= wo["sl"] <= 2650,
