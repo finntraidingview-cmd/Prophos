@@ -66094,6 +66094,13 @@
    * (tpStartUmTick → polarStartenAmPc), der Slave-PC nimmt sein polar_slave-Signal wie bisher. Eine Startzeit bekommt ein Polar-Plan nur
    * über die Prüf-Tabelle (/polar/freigeben, alles ✓); gespeicherte Pläne startet der Wächter nie — Hand-Polar („Läuft") bleibt. */
   const POLAR_AUTO = true
+  // RC5 (12.11.2026): Recovery-Plan (Ausgleich/Recoverer) eines Farmers → '' (frei) | Grund. Modul fehlt oder wirft = nicht starten (fail-closed).
+  function suRecoveryTpGrund(p){
+    if(!p || !tpIstFarmerPlan(p) || !((p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) || (typeof planIstRecoverer === 'function' ? planIstRecoverer(p) : !!window._planIstRecoverer?.(p)))) return ''
+    let rt = 'Recovery-TP nicht prüfbar — Prüfung nicht geladen'
+    try{ if(typeof window._wdRecoveryTpGrund === 'function') rt = window._wdRecoveryTpGrund(p) }catch(_){}
+    return rt || ''
+  }
   function suStartetNichtWeil(p, scharf){
     if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')) return 'kein Puls-Weg'   // polar (13.10.2026): startet am Master-PC
     if(cmeWochenende()) return WOCHENENDE_GRUND   // WE1 (07.11.2026): am Wochenende nie eine Order
@@ -66109,6 +66116,7 @@
     if(tpLotsDeckelFehlt(p)){ tpLotsDeckelMelden(p); return tpLotsDeckelText(p) }   // LOTS-DECKEL (02.11.2026): weder Puls-Order noch Hedge, kein Countdown, kein Claim
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung im Funded-Planer → Winning Days'   // APEX-WD BESTÄTIGEN (02.11.2026)
+    { const rt = suRecoveryTpGrund(p); if(rt) return rt }   // RC5 (12.11.2026): Recovery-Plan nur mit frisch geprüftem TP
     if(planKontoDeaktiviert(p)) return 'Konto deaktiviert'   // 30.10.2026; DB-Netz am Claim: trade_plans_a00_konto_deaktiviert
     // PAYOUT OFFEN (03.11.2026): ein Farmer-Plan eines Kontos mit offener Payout-Anfrage startet nicht — Railway zieht ihn zurück (wd_payout_abgleich).
     // try: _wd/wdPayoutOffen stehen weiter hinten im Modul (TDZ beim allerersten Takt)
@@ -66148,7 +66156,8 @@
   function suKetteFrei(p, plaene, now){
     const tag = suKettenTag(p)
     // APEX-WD BESTÄTIGEN (02.11.2026): ein Apex-WD, der auf Finns „Bestätigen" wartet, hält die Kette seiner ID nicht auf — Finn: „bei Tradeify nichts, bei Topstep nichts"
-    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && (String(x.id) === String(p.id) || !(tpWdWartetAufBestaetigung(x) || tpLotsDeckelFehlt(x))))
+    // RC5 (Prüfer M1): ein Recovery-Plan mit „Recovery-TP nicht prüfbar“ hält die Kette ebenso wenig auf — sonst verlöre die ID alle Winning Days des Tages
+    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && (String(x.id) === String(p.id) || !(tpWdWartetAufBestaetigung(x) || tpLotsDeckelFehlt(x) || suRecoveryTpGrund(x))))
       .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
     const i = kette.findIndex(x => String(x.id) === String(p.id))
     if(i <= 0) return new Date(p.startUm).getTime() <= now                     // Kopf (oder nicht in der Kette): zur eigenen Startzeit
@@ -74397,7 +74406,7 @@
    * wd_zyklus_konto), hier liegt der Stand je Konto: aus /admin/wd-plaene (Mac, Markt) bzw. GET /wd-zyklus (PC-Tab, Accounts, Admin-Payout).
    * Fehlt das Feld (Regel aus, andere Firma, altes Backend), bleibt die Karte leer und alles läuft wie heute. Keine Prüfung, keine Sperre.
    * window, weil Admin- und Farmer-Block in getrennten Geltungsbereichen liegen. */
-  window._wdZyklus = { map: {}, at: {}, geladen: false, laedt: {} }
+  window._wdZyklus = { map: {}, at: {}, geladen: false, laedt: {}, kontoAt: {} }   // kontoAt (RC5): je Konto, wann der Stand ankam (GET /wd-zyklus: Server-Zeit d.at, Admin-Weg: Empfang, ms)
   const WD_ZYKLUS_ALTER_MS = 5 * 60000
   window._wdKontoZeileTest = (acc, o) => tpVorplanZeile(acc, o)   // Test-Haken (REIN RECHNEND)
   window._wdZyklusRoh = id => (id != null && window._wdZyklus.map[String(id)]) || null
@@ -74413,7 +74422,8 @@
   // Plan für Minuten auf den Staffel-Hedge zurück und ein Würfel würde neu gewürfelt (Gegenprüfung 02.11.2026). Altes Backend schickt das Feld nicht.
   function wdZyklusMerken(konten, ok){
     if(!Array.isArray(konten) || ok === false) return
-    for(const k of konten){ if(!k || k.id == null) continue; if(k.zyklus) window._wdZyklus.map[String(k.id)] = k.zyklus; else delete window._wdZyklus.map[String(k.id)] }
+    const _jetztM = Date.now()
+    for(const k of konten){ if(!k || k.id == null) continue; if(k.zyklus) window._wdZyklus.map[String(k.id)] = k.zyklus; else delete window._wdZyklus.map[String(k.id)]; window._wdZyklus.kontoAt[String(k.id)] = _jetztM }
     window._wdZyklus.geladen = true
   }
   /* GET /wd-zyklus, je Art höchstens alle 5 min. o.ids = nur diese Konten (eigener Tab), o.admin = ganze Admin-Sicht, o.neu = Cache übergehen.
@@ -74444,6 +74454,7 @@
         const vorher = JSON.stringify(st.map)
         for(const id of (o.admin ? Object.keys(st.map) : o.ids)) if(!neu[id]) delete st.map[id]
         Object.assign(st.map, neu)
+        { const atS = Date.parse(d.at || '') || Date.now(); for(const id of (o.admin ? Object.keys(neu) : o.ids)) st.kontoAt[String(id)] = atS }   // RC5: Frische je Konto
         st.geladen = true; st.at[art] = Date.now()
         return JSON.stringify(st.map) !== vorher
       }catch(e){ console.warn('[recoverer] laden', (e && e.message) || e); return false }
@@ -74453,6 +74464,33 @@
   }
   /* Zeile trägt einen Recoverer-Würfel, der Stand ist aber noch nie geladen (Tab-Start, Railway weg, zyklus_ok false): kein Plan anlegen. Der TP käme aus der
    * Zeile (1.499 $), der Hedge aber aus der Staffel, weil wdZyklusVon null ist — also 100–175 € statt 450 € (Prüfer S16, 02.11.2026). Beim nächsten Takt neu. */
+  /* RC5 RECOVERY-TP VOR DEM START (Finn 12.11.2026 ~20:17, Fall Mike Tradeify …3058: TP 2.904 $ statt ≈ 1.738 + Puffer): ein Recovery-Plan (Tradeify-/Lucid-Ausgleich,
+   * Apex-Recoverer) startet nur, wenn der Zyklus-Stand seines Kontos NACH dem Ende des letzten Trades gerechnet wurde, kein anderer Trade am Konto läuft und der
+   * Plan-TP nicht mehr als WD_RECOVERY_TP_TOL über dem nötigen liegt (der Nachzug im Farmer-Takt zieht ihn hin). Sonst fail-closed: nicht mit dem alten TP starten → Grund „Recovery-TP nicht prüfbar …“,
+   * der Plan wartet (Start-Fenster), der nächste Takt prüft neu. Hand-Werte (hand_werte_at) gelten — Finn hat den TP selbst gesetzt. → '' (frei) | Grund. */
+  // Prüfer RC5 (M2/S1): gesperrt wird nur ein zu GROSSER TP — kleiner ist nie riskant (Rest kommt am nächsten Tag). Toleranz deckt den Puffer-Neuwurf je Handelstag
+  // (30–60 $) ab, sonst hinge ein Plan, den der Nachzug nicht anfassen darf (Hedge aus, Hand-Popup ohne hand_werte_at). Erwartet wird, was auch der Würfel nimmt:
+  // TP-Vorgabe am Konto (wd_tp) beim Apex-Recoverer, beim Ausgleich max(Ziel, Vorgabe) — wie wdPlanAnlegen.
+  const WD_RECOVERY_TP_TOL = 75
+  window._wdRecoveryTpSoll = (p, z) => {
+    const acc = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts.find(a => String(a.id) === String(p.masterAccountId)) : null
+    const vg = Number(acc && acc.wdTp) > 0 ? Number(acc.wdTp) : 0, ziel = Number(z && z.ziel) || 0
+    return vg ? ((p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) ? Math.max(ziel, vg) : vg) : ziel
+  }
+  window._wdRecoveryTpGrund = p => {
+    if(!p || p.handWerteAt) return ''
+    const st = window._wdZyklus, id = String(p.masterAccountId || ''), z = id ? window._wdZyklusRoh?.(id) : null
+    const nicht = t => 'Recovery-TP nicht prüfbar — ' + t
+    if(!st || !st.geladen || !z) return nicht('Zyklus-Stand nicht geladen')
+    const plaene = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans.filter(q => q && String(q.masterAccountId || '') === id && String(q.id) !== String(p.id)) : []
+    if(plaene.some(q => q.status === 'open')) return nicht('anderer Trade am Konto läuft')
+    const ende = Math.max(0, ...plaene.filter(q => q.status === 'completed' || q.status === 'review').map(q => Date.parse(q.endedAt || q.completedAt || '') || 0))
+    if(ende && !((Number(st.kontoAt && st.kontoAt[id]) || 0) > ende)) return nicht('Zyklus-Stand älter als der letzte Trade')
+    if(!(z.aktiv && Number(z.ziel) > 0)) return nicht(String(z.grund || 'Zyklus nicht aktiv').slice(0, 90))
+    const soll = window._wdRecoveryTpSoll(p, z)
+    if(Number(p.masterTp) > soll + WD_RECOVERY_TP_TOL) return nicht(`Plan-TP ${Math.round(Number(p.masterTp))} $, nötig ${Math.round(soll)} $ — Nachziehen folgt`)
+    return ''
+  }
   function wdZyklusUngeklaert(k){ return !window._wdZyklus?.geladen && (k && k.wuerfel || {}).quelle === 'recoverer' }
   /* EINMAL 🟠 STATT STILL (Eingang 02.11.2026): ein so übersprungenes Konto verliert sonst seinen Winning Day, ohne dass es jemand merkt. Der Tab meldet je Konto und Tag
    * einmal, erst nach warteMs (Stand war vielleicht nur beim Tab-Start kurz weg); Railway entprellt über alle Tabs (POST /alarm/recoverer, Prozess + alarm_log).
@@ -75309,12 +75347,17 @@
    * TP-Vorgabe am Konto, Regel aktiv → die Felder für die Regelwerte, sonst null. master_risk bewusst leer in die Rechnung: wdFarmHedgeKern nähme sonst den alten
    * Plan-Wert (376) als Risiko und der Regel-Hedge würde um den Faktor TP/376 zu groß. Die Bestätigungspflicht bleibt, hedge_freigabe_at wird nie gesetzt.
    * HAND-WERTE (Gegenprüfung 02.11.2026): „Plan bearbeiten“ und das Plan-Popup setzen hand_werte_at nicht und lassen k.wuerfel stehen. Darum zählt nur ein Plan, der
-   * noch genau dem gewürfelten Eintrag entspricht (k: quelle wuerfel, TP, Kontrakte, Hedge-Basis). Danach steht quelle auf recoverer: der Schritt greift je Plan nur einmal. */
+   * noch genau dem gewürfelten Eintrag entspricht (k: quelle wuerfel, TP, Kontrakte, Hedge-Basis). Danach steht quelle auf recoverer; seit RC5 (12.11.2026) zieht der Schritt
+   * einen solchen Plan bei jeder Änderung des frischen Zyklus-Ziels erneut nach (bei gleichem Ziel null — keine Schleife). Bestätigungspflicht entfällt seit RC4. */
+  // RC5: wd_sl „ohne“ wie app.py für Recoverer/Ausgleich (Stufe null, kein Puffer) — der Nachzug ersetzt damit einen gewürfelten SL des normalen WD
+  const wdSlOhneWuerfel = grund => ({ ohne: true, stufe: null, pct: null, usd: null, puffer: null, balance: null, liq_balance: null, regel: 'sl_wuerfel', grund, quelle: 'nachzug_rc5' })
   function wdRecovererAltplanUpd(plan, acc, zy, z, hedgeAn, ddListe, k){
     if(!plan || !acc || !zy || !z || z.basis !== 'recoverer' || !(z.slaveEur > 0) || !hedgeAn) return null
     const w = k && k.wuerfel, instr = (zy.instr === 'nq' || zy.instr === 'mnq') ? zy.instr : null   // RC3: auch MNQ-Stufen ziehen den Altplan einmal nach
     // 1 NQ (Finn 02.11.2026): ein schon umgestellter Recoverer (quelle recoverer) ohne instr geht einmal mit; danach steht instr im Eintrag, eine Hand-Änderung bleibt
-    const stufe = w && (w.quelle === 'wuerfel' || (w.quelle === 'recoverer' && instr && !w.instr))
+    // RC5 (Finn 12.11.2026 ~20:17: „dass der Take Profit immer nur so ist, wie er wirklich sein muss“): ein schon gesetzter Recovery-Plan (quelle recoverer) wird bis zum
+    // Start auf den FRISCHEN Zyklus-Stand nachgezogen — TP, Menge nach RC3-Staffel, Hedge. Eine Hand-Änderung bleibt (TP/kt ≠ Würfel, hand_werte_at → oben/unten null)
+    const stufe = w && (w.quelle === 'wuerfel' || w.quelle === 'recoverer')
     if(!w || !stufe || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
     if(!(Math.abs(Number(k.slave) - Number(plan.slaveRisk)) <= 0.5)) return null
     const pplAlt = hedgePplFuer(plan.masterSymbol)
@@ -75333,7 +75376,8 @@
     wdFarmHedge(h, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, true, ddListe)
     if(!(h.hedge_eur > 0) || !(h.multiplier > 0)) return null
     if(Math.abs((Number(plan.masterTp) || 0) - tp) <= 0.5 && Math.abs(Number(plan.hedgeEur) - h.hedge_eur) <= 1 && Number(plan.masterContracts) === kt && symbol === plan.masterSymbol) return null
-    const upd = { master_tp: tp, master_symbol: symbol, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
+    // RC5 (Prüfer SOLLTE): ein zum Recovery-Plan nachgezogener WD behält keinen Zufalls-SL — Recoverer und Ausgleich würfeln nicht (wie POST /admin/wd-plaene)
+    const upd = { master_sl: null, master_tp: tp, master_symbol: symbol, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
     return { upd, tp, kt, instr, zyArt: zy.art || null, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }   // zyArt: Tradeify-Ausgleich braucht die Bestätigungs-Marke (03.11.2026)
   }
   window._wdRecovererAltplanUpd = wdRecovererAltplanUpd   // Test-Haken
@@ -75966,6 +76010,9 @@
     // Selbstheilung/Rückfall mit festem Instrument aus dem Würfel (extra.instr — gibt es nur aus einem Recovery-Stand) bei Apex ebenso (Prüfer RC3 KANN 3)
     if((zyAus && zyAus.art !== 'tradeify') || (extra && extra.instr && /apex/i.test(String(acc.firm || ''))))
       row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_recoverer: true })
+    // RC5 (Prüfer RC4 SOLLTE, Master 12.11.2026): normaler Apex-WD trägt ausdrücklich wd_recoverer:false — sonst gälte er auf NQ (Hand-Symbol) als Recoverer
+    // (kein SL-Würfel, keine Bestätigung über die Apex-Liste, RC5-Prüfung). Der NQ-Rückfall bleibt nur für Altpläne ohne Marke; der Nachzug setzt true darüber.
+    else if(/apex/i.test(String(acc.firm || ''))) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_recoverer: false })
     // Zufalls-SL (WS1b-Nachzug 09.11.2026): Rückfall und Selbstheilung (der alte Plan ist dann gelöscht, seine Würfel-Werte gibt es nirgends mehr) ehrlich ohne SL
     { const wSl = wdSlwRueckfall(_wd.regeln); if(wSl) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_sl: wSl }) }
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
@@ -76095,9 +76142,9 @@
           let altFrei = false
           if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
           // Tradeify-Ausgleich (03.11.2026): ERST die Marke wd_ausgleich, dann den TP hochziehen — scheitert die Marke, bleibt der Plan, wie er ist (seit RC4 12.11.2026 ohne Bestätigung; die Marke schaltet den SL-Würfel ab)
-          if(alt && altFrei && alt.zyArt === 'tradeify'){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Ausgleich-Marke', e) } }
+          if(alt && altFrei && alt.zyArt === 'tradeify'){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true, wd_sl: wdSlOhneWuerfel('Ausgleich — kein Würfel') }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Ausgleich-Marke', e) } }
           // RC3: Apex-Recoverer — ERST die Marke, dann auf MNQ/NQ umstellen (sonst stünde ein MNQ-Recoverer ohne Erkennung da: SL-Würfel, kein Chip)
-          else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Recoverer-Marke', e) } }
+          else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true, wd_sl: wdSlOhneWuerfel('Recoverer — kein Würfel') }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Recoverer-Marke', e) } }
           if(alt && altFrei){
             // Alte Werte im Riegel (S9 02.11.2026): Pläne haben hier kein Realtime, eine Hand-Änderung am Mac sähe der Tab nicht. 0 Zeilen → frisch lesen, sonst schriebe er bis zum Start vergeblich
             const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)

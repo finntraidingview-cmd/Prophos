@@ -16521,6 +16521,7 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts, rc_regel=None):
     erfuellt = bool(st["tage"]) and st["profit"] > 0 and st["profit"] >= 2 * bester
     d0 = lambda x: f"{x:,.0f}".replace(",", ".").replace("-", "−")
     farm = bool((konto or {}).get("wd_farm"))
+    _of = wd_zyklus_offen(plaene, st["start"])   # RC5: Trade offen bzw. ohne P&L → Stand nicht belegt, kein Recoverer-Ziel
     # EINE festgestellte Ursache je Zustand (Finn /Goal 09.10.2026)
     if r is None:
         aktiv, code, grund = False, "keine_regel", "Recoverer nicht eingerichtet (zyklus_regel fehlt) → sql/2026-11-02_recoverer.sql einspielen"
@@ -16542,6 +16543,8 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts, rc_regel=None):
         aktiv, code, grund = False, "erfuellt", f"Zyklus {st['nr']}: erfüllt — Profit {d0(st['profit'])} $ ≥ 2 × bester Tag {d0(bester)} $"
     else:
         aktiv, code, grund = True, "profit", f"Zyklus {st['nr']}: Verlusttag −{d0(st['verlust'])} $, Profit {d0(st['profit'])} $ < 2 × bester Tag {d0(bester)} $"
+    if aktiv and _of:   # RC5 (Prüfer K3: erst nach den übrigen Gründen, damit „aus/Zyklus 1“ sichtbar bleiben): unbelegter Stand → kein Recoverer-Ziel
+        aktiv, code, grund = False, "laeuft", _of
     # Schalter „an“ ohne Verlusttag: V = 0 → Normalwerte (Konstrukt Abschnitt 6), also kein Ziel/Hedge aus der Regel
     w = wd_zyklus_werte(st["verlust"], r, norm["ziel_normal"], norm["satz_normal"]) if (aktiv and st["verlust"] > 0) else None
     n_tage, rest = wd_zyklus_bis(st["profit"], bester, w["ziel"]) if (w and not erfuellt) else (None, None)
@@ -16771,6 +16774,27 @@ def tradeify_zyklus_firma(konto):
     return zyklus_plus_key(konto) is not None
 
 
+def wd_zyklus_offen(plaene, start):
+    """REIN RECHNEND (testbar, RC5 12.11.2026): Grund, warum der Zyklus-Stand eines Kontos gerade NICHT belegt ist, oder None.
+    Anlass Mike Tradeify 150k …3058: der Ausgleichs-Trade fc2c545c (+1.105,86 $) endete 11.11. 21:45:07 UTC, der Tab würfelte 13 s später den nächsten Ausgleich mit
+    einem Stand, in dem dieser Trade fehlte (offen bzw. ohne P&L zählte er weder im Gewinn noch in der Frische-Prüfung) → TP 2.904 $ statt ≈ 1.738 + Puffer.
+    - ein Trade am Konto läuft (status open) → sein Ergebnis fehlt noch
+    - ein beendeter Trade im Zyklus wartet noch auf die Nachlesung (status review ohne P&L, Start-Tag nach dem Anfrage-Tag; ohne Anfrage alle)"""
+    for p in plaene or ():
+        if str(p.get("status") or "") == "open":
+            return "Trade läuft noch — Zyklus-Stand erst nach dem Abhaken"
+    for p in plaene or ():
+        # nur „review“ (wartet auf die Nachlesung) — ein completed ohne P&L (Altlast) sperrte sonst dauerhaft (Prüfer S3, z. B. Lucid Zyklus 1 mit 60-Tage-Fenster)
+        if str(p.get("status") or "") != "review":
+            continue
+        tag = _wd_berlin_tag(p.get("started_at") or p.get("ended_at") or p.get("completed_at"))
+        if start and (not tag or tag <= start):
+            continue
+        if wd_plan_pnl(p) is None:
+            return "Trade ohne P&L im Zyklus — Zyklus-Stand erst nach der Nachlesung"
+    return None
+
+
 def tradeify_zyklus_start_bal(plaene, start):
     """REIN RECHNEND: tv.balance_start des ersten Trades mit Start-Tag (Berlin) NACH dem Anfrage-Tag — wie wd_zyklus_stand den Zyklus abgrenzt. None = noch kein Trade."""
     if not start:
@@ -16827,6 +16851,9 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     if st["nr"] < ab:
         return dict(out, grund_code="zyklus_1", grund=("Zyklus 1 (vor dem ersten Payout gilt die Regel nicht)" if ab == 2 and st["nr"] == 1
                                                        else f"Zyklus {st['nr']} (die Regel gilt ab Zyklus {ab})"))
+    # RC5: läuft am Konto ein Trade oder wartet ein Trade im Zyklus noch auf die Nachlesung, ist der Fehlbetrag nicht belegt → kein Ausgleich (aktiv False unten; der
+    # Tab plant einen normalen WD, den der Recoverer-Nachzug hochzieht, sobald der Stand frisch ist). Die Payout-Sperre rechnet weiter aus der Balance (Prüfer S2).
+    _of = wd_zyklus_offen(plaene, st["start"])
     sb = tradeify_zyklus_start_bal(plaene, st["start"])
     if st["nr"] == 1 and st["start"] is None:
         # LZ1 (10.11.2026): 1. Zyklus (Regel ab Zyklus 1, Lucid) — es gibt noch keine Payout-Anfrage; der Zyklus beginnt mit dem Konto: Start-Balance, sonst Kontogröße
@@ -16875,7 +16902,7 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     # Prüfer (MUSS b): der Ausgleichs-Trade (TP ohne SL) nur bei einem Fehlbetrag bis zum Max DD — der größere WD-Puffer (PO2b) gilt nur für die Sperre;
     # darüber (z. B. −5.416 $ bei 4.500 $ DD, oder ein zu hoher Zyklus-Start) gesperrt, Ausgleich von Hand
     gross = fehl > dd
-    aktiv = gesperrt and stand >= ziel_tage - 1 and not gross
+    aktiv = gesperrt and stand >= ziel_tage - 1 and not gross and not _of   # RC5: nie aus einem unbelegten Stand
     # aufgerundet auf ganze $; E4: max(Fehlbetrag + 1 $, Mindest-Gewinn − Gewinn) — bei 1 $ genau die alte Formel, bei mehr reicht der TP bis zum Mindest-Gewinn
     tp = max(float(ziel_normal), float(-(-(max(fehl + TRADEIFY_ZYKLUS_MIN_USD, min_usd - gewinn) + puffer) // 1))) if aktiv else None
     out.update({"start_bal": sb, "gewinn": gewinn, "gesperrt": gesperrt, "fehl": fehl, "aktiv": aktiv, "ziel_normal": ziel_normal, "satz_normal": satz_normal,
@@ -16894,6 +16921,8 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
             out["recovery_lots"] = _rc
             out.update(rc3_felder(_rc))
             out["grund"] += rc3_grund(_rc)
+    elif gesperrt and _of and stand >= ziel_tage - 1:
+        out.update({"grund_code": "laeuft", "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Ausgleich wartet — {_of}"})
     elif gesperrt and gross:
         out.update({"grund_code": "minus", "ausgleich_hand": True,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ (mehr als Max DD {d0(dd)} $) · Payout erst ab +{m_txt} $ — kein automatischer Ausgleichs-Trade, von Hand planen"})
@@ -16973,7 +17002,7 @@ def _wd_zyklus_anhaengen(konten):
             seit = min(starts) + "T00:00:00+00:00"
             for p in _sb_all("trade_plans", {"select": "id,master_account_id,status,route,started_at,ended_at,completed_at,master_pl,"
                                                        "tv:mt5_baseline->tv,fin:mt5_baseline->final",
-                                             "master_account_id": f"in.({','.join(ids)})", "status": "in.(completed,review)",
+                                             "master_account_id": f"in.({','.join(ids)})", "status": "in.(completed,review,open)",   # RC5: + open (wd_zyklus_offen)
                                              "started_at": f"gte.{seit}"}):
                 plaene.setdefault(str(p.get("master_account_id")), []).append(p)
         try:   # RC3: Menge des Recoverers nach dem Ziel (eigene Spalte recovery_lots; fehlt/Fehler → 1 NQ wie bisher, der Apex-Stand bleibt)
@@ -18342,6 +18371,9 @@ def admin_wd_plaene():
                 # (kein SL-Würfel unten, Freigabe-Meldung, Rang, Chips) hängt nicht mehr am NQ-Symbol (der Recoverer fährt seit RC3 auch MNQ)
                 if (r or {}).get("wd_recoverer") is True:
                     body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_recoverer=True)
+                elif "apex" in str(body.get("master_firm") or (acc[0].get("firm") if acc else "") or "").lower():
+                    # RC5 (Prüfer RC4 SOLLTE, Master 12.11.2026): normaler Apex-WD ausdrücklich false — ohne Marke gälte er auf NQ als Recoverer (NQ-Rückfall nur für Altpläne)
+                    body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_recoverer=False)
                 # WD-SL-WÜRFEL (WS1a, 09.11.2026): JE Plan gewürfelt, NACH _wd_ohne_master_sl — ein vom Tab mitgeschickter master_sl ist oben schon verworfen,
                 # einen SL aus einer anderen Regel gibt es auf diesem Weg nicht (WD_PLAN_FELDER trägt kein mt5_baseline). Würfel-Fehler → Plan wie bisher ohne SL.
                 # Recoverer (Apex-WD auf NQ) und Tradeify-Ausgleich würfeln NICHT (Master 09.11.2026 ~20:15: „bestehende Regeln nicht anfassen“, Finns

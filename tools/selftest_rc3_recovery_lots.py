@@ -192,7 +192,7 @@ check("if(zyT && zyT.art !== 'tradeify') pr.wd_recoverer = true" in HTML, "Mac-W
 check("if((zyAus && zyAus.art !== 'tradeify') || (extra && extra.instr && /apex/i.test(String(acc.firm || ''))))\n      row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_recoverer: true })" in HTML,
       "PC-Tab-Weg (wdPlanAnlegen): Marke am Plan, auch Selbstheilung mit festem Instrument bei Apex (Prüfer KANN 3)")
 check("z.wd_recoverer = p.wd_recoverer ?? null" in HTML and "wd_recoverer: z.wd_recoverer ?? null })" in HTML, "WD-Karten Läuft/Wartet/Braucht dich: Marke durchgereicht (Prüfer SOLLTE 1)")
-check("else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true }, 'planned'))" in HTML, "Altplan-Weg: erst die Marke, dann umstellen")
+check("else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true, wd_sl: wdSlOhneWuerfel('Recoverer — kein Würfel') }, 'planned'))" in HTML, "Altplan-Weg: erst die Marke, dann umstellen")
 check("instrFest = (zy && (zy.instr === 'nq' || zy.instr === 'mnq')) ? zy.instr : null" in HTML and "_tpNqMode = instrFest ? instrFest : (vp.instr === 'nq' ? 'nq' : 'mnq')" in HTML,
       "Würfel: festes Instrument (auch MNQ) vor dem des Farmers, auch für die Hedge-Rechnung")
 

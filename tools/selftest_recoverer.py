@@ -22,7 +22,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "datetime": datetime, "timezone": timezone}
     for name in ("def _wd_num(", "def wd_tsx_master_pl(", "def _wd_konto_groesse(", "def _wd_berlin_tag(", "def wd_plan_pnl(", "def wd_zyklus_stand(",
-                 "def _wd_staffel_eur(", "def wd_zyklus_firma_key(", "def wd_zyklus_normal(", "def wd_zyklus_werte(", "def wd_zyklus_bis(", "def wd_zyklus_konto("):
+                 "def _wd_staffel_eur(", "def wd_zyklus_firma_key(", "def wd_zyklus_normal(", "def wd_zyklus_werte(", "def wd_zyklus_bis(", "def wd_zyklus_offen(", "def wd_zyklus_konto("):   # RC5: wd_zyklus_offen
         i = src.index(name)
         exec(src[i:src.find("\n\n\n", i)], ns)
     i = src.index("WD_ZYKLUS_VORGABE = {")
@@ -231,8 +231,12 @@ return JSON.stringify({ a: a, hk: hMenge(hK), nqSperre: [wdNqOhneMenge('nq', hMe
                   f"Altplan: Mike → 1.499 $ / ~450 €, altes Risiko 376 nicht übernommen ({a and a['upd']})")
             check(a and a["kt"] == 3 and a["upd"]["master_contracts"] == 3 and a["vor"]["eur"] == a["upd"]["hedge_eur"], "Altplan: Kontrakte bleiben, Vorschau passt zum Plan")
             check("hedge_freigabe_at" not in a["upd"] and "start_um" not in a["upd"] and "richtung" not in a["upd"], "Altplan: keine Freigabe, Start und Richtung unberührt")
-            for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handslave", "handhedge", "ohnemult", "schonrec", "ohnewuerfel", "keink"):
+            for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handslave", "handhedge", "ohnemult", "ohnewuerfel", "keink"):
                 check(r[fall] is None, f"Altplan: {fall} → nichts ändern")
+            # RC5 (Finn 12.11.2026: „dass der Take Profit immer nur so ist, wie er wirklich sein muss“): ein schon gesetzter Recovery-Plan wird bis zum Start auf den
+            # frischen Zyklus nachgezogen (bis RC5: „schonrec → nichts ändern“)
+            sr = r["schonrec"]
+            check(sr and sr["upd"]["master_tp"] == 1499 and sr["tp"] == 1499, f"Altplan: schonrec (Recovery-Würfel 376 $) → auf den frischen Zyklus 1.499 $ nachgezogen ({sr and sr['upd']})")
             check(r["kt"]["upd"]["master_contracts"] == 4, "Altplan: Kontrakte aus der Regel, wenn sie welche vorgibt")
             check(r["hk"] == 1 and r["nqSperre"] == [True, True, False, False], f"1 NQ: k.kt leer → Menge 1 aus dem Würfel; ohne Menge kein NQ-Plan, MNQ unberührt ({r['hk']}, {r['nqSperre']})")
             n2 = r["nq2"]
