@@ -15116,6 +15116,30 @@ def liq_kw_daily(kw_firmen, firma, groesse):
     return (d, r.get("soft") is True) if d and d > 0 else (None, False)
 
 
+TOPSTEP_DLL_RE = re.compile(r"(^|[^A-Z])DLL([^A-Z]|$)", re.I)
+
+
+def liq_topstep_dll(regeln, acc):
+    """REIN RECHNEND (testbar, TX4 Finn 12.11.2026: „der Fusion soll schließen, wenn der Account selber schließt … bei −3.000 … Radar soll eben auch drauf“):
+    Tageslimit eines Topstep-Kontos → (dl, quelle) | (None, None). Wie prophos.html hedgeTopstepDll: accounts.dll_usd > 0 (0 = ausdrücklich keins), sonst nur ein
+    Topstep-DLL-Konto (TopstepX-SKU mit „DLL“ in External ID/Name) mit dem Betrag aus liq_regeln Topstep (Zeile der Kontoart mit art tagesstart, sonst challenge)."""
+    a = acc or {}
+    if "topstep" not in str(a.get("firm") or "").lower():
+        return None, None
+    kd = _wd_num(a.get("dll_usd"))
+    if kd is not None and kd <= 0:
+        return None, None
+    if kd and kd > 0:
+        return float(kd), "Konto"
+    if not TOPSTEP_DLL_RE.search(f"{a.get('external_id') or ''} {a.get('name') or ''}"):
+        return None, None
+    for kt_ in (str(a.get("account_type") or "").lower() or "challenge", "challenge"):
+        r, _w = liq_regel_waehlen(regeln, a.get("firm"), kt_, None)
+        if r and r.get("art") == "tagesstart" and "topstep" in str(r.get("firma") or "").lower() and (_wd_num(r.get("betrag_usd")) or 0) > 0:
+            return float(_wd_num(r.get("betrag_usd"))), "Topstep-DLL"
+    return None, None
+
+
 def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None, kw_firmen=None,
                      peak_eod=None, tagesstart_eod=None):
     """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile → {liq_regel_balance, liq_regel_level_nq,
@@ -15153,6 +15177,17 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
             if r_bal is None or d_bal > r_bal:
                 r_bal, r_art = d_bal, ("tagesstart" if d_weich else "tageslimit")
                 r_text = f"Daily Loss {_liq_de(d_usd)} $ ab Tagesstart {_liq_de(float(ts_d), 2)} $ (Planer-Einstellung)"
+    # TX4 (12.11.2026): Topstep-Konto mit Tageslimit (DLL-SKU bzw. accounts.dll_usd), dessen Regel kein Tageslimit trägt (Express: Kontoart winning_days/funded) —
+    # Tagesstart − DLL als weiches Tageslimit (Positionen zu, Konto lebt), damit der Radar dort „Tageslimit“ zeigt und schließt, wenn es näher als die MLL liegt.
+    # Wie der Tab (hedgeTopstepDll): Tagesstart mehr als das DLL über der Start-Balance = unplausibel → nichts (nur MLL)
+    if not ah and r_art not in ("tagesstart", "stufen") and "liq_topstep_dll" in globals():
+        t_dl, t_q = liq_topstep_dll(regeln, a)
+        ts_t = tagesstart if tagesstart is not None else start_bal
+        if t_dl and ts_t is not None and (start_bal is None or float(ts_t) - float(start_bal) < t_dl):
+            t_bal = round(float(ts_t) - t_dl, 2)
+            if r_bal is None or t_bal > r_bal:
+                r_bal, r_art = t_bal, "tagesstart"
+                r_text = f"Tageslimit {_liq_de(t_dl)} $ ({t_q}) ab Tagesstart {_liq_de(float(ts_t), 2)} $"
     if weg:
         r_text = f"{r_text} ({weg})"
     if mll is not None:

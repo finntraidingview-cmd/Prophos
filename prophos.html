@@ -31813,6 +31813,35 @@
     const f = tsxBracketsFehlen(plan.mt5Baseline ? plan : Object.assign({}, plan, { mt5Baseline: b }))
     return !(f && f.risk)
   }
+  /* TX4 TOPSTEP-TAGESLIMIT (Finn 12.11.2026): Daily Loss Limit eines Topstep-Kontos ab dem belegten Tagesstart → {liq_balance (= Tagesstart − DLL, ohne +100), dl,
+   * tagesstart, quelle, regel_id, dl_quelle} | null. Woher das DLL kommt (keine Firmen-Sonderzahl im Code):
+   *   1. accounts.dll_usd > 0 → dieses (DL2-Konto-Limit); 0 → ausdrücklich keins.
+   *   2. sonst nur ein Topstep-DLL-Konto (TopstepX-SKU mit „DLL“ in External ID/Name, z. B. „150K DLL Express“, „150KTC-SKU-V2-DLL-…“): Betrag aus liq_regeln Topstep —
+   *      Zeile der Kontoart (art tagesstart), sonst die der Challenge (heute 3.000 $, Finn 08.10.2026). Konten ohne DLL im Namen (z. B. „$150K Express“) haben keins.
+   * Tagesstart wie hedgeLiqDll: Start-Balance des ersten Plans des CME-Tags, sonst die eigene Lesung (tv.balance_start) — dieselbe Basis wie die MLL (Express 0-basiert).
+   * FAIL-CLOSED: Tagesstart unplausibel (mehr als das DLL über der Start-Balance = das Limit wäre schon gerissen, oder andere Basis) → null (nur MLL). REIN bis auf
+   * hedgeTagesstart (tradePlans) und liqRegelWaehlen. */
+  function hedgeTopstepDll(plan, acc, startBal, regeln){
+    const firma = String((acc && acc.firm) || (plan && plan.masterFirm) || '')
+    if(!/topstep/i.test(firma) || !isFinite(Number(startBal))) return null
+    const kontoDl = acc && acc.dllUsd != null && isFinite(Number(acc.dllUsd)) ? Number(acc.dllUsd) : null
+    if(kontoDl === 0) return null
+    let dl = null, regelId = null, dq = null
+    if(kontoDl > 0){ dl = kontoDl; dq = 'konto' }
+    else{
+      const kenn = String((acc && (acc.externalId || acc.external_id)) || '') + ' ' + String((acc && acc.name) || (plan && plan.masterName) || '')
+      if(!/(^|[^A-Z])DLL([^A-Z]|$)/i.test(kenn) || !Array.isArray(regeln) || typeof liqRegelWaehlen !== 'function') return null
+      const typ = String((acc && acc.type) || '').toLowerCase() || 'challenge'
+      const wahl = [typ, 'challenge'].map(k => liqRegelWaehlen(regeln, firma, k, null)).find(r => r && r.art === 'tagesstart' && Number(r.betrag_usd) > 0 && /topstep/i.test(String(r.firma || '')))
+      if(!wahl) return null
+      dl = Number(wahl.betrag_usd); regelId = wahl.id; dq = 'liq_regeln_topstep_dll'
+    }
+    const ts = (typeof hedgeTagesstart === 'function') ? hedgeTagesstart(plan, Number(startBal)) : { balance: Number(startBal), quelle: 'start_balance' }
+    const tb = Number(ts && ts.balance)
+    if(!isFinite(tb) || tb - Number(startBal) >= dl || Math.abs(tb - Number(startBal)) > Math.max(dl * 3, 10000)) return null   // Limit schon gerissen / andere Basis → nur MLL
+    return { liq_balance: Math.round((tb - dl) * 100) / 100, dl, tagesstart: tb, quelle: ts.quelle, regel_id: regelId, dl_quelle: dq }
+  }
+  window._hedgeTopstepDll = hedgeTopstepDll   // Test-Haken
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
     // ZUFALLS-SL (WS1b-Nachzug 09.11.2026, Finn: „Fusion-Hedge schließt mit dem Master am SL wie bisher"): hat der Planer einen SL gewürfelt (mt5_baseline.wd_sl.usd)
@@ -31854,12 +31883,24 @@
       : (typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName((accT && accT.name) || (plan && plan.masterName) || '') : null)
     const expressOhneMerkmal = tvT && tvT.balance_relativ == null && exT && isFinite(mllT) && mllT <= 0 && isFinite(bsT) && grT > 0 && bsT < grT / 2
     if(tvT && isFinite(mllT) && isFinite(bsT) && (tvT.balance_relativ === true || mllT > 1000 || expressOhneMerkmal)){
-      const liqT = Math.round((mllT + 100) * 100) / 100, usdT = Math.round((bsT - liqT) * 100) / 100
-      const felderT = { liq_art: 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
-      if(!(usdT > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Start-Balance nicht über der TopstepX-MLL + 100 $ — Hedge schließt nur am TP', liq_balance: liqT }, felderT)
+      const liqM = Math.round((mllT + 100) * 100) / 100
+      // TX4 (Finn 12.11.2026 ~21:30: „dann soll der Fusion schließen, wenn der Account selber schließt … bei −3.000 … Radar soll eben auch drauf“): bei Topstep mit
+      // Tageslimit (DLL) gilt das NÄHERE von MLL + 100 und Tagesstart − DLL + 100 (hedgeTopstepDll, wie hedgeLiqDll bei den anderen Firmen). Ohne belegten Tagesstart
+      // oder ohne DLL bleibt es bei MLL + 100 (fail-closed). Erster Weg bleibt das Auge/Userscript (Master-Ende → Hedge zu), das Level ist die Absicherung; der Radar-
+      // Schluss (sl_feed) und der Airbag stehen auf demselben sl_level_nq.
+      if(typeof liqRegelnLaden === 'function') liqRegelnLaden().catch(() => {})   // höchstens alle 60 s; fehlen sie jetzt, zieht der Wächter das DLL-Level nach
+      const dT = typeof hedgeTopstepDll === 'function' ? hedgeTopstepDll(plan, accT, bsT, typeof _liqRegeln !== 'undefined' ? _liqRegeln : null) : null   // get: Test-Lader
+      const liqD = dT ? Math.round((dT.liq_balance + 100) * 100) / 100 : null
+      const tag = liqD != null && liqD > liqM
+      const liqT = tag ? liqD : liqM, usdT = Math.round((bsT - liqT) * 100) / 100
+      const felderT = { liq_art: tag ? 'daily_loss' : 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null,
+        liq_dll: dT ? { usd: dT.dl, stufe: null, ab_balance: null, tagesstart: dT.tagesstart, quelle: dT.quelle, regel_id: dT.regel_id, dl_quelle: dT.dl_quelle, dll_schutz: true } : null }
+      if(!(usdT > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: tag ? 'Start-Balance nicht über dem Tageslimit + 100 $ — Hedge schließt nur am TP'
+        : 'Start-Balance nicht über der TopstepX-MLL + 100 $ — Hedge schließt nur am TP', liq_balance: liqT }, felderT)
       const pktT = Math.round(usdT / (ppl * kt) * 100) / 100
       const lvlT = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktT : einstieg + pktT) * 100) / 100 : null
-      return Object.assign({ sl_punkte: pktT, sl_level_nq: lvlT, sl_art: 'liquidation', liq_balance: liqT, sl_usd_hedge: usdT, liq_quelle: 'topstepx_mll', liq_balance_start: bsT }, felderT)
+      return Object.assign({ sl_punkte: pktT, sl_level_nq: lvlT, sl_art: 'liquidation', liq_balance: liqT, sl_usd_hedge: usdT, liq_quelle: tag ? 'topstep_dll' : 'topstepx_mll',
+        liq_balance_start: bsT, liq_mll_balance: liqM }, felderT)
     }
     // TX3 FAIL-CLOSED: ein Topstep-Express-Konto, dessen Basis/MLL oben nicht sicher stand (keine Lesung, MLL > 0, Balance nicht 0-basiert, balance_relativ false
     // bei 0-basierter Lage …), bekommt NIE das Level „Größe + 100“ (150.100 gegen eine 0-basierte Balance; oder ein Level nah am Kurs, das den Hedge sofort
