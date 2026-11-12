@@ -10121,6 +10121,8 @@ def admin_vorrat():
             return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
         _sb_pruefen(r)
         _mp_cache.pop(ziel_uid, None)          # Muster-Portfolio (16.10.2026): Tacho zeigt den neuen Status sofort
+        for _k in [k for k in list(_mp_cache) if isinstance(k, tuple) and k and k[0] == "__alle__"]:
+            _mp_cache.pop(_k, None)            # MP2: Total unter Admin → Alle Accounts ebenso
         return jsonify({"ok": True, "user_id": ziel_uid, "firma": firma, "status": status})
     except Exception as e:
         print(f"[vorrat] ⚠️ POST: {type(e).__name__}: {e}", flush=True)
@@ -10167,6 +10169,49 @@ def muster_portfolio_zeilen(zellen, ziele):
     return sorted(out, key=lambda x: (float(x.get("reihe") or 0), str(x["firma"])))
 
 
+def muster_portfolio_summe(zeilen_je_uid, namen=None):
+    """REIN RECHNEND (testbar, MP2 12.11.2026, Finn: „genau diese Logik auch mit Muster-Portfolio unter Admin → Alle Accounts … alles zusammen mit Total“):
+    {user_id: muster_portfolio_zeilen(...)} → Total je Firma über alle IDs. Ziel und Stand zählen NUR bei IDs, bei denen die Firma NICHT gesperrt ist
+    (vorrat_matrix). gesichert je ID auf ihr Ziel gedeckelt (eine ID über dem Ziel füllt keine andere auf — wie der Tacho je ID, der bei 100 % endet);
+    fortschritt = Σ (fortschritt_pct × soll) ÷ Σ soll. → [{firma, status, art, typen, einheit, soll, gesichert, gesichert_roh, gesichert_pct,
+    fortschritt_pct, ids_n, gesperrt_n, reihe, je_id[{user_id, name, status, soll, gesichert, gesichert_pct, fortschritt_pct}]}] in Ziel-Reihenfolge."""
+    namen = namen or {}
+    je = {}
+    for uid, zeilen in (zeilen_je_uid or {}).items():
+        for z in zeilen or []:
+            f = z.get("firma")
+            t = je.setdefault(f, {"firma": f, "art": z.get("art"), "typen": z.get("typen") or [], "einheit": z.get("einheit"), "reihe": z.get("reihe"),
+                                  "soll": 0.0, "gesichert": 0.0, "gesichert_roh": 0.0, "_fort": 0.0, "ids_n": 0, "gesperrt_n": 0, "je_id": []})
+            soll, ges = float(z.get("soll") or 0), float(z.get("gesichert") or 0)
+            fp = z.get("fortschritt_pct") if z.get("fortschritt_pct") is not None else z.get("gesichert_pct")
+            if fp is not None and z.get("gesichert_pct") is not None:
+                fp = max(float(fp), float(z.get("gesichert_pct")))   # Prüfer KANN: wie der Tacho je ID (mpWert = max) — Total = Schnitt der gezeigten Werte
+            t["je_id"].append({"user_id": str(uid), "name": namen.get(str(uid)) or str(uid)[:8], "status": z.get("status"), "soll": soll, "gesichert": round(ges, 2),
+                               "gesichert_pct": z.get("gesichert_pct"), "fortschritt_pct": z.get("fortschritt_pct")})
+            if z.get("status") == "gesperrt":
+                t["gesperrt_n"] += 1
+                continue
+            t["ids_n"] += 1
+            if soll > 0:
+                t["soll"] += soll
+                t["gesichert"] += min(ges, soll)
+                t["gesichert_roh"] += ges
+                t["_fort"] += (float(fp) / 100.0 if fp is not None else 0.0) * soll
+    out = []
+    for t in je.values():
+        soll = t["soll"]
+        t["gesichert_pct"] = round(100 * min(1.0, t["gesichert"] / soll), 1) if soll > 0 else None
+        fort = t.pop("_fort")
+        t["fortschritt_pct"] = round(100 * min(1.0, fort / soll), 1) if soll > 0 else None
+        if t["gesichert_pct"] is not None and t["fortschritt_pct"] is not None and t["fortschritt_pct"] < t["gesichert_pct"]:
+            t["fortschritt_pct"] = t["gesichert_pct"]
+        t["soll"], t["gesichert"], t["gesichert_roh"] = round(soll, 2), round(t["gesichert"], 2), round(t["gesichert_roh"], 2)
+        t["status"] = "frei" if t["ids_n"] else "gesperrt"
+        t["je_id"].sort(key=lambda x: (x["status"] == "gesperrt", str(x["name"]).lower()))
+        out.append(t)
+    return sorted(out, key=lambda x: (float(x.get("reihe") or 0), str(x["firma"])))
+
+
 @app.route("/admin/muster-portfolio", methods=["GET", "OPTIONS"])
 def admin_muster_portfolio():
     """GET ?user_id= (Standard: der eigene Login) → Tacho-Zeilen je Firma des Muster-Portfolios für diese ID. Schalten läuft über
@@ -10176,6 +10221,8 @@ def admin_muster_portfolio():
     uid, err = _wd_login()
     if err:
         return err
+    if request.args.get("alle") == "1":
+        return _mp_alle_antwort()
     ziel_uid = str(request.args.get("user_id") or uid).strip().lower()
     if not re.match(r"^[0-9a-f-]{36}$", ziel_uid):
         return jsonify({"error": "user_id ungültig"}), 400
@@ -10197,6 +10244,34 @@ def admin_muster_portfolio():
     except Exception as e:
         print(f"[muster] ⚠️ GET {ziel_uid[:8]}: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"{type(e).__name__}: {e}"[:300]}), 500
+
+def _mp_alle_antwort():
+    """MP2 (12.11.2026): ?alle=1 → Total über alle IDs der Sicht des Aufrufers (Standard Finn: Hermann Technologies, Gruppen mit Verwalter wie Emins
+    raus — _admin_basis/_admin_standard_aus; eine einzelne ID sieht nur sich). EIN Lauf vorrat2_rechnen_lauf über alle IDs (ohne die ohne_ids der
+    Vorrat-Seite), dann muster_portfolio_zeilen je ID und muster_portfolio_summe. Nur lesen, schreibt nichts. Merker MP_CACHE_S je Sicht."""
+    s = _admin_sicht()
+    schluessel = ("__alle__", _admin_nur_uid(), tuple(sorted(s)) if s else None, str(request.args.get("gruppe") or ""))
+    c = _mp_cache.get(schluessel)
+    if c and time.time() - c[0] < MP_CACHE_S:
+        return jsonify(c[1])
+    try:
+        ziele, _m, _e, bereit = _vorrat_tabellen()
+        if not bereit:
+            return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
+        erg = vorrat2_rechnen_lauf("hand")
+        je_uid = {}
+        for z in erg.get("zellen") or []:
+            je_uid.setdefault(str(z.get("user_id")), []).append(z)
+        zeilen = {u: muster_portfolio_zeilen(zz, ziele) for u, zz in je_uid.items()}
+        namen, _aus = _ap_namen()
+        antwort = {"alle": True, "gerechnet_um": erg.get("gerechnet_um"), "ids_n": len(zeilen), "firmen": muster_portfolio_summe(zeilen, namen),
+                   "darf_schalten": False}
+        _mp_cache[schluessel] = (time.time(), antwort)
+        return jsonify(antwort)
+    except Exception as e:
+        print(f"[muster] ⚠️ GET alle: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"{type(e).__name__}: {e}"[:300]}), 500
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # VORRAT STUFE 2 (06.10.2026, Finn über den Master): Bestehens-Chance je Konto und Kette, sicherer Bestand gewichtet
