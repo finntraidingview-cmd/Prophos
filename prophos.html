@@ -31891,9 +31891,15 @@
       if(typeof liqRegelnLaden === 'function') liqRegelnLaden().catch(() => {})   // höchstens alle 60 s; fehlen sie jetzt, zieht der Wächter das DLL-Level nach
       const dT = typeof hedgeTopstepDll === 'function' ? hedgeTopstepDll(plan, accT, bsT, typeof _liqRegeln !== 'undefined' ? _liqRegeln : null) : null   // get: Test-Lader
       const liqD = dT ? Math.round((dT.liq_balance + 100) * 100) / 100 : null
-      const tag = liqD != null && liqD > liqM
+      let tag = liqD != null && liqD > liqM
+      // TX4b (Prüfer S7 SOLLTE 1, wie DL2 „nie gar kein Level“): liegt die Start-Balance nicht mehr über dem Tageslimit + 100 (2. Trade knapp am DLL, z. B. Tagesstart 0,
+      // Start −2.950, DLL 3.000 → −2.900), gälte sonst GAR KEIN Level — dann das MLL-Level wie vor TX4, nie schlechter
+      if(tag && !(bsT - liqD > 0) && bsT - liqM > 0) tag = false
       const liqT = tag ? liqD : liqM, usdT = Math.round((bsT - liqT) * 100) / 100
-      const felderT = { liq_art: tag ? 'daily_loss' : 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null,
+      // TX4b (Prüfer S7 SOLLTE 2): geladen nur, wenn die Regeln da sind bzw. das DLL vom Konto kommt — sonst zieht der Wächter das DLL-Level nach dem Laden nach
+      // (ohneRegeln: liq_quelle 'balance_start' nach dem ersten Wächter-Nachtrag, !liq_regeln_geladen, _liqRegeln da)
+      const geladenT = !!(typeof _liqRegeln !== 'undefined' && _liqRegeln) || !!(dT && dT.dl_quelle === 'konto')
+      const felderT = { liq_art: tag ? 'daily_loss' : 'mll_topstep', liq_regeln_geladen: geladenT, liq_vor_pkt: null,
         liq_dll: dT ? { usd: dT.dl, stufe: null, ab_balance: null, tagesstart: dT.tagesstart, quelle: dT.quelle, regel_id: dT.regel_id, dl_quelle: dT.dl_quelle, dll_schutz: true } : null }
       if(!(usdT > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: tag ? 'Start-Balance nicht über dem Tageslimit + 100 $ — Hedge schließt nur am TP'
         : 'Start-Balance nicht über der TopstepX-MLL + 100 $ — Hedge schließt nur am TP', liq_balance: liqT }, felderT)
@@ -59078,7 +59084,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2215'
+  const OS_TAB_BUILD = '2026-09-22.2216'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

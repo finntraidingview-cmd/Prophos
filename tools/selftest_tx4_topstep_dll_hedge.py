@@ -38,7 +38,7 @@ let accounts = [];
 const planWdSlUsd = () => 0, hedgeWdSlRiskBelegt = () => true, hedgeIstTradeifyFinal = () => false, tpIstApexHedge = () => false;
 const hedgeLiqStart = p => { const tv = p && p.mt5Baseline && p.mt5Baseline.tv; return tv && typeof tv.balance_start === 'number' ? { balance: tv.balance_start, quelle: 'balance_start' } : null };
 const hedgeLiqDll = () => null, hedgeLiqDllApex = () => null, hedgeDllVorPkt = () => 0, hedgeDllVorEff = (a, b) => b, HEDGE_DLL_VOR_PKT = 0;
-let _liqRegeln = REGELN_JSON; const liqRegelnLaden = () => ({ catch(){} });
+const REGELN_ALL = REGELN_JSON; let _liqRegeln = REGELN_ALL; const liqRegelnLaden = () => ({ catch(){} });
 const firmNormRichtung = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const tpKontoGroesseAusName = n => { const m = /(\\d+)\\s*k\\b/i.exec(String(n || '')); return m ? Number(m[1]) * 1000 : null };
 let TS = null;   // Tagesstart-Stub: null = eigene Lesung
@@ -61,7 +61,10 @@ TS = NaN; r.tsFehlt = L(INA, { mll_start: 0, balance_start: 20524.08, balance_re
 TS = 24000; r.tsUnplausibel = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null }); TS = null;
 INA.dllUsd = 0; r.konto0 = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null });
 INA.dllUsd = 2000; r.konto2000 = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null }); INA.dllUsd = null;
+TS = 0; r.s7 = L(INA, { mll_start: -4500, balance_start: -2950, balance_relativ: true }); TS = null;
 _liqRegeln = null; r.ohneRegeln = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null });
+INA.dllUsd = 3000; r.ohneRegelnKonto = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null }); INA.dllUsd = null;
+_liqRegeln = REGELN_ALL; r.nachLaden = L(INA, { mll_start: 0, balance_start: 20524.08, balance_relativ: null });
 JSON.stringify(r);
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
@@ -100,6 +103,14 @@ for k, name in (("tsFehlt", "Tagesstart fehlt"), ("tsUnplausibel", "Tagesstart 2
     x = r.get(k) or {}
     check(x.get("liq_art") == "mll_topstep" and x.get("liq_balance") == 100 and abs((x.get("sl_usd_hedge") or 0) - 20424.08) < 0.01,
           f"{name}: nur MLL + 100 (fail-closed, kein Level nah am Kurs)")
+s7 = r.get("s7") or {}
+check(s7.get("liq_art") == "mll_topstep" and abs((s7.get("liq_balance") or 0) - (-4400)) < 0.01 and abs((s7.get("sl_usd_hedge") or 0) - 1450) < 0.01 and s7.get("sl_level_nq"),
+      f"TX4b S7-Fall: Tagesstart 0, 2. Trade bei −2.950, DLL 3.000 → DLL-Level −2.900 läge über der Start-Balance → MLL-Level −4.400 statt gar keins — {s7.get('liq_balance')} / {s7.get('sl_usd_hedge')}")
+o, ok_, nl = r.get("ohneRegeln") or {}, r.get("ohneRegelnKonto") or {}, r.get("nachLaden") or {}
+check(o.get("liq_regeln_geladen") is False and o.get("liq_art") == "mll_topstep", "TX4b: Regeln nicht geladen → MLL-Level, liq_regeln_geladen false (der Wächter zieht nach)")
+check(ok_.get("liq_regeln_geladen") is True and ok_.get("liq_art") == "daily_loss", "TX4b: DLL vom Konto → geladen true auch ohne Regeln")
+check(nl.get("liq_regeln_geladen") is True and nl.get("liq_art") == "daily_loss" and abs((nl.get("liq_balance") or 0) - 17624.08) < 0.01,
+      "TX4b: nach dem Laden der Regeln → Nachzug auf das DLL-Level (geladen true)")
 k2 = r.get("konto2000") or {}
 check(k2.get("liq_art") == "daily_loss" and abs((k2.get("liq_balance") or 0) - 18624.08) < 0.01 and (k2.get("liq_dll") or {}).get("dl_quelle") == "konto",
       "Konto dll_usd 2.000 geht vor der Regel (DL2-Konto-Limit)")
@@ -129,7 +140,11 @@ check(f4["liq_gilt"] == "regel" and f4["liq_regel_balance"] == 149000 and "Tages
 
 print("3) Anker")
 hl = fn("hedgeLiqLevel")
-check("const tag = liqD != null && liqD > liqM" in hl and "liq_art: tag ? 'daily_loss' : 'mll_topstep'" in hl, "Tab: das NÄHERE von MLL + 100 und Tagesstart − DLL + 100")
+check("let tag = liqD != null && liqD > liqM" in hl and "liq_art: tag ? 'daily_loss' : 'mll_topstep'" in hl, "Tab: das NÄHERE von MLL + 100 und Tagesstart − DLL + 100")
+wa = html[html.index("const ohneRegeln = "):html.index("const ohneRegeln = ") + 6000]
+check("const ohneRegeln = h.liq_quelle === 'balance_start' && !h.liq_regeln_geladen && !!_liqRegeln" in wa and "liq_quelle: 'balance_start'" in wa and "hedgeLiqDllFelder(lq)" in wa,
+      "Wächter: zieht nach (liq_quelle ≠ balance_start beim ersten Mal, danach ohneRegeln) und trägt liq_regeln_geladen aus dem Ergebnis")
+check("liq_regeln_geladen: geladenT" in hl and "if(tag && !(bsT - liqD > 0) && bsT - liqM > 0) tag = false" in hl, "Tab: geladen ehrlich, Rückfall aufs MLL-Level")
 check(html.count("liq_art !== 'daily_loss' ? 'liq' : 'sl'") == 1, "Hedge-Grund am Tageslimit wird als „sl“ statt „liq“ gezählt wie bei den anderen Firmen (daily_loss)")
 
 print()
