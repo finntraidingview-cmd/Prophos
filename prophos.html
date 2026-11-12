@@ -3193,6 +3193,9 @@
   #af-view .af-schalter{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer;white-space:nowrap}
   /* Admin-Reiter: einzeilig + horizontal scrollbar wie am Handy (sonst brechen die Beschriftungen zweizeilig um) */
   #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
+  /* PA1 (12.11.2026): Handy — Approved/Erhalten bleiben sichtbar, die Knopf-Spalte klebt rechts an der waagerecht scrollenden Tabelle */
+  @media (max-width:760px){ #dashboard-view #adm-f-pend-rows td:last-child,#dashboard-view #adm-f-pend-panel thead th:last-child{position:sticky;right:0;background:var(--card, #fff);box-shadow:-8px 0 8px -8px rgba(0,0,0,.18)}
+    #dashboard-view #adm-f-pend-rows .pp-appr-am{display:block;margin:0 0 4px 0;text-align:right} }
   /* PLANER-TAB (30.10.2026): im Planer-Modus statt der Admin-Reiter die Chip-Leiste der vier Planer */
   #dashboard-view section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}
   /* PLANER-RECHTE (30.10.2026): ohne Schreibrecht Schreib-Elemente ausgegraut (Klick fängt der Riegel ab) */
@@ -20048,6 +20051,56 @@
       if(n && n.dataset.auto && _admReceiveO.naechsterTage && /^\d{4}-\d{2}-\d{2}$/.test(am)) n.value = admReceivePlus(am, _admReceiveO.naechsterTage) })
     $('adm-receive-next')?.addEventListener('input', e => { delete e.target.dataset.auto })
     window._admPayoutErhaltenOeffnen = (t, o) => admPayoutErhaltenOeffnen(t, o)   // Funded Planer → CFD, „Payouts auf dem Weg“ (30.10.2026)
+    /* ── PA1 APPROVED (Finn 12.11.2026 ~20:05 Dubai: „Nach dem Anfragen steht erst nur ‚Approved‘. Nach Klick auf ‚Approved‘ kommt als nächster Button ‚Erhalten‘.
+     * Bei ‚Approved‘ wird das Konto schon wieder freigeschaltet und für Winning Days gefahren. Bei ‚Erhalten‘ wird erst wirklich zu Finanzen gebucht.“)
+     * Zustand an der Anfrage (approved_at aus /admin/overview). Approved = PATCH /admin/payout-approved (keine Buchung), Rücknahme mit „zurück“, solange
+     * nicht erhalten und noch kein neuer Plan gestartet ist (sonst sagt der Server warum). Dieselben Knöpfe im Funded Planer → CFD „Payouts auf dem Weg“. */
+    const admPayoutApprovedTxt = t => { const d = t && t.approved_at ? new Date(t.approved_at) : null
+      return d && !isNaN(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Dubai' }) : '' }
+    function admPayoutSchrittHtml(t, o){
+      const xs = o && o.klein ? ' btn-xs' : '', st = o && o.klein ? '' : ' style="padding:4px 9px;font-size:11.5px"'
+      if(!t || !t.id) return ''
+      if(!t.approved_at) return `<button type="button" class="btn btn-primary${xs} pp-appr"${st} title="Firma hat den Payout approved — Konto fährt wieder (Winning Days), gebucht wird erst mit „Erhalten“">Approved</button>`
+      return `<span class="pp-appr-am" style="color:var(--good, #15803d);font-size:11.5px;margin-right:6px;white-space:nowrap" title="Approved — Konto ist wieder freigeschaltet, Geld noch nicht da">✓ Approved am ${escapeHtml(admPayoutApprovedTxt(t))}`
+        + ` <a href="#" class="pp-appr-x" style="color:var(--sub);font-size:11px;margin-left:2px" title="Approved zurücknehmen (Konto wieder gesperrt), solange nicht erhalten und noch kein neuer Trade gestartet">zurück</a></span>`
+        + `<button type="button" class="btn btn-primary${xs} pp-ok"${st}>✓ erhalten</button>`
+    }
+    // o: wie admPayoutErhaltenOeffnen (Funded CFD: naechsterTage, waitingLeeren, nachher)
+    function admPayoutSchrittVerdrahten(el, t, o){
+      el.querySelector('.pp-appr')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); admPayoutApprovedSenden(t, false, e.currentTarget, o) })
+      el.querySelector('.pp-appr-x')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); admPayoutApprovedSenden(t, true, e.currentTarget, o) })
+      el.querySelector('.pp-ok')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); admPayoutErhaltenOeffnen(t, o) })
+    }
+    let _admApprLaeuft = false
+    async function admPayoutApprovedSenden(t, zurueck, knopf, o){
+      if(!t || !t.id || _admApprLaeuft) return
+      if(zurueck && !confirm(`Approved für ${t.account_name || 'diese Anfrage'} zurücknehmen? Das Konto ist dann wieder gesperrt, bis der Payout approved oder erhalten ist.`)) return
+      _admApprLaeuft = true; if(knopf) knopf.style.pointerEvents = 'none'
+      let d = {}
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const res = await fetch(`${WATCHER_HOME}/admin/payout-approved?ansicht=admin`, {
+          method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pending_id: t.id, ...(zurueck ? { zurueck: true } : {}), ...(!zurueck && o && o.waitingLeeren ? { waiting_leeren: true } : {}) }) })
+        d = await res.json().catch(() => ({}))
+        if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+      }catch(e){
+        _admApprLaeuft = false; if(knopf) knopf.style.pointerEvents = ''
+        if(typeof atToast === 'function') atToast(`${zurueck ? 'Nicht zurückgenommen' : 'Nicht approved'}: ${(e && e.message) || e}`, 'end')
+        return
+      }
+      _admApprLaeuft = false
+      const neu = (d && d.pending) || {}
+      for(const x of ((admData && admData.pending_payouts) || [])) if(String(x.id) === String(t.id)){ x.approved_at = zurueck ? null : (neu.approved_at || new Date().toISOString()); x.approved_von = zurueck ? null : (neu.approved_von || null) }
+      t.approved_at = zurueck ? null : (neu.approved_at || new Date().toISOString())
+      if(!zurueck && d.waiting_geleert && t.account_id) for(const r of ((admData && admData.accounts) || [])) if(String(r.id) === String(t.account_id)) r.waiting_payout_since = null
+      try{ admFinRender() }catch(_){}
+      try{ o?.nachher?.({ approved: !zurueck }) }catch(_){}
+      if(typeof atToast === 'function') atToast(zurueck ? `↩ Approved zurückgenommen — ${t.account_name || 'Konto'} wieder gesperrt` : `✓ ${t.account_name || 'Payout'} approved — Konto fährt wieder, gebucht wird beim „Erhalten“`, zurueck ? 'end' : 'start')
+    }
+    window._admPayoutSchritt = { html: admPayoutSchrittHtml, verdrahten: admPayoutSchrittVerdrahten }   // Funded Planer → CFD, „Payouts auf dem Weg“ (PA1)
     async function admPayoutErhaltenBuchen(){
       const t = _admReceive; if(!t || !admData) return
       const msg = $('admReceiveMsg'), btn = $('admReceiveSave')
@@ -20660,7 +20713,7 @@
       $('adm-f-pend').textContent = pend.length ? admEur.format(pendSum) : '—'
       $('adm-f-pend').style.color = pend.length ? 'var(--warn-ink, #b45309)' : 'var(--ink)'
       $('adm-f-pend-sub').textContent = pend.length
-        ? `${pend.length} Anfrage${pend.length === 1 ? '' : 'n'} offen`
+        ? `${pend.length} Anfrage${pend.length === 1 ? '' : 'n'} offen` + (pend.some(t => t.approved_at) ? ` · ${pend.filter(t => t.approved_at).length} approved` : '')   // PA1
         : 'angefragt, noch nicht da'
       const pendPanel = $('adm-f-pend-panel')
       if(pendPanel){
@@ -20681,10 +20734,10 @@
               '<td><span class="pp-bei"></span></td>' +
               `<td class="adm-num" style="font-weight:600;color:var(--warn-ink, #b45309)">${admEur.format(Number(t.amount) || 0)}</td>` +
               '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>' +
-              '<td style="text-align:right;white-space:nowrap"><button type="button" class="btn btn-primary pp-ok" style="padding:4px 9px;font-size:11.5px">✓ erhalten</button></td>'
-            // ✓ erhalten (29.10.2026): öffnet das Admin-Modal, bucht über /admin/payout-erhalten; ohne id (älterer Backend-Stand) kein Knopf
-            const okBtn = tr.querySelector('.pp-ok')
-            if(t.id) okBtn.addEventListener('click', () => admPayoutErhaltenOeffnen(t)); else okBtn.remove()
+              `<td style="text-align:right;white-space:nowrap">${admPayoutSchrittHtml(t)}</td>`
+            // PA1 (Finn 12.11.2026): erst [Approved] (Konto fährt wieder, keine Buchung), dann „Approved am …“ + [✓ erhalten] (bucht wie bisher, Modal);
+            // ohne id (älterer Backend-Stand) kein Knopf
+            if(t.id) admPayoutSchrittVerdrahten(tr, t)
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
             tr.querySelector('.pp-bei').textContent = t.liegt_bei || '—'
@@ -76091,10 +76144,12 @@
     if(Date.now() - (_wd.frischAt || 0) < 60000) return
     _wd.frischAt = Date.now()
     try{
-      const [po, ak] = await Promise.all([
-        supabase.from('pending_payouts').select('account_id').eq('user_id', uid).eq('status', 'pending'),
+      let [po, ak] = await Promise.all([
+        supabase.from('pending_payouts').select('account_id,approved_at').eq('user_id', uid).eq('status', 'pending'),
         supabase.from('accounts').select('*').eq('user_id', uid).eq('account_type', 'winning_days')])
-      if(!po.error) _wd.payoutOffen = new Set((po.data || []).map(x => String(x.account_id)))
+      // PA1 (Finn 12.11.2026): approved = Konto fährt wieder Winning Days (wie app.py payout_sperrt) — fehlt die Spalte noch (SQL), sperrt jede offene Anfrage wie bisher
+      if(po.error && /approved_at/.test(String(po.error.message || ''))) po = await supabase.from('pending_payouts').select('account_id').eq('user_id', uid).eq('status', 'pending')
+      if(!po.error) _wd.payoutOffen = new Set((po.data || []).filter(x => !x.approved_at).map(x => String(x.account_id)))
       if(!ak.error) for(const r of (ak.data || [])){
         const a = (accounts || []).find(q => String(q.id) === String(r.id)); if(!a) continue
         const f = rowToAccount(r); for(const key of WD_ZIEL_FELDER) a[key] = f[key]
@@ -91351,8 +91406,11 @@
         <td style="white-space:nowrap">${d && !isNaN(d) ? escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' })) : '—'}</td>
         <td style="white-space:nowrap;color:${tage != null && tage >= 14 ? 'var(--danger-ink, #b91c1c)' : 'var(--sub)'}">${tage == null ? '—' : tage === 0 ? 'heute' : `seit ${tage} Tag${tage === 1 ? '' : 'en'}`}</td>
         <td style="color:var(--sub)">${escapeHtml(t.liegt_bei || '—')}</td>
-        <td style="padding-right:20px;text-align:right;white-space:nowrap">${t.id && typeof window._admPayoutErhaltenOeffnen === 'function'
-          ? `<button type="button" class="btn ${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'btn-primary' : 'btn-ghost'} btn-xs" data-fcfd-erhalten="${escapeHtml(String(t.id))}" title="${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'Laut Mail-Abgleich ausgezahlt (z. B. „You got paid“) — ' : ''}Payout als erhalten buchen (Rückfrage im Fenster) · Konto raus aus Waiting for Payout · „Payout anfragbar ab“ = Erhalten + 14 Tage">✓ Erhalten</button>` : ''}</td></tr>` }
+        <td style="padding-right:20px;text-align:right;white-space:nowrap" data-fcfd-schritt="${escapeHtml(String(t.id || ''))}">${t.id && window._admPayoutSchritt && !t.approved_at
+          // PA1 (Finn 12.11.2026): erst [Approved] — Konto fährt wieder (Winning Days), keine Buchung; danach „✓ Approved am …“ · zurück + [✓ Erhalten] wie bisher
+          ? window._admPayoutSchritt.html(t, { klein: true })
+          : t.id && typeof window._admPayoutErhaltenOeffnen === 'function'
+          ? (t.approved_at && window._admPayoutSchritt ? window._admPayoutSchritt.html(t, { klein: true }).replace(/<button[^>]*pp-ok[^>]*>[^<]*<\/button>$/, '') : '') + `<button type="button" class="btn ${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'btn-primary' : 'btn-ghost'} btn-xs" data-fcfd-erhalten="${escapeHtml(String(t.id))}" title="${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'Laut Mail-Abgleich ausgezahlt (z. B. „You got paid“) — ' : ''}Payout als erhalten buchen (Rückfrage im Fenster) · Konto raus aus Waiting for Payout · „Payout anfragbar ab“ = Erhalten + 14 Tage">✓ Erhalten</button>` : ''}</td></tr>` }
     const tabelle = `<div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Firma</th><th>Betrag</th><th>Angefragt am</th><th>Seit</th><th>Liegt bei</th><th style="padding-right:20px"></th></tr></thead>
       <tbody>${zeilen.map(zeile).join('')}</tbody></table></div>`
     return `<div data-apg-anker="unterwegs">${apgKarte(`Payouts auf dem Weg · ${zeilen.length}`, zeilen.length ? `${sumTxt} angefragt, noch nicht erhalten · älteste zuerst` : 'angefragt, noch nicht erhalten',
@@ -91651,6 +91709,9 @@
     { const t = root.querySelector('[data-apg-anker="wartet"] .fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
     // „✓ Erhalten“ in „Payouts auf dem Weg“ (Finn 30.10.2026 ~08:16): bestehendes Admin-Fenster „Payout erhalten“ (= Rückfrage), bucht über
     // /admin/payout-erhalten; „Payout anfragbar ab“ = Erhalten + 14 Tage, Konto raus aus Waiting for Payout, danach neu zeichnen
+    // PA1: [Approved] / „zurück“ in derselben Zelle (window._admPayoutSchritt, Admin → Finanzen), gleiche Optionen wie „✓ Erhalten“
+    root.querySelectorAll('[data-fcfd-schritt]').forEach(td => { const t = ((window._admData && window._admData.pending_payouts) || []).find(x => String(x.id) === td.dataset.fcfdSchritt)
+      if(t && window._admPayoutSchritt){ td.querySelectorAll('.pp-ok').forEach(b => b.remove()); window._admPayoutSchritt.verdrahten(td, t, { naechsterTage: 14, waitingLeeren: true, nachher: () => window._apIdsRender?.() }) } })
     root.querySelectorAll('[data-fcfd-erhalten]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation()
       const t = ((window._admData && window._admData.pending_payouts) || []).find(x => String(x.id) === b.dataset.fcfdErhalten); if(!t) return
       window._admPayoutErhaltenOeffnen?.(t, { naechsterTage: 14, waitingLeeren: true, nachher: () => window._apIdsRender?.() }) }))

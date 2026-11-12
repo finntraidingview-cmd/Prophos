@@ -8588,10 +8588,14 @@ def admin_build_overview(kapitel_id=None):
     # oben rein — angefragtes Geld ist noch kein Geld, es wird nur GEZEIGT.
     pending_rows = []
     try:
-        for t in _sb_all("pending_payouts", {
-                "select": "id,user_id,account_id,account_name,account_firm,amount,currency,"
-                          "liegt_bei,requested_at,notes",
-                "status": "eq.pending"}):
+        _pp_sel = "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,requested_at,notes"
+        try:
+            _pp = _sb_all("pending_payouts", {"select": _pp_sel + ",approved_at,approved_von", "status": "eq.pending"})   # PA1
+        except Exception as _e_pp:
+            if "approved_at" not in str(_e_pp):
+                raise
+            _pp = _sb_all("pending_payouts", {"select": _pp_sel, "status": "eq.pending"})   # PA1-SQL noch nicht eingespielt
+        for t in _pp:
             uid = str(t.get("user_id"))
             if uid in excluded_ids:
                 continue
@@ -8614,6 +8618,8 @@ def admin_build_overview(kapitel_id=None):
                 "account_name": t.get("account_name") or "",
                 "account_firm": t.get("account_firm") or "",
                 "notes": t.get("notes") or "",
+                "approved_at": t.get("approved_at") or None,   # PA1: Approved-Schritt (Konto fährt wieder), Erhalten bucht erst
+                "approved_von": t.get("approved_von") or None,
             })
         pending_rows.sort(key=lambda r: r["requested_at"])
     except Exception as e:
@@ -17853,6 +17859,39 @@ def wd_payout_abgleich(rows, offen, plaene, jetzt, regeln, rnd=None, geprueft=()
     return updates
 
 
+# ── PA1 APPROVED (Finn 12.11.2026 ~20:05 Dubai: „Oft werden Payouts aber approved, und es dauert noch 3–4 Tage, bis sie wirklich geschickt werden … Bei
+# ‚Approved‘ wird das Konto schon wieder freigeschaltet und für Winning Days gefahren. Bei ‚Erhalten‘ wird erst wirklich zu Finanzen gebucht“). Sperre = Anfrage
+# offen (pending_payouts status pending) UND noch nicht approved (approved_at leer). Ist-Weg (Befund PA1): nur der WD-Farmer sperrt an der offenen Anfrage
+# (wd_payout_abgleich, GET/POST /admin/wd-plaene, PC-Tab wdKontenFrisch); Funded CFD ist schon mit der Anfrage frei (waiting_payout_since leert die Anfrage),
+# Zyklus-Zähler zählen ab der Anfrage. Spalte approved_at fehlt (SQL noch nicht eingespielt) → wie bisher: jede offene Anfrage sperrt.
+def payout_sperrt(zeile):
+    """REIN (testbar, PA1): sperrt diese pending_payouts-Zeile das Konto für die Planer? status pending und approved_at leer."""
+    z = zeile or {}
+    return str(z.get("status") or "pending") == "pending" and not z.get("approved_at")
+
+
+def _payout_offen_ids(ids=None):
+    """PA1: {account_id} mit sperrender Anfrage (payout_sperrt). ids = nur diese Konten (in Teilen zu 80), None = alle. Lesefehler → wirft (die Aufrufer sind
+    fail-closed bzw. loggen); fehlt nur die Spalte approved_at, liest es wie vor PA1 (jede offene Anfrage sperrt)."""
+    teile = [None] if ids is None else [sorted(ids)[i:i + 80] for i in range(0, len(ids), 80)]
+    out, ohne_spalte = set(), False
+    for teil in teile:
+        if teil == []:
+            continue
+        q = {"select": "account_id,approved_at", "status": "eq.pending"}
+        if teil is not None:
+            q["account_id"] = "in.(" + ",".join(str(x) for x in teil) + ")"
+        try:
+            rows = (_sb_all if teil is None else sb_select)("pending_payouts", q) or []
+        except Exception as e:
+            if "approved_at" not in str(e):
+                raise
+            ohne_spalte = True
+            rows = (_sb_all if teil is None else sb_select)("pending_payouts", dict(q, select="account_id")) or []
+        out |= {str(r.get("account_id")) for r in rows if r.get("account_id") and (ohne_spalte or payout_sperrt(dict(r, status="pending")))}
+    return out
+
+
 def wd_payout_tick(sofort=False):
     """Railway: alle WD_PAYOUT_TAKT_S (oder sofort nach einer Payout-Route) wd_payout_abgleich anwenden. Plan-Löschen nur mit Guard (planned, nie
     geclaimt, nie gesendet); Zeilen nur auf den gelesenen Stand (updated_at) — dazwischen geändert → nächster Takt. Fehler → Log, nie werfen."""
@@ -17867,7 +17906,7 @@ def wd_payout_tick(sofort=False):
         from zoneinfo import ZoneInfo
         heute = jetzt.astimezone(ZoneInfo(str(regeln.get("tz") or "Asia/Dubai"))).strftime("%Y-%m-%d")
         rows = sb_select("wd_tagesplan", {"select": "tag,user_id,status,start_um,richtung,reihenfolge,updated_at,konten", "tag": f"gte.{heute}"}) or []
-        offen = {str(p.get("account_id")) for p in (_sb_all("pending_payouts", {"select": "account_id", "status": "eq.pending"}) or []) if p.get("account_id")}
+        offen = _payout_offen_ids()   # PA1: approved = nicht mehr offen (Konto fährt wieder Winning Days)
         ids = sorted({str(k.get("id")) for x in rows for k in (x.get("konten") or []) if isinstance(k, dict)
                       and (str(k.get("id")) in offen or k.get("hinweis") in (WD_HINWEIS_PAYOUT, WD_HINWEIS_PAYOUT_MORGEN))})
         if not ids:
@@ -18054,10 +18093,7 @@ def admin_wd_plaene():
             if konten:
                 try:
                     ids = [k["id"] for k in konten]
-                    po_offen = set()
-                    for i in range(0, len(ids), 80):
-                        po_offen |= {str(p.get("account_id")) for p in sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending",
-                                                                                                   "account_id": "in.(" + ",".join(ids[i:i + 80]) + ")"}) or []}
+                    po_offen = _payout_offen_ids([str(x) for x in ids])   # PA1: approved sperrt nicht
                     for k in konten:
                         if k["id"] in po_offen:
                             k["payout_offen"] = True
@@ -18192,10 +18228,7 @@ def admin_wd_plaene():
         po_fehler = None
         try:
             _mids = sorted({str((r or {}).get("master_account_id") or "") for r in rows[:200]} - {""})
-            po_offen = set()
-            for i in range(0, len(_mids), 80):
-                po_offen |= {str(p.get("account_id")) for p in sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending",
-                                                                                           "account_id": "in.(" + ",".join(_mids[i:i + 80]) + ")"}) or []}
+            po_offen = _payout_offen_ids(_mids)   # PA1: approved sperrt nicht
         except Exception as e:
             # SA1c: fail-closed — ohne lesbaren Payout-Stand kein WD-Plan (der Tab prüft nur noch den Zeilen-Hinweis); einmal je 30 min an die Master-IDs
             print(f"[wd] ⚠️ Payout offen (anlegen): {type(e).__name__}: {e} — kein WD-Plan in diesem Lauf", flush=True)
@@ -19193,6 +19226,105 @@ def admin_payout_erhalten():
     return jsonify({"ok": True, "tx": tx, "pending": upd[0] if upd else None, "account": konto,
                     "termin_fehler": termin_fehler, "erhalten_am": erhalten_am, "naechster_payout": naechster,
                     "waiting_geleert": waiting_geleert})
+
+
+def payout_approved_zurueck_urteil(approved_at, plaene):
+    """REIN RECHNEND (testbar, PA1 Rückweg): darf ein Approved zurückgenommen werden? Nein, sobald seit dem Approved ein Plan des Kontos gestartet ist
+    (started_at bzw. start_um_gestartet_at nach approved_at) — dann läuft der neue Zyklus schon, Rücknahme wäre zu spät. → (ok, grund)."""
+    a = _ap_ts(str(approved_at)) if approved_at else None
+    if a is None:
+        return False, "nicht approved"
+    for p in plaene or ():
+        for k in ("started_at", "start_um_gestartet_at"):
+            t = _ap_ts(str(p.get(k))) if p.get(k) else None
+            if t is not None and t > a:
+                return False, f"seit dem Approved ist schon ein Trade gestartet ({str(p.get('master_name') or p.get('id') or '')[:40]}) — nicht mehr zurücknehmbar"
+    return True, ""
+
+
+@app.route("/admin/payout-approved", methods=["PATCH", "OPTIONS"])
+def admin_payout_approved():
+    """PA1 (Finn 12.11.2026 ~20:05 Dubai): Payout-Anfrage ist bei der Firma approved, das Geld kommt erst in 3–4 Tagen. Approved = das Konto wieder
+    freischalten (die Anfrage sperrt nicht mehr: payout_sperrt, WD-Farmer plant wieder — wd_payout_tick sofort), KEINE Buchung; „Erhalten“
+    (/admin/payout-erhalten) bucht weiter wie bisher. Body {pending_id, zurueck (bool), waiting_leeren (bool)}.
+    Approved: nur offene Anfrage (status pending) ohne approved_at, Guard approved_at is.null (zweiter Klick → 409). waiting_leeren wie beim Erhalten
+    (Funded CFD: Konto raus aus Waiting for Payout — die Anfrage leert es heute schon, das ist nur das Netz).
+    Zurück (versehentliches Approved): nur solange nicht erhalten und seit dem Approved kein Plan des Kontos gestartet ist (payout_approved_zurueck_urteil),
+    Guard approved_at = gelesener Wert; danach sperrt die Anfrage wieder, wd_payout_tick zieht noch nicht gestartete WD-Pläne zurück.
+    Auth wie /admin/payout-erhalten: ADMIN_EMAILS oder voller Admin-Reiter-Login, sonst Verwalter für Anfragen SEINER Gruppe."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _admin_voll()
+    gruppe = None
+    if err:
+        if err[1] != 403:
+            return err
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
+    b = request.get_json(silent=True) or {}
+    pid = str(b.get("pending_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"error": "pending_id fehlt/ungültig"}), 400
+    zurueck = b.get("zurueck") is True
+    try:
+        rows = sb_select("pending_payouts", {"select": "id,user_id,account_id,account_name,status,approved_at,approved_von", "id": f"eq.{pid}", "limit": "1"}) or []
+    except Exception as e:
+        if "approved_at" in str(e):
+            return jsonify({"error": "Spalte approved_at fehlt — sql/2026-11-12_pa1_payout_approved.sql einspielen"}), 409
+        return jsonify({"error": f"Anfrage nicht lesbar ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"error": "Anfrage nicht gefunden"}), 404
+    p = rows[0]
+    if gruppe is not None and str(p.get("user_id") or "") not in gruppe:
+        return jsonify({"error": "Nur Anfragen der eigenen Gruppe"}), 403
+    if str(p.get("status") or "") != "pending":
+        return jsonify({"error": f"Anfrage ist schon „{p.get('status')}\" — nichts geändert"}), 409
+    aid = str(p.get("account_id") or "")
+    jetzt = datetime.now(timezone.utc).isoformat()
+    if zurueck:
+        if not p.get("approved_at"):
+            return jsonify({"error": "Anfrage ist nicht approved — nichts zurückzunehmen"}), 409
+        plaene = []
+        if aid:
+            try:
+                plaene = sb_select("trade_plans", {"select": "id,master_name,started_at,start_um_gestartet_at", "master_account_id": f"eq.{aid}",
+                                                   "created_at": f"gte.{(_ap_ts(str(p['approved_at'])) - timedelta(days=1)).isoformat()}"}) or []
+            except Exception as e:
+                return jsonify({"error": f"Pläne des Kontos nicht lesbar ({type(e).__name__}) — nichts zurückgenommen"}), 502
+        ok, grund = payout_approved_zurueck_urteil(p.get("approved_at"), plaene)
+        if not ok:
+            return jsonify({"error": grund, "hinweis": True}), 409
+        try:
+            upd = sb_update("pending_payouts", {"id": f"eq.{pid}", "status": "eq.pending", "approved_at": f"eq.{p['approved_at']}"},
+                            {"approved_at": None, "approved_von": None, "updated_at": jetzt})
+        except Exception as e:
+            return jsonify({"error": f"nicht zurückgenommen ({type(e).__name__})"}), 502
+        if not upd:
+            return jsonify({"error": "Anfrage hat sich inzwischen geändert (anderer Klick/Browser) — neu laden"}), 409
+        threading.Thread(target=wd_payout_tick, kwargs={"sofort": True}, daemon=True).start()   # Konto wieder gesperrt → nicht gestartete WD-Pläne raus
+        return jsonify({"ok": True, "pending": upd[0], "zurueck": True})
+    if p.get("approved_at"):
+        return jsonify({"error": "Anfrage ist schon approved", "pending": p}), 409
+    try:
+        upd = sb_update("pending_payouts", {"id": f"eq.{pid}", "status": "eq.pending", "approved_at": "is.null"},
+                        {"approved_at": jetzt, "approved_von": str(uid or "") or None, "updated_at": jetzt})
+    except Exception as e:
+        return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
+    if not upd:
+        return jsonify({"error": "Anfrage ist inzwischen approved oder erhalten (anderer Klick/Browser) — neu laden"}), 409
+    waiting_geleert = False
+    if b.get("waiting_leeren") is True and aid:
+        try:
+            z = sb_update("accounts", {"id": f"eq.{aid}", "user_id": f"eq.{p.get('user_id')}", "select": "id,waiting_payout_since"}, {"waiting_payout_since": None})
+            waiting_geleert = bool(z and z[0].get("waiting_payout_since") is None)
+        except Exception as e:
+            print(f"[payout-approved] ⚠️ waiting {aid}: {type(e).__name__}: {e}", flush=True)
+    threading.Thread(target=wd_payout_tick, kwargs={"sofort": True}, daemon=True).start()   # Approved → WD-Konto heute wieder rein (wie beim Erhalten)
+    return jsonify({"ok": True, "pending": upd[0], "waiting_geleert": waiting_geleert})
 
 
 def payout_anfrage_konto_felder(konto, naechster, morgen):
