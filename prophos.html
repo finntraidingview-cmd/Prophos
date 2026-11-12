@@ -30404,7 +30404,10 @@
     const tv = { konto: tvV2Konto(plan) || (r && r.konto) || null, today_pnl_start: rplStart, today_pnl_start_quelle: rplStart != null ? 'rpl' : null,
                  datum_start: tvV2Handelstag(at), at, puls: 'tsx',
                  pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, quelle: 'tsx_order', klick_at: (r && r.klick_at) || null,
-                 balance_start: zahl(r.balance_start), mll_start: zahl(r.mll), rpl_start: zahl(r.rpl), balance_relativ: rel,
+                 balance_start: zahl(r.balance_start), rpl_start: zahl(r.rpl), balance_relativ: rel,
+                 // TL1b (Prüfer S2 KANN): MLL nur, wenn das gelesene Konto (r.konto_aktiv) zu diesem Plan passt — dieselbe Prüfung wie die Balance-Lesung
+                 // (tvBalanceKontoBelegt); sonst wäre eine fremde MLL die „neueste Lesung“ für Planung und Blow-Urteil (app.py ap_kette_mll_urteil)
+                 mll_start: (typeof tvBalanceKontoBelegt !== 'function' || tvBalanceKontoBelegt(r && r.konto_aktiv, plan.masterAccountId, zahl(r.balance_start))) ? zahl(r.mll) : null,
                  // echte Bracket-Orders aus dem TopstepX-Reiter „Orders" (Backend F28, 0030ba6) — Heuristik, kann Montag noch null sein
                  tp_level_nq: zahl(r.tp_level) > 1000 ? r.tp_level : null, sl_level_nq: zahl(r.sl_level) > 1000 ? r.sl_level : null,
                  tp_level_quelle: zahl(r.tp_level) > 1000 ? String(r.tp_level_quelle || 'tsx_toast') : null,
@@ -58890,7 +58893,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2206'
+  const OS_TAB_BUILD = '2026-09-22.2207'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

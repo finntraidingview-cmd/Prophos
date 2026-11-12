@@ -25489,7 +25489,10 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
     Weder Lesung noch Tagesschluss: wie früher ap_kette_mll aus dem Hochpunkt (peak/balance) — lieber zu hoch als zu tief.
     TL1 (12.11.2026, Topstep-Support: Lock bei der Startgröße): jede GERECHNETE MLL höchstens groesse; die Lesung selbst gilt wie gelesen. Pläne OHNE
     konto_typ (Vorfall Marc …22631094: Plan 272809d8 vom 09.11. trug keinen, seine Lesung 150.000 fiel raus — es zählte die ältere Lesung vom 06.11. plus
-    Tagesschluss 157.087) zählen wie dieselbe Phase; nur ein ANDERER Typ wird übersprungen (Express-Lesungen fallen ohnehin über „> Hälfte der Größe“ raus)."""
+    Tagesschluss 157.087) zählen wie dieselbe Phase; nur ein ANDERER Typ wird übersprungen (Express-Lesungen fallen ohnehin über „> Hälfte der Größe“ raus).
+    TL1b (Prüfer S2 KANN, fail-closed): eine Zeile ohne konto_typ zählt nur, wenn sie ab dem PHASENBEGINN gestartet ist — erster Plan mit dem
+    Typ des Kontos nach dem letzten Plan eines anderen Typs (wie liq_peak gedacht: Werte der alten Phase heben die neue nie). Ohne einen Plan
+    der aktuellen Phase zählt keine Zeile ohne konto_typ."""
     if not groesse or not dd:
         return None, None
     lock = float(groesse)
@@ -25503,11 +25506,18 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
         except Exception:
             return None
     heute = _cme_handelstag((jetzt or datetime.now(timezone.utc)).isoformat())
+    eigene = [f for f in verlauf or () if str(f.get("master_account_id") or "") == aid]
+    _anders = [st for st in (_t(f.get("started_at")) for f in eigene if f.get("konto_typ") and str(f["konto_typ"]).lower() != typ) if st]
+    _gleich = [st for st in (_t(f.get("started_at")) for f in eigene if f.get("konto_typ") and str(f["konto_typ"]).lower() == typ) if st
+               and (not _anders or st > max(_anders))]
+    beginn = min(_gleich) if _gleich else None          # TL1b: Phasenbeginn (None = keine Zeile ohne konto_typ zählt)
     lesung, lesung_at = None, None
     schluss = {}                                            # Handelstag → (ended_at, balance_end) des letzten Endes an diesem Tag
     for f in verlauf or ():
         if str(f.get("master_account_id") or "") != aid or (f.get("konto_typ") and str(f["konto_typ"]).lower() != typ):   # TL1: ohne konto_typ = dieselbe Phase
             continue
+        if not f.get("konto_typ") and (beginn is None or not _t(f.get("started_at")) or _t(f.get("started_at")) < beginn):
+            continue                                            # TL1b: ohne konto_typ nur ab dem Phasenbeginn (fail-closed)
         m, st = _wd_num(f.get("mll_start")), _t(f.get("started_at"))
         if m is not None and m > float(groesse) * 0.5 and st and (lesung_at is None or st > lesung_at):   # Express (0-basiert) fällt raus
             lesung, lesung_at = float(m), st
@@ -31291,6 +31301,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "master_symbol": (str(w.get("symbol") or regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026); Mini: MNQ
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
+            # TL1b (12.11.2026): Kettenpläne tragen ihren konto_typ ab dem Anlegen — Plan 272809d8 (09.11.) wurde von Hand abgeschlossen und bekam keinen
+            # (sonst stempeln erst das Abhaken bzw. der Tab planKontoTypMerken), seine MLL-Lesung fiel aus ap_kette_mll_belegt. Andere Pläne wie bisher
+            "konto_typ": (a.get("account_type") or None) if w.get("kette") else None,
             "mt5_baseline": ({"kette": dict(w["kette"], tag=tag)} if w.get("kette")                       # Topstep-Kette Trade 1 (08.10.2026)
                              else {"tage_mini": dict(w["tage_mini"], tag=tag)} if w.get("tage_mini") else None),   # Tage sammeln (09.10.2026)
             # Tausender-Punkt nur für Rest und Balance (09.10.2026): das alte .replace(",", ".") über die ganze Notiz machte aus der
@@ -39340,7 +39353,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
     startwert_neu = ap_kette_startwert_neu(jetzt)   # Startwert-Pläne mit abweichender erster Lesung neu planen lassen (09.10.2026)
     t1s = [p for p in (sb_select("trade_plans", {
         "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,auto_plan,auto_bestaetigt_at,ended_at,"
-                  "planned_for,status,mt5_baseline", "route": "eq.tsv2", "status": "in.(review,completed)",
+                  "planned_for,status,konto_typ,mt5_baseline", "route": "eq.tsv2", "status": "in.(review,completed)",
         "ended_at": "gte." + mitternacht.isoformat(), "mt5_baseline->kette->>nr": "eq.1"}) or [])]
     if not t1s:
         return {"neu": [], "abgehakt": abgehakt}
@@ -39429,6 +39442,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
                  "master_tp": werte["tp"], "master_sl": werte["sl"], "richtung": r, "route": "tsv2", "master_symbol": t1.get("master_symbol"),
                  "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
                  "planned_for": t1.get("planned_for"), "auto_plan": True,
+                 "konto_typ": t1.get("konto_typ") or "challenge",   # TL1b: Kette gibt es nur in der Challenge (Topstep Combine), wie ap_kette_abhaken
                  "auto_bestaetigt_at": jetzt.isoformat() if t1.get("auto_bestaetigt_at") else None,
                  "mt5_baseline": {"kette": k2},
                  "notes": (f"Auto-Planer · {AP_KETTE_TXT} 2/2 · Trade 1 {werte['e1']:+,.0f} $ → TP {werte['tp']:,} / SL {werte['sl']:,} $ "
@@ -40750,6 +40764,7 @@ def _tt_zeile(p, k, werte, start, richtung, tag_id, echt, bal_tag0, param, rnd, 
             "master_tp": werte["tp"], "master_sl": werte["sl"], "richtung": richtung,
             "route": p.get("route"), "master_symbol": sym, "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned",
             "priority": "medium", "planned_for": p.get("planned_for"), "auto_plan": True,
+            "konto_typ": (p.get("konto_typ") or "challenge") if p.get("route") == "tsv2" else None,   # TL1b: nur Topstep-Kettenteile (tsv2) erben/setzen den konto_typ; CFD-Tagesteilung (WS2) bleibt NULL bis planKontoTypMerken beim Abhaken (Prüfer S2 SOLLTE 1, 12.11.2026: sonst trüge Teil 2 nach Phasenwechsel die alte Phase)
             "auto_bestaetigt_at": jetzt.isoformat() if p.get("auto_bestaetigt_at") else None, "mt5_baseline": base, "notes": notiz}
 
 
