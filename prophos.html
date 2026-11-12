@@ -3391,7 +3391,8 @@
   /* aufgeklappte Person: je Firma eine kompakte Zeile im festen Raster [Firma | Kette | Ziel | Menge | Pille + Knöpfe] */
   #vr-view .vr-fz-box{padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
   #vr-view .vr-fz{display:grid;grid-template-columns:minmax(110px,170px) minmax(0,1.2fr) minmax(90px,150px) auto;grid-template-areas:"firma auftrag bar rechts";align-items:center;column-gap:14px;row-gap:6px;padding:11px 0;border-top:1px solid var(--border-soft);font-size:13.5px;cursor:pointer}
-    grid-template-areas:"firma kette bar menge rechts";column-gap:12px;align-items:center;padding:7px 0;border-top:1px solid var(--border-soft);font-size:13px;cursor:pointer}
+  /* HN1b (12.11.2026, Prüfer-Nebenbefund zu HN1): hier stand der Rest der alten .vr-fz-Regel (fa4bc96f) ohne Selektor mit eigenem „}“ — der CSS-Parser nahm ihn als
+     Selektor der nächsten Regel und verwarf sie samt „.vr-fz-box > :first-child{border-top:none}“ (erste Firmen-Zeile bekam eine doppelte Linie). Rest entfernt. */
   #vr-view .vr-fz-box > :first-child{border-top:none}
   #vr-view .vr-fz:hover .vr-fz-firma span{text-decoration:underline;text-decoration-color:var(--sub-2);text-underline-offset:2px}
   #vr-view .vr-fz-firma{grid-area:firma;display:flex;align-items:center;gap:7px;min-width:0;font-weight:400;font-size:13px}
@@ -59023,7 +59024,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2211'
+  const OS_TAB_BUILD = '2026-09-22.2212'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
