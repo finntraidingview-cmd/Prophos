@@ -3,8 +3,9 @@
 -- mt5_baseline.wd_recoverer bzw. ohne Marke Apex-WD auf NQ wie wd_ist_recoverer_plan) nicht mehr an; sie starten wie normale WD zur geplanten Zeit.
 -- Unverändert: Hedge-Trades (hedge_art apex / tradeify_final) und normale Apex-WD der Liste wd_farmer_regeln.bestaetigen_firmen (wd_bestaetigen_noetig).
 -- Basis: pg_get_functiondef(trade_plans_a0_hedge_freigabe) live am 12.11.2026 ~20:15 Dubai, nur die Bedingung im WD-Zweig geändert. Vor dem Einspielen erneut vergleichen.
--- Reihenfolge: zusammen mit dem app.py/prophos.html-Push (RC4); einzeln ist beides harmlos (der alte Tab wartet weiter, der neue Tab bekäme ohne diese Datei
--- beim Claim die Sperre „wartet auf deine Bestätigung“). Wiederholbar (create or replace).
+-- Reihenfolge (Prüfer RC4 SOLLTE): ZUERST bzw. gleichzeitig mit dem app.py/prophos.html-Push (RC4). Diese Datei vorab ist harmlos (der alte Tab wartet weiter auf ✓).
+-- Umgekehrt NICHT: der neue Tab versuchte den Ausgleich zu starten, der alte Riegel blockte den Claim, und „Zu bestätigen“ zeigte ihn nicht mehr → Plan hinge
+-- unsichtbar. Wiederholbar (create or replace). Vorher: select position('\"' in pg_get_functiondef('public.trade_plans_a0_hedge_freigabe'::regproc)) — 0 erwartet.
 create or replace function public.trade_plans_a0_hedge_freigabe()
  returns trigger
  language plpgsql

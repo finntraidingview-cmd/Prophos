@@ -59023,7 +59023,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2210'
+  const OS_TAB_BUILD = '2026-09-22.2211'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -76093,7 +76093,7 @@
           // TP-Vorgabe frisch aus der DB: accounts hat kein Realtime, der Cache kann eine neue Hand-Vorgabe noch nicht kennen. Lesefehler = nichts schreiben
           let altFrei = false
           if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
-          // Tradeify-Ausgleich (03.11.2026): ERST die Bestätigungs-Marke, dann den TP hochziehen — scheitert die Marke, bleibt der Plan, wie er ist (nie ein großer TP ohne Bestätigung)
+          // Tradeify-Ausgleich (03.11.2026): ERST die Marke wd_ausgleich, dann den TP hochziehen — scheitert die Marke, bleibt der Plan, wie er ist (seit RC4 12.11.2026 ohne Bestätigung; die Marke schaltet den SL-Würfel ab)
           if(alt && altFrei && alt.zyArt === 'tradeify'){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Ausgleich-Marke', e) } }
           // RC3: Apex-Recoverer — ERST die Marke, dann auf MNQ/NQ umstellen (sonst stünde ein MNQ-Recoverer ohne Erkennung da: SL-Würfel, kein Chip)
           else if(alt && altFrei){ try{ altFrei = !!(await baselinePatch(plan.id, { wd_recoverer: true }, 'planned')) }catch(e){ altFrei = false; console.warn('[wd] Recoverer-Marke', e) } }
@@ -92220,7 +92220,7 @@
         <div class="e2-zeile">${e2L('WDs bis Payout', 'Ziel je Konto (goal_target), Standard')}<em>${e2De(wd.ziel_std)}</em></div>
         ${wdz && wdz.tp ? `<div class="e2-zeile">${e2L('TP je WD', (wdz.tp_quelle === 'wd-farmer' ? 'aus dem WD-Farmer' : 'Standard des WD-Farmers') + ', je Konto gewürfelt')}<em>${e2De(wdz.tp[0])}–${e2De(wdz.tp[1])} $</em></div>` : ''}
         ${wdz && wdz.kt ? `<div class="e2-zeile">${e2L('Kontrakte je WD')}<em>${wdz.kt[0] === wdz.kt[1] ? e2De(wdz.kt[0]) : e2De(wdz.kt[0]) + '–' + e2De(wdz.kt[1])} ${escapeHtml(String(wdz.instr || ''))}</em></div>` : ''}
-        <div class="e2-zeile">${e2L('Bestätigen', wd.bestaetigen ? 'jeder Farmer-WD startet erst nach ✓ — Verwalter-Gruppen ausgenommen' : '')}<em>${wd.bestaetigen ? 'einzeln ✓' : 'von selbst'}</em></div>
+        <div class="e2-zeile">${e2L('Bestätigen', wd.bestaetigen ? 'jeder Farmer-WD startet erst nach ✓ — Verwalter-Gruppen, Recoverer und Ausgleich ausgenommen (RC4)' : '')}<em>${wd.bestaetigen ? 'einzeln ✓' : 'von selbst'}</em></div>
         ${(wd.besonders || []).map(b => b && typeof b === 'object' ? `<div class="e2-zeile">${e2L(String(b.name || ''), b.info || '')}<em>${escapeHtml(String(b.wert || ''))}</em></div>` : '').join('')}
         <div class="wd-fuss">ändern unter <button type="button" class="e2-link" data-e2-wd-link>Winning Days → Einstellungen</button></div></div>`
       const punkt = `<i class="e2-punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f.name) : 'var(--g-a2)'}"></i>`
