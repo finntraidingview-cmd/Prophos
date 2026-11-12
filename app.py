@@ -32704,6 +32704,33 @@ def notiz_hedge_zeile_setzen(notes, zeile):
     return ("\n".join(alt).rstrip() + "\n" + z).strip()
 
 
+def hedge_mindest_lot(roh_lots, menge, min_lot):
+    """REIN RECHNEND (testbar, EH1 Finn 12.11.2026 ~20:45: „Wenn der Fusion-Hedge zu klein ist, einfach immer 0,01, immer das Kleinste. Da geht es nur um ein paar
+    Cent, ist echt egal.“): liegt ein BELEGT gerechneter Hedge (roh_lots > 0) gerundet unter dem Mindest-Lot des Hedge-Kontos, wird er auf genau min_lot
+    aufgerundet → (lots, multiplier, faktor) | None (nicht nötig bzw. nicht darstellbar). multiplier = Fusion-Lots je Master-Lot, auf 4 Stellen AUFGERUNDET, so dass
+    menge × multiplier auf dem 0,01-Raster des Brokers genau min_lot ergibt (Copier norm_vol rundet auf den Schritt); faktor = neue ÷ alte Lots (für q/slave_risk).
+    Nur nach oben auf das Minimum — alles andere bleibt, wie es war."""
+    import math
+    try:
+        r, m, ml = float(roh_lots), float(menge), float(min_lot)
+    except (TypeError, ValueError):
+        return None
+    if not (r > 0 and m > 0 and ml > 0) or round(r, 2) >= ml - 1e-9:
+        return None
+    mult = math.ceil(ml / m * 10000 - 1e-6) / 10000
+    if round(mult * m, 2) != round(ml, 2):
+        return None   # auf 4 Stellen nicht genau darstellbar → wie bisher gesperrt (fail-closed)
+    return round(ml, 2), mult, (mult * m) / r
+
+
+def hedge_auf_text(h, min_lot=0.01):
+    """EH1: Notiz-Zusatz „ · Hedge auf Mindest-Lot 0,01 aufgerundet (gerechnet 0,004)“ | '' (nicht aufgerundet)."""
+    v = (h or {}).get("aufgerundet_von")
+    if v is None:
+        return ""
+    return f" · Hedge auf Mindest-Lot {float(min_lot):.2f} aufgerundet (gerechnet {float(v):.3f})".replace(".", ",")
+
+
 def eh_hedge(satz, menge, master_ppl, slave_ppl, master_risk, faktor=0.89, min_lot=0.01):
     """REIN RECHNEND (testbar): Fusion-Hedge B2 eines Plans → ({q, multiplier, lots, slave_risk}, None) | (None, grund).
     satz = Kontowert ÷ Polster (€ je $), menge = Master-Lots, master_ppl $/Pkt je Lot, slave_ppl €/Pkt je Lot Fusion,
@@ -32720,10 +32747,16 @@ def eh_hedge(satz, menge, master_ppl, slave_ppl, master_risk, faktor=0.89, min_l
     q = s / float(faktor or EH_STANDARD["netto_faktor"])
     mult = q * mp / sp
     lots = round(mult * m, 2)
+    auf = None
     if lots < float(min_lot) - 1e-9:
-        return None, f"Hedge {mult * m:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
-    return {"q": round(q, 5), "multiplier": round(mult, 4), "lots": lots,
-            "slave_risk": round(q * mr, 2) if mr and mr > 0 else None}, None
+        mi = hedge_mindest_lot(mult * m, m, min_lot)   # EH1: auf das Mindest-Lot aufrunden statt sperren
+        if not mi:
+            return None, f"Hedge {mult * m:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
+        auf = round(mult * m, 4)
+        lots, q = mi[0], q * mi[2]
+        mult = mi[1]
+    return dict({"q": round(q, 5), "multiplier": round(mult, 4), "lots": lots,
+                 "slave_risk": round(q * mr, 2) if mr and mr > 0 else None}, **({"aufgerundet_von": auf} if auf is not None else {})), None
 
 
 def eh_marge(les, lots, richtung, vorgemerkt, max_lots, reserve=EH_MARGE_RESERVE):
@@ -32879,12 +32912,12 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     login = login or str(hedge_acc[hid].get("external_id") or "")
     base["echo_hedge"] = {"status": "geplant", "quelle": "planer", "at": jetzt_iso, "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"],
                           "satz": kw.get("satz_eur_pro_usd"), "kontowert_eur": kw.get("wert_eur"), "balance": round(float(bal), 2), "login": login,
-                          "netto_faktor": par["netto_faktor"]}
+                          "netto_faktor": par["netto_faktor"], **({"aufgerundet_von": h["aufgerundet_von"]} if h.get("aufgerundet_von") is not None else {})}   # EH1
     base["hedge_vorschau"] = ehv_vorschau(h, None, z.get("master_tp"), jetzt_iso)
     z.update({"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
               "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": base,
               "notes": notiz_hedge_zeile_setzen(z.get("notes"), (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                        f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ","))})   # WZ1: setzen statt anhängen
+                        f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",") + hedge_auf_text(h, par["min_lot"]))})   # WZ1: setzen statt anhängen; EH1
     return "echo", None
 
 
@@ -33171,11 +33204,11 @@ def _eh_tick_lauf(jetzt):
                 continue
             info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"],
                     "satz": kw.get("satz_eur_pro_usd"), "kontowert_eur": kw.get("wert_eur"), "balance": round(float(bal), 2), "login": login,
-                    "netto_faktor": par["netto_faktor"]}
+                    "netto_faktor": par["netto_faktor"], **({"aufgerundet_von": h["aufgerundet_von"]} if h.get("aufgerundet_von") is not None else {})}   # EH1
             upd = {"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
                    "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, echo_hedge=info),
                    "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['echo']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                             f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ","))}   # WZ1: setzen statt anhängen
+                             f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",") + hedge_auf_text(h, par["min_lot"]))}   # WZ1; EH1
             try:
                 if not sb_update("trade_plans", _eh_guard(p, route=p.get("route") or "mt5v2"), upd):   # E3: Echo aus dem Planer nachrechnen
                     # inzwischen geändert → eh_schnell_tick sieht das neue updated_at gleich wieder; geclaimt → eh_rot_start_pruefen (🔴)
@@ -33254,8 +33287,9 @@ def ehv_vorschau(h, grund, master_tp, jetzt_iso):
     if grund or not h:
         return {"grund": str(grund or "nicht rechenbar"), "at": jetzt_iso}
     tp = _wd_num(master_tp)
-    return {"lots": h["lots"], "multiplier": h["multiplier"], "q": h["q"], "blow_eur": h.get("slave_risk"),
-            "pass_eur": (round(-tp * h["q"], 2) if tp and tp > 0 else None), "at": jetzt_iso}
+    return dict({"lots": h["lots"], "multiplier": h["multiplier"], "q": h["q"], "blow_eur": h.get("slave_risk"),
+                 "pass_eur": (round(-tp * h["q"], 2) if tp and tp > 0 else None), "at": jetzt_iso},
+                **({"aufgerundet_von": h["aufgerundet_von"]} if h.get("aufgerundet_von") is not None else {}))   # EH1
 
 
 def ehv_abweichung(vs, lots):
@@ -33451,10 +33485,16 @@ def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01, sppl=None):
     pkt = pol / (pp * k)
     lots = slave_risk / (sp * pkt)
     mult = lots / k
+    auf = None
     if round(lots, 2) < float(min_lot) - 1e-9:
-        return None, f"Hedge {lots:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
-    return {"q": round(q, 5), "master_risk": round(pol, 2), "slave_risk": round(slave_risk, 2), "lots": round(lots, 2),
-            "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * sp * t / (pp * k), 2)}, None
+        mi = hedge_mindest_lot(lots, k, min_lot)   # EH1: auf das Mindest-Lot aufrunden statt sperren
+        if not mi:
+            return None, f"Hedge {lots:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
+        auf = round(lots, 4)
+        q, slave_risk, lots, mult = q * mi[2], slave_risk * mi[2], mi[0], mi[1]
+    return dict({"q": round(q, 5), "master_risk": round(pol, 2), "slave_risk": round(slave_risk, 2), "lots": round(lots, 2),
+                 "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * sp * t / (pp * k), 2)},
+                **({"aufgerundet_von": auf} if auf is not None else {})), None
 
 
 def tfh_stand(regeln=None):
@@ -33732,11 +33772,12 @@ def tfh_tick(jetzt=None, force=False):
             continue
         info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"], "satz": satz,
                 "kontowert_eur": wert, "polster": h["master_risk"], "balance": round(float(bal), 2), "login": login,
-                "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"]}
+                "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"],
+                **({"aufgerundet_von": h["aufgerundet_von"]} if h.get("aufgerundet_von") is not None else {})}   # EH1
         upd = {"orbit_v3": True, "hedge_eur": h["hedge_eur"], "hedge_faktor": h["hedge_faktor"], "multiplier": h["multiplier"],
                "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, tradeify_hedge=info),
                "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['orbit']} (finaler {tfh_name(p)}, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ","))}   # WZ1b: setzen statt anhängen
+                         f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ",") + hedge_auf_text(h, par["min_lot"]))}   # WZ1b; EH1
         try:
             if not sb_update("trade_plans", _tfh_guard(p), upd):
                 continue                                  # inzwischen geclaimt/geändert → nächster Takt
@@ -35531,12 +35572,14 @@ def ah_tick(jetzt=None, force=False):
                 "kontowert_eur": round(wert, 2), "polster_usd": round(polster, 2), "abstand_usd": h["abstand"], "abstand_art": h["abstand_art"],
                 "liq_balance": liq, "balance": round(float(bal), 2),
                 "login": login, "netto_faktor": par["netto_faktor"], "freigabe_at": p.get("hedge_freigabe_at"),
-                "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
+                "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")},
+                **({"aufgerundet_von": h["aufgerundet_von"]} if h.get("aufgerundet_von") is not None else {})}   # EH1
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
                "notes": notiz_hedge_zeile_setzen(p.get("notes"), (f"{MODELL_NAME['orbit_prio2']}: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
                          f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · "
-                         + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ","))}   # WZ1b: setzen statt anhängen
+                         + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ",")
+                         + hedge_auf_text(h, par["min_lot"]))}   # WZ1b: setzen statt anhängen; EH1
         g = _ah_guard(p)
         g["hedge_freigabe_at"] = "not.is.null"
         try:
@@ -35578,7 +35621,8 @@ def ah_tick(jetzt=None, force=False):
             continue
         info = dict(alt, at=_wt_now_iso(), lots=h["lots"], q=h["q"], multiplier=h["multiplier"], satz=round(wert / h["abstand"], 6), kontowert_eur=round(wert, 2),
                     polster_usd=round(polster, 2), abstand_usd=h["abstand"], abstand_art=h["abstand_art"], liq_balance=liq, balance=round(float(bal), 2),
-                    nachgezogen={"at": _wt_now_iso(), "lots_vorher": alt.get("lots"), "master_risk_vorher": p.get("master_risk")})
+                    nachgezogen={"at": _wt_now_iso(), "lots_vorher": alt.get("lots"), "master_risk_vorher": p.get("master_risk")},
+                    aufgerundet_von=h.get("aufgerundet_von"))   # EH1 (None = nicht aufgerundet)
         upd = {"hedge_eur": round(wert, 2), "master_risk": h["abstand"], "slave_risk": h["slave_risk"], "multiplier": h["multiplier"],
                "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info)}
         g = _ah_guard(p, mit=True)

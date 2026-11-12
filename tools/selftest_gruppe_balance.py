@@ -62,8 +62,11 @@ m = re.search(r"EH_HALT_CODES = \((.*?)\)", src); codes = re.findall(r'"(\w+)"',
 q = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sql", "2026-11-02_echo_ohne_hedge_riegel.sql"), encoding="utf-8").read()
 ok(codes == ["balance", "lesung", "groesse"] and "not in ('balance', 'lesung', 'groesse')" in q, "Halte-Gründe in app.py und SQL gleich; mini, kein_konto, marge, grenze nie")
 ns["EH_HALT_CODES"] = tuple(codes); exec(fn("eh_ohne_text"), ns); exec(fn("eh_grund_code"), ns)
-exec(fn("eh_hedge"), dict(ns, _wd_num=lambda x: x, EH_STANDARD={"netto_faktor": 0.89}), hg := {})
-kl = hg["eh_hedge"](0.001, 0.01, 1.0, 1.0, None, 1.0, 0.01)[1]
+hg = dict(ns, _wd_num=lambda x: x, EH_STANDARD={"netto_faktor": 0.89})
+exec(fn("hedge_mindest_lot") + "\n" + fn("eh_hedge"), hg)   # ein Namensraum: eh_hedge findet hedge_mindest_lot (EH1)
+# EH1 (12.11.2026): eh_hedge rundet unter 0,01 Lot jetzt auf; der Text „unter 0,01 Lot“ bleibt nur, wenn das nicht darstellbar ist — Code-Zuordnung am Text prüfen
+kl = "Hedge 0,004 Lot unter 0,01 Lot"
+ok(hg["eh_hedge"](0.001, 0.01, 1.0, 1.0, None, 1.0, 0.01)[0]["lots"] == 0.01, "eh_hedge: 0,00001 Lot gerechnet → auf 0,01 aufgerundet (EH1)")
 ok(ns["eh_grund_code"](kl) == "klein" and "klein" not in codes, "echter Text von eh_hedge unter 0,01 Lot: klein, hält nicht")
 ok(ns["eh_grund_code"]("kein Kontowert-Satz (Kontowert ÷ Polster) für dieses Konto") == "groesse", "kein Kontowert-Satz bleibt groesse, hält")
 ok(ns["eh_ohne_text"]("balance", "x").startswith("startet nicht") and ns["eh_ohne_text"]("marge", "x").startswith("startet nicht"), "⚪-Text passt zum Riegel (seit E1 03.11.2026 hält er jeden Code)")

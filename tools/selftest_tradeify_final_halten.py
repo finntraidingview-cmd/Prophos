@@ -13,7 +13,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re}
     teile = [re.search(r"^TFH_STANDARD = .*$", src, re.M).group(0), re.search(r"^TFH_SLAVE_PPL = .*$", src, re.M).group(0)]
-    for name in ("_wd_num", "_ist_tradeify_cfd", "tfh_param", "ap_plan_final_text", "tfh_hedge", "ap_tradeify_final_halten"):
+    for name in ("_wd_num", "_ist_tradeify_cfd", "tfh_param", "ap_plan_final_text", "hedge_mindest_lot", "tfh_hedge", "ap_tradeify_final_halten"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -60,7 +60,8 @@ def main():
     ok(g and abs(g["slave_risk"] / (0.85 * 4500 / (20 * 2)) - g["lots"]) < 0.01, "Lots wie hedgeMultAusRisiko")
     ok(th(None, 4500, 2, 20.0, 2039)[0] is None and th(0.13, None, 2, 20.0, 2039)[0] is None and th(0.13, 4500, 2, 20.0, None)[0] is None,
        "fehlende Werte → Grund")
-    ok(th(0.0001, 4500, 1, 2.0, 100)[0] is None, "zu klein → Grund (min_lot)")
+    _k = th(0.0001, 4500, 1, 2.0, 100)[0]   # EH1 (12.11.2026): zu klein → auf das Mindest-Lot 0,01 aufgerundet statt Grund
+    ok(_k is not None and _k["lots"] == 0.01 and _k.get("aufgerundet_von") is not None and _k["multiplier"] == 0.01, f"zu klein → auf 0,01 Lot aufgerundet ({_k})")
 
     if f:
         print("ROT:\n  " + "\n  ".join(f))

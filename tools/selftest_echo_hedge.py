@@ -73,8 +73,10 @@ def rein():
     h2, _ = ns["eh_hedge"](0.0464, 2.5, 20.0, 0.85, 1500, 0.89, 0.01)
     ok(h2["lots"] == round(0.0464 / 0.89 * 20 / 0.85 * 2.5, 2), f"FundingPips NDX 20 $/Pkt, 2,5 Lot → {h2['lots']} Lot")
     ok(ns["eh_hedge"](0.0446, 0.18, 1.0, 0.85, 100)[0]["lots"] == 0.01, "Klein-Trade 0,18 Lot → 0,0106 gerundet 0,01 Lot (wie gp_hedge)")
-    ok(ns["eh_hedge"](0.0446, 0.05, 1.0, 0.85, 100)[0] is None, "0,05 Lot → 0,003 Lot unter 0,01, ohne Hedge")
-    ok("unter 0,01 Lot" in ns["eh_hedge"](0.0446, 0.05, 1.0, 0.85, 100)[1], "Grund nennt die Grenze")
+    # EH1 (Finn 12.11.2026: „Wenn der Fusion-Hedge zu klein ist, einfach immer 0,01“): unter dem Mindest-Lot → auf 0,01 aufgerundet statt ohne Hedge
+    _h5, _g5 = ns["eh_hedge"](0.0446, 0.05, 1.0, 0.85, 100)
+    ok(_g5 is None and _h5["lots"] == 0.01 and _h5["multiplier"] == 0.2 and abs(_h5["aufgerundet_von"] - 0.0029) < 0.0001,
+       f"0,05 Lot → 0,003 Lot gerechnet → auf 0,01 aufgerundet, Multiplikator 0,2 (EH1) ({_h5})")
     ok(ns["eh_hedge"](None, 20, 1, 0.85, 1)[0] is None and ns["eh_hedge"](0.04, 20, None, 0.85, 1)[0] is None
        and ns["eh_hedge"](0.04, 0, 1, 0.85, 1)[0] is None, "ohne Satz / Punktwert / Lots → Grund")
     ok(ns["eh_hedge"](0.0446, 20, 1.0, 0.85, None)[0]["slave_risk"] is None, "ohne master_risk: Multiplikator trotzdem, slave_risk leer")
