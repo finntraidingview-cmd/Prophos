@@ -16304,6 +16304,9 @@
     for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith(PROF_BUCKET) && !schonen.some(u => u && k === PROF_BUCKET + u)) ks.push(k) }
     let n = 0
     for(const k of ks){
+      // IW1b (Master nach S2, 12.11.2026): je Bucket neu prüfen — beginnt ein anderer Tab mittendrin einen ID-Wechsel, nichts mehr schreiben (sonst
+      // überschriebe das Zurückschreiben unten den eben gesicherten Bucket des anderen Tabs mit dem hier gelesenen, älteren Stand)
+      if(profFremdWechsel()) break
       try{
         const roh = localStorage.getItem(k) || ''
         if(!PROF_PUFFER_SPUREN.some(t => roh.includes(t))) continue   // IW1: Bucket ohne Puffer nicht erst parsen (Zeichenkette reicht als Vorab-Test)
@@ -58974,7 +58977,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2204'
+  const OS_TAB_BUILD = '2026-09-22.2205'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63609,6 +63612,9 @@
 
   async function abgleichTick(){
     if(!MT5_LOCAL || window._tabNebenSofort || _ab.laeuft || typeof window.mtcApi !== 'function') return
+    // IW1b (Master nach S2, 12.11.2026): erst nach der frischen Plan-Ladung dieser ID — vorher steht nur der gedeckelte Plan-Puffer in tradePlans
+    // (cachePlaeneAuswahl), abFremdAufKonto fände einen später gestarteten, abgeschlossenen Plan nicht und hielte dessen Position für fremd. Wie wdTick.
+    if(window._tpFrischUid !== currentUserId) return
     const now = Date.now(), min = abIntervallMin()
     if(!_ab.naechster){
       let ls = 0; try{ ls = Number(localStorage.getItem(AB_LS)) || 0 }catch(_){}

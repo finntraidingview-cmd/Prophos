@@ -83,6 +83,30 @@ JSON.stringify({ gesperrt, nachSperre, n1, n2, a: K('a'), b: K('b'), cGleich: lo
     check(bool(v) and v["n2"] == 0, "(a) zweiter Lauf: nichts mehr zu tun")
     check(bool(v) and v["lose"] == [True] * 5, "(a) lose Keys der aktiven ID (auch ihre Puffer), psession_*, sb-* bleiben unberührt")
 
+    # IW1b: beginnt ein anderer Tab mittendrin einen Wechsel, schreibt das Räumen keinen Bucket mehr (je Bucket neu geprüft)
+    v, err = jxa(VORSPANN + PROF + AUF + r"""
+const voll = JSON.stringify({ prophos_tw_hand: '{}', prophos_cache_plans: X(5000) })
+for(const k of ['a', 'b', 'c']) localStorage.setItem('prophos_bucket_' + k, voll)
+const merker = () => JSON.stringify({ tab: 'anderer-tab', von: 'x', nach: 'y', at: Date.now(), bis: Date.now() + 10000 })
+// Fall 1: Merker schon da → nichts geräumt
+localStorage.setItem(PROF_WECHSEL_LS, merker())
+const n0 = _profCachesAusBuckets([])
+const unber0 = ['a', 'b', 'c'].every(k => localStorage.getItem('prophos_bucket_' + k) === voll)
+localStorage.removeItem(PROF_WECHSEL_LS)
+// Fall 2: Merker erscheint, nachdem der erste Bucket gelesen wurde (anderer Tab startet mittendrin)
+const roh = localStorage.getItem.bind(localStorage); let gelesen = 0
+localStorage.getItem = k => { const v = roh(k); if(String(k).startsWith('prophos_bucket_') && ++gelesen === 1) localStorage.m.set(PROF_WECHSEL_LS, merker()); return v }
+const n1 = _profCachesAusBuckets([])
+localStorage.getItem = roh
+const geraeumt = ['a', 'b', 'c'].filter(k => !localStorage.getItem('prophos_bucket_' + k).includes('prophos_cache_plans'))
+// Fall 3: eigener Wechsel-Merker (dieser Tab) bremst nicht
+localStorage.m.set(PROF_WECHSEL_LS, JSON.stringify({ tab: PROF_TAB_ID, bis: Date.now() + 10000 }))
+const n2 = _profCachesAusBuckets([])
+JSON.stringify({ n0, unber0, n1, geraeumt, n2 })""")
+    check(bool(v) and v["n0"] == 0 and v["unber0"], f"IW1b: Wechsel in anderem Tab läuft → nichts geräumt, Buckets unberührt ({v or err})")
+    check(bool(v) and v["n1"] == 1 and len(v["geraeumt"]) == 1, f"IW1b: anderer Tab beginnt mittendrin → nach dem ersten Bucket Schluss ({v and v['geraeumt']})")
+    check(bool(v) and v["n2"] == 2, f"IW1b: eigener Wechsel-Merker bremst das Werfen nicht (Rückfall beim eigenen Wegsichern) ({v and v['n2']})")
+
     # (b) Plan-Auswahl
     v, err = jxa("const X = n => 'x'.repeat(n)\n" + CP.replace("window._cachePlaeneAuswahl", "var _x") + r"""
 const T = Date.parse('2026-11-12T14:00:00Z'), H = 3600000
@@ -127,6 +151,11 @@ w = HTML[HTML.index("  async function wdTick(){"):HTML.index("  async function w
 check("if(window._tpFrischUid !== uid){" in w and w.index("if(window._tpFrischUid !== uid){") < w.index("_wd.laeuft = true") and "window._tpFrischUid = currentUserId" in HTML,
       "(b) WD-Farmer beginnt erst nach frischer Plan-Ladung dieser ID (nicht auf dem gedeckelten Puffer)")
 check("m.abs0 > 60000" in HTML, "(c) liegengebliebene Messung > 60 s wird verworfen")
+ab = HTML[HTML.index("  async function abgleichTick(){"):HTML.index("  async function abgleichTick(){") + 1200]
+check("if(window._tpFrischUid !== currentUserId) return" in ab and ab.index("if(window._tpFrischUid !== currentUserId) return") < ab.index("_ab.laeuft = true"),
+      "IW1b: abgleichTick erst nach frischer Plan-Ladung dieser ID (vor _ab.laeuft, wie wdTick)")
+cb = HTML[HTML.index("  function _profCachesAusBuckets(schonen){"):HTML.index("    return n\n  }", HTML.index("  function _profCachesAusBuckets(schonen){"))]
+check("for(const k of ks){" in cb and cb.index("if(profFremdWechsel()) break") > cb.index("for(const k of ks){"), "IW1b: _profCachesAusBuckets prüft den fremden Wechsel je Bucket")
 
 print()
 if FEHLER:
