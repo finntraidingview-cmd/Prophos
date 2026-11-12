@@ -16296,6 +16296,8 @@
   const PROF_PUFFER_KEYS = ['prophos_tpl_cache', 'prophos_wd_cache']
   const profIstPuffer = k => typeof k === 'string' && (k.startsWith(PROF_CACHE) || PROF_PUFFER_KEYS.includes(k))
   const _profVoll = e => !!e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)
+  // IW1 (12.11.2026): Schlüssel-Anfänge der Puffer als Text — kommt keiner davon im Bucket-Text vor, trägt der Bucket keinen Puffer (falsch-positiv nur = einmal parsen)
+  const PROF_PUFFER_SPUREN = ['"' + PROF_CACHE, ...PROF_PUFFER_KEYS.map(k => '"' + k + '"')]
   // Puffer aus den Buckets anderer IDs werfen (schonen = IDs, deren Bucket unberührt bleibt) → Anzahl geworfener Einträge
   function _profCachesAusBuckets(schonen){
     const ks = []
@@ -16303,7 +16305,9 @@
     let n = 0
     for(const k of ks){
       try{
-        const b = JSON.parse(localStorage.getItem(k) || 'null'); if(!b) continue
+        const roh = localStorage.getItem(k) || ''
+        if(!PROF_PUFFER_SPUREN.some(t => roh.includes(t))) continue   // IW1: Bucket ohne Puffer nicht erst parsen (Zeichenkette reicht als Vorab-Test)
+        const b = JSON.parse(roh || 'null'); if(!b) continue
         const cs = Object.keys(b).filter(profIstPuffer); if(!cs.length) continue
         for(const c of cs) delete b[c]
         localStorage.setItem(k, JSON.stringify(b))   // kleiner als vorher — passt immer
@@ -16338,14 +16342,21 @@
     schreiben()                              // nur noch echte Keys überall — passt das nicht, fliegt der Fehler (nie echte Keys werfen)
     return { stufe: 3, geworfen }
   }
-  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen (ziel = ID, deren Puffer am längsten geschont werden)
+  /* PUFFER BLEIBEN DRAUSSEN (IW1, 12.11.2026, Finn ~18:35 Dubai: „Warum dauert ID-Wechsel bei Prophos gerade wieder so ewig?"): Befund: Railway/Supabase
+   * normal (Boot-Abfragen nach dem Wechsel ≈ 1 s), aber der localStorage stand bei ~3,9 Mio. Zeichen (7,8 MB) — prophos_cache_plans je ID bis 0,9 Mio.
+   * Zeichen (Bucket 13905525), dazu tpl_cache, cache_accounts, wd_cache in JEDEM Bucket. Jeder Wechsel las, stringifizierte und schrieb diese Puffer
+   * synchron um (hier und in profRestore), bei Quota stufenweise mit Wiederholungen. Die Puffer sind nur Sofort-Anzeige der EIGENEN ID beim Neuladen
+   * (hydrateFromCache, tplCacheSchreiben, wdCacheSchreiben) — nach einem Wechsel lädt der Boot sie ohnehin frisch wie beim Erststart. Darum (Master-OK
+   * 12.11.2026): in den Bucket kommen nur noch die echten Keys (Einstellungen, Archiv, Merker, Filter, Chips …), die Puffer der alten ID werden nur
+   * geleert. Das Stufen-Werfen in _profBucketSchreiben bleibt als Rückfall für alte Buckets, die noch Puffer tragen (bis profPufferAufraeumen lief). */
+  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen (ziel = ID, deren Bucket beim Werfen geschont wird)
   function profSnapshotAndClear(userId, ziel){
     const keys = _profAppKeys()
     if(userId){
       const bucket = {}
-      for(const k of keys) bucket[k] = localStorage.getItem(k)
+      for(const k of keys) if(!profIstPuffer(k)) bucket[k] = localStorage.getItem(k)   // IW1: Puffer nie in den Bucket
       const erg = _profBucketSchreiben(userId, ziel, bucket)
-      if(erg.stufe >= 2) profHinweisMerken('ID gewechselt — Speicher war voll, Verlauf/Puffer der alten ID verworfen (laden frisch).')
+      if(erg.stufe >= 2) profHinweisMerken('ID gewechselt — Speicher war voll, Puffer anderer IDs verworfen (laden frisch).')   // IW1: der eigene Bucket trägt keine Puffer mehr
     }
     for(const k of keys) localStorage.removeItem(k)
   }
@@ -16364,8 +16375,12 @@
      * Einspielen → alte ID schon geleert, Ziel-ID halb drin. Jetzt echte Keys zuerst (bei Quota: Caches der anderen
      * Buckets werfen, nochmal), die prophos_cache_* zuletzt und nur, wenn sie passen — sonst lädt Supabase sie frisch. */
     const eintraege = Object.entries(bucket).filter(([, v]) => v != null)
-    const echte  = eintraege.filter(([k]) => !profIstPuffer(k))   // Puffer (prophos_cache_*, tpl_cache, wd_cache) zuletzt (20.10.2026)
-    const caches = eintraege.filter(([k]) =>  profIstPuffer(k))
+    const echte  = eintraege.filter(([k]) => !profIstPuffer(k))
+    /* IW1 (12.11.2026): Puffer werden nicht mehr eingespielt — die Ziel-ID lädt sie nach dem Neuladen frisch wie beim Erststart (Begründung bei
+     * profSnapshotAndClear). Trägt ihr Bucket noch welche (alter Stand), fliegen sie hier gleich mit raus — der Bucket wird nur kleiner, passt immer. */
+    if(eintraege.some(([k]) => profIstPuffer(k))){
+      try{ const rein = {}; for(const [k, v] of eintraege) if(!profIstPuffer(k)) rein[k] = v; localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(rein)) }catch(_){}
+    }
     _profBulkWrite = true
     try{
       for(const [k, v] of echte){
@@ -16377,12 +16392,64 @@
           localStorage.setItem(k, v)   // echter Key — passt er auch jetzt nicht, fliegt der Fehler (nie stumm verlieren)
         }
       }
-      for(const [k, v] of caches){
-        try{ localStorage.setItem(k, v) }
-        catch(e){ if(!_profVoll(e)) throw e; console.warn('[profil] Puffer übersprungen (Speicher voll):', k); profHinweisMerken('ID gewechselt — Speicher war voll, Puffer dieser ID laden frisch.') }
-      }
     } finally { _profBulkWrite = false }
   }
+  /* EINMAL AUFRÄUMEN (IW1, 12.11.2026): Puffer, die alte Stände in die Buckets gelegt haben (bis 0,9 Mio. Zeichen je ID), einmal je Seitenstart aus
+   * ALLEN Buckets werfen — nur Puffer-Schlüssel (profIstPuffer: prophos_cache_*, tpl_cache, wd_cache); Einstellungen, Archiv-Merker, tw_hand, Filter,
+   * Chips, Sitzungen (prophos_psession_*, sb-*) bleiben unberührt, ebenso die losen Puffer der aktiven ID (Sofort-Anzeige beim nächsten Neuladen).
+   * Verzögert und nur, wenn kein Tab gerade die ID wechselt (sonst würde die Schreibsperre greifen). Nach dem ersten Lauf ist es ein reiner Text-Test. */
+  function profPufferAufraeumen(){
+    if(profFremdWechsel() || _profWechselLaeuft) return -1
+    return _profCachesAusBuckets([])
+  }
+  setTimeout(() => { try{ const n = profPufferAufraeumen(); if(n > 0) console.debug('[IW] Puffer aus Profil-Buckets geräumt:', n) }catch(_){} }, 4000)
+  window._profPufferAufraeumen = profPufferAufraeumen   // Test-Haken
+  /* KEIN PUFFER WÄHREND DES WECHSELS (IW1, Prüfer 12.11.2026): zwischen Wegsichern und Neuladen (setSession, Archiv bis 3 s) kann ein später Ladevorgang
+   * der ALTEN Seite noch cacheWrite/tplCacheSchreiben/wdCacheSchreiben rufen — die Ziel-ID zeigte nach dem Neuladen dann kurz Pläne/Konten der alten ID.
+   * Die Puffer-Schreiber fragen das hier und lassen es aus. */
+  window._profPufferGesperrt = () => { try{ return !!_profWechselLaeuft }catch(_){ return false } }
+
+  /* MESSUNG ID-WECHSEL (IW1 c, 12.11.2026): performance.mark je Phase, Ausgabe NUR in console.debug ('[IW] …'). Vor dem Neuladen: start → snapshot
+   * (Wegsichern) → restore (Ziel einspielen) → session (setSession) → archiv → reload; die Werte reisen in sessionStorage (überlebt location.reload,
+   * gehört keinem Bucket). Nach dem Neuladen: reload (alte Seite weg bis Navigation), html, dom (Parsen/Kompilieren der Seite), dashboard (Boot zeigt
+   * das Dashboard), gerendert (Accounts + Trade-Pläne der Ziel-ID frisch geladen und gezeichnet). Zeiten in ms ab dem Klick. Ändert nichts am Ablauf. */
+  const IW_MESS_SS = 'prophos_iw_messung'
+  const _iw = { t0: null, ph: {} }
+  function iwMarke(name){
+    try{ performance.mark('iw:' + name) }catch(_){}
+    if(_iw.t0 != null) _iw.ph[name] = Math.round(performance.now() - _iw.t0)
+  }
+  function iwVorNeuladen(von, nach){
+    iwMarke('reload')
+    try{ sessionStorage.setItem(IW_MESS_SS, JSON.stringify({ von, nach, abs0: performance.timeOrigin + _iw.t0, ph: _iw.ph })) }catch(_){}
+  }
+  function iwNachLaden(stufe){
+    let m = null; try{ m = JSON.parse(sessionStorage.getItem(IW_MESS_SS) || 'null') }catch(_){}
+    if(!m || !m.abs0) return null
+    // Wechsel endete im Login oder Tab war zu: liegengebliebene Messung (älter als 60 s) verwerfen, nie gegen einen alten Start rechnen (Prüfer 12.11.2026)
+    if(performance.timeOrigin + performance.now() - m.abs0 > 60000){ try{ sessionStorage.removeItem(IW_MESS_SS) }catch(_){} return null }
+    try{ performance.mark('iw:' + stufe) }catch(_){}
+    const ms = abs => Math.round(abs - m.abs0)
+    if(stufe === 'dashboard'){
+      if(m.ph.dashboard != null) return m   // Boot zeichnet das Dashboard ggf. zweimal (Boot-Block + SIGNED_IN) — der erste zählt
+      m.ph.navigation = ms(performance.timeOrigin)
+      m.ph.dashboard = ms(performance.timeOrigin + performance.now())
+      try{ sessionStorage.setItem(IW_MESS_SS, JSON.stringify(m)) }catch(_){}
+      return m
+    }
+    m.ph[stufe] = ms(performance.timeOrigin + performance.now())
+    // html = Seite geladen, dom = geparst + Module ausgeführt (DOMContentLoaded) — erst hier ablesen, beim Dashboard-Zeichnen steht DOMContentLoaded noch aus
+    const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null
+    if(nav){ m.ph.html = ms(performance.timeOrigin + nav.responseEnd); if(nav.domContentLoadedEventEnd > 0) m.ph.dom = ms(performance.timeOrigin + nav.domContentLoadedEventEnd) }
+    try{ sessionStorage.removeItem(IW_MESS_SS) }catch(_){}
+    window._iwLetzteMessung = m
+    console.debug('[IW] ID-Wechsel ' + String(m.von || '').slice(0, 8) + ' → ' + String(m.nach || '').slice(0, 8) + ': ' + m.ph[stufe] + ' ms bis gezeichnet', m.ph)
+    return m
+  }
+  window._iwNachLaden = iwNachLaden
+  // „gerendert" ein Bild nach dem Zeichnen — requestAnimationFrame steht in verdeckten/gedrosselten Tabs still, darum spätestens nach 250 ms (zählt nur einmal)
+  window._iwNachBild = () => { let fertig = false; const los = () => { if(fertig) return; fertig = true; try{ iwNachLaden('gerendert') }catch(_){} }
+    try{ requestAnimationFrame(() => setTimeout(los, 0)) }catch(_){}; setTimeout(los, 250) }
 
   // Profil (+ Session) des gerade eingeloggten Users merken/aktualisieren
   async function profRegisterCurrent(user){
@@ -16453,6 +16520,7 @@
     // ID1c: Merker VOR dem Wegsichern, dann ~150 ms, damit die anderen Tabs ihn über das storage-Ereignis sehen und nichts mehr schreiben
     if(!profWechselMerken(profActiveId(), userId)){ if(typeof atToast === 'function') atToast('ID-Wechsel nicht gestartet: Speicher voll (Wechsel-Merker) — bitte erneut versuchen', 'warn'); return }
     _profWechselLaeuft = true
+    _iw.t0 = performance.now(); _iw.ph = {}; iwMarke('start')   // IW1 c: Messung ab dem Klick
     await new Promise(ok => setTimeout(ok, 150))
     try{ document.getElementById('userDropdown')?.classList.remove('open') }catch(_){}
     const hinweis = document.createElement('div')
@@ -16488,7 +16556,9 @@
 
     // 1. Aktuellen Stand sichern + lokalen Zustand leeren, 2. Ziel-Bucket einspielen
     profSnapshotAndClear(curId, userId)
+    iwMarke('snapshot')
     profRestore(userId)
+    iwMarke('restore')
 
     if(!sess?.refresh_token){
       // Keine Session gespeichert → einmalig Passwort abfragen (Login-Maske vorbefüllt)
@@ -16501,6 +16571,7 @@
     try{
       const { error } = await supabase.auth.setSession(sess)
       if(error) throw error
+      iwMarke('session')
       localStorage.setItem(PROF_ACTIVE, userId)
       // ARCHIV VOR DEM NEULADEN (ID1b F3, 09.11.2026): das Cloud-Archiv der Ziel-ID jetzt holen (Sitzung steht schon) — dann zeichnet die Accounts-
       // Liste nach dem Neuladen sofort, statt bis zum Initial-Sync (bis 6 s) in „Lade Accounts…“ zu warten. Nur wenn das Lesen scheitert, bleibt
@@ -16508,10 +16579,12 @@
       let archDa = false
       try{ archDa = await profArchivVorladen(userId) }catch(_){ archDa = false }
       if(!archDa){ try{ sessionStorage.setItem('prophos_arch_warten', String(userId)) }catch(_){} }   // AC1: nach dem Neuladen erst das Archiv dieser ID (ARCH_WARTEN_SS)
+      iwMarke('archiv')
       // NEU LADEN statt nur die View zu wechseln: dupState, tsState, pairs, Firm-Specs u.a.
       // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
       // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
       profWechselLoesen()   // ID1c: localStorage + PROF_ACTIVE gehören jetzt der Ziel-ID → andere Tabs dürfen neu laden
+      iwVorNeuladen(curId, userId)   // IW1 c
       location.reload()
       return 'neu_laden'   // Hinweis + Riegel bleiben bis zum Neuladen (profSwitchTo)
     }catch(e){
@@ -52644,7 +52717,8 @@
       if(typeof renderAccounts === 'function') renderAccounts()
       // Frischen Stand für den nächsten Boot merken — Gegenstück zum
       // Accounts-Cache, gleiche Begründung (schneller Profilwechsel).
-      if(typeof cacheWrite === 'function') cacheWrite(CACHE_PLAN_LS, tradePlans)
+      if(typeof cacheWrite === 'function') cacheWrite(CACHE_PLAN_LS, cachePlaeneAuswahl(tradePlans))   // IW1 b: nur Sofort-Anzeige, gedeckelt
+      window._tpFrischUid = currentUserId   // IW1 (Prüfer): tradePlans ist jetzt die volle Liste dieser ID, nicht mehr der gedeckelte Puffer (wdTick wartet darauf)
     }catch(e){
       console.error('loadTradePlansFromSupabase failed:', e)
     }
@@ -58900,7 +58974,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2203'
+  const OS_TAB_BUILD = '2026-09-22.2204'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -70314,6 +70388,7 @@
   const TPL_CACHE_MAX_KB = 250   // Deckel je Bucket (20.10.2026) — 13 IDs × Puffer müssen zusammen unter die ~5 MB des localStorage
   function tplCacheSchreiben(){
     try{
+      if(window._profPufferGesperrt?.()) return   // IW1: ID-Wechsel läuft — kein Puffer der alten ID
       const k = (a, n) => Array.isArray(a) ? a.slice(0, n) : []
       // Fehlgeschlagener Abruf (09.10.2026): Lauf bzw. Delta des vorigen Zwischenspeichers samt seiner Zeit bleiben — nie den alten Stand
       // mit „jetzt" neu stempeln (sonst galt ein seit Stunden altes „Braucht dich" beim nächsten Öffnen als frisch)
@@ -76111,6 +76186,15 @@
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || _wd.laeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
+    /* PLÄNE ERST FRISCH (IW1, Prüfer 12.11.2026): seit dem gedeckelten Plan-Puffer (cachePlaeneAuswahl) stehen bis zur ersten frischen Ladung nur
+     * offene + die abgeschlossenen der letzten 2 Tage in tradePlans — zielWdAuto (über wdRegistrieren/wdAbgleich) zählte daraus zu wenige Winning Days
+     * und hätte auf ein volles Konto einen WD-Plan legen können (bei sehr großen IDs ohne Puffer stand vorher sogar die leere Liste da). Darum beginnt
+     * der Farmer erst, wenn loadTradePlansFromSupabase für diese ID einmal geklappt hat; bis dahin höchstens 1×/min neu anstoßen. */
+    if(window._tpFrischUid !== uid){
+      if(!_wd.tpNachAt) _wd.tpNachAt = Date.now()   // erster Takt: die Boot-Ladung läuft meist noch — nicht doppelt anstoßen
+      else if(Date.now() - _wd.tpNachAt > 60000){ _wd.tpNachAt = Date.now(); try{ loadTradePlansFromSupabase() }catch(_){} }
+      return
+    }
     _wd.laeuft = true
     try{
       if(!_wd.geladen || Date.now() - _wd.letzteLadung > 5 * 60000){ if(!(await wdLaden())) return }
@@ -78085,6 +78169,7 @@
   const WD_CACHE_MAX_KB = 200   // Deckel (20.10.2026, Quota beim ID-Wechsel): über der Grenze ohne die Konten der Sicht, dann ohne Zeilen
   function wdCacheSchreiben(tag){
     try{
+      if(window._profPufferGesperrt?.()) return   // IW1: ID-Wechsel läuft — kein Puffer der alten ID
       const c = { tag, at: Date.now(), regeln: _wd.regeln, rows: _wd.rows || [], konten: (_wd.daten && _wd.daten.konten) || [] }
       let s = JSON.stringify(c)
       if(s.length > WD_CACHE_MAX_KB * 1024){ c.konten = []; s = JSON.stringify(c) }
@@ -82595,11 +82680,44 @@
   const _cacheStripAcc = a => ({ ...a, creds: null, ma: a.ma ? { ...a.ma, token: '' } : null })
   function cacheWrite(key, arr){
     try{
+      if(window._profPufferGesperrt?.()) return   // IW1: ID-Wechsel läuft — kein Puffer der alten ID
       const s = JSON.stringify(arr)
-      if(s.length > 900 * 1024) return           // localStorage-Budget schonen
+      // localStorage-Budget schonen. IW1 (12.11.2026): zu groß → den ALTEN Puffer auch wegnehmen — sonst zeigte der nächste Boot einen Stand von vor Tagen
+      if(s.length > 900 * 1024){ localStorage.removeItem(key); return }
       localStorage.setItem(key, s)
     }catch(_){}
   }
+  /* PLAN-PUFFER GEDECKELT (IW1 b, 12.11.2026, Master: „cache_plans deckeln: nur die Pläne, die die Ansicht wirklich zum Sofort-Zeigen braucht … Zielgröße
+   * je ID ≤ 300 KB"). Befund 12.11.: der Puffer trug ALLE trade_plans der ID mit select=* — 4.000–4.600 Zeichen je Plan, davon ~80 % mt5_baseline
+   * (Puls-/Echo-Belege). Große IDs lagen bei 0,8–2,0 Mio. Zeichen: knapp unter dem 900-K-Deckel (13905525: 0,88 Mio.) füllten sie den Speicher, darüber
+   * (32b854d1: 2,0 Mio.) gab es gar keinen Puffer. Der Puffer ist nur die Sofort-Anzeige bis loadTradePlansFromSupabase (~0,5–1 s nach dem Boot) ALLE
+   * Pläne frisch ersetzt. Darum nur noch:
+   *   1. immer: alles, was nicht abgeschlossen ist (planned/open/review — die Karten, die Trades/Radar sofort zeigen und die PC-Tab-Wachen brauchen),
+   *      und abgeschlossene Pläne mit Hedge in einem Zwischenzustand (mt5_baseline.hedge offen/oeffnet/schliesst/unklar/wartet);
+   *   2. dazu abgeschlossene Pläne der letzten CACHE_PLAN_TAGE (2) Tage, neueste zuerst, solange der Puffer unter CACHE_PLAN_MAX_Z bleibt.
+   * CACHE_PLAN_MAX_Z = 150 K Zeichen = 300 KB im localStorage (UTF-16, so gemessen im Befund) ≈ 30–35 Pläne — reicht für heute + gestern.
+   * Ältere Pläne (Statistik, Kapitel, Fortschritt) kommen ~1 s später mit der frischen Ladung wie heute bei IDs ohne Puffer. Reihenfolge wie geladen
+   * (created_at absteigend). Mehr als 1. allein wird nie weggelassen (dann gilt nur der 900-K-Deckel von cacheWrite). REIN, testbar. */
+  const CACHE_PLAN_TAGE = 2, CACHE_PLAN_MAX_Z = 150 * 1024
+  // Prüfer 12.11.2026: nur Zwischenzustände sind „offen" — 'uebersprungen'/'fehler' sind Endzustände (Hedge ging nie auf), die fallen ins Tage-Fenster
+  const CP_HEDGE_OFFEN = ['offen', 'oeffnet', 'schliesst', 'unklar', 'wartet']
+  const _cpHedgeOffen = p => { const h = p && p.mt5Baseline && p.mt5Baseline.hedge; return !!h && CP_HEDGE_OFFEN.includes(h.status) }
+  function cachePlaeneAuswahl(plaene, jetzt = Date.now(), maxZ = CACHE_PLAN_MAX_Z, tage = CACHE_PLAN_TAGE){
+    const liste = Array.isArray(plaene) ? plaene.filter(Boolean) : []
+    const nimm = new Set()
+    let z = 2
+    for(const p of liste) if(p.status !== 'completed' || _cpHedgeOffen(p)){ nimm.add(p); z += JSON.stringify(p).length + 1 }
+    const zeit = p => { const t = Date.parse(p.endedAt || p.completedAt || p.startedAt || p.createdAt || ''); return isFinite(t) ? t : 0 }
+    const grenze = jetzt - tage * 86400000
+    const rest = liste.filter(p => !nimm.has(p) && zeit(p) >= grenze).sort((a, b) => zeit(b) - zeit(a))
+    for(const p of rest){
+      const n = JSON.stringify(p).length + 1
+      if(z + n > maxZ) break
+      nimm.add(p); z += n
+    }
+    return liste.filter(p => nimm.has(p))
+  }
+  window._cachePlaeneAuswahl = cachePlaeneAuswahl   // Test-Haken
   let _cacheHydrated = false
   function hydrateFromCache(){
     // Läuft genau einmal, und bewusst NACH _origShowDashboard: dort sitzt
@@ -83914,10 +84032,12 @@
     _origShowDashboard.apply(this, arguments)
     if(!currentUserId) return
     hydrateFromCache()   // läuft ohnehin nur einmal (_cacheHydrated)
+    try{ window._iwNachLaden?.('dashboard') }catch(_){}   // IW1 c: Messung ID-Wechsel (nur wenn der Wechsel sie in sessionStorage gelegt hat)
     if(!bootGeradeGeladen(_bootGeladen, currentUserId)){
       _bootGeladen = { uid: currentUserId, at: Date.now() }
-      loadAccountsFromSupabase()
-      loadTradePlansFromSupabase()
+      // IW1 c: „gerendert" = Accounts + Trade-Pläne der neuen ID frisch geladen und gezeichnet (ein Bild später). Ablauf wie vorher.
+      Promise.allSettled([loadAccountsFromSupabase(), loadTradePlansFromSupabase()])
+        .then(() => window._iwNachBild?.())
       loadTransactionsFromSupabase()
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
       if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
@@ -83977,8 +84097,9 @@
       if(session && session.user && !fremdW && !bootGeradeGeladen(_bootGeladen, session.user.id)){
         currentUserId = session.user.id
         _bootGeladen = { uid: session.user.id, at: Date.now() }
-        loadAccountsFromSupabase()
-        loadTradePlansFromSupabase()
+        // IW1 c: wie im showDashboard-Haken — „gerendert" der Messung, wenn dieser Rückfall zuerst lädt (Ablauf unverändert)
+        Promise.allSettled([loadAccountsFromSupabase(), loadTradePlansFromSupabase()])
+          .then(() => window._iwNachBild?.())
         loadTransactionsFromSupabase()
         if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
         if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()

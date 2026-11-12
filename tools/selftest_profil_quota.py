@@ -5,8 +5,8 @@ Aufruf:  python3 tools/selftest_profil_quota.py
 Lädt den Profil-Block aus prophos.html (PROF_LS … profRestore) echt per osascript/JXA mit einem Fake-localStorage, der ab einer Grenze
 QuotaExceededError wirft, und prüft: (1) Puffer-Klassifikation (prophos_cache_*, tpl_cache, wd_cache = Puffer; archive, kasse, kapitel …
 = echt); (2) Wegsichern stufenweise — passt sofort / Puffer fremder Buckets / eigene Puffer / auch Puffer der Ziel-ID — echte Keys bleiben
-in JEDEM Bucket; Hinweis für nach dem Neuladen ab Stufe 2; (3) passt der Bucket selbst ohne jeden Puffer nicht, fliegt der Fehler und kein
-echter Key ist weg; (4) Einspielen: echte zuerst, Puffer nur wenn sie passen; (5) Deckel in tplCacheSchreiben/wdCacheSchreiben (Text).
+in JEDEM Bucket; Hinweis für nach dem Neuladen ab Stufe 2 (seit IW1 12.11.2026: der eigene Bucket trägt nie Puffer, Stufen nur noch Rückfall); (3) passt der Bucket selbst ohne jeden Puffer nicht, fliegt der Fehler und kein
+echter Key ist weg; (4) Einspielen: nur echte Keys (seit IW1 nie Puffer); (5) Deckel in tplCacheSchreiben/wdCacheSchreiben (Text).
 Ohne Netz, Platzhalter-IDs."""
 import json
 import os
@@ -98,25 +98,42 @@ function szene(o){
 """
     ECHT = ["prophos_account_archive", "prophos_kapitel", "prophos_kasse_frei:me"]
     VOLL = sorted(ECHT + ["prophos_tpl_cache", "prophos_wd_cache", "prophos_cache_plans"])
-    # Stufe 0: Platz für den ganzen Bucket (238 KB) → nichts verworfen
+    # nachgezogen IW1 (12.11.2026, Master-OK): profSnapshotAndClear legt KEINE Puffer mehr in den Bucket (nur echte Keys) — die Puffer der alten ID
+    # werden nur geleert. Die Stufen von _profBucketSchreiben bleiben als Rückfall für alte Buckets mit Puffern und werden unten direkt geprüft.
+    # Stufe 0: genug Platz → eigener Bucket nur echte Keys, fremde unberührt
     v, err = jxa(VORSPANN + BLOCK + SZENE + "JSON.stringify(szene({ fremdPuffer: true, delta: 300000 }))")
-    check(bool(v) and v["fehler"] is None and v["me"] == VOLL and "prophos_tpl_cache" in v["a"] and v["hinweis"] is None, f"Stufe 0: genug Platz → eigener Bucket komplett (mit Puffern), fremde unberührt, kein Hinweis ({err or ''})")
-    check(bool(v) and v["rest"] == ["prophos_active_profile", "prophos_profiles"], "nach dem Wegsichern liegen nur die System-Keys lose im localStorage")
-    # Stufe 1: fremde Buckets tragen Puffer (3 × 140 KB) → die fliegen, eigener Bucket passt dann ganz
+    check(bool(v) and v["fehler"] is None and v["me"] == ECHT and "prophos_tpl_cache" in v["a"] and v["hinweis"] is None, f"IW1: eigener Bucket ohne Puffer (nur echte Keys), fremde unberührt, kein Hinweis ({err or ''})")
+    check(bool(v) and v["rest"] == ["prophos_active_profile", "prophos_profiles"], "nach dem Wegsichern liegen nur die System-Keys lose im localStorage (Puffer der alten ID geleert)")
+    # früher Stufe 1/2: mit Puffern 238 KB, ohne nur 8 KB → passt jetzt sofort, nichts wird geworfen, kein Hinweis
     v, err = jxa(VORSPANN + BLOCK + SZENE + "JSON.stringify(szene({ fremdPuffer: true, delta: 100000 }))")
-    check(bool(v) and v["fehler"] is None and v["a"] == ["prophos_account_archive", "prophos_kapitel"] and "prophos_tpl_cache" in v["ziel"] and v["me"] == VOLL and v["hinweis"] is None,
-          f"Stufe 1: Puffer fremder Buckets weg, Ziel-ID geschont, eigene Puffer bleiben, kein Hinweis ({err or ''})")
-    check(bool(v) and v["echtA"] is True and v["echtMe"] is True, "Stufe 1: echte Keys fremder und eigener ID unversehrt")
-    # Stufe 2: fremde Buckets haben keine Puffer → Stufe 1 bringt nichts, eigene Puffer fliegen (Bucket 238 → 8 KB)
+    check(bool(v) and v["fehler"] is None and v["me"] == ECHT and "prophos_tpl_cache" in v["a"] and v["hinweis"] is None and v["echtA"] is True and v["echtMe"] is True,
+          f"IW1: wenig Platz — Bucket ohne Puffer passt sofort, fremde Buckets unangetastet, echte Keys unversehrt ({err or ''})")
     v, err = jxa(VORSPANN + BLOCK + SZENE + "JSON.stringify(szene({ fremdPuffer: false, delta: 100000 }))")
-    check(bool(v) and v["fehler"] is None and v["me"] == ECHT and "prophos_tpl_cache" in (v["ziel"] or []) and v["echtMe"] is True,
-          f"Stufe 2: eigene Puffer verworfen, echte Keys der eigenen ID bleiben, Ziel-Puffer noch geschont ({err or ''})")
-    check(bool(v) and v["hinweis"] and "verworfen" in v["hinweis"], "Stufe 2: Hinweis für nach dem Neuladen gemerkt")
+    check(bool(v) and v["fehler"] is None and v["me"] == ECHT and "prophos_tpl_cache" in (v["ziel"] or []) and v["echtMe"] is True and v["hinweis"] is None,
+          f"IW1: ohne fremde Puffer — eigener Bucket echte Keys, Ziel-Bucket unangetastet, kein Hinweis ({err or ''})")
     # Stufe 3: auch 8 KB passen nicht mehr → die Puffer der Ziel-ID (140 KB) fliegen, dann geht der Wechsel durch
     v, err = jxa(VORSPANN + BLOCK + SZENE + "JSON.stringify(szene({ fremdPuffer: false, delta: 2000 }))")
     check(bool(v) and v["fehler"] is None and v["ziel"] == ["prophos_account_archive", "prophos_kapitel"] and v["me"] == ECHT and v["echtZiel"] is True and v["echtMe"] is True,
           f"Stufe 3: auch Ziel-Puffer verworfen, echte Keys überall da, Wechsel geht durch ({err or ''})")
     check(bool(v) and v["hinweis"] and "verworfen" in v["hinweis"], "Stufe 3: Hinweis gemerkt")
+    # Rückfall-Stufen direkt an _profBucketSchreiben (Bucket MIT Puffern, wie ihn alte Stände geschrieben hätten)
+    STUFEN = r"""
+function stufe(o){
+  localStorage = new FakeLS(1e12)
+  const fb = JSON.stringify({ prophos_account_archive: X(5000), prophos_tpl_cache: X(60000), prophos_cache_plans: X(80000) })
+  fuellen(localStorage, { prophos_bucket_a: o.fremd ? fb : JSON.stringify({ prophos_account_archive: X(5000) }), prophos_bucket_ziel: fb })
+  localStorage.limit = localStorage.belegt() + o.delta
+  const b = { prophos_account_archive: X(8000), prophos_tpl_cache: X(90000), prophos_cache_plans: X(100000) }
+  const r = _profBucketSchreiben('me', 'ziel', b)
+  const K = k => Object.keys(JSON.parse(localStorage.getItem('prophos_bucket_' + k))).sort()
+  return { stufe: r.stufe, me: K('me'), a: K('a'), ziel: K('ziel') }
+}
+"""
+    v, err = jxa(VORSPANN + BLOCK + STUFEN + "JSON.stringify([stufe({ fremd: true, delta: 100000 }), stufe({ fremd: false, delta: 100000 })])")
+    check(bool(v) and v[0]["stufe"] == 1 and v[0]["a"] == ["prophos_account_archive"] and "prophos_tpl_cache" in v[0]["ziel"] and "prophos_tpl_cache" in v[0]["me"],
+          f"Rückfall Stufe 1: Puffer fremder Buckets weg, Ziel geschont ({v or err})")
+    check(bool(v) and v[1]["stufe"] == 2 and v[1]["me"] == ["prophos_account_archive"] and "prophos_tpl_cache" in v[1]["ziel"],
+          f"Rückfall Stufe 2: eigene Puffer verworfen, Ziel geschont ({v or err})")
     # (3) unmöglich: nur echte Keys überall (eigene 300 KB), kein Puffer, der Platz schaffen könnte → Fehler fliegt, nichts Echtes verloren
     v, err = jxa(VORSPANN + BLOCK + SZENE + "JSON.stringify(szene({ fremdPuffer: false, losePuffer: false, loseEcht: 300000, delta: 1000 }))")
     check(bool(v) and v["fehler"] == "QuotaExceededError" and v["me"] is None and v["echtA"] is True and v["echtZiel"] is True and "prophos_account_archive" in v["rest"] and "prophos_kasse_frei:me" in v["rest"],
@@ -129,9 +146,14 @@ fuellen(localStorage, { prophos_profiles: '[]', 'prophos_bucket_a': JSON.stringi
   'prophos_bucket_ziel': JSON.stringify({ prophos_account_archive: X(9000), prophos_kapitel: '{"id":2}', prophos_tpl_cache: X(50000), prophos_wd_cache: X(30000), prophos_cache_plans: X(70000) }) })
 profRestore('ziel')
 JSON.stringify({ keys: [...localStorage.m.keys()].filter(k => !k.startsWith('prophos_bucket_') && k !== 'prophos_profiles').sort(), a: Object.keys(JSON.parse(localStorage.getItem('prophos_bucket_a'))), hinweis: sessionStorage.getItem('prophos_profil_hinweis'), bulk: _profBulkWrite })""")
-    check(bool(v) and v["keys"] == ["prophos_account_archive", "prophos_kapitel", "prophos_tpl_cache"] and v["bulk"] is False,
-          f"Einspielen: echte Keys drin, passender Puffer (tpl) drin, zu große Puffer (wd, cache_plans) übersprungen, Sync-Riegel wieder frei ({v or err})")
-    check(bool(v) and v["hinweis"] and "frisch" in v["hinweis"], "Einspielen: Hinweis gemerkt, wenn ein Puffer übersprungen wurde")
+    # nachgezogen IW1: Puffer werden nie eingespielt, der Ziel-Bucket verliert sie dabei; fremde Buckets bleiben, wie sie sind
+    check(bool(v) and v["keys"] == ["prophos_account_archive", "prophos_kapitel"] and v["bulk"] is False and v["a"] == ["prophos_account_archive", "prophos_cache_plans"],
+          f"IW1 Einspielen: nur echte Keys, kein Puffer (lädt frisch), fremder Bucket unberührt, Sync-Riegel wieder frei ({v or err})")
+    check(bool(v) and v["hinweis"] is None, "IW1 Einspielen: kein Hinweis (kein Puffer übersprungen, sondern gewollt draußen)")
+    v, err = jxa(VORSPANN + BLOCK + r"""
+localStorage = new FakeLS(1e12); fuellen(localStorage, { 'prophos_bucket_ziel': JSON.stringify({ prophos_account_archive: X(9000), prophos_tpl_cache: X(50000), prophos_wd_cache: X(30000) }) })
+profRestore('ziel'); JSON.stringify(Object.keys(JSON.parse(localStorage.getItem('prophos_bucket_ziel'))))""")
+    check(v == ["prophos_account_archive"], f"IW1 Einspielen: Ziel-Bucket danach ohne Puffer ({v or err})")
 
 # (5) Deckel + Haken (Text)
 check("const TPL_CACHE_MAX_KB = 250" in HTML and "if(s.length > TPL_CACHE_MAX_KB * 1024){ c.lt = []; s = JSON.stringify(c) }" in HTML and "c.bilanz = []" in HTML,
@@ -140,6 +162,7 @@ check("const WD_CACHE_MAX_KB = 200" in HTML and "if(s.length > WD_CACHE_MAX_KB *
       "wdCacheSchreiben: Deckel 200 KB — erst ohne Konten, dann ohne Zeilen")
 check("try{ profHinweisZeigen() }catch(_){}" in HTML, "Hinweis wird nach dem Neuladen gezeigt (hydrateFromCache)")
 check("const echte  = eintraege.filter(([k]) => !profIstPuffer(k))" in HTML, "profRestore nutzt dieselbe Puffer-Definition")
+check("for(const k of keys) if(!profIstPuffer(k)) bucket[k] = localStorage.getItem(k)" in HTML, "IW1: profSnapshotAndClear legt keine Puffer in den Bucket")
 check(HTML.count("k.startsWith(PROF_CACHE)") == 1 and HTML.count("c.startsWith(PROF_CACHE)") == 0, "prophos_cache_-Vergleich nur noch in profIstPuffer, nirgends sonst")
 
 print()
