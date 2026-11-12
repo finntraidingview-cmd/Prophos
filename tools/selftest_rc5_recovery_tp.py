@@ -165,8 +165,18 @@ check("{ const rt = suRecoveryTpGrund(p); if(rt) return rt }" in sp and "let rt 
 i3 = html.index("  function suKetteFrei(p, plaene, now){")
 check("tpLotsDeckelFehlt(x) || suRecoveryTpGrund(x))" in html[i3:i3 + 900], "Kette: ein gesperrter Recovery-Plan hält die WD-Kette der ID nicht auf (Prüfer M1)")
 check("const stufe = w && (w.quelle === 'wuerfel' || w.quelle === 'recoverer')" in html, "Nachzug: auch schon gesetzte Recovery-Pläne bis zum Start")
-check("const upd = { master_sl: null, master_tp: tp," in html and "wd_ausgleich: true, wd_sl: wdSlOhneWuerfel('Ausgleich — kein Würfel')" in html
-      and "wd_recoverer: true, wd_sl: wdSlOhneWuerfel('Recoverer — kein Würfel')" in html, "Nachzug: Recovery-Plan ohne Zufalls-SL (master_sl null, wd_sl „kein Würfel“)")
+check("const upd = { master_sl: null, master_tp: tp," in html and "{ wd_ausgleich: true, wd_sl: wdSlOhneWuerfel('Ausgleich — kein Würfel') }" in html
+      and "{ wd_recoverer: true, wd_sl: wdSlOhneWuerfel('Recoverer — kein Würfel') }" in html, "Nachzug: Recovery-Plan ohne Zufalls-SL (master_sl null, wd_sl „kein Würfel“)")
+# RC5b (S7 SOLLTE): Marke + wd_sl nie VOR dem TP-Update und nie ohne Claim-Guards — alles in EINEM Update mit updated_at-Lock
+i = html.index("          let blNeu = null, blAt = null")
+blk = html[i:html.index("          // nie zurückdrehen, was der Richtungsschutz am Start gedreht hat", i)]
+check("baselinePatch(plan.id, { wd_ausgleich" not in html and "baselinePatch(plan.id, { wd_recoverer" not in html, "keine Marke mehr per baselinePatch vor dem TP-Update")
+upd = blk[blk.index(".update(Object.assign({}, alt.upd, { mt5_baseline: blNeu }))"):]
+upd = upd[:upd.index(".select('*')")]
+check(all(g in upd for g in (".eq('status', 'planned')", ".is('start_um_gestartet_at', null)", ".is('orbit_gesendet_at', null)", ".is('started_at', null)", ".eq('updated_at', blAt)")),
+      "Marke, wd_sl und TP im selben Update: status planned, ungeclaimt, nicht gesendet, nicht gestartet, updated_at unverändert")
+check(blk.index(".select('mt5_baseline,updated_at')") < blk.index(".update(Object.assign({}, alt.upd, { mt5_baseline: blNeu }))") and "Object.assign({}, (frB.mt5_baseline" in blk,
+      "Reihenfolge: Baseline frisch lesen → zusammenführen → ein Update (kein anderer Schreiber geht verloren)")
 check("else if(/apex/i.test(String(acc.firm || ''))) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_recoverer: false })" in html
       and 'body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_recoverer=False)' in app, "normaler Apex-WD trägt wd_recoverer:false (Tab-Rückfall + POST /admin/wd-plaene)")
 lade("wd_ist_recoverer_plan")

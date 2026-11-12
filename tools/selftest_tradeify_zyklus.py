@@ -126,7 +126,7 @@ check(not ruf("hf_ist_wd", dict(wt, aus="true"), ["apex"]) and not ruf("hf_ist_w
 check("wd_ausgleich" not in ruf("hf_basis", [])["or"] and "wd_ausgleich" not in ruf("hf_basis", ["apex"])["or"], "Abfrage holt keine Ausgleichs-Trades mehr (RC4)")
 check('if (r or {}).get("wd_ausgleich") is True:\n' in app and "if(ausgleich) pr.wd_ausgleich = true" in html
       and "if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })" in html, "Marke wd_ausgleich an beiden Anlage-Wegen (Mac über Railway, Tab direkt)")
-check("altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true, wd_sl: wdSlOhneWuerfel('Ausgleich — kein Würfel') }, 'planned'))" in html, "Nachziehen auf den Ausgleich: erst die Marke, sonst kein großer TP")
+check("alt.zyArt === 'tradeify' ? { wd_ausgleich: true, wd_sl: wdSlOhneWuerfel('Ausgleich — kein Würfel') }" in html and ".update(Object.assign({}, alt.upd, { mt5_baseline: blNeu }))" in html, "Nachziehen auf den Ausgleich: erst die Marke, sonst kein großer TP")
 check("if((p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) || (typeof planIstRecoverer === 'function'" in html, "PC-Tab: markierter Ausgleich (und Recoverer) wartet nie auf eine Bestätigung (RC4)")
 lade("hf_zeile_fuer"); lade("hf_wd_sichtbar")
 emin, ht = {"user_id": "emin-mitglied", "aus": "true", "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}, {"user_id": "ht-id", "aus": None, "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
