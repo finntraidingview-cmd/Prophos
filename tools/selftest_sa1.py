@@ -47,7 +47,8 @@ j = APP.find("# PAYOUT OFFEN (R2c, 05.11.2026")
 # nachgezogen 11.11.2026 (ST1, Slave 2): 92e8578b WS1a schob den WD-SL-Würfel-Kontext zwischen Payout-Lesung und Schleife — der Ausschnitt
 # reicht jetzt bis zur ersten trade_plans-Lesung in der Schleife statt fester 4.000 Zeichen (Prüfung unverändert, plus frische pending_payouts-Lesung)
 _po = APP[j:APP.find('offen = sb_select("trade_plans"', j)] if j > 0 else ""
-ok(j > 0 and 'sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending"' in _po
+# PA1 (12.11.2026): die frische Lesung läuft über _payout_offen_ids (pending_payouts status pending, approved sperrt nicht) — Prüfung unverändert
+ok(j > 0 and 'po_offen = _payout_offen_ids(_mids)' in _po
    and 'if mid in po_offen:' in _po and '"grund": WD_HINWEIS_PAYOUT' in _po,
    "#4 POST /admin/wd-plaene prüft pending_payouts frisch und gibt WD_HINWEIS_PAYOUT als Grund zurück")
 ok("if(rein && wdKontoPayoutOffen(k)) return wdSay(" in HTML, "#4 Hand-Weg „heute rein“ behält die strenge Prüfung (sicher in die richtige Richtung)")

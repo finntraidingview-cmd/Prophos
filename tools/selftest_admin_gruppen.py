@@ -74,7 +74,8 @@ def lade():
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids",
              "admin_lese_gruppe_menge", "admin_radar_lese_sicht", "ap_lese_gruppe",   # SICHT JE GRUPPE (30.10.2026)
-             "_fx_wert", "_fx_admin_uids", "fx_aus_zeilen"]
+             "_fx_wert", "_fx_admin_uids", "fx_aus_zeilen",
+             "sb_spalte_fehlt", "payout_sperrt", "_payout_offen_ids"]   # PA1 (12.11.2026): WD-Payout-Sperre über _payout_offen_ids (approved sperrt nicht)
     # RT1 (05.11.2026): _admin_basis liest den Kurs seit f08ecc92 (USD→EUR live, 03.11.2026) über fx_aus_zeilen(_fx_admin_uids()) —
     # der Block-Lader lud die FX-Helfer + FX_STANDARD nicht nach (NameError); Prüfabsicht unverändert
     # PC_AUS_S (20.10.2026, Prüfer S2): admin_pc_stand nutzt seit e61516c1 („PC aus", 19.10.) die Schwelle PC_AUS_S — ohne sie NameError im Lader
