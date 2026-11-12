@@ -58859,7 +58859,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2201'
+  const OS_TAB_BUILD = '2026-09-22.2202'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68533,7 +68533,7 @@
   const _twHand = new Map()   // `${tag}|${konto}` → 'laeuft' | 'ok' | Fehlertext
   function twHandKnopf(c){
     const r = (c && c.r) || {}, kid = String(r.konto_id || ''), tag = String((c && c.tag) || '').slice(0, 10)
-    if(!kid || !tag || !/^Pause-Tag \(Handels-Würfel \d/.test(String(r.grund || ''))) return ''   // Planer-Format mit Prozent (TW_GRUND); WD hat „heute wieder rein“
+    if(!kid || !tag || !/^Pause-Tag (\(Handels-Würfel|Firma \(Firmen-Würfel) \d/.test(String(r.grund || ''))) return ''   // Planer-Format mit Prozent (TW_GRUND); WD hat „heute wieder rein“
     const st = _twHand.get(tag + '|' + kid)
     if(st === 'ok') return ' <small class="tw-hand-ok" title="von Hand reingenommen — der nächste Takt plant das Konto">✋ rein</small>'
     return ` <button type="button" class="tw-hand-btn" data-tw-hand="${escapeHtml(kid)}" data-tw-tag="${escapeHtml(tag)}"${st === 'laeuft' ? ' disabled' : ''} title="${escapeHtml(st && st !== 'laeuft' ? 'nicht gespeichert: ' + st : 'Pause-Tag überstimmen: dieses Konto am ' + tag + ' trotzdem planen (nur dieser Tag)')}">${st === 'laeuft' ? '…' : 'heute rein'}</button>`
@@ -68946,7 +68946,7 @@
       // TAGESDECKEL RAUS (Finn 19.10.2026, Admin-Reiter: 18 Apex-Zeilen „Tagesdeckel der Firma — höchstens 2 Konten je ID und Tag“ — „Ich weiß ja,
       // dass ich nur zwei bis drei Apex pro Tag machen kann, also brauch ich nicht jeden einzelnen Apex sekundenschreiben“): nichts zu tun, der Bot nimmt
       // das Konto an einem anderen Tag dran. Bleibt in ausgelassen[] (Konto-Chip „ausgelassen · Tagesdeckel“, ID-Leiste), nur nicht als Braucht-dich-Zeile
-      if(/geplanten\/laufenden Plan|Tagesdeckel der Firma|^Pause-Tag \(Handels-Würfel/.test(g)) continue   // TW1 (11.11.2026): Pause-Tag ist gewollt, keine Handarbeit
+      if(/geplanten\/laufenden Plan|Tagesdeckel der Firma|^Pause-Tag \(Handels-Würfel|^Pause-Tag Firma \(Firmen-Würfel/.test(g)) continue   // TW1 (11.11.2026): Pause-Tag ist gewollt, keine Handarbeit
       // seit dem Lauf archiviert (08.10.2026, Finn: „Den Account habe ich schon längst archiviert … soll selber weggemacht werden"): das Backend
       // filtert beim Ausliefern (app.py ap_ohne_archiv); hier zusätzlich für eigene Konten, falls noch ein alter Lauf im Zwischenspeicher steht
       if(x.konto_id && archEigen[x.konto_id] && archEigen[x.konto_id].archived) continue
@@ -75311,6 +75311,7 @@
   const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden', 'Payout-Stand nicht lesbar – nächster Lauf versucht es wieder',
                             'fester SL: Daten fehlen (Balance, Tagesstart oder Liq) – nächster Lauf versucht es wieder']   // FT2: = app.py WD_GRUND_SL_DATEN   // vom Server gesetzt, nicht von Finn
   const WD_HINWEIS_PAUSE = 'Pause-Tag (Handels-Würfel) – heute kein Trade, morgen neu gewürfelt'   // = app.py TW_GRUND_WD — Schlüssel-Text, nie umbenennen
+  const WD_HINWEIS_PAUSE_FIRMA = 'Pause-Tag Firma (Firmen-Würfel) – heute kein Trade bei dieser Firma für diese ID, morgen neu'   // = app.py TW_GRUND_FIRMA_WD (TW3) — nie umbenennen
   /* HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden. Für den
    * heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht wurde, aber für die zukünftigen ja."): ein Konto, auf dem im
    * CME-Handelstag des Lauf-Tags (Vortag 17:00 Chicago, wie app.py wd_cme_tag_start) schon ein Plan gestartet ist, kommt heute nicht dazu — aktiv false mit
@@ -75776,7 +75777,7 @@
     const tagKey = row.planned_for || tagDubai
     // TW1 HANDELS-WÜRFEL (Prüfer MUSS 11.11.2026): dieser Rückfall schreibt DIREKT in trade_plans — derselbe feste Wurf wie app.py (POST /admin/wd-plaene) mit dem Wert
     // des eigenen Unternehmens (GET /admin/handel-wuerfel). Selbstheilung (extra.id = Ersatz eines bestehenden Plans) würfelt nicht. Fehler → handelt wie bisher
-    if(!(extra && extra.id) && await hwWdPause(acc, tagKey, currentUserId)) return { fehler: WD_HINWEIS_PAUSE }   // Besitzer = diese ID (accounts = eigene Konten)
+    { const _hwp = !(extra && extra.id) && await hwWdPause(acc, tagKey, currentUserId); if(_hwp) return { fehler: _hwp === true ? WD_HINWEIS_PAUSE : _hwp } }   // Besitzer = diese ID; TW3: Hinweis Konto- oder Firmen-Pause
     try{
       const { data: schon } = await supabase.from('trade_plans').select('*').eq('master_account_id', acc.id).eq('planned_for', tagKey)
         .eq('notes', 'Winning-Day-Farmer').limit(1)
@@ -76934,7 +76935,7 @@
     // TW2 (Finn 11.11.2026 21:30: „Wenn ein Konto per Würfel einen Pause-Tag hat, soll es überstimmt werden, wenn ich es von Hand reinnehme"): „heute wieder rein"
     // auf einem Pause-Tag setzt ZUERST die Marke je Konto × Tag (POST /admin/handel-wuerfel/hand) — sonst lehnte POST /admin/wd-plaene den Plan gleich wieder ab
     // und die Zeile stünde nach dem Anlegen erneut auf Pause. Marke nicht gespeichert → nichts geändert, Fehler sichtbar
-    if(rein && k.hinweis === WD_HINWEIS_PAUSE){
+    if(rein && (k.hinweis === WD_HINWEIS_PAUSE || k.hinweis === WD_HINWEIS_PAUSE_FIRMA)){   // TW3: auch der Firmen-Pause-Tag
       try{ await apdApi('POST', '/handel-wuerfel/hand', { konto_id: String(k.id), tag: String(x.tag || '').slice(0, 10), rein: true, sicht: 'admin' }, '/admin') }
       catch(e){ return wdSay(`${k.name || 'Konto'}: Pause-Tag nicht überstimmt — ${(e && e.message) || e}`, 'err') }
     }
@@ -94800,55 +94801,68 @@
     })()
     return _hw.laeuft[g]
   }
-  // REIN (Test-Haken): Innenleben einer Karte aus Antwort D, Entwurf und Meldung
-  function hwInnenHtml(planer, D, entwurf, msg){
+  // TW3 FIRMEN-WÜRFEL (Finn 12.11.2026: „die Prop-Firma der jeweiligen ID soll zu 20 % an einem Tag gar nicht getradet werden“): EIN Wert je Unternehmen
+  // (Zeile planer = 'firma_je_id', app.py TW_FIRMA) — steht in JEDER Planer-Karte als zweite Zeile, derselbe Wert für alle Planer
+  const HW_FIRMA = 'firma_je_id'
+  // REIN: eine Zeile (Feld bzw. Wert) für key = Planer oder HW_FIRMA
+  function hwZeileHtml(key, label, D, entwurf, msg, darf){
+    const wert = hwZahl((D.werte || {})[key]), std = hwZahl(D.standard_pct) ?? 100
+    const v = entwurf != null ? entwurf : (wert != null ? String(wert) : '')
+    const geaendert = entwurf != null && String(entwurf) !== (wert != null ? String(wert) : '')
+    const feld = darf
+      ? `<input type="number" class="input mono${geaendert ? ' geaendert' : ''}" data-hw-in="${escapeHtml(key)}" min="0" max="100" step="1" inputmode="numeric" value="${escapeHtml(v)}" placeholder="${escapeHtml(String(std))}" aria-label="${escapeHtml(label)} in Prozent"> %`
+        + `<button type="button" class="btn btn-ghost btn-xs" data-hw-speichern="${escapeHtml(key)}">Speichern</button>`
+      : `<b class="mono">${hwPct(wert ?? std)} %</b>`
+    const m = msg ? `<span class="hw-msg ${msg.ok ? 'ok' : 'fehler'}">${escapeHtml(msg.text)}</span>` : ''
+    return `<div class="hw-zeile"><span>${escapeHtml(label)}</span>${feld}${m}</div>`
+  }
+  // REIN (Test-Haken): Innenleben einer Karte aus Antwort D, Entwürfen und Meldungen (entwurfF/msgF = Firmen-Zeile TW3)
+  function hwInnenHtml(planer, D, entwurf, msg, entwurfF, msgF){
     const titel = `<div class="hw-titel">Handels-Würfel<small>${escapeHtml(HW_PLANER[planer] || planer)} · je Konto und Tag gewürfelt</small></div>`
     if(!D || (!D.werte && !D.fehlt && !D.fehler)) return `<div class="hw-kopf">${titel}<span class="hw-fuss">lädt …</span></div>`
     if(D.fehlt) return `<div class="hw-kopf">${titel}<span class="hw-fuss">kommt mit dem nächsten Backend-Stand — bis dahin handelt jedes Konto jeden Tag (100 %)</span></div>`
     if(!D.werte) return `<div class="hw-kopf">${titel}<span class="hw-msg fehler">⚠ nicht lesbar: ${escapeHtml(String(D.fehler || '?'))}</span></div>`
     const wert = hwZahl((D.werte || {})[planer]), std = hwZahl(D.standard_pct) ?? 100, eff = wert ?? std
+    const wertF = hwZahl((D.werte || {})[HW_FIRMA]), effF = wertF ?? std, mitFirma = HW_FIRMA in (D.werte || {})   // altes Backend ohne TW3: keine Firmen-Zeile
     const unt = D.unternehmen && D.unternehmen.gruppe_id ? String(D.unternehmen.name || 'Unternehmen') : 'Hermann Technologies (Standard)'
     const darf = D.darf === true && D.tabelle !== false
-    const v = entwurf != null ? entwurf : (wert != null ? String(wert) : '')
-    const geaendert = entwurf != null && String(entwurf) !== (wert != null ? String(wert) : '')
-    const feld = darf
-      ? `<input type="number" class="input mono${geaendert ? ' geaendert' : ''}" data-hw-in min="0" max="100" step="1" inputmode="numeric" value="${escapeHtml(v)}" placeholder="${escapeHtml(String(std))}" aria-label="Konten handeln je Tag in Prozent"> %`
-        + `<button type="button" class="btn btn-ghost btn-xs" data-hw-speichern>Speichern</button>`
-      : `<b class="mono">${hwPct(eff)} %</b>`
     const fuss = eff >= 100 ? '100 % = jedes Konto jeden Tag (wie bisher)'
       : eff <= 0 ? '0 % = kein Konto bekommt einen Trade'
       : `≈ ${hwPct(eff)} von 100 Konten handeln je Tag, die anderen haben Pause — morgen wird neu gewürfelt`
-    const herkunft = (D.unternehmen && D.unternehmen.gruppe_id && wert == null) ? ' · kein eigener Wert: 100 % (der Wert von Hermann Technologies gilt hier nicht)' : ''
+    const fussF = !mitFirma ? '' : effF >= 100 ? ' · Firma je ID: jede Firma jeden Tag'
+      : ` · Firma je ID: an ≈ ${hwPct(100 - effF)} % der Tage handelt eine ID bei einer Firma gar nicht (gilt für alle Planer), danach der Konto-Würfel`
+    const ohneEigen = D.unternehmen && D.unternehmen.gruppe_id ? [wert == null ? 'Konten' : '', mitFirma && wertF == null ? 'Firma je ID' : ''].filter(Boolean) : []   // Prüfer TW3 KANN 3: je Zeile
+    const herkunft = ohneEigen.length ? ` · ${ohneEigen.join(' und ')} ohne eigenen Wert: 100 % (der Wert von Hermann Technologies gilt hier nicht)` : ''
     const ohneTab = D.tabelle === false ? `<div class="hw-msg fehler">Tabelle planer_handel_wuerfel fehlt — sql/2026-11-11_tageswuerfel_75.sql einspielen (bis dahin 100 %)</div>` : ''
       + (D.fehler ? `<div class="hw-msg fehler">⚠ ${escapeHtml(String(D.fehler))}</div>` : '')   // Lesefehler sichtbar statt still „100 %“ (Prüfer K1)
-    const m = msg ? `<span class="hw-msg ${msg.ok ? 'ok' : 'fehler'}">${escapeHtml(msg.text)}</span>` : ''
-    return `<div class="hw-kopf">${titel}<div class="hw-zeile"><span>Konten handeln je Tag</span>${feld}${m}</div></div>`
-      + `<div class="hw-fuss">${escapeHtml(fuss)} · gilt für ${escapeHtml(unt)}${escapeHtml(herkunft)}${darf ? ' · leer = 100 %' : ' · nur ansehen'}</div>${ohneTab}`
+    return `<div class="hw-kopf">${titel}${hwZeileHtml(planer, 'Konten handeln je Tag', D, entwurf, msg, darf)}`
+      + (mitFirma ? hwZeileHtml(HW_FIRMA, 'Firma je ID handelt je Tag', D, entwurfF, msgF, darf) : '') + `</div>`
+      + `<div class="hw-fuss">${escapeHtml(fuss + fussF)} · gilt für ${escapeHtml(unt)}${escapeHtml(herkunft)}${darf ? ' · leer = 100 %' : ' · nur ansehen'}</div>${ohneTab}`
   }
   function hwZeichnen(el){
-    const planer = el.dataset.hwPlaner, gid = el.dataset.hwGid || '', k = hwSchl(planer, gid)
-    el.innerHTML = hwInnenHtml(planer, _hw.d[gid], _hw.entwurf[k], _hw.msg[k])
-    const inp = el.querySelector('[data-hw-in]'), knopf = el.querySelector('[data-hw-speichern]')
-    if(inp){
-      inp.addEventListener('input', () => { _hw.entwurf[k] = inp.value; _hw.msg[k] = null
-        const D = _hw.d[gid] || {}, alt = hwZahl((D.werte || {})[planer]); inp.classList.toggle('geaendert', inp.value !== (alt != null ? String(alt) : '')) })
-      inp.addEventListener('focus', () => { _hw.fokus = k })
+    const planer = el.dataset.hwPlaner, gid = el.dataset.hwGid || '', k = hwSchl(planer, gid), kF = hwSchl(HW_FIRMA, gid)
+    el.innerHTML = hwInnenHtml(planer, _hw.d[gid], _hw.entwurf[k], _hw.msg[k], _hw.entwurf[kF], _hw.msg[kF])
+    el.querySelectorAll('[data-hw-in]').forEach(inp => {
+      const key = inp.dataset.hwIn, kk = hwSchl(key, gid), fk = planer + '#' + kk   // Fokus je Karte (die Firmen-Zeile steht in jeder Karte)
+      inp.addEventListener('input', () => { _hw.entwurf[kk] = inp.value; _hw.msg[kk] = null
+        const D = _hw.d[gid] || {}, alt = hwZahl((D.werte || {})[key]); inp.classList.toggle('geaendert', inp.value !== (alt != null ? String(alt) : '')) })
+      inp.addEventListener('focus', () => { _hw.fokus = fk })
       // Fokus nur vergessen, wenn er wirklich woanders hin ging — beim Neuzeichnen des Hosts ist die Karte weg (nicht verbunden) und holt ihn sich zurück
-      inp.addEventListener('blur', () => setTimeout(() => { if(el.isConnected && _hw.fokus === k && !el.contains(document.activeElement)) _hw.fokus = null }, 0))
-      inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); hwSpeichern(el) } else if(e.key === 'Escape'){ delete _hw.entwurf[k]; hwZeichnen(el) } })
-      if(_hw.fokus === k){ try{ inp.focus({ preventScroll: true }); const n = inp.value.length; inp.setSelectionRange?.(n, n) }catch(_){} }
-    }
-    if(knopf) knopf.addEventListener('click', () => hwSpeichern(el))
+      inp.addEventListener('blur', () => setTimeout(() => { if(el.isConnected && _hw.fokus === fk && !el.contains(document.activeElement)) _hw.fokus = null }, 0))
+      inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); hwSpeichern(el, key) } else if(e.key === 'Escape'){ delete _hw.entwurf[kk]; hwZeichnen(el) } })
+      if(_hw.fokus === fk){ try{ inp.focus({ preventScroll: true }); const n = inp.value.length; inp.setSelectionRange?.(n, n) }catch(_){} }
+    })
+    el.querySelectorAll('[data-hw-speichern]').forEach(knopf => knopf.addEventListener('click', () => hwSpeichern(el, knopf.dataset.hwSpeichern)))
   }
   function hwAlleZeichnen(gid){
     document.querySelectorAll('.hw-karte').forEach(el => { if((el.dataset.hwGid || '') === (gid || '')) hwZeichnen(el) })
   }
-  async function hwSpeichern(el){
-    const planer = el.dataset.hwPlaner, gid = el.dataset.hwGid || '', k = hwSchl(planer, gid)
-    const roh = String(_hw.entwurf[k] ?? (el.querySelector('[data-hw-in]') || {}).value ?? '').trim().replace(',', '.')
+  async function hwSpeichern(el, key){
+    const gid = el.dataset.hwGid || '', planer = key || el.dataset.hwPlaner, k = hwSchl(planer, gid)
+    const roh = String(_hw.entwurf[k] ?? (el.querySelector(`[data-hw-in="${planer}"]`) || {}).value ?? '').trim().replace(',', '.')
     const pct = roh === '' ? null : Number(roh)
     if(pct != null && (!isFinite(pct) || pct < 0 || pct > 100)){ _hw.msg[k] = { ok: false, text: '0 bis 100 eintragen (leer = 100 %)' }; hwZeichnen(el); return }
-    const knopf = el.querySelector('[data-hw-speichern]'); if(knopf) knopf.disabled = true
+    const knopf = el.querySelector(`[data-hw-speichern="${planer}"]`); if(knopf) knopf.disabled = true
     try{
       const d = await apdApi('POST', '/handel-wuerfel', Object.assign({ planer, pct }, gid ? { gruppe_id: gid } : {}), '/admin')
       const D = _hw.d[gid] = Object.assign({}, _hw.d[gid] || {}, { werte: d.werte || Object.assign({}, (_hw.d[gid] || {}).werte, { [planer]: pct }) })
@@ -94891,11 +94905,26 @@
       if(!acc || !acc.id) return false
       const g = uid ? await hwWdGid(String(uid)) : ''
       if(!_hw.d[g] || !_hw.d[g].werte || Date.now() - (_hw.at[g] || 0) > HW_FRISCH_MS) await hwLaden(g)
-      const pct = hwZahl((((_hw.d[g] || {}).werte) || {}).winning_days)
-      if(pct == null || pct >= 100) return false
-      if(!(pct <= 0 || (await hwWurf('winning_days', String(acc.id), tag)) * 100 >= pct)) return false
-      return !(await hwHandMarke(acc, tag, uid))   // TW2: von Hand reingenommen → kein Pause-Tag
+      const W = ((_hw.d[g] || {}).werte) || {}
+      // TW3: zuerst der Firmen-Wurf je ID × Firma × Tag (wie app.py tw_firma_handelt), dann der Konto-Wurf → false | Hinweis-Text
+      const pf = hwZahl(W[HW_FIRMA])
+      let grund = false
+      if(pf != null && pf < 100 && uid && String(acc.firm || '').trim() && (pf <= 0 || (await hwFirmaWurf(uid, acc.firm, tag)) * 100 >= pf)) grund = WD_HINWEIS_PAUSE_FIRMA
+      else{
+        const pct = hwZahl(W.winning_days)
+        if(pct == null || pct >= 100) return false
+        if(!(pct <= 0 || (await hwWurf('winning_days', String(acc.id), tag)) * 100 >= pct)) return false
+        grund = WD_HINWEIS_PAUSE
+      }
+      return (await hwHandMarke(acc, tag, uid)) ? false : grund   // TW2: von Hand reingenommen → kein Pause-Tag (auch nicht der Firma)
     }catch(e){ console.warn('[hw] WD-Rückfall', e); return false }
+  }
+  // TW3 (Test-Haken): derselbe feste Wurf wie app.py tw_firma_wurf — sha256("tw3|uid|firma_norm|tag"), Firma wie _ap_norm (klein, nur a–z0–9)
+  async function hwFirmaWurf(uid, firma, tag){
+    const norm = String(firma || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tw3|${uid}|${norm}|${String(tag || '').slice(0, 10)}`))
+    const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+    return parseInt(hex.slice(0, 13), 16) / 16 ** 13
   }
   // TW2: Marke „von Hand rein" je Konto × Tag (app.py tw_hand_key, user_settings des Konto-Besitzers = diese ID). Nicht lesbar → keine Marke (Pause bleibt, wie app.py)
   async function hwHandMarke(acc, tag, uid){
@@ -94906,7 +94935,7 @@
       return !!(data && data.length)
     }catch(e){ console.warn('[hw] Hand-Marke', e); return false }
   }
-  window._hw = { innen: hwInnenHtml, platz: hwPlatz, wurf: hwWurf, wdPause: hwWdPause, handMarke: hwHandMarke, stand: _hw }   // Test-Haken (Stub)
+  window._hw = { innen: hwInnenHtml, platz: hwPlatz, wurf: hwWurf, firmaWurf: hwFirmaWurf, wdPause: hwWdPause, handMarke: hwHandMarke, stand: _hw }   // Test-Haken (Stub)
 
   /* ========== RANGE-WÜRFEL ========== */
   /* RV1 (Finn 11.11.2026 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss, Take Profit und

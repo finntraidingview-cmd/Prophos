@@ -18276,8 +18276,9 @@ def admin_wd_plaene():
                 # TW1 HANDELS-WÜRFEL (11.11.2026, Finn: „Das geht hier um die kompletten Winning Days"): erst hier, nach dem Verknüpfen — ein schon angelegter
                 # Farmer-Plan desselben Tages bleibt. Pause-Tag → kein Plan; der Tab schreibt den Grund als Hinweis (WD_AUTO_HINWEISE: morgen wieder dabei).
                 # Fester Wurf je Konto × Plan-Tag (planned_for, sonst heute in Dubai), Lesefehler → Plan wie bisher.
-                if tw_pause_grund("winning_days", acc[0], neu_tag[:10] or datetime.now(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")):
-                    uebersprungen.append({"master_account_id": mid, "grund": TW_GRUND_WD}); continue
+                _tw_g = tw_pause_grund("winning_days", acc[0], neu_tag[:10] or datetime.now(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d"))
+                if _tw_g:   # TW3 (Prüfer SOLLTE 1): der passende Text — Konto-Pause TW_GRUND_WD oder Firmen-Pause TW_GRUND_FIRMA_WD
+                    uebersprungen.append({"master_account_id": mid, "grund": _tw_g}); continue
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
                 body["winning_day"] = True   # Farmer-Plan = Winning Day (25.09.2026, sql/2026-09-25_trade_plans_winning_day.sql)
@@ -30806,7 +30807,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if not _tw_w or not p.get("master_account_id"):
             return False
         pl = "challenge_futures" if ap_klasse(p.get("route"), p.get("master_firm")) == "futures" else "challenge_cfd"   # Route des Vorschlags wie die Konto-Schleife
-        return bool(tw_pause_grund(pl, {"id": p.get("master_account_id"), "user_id": p.get("user_id")}, str(p.get("planned_for") or tag)[:10], _tw_w, _tw_k))
+        return bool(tw_pause_grund(pl, {"id": p.get("master_account_id"), "user_id": p.get("user_id"), "firm": p.get("master_firm")},   # TW3: Firma für den Firmen-Wurf
+                                   str(p.get("planned_for") or tag)[:10], _tw_w, _tw_k))
 
     def _vorschlag_roh(p):
         return (not nachplanen) and p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
@@ -43765,12 +43767,20 @@ def _ap_plan_am_tag(p, tag, tz):
 # von Hand angelegte Pläne bleiben. Keine Zeile / Tabelle fehlt / Lesefehler → 100 % = wie vor TW1. Ein Unternehmen hat seine eigene Zeile; ohne sie gilt
 # 100 % — es erbt den Wert von Hermann Technologies bewusst NICHT (Master 11.11.2026: „Emins Unternehmen eigene Einstellung, dort Standard 100 %"). ══
 TW_PLANER = ("challenge_cfd", "challenge_futures", "funded_cfd", "funded_futures", "winning_days")
+# TW3 FIRMEN-WÜRFEL (Finn 12.11.2026: „IDs haben Propfirms, Propfirms haben Accounts … eine Ebene höher: die Prop-Firma der jeweiligen ID soll zu 20 % an einem Tag
+# gar nicht getradet werden — Risiko verteilen“; Korrektur 12.11.: „Zufalls-Propfirms bleiben bei 25 %“ → SQL HT 75 % handelt): EIN Wert je Unternehmen (Zeile planer = TW_FIRMA in planer_handel_wuerfel), fester Wurf je ID × Firma × Tag
+# (tw_firma_wurf, Firma nach _ap_norm — „FundedNext“ und „FundedNext Futures“ sind getrennt). Trifft er, plant KEIN Planer für diese ID × Firma an dem Tag einen
+# neuen Trade (ein Wurf für alle fünf Planer); danach greift der Konto-Wurf (TW1) für die übrigen. Ohne Zeile 100 % (wie bisher), ein Unternehmen erbt nicht.
+TW_FIRMA = "firma_je_id"
+TW_EINST = TW_PLANER + (TW_FIRMA,)
 TW_PLANER_NAME = {"challenge_cfd": "Challenge-Planer CFD", "challenge_futures": "Challenge-Planer Futures", "funded_cfd": "Funded-Planer CFD",
-                  "funded_futures": "Funded-Planer Futures", "winning_days": "Winning Days"}
+                  "funded_futures": "Funded-Planer Futures", "winning_days": "Winning Days", "firma_je_id": "Firma je ID"}
 TW_STANDARD_PCT = 100.0
 TW_CACHE_S = 60
 TW_GRUND = "Pause-Tag (Handels-Würfel {pct} %) — heute kein Trade, morgen neu gewürfelt"   # Schlüssel-Anfang „Pause-Tag" (HAND_PLANER_OHNE) — bewusst NICHT in AP_NACHPLAN_FEST_GRUENDE: hebt Finn den Wert tagsüber, holt das Nachplanen die Konten dazu
 TW_GRUND_WD = "Pause-Tag (Handels-Würfel) – heute kein Trade, morgen neu gewürfelt"         # = prophos.html WD_HINWEIS_PAUSE — nie umbenennen
+TW_GRUND_FIRMA = "Pause-Tag Firma (Firmen-Würfel {pct} %) — heute kein Trade bei {firma} für diese ID, morgen neu"   # TW3, Schlüssel-Anfang „Pause-Tag" (HAND_PLANER_OHNE)
+TW_GRUND_FIRMA_WD = "Pause-Tag Firma (Firmen-Würfel) – heute kein Trade bei dieser Firma für diese ID, morgen neu"   # = prophos.html WD_HINWEIS_PAUSE_FIRMA — nie umbenennen
 TW_ALT_S = 900          # Prüfer S3: bei einem kurzen Lesefehler gilt der letzte gute Stand bis zu 15 min weiter (wie ap_unt_kontext), sonst füllte ein
                         # einzelner Supabase-Aussetzer in diesem Lauf alle Pause-Tage auf
 _tw = {"bis": 0.0, "werte": None, "tabelle": True, "fehler_at": 0.0, "gut": None, "gut_at": 0.0, "fehler": ""}
@@ -43813,7 +43823,7 @@ def tw_werte(frisch=False):
             return _tw["werte"]
     try:
         rows = sb_select("planer_handel_wuerfel", {"select": "planer,gruppe,pct"}) or []
-        werte = {(str(r.get("planer")), str(r.get("gruppe") or "")): _wd_num(r.get("pct")) for r in rows if r.get("planer") in TW_PLANER}
+        werte = {(str(r.get("planer")), str(r.get("gruppe") or "")): _wd_num(r.get("pct")) for r in rows if r.get("planer") in TW_EINST}
         with _tw_lock:
             _tw.update(bis=jetzt + TW_CACHE_S, werte=werte, tabelle=True, gut=werte, gut_at=jetzt, fehler="")
         return werte
@@ -43844,16 +43854,40 @@ def tw_pct(planer, uid, werte=None, ktx=None):
     return tw_pct_von(w, planer, gid)
 
 
+def tw_firma_wurf(uid, firma, tag):
+    """REIN RECHNEND (testbar, TW3): fester Wurf in [0, 1) je ID × Firma × Tag — unabhängig vom Konto-Wurf (anderer Schlüssel „tw3|…“), Firma nach _ap_norm."""
+    return fest_wurf(f"tw3|{uid}|{_ap_norm(firma)}|{str(tag)[:10]}")
+
+
+def tw_firma_handelt(uid, firma, tag, pct):
+    """REIN RECHNEND (testbar, TW3): handelt die ID heute bei dieser Firma? pct None/≥ 100 → immer, ≤ 0 → nie, ohne ID/Firma → immer (wie bisher)."""
+    p = _wd_num(pct)
+    if p is None or p >= 100 or not uid or not str(firma or "").strip():
+        return True
+    if p <= 0:
+        return False
+    return tw_firma_wurf(uid, firma, tag) * 100.0 < p
+
+
 def tw_pause_grund(planer, a, tag, werte=None, ktx=None):
-    """Konto-Zeile a (id, user_id) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher).
-    TW2: von Hand reingenommen (Marke tw_hand je Konto × Tag, tw_hand_konten) → None — die Hand überstimmt den Wurf, nur an diesem Tag."""
+    """Konto-Zeile a (id, user_id, firm bzw. master_firm) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher).
+    TW3: zuerst der Firmen-Wurf je ID × Firma × Tag (TW_FIRMA, gilt für alle Planer gleich), dann der Konto-Wurf (TW1) für die übrigen.
+    TW2: von Hand reingenommen (Marke tw_hand je Konto × Tag, tw_hand_konten) → None — die Hand überstimmt beide Würfe, nur für dieses Konto an diesem Tag."""
     try:
-        pct = tw_pct(planer, (a or {}).get("user_id"), werte, ktx)
-        if pct >= 100 or tw_handelt(planer, str((a or {}).get("id") or ""), tag, pct):
-            return None
+        uid = (a or {}).get("user_id")
+        firma = (a or {}).get("firm") or (a or {}).get("master_firm")
+        grund = None
+        pf = tw_pct(TW_FIRMA, uid, werte, ktx) if "TW_FIRMA" in globals() else TW_STANDARD_PCT   # get: ältere Selftest-Lader ohne TW3
+        if pf < 100 and not tw_firma_handelt(uid, firma, tag, pf):
+            grund = TW_GRUND_FIRMA_WD if planer == "winning_days" else TW_GRUND_FIRMA.format(pct=_tw_pct_txt(pf), firma=str(firma).strip())
+        else:
+            pct = tw_pct(planer, uid, werte, ktx)
+            if pct >= 100 or tw_handelt(planer, str((a or {}).get("id") or ""), tag, pct):
+                return None
+            grund = TW_GRUND_WD if planer == "winning_days" else TW_GRUND.format(pct=_tw_pct_txt(pct))
         if "tw_hand_konten" in globals() and str((a or {}).get("id") or "") in tw_hand_konten(tag):   # get: ältere Selftest-Lader ziehen tw_pause_grund ohne TW2
             return None
-        return TW_GRUND_WD if planer == "winning_days" else TW_GRUND.format(pct=_tw_pct_txt(pct))
+        return grund
     except Exception as e:
         print(f"[handels-wuerfel] ⚠️ {planer}: {type(e).__name__}: {e} — handelt wie bisher", flush=True)
         return None
@@ -43912,7 +43946,7 @@ def admin_handel_wuerfel():
             name, bekannt = None, None
     def antwort():
         werte = tw_werte(frisch=True)
-        return {"ok": True, "werte": {p: werte.get((p, str(gid or ""))) for p in TW_PLANER}, "standard_pct": TW_STANDARD_PCT,
+        return {"ok": True, "werte": {p: werte.get((p, str(gid or ""))) for p in TW_EINST}, "standard_pct": TW_STANDARD_PCT,
                 "unternehmen": ({"gruppe_id": str(gid), "name": name} if gid else None), "darf": bool(darf), "tabelle": bool(_tw.get("tabelle", True)),
                 "planer_namen": TW_PLANER_NAME, **({"fehler": _tw["fehler"]} if _tw.get("fehler") else {})}   # Prüfer K1: Lesefehler sichtbar statt „100 %"
     if request.method == "GET":
@@ -43925,8 +43959,8 @@ def admin_handel_wuerfel():
         return jsonify({"ok": False, "msg": "Unternehmen gerade nicht prüfbar — gleich noch einmal"}), 502
     body = request.get_json(silent=True) or {}
     planer = str(body.get("planer") or "")
-    if planer not in TW_PLANER:
-        return jsonify({"ok": False, "msg": f"planer = {' | '.join(TW_PLANER)}"}), 400
+    if planer not in TW_EINST:
+        return jsonify({"ok": False, "msg": f"planer = {' | '.join(TW_EINST)}"}), 400
     roh = body.get("pct")
     pct = None if roh in (None, "") else _wd_num(roh)
     if roh not in (None, "") and (pct is None or isinstance(roh, bool) or not 0 <= pct <= 100):
@@ -43940,7 +43974,9 @@ def admin_handel_wuerfel():
                                                 "updated_at": datetime.now(timezone.utc).isoformat(), "updated_von": str(uid) if uid else None})
     except Exception as e:
         _r = getattr(e, "response", None)
-        hinweis = " — sql/2026-11-11_tageswuerfel_75.sql eingespielt?" if "planer_handel_wuerfel" in str(getattr(_r, "text", "") or "") else ""
+        _txt = str(getattr(_r, "text", "") or "")
+        hinweis = (" — sql/2026-11-12_tw3_firmen_wuerfel.sql eingespielt?" if planer == TW_FIRMA and ("planer_check" in _txt or "23514" in _txt)   # TW3 (Prüfer KANN 2)
+                   else " — sql/2026-11-11_tageswuerfel_75.sql eingespielt?" if "planer_handel_wuerfel" in _txt else "")
         return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__}){hinweis}"}), 502
     print(f"[handels-wuerfel] {TW_PLANER_NAME[planer]} · {name or 'Standard (HT)'} → {'100 % (Zeile weg)' if pct is None else _tw_pct_txt(pct) + ' %'} "
           f"durch {str(uid)[:8]}", flush=True)
