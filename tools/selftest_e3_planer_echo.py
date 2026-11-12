@@ -72,7 +72,9 @@ def planer():
        "ID ohne Fusion-Konto: nicht stellbar mit Grund (Aufrufer legt nicht an)")
     z, a = zeile("FTMO", master_contracts=0.05)
     art, grund = f(z, a)
-    ok(art == "v2" and "unter 0,01 Lot" in grund, "Hedge unter 0,01 Lot: nicht stellbar mit Grund")
+    # EH1 (Finn 12.11.2026: „Wenn der Fusion-Hedge zu klein ist, einfach immer 0,01“): unter 0,01 Lot → Echo mit 0,01 Lot, Notiz nennt die Aufrundung
+    ok(art == "echo" and grund is None and z["mt5_baseline"]["echo_hedge"]["lots"] == 0.01 and z["mt5_baseline"]["echo_hedge"].get("aufgerundet_von") is not None
+       and "aufgerundet" in (z.get("notes") or ""), f"Hedge unter 0,01 Lot: auf 0,01 aufgerundet, Echo mit Hedge (EH1) ({art}, {grund})")
 
     print("ap_echo_hedge_anlegen (Schalter, Fehler je Zeile)")
     ns2 = eh.lade(dict(STUBS, _sb_all=lambda t, q: [], gp_hedge_settings_eigen=lambda rows: rows, ap_ppl_karte=lambda rows, norm=None: ({}, {}), ap_ppl_ctx_unternehmen=lambda rows, norm=None: {"ppl": {}, "ppl_firma": {}},
