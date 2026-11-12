@@ -46210,8 +46210,46 @@
     if(eintrag && k && [...k.querySelectorAll('.ab2-eintrag')].some(x => x !== el)){ el.remove(); ab2Kompakt(k); return }
     if(!k || k.classList.contains('weg')) return
     if(k === document.getElementById('ab2-karte')){ clearTimeout(_ab2Timer); _ab2Timer = null }   // nie den Timer einer neueren Karte löschen
+    if(_ab2Weg && _ab2Weg.k === k) ab2WegAus()   // AP8: Wächter dieser Karte abbauen
     k.classList.add('weg'); setTimeout(() => k.remove(), 220)
   }
+  /* AP8 SOFORT ZU (Finn 12.11.2026 18:25: „Das Abhak-Popup im Radar bleibt viel zu lange stehen“ — stand noch über anderen Zeilen, obwohl die Maus längst woanders
+   * war). Ursache: die Karte liegt in der Bildmitte über den Radar-Zeilen; fuhr die Maus auf dem Weg zur nächsten Zeile darüber, hielt mouseenter den Timer an,
+   * danach erst 1,5 s; jedes weitere Abhaken hängte einen Eintrag an dieselbe Karte und stellte den Timer auf 12 s bzw. 7–10 s zurück; Scrollen, Klick daneben
+   * und Escape schlossen sie nicht. Jetzt am Rechner mit Maus (hover + feiner Zeiger; Handy/Antippen bleibt wie bisher): sobald die Maus die Stelle verlässt, an
+   * der die Karte aufging (> AB2_RUHE_PX), und nicht auf der Karte ist → nach AB2_GNADE_MS zu; zurück auf die Karte hält sie. Zu auch bei Mausrad/Scrollen,
+   * Klick außerhalb und Escape. Immer nur eine Karte: ein neues Abhaken ersetzt die alte sofort (statt Liste). Die Zeit-Deckel (12 s / 7–10 s) bleiben,
+   * falls die Maus gar nicht bewegt wird. Nur diese Karte — eigene Wächter, solange sie offen ist, kein Sammel-Handler. */
+  const AB2_GNADE_MS = 150, AB2_RUHE_PX = 12
+  let _ab2Weg = null   // { k, ursprung, timer, mv, dn, rad, kd }
+  const ab2Fein = () => { try{ return !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) }catch(_){ return false } }
+  function ab2WegAus(){
+    const w = _ab2Weg; if(!w) return
+    _ab2Weg = null; clearTimeout(w.timer)
+    document.removeEventListener('pointermove', w.mv, true); document.removeEventListener('pointerdown', w.dn, true)
+    document.removeEventListener('wheel', w.rad, true); document.removeEventListener('keydown', w.kd, true)
+  }
+  function ab2WegAn(k){
+    ab2WegAus()
+    if(!k || !ab2Fein()) return
+    const w = { k, ursprung: null, timer: null, auf: Date.now() }
+    const halt = () => { clearTimeout(w.timer); w.timer = null }
+    const zuBald = () => { if(!w.timer) w.timer = setTimeout(() => { w.timer = null; if(!k.matches(':hover')) ab2Zu(k) }, AB2_GNADE_MS) }
+    const maus = e => !e.pointerType || e.pointerType === 'mouse' || e.pointerType === 'pen'
+    w.mv = e => {
+      if(!maus(e)) return
+      if(k.contains(e.target)){ halt(); return }
+      if(!w.ursprung){ w.ursprung = [e.clientX, e.clientY]; return }   // erste Bewegung nach dem Aufgehen = Stelle der Zeile/des Knopfs
+      if(Math.hypot(e.clientX - w.ursprung[0], e.clientY - w.ursprung[1]) > AB2_RUHE_PX) zuBald()
+    }
+    w.dn = e => { if(maus(e) && !k.contains(e.target)) ab2Zu(k) }   // pointerdown vor click: ein neues Abhaken macht danach seine eigene Karte
+    w.rad = e => { if(Date.now() - w.auf > 300 && !k.contains(e.target)) ab2Zu(k) }   // Mausrad = Scrollen (scroll-Ereignisse kommen auch vom Neuzeichnen des Radars); 300 ms Schutz gegen einen auslaufenden Trackpad-Schwung
+    w.kd = e => { if(e.key === 'Escape') ab2Zu(k) }
+    document.addEventListener('pointermove', w.mv, true); document.addEventListener('pointerdown', w.dn, true)
+    document.addEventListener('wheel', w.rad, { capture: true, passive: true }); document.addEventListener('keydown', w.kd, true)
+    _ab2Weg = w
+  }
+  window._ab2Weg = () => _ab2Weg   // Test-Haken
   function ab2Zeit(el, ms){
     const k = el && el.closest ? el.closest('.ab2') : null
     if(!k || document.getElementById('ab2-karte') !== k || k.classList.contains('weg')) return
@@ -46279,7 +46317,9 @@
     const mpl = ab2Num(info.mpl)
     const art = ({ funded_cfd: 'Funded CFD', funded: 'Funded Futures', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2' })[String(info.typ)] || 'Konto'
     // AB2c: steht die Karte noch (mehrere Funded hintereinander abgehakt), kommt der neue Trade als Zeile oben dazu statt die Karte zu ersetzen
+    // AP8: am Rechner mit Maus immer nur eine Karte — die alte geht sofort, ohne Ausblenden (Handy: Liste wie bisher)
     let k = ab2Karte()
+    if(k && ab2Fein()){ ab2WegAus(); clearTimeout(_ab2Timer); _ab2Timer = null; k.remove(); k = null }
     if(!k){
       document.getElementById('ab2-karte')?.remove(); clearTimeout(_ab2Timer)
       k = document.createElement('div')
@@ -46288,7 +46328,8 @@
       document.body.appendChild(k)
       k.addEventListener('click', e => { if(e.target.closest('[data-ab2-wartet]')) return; ab2Zu(k) })
       k.addEventListener('mouseenter', () => { if(document.getElementById('ab2-karte') === k) clearTimeout(_ab2Timer) })
-      k.addEventListener('mouseleave', () => ab2Zeit(k, 1500))
+      k.addEventListener('mouseleave', () => ab2Zeit(k, ab2Fein() ? AB2_GNADE_MS : 1500))   // AP8: Maus runter = nach 150 ms zu (Handy wie bisher)
+      ab2WegAn(k)
     }
     const liste = k.querySelector('.ab2-liste')
     liste.querySelectorAll('.ab2-eintrag').forEach(x => { if(x.dataset.konto === String(info.konto_id)) x.remove() })   // dasselbe Konto noch einmal → nur die neue Zeile
@@ -58859,7 +58900,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2202'
+  const OS_TAB_BUILD = '2026-09-22.2203'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
