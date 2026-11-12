@@ -116,22 +116,22 @@ check(ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, None)["g
 ohne_bs = [dict(PL[1], tv={})] + PL[2:]
 check(ruf("tradeify_zyklus_start_bal", ohne_bs, "2026-10-22") is None, "erster Trade nach der Anfrage ohne balance_start → Start unbekannt (kein späterer Trade als Ersatz)")
 check('trotzdem = b.get("trotzdem") is True and _planer_admin_auth()[1] is None' in app and "admAnfrageSpeichern(true)" in html, "(c) Notausgang: trotzdem nur für Admin, Knopf im Admin-Payout-Popup")
-check(z["bestaetigen"] is True and "TRADEIFY_AUSGLEICH_BESTAETIGEN = True" in app, "(d) Finn „yes“: Ausgleichs-Trade einzeln bestätigen (zyklus.bestaetigen)")
+# RC4 (Finn 12.11.2026 „Nein, automatisch.“): die Bestätigungspflicht des Ausgleichs ist weg — die Prüfungen unten drehen sich entsprechend (bis RC4: „yes“ vom 03.11.)
+check(z["bestaetigen"] is False and "TRADEIFY_AUSGLEICH_BESTAETIGEN = False" in app, "(d) RC4: Ausgleichs-Trade ohne Bestätigung (zyklus.bestaetigen false)")
 for n2 in ("hf_ist_wd", "hf_basis"):
     lade(n2)
 ns["HEDGE_ARTEN"] = ("apex", "tradeify_final")
 wt = {"winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
-check(ruf("hf_ist_wd", dict(wt, aus="true"), ["apex"]) and not ruf("hf_ist_wd", wt, ["apex"]), "Liste „Zu bestätigen“: Tradeify-Ausgleich ja, normaler Tradeify-WD nie")
-check("mt5_baseline->>wd_ausgleich.eq.true" in ruf("hf_basis", [])["or"] and "mt5_baseline->>wd_ausgleich.eq.true" in ruf("hf_basis", ["apex"])["or"], "Abfrage holt markierte Ausgleichs-Trades (mit und ohne Apex-Liste)")
-check('if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:' in app and "if(ausgleich) pr.wd_ausgleich = true" in html
+check(not ruf("hf_ist_wd", dict(wt, aus="true"), ["apex"]) and not ruf("hf_ist_wd", wt, ["apex"]), "Liste „Zu bestätigen“: weder Tradeify-Ausgleich (RC4) noch normaler Tradeify-WD")
+check("wd_ausgleich" not in ruf("hf_basis", [])["or"] and "wd_ausgleich" not in ruf("hf_basis", ["apex"])["or"], "Abfrage holt keine Ausgleichs-Trades mehr (RC4)")
+check('if (r or {}).get("wd_ausgleich") is True:\n' in app and "if(ausgleich) pr.wd_ausgleich = true" in html
       and "if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })" in html, "Marke wd_ausgleich an beiden Anlage-Wegen (Mac über Railway, Tab direkt)")
 check("altFrei = !!(await baselinePatch(plan.id, { wd_ausgleich: true }, 'planned'))" in html, "Nachziehen auf den Ausgleich: erst die Marke, sonst kein großer TP")
-check("if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return true" in html, "PC-Tab startet einen markierten Ausgleich erst nach der Bestätigung — auch in Gruppen (Finn: „auch bestätigen“)")
+check("if((p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) || (typeof planIstRecoverer === 'function'" in html, "PC-Tab: markierter Ausgleich (und Recoverer) wartet nie auf eine Bestätigung (RC4)")
 lade("hf_zeile_fuer"); lade("hf_wd_sichtbar")
 emin, ht = {"user_id": "emin-mitglied", "aus": "true", "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}, {"user_id": "ht-id", "aus": None, "winning_day": True, "notes": "Winning-Day-Farmer", "master_firm": "Tradeify"}
-check(ruf("hf_zeile_fuer", emin, None, {"emin-mitglied"}, ["apex"], {"emin-mitglied"}), "Admin sieht den Ausgleich auch aus einer Gruppe mit Verwalter")
-check(ruf("hf_zeile_fuer", emin, frozenset({"emin-mitglied"}), set(), ["apex"], set()) and not ruf("hf_zeile_fuer", dict(emin, user_id="fremd"), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
-      "Verwalter sieht nur die Ausgleichs-Trades seiner Gruppe")
+check(not ruf("hf_zeile_fuer", emin, None, {"emin-mitglied"}, ["apex"], {"emin-mitglied"}), "Admin: Ausgleich aus einer Gruppe mit Verwalter nicht mehr in der Liste (RC4)")
+check(not ruf("hf_zeile_fuer", emin, frozenset({"emin-mitglied"}), set(), ["apex"], set()), "Verwalter: Ausgleich seiner Gruppe nicht mehr in der Liste (RC4)")
 check(not ruf("hf_zeile_fuer", ht, frozenset({"ht-id"}), set(), ["apex"], set()), "Verwalter sieht keine anderen Freigaben (Hedge-Arten, Apex-WD, normale WD)")
 check(not ruf("hf_zeile_fuer", dict(emin, art="tradeify_final"), frozenset({"emin-mitglied"}), set(), ["apex"], set())
       and not ruf("hf_zeile_fuer", dict(emin, winning_day=False), frozenset({"emin-mitglied"}), set(), ["apex"], set()),
@@ -143,9 +143,11 @@ check(ruf("hf_zeile_fuer", _op, frozenset({"emin-mitglied"}), set(), ["apex"], s
 sqlg = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_gruppen.sql"), encoding="utf-8").read()
 check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true' and coalesce(new.winning_day, false))) then" in sqlg and "verwalter_user_id" not in sqlg.split("TRADEIFY-AUSGLEICH (03.11.2026)")[1].split("then")[0],
       "DB-Netz: Ausgleich ohne Gruppen-Ausnahme (neue SQL-Datei)")
-check("'/hedge-freigabe?ansicht=admin'" in html and "String(z.aus || '').toLowerCase() === 'true')" in html, "Liste mit ansicht=admin (Verwalter), Ausgleich in „Zu bestätigen“ immer sichtbar")
+check("'/hedge-freigabe?ansicht=admin'" in html and "String(z.aus || '').toLowerCase() === 'true')" not in html, "Liste mit ansicht=admin (Verwalter); Ausgleich nicht mehr in „Zu bestätigen“ (RC4)")
 sql = open(os.path.join(W, "sql", "2026-11-03_tradeify_ausgleich_bestaetigen.sql"), encoding="utf-8").read()
-check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true'" in sql, "DB-Netz hält einen unbestätigten Ausgleichs-Start (SQL-Datei)")
+check("coalesce(new.mt5_baseline->>'wd_ausgleich', '') = 'true'" in sql, "Alt-Datei 03.11.: DB-Netz hielt den Ausgleich (Geschichte)")
+sql4 = open(os.path.join(W, "sql", "2026-11-12_rc4_ausgleich_automatisch.sql"), encoding="utf-8").read()
+check("and coalesce(new.mt5_baseline->>'wd_ausgleich', '') <> 'true'" in sql4, "RC4-Datei: DB-Netz hält den Ausgleich nicht mehr")
 check("if(ziel && ziel.done && !wdAusgleichFaellig(k.acc.id))" in html and "if(ziel && ziel.done && !wdAusgleichFaellig(acc.id))" in html, "Ziel voll + Zyklus im Minus: Konto bleibt im Farmer (Ausgleich wird angelegt)")
 check("Math.max(Number(zy.ziel), tpVor || 0)" in html, "TP-Vorgabe am Konto schlägt den Ausgleich nicht (max)")
 check("document.addEventListener('click', e => {\n    const el = e.target && e.target.closest && e.target.closest('.acc-rec-chip" not in html and "window._recoveryChipKlick" in html, "kein Sammel-Klick-Handler, Klick nur am Chip")
@@ -229,8 +231,8 @@ zl = ruf("tradeify_zyklus_konto", FINN, PLL, PAYL, 3, 5, VP, 157096.5, FR, regel
 check(zl["art"] == "tradeify" and zl["firma_key"] == "lucid" and zl["nr"] == 3 and zl["gewinn"] == -1891.0 and zl["gesperrt"] and not zl["aktiv"]
       and zl["grund_code"] == "minus", f"Finn Lucid: Zyklus 3, −1.891 $, Payout gesperrt, 3/5 → noch normaler WD ({zl['grund']})")
 zl4 = ruf("tradeify_zyklus_konto", FINN, PLL, PAYL, 4, 5, VP, 157096.5, FR, regel=ML)
-check(zl4["aktiv"] and 1922 <= zl4["ziel"] <= 1952 and zl4["bestaetigen"] is True and zl4["hedge_eur"] > 0,
-      f"4/5 im Minus: Ausgleichs-Trade TP = 1.891 + 1 + 30–60 → {zl4['ziel']} $, einzeln bestätigen, Hedge {zl4['hedge_eur']} €")
+check(zl4["aktiv"] and 1922 <= zl4["ziel"] <= 1952 and zl4["bestaetigen"] is False and zl4["hedge_eur"] > 0,
+      f"4/5 im Minus: Ausgleichs-Trade TP = 1.891 + 1 + 30–60 → {zl4['ziel']} $, ohne Bestätigung (RC4), Hedge {zl4['hedge_eur']} €")
 # 1. Zyklus (noch keine Anfrage): Start = Start-Balance bzw. Kontogröße
 NEU = dict(FINN, id="lneu", name="150k LFF999 → Winning Days")
 z1p = ruf("tradeify_zyklus_konto", NEU, [], [], 2, 5, VP, 151200.0, None, regel=ML)

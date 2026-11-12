@@ -63883,8 +63883,9 @@
   window._tpWdWartetAufBestaetigung = p => tpWdWartetAufBestaetigung(p)   // WD-Block im Login ohne Bestätigungsrecht (03.11.2026)
   const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || p.winningDay !== true || !tpIstFarmerPlan(p)) return false
     const firma = String(p.masterFirm || '').toLowerCase()
-    // TRADEIFY-AUSGLEICH (Finn 03.11.2026 „yes“): jeder Ausgleichs-Trade (mt5_baseline.wd_ausgleich) wird einzeln bestätigt wie der Apex-WD; normale Tradeify-WD nicht
-    if(p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) return true   // auch Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“) — der Verwalter bestätigt in seiner Ansicht
+    // RC4 (Finn 12.11.2026 ~20:00 Dubai: „Nein, automatisch.“ — überholt das „yes“ vom 03.11.2026): Ausgleich (mt5_baseline.wd_ausgleich, Tradeify/Lucid) und
+    // Recoverer (Apex) warten nie auf eine Bestätigung, auch nicht über die Apex-Liste — sie starten wie normale WD zur Startzeit (wie app.py hf_ist_wd + DB-Riegel)
+    if((p.mt5Baseline && p.mt5Baseline.wd_ausgleich === true) || (typeof planIstRecoverer === 'function' ? planIstRecoverer(p) : !!window._planIstRecoverer?.(p))) return false
     return !tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k)) }
   /* Verwalter-Gruppen sind ausgenommen (Prüfer S12, 02.11.2026): sie stehen nie in Finns Liste, ein Apex-WD der Gruppe wäre sonst nicht bestätigbar. Dieselbe Regel wie der DB-Riegel, RPC
    * wd_bestaetigen_ich_ausgenommen() fragt nur nach der eigenen ID (10 min gemerkt, nur bei gesetzter Firmenliste). Unbekannt = nicht ausgenommen: lieber warten als ohne Bestätigung starten. */
@@ -75800,7 +75801,7 @@
         if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
         const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), wdRecovererSymbol(symbol, (k.wuerfel || {}).instr), wdKontoRichtung(k, row.richtung), tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
-        if(ausgleich) pr.wd_ausgleich = true   // Railway legt ihn mit mt5_baseline.wd_ausgleich an → wartet auf Finns Bestätigung
+        if(ausgleich) pr.wd_ausgleich = true   // Railway legt ihn mit mt5_baseline.wd_ausgleich an (Marke: kein SL-Würfel; seit RC4 12.11.2026 ohne Bestätigung)
         if(zyT && zyT.art !== 'tradeify') pr.wd_recoverer = true   // RC3: Apex-Recoverer → mt5_baseline.wd_recoverer (Railway), Erkennung ohne NQ-Symbol
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
@@ -75959,7 +75960,7 @@
     if(ce) return { warten: true }   // ein anderer Tab legt gerade an — beim nächsten Abgleich steht sein Plan da
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_heil:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
-    if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })   // wartet auf Finns Bestätigung (03.11.2026)
+    if(ausgleichA) row.mt5_baseline = Object.assign({}, row.mt5_baseline || {}, { wd_ausgleich: true })   // Marke (03.11.2026); seit RC4 (12.11.2026) ohne Bestätigung
     // RC3 RECOVERER-MARKE (Master 11.11.2026): Plan aus dem aktiven Apex-Recoverer-Zyklus — Erkennung nicht mehr am NQ-Symbol (fährt seit RC3 auch MNQ)
     // Selbstheilung/Rückfall mit festem Instrument aus dem Würfel (extra.instr — gibt es nur aus einem Recovery-Stand) bei Apex ebenso (Prüfer RC3 KANN 3)
     if((zyAus && zyAus.art !== 'tradeify') || (extra && extra.instr && /apex/i.test(String(acc.firm || ''))))
@@ -77395,8 +77396,8 @@
     try{ window._ahfWdLaden?.() }catch(_){}
     const d = wdUebersichtDaten(_wd.rows)
     const fehlerAhf = (typeof window._ahfFehler === 'function' && window._ahfFehler()) ? `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ ${escapeHtml(window._ahfFehler().slice(0, 160))}</div>` : ''   // sonst bliebe ein gescheitertes „Bestätigen" hier stumm
-    // Tradeify-Ausgleich (Finn 03.11.2026: „auch bestätigen“): immer sichtbar, auch aus einer Gruppe außerhalb der gewählten Sicht — er darf nie unsichtbar hängen
-    const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id) || String(z.aus || '').toLowerCase() === 'true')
+    // RC4 (Finn 12.11.2026 „Nein, automatisch.“): Tradeify-Ausgleich steht nicht mehr in „Zu bestätigen“ (bis dahin immer sichtbar, auch aus fremden Gruppen)
+    const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id))
     // APEX-WD BESTÄTIGEN (02.11.2026): was oben in „Zu bestätigen" steht, nicht zugleich unter „Wartet auf Start" bzw. „überfällig" zeigen
     const offenIds = new Set(offen.map(z => String(z.id)))
     d.warten = d.warten.filter(e => !(e.p && offenIds.has(String(e.p.id))))
@@ -77422,7 +77423,7 @@
           + `) — bestätigen nur im Login „Finn + Pascal“ bzw. beim Verwalter der Gruppe</div>`
       }
     }catch(_){}
-    box.innerHTML = fehlerAhf + ohneRecht + wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD und Tradeify-Ausgleich — startet erst nach deinem „Bestätigen" · Zeiten Dubai', offen, alleKnopf)
+    box.innerHTML = fehlerAhf + ohneRecht + wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD — startet erst nach deinem „Bestätigen" · Zeiten Dubai', offen, alleKnopf)
       + laeuftHtml
       + brauchtHtml
       + wartenHtml

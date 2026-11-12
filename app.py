@@ -4360,12 +4360,11 @@ def alarm_tick():
     evs = [ev for ev in alarm_ereignisse(rows, namen, jetzt, seit) if ev[0] not in _alarm["gemeldet"]]
     try:                                       # APEX-WD BESTÄTIGEN (02.11.2026): eigene Abfrage — Farmer-Pläne von nachts fallen aus „updated_at ≤ 3 h" heraus
         firmen_wd = wd_bestaetigen_firmen()
-        if firmen_wd or TRADEIFY_AUSGLEICH_BESTAETIGEN:   # + Tradeify-Ausgleich (03.11.2026)
+        if firmen_wd or TRADEIFY_AUSGLEICH_BESTAETIGEN:   # Tradeify-Ausgleich: seit RC4 (12.11.2026) False — nur noch die Apex-Liste
             wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art,aus:mt5_baseline->>wd_ausgleich,wd_recoverer:mt5_baseline->>wd_recoverer",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
             gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
-            wd_offen = [r for r in wd_offen if (hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id")))
-                        or str(r.get("aus") or "").lower() == "true"]   # wie die Liste; Tradeify-Ausgleich auch aus Gruppen (Finn 03.11.2026: „auch bestätigen“)
+            wd_offen = [r for r in wd_offen if hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id"))]   # wie die Liste (RC4: ohne Ausgleich)
             evs += [ev for ev in alarm_wd_bestaetigen(wd_offen, firmen_wd, namen, jetzt) if ev[0] not in _alarm["gemeldet"] and all(ev[0] != e[0] for e in evs)]
     except Exception as e:
         print(f"[alarm] ⚠️ Apex-WD-Bestätigung: {type(e).__name__}: {e}", flush=True)
@@ -16593,7 +16592,11 @@ TRADEIFY_ZYKLUS_MIN_USD = 1.0
 TRADEIFY_ZYKLUS_PUFFER = (30, 60)
 # BESTÄTIGEN (Stopp S9 zu 7388c5f4, 03.11.2026): ob der Ausgleichs-Trade wie der Apex-Recoverer einzeln bestätigt werden muss, fragt der Eingang bei Finn. Vorbereitet als
 # Feld zyklus.bestaetigen; scharf (Pflicht im Farmer) erst nach Finns Antwort — bis dahin False
-TRADEIFY_AUSGLEICH_BESTAETIGEN = True   # Finn 03.11.2026 (über den Eingang): „yes“ — jeder Ausgleichs-Trade einzeln bestätigen, normale Tradeify-WD nicht   # Finn 03.11.2026 Nachtrag: Puffer des Ausgleichs-Trades je Trade gewürfelt 30–60 $ (Jitter-Regel), ersetzt „normaler TP − Linie“
+# RC4 (Finn 12.11.2026 ~20:00 Dubai, Frage „Sollen Recovery-Trades weiter einzeln bestätigt werden?“): „Nein, automatisch.“ — überholt das „yes“ vom 03.11.2026.
+# Anlass: zwei Ausgleichs-WD (Mike Tradeify …3058, Finn + Pascal Lucid …0001) blieben am 12.11. unbestätigt und starteten nie. Ausgleich (Tradeify, Lucid) und
+# Recoverer (Apex) starten jetzt wie normale WD zur geplanten Zeit: nicht in „Zu bestätigen“, keine Bestätigungs-Meldung, kein Halt im Tab, kein DB-Riegel
+# (sql/2026-11-12_rc4_ausgleich_automatisch.sql). Die Marke mt5_baseline.wd_ausgleich bleibt (kein SL-Würfel, Rang, Chips) — sie verlangt keine Bestätigung mehr.
+TRADEIFY_AUSGLEICH_BESTAETIGEN = False  # bis 12.11.2026 True (Finn 03.11.2026: „yes“ — jeder Ausgleichs-Trade einzeln bestätigen)   # Finn 03.11.2026 Nachtrag: Puffer des Ausgleichs-Trades je Trade gewürfelt 30–60 $ (Jitter-Regel), ersetzt „normaler TP − Linie“
 
 
 # RC3 LOTS DER RECOVERY-TRADES NACH TP (Finn 11.11.2026 19:24 über den Master: „Bei Recovery Trades sind die standardmäßig alle mit 3 MNQ … weil bei Recovery
@@ -18331,9 +18334,9 @@ def admin_wd_plaene():
                 # kapitel_id bewusst nicht gesetzt (24.09.2026): der DB-Trigger ordnet den Plan nach Datum dem Kapitel zu.
                 # V2 statt Hedge-Weg (24.09.2026, Vollumstieg): route tvv2/mt5v2, kein Slave, kein Multiplier.
                 _wd_plan_v2(body, (acc[0].get("firm") if acc and acc[0].get("firm") else body.get("master_firm")))
-                # TRADEIFY-AUSGLEICH BESTÄTIGEN (Finn 03.11.2026 „yes“): der Farmer meldet den Ausgleichs-Trade mit wd_ausgleich — die Marke kann nur eine Bestätigung
-                # verlangen, nie eine erlassen; ohne Bestätigung startet der Plan nicht (Freigabe wie Apex-WD, hedge_freigabe_at)
-                if (r or {}).get("wd_ausgleich") is True and TRADEIFY_AUSGLEICH_BESTAETIGEN:
+                # TRADEIFY-AUSGLEICH: der Farmer meldet den Ausgleichs-Trade mit wd_ausgleich → Marke am Plan (kein SL-Würfel, Rang, Chips). Seit RC4 (Finn 12.11.2026
+                # „Nein, automatisch.“) verlangt sie keine Bestätigung mehr — darum unabhängig von TRADEIFY_AUSGLEICH_BESTAETIGEN gesetzt (vorher nur bei True)
+                if (r or {}).get("wd_ausgleich") is True:
                     body["mt5_baseline"] = dict(body.get("mt5_baseline") or {}, wd_ausgleich=True)
                 # RC3 RECOVERER-MARKE (Master 11.11.2026): der Farmer meldet einen Plan aus dem aktiven Apex-Recoverer-Zyklus mit wd_recoverer — die Erkennung
                 # (kein SL-Würfel unten, Freigabe-Meldung, Rang, Chips) hängt nicht mehr am NQ-Symbol (der Recoverer fährt seit RC3 auch MNQ)
@@ -33781,10 +33784,10 @@ def hf_basis(firmen):
     basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null"}
     arten = "mt5_baseline->>hedge_art.in.(" + ",".join(HEDGE_ARTEN) + ")"
     if not firmen:
-        basis["or"] = f"({arten},mt5_baseline->>wd_ausgleich.eq.true)"   # + Tradeify-Ausgleich (03.11.2026), auch ohne Apex-Liste
+        basis["or"] = f"({arten})"   # RC4 (Finn 12.11.2026 „Nein, automatisch.“): Tradeify-Ausgleich nicht mehr in der Liste
         return basis
     wd = ",".join(f"and(winning_day.is.true,notes.ilike.*Winning-Day-Farmer*,master_firm.ilike.*{f}*)" for f in firmen)
-    basis["or"] = f"({arten},{wd},mt5_baseline->>wd_ausgleich.eq.true)"   # + Tradeify-Ausgleich (03.11.2026)
+    basis["or"] = f"({arten},{wd})"   # RC4: ohne Tradeify-Ausgleich (Recoverer filtert hf_ist_wd heraus)
     return basis
 
 
@@ -34113,26 +34116,25 @@ def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
 
 
 def hf_zeile_fuer(r, verw_sicht, aus, firmen, gruppen_ids):
-    """REIN RECHNEND (testbar): steht die Zeile in der Freigabe-Liste dieses Logins? Verwalter (verw_sicht = seine Gruppe): nur Tradeify-Ausgleichs-Trades seiner
-    Gruppe, seit MO1 (05.11.2026) auch die Orbit-Prio-2-Hedges (art 'apex') seiner Gruppe. Admin: wie bisher (HT, sichtbare Apex-WD) und jeder Ausgleichs-Trade,
-    auch aus Gruppen mit Verwalter (Finn 03.11.2026: „Nein, auch bestätigen“)."""
-    ausgleich = str(r.get("aus") or "").lower() == "true"
+    """REIN RECHNEND (testbar): steht die Zeile in der Freigabe-Liste dieses Logins? Verwalter (verw_sicht = seine Gruppe): seit MO1 (05.11.2026) die
+    Orbit-Prio-2-Hedges (art 'apex') seiner Gruppe. Admin: HT und sichtbare Apex-WD. Tradeify-Ausgleich seit RC4 (Finn 12.11.2026 „Nein, automatisch.“) nicht mehr —
+    bis dahin stand er hier für Verwalter und Admin (Finn 03.11.2026: „Nein, auch bestätigen“)."""
     if verw_sicht is not None:
-        # + hf_ist_wd (S9 zu bda93043): nur Winning-Day-Ausgleiche des Farmers (winning_day, Farmer-Notiz, keine Hedge-Art) seiner Gruppe
-        # ORBIT PRIO 2 (MO1, 05.11.2026, Master: „bei Emins Gruppe bestätigt Emin selbst“): dazu die Orbit-Prio-2-Hedges (hedge_art 'apex') SEINER Gruppe
+        # ORBIT PRIO 2 (MO1, 05.11.2026, Master: „bei Emins Gruppe bestätigt Emin selbst“): die Orbit-Prio-2-Hedges (hedge_art 'apex') SEINER Gruppe
         if str(r.get("user_id")) not in verw_sicht:
             return False
-        return (ausgleich and hf_ist_wd(r, firmen)) or r.get("art") == "apex"
-    return str(r.get("user_id")) not in (aus or ()) or hf_wd_sichtbar(r, firmen, gruppen_ids) or ausgleich
+        return r.get("art") == "apex"
+    return str(r.get("user_id")) not in (aus or ()) or hf_wd_sichtbar(r, firmen, gruppen_ids)
 
 
 def hf_ist_wd(zeile, firmen):
-    """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) oder ein Tradeify-Ausgleichs-Trade
-    (mt5_baseline.wd_ausgleich, alias aus, 03.11.2026) → True."""
+    """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) → True. RC4 (Finn 12.11.2026 „Nein, automatisch.“):
+    Ausgleich (mt5_baseline.wd_ausgleich, alias aus) und Recoverer (wd_ist_recoverer_plan) nie — sie starten ohne Bestätigung, auch wenn ihre Firma in der
+    Apex-Liste steht (wie der DB-Riegel trade_plans_a0_hedge_freigabe). Bis RC4 war der Ausgleich hier immer True."""
     if zeile.get("art") in HEDGE_ARTEN or zeile.get("winning_day") is not True or "Winning-Day-Farmer" not in str(zeile.get("notes") or ""):
         return False
-    if str(zeile.get("aus") or "").lower() == "true":
-        return True
+    if str(zeile.get("aus") or "").lower() == "true" or wd_ist_recoverer_plan(zeile):
+        return False
     firm = str(zeile.get("master_firm") or "").lower()
     return any(f in firm for f in firmen)
 
