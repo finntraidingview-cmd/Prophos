@@ -33,7 +33,7 @@ def quelle(name):
 
 
 ns = {"datetime": datetime, "timezone": timezone, "timedelta": timedelta, "re": re}
-for n in ("_ap_ts", "payout_sperrt", "_payout_offen_ids", "payout_approved_zurueck_urteil"):
+for n in ("_ap_ts", "sb_spalte_fehlt", "payout_sperrt", "_payout_offen_ids", "payout_approved_zurueck_urteil"):
     try:
         exec(quelle(n), ns)
     except LookupError:
@@ -53,18 +53,35 @@ ZEILEN = [{"account_id": "a1", "approved_at": None}, {"account_id": "a2", "appro
 aufrufe = []
 
 
+class _Antwort:
+    def __init__(self, code, text):
+        self.status_code, self.text = code, text
+
+
+class HTTPFehler(Exception):
+    """wie requests.HTTPError: str() nennt nur Status + URL (mit approved_at im select), der PostgREST-Text steht in response.text"""
+    def __init__(self, code, text):
+        super().__init__(f"{code} Client Error for url: https://x.supabase.co/rest/v1/pending_payouts?select=account_id%2Capproved_at")
+        self.response = _Antwort(code, text)
+
+
 def sb_fake(tabelle, q):
     aufrufe.append(q)
     if "approved_at" in q["select"] and ns.get("_ohne_spalte"):
-        raise RuntimeError('400 {"message":"column pending_payouts.approved_at does not exist"}')
+        raise HTTPFehler(400, '{"code":"42703","message":"column pending_payouts.approved_at does not exist"}')
     if ns.get("_kaputt"):
-        raise RuntimeError("502 Bad Gateway")
+        raise HTTPFehler(503, "Service Unavailable")
     ids = None
     if "account_id" in q:
         ids = set(q["account_id"][4:-1].split(","))
     return [dict(z) if "approved_at" in q["select"] else {"account_id": z["account_id"]} for z in ZEILEN if ids is None or z["account_id"] in ids]
 
 
+sf = ns["sb_spalte_fehlt"]
+check(sf(HTTPFehler(400, '{"code":"42703","message":"column pending_payouts.approved_at does not exist"}'), "approved_at") is True, "Spalte fehlt: 400 + 42703 erkannt")
+check(sf(HTTPFehler(503, "Service Unavailable"), "approved_at") is False, "503 (URL nennt approved_at) ist KEIN „Spalte fehlt“ (Prüfer PA1)")
+check(sf(HTTPFehler(400, '{"code":"PGRST100","message":"failed to parse filter"}'), "approved_at") is False, "anderer 400er ist kein „Spalte fehlt“")
+check(sf(RuntimeError("approved_at does not exist"), "approved_at") is False, "Fehler ohne Antwort zählt nie als „Spalte fehlt“")
 ns["_sb_all"] = sb_fake
 ns["sb_select"] = sb_fake
 off = ns["_payout_offen_ids"]
@@ -79,7 +96,7 @@ ns["_kaputt"] = True
 try:
     off(["a1"])
     check(False, "echter Lesefehler wird weitergereicht (fail-closed beim WD-Anlegen)")
-except RuntimeError:
+except HTTPFehler:
     check(True, "echter Lesefehler wird weitergereicht (fail-closed beim WD-Anlegen)")
 ns["_kaputt"] = False
 viele = [f"k{i:03d}" for i in range(170)]
@@ -103,7 +120,8 @@ check('offen = _payout_offen_ids()' in quelle("wd_payout_tick"), "wd_payout_tick
 check(not re.search(r'sb_select\("pending_payouts", \{"select": "account_id", "status": "eq\.pending",\s*"account_id"', APP), "keine alte WD-Sperre ohne approved_at mehr")
 route = quelle("admin_payout_approved")
 check('"/admin/payout-approved"' in APP and '"approved_at": "is.null"' in route and '"status": "eq.pending"' in route, "Route: Guard status pending + approved_at is.null (zweiter Klick → 409)")
-check('"approved_at": f"eq.{p[\'approved_at\']}"' in route and "payout_approved_zurueck_urteil(" in route, "Rückweg: Guard auf den gelesenen Wert + Prüfung „kein Trade gestartet“")
+check('"approved_at": f"eq.{p[\'approved_at\']}"' in route and "payout_approved_zurueck_urteil(" in route and '"or": f"(started_at.gte.{_ab},start_um_gestartet_at.gte.{_ab})"' in route
+      and '"created_at": f"gte.' not in route, "Rückweg: Guard auf den gelesenen Wert + Prüfung „kein Trade gestartet“")
 check(route.count("threading.Thread(target=wd_payout_tick") == 2, "Approved und Rücknahme stoßen wd_payout_tick sofort an")
 check('"transactions"' not in route, "Approved bucht NICHTS (keine transactions-Zeile)")
 check("_admin_voll()" in route and "_admin_verwalter()" in route and '"Nur Anfragen der eigenen Gruppe"' in route, "Rechte wie „Erhalten“ (Admin, Verwalter nur eigene Gruppe)")
@@ -118,7 +136,7 @@ check("${admPayoutSchrittHtml(t)}" in HTML and "admPayoutSchrittVerdrahten(tr, t
 check("window._admPayoutSchritt.html(t, { klein: true })" in HTML and "window._admPayoutSchritt.verdrahten(td, t, { naechsterTage: 14, waitingLeeren: true" in HTML,
       "Funded Planer → CFD „Payouts auf dem Weg“: derselbe Schritt")
 check("/admin/payout-approved?ansicht=admin" in HTML and "zurueck: true" in HTML, "Frontend ruft die Route (auch Rücknahme)")
-check("#dashboard-view #adm-f-pend-rows td:last-child" in HTML and "position:sticky;right:0" in HTML, "Handy: Knopf-Spalte klebt rechts")
+check("#dashboard-view #adm-f-pend-rows td:last-child" in HTML and "position:sticky;right:0;background:var(--surface, #fff)" in HTML, "Handy: Knopf-Spalte klebt rechts (Hintergrund --surface, auch dunkel)")
 
 # admPayoutSchrittHtml echt in JavaScriptCore
 m = re.search(r"    const admPayoutApprovedTxt = .*?\n    function admPayoutSchrittHtml\(t, o\)\{.*?\n    \}\n", HTML, re.S)

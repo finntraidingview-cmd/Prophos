@@ -8592,7 +8592,7 @@ def admin_build_overview(kapitel_id=None):
         try:
             _pp = _sb_all("pending_payouts", {"select": _pp_sel + ",approved_at,approved_von", "status": "eq.pending"})   # PA1
         except Exception as _e_pp:
-            if "approved_at" not in str(_e_pp):
+            if not sb_spalte_fehlt(_e_pp, "approved_at"):
                 raise
             _pp = _sb_all("pending_payouts", {"select": _pp_sel, "status": "eq.pending"})   # PA1-SQL noch nicht eingespielt
         for t in _pp:
@@ -17864,6 +17864,19 @@ def wd_payout_abgleich(rows, offen, plaene, jetzt, regeln, rnd=None, geprueft=()
 # offen (pending_payouts status pending) UND noch nicht approved (approved_at leer). Ist-Weg (Befund PA1): nur der WD-Farmer sperrt an der offenen Anfrage
 # (wd_payout_abgleich, GET/POST /admin/wd-plaene, PC-Tab wdKontenFrisch); Funded CFD ist schon mit der Anfrage frei (waiting_payout_since leert die Anfrage),
 # Zyklus-Zähler zählen ab der Anfrage. Spalte approved_at fehlt (SQL noch nicht eingespielt) → wie bisher: jede offene Anfrage sperrt.
+def sb_spalte_fehlt(e, spalte):
+    """REIN (testbar, PA1-Prüfer SOLLTE): ist dieser Supabase-Fehler genau „Spalte fehlt“ (PostgREST 400, Code 42703 bzw. „column … <spalte> does not exist“)?
+    str(HTTPError) enthält nur Status + URL (und die URL nennt die Spalte im select) — darum am Antworttext prüfen, nie am Fehlertext."""
+    r = getattr(e, "response", None)
+    if r is None or getattr(r, "status_code", None) != 400:
+        return False
+    try:
+        t = str(r.text or "")
+    except Exception:
+        return False
+    return ("42703" in t or "does not exist" in t) and spalte in t
+
+
 def payout_sperrt(zeile):
     """REIN (testbar, PA1): sperrt diese pending_payouts-Zeile das Konto für die Planer? status pending und approved_at leer."""
     z = zeile or {}
@@ -17884,7 +17897,7 @@ def _payout_offen_ids(ids=None):
         try:
             rows = (_sb_all if teil is None else sb_select)("pending_payouts", q) or []
         except Exception as e:
-            if "approved_at" not in str(e):
+            if not sb_spalte_fehlt(e, "approved_at"):
                 raise
             ohne_spalte = True
             rows = (_sb_all if teil is None else sb_select)("pending_payouts", dict(q, select="account_id")) or []
@@ -19273,7 +19286,7 @@ def admin_payout_approved():
     try:
         rows = sb_select("pending_payouts", {"select": "id,user_id,account_id,account_name,status,approved_at,approved_von", "id": f"eq.{pid}", "limit": "1"}) or []
     except Exception as e:
-        if "approved_at" in str(e):
+        if sb_spalte_fehlt(e, "approved_at"):
             return jsonify({"error": "Spalte approved_at fehlt — sql/2026-11-12_pa1_payout_approved.sql einspielen"}), 409
         return jsonify({"error": f"Anfrage nicht lesbar ({type(e).__name__})"}), 502
     if not rows:
@@ -19291,8 +19304,10 @@ def admin_payout_approved():
         plaene = []
         if aid:
             try:
+                # PA1-Prüfer (SOLLTE): nach dem Start filtern, nicht nach created_at — ein vorgeplanter Plan, der erst nach dem Approved startet, zählt
+                _ab = _ap_ts(str(p["approved_at"])).isoformat()
                 plaene = sb_select("trade_plans", {"select": "id,master_name,started_at,start_um_gestartet_at", "master_account_id": f"eq.{aid}",
-                                                   "created_at": f"gte.{(_ap_ts(str(p['approved_at'])) - timedelta(days=1)).isoformat()}"}) or []
+                                                   "or": f"(started_at.gte.{_ab},start_um_gestartet_at.gte.{_ab})"}) or []
             except Exception as e:
                 return jsonify({"error": f"Pläne des Kontos nicht lesbar ({type(e).__name__}) — nichts zurückgenommen"}), 502
         ok, grund = payout_approved_zurueck_urteil(p.get("approved_at"), plaene)
