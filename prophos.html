@@ -3841,9 +3841,63 @@
   #adm-pane-wd .wd-po-fuss{font-size:11.5px;color:var(--sub);display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;min-height:20px}
   #adm-pane-wd .wd-po-fuss .btn-xs{padding:1px 8px;font-size:11px;height:auto}
   #adm-pane-wd .wd-ueb-leer{color:var(--sub);font-size:12.5px;padding:4px 0}
-  /* Heute nicht drin (28.10.2026): Kacheln wie Payouts, Würfeln-Knopf rechts; .btn setzt display:flex und schlägt hidden (wie .wd-po-mehr) */
-  #adm-pane-wd #wdNdAlle[hidden]{display:none}
-  #adm-pane-wd #wd-nd-grid .wd-po-fuss{justify-content:flex-end}
+  /* HEUTE NICHT DRIN (HN1, Finn 12.11.2026: „nicht so kachelig und blockig, eher cleaner, auch für alle anderen Planer“): EINE Liste in allen fünf Planern
+   * (hndHtml) — Kopf mit Zähler (klappt), Gruppen-Überschrift je Grund, eine ruhige Zeile je Konto. Farben aus den Planer-Tokens (--g-*), sonst Grundfarben. */
+  .hnd{--hnd-text:var(--g-text,var(--ink));--hnd-sub:var(--g-sub,var(--sub));--hnd-linie:var(--g-rand,var(--line));min-width:0;container-type:inline-size}
+  .hnd.apg-karte{padding:12px 18px}
+  .hnd-kopf{display:flex;align-items:center;gap:8px;min-width:0}
+  .hnd-auf{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;background:none;border:0;padding:4px 0;margin:0;color:var(--hnd-text);font:inherit;text-align:left;cursor:pointer}
+  .hnd-auf:disabled{cursor:default}
+  .hnd-auf:focus-visible{outline:2px solid var(--g-a2,var(--violet));outline-offset:2px;border-radius:6px}
+  .hnd-pfeil{width:14px;height:14px;flex:0 0 14px;align-self:center;color:var(--hnd-sub);transition:transform .15s ease}
+  .hnd.auf .hnd-pfeil{transform:rotate(90deg)}
+  .hnd-auf:disabled .hnd-pfeil{opacity:.35}
+  .hnd-titel{font-size:15px;font-weight:600}
+  .hnd-n{font-size:12px;font-weight:600;color:var(--hnd-sub);font-variant-numeric:tabular-nums}
+  .hnd-sub{flex:1 1 100%;font-size:12px;color:var(--hnd-sub);padding-left:22px}
+  .hnd-r{flex:0 0 auto}
+  .hnd-rumpf{display:none;margin-top:6px}
+  .hnd.auf .hnd-rumpf{display:block}
+  .hnd-leer{font-size:12.5px;color:var(--hnd-sub);padding:4px 0 2px 22px}
+  .hnd:not(.auf) .hnd-rumpf:has(.hnd-leer){display:block}
+  .hnd-gruppe + .hnd-gruppe{margin-top:6px}
+  .hnd-g{display:flex;align-items:baseline;gap:6px;font-size:11.5px;font-weight:600;color:var(--hnd-sub);padding:8px 0 4px;border-bottom:1px solid var(--hnd-linie);letter-spacing:.01em}
+  .hnd-g-n{font-weight:500;font-variant-numeric:tabular-nums}
+  .hnd-z{display:grid;grid-template-columns:minmax(80px,1fr) minmax(70px,.9fr) 92px 150px minmax(0,2.6fr) auto;align-items:center;gap:4px 12px;
+    padding:7px 0;border-bottom:1px solid var(--hnd-linie);font-size:12.5px;color:var(--hnd-text);min-width:0}
+  .hnd-z:last-child{border-bottom:0}
+  .hnd.mit-akt .hnd-z{grid-template-columns:minmax(80px,1fr) minmax(70px,.9fr) 92px 150px minmax(0,2.6fr) 128px}   /* Knopf-Spalte fest, damit die Zeilen bündig bleiben */
+  .hnd-z[role="button"]{cursor:pointer}
+  .hnd-z[role="button"]:hover{background:var(--g-kpi,var(--surface-2,transparent))}
+  .hnd-z > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hnd-z > .hnd-bal,.hnd-z > .hnd-konto{overflow:visible}
+  .hnd-wer{display:flex;align-items:center;gap:6px}
+  .hnd-wer b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  .hnd-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+  .hnd-firma,.hnd-grund{color:var(--hnd-sub)}
+  .hnd-konto{font-size:12px}
+  .hnd-bal{text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+  .hnd-bal em{font-style:normal;color:var(--hnd-sub)}
+  .hnd-bal em.gut{color:var(--g-gut,var(--good-ink,#15803d))}
+  .hnd-bal em.rot{color:var(--g-rot,var(--danger-ink,#b91c1c))}
+  .hnd-leise{color:var(--hnd-sub)}
+  .hnd-akt{text-align:right}
+  .hnd-akt:empty{display:none}
+  .hnd-akt .btn-xs{padding:1px 8px;font-size:11px;height:auto}
+  /* Breite der Karte statt des Fensters (Seitenleiste, Pane): unter 860 px rutscht der Grund in eine zweite Zeile, unter 520 px das Handy-Raster */
+  @container (max-width:860px){
+    .hnd-z,.hnd.mit-akt .hnd-z{grid-template-columns:minmax(80px,1fr) minmax(70px,1fr) 92px 150px auto;grid-template-areas:"wer firma konto bal akt" "grund grund grund grund akt";row-gap:1px}
+    .hnd.mit-akt .hnd-z{grid-template-columns:minmax(80px,1fr) minmax(70px,1fr) 92px 150px 124px}
+    .hnd-wer{grid-area:wer} .hnd-firma{grid-area:firma} .hnd-konto{grid-area:konto} .hnd-bal{grid-area:bal} .hnd-akt{grid-area:akt}
+    .hnd-z > .hnd-grund{grid-area:grund;white-space:normal;overflow:visible;font-size:12px;padding-left:14px}
+  }
+  @container (max-width:520px){
+    .hnd-z,.hnd.mit-akt .hnd-z{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"wer wer bal" "firma konto konto" "grund grund grund" "akt akt akt";gap:2px 8px;padding:8px 0}
+    .hnd-firma{font-size:12px} .hnd-konto{font-size:11.5px;color:var(--hnd-sub)}
+    .hnd-z > .hnd-grund{padding-left:0} .hnd-akt{justify-self:end;margin-top:2px}
+    .hnd-kopf{flex-wrap:wrap} .hnd-r{flex:1 1 100%;padding-left:22px}
+  }
+  @media (max-width:640px){ .hnd.apg-karte{padding:10px 14px} }
   #adm-pane-wd #wd-ueb-stat-rows .adm-row{grid-template-columns:minmax(130px,1.4fr) minmax(50px,1.4fr) auto 46px;padding:8px 0}
   #adm-pane-wd #wd-ueb-stat-rows .adm-row-name small{display:block;font-size:11px;color:var(--sub);font-weight:400}
   /* Alle Winning Days einzeln (29.10.2026): kleiner Schalter wie .apd-schalter, Liste scrollt in sich, Kopfzeile bleibt stehen */
@@ -13544,14 +13598,10 @@
           </div>
           <!-- HEUTE NICHT DRIN (28.10.2026, Finn: „alle Accounts, die Winning Days als Typ haben, aber heute nicht gehandelt werden … per Zufallsprinzip
                in die heutigen Winning Days der jeweiligen ID reinwürfeln“ — Anlass: Tradeify-Payout nachts angefragt → Konto raus, morgens Geld da → wieder rein).
-               Kacheln wie Payouts (wd-po), Würfeln je Konto + „Alle würfeln“ (wdNdRender / wdKontoEinwuerfeln). Eigene Verdrahtung. -->
-          <div class="panel" id="wd-nd" style="margin:0 0 12px">
-            <div class="wd-panel-kopf">
-              <div class="panel-title">Heute nicht drin <span style="font-weight:400;color:var(--sub);font-size:12px">· Winning-Days-Konten ohne Platz im heutigen Tagesplan <span id="wd-nd-sub"></span></span></div>
-              <button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" hidden title="alle Konten mit Haken, die heute nicht drin sind, je eins zu seiner ID dazuwürfeln (eigene Zufallszeit, Richtung gleich/gegen den Block je 1/2) — Konten mit Haken aus bleiben draußen">🎲 Alle würfeln</button>
-            </div>
-            <div class="wd-po-grid" id="wd-nd-grid"></div>
-          </div>
+               Würfeln je Konto + „Alle würfeln“ (wdNdRender / wdKontoEinwuerfeln). Eigene Verdrahtung. -->
+          <!-- HN1 (Finn 12.11.2026: „nicht so kachelig und blockig, eher cleaner“): dieselbe schlanke Liste wie in den anderen Planern (window._hndHtml) —
+               Kopf mit Zähler und „🎲 Alle würfeln“ zeichnet wdNdRender mit, Zeilen nach Grund gruppiert, ab 11 Konten eingeklappt -->
+          <div class="panel" id="wd-nd" style="margin:0 0 12px"><div id="wd-nd-grid"></div></div>
           <!-- Einstellungen als drei Karten (23.09.2026, Finn: „unten auch draufdrücken, mehr Farben, auf eine Firma
                drücken und die Werte schnell eingeben, Tabelle größer") — gleiche IDs wie zuvor, damit Laden/Speichern
                (wdRegelnInsFormular / wdRegelnSpeichern / wdHedgeSpeichern) unverändert greifen.
@@ -58973,7 +59023,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2209'
+  const OS_TAB_BUILD = '2026-09-22.2210'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77379,7 +77429,7 @@
     const b = box.querySelector('[data-wd-ue-alle]')
     if(b) b.addEventListener('click', () => { if(confirm(`Alle ${offen.length} Apex-Winning-Days bestätigen? Sie starten dann zur Startzeit.`)){ b.disabled = true; window._ahfFreigebenIds?.(offen.map(z => String(z.id))) } })
   }
-  window._wdStub = (rows, daten) => { _wd.rows = rows || []; _wd.daten = daten || { plaene: [] }; wdAblauf(_wd.rows, []) }   // Stub ohne Login (Test-Haken, 30.10.2026)
+  window._wdStub = (rows, daten) => { _wd.rows = rows || []; _wd.daten = daten || { plaene: [] }; wdAblauf(_wd.rows, []); try{ wdNdRender() }catch(_){} }   // Stub ohne Login (Test-Haken, 30.10.2026; HN1: „Heute nicht drin“ mit)
   window._wdUebersichtNeu = () => { try{ if(document.getElementById('wd-uebersicht')) wdUebersicht() }catch(e){ console.warn('[wd] Übersicht', e) } }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
@@ -77945,26 +77995,28 @@
     return out.sort((a, b) => (b.kann - a.kann) || (b.farm - a.farm) || String(a.kd.person || '').localeCompare(String(b.kd.person || '')) || String(a.kd.name || '').localeCompare(String(b.kd.name || '')))
   }
   function wdNdRender(){
-    const box = document.getElementById('wd-nd-grid'), sub = document.getElementById('wd-nd-sub'), alle = document.getElementById('wdNdAlle'); if(!box) return
+    // HN1 (Finn 12.11.2026): statt Kacheln die schlanke Liste aller Planer (window._hndHtml) — gleiche Daten (wdNdListe), gleiche Knöpfe/Merkmale
+    // (data-wd-nd-rein, #wdNdAlle, data-wd-nd-id = Klick klappt die ID oben auf), nur die Darstellung ist neu
+    const box = document.getElementById('wd-nd-grid'); if(!box) return
+    const H = window._hndHtml, G = window._hndGruppe
+    if(typeof H !== 'function'){ box.innerHTML = '<div class="wd-ueb-leer">Lädt …</div>'; return }
     const liste = wdNdListe()
-    if(liste === null){ box.innerHTML = `<div class="wd-ueb-leer">${_wd.datenFehler ? 'Konten nicht ladbar (' + escapeHtml(_wd.datenFehler) + ')' : 'Lädt …'}</div>`; if(alle) alle.hidden = true; if(sub) sub.textContent = ''; return }
+    if(liste === null){ box.innerHTML = H('wd', null, { fehler: _wd.datenFehler ? 'Konten nicht ladbar (' + _wd.datenFehler + ')' : '' }); return }
     const wuerfelbar = liste.filter(e => e.kann && e.farm)
-    if(sub) sub.textContent = liste.length ? `· ${liste.length} ${liste.length === 1 ? 'Konto' : 'Konten'}${wuerfelbar.length ? ` · ${wuerfelbar.length} nachwürfelbar` : ''}` : ''
-    if(alle){ alle.hidden = !wuerfelbar.length; alle.textContent = `🎲 Alle würfeln (${wuerfelbar.length})` }
-    if(!liste.length){ box.innerHTML = '<div class="wd-ueb-leer">Alle Winning-Days-Konten dieser Sicht sind heute drin.</div>'; return }
-    box.innerHTML = liste.map(e => {
-      const kd = e.kd, uid = escapeHtml(String(kd.user_id)), live = kd.live_balance
+    // Prüfer: läuft „Alle würfeln“ gerade (mehrere await), zeigt ein Neuzeichnen im Takt den Knopf weiter gesperrt
+    const alle = _wd.ndAlleLaeuft ? '<button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" disabled>würfelt …</button>' : wuerfelbar.length ? `<button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" title="alle Konten mit Haken, die heute nicht drin sind, je eins zu seiner ID dazuwürfeln (eigene Zufallszeit, Richtung gleich/gegen den Block je 1/2) — Konten mit Haken aus bleiben draußen">🎲 Alle würfeln (${wuerfelbar.length})</button>` : ''
+    const zeilen = liste.map(e => {
+      const kd = e.kd, uid = String(kd.user_id), live = kd.live_balance
       const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name, type: kd.type })
       const groesse = express ? 0 : kontoGroesseAnzeige(kd.name, kd.starting_balance, live)
       const plus = live != null && (groesse > 0 || express) ? Math.round(live - groesse) : null
-      const bal = live != null ? `$${wdDe(live)}${plus != null ? ` <span style="color:${wdUebFarbe(plus)}">${plus >= 0 ? '+' : '−'}${wdDe(Math.abs(plus))}</span>` : ''}` : '<span class="kf">kein Live-Stand</span>'
-      const knopf = e.kann ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-nd-rein="${escapeHtml(String(kd.id))}" data-wd-nd-uid="${uid}" title="${e.farm ? 'heute zur ID dazuwürfeln: eigene Zufallszeit im Fenster, Richtung gleich/gegen den Block je 1/2 — Plan folgt bei SCHARF' : 'Haken dauerhaft setzen UND heute zur ID dazuwürfeln'}">🎲 ${e.farm ? 'Würfeln' : 'Haken + Würfeln'}</button>` : ''
-      return `<div class="wd-po" role="button" tabindex="0" data-wd-nd-id="${uid}" title="Klick: ${escapeHtml(kd.person || '')} oben aufklappen">
-        <div class="wd-po-kopf"><span><span class="adm-dot" style="background:${idFarbe(kd.user_id)}"></span>${escapeHtml(kd.person || '')}</span><span>${escapeHtml(e.firma)}</span></div>
-        <div class="wd-po-name"><span>${escapeHtml(wdUebKonto(kd))}</span><span class="mono" style="font-size:12px;font-weight:500;color:var(--sub)">${bal}</span></div>
-        <div class="wd-po-stand" style="color:var(--sub)">${e.po ? '💸 Payout angefragt · ' : ''}${escapeHtml(e.grund)}</div>
-        <div class="wd-po-fuss">${knopf}</div></div>`
-    }).join('')
+      const knopf = e.kann ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-nd-rein="${escapeHtml(String(kd.id))}" data-wd-nd-uid="${escapeHtml(uid)}" title="${e.farm ? 'heute zur ID dazuwürfeln: eigene Zufallszeit im Fenster, Richtung gleich/gegen den Block je 1/2 — Plan folgt bei SCHARF' : 'Haken dauerhaft setzen UND heute zur ID dazuwürfeln'}">🎲 ${e.farm ? 'Würfeln' : 'Haken + Würfeln'}</button>` : ''
+      return { uid, person: kd.person || '', firma: e.firma, konto: wdUebKonto(kd), kontoTitel: kd.name || '', bal: live != null ? Number(live) : null, plus,
+        grund: (e.po ? 'Payout angefragt · ' : '') + e.grund, gruppe: e.po ? 'Payout angefragt / Waiting' : (typeof G === 'function' ? G(e.grund) : ''), aktion: knopf,
+        zeileAttr: ` role="button" tabindex="0" data-wd-nd-id="${escapeHtml(uid)}" title="Klick: ${escapeHtml(kd.person || '')} oben aufklappen"` }
+    })
+    box.innerHTML = H('wd', zeilen, { rechts: alle, sub: liste.length ? escapeHtml(`Winning-Days-Konten ohne Platz im heutigen Tagesplan${wuerfelbar.length ? ` · ${wuerfelbar.length} nachwürfelbar` : ''}`) : '',
+      leer: 'Alle Winning-Days-Konten dieser Sicht sind heute drin.' })
   }
   /* Zufallsslot für EIN Konto in der Zeile seiner ID (REIN RECHNEND, window._wdNdSlot): Minute im Fenster [Start ab, Spätestens] mit
    * Block-Abstand (wdBlockAbstandMs) zu allen Blockstarts und Gruppen aller IDs — wie die weiteren Gruppen in wdBuendelWuerfeln —, als Versatz
@@ -78109,7 +78161,7 @@
     const b = document.getElementById('wdNdAlle'), liste = (wdNdListe() || []).filter(e => e.kann && e.farm)
     if(!liste.length || _wd.busy) return
     if(b){ b.disabled = true; b.textContent = 'würfelt …' }
-    _wd.busy = true
+    _wd.busy = true; _wd.ndAlleLaeuft = true   // HN1: wdNdRender zeichnet den Knopf dann gesperrt
     const ok = [], schlecht = []
     try{
       for(const e of liste){   // nacheinander — jede Runde sieht die Gruppen der vorigen (Block-Abstand), eine Zeile je Schreibzugriff
@@ -78124,7 +78176,7 @@
       await wdNeuLaden()
       wdSay(`${ok.length} von ${liste.length} Konten heute dazugewürfelt${angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : ''}${planHinweis ? ' · ' + planHinweis : ''}${ok.length ? ' — ' + ok.join(' · ') : ''}${schlecht.length ? ' ⚠ ' + schlecht.join(' · ') : ''}`, schlecht.length ? 'err' : 'ok')
     }catch(err){ wdSay('Fehler: ' + (err.message || err), 'err') }
-    finally{ _wd.busy = false; if(b){ b.disabled = false } try{ wdNdRender() }catch(_){} }
+    finally{ _wd.busy = false; _wd.ndAlleLaeuft = false; if(b){ b.disabled = false } try{ wdNdRender() }catch(_){} }
   }
   // Eigene Verdrahtung des Kastens (wie #wd-ueb): Würfeln je Konto, Alle würfeln, Klick auf die Kachel klappt die ID oben auf
   ;(() => {
@@ -90328,6 +90380,111 @@
         <div class="apg-kpi-r">${APG_WELLE}${o.pillen || ''}</div></div></div>`
   const apgEur = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
   const _apgStd = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', hourCycle: 'h23' })
+  /* ══ HEUTE NICHT DRIN IN JEDEM PLANER (HN1, Finn 12.11.2026 ~20:15 Dubai: „Können wir bei jedem Planer … dieses ‚Heute nicht drin‘ machen? … Je Konto:
+   * dass es heute nicht drin ist und der Grund … So sehe ich in jedem Planer, welche Accounts heute nicht drangekommen sind und warum. Vom Design her
+   * nicht so kachelig und blockig, eher cleaner, auch für alle anderen Planer.“). EINE schlanke Liste für alle fünf Planer (hndHtml, auch window._hndHtml
+   * für Winning Days): je Konto eine Zeile — ID-Punkt · ID · Firma · Konto · Balance (+ Gewinn) · Grund · Aktion (nur wo es heute eine gibt) —, gruppiert
+   * nach Grund mit Zähler, ab 11 Konten eingeklappt (Kopf mit Zähler, Klick klappt; Stand je Planer gemerkt). Nur Anzeige, die Planer-Logik bleibt.
+   * Quellen: Challenge CFD/Futures GET /admin/auto-plan/nicht-drin (alle Läufe des Tags gemischt, Sicht wie der Reiter), Funded Futures/CFD die
+   * Planer-Antwort selbst (ausgelassen[] + ziel[], Q.nichtDrin), Winning Days wdNdListe. Konten, die heute schon drin sind (Plan, läuft, gehandelt),
+   * fallen raus (HND_DRIN). ══ */
+  const HND_DRIN = /geplanten\/laufenden Plan|heute schon gehandelt|^heute schon|^schon geplant|^läuft gerade|^alter Vorschlag/i
+  const HND_GRUPPEN = [
+    [/^Firma im Funded-(CFD-)?Planer aus/i, 'Firma im Planer aus'], [/^ID nicht im Challenge-Planer/i, 'ID nicht im Challenge-Planer'],   // nicht_im_planer[] (Nachtrag Master)
+    [/^Pause-Tag.*Firm|Firmen-Würfel/i, 'Pause-Tag Firma (Firmen-Würfel)'], [/^Pause-Tag|Handels-Würfel/i, 'Pause-Tag (Handels-Würfel)'],
+    [/Payout angefragt|Waiting for Payout|wartet auf Payout|Payout offen|Payout läuft/i, 'Payout angefragt / Waiting'], [/^Ziel erreicht.*Phase|Phase umstellen/i, 'Ziel erreicht – Phase umstellen'],
+    [/Ziel erreicht/i, 'Ziel erreicht'], [/Block der ID läuft/i, 'Block der ID läuft gerade'], [/Block der ID wurde heute verpasst/i, 'Block der ID verpasst'], [/Block der ID/i, 'Block der ID heute schon durch'], [/deaktiviert/i, 'Konto deaktiviert'],
+    [/geblowt|geblasen/i, 'geblowt?'], [/Liquidation|Boden/i, 'Abstand zur Liquidation zu klein'], [/Hedge.*stellbar|kein .*Hedge/i, 'kein Hedge stellbar'],
+    [/nicht live|keine Balance|kein Live-Stand|nicht nachgelesen|Balance-Prüfung/i, 'Balance nicht live'], [/Nachlesung|Überprüfen|noch nicht erledigt/i, 'wartet auf Überprüfen'],
+    [/Tagesdeckel|Tages-Deckel/i, 'Tagesdeckel erreicht'], [/Flex-Konto/i, 'Flex-Konto'], [/External ID/i, 'External ID fehlt'], [/gesperrt/i, 'Firma gesperrt'],
+    [/Tage sammeln/i, 'Tage sammeln – von Hand'], [/ausgenommen|Haken (im Konto )?aus|Haken „Auto-Planer“ am Konto aus|nicht im Farm/i, 'vom Planer ausgenommen'], [/keine Regel|in der Gruppe aus/i, 'keine Regel'],
+    [/nicht eingetragen|nicht in der Zeile|nur heute raus|Tageslauf/i, 'heute nicht eingeplant'], [/Zeitfenster|kein freier Slot|Fenster/i, 'kein Platz im Zeitfenster'] ]
+  function hndGruppe(g){
+    const t = String(g || '')
+    for(const [re, titel] of HND_GRUPPEN) if(re.test(t)) return titel
+    return (typeof apGrundKurz === 'function' ? apGrundKurz(t) : t.split(/[—(]/)[0].trim()) || 'sonstige'
+  }
+  const _hndAuf = window._hndAuf || (window._hndAuf = {})   // je Planer: von Hand auf-/zugeklappt (sonst: bis 10 Konten offen)
+  const hndDe = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
+  /* key: Planer (Merker fürs Klappen) · liste: [{ uid, person, firma, konto, kontoTitel, bal, ccy, plus, grund, aktion, zeileAttr }] oder null (lädt)
+   * opt: { titel, sub, fehler, rechts (HTML rechts im Kopf, nicht klappend), leer, karte (true = in .apg-karte) } */
+  function hndHtml(key, liste, opt){
+    opt = opt || {}
+    const n = Array.isArray(liste) ? liste.length : 0
+    const auf = key in _hndAuf ? !!_hndAuf[key] : n <= 10
+    const kopf = `<div class="hnd-kopf"><button type="button" class="hnd-auf" data-hnd-auf="${escapeHtml(key)}" aria-expanded="${auf}"${n ? '' : ' disabled'}>
+        <svg class="hnd-pfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="hnd-titel">${escapeHtml(opt.titel || 'Heute nicht drin')}</span>${liste ? `<span class="hnd-n">${n}</span>` : ''}
+        ${opt.sub ? `<span class="hnd-sub">${opt.sub}</span>` : ''}</button>${opt.rechts ? `<span class="hnd-r">${opt.rechts}</span>` : ''}</div>`
+    let rumpf
+    if(opt.fehler) rumpf = `<div class="hnd-leer">⚠ ${escapeHtml(opt.fehler)}</div>`
+    else if(!liste) rumpf = '<div class="hnd-leer">Lädt …</div>'
+    else if(!n) rumpf = `<div class="hnd-leer">${escapeHtml(opt.leer || 'Alle Konten dieser Sicht sind heute drin.')}</div>`
+    else {
+      const gr = new Map()
+      for(const e of liste){ const k = e.gruppe || hndGruppe(e.grund); if(!gr.has(k)) gr.set(k, []); gr.get(k).push(e) }
+      const zeile = e => {
+        const bal = e.bal != null && isFinite(e.bal) ? `${e.ccy === 'EUR' ? '' : '$'}${hndDe(e.bal)}${e.ccy === 'EUR' ? ' €' : ''}` : ''
+        const plus = e.plus != null && isFinite(e.plus) ? `<em class="${e.plus > 0 ? 'gut' : e.plus < 0 ? 'rot' : ''}">${e.plus > 0 ? '+' : e.plus < 0 ? '−' : '±'}${hndDe(e.plus)}</em>` : ''
+        return `<div class="hnd-z"${e.zeileAttr || ''}>
+          <span class="hnd-wer"><i class="hnd-dot" style="background:${idFarbe(e.uid)}"></i><b>${escapeHtml(e.person || '—')}</b></span>
+          <span class="hnd-firma">${escapeHtml(e.firma || '')}</span>
+          <span class="hnd-konto mono"${e.kontoTitel ? ` title="${escapeHtml(e.kontoTitel)}"` : ''}>${escapeHtml(e.konto || '—')}</span>
+          <span class="hnd-bal mono">${bal || '<span class="hnd-leise">–</span>'}${plus ? ' ' + plus : ''}</span>
+          <span class="hnd-grund" title="${escapeHtml(e.grund || '')}">${escapeHtml(e.grund || '')}</span>
+          <span class="hnd-akt">${e.aktion || ''}</span></div>`
+      }
+      const sortiert = l => l.slice().sort((a, b) => String(a.person || '').localeCompare(String(b.person || ''), 'de') || String(a.firma || '').localeCompare(String(b.firma || ''), 'de') || String(a.konto || '').localeCompare(String(b.konto || ''), 'de'))
+      rumpf = [...gr.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'de'))
+        .map(([k, l]) => `<div class="hnd-gruppe"><div class="hnd-g"><span>${escapeHtml(k)}</span><span class="hnd-g-n">${l.length}</span></div>${sortiert(l).map(zeile).join('')}</div>`).join('')
+    }
+    const mitAkt = Array.isArray(liste) && liste.some(e => e.aktion)
+    return `<section class="hnd${auf ? ' auf' : ''}${mitAkt ? ' mit-akt' : ''}${opt.karte ? ' apg-karte' : ''}" data-hnd="${escapeHtml(key)}">${kopf}<div class="hnd-rumpf">${rumpf}</div></section>`
+  }
+  window._hndHtml = hndHtml; window._hndGruppe = hndGruppe   // Winning Days (anderer Block) + Test-Haken
+  // Klappen ohne Neuzeichnen: Klasse am Abschnitt, Merker je Planer (überlebt das Neuzeichnen im Takt)
+  document.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest && ev.target.closest('[data-hnd-auf]'); if(!b || b.disabled) return
+    const box = b.closest('.hnd'); if(!box) return
+    const auf = box.classList.toggle('auf'); _hndAuf[b.dataset.hndAuf] = auf; b.setAttribute('aria-expanded', String(auf))
+  })
+  // Challenge: Läufe des Tags (GET /admin/auto-plan/nicht-drin), höchstens alle 60 s je Tag/Sicht/Login, danach neu zeichnen
+  const _hndCh = { d: null, at: 0, k: '', laedt: false, fehler: '' }
+  function hndChLaden(tag){
+    const q = (typeof window._tplSicht === 'function' ? window._tplSicht() : '') || '', k = [String(currentUserId || ''), tag, q].join('|')
+    if(_hndCh.laedt || (_hndCh.k === k && Date.now() - _hndCh.at < 60000)) return
+    if(_hndCh.k !== k){ _hndCh.d = null; _hndCh.fehler = '' }
+    _hndCh.laedt = true; _hndCh.k = k
+    apdApi('GET', '/nicht-drin' + (q ? q + '&' : '?') + 'tag=' + encodeURIComponent(tag))
+      .then(d => { if(_hndCh.k === k){ _hndCh.d = d; _hndCh.fehler = '' } })
+      .catch(e => { if(_hndCh.k === k) _hndCh.fehler = (e && e.status === 404) ? 'Railway kennt /nicht-drin noch nicht (neuer Stand kommt mit dem nächsten Deploy)' : 'nicht geladen: ' + ((e && e.message) || e) })
+      .finally(() => { _hndCh.laedt = false; _hndCh.at = Date.now()
+        try{ if(!apIstFunded() && !_apIds.laeuft && document.getElementById('ap-ids-root')?.offsetParent) apIdsRender() }catch(_){} })
+  }
+  window._hndChStub = d => { const q = (typeof window._tplSicht === 'function' ? window._tplSicht() : '') || ''; Object.assign(_hndCh, { d, at: Date.now(), k: [String(currentUserId || ''), tplDatum(new Date()), q].join('|'), fehler: '', laedt: false }) }   // Stub ohne Railway
+  // Zeilen eines Planers: o = { fd, fc, Q, u (ID der Sicht), firma ('alle' oder Name) }
+  function hndPlanerHtml(o){
+    const heute = tplDatum(new Date()), key = o.fc ? 'fcfd' : o.fd ? 'funded' : 'challenge-' + (apArtJetzt() || 'alle')
+    let roh = null, tagQ = heute, at = null, fehler = ''
+    if(o.fd){ const N = o.Q && o.Q.nichtDrin; if(!N) return ''; roh = N.liste || []; tagQ = N.tag || heute; at = N.at }
+    else { hndChLaden(heute); const d = _hndCh.d; fehler = _hndCh.fehler && !d ? _hndCh.fehler : ''; if(d){ roh = [...(d.ausgelassen || []), ...(d.nicht_im_planer || [])]; tagQ = d.tag || heute; at = d.at } }
+    const ad = new Map(((window._admData && window._admData.accounts) || []).map(r => [String(r.id), r]))
+    const zahl = v => v == null || v === '' || !isFinite(Number(v)) ? null : Number(v)
+    const liste = roh == null ? null : roh.filter(x => x && !HND_DRIN.test(String(x.grund || '')) && (!o.u || String(x.user_id) === String(o.u))
+        && (!o.firma || o.firma === 'alle' || String(x.firma || '').trim() === o.firma)
+        && (o.fd || ((!x.typ || TPL_TYPEN.includes(String(x.typ))) && apArtPasst(x))))
+      .map(x => {
+        const r = ad.get(String(x.konto_id || '')) || null
+        const bal = zahl(x.balance) ?? (r && Number(r.balance) > 0 ? Number(r.balance) : null)
+        let g = 0; try{ g = Number(kontoGroesseKurz(x.konto || (r && r.name), r && r.starting_balance, bal)) || 0 }catch(_){}
+        const e4 = fdpEnde4(x.konto || (r && r.name))
+        return { uid: String(x.user_id || ''), person: x.user || (r && r.person) || '', firma: String(x.firma || (r && r.firm) || ''),
+          konto: (g ? Math.round(g / 1000) + 'k' : '') + (e4 ? ' …' + e4 : '') || String(x.konto || '—'), kontoTitel: String(x.konto || (r && r.name) || ''),
+          bal, ccy: r && r.balance_ccy === 'EUR' ? 'EUR' : 'USD', plus: bal != null && g > 0 ? bal - g : null, grund: apBlowText(x.grund || '') }
+      })
+    const sub = [tagQ !== heute ? 'Planer-Tag ' + apPrTagText(tagQ) : '', at ? 'Stand ' + tplUhrIso(at) : ''].filter(Boolean).join(' · ')
+    return hndHtml(key, liste, { karte: true, fehler, sub: escapeHtml(sub), leer: 'Alle Konten dieses Planers sind heute drin.' })
+  }
   function apGuestlyHtml(x){
     const T = apIdsKopfHtml(x.ow.laeuft, true); if(!T) return ''
     // FUNDED FUTURES (30.10.2026, Master: „im selben Gerüst wie Challenge"): dieselben Bausteine, Quelle _fdpQ (fdpMitQuelle); Vorschau statt
@@ -90423,7 +90580,8 @@
     // E2e (Nachtrag 5, Finn 05.11.2026 ~05:35: „Regeln … basic unter den Zeitstrahl. Dann kommt ‚zu bestätigen‘“): Funded Futures hängt seine Regel-Zeile direkt an den Zeitstrahl
     let e2Oben = ''; if(fd && !fc) try{ e2Oben = e2EinstHtml(Q, x.admin) }catch(e){ console.warn('[e2] Einstellungen Funded Futures', e) }
     const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>` + e2Oben
-    const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div>${x.heuteHb || ''}`
+    let nd = ''; try{ nd = hndPlanerHtml({ fd, fc, Q, u, firma: fs ? fs.firma : 'alle' }) }catch(e){ console.warn('[hnd] Heute nicht drin', e) }   // HN1 (12.11.2026): nach „Wartet auf Start“
+    const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div><div data-apg-anker="nichtdrin">${nd}</div>${x.heuteHb || ''}`
     let unten = ''; if(fc) try{ unten = fcfdUnterHtml(u) }catch(e){ console.warn('[apg] Funded CFD unten', e) }   // Waiting · Firmen · Regeln
     // FUNDED CFD (Finn 05.11.2026 ~05:35 Dubai: „Mach die Regeln basic unter den Zeitstrahl. Dann kommt ‚zu bestätigen'"): kompakte Einstellungen
     // direkt unter dem Zeitstrahl, die alte Leiste darüber entfällt (ihr „Nachplanen"/„Jetzt planen" zieht mit)
@@ -92653,9 +92811,13 @@
       ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
     const ausg = [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Winning Days' }))]
       .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded', grund: x.grund || '', plan_tag: d.tag || null }))   // TW2: Plan-Tag des Planers (CME-Tag)
+    // HN1 (12.11.2026): „Heute nicht drin“ — alle Gründe des Planers ungefiltert (Waiting, Pause-Tag, Tagesdeckel …), Balance aus der Zeile
+    const nichtDrin = { tag: d.tag || null, at: d.at || null, liste: [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Winning Days' })), ...(d.nicht_im_planer || [])]   // nicht_im_planer: Firma im Planer aus (HN1-Nachtrag)
+      .filter(x => x && (x.konto_id || x.konto)).map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || x.user || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, grund: x.grund || '',
+        balance: x.balance ?? (x.anzeige && x.anzeige.balance) ?? null })) }
     const ids = new Set(plaene.map(p => String(p.plan_id)))
     return {
-      vorschau, aktiv: !!d.aktiv, regelnQuelle: d.regeln_quelle, zeiten: d.zeiten || {}, regeln: d.regeln || null,   // regeln: E2-Einstellungen (04.11.2026)
+      vorschau, aktiv: !!d.aktiv, regelnQuelle: d.regeln_quelle, zeiten: d.zeiten || {}, regeln: d.regeln || null, nichtDrin,   // regeln: E2-Einstellungen (04.11.2026)
       // Kontoliste der Firma in den Einstellungen (E2d): alle Konto-Zeilen des Laufs (schon nach Sicht gefiltert) mit Ziel-Fortschritt (app.py fdp_konto_anzeige)
       konten: [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])].filter((z, i, l) => z && z.konto_id && l.findIndex(y => y && String(y.konto_id) === String(z.konto_id)) === i).map(z => ({ konto_id: String(z.konto_id), konto: z.konto, firma: z.firma,
         user: namen.get(String(z.user_id)) || '', balance: z.balance ?? null, grund: z.grund || (z.aktion === 'ziel' ? 'Ziel erreicht' : z.aktion === 'planen' ? 'geplant' : ''), a: z.anzeige || null,
@@ -92715,8 +92877,12 @@
       ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
     const ausg = [...(d.ausgelassen || []).filter(x => !FCP_AUSG_LEISE.test(String(x.grund || ''))), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Waiting for Payout' }))]
       .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded_cfd', grund: x.grund || '', plan_tag: d.tag || null }))   // TW2: Plan-Tag des Planers
+    // HN1 (12.11.2026): „Heute nicht drin“ — hier OHNE den Leise-Filter (Waiting for Payout, Pause-Tag … sind genau die Gründe, die Finn sehen will)
+    const nichtDrin = { tag: d.tag || null, at: d.at || null, liste: [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Waiting for Payout' })), ...(d.nicht_im_planer || [])]
+      .filter(x => x && (x.konto_id || x.konto)).map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || x.user || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, grund: x.grund || '',
+        balance: x.balance ?? null })) }
     return {
-      vorschau: false, aktiv, regelnQuelle: null, zeiten: d.zeiten || {}, fcfd: true, zielAutoWartet: !!d.ziel_auto_wartet,
+      vorschau: false, aktiv, regelnQuelle: null, zeiten: d.zeiten || {}, fcfd: true, zielAutoWartet: !!d.ziel_auto_wartet, nichtDrin,
       newsRegel: typeof d.news_regel === 'boolean' ? d.news_regel : null,   // NEWS-KACHEL (30.10.2026): S4 6583d221, älteres Backend → null
       apIds: { rows, offen, bestaetigt, bestaetigtT0: Date.now(), aktiv, tag: heute, D: null, fehler: '', offenFehler: '', ...FDP_ART.fcfd.merker },
       ap: { letzter: { tag: heute, at: d.at, trocken: false, quelle: 'funded_cfd', geplant: [], ausgelassen: ausg },

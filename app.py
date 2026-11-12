@@ -42892,6 +42892,92 @@ def admin_auto_plan_konten_stand():
     return resp
 
 
+def ap_nicht_drin_mischen(laeufe):
+    """REIN RECHNEND (testbar, HN1 Finn 12.11.2026: „in jedem Planer … welche Accounts heute nicht drangekommen sind und warum"): alle Challenge-Läufe
+    EINES Tags (Nachtlauf + Nachplan-Läufe) → {tag, at, quelle, ausgelassen}. Ein Nachplan-Lauf führt nur seine eigenen Konten — darum gilt je Konto
+    die NEUESTE Aussage über alle Läufe des Tags: ausgelassen mit Grund, oder geplant → nicht mehr in der Liste. Trockenläufe (Probelauf) zählen nicht.
+    laeufe: [{tag, at, quelle, aus: [...], gep: [...], trocken}] in beliebiger Reihenfolge. Nur lesen, plant nichts."""
+    stand, at, quelle, tag = {}, None, None, None
+    for l in sorted([l for l in (laeufe or []) if isinstance(l, dict)], key=lambda l: str(l.get("at") or "")):
+        if str(l.get("trocken") or "").lower() == "true":
+            continue
+        tag = tag or l.get("tag")
+        at, quelle = l.get("at") or at, l.get("quelle") or quelle
+        for z in l.get("gep") or []:
+            if isinstance(z, dict) and z.get("konto_id"):
+                stand[str(z["konto_id"])] = None
+        for z in l.get("aus") or []:
+            if isinstance(z, dict) and z.get("konto_id"):
+                stand[str(z["konto_id"])] = z
+    return {"tag": tag, "at": at, "quelle": quelle, "ausgelassen": [z for z in stand.values() if z]}
+
+
+@app.route("/admin/auto-plan/nicht-drin", methods=["GET", "OPTIONS"])
+def admin_auto_plan_nicht_drin():
+    """GET ?tag=YYYY-MM-DD&sicht=admin → {ok, tag, at, quelle, ausgelassen[]} — Abschnitt „Heute nicht drin" im Challenge-Planer (HN1, 12.11.2026).
+    Wie GET /admin/auto-plan (Gate _ap_zugang mit Admin-Reiter, Sicht je ID/Gruppe, Verwalter-Gruppe aus auto_plan_gruppe.letzter_lauf), aber
+    über ALLE Läufe des Tags gemischt (ap_nicht_drin_mischen) statt nur den neuesten. Ohne ?tag der Tag des neuesten Laufs. Nur lesen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, _reg, err = _ap_zugang(admin_reiter=True)
+    if err:
+        return err
+    sicht = _ap_sicht_aus_anfrage(admin, uid)
+    tag = str(request.args.get("tag") or "").strip()[:10]
+    if tag and not re.match(r"^\d{4}-\d{2}-\d{2}$", tag):
+        return jsonify({"ok": False, "msg": "tag als YYYY-MM-DD"}), 400
+    try:
+        gr_lauf = None if admin else ap_gruppe_von_uid(uid)
+    except Exception as e:
+        print(f"[nicht-drin] ⚠️ Gruppe: {type(e).__name__}: {e}", flush=True)
+        gr_lauf = None
+    try:
+        if gr_lauf:   # Verwalter-Gruppe: nur ihr eigener letzter Lauf (wie GET /admin/auto-plan), nie der HT-Lauf
+            ll = gr_lauf.get("letzter_lauf") if isinstance(gr_lauf.get("letzter_lauf"), dict) else {}
+            laeufe = [{"tag": ll.get("tag"), "at": ll.get("at"), "quelle": ll.get("quelle"), "aus": ll.get("ausgelassen"), "gep": ll.get("geplant"),
+                       "trocken": ll.get("trocken")}] if ll and (not tag or str(ll.get("tag") or "")[:10] == tag) else []
+        else:
+            if not tag:
+                neu = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag", order="at.desc", limit="1")) or []
+                tag = str((neu[0] if neu else {}).get("tag") or "")[:10]
+            laeufe = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,aus:ergebnis->ausgelassen,gep:ergebnis->geplant,trocken:ergebnis->>trocken",
+                                                      tag=f"eq.{tag}", order="at.desc", limit="400")) if tag else []   # Prüfer: neueste zuerst — über 400 fielen sonst die geltenden weg (Mischen sortiert selbst)
+    except Exception as e:
+        print(f"[nicht-drin] ⚠️ Läufe: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"Läufe nicht lesbar: {type(e).__name__}"}), 503
+    erg = ap_nicht_drin_mischen(laeufe)
+    erg["tag"] = erg.get("tag") or tag or None
+    try:
+        erg = ap_ohne_archiv(erg, _ap_archiviert())   # inzwischen archiviert → nicht mehr in der Liste
+    except Exception as e:
+        print(f"[nicht-drin] ⚠️ Archiv-Filter: {type(e).__name__}: {e}", flush=True)
+    erg = ap_aus_ohne_plan_laden(erg)   # Konto hat inzwischen einen Plan für den Tag → drin
+    # HN1-Nachtrag (Master 12.11.2026, Befund S4): HT-IDs ohne Haken in auto_plan_regeln.user_ids liest der Lauf gar nicht ein — ihre Challenge-
+    # Konten hier mit Grund (nur lesen, der Lauf bleibt unverändert). Nur im HT-Lauf; Planer-Gruppen (Emin) planen ihre IDs selbst.
+    still = []
+    if not gr_lauf:
+        try:
+            drin = {str(u) for u in (_reg or {}).get("user_ids") or ()} | {str(u) for u in _fd_gruppen_ids()}
+            raus = [u for u in _fdp_ht_ids() if u not in drin]
+            if raus:
+                archiv, namen = _ap_archiviert(), _ap_namen()[0]
+                for a in _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,tv_balance", "user_id": "in.(" + ",".join(raus) + ")",
+                                              "account_type": "in.(" + ",".join(AP_TYPEN) + ")"}) or []:
+                    if str(a.get("id")) in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN or ist_topstep_express(a):
+                        continue   # wie der Lauf: archiviert, Gegenhedge-Konto, Topstep Express nie im Challenge-Planer
+                    still.append({"konto_id": str(a.get("id")), "user_id": str(a.get("user_id")), "user": namen.get(str(a.get("user_id"))) or str(a.get("user_id"))[:8],
+                                  "konto": a.get("name"), "firma": a.get("firm"), "typ": a.get("account_type"), "balance": _wd_num(a.get("tv_balance")), "grund": AP_GRUND_ID_AUS})
+        except Exception as e:
+            print(f"[nicht-drin] ⚠️ IDs außerhalb des Planers: {type(e).__name__}: {e}", flush=True)
+    out = ap_sicht(erg, sicht) if sicht is not None else erg
+    if sicht is not None:
+        still = ap_sicht({"ausgelassen": still}, sicht).get("ausgelassen") or []
+    resp = jsonify(json.loads(json.dumps({"ok": True, "tag": out.get("tag"), "at": out.get("at"), "quelle": out.get("quelle"),
+                                          "ausgelassen": out.get("ausgelassen") or [], "nicht_im_planer": still}, default=str)))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/admin/auto-plan/konto-consistency", methods=["POST", "OPTIONS"])
 def admin_auto_plan_konto_consistency():
     """POST {konto_id, pct: null | 1–100} → accounts.consistency_pct (null = Firmen-Standard). Nur Admin, nur Challenge-Konten des Planers."""
@@ -48486,6 +48572,11 @@ def _fdp_ids_aus():
         return set()
 
 
+FDP_GRUND_FIRMA_AUS = "Firma im Funded-Planer aus — unter Funded Planer → Futures → Einstellungen einschalten"   # HN1 (12.11.2026)
+FCP_GRUND_FIRMA_AUS = "Firma im Funded-CFD-Planer aus — unter Funded Planer → CFD → Einstellungen einschalten"   # HN1 (12.11.2026)
+AP_GRUND_ID_AUS = "ID nicht im Challenge-Planer — unter „IDs verwalten“ den Haken setzen"   # HN1 (12.11.2026)
+
+
 def _fdp_ht_ids():
     """user_ids der Gruppe „Hermann Technologies“ ohne ids_aus (Vorschau ohne eingespielte Regeln und Liste „IDs verwalten")."""
     try:
@@ -48557,8 +48648,20 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                   "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
     an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
-    konten = [a for a in ap_deaktiviert_anwenden(konten) or [] if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
+    _alle_k = ap_deaktiviert_anwenden(konten) or []
+    konten = [a for a in _alle_k if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
     archiv = _ap_archiviert()
+    # HN1 (Master 12.11.2026, Befund S4: Konten einer ausgeschalteten Firma fielen hier still weg): eigene Liste nicht_im_planer[] mit Grund — nur für
+    # „Heute nicht drin“. Entscheidung unverändert (kein Plan); bewusst NICHT in ausgelassen[] (ID-Leiste, Braucht dich, Lauf-Zeile, Kontoliste je Firma)
+    try:   # HN1 (Master beim Push): nur Anzeige — ein Fehler hier darf den Planerlauf nie abbrechen
+        erg["nicht_im_planer"] = [{"konto_id": str(a.get("id")), "user_id": str(a.get("user_id")), "konto": a.get("name"), "firma": a.get("firm"),
+                                   "balance": (lambda v, bs: None if v is None else round(v + bs, 2))(_wd_num(a.get("tv_balance")), fdp_express_basis(a, _wd_konto_groesse(a))),   # Express absolut wie der Hauptweg (Prüfer)
+                                   "grund": FDP_GRUND_FIRMA_AUS}
+                                  for a in _alle_k if str(a.get("id")) not in archiv and _ap_norm(a.get("firm")) not in AP_STILL_FIRMEN
+                                  and not ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
+    except Exception as _e:
+        print(f"[funded-planer] ⚠️ nicht_im_planer: {type(_e).__name__}: {_e}", flush=True)
+        erg["nicht_im_planer"] = []
     konten = [a for a in konten if str(a.get("id")) not in archiv]
     ids = [str(a["id"]) for a in konten]
     plaene, payouts = [], {}
@@ -51409,7 +51512,18 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade",
                                       "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
     archiv = _ap_archiviert()
-    konten = [a for a in ap_deaktiviert_anwenden(konten) if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
+    _kd = ap_deaktiviert_anwenden(konten)
+    konten = [a for a in _kd if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
+    # HN1-Nachtrag (Master 12.11.2026): still weggefilterte Konten (Firma ohne Regel bzw. im Planer aus, unten) als nicht_im_planer[] mit Grund —
+    # nur für „Heute nicht drin“; Entscheidung unverändert (kein Plan), nicht in ausgelassen[] und nicht in auto_plan_lauf
+    _nip = lambda a: {"konto_id": str(a.get("id")), "user_id": str(a.get("user_id")), "konto": a.get("name"), "firma": a.get("firm"),   # noqa: E731
+                      "balance": _wd_num(a.get("tv_balance")), "grund": FCP_GRUND_FIRMA_AUS}
+    try:   # HN1 (Master beim Push): nur Anzeige — ein Fehler hier darf den Planerlauf nie abbrechen
+        erg["nicht_im_planer"] = [_nip(a) for a in _kd if str(a.get("id")) not in archiv and _ap_norm(a.get("firm")) not in AP_STILL_FIRMEN
+                                  and not ap_regel_finden(firmen, a.get("firm"))]
+    except Exception as _e:
+        print(f"[funded-cfd] ⚠️ nicht_im_planer: {type(_e).__name__}: {_e}", flush=True)
+        erg["nicht_im_planer"] = []
     ids = [str(a["id"]) for a in konten]
     gt_korr = fcp_gt_korr_laden(ids)     # GT2: Gewinntage von Hand je Konto + Zyklus (Spalte fehlt → {})
     plaene, pend, verw, buch = [], [], [], []
@@ -51470,6 +51584,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         regel = ap_regel_finden(an if reg_u is reg else [f for f in (reg_u.get("firmen") or []) if isinstance(f, dict) and f.get("an")], a.get("firm"))
         param_u = param if reg_u is reg else fcp_param(reg_u)
         if not regel:
+            try:
+                erg.setdefault("nicht_im_planer", []).append(_nip(a))   # HN1-Nachtrag: sichtbar in „Heute nicht drin“ (nur Anzeige, nie den Lauf abbrechen)
+            except Exception:
+                pass
             continue                     # Firma aus: nur in plaene, nie geplant
         od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
         fkey = (regel.get("namen") or [""])[0]
@@ -51839,7 +51957,7 @@ def fcp_sicht(erg, sicht):
     if sicht is None:
         return erg
     out = dict(erg)
-    for f in ("geplant", "ziel", "ausgelassen", "plaene", "ids", "alle_ids", "verschoben"):      # ids/alle_ids: Funded-Planer (fdp_planen); verschoben: M1
+    for f in ("geplant", "ziel", "ausgelassen", "plaene", "ids", "alle_ids", "verschoben", "nicht_im_planer"):      # ids/alle_ids: Funded-Planer (fdp_planen); verschoben: M1; HN1
         if isinstance(erg.get(f), list):
             out[f] = [z for z in erg.get(f) or [] if admin_in_sicht(z.get("user_id"), sicht)]
     out["sicht"] = "eigene" if isinstance(sicht, str) else "gruppe"
