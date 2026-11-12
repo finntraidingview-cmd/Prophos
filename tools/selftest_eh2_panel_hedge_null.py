@@ -75,6 +75,11 @@ check("Hedge-0-Prüfung nicht möglich" in blk and "_master_contract_size_live(_
 mcl = quelle(PANEL, "_master_contract_size_live")
 check("mt5.symbol_info(symbol)" in mcl and "mt5.shutdown()" in mcl and "master_expected_login" in mcl and "order_send" not in mcl,
       "Master-Kontraktgröße NUR LESEND (symbol_info, Login-Guard, shutdown), kein order_send")
+# Prüfer EH2 (SOLLTE): nur laufendes Terminal, kurzer timeout, nie ohne erwarteten Login, Ergebnis gemerkt
+check("provision.terminal_pids(" in mcl and mcl.index("provision.terminal_pids(") < mcl.index("mt5.initialize("), "nur ein schon laufendes Terminal wird gelesen (nie gestartet)")
+check("mt5.initialize(path=path, timeout=5000)" in mcl, "initialize mit 5 s timeout (nicht 60 s Standard vor dem Klick)")
+check("or not exp:" in mcl and "int(ai.login) != exp" in mcl, "ohne master_expected_login wird nicht gelesen; Login muss passen")
+check("_MCS_CACHE[key] = (time.time(), cs)" in mcl and "_MCS_CACHE_S" in PANEL, "Kontraktgröße je Terminal × Login × Symbol gemerkt (kein Anschluss vor jeder Order)")
 check('"hedge_sym": hedge_sym_specs(m.symbol_map)' in COP and "def hedge_sym_specs(symbol_map):" in COP, "Copier schreibt hedge_sym (Lot-Schritt, Mindest-Lot, Kontraktgröße der Hedge-Ziele) in den Status")
 check("const hedgeNull = !!(r && !r.ok && r.code === 'hedge_null' && r.gesendet === false" in HTML and "unklar: !(retryOk || sicherAbgelehnt || hedgeNull)" in HTML
       and "(retryOk || echoAus || hedgeNull)) await fensterWeg()" in HTML, "PC-Tab: hedge_null = nichts gesendet (nicht UNKLAR), Fenster zurück")

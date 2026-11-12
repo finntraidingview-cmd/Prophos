@@ -5931,27 +5931,49 @@ def hedge_null_urteil(volumen, multiplier, m_cs, hs):
     return False, "", v
 
 
+_MCS_CACHE = {}          # EH2: (Terminal-Pfad, Login, Symbol) → (Zeit, Kontraktgröße) — die Kontraktgröße eines Symbols ändert sich praktisch nie
+_MCS_CACHE_S = 6 * 3600
+
+
 def _master_contract_size_live(cfg, symbol):
     """EH2: Kontraktgröße des Master-Symbols LIVE am Master-Terminal, NUR LESEND (wie _master_positionen_live: initialize → symbol_info → shutdown,
-    Login-Guard). → float | None (nicht lesbar — Aufrufer prüft dann nicht, nur Log)."""
+    Login-Guard). → float | None (nicht lesbar — Aufrufer prüft dann nicht, nur Log).
+    Prüfer EH2 (SOLLTE): nur ein Terminal lesen, das schon läuft (provision.terminal_pids wie der Deals-Weg — initialize startete sonst ein
+    geschlossenes Terminal ohne die Start-Parameter), initialize mit kurzem timeout (5 s statt 60 s Standard: ein hängendes Terminal bzw. ein offener
+    Login-Dialog darf die Zeit bis zum Klick nicht aufzehren), ohne master_expected_login nie (sonst läse es ein fremdes Konto). Ergebnis 6 h gemerkt."""
     path = str(cfg.get("master_terminal_path") or "").strip()
-    if not path or not os.path.exists(path) or not symbol:
+    try:
+        exp = int(cfg.get("master_expected_login") or 0)
+    except (TypeError, ValueError):
+        exp = 0
+    if not path or not os.path.exists(path) or not symbol or not exp:
+        return None
+    key = (os.path.abspath(path), exp, str(symbol))
+    c = _MCS_CACHE.get(key)
+    if c and time.time() - c[0] < _MCS_CACHE_S:
+        return c[1]
+    try:
+        if not provision.terminal_pids(os.path.dirname(os.path.abspath(path))):
+            return None
+    except Exception:
         return None
     try:
         import MetaTrader5 as mt5
     except ImportError:
         return None
     try:
-        if not mt5.initialize(path=path):
+        if not mt5.initialize(path=path, timeout=5000):
             return None
         try:
             ai = mt5.account_info()
-            exp = int(cfg.get("master_expected_login") or 0)
-            if ai is None or (exp and int(ai.login) != exp):
+            if ai is None or int(ai.login) != exp:
                 return None
             si = mt5.symbol_info(symbol)
             cs = float(getattr(si, "trade_contract_size", 0) or 0) if si is not None else 0.0
-            return cs if cs > 0 else None
+            if cs > 0:
+                _MCS_CACHE[key] = (time.time(), cs)
+                return cs
+            return None
         finally:
             mt5.shutdown()
     except Exception:
