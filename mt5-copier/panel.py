@@ -5931,6 +5931,10 @@ def hedge_null_urteil(volumen, multiplier, m_cs, hs):
     return False, "", v
 
 
+# EH2b (Prüfer S2, 12.11.2026): mt5.initialize/shutdown gilt prozessweit — zwei Lesungen im Panel-Prozess (zwei Echo-Starts verschiedener Instanzen,
+# Lösch-Riegel) lasen sonst gegenseitig das falsche Terminal. Ein Modul-Lock um JEDEN In-Prozess-MT5-Anschluss; nicht in 5 s frei → nicht lesen (None).
+_MT5_INPROC_LOCK = threading.Lock()
+_MT5_INPROC_WARTE_S = 5.0
 _MCS_CACHE = {}          # EH2: (Terminal-Pfad, Login, Symbol) → (Zeit, Kontraktgröße) — die Kontraktgröße eines Symbols ändert sich praktisch nie
 _MCS_CACHE_S = 6 * 3600
 
@@ -5961,6 +5965,8 @@ def _master_contract_size_live(cfg, symbol):
         import MetaTrader5 as mt5
     except ImportError:
         return None
+    if not _MT5_INPROC_LOCK.acquire(timeout=_MT5_INPROC_WARTE_S):
+        return None                                   # EH2b: anderer In-Prozess-Anschluss läuft → nicht prüfen, kein Riegel
     try:
         if not mt5.initialize(path=path, timeout=5000):
             return None
@@ -5970,7 +5976,8 @@ def _master_contract_size_live(cfg, symbol):
                 return None
             si = mt5.symbol_info(symbol)
             cs = float(getattr(si, "trade_contract_size", 0) or 0) if si is not None else 0.0
-            if cs > 0:
+            ai2 = mt5.account_info()                  # EH2b: nach dem Lesen nochmals das Konto — nur dann gilt (und wird gemerkt), was gelesen wurde
+            if cs > 0 and ai2 is not None and int(ai2.login) == exp:
                 _MCS_CACHE[key] = (time.time(), cs)
                 return cs
             return None
@@ -5978,6 +5985,8 @@ def _master_contract_size_live(cfg, symbol):
             mt5.shutdown()
     except Exception:
         return None
+    finally:
+        _MT5_INPROC_LOCK.release()
 
 
 def _master_positionen_live(cfg):
@@ -5993,6 +6002,8 @@ def _master_positionen_live(cfg):
         import MetaTrader5 as mt5
     except ImportError:
         return None
+    if not _MT5_INPROC_LOCK.acquire(timeout=_MT5_INPROC_WARTE_S):
+        return None                                   # EH2b: anderer In-Prozess-Anschluss läuft → nicht prüfbar (nie „beweisbar flach“)
     try:
         if not mt5.initialize(path=path):
             return None
@@ -6001,11 +6012,19 @@ def _master_positionen_live(cfg):
             exp = int(cfg.get("master_expected_login") or 0)
             if ai is None or (exp and int(ai.login) != exp):
                 return None
-            return len(mt5.positions_get() or ())
+            pos = mt5.positions_get()
+            if pos is None:                           # EH2b: Lesefehler ist nie „0 Positionen“ (vorher len(None or ()) = 0 = flach)
+                return None
+            ai2 = mt5.account_info()
+            if ai2 is None or (exp and int(ai2.login) != exp):
+                return None
+            return len(pos)
         finally:
             mt5.shutdown()
     except Exception:
         return None
+    finally:
+        _MT5_INPROC_LOCK.release()
 
 
 def _ok_dialog_watcher(install_dir, dauer_s=75):

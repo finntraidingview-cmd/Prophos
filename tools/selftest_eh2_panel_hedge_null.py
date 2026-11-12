@@ -84,6 +84,87 @@ check('"hedge_sym": hedge_sym_specs(m.symbol_map)' in COP and "def hedge_sym_spe
 check("const hedgeNull = !!(r && !r.ok && r.code === 'hedge_null' && r.gesendet === false" in HTML and "unklar: !(retryOk || sicherAbgelehnt || hedgeNull)" in HTML
       and "(retryOk || echoAus || hedgeNull)) await fensterWeg()" in HTML, "PC-Tab: hedge_null = nichts gesendet (nicht UNKLAR), Fenster zurück")
 
+# ── EH2b (Prüfer S2): In-Prozess-MT5-Lock — zwei Threads, zwei Terminals (gemockt) → keine Kreuz-Werte; positions_get None nie flach
+import tempfile
+import threading
+import time
+import types
+
+
+class FakeMT5:
+    """prozessweiter Anschluss wie MetaTrader5: initialize(path) wechselt DAS eine Terminal, Aufrufe dazwischen schlafen (Verzahnung erzwingen)"""
+    def __init__(self, terminals):
+        self.t, self.aktuell = terminals, None
+
+    def initialize(self, path=None, timeout=None):
+        self.aktuell = path
+        time.sleep(0.01)
+        return True
+
+    def shutdown(self):
+        self.aktuell = None
+
+    def account_info(self):
+        time.sleep(0.005)
+        t = self.t.get(self.aktuell)
+        return types.SimpleNamespace(login=t["login"]) if t else None
+
+    def symbol_info(self, sym):
+        time.sleep(0.01)
+        t = self.t.get(self.aktuell)
+        return types.SimpleNamespace(trade_contract_size=t["cs"]) if t else None
+
+    def positions_get(self):
+        time.sleep(0.005)
+        t = self.t.get(self.aktuell)
+        return t["pos"] if t else None
+
+
+tmp = tempfile.mkdtemp()
+pa, pb = os.path.join(tmp, "A", "terminal64.exe"), os.path.join(tmp, "B", "terminal64.exe")
+for x in (pa, pb):
+    os.makedirs(os.path.dirname(x), exist_ok=True)
+    open(x, "w").close()
+fake = FakeMT5({pa: {"login": 111, "cs": 1.0, "pos": ()}, pb: {"login": 222, "cs": 20.0, "pos": (1, 2)}})
+sys.modules["MetaTrader5"] = fake
+pns = {"os": os, "time": time, "threading": threading, "provision": types.SimpleNamespace(terminal_pids=lambda d: [1])}
+blk = PANEL[PANEL.index("_MT5_INPROC_LOCK = threading.Lock()"):PANEL.index("def _ok_dialog_watcher(")]
+exec(blk, pns)
+ca, cb = {"master_terminal_path": pa, "master_expected_login": 111}, {"master_terminal_path": pb, "master_expected_login": 222}
+erg = {"a": [], "b": [], "pa": [], "pb": []}
+
+
+def lauf(cfg, k, kp):
+    for i in range(15):
+        pns["_MCS_CACHE"].clear()
+        erg[k].append(pns["_master_contract_size_live"](cfg, "NAS100"))
+        erg[kp].append(pns["_master_positionen_live"](cfg))
+
+
+th = [threading.Thread(target=lauf, args=(ca, "a", "pa")), threading.Thread(target=lauf, args=(cb, "b", "pb"))]
+for x in th:
+    x.start()
+for x in th:
+    x.join()
+check(set(v for v in erg["a"] if v is not None) <= {1.0} and set(v for v in erg["b"] if v is not None) <= {20.0} and erg["a"].count(1.0) + erg["b"].count(20.0) >= 20,
+      f"zwei Threads, zwei Terminals: Kontraktgröße nie vom fremden Terminal (A {set(erg['a'])}, B {set(erg['b'])})")
+check(set(v for v in erg["pa"] if v is not None) <= {0} and set(v for v in erg["pb"] if v is not None) <= {2}, f"Positionen nie vom fremden Terminal (A {set(erg['pa'])}, B {set(erg['pb'])})")
+pns["_MCS_CACHE"].clear()
+pns["_master_contract_size_live"](ca, "NAS100"); pns["_master_contract_size_live"](cb, "NAS100")
+check(all((k[1] == 111 and v[1] == 1.0) or (k[1] == 222 and v[1] == 20.0) for k, v in pns["_MCS_CACHE"].items()) and len(pns["_MCS_CACHE"]) == 2, "Cache ohne Kreuz-Werte (Login ↔ Kontraktgröße)")
+fake.t[pa]["pos"] = None
+check(pns["_master_positionen_live"](ca) is None, "positions_get None → nicht prüfbar (None), nie „beweisbar flach“ (0)")
+fake.t[pa]["pos"] = ()
+pns["_MT5_INPROC_LOCK"].acquire()
+t0 = time.time()
+pns["_MT5_INPROC_WARTE_S"] = 0.2
+r1, r2 = pns["_master_contract_size_live"](dict(ca, master_expected_login=111), "US500"), pns["_master_positionen_live"](ca)
+pns["_MT5_INPROC_LOCK"].release()
+check(r1 is None and r2 is None and time.time() - t0 < 2, "Lock besetzt → nach Wartezeit None (kein Riegel bzw. nicht flach), kein Hängen")
+fake.t[pb]["login"] = 333
+pns["_MCS_CACHE"].clear()
+check(pns["_master_contract_size_live"](cb, "NAS100") is None and not pns["_MCS_CACHE"], "Konto passt nicht (Login-Guard) → None, nichts gemerkt")
+
 print()
 if fehler:
     print(f"ROT: {len(fehler)} Prüfung(en)")
