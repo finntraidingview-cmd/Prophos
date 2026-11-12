@@ -2686,6 +2686,25 @@ def main():
             log(f"[solo] {a.get('aktion')} {cid[:8]}: {'OK' if erg.get('ok') else 'FEHLER'} — {str(erg.get('msg') or '')[:160]}")
             solo_ergebnis_schreiben(alle, cid, erg)
 
+    # EH2 (12.11.2026, Befund S2): Symbol-Daten der Hedge-Ziele (volume_step/min, Kontraktgröße) in den Status — das Panel prüft damit VOR dem Klick
+    # (/api/master-order), ob der Hedge nach norm_vol 0 Lot würde. Höchstens alle 60 s je Symbol neu gelesen; nicht lesbar → fehlt (Panel loggt nur).
+    _hs_cache = {}
+
+    def hedge_sym_specs(symbol_map):
+        out = {}
+        for ziel in sorted({str(v) for v in (symbol_map or {}).values() if v}):
+            c = _hs_cache.get(ziel)
+            if not c or time.time() - c[0] > 60:
+                try:
+                    si = sym_info(ziel)
+                except Exception:
+                    si = None
+                c = (time.time(), si)
+                _hs_cache[ziel] = c
+            if c[1]:
+                out[ziel] = {k: c[1].get(k) for k in ("volume_step", "volume_min", "trade_contract_size")}
+        return out
+
     def master_status(m, snap, hedges, connected):
         # Ein EINGEFRORENER Snapshot ist genauso blind wie ein fehlender — nur
         # unsichtbarer: die Datei von gestern liest sich gueltig (Fund 15.08.2026,
@@ -2725,6 +2744,7 @@ def main():
             "hedge_login": int(ai.login), "hedge_server": str(ai.server),
             "magic": m.magic, "comment_prefix": m.prefix,
             "multiplier": m.multiplier, "symbol_map": m.symbol_map,
+            "hedge_sym": hedge_sym_specs(m.symbol_map),   # EH2: Hedge-Ziele {volume_step, volume_min, trade_contract_size}
             "master_positions": (snap or {}).get("positions") or [],
             "hedges": {str(k): v for k, v in (hedges or {}).items()},
             "blocked": sorted(m.blocked),

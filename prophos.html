@@ -57241,6 +57241,9 @@
                   // Ergebnis nicht unklar: nichts liegt am Konto → unklar = false (der Tages-Reset räumt den Plan dann weg statt „nie fertig“ ins Radar)
                   // Nur das Feld des Bots zählt (S4), nie ein Text-Raten im Tab; mit Position (price + ticket) nie — dort liegt etwas am Konto
                   const sicherAbgelehnt = !!(r && r.server_abgelehnt === true && !(r.price && r.ticket) && !r.ok)
+                  // EH2 (12.11.2026): Panel-Riegel „Hedge wäre 0 Lot“ — vor dem Bot-Start, beweisbar nichts gesendet (gesendet false), kein Neuversuch (retry_ok false),
+                  // aber auch nicht UNKLAR: nichts liegt am Konto
+                  const hedgeNull = !!(r && !r.ok && r.code === 'hedge_null' && r.gesendet === false && !(r.price && r.ticket))
                   const echoAus = _pfEchoPausiert(r)
                   const nichtScharf = echoBotNichtScharf(r)   // ES2d: Bot meldet „Copier nicht scharf" — wie der Scharf-Fehler im Tab
                   _pfSet('m5term', 'err', (echoAus || nichtScharf ? 'Nichts platziert: ' : 'Order fehlgeschlagen: ')
@@ -57249,6 +57252,7 @@
                     fe.textContent = echoAus
                       ? '⏸ Echo ist pausiert — es wurde NICHTS gesendet. Unten fortsetzen, dann läuft der Check sofort neu.'
                       : nichtScharf ? '✗ Copier nicht scharf — es wurde NICHTS gesendet.'
+                      : hedgeNull ? '✗ Hedge wäre 0 Lot — es wurde NICHTS gesendet. Kontraktgrößen Master/Fusion bzw. Multiplikator prüfen.'
                       : retryOk
                       ? '✗ Order abgelehnt — Meldung oben. Erneut „Weiter" → „Starten".'
                       : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
@@ -57267,16 +57271,16 @@
                     _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // wie der Scharf-Fehler im Tab
                     _pfStatusSave()
                     try{ renderTradePlans() }catch(_){}
-                  } else _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !(retryOk || sicherAbgelehnt),
+                  } else _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !(retryOk || sicherAbgelehnt || hedgeNull),
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                   // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
                   // S8: beweisbar nichts gesendet (retry_ok bzw. Echo pausiert, keine Position) → Fenster zurück; „Erneut" schreibt es neu.
                   // UNKLAR (kein retry_ok) bleibt es stehen — dort kann eine Order liegen, die gehedgt werden muss
-                  if(!(r && r.price && r.ticket) && (retryOk || echoAus)) await fensterWeg()
+                  if(!(r && r.price && r.ticket) && (retryOk || echoAus || hedgeNull)) await fensterWeg()
                   if(!(r && r.price && r.ticket) && echoAus) await sfEinmal({ schritt: 'm5pause', msg: 'Echo ist pausiert (Not-Aus) — nichts gesendet.', unklar: false })
                   if(!(r && r.price && r.ticket) && nichtScharf) await sfEinmal({ schritt: 'm5scharf', msg: String(r.msg || 'Copier nicht scharf — nichts gesendet.'), unklar: false })
-                  if(!(r && r.price && r.ticket) && !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !(retryOk || sicherAbgelehnt), bild: r && r.fehlerbild,
+                  if(!(r && r.price && r.ticket) && !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !(retryOk || sicherAbgelehnt || hedgeNull), bild: r && r.fehlerbild,
                     ...(sicherAbgelehnt ? { server_abgelehnt: true, grund: String(r.grund || '').slice(0, 160) || undefined } : {}) })
                 }
               }catch(e){

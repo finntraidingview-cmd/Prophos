@@ -149,8 +149,9 @@ def main():
           and "&& !echoAus && !nichtScharf) await sfEinmal({ schritt: 'm5order'" in nsf,
           "ES2d: Bot meldet nicht scharf → Start-Fehler m5scharf, Plakette issue, Handy check_fail, kein m5order")
     nach = order[order.index("pulsSpurSchreiben(plan.id, r)"):order.index("}catch(e){")]
-    check("(retryOk || echoAus)) await fensterWeg()" in nach and nach.count("await fensterWeg()") == 1,
-          "Order abgelehnt: Fenster nur zurück bei beweisbar nichts gesendet (retry_ok / Echo pausiert), nie bei UNKLAR (ES2b)")
+    # EH2 (12.11.2026): + hedgeNull (Panel-Riegel „Hedge wäre 0 Lot“, gesendet false) — auch beweisbar nichts gesendet
+    check("(retryOk || echoAus || hedgeNull)) await fensterWeg()" in nach and nach.count("await fensterWeg()") == 1,
+          "Order abgelehnt: Fenster nur zurück bei beweisbar nichts gesendet (retry_ok / Echo pausiert / Hedge 0 Lot), nie bei UNKLAR (ES2b)")
     bereit = k[k.index("_pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')") - 300:k.index("if(sec > 240){")]
     check("fensterWeg" not in bereit, "Hand-Weg „Bereit — im Terminal traden“ lässt das Fenster offen (Hand-Trade soll gehedgt werden)")
     tick = t[t.index("_pfMt5Timer = setInterval(async () => {"):]

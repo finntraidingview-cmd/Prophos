@@ -5908,6 +5908,56 @@ def _startup_attach_part(fname, cfg, install_dir):
     return "\n" + provision.build_startup_ini(preset=preset)
 
 
+def hedge_null_urteil(volumen, multiplier, m_cs, hs):
+    """REIN RECHNEND (testbar, EH2 12.11.2026, Befund S2): würde der Copier zu dieser Master-Order einen Hedge von 0 Lot rechnen? Dieselbe Formel wie
+    copier.plan_actions + norm_vol: v = volumen × multiplier × m_cs ÷ h_cs, auf volume_step gerundet, unter volume_min → 0.
+    hs = {volume_step, volume_min, trade_contract_size} des Hedge-Ziels (Copier-Status hedge_sym). → (gesperrt, text, v) | (None, grund, None) = nicht prüfbar
+    (fehlende Angabe → wie bisher kein Riegel, nur Log)."""
+    try:
+        vol, mult = float(volumen), float(multiplier)
+        mcs = float(m_cs)
+        step = float((hs or {}).get("volume_step") or 0)
+        vmin = float((hs or {}).get("volume_min") or 0)
+        hcs = float((hs or {}).get("trade_contract_size") or 0)
+    except (TypeError, ValueError):
+        return None, "Angabe nicht lesbar", None
+    if not (vol > 0 and mult > 0 and mcs > 0 and step > 0 and vmin > 0 and hcs > 0):
+        return None, "Angabe fehlt (Volumen/Multiplikator/Kontraktgrößen/Lot-Schritt)", None
+    roh = vol * mult * (mcs / hcs)
+    v = round(round(roh / step) * step, 8)
+    if v < vmin - 1e-6:
+        return True, (f"Hedge wäre 0 Lot — Kontraktgrößen Master/Fusion prüfen (gerechnet {roh:.4f} Lot = {vol:g} × {mult:.4f} × {mcs:g} ÷ {hcs:g}, "
+                      f"Mindest-Lot {vmin:g}). Nichts gesendet."), 0.0
+    return False, "", v
+
+
+def _master_contract_size_live(cfg, symbol):
+    """EH2: Kontraktgröße des Master-Symbols LIVE am Master-Terminal, NUR LESEND (wie _master_positionen_live: initialize → symbol_info → shutdown,
+    Login-Guard). → float | None (nicht lesbar — Aufrufer prüft dann nicht, nur Log)."""
+    path = str(cfg.get("master_terminal_path") or "").strip()
+    if not path or not os.path.exists(path) or not symbol:
+        return None
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+    try:
+        if not mt5.initialize(path=path):
+            return None
+        try:
+            ai = mt5.account_info()
+            exp = int(cfg.get("master_expected_login") or 0)
+            if ai is None or (exp and int(ai.login) != exp):
+                return None
+            si = mt5.symbol_info(symbol)
+            cs = float(getattr(si, "trade_contract_size", 0) or 0) if si is not None else 0.0
+            return cs if cs > 0 else None
+        finally:
+            mt5.shutdown()
+    except Exception:
+        return None
+
+
 def _master_positionen_live(cfg):
     """LIVE am Master-Terminal nachsehen, NUR LESEND (19.08.2026, Finns Fund:
     der Loesch-Riegel glaubte der Positionsliste aus dem EINGEFRORENEN
@@ -8637,6 +8687,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
                     "Fuer diese Instanz laeuft gerade schon eine Order — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))
+            # HEDGE WÄRE 0 LOT (EH2 12.11.2026, Befund S2 zu EH1): nur Echo mit Hedge — rechnet der Copier für diese Order mit der Formel aus
+            # plan_actions/norm_vol 0 Lot (Kontraktgröße Master ≫ Fusion-Raster, falsches Preset), bliebe die Order ungehedgt: KEIN Klick, retry_ok False.
+            # Fehlt eine Angabe (Master-Kontraktgröße nicht lesbar, Copier-Status ohne hedge_sym, kein Mapping), bleibt es wie bisher — nur Log.
+            if not ohne_hedge:
+                try:
+                    _cfg_h = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+                    _hsym = str((_cfg_h.get("symbol_map") or {}).get(cmd["symbol"]) or "")
+                    _hs = ((st.get("hedge_sym") or {}) if isinstance(st.get("hedge_sym"), dict) else {}).get(_hsym) if _hsym else None
+                    _mcs = _master_contract_size_live(_cfg_h, cmd["symbol"]) if _hs else None
+                    _gesp, _txt, _v = hedge_null_urteil(cmd["volumen"], _cfg_h.get("multiplier"), _mcs, _hs)
+                except Exception as e:
+                    _gesp, _txt, _v = None, f"{type(e).__name__}: {e}", None
+                if _gesp is True:
+                    lock.release()
+                    print(f"[panel] {fname}: master-order RIEGEL hedge_null {cmd['symbol']} {cmd['volumen']}: {_txt[:200]}", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "retry_ok": False, "gesendet": False, "grund": "hedge_null", "code": "hedge_null",
+                                                       "msg": _txt}, ensure_ascii=False))
+                if _gesp is None:
+                    print(f"[panel] {fname}: master-order Hedge-0-Prüfung nicht möglich ({cmd['symbol']} → {_hsym or 'kein Mapping'}): {_txt}", flush=True)
             bot = os.path.join(HERE, "order_bot.py")
             if not os.path.exists(bot):
                 # Nachladen statt raten (15.08.2026): die Datei fehlt auf PCs,
