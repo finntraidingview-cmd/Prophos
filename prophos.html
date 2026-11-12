@@ -3196,6 +3196,14 @@
   /* PA1 (12.11.2026): Handy — Approved/Erhalten bleiben sichtbar, die Knopf-Spalte klebt rechts an der waagerecht scrollenden Tabelle */
   @media (max-width:760px){ #dashboard-view #adm-f-pend-rows td:last-child,#dashboard-view #adm-f-pend-panel thead th:last-child{position:sticky;right:0;background:var(--surface, #fff);box-shadow:-8px 0 8px -8px rgba(0,0,0,.18)}
     #dashboard-view #adm-f-pend-rows .pp-appr-am{display:block;margin:0 0 4px 0;text-align:right} }
+  /* PA2 (Finn 12.11.2026 23:30: „Mach mal Approved und Erhalten andere Farbe.“): zwei Schritte auf einen Blick — Approved (Konto fährt wieder, keine Buchung)
+     als ruhiger Umriss in --blue, „✓ erhalten“ (bucht in Finanzen) als grüner Knopf wie die übrigen Erfolgs-Farben (--good-ink hell, --good dunkel) */
+  #dashboard-view .btn.pp-appr{background:var(--surface);border:1px solid var(--blue);color:var(--blue);box-shadow:none}
+  #dashboard-view .btn.pp-appr:hover{background:color-mix(in srgb,var(--blue) 10%,var(--surface));transform:none}
+  #dashboard-view .btn.pp-erh{background:var(--good-ink,#15803d);border:1px solid var(--good-ink,#15803d);color:#fff;box-shadow:none}
+  #dashboard-view .btn.pp-erh:hover{background:color-mix(in srgb,var(--good-ink,#15803d) 86%,#000);transform:none}
+  html[data-theme="dark"] #dashboard-view .btn.pp-erh{background:var(--good,#32D583);border-color:var(--good,#32D583);color:#06150d}
+  html[data-theme="dark"] #dashboard-view .btn.pp-erh:hover{background:color-mix(in srgb,var(--good,#32D583) 86%,#fff)}
   /* PLANER-TAB (30.10.2026): im Planer-Modus statt der Admin-Reiter die Chip-Leiste der vier Planer */
   #dashboard-view section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}
   /* PLANER-RECHTE (30.10.2026): ohne Schreibrecht Schreib-Elemente ausgegraut (Klick fängt der Riegel ab) */
@@ -20111,10 +20119,11 @@
     function admPayoutSchrittHtml(t, o){
       const xs = o && o.klein ? ' btn-xs' : '', st = o && o.klein ? '' : ' style="padding:4px 9px;font-size:11.5px"'
       if(!t || !t.id) return ''
-      if(!t.approved_at) return `<button type="button" class="btn btn-primary${xs} pp-appr"${st} title="Firma hat den Payout approved — Konto fährt wieder (Winning Days), gebucht wird erst mit „Erhalten“">Approved</button>`
+      // PA2 (Finn 12.11.2026 23:30: „Mach mal Approved und Erhalten andere Farbe.“): Approved = blauer Umriss (erster Schritt), ✓ erhalten = grün (bucht) — CSS .pp-appr / .pp-erh
+      if(!t.approved_at) return `<button type="button" class="btn${xs} pp-appr"${st} title="Firma hat den Payout approved — Konto fährt wieder (Winning Days), gebucht wird erst mit „Erhalten“">Approved</button>`
       return `<span class="pp-appr-am" style="color:var(--good, #15803d);font-size:11.5px;margin-right:6px;white-space:nowrap" title="Approved — Konto ist wieder freigeschaltet, Geld noch nicht da">✓ Approved am ${escapeHtml(admPayoutApprovedTxt(t))}`
         + ` <a href="#" class="pp-appr-x" style="color:var(--sub);font-size:11px;margin-left:2px" title="Approved zurücknehmen (Konto wieder gesperrt), solange nicht erhalten und noch kein neuer Trade gestartet">zurück</a></span>`
-        + `<button type="button" class="btn btn-primary${xs} pp-ok"${st}>✓ erhalten</button>`
+        + `<button type="button" class="btn${xs} pp-ok pp-erh"${st}>✓ erhalten</button>`
     }
     // o: wie admPayoutErhaltenOeffnen (Funded CFD: naechsterTage, waitingLeeren, nachher)
     function admPayoutSchrittVerdrahten(el, t, o){
@@ -91661,7 +91670,7 @@
           // PA1 (Finn 12.11.2026): erst [Approved] — Konto fährt wieder (Winning Days), keine Buchung; danach „✓ Approved am …“ · zurück + [✓ Erhalten] wie bisher
           ? window._admPayoutSchritt.html(t, { klein: true })
           : t.id && typeof window._admPayoutErhaltenOeffnen === 'function'
-          ? (t.approved_at && window._admPayoutSchritt ? window._admPayoutSchritt.html(t, { klein: true }).replace(/<button[^>]*pp-ok[^>]*>[^<]*<\/button>$/, '') : '') + `<button type="button" class="btn ${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'btn-primary' : 'btn-ghost'} btn-xs" data-fcfd-erhalten="${escapeHtml(String(t.id))}" title="${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'Laut Mail-Abgleich ausgezahlt (z. B. „You got paid“) — ' : ''}Payout als erhalten buchen (Rückfrage im Fenster) · Konto raus aus Waiting for Payout · „Payout anfragbar ab“ = Erhalten + 14 Tage">✓ Erhalten</button>` : ''}</td></tr>` }
+          ? (t.approved_at && window._admPayoutSchritt ? window._admPayoutSchritt.html(t, { klein: true }).replace(/<button[^>]*pp-ok[^>]*>[^<]*<\/button>$/, '') : '') + `<button type="button" class="btn ${t.approved_at ? 'pp-erh' : /^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'btn-primary' : 'btn-ghost'} btn-xs" data-fcfd-erhalten="${escapeHtml(String(t.id))}" title="${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'Laut Mail-Abgleich ausgezahlt (z. B. „You got paid“) — ' : ''}Payout als erhalten buchen (Rückfrage im Fenster) · Konto raus aus Waiting for Payout · „Payout anfragbar ab“ = Erhalten + 14 Tage">✓ Erhalten</button>` : ''}</td></tr>` }
     const tabelle = `<div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Firma</th><th>Betrag</th><th>Angefragt am</th><th>Seit</th><th>Liegt bei</th><th style="padding-right:20px"></th></tr></thead>
       <tbody>${zeilen.map(zeile).join('')}</tbody></table></div>`
     return `<div data-apg-anker="unterwegs">${apgKarte(`Payouts auf dem Weg · ${zeilen.length}`, zeilen.length ? `${sumTxt} angefragt, noch nicht erhalten · älteste zuerst` : 'angefragt, noch nicht erhalten',
