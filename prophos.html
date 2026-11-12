@@ -30447,7 +30447,15 @@
     // steckte mit drin. Handelstag des KLICKS (beim Nachholen aus puls_ergebnisse ist „jetzt" ≥ 2 min später, um 17:00 CT schon der
     // Folgetag). balance_relativ: TopstepX-Express zeigt die Balance 0-basiert (wie F27), nur zum Abgleich von Start und Ende.
     const rplStart = zahl(r.rpl) != null ? zahl(r.rpl) + (zahl(r.upl) || 0) : null
-    const rel = tsxBalanceRelativ(r)
+    // TX3 (12.11.2026): das Auge meldet balance_relativ nur bei negativem MLL oder „$150K“ im Label — „150K DLL Express (…)“ nach dem Lock bei 0 → null.
+    // Dann aus dem Konto ableiten: Topstep Express laut Prophos und Start-Balance unter der halben Größe → true (nur dieser Fall; sonst bleibt es offen)
+    let rel = tsxBalanceRelativ(r)
+    if(rel === null){
+      const accR = (typeof accounts !== 'undefined' && Array.isArray(accounts) ? accounts : []).find(a => String(a.id) === String(plan && plan.masterAccountId)), bsR = zahl(r.balance_start)
+      const grR = accR && Number(accR.startingBalance) > 0 ? Number(accR.startingBalance)
+        : (typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName((accR && accR.name) || (plan && plan.masterName) || '') : null)
+      if(bsR != null && grR > 0 && bsR < grR / 2 && typeof kontoIstTopstepExpress === 'function' && kontoIstTopstepExpress(accR)) rel = true
+    }
     // Rückweg aus der Positions-Zeile (.1488, Finn 13.10.2026: „Entry, Kontrakte, Dollar — damit kann man den Wert ausrechnen"): meldet der
     // Bot kein tp_level/sl_level (Zelle nicht gesetzt, Bracket schon von TopstepX), nimmt die Baseline das Level, das der Bot aus Entry
     // Price + Risk / To Make der Positions-Tabelle gerechnet hat (positionen[].tp_level/sl_level, Quelle tsx_tabelle)
@@ -31773,13 +31781,32 @@
     // wie bei Tradeify (Größe + 100). Ohne lesbare MLL wie bisher.
     const tvT = plan && plan.route === 'tsv2' && plan.mt5Baseline && plan.mt5Baseline.tv
     const mllT = tvT && tvT.mll_start != null && tvT.mll_start !== '' ? Number(tvT.mll_start) : NaN, bsT = tvT ? Number(tvT.balance_start) : NaN
-    if(tvT && isFinite(mllT) && isFinite(bsT) && (tvT.balance_relativ === true || mllT > 1000)){
+    // TX3 (Master 12.11.2026, Vorfall Ina PRO …8936, Plan 0ad96857: liq_balance 150.100 gegen BAL 20.524 → kein Liq-Level, nur Radar): das Merkmal
+    // balance_relativ setzt das Auge (mt5-copier/augen_tsx.js balanceRelativ) nur bei negativem MLL oder einem Label mit „$150K“. DLL-Express-Konten heißen in
+    // TopstepX „150K DLL Express (…)“ (ohne $) — solange die MLL vor dem Lock negativ ist (−4.500), kommt true; nach dem Lock bei 0 (Topstep-Support: „locks at
+    // $0“) kommt null. Kein alter Bot-Stand, sondern dieser Lesepfad (Ina pc-xc5c52, Simon …2392 am 11.11. nach dem Lock; „$150K Express“-Konten unauffällig).
+    // Darum Express hier auch ohne Merkmal: Konto laut Prophos Topstep Express (kontoIstTopstepExpress), MLL ≤ 0 und Start-Balance unter der halben Größe —
+    // Liq = MLL + 100 wie app.py wd_sl_express_mll/fdp_express_liq. Eine Express-MLL über 0 gibt es nicht (Lock bei 0) → unklar → kein Level (unten).
+    const kontenT = typeof accounts !== 'undefined' && Array.isArray(accounts) ? accounts : []   // Test-Lader ohne accounts (selftest_tx2_express_sl)
+    const accT = tvT ? kontenT.find(a => String(a.id) === String(plan && plan.masterAccountId)) : null
+    const exT = !!(tvT && typeof kontoIstTopstepExpress === 'function' && kontoIstTopstepExpress(accT))
+    const grT = !exT ? null : accT && Number(accT.startingBalance) > 0 ? Number(accT.startingBalance)
+      : (typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName((accT && accT.name) || (plan && plan.masterName) || '') : null)
+    const expressOhneMerkmal = tvT && tvT.balance_relativ == null && exT && isFinite(mllT) && mllT <= 0 && isFinite(bsT) && grT > 0 && bsT < grT / 2
+    if(tvT && isFinite(mllT) && isFinite(bsT) && (tvT.balance_relativ === true || mllT > 1000 || expressOhneMerkmal)){
       const liqT = Math.round((mllT + 100) * 100) / 100, usdT = Math.round((bsT - liqT) * 100) / 100
       const felderT = { liq_art: 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
       if(!(usdT > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Start-Balance nicht über der TopstepX-MLL + 100 $ — Hedge schließt nur am TP', liq_balance: liqT }, felderT)
       const pktT = Math.round(usdT / (ppl * kt) * 100) / 100
       const lvlT = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktT : einstieg + pktT) * 100) / 100 : null
       return Object.assign({ sl_punkte: pktT, sl_level_nq: lvlT, sl_art: 'liquidation', liq_balance: liqT, sl_usd_hedge: usdT, liq_quelle: 'topstepx_mll', liq_balance_start: bsT }, felderT)
+    }
+    // TX3 FAIL-CLOSED: ein Topstep-Express-Konto, dessen Basis/MLL oben nicht sicher stand (keine Lesung, MLL > 0, Balance nicht 0-basiert, balance_relativ false
+    // bei 0-basierter Lage …), bekommt NIE das Level „Größe + 100“ (150.100 gegen eine 0-basierte Balance; oder ein Level nah am Kurs, das den Hedge sofort
+    // schließt) — nur den Hinweis, der Hedge schließt am TP, der Radar schützt wie heute
+    if(plan && plan.route === 'tsv2' && typeof kontoIstTopstepExpress === 'function'
+       && kontoIstTopstepExpress((typeof accounts !== 'undefined' && Array.isArray(accounts) ? accounts : []).find(a => String(a.id) === String(plan.masterAccountId)))){
+      return { hinweis: 'Topstep Express: MLL aus TopstepX nicht sicher lesbar — Hedge schließt nur am TP (Radar schützt)', liq_art: 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
     }
     // FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026, Prüfung zu tfh_tick): Liquidation = Start-Balance − Polster (master_risk, Planer-Kontowert
     // = Drawdown 4.500 $ bei Tradeify 150k) + 100 $ wie bei Größe + 100 — „Kontogröße + 100" läge bei einer 157k-Challenge 7.000 $ zu tief
@@ -58946,7 +58973,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2208'
+  const OS_TAB_BUILD = '2026-09-22.2209'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
