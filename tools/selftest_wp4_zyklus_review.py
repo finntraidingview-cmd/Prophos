@@ -128,14 +128,15 @@ check(ab2.get("bereit") is False and "Consistency 67,7 % > 50 %" in (ab2.get("fe
 o3 = ruf("kz_rechnen", dict(ACC, tv_balance=101300.0), dict(c, bal=101300.0, plaene=PL[:4]))
 check("Ziel +1.300 $ von +1.454 $ — zählt ab +1.309 $, fehlen 9 $" in ((o3.get("abhak") or {}).get("fehlt_text") or ""), f"Ziel fehlt mit Zahlen: {(o3.get('abhak') or {}).get('fehlt_text')}")
 
-# Frontend: Checkliste im Abhak-Popup (jsc, echte Funktionen mit der kz_rechnen-Antwort von oben)
+# Frontend: Daten der Checkliste (jsc, echte Funktion mit der kz_rechnen-Antwort von oben). AP9 (Finn 12.11.2026: „komplett weglassen“):
+# die Anzeige (wpChecklisteHtml) ist raus — wpCheckliste bleibt, weil Vorauswahl und Ziel-Karte (mwdErlZielOk) daran hängen
 import json, subprocess, tempfile
 def _fn(start, ende):
     i = html.index(start); return html[i:html.index(ende, i)]
-js = (_fn("  function escapeHtml(s){", "\n  }\n") + "\n  }\n" + _fn("  function wpCheckliste(d){", "  window._wpCheckliste") + _fn("  function wpChecklisteHtml(u){", "  window._wpChecklisteHtml")
+js = (_fn("  function escapeHtml(s){", "\n  }\n") + "\n  }\n" + _fn("  function wpCheckliste(d){", "  window._wpCheckliste")
       + "\nconst D = " + json.dumps({"abhak": o["abhak"], "urteil": o["urteil"]}) + ", D2 = " + json.dumps({"abhak": o2["abhak"], "urteil": o2["urteil"]}) + ";\n"
       + "const L = wpCheckliste(D), L2 = wpCheckliste(D2);\n"
-      + "print(JSON.stringify({ L, L2, h: wpChecklisteHtml({ bereit: true, wartet: false, liste: L, fehltText: '' }), h2: wpChecklisteHtml({ bereit: false, wartet: false, liste: L2, fehltText: D2.abhak.fehlt_text }), h0: wpChecklisteHtml(null) }))")
+      + "print(JSON.stringify({ L, L2 }))")
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
     d.write(js)
 rr = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", d.name], capture_output=True, text=True)
@@ -145,22 +146,21 @@ L = e.get("L") or []
 check([r["name"] for r in L] == ["Ziel bis Waiting", "Consistency ≤ 50 %", "Payout ab"] and [r["st"] for r in L] == ["ok", "ok", "info"],
       f"Checkliste: Ziel ✓, Consistency ✓, Payout ab nur Info ({[(r['name'], r['st']) for r in L]} {rr.stderr[:200]})")
 check(L and L[1]["wert"] == "41,5 % · bester Tag 722 $ ÷ 1.740 $" and "+1.803 $ / +1.454 $" in L[0]["wert"] and "20.11" in L[2]["wert"], f"Werte: {[r['wert'] for r in L]}")
-check("→ Konto jetzt zu Waiting for Payout" in (e.get("h") or "") and "✓" in (e.get("h") or ""), "alles ✓ → „Konto jetzt zu Waiting for Payout“")
 # AP2 (11.11.2026): Anzeige-Felder — Ist groß rechts, Soll/fehlt klein darunter; keine Textwand mehr
 check(L and str(L[0].get("titel") or "").startswith("Ziel") and L[0].get("gross") == "+1.803 $" and "erreicht" in (L[0].get("klein") or "") and L[1].get("gross") == "41,5 %"
-      and L[1].get("klein") == "erlaubt ≤ 50 % · bester Tag 722 $ von 1.740 $ Gewinn-Tagen" and "<b>+1.803 $</b>" in (e.get("h") or ""), f"AP2 Anzeige: {[(r.get('titel'), r.get('gross'), r.get('klein')) for r in L]}")
+      and L[1].get("klein") == "erlaubt ≤ 50 % · bester Tag 722 $ von 1.740 $ Gewinn-Tagen", f"AP2 Anzeige-Felder: {[(r.get('titel'), r.get('gross'), r.get('klein')) for r in L]}")
 L2 = e.get("L2") or []
-check(L2 and L2[1]["st"] == "nein" and "Noch nicht fertig: Consistency — Konto bleibt" in (e.get("h2") or "") and 'wpck-z nein' in (e.get("h2") or "")
-      and "67,7 %" in (e.get("h2") or "") and "Nichts ändern — fehlt" not in (e.get("h2") or ""),
-      "fehlt → „Noch nicht fertig: Consistency“ (AP2: keine Textwand), Zeile rot")
-check("nicht lesbar" in (e.get("h0") or ""), "Urteil nicht lesbar → Hinweis statt Liste")
+check(L2 and L2[1]["st"] == "nein" and "67,7 %" in str(L2[1].get("gross") or ""), f"Consistency verletzt → Zeile „nein“ ({L2[1:2]})")
 check("ruhig && !_wpFcfd && !_wpZiel && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))" in html and "!(opts && opts.nurStill)" in html,
       "Ein Klick bei Funded CFD öffnet immer das Popup, der stille Takt nie")
-check('id="mwd-erl-pcheck"' in html and 'id="tc-pcheck"' in html, "Checkliste in Radar-Popup und Trades-Dialog")
+# AP9: Checkliste weder im Radar-Popup noch im Trades-Dialog, keine Reste (Platzhalter, Neuberechnung beim Tippen, Hinweiszeile, CSS)
+check(all(x not in html for x in ('id="mwd-erl-pcheck"', 'id="tc-pcheck"', 'function wpChecklisteHtml', 'function wpErgText', 'function wpLokal',
+      'function wpPlatzhalterHtml', 'mwdErlPcheckZeichnen', 'mwd-erl-waiting-hint', '.wpck')), "AP9: Checkliste samt Resten weg (Popup + Trades-Dialog)")
+check("_mwdErlU = an && typeof window._wpGemerkt === 'function'" in html and "function mwdErlZielOk()" in html and "mwdErlWpAnwenden(u)" in html,
+      "AP9: Urteil/Vorladen/Vorauswahl/Ziel-Karte bleiben")
 
 # Frontend: Popup-Texte
 check("okText: String(ab.ok_text || '')" in html and "'fehlt: ' + String(ab.fehlt_text)" in html, "wpUrteil liest ok_text/fehlt_text")
-check("u.bereit ? 'alles erfüllt — vorausgewählt' : (u.grund ? 'erst, wenn oben alles ✓ ist' : '')" in html, "Radar-Popup: kurzer Satz bei Waiting (AP2, Zahlen stehen in der Checkliste)")
 check("zyklus_ts.get(aid)" in app and app.count("zyklus_ts.get(aid)") >= 4, "Planer zählt mit dem genauen Zyklus-Start")
 
 print("ALLES GRÜN" if not fehler else f"{len(fehler)} FEHLER")
