@@ -6005,7 +6005,7 @@ def _master_positionen_live(cfg):
     if not _MT5_INPROC_LOCK.acquire(timeout=_MT5_INPROC_WARTE_S):
         return None                                   # EH2b: anderer In-Prozess-Anschluss läuft → nicht prüfbar (nie „beweisbar flach“)
     try:
-        if not mt5.initialize(path=path):
+        if not mt5.initialize(path=path, timeout=5000):   # EH2c (Prüfer S2 KANN): 5 s statt 60 s Standard — hält sonst den In-Prozess-Lock lange
             return None
         try:
             ai = mt5.account_info()

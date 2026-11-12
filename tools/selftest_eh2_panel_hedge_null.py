@@ -78,6 +78,7 @@ check("mt5.symbol_info(symbol)" in mcl and "mt5.shutdown()" in mcl and "master_e
 # Prüfer EH2 (SOLLTE): nur laufendes Terminal, kurzer timeout, nie ohne erwarteten Login, Ergebnis gemerkt
 check("provision.terminal_pids(" in mcl and mcl.index("provision.terminal_pids(") < mcl.index("mt5.initialize("), "nur ein schon laufendes Terminal wird gelesen (nie gestartet)")
 check("mt5.initialize(path=path, timeout=5000)" in mcl, "initialize mit 5 s timeout (nicht 60 s Standard vor dem Klick)")
+check("mt5.initialize(path=path, timeout=5000)" in quelle(PANEL, "_master_positionen_live"), "EH2c: auch der Lösch-Riegel initialisiert mit 5 s timeout (hält den In-Prozess-Lock nicht 60 s)")
 check("or not exp:" in mcl and "int(ai.login) != exp" in mcl, "ohne master_expected_login wird nicht gelesen; Login muss passen")
 check("_MCS_CACHE[key] = (time.time(), cs)" in mcl and "_MCS_CACHE_S" in PANEL, "Kontraktgröße je Terminal × Login × Symbol gemerkt (kein Anschluss vor jeder Order)")
 check('"hedge_sym": hedge_sym_specs(m.symbol_map)' in COP and "def hedge_sym_specs(symbol_map):" in COP, "Copier schreibt hedge_sym (Lot-Schritt, Mindest-Lot, Kontraktgröße der Hedge-Ziele) in den Status")
