@@ -2,7 +2,7 @@
 """Selbsttest ST1 (Master 15.11.2026, Finns FundingPips-Regeln): Add-on „Striking“ für FundingPips Funded CFD (app.py FCP_STRIKING_STANDARD,
 fcp_striking_regel, fcp_striking_anwenden, fcp_max_sl, Gewinntag-SL in fcp_konto_rechnen, Verdrahtung fcp_planen / kz_rechnen / zw_funded_cfd,
 fcp_regel_patch striking.*; prophos.html Chip + Name + Einstellung).
-Kern: (1) DIFF-TEST gegen origin/main — ohne Striking rechnet fcp_konto_rechnen für FundedNext, The5ers, Blue Guardian, FTMO und FundingPips bitgleich
+Kern: (1) DIFF-TEST gegen den main-Stand vor ST1 (BASIS 92e49a11) — ohne Striking rechnet fcp_konto_rechnen für FundedNext, The5ers, Blue Guardian, FTMO und FundingPips bitgleich
 (gleicher Zufalls-Verbrauch); (2) Striking: erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 je 100k), gesammelt auch über das
 Ziel hinaus, Verlusttage zählen nicht; danach Consistency 35 % (Payout-Trade gedeckelt: W 4.550 → höchstens ≈ 2.450); jeder Trade SL < 1 % der Größe.
 Ohne Netz, Regeln in der Form wie live (FundingPips: ziel 1.250–2.000, sl 1.300–1.600, lots 0,75–0,8 je 100k; keine Consistency, kein Refund).
@@ -47,10 +47,11 @@ FP = {"an": True, "name": "FundingPips", "namen": ["fundingpips"], "consistency_
 JG = app.fcp_je_groesse
 R = app.fcp_konto_rechnen
 
-print("— 1) Diff-Test gegen origin/main: ohne Striking bitgleich —")
+BASIS_VOR_ST1 = "92e49a11"   # main-Commit vor ST1 (fest, nie ein Branch-Stand)
+print(f"— 1) Diff-Test gegen main vor ST1 ({BASIS_VOR_ST1}): ohne Striking bitgleich —")
 alt = None
 try:
-    src_alt = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:app.py"], capture_output=True, text=True, timeout=60, check=True).stdout
+    src_alt = subprocess.run(["git", "-C", WURZEL, "show", BASIS_VOR_ST1 + ":app.py"], capture_output=True, text=True, timeout=60, check=True).stdout
     d = tempfile.mkdtemp(prefix="st1_alt_")
     pfad = os.path.join(d, "app_alt_st1.py")
     with open(pfad, "w", encoding="utf-8") as fh:
@@ -59,8 +60,8 @@ try:
     alt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(alt)
 except Exception as e:  # noqa: BLE001
-    print(f"   origin/main nicht ladbar: {type(e).__name__}: {e}")
-ok(alt is not None and not hasattr(alt, "fcp_striking_regel"), "origin/main geladen (ohne Striking) als Vergleich")
+    print(f"   {BASIS_VOR_ST1} nicht ladbar: {type(e).__name__}: {e}")
+ok(alt is not None and not hasattr(alt, "fcp_striking_regel"), f"main vor ST1 ({BASIS_VOR_ST1}) geladen als Vergleich")
 faelle = abw = rnd_abw = 0
 if alt is not None:
     for regel in (FN, T5, BG, FT, FP):
@@ -80,7 +81,7 @@ if alt is not None:
                                     abw += 1
                                 if ra.random() != rb.random():
                                     rnd_abw += 1
-    ok(faelle > 3000 and abw == 0, f"{faelle} Fälle (FundedNext, The5ers, Blue Guardian, FTMO, FundingPips): Ergebnis wie origin/main ({abw} Abweichungen)")
+    ok(faelle > 3000 and abw == 0, f"{faelle} Fälle (FundedNext, The5ers, Blue Guardian, FTMO, FundingPips): Ergebnis wie vor ST1 ({abw} Abweichungen)")
     ok(rnd_abw == 0, f"gleicher Zufalls-Verbrauch — weitere Würfe im Lauf bleiben gleich ({rnd_abw} Abweichungen)")
     zb_abw = sum(1 for r_ in (FN, T5, BG, FT, FP) for z in (1, 2) for od in (False, True)
                  if app.fcp_konto_ziel_boden(r_, 100000, z, "100k X", on_demand=od) != alt.fcp_konto_ziel_boden(r_, 100000, z, "100k X", on_demand=od))
@@ -99,7 +100,7 @@ if alt is not None:
 print("— 2) Striking-Regel —")
 st = app.fcp_striking_regel(FP)
 ok(st == {"gewinntage_anzahl": 7, "gewinntag_min_je_100k": 500.0, "consistency_pct": 35.0, "tp_je_100k": [550.0, 750.0], "sl_je_100k": [700.0, 800.0],
-          "verlust_max_pct": 1.0}, f"FundingPips Code-Standard {st}")
+          "verlust_max_pct": 1.0, "lots_je_100k": [0.2, 0.4]}, f"FundingPips Code-Standard {st}")
 ok(app.fcp_striking_regel(dict(FP, striking={"consistency_pct": 30}))["consistency_pct"] == 30.0
    and app.fcp_striking_regel(dict(FP, striking={"consistency_pct": 30}))["gewinntage_anzahl"] == 7, "Override je Feld über dem Standard (Rest bleibt)")
 ok(app.fcp_striking_regel(dict(FP, striking=False)) is None, "striking: false = keine Striking-Regel")
@@ -108,7 +109,7 @@ ok(app.fcp_striking_regel(dict(FP, striking={"tp_je_100k": [0, 0]})) is None, "k
 for g, mn, tp, sl, dk in ((100000, 500.0, [550.0, 750.0], [700.0, 800.0], 826.0), (50000, 250.0, [275.0, 375.0], [350.0, 400.0], 413.0),
                           (200000, 1000.0, [1100.0, 1500.0], [1400.0, 1600.0], 1652.0)):
     r2, jg2, deckel = app.fcp_striking_anwenden(FP, JG(FP, g) or JG(FP, 100000), g)
-    ok(jg2["gewinntage"] == {"anzahl": 7, "min": mn, "tp": tp, "sl": sl, "cons_mit": True} and deckel == dk, f"{g // 1000}k: 7 × ≥ {mn:g} $, TP {tp}, SL {sl}, SL-Deckel {dk:g} $")
+    ok({k: v for k, v in jg2["gewinntage"].items() if k != "lots"} == {"anzahl": 7, "min": mn, "tp": tp, "sl": sl, "cons_mit": True} and deckel == dk, f"{g // 1000}k: 7 × ≥ {mn:g} $, TP {tp}, SL {sl}, SL-Deckel {dk:g} $")
 r2, jg2, deckel = app.fcp_striking_anwenden(FP, JG(FP, 100000), 100000)
 ok(app.fcp_consistency_pct(r2) == 35.0 and app.fcp_erster_payout(r2) is None and jg2["ziel"] == [1250, 2000] and jg2["sl"] == [1300, 1600]
    and jg2["lots"] == [0.75, 0.8] and jg2["hedge_eur"] == 2000, "Consistency 35 %, kein Refund; Ziel/SL/Lots/Hedge der Größe bleiben")
@@ -179,6 +180,82 @@ r = R(jg2, 100000, 100000, 2, False, 1.0, 0.85, random.Random(1), regel=r2, gewi
 ok((r.get("cons_laufend") or {}).get("anteil") == round(700 / 1300, 4) and r["cons_laufend"]["p"] == 35.0, f"laufender Stand im Ergebnis (Notiz/Plan): {r.get('cons_laufend')}")
 bg2 = R(JG(BG, 100000), 100000, 100000, 2, False, 1.0, 0.85, random.Random(9), regel=dict(BG, consistency_pct=30), gewinntage=(0, 3), tage={"b": 0.0, "w": 0.0})
 ok("cons_laufend" not in bg2, "Blue Guardian (ohne Striking) rechnet beim Sammeln keine laufende Consistency")
+
+print("— 3c) ST1c (Finn 15.11.2026): Gewinntag-Lots 0,2–0,4 je 100k, $-Werte bleiben, Punkte aus Lots × 20 $/Pkt —")
+for g, lt in ((100000, [0.2, 0.4]), (50000, [0.1, 0.2]), (200000, [0.4, 0.8])):
+    ok(app.fcp_striking_anwenden(FP, JG(FP, g) or JG(FP, 100000), g)[1]["gewinntage"]["lots"] == lt, f"{g // 1000}k: Gewinntag-Lots {lt}")
+MPPL = 20.0
+fehl, pkt = [], []
+for seed in range(60):
+    for g in (100000, 50000):
+        rg, jgg, dk = app.fcp_striking_anwenden(FP, JG(FP, g), g)
+        f_ = g / 100000
+        for sp in (0.6, 0.85, 1.2):
+            r = R(jgg, g, g, 2, False, MPPL, sp, random.Random(seed), regel=rg, gewinntage=(2, 7), max_sl=app.fcp_max_sl(None, dk),
+                  tage={"b": 700.0 * f_, "w": 1300.0 * f_, "n": 2, "serie": 0.0, "serie_n": 0})
+            if not (r["aktion"] == "planen" and r["tp_art"] == "gewinntag" and 0.2 * f_ - 1e-9 <= r["lots"] <= 0.4 * f_ + 1e-9
+                    and 550 * f_ <= r["tp"] <= 750 * f_ and 700 * f_ <= r["sl"] <= 800 * f_ and abs(r["tp_pkt"] - round(r["tp"] / (MPPL * r["lots"]), 1)) < 1e-9
+                    and r["hedge_lots"] >= 0.01 and abs(r["hedge_lots"] - round(r["multiplier"] * r["lots"], 2)) < 1e-9):
+                fehl.append((seed, g, sp, r.get("aktion"), r.get("lots"), r.get("hedge_lots")))
+            if g == 100000 and sp == 0.85:
+                pkt.append((r["lots"], r["tp_pkt"], r["hedge_lots"]))
+ok(not fehl, f"100k/50k × Fusion 0,6/0,85/1,2 €/Pkt: Lots im Bereich, TP/SL in $ wie bisher, Pkt = $ ÷ (20 × Lots), Hedge-Lots ≥ 0,01 und = Multiplier × Lots ({fehl[:2]})")
+print("   Beispiele 100k (Lots, TP-Pkt, Hedge-Lots):", ", ".join(f"{a:g}/{b:g}/{c:g}" for a, b, c in pkt[:5]))
+ok(min(h for _, _, h in pkt) >= 0.5, f"kleinste Hedge-Lots bei 100k: {min(h for _, _, h in pkt):g} (weit über 0,01)")
+r = R(jg2, 100000, 100000, 2, False, MPPL, 0.85, random.Random(4), regel=r2, gewinntage=(2, 7), max_sl=MS, tage={"b": 700.0, "w": 1300.0, "n": 2, "serie": 0, "serie_n": 0})
+q = r["slave_risk"] / r["dd"]
+ok(abs(r["hedge_sl_eur"] - round(q * r["sl"], 2)) < 0.01 and abs(r["hedge_tp_eur"] + round(q * r["tp"], 2)) < 0.01 and r["hedge_eur"] == 2000,
+   "Hedge-€ am TP/SL folgen den $-Werten (q = Hedge € ÷ DD), Hedge-Betrag 2.000 € wie bisher")
+r = R(jg2, 99000, 100000, 2, False, MPPL, 0.85, random.Random(4), regel=r2, gewinntage=(7, 7), max_sl=MS, tage={"b": 700.0, "w": 4550.0, "n": 7, "serie": 0, "serie_n": 0},
+      ziel_fest={"zyklus": 2, "usd": 2000})
+ok(str(r["tp_art"]).startswith("consistency") and 0.75 <= r["lots"] <= 0.8, f"Phase B (Ziel-Trades): Lots der Größe 0,75–0,8 wie bisher ({r['lots']})")
+ok("lots" not in app.fcp_striking_anwenden(dict(FP, striking={"lots_je_100k": False}), JG(FP, 100000), 100000)[1]["gewinntage"],
+   "Override lots_je_100k false → Gewinntag-Trades mit den Lots der Größe (wie vor ST1c)")
+ok(app.fcp_striking_regel(dict(FP, striking={"lots_je_100k": [0, 0.2]})) is None, "Lots 0 → ungültig (nie halb gültig)")
+u, _ = app.fcp_regel_patch({"id": 1, "firmen": [copy.deepcopy(FP)]}, {"firma": "FundingPips", "feld": "striking.lots_je_100k", "wert": [0.25, 0.35]})
+ok(u and app.fcp_striking_regel(u["firmen"][0])["lots_je_100k"] == [0.25, 0.35], "Einstellung: Lots je 100k änderbar (0,25–0,35)")
+ok(all(app.fcp_regel_patch({"id": 1, "firmen": [copy.deepcopy(FP)]}, {"firma": "FundingPips", "feld": "striking.lots_je_100k", "wert": w})[0] is None
+       for w in ([0, 0.2], [0.005, 0.2], [0.2, 60], [0.4, 0.2])), "Lots 0 / < 0,01 / > 50 / von > bis → abgelehnt")
+alt_m = None
+try:
+    _src = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:app.py"], capture_output=True, text=True, timeout=60, check=True).stdout
+    _d = tempfile.mkdtemp(prefix="st1c_alt_")
+    with open(os.path.join(_d, "app_alt_st1c.py"), "w", encoding="utf-8") as fh:
+        fh.write(_src)
+    _sp = importlib.util.spec_from_file_location("app_alt_st1c", os.path.join(_d, "app_alt_st1c.py"))
+    alt_m = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(alt_m)
+except Exception as e:  # noqa: BLE001
+    print(f"   origin/main nicht ladbar: {type(e).__name__}: {e}")
+if alt_m is not None and "lots_je_100k" not in str(getattr(alt_m, "FCP_STRIKING_STANDARD", {})):
+    n_ = d_a = d_b = d_r = 0
+    for regel in (FN, T5, BG, FT, FP):
+        for bal in (98000, 100000, 100700, 102200):
+            for zyk in (1, 2):
+                for gti in ((None, (0, 3), (3, 3)) if regel is BG else (None,)):
+                    for seed in (1, 7, 42):
+                        kw = dict(regel=regel, gewinne=None, gewinntage=gti, tage=(0.0, 0), max_sl=None)
+                        ra, rb = random.Random(seed), random.Random(seed)
+                        a = R(JG(regel, 100000), bal, 100000, zyk, False, MPPL, 0.85, ra, **kw)
+                        b = alt_m.fcp_konto_rechnen(alt_m.fcp_je_groesse(regel, 100000), bal, 100000, zyk, False, MPPL, 0.85, rb, **kw)
+                        n_ += 1
+                        d_a += a != b
+                        d_r += ra.random() != rb.random()
+    for gti in ((7, 7), (8, 7)):
+        for bal in (99000, 101000, 104550):
+            for seed in range(10):
+                ra, rb = random.Random(seed), random.Random(seed)
+                na, nb = app.fcp_striking_anwenden(FP, JG(FP, 100000), 100000), alt_m.fcp_striking_anwenden(FP, alt_m.fcp_je_groesse(FP, 100000), 100000)
+                tw_ = {"b": 700.0, "w": 4550.0, "n": 7, "serie": 0.0, "serie_n": 0}
+                a = R(na[1], bal, 100000, 2, False, MPPL, 0.85, ra, regel=na[0], gewinntage=gti, max_sl=na[2], tage=tw_, ziel_fest={"zyklus": 2, "usd": 2000})
+                b = alt_m.fcp_konto_rechnen(nb[1], bal, 100000, 2, False, MPPL, 0.85, rb, regel=nb[0], gewinntage=gti, max_sl=nb[2], tage=tw_, ziel_fest={"zyklus": 2, "usd": 2000})
+                n_ += 1
+                d_b += a != b
+                d_r += ra.random() != rb.random()
+    ok(n_ > 200 and d_a == 0 and d_b == 0 and d_r == 0,
+       f"Diff gegen origin/main (ST1b): {n_} Fälle — andere Firmen/Wege und Striking Phase B bitgleich, gleicher Zufalls-Verbrauch ({d_a}/{d_b}/{d_r})")
+else:
+    ok(alt_m is not None, "origin/main als Vergleich für ST1c (übersprungen: origin/main hat schon ST1c)")
 
 print("— 4) Simulation 100k: Verlusttage überspringen, 7 Tage, dann Consistency 35 % —")
 

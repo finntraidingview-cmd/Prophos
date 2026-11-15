@@ -47433,7 +47433,7 @@
     }
     // ST1 (Master 15.11.2026): Striking — nur FundingPips Funded CFD (an bei anderer Firma: zeigen, damit man es ausschalten kann); kombinierbar mit 1 % Rule
     if(a.type === 'funded_cfd' && a.striking !== undefined && (accIstFundingPipsCfd(a) || a.striking === true)){
-      const t = a.striking ? (accIstFundingPipsCfd(a) ? 'Striking an — erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 $ je 100k), dann Consistency 35 % · Verlust je Trade < 1 % (SL ≤ 1 % ÷ 1,15 × 0,95 ≈ 826 $ je 100k, Bot-Nachziehen eingerechnet)'
+      const t = a.striking ? (accIstFundingPipsCfd(a) ? 'Striking an — erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 $, 0,2–0,4 Lot je 100k), dann Consistency 35 % · Verlust je Trade < 1 % (SL ≤ 1 % ÷ 1,15 × 0,95 ≈ 826 $ je 100k, Bot-Nachziehen eingerechnet)'
         : 'Striking an, aber die Firma hat keine Striking-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'Striking aus — Klick schaltet an (FundingPips: 7 Gewinntage, Consistency 35 %, Verlust je Trade < 1 %)'
       chips.push(`<button type="button" class="acc-addon st${a.striking ? ' an' : ''}" data-acc-addon="st" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>Striking</button>`)
     }
@@ -59150,7 +59150,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2218'
+  const OS_TAB_BUILD = '2026-09-22.2219'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -91441,11 +91441,11 @@
             ${fcrFeld('Consistency', odE.consistency_pct ?? null, Object.assign({ feld: 'on_demand.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '40' })}</div>`
         : fcrZeile('Add-on On Demand', `+${fcrSpanne(odE.ziel_je_100k, '$')} je 100k · Consistency ${fcrZahl(odE.consistency_pct ?? 40)} % · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`)
       // ST1 (Master 15.11.2026): Add-on Striking je Firma, nur FundingPips — Werte je 100k (skaliert mit der Kontogröße), leer = Standard
-      const ST_STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1 }
+      const ST_STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1, lots_je_100k: [0.2, 0.4] }
       const stE = String((f.namen || [])[0] || '') === 'fundingpips' ? (f.striking_eff || ST_STD) : null
       const stN = stE ? fcrKontenListe(f, D).filter(x => x.striking).length : 0
       const stSub = `erst ${fcrZahl(stE ? stE.gewinntage_anzahl : 7)} Gewinntage, dann Consistency · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`
-      const stInfo = fcrInfo('st', 'Konten mit Add-on „Striking" (Accounts → Add-ons): zuerst je Tag ein Gewinntag-Trade (TP/SL je 100k), bis die Gewinntage erreicht sind — auch wenn das Ziel schon erreicht ist; Verlusttage zählen nicht. Danach Consistency je Zyklus (der größte Tag höchstens p % der Gewinn-Tage). Jeder Trade: SL ≤ Max. Verlust ÷ 1,15 (Nachzieh-Toleranz des Bots) × 0,95 — 100k 826 $ — das engere mit der 1 % Rule. Kein Refund-Trade. Leeres Feld = Standard 7 × 500 $ · TP 550–750 · SL 700–800 · 35 % · 1 %')
+      const stInfo = fcrInfo('st', 'Konten mit Add-on „Striking" (Accounts → Add-ons): zuerst je Tag ein Gewinntag-Trade (TP/SL je 100k), bis die Gewinntage erreicht sind — auch wenn das Ziel schon erreicht ist; Verlusttage zählen nicht. Danach Consistency je Zyklus (der größte Tag höchstens p % der Gewinn-Tage). Jeder Trade: SL ≤ Max. Verlust ÷ 1,15 (Nachzieh-Toleranz des Bots) × 0,95 — 100k 826 $ — das engere mit der 1 % Rule. Kein Refund-Trade. Leeres Feld = Standard 7 × 500 $ · TP 550–750 · SL 700–800 · 35 % · 1 % · Lots 0,2–0,4 (Gewinntage; Ziel-Trades danach mit den Lots der Größe)')
       const stBlock = !stE ? '' : ad
         ? `<div class="wd-abl-schalter lesen"><span><b>Add-on · Striking${stInfo}</b><small>${escapeHtml(stSub)}</small></span></div>
           <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Gewinntage', stE.gewinntage_anzahl ?? null, Object.assign({ feld: 'striking.gewinntage_anzahl' }, fz), { einheit: 'Tage', leer: '7' })}
@@ -91453,8 +91453,9 @@
             ${fcrFeld('Gewinntag-TP', stE.tp_je_100k, Object.assign({ feld: 'striking.tp_je_100k' }, fz), { bereich: true, einheit: '$ je 100k', leer: 'Standard' })}
             ${fcrFeld('Gewinntag-SL', stE.sl_je_100k, Object.assign({ feld: 'striking.sl_je_100k' }, fz), { bereich: true, einheit: '$ je 100k', leer: 'Standard' })}
             ${fcrFeld('Consistency', stE.consistency_pct ?? null, Object.assign({ feld: 'striking.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '35' })}
-            ${fcrFeld('Max. Verlust', stE.verlust_max_pct ?? null, Object.assign({ feld: 'striking.verlust_max_pct' }, fz), { einheit: '< % je Trade', leer: '1' })}</div>`
-        : fcrZeile('Add-on Striking', `${fcrZahl(stE.gewinntage_anzahl)} × ≥ ${fcrZahl(stE.gewinntag_min_je_100k)} $ je 100k · TP ${fcrSpanne(stE.tp_je_100k, '$')} · SL ${fcrSpanne(stE.sl_je_100k, '$')} · Consistency ${fcrZahl(stE.consistency_pct ?? 35)} % · Verlust < ${fcrZahl(stE.verlust_max_pct ?? 1)} % · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`)
+            ${fcrFeld('Max. Verlust', stE.verlust_max_pct ?? null, Object.assign({ feld: 'striking.verlust_max_pct' }, fz), { einheit: '< % je Trade', leer: '1' })}
+            ${fcrFeld('Gewinntag-Lots', stE.lots_je_100k ?? null, Object.assign({ feld: 'striking.lots_je_100k' }, fz), { bereich: true, einheit: 'Lot je 100k', leer: 'Standard' })}</div>`
+        : fcrZeile('Add-on Striking', `${fcrZahl(stE.gewinntage_anzahl)} × ≥ ${fcrZahl(stE.gewinntag_min_je_100k)} $ je 100k · TP ${fcrSpanne(stE.tp_je_100k, '$')} · SL ${fcrSpanne(stE.sl_je_100k, '$')} · Consistency ${fcrZahl(stE.consistency_pct ?? 35)} % · Verlust < ${fcrZahl(stE.verlust_max_pct ?? 1)} %${stE.lots_je_100k ? ` · Lots ${fcrSpanne(stE.lots_je_100k, '')}` : ''} · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`)
       if(!ad) return `${fcrWAbschnitt(f.firma + alleGr)}${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}${odBlock}
 ${stBlock}
         ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
@@ -91602,7 +91603,7 @@ ${stBlock}
         const od = Object.assign({}, f.on_demand && typeof f.on_demand === 'object' ? f.on_demand : {}); if(b.wert == null) delete od[t]; else od[t] = b.wert
         f.on_demand = Object.keys(od).length ? od : null; f.on_demand_eff = Object.assign({}, f.on_demand_eff || STD, { [t]: b.wert ?? STD[t] }); return }
       if(b.feld.startsWith('striking.')){   // ST1: Add-on Striking — leer = Standard (das Neuladen holt den echten Stand)
-        const t = b.feld.slice(9), STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1 }
+        const t = b.feld.slice(9), STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1, lots_je_100k: [0.2, 0.4] }
         const st = Object.assign({}, f.striking && typeof f.striking === 'object' ? f.striking : {}); if(b.wert == null) delete st[t]; else st[t] = b.wert
         f.striking = Object.keys(st).length ? st : null; f.striking_eff = Object.assign({}, f.striking_eff || STD, { [t]: b.wert ?? STD[t] }); return }
       if(b.feld.startsWith('erster_payout.') && f.erster_payout && typeof f.erster_payout === 'object'){

@@ -2,7 +2,7 @@
 """Selbsttest ST1b Variante (a) (Prüfer S2 MUSS, Master 15.11.2026): Striking-Verlustgrenze im Bot-cmd.
 Echo mit Hedge: nachzieh_cmd löscht die Tagesgrenze, sl_ausloeser zieht erst ab Plan × 1,15 nach — ein Striking-Trade konnte so über 1 % verlieren.
 Jetzt: cmd.verlust_grenze_usd (Planer → funded_plan → PC-Tab → panel.py) bleibt bei Echo mit Hedge stehen und wirkt wie die Tagesgrenze
-(SL am Fill auf min(sl_usd, Grenze)). Ohne das Feld bitgleich wie origin/main (Diff-Test über nachzieh_cmd); Hedge folgt über copier.plan_sltp.
+(SL am Fill auf min(sl_usd, Grenze)). Ohne das Feld bitgleich (Diff-Test über nachzieh_cmd gegen den main-Stand vor ST1b); Hedge folgt über copier.plan_sltp.
 Aufruf: python3 tools/selftest_st1b_striking_grenze.py      (ohne Netz, ohne Klick: _sltp_klicken/_api_lesen gestubbt)"""
 import itertools
 import os
@@ -25,14 +25,15 @@ def ok(b, t):
         FEHLER.append(t)
 
 
-print("— 1) nachzieh_cmd ohne verlust_grenze_usd bitgleich wie origin/main —")
-alt_src = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:mt5-copier/order_bot.py"], capture_output=True, text=True, timeout=60).stdout
+BASIS_VOR_ST1 = "92e49a11"   # main-Commit vor ST1b (fest, nie ein Branch-Stand)
+print(f"— 1) nachzieh_cmd ohne verlust_grenze_usd bitgleich wie main vor ST1b ({BASIS_VOR_ST1}) —")
+alt_src = subprocess.run(["git", "-C", WURZEL, "show", BASIS_VOR_ST1 + ":mt5-copier/order_bot.py"], capture_output=True, text=True, timeout=60).stdout
 m = re.search(r"\ndef nachzieh_cmd\(cmd\):\n(?:    .*\n|\n)+?(?=\S)", alt_src)
 ns = {}
 if m:
-    exec(m.group(0), ns)   # nur die reine Funktion aus origin/main (kein Import des alten Moduls)
+    exec(m.group(0), ns)   # nur die reine Funktion aus dem Basis-Stand (kein Import des alten Moduls)
 alt_nc = ns.get("nachzieh_cmd")
-ok(alt_nc is not None and "verlust_grenze_usd" not in (m.group(0) if m else ""), "nachzieh_cmd aus origin/main geladen (ohne Striking)")
+ok(alt_nc is not None and "verlust_grenze_usd" not in (m.group(0) if m else ""), f"nachzieh_cmd aus {BASIS_VOR_ST1} geladen (ohne Striking)")
 faelle = abw = 0
 if alt_nc:
     for oh, fin, tg, fg in itertools.product((None, False, True), (None, "", "pass", "beide", "blow", "gewinntag", "x"), (None, "", 0, 500.0, -3, "abc"),
@@ -47,7 +48,7 @@ if alt_nc:
             neu, alt = ob.nachzieh_cmd(c), alt_nc(c)
             if neu != alt or (neu is c) != (alt is c):
                 abw += 1
-ok(faelle > 1000 and abw == 0, f"{faelle} Aufträge ohne gültige Grenze (fehlt/leer/0/negativ): Ergebnis und Identität wie origin/main ({abw} Abweichungen)")
+ok(faelle > 1000 and abw == 0, f"{faelle} Aufträge ohne gültige Grenze (fehlt/leer/0/negativ): Ergebnis und Identität wie vor ST1b ({abw} Abweichungen)")
 
 print("— 2) nachzieh_cmd mit Striking-Grenze —")
 h = ob.nachzieh_cmd({"final": "blow", "tages_grenze_usd": 500.0, "verlust_grenze_usd": 950.0, "sl_usd": 826.0})

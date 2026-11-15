@@ -50657,6 +50657,11 @@ def fcp_regel_patch(zeile, body):
             if w is None or not w[0] > 0:
                 return None, f"Striking · {FCP_STRIKING_FELDER[teil]}: von–bis in $ (> 0)"
             st[teil] = w
+        elif teil == "lots_je_100k":   # ST1c: 0,01–FCP_WERT_MAX lots je 100k (wie die Lots je Größe)
+            w = _fcp_bereich_ok(v)
+            if w is None or not w[0] >= 0.01 or w[1] > FCP_WERT_MAX["lots"]:
+                return None, f"Striking · {FCP_STRIKING_FELDER[teil]}: von–bis in Lot (0,01–{_liq_de(FCP_WERT_MAX['lots'])})"
+            st[teil] = w
         else:
             w = _fcp_zahl_ok(v)
             grenzen = {"gewinntage_anzahl": (1, 30), "gewinntag_min_je_100k": (1, 100000), "consistency_pct": (1, 99), "verlust_max_pct": (0.1, 10)}[teil]
@@ -50804,10 +50809,13 @@ def fcp_on_demand_anwenden(regel, jg, groesse):
 #             (max_risiko_trade); das engere gilt. Die Gewinntag-SL 700–800 $ liegen darunter und bleiben.
 #   Refund-Zyklus (erster Payout) gibt es mit Striking nicht (die 35 % gelten in jedem Zyklus).
 # Werte je 100k, linear auf die Kontogröße skaliert (50k = halbe Werte). Überschreibbar je Firma in funded_cfd_plan_regeln.firmen[].striking (false = keine).
+# ST1c (Finn 15.11.2026): Gewinntag-Lots 0,2–0,4 je 100k (gewürfelt, linear skaliert: 50k 0,1–0,2) — die $-Werte (TP 550–750, SL 700–800) bleiben, die
+# Punkte folgen aus Lots × Punktwert (FundingPips 20 $/Pkt je Lot: 0,3 Lot → 6 $/Pkt → TP ~108 Pkt). Phase B (Ziel-Trades) nimmt weiter die Lots der Größe.
 FCP_STRIKING_STANDARD = {"fundingpips": {"gewinntage_anzahl": 7, "gewinntag_min_je_100k": 500, "consistency_pct": 35,
-                                         "tp_je_100k": [550, 750], "sl_je_100k": [700, 800], "verlust_max_pct": 1.0}}
+                                         "tp_je_100k": [550, 750], "sl_je_100k": [700, 800], "verlust_max_pct": 1.0, "lots_je_100k": [0.2, 0.4]}}
 FCP_STRIKING_FELDER = {"gewinntage_anzahl": "Gewinntage", "gewinntag_min_je_100k": "Gewinntag ab je 100k", "consistency_pct": "Consistency",
-                       "tp_je_100k": "Gewinntag-TP je 100k", "sl_je_100k": "Gewinntag-SL je 100k", "verlust_max_pct": "Verlust je Trade unter"}
+                       "tp_je_100k": "Gewinntag-TP je 100k", "sl_je_100k": "Gewinntag-SL je 100k", "verlust_max_pct": "Verlust je Trade unter",
+                       "lots_je_100k": "Gewinntag-Lots je 100k"}
 # SL-DECKEL STRIKING (ST1b, Prüfer S2 MUSS, Master 15.11.2026): Funded CFD läuft als Echo mit Hedge — nachzieh_cmd (mt5-copier/order_bot.py) setzt dort
 # tages_grenze_usd = None, und sl_ausloeser zieht den SL erst nach, wenn der echte Verlust > Plan × 1,15 ist (NACHZIEH_SL_TOLERANZ). Ein Plan-SL von 950 $
 # lief also bis ~1.092 $ (live FundingPips: echter Verlust ÷ master_sl p90 1,104, 24 % über 1,0526). Deckel deshalb = verlust_max_pct × Größe ÷ 1,15
@@ -50830,9 +50838,14 @@ def fcp_striking_regel(regel):
     tp, sl = fcp_bereich(st.get("tp_je_100k")), fcp_bereich(st.get("sl_je_100k"))
     if not anz or anz < 1 or not mn or mn <= 0 or not tp or not sl or not tp[0] > 0 or not sl[0] > 0 or not vp or vp <= 0:
         return None
+    # ST1c: Gewinntag-Lots — fehlt das Feld (Regel ohne Lots, false/leer), nehmen die Gewinntag-Trades die Lots der Größe wie bisher; ungültig → None
+    lt = fcp_bereich(st.get("lots_je_100k")) if st.get("lots_je_100k") not in (None, "", False) else None
+    if st.get("lots_je_100k") not in (None, "", False) and (not lt or not lt[0] > 0):
+        return None
     return {"gewinntage_anzahl": int(anz), "gewinntag_min_je_100k": float(mn),
             "consistency_pct": float(p) if p is not None and 0 < p < 100 else None,
-            "tp_je_100k": list(tp), "sl_je_100k": list(sl), "verlust_max_pct": float(vp)}
+            "tp_je_100k": list(tp), "sl_je_100k": list(sl), "verlust_max_pct": float(vp),
+            "lots_je_100k": [float(lt[0]), float(lt[1])] if lt else None}
 
 
 def fcp_striking_anwenden(regel, jg, groesse):
@@ -50846,6 +50859,8 @@ def fcp_striking_anwenden(regel, jg, groesse):
     jg2 = dict(jg, gewinntage={"anzahl": st["gewinntage_anzahl"], "min": float(round(st["gewinntag_min_je_100k"] * f)), "cons_mit": True,   # Consistency ab Trade 1
                                "tp": [float(round(st["tp_je_100k"][0] * f)), float(round(st["tp_je_100k"][1] * f))],
                                "sl": [float(round(st["sl_je_100k"][0] * f)), float(round(st["sl_je_100k"][1] * f))]})
+    if st.get("lots_je_100k"):   # ST1c: Gewinntag-Lots skaliert, auf 0,01 gerundet, nie unter 0,01
+        jg2["gewinntage"]["lots"] = [max(0.01, round(st["lots_je_100k"][0] * f, 2)), max(0.01, round(st["lots_je_100k"][1] * f, 2))]
     jg2.pop("tp_erster", None)
     r2 = dict(regel or {}, erster_payout=False, consistency_pct=st["consistency_pct"] or 0, tp_modus=None)
     deckel = float(int(st["verlust_max_pct"] / 100.0 * float(g) / FCP_STRIKING_NACHZIEH_TOLERANZ * (1.0 - FCP_STRIKING_SL_PUFFER)))   # ST1b
@@ -51539,7 +51554,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     if sl and ms and ms > 0 and sl > ms:
         sl = float(int(ms))                  # nie über das Risiko-Limit des Kontos (Vorfall Jacob …7924, 30.10.2026)
         basis["sl_gedeckelt"] = True
-    lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
+    # ST1c: Gewinntag-Trades eines Striking-Kontos mit eigenen Lots (0,2–0,4 je 100k) — ein Wurf wie bisher, nur die Spanne wechselt (Blue Guardian ohne gt.lots unverändert)
+    lots = fcp_wuerfel(gt.get("lots") if (tp_art == "gewinntag" and fcp_bereich(gt.get("lots"))) else jg.get("lots"), rnd, 2)
     if ep and lots:
         # REFUND-LOTS NACH VERHÄLTNIS × 2 (Finn 03.11.2026 ~01:00 Dubai über den Eingang: „die Werte gefallen mir sehr gut" — ersetzt × 0,1 aus .2002):
         # Lots = gezogene Normal-Lots × (Refund-TP ÷ gezogenes Normal-Ziel der Funded-Regel) × 2, abgerundet auf 0,01, mindestens 0,01, höchstens die
