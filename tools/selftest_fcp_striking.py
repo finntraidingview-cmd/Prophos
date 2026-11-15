@@ -105,8 +105,8 @@ ok(app.fcp_striking_regel(dict(FP, striking={"consistency_pct": 30}))["consisten
 ok(app.fcp_striking_regel(dict(FP, striking=False)) is None, "striking: false = keine Striking-Regel")
 ok(all(app.fcp_striking_regel(r_) is None for r_ in (FN, T5, BG, FT)), "andere Firmen ohne Striking-Regel")
 ok(app.fcp_striking_regel(dict(FP, striking={"tp_je_100k": [0, 0]})) is None, "kaputter Wert → None (nie halb gültig)")
-for g, mn, tp, sl, dk in ((100000, 500.0, [550.0, 750.0], [700.0, 800.0], 950.0), (50000, 250.0, [275.0, 375.0], [350.0, 400.0], 475.0),
-                          (200000, 1000.0, [1100.0, 1500.0], [1400.0, 1600.0], 1900.0)):
+for g, mn, tp, sl, dk in ((100000, 500.0, [550.0, 750.0], [700.0, 800.0], 826.0), (50000, 250.0, [275.0, 375.0], [350.0, 400.0], 413.0),
+                          (200000, 1000.0, [1100.0, 1500.0], [1400.0, 1600.0], 1652.0)):
     r2, jg2, deckel = app.fcp_striking_anwenden(FP, JG(FP, g) or JG(FP, 100000), g)
     ok(jg2["gewinntage"] == {"anzahl": 7, "min": mn, "tp": tp, "sl": sl, "cons_mit": True} and deckel == dk, f"{g // 1000}k: 7 × ≥ {mn:g} $, TP {tp}, SL {sl}, SL-Deckel {dk:g} $")
 r2, jg2, deckel = app.fcp_striking_anwenden(FP, JG(FP, 100000), 100000)
@@ -115,7 +115,11 @@ ok(app.fcp_consistency_pct(r2) == 35.0 and app.fcp_erster_payout(r2) is None and
 ok("striking" not in FP and "gewinntage" not in FP["je_groesse"]["100000"], "Regel selbst unverändert (Kopie)")
 ok(app.fcp_striking_anwenden(BG, JG(BG, 100000), 100000) is None and app.fcp_striking_anwenden(FP, JG(FP, 100000), None) is None,
    "Firma ohne Regel / Größe fehlt → None (Planer plant normal)")
-ok(app.fcp_max_sl(None, 950) == 950 and app.fcp_max_sl(1000, 950) == 950 and app.fcp_max_sl(800, 950) == 800 and app.fcp_max_sl(None, None) is None,
+ok(app.FCP_STRIKING_NACHZIEH_TOLERANZ == 1.15 and abs(826 * 1.15 - 950) < 1 and 826 * 1.15 < 1000,
+   "ST1b (S2 MUSS): Deckel 826 $ (100k) — auch mit der Nachzieh-Toleranz des Bots (× 1,15 ≈ 950 $) unter 1 % = 1.000 $")
+bot = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
+ok("NACHZIEH_SL_TOLERANZ = 0.15" in bot, "Bot-Toleranz 0,15 = FCP_STRIKING_NACHZIEH_TOLERANZ − 1 (beide zusammen ändern)")
+ok(app.fcp_max_sl(None, 826) == 826 and app.fcp_max_sl(1000, 826) == 826 and app.fcp_max_sl(800, 826) == 800 and app.fcp_max_sl(None, None) is None,
    "SL-Deckel: das engere von 1 % Rule (max_risiko_trade) und Striking")
 
 print("— 3) Phase A: 7 Gewinntage sammeln, auch über das Ziel hinaus —")
@@ -201,11 +205,11 @@ for seed in range(30):
     gt_trades = [x for x in log if x[0] == "gewinntag"]
     gewinn_tage = [x for x in gt_trades if x[1] > 0]
     nach = [x for x in log if x[0] not in ("gewinntag", "ende")]
-    if not (r is not None and r["aktion"] == "ziel" and len(gewinn_tage) == 7 and all(x[2] <= 950 for x in log if x[0] != "ende")
-            and log.index(gewinn_tage[-1]) == len(gt_trades) - 1 and all(x[2] <= 950 for x in nach)):
+    if not (r is not None and r["aktion"] == "ziel" and len(gewinn_tage) == 7 and all(x[2] <= 826 for x in log if x[0] != "ende")
+            and log.index(gewinn_tage[-1]) == len(gt_trades) - 1 and all(x[2] <= 826 for x in nach)):
         fehl.append((seed, log[-3:]))
     laenge.append(len(log) - 1)
-ok(not fehl, f"30 Läufe mit 3 Verlusttagen: genau 7 Gewinntage gesammelt, dann Ziel + Consistency → Waiting; jeder SL ≤ 950 ({fehl[:1]})")
+ok(not fehl, f"30 Läufe mit 3 Verlusttagen: genau 7 Gewinntage gesammelt, dann Ziel + Consistency → Waiting; jeder SL ≤ 826 ({fehl[:1]})")
 ok(min(laenge) >= 10, f"3 Verlusttage beim Sammeln → ≥ 10 Handelstage bis Waiting (min {min(laenge)}, max {max(laenge)})")
 log, r = sim(4, set())
 print("   Beispiel ohne Verlust:", " / ".join(f"{x[1]:g}" for x in log if x[0] != "ende"), "→", r["aktion"], r.get("consistency", {}).get("bester_tag") if r.get("consistency") else "")
@@ -216,9 +220,9 @@ tw = {"b": 700.0, "w": W, "n": 7, "serie": 0.0, "serie_n": 0}
 fehl = []
 for seed in range(40):
     r = R(jg2, 99000, 100000, 2, False, 1.0, 0.85, random.Random(seed), regel=r2, gewinntage=(7, 7), max_sl=MS, tage=tw, ziel_fest={"zyklus": 2, "usd": 2000})
-    if not (r["aktion"] == "planen" and str(r["tp_art"]).startswith("consistency") and r["tp"] <= 0.35 * (W + r["tp"]) + 0.5 and r["sl"] <= 950):
+    if not (r["aktion"] == "planen" and str(r["tp_art"]).startswith("consistency") and r["tp"] <= 0.35 * (W + r["tp"]) + 0.5 and r["sl"] <= 826):
         fehl.append((seed, r.get("tp_art"), r.get("tp"), r.get("sl")))
-ok(not fehl, f"7 Tage, Gewinn −1.000 (Verluste), Ziel 2.000 → Rest 3.000: Payout-Trade ≤ 35 % (W 4.550 → ≤ 2.450), SL ≤ 950 ({fehl[:2]})")
+ok(not fehl, f"7 Tage, Gewinn −1.000 (Verluste), Ziel 2.000 → Rest 3.000: Payout-Trade ≤ 35 % (W 4.550 → ≤ 2.450), SL ≤ 826 ({fehl[:2]})")
 r = R(jg2, 99000, 100000, 2, False, 1.0, 0.85, random.Random(1), regel=r2, gewinntage=(7, 7), max_sl=MS, tage=tw, ziel_fest={"zyklus": 2, "usd": 2000})
 print(f"   Beispiel: TP {r['tp']:g} $ (Grenze {0.35 / 0.65 * W:.0f} $), SL {r['sl']:g} $, gedeckelt: {r.get('sl_gedeckelt')}")
 r = R(jg2, 104550, 100000, 2, False, 1.0, 0.85, random.Random(1), regel=r2, gewinntage=(7, 7), max_sl=MS, tage=dict(tw, b=750.0), ziel_fest={"zyklus": 2, "usd": 2000})
@@ -251,7 +255,9 @@ fp = SRC[SRC.index("def fcp_planen("):SRC.index("def fcp_sicht(")]
 ok(",on_demand,fcp_ziel,striking" in fp and "st_spalte = False" in fp and 'a.get("striking") is True' in fp, "Planer liest accounts.striking, ohne Spalte wie bisher")
 ok("fcp_striking_anwenden(regel, jg, g)" in fp and "regel_k, jg, st_deckel = _sta" in fp
    and 'max_sl=fcp_max_sl(a.get("max_risiko_trade"), st_deckel) if st_deckel else a.get("max_risiko_trade")' in fp, "Striking-Regel + SL-Deckel gehen in fcp_konto_rechnen")
-ok("if st_an and not od_an:" in fp and 'zeile["striking_ohne_regel"] = True' in fp, "On Demand hat Vorrang; Firma ohne Regel → normal + Hinweis")
+ok('zeile["striking_ohne_groesse" if fcp_striking_regel(regel) else "striking_ohne_regel"] = True' in fp and "Striking: Kontogröße unbekannt" in fp,
+   "ST1b (S2 KANN 1): eigene Notiz, wenn nur die Kontogröße fehlt")
+ok("if st_an and not od_an:" in fp and 'else "striking_ohne_regel"] = True' in fp, "On Demand hat Vorrang; Firma ohne Regel → normal + Hinweis")
 ok('**({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend")}' in fp and "if r.get(\"striking\") else {}))" in fp, "funded_plan bekommt striking nur bei Striking-Konten")
 kz = SRC[SRC.index("def kz_rechnen("):SRC.index("def kz_rechnen(") + 40000]
 ok("_sta = fcp_striking_anwenden(freg, jg, groesse) if (not _oda and a.get(\"striking\") is True" in kz and '"Add-on Striking"' in kz,

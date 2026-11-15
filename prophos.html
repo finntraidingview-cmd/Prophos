@@ -47433,7 +47433,7 @@
     }
     // ST1 (Master 15.11.2026): Striking — nur FundingPips Funded CFD (an bei anderer Firma: zeigen, damit man es ausschalten kann); kombinierbar mit 1 % Rule
     if(a.type === 'funded_cfd' && a.striking !== undefined && (accIstFundingPipsCfd(a) || a.striking === true)){
-      const t = a.striking ? (accIstFundingPipsCfd(a) ? 'Striking an — erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 $ je 100k), dann Consistency 35 % · Verlust je Trade < 1 % (SL ≤ 0,95 %)'
+      const t = a.striking ? (accIstFundingPipsCfd(a) ? 'Striking an — erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 $ je 100k), dann Consistency 35 % · Verlust je Trade < 1 % (SL ≤ 1 % ÷ 1,15 × 0,95 ≈ 826 $ je 100k, Bot-Nachziehen eingerechnet)'
         : 'Striking an, aber die Firma hat keine Striking-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'Striking aus — Klick schaltet an (FundingPips: 7 Gewinntage, Consistency 35 %, Verlust je Trade < 1 %)'
       chips.push(`<button type="button" class="acc-addon st${a.striking ? ' an' : ''}" data-acc-addon="st" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>Striking</button>`)
     }
@@ -91436,7 +91436,7 @@
       const stE = String((f.namen || [])[0] || '') === 'fundingpips' ? (f.striking_eff || ST_STD) : null
       const stN = stE ? fcrKontenListe(f, D).filter(x => x.striking).length : 0
       const stSub = `erst ${fcrZahl(stE ? stE.gewinntage_anzahl : 7)} Gewinntage, dann Consistency · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`
-      const stInfo = fcrInfo('st', 'Konten mit Add-on „Striking" (Accounts → Add-ons): zuerst je Tag ein Gewinntag-Trade (TP/SL je 100k), bis die Gewinntage erreicht sind — auch wenn das Ziel schon erreicht ist; Verlusttage zählen nicht. Danach Consistency je Zyklus (der größte Tag höchstens p % der Gewinn-Tage). Jeder Trade: SL unter „Verlust je Trade" (− 5 % Puffer, das engere mit der 1 % Rule). Kein Refund-Trade. Leeres Feld = Standard 7 × 500 $ · TP 550–750 · SL 700–800 · 35 % · 1 %')
+      const stInfo = fcrInfo('st', 'Konten mit Add-on „Striking" (Accounts → Add-ons): zuerst je Tag ein Gewinntag-Trade (TP/SL je 100k), bis die Gewinntage erreicht sind — auch wenn das Ziel schon erreicht ist; Verlusttage zählen nicht. Danach Consistency je Zyklus (der größte Tag höchstens p % der Gewinn-Tage). Jeder Trade: SL ≤ Max. Verlust ÷ 1,15 (Nachzieh-Toleranz des Bots) × 0,95 — 100k 826 $ — das engere mit der 1 % Rule. Kein Refund-Trade. Leeres Feld = Standard 7 × 500 $ · TP 550–750 · SL 700–800 · 35 % · 1 %')
       const stBlock = !stE ? '' : ad
         ? `<div class="wd-abl-schalter lesen"><span><b>Add-on · Striking${stInfo}</b><small>${escapeHtml(stSub)}</small></span></div>
           <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Gewinntage', stE.gewinntage_anzahl ?? null, Object.assign({ feld: 'striking.gewinntage_anzahl' }, fz), { einheit: 'Tage', leer: '7' })}

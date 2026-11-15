@@ -50800,14 +50800,20 @@ def fcp_on_demand_anwenden(regel, jg, groesse):
 #             das Ziel darf beim Sammeln schon erreicht sein, gesammelt wird trotzdem bis zur Anzahl (fcp_konto_rechnen Phase A). Verlusttage zählen nicht.
 #   Phase B — danach Consistency 35 % über fcp_cons_finn (Basis Summe der Gewinn-Tage W, wie alle Consistency-Firmen seit O1): der Payout-Trade ist gedeckelt
 #             (7 Tage ≈ 4.550 $ → höchstens ≈ 2.450 $); liegt der größte Tag über 35 %, plant sie weitere Tage.
-#   Jeder Trade: SL höchstens verlust_max_pct der Größe minus 5 % Puffer (100k: 950 $) — über max_sl wie das 1-%-Limit (max_risiko_trade); das engere gilt.
+#   Jeder Trade: SL höchstens verlust_max_pct der Größe ÷ 1,15 × 0,95 (100k: 826 $, 50k: 413 $, ST1b) — über max_sl wie das 1-%-Limit
+#             (max_risiko_trade); das engere gilt. Die Gewinntag-SL 700–800 $ liegen darunter und bleiben.
 #   Refund-Zyklus (erster Payout) gibt es mit Striking nicht (die 35 % gelten in jedem Zyklus).
 # Werte je 100k, linear auf die Kontogröße skaliert (50k = halbe Werte). Überschreibbar je Firma in funded_cfd_plan_regeln.firmen[].striking (false = keine).
 FCP_STRIKING_STANDARD = {"fundingpips": {"gewinntage_anzahl": 7, "gewinntag_min_je_100k": 500, "consistency_pct": 35,
                                          "tp_je_100k": [550, 750], "sl_je_100k": [700, 800], "verlust_max_pct": 1.0}}
 FCP_STRIKING_FELDER = {"gewinntage_anzahl": "Gewinntage", "gewinntag_min_je_100k": "Gewinntag ab je 100k", "consistency_pct": "Consistency",
                        "tp_je_100k": "Gewinntag-TP je 100k", "sl_je_100k": "Gewinntag-SL je 100k", "verlust_max_pct": "Verlust je Trade unter"}
-FCP_STRIKING_SL_PUFFER = 0.05         # SL-Deckel = verlust_max_pct × Größe × (1 − 5 %) — Schlupf/Spread bleiben sicher unter 1 %
+# SL-DECKEL STRIKING (ST1b, Prüfer S2 MUSS, Master 15.11.2026): Funded CFD läuft als Echo mit Hedge — nachzieh_cmd (mt5-copier/order_bot.py) setzt dort
+# tages_grenze_usd = None, und sl_ausloeser zieht den SL erst nach, wenn der echte Verlust > Plan × 1,15 ist (NACHZIEH_SL_TOLERANZ). Ein Plan-SL von 950 $
+# lief also bis ~1.092 $ (live FundingPips: echter Verlust ÷ master_sl p90 1,104, 24 % über 1,0526). Deckel deshalb = verlust_max_pct × Größe ÷ 1,15
+# (die Toleranz des Nachziehens ausgeschöpft bleibt unter 1 %) × 0,95 (Schlupf/Spread): 100k 826 $, 50k 413 $.
+FCP_STRIKING_NACHZIEH_TOLERANZ = 1.15  # = 1 + NACHZIEH_SL_TOLERANZ (0,15) im Bot (mt5-copier/order_bot.py) — beide zusammen ändern
+FCP_STRIKING_SL_PUFFER = 0.05         # zusätzlicher Puffer für Schlupf/Spread
 
 
 def fcp_striking_regel(regel):
@@ -50831,7 +50837,7 @@ def fcp_striking_regel(regel):
 
 def fcp_striking_anwenden(regel, jg, groesse):
     """REIN (testbar): Regel + Größen-Werte eines Striking-Kontos → (regel, jg, sl_deckel $) oder None (Firma ohne Striking-Regel / Größe fehlt).
-    jg.gewinntage = {anzahl, min, tp, sl} skaliert (f = Größe ÷ 100.000), Consistency p %, kein Refund-Zyklus; SL-Deckel = verlust_max_pct × Größe × 0,95.
+    jg.gewinntage = {anzahl, min, tp, sl} skaliert (f = Größe ÷ 100.000), Consistency p %, kein Refund-Zyklus; SL-Deckel = verlust_max_pct × Größe ÷ 1,15 × 0,95 (ST1b).
     Ziel, Lots, Hedge, DD und der normale SL der Größe bleiben (der Payout-Trade nimmt den normalen SL, gedeckelt)."""
     st, g = fcp_striking_regel(regel), _wd_num(groesse)
     if not st or not jg or not g:
@@ -50842,7 +50848,7 @@ def fcp_striking_anwenden(regel, jg, groesse):
                                "sl": [float(round(st["sl_je_100k"][0] * f)), float(round(st["sl_je_100k"][1] * f))]})
     jg2.pop("tp_erster", None)
     r2 = dict(regel or {}, erster_payout=False, consistency_pct=st["consistency_pct"] or 0, tp_modus=None)
-    deckel = float(int(st["verlust_max_pct"] / 100.0 * float(g) * (1.0 - FCP_STRIKING_SL_PUFFER)))
+    deckel = float(int(st["verlust_max_pct"] / 100.0 * float(g) / FCP_STRIKING_NACHZIEH_TOLERANZ * (1.0 - FCP_STRIKING_SL_PUFFER)))   # ST1b
     return r2, jg2, deckel
 
 
@@ -51911,7 +51917,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 regel_k, jg, st_deckel = _sta
             else:
                 st_an = False            # wie O1: Firma ohne Striking-Regel → normal planen, Hinweis in der Notiz
-                zeile["striking_ohne_regel"] = True
+                # ST1b (S2 KANN 1): eigene Notiz, wenn die Regel da ist und nur die Kontogröße fehlt (nicht „ohne Regel dieser Firma“)
+                zeile["striking_ohne_groesse" if fcp_striking_regel(regel) else "striking_ohne_regel"] = True
         if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
             aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen"); continue
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
@@ -52062,6 +52069,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (" · On Demand" if r.get("on_demand") else "") + (" · On Demand ohne Regel dieser Firma → normale Regel" if r.get("on_demand_ohne_regel") else "")
                  + (f" · Striking (SL ≤ {_liq_de(r['striking_sl_deckel'])} $)" if r.get("striking") and r.get("striking_sl_deckel") else "")   # ST1
                  + (" · Striking ohne Regel dieser Firma → normale Regel" if r.get("striking_ohne_regel") else "")
+                 + (" · Striking: Kontogröße unbekannt → normale Regel (Größe im Namen bzw. Starting Balance eintragen)" if r.get("striking_ohne_groesse") else "")
                  # ST1-Nachtrag: Consistency läuft beim Sammeln mit (größter Tag ÷ Summe der Gewinn-Tage)
                  + ((lambda c: f" · Consistency {_liq_de(c['p'])} % läuft mit: größter Tag {_liq_de(c['bester_tag'])} $ von {_liq_de(c['summe_tage'])} $"
                      + (f" ({round(c['anteil'] * 100)} %)" if c.get("anteil") is not None else "") + f" · noch {c['tage_offen']} Gewinntage"
