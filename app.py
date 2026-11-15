@@ -16177,7 +16177,8 @@ def _wd_zahl(v):
 # Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
-WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}, "ftmo futures": 200.0}   # FT2 (Finn 11.11.2026 21:05: „5 Winning Days, je Winning Day 200+“, zählt schon in der Funded-Phase)   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+# LF1 (Finn 16.11.2026): Lucid je Größe — 50k 150 $, 150k 250 $ (unbekannte Größe = 150k-Wert, zählt nie zu früh; wie Apex)
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": {"50000": 150.0, "150000": 250.0}, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}, "ftmo futures": 200.0}   # FT2 (Finn 11.11.2026 21:05: „5 Winning Days, je Winning Day 200+“, zählt schon in der Funded-Phase)   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
 
 
 def hedge_grund_echt(p):
@@ -43883,7 +43884,7 @@ def konto_ziele():
                 try:
                     _freg = _fdp_regeln_gemerkt() or {}   # KK1: 60 s gemerkt (je Funded-Konto sonst eine DB-Abfrage)
                     _fr = ap_regel_finden(fd_unt_an(_freg, "futures", a.get("user_id"), None, True), a.get("firm")) if _freg else None   # streng wie fdp_planen (an_von)
-                    if _fr:
+                    if _fr and fdp_groesse_an(_fr, a):   # LF1: Größe im Planer aus (an: false) wie Firma aus — kein Ziel
                         ctx["fdp"] = {"regel": _fr, "pay": [z.get("requested_at") or z.get("created_at") for z in pend] + [z.get("payout_date") or z.get("created_at") for z in verw]}
                 except Exception as e:
                     print(f"[konto-ziele] ⚠️ Funded-Planer-Regel {kid[:8]}: {type(e).__name__}: {e}", flush=True)
@@ -45398,7 +45399,7 @@ def _ap_bal_auto_funded_konten():
         return [], {}
     konten = [a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(uids) + ")",
                                               "account_type": "eq.funded"}) or []
-              if ap_regel_finden(an, a.get("firm"))]
+              if ap_regel_finden(an, a.get("firm")) and (globals().get("fdp_groesse_an") or (lambda _r, _a: True))(ap_regel_finden(an, a.get("firm")), a)]   # LF1: Größe aus → keine Lesung
     ids = [str(a.get("id")) for a in konten]
     plaene = []
     for i in range(0, len(ids), 100):
@@ -45709,12 +45710,15 @@ def ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, letzt, echo_bal
 def ap_bal_gruppe_funded_filter(konten, firmen_fdp, firmen_fcp):
     """REIN RECHNEND (testbar): Funded → Firmen an im Funded-Planer, Funded CFD → Firmen an im Funded-CFD-Planer. Eine Firma, die kein Planer fährt, wird nicht gelesen."""
     an = lambda fs: [f for f in fs or () if isinstance(f, dict) and f.get("an")]
+    ga = globals().get("fdp_groesse_an") or (lambda _r, _a: True)   # LF1; Selbsttest-Lader ziehen diese Funktion einzeln (dann wie bisher)
     if callable(firmen_fdp) or callable(firmen_fcp):   # UNT4: Firmen je Konto (Regel des Unternehmens der ID)
         fdp_f = firmen_fdp if callable(firmen_fdp) else (lambda _a: firmen_fdp)
         fcp_f = firmen_fcp if callable(firmen_fcp) else (lambda _a: firmen_fcp)
-        return [a for a in konten or () if ap_regel_finden(an(fcp_f(a) if a.get("account_type") == "funded_cfd" else fdp_f(a)), a.get("firm"))]
+        return [a for a in konten or () if ap_regel_finden(an(fcp_f(a) if a.get("account_type") == "funded_cfd" else fdp_f(a)), a.get("firm"))
+                and (a.get("account_type") == "funded_cfd" or ga(ap_regel_finden(an(fdp_f(a)), a.get("firm")), a))]   # LF1: Futures-Größe aus
     fdp, fcp = an(firmen_fdp), an(firmen_fcp)
-    return [a for a in konten or () if ap_regel_finden(fcp if a.get("account_type") == "funded_cfd" else fdp, a.get("firm"))]
+    return [a for a in konten or () if ap_regel_finden(fcp if a.get("account_type") == "funded_cfd" else fdp, a.get("firm"))
+            and (a.get("account_type") == "funded_cfd" or ga(ap_regel_finden(fdp, a.get("firm")), a))]   # LF1
 
 
 def ap_bal_auto_gruppen_tick(jetzt, reg=None):
@@ -48715,6 +48719,17 @@ def _fdp_ids_aus():
 
 
 FDP_GRUND_FIRMA_AUS = "Firma im Funded-Planer aus — unter Funded Planer → Futures → Einstellungen einschalten"   # HN1 (12.11.2026)
+FDP_GRUND_GROESSE_AUS = "Kontogröße im Funded-Planer aus — unter Funded Planer → Futures → Einstellungen je Größe einschalten"   # LF1 (16.11.2026)
+
+
+def fdp_groesse_an(regel, konto):
+    """REIN (testbar), LF1 (Master 16.11.2026, Lucid Flex 50k: „das 150k-Profil bleibt aus, das 50k-Profil braucht einen eigenen An-Schalter“): False nur,
+    wenn je_groesse[Größe des Kontos].an ausdrücklich false ist — sonst True. Profile ohne diesen Schlüssel (alle bis LF1) bleiben bitgleich: es zählt
+    allein der Schalter der Firma. Größe unbekannt bzw. keine Werte → True (dann entscheidet der bisherige Weg, z. B. „keine Werte für …k“)."""
+    if not isinstance(regel, dict):
+        return True
+    jg = fdp_je_groesse(regel, _wd_konto_groesse(konto))
+    return not (isinstance(jg, dict) and jg.get("an") is False)
 FCP_GRUND_FIRMA_AUS = "Firma im Funded-CFD-Planer aus — unter Funded Planer → CFD → Einstellungen einschalten"   # HN1 (12.11.2026)
 AP_GRUND_ID_AUS = "ID nicht im Challenge-Planer — unter „IDs verwalten“ den Haken setzen"   # HN1 (12.11.2026)
 
@@ -48791,16 +48806,18 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
     an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
     _alle_k = ap_deaktiviert_anwenden(konten) or []
-    konten = [a for a in _alle_k if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
+    konten = [a for a in _alle_k if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
+              and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a)]   # LF1: Größe mit an: false wie Firma aus
     archiv = _ap_archiviert()
     # HN1 (Master 12.11.2026, Befund S4: Konten einer ausgeschalteten Firma fielen hier still weg): eigene Liste nicht_im_planer[] mit Grund — nur für
     # „Heute nicht drin“. Entscheidung unverändert (kein Plan); bewusst NICHT in ausgelassen[] (ID-Leiste, Braucht dich, Lauf-Zeile, Kontoliste je Firma)
     try:   # HN1 (Master beim Push): nur Anzeige — ein Fehler hier darf den Planerlauf nie abbrechen
         erg["nicht_im_planer"] = [{"konto_id": str(a.get("id")), "user_id": str(a.get("user_id")), "konto": a.get("name"), "firma": a.get("firm"),
                                    "balance": (lambda v, bs: None if v is None else round(v + bs, 2))(_wd_num(a.get("tv_balance")), fdp_express_basis(a, _wd_konto_groesse(a))),   # Express absolut wie der Hauptweg (Prüfer)
-                                   "grund": FDP_GRUND_FIRMA_AUS}
+                                   "grund": FDP_GRUND_FIRMA_AUS if not ap_regel_finden(an_von(a.get("user_id")), a.get("firm")) else FDP_GRUND_GROESSE_AUS}
                                   for a in _alle_k if str(a.get("id")) not in archiv and _ap_norm(a.get("firm")) not in AP_STILL_FIRMEN
-                                  and not ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))]
+                                  and not (ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
+                                           and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a))]   # LF1
     except Exception as _e:
         print(f"[funded-planer] ⚠️ nicht_im_planer: {type(_e).__name__}: {_e}", flush=True)
         erg["nicht_im_planer"] = []
@@ -49886,7 +49903,7 @@ _FDP_GR_FELDER = {"ziel_gewinn": (1, 50000), "max_trade": (1, 50000), "kosten_eu
                   "ein_sl": (1, 20000), "t1_sl": (1, 20000), "t1_tp": (1, 50000), "t2_abstand_min": (0, 120)}
 _FDP_GR_KT = ("kontrakte", "ein_kontrakte", "t1_kontrakte", "t2_kontrakte")   # {Anzahl: Anteil}, Summe 1
 _FDP_GR_ZEIT = ("t1_von", "t1_bis", "t2_bis", "alarm_offen")                 # HH:MM Dubai (alarm_offen: FF2c)
-_FDP_GR_BOOL = ("sl_hinter_liq",)
+_FDP_GR_BOOL = ("sl_hinter_liq", "an")   # an (LF1): Größe im Planer — änderbar nur, wo der Schlüssel per SQL steht (Lucid 50k/150k)
 
 
 def fdp_regeln_anzeige(reg, quelle="db"):
