@@ -227,8 +227,10 @@ def main():
     r = subprocess.run([JSC, d.name], capture_output=True, text=True)
     os.unlink(d.name)
     out = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else ["", ""]
-    check(r.returncode == 0 and "Fusion −17 € (1 fehlt)" in out[0] and "T1 Long · +500 $ · Fusion −20 €" in out[0] and "T2 Short · +60 $ · Fusion +4 €" in out[0]
-          and "T3 Long · −30 $ · Fusion fehlt" in out[0] and "+500 $ + 60 $ − 30 $ = " in out[0], f"Tag-Chip Echo: Teile mit Fusion, Summe + fehlt ({r.stderr[:200]} {out[0][:400]})")
+    # WK1 (13.11.2026): Kopf „Tag <Summe> · Fusion“ ohne Rechenkette, je Teil eine Tabellen-Zeile (T-Nr · Richtung · Ende · P&L · Fusion)
+    _z = [" · ".join(c for c in re.findall(r"<span[^>]*>([^<]*)</span>", z) if c) for z in re.findall(r'<span class="wkt-z"[^>]*>(.*?</span>)</span>', out[0])]
+    check(r.returncode == 0 and "Fusion −17 € (1 fehlt)" in out[0] and _z == ["T1 · Long · +500 $ · −20 €", "T2 · Short · +60 $ · +4 €", "T3 · Long · −30 $ · fehlt"]
+          and "+500 $ + 60 $ − 30 $ = " not in out[0], f"Tag-Chip Echo: Teile mit Fusion als Tabelle, Summe + fehlt ({r.stderr[:200]} {_z} {out[0][:300]})")
     check("Fusion" not in out[1] and "(1 Trade)" in out[1], f"Tag-Chip Orbit ohne Hedge: ohne Fusion, wie bisher ({out[1][:200]})")
     js3 = js2.replace("print(JSON.stringify([wdlKetteTagChip(T), wdlKetteTagChip(O)]));",
                       "const Z = { status: 'review', kette_tag: " + json.dumps(te0) + ", kette_teile: " + json.dumps(te0["teile"]) + " };" +

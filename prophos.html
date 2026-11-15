@@ -6085,7 +6085,24 @@
   #dashboard-view .wdl-z-akt:has(> .wdl-erg) .el-knopf{padding:3px 8px}
   #dashboard-view .wdl-z-akt:has(> .wdl-erg) .wdl-man-text{flex-basis:0}   /* Manuelle Arbeit: Notiz bricht selbst um, statt die Knöpfe in eine 3. Zeile zu schieben */
   #dashboard-view .wdl-z-akt > .wdl-erg{flex-basis:100%;text-align:right;font-size:12px;line-height:1.3}
-  #dashboard-view .wdl-kette-tag{display:block;font-variant-numeric:tabular-nums}   /* zweizeilig: Summe, darunter Balance — passt in die schmale Ergebnis-Spalte */
+  #dashboard-view .wdl-kette-tag{display:block;font-variant-numeric:tabular-nums}
+  /* WK1 (Finn 13.11.2026: „wenn mehrere Trades pro Tag sind … cleaner“): Kopf „Tag <Summe> · Fusion“, darunter die Trades als Raster mit bündigen Spalten
+     (T-Nr · Richtung · Ende · Master-P&L · Fusion), kleiner und gedämpft, Balance gedämpft darunter. Folgt der Ausrichtung der Zelle (inline-grid). */
+  #dashboard-view .wdl-kette-tag.wkt .wkt-kopf{display:block}
+  #dashboard-view .wdl-kette-tag .wkt-tab{display:inline-grid;grid-template-columns:repeat(5,auto);column-gap:8px;row-gap:1px;margin-top:3px;font-size:11.5px;line-height:1.35;color:var(--sub);text-align:left;vertical-align:top}
+  #dashboard-view .wdl-kette-tag .wkt-z{display:contents}
+  #dashboard-view .wdl-kette-tag .wkt-pl,#dashboard-view .wdl-kette-tag .wkt-fu{text-align:right;white-space:nowrap}
+  #dashboard-view .wdl-kette-tag .wkt-bal{display:block;margin-top:2px;font-size:11.5px;color:var(--sub)}
+  /* Handy (Radar-Raster ab 820 px): die Ergebnis-Spalte ist nur ~120 px breit und schneidet ab (overflow hidden) — Richtung und Ende fallen dort aus der Tabelle
+     (stehen im Tooltip der Zeile), es bleiben T-Nr · P&L · Fusion; der Kopf darf umbrechen */
+  @media (max-width:820px){
+    #dashboard-view .wdl-kette-tag .wkt-tab{grid-template-columns:repeat(3,auto);column-gap:6px;font-size:11px}
+    #dashboard-view .wdl-kette-tag .wkt-z > span:nth-child(2),#dashboard-view .wdl-kette-tag .wkt-z > span:nth-child(3){display:none}
+    #dashboard-view .wdl-kette-tag.wkt .wkt-kopf{white-space:normal}
+    #dashboard-view .wdl-kette-tag.wkt .wkt-kopf b{white-space:nowrap}
+    #dashboard-view .wdl-kette-tag.wkt .wkt-kfu{display:block}   /* „Fusion +57 €“ als eigene Zeile unter dem Tagesbetrag, ohne Punkt */
+    #dashboard-view .wdl-kette-tag.wkt .wkt-pkt{display:none}
+  }   /* zweizeilig: Summe, darunter Balance — passt in die schmale Ergebnis-Spalte */
   #dashboard-view .wdl-z-akt > .wdl-erg > b{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}   /* „…" am Chip selbst; ein angehängtes „→ Review" bricht lieber um, als zu verschwinden */
   /* Radar-Abschnitt „Bestanden" (09.10.2026): Phase-Chip in der ri-Spalte, Balance → Ziel in mi, Tage in konto, Status in pl, Knopf in zeit */
   #dashboard-view .wdl-z-bst .wdl-z-ri .type-badge{font-size:11px;padding:1px 7px}
@@ -40525,17 +40542,33 @@
     const z = Math.sign(Number(v)) * Math.round(Math.abs(Number(v)))   // symmetrisch gerundet vor dem Vorzeichen (−16,5 → −17) — nie „−0 €"
     return `Fusion ${z < 0 ? '−' : '+'}${Math.abs(z).toLocaleString('de-DE')} €`
   }
-  function wdlKetteTeilZeile(x, sg){
-    if(!x || typeof x !== 'object') return ''
+  function wdlKetteTeilDaten(x, sg){
     const ri = x.richtung === 'buy' ? 'Long' : x.richtung === 'sell' ? 'Short' : ''
     const en = { tp: 'TP', sl: 'SL', liq: 'Liq', hand: 'Hand' }[x.ende] || ''
-    const pl = (x.pl == null || !isFinite(Number(x.pl))) ? '–' : (x.art === 'geschaetzt' ? '≈ ' : '') + sg(Number(x.pl))
+    const plv = (x.pl == null || !isFinite(Number(x.pl))) ? null : Number(x.pl)
+    const pl = plv == null ? '–' : (x.art === 'geschaetzt' ? '≈ ' : '') + sg(plv)
     const tip = (x.art === 'geschaetzt' ? 'P&L geschätzt aus dem Kurs — keine Balance-Lesung' : x.art === 'eingetragen' ? 'P&L am Plan eingetragen' : x.art === 'gelesen' ? 'P&L aus der Balance-Lesung' : '')
       + (en ? ` · Ende ${en} laut Kurs-Verlauf (Minutenkerzen), nicht gelesen` : '')
     // WS2E-Tag (Finn 10.11.2026: „nur den letzten Trade abhaken, aber die Resultate aller Trades sehen"): Fusion-P&L je Teil aus tagesende.teile[].fusion
     // (app.py tt_fusion_pl) — nur wenn der Schlüssel da ist (Teil mit Hedge); null = noch nicht belegt. Topstep/Orbit ohne Hedge: unverändert
     const fu = ('fusion' in x) ? wdlKetteFusionTxt(x.fusion) : ''
-    return `<br><span title="${escapeHtml(tip + (fu ? ' · Fusion-Gegenhedge des Teils' : ''))}">T${Number(x.nr) || '?'}${ri ? ' ' + ri : ''}${en ? ' · ' + en : ''} · ${pl}${fu ? ' · ' + fu : ''}</span>`
+    return { nr: Number(x.nr) || '?', ri, en, plv, pl, fu, tip: tip + (fu ? ' · Fusion-Gegenhedge des Teils' : '') }
+  }
+  function wdlKetteTeilZeile(x, sg){
+    if(!x || typeof x !== 'object') return ''
+    const d = wdlKetteTeilDaten(x, sg)
+    return `<br><span title="${escapeHtml(d.tip)}">T${d.nr}${d.ri ? ' ' + d.ri : ''}${d.en ? ' · ' + d.en : ''} · ${d.pl}${d.fu ? ' · ' + d.fu : ''}</span>`
+  }
+  /* WK1 (Finn 13.11.2026: „wenn mehrere Trades pro Tag sind, dann mach bitte hier das cleaner, da erkennt man ja grad nix“): ab 2 Trades je Trade eine Zeile
+   * einer kleinen Tabelle mit festen Spalten T-Nr · Richtung · Ende · Master-P&L · Fusion — die Spalten stehen untereinander bündig (CSS-Raster .wkt-tab,
+   * Zeile = display:contents). Dieselben Werte und Tooltips wie die Textzeilen (wdlKetteTeilDaten), nur die Darstellung. */
+  function wdlKetteTeilTabelle(teile, sg, farbe){
+    const zeilen = teile.map(x => {
+      const d = wdlKetteTeilDaten(x, sg), fuW = d.fu ? d.fu.replace(/^Fusion /, '') : ''
+      return `<span class="wkt-z" title="${escapeHtml(d.tip)}"><span>T${d.nr}</span><span>${d.ri}</span><span>${d.en}</span>`
+        + `<span class="wkt-pl"${d.plv != null ? ` style="color:${farbe(d.plv)}"` : ''}>${d.pl}</span><span class="wkt-fu"${d.fu ? ' title="Fusion-Gegenhedge des Teils"' : ''}>${fuW}</span></span>`
+    }).join('')
+    return `<span class="wkt-tab">${zeilen}</span>`
   }
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
@@ -40549,8 +40582,10 @@
       // Ohne Tagesergebnis (letzter Trade ohne Lesung, oder Trade 1 nach dem Fenster): Summe aus den Teilen, nur in Überprüfen und nie für einen wartenden Trade 1
       if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return ''
       const summe = teile.reduce((a, x) => a + Number(x.pl), 0), gesch = teile.some(x => x.art === 'geschaetzt')
-      const kopf = teile.length > 1 ? `${teile.map((x, i) => (i ? (Number(x.pl) < 0 ? ' − ' : ' + ') + de(Number(x.pl)) + ' $' : sg(Number(x.pl)))).join('')} = ` : '(1 Trade) '
-      return `<span class="wdl-kette-tag" title="Tagesergebnis aus den Trades des Tages${gesch ? ' — ≈: mindestens ein Trade nur geschätzt, beim Abhaken prüfen' : ''}">Tag ${kopf}<b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b>${jeTrade}</span>`
+      const tipO = `Tagesergebnis aus den Trades des Tages${gesch ? ' — ≈: mindestens ein Trade nur geschätzt, beim Abhaken prüfen' : ''}`
+      // WK1 (13.11.2026): ab 2 Trades Kopf nur „Tag <Summe>“, die Teile stehen in der Tabelle darunter; 1 Trade wie bisher
+      if(teile.length > 1) return `<span class="wdl-kette-tag wkt" title="${tipO}"><span class="wkt-kopf">Tag <b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b></span>${wdlKetteTeilTabelle(teile, sg, farbe)}</span>`
+      return `<span class="wdl-kette-tag" title="${tipO}">Tag (1 Trade) <b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b>${jeTrade}</span>`
     }
     const tag = n(k.tag_pl), bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
     if(tag == null) return ''
@@ -40567,7 +40602,12 @@
     const fuOffen = Number(k.fusion_offen) > 0 ? Number(k.fusion_offen) : 0
     const fuSum = n(k.fusion_sum) != null ? ` · ${wdlKetteFusionTxt(k.fusion_sum)}${fuOffen ? ` (${fuOffen} ${fuOffen === 1 ? 'fehlt' : 'fehlen'})` : ''}`
       : fuOffen ? ' · Fusion fehlt' : ''
-    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart${fuSum ? ' · Fusion = Summe der Gegenhedges aller Teile' : ''}">Tag ${weg}${fuSum}${jeTrade}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
+    const tipK = `Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart${fuSum ? ' · Fusion = Summe der Gegenhedges aller Teile' : ''}`
+    // WK1 (13.11.2026): Mehr-Trade-Tag mit Teilen → Kopf „Tag <Summe> · Fusion“, Rechenkette entfällt (die Teile stehen in der Tabelle), Balance gedämpft darunter.
+    // Ohne kette_teile bleibt die Rechenkette (sonst fehlten die Teile ganz), 1 Trade wie bisher
+    if(teile.length > 1)   // nur mit mindestens 2 Teilen — sonst stünde ein Trade ohne Gegenstück da, dann lieber die Rechenkette
+      return `<span class="wdl-kette-tag wkt" title="${tipK}"><span class="wkt-kopf">Tag ${summe}${fuSum ? `<span class="wkt-kfu"><span class="wkt-pkt"> · </span>${fuSum.replace(/^ · /, '')}</span>` : ''}</span>${wdlKetteTeilTabelle(teile, sg, farbe)}${bal != null ? `<span class="wkt-bal">Balance ${de(bal)} $</span>` : ''}</span>`
+    return `<span class="wdl-kette-tag" title="${tipK}">Tag ${weg}${fuSum}${jeTrade}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
   }
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
@@ -59084,7 +59124,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2216'
+  const OS_TAB_BUILD = '2026-09-22.2217'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

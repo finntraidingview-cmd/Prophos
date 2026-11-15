@@ -132,7 +132,7 @@ JETZT = "Date.parse('2026-11-02T12:00:00Z')"
 # nachgezogen 11.11.2026 (ST1, Slave 2): ff1f685a WS2e zieht die Topstep-Trade-1-Bedingung gewollt in die neue Hilfsfunktion wdlKetteNichtLetzter
 # (ohne kette_von genau der alte Weg: tsv2 + kette_nr 1) — sie gehört mit in den Ausschnitt; ebenso a1b47aa9 WS2d tpKetteNichtLetzter
 # (PC-Tab-Seite, ohne kette.von genau der alte Weg: nur Trade 1) für tpKetteLesenWeiter
-js = STUBS + "\n".join(fn(n) for n in ("tpKetteNichtLetzter", "tpKetteLesenWeiter", "wdlKetteNichtLetzter", "wdlKetteT1Offen", "wdlWartet", "wdlWartetLesung", "wdlKetteTeilZeile", "wdlKetteTagChip"))
+js = STUBS + "\n".join(fn(n) for n in ("tpKetteNichtLetzter", "tpKetteLesenWeiter", "wdlKetteNichtLetzter", "wdlKetteT1Offen", "wdlWartet", "wdlWartetLesung", "wdlKetteTeilDaten", "wdlKetteTeilZeile", "wdlKetteTeilTabelle", "wdlKetteTagChip"))   # WK1: Teil-Daten + Tabelle
 js += f"\nDate.now = () => {JETZT};\n"
 BIS, VORBEI = "2026-11-02T18:30:00Z", "2026-11-02T11:00:00Z"
 T1 = {"id": "a", "route": "tsv2", "status": "review", "kette_nr": 1, "kette_lesen_bis": BIS, "balance_start": 150000, "balance_end": None,
@@ -186,10 +186,14 @@ check(W.get("t1_unplausibel") is None, "Trade 1 „von Hand abhaken“ (unplausi
 check(W.get("t1_30_versuche") is None, "Trade 1 nach 30 Versuchen: Puls hört auf → abhakbar mit Schätzung")
 check(W.get("t1_folgetrade") is None, "Trade 1 mit Folgetrade-Balance: keine genaue Lesung → nicht „Trade 2 folgt“")
 check(W.get("t2_8_versuche") is None, "Trade 2 nach 8 Versuchen: wie bisher (Haken mit Schätzung)")
+# WK1 (13.11.2026): ab 2 Trades Kopf nur „Tag <Summe>“, je Trade eine Tabellen-Zeile mit festen Spalten (T-Nr · Richtung · Ende · P&L · Fusion)
+def wkt_zeilen(h):
+    return [" · ".join(c for c in re.findall(r"<span[^>]*>([^<]*)</span>", z) if c) for z in re.findall(r'<span class="wkt-z"[^>]*>(.*?</span>)</span>', h)]
 c = K.get("mit_tagesende") or ""
-check("Tag +2.494 $ − 5.208 $ =" in c and "T1 Long · TP · +2.322 $" in c and "T2 Short · SL · −5.208 $" in c and "Balance 151.777 $" in c, f"Chip mit Tagesergebnis: je Trade eine Zeile ({c})")
+check(wkt_zeilen(c) == ["T1 · Long · TP · +2.322 $", "T2 · Short · SL · −5.208 $"] and "Balance 151.777 $" in c and '<span class="wkt-kopf">Tag <b' in c and " = " not in c,
+      f"Chip mit Tagesergebnis: Kopf ohne Rechenkette, je Trade eine Tabellen-Zeile ({wkt_zeilen(c)} {c[:200]})")
 c = K.get("ohne_tagesende_geschaetzt") or ""
-check("≈ +4.494 $" in c and "T2 Short · SL · ≈ +2.172 $" in c, f"Chip ohne Tagesergebnis: Summe aus den Teilen mit ≈ ({c})")
+check("≈ +4.494 $" in c and "T2 · Short · SL · ≈ +2.172 $" in wkt_zeilen(c) and " = " not in c, f"Chip ohne Tagesergebnis: Summe aus den Teilen mit ≈ ({wkt_zeilen(c)})")
 check(K.get("t1_wartet") == "", "wartender Trade 1: kein Chip")
 c = K.get("t1_nach_fenster") or ""
 check("(1 Trade)" in c and "≈ −1.723 $" in c, f"Trade 1 nach dem Fenster: (1 Trade) ≈ ({c})")
