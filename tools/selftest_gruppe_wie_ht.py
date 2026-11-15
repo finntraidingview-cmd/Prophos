@@ -202,7 +202,8 @@ NACHT = {"tag": Z_TAG, "at": "2026-11-01T21:31:01+00:00", "quelle": "nacht", "na
 Z_KONTEN = [{"id": k, "account_type": "phase1", "user_id": "u-emin"} for k in ("k-erl", "k-rev", "k-heute", "k-ziel", "k-alt")]
 Z_PLAENE = [{"master_account_id": "k-erl", "status": "completed", "started_at": "2026-10-30T05:00:00+00:00", "completed_at": "2026-11-01T21:42:00+00:00"},
             {"master_account_id": "k-rev", "status": "review", "started_at": "2026-10-30T05:00:00+00:00"},
-            {"master_account_id": "k-heute", "status": "completed", "started_at": "2026-10-30T05:00:00+00:00", "completed_at": "2026-11-02T05:00:00+00:00"},
+            # NP1 (16.11.2026): „heute abgehakt“ belegt nur, wenn auch HEUTE gehandelt wurde — Abhaken allein ist kein Handeln (Fall Freitagstrade → selftest_np1_abgehakt)
+            {"master_account_id": "k-heute", "status": "completed", "started_at": "2026-11-02T04:00:00+00:00", "completed_at": "2026-11-02T05:00:00+00:00"},
             {"master_account_id": "k-alt", "status": "planned", "planned_for": Z_TAG}]
 Z_AUFRUFE = []
 ANTWORT = {"geplant": [{"konto_id": "k-erl"}], "ausgelassen": []}

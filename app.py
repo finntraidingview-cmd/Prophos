@@ -44139,16 +44139,19 @@ def _ap_plan_am_tag(p, tag, tz):
         # 08.10.2026 EIN TRADE PRO KONTO UND TAG (Finn: „Es wird immer nur maximal ein Trade pro Tag gemacht?“): ein heute schon
         # beendeter (abgehakter) Trade belegt das Konto für den Rest des Tages. Vorfall: Inas drei Apex-Konten endeten 03:57 Dubai
         # im Tagesstopp, das Nachplanen legte um 07:20 Dubai für dieselben Konten neue Trades für HEUTE an (08:47/17:04/18:06).
-        for k in ("started_at", "ended_at", "completed_at", "start_um"):
-            v = p.get(k)
-            if not v:
-                continue
+        # NP1 (16.11.2026, Master/Finn: 5 Konten blieben nach dem Abhaken den ganzen Tag draußen): ABHAKEN IST KEIN HANDELN — Finn hakte die Freitagstrades
+        # vom 13.11. am 16.11. ~03:00 Dubai (= 00:00 deutsche Zeit, AP_TZ_TAG) ab; completed_at fiel auf den neuen Tag und belegte das Konto als „heute
+        # gehandelt“. Es zählt, wann gehandelt wurde (started_at, ended_at — Inas Tagesstopp hat ended_at heute und blockt weiter); start_um und completed_at
+        # nur als Rückfall, wenn keine dieser beiden Zeiten lesbar ist (alte Hand-Zeilen, verbrauchte Pläne ohne Start).
+        def _tag_von(v):
             try:
-                if datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d") == tag:
-                    return True
+                return datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d") if v else None
             except (TypeError, ValueError):
-                continue
-        return False
+                return None
+        gehandelt = [t for t in (_tag_von(p.get("started_at")), _tag_von(p.get("ended_at"))) if t]
+        if gehandelt:
+            return tag in gehandelt
+        return tag in (_tag_von(p.get("start_um")), _tag_von(p.get("completed_at")))
     if st != "planned":
         return False
     if p.get("planned_for"):
