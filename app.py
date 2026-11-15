@@ -44281,7 +44281,8 @@ def tw_firma_handelt(uid, firma, tag, pct):
 def tw_pause_grund(planer, a, tag, werte=None, ktx=None):
     """Konto-Zeile a (id, user_id, firm bzw. master_firm) → Grund-Text, wenn heute Pause-Tag, sonst None. Jeder Fehler → None (handelt wie bisher).
     TW3: zuerst der Firmen-Wurf je ID × Firma × Tag (TW_FIRMA, gilt für alle Planer gleich), dann der Konto-Wurf (TW1) für die übrigen.
-    TW2: von Hand reingenommen (Marke tw_hand je Konto × Tag, tw_hand_konten) → None — die Hand überstimmt beide Würfe, nur für dieses Konto an diesem Tag."""
+    TW2: von Hand reingenommen (Marke tw_hand je Konto × Tag, tw_hand_konten) → None — die Hand überstimmt beide Würfe, nur für dieses Konto an diesem Tag.
+    TW4: Ausnahme je ID × Firma × Tag (planer_wuerfel_ausnahme, tw_ausnahmen) → None für alle Konten dieser ID bei der Firma an dem Tag (mit konto_id: nur dieses)."""
     try:
         uid = (a or {}).get("user_id")
         firma = (a or {}).get("firm") or (a or {}).get("master_firm")
@@ -44295,6 +44296,10 @@ def tw_pause_grund(planer, a, tag, werte=None, ktx=None):
                 return None
             grund = TW_GRUND_WD if planer == "winning_days" else TW_GRUND.format(pct=_tw_pct_txt(pct))
         if "tw_hand_konten" in globals() and str((a or {}).get("id") or "") in tw_hand_konten(tag):   # get: ältere Selftest-Lader ziehen tw_pause_grund ohne TW2
+            return None
+        # TW4 (16.11.2026, Finn „mach Simon mal rein für heute“): Ausnahme je ID × Firma × Tag überstimmt Firmen- und Konto-Wurf — nur gelesen, wenn ein Wurf
+        # Pause ergibt; get: ältere Selftest-Lader ziehen tw_pause_grund ohne TW4
+        if "tw_ausnahmen" in globals() and tw_ausnahme_hat(tw_ausnahmen(tag), uid, firma, (a or {}).get("id")):
             return None
         return grund
     except Exception as e:
@@ -44526,6 +44531,91 @@ def admin_handel_wuerfel_hand():
     print(f"[handels-wuerfel] ✋ {acc.get('name') or kid[:8]} am {tag} {'von Hand rein (Pause-Tag überstimmt)' if rein else 'Hand-Marke weg (Wurf gilt)'} "
           f"durch {str(me)[:8]}", flush=True)
     return jsonify({"ok": True, "konto_id": kid, "tag": tag, "rein": rein})
+
+
+# ══ TW4 WÜRFEL-AUSNAHME JE ID × FIRMA × TAG (16.11.2026, Finn ~03:30 Dubai über den Master: „mach Simon mal rein für heute“ — zehn Lucid-Challenges standen auf
+# „Pause-Tag Firma (Firmen-Würfel 85 %)“; es gab nur den globalen Wert (füllte alle 24 Firmen-Pausen auf) oder TW2 je Konto). Tabelle planer_wuerfel_ausnahme
+# (sql/2026-11-16_wuerfel_ausnahme.sql): Zeile user_id × firma (NULL = alle Firmen der ID) × tag → für diese ID × Firma greifen an dem Plan-Tag weder der
+# Firmen-Würfel (TW3) noch der Konto-Würfel (TW1). Gelesen in tw_pause_grund, also überall, wo der Würfel greift (Nachtlauf, Nachplan-Takt + Filter, Knopf,
+# Funded-Takt, WD-POST). Alle anderen Regeln bleiben. „Pause-Tag“ ist kein fester Nachplan-Grund → der nächste Takt (5 min) rechnet die Konten neu.
+# Nachtrag Master 16.11.2026: optional konto_id — ist sie gesetzt, gilt die Zeile NUR für dieses eine Konto (beide Würfel aus), firma wird dann nicht gebraucht.
+# Gelesen wird nur, wenn ein Würfel überhaupt eine Pause ergibt — ohne Tabelle/Zeile/bei Lesefehler ist alles wie vor TW4 (Würfel gilt). ══
+TW_AUSNAHME_TAB = "planer_wuerfel_ausnahme"
+TW_AUSNAHME_CACHE_S = 20
+_tw_aus = {}                   # tag → (bis, set((user_id, firma_norm | "*") | ("konto", konto_id)))
+_tw_aus_gut = {}               # tag → (gelesen_um, menge) — letzter gute Stand für kurze Lesefehler (Prüfer TW4 SOLLTE 2, wie tw_werte/TW_ALT_S)
+TW_AUSNAHME_ALT_S = 600        # so lange gilt der letzte gute Stand bei einem Lesefehler weiter (nicht bei „Tabelle fehlt“)
+_tw_aus_log = {"at": 0.0}
+_tw_aus_lock = threading.Lock()
+
+
+def tw_ausnahme_aus_zeilen(rows, tag):
+    """REIN RECHNEND (testbar, TW4): Tabellen-Zeilen → Menge {(user_id, Firma nach _ap_norm | "*")} für genau diesen Tag. firma leer/NULL → "*" (alle Firmen).
+    Zeile mit konto_id → ("konto", konto_id): nur dieses Konto (Nachtrag 16.11.2026)."""
+    t, out = str(tag or "")[:10], set()
+    for r in rows or []:
+        if not isinstance(r, dict) or not r.get("user_id") or str(r.get("tag") or "")[:10] != t:
+            continue
+        if r.get("konto_id"):
+            out.add(("konto", str(r["konto_id"])))
+            continue
+        f = str(r.get("firma") or "").strip()
+        out.add((str(r["user_id"]), _ap_norm(f) if f else "*"))
+    return out
+
+
+def tw_ausnahme_hat(menge, uid, firma, konto_id=None):
+    """REIN RECHNEND (testbar, TW4): hat ID × Firma (oder das Konto selbst) eine Ausnahme in der Menge? Zeile ohne Firma gilt für jede Firma der ID; ohne ID nie
+    (außer über die Konto-Zeile)."""
+    if not menge:
+        return False
+    if konto_id and ("konto", str(konto_id)) in menge:
+        return True
+    if not uid:
+        return False
+    u = str(uid)
+    if (u, "*") in menge:
+        return True
+    f = str(firma or "").strip()
+    return bool(f) and (u, _ap_norm(f)) in menge
+
+
+def tw_ausnahmen(tag, frisch=False):
+    """Ausnahmen (TW4) für den Plan-Tag, 20 s gemerkt je Tag. Tabelle fehlt → leere Menge (= wie vor TW4), höchstens stündlich geloggt.
+    Lesefehler → der letzte gute Stand des Tags, solange er ≤ TW_AUSNAHME_ALT_S alt ist (Prüfer TW4: ein kurzer Supabase-Aussetzer soll eine gesetzte
+    Ausnahme nicht für einen WD-POST/Funded-Takt aushebeln), sonst leere Menge (der Würfel gilt); 15 s gemerkt, höchstens einmal je Minute geloggt.
+    Nicht abgedeckt: der WD-Rückfall im Browser (prophos.html hwWdPause, nur wenn POST /admin/wd-plaene ausfällt) würfelt selbst und kennt TW4 nicht —
+    die Tabelle hat RLS ohne Policies, der Browser kann sie nicht lesen; dort bleibt im Zweifel der Pause-Tag (vorsichtige Richtung)."""
+    t = str(tag or "")[:10]
+    if not t:
+        return set()
+    jetzt = time.time()
+    with _tw_aus_lock:
+        z = _tw_aus.get(t)
+        if not frisch and z and z[0] > jetzt:
+            return z[1]
+    try:
+        rows = sb_select(TW_AUSNAHME_TAB, {"select": "*", "tag": f"eq.{t}"}) or []   # „*“: läuft mit und ohne Spalte konto_id
+        menge = tw_ausnahme_aus_zeilen(rows, t)
+    except Exception as e:
+        _r = getattr(e, "response", None)
+        fehlt = getattr(_r, "status_code", None) in (400, 404) and TW_AUSNAHME_TAB in str(getattr(_r, "text", "") or "")
+        with _tw_aus_lock:
+            gut = _tw_aus_gut.get(t)
+            menge = gut[1] if (not fehlt and gut and jetzt - gut[0] <= TW_AUSNAHME_ALT_S) else set()
+            if jetzt - _tw_aus_log["at"] > (3600 if fehlt else 60):
+                _tw_aus_log["at"] = jetzt
+                print(f"[handels-wuerfel] {'Ausnahme-Tabelle fehlt (sql/2026-11-16_wuerfel_ausnahme.sql) — Würfel gilt' if fehlt else '⚠️ Ausnahmen ' + t + ' nicht lesbar (' + type(e).__name__ + ')' + (' — letzter Stand gilt' if menge else ' — Würfel gilt')}", flush=True)
+            _tw_aus[t] = (jetzt + (60 if fehlt else 15), menge)
+        return menge
+    with _tw_aus_lock:
+        for k in [k for k, v in _tw_aus.items() if v[0] < jetzt - 3600]:
+            _tw_aus.pop(k, None)
+        for k in [k for k, v in _tw_aus_gut.items() if v[0] < jetzt - 3600]:
+            _tw_aus_gut.pop(k, None)
+        _tw_aus[t] = (jetzt + TW_AUSNAHME_CACHE_S, menge)
+        _tw_aus_gut[t] = (jetzt, menge)
+    return menge
 
 
 # ══ RV1 RANGE-WÜRFEL (11.11.2026, Finn 07:35 über den Master: „75 % der Trades bleiben gleich, und nur bei 25 % der Trades wird's angepasst … Stop Loss,
