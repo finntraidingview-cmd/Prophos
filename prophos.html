@@ -56321,6 +56321,13 @@
    * Mindest-$ des Tages liefern (Finn: „genau das Gleiche wie bei Take Profit, bei Overall Goal oder beim Stop Loss"). Erkannt am Funded-Planer
    * (mt5_baseline.funded_plan.tp_art 'gewinntag', Blue Guardian 550–650 $) bzw. an der Auto-Planer-Stufe „Gewinntag x/y sammeln". Gewinntag + Blow
    * am Boden → 'beide'. Anlass GT1 Blue Guardian …7770: TP 590 $, Fill 9,3 Pkt schlechter → +447,83 $, Tag unter 500 $ nicht gezählt. */
+  // ST1b (Striking, Master 15.11.2026): Verlustgrenze je Trade ($) aus dem Funded-Plan (app.py fcp_planen → funded_plan.verlust_grenze_usd) — reist als
+  // verlust_grenze_usd über panel.py zum Bot (nachzieh_cmd); null = kein Striking-Plan, dann bleibt der Body unverändert
+  function stGrenzeUsd(plan){
+    const fp = plan && plan.mt5Baseline && plan.mt5Baseline.funded_plan
+    const g = fp && typeof fp === 'object' && fp.striking === true ? Number(fp.verlust_grenze_usd) : NaN
+    return isFinite(g) && g > 0 ? g : null
+  }
   function echoGewinntag(plan, n){
     const fp = plan && plan.mt5Baseline && plan.mt5Baseline.funded_plan
     if(fp && typeof fp === 'object' && fp.tp_art === 'gewinntag') return 'Gewinntag-Trade (Funded-Planer)'
@@ -57319,7 +57326,9 @@
                                              volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd,
                                              final: _fin.final, final_grund: _fin.grund,
                                              // ES2d: Scharf-Beweis im Bot (nur mit gemeldeter Fähigkeit); der Bot kappt selbst auf 5–60 s
-                                             ...(imBot ? { scharf_pflicht: true, scharf_max_s: Math.round(scharfMax / 1000) } : {}) }) })
+                                             ...(imBot ? { scharf_pflicht: true, scharf_max_s: Math.round(scharfMax / 1000) } : {}),
+                                             // ST1b Striking: Verlustgrenze je Trade aus dem Funded-Plan — nur wenn gesetzt (sonst Body wie bisher)
+                                             ...(stGrenzeUsd(plan) ? { verlust_grenze_usd: stGrenzeUsd(plan) } : {}) }) })
                     if(!mt5OrderWiederholen(r, Date.now() - t0)) break
                     if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
                       r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
@@ -59141,7 +59150,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2217'
+  const OS_TAB_BUILD = '2026-09-22.2218'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

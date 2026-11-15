@@ -50879,6 +50879,15 @@ def fcp_striking_gt_tp(tp, pct, gt, gewinntage, tw):
     return float(t), info
 
 
+def fcp_striking_verlust_grenze(regel, groesse):
+    """REIN (testbar), ST1b Variante (a): harte Verlustgrenze je Trade für den Bot ($) = verlust_max_pct × Größe × (1 − 5 % Reserve) — 100k 950 $,
+    50k 475 $. Reist als funded_plan.verlust_grenze_usd → PC-Tab → panel.py → order_bot nachzieh_cmd (SL am Fill auf min(sl_usd, Grenze)). None ohne Regel/Größe."""
+    st, g = fcp_striking_regel(regel), _wd_num(groesse)
+    if not st or not g:
+        return None
+    return float(int(st["verlust_max_pct"] / 100.0 * float(g) * (1.0 - FCP_STRIKING_SL_PUFFER)))
+
+
 def fcp_max_sl(max_sl, deckel):
     """REIN (testbar): das engere von accounts.max_risiko_trade und dem Striking-Deckel (keins gültig → max_sl unverändert)."""
     w = [x for x in (_wd_num(max_sl), _wd_num(deckel)) if x is not None and x > 0]
@@ -51965,6 +51974,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if st_an and st_deckel:
             r["striking"] = True
             r["striking_sl_deckel"] = st_deckel
+            r["verlust_grenze_usd"] = fcp_striking_verlust_grenze(regel, g)   # ST1b (a): harte Grenze für den Bot (SL am Fill)
         if _heute_n >= 1 and r.get("aktion") == "planen" and r.get("tp_art") == "gewinntag":
             aus("heute schon getradet — Gewinntage: ein Trade je Tag (zählt sonst nicht als neuer Tag)"); continue   # Fremd-Review E1e
         # TW1 HANDELS-WÜRFEL (11.11.2026): nur dort, wo ein neuer Trade entstünde — „Ziel erreicht → Waiting“ und alle anderen Aktionen laufen weiter;
@@ -52096,7 +52106,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                                          "ziel_fest", "on_demand")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt,
                                                  # ST1: nur bei Striking-Konten (alle anderen Pläne bitgleich wie bisher)
-                                                 **({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend")}
+                                                 **({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend"),
+                                                     "verlust_grenze_usd": r.get("verlust_grenze_usd")}
                                                     if r.get("striking") else {}))}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))

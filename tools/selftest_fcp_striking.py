@@ -117,6 +117,9 @@ ok(app.fcp_striking_anwenden(BG, JG(BG, 100000), 100000) is None and app.fcp_str
    "Firma ohne Regel / Größe fehlt → None (Planer plant normal)")
 ok(app.FCP_STRIKING_NACHZIEH_TOLERANZ == 1.15 and abs(826 * 1.15 - 950) < 1 and 826 * 1.15 < 1000,
    "ST1b (S2 MUSS): Deckel 826 $ (100k) — auch mit der Nachzieh-Toleranz des Bots (× 1,15 ≈ 950 $) unter 1 % = 1.000 $")
+ok(app.fcp_striking_verlust_grenze(FP, 100000) == 950.0 and app.fcp_striking_verlust_grenze(FP, 50000) == 475.0
+   and app.fcp_striking_verlust_grenze(BG, 100000) is None and app.fcp_striking_verlust_grenze(FP, None) is None,
+   "ST1b (a): harte Bot-Grenze 1 % − 5 % Reserve (100k 950 $, 50k 475 $), ohne Regel/Größe keine")
 bot = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
 ok("NACHZIEH_SL_TOLERANZ = 0.15" in bot, "Bot-Toleranz 0,15 = FCP_STRIKING_NACHZIEH_TOLERANZ − 1 (beide zusammen ändern)")
 ok(app.fcp_max_sl(None, 826) == 826 and app.fcp_max_sl(1000, 826) == 826 and app.fcp_max_sl(800, 826) == 800 and app.fcp_max_sl(None, None) is None,
@@ -258,7 +261,7 @@ ok("fcp_striking_anwenden(regel, jg, g)" in fp and "regel_k, jg, st_deckel = _st
 ok('zeile["striking_ohne_groesse" if fcp_striking_regel(regel) else "striking_ohne_regel"] = True' in fp and "Striking: Kontogröße unbekannt" in fp,
    "ST1b (S2 KANN 1): eigene Notiz, wenn nur die Kontogröße fehlt")
 ok("if st_an and not od_an:" in fp and 'else "striking_ohne_regel"] = True' in fp, "On Demand hat Vorrang; Firma ohne Regel → normal + Hinweis")
-ok('**({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend")}' in fp and "if r.get(\"striking\") else {}))" in fp, "funded_plan bekommt striking nur bei Striking-Konten")
+ok('**({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend"),' in fp and "if r.get(\"striking\") else {}))" in fp, "funded_plan bekommt striking nur bei Striking-Konten")
 kz = SRC[SRC.index("def kz_rechnen("):SRC.index("def kz_rechnen(") + 40000]
 ok("_sta = fcp_striking_anwenden(freg, jg, groesse) if (not _oda and a.get(\"striking\") is True" in kz and '"Add-on Striking"' in kz,
    "Konto-Ziele: Gewinntage n/7 + Consistency 35 % wie der Planer")

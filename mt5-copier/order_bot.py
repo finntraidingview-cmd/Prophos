@@ -349,16 +349,38 @@ def sl_ausloeser(verlust_usd, sl_usd, grenze_usd=None):
 # 'gewinntag' (Mindest-$ je Tag, Finn: „genau das Gleiche wie bei Take Profit, bei Overall Goal oder beim Stop Loss“). 'blow' und die Tagesgrenze
 # bleiben bei Echo mit Hedge weiter aus (31.10.2026); der Hedge folgt dem neuen Master-TP von selbst (copier.plan_sltp, Master-TP → Hedge-SL).
 # Die TP-Urteile stehen als feste Liste in nachzieh_cmd UND nachzieh_seiten (keine Modul-Konstante: Selbsttest-Lader ziehen die Funktionen einzeln).
+# STRIKING-VERLUSTGRENZE (ST1b Variante a, Prüfer S2 MUSS, Master 15.11.2026): FundingPips-Striking erlaubt je Trade nie ≥ 1 % Verlust. Bei Echo mit
+# Hedge löscht nachzieh_cmd die Tagesgrenze, und sl_ausloeser zieht erst ab Plan × 1,15 nach — ein Plan-SL lief so bis ~1,1 × Plan. Der Planer schickt
+# deshalb für Striking-Pläne cmd.verlust_grenze_usd (1 % × Größe − 5 % Reserve, über den PC-Tab und panel.py). Diese Grenze bleibt auch bei Echo mit
+# Hedge stehen und wirkt genau wie die Tagesgrenze: reißt der echte Verlust bis zum SL (ab Fill, + Kommission) sie, kommt der SL am Fill auf
+# min(sl_usd, Grenze) (sl_tagesgrenze_vom_fill). Der Hedge folgt dem neuen Master-SL von selbst (copier.plan_sltp). Ohne das Feld (jeder andere Plan,
+# alter Tab) ist der Auftrag bitgleich wie bisher. Inline gerechnet, nicht als Hilfsfunktion (Selbsttest-Lader ziehen nachzieh_cmd einzeln).
 def nachzieh_cmd(cmd):
     """REIN RECHNEND (testbar): der Auftrag für _sltp_nachziehen. Echo V2: derselbe cmd. Echo mit Hedge: Kopie ohne Tagesgrenze, final nur noch
-    als TP-Seite ('pass' bzw. 'gewinntag', 'beide' → 'pass', 'blow'/sonst → None) — der SL klickt dort nur über sl_ausloeser 'plan'."""
+    als TP-Seite ('pass' bzw. 'gewinntag', 'beide' → 'pass', 'blow'/sonst → None) — der SL klickt dort nur über sl_ausloeser 'plan'.
+    ST1b: cmd.verlust_grenze_usd (> 0, Striking) wird zur Grenze (bei Echo V2 das engere mit der Tagesgrenze), grenze_art 'striking' für die Spur."""
+    try:
+        vg = float(cmd.get("verlust_grenze_usd")) if cmd.get("verlust_grenze_usd") not in (None, "") else None
+    except (TypeError, ValueError):
+        vg = None
+    vg = vg if (vg is not None and vg > 0) else None
     if cmd.get("ohne_hedge"):
-        return cmd
+        if vg is None:
+            return cmd
+        try:
+            tg0 = float(cmd.get("tages_grenze_usd")) if cmd.get("tages_grenze_usd") not in (None, "") else None
+        except (TypeError, ValueError):
+            tg0 = None
+        if tg0 is not None and 0 < tg0 <= vg:
+            return cmd                            # die Tagesgrenze ist schon die engere
+        return dict(cmd, tages_grenze_usd=vg, grenze_art="striking")
     f = str(cmd.get("final") or "").strip().lower()
     tp_final = ("gewinntag" if f == "gewinntag" else "pass") if f in ("pass", "beide", "gewinntag") else None
     grund = str(cmd.get("final_grund") or "") if tp_final else ""
     if f == "beide":
         grund = (grund + " · " if grund else "") + "SL-Seite bei Echo mit Hedge aus"   # Spur ehrlich: der SL am Boden wird hier nicht bewegt
+    if vg is not None:
+        return dict(cmd, final=tp_final, final_grund=grund, tages_grenze_usd=vg, grenze_art="striking")
     return dict(cmd, final=tp_final, final_grund=grund, tages_grenze_usd=None)
 
 
@@ -14083,6 +14105,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
         komm, gesucht = _kommission_lesen(path, expected, p["ticket"]), True
         verlust = round(abs(float(fill) - float(sl_alt)) * float(vol) * float(contract_size) + max(0.0, float(komm or 0)), 2)
     ausl, atxt = sl_ausloeser(verlust, cmd.get("sl_usd"), cmd.get("tages_grenze_usd"))
+    if atxt and cmd.get("grenze_art") == "striking":   # ST1b: die Grenze ist die Striking-Verlustgrenze, nicht die Tagesgrenze — Spur ehrlich
+        atxt = atxt.replace("Tagesgrenze", "Striking-Grenze (Verlust je Trade < 1 %)")
     if atxt:
         trail.append(atxt)
     if verlust is not None:
@@ -14090,6 +14114,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
         g_ok = tagesgrenze_pruefen(fill, sl_alt, vol, contract_size, komm, cmd.get("tages_grenze_usd"))[1]
         if g_ok is not None:                   # Rückgabefeld wie seit .1747 (View justage_ereignisse, Panel)
             tg = {"verlust_usd": verlust, "grenze_usd": round(float(cmd["tages_grenze_usd"]), 2), "ueber": ausl == "tagesgrenze"}
+            if cmd.get("grenze_art") == "striking":
+                tg["art"] = "striking"             # ST1b: nur bei Striking-Plänen, sonst das Rückgabefeld wie bisher
     if ausl:
         sl_an = True
     seiten = "+".join(s for s, an in (("TP", tp_an), ("SL", sl_an)) if an)
@@ -14101,7 +14127,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
         return erg
     nur_ausl = bool(ausl) and not nachzieh_seiten(cmd.get("final"))[1]
     trail.append(f"Final: {cmd.get('final') or 'keins'}{' (' + fg + ')' if fg else ''} → nur {seiten} am Fill nachziehen"
-                 + ((" (SL wegen Tagesgrenze)" if ausl == "tagesgrenze" else " (SL wegen Plan + 15 %)") if nur_ausl else ""))
+                 + (((" (SL wegen Striking-Grenze)" if cmd.get("grenze_art") == "striking" else " (SL wegen Tagesgrenze)") if ausl == "tagesgrenze"
+                     else " (SL wegen Plan + 15 %)") if nur_ausl else ""))
     if not gesucht:
         komm = _kommission_lesen(path, expected, p["ticket"])
     sl_ex, tp_ex = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)

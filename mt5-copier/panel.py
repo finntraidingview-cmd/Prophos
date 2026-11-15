@@ -8684,6 +8684,14 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 _tg = None
             cmd["tages_grenze_usd"] = _tg if ohne_hedge and _tg is not None and _tg >= 0 else None
+            # ST1b (Striking, Master 15.11.2026): Verlustgrenze je Trade ($, > 0) — auch bei Echo mit Hedge; der Bot (nachzieh_cmd) zieht den SL am Fill
+            # auf min(sl_usd, Grenze), wenn der echte Verlust bis SL sie reißt. Nur gesetzt, wenn der Tab sie schickt (Striking-Pläne), sonst kein Feld.
+            try:
+                _vg = float(body.get("verlust_grenze_usd")) if body.get("verlust_grenze_usd") not in (None, "") else None
+            except (TypeError, ValueError):
+                _vg = None
+            if _vg is not None and _vg > 0:
+                cmd["verlust_grenze_usd"] = _vg
             if ohne_hedge:
                 fenster = _echo_fenster_offen(inst["config_file"])
                 if fenster:
