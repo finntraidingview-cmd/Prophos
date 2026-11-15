@@ -43463,6 +43463,10 @@ def kz_rechnen(a, ctx):
             freg, jg = _oda
             _zbo, _dd = fcp_bereich(jg.get("ziel")), _wd_num(jg.get("dd"))
             zb = (float(groesse) + _zbo[0], float(groesse) - float(_dd or 0)) if (_zbo and groesse) else zb
+        # ST1 (15.11.2026): Striking-Konto rechnet wie der Planer — Gewinntage n/7 ≥ 0,5 %, Consistency 35 %, kein Refund-Zyklus (Ziel/Boden wie normal)
+        _sta = fcp_striking_anwenden(freg, jg, groesse) if (not _oda and a.get("striking") is True and freg and jg) else None
+        if _sta:
+            freg, jg = _sta[0], _sta[1]
         ep = fcp_erster_payout(freg) if (freg and zyklus == 1) else None
         bereich = fcp_bereich((ep or jg).get("ziel")) if (ep or jg) else None
         z_fest = None
@@ -43472,6 +43476,8 @@ def kz_rechnen(a, ctx):
         if zb and z_fest is not None and groesse:
             zb = (float(groesse) + z_fest, zb[1])
         out["on_demand"] = bool(_oda)
+        if _sta:
+            out["striking"] = {"sl_deckel": _sta[2]}
         out["ziel_fest"] = z_fest
         wartet = bool(a.get("waiting_payout_since"))
         _p_zt = fcp_param(ctx.get("fcp_regel") or {})   # ZT1: Ziel-Toleranz des Funded-CFD-Planers (Unternehmen der ID), dieselbe wie im Planer
@@ -43547,6 +43553,9 @@ def kz_rechnen(a, ctx):
                        + (f" · Ziel erreicht (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)" if zt_info else "")])   # ZT1
         if _oda:
             checks.append(["info", "Add-on On Demand", "Ziel 2–2,25 % · Consistency " + (_liq_de(p_cons) + " %" if p_cons else "–")])
+        if _sta:
+            checks.append(["info", "Add-on Striking", f"Verlust je Trade < 1 % (SL ≤ {_liq_de(_sta[2])} $) · Consistency "
+                           + (_liq_de(p_cons) + " %" if p_cons else "–")])
         if gt:
             checks.append([("ok" if gti[0] >= gti[1] else "nein") if gti else "info", f"Gewinntage ≥ {kz_usd(_wd_num(gt.get('min')))}", f"{gti[0]} / {gti[1]}" if gti else "—"])
         if p_cons:
@@ -43570,7 +43579,8 @@ def kz_rechnen(a, ctx):
                 nx = fcp_konto_rechnen(jg, float(bal), float(groesse), zyklus, fcp_eins_prozent(a), 1.0, 1.0, None, freg,
                                        param=fcp_param(ctx.get("fcp_regel") or {}), tage=tzw,
                                        gewinne=fcp_gewinne(plaene_z, seit, z_ts), gewinntage=gti,
-                                       ziel_fest=({"usd": z_eff_ab, "zyklus": zyklus} if z_eff_ab is not None else None))
+                                       ziel_fest=({"usd": z_eff_ab, "zyklus": zyklus} if z_eff_ab is not None else None),
+                                       **({"max_sl": fcp_max_sl(a.get("max_risiko_trade"), _sta[2])} if _sta else {}))   # ST1: SL < 1 % wie der Planer
         except Exception as e:
             print(f"[konto-ziele] ⚠️ nächster Trade {aid[:8]}: {type(e).__name__}: {e}", flush=True)
         # WP4 (3) (Finn 10.11.2026): das Abhak-Popup wählt bei Ziel + Consistency „Waiting“ vor und sagt warum; sonst steht genau da, was fehlt — mit Zahlen.
@@ -43815,7 +43825,13 @@ def konto_ziele():
     try:
         try:
             try:   # O1: On Demand + festes Ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten, wie bisher
-                rows = sb_select("accounts", {"select": KZ_KONTO_SEL + ",on_demand,fcp_ziel", "id": f"eq.{kid}"}) or []
+                try:   # ST1: + striking (sql/2026-11-15_addon_striking.sql) — fehlt nur sie, ohne Striking
+                    rows = sb_select("accounts", {"select": KZ_KONTO_SEL + ",on_demand,fcp_ziel,striking", "id": f"eq.{kid}"}) or []
+                except requests.exceptions.HTTPError as e_st:
+                    _t = str(getattr(e_st.response, "text", "") or e_st)
+                    if "striking" not in _t or "on_demand" in _t or "fcp_ziel" in _t:
+                        raise
+                    rows = sb_select("accounts", {"select": KZ_KONTO_SEL + ",on_demand,fcp_ziel", "id": f"eq.{kid}"}) or []
             except requests.exceptions.HTTPError as e:
                 if "on_demand" not in str(getattr(e.response, "text", "") or e) and "fcp_ziel" not in str(getattr(e.response, "text", "") or e):
                     raise
@@ -46101,13 +46117,20 @@ def zw_funded_cfd():
     # „Waiting for Payout“ vor, obwohl FundedNext erst ab ~2.000 $ auszahlt). Fehlt die Spalte on_demand, rechnet alles wie bisher.
     _sel = "id,user_id,name,firm,starting_balance,created_at"
     try:
-        konten = _sb_all("accounts", {"select": _sel + ",on_demand,fcp_ziel", "account_type": "eq.funded_cfd"}) or []   # ZT1: fcp_ziel = festes Ziel
+        try:   # ST1: + striking (Gewinntage 7 → kein Radar-Ziel, solange Tage fehlen) — fehlt nur die Spalte, wie bisher
+            konten = _sb_all("accounts", {"select": _sel + ",on_demand,fcp_ziel,striking", "account_type": "eq.funded_cfd"}) or []
+        except requests.exceptions.HTTPError as e_st:
+            _t = str(getattr(e_st.response, "text", "") or e_st)
+            if "striking" not in _t or "on_demand" in _t or "fcp_ziel" in _t:
+                raise
+            konten = _sb_all("accounts", {"select": _sel + ",on_demand,fcp_ziel", "account_type": "eq.funded_cfd"}) or []   # ZT1: fcp_ziel = festes Ziel
     except requests.exceptions.HTTPError as e:
         if "on_demand" not in str(getattr(e.response, "text", "") or e):
             raise
         konten = _sb_all("accounts", {"select": _sel, "account_type": "eq.funded_cfd"}) or []
     ids = [str(a["id"]) for a in konten]
     od_ids = {str(a["id"]) for a in konten if a.get("on_demand") is True}
+    st_ids = {str(a["id"]) for a in konten if a.get("striking") is True and str(a["id"]) not in od_ids}   # ST1
     pend, verw, buch = [], [], []
     for i in range(0, len(ids), 80):
         teil = "in.(" + ",".join(ids[i:i + 80]) + ")"
@@ -46123,6 +46146,8 @@ def zw_funded_cfd():
         _r, _g = ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)
         _j = fcp_je_groesse(_r, _g) or {}
         _o = fcp_on_demand_anwenden(_r, _j, _g) if str(a["id"]) in od_ids else None   # OD1: On Demand hat keine Gewinntage
+        if not _o and str(a["id"]) in st_ids:
+            _o = fcp_striking_anwenden(_r, _j, _g)    # ST1: Striking hat Gewinntage (7 × ≥ 0,5 %)
         return _o[1] if _o else _j
     gt_konten = [a for a in konten if isinstance(_gt_jg(a).get("gewinntage"), dict)]
     gt_plaene, zyk = {}, fcp_zyklus_start(pend, verw, buch)
@@ -46151,7 +46176,8 @@ def zw_funded_cfd():
                     _pz = dict(_pz, ziel_toleranz_pct=0.0)          # Prüfer M1: On Demand ohne Toleranz
                 _zw.setdefault("ziele_tol", {})[aid] = round(float(_g) + fcp_ziel_schwelle(_zr, _pz), 2)
             if aid in gt_ids:
-                gti = fcp_gewinntage_ist((fcp_je_groesse(regel, _wd_konto_groesse(a)) or {}).get("gewinntage"), aid, gt_plaene.get(aid, []),
+                # ST1: Gewinntage aus _gt_jg (Striking 7 × 0,5 %; sonst dieselben Werte wie fcp_je_groesse — gt_ids enthält nur Konten mit Gewinntagen)
+                gti = fcp_gewinntage_ist(_gt_jg(a).get("gewinntage"), aid, gt_plaene.get(aid, []),
                                          fcp_gewinntage_seit(zyk.get(aid), a.get("created_at")), fcp_gt_korrektur(gt_korr.get(aid), n.get(aid, 0) + 1))
                 if not gti or int(gti[0]) < int(gti[1]):
                     _zw["ziele"].pop(aid, None)
@@ -50339,7 +50365,8 @@ def fcp_firma_einstellung(f, param=None):
             "tp_zyklen": f.get("tp_zyklen"), "tp_zyklen_eff": f.get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key),
             "tp_deckel_plus": f.get("tp_deckel_plus"), "tp_deckel_plus_eff": f.get("tp_deckel_plus") if f.get("tp_deckel_plus") is not None else (param or fcp_param_standard())["tp_deckel_plus_standard"],
             "erster_payout": f.get("erster_payout"), "erster_payout_eff": fcp_erster_payout(f), "weg": FCP_WEG["name"],
-            "on_demand": f.get("on_demand"), "on_demand_eff": fcp_on_demand_regel(f)}       # O1b: Add-on On Demand (DB-Override, was gilt)
+            "on_demand": f.get("on_demand"), "on_demand_eff": fcp_on_demand_regel(f),       # O1b: Add-on On Demand (DB-Override, was gilt)
+            "striking": f.get("striking"), "striking_eff": fcp_striking_regel(f)}           # ST1: Add-on Striking (DB-Override, was gilt)
 
 
 def fcp_code_werte():
@@ -50616,6 +50643,30 @@ def fcp_regel_patch(zeile, body):
             f["on_demand"] = od
         else:
             f.pop("on_demand", None)
+    elif feld.startswith("striking.") and feld.split(".", 1)[1] in FCP_STRIKING_FELDER:
+        # ST1 (15.11.2026): Add-on Striking je Firma — wie on_demand.*: Override je Feld über FCP_STRIKING_STANDARD, leer = Feld weg (Standard);
+        # setzen nur bei Firmen mit Striking-Standard (heute FundingPips), leeren überall
+        teil = feld.split(".", 1)[1]
+        if v not in (None, "") and ((f.get("namen") or [""])[0]) not in FCP_STRIKING_STANDARD:
+            return None, "Striking gibt es nur bei FundingPips"
+        st = dict(f.get("striking")) if isinstance(f.get("striking"), dict) else {}
+        if v is None or v == "":
+            st.pop(teil, None)
+        elif teil in ("tp_je_100k", "sl_je_100k"):
+            w = _fcp_bereich_ok(v)
+            if w is None or not w[0] > 0:
+                return None, f"Striking · {FCP_STRIKING_FELDER[teil]}: von–bis in $ (> 0)"
+            st[teil] = w
+        else:
+            w = _fcp_zahl_ok(v)
+            grenzen = {"gewinntage_anzahl": (1, 30), "gewinntag_min_je_100k": (1, 100000), "consistency_pct": (1, 99), "verlust_max_pct": (0.1, 10)}[teil]
+            if w is None or not grenzen[0] <= w <= grenzen[1] or (teil == "gewinntage_anzahl" and w != int(w)):
+                return None, f"Striking · {FCP_STRIKING_FELDER[teil]}: {_liq_de(grenzen[0])}–{_liq_de(grenzen[1])}"
+            st[teil] = int(w) if teil == "gewinntage_anzahl" else w
+        if st:
+            f["striking"] = st
+        else:
+            f.pop("striking", None)
     else:
         return None, "unbekanntes Feld"
     return {"firmen": firmen}, None
@@ -50740,6 +50791,92 @@ def fcp_on_demand_anwenden(regel, jg, groesse):
     jg2["ziel"] = [float(round(od["ziel_je_100k"][0] * f)), float(round(od["ziel_je_100k"][1] * f))]
     r2 = dict(regel or {}, erster_payout=False, consistency_pct=od["consistency_pct"] or 0, tp_modus=None)
     return r2, jg2
+
+
+# ADD-ON STRIKING (ST1, Master 15.11.2026, Finn mit den FundingPips-Regeln): gilt nur für Konten mit accounts.striking = true (von Hand am Konto, Chip
+# „Striking“ in der Spalte Add-ons). FundingPips-Regeln: Consistency 35 % (kein Tag über 35 % des Zyklus-Gewinns, Reset je Payout), mindestens 7 Gewinntage je
+# Zyklus mit je ≥ 0,5 % der Kontogröße (100k = 500 $, Reset je Payout), Striking-System: Verlust je Trade nie ≥ 1 % der Größe. Planung (keine Prüf-Funktion):
+#   Phase A — solange Gewinntage fehlen, je Tag EIN Gewinntag-Trade (TP 550–750 $ je 100k, SL 700–800 $ je 100k, gewürfelt) — wie Blue Guardian (BG1);
+#             das Ziel darf beim Sammeln schon erreicht sein, gesammelt wird trotzdem bis zur Anzahl (fcp_konto_rechnen Phase A). Verlusttage zählen nicht.
+#   Phase B — danach Consistency 35 % über fcp_cons_finn (Basis Summe der Gewinn-Tage W, wie alle Consistency-Firmen seit O1): der Payout-Trade ist gedeckelt
+#             (7 Tage ≈ 4.550 $ → höchstens ≈ 2.450 $); liegt der größte Tag über 35 %, plant sie weitere Tage.
+#   Jeder Trade: SL höchstens verlust_max_pct der Größe minus 5 % Puffer (100k: 950 $) — über max_sl wie das 1-%-Limit (max_risiko_trade); das engere gilt.
+#   Refund-Zyklus (erster Payout) gibt es mit Striking nicht (die 35 % gelten in jedem Zyklus).
+# Werte je 100k, linear auf die Kontogröße skaliert (50k = halbe Werte). Überschreibbar je Firma in funded_cfd_plan_regeln.firmen[].striking (false = keine).
+FCP_STRIKING_STANDARD = {"fundingpips": {"gewinntage_anzahl": 7, "gewinntag_min_je_100k": 500, "consistency_pct": 35,
+                                         "tp_je_100k": [550, 750], "sl_je_100k": [700, 800], "verlust_max_pct": 1.0}}
+FCP_STRIKING_FELDER = {"gewinntage_anzahl": "Gewinntage", "gewinntag_min_je_100k": "Gewinntag ab je 100k", "consistency_pct": "Consistency",
+                       "tp_je_100k": "Gewinntag-TP je 100k", "sl_je_100k": "Gewinntag-SL je 100k", "verlust_max_pct": "Verlust je Trade unter"}
+FCP_STRIKING_SL_PUFFER = 0.05         # SL-Deckel = verlust_max_pct × Größe × (1 − 5 %) — Schlupf/Spread bleiben sicher unter 1 %
+
+
+def fcp_striking_regel(regel):
+    """Striking-Werte der Firma (Dict wie FCP_STRIKING_STANDARD je Firma) — regel.striking (false = keine; Dict = Override je Feld über dem Standard),
+    sonst Standard je Firmen-Schlüssel, sonst None. Ungültige Werte → None (nie halb gültig planen)."""
+    r = regel or {}
+    std = FCP_STRIKING_STANDARD.get(((r.get("namen") or [""])[0])) or {}
+    st = r.get("striking") if "striking" in r else std
+    if isinstance(st, dict) and st is not std:
+        st = dict(std, **st)
+    if not isinstance(st, dict) or not st:
+        return None
+    anz, mn, p, vp = (_wd_num(st.get(k)) for k in ("gewinntage_anzahl", "gewinntag_min_je_100k", "consistency_pct", "verlust_max_pct"))
+    tp, sl = fcp_bereich(st.get("tp_je_100k")), fcp_bereich(st.get("sl_je_100k"))
+    if not anz or anz < 1 or not mn or mn <= 0 or not tp or not sl or not tp[0] > 0 or not sl[0] > 0 or not vp or vp <= 0:
+        return None
+    return {"gewinntage_anzahl": int(anz), "gewinntag_min_je_100k": float(mn),
+            "consistency_pct": float(p) if p is not None and 0 < p < 100 else None,
+            "tp_je_100k": list(tp), "sl_je_100k": list(sl), "verlust_max_pct": float(vp)}
+
+
+def fcp_striking_anwenden(regel, jg, groesse):
+    """REIN (testbar): Regel + Größen-Werte eines Striking-Kontos → (regel, jg, sl_deckel $) oder None (Firma ohne Striking-Regel / Größe fehlt).
+    jg.gewinntage = {anzahl, min, tp, sl} skaliert (f = Größe ÷ 100.000), Consistency p %, kein Refund-Zyklus; SL-Deckel = verlust_max_pct × Größe × 0,95.
+    Ziel, Lots, Hedge, DD und der normale SL der Größe bleiben (der Payout-Trade nimmt den normalen SL, gedeckelt)."""
+    st, g = fcp_striking_regel(regel), _wd_num(groesse)
+    if not st or not jg or not g:
+        return None
+    f = float(g) / 100000.0
+    jg2 = dict(jg, gewinntage={"anzahl": st["gewinntage_anzahl"], "min": float(round(st["gewinntag_min_je_100k"] * f)), "cons_mit": True,   # Consistency ab Trade 1
+                               "tp": [float(round(st["tp_je_100k"][0] * f)), float(round(st["tp_je_100k"][1] * f))],
+                               "sl": [float(round(st["sl_je_100k"][0] * f)), float(round(st["sl_je_100k"][1] * f))]})
+    jg2.pop("tp_erster", None)
+    r2 = dict(regel or {}, erster_payout=False, consistency_pct=st["consistency_pct"] or 0, tp_modus=None)
+    deckel = float(int(st["verlust_max_pct"] / 100.0 * float(g) * (1.0 - FCP_STRIKING_SL_PUFFER)))
+    return r2, jg2, deckel
+
+
+def fcp_striking_gt_tp(tp, pct, gt, gewinntage, tw):
+    """REIN (testbar), ST1-Nachtrag (Finn 15.11.2026: „die 35 % laufen den ganzen Zyklus mit, auch beim Farmen der 7 Gewinntage"): Gewinntag-TP beim
+    Sammeln mit laufender Consistency → (tp, info). Basis wie fcp_cons_finn: W = Summe der Gewinn-Tage im Zyklus, B = größter Tag (Verluste zählen nicht).
+    k = fehlende Gewinntage inkl. heute (soll − ist, mind. 1; Zählung nicht lesbar → anzahl).
+    Deckel: der neue Tag darf mit den übrigen k − 1 Tagen (je mindestens TP-von) nie über p landen — t ≤ p × (W + (k − 1) × TP-von) ÷ (1 − p) × 0,95.
+    Nachziehen: liegt schon ein großer Tag B vor (B > p × (W + k × TP-von)), zieht der TP Richtung (B ÷ p − W) ÷ k, höchstens TP-bis — der Zyklus läuft
+    mit möglichst wenigen Tagen auf p zu; was danach fehlt, plant Phase B (fcp_cons_finn). Nie unter TP-von (der Tag muss als Gewinntag zählen).
+    Zyklus nicht lesbar → TP unverändert (gewürfelt im Bereich). Gleicher Zufalls-Verbrauch (rechnet nur mit dem schon gewürfelten TP)."""
+    b_, p = fcp_bereich((gt or {}).get("tp")), float(pct) / 100.0
+    info = {"p": float(pct), "lesbar": bool(tw)}
+    if not tw or not b_ or not 0 < p < 1:
+        return tp, info
+    w, b = float(tw.get("w") or 0), float(tw.get("b") or 0)
+    gi = gewinntage if isinstance(gewinntage, (list, tuple)) and len(gewinntage) == 2 else None
+    k = max(1, int(gi[1]) - int(gi[0])) if gi else max(1, int(_wd_num((gt or {}).get("anzahl")) or 1))
+    lo, hi = float(b_[0]), float(b_[1])
+    t = float(tp)
+    if b > p * (w + k * lo):                                        # großer Tag schon da → TP nach oben ziehen (höchstens TP-bis)
+        t = max(t, min(hi, float(-(-(b / p - w) // k))))
+    cap = float(int(p * (w + (k - 1) * lo) / (1.0 - p) * 0.95))
+    gedeckelt = t > cap
+    if gedeckelt:
+        t = max(lo, cap)
+    info.update(bester_tag=b, summe_tage=w, anteil=round(b / w, 4) if w > 0 else None, deckel=cap, tage_offen=k, gedeckelt=gedeckelt)
+    return float(t), info
+
+
+def fcp_max_sl(max_sl, deckel):
+    """REIN (testbar): das engere von accounts.max_risiko_trade und dem Striking-Deckel (keins gültig → max_sl unverändert)."""
+    w = [x for x in (_wd_num(max_sl), _wd_num(deckel)) if x is not None and x > 0]
+    return min(w) if w else max_sl
 
 
 # FESTES ZIEL JE KONTO (O1, Finn 05.11.2026 ~07:20: „in Zukunft bei ALLEN Funded-CFD-Accounts: das Ziel wird je Account einmal per Zufall gewählt und
@@ -51346,6 +51483,10 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus, P["tp_deckel_plus_standard"])
     if gt and gt_offen:
         tp, tp_art, deckel = fcp_wuerfel(gt.get("tp"), rnd), "gewinntag", None    # Phase A: ein Gewinntag-Trade je Tag (TP gewürfelt, BG 550–650 $)
+        _pl = fcp_consistency_pct(regel) if gt.get("cons_mit") else None
+        if _pl:
+            # ST1-Nachtrag (Finn 15.11.2026): Consistency läuft schon beim Sammeln mit (Basis = Summe der Gewinn-Tage W, wie fcp_cons_finn)
+            tp, basis["cons_laufend"] = fcp_striking_gt_tp(tp, _pl, gt, gewinntage, fcp_tw_aus(tage, gewinn))
     elif gt and not pct:
         tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(P["tp_min_usd"])), "rest", None   # Phase B: Rest bis zum Ziel in einem Trade
         # (mit Consistency nicht: ein Trade über den ganzen Rest würde selbst der größte Tag — dann Weg A unten, Fremd-Review E1b Runde 3)
@@ -51376,6 +51517,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     basis["tp_deckel"] = deckel
     # SA1 #6: sl_1pct nur bei Firmen mit sichtbarem Feld (FundedNext) — FTMO hatte live unsichtbare Werte; max_sl deckelt unten weiter jede Firma
     sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") and fcp_sl_1pct_firma(regel) else jg.get("sl")
+    if tp_art == "gewinntag" and fcp_bereich(gt.get("sl")):
+        sl_b = gt.get("sl")                  # ST1 Striking: eigener SL der Gewinntag-Trades (700–800 $ je 100k) — Blue Guardian ohne gt.sl unverändert
     sl = fcp_wuerfel(sl_b, rnd)
     ms = _wd_num(max_sl)
     if sl and ms and ms > 0 and sl > ms:
@@ -51614,10 +51757,21 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     in_uids = "in.(" + ",".join(uids) + ")"
     # O1 (05.11.2026): on_demand + fcp_ziel (sql/2026-11-05_fcp_on_demand.sql) — fehlen die Spalten noch, läuft der Planer genau wie bisher
     od_spalte = True
+    st_spalte = True                     # ST1 (15.11.2026): accounts.striking (sql/2026-11-15_addon_striking.sql) — fehlt sie, plant er ohne Striking wie bisher
     try:
-        konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade,on_demand,fcp_ziel",
-                                      "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
+        try:
+            konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade,on_demand,fcp_ziel,striking",
+                                          "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
+        except requests.exceptions.HTTPError as e_st:
+            _t = str(getattr(e_st.response, "text", "") or e_st)
+            if "striking" not in _t or "on_demand" in _t or "fcp_ziel" in _t:
+                raise
+            st_spalte = False
+            print("[funded-cfd] striking fehlt — ohne Striking (SQL 2026-11-15_addon_striking.sql)", flush=True)
+            konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade,on_demand,fcp_ziel",
+                                          "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
     except requests.exceptions.HTTPError as e:
+        st_spalte = False
         if "on_demand" not in str(getattr(e.response, "text", "") or e) and "fcp_ziel" not in str(getattr(e.response, "text", "") or e):
             raise                        # anderer Fehler (5xx, …): nicht still ohne On Demand planen (Fremd-Review O1)
         od_spalte = False
@@ -51703,6 +51857,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 pass
             continue                     # Firma aus: nur in plaene, nie geplant
         od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
+        st_an = st_spalte and a.get("striking") is True      # ST1: Striking-Konto (Finn schaltet es am Konto, FundingPips)
         fkey = (regel.get("namen") or [""])[0]
         if fkey.startswith("tradeify") and not _ist_tradeify_cfd(a.get("firm")):
             continue                     # Tradeify-Futures nie hier (Regel-Schlüssel „tradeify" ohne cfd hat keine Zeile, doppelt gesichert)
@@ -51713,6 +51868,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             _rk = regel
             if od_an:
                 _rk, _jg = fcp_on_demand_anwenden(regel, _jg, _g) or (regel, _jg)
+            elif st_an:
+                _rk, _jg = (fcp_striking_anwenden(regel, _jg, _g) or (regel, _jg, None))[:2]
             _bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
             _tz = fcp_tage_zyklus(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None
             _tw = fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), None, a.get("fcp_ziel"),
@@ -51723,7 +51880,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                             bester_tag=(_tw["b"] if _tw and _tw.get("broker") else _tz[0] if _tz else None), trades=_tz[1] if _tz else None,
                                             consistency_pct=fcp_consistency_pct(_rk), summe_gewinntage=_tw["w"] if _tw else None,
                                             consistency_broker=bool(_tw and _tw.get("broker")),
-                                            on_demand=od_an, ziel_fest=(a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)))
+                                            on_demand=od_an, striking=bool(st_an and not od_an), ziel_fest=(a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)))
         except Exception as e:
             print(f"[funded-cfd] ⚠️ Kontostand {aid[:8]}: {type(e).__name__}: {e}", flush=True)
         aus = lambda grund, **x: erg["ausgelassen"].append(dict(zeile, aktion="aus", grund=grund, **x))   # noqa: E731
@@ -51747,6 +51904,14 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             else:
                 od_an = False            # Prüfer O1: Firma ohne On-Demand-Regel → normal planen (nicht still „aus"); Hinweis in der Notiz
                 zeile["on_demand_ohne_regel"] = True
+        st_deckel = None
+        if st_an and not od_an:          # ST1: On Demand hat Vorrang (gibt es nur bei FundedNext, Striking nur bei FundingPips)
+            _sta = fcp_striking_anwenden(regel, jg, g)
+            if _sta:
+                regel_k, jg, st_deckel = _sta
+            else:
+                st_an = False            # wie O1: Firma ohne Striking-Regel → normal planen, Hinweis in der Notiz
+                zeile["striking_ohne_regel"] = True
         if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
             aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen"); continue
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
@@ -51777,7 +51942,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if isinstance(jg.get("gewinntage"), dict) else None   # GT2: + Korrektur von Hand des laufenden Zyklus
         r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel_k,
                               # Consistency je Zyklus (04.11.2026): nur Gewinne seit dem jüngsten Payout; Payouts nicht lesbar → None → 750 (fail-closed)
-                              max_sl=a.get("max_risiko_trade"), param=(dict(param_u, ziel_toleranz_pct=0.0) if od_an else param_u),   # E1b; ZT1-Prüfer M1: On Demand ohne Toleranz (Payout-Mindestsumme der Firma)
+                              max_sl=fcp_max_sl(a.get("max_risiko_trade"), st_deckel) if st_deckel else a.get("max_risiko_trade"), param=(dict(param_u, ziel_toleranz_pct=0.0) if od_an else param_u),   # E1b; ZT1-Prüfer M1: On Demand ohne Toleranz (Payout-Mindestsumme der Firma)
                               tage=fcp_tw_broker(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), heute_tag, a.get("fcp_ziel"),
                                                  zyklus_ab.get(aid), zyklus_ts.get(aid)) if payouts_ok else None,   # O1/E1e; CS1: Basis laut Broker (fcp_ziel.broker); WP4
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None, gewinntage=gti,
@@ -51790,6 +51955,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 balance=round(float(bal), 2)); continue
         if od_an:
             r["on_demand"] = True
+        if st_an and st_deckel:
+            r["striking"] = True
+            r["striking_sl_deckel"] = st_deckel
         if _heute_n >= 1 and r.get("aktion") == "planen" and r.get("tp_art") == "gewinntag":
             aus("heute schon getradet — Gewinntage: ein Trade je Tag (zählt sonst nicht als neuer Tag)"); continue   # Fremd-Review E1e
         # TW1 HANDELS-WÜRFEL (11.11.2026): nur dort, wo ein neuer Trade entstünde — „Ziel erreicht → Waiting“ und alle anderen Aktionen laufen weiter;
@@ -51892,6 +52060,13 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
                  + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
                  + (" · On Demand" if r.get("on_demand") else "") + (" · On Demand ohne Regel dieser Firma → normale Regel" if r.get("on_demand_ohne_regel") else "")
+                 + (f" · Striking (SL ≤ {_liq_de(r['striking_sl_deckel'])} $)" if r.get("striking") and r.get("striking_sl_deckel") else "")   # ST1
+                 + (" · Striking ohne Regel dieser Firma → normale Regel" if r.get("striking_ohne_regel") else "")
+                 # ST1-Nachtrag: Consistency läuft beim Sammeln mit (größter Tag ÷ Summe der Gewinn-Tage)
+                 + ((lambda c: f" · Consistency {_liq_de(c['p'])} % läuft mit: größter Tag {_liq_de(c['bester_tag'])} $ von {_liq_de(c['summe_tage'])} $"
+                     + (f" ({round(c['anteil'] * 100)} %)" if c.get("anteil") is not None else "") + f" · noch {c['tage_offen']} Gewinntage"
+                     + (f" · TP gedeckelt auf {_liq_de(c['deckel'])} $" if c.get("gedeckelt") else ""))(r["cons_laufend"])
+                    if isinstance(r.get("cons_laufend"), dict) and r["cons_laufend"].get("lesbar") else "")
                  + (" · Ziel fest" if r.get("ziel_fest") else "")   # O1
                  # The5ers je Zyklus (04.11.2026): Zyklus-Gewinne in der Notiz — Finn sieht, woraus der TP kommt (nicht lesbar → „?")
                  + ((f" · Zyklus-Gewinne {_liq_de(r['gewinne'])} $" if r.get("gewinne") is not None else " · Zyklus-Gewinne ?")
@@ -51911,7 +52086,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
                                                                          "zyklus", "tp_deckel", "gewinne", "consistency", "erster_payout", "gewinntage",
                                                                          "ziel_fest", "on_demand")},
-                                                 art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
+                                                 art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt,
+                                                 # ST1: nur bei Striking-Konten (alle anderen Pläne bitgleich wie bisher)
+                                                 **({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend")}
+                                                    if r.get("striking") else {}))}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
     if not trocken:

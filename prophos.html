@@ -5229,6 +5229,8 @@
   #dashboard-view .acc-addon.od.an{border-color:#9ED9C8;background:#EAF8F3;color:#16735A}
   :where([data-theme=dark]) #dashboard-view .acc-addon.an{background:rgba(242,196,109,.12);border-color:rgba(242,196,109,.45);color:#f2c46d}
   :where([data-theme=dark]) #dashboard-view .acc-addon.od.an{background:rgba(22,160,120,.14);border-color:rgba(22,160,120,.45);color:#5cc4a3}
+  #dashboard-view .acc-addon.st.an{border-color:#B9C3F2;background:#EEF1FD;color:#3A4BA8}   /* ST1 Striking */
+  :where([data-theme=dark]) #dashboard-view .acc-addon.st.an{background:rgba(99,120,230,.15);border-color:rgba(99,120,230,.45);color:#9fb0f5}
   #dashboard-view .acc-ap-k .acc-ap-s{font-size:11px}
   #dashboard-view .acc-ap-s.raus{color:#b45309}
   #dashboard-view .acc-ap-s.bald{color:var(--violet);font-weight:600}   /* Planer-Chip „nächster Lauf ≤ 10 min" nach einer Balance-Lesung (08.10.2026) */
@@ -45344,13 +45346,14 @@
    * + je aktivem Add-on „ · 1% Rule" / „ · On Demand" (Reihenfolge fest: 1% Rule vor On Demand), danach andere Zusätze unverändert (z. B. „ONESIDE BETTING!!").
    * EINE Quelle: der Zusatz hinter „ · ". opts.eins / opts.od: true = rein, false = raus, undefined = so lassen. Idempotent (kein zweiter Zusatz bei Mehrfachklick).
    * „1% RULE" in anderer Schreibweise bleibt erkennbar (accEinsProzentName / fcp_eins_prozent) und wird beim Einschalten nicht verdoppelt. */
-  const ADDON_EINS_RE = /^1\s*%\s*-?\s*rule$/i, ADDON_OD_RE = /^on[\s-]*demand$/i
+  // ST1 (15.11.2026): „ · Striking“ (FundingPips) als drittes Add-on — Reihenfolge 1% Rule, On Demand, Striking, danach der Rest; opts.st wie opts.od
+  const ADDON_EINS_RE = /^1\s*%\s*-?\s*rule$/i, ADDON_OD_RE = /^on[\s-]*demand$/i, ADDON_ST_RE = /^striking$/i
   function kontoZusatzMitAddons(zusatz, opts = {}){
     const teile = String(zusatz || '').split(' · ').map(x => x.trim()).filter(Boolean)
-    const einsAlt = teile.find(x => ADDON_EINS_RE.test(x)), odAlt = teile.find(x => ADDON_OD_RE.test(x))
-    const rest = teile.filter(x => !ADDON_EINS_RE.test(x) && !ADDON_OD_RE.test(x))
-    const eins = opts.eins === undefined ? !!einsAlt : !!opts.eins, od = opts.od === undefined ? !!odAlt : !!opts.od
-    return [eins ? (einsAlt || '1% Rule') : '', od ? 'On Demand' : '', ...rest].filter(Boolean).join(' · ')
+    const einsAlt = teile.find(x => ADDON_EINS_RE.test(x)), odAlt = teile.find(x => ADDON_OD_RE.test(x)), stAlt = teile.find(x => ADDON_ST_RE.test(x))
+    const rest = teile.filter(x => !ADDON_EINS_RE.test(x) && !ADDON_OD_RE.test(x) && !ADDON_ST_RE.test(x))
+    const eins = opts.eins === undefined ? !!einsAlt : !!opts.eins, od = opts.od === undefined ? !!odAlt : !!opts.od, st = opts.st === undefined ? !!stAlt : !!opts.st
+    return [eins ? (einsAlt || '1% Rule') : '', od ? 'On Demand' : '', st ? 'Striking' : '', ...rest].filter(Boolean).join(' · ')
   }
   function kontoNameMitAddons(name, opts = {}){
     const n = String(name || ''), i = n.indexOf(' · ')
@@ -45850,6 +45853,8 @@
       maxRisikoTrade: row.max_risiko_trade != null ? Number(row.max_risiko_trade) : null,
       // O1 (05.11.2026): undefined = Spalte fehlt noch (SQL nicht eingespielt) → kein Schalter, nichts geschrieben
       onDemand: row.on_demand === undefined ? undefined : row.on_demand === true,
+      // ST1 (15.11.2026): Add-on Striking (FundingPips) — undefined = Spalte fehlt noch (sql/2026-11-15_addon_striking.sql) → kein Chip, nichts geschrieben
+      striking: row.striking === undefined ? undefined : row.striking === true,
       fcpZiel: row.fcp_ziel && typeof row.fcp_ziel === 'object' ? row.fcp_ziel : null,   // eigene Vorgabe je Konto (07.10.2026), nicht das Firmen-Limit
       autoPlaner: row.auto_planer !== false,   // Auto-Planer-Haken (08.10.2026): false = nie automatisch einplanen
       wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
@@ -47426,6 +47431,12 @@
         : 'On Demand an, aber die Firma hat keine On-Demand-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'On Demand aus — Klick schaltet an'
       chips.push(`<button type="button" class="acc-addon od${a.onDemand ? ' an' : ''}" data-acc-addon="od" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>On Demand</button>`)
     }
+    // ST1 (Master 15.11.2026): Striking — nur FundingPips Funded CFD (an bei anderer Firma: zeigen, damit man es ausschalten kann); kombinierbar mit 1 % Rule
+    if(a.type === 'funded_cfd' && a.striking !== undefined && (accIstFundingPipsCfd(a) || a.striking === true)){
+      const t = a.striking ? (accIstFundingPipsCfd(a) ? 'Striking an — erst 7 Gewinntage ≥ 0,5 % (je Tag ein Trade, TP 550–750 / SL 700–800 $ je 100k), dann Consistency 35 % · Verlust je Trade < 1 % (SL ≤ 0,95 %)'
+        : 'Striking an, aber die Firma hat keine Striking-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'Striking aus — Klick schaltet an (FundingPips: 7 Gewinntage, Consistency 35 %, Verlust je Trade < 1 %)'
+      chips.push(`<button type="button" class="acc-addon st${a.striking ? ' an' : ''}" data-acc-addon="st" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>Striking</button>`)
+    }
     return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
   }
   async function accAddonUmstellen(id, art, btn){
@@ -47434,6 +47445,10 @@
     if(art === 'eins' && !accIstFundedNextCfd(a) && !(a.maxRisikoTrade > 0) && !accEinsProzentName(a)) return   // O1b: anschalten nur bei FundedNext
     let upd = null, msg = ''
     if(art === 'od'){ upd = { on_demand: !a.onDemand, name: kontoNameMitAddons(a.name, { od: !a.onDemand }) }; msg = upd.on_demand ? 'On Demand an — der Funded-CFD-Planer nimmt ab dem nächsten Lauf die On-Demand-Regel' : 'On Demand aus — wieder die normale Regel der Firma' }
+    else if(art === 'st'){   // ST1: anschalten nur bei FundingPips Funded CFD, ausschalten immer
+      if(a.type !== 'funded_cfd' || a.striking === undefined || (!a.striking && !accIstFundingPipsCfd(a))) return
+      upd = { striking: !a.striking, name: kontoNameMitAddons(a.name, { st: !a.striking }) }
+      msg = upd.striking ? 'Striking an — der Funded-CFD-Planer sammelt ab dem nächsten Lauf erst 7 Gewinntage, Verlust je Trade < 1 %' : 'Striking aus — wieder die normale Regel der Firma' }
     else if(art === 'eins'){
       if(a.maxRisikoTrade > 0 || accEinsProzentName(a)){
         const n2 = kontoNameMitAddons(a.name, { eins: false })   // O1b: aus = max Risiko leer + „ · 1% Rule" raus aus dem Namen
@@ -47453,6 +47468,7 @@
       if(error) throw error
       if(!data) throw new Error('nicht gespeichert (fremdes Konto?)')
       if('on_demand' in upd) a.onDemand = data.on_demand === true
+      if('striking' in upd) a.striking = data.striking === true
       if('max_risiko_trade' in upd) a.maxRisikoTrade = data.max_risiko_trade != null ? Number(data.max_risiko_trade) : null
       if('name' in upd && data.name) a.name = data.name
       if(typeof atToast === 'function') atToast('Add-on · ' + msg, 'start')
@@ -47693,6 +47709,7 @@
   // ON DEMAND + FESTES ZIEL (O1, Finn 05.11.2026 ~07:20 Dubai): Chip „On Demand" neben Waiting/Refund; das feste Ziel des Zyklus (accounts.fcp_ziel)
   // steht im Chip-Titel, im Konto-Bearbeiten und in den Konto-Daten (accO1DetailZeilen — Hook für die Detailseite K1 von S5)
   const accIstFundedNextCfd = a => !!a && /f(ou|u)nded\s*next/i.test(String(a.firm || '')) && !/futures/i.test(String(a.firm || ''))
+  const accIstFundingPipsCfd = a => !!a && /funding\s*pips/i.test(String(a.firm || '')) && !/futures/i.test(String(a.firm || ''))   // ST1: Striking
   function accZielFestText(a){
     const z = a && a.fcpZiel, usd = z && Number(z.usd)
     if(!(usd > 0)) return ''
@@ -47706,8 +47723,8 @@
   function accO1DetailZeilen(acc){
     if(!acc || acc.type !== 'funded_cfd') return []
     const z = []
-    const ad = [(acc.maxRisikoTrade > 0 || accEinsProzentName(acc)) ? '1 % Rule' : '', acc.onDemand === true ? 'On Demand' : ''].filter(Boolean)   // Add-ons (O1)
-    if(ad.length || (acc.onDemand !== undefined && accIstFundedNextCfd(acc))) z.push(['Add-ons', ad.join(' · ') || '—'])
+    const ad = [(acc.maxRisikoTrade > 0 || accEinsProzentName(acc)) ? '1 % Rule' : '', acc.onDemand === true ? 'On Demand' : '', acc.striking === true ? 'Striking' : ''].filter(Boolean)   // Add-ons (O1, ST1)
+    if(ad.length || (acc.onDemand !== undefined && accIstFundedNextCfd(acc)) || (acc.striking !== undefined && accIstFundingPipsCfd(acc))) z.push(['Add-ons', ad.join(' · ') || '—'])
     const zf = accZielFestText(acc); if(zf) z.push(['Ziel fest', zf])
     return z
   }
@@ -91414,7 +91431,23 @@
           <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel je 100k', odE.ziel_je_100k, Object.assign({ feld: 'on_demand.ziel_je_100k' }, fz), { bereich: true, einheit: '$', leer: 'Standard' })}
             ${fcrFeld('Consistency', odE.consistency_pct ?? null, Object.assign({ feld: 'on_demand.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '40' })}</div>`
         : fcrZeile('Add-on On Demand', `+${fcrSpanne(odE.ziel_je_100k, '$')} je 100k · Consistency ${fcrZahl(odE.consistency_pct ?? 40)} % · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`)
+      // ST1 (Master 15.11.2026): Add-on Striking je Firma, nur FundingPips — Werte je 100k (skaliert mit der Kontogröße), leer = Standard
+      const ST_STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1 }
+      const stE = String((f.namen || [])[0] || '') === 'fundingpips' ? (f.striking_eff || ST_STD) : null
+      const stN = stE ? fcrKontenListe(f, D).filter(x => x.striking).length : 0
+      const stSub = `erst ${fcrZahl(stE ? stE.gewinntage_anzahl : 7)} Gewinntage, dann Consistency · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`
+      const stInfo = fcrInfo('st', 'Konten mit Add-on „Striking" (Accounts → Add-ons): zuerst je Tag ein Gewinntag-Trade (TP/SL je 100k), bis die Gewinntage erreicht sind — auch wenn das Ziel schon erreicht ist; Verlusttage zählen nicht. Danach Consistency je Zyklus (der größte Tag höchstens p % der Gewinn-Tage). Jeder Trade: SL unter „Verlust je Trade" (− 5 % Puffer, das engere mit der 1 % Rule). Kein Refund-Trade. Leeres Feld = Standard 7 × 500 $ · TP 550–750 · SL 700–800 · 35 % · 1 %')
+      const stBlock = !stE ? '' : ad
+        ? `<div class="wd-abl-schalter lesen"><span><b>Add-on · Striking${stInfo}</b><small>${escapeHtml(stSub)}</small></span></div>
+          <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Gewinntage', stE.gewinntage_anzahl ?? null, Object.assign({ feld: 'striking.gewinntage_anzahl' }, fz), { einheit: 'Tage', leer: '7' })}
+            ${fcrFeld('Gewinntag ab', stE.gewinntag_min_je_100k ?? null, Object.assign({ feld: 'striking.gewinntag_min_je_100k' }, fz), { einheit: '$ je 100k', leer: '500' })}
+            ${fcrFeld('Gewinntag-TP', stE.tp_je_100k, Object.assign({ feld: 'striking.tp_je_100k' }, fz), { bereich: true, einheit: '$ je 100k', leer: 'Standard' })}
+            ${fcrFeld('Gewinntag-SL', stE.sl_je_100k, Object.assign({ feld: 'striking.sl_je_100k' }, fz), { bereich: true, einheit: '$ je 100k', leer: 'Standard' })}
+            ${fcrFeld('Consistency', stE.consistency_pct ?? null, Object.assign({ feld: 'striking.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '35' })}
+            ${fcrFeld('Max. Verlust', stE.verlust_max_pct ?? null, Object.assign({ feld: 'striking.verlust_max_pct' }, fz), { einheit: '< % je Trade', leer: '1' })}</div>`
+        : fcrZeile('Add-on Striking', `${fcrZahl(stE.gewinntage_anzahl)} × ≥ ${fcrZahl(stE.gewinntag_min_je_100k)} $ je 100k · TP ${fcrSpanne(stE.tp_je_100k, '$')} · SL ${fcrSpanne(stE.sl_je_100k, '$')} · Consistency ${fcrZahl(stE.consistency_pct ?? 35)} % · Verlust < ${fcrZahl(stE.verlust_max_pct ?? 1)} % · ${stN} ${stN === 1 ? 'Konto' : 'Konten'}`)
       if(!ad) return `${fcrWAbschnitt(f.firma + alleGr)}${fcrZeile('Im Planer', f.an === false ? 'aus' : 'an')}${fcrZeile('Refund-Trade', ep ? `+${fcrSpanne(ep.ziel, '$')} · ${fcrZahl(ep.hedge_eur_je_dd ?? 0)} € je $ DD` : 'aus')}${odBlock}
+${stBlock}
         ${fcrZeile('Gewinntage', gt ? `${fcrZahl(gt.anzahl)} × ≥ ${fcrZahl(gt.min)} $ · TP ${fcrSpanne(gt.tp, '$')}` : 'aus')}`
       return `<div data-fcr-firmateil>${fcrWAbschnitt(f.firma + alleGr)}
         ${fcrWSchalter('firma:' + f.firma, f.an !== false, 'Im Planer')}
@@ -91422,6 +91455,7 @@
         ${ep ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel', ep.ziel, Object.assign({ feld: 'erster_payout.ziel' }, epFz), { bereich: true, einheit: '$' })}
             ${fcrFeld('Hedge', ep.hedge_eur_je_dd ?? null, Object.assign({ feld: 'erster_payout.hedge_eur_je_dd' }, epFz), { einheit: '€ je $ DD' })}</div>` : ''}
         ${odBlock}
+        ${stBlock}
         ${fcrWSchalter('gewinntage_alle:' + f.firma, !!gt, 'Gewinntage', 'vor dem Ziel', fcrInfo('gt', 'erst so viele Tage mit mindestens diesem Gewinn — bis dahin je Tag ein Trade mit diesem TP'))}
         ${gt ? `<div class="fcr-e-felder fcr-e-unter">${fcrFeld('Anzahl', gt.anzahl, Object.assign({ feld: 'gewinntage_alle.anzahl' }, fz), { einheit: 'Tage' })}
           ${fcrFeld('Mindestgewinn', gt.min, Object.assign({ feld: 'gewinntage_alle.min' }, fz), { einheit: '$' + gtBezug })}
@@ -91473,7 +91507,7 @@
         firma: String(f.name || '?'), an: f.an, weg: f.weg, namen: f.namen, ohne_namen: Array.isArray(f.ohne_namen) ? f.ohne_namen : [],
         tp_modus: f.tp_modus, tp_modus_eff: f.tp_modus_eff, tp_zyklen: f.tp_zyklen, tp_zyklen_eff: f.tp_zyklen_eff,
         consistency_pct: f.consistency_pct, consistency_pct_eff: f.consistency_pct_eff,
-        tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, on_demand: f.on_demand, on_demand_eff: f.on_demand_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
+        tp_deckel_plus: f.tp_deckel_plus, tp_deckel_plus_eff: f.tp_deckel_plus_eff, on_demand: f.on_demand, on_demand_eff: f.on_demand_eff, striking: f.striking, striking_eff: f.striking_eff, erster_payout: f.erster_payout, erster_payout_eff: f.erster_payout_eff,
         hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', Array.isArray(f.ohne_namen) && f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
         groessen: Object.entries(f.je_groesse).filter(([, x]) => x && typeof x === 'object').map(([gr, x]) => ({ groesse: Number(gr), roh: x, ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
           hedge_eur: x.hedge_eur, hedge_dd: x.dd, daily_loss: x.daily_loss,
@@ -91558,6 +91592,10 @@
         const t = b.feld.slice(10), STD = { ziel_je_100k: [2000, 2250], consistency_pct: 40 }
         const od = Object.assign({}, f.on_demand && typeof f.on_demand === 'object' ? f.on_demand : {}); if(b.wert == null) delete od[t]; else od[t] = b.wert
         f.on_demand = Object.keys(od).length ? od : null; f.on_demand_eff = Object.assign({}, f.on_demand_eff || STD, { [t]: b.wert ?? STD[t] }); return }
+      if(b.feld.startsWith('striking.')){   // ST1: Add-on Striking — leer = Standard (das Neuladen holt den echten Stand)
+        const t = b.feld.slice(9), STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1 }
+        const st = Object.assign({}, f.striking && typeof f.striking === 'object' ? f.striking : {}); if(b.wert == null) delete st[t]; else st[t] = b.wert
+        f.striking = Object.keys(st).length ? st : null; f.striking_eff = Object.assign({}, f.striking_eff || STD, { [t]: b.wert ?? STD[t] }); return }
       if(b.feld.startsWith('erster_payout.') && f.erster_payout && typeof f.erster_payout === 'object'){
         const t = b.feld.slice(14); f.erster_payout = Object.assign({}, f.erster_payout, { [t]: b.wert }); f.erster_payout_eff = Object.assign({}, f.erster_payout_eff, { [t]: b.wert }) }
     }catch(_){ /* nur Anzeige — das Neuladen holt den echten Stand */ }
