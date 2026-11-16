@@ -27889,6 +27889,25 @@
   }
   window._firmNormRichtung = firmNormRichtung
   const _dirNorm = f => firmNormRichtung(f)   // seit 08.10.2026 dieselben Schreibweisen-Regeln wie das Backend (vorher nur a–z0–9)
+  /* FLOTTEN-ZEILEN SCHLANK (SB2b, 16.11.2026, Supabase-Rechnung 232 $, Befund SB1): die drei Flotten-Leser (mt5FleetRenderTick,
+   * hedgeCloudRowsNachladen, firmLiveRichtungen) zogen an Handelstagen ~65.000-mal am Tag alle frischen mt5_live-Zeilen mit
+   * select=* (~10 KB je Zeile) — ~63 % des gesamten Egress. Die Sicht mt5_live_flotte (sql/2026-11-16_mt5_live_flotte.sql) liefert
+   * dieselben Zeilen ohne status.panel_lauf/mt5_update/kurs_bruecke, die keiner dieser Leser braucht; RLS gilt unverändert
+   * (security_invoker). Fehlt die Sicht (SQL noch nicht eingespielt / Schema-Cache), einmal direkt mt5_live wie bisher und
+   * 10 min dabei bleiben — so kann der Push nie vor dem SQL die Flotte leer machen. */
+  let _mt5FlotteFehltAt = 0
+  async function mt5FlotteZeilen(grenze){
+    if(Date.now() - _mt5FlotteFehltAt > 10 * 60 * 1000){
+      const r = await supabase.from('mt5_live_flotte').select('*').gte('updated_at', grenze)
+      const fehlt = r.error && (r.status === 404 || ['PGRST205', '42P01', 'PGRST200'].includes(String(r.error.code || '')))
+      if(!fehlt) return r
+      _mt5FlotteFehltAt = Date.now()
+      console.warn('[flotte] Sicht mt5_live_flotte fehlt — lese mt5_live direkt', r.error && r.error.message)
+    }
+    return await supabase.from('mt5_live').select('*').gte('updated_at', grenze)
+  }
+  window._mt5FlotteZeilen = mt5FlotteZeilen   // Diagnose: welche Quelle (Sicht/Rückfall) liefert gerade?
+  window._mt5FlotteRueckfall = () => _mt5FlotteFehltAt ? new Date(_mt5FlotteFehltAt).toISOString() : null
   async function firmLiveRichtungen(firmName){
     const ziel = _dirNorm(firmName)
     const out = { long: [], short: [] }        // je Eintrag: {wer, quelle, symbol}
@@ -27901,7 +27920,7 @@
       const meUid = String(session?.user?.id || '')
       const grenze = grenzeMinute(10 * 60 * 1000)   // stabile URL (01.10.2026)
       const [ml, dl] = await Promise.all([
-        supabase.from('mt5_live').select('*').gte('updated_at', grenze),
+        mt5FlotteZeilen(grenze),   // schlanke Sicht (SB2b 16.11.2026)
         supabase.from('dup_live').select('*').gte('updated_at', grenze)
       ])
       const jetzt = Date.now()
@@ -28019,7 +28038,7 @@
       // FLOTTE WEG (Finn 09.10.2026 ~10:27 Dubai: „Offen" zeigt nur die eigene ID, alle IDs stehen im Radar): dup_live und die RPC
       // flotte_offene_plaene speisten nur die Karten anderer Personen — beide Abrufe entfallen. mt5_live bleibt: daraus leben die
       // Live-P&L-Chips der EIGENEN Karten (window._mt5CloudRows), die FUSION-Chips und der Balance-Cache, dazu die roten Hinweise der eigenen ID.
-      const ml = await mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000)
+      const ml = await mitTimeout(mt5FlotteZeilen(grenze), 8000)   // schlanke Sicht (SB2b 16.11.2026)
       const dl = { data: [], error: null }, fp = { data: [], error: null }
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
@@ -36408,7 +36427,7 @@
     if(!offen) return
     _hedgeRowsLaeuft = true
     try{
-      const { data, error } = await supabase.from('mt5_live').select('*').gte('updated_at', window.grenzeMinute(10 * 60 * 1000))
+      const { data, error } = await mt5FlotteZeilen(window.grenzeMinute(10 * 60 * 1000))   // schlanke Sicht (SB2b 16.11.2026)
       if(!error && Array.isArray(data)){
         window._mt5CloudRows = data.sort((a, b) => String(a.instance).localeCompare(String(b.instance)))
         window._mt5CloudRowsAt = Date.now()
@@ -59183,7 +59202,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2228'
+  const OS_TAB_BUILD = '2026-09-22.2229'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
