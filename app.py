@@ -43656,7 +43656,22 @@ def kz_rechnen(a, ctx):
         tzw = fcp_tw_broker(plaene_z, seit, None, a.get("fcp_ziel"), z_ab, z_ts)   # CS1: Basis laut Broker (fcp_ziel.broker), sonst wie der Planer; WP4
         cons_ok = True
         an = None
-        if p_cons:
+        tz_c, cons_netto_k = tzw, False   # OD2: Zyklus-Werte der Consistency-Anzeige (On Demand: w = Netto-Profit) — Abhak-Text und abhak.cons unten
+        if p_cons and _oda and (freg or {}).get("consistency_basis") == "netto":
+            # OD2 (Finn 17.11.2026, Marc …7821): On Demand wie FundedNext und der Planer — größter Tag ÷ Netto-Profit des Zyklus, Required profit = größter Tag ÷ p
+            tzn = fcp_tw_netto(tzw, gewinn) if gewinn is not None else None
+            tz_c, cons_netto_k = tzn, True
+            an = (tzn["b"] / tzn["w"]) if (tzn and tzn["w"] > 0) else None
+            cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzn and tzn["b"] == 0 and gewinn and gewinn > 0)
+            _odz = fcp_od_ziel(p_cons, (z_fest if z_fest is not None else bereich[0]) if bereich else 0.0, gewinn, tzn) if (tzn and gewinn is not None) else None
+            if _odz:
+                out["od_ziel"] = _odz
+            kach.append(kz_cons_kachel(p_cons, an, tzn["b"] if tzn else None, tzn["w"] if tzn else None,
+                                       "Netto-Profit des Zyklus (wie FundedNext)" + (" (größter Tag laut Broker)" if tzw and tzw.get("broker") else ""),
+                                       "On Demand: größter Tag ÷ Netto-Profit des Zyklus (FundedNext, wie der Funded-CFD-Planer)"
+                                       + (f" · On-Demand-Ziel {_liq_de(_odz['usd'])} $" if _odz else ""),
+                                       "Zyklus nicht lesbar" if tzn is None else "noch kein Profit"))
+        elif p_cons:
             an = (tzw["b"] / tzw["w"]) if (tzw and tzw["w"] > 0) else None
             cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzw and tzw["w"] == 0 and gewinn and gewinn > 0)
             kach.append(kz_cons_kachel(p_cons, an, tzw["b"] if tzw else None, tzw["w"] if tzw else None,
@@ -43735,10 +43750,14 @@ def kz_rechnen(a, ctx):
             ab_fehlt.append("Ziel: keine Balance-Lesung" if zb else "Ziel: keine Regel für Firma/Größe")
         if p_cons:
             if an is not None:
-                _ct = f"Consistency {kz_pct(an)} {'≤' if cons_ok else '>'} {_liq_de(p_cons)} % (größter Tag {_liq_de(tzw['b'])} $ / Gewinn-Tage {_liq_de(tzw['w'])} $)"
+                _ct = f"Consistency {kz_pct(an)} {'≤' if cons_ok else '>'} {_liq_de(p_cons)} % (größter Tag {_liq_de(tz_c['b'])} $ / " \
+                      + (f"Profit {_liq_de(tz_c['w'])} $" + (f" · On-Demand-Ziel {_liq_de(out['od_ziel']['usd'])} $" if isinstance(out.get("od_ziel"), dict) else "")
+                         if cons_netto_k else f"Gewinn-Tage {_liq_de(tz_c['w'])} $") + ")"   # OD2: On Demand gegen den Netto-Profit
                 (ab_ok if cons_ok else ab_fehlt).append(_ct)
             elif not cons_ok:
-                ab_fehlt.append("Consistency nicht prüfbar (Zyklus nicht lesbar)" if tzw is None else "Consistency: noch kein Gewinn-Tag")
+                ab_fehlt.append("Consistency nicht prüfbar (Zyklus nicht lesbar)" if tz_c is None else
+                                (f"Consistency: Profit {_liq_de(gewinn)} $ ≤ 0" + (f" · On-Demand-Ziel {_liq_de(out['od_ziel']['usd'])} $" if isinstance(out.get("od_ziel"), dict) else "")
+                                 if cons_netto_k else "Consistency: noch kein Gewinn-Tag"))
         if gt:
             if gti and gti[0] >= gti[1]:
                 ab_ok.append(f"Gewinntage {gti[0]}/{gti[1]}")
@@ -43746,7 +43765,8 @@ def kz_rechnen(a, ctx):
                 ab_fehlt.append(f"Gewinntage {gti[0]}/{gti[1]}" if gti else "Gewinntage nicht lesbar")
         out["abhak"] = {"bal": bal, "ziel_bal": zb[0] if zb else None, "rest": round(zb[0] - bal, 2) if (zb and bal) else None, "erreicht": erreicht,
                         "ok_text": " · ".join(ab_ok), "fehlt_text": " · ".join(ab_fehlt),
-                        "cons": ({"p": p_cons, "b": (tzw or {}).get("b"), "w": (tzw or {}).get("w"), "anteil": an, "ok": cons_ok} if p_cons else None),
+                        "cons": ({"p": p_cons, "b": (tz_c or {}).get("b"), "w": (tz_c or {}).get("w"), "anteil": an, "ok": cons_ok,
+                                  **({"basis": "netto", "lesbar": tz_c is not None} if cons_netto_k else {})} if p_cons else None),   # OD2: Popup-Text „Profit“
                         "gewinntage": list(gti) if (gt and gti) else None,
                         "naechster": ({"aktion": nx.get("aktion"), "tp": nx.get("tp"), "grund": nx.get("grund")} if isinstance(nx, dict) else None),
                         "bereit": bool(ok), "wartet": wartet}
@@ -51079,8 +51099,53 @@ def fcp_on_demand_anwenden(regel, jg, groesse):
     f = float(g) / 100000.0
     jg2 = {k: v for k, v in dict(jg).items() if k not in ("gewinntage", "tp_erster")}
     jg2["ziel"] = [float(round(od["ziel_je_100k"][0] * f)), float(round(od["ziel_je_100k"][1] * f))]
-    r2 = dict(regel or {}, erster_payout=False, consistency_pct=od["consistency_pct"] or 0, tp_modus=None)
+    # OD2 (17.11.2026): consistency_basis „netto“ — FundedNext rechnet die On-Demand-Consistency gegen den Netto-Profit, nicht gegen die Summe der
+    # Gewinn-Tage (fcp_tw_netto). Nur On-Demand-Konten bekommen den Schlüssel, alle anderen Regeln bleiben bitgleich.
+    r2 = dict(regel or {}, erster_payout=False, consistency_pct=od["consistency_pct"] or 0, tp_modus=None, consistency_basis="netto")
     return r2, jg2
+
+
+# OD2 CONSISTENCY GEGEN DEN NETTO-PROFIT (Finn 17.11.2026 ~03:10 Dubai, Marc FundedNext 100k On Demand: „Bei Marc wäre der erste Account ready, aber der
+# Highest Profit Day schließt es noch aus … Ich kann noch keinen Payout anfragen“). FundedNext-Dashboard: Profit 2.226,83 $, Highest profit 1.960,56 $,
+# 88,04 % (= 1.960,56 ÷ 2.226,83), Required profit 4.901,40 $ (= 1.960,56 ÷ 0,40). Prophos rechnete seit O1 gegen die Summe der Gewinn-Tage
+# (1.960,56 + 1.780,15 + 991,01 + 746,78 + 1.008,08 = 6.486,58 → 30 % ≤ 40 %) und stellte das Konto am 16.11. auf Waiting for Payout, obwohl die Firma
+# wegen der zwei Verlust-Tage noch nicht auszahlt. On Demand: Basis W = Netto-Profit des Zyklus (Balance − Kontogröße, aus der Lesung). Fertig erst,
+# wenn Profit ≥ Ziel UND größter Tag ≤ p × Profit, also Profit ≥ größter Tag ÷ p. fcp_cons_finn plant mit W = Profit genau das (ohne 2-%-Puffer,
+# fcp_od_ende_min): Fall A (größter Tag > p × Ziel) Ende = größter Tag ÷ p + 1 $, Fall B Ende = Ziel; Deckel je Tag p × Ende × 0,95 minus heute schon
+# Gewonnenes — liegt unter dem bisherigen größten Tag bzw. unter p × Ziel, auch für Erholungstage nach einem Verlust (zählen bei FundedNext voll). Striking/The5ers/Blue Guardian
+# und normale Funded-CFD-Konten rechnen weiter mit der Summe der Gewinn-Tage (Finn 05.11.2026, Memory „Consistency je Zyklus“).
+def fcp_tw_netto(tw, gewinn):
+    """REIN RECHNEND (testbar, OD2): Zyklus-Werte (fcp_tage_zyklus_w / fcp_tw_broker / fcp_tw_aus) mit w = Netto-Profit (gewinn) statt der Summe der
+    Gewinn-Tage; größter Tag b, Serie und Tagessumme bleiben. tw None (Zyklus nicht lesbar) → None (fail-closed wie bisher)."""
+    if not isinstance(tw, dict):
+        return tw
+    return dict(tw, w=round(float(gewinn), 2), basis="netto")
+
+
+def fcp_od_ende_min(pct, ziel, tw):
+    """REIN RECHNEND (testbar, OD2-Nachtrag 2, Finn 17.11.2026 ~03:15: „immer nur auf das eigentliche Ziel kommen, statt so hinauszuschießen“): Mindest-Ende
+    (Profit) für fcp_cons_finn bei On Demand statt des 2-%-Puffers. Fall B — größter Tag ≤ p × Ziel: 0 (das Ziel selbst bindet, der Plan endet genau auf
+    dem Ziel; Deckel je Tag p × Ziel × 0,95, auch nach Verlusttagen). Fall A — größter Tag > p × Ziel (Consistency überschossen): größter Tag ÷ p auf
+    ganze $ aufgerundet + 1 $ (Required profit der Firma, gegen Rundung des letzten TPs); Deckel p × Ende × 0,95 liegt unter dem größten Tag."""
+    if not pct or not isinstance(tw, dict):
+        return None
+    q, B = float(pct) / 100.0, float(tw.get("b") or 0)
+    if B <= q * float(ziel) + 0.005:
+        return 0.0
+    return float(int(B / q) + 1)
+
+
+def fcp_od_ziel(pct, ziel, gewinn, tw):
+    """REIN RECHNEND (testbar, OD2): On-Demand-Ziel des Zyklus nach FundedNext → {usd, grund, bester_tag, wachstum, bereit, fehlt} | None.
+    usd = max(Wachstumsziel, größter Tag ÷ p) (Required profit der Firma), grund „consistency“, wenn der größte Tag das Ziel hochzieht, sonst „wachstum“;
+    bereit = Profit ≥ usd. Ohne p oder ohne lesbaren Zyklus → None."""
+    if not pct or not isinstance(tw, dict):
+        return None
+    q, B, Z, G = float(pct) / 100.0, float(tw.get("b") or 0), float(ziel), float(gewinn)
+    req = B / q
+    usd = max(Z, req)
+    return {"usd": round(usd, 2), "grund": "consistency" if req > Z + 0.005 else "wachstum", "bester_tag": round(B, 2), "wachstum": round(Z, 2),
+            "p": float(pct), "bereit": G >= usd - 0.005, "fehlt": round(max(usd - G, 0.0), 2)}
 
 
 # ADD-ON STRIKING (ST1, Master 15.11.2026, Finn mit den FundingPips-Regeln): gilt nur für Konten mit accounts.striking = true (von Hand am Konto, Chip
@@ -51482,7 +51547,7 @@ def fcp_tw_broker(plaene, seit_tag, heute_tag, fcp_ziel, zyklus_ab, ab_ts=None):
 FCP_CONS_ANTEIL_SPANNE = 5.0     # TP je Trade = Zufall (p − 5 %) … p der Distanz (Finn 05.11.2026 ~07:50: „35–40 % davon, per Zufall bei jedem Trade")
 
 
-def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None, ziel_min=None):
+def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None, ziel_min=None, ende_min=None):
     """REIN RECHNEND (testbar): CONSISTENCY NACH FINN (O1, 05.11.2026 ~07:45/07:50 Dubai, ersetzt Weg A für alle Consistency-Firmen):
     „Angenommen wir machen −2.000, dann fehlen noch genau 5.000 zum Ziel. 40 % davon sind 2.000, der größte Tag darf nicht über 2.000 sein. Dann machen
     wir 1.500, 1.900, 1.600 … So wenige Trades wie möglich, immer nur das, was zum Ziel noch fehlt" · „Wir nehmen die aktuelle Balance bis zum Ziel =
@@ -51503,10 +51568,11 @@ def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None, ziel_min=None):
     S, k = float(tw.get("serie") or 0), int(tw.get("serie_n") or 0)
     # ZT1: ziel_min = Schwelle mit Toleranz (fcp_ziel_schwelle) — fertig schon dort; Consistency (B ≤ p × W) bleibt unverändert Pflicht
     zm = float(ziel_min) if ziel_min is not None and _wd_num(ziel_min) is not None and float(ziel_min) <= Z else Z
-    if G >= zm - 0.005 and B <= q * W + 0.005:
+    if G >= zm - 0.005 and B <= q * W + (0.005 if ende_min is None else 0.005 * q):   # OD2-Review: On Demand Toleranz × p (wie fcp_od_ziel.bereit)
         return {"tp": None, "ende": round(Z), "deckel": None, "rest": round(Z - G, 2), "n": 0, "k": k, "bester_tag": B, "summe_tage": W, "distanz": None,
                 "anteil": None, "p": float(pct), "fertig": True, "lesbar": True}
-    R = max(Z - G, B / q * FCP_CONS_PUFFER_ZIEL - W, 0.0)
+    # OD2: ende_min (nur On Demand, fcp_od_ende_min) ersetzt den 2-%-Puffer „größter Tag ÷ p × 1,02“ — None = wie bisher (alle anderen Firmen bitgleich)
+    R = max(Z - G, (B / q * FCP_CONS_PUFFER_ZIEL if ende_min is None else float(ende_min)) - W, 0.0)
     c = q * (W + R) * FCP_CONS_PUFFER_DECKEL
     # E1e (Finn 05.11.2026 ~08:30): mehrere Trades am selben Tag zählen als EIN Tag — der Deckel gilt für die Tagessumme (heute schon im Plus → weniger Platz)
     h = max(float(tw.get("heute") or 0), 0.0)
@@ -51767,6 +51833,7 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         basis["gewinntage"] = list(gi) if gi else None
         gt_offen = gi is None or int(gi[0]) < int(gi[1])             # Zählung nicht lesbar → Phase A (kleiner Trade), nie ein Ziel-Trade auf Verdacht
     pct = fcp_consistency_pct(regel) if not (gt and gt_offen) and not ep else None
+    cons_netto = bool(pct) and (regel or {}).get("consistency_basis") == "netto"   # OD2: nur On-Demand-Regeln (fcp_on_demand_anwenden)
     # ZT1-Prüfer S1: Bezug für „Ziel erreicht" ohne Consistency = festes Ziel des Zyklus (wie /konto-ziele), ohne gespeichertes Ziel der untere Wert wie bisher
     _zz = max(fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0])[0], ziel_b[0]) if ziel_fest is not None else ziel_b[0]
     if pct:
@@ -51775,15 +51842,22 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         # O1 (Finn 05.11.2026): Ziel erreicht = G ≥ Z und größter Tag B ≤ p × Summe der Gewinn-Tage W. Z = festes Ziel des Kontos, sonst Ziel-von.
         # Ohne Zufall (sonst verschöbe ein Konto am Ziel die Würfe aller folgenden Konten des Laufs)
         tw0 = fcp_tw_aus(tage, gewinn)
+        if cons_netto:
+            tw0 = fcp_tw_netto(tw0, gewinn)      # OD2: On Demand — Basis Netto-Profit (wie FundedNext), sonst Summe der Gewinn-Tage wie bisher
         z_f, _n0 = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0]) if ziel_fest is not None else (ziel_b[0], True)
         z_f = max(z_f, ziel_b[0])
+        if cons_netto:
+            _odz = fcp_od_ziel(pct, z_f, gewinn, tw0)
+            if _odz:
+                basis["od_ziel"] = _odz          # OD2: On-Demand-Ziel (Required profit) in jeder Antwort dieses Kontos — Notiz, Reiter, Konto-Seite
         # ZT1 (Finn 10.11.2026): Ziel erreicht ab Ziel × (1 − Toleranz) — Consistency-Bedingung unverändert
         # ZT1-Prüfer S1: Bezug ist überall das feste Ziel des Zyklus (wie /konto-ziele und Radar), sonst der untere Wert
         if tw0 is None:
             if gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005:   # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht)
                 return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": None, "ende": round(z_f)},
                             ziel_toleranz=fcp_ziel_toleranz_info(z_f, gewinn, P))
-        elif gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005 and float(tw0.get("b") or 0) <= pct / 100.0 * float(tw0.get("w") or 0) + 0.005:
+        elif gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005 and float(tw0.get("b") or 0) <= pct / 100.0 * float(tw0.get("w") or 0) + 0.005 * (pct / 100.0 if cons_netto else 1.0):
+            # OD2-Review: On Demand Toleranz × p — sonst gälte schon Profit 4.901,39 als ≥ 1.960,56 ÷ 0,40 (fcp_od_ziel.bereit sagt dort nein)
             return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout",
                         consistency={"p": pct, "bester_tag": tw0.get("b"), "summe_tage": tw0.get("w"), "ende": round(z_f)},
                         ziel_toleranz=fcp_ziel_toleranz_info(z_f, gewinn, P))
@@ -51811,7 +51885,14 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         # CONSISTENCY WEG A (Finn 05.11.2026 ~04:20 Dubai, ersetzt C5 „750-Start, höchstens die Zyklus-Gewinne"): Endziel, Deckel, Rest gleich verteilt
         # (fcp_cons_rechnen). Das Ziel Z bleibt das gewürfelte Ziel der Größe, G = Balance − Kontogröße, B = größter Gewinn-Tag im Zyklus
         # seit O1 (05.11.2026) nach Finn: fcp_cons_finn — Basis Summe der Gewinn-Tage, TP (p − 5 %) … p der Distanz, letzter Trade = Rest
-        cr = fcp_cons_finn(pct, ziel, gewinn, fcp_tw_aus(tage, gewinn), rnd, ziel_min=fcp_ziel_schwelle(ziel, P))   # ZT1: fertig ab Schwelle
+        _tw_c = fcp_tw_aus(tage, gewinn)
+        if cons_netto:
+            _tw_c = fcp_tw_netto(_tw_c, gewinn)  # OD2: Basis Netto-Profit, Ende aus fcp_od_ende_min, Deckel p × Ende × 0,95 (< bisheriger größter Tag)
+            _odz2 = fcp_od_ziel(pct, ziel, gewinn, _tw_c)
+            if _odz2:
+                basis["od_ziel"] = _odz2         # OD2-Review: mit dem Ziel, das dieser Plan ansteuert (ohne festes Ziel gewürfelt, nicht der untere Wert)
+        cr = fcp_cons_finn(pct, ziel, gewinn, _tw_c, rnd, ziel_min=fcp_ziel_schwelle(ziel, P),   # ZT1: fertig ab Schwelle
+                           **({"ende_min": fcp_od_ende_min(pct, ziel, _tw_c)} if cons_netto and isinstance(_tw_c, dict) else {}))   # OD2: ohne 2-%-Puffer
         if cr.get("tages_deckel"):
             return dict(basis, aktion="aus", grund=f"Consistency: heute schon +{_liq_de(cr['heute'])} $ — Tages-Deckel {_liq_de(cr['deckel'])} $ erreicht, morgen weiter",
                         consistency=cr)
@@ -51863,6 +51944,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     if grund:
         return dict(basis, aktion="aus", grund=grund)
     q = float(h["slave_risk"]) / float(dd)                 # € Hedge je $ Master
+    if cons_netto and isinstance(basis.get("od_ziel"), dict) and tp_art == "consistency":
+        ziel = max(ziel, float(basis["od_ziel"]["usd"]))    # OD2: Ziel des Plans = On-Demand-Ziel (Required profit), Reiter rechnet „Rest“ davon
     return dict(basis, aktion="planen", grund="", ziel=g + ziel, tp=tp, sl=sl, lots=lots, tp_art=tp_art,
                 tp_pkt=round(tp / (mppl * lots), 1), sl_pkt=round(sl / (mppl * lots), 1),
                 hedge_eur=h["slave_risk"], hedge_lots=h["lots"], master_risk=h["master_risk"], slave_risk=h["slave_risk"],
@@ -52378,6 +52461,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else "")   # 03.11.2026
                  + (f" · Gewinntage {r['gewinntage'][0]}/{r['gewinntage'][1]}" if r.get("gewinntage") else "")   # Blue Guardian (BG1)
                  + (" · On Demand" if r.get("on_demand") else "") + (" · On Demand ohne Regel dieser Firma → normale Regel" if r.get("on_demand_ohne_regel") else "")
+                 # OD2: Required profit wie FundedNext (größter Tag ÷ p) — nur On-Demand-Konten
+                 + ((lambda o: f" · On-Demand-Ziel {_liq_de(o['usd'])} $" + (f" (Consistency: größter Tag {_liq_de(o['bester_tag'])} $ ÷ {_liq_de(o['p'])} %)"
+                                                                            if o.get("grund") == "consistency" else " (Wachstum)"))(r["od_ziel"])
+                    if r.get("on_demand") and isinstance(r.get("od_ziel"), dict) else "")
                  + (f" · Striking (SL ≤ {_liq_de(r['striking_sl_deckel'])} $)" if r.get("striking") and r.get("striking_sl_deckel") else "")   # ST1
                  + (" · Striking ohne Regel dieser Firma → normale Regel" if r.get("striking_ohne_regel") else "")
                  + (" · Striking: Kontogröße unbekannt → normale Regel (Größe im Namen bzw. Starting Balance eintragen)" if r.get("striking_ohne_groesse") else "")
@@ -52406,6 +52493,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                                          "zyklus", "tp_deckel", "gewinne", "consistency", "erster_payout", "gewinntage",
                                                                          "ziel_fest", "on_demand")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt,
+                                                 # OD2: nur On-Demand-Konten (alle anderen Pläne bitgleich wie bisher)
+                                                 **({"od_ziel": r.get("od_ziel")} if r.get("on_demand") and isinstance(r.get("od_ziel"), dict) else {}),
                                                  # ST1: nur bei Striking-Konten (alle anderen Pläne bitgleich wie bisher)
                                                  **({"striking": True, "striking_sl_deckel": r.get("striking_sl_deckel"), "cons_laufend": r.get("cons_laufend"),
                                                      "verlust_grenze_usd": r.get("verlust_grenze_usd")}
@@ -52557,7 +52646,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               if _wd_num(p.get("multiplier")) and _wd_num(p.get("master_contracts")) else None,
                               "funded_cfd_plan": von_fcp,
                               "vorschlag": bool(fp and fp.get("art") == FCP_ART) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
-                              **({x: fp.get(x) for x in ("ziel", "gewinn", "tp_art", "hedge_eur", "hedge_tp_eur", "hedge_sl_eur", "eins_prozent", "erster_payout")} if fp else {})})
+                              **({x: fp.get(x) for x in ("ziel", "gewinn", "tp_art", "hedge_eur", "hedge_tp_eur", "hedge_sl_eur", "eins_prozent", "erster_payout")} if fp else {}),
+                              **({"od_ziel": fp["od_ziel"]} if fp and isinstance(fp.get("od_ziel"), dict) else {})})   # OD2: nur On-Demand-Pläne
     if ruhe:
         erg["msg"] = ruhe
     return erg

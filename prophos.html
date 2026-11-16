@@ -46579,10 +46579,12 @@
       z.push(r)
     }
     const c = ab.cons
+    // OD2 (17.11.2026): On Demand rechnet gegen den Netto-Profit (c.basis 'netto'), sonst Summe der Gewinn-Tage
+    const cNetto = c && c.basis === 'netto', cLeer = cNetto && c.lesbar ? `Profit ${de(c.w)} $ ≤ 0` : 'nicht prüfbar (Zyklus nicht lesbar)'
     if(c && c.p != null) z.push({ st: c.ok ? 'ok' : 'nein', name: `Consistency ≤ ${de(c.p, 1)} %`,
-      wert: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} % · bester Tag ${de(c.b)} $ ÷ ${de(c.w)} $` : 'nicht prüfbar (Zyklus nicht lesbar)',
+      wert: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} % · bester Tag ${de(c.b)} $ ÷ ${de(c.w)} $${cNetto ? ' Profit' : ''}` : cLeer,
       titel: 'Consistency', gross: c.anteil != null ? `${de(Number(c.anteil) * 100, 1)} %` : '–',
-      klein: `erlaubt ≤ ${de(c.p, 1)} %` + (c.anteil != null ? ` · bester Tag ${de(c.b)} $ von ${de(c.w)} $ Gewinn-Tagen` : ' · nicht prüfbar (Zyklus nicht lesbar)') })
+      klein: `erlaubt ≤ ${de(c.p, 1)} %` + (c.anteil != null ? ` · bester Tag ${de(c.b)} $ von ${de(c.w)} $ ${cNetto ? 'Profit' : 'Gewinn-Tagen'}` : ' · ' + cLeer) })
     const gt = ck.find(x => /^Gewinntage/.test(String(x[1])))
     if(gt){
       const mm = String(gt[2] || '').match(/^(\d+)\s*\/\s*(\d+)$/), grenze = String(gt[1]).replace(/^Gewinntage\s*/, '')
@@ -93597,7 +93599,9 @@ ${stBlock}
       const usd = tp && tpPkt ? tp / tpPkt : sl && slPkt ? sl / slPkt : null
       const groesse = zahl(x.groesse), dd = zahl(x.dd), boden = groesse && dd ? groesse - dd : null
       const rest = zahl(x.ziel) != null && zahl(x.balance) != null ? Math.max(0, zahl(x.ziel) - zahl(x.balance)) : null
-      const stufe = [{ erster_payout: 'TP fest vor dem 1. Payout', erster_payout_refund: 'TP aufs Refund-Ziel (1. Payout)', ziel: 'TP aufs Ziel', nachholen: 'TP holt den Verlust nach' }[x.tp_art] || '',
+      // OD2 (17.11.2026): On-Demand-Konten — Required profit wie FundedNext (größter Tag ÷ p), app.py funded_plan.od_ziel
+      const odZ = x.od_ziel && zahl(x.od_ziel.usd) != null ? `On-Demand-Ziel ${$txt(x.od_ziel.usd)} $${x.od_ziel.grund === 'consistency' ? ' (Consistency)' : ''}` : ''
+      const stufe = [{ erster_payout: 'TP fest vor dem 1. Payout', erster_payout_refund: 'TP aufs Refund-Ziel (1. Payout)', ziel: 'TP aufs Ziel', nachholen: 'TP holt den Verlust nach' }[x.tp_art] || '', odZ,
         zahl(x.gewinn) != null ? `Gewinn ${zahl(x.gewinn) < 0 ? '−' : '+'}${$txt(x.gewinn)} $` : '', x.eins_prozent ? '1-%-Regel' : '', x.richtung_geschuetzt ? 'Richtung wie laufender Trade' : ''].filter(Boolean).join(' · ') || null
       const minus = zahl(x.hedge_tp_eur) != null ? Math.abs(zahl(x.hedge_tp_eur)) : null, plus = zahl(x.hedge_sl_eur) != null ? Math.abs(zahl(x.hedge_sl_eur)) : null
       const fusion = (minus != null || plus != null || zahl(x.hedge_lots) != null) ? { lots: zahl(x.hedge_lots), minus, plus, gedeckt: zahl(x.hedge_eur), tpPkt, slPkt } : null
