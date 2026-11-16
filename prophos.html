@@ -37323,28 +37323,109 @@
     if(!ch) return
     try{ _mklRtKAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtKAbbau = null }) }catch(_){ _mklRtKAbbau = null }
   }
+  /* EINE NACHRICHT JE UPSERT (SB4, 16.11.2026, Supabase-Rechnung 232 $: Realtime ≈ 99 % tv_kurse, ~780.000 Nachrichten/Tag).
+   * Der Liefer-PC upsertet NQ + MNQ meist in einem Aufruf, Realtime schickte trotzdem je Wurzel eine Nachricht an jeden Abonnenten.
+   * Ein Statement-Trigger (sql/2026-11-16_tv_kurs_paar.sql) spiegelt jedes Upsert in EINE Zeile je PC in tv_kurs_paar
+   * ({nq, mnq} = die tv_kurse-Zeilen 1:1, geaendert = die Wurzeln dieses Upserts) — der Kanal hört jetzt dort, gemessen ≈ −35 %.
+   * Ausgewertet werden NUR die Wurzeln aus `geaendert`; die andere steht mit ihrem alten Stand in der Zeile und darf nie als frisch
+   * in den Klick-Puffer (hedgeFeedPuffern stempelt mit der Empfangszeit). NQ = MNQ geht nicht: im Mittel 1,3 Punkte auseinander.
+   * Fehlt tv_kurs_paar (SQL noch nicht eingespielt), hört der Kanal wie bisher tv_kurse; alle 10 min neu prüfen und dann umsteigen.
+   * Hängt die Probe, nach 3 s ohne sie aufbauen (tv_kurse) — der Kurs-Kanal wartet nie auf die Probe. */
+  const _mklPaar = { da: null, at: 0, laeuft: false, seit: 0 }
+  let _mklRtTabelle = null
+  function mklPaarPruefen(){
+    if(_mklPaar.laeuft || _mklPaar.da === true) return
+    if(_mklPaar.da === false && Date.now() - _mklPaar.at < 10 * 60 * 1000) return
+    _mklPaar.laeuft = true; _mklPaar.seit = Date.now()
+    Promise.resolve(supabase.from('tv_kurs_paar').select('id').limit(1)).then(r => {
+      const fehlt = !!(r && r.error && (r.status === 404 || ['PGRST205', '42P01'].includes(String(r.error.code || ''))))
+      if(r && r.error && !fehlt){ _mklPaar.da = false; _mklPaar.at = Date.now() - 9 * 60 * 1000; return }   // Netz/Timeout: in 1 min nochmal
+      _mklPaar.da = !fehlt; _mklPaar.at = Date.now()
+      if(_mklPaar.da && _mklRt && _mklRtTabelle === 'tv_kurse') mklKursKanalAbbauen()   // läuft noch auf tv_kurse → nächster Tick baut neu
+    }).catch(() => { _mklPaar.da = false; _mklPaar.at = Date.now() - 9 * 60 * 1000 }).finally(() => { _mklPaar.laeuft = false })
+  }
+  function mklKursKanalAbbauen(){
+    const ch = _mklRt
+    _mklRt = null; _mklRtStatus = null; _mklRtWeg = 0; _mklRtTabelle = null; _mklPaar.subAt = 0; mklPollSetzen()
+    if(!ch) return
+    try{ _mklRtAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtAbbau = null }) }catch(_){ _mklRtAbbau = null }
+  }
+  window._mklKursTabelle = () => _mklRtTabelle   // Diagnose: 'tv_kurs_paar' (neu) | 'tv_kurse' (Rückfall) | null (kein Abo)
+  function mklKursZeile(r){
+    if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
+    hedgeFeedPuffern(r, Date.now())   // Kurs zum Puls-Klick (28.09.2026) — vor dem Zwei-PC-Filter, jeder Kurs zählt
+    const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
+    if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
+    mkl.kursJe[r.wurzel] = kk
+    if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
+    if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
+  }
   function mklRealtimeStart(){
     if(mkl.stub || !currentUserId || typeof supabase.channel !== 'function') return
     if(mklKursKanalGewollt()){
       _mklRtWeg = 0
+      if(_mklRt && _mklRtTabelle === 'tv_kurse') mklPaarPruefen()   // Rückfall-Kanal: alle 10 min schauen, ob die Paar-Tabelle da ist
+      // STILLSTAND-WÄCHTER (Gegenprüfung SB4): SUBSCRIBED beweist nicht, dass Daten kommen (Trigger im Fehlerzweig, Tabelle nicht in
+      // der Publication). Kommt auf dem Paar-Kanal ≥ 15 s nichts, während das Polling (mklPoll → mkl.kursJe aus tv_kurse) einen Kurs
+      // zeigt, der jünger ist als die letzte Paar-Nachricht, steht der Spiegel → 10 min zurück auf tv_kurse (der Fusion-Wächter
+      // braucht Realtime-Kurse ≤ 5 s). Ruhiger Markt löst nichts aus: der Feed schreibt spätestens alle ~6 s ein Lebenszeichen.
+      // PC-Tab ohne sichtbaren Radar pollt nicht (mklTick nur bei mklAktiv) → dort höchstens 1×/min eine Mini-Probe (jüngstes
+      // tv_kurse.updated_at). Bis dahin deckt hedgeKursAktuell den Wächter selbst per REST ab (hedgeKursLesen, ≤ 5 s).
+      if(_mklRt && _mklRtTabelle === 'tv_kurs_paar' && _mklRtStatus === 'SUBSCRIBED' && _mklPaar.subAt){
+        const jetzt = Date.now(), letzte = Math.max(_mklPaar.msgAt || 0, _mklPaar.subAt)
+        if(jetzt - letzte >= 15000){
+          const steht = wie => {
+            console.warn('[markt-live] tv_kurs_paar steht seit', Math.round((Date.now() - letzte) / 1000), 's (' + wie + ') — zurück auf tv_kurse')
+            _mklPaar.da = false; _mklPaar.at = Date.now(); _mklPaar.subAt = 0; mklKursKanalAbbauen()
+          }
+          // Uhr-fest (Gegenprüfung SB4): „frischer als der Spiegel“ nur Schreiber-Uhr gegen Schreiber-Uhr (datenAt = jüngste
+          // updated_at aus Paar-Nachrichten); ohne eine einzige Paar-Nachricht seit dem Aufbau zählt die Empfangszeit des Aufbaus.
+          const spiegelAt = _mklPaar.datenAt || letzte
+          const datenAt = k => (k && k.erfasst_ms) ? k.erfasst_ms - (Number(k.alter_ms) || 0) : 0
+          const neuester = Math.max(datenAt(mkl.kursJe && mkl.kursJe.NQ), datenAt(mkl.kursJe && mkl.kursJe.MNQ))
+          if(neuester > spiegelAt + 3000 && jetzt - neuester <= 20000){ steht('Polling'); return }
+          if(!_mklPaar.probeLaeuft && jetzt - (_mklPaar.probeAt || 0) >= 60000){
+            _mklPaar.probeLaeuft = true; _mklPaar.probeAt = jetzt
+            const ch0 = _mklRt
+            Promise.resolve(supabase.from('tv_kurse').select('updated_at').in('wurzel', ['NQ', 'MNQ']).order('updated_at', { ascending: false }).limit(1)).then(({ data }) => {
+              const t = Date.parse(((data || [])[0] || {}).updated_at || '') || 0
+              const s2 = _mklPaar.datenAt || Math.max(_mklPaar.msgAt || 0, _mklPaar.subAt || 0)
+              if(_mklRt === ch0 && _mklRtTabelle === 'tv_kurs_paar' && t > s2 + 3000 && Date.now() - t <= 20000) steht('Probe')
+            }).catch(() => {}).finally(() => { _mklPaar.probeLaeuft = false })
+          }
+        }
+      }
       if(_mklRt || _mklRtAbbau) return
+      if(_mklPaar.da === null){ mklPaarPruefen(); if(_mklPaar.laeuft && Date.now() - _mklPaar.seit < 3000) return }
+      const tabelle = _mklPaar.da === true ? 'tv_kurs_paar' : 'tv_kurse'
       try{
         const ch = supabase.channel('markt-live')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurse' }, m => { try{
-            const r = m.new; if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
-            hedgeFeedPuffern(r, Date.now())   // Kurs zum Puls-Klick (28.09.2026) — vor dem Zwei-PC-Filter, jeder Kurs zählt
-            const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
-            if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
-            mkl.kursJe[r.wurzel] = kk
-            if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
-            if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
-          }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
-        _mklRt = ch
+          .on('postgres_changes', { event: '*', schema: 'public', table: tabelle }, m => { try{
+            const n = m.new; if(!n || mkl.stub) return
+            if(tabelle === 'tv_kurse'){ mklKursZeile(n); return }
+            _mklPaar.msgAt = Date.now()
+            // realtime-js wandelt text[]/jsonb normalerweise selbst um; als String ankommend ("{MNQ,NQ}" bzw. JSON-Text) trotzdem lesen
+            const ge = Array.isArray(n.geaendert) ? n.geaendert : String(n.geaendert || '').replace(/[{}"\s]/g, '').split(',').filter(Boolean)
+            const zeile = v => { if(typeof v !== 'string') return v || null; try{ return JSON.parse(v) }catch(_){ return null } }
+            for(const w of ge){
+              const r = w === 'NQ' ? zeile(n.nq) : w === 'MNQ' ? zeile(n.mnq) : null
+              // Datenzeit (Schreiber-Uhr) für den Stillstand-Wächter — gegen tv_kurse.updated_at derselben Uhr vergleichen, nie gegen Date.now()
+              const t = Date.parse((r && r.updated_at) || '') || 0; if(t > (_mklPaar.datenAt || 0)) _mklPaar.datenAt = t
+              mklKursZeile(r)
+            }
+          }catch(e){ console.warn('[markt-live] ' + tabelle, e) } })
+        _mklRt = ch; _mklRtTabelle = tabelle
         ch.subscribe(status => {
           if(_mklRt !== ch) return   // Status eines schon abgemeldeten Kanals (CLOSED) nicht übernehmen
           _mklRtStatus = status
           mklPollSetzen()
-          console.log('[markt-live] Realtime', status)
+          console.log('[markt-live] Realtime', tabelle, status)
+          // Paar-Kanal kommt nicht zustande (z. B. Tabelle da, aber nicht in der Publication): sofort zurück auf tv_kurse, 10 min
+          // dabei bleiben — der Fusion-Wächter braucht Kurse ≤ 5 s, Polling allein reicht dafür nicht.
+          if(tabelle === 'tv_kurs_paar' && (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT')){
+            _mklPaar.da = false; _mklPaar.at = Date.now(); mklKursKanalAbbauen(); return
+          }
+          if(tabelle === 'tv_kurs_paar' && status === 'SUBSCRIBED') _mklPaar.subAt = Date.now()
           // Frisch aufgebaut (01.10.2026, Abo am PC-Tab nur noch bei Bedarf): einmal die aktuellen tv_kurse-Zeilen in den Klick-Puffer,
           // damit er nicht erst mit der nächsten Änderung beginnt — ein Puls-Klick kurz nach dem Aufbau hat so schon einen Kurs davor.
           if(status === 'SUBSCRIBED' && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
@@ -37352,15 +37433,13 @@
               .then(({ data }) => { for(const x of (data || [])) hedgeFeedPuffern(x, Date.parse((x && x.updated_at) || '') || 0) }).catch(() => {})
           }
         })
-      }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; mklPollSetzen() }
+      }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; _mklRtTabelle = null; mklPollSetzen() }
       return
     }
     if(!_mklRt) return
     if(!_mklRtWeg){ _mklRtWeg = Date.now(); return }
     if(Date.now() - _mklRtWeg < 60000) return
-    const ch = _mklRt
-    _mklRt = null; _mklRtStatus = null; _mklRtWeg = 0; mklPollSetzen()
-    try{ _mklRtAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtAbbau = null }) }catch(_){ _mklRtAbbau = null }
+    mklKursKanalAbbauen()
   }
   window._mklRealtimeStatus = () => _mklRtStatus   // null = kein Kurs-Abo (PC-Tab ohne Bedarf laut mklPcBrauchtKurs, kein Radar sichtbar)
   window._mklKerzenStatus = () => _mklRtKStatus   // Test-/Diagnose-Zugriff: null = kein Kerzen-Abo (kein Chart offen)
@@ -59373,7 +59452,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2232'
+  const OS_TAB_BUILD = '2026-09-22.2233'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
