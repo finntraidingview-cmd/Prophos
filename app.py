@@ -15028,17 +15028,19 @@ def _liq_verlauf_laden(acc_ids, streng=False):
     return out
 
 
-def liq_peak(p, acc, start_bal, verlauf, eod_tagesstart=None, eod=False):
+def liq_peak(p, acc, start_bal, verlauf, eod_tagesstart=None, eod=False, heute=None):
     """REIN RECHNEND (testbar): höchste BELEGTE Balance des Kontos in seiner aktuellen Phase VOR dem Start dieses Trades → wert | None.
     Belegt = final.balance_end früherer Pläne (Ende vor diesem Start), tv.balance_start früherer Pläne, die Start-Balance dieses Trades
     und accounts.tv_balance (gelesen vor diesem Start). Phase = trade_plans.konto_typ gleich der Kontoart — Höchststände aus der
     Challenge heben den Funded-Boden nicht (dieselbe Konto-Zeile wechselt die Phase). Pläne ohne konto_typ zählen nicht.
     eod=True (End-of-Day-Drawdown, 03.11.2026, Fremd-Review zu R1): der Boden trailt nur über Tagesend-Balances — zählen nur Werte früherer
     CME-Handelstage (Start-Balance des ersten und End-Balance des letzten Trades je Tag) und der Tagesstart von heute (eod_tagesstart, sonst
-    die Start-Balance); Intraday-Stände von heute (Start dieses Trades nach einem Gewinn am Morgen) und accounts.tv_balance nicht."""
+    die Start-Balance); Intraday-Stände von heute (Start dieses Trades nach einem Gewinn am Morgen) und accounts.tv_balance nicht.
+    heute (nur eod, EOD1 16.11.2026) = Plan-Tag als CME-Tag 'YYYY-MM-DD' — der Funded-Planer plant ab dem Nachtlauf (02:00 Dubai) schon den NÄCHSTEN Tag, während
+    der CME-Tag von jetzt erst um 17:00 CT wechselt; dann zählt der eben beendete Tag mit seinem Schluss. Ohne heute: CME-Tag von p.started_at, sonst von jetzt."""
     a = acc or {}
     if eod:
-        return _liq_peak_eod(p, a, start_bal, verlauf, eod_tagesstart)
+        return _liq_peak_eod(p, a, start_bal, verlauf, eod_tagesstart, heute)
     typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or p.get("master_account_id") or "")
     st = str(p.get("started_at") or "")
     werte = [start_bal] if start_bal is not None else []
@@ -15059,11 +15061,18 @@ def liq_peak(p, acc, start_bal, verlauf, eod_tagesstart=None, eod=False):
     return max(werte) if werte else None
 
 
-def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart):
-    """liq_peak im End-of-Day-Modus (s. dort)."""
+def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart, heute=None):
+    """liq_peak im End-of-Day-Modus (s. dort).
+    EOD1 (Finn 16.11.2026, Chris FTMO Futures 50k …9613: Trade 1 am 11.11. +2.305,84 → 51.451,68 mitten am Tag, Trade 2 −3.038,32 → 48.413,36 Tagesschluss;
+    der Funded-Planer meldete „geblowt? Konto-Boden 48.452 $ … ab Höchststand 51.451,68“): ohne Trade-Start (p ohne started_at — Planer-Nachtlauf, Pump, Konto-Ziele)
+    zählte bisher auch der LAUFENDE Handelstag mit. Jetzt gilt „heute“ = CME-Tag von p.started_at, sonst der CME-Tag von jetzt — der laufende Tag geht nur mit seinem
+    Tagesstart ein (tagesstart, sonst Start-Balance des ersten Trades heute, sonst start_bal = die Balance, solange heute noch kein Trade lief), nie mit Zwischenständen."""
     typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or p.get("master_account_id") or "")
     st = str(p.get("started_at") or "")
-    heute = _cme_handelstag(st) if st else None
+    if heute is None:
+        heute = _cme_handelstag(st) if st else _cme_handelstag(None)
+    heute_erst = None      # EOD1: Start-Balance des ersten Trades am laufenden Handelstag (= dessen Tagesstart)
+    heute_lief = False     # EOD1 (Prüfer SOLLTE): lief heute schon ein Trade (auch ohne bal_start)? Dann ist start_bal ein Zwischenstand, kein Tagesstart
     erst, letzt = {}, {}   # Tag → (Zeit, Wert): Start-Balance des ersten Trades bzw. End-Balance des letzten Trades je Handelstag
     for f in verlauf or ():
         if str(f.get("master_account_id") or "") != aid or str(f.get("id")) == str(p.get("id")):
@@ -15071,16 +15080,22 @@ def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart):
         if not f.get("konto_typ") or str(f.get("konto_typ")).lower() != typ:
             continue
         be, bs = _wd_num(f.get("bal_end")), _wd_num(f.get("bal_start"))
+        if f.get("started_at") and (not st or str(f["started_at"]) <= st) and heute is not None and str(_cme_handelstag(f["started_at"])) == str(heute):
+            heute_lief = True
         if bs is not None and f.get("started_at") and (not st or str(f["started_at"]) <= st):
             d = _cme_handelstag(f["started_at"])
             if d and (heute is None or str(d) < str(heute)) and (d not in erst or str(f["started_at"]) < erst[d][0]):
                 erst[d] = (str(f["started_at"]), bs)
+            elif d and heute is not None and str(d) == str(heute) and (heute_erst is None or str(f["started_at"]) < heute_erst[0]):
+                heute_erst = (str(f["started_at"]), bs)
         if be is not None and f.get("ended_at") and (not st or str(f["ended_at"]) <= st):
             d = _cme_handelstag(f["ended_at"])
             if d and (heute is None or str(d) < str(heute)) and (d not in letzt or str(f["ended_at"]) > letzt[d][0]):
                 letzt[d] = (str(f["ended_at"]), be)
     werte = [v for _t, v in list(erst.values()) + list(letzt.values())]
-    werte.append(tagesstart if tagesstart is not None else start_bal)
+    # Tagesstart von heute: übergeben, sonst Start-Balance des ersten Trades heute, sonst start_bal — aber nur, wenn heute noch nichts lief (dann ist die Balance
+    # der Tagesstart); lief heute schon ein Trade ohne belegte Start-Balance, zählen nur die Schlüsse der Vortage (start_bal wäre ein Zwischenstand)
+    werte.append(tagesstart if tagesstart is not None else (heute_erst[1] if heute_erst else (None if heute_lief else start_bal)))
     werte = [w for w in werte if w is not None and w > 0]
     return max(werte) if werte else None
 
@@ -26582,7 +26597,9 @@ def _ap_peaks(konten, streng=False):
     try:
         konten = [a for a in konten or () if a and a.get("id")]
         verlauf = _liq_verlauf_laden([a["id"] for a in konten], streng=streng)
-        return {str(a["id"]): liq_peak({}, a, None, verlauf) for a in konten}
+        # EOD1 (16.11.2026): nachziehende Böden der Futures-Challenges (Tradeify, Lucid, Topstep, FTMO/FNF Futures) trailen am Tagesschluss → Tagesend-Höchststand;
+        # Apex trailt intraday (Auftrag EOD1) und bleibt beim Höchststand über alle Trade-Enden; der Radar wählt weiter über liq_regeln.maxdd_art
+        return {str(a["id"]): liq_peak({}, a, None, verlauf, eod="apex" not in str(a.get("firm") or "").lower()) for a in konten}
     except Exception as e:
         print(f"[auto-plan] ⚠️ boden/peak: {type(e).__name__}: {e}", flush=True)
         return None if streng else {}
@@ -49078,7 +49095,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         start, ab = (zy["start"] if zy["start"] is not None else balance), zy["ab"]
         hedge_pls = [_wd_num(p.get("slave_pl")) for p in pl if p.get("status") == "completed" and (p.get("orbit_v3") or (_wd_num(p.get("hedge_eur")) or 0) > 0)
                      and (not ab or str(p.get("started_at") or "") > str(ab))]
-        peak = liq_peak({}, a, balance, verlauf)
+        # EOD1 (Finn 16.11.2026, Chris FTMO Futures …9613 „geblowt?“ nach Trade 1 +2.305 / Trade 2 −3.038 am selben Tag): fdp_liq rechnet immer EOD-trailing →
+        # Höchststand NUR aus Tagesschlüssen, nie der Zwischenstand nach einem Gewinn-Trade; Apex trailt intraday und bleibt wie bisher
+        peak = liq_peak({}, a, balance, verlauf, eod="apex" not in str(a.get("firm") or "").lower(), heute=cme_heute)   # heute = Plan-Tag (Prüfer MUSS: Nachtlauf plant schon den Folgetag)
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
         # EU1 (06.11.2026): € je Punkt Fusion dieser ID in konst mitgeben (fdp_konto_rechnen bleibt rein rechnend); ohne fusion_sppl (Ausschnitt-Selbsttests) → 0,85
@@ -49089,7 +49108,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             return {"aktion": "aus", "grund": "Topstep Express plant der Funded-Planer nur im Pump-Modell (TopstepX 0-basiert)"}, zy
         if (regel or {}).get("tp_modus") == "pump2":
             # FF2: Pump-Modell — Liq nach Tagesend-Logik (EOD-Trailing zieht erst am Tagesende nach), Würfel fest je Konto × Zyklus × CME-Tag
-            peak_e = liq_peak({}, a, balance, verlauf, eod=True)
+            peak_e = liq_peak({}, a, balance, verlauf, eod=True, heute=cme_heute)   # EOD1: Plan-Tag, s. konto_rechnen
             # LP1 (3): heutiger Verlust mindert den Daily-Loss-Rest (nur Firmen mit daily_usd, Lucid) — auch ein Hand-Trade ohne Plan (balance ist live)
             _tv, _tvq = fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, str(a["id"]), basis, payout_ab=ab) \
                 if _wd_num((jg or {}).get("daily_usd")) else (0.0, None)

@@ -9,13 +9,13 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel", "ap_kette_mll", "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de",
-              "liq_peak", "_ap_peaks", "ap_boden_sicher")
+              "liq_peak", "_liq_peak_eod", "_cme_handelstag", "_ap_peaks", "ap_boden_sicher")   # EOD1 16.11.2026: _ap_peaks nimmt den EOD-Weg
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN")
 
 
 def lade():
     src = open(APP, encoding="utf-8").read()
-    ns = {"re": re}
+    ns = {"re": re, "datetime": __import__("datetime").datetime, "timezone": __import__("datetime").timezone}   # EOD1: _cme_handelstag
     teile = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in KONSTANTEN]
     for name in FUNKTIONEN:
         i = src.index(f"\ndef {name}(") + 1
