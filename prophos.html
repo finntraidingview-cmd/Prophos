@@ -41400,6 +41400,10 @@
   // „Manuelle Arbeit" bewusst ohne Sammel-Knopf (Prüf-Befund): dort öffnet jeder Einzel-Klick das Popup („manuell") — Handarbeit wird nie gesammelt gebucht
   const WDL_SAMMEL_BLOW = new Set(['geblowt oder Konto weg', 'Blow-Beweis oder unklares Ende'])
   const WDL_SAMMEL_ZIEL = new Set(['Ziel erreicht', 'Funded-CFD-Ziel erreicht'])
+  // RB3b (Prüfer S2 16.11.2026): Speichern/Vormerken ohne Timeout — hing Railway, blieb _wdlSammel gesetzt und Einzel-Abhaken + Takte waren bis zum Neuladen gesperrt.
+  // Jede Zeile wartet höchstens so lange, dann „Zeitüberschreitung“ in die Stehen-Liste und weiter; das finally gibt Knopf und Sperre in jedem Fall frei
+  const WDL_SAMMEL_FRIST_MS = 20000
+  const WDL_SAMMEL_ZEIT_TXT = 'Zeitüberschreitung (20 s, Server antwortet nicht) — nach dem Neuladen prüfen, ob abgehakt'
   const WDL_SAMMEL_ST = { none: 'Nichts ändern', blown: 'geblowt', passed: 'bestanden', waiting: 'Waiting for Payout', winning_days: 'Winning Days' }
   const _wdlSammelListen = new Map()   // Titel → Zeilen der Gruppe beim letzten Render (die Zahl am Knopf)
   let _wdlSammelErg = null             // { titel, ok, vm, stehen: [[Name, Grund]], fehler: [[Name, Grund]] } — bleibt unter dem Knopf, bis × oder der nächste Lauf
@@ -41440,7 +41444,7 @@
           if(t.status !== 'review'){ erg.stehen.push([name(t), 'nicht mehr in Überprüfen']); continue }
           const grund = wdlEinKlickGrund(t)
           if(wdlVormerkbar(t, grund)){   // wie der Einzel-Klick: ohne Lesung vormerken, nie schätzen
-            await wdlVormerken(pid, t, grund, true)
+            if(await warte(wdlVormerken(pid, t, grund, true), WDL_SAMMEL_FRIST_MS) === '__zeit'){ erg.stehen.push([name(t), WDL_SAMMEL_ZEIT_TXT]); continue }   // RB3b
             if(t.vorgemerkt) erg.vm++; else erg.fehler.push([name(t), 'nicht vorgemerkt'])
             continue
           }
@@ -41467,7 +41471,10 @@
             : !passt ? `Popup schlägt „${WDL_SAMMEL_ST[st] || st}“ vor` : (o.eigen && st === 'passed') ? 'eigener Plan — Nachfolger anlegen' : ''
           if(unklar){ _mwdErlId = null; erg.stehen.push([name(t), unklar]); continue }
           _mwdErlEinKlick = true; _mwdErlStill = true   // nur_review (nichts doppelt), kein Strahl je Zeile
-          const r = await mklWdErledigtSpeichern()
+          // RB3b: hängt Railway, wartet die Zeile höchstens WDL_SAMMEL_FRIST_MS — die Werte hat Speichern vor dem ersten await gelesen, die nächste Zeile stört es nicht
+          const r = await warte(mklWdErledigtSpeichern(), WDL_SAMMEL_FRIST_MS)
+          // Zeile zurück nach „Überprüfen“ (wie der Fehlerweg in Speichern) — sonst verschwände sie mit der Gruppe samt Hinweis; der nächste Stand zeigt, ob sie doch durchging
+          if(r === '__zeit'){ try{ wdlLokalVergessen(pid) }catch(_){} erg.stehen.push([name(t), WDL_SAMMEL_ZEIT_TXT]); continue }
           if(r && r.ok) erg.ok++
           else erg.fehler.push([name(t), (r && r.fehler) || document.getElementById('mwdErledigtMsg')?.textContent || 'nicht gespeichert'])
         }catch(e){ _mwdErlId = null; erg.fehler.push([name(t), String((e && e.message) || e)]) }
@@ -59452,7 +59459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2233'
+  const OS_TAB_BUILD = '2026-09-22.2234'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
