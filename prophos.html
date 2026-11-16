@@ -53899,7 +53899,7 @@
       // Funded-Planer (o.fusion, 28.10.2026): Spalte „Fusion" = Lots + gedeckte Kosten statt Stufe; unter TP/SL, wo Fusion dabei steht —
       // der Fusion-SL liegt auf dem Master-TP, der Fusion-TP auf dem Master-SL (der Schließer macht Fusion mit dem Master zu)
       const fu = o.fusion, eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €', pkt = v => v != null ? Math.round(v).toLocaleString('de-DE') + ' Pkt' : ''
-      const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? (fu.pumpB ? ` Hedge-Basis ${eur(fu.gedeckt)} — was der Planer normalerweise bis zu dieser Balance kostet (Pump-Weg simuliert, echt offen ${eur(fu.echt)}) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : fu.imPlus ? ` Hedge-Basis ${eur(fu.gedeckt)} — Konto im Plus, fester Satz € je $ Abstand zur Liquidation (AH2) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.`) : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
+      const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? (fu.pumpB ? ` Hedge-Basis ${eur(fu.gedeckt)} — theoretische Kosten eines frischen Kontos (fester Satz € je $ × Abstand zur Liquidation, echt offen ${eur(fu.echt)}) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : fu.imPlus ? ` Hedge-Basis ${eur(fu.gedeckt)} — Konto im Plus, fester Satz € je $ Abstand zur Liquidation (AH2) — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.`) : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
       // AUSGÄNGE ALS PAARE (30.10.2026, Finn ~07:10: „was gehört zusammen?"): je Ausgang eine Zeile über die volle Breite —
       // Master TP ↔ Fusion SL, Master SL ↔ Fusion TP; Master immer $, Fusion immer €, dieselben Felder wie vorher (fu.minus / fu.plus)
       // KARTE EINZEILIG (Finn 30.10.2026 ~08:25): die Paare stehen jetzt IN den Spalten TP / SL (pzPaarZelle) statt als zweite Zeile darunter
@@ -59159,7 +59159,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2222'
+  const OS_TAB_BUILD = '2026-09-22.2223'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -93030,8 +93030,12 @@ ${stBlock}
         x.liq != null ? 'Liq ' + Math.round(x.liq).toLocaleString('de-DE') + ' $' : '',
         x.hedge_sl_eur != null ? `Hedge +${Math.round(x.hedge_sl_eur)} / −${Math.round(x.hedge_tp_eur)} €` : '',
         // AH2 (Finn 10.11.2026): Konto im Plus — Hedge-Basis aus dem festen Satz (app.py fdp_konto_rechnen hedge_quelle), offene Kosten daneben
-        // FH1 B (Finn 10.11.2026): Hedge-Basis = Pump-Kosten bis zur Balance (Planer-Weg simuliert), echte offene Kosten daneben
-        x.hedge_basis === 'pump_b' ? `Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € Pump-Kosten bis Balance · echt ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €`
+        // FH1 B (Finn 10.11.2026) / HB1 (16.11.2026): Hedge-Basis = theoretische Kosten eines FRISCHEN Kontos = fester Satz (hedge_eur bzw. kosten_eur ÷ dd)
+        // × Abstand Balance − Liq (app.py fdp_frisch_satz), echte offene Kosten daneben — keine Pfad-Simulation mehr
+        x.hedge_basis === 'pump_b' ? `Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € = theoretische Kosten (frisches Konto)`
+          + (Number(x.balance) > Number(x.liq) && Number(x.offen_eur) > 0
+            ? `: ${(Number(x.offen_eur) / (Number(x.balance) - Number(x.liq))).toLocaleString('de-DE', { maximumFractionDigits: 3 })} €/$ × ${Math.round(Number(x.balance) - Number(x.liq)).toLocaleString('de-DE')} $ Abstand` : '')
+          + ` · echt ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €`
         : x.hedge_quelle ? `im Plus (offen ${Math.round(Number(x.offen_kosten_eur) || 0).toLocaleString('de-DE')} €) · Hedge-Basis ${Math.round(Number(x.offen_eur) || 0).toLocaleString('de-DE')} € fester Satz`
           : x.offen_eur != null ? 'offen ' + Math.round(x.offen_eur).toLocaleString('de-DE') + ' €' : ''].filter(Boolean).join(' · ') : null
       // FUSION-GEGENHEDGE SICHTBAR (28.10.2026, Finn am Screenshot „Zu bestätigen": „wie viel gehedged wird, wo mein Fusion-TP und -SL sind,
