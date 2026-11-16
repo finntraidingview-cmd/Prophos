@@ -47783,6 +47783,49 @@
     const d = await r.json().catch(() => ({}))
     return (!r.ok || d.ok === false || !d.gewinntage || d.gewinntage.soll == null) ? null : d.gewinntage
   }
+  /* ST2 STRIKING-GEWINNTAGE IN DER PAYOUT-ZEILE (Master 16.11.2026, Finn „Ja, anzeigen“ — SK1-Befund: „Payout in 14 T“ kommt nur aus payout_ready_at,
+   * 0/7 stand bisher nur in Plan-Notiz/Trade-Verlauf): Konten mit Add-on Striking zeigen unter dem Namen zusätzlich „n/7 Gewinntage“, z. B.
+   * „💸 Payout in 14 T · ab 30.11. · 0/7 Gewinntage“. Zahl nur aus GET /konto-ziele (accGtHolen → out.gewinntage ist/soll inkl. Korrektur von Hand,
+   * app.py kz_rechnen mit fcp_striking_anwenden — dieselbe Zählung wie Planer und Radar), keine eigene Rechnung. Je Striking-Konto höchstens alle
+   * 5 min geladen, eines nach dem anderen; ändert sich ein Stand, einmal neu zeichnen. Nicht geladen / nicht lesbar → Zeile wie bisher. */
+  // versucht: Konto-ID → Zeitpunkt des letzten Abrufs (5-min-Sperre je Konto: ein neu auf Striking gestelltes Konto lädt sofort, Prüfer ST2)
+  const _stGt = { je: new Map(), versucht: new Map(), laeuft: false, uid: '' }
+  const accStGtKonto = a => !!a && a.type === 'funded_cfd' && a.striking === true
+  function stGtMerken(id, g){ if(id == null || !g || g.soll == null) return; _stGt.je.set(String(id), { ist: g.ist, soll: g.soll }) }
+  async function stGtSicherstellen(){
+    if(!currentUserId) return
+    // ID-Wechsel ohne Neuladen — VOR der Lauf-Sperre (Prüfer ST2): ein Lauf der vorigen ID bricht an seiner uid-Prüfung ab
+    if(_stGt.uid !== String(currentUserId)){ _stGt.je = new Map(); _stGt.versucht = new Map(); _stGt.laeuft = false; _stGt.uid = String(currentUserId) }
+    if(_stGt.laeuft) return
+    const jetzt = Date.now()
+    const ids = (Array.isArray(accounts) ? accounts : []).filter(accStGtKonto).map(a => String(a.id))
+      .filter(id => jetzt - (_stGt.versucht.get(id) || 0) >= 300000)
+    if(!ids.length) return
+    _stGt.laeuft = true
+    ids.forEach(id => _stGt.versucht.set(id, jetzt))   // Zeitstempel schon beim Versuch: ein Fehler löst keine Ladeschleife aus renderAccounts aus
+    const uid = _stGt.uid
+    let neu = false
+    try{
+      for(const id of ids){
+        try{
+          const g = await accGtHolen(id)
+          if(_stGt.uid !== uid) return   // inzwischen andere ID
+          const alt = _stGt.je.get(id)
+          if(g && g.soll != null){ if(!alt || alt.ist !== g.ist || alt.soll !== g.soll) neu = true; stGtMerken(id, g) }
+          else if(alt){ _stGt.je.delete(id); neu = true }   // keine Zählung mehr (Regel weg, On Demand dazu) → alten Stand nicht weiter zeigen
+        }catch(e){ console.warn('[striking-gewinntage]', (e && e.message) || e) }
+      }
+    }finally{ if(_stGt.uid === uid) _stGt.laeuft = false }
+    if(neu && typeof renderAccounts === 'function') renderAccounts()
+  }
+  // „ · n/7 Gewinntage“ für die Payout-Zeile — leer, solange nicht geladen oder kein Striking-Konto
+  function stGtText(a){
+    if(!accStGtKonto(a)) return ''
+    stGtSicherstellen()
+    const g = _stGt.je.get(String(a.id))
+    return g && g.ist != null && g.soll != null ? ` · ${g.ist}/${g.soll} Gewinntage` : ''
+  }
+  window._stGtStub = (id, g) => { _stGt.uid = String(currentUserId || ''); stGtMerken(id, g); _stGt.versucht.set(String(id), Date.now()) }   // Boot-Check ohne Login
   async function accGtFeldSetzen(acc){
     const feld = document.getElementById('ac-gt-feld'); if(!feld) return
     feld.hidden = true; _accGt.id = acc && acc.id != null ? String(acc.id) : null; _accGt.d = null
@@ -47796,6 +47839,7 @@
   }
   function accGtZeigen(g){
     _accGt.d = g
+    stGtMerken(_accGt.id, g)   // ST2: frischer Stand aus dem Modal gilt auch für die Payout-Zeile
     const feld = document.getElementById('ac-gt-feld'), inp = document.getElementById('ac-gt-ist'), soll = document.getElementById('ac-gt-soll'), hint = document.getElementById('ac-gt-hint')
     if(!feld || !inp) return
     const de = v => Math.round(Number(v) || 0).toLocaleString('de-DE')
@@ -48430,8 +48474,14 @@
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         // Funded CFD (16.10.2026): „Payout ab"-Chip aus demselben Feld statt des allgemeinen Termin-Chips — „in 3 T · ab 19.10." / „jetzt" /
         // „angefragt" / „Datum fehlt" (Klick → Feld im Account-Modal)
-        const payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
+        let payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
           : (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
+        // ST2 (Master 16.11.2026, Finn „Ja, anzeigen“): Striking-Konto → „ · n/7 Gewinntage“ hinten im Payout-Chip (Stand aus /konto-ziele, stGtText);
+        // ohne Payout-Chip eigener kleiner Chip. Alle anderen Konten unverändert.
+        const stGt = a.type === 'funded_cfd' ? (() => { try{ return stGtText(a) }catch(_){ return '' } })() : ''
+        if(stGt) payoutHtml = payoutHtml && payoutHtml.endsWith('</span>')
+          ? payoutHtml.slice(0, -'</span>'.length) + escapeHtml(stGt) + '</span>'
+          : payoutHtml + `<span class="acc-po acc-po-sub">${escapeHtml(stGt.replace(/^ · /, ''))}</span>`
         if(payoutHtml) metaParts.push(payoutHtml)
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
@@ -59202,7 +59252,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2229'
+  const OS_TAB_BUILD = '2026-09-22.2230'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
