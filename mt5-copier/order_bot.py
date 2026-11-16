@@ -14828,22 +14828,7 @@ def run(cfg_path, cmd):
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
                        f"Knoepfe: {', '.join(inventar) or 'keine'} [" + _spur(trail) + "]"}
-    # LETZTER BLICK VOR DEM UNUMKEHRBAREN KNOPF (Gegenprüfung ES3b 05.11.2026): zwischen dem Scharf-Beweis oben und hier liegen Terminal-Suche,
-    # F9 und Tippen (bis ~30 s) — ein „laufend“-Fenster mit Master-Position kann in der Zeit beendet werden. Ein Lesen ohne Warten; nicht scharf →
-    # Dialog per ESC zu, Abbruch nicht_scharf (der Knopf ist nicht gedrückt, nichts gesendet).
-    if cmd.get("scharf_pflicht") is True and not cmd.get("ohne_hedge"):
-        _sch_ok, _sch_grund = _echo_scharf_abwarten(cfg_path, 0.0, [], immer_scharf=bool(cfg.get("immer_scharf", False)))
-        if not _sch_ok:
-            try:
-                _el_tasten(dlg, "{ESC}", set_foreground=False)
-            except Exception:
-                pass
-            _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC mit Beweis — ein stehen gebliebener Order-Dialog mit aktivem Buy/Sell blockt später den Close
-            trail.append(f"vor dem {muster}-Knopf nicht mehr scharf: {_sch_grund}")
-            return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
-                    "msg": (f"Copier vor dem {muster}-Knopf nicht mehr scharf ({_sch_grund}) — Dialog geschlossen, nichts gesendet. [" + _spur(trail) + "]")}
-        trail.append(f"vor dem {muster}-Knopf noch scharf")
-    # IS1 (16.11.2026): LETZTER KURS-BLICK VOR DEM KNOPF — zwischen dem Rechnen oben und hier liegen SL/TP-Tippen und Pausen (2–4 s). Liegen die
+    # IS1 (16.11.2026): KURS-BLICK VOR DEM KNOPF (VOR dem Scharf-Blick, Prüfer S2: der Scharf-Blick bleibt das Letzte vor dem Klick) — zwischen dem Rechnen oben und hier liegen SL/TP-Tippen und Pausen (2–4 s). Liegen die
     # getippten F9-Stops beim jetzigen Kurs auf der falschen Seite bzw. im Mindestabstand, lehnte der Broker die ganze Order ab („Invalid stops“,
     # 12 s ohne Bestätigung, Plan in review). Dann einmal neu ab dem jetzigen Kurs tippen (derselbe $-Abstand wie geplant, nie weiter weg als der
     # Plan); passt es danach immer noch nicht oder klappt das Tippen nicht: Dialog zu, nichts gesendet — statt eine sichere Ablehnung zu senden.
@@ -14880,6 +14865,21 @@ def run(cfg_path, cmd):
                         "msg": (f"Kurs vor dem {muster}-Knopf über die F9-Stops gelaufen ({_su}) — Dialog geschlossen, nichts gesendet. "
                                 "→ neu starten [" + _spur(trail) + "]")}
             trail.append(f"F9-SL/TP neu ab Kurs {(_ka if kauf else _kb):.10g}: SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)}")
+    # LETZTER BLICK VOR DEM UNUMKEHRBAREN KNOPF (Gegenprüfung ES3b 05.11.2026): zwischen dem Scharf-Beweis oben und hier liegen Terminal-Suche,
+    # F9 und Tippen (bis ~30 s) — ein „laufend“-Fenster mit Master-Position kann in der Zeit beendet werden. Ein Lesen ohne Warten; nicht scharf →
+    # Dialog per ESC zu, Abbruch nicht_scharf (der Knopf ist nicht gedrückt, nichts gesendet).
+    if cmd.get("scharf_pflicht") is True and not cmd.get("ohne_hedge"):
+        _sch_ok, _sch_grund = _echo_scharf_abwarten(cfg_path, 0.0, [], immer_scharf=bool(cfg.get("immer_scharf", False)))
+        if not _sch_ok:
+            try:
+                _el_tasten(dlg, "{ESC}", set_foreground=False)
+            except Exception:
+                pass
+            _f9_dialog_zu(dlg, trail)   # NZ1 (10.11.2026): ESC mit Beweis — ein stehen gebliebener Order-Dialog mit aktivem Buy/Sell blockt später den Close
+            trail.append(f"vor dem {muster}-Knopf nicht mehr scharf: {_sch_grund}")
+            return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
+                    "msg": (f"Copier vor dem {muster}-Knopf nicht mehr scharf ({_sch_grund}) — Dialog geschlossen, nichts gesendet. [" + _spur(trail) + "]")}
+        trail.append(f"vor dem {muster}-Knopf noch scharf")
     try:
         _maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)   # Anfahrt auf einen gewürfelten Punkt (07.10.2026)
     except Exception:

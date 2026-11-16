@@ -12440,8 +12440,11 @@ def test_is1_stops_frisch():
     i_sch = q.find('trail.append(f"vor dem {muster}-Knopf noch scharf")')
     i_lb = q.find("_su = f9_stops_urteil(cmd[\"richtung\"], _ka, _kb, sl_f9, tp_f9, _st_lv, _st_pt)")
     i_kn = q.find("_maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)")
-    chk(0 < i_fr < i_ber < i_sch < i_lb < i_kn, f"Reihenfolge frisch → rechnen → scharf → letzter Blick → Knopf ({i_fr},{i_ber},{i_sch},{i_lb},{i_kn})")
-    blk = q[i_lb:i_kn]
+    i_kf = q.find("    muster = \"buy\" if kauf else \"sell\"")
+    i_sb = q.find("if cmd.get(\"scharf_pflicht\") is True and not cmd.get(\"ohne_hedge\"):\n        _sch_ok, _sch_grund = _echo_scharf_abwarten(cfg_path, 0.0")
+    chk(0 < i_fr < i_ber < i_kf < i_lb < i_sb < i_sch < i_kn, f"Reihenfolge frisch → rechnen → Knopf-Suche → Kurs-Blick → Scharf-Blick (das Letzte, Prüfer S2) → Knopf ({i_fr},{i_ber},{i_kf},{i_lb},{i_sb},{i_sch},{i_kn})")
+    chk("_tick_lesen(" not in q[i_sb:i_kn] and "_feld_tippen(" not in q[i_sb:i_kn], "zwischen Scharf-Blick und Knopf kein Lesen/Tippen")
+    blk = q[i_lb:i_sb]
     chk('"retry_ok": True' in blk and '"code": "f9_stops_bewegt"' in blk and "nichts gesendet" in blk and "_f9_dialog_zu(dlg, trail)" in blk
         and blk.count("_tick_lesen(") == 1 and "sl_f9, tp_f9 = _s2, _t2" in blk and "sltp_mindestabstand(" in blk
         and "_neu_ok = _su is None and bool(_ka and _kb)" in blk,
