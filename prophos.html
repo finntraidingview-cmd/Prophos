@@ -4672,8 +4672,11 @@
   #ap-ids-root.ap-guestly .fp1-z{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--g-rand)}
   #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma{flex:1 1 auto;min-width:0;border-bottom:0}
   #ap-ids-root.ap-guestly .fp1-z > .fp1-sw{margin-right:4px}
-  /* die Kernwerte rechts in der Zeile waren in der schmalen Spalte schon abgeschnitten („TP …“) — mit Schalter blieb ein Buchstabe; sie stehen beim Klick in den Details */
-  #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma .fz{display:none}
+  /* Kurzinfo rechts bleibt (Finn 16.11.2026), gekürzt auf eine feste Breite, damit Name, Pfeil und Schalter Platz haben — ganz steht sie im Tooltip und in den Details */
+  #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma{grid-template-columns:10px minmax(78px,1fr) minmax(0,max-content) 12px;gap:8px}   /* Name hat Vorrang, die Kurzinfo nimmt den Rest */
+  #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma .fz{min-width:0;width:100%;max-width:70px;justify-self:end;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma .fl{min-width:0;overflow:hidden}
+  #ap-ids-root.ap-guestly :is(#e2-einst,#fcr-einst) .fp1-z > .wd-firma :is(.fn,.fk){display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #fcr-einst.fcr-w .wd-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 12px;align-items:center;gap:10px;padding:9px 4px;width:100%;text-align:left;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--g-rand);cursor:pointer;transition:background .12s}
   #fcr-einst.fcr-w .wd-firma:hover{background:color-mix(in srgb,var(--g-karte) 55%,transparent)}
   #fcr-einst.fcr-w .wd-firma .punkt{width:10px;height:10px;border-radius:50%}
@@ -59156,7 +59159,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2220'
+  const OS_TAB_BUILD = '2026-09-22.2221'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -91330,7 +91333,8 @@
   // WD-Klassen (wd-set-grid/-card, wd-abl-*, wd-firma) unter der eigenen Wurzel #fcr-einst, eigene Teile fcr-w-* — das WD-CSS (#adm-pane-wd) bleibt unberührt. „Jetzt planen" steht außerhalb (fcrLeisteHtml), Titel klappt die Gruppe zu (gemerkt).
   const fcrWSchalter = (k, an, titel, unter, info) => `<label class="wd-abl-schalter${fcrSwDarf(k) ? '' : ' lesen'}"><span><b>${escapeHtml(titel)}${info || ''}</b>${unter ? `<small>${escapeHtml(unter)}</small>` : ''}</span>${fcrSwDarf(k)
     ? `<input type="checkbox" data-fcr-sw="${escapeHtml(k)}"${an ? ' checked' : ''} title="${escapeHtml(titel)} an/aus — wirkt sofort">`
-    : `<span class="fcr-e-stand${an ? ' an' : ''}"><i></i>${an ? 'an' : 'aus'}</span>`}</label>`
+    // FP1-Nachtrag (16.11.2026): im Unternehmen sind gemeinsame Schalter nur Stand — sagen, warum (der Server nimmt dort nur Firmen-Werte an)
+    : `<span class="fcr-e-stand${an ? ' an' : ''}"${fcrAdmin() && fcrUnt() ? ' title="gilt für alle Unternehmen — ändern im Standard (Unternehmen-Wahl oben)"' : ''}><i></i>${an ? 'an' : 'aus'}${fcrAdmin() && fcrUnt() ? ' · für alle' : ''}</span>`}</label>`
   // E1e (Finn 05.11.2026 ~08:30): Trades je Konto und Tag aus der Regel (zeiten.trades_je_tag, Standard 1)
   // O1b (Master 05.11.2026: Untertitel sagte nach dem Speichern noch „1 Trade"): zuerst die Regel (fcrLokal führt sie beim Speichern nach), sonst der Planer-Stand der Seite
   function fcrTradesJeTag(){ try{ const zr = ((_fcfdR || {}).d || {}).zeiten
@@ -91374,7 +91378,7 @@
       const sw = `<input type="checkbox" class="e2-sw fp1-sw" data-fcr-sw="${escapeHtml(kSw)}" aria-label="${escapeHtml(f.firma)} im Funded-CFD-Planer an/aus" title="${f.an === false ? 'aus — Klick schaltet ein (speichert sofort)' : 'im Planer — Klick schaltet aus (speichert sofort)'}"${f.an === false ? '' : ' checked'}${fcrSwDarf(kSw) ? '' : ' disabled'}>`
       return `<div class="fp1-z"><button type="button" class="wd-firma${an ? ' gewaehlt' : ''}${f.an === false ? ' aus' : ''}" data-fcr-firma="${escapeHtml(f.firma)}" aria-pressed="${an ? 'true' : 'false'}">
           <span class="punkt" style="background:${ton(f)}"></span><span class="fl"><span class="fn">${escapeHtml(f.firma)}</span><span class="fk">${escapeHtml(unter)}</span></span>
-          <span class="fz">${escapeHtml(mono)}</span><span class="pfeil">›</span></button>${sw}</div>`
+          <span class="fz" title="${escapeHtml(mono)}">${escapeHtml(mono)}</span><span class="pfeil">›</span></button>${sw}</div>`
     }
     const nAn = firmen.filter(f => f.an !== false).length
     const liste = `<div class="wd-set-card">
@@ -92333,7 +92337,9 @@ ${stBlock}
     /* NACHTRAG 10 (Finn 05.11.2026 ~07:05: „Erste Spalte: Firma. Die Ablauf-Spalte in die zweite und dritte mit einbauen … zwei Spalten mit den ganzen Inputs —
      * eine mit Zielen, eine mit Planer/Hedge —, jede mit eigenem Fokus“): links Firmen | Mitte „Ziel & Trade“ | rechts „Planer & Hedge“. Die globalen Ablauf-Werte
      * stehen kompakt oben rechts als eigener Block (eigenes Speichern „ablauf“, merke() findet den Block über .e2-block); Pfade und e2Body bleiben gleich. */
-    const ablauf = `<div class="e2-block e2-global"><div class="wd-abl-abschnitt e2-abs">Planer · alle Firmen${e2Save('ablauf', darfG, '')}</div>
+    // FP1-Nachtrag (16.11.2026): in der Unternehmen-Ansicht sind die gemeinsamen Schalter gesperrt (der Server nimmt dort nur Firmen-Werte an) — sichtbar sagen, warum
+    const allePille = darfR && !darfG && R.unternehmen ? '<div class="wd-fuss" title="Planer, Selbst bestätigen, Startfenster und Tagesdeckel gelten für alle Unternehmen — ändern im Standard (Unternehmen-Wahl oben)">🔒 gilt für alle Unternehmen — im Standard ändern</div>' : ''
+    const ablauf = `<div class="e2-block e2-global"><div class="wd-abl-abschnitt e2-abs">Planer · alle Firmen${e2Save('ablauf', darfG, '')}</div>${allePille}
       ${e2Sch('s.aktiv', R.aktiv, darfG, 'Planer', 'an = legt Vorschläge/Pläne an · aus = nur Vorschau')}
       ${e2Sch('s.auto_bestaetigen', R.auto_bestaetigen, darfG, 'Selbst bestätigen', 'aus = jeder Funded-Trade von Hand unter „Zu bestätigen“')}
       ${e2Sch('z.fenster.an', !!fe, darfG, 'Eigenes Startfenster', 'aus = Fenster des Challenge-Planers' + (fe ? '' : ' (' + String(fen.von || '–') + '–' + String(fen.bis || '–') + ')'))}
@@ -92426,7 +92432,7 @@ ${stBlock}
         const sw = `<input type="checkbox" class="e2-sw fp1-sw" data-e2-sofort="${i}" aria-label="${escapeHtml(x.name)} im Funded-Planer an/aus" title="${escapeHtml(gr.length ? (e2Wert(`f.${i}.an`, !!x.an) ? 'im Planer — Klick schaltet aus (speichert sofort)' : 'aus — Klick schaltet ein (speichert sofort)') : 'erst Werte je Größe hinterlegen (per SQL), dann einschaltbar')}"${e2Wert(`f.${i}.an`, !!x.an) ? ' checked' : ''}${darfR && gr.length && !_e2.laeuft ? '' : ' disabled'}>`
         return `<div class="fp1-z"><div class="wd-firma${on ? ' offen' : ''}" data-e2-firma="${i}" role="button" tabindex="0" aria-expanded="${on}"><span class="punkt" style="background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(x.name) : 'var(--g-a2)'}"></span>
           <span class="fl"><span class="fn">${escapeHtml(x.name)}${e2Offen(`f.${i}.`) ? ' ·' : ''}</span><span class="fk">${x.an ? 'plant' : 'aus'}${gr.length ? ' · ' + gr.map(v => fcfdGroesse(v)).join(' · ') : ''}</span></span>
-          <span class="fz">${escapeHtml(kernwerte(x))}</span><span class="pfeil">›</span></div>${sw}</div>` }).join('')}</div></div>`
+          <span class="fz" title="${escapeHtml(kernwerte(x))}">${escapeHtml(kernwerte(x))}</span><span class="pfeil">›</span></div>${sw}</div>` }).join('')}</div></div>`
     /* ── 3) DETAILS DER GEWÄHLTEN FIRMA (Nachtrag 8 Finn 05.11.2026 ~06:30: „Das Konten hier weg machen. Je nachdem, auf welche Propfirma ich bei Firmen drücke, kommen rechts
      * die Details dazu“): Größen-Pillen, Ziel/Consistency, Trade, Kontrakte, dazu bei Funded Futures die Winning-Day-Kachel. Keine Konten-Spalte mehr. */
     let mitteK = '<div class="wd-set-card"><h4><span>Ziel &amp; Trade<span class="h4sub">keine Firma in den Regeln</span></span></h4></div>'
@@ -92627,7 +92633,9 @@ ${stBlock}
     }catch(e){
       // 409 = jemand hat inzwischen gespeichert: Entwurf bleibt, Basis auf den neuen Stand — erst nach dem Neuladen (alle 60 s) und Prüfen erneut speichern
       if(e && e.status === 409){ delete _e2.basis[karte]; try{ apIdsLaden() }catch(_){} _e2.meldung[karte] = { art: 'fehler', text: 'Inzwischen von jemand anderem geändert — Werte prüfen, dann erneut speichern' } }
-      else _e2.meldung[karte] = { art: 'fehler', text: (e && e.message) || String(e) } }
+      else _e2.meldung[karte] = { art: 'fehler', text: (e && e.message) || String(e) }
+      // FP1-Nachtrag (16.11.2026): ein abgelehnter Speicherversuch ist immer sichtbar — nicht nur als kleine Zeile im Fuß der Karte
+      if(typeof atToast === 'function') atToast('Funded-Planer: nicht gespeichert — ' + _e2.meldung[karte].text, 'end') }
     finally{ _e2.laeuft = ''; apIdsRender() }
   }
   function e2Verdrahten(root){
@@ -92717,6 +92725,15 @@ ${stBlock}
           if(s2){ s2.className = sp ? 'fehler' : ''; s2.textContent = sp || (n ? `${n} Änderung${n === 1 ? '' : 'en'} noch nicht gespeichert` : '') } })
         if(kb) delete _e2.meldung[kb.dataset.e2Save] }
       el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', merke)
+      // FP1-Nachtrag (Master 16.11.2026: Finn stellte „Selbst bestätigen“ aus, in der DB kam nichts an — der Schalter war nur ein Entwurf und wartete auf „Speichern“,
+      // die Schalter im CFD-Planer wirken dagegen sofort): „Planer“ und „Selbst bestätigen“ speichern jetzt sofort (derselbe Weg e2Speichern('ablauf')), solange in
+      // „Planer · alle Firmen“ nichts anderes offen ist — sonst wie bisher über „Speichern“. Rückfrage verneint oder abgelehnt → Schalter zurück, Meldung sichtbar.
+      if(el.type === 'checkbox' && /^s\.(aktiv|auto_bestaetigen)$/.test(el.dataset.e2Pfad)) el.addEventListener('change', async () => {
+        const p = el.dataset.e2Pfad
+        if(!e2Hat(p) || _e2.laeuft || Object.keys(_e2.entwurf).some(k => /^[sz]\./.test(k) && k !== p)) return
+        await e2Speichern('ablauf')
+        if(e2Hat(p)){ delete _e2.entwurf[p]; apIdsRender() }
+      })
       if(el.type !== 'checkbox') el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); const b = el.closest('.e2-block, .wd-set-card, .e2-detail, .e2-spalte, .e2-karte2')?.querySelector('[data-e2-save]'); if(b) b.click() } })
     })
     box.querySelectorAll('[data-e2-save]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); e2Speichern(b.dataset.e2Save) }))
