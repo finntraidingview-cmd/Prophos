@@ -43916,6 +43916,10 @@
    * → {pr, ids, alt} | null (null = voll laden: zu viele Änderungen oder kein Vergleichsstand). Ein Plan, der lokal fehlt (neu, oder vorher im
    * Lösch-Fenster ausgeblendet), wird mitgeholt. */
   planPoll.DELTA_MAX = 60
+  /* SB3 (16.11.2026, Supabase-Rechnung 232 $, Bericht SB1 Quelle 4): voller select=*-Abruf als Sicherheitsnetz 5 min → 30 min.
+   * Neu/geändert/gelöscht kommt weiter über die Delta-Probe (id+updated_at, BEFORE-UPDATE-Trigger trade_plans_set_updated_at stempelt jedes
+   * Update mit now()). Das Netz fängt nur noch einen lokal abweichenden Stand ohne DB-Änderung; kein Order-Weg hängt daran. */
+  planPoll.VOLL_MS = 30 * 60_000
   function planPollDelta(pr){
     const vorher = new Set(String(planPoll.sig || '').split('|').filter(Boolean))
     const alt = new Map((tradePlans || []).map(p => [String(p.id), p]))
@@ -43947,9 +43951,9 @@
     const uid = currentUserId
     planPoll.inFlight = true
     try{
-      // alle 5 min trotzdem voll (Sicherheitsnetz: ein lokal abweichender Stand ohne DB-Änderung kommt so wie früher zurück)
+      // alle 30 min (SB3, vorher 5 min) trotzdem voll (Sicherheitsnetz: ein lokal abweichender Stand ohne DB-Änderung kommt so wie früher zurück)
       let delta = null
-      if(planPoll.sig != null && planPoll.sigUid === uid && jetzt - (planPoll.vollAt || 0) < 5 * 60_000){
+      if(planPoll.sig != null && planPoll.sigUid === uid && jetzt - (planPoll.vollAt || 0) < planPoll.VOLL_MS){
         const { data: pr, error: pe } = await supabase
           .from('trade_plans').select('id,updated_at')
           .eq('user_id', uid)
@@ -43965,7 +43969,7 @@
         // PC-Tab 254 volle Abrufe/h (771 Pläne, ~5–10 KB je Zeile mit mt5_baseline ≈ 1–2 GB JSON/h), Ina 240/h; fast jede Probe sah eine
         // Änderung (Baseline-Schreiber stempeln updated_at im Sekundentakt). Jetzt kommen nur die Zeilen mit neuem updated_at bzw. die neuen;
         // die übrigen bleiben die bisherigen Objekte (wie vorher, wenn „changed“ unten falsch blieb). Reihenfolge = die der Probe
-        // (created_at desc). Gelöschte fallen weg, weil sie in der Probe fehlen. Voller Abruf weiter alle 5 min (Sicherheitsnetz oben).
+        // (created_at desc). Gelöschte fallen weg, weil sie in der Probe fehlen. Voller Abruf weiter alle 30 min (SB3, Sicherheitsnetz oben).
         const { data: dz, error: de } = await supabase.from('trade_plans').select('*').eq('user_id', uid).in('id', delta.ids)
         if(de || !dz){ planPollFehler(true); return }
         planPollFehler(false)
@@ -59179,7 +59183,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2227'
+  const OS_TAB_BUILD = '2026-09-22.2228'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
