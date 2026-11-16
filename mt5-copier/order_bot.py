@@ -16841,6 +16841,98 @@ def _tsx_symbol_dialog_weg(s, st, trail):
     return st, zu
 
 
+# TIME SYNC WARNING (TS1, Finn 16.11.2026 über den Master): TopstepX legt ein Modal „Time Sync Warning — Your computer clock is not synchronized
+# with the correct time … Please update your system clock to match the current time." mit genau einem Knopf „PROCEED" über die Seite; es blockiert
+# jede Bedienung (Konto-Auslöser, Ticket, Brackets). Puls klickt NUR diesen bekannten Dialog weg: genau EIN offener Dialog, Überschrift (h1–h4,
+# ohne Überschrift der Anfang des Texts) enthält „Time Sync Warning", genau EIN Knopf „PROCEED" (Text, sonst aria; Groß-/Kleinschreibung egal) —
+# Druck mit Ziel-Beweis (am Punkt liegt genau dieser Knopf, kein Order-Wort), kurz warten, neu lesen; steht er noch, EINE Wiederholung, danach
+# geht der Lauf weiter wie bisher (der offene Dialog führt dort zum bekannten Fehler). Nie ein anderer Dialog, nie ein allgemeines OK/Proceed.
+# Die Uhr selbst fasst Puls nie an (Windows-Einstellungen tabu) — in die Spur/puls_diagnose kommt „Time Sync Warning weggeklickt" mit Zeit und PC,
+# die Antwort trägt pc_uhr_unsynchron {at, pc} (Haken für die ⚪-Meldung „PC-Uhr nicht synchron — Windows-Zeit synchronisieren").
+TSX_RX_ZEITSYNC = re.compile(r"time\s*sync\s*warning", re.I)
+TSX_RX_ZEITSYNC_KNOPF = re.compile(r"^\s*proceed\s*$", re.I)
+_TSX_ZEITSYNC = {}        # je Lauf: {at, pc} nach einem erfolgreichen Wegklicken → die Antwort bekommt pc_uhr_unsynchron (_EineAntwort.ausgeben)
+
+
+def tsx_zeitsync_dialog(popups):
+    """REIN RECHNEND (testbar): stand.popups → der EINE offene Dialog „Time Sync Warning" | None. Überschrift (titel) muss „Time Sync Warning"
+    enthalten; nur ohne Überschrift muss der Text damit BEGINNEN. Mehrere Dialoge oder ein anderer → None."""
+    ps = [p for p in (popups or []) if isinstance(p, dict)]
+    if len(ps) != 1:
+        return None
+    titel = str(ps[0].get("titel") or "").strip()
+    treffer = TSX_RX_ZEITSYNC.search(titel) if titel else TSX_RX_ZEITSYNC.match(str(ps[0].get("text") or "").strip())
+    return ps[0] if treffer else None
+
+
+def tsx_zeitsync_knopf(popup):
+    """REIN RECHNEND (testbar): der EINE Knopf „PROCEED" des Time-Sync-Dialogs (Text, sonst aria; Rechteck ≥ 2 px, kein Order-Wort) | None.
+    Zwei PROCEED-Knöpfe oder keiner → None (nichts drücken)."""
+    p = popup if isinstance(popup, dict) else {}
+    kand = []
+    for b in (p.get("knoepfe") or []):
+        if not isinstance(b, dict):
+            continue
+        text, aria = str(b.get("text") or "").strip(), str(b.get("aria") or "").strip()
+        r = b.get("rect")
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            continue
+        if TSX_RX_ZEITSYNC_KNOPF.match(text or aria) and not re.search(TSX_DIALOG_TABU, text + " " + aria, re.I):
+            kand.append(dict(b, text=(text or aria), aus_aria=not text))
+    return kand[0] if len(kand) == 1 else None
+
+
+def _pc_id_lesen():
+    """pc_id aus pc_id.json neben dem Bot (wie _puls_diagnose_senden) | ''. Wirft nie."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pc_id.json"), "r", encoding="utf-8") as f:
+            pc = (json.load(f) or {}).get("pc_id")
+        return pc if isinstance(pc, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", pc) else ""
+    except Exception:
+        return ""
+
+
+def _tsx_zeitsync_weg(s, st, trail):
+    """Den bekannten Dialog „Time Sync Warning" mit „PROCEED" schließen: Druck mit Ziel-Beweis, neu lesen, höchstens EINE Wiederholung.
+    -> (stand, weg): weg None = kein solcher Dialog (nichts getan), True = geschlossen, False = steht noch / kein eindeutiger Knopf.
+    Wirft nie; fasst keinen anderen Dialog an."""
+    if not tsx_zeitsync_dialog((st or {}).get("popups") if isinstance(st, dict) else None):
+        return st, None
+    for versuch in (1, 2):
+        dlg = tsx_zeitsync_dialog((st or {}).get("popups") if isinstance(st, dict) else None)
+        if not dlg:
+            break
+        kn = tsx_zeitsync_knopf(dlg)
+        if not kn:
+            trail.append("Time Sync Warning: kein eindeutiger PROCEED-Knopf — nichts gedrückt")
+            return st, False
+        trail.append(f"Time Sync Warning (PC-Uhr nicht synchron) → PROCEED (Versuch {versuch} von 2)")
+        r = list(kn["rect"])[:4]
+        pruef = dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
+                      "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
+        try:
+            _tsx_pause()
+            if not s.klick(r, "Time Sync Warning: PROCEED", pruef=pruef):
+                trail.append(f"Time Sync Warning: Druck {versuch} nicht ausgeführt (Ziel-Beweis)")
+            _warte(0.8, 0.5)
+            st = s.stand()
+        except Exception as e_:
+            trail.append(f"Time Sync Warning: {type(e_).__name__}: {str(e_)[:60]}")
+            return st, False
+    if tsx_zeitsync_dialog((st or {}).get("popups") if isinstance(st, dict) else None):
+        trail.append("Time Sync Warning steht nach 2 Versuchen noch — nichts weiter")
+        return st, False
+    jetzt = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    pc = _pc_id_lesen()
+    _TSX_ZEITSYNC.update(at=jetzt, pc=pc or None)
+    trail.append(f"Time Sync Warning weggeklickt ({jetzt}, {pc or 'PC unbekannt'}) — PC-Uhr nicht synchron, Windows-Zeit synchronisieren")
+    try:
+        _puls_diagnose_senden(list(trail), "zeitsync")    # sofort in puls_diagnose (2 s, Fehler still) — welcher PC die falsche Uhr hat
+    except Exception:
+        pass
+    return st, True
+
+
 def _tsx_geblowt_merken(res, ext, st=None):
     """res.konto_geblowt = tsx_geblowt_urteil(…) setzen, falls bewiesen (aktives Konto aus dem Stand). Nur Felder, kein Klick."""
     ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
@@ -21258,6 +21350,8 @@ class _EineAntwort:
 
     def ausgeben(self, res):
         try:
+            if _TSX_ZEITSYNC and isinstance(res, dict) and "pc_uhr_unsynchron" not in res:
+                res["pc_uhr_unsynchron"] = dict(_TSX_ZEITSYNC)   # TS1: Time Sync Warning weggeklickt — Haken für die ⚪-Meldung „PC-Uhr nicht synchron"
             print(json.dumps(res, ensure_ascii=False))
             sys.stdout.flush()
         finally:
@@ -21325,7 +21419,12 @@ def _tsx_konto_sichern(s, ext, st, trail):
         if bd_res.get("blow_dialog"):
             ex["blow_dialog"] = bd_res["blow_dialog"]
         return False, code, msg, st_, ex
+    zs_versucht = False
     for _runde in range(6):
+        # TS1 (16.11.2026): „Time Sync Warning" liegt über allem — als bekannter Dialog einmal je Lauf zuerst weg (PROCEED), dann wie bisher
+        if not zs_versucht and tsx_zeitsync_dialog(st.get("popups") if isinstance(st, dict) else None):
+            zs_versucht = True
+            st, _zs = _tsx_zeitsync_weg(s, st, trail)
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("kontonr") or ko.get("aktiv") or "")
         if ko.get("liste_offen"):
@@ -22421,7 +22520,14 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                 else:
                     trail.append(f"Brackets: Runde {runde + 1} von {TSX_K4_BRACKET_RUNDEN} für {', '.join(n_ for _f, _u, n_ in offen_f)}")
             if isinstance(st, dict) and st.get("popups"):
-                res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")   # → Fehlerfoto auch bei ok true (Hülle)
+                if not tsx_zeitsync_dialog(st.get("popups")):
+                    res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")   # → Fehlerfoto auch bei ok true (Hülle)
+                try:
+                    st, _zs = _tsx_zeitsync_weg(s, st, trail)   # TS1: bekannter Blocker „Time Sync Warning" → PROCEED (nur dieser Dialog)
+                    if _zs is False:
+                        res.setdefault("bracket_dialog", "Time Sync Warning")
+                except Exception as e_:
+                    trail.append(f"Brackets: Time Sync Warning {type(e_).__name__}: {str(e_)[:60]}")
                 try:
                     st, _sd = _tsx_symbol_dialog_weg(s, st, trail)   # selbst ausgelöst (29.10.2026, e9cf8722) — nur dieser Dialog
                 except Exception as e_:
@@ -22611,6 +22717,8 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
     res["tv_symbol"] = ziel
     _tsx_pause()
     st = s.stand()                                    # EIN frischer Blick — daraus wird geurteilt
+    if tsx_zeitsync_dialog(st.get("popups") if isinstance(st, dict) else None):
+        st, _zs = _tsx_zeitsync_weg(s, st, trail)     # TS1: vor dem Order-Klick — danach ist st wieder ein frischer Blick (bzw. Dialog steht → Vorprüfung „Dialog offen")
     ok, fehler, kn, markt_zu = tsx_k3_vor_klick(st, befehl, ziel, befehl["ext"])
     ktext = str((kn or {}).get("text") or "")
     nur_markt = markt_zu and len(fehler) == 1
@@ -22911,6 +23019,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                     return raus("login", lg2, "login")
                 res["schritt"] = "lesen"
                 st, bereit = _tsx_bereit_warten(s, trail)
+        if isinstance(st, dict) and tsx_zeitsync_dialog(st.get("popups")):
+            st, _zs = _tsx_zeitsync_weg(s, st, trail)   # TS1 (16.11.2026): beim Start — bekannter Blocker „Time Sync Warning" → PROCEED, dann wie bisher
         ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
         # TSX-LADEN (05.10.2026): steht nach der Bereit-Probe nur noch der Lade-Schirm im Weg, trotzdem in den Konto-Schritt — der wartet
         # dort noch einmal kurz und meldet sonst ehrlich „lädt noch" (ohne das läse K1 unter dem Lade-Schirm das falsche Konto an)
