@@ -286,7 +286,8 @@ check(0 < q.find("_close_reste_raeumen(w, trail)") < q.find("_handel_tab_aktivie
 qr = inspect.getsource(ob.run)
 n_esc = qr.count('_el_tasten(dlg, "{ESC}", set_foreground=False)')
 n_zu = qr.count("_f9_dialog_zu(dlg, trail)")
-check(n_zu == 7 and n_esc >= 7, f"d: _f9_dialog_zu an allen 7 ESC-Stellen nach dem Dialog-Fund in run() ({n_zu} Aufrufe, {n_esc} ESC)")
+# IS1 (a90d2169, 16.11.2026): achte Stelle — „letzter Blick vor dem Knopf“ bricht mit ESC + _f9_dialog_zu ab (NZ1-Regel eingehalten)
+check(n_zu == 8 and n_esc >= 8, f"d: _f9_dialog_zu an allen 8 ESC-Stellen nach dem Dialog-Fund in run() ({n_zu} Aufrufe, {n_esc} ESC)")
 pos_zu = [i for i in range(len(qr)) if qr.startswith("_f9_dialog_zu(dlg, trail)", i)]
 check(all(qr.rfind('_el_tasten(dlg, "{ESC}", set_foreground=False)', 0, i) > qr.rfind("_f9_dialog_zu(dlg, trail)", 0, i) for i in pos_zu),
       "d: jedem _f9_dialog_zu geht ein eigenes ESC voraus")

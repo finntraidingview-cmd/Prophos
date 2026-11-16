@@ -137,6 +137,7 @@ check("wdl.daten = d; wdl.fehler = ''\n      setTimeout(() => { try{ wdlVorgemer
 vm = html[html.index("  const WDL_VORMERK_GRUENDE"):html.index("  function wdlAbhakenSperre(")]
 vm = vm[:vm.index("  async function wdlVormerken(")] + vm[vm.index("  // Abhaken, sobald die Lesung da ist"):]
 js2 = STUBS + fn + """
+let _wdlSammel = null;   // RB3 (16.11.2026): Modul-Variable direkt vor WDL_VORMERK_GRUENDE (außerhalb des Ausschnitts), die Takte fragen sie ab
 const window = {};
 const document = { getElementById: () => ({ classList: { contains: () => false } }) };
 let geoeffnet = []; function mklWdErledigtOeffnen(pid, t, o){ geoeffnet.push([pid, !!o.einKlick, !!o.nurStill]) }
