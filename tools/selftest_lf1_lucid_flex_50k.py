@@ -176,7 +176,7 @@ ok("if _fr and fdp_groesse_an(_fr, a):" in SRC, "Abhaken (AP6 Ziel → WD): Grö
 ok('_FDP_GR_BOOL = ("sl_hinter_liq", "an")' in SRC, "Einstellung: an je Größe als Schalter")
 sq = open(os.path.join(WURZEL, "sql", "2026-11-16_lucid_flex_50k.sql"), encoding="utf-8").read()
 ok("'{je_groesse,150000,an}', 'false'::jsonb" in sq and '"pump2_pct": 0' in sq and '"hedge_eur": 300' in sq and "where not exists" in sq
-   and "coalesce(max(id), 0)" in sq, "SQL: Firma an, 150k aus, 50k-Profil, liq_regeln 50k idempotent mit id")
+   and "insert into public.liq_regeln (firma," in sq, "SQL: Firma an, 150k aus, 50k-Profil, liq_regeln 50k idempotent (id = Identity, nicht mitgegeben)")
 _i = sq.index("'{\n          \"an\"")
 sql_jg = json.loads(sq[_i + 1:sq.index("}'::jsonb", _i) + 1])
 ok(sql_jg == JG50, "Profil im Test = Profil in der SQL-Datei")

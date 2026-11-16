@@ -43,10 +43,9 @@ where r.id = 1
   and exists (select 1 from jsonb_array_elements(r.firmen) f where f->>'name' = 'Lucid Trading');
 
 -- Liquidation/Daily Loss für Radar und Hedge (liq_regeln): Lucid 50k Funded und Winning Days = DLL 1.200 $ ab Tagesstart (wie id 17/18 für 150k mit 2.700).
--- id hat keinen Default (NOT NULL) → max(id) + Laufnummer, wie die bisherigen Zeilen von Hand vergeben
-insert into public.liq_regeln (id, firma, kontotyp, groesse, art, betrag_usd, maxdd_art, maxdd_lock_ueber_groesse_usd, notiz, quelle)
-select (select coalesce(max(id), 0) from public.liq_regeln) + row_number() over (order by t.kontotyp),
-       'Lucid Trading', t.kontotyp, 50000, 'tagesstart', 1200, 'eod_trailing', 100,
+-- id ist eine Identity-Spalte (GENERATED ALWAYS) → nicht mitgeben (Master 16.11.2026: erster Lauf brach mit 428C9 ab)
+insert into public.liq_regeln (firma, kontotyp, groesse, art, betrag_usd, maxdd_art, maxdd_lock_ueber_groesse_usd, notiz, quelle)
+select 'Lucid Trading', t.kontotyp, 50000, 'tagesstart', 1200, 'eod_trailing', 100,
        'LF1 16.11.2026: Lucid Flex 50k ' || t.text || ' — Daily Loss 1.200 $ ab Tagesstart (Tagespause, Konto lebt); Blow nur am Max Loss 2.000 EOD, Lock Größe + 100 (wie id 12).',
        'Finn 16.11.2026 (über den Master, LF1)'
 from (values ('funded', 'Funded'), ('winning_days', 'Winning Days')) as t(kontotyp, text)
