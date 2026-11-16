@@ -132,7 +132,14 @@ ob._TSX_ZEITSYNC.clear()
 # ── 5) Diff-Test gegen origin/main: an bestehenden Stellen nur Code unter der Time-Sync-Bedingung ──────────────────────────────
 src = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
 try:
-    diff = subprocess.run(["git", "diff", "-U0", "origin/main", "--", "mt5-copier/order_bot.py"], cwd=WURZEL, capture_output=True, text=True).stdout
+    # HW1 (16.11.2026): der Diff-Test schützt nur den TS1-Commit bis zum Push — liegt TS1 schon auf origin/main, gehören spätere Änderungen an
+    # order_bot.py nicht mehr zu TS1 (sonst wäre der Test bei jeder Folgeänderung rot)
+    basis = subprocess.run(["git", "show", "origin/main:mt5-copier/order_bot.py"], cwd=WURZEL, capture_output=True, text=True).stdout
+    if "# TIME SYNC WARNING (TS1" in basis:
+        diff = ""
+        print("(Diff-Test übersprungen: TS1 liegt schon auf origin/main)")
+    else:
+        diff = subprocess.run(["git", "diff", "-U0", "origin/main", "--", "mt5-copier/order_bot.py"], cwd=WURZEL, capture_output=True, text=True).stdout
 except Exception as e:
     diff = ""
     print(f"(Diff-Test übersprungen: {type(e).__name__})")

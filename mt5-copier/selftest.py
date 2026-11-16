@@ -12143,8 +12143,10 @@ def test_puls_fehler_1953():
     q_main = _i.getsource(ob.main)
     chk(0 < q_main.find("heim = _zurueck_zu_prophos()") < q_main.find("_echo_tipp_sperre_frei()") < q_main.find("print(json.dumps(res))"),
         "main: Freigabe nach dem Heimweg, vor der Antwort")
-    chk("_warte(" in _i.getsource(ob._echo_tipp_sperre_holen) and "time.sleep" not in _i.getsource(ob._echo_tipp_sperre_holen),
-        "Warten nur über _warte (Zufalls-Streuung), kein fester sleep")
+    # HW1 (16.11.2026): der Takt wartet jetzt blockierend im Mutex mit gestreuter Frist (1500 + random·1000 ms) statt _warte — Jitter bleibt, nie ein fester sleep
+    _qh = _i.getsource(ob._echo_tipp_sperre_holen)
+    chk(("_warte(" in _qh or "int(1500 + random.random() * 1000)" in _qh) and "time.sleep" not in _qh,
+        "Warten nur gestreut (_warte bzw. blockierende Mutex-Frist 1,5–2,5 s), kein fester sleep")
     print(("✓" if ok else "✗") + " Puls-Fehler .1953: PC-Tipp-Sperre — Urteil, Antwort, Reihenfolge, ohne Windows unverändert")
     return ok
 

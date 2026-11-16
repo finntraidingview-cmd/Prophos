@@ -14308,8 +14308,10 @@ def echo_tipp_sperre_urteil(rc, gewartet_s, max_s=ECHO_TIPP_WARTE_MAX_S):
 
 
 def _echo_tipp_sperre_holen(trail=None):
-    """PC-weite Tipp-Sperre holen (s. Block oben). Wartet gestreut (_warte 1.5 + 0..1.0 s) bis frei oder ECHO_TIPP_WARTE_MAX_S;
-    Wartezeit steht in der Spur. → 'frei' | 'aufgeben' | 'unbekannt'. Wirft nie."""
+    """PC-weite Tipp-Sperre holen (s. Block oben). Wartet gestreut (1,5–2,5 s je Takt) bis frei oder ECHO_TIPP_WARTE_MAX_S;
+    Wartezeit steht in der Spur. → 'frei' | 'aufgeben' | 'unbekannt'. Wirft nie.
+    HW1 (16.11.2026, Prüfer S2): der Takt wartet BLOCKIEREND im Mutex (WaitForSingleObject mit gestreuter Frist statt 0 + Schlaf) — Windows gibt die
+    Sperre bei der Freigabe direkt an den Wartenden; ein gleich danach startender Lese-Lauf im Puls-Chrome (Heimweg) kann den Echo-Lauf so nie aushungern."""
     try:
         import ctypes
         k32 = ctypes.windll.kernel32
@@ -14320,13 +14322,12 @@ def _echo_tipp_sperre_holen(trail=None):
         t0 = time.time()
         gemeldet = False
         while True:
-            rc = k32.WaitForSingleObject(h, 0)
+            rc = k32.WaitForSingleObject(h, 0 if not gemeldet else int(1500 + random.random() * 1000))
             u = echo_tipp_sperre_urteil(rc, time.time() - t0)
             if u == "warten":
                 if not gemeldet and trail is not None:
-                    trail.append("PC-Tipp-Sperre belegt (anderer Echo-Lauf an diesem PC tippt gerade) — warte")
+                    trail.append("PC-Tipp-Sperre belegt (anderer Echo-Lauf oder Lesung im Puls-Chrome an diesem PC) — warte")
                 gemeldet = True
-                _warte(1.5, 1.0)
                 continue
             if u == "frei":
                 _ECHO_TIPP["gehalten"] = True
@@ -14352,6 +14353,62 @@ def _echo_tipp_sperre_frei():
         k32.CloseHandle(h)
     except Exception:
         pass
+
+
+# ══ HW1 HEIMWEG/LESUNG IM PULS-CHROME NIE WÄHREND EINES ECHO-LAUFS (Master 16.11.2026 nach IN1; Ina pc-xc5c52 14:58, Plan 02d5eca7 Tradeify CFD 119832):
+# Echo war im F9-Dialog, beim Symbol-Tippen lag das Puls-Chrome (TradingView 'NQ1! …') vorn → „Symbol 'NAS100' steht nicht bestaetigt im Dialog (gelesen:
+# 'EURUSD …')“, Abbruch vor dem Knopf. Zur selben Zeit lief Inas Apex-Big-Trade mit Heim-Wache (Heimweg 15:04/15:09/15:11 …): der Heimweg ist ein eigener
+# Bot-Lauf tvlesen bzw. tsxlesen (prophos.html bigTradeHeim → tvV2Lesen → /api/tv-lesen bzw. /api/tsx-lesen) und holte das Puls-Chrome nach vorn, ohne die
+# PC-Tipp-Sperre des Echo-Laufs zu kennen. Jetzt versucht der Lese-Lauf die Sperre EINMAL, ohne Warten:
+#   belegt → sofort {code: puls_beschaeftigt, retry_ok} — nichts angefasst, kein Fehlerfoto (FEHLERFOTO_CODES_OHNE); die Heim-Wache verschiebt (HW_SPAETER_CODES,
+#            kein Fehlerzähler), Rundgang/Endlesung warten wie bei jedem belegten Puls. KEIN Warten im Bot (Prüfer HW1 M1: Wartezeit vor dem Modus frisst den
+#            Wachhund-Puffer, das Panel beendet den Bot hart, bei TopstepX bliebe die 15-min-Handlauf-Sperre stehen; dazu hielte das Panel TV_ORDER_LOCK länger).
+#   frei   → halten bis zum Ende des Laufs, damit ein Echo-Lauf nicht mitten in die Lesung tippt (er wartet blockierend, s. _echo_tipp_sperre_holen).
+#   Die Auge-Reparatur (tsxlesen auge_reparieren, bis 240 s, 1× je 30 min) bleibt ganz ohne Sperre wie bisher (sonst gäbe Echo nach 150 s auf bzw. ein
+#   „belegt“ verbrauchte die 30-min-Frist der Reparatur).
+# Orders/Closes im Puls-Chrome (tvkonto, tsxorder, tvclose …) und tvkontenliste bleiben unberührt. Ohne Windows/ctypes → wie bisher.
+
+
+def _lese_tipp_sperre_versuch():
+    """PC-Tipp-Sperre EINMAL ohne Warten versuchen (HW1) → 'frei' (gehört jetzt diesem Lauf) | 'belegt' | 'unbekannt'. Wirft nie."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateMutexW(None, False, ECHO_TIPP_MUTEX)
+        if not h:
+            return "unbekannt"
+        _ECHO_TIPP["h"] = h
+        u = echo_tipp_sperre_urteil(k32.WaitForSingleObject(h, 0), 0.0)
+        if u == "frei":
+            _ECHO_TIPP["gehalten"] = True
+            return "frei"
+        return "belegt" if u == "warten" else "unbekannt"
+    except Exception:
+        return "unbekannt"
+
+
+def lese_tipp_sperre_antwort(was):
+    """REIN (testbar): Antwort eines Lese-Laufs im Puls-Chrome bei belegter PC-Tipp-Sperre (HW1)."""
+    return {"ok": False, "code": "puls_beschaeftigt", "schritt": "pc_tipp_sperre", "retry_ok": True, "gesendet": False,
+            "msg": f"{was}: Echo-Lauf an diesem PC tippt gerade (PC-Tipp-Sperre) — nichts angefasst, Puls-Chrome nicht nach vorn, gleich erneut",
+            "trail": f"PC-Tipp-Sperre belegt (Echo-Lauf an diesem PC) — {was} verschoben, nichts angefasst"}   # String wie jede andere Spur (Prüfer K1)
+
+
+def _lese_lauf_mit_tipp_sperre(was, lauf, halten=True):
+    """Lese-Lauf im Puls-Chrome (HW1): Sperre belegt → Antwort puls_beschaeftigt, lauf() läuft NICHT; frei → lauf() (Sperre gehalten, wenn halten),
+    Freigabe immer. Wirft, was lauf() wirft."""
+    u = _lese_tipp_sperre_versuch()
+    if u == "belegt":
+        _echo_tipp_sperre_frei()
+        print(f"[{was}] PC-Tipp-Sperre belegt (Echo-Lauf an diesem PC) — verschoben (HW1)", file=sys.stderr, flush=True)
+        print(json.dumps(lese_tipp_sperre_antwort(was), ensure_ascii=False), flush=True)
+        return None
+    if not halten:
+        _echo_tipp_sperre_frei()   # nur geprüft: lange Läufe halten die Sperre nicht
+    try:
+        return lauf()
+    finally:
+        _echo_tipp_sperre_frei()
 
 
 def _echo_tipp_sperre_antwort(gewartet_s, trail=None):
@@ -31917,7 +31974,14 @@ def main():
         except ValueError:
             cmd = {}
         try:
-            (modus_tsxinventar if sys.argv[1] == "tsxinventar" else modus_tsxlesen)(cmd if isinstance(cmd, dict) else {})
+            if sys.argv[1] == "tsxlesen" and not (isinstance(cmd, dict) and cmd.get("auge_reparieren") is True):
+                # HW1: Heimweg/Lesung im Puls-Chrome nie, während ein Echo-Lauf an diesem PC tippt. Die Auge-Reparatur (bis 240 s, höchstens 1× je
+                # 30 min, der Tab setzt die Frist VOR dem Lauf) läuft wie bisher ohne Sperre — ein „belegt“ verbrauchte sonst die 30 min (Prüfer K2/K3)
+                _lese_lauf_mit_tipp_sperre("tsxlesen", lambda: modus_tsxlesen(cmd if isinstance(cmd, dict) else {}))
+            elif sys.argv[1] == "tsxlesen":
+                modus_tsxlesen(cmd if isinstance(cmd, dict) else {})
+            else:
+                modus_tsxinventar(cmd if isinstance(cmd, dict) else {})
         except Exception as e:
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TopstepX-Lauf abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
@@ -31934,7 +31998,7 @@ def main():
             print(json.dumps({"ok": False, "code": "befehl", "msg": f"Befehl kein gueltiges JSON: {e}"}))
             return 2
         try:
-            modus_tvlesen(cmd)
+            _lese_lauf_mit_tipp_sperre("tvlesen", lambda: modus_tvlesen(cmd))   # HW1: Heimweg der Heim-Wache nie, während Echo tippt
         except Exception as e:
             # Ort dazu (24.09.2026 abends, Finn: 'der Reader ist aktiv, liest die Position trotzdem
             # nicht' — in der DB stand nur 'absturz'): letzte eigene Stelle aus dem Traceback.
