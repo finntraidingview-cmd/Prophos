@@ -5772,6 +5772,13 @@
      Liquidation/SL zeigt der Chart beim Klick. Eigene wdl-z-*-Klassen, die mwd-*-Karten der Winning Days bleiben, wie sie sind. */
   #dashboard-view .wdl-tab{border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .wdl-tab + .wdl-tab{margin-top:14px}
+  /* RB3 (16.11.2026): Sammel-Knopf „Alle abhaken (n)“ rechts unter dem Gruppenkopf, Ergebnisliste darunter */
+  #dashboard-view .wdl-sammel{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .wdl-sammel small{font-size:11.5px;color:var(--sub)}
+  #dashboard-view .wdl-sammel-erg{position:relative;display:flex;flex-direction:column;gap:2px;padding:6px 30px 7px 12px;font-size:11.5px;color:var(--sub);border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .wdl-sammel-erg b{color:var(--ink);font-weight:600}
+  #dashboard-view .wdl-sammel-erg .is-fehler, #dashboard-view .wdl-sammel-erg .is-fehler b{color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .wdl-sammel-weg{position:absolute;top:4px;right:8px;border:0;background:none;color:var(--sub);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
   /* Echo-Zeilen (30.09.2026): ohne Chart-Auswahl, Symbol grau */
   /* Sektionsköpfe Orbit/Echo kräftiger als die Gruppenköpfe (30.09.2026: Finn übersah „Echo" unter Orbits „Beendet") — beide gleich */
   /* Plattform-Pille je Zeile (30.09.2026, Finn: „eine Liste, wo alle Laufenden drin sind, unterschieden nur mit Orbit und Echo"):
@@ -38770,6 +38777,9 @@
     mwdErlStatusUI()   // AP9: ohne Hinweiszeile unter „Waiting“ (Checkliste entfernt)
   }
   function mklWdErledigtOeffnen(pid, extra, opts){
+    // RB3 (Prüf-Befund 16.11.2026): während des Sammel-Abhakens teilt sich jedes Öffnen dieselben Felder (_mwdErlId, Status, P&L) — Rest von Hand,
+    // Trades-Reiter usw. warten, bis der Lauf fertig ist
+    if(_wdlSammel && !(opts && opts.sammel)){ if(typeof atToast === 'function') atToast('Sammel-Abhaken läuft gerade — gleich noch einmal', 'end'); return }
     _mwdErlSicht = !!(opts && opts.sicht)   // jedes Öffnen setzt neu — nur die Radar-Knöpfe geben sicht mit
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     // Echo/Duplikum (02.10.2026): kein Solo-Hedge am Plan — Fusion-P&L aus dem Live-Wert (slave_pl_live) bzw. dem slave_pl am Plan
@@ -38935,6 +38945,18 @@
     mwdErlWdhVorschlag()
     mwdErlWdVorschau()
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
+    // RB3 SAMMEL-ABHAKEN (Finn 16.11.2026: „Alle abhaken / Alle archivieren je Gruppe“): Vorbelegung wie oben, aber nie ein Popup und nie der Trades-Dialog —
+    // wdlSammelLauf liest die Vorbelegung (nach dem Payout-Urteil wp), entscheidet und bucht über mklWdErledigtSpeichern (derselbe Schreibweg wie der Klick)
+    if(opts && opts.sammel){
+      // wie unten (AP6 Prüfer K5): geht der Ein Klick doch auf (Grund da), lädt er bei Challenge/Phase/Funded Futures die Vorwahl nach — hier genauso, nur ohne Popup
+      if(opts.sammelUrteil && !_wpZeigen && _wpAndere){
+        _mwdErlWp = window._wpUrteil(pw.konto_id)
+        _mwdErlWp.then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)) mwdErlWpAnwenden(u) })
+        _wpListe(true)
+      }
+      // schaetzung: der P&L ist nur der ≈-Vorschlag (Konto weg / Topstep-MLL / TP + weg, „bitte prüfen“) — wird nie im Sammel-Lauf gebucht
+      return { wp: _mwdErlWp || null, fcfd: _wpFcfd, eigen: !!eigen, ohneHedge: _mwdErlOhneHedge, schaetzung: plVor == null && _kwSch != null }
+    }
     // EIN KLICK (Finn 30.10.2026 18:0x): unauffälliger Trade (wdlEinKlickGrund) speichert mit genau dieser Vorbelegung, ohne das Popup zu zeigen. Sagt die Vorbelegung
     // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
     if(opts && opts.einKlick){
@@ -39088,7 +39110,7 @@
       // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
       wdlSofortErledigt(pid)   // Plan ist zu (auch bei Buchungsfehler) → Live Trades sofort nach „Erledigt"
-      if(d.buchung_fehler){ if(ab2) ab2Zu(ab2.el); if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
+      if(d.buchung_fehler){ if(ab2) ab2Zu(ab2.el); if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return { ok: false, fehler: 'Buchung: ' + d.buchung_fehler } }   // RB3: Ergebnis für den Sammel-Lauf
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
       const ar = d.archiv || null
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
@@ -39146,13 +39168,15 @@
       // eigener Plan über den Railway-Weg (A1 03.11.2026): die lokale Planliste nachladen — sonst stünde er im Trades-Reiter weiter in „Überprüfen“ (Gegenprüfung)
       if(mklWdEigenerPlan(pid) && typeof loadTradePlansFromSupabase === 'function'){ try{ await loadTradePlansFromSupabase() }catch(_){} }
       mklWdRender(); mklChartZeichnen()
+      return { ok: true, archiviert: !!(ar && ar.archiviert) }   // RB3: Ergebnis für den Sammel-Lauf (die übrigen Aufrufer werten es nicht aus)
     }catch(e){
       // still nur bei „nicht mehr in Überprüfen“ (schon abgehakt, anderer Tab); jeder andere 409 (z. B. „gleichzeitig geändert“, Betrieb 1 02.11.2026) ruft die Zeile zurück
-      if(still && e && e.status === 409){ if(!/nicht mehr in Überprüfen/.test(String(e.message || ''))) wdlLokalVergessen(pid); try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return }
+      if(still && e && e.status === 409){ const schon = /nicht mehr in Überprüfen/.test(String(e.message || '')); if(!schon) wdlLokalVergessen(pid); try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return { ok: schon, schon, fehler: String(e.message || e) } }
       if(ab2) ab2Zu(ab2.el)   // AB2: nicht gebucht → kein Strahl stehen lassen
       if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
       wdlLokalVergessen(pid)   // nicht gebucht → die Zeile kommt mit dem nächsten Stand zurück nach „Überprüfen" (08.10.2026)
       try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
+      return { ok: false, fehler: String((e && e.message) || e) }
     }
     finally{ if(btn) btn.disabled = false }
   }
@@ -41185,6 +41209,7 @@
   /* VORMERKEN STATT POPUP (Finn 02.11.2026: bei „ohne Lesung" auch direkt weg): der Klick merkt den Plan vor (Railway mt5_baseline.abhaken_vorgemerkt), er bleibt in Überprüfen
    * und verschwindet aus „Erledigt". Kommt die Lesung, hakt der Radar ihn über den Ein-Klick-Weg ab (wdlVorgemerktTick), mit der echten Lesung als Wert. Braucht er dann doch eine
    * Aktion (Blow, Ziel …), steht er wieder in „Erledigt" und öffnet beim Klick das Popup. Geschätzt wird nie etwas gebucht. */
+  let _wdlSammel = null   // RB3: läuft ein Sammel-Abhaken ({ titel, i, n }) — Takte und Einzel-Klicks warten, sonst teilten sie sich die Popup-Felder (_mwdErlId)
   const WDL_VORMERK_GRUENDE = new Set(['wartet auf Lesung', 'keine echte Lesung', 'Hedge-P&L fehlt'])
   const WDL_VORMERK_FRIST_MS = 6 * 3600000   // Stopp S9 (02.11.2026): nie ewig versteckt — danach steht der Plan wieder in „Erledigt"
   const wdlVorgemerkt = t => !!(t && t.status === 'review' && t.vorgemerkt && t.vorgemerkt.at)
@@ -41245,7 +41270,7 @@
   const _wdlRestVersuch = new Map(), _wdlRestN = new Map()
   let _wdlRestRecht = { at: 0, ok: false }
   function wdlRestVorgaengerTick(){
-    if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    if(_wdlSammel || document.getElementById('mwdErledigtModal')?.classList.contains('open')) return   // RB3: nie während eines Sammel-Abhakens
     if(Date.now() - _wdlRestRecht.at > 300000){
       _wdlRestRecht.at = Date.now()
       Promise.resolve().then(() => typeof window._planerSchreiben === 'function' ? window._planerSchreiben() : false).then(ok => { _wdlRestRecht.ok = ok === true }, () => { _wdlRestRecht.ok = false })
@@ -41278,13 +41303,105 @@
   }
   window._wdlRestVorgaengerTick = wdlRestVorgaengerTick   // Test-Haken
   function wdlVorgemerktTick(){
-    if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    if(_wdlSammel || document.getElementById('mwdErledigtModal')?.classList.contains('open')) return   // RB3: nie während eines Sammel-Abhakens
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
     if(!t) return
     _wdlVmVersuch.set(wdlTid(t), Date.now())
     try{ mklWdErledigtOeffnen(wdlTid(t), t, { sicht: true, einKlick: true, nurStill: true }) }catch(e){ console.warn('[radar] vorgemerkt abhaken', e) }
   }
   let _wdlEinKlickAt = 0
+  /* RB3 SAMMEL-ABHAKEN JE GRUPPE (Finn 16.11.2026: „Füge im Radar immer einen Knopf hinzu wie ‚Alle abhaken', ‚Alle archivieren' … je nach Gruppe. Wenn viele
+   * Accounts blowen, gehe ich alles einmal durch und hake dann alles auf einmal ab — alle Geblowten werden archiviert."). Jede Zeile läuft nacheinander genau wie
+   * der Einzel-Knopf: vormerkbar → wdlVormerken; sonst mklWdErledigtOeffnen (Vorbelegung, Payout-Urteil abgewartet) → mklWdErledigtSpeichern (Railway /admin/wd-plaene,
+   * nur_review). Kein eigener Schreibweg. Gebucht wird nur, wenn die Vorbelegung des Popups eindeutig ist — Blow-Gruppe: „geblowt" vorgewählt; Ziel erreicht:
+   * ein Schritt vorgewählt; sonst „Nichts ändern"/Waiting. Alles andere (eigener Plan mit Trades-Dialog, unplausibel, Boden unbekannt, Winning-Day-Vorschlag,
+   * fehlender P&L …) bleibt stehen und steht danach mit Grund unter dem Knopf — nie geraten, nie still übersprungen. */
+  const WDL_SAMMEL_TITEL = { 'Geblowt · archivieren': 'Alle archivieren', 'Abhaken · Challenge': 'Alle abhaken', 'Abhaken · Funded': 'Alle abhaken',
+                             'Abhaken · Winning Days': 'Alle abhaken', 'Trade abhaken': 'Alle abhaken' }
+  // „Manuelle Arbeit" bewusst ohne Sammel-Knopf (Prüf-Befund): dort öffnet jeder Einzel-Klick das Popup („manuell") — Handarbeit wird nie gesammelt gebucht
+  const WDL_SAMMEL_BLOW = new Set(['geblowt oder Konto weg', 'Blow-Beweis oder unklares Ende'])
+  const WDL_SAMMEL_ZIEL = new Set(['Ziel erreicht', 'Funded-CFD-Ziel erreicht'])
+  const WDL_SAMMEL_ST = { none: 'Nichts ändern', blown: 'geblowt', passed: 'bestanden', waiting: 'Waiting for Payout', winning_days: 'Winning Days' }
+  const _wdlSammelListen = new Map()   // Titel → Zeilen der Gruppe beim letzten Render (die Zahl am Knopf)
+  let _wdlSammelErg = null             // { titel, ok, vm, stehen: [[Name, Grund]], fehler: [[Name, Grund]] } — bleibt unter dem Knopf, bis × oder der nächste Lauf
+  function wdlSammelHtml(titel, arr){
+    const was = WDL_SAMMEL_TITEL[titel]; if(!was) return ''
+    const liste = (arr || []).filter(t => t && t.status === 'review' && !wdlAbhakenSperre(t))
+    _wdlSammelListen.set(titel, liste)
+    const lauf = !!(_wdlSammel && _wdlSammel.titel === titel)
+    const e = (_wdlSammelErg && _wdlSammelErg.titel === titel && (_wdlSammelErg.stehen.length || _wdlSammelErg.fehler.length)) ? _wdlSammelErg : null
+    if(!liste.length && !e) return ''
+    const tip = (titel === 'Geblowt · archivieren' ? 'Alle Zeilen nacheinander abhaken — geblowt, Konto wird archiviert' : 'Alle Zeilen nacheinander abhaken')
+      + ' (wie der Knopf „Abhaken“ je Zeile). Zeilen, die eine Entscheidung brauchen, bleiben stehen und werden danach mit Grund genannt.'
+    const knopf = liste.length ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-sammel="${escapeHtml(titel)}"${_wdlSammel ? ' disabled' : ''} title="${escapeHtml(tip)}">${lauf ? `${was} … ${_wdlSammel.i}/${_wdlSammel.n}` : `${was} (${liste.length})`}</button>` : ''
+    const zeilen = e ? e.fehler.map(([n, g]) => `<span class="is-fehler"><b>${escapeHtml(n)}</b> — ${escapeHtml(g)}</span>`).join('')
+      + e.stehen.map(([n, g]) => `<span><b>${escapeHtml(n)}</b> — ${escapeHtml(g)}</span>`).join('') : ''
+    return `<div class="wdl-sammel">${e ? `<small>${e.ok} abgehakt${e.vm ? ` · ${e.vm} vorgemerkt` : ''} · ${e.stehen.length + e.fehler.length} nicht:</small>` : ''}${knopf}</div>`
+      + (e ? `<div class="wdl-sammel-erg">${zeilen}<button type="button" class="wdl-sammel-weg" data-wdl-sammel-weg="1" title="Liste ausblenden">×</button></div>` : '')
+  }
+  async function wdlSammelLauf(titel){
+    if(_wdlSammel) return
+    if(document.getElementById('mwdErledigtModal')?.classList.contains('open')){ if(typeof atToast === 'function') atToast('Erst das offene Abhak-Popup schließen', 'end'); return }
+    const liste = (_wdlSammelListen.get(titel) || []).slice()
+    if(!liste.length) return
+    const blowGr = titel === 'Geblowt · archivieren'
+    const frage = (blowGr ? `${liste.length} Trades abhaken + Konten archivieren?` : `${liste.length} Trades abhaken?`)
+      + '\n\nJede Zeile läuft wie ihr Knopf „Abhaken“ mit der Vorbelegung des Popups. Zeilen, die eine Entscheidung brauchen (geschätzter P&L, Ziel-Stand offen, eigener Plan …), bleiben stehen und werden danach genannt.'
+    if(!confirm(frage)) return
+    const erg = { titel, ok: 0, vm: 0, stehen: [], fehler: [] }
+    const name = t => { const k = (t && t.konto) || {}; return `${(t && t.person) || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
+    const warte = (p, ms) => Promise.race([Promise.resolve(p).catch(() => null), new Promise(r => setTimeout(() => r('__zeit'), ms))])
+    _wdlSammelErg = null
+    _wdlSammel = { titel, i: 0, n: liste.length }
+    try{
+      for(const t0 of liste){
+        _wdlSammel.i++; wdlRender()
+        const pid = wdlTid(t0), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid) || t0   // frischester Stand
+        try{
+          if(t.status !== 'review'){ erg.stehen.push([name(t), 'nicht mehr in Überprüfen']); continue }
+          const grund = wdlEinKlickGrund(t)
+          if(wdlVormerkbar(t, grund)){   // wie der Einzel-Klick: ohne Lesung vormerken, nie schätzen
+            await wdlVormerken(pid, t, grund, true)
+            if(t.vorgemerkt) erg.vm++; else erg.fehler.push([name(t), 'nicht vorgemerkt'])
+            continue
+          }
+          const blow = WDL_SAMMEL_BLOW.has(grund), ziel = WDL_SAMMEL_ZIEL.has(grund)
+          if(grund && !blow && !ziel){ erg.stehen.push([name(t), grund]); continue }
+          const o = mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: true, sammel: true, sammelUrteil: ziel })
+          if(!o){ _mwdErlId = null; erg.stehen.push([name(t), 'Popup nicht vorbereitet']); continue }
+          // eigener Plan: der Einzel-Klick öffnet hier den Trades-Dialog (anderer Weg) — nur der stille Fall bucht über Railway
+          if(o.eigen && (grund || o.fcfd)){ _mwdErlId = null; erg.stehen.push([name(t), 'eigener Plan — im Trades-Dialog abhaken']); continue }
+          if(o.schaetzung){ _mwdErlId = null; erg.stehen.push([name(t), 'P&L nur geschätzt (≈) — einzeln prüfen']); continue }   // nie eine Schätzung endgültig buchen
+          if(o.wp){
+            // _wpUrteil löst nach spätestens WP_URTEIL_MS mit null auf (auch bei Fehlern) — ohne Urteil keine Vorwahl, also keine eindeutige Vorbelegung
+            const u = await warte(o.wp, 12000)
+            // Blow: „geblowt" kommt aus wdlGeblowtUrteil (sofort), das Urteil wählt nur Ziel-Schritte — dort reicht es, wenn es fehlt (passt prüft unten „geblowt")
+            if(u === '__zeit' || (u == null && !blow)){ _mwdErlId = null; erg.stehen.push([name(t), 'Ziel-Stand nicht lesbar — einzeln abhaken']); continue }
+          }
+          await Promise.resolve()   // die Vorwahl aus dem Urteil (.then im Öffnen) ist angewendet
+          const st = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+          const mV = plZahl(document.getElementById('mwd-erl-master')?.value), fV = o.ohneHedge ? 0 : plZahl(document.getElementById('mwd-erl-fusion')?.value)
+          // wie der Ein Klick (ruhig: !wdhCb.checked, ohne hidden): der Haken „war ein Winning Day“ wird erst nach der Rechte-Abfrage sichtbar — gesetzt = Entscheidung
+          const wdh = !!document.getElementById('mwd-erl-wdh-cb')?.checked
+          const passt = blow ? st === 'blown' : ziel ? ['passed', 'waiting', 'winning_days'].includes(st) : ['none', 'waiting'].includes(st)
+          const unklar = (mV == null || !isFinite(mV)) ? 'P&L fehlt' : (fV == null || !isFinite(fV)) ? 'Fusion-P&L fehlt' : wdh ? 'Winning-Day-Vorschlag'
+            : !passt ? `Popup schlägt „${WDL_SAMMEL_ST[st] || st}“ vor` : (o.eigen && st === 'passed') ? 'eigener Plan — Nachfolger anlegen' : ''
+          if(unklar){ _mwdErlId = null; erg.stehen.push([name(t), unklar]); continue }
+          _mwdErlEinKlick = true; _mwdErlStill = true   // nur_review (nichts doppelt), kein Strahl je Zeile
+          const r = await mklWdErledigtSpeichern()
+          if(r && r.ok) erg.ok++
+          else erg.fehler.push([name(t), (r && r.fehler) || document.getElementById('mwdErledigtMsg')?.textContent || 'nicht gespeichert'])
+        }catch(e){ _mwdErlId = null; erg.fehler.push([name(t), String((e && e.message) || e)]) }
+      }
+    }finally{
+      _mwdErlEinKlick = false; _mwdErlStill = false
+      _wdlSammel = null; _wdlSammelErg = erg
+      wdlRender()
+      try{ wdlLaden(true) }catch(_){}
+      if(typeof atToast === 'function') atToast(`${titel}: ${erg.ok} abgehakt${erg.vm ? ` · ${erg.vm} vorgemerkt` : ''}${erg.stehen.length ? ` · ${erg.stehen.length} bleiben stehen` : ''}${erg.fehler.length ? ` · ${erg.fehler.length} Fehler` : ''}`, erg.fehler.length ? 'end' : 'ok')
+      try{ if(blowGr && erg.ok && typeof archivCloudAbgleich === 'function'){ await archivCloudAbgleich(); if(typeof renderAccounts === 'function') renderAccounts() } }catch(_){}   // Accounts-Zahl sinkt sofort
+    }
+  }
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
     // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
@@ -41895,7 +42012,7 @@
         ? `<span class="wdl-z-wer wdl-z-wer-kp"><span class="wdl-kp-t">${titel} · ${arr.length}</span><span class="wdl-kp" data-wdl-kp="${escapeHtml(titel)}">${chips}</span></span>`
         : `<span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
       return `<div class="wdl-tab${cls ? ' ' + cls : ''}${wdl.modell ? '' : ' wdl-tab-mb'}"><div class="wdl-z wdl-z-kopf${chips ? ' wdl-z-kopf-kp' : ''}">${kopfLinks}`
-        + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 5 ? ['mi', 'konto', 'datum', 'pl', 'zeit'] : sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
+        + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 5 ? ['mi', 'konto', 'datum', 'pl', 'zeit'] : sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${wdlSammelHtml(titel, arr)}${zeilen}${fuss}</div>`   // RB3: Sammel-Knopf unter dem Kopf
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
     const nachStart = arr => arr.sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
@@ -42283,9 +42400,13 @@
     const an = ev.target.closest('[data-wdl-ansehen]')
     if(an){ if(!an.disabled) wdlAnsehen(an.getAttribute('data-wdl-ansehen')); return }
     if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }   // „n vorgemerkt ×“ (02.11.2026)
+    // RB3: „Alle abhaken“ / „Alle archivieren“ je Gruppe und × an der Ergebnisliste
+    const sm = ev.target.closest('[data-wdl-sammel]')
+    if(sm){ if(!sm.disabled) wdlSammelLauf(sm.getAttribute('data-wdl-sammel')); return }
+    if(ev.target.closest('[data-wdl-sammel-weg]')){ _wdlSammelErg = null; wdlRender(); return }
     const ab = ev.target.closest('[data-wdl-abhaken]')
     if(ab){
-      if(ab.disabled) return
+      if(ab.disabled || _wdlSammel) return   // RB3: während des Sammel-Laufs kein zweites Popup (teilt sich die Felder)
       const pid = ab.getAttribute('data-wdl-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
       // Doppelklick: die Zeile ist nach dem ersten Klick weg, die nächste rückt unter den Mauszeiger und würde ohne Popup mitgebucht (Gegenprüfung 30.10.2026)
       if(Date.now() - _wdlEinKlickAt < 600) return
@@ -59252,7 +59373,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2230'
+  const OS_TAB_BUILD = '2026-09-22.2231'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
