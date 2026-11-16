@@ -151,8 +151,11 @@ def planer_unveraendert(src, ns):
         ohne_te = lambda t: re.sub(r"\n    plaene = \[dict\(p, status=\"completed\"[^\n]*\n[^\n]*for p in plaene\]", "", re.sub(r',"\n\s+"kette_te:mt5_baseline->kette->tagesende", "order"', '", "order"', t))   # noqa: E731
         # KONTO DEAKTIVIERT (30.10.2026, S4): ap_planen nennt für deaktivierte Konten einen eigenen Grund, die Rechnung bleibt — Vergleich ohne diese Weiche
         ohne_dk = lambda t: t.replace('AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else ', "")   # noqa: E731
+        # EOD1b (16.11.2026, S5, Prüfer S2 MUSS): ap_planen gibt den Plan-Tag an _ap_peaks/_ap_kette_mlls (heute=tag) — Boden/MLL, nicht Richtung/Waage;
+        # Vergleich ohne diese Zusätze, bis der Master BASIS auf den main-Commit nachzieht
+        ohne_eod1b = lambda t: re.sub(r"\n    # EOD1b: Plan-Tag als „heute“[^\n]*", "", t).replace(", heute=tag)", ")").replace(", EOD1b: Plan-Tag", "")   # noqa: E731
         if BASIS_ROH:
-            anders = [n for n in PLANER_FUNKTIONEN if fn(src, n) != fn(alt, n)]
+            anders = [n for n in PLANER_FUNKTIONEN if ohne_eod1b(fn(src, n)) != fn(alt, n)]
         else:
             anders = [n for n in PLANER_FUNKTIONEN
                       if (ohne_gruppe(ohne_te(ohne_dk(fn(src, n)))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]

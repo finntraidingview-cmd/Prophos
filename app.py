@@ -11866,7 +11866,7 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             "consistency_pct": a.get("consistency_pct"), "_a": a})
     # Höchststand je Kettenkonto (Topstep mit DLL, 09.10.2026) für MLL in Chance und Kontowert — eine Abfrage, Fehler → ohne Höchststand
     kette_konten = [k["_a"] for (u_, f_), l_ in je.items() if (kws.get(f_) or {}).get("kette_daily") for k in l_]
-    peaks = _ap_peaks(kette_konten) if kette_konten else {}
+    peaks = _ap_peaks(kette_konten) if kette_konten else {}   # EOD1b: bewusst „jetzt“ (Bewertung des Ist-Stands, kein Plan-Tag; ap_kette_mll nimmt max(…, Balance))
     for l_ in je.values():
         for k in l_:
             k["peak"] = peaks.get(str(k["_a"].get("id")))
@@ -15074,6 +15074,9 @@ def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart, heute=None):
     heute_erst = None      # EOD1: Start-Balance des ersten Trades am laufenden Handelstag (= dessen Tagesstart)
     heute_lief = False     # EOD1 (Prüfer SOLLTE): lief heute schon ein Trade (auch ohne bal_start)? Dann ist start_bal ein Zwischenstand, kein Tagesstart
     erst, letzt = {}, {}   # Tag → (Zeit, Wert): Start-Balance des ersten Trades bzw. End-Balance des letzten Trades je Handelstag
+    # EOD1b (S2 KANN 1, fail-safe): Tag → (Start des letzten Trades, hat er einen gelesenen Schluss?) und Tag → höchster Trade-Stand (Start/Ende) dieses Tags.
+    # Fehlt beim letzten Trade eines Vortags der gelesene Schluss, gilt für diesen Tag der Intraday-Höchststand wie vor EOD1 — nie tiefer als früher
+    letzter, tag_hoch = {}, {}
     for f in verlauf or ():
         if str(f.get("master_account_id") or "") != aid or str(f.get("id")) == str(p.get("id")):
             continue
@@ -15082,6 +15085,15 @@ def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart, heute=None):
         be, bs = _wd_num(f.get("bal_end")), _wd_num(f.get("bal_start"))
         if f.get("started_at") and (not st or str(f["started_at"]) <= st) and heute is not None and str(_cme_handelstag(f["started_at"])) == str(heute):
             heute_lief = True
+        if f.get("started_at") and (not st or str(f["started_at"]) <= st):
+            d0 = _cme_handelstag(f["started_at"])
+            if d0 and heute is not None and str(d0) < str(heute):
+                ende_da = be is not None and bool(f.get("ended_at")) and (not st or str(f["ended_at"]) <= st)
+                if d0 not in letzter or str(f["started_at"]) > letzter[d0][0]:
+                    letzter[d0] = (str(f["started_at"]), ende_da)
+                for v in (bs, be if ende_da else None):
+                    if v is not None:
+                        tag_hoch[d0] = max(tag_hoch.get(d0, v), v)
         if bs is not None and f.get("started_at") and (not st or str(f["started_at"]) <= st):
             d = _cme_handelstag(f["started_at"])
             if d and (heute is None or str(d) < str(heute)) and (d not in erst or str(f["started_at"]) < erst[d][0]):
@@ -15093,6 +15105,7 @@ def _liq_peak_eod(p, a, start_bal, verlauf, tagesstart, heute=None):
             if d and (heute is None or str(d) < str(heute)) and (d not in letzt or str(f["ended_at"]) > letzt[d][0]):
                 letzt[d] = (str(f["ended_at"]), be)
     werte = [v for _t, v in list(erst.values()) + list(letzt.values())]
+    werte += [tag_hoch[d] for d, (_t, ende_da) in letzter.items() if not ende_da and d in tag_hoch]   # EOD1b fail-safe (s. o.)
     # Tagesstart von heute: übergeben, sonst Start-Balance des ersten Trades heute, sonst start_bal — aber nur, wenn heute noch nichts lief (dann ist die Balance
     # der Tagesstart); lief heute schon ein Trade ohne belegte Start-Balance, zählen nur die Schlüsse der Vortage (start_bal wäre ein Zwischenstand)
     werte.append(tagesstart if tagesstart is not None else (heute_erst[1] if heute_erst else (None if heute_lief else start_bal)))
@@ -25811,7 +25824,7 @@ def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
     return round(min(float(groesse), hoch - float(dd)), 2)
 
 
-def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balance=None):
+def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balance=None, heute=None):
     """REIN RECHNEND (testbar): MLL eines Topstep-Kettenkontos aus BELEGTEN Werten → (mll, quelle) | (None, None).
     Vorfall Mike …17758280 (Finn 15.10.2026, Screenshot „geblowt? Balance 147.124 auf/unter dem MLL 147.799" — TopstepX zeigt MLL
     145.500): beide Trades liefen am selben Topstep-Handelstag (12.10. 23:39 UTC +2.299 → 152.299, 13.10. 09:41 UTC −5.175), liq_peak
@@ -25838,7 +25851,9 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balanc
             return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
         except Exception:
             return None
-    heute = _cme_handelstag((jetzt or datetime.now(timezone.utc)).isoformat())
+    # EOD1b (S2 16.11.2026): heute = Plan-Tag, wenn übergeben — der Nachtlauf (01:30 Dubai) plant schon den Folgetag, der CME-Tag wechselt erst 03:00 Dubai;
+    # sonst fiele der Schluss des eben gehandelten Tags weg und das MLL läge um dessen Gewinn zu TIEF
+    heute = str(heute) if heute else _cme_handelstag((jetzt or datetime.now(timezone.utc)).isoformat())
     eigene = [f for f in verlauf or () if str(f.get("master_account_id") or "") == aid]
     _anders = [st for st in (_t(f.get("started_at")) for f in eigene if f.get("konto_typ") and str(f["konto_typ"]).lower() != typ) if st]
     _gleich = [st for st in (_t(f.get("started_at")) for f in eigene if f.get("konto_typ") and str(f["konto_typ"]).lower() == typ) if st
@@ -26590,24 +26605,28 @@ def ap_boden_zeile(regel, a, balance, bal_stand):
     return out
 
 
-def _ap_peaks(konten, streng=False):
+def _ap_peaks(konten, streng=False, heute=None):
     """konto_id → höchste belegte Balance (liq_peak, gleiche Phase) für ap_boden_konto — Daten aus _liq_verlauf_laden (60 s Cache,
     wie der Radar). Anzeige: jeder Fehler → {} (dann schätzt der Boden ab Start bzw. aktueller Balance). streng=True (MLL der Topstep-
-    Kette): Fehler → None, damit der Planer „MLL nicht prüfbar" melden kann statt mit zu tiefem MLL zu planen."""
+    Kette): Fehler → None, damit der Planer „MLL nicht prüfbar" melden kann statt mit zu tiefem MLL zu planen.
+    heute (EOD1b, S2 16.11.2026) = Plan-Tag 'YYYY-MM-DD' = der Tag, an dem die Pläne laufen (ap_planen: tag, _ap_stand_laden: deutscher Tag — beides dieselbe
+    CME-Session wie das Handelsfenster; Dubai-/deutsches Datum und CME-Tag weichen nur nachts ab, dann gilt der eben gehandelte Tag als beendet): der Challenge-Nachtlauf (01:30 Dubai)
+    plant schon den Folgetag, der CME-Tag wechselt erst 03:00 Dubai — ohne Plan-Tag fiele der Schluss des eben gehandelten Tags aus dem Höchststand.
+    None = CME-Tag von jetzt (Anzeigen ohne Plan-Tag: Vorrat, Kontowerte, „Zu bestätigen" — dort nimmt der Boden zusätzlich max(…, Balance))."""
     try:
         konten = [a for a in konten or () if a and a.get("id")]
         verlauf = _liq_verlauf_laden([a["id"] for a in konten], streng=streng)
         # EOD1 (16.11.2026): nachziehende Böden der Futures-Challenges (Tradeify, Lucid, Topstep, FTMO/FNF Futures) trailen am Tagesschluss → Tagesend-Höchststand;
         # Apex trailt intraday (Auftrag EOD1) und bleibt beim Höchststand über alle Trade-Enden; der Radar wählt weiter über liq_regeln.maxdd_art
-        return {str(a["id"]): liq_peak({}, a, None, verlauf, eod="apex" not in str(a.get("firm") or "").lower()) for a in konten}
+        return {str(a["id"]): liq_peak({}, a, None, verlauf, eod="apex" not in str(a.get("firm") or "").lower(), heute=heute) for a in konten}
     except Exception as e:
         print(f"[auto-plan] ⚠️ boden/peak: {type(e).__name__}: {e}", flush=True)
         return None if streng else {}
 
 
-def _ap_kette_mlls(tripel, streng=False, peaks=None):
+def _ap_kette_mlls(tripel, streng=False, peaks=None, heute=None):
     """konto_id → (mll, quelle) aus ap_kette_mll_belegt für die Topstep-Kette (15.10.2026, Mike …8280). tripel = [(konto, regel, balance)].
-    Verlauf wie _ap_peaks (60 s Cache). streng=True: Fehler → None (Planer meldet „MLL nicht prüfbar"), sonst {}."""
+    Verlauf wie _ap_peaks (60 s Cache). streng=True: Fehler → None (Planer meldet „MLL nicht prüfbar"), sonst {}. heute = Plan-Tag (EOD1b, s. _ap_peaks)."""
     try:
         tripel = [(a, r, b) for a, r, b in tripel or () if a and a.get("id")]
         verlauf = _liq_verlauf_laden([a["id"] for a, _r, _b in tripel], streng=streng)
@@ -26616,7 +26635,7 @@ def _ap_kette_mlls(tripel, streng=False, peaks=None):
             groesse = ap_groesse((r or {}).get("groessen"), b) if b is not None else None
             # peaks/b = alter Hochpunkt, nur für den Rückfall ohne Lesung und ohne Tagesschluss (16.10.2026)
             out[str(a["id"])] = ap_kette_mll_belegt(groesse or liq_konto_groesse(a), (r or {}).get("dd_usd"), a, verlauf,
-                                                    peak=(peaks or {}).get(str(a["id"])), balance=b)
+                                                    peak=(peaks or {}).get(str(a["id"])), balance=b, heute=heute)
         return out
     except Exception as e:
         print(f"[auto-plan] ⚠️ kette/mll: {type(e).__name__}: {e}", flush=True)
@@ -28386,7 +28405,7 @@ def admin_build_kontowerte(sicht=None):
     kauf = _ap_kauf_echt(aktiv) if aktiv else {}
     # Höchststand für die Topstep-Kette mit DLL (09.10.2026, MLL im Kontowert) — nur Kettenkonten, eine Abfrage, Fehler → ohne
     kette_ids = [a for a in konten if str(a["id"]) in aktiv and (ap_kw_param(ap_regel_unternehmen(a.get("user_id"), firmen, a.get("firm"), streng=False)) or {}).get("kette_daily")]
-    peaks = _ap_peaks(kette_ids) if kette_ids else {}
+    peaks = _ap_peaks(kette_ids) if kette_ids else {}   # EOD1b: bewusst „jetzt“ (Kontowert = Ist-Stand, kein Plan-Tag; Boden nimmt max(…, Balance))
     # frische Konten: Startwert wie im Planer (ap_startwert_frisch, Finn 09.10.2026) — Verlauf nur für aktive Konten ohne Lesung
     _aktiv = set(aktiv)
     ohne = {str(a["id"]) for a in konten if str(a["id"]) in _aktiv and acc_balance_wahl(a, echo_bal, dup_bal)[0] is None
@@ -31408,9 +31427,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # Lesefehler (streng → None): Kettenkonten mit DLL bekommen KEINEN Plan („MLL nicht prüfbar", Prüfung Slave 2) — nie mit zu tiefem MLL
     # planen. Ein Konto ohne jeden belegten Stand (frisch) hat peak None → MLL ab Größe/Balance, das ist richtig.
     kette_tripel = [(k["a"], k["regel"], k["bal"]) for k in kandidaten if ap_kette_regel(k["regel"])]
-    peaks_kette = _ap_peaks([a for a, _r, _b in kette_tripel], streng=True) if kette_tripel else {}
+    # EOD1b: Plan-Tag als „heute“ (deutscher Tag = CME-Tag) — der Nachtlauf 01:30 Dubai plant schon den Folgetag, der eben gehandelte Tag zählt mit seinem Schluss
+    peaks_kette = _ap_peaks([a for a, _r, _b in kette_tripel], streng=True, heute=tag) if kette_tripel else {}
     # 15.10.2026 (Mike …8280 „geblowt?" bei lebendem Konto): MLL aus der TopstepX-Lesung/Tagesschlüssen, nicht aus Zwischenständen
-    mlls_kette = (_ap_kette_mlls(kette_tripel, streng=True, peaks=peaks_kette) if kette_tripel else {}) if peaks_kette is not None else None
+    mlls_kette = (_ap_kette_mlls(kette_tripel, streng=True, peaks=peaks_kette, heute=tag) if kette_tripel else {}) if peaks_kette is not None else None
     for key, liste in tranchen.items():
         rechnung, tps_tranche = [], set()
         for k in liste:
@@ -31620,7 +31640,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 
     frontcode = _wd_futures_frontcode(mitternacht.astimezone(timezone.utc))
     zeilen, geplant = [], []
-    peaks = _ap_peaks([k["a"] for _key, k, _w, _v in plan_roh])   # Höchststand für den geschätzten Boden (08.10.2026)
+    peaks = _ap_peaks([k["a"] for _key, k, _w, _v in plan_roh], heute=tag)   # Höchststand für den geschätzten Boden (08.10.2026), EOD1b: Plan-Tag
     for key, k, w, vers in plan_roh:
         if key not in minuten:
             continue
@@ -38414,7 +38434,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                                                        "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")"})))
     except Exception as e:
         print(f"[auto-plan] ⚠️ balance_live: {type(e).__name__}: {e}", flush=True)
-    peaks = _ap_peaks([konto(p) for p in heute])   # Höchststand für den geschätzten Boden (08.10.2026)
+    peaks = _ap_peaks([konto(p) for p in heute], heute=tag)   # Höchststand für den geschätzten Boden (08.10.2026), EOD1b: Stand-Tag (deutscher Tag)
     folge_rows = []
     for p in heute + folge:
         a, r = konto(p), p.get("richtung")
@@ -41511,7 +41531,7 @@ def admin_auto_plan_ids():
             echo_bal, dup_bal = _ap_balance_karten()
         except Exception:
             echo_bal, dup_bal = {}, {}
-        peaks = _ap_peaks(list(accs.values()))   # Höchststand für den geschätzten Boden (08.10.2026)
+        peaks = _ap_peaks(list(accs.values()))   # Höchststand für den geschätzten Boden (08.10.2026); EOD1b: bewusst „jetzt“ (Anzeige, Boden nimmt max(…, Balance))
         for p in pl:
             a = accs.get(str(p.get("master_account_id")))
             (bestaetigt if p.get("auto_bestaetigt_at") else offen).append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),

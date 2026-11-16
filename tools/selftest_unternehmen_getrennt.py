@@ -114,7 +114,7 @@ def stelle_db(ns, jetzt):
             return [{"user_id": U3}] if "p-e2" in str(params.get("id")) else [{"user_id": U2}]
         return alt_sel(table, params)
     ns.update(_sb_all=_sb_all, sb_select=sb_select, _ap_namen=lambda: ({U1: "Eins", U2: "Zwei", U3: "Drei"}, {U3}),
-              _ap_plaene_mit_hand=lambda q: _sb_all("trade_plans", q), _ap_konten_mit_trade=lambda ids: set(), _ap_peaks=lambda ks: {},
+              _ap_plaene_mit_hand=lambda q: _sb_all("trade_plans", q), _ap_konten_mit_trade=lambda ids: set(), _ap_peaks=lambda ks, **kw: {},
               ap_startwert_kandidat=lambda a, e, d: False)
     return reg
 

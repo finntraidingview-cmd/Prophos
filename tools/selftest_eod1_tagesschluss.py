@@ -37,7 +37,7 @@ def ruf(fn, *a, **k):
     raise RuntimeError(fn)
 
 
-for n in ("_wd_num", "_cme_handelstag", "liq_peak", "_liq_peak_eod", "liq_konto_boden", "fdp_liq"):
+for n in ("_wd_num", "_cme_handelstag", "liq_peak", "_liq_peak_eod", "liq_konto_boden", "fdp_liq", "ap_kette_mll_belegt"):
     lade(n)
 
 CHRIS = {"id": "29256430", "account_type": "funded", "firm": "FTMO Futures", "name": "50k FTMO409613 → Funded", "max_drawdown": 3000,
@@ -98,6 +98,32 @@ check(pko == 50000.0, f"11.11. nach Trade 1 ohne bal_start, Live 51.451,68: Höc
 check(ruf("liq_peak", {}, CHRIS, 50200.0, V[:1], eod=True, heute="2026-11-11") == 50200.0,
       "heute noch kein Trade: die Balance ist der Tagesstart und zählt (Hand-Trade/Gutschrift über Nacht)")
 
+# ── EOD1b (S2 MUSS): Challenge-Nachtlauf 01:30 Dubai (= 21:30 UTC, CME-Tag von jetzt noch der eben gehandelte Tag) plant den Folgetag ──
+NACHT = datetime(2026, 11, 16, 21, 30, tzinfo=timezone.utc)   # 17.11. 01:30 Dubai
+check(str(ruf("_cme_handelstag", NACHT.isoformat())) == "2026-11-16", "Beleg: um 01:30 Dubai ist der CME-Tag noch der 16.11.")
+TS = {"id": "ts1", "account_type": "challenge", "firm": "Topstep", "name": "150k Topstep TS1"}
+VT = [{"id": "t1", "master_account_id": "ts1", "konto_typ": "challenge", "started_at": "2026-11-13T15:00:00+00:00", "ended_at": "2026-11-13T15:30:00+00:00",
+       "bal_start": 150000.0, "bal_end": 150000.0, "mll_start": 145500.0},
+      {"id": "t2", "master_account_id": "ts1", "konto_typ": "challenge", "started_at": "2026-11-16T15:00:00+00:00", "ended_at": "2026-11-16T15:45:00+00:00",
+       "bal_start": 150000.0, "bal_end": 153000.0, "mll_start": 145500.0}]
+alt_k = ruf("ap_kette_mll_belegt", 150000, 4500, TS, VT, jetzt=NACHT, peak=153000.0, balance=153000.0)
+neu_k = ruf("ap_kette_mll_belegt", 150000, 4500, TS, VT, jetzt=NACHT, peak=153000.0, balance=153000.0, heute="2026-11-17")
+check(alt_k[0] == 145500.0, f"Beleg ohne Plan-Tag: Kette-MLL 145.500 (Lesung vom 16.11. Start) — 3.000 $ zu tief ({alt_k})")
+check(neu_k[0] == 148500.0, f"mit Plan-Tag 17.11.: Tagesschluss 16.11. 153.000 zählt → MLL 148.500 ({neu_k})")
+pk_t = ruf("liq_peak", {}, TS, None, VT, eod=True, heute="2026-11-17")
+check(pk_t == 153000.0, f"_ap_peaks-Weg (liq_peak eod, Plan-Tag 17.11.): Höchststand 153.000 — {pk_t}")
+check(ruf("liq_peak", {}, TS, None, VT, eod=True, heute="2026-11-16") == 150000.0, "derselbe Verlauf mit „heute“ = 16.11. (alter Weg): 150.000 — der Gewinn fiele raus")
+check('_ap_peaks([a for a, _r, _b in kette_tripel], streng=True, heute=tag)' in app and '_ap_kette_mlls(kette_tripel, streng=True, peaks=peaks_kette, heute=tag)' in app
+      and '_ap_peaks([k["a"] for _key, k, _w, _v in plan_roh], heute=tag)' in app, "ap_planen übergibt den Plan-Tag (Kette streng, MLL, geschätzter Boden)")
+check('_ap_peaks([konto(p) for p in heute], heute=tag)' in app, "_ap_stand_laden übergibt den Stand-Tag")
+check("peak=(peaks or {}).get(str(a[\"id\"])), balance=b, heute=heute)" in app, "_ap_kette_mlls reicht heute an ap_kette_mll_belegt")
+
+# ── EOD1b KANN 1 (fail-safe): letzter Trade eines Vortags ohne gelesenen Schluss → Intraday-Höchststand dieses Tags, nie tiefer als vorher ──
+VK = [V[0], V[1], dict(V[2], bal_end=None)]
+pkk = ruf("liq_peak", {}, CHRIS, BAL, VK, eod=True, heute="2026-11-16")
+check(pkk == 51451.68, f"11.11. Trade 2 ohne Schluss: Höchststand 51.451,68 wie vor EOD1 — {pkk}")
+check(ruf("liq_peak", {}, CHRIS, BAL, V, eod=True, heute="2026-11-16") == 50000.0, "mit gelesenem Schluss bleibt es bei 50.000")
+
 # ── Apex trailt intraday und bleibt wie bisher ──
 e = lambda a: "apex" not in str(a.get("firm") or "").lower()   # dieselbe Bedingung wie an den Einbaustellen (Anker unten)
 check(all(e({"firm": f}) for f in ("FTMO Futures", "Tradeify", "Lucid Trading", "Topstep", "FundedNext Futures", "Alpha Futures")),
@@ -108,7 +134,7 @@ check(ruf("liq_peak", {}, APEX, BAL, V, eod=e(APEX)) == 51451.68, "Apex mit dens
 
 # ── Einbau an den Stellen ──
 check('peak = liq_peak({}, a, balance, verlauf, eod="apex" not in str(a.get("firm") or "").lower(), heute=cme_heute)' in app, "Funded-Planer Futures (konto_rechnen → fdp_liq): EOD-Höchststand außer Apex")
-check('return {str(a["id"]): liq_peak({}, a, None, verlauf, eod="apex" not in str(a.get("firm") or "").lower()) for a in konten}' in app,
+check('return {str(a["id"]): liq_peak({}, a, None, verlauf, eod="apex" not in str(a.get("firm") or "").lower(), heute=heute) for a in konten}' in app,
       "Challenge-Planer _ap_peaks (nachziehende Böden): EOD-Höchststand außer Apex")
 check("heute = _cme_handelstag(st) if st else _cme_handelstag(None)" in app, "_liq_peak_eod: ohne Trade-Start gilt der laufende CME-Tag als heute")
 check('pk = peak_eod if (peak_eod is not None and (b_regel or {}).get("maxdd_art") == "eod_trailing") else peak' in app, "Radar (liq_regel_felder) wählt bei EOD-Trailing weiter peak_eod")
