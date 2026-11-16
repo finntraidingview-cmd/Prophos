@@ -1165,12 +1165,44 @@ def solo_zu_erkennen(bekannt, aktuell):
     return out
 
 
+# FH4 (Master 16.11.2026, Folge zu FH3 von S1): heute 18:51 an 488579 kam eine kurze LEERE Positionsliste — jedes bekannte Solo-Ticket galt als „zu“,
+# die Historie hatte noch keinen Deal → Eintrag „unbekannt“ ohne P&L, das Ticket fiel aus „bekannt“; kam die Position wieder und schloss echt, verwarf der
+# Ring den echten Deal („der Erste gewinnt“), gebucht hat erst Master-Ende/Feed. Jetzt (a) ein Ticket gilt erst nach SOLO_ZU_BESTAETIGT aufeinanderfolgenden
+# Lesungen ohne es als verschwunden; findet die Historie dann den Deal, wird sofort gebucht. Ohne Deal bleibt es in „bekannt“ und wird gedrosselt
+# (SOLO_ZU_NACHLESE_S) nachgelesen — „unbekannt“ erst nach SOLO_ZU_DEAL_WARTE_S, bei LEERER Positionsliste (Lücke im Terminal) erst nach SOLO_ZU_LUECKE_MAX_S.
+# (b) ein späterer Eintrag mit echtem Deal ersetzt einen früheren „unbekannt“ an seiner Stelle; (c) Ring-Größe unverändert (SOLO_ZU_MAX).
+SOLO_ZU_BESTAETIGT = 2          # aufeinanderfolgende Lesungen ohne das Ticket
+SOLO_ZU_NACHLESE_S = 5.0        # Historie ohne Deal höchstens so oft neu lesen (jede Lesung wartet bis 2 s)
+SOLO_ZU_DEAL_WARTE_S = 20.0     # Liste sonst gefüllt, Historie hinkt: so lange auf den Deal warten, dann „unbekannt“
+SOLO_ZU_LUECKE_MAX_S = 60.0     # Positionsliste ganz leer (Lücke) und kein Deal: so lange warten, dann „unbekannt“
+
+
+def solo_eintrag_echt(e):
+    """REIN (testbar): trägt ein Ring-Eintrag einen echten Deal (P&L, Schluss-Kurs oder Grund ≠ unbekannt)?"""
+    e = e or {}
+    return e.get("pl") is not None or bool(e.get("fill_close")) or str(e.get("grund") or "unbekannt") != "unbekannt"
+
+
+def solo_zu_urteil(n_fehlt, fehlt_s, deal_da, liste_leer):
+    """REIN RECHNEND (testbar, FH4): Ticket fehlt n_fehlt Lesungen in Folge seit fehlt_s Sekunden → 'buchen' | 'warten'."""
+    if int(n_fehlt or 0) < SOLO_ZU_BESTAETIGT:
+        return "warten"
+    if deal_da:
+        return "buchen"
+    return "buchen" if float(fehlt_s or 0) >= (SOLO_ZU_LUECKE_MAX_S if liste_leer else SOLO_ZU_DEAL_WARTE_S) else "warten"
+
+
 def solo_zu_ring(ring, eintrag, maximum=SOLO_ZU_MAX):
-    """REIN RECHNEND (testbar): Eintrag {ticket, …} in den Ring — ein Ticket steht
-    nie doppelt (der Erste gewinnt), aelteste fliegen raus, juengster hinten."""
+    """REIN RECHNEND (testbar): Eintrag {ticket, …} in den Ring — ein Ticket steht nie doppelt, aelteste fliegen raus, juengster hinten.
+    Steht das Ticket schon drin, gewinnt der Erste — AUSSER der vorhandene ist „unbekannt“ ohne Deal und der neue trägt einen echten Deal:
+    dann ersetzt der neue ihn an derselben Stelle (FH4 b)."""
     ring = [r for r in (ring or []) if isinstance(r, dict)]
-    if any(int(r.get("ticket") or 0) == int(eintrag.get("ticket") or 0) for r in ring):
-        return ring
+    t = int(eintrag.get("ticket") or 0)
+    for i, r in enumerate(ring):
+        if int(r.get("ticket") or 0) == t:
+            if not solo_eintrag_echt(r) and solo_eintrag_echt(eintrag):
+                ring[i] = dict(eintrag)
+            return ring[-int(maximum):]
     ring.append(dict(eintrag))
     return ring[-int(maximum):]
 
@@ -2330,29 +2362,78 @@ def main():
     if hedge_acc["solo_bekannt"]:
         log(f"[solo] {len(hedge_acc['solo_bekannt'])} Solo-Ticket(s) aus {SOLO_ZU} bekannt — pruefe beim ersten Tick, ob sie noch offen sind")
 
-    def solo_abschluesse_erkennen(solo_liste):
+    def solo_abschluesse_erkennen(solo_liste, liste_leer=False):
         """Pro Tick: verschwundene Solo-Tickets → P&L/Grund/Exit aus der Historie → Ring + Datei.
-        solo_liste None (Terminal nicht lesbar) = kein Urteil, bekannt bleibt stehen."""
+        solo_liste None (Terminal nicht lesbar) = kein Urteil, bekannt bleibt stehen. liste_leer = positions_get lieferte GAR KEINE Position
+        (auch keine Familien-/fremde) — Verdacht auf eine Lücke im Terminal (FH4). Ein fehlendes Ticket bleibt in „bekannt“, bis solo_zu_urteil
+        „buchen“ sagt; erst dann ein Ring-Eintrag. Solange es wartet, bleibt es mit seinem letzten Stand und unbestaetigt: true in hedge_acc["solo"]
+        (Status hedge_solo) — Prüfer FH4 MUSS: sonst sähe die Hedge-Wache des PC-Tabs „Ticket weg, kein Ring-Eintrag“ und schickte nach 20 s einen echten
+        Close (hedgeSoloSchliessen level_mt5), der nach einer Lücke den noch offenen Hedge schlösse. Ring-Eintrag und Verschwinden aus hedge_solo fallen so
+        wie bisher in denselben Status."""
         if solo_liste is None:
+            hedge_acc.pop("solo_fehlt", None)   # unlesbar: „in Folge“ ist unterbrochen — neu zählen (Prüfer K5)
             return
+        letzt = hedge_acc.setdefault("solo_letzt", {})   # Ticket → letzter voller Eintrag aus hedge_solo (für wartende Tickets)
+        for p_ in solo_liste:
+            if p_ and p_.get("ticket"):
+                letzt[int(p_["ticket"])] = dict(p_)
         aktuell = {int(p["ticket"]): {"symbol": p.get("symbol"), "lots": p.get("lots"), "richtung": p.get("richtung"), "fill": p.get("fill"),
                                       "plan8": p.get("plan8"), "plan_id": p.get("plan_id")}
                    for p in solo_liste if p and p.get("ticket")}
-        weg = solo_zu_erkennen(hedge_acc.get("solo_bekannt") or {}, aktuell)
+        bekannt_alt = hedge_acc.get("solo_bekannt") or {}
+        weg = solo_zu_erkennen(bekannt_alt, aktuell)
+        jetzt_ = time.time()
+        fehlt = hedge_acc.setdefault("solo_fehlt", {})   # Ticket → {n, seit, lese_at} (nur im Speicher; „bekannt“ ist neustart-fest)
+        for t_ in [t_ for t_ in fehlt if t_ in aktuell or t_ not in {int(k) for k in bekannt_alt}]:
+            fehlt.pop(t_, None)                            # wieder da (Lücke vorbei) bzw. nicht mehr bekannt
+        behalten, gebucht = {}, 0
         ring = hedge_acc.get("solo_zu") or []
         for e in weg:
-            pl, grund, exit_preis = solo_pl_aus_history(e["ticket"])
+            t_ = int(e["ticket"])
+            f_ = fehlt.get(t_) or {"n": 0, "seit": jetzt_, "lese_at": 0.0}
+            f_["n"] += 1
+            fehlt[t_] = f_
+            pl, grund, exit_preis = None, None, None
+            grenze_ = SOLO_ZU_LUECKE_MAX_S if liste_leer else SOLO_ZU_DEAL_WARTE_S
+            # Historie (Prüfer FH4 S4): die ERSTE Lesung wie bisher mit bis 8 Versuchen (bis 2 s, einmal je Ticket), jede weitere nur EIN Versuch ohne Pause;
+            # bei leerer Liste (Lücke) nach der ersten erst wieder an der Grenze — der Copier-Tick steht so nie minutenlang
+            ende_ = jetzt_ - f_["seit"] >= grenze_
+            if f_["n"] >= SOLO_ZU_BESTAETIGT and (not f_["lese_at"] or ende_ or (not liste_leer and jetzt_ - f_["lese_at"] >= SOLO_ZU_NACHLESE_S)):
+                erste_ = not f_["lese_at"]
+                f_["lese_at"] = jetzt_
+                pl, grund, exit_preis = solo_pl_aus_history(t_, versuche=8 if erste_ else 1)
+            deal_da = pl is not None or str(grund or "unbekannt") != "unbekannt"
+            if solo_zu_urteil(f_["n"], jetzt_ - f_["seit"], deal_da, liste_leer) == "warten":
+                behalten[t_] = bekannt_alt.get(t_) if t_ in bekannt_alt else bekannt_alt.get(str(t_))
+                if f_["n"] == SOLO_ZU_BESTAETIGT and not deal_da:
+                    log(f"[solo] Position {t_} fehlt {f_['n']}× ohne Deal in der Historie{' (Positionsliste leer)' if liste_leer else ''} — wartet "
+                        f"bis {grenze_:.0f} s auf den Deal (FH4)")
+                continue
+            fehlt.pop(t_, None)
+            gebucht += 1
             eintrag = {"ticket": int(e["ticket"]), "pl": pl, "grund": grund or "unbekannt", "fill_close": exit_preis,
                        # ms + UTC, echte Fill-Zeit des Close-Deals (29.10.2026: Radar „Fusion 0,3 s nach dem Master");
-                       # Historie hinkt (kein Deal) → jetzt in ms
-                       "closed_at": deal_closed_at(solo_letzter_deal.pop(int(e["ticket"]), None), e.get("symbol")),
+                       # kein Deal (Historie hinkt) → Zeitpunkt des ERSTEN Fehlens (FH4, Prüfer S3 — nicht das Ende der Wartezeit)
+                       "closed_at": (deal_closed_at(solo_letzter_deal.pop(int(e["ticket"]), None), e.get("symbol")) if deal_da
+                                     else utc_iso_ms(f_["seit"])),
                        "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill"),
                        "plan8": e.get("plan8"), "plan_id": e.get("plan_id")}
             ring = solo_zu_ring(ring, eintrag)
             log(f"[solo] Position {e['ticket']} zu ({eintrag['grund']}) · P&L {pl if pl is not None else '?'} · @ {exit_preis or '?'}")
-        if weg or aktuell != hedge_acc.get("solo_bekannt"):
-            hedge_acc["solo_zu"], hedge_acc["solo_bekannt"] = ring, aktuell
-            solo_zu_speichern(ring, aktuell)
+        neu_bekannt = dict(aktuell)
+        neu_bekannt.update({t_: v for t_, v in behalten.items() if v is not None})
+        # wartende Tickets im Status sichtbar lassen (s. Docstring) — letzter Stand, gekennzeichnet; ohne letzten Stand (nach Neustart) aus „bekannt“
+        sichtbar = []
+        for t_ in behalten:
+            z_ = letzt.get(t_) or dict(behalten.get(t_) or {}, ticket=t_)
+            sichtbar.append(dict(z_, ticket=t_, unbestaetigt=True))
+        if sichtbar:
+            hedge_acc["solo"] = list(solo_liste) + sichtbar
+        for t_ in [t_ for t_ in letzt if t_ not in aktuell and t_ not in behalten]:
+            letzt.pop(t_, None)
+        if gebucht or neu_bekannt != bekannt_alt:
+            hedge_acc["solo_zu"], hedge_acc["solo_bekannt"] = ring, neu_bekannt
+            solo_zu_speichern(ring, neu_bekannt)
 
     def solo_ergebnisse():
         try:
@@ -2384,13 +2465,13 @@ def main():
 
     solo_letzter_deal = {}   # Ticket → letzter OUT-Deal aus solo_pl_aus_history (nur fuer closed_at, wird beim Lesen entfernt)
 
-    def solo_pl_aus_history(ticket):
+    def solo_pl_aus_history(ticket, versuche=8):
         """Realisierter P&L der Position aus der Deal-Historie (Profit + Kommission
         + Swap + Gebuehr) — der Beweis fuer slave_pl — plus GRUND des Schliessens
         (DEAL_REASON des letzten OUT-Deals, solo_deal_grund) und Schluss-Kurs.
         -> (pl, grund, exit_preis); (None, None, None), wenn die Historie noch
-        nachhinkt ('Beweis oder leer')."""
-        for _ in range(8):
+        nachhinkt ('Beweis oder leer'). versuche: Lesungen mit 0,25 s Pause (FH4: Nachlesen wartender Tickets nur 1, ohne Pause)."""
+        for _i in range(max(1, int(versuche))):
             try:
                 deals = mt5.history_deals_get(position=int(ticket))
             except Exception:
@@ -2405,7 +2486,8 @@ def main():
                     while len(solo_letzter_deal) > 50:   # Close-Befehle lesen ihn nie ab → klein halten
                         solo_letzter_deal.pop(next(iter(solo_letzter_deal)))
                     return pl, solo_deal_grund(getattr(letzter, "reason", None)), float(getattr(letzter, "price", 0.0) or 0.0)
-            time.sleep(0.25)
+            if int(versuche) > 1:
+                time.sleep(0.25)          # wie bisher nach jedem Versuch (Close-Wege unverändert); 1 Versuch = ohne Pause
         return None, None, None
 
     def solo_open(m, a):
@@ -2961,7 +3043,9 @@ def main():
             hedge_acc["solo"] = solo
             # Abschluesse selbst erkennen (Ring hedge_solo_zu), dann Auftraege vom Panel (open/close)
             try:
-                solo_abschluesse_erkennen(solo)
+                # FH4: ganz leere Positionsliste (keine Solo-, Familien- oder fremde Position) = Verdacht auf Lücke im Terminal
+                solo_abschluesse_erkennen(solo, liste_leer=solo is not None and fremde is not None and not solo and not fremde
+                                          and not _pos_alle)
             except Exception as e:
                 log(f"⚠ Solo-Abschluss-Erkennung: {type(e).__name__}: {str(e)[:120]}")
             try:
