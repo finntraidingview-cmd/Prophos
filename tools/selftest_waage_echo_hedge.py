@@ -104,7 +104,8 @@ def schleife(ns):
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
                      "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
-BASIS = "0a141e00"     # nachgezogen (12.11.2026, Master, main-Commit 0a141e00 = TL1b): ap_planen bewusst geändert — Topstep-Ketten-Trade 1 trägt konto_typ ab dem Anlegen (Prüfer S2 OK); übrige Planer-/Waage-Funktionen unverändert.
+BASIS = "65687b2e"     # nachgezogen (16.11.2026, Master, main-Commit 65687b2e = EOD1b): ap_planen gibt den Plan-Tag an _ap_peaks/_ap_kette_mlls (Boden/MLL, nicht Richtung/Waage; Prüfer S2 OK).
+                       # Davor: BASIS = "0a141e00"     # nachgezogen (12.11.2026, Master, main-Commit 0a141e00 = TL1b): ap_planen bewusst geändert — Topstep-Ketten-Trade 1 trägt konto_typ ab dem Anlegen (Prüfer S2 OK); übrige Planer-/Waage-Funktionen unverändert.
                        # Davor: BASIS = "cbd98da0"     # nachgezogen (12.11.2026, Master, main-Commit cbd98da0 = TW3): ap_planen bewusst geändert — Firmen-Würfel je ID × Firma × Tag (tw_firma_wurf/tw_pause_dazu), Finn 12.11.: „die Zufalls-Propfirms bleiben bei 25 %“; übrige Planer-/Waage-Funktionen unverändert.
                        # Davor: BASIS = "50deee19"     # nachgezogen (11.11.2026, ST1 Slave 2, main-Commit 50deee19 = RV1d): ap_planen seit 1736e50b bewusst geändert durch cc2cdcce/6d9a059d WS2a (Trades pro Tag), 300f3691 WZ1, 201e2530 TT1, 8d5e4d70 TW1 (Handels-Würfel), 7e77e0bf/141c3f13/50deee19 RV1/RV1b/RV1d (Range-Würfel) — alle Finns Aufträge vom 09.–11.11.; die übrigen Planer-/Waage-Funktionen unverändert.
                        # Davor: BASIS = "1736e50b"     # nachgezogen (05.11.2026, Master, ZU1b S7 532df46a = main-Commit 1736e50b): ap_planen gibt den Plan-Tag an die zeiten weiter (zeiten["_tag"]) — Fenster/Fensterende/CFD-Grenzen je Plan-Tag; an jedem Tag ohne Zeitumstellung bitgleich.
@@ -155,7 +156,7 @@ def planer_unveraendert(src, ns):
         # Vergleich ohne diese Zusätze, bis der Master BASIS auf den main-Commit nachzieht
         ohne_eod1b = lambda t: re.sub(r"\n    # EOD1b: Plan-Tag als „heute“[^\n]*", "", t).replace(", heute=tag)", ")").replace(", EOD1b: Plan-Tag", "")   # noqa: E731
         if BASIS_ROH:
-            anders = [n for n in PLANER_FUNKTIONEN if ohne_eod1b(fn(src, n)) != fn(alt, n)]
+            anders = [n for n in PLANER_FUNKTIONEN if fn(src, n) != fn(alt, n)]
         else:
             anders = [n for n in PLANER_FUNKTIONEN
                       if (ohne_gruppe(ohne_te(ohne_dk(fn(src, n)))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
