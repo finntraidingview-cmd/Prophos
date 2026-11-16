@@ -21598,6 +21598,18 @@ def puls_heim_zweit_regel(regel):
     return max(1, mx), (float(z) if z is not None and z >= 0 else PULS_HEIM_ZWEIT_USD)
 
 
+def puls_heim_zweit_firma(regel, firma, zweit_usd):
+    """REIN RECHNEND (testbar, PH1 16.11.2026, Finn: „Der Zweit-Start-Abstand soll je Firma gelten“): Spanne für EINEN laufenden Big Trade —
+    regel.firmen[<_ap_norm(firma)>].zweit_usd (wie puls_heim_schwellen tp_usd/liq_usd), sonst der globale zweit_usd. Anlass: Lucid/FNF Futures 50k
+    haben ab dem Start ≤ 2.000 $ bis zur Grenze — mit globalen 2.500 $ stand der laufende Trade nie weit genug weg, ein zweiter Orbit startete nie.
+    Ohne Eintrag bzw. ungültig (fehlt, < 0, keine Zahl) → zweit_usd unverändert (bitgleich zu vorher)."""
+    fx = regel.get("firmen") if isinstance(regel, dict) and isinstance(regel.get("firmen"), dict) else {}
+    key = _ap_norm(firma) if firma else ""
+    f = fx.get(key) if key else None
+    z = _wd_num(f.get("zweit_usd")) if isinstance(f, dict) else None
+    return float(z) if z is not None and z >= 0 else zweit_usd
+
+
 def puls_heim_markt_oeffnung(jetzt=None):
     """REIN RECHNEND (testbar, 03.11.2026): liegt jetzt (aware datetime, Standard: jetzt) in 09:28–09:35 New York? → Fensterende (UTC) | None.
     Wie prophos_big_trade_markt_oeffnung."""
@@ -21611,10 +21623,11 @@ def puls_heim_markt_oeffnung(jetzt=None):
 
 def puls_heim_zweit_urteil(andere, max_je_id, zweit_usd, firma=None, markt_bis=None):
     """REIN RECHNEND (testbar): darf ein weiterer Big Trade derselben ID im selben Fenster starten? andere = [{name, art, nah, rest_tp_usd,
-    rest_liq_usd, gesendet}] der schon laufenden (nah wie puls_heim_nah mit Schwellen (zweit_usd, zweit_usd); gesendet = Order gerade raus,
-    noch nicht offen). firma = [{name, firma}] laufende Big Trades derselben ID bei derselben Firma (beide Fenster); markt_bis = Ende der
-    Markteröffnung (puls_heim_markt_oeffnung) oder None. Reihenfolge wie prophos_big_trade_halten: nichts im Fenster → nur Firma; sonst voll →
-    Firma → Markteröffnung → Abstand. → {frei, code?, grund?, rest_tp_usd?, rest_liq_usd?, firma?, bis?}."""
+    rest_liq_usd, gesendet, zweit_usd?}] der schon laufenden (nah wie puls_heim_nah mit Schwellen (z, z), z = zweit_usd der Firma des laufenden
+    Trades (PH1, puls_heim_zweit_firma), sonst der globale zweit_usd; gesendet = Order gerade raus, noch nicht offen). firma = [{name, firma}]
+    laufende Big Trades derselben ID bei derselben Firma (beide Fenster); markt_bis = Ende der Markteröffnung (puls_heim_markt_oeffnung) oder
+    None. Reihenfolge wie prophos_big_trade_halten: nichts im Fenster → nur Firma; sonst voll → Firma → Markteröffnung → Abstand.
+    → {frei, code?, grund?, rest_tp_usd?, rest_liq_usd?, firma?, bis?, zweit_usd? (nur Spanne einer Firma ≠ global)}."""
     andere, firma = list(andere or ()), list(firma or ())
     def firma_sperre():
         f = firma[0]
@@ -21641,8 +21654,14 @@ def puls_heim_zweit_urteil(andere, max_je_id, zweit_usd, firma=None, markt_bis=N
             return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR,
                     "grund": f"Big Trade {a.get('name')} ({a.get('art')}) nicht prüfbar: {a.get('grund') or 'kein Kurs/Level'} — zweiter Start wartet"}
         if a.get("nah"):
-            return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT, "rest_tp_usd": a.get("rest_tp_usd"), "rest_liq_usd": a.get("rest_liq_usd"),
-                    "grund": f"1. Trade {a.get('name')} ({a.get('art')}) ist {a.get('grund')} — zweiter Start wartet (Spanne {format(float(zweit_usd), ',.0f').replace(',', '.')} $)"}
+            # PH1 (16.11.2026): Spanne des laufenden Trades je Firma (a.zweit_usd, puls_heim_zweit_firma), sonst die globale — nur dann ein
+            # eigenes Feld zweit_usd in der Antwort (der Tab zeigt es als „Spanne“), ohne Firmen-Eintrag bitgleich wie vorher
+            sp = a.get("zweit_usd") if a.get("zweit_usd") is not None else zweit_usd
+            u = {"frei": False, "code": PULS_HEIM_CODE_ZWEIT, "rest_tp_usd": a.get("rest_tp_usd"), "rest_liq_usd": a.get("rest_liq_usd"),
+                 "grund": f"1. Trade {a.get('name')} ({a.get('art')}) ist {a.get('grund')} — zweiter Start wartet (Spanne {format(float(sp), ',.0f').replace(',', '.')} $)"}
+            if float(sp) != float(zweit_usd):
+                u["zweit_usd"] = float(sp)
+            return u
     return {"frei": True}
 
 
@@ -21707,14 +21726,20 @@ def puls_heim_zweit_pruefen(plan):
             return {"frei": True, "max_je_id": mx, "zweit_usd": zu}
         bis = puls_heim_markt_oeffnung(jetzt) if andere else None
         offen = [r for r in andere if r.get("status") == "open"]
-        naehe = {str(x[0].get("id")): x for x in _puls_heim_naehe(offen, lambda _a, _p: (zu, zu))} \
+        # PH1 (16.11.2026): Spanne je LAUFENDEM Trade nach SEINER Firma (Konto-Firma wie puls_heim_pruefen, sonst master_firm), sonst global zu
+        zweit_je = {}
+        def _zweit_schwellen(acc, q):
+            z = puls_heim_zweit_firma(regel, (acc or {}).get("firm") or q.get("master_firm"), zu)
+            zweit_je[str(q.get("id"))] = z
+            return (z, z)
+        naehe = {str(x[0].get("id")): x for x in _puls_heim_naehe(offen, _zweit_schwellen)} \
             if (offen and len(andere) < mx and not firma and bis is None) else {}
         liste = []
         for r in andere:
             x = naehe.get(str(r.get("id")))
             if x:
                 liste.append({"name": x[3], "art": x[4], "nah": x[1]["nah"], "grund": x[1]["grund"], "rest_tp_usd": x[1]["rest_tp_usd"],
-                              "rest_liq_usd": x[1]["rest_liq_usd"], "info": x[2]})
+                              "rest_liq_usd": x[1]["rest_liq_usd"], "info": x[2], "zweit_usd": zweit_je.get(str(r.get("id")), zu)})
             else:
                 liste.append({"name": r.get("master_name") or r.get("master_firm") or "?", "art": str(r.get("richtung") or "").upper(),
                               "gesendet": r.get("status") != "open", "nah": None})
@@ -21725,7 +21750,10 @@ def puls_heim_zweit_pruefen(plan):
                 u["big_trade"] = erst
         elif liste:   # Z6 (03.11.2026): weiterer Big Trade frei → Abstand der laufenden beim Start merken (Handy-Meldung „Zweiter Big Trade gestartet“)
             u["zweit_andere"] = [dict(a.get("info") or {}, konto=(a.get("info") or {}).get("konto") or a.get("name"), art=a.get("art")) for a in liste]
-        return dict(u, max_je_id=mx, zweit_usd=zu)
+        out = dict(u, max_je_id=mx, zweit_usd=zu)
+        if u.get("zweit_usd") is not None:   # PH1: Spanne der Firma des wartenden-machenden Trades (nur bei Firmen-Eintrag gesetzt)
+            out["zweit_usd"] = u["zweit_usd"]
+        return out
     except Exception as e:
         print(f"[puls-heim] ⚠️ Zweit-Prüfung {str(p.get('id'))[:8]}: {type(e).__name__}: {str(e)[:160]}", flush=True)
         return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "max_je_id": mx, "zweit_usd": zu,
