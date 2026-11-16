@@ -32423,6 +32423,110 @@
     }catch(_){}
     return null
   }
+  /* TICKET-WEG NUR MIT BEWEIS (FH3, 16.11.2026, Vorfall Finn + Pascal FundedNext Futures 150k …38896, Plan e7109578): 14:51:48–14:52:00 UTC
+   * meldete der Copier von Fusion 488579 alle 7 Solo-Tickets im 2-s-Takt als „weg“ (Ring grund „unbekannt“, pl null) — die Positionsliste
+   * war nur kurz LEER (Reconnect/positions_get leer), 20 s später waren 6 davon wieder da. Der Tab von pc-2zc2we sah sein Ticket in EINER
+   * Lesung nicht, nahm „Level in MetaTrader gefüllt“ an und schickte über hedgeSoloSchliessen einen ECHTEN Close → der lebende Hedge ging
+   * zu, der Master (BUY 2 MNQ, −1.678 $) lief ungehedgt weiter. Regel jetzt (Master/Finn): „Ticket fehlt“ heißt nur dann „zu“, wenn
+   *   (a) die Liste in der Lesung NICHT leer ist (andere Tickets da) und das Ticket in ≥ 2 frischen Lesungen fehlt, ≥ 10–15 s auseinander
+   *       (gestreut), oder (b) der Ring es als zu meldet und es in keiner frischen Liste mehr lebt.
+   * Gebucht wird dann OHNE Close-Befehl; das P&L holt hedgePlNachholen (nur wenn das Ticket nirgends mehr lebt). Leere Liste → nichts, warten.
+   * REIN RECHNEND (Test-Haken window._hedgeTicketWegEntscheid): stand = {ticket, n, naechster} der letzten Lesung oder null. */
+  // lesungAt = fetchedAt des Copier-Stands (Prüfer-Nachzug FH3: dieselbe ≤ 15 s alte Lesung darf nicht zweimal zählen); null = ohne Vergleich.
+  // Ein Stand älter als 5 min (Zweig lange nicht erreicht) gilt als verfallen und fängt neu an.
+  function hedgeTicketWegEntscheid(liste, ticket, stand, jetzt, abstandMs, lesungAt){
+    const t = Number(ticket)
+    if(!Array.isArray(liste) || !(t > 0)) return { tun: 'nichts', stand: stand || null, warum: 'keine frische Liste' }
+    if(liste.some(q => q && Number(q.ticket) === t)) return { tun: 'nichts', stand: null, warum: 'Ticket lebt' }
+    if(!liste.some(q => q && Number(q.ticket) > 0)) return { tun: 'nichts', stand: stand || null, warum: 'Liste leer (Reconnect?) — warten' }
+    const ab = (Number(abstandMs) >= 10000) ? Number(abstandMs) : 10000
+    const la = Number(lesungAt) > 0 ? Number(lesungAt) : null
+    const neu = { ticket: t, n: 1, naechster: jetzt + ab, seit: jetzt, lesung_at: la }
+    if(!stand || Number(stand.ticket) !== t || jetzt - (Number(stand.seit) || jetzt) > 300000) return { tun: 'nichts', stand: neu, warum: '1. Lesung ohne Ticket' }
+    if(jetzt < Number(stand.naechster)) return { tun: 'nichts', stand, warum: 'warte auf die nächste Lesung' }
+    if(la != null && stand.lesung_at != null && !(la > Number(stand.lesung_at))) return { tun: 'nichts', stand, warum: 'derselbe Copier-Stand — warte auf einen neueren' }
+    const n = (Number(stand.n) || 1) + 1
+    const st2 = { ticket: t, n, naechster: jetzt + ab, seit: Number(stand.seit) || jetzt, lesung_at: la }
+    if(n >= 2) return { tun: 'buchen', stand: st2, warum: `${n} Lesungen ≥ ${Math.round(ab / 1000)} s auseinander ohne Ticket, andere Tickets da` }
+    return { tun: 'nichts', stand: st2, warum: 'weiter beobachten' }
+  }
+  /* RING ALS BEWEIS NUR MIT DEAL (Prüfer-Nachzug FH3): beim Vorfall schrieb der Copier für jedes kurz verschwundene Ticket „unbekannt“ ohne P&L und
+   * ohne Schlusskurs in den Ring — und der Ring vergisst nie (letzte 20). Ein Ring-Eintrag beweist „zu“ nur mit P&L, Schlusskurs oder einem echten
+   * Grund aus der Deal-Historie (tp/sl/hand/stopout/level_*). REIN RECHNEND (window._hedgeRingBeweis). */
+  function hedgeRingBeweis(z){
+    if(!z || typeof z !== 'object') return false
+    if(typeof z.pl === 'number' && isFinite(z.pl)) return true
+    if(Number(z.fill_close) > 0) return true
+    const g = String(z.grund || '')
+    return !!g && g !== 'unbekannt' && g !== 'close'
+  }
+  window._hedgeRingBeweis = hedgeRingBeweis
+  /* P&L-NACHFRAGE NUR MIT BELEG (Prüfer-Nachzug FH3): hedgePlNachholen ist ein Close-Aufruf mit Ticket — der Copier SCHLIESST, wenn er die
+   * Position findet. Erlaubt nur, wenn (a) der Ring-Eintrag ein Deal-Beweis ist und das Ticket in keiner frischen Liste lebt, oder (b) das Ticket
+   * seit ≥ 60 s in jeder frischen, NICHT leeren Liste fehlt (in Folge — eine leere Lesung fängt die 60 s neu an). REIN RECHNEND (window._hedgeNachfrageEntscheid). */
+  function hedgeNachfrageEntscheid(liste, ticket, fehltSeit, jetzt, ringBeweis){
+    const t = Number(ticket)
+    if(!(t > 0) || !Array.isArray(liste)) return { ok: false, fehltSeit: fehltSeit || null }
+    if(liste.some(q => q && Number(q.ticket) === t)) return { ok: false, fehltSeit: null }
+    if(ringBeweis) return { ok: true, fehltSeit: fehltSeit || null }
+    if(!liste.some(q => q && Number(q.ticket) > 0)) return { ok: false, fehltSeit: null }   // leer = Reconnect: neu zählen (Prüfer: ein langer Reconnect darf die 60 s nicht füllen)
+    const seit = Number(fehltSeit) > 0 ? Number(fehltSeit) : jetzt
+    return { ok: jetzt - seit >= 60000, fehltSeit: seit }
+  }
+  window._hedgeNachfrageEntscheid = hedgeNachfrageEntscheid
+  const _hedgeFehltSeit = new Map()   // plan_id → seit wann das Ticket in nicht leeren Listen fehlt (P&L-Nachfrage)
+  window._hedgeTicketWegEntscheid = hedgeTicketWegEntscheid
+  const _hedgeWegStand = new Map()   // plan_id → stand aus hedgeTicketWegEntscheid
+  // gestreut 20–30 s (Jitter-Regel; Prüfer-Nachzug FH3: beim Vorfall fielen die Tickets im 2-s-Takt nacheinander heraus — das erste fehlte bis zu
+  // ~12 s, während andere noch in der Liste standen; die Lücke dauerte ~20 s. 10–15 s hätten das erste Ticket gebucht)
+  const hedgeWegAbstandMs = () => 20000 + Math.floor(Math.random() * 10000)
+  // Liste UND Stand-Zeit der Lesung (fetchedAt) — wie hedgeSoloListeFrisch, nur mit der Zeit für „neuere Lesung“
+  function hedgeSoloLesungFrisch(){
+    try{
+      if(!MT5_LOCAL || typeof window.mtcInstances !== 'function') return null
+      for(const i of Object.values(window.mtcInstances() || {})){
+        if(i && i.alive && i.fetchedAt && (Date.now() - i.fetchedAt) <= 15000 && i.status && Array.isArray(i.status.hedge_solo)) return { liste: i.status.hedge_solo, at: Number(i.fetchedAt) || null }
+      }
+    }catch(_){}
+    return null
+  }
+  // Lebt das Ticket in einer frischen Liste? Am PC die lokale Panel-Liste, sonst/zusätzlich mt5_live der Zeilen des Hedge-PCs (≤ 30 s).
+  // REIN RECHNEND bis auf die Quellen; true = lebt, false = nirgends gesehen (auch: keine frische Quelle).
+  function hedgeTicketLebt(ticket, pc, liste){
+    const t = Number(ticket); if(!(t > 0)) return false
+    try{
+      if(Array.isArray(liste) && liste.some(q => q && Number(q.ticket) === t)) return true
+      const jetzt = Date.now()
+      for(const r of (window._mt5CloudRows || [])){
+        if(!r || (pc && r.pc_name !== pc) || !(jetzt - (Date.parse(r.updated_at || '') || 0) <= 30000)) continue
+        const s = r.status && r.status.hedge_solo
+        if(Array.isArray(s) && s.some(q => q && Number(q.ticket) === t)) return true
+      }
+    }catch(_){}
+    return false
+  }
+  window._hedgeTicketLebt = hedgeTicketLebt
+  // FH3: „Ticket weg“ mit Beweis buchen — OHNE Close-Befehl (der Copier wird nicht angesprochen). P&L folgt über hedgePlNachholen,
+  // das erst fragt, wenn das Ticket in keiner frischen Liste mehr lebt. Ein anderer Tab hat schon gebucht / neues Ticket → nichts.
+  async function hedgeWegBuchen(plan, warum){
+    const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+    if(!h || !(h.status === 'offen' || h.status === 'schliesst') || !h.ticket) return false
+    const pid = String(plan.id)
+    if(_hedgeBusy.has(pid)) return false
+    _hedgeBusy.add(pid)
+    try{
+      try{ const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle(); const hf = z && z.mt5_baseline && z.mt5_baseline.hedge
+        if(!hf || !(hf.status === 'offen' || hf.status === 'schliesst') || Number(hf.ticket) !== Number(h.ticket)) return false
+        var hNeu = hf }catch(_){ return false }   // Lesefehler → nächster Takt
+      // Lief unser eigener Close (schliesst, Antwort verloren), gilt dessen Grund — sonst „Level in MetaTrader“
+      const grund = (hNeu.status === 'schliesst' && hNeu.grund && hNeu.grund !== 'level_mt5') ? hNeu.grund : 'level_mt5'
+      await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund, grund_tab: 'level_mt5', grund_copier: null, pl: null, pl_offen: true, schon_zu: true, close_fehler: null, close_versuche: 0,
+        closed_at: new Date().toISOString(), close_tab: HEDGE_TAB_ID, weg_beweis: String(warum || '').slice(0, 160),
+        msg: 'Ticket nicht mehr in der Fusion-Liste — ohne Close gebucht, P&L folgt' })
+      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grund)}) · P&L folgt`, 'end')
+      return true
+    }finally{ _hedgeBusy.delete(pid) }
+  }
   // Vom Copier SELBST erkannte Abschlüsse (Backend .475): status.hedge_solo_zu[] = letzte 20 {ticket, pl, grund, fill_close,
   // closed_at, …}, neustart-fest. Steht das Ticket drin, ist die Position zu — ohne Close-Aufruf. Nur frische Status (≤ 15 s).
   // Am PC aus dem Panel (mtcInstances), am Mac aus mt5_live (window._mt5CloudRows, Zeilen des PCs, der den Hedge hält) —
@@ -36097,15 +36201,30 @@
         // Ring-Abgleich (Backend .475): Ticket in hedge_solo_zu → Position ist zu, Ergebnis direkt übernehmen, kein Close-Aufruf
         if((h.status === 'offen' || h.status === 'schliesst') && h.ticket && !_hedgeBusy.has(String(p.id))){
           const zu = hedgeSoloZuFinden(h.ticket, h.pc)
-          if(zu){ await hedgeZuAusRing(p, zu); continue }
+          // FH3: Ring-Eintrag zählt nur, wenn das Ticket in keiner frischen Liste mehr lebt (16.11.: „unbekannt“-Einträge bei kurz leerer Liste)
+          if(zu && hedgeRingBeweis(zu) && !hedgeTicketLebt(h.ticket, h.pc, liste)){ await hedgeZuAusRing(p, zu); continue }
         }
         if(!amPc) continue
+        // FH3-RÜCKNAHME: ohne Close als zu gebucht (weg_beweis), noch kein P&L, und das Ticket lebt wieder in der frischen Liste → war doch nur
+        // eine Lücke in der Liste: wieder „offen“, damit der Wächter den Hedge weiter am Master führt (sonst bliebe er verwaist offen)
+        if((p.status === 'open' || p.status === 'review') && h.status === 'geschlossen' && h.weg_beweis && h.pl == null && h.ticket && Array.isArray(liste) && liste.some(q => q && Number(q.ticket) === Number(h.ticket)) && !_hedgeBusy.has(String(p.id))){
+          // auch im Review (Prüfer-Nachzug): mit „offen“ schließt der Wächter einen lebenden Hedge sauber über das Master-Ende statt ihn verwaisen zu lassen
+          _hedgeFehltSeit.delete(String(p.id))
+          try{ await hedgeAmPlanSchreiben(p.id, { status: 'offen', weg_beweis: null, weg_zurueck_at: new Date().toISOString(), pl_offen: false, schon_zu: false, closed_at: null, grund: null, grund_tab: null, pl_versuche: 0, pl_nachfrage_at: null,
+            msg: 'Ticket wieder in der Fusion-Liste — Buchung „zu“ zurückgenommen' }) }catch(e){ console.warn('[hedgeWache] Rücknahme', e) }
+          continue
+        }
         // Hedge wegen Master-TP/-SL zu, Plan läuft noch → Plan auf Überprüfen (25.09.2026, auch nachträglich, z. B. Plan 24b7c138)
         if(h.status === 'geschlossen' && p.status === 'open' && (HEDGE_REVIEW_GRUENDE[h.grund] || hedgeReviewSpaetFaellig(h, Date.now()))){ if(await hedgePlanAufReview(p)) continue }   // + Nachzügler nach Reader-Ende (08.10.2026)
         // Hedge von Hand/anders zu, Master laut Prophos offen (30.10.2026): nur mit Reader-Flach-Beweis → Überprüfen, sonst bleibt der Alarm
         if(hedgeHandFlachFaellig(p, Date.now())){ try{ await hedgeHandFlachPruefen(p) }catch(e){ console.warn('[handFlach]', e) } }
         // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
-        if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
+        // FH3: die Nachfrage ist ein Close-Aufruf mit Ticket — nie, solange das Ticket noch in einer frischen Liste lebt
+        if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id)) && !hedgeTicketLebt(h.ticket, h.pc, liste)){
+          const pidN = String(p.id), nf = hedgeNachfrageEntscheid(liste, h.ticket, _hedgeFehltSeit.get(pidN) || null, Date.now(), hedgeRingBeweis(hedgeSoloZuFinden(h.ticket, h.pc)))
+          if(nf.fehltSeit) _hedgeFehltSeit.set(pidN, nf.fehltSeit); else _hedgeFehltSeit.delete(pidN)
+          if(nf.ok){ await hedgePlNachholen(p); continue }
+        }
         // Master nie gefüllt → Beweis sammeln, dann Start-Fehler + neu einplanen bzw. Überprüfen (08.10.2026, Finn) — nach dem P&L-Nachholen
         if(h.status === 'geschlossen' && p.status === 'open' && h.grund === 'master_nie_da'){ try{ await hedgeNieDaPruefen(p) }catch(e){ console.warn('[nieDa]', e) } continue }
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
@@ -36275,9 +36394,16 @@
           }catch(e){ console.warn('[hedgeWache] Reader-Abgleich', e) }
         }
         // Position im Terminal weg (Schließ-Level gefüllt oder von Hand zu) — erst 20 s nach dem Open, damit ein
-        // Status von VOR dem Open nicht als „weg" durchgeht; hedgeSoloSchliessen bekommt dann schon_zu + P&L
-        if(liste && !liste.some(q => q && Number(q.ticket) === Number(h.ticket))
-           && Date.now() - (Date.parse(h.opened_at || h.at || '') || 0) > 20000) await hedgeSoloSchliessen(p, 'level_mt5')
+        // Status von VOR dem Open nicht als „weg" durchgeht.
+        // FH3 (16.11.2026, e7109578): NIE mehr ein Close-Befehl aus „Ticket fehlt“ — nur buchen, und nur mit Beweis (hedgeTicketWegEntscheid:
+        // Liste nicht leer + 2 Lesungen ≥ 10–15 s ohne Ticket). Vorher ging hier hedgeSoloSchliessen raus und schloss eine lebende Position.
+        if((h.status === 'offen' || h.status === 'schliesst') && h.ticket && Array.isArray(liste) && !_hedgeBusy.has(String(p.id))
+           && Date.now() - (Date.parse(h.opened_at || h.at || '') || 0) > 20000){
+          const lesW = hedgeSoloLesungFrisch()
+          const pidW = String(p.id), e = hedgeTicketWegEntscheid(liste, h.ticket, _hedgeWegStand.get(pidW) || null, Date.now(), hedgeWegAbstandMs(), lesW && lesW.at)
+          if(e.stand) _hedgeWegStand.set(pidW, e.stand); else _hedgeWegStand.delete(pidW)
+          if(e.tun === 'buchen'){ _hedgeWegStand.delete(pidW); await hedgeWegBuchen(p, e.warum) }
+        }
       }
     }catch(e){ console.warn('[hedgeWache]', e) }
     finally{ _hedgeWacheBusy = false }
@@ -59494,7 +59620,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2238'
+  const OS_TAB_BUILD = '2026-09-22.2239'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63838,8 +63964,14 @@
     if(term.some(x => !Array.isArray(x.status.hedge_solo))) return { z: null, warum: 'hedge_solo nicht lesbar' }
     const t = Number(h.ticket)
     if(lebend.some(x => Array.isArray(x.status.hedge_solo) && x.status.hedge_solo.some(q => q && Number(q.ticket) === t))) return { z: 'offen', warum: '' }
-    const ring = lebend.some(x => Array.isArray(x.status.hedge_solo_zu) && x.status.hedge_solo_zu.some(q => q && Number(q.ticket) === t))
-    if(ring || h.status === 'geschlossen') return { z: 'zu', warum: ring ? 'Ring' : 'DB geschlossen' }
+    // FH3 (16.11.2026): ein Ring-Eintrag zählt nur mit Deal-Beweis (hedgeRingBeweis) — „unbekannt“ ohne P&L stammt aus einer kurz leeren Liste;
+    // „DB geschlossen“ aus einer Weg-Buchung ohne P&L (weg_beweis) ist kein Beweis. Sind alle Listen des Hedge-Kontos leer: warten (Reconnect).
+    const ring = lebend.some(x => Array.isArray(x.status.hedge_solo_zu) && x.status.hedge_solo_zu.some(q => q && Number(q.ticket) === t && hedgeRingBeweis(q)))
+    const dbZu = h.status === 'geschlossen' && !(h.weg_beweis && h.pl == null)
+    // Leer-Prüfung VOR dem Ring (Prüfer): ein Deal-Ring aus einem Teil-Close darf bei leerer Liste nie „zu“ sagen → sonst master_zu
+    if(term.every(x => !x.status.hedge_solo.some(q => q && Number(q.ticket) > 0))) return { z: null, warum: 'Liste des Hedge-Kontos leer (Reconnect?) — warten' }
+    if(ring) return { z: 'zu', warum: 'Ring' }
+    if(dbZu) return { z: 'zu', warum: 'DB geschlossen' }
     return { z: null, warum: 'Ticket fehlt in hedge_solo, aber weder Ring noch DB sagen „zu"' }
   }
   window._abHedgeSolo = abHedgeSolo
