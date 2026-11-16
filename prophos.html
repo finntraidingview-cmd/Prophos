@@ -59620,7 +59620,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2239'
+  const OS_TAB_BUILD = '2026-09-22.2240'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63729,8 +63729,10 @@
   // REIN RECHNEND (Test-Haken window._zsHedgeLesung): eine Copier-Lesung → true = Hedge weg · false = Hedge noch da · null = kein Beweis (nicht frisch)
   //   art 'solo': instances = [{alive, status:{hedge_solo:[{ticket}]}}], ticket = Fusion-Solo-Ticket
   //   art 'echo': instances, file = Instanz des Masters, ticket = Master-ident (Copier-Hedges stehen unter status.hedges[ident])
-  function zsHedgeLesung(art, instances, ticket, file){
-    const inst = Array.isArray(instances) ? instances : []
+  // hedgeLogin (FH5, Prüfer): nur die Instanzen DIESES Fusion-Kontos zählen (wie abHedgeSolo) — sonst wären Tickets eines anderen Hedge-Kontos „andere da“
+  function zsHedgeLesung(art, instances, ticket, file, hedgeLogin){
+    let inst = Array.isArray(instances) ? instances : []
+    if(art === 'solo' && hedgeLogin) inst = inst.filter(x => x && x.status && String(x.status.hedge_login || x.hedge_expected || '') === String(hedgeLogin))
     if(art === 'solo'){
       // Gegenprüfung 09.11.2026 (Risiko 3): hedge_solo gilt je Copier-Prozess — über ALLE lebenden Instanzen vereinigen (wie panel.py
       // scharf_copier_solo); meldet eine lebende Instanz hedge_solo = null (positions_get-Fehler), ist nichts bewiesen
@@ -63738,7 +63740,17 @@
       if(lebend.some(x => x.status.hedge_solo === null)) return null
       const listen = lebend.filter(x => Array.isArray(x.status.hedge_solo))
       if(!listen.length) return null
-      return !listen.some(x => x.status.hedge_solo.some(q => q && Number(q.ticket) === Number(ticket)))
+      const t = Number(ticket)
+      if(listen.some(x => x.status.hedge_solo.some(q => q && Number(q.ticket) === t))) return false
+      // FH5 (16.11.2026, Hinweis S2 nach FH3/Vorfall e7109578): eine KOMPLETT LEERE Liste ist kein Beweis — beim Copier-Aussetzer fielen alle
+      // Solo-Tickets ~20 s aus der Liste. Sonst wertete der Zufalls-Schluss die Lücke als „Hedge weg“ und unterdrückte den Alarm „Hedge NICHT zu“.
+      // „weg“ dann nur mit Deal-Ring (hedgeRingBeweis: P&L/Schlusskurs/echter Grund) — so bleibt das Ein-Positions-Konto nach echtem Schluss bewiesen.
+      // BEWUSST anders als abHedgeSolo (dort Leer-Prüfung VOR dem Ring, weil daraus master_zu folgt): hier hängt nur ein Alarm daran. Restrisiko:
+      // Teil-Close (Ring hat schon einen Deal, Rest offen) + gleichzeitig leere Liste → „weg“ ohne Alarm — selten, der Copier drückt den Rest selbst zu.
+      // Die Alternative wäre ein Fehlalarm nach JEDEM echten Schluss eines Ein-Positions-Kontos.
+      if(lebend.some(x => Array.isArray(x.status.hedge_solo_zu) && x.status.hedge_solo_zu.some(q => q && Number(q.ticket) === t && hedgeRingBeweis(q)))) return true
+      if(!listen.some(x => x.status.hedge_solo.some(q => q && Number(q.ticket) > 0))) return null
+      return true
     }
     const i = inst.find(x => x && x.file === file)
     if(!i || !i.alive || !i.status || i.status.note) return null
@@ -63750,13 +63762,13 @@
   window._zsHedgeLesung = zsHedgeLesung
 
   // Zwei frische Lesungen hintereinander ohne Hedge → { hedge_zu: true, beleg } · Frist um → { hedge_zu: false, beleg }
-  async function zsHedgeBeweis(art, ticket, file){
+  async function zsHedgeBeweis(art, ticket, file, hedgeLogin){
     const t0 = Date.now(), lesungen = []
     let n = 0
     while(Date.now() - t0 < ZS.hedge_frist_ms){
       let dd = null
       try{ dd = await window.mtcApi('instances') }catch(_){ dd = null }
-      const weg = (dd && !dd.copier_offline && !dd._httpFail) ? zsHedgeLesung(art, dd.instances, ticket, file) : null
+      const weg = (dd && !dd.copier_offline && !dd._httpFail) ? zsHedgeLesung(art, dd.instances, ticket, file, hedgeLogin) : null
       lesungen.push({ at: new Date().toISOString(), weg })
       n = weg === true ? n + 1 : 0
       if(n >= ZS.hedge_lesungen) return { hedge_zu: true, beleg: { art, ticket, lesungen: lesungen.slice(-ZS.hedge_lesungen), dauer_ms: Date.now() - t0 } }
@@ -63841,7 +63853,7 @@
     // Hedge-Beweis: Fusion-Solo (tvv2 mit Hedge) bzw. Copier-Hedge (Echo). Echo V2 und Orbit ohne Hedge: null (kein Hedge)
     let hb = { hedge_zu: null, beleg: null }
     const h = b.hedge
-    if(h && h.ticket && ['offen', 'schliesst'].includes(h.status)) hb = await zsHedgeBeweis('solo', h.ticket, null)
+    if(h && h.ticket && ['offen', 'schliesst'].includes(h.status)) hb = await zsHedgeBeweis('solo', h.ticket, null, h.hedge_login || null)
     else if(p.route === 'mt5' && (erg.ticket || Number(b.ticket))){
       let file = erg.file || null
       if(!file){ try{ const dd = await window.mtcApi('instances'); const r = mt5RouteResolve(p, (dd && dd.instances) || []); file = r && r.inst && r.inst.file }catch(_){} }
@@ -63852,7 +63864,7 @@
     const hedgeTxt = hb.hedge_zu === true ? ' · Hedge zu (2 Lesungen)' : hb.hedge_zu === false ? ' · ⚠ Hedge NICHT bewiesen zu' : ''
     try{ await acLog(p, true, `Zufalls-Schluss ${status === 'war_flach' ? '(war schon flach)' : '✓'}${st.art === 'hx1' ? ' · HX1: nur Master' : ''}: ${erg.msg || ''}${hedgeTxt}`) }catch(_){}
     if(typeof atToast === 'function') atToast(`🎲 ${name}: Zufalls-Schluss ${status === 'war_flach' ? '— war schon flach' : '✓'}${hedgeTxt}`, 'end')
-    if(hb.hedge_zu === false) acBenachrichtigen('🔴 Zufalls-Schluss', `${name}: Master zu, Hedge nach 90 s noch offen — im Hedge-Terminal prüfen.`)
+    if(hb.hedge_zu === false) acBenachrichtigen('🔴 Zufalls-Schluss', `${name}: Master zu, Hedge nach 90 s NICHT bewiesen zu (offen oder Copier-Liste leer) — im Hedge-Terminal prüfen.`)
     try{ loadTradePlansFromSupabase() }catch(_){}
   }
 
