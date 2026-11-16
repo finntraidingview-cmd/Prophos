@@ -4407,6 +4407,10 @@ def alarm_tick():
         update_wartet_tick(aus, jetzt.timestamp())
     except Exception as e:
         print(f"[alarm] ⚠️ Update-Wache: {type(e).__name__}: {e}", flush=True)
+    try:
+        pc_uhr_tick(aus, jetzt.timestamp())   # TS1b (16.11.2026): Puls hat „Time Sync Warning“ weggeklickt → ⚪ PC-Uhr nicht synchron
+    except Exception as e:
+        print(f"[alarm] ⚠️ PC-Uhr-Wache: {type(e).__name__}: {e}", flush=True)
     if jetzt.minute == 7 and jetzt.hour == 3:          # einmal am Tag aufräumen
         try:
             sb_delete("alarm_log", {"at": f"lt.{(jetzt - timedelta(days=ALARM_LOG_TAGE)).isoformat()}"})
@@ -4953,6 +4957,63 @@ def update_wartet_tick(aus, jetzt_ts):
         if schon and key in schon:
             continue
         alarm_senden(3, "copier_update_wartet", "Copier-Update wartet", text, uid=uid, schluessel=key, tag=f"alarm-update-{daten.get('pc')}", daten=daten)
+
+
+# PC-UHR NICHT SYNCHRON (TS1b, Master 16.11.2026 zu TS1): TopstepX zeigt „Time Sync Warning", wenn die Windows-Uhr eines PCs falsch geht; Puls klickt
+# den Dialog weg (order_bot.py _tsx_zeitsync_weg) und meldet es sofort in puls_diagnose (schritt „zeitsync", Spur „Time Sync Warning weggeklickt …").
+# Der Alarm-Takt liest puls_diagnose (eine Zeile je PC, letzter Lauf) und schickt ⚪ „PC-Uhr nicht synchron — Windows-Zeit synchronisieren (PC von <Name>
+# (<pc>))" an die Master-IDs — je PC höchstens einmal am Tag (Dubai), nur eigene Gruppe wie die übrigen Wachen. Die Uhr selbst stellt niemand automatisch.
+PC_UHR_FRISCH_S = 2 * 3600       # nur frische Läufe — eine alte zeitsync-Zeile eines ausgeschalteten PCs meldet nicht jeden Tag neu
+PC_UHR_SPUR = "Time Sync Warning weggeklickt"
+
+
+def pc_uhr_ereignisse(rows, jetzt_ts, tag, pc_namen=None, pc_uid=None):
+    """REIN RECHNEND (testbar): puls_diagnose-Zeilen [{pc_id, at, schritt, spur}] → [(schluessel, text, uid, daten)] für PCs, deren letzter Puls-Lauf
+    (höchstens PC_UHR_FRISCH_S alt) „Time Sync Warning" weggeklickt hat (schritt „zeitsync" oder der Satz in der Spur). Schlüssel je PC und Tag."""
+    pc_namen, pc_uid = pc_namen or {}, pc_uid or {}
+    out = {}
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        pc = str(r.get("pc_id") or "")
+        if not pc or not (str(r.get("schritt") or "") == "zeitsync" or PC_UHR_SPUR in str(r.get("spur") or "")):
+            continue
+        try:
+            at_ts = datetime.fromisoformat(str(r.get("at") or "").replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            continue
+        if jetzt_ts - at_ts > PC_UHR_FRISCH_S:
+            continue
+        key = f"pc_uhr|{pc}|{tag}"
+        name = (pc_namen.get(pc) or {}).get("name") if isinstance(pc_namen.get(pc), dict) else None
+        wer = f"PC von {name} ({pc})" if name else pc
+        text = (f"PC-Uhr nicht synchron — Windows-Zeit synchronisieren ({wer}). Puls hat in TopstepX „Time Sync Warning“ mit PROCEED weggeklickt; "
+                "die Uhr stellt niemand automatisch.")
+        out[key] = (key, text, pc_uid.get(pc), {"pc": pc, "at": r.get("at")})
+    return list(out.values())
+
+
+def pc_uhr_tick(aus, jetzt_ts):
+    ab = datetime.fromtimestamp(jetzt_ts - PC_UHR_FRISCH_S, timezone.utc).isoformat()
+    rows = sb_select("puls_diagnose", {"select": "pc_id,at,schritt:diagnose->>schritt,spur:diagnose->>spur", "at": f"gte.{ab}"}) or []
+    rows = [r for r in rows if isinstance(r, dict) and (str(r.get("schritt") or "") == "zeitsync" or PC_UHR_SPUR in str(r.get("spur") or ""))]
+    if not rows:
+        return
+    # PC → ID aus mt5_live (wie update_wartet_tick): nur eigene Gruppe, nie Emins Gruppe; PCs ohne mt5_live-Zeile melden ohne ID
+    pc_uid = {}
+    for z in _sb_all("mt5_live", {"select": "pc_name,user_id:status->>user_id"}) or []:
+        if isinstance(z, dict) and z.get("pc_name") and z.get("user_id"):
+            pc_uid.setdefault(str(z["pc_name"]), str(z["user_id"]))
+    rows = [r for r in rows if not (pc_uid.get(str(r.get("pc_id") or "")) and (pc_uid[str(r["pc_id"])] in set(aus or ())
+                                                                              or _alarm_fremd_verwaltet(pc_uid[str(r["pc_id"])])))]
+    tag = datetime.fromtimestamp(jetzt_ts, timezone.utc).astimezone(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")
+    evs = [ev for ev in pc_uhr_ereignisse(rows, jetzt_ts, tag, _pc_namen_daten(), pc_uid) if ev[0] not in _alarm["gemeldet"]]
+    schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()
+    for key, text, uid, daten in evs:
+        _alarm["gemeldet"][key] = time.time()
+        if schon and key in schon:
+            continue
+        alarm_senden(3, "pc_uhr", "PC-Uhr nicht synchron", text, uid=uid, schluessel=key, tag=f"alarm-pc-uhr-{daten.get('pc')}", daten=daten)
 
 
 def zwilling_tick(aus, jetzt_ts):
