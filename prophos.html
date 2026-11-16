@@ -57797,6 +57797,17 @@
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
   // Hedge-Betrag für einen Winning-Day-Plan: bestehender Wert bleibt, sonst Staffel (Live-Balance − Kontogröße),
   // ohne Rechenbasis (kein DD am Konto) die kleinste Stufe — ein Winning Day ohne Hedge wäre kein Winning Day.
+  /* LF1e (Prüfer S4 SOLLTE, Master 16.11.2026): 50k-Schlüssel (Lucid/FNF 50k) ohne eigene Hedge-Tabelle → Fehlertext (sonst ''). Dann belegt das Hand-Popup
+   * „Risiko Slave“ NICHT mit der Standard-Staffel vor (kein stiller Rückfall), das Feld bleibt leer mit Hinweis, Speichern braucht einen Wert von Hand. */
+  function tpWdHedgeFehlt(masterId){
+    try{
+      const acc = (accounts || []).find(a => String(a.id) === String(masterId)); if(!acc) return ''
+      const k = tpVorplanFirmaKey(acc.firm, acc); if(wdBasisKey(k) === k || !tpVorplanIstFunded(acc)) return ''
+      const vp = (typeof wdVorplanRegeln === 'function') ? wdVorplanRegeln() : { regeln: TP_VP_VORGABE }
+      const z = tpVorplanZeile(acc, { ohneRecoverer: true, live: (typeof tpVorplanLive === 'function') ? tpVorplanLive(acc) : null, slaveCurrency: '€', regeln: vp.regeln, zufall: 0.5 })
+      return (z && z.fehler && /^Hedge-Werte fehlen/.test(z.fehler)) ? z.fehler : ''
+    }catch(_){ return '' }
+  }
   function tpWdHedgeEur(masterId, bestehend){
     if(bestehend > 0) return bestehend
     try{
@@ -57805,6 +57816,7 @@
       if(acc){
         const z = tpVorplanZeile(acc, { ohneRecoverer: true, live: (typeof tpVorplanLive === 'function') ? tpVorplanLive(acc) : null, slaveCurrency: '€', regeln: vp.regeln, zufall: 0.5 })
         if(z && !z.fehler && z.slaveEur > 0) return Math.round(z.slaveEur * 100) / 100
+        if(z && z.fehler && /^Hedge-Werte fehlen/.test(z.fehler)) return null   // LF1e: 50k ohne eigene Tabelle — kein Rückfall auf die Standard-Staffel
       }
       const st = (vp.regeln && vp.regeln.staffel) || TP_VP_VORGABE.staffel
       const e = tpVorplanStaffel(0, st); return e > 0 ? e : 50
@@ -57925,6 +57937,10 @@
       const masterId = document.getElementById('tp-master')?.value
       const v = (ep && ep.slaveRisk > 0) ? Number(ep.slaveRisk) : tpWdHedgeEur(masterId, 0)
       if(v > 0){ el.value = String(Math.round(v * 100) / 100); _tpWdHand.slaveVorbelegt = true }
+      else if(v == null){   // LF1e: Hedge-Werte fehlen (50k) — Feld leer lassen, Hinweis statt Standard-Wert
+        const f = tpWdHedgeFehlt(masterId); el.placeholder = 'Hedge-Werte fehlen'; el.title = f
+        if(f && typeof atToast === 'function') atToast(f, 'end')
+      }
     }catch(e){ console.warn('[wd-slave-risk] Vorbelegung', e) }
   }
   // Vorschau-Kacheln aus den Lots: bei SL gewinnt Fusion Lots × 0,85 × SL-Punkte (= Slave-Risiko), bei TP verliert Fusion
@@ -59159,7 +59175,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2223'
+  const OS_TAB_BUILD = '2026-09-22.2224'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74089,6 +74105,9 @@
       if(o3Ts) Object.assign(v2Extra, { route: 'tsv2', winning_day: false })   // Topstep Big Trade (27.10.2026): Weg tsv2, orbit_v3 setzt der Block unten
       if(_tpWd || _tpO3){
         if(!masterTp){ msg(`${_tpO3 ? (tpMasterIstTopstep() ? 'Nova' : 'Orbit') : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
+        // LF1e: 50k-Konto ohne eigene Hedge-Tabelle — nur mit Risiko Slave von Hand speichern (kein stiller Standard-Wert)
+        if(_tpWd && !_tpO3){ const _hf = tpWdHedgeFehlt(masterId), _sv = parseFloat(document.getElementById('tp-slave-risk')?.value)
+          if(_hf && !(_sv > 0)){ msg(_hf + ' — oder „Risiko Slave (€)“ von Hand eintragen. Nicht gespeichert.', 'err'); return } }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
         // Lots × 0,85 × TP-Punkte = Fusion-Verlust am Master-TP (die Bedeutung, die Copier-Lots und Farmer-Abgleich kennen)

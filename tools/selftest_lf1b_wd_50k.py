@@ -117,7 +117,7 @@ def zeile(praefix):
 js = ("const istTradeifyCfd = f => /tradeify/i.test(String(f || '')) && /cfd/i.test(String(f || ''));\n"
       + zeile("  const TP_VP_VORGABE = ") + zeile("  function wdBasisKey(") + zeile("  function wd50kName(") + zeile("  const TP_VP_FIRMEN = ")
       + fn("tpVpLucidWieTradeify") + fn("tpVpApex100") + fn("tpVp50k") + fn("tpVorplanFirmaKey") + fn("wdKtSpanne")
-      + zeile("  function tpVorplanSpanne(") + zeile("  function tpVorplanIstFunded(") + fn("tpVorplanZeile") + """
+      + zeile("  function tpVorplanSpanne(") + zeile("  function tpVorplanIstFunded(") + fn("tpVorplanZeile") + fn("tpWdHedgeFehlt") + fn("tpWdHedgeEur") + """
 const tpTopstepMll = () => 0, kontoIstTopstepExpress = () => false, tpKontoGroesseAusName = () => 50000, wdZyklusVon = () => null, tpVorplanSlaveWaehrung = e => e;
 const tpVorplanStaffel = (plus, l) => Array.isArray(l) && l.length ? Number(l[0].eur || 0) : 0;
 const K = (firm, name, sb) => ({ firm, name, startingBalance: sb, type: 'winning_days', maxDrawdown: 2000 });
@@ -136,6 +136,13 @@ const z2 = tpVorplanZeile(K('Lucid Trading', '50k L1 → WD'), { regeln: Object.
 const z3 = tpVorplanZeile(K('Lucid Trading', '150k L1 → WD', 150000), { regeln: R, live: 151000, zufall: 0.5 });
 const z4 = tpVorplanZeile(K('FundedNext Futures', '50k F1'), { regeln: R, live: 51000, zufall: 0.5 });
 r.z = [z1.fehler || null, z2.fehler || null, z2.slaveEur, z2.tpVon, z2.tpBis, z3.fehler || null, z3.slaveEur, z3.tpVon, z4.fehler || null];
+// LF1e: Hand-Popup Winning Day — Vorbelegung „Risiko Slave“
+var accounts = [Object.assign(K('Lucid Trading', '50k L1 → WD'), { id: 'a50' }), Object.assign(K('Lucid Trading', '150k L1 → WD', 150000), { id: 'a150' }),
+  Object.assign(K('FundedNext Futures', '50k F1'), { id: 'f50' }), Object.assign(K('Tradeify', '150k T1', 150000), { id: 't150', maxDrawdown: 0 })];
+let _vpR = R; const wdVorplanRegeln = () => ({ regeln: _vpR }), tpVorplanLive = a => (a.startingBalance || 50000) + 1000;
+r.he = [tpWdHedgeEur('a50', 0), tpWdHedgeFehlt('a50'), tpWdHedgeEur('a150', 0), tpWdHedgeFehlt('a150'), tpWdHedgeEur('f50', 0), tpWdHedgeEur('t150', 0), tpWdHedgeEur('a50', 40)];
+_vpR = Object.assign({}, R, { staffelFirma: { lucid: R.staffelFirma.lucid, lucid50: [{ von: 0, eur: 25 }] } });
+r.he2 = [tpWdHedgeEur('a50', 0), tpWdHedgeFehlt('a50')];
 JSON.stringify(r);
 """)
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
@@ -160,6 +167,15 @@ ok(zz[5] is None and zz[6] == 60 and zz[7] == 268, "Lucid 150k: Tabelle und TP d
 ok("firmen[(typeof wdBasisKey === 'function') ? wdBasisKey(k) : k]" in html and "${e4RegelnHtml(wdBasisKey(k))}" in html,
    "fester SL je Firma und Payout-Regeln (E4) lesen den Firmen-Schlüssel")
 ok("wdBasisKey(k) !== k ? 'fehlt' : 'wie Standard'" in html, "Hedge-Tabelle im Farmer: 50k ohne eigene Tabelle zeigt „fehlt“")
+he, he2 = jr.get("he") or [None] * 7, jr.get("he2") or [None] * 2
+ok(he[0] is None and "Hedge-Werte fehlen für Lucid 50k" in str(he[1]) and he[4] is None,
+   f"LF1e Hand-Popup: Lucid/FNF 50k ohne Tabelle → keine Vorbelegung (null), Hinweis-Text da ({he[:2]}, FNF {he[4]})")
+ok(he[2] == 60 and he[3] == "" and he[5] == 50 and he[6] == 40,
+   f"Lucid 150k aus seiner Tabelle (60), kein Hinweis; Konto ohne DD wie bisher Standard-Staffel (50); bestehender Wert bleibt (40) ({he[2:]})")
+ok(he2 == [25, ""], f"mit eigener Tabelle lucid50: Vorbelegung 25 €, kein Hinweis ({he2})")
+ok("else if(v == null){   // LF1e" in html and "el.placeholder = 'Hedge-Werte fehlen'" in html
+   and "if(_hf && !(_sv > 0)){ msg(_hf + ' — oder „Risiko Slave (€)“ von Hand eintragen. Nicht gespeichert.', 'err'); return }" in html,
+   "Popup: Feld leer mit Hinweis, Speichern ohne Wert gesperrt (Wert von Hand bleibt möglich)")
 
 print()
 print("alle Tests bestanden" if not FEHLER else f"{len(FEHLER)} ROT")
