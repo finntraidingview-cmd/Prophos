@@ -56944,12 +56944,23 @@
   }
   // REIN RECHNEND (window._mt5OrderWiederholen, 30.10.2026): master-order-Antwort + Sekunden seit dem ersten Versuch → erneut versuchen?
   // Nur bei retry_ok (beweisbar nichts gesendet) und Terminal-Gründen; terminal_heilt bis 180 s, sonst 90 s — wie der Echo-V2-Weg
+  /* HW2 (Master 16.11.2026, Folge zu HW1): PC-TIPP-SPERRE BELEGT. Der Bot wartet bis ECHO_TIPP_WARTE_MAX_S (150 s, order_bot.py) auf die PC-weite Sperre
+   * und antwortet erst dann {retry_ok, code puls_beschaeftigt, grund pc_tipp_sperre} — nichts gesendet. Die alte Frist 90 s lag darunter: die erste
+   * Antwort kam nach ~150 s, wiederholt wurde nie. Jetzt eigene Frist bis ECHO_TIPP_FRIST_MS (= Budget eines Echo-Starts, pfLebt 340 s „master-order
+   * darf bis 320 s brauchen"), gestreut 20–40 s zwischen den Versuchen (echoTippPauseMs). Claim, Riegel und Scharf-Beweis unverändert; nur bei
+   * retry_ok === true und nicht gesendet. */
+  const ECHO_TIPP_FRIST_MS = 320000
+  // nur grund pc_tipp_sperre (Prüf-Befund): puls_beschaeftigt OHNE grund kommt auf master-order sonst nur von der Polar-Sperre (panel.py) — Polar hat
+  // Vorrang, dort bleibt es beim sofortigen Start-Fehler wie bisher
+  const echoTippBelegt = r => !!(r && !r.ok && r.retry_ok === true && r.gesendet !== true && r.grund === 'pc_tipp_sperre')
+  const echoTippPauseMs = () => 20000 + Math.random() * 20000   // gestreut (Jitter-Regel)
   function mt5OrderWiederholen(r, seitMs){
     if(echoBotNichtScharf(r)) return false   // ES2d: „nicht scharf" ist eine Antwort, kein Terminal-Heilen (Bot hat schon bis scharf_max_s gewartet)
-    // pc_tipp_sperre (30.10.2026, Routine „Puls-Fehler“ .1953): ein anderer Echo-Lauf an diesem PC tippt noch — der Bot hat gewartet und nichts gesendet, 90 s wie Terminal-Gründe
-    const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || r.grund === 'pc_tipp_sperre' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
+    if(echoTippBelegt(r)) return seitMs <= ECHO_TIPP_FRIST_MS   // HW2: PC-Tipp-Sperre / Puls beschäftigt — eigene Frist, s. oben
+    const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
     return wartbar && seitMs <= (r.grund === 'terminal_heilt' ? 180000 : 90000)
   }
+  window._echoTippBelegt = echoTippBelegt   // Test-Haken (HW2)
   window._mt5OrderWiederholen = mt5OrderWiederholen   // Test-Haken
   /* ECHO-FENSTER VOR DER ORDER (30.10.2026, Befund Slave 8: zwei Echo-mit-Hedge-Master liefen ohne Hedge — FundingPips 50k und
    * FundedNext, Order 23:07 / 00:05 UTC). plan?file (öffnet das Trade-Fenster im plans.json des Panels) ging ungeprüft raus: mtcApi wirft
@@ -57642,8 +57653,16 @@
                     if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
                       r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
                     }
-                    _pfSet('m5term', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in ~6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
-                    await new Promise(res => setTimeout(res, 5000 + Math.random() * 2000))   // gestreut (Jitter-Regel)
+                    // HW2: PC-Tipp-Sperre belegt → 20–40 s gestreut (der andere Echo-Lauf an diesem PC braucht seine Zeit), sonst wie bisher ~6 s
+                    const _tipp = echoTippBelegt(r), _pauseMs = _tipp ? echoTippPauseMs() : 5000 + Math.random() * 2000   // gestreut (Jitter-Regel)
+                    _pfSet('m5term', 'warn', _tipp
+                      ? `⏳ Anderer Echo-Lauf an diesem PC tippt noch — neuer Versuch in ~${Math.round(_pauseMs / 1000)} s (${Math.round((Date.now() - t0) / 1000)}s, nichts gesendet)`
+                      : `⏳ Terminal noch nicht bereit — neuer Versuch in ~6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
+                    await new Promise(res => setTimeout(res, _pauseMs))
+                    // HW2: nach der (längeren) Pause erst prüfen, ob das Popup noch für diesen Plan offen ist — sonst kein neuer Auftrag
+                    if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
+                      r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
+                    }
                   }
                 }finally{ if(_pfV2Laeuft === String(plan.id)) _pfV2Laeuft = laufVorher }
                 // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
@@ -59475,7 +59494,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2237'
+  const OS_TAB_BUILD = '2026-09-22.2238'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
