@@ -200,7 +200,8 @@ if m:
     check({k: {t: {f: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v) for f, v in d.items()} for t, d in x.items()} for k, x in fe.items()}
           == {k: {t: {f: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v) for f, v in d.items()} for t, d in x.items()} for k, x in be.items()},
           "Frontend-Standard = app.py WD_FIRMEN_REGELN_STD (alle Firmen)")
-check("${e4RegelnHtml(k)}" in html and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
+# LF1 (16.11.2026): die 50k-Zeilen (lucid50/fnfutures50) zeigen die Regeln ihrer Firma — wdBasisKey(k), sonst k unverändert
+check(("${e4RegelnHtml(k)}" in html or "${e4RegelnHtml(wdBasisKey(k))}" in html) and "firmen_regeln: neu" in html and "await wdNurGruppe()" in html.split("async function e4Speichern")[1][:200],
       "Einstellungen → Firmen: Payout-Regeln je Firma, Speichern in firmen_regeln, nur HT-weit (wdNurGruppe)")
 check("_tradeify_zyklus_anhaengen(apex, plaene, pay, vorplan, _wd_firmen_regeln_lesen())" in app and "regel=mn_je.get(zyklus_plus_key(k) or \"tradeify\"), wd_lock=_lock(k)," in app,   # LZ1 (10.11.2026): Regel je Firma (Tradeify/Lucid); PO2b: WD-Lock; RC3: danach rc_regel
       "Railway liest firmen_regeln (Rückfall Standard) und gibt die Regel an tradeify_zyklus_konto")

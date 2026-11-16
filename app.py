@@ -16924,12 +16924,19 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     fehl = round(max(0.0, -gewinn), 2)
     regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
     _fu = regeln.get("fu") if isinstance(regeln.get("fu"), dict) else {}
-    fu = _fu.get(fk) or _fu.get("tradeify")   # LZ1: Lucid mit eigenen WD-Werten, sonst die von Tradeify (wie tpVpLucidWieTradeify)
+    g = _wd_konto_groesse(konto)
+    # LF1: Lucid 50k mit eigenem TP-/Hedge-Schlüssel (lucid50) — TP aus dessen Spanne, Hedge NUR aus dessen Tabelle (kein Rückfall auf Lucid/Tradeify/Standard);
+    # Regel (min_netto), Menge (RC3) und Name bleiben beim Firmen-Schlüssel. Lucid/Tradeify 150k: tk == fk → bitgleich wie bisher
+    tk = (globals().get("WD_FU_50K") or {}).get(fk, fk) if (g and abs(float(g) - 50000) < 1) else fk   # globals: Selbsttest-Lader ziehen die Funktion einzeln
+    if tk != fk:
+        fu = _fu.get(tk) if isinstance(_fu.get(tk), list) else (globals().get("WD_FU_STANDARD") or {}).get(tk)
+    else:
+        fu = _fu.get(fk) or _fu.get("tradeify")   # LZ1: Lucid mit eigenen WD-Werten, sonst die von Tradeify (wie tpVpLucidWieTradeify)
     von, bis = fu if (isinstance(fu, list) and len(fu) == 2) else (270, 290)
     ziel_normal = round(((_wd_num(von) or 0) + max(_wd_num(von) or 0, _wd_num(bis) or 0)) / 2)
-    g = _wd_konto_groesse(konto)
     sf = regeln.get("staffelFirma") if isinstance(regeln.get("staffelFirma"), dict) else {}
-    staffel_eur = _wd_staffel_eur(round(lv - g) if g else 0, sf.get(fk) or sf.get("tradeify") or regeln.get("staffel"))
+    hedge_fehlt = tk != fk and not (isinstance(sf.get(tk), list) and sf.get(tk))
+    staffel_eur = 0.0 if hedge_fehlt else _wd_staffel_eur(round(lv - g) if g else 0, (sf.get(tk) if tk != fk else None) or sf.get(fk) or sf.get("tradeify") or regeln.get("staffel"))
     satz_normal = round(staffel_eur / ziel_normal * 1000, 2) if ziel_normal > 0 else 0.0
     # Puffer je Trade gewürfelt (Jitter), aber stabil für denselben Trade: Saat = Konto + CME-Handelstag (höchstens 1 Trade je Tag) — sonst zöge jeder Abruf einen
     # anderen TP und der Tab würde den geplanten Trade ständig nachziehen
@@ -16944,7 +16951,10 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     tp = max(float(ziel_normal), float(-(-(max(fehl + TRADEIFY_ZYKLUS_MIN_USD, min_usd - gewinn) + puffer) // 1))) if aktiv else None
     out.update({"start_bal": sb, "gewinn": gewinn, "gesperrt": gesperrt, "fehl": fehl, "aktiv": aktiv, "ziel_normal": ziel_normal, "satz_normal": satz_normal,
                 "puffer": puffer, "stand": stand, "ziel_tage": ziel_tage})
-    if aktiv:
+    if aktiv and hedge_fehlt:   # LF1: Lucid 50k ohne eigene Hedge-Tabelle — kein Ausgleichs-Trade mit Hedge 0, sichtbarer Grund (Sperre bleibt)
+        out.update({"aktiv": False, "satz_normal": None, "grund_code": "hedge_fehlt",
+                    "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Ausgleich fällig, aber Hedge-Werte fehlen für {fname} 50k (Winning Days → Einstellungen → {fname} 50k → eigene Hedge-Tabelle)"})
+    elif aktiv:
         out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
         # RC3 (Finn 11.11.2026): Menge nach TP — Felder wie der Apex-Recoverer, die das Frontend liest (rc3_felder). TP, Satz und hedge_eur bleiben
@@ -50247,6 +50257,18 @@ def fdp_regeln_aendern(reg, body):
 WD_FU_STANDARD = {"tradeify": [270, 290], "lucid": [270, 290], "fnfutures": [270, 290], "apex": [370, 390], "apex100": [320, 340], "topstep": [220, 240], "sonst": [270, 290], "ftmofutures": [220, 240]}   # FT2: FTMO Futures „TP so 220 bis 240“
 
 
+WD_FU_50K = {"lucid": "lucid50", "fnfutures": "fnfutures50"}   # LF1: eigene WD-TP-Schlüssel für 50k (wie apex100), Firmen-Regeln bleiben beim Firmen-Schlüssel
+WD_FU_STANDARD.update({"lucid50": [170, 190], "fnfutures50": [220, 240]})   # LF1 (Finn 16.11.2026): FNF 50k 220–240 (Linie 200), Lucid 50k 170–190 (Linie 150)
+
+
+def wd_tp_schluessel(name, groesse=None):
+    """REIN (testbar), LF1: Schlüssel für TP-Spanne, Kontrakte und Hedge-Tabelle des Farmers (wie tpVorplanFirmaKey im Frontend) — bei Lucid / FundedNext Futures
+    mit 50k der eigene 50k-Schlüssel, sonst der Firmen-Schlüssel fdp_wd_schluessel (bitgleich). Firmen-Regeln, fester SL und Freigabe bleiben beim Firmen-Schlüssel."""
+    k = fdp_wd_schluessel(name, groesse)
+    g = _wd_num(groesse)
+    return WD_FU_50K.get(k, k) if (g is not None and abs(float(g) - 50000) < 1) else k
+
+
 def fdp_wd_schluessel(name, groesse=None):
     """REIN RECHNEND (testbar): Firmen-Schlüssel des WD-Farmers wie tpVorplanFirmaKey im Frontend (fnfutures, apex/apex100 nach Größe, lucid, tradeify, topstep, sonst)."""
     f = str(name or "").lower()
@@ -50278,11 +50300,14 @@ def fdp_wd_anzeige(firma, vorplan, zyklus_regel, bestaetigen=(), firmen_regeln=N
     gr = sorted((str(g) for g in ((firma or {}).get("je_groesse") or {})), key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else 0) or [None]
     zeilen = []
     for g in gr:
-        key = fdp_wd_schluessel(name, g)
+        key = wd_tp_schluessel(name, g)   # LF1: Lucid/FNF 50k mit eigenem Schlüssel (TP/Kontrakte), sonst wie bisher fdp_wd_schluessel
         tp = fu.get(key) if isinstance(fu.get(key), list) else (fu.get("tradeify") if key == "lucid" and isinstance(fu.get("tradeify"), list) else None)
         quelle = "wd-farmer" if tp else "standard"
         tp = tp or WD_FU_STANDARD.get(key)
         k = ktr.get(key) if isinstance(ktr.get(key), list) else (ktr.get("tradeify") if key == "lucid" and isinstance(ktr.get("tradeify"), list) else None)
+        _bk = {v: b for b, v in WD_FU_50K.items()}.get(key)
+        if k is None and _bk and isinstance(ktr.get(_bk), list):   # LF1: wie wdKtSpanne — Kontrakte der Firma × 50k/150k (gerundet, mind. 1)
+            k = [max(1, rund((_wd_num(x) or 1) / 3)) for x in ktr[_bk]]
         # wie wdKtSpanne (Gegenprüfung E2b): von = max(1, round(sp[0] || std)), bis = max(von, round(sp[1] || von)); keine Liste → [std, std]
         if k is not None:
             kv = max(1, rund(_wd_num(k[0] if len(k) > 0 else None) or kt_std))
