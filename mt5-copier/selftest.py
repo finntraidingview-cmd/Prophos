@@ -2622,6 +2622,7 @@ def main():
     results.append(_test_sicher(test_magic_zwilling))
     results.append(_test_sicher(test_extern_deal))
     results.append(_test_sicher(test_f9a_desktop_bereit))
+    results.append(_test_sicher(test_is1_stops_frisch))
 
     print()
     ok = sum(1 for r in results if r)
@@ -12387,6 +12388,67 @@ def test_f9a_desktop_bereit():
     qw = _i.getsource(ob.desktop_frei_abwarten)
     chk("_warte(1.2, 1.8)" in qw and "time.sleep" not in qw, "Warten gestreut über _warte (Jitter-Regel), kein fester Takt")
     print(("✓" if ok else "✗") + " F9A: Desktop-Bereitschaft vor F9 — gesperrt = gestreut warten, sonst Abbruch ohne Taste mit Ursache vorn")
+    return ok
+
+
+def test_is1_stops_frisch():
+    """IS1 (16.11.2026): „m5still … KEINE Bestaetigung binnen 12 s — Grund: SL/TP ungültig (Server: Invalid stops)“ — F9-SL/TP rechneten ab dem Kurs
+    vom Laufanfang (10–20 s vor dem Klick). Jetzt: Kurs frisch vor dem Rechnen, letzter Blick vor dem Knopf, einmal neu tippen, sonst nichts senden."""
+    import inspect as _i
+    import order_bot as ob
+    ok = True
+
+    def chk(c, t):
+        nonlocal ok
+        if not c:
+            ok = False
+            print("   ✗ " + t)
+
+    U = ob.f9_stops_urteil
+    # (1) Fall Tradeify buy 3,3 Lot, SL 172 $ = 5,21 Pkt (cs 10): ab Ask 27714,20 → SL 27708,99 / TP 27815,38
+    sl, tp = ob.berechne_sl_tp("buy", 27714.20, 3.3, 10, 172, 3339, 2)
+    chk((sl, tp) == (27708.99, 27815.38), f"Tradeify-Zahlen wie in der Spur ({sl}/{tp})")
+    chk(U("buy", 27714.20, 27713.20, sl, tp) is None, "Kurs wie gelesen → gültig")
+    u = U("buy", 27707.0, 27706.0, sl, tp)
+    chk(bool(u) and u.startswith("SL 27708.99 liegt nicht mehr unter Bid 27706"), f"Kurs −8 Pkt → SL über Bid erkannt ({u})")
+    u4 = U("buy", 27710.5, 27709.5, sl, tp, stops_level=100, point=0.01)
+    chk(bool(u4) and "Bid 27709.5 − Mindestabstand 1.01" in u4, f"Mindestabstand 1,01 Pkt: Bid 27709,5 − 1,01 < SL → ungültig ({u4})")
+    chk(U("buy", 27712.0, 27711.0, sl, tp, stops_level=100, point=0.01) is None, "Mindestabstand eingehalten → gültig")
+    # (2) Fall FundedNext sell 0,3 Lot, SL 82,09 $ = 27,36 Pkt: ab Bid 27716,37 → SL 27743,73 / TP 27679,13; NQ lief in der Minute +39 Pkt
+    sl2, tp2 = ob.berechne_sl_tp("sell", 27716.37, 0.3, 10, 82.09, 111.71, 2)
+    chk((sl2, tp2) == (27743.73, 27679.13), f"FundedNext-Zahlen wie in der Spur ({sl2}/{tp2})")
+    chk(U("sell", 27717.4, 27716.37, sl2, tp2) is None, "sell: Kurs wie gelesen → gültig")
+    u2 = U("sell", 27747.0, 27746.0, sl2, tp2)
+    chk(bool(u2) and u2.startswith("SL 27743.73 liegt nicht mehr über Ask 27747"), f"sell: Kurs +30 Pkt → SL unter Ask erkannt ({u2})")
+    chk(bool(U("sell", 27679.0, 27678.0, sl2, tp2)), "sell: TP über Ask gerutscht → ungültig")
+    chk(bool(U("buy", 27816.5, 27815.5, sl, tp)), "buy: Kurs über TP → ungültig")
+    # (3) ohne Kurs/Level keine Aussage, nie werfen
+    chk(U("buy", None, None, sl, tp) is None and U("buy", 1, 1, None, tp) is None and U("buy", "x", 1, sl, tp) is None,
+        "ohne Kurs/SL bzw. unlesbar → None (Stand vorher)")
+    # (4) Neu-Rechnen ab dem jetzigen Kurs: derselbe $-Abstand (nie weiter weg als der Plan)
+    s3, t3 = ob.berechne_sl_tp("buy", 27707.0, 3.3, 10, 172, 3339, 2)
+    chk(abs((27707.0 - s3) * 33 - 172) < 0.5 and abs((t3 - 27707.0) * 33 - 3339) < 0.5, f"neu ab 27707: SL/TP mit Plan-$ ({s3}/{t3})")
+    # (5) _tick_lesen: reine Lesung, nie werfen
+    qt = _i.getsource(ob._tick_lesen)
+    chk("symbol_info_tick" in qt and "order_send" not in qt and "order_check" not in qt and "except Exception" in qt,
+        "_tick_lesen: nur symbol_info_tick, kein Auftrag, wirft nie")
+    chk(sys.platform == "win32" or ob._tick_lesen("x", 1, "NAS100") == (None, None), "_tick_lesen ohne Terminal → (None, None)")
+    # (6) Einbau in run(): Kurs frisch VOR berechne_sl_tp im F9-Block; letzter Blick nach dem Scharf-Blick, VOR der Knopf-Anfahrt
+    q = _i.getsource(ob.run)
+    i_fr = q.find("_fa, _fb = _tick_lesen(path, expected, symbol)")
+    i_ber = q.find("sl_f9, tp_f9 = berechne_sl_tp(cmd[\"richtung\"], ref, vol,")
+    i_sch = q.find('trail.append(f"vor dem {muster}-Knopf noch scharf")')
+    i_lb = q.find("_su = f9_stops_urteil(cmd[\"richtung\"], _ka, _kb, sl_f9, tp_f9, _st_lv, _st_pt)")
+    i_kn = q.find("_maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)")
+    chk(0 < i_fr < i_ber < i_sch < i_lb < i_kn, f"Reihenfolge frisch → rechnen → scharf → letzter Blick → Knopf ({i_fr},{i_ber},{i_sch},{i_lb},{i_kn})")
+    blk = q[i_lb:i_kn]
+    chk('"retry_ok": True' in blk and '"code": "f9_stops_bewegt"' in blk and "nichts gesendet" in blk and "_f9_dialog_zu(dlg, trail)" in blk
+        and blk.count("_tick_lesen(") == 1 and "sl_f9, tp_f9 = _s2, _t2" in blk and "sltp_mindestabstand(" in blk
+        and "_neu_ok = _su is None and bool(_ka and _kb)" in blk,
+        "letzter Blick: einmal neu tippen (TP-Mindestabstand), sonst Dialog zu, nichts gesendet, retry_ok, eigener Code")
+    m = "Kurs vor dem buy-Knopf über die F9-Stops gelaufen (SL 1 liegt nicht mehr unter Bid 2) — Dialog geschlossen, nichts gesendet. → neu starten"
+    chk("nichts gesendet" in m[:220], "Meldung: „nichts gesendet“ in den ersten 220 Zeichen (m5still-Kürzung)")
+    print(("✓" if ok else "✗") + " IS1: F9-SL/TP ab frischem Kurs, letzter Blick vor dem Knopf — keine „Invalid stops“-Order mehr senden")
     return ok
 
 

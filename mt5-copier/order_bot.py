@@ -11937,6 +11937,34 @@ def sl_mindest_urteil(richtung, ask, bid, vol, contract_size, sl_usd, tp_usd, st
             f"Plan-SL mindestens {verlust:,.0f} $ — mit diesem Plan-SL ist die Order nicht startbar".replace(",", " "))
 
 
+def f9_stops_urteil(richtung, ask, bid, sl, tp, stops_level=None, point=None):
+    """REIN RECHNEND (testbar, IS1 16.11.2026): nimmt der Server die getippten F9-SL/TP beim JETZIGEN Kurs an? → None (ja oder nicht prüfbar) |
+    Text mit der EINEN Ursache. Wie MT5 prüft: Kauf-Stops gegen Bid (SL unter Bid − Abstand, TP über Bid + Abstand), Verkauf-Stops gegen Ask;
+    Abstand = (trade_stops_level + 1) × point wie sltp_mindestabstand, ohne Stops-Level nur die Seite. Ohne Kurs oder Level keine Aussage."""
+    try:
+        if sl is None or tp is None or not ask or not bid:
+            return None
+        lv, pt = float(stops_level or 0), float(point or 0)
+        d = (lv + 1) * pt if lv > 0 and pt > 0 else 0.0
+        sl, tp, ask, bid = float(sl), float(tp), float(ask), float(bid)
+    except (TypeError, ValueError):
+        return None
+    kauf = str(richtung).lower() == "buy"
+    ref = bid if kauf else ask
+    seite = "Bid" if kauf else "Ask"
+    m_minus = f" − Mindestabstand {d:.10g}" if d > 0 else ""
+    m_plus = f" + Mindestabstand {d:.10g}" if d > 0 else ""
+    if kauf and sl > ref - d - VORPRUEF_TOL:
+        return f"SL {sl:.10g} liegt nicht mehr unter {seite} {ref:.10g}{m_minus} (Kurs seit der Lesung um {sl - ref + d:.2f} Pkt zu nah)"
+    if not kauf and sl < ref + d + VORPRUEF_TOL:
+        return f"SL {sl:.10g} liegt nicht mehr über {seite} {ref:.10g}{m_plus} (Kurs seit der Lesung um {ref + d - sl:.2f} Pkt zu nah)"
+    if kauf and tp < ref + d + VORPRUEF_TOL:
+        return f"TP {tp:.10g} liegt nicht mehr über {seite} {ref:.10g}{m_plus} (Kurs seit der Lesung um {ref + d - tp:.2f} Pkt zu nah)"
+    if not kauf and tp > ref - d - VORPRUEF_TOL:
+        return f"TP {tp:.10g} liegt nicht mehr unter {seite} {ref:.10g}{m_minus} (Kurs seit der Lesung um {tp - ref + d:.2f} Pkt zu nah)"
+    return None
+
+
 def vorpruefung_meldung(grund, fix, spur_text):
     """REIN RECHNEND (testbar, FS2-C): Meldung bei „nicht senden“ — Anfang fest (Muster-Schlüssel), danach die EINE Ursache und der Fix."""
     return f"Vorprüfung vor F9: {grund} — nichts gesendet. → {fix} [{spur_text}]"
@@ -12024,6 +12052,24 @@ def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
     except Exception as e:
         out["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
     return out
+
+
+def _tick_lesen(path, expected, symbol):
+    """IS1 (16.11.2026): nur den aktuellen Kurs des Symbols lesen → (ask, bid) oder (None, None). Nie werfen, kein Auftrag an den Server
+    (symbol_info_tick ist eine reine Lesung über die ohnehin offene Terminal-Verbindung); fremdes Konto am Terminal = keine Aussage."""
+    try:
+        import MetaTrader5 as mt5
+        if not symbol or not _api_verbinden(mt5, path, 5000):   # Prüfer: getrennt → höchstens 5 s im offenen Dialog statt 60 s
+            return None, None
+        ai = mt5.account_info()
+        if ai is None or (expected and int(ai.login) != int(expected)):
+            return None, None
+        t = mt5.symbol_info_tick(symbol)
+        if t is None or not (t.ask and t.bid):
+            return None, None
+        return float(t.ask), float(t.bid)
+    except Exception:
+        return None, None
 
 
 def _mt5_journal_zeilen(data_path, n=400, beide=False):
@@ -14700,6 +14746,17 @@ def run(cfg_path, cmd):
         # der Broker sonst komplett ablehnen (kein Fill). Bei 0/0 laeuft alles
         # exakt wie bisher, der Nachtrag nach dem Fill uebernimmt.
         if mit_sltp:
+            # IS1 (16.11.2026, „m5still … KEINE Bestaetigung binnen 12 s — Grund: SL/TP ungültig (Server: Invalid stops)“, 8× in 30 Tagen auf 5 PCs):
+            # ref_ask/ref_bid stammen aus der Lesung am Laufanfang — bis hier vergehen 10–20 s (Terminal, F9, Symbol, Volumen). Im selben Zug lief
+            # NQ +39 Pkt (FundedNext sell, SL 27,4 Pkt) bzw. −17 Pkt (Tradeify buy, SL 5,2 Pkt): der SL lag beim Klick auf der falschen Seite, der
+            # Broker lehnte samt Order ab. Jetzt den Kurs unmittelbar vor dem Rechnen frisch lesen (gleicher $-Abstand, nur ab dem jetzigen Kurs);
+            # nicht lesbar = Lesung vom Anfang (Stand vorher).
+            _fa, _fb = _tick_lesen(path, expected, symbol)
+            if _fa and _fb:
+                _alt_ref = lese.get("ref_ask") if kauf else lese.get("ref_bid")
+                lese = dict(lese, ref_ask=_fa, ref_bid=_fb)
+                if _alt_ref:
+                    trail.append(f"Kurs vor F9-SL/TP frisch: {(_fa if kauf else _fb):.10g} (Lesung am Anfang {float(_alt_ref):.10g})")
             ref = lese.get("ref_ask") if kauf else lese.get("ref_bid")
             if not ref:
                 trail.append("kein Live-Kurs fuer F9-SL/TP — Nachtrag nach Fill")
@@ -14786,6 +14843,43 @@ def run(cfg_path, cmd):
             return {"ok": False, "retry_ok": True, "code": "nicht_scharf", "grund": "nicht_scharf",
                     "msg": (f"Copier vor dem {muster}-Knopf nicht mehr scharf ({_sch_grund}) — Dialog geschlossen, nichts gesendet. [" + _spur(trail) + "]")}
         trail.append(f"vor dem {muster}-Knopf noch scharf")
+    # IS1 (16.11.2026): LETZTER KURS-BLICK VOR DEM KNOPF — zwischen dem Rechnen oben und hier liegen SL/TP-Tippen und Pausen (2–4 s). Liegen die
+    # getippten F9-Stops beim jetzigen Kurs auf der falschen Seite bzw. im Mindestabstand, lehnte der Broker die ganze Order ab („Invalid stops“,
+    # 12 s ohne Bestätigung, Plan in review). Dann einmal neu ab dem jetzigen Kurs tippen (derselbe $-Abstand wie geplant, nie weiter weg als der
+    # Plan); passt es danach immer noch nicht oder klappt das Tippen nicht: Dialog zu, nichts gesendet — statt eine sichere Ablehnung zu senden.
+    if f9_getippt and sl_f9 is not None and tp_f9 is not None:
+        _st_lv, _st_pt = _vp_api.get("stops_level"), _vp_api.get("point")
+        _ka, _kb = _tick_lesen(path, expected, symbol)
+        _su = f9_stops_urteil(cmd["richtung"], _ka, _kb, sl_f9, tp_f9, _st_lv, _st_pt)
+        if _su:
+            trail.append(f"Kurs vor dem {muster}-Knopf: {_su} → SL/TP neu ab dem jetzigen Kurs")
+            _neu_ok = False
+            try:
+                _s2, _t2 = berechne_sl_tp(cmd["richtung"], _ka if kauf else _kb, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], digits)
+                _s2_k, _t2, _ = sltp_mindestabstand(cmd["richtung"], _ka, _kb, _s2, _t2, _st_lv, _st_pt, digits)   # nur der TP rückt (FS2-C)
+                if (_feld_tippen(sl_el, fmt_preis(_s2, digits), "F9-SL neu", trail, rahmen=dlg)
+                        and _feld_tippen(tp_el, fmt_preis(_t2, digits), "F9-TP neu", trail, rahmen=dlg)):
+                    sl_f9, tp_f9 = _s2, _t2
+                    _ka, _kb = _tick_lesen(path, expected, symbol)
+                    _su = f9_stops_urteil(cmd["richtung"], _ka, _kb, sl_f9, tp_f9, _st_lv, _st_pt)
+                    _neu_ok = _su is None and bool(_ka and _kb)   # Prüfer: ohne frischen Kurs nicht belegt → nicht senden (und kein None-Format)
+                    if _su is None and not _neu_ok:
+                        _su = "Kurs nach dem Neu-Tippen nicht lesbar"
+                else:
+                    _su = "F9-SL/TP ließen sich nicht neu tippen"
+            except Exception as _ne:
+                _su = f"Neu-Rechnen gestört ({type(_ne).__name__})"
+            if not _neu_ok:
+                try:
+                    _el_tasten(dlg, "{ESC}", set_foreground=False)
+                except Exception:
+                    pass
+                _f9_dialog_zu(dlg, trail)   # NZ1: ESC mit Beweis
+                trail.append(f"F9-Stops vor dem {muster}-Knopf ungültig: {_su} → nicht senden")
+                return {"ok": False, "retry_ok": True, "code": "f9_stops_bewegt", "grund": "f9_stops_bewegt",
+                        "msg": (f"Kurs vor dem {muster}-Knopf über die F9-Stops gelaufen ({_su}) — Dialog geschlossen, nichts gesendet. "
+                                "→ neu starten [" + _spur(trail) + "]")}
+            trail.append(f"F9-SL/TP neu ab Kurs {(_ka if kauf else _kb):.10g}: SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)}")
     try:
         _maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)   # Anfahrt auf einen gewürfelten Punkt (07.10.2026)
     except Exception:
