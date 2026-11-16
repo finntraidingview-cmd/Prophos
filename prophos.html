@@ -14276,6 +14276,12 @@
                   <input type="checkbox" id="adm-k-pause" class="adm-k-f" style="margin:0">
                   <span>Längste Trade-Pause zuerst</span>
                 </label>
+                <!-- AA1 Neueste zuerst (16.11.2026, Finn: „nur die neuesten Accounts sehen, die als Neueste dazugekommen sind — egal ob Nachfolger oder neuer
+                     Account"): nach Anlagedatum (accounts.created_at) absteigend über alle IDs, mit Datum an jeder Zeile. Zustand in localStorage -->
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Nach Anlagedatum sortieren: zuletzt angelegte Konten oben (Nachfolger zählen wie neue Konten), Datum an jeder Zeile — solange an, überstimmt es die drei Haken links">
+                  <input type="checkbox" id="adm-k-neu" class="adm-k-f" style="margin:0">
+                  <span>Neueste zuerst</span>
+                </label>
                 <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
               </div>
               <div style="display:flex;align-items:center;gap:14px">
@@ -20636,7 +20642,7 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.pause = !!$('adm-k-pause')?.checked; poSortMerken('prophos_adm_pause_zuerst', admK.pause); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.pause = !!$('adm-k-pause')?.checked; poSortMerken('prophos_adm_pause_zuerst', admK.pause); admK.neu = !!$('adm-k-neu')?.checked; poSortMerken('prophos_adm_neu_zuerst', admK.neu); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = [], jetztIso = new Date().toISOString()
@@ -20667,6 +20673,13 @@
           return !li ? [3, 0] : li.stufe === 'lauf' ? [2, 0] : li.stufe === 'nie' ? [0, 0] : [1, li.sortMs] }
         sortiert = sortiert.map((a, i) => ({ a, i, k: rang(a) })).sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || x.i - y.i).map(z => z.a)
       }
+      // AA1 NEUESTE ZUERST (16.11.2026, Finn): Anlagedatum (r.created = accounts.created_at aus /admin/overview) absteigend, über alle IDs — ein Nachfolger
+      // ist eine eigene Zeile mit eigenem created_at und zählt wie ein neues Konto. Nur sortieren, nichts ausblenden; ohne Datum ans Ende. Wirkt nach den
+      // anderen Haken (gewinnt also gegen sie), der Spaltenkopf „Trade“ (ltSort) gewinnt wie bisher
+      if(admK.neu){
+        const ms = a => { const t = Date.parse((zu.get(a) || {}).created || ''); return Number.isFinite(t) ? t : null }
+        sortiert = sortiert.map((a, i) => ({ a, i, m: ms(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : y.m - x.m) || x.i - y.i).map(z => z.a)
+      }
       if(admK.ltSort){   // Letzter Trade (27.10.2026): älteste zuerst bzw. neueste zuerst; Konten ohne Stand (archiviert) ans Ende
         const ms = a => { const li = admLetzterTradeInfo((zu.get(a) || {}).letzter_trade, jetztIso); return li ? li.sortMs : null }
         sortiert = sortiert.map((a, i) => ({ a, i, m: ms(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : (admK.ltSort === 'alt' ? x.m - y.m : y.m - x.m)) || x.i - y.i).map(z => z.a)
@@ -20680,7 +20693,7 @@
       // „Trade planen" für andere IDs nie auf einem PC-Tab (S2/Master 29.10.2026): das fremde Konto stünde sonst, solange das Popup offen ist,
       // in `accounts` eines Puls-PCs, und dessen Hintergrund-Abläufe lesen diese Liste. Gleiche Erkennung wie MT5_LOCAL.
       const admPcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-      tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab })).join('')
+      tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab, neu: !!admK.neu })).join('')
       admKontenVerdrahten(tb)
     }
     // RECOVERER (02.11.2026): Stand der ganzen Admin-Sicht nachladen; geändert → Alle Accounts und Payouts neu zeichnen
@@ -20707,6 +20720,8 @@
       try{ const eigen = String(r.user_id) === String(currentUserId), ger = a.type === 'funded_cfd' && !a.payoutReadyAt && o.poGer && o.poGer.ab ? o.poGer : null
         const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(ger ? Object.assign({}, a, { payoutReadyAt: ger.ab }) : a, { offen: !!r.po_offen }, eigen && !ger) : payoutReadyBadgeHtml(a)
         if(p) metaParts.push(ger && !r.po_offen ? `${p} <span class="acc-po acc-po-sub" title="${escapeHtml('gerechnet: ' + (ger.grund || '') + ' — frühester Termin, kein Muss; „Payout anfragbar ab“ am Konto ist leer')}">· gerechnet</span>` : p) }catch(_){}
+      // AA1 (16.11.2026): bei „Neueste zuerst“ klein das Anlagedatum („neu 16.11.“), Tooltip mit Jahr und Uhrzeit
+      if(o.neu){ try{ const d = new Date(r.created || ''); if(!isNaN(d)) metaParts.push(`<span class="acc-po acc-po-sub" title="${escapeHtml('angelegt ' + d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}">neu ${escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }))}</span>`) }catch(_){} }
       const meta = metaParts.length
         ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
       const archBadge = r.archived
@@ -20752,6 +20767,7 @@
     { const cb = $('adm-k-payout'); if(cb) cb.checked = poSortLesen('prophos_adm_payout_zuerst') }   // Haken gemerkt (16.10.2026)
     { const cb = $('adm-k-heute'); if(cb) cb.checked = poSortLesen('prophos_adm_heute_zuerst') }     // Heute offen zuerst (16.10.2026)
     { const cb = $('adm-k-pause'); if(cb) cb.checked = poSortLesen('prophos_adm_pause_zuerst') }   // Längste Trade-Pause zuerst (27.10.2026)
+    { const cb = $('adm-k-neu'); if(cb) cb.checked = poSortLesen('prophos_adm_neu_zuerst') }       // AA1 Neueste zuerst (16.11.2026)
     try{ localStorage.removeItem('prophos_adm_inaktiv') }catch(_){}   // alter Filter „≥ 5 Tage ohne Trade" (bis .1770) — wirkt nie mehr, Schlüssel weg
     document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
     $('adm-k-search')?.addEventListener('input', admKontenRender)
@@ -59459,7 +59475,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2235'
+  const OS_TAB_BUILD = '2026-09-22.2236'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
