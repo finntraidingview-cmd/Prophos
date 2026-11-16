@@ -28532,7 +28532,8 @@
     for(const r of (rows || [])){
       const at = Date.parse((r && r.updated_at) || '') || 0
       if(!at) continue
-      const s = (r && r.status) || {}
+      // Zwei Formen (SB2a, 16.11.2026): Flotten-Tick reicht volle Zeilen mit status, mt5BalCacheLaden nur die 4 Felder flach.
+      const s = (r && r.status) || r || {}
       const setze = (login, bal, ccy) => {
         const lg = String(login || '')
         if(!lg || bal == null) return
@@ -28546,8 +28547,11 @@
   }
   async function mt5BalCacheLaden(){
     try{
+      // Nur die 4 Felder, die mt5BalCacheFuellen liest (SB2a, 16.11.2026, Supabase-Rechnung 232 $): vorher kam der ganze status
+      // (~7,5 KB je Zeile, ~270 Zeilen, ~6.800 Abrufe/Tag ≈ 14 GB/Tag ≈ 10 % des Egress). `->` statt `->>`, damit Typ und null genau
+      // wie bisher aus status.x ankommen.
       const { data, error } = await supabase.from('mt5_live')
-        .select('master_login,hedge_login,status,updated_at')
+        .select('master_login,hedge_login,updated_at,master_balance:status->master_balance,master_currency:status->master_currency,hedge_balance:status->hedge_balance,hedge_currency:status->hedge_currency')
         .order('updated_at', { ascending: false }).limit(300)
       if(!error) mt5BalCacheFuellen(data)
     }catch(_){ /* still — das Dropdown zeigt dann wie bisher initialBalance */ }
@@ -59175,7 +59179,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2225'
+  const OS_TAB_BUILD = '2026-09-22.2226'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
