@@ -144,7 +144,13 @@ ok(r["aktion"] == "planen" and r["od_ziel"]["usd"] == 2250.0, f"größter Tag 90
 print("— Zyklus nicht lesbar / nur On Demand —")
 ok(app.fcp_tw_netto(None, 100) is None and app.fcp_od_ziel(40, 2000, 100, None) is None, "nicht lesbar → None (fail-closed wie bisher)")
 r = R(JGO, BAL, G100, 1, False, 1.0, 0.85, random.Random(3), regel=RK, tage=None, ziel_fest=ZF)
-ok(r["aktion"] == "ziel" and app.fcp_ziel_echt(r)[0] is False, "nicht lesbar: Ziel-Urteil, aber nicht umgestellt (fcp_ziel_echt wie bisher)")
+ok(r["aktion"] == "aus" and r["grund"] == "On Demand: Tagesgewinne nicht lesbar — Consistency offen, kein Waiting",
+   f"OD2b: On Demand, Wachstumsziel erreicht, Tagesgewinne nicht lesbar → aus, kein Waiting („{r.get('grund')}“)")
+r = R(JGO, G100 + 500, G100, 1, False, 1.0, 0.85, random.Random(3), regel=RK, tage=None, ziel_fest=ZF)
+ok(r["aktion"] == "planen" and r["tp_art"] == "consistency_ohne_zyklus" and r["tp"] <= 0.4 * 2161 * 0.95 + 0.5,
+   f"OD2b: unter dem Ziel und nicht lesbar → kleinster sicherer Trade wie bisher (TP {r.get('tp')})")
+r = R(JG, G100 + 5200, G100, 2, False, 1.0, 0.85, random.Random(3), regel=dict(FN, consistency_pct=40), tage=None)   # normales Ziel 5.000–5.500
+ok(r["aktion"] == "ziel" and app.fcp_ziel_echt(r)[0] is False, "Nicht-On-Demand nicht lesbar: Ziel-Urteil wie bisher, nicht umgestellt (fcp_ziel_echt)")
 ok(RK.get("consistency_basis") == "netto" and "consistency_basis" not in FN, "nur die On-Demand-Regel trägt consistency_basis, die Firmen-Regel bleibt")
 for regel in (FN, dict(FN, namen=["the5ers"], tp_modus="consistency50")):
     r = R(app.fcp_je_groesse(regel, G100), BAL, G100, 2, False, 1.0, 0.85, random.Random(3), regel=regel, tage=tw)

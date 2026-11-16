@@ -51852,7 +51852,13 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
                 basis["od_ziel"] = _odz          # OD2: On-Demand-Ziel (Required profit) in jeder Antwort dieses Kontos — Notiz, Reiter, Konto-Seite
         # ZT1 (Finn 10.11.2026): Ziel erreicht ab Ziel × (1 − Toleranz) — Consistency-Bedingung unverändert
         # ZT1-Prüfer S1: Bezug ist überall das feste Ziel des Zyklus (wie /konto-ziele und Radar), sonst der untere Wert
-        if tw0 is None:
+        if tw0 is None and cons_netto:
+            # OD2b (Prüfer S2, 17.11.2026): On Demand ohne lesbare Tagesgewinne — die Consistency ist offen (genau Marcs Fall …7821), also nie „ziel“
+            # (kein Waiting), aber auch kein Trade auf Verdacht. Nicht-On-Demand unverändert unten.
+            if gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005:
+                return dict(basis, aktion="aus", grund="On Demand: Tagesgewinne nicht lesbar — Consistency offen, kein Waiting",
+                            consistency={"p": pct, "bester_tag": None, "ende": round(z_f)})
+        elif tw0 is None:
             if gewinn >= fcp_ziel_schwelle(z_f, P) - 0.005:   # Zyklus nicht lesbar → wie bisher nur das Ziel (kein Trade auf Verdacht)
                 return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout", consistency={"p": pct, "bester_tag": None, "ende": round(z_f)},
                             ziel_toleranz=fcp_ziel_toleranz_info(z_f, gewinn, P))
