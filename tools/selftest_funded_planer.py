@@ -462,13 +462,13 @@ def im_plus(ns):
     j100, j150 = jg(REGEL, 100000), jg(REGEL, 150000)
     # Chris 100k …0005: Balance 105.845,56, offene Kosten −498 € → seit FH1 B: Pump-Kosten bis Balance statt AH2-Satz
     r = R(REGEL, j100, ST100, 105845.56, 105845.56, -498, 100000, 100000)
-    kb = KB(j100, 100000, 105845.56, 100000)
+    kb = round(350 / 3000 * (105845.56 - r["liq"]), 2)   # HB1 (16.11.2026): Satz eines frischen Kontos × Abstand statt Pfad-Simulation
     check(r["aktion"] == "planen" and r.get("hedge_basis") == "pump_b" and abs(r["offen_eur"] - kb) < 0.011 and r.get("offen_kosten_eur") == -498
-          and "Pump-Kosten bis Balance (B)" in r["hedge_quelle"], f"100k −498 € über dem Start: Hedge-Basis B {r['offen_eur']} € („{r.get('hedge_quelle')}“)")
+          and "theoretische Kosten (frisches Konto)" in r["hedge_quelle"], f"100k −498 € über dem Start: Hedge-Basis {r['offen_eur']} € („{r.get('hedge_quelle')}“)")
     # Mike 150k …0001: Balance 150.238,76, offene Kosten −3.022 € → B = 550 + 550/4.000 × 238,76
     m = R(REGEL, j150, ST150, 150238.76, 150238.76, -3022, 150000, 150000)
-    check(m["aktion"] == "planen" and m.get("hedge_basis") == "pump_b" and abs(m["offen_eur"] - round(550 + 550 / 4000 * 238.76, 2)) < 0.011,
-          f"150k −3.022 € knapp über dem Start: Hedge-Basis B {m.get('offen_eur')} € (550 + 0,1375 × 238,76)")
+    check(m["aktion"] == "planen" and m.get("hedge_basis") == "pump_b" and abs(m["offen_eur"] - round(550 / 4000 * (150238.76 - m["liq"]), 2)) < 0.011,
+          f"150k −3.022 € knapp über dem Start: Hedge-Basis {m.get('offen_eur')} € (550/4.000 × Abstand, HB1)")
     # AH2 unter dem Start: offene Kosten ≤ 0 → fester Satz kosten_eur ÷ dd (Apex hat kein hedge_eur) = 350 / 3.000
     u = R(REGEL, j100, ST100, 99500, 99500, -498, 100000, 100000)
     satz = 350 / 3000

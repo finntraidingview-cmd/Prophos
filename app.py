@@ -48086,6 +48086,19 @@ def fdp_hedge(offen, balance, liq, tp, sl, kt, ppl=FDP_NQ_PPL, sppl=FDP_SLAVE_PP
             "hedge_tp_eur": round(v * tp, 2), "hedge_sl_eur": round(v * (sl or 0), 2)}
 
 
+def fdp_frisch_satz(jg):
+    """REIN RECHNEND (testbar, HB1 16.11.2026): fester Satz eines FRISCHEN Kontos € je $ Abstand → (satz, betrag_eur, dd, 'hedge_eur'|'kosten_eur') | None.
+    hedge_eur ÷ dd der Regel, fehlt hedge_eur: kosten_eur ÷ dd (Apex 100k 350 € auf 3.000 $). Derselbe Satz wie AH2 (Konto im Plus)."""
+    jg = jg or {}
+    ddj = _wd_num(jg.get("dd"))
+    he, art = _wd_num(jg.get("hedge_eur")), "hedge_eur"
+    if not (he and he > 0):
+        he, art = _wd_num(jg.get("kosten_eur")), "kosten_eur"
+    if not (he and he > 0 and ddj and ddj > 0):
+        return None
+    return he / ddj, he, ddj, art
+
+
 def fdp_kosten_theorie(jg, start, balance, groesse, lock=100.0, max_schritte=60):
     """REIN RECHNEND (testbar; FH1 Variante B, Finn 10.11.2026): was es den Planer normalerweise kostet, das Konto vom Zyklus-Start bis zur Balance hochzupumpen.
     Start mit den Kontokosten (kosten_eur), Schritte wie fdp_tp (je höchstens max_trade, der letzte bis genau zur Balance), jeder Schritt gewinnt; der Fusion-Hedge
@@ -48185,7 +48198,7 @@ def fdp_notiz_basis(notes, r):
     n = str(notes or "")
     if not re.search(r" · (offene Kosten |Konto im Plus |Hedge-Basis )", n):
         return None
-    tail = (f"Hedge-Basis {_liq_de(r['offen_eur'])} € = Pump-Kosten bis Balance (B) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
+    tail = (f"Hedge-Basis {_liq_de(r['offen_eur'])} € = theoretische Kosten (frisches Konto) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else   # HB1
             f"Konto im Plus (offene Kosten {_liq_de(r.get('offen_kosten_eur'))} €) · Hedge-Basis {_liq_de(r['offen_eur'])} € = {r['hedge_quelle']}" if r.get("hedge_quelle") else
             f"offene Kosten {_liq_de(r['offen_eur'])} €")
     return re.sub(r" · (offene Kosten |Konto im Plus |Hedge-Basis ).*$", " · " + tail, n)
@@ -48643,20 +48656,23 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     # 1.604 € im Hedge zurückgeholt hat — „nicht mit den echten offenen Kosten rechnen, sondern mit dem, was es normalerweise kosten würde, den Account auf
     # 108.000 hochzukriegen"): Balance ≥ Zyklus-Start → Hedge-Basis = max(echte offene Kosten, fdp_kosten_theorie = Planer-Weg simuliert, mit EOD-Nachziehen
     # der Liq bis Größe + lock). Balance < Start → wie bisher echte Kosten, ≤ 0 → AH2-Satz unten. Ohne Simulationsdaten (kosten_eur/dd/max_trade) → wie bisher.
+    # HB1 (Finn 16.11.2026, Master): „theoretische Pumpkosten“ = die normalen Kosten eines FRISCHEN Kontos, also der Satz wie AH2 (hedge_eur ÷ dd der Regel,
+    # fehlt hedge_eur: kosten_eur ÷ dd; Apex 100k 350 € auf 3.000 $ = 0,117 €/$) × aktueller Abstand (Balance − Liq) — KEINE Pfad-Simulation mehr. Anlass Chris Apex
+    # 100k …0006: Balance 101.454, Liq 100.100 (1.354 $ Abstand), echt −821 €, Simulation 520 € → 0,38 €/$, ~17 Fusion-Lots über dem Deckel 16; jetzt ≈ 158 €, ~5 Lots.
+    # Bedingung (Balance ≥ Zyklus-Start) und max(echte offene Kosten, kb) bleiben; offen ≤ 0 ohne kb → AH2 wie bisher. Schlüssel hedge_basis bleibt 'pump_b'
+    # (Frontend + gespeicherte Pläne lesen ihn), der Text sagt jetzt, was gerechnet wird. fdp_kosten_theorie bleibt (Selbsttests/Erklärung).
     offen_h, h_quelle, h_basis = offen, None, None
-    kb = fdp_kosten_theorie(jg, start, balance, g, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0) \
-        if balance >= start - 0.005 else None
+    fs = fdp_frisch_satz(jg)
+    kb = round(fs[0] * (balance - liq), 2) if (fs and balance >= start - 0.005) else None
     if kb is not None and kb > (offen if (offen and offen > 0) else 0.0) + 0.005:
         offen_h, h_basis = kb, "pump_b"
-        h_quelle = f"Pump-Kosten bis Balance (B) {_liq_de(kb)} € · echt {_liq_de(offen)} €"
+        h_quelle = (f"theoretische Kosten (frisches Konto): {_liq_de(fs[1])} € je {_liq_de(fs[2])} $ ({fs[3]}) × {_liq_de(balance - liq)} $ Abstand = "
+                    f"{_liq_de(kb)} € · echt {_liq_de(offen)} €")
     elif not (offen and offen > 0):
-        ddj = _wd_num(jg.get("dd"))
-        he, satz_art = _wd_num(jg.get("hedge_eur")), "hedge_eur"
-        if not (he and he > 0):
-            he, satz_art = _wd_num(jg.get("kosten_eur")), "kosten_eur"
-        if not (he and he > 0 and ddj and ddj > 0):
+        if not fs:
             return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} € — Konto im Plus, fester Satz fehlt: hedge_eur bzw. kosten_eur / dd der Regel)")
-        offen_h, h_basis = round(he / ddj * (balance - liq), 2), "ah2"
+        satz, he, ddj, satz_art = fs
+        offen_h, h_basis = round(satz * (balance - liq), 2), "ah2"
         h_quelle = f"fester Satz (Konto im Plus): {_liq_de(he)} € je {_liq_de(ddj)} $ ({satz_art}) × {_liq_de(balance - liq)} $ Abstand"
     h = fdp_hedge(offen_h, balance, liq, tp, sl, kt, sppl=K.get("sppl") or FDP_SLAVE_PPL)   # EU1
     if not h:
@@ -49142,8 +49158,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
         notiz = "" if r.get("pump") else (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · " + (f"offene Kosten {_liq_de(r['offen_eur'])} €" if not r.get("hedge_quelle") else
-                 # FH1 B (10.11.2026): Hedge-Basis = Pump-Kosten bis zur Balance, echte offene Kosten daneben
-                 f"Hedge-Basis {_liq_de(r['offen_eur'])} € = Pump-Kosten bis Balance (B) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
+                 # FH1 B (10.11.2026) / HB1 (16.11.2026): Hedge-Basis = theoretische Kosten eines frischen Kontos (Satz × Abstand), echte offene Kosten daneben
+                 f"Hedge-Basis {_liq_de(r['offen_eur'])} € = theoretische Kosten (frisches Konto) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
                  # AH2 (10.11.2026): Konto im Plus — Hedge-Basis aus dem festen Satz, offene Kosten daneben
                  f"Konto im Plus (offene Kosten {_liq_de(r.get('offen_kosten_eur'))} €) · Hedge-Basis {_liq_de(r['offen_eur'])} € = {r['hedge_quelle']}")) if r.get("tp_art") != "rest" else (
                  # FTMO Futures (03.11.2026): keine Stufe, TP = Rest bis zum Ziel, Hedge fest € je $ Abstand zur Liquidation

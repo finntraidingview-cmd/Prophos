@@ -64,8 +64,9 @@ check(liq2_150 == 150100 and liq2_100 == 100100, "nach Pump 1 steht die Liq fest
 
 print("3) Regel Balance ≥ Start → max(echt, B); darunter wie heute")
 c = R(REGEL, j100, fp.ST100, 108363.04, 108363.04, 514.70, 100000, 100000, kt_fest=2)
-check(c["hedge_basis"] == "pump_b" and abs(c["offen_eur"] - 1470.6) < 1 and c["offen_kosten_eur"] == 514.70
-      and c["hedge_quelle"].startswith("Pump-Kosten bis Balance (B) 1.47") and c["hedge_quelle"].endswith("echt 515 €"),
+# HB1 (Finn 16.11.2026): B = Satz eines FRISCHEN Kontos (350 € / 3.000 $) × aktueller Abstand, keine Pfad-Simulation mehr
+check(c["hedge_basis"] == "pump_b" and abs(c["offen_eur"] - round(350 / 3000 * (108363.04 - c["liq"]), 2)) < 0.011 and c["offen_kosten_eur"] == 514.70
+      and c["hedge_quelle"].startswith("theoretische Kosten (frisches Konto): 350 € je 3.000 $ (kosten_eur)") and c["hedge_quelle"].endswith("echt 515 €"),
       f"Chris …0006 nach WD (echt 515 €): Basis B {c['offen_eur']} € · {c['lots']} Lot (heute 2,79) · „{c['hedge_quelle']}“")
 j = R(REGEL, j100, fp.ST100, 98081.4, 98081.4, 144.94, 100000, 100000, kt_fest=2)
 check("hedge_basis" not in j and j["offen_eur"] == 144.94, "Jacob …0003 unter dem Start (98.081): echte Kosten wie heute")

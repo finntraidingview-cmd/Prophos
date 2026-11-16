@@ -30,9 +30,10 @@ ALT = {"status": "planned", "auto_bestaetigt_at": None, "start_um": None, "start
 
 print("1) Vorschlag vor FH1 → neue Hedge-Basis")
 f = BN(ALT, r)
-check(f and f["slave_risk"] == 1470.54 and abs(f["multiplier"] - 3.9876) < 0.0002 and abs(f["hedge_eur"] - 647.65) < 0.05 and "master_tp" not in f,
-      f"Hedge-Felder neu (Basis 1.470,54 €, Multiplikator {f and f['multiplier']}, Fusion am TP {f and f['hedge_eur']} €), TP/SL/Kontrakte bleiben")
-check(NZ(ALT["notes"], r).endswith("· Hedge-Basis 1.471 € = Pump-Kosten bis Balance (B) · echt 515 €") and NZ("ohne Ende", r) is None, "Notiz-Ende umgeschrieben")
+# HB1 (16.11.2026): Basis = 350 € / 3.000 $ × Abstand 8.263 $ = 964,02 € (vorher Pfad-Simulation 1.470,54 €)
+check(f and f["slave_risk"] == 964.02 and f["slave_risk"] == r["slave_risk"] and f["multiplier"] == r["multiplier"] and f["hedge_eur"] == r["hedge_eur"] and "master_tp" not in f,
+      f"Hedge-Felder neu (Basis 964,02 €, Multiplikator {f and f['multiplier']}, Fusion am TP {f and f['hedge_eur']} €), TP/SL/Kontrakte bleiben")
+check(NZ(ALT["notes"], r).endswith("· Hedge-Basis 964 € = theoretische Kosten (frisches Konto) · echt 515 €") and NZ("ohne Ende", r) is None, "Notiz-Ende umgeschrieben")
 
 print("2) Guards")
 ok = True
