@@ -16178,7 +16178,8 @@ def _wd_zahl(v):
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
 # LF1 (Finn 16.11.2026): Lucid je Größe — 50k 150 $, 150k 250 $ (unbekannte Größe = 150k-Wert, zählt nie zu früh; wie Apex)
-WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": {"50000": 150.0, "150000": 250.0}, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}, "ftmo futures": 200.0}   # FT2 (Finn 11.11.2026 21:05: „5 Winning Days, je Winning Day 200+“, zählt schon in der Funded-Phase)   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+# LF1b (FundedNext Help-Center, Flex 50k: Benchmark Day ab 200 $): FundedNext Futures 50k 200 $, sonst 250 $ wie bisher
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": {"50000": 150.0, "150000": 250.0}, "fundednext futures": {"50000": 200.0, "150000": 250.0}, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}, "ftmo futures": 200.0}   # FT2 (Finn 11.11.2026 21:05: „5 Winning Days, je Winning Day 200+“, zählt schon in der Funded-Phase)   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
 
 
 def hedge_grund_echt(p):
@@ -48859,11 +48860,16 @@ FDP_GRUND_GROESSE_AUS = "Kontogröße im Funded-Planer aus — unter Funded Plan
 def fdp_groesse_an(regel, konto):
     """REIN (testbar), LF1 (Master 16.11.2026, Lucid Flex 50k: „das 150k-Profil bleibt aus, das 50k-Profil braucht einen eigenen An-Schalter“): False nur,
     wenn je_groesse[Größe des Kontos].an ausdrücklich false ist — sonst True. Profile ohne diesen Schlüssel (alle bis LF1) bleiben bitgleich: es zählt
-    allein der Schalter der Firma. Größe unbekannt bzw. keine Werte → True (dann entscheidet der bisherige Weg, z. B. „keine Werte für …k“)."""
+    allein der Schalter der Firma. Größe unbekannt bzw. keine Werte → True (dann entscheidet der bisherige Weg, z. B. „keine Werte für …k“).
+    LF1b: Hat die Firma Schalter je Größe (irgendeine Größe trägt „an“), ist eine Größe OHNE Werte aus — eine Firma, die nur für 50k eingeschaltet wurde
+    (FundedNext Futures, Lucid), plant/liest ihre anderen Größen nicht (sonst „keine Werte für 100k“ und Auto-Lesungen für Konten, die niemand plant)."""
     if not isinstance(regel, dict):
         return True
     jg = fdp_je_groesse(regel, _wd_konto_groesse(konto))
-    return not (isinstance(jg, dict) and jg.get("an") is False)
+    if isinstance(jg, dict):
+        return jg.get("an") is not False
+    alle = regel.get("je_groesse") if isinstance(regel.get("je_groesse"), dict) else {}
+    return not any(isinstance(v, dict) and "an" in v for v in alle.values())
 FCP_GRUND_FIRMA_AUS = "Firma im Funded-CFD-Planer aus — unter Funded Planer → CFD → Einstellungen einschalten"   # HN1 (12.11.2026)
 AP_GRUND_ID_AUS = "ID nicht im Challenge-Planer — unter „IDs verwalten“ den Haken setzen"   # HN1 (12.11.2026)
 

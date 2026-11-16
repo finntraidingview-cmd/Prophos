@@ -46,6 +46,10 @@ LUCID = copy.deepcopy(LUCID_ALT)
 LUCID["an"] = True
 LUCID["je_groesse"]["150000"]["an"] = False
 LUCID["je_groesse"]["50000"] = copy.deepcopy(JG50)
+# LF1b: FundedNext Futures Flex 50k (wie sql/2026-11-16_fnf_flex_50k.sql)
+JGF = {"an": True, "dd": 1500, "ziel_gewinn": [6000, 8000], "ziel_toleranz_pct": 10, "pump2_pct": 0, "ein_kontrakte": {"1": 0.5, "2": 0.5}, "ein_sl": [1300, 1400],
+       "sl_kein_pct": 0, "sl_hinter_liq": False, "t1_von": "03:00", "t1_bis": "16:00", "hedge_eur": 350, "hedge_auf_usd": 1500}
+FNF = {"an": True, "name": "FundedNext Futures", "namen": ["fundednextfutures"], "symbol": "NQ", "lock_usd": 100, "tp_modus": "pump2", "je_groesse": {"50000": copy.deepcopy(JGF)}}
 APEX = {"an": True, "name": "Apex Trader", "namen": ["apextrader", "apex"], "lock_usd": 100, "je_groesse": {"100000": {"dd": 3000, "ziel_gewinn": [3000, 3500], "max_trade": 3000,
         "kosten_eur": 300, "kontrakte": {"2": 0.5, "3": 0.5}}, "150000": {"dd": 5000, "ziel_gewinn": [5000, 5500], "max_trade": 5000, "kosten_eur": 400, "kontrakte": {"3": 1}}}}
 FTMO = {"an": True, "name": "FTMO Futures", "namen": ["ftmofutures"], "lock_usd": 0, "tp_modus": "rest",
@@ -106,11 +110,11 @@ if alt is not None:
         for nm in ("50k A", "100k A", "150k A", "A ohne Größe"):
             for pl in (149.0, 151.0, 249.0, 251.0, 299.0, 351.0):
                 k = {"firm": f, "name": nm, "account_type": "winning_days"}
-                if "lucid" in f.lower() and nm.startswith("50k"):
+                if ("lucid" in f.lower() or "fundednext futures" in f.lower()) and nm.startswith("50k"):
                     continue
                 if (app.wd_min_gewinn(k), app._wd_good_day(k, pl)) != (alt.wd_min_gewinn(k), alt._wd_good_day(k, pl)):
                     wd_abw.append((f, nm, pl))
-    ok(not wd_abw, f"WD-Linie aller Firmen/Größen außer Lucid 50k unverändert ({wd_abw[:3]})")
+    ok(not wd_abw, f"WD-Linie aller Firmen/Größen außer Lucid 50k und FNF Futures 50k unverändert ({wd_abw[:3]})")
 
 print("— 2) Lucid 50k: EIN Pump-Trade aufs Ziel —")
 fehl, ziele, kts = [], {}, set()
@@ -138,11 +142,34 @@ ok(r["aktion"] == "ziel", f"Gewinn 5.500 ≥ Untergrenze 6.000 × 0,9 (Toleranz 
 r = app.fdp_pump_konto(LUCID, JG50, 49100.0, 50000.0, 50000.0, 50000, "a1", 1, "2026-11-17", random.Random(3), sppl=0.85)
 ok(r["aktion"] == "planen" and r["sl"] <= 49100 - 48000 - 50, f"Balance 49.100 (Liq 48.000): SL ≤ Abstand − 50 → {r.get('sl')}")
 
+print("— 2b) LF1b FundedNext Futures Flex 50k: EIN Pump-Trade, ohne Daily Loss —")
+fehl, ziele = [], {}
+for kid in ("f1", "f2", "f3", "f4"):
+    for tag in ("2026-11-17", "2026-11-18", "2026-11-19"):
+        r = app.fdp_pump_konto(FNF, JGF, 50000.0, 50000.0, 50000.0, 50000, kid, 1, tag, random.Random(f"{kid}{tag}"), sppl=0.85)
+        ziele.setdefault(kid, set()).add(r["pump"]["ziel_gewinn"])
+        if not (r["aktion"] == "planen" and r["pump"]["weg"] == "ein" and r.get("kette") is None and 6000 <= r["tp"] <= 8000 and 1300 <= r["sl"] <= 1400
+                and r["kontrakte"] in (1, 2) and r["liq"] == 48500 and r.get("dll") is None):
+            fehl.append((kid, tag, r.get("aktion"), r.get("grund"), r.get("sl"), r.get("liq"), r.get("dll")))
+ok(not fehl and all(len(v) == 1 for v in ziele.values()), f"12 Pump-Tage: EIN Trade, Ziel 6–8k fest je Konto, SL 1.300–1.400, 1–2 NQ, Liq 48.500 (MLL 1.500), kein DLL ({fehl[:2]})")
+rk = app.fdp_pump_trade1(JGF, "ein", 50000.0, 50000.0, 48500.0, 57000.0, random.Random(2))
+ok(rk["hedge_eur"] == round(350 / 1500 * rk["sl"], 2), f"Hedge 350 € je 1.500 $ Risiko: SL {rk['sl']:g} $ → {rk['hedge_eur']:g} €")
+r = app.fdp_pump_konto(FNF, JGF, 49700.0, 50000.0, 50000.0, 50000, "f1", 1, "2026-11-17", random.Random(5), sppl=0.85)
+ok(r["aktion"] == "planen" and r["sl"] <= 49700 - 48500 - 50, f"Balance 49.700 (Liq 48.500): SL höchstens Abstand − 50 = 1.150 → {r.get('sl')}")
+liq_lock = app.fdp_liq(50000, 1500, 51700, 51700, 100.0)[0]
+ok(liq_lock == 50100, f"MLL-Lock: ab Höchststand 51.600 fest bei 50.100 (Größe + 100) → {liq_lock}")
+r = app.fdp_pump_konto(dict(LUCID, je_groesse=dict(LUCID["je_groesse"], **{"50000": dict(JG50, hedge_eur=300)})), dict(JG50, hedge_eur=300), 50000.0, 50000.0, 50000.0,
+                       50000, "a1", 1, "2026-11-17", random.Random(1), sppl=0.85)
+ok(r["aktion"] == "planen", "Lucid mit Hedge 300 € (Finn-Nachtrag) plant")
+
 print("— 3) Schalter je Größe —")
 ok(app.fdp_groesse_an(LUCID, konto("Lucid Trading", 50000)) is True and app.fdp_groesse_an(LUCID, konto("Lucid Trading", 150000)) is False,
    "Lucid: 50k an, 150k aus")
 ok(all(app.fdp_groesse_an(r_, konto(r_["name"], g)) for r_ in (TRADEIFY, LUCID_ALT, APEX, FTMO) for g in (50000, 100000, 150000)) and app.fdp_groesse_an(None, {}),
    "Profile ohne „an“ je Größe: immer an (nur der Firmen-Schalter zählt)")
+ok(app.fdp_groesse_an(FNF, konto("FundedNext Futures", 50000)) and not app.fdp_groesse_an(FNF, konto("FundedNext Futures", 100000))
+   and not app.fdp_groesse_an(FNF, konto("FundedNext Futures", 150000)) and not app.fdp_groesse_an(LUCID, konto("Lucid Trading", 100000)),
+   "LF1b: Firma mit Schaltern je Größe — Größen ohne Werte (FNF 100k/150k, Lucid 100k) sind aus, nicht „keine Werte“ und nicht gelesen")
 alle = [konto("Lucid Trading", 50000, kid="l50"), konto("Lucid Trading", 150000, kid="l150"), konto("Tradeify", 150000, kid="t150"),
         konto("Lucid Trading", 150000, "funded_cfd", "lcfd")]
 f2 = [a["id"] for a in app.ap_bal_gruppe_funded_filter(alle, [LUCID, dict(TRADEIFY, an=True)], [{"an": True, "name": "Lucid Trading", "namen": ["lucidtrading", "lucid"]}])]
@@ -162,6 +189,9 @@ print("— 4) WD-Linie Lucid je Größe —")
 w = lambda n, t="winning_days": {"firm": "Lucid Trading", "name": n, "account_type": t}   # noqa: E731
 ok(app.wd_min_gewinn(w("50k L1 → WD")) == 150.0 and app.wd_min_gewinn(w("150k L1 → WD")) == 250.0 and app.wd_min_gewinn(w("L1 ohne Größe")) == 250.0
    and app.wd_min_gewinn(w("100k L1")) == 250.0, "wd_min_gewinn: 50k 150 $, 150k/100k/unbekannt 250 $")
+wf = lambda n: {"firm": "FundedNext Futures", "name": n, "account_type": "winning_days"}   # noqa: E731
+ok(app.wd_min_gewinn(wf("50k F1")) == 200.0 and app.wd_min_gewinn(wf("100k F1")) == 250.0 and app.wd_min_gewinn(wf("F1")) == 250.0
+   and app._wd_good_day(wf("50k F1"), 210) is True and app._wd_good_day(wf("50k F1"), 190) is False, "LF1b: FNF Futures 50k Benchmark Day ab 200 $, sonst 250 $")
 ok(app._wd_good_day(w("50k L1"), 160) is True and app._wd_good_day(w("150k L1"), 160) is False and app._wd_good_day(w("50k L1"), 150) is False,
    "Good Day: 50k ab > 150 $, 150k erst > 250 $")
 ok(app.wd_min_gewinn(dict(w("50k L1"), goal_min_profit=200)) == 200.0, "goal_min_profit am Konto gilt weiter vor der Firma")
@@ -179,6 +209,10 @@ ok("'{je_groesse,150000,an}', 'false'::jsonb" in sq and '"pump2_pct": 0' in sq a
    and "insert into public.liq_regeln (firma," in sq, "SQL: Firma an, 150k aus, 50k-Profil, liq_regeln 50k idempotent (id = Identity, nicht mitgegeben)")
 _i = sq.index("'{\n          \"an\"")
 sql_jg = json.loads(sq[_i + 1:sq.index("}'::jsonb", _i) + 1])
+sqf = open(os.path.join(WURZEL, "sql", "2026-11-16_fnf_flex_50k.sql"), encoding="utf-8").read()
+_j = sqf.index("'{\n          \"an\"")
+ok(json.loads(sqf[_j + 1:sqf.index("}'::jsonb", _j) + 1]) == JGF and '"tp_modus": "pump2"' in sqf and '"lock_usd": 100' in sqf,
+   "LF1b: Profil im Test = Profil in sql/2026-11-16_fnf_flex_50k.sql (pump2, Lock 100)")
 ok(sql_jg == JG50, "Profil im Test = Profil in der SQL-Datei")
 
 print("— 6) Frontend (prophos.html, JavaScriptCore) —")
@@ -196,7 +230,9 @@ js = "const istTradeifyCfd = f => /tradeify/i.test(String(f || '')) && /cfd/i.te
 const L = (f, n) => ({ firm: f, name: n });
 JSON.stringify({ tc: [tcGoodDayGrenze(L('Lucid Trading', '50k A')), tcGoodDayGrenze(L('Lucid Trading', '150k A')), tcGoodDayGrenze(L('Lucid Trading', 'A')),
   tcGoodDayGrenze(L('Apex Trader', '100k A')), tcGoodDayGrenze(L('Apex Trader', '150k A')), tcGoodDayGrenze(L('Tradeify', '50k A')), tcGoodDayGrenze(L('Topstep', '50k A'))],
-  zw: [zielWdMin(L('Lucid Trading', '50k A')), zielWdMin(L('Lucid Trading', '150k A')), zielWdMin(L('Tradeify', '50k A')), zielWdMin(L('Apex Trader', '100k A')), zielWdMin(L('FTMO Futures', '50k A'))] });
+  zw: [zielWdMin(L('Lucid Trading', '50k A')), zielWdMin(L('Lucid Trading', '150k A')), zielWdMin(L('Tradeify', '50k A')), zielWdMin(L('Apex Trader', '100k A')), zielWdMin(L('FTMO Futures', '50k A')),
+       zielWdMin(L('FundedNext Futures', '50k A')), zielWdMin(L('FundedNext Futures', '100k A'))],
+  fnf: [tcGoodDayGrenze(L('FundedNext Futures', '50k A')), tcGoodDayGrenze(L('FundedNext Futures', '150k A'))] });
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
     fh.write(js)
@@ -208,7 +244,8 @@ try:
 finally:
     os.unlink(fh.name)
 ok(jr.get("tc") == [150, 250, 250, 300, 350, 250, 150], f"tcGoodDayGrenze: Lucid 50k 150 / 150k 250 / ohne Größe 250, Apex/Tradeify/Topstep unverändert ({jr.get('tc')})")
-ok(jr.get("zw") == [150, 250, 250, 300, 200], f"zielWdMin: Lucid 50k 150, Rest unverändert ({jr.get('zw')})")
+ok(jr.get("zw") == [150, 250, 250, 300, 200, 200, 250], f"zielWdMin: Lucid 50k 150, FNF 50k 200, Rest unverändert ({jr.get('zw')})")
+ok(jr.get("fnf") == [200, 250], f"tcGoodDayGrenze: FNF Futures 50k 200 / 150k 250 ({jr.get('fnf')})")
 ok("an: ['Diese Größe im Planer'" in html and "titel !== 'Größe im Planer' || ks.some(k => w[k] !== undefined)" in html,
    "Einstellung: Schalter „Diese Größe im Planer“ nur, wo er per SQL steht")
 
