@@ -111,8 +111,9 @@ def main():
     # Herzschlag mit Login/URL/Kennung (16.10.2026)
     import time as _t
     hz = {"re": re, "time": _t}
-    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen", "neben_tab_frei"],
-                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT"]), hz)
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen", "neben_tab_frei", "_haupt_tab_neu_waehlen", "haupt_tab_halten", "claim_riegel", "_claim_riegel_jetzt"],
+                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT", "TAB_NL",
+                  "PULS_WACHE_HAUPT_LEBT_S", "CLAIM_RIEGEL_FRISCH_S", "CLAIM_HALTEN_MAX_S"]), hz)
     hz["tab_gesehen"]("Mozilla/5.0", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"]})
     check(hz["_TAB_OEFFNEN"]["zuletzt"] == 0.0, "Panel-Seite im Browser zählt nicht als Tab")
     hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]})
@@ -166,8 +167,9 @@ def main():
             return self.t
     uhr = _Uhr()
     zv = {"re": re, "time": uhr}
-    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen"],
-                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT"]), zv)
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen", "_haupt_tab_neu_waehlen", "haupt_tab_halten", "claim_riegel", "_claim_riegel_jetzt"],
+                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT", "TAB_NL",
+                  "PULS_WACHE_HAUPT_LEBT_S", "CLAIM_RIEGEL_FRISCH_S", "CLAIM_HALTEN_MAX_S"]), zv)
     ANLAUF_S = 90.0
     def verlauf(anderer_fragt):
         zv["_TABS"].clear()
@@ -217,7 +219,7 @@ def main():
     html = open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read()
     check("sessionStorage.getItem('prophos_tab_id')" in html, "Tab-Kennung übersteht Neuladen (sessionStorage je Tab)")
     pq0 = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
-    check("TAB_ZAEHL_FRISCH_S" in pq0 and "haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT[\"tid\"], tid)" in pq0,
+    check("TAB_ZAEHL_FRISCH_S" in pq0 and "_haupt_tab_neu_waehlen(jetzt, tid)" in pq0 and "haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT[\"tid\"], ich)" in pq0,
           "Doppel-Tab-Zählung nur frische Kennungen; Sicherung bekommt die fragende Kennung")
     # FERN-AUFTRAG „Prophos im Puls-Chrome öffnen" (30.10.2026)
     fa = {"re": re}

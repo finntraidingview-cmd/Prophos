@@ -2962,7 +2962,7 @@ def tab_gesehen(user_agent, query=None):
         _TABS[tid] = {"at": jetzt, "login": w("login") == "1", "url": w("url"), "puls": alt.get("puls"), "neben_at": alt.get("neben_at")}
         for t in [t for t, z in _TABS.items() if jetzt - max(float(z.get("at") or 0), float(z.get("neben_at") or 0)) > 3600]:
             _TABS.pop(t, None)
-        _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"], tid)
+        _TAB_HAUPT["tid"] = _haupt_tab_neu_waehlen(jetzt, tid)   # PW1: haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"], tid) + Claim-Schutz
         if _TAB_HAUPT["tid"] != tid:
             return False
     _TAB_OEFFNEN["zuletzt"] = time.time()
@@ -3068,6 +3068,92 @@ def puls_wache_entscheiden(jetzt, erreichbar, n_prophos, fehlt_seit, letzter, lo
     return True, warum, fehlt_seit
 
 
+# ══ PW1 CLAIM-SCHUTZ (Master 16.11.2026 nach FM1, Slave 4): alle 6 unklaren „puls_still: geclaimt, danach kein Ergebnis (Tab neu geladen …)“ der Woche
+# (Aurel pc-pw1put 15.11. 23:20Z, Simon pc-pmqd8g 16.11. 04:47Z, l5o8bv, 7ftp5l ×2, xc5c52) kamen 7–9 min nach „Puls-Wache … geöffnet“: der Haupt-Tab lebte
+# in einem ANDEREN Chrome und hatte gerade einen Start geclaimt (Railway-Log im selben Takt „wartet: Start geclaimt (< 6 min)“), die Wache sah im Puls-Chrome
+# keinen Prophos-Tab und öffnete einen; der neue Tab (angemeldet + Puls-Chrome) wurde sofort Haupt-Tab, der claimende fiel auf „nur ansehen“ → Ergebnis weg.
+# Zwei Sicherungen, beide nur, solange Railway einen Riegel meldet (Signal läuft, Start geclaimt < 6 min, Start ≤ 5 min, Hedge öffnet/schließt):
+#   (1) puls_wache_halten: lebt ein angemeldeter Haupt-Tab woanders (fragte ≤ PULS_WACHE_HAUPT_LEBT_S), öffnet die Wache nicht — danach wie bisher.
+#   (2) haupt_tab_halten: steht ein Riegel, bleibt der bisherige Haupt-Tab Haupt-Tab, solange er lebt — auch wenn ein höher rangierter Tab dazukommt.
+# Zeitgrenze für beide: CLAIM_HALTEN_MAX_S am Stück (ein klemmender Riegel hält nie ewig), ein toter Tab (fragt > 90 s nicht) wird sofort ersetzt.
+# Unverändert: ist GAR KEIN Prophos-Tab da (der Anlass 02.11.), öffnet die Wache wie bisher auch bei offenem Trade; Neuladen nach Updates ist nicht berührt.
+PULS_WACHE_HAUPT_LEBT_S = 90     # Haupt-Tab fragt sonst alle 5–30 s, verdeckt gedrosselt ~1×/min
+CLAIM_RIEGEL_FRISCH_S = 150      # Tab-Stand (Railway-Riegel) höchstens so alt — wie die anderen Leser von TAB_NL["stand"]
+CLAIM_HALTEN_MAX_S = 10 * 60     # länger hält keine der beiden Sicherungen am Stück
+
+
+def claim_riegel(stand, stand_at, jetzt):
+    """REIN RECHNEND (testbar): Server-Riegel aus dem letzten Tab-Stand ('' = keiner oder Stand zu alt)."""
+    if not isinstance(stand, dict) or jetzt - float(stand_at or 0) > CLAIM_RIEGEL_FRISCH_S:
+        return ""
+    return str(stand.get("riegel") or "").strip()
+
+
+def puls_wache_halten(riegel, haupt_alter_s, haupt_login, halten_seit, jetzt):
+    """REIN RECHNEND (testbar, PW1): soll die Wache trotz fehlendem Prophos-Tab im Puls-Chrome NICHT öffnen? → (halten, grund, halten_seit_neu).
+    haupt_alter_s = Sekunden seit der letzten Abfrage des Haupt-Tabs (None = keiner), haupt_login = Haupt-Tab angemeldet."""
+    if not riegel or haupt_alter_s is None or haupt_alter_s > PULS_WACHE_HAUPT_LEBT_S or not haupt_login:
+        return False, "", None
+    halten_seit = halten_seit or jetzt
+    if jetzt - halten_seit >= CLAIM_HALTEN_MAX_S:
+        return False, f"Riegel „{riegel}“ hält seit {int((jetzt - halten_seit) // 60)} min — öffnet trotzdem", halten_seit
+    return True, (f"wartet: Haupt-Tab lebt in einem anderen Chrome (Abfrage vor {int(haupt_alter_s)} s), {riegel} — "
+                  f"öffnet danach (spätestens nach {CLAIM_HALTEN_MAX_S // 60} min)"), halten_seit
+
+
+def haupt_tab_halten(tabs, jetzt, bisher, neu, riegel, halten):
+    """REIN RECHNEND (testbar, PW1): Ergebnis von haupt_tab_waehlen nachprüfen → (tid, halten_neu). Wechselt die Wahl weg von einem lebenden, ANGEMELDETEN
+    bisherigen Haupt-Tab (Abfrage ≤ PULS_WACHE_HAUPT_LEBT_S; ein Tab ohne Login claimt nichts — Prüfer PW1 MUSS), während ein Riegel steht, bleibt der
+    bisherige. halten = {"tid": bisheriger Haupt-Tab, "seit": Beginn} — EIN Zeitgeber je Konflikt (Prüfer PW1 SOLLTE 2): er läuft weiter, solange der Riegel
+    steht und derselbe Tab Haupt-Tab ist (auch über Aufrufe ohne Konflikt hinweg, z. B. wenn der neue Tab gerade „nur ansehen“ ist), und endet nur ohne
+    Riegel oder mit einem anderen Haupt-Tab. Nach CLAIM_HALTEN_MAX_S gewinnt wieder die normale Wahl."""
+    if not riegel:
+        return neu, None
+    if isinstance(halten, dict) and halten.get("tid") != bisher:
+        halten = None
+    if not neu or neu == bisher:
+        return neu, halten
+    z = (tabs or {}).get(bisher) if bisher else None
+    if not z or jetzt - float(z.get("at") or 0) > PULS_WACHE_HAUPT_LEBT_S or z.get("login") is not True:
+        return neu, None
+    halten = halten if isinstance(halten, dict) else {"tid": bisher, "seit": jetzt}
+    if jetzt - float(halten.get("seit") or jetzt) >= CLAIM_HALTEN_MAX_S:
+        return neu, halten
+    return bisher, halten
+
+
+def _claim_riegel_jetzt():
+    return claim_riegel(TAB_NL.get("stand"), TAB_NL.get("stand_at"), time.time())
+
+
+def haupt_tab_frei_api(tid, login, jetzt):
+    """/api/haupt-tab (Tab im „nur ansehen"-Modus): neben_tab_frei + PW1-Halten mit demselben Zeitgeber wie tab_gesehen — während ein Riegel steht und der
+    angemeldete Haupt-Tab lebt, kein „frei“ (sonst lüde der Puls-Chrome-Tab als Haupt-Tab neu, tab_gesehen hielte ihn fest, nach 90 s wieder „nur ansehen“ …)."""
+    frei = neben_tab_frei(_TABS, tid, login, jetzt, _TAB_HAUPT["tid"])
+    if frei and tid:
+        try:
+            gewaehlt, _TAB_HAUPT["halten"] = haupt_tab_halten(_TABS, jetzt, _TAB_HAUPT["tid"], tid, _claim_riegel_jetzt(), _TAB_HAUPT.get("halten"))
+            frei = gewaehlt == tid
+        except Exception:
+            pass
+    return frei
+
+
+def _haupt_tab_neu_waehlen(jetzt, ich=""):
+    """haupt_tab_waehlen + PW1-Halten (beide Aufrufer: tab_gesehen und _haupt_tab_runde). Wirft nie: im Zweifel die unveränderte Wahl."""
+    neu = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"], ich) if ich else haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"])
+    try:
+        tid, _TAB_HAUPT["halten"] = haupt_tab_halten(_TABS, jetzt, _TAB_HAUPT["tid"], neu, _claim_riegel_jetzt(), _TAB_HAUPT.get("halten"))
+    except Exception:
+        return neu
+    if tid != neu and _TAB_HAUPT.get("halten_grund") != tid:
+        _TAB_HAUPT["halten_grund"] = tid
+        print(f"[haupt-tab] Wechsel zu {neu} gesperrt — Riegel steht ({_claim_riegel_jetzt()}), {tid} bleibt Haupt-Tab", flush=True)
+    if tid == neu:
+        _TAB_HAUPT["halten_grund"] = ""
+    return tid
+
+
 def _puls_wache_url():
     """Adresse des letzten Tabs (localhost ≠ 127.0.0.1 = getrennte Logins, S9 02.11.2026 — sonst öffnete die Wache einen nicht angemeldeten Tab) mit
     ?v=<Build> wie die Neulade-Wege des Tabs (frischer Tab-Stand von Railway, sonst OS_TAB_BUILD der lokalen prophos.html)."""
@@ -3096,6 +3182,27 @@ def _puls_wache_schritt(pc):
         jetzt = time.time()
         auf, grund, _PULS_WACHE["fehlt_seit"] = puls_wache_entscheiden(jetzt, erreichbar, n, _PULS_WACHE["fehlt_seit"], _PULS_WACHE["letzter"],
                                                                       _browser_und_mt5_frei(), _win_leerlauf_s())
+        if auf:   # PW1 (16.11.2026): Haupt-Tab woanders hält gerade einen Claim → nicht öffnen (Zeitgrenze CLAIM_HALTEN_MAX_S)
+            # Riegel FRISCH holen (Prüfer PW1 SOLLTE 4): der Stand der Vorrunde ist ~60–70 s alt, ein Claim/Signal darin wäre sonst unsichtbar.
+            # Nur in dieser Runde mit Öffnen-Absicht (selten), Fehler still — dann gilt der alte Stand.
+            if pc:
+                try:
+                    _st = _tab_stand_holen(pc, "")
+                    if isinstance(_st, dict) and _st.get("ok"):
+                        TAB_NL.update(stand=_st, stand_at=time.time())
+                except Exception:
+                    pass
+            h = _TABS.get(_TAB_HAUPT.get("tid") or "") or {}
+            h_alter = (jetzt - float(h["at"])) if h.get("at") else None
+            halten, h_grund, _PULS_WACHE["halten_seit"] = puls_wache_halten(_claim_riegel_jetzt(), h_alter, h.get("login") is True,
+                                                                           _PULS_WACHE.get("halten_seit"), jetzt)
+            if halten:
+                auf, grund = False, f"{grund} — {h_grund}"
+            elif h_grund:
+                grund = f"{grund} · {h_grund}"
+        elif not erreichbar or n > 0:
+            # Zeitgeber nur zurück, wenn nichts mehr fehlt — nicht bei „Lock belegt“/„Eingabe“/„Abstand“ (Prüfer PW1 SOLLTE 3: sonst dehnbar ohne Ende)
+            _PULS_WACHE["halten_seit"] = None
         if auf:
             ok, msg = _tab_oeffnen(_puls_wache_url())
             if ok or "lokales Backend" not in str(msg):    # Backend gerade im Neustart → nächste Runde neu, sonst zählt der Versuch
@@ -4469,7 +4576,7 @@ def _haupt_tab_runde(pc, liste, jetzt):
         if tids is not None:
             for t in _TABS:
                 _TABS[t]["puls"] = t in tids
-            _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"])
+            _TAB_HAUPT["tid"] = _haupt_tab_neu_waehlen(jetzt)   # PW1: + Claim-Schutz (hier kippte bei Aurel/Simon die Wahl zum neuen Puls-Chrome-Tab)
     meldung = ""
     if len(lebend) >= 2:
         h = _TABS.get(_TAB_HAUPT["tid"]) or {}
@@ -7245,7 +7352,7 @@ class Handler(BaseHTTPRequestHandler):
             login = str((q.get("login") or [""])[0]) == "1"
             if tid:   # merken (für die Doppel-Tab-Meldung), aber nie als Haupt-Herzschlag ("at" bleibt)
                 _TABS.setdefault(tid, {"at": 0.0, "puls": None}).update(login=login, neben_at=time.time())
-            frei = neben_tab_frei(_TABS, tid, login, time.time(), _TAB_HAUPT["tid"])
+            frei = haupt_tab_frei_api(tid, login, time.time())   # PW1 (16.11.2026): neben_tab_frei + Claim-Schutz (gleicher Zeitgeber wie tab_gesehen)
             return self._send(200, json.dumps({"ok": True, "frei": frei}))
         if path == "/api/tab-zustand":
             # FS1 (10.11.2026): Tab-Zustand für die Puls-Spur; anlass=tab_nicht_erreichbar startet die Stufen-Heilung sofort (s. TAB_HEIL_SOFORT). Nur lokal.

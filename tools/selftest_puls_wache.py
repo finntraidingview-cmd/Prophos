@@ -37,11 +37,12 @@ ns = {"re": re, "os": os, "HERE": os.path.join(W, "mt5-copier"), "TAB_URL": "htt
       "time": types.SimpleNamespace(time=lambda: uhr[0]), "datetime": __import__("datetime").datetime,
       "_PROPHOS_URL_RE": re.compile(r"^http://(localhost|127\.0\.0\.1):5000(/|$)"), "_cdp_get": cdp_get,
       "_browser_und_mt5_frei": lambda tv_eigen=False: welt["frei"], "_tab_oeffnen": lambda url: (welt["oeffnen"].append((uhr[0], url)), welt["antwort"])[1],
-      "_tab_stand_holen": lambda pc, spur: None, "print": lambda *a, **k: None, "_win_leerlauf_s": lambda: welt["idle"]}
+      "_tab_stand_holen": lambda pc, spur: None, "_TABS": {}, "_TAB_HAUPT": {"tid": ""}, "print": lambda *a, **k: None, "_win_leerlauf_s": lambda: welt["idle"]}
 for n in ast.parse(SRC).body:
-    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("PULS_WACHE_FEHLT_S", "PULS_WACHE_ABSTAND_S", "PULS_WACHE_IDLE_S", "_PULS_WACHE", "TAB_URL_V_RE") for t in n.targets):
+    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("PULS_WACHE_FEHLT_S", "PULS_WACHE_ABSTAND_S", "PULS_WACHE_IDLE_S", "_PULS_WACHE", "TAB_URL_V_RE",
+                                                                          "PULS_WACHE_HAUPT_LEBT_S", "CLAIM_RIEGEL_FRISCH_S", "CLAIM_HALTEN_MAX_S") for t in n.targets):
         exec(ast.get_source_segment(SRC, n), ns)
-    if isinstance(n, ast.FunctionDef) and n.name in ("puls_wache_entscheiden", "_puls_wache_url", "_puls_wache_schritt"):
+    if isinstance(n, ast.FunctionDef) and n.name in ("puls_wache_entscheiden", "_puls_wache_url", "_puls_wache_schritt", "puls_wache_halten", "claim_riegel", "_claim_riegel_jetzt"):
         exec(ast.get_source_segment(SRC, n), ns)
 schritt = ns["_puls_wache_schritt"]
 TV = {"type": "page", "url": "https://www.tradingview.com/chart/x/"}
@@ -106,7 +107,10 @@ check(ns["_puls_wache_url"]().startswith("http://localhost:5000/?v="), "ohne gem
 # Einbau
 check("_puls_wache_schritt(pc)" in SRC and SRC.index("_puls_wache_schritt(pc)") < SRC.index("STUFEN-HEILUNG (30.10.2026)"), "im Tab-Wächter vor der Stufen-Heilung")
 w = SRC[SRC.index("def _puls_wache_schritt("):SRC.index("def tab_neuladen_entscheiden(")]
-check("json/close" not in w and "keybd_event" not in w and "riegel" not in w, "Wache schließt nichts, drückt keine Taste und fragt keinen Server-Riegel (offener Trade erlaubt)")
+# PW1 (16.11.2026): die Wache liest den Server-Riegel jetzt NUR für den Claim-Schutz (Haupt-Tab lebt woanders) — ohne lebenden Haupt-Tab öffnet sie weiter
+# auch bei offenem Trade (Fälle in tools/selftest_pw1_claim_schutz.py)
+check("json/close" not in w and "keybd_event" not in w and "puls_wache_halten(_claim_riegel_jetzt()" in w,
+      "Wache schließt nichts, drückt keine Taste; Server-Riegel nur für den PW1-Claim-Schutz")
 o = SRC[SRC.index("def _tab_oeffnen("):SRC.index("_TAB_PULS_OEFFNEN_CODE = (")]
 check("TV_ORDER_LOCK.acquire(blocking=False)" in o and "'background': True" in SRC, "Öffnen unter dem Puls-Lock, neues Fenster im Hintergrund")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
