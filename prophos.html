@@ -59179,7 +59179,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2226'
+  const OS_TAB_BUILD = '2026-09-22.2227'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -84074,42 +84074,14 @@
     return d
   }
   window._kontoFuerAnlegen = (fuer, acc, cons) => kontoFuerAnlegen(fuer, acc, cons)   // cons = Consistency aus dem Modal (ging bis 30.10.2026 verloren)
-  // Eigene ID: Zeilen über der Kontoliste (Spalten wie Accounts: Account · Firm · Typ · Balance · Planer · Verknüpfungen · Aktionen)
+  // TV1 (Finn 16.11.2026 über den Master zu „FTMO110764 · FTMO Futures · zu bestätigen · aus TV“ bei Chris: „Mach dieses ‚bestätigen' komplett weg.
+  // Wir fügen die Accounts immer alle manuell hinzu. Alles verwerfen, das nutzen wir nicht.“): unter Accounts keine Vorschlags-Zeilen mehr — nach den
+  // Mail-Zeilen (MV1 11.11.2026) jetzt auch die TV-Zeilen. tvNeuRender leert nur noch das tbody #tvNeuRows (bleibt im Markup, renderAccounts ruft
+  // weiter hierher) und lädt nichts mehr (/tv-konten/mein + /konto-mails/mein fielen beim Öffnen von Accounts weg). Unverändert: Admin → Alle Accounts
+  // (#adm-k-tv), der Reiter „Konten aus Mail & TV“, Bestätigen/Verwerfen dort, der TV-Leser und tv_konten im Backend.
   function tvNeuRender(){
     const tb = document.getElementById('tvNeuRows')
-    if(!tb) return
-    if((!_tvNeu.at || _tvNeu.uid !== String(currentUserId || '')) && !_tvNeu.laedt){ tvNeuLaden(); return }   // erster Aufruf bzw. andere ID lädt einmal
-    const eigene = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts : []
-    const uidJetzt = String(currentUserId || '')
-    // MV1 (Finn 11.11.2026 19:24 über den Master zu „14389689 · FundedNext · zu bestätigen · aus Mail“: „Ja, einfach verwerfen. Das habe ich nie genutzt,
-    // wegmachen.“): unter Accounts keine Mail-Vorschläge mehr — nur noch die TV-Zeilen. Das Laden (/konto-mails/mein, liefert auch die Verworfen-Liste für die
-    // TV-Zeilen), Admin → Konten aus Mail & TV / Alle Accounts und der Mail-Leser im Backend bleiben, wie sie sind.
-    const offen = kontoZuBestaetigen(tvOffen(_tvNeu.rows, eigene, currentUserId).filter(z => !_tvNeu.verworfen.has(kontoKey(z.ext))), [])
-      .filter(z => !_admKTv.angelegt.has(`${uidJetzt}|${extIdNorm(z.ext)}`))
-      // MV1 (Master 11.11.2026, Screenshot Finn 19:21 bei Chris: Filter „Firma: FTMO Futures“, darüber trotzdem „14389689 · FundedNext · Funded · zu bestätigen“):
-      // die Vorschläge standen über der Liste, ohne den Firmen- und Typ-Filter. Die TV-Zeilen, die bleiben, folgen jetzt denselben zwei Vergleichen wie
-      // renderAccounts (a.firm / a.type exakt) — Firma „?“ (unbekannt) trifft keinen gesetzten Firmen-Filter. Nur Anzeige: Bestätigen/Verwerfen bleiben.
-      // try: accFilters ist ein let weiter oben — ein sehr früher Aufruf (TDZ) zeigt dann ungefiltert statt zu werfen (Prüfer MV1, KANN)
-      .filter(z => { let f = null; try{ f = accFilters }catch(_){}
-        f = f || { firm: '', type: '' }
-        return (!f.firm || z.firma === f.firm) && (!f.type || z.typ === f.type) })
-    tb.innerHTML = ''
-    if(!offen.length) return
-    if(TV_KONTEN_AUTO) console.warn('[tv-konten] TV_KONTEN_AUTO = true, automatisches Anlegen ist aber nicht gebaut — Bestätigen bleibt nötig')
-    for(const z of offen){
-      const tr = document.createElement('tr')
-      tr.style.background = 'var(--surface-tint)'
-      tr.innerHTML = '<td style="padding-left:20px"></td><td></td><td></td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td>'
-        + '<td style="color:var(--sub);font-size:12px"></td><td style="padding-right:20px"></td>'
-      tvZelleAccount(tr.children[0], z)
-      tr.children[1].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
-      if(z.firma === '?') tr.children[1].style.color = 'var(--sub)'
-      z.schonDa = _tvNeu.schonDa.has(extIdNorm(z.ext))
-      tvZelleTyp(tr.children[2], z)
-      tr.children[5].textContent = (z.quellen || ['TV']).map(q => q === 'TV' ? ['TradingView', (z.tv || z.row).pc_id || ''].filter(Boolean).join(' · ') : 'Mail').join(' + ')
-      if(!z.schonDa) tvKnoepfe(tr.children[6], z)
-      tb.appendChild(tr)
-    }
+    if(tb) tb.innerHTML = ''
   }
   async function tvNeuIgnorieren(name){
     tvIgnoriertMerken(name); tvNeuRender(); if(_admKTv.at) admKTvRender()   // sofort weg — lokal gemerkt; Admin-Liste nur, wenn sie geladen ist
@@ -84174,7 +84146,7 @@
       tb.appendChild(tr)
     }
   }
-  window._tvNeuOeffnen = () => tvNeuLaden()
+  window._tvNeuOeffnen = () => tvNeuRender()   // TV1 (16.11.2026): Accounts öffnen lädt keine Vorschläge mehr, leert nur das tbody
   window._tvSchonDa = ext => { const k = extIdNorm(ext); if(!k) return; _tvNeu.schonDa.add(k); tvNeuRender(); if(_admKTv.at) admKTvRender() }   // Doppel-Schutz (29.10.2026)
   window._admKTvRender = () => admKTvRender()
   // Boot-Check ohne Login: Zeilen direkt setzen (Stub), ohne Route
