@@ -17226,6 +17226,44 @@ def tsx_dialog_offen_text(popups):
     return f"Dialog ohne Text offen ({tsx_ueberlagerung_name(p0)})"
 
 
+def _tsx_rect_schnitt(a, b, rand=6.0):
+    """REIN RECHNEND (testbar): schneiden sich zwei Rechtecke [x, y, w, h], a um rand px vergrößert? Kaputte Rechtecke → False."""
+    try:
+        ax, ay, aw, ah = [float(v) for v in list(a)[:4]]
+        bx, by, bw, bh = [float(v) for v in list(b)[:4]]
+    except (TypeError, ValueError):
+        return False
+    if aw <= 0 or ah <= 0 or bw <= 0 or bh <= 0:
+        return False
+    return ax - rand < bx + bw and bx < ax + aw + rand and ay - rand < by + bh and by < ay + ah + rand
+
+
+def tsx_ueberlagerung_sperrzone(rect, st):
+    """REIN RECHNEND (testbar, TX1c 17.11.2026, Prüfer S2): harter Riegel vor dem Druck auf das X einer Überlagerung → Name der Zone | None.
+    Nie in der Nähe (± 6 px) von Kauf-/Verkauf-Knopf der Order-Karte; solange eine Position offen sein KANN (flach nicht bewiesen, Positions-
+    Zeile mit Menge ≠ 0 oder Position gelesen) auch nie über dem Positions-/Orders-Dock (Tabelle), einer Positionszeile oder ihrem Close-Kreuz."""
+    st = st if isinstance(st, dict) else {}
+    t = st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+    for k, name in (("kauf", "dem Kauf-Knopf"), ("verkauf", "dem Verkauf-Knopf")):
+        kn = t.get(k) if isinstance(t.get(k), dict) else {}
+        if kn.get("rect") and _tsx_rect_schnitt(rect, kn["rect"]):
+            return name
+    g = t.get("gitter") if isinstance(t.get("gitter"), dict) else {}
+    zeilen = [z for z in (g.get("zeilen") or []) if isinstance(z, dict)]
+    offen = st.get("flach") is not True or bool(st.get("positionen")) \
+        or any(isinstance(z.get("menge"), (int, float)) and z["menge"] != 0 for z in zeilen)
+    if not offen:
+        return None
+    for z in zeilen:
+        if z.get("close_rect") and _tsx_rect_schnitt(rect, z["close_rect"]):
+            return "dem Close-Kreuz einer Positionszeile"
+        if z.get("rect") and _tsx_rect_schnitt(rect, z["rect"]):
+            return "einer Positionszeile"
+    if g.get("rect") and _tsx_rect_schnitt(rect, g["rect"]):
+        return "dem Positions-/Orders-Dock"
+    return None
+
+
 def _tsx_ueberlagerung_weg(s, st, trail):
     """Überlagerungen ohne Order-Bezug (tsx_ueberlagerung) über ihren EINEN Schließ-Knopf schließen — Druck mit Ziel-Beweis, neu lesen,
     höchstens zwei Drücke je Aufruf und TSX_UEBER_MAX je Lauf. -> (stand, grund): grund None = keine (mehr) da, sonst der klare Abbruchgrund
@@ -17253,13 +17291,25 @@ def _tsx_ueberlagerung_weg(s, st, trail):
             trail.append(grund)
             return st, grund
         r = list(kn["rect"])[:4]
+        zone = tsx_ueberlagerung_sperrzone(r, st)
+        if zone:
+            # TX1c (Prüfer S2): das X liegt über einer Order-/Positions-Fläche — verschwände das Popup vor dem Druck, träfe er sie. Kein Druck.
+            grund = f"{was} offen ({name}) — sein Schließen-Knopf liegt über {zone} (Position evtl. offen), nichts geklickt"
+            trail.append(grund)
+            return st, grund
+        dlg = list(p.get("rect") or [])[:4]
+        if len(dlg) != 4 or not str(p.get("role") or "").strip() and not p.get("cls"):
+            grund = f"{was} offen ({name}) — Popup-Rechteck fehlt, Bindung im Ziel-Beweis nicht möglich, nichts geklickt"
+            trail.append(grund)
+            return st, grund
         tabu = TSX_UEBER_PRUEF_TABU                       # beide Tabu-Listen im Ziel-Beweis (Prüfblick TX1b)
+        # TX1c: dialog = das Element am Punkt muss in GENAU diesem Popup-Container stecken (win_ziel_pruef_dialog_js)
         if kn.get("icon_x"):
-            pruef = {"rect": r, "text": "", "aria": "", "tabu": tabu}
+            pruef = {"rect": r, "text": "", "aria": "", "tabu": tabu, "dialog": dlg}
         elif kn.get("aus_aria"):
-            pruef = {"rect": r, "text": "", "aria": kn["text"][:40], "tabu": tabu}
+            pruef = {"rect": r, "text": "", "aria": kn["text"][:40], "tabu": tabu, "dialog": dlg}
         else:
-            pruef = {"rect": r, "text": kn["text"][:40], "aria": "", "tabu": tabu, "wort": kn["text"].lower()[:40]}
+            pruef = {"rect": r, "text": kn["text"][:40], "aria": "", "tabu": tabu, "wort": kn["text"].lower()[:40], "dialog": dlg}
         kname = "Symbol-X" if kn.get("icon_x") else repr(kn["text"][:24])
         try:
             _tsx_pause()
@@ -24146,7 +24196,29 @@ def win_ziel_pruef_js(x, y, pruef):
             "var h=win_hover_eltern(e);"
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
             "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok&&!karte_knopf),was:(karte_knopf?'Knopf in der Karte: ':'')+(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m,beweis:{drin:drin,klein:klein,text_ok:text_ok,tabu:tabu,karte_knopf:karte_knopf,ziel:c,k:[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)],k_tag:k.tagName.toLowerCase(),t:t}};})("
-            + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
+            + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS) \
+        if not (isinstance(pruef, dict) and pruef.get("dialog")) else win_ziel_pruef_dialog_js(x, y, pruef)
+
+
+def win_ziel_pruef_dialog_js(x, y, pruef):
+    """Ziel-Beweis MIT DIALOG-BINDUNG (TX1c, 17.11.2026, Prüfer S2 zu TX1b: beim Symbol-X einer Überlagerung prüft der Beweis nur Rechteck +
+    leeren Text — verschwindet das Popup in der Pause vor dem Druck oder liegt es nicht oben, träfe der Klick das Element darunter, z. B. das
+    textlose Close-Kreuz einer Positionszeile → Position zu, Fusion-Hedge allein offen). pruef.dialog = Rechteck [x, y, w, h] des erkannten
+    Popup-Containers: das Element am Punkt muss in einem role=dialog/alertdialog/aria-modal-Vorfahren mit GENAU diesem Rechteck (± 6 px)
+    stecken, sonst passt nichts. Gleicher Beweis wie win_ziel_pruef_js, nur diese Bedingung dazu — ohne pruef.dialog wird dieser Weg nie
+    benutzt (win_ziel_pruef_js liefert dann denselben Text wie vor TX1c)."""
+    p = {k: v for k, v in pruef.items() if k != "dialog"}
+    js = win_ziel_pruef_js(x, y, p)
+    d = [float(v) for v in list(pruef.get("dialog") or [])[:4]] + [0.0] * 4
+    bindung = ("var dialog_ok=false,dq=e;while(dq&&dq.closest){dq=dq.closest('[role=\"dialog\"],[role=\"alertdialog\"],[aria-modal=\"true\"]');"
+               "if(!dq)break;var dr=dq.getBoundingClientRect();"
+               f"if(Math.abs(dr.left-{d[0]:.1f})<=6&&Math.abs(dr.top-{d[1]:.1f})<=6&&Math.abs(dr.width-{d[2]:.1f})<=6&&Math.abs(dr.height-{d[3]:.1f})<=6)"
+               "{dialog_ok=true;break;}dq=dq.parentElement;}")
+    alt_r = "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&"
+    if js.count(alt_r) != 1:
+        return "(function(){return {hover:false,passt:false,was:'Dialog-Bindung nicht einsetzbar'};})()"   # nie ein Druck ohne Bindung
+    return js.replace(alt_r, bindung + "return {hover:h.hover,eltern:h.eltern,dialog:dialog_ok,passt:!!(dialog_ok&&drin&&", 1) \
+             .replace("was:(karte_knopf?", "was:(!dialog_ok?'nicht im Popup: ':'')+(karte_knopf?", 1)
 
 
 # Schließen-Knöpfe der Meldungen, die GANZ im Bild liegen: erst das X der Gruppe (toast-group-close-button-*), sonst das X einzelner

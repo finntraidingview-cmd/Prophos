@@ -162,6 +162,20 @@ s, t, g = ueber_lauf({"popups": [WERB]}, [{"popups": [WERB]}, {"popups": [WERB]}
 check(len(s.klicks) == 2 and g and "steht nach dem Druck" in g, "bleibt stehen → höchstens 2 Drücke je Aufruf, dann Grund")
 s, t, g = ueber_lauf({"popups": [{"titel": "Confirm Order", "text": "Buy 3", "knoepfe": [{"text": "Close", "rect": R}]}]}, [])
 check(not s.klicks and g is None, "Order-Dialog: nichts gedrückt (bleibt für die Vorprüfung)")
+# TX1c (Prüfer S2): Dialog-Bindung im Beweis + harter Riegel über Order-/Positions-Flächen
+s, t, g = ueber_lauf({"popups": [WERB]}, [{"popups": []}])
+check(s.klicks and s.klicks[0][2].get("dialog") == WERB["rect"], "Ziel-Beweis trägt das Popup-Rechteck (Dialog-Bindung)")
+GITTER = {"da": True, "rect": [900, 640, 700, 200], "zeilen": [{"symbol": "MNQZ26", "menge": 3, "rect": [900, 680, 700, 30], "close_rect": [985, 690, 24, 24]}]}
+ST_OFFEN = {"popups": [WERB], "flach": False, "ticket": {"gitter": GITTER}}
+s, t, g = ueber_lauf(ST_OFFEN, [])
+check(not s.klicks and g and "Close-Kreuz einer Positionszeile" in g, f"Position offen, X über dem Close-Kreuz → kein Druck, klarer Grund ({g})")
+sz = ob.tsx_ueberlagerung_sperrzone
+check(sz([1300, 650, 24, 24], ST_OFFEN) == "dem Positions-/Orders-Dock", "X über dem Dock bei offener Position → gesperrt")
+check(sz([1300, 650, 24, 24], {"flach": True, "ticket": {"gitter": dict(GITTER, zeilen=[])}}) is None, "flach bewiesen, keine Zeile → Dock frei")
+check(sz([1300, 650, 24, 24], {"ticket": {"gitter": dict(GITTER, zeilen=[])}}) == "dem Positions-/Orders-Dock", "flach NICHT bewiesen → Dock gesperrt")
+check(sz([100, 100, 24, 24], {"flach": True, "ticket": {"kauf": {"rect": [110, 105, 120, 40]}}}) == "dem Kauf-Knopf", "nie neben Kauf/Verkauf (auch flach)")
+check(sz([100, 100, 24, 24], ST_OFFEN) is None and not ob._tsx_rect_schnitt([0, 0, 10, 10], [17, 0, 10, 10]) and ob._tsx_rect_schnitt([0, 0, 10, 10], [15, 0, 10, 10]),
+      "weit weg frei, Rand ± 6 px")
 ob._TSX_UEBER_N[0] = ob.TSX_UEBER_MAX
 s = Sitzung([])
 st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [WERB]}, [])
@@ -441,6 +455,10 @@ F = {
                        'width:520px;height:220px;background:#222"><a class="promo" href="#code" style="position:absolute;left:10px;top:10px;width:400px;height:200px">'
                        '<img alt="" width="400" height="200"></a><button aria-label="Close Message" class="ab-close-button" style="position:absolute;right:6px;top:6px;'
                        'width:24px;height:24px"><svg width="14" height="14"><path d="M1 1l12 12M13 1L1 13" stroke="#fff"/></svg></button></div>'),
+    "pos_close": ("TopstepX", TRADE_BODY + '<div role="grid" style="position:fixed;left:900px;top:640px;width:700px;height:200px">'
+                  '<div role="row"><div role="columnheader">Symbol</div></div><div role="row" style="display:flex;height:30px">'
+                  '<div role="gridcell">MNQZ26</div><div role="gridcell"><button class="kreuz" style="width:24px;height:24px">'
+                  '<svg width="12" height="12"><path d="M1 1l10 10M11 1L1 11" stroke="#fff"/></svg></button></div></div></div>'),
     "werbung_iframe": ("TopstepX", TRADE_BODY + '<div role="dialog" class="ab-iam-root ab-html" style="position:fixed;right:20px;bottom:20px;width:520px;height:220px">'
                        '<iframe title="Modal Message" srcdoc="&lt;h3&gt;Give 50% Off Get 50% Off&lt;/h3&gt;&lt;a href=&quot;#&quot;&gt;Get Your Code&lt;/a&gt;" '
                        'style="width:480px;height:200px;border:0"></iframe><button aria-label="Close" style="position:absolute;right:6px;top:6px;width:24px;height:24px">'
@@ -604,12 +622,30 @@ else:
         check("Dialog ohne Text offen (ohne Text · Klasse" in ob.tsx_dialog_offen_text(pp) and "Lage [" in ob.tsx_dialog_offen_text(pp)
               and "Bilder 1" in ob.tsx_dialog_offen_text(pp), f"Vorprüfung nennt Klasse, Rolle, Lage ({ob.tsx_dialog_offen_text(pp)[:120]})")
         if kn:
-            pr = {"rect": kn["rect"], "text": "", "aria": kn["text"], "tabu": ob.TSX_UEBER_KNOPF_TABU}
+            pr = {"rect": kn["rect"], "text": "", "aria": kn["text"], "tabu": ob.TSX_UEBER_PRUEF_TABU, "dialog": pp[0]["rect"]}
             v = c.ziel(kn["rect"], pr)
-            check(v.get("hover") and v.get("passt"), f"Ziel-Beweis am X passt ({v.get('was')})")
+            check(v.get("hover") and v.get("passt") and v.get("dialog") is True, f"Ziel-Beweis mit Dialog-Bindung am X passt ({v.get('was')})")
+            v_falsch = c.ziel(kn["rect"], dict(pr, dialog=[0, 0, 300, 100]))
+            check(not v_falsch.get("passt") and "nicht im Popup" in str(v_falsch.get("was")), "falsches Popup-Rechteck → passt nicht")
+            # S2-Fall 2: Popup liegt NICHT oben — ein anderes namenloses Element deckt das X
+            c.js("(function(){var d=document.createElement('button');d.style.cssText='position:fixed;left:%dpx;top:%dpx;width:24px;height:24px;z-index:5000';"
+                 "document.body.appendChild(d);})()" % (kn["rect"][0], kn["rect"][1]))
+            v_alt = c.ziel(kn["rect"], {"rect": kn["rect"], "text": "", "aria": "", "tabu": ob.TSX_UEBER_PRUEF_TABU})
+            v_neu = c.ziel(kn["rect"], {"rect": kn["rect"], "text": "", "aria": "", "tabu": ob.TSX_UEBER_PRUEF_TABU, "dialog": pp[0]["rect"]})
+            check(v_alt.get("passt") and not v_neu.get("passt"),
+                  "Popup liegt nicht oben (namenloser Knopf darüber): ohne Bindung hätte der Beweis gepasst, mit Bindung kein Druck")
+            c.laden(*F["werbung_grafik"])
             lk = c.js("(function(){var r=document.querySelector('a.promo').getBoundingClientRect();return [r.left,r.top,r.width,r.height];})()")
             v2 = c.ziel(lk, dict(pr, rect=lk))
             check(not v2.get("passt"), "derselbe Beweis am Link „Get Your Code“ schlägt fehl (nie ein Link)")
+        # S2-Fall 1: Popup verschwindet vor dem Druck → am Punkt liegt das textlose Close-Kreuz der Positionszeile
+        c.laden(*F["pos_close"])
+        kreuz = c.js("(function(){var r=document.querySelector('.kreuz').getBoundingClientRect();return [r.left,r.top,r.width,r.height];})()")
+        alt_pr = {"rect": kreuz, "text": "", "aria": "", "tabu": ob.TSX_UEBER_PRUEF_TABU}
+        v_alt = c.ziel(kreuz, alt_pr)
+        v_neu = c.ziel(kreuz, dict(alt_pr, dialog=[1060, 573, 520, 220]))
+        check(v_alt.get("passt") and not v_neu.get("passt") and "nicht im Popup" in str(v_neu.get("was")),
+              f"Popup weg, Punkt auf dem Close-Kreuz: TX1b-Beweis hätte gedrückt, mit Bindung kein Druck ({v_neu.get('was')})")
         c.laden(*F["werbung_iframe"])
         pp = c.stand(NEU_AUGEN).get("popups") or []
         kn = ob.tsx_ueberlagerung_knopf(pp[0]) if pp else None
@@ -684,6 +720,13 @@ else:
     alt_d, neu_d = defs(ALT_BOT), defs(src_bot)
     GEAENDERT = {"tsx_zeitsync_dialog", "_tsx_zeitsync_weg", "_tsx_cdp_login", "_tsx_sitzung_waehlen", "_tsx_auge_konto", "modus_tsxlesen_cdp",
                  "_tsx_k3_probe", "_tsx_k4_senden", "tsx_k3_vor_klick", "_tsx_k4_dialog_name"}
+    GEAENDERT.add("win_ziel_pruef_js")   # TX1c: Weiche zu win_ziel_pruef_dialog_js NUR mit pruef.dialog — Ausgabe sonst buchstabengleich (s. u.)
+    ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
+    exec(alt_d["win_ziel_pruef_js"], ns_alt)
+    proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},
+              {"rect": [1, 1, 9, 9], "text": "", "aria": "close", "tabu": "z", "zelle": [1, 1, 9, 9]}, {"rect": [2, 2, 5, 5], "text": "abc", "aria": "", "tabu": "q", "karte": [0, 0, 50, 20]}]
+    check(all(ns_alt["win_ziel_pruef_js"](10.5, 20.5, p_) == ob.win_ziel_pruef_js(10.5, 20.5, p_) for p_ in proben),
+          "win_ziel_pruef_js ohne pruef.dialog: erzeugter Beweis buchstabengleich zu origin/main (alle Order-Klicks unverändert)")
     anders = sorted(n for n in alt_d if n not in GEAENDERT and alt_d[n] != neu_d.get(n))
     check(not anders, f"alle übrigen {len(alt_d) - len(GEAENDERT)} Funktionen/Klassen bitgleich, auch _AugenSitzung, _tsx_konto_sichern, _tsx_k3_probe, "
                       f"_tsx_k4_senden, tsx_k3_vor_klick, _tsx_blow_dialog_weg ({anders[:6]})")
