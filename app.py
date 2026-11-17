@@ -27486,6 +27486,8 @@ def _ap_archiviert(streng=False):
 
 
 AP_STARTWERT_QUELLE = "Startwert (frisches Konto)"
+# SB1 (17.11.2026): Notiz-Zusatz der Funded-Planer bei Startwert — bewusst ohne Zahl hinter „Balance", sonst griffe _AP_BAL_PLAN (Balance-Wache)
+AP_STARTWERT_TEXT = "Balance aus Startwert (frisches Konto, ohne Lesung)"
 
 
 AP_LESE_FELDER = ("tv_balance_at", "topstep_last_check", "meta_api_last_check")
@@ -27568,6 +27570,38 @@ def _ap_login_zwillinge(konten):
     except Exception as e:
         print(f"[auto-plan] ⚠️ Login-Zwillinge: {type(e).__name__}: {e}", flush=True)
         return None
+    return out
+
+
+def ap_startwerte_laden(konten, echo_bal=None, dup_bal=None):
+    """SB1 STARTWERT FÜR ALLE PLANER (Finn 17.11.2026 ~04:05 Dubai: „Bei einem neuen Account oder Nachfolger ist die Balance klar: Ein 50k-Nachfolger hat
+    50k, ein 150k-Nachfolger 150k … Dann kann der Trade-Planer gleich planen"; Befund: Funded-Futures-Nachfolger 50k FundedNext Futures und 50k Lucid
+    standen am 16.11. mit „Balance nicht live — ↻ Balance lesen" im Funded-Planer, obwohl nie gehandelt und nie gelesen). Bis dahin gab nur ap_planen/
+    gp_planen frischen Konten den Startwert; jetzt auch fdp_planen (Funded Futures) und fcp_planen (Funded CFD) — über DIESELBE Kette wie ap_planen,
+    keine zweite Rechnung: ohne echte Balance (acc_balance_wahl leer) → ap_startwert_kandidat → _ap_konten_mit_trade → _ap_login_zwillinge →
+    ap_startwert_frisch. → {konto_id: Startwert}. echo_bal/dup_bal None → nur geladen, wenn es überhaupt Kandidaten gibt (Supabase-Diät).
+    Lesefehler (Verlauf/Zwillinge) → {} = kein Startwert, wie bisher. Schreibt nichts in die DB; eine echte Lesung hat immer Vorrang."""
+    ohne = lambda k, e, d: [a for a in k if a and a.get("id") and acc_balance_wahl(a, e, d)[0] is None   # noqa: E731
+                            and ap_startwert_kandidat(a, e, d)]
+    kand = ohne(konten or (), echo_bal or {}, dup_bal or {})
+    if not kand:
+        return {}
+    if echo_bal is None or dup_bal is None:
+        _e, _d = _ap_balance_karten()
+        echo_bal, dup_bal = (_e if echo_bal is None else echo_bal), (_d if dup_bal is None else dup_bal)
+        kand = ohne(kand, echo_bal, dup_bal)
+        if not kand:
+            return {}
+    gehandelt = _ap_konten_mit_trade([a["id"] for a in kand])
+    zwillinge = _ap_login_zwillinge(kand) if gehandelt is not None else None
+    if gehandelt is None or zwillinge is None:
+        return {}
+    out = {}
+    for a in kand:
+        aid, lg = str(a["id"]), str(a.get("external_id") or "").strip()
+        sw = ap_startwert_frisch(a, aid in gehandelt or aid in zwillinge, gelesen=bool(lg) and (lg in echo_bal or lg in dup_bal))
+        if sw:
+            out[aid] = sw
     return out
 
 
@@ -49069,7 +49103,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         erg["msg"] = "Wochenende — kein CME-Handelstag"
         return erg
     konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,"
-                                            "max_drawdown,waiting_payout_since,starting_balance,created_at",
+                                            "max_drawdown,waiting_payout_since,starting_balance,created_at,"
+                                            "account_size,topstep_balance,topstep_last_check,meta_api_balance,meta_api_last_check",   # SB1: Startwert-Prüfung (Lese-Felder, Größe)
                                   "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
     an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
@@ -49129,6 +49164,17 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 schon[str(a.get("user_id"))] = schon.get(str(a.get("user_id")), 0) + 1
     rnd = random.Random(seed if seed is not None else f"fp-{cme_heute}-{int(jetzt.timestamp() // FDP_TAKT_S)}")
     kand, rech = [], {}
+    # SB1 (Finn 17.11.2026): Startwert für frische Konten ohne Lesung — Vorfilter ohne DB: ohne tv_balance, ohne jeden Plan (sonst nie frisch) und nur Konten,
+    # die unten überhaupt bis zum Balance-Tor kämen (Haken an, kein Waiting, Werte für die Größe) — sonst fragten Dauer-Auslasser alle 5 min den Verlauf ab
+    # (Gegenprüfung). External ID Pflicht wie ap_planen (ap_ext_fehlt): tvv2/tsv2 ohne Login starten rot — ohne Lesung blieb das bisher nur „Balance nicht live“
+    try:
+        startwerte = ap_startwerte_laden([a for a in konten if _wd_num(a.get("tv_balance")) is None and not je_plan.get(str(a["id"]))
+                                          and a.get("auto_planer") is not False and not a.get("waiting_payout_since")
+                                          and fdp_je_groesse(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), _wd_konto_groesse(a))
+                                          and not ap_ext_fehlt(a, {"route": fdp_route(a.get("firm"))})])
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Startwert: {type(e).__name__}: {e} — kein Startwert in diesem Lauf", flush=True)
+        startwerte = {}
 
     def konto_rechnen(a, pl, balance, g, regel, jg, kt_fest=None):
         zy = fdp_zyklus(g, payouts.get(str(a["id"])), pl)
@@ -49232,6 +49278,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if any(p.get("started_at") and _cme_handelstag(p["started_at"]) == cme_heute for p in pl):
             erg["ausgelassen"].append(dict(zeile, grund="heute schon getradet")); continue
         letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
+        if zeile["balance"] is None and not letzt and aid in startwerte:
+            # SB1 (Finn 17.11.2026): frisches Konto/Nachfolger ohne Lesung → Startwert = Kontogröße (ap_startwerte_laden), nur im Speicher
+            zeile.update(balance=startwerte[aid], balance_quelle=AP_STARTWERT_QUELLE, startwert=True)
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
         try:
@@ -49349,6 +49398,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if r.get("kette"):
                 lb = fdp_pump_minute(pm.get("t2_bis") or "18:30", mitternacht)
                 mb_pump["kette"] = dict(r["kette"], lesen_bis=(mitternacht + timedelta(minutes=lb)).astimezone(timezone.utc).isoformat() if lb is not None else None)
+        if r.get("startwert"):
+            notiz += f" · {AP_STARTWERT_TEXT}"   # SB1: Plan aus dem Startwert, nicht aus einer Lesung
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
@@ -52245,6 +52296,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         je_plan.setdefault(str(p.get("master_account_id")), []).append(p)
     rnd = random.Random(seed if seed is not None else f"fcp-{plan_tag}-{int(jetzt.timestamp() // FCP_TAKT_S)}")
     kand, ziel_schreiben = [], {}
+    # SB1 (Finn 17.11.2026): Startwert für frische Konten ohne Lesung — Vorfilter ohne DB: ohne jeden Plan (sonst nie frisch) und nur Konten, die unten bis
+    # zum Balance-Tor kämen (Haken an, kein Waiting, Hedge-Konto der ID da) — sonst fragten Dauer-Auslasser alle 5 min den Verlauf ab (Gegenprüfung).
+    # Echo-Karten schon geladen; Echo (mt5) braucht keine External ID
+    try:
+        startwerte = ap_startwerte_laden([a for a in ([] if ruhe else konten) if not je_plan.get(str(a["id"])) and a.get("auto_planer") is not False
+                                          and not a.get("waiting_payout_since") and hedge_ids.get(str(a.get("user_id"))) in hedge_acc], echo_bal, dup_bal)
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Startwert: {type(e).__name__}: {e} — kein Startwert in diesem Lauf", flush=True)
+        startwerte = {}
     _ntj = _wd_num((reg.get("zeiten") or {}).get("trades_je_tag"))
     n_tag = max(1, min(5, int(_ntj))) if _ntj else 1                          # E1e: Trades je Konto und Tag
     # Tag für die Tagessumme der Consistency = Plan-Tag (nicht das Berlin-Datum von jetzt: im Nachtfenster 01:00–03:00 Dubai plant er schon den nächsten
@@ -52338,6 +52398,10 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if not be:
                 aus("Balance nicht live (seit dem letzten Trade nicht nachgelesen) — ↻ Balance lesen"); continue
             bal, bal_quelle = be, "Nachlesung"
+        if bal is None and not letzt and aid in startwerte:
+            # SB1 (Finn 17.11.2026): frisches Konto/Nachfolger ohne Lesung → Startwert = Kontogröße (ap_startwerte_laden), nur im Speicher
+            bal, bal_quelle = startwerte[aid], AP_STARTWERT_QUELLE
+            zeile["startwert"] = True
         if bal is None:
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
@@ -52485,7 +52549,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     if (str(r.get("tp_art") or "").startswith("consistency") or (r.get("tp_art") == "mindest" and "gewinne" in r)) and not r.get("consistency") else "")
                  # Weg A (05.11.2026): „Consistency 50 % · Trade 3 von 8 · Endziel …"
                  + ((lambda c: f" · Consistency {_liq_de(c['p'])} % · noch {_liq_de(c['rest'])} $ · Trade {int(c['k']) + 1} von {int(c['k']) + int(c['n'])} · größter Tag {_liq_de(c['bester_tag'])} $"
-                     if c.get("lesbar") else f" · Consistency {_liq_de(c['p'])} % · Zyklus nicht lesbar → kleinster sicherer Trade")(r["consistency"]) if r.get("consistency") else ""))
+                     if c.get("lesbar") else f" · Consistency {_liq_de(c['p'])} % · Zyklus nicht lesbar → kleinster sicherer Trade")(r["consistency"]) if r.get("consistency") else "")
+                 + (f" · {AP_STARTWERT_TEXT}" if r.get("startwert") else ""))   # SB1
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
