@@ -5,7 +5,7 @@ Geprüft: (1) ap_startwerte_laden — dieselbe Kette wie ap_planen (Kandidat →
 bei Kandidaten, Lesefehler → {}; (2) Funded Futures fdp_planen: frischer 50k-/150k-Nachfolger → Plan mit 50.000/150.000, Notiz-Zusatz, nichts als
 „gelesen" geschrieben; Hand-Trade, Login-Zwilling, Lesung → wie bisher; (3) Funded CFD fcp_planen: frischer 50k-/100k-/200k-Nachfolger → Plan mit
 der Größe; Echo-Lesung schlägt den Startwert; (4) Challenge-Planer ap_planen hat den Startwert schon (selftest_startwert_frisch);
-(5) BITGLEICH gegen origin/main: Konten MIT Lesung ergeben in fdp_planen und fcp_planen genau dieselben Pläne/Zeilen wie vorher; dazu vorher/nachher
+(5) BITGLEICH gegen den Stand VOR SB1 (4c6eda8e~1, fest — origin/main enthält SB1 seit dem Push): Konten MIT Lesung ergeben in fdp_planen und fcp_planen genau dieselben Pläne/Zeilen wie vorher; dazu vorher/nachher
 für die frischen Konten. (6) Balance-Wache: Startwert-Pläne ohne Lesung fasst sie nicht an, eine abweichende echte Lesung wie bisher.
 Platzhalter-IDs, keine echten Konten. Ohne Netz. Aufruf: python3 tools/selftest_sb1_startwert_alle_planer.py"""
 import copy
@@ -41,7 +41,9 @@ def modul(pfad, name):
 
 NEU = modul(os.path.join(WURZEL, "app" + ".py"), "app_neu")
 _alt_dir = tempfile.mkdtemp(prefix="sb1_alt_")
-_alt_src = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:app" + ".py"], capture_output=True, text=True, check=True).stdout
+# SB1c (Prüfer S2, 17.11.2026): fester Vorgänger statt origin/main — seit SB1 (4c6eda8e) auf main liegt, plante „vorher“ auch und Teil 5 war immer rot
+BASIS = "4c6eda8e~1"
+_alt_src = subprocess.run(["git", "-C", WURZEL, "show", BASIS + ":app" + ".py"], capture_output=True, text=True, check=True).stdout
 with open(os.path.join(_alt_dir, "app_alt.py"), "w", encoding="utf-8") as f:
     f.write(_alt_src)
 ALT = modul(os.path.join(_alt_dir, "app_alt.py"), "app_alt")
@@ -267,7 +269,7 @@ def main():
         seg = src[i:src.index("\n\n\n", i)]
         check("sw = ap_startwert_frisch(a, _ht, gelesen=_gel)" in seg, f"{fn}: ap_startwert_frisch im Weg (unverändert)")
 
-    print("5) BITGLEICH gegen origin/main (Konten mit Lesung)")
+    print(f"5) BITGLEICH gegen den Stand vor SB1 ({BASIS}, Konten mit Lesung)")
     FREMD[:] = []
     ALT_EINTRAG[:] = []
     for scharf in (False, True):
@@ -275,7 +277,7 @@ def main():
         check(a == b, f"Funded Futures {'scharf (Zeilen + Lauf)' if scharf else 'Trockenlauf'}: bitgleich ({len(a)} Zeichen)")
         a, b = kern(*lauf_c(ALT, [C_LES, C_LES2], scharf)), kern(*lauf_c(NEU, [C_LES, C_LES2], scharf))
         check(a == b, f"Funded CFD {'scharf (Zeilen + Lauf)' if scharf else 'Trockenlauf'}: bitgleich ({len(a)} Zeichen)")
-    print("   vorher (origin/main) → nachher, frische Konten:")
+    print(f"   vorher ({BASIS}) → nachher, frische Konten:")
     for name, lf, ks in (("Futures", lauf_f, [F150, F50]), ("CFD", lauf_c, [C100, C50, C200])):
         (ea, _x), (en, _y) = lf(ALT, ks), lf(NEU, ks)
         ga, aa = je_konto(ea)
