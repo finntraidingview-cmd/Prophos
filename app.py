@@ -43975,9 +43975,22 @@ def kz_fdp_abhak(a, fdp, bal, plaene, bal_quelle=None):
     wert = f"{kz_usd(gew, 0, True)} / {kz_usd(z_rel, 0, True)}"
     fehlt = "" if erreicht else (f"Balance {_liq_de(bal)} $ unplausibel (Ziel {_liq_de(ziel)} $) — Balance neu lesen" if not plaus
                                  else f"Ziel {kz_usd(gew, 0, True)} von {kz_usd(z_rel, 0, True)} — fehlen {_liq_de(max(1.0, -(-(ziel - float(bal)) // 1)))} $")
+    # AB1-Nachtrag (Finn 17.11.2026 ~15:20, Abhak-Popup: „die Consistency-Regel mit Stand und Fehlbetrag“): Consistency der Firma (funded_plan_regeln consistency_pct,
+    # z. B. Apex 50) NUR ALS ANZEIGE — der Futures-Planer prüft sie nicht (E2d, 27.10.2026), bereit bleibt allein das Ziel. Größter Tag aus denselben Tageswerten wie
+    # fdp_konto_anzeige (fdp_tage, beendete Trades im Zyklus); was der Gewinn darüber hinaus noch nicht gebucht hat (Trade in review), zählt als ein eigener Tag —
+    # wie fdp_topstep_cons_hinweis den heutigen Gewinn mitzählt.
+    cons = None
+    p_c = _wd_num(regel.get("consistency_pct"))
+    if p_c and p_c > 0:
+        tg = fdp_tage(pl, zy.get("ab"))
+        offen = round(gew - sum(tg.values()), 2)
+        b_c = max([v for v in tg.values() if v > 0] + ([offen] if offen > 0 else []), default=0.0)
+        an_c = (b_c / gew) if (gew > 0 and b_c > 0) else None
+        cons = {"p": p_c, "b": round(b_c, 2), "w": gew, "anteil": round(an_c, 4) if an_c is not None else None,
+                "ok": bool(an_c is not None and an_c <= p_c / 100.0 + 1e-9), "nur_anzeige": True}
     return {"bal": bal, "start": start, "ziel_bal": ziel, "rest": round(ziel - float(bal), 2), "erreicht": erreicht, "bereit": erreicht, "wartet": False,
             "schritt": "winning_days", "zyklus": zy.get("nr"), "ok_text": f"Ziel {wert}" if erreicht else "", "fehlt_text": fehlt,
-            "checks": [["ok" if erreicht else "nein", "Ziel bis Winning Days", wert]]}
+            "checks": [["ok" if erreicht else "nein", "Ziel bis Winning Days", wert]], "cons": cons}
 
 
 def _kz_fcp_tag(z, felder):
