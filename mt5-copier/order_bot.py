@@ -17109,6 +17109,184 @@ def _tsx_zeitsync_weg(s, st, trail):
     return st, True
 
 
+# ÜBERLAGERUNGEN OHNE ORDER-BEZUG (TX1b, 17.11.2026 06:48/06:49 Dubai, zwei Topstep-PCs: Vorprüfung „Ticket gefüllt, aber es passt noch nicht:
+# Dialog offen ('')" — Konto, Contract MNQZ26 und Menge 3 standen richtig, nichts platziert. Finn am Bild: unten rechts ein TopstepX-Werbe-Popup
+# „Give 50% Off Get 50% Off · Everybody Eats This Friendsgiving! … Get Your Code →" mit einem X oben rechts — als role=dialog ohne Text im DOM
+# (Grafik/iframe), das X ohne Text nur mit aria-label. Finn: „So etwas soll er automatisch erkennen und auch automatisch wegklicken." Regel:
+# Überlagerung = Popup, dessen Titel/Text/Knöpfe NICHTS mit Order, Konto, Login, Risiko oder Bestätigung zu tun haben, UND das entweder Werbe-/
+# Hinweis-Wörter trägt (Rabatt, Promo, Referral, Cookie, What's new …) oder gar keinen Text hat. Geschlossen wird NUR über einen eindeutigen
+# Schließ-Knopf (Text bzw. aria „Close"/„Close Message"/„Dismiss"/„Got it"/„No thanks"/×, sonst das EINE Symbol-X in der Ecke) — nie ein Link,
+# nie „Get Your Code"/Kauf/Upgrade/Order-Wort, Ziel-Beweis am Punkt. Jede geschlossene Überlagerung kommt mit Text-Auszug, Klasse und Lage in
+# die Spur. Kein eindeutiger Knopf → Abbruch wie bisher, aber mit klarem Grund („TopstepX-Werbe-Popup offen (…)" / „Dialog ohne Text (…)").
+TSX_RX_UEBER_TABU = re.compile(r"\b(buy|sell|orders?|positions?|flatten|reverse|brackets?|contracts?|accounts?|konto|loss\s*limit|eligible|"
+                               r"violation|liquidat\w*|reset|sign[\s-]?in|log[\s-]?in|login|password|passwort|confirm\w*|bestätig\w*|are you sure|"
+                               r"risk|margin|time\s*sync|switch\s+chart\s+symbol|cancel\w*|maintenance|wartung|halt\w*|holiday|feiertag|"
+                               r"closed|closing|early close|market|markt|outage|downtime|disconnect\w*|connection|verbindung|"
+                               r"terms of (use|service)|agree|zustimm\w*|accept\w*|reload|neu laden|refresh)\b", re.I)
+TSX_RX_WERBUNG = re.compile(r"\d+\s*%\s*off|discount|promo|referral|friendsgiving|black\s*friday|cyber\s*monday|\bsale\b|coupon|special offer|"
+                            r"giveaway|webinar|what'?s new|new feature|update available|\bcookies?\b|announcement|limited[- ]time|"
+                            r"terms (&|and) conditions apply|get your code|rabatt|angebot|gutschein", re.I)
+# echte Schließ-Wörter (X/×, Close, Dismiss) gehen vor; „Got it"/„No thanks"/„Not now" nur, wenn es der EINZIGE Knopf ist (bei In-App-
+# Nachrichten können sie eine Aktion tragen — Prüfblick TX1b); „OK" zählt nie (Zustimmung: Update neu laden, Cookies, Bedingungen)
+TSX_RX_UEBER_ZU = re.compile(r"^\s*(close|dismiss|schlie(?:ß|ss)en|[×✕✖x])"
+                             r"(\s+(message|dialog|popup|pop-up|banner|notification|modal|ad|announcement|meldung|hinweis))?\s*$", re.I)
+TSX_RX_UEBER_ZU_SCHWACH = re.compile(r"^\s*(got it|no thanks|not now|maybe later|nein danke|später)\s*$", re.I)
+TSX_UEBER_KNOPF_TABU = r"\b(get|code|claim|shop|buy|sell|upgrade|learn|join|sign|subscribe|redeem|order|position|account|reset|purchase|kauf|start|proceed)\b"
+TSX_UEBER_PRUEF_TABU = (r"\b(get|code|claim|shop|buy|sell|upgrade|learn|join|sign|subscribe|redeem|order|position|account|reset|purchase|kauf|"
+                        r"start|proceed|flatten|reverse|submit|place|cancel|verkauf)\b")   # Ziel-Beweis: Knopf-Tabu + TSX_DIALOG_TABU
+TSX_UEBER_MAX = 4        # je Lauf höchstens viermal eine Überlagerung schließen — kommt immer wieder eine, Abbruch mit Grund
+_TSX_UEBER_N = [0]
+
+
+def tsx_ueberlagerung(p):
+    """REIN RECHNEND (testbar, TX1b): ist dieses Popup eine Überlagerung ohne Order-Bezug? -> {art 'werbung'|'leer', text} | None.
+    Nie Time Sync (eigener Weg), Loss-Limit-Meldung, Symbol-Dialog; nie bei einem Order-/Konto-/Login-/Bestätigungs-Wort in Titel, Text oder
+    einem Knopf. 'werbung' = Werbe-/Hinweis-Wörter; 'leer' = weder Titel noch Text (Grafik/iframe) — alles andere bleibt unangetastet."""
+    if not isinstance(p, dict):
+        return None
+    if tsx_zeitsync_dialog([p]) or tsx_blow_dialog([p]) or tsx_symbol_dialog([p]):
+        return None
+    t = " ".join(str(p.get(k) or "") for k in ("titel", "text", "text_voll")).strip()
+    if TSX_RX_UEBER_TABU.search(t):
+        return None
+    for b in (p.get("knoepfe") or []):
+        if isinstance(b, dict) and re.search(TSX_DIALOG_TABU, f"{b.get('text') or ''} {b.get('aria') or ''}", re.I):
+            return None                                    # ein Order-Knopf im Popup → kein Werbe-Popup
+    if TSX_RX_WERBUNG.search(t):
+        return {"art": "werbung", "text": re.sub(r"\s+", " ", t)[:80]}
+    if not t:
+        return {"art": "leer", "text": ""}
+    return None
+
+
+def tsx_ueberlagerung_knopf(p):
+    """REIN RECHNEND (testbar, TX1b): der EINE Schließ-Knopf der Überlagerung | None. Erst Knöpfe mit reinem Schließ-Wort (Text, sonst aria —
+    „Close Message" zählt), gleiches Wort mehrfach = ein Knopf (der sichtbare Text vor dem aria-X); sonst genau EIN Symbol-X (ohne Text/aria,
+    Symbol „Close…" oder klein in der Ecke oben rechts). Nie ein Knopf mit Get/Code/Upgrade/Kauf/Order-Wort (Links sind keine Knöpfe)."""
+    wort, symbol, schwach = [], [], []
+    alle_kn = [b for b in ((p or {}).get("knoepfe") or []) if isinstance(b, dict)]
+    for b in alle_kn:
+        text, aria = str(b.get("text") or "").strip(), str(b.get("aria") or "").strip()
+        r = b.get("rect")
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            continue
+        if re.search(TSX_UEBER_KNOPF_TABU, f"{text} {aria}", re.I) or re.search(TSX_DIALOG_TABU, f"{text} {aria}", re.I):
+            continue
+        if TSX_RX_UEBER_ZU.match(text) or (not text and TSX_RX_UEBER_ZU.match(aria)):
+            wort.append(dict(b, text=(text or aria), aus_aria=not text))
+            continue
+        if TSX_RX_UEBER_ZU_SCHWACH.match(text) or (not text and TSX_RX_UEBER_ZU_SCHWACH.match(aria)):
+            schwach.append(dict(b, text=(text or aria), aus_aria=not text))
+            continue
+        if text or aria:
+            continue
+        icon = str(b.get("icon") or "")
+        if TSX_RX_ICON_NIE.search(icon):
+            continue
+        if TSX_RX_ICON_X.search(icon) or b.get("ecke") is True:
+            symbol.append(dict(b, text="", aus_aria=False, icon_x=True))
+    if wort:
+        # gleiches Wort mehrfach (Text-„Close" + aria-„Close") = ein Knopf; verschiedene Wörter (×, Close Message) → nichts raten
+        if len({re.sub(r"\s+", " ", b["text"].lower()) for b in wort}) != 1:
+            return None
+        return ([b for b in wort if not b.get("aus_aria")] or wort)[0]
+    if symbol:
+        return symbol[0] if len(symbol) == 1 else None
+    return schwach[0] if len(schwach) == 1 and len(alle_kn) == 1 else None
+
+
+def tsx_ueberlagerung_name(p):
+    """REIN RECHNEND (testbar): Text-Auszug, Klasse, Rolle und Lage einer Überlagerung für Spur/Grund — damit man sie beim nächsten Mal erkennt.
+    Ohne Text dazu, was drinsteckt (Bilder, iframes, Links) aus augen_tsx.js popups[].leer."""
+    p = p if isinstance(p, dict) else {}
+    t = re.sub(r"\s+", " ", " ".join(str(p.get(k) or "") for k in ("titel", "text")).strip())[:60]
+    teile = [f"'{t}'" if t else "ohne Text", f"Klasse {str(p.get('cls') or '-')[:50]}", f"Rolle {p.get('role') or '-'}",
+             f"Lage {list(p.get('rect') or [])[:4]}"]
+    le = p.get("leer") if isinstance(p.get("leer"), dict) else {}
+    if le:
+        ifr = [str((f or {}).get("src") or (f or {}).get("titel") or "iframe")[:40] for f in (le.get("iframes") or []) if isinstance(f, dict)]
+        teile.append(f"Bilder {le.get('bilder', 0)} · Links {le.get('links', 0)} · Elemente {le.get('elemente', 0)}"
+                     + (f" · Shadow {le.get('shadow')}" if le.get("shadow") else "") + (f" · iframe {ifr[:2]}" if ifr else ""))
+    return " · ".join(teile)
+
+
+def tsx_dialog_offen_text(popups):
+    """REIN RECHNEND (testbar, TX1b): Fehlertext der Vorprüfung für offene Popups. Bisher „Dialog offen ('Titel')" — bleibt so für jeden Dialog
+    mit Titel/Text; eine Werbe-Überlagerung heißt „TopstepX-Werbe-Popup offen (…)", ein Dialog ohne Text nennt Klasse, Rolle und Lage."""
+    ps = [p for p in (popups or []) if isinstance(p, dict)]
+    if not ps:
+        return ""
+    p0 = ps[0]
+    u = tsx_ueberlagerung(p0)
+    if u and u["art"] == "werbung":
+        return f"TopstepX-Werbe-Popup offen ({tsx_ueberlagerung_name(p0)})"
+    name = str(p0.get("titel") or p0.get("text") or "")[:40]
+    if name:
+        return "Dialog offen ('" + name + "')"
+    return f"Dialog ohne Text offen ({tsx_ueberlagerung_name(p0)})"
+
+
+def _tsx_ueberlagerung_weg(s, st, trail):
+    """Überlagerungen ohne Order-Bezug (tsx_ueberlagerung) über ihren EINEN Schließ-Knopf schließen — Druck mit Ziel-Beweis, neu lesen,
+    höchstens zwei Drücke je Aufruf und TSX_UEBER_MAX je Lauf. -> (stand, grund): grund None = keine (mehr) da, sonst der klare Abbruchgrund
+    („TopstepX-Werbe-Popup offen (…) — kein eindeutiger Schließen-Knopf …"). Wirft nie; fasst keinen anderen Dialog an."""
+    grund = None
+    for _druck in (1, 2):
+        ps = (st or {}).get("popups") if isinstance(st, dict) else None
+        kand = [(p, tsx_ueberlagerung(p)) for p in (ps or []) if isinstance(p, dict)]
+        kand = [(p, u) for p, u in kand if u]
+        if not kand:
+            return st, None
+        # die erste Überlagerung MIT eindeutigem Knopf (ein leeres Gerüst ohne Knopf davor blockiert nicht die Werbung dahinter — Prüfblick TX1b)
+        mit = [(p_, u_, tsx_ueberlagerung_knopf(p_)) for p_, u_ in kand]
+        p, u, kn = next((x for x in mit if x[2]), mit[0])
+        was = "TopstepX-Werbe-Popup" if u["art"] == "werbung" else "Dialog ohne Text"
+        name = tsx_ueberlagerung_name(p)
+        if _TSX_UEBER_N[0] >= TSX_UEBER_MAX:
+            grund = f"{was} offen ({name}) — in diesem Lauf schon {TSX_UEBER_MAX}× eine Überlagerung geschlossen, nichts mehr gedrückt"
+            trail.append(grund)
+            return st, grund
+        if not kn:
+            kn_txt = ", ".join(f"'{str(b.get('text') or b.get('aria') or b.get('icon') or '-')[:24]}'"
+                               for b in (p.get("knoepfe") or [])[:6] if isinstance(b, dict))
+            grund = f"{was} offen ({name}) — kein eindeutiger Schließen-Knopf (Knöpfe {kn_txt or '-'}), nichts geklickt"
+            trail.append(grund)
+            return st, grund
+        r = list(kn["rect"])[:4]
+        tabu = TSX_UEBER_PRUEF_TABU                       # beide Tabu-Listen im Ziel-Beweis (Prüfblick TX1b)
+        if kn.get("icon_x"):
+            pruef = {"rect": r, "text": "", "aria": "", "tabu": tabu}
+        elif kn.get("aus_aria"):
+            pruef = {"rect": r, "text": "", "aria": kn["text"][:40], "tabu": tabu}
+        else:
+            pruef = {"rect": r, "text": kn["text"][:40], "aria": "", "tabu": tabu, "wort": kn["text"].lower()[:40]}
+        kname = "Symbol-X" if kn.get("icon_x") else repr(kn["text"][:24])
+        try:
+            _tsx_pause()
+            ok = s.klick(r, f"{was} schließen ({kname})", pruef=pruef)
+            if ok:
+                _TSX_UEBER_N[0] += 1                       # nur echte Drücke zählen
+                _warte(0.8, 0.5)
+            st = s.stand()
+        except Exception as e_:
+            grund = f"{was} offen ({name}) — Schließen: {type(e_).__name__}: {str(e_)[:60]}"
+            trail.append(grund)
+            return st, grund
+        if not ok:
+            grund = f"{was} offen ({name}) — Schließen-Knopf {kname} nicht gedrückt (Klick ohne Beweis)"
+            continue
+        noch = [q for q in ((st or {}).get("popups") or []) if isinstance(q, dict) and tsx_ueberlagerung(q)
+                and list(q.get("rect") or [])[:4] == list(p.get("rect") or [])[:4] and q.get("cls") == p.get("cls")]
+        if noch:
+            grund = f"{was} offen ({name}) — steht nach dem Druck auf {kname} noch"
+            continue
+        grund = None
+        trail.append(f"Überlagerung weggeklickt: {was} {name} · Knopf {kname}")
+    if grund:
+        trail.append(grund)
+    return st, grund
+
+
 def _tsx_geblowt_merken(res, ext, st=None):
     """res.konto_geblowt = tsx_geblowt_urteil(…) setzen, falls bewiesen (aktives Konto aus dem Stand). Nur Felder, kein Klick."""
     ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
@@ -21793,7 +21971,8 @@ def tsx_k3_vor_klick(stand, befehl, code, ext):
     if ko.get("liste_offen"):
         f.append("Konto-Liste offen")
     if st.get("popups"):
-        f.append("Dialog offen ('" + str((st["popups"][0] or {}).get("titel") or (st["popups"][0] or {}).get("text") or "")[:40] + "')")
+        # TX1b (17.11.2026): mit Titel/Text wie bisher „Dialog offen ('…')"; Werbe-Popup bzw. Dialog ohne Text mit Klasse/Rolle/Lage
+        f.append(tsx_dialog_offen_text(st["popups"]) or "Dialog offen ('')")
     if st.get("flach") is not True:
         f.append("Konto nicht flach bewiesen (keine zweite Order auf eine offene Position)")
     g = t.get("gitter") if isinstance(t.get("gitter"), dict) else {}
@@ -22681,6 +22860,8 @@ def tsx_k4_stift_rect(feld, zeile):
 def _tsx_k4_dialog_name(st):
     """Titel bzw. Text des ersten offenen TopstepX-Dialogs für Spur/Warnung ('' ohne Dialog). Liest nur."""
     p0 = (st.get("popups") or [None])[0] if isinstance(st, dict) else None
+    if isinstance(p0, dict) and not (p0.get("titel") or p0.get("text")):
+        return tsx_ueberlagerung_name(p0)[:120]          # TX1b: Dialog ohne Text nennt Klasse, Rolle und Lage
     return str((p0 or {}).get("titel") or (p0 or {}).get("text") or "")[:50] if isinstance(p0, dict) else ""
 
 
@@ -23035,8 +23216,14 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                     st, _bd = _tsx_blow_dialog_weg(s, st, trail, res)
                 except Exception as e_:
                     trail.append(f"Brackets: Meldung schließen {type(e_).__name__}: {str(e_)[:60]}")
+                _ug = None
+                try:
+                    if isinstance(st, dict) and any(tsx_ueberlagerung(p) for p in (st.get("popups") or [])):
+                        st, _ug = _tsx_ueberlagerung_weg(s, st, trail)   # TX1b: Werbe-Popup über der Positions-Tabelle → X, dann SL/TP
+                except Exception as e_:
+                    trail.append(f"Brackets: Überlagerung {type(e_).__name__}: {str(e_)[:60]}")
                 if isinstance(st, dict) and st.get("popups"):
-                    g_ = f"Dialog offen ('{_tsx_k4_dialog_name(st)}')"
+                    g_ = _ug or f"Dialog offen ('{_tsx_k4_dialog_name(st)}')"   # TX1b: klarer Grund, wenn die Überlagerung stehen blieb
                     trail.append(f"Brackets: {g_} — nichts darunter angeklickt")
                     for _f, _u, n_ in offen_f:
                         letzte[n_] = letzte.get(n_) or g_
@@ -23218,7 +23405,14 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
     st = s.stand()                                    # EIN frischer Blick — daraus wird geurteilt
     if tsx_zeitsync_dialog(st.get("popups") if isinstance(st, dict) else None):
         st, _zs = _tsx_zeitsync_weg(s, st, trail)     # TS1: vor dem Order-Klick — danach ist st wieder ein frischer Blick (bzw. Dialog steht → Vorprüfung „Dialog offen")
+    _ug = None
+    if isinstance(st, dict) and any(tsx_ueberlagerung(p) for p in (st.get("popups") or [])):
+        st, _ug = _tsx_ueberlagerung_weg(s, st, trail)   # TX1b: Werbe-Popup/Dialog ohne Text über ihr X schließen — sonst Vorprüfung mit klarem Grund
+        if isinstance(st, dict) and tsx_zeitsync_dialog(st.get("popups")):
+            st, _zs = _tsx_zeitsync_weg(s, st, trail)  # stand die Time Sync Warning neben der Werbung (zwei Dialoge), jetzt erkennbar
     ok, fehler, kn, markt_zu = tsx_k3_vor_klick(st, befehl, ziel, befehl["ext"])
+    if _ug and not ok:                                # TX1b: der klare Grund (kein eindeutiges X / steht noch) statt nur „… offen"
+        fehler = [_ug if str(x).startswith(("TopstepX-Werbe-Popup offen", "Dialog ohne Text offen")) else x for x in fehler]
     ktext = str((kn or {}).get("text") or "")
     nur_markt = markt_zu and len(fehler) == 1
     if not ok and not nur_markt:
@@ -23423,6 +23617,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
         wachhund_s = max(10.0, min(wachhund_s, float(frist_s)))
     diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     _TSX_ZEITSYNC_N[0] = 0                         # TX1: Time-Sync-Zähler gilt je Lauf
+    _TSX_UEBER_N[0] = 0                            # TX1b: Überlagerungs-Zähler ebenso
     trail = _StempelSpur()
     _start_versatz(trail)                          # 28.10.2026: nicht in derselben Sekunde zugreifen, in der der Lauf startet
     trail.frist_s = wachhund_s
@@ -23522,6 +23717,10 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                 st, bereit = _tsx_bereit_warten(s, trail)
         if isinstance(st, dict) and tsx_zeitsync_dialog(st.get("popups")):
             st, _zs = _tsx_zeitsync_weg(s, st, trail)   # TS1 (16.11.2026): beim Start — bekannter Blocker „Time Sync Warning" → PROCEED, dann wie bisher
+        if isinstance(st, dict) and any(tsx_ueberlagerung(p) for p in (st.get("popups") or [])):
+            st, _ug = _tsx_ueberlagerung_weg(s, st, trail)   # TX1b: beim Start (Lesen + Order) — Werbe-Popup/Dialog ohne Text über ihr X weg
+            if isinstance(st, dict) and tsx_zeitsync_dialog(st.get("popups")):
+                st, _zs = _tsx_zeitsync_weg(s, st, trail)   # Time Sync stand neben der Werbung — jetzt allein, also erkennbar
         ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
         # TSX-LADEN (05.10.2026): steht nach der Bereit-Probe nur noch der Lade-Schirm im Weg, trotzdem in den Konto-Schritt — der wartet
         # dort noch einmal kurz und meldet sonst ehrlich „lädt noch" (ohne das läse K1 unter dem Lade-Schirm das falsche Konto an)

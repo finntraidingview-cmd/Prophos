@@ -158,7 +158,10 @@ if diff:
           "Brackets: ohne Time-Sync-Dialog wird bracket_dialog wie bisher gesetzt")
 # Aufrufstellen: jede steht hinter tsx_zeitsync_dialog (_tsx_zeitsync_weg selbst prüft ebenfalls zuerst)
 aufrufe = [m.start() for m in re.finditer(r"(?<!def )_tsx_zeitsync_weg\(s, st, trail\)", src)]
-check(len(aufrufe) == 4, f"vier Aufrufstellen: Kontowahl, vor dem Order-Klick, Brackets, Lesen beim Start ({len(aufrufe)})")
+# TX1b (17.11.2026): + 2 Nachprüfungen direkt nach dem Schließen einer Werbe-Überlagerung (Start, vor dem Order-Klick) — dort konnte die Time
+# Sync Warning als zweiter Dialog neben der Werbung nicht erkannt werden; beide stehen ebenfalls hinter tsx_zeitsync_dialog
+n_tx1b = src.count("_tsx_ueberlagerung_weg(s, st, trail)") and 2
+check(len(aufrufe) == 4 + n_tx1b, f"Aufrufstellen: Kontowahl, vor dem Order-Klick, Brackets, Lesen beim Start (+ TX1b-Nachprüfungen) ({len(aufrufe)})")
 check(all("tsx_zeitsync_dialog(" in src[max(0, a - 420):a] for a in aufrufe), "jede Aufrufstelle prüft vorher tsx_zeitsync_dialog")
 check("s.taste" not in src[src.index("def _tsx_zeitsync_weg("):src.index("\ndef _tsx_geblowt_merken(")], "kein Esc/keine Taste — nur der PROCEED-Druck")
 

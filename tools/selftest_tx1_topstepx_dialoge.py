@@ -90,6 +90,86 @@ src_bot =open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-
 check(src_bot.count("_TSX_ZEITSYNC_N[0] = 0") == 1 and src_bot.index("_TSX_ZEITSYNC_N[0] = 0") > src_bot.index("def modus_tsxlesen_cdp("),
       "Zähler wird je Lauf (modus_tsxlesen_cdp) zurückgesetzt")
 
+# ── A2) Überlagerungen ohne Order-Bezug (TX1b) ──────────────────────────────────────────────────────────────────────────────
+print("── A2) Werbe-Popup / Dialog ohne Text")
+X = {"text": "", "aria": "Close Message", "rect": [990, 700, 24, 24]}
+WERB = {"role": "dialog", "cls": "ab-iam-root", "rect": [1060, 660, 520, 220], "titel": "", "text": "", "knoepfe": [X],
+        "leer": {"bilder": 1, "links": 1, "elemente": 5, "iframes": []}}
+WERB_T = {"role": "dialog", "cls": "promo", "rect": [1060, 660, 520, 220], "titel": "Give 50% Off Get 50% Off",
+          "text": "Give 50% Off Get 50% Off Everybody Eats This Friendsgiving! Share your referral code", "knoepfe": [{"text": "×", "rect": [990, 700, 24, 24]}]}
+ul, uk = ob.tsx_ueberlagerung, ob.tsx_ueberlagerung_knopf
+check((ul(WERB) or {}).get("art") == "leer" and (ul(WERB_T) or {}).get("art") == "werbung", "ohne Text → 'leer', Werbe-Wörter → 'werbung'")
+for t_ in ("Confirm Order", "Buy 3 MNQ", "You hit your Maximum Loss Limit", "Sign in", "Are you sure?", "Position Brackets", "Account settings"):
+    check(ul(dict(WERB_T, titel=t_, text=t_ + " 50% off")) is None, f"Order-/Konto-/Login-Bezug „{t_}“ → nie eine Überlagerung")
+check(ul(dict(WERB, knoepfe=[X, {"text": "Buy", "rect": R}])) is None, "Knopf mit Order-Wort im Popup → keine Überlagerung")
+check(ul({"titel": "Settings", "text": "Chart settings saved", "knoepfe": []}) is None, "unbekannter Dialog mit Text → bleibt (wie bisher)")
+check(ul(TXT) is None, "Time Sync nie hier (eigener Weg)")
+k_ = uk(WERB)
+check(k_ and k_["aus_aria"] and k_["text"] == "Close Message", "X nur mit aria „Close Message“ → Schließ-Knopf")
+check(uk(dict(WERB, knoepfe=[{"text": "Get Your Code →", "rect": R}, X]))["text"] == "Close Message", "„Get Your Code“ zählt nie, das X schon")
+check(uk(dict(WERB, knoepfe=[{"text": "Get Your Code", "rect": R}])) is None and uk(dict(WERB, knoepfe=[{"text": "Upgrade now", "rect": R}])) is None,
+      "nur Link-/Kauf-Knöpfe → kein Schließ-Knopf")
+check(uk(dict(WERB, knoepfe=[{"text": "", "aria": "", "icon": "CloseIcon", "rect": R}]))["icon_x"], "Symbol-X ohne Text/aria (CloseIcon)")
+check(uk(dict(WERB, knoepfe=[{"text": "", "icon": "CloseIcon", "rect": R}, {"text": "", "icon": "CloseIcon", "rect": [1, 1, 20, 20]}])) is None,
+      "zwei namenlose X → nichts")
+check(uk(dict(WERB, knoepfe=[{"text": "×", "rect": R}, {"text": "", "aria": "Close Message", "rect": [1, 1, 20, 20]}])) is None,
+      "verschiedene Schließ-Wörter (× und Close Message) → nichts")
+check(uk(dict(WERB, knoepfe=[{"text": "OK", "rect": R}])) is None and uk(dict(WERB, knoepfe=[{"text": "Okay", "rect": R}])) is None,
+      "„OK“ zählt nie (Zustimmung: Update neu laden, Cookies, Bedingungen)")
+check((uk(dict(WERB, knoepfe=[{"text": "OK", "rect": R}, X])) or {}).get("text") == "Close Message", "„OK“ + X → das X")
+check((uk(dict(WERB, knoepfe=[{"text": "Got it", "rect": R}, X])) or {}).get("text") == "Close Message", "„Got it“ + X → das X (X geht vor)")
+check((uk(dict(WERB, knoepfe=[{"text": "Got it", "rect": R}])) or {}).get("text") == "Got it", "„Got it“ als EINZIGER Knopf → der")
+check(uk(dict(WERB, knoepfe=[{"text": "Got it", "rect": R}, {"text": "Learn more", "rect": [1, 1, 80, 20]}])) is None,
+      "„Got it“ neben einem anderen Knopf → nichts")
+for t_ in ("Announcement: scheduled maintenance tonight", "What's new: CME early close 12:00 CT", "Update available — reload the page",
+           "We use cookies. Accept all?", "Promo! Positions will be liquidated"):
+    check(ul(dict(WERB_T, titel="", text=t_, knoepfe=[X])) is None, f"Warnung im Gewand eines Hinweises bleibt: „{t_}“")
+check(ul(dict(WERB_T, titel="Announcement", text="Give 50% Off " + "x " * 80, text_voll="Give 50% Off " + "x " * 80 + "open orders will be cancelled",
+              knoepfe=[X])) is None, "Warnwort erst hinter Zeichen 160 (text_voll) → bleibt")
+check(ob.tsx_dialog_offen_text([{"titel": "Position Brackets", "text": "x"}]) == "Dialog offen ('Position Brackets')", "Dialog mit Titel: Text wie bisher")
+check(ob.tsx_dialog_offen_text([WERB]).startswith("Dialog ohne Text offen (ohne Text · Klasse ab-iam-root · Rolle dialog · Lage [1060, 660, 520, 220]"),
+      "Dialog ohne Text: Klasse, Rolle, Lage")
+check(ob.tsx_dialog_offen_text([WERB_T]).startswith("TopstepX-Werbe-Popup offen ("), "Werbe-Popup: klarer Grund")
+check("ohne Text · Klasse ab-iam-root" in ob._tsx_k4_dialog_name({"popups": [WERB]}) and ob._tsx_k4_dialog_name({"popups": [{"titel": "Abc"}]}) == "Abc",
+      "Bracket-Schritt: Dialog ohne Text nennt Klasse/Lage, sonst wie bisher")
+
+
+def ueber_lauf(st0, staende, klick_ok=True):
+    ob._TSX_UEBER_N[0] = 0
+    s = Sitzung(staende)
+    s.klick_ok = klick_ok
+    s.klick = lambda rect, name, toast_ok=False, pruef=None, doppel=False: (s.klicks.append((list(rect), name, dict(pruef or {}))), klick_ok)[1]
+    t = []
+    st, grund = ob._tsx_ueberlagerung_weg(s, st0, t)
+    return s, t, grund
+
+
+s, t, g = ueber_lauf({"popups": [WERB]}, [{"popups": []}])
+check(g is None and len(s.klicks) == 1 and s.klicks[0][2].get("aria") == "Close Message" and re.search(s.klicks[0][2]["tabu"], "Get Your Code", re.I)
+      and any(x.startswith("Überlagerung weggeklickt: Dialog ohne Text ohne Text · Klasse ab-iam-root") and "Lage [" in x for x in t),
+      "X gedrückt (Ziel-Beweis aria, Tabu „Get“/„Code“), Spur mit Klasse und Lage")
+s, t, g = ueber_lauf({"popups": [WERB_T]}, [{"popups": []}])
+check(g is None and s.klicks[0][2].get("wort") == "×" and any("TopstepX-Werbe-Popup 'Give 50% Off" in x for x in t), "Werbe-Popup mit Text: × gedrückt, Text-Auszug in der Spur")
+s, t, g = ueber_lauf({"popups": [dict(WERB, knoepfe=[])]}, [])
+check(not s.klicks and g and "kein eindeutiger Schließen-Knopf" in g and "Klasse ab-iam-root" in g, "kein X → nichts gedrückt, Grund mit Klasse")
+GERUEST = {"role": "dialog", "cls": "leer", "rect": [0, 0, 20, 20], "titel": "", "text": "", "knoepfe": []}
+s, t, g = ueber_lauf({"popups": [GERUEST, WERB]}, [{"popups": [GERUEST]}])
+check(len(s.klicks) == 1 and s.klicks[0][2].get("aria") == "Close Message" and g and "kein eindeutiger" in g,
+      "leeres Gerüst vor der Werbung: die Werbung mit X wird geschlossen, das Gerüst bleibt mit Grund")
+pr_ = (ueber_lauf({"popups": [WERB]}, [{"popups": []}])[0].klicks or [[None, None, {}]])[0][2].get("tabu") or "x^"
+check(all(re.search(pr_, w_, re.I) for w_ in ("Cancel", "Flatten", "Get Your Code", "Upgrade", "Place order")), "Ziel-Beweis-Tabu: Knopf-Tabu + Order-Tabu")
+s, t, g = ueber_lauf({"popups": [WERB]}, [{"popups": [WERB]}, {"popups": [WERB]}])
+check(len(s.klicks) == 2 and g and "steht nach dem Druck" in g, "bleibt stehen → höchstens 2 Drücke je Aufruf, dann Grund")
+s, t, g = ueber_lauf({"popups": [{"titel": "Confirm Order", "text": "Buy 3", "knoepfe": [{"text": "Close", "rect": R}]}]}, [])
+check(not s.klicks and g is None, "Order-Dialog: nichts gedrückt (bleibt für die Vorprüfung)")
+ob._TSX_UEBER_N[0] = ob.TSX_UEBER_MAX
+s = Sitzung([])
+st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [WERB]}, [])
+check(not s.klicks and g and "schon 4×" in g, "je Lauf höchstens 4 Überlagerungen, danach Grund")
+ob._TSX_UEBER_N[0] = 0
+check(src_bot.count("_TSX_UEBER_N[0] = 0") == 1 and src_bot.count("st, _ug = _tsx_ueberlagerung_weg(s, st, trail)") == 3,
+      "drei Stellen: Start (Lesen + Order), vor dem Order-Klick, Bracket-Schritt; Zähler je Lauf")
+
 # ── B) Google: Regeln ───────────────────────────────────────────────────────────────────────────────────────────────────────
 print("── B) Google-Anmeldung: Regeln")
 GK = {"tag": "button", "text": "Sign in with Google", "aria": "", "rect": [700, 400, 300, 44], "aus": False}
@@ -356,6 +436,21 @@ F = {
     "trade": ("MNQZ26 $27,369.75 ▲ +0.31%", TRADE_BODY),
     "trade_bracket": ("TopstepX", TRADE_BODY + '<div role="dialog" class="box" style="position:fixed;left:500px;top:200px"><h2>Position Brackets</h2>'
                       '<button aria-label="close">x</button></div>'),
+    # TX1b Werbe-Popup unten rechts (Finns Bild): Grafik mit Link, X nur als Symbol mit aria-label
+    "werbung_grafik": ("TopstepX", TRADE_BODY + '<div role="dialog" aria-modal="true" class="ab-iam-root promo-x" style="position:fixed;right:20px;bottom:20px;'
+                       'width:520px;height:220px;background:#222"><a class="promo" href="#code" style="position:absolute;left:10px;top:10px;width:400px;height:200px">'
+                       '<img alt="" width="400" height="200"></a><button aria-label="Close Message" class="ab-close-button" style="position:absolute;right:6px;top:6px;'
+                       'width:24px;height:24px"><svg width="14" height="14"><path d="M1 1l12 12M13 1L1 13" stroke="#fff"/></svg></button></div>'),
+    "werbung_iframe": ("TopstepX", TRADE_BODY + '<div role="dialog" class="ab-iam-root ab-html" style="position:fixed;right:20px;bottom:20px;width:520px;height:220px">'
+                       '<iframe title="Modal Message" srcdoc="&lt;h3&gt;Give 50% Off Get 50% Off&lt;/h3&gt;&lt;a href=&quot;#&quot;&gt;Get Your Code&lt;/a&gt;" '
+                       'style="width:480px;height:200px;border:0"></iframe><button aria-label="Close" style="position:absolute;right:6px;top:6px;width:24px;height:24px">'
+                       '<svg width="14" height="14"><path d="M1 1l12 12M13 1L1 13" stroke="#fff"/></svg></button></div>'),
+    "werbung_text": ("TopstepX", TRADE_BODY + '<div role="dialog" class="promo" style="position:fixed;right:20px;bottom:20px;width:520px;height:220px;background:#222">'
+                     '<h3>Give 50% Off Get 50% Off</h3><p>Everybody Eats This Friendsgiving! Share your referral code &amp; earn 50% off your next purchase.*</p>'
+                     '<a href="#code">Get Your Code →</a><small>*Limited-time only. Terms &amp; conditions apply.</small>'
+                     '<button style="position:absolute;right:6px;top:6px;width:24px;height:24px">×</button></div>'),
+    "order_dialog": ("TopstepX", TRADE_BODY + '<div role="dialog" class="box" style="position:fixed;left:500px;top:200px"><h2>Confirm Order</h2>'
+                     '<p>Buy 3 MNQZ26 @ Market</p><button>Close</button><button>Confirm</button></div>'),
     # Anmeldung
     "login_google": ("Topstep | Sign in", '<div class="box" style="margin:100px auto"><h1>Sign in</h1>'
                      '<button class="g"><img alt="" width="18" height="18">Sign in with Google</button>'
@@ -494,7 +589,44 @@ else:
         for name in ("trade", "trade_bracket", "login_google", "login_alt"):
             c.laden(*F[name])
             a, n = c.stand(ALT_AUGEN), c.stand(NEU_AUGEN)
-            check(ALT_AUGEN and ohne(a) == ohne(n), f"stand() ohne Time-Sync-Dialog bitgleich zu origin/main ({name})")
+            n2 = ohne(n)
+            for p_ in (n2.get("popups") or []):              # TX1b: jedes Popup trägt jetzt cls (nur bei einem offenen Dialog)
+                p_.pop("cls", None)
+            check(ALT_AUGEN and ohne(a) == n2 and (name != "trade" or not n.get("popups")),
+                  f"stand() bitgleich zu origin/main ({name}{'; Popups nur + cls' if n.get('popups') else ', ganz ohne Popup'})")
+        # TX1b Werbe-Popup (Finns Bild 17.11.): role=dialog nur mit Grafik + Link „Get Your Code" + X (aria „Close Message")
+        c.laden(*F["werbung_grafik"])
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        u = ob.tsx_ueberlagerung(pp[0]) if pp else None
+        kn = ob.tsx_ueberlagerung_knopf(pp[0]) if pp else None
+        check(len(pp) == 1 and not pp[0].get("text") and (pp[0].get("leer") or {}).get("bilder", 0) >= 1 and pp[0].get("cls")
+              and u and u["art"] == "leer" and kn and kn.get("aus_aria"), f"Werbe-Popup ohne DOM-Text: als Überlagerung erkannt, X über aria ({pp[:1]})")
+        check("Dialog ohne Text offen (ohne Text · Klasse" in ob.tsx_dialog_offen_text(pp) and "Lage [" in ob.tsx_dialog_offen_text(pp)
+              and "Bilder 1" in ob.tsx_dialog_offen_text(pp), f"Vorprüfung nennt Klasse, Rolle, Lage ({ob.tsx_dialog_offen_text(pp)[:120]})")
+        if kn:
+            pr = {"rect": kn["rect"], "text": "", "aria": kn["text"], "tabu": ob.TSX_UEBER_KNOPF_TABU}
+            v = c.ziel(kn["rect"], pr)
+            check(v.get("hover") and v.get("passt"), f"Ziel-Beweis am X passt ({v.get('was')})")
+            lk = c.js("(function(){var r=document.querySelector('a.promo').getBoundingClientRect();return [r.left,r.top,r.width,r.height];})()")
+            v2 = c.ziel(lk, dict(pr, rect=lk))
+            check(not v2.get("passt"), "derselbe Beweis am Link „Get Your Code“ schlägt fehl (nie ein Link)")
+        c.laden(*F["werbung_iframe"])
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        kn = ob.tsx_ueberlagerung_knopf(pp[0]) if pp else None
+        check(len(pp) == 1 and (ob.tsx_ueberlagerung(pp[0]) or {}).get("art") == "leer" and kn and kn["text"] == "Close"
+              and "iframe ['Modal Message']" in ob.tsx_dialog_offen_text(pp), f"Werbe-Popup mit Text im iframe: erkannt, X „Close“, Spur nennt das iframe")
+        if kn:
+            v = c.ziel(kn["rect"], {"rect": kn["rect"], "text": "", "aria": "Close", "tabu": ob.TSX_UEBER_KNOPF_TABU})
+            check(v.get("hover") and v.get("passt"), "Ziel-Beweis am X neben dem iframe passt")
+        c.laden(*F["werbung_text"])
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        u = ob.tsx_ueberlagerung(pp[0]) if pp else None
+        check(u and u["art"] == "werbung" and (ob.tsx_ueberlagerung_knopf(pp[0]) or {}).get("text") in ("×", "Close")
+              and ob.tsx_dialog_offen_text(pp).startswith("TopstepX-Werbe-Popup offen ('Give 50% Off"), "Werbe-Popup mit Text: „TopstepX-Werbe-Popup“, X gefunden")
+        c.laden(*F["order_dialog"])
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        check(pp and ob.tsx_ueberlagerung(pp[0]) is None and ob.tsx_dialog_offen_text(pp) == "Dialog offen ('Confirm Order')",
+              "Order-Bestätigung bleibt unangetastet, Text wie bisher")
         # Anmeldung: TSX_K0_BLICK_JS
         erwart = {"login_google": ("google", 1), "login_dialog": ("google", 1), "login_gsi": ("google", 1), "login_ohne_google": ("anmeldung", 0),
                   "login_nur_signup": (None, 0), "login_alt": ("alt", 0), "trade": (None, 0), "trade_bracket": (None, 0), "ts_ohne_rolle": (None, 0)}
@@ -550,7 +682,8 @@ else:
                 out[k.name] = "\n".join(zeilen[k.lineno - 1 - len(k.decorator_list):k.end_lineno])
         return out
     alt_d, neu_d = defs(ALT_BOT), defs(src_bot)
-    GEAENDERT = {"tsx_zeitsync_dialog", "_tsx_zeitsync_weg", "_tsx_cdp_login", "_tsx_sitzung_waehlen", "_tsx_auge_konto", "modus_tsxlesen_cdp"}
+    GEAENDERT = {"tsx_zeitsync_dialog", "_tsx_zeitsync_weg", "_tsx_cdp_login", "_tsx_sitzung_waehlen", "_tsx_auge_konto", "modus_tsxlesen_cdp",
+                 "_tsx_k3_probe", "_tsx_k4_senden", "tsx_k3_vor_klick", "_tsx_k4_dialog_name"}
     anders = sorted(n for n in alt_d if n not in GEAENDERT and alt_d[n] != neu_d.get(n))
     check(not anders, f"alle übrigen {len(alt_d) - len(GEAENDERT)} Funktionen/Klassen bitgleich, auch _AugenSitzung, _tsx_konto_sichern, _tsx_k3_probe, "
                       f"_tsx_k4_senden, tsx_k3_vor_klick, _tsx_blow_dialog_weg ({anders[:6]})")
@@ -560,7 +693,17 @@ else:
         "_tsx_sitzung_waehlen": 1,       # login_seite: seite → tsx_login_art
         "_tsx_auge_konto": 1,            # Bedingung nach der Bereit-Probe
         "modus_tsxlesen_cdp": 1,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start)
+        "_tsx_k3_probe": 0,              # TX1b: vor dem Order-Klick nur der Überlagerungs-Zweig dazu (hinter tsx_ueberlagerung)
+        "_tsx_k4_senden": 1,             # TX1b: Überlagerungs-Zweig dazu, g_ nimmt den klaren Grund (_ug), sonst wie bisher
+        "tsx_k3_vor_klick": 1,           # TX1b: Text „Dialog offen" über tsx_dialog_offen_text (mit Titel/Text gleich, s. A2)
+        "_tsx_k4_dialog_name": 0,        # TX1b: ohne Titel/Text Klasse/Rolle/Lage
     }
+    for name in ("_tsx_k3_probe", "_tsx_k4_senden"):
+        neu_z = [x[1:] for x in difflib.unified_diff(alt_d[name].splitlines(), neu_d[name].splitlines(), lineterm="", n=0)
+                 if x.startswith("+") and not x.startswith("+++")]
+        check(neu_z and all(any(w_ in z for w_ in ("ueberlagerung", "Überlagerung", "_ug", "zeitsync", "_zs"))
+                            or z.strip() in ("try:", "except Exception as e_:") for z in neu_z),
+              f"{name}: neue Zeilen nur im Überlagerungs-Zweig ({len(neu_z)})")
     for name, n_erlaubt in weg_erlaubt.items():
         d = [x for x in difflib.unified_diff(alt_d[name].splitlines(), neu_d[name].splitlines(), lineterm="", n=0)
              if x.startswith("-") and not x.startswith("---")]
