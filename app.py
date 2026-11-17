@@ -13479,15 +13479,52 @@ def wd_sl_fuer_plan(regel, plan, acc, liq_regeln, fruehere, rnd=None):
         # sonst hinge die Sicherheit nur an der Stufen-Obergrenze (DB-änderbar). Reihenfolge der Gründe wie bisher: erst MLL-Lesung, dann Balance.
         bal, bal_grund = wd_sl_balance(acc, fruehere, null_basiert=True)
         mll, mll_text = wd_sl_express_mll(acc, fruehere, bal)
+        # TS-DLL (Finn 17.11.2026 ~07:05 Dubai: „Bei Funded ist auch ein 3K Daily Loss Limit … Stop Loss, Take Profit, alles anpassen“; TopstepX „150K DLL Express
+        # (…6316)“ zeigt „DLL … $3,000.00“; 07:07 „Soft Breach wie bei Lucid, nur eben 3k“; 07:13 „Ja, für alle.“ — auch SKUs ohne „DLL“): bei einem Topstep-Konto
+        # mit Tageslimit (liq_topstep_dll: accounts.dll_usd, liq_regeln Topstep funded/winning_days, Challenge nur DLL-SKU) endet der Puffer am NÄHEREN von
+        # MLL + 100 und Tagesstart − DLL + 100 — wie der Fusion-Hedge (hedgeTopstepDll/TX4) und der Radar (liq_regel_felder). Vorher lag der Würfel-SL bis zur MLL
+        # (…6316: Puffer 19.377 $), Topstep schließt den Master aber schon bei −3.000 $. Tagesstart wie liq_tagesstart (frühester Trade des CME-Tags, sonst diese
+        # Balance); unplausibel (Tagesstart ≥ DLL über der Balance bzw. andere Basis, wie hedgeTopstepDll) → nur MLL. Ohne Regeln/DLL unverändert.
+        t_dl, t_q = liq_topstep_dll(liq_regeln, acc) if (liq_regeln and "liq_topstep_dll" in globals()) else (None, None)
+        ts = liq_d = None
+        if t_dl and bal is not None:
+            ts_p = dict(plan or {}, master_account_id=acc.get("id"), started_at=(plan or {}).get("started_at") or (plan or {}).get("start_um"))
+            ts, _tsq = liq_tagesstart(ts_p, bal, fruehere)
+            if ts is not None and float(ts) - float(bal) < t_dl and abs(float(ts) - float(bal)) <= max(t_dl * 3, 10000.0):
+                liq_d = round(float(ts) - t_dl + TX2_MLL_VOR, 2)
         if mll is None:
-            return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund=mll_text)
-        if bal is None:
+            # TS-DLL (Prüfer 17.11.2026, Henne-Ei): mit Tageslimit sperrt DL2b jeden WD ohne SL — ein Express ohne MLL-Lesung bekäme nie einen Plan und damit nie die
+            # Lesung (Puls liest die MLL erst beim Start). Die Express-MLL liegt aber NIE über 0 (Lock bei 0, wd_sl_express_mll „höchstens 0“) → MLL + 100 ≤ 100.
+            # Liegt das DLL-Level darüber, ist es sicher das nähere: Puffer bis dorthin auch ohne Lesung. Sonst wie bisher ohne SL mit dem MLL-Grund.
+            if liq_d is None or not (liq_d > TX2_MLL_VOR):
+                return wd_sl_wuerfeln(regel, None, _wd_num(acc.get("tv_balance")), rnd=rnd, grund=mll_text)
+            mll_text = f"MLL nicht gelesen ({mll_text}), Express-MLL höchstens 0"
+            liq = TX2_MLL_VOR
+        elif bal is None:
             return wd_sl_wuerfeln(regel, None, rnd=rnd, grund=bal_grund)
-        liq = round(mll + TX2_MLL_VOR, 2)
+        else:
+            liq = round(mll + TX2_MLL_VOR, 2)
+        liq_q, dll_info, dll_mv = mll_text, None, None
+        if liq_d is not None:
+            dll_info = {"usd": t_dl, "tagesstart": round(float(ts), 2), "liq_balance": liq_d}
+            if liq_d > liq:
+                liq = liq_d
+                liq_q = f"Tageslimit {_liq_de(t_dl)} $ ab Tagesstart {_liq_de(float(ts), 2)} $ + 100 $ (näher als {mll_text})"
+                # DL2 wie Lucid (Master 17.11.2026: „1:1 nach dem Lucid-Muster, nur mit 3.000 $“): ohne SL gewürfelt → Pflicht-SL knapp vor dem Tageslimit
+                # (wd_sl_dll_pflicht: Abstand zum DLL − WD_SL_DLL_PUFFER). DL2-Schalter der Zeile (dll_schutz NULL + tagesstart = an), Konto-Limit immer an.
+                try:
+                    _schutz = t_q == "Konto" or liq_dll_schutz(liq_regel_waehlen(liq_regeln, acc.get("firm"), str(acc.get("account_type") or "").lower() or "challenge", None)[0])
+                except Exception:
+                    _schutz = False
+                dll_mv = {"art": "daily_loss", "usd": round(float(bal) - (float(ts) - t_dl), 2), "dll_schutz": _schutz is True}
         w = wd_sl_wuerfeln(regel, round(bal - liq, 2), bal, liq, rnd=rnd,
-                           grund=f"Topstep Express — Balance {bal:,.2f} $ an/unter MLL + 100 ({liq:,.2f} $)".replace(",", "X").replace(".", ",").replace("X", "."))
+                           grund=f"Topstep Express — Balance {bal:,.2f} $ an/unter {'Tageslimit' if dll_mv is not None else 'MLL'} + 100 ({liq:,.2f} $)".replace(",", "X").replace(".", ",").replace("X", "."))
+        if dll_mv:
+            w = wd_sl_dll_pflicht(w, dll_mv)
         if isinstance(w, dict):
-            w["liq_quelle"] = mll_text
+            w["liq_quelle"] = liq_q
+            if dll_info:
+                w["dll"] = dll_info
         return w
     # Prüfer WS1a: ohne geladene liq_regeln fiele die Rechnung auf Größe + 100 zurück — bei Apex läge der SL dann hinter dem Daily Loss
     if not liq_regeln:
@@ -15225,9 +15262,17 @@ def liq_topstep_dll(regeln, acc):
         return None, None
     if kd and kd > 0:
         return float(kd), "Konto"
+    # TS-DLL (Finn 17.11.2026 ~07:13: „Ja, für alle.“ — 3K-Daily-Loss, Soft Breach wie Lucid, für ALLE Topstep-Funded/Express/WD, auch ohne „DLL“ in der SKU, z. B.
+    # Mike …1691): Funded/Winning Days nehmen die eigene Topstep-Zeile ihrer Kontoart (liq_regeln funded/winning_days, tagesstart) ohne SKU-Bedingung. Der frühere
+    # Einwand (Hedge zu bei −3K, Master liefe weiter) entfällt laut Finn, die Konten haben real ein 3K-DLL. Challenge unverändert (nur DLL-SKU, id 8).
+    typ_ = str(a.get("account_type") or "").lower()
+    if typ_ in ("funded", "winning_days"):
+        r, _w = liq_regel_waehlen(regeln, a.get("firm"), typ_, None)
+        if r and r.get("art") == "tagesstart" and "topstep" in str(r.get("firma") or "").lower() and (_wd_num(r.get("betrag_usd")) or 0) > 0:
+            return float(_wd_num(r.get("betrag_usd"))), "Topstep-DLL"
     if not TOPSTEP_DLL_RE.search(f"{a.get('external_id') or ''} {a.get('name') or ''}"):
         return None, None
-    for kt_ in (str(a.get("account_type") or "").lower() or "challenge", "challenge"):
+    for kt_ in (typ_ or "challenge", "challenge"):
         r, _w = liq_regel_waehlen(regeln, a.get("firm"), kt_, None)
         if r and r.get("art") == "tagesstart" and "topstep" in str(r.get("firma") or "").lower() and (_wd_num(r.get("betrag_usd")) or 0) > 0:
             return float(_wd_num(r.get("betrag_usd"))), "Topstep-DLL"
@@ -15252,6 +15297,15 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
     r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart, tagesstart_eod)
     r_art = (regel or {}).get("art")
+    # TS-DLL (Prüfer 17.11.2026): Topstep Funded/WD laufen seit den Zeilen Topstep funded/winning_days über liq_aus_regel statt über den TX4-Block unten — dessen
+    # Fail-closed gilt hier mit: Tagesstart mehr als das DLL über der Start-Balance (Limit schon gerissen / andere Basis, z. B. absolut gegen Express 0-basiert) →
+    # Regel verworfen, es bleibt die MLL (wie hedgeTopstepDll im Tab und wd_sl_fuer_plan). Andere Firmen und die Topstep-Challenge (id 8) unverändert.
+    if (r_bal is not None and r_art == "tagesstart" and "topstep" in str((regel or {}).get("firma") or "").lower()
+            and (regel or {}).get("kontotyp") in ("funded", "winning_days") and start_bal is not None):
+        _ts_c, _dl_c = (tagesstart if tagesstart is not None else start_bal), _wd_num(regel.get("betrag_usd"))
+        if _dl_c and float(_ts_c) - float(start_bal) >= _dl_c:
+            r_bal, r_art = None, None
+            r_text = f"Tageslimit {_liq_de(_dl_c)} $: Tagesstart {_liq_de(float(_ts_c), 2)} $ liegt mehr als das Limit über der Start-Balance — nur MLL"
     if ah:
         d_bal, d_text = ah_dll_balance(a, tagesstart if tagesstart is not None else start_bal)
         if d_bal is not None and (r_bal is None or d_bal > r_bal):
