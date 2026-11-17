@@ -45,13 +45,14 @@ grant update (gruppe_id) on public.id_wallets to authenticated;
 --   Simon_OKX      arbitrum  2fefd106-d0d4-41d7-9acb-781014593e01       0,00
 --   Simon_OKX      ethereum  1774772e-0579-4b0c-8e81-0eb626d41d4e       0,00
 --
--- update public.id_wallets set gruppe_id = '7ad374a1-c470-4b13-bf6b-24722f82739a'
---  where person_uid is null and gruppe_id is null and id in (
---    '4faae557-8f50-4de3-8dac-2ff728602b79','fcafbfb9-2c10-40b4-8692-ca641787b799','70c7c1ed-70c1-4bd8-936a-324d14985831',
---    '402823f4-d38e-4ade-acdd-61d1c5ba38dd','28124f28-c953-4206-9b9c-7c752b474da6','2810b657-1eb9-4b72-9dde-7c3ee62632f9',
---    '1109f042-db5e-4c90-9418-e7931809adde','d6fb851d-47e9-4feb-8fca-31a9cc9d2f31','09114e13-7cf7-44d0-afcf-10577dbd0654',
---    '561aea16-c60e-423f-bfc3-8ce85d60651d','50c2ac5d-adc9-4557-95b1-cf0be0e4f961','2fefd106-d0d4-41d7-9acb-781014593e01',
---    '1774772e-0579-4b0c-8e81-0eb626d41d4e');
+-- EINGESPIELT vom Master 17.11.2026 (Prüfer S2 frei; alle 13 laut Finn HT) inkl. dieser Zuordnung:
+update public.id_wallets set gruppe_id = '7ad374a1-c470-4b13-bf6b-24722f82739a'
+ where person_uid is null and gruppe_id is null and id in (
+   '4faae557-8f50-4de3-8dac-2ff728602b79','fcafbfb9-2c10-40b4-8692-ca641787b799','70c7c1ed-70c1-4bd8-936a-324d14985831',
+   '402823f4-d38e-4ade-acdd-61d1c5ba38dd','28124f28-c953-4206-9b9c-7c752b474da6','2810b657-1eb9-4b72-9dde-7c3ee62632f9',
+   '1109f042-db5e-4c90-9418-e7931809adde','d6fb851d-47e9-4feb-8fca-31a9cc9d2f31','09114e13-7cf7-44d0-afcf-10577dbd0654',
+   '561aea16-c60e-423f-bfc3-8ce85d60651d','50c2ac5d-adc9-4557-95b1-cf0be0e4f961','2fefd106-d0d4-41d7-9acb-781014593e01',
+   '1774772e-0579-4b0c-8e81-0eb626d41d4e');
 --
 -- OFFEN (nicht Teil dieser Datei): kapital_app.py _daten_lesen liest Wallets nur über person_uid ∈ Mitglieder — Wallets mit
 -- gruppe_id (ohne ID) fehlen dort weiter in der Gruppensumme. Ebenso sieht ein eingeschränkter Login (nur_eigene_wallets prüft
