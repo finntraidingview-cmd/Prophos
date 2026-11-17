@@ -64,7 +64,8 @@ def main():
     check(o["vor3Apex"]["txt"] == "vor 3 T · 14:00", f"Apex 3 Tage → vor 3 T · 14:00 ({o['vor3Apex']['txt']})")
     check(o["alt"]["txt"] == "11.10." and o["alt"]["tage"] == 10, f"10 Tage → Datum 11.10. ({o['alt']['txt']})")
     check(o["altApex"]["txt"] == "11.10. 14:00", f"Apex 10 Tage → 11.10. 14:00 ({o['altApex']['txt']})")
-    check(o["alt"]["tip"] == "11.10.2026 14:00 Dubai", f"Tooltip voller Zeitstempel Dubai ({o['alt']['tip']})")
+    # seit 17.11.2026 Gerätezeit ohne „Dubai“ (Finn: „Jeder seine Gerätezeit“) — dieser Mac steht auf Dubai, daher dieselbe Uhrzeit
+    check(o["alt"]["tip"] == "11.10.2026 14:00", f"Tooltip voller Zeitstempel in Gerätezeit ({o['alt']['tip']})")
     check(o["tagwechsel"]["txt"] == "<b>heute 01:30</b>", f"21:30 UTC = 01:30 Dubai = heute (Kalendertag Dubai, nicht UTC) ({o['tagwechsel']['txt']})")
     check(o["leer"]["txt"] == "–" and o["leer"]["tage"] is None, f"ohne Zeitstempel → – ({o['leer']['txt']})")
     check(o["quelleTag"]["ts"] == "2026-10-20T13:06:00Z" and o["quelleTag"]["quelle"].startswith("Ziel-Wache"), f"Ziel-Tag geht vor Trade-Ende ({o['quelleTag']['quelle']})")

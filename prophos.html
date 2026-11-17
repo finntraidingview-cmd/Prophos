@@ -17741,7 +17741,7 @@
     function admLaedtZeigen(an){
       const b = $('adm-refresh'); if(!b) return
       b.textContent = an ? '⋯' : '↻'
-      b.title = an ? `Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'} · aktualisiere …` : 'Neu laden'
+      b.title = an ? `Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'} · aktualisiere …` : 'Neu laden'
     }
     // UNT6 (Master 05.11.2026, K3 C1): Krone nach der Rolle vom Server (d.krone = admin_voll oder Verwalter) — fehlt das Feld, bleibt die feste Liste (hydrateUser)
     function admKroneSetzen(d, uid){
@@ -17854,7 +17854,7 @@
       }catch(e){
         if(veraltet()){ nachziehen(); return }
         if(standDa()){   // LD1: Stand bleibt stehen, die Zeile sagt, von wann er ist
-          msg.style.display = ''; msg.textContent = `Übersicht nicht aktualisiert: ${e.message || e} — angezeigt: Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—'}`
+          msg.style.display = ''; msg.textContent = `Übersicht nicht aktualisiert: ${e.message || e} — angezeigt: Stand ${window._admLadeZeit ? new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'}`
           return
         }
         msg.style.display = ''
@@ -19178,7 +19178,9 @@
     function admBalanceZelle(td, r, c){
       if(c.bal == null){ td.textContent = '—'; td.style.color = 'var(--sub)'; td.title = 'Keine Balance-Quelle (Echo/TSX/Duplikum), manuell leer oder 0'; return }
       const manuell = r.balance_src === 'manuell'
-      const stand = c.balAt ? new Date(c.balAt).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : ''
+      // GERÄTEZEIT (Finn 17.11.2026: „Jeder seine Gerätezeit“ — Finn Dubai, Emin Deutschland): reine Anzeigen ohne festes timeZone,
+      // der Browser nimmt die Zeitzone des Geräts. Tagesgrenzen, Regelzeiten, Eingabefelder und gespeicherte Texte bleiben Dubai/Berlin.
+      const stand = c.balAt ? new Date(c.balAt).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
       // Typo (Finn 08.10.2026: „die Schriften cleaner, die Zahlen sind hässlich"): Balance 13 px normal + tabular-nums, Nebenzeile 11.5 px grau
       td.innerHTML = '<span class="tnum" style="font-weight:600;font-size:13px"></span><div style="font-size:11.5px;color:var(--sub)"></div>'
       td.children[0].textContent = admGeld(c.bal, c.ccy)
@@ -20167,7 +20169,7 @@
      * Zustand an der Anfrage (approved_at aus /admin/overview). Approved = PATCH /admin/payout-approved (keine Buchung), Rücknahme mit „zurück“, solange
      * nicht erhalten und noch kein neuer Plan gestartet ist (sonst sagt der Server warum). Dieselben Knöpfe im Funded Planer → CFD „Payouts auf dem Weg“. */
     const admPayoutApprovedTxt = t => { const d = t && t.approved_at ? new Date(t.approved_at) : null
-      return d && !isNaN(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Dubai' }) : '' }
+      return d && !isNaN(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
     function admPayoutSchrittHtml(t, o){
       const xs = o && o.klein ? ' btn-xs' : '', st = o && o.klein ? '' : ' style="padding:4px 9px;font-size:11.5px"'
       if(!t || !t.id) return ''
@@ -20449,8 +20451,8 @@
     // REIN RECHNEND (testbar, tools/selftest_admin_trade_spalte.py): → { art: 'lauf'|'plan'|'pruef'|null, text, tip, plan_id, uid } | null
     function admKontoTradeInfo(accId, zeilen, jetzt){
       const id = String(accId || ''); if(!id) return null
-      const uhr = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) }
-      const tagAnders = iso => { const d = new Date(iso || ''); if(isNaN(d)) return ''; const f = x => new Date(x).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Dubai' }); return f(d) === f(jetzt) ? '' : f(d) + ' ' }
+      const uhr = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }   // Gerätezeit (17.11.2026)
+      const tagAnders = iso => { const d = new Date(iso || ''); if(isNaN(d)) return ''; const f = x => new Date(x).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); return f(d) === f(jetzt) ? '' : f(d) + ' ' }
       const meine = (zeilen || []).filter(t => t && (String(t.konto_id || '') === id || (t.plattform === 'polar' && String(t.slave_account_id || '') === id)))
       if(!meine.length) return null
       const menge = t => {
@@ -20614,8 +20616,9 @@
       if(!lt || typeof lt !== 'object') return null
       const tz = 'Asia/Dubai', tag = d => d.toLocaleDateString('en-CA', { timeZone: tz })
       const jetzt = new Date(jetztIso || Date.now()), at = lt.at ? new Date(lt.at) : null
-      const uhr = d => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: tz })
-      const voll = d => d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: tz }) + ' Dubai'
+      // Uhrzeit in Gerätezeit (17.11.2026), Tageszählung (tag) bleibt Dubai
+      const uhr = d => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+      const voll = d => d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       if(lt.laeuft) return { stufe: 'lauf', text: 'läuft jetzt', tip: 'Ein Trade läuft gerade' + (at && !isNaN(at) ? ` (gestartet ${voll(at)})` : ''), tage: 0, sortMs: Number.MAX_SAFE_INTEGER }
       if(!at || isNaN(at)) return { stufe: 'nie', text: 'nie', tip: 'Noch kein Trade auf diesem Konto', tage: null, sortMs: 0 }
       const tage = Math.max(0, Math.round((Date.parse(tag(jetzt)) - Date.parse(tag(at))) / 86400000))
@@ -41296,9 +41299,10 @@
     const jetzt = jetztIso ? new Date(jetztIso) : new Date()
     const tagVon = x => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(x)   // „2026-10-21" = Kalendertag Dubai
     const tage = Math.round((Date.parse(tagVon(jetzt)) - Date.parse(tagVon(d))) / 86400000)
-    const uhr = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
-    const datum = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
-    const voll = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + uhr + ' Dubai'
+    // Anzeige in Gerätezeit (17.11.2026), Tageszählung oben bleibt Dubai
+    const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    const datum = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    const voll = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + uhr
     let txt
     if(tage <= 0) txt = `<b>heute ${uhr}</b>`
     else if(tage === 1) txt = 'gestern' + (apex ? ' ' + uhr : '')
@@ -41337,11 +41341,11 @@
       if(!best || String(t.started_at) > String(best.started_at)) best = t
     }
     if(!best) return `<span class="wdl-z-datum" title="heute (Dubai) noch kein Trade auf diesem Konto">–</span>`
-    const uhr = new Date(best.started_at).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
+    const uhr = new Date(best.started_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })   // Gerätezeit (17.11.2026)
     const art = best.tage_mini ? 'Mini-Trade' : 'Trade'
     return best.status === 'open'
-      ? `<span class="wdl-z-datum" title="${art} läuft seit ${uhr} Dubai">läuft ${uhr}</span>`
-      : `<span class="wdl-z-datum" title="${art} heute ${uhr} Dubai — Handelstag gesammelt"><b class="wdl-bst-ziel">✓</b> ${uhr}</span>`
+      ? `<span class="wdl-z-datum" title="${art} läuft seit ${uhr}">läuft ${uhr}</span>`
+      : `<span class="wdl-z-datum" title="${art} heute ${uhr} — Handelstag gesammelt"><b class="wdl-bst-ziel">✓</b> ${uhr}</span>`
   }
   const bstTsSort =(x, y) => String((y && y.ts) || '').localeCompare(String((x && x.ts) || ''))   // neueste oben, ohne Zeitstempel ganz unten
   /* ZEITSTRAHL STATT NUR KONTO-ZAHL (Finn 21.10.2026 ~21:45 Dubai, Radar → Erledigt/Bestanden: „statt Konto einen Zeitstrahl: wo das Konto gerade
@@ -42484,7 +42488,7 @@
           const d = new Date(x.seit), seit = isNaN(d) ? '' : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           const { bal, ziel, mt, fehlt, mini, miniUhr } = x
           const status = fehlt ? 'Tage sammeln' + (mini ? (mini.status === 'open' ? ' · Mini läuft' : ' · Mini ' + miniUhr) : '') : 'Review'
-          const statusTip = fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt${mini ? (mini.status === 'open' ? ' — Mini-Trade läuft gerade' : ` — nächster Mini-Trade ${miniUhr} Dubai`) : ' — der Auto-Planer plant je Handelstag einen Mini-Trade'}`
+          const statusTip = fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt${mini ? (mini.status === 'open' ? ' — Mini-Trade läuft gerade' : ` — nächster Mini-Trade ${miniUhr}`) : ' — der Auto-Planer plant je Handelstag einen Mini-Trade'}`
             : x.eigen ? 'Ziel und Mindesttage erfüllt — Phase umstellen' : `Ziel erreicht (Ziel-Wache) — Mindesttage sieht nur ${x.user}`
           const knopf = x.eigen
             ? ((neu && !fehlt) ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
@@ -54881,10 +54885,10 @@
     const zf = typeof zielFortschritt === 'function' ? zielFortschritt(a) : null
     const mt = zf && zf.mindest ? zf : null
     const fehlt = !!(mt && !mt.done)
-    // nächster Mini-Trade des Auto-Planers (mt5_baseline.tage_mini) für dieses Konto — Uhrzeit Dubai wie überall im Plan
+    // nächster Mini-Trade des Auto-Planers (mt5_baseline.tage_mini) für dieses Konto — Uhrzeit in Gerätezeit (17.11.2026)
     const mini = fehlt ? (tradePlans || []).filter(p => String(p.masterAccountId) === String(a.id) && (p.status === 'planned' || p.status === 'open') && planIstTageMini(p))
       .sort((x, y) => String(x.startUm || '').localeCompare(String(y.startUm || '')))[0] : null
-    const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : ''
+    const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
     return { bal, ziel, mt, fehlt, mini, miniUhr }
   }
   /* → TRADE-PLANER (Finn 20.10.2026 22:55 Dubai, Radar → Bestanden → Rest von Hand, FundingPips 346 $ / The5ers 119 $ unter dem Ziel: „Vor allem
@@ -59416,7 +59420,7 @@
                : dir === 'sell' ? 'background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger-ink, #b91c1c)'
                : 'background:color-mix(in srgb, var(--sub) 12%, transparent);color:var(--sub)'
       let wann = ''
-      try{ wann = new Date(p.startedAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }catch(_){}
+      try{ wann = new Date(p.startedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }catch(_){}
       const tip = [p.masterName || '—', p.masterSymbol || '', wann, dir ? '' : 'Richtung nicht erfasst'].filter(Boolean).join(' · ')
       return `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${st}" title="${escapeHtml(tip)}">${dir === 'buy' ? 'BUY' : dir === 'sell' ? 'SELL' : '?'}</span>`
     }
@@ -65948,8 +65952,10 @@
     if(art === 'gleiche_firma'){ const f = d.firma || (/ läuft schon bei (.+?) — je Firma/.exec(g) || [])[1]
       return { art, kurz: `gleiche Firma läuft schon${f ? ' (' + f + ')' : ''}`, pille: 'gleiche Firma' } }
     const bisMs = Date.parse(d.bis || '')
-    const bis = Number.isFinite(bisMs) ? new Date(bisMs).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : (/bis (\d{1,2}:\d{2}) Dubai/.exec(g) || [])[1]
-    return { art, kurz: `Markteröffnung 09:28–09:35 New York${bis ? ' (bis ' + bis + ' Dubai)' : ''}`, pille: 'Markteröffnung' }
+    // Gerätezeit (17.11.2026); nur der Rückfall aus dem DB-Text ist Dubai-Zeit und trägt das Wort weiter
+    const bisDb = (/bis (\d{1,2}:\d{2}) Dubai/.exec(g) || [])[1]
+    const bis = Number.isFinite(bisMs) ? new Date(bisMs).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : bisDb ? bisDb + ' Dubai' : ''
+    return { art, kurz: `Markteröffnung 09:28–09:35 New York${bis ? ' (bis ' + bis + ')' : ''}`, pille: 'Markteröffnung' }
   }
   window._zweitGrund = zweitGrund
   /* ZWEI ORBIT — SOFORT-START-WÄCHTER (03.11.2026, Z4, Lücke 2 der Prüfung S3): „1. Trade zu nah“, „gerade gesendet“ und „ohne Kurs“ kamen über
@@ -67485,8 +67491,8 @@
   function apLadeFehlerSatz(was, f, standMs){
     if(!f) return ''
     const grund = f.status && f.status !== 200 ? `HTTP ${f.status}` : f.status === 200 ? String(f.msg || 'Antwort ok:false').slice(0, 80) : `keine Verbindung: ${String(f.msg || 'Netzfehler').slice(0, 60)}`
-    const stand = standMs ? new Date(standMs).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : ''
-    return `⚠ ${was} nicht geladen (${grund}) — ${stand ? `Anzeige = Zwischenspeicher von ${stand} Dubai` : 'keine Daten'}. Seite neu laden; hält es an, Backend prüfen.`
+    const stand = standMs ? new Date(standMs).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''   // Gerätezeit (17.11.2026)
+    return `⚠ ${was} nicht geladen (${grund}) — ${stand ? `Anzeige = Zwischenspeicher von ${stand}` : 'keine Daten'}. Seite neu laden; hält es an, Backend prüfen.`
   }
   const apLadeFehlerText = () => apLadeFehlerSatz('Planer-Daten', _ap.ladeFehler, _ap.geholtAt)
   const apdLadeFehlerText = () => (_apd.fehler && _apd.fehlerInfo) ? apLadeFehlerSatz('Delta-Daten', _apd.fehlerInfo, _apd.d && _apd.d.um ? Date.parse(_apd.d.um) : 0) : ''
@@ -68557,9 +68563,9 @@
     catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] }; _ahf.verboten = !!(e && e.status === 403) }
     finally{ _ahf.laeuft = false; ahfRender(); try{ window._wdUebersichtNeu?.() }catch(_){} }
   }
-  // Start in Dubai: heute nur die Uhrzeit, sonst Datum + Uhrzeit (wie „Zu bestätigen")
+  // Start in Gerätezeit (17.11.2026, vorher Dubai): heute nur die Uhrzeit, sonst Datum + Uhrzeit (wie „Zu bestätigen")
   const ahfWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
-    const f = o => d.toLocaleString('de-DE', Object.assign({ timeZone: 'Asia/Dubai' }, o)), heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
+    const f = o => d.toLocaleString('de-DE', o), heute = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const t = f({ day: '2-digit', month: '2-digit' }), u = f({ hour: '2-digit', minute: '2-digit' }); return t === heute ? u : `${t} ${u}` }
   const ahfEur = v => { const n = Number(v); return isFinite(n) && v != null ? (n < 0 ? '−' : '+') + Math.round(Math.abs(n)).toLocaleString('de-DE') + ' €' : '–' }
   // + Kontoart (PLANER-GLIEDERUNG 30.10.2026): im Challenge Planer · CFD/Futures nur Hedge-Trades dieser Art — Liste, Zähler und alle drei
@@ -68592,7 +68598,7 @@
       return g ? `<span class="tc2-chip ahf-kurz" title="${escapeHtml('Echo-Hedge (Fusion) nicht rechenbar: ' + g)}">⇄ <span style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(g.slice(0, 48))}</span></span>` : ''
     }
     const ml = Number(z.menge), mult = vs.multiplier != null ? Number(vs.multiplier) : (ml > 0 ? Number(vs.lots) / ml : null)
-    const tip = `Echo mit Fusion-Gegenhedge (Vorschau, ${vs.at ? 'gerechnet ' + new Date(vs.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) + ' Dubai' : 'Railway'})`
+    const tip = `Echo mit Fusion-Gegenhedge (Vorschau, ${vs.at ? 'gerechnet ' + new Date(vs.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : 'Railway'})`
       + ` — ${zahl(vs.lots, 2)} Lot Fusion${ml > 0 ? ` auf ${zahl(ml, 2)} Lot Master` : ''}${vs.q ? ` · q ${vs.q} €/$ (Kontowert ÷ Polster)` : ''}`
       + ` · SL: Master am Stop Loss → Fusion +€ · TP: Master am Take Profit → Fusion −€. Umgestellt wird erst ~20 min vor dem Start (dann mit Marge/Lesung).`
     return `<span class="tc2-chip ahf-kurz" title="${escapeHtml(tip)}">⇄ ${zahl(vs.lots, 2)} Lot · SL <span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span>`
@@ -70766,7 +70772,7 @@
     const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
     const QW = { lauf: 'Satz aus dem Planer-Lauf des Tages', balance_vorher: 'Satz aus dem Kontowert bei der Balance vor dem Trade', heute: 'Satz aus dem Kontowert von heute' }
-    const zeit = iso => { const d = new Date(iso || ''); return isNaN(d) ? '—' : d.toLocaleString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+    const zeit = iso => { const d = new Date(iso || ''); return isNaN(d) ? '—' : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }   // Gerätezeit (17.11.2026)
     const zeilen = [...b].sort((x, y) => String(y.start || '').localeCompare(String(x.start || ''))).slice(0, 30).map(z => `<div class="tpl-hz zu" title="${escapeHtml(`${z.konto || ''} · ${QW[z.satz_quelle] || ''}`)}">
         <span class="w"><i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</small></span>
         <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${escapeHtml(z.typ === 'phase2' ? 'Phase 2' : z.typ === 'phase1' ? 'Phase 1' : z.typ || '')}</span>
@@ -80342,8 +80348,8 @@
   function heuteKompaktHtml(i){
     if(!i) return ''
     if(i.getradet) return '<span class="acc-heute acc-heute-ok" title="Heute schon getradet (Planer-Tag, Berliner Zeit)">✓</span>'
-    if(i.geplant_um){ const um = new Date(i.geplant_um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
-      return `<span class="acc-heute acc-heute-plan" title="Heute ist ein Trade geplant: ${escapeHtml(um)} Dubai">◷ ${escapeHtml(um)}</span>` }
+    if(i.geplant_um){ const um = new Date(i.geplant_um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })   // Gerätezeit (17.11.2026)
+      return `<span class="acc-heute acc-heute-plan" title="Heute ist ein Trade geplant: ${escapeHtml(um)}">◷ ${escapeHtml(um)}</span>` }
     return '<span class="acc-heute acc-heute-offen" title="Funded Futures: heute noch nicht getradet — Erinnerung, keine Regel"><i></i>heute offen</span>'
   }
   function heuteOffen(i){ return !!i && !i.getradet && !i.geplant_um }
@@ -84319,7 +84325,7 @@
       const dup = zeilen.find(z => z.ext && kontoKey(z.ext) === key)
       if(dup){ if(!dup.quellen.includes('TV')) dup.quellen.push('TV'); dup.tv = row; continue }
       zeilen.push(Object.assign({ m: { user_id: row.user_id, person: personVon(row.user_id), datum: row.zuletzt_at || row.zuerst_at || '',
-        betreff: `TradingView-Dropdown${row.pc_id ? ' · ' + row.pc_id : ''}${row.zuerst_at ? ' · zuerst ' + new Date(row.zuerst_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'Europe/Berlin' }) : ''}` },
+        betreff: `TradingView-Dropdown${row.pc_id ? ' · ' + row.pc_id : ''}${row.zuerst_at ? ' · zuerst ' + new Date(row.zuerst_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) : ''}` },
         quellen: ['TV'], tv: row }, e, stand))
     }
     zeilen.sort((a, b) => (Date.parse(b.m.datum || '') || 0) - (Date.parse(a.m.datum || '') || 0))
@@ -84361,7 +84367,7 @@
         '<td class="km-stand"></td>' +
         '<td class="km-akt" style="text-align:right;white-space:nowrap"></td>'
       const dt = z.m.datum ? new Date(z.m.datum) : null
-      tr.querySelector('.km-datum').textContent = dt && !isNaN(dt) ? dt.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : '—'
+      tr.querySelector('.km-datum').textContent = dt && !isNaN(dt) ? dt.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—'
       tr.querySelector('.km-firma').textContent = z.firma
       tr.querySelector('.km-acc').textContent = z.ext || '— (Kontonummer nicht in der Mail)'
       const roh = tr.querySelector('.km-roh')
@@ -84375,7 +84381,7 @@
       if(z.quellen.includes('TV')){   // Quelle TradingView-Dropdown; bei Dubletten Mail+TV beide Chips
         if(z.quellen.includes('Mail')){ const q = document.createElement('span'); q.className = 'chip chip-neutral'; q.style.marginRight = '4px'; q.textContent = 'Mail'; st.appendChild(q) }
         const q = document.createElement('span'); q.className = 'chip chip-neutral'; q.style.cssText = 'margin-right:4px;color:var(--violet)'; q.textContent = 'TV'
-        q.title = z.tv ? `im TV-Dropdown${z.tv.pc_id ? ' auf ' + z.tv.pc_id : ''}${z.tv.zuletzt_at ? ', zuletzt ' + new Date(z.tv.zuletzt_at).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : ''}` : ''
+        q.title = z.tv ? `im TV-Dropdown${z.tv.pc_id ? ' auf ' + z.tv.pc_id : ''}${z.tv.zuletzt_at ? ', zuletzt ' + new Date(z.tv.zuletzt_at).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''}` : ''
         st.appendChild(q)
       }
       if(z.art === 'reset'){   // Art „Reset" (Finn 29.10.2026): neue External ID nach Konto-Reset — Abgleich gegen accounts wie sonst
@@ -84561,7 +84567,7 @@
     }).map(r => Object.assign({ row: r }, kontoTvErkennen(r)))
       .sort((a, b) => (Date.parse(b.row.zuerst_at || '') || 0) - (Date.parse(a.row.zuerst_at || '') || 0))
   }
-  const tvZeit = v => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? d.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : '' }
+  const tvZeit = v => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? d.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '' }   // Gerätezeit (17.11.2026)
   // Zellen „Account" (Name + Unterzeile) und „Typ" (Phase + Chip) — gleich in beiden Listen
   function tvZelleAccount(td, z){
     td.innerHTML = '<span class="mono" style="font-size:12.5px;font-weight:600"></span><div style="font-size:11px;color:var(--sub);margin-top:1px"></div>'
@@ -90824,8 +90830,8 @@
    * (gegen okWeg/zurLokal gefiltert); wartet = Delta heute (bestätigt, inkl. okLokal) + /ids bestaetigt[] (falls das Backend es liefert) +
    * warteLokal (hier bestätigt, z. B. für morgen); läuft = Delta heute (auto). ID-Sicht (_apSicht) gilt überall. */
   const apIdsWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
-    const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
-    const t = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
+    const heute = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })   // Gerätezeit (17.11.2026)
+    const t = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     return t === heute ? u : `${t} ${u}` }
   // notes-Text des Plans („Auto-Planer · Etappe · Rest 9.000 $ bis Ziel · Balance 150.000 (TV)", app.py Nachtlauf/Nachplanen) → {rest, balance}
   const apIdsAusNotes = txt => { const t = String(txt || ''), r = /Rest ([\d.]+) \$/.exec(t), b = /Balance ([\d.]+)/.exec(t)
@@ -92016,7 +92022,7 @@
     const jetzt = Date.now(), ev = (Array.isArray(d.events) ? d.events : []).filter(e => String(e.impact || '').toLowerCase() === 'high' && String(e.country || '').toUpperCase() === 'USD')
       .map(e => ({ e, t: Date.parse(e.date || '') })).filter(x => isFinite(x.t) && x.t > jetzt - 15 * 60000).sort((a, b) => a.t - b.t)
     const n = ev[0]
-    const naechster = n ? `${new Date(n.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })} Dubai · ${String(n.e.title || '–')}`
+    const naechster = n ? `${new Date(n.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${String(n.e.title || '–')}`
       : (_fcfdNews.d && !_fcfdNews.fehler ? 'keiner in dieser und nächster Woche' : '–')
     const fetchedMs = typeof d.fetched === 'number' ? (d.fetched < 1e12 ? d.fetched * 1000 : d.fetched) : Date.parse(d.fetched || '')
     const alter = isFinite(fetchedMs) ? Math.round((jetzt - fetchedMs) / 60000) : null
@@ -92520,7 +92526,7 @@ ${stBlock}
         <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(uid)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(t.person || e.person || '–')}</td>
         <td>${escapeHtml(t.account_firm || e.firma || '–')}</td>
         <td style="font-weight:600;color:var(--warn-ink, #b45309);font-family:var(--mono);white-space:nowrap">${escapeHtml(geld(t))}</td>
-        <td style="white-space:nowrap">${d && !isNaN(d) ? escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' })) : '—'}</td>
+        <td style="white-space:nowrap">${d && !isNaN(d) ? escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })) : '—'}</td>
         <td style="white-space:nowrap;color:${tage != null && tage >= 14 ? 'var(--danger-ink, #b91c1c)' : 'var(--sub)'}">${tage == null ? '—' : tage === 0 ? 'heute' : `seit ${tage} Tag${tage === 1 ? '' : 'en'}`}</td>
         <td style="color:var(--sub)">${escapeHtml(t.liegt_bei || '—')}</td>
         <td style="padding-right:20px;text-align:right;white-space:nowrap" data-fcfd-schritt="${escapeHtml(String(t.id || ''))}">${t.id && window._admPayoutSchritt && !t.approved_at
@@ -92606,7 +92612,7 @@ ${stBlock}
         : `<span class="wp3-ziel">${escapeHtml(gewTxt)}</span><small class="wp3-fehlt">${z && z.fehler ? 'Ziel nicht lesbar: ' + escapeHtml(z.fehler.slice(0, 60)) : z ? 'kein Ziel hinterlegt' : 'Ziel lädt …'}</small>`
       const h = Math.max(0, Math.round((jetzt - t) / 3600000))
       const rel = h < 1 ? 'vor < 1 h' : `vor ${h} h`
-      const um = new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+      const um = new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })   // Gerätezeit (17.11.2026)
       const laeuft = !!_wp3.zurueck[id]
       return `<tr data-wp3-zeile="${escapeHtml(id)}"><td style="padding-left:20px"><button type="button" class="wp3-konto" data-wp3-oeffnen="${escapeHtml(id)}" data-wp3-uid="${escapeHtml(uid)}" title="Konto öffnen">${escapeHtml(r.name || '–')}</button><small class="wp3-firma">${escapeHtml(r.firm || '')}</small></td>
         <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(uid)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
@@ -92692,7 +92698,7 @@ ${stBlock}
     const jetzt = Date.now(), ev = (Array.isArray(d.events) ? d.events : []).filter(e => String(e.impact || '').toLowerCase() === 'high' && String(e.country || '').toUpperCase() === 'USD')
       .map(e => ({ e, t: Date.parse(e.date || '') })).filter(x => isFinite(x.t) && x.t > jetzt - 15 * 60000).sort((a, b) => a.t - b.t)
     const n = ev[0]
-    const nTxt = n ? `${new Date(n.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })} Dubai · ${escapeHtml(String(n.e.title || '–'))}${n.t <= jetzt ? ' · läuft gerade' : ` · in ${Math.round((n.t - jetzt) / 60000) >= 120 ? Math.round((n.t - jetzt) / 3600000) + ' h' : Math.round((n.t - jetzt) / 60000) + ' min'}`}`
+    const nTxt = n ? `${new Date(n.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${escapeHtml(String(n.e.title || '–'))}${n.t <= jetzt ? ' · läuft gerade' : ` · in ${Math.round((n.t - jetzt) / 60000) >= 120 ? Math.round((n.t - jetzt) / 3600000) + ' h' : Math.round((n.t - jetzt) / 60000) + ' min'}`}`
       : (_fcfdNews.d && !_fcfdNews.fehler ? 'keiner im Kalender (diese + nächste Woche)' : '')
     const fetchedMs = typeof d.fetched === 'number' ? (d.fetched < 1e12 ? d.fetched * 1000 : d.fetched) : Date.parse(d.fetched || '')
     const alterMin = isFinite(fetchedMs) ? Math.round((jetzt - fetchedMs) / 60000) : null
@@ -92737,12 +92743,12 @@ ${stBlock}
     const plus = k.filter(e => e.ueber > 0).length, unter = k.filter(e => e.ueber != null && e.ueber < 0).length
     const wartet = k.filter(e => e.wartet), angefragt = k.filter(e => e.angefragt), ohne = k.filter(e => e.bal == null)
     const aeltest = wartet.map(e => Date.parse(e.r.waiting_payout_since)).filter(isFinite).sort((a, b) => a - b)[0]
-    const tagTxt = ms => new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Dubai' })
+    const tagTxt = ms => new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const ls = [...ids.values()].sort((a, b) => (b.L + b.S) - (a.L + a.S)).slice(0, 15)
     const fListe = [...firmen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 15)
     _apgFcfd.daten = { ls, namen: ['handelbar', 'Waiting for Payout'], balken: { labels: fListe.map(x => x[0]), werte: fListe.map(x => x[1]), einheit: ['Konto', 'Konten'] } }
     const kopf = `<div class="apg-kopf"><div class="apg-zeitraum"><button type="button" class="on" tabindex="-1">Heute</button><button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button></div>
-        <span class="apg-stand">Funded CFD · Entwurf · Konten aus Admin → Alle Accounts${window._admLadeZeit ? ' · Stand ' + escapeHtml(new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })) : ''}</span>
+        <span class="apg-stand">Funded CFD · Entwurf · Konten aus Admin → Alle Accounts${window._admLadeZeit ? ' · Stand ' + escapeHtml(new Date(window._admLadeZeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })) : ''}</span>
         <div class="apg-knoepfe">${apgPille('lila', 'Entwurf', 'Der Funded-CFD-Planer ist noch nicht gebaut — hier nur die Konten, die er planen wird')}<button type="button" class="apg-knopf" data-apg-fcfd-neu title="Übersicht neu laden (dieselbe Abfrage wie Admin → Übersicht)">↻</button></div></div>`
     const kpis = `<div class="apg-kpis">
       ${apgKpi({ gross: true, icon: APG_ICON.pl, name: 'Gewinn über Kontogröße', zahl: usd.length ? apgUsd(sU) : '–', cls: sU > 0 ? 'gut' : sU < 0 ? 'rot' : '',

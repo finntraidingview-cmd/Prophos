@@ -23,7 +23,7 @@ def main():
     check("_ap.geholtAt = Date.now(); _ap.ladeFehler = null; _ap.ausCache = false" in h
           and "pr.catch(e => { if(_ap.lauf === pr) _ap.ladeFehler = { status: (e && e.status) || 0," in h,
           "apLetztenHolen: Erfolgszeit bzw. Ladefehler {status, msg, at}")
-    check("`⚠ ${was} nicht geladen (${grund}) — ${stand ? `Anzeige = Zwischenspeicher von ${stand} Dubai` : 'keine Daten'}. Seite neu laden; hält es an, Backend prüfen.`" in h
+    check("`⚠ ${was} nicht geladen (${grund}) — ${stand ? `Anzeige = Zwischenspeicher von ${stand}` : 'keine Daten'}. Seite neu laden; hält es an, Backend prüfen.`" in h
           and "`HTTP ${f.status}`" in h and "`keine Verbindung: ${" in h, "Satz: genau eine Ursache (HTTP-Status bzw. keine Verbindung) + Stand")
     check("_apd.fehlerInfo = { status: (e && e.status) || 0, msg: _apd.fehler, at: Date.now() }" in h and "apLadeFehlerSatz('Delta-Daten'" in h,
           "Delta: Status gemerkt, eigener Satz mit Stand = um des letzten Deltas")
