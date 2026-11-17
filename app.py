@@ -9403,7 +9403,6 @@ def admin_build_kapitel():
         return str(acc.get("user_id") or p.get("user_id") or "")
 
     out = []
-    dk_ids = dk_deaktiviert_anzeige()   # DK1 (17.11.2026): nur für wd_liste (WD-Statistik), Summen des Kapitels bleiben
     for k in liste:
         kid = _kapitel_int(k.get("id"))
         if kid is None:
@@ -9475,7 +9474,8 @@ def admin_build_kapitel():
                 trades_ohne_hedge += 1
             # Winning Day (26.09.2026): Orbit V2 mit Fusion-Gegenhedge (hedge_eur > 0) oder als Winning Day markiert — echter
             # Hedge, Fusion-€ = slave_pl (Deal-Historie). Eigene Liste, zählt NICHT in die Kontrafakt-Trades.
-            if kontrafakt and str(p.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(p) and str(p.get("master_account_id") or "") not in dk_ids and (
+            # DK1b (Finn 17.11.2026: „Nein, Statistik behalten."): historische WDs deaktivierter Konten zählen in der WD-Statistik weiter — kein DK1-Filter hier
+            if kontrafakt and str(p.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(p) and (
                     (_f(p.get("hedge_eur")) or 0) > 0 or p.get("winning_day") or str(p.get("konto_typ") or "") == "winning_days"):
                 macc = by_id.get(str(p.get("master_account_id") or "")) or {}
                 wd_liste.append({
@@ -27888,7 +27888,8 @@ def ap_deaktiviert_anwenden(konten, ids=None):
 
 
 # DK1 DEAKTIVIERT IN WD + PAYOUTS (Finn 17.11.2026 ~06:35 Dubai: „Bei WD und Payouts etc. sollen deaktivierte Accounts nicht angezeigt und nicht mitgezählt
-# werden."): Anzeige-Listen (Admin → Payouts payout_ready, /admin/wd-heute, wd_liste der WD-Statistik) lassen deaktivierte Konten weg. NUR ANZEIGE — Kapital,
+# werden."): Anzeige-Listen (Admin → Payouts payout_ready, /admin/wd-heute) lassen deaktivierte Konten weg; die WD-Statistik (wd_liste) behält sie
+# (DK1b, Finn 17.11.2026: „Nein, Statistik behalten."). NUR ANZEIGE — Kapital,
 # Kosten, Gesamtwert, Buchungen, erhaltene und angefragte Payouts (echtes Geld) bleiben wie bisher. Lesefehler → leere Menge (Anzeige wie vor DK1, Log),
 # nie ein Abbruch der Übersicht.
 def dk_deaktiviert_anzeige():
