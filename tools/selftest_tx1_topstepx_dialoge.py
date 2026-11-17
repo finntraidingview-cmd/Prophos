@@ -176,6 +176,43 @@ check(sz([1300, 650, 24, 24], {"ticket": {"gitter": dict(GITTER, zeilen=[])}}) =
 check(sz([100, 100, 24, 24], {"flach": True, "ticket": {"kauf": {"rect": [110, 105, 120, 40]}}}) == "dem Kauf-Knopf", "nie neben Kauf/Verkauf (auch flach)")
 check(sz([100, 100, 24, 24], ST_OFFEN) is None and not ob._tsx_rect_schnitt([0, 0, 10, 10], [17, 0, 10, 10]) and ob._tsx_rect_schnitt([0, 0, 10, 10], [15, 0, 10, 10]),
       "weit weg frei, Rand ± 6 px")
+# TX1d HubSpot-CTA (X im fremden iframe) → ausblenden, kein Klick
+HS = {"role": "dialog", "cls": "go1222083472 go3508454897 hs-cta-embed__loaded go3", "rect": [1785, 893, 400, 198], "titel": "", "text": "", "knoepfe": [],
+      "leer": {"bilder": 0, "links": 0, "elemente": 1, "iframes": [{"src": "https://topsteptrader-0000000.hs-sites.com/cta/abc", "titel": "", "rect": [1785, 893, 400, 198]}]}}
+hw = ob.tsx_hubspot_werbung
+check(hw(HS), "HubSpot-CTA aus der Spur vom 17.11. erkannt")
+check(not hw(dict(HS, cls="go3 promo")) and not hw(dict(HS, text="x")) and not hw(dict(HS, knoepfe=[X])), "ohne hs-cta-embed / mit Text / mit Knopf → nicht")
+check(not hw(dict(HS, leer=dict(HS["leer"], iframes=[{"src": "https://evil.example/hs-sites.com/x"}])))
+      and not hw(dict(HS, leer=dict(HS["leer"], iframes=[{"src": "https://x.hs-sites.com.evil.example/"}])))
+      and not hw(dict(HS, leer=dict(HS["leer"], iframes=[]))) and not hw(dict(HS, leer=dict(HS["leer"], links=1))),
+      "iframe nicht von HubSpot / keins / Link daneben → nicht")
+
+
+class HsSitz(Sitzung):
+    def __init__(self, staende, antwort):
+        super().__init__(staende)
+        self.antwort, self.js = antwort, []
+
+    def lese_js(self, a, timeout=8):
+        self.js.append(a)
+        return self.antwort
+
+
+ob._TSX_UEBER_N[0] = 0
+s = HsSitz([{"popups": []}], {"versteckt": 1})
+t = []
+st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [HS]}, t)
+check(g is None and not s.klicks and len(s.js) == 1 and "display','none'" in s.js[0] and any(x.startswith("HubSpot-Werbung ausgeblendet (kein Klick)") for x in t),
+      "HubSpot-CTA: ausgeblendet, KEIN Klick, Spur „HubSpot-Werbung ausgeblendet“")
+s = HsSitz([], {"versteckt": 0, "grund": "iframe nicht von HubSpot"})
+st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [HS]}, [])
+check(g and "nicht ausgeblendet (iframe nicht von HubSpot)" in g and not s.klicks, "JS lehnt ab → Grund, nichts geklickt")
+s = HsSitz([{"popups": [HS]}], {"versteckt": 1})
+st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [HS]}, [])
+check(g and "wieder da" in g, "kommt nach dem Ausblenden wieder → Grund")
+s = HsSitz([{"popups": []}], {"versteckt": 1})
+st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [WERB]}, [])
+check(s.klicks and not s.js, "normales Werbe-Popup mit X: weiter der Klickweg (Ausblenden nur für HubSpot)")
 ob._TSX_UEBER_N[0] = ob.TSX_UEBER_MAX
 s = Sitzung([])
 st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [WERB]}, [])
@@ -395,9 +432,13 @@ check(src_bot.count("tsx_login_art(bl[\"login\"])") == 2 and "return bool(tsx_lo
 print("── D) DOM-Schnipsel in echtem Chrome (headless)")
 
 
-def git_alt(pfad):
+# Bitgleich gegen den FESTEN Stand vor TX1 (main vor 2ffb0f7e, live .2245 enthält TX1–TX1c) — wie SB1c; TX1d prüft E2 zusätzlich gegen origin/main
+BASIS = "2ffb0f7e~1"
+
+
+def git_alt(pfad, ref=BASIS):
     try:
-        return subprocess.run(["git", "-C", WURZEL, "show", "origin/main:" + pfad], capture_output=True, text=True, check=True).stdout
+        return subprocess.run(["git", "-C", WURZEL, "show", f"{ref}:{pfad}"], capture_output=True, text=True, check=True).stdout
     except Exception:
         return None
 
@@ -455,6 +496,12 @@ F = {
                        'width:520px;height:220px;background:#222"><a class="promo" href="#code" style="position:absolute;left:10px;top:10px;width:400px;height:200px">'
                        '<img alt="" width="400" height="200"></a><button aria-label="Close Message" class="ab-close-button" style="position:absolute;right:6px;top:6px;'
                        'width:24px;height:24px"><svg width="14" height="14"><path d="M1 1l12 12M13 1L1 13" stroke="#fff"/></svg></button></div>'),
+    # TX1d: HubSpot-CTA-Embed wie in der Spur vom 17.11. — role=dialog, Klasse hs-cta-embed__loaded, darin NUR ein fremdes iframe (hs-sites.com)
+    "hubspot": ("TopstepX", TRADE_BODY + '<div role="dialog" class="go1222083472 go3508454897 hs-cta-embed__loaded go3" style="position:fixed;'
+                'right:20px;bottom:20px;width:400px;height:198px"><iframe src="https://topsteptrader-0000000.hs-sites.com/cta/abc" '
+                'style="width:400px;height:198px;border:0"></iframe></div>'),
+    "hubspot_fremd": ("TopstepX", TRADE_BODY + '<div role="dialog" class="hs-cta-embed__loaded" style="position:fixed;right:20px;bottom:20px;'
+                      'width:400px;height:198px"><iframe src="https://example.org/cta" style="width:400px;height:198px;border:0"></iframe></div>'),
     "pos_close": ("TopstepX", TRADE_BODY + '<div role="grid" style="position:fixed;left:900px;top:640px;width:700px;height:200px">'
                   '<div role="row"><div role="columnheader">Symbol</div></div><div role="row" style="display:flex;height:30px">'
                   '<div role="gridcell">MNQZ26</div><div role="gridcell"><button class="kreuz" style="width:24px;height:24px">'
@@ -509,7 +556,9 @@ class Chrome:
         self.port = 9477
         self.dir = tempfile.mkdtemp(prefix="tx1-chrome-")
         self.p = subprocess.Popen([CHROME, "--headless=new", f"--remote-debugging-port={self.port}", f"--user-data-dir={self.dir}",
-                                   "--no-first-run", "--no-default-browser-check", "--window-size=1600,900", "about:blank"],
+                                   "--no-first-run", "--no-default-browser-check", "--window-size=1600,900",
+                                   "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",   # kein Netz (HubSpot-iframe lädt nicht nach draußen)
+                                   "about:blank"],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         ende, ws = time.time() + 20, None
         while time.time() < ende and not ws:
@@ -584,7 +633,7 @@ else:
         check(st.get("v") == "tsx-0.7.3" and len(pp) == 1 and pp[0].get("quelle") == "text" and pp[0].get("titel") == "Time Sync Warning"
               and dlg and kn and kn["text"] == "PROCEED", f"Modal OHNE ARIA-Rolle (Finns Bild): Popup aus dem Text-Weg, PROCEED gefunden ({pp[:1]})")
         alt_pp = (c.stand(ALT_AUGEN).get("popups") or []) if ALT_AUGEN else None
-        check(alt_pp == [], "Gegenprobe: die alte augen_tsx.js (origin/main) sah dieses Modal NICHT — die Ursache der Fehlstarts am 17.11.")
+        check(alt_pp == [], "Gegenprobe: die alte augen_tsx.js (vor TX1) sah dieses Modal NICHT — die Ursache der Fehlstarts am 17.11.")
         if kn:
             pr = {"rect": kn["rect"], "text": "PROCEED", "aria": "", "tabu": ob.TSX_DIALOG_TABU, "wort": "proceed"}
             v = c.ziel(kn["rect"], pr)
@@ -611,7 +660,7 @@ else:
             for p_ in (n2.get("popups") or []):              # TX1b: jedes Popup trägt jetzt cls (nur bei einem offenen Dialog)
                 p_.pop("cls", None)
             check(ALT_AUGEN and ohne(a) == n2 and (name != "trade" or not n.get("popups")),
-                  f"stand() bitgleich zu origin/main ({name}{'; Popups nur + cls' if n.get('popups') else ', ganz ohne Popup'})")
+                  f"stand() bitgleich zum Stand vor TX1 ({name}{'; Popups nur + cls' if n.get('popups') else ', ganz ohne Popup'})")
         # TX1b Werbe-Popup (Finns Bild 17.11.): role=dialog nur mit Grafik + Link „Get Your Code" + X (aria „Close Message")
         c.laden(*F["werbung_grafik"])
         pp = c.stand(NEU_AUGEN).get("popups") or []
@@ -638,6 +687,28 @@ else:
             lk = c.js("(function(){var r=document.querySelector('a.promo').getBoundingClientRect();return [r.left,r.top,r.width,r.height];})()")
             v2 = c.ziel(lk, dict(pr, rect=lk))
             check(not v2.get("passt"), "derselbe Beweis am Link „Get Your Code“ schlägt fehl (nie ein Link)")
+        # TX1d: HubSpot-CTA mit Cross-Origin-iframe
+        c.laden(*F["hubspot"])
+        time.sleep(0.3)
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        check(len(pp) == 1 and ob.tsx_hubspot_werbung(pp[0]) and not ob.tsx_ueberlagerung_knopf(pp[0])
+              and c.js("document.querySelector('iframe').contentDocument === null"),
+              f"HubSpot-CTA: als HubSpot erkannt, kein Knopf sichtbar, iframe ist fremder Herkunft ({ob.tsx_ueberlagerung_name(pp[0]) if pp else '-'})")
+        if pp:
+            v = c.js(ob.tsx_hubspot_weg_js(pp[0]["rect"])) or {}
+            pp2 = c.stand(NEU_AUGEN).get("popups") or []
+            check(v.get("versteckt") == 1 and pp2 == [], f"ausgeblendet → stand() ohne Popup ({v})")
+            v2 = c.js(ob.tsx_hubspot_weg_js(pp[0]["rect"])) or {}
+            check(not v2.get("versteckt"), "zweiter Aufruf findet nichts mehr (nichts anderes betroffen)")
+        c.laden(*F["hubspot_fremd"])
+        time.sleep(0.3)
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        v = c.js(ob.tsx_hubspot_weg_js(pp[0]["rect"])) if pp else {}
+        check(pp and not ob.tsx_hubspot_werbung(pp[0]) and not (v or {}).get("versteckt") and (c.stand(NEU_AUGEN).get("popups") or []),
+              "gleiche Klasse, iframe NICHT von HubSpot → nicht ausgeblendet, Popup bleibt")
+        c.laden(*F["werbung_grafik"])
+        pp = c.stand(NEU_AUGEN).get("popups") or []
+        check(pp and not (c.js(ob.tsx_hubspot_weg_js(pp[0]["rect"])) or {}).get("versteckt"), "normales Werbe-Popup wird nie ausgeblendet (dort gilt das X)")
         # S2-Fall 1: Popup verschwindet vor dem Druck → am Punkt liegt das textlose Close-Kreuz der Positionszeile
         c.laden(*F["pos_close"])
         kreuz = c.js("(function(){var r=document.querySelector('.kreuz').getBoundingClientRect();return [r.left,r.top,r.width,r.height];})()")
@@ -705,7 +776,7 @@ else:
         c.zu()
 
 # ── E) Bitgleich: Order-Klickpfad ohne Dialog unverändert ───────────────────────────────────────────────────────────────────
-print("── E) Bitgleich gegen origin/main")
+print("── E) Bitgleich gegen den Stand vor TX1 (" + BASIS + ")")
 if not ALT_BOT:
     print("(E übersprungen: origin/main nicht lesbar)")
     FEHLER.append("E nicht gelaufen")
@@ -726,7 +797,7 @@ else:
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},
               {"rect": [1, 1, 9, 9], "text": "", "aria": "close", "tabu": "z", "zelle": [1, 1, 9, 9]}, {"rect": [2, 2, 5, 5], "text": "abc", "aria": "", "tabu": "q", "karte": [0, 0, 50, 20]}]
     check(all(ns_alt["win_ziel_pruef_js"](10.5, 20.5, p_) == ob.win_ziel_pruef_js(10.5, 20.5, p_) for p_ in proben),
-          "win_ziel_pruef_js ohne pruef.dialog: erzeugter Beweis buchstabengleich zu origin/main (alle Order-Klicks unverändert)")
+          "win_ziel_pruef_js ohne pruef.dialog: erzeugter Beweis buchstabengleich zum Stand vor TX1 (alle Order-Klicks unverändert)")
     anders = sorted(n for n in alt_d if n not in GEAENDERT and alt_d[n] != neu_d.get(n))
     check(not anders, f"alle übrigen {len(alt_d) - len(GEAENDERT)} Funktionen/Klassen bitgleich, auch _AugenSitzung, _tsx_konto_sichern, _tsx_k3_probe, "
                       f"_tsx_k4_senden, tsx_k3_vor_klick, _tsx_blow_dialog_weg ({anders[:6]})")
@@ -756,6 +827,26 @@ else:
     check(not ab, "TSX_K0_BLICK_JS: nur Zeilen dazu, keine alte Zeile geändert")
     ab = [x for x in difflib.unified_diff(ALT_AUGEN.splitlines(), NEU_AUGEN.splitlines(), lineterm="", n=0) if x.startswith("-") and not x.startswith("---")]
     check(len(ab) == 1 and "var VERSION = 'tsx-0.7.2'" in ab[0], f"augen_tsx.js: nur VERSION geändert, sonst nur Neues ({[x[:60] for x in ab]})")
+
+# ── E2) TX1d gegen origin/main (live .2245 mit TX1–TX1c): nur _tsx_ueberlagerung_weg bekommt den HubSpot-Zweig, sonst nur neue Funktionen ──
+print("── E2) TX1d gegen origin/main")
+MAIN_BOT = git_alt("mt5-copier/order_bot.py", "origin/main")
+if MAIN_BOT and "tsx_hubspot_werbung" not in MAIN_BOT:
+    m_d, n_d = defs(MAIN_BOT), defs(src_bot)
+    anders2 = sorted(n for n in m_d if m_d[n] != n_d.get(n))
+    check(anders2 == ["_tsx_ueberlagerung_weg"], f"gegenüber origin/main nur _tsx_ueberlagerung_weg geändert ({anders2})")
+    weg2 = [x for x in difflib.unified_diff(m_d["_tsx_ueberlagerung_weg"].splitlines(), n_d["_tsx_ueberlagerung_weg"].splitlines(), lineterm="", n=0)
+            if x.startswith("-") and not x.startswith("---")]
+    neu2 = [x[1:] for x in difflib.unified_diff(m_d["_tsx_ueberlagerung_weg"].splitlines(), n_d["_tsx_ueberlagerung_weg"].splitlines(), lineterm="", n=0)
+            if x.startswith("+") and not x.startswith("+++")]
+    check(not weg2 and neu2 and neu2[0].strip().startswith("hs = next(") and all("hs" in z or "was" in z or "name" in z or "grund" in z
+                                                                                or z.strip() in ("continue", "p, u = hs[0], hs[1]") for z in neu2),
+          f"_tsx_ueberlagerung_weg: nur der HubSpot-Zweig dazu, nur hinter „kein Knopf“, keine Zeile entfernt ({len(neu2)} neu)")
+    neu_namen = sorted(set(n_d) - set(m_d))
+    check(neu_namen == ["_tsx_hubspot_weg", "tsx_hubspot_weg_js", "tsx_hubspot_werbung"], f"neue Funktionen nur HubSpot ({neu_namen})")
+    check(git_alt("mt5-copier/augen_tsx.js", "origin/main") == NEU_AUGEN, "augen_tsx.js unverändert gegenüber origin/main")
+else:
+    print("(E2 übersprungen: origin/main enthält TX1d schon)")
 
 print()
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER: {FEHLER}")

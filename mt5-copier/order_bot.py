@@ -17264,6 +17264,71 @@ def tsx_ueberlagerung_sperrzone(rect, st):
     return None
 
 
+# HUBSPOT-WERBUNG AUSBLENDEN (TX1d, 17.11.2026, Topstep-PC 08:36/09:11/10:52 Dubai, drei Challenge-Starts nach .2245 gescheitert: „Dialog ohne
+# Text offen (… Klasse go… hs-cta-embed__loaded go3 · Rolle dialog · Lage [1785, 893, 400, 198] · Bilder 0 · Links 0 · Elemente 1 · iframe
+# ['https://…hs-sites.c…']) — kein eindeutiger Schließen-Knopf"). Das Werbe-Popup ist ein HubSpot-CTA-Embed: Inhalt samt X in einem fremden
+# iframe (hs-sites.com) — im TopstepX-Dokument gibt es keinen Knopf, und ein Klick ins iframe hätte keinen Ziel-Beweis (am Punkt sieht die
+# Seite nur das iframe). Darum OHNE Maus: genau dieses eine Popup per CSS ausblenden (display:none am hs-cta-embed-Element), nur wenn
+#   • Klasse hs-cta-embed, Lage = erkanntes Popup (± 6 px), genau EIN solches Popup an der Stelle,
+#   • alle iframes darin von HubSpot (https://…hs-sites.com / hubspot.com / hubspotusercontent…), mindestens eins,
+#   • kein eigener Text, kein Knopf/Link/Eingabefeld außerhalb des iframes.
+# Kein Klick, keine Navigation, nichts an TopstepX selbst. Spur „HubSpot-Werbung ausgeblendet (…)". Sperrzonen und Order-Klickpfad unberührt.
+TSX_RX_HUBSPOT_SRC = re.compile(r"^https://[^/]*\.(hs-sites(-eu1)?\.com|hubspot\.com|hubspotusercontent[\w-]*\.(com|net))(/|$)", re.I)
+
+
+def tsx_hubspot_werbung(p):
+    """REIN RECHNEND (testbar, TX1d): ist dieses Popup ein HubSpot-CTA-Embed ohne eigenen Inhalt? Klasse hs-cta-embed, kein Titel/Text, kein
+    Knopf, augen_tsx.js leer.iframes ≥ 1 und alle von HubSpot, keine Links/Bilder außerhalb. -> bool"""
+    if not isinstance(p, dict) or "hs-cta-embed" not in str(p.get("cls") or ""):
+        return False
+    if str(p.get("titel") or "").strip() or str(p.get("text") or "").strip() or [b for b in (p.get("knoepfe") or []) if isinstance(b, dict)]:
+        return False
+    le = p.get("leer") if isinstance(p.get("leer"), dict) else {}
+    ifr = [f for f in (le.get("iframes") or []) if isinstance(f, dict)]
+    if not ifr or not all(TSX_RX_HUBSPOT_SRC.match(str(f.get("src") or "")) for f in ifr):
+        return False
+    return not le.get("links") and not le.get("bilder")
+
+
+def tsx_hubspot_weg_js(rect):
+    """JS (nur dieses Element, kein Klick): das EINE role=dialog/aria-modal-Popup mit Klasse hs-cta-embed an rect (± 6 px), nur HubSpot-iframes,
+    ohne eigenen Text/Knopf/Link → display:none !important. -> {versteckt, grund, cls}"""
+    r = [float(v) for v in list(rect or [])[:4]] + [0.0] * 4
+    return ("(function(R){var RX=" + "/^https:\\/\\/[^\\/]*\\.(hs-sites(-eu1)?\\.com|hubspot\\.com|hubspotusercontent[\\w-]*\\.(com|net))(\\/|$)/i" + ";"
+            "var o={versteckt:0,grund:''};"
+            "var ds=[].slice.call(document.querySelectorAll('[role=\"dialog\"],[role=\"alertdialog\"],[aria-modal=\"true\"]')).filter(function(d){"
+            "var q=d.getBoundingClientRect();return Math.abs(q.left-R[0])<=6&&Math.abs(q.top-R[1])<=6&&Math.abs(q.width-R[2])<=6&&Math.abs(q.height-R[3])<=6;});"
+            "if(ds.length!==1){o.grund='Popup '+ds.length+'x an dieser Lage';return o;}"
+            "var d=ds[0],k=String(typeof d.className==='string'?d.className:(d.getAttribute('class')||''));o.cls=k.slice(0,60);"
+            "if(!/hs-cta-embed/.test(k)){o.grund='keine hs-cta-embed-Klasse';return o;}"
+            "var fr=[].slice.call(d.querySelectorAll('iframe'));"
+            "if(!fr.length||!fr.every(function(f){return RX.test(String(f.src||''));})){o.grund='iframe nicht von HubSpot';return o;}"
+            "if(String(d.textContent||'').trim()||d.querySelector('button,[role=\"button\"],a[href],input,select,textarea')){o.grund='Popup hat eigenen Inhalt';return o;}"
+            "d.style.setProperty('display','none','important');o.versteckt=1;return o;})(" + json.dumps(r[:4]) + ")")
+
+
+def _tsx_hubspot_weg(s, st, p, was, name, trail):
+    """HubSpot-CTA ausblenden (tsx_hubspot_weg_js), neu lesen. -> (stand, grund | None). Wirft nie, klickt nie."""
+    try:
+        v = s.lese_js(tsx_hubspot_weg_js(p.get("rect")), timeout=5) or {}
+    except Exception as e_:
+        return st, f"{was} offen ({name}) — HubSpot-Werbung nicht ausblendbar ({type(e_).__name__})"
+    if not (isinstance(v, dict) and v.get("versteckt")):
+        return st, f"{was} offen ({name}) — HubSpot-Werbung nicht ausgeblendet ({str((v or {}).get('grund') if isinstance(v, dict) else '-')[:60]})"
+    _TSX_UEBER_N[0] += 1
+    try:
+        _warte(0.5, 0.3)
+        st = s.stand()
+    except Exception as e_:
+        return st, f"{was} offen ({name}) — nach dem Ausblenden nicht lesbar ({type(e_).__name__})"
+    noch = [q for q in ((st or {}).get("popups") or []) if isinstance(q, dict) and tsx_hubspot_werbung(q)
+            and list(q.get("rect") or [])[:4] == list(p.get("rect") or [])[:4]]
+    if noch:
+        return st, f"{was} offen ({name}) — HubSpot-Werbung nach dem Ausblenden wieder da"
+    trail.append(f"HubSpot-Werbung ausgeblendet (kein Klick): {name}")
+    return st, None
+
+
 def _tsx_ueberlagerung_weg(s, st, trail):
     """Überlagerungen ohne Order-Bezug (tsx_ueberlagerung) über ihren EINEN Schließ-Knopf schließen — Druck mit Ziel-Beweis, neu lesen,
     höchstens zwei Drücke je Aufruf und TSX_UEBER_MAX je Lauf. -> (stand, grund): grund None = keine (mehr) da, sonst der klare Abbruchgrund
@@ -17285,6 +17350,16 @@ def _tsx_ueberlagerung_weg(s, st, trail):
             trail.append(grund)
             return st, grund
         if not kn:
+            hs = next((x for x in mit if tsx_hubspot_werbung(x[0])), None)
+            if hs:                                         # TX1d: HubSpot-CTA (X im fremden iframe) → ausblenden, kein Klick
+                p, u = hs[0], hs[1]
+                was = "TopstepX-Werbe-Popup" if u["art"] == "werbung" else "Dialog ohne Text"
+                name = tsx_ueberlagerung_name(p)
+                st, grund = _tsx_hubspot_weg(s, st, p, was, name, trail)
+                if grund:
+                    trail.append(grund)
+                    return st, grund
+                continue
             kn_txt = ", ".join(f"'{str(b.get('text') or b.get('aria') or b.get('icon') or '-')[:24]}'"
                                for b in (p.get("knoepfe") or [])[:6] if isinstance(b, dict))
             grund = f"{was} offen ({name}) — kein eindeutiger Schließen-Knopf (Knöpfe {kn_txt or '-'}), nichts geklickt"
