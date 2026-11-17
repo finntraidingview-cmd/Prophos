@@ -59726,7 +59726,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2243'
+  const OS_TAB_BUILD = '2026-09-22.2244'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77647,7 +77647,8 @@
       const zuSpaet = p.status === 'planned' && p.start_um_gestartet_at && !p.orbit_gesendet_at && Date.now() - new Date(p.start_um || 0).getTime() > 15 * 60000
       return { ...k, status: zuSpaet ? 'verpasst' : p.status, gesendet: !!p.orbit_gesendet_at, um: p.orbit_gesendet_at || p.start_um_gestartet_at || null, ended: p.ended_at || null,
                pl: p.master_pl == null ? null : Number(p.master_pl), tp: p.master_tp != null ? Number(p.master_tp) : k.tp, sl: p.master_sl != null ? Number(p.master_sl) : null,
-               slave: p.slave_risk != null ? Number(p.slave_risk) : k.slave, start_um: p.start_um || k.start_um, gestartet: !!p.start_um_gestartet_at, richtung: p.richtung || null }
+               slave: p.slave_risk != null ? Number(p.slave_risk) : k.slave, start_um: p.start_um || k.start_um, gestartet: !!p.start_um_gestartet_at, richtung: p.richtung || null,
+               hedgeSt: p.anz_hedge || null }   // DK1c (17.11.2026): Status des Fusion-Hedges (GET /admin/wd-plaene anz_hedge) — nur für den Deaktiviert-Filter in wdKarte
     })
     let status = x.status
     if(status !== 'fertig' && status !== 'verpasst' && status !== 'leer'){
@@ -77705,8 +77706,10 @@
     // archivierte Konten existieren hier nicht (Finn 23.09.2026); nur Typ Winning Days (26.09.2026) — ohne Plan und nicht in der RPC = kein WD-Konto
     const nurWd = k => k.plan_id || !(_wd.daten && _wd.daten.rpc) || !!wdKontoDaten(k.id)
     // DK1 (Finn 17.11.2026: „Bei WD und Payouts … sollen deaktivierte Accounts nicht angezeigt … werden"): deaktiviert = weg, auch mit Plan von vorher —
-    // nur ein laufender (open bzw. planned + gestartet) und ein zu prüfender (review, muss abgehakt werden: Buchung in Finanzen) bleiben
+    // nur ein laufender (open bzw. planned + gestartet), ein zu prüfender (review, muss abgehakt werden: Buchung in Finanzen) und einer mit nicht
+    // geschlossenem Fusion-Hedge (DK1c, Prüfer S2: gleiche Regel wie /admin/wd-heute) bleiben
     const deakt = k => !!(wdKontoDaten(k.id) || {}).deaktiviert && k.status !== 'open' && k.status !== 'review' && !(k.status === 'planned' && k.gestartet)
+      && !(k.hedgeSt && k.hedgeSt !== 'geschlossen')
     const ohne = [], sichtbar = (x.konten || []).filter(k => (!k.archiviert || k.plan_id) && nurWd(k) && !deakt(k))
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}

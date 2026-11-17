@@ -32,6 +32,19 @@ P = [{"master_account_id": "a", "status": "open"}, {"master_account_id": "a", "s
 r = app.dk_ohne_deaktiviert(P, frozenset({"a"}), feld="master_account_id", offen_behalten=True)
 check([(p["master_account_id"], p["status"]) for p in r] == [("a", "open"), ("a", "review"), ("x", "review")],
       f"wd-heute: laufender + zu prüfender Plan bleiben (Abhaken bucht in Finanzen), planned weg ({r})")
+# DK1c (Prüfer S2 17.11.2026): completed/cancelled mit nicht geschlossenem Fusion-Hedge bleibt — die 20-s-Wächter lesen /admin/wd-heute
+H = [{"master_account_id": "a", "status": "completed", "mt5_baseline": {"hedge": {"status": "offen"}}},
+     {"master_account_id": "a", "status": "cancelled", "mt5_baseline": {"hedge": {"status": "schliesst"}}},
+     {"master_account_id": "a", "status": "completed", "mt5_baseline": {"hedge": {"ticket": 1}}},
+     {"master_account_id": "a", "status": "completed", "mt5_baseline": {"hedge": {"status": "geschlossen"}}},
+     {"master_account_id": "a", "status": "completed", "mt5_baseline": {}},
+     {"master_account_id": "a", "status": "completed", "mt5_baseline": None}]
+rh = app.dk_ohne_deaktiviert(H, frozenset({"a"}), feld="master_account_id", offen_behalten=True)
+check([((p.get("mt5_baseline") or {}).get("hedge") or {}).get("status", "ohne") for p in rh] == ["offen", "schliesst", "ohne"],
+      f"Hedge offen/schliesst/ohne Status bleibt, geschlossen bzw. kein Hedge fällt raus ({len(rh)})")
+check(app.dk_hedge_nicht_zu({"mt5_baseline": {"hedge": {"status": "fehler"}}}) is True and app.dk_hedge_nicht_zu({}) is False
+      and app.dk_hedge_nicht_zu({"mt5_baseline": "kaputt"}) is False, "dk_hedge_nicht_zu: fehler = nicht zu, ohne/kaputte Baseline = kein Hedge")
+check(len(app.dk_ohne_deaktiviert(H, frozenset({"a"}), feld="master_account_id")) == 0, "ohne offen_behalten zählt auch der Hedge nicht")
 r2 = app.dk_ohne_deaktiviert(P, frozenset({"a"}), feld="master_account_id")
 check([p["master_account_id"] for p in r2] == ["x"], "ohne offen_behalten fällt auch open raus")
 check(app.dk_ohne_deaktiviert([{"account_id": None}], frozenset({"a"})) == [{"account_id": None}], "Zeile ohne Konto-ID bleibt")
@@ -57,6 +70,8 @@ h = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 check("const dkAus = !!a.deaktiviertAt" in h and "let payoutHtml = (dkAus && !dkPoOffen) ? ''" in h, "Accounts: kein Payout-/Ziel-Chip an deaktivierten Konten, offene Anfrage bleibt")
 check("for(const k of konten) if(deakt.has(k.id)) k.deaktiviert = true" in h and "&& !deakt(k))" in h, "Farmer: Marke + Ausblenden in der ID-Tabelle")
 check("k.status !== 'open' && k.status !== 'review' && !(k.status === 'planned' && k.gestartet)" in h, "Farmer: laufend/review/gestartet bleiben sichtbar")
+check("&& !(k.hedgeSt && k.hedgeSt !== 'geschlossen')" in h and "hedgeSt: p.anz_hedge || null" in h and '"anz_hedge:mt5_baseline->hedge->>status",' in src,
+      "Farmer: Plan mit nicht geschlossenem Hedge bleibt (DK1c, Alias aus GET /admin/wd-plaene)")
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)

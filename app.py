@@ -14560,7 +14560,8 @@ def admin_wd_heute():
                 continue
             gesehen.add(pid)
             plaene.append(p)
-        # DK1 (17.11.2026): Pläne deaktivierter Konten nicht in „Winning Days“ — laufende (open) und zu prüfende (review, Abhak-Liste) bleiben sichtbar
+        # DK1 (17.11.2026): Pläne deaktivierter Konten nicht in „Winning Days“ — laufende (open), zu prüfende (review, Abhak-Liste) und solche mit
+        # nicht geschlossenem Fusion-Hedge (DK1c, Wächter lesen diese Liste) bleiben sichtbar
         plaene = dk_ohne_deaktiviert(plaene, dk_deaktiviert_anzeige(), feld="master_account_id", offen_behalten=True)
         acc_ids = {str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")}
         accs = {}
@@ -18335,7 +18336,8 @@ def admin_wd_plaene():
                                   "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt,"
                                   "hand_werte_at,master_firm,anz_frei:hedge_freigabe_at,"   # WD-Zeile von Hand (02.11.2026): Sperre fürs Nachziehen + Popup
                                   "wd_sl:mt5_baseline->wd_sl,"   # WD-SL-WÜRFEL (WS1a, 09.11.2026): Chip „SL … $ (… % Puffer)" in den WD-Zeilen, auch fremde IDs
-                                  "wd_recoverer:mt5_baseline->>wd_recoverer",   # RC3 (Prüfer SOLLTE 1): Chip „Recoverer“ in der Farmer-Tabelle auch für MNQ-Recoverer
+                                  "wd_recoverer:mt5_baseline->>wd_recoverer,"   # RC3 (Prüfer SOLLTE 1): Chip „Recoverer“ in der Farmer-Tabelle auch für MNQ-Recoverer
+                                  "anz_hedge:mt5_baseline->hedge->>status",   # DK1c (17.11.2026): Deaktiviert-Filter der Farmer-Tabelle behält Pläne mit nicht geschlossenem Hedge
                         "id": f"in.({chunk})"})
             # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
             # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
@@ -27907,7 +27909,17 @@ def dk_ohne_deaktiviert(zeilen, ids, feld="account_id", offen_behalten=False):
     wd_hedge in Finanzen; Gegenprüfung DK1 17.11.2026). → neue Liste."""
     if not ids:
         return list(zeilen or ())
-    return [z for z in (zeilen or ()) if str((z or {}).get(feld) or "") not in ids or (offen_behalten and (z or {}).get("status") in ("open", "review"))]
+    return [z for z in (zeilen or ()) if str((z or {}).get(feld) or "") not in ids
+            or (offen_behalten and ((z or {}).get("status") in ("open", "review") or dk_hedge_nicht_zu(z)))]
+
+
+def dk_hedge_nicht_zu(plan):
+    """REIN RECHNEND (testbar, DK1c — Prüfer S2 17.11.2026): hat der Plan einen Fusion-Hedge (mt5_baseline.hedge), der nicht eindeutig „geschlossen“ ist
+    (offen/oeffnet/schliesst/fehler/ohne Status)? Dann bleibt er im Deaktiviert-Filter — die 20-s-Wächter (wdReaderLageLaden, hedgeCloudRowsNachladen)
+    lesen /admin/wd-heute und müssen einen noch offenen Hedge auch nach completed/cancelled am deaktivierten Konto sehen. Ohne Hedge-Eintrag → False."""
+    base = (plan or {}).get("mt5_baseline")
+    h = base.get("hedge") if isinstance(base, dict) else None
+    return isinstance(h, dict) and h.get("status") != "geschlossen"
 
 
 AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts am Stift ausschalten"
