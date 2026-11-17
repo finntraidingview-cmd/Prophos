@@ -43,7 +43,7 @@ import tempfile
 STUBS = """
 const flag = n => t => !!(t && t['_' + n]);
 const wdlIstPolar = flag('polar'), mklWdEigenerPlan = () => false, wdlAbhakenSperre = () => '', wdlManuell = flag('man'), wdlGeblowtUrteil = flag('blow'), wdlKontoWeg = flag('weg'),
-  wdlKontoWegErg = () => '', wdlTpUndWeg = flag('tpweg'), wdlBestandenChip = flag('best'), wdlFehltChip = flag('fehlt'), wdlZielMarkiert = flag('ziel'), wdlFcfdZielErreicht = flag('fz'),
+  wdlKontoWegErg = () => '', wdlTpUndWeg = flag('tpweg'), wdlBestandenChip = flag('best'), wdlFehltChip = flag('fehlt'), wdlZielMarkiert = flag('ziel'), wdlFcfdZielErreicht = flag('fz'), wdlFcfdStandOffen = flag('fso'), WDL_FCFD_STAND_OFFEN = 'Funded CFD: Ziel-Stand lädt noch',
   wdlWartet = flag('wart'), wdlPlGesch = flag('gesch'), wdlLiqIstTag = flag('tag'), wdlTid = t => t.id;
 const wdlBlowStand = t => Object.assign(t._ohneLiq ? { liq: null, bal: t.balance_end } : { liq: 90000, bal: t.balance_end }, t._soft ? { softBreach: true } : {}, t._sgesch ? { geschaetzt: true } : {}, t._sblow ? { geblowt: true } : {});
 const WDL_UEBERGANG = { challenge: 'x', phase1: 'x', phase2: 'x' };
@@ -93,7 +93,7 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           # Prüfer AB1 (MUSS): softBreach neben dem Konto-Boden (liq_gilt 'boden') ist kein Beleg — Popup wie bisher
           ("AB1: demo_liq, softBreach, aber Liq gilt Boden → Popup", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "endlesung": {"grund": "demo_liq", "quelle": "puls"}, "_soft": True}, False),
           ("AB1: Demo liquidiert, softBreach, Liq gilt Boden → Popup wie bisher", {"pl_balance": -2757, "master_sl": None, "master_risk": 4500, "demo": {"status": "liquidiert", "stop": "liq"}, "_soft": True}, False),
-          ("Funded-CFD-Ziel", {"_fz": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
+          ("Funded-CFD-Ziel", {"_fz": True}, False), ("Funded CFD: Ziel möglich, noch kein Stand (AB1b)", {"_fso": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
 js = STUBS + fn + "\nconst F = " + json.dumps([dict(BASIS, **f[1]) for f in FAELLE], ensure_ascii=False) + "; print(JSON.stringify(F.map(wdlEinKlickGrund)));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
     d.write(js)

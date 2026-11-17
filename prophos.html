@@ -39271,7 +39271,9 @@
       if(an) (_mwdErlWp || window._wpUrteil(pw.konto_id)).then(u => { if(_wpNr === _mwdErlNr && _mwdErlId === String(pid)){ if(u || !_mwdErlU) _mwdErlU = u; if(_zsAn) mwdErlZielZeile(u, true)
         // AB1 (Gegenprüfung): Grund „Funded-CFD-Ziel erreicht“ kam aus dem gemerkten Stand — sagt der frische „nicht bereit“, fällt die Grund-Zeile weg (sonst Widerspruch zur Ziel-Zeile)
         // Nachtrag: genauso „Funded Futures: Winning Days anbieten“ (kommt aus P&L ≈ TP, nicht aus dem Ziel) — die Ziel-Zeile sagt dann, was fehlt
-        if(u && !u.bereit && _zsAn){ const gEl = document.getElementById('mwd-erl-grund'); if(gEl && /Funded-CFD-Ziel erreicht|Winning Days anbieten/.test(gEl.textContent)){ gEl.hidden = true; gEl.textContent = '' } } } })
+        // AB1b: „Ziel-Stand lädt noch“ fällt weg, sobald der Stand da ist (die Ziel-Zeile zeigt ihn)
+        if(u && _zsAn){ const gEl = document.getElementById('mwd-erl-grund')
+          if(gEl && (/Ziel-Stand lädt noch/.test(gEl.textContent) || (!u.bereit && /Funded-CFD-Ziel erreicht|Winning Days anbieten/.test(gEl.textContent)))){ gEl.hidden = true; gEl.textContent = '' } } } })
     }
     // AB1 (17.11.2026): Ziel-Stand bei Funded CFD sofort (gemerkter Stand nach dem Trade-Ende) bzw. „wird geladen …“, der frische ersetzt ihn — nur Text, die Auswahl springt nicht.
     // Nachtrag (Finn ~15:10, Mike Apex …0004): auch Funded Futures (Zeile „→ Winning Days“ sichtbar, abhak aus kz_fdp_abhak)
@@ -41127,6 +41129,11 @@
     const u = typeof window._wpGemerkt === 'function' ? window._wpGemerkt(t.konto_id, Date.parse(t.ended_at || '') || 0) : null
     return !!(u && u.art === 'cfd' && u.bereit && !u.wartet)
   }
+  const WDL_FCFD_STAND_OFFEN = 'Funded CFD: Ziel-Stand lädt noch'
+  function wdlFcfdStandOffen(t){
+    if(!wdlFcfdZielMoeglich(t) || !t.konto_id) return false
+    return !(typeof window._wpGemerkt === 'function' && window._wpGemerkt(t.konto_id, Date.parse(t.ended_at || '') || 0))
+  }
   function wdlFcfdZielAb(t){
     const n = v => v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null
     // ziel_erreicht_ab kann über ziel_usd liegen (festes Ziel des Zyklus über dem unteren Wert, Prüfer S1) — dann gilt es, wie im Planer
@@ -41559,7 +41566,11 @@
     const grenze = pl > 0 ? 2 * Math.max(Math.abs(Number(t.master_tp)) || 0, 1000)   // Gewinn: nur der TP (Winning Day TP 300 + 4.500 $ bis zur Liq ließe sonst +9.000 $ durch)
       : (Number(stand.liq) > 0 ? 2 : 1.5) * Math.max(Math.abs(Number(t.master_sl)) || 0, Math.abs(Number(t.master_risk)) || 0, liqAbstand, 1000)
     if(Math.abs(pl) > grenze) return 'Ergebnis unplausibel (falsches Konto?)'
-    return ''
+    // AB1b (Prüfer S2 zu 7ae8ec86): Funded CFD, nach der Balance kann das Ziel fallen (wdlFcfdZielMoeglich), aber /konto-ziele hat noch keinen Stand nach dem Trade-Ende
+    // (Radar-Vorladen ≤ 60 s) → nie Ein Klick, sondern Popup mit „Ziel-Stand wird geladen …“ und der Vorauswahl-Logik. Bewusst als LETZTE Prüfung (Gegenprüfung AB1b):
+    // alle Schutz-Gründe davor (Hedge offen, ohne Lesung → vormerken, unplausibel …) bleiben vorrangig — ein vorgemerkter Plan bucht später still nur, wenn das Ziel
+    // nach der Balance NICHT möglich ist (mklWdErledigtOeffnen: _mwdErlWp && wdlFcfdZielMoeglich). Ein Klick also nur mit Stand oder klar unter dem Ziel.
+    return wdlFcfdStandOffen(t) ? WDL_FCFD_STAND_OFFEN : ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
   /* VORMERKEN STATT POPUP (Finn 02.11.2026: bei „ohne Lesung" auch direkt weg): der Klick merkt den Plan vor (Railway mt5_baseline.abhaken_vorgemerkt), er bleibt in Überprüfen
@@ -41726,7 +41737,8 @@
             continue
           }
           const blow = WDL_SAMMEL_BLOW.has(grund), ziel = WDL_SAMMEL_ZIEL.has(grund)
-          if(grund && !blow && !ziel){ erg.stehen.push([name(t), grund]); continue }
+          // AB1b: „Ziel-Stand lädt noch“ hält den Sammel-Lauf nicht auf — Funded CFD wartet dort ohnehin auf das frische Urteil (o.wp), Waiting nur bei bereit
+          if(grund && !blow && !ziel && grund !== WDL_FCFD_STAND_OFFEN){ erg.stehen.push([name(t), grund]); continue }
           const o = mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: true, sammel: true, sammelUrteil: ziel })
           if(!o){ _mwdErlId = null; erg.stehen.push([name(t), 'Popup nicht vorbereitet']); continue }
           // eigener Plan: der Einzel-Klick öffnet hier den Trades-Dialog (anderer Weg) — nur der stille Fall bucht über Railway
@@ -59807,7 +59819,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2245'
+  const OS_TAB_BUILD = '2026-09-22.2246'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

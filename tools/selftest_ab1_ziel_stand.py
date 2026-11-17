@@ -28,7 +28,7 @@ def schnitt(von, bis):
 
 
 zs = schnitt("function wpZielStand(", "window._wpZielStand")
-fz = schnitt("function wdlFcfdZielErreicht(", "function wdlFcfdZielAb(")
+fz = schnitt("function wdlFcfdZielErreicht(", "function wdlFcfdZielAb(") + schnitt("function wdlFcfdZielAb(", "window._wdlFcfdZielMoeglich")
 
 # /konto-ziele-Antwort wie Railway nach Marcs Trade (Werte aus dem FundedNext-Dashboard, Konto ohne Kennung)
 MARC = {"typ": "funded_cfd", "groesse": 100000,
@@ -53,10 +53,10 @@ OD_OHNE_G = dict(MARC, groesse=None)
 WARTET = {"typ": "funded_cfd", "groesse": 100000, "abhak": {"bal": 104950, "ziel_bal": 102000, "bereit": True, "wartet": True}}
 
 js = f"""
+let GEM = null; const window = {{ _wpGemerkt: (id, nach) => GEM }};
 {zs}
 {fz}
 const wdlBlowStand = t => t._bs || null;
-let GEM = null; const window = {{ _wpGemerkt: (id, nach) => GEM }};
 const T = {{ konto_typ: 'funded_cfd', konto_id: 'k1', ended_at: '2026-11-17T11:00:00Z', ziel_usd: 102000, _bs: {{ bal: 104077.42, geblowt: false }} }};
 const R = {{}};
 R.marc = wpZielStand({json.dumps(MARC)});
@@ -76,13 +76,16 @@ GEM = {{ art: 'cfd', bereit: true, wartet: false }}; R.fz_ja = wdlFcfdZielErreic
 GEM = {{ art: 'cfd', bereit: true, wartet: true }}; R.fz_wartet = wdlFcfdZielErreicht(T);
 GEM = {{ art: 'cfd', bereit: true, wartet: false }}; R.fz_blow = wdlFcfdZielErreicht(Object.assign({{}}, T, {{ _bs: {{ bal: 89000, geblowt: true }} }}));
 R.fz_challenge = wdlFcfdZielErreicht(Object.assign({{}}, T, {{ konto_typ: 'challenge' }}));
+GEM = null; R.so_ohne = wdlFcfdStandOffen(T);
+GEM = {{ art: 'cfd', bereit: false, wartet: false }}; R.so_mit = wdlFcfdStandOffen(T);
+GEM = null; R.so_unter = wdlFcfdStandOffen(Object.assign({{}}, T, {{ _bs: {{ bal: 100800, geblowt: false }} }}));
 print(JSON.stringify(R));
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
     d.write(js)
 r = subprocess.run([JSC, d.name], capture_output=True, text=True)
 os.unlink(d.name)
-check(r.returncode == 0, f"jsc läuft ({r.stderr[:300]})")
+check(r.returncode == 0, f"jsc läuft ({r.stderr[:300]}{r.stdout[-300:] if r.returncode else ''})")
 R = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else {}
 
 print("1) Vorauswahl nur aus /konto-ziele abhak.bereit")
@@ -90,6 +93,13 @@ check(R.get("fz_ohne") is False, "Marc, Balance 104.077 ≥ Radar-Ziel 102.000, 
 check(R.get("fz_nein") is False, "Stand sagt nicht bereit (Consistency) → nicht erreicht")
 check(R.get("fz_ja") is True, "Stand sagt bereit → erreicht (⏳ vorgewählt)")
 check(R.get("fz_wartet") is False and R.get("fz_blow") is False and R.get("fz_challenge") is False, "wartet schon / geblowt / keine Funded CFD → nie")
+
+check(R.get("so_ohne") is True and R.get("so_mit") is False and R.get("so_unter") is False,
+      f"AB1b: Ziel möglich + kein Stand → „Ziel-Stand lädt noch“ (nie Ein Klick); mit Stand oder klar unter dem Ziel nicht ({R.get('so_ohne')}, {R.get('so_mit')}, {R.get('so_unter')})")
+eg = schnitt("function wdlEinKlickGrund(", "window._wdlEinKlickGrund")
+check("return wdlFcfdStandOffen(t) ? WDL_FCFD_STAND_OFFEN : ''" in eg and eg.index("wdlFcfdStandOffen(t)") > eg.index("'Ergebnis unplausibel (falsches Konto?)'"),
+      "AB1b: letzte Prüfung — alle Schutz-Gründe (Hedge offen, ohne Lesung, unplausibel) bleiben vorrangig, Sammel bucht nur, was sonst Ein Klick wäre")
+check("grund !== WDL_FCFD_STAND_OFFEN" in html, "AB1b: Sammel-Abhaken hält bei „Ziel-Stand lädt noch“ nicht an (wartet aufs Urteil)")
 
 print("2) Ziel-Stand-Zeile")
 m = R.get("marc") or {}

@@ -125,7 +125,11 @@ rr = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versio
 os.unlink(d.name)
 e = json.loads(rr.stdout.strip().splitlines()[-1]) if rr.returncode == 0 else None
 check(e == [51350, 51500, 52000, None], f"Radar: Ziel ab Toleranz-Schwelle (auch über dem unteren Wert bei festem Ziel), ohne Feld wie bisher ({e} {rr.stderr[:200]})")
-check("zielRest(b.bal, wdlFcfdZielAb(t))" in html and "Number(b.bal) < wdlFcfdZielAb(t)" in html, "Radar-Vorauswahl und Ein-Klick-Prüfung nutzen die Schwelle")
+# AB1 (17.11.2026): die Radar-Vorauswahl rechnet nicht mehr selbst (Balance ≥ Schwelle), sondern nimmt abhak.bereit aus /konto-ziele — die Toleranz steckt dort
+# serverseitig (erreicht … gewinn >= _sw, oben geprüft). Die Ein-Klick-Prüfung „Ziel möglich“ (wdlFcfdZielMoeglich) nutzt die Schwelle weiter.
+_fz = html[html.index("function wdlFcfdZielErreicht("):html.index("function wdlFcfdZielAb(")]
+check("window._wpGemerkt(t.konto_id" in _fz and "u.bereit" in _fz and "zielRest(" not in _fz, "Radar-Vorauswahl: abhak.bereit aus /konto-ziele (Toleranz serverseitig)")
+check("Number(b.bal) < wdlFcfdZielAb(t)" in html, "Ein-Klick-Prüfung (Ziel möglich) nutzt die Schwelle")
 check("{ param: 'ziel_toleranz_pct' }" in html and "'Ziel-Toleranz'" in html, "Einstellung „Ziel-Toleranz“ im Funded Planer → CFD")
 
 print("ALLES GRÜN" if not fehler else f"{len(fehler)} FEHLER")
