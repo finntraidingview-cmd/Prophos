@@ -51,7 +51,8 @@ def main():
     out.sort = [{ ts: null, n: 'leer' }, { ts: '2026-10-18T10:00:00Z', n: 'alt' }, { ts: '2026-10-21T00:10:00Z', n: 'neu' }, { ts: '2026-10-20T05:10:00Z', n: 'mitte' }].sort(bstTsSort).map(x => x.n)
     JSON.stringify(out)
     """
-    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True)
+    # GZ1 17.11.2026 (Prüfer S2): Anzeigen laufen in Gerätezeit → JS fest in Dubai rechnen, sonst nur am Mac in Dubai grün
+    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True, env={**os.environ, 'TZ': 'Asia/Dubai'})
     if r.returncode != 0:
         print("✗ JavaScriptCore:", r.stderr.strip()[:400]); sys.exit(1)
     o = json.loads(r.stdout.strip())

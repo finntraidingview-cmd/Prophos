@@ -40,7 +40,8 @@ Z = [
 if m and shutil.which("osascript"):
     js = (m.group(0) + "\nvar Z = " + json.dumps(Z) + ";\n"
           "JSON.stringify(['k1','k2','k3','k4','k5','k6','k7','k9'].map(function(k){ var r = admKontoTradeInfo(k, Z, '" + JETZT + "'); return r ? [r.art, r.text, r.plan_id, r.uid] : null }))")
-    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True)
+    # GZ1 17.11.2026 (Prüfer S2): Anzeigen laufen in Gerätezeit → JS fest in Dubai rechnen, sonst nur am Mac in Dubai grün
+    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True, env={**os.environ, 'TZ': 'Asia/Dubai'})
     try:
         v = json.loads(r.stdout.strip())
     except ValueError:

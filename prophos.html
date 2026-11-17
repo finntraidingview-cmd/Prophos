@@ -20614,9 +20614,9 @@
     // REIN RECHNEND (window._admLetzterTradeInfo): → { stufe: 'lauf'|'ok'|'amber'|'rot'|'nie', text, tip, tage, sortMs } | null (Feld fehlt)
     function admLetzterTradeInfo(lt, jetztIso){
       if(!lt || typeof lt !== 'object') return null
-      const tz = 'Asia/Dubai', tag = d => d.toLocaleDateString('en-CA', { timeZone: tz })
+      const tag = d => d.toLocaleDateString('en-CA')   // Kalendertag des Geräts (GZ1 17.11.2026, vorher Dubai) — Tageswort passt zur Uhrzeit
       const jetzt = new Date(jetztIso || Date.now()), at = lt.at ? new Date(lt.at) : null
-      // Uhrzeit in Gerätezeit (17.11.2026), Tageszählung (tag) bleibt Dubai
+      // Uhrzeit in Gerätezeit (17.11.2026)
       const uhr = d => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
       const voll = d => d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       if(lt.laeuft) return { stufe: 'lauf', text: 'läuft jetzt', tip: 'Ein Trade läuft gerade' + (at && !isNaN(at) ? ` (gestartet ${voll(at)})` : ''), tage: 0, sortMs: Number.MAX_SAFE_INTEGER }
@@ -41297,9 +41297,10 @@
     const d = ts ? new Date(ts) : null
     if(!d || isNaN(d)) return { txt: '–', tip: 'kein Zeitstempel — Ziel-Wache hat das Konto noch nicht getaggt und kein beendeter Trade bekannt', tage: null }
     const jetzt = jetztIso ? new Date(jetztIso) : new Date()
-    const tagVon = x => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(x)   // „2026-10-21" = Kalendertag Dubai
+    // Kalendertag des Geräts (GZ1 17.11.2026, vorher Dubai): Tageswort und Uhrzeit in derselben Zone, sonst „heute 22:30“ für Emins gestern (Prüfer S2)
+    const tagVon = x => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(x)
     const tage = Math.round((Date.parse(tagVon(jetzt)) - Date.parse(tagVon(d))) / 86400000)
-    // Anzeige in Gerätezeit (17.11.2026), Tageszählung oben bleibt Dubai
+    // Anzeige in Gerätezeit (17.11.2026)
     const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     const datum = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const voll = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + uhr
@@ -65952,10 +65953,9 @@
     if(art === 'gleiche_firma'){ const f = d.firma || (/ läuft schon bei (.+?) — je Firma/.exec(g) || [])[1]
       return { art, kurz: `gleiche Firma läuft schon${f ? ' (' + f + ')' : ''}`, pille: 'gleiche Firma' } }
     const bisMs = Date.parse(d.bis || '')
-    // Gerätezeit (17.11.2026); nur der Rückfall aus dem DB-Text ist Dubai-Zeit und trägt das Wort weiter
-    const bisDb = (/bis (\d{1,2}:\d{2}) Dubai/.exec(g) || [])[1]
-    const bis = Number.isFinite(bisMs) ? new Date(bisMs).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : bisDb ? bisDb + ' Dubai' : ''
-    return { art, kurz: `Markteröffnung 09:28–09:35 New York${bis ? ' (bis ' + bis + ')' : ''}`, pille: 'Markteröffnung' }
+    // bleibt Dubai mit dem Wort (GZ1 17.11.2026, Prüfer S2): kurz landet im Start-Sperre-Toast neben „neue Prüfung HH:MM Dubai“ — eine Zone je Satz (08.10.)
+    const bis = Number.isFinite(bisMs) ? new Date(bisMs).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : (/bis (\d{1,2}:\d{2}) Dubai/.exec(g) || [])[1]
+    return { art, kurz: `Markteröffnung 09:28–09:35 New York${bis ? ' (bis ' + bis + ' Dubai)' : ''}`, pille: 'Markteröffnung' }
   }
   window._zweitGrund = zweitGrund
   /* ZWEI ORBIT — SOFORT-START-WÄCHTER (03.11.2026, Z4, Lücke 2 der Prüfung S3): „1. Trade zu nah“, „gerade gesendet“ und „ohne Kurs“ kamen über

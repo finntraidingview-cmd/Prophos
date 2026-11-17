@@ -63,7 +63,8 @@ print(aus.join('\n'))
         fd.write(code)
         p = fd.name
     try:
-        out = subprocess.run([JSC, p], capture_output=True, text=True, timeout=30).stdout.strip()
+        # GZ1 17.11.2026 (Prüfer S2): Anzeigen laufen in Gerätezeit → JS fest in Dubai rechnen, sonst nur am Mac in Dubai grün
+        out = subprocess.run([JSC, p], capture_output=True, text=True, env={**os.environ, 'TZ': 'Asia/Dubai'}, timeout=30).stdout.strip()
     finally:
         os.unlink(p)
     for z in (out or "ROT JavaScriptCore lieferte nichts").splitlines():

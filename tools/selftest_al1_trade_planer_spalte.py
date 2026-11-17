@@ -112,7 +112,8 @@ else:
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(JS % code)
     try:
-        r = subprocess.run([JSC, f.name], capture_output=True, text=True, timeout=60)
+        # GZ1 17.11.2026 (Prüfer S2): Anzeigen laufen in Gerätezeit → JS fest in Dubai rechnen, sonst nur am Mac in Dubai grün
+        r = subprocess.run([JSC, f.name], capture_output=True, text=True, env={**os.environ, 'TZ': 'Asia/Dubai'}, timeout=60)
     finally:
         os.unlink(f.name)
     try:
