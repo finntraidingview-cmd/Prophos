@@ -212,9 +212,9 @@ if not os.environ.get("SELFTEST_APP"):
     check(k2.get("aktion") == "ziel", f"fdp_pump_konto: Ziel erreicht → Winning Days ({k2.get('aktion')})")
     # FF2b: Niveau 16.000 fest — +13.500 ist NICHT erreicht (Rest 2.500), nach einem Verlusttag (−2.700) ist der TP Niveau − Balance = 18.700
     k2b = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START + 13500, START + 13500, START, 150000, "konto-0001", 1, "2026-11-13", R())
-    check(k2b.get("aktion") == "planen" and k2b["tp"] == 2500, f"Niveau 16.000 bei +13.500 → weiter, TP 2.500 (keine Untergrenzen-Regel mehr) ({k2b.get('aktion')}, {k2b.get('tp')})")
+    check(k2b.get("aktion") == "planen" and k2b["tp"] == 2750, f"Niveau 16.000 bei +13.500 → weiter, TP 2.500 + 10 % Puffer = 2.750 (FP-PUF) (keine Untergrenzen-Regel mehr) ({k2b.get('aktion')}, {k2b.get('tp')})")
     k2d = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START - 2700, START, START, 150000, "konto-0001", 1, "2026-11-13", R())
-    check(k2d.get("aktion") == "planen" and k2d["tp"] == 18700 and abs(k2d["ziel"] - 166000) < 0.01, f"nach Verlusttag −2.700: Niveau 166.000 bleibt, TP 18.700 ({k2d.get('tp')})")
+    check(k2d.get("aktion") == "planen" and k2d["tp"] == 20570 and abs(k2d["ziel"] - 166000) < 0.01, f"nach Verlusttag −2.700: Niveau 166.000 bleibt, TP 18.700 + 10 % = 20.570 (FP-PUF) ({k2d.get('tp')})")
     k2e = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[16000, 16000], pump2_pct=0), START + 15920, START + 15920, START, 150000, "konto-0001", 1, "2026-11-13", R())
     check(k2e.get("aktion") == "ziel", f"80 $ unter dem Niveau (Schlupf am TP) → Ziel erreicht, kein Mini-Trade ({k2e.get('aktion')})")
     k2c = ruf("fdp_pump_konto", REG_TR, fest(TR, ziel_gewinn=[13000, 19000], pump2_pct=0), START + 8000, START + 8000, START, 150000, "konto-0001", 1, "2026-11-13", R())
@@ -298,8 +298,8 @@ if not os.environ.get("SELFTEST_APP"):
     e, log = lauf([t1("t1-a", "2026-11-12T07:50:00Z", 156000)])
     z = log["insert"][0] if log["insert"] else {}
     zf = ((z.get("mt5_baseline") or {}).get("funded_plan") or {})
-    check(len(log["insert"]) == 1 and z.get("master_tp") == 10000 and z.get("master_contracts") == 3 and z.get("master_sl") is None,
-          f"Takt: Trade 2 angelegt, TP 10.000, 3 NQ, ohne SL ({len(log['insert'])} · {z.get('master_tp')} · {z.get('master_sl')})")
+    check(len(log["insert"]) == 1 and z.get("master_tp") == 11000 and z.get("master_contracts") == 3 and z.get("master_sl") is None,
+          f"Takt: Trade 2 angelegt, TP 10.000 + 10 % Puffer = 11.000 (FP-PUF), 3 NQ, ohne SL ({len(log['insert'])} · {z.get('master_tp')} · {z.get('master_sl')})")
     check(((z.get("mt5_baseline") or {}).get("kette") or {}).get("nr") == 2 and ((z.get("mt5_baseline") or {}).get("kette") or {}).get("vor") == "t1-a"
           and (zf.get("pump") or {}).get("nr") == 2 and (zf.get("pump") or {}).get("t1_plan_id") == "t1-a", "Takt: Trade 2 trägt kette {nr 2, vor T1} und pump {nr 2, t1_plan_id}")
     check(z.get("start_um") and z.get("auto_bestaetigt_at") and "2026-11-12T08:" <= str(z.get("start_um")) <= "2026-11-12T14:30", f"Takt: bestätigt wie Trade 1, Start bis 18:30 Dubai ({z.get('start_um')})")

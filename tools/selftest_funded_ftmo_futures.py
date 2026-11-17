@@ -48,6 +48,8 @@ for k in ("'tp_modus', 'rest'", "'lock_usd', 0", "jsonb_build_array(4750, 5000)"
           "'daily_usd', 1000", "'hedge_eur', 450", "'an', true", "f->'namen' ? 'ftmofutures'"):
     check(k in SQL, f"SQL enthält {k}")
 jg = JG(REGEL, 50000)
+# FP-PUF (17.11.2026): hier die FTMO-Rest-Logik selbst (TP = Rest) — die Rechnung läuft mit Ziel-Puffer aus; den Puffer prüft selftest_fp_puf_ziel_puffer.py
+REGEL = dict(REGEL, ziel_puffer_pct=0, ziel_puffer_min_usd=0)
 KID = "ftmo-535039"   # Platzhalter-ID, Ziel fest daraus
 
 zg = ZG(jg, KID)

@@ -19,7 +19,7 @@ def check(ok, text):
 
 
 ns = fp.laden()
-REGEL = ns["FDP_FIRMEN_STANDARD"][0]
+REGEL = dict(ns["FDP_FIRMEN_STANDARD"][0], ziel_puffer_pct=0, ziel_puffer_min_usd=0)   # FP-PUF: Puffer aus — der Fall ist ein Vorschlag von vor dem Puffer (TP = Rest)
 R, JG, BN, NZ = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"], ns["fdp_vorschlag_basis_neu"], ns["fdp_notiz_basis"]
 j = JG(REGEL, 100000)
 r = R(REGEL, j, fp.ST100, 108363.04, 108363.04, 514.70, 100000, 100000, kt_fest=2, konst={"sppl": 0.8926})

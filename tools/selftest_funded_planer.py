@@ -107,7 +107,7 @@ def szenario(ns):
     r3 = R(REGEL, j150, ST150, 154500, 157500, offen_3, 150000, 150000)
     check(r3["sl"] == 2500 and r3["tp"] == 7500 and r3["liq"] == 150100, f"Tag 3 bei 154.500: TP {r3.get('tp')} / SL {r3.get('sl')} (Stufe ab 153.000)")
     r4 = R(REGEL, j150, ST150, 162000, 162000, offen_3 + r3["hedge_tp_eur"], 150000, 150000)
-    check(r4["tp"] == 3000 and r4["sl"] == 4000, f"Gewinn → 162.000, Tag 4: TP {r4.get('tp')} / SL {r4.get('sl')} (Rest bis Ziel, Stufe ab 160.000)")
+    check(r4["tp"] == 3300 and r4["sl"] == 4000, f"Gewinn → 162.000, Tag 4: TP {r4.get('tp')} / SL {r4.get('sl')} (Rest bis Ziel 3.000 + 10 % Puffer, FP-PUF, Stufe ab 160.000)")
 
     print("100k (Kosten 350 €, Verhältnis 350/3.000)")
     q = R(REGEL, j100, ST100, 100000, None, 350, 100000, 100000)
@@ -157,8 +157,8 @@ def bausteine(ns):
                          {"status": "completed", "started_at": "2026-10-21T14:00:00+00:00", "master_pl": 7500},
                          {"status": "planned", "started_at": None, "master_pl": None}])
     c = R(REGEL, j150, ST150, 164884, 164884, 3000, 150000, 150000, None, tg)
-    check(tg == {"2026-10-20": 7384, "2026-10-21": 7500} and c["consistency_pct"] == 50.4 and c["aktion"] == "planen" and c["tp"] == 116,
-          f"Anzeige „größter Tag {c['consistency_pct']} %“ (Marc 20./21.10.) — keine Wache, nächster TP normal ({c['tp']} $ bis Ziel)")
+    check(tg == {"2026-10-20": 7384, "2026-10-21": 7500} and c["consistency_pct"] == 50.4 and c["aktion"] == "planen" and c["tp"] == 216,
+          f"Anzeige „größter Tag {c['consistency_pct']} %“ (Marc 20./21.10.) — keine Wache, nächster TP normal ({c['tp']} $ = 116 $ bis Ziel + Mindest-Puffer 100 $, FP-PUF)")
     z = ns["fdp_zyklus"](150000, [], [])
     check(z == {"nr": 1, "ab": None, "start": 150000.0}, "Zyklus 1 ohne Payout ab Kontogröße")
     z2 = ns["fdp_zyklus"](150000, ["2026-10-20T10:00:00+00:00"], [{"started_at": "2026-10-19T10:00:00+00:00", "bal_start": 160000},

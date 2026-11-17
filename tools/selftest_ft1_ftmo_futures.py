@@ -39,7 +39,7 @@ u_alt = [(app.fdp_ziel_gewinn(ALT, k, 1) - 4750) / 250 for k in ids[:50]]
 u_neu = [(app.fdp_ziel_gewinn(NEU, k, 1) - 4000) / 500 for k in ids[:50]]
 check(all(abs(a - b) < 0.01 for a, b in zip(u_alt, u_neu)), "dieselbe Lage in der Spanne wie vorher (gleicher Würfel je Konto, nur neue Grenzen)")
 w = R(NEU, 50000.0, ids[3])
-check(w["aktion"] == "planen" and w["tp"] == round(w["ziel"] - 50000.0, 2) and 4000 <= w["tp"] <= 4500, f"frisches Konto: TP = Rest bis Ziel ({w['tp']} $, Ziel {w['ziel']})")
+check(w["aktion"] == "planen" and w["tp"] == round(round(w["ziel"] - 50000.0, 2) * 1.1, 2) and 4400 <= w["tp"] <= 4950, f"frisches Konto: TP = Rest bis Ziel + 10 % Puffer (FP-PUF) ({w['tp']} $, Ziel {w['ziel']})")
 check(R(NEU, 50000.0 + 4600, ids[3])["aktion"] == "ziel", "Balance über dem neuen Ziel → „Ziel erreicht → Winning Days“")
 
 print("2) Kontrakte 50 % 1 NQ / 50 % 2 NQ")

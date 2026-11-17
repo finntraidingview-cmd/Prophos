@@ -235,7 +235,12 @@ p, f = aend(dict(REG, firmen=[dict(REG["firmen"][0], consistency_pct=50)] + REG[
 check(f is None and "consistency_pct" not in p["firmen"][0], "Consistency aus → Schlüssel weg")
 nein({"updated_at": U, "firma": {"name": "Apex Trader", "consistency_pct": 5}}, "Consistency unter 10 %")
 r_c = R(dict(ALT["firmen"][0], consistency_pct=40), jg(ALT["firmen"][0], 150000), [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000, kt_fest=2, konto_id="k1")
-check(r_c == r_a, "Consistency ändert die Planer-Rechnung nicht (nur Anzeige)")
+# FP-PUF (17.11.2026): consistency_pct deckelt jetzt den Ziel-Puffer des letzten Trades — ohne Puffer bleibt es reine Anzeige
+_aus = {"ziel_puffer_pct": 0, "ziel_puffer_min_usd": 0}
+r_c0 = R(dict(ALT["firmen"][0], consistency_pct=40, **_aus), jg(ALT["firmen"][0], 150000), [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000, kt_fest=2, konto_id="k1")
+r_a0 = R(dict(ALT["firmen"][0], **_aus), jg(ALT["firmen"][0], 150000), [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}], 158000.0, 158000.0, 550.0, 150000, 150000, kt_fest=2, konto_id="k1")
+check(r_c0 == r_a0, "Consistency ändert die Planer-Rechnung nicht (ohne Ziel-Puffer nur Anzeige)")
+check(r_a["tp"] == 7500 and r_c["tp"] == 7000 and r_c["sl"] == r_a["sl"], f"mit Ziel-Puffer: Rest 7.000 → Max-Trade 7.500, Consistency 40 % deckelt den Puffer → 7.000 ({r_a['tp']} / {r_c['tp']})")
 src_plan2 = SRC[SRC.index("def fdp_planen("):SRC.index("def fdp_tick(")]
 check('zeile["anzeige"] = fdp_konto_anzeige(' in src_plan2 and "rnd" not in SRC[SRC.index("def fdp_konto_anzeige("):SRC.index("def fdp_konto_rechnen(")], "Anzeige-Werte je Konto ohne Würfel (kein Einfluss auf die Pläne)")
 check('type="range" class="e2-range"' in HTML and 'class="wd-set-grid"' in HTML and "${firmenK}${mitteK}${rechtsK}" in HTML and "const kontoZeile" not in HTML

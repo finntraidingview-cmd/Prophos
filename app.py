@@ -48582,6 +48582,69 @@ def fdp_ziel_tol_grund(jg):
     return (f"Ziel erreicht (Toleranz {_ap_de(_wd_num(jg.get('ziel_toleranz_pct')), 0)} %: Gewinn ≥ {_liq_de(fdp_ziel_schwelle(jg))} $) → Winning Days")
 
 
+# FP-PUF ZIEL-PUFFER (Finn 17.11.2026 ~15:15 Dubai: „Bei der Regel gerne Puffer, gerne auch 10 % Puffer oder so. Hier mehr Puffer einbauen, nicht vergessen.“
+# Anlass Apex 100k: Ziel 112.000 $, letzter Trade TP 5.992 $ getroffen, gebucht +5.948,80 $ (Slippage + Gebühren) → Balance 42,90 $ UNTER dem Ziel, kein Wechsel
+# zu Winning Days). Der Trade, der das Ziel erreichen soll (TP = Rest bis Ziel: Normalmodus letzter Schritt, Modus „rest“, Pump „ein Trade“/Trade 2), bekommt
+# TP = Rest + max(Rest × ziel_puffer_pct %, ziel_puffer_min_usd). Einstellung je Firma (funded_plan_regeln.firmen[]), ohne Einstellung 10 % / 100 $; 0 / 0 = aus.
+# Grenzen: nie über max_trade der Größe und nie über den Consistency-Deckel der Firma (consistency_pct: Tagesgewinn ≤ c % des Zyklus-Gewinns NACH dem Trade
+# → TP ≤ c ÷ (100 − c) × bisheriger Gewinn) — gedeckelt steht in der Plan-Notiz. Der Puffer hebt den TP nur an, nie unter den Rest; Risiko, SL und
+# Kontrakte bleiben, der Fusion-Hedge rechnet dieselbe Formel mit dem neuen TP. Der Ziel-erreicht-Check (Wechsel zu Winning Days) bleibt unverändert.
+FDP_ZIEL_PUFFER_PCT = 10.0                # % des Rests bis zum Ziel obendrauf
+FDP_ZIEL_PUFFER_MIN_USD = 100.0           # mindestens so viel $ (Gebühren + Slippage am Fill)
+
+
+def fdp_ziel_puffer_cfg(regel):
+    """REIN RECHNEND (testbar, FP-PUF): Puffer-Einstellung der Firmen-Regel → {pct, min, cons_pct}. ziel_puffer_pct 0–50 (sonst 10), ziel_puffer_min_usd
+    0–5000 (sonst 100), consistency_pct 10–99 als Deckel (sonst None = kein Consistency-Deckel)."""
+    r = regel if isinstance(regel, dict) else {}
+
+    def zahl(k, lo, hi, std):
+        v = r.get(k)
+        x = None if isinstance(v, bool) else _wd_num(v)
+        return float(x) if x is not None and lo <= x <= hi else std
+    return {"pct": zahl("ziel_puffer_pct", 0, 50, FDP_ZIEL_PUFFER_PCT), "min": zahl("ziel_puffer_min_usd", 0, 5000, FDP_ZIEL_PUFFER_MIN_USD),
+            "cons_pct": zahl("consistency_pct", 10, 99, None)}
+
+
+def fdp_ziel_puffer(cfg, rest, max_trade=None, gewinn=None, tag_bisher=0.0, dd=None):
+    """REIN RECHNEND (testbar, FP-PUF): TP des Trades, der das Ziel erreichen soll → (tp, info | None). cfg = fdp_ziel_puffer_cfg (None = kein Puffer, bitgleich),
+    rest = Ziel − Balance, max_trade = Deckel je Trade (None = keiner), gewinn = Zyklus-Gewinn vor dem Trade, tag_bisher = Gewinn heute schon (Pump Trade 1
+    vor Trade 2) — Consistency: (tag_bisher + tp) ≤ c % × (gewinn + tp) → tp ≤ (c × gewinn − 100 × tag_bisher) ÷ (100 − c).
+    dd (Prüfer-Gegenlesen 17.11.2026): Plausi-Fenster der Wege ohne max_trade (Pump, Modus „rest“: Balance > Ziel + dd gilt als unplausibel, auch beim Abhaken
+    kz_fdp_abhak) — Puffer höchstens dd ÷ 2, sonst stünde ein getroffener TP als „unplausibel“ statt „Ziel erreicht“ da.
+    tp = Rest + max(Rest × pct %, min), gedeckelt, nie unter dem Rest. info = {rest, puffer, soll, pct, min, deckel}."""
+    rest = round(float(rest), 2) if rest is not None else None
+    if not cfg or rest is None or rest <= 0:
+        return rest, None
+    p = max(rest * float(cfg.get("pct") or 0) / 100.0, float(cfg.get("min") or 0))
+    if p <= 0:
+        return rest, None
+    soll = rest + p
+    tp, deckel = soll, None
+    mt = _wd_num(max_trade)
+    if mt and mt > 0 and tp > mt:
+        tp, deckel = float(mt), f"Max-Trade {_liq_de(mt)} $"
+    ddn = _wd_num(dd)
+    if ddn and ddn > 0 and tp > rest + ddn / 2.0:
+        tp, deckel = rest + ddn / 2.0, f"Plausi-Fenster ½ DD = {_liq_de(ddn / 2.0)} $"
+    c = cfg.get("cons_pct")
+    if c and gewinn is not None:
+        cap = (c * max(0.0, float(gewinn)) - 100.0 * max(0.0, float(tag_bisher or 0))) / (100.0 - c)
+        if tp > cap:
+            tp, deckel = cap, f"Consistency {int(c) if c == int(c) else c} % (TP ≤ {_liq_de(round(max(cap, 0.0), 2))} $)"
+    tp = round(max(rest, tp), 2)
+    return tp, {"rest": rest, "puffer": round(tp - rest, 2), "soll": round(soll, 2), "pct": cfg.get("pct"), "min": cfg.get("min"),
+                "deckel": deckel if tp < round(soll, 2) - 0.005 else None}
+
+
+def fdp_ziel_puffer_text(info):
+    """Notiz-Stück zum Puffer („ (TP = Rest 5.992 $ + Puffer 8 $, gedeckelt: Max-Trade 6.000 $)“) — leer ohne Puffer."""
+    if not info:
+        return ""
+    return (f" (TP = Rest {_liq_de(info['rest'])} $ + Puffer {_liq_de(info['puffer'])} $"
+            + (f", gedeckelt: {info['deckel']} statt +{_liq_de(round(info['soll'] - info['rest'], 2))} $" if info.get("deckel") else "") + ")")
+
+
 def fdp_sl_rest(jg, balance, liq, rnd=None, tages_puffer=FDP_TAGES_PUFFER, liq_puffer=FDP_LIQ_PUFFER):
     """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_LIQ_PUFFER,
     ganze Dollar abgerundet. Ohne rnd die Mitte."""
@@ -48726,9 +48789,10 @@ def _fdp_pump_sl(jg, schluessel, balance, liq, daily_rest, rnd, kein_pct):
     return sl, min(sl, grenze)
 
 
-def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
+def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0, puffer=None):
     """REIN RECHNEND (testbar): Ein-Trade-Weg bzw. Trade 1 eines Pump-Tags → {aktion: planen, tp, sl, risiko, kontrakte, hedge_eur, kette} | {aktion: aus|ziel, grund}.
-    ziel = Ziel-Balance (Zyklus-Start + ziel_gewinn), tag_verlust = heutiger Verlust des Kontos (Daily-Rest bei Lucid)."""
+    ziel = Ziel-Balance (Zyklus-Start + ziel_gewinn), tag_verlust = heutiger Verlust des Kontos (Daily-Rest bei Lucid).
+    puffer = fdp_ziel_puffer_cfg (FP-PUF 17.11.2026): geht der Trade bis zum Ziel (ohne kette), TP = Rest + Puffer (ziel_puffer im Ergebnis); None = ohne (bitgleich)."""
     if balance is None or liq is None or balance - liq <= FDP_LIQ_PUFFER:
         return {"aktion": "aus", "grund": "zu nah an der Liquidation"}
     rest = round(ziel - balance, 2)
@@ -48758,10 +48822,15 @@ def fdp_pump_trade1(jg, weg, balance, start, liq, ziel, rnd, tag_verlust=0.0):
     h = fdp_pump_hedge(jg, risiko)
     if h is None:
         return {"aktion": "aus", "grund": "Hedge-Satz fehlt (Fusion-Hedge je Master-Risiko in den Einstellungen)"}
-    return {"aktion": "planen", "tp": tp, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "kette": kette}
+    pz = None
+    if kette is None and puffer:   # FP-PUF: dieser Trade soll das Ziel erreichen (tp = rest) — Risiko/SL/Kontrakte oben bleiben
+        tp, pz = fdp_ziel_puffer(puffer, tp, (jg or {}).get("max_trade"), balance - (start if start is not None else balance),
+                                 dd=None if (jg or {}).get("max_trade") else (jg or {}).get("dd"))   # Plausi-Fenster Pump: Ziel + dd
+    return dict({"aktion": "planen", "tp": tp, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "kette": kette},
+                **({"ziel_puffer": pz} if pz else {}))
 
 
-def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, start=None, tag_verlust=0.0):
+def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, start=None, tag_verlust=0.0, puffer=None):
     """REIN RECHNEND (testbar): Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund). liq_eod = Liq nach Tagesend-Logik
     (liq_peak eod=True). balance_start = Balance beim Start von Trade 1 = Tagesstart (Trade 1 ist der erste Trade des Pump-Tags) — darum gilt bei Daily Loss:
     Verlust höchstens E1 + daily_usd. Trade 1 nicht am TP (Hand, Abgleich am Master) → „Tag zu“ (Finn: „Die Trades werden nicht geschlossen durch Zufall“)."""
@@ -48799,8 +48868,13 @@ def fdp_pump_trade2(jg, t1, balance_start, balance_end, liq_eod, ziel, rnd, star
         return None, "Kontrakte Trade 2 fehlen in den Einstellungen — kein Trade 2"
     if ziel - balance_end < FDP_PUMP_T2_MIN_TP_USD:
         return None, f"Rest zum Ziel nur {ziel - balance_end:,.0f} $ — kein Mini-Trade 2, Tag zu".replace(",", ".")
-    return {"tp": round(ziel - balance_end, 2), "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "e1": e1,
-            "kette": {"von": 2, "nr": 2, "rolle": "haupt", "e_bisher": e1}}, None
+    # FP-PUF (17.11.2026): Trade 2 soll das Ziel erreichen → TP = Rest + Puffer (puffer = fdp_ziel_puffer_cfg; None = ohne, bitgleich). Gewinn = ab Zyklus-Start
+    # Consistency (Prüfer-Gegenlesen): der Tag zählt Trade 1 mit (tag_bisher = E1); ohne Zyklus-Start → Tagesstart (vorsichtig: dann kein Consistency-Puffer)
+    tp2, pz = fdp_ziel_puffer(puffer, round(ziel - balance_end, 2), (jg or {}).get("max_trade"),
+                              float(balance_end) - float(start if start is not None else balance_start), tag_bisher=max(0.0, e1),
+                              dd=None if (jg or {}).get("max_trade") else (jg or {}).get("dd")) if puffer else (round(ziel - balance_end, 2), None)
+    return dict({"tp": tp2, "sl": sl, "risiko": round(risiko, 2), "kontrakte": kt, "hedge_eur": h, "e1": e1,
+                 "kette": {"von": 2, "nr": 2, "rolle": "haupt", "e_bisher": e1}}, **({"ziel_puffer": pz} if pz else {})), None
 
 
 def fdp_pump_t2_start(jg, t1_ende_utc, rnd):
@@ -48860,7 +48934,7 @@ def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklu
     if balance > ziel + dd:
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance lesen")
     # FF2b: Zielniveau fest je Zyklus — erreicht erst, wenn die Balance das Niveau erreicht (fdp_pump_trade1 → „ziel“); die Untergrenzen-Regel von FF2 ist raus
-    t = fdp_pump_trade1(jg, w["weg"], balance, start, liq, ziel, rnd, tag_verlust)
+    t = fdp_pump_trade1(jg, w["weg"], balance, start, liq, ziel, rnd, tag_verlust, puffer=fdp_ziel_puffer_cfg(regel))   # FP-PUF
     if t["aktion"] != "planen":
         return dict(basis, **t)
     he, auf = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("hedge_auf_usd"))
@@ -48873,7 +48947,8 @@ def fdp_pump_konto(regel, jg, balance, peak_eod, start, groesse, konto_id, zyklu
                 t2_bis=jg.get("t2_bis") or "18:30")
     return dict(basis, **h, aktion="planen", grund="", tp=t["tp"], sl=t["sl"], kontrakte=kt, tp_art="pump", stufe=None, dll=_wd_num(jg.get("daily_usd")), minis=None,
                 offen_eur=round(he / auf * (balance - liq), 2), tp_pkt=round(t["tp"] / (FDP_NQ_PPL * kt), 2),
-                sl_pkt=round(t["sl"] / (FDP_NQ_PPL * kt), 2) if t["sl"] is not None else None, pump=pump, kette=t["kette"])
+                sl_pkt=round(t["sl"] / (FDP_NQ_PPL * kt), 2) if t["sl"] is not None else None, pump=pump, kette=t["kette"],
+                **({"ziel_puffer": t["ziel_puffer"]} if t.get("ziel_puffer") else {}))   # FP-PUF
 
 
 def fdp_konto_anzeige(groesse, jg, balance, zy, tage_fn, plaene, konto_id):
@@ -48920,11 +48995,18 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     tol_hit = art != "ziel" and fdp_ziel_tol_erreicht(jg, balance, start)   # FE1b: Ziel-Toleranz je Firma × Größe (Standard aus)
     if tol_hit:
         tp, art = None, "ziel"
+    # FP-PUF (17.11.2026): TP = Rest bis Ziel (letzter Schritt bzw. Modus „rest“) → Puffer obendrauf, gedeckelt auf max_trade / Consistency; sonst bitgleich
+    puffer = None
+    if art in ("normal", "rest") and tp is not None and abs(tp - round(ziel - balance, 2)) < 0.005:
+        tp, puffer = fdp_ziel_puffer(fdp_ziel_puffer_cfg(regel), tp, jg.get("max_trade"), balance - start,
+                                     dd=None if jg.get("max_trade") else dd)   # Plausi-Fenster: mit max_trade Ziel + max_trade, sonst Ziel + dd
     gew = round(balance - start, 2)
     max_tag = max([v for v in (tage or {}).values() if v > 0], default=0.0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
              "offen_eur": round(offen, 2), "gewinn": gew, "max_tag": round(max_tag, 2),
              "consistency_pct": round(max_tag / gew * 100, 1) if gew > 0 and max_tag > 0 else None}
+    if puffer:
+        basis["ziel_puffer"] = puffer   # FP-PUF: für Plan-Notiz und funded_plan
     if art == "ziel":
         return dict(basis, aktion="ziel", grund=fdp_ziel_tol_grund(jg) if tol_hit else "Ziel erreicht → Winning Days")
     if rest_modus:
@@ -49371,7 +49453,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     if felder:
                         fp_neu = dict(lauf[0]["funded_plan"], **{k: r_neu.get(k) for k in ("liq", "stufe", "dll", "minis", "offen_eur", "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")})
                         # AH2-Nachzug (Gegenprüfung): Konto-im-Plus-Felder mit neu rechnen — gesetzt nur bei festem Satz, sonst raus (kein alter Text, offen > 0 ohne neue Schlüssel)
-                        for _k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis"):
+                        for _k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis", "ziel_puffer"):   # FP-PUF: Puffer des neuen TP mitführen
                             if r_neu.get(_k) is not None:
                                 fp_neu[_k] = r_neu[_k]
                             else:
@@ -49480,7 +49562,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         auto_k = auto_ok and str(a["user_id"]) in ht_uids     # Auto-Bestätigen nur für die HT-Liste — eine Gruppe bestätigt immer selbst (S4)
         start = mitternacht + timedelta(minutes=m)
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
-        notiz = "" if r.get("pump") else (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
+        _pz = fdp_ziel_puffer_text(r.get("ziel_puffer"))   # FP-PUF: „ (TP = Rest … + Puffer …[, gedeckelt …])“ hinter dem Ziel, vor dem Hedge-Ende (fdp_notiz_basis)
+        notiz = "" if r.get("pump") else (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} ${_pz} · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · " + (f"offene Kosten {_liq_de(r['offen_eur'])} €" if not r.get("hedge_quelle") else
                  # FH1 B (10.11.2026) / HB1 (16.11.2026): Hedge-Basis = theoretische Kosten eines frischen Kontos (Satz × Abstand), echte offene Kosten daneben
                  f"Hedge-Basis {_liq_de(r['offen_eur'])} € = theoretische Kosten (frisches Konto) · echt {_liq_de(r.get('offen_kosten_eur'))} €" if r.get("hedge_basis") == "pump_b" else
@@ -49488,14 +49571,14 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                  f"Konto im Plus (offene Kosten {_liq_de(r.get('offen_kosten_eur'))} €) · Hedge-Basis {_liq_de(r['offen_eur'])} € = {r['hedge_quelle']}")) if r.get("tp_art") != "rest" else (
                  # FTMO Futures (03.11.2026): keine Stufe, TP = Rest bis zum Ziel, Hedge fest € je $ Abstand zur Liquidation
                  f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · "
-                 f"Daily Loss {_liq_de(r['dll'])} $ · TP = Rest bis Ziel · Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r['verhaeltnis'], 3)} € je $)")
+                 f"Daily Loss {_liq_de(r['dll'])} $ · TP = Rest bis Ziel{_pz} · Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r['verhaeltnis'], 3)} € je $)")
         mb_pump = {}
         if r.get("pump"):
             # FF2: eigene Notiz; Kennung funded_plan.pump; Trade 1 von zwei trägt kette {von 2, nr 1} (WS2-Schnittstelle) mit lesen_bis = t2_bis Dubai, damit der
             # PC-Tab die End-Balance genau nachliest (tpKetteLesenWeiter) — daraus entsteht Trade 2 (fdp_pump_tick)
             pm = r["pump"]
             notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Pump {'Trade 1 von 2' if r.get('kette') else 'ein Trade'} · Zyklus {r['zyklus']} · "
-                     f"Ziel {_liq_de(r['ziel'])} $ (Niveau +{_liq_de(pm.get('ziel_gewinn'))} $ im Zyklus) · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
+                     f"Ziel {_liq_de(r['ziel'])} $ (Niveau +{_liq_de(pm.get('ziel_gewinn'))} $ im Zyklus){_pz} · Liq {_liq_de(r['liq'])} $ (Tagesend) · "
                      f"{('SL ' + _liq_de(r['sl']) + ' $') if r.get('sl') is not None else 'ohne SL'} · Hedge {_ap_de(r['verhaeltnis'], 3)} € je $ Risiko")
             _eb = fdp_express_basis(a, r.get("groesse"))
             if _eb:   # TS2: Nova in TopstepX — dort steht das Konto 0-basiert, die Werte auch so zeigen
@@ -49521,7 +49604,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("zyklus", "start", "ziel", "liq", "stufe", "dll", "minis", "offen_eur",
                                                                          "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")},
-                                                 **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis") if r.get(k) is not None},   # AH2 / FH1 B
+                                                 **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis", "ziel_puffer") if r.get(k) is not None},   # AH2 / FH1 B / FP-PUF
                                                  **({"pump": mb_pump["pump"]} if mb_pump.get("pump") else {}),   # FF2
                                                  start_um=start.astimezone(timezone.utc).isoformat()),
                              **({"kette": mb_pump["kette"]} if mb_pump.get("kette") else {})}})
@@ -49801,7 +49884,8 @@ def fdp_pump_tick(jetzt=None, rnd=None):
                 continue
             ziel = _wd_num(fp.get("ziel")) or ((_wd_num(fp.get("start")) or bs) + (_wd_num(pm.get("ziel_gewinn")) or 0))   # FF2b: Niveau über dem Zyklus-Start
             w, grund = fdp_pump_trade2(jg, {"tp": _wd_num(p.get("master_tp"))}, bs, be, liq, ziel, rnd, start=_wd_num(fp.get("start")),   # FE1b: Toleranz ab Zyklus-Start
-                                       tag_verlust=_wd_num(pm.get("tag_verlust")) or 0.0)   # LP1-Prüfer: Verlust vor Trade 1
+                                       tag_verlust=_wd_num(pm.get("tag_verlust")) or 0.0,   # LP1-Prüfer: Verlust vor Trade 1
+                                       puffer=fdp_ziel_puffer_cfg(regel))   # FP-PUF: Trade 2 = Rest zum Ziel + Puffer
             if grund:
                 ende(p, pm, grund, melden=not grund.startswith("Ziel schon"))
                 continue
@@ -49852,13 +49936,14 @@ def fdp_pump_tick(jetzt=None, rnd=None):
                 "start_um": st_iso if auto else None, "status": "planned", "priority": "high",
                 "planned_for": start.astimezone(_ap_tz(FDP_PUMP_TZ)).strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto else None,
                 "notes": (f"Funded-Planer{'' if auto else ' · Vorschlag'} · Pump Trade 2 von 2 · Trade 1 {w['e1']:+,.0f} $".replace(",", ".")
-                          + f" · Ziel {_liq_de(ziel)} $ · Liq {_liq_de(liq)} $ (Tagesend) · "
+                          + f" · Ziel {_liq_de(ziel)} ${fdp_ziel_puffer_text(w.get('ziel_puffer'))} · Liq {_liq_de(liq)} $ (Tagesend) · "   # FP-PUF
                           + (f"SL Break-even {_liq_de(w['sl'])} $" if w["sl"] is not None else "ohne SL")
                           + f" · Hedge {_ap_de(h['verhaeltnis'], 3)} € je $ Risiko"
                           + (f" · Nova (TopstepX, Express ab 0: Ziel {_liq_de(ziel - basis)} $ · Liq {_liq_de(liq - basis)} $)" if basis else "")),   # TS2
                 "mt5_baseline": {"funded_plan": {"zyklus": fp.get("zyklus"), "start": fp.get("start"), "ziel": round(ziel, 2), "liq": round(liq, 2), "tp_art": "pump",
                                                  "offen_eur": round(he / auf * (be - liq), 2), "verhaeltnis": h["verhaeltnis"], "hedge_sl_eur": h["hedge_sl_eur"],
                                                  "hedge_tp_eur": h["hedge_tp_eur"], "start_um": st_iso,
+                                                 **({"ziel_puffer": w["ziel_puffer"]} if w.get("ziel_puffer") else {}),   # FP-PUF
                                                  "pump": {"weg": "zwei", "nr": 2, "t1_plan_id": pid, "ziel_gewinn": pm.get("ziel_gewinn"), "tag": pm.get("tag"),
                                                           "e1": w["e1"], "risiko": w["risiko"], **({"express_basis": basis} if basis else {})}},
                                  "kette": dict(w["kette"], vor=pid)}}
@@ -50324,6 +50409,8 @@ FDP_FEST_TEXT = [   # Regeln ohne Zahl, fest im Code (fdp_planen / fdp_konto_rec
     "Daily Loss und Minis je Stufe aus liq_regeln (Stufe nach Balance beim Planen), Liquidation EOD-trailing mit Lock",
     "Startfenster = eigenes Fenster (Ablauf), sonst das des Challenge-Planers (auto_plan_regeln.zeiten) — darin zufällig",
     "1 Trade je Konto und CME-Handelstag · Ziel erreicht → Konto auf Winning Days",
+    # FP-PUF (17.11.2026)
+    "Trade bis zum Ziel: TP = Rest + Puffer (je Firma ziel_puffer_pct, Standard 10 %, mindestens ziel_puffer_min_usd, Standard 100 $) — höchstens Max-Trade und Consistency-Deckel",
 ]
 # Untergrenze 1 (Gegenprüfung 04.11.2026): 0 rechnet der Planer nicht als 0 — vorlauf_min „or 15", abstand_id_min beim Bestätigen „or 90"
 _FDP_ZEIT_FELDER = {"max_je_id_tag": (0, 6, True),   # FE1b: 0 = Tagesdeckel je ID aus
@@ -50348,7 +50435,8 @@ def fdp_regeln_anzeige(reg, quelle="db"):
         jg = f.get("je_groesse") if isinstance(f.get("je_groesse"), dict) else {}
         firmen.append({"name": f.get("name") or (f.get("namen") or ["?"])[0], "namen": list(f.get("namen") or []), "an": bool(f.get("an")),
                        "symbol": f.get("symbol"), "lock_usd": f.get("lock_usd"), "tp_modus": f.get("tp_modus") or "normal",
-                       "consistency_pct": _wd_num(f.get("consistency_pct")),   # E2d: nur Anzeige (Kontoliste), der Planer prüft keine Consistency
+                       "consistency_pct": _wd_num(f.get("consistency_pct")),   # E2d: Anzeige (Kontoliste); seit FP-PUF auch Deckel des Ziel-Puffers, sonst keine Prüfung
+                       "ziel_puffer": fdp_ziel_puffer_cfg(f), "ziel_puffer_db": {k: f.get(k) for k in ("ziel_puffer_pct", "ziel_puffer_min_usd") if k in f},   # FP-PUF
                        "je_groesse": {str(k): dict(v) for k, v in jg.items() if isinstance(v, dict)}})
     return {"quelle": quelle if reg else "standard", "aktiv": bool(r.get("aktiv")), "auto_bestaetigen": r.get("auto_bestaetigen") is True,
             "updated_at": r.get("updated_at"), "zeiten": dict(FDP_ZEITEN_STANDARD, **(r.get("zeiten") or {})), "zeiten_db": dict(r.get("zeiten") or {}),
@@ -50432,8 +50520,8 @@ def fdp_regeln_aendern(reg, body):
         patch["konst"] = neu_k
     fa = b.get("firma")
     if fa is not None:
-        if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse", "consistency_pct"} or len(fa) < 2:
-            return None, "firma: {name, an | lock_usd | je_groesse | consistency_pct}"
+        if not isinstance(fa, dict) or not fa.get("name") or set(fa) - {"name", "an", "lock_usd", "je_groesse", "consistency_pct", "ziel_puffer_pct", "ziel_puffer_min_usd"} or len(fa) < 2:
+            return None, "firma: {name, an | lock_usd | je_groesse | consistency_pct | ziel_puffer_pct | ziel_puffer_min_usd}"
         firmen = [dict(f) if isinstance(f, dict) else f for f in (reg.get("firmen") or [])]
         idx = [i for i, f in enumerate(firmen) if isinstance(f, dict) and (f.get("name") or (f.get("namen") or [""])[0]) == fa["name"]]
         if len(idx) != 1:
@@ -50451,6 +50539,16 @@ def fdp_regeln_aendern(reg, body):
                 if x is None:
                     return None, "consistency_pct: Zahl 10–100 oder null"
                 f["consistency_pct"] = x
+        # FP-PUF (17.11.2026): Ziel-Puffer je Firma — neuer Schlüssel ausdrücklich erlaubt, null = Standard (10 % / 100 $), 0 / 0 = aus
+        for _k, _lo, _hi in (("ziel_puffer_pct", 0, 50), ("ziel_puffer_min_usd", 0, 5000)):
+            if _k in fa:
+                if fa[_k] is None:
+                    f.pop(_k, None)
+                else:
+                    x = _fdp_zahl(fa[_k], _lo, _hi)
+                    if x is None:
+                        return None, f"{_k}: Zahl {_lo}–{_hi} oder null"
+                    f[_k] = x
         if "lock_usd" in fa:
             if "lock_usd" not in f:
                 return None, "lock_usd: bei dieser Firma nicht hinterlegt"

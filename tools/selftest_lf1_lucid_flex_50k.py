@@ -60,6 +60,8 @@ def konto(firma, g, typ="funded", kid="k1"):
     return {"id": kid, "name": f"{g // 1000}k X-{kid} → Funded", "firm": firma, "account_type": typ, "starting_balance": g, "user_id": "u1"}
 
 
+# FP-PUF (17.11.2026): Ziel-Puffer aus → neue Rechnung bitgleich mit main vor LF1 (der Puffer selbst: selftest_fp_puf_ziel_puffer.py)
+PUF_AUS = {"ziel_puffer_pct": 0, "ziel_puffer_min_usd": 0}
 print(f"— 1) Diff-Test gegen main vor LF1 ({BASIS_VOR_LF1}) —")
 alt = None
 try:
@@ -83,7 +85,7 @@ if alt is not None:
                     for kid in ("k1", "k2", "k3"):
                         for tv in (0.0, 900.0):
                             ra, rb = random.Random(f"{kid}{tag}"), random.Random(f"{kid}{tag}")
-                            a = app.fdp_pump_konto(regel, jg, bal, max(bal, 150000), 150000, 150000, kid, zyk, tag, ra, sppl=0.85, tag_verlust=tv)
+                            a = app.fdp_pump_konto(dict(regel, **PUF_AUS), jg, bal, max(bal, 150000), 150000, 150000, kid, zyk, tag, ra, sppl=0.85, tag_verlust=tv)
                             b = alt.fdp_pump_konto(regel, jg, bal, max(bal, 150000), 150000, 150000, kid, zyk, tag, rb, sppl=0.85, tag_verlust=tv)
                             n += 1
                             abw += a != b
@@ -93,7 +95,7 @@ if alt is not None:
         for bal in (g - 1500, g, g + 1200, g + 3000):
             for seed in range(6):
                 ra, rb = random.Random(seed), random.Random(seed)
-                a = app.fdp_konto_rechnen(regel, jg, None, bal, max(bal, g), 300.0, g, g, ra, konto_id="k1", zyklus=1)
+                a = app.fdp_konto_rechnen(dict(regel, **PUF_AUS), jg, None, bal, max(bal, g), 300.0, g, g, ra, konto_id="k1", zyklus=1)
                 b = alt.fdp_konto_rechnen(regel, jg, None, bal, max(bal, g), 300.0, g, g, rb, konto_id="k1", zyklus=1)
                 n += 1
                 abw += a != b
@@ -126,10 +128,10 @@ for kid in ("a1", "a2", "a3", "a4", "a5"):
             ziele.setdefault((kid, zyk), set()).add(zg)
             kts.add(r.get("kontrakte"))
             q = round(300 / 2000 * r["sl"], 2) if r.get("sl") else None
-            if not (r["aktion"] == "planen" and r["pump"]["weg"] == "ein" and r.get("kette") is None and 6000 <= zg <= 8000 and r["tp"] == zg
+            if not (r["aktion"] == "planen" and r["pump"]["weg"] == "ein" and r.get("kette") is None and 6000 <= zg <= 8000 and r["tp"] == round(zg * 1.1, 2)   # FP-PUF: Ziel + 10 % Puffer
                     and 1000 <= r["sl"] <= 1100 and r["kontrakte"] in (1, 2) and r.get("dll") == 1200 and r["liq"] == 48000):
                 fehl.append((kid, zyk, tag, r.get("aktion"), r.get("grund"), r.get("tp"), r.get("sl"), r.get("kontrakte"), r.get("liq")))
-ok(not fehl, f"40 Pump-Tage: immer EIN Trade (kein Trade 2), TP = ganzes Ziel 6.000–8.000, SL 1.000–1.100, 1–2 NQ, Liq 48.000, DLL 1.200 ({fehl[:2]})")
+ok(not fehl, f"40 Pump-Tage: immer EIN Trade (kein Trade 2), TP = ganzes Ziel 6.000–8.000 + 10 % Puffer, SL 1.000–1.100, 1–2 NQ, Liq 48.000, DLL 1.200 ({fehl[:2]})")
 ok(all(len(v) == 1 for v in ziele.values()) and len({min(v) for v in ziele.values()}) > 3, "Ziel fest je Konto × Zyklus (an allen Tagen gleich), über Konten gestreut")
 ok(kts == {1, 2}, f"Kontrakte 1 und 2 NQ kommen beide vor ({sorted(kts)})")
 r = app.fdp_pump_konto(LUCID, JG50, 50000.0, 50000.0, 50000.0, 50000, "a1", 1, "2026-11-17", random.Random(1), sppl=0.85)
@@ -148,7 +150,7 @@ for kid in ("f1", "f2", "f3", "f4"):
     for tag in ("2026-11-17", "2026-11-18", "2026-11-19"):
         r = app.fdp_pump_konto(FNF, JGF, 50000.0, 50000.0, 50000.0, 50000, kid, 1, tag, random.Random(f"{kid}{tag}"), sppl=0.85)
         ziele.setdefault(kid, set()).add(r["pump"]["ziel_gewinn"])
-        if not (r["aktion"] == "planen" and r["pump"]["weg"] == "ein" and r.get("kette") is None and 6000 <= r["tp"] <= 8000 and 1300 <= r["sl"] <= 1400
+        if not (r["aktion"] == "planen" and r["pump"]["weg"] == "ein" and r.get("kette") is None and 6600 <= r["tp"] <= 8800 and 1300 <= r["sl"] <= 1400
                 and r["kontrakte"] in (1, 2) and r["liq"] == 48500 and r.get("dll") is None):
             fehl.append((kid, tag, r.get("aktion"), r.get("grund"), r.get("sl"), r.get("liq"), r.get("dll")))
 ok(not fehl and all(len(v) == 1 for v in ziele.values()), f"12 Pump-Tage: EIN Trade, Ziel 6–8k fest je Konto, SL 1.300–1.400, 1–2 NQ, Liq 48.500 (MLL 1.500), kein DLL ({fehl[:2]})")
