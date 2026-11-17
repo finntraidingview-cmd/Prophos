@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.7.2';   // 0.7.2 (05.11.2026, SW3 „PCs ruhig“): billige Prüfungen vor sichtbar() (Rohliste, Kopf-Filter, „No Active Position“-Text) — gleiches Ergebnis, viel weniger getComputedStyle/Layout bei 10 Lesungen/s; Meldungs-Merker räumt > 60 s alte Einträge · 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
+  var VERSION = 'tsx-0.7.3';   // 0.7.3 (17.11.2026, TX1): „Time Sync Warning“ auch ohne ARIA-Rolle als Popup (zeitsyncOhneRolle), sonst bitgleich · 0.7.2 (05.11.2026, SW3 „PCs ruhig“): billige Prüfungen vor sichtbar() (Rohliste, Kopf-Filter, „No Active Position“-Text) — gleiches Ergebnis, viel weniger getComputedStyle/Layout bei 10 Lesungen/s; Meldungs-Merker räumt > 60 s alte Einträge · 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -284,8 +284,43 @@ var PROPHOS_AUGEN_TSX = (function () {
       if (/loss limit|ineligible|eligible for funding|violation/i.test(o.text)) o.text_voll = txt(d).slice(0, 400);
       out.push(o);
     });
+    try { zeitsyncOhneRolle(out); } catch (_) {}
     out.forEach(function (o) { delete o._el; });
     return out;
+  }
+  /* TIME SYNC WARNING OHNE ARIA-ROLLE (tsx-0.7.3, TX1 17.11.2026, ein Topstep-PC: viermal 05:32–06:20 Dubai „Konto-Auslöser verdeckt ('Time Sync
+   * WarningYour computer clock is ') — Dialog offen? Nichts geklickt", obwohl TS1 (16.11.) den Dialog wegklicken sollte — die Spur zeigt, dass
+   * TS1 ihn nie sah: TopstepX baut dieses Modal ohne role="dialog"/aria-modal, dialoge() fand es nicht, stand.popups blieb leer.
+   * Darum NUR für genau diesen Dialog ein Text-Weg: ein sichtbares Element, dessen ganzer Text „Time Sync Warning" ist (Titel), darüber
+   * (≤ 8 Ebenen) der KLEINSTE Kasten, der zusätzlich den Text „computer clock" und GENAU EINEN sichtbaren Knopf „PROCEED" trägt. Der Kasten
+   * kommt als Popup mit quelle 'text' dazu — nur, wenn er nicht schon in einem ARIA-Dialog steckt. Ohne diesen Titel ändert sich nichts. */
+  function zeitsyncOhneRolle(out) {
+    // billiger Vortest (SW3 „PCs ruhig", 10 Lesungen/s): ohne diesen Text auf der Seite kein Element-Scan
+    if (!document.body || !/time\s*sync\s*warning/i.test(document.body.textContent || '')) return;
+    var titel = alle('h1,h2,h3,h4,h5,h6,div,span,p,strong,b,header,label').filter(function (e) {
+      return /^time\s*sync\s*warning$/i.test(txt(e)) && sichtbar(e);
+    });
+    titel = titel.filter(function (e) { return !titel.some(function (f) { return f !== e && e.contains(f); }); });   // innerstes
+    titel.forEach(function (t) {
+      if (out.some(function (o) { return o._el && (o._el.contains(t) || t.contains(o._el)); })) return;
+      var box = t.parentElement;
+      for (var i = 0; box && box !== document.body && i < 8; i++, box = box.parentElement) {
+        if (!/computer clock/i.test(txt(box))) continue;
+        var kn = proceedKnoepfe(box);
+        if (kn.length !== 1) continue;
+        if (out.some(function (o) { return o._el && (o._el.contains(box) || box.contains(o._el)); })) return;
+        out.push({ _el: box, role: attr(box, 'role'), rect: rect(box), titel: txt(t).slice(0, 60), text: txt(box).slice(0, 160),
+                   knoepfe: kn.map(function (b) { return kurz(b, xMerkmale(b, box)); }), quelle: 'text' });
+        return;
+      }
+    });
+  }
+  // sichtbare Knöpfe mit dem GANZEN Text „PROCEED" — erst echte Knöpfe, sonst das innerste Element mit genau diesem Text (div mit onClick)
+  function proceedKnoepfe(box) {
+    var kn = alle('button,[role="button"],a', box).filter(function (b) { return /^proceed$/i.test(txt(b)) && sichtbar(b); });
+    if (kn.length) return kn;
+    var roh = alle('div,span', box).filter(function (b) { return /^proceed$/i.test(txt(b)) && sichtbar(b); });
+    return roh.filter(function (b) { return !roh.some(function (f) { return f !== b && b.contains(f); }); });
   }
 
   // ── K1 Lesen: Konto, Kopfzeile, Positionen (Vertrag T3, 30.09.2026) ────────

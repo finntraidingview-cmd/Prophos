@@ -17003,17 +17003,32 @@ def _tsx_symbol_dialog_weg(s, st, trail):
 TSX_RX_ZEITSYNC = re.compile(r"time\s*sync\s*warning", re.I)
 TSX_RX_ZEITSYNC_KNOPF = re.compile(r"^\s*proceed\s*$", re.I)
 _TSX_ZEITSYNC = {}        # je Lauf: {at, pc} nach einem erfolgreichen Wegklicken → die Antwort bekommt pc_uhr_unsynchron (_EineAntwort.ausgeben)
+# TX1 (17.11.2026, ein Topstep-PC viermal 05:32–06:20 Dubai „Konto-Auslöser verdeckt ('Time Sync WarningYour computer clock is ')" trotz TS1 —
+# die Spur zeigt, dass TS1 den Dialog nie erkannte: TopstepX baut ihn ohne ARIA-Rolle, stand.popups blieb leer). augen_tsx.js tsx-0.7.3 liefert
+# ihn jetzt über den Text (quelle 'text'); hier zählen leere Popups nicht mehr als zweiter Dialog, und Titel UND Text müssen passen.
+TSX_RX_ZEITSYNC_TEXT = re.compile(r"computer\s*clock|not\s*synchroni[sz]ed", re.I)
+TSX_ZEITSYNC_MAX = 3      # TX1 (Finn 17.11.2026): je Lauf höchstens dreimal wegklicken (erstes Mal + zweimal wieder); kommt er öfter → Abbruch wie bisher
+_TSX_ZEITSYNC_N = [0]     # je Lauf (Bot-Prozess): wie oft der Dialog schon weggeklickt wurde
+
+
+def tsx_popup_leer(p):
+    """REIN RECHNEND (testbar, TX1 17.11.2026): ein Popup ohne Überschrift, ohne Text und ohne Knopf (TopstepX hält manchmal ein leeres
+    role=dialog-Gerüst offen — ein Topstep-PC 17.11. 06:30 Dubai „Dialog offen ('')"). Es zählt beim Erkennen der Time Sync Warning nicht als zweiter Dialog."""
+    return isinstance(p, dict) and not str(p.get("titel") or "").strip() and not str(p.get("text") or "").strip() \
+        and not [b for b in (p.get("knoepfe") or []) if isinstance(b, dict)]
 
 
 def tsx_zeitsync_dialog(popups):
     """REIN RECHNEND (testbar): stand.popups → der EINE offene Dialog „Time Sync Warning" | None. Überschrift (titel) muss „Time Sync Warning"
-    enthalten; nur ohne Überschrift muss der Text damit BEGINNEN. Mehrere Dialoge oder ein anderer → None."""
-    ps = [p for p in (popups or []) if isinstance(p, dict)]
+    enthalten; nur ohne Überschrift muss der Text damit BEGINNEN. Mehrere Dialoge oder ein anderer → None.
+    TX1 (17.11.2026): leere Popups (tsx_popup_leer) zählen nicht mit, und der Text muss die Uhr nennen („computer clock" / „not synchronized")."""
+    ps = [p for p in (popups or []) if isinstance(p, dict) and not tsx_popup_leer(p)]
     if len(ps) != 1:
         return None
     titel = str(ps[0].get("titel") or "").strip()
-    treffer = TSX_RX_ZEITSYNC.search(titel) if titel else TSX_RX_ZEITSYNC.match(str(ps[0].get("text") or "").strip())
-    return ps[0] if treffer else None
+    text = str(ps[0].get("text") or "").strip()
+    treffer = TSX_RX_ZEITSYNC.search(titel) if titel else TSX_RX_ZEITSYNC.match(text)
+    return ps[0] if treffer and TSX_RX_ZEITSYNC_TEXT.search(text) else None
 
 
 def tsx_zeitsync_knopf(popup):
@@ -17057,6 +17072,14 @@ def _tsx_zeitsync_weg(s, st, trail):
         if not kn:
             trail.append("Time Sync Warning: kein eindeutiger PROCEED-Knopf — nichts gedrückt")
             return st, False
+        if versuch == 1:
+            if _TSX_ZEITSYNC_N[0] >= TSX_ZEITSYNC_MAX:
+                # TX1 (Finn 17.11.2026): „kommt er innerhalb desselben Laufs öfter als zweimal wieder, abbrechen wie bisher" — nichts mehr
+                # drücken, der offene Dialog führt beim Aufrufer zum bekannten Fehler (Konto-Auslöser verdeckt / Dialog offen)
+                trail.append(f"Time-Sync-Dialog kam in diesem Lauf zum {_TSX_ZEITSYNC_N[0] + 1}. Mal — nichts mehr gedrückt "
+                             f"(höchstens {TSX_ZEITSYNC_MAX}× je Lauf)")
+                return st, False
+            _TSX_ZEITSYNC_N[0] += 1                        # jedes Auftauchen zählt (auch wenn er nach 2 Drücken stehen bleibt — Prüfblick TX1)
         trail.append(f"Time Sync Warning (PC-Uhr nicht synchron) → PROCEED (Versuch {versuch} von 2)")
         r = list(kn["rect"])[:4]
         pruef = dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
@@ -17076,7 +17099,9 @@ def _tsx_zeitsync_weg(s, st, trail):
     jetzt = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     pc = _pc_id_lesen()
     _TSX_ZEITSYNC.update(at=jetzt, pc=pc or None)
-    trail.append(f"Time Sync Warning weggeklickt ({jetzt}, {pc or 'PC unbekannt'}) — PC-Uhr nicht synchron, Windows-Zeit synchronisieren")
+    # „Time Sync Warning weggeklickt (" ist Schlüssel für app.py PC_UHR_SPUR (TS1b) — nie umbenennen; „Time-Sync-Dialog weggeklickt" davor (TX1)
+    trail.append(f"Time-Sync-Dialog weggeklickt · Time Sync Warning weggeklickt ({jetzt}, {pc or 'PC unbekannt'}) — PC-Uhr nicht synchron, "
+                 "Windows-Zeit synchronisieren")
     try:
         _puls_diagnose_senden(list(trail), "zeitsync")    # sofort in puls_diagnose (2 s, Fehler still) — welcher PC die falsche Uhr hat
     except Exception:
@@ -20346,7 +20371,8 @@ def _tsx_sitzung_waehlen(trail, sitz=None):
 
     def login_seite(sz):
         b = sz.lese_js(TSX_K0_BLICK_JS) or {}
-        return bool((b.get("login") or {}).get("seite")) if isinstance(b.get("login"), dict) else False
+        # TX1 (17.11.2026): auch die Google-Anmeldung („Topstep | Sign in", Knopf „Sign in with Google") zählt als Login-Seite
+        return bool(tsx_login_art(b.get("login"))) if isinstance(b.get("login"), dict) else False
 
     if login_seite(s):
         liste = _cdp_http("/json/list") or []
@@ -20432,6 +20458,20 @@ TSX_K0_BLICK_JS = r"""(function () {
   var fm = bt.match(/(invalid|incorrect|wrong password|login failed|access denied|locked|too many attempts)[^.]{0,80}/i);
   lg.fehler_text = fm ? fm[0].slice(0, 100) : null;
   lg.zwei_faktor = /captcha|verification code|two.?factor|2fa|one.?time (pass)?code|code (was )?sent|recaptcha/i.test(bt);
+  // GOOGLE-ANMELDUNG (TX1, 17.11.2026 — Finn: „Immer ‚Sign in with Google' wählen, nur auf Google drücken, der Rest läuft automatisch";
+  // ein Topstep-PC 04:49/05:05 Dubai: Fenster „Topstep | Sign in", Bereit-Probe 20 s ohne Konto-Auslöser → anker_fehlt, die alte Login-Erkennung
+  // (Pfad /login oder Passwortfeld + „PLATFORM LOGIN") sah die Seite nicht). Nur lesen, keine Feldwerte: Knöpfe „Sign in with Google" /
+  // „Continue with Google" (Text, aria-label, title, value; dazu der Google-iframe-Knopf „Sign in with Google Button"), und ob die Seite
+  // überhaupt eine Anmeldung ist (Seitentitel „… Sign in"/„Log in" oder ein Dialog, der mit „Sign in"/„Session expired" beginnt).
+  var RX_GOOGLE = /^\s*(sign\s*in|log\s*in|login|continue|weiter|anmelden)\s+(with|mit)\s+google(\s+button)?\s*$|^\s*(mit|über)\s+google\s+(anmelden|fortfahren)\s*$/i;
+  var gk = innen(Q('button,[role="button"],a[href],input[type="button"],input[type="submit"]').filter(sb).filter(function (e) {
+    return RX_GOOGLE.test(T(e)) || RX_GOOGLE.test(A(e, 'aria-label')) || RX_GOOGLE.test(A(e, 'title')) || RX_GOOGLE.test(A(e, 'value')); }));
+  var gi = Q('iframe').filter(sb).filter(function (f) { return RX_GOOGLE.test(A(f, 'title')); });
+  lg.google = gk.slice(0, 4).map(K).concat(gi.slice(0, 2).map(function (f) { var k = K(f); k.gsi = true; return k; }));
+  lg.google_n = gk.length + gi.length;
+  lg.signin = /\b(sign[\s-]?in|log[\s-]?in)\b/i.test(String(document.title)) ||
+    Q('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sb).some(function (d) {
+      return /^(sign[\s-]?in|log[\s-]?in|session (expired|timed out|ended)|you('ve| have) been (signed|logged) out)/i.test(T(d).slice(0, 80)); });
   o.login = lg;
   // Konto-Auslöser: klickbare Elemente mit '$…K … |' (innerstes), dazu wie viele Konto-Zeilen sichtbar sind
   o.konto = innen(Q(KLICKBAR + ',div,span').filter(sb).filter(function (e) {
@@ -20801,6 +20841,13 @@ def _tsx_cdp_login(s, trail):
         return lg_, ok_, text_
 
     lg = blick()
+    if tsx_login_art(lg) in ("google", "anmeldung"):
+        # TX1 (17.11.2026): TopstepX-Anmeldung über Google (Finn: „immer ‚Sign in with Google' wählen") — eigener, enger Weg. None = doch die
+        # alte Login-Seite (Passwortfeld + „PLATFORM LOGIN" ohne Google-Knopf) → weiter wie bisher
+        g = _tsx_google_login(s, trail, blick, lg)
+        if g is not None:
+            return g
+        lg = blick()
     if not lg.get("seite"):
         return True
     # 01.10.2026 (Kette in einem Lauf): nach dem Kaltstart liegt das Puls-Chrome minimiert — Chrome füllt ein Formular im minimierten
@@ -20891,6 +20938,307 @@ def _tsx_cdp_login(s, trail):
         if l2.get("fehler_text") or l2.get("zwei_faktor"):
             return f"TopstepX-Login nach dem Klick: '{l2.get('fehler_text') or '2FA/Captcha'}' — nicht angemeldet, kein zweiter Versuch."
     return "TopstepX zeigt 25 s nach dem Login-Klick weiter die Login-Seite — kein zweiter Versuch, bitte im Puls-Chrome nachsehen."
+
+
+# ══ TOPSTEPX-ANMELDUNG ÜBER GOOGLE (TX1, 17.11.2026) ═══════════════════════════════════════════════════════════════════════════════════════
+# Finn ~06:30 Dubai: „Manchmal kommt ein ‚Sign In', dann muss man sich bei TopstepX neu anmelden. Das haben wir umgestellt: Immer ‚Sign in with
+# Google' wählen, nur auf Google drücken, der Rest läuft automatisch." Vorfall: ein Topstep-PC 04:49/05:05 Dubai „Konto-Auslöser in TopstepX
+# nicht gefunden" (Fenster „Topstep | Sign in", die alte Login-Erkennung sah die Seite nicht), am 16.11. ein zweiter PC genauso.
+# Regeln (eng, lieber abbrechen als falsch klicken):
+#   1. Puls klickt auf der TopstepX-Anmeldung (Seite oder Dialog) NUR den EINEN Knopf „Sign in with Google"/„Continue with Google" (Ziel-Beweis
+#      mit dem Wort „google", Tabu Sign-up/Register/Order/Logout). Kein Google-Knopf oder mehrere → Abbruch mit Grund, nichts geraten.
+#   2. Öffnet sich danach Googles Kontoauswahl (eigenes Fenster oder derselbe Tab, accounts.google.com) mit GENAU EINEM angemeldeten Konto im
+#      Puls-Chrome-Profil, klickt er dieses eine Konto (Ziel-Beweis: der Eintrag trägt ein „@", kein „Use another account"/„Signed out").
+#   3. Nie tippen, nie Feldwerte lesen, nie E-Mail-Adressen in die Spur. Fragt Google nach Passwort, E-Mail, Code/2-Step, Bestätigung oder ist
+#      das Konto abgemeldet: Abbruch „TopstepX-Login braucht Hand (Google fragt nach …)". Mehrere Konten → Abbruch.
+#   4. Danach warten, bis TopstepX wieder geladen ist (Anmeldung weg), augen_tsx.js neu laden, der Lauf macht normal weiter.
+#   5. Nach einem Google-Klick ohne Erfolg 30 min kein neuer Versuch (tsx_google_login.json, wie TSX_LOGIN_SPERRE_S beim alten Login).
+TSX_GOOGLE_KNOPF_S = 8.0          # so lange (nur lesen) auf den Google-Knopf warten, wenn die Seite schon „Sign in" heißt
+TSX_GOOGLE_WARTEN_S = 40.0        # nach dem Google-Klick: bis TopstepX wieder angemeldet ist (Google-Fenster, Kontoauswahl, Rückweg)
+TSX_GOOGLE_TABU = r"\b(sign\s*up|register|create|buy|sell|order|logout|log\s*out|abmelden)\b"
+TSX_GOOGLE_KONTO_TABU = r"use another|anderes konto|remove|entfernen|signed out|abgemeldet|add account|hinzuf"
+TSX_RX_MAIL = re.compile(r"[^\s@'\"(),;<>]+@[^\s@'\"(),;<>]+\.[a-z]{2,}", re.I)   # Adressen aus der Spur nehmen (nie mitschreiben)
+
+# Google-Seite lesen (accounts.google.com, NUR LESEN, keine Feldwerte, keine Adressen): sichtbare Passwort-/E-Mail-Felder (Anzahl),
+# Code/2-Step/Captcha-Text, Kontoauswahl („Choose an account") mit ihren Konto-Zeilen (nur Rechteck + „abgemeldet"), Bestätigungs-Knopf.
+TSX_GOOGLE_BLICK_JS = r"""(function () {
+  function sb(e) { try { if (!e || !e.getBoundingClientRect) return false; var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3) return false;
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false; var s = getComputedStyle(e);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function A(e, n) { try { return e.getAttribute(n) || ''; } catch (_) { return ''; } }
+  function Q(s, w) { try { return Array.prototype.slice.call((w || document).querySelectorAll(s)); } catch (_) { return []; } }
+  function innen(l) { return l.filter(function (e) { return !l.some(function (f) { return f !== e && e.contains(f); }); }); }
+  var o = { url: String(location.href).slice(0, 200), titel: String(document.title).slice(0, 80), bereit: document.readyState === 'complete' };
+  o.pw = Q('input[type="password"]').filter(sb).length;
+  o.email = Q('input[type="email"],input[name="identifier"],input[autocomplete="username"]').filter(sb).length;
+  var bt = document.body ? T(document.body).slice(0, 4000) : '';
+  o.code = /2-step|two-step|2-schritt|zwei schritten|verify (it'?s|that it'?s) you|dass sie es sind|enter (a |the )?code|code eingeben|verification code|bestätigungscode|captcha|not a robot|kein roboter|security key|sicherheitsschlüssel|check your phone|smartphone prüfen/i.test(bt);
+  o.auswahl = /choose an account|konto auswählen|wählen sie ein konto/i.test(bt);
+  var RX_MAIL = /[^\s@]+@[^\s@]+\.[a-z]{2,}/i, RX_NICHT = /use another account|anderes konto|remove an account|konto entfernen|add account|konto hinzuf/i;
+  // Konten ZÄHLEN auch außerhalb des sichtbaren Bereichs (kleines Google-Fenster, weitere Konten weiter unten — Prüfblick TX1): nur nicht
+  // versteckt und mit Fläche; geklickt wird ohnehin nur mit Ziel-Beweis am Punkt
+  function da(e) { try { var r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width >= 3 && r.height >= 3 &&
+    s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  var roh = Q('[data-identifier],[data-email]').filter(function (e) { return /@/.test(A(e, 'data-identifier') + A(e, 'data-email')) && da(e); });
+  if (!roh.length) roh = innen(Q('[role="link"],[role="button"],li,button,a').filter(da).filter(function (e) {
+    var t = T(e); return RX_MAIL.test(t) && t.length < 200 && !RX_NICHT.test(t); }));
+  var kl = [];
+  roh.forEach(function (e) { var k = e.closest('[role="link"],[role="button"],a,button') || e; if (kl.indexOf(k) < 0 && !RX_NICHT.test(T(k))) kl.push(k); });
+  kl = innen(kl);
+  o.konten = kl.slice(0, 6).map(function (k) { return { rect: R(k), abgemeldet: /signed out|abgemeldet/i.test(T(k)) }; });
+  o.n = kl.length;
+  o.zustimmung = !o.auswahl && Q('button,[role="button"]').filter(sb).some(function (b) {
+    return /^(continue|allow|weiter|zulassen|fortfahren|accept|akzeptieren|confirm|bestätigen)$/i.test(T(b)); });
+  o.auswahl = o.auswahl && !Q('input[type="password"],input[type="email"]').filter(sb).length;   // Auswahl nur ohne Eingabefeld
+  return o;
+})()"""
+
+
+def tsx_login_art(lg):
+    """REIN RECHNEND (testbar, TX1): Login-Lage aus TSX_K0_BLICK_JS.login → 'google' (ein Google-Knopf ist zu sehen — Finns Weg, auch neben
+    einem alten Formular) | 'alt' (alte Login-Seite: Pfad /login bzw. Passwortfeld + „PLATFORM LOGIN") | 'anmeldung' (Seitentitel/Dialog sagt
+    „Sign in", aber noch kein Google-Knopf) | None (keine Anmeldung)."""
+    lg = lg if isinstance(lg, dict) else {}
+    try:
+        if int(lg.get("google_n") or 0) > 0:
+            return "google"
+    except (TypeError, ValueError):
+        pass
+    if lg.get("seite"):
+        return "alt"
+    if lg.get("signin"):
+        return "anmeldung"
+    return None
+
+
+def tsx_google_knopf(lg):
+    """REIN RECHNEND (testbar): der EINE Google-Knopf der TopstepX-Anmeldung → (knopf, '') | (None, Grund). Knopf = {rect, text, aria, gsi, …}
+    aus TSX_K0_BLICK_JS (login.google); Rechteck ≥ 4 px, nicht gesperrt. Keiner oder mehrere → None (nichts raten)."""
+    lg = lg if isinstance(lg, dict) else {}
+    kn = [k for k in (lg.get("google") or []) if isinstance(k, dict) and not k.get("aus")
+          and isinstance(k.get("rect"), (list, tuple)) and len(k["rect"]) >= 4 and k["rect"][2] >= 4 and k["rect"][3] >= 4]
+    try:
+        n = max(int(lg.get("google_n") or 0), len(kn))
+    except (TypeError, ValueError):
+        n = len(kn)
+    if n == 1 and len(kn) == 1:
+        if kn[0].get("gsi"):
+            # Googles eigener Knopf im iframe zeigt „Continue as <Konto>" und meldet ohne Kontoauswahl an — welches Konto, kann Puls nicht
+            # prüfen (fremde Herkunft). Regel „mehrere Konten → abbrechen" ginge verloren → nicht drücken (Prüfblick TX1)
+            return None, "Google-Knopf nur als Google-iframe — welches Google-Konto er nimmt, ist nicht prüfbar"
+        return kn[0], ""
+    if not kn and n <= 0:
+        return None, "Anmeldung offen, aber kein Knopf „Sign in with Google“"
+    if not kn:
+        return None, "Knopf „Sign in with Google“ gesperrt oder ohne Fläche"
+    return None, f"{n} Google-Knöpfe — nicht eindeutig"
+
+
+def tsx_google_pruef(kn):
+    """REIN RECHNEND (testbar): Ziel-Beweis für den Google-Knopf (win_ziel_pruef_js) — das Wort „google" im Text, sonst in aria-label/title
+    (Google-iframe-Knopf: Titel „Sign in with Google Button"), Tabu Sign-up/Register/Order/Logout."""
+    k = kn if isinstance(kn, dict) else {}
+    imtext = "google" in str(k.get("text") or "").lower()
+    return {"rect": list(k.get("rect") or [])[:4], "text": "google" if imtext else "", "aria": "" if imtext else "google", "tabu": TSX_GOOGLE_TABU}
+
+
+def ist_google_konten_url(url):
+    """REIN RECHNEND (testbar): Googles Anmeldeseite (https://accounts.google.com/…)."""
+    return bool(re.match(r"^https://accounts\.google\.com(/|$)", str(url or "").strip().lower()))
+
+
+def tsx_google_ziel(liste, eigene_id, vorher_ids=()):
+    """REIN RECHNEND (testbar): die Google-Seite nach dem Klick aus /json/list → Target | None. Zuerst der eigene TopstepX-Tab, falls er selbst
+    auf accounts.google.com steht (Weiterleitung im selben Tab), sonst GENAU EINE neue Google-Seite (Anmeldefenster, das der Klick geöffnet
+    hat — nicht in vorher_ids). Mehrere neue oder keine → None (warten bzw. am Ende Abbruch)."""
+    seiten = [x for x in (liste or []) if isinstance(x, dict) and x.get("type") == "page" and ist_google_konten_url(x.get("url"))
+              and x.get("webSocketDebuggerUrl")]
+    eigen = [x for x in seiten if eigene_id and x.get("id") == eigene_id]
+    if eigen:
+        return eigen[0]
+    vorher = set(vorher_ids or ())
+    neu = [x for x in seiten if x.get("id") not in vorher]
+    return neu[0] if len(neu) == 1 else None
+
+
+def tsx_google_urteil(gb):
+    """REIN RECHNEND (testbar): TSX_GOOGLE_BLICK_JS → {art, grund, konto?, n?}. art:
+    'warten' (keine/ladende Google-Seite, noch nichts Eindeutiges) · 'hand' (Passwort, E-Mail, Code/2-Step, Bestätigung, abgemeldetes Konto —
+    grund nennt was) · 'konto' (genau EINE angemeldete Konto-Zeile → konto = {rect}) · 'mehrere' (n Konten) · 'keins' (Kontoauswahl ohne Zeile).
+    Reihenfolge: jedes Eingabe-/Code-Merkmal schlägt die Kontoauswahl (lieber abbrechen als falsch klicken)."""
+    g = gb if isinstance(gb, dict) else {}
+    if not ist_google_konten_url(g.get("url")):
+        return {"art": "warten", "grund": "keine Google-Seite"}
+
+    def zahl(k):
+        try:
+            return int(g.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0
+    if zahl("pw") > 0:
+        return {"art": "hand", "grund": "Passwort"}
+    if zahl("email") > 0:
+        return {"art": "hand", "grund": "E-Mail-Adresse"}
+    if g.get("code"):
+        return {"art": "hand", "grund": "Code/2-Step-Bestätigung"}
+    konten = [k for k in (g.get("konten") or []) if isinstance(k, dict) and isinstance(k.get("rect"), (list, tuple))
+              and len(k["rect"]) >= 4 and k["rect"][2] >= 4 and k["rect"][3] >= 4]
+    n = max(zahl("n"), len(konten))
+    # NUR auf der echten Kontoauswahl („Choose an account"/„Konto auswählen") — eine Konto-Zeile/ein Konto-Chip auf anderen Google-Seiten
+    # (z. B. „Sign in to Topstep … Continue") ist nie ein Klickziel (Prüfblick TX1: der Chip öffnet das Konto-Menü mit „Sign out")
+    if g.get("auswahl"):
+        if n == 1 and len(konten) == 1:
+            if konten[0].get("abgemeldet"):
+                return {"art": "hand", "grund": "Passwort (das Google-Konto ist im Puls-Chrome abgemeldet)"}
+            return {"art": "konto", "grund": "ein Google-Konto", "konto": konten[0]}
+        if n > 1:
+            return {"art": "mehrere", "grund": f"{n} Google-Konten zur Auswahl", "n": n}
+        return {"art": "keins", "grund": "Google-Kontoauswahl ohne Konto-Zeile"}
+    if g.get("zustimmung"):
+        return {"art": "hand", "grund": "Bestätigung (Knopf „Continue/Allow“)"}
+    if g.get("bereit") is False:
+        return {"art": "warten", "grund": "Google-Seite lädt"}
+    return {"art": "warten", "grund": "Google-Seite ohne Kontoauswahl"}
+
+
+def tsx_google_fertig(b):
+    """REIN RECHNEND (testbar): TopstepX wieder angemeldet? b = TSX_K0_BLICK_JS — Adresse auf topstepx.com und keine Anmeldung mehr
+    (kein Google-Knopf, keine Login-Seite, kein „Sign in")."""
+    b = b if isinstance(b, dict) else {}
+    return ist_topstepx_url(b.get("url")) and tsx_login_art(b.get("login")) is None
+
+
+def tsx_google_hand_text(grund, art="hand"):
+    """REIN RECHNEND (testbar): der klare Abbruchgrund für den PC-Tab/die Spur."""
+    if art == "hand":
+        return f"TopstepX-Login braucht Hand (Google fragt nach {grund}) — nichts eingegeben, bitte im Puls-Chrome von Hand anmelden."
+    return f"TopstepX-Login braucht Hand ({grund}) — nichts gewählt, bitte im Puls-Chrome von Hand anmelden."
+
+
+def _tsx_google_sperre(grund=None):
+    """tsx_google_login.json: grund=None → lesen ({at, grund} | {}); grund '' → Sperre lösen; sonst Sperre jetzt setzen. Wirft nie."""
+    try:
+        if grund is None:
+            d = _augen_json_lesen("tsx_google_login.json") or {}
+            return d if isinstance(d, dict) else {}
+        _augen_json_schreiben("tsx_google_login.json", {"at": time.time(), "grund": str(grund)[:120]} if grund else {})
+    except Exception:
+        pass
+    return {}
+
+
+def _tsx_google_login(s, trail, blick, lg):
+    """TopstepX-Anmeldung über Google (TX1, Regeln oben). blick() = TSX_K0_BLICK_JS.login des TopstepX-Tabs.
+    -> True (angemeldet) | Fehlertext | None (doch die alte Login-Seite ohne Google-Knopf → der Aufrufer macht wie bisher weiter)."""
+    ende = time.time() + TSX_GOOGLE_KNOPF_S
+    while tsx_login_art(lg) == "anmeldung" and time.time() < ende:   # Seite heißt „Sign in", Knopf noch nicht gezeichnet: nur lesen
+        _warte(0.8, 0.4)
+        lg = blick()
+    art = tsx_login_art(lg)
+    if art is None:
+        trail.append("TopstepX: Anmeldung von selbst weg (Sitzung gültig)")
+        return True
+    if art == "alt":
+        return None
+    kn, grund = tsx_google_knopf(lg)
+    trail.append(f"TopstepX abgemeldet (Anmeldung offen) — Google-Knöpfe {lg.get('google_n') or 0}")
+    if not kn:
+        return f"TopstepX-Login braucht Hand ({grund}) — nichts geklickt, bitte im Puls-Chrome von Hand anmelden."
+    sp = _tsx_google_sperre()
+    try:
+        seit = time.time() - float(sp["at"]) if sp.get("at") else 1e9
+    except (TypeError, ValueError):
+        seit = 1e9
+    if 0 <= seit < TSX_LOGIN_SPERRE_S:
+        return (f"TopstepX-Login braucht Hand ({str(sp.get('grund') or 'letzter Google-Versuch ohne Erfolg')[:80]}; letzter Google-Klick vor "
+                f"{int(seit // 60)} min) — kein neuer Versuch, bitte im Puls-Chrome von Hand anmelden.")
+    vorher = [str(x.get("id")) for x in (_cdp_http("/json/list") or []) if isinstance(x, dict) and x.get("id")]
+    n_spur = len(trail)
+    _tsx_google_sperre("Google-Klick ohne Anmeldung")      # vor dem Druck merken — auch ein Absturz danach zählt als Versuch
+    _tsx_pause()
+    name = "TopstepX „Sign in with Google“" + (" (Google-Knopf im iframe)" if kn.get("gsi") else "")
+    if not s.klick(kn["rect"], name, pruef=tsx_google_pruef(kn)):
+        _tsx_google_sperre("")                              # nicht gedrückt = kein Versuch
+        return "Knopf „Sign in with Google“ nicht gedrückt (Klick ohne Beweis) — nichts weiter versucht."
+    g_sitz = [None]
+
+    def g_zu():
+        # nur die CDP-Verbindung zu: kein „Offen bleiben"/Minimieren für das Google-Fenster (die Marke gehört dem TopstepX-Fenster; ein offenes
+        # Google-Fenster mit Passwortfrage bleibt für die Hand stehen)
+        if g_sitz[0] is not None:
+            try:
+                g_sitz[0]._win_hwnd = None
+                g_sitz[0].zu()
+            except Exception:
+                pass
+            g_sitz[0] = None
+    konto_geklickt = False
+    letzt = "kein Google-Fenster"
+    ende = time.time() + TSX_GOOGLE_WARTEN_S
+    try:
+        while time.time() < ende:
+            _warte(1.0, 0.4)
+            try:
+                b = s.lese_js(TSX_K0_BLICK_JS, timeout=5)
+            except Exception:
+                b = None                                    # Seite lädt gerade neu (Weiterleitung)
+            if tsx_google_fertig(b):
+                s._seite_abwarten(20.0)
+                s._augen_laden()
+                _tsx_google_sperre("")
+                trail.append("TopstepX angemeldet (über Google) — weiter wie gewohnt")
+                return True
+            ziel = tsx_google_ziel(_cdp_http("/json/list") or [], getattr(s, "target_id", None), vorher)
+            if not ziel:
+                letzt = "kein Google-Fenster" if not konto_geklickt else "Google-Fenster zu, TopstepX noch nicht angemeldet"
+                continue
+            if ziel.get("id") == getattr(s, "target_id", None):
+                gs = s
+            else:
+                if g_sitz[0] is None or getattr(g_sitz[0], "target_id", None) != ziel.get("id"):
+                    g_zu()
+                    try:
+                        g_sitz[0] = _AugenSitzung(trail, ziel=ziel, js_datei="augen_tsx.js", tv_riegel=False)
+                    except Exception as e_:
+                        letzt = f"Google-Fenster nicht verbunden ({type(e_).__name__})"
+                        continue
+                    trail.append("Google-Anmeldefenster offen")
+                gs = g_sitz[0]
+            try:
+                u = tsx_google_urteil(gs.lese_js(TSX_GOOGLE_BLICK_JS, timeout=5))
+            except Exception as e_:
+                letzt = f"Google-Seite nicht lesbar ({type(e_).__name__})"
+                continue
+            letzt = u["grund"]
+            if u["art"] == "warten":
+                continue
+            if u["art"] in ("hand", "mehrere", "keins"):
+                _tsx_google_sperre(u["grund"])
+                trail.append(f"Google: {u['grund']} — nichts eingegeben, Abbruch")
+                return tsx_google_hand_text(u["grund"], u["art"])
+            if konto_geklickt:                              # Kontoauswahl steht nach dem Klick noch: warten, nie ein zweiter Druck
+                letzt = "Google-Kontoauswahl steht nach dem Klick noch"
+                continue
+            konto_geklickt = True
+            r = list(u["konto"]["rect"])[:4]
+            _tsx_pause()
+            if not gs.klick(r, "Google-Konto (das einzige im Puls-Chrome)",
+                            pruef={"rect": r, "text": "@", "aria": "", "tabu": TSX_GOOGLE_KONTO_TABU}):
+                _tsx_google_sperre("Google-Konto nicht gedrückt (Klick ohne Beweis)")
+                return "Google-Konto nicht gedrückt (Klick ohne Beweis) — nichts weiter versucht, bitte im Puls-Chrome von Hand anmelden."
+    finally:
+        g_zu()
+        # nie eine E-Mail-Adresse in der Spur: die Klick-Hand schreibt bei Fehlschlag den Text am Zielpunkt mit (Konto-Zeile = Name + Adresse)
+        try:
+            for i in range(n_spur, len(trail)):
+                trail[i] = TSX_RX_MAIL.sub("[E-Mail]", str(trail[i]))
+        except Exception:
+            pass
+    _tsx_google_sperre(f"nach dem Google-Klick nicht angemeldet ({letzt})")
+    return (f"TopstepX {int(TSX_GOOGLE_WARTEN_S)} s nach dem Google-Klick nicht angemeldet ({letzt}) — kein zweiter Versuch, "
+            "bitte im Puls-Chrome nachsehen.")
 
 
 def tsx_k0_pruef(el):
@@ -22985,7 +23333,7 @@ def _tsx_auge_konto(s, ext, trail):
     st, bereit = _tsx_bereit_warten(s, trail)
     if not bereit:
         bl = s.lese_js(TSX_K0_BLICK_JS) or {}
-        if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and bl["login"].get("seite"):
+        if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and tsx_login_art(bl["login"]):   # TX1: auch die Google-Anmeldung
             trail.append("Auge-Reparatur: nach der Ladephase steht die TopstepX-Login-Seite da — Login-Weg")
             lg = _tsx_cdp_login(s, trail)
             if lg is not True:
@@ -23074,6 +23422,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
         # nie länger als die Standard-Frist; K4 rechnet seine Restzeit über _tsx_frist(trail) gegen genau diese Frist
         wachhund_s = max(10.0, min(wachhund_s, float(frist_s)))
     diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
+    _TSX_ZEITSYNC_N[0] = 0                         # TX1: Time-Sync-Zähler gilt je Lauf
     trail = _StempelSpur()
     _start_versatz(trail)                          # 28.10.2026: nicht in derselben Sekunde zugreifen, in der der Lauf startet
     trail.frist_s = wachhund_s
@@ -23162,7 +23511,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             # Trading Experience") statt der Login-Seite. Steht JETZT die Login-Seite da, einmal den Login-Weg (ein Klick, Beweis,
             # 30-min-Sperre) und die Bereit-Probe noch einmal — sonst ehrlich weiter (tsx_cdp_lesung meldet anker_fehlt).
             bl = s.lese_js(TSX_K0_BLICK_JS) or {}
-            if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and bl["login"].get("seite"):
+            # TX1 (17.11.2026): auch die Google-Anmeldung („Sign in"/„Sign in with Google") — gilt für Lesen (tsxlesen) wie für den Order-Start
+            if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and tsx_login_art(bl["login"]):
                 res["schritt"] = "login"
                 trail.append("Nach der Ladephase steht die TopstepX-Login-Seite da — Login-Weg")
                 lg2 = _tsx_cdp_login(s, trail)

@@ -80,6 +80,8 @@ MIT, OHNE = {"popups": [DLG]}, {"popups": []}
 
 def lauf(st0, staende, klick_ok=True):
     ob._TSX_ZEITSYNC.clear()
+    if hasattr(ob, "_TSX_ZEITSYNC_N"):
+        ob._TSX_ZEITSYNC_N[0] = 0      # TX1 (17.11.2026): Zähler je Lauf (im Betrieb setzt modus_tsxlesen_cdp ihn zurück) — hier je Fall ein neuer Lauf
     diag.clear()
     s, trail = Sitzung(staende, klick_ok), []
     st, weg = ob._tsx_zeitsync_weg(s, st0, trail)
