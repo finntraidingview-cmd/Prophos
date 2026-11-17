@@ -14703,6 +14703,8 @@
             <button class="btn btn-ghost" id="wal-refresh" title="Balances von den Chains neu laden" style="padding:8px 12px">↻</button>
             <span id="wal-msg" style="font-size:12px;color:var(--sub)"></span>
           </div>
+          <!-- MW1 (17.11.2026): Wallets ohne ID und ohne Unternehmen — nur beim HT-Admin, zählen nirgends mit (walOhneRender) -->
+          <div class="adm-ohne-unt" id="wal-ohne" hidden style="margin:0 0 14px"></div>
 
           <!-- Kacheln (29.10.2026, Finn: „wir brauchen eigentlich nur Ethereum und Arbitrum"): Gesamt, Ethereum, Arbitrum immer;
                Polygon/BNB/Solana/Tron nur, wenn dort eine Wallet existiert (walRender) — nichts entfernt -->
@@ -21692,6 +21694,21 @@
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
+    /* GRUPPE JE WALLET (MW1, 17.11.2026, Finn mit Screenshot: Admin → „Emin" → Meta Wallet zeigte „Marco Ziegler", „Marc Fischer",
+     * „Simon_OKX" … — „Hermann-Technologies-IDs sind bei Emin drin. War schon mal so."). Ursache: 13 Zeilen in id_wallets ohne
+     * person_uid (Name frei eingetippt); der Filter schloss nur die person_uid fremder IDs aus (excluded_uids), eine leere person_uid
+     * stand nie darin → diese Wallets erschienen in JEDER Gruppe. Jetzt: Gruppe = Gruppe der person_uid, sonst Spalte gruppe_id
+     * (sql/2026-11-17_meta_wallet_gruppe.sql), sonst „ohne Zuordnung" — zählt in keiner Gruppe mit und steht nur beim HT-Admin als
+     * eigene Box zum Zuweisen (walOhne). Nie über den Namen geraten. */
+    let walOhne = []
+    const walOhneUid = x => !String(x?.person_uid || '').trim()
+    function walSicht(){
+      const s = (typeof window._admGruppeSicht === 'function' && window._admGruppeSicht()) || {}
+      const gruppe = String(s.gruppe || ''), ht = String(s.ht || '')
+      // eingeschränkt (Verwalter-Login): Wallets ohne ID nie — die RLS (nur_eigene_wallets über person_uid) liefert sie dort ohnehin nicht
+      if(s.eingeschraenkt) return { gid: '', ht: false }
+      return { gid: gruppe || ht, ht: !!ht && (!gruppe || gruppe === ht) }
+    }
     // 29.10.2026 (Finn: „wir brauchen eigentlich nur Ethereum und Arbitrum"): diese beiden Kacheln immer, eine 0x-Adresse gilt für beide
     const WAL_IMMER = ['ethereum', 'arbitrum']
     const WAL_KURZ = { ethereum: 'ETH', arbitrum: 'ARB', polygon: 'POL', bnb: 'BNB', solana: 'SOL', tron: 'TRX' }
@@ -21752,7 +21769,9 @@
       if(walOpened){ return }
       walOpened = true
       // Feed erst nach den Balances — beide reden mit TronGrid (1 Req/s keyless)
-      walLoad().then(walRefreshBalances).then(() => walFeedLoad(false))
+      // MW1: Gruppe (walSicht) und excluded_uids kommen aus der Admin-Übersicht — vor dem ersten Laden erst auf sie warten
+      const vor = admData ? Promise.resolve() : Promise.resolve(admLoad()).catch(() => {})
+      vor.then(walLoad).then(walRefreshBalances).then(() => walFeedLoad(false))
     }
 
     async function walLoad(){
@@ -21776,7 +21795,12 @@
         if(!excl){ try{ const fp = await fleetPersonen(); if(fp && fp.exclUids && (fp.exclFrisch || fp.exclUids.size)) excl = fp.exclUids }catch(_){} }
         if(!excl){ try{ const m = JSON.parse(localStorage.getItem('prophos_fleet_excl') || 'null'); if(Array.isArray(m) && m.length) excl = new Set(m.map(String)) }catch(_){} }
         $('wal-excl-warn').style.display = excl ? 'none' : ''
-        wallets = excl ? (w.data || []).filter(x => !excl.has(String(x.person_uid || ''))) : (w.data || [])
+        // MW1: Wallets ohne ID nur über gruppe_id in genau ihre Gruppe, ohne gruppe_id in keine (auch nicht im Notweg ohne excl)
+        const sicht = walSicht(), alle = w.data || []
+        wallets = alle.filter(x => walOhneUid(x)
+          ? (!!sicht.gid && String(x.gruppe_id || '') === sicht.gid)
+          : (!excl || !excl.has(String(x.person_uid))))
+        walOhne = sicht.ht ? alle.filter(x => walOhneUid(x) && !x.gruppe_id) : []
         walErlaubt = new Set(wallets.map(x => String(x.id)))
         walSnaps = (s.data || []).filter(x => walErlaubt.has(String(x.wallet_id)))
         $('wal-db-warn').style.display = 'none'
@@ -21971,7 +21995,10 @@
     }
     async function walRefreshBalancesInner(){
       const msgEl = $('wal-msg')
-      if(!wallets.length){ msgEl.textContent = ''; return }
+      // MW1: „Ohne Zuordnung" (nur HT-Admin) mitladen — Betrag in der Box und Tages-Snapshot laufen weiter; zählt nicht in „x von y"
+      const inGruppe = new Set(wallets.map(w => w.id))
+      const zuLaden = wallets.concat(walOhne.filter(w => !inGruppe.has(w.id)))
+      if(!zuLaden.length){ msgEl.textContent = ''; walRender(); return }
       msgEl.textContent = 'Lade Balances…'
       await walFetchPrices()
       let fail = 0
@@ -21987,7 +22014,7 @@
             { onConflict:'wallet_id,day' })
         }catch(e){
           walBal.set(w.id, { usdt:null, coin:null, coinUsdt:null, err:(e.message || String(e)) })
-          fail++
+          if(inGruppe.has(w.id)) fail++
         }
         walRender()   // jede fertige Wallet sofort zeigen statt auf die langsamste zu warten
       }
@@ -21996,8 +22023,8 @@
       // zweite lief IMMER in die Sperre, egal wie oft man löscht/neu anlegt).
       // Deshalb Tron strikt nacheinander mit Abstand — alle anderen Chains
       // bleiben parallel, die drosseln nicht.
-      const tronWs = wallets.filter(w => w.chain === 'tron')
-      const restWs = wallets.filter(w => w.chain !== 'tron')
+      const tronWs = zuLaden.filter(w => w.chain === 'tron')
+      const restWs = zuLaden.filter(w => w.chain !== 'tron')
       await Promise.all([
         ...restWs.map(laden),
         (async () => {
@@ -22007,7 +22034,7 @@
           }
         })()
       ])
-      msgEl.textContent = fail ? `${wallets.length - fail} von ${wallets.length} Wallets geladen` : 'Stand: gerade eben'
+      msgEl.textContent = fail ? `${inGruppe.size - fail} von ${inGruppe.size} Wallets geladen` : 'Stand: gerade eben'
       // Snapshots neu lesen, damit der heutige Punkt direkt im Verlauf auftaucht
       const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt,coin_usdt').order('day')
       if(data){ walSnaps = data.filter(x => walErlaubt.has(String(x.wallet_id))); walRender() }   // B37: wie walLoad
@@ -22020,6 +22047,7 @@
 
     function walRender(){
       if(!$('wal-rows')) return
+      try{ walOhneRender() }catch(e){ console.warn('[wallet] ohne Zuordnung:', e.message || e) }   // MW1
       const rows = walFiltered()
 
       // Personen-Filter + Namensvorschläge (Admin-Übersicht + Profile + vorhandene Wallets)
@@ -22168,6 +22196,65 @@
       walFeedRender()   // Alle-Transfers-Feed folgt demselben Personen-Filter (15.09.2026)
     }
 
+    /* OHNE ZUORDNUNG (MW1, 17.11.2026): je Name eine Zeile mit Chains + Betrag, Auswahl „Unternehmen" und „Zuweisen" (schreibt
+     * id_wallets.gruppe_id — dauerhaft, nicht über den Namen). Wie die Box „Ohne Unternehmen" im Admin-Kopf (UNT0). Nur HT-Admin
+     * (walSicht().ht), sonst leer. Gewählte Unternehmen überleben das Neuzeichnen während des Balance-Laufs. */
+    let walOhneListe = [], walOhneSchluessel = ''
+    function walOhneRender(){
+      const el = $('wal-ohne'); if(!el) return
+      const gr = (admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
+      // Sicht gewechselt (Chip „Emin"), aber walLoad noch nicht durch: Box sofort weg statt der alten HT-Liste
+      if(!walOhne.length || !gr.length || !walSicht().ht){ el.hidden = true; el.innerHTML = ''; walOhneListe = []; walOhneSchluessel = ''; return }
+      const wert = w => { const b = walBal.get(w.id); return b?.usdt != null ? b.usdt + (b.coinUsdt || 0) : null }
+      const summe = walOhne.reduce((t, w) => t + (wert(w) ?? 0), 0), da = walOhne.some(w => wert(w) != null)
+      const kopf = `Ohne Zuordnung · ${walOhne.length} Wallet${walOhne.length === 1 ? '' : 's'}${da ? ' · ' + walNf.format(summe) + ' USDT' : ''} — zählt in keinem Unternehmen mit, bis du sie zuweist`
+      const teile = g => g.ws.map(w => `${WAL_KURZ[w.chain] || w.chain} ${wert(w) != null ? walNf.format(wert(w)) : '–'}`).join(' · ')
+      // Gleiche Liste wie zuletzt (der Balance-Lauf zeichnet je Wallet neu): nur Beträge nachtragen — Auswahl, offenes Dropdown,
+      // Knopf-Sperre und „speichert …" bleiben in denselben Knoten (Gegenprüfung 17.11.2026)
+      const schluessel = walOhne.map(w => w.id).sort().join(',') + '|' + gr.map(x => x.id).join(',')
+      if(schluessel === walOhneSchluessel && !el.hidden){
+        el.querySelector('.aou-kopf').textContent = kopf
+        walOhneListe.forEach((g, i) => { const s = el.querySelector(`[data-wal-ohne-teile="${i}"]`); if(s) s.textContent = teile(g) })
+        return
+      }
+      walOhneSchluessel = schluessel
+      const proName = new Map()
+      for(const w of walOhne){ const l = proName.get(w.person_name) || []; l.push(w); proName.set(w.person_name, l) }
+      walOhneListe = [...proName.entries()].map(([name, ws]) => ({ name, ws })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+      const opt = gr.map(x => `<option value="${escapeHtml(String(x.id))}">${escapeHtml(String(x.name || ''))}</option>`).join('')
+      el.innerHTML = `<div class="aou-kopf">${escapeHtml(kopf)}</div>`
+        + walOhneListe.map((g, i) => {
+          const nm = escapeHtml(String(g.name || ''))
+          return `<div class="aou-z"><span class="aou-wer">${nm}<small data-wal-ohne-teile="${i}">${escapeHtml(teile(g))}</small></span>`
+            + `<select data-wal-ohne-gruppe="${i}" aria-label="Unternehmen für ${nm}"><option value="">Unternehmen wählen …</option>${opt}</select>`
+            + `<button type="button" class="btn btn-ghost btn-xs" data-wal-ohne-zuweisen="${i}">Zuweisen</button>`
+            + `<span class="aou-msg" data-wal-ohne-msg="${i}"></span></div>`
+        }).join('')
+      el.hidden = false
+    }
+    document.getElementById('wal-ohne')?.addEventListener('click', async ev => {
+      const b = ev.target.closest('[data-wal-ohne-zuweisen]'); if(!b || b.disabled) return
+      const i = b.dataset.walOhneZuweisen, g = walOhneListe[Number(i)], box = $('wal-ohne'); if(!g || !box) return
+      const sel = box.querySelector(`select[data-wal-ohne-gruppe="${i}"]`), msg = box.querySelector(`[data-wal-ohne-msg="${i}"]`)
+      const gid = sel && sel.value
+      if(!gid){ if(msg) msg.textContent = 'erst Unternehmen wählen'; return }
+      const gname = sel.options[sel.selectedIndex]?.textContent || ''
+      if(!confirm(`„${g.name}" (${g.ws.length} Wallet${g.ws.length === 1 ? '' : 's'}) dem Unternehmen „${gname}" zuweisen?\nDanach zählt sie nur dort mit.`)) return
+      b.disabled = true; if(msg) msg.textContent = 'speichert …'
+      try{
+        const { data, error } = await supabase.from('id_wallets').update({ gruppe_id: gid })
+          .in('id', g.ws.map(w => w.id)).or('person_uid.is.null,person_uid.eq.').select('id')   // wie walOhneUid: null oder leer
+        if(error){
+          if(error.code === 'PGRST204' || /gruppe_id/i.test(error.message || '')) throw new Error('Spalte gruppe_id fehlt noch (sql/2026-11-17_meta_wallet_gruppe.sql)')
+          throw error
+        }
+        // ohne UPDATE-Policy trifft die RLS still 0 Zeilen — nicht als Erfolg melden
+        if(!data || !data.length) throw new Error('keine Zeile geändert — Schreibrecht fehlt noch (sql/2026-11-17_meta_wallet_gruppe.sql)')
+        await walLoad()
+        walFeedLoad(false)   // zugewiesene Wallets fehlen sonst im Transfer-Feed
+      }catch(e){ if(msg) msg.textContent = 'nicht gespeichert: ' + ((e && e.message) || e); b.disabled = false }
+    })
+
     // Verlauf: Summe der gefilterten Wallets pro Tag. Fehlt für einen Tag der
     // Snapshot einer Wallet, gilt ihr letzter bekannter Wert weiter — sonst
     // sähe jeder Lade-Lücken-Tag wie ein Einbruch aus.
@@ -22220,14 +22307,24 @@
       else if(WAL_CHAINS.solana.valid(a)) sel.value = 'solana'
     }
     // Zeilen schreiben, Label nur, wenn die Spalte existiert (sql/2026-10-29_meta_wallet_label.sql) — sonst ohne und mit Hinweis
+    // MW1 (17.11.2026): ebenso gruppe_id (sql/2026-11-17_meta_wallet_gruppe.sql) — fehlt die Spalte, ohne sie speichern, Wallet steht dann unter „Ohne Zuordnung"
     async function walInsert(zeilen){
-      const ohneSpalte = e => e && (e.code === 'PGRST204' || /'label' column/i.test(e.message || ''))
-      let { error } = await supabase.from('id_wallets').insert(zeilen)
-      let hinweis = ''
-      if(ohneSpalte(error) && zeilen.some(z => 'label' in z)){
-        ;({ error } = await supabase.from('id_wallets').insert(zeilen.map(z => { const k = { ...z }; delete k.label; return k })))
-        hinweis = 'Name nicht gespeichert: Spalte label fehlt noch (sql/2026-10-29_meta_wallet_label.sql).'
+      const OPT = {
+        gruppe_id: 'Unternehmen nicht gespeichert: Spalte gruppe_id fehlt noch (sql/2026-11-17_meta_wallet_gruppe.sql) — die Wallet steht unter „Ohne Zuordnung".',
+        label: 'Name nicht gespeichert: Spalte label fehlt noch (sql/2026-10-29_meta_wallet_label.sql).'
       }
+      const ohneSpalte = e => e && (e.code === 'PGRST204' || /'(label|gruppe_id)' column/i.test(e.message || ''))
+      let { error } = await supabase.from('id_wallets').insert(zeilen)
+      const hinweise = []
+      for(let n = 0; n < 2 && ohneSpalte(error); n++){
+        const k = Object.keys(OPT).find(k => zeilen.some(z => k in z) && new RegExp(`'${k}' column`, 'i').test(error.message || ''))
+          || (zeilen.some(z => 'label' in z) ? 'label' : null)   // bisheriger Weg: PGRST204 ohne Spaltennamen = label
+        if(!k) break
+        zeilen = zeilen.map(z => { const c = { ...z }; delete c[k]; return c })
+        hinweise.push(OPT[k])
+        ;({ error } = await supabase.from('id_wallets').insert(zeilen))
+      }
+      const hinweis = hinweise.join(' ')
       // UNIQUE(chain, address) — z. B. bei einer ausgeblendeten ID (Emin-Gruppe, hier nicht sichtbar) schon eingetragen; der Insert ist atomar
       if(error && error.code === '23505') throw new Error('Adresse ist schon bei einer anderen (ausgeblendeten) ID eingetragen — nichts gespeichert.')
       if(error) throw error
@@ -22248,7 +22345,7 @@
         msgEl.textContent = `Das sieht nicht nach einer ${wahl === 'evm' ? 'Ethereum/Arbitrum' : c.label}-Adresse aus — erwartet: ${c.hint}.`
         $('wal-add-address').focus(); return
       }
-      const vorhanden = wallets.filter(w => chains.includes(w.chain) && w.address.toLowerCase() === address.toLowerCase())
+      const vorhanden = wallets.concat(walOhne).filter(w => chains.includes(w.chain) && w.address.toLowerCase() === address.toLowerCase())   // MW1: auch „Ohne Zuordnung"
       // dieselbe Adresse bei einer anderen Person → nicht still einer zweiten Person zuordnen (Gegenprüfung 29.10.2026)
       const fremd = vorhanden.find(w => String(w.person_name || '').toLowerCase() !== person.toLowerCase())
       if(fremd){ msgEl.textContent = `Diese Adresse gehört schon ${fremd.person_name} (${WAL_CHAINS[fremd.chain]?.label || fremd.chain}) — nichts gespeichert.`; return }
@@ -22258,9 +22355,11 @@
       const uid = (admData?.people || []).find(p => p.name?.toLowerCase() === person.toLowerCase())?.user_id
         || (typeof profList === 'function' ? profList() : []).find(p => p?.name?.toLowerCase() === person.toLowerCase())?.userId
         || null
+      // MW1 (17.11.2026): ohne ID gleich das oben gewählte Unternehmen mitschreiben — sonst stünde sie in keiner Gruppe (bzw. früher in allen)
+      const gid = uid ? '' : walSicht().gid
       const btn = $('wal-add'); btn.disabled = true
       try{
-        const hinweis = await walInsert(neu.map(chain => Object.assign({ person_uid: uid, person_name: person, chain, address }, label ? { label } : {})))
+        const hinweis = await walInsert(neu.map(chain => Object.assign({ person_uid: uid, person_name: person, chain, address }, label ? { label } : {}, gid ? { gruppe_id: gid } : {})))
         $('wal-add-address').value = ''; if($('wal-add-label')) $('wal-add-label').value = ''
         msgEl.style.color = 'var(--sub)'   // Hinweise grau, Fehler bleiben rot (unten zurückgesetzt)
         if(hinweis){ msgEl.textContent = hinweis }
@@ -22281,7 +22380,7 @@
       if(!confirm(`${w.person_name}: dieselbe Adresse auch auf ${c.label} eintragen?\n${w.address}`)) return
       walZwillingLaeuft = true
       try{
-        const hinweis = await walInsert([Object.assign({ person_uid: w.person_uid || null, person_name: w.person_name, chain, address: w.address }, w.label ? { label: w.label } : {})])
+        const hinweis = await walInsert([Object.assign({ person_uid: w.person_uid || null, person_name: w.person_name, chain, address: w.address }, w.label ? { label: w.label } : {}, w.gruppe_id ? { gruppe_id: w.gruppe_id } : {})])
         if(hinweis){ $('wal-add-msg').style.color = 'var(--sub)'; $('wal-add-msg').textContent = hinweis }
         await walLoad()
         walRefreshBalances().then(() => walFeedLoad(false))
@@ -59622,7 +59721,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2242'
+  const OS_TAB_BUILD = '2026-09-22.2243'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
