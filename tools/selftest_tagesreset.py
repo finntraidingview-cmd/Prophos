@@ -107,6 +107,36 @@ for name, extra, soll, wort in FAELLE:
     e = ART(p, TAG, JETZT, TZ)
     check(e["art"] == soll and wort.lower() in e["grund"].lower(), f"{name}: {soll} — {e['grund']}")
 
+# TR2 (Finn 18.11.2026, Vorfall Chris 17.11.: PC bis ~17:00 aus, 5 verpasste Pläne mit start_claim_art='verbrauch' geclaimt → alle
+# „⚠ unklar: Plan … nie fertig" im Abhaken). Verbrauch ohne Hinweis → weg; Hinweis hat Vorrang → pruefen; echter Start bleibt pruefen
+VERB = [
+    ("Verbrauch (verpasst) ohne Hinweis", {"start_claim_art": "verbrauch"}, "weg", "nie gestartet"),
+    ("Verbrauch, Start-Fehler zu_spaet alt (vor dem Claim)", {"start_claim_art": "verbrauch", "mt5_baseline": {"start_fehler": sf("2026-10-19T09:00:00Z", "zu_spaet")}}, "weg", "verbraucht"),
+    ("Verbrauch MIT an Orbit gesendet", {"start_claim_art": "verbrauch", "orbit_gesendet_at": "2026-10-19T10:00:05+00:00"}, "pruefen", "Orbit"),
+    ("Verbrauch MIT Start-Fehler unklar", {"start_claim_art": "verbrauch", "mt5_baseline": {"start_fehler": sf("2026-10-19T10:01:00Z", "knopf", unklar=True)}}, "pruefen", "unklar"),
+    ("Verbrauch MIT Ticket", {"start_claim_art": "verbrauch", "route": "mt5v2", "mt5_baseline": {"ticket": 77}}, "pruefen", "Ticket"),
+    ("Verbrauch MIT Ende-Eintrag ohne Aufgabe", {"start_claim_art": "verbrauch", "mt5_baseline": {"final": {"grund": "demo_liq"}}}, "pruefen", "Ende-Eintrag"),
+    ("echter Start ohne Ergebnis", {"start_claim_art": "start"}, "pruefen", "kein Ergebnis"),
+    ("alter Plan ohne Feld start_claim_art (None)", {"start_claim_art": None}, "pruefen", "kein Ergebnis"),
+    ("start_claim_art leer", {"start_claim_art": ""}, "pruefen", "kein Ergebnis"),
+]
+for name, extra, soll, wort in VERB:
+    e = ART(dict(BASIS, **extra), TAG, JETZT, TZ)
+    check(e["art"] == soll and wort.lower() in e["grund"].lower(), f"TR2 {name}: {soll} — {e['grund']}")
+e = ART(dict(BASIS, start_claim_art="verbrauch", start_um_gestartet_at="2026-10-20T20:10:00+00:00", start_um="2026-10-20T17:00:00+00:00"), TAG, JETZT, TZ)
+check(e["art"] is None, f"TR2 Verbrauch-Claim < 2 h her: nicht betroffen — {e['grund']}")
+e = ART(dict(BASIS, start_claim_art="verbrauch", route="polar", start_um_gestartet_at=None, start_um=None), TAG, JETZT, TZ)
+check(e["art"] is None, f"TR2 Polar nur gespeichert bleibt stehen (Verbrauch ändert nichts) — {e['grund']}")
+# die fünf von Chris (17.11.), nachgebildet (Startzeiten/Routen Platzhalter): beim Anlauf ~17:00 Dubai verbraucht, sonst nichts am Plan
+J18 = datetime(2026, 11, 17, 22, 0, tzinfo=timezone.utc)      # Nachtlauf 02:00 Dubai am 18.11.
+for pid, route, start in (("a27777b5", "mt5v2", "2026-11-17T02:57:00+00:00"), ("5ebca32c", "orbit", "2026-11-17T06:06:00+00:00"),
+                          ("4395ddf7", "orbit", "2026-11-17T10:38:00+00:00"), ("b16ec1a0", "orbit", "2026-11-17T11:58:00+00:00"),
+                          ("e1d3e225", "tvv2", "2026-11-17T04:10:00+00:00")):
+    p = {"id": pid, "status": "planned", "started_at": None, "route": route, "planned_for": "2026-11-17", "start_um": start,
+         "start_um_gestartet_at": "2026-11-17T13:02:11+00:00", "start_claim_art": "verbrauch", "orbit_gesendet_at": None, "mt5_baseline": None}
+    e = ART(p, "2026-11-18", J18, TZ)
+    check(e["art"] == "weg", f"TR2 Chris {pid} (17.11., PC aus, beim Anlauf verbraucht): weg — {e['grund']}")
+
 # NICHT BETROFFEN → None
 NICHT = [
     ("heutiger Plan", {"planned_for": "2026-10-21", "start_um": "2026-10-21T08:00:00+00:00", "start_um_gestartet_at": None}),
@@ -218,6 +248,25 @@ check(r.get("p_status") == "review" and fin.get("grund") == "tagesende_unklar" a
       and fin.get("at") == BASIS["start_um"] and fin.get("puls_versuche") == 1 and "today_pnl" not in fin and "Order am Konto prüfen" in fin.get("hinweis", ""),
       f"final: Grund + Hinweis am toten Tag, alte Felder bleiben, kein today_pnl (nicht „gelesen“) — {fin}")
 check(not any(z[0] == "heute-0002" for z in DB["update"]) and "heute-0002" not in DB["geloescht"], "heutiger Plan bleibt unberührt")
+
+# TR2: Verbrauch-Plan wird gelöscht — Guard verlangt zusätzlich, dass der Claim noch „Verbrauch" ist; ein Start-Plan ohne Ergebnis → Überprüfen
+ROWS[:] = [dict(BASIS, id="verb-0006", start_claim_art="verbrauch", master_name="Konto G", result_notes=None, mt5_baseline=None),
+           dict(BASIS, id="verb-0007", start_claim_art="verbrauch", master_name="Konto H", result_notes=None, mt5_baseline=None, _art_neu="start"),
+           dict(BASIS, id="start-0008", start_claim_art="start", master_name="Konto I", result_notes=None, mt5_baseline=None)]
+for r_ in ROWS:
+    if r_.get("_art_neu"):
+        r_["start_claim_art"] = r_.pop("_art_neu")     # zwischen Lesen und Löschen umgeschrieben (Guard muss halten)
+_lies = _sb_all
+ns["_sb_all"] = lambda t, p: [dict(r, start_claim_art="verbrauch") if r["id"] == "verb-0007" else r for r in _lies(t, p)]
+for k in ("geloescht", "update", "rpc", "delete_params", "update_params"):
+    DB[k] = []
+out = ns["ap_tagesreset"](TAG, JETZT)
+check(DB["geloescht"] == ["verb-0006"] and [z["plan_id"] for z in out["weg"]] == ["verb-0006"],
+      f"TR2 Verbrauch gelöscht, umgeschriebener Claim (verb-0007) nicht — {DB['geloescht']}")
+check(all(g.get("start_claim_art") == "eq.verbrauch" for g in DB["delete_params"]) and len(DB["delete_params"]) == 2,
+      f"TR2 Lösch-Guard mit start_claim_art=eq.verbrauch — {DB['delete_params']}")
+check([x[0] for x in DB["update"]] == ["start-0008"], f"TR2 echter Start ohne Ergebnis → Überprüfen — {[x[0] for x in DB['update']]}")
+check("start_claim_art" in fn("ap_tagesreset").split("sel = (")[1].split(")")[0], "TR2 start_claim_art wird mitgeladen")
 
 # Einhängen im Nachtlauf: vor ap_planen, auch wenn der Planer aus ist, eigener try
 nt = fn("ap_nacht_tick")

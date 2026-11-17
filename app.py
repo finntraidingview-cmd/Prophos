@@ -31092,6 +31092,13 @@ def tagesreset_art(p, tag, jetzt, tz):
     sf_at = _ap_ts((sf or {}).get("at"))
     if sf and sf.get("unklar") is False and sf_at and sf_at >= claim:
         return {"art": "weg", "grund": f"Start-Fehler ohne Order ({sf.get('schritt') or '?'}, Bot: nichts platziert)"}
+    # TR2 (Finn 18.11.2026, Vorfall Chris 17.11.: PC bis ~17:00 aus, beim Anlauf hat der PC-Tab 5 verpasste Pläne mit
+    # start_claim_art='verbrauch' geclaimt → Nachtlauf kannte das Feld nicht → alle 5 „⚠ unklar: Plan … nie fertig" im Abhaken, Konten
+    # blockiert, obwohl nie ein Trade lief). Verbrauch = verpasst / Ziel erreicht / Manuelle Arbeit / Archiv / Riegel aufgegeben — der
+    # Tab startet dann NIE. Steht kein Hinweis am Plan (oben, hat Vorrang), ist er also sicher ohne Order → weg. Echte Starts ('start')
+    # und alte Pläne ohne Feld bleiben beim „pruefen".
+    if str(p.get("start_claim_art") or "") == "verbrauch":
+        return {"art": "weg", "grund": "nur verbraucht (verpasst/Ziel/Manuell/Archiv), nie gestartet"}
     return {"art": "pruefen", "grund": "geclaimt, aber kein Ergebnis am Plan"}
 
 
@@ -31101,8 +31108,8 @@ def ap_tagesreset(tag, jetzt, trocken=False):
     protokolliert. trocken = nur einteilen. → {"weg": [...], "pruefen": [...], "fehler": n}"""
     tz = _ap_tz("Asia/Dubai")
     tag0 = datetime.fromisoformat(str(tag)).replace(tzinfo=tz)
-    sel = ("id,user_id,route,status,auto_plan,notes,master_name,planned_for,start_um,start_um_gestartet_at,orbit_gesendet_at,started_at,"
-           "result_notes,mt5_baseline,polar_lauf(id,status)")
+    sel = ("id,user_id,route,status,auto_plan,notes,master_name,planned_for,start_um,start_um_gestartet_at,start_claim_art,orbit_gesendet_at,"
+           "started_at,result_notes,mt5_baseline,polar_lauf(id,status)")   # start_claim_art: TR2 18.11.2026 (Verbrauch ≠ Start)
     rows = (_sb_all("trade_plans", {"select": sel, "status": "eq.planned", "started_at": "is.null", "planned_for": f"lt.{tag}", "order": "id.asc"}) or []) \
         + (_sb_all("trade_plans", {"select": sel, "status": "eq.planned", "started_at": "is.null", "planned_for": "is.null",
                                    "start_um": f"lt.{tag0.isoformat()}", "order": "id.asc"}) or [])
@@ -31123,7 +31130,10 @@ def ap_tagesreset(tag, jetzt, trocken=False):
                  "or": f"(start_um_gestartet_at.is.null,start_um_gestartet_at.lt.{alt})"}
         try:
             if e["art"] == "weg":
-                if sb_delete("trade_plans", dict(guard, orbit_gesendet_at="is.null")):
+                g_weg = dict(guard, orbit_gesendet_at="is.null")
+                if str(p.get("start_claim_art") or "") == "verbrauch":
+                    g_weg["start_claim_art"] = "eq.verbrauch"    # TR2 18.11.2026: nur löschen, solange der Claim noch „Verbrauch" ist
+                if sb_delete("trade_plans", g_weg):
                     out["weg"].append(z)
                 else:
                     print(f"[tages-reset] {pid[:8]}: nicht gelöscht — Plan hat sich seit dem Lesen geändert (Guard)", flush=True)
