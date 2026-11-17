@@ -9080,6 +9080,7 @@ def admin_build_overview(kapitel_id=None):
             "payout_pct": _pnum(a.get("payout_pct")),
             "payout_override": _pnum(a.get("payout_override")),
         })
+    payout_ready = dk_ohne_deaktiviert(payout_ready, dk_deaktiviert_anzeige())   # DK1 (17.11.2026): deaktiviert = nicht in Admin → Payouts / WD-Überblick
     payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 
     # TRADES HEUTE (22.09.2026, Finn: „daily so kurzen Überblick, was wir heute
@@ -9402,6 +9403,7 @@ def admin_build_kapitel():
         return str(acc.get("user_id") or p.get("user_id") or "")
 
     out = []
+    dk_ids = dk_deaktiviert_anzeige()   # DK1 (17.11.2026): nur für wd_liste (WD-Statistik), Summen des Kapitels bleiben
     for k in liste:
         kid = _kapitel_int(k.get("id"))
         if kid is None:
@@ -9473,7 +9475,7 @@ def admin_build_kapitel():
                 trades_ohne_hedge += 1
             # Winning Day (26.09.2026): Orbit V2 mit Fusion-Gegenhedge (hedge_eur > 0) oder als Winning Day markiert — echter
             # Hedge, Fusion-€ = slave_pl (Deal-Historie). Eigene Liste, zählt NICHT in die Kontrafakt-Trades.
-            if kontrafakt and str(p.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(p) and (
+            if kontrafakt and str(p.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(p) and str(p.get("master_account_id") or "") not in dk_ids and (
                     (_f(p.get("hedge_eur")) or 0) > 0 or p.get("winning_day") or str(p.get("konto_typ") or "") == "winning_days"):
                 macc = by_id.get(str(p.get("master_account_id") or "")) or {}
                 wd_liste.append({
@@ -14558,6 +14560,8 @@ def admin_wd_heute():
                 continue
             gesehen.add(pid)
             plaene.append(p)
+        # DK1 (17.11.2026): Pläne deaktivierter Konten nicht in „Winning Days“ — laufende (open) und zu prüfende (review, Abhak-Liste) bleiben sichtbar
+        plaene = dk_ohne_deaktiviert(plaene, dk_deaktiviert_anzeige(), feld="master_account_id", offen_behalten=True)
         acc_ids = {str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")}
         accs = {}
         ids = sorted(acc_ids)
@@ -18216,7 +18220,8 @@ def admin_wd_plaene():
         tag = (request.args.get("tag") or "").strip()[:10]
         try:
             disp, excluded = _wd_personen()
-            archiv = _acc_plan_archiviert() | _ap_deaktiviert_ids()   # deaktiviert (30.10.2026): nicht im Farmer, wie archiviert — nur diese Liste
+            deakt = _ap_deaktiviert_ids()
+            archiv = _acc_plan_archiviert() | deakt   # deaktiviert (30.10.2026): nicht im Farmer, wie archiviert — nur diese Liste
             # wd_zyklus_regel (Recoverer, 02.11.2026) tolerant — solange die Spalte fehlt (SQL nicht eingespielt), ohne sie
             _felder = "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at,wd_tp,wd_sl,max_risiko_trade"
             try:
@@ -18225,6 +18230,7 @@ def admin_wd_plaene():
                 if "wd_zyklus_regel" not in str(getattr(e.response, "text", "") or e):
                     raise
                 accs = _sb_all("accounts", {"select": _felder})
+            deakt_uid = {str(a["id"]): str(a.get("user_id")) for a in accs if str(a.get("id")) in deakt}   # DK1: Besitzer je deaktiviertem Konto (Sicht-Filter unten)
             konten = []
             for a in accs:
                 typ = (a.get("account_type") or "").lower()
@@ -18390,7 +18396,10 @@ def admin_wd_plaene():
                         continue
                     belegt[mid] = "hat schon einen geplanten/laufenden Plan"
             return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx(), "belegt": belegt, "plaene_tag": plaene_tag,
-                            "richtung_fest": richtung_fest, "zyklus_ok": zyklus_ok})
+                            "richtung_fest": richtung_fest, "zyklus_ok": zyklus_ok,
+                            # DK1 (17.11.2026): deaktivierte Konto-IDs — der Farmer blendet sie in der RPC-Liste ganz aus statt als „archiviert“ zu führen.
+                            # Nur Konten der eigenen Sicht (zwei Unternehmen getrennt): ein Verwalter bekommt keine IDs fremder Gruppen
+                            "deaktiviert": sorted(i for i in deakt if sicht_get is None or deakt_uid.get(i) in sicht_get)})
         except Exception as e:
             print(f"[wd] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": f"Farmer-Daten nicht ladbar ({type(e).__name__}: {e})"}), 502
@@ -27876,6 +27885,28 @@ def ap_deaktiviert_anwenden(konten, ids=None):
         if str(a.get("id")) in ids:
             a["auto_planer"], a["deaktiviert"] = False, True
     return konten
+
+
+# DK1 DEAKTIVIERT IN WD + PAYOUTS (Finn 17.11.2026 ~06:35 Dubai: „Bei WD und Payouts etc. sollen deaktivierte Accounts nicht angezeigt und nicht mitgezählt
+# werden."): Anzeige-Listen (Admin → Payouts payout_ready, /admin/wd-heute, wd_liste der WD-Statistik) lassen deaktivierte Konten weg. NUR ANZEIGE — Kapital,
+# Kosten, Gesamtwert, Buchungen, erhaltene und angefragte Payouts (echtes Geld) bleiben wie bisher. Lesefehler → leere Menge (Anzeige wie vor DK1, Log),
+# nie ein Abbruch der Übersicht.
+def dk_deaktiviert_anzeige():
+    """Deaktivierte Konto-IDs für Anzeige-Filter → frozenset; Fehler → frozenset() mit Log (zeigt dann wie vorher alles)."""
+    try:
+        return _ap_deaktiviert_ids()
+    except Exception as e:
+        print(f"[dk1] ⚠️ deaktivierte Konten nicht lesbar ({type(e).__name__}) — Anzeige ungefiltert", flush=True)
+        return frozenset()
+
+
+def dk_ohne_deaktiviert(zeilen, ids, feld="account_id", offen_behalten=False):
+    """REIN RECHNEND (testbar): Zeilen ohne deaktivierte Konten (Konto-ID im Feld `feld`). offen_behalten: laufende (open) und zu prüfende (review)
+    Pläne bleiben sichtbar — ein offener Trade verschwindet nie, und ein review-Plan muss abgehakt werden können (Abhaken bucht die Fusion-P&L als
+    wd_hedge in Finanzen; Gegenprüfung DK1 17.11.2026). → neue Liste."""
+    if not ids:
+        return list(zeilen or ())
+    return [z for z in (zeilen or ()) if str((z or {}).get(feld) or "") not in ids or (offen_behalten and (z or {}).get("status") in ("open", "review"))]
 
 
 AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts am Stift ausschalten"

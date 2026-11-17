@@ -48919,16 +48919,21 @@
         // Fortschritts-Ziel (10.09.2026): "🏆 3/5 Winning Days ●●●○○"
         // Klick auf das Badge öffnet den Account zum Bearbeiten (15.09.2026 abends,
         // Finn: "auf Account gehen und dann auf Winning Days" → Stand korrigieren)
-        const zielHtml = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a, true) : ''
+        // DK1 (Finn 17.11.2026: „Bei WD und Payouts … sollen deaktivierte Accounts nicht angezeigt und nicht mitgezählt werden"): deaktiviertes Konto ohne
+        // Ziel-/WD-Badge und ohne Payout-Chip — die Zeile selbst bleibt (ausgegraut, Chip „deaktiviert“), damit Finn es wieder einschalten kann
+        const dkAus = !!a.deaktiviertAt
+        const zielHtml = (!dkAus && typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a, true) : ''
         if(zielHtml) metaParts.push(zielHtml)
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         // Funded CFD (16.10.2026): „Payout ab"-Chip aus demselben Feld statt des allgemeinen Termin-Chips — „in 3 T · ab 19.10." / „jetzt" /
         // „angefragt" / „Datum fehlt" (Klick → Feld im Account-Modal)
-        let payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
+        // DK1-Gegenprüfung: eine offene Anfrage bleibt auch am deaktivierten Konto sichtbar („💸 Payout angefragt“ — Geld unterwegs)
+        const dkPoOffen = dkAus && a.type === 'funded_cfd' && !!(_poEigen.je.get(String(a.id)) || {}).offen
+        let payoutHtml = (dkAus && !dkPoOffen) ? '' : a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
           : (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         // ST2 (Master 16.11.2026, Finn „Ja, anzeigen“): Striking-Konto → „ · n/7 Gewinntage“ hinten im Payout-Chip (Stand aus /konto-ziele, stGtText);
         // ohne Payout-Chip eigener kleiner Chip. Alle anderen Konten unverändert.
-        const stGt = a.type === 'funded_cfd' ? (() => { try{ return stGtText(a) }catch(_){ return '' } })() : ''
+        const stGt = (a.type === 'funded_cfd' && !dkAus) ? (() => { try{ return stGtText(a) }catch(_){ return '' } })() : ''
         if(stGt) payoutHtml = payoutHtml && payoutHtml.endsWith('</span>')
           ? payoutHtml.slice(0, -'</span>'.length) + escapeHtml(stGt) + '</span>'
           : payoutHtml + `<span class="acc-po acc-po-sub">${escapeHtml(stGt.replace(/^ · /, ''))}</span>`
@@ -76186,6 +76191,10 @@
       const ok = new Set(rail.konten.map(k => String(k.id)))
       const heute = new Map(rail.konten.filter(k => k && k.heute_gestartet).map(k => [String(k.id), k.heute_gestartet]))   // heute schon getradet (03.11.2026, app.py)
       for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false; if(heute.has(k.id)) k.heute_gestartet = heute.get(k.id) }
+      // DK1 (17.11.2026): deaktivierte Konten bleiben „archiviert" (fahren nicht mit, Tageszeilen räumen sie weg) und tragen zusätzlich die Marke —
+      // die Zeilen der ID-Tabelle blenden sie dann auch mit Plan von vorher aus (wdAblauf). Altes Backend ohne Feld: wie bisher.
+      const deakt = new Set((Array.isArray(rail.deaktiviert) ? rail.deaktiviert : []).map(String))
+      for(const k of konten) if(deakt.has(k.id)) k.deaktiviert = true
       // PAYOUT OFFEN (R2c, 05.11.2026): Railway liefert payout_offen je Konto (app.py, 03.11.2026) — mit RPC kam es bisher nie in diese Liste, wdErwartet
       // und die Hand-Wege sahen die offene Anfrage am Mac nicht. Jetzt wie heute_gestartet mitnehmen (nur true setzen, fehlt es: wie bisher).
       const poOffen = new Set(rail.konten.filter(k => k && k.payout_offen).map(k => String(k.id)))
@@ -77695,7 +77704,10 @@
     // archivierte sein, da kann nicht gar nichts sein"); Konten ohne Haken bleiben sichtbar (grau)
     // archivierte Konten existieren hier nicht (Finn 23.09.2026); nur Typ Winning Days (26.09.2026) — ohne Plan und nicht in der RPC = kein WD-Konto
     const nurWd = k => k.plan_id || !(_wd.daten && _wd.daten.rpc) || !!wdKontoDaten(k.id)
-    const ohne = [], sichtbar = (x.konten || []).filter(k => (!k.archiviert || k.plan_id) && nurWd(k))
+    // DK1 (Finn 17.11.2026: „Bei WD und Payouts … sollen deaktivierte Accounts nicht angezeigt … werden"): deaktiviert = weg, auch mit Plan von vorher —
+    // nur ein laufender (open bzw. planned + gestartet) und ein zu prüfender (review, muss abgehakt werden: Buchung in Finanzen) bleiben
+    const deakt = k => !!(wdKontoDaten(k.id) || {}).deaktiviert && k.status !== 'open' && k.status !== 'review' && !(k.status === 'planned' && k.gestartet)
+    const ohne = [], sichtbar = (x.konten || []).filter(k => (!k.archiviert || k.plan_id) && nurWd(k) && !deakt(k))
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
