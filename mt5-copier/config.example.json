@@ -45,6 +45,6 @@
   "magic": 770001,
   "comment_prefix": "PH",
 
-  "_9_magic_base": "NUR relevant, wenn MEHRERE PCs sich EIN Hedge-Konto teilen (27.08.2026, Finns Ein-Konto-fuer-alle wegen der Marge). Dann braucht jeder PC einen eigenen 1000er-Block, sonst raeumen sich die Copier verschiedener PCs gegenseitig die Hedges (magic ist der Primaerfilter, gleiche magic = fremder Hedge wird fuer eigen gehalten). Erster PC 770000 (Default, Feld weglassen), zweiter 771000, dritter 772000 … bis 779000. Die Provisionierung vergibt neue magics dann ab magic_base+1. Alles bleibt in der Familie 770000-779999, fremde PC-Bloecke loesen also keinen Fremd-Alarm aus.",
+  "_9_magic_base": "NUR relevant, wenn MEHRERE PCs sich EIN Hedge-Konto teilen (27.08.2026, Finns Ein-Konto-fuer-alle wegen der Marge). Dann braucht jeder PC einen eigenen 1000er-Block, sonst raeumen sich die Copier verschiedener PCs gegenseitig die Hedges (magic ist der Primaerfilter, gleiche magic = fremder Hedge wird fuer eigen gehalten). Erster PC 770000 (Default, Feld weglassen), zweiter 771000, dritter 772000 … (Reihenfolge s. provision.py; seit MF1 18.11.2026 neue Bloecke 750000 … 759000, 779000 = Umzugs-Reservat). Die Provisionierung vergibt neue magics dann ab magic_base+1. Alles bleibt in der Familie 750000-779999 (FAMILIE_MIN/MAX im Copier), fremde PC-Bloecke loesen also keinen Fremd-Alarm aus.",
   "magic_base": 770000
 }

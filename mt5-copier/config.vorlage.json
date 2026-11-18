@@ -5,7 +5,7 @@
   "hedge_expected_login": 488579,
   "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
   "common_files_dir": "",
-  "_magic_base_hinweis": "NUR setzen, wenn dieser PC sich das Fusion-Hedge-Konto mit ANDEREN PCs teilt (27.08.2026). Jeder PC braucht dann einen eigenen 1000er-Block, sonst schliessen sich die Copier gegenseitig die Hedges: erster PC 770000 (= Default, Feld weglassen), zweiter PC 771000, dritter 772000 … bis 779000. Neu provisionierte Accounts bekommen ihre magic dann in diesem Block.",
+  "_magic_base_hinweis": "NUR setzen, wenn dieser PC sich das Fusion-Hedge-Konto mit ANDEREN PCs teilt (27.08.2026). Jeder PC braucht dann einen eigenen 1000er-Block, sonst schliessen sich die Copier gegenseitig die Hedges: erster PC 770000 (= Default, Feld weglassen), zweiter PC 771000, dritter 772000 … (Vergabe-Reihenfolge und belegte Bloecke: Kommentar an MAGIC_BASE in provision.py; seit MF1 18.11.2026 neue Bloecke 750000, 751000 … 759000 — erst wenn ALLE PCs den neuen Copier haben). 779000 = Umzugs-Reservat, nie vergeben. Neu provisionierte Accounts bekommen ihre magic dann in diesem Block.",
   "magic_base": 770000,
   "multiplier": 1.0,
   "symbol_map": {

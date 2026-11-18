@@ -94,11 +94,15 @@ def used_values(folder):
 # magics in einem EIGENEN Block vergeben — sonst sieht der Copier des einen PCs
 # die Hedges des anderen als eigene (gleiche magic) und schliesst sie weg (der
 # teuerste Audit-Fund, PC-uebergreifend). Ein PC = ein 1000er-Block:
-#   770000 (Default/erster PC) · 771000 … 778000, danach 760000 … 769000
+#   770000 (Default/erster PC) · 771000 … 778000, danach 760000 … 769000,
+#   seit MF1 (18.11.2026) danach 750000, 751000 … 759000
 #   (779000er = Umzugs-Reservat, s. MAGIC_UMZUG in copier.py)
-# Der ganze Bereich bleibt in der Magic-Familie 760000-779999 (FAMILIE_MIN/MAX
-# im Copier — 11.09.2026 nach UNTEN erweitert, weil die 7 Bestands-PCs
-# 770000-776000 belegt hatten; Bestand und Reservat blieben so unangetastet),
+# Der ganze Bereich bleibt in der Magic-Familie 750000-779999 (FAMILIE_MIN/MAX
+# im Copier — 11.09.2026 nach UNTEN auf 760000 erweitert, weil die 7 Bestands-
+# PCs 770000-776000 belegt hatten; 18.11.2026 nochmal nach UNTEN auf 750000,
+# weil 760000-778000 voll waren; Bestand und Reservat blieben so unangetastet.
+# 75xxxx-Bloecke erst vergeben, wenn ALLE PCs den Copier mit FAMILIE_MIN
+# 750000 laufen haben — ein alter Copier haelt sie sonst fuer fremd),
 # fremde PCs loesen also weiterhin keinen Fehlalarm aus. Fehlt der Wert
 # in der Config, gilt MAGIC_BASE (770000) — Bestands-PCs bleiben unveraendert.
 def next_magic(magics, base=MAGIC_BASE):

@@ -15,7 +15,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from copier import (plan_actions, check_fleet, compute_startup_skip,  # noqa: E402
                     plan_sltp, broker_abstand, find_notfall_deals, read_snapshot,
-                    magic_umzug_ziel, MAGIC_UMZUG, FAMILIE_MIN, FAMILIE_MAX)
+                    magic_umzug_ziel, MAGIC_UMZUG, FAMILIE_MIN, FAMILIE_MAX,
+                    ist_familie_magic)
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
 FUSION = {
@@ -2539,11 +2540,29 @@ def main():
     # Position alarmiert.
     def _ab_2014():   # ST2: Inline-Prüfung ab Zeile 2014 (alte Zählung) — ein Abbruch zählt ✗, die Suite läuft weiter
         nonlocal z
-        chk("Magic-Familie: 760000-779999, Bestand + Umzugs-Reservat innerhalb",
-            FAMILIE_MIN == 760000 and FAMILIE_MAX == 779999
+        chk("Magic-Familie: 750000-779999, Bestand + Umzugs-Reservat innerhalb",
+            FAMILIE_MIN == 750000 and FAMILIE_MAX == 779999
             and all(FAMILIE_MIN <= z <= FAMILIE_MAX for z in MAGIC_UMZUG.values())
-            and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
+            and FAMILIE_MIN <= 760000 and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
     _inline(_ab_2014)
+
+    # ── MF1 (18.11.2026, Finn: „ich brauche neue magic base nummern") ──────────
+    # Familie zweites Mal nach UNTEN erweitert (750000). Neue PC-Bloecke 750000,
+    # 751000 … 759000 muessen als Familie gelten (sonst hedge_fremde-Alarm am
+    # geteilten Fusion-Konto), alles darunter/darueber nicht — und der Solo-Hedge
+    # (SOLO_MAGIC 790001) muss weiter AUSSERHALB liegen.
+    def _mf1_familie():
+        from copier import SOLO_MAGIC
+        chk("MF1: 751000/750000/759999 Familie, 749999/780000/Solo nicht, Bestand bleibt",
+            ist_familie_magic(751000) and ist_familie_magic(750000)
+            and ist_familie_magic(751001) and ist_familie_magic(759999)
+            and ist_familie_magic(760001) and ist_familie_magic(770900)
+            and ist_familie_magic(779215) and ist_familie_magic(779999)
+            and not ist_familie_magic(749999) and not ist_familie_magic(780000)
+            and not ist_familie_magic(SOLO_MAGIC) and not ist_familie_magic(0)
+            and not ist_familie_magic(None) and not ist_familie_magic("x")
+            and ist_familie_magic("751002"))
+    _inline(_mf1_familie)
 
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
     results.append(_test_sicher(test_terminal_pids_ohne_wmic))

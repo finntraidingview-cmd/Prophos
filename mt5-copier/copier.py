@@ -802,15 +802,36 @@ MAGIC_UMZUG = {26674215: 779215, 26674216: 779216}
 # die letzten freien Bloecke) — nach unten, damit Bestand UND 779er-Umzugs-
 # Reservat exakt unangetastet bleiben. Neue PC-Bloecke ab jetzt in dieser
 # Reihenfolge: 777000, 778000, dann 760000, 761000, … 769000.
-FAMILIE_MIN = 760000
+# MF1 (18.11.2026, Finn: „ich brauche neue magic base nummern"): Familie war
+# wieder voll (760000-771000 + 773000-778000 belegt, 772000 erst nach Abbau von
+# Jacobs altem PC frei, 779000 = Umzugs-Reservat). Zweites Mal nach UNTEN
+# erweitert auf 750000 — gleicher Grund wie am 11.09.: Bestand und 779er-
+# Reservat bleiben exakt unangetastet. Vorher belegt: im Code (copier, panel,
+# provision, order_bot, polar, HedgeReader, app.py, prophos.html, Vorlagen) und
+# in der DB liegt keine magic in 750000-759999; nach oben ginge nicht sauber,
+# dort liegt SOLO_MAGIC 790001 (muss AUSSERHALB bleiben). Neue PC-Bloecke ab
+# jetzt in dieser Reihenfolge: 750000, 751000, … 759000.
+# ROLLOUT: einen 75xxxx-Block erst vergeben, wenn ALLE PCs am geteilten Fusion-
+# Konto diesen Copier laufen haben — ein alter Copier haelt 75xxxx-Hedges sonst
+# fuer FREMD (hedge_fremde-Alarm).
+FAMILIE_MIN = 750000
 FAMILIE_MAX = 779999
+
+
+def ist_familie_magic(magic):
+    """REIN RECHNEND (testbar, MF1 18.11.2026): gehoert die magic einer Position
+    am geteilten Hedge-Konto zur Prophos-Flotte (= kein hedge_fremde-Alarm)?"""
+    try:
+        return FAMILIE_MIN <= int(magic) <= FAMILIE_MAX
+    except (TypeError, ValueError):
+        return False
 
 # ── Eigenstaendige Fusion-Position („Solo-Hedge", 24.09.2026 abends) ──────────
 # Finn: „Winning Days jetzt gegenhedgen, ohne Duplikum: Puls platziert in
 # TradingView, direkt danach geht auf Fusion die Gegen-Order im Verhaeltnis rein,
 # und sobald NQ den Take Profit (+ 2–3 Punkte) erreicht, wird sie geschlossen."
 # Die Position gehoert zu KEINEM Master-Snapshot — deshalb eine magic AUSSERHALB
-# der Familie 760000–779999: kein Copier auf keinem PC am geteilten Fusion-Konto
+# der Familie 750000–779999 (seit MF1 18.11.2026): kein Copier auf keinem PC am geteilten Fusion-Konto
 # haelt sie fuer einen eigenen Hedge ohne Master und schliesst sie (hedge_book
 # filtert nach fleet_magics UND Kommentar '<prefix>-<Ziffern>'; der Kommentar
 # hier traegt bewusst keinen Bindestrich-Ziffern-Block). Befehle kommen vom
@@ -2055,7 +2076,7 @@ def main():
     # ── Gezielter Magic-Umzug (11.09.2026, s. Kommentar an MAGIC_UMZUG) ─────────
     # Bewusst erst NACH dem Hedge-Connect: umgezogen wird nur, wenn auf dem
     # Hedge-Konto KEINE Position mit der alten magic liegt — sonst wuerde ein
-    # laufender Hedge zur unsichtbaren Waise (die Familie 760000-779999 loest
+    # laufender Hedge zur unsichtbaren Waise (die Familie 750000-779999 loest
     # keinen hedge_fremde-Alarm aus). Blockiert eine Position (auch die eines
     # fremden PCs mit Kollisions-magic), versucht es der naechste Copier-
     # Neustart wieder. Ein Fehler hier darf den Copier nie aufhalten.
@@ -3003,8 +3024,8 @@ def main():
             # FREMDE Positionen auf dem Hedge-Konto (18.08.2026, Finns Wunsch:
             # auch eine Slave-Order sehen, die der Copier gar nicht kennt —
             # z.B. von Hand eroeffnet). 'Fremd' = Magic ausserhalb der
-            # Prophos-Familie FAMILIE_MIN-FAMILIE_MAX (seit 11.09.2026
-            # 760000-779999): die Hedges der ANDEREN PCs am selben
+            # Prophos-Familie FAMILIE_MIN-FAMILIE_MAX (seit MF1 18.11.2026
+            # 750000-779999): die Hedges der ANDEREN PCs am selben
             # Hedge-Konto tragen Familien-Magics und sind kein Alarm.
             fremde, solo = [], []
             try:
@@ -3014,7 +3035,7 @@ def main():
                     raise RuntimeError("positions_get None")
                 for p_ in _pos_alle:
                     mg = int(getattr(p_, "magic", 0) or 0)
-                    if FAMILIE_MIN <= mg <= FAMILIE_MAX:
+                    if ist_familie_magic(mg):
                         continue
                     if mg == SOLO_MAGIC:
                         # Solo-Hedge (24.09.2026): kein Alarm, eigene Liste — Prophos zeigt
