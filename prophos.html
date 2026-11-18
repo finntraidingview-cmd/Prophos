@@ -14420,9 +14420,8 @@
                     <th>Person</th>
                     <th>Angefragt</th>
                     <th>Account</th>
-                    <th>Liegt bei</th>
+                    <th>Status</th><!-- PU4 (Finn 18.11.2026): „Liegt bei“ → „Status“, Notiz steht klein darunter (eigene Spalte entfällt) -->
                     <th class="adm-num">Betrag</th>
-                    <th>Notiz</th>
                     <th></th>
                   </tr></thead>
                   <tbody id="adm-f-pend-rows"></tbody>
@@ -20209,21 +20208,19 @@
     /* PU3 HAND-NOTIZ JE PAYOUT-ANFRAGE (Finn 18.11.2026, „Payouts unterwegs“ Spalte Notiz: „bitte hier auch Notiz hinzufügen…“): „+ Notiz“ wie im Radar
      * (Bestanden/Review, dieselben Klassen .wdl-bst-notiz / .wdl-bst-notiz-feld). Klick → Feld, Enter/Blur speichert, Esc bricht ab, leeren = löschen.
      * Gespeichert in pending_payouts.admin_notiz über PATCH /admin/payout-notiz (Service-Key, Rechte wie Approved) — NICHT notes (automatischer Text,
-     * wandert beim Erhalten in die Buchung) und NICHT liegt_bei (Mail-Matcher). admin_notiz null = Spalte fehlt (SQL noch nicht eingespielt) → kein Knopf.
-     * Der automatische Text bleibt klein/grau darunter, voll im Tooltip. Das Feld überlebt einen Neuaufbau: _admPendNotizEdit hält id + Text. */
+     * wandert beim Erhalten in die Buchung) und NICHT liegt_bei (Mail-Matcher). Das Feld überlebt einen Neuaufbau: _admPendNotizEdit hält id + Text.
+     * PU4 (Finn 18.11.2026): steht jetzt klein UNTER dem Status-Chip (Spalte „Status“, eigene Notiz-Spalte entfällt); der automatische Text nur noch
+     * im Tooltip des Status. Knopf hängt NICHT mehr an admin_notiz vom Backend (Finn sah auf .2257 keinen Knopf: Railway war noch nicht neu bzw. der
+     * gemerkte Admin-Stand aus IndexedDB kannte das Feld nicht) — fehlt die Spalte wirklich, sagt es das PATCH (409 „Spalte fehlt“ → Toast). */
     const ADM_PEND_NOTIZ_MAX = 200
     let _admPendNotizEdit = null   // { id, text }
     function admPendNotizZelle(td, t){
       if(!td || !t) return
       td.textContent = ''
-      const zelle = td
-      td = document.createElement('div')
-      td.style.cssText = 'min-width:150px;max-width:220px'   // Handy: Tabelle quetscht die Spalte sonst auf wenige Zeichen
-      zelle.appendChild(td)
-      if(t.id && t.admin_notiz != null){
+      if(t.id){
         const txt = String(t.admin_notiz || '')
         const box = document.createElement('div')
-        if(t.notes) box.style.marginBottom = '2px'
+        box.style.cssText = 'margin-top:3px;max-width:240px'
         if(_admPendNotizEdit && _admPendNotizEdit.id === String(t.id)){
           const i = document.createElement('input')
           i.type = 'text'; i.className = 'wdl-bst-notiz-feld'; i.maxLength = ADM_PEND_NOTIZ_MAX; i.placeholder = 'Notiz'
@@ -20244,13 +20241,6 @@
           box.appendChild(bt)
         }
         td.appendChild(box)
-      }
-      if(t.notes){
-        const a = document.createElement('div')
-        a.className = 'pp-note'
-        a.style.cssText = 'color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
-        a.textContent = t.notes; a.title = t.notes
-        td.appendChild(a)
       }
     }
     async function admPendNotizSpeichern(t, wert){
@@ -20939,8 +20929,7 @@
             if(!voll){ el.textContent = '—'; return }
             const teile = voll.split(' · ')
             const st = ADM_PEND_STUFE[String(teile[0] || '').trim().toLowerCase()]
-            const td = el.closest('td'); if(td) td.title = voll
-            if(!st){ el.textContent = voll; return }   // Hand-Text ohne Matcher-Stufe
+            if(!st){ el.textContent = voll; return }   // Hand-Text ohne Matcher-Stufe (Tooltip setzt der Aufrufer, PU4)
             const chip = document.createElement('span')
             chip.className = st[1]; chip.textContent = st[0]
             el.style.whiteSpace = 'nowrap'   // Chip + Datum immer in einer Zeile
@@ -20963,7 +20952,7 @@
             kopf.dataset.art = b.k
             kopf.innerHTML = '<td colspan="4" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
               + '<td class="adm-num tnum pp-block-sum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--warn-ink, #b45309)"></td>'
-              + '<td colspan="2" style="background:var(--bg2);text-align:right;padding-top:12px"><span class="pp-block-m tnum" style="font-weight:700;color:var(--warn-ink, #b45309)"></span></td>'
+              + '<td style="background:var(--bg2);text-align:right;padding-top:12px"><span class="pp-block-m tnum" style="font-weight:700;color:var(--warn-ink, #b45309)"></span></td>'
             kopf.children[0].children[0].textContent = b.titel
             kopf.children[0].children[1].textContent = `${b.list.length} Anfrage${b.list.length === 1 ? '' : 'n'}`
               + (b.k === 'sonst' ? ' · Konto ohne Kontoart' : '')
@@ -20982,9 +20971,8 @@
               `<td style="color:var(--sub);font-size:12.5px">${d ? d.toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'}` +
               (daysStr ? ` <span style="color:${days >= 14 ? 'var(--danger)' : 'var(--sub)'};font-size:11px">· ${daysStr}</span>` : '') + '</td>' +
               '<td><span class="pp-acc" style="font-size:12.5px"></span></td>' +
-              '<td><span class="pp-bei"></span></td>' +
+              '<td class="pp-status-td"><div class="pp-bei"></div><div class="pp-note-box"></div></td>' +   // PU4: Status-Chip + Datum, darunter klein „+ Notiz“
               `<td class="adm-num" style="font-weight:600;color:var(--warn-ink, #b45309)">${admEur.format(Number(t.amount) || 0)}</td>` +
-              '<td class="pp-note-td" style="font-size:12px"></td>' +
               `<td style="text-align:right;white-space:nowrap">${admPayoutSchrittHtml(t)}</td>`
             // PA1 (Finn 12.11.2026): erst [Approved] (Konto fährt wieder, keine Buchung), dann „Approved am …“ + [✓ erhalten] (bucht wie bisher, Modal);
             // ohne id (älterer Backend-Stand) kein Knopf
@@ -20992,7 +20980,10 @@
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
             admPendBeiFuellen(tr.querySelector('.pp-bei'), t.liegt_bei)   // PU2: Status-Chip statt Mail-Satz
-            admPendNotizZelle(tr.querySelector('.pp-note-td'), t)   // PU3: Hand-Notiz + automatischer Text klein darunter
+            // PU4: automatischer Text (notes, „Aus Admin angefragt · vorher: …“) nicht mehr sichtbar — nur im Tooltip des Status, unter dem Mail-Text
+            const beiEl = tr.querySelector('.pp-bei')
+            if(beiEl) beiEl.title = [String(t.liegt_bei || '').trim(), String(t.notes || '').trim()].filter(Boolean).join('\n')
+            admPendNotizZelle(tr.querySelector('.pp-note-box'), t)   // PU3/PU4: Hand-Notiz klein unter dem Chip
             tb.appendChild(tr)
           }
         }
