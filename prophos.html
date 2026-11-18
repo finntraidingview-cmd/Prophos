@@ -6059,6 +6059,8 @@
   #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
   #dashboard-view .wdl-tab-sek-bestanden{--wdl-sek:#15803d}
   #dashboard-view .wdl-tab-sek-review{--wdl-sek:#15803d}
+  #dashboard-view .wdl-tab-sek-wt{--wdl-sek:#15803d}   /* BS1 19.11.2026: Waiting for Payout (On Demand) wie Review */
+  #dashboard-view .wdl-bst-hand-hinweis{margin:-4px 2px 10px;font-size:12px;font-weight:600;color:var(--warn-ink, #b45309)}   /* BS1: andere IDs nicht frisch geladen */
   #dashboard-view .wdl-tab-sek-geblowt{--wdl-sek:#b91c1c}
   #dashboard-view .wdl-tab-sek-geparkt{--wdl-sek:#d97706}
   #dashboard-view .wdl-tab-sek-tage{--wdl-sek:#B45309}   /* Tage farmen (13.10.2026): amber wie der Status „Tage sammeln" */
@@ -6168,6 +6170,8 @@
      Name ab 100 px — zusammen 908 px statt 862 */
   #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(100px,1fr) 140px 216px 80px 88px 116px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}
   #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer ri mi konto datum pl pl" "wer ri mi zeit zeit zeit zeit"}
+  /* BS1 19.11.2026: Waiting for Payout ohne Knopf → Status-Chip über Status + Zeit (sonst „Waiting for Pay…“); Handy (≤ 820 px) bleibt beim Bestanden-Raster */
+  @media (min-width:821px){ #dashboard-view .wdl-tab-bst.wdl-tab-sek-wt .wdl-z{grid-template-areas:"wer ri mi konto datum pl pl"} #dashboard-view .wdl-tab-bst.wdl-tab-sek-wt .wdl-z-kopf .wdl-z-zeit{display:none} }
   /* NOTIZ JE KONTO IN REVIEW (Finn 30.10.2026: „OK, warten auf KYC"): eigene Spalte neben dem Status; dafür Mitte, Tage und Status schmaler, Zeit breiter für „im Login von …" */
   #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z{grid-template-columns:minmax(90px,1fr) 140px 168px 36px 76px 68px minmax(100px,1.2fr) 112px;column-gap:10px;grid-template-areas:"wer ri mi konto datum pl notiz zeit"}
   #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto datum pl notiz zeit" "sw sw sw sw sw sw sw sw"}
@@ -6343,6 +6347,7 @@
     /* Bestanden-Datum am Handy (21.10.2026): eigene Zeile direkt unter dem Konto-Namen, linksbündig */
     #dashboard-view .wdl-tab-bst .wdl-z{grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit"}
     #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer wer wer wer" "datum datum datum datum" "ri mi mi mi" "pl pl pl pl" "zeit zeit zeit zeit"}
+    #dashboard-view .wdl-tab-bst.wdl-tab-sek-wt .wdl-z{grid-template-areas:"wer wer wer wer" "datum datum pl pl" "ri ri mi mi"}   /* BS1: „Waiting for Payout“ ganz, Phase-Chip ganz */
     #dashboard-view .wdl-z-datum{text-align:left;padding-left:14px}
     #dashboard-view .wdl-tab-bst .wdl-z-kopf .wdl-z-datum{display:none}
     #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;column-gap:4px;grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit" "notiz notiz notiz notiz"}
@@ -21319,7 +21324,7 @@
         const wd = cal.filter(istWd)
           .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
         // PO1 (Finn 09.11.2026): anfragbar oben — fällige Termine (heute/überfällig) und erfüllte On-Demand-Konten zuerst, sonst wie bisher nach Termin
-        const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!(r.calc.od && r.calc.od.ok === true)) ? 0 : 1
+        const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!((r.calc.od && r.calc.od.ok === true) || r.waiting_since)) ? 0 : 1   // BS1: Waiting ohne Termin = anfragbar
         const cfd = cal.filter(r => !istWd(r))
           .sort((a, b) => (cfdAnf(a) - cfdAnf(b)) || String(a.calc.tag || '9999').localeCompare(String(b.calc.tag || '9999')) || String(a.person || '').localeCompare(String(b.person || '')))
         if(wd.length) gruppen.push(['wd', wd])
@@ -21399,8 +21404,18 @@
               }
               st.appendChild(chip)
             }else{
-              const chip = document.createElement('span'); chip.className = 'chip chip-neutral'
+              // BS1 (Finn 19.11.2026 ~02:30 Dubai, Kasse → Payouts → CFD · Waiting for Payout: „ich kann hier nix anklicken bei On-Demand-Acc“ — Marc FundedNext
+              // …7821 „seit heute“, Ina 19 Tage): das Konto steht im Waiting for Payout (waiting_payout_since) und hat keine offene Anfrage → der Chip ist ein Knopf
+              // und öffnet dieselbe Anfrage wie „jetzt anfragbar“/„heute anfragbar“ (admAnfrageOeffnen). Vorher nur bei On Demand mit od.ok === true — ist das
+              // Urteil von /konto-ziele noch nicht geladen oder nicht lesbar (ok null), blieb die Zeile ohne Weg. Ohne Waiting-Datum bleibt es ein Hinweis.
+              const wartetAnf = !!r.waiting_since && !offen
+              const chip = document.createElement(wartetAnf ? 'button' : 'span'); chip.className = 'chip ' + (wartetAnf ? 'chip-good' : 'chip-neutral')
               chip.textContent = wartetTxt
+              if(wartetAnf){
+                chip.type = 'button'; chip.style.cssText = 'border:0;cursor:pointer'
+                chip.title = `Payout für ${admShortName(r.person || '—')} anfragen`
+                chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
+              }
               st.appendChild(chip)
               if(od && od.fehlt){
                 // PO1: On Demand noch nicht erfüllt → der fehlende Punkt kurz darunter („Consistency 52 % > 40 %“)
@@ -40517,9 +40532,56 @@
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
       // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ bstNotizAbgleich(d) }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) await archivCloudAbgleich() }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; _hand.fehlVersuche = 0; handRadarMerken(d); handZielAbgleich(d); bstLokalAnwenden(d); try{ bstNotizAbgleich(d) }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) await archivCloudAbgleich() }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
-    finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
+    finally{
+      _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender()
+      // BS1: abgebrochen/Fehler → bald neu versuchen (5 s, höchstens HAND_SCHNELL_MAX-mal), nicht erst im 60-s-Takt; der Radar zeigt so lange den gemerkten Stand + Hinweis
+      if(_hand.fehler){
+        _hand.fehlVersuche = (_hand.fehlVersuche || 0) + 1
+        try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){}
+        if(_hand.fehlVersuche <= HAND_SCHNELL_MAX && !_hand.schnell) _hand.schnell = setTimeout(() => { _hand.schnell = null; try{ handLaden() }catch(_){} }, 5000)
+      }
+    }
+  }
+  /* LETZTER GUTER BESTANDEN-STAND (BS1, Finn 19.11.2026 ~02:30 Dubai, Radar → Bestanden zeigte nur „Review · 1“ statt 17 Konten: „wo sind die ganzen Accounts
+   * bei Bestanden hin?“). URSACHE (Railway-HTTP-Log): der erste /admin/handarbeit-Abruf von Finns Mac nach dem Öffnen kam um 02:29:25 mit 499 an (Fetch abgebrochen —
+   * der Mac meldete laufend net::ERR_NETWORK_CHANGED), der nächste gute erst 02:35. Bis dahin war _hand.d leer, und bstZeilen nimmt die Konten ALLER anderen IDs
+   * nur aus _hand.d.radar_bestanden → übrig blieb still das eine eigene Konto, ohne Hinweis. Jetzt: (1) jede gute Antwort merkt die Radar-Listen (radar_bestanden,
+   * radar_waiting) je ID in localStorage — wenige KB, try/catch (Speicher voll → nur ohne Merker); (2) fehlt _hand.d (Abbruch, frischer Tab), nimmt der Radar diesen
+   * Stand (höchstens HAND_MERK_MAX_MS alt); (3) der Kopf von Bestanden sagt, dass die anderen IDs gerade nicht frisch geladen sind; (4) Fehler → Wiederholung nach 5 s. */
+  const HAND_MERK_KEY = 'prophos_hand_radar_v1', HAND_MERK_MAX_MS = 12 * 3600000, HAND_SCHNELL_MAX = 6
+  function handRadarMerken(d){
+    try{
+      const ohneLokal = arr => Array.isArray(arr) ? arr.filter(z => z && !z.lokal) : null
+      localStorage.setItem(HAND_MERK_KEY, JSON.stringify({ uid: String(currentUserId || ''), at: Date.now(), radar_bestanden: ohneLokal(d.radar_bestanden), radar_waiting: ohneLokal(d.radar_waiting) }))
+    }catch(_){}
+  }
+  function handRadarGemerkt(){
+    try{
+      const m = JSON.parse(localStorage.getItem(HAND_MERK_KEY) || 'null')
+      if(!m || String(m.uid) !== String(currentUserId || '') || !(Date.now() - Number(m.at) < HAND_MERK_MAX_MS)) return null
+      return m
+    }catch(_){ return null }
+  }
+  // Liste der anderen IDs für den Radar (feld = 'radar_bestanden' | 'radar_waiting'): frische Antwort, sonst der gemerkte Stand, sonst [] — wie vorher
+  function handRadarListe(feld){
+    const d = typeof _hand !== 'undefined' ? _hand.d : null
+    if(d){
+      if(feld === 'radar_bestanden') return d.radar_bestanden || (d.gruppen && d.gruppen.bestanden) || []
+      return Array.isArray(d[feld]) ? d[feld] : []
+    }
+    const m = handRadarGemerkt()
+    return (m && Array.isArray(m[feld])) ? m[feld] : []
+  }
+  // Hinweis im Kopf von Bestanden: leer, solange die Liste frisch ist
+  function handRadarHinweis(){
+    if(typeof _hand === 'undefined' || (_hand.d && !_hand.fehler)) return ''
+    const m = !_hand.d ? handRadarGemerkt() : null
+    const uhr = ts => new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if(_hand.d) return `andere IDs: Stand ${uhr(_hand.at)} — Neuladen gescheitert, versucht es wieder`
+    if(m) return `andere IDs: gemerkter Stand ${uhr(m.at)} — ${_hand.fehler ? 'Verbindung weg, lädt neu' : 'lädt …'}`
+    return _hand.fehler ? 'andere IDs nicht geladen (Verbindung weg) — lädt neu' : 'andere IDs laden …'
   }
   /* ZIEL-TAG FÜR EIGENE KONTEN NACHZIEHEN (14.10.2026, Finn im Login „Finn + Pascal": FundedNext Futures 150k …7926 abgehakt, 157.999,68 →
    * Ziel 158.000 — das Konto tauchte weder unter Erledigt noch unter Bestanden → Review auf). Die Ziel-Wache (Railway, 5-min-Takt) setzte
@@ -42625,7 +42687,7 @@
       // .1480 (13.10.2026, Finn in Moritz' Login: FundingPips 20429722 Phase 1 hatte seit 09.10. das Ziel, stand aber in keinem Radar):
       // /admin/handarbeit liefert {gruppen:{bestanden:[…]}} — hier stand _hand.d.bestanden, also immer leer → fremde Konten fehlten seit 09.10.
       // .1520: radar_bestanden = bestandene Konten ALLER IDs (auch im Login ohne Admin-E-Mail); ältere Backends → gruppen.bestanden
-      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => bstServerZeileGilt(z, eigeneIds, archB))   // EIGENE ID AUCH (14.10.2026, Finn: „dass ich immer alles auch von meiner eigenen ID sehe" — FundedNext …7926 fiel durch, weil `accounts` den Ziel-Tag noch nicht kannte): ein eigenes Konto, das bstKonten (lokal) nicht hat, kommt aus der Server-Liste — mit lokalem Konto als volle eigene Zeile samt Knopf (unten), ohne lokales Konto als Lese-Zeile
+      const fremd = handRadarListe('radar_bestanden').filter(z => bstServerZeileGilt(z, eigeneIds, archB))   // BS1 19.11.2026: ohne frische Antwort der gemerkte Stand   // EIGENE ID AUCH (14.10.2026, Finn: „dass ich immer alles auch von meiner eigenen ID sehe" — FundedNext …7926 fiel durch, weil `accounts` den Ziel-Tag noch nicht kannte): ein eigenes Konto, das bstKonten (lokal) nicht hat, kommt aus der Server-Liste — mit lokalem Konto als volle eigene Zeile samt Knopf (unten), ohne lokales Konto als Lese-Zeile
         .map(z => {
           const lok = String(z.user_id) === ich ? (accounts || []).find(a => a && String(a.id) === String(z.konto_id)) : null
           if(lok){   // eigenes Konto, lokal ohne Ziel-Tag → Tag der Ziel-Wache übernehmen und wie bstKonten zeichnen (Knopf → Phase/Funded)
@@ -42671,6 +42733,45 @@
             + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a).replace(/>Tage sammeln \d+\/\d+</, '>Tage sammeln<') : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindesttage: ${Math.min(mt.count, mt.target)} von ${mt.target}">Tage sammeln</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
             + (fehlt ? '' : bstNotizZelle(x.kid, x.uid))
+            + '</div>' }
+        })
+    }
+    /* WAITING FOR PAYOUT (BS1, Finn 19.11.2026 ~02:30 Dubai, Radar → Bestanden: „da müssen auch die hin, die On Demand sind“ — Marc FundedNext …7821
+     * „Waiting for Payout · seit heute“ stand nur in Admin → Kasse): On-Demand-Funded-Konten im Waiting for Payout als eigene Station unter Review.
+     * Dieselbe Zeile wie Tage sammeln/Review (Klassen, Spalten, Sortierung nach Zeit), Zeitpunkt = waiting_payout_since. Eigene Konten aus `accounts`
+     * (onDemand + waitingPayoutSince, nicht deaktiviert/archiviert), fremde aus /admin/handarbeit radar_waiting (app.py hand_radar_waiting). Nur Anzeige:
+     * angefragt wird wie bisher in Admin → Kasse → Payouts („Payout anfragen“), danach fällt das Konto hier von selbst heraus (Waiting leer). */
+    const wtZeilen = () => {
+      const ich = String(currentUserId || ''); if(!ich) return []
+      const ichName = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich'
+      const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+      let arch = {}; try{ arch = getArchive() || {} }catch(_){}
+      const archiviert = kid => !!(arch[String(kid)] && arch[String(kid)].archived)
+      const gross = (name, start) => { let g = 0; try{ g = Number(kontoGroesseAnzeige(name, start, null)) || 0 }catch(_){} return g }
+      const eigenKonten = (accounts || []).filter(a => a && a.onDemand === true && a.waitingPayoutSince && !a.deaktiviertAt && !archiviert(a.id))
+      const eigeneIds = new Set((accounts || []).filter(Boolean).map(a => String(a.id)))
+      const eigen = eigenKonten.map(a => {
+        const b = (typeof planKontoBalance === 'function' && planKontoBalance(a)) || null
+        return { uid: ich, user: ichName, kid: String(a.id), firma: a.firm, name: a.name, gr: gross(a.name, a.startingBalance), typ: String(a.type || ''),
+          e4: String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), seit: a.waitingPayoutSince, bal: b && isFinite(b.val) ? b.val : null }
+      })
+      const quelle = handRadarListe('radar_waiting')
+      const fremd = quelle.filter(z => z && z.konto_id && !eigeneIds.has(String(z.konto_id)) && !archiviert(z.konto_id)).map(z => ({
+        uid: String(z.user_id || ''), user: z.user || '?', kid: String(z.konto_id), firma: z.firma, name: z.konto, gr: gross(z.konto, z.start_balance),
+        typ: String(z.typ || ''), e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), seit: z.seit, bal: num(z.bal) }))
+      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person)
+        .map(x => Object.assign(x, { ts: x.seit ? String(x.seit) : null }))
+        .sort(bstTsSort)
+        .map(x => {
+          const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
+          const k = bstZeitKurz(x.seit, false)
+          return { ts: x.ts, kid: x.kid, html: `<div class="wdl-z wdl-z-bst wdl-z-wt" style="--wdl-id:${idFarbe(x.uid)}">`
+            + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
+            + `<span class="wdl-z-ri"><span class="wdl-bst-phase type-${escapeHtml(x.typ || 'funded_cfd')}" title="Funded mit Add-on On Demand">Funded · On Demand</span></span>`
+            + zelle('mi', x.bal != null ? de(x.bal) : '–', { tip: x.bal != null ? 'Balance (letzte Lesung)' : 'Balance nur im Login des Kontos bekannt' })
+            + zelle('konto', '–', { tip: 'On Demand: keine Mindesttage' })
+            + `<span class="wdl-z-datum" title="${escapeHtml('Waiting for Payout seit ' + k.tip)}">${k.txt}</span>`
+            + `<span class="wdl-z-pl wdl-bst-ok" title="Ziel erreicht — wartet auf den Payout. Anfragen in Admin → Kasse → Payouts (Payout anfragen)"><span class="type-badge acc-ziel-chip">Waiting for Payout</span></span>`
             + '</div>' }
         })
     }
@@ -42725,8 +42826,7 @@
         // raus aus „Rest von Hand" (die Ziel-Wache taggt es eben, Tage sammeln/Review holt es). Fremde Konten mit Ziel-Tag (handarbeit) ebenso.
         const rvhSt = (wdl.rvhBal || {})[kid] || {}, rvhLauf = !!rvhSt.laeuft
         if(rvhSt.amZiel) continue
-        if(!eigen && kid && (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])
-          .some(z => z && String(z.konto_id) === kid && z.seit))) continue
+        if(!eigen && kid && handRadarListe('radar_bestanden').some(z => z && String(z.konto_id) === kid && z.seit)) continue   // BS1: dieselbe Quelle wie bstZeilen
         // JÜNGERE KONTO-BALANCE (21.10.2026, Moritz Tradeify …4572: Rest von Hand geholt, Puls las 15:29 159.013 — die Zeile rechnete weiter mit
         // 158.945 vom Trade-Ende 15:04): liegt die Konto-Balance (accounts.tv_balance) zeitlich NACH dem Trade-Ende, gilt sie; am Ziel → raus
         const kbJ = n(t.konto_balance), kbAt = Date.parse(t.konto_balance_at || '') || 0, endeTs = Date.parse(t.ended_at || t.completed_at || '') || 0
@@ -42784,7 +42884,13 @@
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage', 'Heute getradet')
         + bstTab([...rev, ...zz.filter(z => !z.fehlt)].sort(bstTsSort), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
-      return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
+      // BS1 (19.11.2026): On Demand im Waiting for Payout als letzte Station (wtZeilen) — Fehler hier nehmen nur diese Station mit
+      let wt = []; try{ wt = wtZeilen() }catch(e){ console.warn('[radar] Waiting for Payout', (e && e.message) || e); wt = [] }
+      const kaestenWt = kaesten + bstTab(wt, 'Waiting for Payout', 'On Demand: Ziel erreicht, wartet auf den Payout — anfragen in Admin → Kasse → Payouts', 'wdl-tab-sek-wt', 'Wartet seit')
+      // BS1: andere IDs gerade nicht frisch (Abruf abgebrochen/läuft) → schmale Zeile über den Stationen statt stiller Leere (auch am Handy sichtbar)
+      const hw = handRadarHinweis()
+      const hinweisZeile = hw ? `<div class="wdl-bst-hand-hinweis" title="Die Konten der anderen IDs kommen von Railway (/admin/handarbeit). Der letzte Abruf ist gescheitert oder läuft noch — angezeigt wird der zuletzt gemerkte Stand; eigene Konten sind immer aktuell.">${escapeHtml(hw)}</div>` : ''
+      return { html: hinweisZeile + kaestenWt, n: (bestTr || []).length + rvh.length + zz.length + rev.length + wt.length }
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto · Boden → Ziel', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -42875,13 +42981,13 @@
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
         + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · <button type="button" class="wdl-vm-weg" data-wdl-vm-weg="1" title="Alle zurück nach „Erledigt" — dann öffnet der Klick wieder das Popup">${vorgemerktN} vorgemerkt ×</button> P&L vorläufig, wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
-        + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
+        + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review → Waiting for Payout', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
     // Bestanden-Zeilen (08.10.2026, seit 09.10.2026 eigener Abschnitt) auch ohne Trades im Zeitraum zeigen — sonst stünde nur „Keine Trades"
-    liste.innerHTML = (trades.length || bstZeilen().length) ? gruppen(trades, modellTrades)
+    liste.innerHTML = (trades.length || bstZeilen().length || wtZeilen().length) ? gruppen(trades, modellTrades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
@@ -98060,7 +98166,7 @@ ${stBlock}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-pruef{--wdl-sek:#f58347}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#e45858}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
-:where([data-theme=dark]) #dashboard-view .wdl-tab-sek-bestanden,:where([data-theme=dark]) #dashboard-view .wdl-tab-sek-review{--wdl-sek:#6ae799}
+:where([data-theme=dark]) #dashboard-view .wdl-tab-sek-bestanden,:where([data-theme=dark]) #dashboard-view .wdl-tab-sek-review,:where([data-theme=dark]) #dashboard-view .wdl-tab-sek-wt{--wdl-sek:#6ae799}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-geblowt{--wdl-sek:#e86868}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-geparkt{--wdl-sek:#f6ae5a}
 :where([data-theme=dark]) #dashboard-view .wdl-tab-sek-tage{--wdl-sek:#f69e5a}

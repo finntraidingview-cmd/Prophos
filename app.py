@@ -17798,6 +17798,25 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
     return out
 
 
+def hand_radar_waiting(konten, archiv, namen, ausgeblendet):
+    """REIN RECHNEND (testbar, BS1 19.11.2026 — Finn, Radar → Bestanden: „da müssen auch die hin, die On Demand sind“): On-Demand-Funded-Konten
+    im Waiting for Payout (accounts.on_demand + waiting_payout_since, nicht deaktiviert, nicht archiviert, ID nicht ausgeblendet) als Zeilen für
+    den Radar-Abschnitt Bestanden → Station „Waiting for Payout“. Nur Anzeige: dieselben Felder wie die bestanden-Zeilen (basis), seit =
+    waiting_payout_since. Angefragt wird wie bisher über Admin → Kasse → Payouts. Neueste zuerst."""
+    out = []
+    for a in konten or ():
+        kid, uid = str(a.get("id") or ""), str(a.get("user_id") or "")
+        if (not kid or not a.get("on_demand") or not a.get("waiting_payout_since") or a.get("deaktiviert_at")
+                or kid in (archiv or ()) or uid in (ausgeblendet or ())):
+            continue
+        out.append({"art": "waiting", "user_id": uid, "user": (namen or {}).get(uid, ""), "konto_id": kid, "firma": a.get("firm") or "",
+                    "konto": a.get("name") or "", "ende4": str(a.get("external_id") or "").strip()[-4:], "typ": a.get("account_type"),
+                    "start_balance": _wd_num(a.get("starting_balance")), "seit": a.get("waiting_payout_since"),
+                    "bal": _wd_num(a.get("tv_balance"))})
+    out.sort(key=lambda z: str(z.get("seit") or ""), reverse=True)
+    return out
+
+
 @app.route("/admin/handarbeit", methods=["GET", "OPTIONS"])
 def admin_handarbeit():
     """GET → {ok, at, n, gruppen: hand_gruppen(…)} für die Sicht des Logins (siehe oben)."""
@@ -17907,8 +17926,19 @@ def admin_handarbeit():
         if lese_g:
             aus_radar = set(namen) - set(lese_g)
         radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, aus_radar, datetime.now(timezone.utc), None, tage_je)["bestanden"]
+        # BS1 (19.11.2026): On Demand im Waiting for Payout — eigene Abfrage, ein Fehler hier nimmt nur diese Station mit (None = nicht lesbar,
+        # der Radar zeigt dann einen Hinweis statt still nichts), nie die Bestanden-Liste
+        try:
+            radar_wait = hand_radar_waiting(_sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
+                                                                                    "on_demand,waiting_payout_since,deaktiviert_at,tv_balance",
+                                                                      on_demand="is.true", waiting_payout_since="not.is.null")),
+                                            archiv, namen, aus_radar)
+        except Exception as e_w:
+            print(f"[handarbeit] ⚠️ radar_waiting: {type(e_w).__name__}: {e_w}", flush=True)
+            radar_wait = None
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
-                   "planer_gelesen": gelesen, "radar_bestanden": radar_best, "review_notizen": hand_review_notizen(_review_notizen_lesen(), ein, ausgeblendet)}
+                   "planer_gelesen": gelesen, "radar_bestanden": radar_best, "radar_waiting": radar_wait,
+                   "review_notizen": hand_review_notizen(_review_notizen_lesen(), ein, ausgeblendet)}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
         alt = stand_alt_holen(("handarbeit", schluessel), e)    # Supabase kurz weg (09.10.2026) → letzter guter Stand dieser Sicht
