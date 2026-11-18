@@ -4728,7 +4728,15 @@
   #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf{display:none}
   /* Master | Fusion (30.10.2026): Kopfzeile wieder da, Lots/TP/SL breiter, Fusion gedämpft rechts daneben */
   /* KARTE EINZEILIG (30.10.2026): TP/SL tragen „+71 $ ↔ −36 €“ (pzPaarZelle) → beide Spalten breiter, Konto/Balance geben Platz ab */
-  #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.pz-pz):not(:has(.apg-mfz)){grid-template-columns:minmax(180px,1.3fr) 110px 84px minmax(110px,1fr) 76px 112px 112px minmax(100px,auto);column-gap:12px}
+  #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.pz-pz):not(:has(.apg-mfz)){grid-template-columns:minmax(180px,1.3fr) 110px 84px minmax(110px,1fr) 88px 112px 112px minmax(100px,auto);column-gap:12px}   /* Fusion 76 → 88 px (FZ1, 18.11.2026): „Hedge 1.279 €“ ganz */
+  /* FZ1 ZAHL KOMPLETT (Finn 18.11.2026: „mach dass man immer die Zahl komplett sieht“): „+18.266 $ ↔ −3.040 €“ passte nicht in 112 px und wurde
+     abgeschnitten → im Funded-Planer zweizeilig wie „11,00 Lot / Hedge 279 €“ daneben: Master $ oben, „↔ Fusion €“ klein darunter (reicht bis 6-stellig) */
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-pz{display:inline-grid;grid-template-columns:auto auto;justify-content:start;align-items:baseline;column-gap:4px;row-gap:1px;line-height:1.25;vertical-align:middle}
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-pz > b:first-child{grid-column:1/-1}
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-pz > i,#ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-pz b + i + b{font-size:11px}
+  /* unter 1360 px blendet #dashboard-view die Spalte „Fusion“ (Lot/Hedge) aus — das Raster hatte sie trotzdem, TP rutschte in die 76-px-Spalte
+     und alles lief über den Kartenrand (1200 px: 968 px Raster in 838 px Karte) → eigenes Raster ohne sie, Knopf bleibt rechts */
+  @media (max-width:1359px){ #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.pz-pz):not(:has(.apg-mfz)){grid-template-columns:minmax(150px,1.3fr) 100px 84px minmax(100px,1fr) 96px 96px minmax(100px,auto)} }
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 84px 135px 135px minmax(100px,auto);column-gap:14px}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:not(:has(.pz-fus)):has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 135px 135px minmax(100px,auto)}
   #ap-ids-root.ap-guestly .pz-radar:has(.apg-mfz) .pz-z-kopf > *{text-align:left;justify-content:flex-start}
