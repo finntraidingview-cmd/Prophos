@@ -40988,10 +40988,19 @@
   function wdlKetteTagWert(t){
     const k = t && t.kette_tag
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    if(k && typeof k === 'object'){ const tag = n(k.tag_pl); return tag == null ? null : { pl: tag, gesch: false, quelle: 'tag' } }
+    // TK1b (Finn 18.11.2026: „der fusion p&l stimmt doch nicht oder“ — rechts stand „Fusion +1,20 €“ = nur T2, Mitte „Fusion −129 €“): auch die Fusion des Tages
+    // kommt von hier. fusion = Summe der Gegenhedges (€) oder null, fusionOffen = Teile mit Hedge ohne Beleg, fusionDa = der Tag hat überhaupt Teile mit Hedge.
+    // Tagesende: kette_tag.fusion_sum / fusion_offen (app.py, wie bisher im Chip); ohne Tagesende: Summe der Teile, die einen fusion-Schlüssel tragen (die Tabelle zeigt sie je Teil)
+    if(k && typeof k === 'object'){
+      const tag = n(k.tag_pl); if(tag == null) return null
+      const fo = Number(k.fusion_offen) > 0 ? Number(k.fusion_offen) : 0, fs = n(k.fusion_sum)
+      return { pl: tag, gesch: false, quelle: 'tag', fusion: fs, fusionOffen: fo, fusionDa: fs != null || fo > 0 }
+    }
     const teile = (t && Array.isArray(t.kette_teile)) ? t.kette_teile.filter(x => x && typeof x === 'object') : []
     if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return null
-    return { pl: teile.reduce((a, x) => a + Number(x.pl), 0), gesch: teile.some(x => x.art === 'geschaetzt'), quelle: 'teile' }
+    const mitFu = teile.filter(x => 'fusion' in x), fuBel = mitFu.filter(x => n(x.fusion) != null)
+    return { pl: teile.reduce((a, x) => a + Number(x.pl), 0), gesch: teile.some(x => x.art === 'geschaetzt'), quelle: 'teile',
+      fusion: fuBel.length ? fuBel.reduce((a, x) => a + Number(x.fusion), 0) : null, fusionOffen: mitFu.length - fuBel.length, fusionDa: mitFu.length > 0 }
   }
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
@@ -41024,8 +41033,8 @@
       : (t1 != null && t2 != null && !(nTr > 2)) ? `${sg(t1)} ${t2 < 0 ? '−' : '+'} ${de(t2)} $ = ${summe}`
       : nTr >= 2 ? `(${nTr} Trades) ${summe}` : `(1 Trade) ${summe}`
     // WS2E-Tag: Fusion-Summe des Tages hinter der Master-Summe (nur wenn das Tagesende fusion_sum trägt, also Teile mit Hedge); fehlt ein Teil-Wert, sagt es das
-    const fuOffen = Number(k.fusion_offen) > 0 ? Number(k.fusion_offen) : 0
-    const fuSum = n(k.fusion_sum) != null ? ` · ${wdlKetteFusionTxt(k.fusion_sum)}${fuOffen ? ` (${fuOffen} ${fuOffen === 1 ? 'fehlt' : 'fehlen'})` : ''}`
+    const fuOffen = tw.fusionOffen   // TK1b: dieselbe Fusion-Summe wie die P&L-Spalte rechts (wdlKetteTagWert)
+    const fuSum = tw.fusion != null ? ` · ${wdlKetteFusionTxt(tw.fusion)}${fuOffen ? ` (${fuOffen} ${fuOffen === 1 ? 'fehlt' : 'fehlen'})` : ''}`
       : fuOffen ? ' · Fusion fehlt' : ''
     const tipK = `Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart${fuSum ? ' · Fusion = Summe der Gegenhedges aller Teile' : ''}`
     // WK1 (13.11.2026): Mehr-Trade-Tag mit Teilen → Kopf „Tag <Summe> · Fusion“, Rechenkette entfällt (die Teile stehen in der Tabelle), Balance gedämpft darunter.
@@ -42136,7 +42145,11 @@
     const ketteTagPlZ = (t, pbTrade) => {
       if(t && t.balance_sprung) return null
       const tw = wdlKetteTagWert(t); if(!tw) return null
-      return zelle('pl', (tw.gesch ? '≈ ' : '') + sig(tw.pl, '$', 2) + slaveZ(t), { f: col(tw.pl),
+      // TK1b: Fusion-Zeile = Fusion des Tages (wie „Fusion …“ im Chip), der Trade allein im Tooltip; Tag ohne Teile mit Hedge → bisherige Fusion-Zeile (slaveZ)
+      const fuT = wdlSlavePl(t), fuOff = tw.fusionOffen ? ` (${tw.fusionOffen} ${tw.fusionOffen === 1 ? 'fehlt' : 'fehlen'})` : ''
+      const fuZ = !tw.fusionDa ? slaveZ(t)
+        : `<small class="wdl-z-slave" style="color:${col(tw.fusion)}" title="${escapeHtml(`Fusion-Gegenhedge aller Trades des Tages${fuOff ? ' —' + fuOff + ' noch ohne Beleg' : ''}${num(fuT) != null ? ` · dieser Trade allein ${sig(fuT, '€', 2)}` : ''}`)}">Fusion ${tw.fusion != null ? sig(tw.fusion, '€', 2) : 'fehlt'}${tw.fusion != null ? fuOff : ''}</small>`
+      return zelle('pl', (tw.gesch ? '≈ ' : '') + sig(tw.pl, '$', 2) + fuZ, { f: col(tw.pl),
         tip: `Tagesergebnis aller Trades des Tages (wie „Tag …“ in der Mitte)${tw.gesch ? ' — ≈: mindestens ein Trade nur geschätzt' : ''}${num(pbTrade) != null ? ` · dieser Trade allein ${sig(num(pbTrade), '$', 2)}` : ''} · abgehakt und gebucht wird je Plan wie bisher` })
     }
     // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde — Userscript, Radar

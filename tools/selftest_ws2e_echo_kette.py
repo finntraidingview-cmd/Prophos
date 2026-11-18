@@ -241,6 +241,27 @@ def main():
     os.unlink(d.name)
     o3 = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else ["", ""]
     check("Fusion fehlt" in o3[0] and "+0 €" not in o3[0] and o3[1] == "Fusion +0 €", f"Chip ohne Fusion-Beleg: „Fusion fehlt“; −0,4 € → „+0 €“ statt „−0 €“ ({o3})")
+    # TK1b (Finn 18.11.2026): wdlKetteTagWert liefert die Fusion des Tages für die P&L-Spalte rechts — dieselbe Zahl wie „Fusion …“ im Chip
+    # (Tagesende fusion_sum/fusion_offen), ohne Tagesende die Summe der Teile mit fusion-Schlüssel; Teile ohne Hedge → fusionDa false (bisherige Zeile)
+    teileS = [{"nr": 1, "pl": 10263.0, "art": "gelesen", "fusion": -130.4}, {"nr": 2, "pl": -109.0, "art": "gelesen", "fusion": 1.2}]
+    js4 = js2.replace("print(JSON.stringify([wdlKetteTagChip(T), wdlKetteTagChip(O)]));",
+                      "const S = { status: 'review', kette_teile: " + json.dumps(teileS) + " };" +
+                      "const S2 = { status: 'review', kette_teile: " + json.dumps([teileS[0], {"nr": 2, "pl": -109.0, "art": "gelesen", "fusion": None}]) + " };" +
+                      "const Z = { status: 'review', kette_tag: " + json.dumps(te0) + ", kette_teile: " + json.dumps(te0["teile"]) + " };" +
+                      "print(JSON.stringify([wdlKetteTagWert(T), wdlKetteTagWert(O), wdlKetteTagWert(S), wdlKetteTagWert(S2), wdlKetteTagWert(Z), wdlKetteTagChip(T)]));")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
+        d.write(js4)
+    r = subprocess.run([JSC, d.name], capture_output=True, text=True)
+    os.unlink(d.name)
+    o4 = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else [None] * 6
+    wT, wO, wS, wS2, wZ, cT = o4
+    check(r.returncode == 0 and wT and wT["fusion"] == te["fusion_sum"] == -16.5 and wT["fusionOffen"] == 1 and wT["fusionDa"] is True and wT["pl"] == te["tag_pl"]
+          and "Fusion −17 € (1 fehlt)" in (cT or ""), f"Tageswert Echo-Tagesende: Fusion = fusion_sum −16,5 €, 1 offen, gleiche Zahl wie im Chip ({r.stderr[:200]} {wT})")
+    check(wO and wO["fusion"] is None and wO["fusionOffen"] == 0 and wO["fusionDa"] is False, f"Tageswert Orbit ohne Hedge: keine Fusion → bisherige Fusion-Zeile ({wO})")
+    check(wS and abs(wS["fusion"] - (-129.2)) < 1e-9 and wS["fusionOffen"] == 0 and wS["fusionDa"] is True and abs(wS["pl"] - 10154.0) < 1e-9,
+          f"Tageswert ohne Tagesende: Fusion = T1 −130,4 + T2 +1,2 = −129,2 € (nicht nur T2) ({wS})")
+    check(wS2 and abs(wS2["fusion"] - (-130.4)) < 1e-9 and wS2["fusionOffen"] == 1, f"Tageswert ohne Tagesende, ein Teil ohne Beleg: Summe der belegten, 1 offen ({wS2})")
+    check(wZ and wZ["fusion"] is None and wZ["fusionOffen"] == 2 and wZ["fusionDa"] is True, f"Tageswert ohne jeden Fusion-Beleg: fusion null, 2 offen („Fusion fehlt“) ({wZ})")
 
     print(f"\n{'selftest_ws2e_echo_kette: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
     return 1 if FEHLER else 0
