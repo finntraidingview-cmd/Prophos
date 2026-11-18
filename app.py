@@ -8649,11 +8649,19 @@ def admin_build_overview(kapitel_id=None):
     pending_rows = []
     try:
         _pp_sel = "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,requested_at,notes"
+        _pp_notiz = True   # PU3 (18.11.2026): Spalte admin_notiz da? Ohne sie (SQL noch nicht eingespielt) zeigt die Karte keinen „+ Notiz“-Knopf
         try:
-            _pp = _sb_all("pending_payouts", {"select": _pp_sel + ",approved_at,approved_von", "status": "eq.pending"})   # PA1
+            try:
+                _pp = _sb_all("pending_payouts", {"select": _pp_sel + ",approved_at,approved_von,admin_notiz", "status": "eq.pending"})   # PA1 + PU3
+            except Exception as _e_pn:
+                if not sb_spalte_fehlt(_e_pn, "admin_notiz"):
+                    raise
+                _pp_notiz = False
+                _pp = _sb_all("pending_payouts", {"select": _pp_sel + ",approved_at,approved_von", "status": "eq.pending"})   # PU3-SQL noch nicht eingespielt
         except Exception as _e_pp:
             if not sb_spalte_fehlt(_e_pp, "approved_at"):
                 raise
+            _pp_notiz = False
             _pp = _sb_all("pending_payouts", {"select": _pp_sel, "status": "eq.pending"})   # PA1-SQL noch nicht eingespielt
         for t in _pp:
             uid = str(t.get("user_id"))
@@ -8680,6 +8688,7 @@ def admin_build_overview(kapitel_id=None):
                 "notes": t.get("notes") or "",
                 "approved_at": t.get("approved_at") or None,   # PA1: Approved-Schritt (Konto fährt wieder), Erhalten bucht erst
                 "approved_von": t.get("approved_von") or None,
+                "admin_notiz": (t.get("admin_notiz") or "") if _pp_notiz else None,   # PU3: Hand-Notiz der Admin-Karte; None = Spalte fehlt
             })
         pending_rows.sort(key=lambda r: r["requested_at"])
     except Exception as e:
@@ -19576,6 +19585,64 @@ def admin_payout_approved():
             print(f"[payout-approved] ⚠️ waiting {aid}: {type(e).__name__}: {e}", flush=True)
     threading.Thread(target=wd_payout_tick, kwargs={"sofort": True}, daemon=True).start()   # Approved → WD-Konto heute wieder rein (wie beim Erhalten)
     return jsonify({"ok": True, "pending": upd[0], "waiting_geleert": waiting_geleert})
+
+
+PAYOUT_NOTIZ_MAX = 200
+
+
+def payout_notiz_sauber(txt):
+    """REIN RECHNEND (testbar, PU3): Hand-Notiz einer Payout-Anfrage — Leerraum zusammengezogen, höchstens PAYOUT_NOTIZ_MAX Zeichen, leer → None (= löschen)."""
+    t = re.sub(r"\s+", " ", str(txt or "")).strip()[:PAYOUT_NOTIZ_MAX].strip()
+    return t or None
+
+
+@app.route("/admin/payout-notiz", methods=["PATCH", "OPTIONS"])
+def admin_payout_notiz():
+    """PU3 (Finn 18.11.2026, Admin → Kasse → „Payouts unterwegs“, Spalte Notiz: „bitte hier auch Notiz hinzufügen“): eigene Hand-Notiz je offener
+    Anfrage in pending_payouts.admin_notiz (sql/2026-11-18_payout_notiz.sql). Bewusst NICHT notes (automatischer Text „Aus Admin angefragt · vorher: …“,
+    wandert beim Erhalten in die Buchung) und NICHT liegt_bei (gehört dem Payout-Mail-Matcher). Body {pending_id, notiz} — leer = löschen.
+    Nur offene Anfragen (status pending). Reine Notiz: sperrt/bucht nichts, kein wd_payout_tick.
+    Auth wie /admin/payout-approved: ADMIN_EMAILS oder voller Admin-Reiter-Login, sonst Verwalter für Anfragen SEINER Gruppe."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _uid, err = _admin_voll()
+    gruppe = None
+    if err:
+        if err[1] != 403:
+            return err
+        _uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
+    b = request.get_json(silent=True) or {}
+    pid = str(b.get("pending_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"error": "pending_id fehlt/ungültig"}), 400
+    notiz = payout_notiz_sauber(b.get("notiz"))
+    try:
+        rows = sb_select("pending_payouts", {"select": "id,user_id,status,admin_notiz", "id": f"eq.{pid}", "limit": "1"}) or []
+    except Exception as e:
+        if sb_spalte_fehlt(e, "admin_notiz"):
+            return jsonify({"error": "Spalte admin_notiz fehlt — sql/2026-11-18_payout_notiz.sql einspielen"}), 409
+        return jsonify({"error": f"Anfrage nicht lesbar ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"error": "Anfrage nicht gefunden"}), 404
+    p = rows[0]
+    if gruppe is not None and str(p.get("user_id") or "") not in gruppe:
+        return jsonify({"error": "Nur Anfragen der eigenen Gruppe"}), 403
+    if str(p.get("status") or "") != "pending":
+        return jsonify({"error": f"Anfrage ist schon „{p.get('status')}\" — Notiz nicht geändert"}), 409
+    try:
+        upd = sb_update("pending_payouts", {"id": f"eq.{pid}", "status": "eq.pending"},
+                        {"admin_notiz": notiz, "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        print(f"[payout-notiz] ⚠️ {pid}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
+    if not upd:
+        return jsonify({"error": "Anfrage ist inzwischen erhalten (anderer Klick/Browser) — neu laden"}), 409
+    return jsonify({"ok": True, "admin_notiz": upd[0].get("admin_notiz") or ""})
 
 
 def payout_anfrage_konto_felder(konto, naechster, morgen):

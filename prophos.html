@@ -20206,6 +20206,78 @@
       if(typeof atToast === 'function') atToast(zurueck ? `↩ Approved zurückgenommen — ${t.account_name || 'Konto'} wieder gesperrt` : `✓ ${t.account_name || 'Payout'} approved — Konto fährt wieder, gebucht wird beim „Erhalten“`, zurueck ? 'end' : 'start')
     }
     window._admPayoutSchritt = { html: admPayoutSchrittHtml, verdrahten: admPayoutSchrittVerdrahten }   // Funded Planer → CFD, „Payouts auf dem Weg“ (PA1)
+    /* PU3 HAND-NOTIZ JE PAYOUT-ANFRAGE (Finn 18.11.2026, „Payouts unterwegs“ Spalte Notiz: „bitte hier auch Notiz hinzufügen…“): „+ Notiz“ wie im Radar
+     * (Bestanden/Review, dieselben Klassen .wdl-bst-notiz / .wdl-bst-notiz-feld). Klick → Feld, Enter/Blur speichert, Esc bricht ab, leeren = löschen.
+     * Gespeichert in pending_payouts.admin_notiz über PATCH /admin/payout-notiz (Service-Key, Rechte wie Approved) — NICHT notes (automatischer Text,
+     * wandert beim Erhalten in die Buchung) und NICHT liegt_bei (Mail-Matcher). admin_notiz null = Spalte fehlt (SQL noch nicht eingespielt) → kein Knopf.
+     * Der automatische Text bleibt klein/grau darunter, voll im Tooltip. Das Feld überlebt einen Neuaufbau: _admPendNotizEdit hält id + Text. */
+    const ADM_PEND_NOTIZ_MAX = 200
+    let _admPendNotizEdit = null   // { id, text }
+    function admPendNotizZelle(td, t){
+      if(!td || !t) return
+      td.textContent = ''
+      const zelle = td
+      td = document.createElement('div')
+      td.style.cssText = 'min-width:150px;max-width:220px'   // Handy: Tabelle quetscht die Spalte sonst auf wenige Zeichen
+      zelle.appendChild(td)
+      if(t.id && t.admin_notiz != null){
+        const txt = String(t.admin_notiz || '')
+        const box = document.createElement('div')
+        if(t.notes) box.style.marginBottom = '2px'
+        if(_admPendNotizEdit && _admPendNotizEdit.id === String(t.id)){
+          const i = document.createElement('input')
+          i.type = 'text'; i.className = 'wdl-bst-notiz-feld'; i.maxLength = ADM_PEND_NOTIZ_MAX; i.placeholder = 'Notiz'
+          i.value = _admPendNotizEdit.text; i.setAttribute('aria-label', 'Notiz zur Payout-Anfrage')
+          i.addEventListener('input', () => { if(_admPendNotizEdit && _admPendNotizEdit.id === String(t.id)) _admPendNotizEdit.text = i.value })
+          i.addEventListener('keydown', e => {
+            if(e.key === 'Enter'){ e.preventDefault(); i.dataset.abbruch = '1'; admPendNotizSpeichern(t, i.value) }   // direkt, nicht über blur() (ohne Fokus kein blur-Event)
+            else if(e.key === 'Escape'){ e.preventDefault(); i.dataset.abbruch = '1'; _admPendNotizEdit = null; try{ admFinRender() }catch(_){} }
+          })
+          i.addEventListener('blur', () => { if(i.dataset.abbruch !== '1') admPendNotizSpeichern(t, i.value) })
+          box.appendChild(i)
+          setTimeout(() => { if(i.isConnected){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } }, 0)
+        }else{
+          const bt = document.createElement('button')
+          bt.type = 'button'; bt.className = 'wdl-bst-notiz' + (txt ? '' : ' ist-leer')
+          bt.textContent = txt || '+ Notiz'; bt.title = txt ? 'Notiz bearbeiten (leeren = löschen)' : 'Eigene Notiz zu dieser Payout-Anfrage'
+          bt.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _admPendNotizEdit = { id: String(t.id), text: txt }; try{ admFinRender() }catch(_){} })
+          box.appendChild(bt)
+        }
+        td.appendChild(box)
+      }
+      if(t.notes){
+        const a = document.createElement('div')
+        a.className = 'pp-note'
+        a.style.cssText = 'color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+        a.textContent = t.notes; a.title = t.notes
+        td.appendChild(a)
+      }
+    }
+    async function admPendNotizSpeichern(t, wert){
+      if(!t || !t.id || !_admPendNotizEdit || _admPendNotizEdit.id !== String(t.id)) return
+      _admPendNotizEdit = null
+      const neu = String(wert || '').replace(/\s+/g, ' ').trim().slice(0, ADM_PEND_NOTIZ_MAX).trim()
+      const alt = String(t.admin_notiz || '')
+      if(neu === alt){ try{ admFinRender() }catch(_){} return }
+      t.admin_notiz = neu   // gleich anzeigen; bei Fehler zurück
+      try{ admFinRender() }catch(_){}
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const res = await fetch(`${WATCHER_HOME}/admin/payout-notiz?ansicht=admin`, {
+          method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pending_id: t.id, notiz: neu }) })
+        const d = await res.json().catch(() => ({}))
+        if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+        t.admin_notiz = String(d.admin_notiz || '')
+        if(typeof atToast === 'function') atToast(neu ? '✓ Notiz gespeichert' : '✓ Notiz gelöscht', 'start')
+      }catch(e){
+        t.admin_notiz = alt
+        if(typeof atToast === 'function') atToast(`Notiz nicht gespeichert: ${(e && e.message) || e}`, 'end')
+      }
+      try{ admFinRender() }catch(_){}
+    }
     async function admPayoutErhaltenBuchen(){
       const t = _admReceive; if(!t || !admData) return
       const msg = $('admReceiveMsg'), btn = $('admReceiveSave')
@@ -20912,7 +20984,7 @@
               '<td><span class="pp-acc" style="font-size:12.5px"></span></td>' +
               '<td><span class="pp-bei"></span></td>' +
               `<td class="adm-num" style="font-weight:600;color:var(--warn-ink, #b45309)">${admEur.format(Number(t.amount) || 0)}</td>` +
-              '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>' +
+              '<td class="pp-note-td" style="font-size:12px"></td>' +
               `<td style="text-align:right;white-space:nowrap">${admPayoutSchrittHtml(t)}</td>`
             // PA1 (Finn 12.11.2026): erst [Approved] (Konto fährt wieder, keine Buchung), dann „Approved am …“ + [✓ erhalten] (bucht wie bisher, Modal);
             // ohne id (älterer Backend-Stand) kein Knopf
@@ -20920,9 +20992,7 @@
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
             admPendBeiFuellen(tr.querySelector('.pp-bei'), t.liegt_bei)   // PU2: Status-Chip statt Mail-Satz
-            tr.querySelector('.pp-note').textContent = t.notes || ''
-            const noteTd = tr.querySelector('.pp-note').closest('td')
-            if(noteTd) noteTd.title = t.notes || ''
+            admPendNotizZelle(tr.querySelector('.pp-note-td'), t)   // PU3: Hand-Notiz + automatischer Text klein darunter
             tb.appendChild(tr)
           }
         }
