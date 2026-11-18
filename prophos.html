@@ -4737,6 +4737,12 @@
   /* unter 1360 px blendet #dashboard-view die Spalte „Fusion“ (Lot/Hedge) aus — das Raster hatte sie trotzdem, TP rutschte in die 76-px-Spalte
      und alles lief über den Kartenrand (1200 px: 968 px Raster in 838 px Karte) → eigenes Raster ohne sie, Knopf bleibt rechts */
   @media (max-width:1359px){ #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.pz-pz):not(:has(.apg-mfz)){grid-template-columns:minmax(150px,1.3fr) 100px 84px minmax(100px,1fr) 96px 96px minmax(100px,auto)} }
+  /* FZ1b REST KOMPLETT (Finn 18.11.2026, Prüfer S2): „147.175 → 163.780 · Rest 1…“ wurde abgeschnitten → Rest klein in eine eigene Zeile unter
+     „Balance → Ziel“ (wie das Fusion-€ unter dem TP/SL-Paar), Trenner „ · “ (.pz-rest-tr) entfällt dort; wird es noch enger, bricht der Text am Pfeil um statt „…“ */
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-bal-t{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3;overflow-wrap:normal;word-break:normal}
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-bal-t > em::after{content:"\200B"}   /* Umbruch nur nach dem Pfeil, nie mitten in „1.163.780“ */
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-bal-t .pz-rest-z{display:block;font-size:11px;line-height:1.25;white-space:nowrap}
+  #ap-ids-root.ap-guestly .pz-radar:has(.pz-pz):not(:has(.apg-mfz)) .pz-bal-t .pz-rest-tr{display:none}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 84px 135px 135px minmax(100px,auto);column-gap:14px}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:not(:has(.pz-fus)):has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 135px 135px minmax(100px,auto)}
   #ap-ids-root.ap-guestly .pz-radar:has(.apg-mfz) .pz-z-kopf > *{text-align:left;justify-content:flex-start}
@@ -54483,7 +54489,7 @@
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
       const mitBahn = o.zielTp ? ziel > istV : (ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3)
       const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val, zielFrei: !!o.zielTp, fusion: o.fusion || null }) : null
-      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${bal.startwert ? `<span class="pz-rest" title="${escapeHtml(PLAN_STARTWERT_TIP)}"> Startwert</span>` : ''}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest pz-rest-z"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
+      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${bal.startwert ? `<span class="pz-rest" title="${escapeHtml(PLAN_STARTWERT_TIP)}"> Startwert</span>` : ''}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest pz-rest-z"><span class="pz-rest-tr"> · </span>Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (bz ? bz.html : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
       // Quelle für die Balance fehlt (Nachtrag 08.10.2026): nicht stumm „–", sondern zeigen, was da ist
