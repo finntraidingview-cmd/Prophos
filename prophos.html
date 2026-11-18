@@ -40979,25 +40979,41 @@
     }).join('')
     return `<span class="wkt-tab">${zeilen}</span>`
   }
+  /* TK1 (Finn 18.11.2026, Radar → Abhaken · Challenge, Topstep V2: „rechts immer nur der P&L von heute insgesamt, nicht der vom letzten Trade — da wo
+   * 5.912 steht, soll 4.495 stehen“): EINE Rechnung für den Tageswert der Kette — der Chip „Tag …“ in der Mitte UND die P&L-Spalte rechts lesen sie.
+   * kette_tag.tag_pl (End-Balance − Balance zum Tagesstart, app.py ap_kette_tagesende); fehlt das Tagesergebnis, die Summe der Teile (nur in Überprüfen,
+   * nie für einen wartenden Trade 1, nur wenn jeder Teil einen P&L hat; gesch = ein Teil nur geschätzt). -> { pl, gesch, quelle: 'tag'|'teile' } | null.
+   * Nur Anzeige: Abhaken, Sammel-Abhaken und Buchung je Plan lesen weiter den Plan (wdlPlTrade / master_pl), nie diese Zahl. */
+  function wdlKetteTagWert(t){
+    const k = t && t.kette_tag
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(k && typeof k === 'object'){ const tag = n(k.tag_pl); return tag == null ? null : { pl: tag, gesch: false, quelle: 'tag' } }
+    const teile = (t && Array.isArray(t.kette_teile)) ? t.kette_teile.filter(x => x && typeof x === 'object') : []
+    if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return null
+    return { pl: teile.reduce((a, x) => a + Number(x.pl), 0), gesch: teile.some(x => x.art === 'geschaetzt'), quelle: 'teile' }
+  }
+  window._wdlKetteTagWert = (...a) => wdlKetteTagWert(...a)   // Test-Haken (TK1)
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const teile = (t && Array.isArray(t.kette_teile)) ? t.kette_teile.filter(x => x && typeof x === 'object') : []
+    const tw = wdlKetteTagWert(t)   // TK1: dieselbe Zahl wie die P&L-Spalte rechts
     const de = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
     const sg = v => `${v < 0 ? '−' : '+'}${de(v)} $`
     const farbe = v => v < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
     const jeTrade = teile.map(x => wdlKetteTeilZeile(x, sg)).join('')
     if(!k || typeof k !== 'object'){
       // Ohne Tagesergebnis (letzter Trade ohne Lesung, oder Trade 1 nach dem Fenster): Summe aus den Teilen, nur in Überprüfen und nie für einen wartenden Trade 1
-      if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return ''
-      const summe = teile.reduce((a, x) => a + Number(x.pl), 0), gesch = teile.some(x => x.art === 'geschaetzt')
+      if(!tw) return ''
+      const summe = tw.pl, gesch = tw.gesch
       const tipO = `Tagesergebnis aus den Trades des Tages${gesch ? ' — ≈: mindestens ein Trade nur geschätzt, beim Abhaken prüfen' : ''}`
       // WK1 (13.11.2026): ab 2 Trades Kopf nur „Tag <Summe>“, die Teile stehen in der Tabelle darunter; 1 Trade wie bisher
       if(teile.length > 1) return `<span class="wdl-kette-tag wkt" title="${tipO}"><span class="wkt-kopf">Tag <b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b></span>${wdlKetteTeilTabelle(teile, sg, farbe)}</span>`
       return `<span class="wdl-kette-tag" title="${tipO}">Tag (1 Trade) <b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b>${jeTrade}</span>`
     }
-    const tag = n(k.tag_pl), bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
-    if(tag == null) return ''
+    const bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
+    if(!tw) return ''
+    const tag = tw.pl
     const summe = `<b style="color:${farbe(tag)}">${sg(tag)}</b>`
     // WS2e (09.11.2026): Tagesende mit teile [{nr, rolle, pl}] (WS2a, 1–4 Teile) → alle Summanden in Reihenfolge; sonst alter Weg (t1_pl + t2_pl bzw. 1 Trade).
     // Fehlt bei mehreren Trades ein Teil-Wert, steht die Anzahl statt einer falschen Summe
@@ -42113,6 +42129,13 @@
     // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
     // nur bei Modellen MIT Fusion-Hedge (02.10.2026: Orbit V2 ohne Hedge zeigte „Fusion +0,00 €")
     const slaveZ = t => { if(!['Echo', 'Orbit', 'Nova', 'Winning Day', 'Orbit Prio 2'].includes(wdlWeg(t))) return '';   /* Nova (27.10.2026): Fusion-Hedge wie Orbit */ const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
+    // TK1 (Finn 18.11.2026: „rechts immer nur der P&L von heute insgesamt, nicht der vom letzten Trade“): Ketten-Zeile mit Tageswert (derselbe wie „Tag …“
+    // in der Mitte, wdlKetteTagWert) → P&L-Spalte = Tagessumme, der Trade allein im Tooltip; ohne Tageswert (Einzel-Trade, wartender Trade 1) null → bisherige Zelle
+    const ketteTagPlZ = (t, pbTrade) => {
+      const tw = wdlKetteTagWert(t); if(!tw) return null
+      return zelle('pl', (tw.gesch ? '≈ ' : '') + sig(tw.pl, '$', 2) + slaveZ(t), { f: col(tw.pl),
+        tip: `Tagesergebnis aller Trades des Tages (wie „Tag …“ in der Mitte)${tw.gesch ? ' — ≈: mindestens ein Trade nur geschätzt' : ''}${num(pbTrade) != null ? ` · dieser Trade allein ${sig(num(pbTrade), '$', 2)}` : ''} · abgehakt und gebucht wird je Plan wie bisher` })
+    }
     // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde — Userscript, Radar
     // oder das 110-%-Level") — seit 28.10.2026 (Finn: „genau angezeigt, über welchen Weg der Trade geschlossen wurde und was der eigentliche
     // TP/SL war … die Overshoots … bei allen Trades, die gegengehedgt werden, im Radar unter Erledigt") eine volle Zeile unter dem Trade
@@ -42291,7 +42314,7 @@
         miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}${wdlKetteTagChip(t) ? ' ' + wdlKetteTagChip(t) : ''}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
-        plZ = zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
+        plZ = ketteTagPlZ(t, pb) || zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026); TK1: Kette = Tagessumme
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
@@ -42314,7 +42337,7 @@
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
           { tip: polar ? wdlPolarErg(t).tip : echo ? '' : demoTip(d) })
-        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
+        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : ketteTagPlZ(t, pb) || zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026); TK1: Kette = Tagessumme
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(polar){
         // Polar erledigt (Verlauf): wer zuerst zu war + beide P&L aus der Abrechnung
@@ -42339,7 +42362,7 @@
         kontoZ = wdlKontoZ(t)
         // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
         const pbZu = t.balance_sprung ? (num(t.master_pl && t.master_pl.wert) ?? t.balance_sprung.tages) : t.pl_balance
-        plZ = zelle('pl', sig(pbZu, '$', 2) + slaveZ(t), { f: col(pbZu), tip: t.balance_sprung ? 'P&L am Plan — ' + balanceSprungText(t.balance_sprung) : num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        plZ = ketteTagPlZ(t, pbZu) || zelle('pl', sig(pbZu, '$', 2) + slaveZ(t), { f: col(pbZu), tip: t.balance_sprung ? 'P&L am Plan — ' + balanceSprungText(t.balance_sprung) : num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
