@@ -20930,16 +20930,30 @@
             const teile = voll.split(' · ')
             const st = ADM_PEND_STUFE[String(teile[0] || '').trim().toLowerCase()]
             if(!st){ el.textContent = voll; return }   // Hand-Text ohne Matcher-Stufe (Tooltip setzt der Aufrufer, PU4)
+            const zeile = document.createElement('div')
+            zeile.style.whiteSpace = 'nowrap'   // Chip + Datum immer in einer Zeile
             const chip = document.createElement('span')
             chip.className = st[1]; chip.textContent = st[0]
-            el.style.whiteSpace = 'nowrap'   // Chip + Datum immer in einer Zeile
-            el.appendChild(chip)
+            zeile.appendChild(chip)
             const datum = /^\d{2}\.\d{2}\.(\s+\d{1,2}:\d{2})?$/.test(String(teile[1] || '').trim()) ? String(teile[1]).trim() : ''
             if(datum){
               const d = document.createElement('span')
               d.className = 'tnum'; d.style.cssText = 'color:var(--sub);font-size:11px;margin-left:6px;white-space:nowrap'
               d.textContent = datum
-              el.appendChild(d)
+              zeile.appendChild(d)
+            }
+            el.appendChild(zeile)
+            /* PU5 (Finn 19.11.2026: „die Mail-Sachen hier doch wieder miteinbringen — was immer der letzte Stand der Mail war"): letzter Mail-Betreff
+             * klein/grau in EINER Zeile unter Chip + Datum = der Teil nach „<Stufe> · <Datum> · “ (payout_liegt_bei_text), ohne „ · vorher: …“
+             * (Hand-Text, steht im Tooltip). Bei „unklar“ ohne den Vorspann „Mail ohne eindeutige Zuordnung: “ — das sagt der Chip schon. */
+            let betreff = teile.slice(datum ? 2 : 1).join(' · ').split(' · vorher: ')[0].trim()
+            if(st[0] === 'unklar') betreff = betreff.replace(/^Mail ohne eindeutige Zuordnung:\s*/i, '')
+            if(betreff){
+              const b = document.createElement('div')
+              b.className = 'pp-mail'
+              b.style.cssText = 'color:var(--sub);font-size:11px;margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+              b.textContent = betreff
+              el.appendChild(b)
             }
           }
           const pendBloecke = [['cfd', 'CFD'], ['fut', 'Futures'], ['sonst', 'Sonstige']]
