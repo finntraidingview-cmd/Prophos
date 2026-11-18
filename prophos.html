@@ -3195,7 +3195,10 @@
   #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
   /* PA1 (12.11.2026): Handy — Approved/Erhalten bleiben sichtbar, die Knopf-Spalte klebt rechts an der waagerecht scrollenden Tabelle */
   @media (max-width:760px){ #dashboard-view #adm-f-pend-rows td:last-child,#dashboard-view #adm-f-pend-panel thead th:last-child{position:sticky;right:0;background:var(--surface, #fff);box-shadow:-8px 0 8px -8px rgba(0,0,0,.18)}
-    #dashboard-view #adm-f-pend-rows .pp-appr-am{display:block;margin:0 0 4px 0;text-align:right} }
+    #dashboard-view #adm-f-pend-rows .pp-appr-am{display:block;margin:0 0 4px 0;text-align:right}
+    #dashboard-view #adm-f-pend-rows .pp-block-m{display:inline} }
+  /* PU1 (18.11.2026): Block-Summe CFD/Futures/Sonstige auch in der klebenden rechten Zelle — auf dem Handy liegt die Betrag-Spalte außer Sicht */
+  #adm-f-pend-rows .pp-block-m{display:none}
   /* PA2 (Finn 12.11.2026 23:30: „Mach mal Approved und Erhalten andere Farbe.“): zwei Schritte auf einen Blick — Approved (Konto fährt wieder, keine Buchung)
      als ruhiger Umriss in --blue, „✓ erhalten“ (bucht in Finanzen) als grüner Knopf wie die übrigen Erfolgs-Farben (--good-ink hell, --good dunkel) */
   #dashboard-view .btn.pp-appr{background:var(--surface);border:1px solid var(--blue);color:var(--blue);box-shadow:none}
@@ -20831,7 +20834,37 @@
         const tb = $('adm-f-pend-rows')
         if(tb){
           tb.innerHTML = ''
-          for(const t of pend){
+          /* PU1 (Finn 18.11.2026: „kannst du CFD und Futures hier trennen"): drei Blöcke CFD · Futures · Sonstige, je mit Kopfzeile + Summe, Reihenfolge
+           * innerhalb wie bisher (requested_at aufsteigend vom Backend). Zuordnung NUR über die Kontoart des Kontos (admData.accounts, auch archivierte):
+           * phase1/phase2/funded_cfd = CFD, challenge/funded/winning_days = Futures (wie pbIstCfd / Trade-Planer-Wegwahl). Anfrage ohne Konto oder Konto
+           * ohne Art → „Sonstige", kein Raten über den Firmennamen. Reine Anzeige — Knöpfe Approved/erhalten/zurück unverändert. */
+          const admPendKonto = new Map((admData.accounts || []).map(r => [String(r.id), r]))
+          const admPendArt = t => {
+            const typ = String((admPendKonto.get(String(t.account_id || '')) || {}).type || '').toLowerCase()
+            if(['phase1', 'phase2', 'funded_cfd'].includes(typ)) return 'cfd'
+            if(['challenge', 'funded', 'winning_days'].includes(typ)) return 'fut'
+            return 'sonst'
+          }
+          const pendBloecke = [['cfd', 'CFD'], ['fut', 'Futures'], ['sonst', 'Sonstige']]
+            .map(([k, titel]) => ({ k, titel, list: pend.filter(t => admPendArt(t) === k) }))
+            .filter(b => b.list.length)
+          const pendZeilen = []
+          for(const b of pendBloecke){
+            const kopf = document.createElement('tr')
+            kopf.className = 'pp-block'
+            kopf.dataset.art = b.k
+            kopf.innerHTML = '<td colspan="4" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
+              + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--warn-ink, #b45309)"></td>'
+              + '<td colspan="2" style="background:var(--bg2);text-align:right;padding-top:12px"><span class="pp-block-m tnum" style="font-weight:700;color:var(--warn-ink, #b45309)"></span></td>'
+            kopf.children[0].children[0].textContent = b.titel
+            kopf.children[0].children[1].textContent = `${b.list.length} Anfrage${b.list.length === 1 ? '' : 'n'}`
+              + (b.k === 'sonst' ? ' · Konto ohne Kontoart' : '')
+            kopf.children[1].textContent = kopf.children[2].children[0].textContent = admEur.format(b.list.reduce((a, t) => a + (Number(t.amount) || 0), 0))
+            pendZeilen.push(kopf)
+            pendZeilen.push(...b.list)
+          }
+          for(const t of pendZeilen){
+            if(t instanceof HTMLElement){ tb.appendChild(t); continue }   // PU1: Block-Kopfzeile
             const d = t.requested_at ? new Date(t.requested_at) : null
             const days = d ? Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000)) : null
             const daysStr = days == null ? '' : (days === 0 ? 'heute' : `vor ${days} Tag${days === 1 ? '' : 'en'}`)
