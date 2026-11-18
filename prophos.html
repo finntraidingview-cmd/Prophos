@@ -40621,6 +40621,7 @@
   }
   window._wdlEchoKetteWartet = wdlEchoKetteWartet   // Test-Haken (WS2E)
   window._wdlKetteTagChip = (...a) => wdlKetteTagChip(...a)   // Test-Haken (WS2e)
+  window._wdlKetteTagWert = (...a) => wdlKetteTagWert(...a)   // Test-Haken (TK1) — hier statt am Funktionskopf: die Selbsttests ziehen den Abschnitt um wdlKetteTagChip ohne window in jsc
   window._wdlWartet = (...a) => wdlWartet(...a)   // Test-Haken (WS2e)
   // Kopf der Ketten-Texte im Radar: Topstep-Tag wie bisher, sonst Tages-Kette (Orbit/Echo-Teile, WS2)
   const wdlKetteKopf = t => (t && t.route === 'tsv2') ? 'Topstep-Tag' : 'Tages-Kette'
@@ -40992,7 +40993,6 @@
     if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return null
     return { pl: teile.reduce((a, x) => a + Number(x.pl), 0), gesch: teile.some(x => x.art === 'geschaetzt'), quelle: 'teile' }
   }
-  window._wdlKetteTagWert = (...a) => wdlKetteTagWert(...a)   // Test-Haken (TK1)
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
@@ -42130,8 +42130,11 @@
     // nur bei Modellen MIT Fusion-Hedge (02.10.2026: Orbit V2 ohne Hedge zeigte „Fusion +0,00 €")
     const slaveZ = t => { if(!['Echo', 'Orbit', 'Nova', 'Winning Day', 'Orbit Prio 2'].includes(wdlWeg(t))) return '';   /* Nova (27.10.2026): Fusion-Hedge wie Orbit */ const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
     // TK1 (Finn 18.11.2026: „rechts immer nur der P&L von heute insgesamt, nicht der vom letzten Trade“): Ketten-Zeile mit Tageswert (derselbe wie „Tag …“
-    // in der Mitte, wdlKetteTagWert) → P&L-Spalte = Tagessumme, der Trade allein im Tooltip; ohne Tageswert (Einzel-Trade, wartender Trade 1) null → bisherige Zelle
+    // in der Mitte, wdlKetteTagWert) → P&L-Spalte = Tagessumme, der Trade allein im Tooltip; ohne Tageswert (Einzel-Trade, wartender Trade 1) null → bisherige Zelle.
+    // Balance-Sprung (Prüfer S2 18.11.2026): tag_pl ist End-Balance − Tagesstart, genau die Differenz, die bei Payout/Reset falsch ist (Regel 08.10.2026 „nie
+    // die Differenz“) → null, es bleibt die bisherige Zelle (balance_sprung.tages bzw. P&L am Plan)
     const ketteTagPlZ = (t, pbTrade) => {
+      if(t && t.balance_sprung) return null
       const tw = wdlKetteTagWert(t); if(!tw) return null
       return zelle('pl', (tw.gesch ? '≈ ' : '') + sig(tw.pl, '$', 2) + slaveZ(t), { f: col(tw.pl),
         tip: `Tagesergebnis aller Trades des Tages (wie „Tag …“ in der Mitte)${tw.gesch ? ' — ≈: mindestens ein Trade nur geschätzt' : ''}${num(pbTrade) != null ? ` · dieser Trade allein ${sig(num(pbTrade), '$', 2)}` : ''} · abgehakt und gebucht wird je Plan wie bisher` })
