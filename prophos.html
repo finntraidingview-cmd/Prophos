@@ -3196,12 +3196,15 @@
   /* PA1 (12.11.2026): Handy — Approved/Erhalten bleiben sichtbar, die Knopf-Spalte klebt rechts an der waagerecht scrollenden Tabelle */
   @media (max-width:760px){ #dashboard-view #adm-f-pend-rows td:last-child,#dashboard-view #adm-f-pend-panel thead th:last-child{position:sticky;right:0;background:var(--surface, #fff);box-shadow:-8px 0 8px -8px rgba(0,0,0,.18)}
     #dashboard-view #adm-f-pend-rows .pp-appr-am{display:block;margin:0 0 4px 0;text-align:right}
-    #dashboard-view #adm-f-pend-rows .pp-block-m{display:inline} }
+    #dashboard-view #adm-f-pend-rows .pp-block-m{display:inline}
+    #dashboard-view #adm-f-pend-rows .pp-block-sum{visibility:hidden} }   /* PU2: sonst stand die Block-Summe beim Scrollen doppelt */
   /* PU1 (18.11.2026): Block-Summe CFD/Futures/Sonstige auch in der klebenden rechten Zelle — auf dem Handy liegt die Betrag-Spalte außer Sicht */
   #adm-f-pend-rows .pp-block-m{display:none}
   /* PA2 (Finn 12.11.2026 23:30: „Mach mal Approved und Erhalten andere Farbe.“): zwei Schritte auf einen Blick — Approved (Konto fährt wieder, keine Buchung)
      als ruhiger Umriss in --blue, „✓ erhalten“ (bucht in Finanzen) als grüner Knopf wie die übrigen Erfolgs-Farben (--good-ink hell, --good dunkel) */
   #dashboard-view .btn.pp-appr{background:var(--surface);border:1px solid var(--blue);color:var(--blue);box-shadow:none}
+  /* PU2 (18.11.2026): Chip „Approved" in „Liegt bei" — Blau wie der Approved-Knopf (Requested orange · Sent grün · unklar grau) */
+  #dashboard-view .chip.pp-st-appr{background:color-mix(in srgb,var(--blue) 10%,transparent);color:var(--blue)}
   #dashboard-view .btn.pp-appr:hover{background:color-mix(in srgb,var(--blue) 10%,var(--surface));transform:none}
   #dashboard-view .btn.pp-erh{background:var(--good-ink,#15803d);border:1px solid var(--good-ink,#15803d);color:#fff;box-shadow:none}
   #dashboard-view .btn.pp-erh:hover{background:color-mix(in srgb,var(--good-ink,#15803d) 86%,#000);transform:none}
@@ -20845,6 +20848,39 @@
             if(['challenge', 'funded', 'winning_days'].includes(typ)) return 'fut'
             return 'sonst'
           }
+          /* PU2 (Finn 18.11.2026: „die E-Mails einfach so: requested / approved / sent (gesendet) / erhalten"): Spalte „Liegt bei" als kurzer Chip
+           * + Datum klein statt Mail-Satz. Die Stufe ist das erste Feld, das der Payout-Mail-Matcher schreibt (app.py payout_liegt_bei_text:
+           * „<Stufe> · <TT.MM. HH:MM> · <Betreff>", Stufen PAYOUT_STUFEN angefragt/geprüft/gesendet + „unklar · …"), gelesen wie
+           * _payout_liegt_bei_stufe — kein neues Text-Parsen. Voller Text (Betreff, „vorher: …") nur noch im Tooltip. Hand-Texte ohne Stufe
+           * bleiben als Text, leer bleibt „—". Reine Anzeige, Knöpfe unverändert. */
+          const ADM_PEND_STUFE = {
+            'angefragt': ['Requested', 'chip chip-warn'],
+            'geprüft':   ['Approved', 'chip pp-st-appr'],
+            'gesendet':  ['Sent', 'chip chip-good'],
+            'erhalten':  ['Erhalten', 'chip chip-good'],
+            'unklar':    ['unklar', 'chip chip-neutral'],
+          }
+          function admPendBeiFuellen(el, txt){
+            if(!el) return
+            const voll = String(txt || '').trim()
+            el.textContent = ''
+            if(!voll){ el.textContent = '—'; return }
+            const teile = voll.split(' · ')
+            const st = ADM_PEND_STUFE[String(teile[0] || '').trim().toLowerCase()]
+            const td = el.closest('td'); if(td) td.title = voll
+            if(!st){ el.textContent = voll; return }   // Hand-Text ohne Matcher-Stufe
+            const chip = document.createElement('span')
+            chip.className = st[1]; chip.textContent = st[0]
+            el.style.whiteSpace = 'nowrap'   // Chip + Datum immer in einer Zeile
+            el.appendChild(chip)
+            const datum = /^\d{2}\.\d{2}\.(\s+\d{1,2}:\d{2})?$/.test(String(teile[1] || '').trim()) ? String(teile[1]).trim() : ''
+            if(datum){
+              const d = document.createElement('span')
+              d.className = 'tnum'; d.style.cssText = 'color:var(--sub);font-size:11px;margin-left:6px;white-space:nowrap'
+              d.textContent = datum
+              el.appendChild(d)
+            }
+          }
           const pendBloecke = [['cfd', 'CFD'], ['fut', 'Futures'], ['sonst', 'Sonstige']]
             .map(([k, titel]) => ({ k, titel, list: pend.filter(t => admPendArt(t) === k) }))
             .filter(b => b.list.length)
@@ -20854,7 +20890,7 @@
             kopf.className = 'pp-block'
             kopf.dataset.art = b.k
             kopf.innerHTML = '<td colspan="4" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
-              + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--warn-ink, #b45309)"></td>'
+              + '<td class="adm-num tnum pp-block-sum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--warn-ink, #b45309)"></td>'
               + '<td colspan="2" style="background:var(--bg2);text-align:right;padding-top:12px"><span class="pp-block-m tnum" style="font-weight:700;color:var(--warn-ink, #b45309)"></span></td>'
             kopf.children[0].children[0].textContent = b.titel
             kopf.children[0].children[1].textContent = `${b.list.length} Anfrage${b.list.length === 1 ? '' : 'n'}`
@@ -20883,7 +20919,7 @@
             if(t.id) admPayoutSchrittVerdrahten(tr, t)
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
-            tr.querySelector('.pp-bei').textContent = t.liegt_bei || '—'
+            admPendBeiFuellen(tr.querySelector('.pp-bei'), t.liegt_bei)   // PU2: Status-Chip statt Mail-Satz
             tr.querySelector('.pp-note').textContent = t.notes || ''
             const noteTd = tr.querySelector('.pp-note').closest('td')
             if(noteTd) noteTd.title = t.notes || ''
