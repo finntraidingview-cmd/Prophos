@@ -20365,6 +20365,12 @@
         const s = document.createElement('div'); s.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:2px;white-space:normal;max-width:220px'
         s.textContent = r.calc.anf.minus; s.title = 'Tradeify/Lucid: Payout erst, wenn der Zyklus im Plus ist (Mindest-Net-Profit, wie die Konto-Seite)'
         st.appendChild(s)
+      }else if(r.wd_ready && wdAbAusIso(r.wd_ab)){
+        // WE1 (Finn 19.11.2026): Ziel erst im laufenden Handelstag voll — die Firma zählt den Tag erst nach Tagesende. 5/5 bleibt stehen, statt des Knopfs
+        // „anfragbar ab 03:00“ (Gerätezeit); nach der Grenze zeichnet admCalRender neu und der Knopf kommt
+        const chip = document.createElement('span'); chip.className = 'chip chip-neutral'; chip.style.marginLeft = '8px'
+        chip.textContent = 'anfragbar ' + wdAbTxt(wdAbAusIso(r.wd_ab)); chip.title = wdAbTip()
+        st.appendChild(chip)
       }else if(r.wd_ready && !(r.calc && r.calc.anf && r.calc.anf.zyklusOffen)){   // PO2: Zyklus noch nicht geprüft → noch kein Knopf
         const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-good'
         chip.style.cssText = 'margin-left:8px;border:0;cursor:pointer'
@@ -20498,7 +20504,7 @@
       let tf = null; try{ tf = zielFortschritt(a) }catch(_){ tf = null }
       if(a.zielErreichtAt) return (tf && tf.mindest && !tf.done) ? 'tage' : 'review'
       let pr = null; try{ pr = payoutReadyInfo(a) }catch(_){ pr = null }
-      if((pr && pr.faellig) || (tf && tf.done && tf.kind === 'winning_days' && !tf.mindest)) return 'payout'
+      if((pr && pr.faellig) || (tf && tf.done && tf.kind === 'winning_days' && !tf.mindest && !(tf.vollAb > Date.now()))) return 'payout'   // WE1: erst nach Ende des Handelstags
       return 'offen'
     }
     /* TRADE-SPALTE (20.10.2026, Finn 20:25 Dubai am Admin → Alle Accounts: „Kannst du hier in der Übersicht hinschreiben, ob der Trade
@@ -21223,7 +21229,7 @@
         for(const r of cal){
           const tag = String(r.ready_at || '').slice(0, 10)
           const tage = tag ? tageBis(tag) : null
-          const faellig = tag ? tage <= 0 : !!r.wd_ready
+          const faellig = tag ? tage <= 0 : !!r.wd_ready && !wdAbAusIso(r.wd_ab)   // WE1: Ziel erst heute voll → noch nicht fällig
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
           // PO2: Railway kann den Tradeify-/Lucid-Zyklus nicht entscheiden → Urteil der Konto-Kachel holen (/konto-ziele, je Konto höchstens alle 5 min, nur diese Zeilen)
@@ -21321,8 +21327,13 @@
         const gruppen = []
         // PO2: Zyklus im Minus (gesperrt) nach unten — nicht anfragbar, auch wenn 5/5
         const wdMinus = r => (r.calc && r.calc.anf && (r.calc.anf.minus || r.calc.anf.zyklusOffen)) ? 1 : 0
+        const wdBereit = r => (r.wd_ready && !wdAbAusIso(r.wd_ab)) ? 1 : 0   // WE1: „anfragbar ab …“ direkt hinter die anfragbaren (5/5 sortiert danach vor 4/5)
+        // WE1: an der Tagesgrenze einmal neu zeichnen, damit „anfragbar ab 03:00“ ohne Neuladen zum Knopf wird
+        const abNext = Math.min(...cal.map(r => wdAbAusIso(r.wd_ab)).filter(Boolean))
+        clearTimeout(window._admWdAbTimer)
+        if(isFinite(abNext)) window._admWdAbTimer = setTimeout(() => { try{ admCalRender() }catch(_){} }, Math.min(abNext - Date.now() + 2000, 2147000000))
         const wd = cal.filter(istWd)
-          .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
+          .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (wdBereit(b) - wdBereit(a)) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
         // PO1 (Finn 09.11.2026): anfragbar oben — fällige Termine (heute/überfällig) und erfüllte On-Demand-Konten zuerst, sonst wie bisher nach Termin
         const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!((r.calc.od && r.calc.od.ok === true) || r.waiting_since)) ? 0 : 1   // BS1: Waiting ohne Termin = anfragbar
         const cfd = cal.filter(r => !istWd(r))
@@ -21484,7 +21495,8 @@
           sub.textContent = `${a.grund} · ${anteilTxt} · × ${pctTxt} %`; b.title = a.regel.quelle
         }else{
           v.textContent = geld(a.erhalten); v.style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
-          sub.textContent = (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
+          const _ab = r.wd_ready ? wdAbAusIso(r.wd_ab) : 0   // WE1 (19.11.2026): Ziel erst heute voll → Betrag steht, „ab 03:00 · “ davor
+          sub.textContent = (_ab ? wdAbTxt(_ab) + ' · ' : '') + (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
             || (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
             + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : '')))
             + ` · × ${pctTxt} %` + (c.manuell ? ` · Payout fest ${geld(c.betrag)}` : '')
@@ -29221,6 +29233,30 @@
     try{ return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(t) }
     catch(_){ return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0') }
   }
+  /* WE1 (Finn 19.11.2026, Admin → Payouts: „Payouts lassen sich immer erst End of Day anfragen … wenn ich heute den fünften Winning Day hole, steht
+   * er schon als ‚anfragbar‘ … da soll ‚5/5‘ stehen, aber man sieht: ab heute Nacht / ab morgen verfügbar“). Die Firma zählt den Tag erst nach Ende
+   * des Handelstags. Grenze = dieselbe CME-Tagesgrenze wie die Zählung (tvV2Handelstag, 17:00 Chicago; app.py _cme_tag_ende / wd_voll_ab).
+   * Keine neue Regel: nur „Handelstag vorbei?“ am Zielstand. */
+  function wdTagEndeMs(tag){   // Ende des CME-Tags 'JJJJ-MM-TT' = 17:00 Chicago (22:00 UTC Sommerzeit, sonst 23:00 UTC)
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(tag || '')); if(!m) return 0
+    const cdt = Date.UTC(+m[1], +m[2] - 1, +m[3], 22)
+    return tvV2Handelstag(cdt) !== m[0] ? cdt : cdt + 3600000
+  }
+  // → Zeitpunkt (ms), ab dem das Konto anfragbar ist, wenn das Ziel ERST im laufenden Handelstag voll wurde (heute gezählt, ohne heute noch nicht am Ziel); sonst 0
+  function wdVollAbMs(tage, count, target, jetzt){
+    const now = jetzt == null ? Date.now() : jetzt, heute = tvV2Handelstag(now), n = Number(count) || 0, z = Number(target) || 0
+    if(!(z > 0) || n < z || n - 1 >= z || !(tage || []).some(t => String(t).slice(0, 10) === heute)) return 0
+    const ende = wdTagEndeMs(heute); return ende > now ? ende : 0
+  }
+  function wdAbAusIso(iso, jetzt){ const t = Date.parse(iso || '') || 0; return t > (jetzt == null ? Date.now() : jetzt) ? t : 0 }   // Railway-Feld (wd_ab / wd_voll_ab)
+  // Gerätezeit (GZ1): „ab 03:00“ am selben Gerätetag, sonst „ab morgen 03:00“
+  function wdAbTxt(ms, jetzt){
+    const d = new Date(ms), n = new Date(jetzt == null ? Date.now() : jetzt), uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleDateString('en-CA') === n.toLocaleDateString('en-CA') ? `ab ${uhr}` : `ab morgen ${uhr}`
+  }
+  // Funktion statt Modul-Konstante: renderAccounts zeichnet vor deren Auswertung (TDZ, s. zielDotsHtml)
+  function wdAbTip(){ return 'Ziel im laufenden Handelstag erreicht — die Firma zählt den Winning Day erst nach Ende des Handelstags (17:00 Chicago); danach anfragbar' }
+  window._wdVollAbMs = wdVollAbMs; window._wdAbTxt = wdAbTxt; window._wdAbAusIso = wdAbAusIso
   // Ein tv-lesen gegen das Panel — dasselbe Muster wie 'tv-konto' in tpOrbitStarten. Altes Panel ohne
   // die Route antwortet mit HTML/404 → mtcApi liefert _httpFail → hier 'reader_fehlt'.
   /* Konto-Kontext für Puls (25.09.2026, Befund Jacob 273fd74f/772fa0c3): tv-lesen schickte nur die External ID. Stand in
@@ -76532,6 +76568,9 @@
       // WD-STAND WIE DER FARMER (W3, 03.11.2026): die RPC zählt den alten Zähler goal_done_offset — Railway liefert den automatischen Stand (wd_stand)
       const stand = new Map(rail.konten.filter(k => k && k.wd_stand != null).map(k => [String(k.id), Number(k.wd_stand)]))
       for(const k of konten) if(stand.has(k.id)) k.winning_days = stand.get(k.id)
+      // WE1 (19.11.2026): Ziel erst heute voll → Railway liefert wd_voll_ab (Ende des Handelstags); fehlt es (altes Backend), wie bisher
+      const vollAb = new Map(rail.konten.filter(k => k && k.wd_voll_ab).map(k => [String(k.id), k.wd_voll_ab]))
+      for(const k of konten) if(vollAb.has(k.id)) k.wd_voll_ab = vollAb.get(k.id)
     }
     if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: k.tp_vorgabe > 0 ? Number(k.tp_vorgabe) : null, sl_vorgabe: k.sl_vorgabe > 0 ? Number(k.sl_vorgabe) : null, winning_days: k.wd_stand != null ? Number(k.wd_stand) : null,
       // live_balance/starting_balance aus Railway übernehmen, falls geliefert (Backend B8, F10 26.09.2026) — vorher hart null
@@ -78798,7 +78837,8 @@
       const r = pr.get(String(k.id)); let calc = null
       try{ calc = r && typeof window._admPayoutCalc === 'function' ? window._admPayoutCalc(r) : null }catch(_){}
       const fehlt = Math.max(0, ziel - n), sperre = wdZyklusSperreTxt(k.id)   // RC6: Zyklus im Minus → nicht „Payout anfragbar“
-      return { k, ziel, n, fehlt, h, sperre, bereit: fehlt === 0 && !sperre, angefragt: angefragt.has(String(k.name || '').trim()), firma: wdUebFirma(k.firm),
+      const ab = fehlt === 0 && !sperre ? wdAbAusIso(k.wd_voll_ab) : 0   // WE1 (19.11.2026): Ziel erst heute voll → anfragbar erst nach Ende des Handelstags
+      return { k, ziel, n, fehlt, h, sperre, ab, bereit: fehlt === 0 && !sperre && !ab, angefragt: angefragt.has(String(k.name || '').trim()), firma: wdUebFirma(k.firm),
                frueh: fehlt ? wdUebFrueh(fehlt, h.offen) : null, betrag: calc && calc.betrag > 0 ? calc.betrag : null, ccy: (calc && calc.ccy) || 'USD' }
     })
   }
@@ -78824,6 +78864,7 @@
       const uid = escapeHtml(String(e.k.user_id)), f = { target: e.ziel, count: Math.min(e.n, e.ziel), done: e.bereit, kind: 'winning_days' }
       const stand = e.angefragt ? '<span style="color:var(--sub)">💸 Payout angefragt</span>'
         : e.bereit ? '<b style="color:var(--good-ink, #15803d)">Payout anfragbar</b>'
+        : e.ab ? `<span title="${escapeHtml(wdAbTip())}">Payout anfragbar <b style="font-weight:600">${escapeHtml(wdAbTxt(e.ab))}</b></span>`
         : e.sperre && !e.fehlt ? `<span style="color:var(--danger)">⚠ ${escapeHtml(e.sperre)}</span>`
         : `<span title="noch ${e.fehlt} Gewinntag${e.fehlt === 1 ? '' : 'e'} bis zum Payout — frühestens am ${escapeHtml(wdUebTag(e.frueh))}, wenn ${e.h.offen ? 'ab heute' : 'ab dem nächsten Handelstag'} jeder Handelstag ein Gewinntag wird">noch ${e.fehlt} · frühestens <b style="font-weight:600">${escapeHtml(wdUebTag(e.frueh))}</b></span>`
       const fuss = [e.betrag != null ? `<span title="Betrag wie Admin → Payouts (Balance über Kontogröße × Profit-Share)">≈ ${escapeHtml(geld(e.betrag, e.ccy))}</span>` : '', e.h.txt]
@@ -79024,11 +79065,12 @@
         else geplant++
       }
       const bereit = liste.filter(e => e.bereit && !e.angefragt), naechst = liste.filter(e => e.fehlt > 0).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
+      const abL = liste.filter(e => e.ab && !e.angefragt).sort((a, b) => a.ab - b.ab), abSub = abL.length ? `${abL.length} ${wdAbTxt(abL[0].ab)}` : ''   // WE1: Ziel heute voll
       const geld = bereit.filter(e => e.betrag != null && e.ccy !== 'EUR').reduce((s, e) => s + e.betrag, 0)
       kz.innerHTML = !konten.length && !liste.length ? '' :
         wdUebKpi('Heute', `${fertig} / ${konten.length}`, `fertig · ${laeuft} läuft · ${geplant} geplant${verpasst ? ` · <span style="color:var(--danger)">${verpasst} verpasst</span>` : ''}`, '') +
         wdUebKpi('P&L heute', mitPl ? wdUebUsd(pl) : '–', mitPl ? `${plus} von ${mitPl} im Plus · Ø ${wdUebUsd(pl / mitPl)}` : 'noch kein WD fertig', mitPl ? wdUebFarbe(pl) : '') +
-        wdUebKpi('Payout anfragbar', bereit.length ? `${bereit.length} ${bereit.length === 1 ? 'Konto' : 'Konten'}` : '–', bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${wdDe(geld)} $` : '') : 'noch keins', bereit.length ? 'var(--good-ink, #15803d)' : '') +
+        wdUebKpi('Payout anfragbar', bereit.length ? `${bereit.length} ${bereit.length === 1 ? 'Konto' : 'Konten'}` : '–', bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${wdDe(geld)} $` : '') + (abSub ? ' · ' + escapeHtml(abSub) : '') : (abSub ? escapeHtml(abSub) : 'noch keins'), bereit.length ? 'var(--good-ink, #15803d)' : '') +
         wdUebKpi('Nächster Payout', naechst ? escapeHtml(wdUebTag(naechst.frueh)) : '–', naechst ? `${escapeHtml(naechst.k.person || '')} · ${escapeHtml(naechst.firma)} · noch ${naechst.fehlt}` : '—', '', 'frühester Tag, wenn ab jetzt jeder Handelstag ein Gewinntag wird')
     }
     _apgWd.liste = liste; try{ apgWdRender(liste) }catch(e){ console.warn('[apg] WD-Gerüst', e) }   // Guestly-Gerüst (30.10.2026) — nur Anzeige, stört die Kacheln nie
@@ -79061,6 +79103,7 @@
       if(isFinite(h) && h >= 0 && h < 24) std[h]++
     }
     const bereit = (liste || []).filter(e => e.bereit && !e.angefragt), naechst = (liste || []).filter(e => e.fehlt > 0).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
+    const abL = (liste || []).filter(e => e.ab && !e.angefragt).sort((a, b) => a.ab - b.ab), abSub = abL.length ? `${abL.length} ${wdAbTxt(abL[0].ab)}` : ''   // WE1 (19.11.2026): Ziel heute voll → „1 ab 03:00“
     const geld = bereit.filter(e => e.betrag != null && e.ccy !== 'EUR').reduce((s, e) => s + e.betrag, 0)
     const ls = [...je.values()].sort((a, b) => (b.L + b.S) - (a.L + a.S)).slice(0, 15), total = std.reduce((a, b) => a + b, 0), peak = total ? std.indexOf(Math.max(...std)) : -1
     const chip = document.getElementById('wd-auto-chip'), chipTxt = String((chip && chip.textContent) || '').trim(), chipAn = !!(chip && chip.classList.contains('an'))
@@ -79077,7 +79120,7 @@
         pillen: verpasst ? apgPille('tuerkis', `⚠ ${verpasst} verpasst`, 'verpasst oder Konto weg') : '' })}
       ${apgKpi({ icon: APG_ICON.lauf, name: 'Läuft', zahl: String(laeuft), ziel: 'ablauf', unter: laeuft ? 'gerade offen' : 'nichts läuft' })}
       ${apgKpi({ icon: APG_ICON.hand, name: 'Payout anfragbar', zahl: String(bereit.length), cls: bereit.length ? 'gut' : '', ziel: 'ueb',
-        unter: bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${apgZahl(geld)} $` : '') : 'noch keins' })}
+        unter: bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${apgZahl(geld)} $` : '') + (abSub ? ' · ' + escapeHtml(abSub) : '') : (abSub ? escapeHtml(abSub) : 'noch keins') })}
       ${apgKpi({ icon: APG_ICON.warte, name: 'Nächster Payout', zahl: naechst ? escapeHtml(wdUebTag(naechst.frueh)) : '–', ziel: 'ueb',
         unter: naechst ? `${escapeHtml(naechst.k.person || '')} · ${escapeHtml(naechst.firma)} · noch ${naechst.fehlt}` : '—', tip: 'frühester Tag, wenn ab jetzt jeder Handelstag ein Gewinntag wird' })}
     </div>`
@@ -80381,7 +80424,9 @@
       // WINNING DAYS AUTOMATISCH (Finn 03.11.2026 ~01:35 Dubai, Fall Mike Apex 100k …0002: drei Gewinn-Tage, gezählt 2): jeder CME-Handelstag mit
       // Tagessumme ≥ Mindestgewinn ab dem Zyklus-Start + Korrektur von Hand (goal_wd_korrektur) — dieselbe Rechnung wie app.py wd_auto_tage
       const w = zielWdAuto(a), heute = tvV2Handelstag()
+      // WE1 (19.11.2026): vollAb = Ende des laufenden Handelstags, wenn erst heute das Ziel voll wurde (sonst 0) — bis dahin „anfragbar ab …“
       return { count: w.count, target: k.target, done: w.count >= k.target, kind: k.kind, mindest, manual: true, auto: true, tage: w.tage,
+               vollAb: mindest ? 0 : wdVollAbMs(w.tage, w.count, k.target),
                heuteAbgehakt: w.tage.includes(heute) || (!!a.goalManualLast && String(a.goalManualLast).slice(0,10) === _deTodayStr()) }
     }
     if(k.manual){
@@ -80451,7 +80496,15 @@
     // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
     // RC6 (19.11.2026): Tradeify/Lucid-Zyklus im Minus (Railway-Stand) → „✓ · Zyklus −5.416 $ · Recovery von Hand“ statt „Payout anfragbar“
     const _sp = f.done && f.kind === 'winning_days' && !f.mindest && typeof window._wdZyklusSperreTxt === 'function' ? window._wdZyklusSperreTxt(a.id) : ''
-    const fertig = f.done ? (f.kind === 'winning_days' && !f.mindest ? (_sp ? ` ✓ · ${escapeHtml(_sp)}` : ' ✓ · Payout anfragbar') : ' ✓') : ''
+    // WE1 (19.11.2026): Ziel erst heute voll → „✓ · Payout anfragbar ab 03:00“ (Gerätezeit), nach Ende des Handelstags wie bisher
+    const _ab = f.done && f.kind === 'winning_days' && !f.mindest && !_sp && f.vollAb > Date.now() ? f.vollAb : 0
+    // an der frühesten Grenze einmal Accounts + Finanzen neu zeichnen, damit „ab 03:00“ nicht stehen bleibt (Kasse: eigener Wecker in admCalRender)
+    if(_ab && (!window._wdAbNeuAt || _ab < window._wdAbNeuAt)){
+      window._wdAbNeuAt = _ab; clearTimeout(window._wdAbNeuT)
+      window._wdAbNeuT = setTimeout(() => { window._wdAbNeuAt = 0
+        try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){} try{ if(typeof renderFinanzen === 'function') renderFinanzen() }catch(_){} }, Math.min(_ab - Date.now() + 2000, 2147000000))
+    }
+    const fertig = f.done ? (f.kind === 'winning_days' && !f.mindest ? (_sp ? ` ✓ · ${escapeHtml(_sp)}` : _ab ? ` ✓ · <span title="${escapeHtml(wdAbTip())}">Payout anfragbar ${wdAbTxt(_ab)}</span>` : ' ✓ · Payout anfragbar') : ' ✓') : ''
     // klickbar (Accounts-Tabelle): öffnet den Account zum Bearbeiten des Stands
     const attr = klickbar ? ` data-acc-wd="${escapeHtml(String(a.id))}" title="Klicken zum Bearbeiten" style="cursor:pointer"` : ''
     if(f.mindest)   // Mindesttage kompakt (+ Gewinntage 25.10.2026) (09.10.2026): „Tage 3/5", grün wenn erfüllt
@@ -80778,9 +80831,11 @@
       if(typeof renderAccounts === 'function') renderAccounts()
       if(typeof renderFinanzen === 'function'){ try{ renderFinanzen() }catch(_){} }
       const ziel = k.target
+      // WE1 (19.11.2026): Ziel erst im laufenden Handelstag voll → „Payout anfragbar ab 03:00“ (die Firma zählt den Tag erst nach Tagesende)
+      let vollAb = 0; try{ vollAb = auto ? ((zielFortschritt(accounts[idx >= 0 ? idx : 0]) || {}).vollAb || 0) : 0 }catch(_){}
       if(typeof atToast === 'function')
         atToast(neuAnz >= ziel
-          ? `🏆 ${Math.min(neuAnz, ziel)}/${ziel} — Payout anfragbar · ${a.name}`
+          ? `🏆 ${Math.min(neuAnz, ziel)}/${ziel} — Payout anfragbar${vollAb ? ' ' + wdAbTxt(vollAb) : ''} · ${a.name}`
           : `🏆 Winning Day abgehakt — ${neuAnz}/${ziel} · ${a.name}`, 'start')
     }catch(e){
       console.warn('[ziel] Winning Day +1 fehlgeschlagen:', e.message || e)
@@ -81077,8 +81132,9 @@
       // Kompakt (23.10.2026): Stand steht rechts als Zahl, das Konto im Kopf — der Haken heißt nur noch „🏆 Winning Day"
       cb.checked = !!(f && f.heuteAbgehakt); cb.disabled = !!(f && f.heuteAbgehakt)
       lbl.textContent = cb.disabled ? '🏆 Winning Day · heute schon gezählt' : '🏆 Winning Day'
+      // WE1 (19.11.2026): „Ziel erreicht“ heißt erst nach Ende des Handelstags anfragbar — Uhrzeit in Gerätezeit
       if(hint) hint.textContent = cb.disabled ? 'Ein Tag zählt nur einmal, egal wie viele Trades.'
-        : f && f.count + 1 >= f.target ? 'Damit ist das Ziel erreicht — Payout anfragbar.' : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+        : f && f.count + 1 >= f.target ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     }else if(f && f.heuteAbgehakt){
       cb.checked = true; cb.disabled = true
       lbl.textContent = `🏆 Winning Day heute schon abgehakt — ${stand} · ${a.name}`
@@ -81087,7 +81143,7 @@
       cb.checked = false; cb.disabled = false
       lbl.textContent = `🏆 Dieser Trade war ein Winning Day — ${stand} · ${a.name}`
       if(hint) hint.textContent = f && f.count + 1 >= f.target
-        ? 'Damit ist das Ziel erreicht — Payout anfragbar.'
+        ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).`
         : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     }
     tcWdRmVorschau()
@@ -83039,6 +83095,7 @@
           : `<span style="color:var(--violet);font-weight:600">💸 Payout ab ${pi.kurz}</span> <span style="color:var(--sub)">· ${pi.rel}</span>`
       }else if(f){
         ready = f.done && f.kind === 'winning_days' && !(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))   // RC6: Zyklus im Minus → nicht anfragbar
+          && !(f.vollAb > Date.now())   // WE1 (19.11.2026): Ziel erst heute voll → erst nach Ende des Handelstags (Badge zeigt „anfragbar ab …“)
         sort = ready ? -1e9 : (f.target - f.count) * 1000
         html = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
       }
@@ -83256,11 +83313,13 @@
       const wd = !!(f && f.kind === 'winning_days' && !f.mindest)
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
       const r = { wd: wd ? `🏆 ${Math.min(f.count, f.target)}/${f.target}` : '', bereit: pi ? !!pi.faellig : !!(wd && f.done && !(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))) }   // Termin vor Ziel, wie renderFinPayoutStatus (RC6: Zyklus im Minus → nicht anfragbar)
+      // WE1 (19.11.2026): Ziel erst heute voll → noch nicht anfragbar, die Option sagt „anfragbar ab 03:00“
+      if(!pi && r.bereit && f.vollAb > Date.now()){ r.bereit = false; r.ab = wdAbTxt(f.vollAb) }
       finPoCache.set(a.id, r); return r
     }
     accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + kontoOptionenGruppiert(finFundedAccounts, a => {
       const st = finPoStand(a), bal = finLiveBalStr(a)
-      return (st.wd ? ' · ' + st.wd : '') + (st.bereit ? ' · anfragbar' : '') + (bal ? ' · ' + bal : '')
+      return (st.wd ? ' · ' + st.wd : '') + (st.bereit ? ' · anfragbar' : st.ab ? ' · anfragbar ' + st.ab : '') + (bal ? ' · ' + bal : '')
     }, a => finPoStand(a).bereit)
     const nextEl = document.getElementById('fin-next-payout'); if(nextEl) nextEl.value = ''
 

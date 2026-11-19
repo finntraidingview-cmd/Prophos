@@ -9070,6 +9070,9 @@ def admin_build_overview(kapitel_id=None):
             "wd_count": count if manual else None,
             "wd_target": target if manual else None,
             "wd_ready": bool(manual and target > 0 and count >= target),
+            # WE1 (Finn 19.11.2026): Ziel erst im laufenden Handelstag voll → ab wann anfragbar (ISO UTC, Ende des CME-Tags), sonst ''.
+            # wd_ready bleibt „Ziel voll“ (5/5); das Frontend zeigt bis zu dieser Zeit „anfragbar ab …“ statt des Knopfs
+            "wd_ab": wd_voll_ab(wd_auto[aid]["tage"], count, target) if (manual and aid in wd_auto) else "",
             "waiting_since": warten[:10],
         })
         bal, ccy, src, at = _acc_balance(a)
@@ -14001,6 +14004,35 @@ def _cme_handelstag(roh=None):
         return None
 
 
+# WE1 (Finn 19.11.2026, Admin → Payouts „🏆 5/5 anfragbar“ am Tag des 5. Winning Days): die Firmen zählen einen Winning Day erst nach Ende
+# des Handelstags — anfragbar ist ein Konto erst, wenn der Tag, der das Ziel voll macht, vorbei ist. Grenze = dieselbe CME-Tagesgrenze, an
+# der die Zählung (wd_auto_tage) den Tag wechselt (17:00 Chicago): Tag gezählt und Tag vorbei meinen so immer denselben Tag. firm_rules.json
+# nennt frühere Schlüsse (Apex Flatten 16:59 ET, Tradeify 17:00 ET, Topstep 15:10 CT / Lock-in 16:00 CT) — dazwischen wird nicht gehandelt,
+# die Grenze liegt also höchstens eine Stunde später als bei der Firma, nie früher. Keine neue Regel: nur „Handelstag vorbei?“ am Zielstand.
+def _cme_tag_ende(tag):
+    """Ende des CME-Handelstags 'JJJJ-MM-TT' = 17:00 America/Chicago an diesem Datum (ab da trägt die Session den Folgetag) → UTC-datetime, None wenn unlesbar."""
+    from zoneinfo import ZoneInfo
+    try:
+        j, m, t = (int(x) for x in str(tag)[:10].split("-"))
+        return datetime(j, m, t, 17, 0, tzinfo=ZoneInfo("America/Chicago")).astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def wd_voll_ab(tage, stand, ziel, jetzt=None):
+    """REIN RECHNEND (testbar): ISO-UTC-Zeit, ab der ein Winning-Days-Konto anfragbar ist, wenn das Ziel ERST im laufenden CME-Handelstag voll
+    wurde (heute gezählt und ohne den heutigen Tag noch nicht am Ziel) — sonst ''. jetzt: ISO/Unix/None (= jetzt), wie _cme_handelstag."""
+    try:
+        stand, ziel = int(stand or 0), int(ziel or 0)
+    except (TypeError, ValueError):
+        return ""
+    heute = _cme_handelstag(jetzt)
+    if ziel <= 0 or not heute or stand < ziel or stand - 1 >= ziel or heute not in {str(x)[:10] for x in (tage or ())}:
+        return ""
+    ende = _cme_tag_ende(heute)
+    return ende.isoformat().replace("+00:00", "Z") if ende else ""
+
+
 def _wd_level(einstieg, richtung, usd, ppl, kt, ist_tp):
     """REIN RECHNEND (testbar): Preis-Level aus einer $-Distanz. BUY: TP über, SL unter dem
     Einstieg; SELL gespiegelt. None ohne Einstieg, ohne Betrag, ohne Punktwert oder Kontrakte."""
@@ -16526,8 +16558,9 @@ def wd_auto_staende(konto_ids):
     out = {}
     for k in konten:
         tage = wd_gezaehlte_tage(k, je.get(str(k["id"]), []))
-        out[str(k["id"])] = {"stand": max(0, len(tage) + int(_wd_num(k.get("goal_wd_korrektur")) or 0)), "tage": tage,
-                             "korrektur": int(_wd_num(k.get("goal_wd_korrektur")) or 0), "ziel": int(_wd_num(k.get("goal_target")) or 5)}
+        st, zl = max(0, len(tage) + int(_wd_num(k.get("goal_wd_korrektur")) or 0)), int(_wd_num(k.get("goal_target")) or 5)
+        out[str(k["id"])] = {"stand": st, "tage": tage, "korrektur": int(_wd_num(k.get("goal_wd_korrektur")) or 0), "ziel": zl,
+                             "voll_ab": wd_voll_ab(tage, st, zl)}   # WE1 (19.11.2026): Ziel erst heute voll → anfragbar ab Ende des Handelstags
     return out
 
 
@@ -18396,6 +18429,8 @@ def admin_wd_plaene():
                             k = next((x for x in konten if x["id"] == kid), None)
                             if k is not None:
                                 k["wd_stand"] = st.get("stand")
+                                if st.get("voll_ab"):
+                                    k["wd_voll_ab"] = st["voll_ab"]   # WE1 (19.11.2026): WD-Übersicht „Payout anfragbar ab …“
                     except Exception as e:
                         print(f"[wd] ⚠️ WD-Stand: {type(e).__name__}: {e}", flush=True)
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne

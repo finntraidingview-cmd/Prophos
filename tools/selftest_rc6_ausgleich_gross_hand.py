@@ -112,7 +112,8 @@ check("const sp = wdZyklusSperreTxt(id)" in _wh and _wh.index("wdZyklusSperreTxt
 check("q.hinweis === WD_HINWEIS_ZIEL && wdZyklusSperreTxt(q.id)" in html and "⚠ Zyklus im Minus" in html, "Ablauf-Chip: „⚠ Zyklus im Minus“ statt „🏆 Ziel erreicht“")
 check("sperre = wdZyklusSperreTxt(k.id)" in html and "bereit: fehlt === 0 && !sperre" in html and html.count("filter(e => e.fehlt > 0).sort(") == 2,
       "WD-Übersicht: bereit nur ohne Sperre, „Nächster Payout“ wie bisher nur aus fehlenden Tagen")
-check("_sp ? ` ✓ · ${escapeHtml(_sp)}` : ' ✓ · Payout anfragbar'" in html, "Accounts-Zeile: „✓ · Zyklus …“ statt „✓ · Payout anfragbar“")
+# WE1 (19.11.2026): zwischen Sperre und „Payout anfragbar“ steht „anfragbar ab …“ (Ziel erst heute voll) — die Sperre geht weiter vor
+check("_sp ? ` ✓ · ${escapeHtml(_sp)}` : _ab ?" in html and ": ' ✓ · Payout anfragbar') : ' ✓') : ''" in html, "Accounts-Zeile: „✓ · Zyklus …“ statt „✓ · Payout anfragbar“")
 check(html.count("!(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))") == 2, "Finanzen: Payout-Status + Kontoauswahl nicht „anfragbar“ bei Sperre")
 
 print()
