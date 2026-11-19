@@ -36,9 +36,9 @@ BG = {"namen": ["blueguardian"], "planen": True, "route": "mt5v2", "dd_pct": 8, 
 # flex wie in der SQL-Datei
 FLEX = {"name": "Nano", "ab_dd_pct": 10, "dd_pct": 10, "kauf_eur": {"100000": 145},
         "je_groesse": {"100000": {"dd_pct": 10, "ziel_pct": {"phase1": 8, "phase2": 5}, "daily_pct": 3, "gewinntage": None,
-                                  "phasen": {"phase1": {"sl": [2300, 2600], "tp": [4950, 5850], "menge": [4, 5.3], "menge_schritt": 0.1,
+                                  "phasen": {"phase1": {"sl": [2000, 2500], "tp": [4950, 5850], "menge": [4, 5.3], "menge_schritt": 0.1,
                                                         "puffer": [25, 50], "ziel_pct": 8, "boden_pct": 10},
-                                             "phase2": {"sl": [2300, 2600], "tp": [2700, 3150], "menge": [4, 5.3], "menge_schritt": 0.1,
+                                             "phase2": {"sl": [2000, 2500], "tp": [2700, 3150], "menge": [4, 5.3], "menge_schritt": 0.1,
                                                         "puffer": [25, 50], "ziel_pct": 5, "boden_pct": 10}}}}}
 BGN = dict(copy.deepcopy(BG), flex=copy.deepcopy(FLEX))
 U = {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5}
@@ -64,7 +64,7 @@ def main():
     print("2 Nano-Plan")
     for bal in (100000.0, 103000.0):
         w, g = plan(BGN, konto(10000), bal)
-        check(w is not None and w["ziel"] == 108000 and w["sl"] <= 2600, f"P1 bei {bal:,.0f}: Ziel 108.000, SL {w and w['sl']} ≤ 2.600 ({g})")
+        check(w is not None and w["ziel"] == 108000 and w["sl"] <= 2500, f"P1 bei {bal:,.0f}: Ziel 108.000, SL {w and w['sl']} ≤ 2.500 ({g})")
         check(w is not None and w["tages_grenze_usd"] == round(bal * 0.03, 2), f"P1 bei {bal:,.0f}: Tagesgrenze 3 % = {w and w['tages_grenze_usd']}")
     w, g = plan(BGN, konto(10000, "phase2"), 100000.0)
     check(w is not None and w["ziel"] == 105000, f"P2: Ziel 105.000 (5 %) → {w and w['ziel']} ({g})")

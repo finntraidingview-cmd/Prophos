@@ -27,6 +27,12 @@ BG1 (Finn 19.11.2026), Slave-Bericht. Teil A = Regeln (unten, ab „Stand der Re
 0,0375 statt 0,0145 €/$ in Phase 1 (≈ 2,6× zu viel Hedge), Phase 2 0,075 statt 0,026 (≈ 2,9×). Fix: Kontowert nimmt die Variante, wenn
 `flex.kauf_eur` gesetzt ist (nur BG Nano; FundingPips Flex hat keins → bitgleich).
 
+**Finns Vorgaben 19.11.2026 (über den Master):** Challenge Nano = Lots/TP wie Standard, **SL 2.000–2.500 $** (Daily 3.000 nie treffen).
+Bedingung „kein Max Loss pro Trade bei Nano“ — geprüft, erfüllt: [NANO] nennt nur Daily 3 % + DD 10 % und „Stop losses: not mandatory“, kein
+Lot-/Risiko-Limit je Trade; [PROH] hat nur die 80-%-Margin-Regel; [AGB] „Prohibited Strategies“ verbietet „excessive risk … in a single
+simulated-trade“ und „Boom or Bust“ OHNE Zahl (Ermessen von Blue Guardian, kein fester Wert). **Funded Nano 100k (BG2):** Payout-Ziel je
+Zyklus **800–1.200 $** (Finn „750/800 bis 1.200“, Master nimmt 800–1.200).
+
 **Funded-CFD-Planer:** kennt keine Varianten je Konto. Heute gäbe es für einen Nano-Funded die Standard-Werte (Gewinntage 3 × 500,
 Ziel 1.000–2.000 ≤ Cap, SL 1.250–1.600 < Daily 3.000 — regelsicher, aber Hedge 1.000 €/8.000 $ ≈ 3× zu groß, Consistency nur zufällig
 eingehalten). Nano-Funded gibt es frühestens nach zwei bestandenen Phasen → eigener Schritt BG2 (Code + Finns Hedge-Satz), s. SQL Teil 2.

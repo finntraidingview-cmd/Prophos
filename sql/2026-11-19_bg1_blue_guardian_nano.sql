@@ -14,12 +14,14 @@
 --      (SL bis 3.150 > Nano-Daily 3.000). Nachfolger Phase 2/Funded und Reset erben den Wert. goal_kind am Nano-Konto LEER lassen (keine Mindesttage).
 --
 -- NANO-WERTE (TP/Lots/Puffer = Standard-Werte von Finn; SL VORSCHLAG Slave, wegen Daily 3 %):
---   P1 TP 4.950–5.850 (2 Trades bis 8.000) · P2 TP 2.700–3.150 (2 Trades bis 5.000) · SL 2.300–2.600 (Standard 2.700–3.150 läge über/an
+--   P1 TP 4.950–5.850 (2 Trades bis 8.000) · P2 TP 2.700–3.150 (2 Trades bis 5.000) · SL 2.000–2.500 (Standard 2.700–3.150 läge über/an
 --   der Tagesgrenze 3.000) · Lots 4–5,3 · Puffer 25–50 · Boden 10 %.
 --   daily_pct 3 → ap_tagesgrenze kappt den SL zusätzlich auf (3 % der Balance − heute realisierter Verlust − 100 $ Puffer) und gibt
 --   tages_grenze_usd an den Plan (Echo V2 zieht den SL am Fill nach). gewinntage null: der Gewinntag-Weg der Firma gilt nie für Nano.
 --   name „Nano“ (Teil C): nur die Reiter im Kernwerte-Editor (E3) — „Standard 100k“ / „Nano 100k“ statt „100k“ / „Flex 100k“; der Planer liest es nicht.
---   SL 2.300–2.600 und Kauf 145 € von Finn bestätigt (19.11.2026, über den Master).
+--   SL 2.000–2.500 (Finn 19.11.2026, neu statt 2.300–2.600: „das Daily von 3.000 nie treffen“) und Kauf 145 € von Finn bestätigt (über den Master).
+--   Finns Bedingung geprüft: kein festes Max Loss / Max Risiko pro Trade für Nano — 2-step-nano-rules (Stop Loss nicht Pflicht, nur Daily 3 % +
+--   DD 10 %), prohibited-trading-strategies (nur 80-%-Margin-Regel), AGB „Prohibited Strategies“ (nur „excessive risk … single trade“ ohne Zahl, Ermessen).
 --   kauf_eur 145 (167 $): nur für den Kontowert = Echo-Hedge-Satz. Braucht den Code-Commit „BG1 Kontowert-Variante“ (ap_kw_regel_konto):
 --   ohne ihn rechnet der Fusion-Hedge Nano mit Standard 300 € / 8 % (≈ 2,6–2,9× zu viel Hedge). ERST NACH DEM RAILWAY-DEPLOY EINSPIELEN.
 --
@@ -39,9 +41,9 @@ update public.auto_plan_regeln
               "daily_pct": 3,
               "gewinntage": null,
               "phasen": {
-                "phase1": {"sl": [2300, 2600], "tp": [4950, 5850], "menge": [4, 5.3], "menge_schritt": 0.1,
+                "phase1": {"sl": [2000, 2500], "tp": [4950, 5850], "menge": [4, 5.3], "menge_schritt": 0.1,
                            "puffer": [25, 50], "ziel_pct": 8, "boden_pct": 10},
-                "phase2": {"sl": [2300, 2600], "tp": [2700, 3150], "menge": [4, 5.3], "menge_schritt": 0.1,
+                "phase2": {"sl": [2000, 2500], "tp": [2700, 3150], "menge": [4, 5.3], "menge_schritt": 0.1,
                            "puffer": [25, 50], "ziel_pct": 5, "boden_pct": 10}
               }
             }
@@ -66,5 +68,6 @@ update public.auto_plan_regeln
 -- Consistency 50 % nur zufällig eingehalten, Gegenhedge 1.000 € / 8.000 $ = 0,125 €/$ — Nano-Funded ist ~390 € wert (145 × 1,8 × 1,5) → ≈ 3×.
 -- Vorschlag nach Code (flex wie im Challenge-Planer, ab_dd_pct 10), Hedge-Satz offen für Finn:
 --   "flex": {"ab_dd_pct": 10, "consistency_pct": 50,
---            "je_groesse": {"100000": {"ziel": [1000, 2000], "sl": [1250, 1600], "lots": [1, 1.75], "hedge_eur": <Finn, z. B. 400>, "dd": 10000}}}
---   (keine gewinntage; Cap 2.000 $ = Ziel-Obergrenze; Zyklus 14 Tage wie Standard).
+--            "je_groesse": {"100000": {"ziel": [800, 1200], "sl": [1250, 1600], "lots": [1, 1.75], "hedge_eur": <Finn, z. B. 400>, "dd": 10000}}}
+--   Ziel 800–1.200 $ je Zyklus (Finn 19.11.2026 „750/800 bis 1.200“, Master: 800–1.200 bis Finn anders sagt) — unter dem Cap 2.000 $ und mit
+--   Consistency 50 % in mindestens 2 Gewinntagen; keine gewinntage-Regel; Zyklus 14 Tage wie Standard.
