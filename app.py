@@ -17102,7 +17102,11 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     stand, ziel_tage = int(_wd_num(wd_stand) or 0), int(_wd_num(wd_ziel) or 5)
     # Prüfer (MUSS b): der Ausgleichs-Trade (TP ohne SL) nur bei einem Fehlbetrag bis zum Max DD — der größere WD-Puffer (PO2b) gilt nur für die Sperre;
     # darüber (z. B. −5.416 $ bei 4.500 $ DD, oder ein zu hoher Zyklus-Start) gesperrt, Ausgleich von Hand
-    gross = fehl > dd
+    # RC6 (Finn 19.11.2026 ~04:20 Dubai, Moritz Tradeify 150k …9666: Zyklus −5.415,70 $ bei Max DD 4.500 → seit 11.11. jeden Tag „Ziel schon voll“, kein
+    # Recovery): der vorhandene Recoverer-Schalter je Konto accounts.wd_zyklus_regel = 'an' gibt den Ausgleich auch über dem Max DD frei — von Hand per SQL,
+    # nur für dieses Konto; danach wieder null. Der Deckel oben (Puffer bis zur WD-Liq, sonst „unplausibel“) bleibt, ebenso Frische, RC5 und die Sperre.
+    _rc6_hand = str((konto or {}).get("wd_zyklus_regel") or "").strip().lower() == "an"
+    gross = fehl > dd and not _rc6_hand
     aktiv = gesperrt and stand >= ziel_tage - 1 and not gross and not _of   # RC5: nie aus einem unbelegten Stand
     # aufgerundet auf ganze $; E4: max(Fehlbetrag + 1 $, Mindest-Gewinn − Gewinn) — bei 1 $ genau die alte Formel, bei mehr reicht der TP bis zum Mindest-Gewinn
     tp = max(float(ziel_normal), float(-(-(max(fehl + TRADEIFY_ZYKLUS_MIN_USD, min_usd - gewinn) + puffer) // 1))) if aktiv else None
@@ -17113,7 +17117,10 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
                     "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ · Ausgleich fällig, aber Hedge-Werte fehlen für {fname} 50k (Winning Days → Einstellungen → {fname} 50k → eigene Hedge-Tabelle)"})
     elif aktiv:
         out.update({"ziel": tp, "satz": satz_normal, "hedge_eur": round(tp * satz_normal / 1000, 2), "grund_code": "ausgleich", "bestaetigen": TRADEIFY_AUSGLEICH_BESTAETIGEN,
-                    "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"})
+                    "grund": f"Zyklus {st['nr']}: −{d0(fehl)} $ — Ausgleichs-Trade TP {d0(tp)} $ (WD {stand}/{ziel_tage})"
+                             + (" · über Max DD von Hand freigegeben" if fehl > dd else "")})
+        if fehl > dd:
+            out["ausgleich_hand_frei"] = True   # RC6: sichtbar, dass dieser Ausgleich nur über den Schalter läuft
         # RC3 (Finn 11.11.2026): Menge nach TP — Felder wie der Apex-Recoverer, die das Frontend liest (rc3_felder). TP, Satz und hedge_eur bleiben
         # unverändert (rechnen in $). Eigenes try: ein Fehler lässt den Ausgleichs-Trade wie bisher
         try:
