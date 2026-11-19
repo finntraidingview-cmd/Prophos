@@ -5808,6 +5808,29 @@ def pc_uac_spur():
     return jsonify({"ok": True, "gesendet": gesendet})
 
 
+@app.route("/alarm/backup-check", methods=["POST"])
+def alarm_backup_check():
+    """BK1 (Finn 20.11.2026): der Backup-Prüfer auf Finns Mac (backup-agent/backup_check.py, launchd 07:20) meldet ein unvollständiges
+    Tages-Backup → 🟠 an die Master-IDs, einmal je Datum (alarm_log-Schlüssel backup_check|<datum>, 20 h). Der Mac hat keinen Prophos-Login,
+    nur die Nur-Lese-Rolle für Supabase — deshalb Token im Header X-Backup-Token (nie in der URL); es passt BACKUP_CHECK_TOKEN oder
+    PULS_FEHLERBILD_TOKEN (liegt schon in ~/.prophos), jeder nur ab 32 Zeichen, Vergleich zeitkonstant wie /puls-fehlerbild-datei; falsch/fehlend → 404."""
+    ist = str(request.headers.get("X-Backup-Token") or "").strip()
+    if not any(ht_payouts_token_ok(ist, os.environ.get(k)) for k in ("BACKUP_CHECK_TOKEN", "PULS_FEHLERBILD_TOKEN")):   # jeder gesetzte passt
+        return Response("Not Found", status=404, mimetype="text/plain")
+    d = request.get_json(silent=True) or {}
+    datum = str(d.get("datum") or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", datum):
+        return jsonify({"ok": False, "error": "datum fehlt"}), 400
+    text = re.sub(r"\s+", " ", str(d.get("text") or ""))[:400] or "Backup unvollständig — Details: tail ~/Library/Logs/prophos-backup-check.log"
+    key = f"backup_check|{datum}"
+    if key in (alarm_im_log([key], 20 * 3600) or set()):
+        return jsonify({"ok": True, "gedrosselt": True})
+    tag = f"{datum[8:10]}.{datum[5:7]}."
+    zu, n = alarm_senden(2, "backup_check", f"Backup {tag} unvollständig", text, schluessel=key, tag=f"alarm-backup-{datum}",
+                         daten={"datum": datum, "anzahl": d.get("anzahl") if isinstance(d.get("anzahl"), int) else None})
+    return jsonify({"ok": True, "zugestellt": zu, "geraete": n})
+
+
 @app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])
 def alarm_stand():
     """Einstellungen: ist dieser Login Master-ID? Dann Schwelle + letzte Meldungen; POST {min_prio} ändert die eigene Schwelle."""

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- BK1 (Finn 20.11.2026): prüft täglich 07:20 das Backup von 06:30 (backup-agent/backup_check.py).
+         Kein RunAtLoad: beim Hochfahren läuft erst das Backup (com.prophos.backup hat RunAtLoad), der
+         Prüfer wartet sonst ohnehin bis 30 min auf ein laufendes backup.py. Das Skript schreibt sein
+         Ergebnis selbst nach ~/Library/Logs/prophos-backup-check.log; hier landen nur Abstürze (stderr).
+         Diese Datei ist die Repo-Kopie; die aktive liegt unter ~/Library/LaunchAgents/. -->
+    <key>Label</key>
+    <string>com.prophos.backup-check</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin exec python3 -u /Applications/Prophos/backup-agent/backup_check.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>20</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/finnhermann/Library/Logs/prophos-backup-check.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Applications/Prophos</string>
+</dict>
+</plist>

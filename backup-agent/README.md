@@ -62,3 +62,15 @@ launchctl kickstart -k gui/501/com.prophos.backup
 Der aktive launchd-Job liegt unter `~/Library/LaunchAgents/com.prophos.backup.plist`;
 die Datei hier im Ordner ist die Repo-Kopie. Nach Änderungen: neu kopieren, dann
 `launchctl bootout gui/501/com.prophos.backup` und wieder `bootstrap`.
+
+## Backup-Prüfer (seit 20.11.2026)
+
+`backup_check.py` prüft jeden Morgen um **07:20** (launchd `com.prophos.backup-check`,
+Repo-Kopie `com.prophos.backup-check.plist`), ob das Backup von 06:30 vollständig ist:
+Tagesordner + jede Tabelle aus Supabase `public` (Soll von jetzt) ohne Fehler, Zeilenzahlen
+ggü. Vortag, Notfall-Paket, iCloud-Archiv des Wochentags, „Fertig" im Backup-Log.
+
+- Ergebnis: `~/Library/Logs/prophos-backup-check.log` (GRÜN/ROT je Lauf)
+- Fehler → 🟠 an die Master-IDs (Railway `POST /alarm/backup-check`, einmal je Datum),
+  Token aus `~/.prophos/backup-check-token`, sonst `~/.prophos/fehlerbild_token`
+- Von Hand, ohne Alarm: `python3 backup-agent/backup_check.py --datum JJJJ-MM-TT --ohne-alarm`
