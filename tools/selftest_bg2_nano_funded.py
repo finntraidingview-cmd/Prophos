@@ -109,6 +109,14 @@ def main():
     check("freg = fcp_regel_konto(" in fn("kz_rechnen") and "max_drawdown" in app.KZ_KONTO_SEL, "Konto-Seite kz_rechnen (KZ_KONTO_SEL hat max_drawdown)")
     check(",max_drawdown," in app.AP_KONTO_FELDER, "Planer-Konten lesen max_drawdown")
 
+    print("6 Trade-Plan-Popup: Funded-Hedge-Knopf (tpFundedHedgeVorgabe, Prüfer S2 SOLLTE)")
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    h = html[html.index("  function tpFundedHedgeVorgabe(master){"):html.index("  function tpFundedHedgeAnwenden(){")]
+    i_n, i_s = h.find("[/blue\\s*g(u)?ardian/i, 500, 10000, 10]"), h.find("[/blue\\s*g(u)?ardian/i, 1000, 8000]")
+    check(0 < i_n < i_s, "Nano-Satz 500 € / 10.000 $ ab 10 % Max DD steht VOR dem Standard-Satz 1.000 / 8.000")
+    check("find(([re, , , ab]) => re.test(String(master.firm || '')) && _abOk(ab))" in h and "_gr > 0 && _dd >= ab / 100 * _gr - 1" in h,
+          "Satz-Wahl prüft die Max-DD-Schwelle (ohne Größe nie die Variante)")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")
