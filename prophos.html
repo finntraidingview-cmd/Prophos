@@ -41103,6 +41103,20 @@
     return { bal: mll, mll, bs, pl: Math.round((mll - bs) * 100) / 100 }
   }
   window._wdlTsxBlowSchaetzung = wdlTsxBlowSchaetzung   // Test-Haken (Stub)
+  /* GEBLOWT AM TAGESENDE DER TAGESTEILUNG (19.11.2026, Finn per Screenshot Radar → Erledigt: „es soll ja eine eigene Spalte geben mit geblowten Accounts …
+   * der war bei Abhaken Challenges, nicht bei geblowt"; Simon FundedNext 100k …1696, Plan 5bb7caa4, Echo mit Fusion-Hedge, Ende 89.932,96 $ bei Boden
+   * 90.000 $). An einer Zeile mit Tagesergebnis (kette_tag) entschied allein kette_tag.blown — app.py tt_tick rechnet das aber NUR für Topstep (tsv2, am
+   * MLL); für Echo/Orbit steht dort immer false, auch wenn der Planer selbst „Balance auf/unter dem Boden — geblowt?" als Tagesende schrieb. Darum für
+   * Echo-Tagesteilungen (mt5/mt5v2, CFD mit statischem Boden) zusätzlich der Boden der Kernwerte (boden_usd, dieselbe Rechnung wie Planer und Ziel-Wache)
+   * gegen die Balance am Tagesende — exakt ≤ Boden, wie der Boden-Rückfall unten. Balance der Zeile zuerst (dieselbe wie Konto-Spalte/Ergebnis-Wort), sonst
+   * kette_tag.balance. Nicht Orbit (tvv2): boden_usd ist der HEUTIGE, nachziehende Boden — eine ältere Tageszeile spränge sonst auf „geblowt" (Gegenprüfung
+   * 19.11.2026). Topstep-Kette unverändert (nur kette_tag.blown, Boden-Rechnung ginge dort vom Start von Trade 2 aus, S2 30.10.2026). */
+  function wdlKetteBodenBlow(t, balZeile){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || (t.route !== 'mt5' && t.route !== 'mt5v2') || !t.kette_tag || typeof t.kette_tag !== 'object') return false
+    const boden = n(t.boden_usd), b = n(balZeile) ?? n(t.kette_tag.balance)
+    return boden != null && boden > 0 && b != null && b > 0 && b <= boden
+  }
   function wdlBlowStand(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return null
@@ -41132,7 +41146,7 @@
     const vonBoden = liqNq == null && !basisVerschieden && n(t.boden_usd) != null
     const liq = vonBoden ? n(t.boden_usd) : liqNq
     const tagLiq = basisVerschieden ? null : soft ? n(t.liq_regel_nur_balance) : null
-    const geblowt = (t.kette_tag && typeof t.kette_tag === 'object') ? t.kette_tag.blown === true : liq != null && bal <= liq + (vonBoden ? 0 : 25)
+    const geblowt = (t.kette_tag && typeof t.kette_tag === 'object') ? (t.kette_tag.blown === true || wdlKetteBodenBlow(t, bal)) : liq != null && bal <= liq + (vonBoden ? 0 : 25)
     // Tagesstopp erreicht (APEX-EVAL-SOFTBREACH 07.10.2026): bis 10 % des Tageslimits darüber zählt noch — der $-SL der Order wird
     // von TradingView auf Ticks gerundet (Apex-150k-Eval: SL 2.000 $ → −1.884,30 $, Balance 148.097 bei Tagesstopp 147.981)
     const bs = n(t.balance_start), tagTol = (tagLiq != null && bs != null && bs > tagLiq) ? Math.max(25, (bs - tagLiq) * 0.1) : 25
@@ -41337,7 +41351,8 @@
    * Trade, sonst Konto-Boden; das Tageslimit ist kein Blow) oder Konto weg. Gruppe UND beide Abhak-Dialoge (Radar-Dialog für fremde Pläne,
    * Trades-Dialog für eigene) fragen hier — der Trades-Dialog belegte bisher nur bei „Konto weg" vor. Nur Vorbelegung, Finn bestätigt. */
   // Tagesende der Topstep-Kette (S2 30.10.2026): kette_tag.blown entscheidet. Die Boden-Rechnung ginge vom Start von Trade 2 aus und belegte ein lebendes Konto mit „geblowt" vor
-  function wdlGeblowtUrteil(t){ if(t && t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true
+  // Echo-Tagesteilung (19.11.2026, wdlKetteBodenBlow): kette_tag.blown ist dort nicht gerechnet → zusätzlich Balance am Tagesende ≤ Boden der Kernwerte
+  function wdlGeblowtUrteil(t){ if(t && t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true || wdlKetteBodenBlow(t, (wdlBlowStand(t) || {}).bal)
     return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
   const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   // Radar-Ergebnis „Konto weg" nach dem Urteil (29.10.2026): vermutlich bestanden (grün) · bitte prüfen (amber) · sonst wie bisher (nahe Liq / alter Stand)

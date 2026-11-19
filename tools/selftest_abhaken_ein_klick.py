@@ -107,7 +107,7 @@ check("grund: grund || ''" in html and "'Nicht direkt abgehakt: ' + gr" in html 
 # ── AB1 mit den ECHTEN wdlBlowStand / wdlLiqIstTag (Prüfer AB1): Mikes Zeile mit Backend-Feldern wie liq_regel_felder sie liefert ──
 def _schnitt(a, e):
     i = html.index(a); return html[i:html.index(e, i)]
-echt = (_schnitt("  function wdlTsxBlowSchaetzung(", "  window._wdlTsxBlowSchaetzung") + _schnitt("  function wdlBlowStand(", "  /* APEX-EVAL-SOFTBREACH")
+echt = (_schnitt("  function wdlTsxBlowSchaetzung(", "  window._wdlTsxBlowSchaetzung") + _schnitt("  function wdlKetteBodenBlow(", "  /* APEX-EVAL-SOFTBREACH")   # 19.11.2026: wdlBlowStand fragt an Tagesteilungs-Zeilen wdlKetteBodenBlow (direkt davor)
         + "  const wdlLiqIstTag = t => !!(t && t.liq_regel_soft && t.liq_gilt === 'regel')\n")
 STUBS2 = STUBS.replace("wdlLiqIstTag = flag('tag'), ", "").replace("const wdlBlowStand = t => ", "const _wdlBlowStandStub = t => ") + "const WDL_TSX_SCHAETZ_TIP = 'x';\n"
 MIKE = dict(BASIS, route="tvv2", konto_typ="challenge", konto_aktuell={"typ": "challenge"}, master_tp=3451, master_sl=None, master_risk=4500, ziel_usd=159000,

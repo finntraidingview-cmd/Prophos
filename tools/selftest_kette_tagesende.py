@@ -202,9 +202,11 @@ def main():
     check('"konto_typ", "ended_at") if x in upd' in src, "Tagesende schreibt ended_at, falls leer (Richtungs-Riegel)")
     html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prophos.html"), encoding="utf-8").read()
     check(html.count("wdlKetteTagChip(t)") >= 3, "Radar-Karte zeigt das Tagesergebnis in Überprüfen und im Verlauf")
-    check("t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true" in html
-          and "(t.kette_tag && typeof t.kette_tag === 'object') ? t.kette_tag.blown === true :" in html,
-          "Abhak-Dialog und Radar-Gruppe: mit Tagesergebnis gilt kette_tag.blown, nicht die Boden-Rechnung ab Trade 2")
+    # 19.11.2026 (Slave 29, Simon FundedNext …1696): an Echo-Tagesteilungen (mt5/mt5v2) zusätzlich der Boden der Kernwerte (wdlKetteBodenBlow) — Topstep (tsv2) und Orbit weiter nur kette_tag.blown
+    check("t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true || wdlKetteBodenBlow(" in html
+          and "(t.kette_tag && typeof t.kette_tag === 'object') ? (t.kette_tag.blown === true || wdlKetteBodenBlow(t, bal)) :" in html
+          and "if(!t || (t.route !== 'mt5' && t.route !== 'mt5v2') || !t.kette_tag || typeof t.kette_tag !== 'object') return false" in html,
+          "Abhak-Dialog und Radar-Gruppe: mit Tagesergebnis gilt kette_tag.blown (Topstep/Orbit nur das), nicht die Boden-Rechnung ab Trade 2")
     check('.get("tagesende"):\n            continue                                  # Tag ist abgeschlossen' in src, "ap_kette_tick legt nach dem Tagesende keinen Trade 2 mehr an")
 
     print(f"\n{'selftest_kette_tagesende: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
