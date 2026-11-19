@@ -18,6 +18,8 @@
 --   der Tagesgrenze 3.000) · Lots 4–5,3 · Puffer 25–50 · Boden 10 %.
 --   daily_pct 3 → ap_tagesgrenze kappt den SL zusätzlich auf (3 % der Balance − heute realisierter Verlust − 100 $ Puffer) und gibt
 --   tages_grenze_usd an den Plan (Echo V2 zieht den SL am Fill nach). gewinntage null: der Gewinntag-Weg der Firma gilt nie für Nano.
+--   name „Nano“ (Teil C): nur die Reiter im Kernwerte-Editor (E3) — „Standard 100k“ / „Nano 100k“ statt „100k“ / „Flex 100k“; der Planer liest es nicht.
+--   SL 2.300–2.600 und Kauf 145 € von Finn bestätigt (19.11.2026, über den Master).
 --   kauf_eur 145 (167 $): nur für den Kontowert = Echo-Hedge-Satz. Braucht den Code-Commit „BG1 Kontowert-Variante“ (ap_kw_regel_konto):
 --   ohne ihn rechnet der Fusion-Hedge Nano mit Standard 300 € / 8 % (≈ 2,6–2,9× zu viel Hedge). ERST NACH DEM RAILWAY-DEPLOY EINSPIELEN.
 --
@@ -26,6 +28,7 @@
 update public.auto_plan_regeln
    set regeln = jsonb_set(regeln, '{firmen}',
        (select jsonb_agg(case when f->'namen' ? 'blueguardian' then f || jsonb_build_object('flex', '{
+          "name": "Nano",
           "ab_dd_pct": 10,
           "dd_pct": 10,
           "kauf_eur": {"100000": 145},
