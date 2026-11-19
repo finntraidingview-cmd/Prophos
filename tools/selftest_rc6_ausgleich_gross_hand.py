@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app = open(os.path.join(W, "app.py"), encoding="utf-8").read()
+html = open(os.path.join(W, "prophos.html"), encoding="utf-8").read()
 fehler = []
 
 
@@ -101,6 +102,18 @@ PLK = PL[:3]
 zk0 = ruf("tradeify_zyklus_konto", MORITZ, PLK, PAY, 5, 5, VP, 161000.0, LIVE_AT, wd_lock=LOCK, rc_regel=RC)
 zk1 = ruf("tradeify_zyklus_konto", dict(MORITZ, wd_zyklus_regel="an"), PLK, PAY, 5, 5, VP, 161000.0, LIVE_AT, wd_lock=LOCK, rc_regel=RC)
 check(zk0["aktiv"] and zk0 == {k: v for k, v in zk1.items()}, "Fehl ≤ Max DD: mit und ohne Schalter bitgleich")
+
+# 5) RC6 Teil 2 — Anzeige (prophos.html): Zyklus im Minus (Railway zyklus.gesperrt) → nie „Payout anfragen/anfragbar“, sondern der Zustand
+check("function wdZyklusSperreTxt(id)" in html and "z.art !== 'tradeify' || !z.gesperrt" in html and "' · Recovery von Hand'" in html,
+      "Helfer wdZyklusSperreTxt: nur Tradeify/Lucid-Stand mit gesperrt, Minus über Max DD → „· Recovery von Hand“")
+_wh = html[html.index("function wdHinweisText(h, id){"):][:600]
+check("const sp = wdZyklusSperreTxt(id)" in _wh and _wh.index("wdZyklusSperreTxt") < _wh.index("Payout anfragen"),
+      "Farmer-Hinweis „Ziel schon voll“: Sperre vor „🏆 x/5 · Payout anfragen“ (gespeicherter Schlüssel-Text bleibt)")
+check("q.hinweis === WD_HINWEIS_ZIEL && wdZyklusSperreTxt(q.id)" in html and "⚠ Zyklus im Minus" in html, "Ablauf-Chip: „⚠ Zyklus im Minus“ statt „🏆 Ziel erreicht“")
+check("sperre = wdZyklusSperreTxt(k.id)" in html and "bereit: fehlt === 0 && !sperre" in html and html.count("filter(e => e.fehlt > 0).sort(") == 2,
+      "WD-Übersicht: bereit nur ohne Sperre, „Nächster Payout“ wie bisher nur aus fehlenden Tagen")
+check("_sp ? ` ✓ · ${escapeHtml(_sp)}` : ' ✓ · Payout anfragbar'" in html, "Accounts-Zeile: „✓ · Zyklus …“ statt „✓ · Payout anfragbar“")
+check(html.count("!(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))") == 2, "Finanzen: Payout-Status + Kontoauswahl nicht „anfragbar“ bei Sperre")
 
 print()
 if fehler:

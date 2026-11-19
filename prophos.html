@@ -75474,6 +75474,17 @@
   // Zyklus-Gewinn mit echtem Vorzeichen (0,60 $ ist +0,60, nicht „−1“) — Gegenprüfung 03.11.2026
   function zyklusTxt(v){ const n = Number(v) || 0; return (n < 0 ? '−' : '+') + Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: Math.abs(n) < 10 ? 2 : 0, maximumFractionDigits: Math.abs(n) < 10 ? 2 : 0 }) }
   window._zyklusTxt = zyklusTxt
+  /* RC6 (Finn 19.11.2026 ~04:20 Dubai, Moritz Tradeify 150k …9666: Zyklus −5.416 $ bei Max DD 4.500 — der Farmer zeigte seit 11.11. „🏆 5/5 · Payout anfragen“,
+   * die WD-Übersicht „Payout anfragbar“, obwohl Tradeify erst ab +1 $ zahlt): sperrt Railways Zyklus-Stand (zyklus.gesperrt, art 'tradeify' = Tradeify + Lucid)
+   * den Payout, sagt die Anzeige das statt „anfragbar“. NUR ANZEIGE aus dem Railway-Stand, keine eigene Regel; ohne Stand '' = wie bisher.
+   * Minus über dem Max DD (ausgleich_hand) → „· Recovery von Hand“, fälliger Ausgleich → „· Ausgleichs-Trade“, sonst „· Payout gesperrt“. */
+  function wdZyklusSperreTxt(id){
+    const z = window._wdZyklusRoh?.(id)
+    if(!z || z.art !== 'tradeify' || !z.gesperrt) return ''
+    const g = z.gewinn != null && Number.isFinite(Number(z.gewinn)) ? `Zyklus ${zyklusTxt(z.gewinn)} $` : 'Zyklus gesperrt'
+    return g + (z.aktiv ? ' · Ausgleichs-Trade' : z.ausgleich_hand ? ' · Recovery von Hand' : z.grund_code === 'laeuft' ? ' · Ausgleich wartet' : ' · Payout gesperrt')
+  }
+  window._wdZyklusSperreTxt = wdZyklusSperreTxt   // Test-Haken (RC6)
   function wdAusgleichFaellig(id){ const z = wdZyklusVon(id); return !!(z && z.art === 'tradeify') }
   function wdZyklusVon(id){ const z = window._wdZyklusRoh?.(id); return (z && z.aktiv && Number(z.ziel) > 0 && Number(z.hedge_eur) > 0) ? z : null }
   // Antwort von /admin/wd-plaene: je Konto Feld setzen oder entfernen. zyklus_ok false = Railway konnte nicht rechnen: Stand behalten — sonst fiele ein
@@ -77988,6 +77999,8 @@
   const WD_HINWEIS_ZIEL = 'Ziel schon voll'
   function wdHinweisText(h, id){
     if(h !== WD_HINWEIS_ZIEL) return String(h || '')
+    const sp = wdZyklusSperreTxt(id)   // RC6: Zyklus im Minus → kein „Payout anfragen“ (Schlüssel-Text „Ziel schon voll“ in der Zeile bleibt)
+    if(sp) return `⚠ ${sp}`
     const kd = wdKontoDaten(id), ziel = kd && kd.goal_target > 0 ? kd.goal_target : 5, ist = kd && kd.winning_days != null ? Math.max(ziel, kd.winning_days) : ziel
     return `🏆 ${ist}/${ziel} · Payout anfragen`
   }
@@ -78600,7 +78613,9 @@
         const jetzt = x.start_um && now >= new Date(x.start_um).getTime() && now <= ende
         // W3 (03.11.2026): „leer", weil die Konten ihr Ziel erreicht haben bzw. auf den Payout warten → nicht „nichts drin"
         const chipHtml = (!erw && x.status === 'leer' && k.length && k.every(q => wdHinweisRuhig(q.hinweis)))
-          ? `<span class="chip chip-good">${k.some(q => q.hinweis === WD_HINWEIS_ZIEL) ? '🏆 Ziel erreicht' : '⏳ Payout läuft'}</span>` : wdChip(erw ? 'erwartet' : x.status)
+          ? (k.some(q => q.hinweis === WD_HINWEIS_ZIEL && wdZyklusSperreTxt(q.id))   // RC6: Zyklus im Minus ist kein „Ziel erreicht“
+            ? `<span class="chip chip-warn" title="${escapeHtml(k.map(q => wdZyklusSperreTxt(q.id)).filter(Boolean).join(' · '))}">⚠ Zyklus im Minus</span>`
+            : `<span class="chip chip-good">${k.some(q => q.hinweis === WD_HINWEIS_ZIEL) ? '🏆 Ziel erreicht' : '⏳ Payout läuft'}</span>`) : wdChip(erw ? 'erwartet' : x.status)
         const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
         const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
         const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
@@ -78782,8 +78797,8 @@
       const ziel = k.goal_target > 0 ? k.goal_target : 5, n = Math.max(0, Number(k.winning_days) || 0), h = wdUebHeute(heute.get(String(k.id)), k)
       const r = pr.get(String(k.id)); let calc = null
       try{ calc = r && typeof window._admPayoutCalc === 'function' ? window._admPayoutCalc(r) : null }catch(_){}
-      const fehlt = Math.max(0, ziel - n)
-      return { k, ziel, n, fehlt, h, bereit: fehlt === 0, angefragt: angefragt.has(String(k.name || '').trim()), firma: wdUebFirma(k.firm),
+      const fehlt = Math.max(0, ziel - n), sperre = wdZyklusSperreTxt(k.id)   // RC6: Zyklus im Minus → nicht „Payout anfragbar“
+      return { k, ziel, n, fehlt, h, sperre, bereit: fehlt === 0 && !sperre, angefragt: angefragt.has(String(k.name || '').trim()), firma: wdUebFirma(k.firm),
                frueh: fehlt ? wdUebFrueh(fehlt, h.offen) : null, betrag: calc && calc.betrag > 0 ? calc.betrag : null, ccy: (calc && calc.ccy) || 'USD' }
     })
   }
@@ -78809,6 +78824,7 @@
       const uid = escapeHtml(String(e.k.user_id)), f = { target: e.ziel, count: Math.min(e.n, e.ziel), done: e.bereit, kind: 'winning_days' }
       const stand = e.angefragt ? '<span style="color:var(--sub)">💸 Payout angefragt</span>'
         : e.bereit ? '<b style="color:var(--good-ink, #15803d)">Payout anfragbar</b>'
+        : e.sperre && !e.fehlt ? `<span style="color:var(--danger)">⚠ ${escapeHtml(e.sperre)}</span>`
         : `<span title="noch ${e.fehlt} Gewinntag${e.fehlt === 1 ? '' : 'e'} bis zum Payout — frühestens am ${escapeHtml(wdUebTag(e.frueh))}, wenn ${e.h.offen ? 'ab heute' : 'ab dem nächsten Handelstag'} jeder Handelstag ein Gewinntag wird">noch ${e.fehlt} · frühestens <b style="font-weight:600">${escapeHtml(wdUebTag(e.frueh))}</b></span>`
       const fuss = [e.betrag != null ? `<span title="Betrag wie Admin → Payouts (Balance über Kontogröße × Profit-Share)">≈ ${escapeHtml(geld(e.betrag, e.ccy))}</span>` : '', e.h.txt]
         .filter(Boolean).join('<span>·</span>') + (e.h.rein ? ` <button type="button" class="btn btn-ghost btn-xs" data-wd-ueb-rein="${escapeHtml(String(e.k.id))}" data-wd-ueb-uid="${uid}" title="für heute wieder mitfahren lassen — wie „heute wieder rein“ in der ID">heute rein</button>` : '')
@@ -79007,7 +79023,7 @@
         else if(k.status === 'open' || (k.status === 'planned' && k.gestartet)) laeuft++
         else geplant++
       }
-      const bereit = liste.filter(e => e.bereit && !e.angefragt), naechst = liste.filter(e => !e.bereit).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
+      const bereit = liste.filter(e => e.bereit && !e.angefragt), naechst = liste.filter(e => e.fehlt > 0).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
       const geld = bereit.filter(e => e.betrag != null && e.ccy !== 'EUR').reduce((s, e) => s + e.betrag, 0)
       kz.innerHTML = !konten.length && !liste.length ? '' :
         wdUebKpi('Heute', `${fertig} / ${konten.length}`, `fertig · ${laeuft} läuft · ${geplant} geplant${verpasst ? ` · <span style="color:var(--danger)">${verpasst} verpasst</span>` : ''}`, '') +
@@ -79044,7 +79060,7 @@
       const hm = String(wdHhmm(k.start_um || x.start_um) || ''), h = /^\d{2}:/.test(hm) ? Number(hm.slice(0, 2)) : NaN   // ohne gültige Zeit nicht zählen
       if(isFinite(h) && h >= 0 && h < 24) std[h]++
     }
-    const bereit = (liste || []).filter(e => e.bereit && !e.angefragt), naechst = (liste || []).filter(e => !e.bereit).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
+    const bereit = (liste || []).filter(e => e.bereit && !e.angefragt), naechst = (liste || []).filter(e => e.fehlt > 0).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
     const geld = bereit.filter(e => e.betrag != null && e.ccy !== 'EUR').reduce((s, e) => s + e.betrag, 0)
     const ls = [...je.values()].sort((a, b) => (b.L + b.S) - (a.L + a.S)).slice(0, 15), total = std.reduce((a, b) => a + b, 0), peak = total ? std.indexOf(Math.max(...std)) : -1
     const chip = document.getElementById('wd-auto-chip'), chipTxt = String((chip && chip.textContent) || '').trim(), chipAn = !!(chip && chip.classList.contains('an'))
@@ -80433,7 +80449,9 @@
     const stand = `${Math.min(f.count, f.target)}/${f.target}`
     // Ziel erreicht + Winning Days = Payout-Fenster offen (15.09.2026, Finn:
     // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
-    const fertig = f.done ? (f.kind === 'winning_days' && !f.mindest ? ' ✓ · Payout anfragbar' : ' ✓') : ''
+    // RC6 (19.11.2026): Tradeify/Lucid-Zyklus im Minus (Railway-Stand) → „✓ · Zyklus −5.416 $ · Recovery von Hand“ statt „Payout anfragbar“
+    const _sp = f.done && f.kind === 'winning_days' && !f.mindest && typeof window._wdZyklusSperreTxt === 'function' ? window._wdZyklusSperreTxt(a.id) : ''
+    const fertig = f.done ? (f.kind === 'winning_days' && !f.mindest ? (_sp ? ` ✓ · ${escapeHtml(_sp)}` : ' ✓ · Payout anfragbar') : ' ✓') : ''
     // klickbar (Accounts-Tabelle): öffnet den Account zum Bearbeiten des Stands
     const attr = klickbar ? ` data-acc-wd="${escapeHtml(String(a.id))}" title="Klicken zum Bearbeiten" style="cursor:pointer"` : ''
     if(f.mindest)   // Mindesttage kompakt (+ Gewinntage 25.10.2026) (09.10.2026): „Tage 3/5", grün wenn erfüllt
@@ -83020,7 +83038,7 @@
           ? `<span style="color:var(--good);font-weight:600">💸 Payout anfragbar · ${pi.rel}</span>`
           : `<span style="color:var(--violet);font-weight:600">💸 Payout ab ${pi.kurz}</span> <span style="color:var(--sub)">· ${pi.rel}</span>`
       }else if(f){
-        ready = f.done && f.kind === 'winning_days'
+        ready = f.done && f.kind === 'winning_days' && !(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))   // RC6: Zyklus im Minus → nicht anfragbar
         sort = ready ? -1e9 : (f.target - f.count) * 1000
         html = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
       }
@@ -83237,7 +83255,7 @@
       let f = null; try{ f = (typeof zielFortschritt === 'function') ? zielFortschritt(a) : null }catch(_){ f = null }
       const wd = !!(f && f.kind === 'winning_days' && !f.mindest)
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
-      const r = { wd: wd ? `🏆 ${Math.min(f.count, f.target)}/${f.target}` : '', bereit: pi ? !!pi.faellig : !!(wd && f.done) }   // Termin vor Ziel, wie renderFinPayoutStatus
+      const r = { wd: wd ? `🏆 ${Math.min(f.count, f.target)}/${f.target}` : '', bereit: pi ? !!pi.faellig : !!(wd && f.done && !(typeof window._wdZyklusSperreTxt === 'function' && window._wdZyklusSperreTxt(a.id))) }   // Termin vor Ziel, wie renderFinPayoutStatus (RC6: Zyklus im Minus → nicht anfragbar)
       finPoCache.set(a.id, r); return r
     }
     accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + kontoOptionenGruppiert(finFundedAccounts, a => {
