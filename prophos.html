@@ -5126,6 +5126,10 @@
   #adm-pane-wd .wd-chip-f{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);font-size:11.5px;cursor:pointer;background:var(--surface,#fff)}
   #adm-pane-wd .wd-chip-f:hover{background:rgba(0,0,0,.03)}
   #adm-pane-wd .wd-chip-f.an{border-color:var(--violet);background:rgba(99,91,255,.08);color:var(--violet);font-weight:600}
+  /* HS1 (Finn 20.11.2026): Chips der gewählten Firma (Klick links oder Chip) hervorgehoben, die anderer Firmen treten zurück */
+  #adm-pane-wd .wd-chip-f.gruppe{border-color:var(--violet)}
+  #adm-pane-wd .wd-chip-f.zurueck{opacity:.45}
+  #adm-pane-wd .wd-chip-f.zurueck:hover{opacity:1}
   #adm-pane-wd .wd-chip-f i{width:8px;height:8px;border-radius:50%;display:inline-block}
   #adm-pane-wd .wd-chip-f small{font-size:10px;color:var(--sub)}
   #adm-pane-wd .wd-staffel-tab{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -60163,7 +60167,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2267'
+  const OS_TAB_BUILD = '2026-09-22.2268'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77854,8 +77858,12 @@
     const r = regeln || {}, sf = (r.staffelFirma && typeof r.staffelFirma === 'object') ? r.staffelFirma : {}
     _wd.staffelArbeit = { standard: wdStaffelListe(r.staffel) }
     for(const k of TP_VP_FIRMEN) _wd.staffelArbeit[k] = (Array.isArray(sf[k]) && sf[k].length) ? wdStaffelListe(sf[k]) : null
-    if(!_wd.staffelWahl) _wd.staffelWahl = 'standard'
+    // HS1 (Finn 20.11.2026: „links auf die Firma drücken → automatisch deren Hedge-Staffelung"): ohne Wahl die links gewählte Firma statt „Standard" —
+    // sonst stand beim Öffnen links Tradeify und rechts Standard. Eine Chip-Wahl (auch „Standard") bleibt über das Neuzeichnen erhalten.
+    if(!_wd.staffelWahl) _wd.staffelWahl = TP_VP_FIRMEN.includes(_wd.firmaOffen) ? _wd.firmaOffen : TP_VP_FIRMEN[0]
   }
+  // HS1: Tabellen derselben Firma (Apex 150k/100k, Lucid/50k, FundedNext/50k, Tradeify/Live) gehören zusammen — nur für die Chip-Hervorhebung
+  const wdStaffelGruppe = k => ({ apex100: 'apex', lucid50: 'lucid', fnfutures50: 'fnfutures', tradeifylive: 'tradeify' })[k] || k
   const wdStaffelEigen = k => !!(_wd.staffelArbeit && Array.isArray(_wd.staffelArbeit[k]) && _wd.staffelArbeit[k].length)
   function wdStaffelAktuell(){
     const a = _wd.staffelArbeit || { standard: wdStaffelListe(null) }, w = _wd.staffelWahl || 'standard'
@@ -77876,7 +77884,11 @@
     const box = document.getElementById('wd-staffel-firmen'); if(!box) return
     const w = _wd.staffelWahl || 'standard'
     const chips = [['standard', 'Standard', '#636e72', '']].concat(TP_VP_FIRMEN.map(k => { const [name, farbe] = WD_FIRMEN[k] || [k, '#636e72']; return [k, name, farbe, wdStaffelEigen(k) ? 'eigene' : wdBasisKey(k) !== k ? 'fehlt' : 'wie Standard'] }))   // LF1: 50k ohne eigene Tabelle = keine WD
-    box.innerHTML = chips.map(([k, name, farbe, sub]) => `<span class="wd-chip-f ${w === k ? 'an' : ''}" data-wd-staffel-wahl="${k}"><i style="background:${farbe}"></i>${escapeHtml(name)}${sub ? `<small>${sub}</small>` : ''}</span>`).join('')
+    // HS1: gewählte Firma → ihre Chips hervorgehoben, die anderer Firmen treten zurück; gilt für sie noch der Standard, gehört „Standard" mit dazu
+    // (50k-/Live-Schlüssel ohne eigene Tabelle fallen nicht auf den Standard zurück, LF1). Bei „Standard" selbst tritt nichts zurück.
+    const stdGilt = w !== 'standard' && !wdStaffelEigen(w) && wdBasisKey(w) === w
+    const chipKl = k => w === k ? 'an' : w === 'standard' ? '' : (k === 'standard' ? (stdGilt ? 'gruppe' : 'zurueck') : wdStaffelGruppe(k) === wdStaffelGruppe(w) ? 'gruppe' : 'zurueck')
+    box.innerHTML = chips.map(([k, name, farbe, sub]) => `<span class="wd-chip-f ${chipKl(k)}" data-wd-staffel-wahl="${k}"><i style="background:${farbe}"></i>${escapeHtml(name)}${sub ? `<small>${sub}</small>` : ''}</span>`).join('')
     box.querySelectorAll('[data-wd-staffel-wahl]').forEach(c => c.addEventListener('click', () => wdStaffelWahl(c.dataset.wdStaffelWahl)))
     const t = document.getElementById('wd-staffel-titel'); if(t) t.textContent = w === 'standard' ? 'Standard (alle Firmen ohne eigene Tabelle)' : ((WD_FIRMEN[w] || [w])[0] + (wdStaffelEigen(w) ? ' · eigene Tabelle' : ' · noch wie Standard'))
     // LF1: 50k-Schlüssel ohne eigene Tabelle — der Farmer plant dort keine WD (kein Rückfall auf den Standard, kein Hedge 0)
