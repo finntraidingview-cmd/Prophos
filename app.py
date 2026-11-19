@@ -23904,15 +23904,20 @@ def konto_reset_zeile(alt, neu_ext, vorlage=None):
     return z
 
 
-def konto_vorlage_finden(vorlagen, firm, typ, groesse):
-    """REIN RECHNEND (testbar): aktive Schablone gleicher Firma × Typ × Größe (account_size/starting_balance) → dict oder None."""
+def konto_vorlage_finden(vorlagen, firm, typ, groesse, dd=None):
+    """REIN RECHNEND (testbar): aktive Schablone gleicher Firma × Typ × Größe (account_size/starting_balance) → dict oder None.
+    dd (BG1, Finn 19.11.2026 — Blue Guardian Standard und Nano je 100k Phase 1): passen mehrere, gewinnt die mit diesem max_drawdown
+    (Nano 10.000 / Standard 8.000 = die Kennung der Variante, ap_konto_flex); keine gleich → die erste wie bisher. Ohne dd unverändert."""
+    erste = None
     for v in vorlagen or ():
         if v.get("aktiv") is False or str(v.get("firm") or "").strip().lower() != str(firm or "").strip().lower() or v.get("account_type") != typ:
             continue
         if groesse and _wd_num(v.get("account_size") or v.get("starting_balance")) != _wd_num(groesse):
             continue
-        return v
-    return None
+        if not _wd_num(dd) or _wd_num(v.get("max_drawdown")) == _wd_num(dd):
+            return v
+        erste = erste or v
+    return erste
 
 
 def _konto_verworfen_lesen(uids):
@@ -24106,7 +24111,8 @@ def konto_reset_bestaetigen():
     # konto_vorlage_finden die erste Schablone der Firma, ein „100k" wurde zum „150k" mit dessen Max DD)
     _m_alt = re.search(r"(\d{2,3})\s*k\b", str(alt.get("name") or ""), re.I)
     _gr_alt = alt.get("account_size") or alt.get("starting_balance") or (float(_m_alt.group(1)) * 1000 if _m_alt else None)
-    vorlage = konto_vorlage_finden(vorlagen, alt.get("firm"), konto_reset_typ(alt.get("account_type")), _gr_alt)
+    # BG1: Max DD der alten Zeile wählt zwischen Schablonen gleicher Firma × Typ × Größe (Blue Guardian Nano 10.000 / Standard 8.000 — Kaufpreis)
+    vorlage = konto_vorlage_finden(vorlagen, alt.get("firm"), konto_reset_typ(alt.get("account_type")), _gr_alt, dd=alt.get("max_drawdown"))
     zeile = konto_reset_zeile(alt, neu_ext, vorlage)
     # DD1 (06.11.2026): alte Zeile ohne Max DD → Schablone, sonst Firmen-Kernwert (vorher erbte der Reset die Lücke); Lesefehler → Feld bleibt leer.
     # Ohne bekannte Größe gar nicht (die Zeile trüge sonst die Größe einer beliebigen Schablone), Flex am alten Namen zählt

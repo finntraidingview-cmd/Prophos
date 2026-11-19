@@ -56,7 +56,7 @@ z = {"name": "100k Y → Phase 1", "firm": "FundingPips", "account_type": "phase
 check(E(z, None, F) == "kernwert" and z["max_drawdown"] == 10000, "FundingPips ohne Flex → Standard 10.000")
 r = src[src.index('@app.route("/konto-reset-bestaetigen"'):]
 r = r[:r.index("\n@app.route(")]
-check("konto_vorlage_finden(vorlagen, alt.get(\"firm\"), konto_reset_typ(alt.get(\"account_type\")), _gr_alt)" in r and "if _gr_alt:" in r and "namen=(alt.get(\"name\"),)" in r,
+check("konto_vorlage_finden(vorlagen, alt.get(\"firm\"), konto_reset_typ(alt.get(\"account_type\")), _gr_alt, dd=alt.get(\"max_drawdown\"))" in r and "if _gr_alt:" in r and "namen=(alt.get(\"name\"),)" in r,
       "Gegenprüfung: Reset sucht die Schablone mit der Größe aus dem alten Namen, ohne Größe kein Max DD")
 check("signal: AbortSignal.timeout(8000)" in html[html.index("async function sucDdErmitteln("):html.index("async function sucDdNachtragen(")], "Gegenprüfung: Kernwert-Abfrage bricht nach 8 s ab (Bulk hängt nie)")
 check(len(re.findall(r"(?<!def )konto_dd_ergaenzen\(zeile, ", src)) == 2 and "def _konto_dd_regeln(" in src, "Reset und /admin/konto-anlegen ergänzen über denselben Weg")

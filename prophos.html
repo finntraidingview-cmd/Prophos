@@ -94327,7 +94327,11 @@ ${stBlock}
       return { v: f[k], pfad: fx ? null : [k], erbt: !!fx && k in f }
     }
   }
-  const e3Kopf = t => t === 'std' ? 'Standard' : /^flex:/.test(t) ? 'Flex ' + e3Gr(t.slice(5)) : e3Gr(t)
+  // BG1 (Finn 19.11.2026): flex.name benennt die Variante (Blue Guardian „Nano“) — dann heißen die Reiter „Standard 100k“ / „Nano 100k“;
+  // ohne flex.name wie bisher „100k“ / „Flex 100k“ (FundingPips)
+  const e3FlexName = f => (f && f.flex && typeof f.flex.name === 'string' && f.flex.name.trim()) ? f.flex.name.trim() : ''
+  const e3Kopf = (t, f) => { const fn = e3FlexName(f)
+    return t === 'std' ? 'Standard' : /^flex:/.test(t) ? (fn || 'Flex') + ' ' + e3Gr(t.slice(5)) : (fn ? 'Standard ' : '') + e3Gr(t) }
   // Im Planer je Größe (Klarstellung Master 05.11.2026): ein eigenes An/Aus je Größe gibt es in der Regel nicht — angezeigt wird, was der Planer
   // mit dieser Größe tut: Firma aus (planen false) · eigene Werte · wie Standard · keine Werte (ap_regel_flex: Größe außerhalb standard_groessen
   // ohne eigene Werte → Konto ausgelassen „Werte fehlen"; ein Schalter hier würde 100k-Spannen auf 50k legen, darum nur Anzeige)
@@ -94341,7 +94345,7 @@ ${stBlock}
     let an = true, txt
     if(f.planen === false){ an = false; txt = 'Firma nicht automatisch geplant (Schalter „automatisch planen")' }
     else if(tab === 'std') txt = std.length ? `Standard-Werte gelten nur für ${std.map(e3Gr).join(' · ')}` : 'Standard-Werte gelten für jede Größe ohne eigene Werte'
-    else if(/^flex:/.test(tab)) txt = `Flex-Konten ${e3Gr(g)} (Drawdown ab ${e3Z((f.flex || {}).ab_dd_pct || 12)} %) · eigene Werte`
+    else if(/^flex:/.test(tab)) txt = `${e3FlexName(f) || 'Flex'}-Konten ${e3Gr(g)} (Drawdown ab ${e3Z((f.flex || {}).ab_dd_pct || 12)} %) · eigene Werte`
     else if((f.je_groesse || {})[g]) txt = 'eigene Werte'
     else if(e3OhneWerte(f, tab)){ an = false; txt = `keine Phasen-Werte — ${e3Gr(g)} wird nicht geplant` }
     else txt = 'wie Standard'
@@ -94362,7 +94366,7 @@ ${stBlock}
     const n = (f.namen || [])[0] || '?', tabs = e3Tabs(f), w = _e3.wahl[art] || {}
     const tab = tabs.includes(w.tab) ? w.tab : tabs[0], cfd = art === 'cfd'
     const eigen = t => /^\d+$/.test(t) ? !!(f.je_groesse || {})[t] : /^flex:/.test(t)
-    const pille = tabs.length > 1 ? `<div class="e3-pille" role="tablist">${tabs.map(t => `<button type="button" role="tab" data-e3-tab="${e3E(t)}" class="${t === tab ? 'an' : ''}" aria-selected="${t === tab}">${e3Kopf(t)}${t !== 'std' && eigen(t) ? '<i>•</i>' : ''}</button>`).join('')}</div>` : ''
+    const pille = tabs.length > 1 ? `<div class="e3-pille" role="tablist">${tabs.map(t => `<button type="button" role="tab" data-e3-tab="${e3E(t)}" class="${t === tab ? 'an' : ''}" aria-selected="${t === tab}">${e3Kopf(t, f)}${t !== 'std' && eigen(t) ? '<i>•</i>' : ''}</button>`).join('')}</div>` : ''
     const q = e3Quelle(f, tab), grTab = /^\d+$/.test(tab) ? tab : /^flex:/.test(tab) ? tab.slice(5) : null
     const groesse = Number(grTab || ((f.groessen || []).length === 1 ? f.groessen[0] : 0)) || null
     const ph = q('phasen'), zp = q('ziel_pct'), phv = (ph.v && typeof ph.v === 'object') ? ph.v : {}

@@ -34,7 +34,7 @@ BG = {"namen": ["blueguardian"], "planen": True, "route": "mt5v2", "dd_pct": 8, 
                  "phase2": {"sl": [2700, 3150], "tp": [2700, 3150], "menge": [4, 5.3], "puffer": [25, 50], "ziel_pct": 4, "boden_pct": 8,
                             "menge_schritt": 0.1}}}
 # flex wie in der SQL-Datei
-FLEX = {"ab_dd_pct": 10, "dd_pct": 10, "kauf_eur": {"100000": 145},
+FLEX = {"name": "Nano", "ab_dd_pct": 10, "dd_pct": 10, "kauf_eur": {"100000": 145},
         "je_groesse": {"100000": {"dd_pct": 10, "ziel_pct": {"phase1": 8, "phase2": 5}, "daily_pct": 3, "gewinntage": None,
                                   "phasen": {"phase1": {"sl": [2300, 2600], "tp": [4950, 5850], "menge": [4, 5.3], "menge_schritt": 0.1,
                                                         "puffer": [25, 50], "ziel_pct": 8, "boden_pct": 10},
@@ -131,6 +131,37 @@ def main():
     v_alt = app.ap_kontowert("phase1", 100000.0, p_alt)
     v_neu = app.ap_kontowert_konto(kf, 100000.0, [FP])
     check(v_neu.get("wert_eur") == v_alt["wert"] and v_neu.get("satz_eur_pro_usd") == v_alt["satz"], f"FP-Flex-Kontowert wie bisher ({v_alt['wert']} €)")
+
+    print("7 Schablonen Standard + Nano (Teil C): Reset wählt nach Max DD")
+    VS = [{"name": "Blue Guardian 100k Standard Phase 1", "firm": "Blue Guardian", "account_type": "phase1", "account_size": 100000,
+           "purchase_cost": 300, "max_drawdown": 8000, "aktiv": True},
+          {"name": "Blue Guardian 100k Nano Phase 1", "firm": "Blue Guardian", "account_type": "phase1", "account_size": 100000,
+           "purchase_cost": 145, "max_drawdown": 10000, "aktiv": True},
+          {"name": "Tradeify Select 150k", "firm": "Tradeify", "account_type": "challenge", "account_size": 150000, "purchase_cost": 213,
+           "max_drawdown": 4500, "aktiv": True}]
+    VF = app.konto_vorlage_finden
+    check(VF(VS, "Blue Guardian", "phase1", 100000)["name"].endswith("Standard Phase 1"), "ohne dd: erste = Standard (wie bisher)")
+    check(VF(VS, "Blue Guardian", "phase1", 100000, dd=10000)["name"].endswith("Nano Phase 1"), "dd 10.000 → Nano-Schablone")
+    check(VF(VS, "Blue Guardian", "phase1", 100000, dd="8000")["name"].endswith("Standard Phase 1"), "dd 8.000 → Standard-Schablone")
+    check(VF(VS, "Blue Guardian", "phase1", 100000, dd=12345)["name"].endswith("Standard Phase 1"), "dd ohne Treffer → erste")
+    check(VF(VS, "Tradeify", "challenge", 150000, dd=4000) is VS[2] and VF(VS, "Tradeify", "challenge", 150000) is VS[2],
+          "eine Schablone je Firma × Typ × Größe: dd ändert nichts")
+    check(VF(VS, "Blue Guardian", "phase2", 100000, dd=10000) is None, "keine Phase-2-Schablone → None wie bisher")
+    alt = {"firm": "Blue Guardian", "account_type": "phase2", "account_size": 100000, "max_drawdown": 10000, "purchase_cost": 0,
+           "name": "100k 700001 → Phase 2"}
+    z = app.konto_reset_zeile(alt, "700002", VF(VS, "Blue Guardian", app.konto_reset_typ(alt["account_type"]), 100000, dd=alt["max_drawdown"]))
+    check(z["purchase_cost"] == 145 and z["max_drawdown"] == 10000 and z["account_type"] == "phase1" and z["name"] == "100k 700002 → Phase 1",
+          f"Reset Nano: Kauf 145, Max DD 10.000, Phase 1 → {z.get('purchase_cost')}, {z.get('max_drawdown')}, {z.get('name')}")
+    src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
+    r = src[src.index('@app.route("/konto-reset-bestaetigen"'):]
+    check('_gr_alt, dd=alt.get("max_drawdown"))' in r[:r.index("\n@app.route(")], "Route /konto-reset-bestaetigen gibt den Max DD der alten Zeile mit")
+
+    print("8 Kernwerte-Reiter (E3): Standard / Nano über flex.name")
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    k = html[html.index("const e3FlexName = "):html.index("  function e3GrStatus(")]
+    check("(fn || 'Flex') + ' ' + e3Gr(t.slice(5))" in k and "(fn ? 'Standard ' : '') + e3Gr(t)" in k, "e3Kopf: mit Name „Nano 100k“/„Standard 100k“, ohne wie bisher")
+    check("${e3Kopf(t, f)}" in html and "${e3Kopf(t)}" not in html, "Reiter-Knopf gibt die Firma mit")
+    check("`${e3FlexName(f) || 'Flex'}-Konten ${e3Gr(g)}" in html, "Status-Zeile: „Nano-Konten 100k“, FundingPips weiter „Flex-Konten“")
 
     print()
     if FEHLER:
