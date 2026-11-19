@@ -28599,6 +28599,27 @@ def ap_kontowert_grund(a, bal, regel):
     return None
 
 
+def ap_kw_regel_konto(regel, konto, balance):
+    """REIN RECHNEND (testbar), BG1 (Finn 19.11.2026, Blue Guardian 2 Step Nano neben Standard): Firmen-Regel für den KONTOWERT dieses Kontos.
+    Eine Variante (regel.flex, erkannt wie im Planer über ap_konto_flex = Max DD ≥ ab_dd_pct %) zählt hier NUR, wenn sie einen eigenen Kaufpreis
+    flex.kauf_eur trägt — dann Kauf, dd_pct und ziel_pct der Variante (Größen-Block flex.je_groesse[g] vor flex), sonst die Firma unverändert.
+    Warum opt-in: der Echo-Hedge (eh_hedge über ap_kontowert_konto) rechnete ein Nano-Konto mit Standard 300 € / 8 % → Satz 0,0375 statt
+    0,0145 €/$ (≈ 2,6× zu viel Fusion-Hedge). FundingPips Flex hat kein flex.kauf_eur und behält bitgleich den Firmen-Kontowert."""
+    fx = (regel or {}).get("flex")
+    if not isinstance(fx, dict) or fx.get("kauf_eur") in (None, "") or not ap_konto_flex(regel, konto, balance):
+        return regel
+    r = dict(regel, kauf_eur=fx["kauf_eur"])
+    if fx.get("dd_pct"):
+        r["dd_pct"] = fx["dd_pct"]
+    g = ap_groesse(regel.get("wert_groessen") or regel.get("groessen"), float(balance)) if _wd_num(balance) else None
+    jg = (fx.get("je_groesse") or {}).get(str(int(g))) if g else None
+    if isinstance(jg, dict):
+        for k in ("dd_pct", "ziel_pct"):
+            if jg.get(k) not in (None, ""):
+                r[k] = jg[k]
+    return r
+
+
 def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=None):
     """REIN RECHNEND: Zeile der Kontowert-Spalte → {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, wie, kauf_eur,
     balance_usd}. Wert = ap_kontowert wie im Probelauf (echter Kauf der Kette nur, wenn plausibel — entscheidet ap_kontowert).
@@ -28612,6 +28633,9 @@ def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=Non
     if typ == "live":
         return dict(leer, hinweis="Live-Konto — kein Kontowert")
     regel = ap_regel_finden(firmen, a.get("firm"))
+    _kwr = globals().get("ap_kw_regel_konto")   # get: ältere Selftest-Lader ziehen ap_kontowert_konto ohne den Helfer
+    if _kwr:
+        regel = _kwr(regel, a, bal)              # BG1: Variante mit eigenem Kaufpreis (Blue Guardian Nano)
     p = ap_kw_param(regel)
     kv = ap_kontowert(typ, bal, p, kauf_eur, peak=peak) if (p and bal is not None) else None
     if not kv:
