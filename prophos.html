@@ -81132,9 +81132,9 @@
       // Kompakt (23.10.2026): Stand steht rechts als Zahl, das Konto im Kopf — der Haken heißt nur noch „🏆 Winning Day"
       cb.checked = !!(f && f.heuteAbgehakt); cb.disabled = !!(f && f.heuteAbgehakt)
       lbl.textContent = cb.disabled ? '🏆 Winning Day · heute schon gezählt' : '🏆 Winning Day'
-      // WE1 (19.11.2026): „Ziel erreicht“ heißt erst nach Ende des Handelstags anfragbar — Uhrzeit in Gerätezeit
+      // WE1 (19.11.2026): „Ziel erreicht“ heißt erst nach Ende des Handelstags anfragbar — Uhrzeit in Gerätezeit; nur wenn DIESER Tag das Ziel voll macht (Prüfer S2), schon voll = sofort
       if(hint) hint.textContent = cb.disabled ? 'Ein Tag zählt nur einmal, egal wie viele Trades.'
-        : f && f.count + 1 >= f.target ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+        : f && f.count + 1 >= f.target ? (f.count + 1 === f.target ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).` : 'Damit ist das Ziel erreicht — Payout anfragbar.') : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     }else if(f && f.heuteAbgehakt){
       cb.checked = true; cb.disabled = true
       lbl.textContent = `🏆 Winning Day heute schon abgehakt — ${stand} · ${a.name}`
@@ -81143,7 +81143,7 @@
       cb.checked = false; cb.disabled = false
       lbl.textContent = `🏆 Dieser Trade war ein Winning Day — ${stand} · ${a.name}`
       if(hint) hint.textContent = f && f.count + 1 >= f.target
-        ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).`
+        ? (f.count + 1 === f.target ? `Damit ist das Ziel erreicht — Payout anfragbar ${wdAbTxt(wdTagEndeMs(tvV2Handelstag()))} (nach Ende des Handelstags).` : 'Damit ist das Ziel erreicht — Payout anfragbar.')
         : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     }
     tcWdRmVorschau()
