@@ -84709,7 +84709,8 @@
   let _kontoVorlagen = null
   async function kontoVorlagenLaden(){
     if(_kontoVorlagen) return _kontoVorlagen
-    try{ const { data, error } = await supabase.from('bulk_vorlagen').select('*').eq('aktiv', true); _kontoVorlagen = !error && Array.isArray(data) ? data : [] }
+    // BG1 Teil C (Prüfer S2, 19.11.2026): feste Reihenfolge wie die Bulk-Liste — Blue Guardian 100k Phase 1 hat zwei Schablonen (Standard 52, Nano 53)
+    try{ const { data, error } = await supabase.from('bulk_vorlagen').select('*').eq('aktiv', true).order('sortierung', { ascending: true }).order('name', { ascending: true }); _kontoVorlagen = !error && Array.isArray(data) ? data : [] }
     catch(_){ _kontoVorlagen = [] }
     return _kontoVorlagen
   }
@@ -84721,8 +84722,24 @@
     const px = typeof window._bulkVorlageFuer === 'function' ? window._bulkVorlageFuer({ id: z.ext || '', titel: '', groesse: gr, typ: z.typ }, liste) : null
     return px && String(px.firm || '').trim().toLowerCase() === firma && (!gr || Number(px.account_size || px.starting_balance) === gr) ? px : null
   }
+  /* MEHRERE SCHABLONEN (BG1 Teil C, Prüfer S2/Master 19.11.2026): Blue Guardian 100k Phase 1 hat Standard (Max DD 8.000) UND Nano (10.000) — die Mail
+   * sagt nicht, welches; der Max DD ist die Kennung im Planer. Passen mehrere Schablonen gleicher Firma × Typ × Größe → ihre Namen (dann entscheidet
+   * ein Mensch im Modal), sonst null. Alle anderen Firmen haben je Größe genau eine → unverändert. */
+  function kontoVorlagenMehrdeutig(z, liste){
+    const gr = (Number(z.groesse) || 0) * 1000, firma = String(z.firma || '').trim().toLowerCase()
+    if(!gr) return null
+    const n = (liste || []).filter(v => String(v.firm || '').trim().toLowerCase() === firma && (!z.typ || v.account_type === z.typ)
+      && Number(v.account_size || v.starting_balance) === gr)
+    return n.length > 1 ? n.map(v => v.name || v.firm) : null
+  }
+  window._kontoVorlagenMehrdeutig = (z, liste) => kontoVorlagenMehrdeutig(z, liste)   // Test-Haken
   async function kontoSchabloneEintragen(z, E){
-    const v = kontoVorlageFinden(z, await kontoVorlagenLaden())
+    const _liste = await kontoVorlagenLaden(), _mehr = kontoVorlagenMehrdeutig(z, _liste)
+    if(_mehr){   // nichts vorbelegen: der Max DD entscheidet Standard/Nano — Hinweis statt einer zufälligen Schablone
+      if(E.modal?.classList.contains('open') && E.msg && !E.msg.textContent){ E.msg.textContent = `Mehrere Schablonen passen (${_mehr.join(' · ')}) — Kaufpreis und Max Drawdown bitte selbst eintragen.`; E.msg.className = 'modal-msg muted' }
+      return
+    }
+    const v = kontoVorlageFinden(z, _liste)
     if(!v || !E.modal?.classList.contains('open') || (E.extId && E.extId.value !== (z.ext || ''))) return   // Modal inzwischen zu/anders
     const leer = el => el && String(el.value || '').trim() === ''
     if(leer(E.purchase) && v.purchase_cost != null) E.purchase.value = v.purchase_cost
@@ -84909,7 +84926,9 @@
   async function kontoDirektAnlegen(z, fremd){
     const gr = Number(z.groesse) || 0
     if(!z.ext || !z.firma || z.firma === '?' || !(gr > 0) || !z.typ || typeof kontoNameRegel !== 'function') return 'modal'
-    const v = kontoVorlageFinden(z, await kontoVorlagenLaden()); if(!v) return 'modal'
+    const _liste = await kontoVorlagenLaden()
+    if(kontoVorlagenMehrdeutig(z, _liste)) return 'modal'   // BG1 Teil C: Standard UND Nano passen → ein Mensch wählt im Modal
+    const v = kontoVorlageFinden(z, _liste); if(!v) return 'modal'
     if(v.goal_kind && !(Number(v.goal_target) > 0)) return 'modal'   // Ziel ohne Zahl in der Schablone (z. B. Mindesttage): das Modal rechnet es
     const uid = fremd ? fremd.uid : String(currentUserId || ''); if(!uid) return 'modal'
     const fuer = fremd || { uid, name: 'die eingeloggte ID', tvName: (z.quellen || []).includes('TV') ? String((z.tv && z.tv.name) || z.ext) : '', ext: z.ext }

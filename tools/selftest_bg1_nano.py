@@ -134,9 +134,9 @@ def main():
 
     print("7 Schablonen Standard + Nano (Teil C): Reset wählt nach Max DD")
     VS = [{"name": "Blue Guardian 100k Standard Phase 1", "firm": "Blue Guardian", "account_type": "phase1", "account_size": 100000,
-           "purchase_cost": 300, "max_drawdown": 8000, "aktiv": True},
+           "purchase_cost": 300, "max_drawdown": 8000, "aktiv": True, "sortierung": 52},
           {"name": "Blue Guardian 100k Nano Phase 1", "firm": "Blue Guardian", "account_type": "phase1", "account_size": 100000,
-           "purchase_cost": 145, "max_drawdown": 10000, "aktiv": True},
+           "purchase_cost": 145, "max_drawdown": 10000, "aktiv": True, "sortierung": 53},
           {"name": "Tradeify Select 150k", "firm": "Tradeify", "account_type": "challenge", "account_size": 150000, "purchase_cost": 213,
            "max_drawdown": 4500, "aktiv": True}]
     VF = app.konto_vorlage_finden
@@ -147,6 +147,13 @@ def main():
     check(VF(VS, "Tradeify", "challenge", 150000, dd=4000) is VS[2] and VF(VS, "Tradeify", "challenge", 150000) is VS[2],
           "eine Schablone je Firma × Typ × Größe: dd ändert nichts")
     check(VF(VS, "Blue Guardian", "phase2", 100000, dd=10000) is None, "keine Phase-2-Schablone → None wie bisher")
+    NZ = list(reversed(VS))   # Prüfer S2 MUSS: DB liefert Nano zuerst (ungeordnet)
+    check(VF(NZ, "Blue Guardian", "phase1", 100000)["name"].endswith("Standard Phase 1"), "Nano zuerst geliefert, ohne dd → trotzdem Standard (Sortierung 52 < 53)")
+    check(VF(NZ, "Blue Guardian", "phase1", 100000, dd=10000)["name"].endswith("Nano Phase 1"), "Nano zuerst geliefert, dd 10.000 → Nano")
+    check(VF(NZ, "Blue Guardian", "phase1", 100000, dd=12345)["name"].endswith("Standard Phase 1"), "Nano zuerst geliefert, dd ohne Treffer → Standard")
+    z0 = {"name": "100k 700003 → Phase 1", "firm": "Blue Guardian", "account_type": "phase1"}
+    _gf = app.konto_dd_ergaenzen(z0, VF(NZ, "Blue Guardian", "phase1", 100000), [BGN])
+    check(_gf == "schablone" and z0["max_drawdown"] == 8000, "/admin/konto-anlegen ohne Max DD, Nano zuerst geliefert → Standard 8.000")
     alt = {"firm": "Blue Guardian", "account_type": "phase2", "account_size": 100000, "max_drawdown": 10000, "purchase_cost": 0,
            "name": "100k 700001 → Phase 2"}
     z = app.konto_reset_zeile(alt, "700002", VF(VS, "Blue Guardian", app.konto_reset_typ(alt["account_type"]), 100000, dd=alt["max_drawdown"]))
@@ -155,6 +162,22 @@ def main():
     src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
     r = src[src.index('@app.route("/konto-reset-bestaetigen"'):]
     check('_gr_alt, dd=alt.get("max_drawdown"))' in r[:r.index("\n@app.route(")], "Route /konto-reset-bestaetigen gibt den Max DD der alten Zeile mit")
+    check(src.count('sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true", "order": "sortierung.asc,name.asc"})') == 2
+          and 'sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true"})' not in src, "beide Server-Leser (konto-anlegen, Reset) sortieren")
+    hx = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    kl = hx[hx.index("async function kontoVorlagenLaden(){"):hx.index("function kontoVorlageFinden(z, liste){")]
+    check(".order('sortierung', { ascending: true }).order('name', { ascending: true })" in kl, "Browser kontoVorlagenLaden sortiert")
+    kd = hx[hx.index("async function kontoDirektAnlegen(z, fremd){"):]
+    kd = kd[:kd.index("\n  }\n")]
+    check("if(kontoVorlagenMehrdeutig(z, _liste)) return 'modal'" in kd and kd.index("kontoVorlagenMehrdeutig") < kd.index("kontoVorlageFinden("),
+          "Ein-Klick aus der Kauf-Mail: zwei passende Schablonen → Modal")
+    ks = hx[hx.index("async function kontoSchabloneEintragen(z, E){"):]
+    ks = ks[:ks.index("\n  }\n")]
+    check("kontoVorlagenMehrdeutig(z, _liste)" in ks and "return\n" in ks[:ks.index("kontoVorlageFinden(")], "Modal: zwei Schablonen → nichts vorbelegt, nur Hinweis")
+    km = hx[hx.index("function kontoVorlagenMehrdeutig(z, liste){"):]
+    km = km[:km.index("\n  }\n")]
+    check("n.length > 1" in km and "Number(v.account_size || v.starting_balance) === gr" in km and "if(!gr) return null" in km,
+          "mehrdeutig nur bei gleicher Firma × Typ × Größe (andere Firmen: je Größe eine Schablone → unverändert)")
 
     print("8 Kernwerte-Reiter (E3): Standard / Nano über flex.name")
     html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()

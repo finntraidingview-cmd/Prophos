@@ -23471,7 +23471,8 @@ def admin_konto_anlegen():
     try:
         if not _wd_num(zeile.get("max_drawdown")):
             _m = re.search(r"(\d{2,3})\s*k\b", str(zeile.get("name") or ""), re.I)
-            _vl = konto_vorlage_finden(sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true"}) or [], zeile.get("firm"), zeile.get("account_type"),
+            # BG1 Teil C: order — bei zwei Schablonen (Blue Guardian Standard 52 / Nano 53) gilt ohne Max DD die erste = Standard
+            _vl = konto_vorlage_finden(sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true", "order": "sortierung.asc,name.asc"}) or [], zeile.get("firm"), zeile.get("account_type"),
                                        float(_m.group(1)) * 1000) if _m else None   # ohne Größe keine Schablone (sonst die erste beliebiger Größe)
             konto_dd_ergaenzen(zeile, _vl, *_konto_dd_regeln(ziel, zeile.get("account_type")))
     except Exception as e:
@@ -23907,9 +23908,12 @@ def konto_reset_zeile(alt, neu_ext, vorlage=None):
 def konto_vorlage_finden(vorlagen, firm, typ, groesse, dd=None):
     """REIN RECHNEND (testbar): aktive Schablone gleicher Firma × Typ × Größe (account_size/starting_balance) → dict oder None.
     dd (BG1, Finn 19.11.2026 — Blue Guardian Standard und Nano je 100k Phase 1): passen mehrere, gewinnt die mit diesem max_drawdown
-    (Nano 10.000 / Standard 8.000 = die Kennung der Variante, ap_konto_flex); keine gleich → die erste wie bisher. Ohne dd unverändert."""
+    (Nano 10.000 / Standard 8.000 = die Kennung der Variante, ap_konto_flex); keine gleich → die erste wie bisher. Ohne dd unverändert.
+    „Erste" = nach Sortierung, dann Name (Teil C, Prüfer S2: die Leser lieferten ungeordnet) — ohne dd also Standard vor Nano."""
     erste = None
-    for v in vorlagen or ():
+    # Sortierung, dann Name (wie die Leser mit order sortierung.asc,name.asc), ohne sortierung ans Ende — auch wenn ein Leser ungeordnet liefert
+    rang = lambda v: (_wd_num(v.get("sortierung")) if _wd_num(v.get("sortierung")) is not None else float("inf"), str(v.get("name") or ""))   # noqa: E731
+    for v in sorted(vorlagen or (), key=rang):
         if v.get("aktiv") is False or str(v.get("firm") or "").strip().lower() != str(firm or "").strip().lower() or v.get("account_type") != typ:
             continue
         if groesse and _wd_num(v.get("account_size") or v.get("starting_balance")) != _wd_num(groesse):
@@ -24091,7 +24095,7 @@ def konto_reset_bestaetigen():
     try:
         konten = sb_select("accounts", {"select": "*", "user_id": f"eq.{ziel}"}) or []
         archiv = _ap_archiviert()
-        vorlagen = sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true"}) or []
+        vorlagen = sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true", "order": "sortierung.asc,name.asc"}) or []   # BG1 Teil C
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht prüfbar: {type(e).__name__}"}), 502
     doppel = admin_konto_doppel(neu_ext, konten)
