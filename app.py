@@ -38407,6 +38407,11 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
     """Kontowert, Gewicht (€) und Delta eines Trades aus dem Kontext des Stands (Kernwerte, echte Käufe, firm_specs)."""
     a = a or {}
     regel = ap_regel_konto(ap_regel_unternehmen(a.get("user_id"), ctx["firmen"], a.get("firm"), streng=False), a, bal)   # UNT3: Regel des Unternehmens
+    # BG1-Prüfer S2 (19.11.2026): Gewicht/Delta für Planer und Waage mit dem Kontowert der Variante (Blue Guardian Nano: Kauf 145 €, DD 10 %)
+    # wie der Echo-Hedge — sonst Nano-Satz 0,03 statt 0,0145. get: ältere Selftest-Lader ziehen _ap_bewerten ohne den Helfer
+    _kwr = globals().get("ap_kw_regel_konto")
+    if _kwr and regel:
+        regel = _kwr(regel, a, bal)
     p = ap_kw_param(regel)
     kw = ap_kontowert(a.get("account_type"), bal, p, ctx["kauf"].get(str(a.get("id")))) if a and bal else None
     fk = _ap_norm(_firm_norm(a.get("firm")))

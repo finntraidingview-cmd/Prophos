@@ -109,6 +109,17 @@ def main():
     check(abs((ks.get("satz_eur_pro_usd") or 0) - 0.0375) < 1e-9, f"Standard-Satz bleibt 0,0375 → {ks.get('satz_eur_pro_usd')}")
     check(app.ap_kw_regel_konto(BGN, konto(10000), None) is BGN, "ohne Balance: Firmen-Regel (kein Raten)")
 
+    print("5b Gewicht/Delta (_ap_bewerten, Planer + Waage — Prüfer S2)")
+
+    def bew(firmen, k, bal):
+        ctx = {"firmen": firmen, "kauf": {}, "ppl": {}, "ppl_firma": {"blueguardian": (10.0, "NAS100", "Lots")}}
+        return app._ap_bewerten(ctx, dict(k, user_id="00000000-0000-0000-0000-0000000000a1"), bal, 4.5, "mt5v2", "NAS100", "buy", 5400, 2450)
+    bn, bn2 = bew([BGN], konto(10000), 100000.0), bew([BGN], konto(10000, "phase2"), 100000.0)
+    check(abs(((bn["kw"] or {}).get("satz") or 0) - 0.0145) < 1e-9, f"Nano P1 Satz 0,0145 → {(bn['kw'] or {}).get('satz')}")
+    check(abs(((bn2["kw"] or {}).get("satz") or 0) - 0.0261) < 1e-4, f"Nano P2 Satz ≈ 0,0261 → {(bn2['kw'] or {}).get('satz')}")
+    for typ, bal in (("phase1", 100000.0), ("phase2", 102000.0)):
+        check(bew([BG], konto(8000, typ), bal) == bew([BGN], konto(8000, typ), bal), f"Standard _ap_bewerten {typ} {bal:,.0f}: gleich")
+
     print("6 FundingPips Flex (flex ohne kauf_eur) bitgleich")
     FP = {"namen": ["fundingpips"], "route": "mt5v2", "boden": "statisch", "dd_pct": 10, "groessen": [50000, 100000], "wert_groessen": [50000, 100000],
           "ziel_pct": {"phase1": 8, "phase2": 5}, "kauf_eur": {"50000": 240, "100000": 464},
