@@ -9025,6 +9025,7 @@ def admin_build_overview(kapitel_id=None):
         live_konten.append(z)
 
     payout_ready = []
+    kasse_notiz = _kasse_notizen_lesen()   # KN1 (19.11.2026): Hand-Notiz je Konto in der Kasse (accounts.payout_notiz)
     # WINNING DAYS AUTOMATISCH (03.11.2026): Stand aus den Trades (wd_auto_staende), sonst goal_done_offset wie bisher
     try:
         wd_auto = wd_auto_staende([a["id"] for a in accounts if (a.get("account_type") or "") == "winning_days" or str(a.get("waiting_payout_since") or "").strip()])
@@ -9074,6 +9075,7 @@ def admin_build_overview(kapitel_id=None):
             # wd_ready bleibt „Ziel voll“ (5/5); das Frontend zeigt bis zu dieser Zeit „anfragbar ab …“ statt des Knopfs
             "wd_ab": wd_voll_ab(wd_auto[aid]["tage"], count, target) if (manual and aid in wd_auto) else "",
             "waiting_since": warten[:10],
+            "payout_notiz": kasse_notiz.get(aid, ""),   # KN1: Hand-Notiz der Kasse-Zeile, '' = keine (oder Spalte noch nicht eingespielt)
         })
         bal, ccy, src, at = _acc_balance(a)
         payout_ready[-1].update({
@@ -19715,6 +19717,65 @@ def admin_payout_notiz():
     if not upd:
         return jsonify({"error": "Anfrage ist inzwischen erhalten (anderer Klick/Browser) — neu laden"}), 409
     return jsonify({"ok": True, "admin_notiz": upd[0].get("admin_notiz") or ""})
+
+
+def _kasse_notizen_lesen():
+    """KN1 (19.11.2026): accounts.payout_notiz (sql/2026-11-19_kasse_payout_notiz.sql) → {konto_id: text}. Nur Konten MIT Notiz (not.is.null).
+    Ein Lesefehler (Spalte fehlt, Netz) kostet nur die Notizen, nie die Kasse — Muster wie _review_notizen_lesen."""
+    try:
+        rows = _sb_all("accounts", {"select": "id,payout_notiz", "payout_notiz": "not.is.null"}) or []
+    except Exception as e:
+        if not sb_spalte_fehlt(e, "payout_notiz"):
+            print(f"[kasse-notiz] ⚠️ Lesen: {type(e).__name__}: {e}", flush=True)
+        return {}
+    return {str(r["id"]): str(r["payout_notiz"]) for r in rows if r.get("id") and str(r.get("payout_notiz") or "").strip()}
+
+
+@app.route("/admin/kasse-notiz", methods=["PATCH", "OPTIONS"])
+def admin_kasse_notiz():
+    """KN1 (Finn 19.11.2026, Admin → Payouts · alle IDs, #kasse, Tabelle PERSON · ACCOUNT · … · ANFRAGBAR: „füg das ich hier auch Payouts Notizen machen
+    kann hinzu“): eigene Hand-Notiz je KONTO der Kasse in accounts.payout_notiz (sql/2026-11-19_kasse_payout_notiz.sql). Dieselbe Bedienung wie PU3
+    (/admin/payout-notiz), nur am Konto statt an der Anfrage — die Kasse-Zeilen haben noch keine Anfrage. Bewusst NICHT review_notiz (Radar → Bestanden)
+    und NICHT notes (Konto-Dialog/Kontoart-Wechsel). Body {account_id, notiz} — leer = löschen, Text wie PU3 gesäubert (payout_notiz_sauber, 200 Zeichen).
+    Reine Notiz: ändert nichts am Planer, Zähler, Termin oder Waiting (kein Trigger hört auf die Spalte).
+    Rechte wie PU3: voller Admin (_admin_voll), sonst Verwalter nur für Konten SEINER Gruppe."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _uid, err = _admin_voll()
+    gruppe = None
+    if err:
+        if err[1] != 403:
+            return err
+        _uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
+    b = request.get_json(silent=True) or {}
+    aid = str(b.get("account_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", aid):
+        return jsonify({"error": "account_id fehlt/ungültig"}), 400
+    notiz = payout_notiz_sauber(b.get("notiz"))
+    try:
+        rows = sb_select("accounts", {"select": "id,user_id,payout_notiz", "id": f"eq.{aid}", "limit": "1"}) or []
+    except Exception as e:
+        if sb_spalte_fehlt(e, "payout_notiz"):
+            return jsonify({"error": "Spalte payout_notiz fehlt — sql/2026-11-19_kasse_payout_notiz.sql einspielen"}), 409
+        return jsonify({"error": f"Konto nicht lesbar ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"error": "Konto nicht gefunden"}), 404
+    k = rows[0]
+    if gruppe is not None and str(k.get("user_id") or "") not in gruppe:
+        return jsonify({"error": "Nur Konten der eigenen Gruppe"}), 403
+    try:
+        upd = sb_update("accounts", {"id": f"eq.{aid}"}, {"payout_notiz": notiz})
+    except Exception as e:
+        print(f"[kasse-notiz] ⚠️ {aid}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
+    if not upd:
+        return jsonify({"error": "Konto inzwischen weg — neu laden"}), 409
+    return jsonify({"ok": True, "payout_notiz": upd[0].get("payout_notiz") or ""})
 
 
 def payout_anfrage_konto_felder(konto, naechster, morgen):

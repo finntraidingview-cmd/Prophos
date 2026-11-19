@@ -20273,6 +20273,70 @@
       }
       try{ admFinRender() }catch(_){}
     }
+    /* KN1 PAYOUT-NOTIZ JE KONTO IN DER KASSE (Finn 19.11.2026, Admin → Payouts · alle IDs, #kasse, Tabelle PERSON · ACCOUNT · … · ANFRAGBAR: „füg das ich hier
+     * auch Payouts Notizen machen kann hinzu“): dieselbe Bedienung wie PU3 oben („+ Notiz“, Klick → Feld, Enter/Blur speichert, Esc bricht ab, leeren = löschen,
+     * Klassen .wdl-bst-notiz / .wdl-bst-notiz-feld), klein unter dem Account-Namen jeder Kasse-Zeile (Winning Days + CFD). Die Zeilen sind KONTEN ohne Anfrage →
+     * gespeichert am Konto in accounts.payout_notiz über PATCH /admin/kasse-notiz (Service-Key, Rechte wie PU3; sql/2026-11-19_kasse_payout_notiz.sql) —
+     * NICHT review_notiz (Radar → Bestanden) und NICHT notes (Konto-Dialog). Gelesen aus /admin/overview payout_ready[].payout_notiz. Knopf steht immer (PU4-Lehre:
+     * gemerkter Admin-Stand kennt das Feld evtl. nicht); fehlt die Spalte, sagt es das PATCH (409 → Toast). Das Feld überlebt einen Neuaufbau (_admKasseNotizEdit). */
+    let _admKasseNotizEdit = null   // { id: account_id, text }
+    function admKasseNotizZelle(td, r){
+      if(!td || !r || !r.account_id) return
+      const id = String(r.account_id), txt = String(r.payout_notiz || '')
+      const box = document.createElement('div')
+      box.className = 'c-notiz'; box.style.cssText = 'margin-top:3px;max-width:280px'
+      if(_admKasseNotizEdit && _admKasseNotizEdit.id === id){
+        const i = document.createElement('input')
+        i.type = 'text'; i.className = 'wdl-bst-notiz-feld'; i.maxLength = ADM_PEND_NOTIZ_MAX; i.placeholder = 'Payout-Notiz'
+        i.value = _admKasseNotizEdit.text; i.setAttribute('aria-label', 'Payout-Notiz zum Konto')
+        i.addEventListener('input', () => { if(_admKasseNotizEdit && _admKasseNotizEdit.id === id) _admKasseNotizEdit.text = i.value })
+        i.addEventListener('keydown', e => {
+          if(e.key === 'Enter'){ e.preventDefault(); i.dataset.abbruch = '1'; admKasseNotizSpeichern(r, i.value) }   // direkt, nicht über blur() (wie PU3)
+          else if(e.key === 'Escape'){ e.preventDefault(); i.dataset.abbruch = '1'; _admKasseNotizEdit = null; try{ admFinRender() }catch(_){} }
+        })
+        i.addEventListener('blur', () => { if(i.dataset.abbruch !== '1') admKasseNotizSpeichern(r, i.value) })
+        i.addEventListener('click', e => e.stopPropagation())
+        box.appendChild(i)
+        setTimeout(() => { if(i.isConnected){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } }, 0)
+      }else{
+        const bt = document.createElement('button')
+        bt.type = 'button'; bt.className = 'wdl-bst-notiz' + (txt ? '' : ' ist-leer')
+        bt.textContent = txt ? '✎ ' + txt : '+ Notiz'; bt.title = txt ? 'Payout-Notiz bearbeiten (leeren = löschen)' : 'Eigene Payout-Notiz zu diesem Konto'
+        bt.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _admKasseNotizEdit = { id, text: txt }; try{ admFinRender() }catch(_){} })
+        box.appendChild(bt)
+      }
+      td.appendChild(box)
+    }
+    function admKasseNotizSetzen(id, wert){
+      for(const x of ((admData && admData.payout_ready) || [])) if(String(x.account_id) === id) x.payout_notiz = wert
+    }
+    async function admKasseNotizSpeichern(r, wert){
+      const id = String((r && r.account_id) || '')
+      if(!id || !_admKasseNotizEdit || _admKasseNotizEdit.id !== id) return
+      _admKasseNotizEdit = null
+      const neu = String(wert || '').replace(/\s+/g, ' ').trim().slice(0, ADM_PEND_NOTIZ_MAX).trim()   // wie payout_notiz_sauber im Backend
+      const alt = String(r.payout_notiz || '')
+      if(neu === alt){ try{ admFinRender() }catch(_){} return }
+      r.payout_notiz = neu; admKasseNotizSetzen(id, neu)   // gleich anzeigen; bei Fehler zurück
+      try{ admFinRender() }catch(_){}
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const res = await fetch(`${WATCHER_HOME}/admin/kasse-notiz?ansicht=admin`, {
+          method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account_id: id, notiz: neu }) })
+        const d = await res.json().catch(() => ({}))
+        if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+        const gespeichert = String(d.payout_notiz || '')
+        r.payout_notiz = gespeichert; admKasseNotizSetzen(id, gespeichert)
+        if(typeof atToast === 'function') atToast(neu ? '✓ Notiz gespeichert' : '✓ Notiz gelöscht', 'start')
+      }catch(e){
+        r.payout_notiz = alt; admKasseNotizSetzen(id, alt)
+        if(typeof atToast === 'function') atToast(`Notiz nicht gespeichert: ${(e && e.message) || e}`, 'end')
+      }
+      try{ admFinRender() }catch(_){}
+    }
     async function admPayoutErhaltenBuchen(){
       const t = _admReceive; if(!t || !admData) return
       const msg = $('admReceiveMsg'), btn = $('admReceiveSave')
@@ -21394,6 +21458,7 @@
             zl.textContent = [ri.fehlt, ri.plan].filter(Boolean).join(' · ')
             tr.querySelector('.c-acc').parentElement.appendChild(zl)
           }
+          admKasseNotizZelle(tr.querySelector('.c-acc').parentElement, r)   // KN1: Hand-Notiz klein unter dem Account (nach #ext / Recoverer-Zeile)
           tr.querySelector('.c-firm').textContent = r.account_firm || '–'
           // Stand: Winning Days = 🏆-Zähler, CFD = relativer Termin bzw. „wartet seit …" ohne Termin
           const st = tr.querySelector('.c-stand')
