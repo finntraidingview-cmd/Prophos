@@ -33,6 +33,14 @@ Lot-/Risiko-Limit je Trade; [PROH] hat nur die 80-%-Margin-Regel; [AGB] „Prohi
 simulated-trade“ und „Boom or Bust“ OHNE Zahl (Ermessen von Blue Guardian, kein fester Wert). **Funded Nano 100k (BG2):** Payout-Ziel je
 Zyklus **800–1.200 $** (Finn „750/800 bis 1.200“, Master nimmt 800–1.200).
 
+**BG2 gebaut (19.11.2026):** Der Funded-CFD-Planer kennt jetzt die Variante je Konto (app.py `fcp_regel_konto`, Kennung Max DD ≥ 10 %), ebenso
+Radar-Ziel/Boden (`zw_funded_cfd`), Konto-Seite (`kz_rechnen`) und Reiter. SQL `sql/2026-11-19_bg2_blue_guardian_nano_funded.sql` (ersetzt den
+auskommentierten Teil 2 der BG1-SQL): flex im blueguardian-Eintrag von funded_cfd_plan_regeln — Ziel 800–1.200, Consistency 50 % (vorhandener
+Weg fcp_cons_finn wie The5ers, je Zyklus), SL 1.250–1.700, Lots 1–1,75, keine Gewinntage, Hedge 500 € / 10.000 $ = 0,05 €/$ (Finn).
+Beispiel aus dem Test: Ziel 1.000 → TP ≈ 475 $, nach einem 475-$-Tag hebt der Planer das Endziel auf ≥ 950/969, damit der größte Tag ≤ 50 % bleibt.
+
+Der folgende Absatz ist der Stand VOR BG2:
+
 **Funded-CFD-Planer:** kennt keine Varianten je Konto. Heute gäbe es für einen Nano-Funded die Standard-Werte (Gewinntage 3 × 500,
 Ziel 1.000–2.000 ≤ Cap, SL 1.250–1.600 < Daily 3.000 — regelsicher, aber Hedge 1.000 €/8.000 $ ≈ 3× zu groß, Consistency nur zufällig
 eingehalten). Nano-Funded gibt es frühestens nach zwei bestandenen Phasen → eigener Schritt BG2 (Code + Finns Hedge-Satz), s. SQL Teil 2.
