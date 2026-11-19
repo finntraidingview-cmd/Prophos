@@ -43901,7 +43901,7 @@ def kz_rechnen(a, ctx):
                          "grund": ("alles erfüllt" if ok else "fehlt: " + ", ".join(fehlt)) if ziel_bal else "keine Ziel-Regel", "checks": checks}
     elif typ == "funded_cfd":
         # ── Funded CFD: wie der Funded-CFD-Planer (Ziel bis Waiting, Gewinntage, Consistency je Zyklus) ──
-        freg = ap_regel_finden(((ctx.get("fcp_regel") or {}).get("firmen") or []), a.get("firm"))
+        freg = fcp_regel_konto(ap_regel_finden(((ctx.get("fcp_regel") or {}).get("firmen") or []), a.get("firm")), a)   # BG2: Variante wie der Planer
         pend, verw, buch = (ctx.get("fcp_pay") or ([], [], []))
         n_pay = fcp_payouts_zaehlen(pend, verw, buch).get(aid, 0)
         zyklus = n_pay + 1
@@ -46702,7 +46702,7 @@ def zw_funded_cfd():
         return
     # OD1 (Finn 05.11.2026): On-Demand-Konten bekommen auch im 1. Zyklus das On-Demand-Ziel (sonst schlüge das Abhak-Popup nach dem kleinen Refund-Trade
     # „Waiting for Payout“ vor, obwohl FundedNext erst ab ~2.000 $ auszahlt). Fehlt die Spalte on_demand, rechnet alles wie bisher.
-    _sel = "id,user_id,name,firm,starting_balance,created_at"
+    _sel = "id,user_id,name,firm,starting_balance,created_at" + ",max_drawdown"   # BG2: max_drawdown = Kennung der Variante (fcp_regel_konto)
     try:
         try:   # ST1: + striking (Gewinntage 7 → kein Radar-Ziel, solange Tage fehlen) — fehlt nur die Spalte, wie bisher
             konten = _sb_all("accounts", {"select": _sel + ",on_demand,fcp_ziel,striking", "account_type": "eq.funded_cfd"}) or []
@@ -46730,7 +46730,7 @@ def zw_funded_cfd():
     firmen_von = lambda a: (fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {}).get("firmen") or []   # noqa: E731 — UNT4: Regel des Unternehmens; streng (S4-Stopp): unbekannt → keine Regel, nie still der Standard
     def _gt_jg(a):
         """Größen-Werte, die für dieses Konto gelten — On Demand nur, wenn die Firma eine On-Demand-Regel hat (sonst normal mit Gewinntagen, wie der Planer)."""
-        _r, _g = ap_regel_finden(firmen_von(a), a.get("firm")), _wd_konto_groesse(a)
+        _r, _g = fcp_regel_konto(ap_regel_finden(firmen_von(a), a.get("firm")), a), _wd_konto_groesse(a)   # BG2: Variante wie der Planer
         _j = fcp_je_groesse(_r, _g) or {}
         _o = fcp_on_demand_anwenden(_r, _j, _g) if str(a["id"]) in od_ids else None   # OD1: On Demand hat keine Gewinntage
         if not _o and str(a["id"]) in st_ids:
@@ -46747,7 +46747,7 @@ def zw_funded_cfd():
     gt_korr = fcp_gt_korr_laden(sorted(gt_ids)) if gt_ids else {}   # GT2: Gewinntage von Hand (wie der Planer)
     for a in konten:
         aid = str(a["id"])
-        regel = ap_regel_finden(firmen_von(a), a.get("firm"))   # UNT4
+        regel = fcp_regel_konto(ap_regel_finden(firmen_von(a), a.get("firm")), a)   # UNT4; BG2: Variante wie der Planer
         zb = fcp_konto_ziel_boden(regel, _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"), on_demand=aid in od_ids)
         if zb:
             _zw["ziele"][aid], _zw["boeden"][aid] = zb
@@ -51430,6 +51430,21 @@ def fcp_regel_patch(zeile, body):
     return {"firmen": firmen}, None
 
 
+def fcp_regel_konto(regel, konto):
+    """REIN RECHNEND (testbar), BG2 (Finn 19.11.2026, Blue Guardian 2 Step Nano Funded neben Standard): Funded-CFD-Regel für DIESES Konto.
+    Wie der Challenge-Planer (ap_konto_flex): regel.flex = {ab_dd_pct, je_groesse, …} und Max DD am Konto ≥ ab_dd_pct % der Kontogröße
+    (_wd_konto_groesse, 1 $ Toleranz) → die Variante: flex.je_groesse ersetzt die Größen-Werte, übrige flex-Felder (consistency_pct …) gehen der
+    Firma vor; Kennung/Name (ab_dd_pct, name) nicht. Sonst — kein flex, kein Max DD, keine Größe, darunter — die Regel unverändert (Standard)."""
+    fx = (regel or {}).get("flex")
+    if not isinstance(fx, dict) or not isinstance(fx.get("je_groesse"), dict):
+        return regel
+    dd, g, ab = _wd_num((konto or {}).get("max_drawdown")), _wd_konto_groesse(konto), _wd_num(fx.get("ab_dd_pct"))
+    if not dd or not g or not ab or dd < ab / 100.0 * float(g) - 1:
+        return regel
+    return dict(regel, **{k: v for k, v in fx.items() if k not in ("ab_dd_pct", "name", "je_groesse")}, je_groesse=dict(fx["je_groesse"]),
+                flex_konto=True)
+
+
 def fcp_je_groesse(regel, groesse):
     """Werte je Kontogröße (ziel, sl, lots, hedge_eur, dd …) der Firmen-Regel oder None."""
     if not regel or not groesse:
@@ -52718,6 +52733,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             except Exception:
                 pass
             continue                     # Firma aus: nur in plaene, nie geplant
+        regel = fcp_regel_konto(regel, a)   # BG2: Variante je Konto (Blue Guardian Nano Funded: Max DD 10.000) — Firma ohne flex unverändert
         od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
         st_an = st_spalte and a.get("striking") is True      # ST1: Striking-Konto (Finn schaltet es am Konto, FundingPips)
         fkey = (regel.get("namen") or [""])[0]
@@ -53102,7 +53118,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         k = km.get(str(p.get("master_account_id"))) or {}
         # Größe, DD und Live-Balance für Boden/Rest im Reiter (S3, 30.10.2026)
         g_k = _wd_konto_groesse(k)
-        jg_k = fcp_je_groesse(ap_regel_finden((fd_unt_reg(reg, "cfd", k.get("user_id"), _ktx) or reg or {}).get("firmen") or [], k.get("firm")), g_k) or {}   # UNT4
+        jg_k = fcp_je_groesse(fcp_regel_konto(ap_regel_finden((fd_unt_reg(reg, "cfd", k.get("user_id"), _ktx) or reg or {}).get("firmen") or [], k.get("firm")), k), g_k) or {}   # UNT4; BG2
         bal_k = acc_balance_wahl(k, echo_bal, dup_bal)[0] if k else None
         erg["plaene"].append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or k.get("user_id") or ""), "konto_id": str(p.get("master_account_id")),
                               "groesse": g_k, "dd": _wd_num(jg_k.get("dd")), "balance": round(float(bal_k), 2) if bal_k else None,
