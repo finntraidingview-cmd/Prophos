@@ -115,7 +115,7 @@ def zeile(praefix):
 
 
 js = ("const istTradeifyCfd = f => /tradeify/i.test(String(f || '')) && /cfd/i.test(String(f || ''));\n"
-      + zeile("  const TP_VP_VORGABE = ") + zeile("  function wdBasisKey(") + zeile("  function wd50kName(") + zeile("  const TP_VP_FIRMEN = ")
+      + zeile("  const TP_VP_VORGABE = ") + zeile("  function wdBasisKey(") + zeile("  function wd50kName(") + zeile("  function wdIst50kKey(") + fn("kontoIstTradeifyLive") + zeile("  const TP_VP_FIRMEN = ")   # TL1 (19.11.2026): Tradeify Live
       + fn("tpVpLucidWieTradeify") + fn("tpVpApex100") + fn("tpVp50k") + fn("tpVorplanFirmaKey") + fn("wdKtSpanne")
       + zeile("  function tpVorplanSpanne(") + zeile("  function tpVorplanIstFunded(") + fn("tpVorplanZeile") + fn("tpWdHedgeFehlt") + fn("tpWdHedgeEur") + """
 const tpTopstepMll = () => 0, kontoIstTopstepExpress = () => false, tpKontoGroesseAusName = () => 50000, wdZyklusVon = () => null, tpVorplanSlaveWaehrung = e => e;
@@ -164,7 +164,7 @@ ok(zz[0] and "Hedge-Werte fehlen für Lucid 50k" in zz[0] and zz[8] and "FundedN
    f"ohne eigene Hedge-Tabelle: sichtbarer Fehler statt Standard-Tabelle — Lucid 50k / FNF 50k ({zz[0]})")
 ok(zz[1] is None and zz[2] == 25 and zz[3] == 170 and zz[4] == 190, f"mit eigener Tabelle: Hedge 25 € aus lucid50, TP 170–190 (Vorgabe) ({zz[1:5]})")
 ok(zz[5] is None and zz[6] == 60 and zz[7] == 268, "Lucid 150k: Tabelle und TP der Firma wie bisher")
-ok("firmen[(typeof wdBasisKey === 'function') ? wdBasisKey(k) : k]" in html and "${e4RegelnHtml(wdBasisKey(k))}" in html,
+ok("firmen[(typeof wdBasisKey === 'function') ? wdBasisKey(k) : k]" in html and "e4RegelnHtml(wdBasisKey(k))}" in html,
    "fester SL je Firma und Payout-Regeln (E4) lesen den Firmen-Schlüssel")
 ok("wdBasisKey(k) !== k ? 'fehlt' : 'wie Standard'" in html, "Hedge-Tabelle im Farmer: 50k ohne eigene Tabelle zeigt „fehlt“")
 he, he2 = jr.get("he") or [None] * 7, jr.get("he2") or [None] * 2

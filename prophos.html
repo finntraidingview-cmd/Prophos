@@ -46663,6 +46663,9 @@
       onDemand: row.on_demand === undefined ? undefined : row.on_demand === true,
       // ST1 (15.11.2026): Add-on Striking (FundingPips) — undefined = Spalte fehlt noch (sql/2026-11-15_addon_striking.sql) → kein Chip, nichts geschrieben
       striking: row.striking === undefined ? undefined : row.striking === true,
+      // TL1 (Finn 19.11.2026, Jacob Tradeify Elite Live): Konto mit echtem Geld, Start 0 $ — Merkmal für den WD-Schlüssel 'tradeifylive'
+      // (sql/2026-11-19_tl1_accounts_echtgeld.sql; Spalte fehlt noch → false wie bisher)
+      echtgeld: row.echtgeld === true,
       fcpZiel: row.fcp_ziel && typeof row.fcp_ziel === 'object' ? row.fcp_ziel : null,   // eigene Vorgabe je Konto (07.10.2026), nicht das Firmen-Limit
       autoPlaner: row.auto_planer !== false,   // Auto-Planer-Haken (08.10.2026): false = nie automatisch einplanen
       wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
@@ -75279,7 +75282,7 @@
    *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
    *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
    *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
-  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], lucid: [270, 290], lucid50: [170, 190], fnfutures: [270, 290], fnfutures50: [220, 240], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], ftmofutures: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], tradeifylive: [270, 290], lucid: [270, 290], lucid50: [170, 190], fnfutures: [270, 290], fnfutures50: [220, 240], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], ftmofutures: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
   // ftmofutures = FTMO Futures (FT2, Finn 11.11.2026 21:05: „Winning Days, genau die gleiche Logik wie immer … TP so 220 bis 240 … je Winning Day 200+“) —
   // eigener Schlüssel wie app.py fdp_wd_schluessel; FTMO CFD bleibt unter „sonst“
   // fnfutures = FundedNext Futures (Finn 16.10.2026: „genau gleich wie bei Tradeify“, Gewinntag 250 $) — eigener Schlüssel, damit
@@ -75295,9 +75298,21 @@
    * Hedge: KEIN Rückfall auf die Standard-Tabelle — ohne eigene Tabelle meldet tpVorplanZeile „Hedge-Werte fehlen“, das Konto wird sichtbar nicht geplant
    * (Finn: „kein stilles 0-Lot“; die Tabelle legt Finn selbst an). */
   // 50k-Schlüssel → Firmen-Schlüssel; gehoben (function statt const): auch aus Code lesbar, der vor dieser Zeile läuft (TDZ)
-  function wdBasisKey(k){ return ({ lucid50: 'lucid', fnfutures50: 'fnfutures' })[k] || k }
-  function wd50kName(k){ return ({ lucid50: 'Lucid 50k', fnfutures50: 'FundedNext Futures 50k' })[k] || k }
-  const TP_VP_FIRMEN = ['tradeify', 'lucid', 'lucid50', 'fnfutures', 'fnfutures50', 'apex', 'apex100', 'topstep', 'ftmofutures', 'sonst']
+  /* TRADEIFY LIVE (TL1, Finn 19.11.2026: „Unter Winning Days kannst du noch Tradeify Live Accounts hinzufügen … als eigene Tabelle für Hedging, weil ich dann
+   * wahrscheinlich mit viel, viel mehr gegenhedgen werde“; Anlass: Jacob 3 × Tradeify 150k Elite Live, echtes Geld). Gleiches Muster wie die 50k-Schlüssel:
+   * 'tradeifylive' → Firmen-Schlüssel 'tradeify', eigene TP-Zeile, Kontrakte und Hedge-Tabelle, KEIN Rückfall auf Standard/Tradeify („Hedge-Werte fehlen“).
+   * Erkennung NUR über accounts.echtgeld (Finn: Variante A) — nicht über Namen oder starting_balance 0 (5 alte Tradeify-Funded tragen auch 0).
+   * Kontrakte ohne eigene Werte = die von Tradeify (keine 50k-Skalierung, wdKtSpanne). Stand für die Hedge-Stufe = Balance selbst (Start 0 $, tpVorplanZeile). */
+  function wdBasisKey(k){ return ({ lucid50: 'lucid', fnfutures50: 'fnfutures', tradeifylive: 'tradeify' })[k] || k }
+  function wd50kName(k){ return ({ lucid50: 'Lucid 50k', fnfutures50: 'FundedNext Futures 50k', tradeifylive: 'Tradeify Live' })[k] || k }
+  function wdIst50kKey(k){ return k === 'lucid50' || k === 'fnfutures50' }   // gehoben wie wdBasisKey (TDZ)
+  // TL1: Tradeify-Futures-Konto mit echtem Geld (Elite Live)? konto = Konto-Objekt (echtgeld aus accounts, wdAccLike); firm optional, sonst konto.firm
+  function kontoIstTradeifyLive(konto, firm){
+    if(!konto || typeof konto !== 'object' || konto.echtgeld !== true) return false
+    const f = String(firm != null ? firm : (konto.firm || ''))
+    return /tradeify/i.test(f) && !istTradeifyCfd(f)
+  }
+  const TP_VP_FIRMEN = ['tradeify', 'tradeifylive', 'lucid', 'lucid50', 'fnfutures', 'fnfutures50', 'apex', 'apex100', 'topstep', 'ftmofutures', 'sonst']
   function tpVpLucidWieTradeify(regeln){
     if(!regeln || typeof regeln !== 'object') return regeln
     const r = { ...regeln }
@@ -75332,6 +75347,7 @@
     if(f.includes('apex')) return tpVpApex100(konto) ? 'apex100' : 'apex'
     if(f.includes('lucid')) return (typeof tpVp50k === 'function' && tpVp50k(konto)) ? 'lucid50' : 'lucid'   // 23.10.2026: Lucid wie Tradeify, eigener Schlüssel; LF1 50k
     if(istTradeifyCfd(f)) return 'sonst'   // Tradeify CFD (23.10.2026) ist CFD — nie die Tradeify-Futures-Regeln
+    if(f.includes('tradeify') && kontoIstTradeifyLive(konto, f)) return 'tradeifylive'   // TL1 (19.11.2026): Elite Live, nur über accounts.echtgeld
     return f.includes('tradeify') ? 'tradeify' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
@@ -75496,7 +75512,8 @@
   function tpVorplanLive(acc){
     try{
       // TradingView-Balance (Puls, 26.09.2026) vor Duplikum — Duplikum fällt weg, sein Spiegel veraltet
-      if(acc && typeof acc.tvBalance === 'number' && isFinite(acc.tvBalance) && (acc.tvBalance > 1000 || kontoIstTopstepExpress(acc))) return acc.tvBalance   // Express 0-basiert (TSV2-PNL)
+      // TL1 (19.11.2026): Tradeify Live startet bei 0 $ — 0 bis 1.000 $ sind dort echte Stände wie bei Express
+      if(acc && typeof acc.tvBalance === 'number' && isFinite(acc.tvBalance) && (acc.tvBalance > 1000 || kontoIstTopstepExpress(acc) || kontoIstTradeifyLive(acc))) return acc.tvBalance   // Express 0-basiert (TSV2-PNL)
       const d = (typeof getDupBalanceForAccount === 'function') ? getDupBalanceForAccount(acc.id) : null
       if(d && typeof d.balance === 'number' && isFinite(d.balance)) return d.balance
       if(acc.topstep && typeof acc.topstep.balance === 'number' && isFinite(acc.topstep.balance)) return acc.topstep.balance
@@ -75658,7 +75675,9 @@
     if(funded){
       // Kontogröße aus starting_balance, sonst aus dem Namen — accounts.balance (manuelle Balance) wird nicht mehr gelesen (F9, 26.09.2026)
       const startRoh = Number(acc.startingBalance) || 0
-      const express = kontoIstTopstepExpress(acc)   // Topstep Express: Stand über 0 $ = die Balance selbst (F27)
+      // Topstep Express: Stand über 0 $ = die Balance selbst (F27); TL1 (19.11.2026): Tradeify Live (Start 0 $) genauso — sonst rechnete „150k“ aus dem
+      // Namen 0 − 150.000 und das Konto stünde immer auf der kleinsten Stufe
+      const express = kontoIstTopstepExpress(acc) || kontoIstTradeifyLive(acc)
       live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
       groesse = express ? 0 : startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name, live)   // mit Balance-Rückfall (05.10.2026)
       if(live == null){ plus = 0; hinweis = 'kein Live-Stand — kleinste Stufe' }
@@ -76364,7 +76383,8 @@
     const kt = (vp && vp.regeln && vp.regeln.kt) || {}
     // LF1: 50k-Schlüssel ohne eigene Kontrakte → die Spanne der Firma × 50k/150k (gerundet, mindestens 1), sonst die Standard-Zahl
     const basisSp = wdBasisKey(firmaKey) !== firmaKey && !Array.isArray(kt[firmaKey]) && Array.isArray(kt[wdBasisKey(firmaKey)]) ? kt[wdBasisKey(firmaKey)] : null
-    const sp = basisSp ? basisSp.map(x => Math.max(1, Math.round((+x || 1) / 3))) : kt[firmaKey]
+    // TL1: Tradeify Live (150k wie Tradeify) übernimmt die Spanne von Tradeify unverändert — die Drittel-Skalierung gilt nur für die 50k-Schlüssel
+    const sp = basisSp ? (wdIst50kKey(firmaKey) ? basisSp.map(x => Math.max(1, Math.round((+x || 1) / 3))) : basisSp) : kt[firmaKey]
     const std = Math.max(1, Math.round(+(vp && vp.kt) || 1))
     if(!Array.isArray(sp)) return [std, std]
     const von = Math.max(1, Math.round(+sp[0] || std)); return [von, Math.max(von, Math.round(+sp[1] || von))]
@@ -76948,7 +76968,7 @@
    *    Staffel über der Kontogröße, TP zufällig aus der Firmen-Spanne — außer das Konto hat eine TP-Vorgabe).
    *    Live-Balance aus dem dup_live-Spiegel (RPC); fehlt sie, kleinste Stufe mit Hinweis, und der PC-Tab
    *    zieht den Slave-Betrag nach, sobald er den Live-Stand hat. ── */
-  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, startingBalance: kd.starting_balance > 0 ? kd.starting_balance : null, wdTp: kd.tp_vorgabe, wdSl: kd.sl_vorgabe, maxRisikoTrade: kd.max_risiko_trade } }   // Größe aus starting_balance/Name, nie balance (F9)
+  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, startingBalance: kd.starting_balance > 0 ? kd.starting_balance : null, wdTp: kd.tp_vorgabe, wdSl: kd.sl_vorgabe, maxRisikoTrade: kd.max_risiko_trade, echtgeld: kd.echtgeld === true } }   // Größe aus starting_balance/Name, nie balance (F9); echtgeld: TL1 (Railway liefert es erst ab Stufe 2)
   async function wdPlaeneAnlegen(tag){
     const d = _wd.daten
     if(!d || !d.rail) return { angelegt: 0, fehler: ['Railway nicht erreichbar — Pläne legen dann die PC-Tabs an (müssen offen sein)'] }
@@ -77541,7 +77561,7 @@
     box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
-  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], lucid: ['Lucid', '#e84393', 'Gewinntag 250 $'], lucid50: ['Lucid 50k', '#fd79a8', 'Gewinntag 150 $ · eigene Hedge-Tabelle nötig'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], fnfutures50: ['FundedNext Futures 50k', '#55efc4', 'Gewinntag 200 $ · eigene Hedge-Tabelle nötig'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], ftmofutures: ['FTMO Futures', '#00a8a8', 'Gewinntag 200 $'], sonst: ['andere Firmen', '#636e72', 'MFFU …'] }
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], tradeifylive: ['Tradeify Live', '#a29bfe', 'Echtgeld · Start 0 $ · Gewinntag 250 $ · eigene Hedge-Tabelle nötig'], lucid: ['Lucid', '#e84393', 'Gewinntag 250 $'], lucid50: ['Lucid 50k', '#fd79a8', 'Gewinntag 150 $ · eigene Hedge-Tabelle nötig'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], fnfutures50: ['FundedNext Futures 50k', '#55efc4', 'Gewinntag 200 $ · eigene Hedge-Tabelle nötig'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], ftmofutures: ['FTMO Futures', '#00a8a8', 'Gewinntag 200 $'], sonst: ['andere Firmen', '#636e72', 'MFFU …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
     const ges = konten.filter(q => tpVorplanFirmaKey(q.firm, q) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
@@ -77731,7 +77751,7 @@
           <div class="wd-feld" style="width:90px"><label>Kontrakte von</label><input type="number" class="input mono" data-wd-kt="${k}-von" min="1" step="1" value="${ks[0]}"></div>
           <div class="wd-feld" style="width:90px"><label>Kontrakte bis</label><input type="number" class="input mono" data-wd-kt="${k}-bis" min="1" step="1" value="${ks[1]}"></div>
           <div class="kf" style="align-self:center">TP und Kontrakte je Konto zufällig aus der Spanne · dann oben „Speichern"</div>
-          ${e4RegelnHtml(wdBasisKey(k))}
+          ${k === 'tradeifylive' ? '<div class="kf" style="flex-basis:100%">Payout-Regeln: Elite Live zahlt täglich aus — die Zyklus-Regel von Tradeify gilt hier nicht</div>' : e4RegelnHtml(wdBasisKey(k))}
         </div>`]
     })
     box.innerHTML = teile.map(t => t[0]).join('')
@@ -77796,7 +77816,7 @@
     const t = document.getElementById('wd-staffel-titel'); if(t) t.textContent = w === 'standard' ? 'Standard (alle Firmen ohne eigene Tabelle)' : ((WD_FIRMEN[w] || [w])[0] + (wdStaffelEigen(w) ? ' · eigene Tabelle' : ' · noch wie Standard'))
     // LF1: 50k-Schlüssel ohne eigene Tabelle — der Farmer plant dort keine WD (kein Rückfall auf den Standard, kein Hedge 0)
     if(t && w !== 'standard' && wdBasisKey(w) !== w && !wdStaffelEigen(w)) t.textContent = (WD_FIRMEN[w] || [w])[0] + ' · Hedge-Tabelle fehlt — ohne sie plant der Farmer hier keine Winning Days'
-    const h = document.getElementById('wd-staffel-hinweis'); if(h) h.textContent = w === 'standard' ? 'nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)' : (wdStaffelEigen(w) ? `gilt nur für ${(WD_FIRMEN[w] || [w])[0]} — Stand über der Kontogröße → Slave-Betrag` : `zeigt den Standard — die erste Änderung macht daraus die eigene Tabelle für ${(WD_FIRMEN[w] || [w])[0]}`)
+    const h = document.getElementById('wd-staffel-hinweis'); if(h) h.textContent = w === 'standard' ? 'nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)' : w === 'tradeifylive' ? (wdStaffelEigen(w) ? 'gilt nur für Tradeify Live (Echtgeld) — Stand = Balance selbst, Start 0 $ → Slave-Betrag' : 'Stand = Balance selbst (Start 0 $) — die erste Änderung macht daraus die eigene Tabelle für Tradeify Live') : (wdStaffelEigen(w) ? `gilt nur für ${(WD_FIRMEN[w] || [w])[0]} — Stand über der Kontogröße → Slave-Betrag` : `zeigt den Standard — die erste Änderung macht daraus die eigene Tabelle für ${(WD_FIRMEN[w] || [w])[0]}`)
     const rb = document.getElementById('wd-staffel-reset'); if(rb) rb.style.display = (w !== 'standard' && wdStaffelEigen(w)) ? '' : 'none'
   }
   function wdStaffelWahl(k){

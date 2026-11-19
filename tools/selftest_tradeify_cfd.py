@@ -119,7 +119,7 @@ def js_const(src, name, ende="\n    const "):
 def js_lauf(src):
     teile = ["var CUSTOM = []; function getCustomFirms(){ return CUSTOM }; function tpWdAktiv(){ return false }; var FIRM_PRESETS = {};"]
     teile.append(js_funktion(src, "istTradeifyCfd") or "function istTradeifyCfd(){ return false }")
-    for f in ("firmNormRichtung", "apPrKurz", "tplFirmaKurz", "tplFirmaMini", "tpVpApex100", "tpVorplanFirmaKey", "tpFirmIstFutures",
+    for f in ("firmNormRichtung", "apPrKurz", "tplFirmaKurz", "tplFirmaMini", "tpVpApex100", "kontoIstTradeifyLive", "tpVorplanFirmaKey", "tpFirmIstFutures",
               "tpFirmIstCfd", "tcGoodDayGrenze", "pbFirmKey", "mpNorm", "firmToPreset", "tpFundedHedgeVorgabe"):
         teile.append(js_funktion(src, f))
     teile.append(js_const(src, "admIstFundedNext"))
