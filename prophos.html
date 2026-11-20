@@ -4922,6 +4922,12 @@
   /* Nächste Payouts (08.10.2026, Finn: Schriften cleaner, Zahlen nicht in Mono): kompaktere Zeilen, Zahlen rechtsbündig + tabular */
   #adm-f-cal-panel .t td{padding-top:7px;padding-bottom:7px;vertical-align:middle}
   #adm-f-cal-panel .t td.adm-num{font-variant-numeric:tabular-nums}
+  /* KS2 (20.11.2026): Notiz-Feld je Kasse-Zeile — immer sichtbar, ruhig bis Hover/Fokus; „Heute getradet“ klein */
+  #adm-f-cal-panel .adm-kn-feld{width:100%;min-width:140px;max-width:240px;box-sizing:border-box;font:inherit;font-size:12px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--ink);outline:none}
+  #adm-f-cal-panel .adm-kn-feld::placeholder{color:var(--sub)}
+  #adm-f-cal-panel .adm-kn-feld:hover{border-color:var(--sub)}
+  #adm-f-cal-panel .adm-kn-feld:focus{border-color:var(--violet);background:var(--surface)}
+  #adm-f-cal-panel .c-heute{font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
   :is(#adm-pane-planer,#tpl-view) .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
   :is(#adm-pane-planer,#tpl-view) .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
   :is(#adm-pane-planer,#tpl-view) .ap-konto .mono{color:var(--sub)}
@@ -14425,6 +14431,8 @@
                     <th>Account</th>
                     <th>Firma</th>
                     <th>Stand</th>
+                    <th>Heute getradet</th>
+                    <th>Notiz</th>
                     <th class="adm-num">Balance</th>
                     <th class="adm-num">Anfragbar</th>
                   </tr></thead>
@@ -20369,46 +20377,52 @@
      * gespeichert am Konto in accounts.payout_notiz über PATCH /admin/kasse-notiz (Service-Key, Rechte wie PU3; sql/2026-11-19_kasse_payout_notiz.sql) —
      * NICHT review_notiz (Radar → Bestanden) und NICHT notes (Konto-Dialog). Gelesen aus /admin/overview payout_ready[].payout_notiz. Knopf steht immer (PU4-Lehre:
      * gemerkter Admin-Stand kennt das Feld evtl. nicht); fehlt die Spalte, sagt es das PATCH (409 → Toast). Das Feld überlebt einen Neuaufbau (_admKasseNotizEdit). */
+    /* KS2 (Finn 20.11.2026, Screenshot .2272, „schon 5–6 Mal gesagt“): die Notiz steht als eigene Spalte „Notiz“ mit einem immer sichtbaren, kleinen Feld je
+     * Zeile — vorher nur der blasse Link „+ Notiz“ unter dem Account-Namen. Geprüft 20.11.: Spalte accounts.payout_notiz da, PATCH /admin/kasse-notiz auf Railway
+     * live, aber keine einzige Notiz gespeichert → der Link wurde schlicht nicht gefunden. Datenweg unverändert (KN1).
+     * Fokus merkt Konto + Text in _admKasseNotizEdit, damit ein Neuaufbau der Tabelle das Tippen nicht abbricht (neues Feld übernimmt Text + Fokus).
+     * Speichern bei Enter oder beim Verlassen, nur bei geändertem Text; Esc setzt zurück; leeren = löschen. Tab von Feld zu Feld speichert das alte Feld
+     * trotzdem (admKasseNotizSpeichern hängt nicht mehr daran, dass der Merker noch auf dieses Konto zeigt). */
     let _admKasseNotizEdit = null   // { id: account_id, text }
     function admKasseNotizZelle(td, r){
       if(!td || !r || !r.account_id) return
       const id = String(r.account_id), txt = String(r.payout_notiz || '')
-      const box = document.createElement('div')
-      box.className = 'c-notiz'; box.style.cssText = 'margin-top:3px;max-width:280px'
-      if(_admKasseNotizEdit && _admKasseNotizEdit.id === id){
-        const i = document.createElement('input')
-        i.type = 'text'; i.className = 'wdl-bst-notiz-feld'; i.maxLength = ADM_PEND_NOTIZ_MAX; i.placeholder = 'Payout-Notiz'
-        i.value = _admKasseNotizEdit.text; i.setAttribute('aria-label', 'Payout-Notiz zum Konto')
-        i.addEventListener('input', () => { if(_admKasseNotizEdit && _admKasseNotizEdit.id === id) _admKasseNotizEdit.text = i.value })
-        i.addEventListener('keydown', e => {
-          if(e.key === 'Enter'){ e.preventDefault(); i.dataset.abbruch = '1'; admKasseNotizSpeichern(r, i.value) }   // direkt, nicht über blur() (wie PU3)
-          else if(e.key === 'Escape'){ e.preventDefault(); i.dataset.abbruch = '1'; _admKasseNotizEdit = null; try{ admFinRender() }catch(_){} }
-        })
-        i.addEventListener('blur', () => { if(i.dataset.abbruch !== '1') admKasseNotizSpeichern(r, i.value) })
-        i.addEventListener('click', e => e.stopPropagation())
-        box.appendChild(i)
-        setTimeout(() => { if(i.isConnected){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } }, 0)
-      }else{
-        const bt = document.createElement('button')
-        bt.type = 'button'; bt.className = 'wdl-bst-notiz' + (txt ? '' : ' ist-leer')
-        bt.textContent = txt ? '✎ ' + txt : '+ Notiz'; bt.title = txt ? 'Payout-Notiz bearbeiten (leeren = löschen)' : 'Eigene Payout-Notiz zu diesem Konto'
-        bt.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _admKasseNotizEdit = { id, text: txt }; try{ admFinRender() }catch(_){} })
-        box.appendChild(bt)
-      }
-      td.appendChild(box)
+      const aktiv = !!(_admKasseNotizEdit && _admKasseNotizEdit.id === id)
+      const i = document.createElement('input')
+      i.type = 'text'; i.className = 'adm-kn-feld'; i.maxLength = ADM_PEND_NOTIZ_MAX; i.placeholder = 'Notiz …'; i.dataset.kid = id
+      i.value = aktiv ? _admKasseNotizEdit.text : txt
+      i.title = txt || 'Payout-Notiz zu diesem Konto — Enter oder Feld verlassen speichert, leeren = löschen'
+      i.setAttribute('aria-label', 'Payout-Notiz zum Konto')
+      i.addEventListener('focus', () => { delete i.dataset.fertig; if(!_admKasseNotizEdit || _admKasseNotizEdit.id !== id) _admKasseNotizEdit = { id, text: i.value } })
+      i.addEventListener('input', () => { _admKasseNotizEdit = { id, text: i.value } })   // Tippen = dieses Feld ist in Arbeit (auch falls focus nicht kam)
+      i.addEventListener('keydown', e => {
+        if(e.key === 'Enter'){ e.preventDefault(); i.dataset.fertig = '1'; const w = i.value; i.blur(); admKasseNotizSpeichern(r, w) }   // blur zuerst: das Feld wird danach nachgezogen
+        else if(e.key === 'Escape'){ e.preventDefault(); i.dataset.fertig = '1'; if(_admKasseNotizEdit && _admKasseNotizEdit.id === id) _admKasseNotizEdit = null; i.value = String(r.payout_notiz || ''); i.blur() }   // r = aktueller Stand (Speichern zieht ihn ohne Neuaufbau nach)
+      })
+      i.addEventListener('blur', () => {
+        if(i.dataset.fertig === '1') return
+        // Neuaufbau nimmt das Feld aus dem DOM (kann blur auslösen) → nicht speichern, das neue Feld hat Text + Fokus übernommen.
+        // Fenster verliert nur den Fokus (activeElement bleibt das Feld) → weiter tippen, nicht speichern.
+        setTimeout(() => { if(i.isConnected && document.activeElement !== i) admKasseNotizSpeichern(r, i.value) }, 0)
+      })
+      i.addEventListener('click', e => e.stopPropagation())
+      td.appendChild(i)
+      if(aktiv) setTimeout(() => { if(i.isConnected && document.activeElement !== i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } }, 0)
     }
     function admKasseNotizSetzen(id, wert){
       for(const x of ((admData && admData.payout_ready) || [])) if(String(x.account_id) === id) x.payout_notiz = wert
     }
     async function admKasseNotizSpeichern(r, wert){
       const id = String((r && r.account_id) || '')
-      if(!id || !_admKasseNotizEdit || _admKasseNotizEdit.id !== id) return
-      _admKasseNotizEdit = null
+      if(!id) return
+      if(_admKasseNotizEdit && _admKasseNotizEdit.id === id) _admKasseNotizEdit = null   // KS2: nur den eigenen Merker löschen (Tab ins nächste Feld behält dessen Merker)
+      // KS2 (Gegencheck 20.11.2026): KEIN Neuaufbau der Tabelle beim Speichern — das Feld steht jetzt immer da; ein admFinRender zwischen mousedown und
+      // mouseup (blur → Speichern) schluckte den Klick auf Knöpfe daneben (Anfragbar, „heute anfragbar“, Raster) und warf den Tab-Fokus auf body.
+      // Die Notiz zeigt sonst nirgends in der Tabelle → nur Daten + die Felder dieses Kontos nachziehen.
       const neu = String(wert || '').replace(/\s+/g, ' ').trim().slice(0, ADM_PEND_NOTIZ_MAX).trim()   // wie payout_notiz_sauber im Backend
       const alt = String(r.payout_notiz || '')
-      if(neu === alt){ try{ admFinRender() }catch(_){} return }
-      r.payout_notiz = neu; admKasseNotizSetzen(id, neu)   // gleich anzeigen; bei Fehler zurück
-      try{ admFinRender() }catch(_){}
+      if(neu === alt){ admKasseNotizFelder(id, alt); return }
+      r.payout_notiz = neu; admKasseNotizSetzen(id, neu); admKasseNotizFelder(id, neu)   // gleich anzeigen; bei Fehler zurück
       try{
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
@@ -20419,13 +20433,20 @@
         const d = await res.json().catch(() => ({}))
         if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
         const gespeichert = String(d.payout_notiz || '')
-        r.payout_notiz = gespeichert; admKasseNotizSetzen(id, gespeichert)
+        r.payout_notiz = gespeichert; admKasseNotizSetzen(id, gespeichert); admKasseNotizFelder(id, gespeichert)
         if(typeof atToast === 'function') atToast(neu ? '✓ Notiz gespeichert' : '✓ Notiz gelöscht', 'start')
       }catch(e){
-        r.payout_notiz = alt; admKasseNotizSetzen(id, alt)
+        r.payout_notiz = alt; admKasseNotizSetzen(id, alt); admKasseNotizFelder(id, alt)
         if(typeof atToast === 'function') atToast(`Notiz nicht gespeichert: ${(e && e.message) || e}`, 'end')
       }
-      try{ admFinRender() }catch(_){}
+    }
+    // KS2: Notiz-Felder eines Kontos in der Kasse auf den Stand setzen — nie ein Feld, in dem gerade getippt wird (Fokus bzw. Merker auf diesem Konto)
+    function admKasseNotizFelder(id, wert){
+      if(_admKasseNotizEdit && _admKasseNotizEdit.id === id) return
+      for(const i of document.querySelectorAll('#adm-f-cal-rows .adm-kn-feld')){
+        if(i.dataset.kid !== id || document.activeElement === i) continue
+        i.value = wert; i.title = wert || 'Payout-Notiz zu diesem Konto — Enter oder Feld verlassen speichert, leeren = löschen'
+      }
     }
     async function admPayoutErhaltenBuchen(){
       const t = _admReceive; if(!t || !admData) return
@@ -21528,12 +21549,39 @@
         if(wd.length) gruppen.push(['wd', wd])
         if(cfd.length) gruppen.push(['cfd', cfd])
 
+        // KS2 „HEUTE GETRADET“ (Finn 20.11.2026): je Konto ✓ + Uhrzeit, wenn heute (CME-Handelstag, tvV2Handelstag = app.py _cme_handelstag wie wd_gezaehlte_tage)
+        // ein Plan des Kontos gestartet ist. Quelle: admData.trades_start (steht schon im /admin/overview: open/review/completed der letzten 36 h, at = started_at,
+        // bei Hand-Nachträgen created_at) — keine neue Abfrage. Fehlt das Feld (alter gemerkter Stand), steht „?“ statt eines falschen „–“.
+        const heuteTag = tvV2Handelstag()
+        const heuteStarts = new Map()
+        const startsDa = Array.isArray(admData && admData.trades_start)
+        for(const p of (startsDa ? admData.trades_start : [])){
+          const ms = p ? Date.parse(p.at) : NaN
+          if(!p || !p.account_id || !isFinite(ms) || tvV2Handelstag(ms) !== heuteTag) continue
+          const k = String(p.account_id), l = heuteStarts.get(k) || []
+          l.push(ms); heuteStarts.set(k, l)
+        }
+        const uhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+        const heuteZelle = (td, r) => {
+          if(!td) return
+          const l = (heuteStarts.get(String(r.account_id)) || []).slice().sort((a, b) => a - b)
+          const s = document.createElement('span')
+          if(!startsDa){ s.textContent = '?'; s.style.color = 'var(--sub)'; s.title = 'Starts von heute nicht geladen — Admin neu laden' }
+          else if(!l.length){ s.textContent = '–'; s.style.color = 'var(--sub)'; s.title = `Heute (Handelstag ${heuteTag}) kein Trade gestartet` }
+          else{
+            s.textContent = '✓ ' + uhr(l[l.length - 1]) + (l.length > 1 ? ` · ${l.length}×` : '')
+            s.style.cssText = 'color:var(--good);font-weight:600'
+            s.title = `Heute (Handelstag ${heuteTag}) gestartet: ${l.map(uhr).join(', ')}`
+          }
+          td.appendChild(s)
+        }
         const kopfZeile = (titel, sub, list, farbe, key) => {
           const tr = document.createElement('tr')
           tr.dataset.calTag = key
           const m = new Map(); list.forEach(r => addErh(m, r))   // Anfragbar je Gruppe (29.10.2026: die eine Zahl der Kachel)
           // Spalte „Größe" entfiel 28.10.2026 (Finn: „Topstep-Funded startet immer bei 0 — das Feld Größe ist unnötig … es geht um die Balance") → colspan 5
-          tr.innerHTML = '<td colspan="5" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
+          // KS2 (20.11.2026): + „Heute getradet“ + „Notiz“ → colspan 7
+          tr.innerHTML = '<td colspan="7" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
             + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--good)"></td>'
           tr.children[0].children[0].textContent = titel
           tr.children[0].children[0].style.color = farbe
@@ -21562,6 +21610,7 @@
             '<td><span class="c-acc" style="font-size:13px"></span><div class="c-ext" style="font-size:11.5px;color:var(--sub)"></div></td>' +
             '<td><span class="c-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
             '<td class="c-stand" style="white-space:nowrap"></td>' +
+            '<td class="c-heute"></td><td class="c-notiz-td"></td>' +   // KS2
             '<td class="adm-num c-bal" style="white-space:nowrap"></td>' +
             '<td class="adm-num c-anf" style="white-space:nowrap"></td>'
           tr.querySelector('.c-person').textContent = admShortName(r.person || '—')
@@ -21582,7 +21631,8 @@
             zl.textContent = [ri.fehlt, ri.plan].filter(Boolean).join(' · ')
             tr.querySelector('.c-acc').parentElement.appendChild(zl)
           }
-          admKasseNotizZelle(tr.querySelector('.c-acc').parentElement, r)   // KN1: Hand-Notiz klein unter dem Account (nach #ext / Recoverer-Zeile)
+          admKasseNotizZelle(tr.querySelector('.c-notiz-td'), r)   // KS2: Notiz als eigene Spalte mit festem Feld (KN1 stand klein unter dem Account)
+          heuteZelle(tr.querySelector('.c-heute'), r)   // KS2: heute getradet ja/nein
           tr.querySelector('.c-firm').textContent = r.account_firm || '–'
           // Stand: Winning Days = 🏆-Zähler, CFD = relativer Termin bzw. „wartet seit …" ohne Termin
           const st = tr.querySelector('.c-stand')
@@ -21675,23 +21725,25 @@
         const b = document.createElement('button')
         b.type = 'button'
         b.style.cssText = 'font:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-align:right;color:inherit'
-        b.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div><div style="font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums"></div>'
-        const v = b.children[0], sub = b.children[1]
+        // KS2 (Finn 20.11.2026, Screenshot .2272): nur noch der $-Betrag; die graue Herleitung („50 % von … · Deckel … · × 90 %“, „ab morgen 03:00 · …“)
+        // steht im Tooltip beim Drüberfahren — Platz für „Heute getradet“ + „Notiz“. Rechnung unverändert.
+        b.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div>'
+        const v = b.children[0]
         if(!a.regel){
           v.textContent = 'Regel fehlt'; v.style.cssText += ';color:var(--sub);font-weight:500'
-          sub.textContent = 'firm_rules.json'; b.title = a.grund
+          b.title = `${a.grund || 'keine Regel der Firma'} · firm_rules.json`
         }else if(a.anfragbar == null){
           const anteilTxt = a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % vom Gewinn`
           v.textContent = '—'; v.style.color = 'var(--sub)'
-          sub.textContent = `${a.grund} · ${anteilTxt} · × ${pctTxt} %`; b.title = a.regel.quelle
+          b.title = `${a.grund} · ${anteilTxt} · × ${pctTxt} %\n${a.regel.quelle}`
         }else{
           v.textContent = geld(a.erhalten); v.style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
-          const _ab = (r.wd_ready && !a.striking) ? wdAbAusIso(r.wd_ab) : 0   // SK1-K: Striking ohne WD-„ab“ · WE1 (19.11.2026): Ziel erst heute voll → Betrag steht, „ab 03:00 · “ davor
-          sub.textContent = (_ab ? wdAbTxt(_ab) + ' · ' : '') + (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
+          const _ab = (r.wd_ready && !a.striking) ? wdAbAusIso(r.wd_ab) : 0   // SK1-K: Striking ohne WD-„ab“ · WE1 (19.11.2026): Ziel erst heute voll → „ab 03:00 · “ davor (KS2: im Tooltip)
+          const herleitung = (_ab ? wdAbTxt(_ab) + ' · ' : '') + (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
             || (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
             + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : '')))
             + ` · × ${pctTxt} %` + (c.manuell ? ` · Payout fest ${geld(c.betrag)}` : '')
-          b.title = `${a.regel.quelle} — klicken: Profit-Share oder fester Payout-Betrag je Konto`
+          b.title = `${herleitung}\n${a.regel.quelle} — klicken: Profit-Share oder fester Payout-Betrag je Konto`
         }
         b.addEventListener('click', () => admCalPayoutEdit(td, r))
         td.appendChild(b)
@@ -60462,7 +60514,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2273'
+  const OS_TAB_BUILD = '2026-09-22.2274'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
