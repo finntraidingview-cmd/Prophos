@@ -46973,15 +46973,18 @@
    * je Konto) bleibt davon unberührt. Tabelle fehlt (SQL noch nicht eingespielt) oder Fehler → rows null: still nichts anzeigen, nichts schreiben. */
   let _apexSt = { uid: '', rows: null, at: 0, laedt: null, gen: 0 }   // gen: jedes Schalten macht laufende Ladungen ungültig (ältere Antwort überschriebe sonst den neuen Stand)
   const accApexStrikingKonto = a => !!a && /apex/i.test(String(a.firm || '')) && (a.type === 'funded' || a.type === 'winning_days')
-  function apexStrikingAn(){
-    return _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows) && _apexSt.rows.some(r => r && r.firma === 'apex' && r.addon === 'striking' && r.an === true)
+  // TS1-F (20.11.2026): derselbe Zustand trägt alle Firmen-Add-ons der ID (addon_firma: Striking Apex, RTP Topstep) — eine Abfrage, je Add-on ein Lesen
+  function firmaAddonAn(firma, addon){
+    return _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows) && _apexSt.rows.some(r => r && r.firma === firma && r.addon === addon && r.an === true)
   }
+  const firmaAddonSig = () => (Array.isArray(_apexSt.rows) ? 'g' : 'x') + _apexSt.rows?.filter(r => r && r.an === true).map(r => r.firma + ':' + r.addon).sort().join(',')
+  const apexStrikingAn = () => firmaAddonAn('apex', 'striking')
   // Liefert true, wenn sich Geladen-Sein oder an/aus geändert hat (Aufrufer zeichnen dann neu). Höchstens alle 60 s, außer erzwungen.
   async function apexStrikingLaden(zwingen){
     const uid = String(currentUserId || ''); if(!uid) return false
     if(!zwingen && _apexSt.uid === uid && Date.now() - _apexSt.at < 60000) return false
     if(_apexSt.laedt && _apexSt.laedtUid === uid) return _apexSt.laedt
-    const vorher = (Array.isArray(_apexSt.rows) ? 'g' : 'x') + apexStrikingAn()
+    const vorher = _apexSt.uid === uid ? firmaAddonSig() : 'neu'
     _apexSt.laedtUid = uid
     const gen = _apexSt.gen
     _apexSt.laedt = (async () => {
@@ -46989,25 +46992,58 @@
       try{ const { data, error } = await supabase.from('addon_firma').select('firma,addon,an').eq('user_id', uid); if(!error) rows = data || [] }catch(_){}
       if(String(currentUserId || '') !== uid || _apexSt.gen !== gen) return false   // ID gewechselt oder inzwischen geschaltet: Antwort verwerfen
       _apexSt.uid = uid; _apexSt.rows = rows; _apexSt.at = Date.now()
-      return ((Array.isArray(rows) ? 'g' : 'x') + apexStrikingAn()) !== vorher
+      return firmaAddonSig() !== vorher
     })()
     try{ return await _apexSt.laedt }finally{ _apexSt.laedt = null }
   }
-  async function apexStrikingSetzen(an){
+  async function firmaAddonSetzen(firma, addon, an){
     const uid = String(currentUserId || ''); if(!uid) throw new Error('nicht angemeldet')
     if(_apexSt.uid !== uid || !Array.isArray(_apexSt.rows)) throw new Error('Add-ons der Firma noch nicht geladen')
     _apexSt.gen++
     const { data, error } = await supabase.from('addon_firma')
-      .upsert({ user_id: uid, firma: 'apex', addon: 'striking', an: !!an, updated_at: new Date().toISOString() }, { onConflict: 'user_id,firma,addon' }).select('firma,addon,an')
+      .upsert({ user_id: uid, firma, addon, an: !!an, updated_at: new Date().toISOString() }, { onConflict: 'user_id,firma,addon' }).select('firma,addon,an')
     if(error) throw error
     if(!data || !data.length) throw new Error('nicht gespeichert (keine Rechte?)')
     if(String(currentUserId || '') !== uid || _apexSt.uid !== uid || !Array.isArray(_apexSt.rows)) return   // ID inzwischen gewechselt: gespeichert ist es, nicht in die Liste der neuen ID mischen
-    _apexSt.rows = _apexSt.rows.filter(r => !(r.firma === 'apex' && r.addon === 'striking')).concat(data)
+    _apexSt.rows = _apexSt.rows.filter(r => !(r.firma === firma && r.addon === addon)).concat(data)
     _apexSt.at = Date.now()
     renderAccounts()
   }
   // Muster-Portfolio (eigener Block weiter unten): geladen = Tabelle da → Schalter zeigen
-  window._apexStriking = { an: apexStrikingAn, geladen: () => _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows), laden: apexStrikingLaden, setzen: apexStrikingSetzen }
+  /* RTP TOPSTEP (TS1-F, Finn 20.11.2026 — Konstrukt .claude/master/berichte/2026-11-20_TS1_topstep_rtp_konstrukt.md): nur Topstep-Funded-Futures
+   * (account_type funded). Status-Zeile unter dem Namen aus dem jüngsten Plan des Kontos mit mt5_baseline.funded_plan.rtp (schreibt der Planer, S1):
+   * „RTP · Ziel 29.000 $ · +x $ · bester Tag y % (≤ 40 %) · n Tage" — jedes fehlende Feld fällt weg, ohne Plan nur „RTP". Rechnet nichts selbst. */
+  const accTopstepRtpKonto = a => !!a && /topstep/i.test(String(a.firm || '')) && a.type === 'funded'
+  function accRtpStand(a){
+    try{
+      const id = String(a.id); let best = null
+      for(const p of (typeof tradePlans !== 'undefined' ? tradePlans : []) || []){
+        if(!p || String(p.masterAccountId) !== id) continue
+        const r = p.mt5Baseline && p.mt5Baseline.funded_plan && p.mt5Baseline.funded_plan.rtp
+        if(!r || typeof r !== 'object') continue
+        const t = String(p.startUm || p.plannedFor || '')
+        if(!best || t > best.t) best = { t, r }
+      }
+      return best ? best.r : null
+    }catch(_){ return null }
+  }
+  function accRtpStatusHtml(a){
+    if(!accTopstepRtpKonto(a) || !firmaAddonAn('topstep', 'rtp')) return ''
+    const r = accRtpStand(a) || {}, zahl = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    const usd = v => Math.round(v).toLocaleString('de-DE') + ' $'
+    const z = zahl(r.z), netto = zahl(r.netto), tage = zahl(r.tage)
+    // bester_pct: Prozent (40) — kommt ein Bruchteil (0,4), wird er umgerechnet; ein bester Tag unter 1 % des Profits kommt praktisch nicht vor
+    let pct = zahl(r.bester_pct); if(pct != null && pct > 0 && pct <= 1) pct *= 100
+    const teile = ['RTP']
+    if(z != null) teile.push('Ziel ' + usd(z))
+    if(netto != null) teile.push((netto >= 0 ? '+' : '−') + usd(Math.abs(netto)))
+    if(pct != null) teile.push(`bester Tag ${(Math.round(pct * 10) / 10).toLocaleString('de-DE')} % (≤ 40 %)`)
+    if(tage != null) teile.push(`${Math.round(tage)} ${Math.round(tage) === 1 ? 'Tag' : 'Tage'}`)
+    return `<span class="acc-po acc-po-sub" title="Responsible Trader Programm (Topstep): Stand aus dem letzten Plan des Konto-Planers">${escapeHtml(teile.join(' · '))}</span>`
+  }
+  const firmaAddonGeladen = () => _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows)
+  window._apexStriking = { an: apexStrikingAn, geladen: firmaAddonGeladen, laden: apexStrikingLaden, setzen: an => firmaAddonSetzen('apex', 'striking', an) }
+  window._firmaAddon = { an: firmaAddonAn, geladen: firmaAddonGeladen, laden: apexStrikingLaden, setzen: firmaAddonSetzen }   // TS1-F: Tacho-Schalter je Firma
 
   const accEls = {
     table:    document.getElementById('accountsTable'),
@@ -48518,6 +48554,9 @@
         : `Striking (Apex) an für diese ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), kein WD-Farmer, kein Recoverer${zs}${pn}${zv}. Schalten am Apex-Tacho im Muster-Portfolio`
       chips.push(`<span class="acc-addon st an acc-addon-fest" title="${escapeHtml(t)}">Striking${fehlt ? ' · ' + fehlt + ' fehlt' : ''}</span>`)
     }
+    // TS1-F (Finn 20.11.2026): Responsible Trader Programm — gesetzt je ID am Topstep-Tacho (addon_firma 'topstep'/'rtp'), hier nur Anzeige
+    if(accTopstepRtpKonto(a) && firmaAddonAn('topstep', 'rtp'))
+      chips.push(`<span class="acc-addon an acc-addon-fest" title="${escapeHtml('Responsible Trader Programm an für diese ID — Ziel 28–30k $, Tag 1 = 40 %, je Trade ≤ 40 % vom Ziel, danach Winning Days. Schalten am Topstep-Tacho im Muster-Portfolio')}">RTP</span>`)
     return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
   }
   async function accAddonUmstellen(id, art, btn){
@@ -49551,6 +49590,9 @@
           ? payoutHtml.slice(0, -'</span>'.length) + escapeHtml(stGt) + '</span>'
           : payoutHtml + `<span class="acc-po acc-po-sub">${escapeHtml(stGt.replace(/^ · /, ''))}</span>`
         if(payoutHtml) metaParts.push(payoutHtml)
+        // TS1-F: RTP-Stand (Topstep-Funded mit Add-on RTP) als eigene Zeile — ohne Add-on/Tabelle leer
+        const rtpZeile = dkAus ? '' : (() => { try{ return accRtpStatusHtml(a) }catch(_){ return '' } })()
+        if(rtpZeile) metaParts.push(rtpZeile)
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
         if(istFut && !String(a.externalId || '').trim() && !(archive[a.id] && archive[a.id].archived)) metaParts.push(`<span class="chip" style="font-size:10.5px;padding:1px 7px;color:var(--sub);border:1px solid var(--line);background:none" title="Ohne External ID kann der Puls das Unterkonto nicht wählen — der Auto-Planer lässt das Konto aus. Bearbeiten → External ID eintragen.">ohne External ID</span>`)
@@ -95632,31 +95674,46 @@ ${stBlock}
       </svg>
       <div class="mp-firma"><i></i>${mpEsc(mpName(f.firma))}</div>
       <div class="mp-sub">${mpEsc(o.sub ? o.sub(f) : mpSub(f))}</div>
-      ${o.pref ? '' : mpStrikingHtml(f, darf)}
+      ${o.pref ? '' : mpAddonHtml(f, darf)}
     </div>`
   }
-  /* SK1 (Finn 20.11.2026): „+ Striking" am Apex-Tacho — Add-on je ID × Firma Apex (addon_firma), gilt für alle Apex-Fundeds/WD-Konten der ID
-   * (Chip in der Add-ons-Spalte). Nur unter Accounts (nicht im Total), nur wenn die Tabelle geladen ist (SQL fehlt → nichts zeigen). Ohne Schalt-Recht nur „an" als Anzeige. */
-  function mpStrikingHtml(f, darf){
-    const st = window._apexStriking
-    if(mpNorm(f.firma) !== 'apex trader' || !st || !st.geladen()) return ''
-    const an = st.an()
+  /* FIRMEN-ADD-ONS AM TACHO (SK1 Striking Apex, TS1-F RTP Topstep — Finn 20.11.2026): Add-on je ID × Firma (addon_firma), gilt für die Konten der
+   * Firma (Chip in der Add-ons-Spalte). Nur unter Accounts (nicht im Total), nur wenn die Tabelle geladen ist (SQL fehlt → nichts zeigen).
+   * Schlüssel = mpNorm(Firma des Tachos). Ohne Schalt-Recht nur „an" als Anzeige. */
+  const MP_ADMIN_TIP = ' — schalten nur Admin („Finn + Pascal")'
+  const MP_FIRMA_ADDONS = {
+    'apex trader': { firma: 'apex', addon: 'striking', name: 'Striking', fehler: 'Striking (Apex)',
+      tipLesen: 'Striking an für alle Apex-Funded/WD-Konten dieser ID' + MP_ADMIN_TIP,
+      tipAn: 'Striking an für alle Apex-Funded/WD-Konten dieser ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer. Klick: ausschalten',
+      tipAus: 'Striking für alle Apex-Funded/WD-Konten dieser ID anschalten — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer',
+      frageAn: 'Striking für Apex bei dieser ID anschalten?\nAlle Apex-Funded/WD-Konten der ID laufen dann über Striking statt WD-Farmer und Recoverer. Je Konto „Zyklus-Start-Balance" eintragen (Konto bearbeiten), sonst plant Striking es nicht.',
+      frageAus: 'Striking für Apex bei dieser ID ausschalten?\nDie Apex-Konten laufen dann wieder normal.' },
+    // TS1-F (Konstrukt .claude/master/berichte/2026-11-20_TS1_topstep_rtp_konstrukt.md): Responsible Trader Programm — nur Topstep-Funded-Futures der ID
+    'topstep': { firma: 'topstep', addon: 'rtp', name: 'RTP', fehler: 'RTP (Topstep)',
+      tipLesen: 'Responsible Trader Programm an für alle Topstep-Funded-Futures dieser ID' + MP_ADMIN_TIP,
+      tipAn: 'Responsible Trader Programm an für alle Topstep-Funded-Futures dieser ID — Ziel 28–30k $, Tag 1 = 40 %, je Trade ≤ 40 % vom Ziel, danach Winning Days. Klick: ausschalten',
+      tipAus: 'Responsible Trader Programm für alle Topstep-Funded-Futures dieser ID anschalten — Ziel 28–30k $, Tag 1 = 40 %, je Trade ≤ 40 % vom Ziel, danach Winning Days',
+      frageAn: 'Responsible Trader Programm (RTP) für Topstep bei dieser ID anschalten?\nAlle Topstep-Funded-Futures der ID laufen dann auf das RTP-Ziel (28–30k $, je Trade ≤ 40 %) und danach in die Winning Days.',
+      frageAus: 'Responsible Trader Programm (RTP) für Topstep bei dieser ID ausschalten?\nDie Topstep-Konten laufen dann wieder normal.' }
+  }
+  function mpAddonHtml(f, darf){
+    const k = mpNorm(f.firma), cfg = MP_FIRMA_ADDONS[k], fa = window._firmaAddon
+    if(!cfg || !fa || !fa.geladen()) return ''
+    const an = fa.an(cfg.firma, cfg.addon)
     // SK1-F3 (Master 20.11.2026): addon_firma schreiben nur Admin-Logins (RLS von S1). Planer-Schreibrecht (GET /admin/planer-rechte, window._planerDarf,
     // 5 min gemerkt) hat aber auch ein Verwalter (app.py planer_schreib_recht) → zusätzlich: nicht eingeschränkt (Verwalter/eigener Code: _admNurGruppe
     // bzw. die gemerkte Rolle der Sitzung). Alle anderen IDs: kein Schalter, nur „Striking" lesend, wenn an. Die RLS sperrt trotzdem selbst.
     const rolle = typeof window._planerRolle === 'function' ? window._planerRolle() : null
     const gruppe = (typeof window._admNurGruppe === 'function' && window._admNurGruppe()) || rolle === 'verwalter' || rolle === 'eigen'
     const admin = typeof window._planerDarf === 'function' && window._planerDarf() && !gruppe && !(_mp.d && _mp.d.darf_schalten === false)
-    if(!admin) return an ? `<span class="mp-st an mp-st-lesen" title="${mpEsc('Striking an für alle Apex-Funded/WD-Konten dieser ID — schalten nur Admin („Finn + Pascal")')}">Striking</span>` : ''
-    const t = an ? 'Striking an für alle Apex-Funded/WD-Konten dieser ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer. Klick: ausschalten'
-      : 'Striking für alle Apex-Funded/WD-Konten dieser ID anschalten — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer'
-    return `<button type="button" class="mp-st${an ? ' an' : ''}" data-mp-striking="${an ? 'aus' : 'an'}" title="${mpEsc(t)}"${darf ? '' : ' disabled'}>${an ? 'Striking' : '+ Striking'}</button>`   // darf = false nur während des Sendens
+    if(!admin) return an ? `<span class="mp-st an mp-st-lesen" title="${mpEsc(cfg.tipLesen)}">${mpEsc(cfg.name)}</span>` : ''
+    return `<button type="button" class="mp-st${an ? ' an' : ''}" data-mp-addon="${mpEsc(k)}" data-mp-schalten="${an ? 'aus' : 'an'}" title="${mpEsc(an ? cfg.tipAn : cfg.tipAus)}"${darf ? '' : ' disabled'}>${an ? '' : '+ '}${mpEsc(cfg.name)}</button>`   // darf = false nur während des Sendens
   }
-  async function mpStrikingSchalten(an){
-    const st = window._apexStriking; if(!st || _mp.sendet) return
+  async function mpAddonSchalten(k, an){
+    const cfg = MP_FIRMA_ADDONS[k], fa = window._firmaAddon; if(!cfg || !fa || _mp.sendet) return
     _mp.sendet = true; mpRender()
-    try{ await st.setzen(an); _mp.fehler = '' }
-    catch(e){ _mp.fehler = `Striking (Apex) nicht ${an ? 'angeschaltet' : 'ausgeschaltet'}: ${(e && e.message) || e}` }
+    try{ await fa.setzen(cfg.firma, cfg.addon, an); _mp.fehler = '' }
+    catch(e){ _mp.fehler = `${cfg.fehler} nicht ${an ? 'angeschaltet' : 'ausgeschaltet'}: ${(e && e.message) || e}` }
     _mp.sendet = false
     mpRender()
   }
@@ -95848,14 +95905,14 @@ ${stBlock}
   // Reiterwechsel: Hervorhebung des Tachos folgt dem Filter des jetzt offenen Reiters (Manuell-Select bzw. Echo-Filter)
   document.querySelectorAll('#dashboard-view section.view[data-view="accounts"] .subtab').forEach(b => b.addEventListener('click', () => setTimeout(mpRender, 0)))
   document.getElementById('mp-leiste')?.addEventListener('click', e => {
-    const sk = e.target.closest('[data-mp-striking]')   // SK1: „+ Striking" am Apex-Tacho — nicht den Tacho-Filter auslösen
+    const sk = e.target.closest('[data-mp-addon]')   // SK1/TS1-F: „+ Striking" / „+ RTP" am Tacho — nicht den Tacho-Filter auslösen
     if(sk){
       e.stopPropagation()
       if(sk.disabled || _mp.sendet || !_mp.d || _mp.d.darf_schalten === false || !(typeof window._planerDarf === 'function' && window._planerDarf())
         || (typeof window._admNurGruppe === 'function' && window._admNurGruppe())) return   // SK1-F3: nur Admin (der Schalter erscheint ohnehin nur dort)
-      const an = sk.dataset.mpStriking === 'an'
-      if(confirm(an ? 'Striking für Apex bei dieser ID anschalten?\nAlle Apex-Funded/WD-Konten der ID laufen dann über Striking statt WD-Farmer und Recoverer. Je Konto „Zyklus-Start-Balance" eintragen (Konto bearbeiten), sonst plant Striking es nicht.'
-        : 'Striking für Apex bei dieser ID ausschalten?\nDie Apex-Konten laufen dann wieder normal.')) mpStrikingSchalten(an)
+      const cfg = MP_FIRMA_ADDONS[sk.dataset.mpAddon]; if(!cfg) return
+      const an = sk.dataset.mpSchalten === 'an'
+      if(confirm(an ? cfg.frageAn : cfg.frageAus)) mpAddonSchalten(sk.dataset.mpAddon, an)
       return
     }
     const s = e.target.closest('[data-mp-sperren]')
