@@ -8831,7 +8831,7 @@
       color:var(--sub-2);
     }
     /* Haken-Zeilen als eigene Zeile mit Luft, nicht als Formular-Rest */
-    #dashboard-view [data-pane="manual"] label:has(#acc-show-archived){
+    #dashboard-view [data-pane="manual"] label:has(#acc-show-archived),#dashboard-view [data-pane="manual"] label:has(#acc-geblowt){
       gap:9px;font-size:13.5px;color:var(--ink-2);min-height:var(--m-row);
     }
 
@@ -9829,6 +9829,12 @@
             <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--sub);cursor:pointer">
               <input type="checkbox" id="acc-show-archived" style="margin:0">
               <span>Archivierte anzeigen</span>
+            </label>
+            <!-- GB1 (Finn 20.11.2026: „zuletzt geblowt anhaken … sortiert: zuletzt geblowt ganz oben … plus Datum"): nur geblowte (archivierte) Konten,
+                 nach Blow-Zeitpunkt absteigend (Archiv-Eintrag reason „blown“, Feld at), Chip „geblowt am …“. Nur Anzeige -->
+            <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Nur geblowte Konten zeigen (auch archivierte), zuletzt geblowt oben, mit Datum">
+              <input type="checkbox" id="acc-geblowt" style="margin:0">
+              <span>Zuletzt geblowt</span>
             </label>
           </div>
         </div>
@@ -14316,8 +14322,14 @@
                   <input type="checkbox" id="adm-k-archived" class="adm-k-f" style="margin:0">
                   <span>Archivierte anzeigen</span>
                 </label>
+                <!-- GB1 (Finn 20.11.2026): nur geblowte Konten aller IDs, zuletzt geblowt oben, Datum je Zeile + Zählung je Firma × ID (7 Tage). Nur Anzeige -->
+                <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Nur geblowte Konten aller IDs (auch archivierte), zuletzt geblowt oben, mit Datum — oben die Zahl je Firma und ID der letzten 7 Tage (Nachkauf-Bedarf)">
+                  <input type="checkbox" id="adm-k-geblowt" class="adm-k-f" style="margin:0">
+                  <span>Zuletzt geblowt</span>
+                </label>
               </div>
             </div>
+            <div id="adm-k-nachkauf" style="font-size:12px;color:var(--sub);margin:0 0 8px;display:none;flex-wrap:wrap;gap:6px;align-items:center"></div>
             <div class="panel" style="padding:0">
               <div class="table-wrap">
                 <table class="t">
@@ -19023,6 +19035,7 @@
       setz('adm-k-type', typ || ''); setz('adm-k-ziel', ''); setz('adm-k-search', '')
       if(extra){ if(extra.person) setz('adm-k-person', String(extra.person)); if(extra.firm) setz('adm-k-firm', String(extra.firm)); if(extra.suche) setz('adm-k-search', String(extra.suche)) }
       const arch = $('adm-k-archived'); if(arch) arch.checked = ($('adm-status')?.value || 'active') !== 'active'
+      const gb = $('adm-k-geblowt'); if(gb) gb.checked = false   // GB1: Sprung aus der Übersicht zeigt die normale Liste (sonst passt die Kachelzahl nicht)
       const tab = document.querySelector('.adm-tab[data-admtab="konten"]'); if(tab) tab.click(); else admKontenRender()
       $('adm-pane-konten')?.scrollIntoView({ behavior:'smooth', block:'start' })
     }
@@ -20871,12 +20884,13 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.pause = !!$('adm-k-pause')?.checked; poSortMerken('prophos_adm_pause_zuerst', admK.pause); admK.neu = !!$('adm-k-neu')?.checked; poSortMerken('prophos_adm_neu_zuerst', admK.neu); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.pause = !!$('adm-k-pause')?.checked; poSortMerken('prophos_adm_pause_zuerst', admK.pause); admK.neu = !!$('adm-k-neu')?.checked; poSortMerken('prophos_adm_neu_zuerst', admK.neu); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked; admK.geblowt = !!$('adm-k-geblowt')?.checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = [], jetztIso = new Date().toISOString()
       for(const r of (admData.accounts || [])){
-        if(!admK.arch && r.archived) continue
+        if(admK.geblowt){ if(!(r.archived && r.arch_grund === 'blown')) continue }   // GB1: nur geblowte (auch archivierte), unabhängig vom Archiv-Haken
+        else if(!admK.arch && r.archived) continue
         if(admK.person && String(r.user_id) !== admK.person) continue
         if(admK.firm && r.firm !== admK.firm) continue
         const a = admKontoAusZeile(r)
@@ -20913,6 +20927,23 @@
         const ms = a => { const li = admLetzterTradeInfo((zu.get(a) || {}).letzter_trade, jetztIso); return li ? li.sortMs : null }
         sortiert = sortiert.map((a, i) => ({ a, i, m: ms(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : (admK.ltSort === 'alt' ? x.m - y.m : y.m - x.m)) || x.i - y.i).map(z => z.a)
       }
+      // GB1 ZULETZT GEBLOWT (Finn 20.11.2026): Blow-Zeit = Archiv-Eintrag at mit reason „blown“ (user_settings.archive, /admin/overview arch_at) absteigend,
+      // gewinnt gegen alle anderen Sortierungen; ohne Zeit (älteres Backend) ans Ende. Oben die Zählung je Firma × ID der letzten 7 Tage (Nachkauf-Bedarf)
+      const gbMs = a => { const t = Date.parse((zu.get(a) || {}).arch_at || ''); return Number.isFinite(t) ? t : null }
+      if(admK.geblowt) sortiert = sortiert.map((a, i) => ({ a, i, m: gbMs(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : y.m - x.m) || x.i - y.i).map(z => z.a)
+      const nk = $('adm-k-nachkauf')
+      if(nk){
+        nk.style.display = admK.geblowt ? 'flex' : 'none'   // nicht über hidden: die globale [hidden]-Regel greift bei display im style nicht
+        if(admK.geblowt){
+          const grenze = Date.now() - 7 * 864e5, je = new Map()
+          for(const a of sortiert){ const m = gbMs(a); if(m == null || m < grenze) continue
+            const r = zu.get(a) || {}, k = (r.firm || '–') + '\u0000' + (r.person || '–'); je.set(k, (je.get(k) || 0) + 1) }
+          const teile = [...je.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0], 'de'))
+            .map(([k, n]) => { const [f, p] = k.split('\u0000'); return `<span class="chip chip-neutral" title="${escapeHtml(`${n} geblowt in den letzten 7 Tagen: ${f} bei ${p}`)}">${escapeHtml(f)} · ${escapeHtml(p)} <b>${n}</b></span>` })
+          const ohneZeit = sortiert.some(a => gbMs(a) == null)
+          nk.innerHTML = `<span>Nachkauf-Bedarf · geblowt in den letzten 7 Tagen:</span>${teile.join('') || '<span>keine</span>'}${ohneZeit ? '<span title="Das Backend liefert noch kein Blow-Datum (arch_at) — nach dem nächsten Backend-Update stehen hier alle">· Datum fehlt bei manchen Konten</span>' : ''}`
+        }
+      }
       admLtKopfZeichnen()
       const heuteN = sortiert.filter(a => heuteOffen(heuteR(a))).length
       if(Date.now() - (_tpl.ltAt || 0) > 50000) admKontenTradesLaden()   // Trade-Spalte (20.10.2026): Live-Trades nachziehen, zeichnet danach neu
@@ -20922,7 +20953,7 @@
       // „Trade planen" für andere IDs nie auf einem PC-Tab (S2/Master 29.10.2026): das fremde Konto stünde sonst, solange das Popup offen ist,
       // in `accounts` eines Puls-PCs, und dessen Hintergrund-Abläufe lesen diese Liste. Gleiche Erkennung wie MT5_LOCAL.
       const admPcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-      tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab, neu: !!admK.neu })).join('')
+      tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab, neu: !!admK.neu, geblowt: !!admK.geblowt })).join('')
       admKontenVerdrahten(tb)
     }
     // RECOVERER (02.11.2026): Stand der ganzen Admin-Sicht nachladen; geändert → Alle Accounts und Payouts neu zeichnen
@@ -20951,6 +20982,10 @@
         if(p) metaParts.push(ger && !r.po_offen ? `${p} <span class="acc-po acc-po-sub" title="${escapeHtml('gerechnet: ' + (ger.grund || '') + ' — frühester Termin, kein Muss; „Payout anfragbar ab“ am Konto ist leer')}">· gerechnet</span>` : p) }catch(_){}
       // AA1 (16.11.2026): bei „Neueste zuerst“ klein das Anlagedatum („neu 16.11.“), Tooltip mit Jahr und Uhrzeit
       if(o.neu){ try{ const d = new Date(r.created || ''); if(!isNaN(d)) metaParts.push(`<span class="acc-po acc-po-sub" title="${escapeHtml('angelegt ' + d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}">neu ${escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }))}</span>`) }catch(_){} }
+      // GB1 (20.11.2026): bei „Zuletzt geblowt“ das Blow-Datum (arch_at aus /admin/overview) unter dem Namen
+      if(o.geblowt && r.arch_grund === 'blown'){ const d = new Date(r.arch_at || '')
+        metaParts.push(isNaN(d) ? '<span class="acc-po acc-po-sub">💀 geblowt · Datum fehlt</span>'
+          : `<span class="acc-po" style="color:#b91c1c" title="${escapeHtml('geblowt (archiviert) ' + d.toLocaleString('de-DE', { timeZone: 'Asia/Dubai' }) + ' Dubai')}">💀 geblowt am ${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' })}</span>`) }
       const meta = metaParts.length
         ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
       const archBadge = r.archived
@@ -46784,6 +46819,14 @@
 
   /* ========== ARCHIV-FILTER ========== */
   let showArchivedAccounts = false
+  // GB1 (Finn 20.11.2026): Haken „Zuletzt geblowt“ — nur geblowte Konten, neuester Blow oben (Zeit = Archiv-Eintrag at, reason „blown“)
+  let zeigeGeblowt = false
+  document.getElementById('acc-geblowt')?.addEventListener('change', (e) => {
+    zeigeGeblowt = e.target.checked
+    if(typeof renderAccounts === 'function') renderAccounts()
+  })
+  // „geblowt am 20.11.2026“ — Datum in Dubai-Zeit wie der Rest der Oberfläche; ohne gültige Zeit leer
+  const accGeblowtDatum = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' }) }
   document.getElementById('acc-show-archived')?.addEventListener('change', (e) => {
     showArchivedAccounts = e.target.checked
     if(typeof renderAccounts === 'function') renderAccounts()
@@ -49384,15 +49427,20 @@
     // PAYOUT AB (16.10.2026): eigene Anfragen einmal je 5 min laden; Filter „Payout anfragbar" sortiert nach Tagen bis anfragbar
     try{ poEigenSicherstellen() }catch(_){}
     const poInfo = a => { try{ return payoutAbInfo(a, _poEigen.je.get(String(a.id))) }catch(_){ return null } }
+    const istGeblowt = a => !!(archive[a.id]?.archived && archive[a.id].reason === 'blown')
     let visible = accSortiert(accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
-      if(!showArchived && isArch) return false
+      if(zeigeGeblowt){ if(!istGeblowt(a)) return false }   // GB1: nur geblowte, auch wenn „Archivierte anzeigen“ aus ist
+      else if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     }))
     if(document.getElementById('acc-payout-sort')?.checked) visible = payoutZuerst(visible, poInfo)   // „Nächster Payout zuerst" (16.10.2026)
+    // GB1: zuletzt geblowt ganz oben, dann der davor (Archiv-Zeit at absteigend; ohne Zeit ans Ende, sonst bisherige Reihenfolge)
+    if(zeigeGeblowt){ const ms = a => { const t = Date.parse(archive[a.id]?.at || ''); return Number.isFinite(t) ? t : null }
+      visible = visible.map((a, i) => ({ a, i, m: ms(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : y.m - x.m) || x.i - y.i).map(z => z.a) }
     // HEUTE TRADEN (16.10.2026): Funded Futures ohne heutigen Trade — Zahl neben dem Haken, auf Wunsch nach oben
     try{
       heuteEigenSicherstellen()
@@ -49594,6 +49642,10 @@
         // TS1-F: RTP-Stand (Topstep-Funded mit Add-on RTP) als eigene Zeile — ohne Add-on/Tabelle leer
         const rtpZeile = dkAus ? '' : (() => { try{ return accRtpStatusHtml(a) }catch(_){ return '' } })()
         if(rtpZeile) metaParts.push(rtpZeile)
+        // GB1: bei „Zuletzt geblowt“ das Blow-Datum unter dem Namen (Archiv-Zeit, Tooltip mit Uhrzeit)
+        if(zeigeGeblowt && archive[a.id]?.reason === 'blown'){ const gd = accGeblowtDatum(archive[a.id].at)
+          metaParts.push(gd ? `<span class="acc-po" style="color:#b91c1c" title="${escapeHtml('geblowt (archiviert) ' + new Date(archive[a.id].at).toLocaleString('de-DE', { timeZone: 'Asia/Dubai' }) + ' Dubai')}">💀 geblowt am ${gd}</span>`
+            : '<span class="acc-po acc-po-sub">💀 geblowt · Datum fehlt</span>') }   // wie in Admin
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
         if(istFut && !String(a.externalId || '').trim() && !(archive[a.id] && archive[a.id].archived)) metaParts.push(`<span class="chip" style="font-size:10.5px;padding:1px 7px;color:var(--sub);border:1px solid var(--line);background:none" title="Ohne External ID kann der Puls das Unterkonto nicht wählen — der Auto-Planer lässt das Konto aus. Bearbeiten → External ID eintragen.">ohne External ID</span>`)
@@ -60410,7 +60462,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2272'
+  const OS_TAB_BUILD = '2026-09-22.2273'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

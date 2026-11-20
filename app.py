@@ -7516,9 +7516,12 @@ def _admin_basis():
                 # 'manual' / 'passed_pending' — mehrere Nutzer tragen identische Einträge,
                 # der erste Treffer gilt, ein Grund überschreibt nur ein leeres Feld.
                 if isinstance(info, dict):
-                    ai = arch_info.setdefault(str(acc_id), {"reason": "", "successor": ""})
+                    ai = arch_info.setdefault(str(acc_id), {"reason": "", "successor": "", "at": ""})
                     if not ai["reason"] and info.get("reason"):
                         ai["reason"] = str(info.get("reason") or "").strip().lower()
+                        ai["at"] = str(info.get("at") or "")   # GB1 (20.11.2026): Zeit desselben Eintrags wie der Grund (Blow-Zeitpunkt bei „blown")
+                    if not ai.get("at") and info.get("at"):
+                        ai["at"] = str(info.get("at") or "")
                     if not ai["successor"] and info.get("successorId"):
                         ai["successor"] = str(info["successorId"])
 
@@ -9011,6 +9014,9 @@ def admin_build_overview(kapitel_id=None):
                 "balance": round(_bal, 2) if _bal is not None else None,
                 "payout_at": str(a.get("payout_ready_at") or "")[:10] if payout_ab_erlaubt(a.get("account_type")) else "",   # PF2: Futures ohne Payout ab
                 "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
+                # GB1 (Finn 20.11.2026, Filter „Zuletzt geblowt“ in Admin → Alle Accounts): Zeitpunkt des Archiv-Eintrags (user_settings.archive …at),
+                # bei reason „blown“ = Blow-Zeitpunkt. Nur gelesen, kein Schreibweg
+                "arch_at": str((arch_info.get(aid) or {}).get("at") or ""),
                 "im_trade": offen.get(aid),
                 "letztes_ende": ende.get(aid),
                 "geplant": geplant.get(aid),   # 30.09.2026, s. o.
