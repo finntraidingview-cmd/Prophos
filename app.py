@@ -49759,6 +49759,153 @@ def sk_notiz(r, auto_k):
             f"Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r.get('verhaeltnis'), 2)} € je $ Abstand)" + (f" · {s['hinweis']}" if s.get("hinweis") else ""))
 
 
+# ══ RESPONSIBLE TRADER PROGRAMM (RTP) FÜR TOPSTEP (TS1, Finn 20.11.2026 ~05:15 Dubai: „einfach mal bauen“) ══
+# Spezifikation: .claude/master/berichte/2026-11-20_TS1_topstep_rtp_konstrukt.md, Regelbasis TS0 (help.topstep.com: im RTP nur XFA-Consistency, bester
+# Tag ≤ 40 %, DLL Pflicht 1.000/2.000/3.000 $). Gesetzt je ID × Topstep (addon_firma: user_id, 'topstep', 'rtp', an — Schreiben nur wd_admin). Gilt NUR
+# für Topstep Funded Futures (Express Funded, account_type funded) der ID; der Funded-Planer plant sie auf einem eigenen Weg (fdp_planen → rtp_konto_rechnen,
+# Rechnung in rtp_topstep.py): Ziel Z 28–30k $ je Konto fest gewürfelt, Tag 1 genau 40 % von Z, danach min(40 % von Z, Rest), nach Verlust neu verteilt;
+# SL 2.500–3.000 $ (≤ DLL − Puffer), NQ 2–3, Hedge = Gesamtkosten des Kontos ÷ (Balance − Liq) wie der Funded-Hedge; Route tsv2 (TopstepX über Puls/Nova,
+# fdp_route). Z erreicht → Winning Days (account_type winning_days + wd_farm) wie der normale Funded-Weg. EIGENES GATE wie Striking: rtp_regeln.aktiv
+# (Not-Aus, Standard aus) + addon_firma-Zeile + Balance (fail-closed); Topstep bleibt im Funded-Planer an=false, RTP läuft daran vorbei. Striking unberührt.
+try:
+    import rtp_topstep as rtp_mod   # eigenes Modul wie striking_apex (Selbsttest tools/selftest_rtp.py)
+except Exception as _rtp_e:
+    rtp_mod = None
+    print(f"[rtp] ⚠️ rtp_topstep nicht ladbar: {type(_rtp_e).__name__}: {_rtp_e}", flush=True)
+RTP_CACHE_S = 60
+RTP_KOSTEN_CACHE_S = 300
+RTP_FIRMA_KEY = "topstep"   # = namen[0] der Topstep-Regel (FDP_FIRMEN_STANDARD) — Schlüssel des Firmen-Abstands, auch wenn die Regel aus ist
+RTP_GRUND_AUS = "RTP aus (rtp_regeln.aktiv = false, globaler Not-Aus) — Konto plant nicht"
+_rtp_cache = {"at": 0.0, "uids": frozenset(), "regel": None, "aktiv": False}
+_rtp_kosten_cache = {"at": 0.0, "ids": (), "wert": None}
+
+
+def _rtp_lesen(frisch=False):
+    """→ (user_ids mit RTP für Topstep an, rtp_regeln.topstep | None, aktiv), 60 s gemerkt. Tabelle fehlt → (leer, None, False) = niemand RTP, wie bisher;
+    Lesefehler nach einem guten Stand → letzter Stand (wie _sk_lesen)."""
+    if not frisch and time.time() - _rtp_cache["at"] < RTP_CACHE_S:
+        return _rtp_cache["uids"], _rtp_cache["regel"], _rtp_cache["aktiv"]
+    uids, regel, aktiv = frozenset(), None, False
+    try:
+        uids = frozenset(str(z.get("user_id")) for z in (sb_select("addon_firma", {"select": "user_id", "firma": "eq.topstep", "addon": "eq.rtp",
+                                                                                   "an": "eq.true"}) or []) if z.get("user_id"))
+        if uids:
+            z1 = (sb_select("rtp_regeln", {"select": "topstep,aktiv", "id": "eq.1"}) or [{}])[0] or {}
+            regel, aktiv = z1.get("topstep"), z1.get("aktiv") is True
+    except Exception as e:
+        if time.time() - (_rtp_cache.get("fehler_at") or 0) > 3600:
+            _rtp_cache["fehler_at"] = time.time()
+            print(f"[rtp] addon_firma/rtp_regeln nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — letzter Stand gilt (SQL eingespielt?)", flush=True)
+        _rtp_cache["at"] = time.time()
+        return _rtp_cache["uids"], _rtp_cache["regel"], _rtp_cache["aktiv"]
+    _rtp_cache.update(at=time.time(), uids=uids, regel=regel if isinstance(regel, dict) else None, aktiv=aktiv)
+    return _rtp_cache["uids"], _rtp_cache["regel"], _rtp_cache["aktiv"]
+
+
+def rtp_ist_konto(konto, uids):
+    """REIN (testbar): Topstep Funded Futures (Express Funded, account_type funded) einer ID mit RTP-Add-on. Challenges/WD-Konten nie."""
+    k = konto or {}
+    return (str(k.get("user_id")) in (uids or ()) and "topstep" in str(k.get("firm") or "").lower()
+            and str(k.get("account_type") or "").lower() == "funded")
+
+
+def _rtp_gesamtkosten(ids):
+    """Gesamtkosten je Konto in € wie die Kachel „Gesamtkosten“ im Account-Detail / admin_build_overview (ohne Kapitel-Filter): Kauf + Hedge-Verluste −
+    Hedge-Gewinne − Payouts über die ganze Vorgänger-Kette (_admin_basis.preds_of, _admin_hedge_ev). → {konto_id: €} | None (Lesefehler → RTP plant nicht).
+    5 min gemerkt (der Planer-Takt fragt sonst alle 5 min alle Konten ab)."""
+    ids = tuple(sorted(str(x) for x in ids or ()))
+    c = _rtp_kosten_cache
+    if c["wert"] is not None and c["ids"] == ids and time.time() - c["at"] < RTP_KOSTEN_CACHE_S:
+        return c["wert"]
+    try:
+        b = _admin_basis()
+        by_id, preds_of, live_ids, fx = b["by_id"], b["preds_of"], b["live_ids"], b["fx"]
+        ketten = {}
+        for aid in ids:
+            kette, stapel, gesehen = [], [aid], {aid}
+            while stapel:
+                cur = stapel.pop()
+                acc = by_id.get(cur)
+                if acc is None or (acc.get("account_type") or "") == "live":
+                    continue
+                kette.append(cur)
+                for vor in preds_of.get(cur, []):
+                    if vor not in gesehen and len(gesehen) < 200:
+                        gesehen.add(vor)
+                        stapel.append(vor)
+            ketten[aid] = kette
+        alle = sorted({k for v in ketten.values() for k in v})
+        hedge, payouts = {}, {}
+        for i in range(0, len(alle), 80):
+            teil = ",".join(alle[i:i + 80])
+            for p in _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl,completed_at,hedge_eur", "status": "eq.completed",
+                                             "master_account_id": f"in.({teil})"}) or []:
+                ev = _admin_hedge_ev(p, by_id, live_ids, fx)
+                if ev is not None:
+                    hedge[ev[0]] = hedge.get(ev[0], 0.0) + ev[2]
+            for t in _sb_all("transactions", {"select": "account_id,amount", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []:
+                a = str(t.get("account_id") or "")
+                payouts[a] = payouts.get(a, 0.0) + (_wd_num(t.get("amount")) or 0.0)
+        wert = {aid: round(sum((_wd_num((by_id.get(k) or {}).get("purchase_cost")) or 0.0) + hedge.get(k, 0.0) - payouts.get(k, 0.0) for k in kette), 2)
+                for aid, kette in ketten.items()}
+        c.update(at=time.time(), ids=ids, wert=wert)
+        return wert
+    except Exception as e:
+        print(f"[rtp] ⚠️ Gesamtkosten nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — RTP plant nicht", flush=True)
+        return None
+
+
+def rtp_konto_rechnen(cfg, a, balance, basis, groesse, tage, liq, tag_verlust, kosten, rnd, sppl=None, payouts=None):
+    """RTP-Trade des Tages für ein Topstep-XFA → dict wie fdp_konto_rechnen (aktion planen | ziel | aus, tp, sl, kontrakte, Hedge-Felder, liq, dll, ziel,
+    tp_art) + rtp {…} für die Plan-Kennung. balance/liq ABSOLUT (Basis = Kontogröße, fdp_express_basis), Netto = Balance − Basis (XFA startet bei 0 $)."""
+    if rtp_mod is None:
+        return {"aktion": "aus", "grund": "RTP: Modul rtp_topstep fehlt"}
+    if not basis:
+        return {"aktion": "aus", "grund": "RTP: kein Topstep-Express-Konto (XFA, 0-basiert) — Kontogröße bzw. Express-Kennung fehlt"}
+    z = rtp_mod.rtp_ziel(cfg, a.get("id"))
+    netto = round(balance - basis, 2)
+    t = rtp_mod.rtp_tag_tp(cfg, z, netto, tage)
+    dll = rtp_mod.rtp_je_groesse(cfg.get("dll"), groesse)
+    basis_r = {"ziel": round(basis + z, 2), "start": basis, "liq": liq, "stufe": None, "dll": dll, "minis": None, "balance": balance,
+               # Feldvertrag S3 (TS1-F): mindestens z, netto, bester_pct (in %), tage (gezählte Handelstage) — tage = tage_n
+               "rtp": dict({k: t.get(k) for k in ("art", "z", "deckel", "rest", "tage_n", "bester", "anteil", "bester_pct")}, tage=t.get("tage_n"),
+                           express_basis=basis, netto=netto)}
+    # Prüfer TS1: Ziel VOR Payout/Liq/Kosten prüfen — sonst bliebe ein XFA mit erreichtem Z auf „aus“ und käme nie zu Winning Days
+    # (der normale Topstep-Weg ist an=false und fängt es nicht auf)
+    if t["aktion"] == "ziel":
+        return dict(basis_r, aktion="ziel")
+    if payouts:
+        # Konstrukt: ein Fenster bis Z, danach Winning Days — mit Payout stimmt „Netto = Balance“ nicht mehr (der Payout zieht ab)
+        return dict(basis_r, aktion="aus", grund="RTP: Konto hatte schon einen Payout — RTP plant nur bis Z vor dem ersten Payout (danach Winning Days)")
+    if liq is None:
+        return dict(basis_r, aktion="aus", grund="RTP: Liquidation (MLL) nicht belegt — ↻ Balance lesen")
+    if kosten is None:
+        return dict(basis_r, aktion="aus", grund="RTP: Gesamtkosten des Kontos nicht lesbar")
+    sl, g_sl = rtp_mod.rtp_sl(cfg, dll, balance - liq, tag_verlust, rnd)
+    if sl is None:
+        return dict(basis_r, aktion="aus", grund="RTP: " + g_sl)
+    if not kosten or kosten <= 0:
+        return dict(basis_r, aktion="aus", grund=f"RTP: Gesamtkosten {_liq_de(kosten or 0)} € — Konto im Plus, kein Hedge-Satz (Gesamtkosten ÷ Abstand)")
+    kt = rtp_mod.rtp_kontrakte(cfg, rnd)
+    h = fdp_hedge(kosten, balance, liq, t["tp"], sl, kt, ppl=FDP_NQ_PPL, sppl=sppl or FDP_SLAVE_PPL)
+    if not h:
+        return dict(basis_r, aktion="aus", grund="RTP: Hedge nicht rechenbar (Abstand zur Liquidation)")
+    return dict(basis_r, **h, aktion="planen", tp=t["tp"], sl=sl, kontrakte=kt, instr="nq", offen_eur=kosten, tp_art=f"rtp_{t['art']}",
+                tag_verlust=tag_verlust or 0.0)
+
+
+def rtp_notiz(r, auto_k):
+    """Plan-Notiz eines RTP-Trades (Anzeige), Werte auch 0-basiert wie in TopstepX (Nova)."""
+    s = r.get("rtp") or {}
+    b = float(s.get("express_basis") or 0)
+    art = {"tag1": "Tag 1 (40 % von Z)", "pump": "Pump-Trade (40 % von Z)", "rest": "letzter Trade (genau der Rest)"}.get(s.get("art"), "Trade")
+    return (f"RTP Topstep{'' if auto_k else ' · Vorschlag'} · {art} · Ziel +{_liq_de(s.get('z'))} $ (Rest {_liq_de(s.get('rest'))} $, Deckel "
+            f"{_liq_de(s.get('deckel'))} $, bester Tag {round(100 * (s.get('anteil') or 0))} % von Z) · SL {_liq_de(r['sl'])} $ (DLL {_liq_de(r.get('dll'))} $"
+            + (f", heute schon −{_liq_de(r['tag_verlust'])} $" if r.get("tag_verlust") else "") + f") · {r['kontrakte']} NQ · Hedge "
+            f"{_liq_de(r['offen_eur'])} € Gesamtkosten ({_ap_de(r.get('verhaeltnis'), 3)} € je $ Abstand) · Nova (TopstepX ab 0: Balance "
+            f"{_liq_de(r['balance'] - b)} $ · Ziel {_liq_de(r['ziel'] - b)} $ · Liq {_liq_de(r['liq'] - b)} $)")
+
+
 def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     """Ein Lauf des Funded-Planers. trocken=True: nur rechnen (Vorschau, Route GET /admin/funded-plan), sonst Pläne anlegen und Ziel-Konten
     auf Winning Days stellen. → {ok, geplant[], ziel[], ausgelassen[], fenster, …}. Seit 30.10.2026 (FUNDED-PLANER JE GRUPPE) für die user_ids
@@ -49811,7 +49958,12 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     if sk_uids:
         _aus = _fdp_ids_aus()
         sk_uids = frozenset(u for u in sk_uids if u not in _aus and (nur_ids is None or u in nur_ids))
-    if (not uids or not (an or any(fd_unt_an(reg, "futures", u, None, True) for u in uids))) and not sk_uids:   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
+    # TS1 RTP (20.11.2026): dasselbe eigene Gate für Topstep (addon_firma topstep/rtp), unabhängig von Planer-Liste und Topstep an=false
+    rtp_uids, rtp_regel, rtp_aktiv = _rtp_lesen()
+    if rtp_uids:
+        _aus_r = _fdp_ids_aus()
+        rtp_uids = frozenset(u for u in rtp_uids if u not in _aus_r and (nur_ids is None or u in nur_ids))
+    if (not uids or not (an or any(fd_unt_an(reg, "futures", u, None, True) for u in uids))) and not sk_uids and not rtp_uids:   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
         erg["msg"] = "keine ID bzw. keine Firma an"
         return erg
     if datetime.strptime(cme_heute, "%Y-%m-%d").weekday() >= 5:
@@ -49829,14 +49981,25 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                        if str(a.get("id")) not in _da]
         except Exception as e:
             print(f"[striking] ⚠️ Striking-Konten nicht lesbar ({type(e).__name__}: {e}) — nur die schon gelesenen in diesem Lauf", flush=True)
+    if rtp_uids:
+        # TS1: Topstep Funded Futures der RTP-IDs dazu — auch, wenn die ID nicht in der Funded-Planer-Liste steht
+        try:
+            _da = {str(a.get("id")) for a in konten or []}
+            konten = (konten or []) + [a for a in (_sb_all("accounts", {"select": _k_sel, "user_id": "in.(" + ",".join(sorted(rtp_uids)) + ")",
+                                                                        "account_type": "eq.funded", "firm": "ilike.*topstep*"}) or [])
+                                       if str(a.get("id")) not in _da]
+        except Exception as e:
+            print(f"[rtp] ⚠️ RTP-Konten nicht lesbar ({type(e).__name__}: {e}) — nur die schon gelesenen in diesem Lauf", flush=True)
     sk_ids = {str(a["id"]) for a in konten or [] if sk_ist_konto(a, sk_uids)}
     sk_cfg = sk_apex.sk_cfg(sk_regel) if (sk_ids and sk_apex is not None) else None
     sk_zfeld = (_sk_zyklus_felder(sorted(sk_ids)) if sk_ids else {}) or {}
-    uids_abstand = list(dict.fromkeys(list(uids) + sorted(sk_uids)))   # SK1: Firmen-Abstand/Big Trades auch über die Pläne der Striking-IDs
+    rtp_ids = {str(a["id"]) for a in konten or [] if rtp_ist_konto(a, rtp_uids)} - sk_ids
+    rtp_cfg = rtp_mod.rtp_cfg(rtp_regel) if (rtp_ids and rtp_mod is not None) else None
+    uids_abstand = list(dict.fromkeys(list(uids) + sorted(sk_uids) + sorted(rtp_uids)))   # SK1/TS1: Firmen-Abstand/Big Trades auch über die Pläne der Add-on-IDs
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
     an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
     _alle_k = ap_deaktiviert_anwenden(konten) or []
-    konten = [a for a in _alle_k if str(a.get("id")) in sk_ids   # SK1: Striking-Konten am Firmen-/Größen-Schalter vorbei (eigenes Gate)
+    konten = [a for a in _alle_k if str(a.get("id")) in sk_ids or str(a.get("id")) in rtp_ids   # SK1/TS1: Add-on-Konten am Firmen-/Größen-Schalter vorbei
               or (ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
                   and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a))]   # LF1: Größe mit an: false wie Firma aus
     archiv = _ap_archiviert()
@@ -49847,7 +50010,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                    "balance": (lambda v, bs: None if v is None else round(v + bs, 2))(_wd_num(a.get("tv_balance")), fdp_express_basis(a, _wd_konto_groesse(a))),   # Express absolut wie der Hauptweg (Prüfer)
                                    "grund": FDP_GRUND_FIRMA_AUS if not ap_regel_finden(an_von(a.get("user_id")), a.get("firm")) else FDP_GRUND_GROESSE_AUS}
                                   for a in _alle_k if str(a.get("id")) not in archiv and _ap_norm(a.get("firm")) not in AP_STILL_FIRMEN
-                                  and str(a.get("id")) not in sk_ids   # SK1: Striking-Konten stehen mit eigenem Grund in ausgelassen[]
+                                  and str(a.get("id")) not in sk_ids and str(a.get("id")) not in rtp_ids   # SK1/TS1: eigener Grund in ausgelassen[]
                                   and not (ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
                                            and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a))]   # LF1
     except Exception as _e:
@@ -49921,6 +50084,21 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         return sk_konto_rechnen(sk_cfg, a, balance, g, zf, tage, lr, peak, rnd, sppl=sppl, rc_regel=sk_rc, payouts=payouts.get(aid)), \
             {"nr": zf["nr"] if zf else None, "ab": zf["seit"] if zf else None, "start": zf["start"] if zf else None}
 
+    # TS1: Gesamtkosten der RTP-Konten (Hedge-Basis) einmal je Lauf — nur, wenn RTP überhaupt plant (Not-Aus an); None = Lesefehler → RTP plant nicht
+    rtp_kosten = _rtp_gesamtkosten(sorted(rtp_ids)) if (rtp_ids and rtp_aktiv and rtp_cfg is not None) else {}
+
+    def rtp_rechnen(a, pl, balance, g, basis):
+        """TS1: RTP-Trade des Tages (rtp_konto_rechnen) — Liq wie der Pump-Weg für Topstep Express (fdp_express_liq: MLL aus TopstepX-Lesungen bzw.
+        frisches XFA −Max DD), Daily-Loss-Rest heute (fdp_tag_verlust), Tage aus allen beendeten Trades (ein Fenster bis zum ersten Payout)."""
+        aid = str(a["id"])
+        dd = rtp_mod.rtp_je_groesse(rtp_cfg.get("mll"), g)
+        liq, _lq = fdp_express_liq(a, verlauf, balance - basis, basis, dd, frisch_ok=not pl) if basis else (None, "")
+        _tv, _tvq = fdp_tag_verlust(balance, cme_heute, _cme_handelstag(jetzt.isoformat()), verlauf, aid, basis)
+        sppl = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None
+        kosten = rtp_kosten.get(aid) if isinstance(rtp_kosten, dict) else None
+        return rtp_konto_rechnen(rtp_cfg, a, balance, basis, g, fdp_tage(pl), liq, _tv, kosten, rnd, sppl=sppl, payouts=payouts.get(aid)), \
+            {"nr": 1, "ab": None, "start": basis}
+
     def konto_rechnen(a, pl, balance, g, regel, jg, kt_fest=None):
         zy = fdp_zyklus(g, payouts.get(str(a["id"])), pl)
         start, ab = (zy["start"] if zy["start"] is not None else balance), zy["ab"]
@@ -49985,15 +50163,22 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 erg["ausgelassen"].append(dict(zeile, grund=SK_GRUND_AUS)); continue
             if sk_cfg is None:
                 erg["ausgelassen"].append(dict(zeile, grund="Striking: Modul striking_apex fehlt")); continue
-        if not jg and not ist_sk:
+        ist_rtp = aid in rtp_ids   # TS1: RTP-Konto (Topstep XFA) — eigener Rechenweg wie Striking
+        if ist_rtp:
+            zeile["rtp_konto"] = True   # eigener Schlüssel (r["rtp"] ist das Dict aus rtp_konto_rechnen, s. SK1-Prüferbefund)
+            if not rtp_aktiv:
+                erg["ausgelassen"].append(dict(zeile, grund=RTP_GRUND_AUS)); continue
+            if rtp_cfg is None:
+                erg["ausgelassen"].append(dict(zeile, grund="RTP: Modul rtp_topstep fehlt")); continue
+        if not jg and not ist_sk and not ist_rtp:
             erg["ausgelassen"].append(dict(zeile, grund=f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-Planer")); continue
         try:   # Kontoliste im Reiter (E2d, 05.11.2026): Ziel-Fortschritt auch für Konten, die heute nicht gerechnet werden — ohne Würfel, ändert keinen Plan
-            if not ist_sk:
+            if not ist_sk and not ist_rtp:
                 zeile["anzeige"] = fdp_konto_anzeige(g, jg, zeile["balance"], fdp_zyklus(g, payouts.get(aid), pl), fdp_tage, pl, aid)
         except Exception as e:
             print(f"[funded-plan] ⚠️ Anzeige {a.get('name')}: {type(e).__name__}: {e}", flush=True)
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
-        if lauf and ist_sk:   # SK1: Striking-Vorschläge nie über den normalen Weg nachrechnen (andere Rechnung)
+        if lauf and (ist_sk or ist_rtp):   # SK1/TS1: Add-on-Vorschläge nie über den normalen Weg nachrechnen (andere Rechnung)
             erg["ausgelassen"].append(dict(zeile, grund={"planned": "schon geplant", "open": "läuft gerade", "review": "wartet auf Nachlesung"}
                                            .get(lauf[0].get("status"), "Plan offen"), plan_id=lauf[0].get("id"))); continue
         if lauf:
@@ -50041,12 +50226,14 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
         try:
-            r, zy = sk_rechnen(a, pl, zeile["balance"], g) if ist_sk else konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
+            r, zy = (sk_rechnen(a, pl, zeile["balance"], g) if ist_sk else rtp_rechnen(a, pl, zeile["balance"], g, _basis) if ist_rtp
+                     else konto_rechnen(a, pl, zeile["balance"], g, regel, jg))
         except Exception as e:
             # S9-Stopp zu b8e6dc2b (03.11.2026): ein Konto mit kaputter Regel (z. B. neue Felder vor dem Code) bricht nie mehr den ganzen Lauf ab
             print(f"[funded-plan] ⚠️ Konto {a.get('name')} nicht rechenbar: {type(e).__name__}: {e}", flush=True)
             erg["ausgelassen"].append(dict(zeile, grund=f"nicht rechenbar ({type(e).__name__}) — Regel prüfen")); continue
-        r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=((regel or {}).get("namen") or [SK_FIRMA_KEY if ist_sk else ""])[0])   # SK1: Apex-Regel kann aus sein
+        # SK1/TS1: Apex- bzw. Topstep-Regel kann aus sein — Firmen-Schlüssel dann aus der Konstante
+        r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=((regel or {}).get("namen") or [SK_FIRMA_KEY if ist_sk else RTP_FIRMA_KEY if ist_rtp else ""])[0])
         if ist_sk and r["aktion"] == "ziel":
             # SK1: Ziel erreicht → nichts mehr planen, Konto wartet auf Payout (macht Finn) — NIE auf Winning Days umstellen wie der normale Weg
             erg["ausgelassen"].append(dict(r, aktion="aus"))
@@ -50092,6 +50279,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         elif sk_ids and "apex" in str(b.get("master_firm") or "").lower():
             # SK1 (Prüfer 2): Apex-Regel aus (Apex-Pause) — bestehende Apex-Pläne belegen trotzdem den Firmen-Abstand der Striking-Starts
             belegt_firma.setdefault(gk(b.get("user_id"), SK_FIRMA_KEY), []).append(m)
+        elif rtp_ids and "topstep" in str(b.get("master_firm") or "").lower():
+            # TS1: Topstep-Regel aus (an=false) — bestehende Topstep-Pläne (WD, Hand) belegen trotzdem den Firmen-Abstand der RTP-Starts
+            belegt_firma.setdefault(gk(b.get("user_id"), RTP_FIRMA_KEY), []).append(m)
         if (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
                 and (b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0)):
             belegt_id.setdefault(str(b.get("user_id")), []).append(m)
@@ -50164,6 +50354,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 mb_pump["kette"] = dict(r["kette"], lesen_bis=(mitternacht + timedelta(minutes=lb)).astimezone(timezone.utc).isoformat() if lb is not None else None)
         if r.get("striking"):
             notiz = sk_notiz(r, auto_k)   # SK1: eigene Notiz (kleiner / Pump / letzter Trade, Rest, Deckel, Tage)
+        if r.get("rtp"):
+            notiz = rtp_notiz(r, auto_k)  # TS1: eigene Notiz (Tag 1 / Pump / Rest, Ziel, DLL, Nova 0-basiert)
         if r.get("startwert"):
             notiz += f" · {AP_STARTWERT_TEXT}"   # SB1: Plan aus dem Startwert, nicht aus einer Lesung
         zeilen.append({
@@ -50180,6 +50372,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                  **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis", "ziel_puffer") if r.get(k) is not None},   # AH2 / FH1 B / FP-PUF
                                                  **({"pump": mb_pump["pump"]} if mb_pump.get("pump") else {}),   # FF2
                                                  **({"striking": dict(r["striking"], instr=r.get("instr"))} if r.get("striking") else {}),   # SK1: Kennung + Stand
+                                                 **({"rtp": dict(r["rtp"], tag_verlust=r.get("tag_verlust") or 0.0)} if r.get("rtp") else {}),   # TS1: Kennung + Stand
                                                  start_um=start.astimezone(timezone.utc).isoformat()),
                              **({"kette": mb_pump["kette"]} if mb_pump.get("kette") else {})}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start.astimezone(timezone.utc).isoformat(), richtung=richtung,
