@@ -60401,7 +60401,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2268'
+  const OS_TAB_BUILD = '2026-09-22.2269'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77489,8 +77489,10 @@
    *    (2) Pläne anlegen (Rückfall) / nachziehen (Zeit, Richtung, Slave nach Live-Balance) / löschen,
    *    (3) Zustand der Pläne in die Zeile spiegeln. ── */
   // AP3 (20.11.2026): Selbstheilung nur im Farm — Tageszeile nicht farm:false UND frische accounts-Zeile mit wd_farm === true; Fehler/leer/null = nein (fail-closed)
-  const wdHeilImFarm = (k, fa, fe) => !!k && k.farm !== false && !fe && !!(Array.isArray(fa) && fa[0] && fa[0].wd_farm === true)
+  const wdFarmFrisch = (fa, fe) => !fe && !!(Array.isArray(fa) && fa[0] && fa[0].wd_farm === true)   // AP3b: frische accounts-Zeile, nur true zählt
+  const wdHeilImFarm = (k, fa, fe) => !!k && k.farm !== false && wdFarmFrisch(fa, fe)
   window._wdHeilImFarm = wdHeilImFarm   // Test-Haken
+  window._wdFarmFrisch = wdFarmFrisch   // Test-Haken (AP3b)
   const _wdHeilAusGemeldet = new Set()   // AP3: „Heilung übersprungen“ je Plan nur einmal je Tab-Leben (wdAbgleich läuft alle 30–90 s)
   async function wdAbgleich(row){
     const r = _wd.regeln || {}, vp = wdVorplanRegeln()
@@ -77596,6 +77598,17 @@
           if(wdZyklusUngeklaert(k)){ wdRecovererAlarm(k.id, 'stand', 120000); continue }   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026); 2 min Geduld am PC-Tab
           // .1487: genau der gewürfelte TP + die gewürfelten Kontrakte aus der Zeile — das, was „Plan heute Nacht“ schon zeigt
           const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt), instr: k.wuerfel.instr || null } : undefined
+          /* AP3b (Master 20.11.2026, Restrisiko aus dem AP3-Gegencheck): auch dieser Rückfall legt nur an, wenn accounts.wd_farm FRISCH gelesen true ist — unabhängig
+           * von k.farm und dem Lade-Cache (kein Realtime auf accounts; frisch gelesen wird oben nur bei abweichendem Haken). Eine Pause per SQL (wd_farm=false, plan_id
+           * leer, Tageszeile farm:true/aktiv) legte sonst einen neuen Plan an. DB sagt false → Konto raus wie beim Haken (WD_HINWEIS_FARM); Lesefehler/keine Zeile =
+           * unbekannt → nichts anlegen, nächster Takt (fail-closed). */
+          let fa = null, fe = null
+          try{ const rf = await supabase.from('accounts').select('id,wd_farm').eq('id', String(k.id)).limit(1); fa = rf.data; fe = rf.error }catch(e){ fe = e }
+          if(!wdFarmFrisch(fa, fe)){
+            if(!fe && Array.isArray(fa) && fa[0] && fa[0].wd_farm === false){ acc.wdFarm = false; set(k, 'farm', false); set(k, 'aktiv', false); set(k, 'hinweis', WD_HINWEIS_FARM) }
+            if(!_wdHeilAusGemeldet.has('rf:' + k.id) && _wdHeilAusGemeldet.add('rf:' + k.id)) console.warn('[wd] Rückfall übersprungen: nicht im Farm', k.id, fe ? '(accounts nicht lesbar)' : '(accounts.wd_farm nicht true)')
+            continue
+          }
           const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, startIso, row.tag, wf)
           if(p.warten) continue   // Claim verloren: der andere Tab legt an (25.09.2026)
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
