@@ -49884,14 +49884,15 @@ def rtp_konto_rechnen(cfg, a, balance, basis, groesse, tage, liq, tag_verlust, k
     sl, g_sl = rtp_mod.rtp_sl(cfg, dll, balance - liq, tag_verlust, rnd)
     if sl is None:
         return dict(basis_r, aktion="aus", grund="RTP: " + g_sl)
-    if not kosten or kosten <= 0:
-        return dict(basis_r, aktion="aus", grund=f"RTP: Gesamtkosten {_liq_de(kosten or 0)} € — Konto im Plus, kein Hedge-Satz (Gesamtkosten ÷ Abstand)")
+    # Master 20.11.: Gesamtkosten ≤ 0 (Kette im Plus) → fester Funded-Satz Topstep (900 € auf 4.500 $ MDD) statt kein Plan — Funded nie ohne Hedge
+    offen, h_quelle = rtp_mod.rtp_hedge_basis(cfg, kosten, balance - liq)
     kt = rtp_mod.rtp_kontrakte(cfg, rnd)
-    h = fdp_hedge(kosten, balance, liq, t["tp"], sl, kt, ppl=FDP_NQ_PPL, sppl=sppl or FDP_SLAVE_PPL)
+    h = fdp_hedge(offen, balance, liq, t["tp"], sl, kt, ppl=FDP_NQ_PPL, sppl=sppl or FDP_SLAVE_PPL) if offen else None
     if not h:
         return dict(basis_r, aktion="aus", grund="RTP: Hedge nicht rechenbar (Abstand zur Liquidation)")
-    return dict(basis_r, **h, aktion="planen", tp=t["tp"], sl=sl, kontrakte=kt, instr="nq", offen_eur=kosten, tp_art=f"rtp_{t['art']}",
-                tag_verlust=tag_verlust or 0.0)
+    basis_r["rtp"]["hedge_quelle"] = h_quelle
+    return dict(basis_r, **h, aktion="planen", tp=t["tp"], sl=sl, kontrakte=kt, instr="nq", offen_eur=offen, tp_art=f"rtp_{t['art']}",
+                tag_verlust=tag_verlust or 0.0, gesamtkosten_eur=kosten)
 
 
 def rtp_notiz(r, auto_k):
@@ -49902,7 +49903,8 @@ def rtp_notiz(r, auto_k):
     return (f"RTP Topstep{'' if auto_k else ' · Vorschlag'} · {art} · Ziel +{_liq_de(s.get('z'))} $ (Rest {_liq_de(s.get('rest'))} $, Deckel "
             f"{_liq_de(s.get('deckel'))} $, bester Tag {round(100 * (s.get('anteil') or 0))} % von Z) · SL {_liq_de(r['sl'])} $ (DLL {_liq_de(r.get('dll'))} $"
             + (f", heute schon −{_liq_de(r['tag_verlust'])} $" if r.get("tag_verlust") else "") + f") · {r['kontrakte']} NQ · Hedge "
-            f"{_liq_de(r['offen_eur'])} € Gesamtkosten ({_ap_de(r.get('verhaeltnis'), 3)} € je $ Abstand) · Nova (TopstepX ab 0: Balance "
+            f"{_liq_de(r['offen_eur'])} € " + (s.get("hedge_quelle") if s.get("hedge_quelle") not in (None, "", "gesamtkosten") else "Gesamtkosten")
+            + f" ({_ap_de(r.get('verhaeltnis'), 3)} € je $ Abstand) · Nova (TopstepX ab 0: Balance "
             f"{_liq_de(r['balance'] - b)} $ · Ziel {_liq_de(r['ziel'] - b)} $ · Liq {_liq_de(r['liq'] - b)} $)")
 
 

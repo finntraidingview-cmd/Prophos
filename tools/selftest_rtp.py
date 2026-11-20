@@ -95,6 +95,15 @@ p = rtp.rtp_tag_tp(CFG, 29000, 28600.0, {"a": 11600, "b": 11600, "c": 5400})
 pruef(p["art"] == "rest" and p["tp"] == 400, f"Rest 400 → TP 400: {p}")
 p = rtp.rtp_tag_tp(CFG, 29000, 11600.0, {"a": 11600})
 pruef(p["bester_pct"] == 100.0 and p["tage_n"] == 1, f"bester_pct in % vom Netto: {p}")
+# Hedge-Basis (Master 20.11.): Gesamtkosten > 0 → Gesamtkosten; ≤ 0 (Kette im Plus) → fester Satz 900 € auf 4.500 $ = 0,2 € je $ Abstand
+off, q = rtp.rtp_hedge_basis(CFG, 600, 4400)
+pruef(off == 600 and q == "gesamtkosten", f"Hedge-Basis Gesamtkosten: {off} {q}")
+for k in (0, -350.5, None):
+    off, q = rtp.rtp_hedge_basis(CFG, k, 4500)
+    pruef(off == 900 and "fester Satz" in q, f"Hedge-Basis fest bei Kosten {k}: {off} {q}")
+off, _q = rtp.rtp_hedge_basis(CFG, -100, 11900)
+pruef(off == 2380, f"fester Satz × Abstand 11.900 $ = 2.380 €: {off}")
+pruef(rtp.rtp_hedge_basis(CFG, -100, 0)[0] is None, "kein Abstand → kein Hedge")
 pruef(rtp.rtp_cfg({"ziel": [30000, 32000], "unbekannt": 1})["ziel"] == [30000, 32000] and "unbekannt" not in rtp.rtp_cfg({"unbekannt": 1}),
       "Einstellung überschreibt nur bekannte Schlüssel")
 

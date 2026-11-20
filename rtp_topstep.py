@@ -28,6 +28,9 @@ RTP_STANDARD = {
     "sl_min": 100,                   # darunter kein Trade
     "ziel_tol": 300,                 # Rest ≤ so viel $ → Ziel erreicht (Schlupf + Gebühren am Fill: bei 3 NQ sind 2 Punkte schon 120 $; Prüfer 20.11.)
     "tp_min": 100,                   # kein Trade mit kleinerem TP
+    # Gesamtkosten ≤ 0 (Kette im Plus): fester Funded-Satz Topstep wie tpFundedHedgeVorgabe (prophos.html) — 900 € auf 4.500 $ Max Drawdown,
+    # als € je $ Abstand zur Liquidation (wie AH2 im Funded-Planer). Master 20.11.: „Funded läuft bei uns nie ohne Hedge“
+    "hedge_fest": [900, 4500],
 }
 RTP_SL_BEZUG = 3000.0                # die SL-Spanne der Einstellung gilt für dieses DLL (150K)
 
@@ -110,6 +113,20 @@ def rtp_sl(cfg, dll, abstand_liq, tag_verlust, rnd):
                  else f"zu nah an der Liquidation (Abstand {round(ab)} $)")
         return None, grund
     return sl, ""
+
+
+def rtp_hedge_basis(cfg, kosten, abstand):
+    """Hedge-Basis in € → (offen | None, quelle). Gesamtkosten > 0 → die Gesamtkosten (€ je $ = Kosten ÷ Abstand, wie der Funded-Hedge);
+    sonst (Kette im Plus) fester Satz hedge_fest = € auf $ Max Drawdown (Topstep 900 / 4.500 = 0,2 € je $) × Abstand zur Liquidation."""
+    k, ab = _zahl(kosten), _zahl(abstand)
+    if ab is None or ab <= 0:
+        return None, ""
+    if k is not None and k > 0:
+        return round(k, 2), "gesamtkosten"
+    eur, dd = [_zahl(x) for x in (cfg.get("hedge_fest") or [900, 4500])[:2]]
+    if not (eur and eur > 0 and dd and dd > 0):
+        return None, ""
+    return round(eur / dd * ab, 2), f"fester Satz {round(eur)} € auf {round(dd)} $ (Gesamtkosten {round(k or 0)} €, Kette im Plus)"
 
 
 def rtp_kontrakte(cfg, rnd):
