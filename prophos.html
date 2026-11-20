@@ -15612,7 +15612,15 @@
           <label>Nächster Payout #</label>
           <input class="input mono" id="ac-sk-nr" type="number" step="1" min="1" max="6" placeholder="1–6" autocomplete="off">
         </div>
-        <div id="ac-sk-hint" hidden style="grid-column:1/-1;font-size:11px;color:var(--sub);margin-top:-4px">Add-on · Striking (Apex): Balance zu Beginn der Probation bzw. nach dem letzten genehmigten Payout · Nummer des nächsten Payouts (1–6). Leer = Striking plant dieses Konto nicht.</div>
+        <!-- SK1-F2 (20.11.2026): Probation ja/nein + Zyklus seit — eigene Spalten (striking_probation / striking_zyklus_seit), nur sichtbar, wenn sie da sind -->
+        <div class="field" id="ac-sk-seit-feld" hidden>
+          <label>Zyklus seit</label>
+          <input class="input mono" id="ac-sk-seit" type="date" autocomplete="off">
+        </div>
+        <div class="field" id="ac-sk-prob-feld" hidden style="align-self:end">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="ac-sk-prob" style="width:16px;height:16px;margin:0"> Trader Probation</label>
+        </div>
+        <div id="ac-sk-hint" hidden style="grid-column:1/-1;font-size:11px;color:var(--sub);margin-top:-4px">Add-on · Striking (Apex): Balance zu Beginn der Probation bzw. nach dem letzten genehmigten Payout · Nummer des nächsten Payouts (1–6) · Zyklus seit = Probation-Start (18.11.2026) bzw. Datum des letzten Payouts. Leer = Striking plant dieses Konto nicht.</div>
         <!-- GT2 (05.11.2026, Finn — Blue Guardian 100k …7770: „Wenn ich auf den Account draufdrücke, kann ich diese Gewinntage nicht bearbeiten … von 1 zu 3"):
              Stand der Gewinntage im laufenden Payout-Zyklus, nur bei Funded-CFD-Konten mit Mindest-$-Tagen (Regel je_groesse.gewinntage). Zahlen aus
              GET /konto-ziele (dieselbe Zählung wie Planer/Radar). „Setzen“ speichert sofort die Differenz zur Zählung als accounts.fcp_gewinntage
@@ -46755,6 +46763,9 @@
       // undefined = Spalte fehlt noch (SQL von S1) → kein Feld, nichts geschrieben; null = nicht gesetzt (Planer plant das Konto nicht, Chip „Zyklus-Start fehlt")
       strikingZyklusStart: row.striking_zyklus_start === undefined ? undefined : (row.striking_zyklus_start != null && row.striking_zyklus_start !== '' && isFinite(Number(row.striking_zyklus_start)) ? Number(row.striking_zyklus_start) : null),
       strikingPayoutNr: row.striking_payout_nr === undefined ? undefined : (row.striking_payout_nr != null && row.striking_payout_nr !== '' && isFinite(Number(row.striking_payout_nr)) ? Number(row.striking_payout_nr) : null),
+      // SK1-F2 (20.11.2026): Apex „Trader Probation" ja/nein + Beginn des Zyklus (Probation-Start bzw. Datum des letzten Payouts) — undefined = Spalte fehlt noch
+      strikingProbation: row.striking_probation === undefined ? undefined : row.striking_probation === true,
+      strikingZyklusSeit: row.striking_zyklus_seit === undefined ? undefined : (row.striking_zyklus_seit ? String(row.striking_zyklus_seit) : null),
       // TL1 (Finn 19.11.2026, Jacob Tradeify Elite Live): Konto mit echtem Geld, Start 0 $ — Merkmal für den WD-Schlüssel 'tradeifylive'
       // (sql/2026-11-19_tl1_accounts_echtgeld.sql; Spalte fehlt noch → false wie bisher)
       echtgeld: row.echtgeld === true,
@@ -46959,6 +46970,7 @@
     onDemand: document.getElementById('ac-on-demand'), odFeld: document.getElementById('ac-od-feld'), zielFest: document.getElementById('ac-ziel-fest'),   // O1 (05.11.2026)
     skStart: document.getElementById('ac-sk-start'), skStartFeld: document.getElementById('ac-sk-start-feld'),   // SK1 Striking Apex (20.11.2026)
     skNr: document.getElementById('ac-sk-nr'), skNrFeld: document.getElementById('ac-sk-nr-feld'), skHint: document.getElementById('ac-sk-hint'),
+    skSeit: document.getElementById('ac-sk-seit'), skSeitFeld: document.getElementById('ac-sk-seit-feld'), skProb: document.getElementById('ac-sk-prob'), skProbFeld: document.getElementById('ac-sk-prob-feld'),   // SK1-F2
     deakt: document.getElementById('ac-deaktiviert'), deaktRow: document.getElementById('ac-deakt-row'),   // Konto deaktiviert (30.10.2026)
     extId:    document.getElementById('ac-ext-id'),
     wdFarm:   document.getElementById('ac-wd-farm'),
@@ -48437,12 +48449,13 @@
     // Spalten fehlen noch (undefined) → kein Chip: ohne sie plant Striking nichts
     if(accApexStrikingKonto(a) && apexStrikingAn() && a.strikingZyklusStart !== undefined && a.strikingPayoutNr !== undefined){
       // beide Werte Pflicht (fail-closed, Konstrukt SK1): der fehlende wird am Chip genannt
-      const fehlt = a.strikingZyklusStart === null ? 'Zyklus-Start' : a.strikingPayoutNr === null ? 'Payout #' : ''
+      const fehlt = a.strikingZyklusStart === null ? 'Zyklus-Start' : a.strikingPayoutNr === null ? 'Payout #' : a.strikingZyklusSeit === null ? 'Zyklus seit' : ''   // SK1-F2: „Zyklus seit" nur mit Spalte (undefined = fehlt noch)
       const zs = a.strikingZyklusStart > 0 ? ' · Zyklus-Start ' + Number(a.strikingZyklusStart).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' $' : ''
       const pn = a.strikingPayoutNr > 0 ? ' · nächster Payout #' + a.strikingPayoutNr : ''
-      const feld = fehlt === 'Zyklus-Start' ? '„Zyklus-Start-Balance"' : '„Nächster Payout #"'
+      const zv = (a.strikingZyklusSeit ? ' · Zyklus seit ' + new Date(a.strikingZyklusSeit).toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai' }) : '') + (a.strikingProbation === true ? ' · Trader Probation' : '')   // SK1-F2
+      const feld = fehlt === 'Zyklus-Start' ? '„Zyklus-Start-Balance"' : fehlt === 'Payout #' ? '„Nächster Payout #"' : '„Zyklus seit"'
       const t = fehlt ? `Striking (Apex) an für diese ID — ${fehlt} fehlt: ohne ihn plant Striking dieses Konto nicht → Konto bearbeiten → ${feld} eintragen`
-        : `Striking (Apex) an für diese ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), kein WD-Farmer, kein Recoverer${zs}${pn}. Schalten am Apex-Tacho im Muster-Portfolio`
+        : `Striking (Apex) an für diese ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), kein WD-Farmer, kein Recoverer${zs}${pn}${zv}. Schalten am Apex-Tacho im Muster-Portfolio`
       chips.push(`<span class="acc-addon st an acc-addon-fest" title="${escapeHtml(t)}">Striking${fehlt ? ' · ' + fehlt + ' fehlt' : ''}</span>`)
     }
     return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
@@ -48738,11 +48751,21 @@
   }
   // SK1 Striking Apex: Felder nur beim Bearbeiten eines Apex-Funded/WD-Kontos, wenn Striking für die ID an ist und die Spalten da sind
   const accSkSichtbar = () => !!(accEls.skStartFeld && !accEls.skStartFeld.hidden)
+  // SK1-F2: timestamptz → Kalendertag in Dubai (wie die Zykluszählung), für <input type=date>
+  // sv-SE liefert JJJJ-MM-TT; passt das Ergebnis nicht (Browser-Eigenheit), der Tag aus dem gespeicherten Text — nie still ein leeres Feld (würde beim Speichern null schreiben)
+  const accSkDatum = v => { const d = new Date(v), t = isFinite(d) ? d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' }) : ''; return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : String(v || '').slice(0, 10) }
   function accSkFelderSetzen(acc){
     const zeig = !!acc && accApexStrikingKonto(acc) && apexStrikingAn() && acc.strikingZyklusStart !== undefined && acc.strikingPayoutNr !== undefined
     for(const el of [accEls.skStartFeld, accEls.skNrFeld, accEls.skHint]) if(el) el.hidden = !zeig
     if(accEls.skStart) accEls.skStart.value = zeig && acc.strikingZyklusStart != null ? String(acc.strikingZyklusStart) : ''
     if(accEls.skNr) accEls.skNr.value = zeig && acc.strikingPayoutNr != null ? String(acc.strikingPayoutNr) : ''
+    // SK1-F2: Probation + Zyklus seit nur mit ihren eigenen Spalten (kann später kommen als die zwei oberen)
+    const zeigSeit = zeig && acc.strikingZyklusSeit !== undefined, zeigProb = zeig && acc.strikingProbation !== undefined
+    if(accEls.skSeitFeld) accEls.skSeitFeld.hidden = !zeigSeit
+    if(accEls.skProbFeld) accEls.skProbFeld.hidden = !zeigProb
+    if(accEls.skSeit){ accEls.skSeit.value = zeigSeit && acc.strikingZyklusSeit ? accSkDatum(acc.strikingZyklusSeit) : ''
+      accEls.skSeit.dataset.alt = zeigSeit && acc.strikingZyklusSeit ? acc.strikingZyklusSeit : ''; accEls.skSeit.dataset.altTag = accEls.skSeit.value }   // Tag unverändert → gespeicherte Uhrzeit behalten
+    if(accEls.skProb) accEls.skProb.checked = zeigProb && acc.strikingProbation === true
   }
   function accOdFelderSetzen(acc){
     const zeig = !!acc && acc.onDemand !== undefined && (accIstFundedNextCfd(acc) || acc.onDemand === true) && acc.type === 'funded_cfd'
@@ -50067,8 +50090,16 @@
     const maxRisiko = parseFloat(accEls.maxRisiko?.value)   // leer = keine Vorgabe (07.10.2026)
     const isEdit = !!_editingAccountId
     // SK1 Striking Apex: nur wenn die Felder sichtbar waren (sonst undefined → nichts geschrieben); leer = null (Striking plant das Konto dann nicht)
-    let skStart, skNr
+    let skStart, skNr, skSeit, skProb
     if(isEdit && accSkSichtbar()){
+      // SK1-F2: Zyklus seit (Tag, 00:00 Dubai) und Probation nur, wenn ihre Felder sichtbar waren
+      if(accEls.skSeitFeld && !accEls.skSeitFeld.hidden){
+        const rd = String(accEls.skSeit?.value || '').trim()
+        if(accEls.skSeit?.validity?.badInput || (rd && !/^\d{4}-\d{2}-\d{2}$/.test(rd))){ setModalMsg('Zyklus seit: ein Datum wählen — z. B. 18.11.2026 — oder leer lassen.', 'err'); accEls.skSeit?.focus(); return }
+        // Tag unverändert → den gespeicherten Zeitpunkt behalten (Backend kann eine genaue Uhrzeit gesetzt haben, z. B. den Payout)
+        skSeit = !rd ? null : (accEls.skSeit.dataset.alt && rd === accEls.skSeit.dataset.altTag) ? accEls.skSeit.dataset.alt : rd + 'T00:00:00+04:00'
+      }
+      if(accEls.skProbFeld && !accEls.skProbFeld.hidden) skProb = !!accEls.skProb?.checked
       // type=number liefert bei ungültiger Eingabe (z. B. „112.288,54") '' — nie still als „leer" speichern und damit den Wert löschen
       if(accEls.skStart?.validity?.badInput){ setModalMsg('Zyklus-Start-Balance: nur Ziffern und Punkt als Komma — z. B. 112288.54.', 'err'); accEls.skStart.focus(); return }
       if(accEls.skNr?.validity?.badInput){ setModalMsg('Nächster Payout #: eine ganze Zahl von 1 bis 6 eintragen.', 'err'); accEls.skNr.focus(); return }
@@ -50171,6 +50202,7 @@
       onDemand: accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? accEls.onDemand.checked : undefined,   // O1: nur wenn der Schalter sichtbar war
       ...(accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? { name: kontoNameMitAddons(name, { od: !!accEls.onDemand.checked }) } : {}),   // O1b: Add-on im Namen
       strikingZyklusStart: skStart, strikingPayoutNr: skNr,   // SK1: undefined = Felder nicht sichtbar → nicht schreiben
+      strikingZyklusSeit: skSeit, strikingProbation: skProb,   // SK1-F2: ebenso
       autoPlaner: accEls.autoPlaner ? accEls.autoPlaner.checked : true,   // Auto-Planer-Haken (08.10.2026)
       // Ziel-Felder je nach sichtbarem Block: Winning Days (Futures-Funded,
       // manuell) / Fortschritts-Ziel (CFD-Phase, automatisch) / sonst Bestand.
@@ -50308,6 +50340,8 @@
           ...(acc.onDemand !== undefined ? { on_demand: !!acc.onDemand } : {}),   // O1: nur mit Spalte (sonst schlüge jedes Speichern fehl)
           // SK1 Striking Apex: nur wenn die Felder sichtbar waren (sichtbar nur mit Spalten) — sonst schlüge jedes Speichern fehl
           ...(acc.strikingZyklusStart !== undefined ? { striking_zyklus_start: acc.strikingZyklusStart, striking_payout_nr: acc.strikingPayoutNr } : {}),
+          ...(acc.strikingZyklusSeit !== undefined ? { striking_zyklus_seit: acc.strikingZyklusSeit } : {}),   // SK1-F2: nur mit sichtbarem Feld (= Spalte da)
+          ...(acc.strikingProbation !== undefined ? { striking_probation: acc.strikingProbation } : {}),
           auto_planer: acc.autoPlaner !== false,   // Auto-Planer-Haken (08.10.2026)
           // Typ wechselt auf Winning Days → Haken an (Finn 03.11.2026, s. accWdUmstellen); sonst der Haken aus dem Popup (Ausschalten bleibt möglich)
           wd_farm: !!acc.wdFarm || (acc.type === 'winning_days' && String((accounts.find(x => String(x.id) === String(_editingAccountId)) || {}).type || '') !== 'winning_days'),
