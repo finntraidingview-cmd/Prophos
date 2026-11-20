@@ -19137,61 +19137,27 @@
      * der Grund wie bei Apex („1/5 Tage · Consistency 100 % · fehlt +3.239 $“). Ohne Feld bleibt alles wie vorher. Werte aus
      * striking_regeln.apex, wenn Railway sie mitschickt (striking.regeln), sonst die Zahlen des Konstrukts. Reine Anzeige, keine Sperre
      * außer dem Knopf „anfragbar“, der nur bei erfüllten Regeln kommt. */
-    const ADM_STRIKING_APEX = { min_profit: { 100000: 3600, 150000: 4600 }, tag_schwelle: { 100000: 300, 150000: 350 },
-                                min_payout_balance: { 100000: 103600, 150000: 154600 }, tage: 5, cons_pct: 50, min_payout: 500 }
+    // SK1-A (20.11.2026): die Regel-Rechnung steht jetzt in skApexRechnung (Modul-Ebene, auch für die Accounts-Zeile) — hier nur noch Texte und Beträge der Kasse
     function admApexStriking(r, c, regel, caps){
-      const s = r.striking, rg = (s.regeln && typeof s.regeln === 'object') ? s.regeln : {}
-      // Zahl > 0 aus Railway, sonst der Wert des Konstrukts ('' / null / Unsinn zählen nicht — Gegencheck 20.11.2026)
-      const jeGr = (feld, std) => { const v = Number(rg[feld] && rg[feld][c.size]); return v > 0 ? v : std[c.size] }
-      const schwelle = jeGr('tag_schwelle', ADM_STRIKING_APEX.tag_schwelle), minProfit = jeGr('min_profit', ADM_STRIKING_APEX.min_profit)
-      const minBal = Number(s.min_payout_balance) > 0 ? Number(s.min_payout_balance) : jeGr('min_payout_balance', ADM_STRIKING_APEX.min_payout_balance)
-      const capsRg = rg.caps && Array.isArray(rg.caps[c.size]) ? rg.caps[c.size].map(Number) : null
-      const capsS = capsRg && capsRg.length && capsRg.every(v => v > 0) ? capsRg : caps
-      const start = Number(s.zyklus_start), seit = /^\d{4}-\d{2}-\d{2}$/.test(String(s.zyklus_seit || '').slice(0, 10)) ? String(s.zyklus_seit).slice(0, 10) : ''
-      const nr = Number(s.payout_nr) >= 1 ? Math.floor(Number(s.payout_nr)) : (Number(r.payouts_n) || 0) + 1
-      const deckel = nr <= capsS.length ? capsS[nr - 1] : null
+      const s = r.striking
+      const e = skApexRechnung({ size: c.size, bal: c.bal, start: s.zyklus_start, seit: s.zyklus_seit, nr: s.payout_nr, payoutsN: r.payouts_n,
+                                 probation: s.probation, minBal: s.min_payout_balance, tage: s.tage, regeln: s.regeln, caps })
+      const geld = v => admGeld(v, c.ccy)
       // FAIL-CLOSED (Konstrukt: „ohne Wert … zeigt ‚Zyklus-Start fehlt‘“; Gegencheck 20.11.2026): fehlt Start, Datum, Regel der Größe oder gibt die
       // Cap-Tabelle die Payout-Nr. nicht her (nach dem 6. schließt der PA), ist die Zeile trotzdem Striking — Betrag 0, Grund statt Knopf, nie der WD-Zähler
-      const fehltWas = !(start > 0) ? 'Zyklus-Start fehlt' : !seit ? 'Zyklus-Datum fehlt'
-        : (schwelle == null || minProfit == null || minBal == null) ? `${c.size / 1000}k: keine Striking-Regel`
-        : deckel == null ? `Payout Nr. ${nr}: kein Cap (Tabelle endet bei ${capsS.length})` : ''
-      if(fehltWas)
-        return { regel: Object.assign({}, regel, { deckel }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub: `Striking · ${fehltWas}`, minus: fehltWas,
-                 striking: { tage: 0, ziel: ADM_STRIKING_APEX.tage, schwelle, netto: null, bester: null, cons: null, probation: !!s.probation, ok: false, fehlt: null, nr, start: start > 0 ? start : null, seit } }
-      // Einträge je Handelstag (Railway); doppelte Tage zusammenfassen, falls doch je Trade geliefert wird
-      const proTag = new Map()
-      for(const t of (Array.isArray(s.tage) ? s.tage : [])){
-        const tg = String(t && t.tag || '').slice(0, 10), pl = Number(t && t.pl)
-        if(tg >= seit && Number.isFinite(pl)) proTag.set(tg, (proTag.get(tg) || 0) + pl)
-      }
-      const tage = [...proTag].map(([tag, pl]) => ({ tag, pl }))
-      const nTage = Math.min(tage.filter(t => Number(t.pl) >= schwelle).length, ADM_STRIKING_APEX.tage)
-      const netto = c.bal - start
-      const bester = tage.reduce((m, t) => Math.max(m, Number(t.pl)), 0)
-      const cons = netto > 0 ? bester / netto * 100 : null
-      const probation = !!s.probation
+      if(e.fehltWas)
+        return { regel: Object.assign({}, regel, { deckel: e.deckel }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub: `Striking · ${e.fehltWas}`, minus: e.fehltWas,
+                 striking: { tage: 0, ziel: e.ziel, schwelle: e.schwelle, netto: null, bester: null, cons: null, probation: e.probation, ok: false, fehlt: null, nr: e.nr, start: e.start, seit: e.seit } }
       const n0 = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
-      const geld = v => admGeld(v, c.ccy)
-      // Was noch fehlt: der größere von Profit-/Balance-Regel und Consistency (Netto ≥ 2 × bester Tag)
-      const fehltRegel = probation ? minProfit - netto : minBal - c.bal
-      const fehlt = Math.max(0, fehltRegel, ADM_STRIKING_APEX.cons_pct > 0 ? bester * 100 / ADM_STRIKING_APEX.cons_pct - netto : 0)
-      const roh = Math.max(0, netto) * .5
-      const gedeckelt = deckel != null && roh > deckel
-      const betrag = gedeckelt ? deckel : roh
-      const tageOk = nTage >= ADM_STRIKING_APEX.tage, consOk = cons != null && cons <= ADM_STRIKING_APEX.cons_pct
-      const ok = tageOk && consOk && fehltRegel <= 0 && betrag >= ADM_STRIKING_APEX.min_payout
-      const tagTxt = seit ? new Date(seit + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'UTC' }) : '?'
+      const tagTxt = new Date(e.seit + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'UTC' })
       // kurz wie die bisherige Apex-Unterzeile (die Zelle bricht nicht um); Start + Datum im Tooltip (tip)
-      const sub = `${probation ? 'Probation' : 'Zyklus'} ${netto >= 0 ? '+' : '−'}${n0(netto)} $ · bester Tag ${n0(bester)} $ · Nr. ${nr} max. ${geld(deckel)}`
-      const tip = `Striking Apex: ${probation ? 'Trader Probation' : 'Zyklus'} seit ${tagTxt}, Start ${geld(start)} → Balance ${geld(c.bal)}`
-        + ` · Betrag = min(Cap Payout Nr. ${nr}, 50 % vom Netto)`
-      const info = { tage: nTage, ziel: ADM_STRIKING_APEX.tage, schwelle, netto, bester, cons, probation, ok, fehlt, nr, start, seit }
-      const rx = Object.assign({}, regel, { deckel, quelle: tip })
-      if(ok) return { regel: rx, grund: '', roh, gedeckelt, anfragbar: betrag, erhalten: betrag * c.pct / 100, sub, striking: info }
-      const teile = [`${nTage}/${ADM_STRIKING_APEX.tage} Tage`, cons == null ? 'Profit ≤ 0' : `Consistency ${Math.round(cons)} %`]
-      if(fehlt > 0) teile.push(`fehlt +${n0(fehlt)} $`)
-      else if(betrag < ADM_STRIKING_APEX.min_payout) teile.push(`unter Mindest-Payout ${geld(ADM_STRIKING_APEX.min_payout)}`)
-      return { regel: rx, grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub, striking: info, minus: teile.join(' · ') }
+      const sub = `${e.probation ? 'Probation' : 'Zyklus'} ${e.netto >= 0 ? '+' : '−'}${n0(e.netto)} $ · bester Tag ${n0(e.bester)} $ · Nr. ${e.nr} max. ${geld(e.deckel)}`
+      const tip = `Striking Apex: ${e.probation ? 'Trader Probation' : 'Zyklus'} seit ${tagTxt}, Start ${geld(e.start)} → Balance ${geld(c.bal)}`
+        + ` · Betrag = min(Cap Payout Nr. ${e.nr}, 50 % vom Netto)`
+      const info = { tage: e.tage, ziel: e.ziel, schwelle: e.schwelle, netto: e.netto, bester: e.bester, cons: e.cons, probation: e.probation, ok: e.ok, fehlt: e.fehlt, nr: e.nr, start: e.start, seit: e.seit }
+      const rx = Object.assign({}, regel, { deckel: e.deckel, quelle: tip })
+      if(e.ok) return { regel: rx, grund: '', roh: e.roh, gedeckelt: e.gedeckelt, anfragbar: e.betrag, erhalten: e.betrag * c.pct / 100, sub, striking: info }
+      return { regel: rx, grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub, striking: info, minus: e.grund }
     }
     // SK1-K: Stand der Payouts-Zeile — Striking-Konto = Tage seit Zyklus-Start und „bereit“ nur bei erfüllten Regeln, sonst der WD-Zähler aus Railway
     // (wd_count/wd_target/wd_ready/wd_ab bleiben unverändert in den Daten, andere Ansichten lesen sie weiter)
@@ -60401,7 +60367,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2269'
+  const OS_TAB_BUILD = '2026-09-22.2270'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80869,8 +80835,102 @@
     return s + '</span>'
   }
 
+  /* STRIKING APEX — EINE RECHNUNG für Kasse → Payouts (admApexStriking, SK1-K) und Accounts-Zeile (SK1-A, Finn 20.11.2026 am Screenshot Accounts als Marc,
+   * .2269: unter den Striking-Konten stand weiter „🏆 5/5 Winning Days ✓ · Payout anfragbar ●●●●●“, laut Apex nicht anfragbar — …06: 1/5 Tage, Consistency
+   * 100 %, fehlt +3.239 $). Konstrukt .claude/master/berichte/2026-11-20_SK1_striking_apex_konstrukt.md. REIN RECHNEND (Test-Haken window._skApexRechnung).
+   * o = { size, bal, start, seit, nr, payoutsN?, probation, minBal?, tage: [{tag, pl}], regeln? (striking_regeln.apex), caps? }
+   * Konstanten als Literale in der Funktion: renderAccounts läuft vor dem Modul-Ende (TDZ, s. zielDotsHtml). */
+  function skApexRechnung(o){
+    const STD = { min_profit: { 100000: 3600, 150000: 4600 }, tag_schwelle: { 100000: 300, 150000: 350 }, min_payout_balance: { 100000: 103600, 150000: 154600 },
+                  caps: { 100000: [2000, 2500, 2500, 3000, 4000, 4000], 150000: [2500, 3000, 3000, 3000, 4000, 5000] } }
+    const ZIEL = 5, CONS = 50, MIN_PAYOUT = 500
+    const size = Number(o.size), rg = (o.regeln && typeof o.regeln === 'object') ? o.regeln : {}
+    // Zahl > 0 aus Railway, sonst der Wert des Konstrukts ('' / null / Unsinn zählen nicht — Gegencheck 20.11.2026)
+    const jeGr = feld => { const v = Number(rg[feld] && rg[feld][size]); return v > 0 ? v : (STD[feld][size] ?? null) }
+    const schwelle = jeGr('tag_schwelle'), minProfit = jeGr('min_profit')
+    const minBal = Number(o.minBal) > 0 ? Number(o.minBal) : jeGr('min_payout_balance')
+    const capsRg = rg.caps && Array.isArray(rg.caps[size]) ? rg.caps[size].map(Number) : null
+    const capsS = capsRg && capsRg.length && capsRg.every(v => v > 0) ? capsRg : (Array.isArray(o.caps) ? o.caps : (STD.caps[size] || []))
+    const start = Number(o.start), seit = skSeitTag(o.seit), probation = o.probation === true
+    const nr = Number(o.nr) >= 1 ? Math.floor(Number(o.nr)) : (Number(o.payoutsN) || 0) + 1
+    const deckel = nr <= capsS.length ? capsS[nr - 1] : null
+    const bal = o.bal == null || o.bal === '' ? NaN : Number(o.bal)
+    const fehltWas = !(start > 0) ? 'Zyklus-Start fehlt' : !seit ? 'Zyklus-Datum fehlt'
+      : (schwelle == null || minProfit == null || minBal == null) ? `${size ? size / 1000 + 'k' : 'Größe unklar'}: keine Striking-Regel`
+      : deckel == null ? `Payout Nr. ${nr}: kein Cap (Tabelle endet bei ${capsS.length})` : !Number.isFinite(bal) ? 'keine Balance' : ''
+    const basis = { ziel: ZIEL, schwelle, probation, nr, deckel, start: start > 0 ? start : null, seit }
+    if(fehltWas) return Object.assign(basis, { ok: false, fehltWas, tage: 0, netto: null, bester: null, cons: null, fehlt: null, betrag: 0, roh: 0, gedeckelt: false, grund: fehltWas })
+    // je Handelstag; doppelte Tage zusammenfassen (Railway liefert je Tag, die Accounts-Zeile summiert selbst)
+    const proTag = new Map()
+    for(const t of (Array.isArray(o.tage) ? o.tage : [])){
+      const tg = String(t && t.tag || '').slice(0, 10), pl = Number(t && t.pl)
+      if(/^\d{4}-\d{2}-\d{2}$/.test(tg) && tg >= seit && Number.isFinite(pl)) proTag.set(tg, (proTag.get(tg) || 0) + pl)
+    }
+    const pls = [...proTag.values()].map(v => Math.round(v * 100) / 100)   // je Tag auf Cent wie app.py sk_tage_je_tag (round(v, 2)) — sonst zählt 299,999… nicht als 300
+    const nTage = Math.min(pls.filter(v => v >= schwelle).length, ZIEL)
+    const netto = bal - start
+    const bester = pls.reduce((m, v) => Math.max(m, v), 0)
+    const cons = netto > 0 ? bester / netto * 100 : null
+    // Was noch fehlt: der größere von Profit-/Balance-Regel und Consistency (Netto ≥ 2 × bester Tag)
+    const fehltRegel = probation ? minProfit - netto : minBal - bal
+    const fehlt = Math.max(0, fehltRegel, bester * 100 / CONS - netto)
+    const roh = Math.max(0, netto) * .5
+    const gedeckelt = roh > deckel
+    const betrag = gedeckelt ? deckel : roh
+    const ok = nTage >= ZIEL && cons != null && cons <= CONS && fehltRegel <= 0 && betrag >= MIN_PAYOUT
+    const n0 = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
+    const teile = [`${nTage}/${ZIEL} Tage`, cons == null ? 'Profit ≤ 0' : `Consistency ${Math.round(cons)} %`]
+    if(fehlt > 0) teile.push(`fehlt +${n0(fehlt)} $`)
+    else if(betrag < MIN_PAYOUT) teile.push(`unter Mindest-Payout ${n0(MIN_PAYOUT)} $`)
+    return Object.assign(basis, { ok, fehltWas: '', tage: nTage, netto, bester, cons, fehlt, betrag, roh, gedeckelt, grund: ok ? '' : teile.join(' · ') })
+  }
+  window._skApexRechnung = skApexRechnung   // Test-Haken
+  // striking_zyklus_seit → 'JJJJ-MM-TT' in Dubai-Zeit (wie app.py sk_seit_tag: das Frontend speichert Dubai-Mitternacht, Supabase liefert UTC zurück) | ''
+  function skSeitTag(roh){
+    const s = String(roh || '').trim()
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+    const t = Date.parse(s); if(!s || !isFinite(t)) return ''
+    try{ return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t)) }catch(_){ return '' }
+  }
+  /* SK1-A: Striking-Stand eines eigenen Apex-Kontos für die Accounts-Zeile — null = kein Striking-Konto (Zeile wie bisher). Tage aus den schon geladenen
+   * eigenen trade_plans (loadTradePlansFromSupabase lädt alle Pläne der ID, kein Nachladen): completed/review mit master_pl, je CME-Handelstag des Endes
+   * (ended_at, sonst completed_at; tvV2Handelstag = app.py _cme_handelstag) summiert, ab zyklus_seit — dieselbe Tages-Logik wie sk_tage_je_tag.
+   * Striking-Konto = Apex funded/winning_days mit Spalten UND (Add-on der ID an ODER ein Startwert gesetzt). Fehlt Start, Datum oder Payout # → Startwerte fehlen. */
+  function skApexKontoStand(a){
+    if(!a || typeof accApexStrikingKonto !== 'function' || !accApexStrikingKonto(a) || a.strikingZyklusStart === undefined) return null
+    const anId = typeof apexStrikingAn === 'function' && apexStrikingAn()
+    if(!anId && !(a.strikingZyklusStart > 0) && !a.strikingZyklusSeit) return null
+    if(!(a.strikingZyklusStart > 0) || !a.strikingZyklusSeit || !(a.strikingPayoutNr >= 1)) return { startFehlt: true }
+    const id = String(a.id), tage = []
+    for(const p of (window._skPlaeneStub || tradePlans || [])){   // _skPlaeneStub: nur Stub-Test (window._zielBadgeStub), sonst die geladenen Pläne
+      if(String(p.masterAccountId || '') !== id || (p.status !== 'completed' && p.status !== 'review') || p.masterPl == null || !isFinite(p.masterPl)) continue
+      const ende = p.endedAt || p.completedAt; if(!ende || !isFinite(Date.parse(ende))) continue   // unlesbar = überspringen (wie _cme_handelstag → None)
+      tage.push({ tag: tvV2Handelstag(ende), pl: Number(p.masterPl) })
+    }
+    const size = kontoGroesseAnzeige(a.name, a.startingBalance, tpVorplanLive(a))
+    return skApexRechnung({ size, bal: tpVorplanLive(a), start: a.strikingZyklusStart, seit: a.strikingZyklusSeit, nr: a.strikingPayoutNr,
+                            probation: a.strikingProbation === true, tage })
+  }
+  window._skApexKontoStand = skApexKontoStand   // Test-Haken
+  // Stub-Test ohne Login (SK1-A): Zeile für ein Konto mit eigenen Test-Plänen zeichnen
+  window._zielBadgeStub = (a, plaene) => { window._skPlaeneStub = plaene || []; try{ return zielBadgeHtml(a, false) }finally{ window._skPlaeneStub = null } }
+
   // Zeile für die Accounts-Tabelle (meta unter dem Namen): "🏆 3/5 Winning Days ●●●○○"
   function zielBadgeHtml(a, klickbar){
+    // SK1-A: Striking-Konto (Apex) → Striking-Stand ab Zyklus-Start statt WD-Zähler; „Payout anfragbar“ nur, wenn alle Apex-Regeln erfüllt sind
+    const sk = (() => { try{ return skApexKontoStand(a) }catch(_){ return null } })()
+    if(sk){
+      const attrS = klickbar ? ` data-acc-wd="${escapeHtml(String(a.id))}" title="Klicken zum Bearbeiten" style="cursor:pointer"` : ''
+      if(sk.startFehlt || sk.fehltWas)
+        return `<span${attrS}><span style="color:var(--sub);font-weight:600">Striking · ${escapeHtml(sk.startFehlt ? 'Startwerte fehlen' : sk.fehltWas)}</span></span>`
+      const geldS = v => Math.round(v).toLocaleString('de-DE') + ' $'
+      const farbeS = sk.ok ? 'var(--good)' : '#006F4F'
+      const tipS = `Striking Apex seit ${sk.seit}${sk.probation ? ' (Trader Probation)' : ''}: Start ${geldS(sk.start)}, netto ${sk.netto >= 0 ? '+' : '−'}${geldS(Math.abs(sk.netto))}, bester Tag ${geldS(sk.bester)} · Payout Nr. ${sk.nr} max. ${geldS(sk.deckel)}`
+        + (sk.ok ? ` · anfragbar ${geldS(sk.betrag)}` : '')
+      const txt = sk.ok ? `Striking · Payout anfragbar (max ${geldS(sk.deckel)})`
+        : `Striking · ${sk.tage}/${sk.ziel} Tage ≥ $${sk.schwelle}` + sk.grund.replace(/^\d+\/\d+ Tage/, '')
+      return `<span${attrS}><span style="color:${farbeS};font-weight:600" title="${escapeHtml(tipS)}">${escapeHtml(txt)}</span>${zielDotsHtml({ target: sk.ziel, count: sk.tage, done: sk.ok, kind: 'winning_days' })}</span>`
+    }
     const f = zielFortschritt(a)
     if(!f) return ''
     const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#006F4F' : 'var(--violet)'
@@ -83481,6 +83541,9 @@
           && !(f.vollAb > Date.now())   // WE1 (19.11.2026): Ziel erst heute voll → erst nach Ende des Handelstags (Badge zeigt „anfragbar ab …“)
         sort = ready ? -1e9 : (f.target - f.count) * 1000
         html = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
+        // SK1-A (Gegencheck 20.11.2026): Striking-Konto → „anfragbar“ und Sortierung aus derselben Rechnung wie die Zeile (zielBadgeHtml), nicht aus dem WD-Zähler
+        const sk = (() => { try{ return skApexKontoStand(a) }catch(_){ return null } })()
+        if(sk){ ready = !!sk.ok; sort = ready ? -1e9 : ((sk.ziel || 5) - (sk.tage || 0)) * 1000 }
       }
       // Waiting for Payout (29.09.2026): steht vor Termin/Ziel, sortiert direkt hinter die anfragbaren
       const wp = (typeof wartetPayoutBadgeHtml === 'function') ? wartetPayoutBadgeHtml(a) : ''
