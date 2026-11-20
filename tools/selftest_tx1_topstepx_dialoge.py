@@ -630,7 +630,8 @@ else:
         pp = st.get("popups") or []
         dlg = ob.tsx_zeitsync_dialog(pp)
         kn = ob.tsx_zeitsync_knopf(dlg) if dlg else None
-        check(st.get("v") == "tsx-0.7.3" and len(pp) == 1 and pp[0].get("quelle") == "text" and pp[0].get("titel") == "Time Sync Warning"
+        # 0.7.4 = TS-D1 (Loss-Limit-Meldung ohne Rolle), Time-Sync unverändert — Kommentar hier, NICHT mitten im Ausdruck (Prüfer TS-D1)
+        check(st.get("v") in ("tsx-0.7.3", "tsx-0.7.4") and len(pp) == 1 and pp[0].get("quelle") == "text" and pp[0].get("titel") == "Time Sync Warning"
               and dlg and kn and kn["text"] == "PROCEED", f"Modal OHNE ARIA-Rolle (Finns Bild): Popup aus dem Text-Weg, PROCEED gefunden ({pp[:1]})")
         alt_pp = (c.stand(ALT_AUGEN).get("popups") or []) if ALT_AUGEN else None
         check(alt_pp == [], "Gegenprobe: die alte augen_tsx.js (vor TX1) sah dieses Modal NICHT — die Ursache der Fehlstarts am 17.11.")
@@ -792,6 +793,8 @@ else:
     GEAENDERT = {"tsx_zeitsync_dialog", "_tsx_zeitsync_weg", "_tsx_cdp_login", "_tsx_sitzung_waehlen", "_tsx_auge_konto", "modus_tsxlesen_cdp",
                  "_tsx_k3_probe", "_tsx_k4_senden", "tsx_k3_vor_klick", "_tsx_k4_dialog_name"}
     GEAENDERT.add("win_ziel_pruef_js")   # TX1c: Weiche zu win_ziel_pruef_dialog_js NUR mit pruef.dialog — Ausgabe sonst buchstabengleich (s. u.)
+    GEAENDERT.add("_tsx_konto_sichern")  # TS-D1 (20.11.2026): Loss-Limit-Meldung bei aktivem Ziel + Dialog-Spur bei „verdeckt“ — geprüft in selftest_tsd1_mll_dialog.py
+    GEAENDERT.update({"tsx_blow_dialog", "_tsx_blow_dialog_weg"})   # TS-D1: Art aus dem Treffer; Text-Weg mit Sperrzone + Kasten-Bindung (ebd.)
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},

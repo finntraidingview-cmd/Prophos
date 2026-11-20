@@ -9432,7 +9432,8 @@ def test_tsx_k3a():
     # tsx-0.6.4 (29.10.2026 abends, S5): Stift ✎ je Risk-/To-Make-Zelle gemeldet — Contract-/Ticket-Lesung unverändert
     # tsx-0.7.0 (02.11.2026, S15): TopstepX 2.4.32 Kopf/Karten-Erkennung als Rückfall — Contract-/Ticket-Lesung unverändert
     # tsx-0.7.3 (17.11.2026, TX1): „Time Sync Warning" ohne ARIA-Rolle als Popup — Contract-/Ticket-Lesung unverändert
-    chk("var VERSION = 'tsx-0.7.3'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+    # tsx-0.7.4 (20.11.2026, TS-D1): Loss-Limit-Meldung ohne ARIA-Rolle als Popup (limitOhneRolle) — Contract-/Ticket-Lesung unverändert
+    chk("var VERSION = 'tsx-0.7.4'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
         and "order-card-click-button-buy" in js and "k3: true" in js
         and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
         and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
@@ -10026,7 +10027,9 @@ def test_tsx_k4():
     neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
     # tsx-0.6.3 seit 4af8c460 (19.10.2026, Symbol-X der Login-Meldung) — Reiter/Positions-Tabelle unberührt (S4 21.10.2026)
     # tsx-0.6.4: dazu feld().stift (Rechteck des ✎) — weiter nur lesend; tsx-0.7.0 (02.11.2026): Konto-Erkennung 2.4.32, Reiter/Tabelle unberührt
-    chk("var VERSION = 'tsx-0.7.3'" in js and "stift: stift" in neu_js   # tsx-0.7.3 (TX1 17.11.2026): Reiter/Tabelle unberührt and "r.left >= wr - 2" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+    # tsx-0.7.3 (TX1 17.11.2026) / tsx-0.7.4 (TS-D1 20.11.2026): Reiter/Tabelle unberührt. TS-D1: der Kommentar stand bis hier MITTEN im Ausdruck —
+    # alle Prüfungen ab „r.left …“ waren dadurch auskommentiert; jetzt wieder aktiv
+    chk("var VERSION = 'tsx-0.7.4'" in js and "stift: stift" in neu_js and "r.left >= wr - 2" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
         and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
         and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x/0.7.0: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
     chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")

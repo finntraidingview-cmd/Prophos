@@ -16704,8 +16704,11 @@ def tsx_konto_treffer(texte, ext_id):
 # Meldung GENANNTE Konto (nur bei vollständiger Kennung …-USERID-NUMMER) geht als konto_verletzungen mit — der PC-Tab archiviert es wie
 # einen Listen-Hinweis; das Ziel gilt nur dann als geblowt, wenn die Meldung es selbst nennt. „Don't remind me" wird nie angehakt.
 TSX_RX_VERLETZUNG = re.compile(r"(maximum[_ \-]?loss|daily[_ \-]?loss|ineligible|violation|liquidat)", re.I)
-TSX_RX_BLOW_DIALOG = re.compile(r"you (have )?hit (your|the) (maximum|daily|max\.?) ?loss limit|(maximum|daily) loss limit (hit|reached|violat)"
-                                r"|no longer eligible for funding", re.I)
+# TS-D1 (20.11.2026, Marc pc-7ftp5l, acht Fehlstarts 19./20.11.): TopstepX liefert den Titel als „You Hit Your" + „Maximum Loss Limit." aus zwei
+# Elementen — im Text steht „You Hit YourMaximum Loss Limit.Setbacks …" OHNE Leerzeichen; die alte Form (genau ein Leerzeichen) traf das nie,
+# die Meldung wurde nie erkannt und nie geschlossen. Darum überall \s* statt eines festen Leerzeichens.
+TSX_RX_BLOW_DIALOG = re.compile(r"you\s*(have\s*)?hit\s*(your|the)\s*(maximum|daily|max\.?)\s*loss\s*limit|(maximum|daily)\s*loss\s*limit\s*(hit|reached|violat)"
+                                r"|no\s*longer\s*eligible\s*for\s*funding", re.I)
 TSX_RX_ICON_X = re.compile(r"close|cross|clear|times|x-?mark|dismiss|cancel-?icon", re.I)        # Symbol-Namen eines X (MUI „CloseIcon")
 TSX_RX_ICON_NIE = re.compile(r"expand|menu|info|help|setting|more|check|arrow|chevron|copy|edit|search|refresh|reset|practice", re.I)
 TSX_RX_KENNUNG_VOLL = re.compile(r"^[A-Z0-9][A-Z0-9-]*-\d{6}-\d{8}$")                           # 150KTC-SKU-V2-DLL-682437-17758280
@@ -16755,12 +16758,32 @@ def tsx_blow_dialog(popups):
         if not isinstance(p, dict):
             continue
         t = " ".join(str(p.get(k) or "") for k in ("titel", "text_voll", "text"))
-        if not TSX_RX_BLOW_DIALOG.search(t):
+        treffer = TSX_RX_BLOW_DIALOG.search(t)
+        if not treffer:
             continue
-        art = "daily_loss" if re.search(r"daily", t, re.I) else "maximum_loss"
+        # TS-D1 (Prüfer 20.11.2026): Art aus dem TREFFER, nicht aus irgendeinem „daily“ im ganzen Kasten-Text (eine MLL-Meldung, die beiläufig
+        # „daily“ erwähnt, hieße sonst DLL)
+        art = "daily_loss" if re.search(r"daily", treffer.group(0), re.I) else "maximum_loss"
         m = TSX_RX_DIALOG_KONTO.search(t)
         return {"art": art, "konto": (m.group(1).upper() if m else ""), "text": re.sub(r"\s+", " ", t).strip()[:160], "popup": p}
     return None
+
+
+def tsx_dialoge_spur(popups, n=3):
+    """REIN RECHNEND (testbar, TS-D1 20.11.2026, Finn: „alles muss gelernt werden können"): offene Dialoge für die Spur — je Dialog Titel, Text
+    (80 Zeichen), Quelle (ARIA / Text-Weg) und die Knöpfe mit Text, aria und Symbol. Damit steht ein unbekannter Dialog mit seinen Knöpfen in der
+    Spur und kann beim nächsten Mal als Muster aufgenommen werden. Leere Liste → ''."""
+    teile = []
+    for p in [x for x in (popups or []) if isinstance(x, dict)][:n]:
+        kn = []
+        for b in [x for x in (p.get("knoepfe") or []) if isinstance(x, dict)][:8]:
+            t = str(b.get("text") or "").strip()[:24]
+            a = str(b.get("aria") or "").strip()[:24]
+            ic = str(b.get("icon") or "").strip()[:20]
+            kn.append("'" + (t or (f"aria:{a}" if a else (f"icon:{ic}" if ic else ("X-Ecke" if b.get("ecke") else "-")))) + "'")
+        text = re.sub(r"\s+", " ", str(p.get("text_voll") or p.get("text") or "")).strip()[:80]
+        teile.append(f"'{str(p.get('titel') or '')[:40]}' · '{text}' · Quelle {p.get('quelle') or 'aria'} · Knöpfe [{', '.join(kn) or '-'}]")
+    return " | ".join(teile)
 
 
 def tsx_blow_dialog_knopf(popup):
@@ -16875,6 +16898,16 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
         trail.append(f"Meldung: kein eindeutiger Schließ-Knopf (Knöpfe {kn_txt or '-'}) — nichts gedrückt")
         return st, bd
     r = list(kn["rect"])[:4]
+    text_weg = str((bd["popup"] or {}).get("quelle") or "") == "text"
+    if text_weg:
+        # TS-D1 (20.11.2026, Prüfer): Meldung OHNE ARIA-Rolle (augen_tsx.js limitOhneRolle) — wie bei Überlagerungen (TX1c) nie über einer Order-/
+        # Positions-Fläche drücken und den Druck an GENAU den erkannten Kasten binden (sonst träfe ein Klick nach dem Verschwinden das Element darunter)
+        zone = tsx_ueberlagerung_sperrzone(r, st)
+        kasten = list((bd["popup"] or {}).get("rect") or [])[:4]
+        if zone or len(kasten) != 4:
+            trail.append(f"Meldung: Schließ-Knopf liegt über {zone} — nichts gedrückt" if zone
+                         else "Meldung: Kasten-Rechteck fehlt, Bindung im Ziel-Beweis nicht möglich — nichts gedrückt")
+            return st, bd
     try:
         _tsx_pause()
         if kn.get("icon_x"):                              # Symbol-X ohne Text/aria: Beweis = Rechteck + Größe + kein Tabu-Wort (Finn: „kurz aufs X")
@@ -16882,6 +16915,8 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
         else:
             pruef = dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
                           "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
+        if text_weg:
+            pruef.update(tabu=TSX_UEBER_PRUEF_TABU, dialog=kasten, kasten=True)   # Text-Weg: Kasten-Bindung + strengere Tabu-Liste (Reset, Start …)
         ok = s.klick(r, f"Meldung schließen ({kn.get('name') or repr(kn['text'][:20])})", pruef=pruef)
     except Exception as e_:
         trail.append(f"Meldung schließen: {type(e_).__name__}: {str(e_)[:80]}")
@@ -22236,6 +22271,23 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 trail.append("K2: Liste meldet " + ", ".join(f"{k[-8:]} ({v['text']})" for k, v in list(neu_v.items())[:6]))
             verletzungen.update(neu_v)
         if tsx_konto_urteil(ko, ext) == "ja":
+            # TS-D1 (20.11.2026, Finn: „Das muss weggeklickt werden können“): steht das Ziel schon aktiv und liegt die Loss-Limit-Meldung offen, gilt
+            # sie dem aktiven Konto (ohne Kennung, wie tsx_geblowt_urteil) bzw. dem genannten — ist das das Ziel, ist es geblowt: Plan nicht starten
+            # (konto_geblowt, der PC-Tab archiviert, keine neuen Versuche). Eine Meldung ohne Kennung NACH einem Wechsel in diesem Lauf könnte noch
+            # vom vorigen Konto stehen → nur schließen, nicht urteilen. Geschlossen wird wie immer EINMAL über einen eindeutigen Schließ-Knopf.
+            bd_z = tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None)
+            if bd_z and not bd_res.get("_blow_dialog_versucht"):
+                st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
+                verletzungen.update(bd_res.get("konto_verletzungen") or {})
+                k_bd = _nur_alnum((bd or {}).get("konto"))
+                if bd and ((k_bd and k_bd == _nur_alnum(ext)) or (not k_bd and gewaehlt is None)):
+                    return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen · "
+                                 f"Konto hat {'DLL' if bd.get('art') == 'daily_loss' else 'MLL'} erreicht (TopstepX-Dialog).", st,
+                                 popups=st.get("popups"))
+                if tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
+                    return _raus("konto_nicht_erreicht", (f"TopstepX-Meldung „{str((bd or {}).get('text') or '')[:60]}“ steht noch (nicht geschlossen) — "
+                                                          "nichts gelesen."), st, popups=st.get("popups"))
+                continue                               # Meldung zu (fremdes Konto genannt) → Stand neu prüfen
             if ko.get("liste_offen"):
                 _cdp_esc(s, st, trail, "Konto-Liste nach dem Wechsel noch offen")
                 _warte(0.6, 0.3)
@@ -22247,7 +22299,12 @@ def _tsx_konto_sichern(s, ext, st, trail):
             if verletzungen:
                 ex["konto_verletzungen"] = dict(verletzungen)
             if bd_res.get("blow_dialog"):
-                ex["blow_dialog"] = bd_res["blow_dialog"]
+                if (gewaehlt is not None or bd_res.get("_vor_ziel")) and not str(bd_res["blow_dialog"].get("konto") or "").strip():
+                    # TS-D1 (Prüfer 20.11.2026, KRITISCH): eine Meldung OHNE Kennung, geschlossen VOR dem Wechsel, galt dem vorgewählten Konto. Ginge sie
+                    # mit, hielte der Aufrufer (_tsx_geblowt_merken: ohne Kennung + aktiv == Ziel) jetzt das gesunde Ziel für geblowt → Archiv
+                    trail.append("K2: Meldung ohne Kennung galt dem vorgewählten Konto, nicht dem Ziel — nicht als geblowt gewertet")
+                else:
+                    ex["blow_dialog"] = bd_res["blow_dialog"]
             if gewaehlt is not None:
                 ex["konto_gewechselt"] = {"von": von, "zu": str(gewaehlt.get("id") or gewaehlt.get("id_kurz") or ext)[:80]}
                 # Hinweis des gewählten Eintrags („Ineligible", „MAXIMUM_LOSS Violation" …) — Lesen ist erlaubt, der PC-Tab archiviert
@@ -22383,10 +22440,13 @@ def _tsx_konto_sichern(s, ext, st, trail):
         # Liste → Ziel-Zeile → Beweis (Liste zu, volle Kennung im Auslöser, Kopfzeile zweimal gleich beim Aufrufer = der Cross-Check).
         bd_offen = tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None)
         if bd_offen and not bd_res.get("_blow_dialog_versucht"):
+            bd_res["_vor_ziel"] = True          # TS-D1: Meldung stand, während NICHT das Ziel aktiv war — ohne Kennung gilt sie nie dem Ziel
             st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
             verletzungen.update(bd_res.get("konto_verletzungen") or {})
             if bd and bd.get("konto") and _nur_alnum(bd["konto"]) == _nur_alnum(ext):
-                return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen.", st,
+                # TS-D1 (20.11.2026): „Konto hat MLL erreicht (TopstepX-Dialog)“ dazu — „TopstepX meldet „…““ am Anfang bleibt (Schlüssel in app.py)
+                return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen · "
+                             f"Konto hat {'DLL' if bd.get('art') == 'daily_loss' else 'MLL'} erreicht (TopstepX-Dialog).", st,
                              popups=st.get("popups"))
             if not tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
                 trail.append("K2: Meldung zu — Konto-Auslöser neu lesen, dann das Zielkonto wählen")
@@ -22395,6 +22455,15 @@ def _tsx_konto_sichern(s, ext, st, trail):
                                                   "Konto nicht gewechselt, nichts geklickt."), st, popups=st.get("popups"))
         if zu.get("disabled") or zu.get("verdeckt"):
             oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
+            # TS-D1 (20.11.2026, Finn: „alles muss gelernt werden können"): jeden offenen Dialog mit Text und Knöpfen in die Spur — ein unbekannter
+            # Dialog kann so beim nächsten Mal als Muster aufgenommen werden; ohne Popup steht das, was über dem Auslöser liegt, dabei
+            _ds = tsx_dialoge_spur(st.get("popups") if isinstance(st, dict) else None)
+            trail.append("K2: über dem Konto-Auslöser " + (f"Dialoge: {_ds}" if _ds else f"liegt {json.dumps(oben, ensure_ascii=False)[:300]} (kein Popup gelesen)"))
+            if TSX_RX_BLOW_DIALOG.search(str(oben.get("text") or "")) and not bd_res.get("_blow_dialog_versucht"):
+                # die Loss-Limit-Meldung liegt über dem Auslöser, steht aber in keinem lesbaren Dialog (augen_tsx.js < 0.7.4 oder anderes Gerüst) —
+                # ehrlicher Grund statt „Dialog offen?"; geklickt wird nur über einen gelesenen Dialog mit eindeutigem Schließ-Knopf
+                return _raus("konto_nicht_erreicht", (f"TopstepX-Meldung „{str(oben.get('text') or '')[:40]}“ über dem Konto-Auslöser, aber kein "
+                                                      "lesbarer Dialog (augen_tsx.js) — nichts geklickt."), st, popups=st.get("popups"))
             return _raus("konto_nicht_erreicht", (f"Konto-Auslöser {'gesperrt' if zu.get('disabled') else 'verdeckt'} "
                                                   f"('{str(oben.get('text') or oben.get('tag') or '')[:40]}') — Dialog offen? Nichts geklickt."),
                          st, popups=st.get("popups"))
@@ -23907,6 +23976,13 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             return raus(code, msg, "lesen")
         res.update(alter_s=0.0, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                    sprache_fremd=False, userscript=None, summary_fehler=None)
+        if order and isinstance(geblowt, dict) and geblowt.get("quelle") == "dialog":
+            # TS-D1 (20.11.2026, Master: „Meldet der Dialog MLL für das Zielkonto, gilt das Konto als geblowt → Plan nicht starten“): bisher wurde der
+            # Beweis nur gemerkt und danach trotzdem das Ticket geprüft. Nur der Dialog-Beweis (das aktive Ziel bzw. von der Meldung genannt) — der
+            # Listen-Hinweis bleibt wie bisher
+            art_k = "DLL" if geblowt.get("art") == "daily_loss" else "MLL"
+            return raus("konto_geblowt", (f"TopstepX meldet „{str(geblowt.get('text') or '')[:90]}“ — Konto {ext} geblowt, nichts platziert · "
+                                          f"Konto hat {art_k} erreicht (TopstepX-Dialog)."), "konto")
         if order:
             if res.get("offen") or res.get("positionen"):
                 # Prüfer 06.10.2026: seit die Augen Positionen lesen (tsx-0.6), endete K1 bei offener Position nicht mehr — die Probe
@@ -24282,13 +24358,20 @@ def win_ziel_pruef_dialog_js(x, y, pruef):
     Popup-Containers: das Element am Punkt muss in einem role=dialog/alertdialog/aria-modal-Vorfahren mit GENAU diesem Rechteck (± 6 px)
     stecken, sonst passt nichts. Gleicher Beweis wie win_ziel_pruef_js, nur diese Bedingung dazu — ohne pruef.dialog wird dieser Weg nie
     benutzt (win_ziel_pruef_js liefert dann denselben Text wie vor TX1c)."""
-    p = {k: v for k, v in pruef.items() if k != "dialog"}
+    p = {k: v for k, v in pruef.items() if k not in ("dialog", "kasten")}
     js = win_ziel_pruef_js(x, y, p)
     d = [float(v) for v in list(pruef.get("dialog") or [])[:4]] + [0.0] * 4
-    bindung = ("var dialog_ok=false,dq=e;while(dq&&dq.closest){dq=dq.closest('[role=\"dialog\"],[role=\"alertdialog\"],[aria-modal=\"true\"]');"
-               "if(!dq)break;var dr=dq.getBoundingClientRect();"
-               f"if(Math.abs(dr.left-{d[0]:.1f})<=6&&Math.abs(dr.top-{d[1]:.1f})<=6&&Math.abs(dr.width-{d[2]:.1f})<=6&&Math.abs(dr.height-{d[3]:.1f})<=6)"
-               "{dialog_ok=true;break;}dq=dq.parentElement;}")
+    if pruef.get("kasten"):
+        # TS-D1 (20.11.2026): Meldung OHNE ARIA-Rolle (augen_tsx.js limitOhneRolle, quelle 'text') — gebunden an den erkannten Kasten selbst: das
+        # Element am Punkt muss in einem Vorfahren mit GENAU diesem Rechteck (± 6 px) stecken (kein Rollen-Selektor möglich). Ohne kasten: wie TX1c.
+        bindung = ("var dialog_ok=false,dq=e;while(dq&&dq.getBoundingClientRect){var dr=dq.getBoundingClientRect();"
+                   f"if(Math.abs(dr.left-{d[0]:.1f})<=6&&Math.abs(dr.top-{d[1]:.1f})<=6&&Math.abs(dr.width-{d[2]:.1f})<=6&&Math.abs(dr.height-{d[3]:.1f})<=6)"
+                   "{dialog_ok=true;break;}dq=dq.parentElement;}")
+    else:
+        bindung = ("var dialog_ok=false,dq=e;while(dq&&dq.closest){dq=dq.closest('[role=\"dialog\"],[role=\"alertdialog\"],[aria-modal=\"true\"]');"
+                   "if(!dq)break;var dr=dq.getBoundingClientRect();"
+                   f"if(Math.abs(dr.left-{d[0]:.1f})<=6&&Math.abs(dr.top-{d[1]:.1f})<=6&&Math.abs(dr.width-{d[2]:.1f})<=6&&Math.abs(dr.height-{d[3]:.1f})<=6)"
+                   "{dialog_ok=true;break;}dq=dq.parentElement;}")
     alt_r = "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&"
     if js.count(alt_r) != 1:
         return "(function(){return {hover:false,passt:false,was:'Dialog-Bindung nicht einsetzbar'};})()"   # nie ein Druck ohne Bindung

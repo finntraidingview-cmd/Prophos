@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.7.3';   // 0.7.3 (17.11.2026, TX1): „Time Sync Warning“ auch ohne ARIA-Rolle als Popup (zeitsyncOhneRolle); jedes Popup trägt cls, ohne Titel/Text dazu leer {bilder, links, iframes} (TX1b Werbe-Popup); ohne Popup bitgleich ·0.7.2 (05.11.2026, SW3 „PCs ruhig“): billige Prüfungen vor sichtbar() (Rohliste, Kopf-Filter, „No Active Position“-Text) — gleiches Ergebnis, viel weniger getComputedStyle/Layout bei 10 Lesungen/s; Meldungs-Merker räumt > 60 s alte Einträge · 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
+  var VERSION = 'tsx-0.7.4';   // 0.7.4 (20.11.2026, TS-D1): Loss-Limit-Meldung „You Hit Your Maximum Loss Limit“ auch ohne ARIA-Rolle als Popup (limitOhneRolle); ohne die Meldung bitgleich · 0.7.3 (17.11.2026, TX1): „Time Sync Warning“ auch ohne ARIA-Rolle als Popup (zeitsyncOhneRolle); jedes Popup trägt cls, ohne Titel/Text dazu leer {bilder, links, iframes} (TX1b Werbe-Popup); ohne Popup bitgleich ·0.7.2 (05.11.2026, SW3 „PCs ruhig“): billige Prüfungen vor sichtbar() (Rohliste, Kopf-Filter, „No Active Position“-Text) — gleiches Ergebnis, viel weniger getComputedStyle/Layout bei 10 Lesungen/s; Meldungs-Merker räumt > 60 s alte Einträge · 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -297,8 +297,55 @@ var PROPHOS_AUGEN_TSX = (function () {
       out.push(o);
     });
     try { zeitsyncOhneRolle(out); } catch (_) {}
+    try { limitOhneRolle(out); } catch (_) {}
     out.forEach(function (o) { delete o._el; });
     return out;
+  }
+  /* LOSS-LIMIT-MELDUNG OHNE ARIA-ROLLE (tsx-0.7.4, TS-D1 20.11.2026, Marc pc-7ftp5l: acht Fehlstarts 19./20.11. „Konto-Auslöser verdeckt ('You Hit
+   * YourMaximum Loss Limit.Setbacks ') — Dialog offen? Nichts geklickt" — die Spur zeigt keine „TopstepX-Meldung", der Bot sah den Dialog nie.
+   * Finn: „Das muss weggeklickt werden können.") Wie zeitsyncOhneRolle: billiger Vortest auf den Seitentext, dann das innerste sichtbare Element,
+   * dessen Text die Meldung trägt (Titel kommt als „You Hit Your" + „Maximum Loss Limit." ohne Leerzeichen an), darüber (≤ 10 Ebenen) der KLEINSTE
+   * Kasten mit mindestens einem sichtbaren Knopf, höchstens 80 % der Fensterfläche. Kommt als Popup mit quelle 'text' dazu — nur, wenn die Meldung
+   * nicht schon in einem ARIA-Dialog steckt. Nur Merkmale (Text, Knöpfe mit icon/ecke), kein Urteil, kein Klick: entscheiden tut der Bot. */
+  var RX_LIMIT = /you\s*(have\s*)?hit\s*(your|the)\s*(maximum|daily|max\.?)\s*loss\s*limit|no\s*longer\s*eligible\s*for\s*funding/i;
+  // Kasten nur, wenn er (oder ein Vorfahr) position:fixed ist — ein Modal-Overlay, nie ein Banner/Hinweis im Panel neben Order-Karte oder
+  // Positions-Dock (Prüfer TS-D1: sonst könnte der Kasten deren Close-Kreuze enthalten und Senden bliebe dauerhaft „Dialog offen“)
+  function imOverlay(e) {
+    for (var i = 0; e && e !== document.body && i < 25; i++, e = e.parentElement) {
+      try { if (getComputedStyle(e).position === 'fixed') return true; } catch (_) { return false; }
+    }
+    return false;
+  }
+  function limitOhneRolle(out) {
+    if (!document.body || !RX_LIMIT.test(document.body.textContent || '')) return;
+    if (out.some(function (o) { return RX_LIMIT.test((o.titel || '') + ' ' + (o.text_voll || o.text || '')); })) return;
+    // SW3 „PCs ruhig“ (10 Lesungen/s): steht der Text nur im verborgenen DOM, ohne Fund höchstens alle 3 s einmal scannen
+    var g = globalThis.__prophosLimitScan = globalThis.__prophosLimitScan || { at: 0 }, jetzt = Date.now();
+    if (g.leer && jetzt - g.at < 3000) return;
+    g.at = jetzt; g.leer = true;
+    var kand = alle('h1,h2,h3,h4,h5,h6,div,span,p,strong,b,header,section').filter(function (e) {
+      return RX_LIMIT.test(txt(e)) && sichtbar(e);
+    });
+    kand = kand.filter(function (e) { return !kand.some(function (f) { return f !== e && e.contains(f); }); });   // innerstes
+    var fl = Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1));
+    kand.slice(0, 3).forEach(function (t) {
+      if (out.some(function (o) { return o._el && (o._el.contains(t) || t.contains(o._el)); })) return;
+      if (!imOverlay(t)) return;
+      var box = t;
+      for (var i = 0; box && box !== document.body && i < 10; i++, box = box.parentElement) {
+        var kn = alle('button,[role="button"]', box).filter(sichtbar);
+        if (!kn.length) continue;
+        var r = box.getBoundingClientRect();
+        if (r.width * r.height > 0.8 * fl) return;                        // ganze Seite statt Meldung → nichts liefern
+        if (!imOverlay(box)) return;                                      // Kasten ragt aus dem Overlay heraus → nichts liefern
+        if (out.some(function (o) { return o._el && (o._el.contains(box) || box.contains(o._el)); })) return;
+        g.leer = false;
+        out.push({ _el: box, role: attr(box, 'role'), rect: rect(box), titel: txt(t).slice(0, 60), text: txt(box).slice(0, 160),
+                   text_voll: txt(box).slice(0, 400), cls: klasse(box).slice(0, 60),
+                   knoepfe: kn.slice(0, 10).map(function (b) { return kurz(b, xMerkmale(b, box)); }), quelle: 'text' });
+        return;
+      }
+    });
   }
   /* TIME SYNC WARNING OHNE ARIA-ROLLE (tsx-0.7.3, TX1 17.11.2026, ein Topstep-PC: viermal 05:32–06:20 Dubai „Konto-Auslöser verdeckt ('Time Sync
    * WarningYour computer clock is ') — Dialog offen? Nichts geklickt", obwohl TS1 (16.11.) den Dialog wegklicken sollte — die Spur zeigt, dass
