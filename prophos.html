@@ -47031,7 +47031,8 @@
     if(!accTopstepRtpKonto(a) || !firmaAddonAn('topstep', 'rtp')) return ''
     const r = accRtpStand(a) || {}, zahl = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const usd = v => Math.round(v).toLocaleString('de-DE') + ' $'
-    const z = zahl(r.z), netto = zahl(r.netto), tage = zahl(r.tage)
+    // Feldnamen laut S1 (20.11.2026): z, netto, bester ($), bester_pct (% vom netto, z. B. 40.0; null bei netto ≤ 0), tage_n (= tage) — Stand beim Planen, vor dem Trade des Tages
+    const z = zahl(r.z), netto = zahl(r.netto), tage = zahl(r.tage_n ?? r.tage)
     // bester_pct: Prozent (40) — kommt ein Bruchteil (0,4), wird er umgerechnet; ein bester Tag unter 1 % des Profits kommt praktisch nicht vor
     let pct = zahl(r.bester_pct); if(pct != null && pct > 0 && pct <= 1) pct *= 100
     const teile = ['RTP']
