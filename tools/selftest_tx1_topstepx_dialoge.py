@@ -795,6 +795,7 @@ else:
     GEAENDERT.add("win_ziel_pruef_js")   # TX1c: Weiche zu win_ziel_pruef_dialog_js NUR mit pruef.dialog — Ausgabe sonst buchstabengleich (s. u.)
     GEAENDERT.add("_tsx_konto_sichern")  # TS-D1 (20.11.2026): Loss-Limit-Meldung bei aktivem Ziel + Dialog-Spur bei „verdeckt“ — geprüft in selftest_tsd1_mll_dialog.py
     GEAENDERT.update({"tsx_blow_dialog", "_tsx_blow_dialog_weg"})   # TS-D1: Art aus dem Treffer; Text-Weg mit Sperrzone + Kasten-Bindung (ebd.)
+    GEAENDERT.add("tsx_blow_dialog_knopf")   # TS-D1b (Stopp S2): nur ok/okay/close/dismiss/schließen/× — nie Continue/Got it/I understand (ebd.)
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},

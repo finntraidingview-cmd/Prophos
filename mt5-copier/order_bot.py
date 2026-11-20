@@ -16714,6 +16714,9 @@ TSX_RX_ICON_NIE = re.compile(r"expand|menu|info|help|setting|more|check|arrow|ch
 TSX_RX_KENNUNG_VOLL = re.compile(r"^[A-Z0-9][A-Z0-9-]*-\d{6}-\d{8}$")                           # 150KTC-SKU-V2-DLL-682437-17758280
 TSX_RX_DIALOG_KONTO = re.compile(r"account\s*:?\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
 TSX_RX_DIALOG_ZU = re.compile(r"^\s*(ok|okay|close|dismiss|got it|continue|i understand|understood|schlie(?:ß|ss)en|verstanden|[×✕✖])\s*$", re.I)
+# TS-D1b (Stopp S2 zu 024e2b83): für die LOSS-LIMIT-MELDUNG nur echte Schließ-Wörter — „Continue“/„Got it“/„I understand“ können dort in
+# Back2Funded/Reset weiterführen (Beleg: Knöpfe „Continue“ + „Reset Trading Combine“ → „Continue“ wäre gedrückt worden)
+TSX_RX_BLOW_ZU = re.compile(r"^\s*(ok|okay|close|dismiss|schlie(?:ß|ss)en|[×✕✖])\s*$", re.I)
 TSX_DIALOG_TABU = r"\b(buy|sell|flatten|reverse|submit|place|order|position|cancel|kauf|verkauf)\b"
 
 
@@ -16803,11 +16806,11 @@ def tsx_blow_dialog_knopf(popup):
             continue
         if re.search(TSX_DIALOG_TABU, t + " " + aria, re.I):
             continue
-        if TSX_RX_DIALOG_ZU.match(t):
+        if TSX_RX_BLOW_ZU.match(t):                       # TS-D1b: nur echte Schließ-Wörter (nie Continue/Got it/I understand)
             wort.append(dict(b, text=t, aus_aria=not text))
             continue
-        if text or (aria and not TSX_RX_DIALOG_ZU.match(aria)):
-            continue                                       # beschrifteter Knopf ohne Schließ-Wort (RESET …, USE ACCOUNT TO PRACTICE)
+        if text or (aria and not TSX_RX_BLOW_ZU.match(aria)):
+            continue                                       # beschrifteter Knopf ohne Schließ-Wort (RESET …, USE ACCOUNT TO PRACTICE, Continue)
         icon = str(b.get("icon") or "")
         if TSX_RX_ICON_NIE.search(icon):
             continue
@@ -16916,7 +16919,7 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
             pruef = dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
                           "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
         if text_weg:
-            pruef.update(tabu=TSX_UEBER_PRUEF_TABU, dialog=kasten, kasten=True)   # Text-Weg: Kasten-Bindung + strengere Tabu-Liste (Reset, Start …)
+            pruef.update(tabu=TSX_BLOW_PRUEF_TABU, dialog=kasten, kasten=True)   # Text-Weg: Kasten-Bindung + strengere Tabu-Liste (Reset, Continue …)
         ok = s.klick(r, f"Meldung schließen ({kn.get('name') or repr(kn['text'][:20])})", pruef=pruef)
     except Exception as e_:
         trail.append(f"Meldung schließen: {type(e_).__name__}: {str(e_)[:80]}")
@@ -17169,6 +17172,9 @@ TSX_RX_UEBER_ZU_SCHWACH = re.compile(r"^\s*(got it|no thanks|not now|maybe later
 TSX_UEBER_KNOPF_TABU = r"\b(get|code|claim|shop|buy|sell|upgrade|learn|join|sign|subscribe|redeem|order|position|account|reset|purchase|kauf|start|proceed)\b"
 TSX_UEBER_PRUEF_TABU = (r"\b(get|code|claim|shop|buy|sell|upgrade|learn|join|sign|subscribe|redeem|order|position|account|reset|purchase|kauf|"
                         r"start|proceed|flatten|reverse|submit|place|cancel|verkauf)\b")   # Ziel-Beweis: Knopf-Tabu + TSX_DIALOG_TABU
+# TS-D1b (Stopp S2): Ziel-Beweis der Loss-Limit-Meldung aus dem Text-Weg — Überlagerungs-Tabu plus Weiter-/Bestätigungs-Wörter. Eigene Liste, weil
+# Überlagerungen „Got it“ als (schwachen) Schließ-Knopf drücken dürfen (TSX_RX_UEBER_ZU_SCHWACH)
+TSX_BLOW_PRUEF_TABU = TSX_UEBER_PRUEF_TABU[:-3] + r"|continue|weiter|got\s+it|i\s+understand|understood|verstanden|activate|restart|practice)\b"
 TSX_UEBER_MAX = 4        # je Lauf höchstens viermal eine Überlagerung schließen — kommt immer wieder eine, Abbruch mit Grund
 _TSX_UEBER_N = [0]
 

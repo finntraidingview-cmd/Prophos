@@ -79,7 +79,13 @@ for knoepfe, soll, name in (
         ([{"text": "", "aria": "", "icon": "CloseIcon", "rect": R_X}, {"text": "RESET ACCOUNT", "rect": R_RESET}], "", "nur Symbol-X + Reset → Symbol-X"),
         ([{"text": "RESET ACCOUNT", "rect": R_RESET}, {"text": "ACTIVATE", "rect": R_OK}], None, "nur Reset/Activate → nichts"),
         ([{"text": "Buy More", "rect": R_RESET}, {"text": "Restart Combine", "rect": R_OK}], None, "Buy/Restart → nichts"),
-        ([{"text": "OK", "rect": R_OK}, {"text": "Close", "rect": R_RESET}], None, "zwei verschiedene Schließ-Wörter → nichts raten")):
+        ([{"text": "OK", "rect": R_OK}, {"text": "Close", "rect": R_RESET}], None, "zwei verschiedene Schließ-Wörter → nichts raten"),
+        # TS-D1b (Stopp S2 zu 024e2b83): Weiter-/Bestätigungs-Wörter können in Back2Funded/Reset führen — nie in der Loss-Limit-Meldung
+        ([{"text": "Continue", "rect": R_OK}, {"text": "Reset Trading Combine", "rect": R_RESET}], None, "Continue + Reset → nichts gedrückt"),
+        ([{"text": "Got it", "rect": R_OK}, {"text": "RESET ACCOUNT", "rect": R_RESET}], None, "Got it + Reset → nichts gedrückt"),
+        ([{"text": "I understand", "rect": R_OK}], None, "nur „I understand“ → nichts gedrückt"),
+        ([{"text": "", "aria": "Continue", "rect": R_X, "icon": "CloseIcon"}], None, "Symbol mit aria „Continue“ → nichts (kein Schließ-X)"),
+        ([{"text": "Continue", "rect": R_RESET}, {"text": "Dismiss", "rect": R_OK}], "Dismiss", "Continue + Dismiss → Dismiss")):
     k = ob.tsx_blow_dialog_knopf(popup(knoepfe=knoepfe))
     check((k is None) if soll is None else (k is not None and k.get("text") == soll), f"Knopf: {name} ({k and (k.get('text') or k.get('name'))})")
 
@@ -140,8 +146,15 @@ check(not ex.get("blow_dialog") and EXT not in (ex.get("konto_verletzungen") or 
 # Prüfer KRITISCH: genau so übernimmt der Aufrufer ex2 und fragt tsx_geblowt_urteil mit aktiv = jetzt das Ziel
 res_auf = {k: v for k, v in ex.items() if k in ("konto_gewechselt", "konto_hinweis", "konto_verletzungen", "blow_dialog")}
 check(ob.tsx_geblowt_urteil(res_auf, EXT, EXT) is None, "Aufrufer-Ebene: das gesunde Ziel gilt nach dem Wechsel NICHT als geblowt (kein Archiv)")
-check(s.pruef[0].get("kasten") is True and s.pruef[0].get("dialog") == R_KASTEN and "reset" in s.pruef[0].get("tabu", ""),
-      "Text-Weg: Ziel-Beweis an den Kasten gebunden (dialog = Kasten-Rechteck, kasten) + strenge Tabu-Liste (Reset …)")
+check(s.pruef[0].get("kasten") is True and s.pruef[0].get("dialog") == R_KASTEN and s.pruef[0].get("tabu") == ob.TSX_BLOW_PRUEF_TABU
+      and all(re.search(ob.TSX_BLOW_PRUEF_TABU, w, re.I) for w in ("Reset Trading Combine", "Continue", "Got it", "I understand"))
+      and not any(re.search(ob.TSX_BLOW_PRUEF_TABU, w, re.I) for w in ("OK", "Close", "Dismiss")),
+      "Text-Weg: Ziel-Beweis an den Kasten gebunden + Tabu (Reset, Continue, Got it, I understand), OK/Close/Dismiss frei")
+# TS-D1b Beleg von S2 als ganzer Lauf: Text-Weg-Meldung mit „Continue“ + „Reset Trading Combine“ → nichts gedrückt
+ok, code, msg, ex, s, sp = lauf([konto(ALT, [popup(knoepfe=[{"text": "Continue", "rect": R_OK}, {"text": "Reset Trading Combine", "rect": R_RESET}])],
+                                       VERDECKT), konto(ALT, [popup()], VERDECKT)], [True])
+check(not s.klicks and "kein eindeutiger Schließ-Knopf" in sp, f"Beleg S2: Continue + Reset Trading Combine → nichts gedrückt ({code})")
+check(re.search(ob.TSX_UEBER_PRUEF_TABU, "Got it", re.I) is None, "Überlagerungen unverändert: „Got it“ dort weiter nicht tabu")
 ok, code, msg, ex, s, sp = lauf([konto(EXT, [popup(quelle="")]), konto(EXT), konto(EXT)], [True])
 check(len(s.pruef) == 1 and "kasten" not in s.pruef[0] and "dialog" not in s.pruef[0], "ARIA-Dialog: Ziel-Beweis wie bisher (keine Kasten-Bindung)")
 # Sperrzone: der OK-Knopf liegt über dem Kauf-Knopf der Order-Karte → kein Druck (wie TX1c bei Überlagerungen)
