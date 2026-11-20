@@ -60410,7 +60410,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2270'
+  const OS_TAB_BUILD = '2026-09-22.2271'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -69354,6 +69354,7 @@
         hinweis_code: x.hinweis_code || null, hinweis_fix: x.hinweis_fix || null, ext_fehlt: !!x.ext_fehlt,   // genauer Kontowert-Grund + Fix (app.py ap_kontowert_grund, 09.10.2026)
         typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
         route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
+        symbol: (typeof x.master_symbol === 'string' && x.master_symbol.trim()) || null,   // SK1-L: Funded-Planer-Zeile (MNQ/NQ) → „3 × MNQ“ (fdpQuelleBauen)
         satz: tplNum(x.satz_eur_je_usd),   // Kontowert-Satz € je $ (Delta offen[]) — Hypo-P&L (07.10.2026)
         balance: tplNum(x.balance) ?? tplNum(g && g.balance), rest: tplNum(x.rest) ?? tplNum(g && g.rest),
         bal_startwert: tplNum(x.balance) == null && /^Startwert/.test(String((g && g.bal_quelle) || '')),   // frisches Konto (09.10.2026)   // Planer-Balance + Rest bis Ziel (Lauf-Zeile, alle IDs)
@@ -70972,7 +70973,10 @@
         richtung: t.richtung, startUm: iso(t.start), startUmGestartetAt: null,
         masterTp: t.tp != null ? t.tp : (t.tp_punkte != null && t.usd != null ? t.tp_punkte * t.usd : 0),
         masterSl: t.sl != null ? t.sl : (t.sl_punkte != null && t.usd != null ? t.sl_punkte * t.usd : 0),
-        masterContracts: t.menge, masterSymbol: (echt && echt.masterSymbol) || (Number(t.usd) === 2 ? 'MNQ' : 'NQ'),
+        // SK1-L (20.11.2026): Symbol der Zeile (Funded-Planer: master_symbol/instr), sonst aus $/Pkt JE KONTRAKT (usd_pro_pkt ist die Summe über die Menge —
+        // „=== 2“ traf nur 1 MNQ, 3 MNQ = 6 $/Pkt zeigte „3 × NQ“)
+        masterContracts: t.menge, masterSymbol: (echt && echt.masterSymbol) || t.symbol
+          || (Number(t.usd) > 0 && Number(t.menge) > 0 && Math.abs(Number(t.usd) / Number(t.menge) - 2) < 1e-6 ? 'MNQ' : 'NQ'),
         autoPlan: t.auto, autoBestaetigtAt: t.status === 'bestaetigt' ? ((echt && echt.autoBestaetigtAt) || 'ja') : null, kontoTyp: t.typ || (echt && echt.kontoTyp) || null,
         // Topstep-Kette fremder IDs (09.10.2026): kette-Block aus dem Delta, damit tpKetteSchritt „Trade 1 · …" zeigt; eigene Pläne haben ihn schon
         ...(!(echt && echt.mt5Baseline) && t.kette ? { mt5Baseline: { kette: t.kette } } : {}) })
@@ -91740,7 +91744,7 @@
       const p = { id: String(z.plan_id), status: art === 'laeuft' ? 'open' : art === 'braucht' ? 'review' : 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
         masterAccountId: t.konto_id || null, richtung: geplant ? apIdsRiLokal(z) : z.richtung, startUm: z.start_um || null, startUmGestartetAt: geplant ? null : (z.start_um || 'ja'),
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge,
-        masterSymbol: pzwIstLot({ route: z.route || t.route || null, masterFirm: z.firma }) ? '' : (z.symbol || 'NQ'),   // 20.10.2026: mt5 (Echo mit Hedge) ist Lot, nicht NQ
+        masterSymbol: pzwIstLot({ route: z.route || t.route || null, masterFirm: z.firma }) ? '' : (z.symbol || z.master_symbol || 'NQ'),   // 20.10.2026: mt5 (Echo mit Hedge) ist Lot, nicht NQ · SK1-L: master_symbol der Funded-Planer-Zeile (MNQ)
         autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null,
         // FF2 (11.11.2026): Pump-Tag des Funded-Planers Futures — kette {von 2, nr} → „Trade 1/2“ + ⛓ (tpKetteSchritt in planZeileHtml); nur Funded-Zeilen, Challenge unverändert
         ...(z.typ === 'funded' && z.kette && typeof z.kette === 'object' ? { mt5Baseline: { kette: z.kette } } : {}),
@@ -94526,7 +94530,17 @@ ${stBlock}
     const namen = new Map((d.ids || []).map(x => [String(x.user_id), x.name || String(x.user_id).slice(0, 8)]))
     const heute = tplDatum(new Date()), vorschau = !d.aktiv
     const zeile = (x, extra) => {
-      const kt = Number(x.kontrakte ?? x.menge) || null, usd = kt ? 20 * kt : null
+      /* SK1-L (Master 20.11.2026, Befund S2): Punktwert fest 20 $ (NQ) — Striking plant auch MNQ (rc3_recovery_lots → instr 'mnq'), dann stand
+       * „3 × NQ“ und 13,2 statt 1,3 Lot Fusion in „Zu bestätigen“. Jetzt aus dem Plan: Symbol (master_symbol/symbol) bzw. instr ('mnq'|'nq'),
+       * Punktwert über hedgePplFuer (NQ 20 · MNQ 2, wie der Startweg). Unbekannt → wie bisher NQ (20 $). Nur Anzeige, Start-/Hedge-Logik unberührt. */
+      // Echter Plan der eigenen ID: Symbol/Risiko/Multiplikator aus den geladenen Plänen (plaene[] von Railway trägt sie nicht — Gegencheck 20.11.2026)
+      const eigenP = x.plan_id ? (tradePlans || []).find(q => String(q.id) === String(x.plan_id)) : null
+      const instrX = String(x.instr || '').toLowerCase()
+      const symRoh = String(x.master_symbol || x.symbol || (eigenP && eigenP.masterSymbol) || (instrX === 'mnq' ? 'MNQ' : instrX === 'nq' ? 'NQ' : '')).trim()
+      const pplRoh = symRoh && typeof hedgePplFuer === 'function' ? hedgePplFuer(symRoh) : 0
+      const symX = pplRoh > 0 ? symRoh : ''   // nur NQ/MNQ — ein anderes Symbol (ES …) bliebe sonst mit NQ-Punkten stehen
+      const pplX = pplRoh || 20
+      const kt = Number(x.kontrakte ?? x.menge) || null, usd = kt ? pplX * kt : null
       const rest = x.ziel != null && x.balance != null ? Math.max(0, Number(x.ziel) - Number(x.balance)) : null
       // Funded-Werte wie der Challenge-Planer seine Stufe zeigt (Spalte „Stufe" / Notiz): Stufe · Daily Loss · Liq · Hedge · offene Kosten
       const stufe = x.stufe != null ? [`Stufe ${x.stufe}${x.dll ? ' · DL ' + Math.round(x.dll).toLocaleString('de-DE') + ' $' : ''}`,
@@ -94547,7 +94561,21 @@ ${stBlock}
       // Lots: Vorschau liefert sie direkt, angelegte Pläne über hedge_eur ÷ (0,85 €/Pkt × TP-Punkte) — dieselbe Formel rückwärts.
       const fusPpl = typeof tpWdSlavePpl === 'function' ? tpWdSlavePpl() : 0.85
       const fusMinus = x.hedge_eur ?? x.hedge_tp_eur ?? null, tpPkt = kt && Number(x.tp) > 0 ? Number(x.tp) / usd : null
-      const fusLots = Number(x.lots) > 0 ? Number(x.lots) : (Number(fusMinus) > 0 && tpPkt ? Math.round(Number(fusMinus) / (fusPpl * tpPkt) * 100) / 100 : null)
+      // SK1-L (Master 20.11.2026, Marc 100k …06: 3 MNQZ6, slave_risk 2.509,88, master_risk 12.549,38, Server multiplier 0,4388 → ≈ 1,3 Lot): dieselbe Lot-Rechnung
+      // wie der Startweg (hedgeLotsSoll: frisch aus slave_risk/master_risk, sonst Kontrakte × multiplier) auf einem Plan-Abbild der Zeile. Fehlen diese Felder
+      // (Vorschau ohne Plan), wie bisher: Lots der Vorschau, sonst Hedge ÷ (€/Pkt × TP-Punkte).
+      // Vorschau ohne Plan (d.geplant): x.lots ist die Server-Rechnung (fdp_hedge), daraus entsteht der Plan — die bleibt vorn (für NQ unverändert)
+      let fusStart = null
+      if(x.plan_id) try{
+        const pAbbild = { masterContracts: kt, masterSymbol: symX || 'NQ', masterTp: Number(x.tp) || 0, masterSl: Number(x.sl) || 0, route: x.route || null,
+          masterAccountId: x.konto_id || null, kontoTyp: 'funded', hedgeEur: Number(fusMinus) || 0,
+          multiplier: Number(x.multiplier ?? (eigenP && eigenP.multiplier)) || null,
+          slaveRisk: Number(x.slave_risk ?? x.slaveRisk ?? (eigenP && eigenP.slaveRisk)) || null, masterRisk: Number(x.master_risk ?? x.masterRisk ?? (eigenP && eigenP.masterRisk)) || null,
+          mt5Baseline: (x.mt5_baseline && typeof x.mt5_baseline === 'object') ? x.mt5_baseline : (eigenP && eigenP.mt5Baseline) || null }
+        const l = kt && typeof hedgeLotsSoll === 'function' ? hedgeLotsSoll(pAbbild, kt, pplX) : undefined
+        if(Number(l) > 0) fusStart = Number(l)
+      }catch(_){}
+      const fusLots = fusStart != null ? fusStart : Number(x.lots) > 0 ? Number(x.lots) : (Number(fusMinus) > 0 && tpPkt ? Math.round(Number(fusMinus) / (fusPpl * tpPkt) * 100) / 100 : null)
       const fusion = (fusMinus != null || x.hedge_sl_eur != null) ? { lots: fusLots, minus: fusMinus != null ? Number(fusMinus) : null,
         plus: x.hedge_sl_eur != null ? Number(x.hedge_sl_eur) : null, gedeckt: x.offen_eur != null ? Number(x.offen_eur) : null,
         imPlus: !!x.hedge_quelle && x.hedge_basis !== 'pump_b',   // AH2 (10.11.2026): gedeckt ist dann die Hedge-Basis aus dem festen Satz, nicht die offenen Kosten (Tooltip)
@@ -94558,6 +94586,7 @@ ${stBlock}
         firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: x.route || (/topstep/i.test(String(x.firma || '')) ? 'tsv2' : 'tvv2'),
         start_um: x.start_um || null, start: x.start_um || null,
         menge: kt, tp: x.tp ?? null, sl: x.sl ?? null, notes: stufe ? 'Funded-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
+        master_symbol: symX || null,   // SK1-L: „3 × MNQ“ statt des Renderer-Rückfalls „NQ“ (leer = wie bisher)
         konto_id: String(x.konto_id || ''), balance_live: true, boden: x.liq ?? null, boden_min: x.liq ?? null, boden_art: x.liq != null ? 'nachziehend_lock' : null,
         auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd,
         // FF2: Pump-Tag mit zwei Trades — kette {von: 2, nr} aus /admin/funded-plan (plaene[]/geplant[]) → „Trade 1/2“ + ⛓ wie die Tages-Kette (ttSchritt); fehlt = wie bisher
