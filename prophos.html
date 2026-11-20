@@ -19175,7 +19175,15 @@
       const sub = `${e.probation ? 'Probation' : 'Zyklus'} ${e.netto >= 0 ? '+' : '−'}${n0(e.netto)} $ · bester Tag ${n0(e.bester)} $ · Nr. ${e.nr} max. ${geld(e.deckel)}`
       const tip = `Striking Apex: ${e.probation ? 'Trader Probation' : 'Zyklus'} seit ${tagTxt}, Start ${geld(e.start)} → Balance ${geld(c.bal)}`
         + ` · Betrag = min(Cap Payout Nr. ${e.nr}, 50 % vom Netto)`
-      const info = { tage: e.tage, ziel: e.ziel, schwelle: e.schwelle, netto: e.netto, bester: e.bester, cons: e.cons, probation: e.probation, ok: e.ok, fehlt: e.fehlt, nr: e.nr, start: e.start, seit: e.seit }
+      // SK1-K2 (Finn 20.11.2026: „wir haben nicht alle Trades gezählt“): die gezählten Handelstage ab Zyklus-Start mit Datum + $ je Tag — dieselbe Auswahl wie
+      // skApexRechnung (gültiges Datum, Tag ≥ seit, je Tag summiert, auf Cent) — für den Tooltip am Stand „Striking n/5 Tage“
+      const jeTag = new Map()
+      for(const t of (Array.isArray(s.tage) ? s.tage : [])){
+        const tg = String(t && t.tag || '').slice(0, 10), pl = Number(t && t.pl)
+        if(/^\d{4}-\d{2}-\d{2}$/.test(tg) && tg >= e.seit && Number.isFinite(pl)) jeTag.set(tg, (jeTag.get(tg) || 0) + pl)
+      }
+      const tageListe = [...jeTag.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([tag, v]) => ({ tag, pl: Math.round(v * 100) / 100 }))
+      const info = { tage: e.tage, ziel: e.ziel, schwelle: e.schwelle, netto: e.netto, bester: e.bester, cons: e.cons, probation: e.probation, ok: e.ok, fehlt: e.fehlt, nr: e.nr, start: e.start, seit: e.seit, tageListe }
       const rx = Object.assign({}, regel, { deckel: e.deckel, quelle: tip })
       if(e.ok) return { regel: rx, grund: '', roh: e.roh, gedeckelt: e.gedeckelt, anfragbar: e.betrag, erhalten: e.betrag * c.pct / 100, sub, striking: info }
       return { regel: rx, grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub, striking: info, minus: e.grund }
@@ -19194,8 +19202,9 @@
       if(dd == null || !caps) return { regel, grund: `${c.size / 1000}k: keine Apex-Payout-Tabelle`, anfragbar: null, erhalten: null }
       // SK1-K: Striking-Konto mit Zyklus-Start → nur ab Zyklus-Start rechnen (Recoverer und Lebens-Puffer gelten hier nicht, Striking ersetzt beides)
       // Feld `striking` als Objekt = Striking-Konto (auch ohne Start → fail-closed in admApexStriking); ein boolesches striking (FundingPips CFD) zählt nicht
-      // Offene Anfrage (Chip „angefragt …“) bleibt wie bisher, auch mit Striking-Daten (Finn 20.11.2026: „Die, die angefragt sind, das passt“)
-      if(r.striking && typeof r.striking === 'object' && !admAnfrageVon(r)) return admApexStriking(r, c, regel, caps)
+      // Offene Anfrage (Chip „angefragt …“) bleibt wie bisher, auch mit Striking-Daten (Finn 20.11.2026: „Die, die angefragt sind, das passt“) —
+      // SK1-K2: aber nur eine Anfrage AB Zyklus-Start; eine ältere (Payout des alten Zyklus, Geld noch unterwegs) rechnet Striking (admAnfrageImZyklus)
+      if(r.striking && typeof r.striking === 'object' && !admAnfrageImZyklus(r)) return admApexStriking(r, c, regel, caps)
       const puffer = c.size + dd
       const ueber = c.bal - puffer
       const nr = (Number(r.payouts_n) || 0) + 1
@@ -20527,6 +20536,20 @@
     // Vorbelegung (S2 31.10.2026): Finanzen laufen in Euro, alle Summen zur Anfrage rechnen ohne Umrechnung → Betrag in €, Kurs wie überall _fxUsdEur. Ohne Kurs (GBP): leer, Finn trägt ein.
     const admAnfrageVorbelegung = (wert, ccy, fx) => { const v = Number(wert), r2 = x => Math.round(x * 100) / 100; if(!(v > 0)) return null; return ccy === 'EUR' ? r2(v) : ccy === 'USD' && Number(fx) > 0 ? r2(v * Number(fx)) : null }
     const admAnfrageVon = r => (admData?.pending_payouts || []).filter(t => t.account_id ? String(t.account_id) === String(r.account_id) : String(t.account_name || '').trim() === String(r.account_name || '').trim() && String(t.user_id) === String(r.user_id)).pop() || null
+    /* SK1-K2 (Finn 20.11.2026, Admin → Payouts: „Warum sind Marcs Accounts hier quasi als anfragbar? … wir haben nicht alle Trades gezählt“ — Marc Apex 100k …05 / 150k …02
+     * standen auf 🏆 5/5 · Anfragbar 2.500 / 3.000 $): ihre offene Anfrage vom 09.11. ist Payout #1 des ALTEN Zyklus (approved, Geld unterwegs); wegen der Ausnahme
+     * „angefragt = wie bisher“ rechneten die Zeilen wieder nach dem Lebens-WD-Zähler. Für Striking-Konten zählt eine offene Anfrage nur, wenn sie AB Zyklus-Start
+     * (striking_zyklus_seit, Dubai-Tag wie skSeitTag) — echt nach dem Start-Tag — gestellt wurde; eine ältere bleibt als Chip sichtbar, gerechnet wird Striking. Fehlt das Anfrage-Datum, rechnet
+     * ebenfalls Striking (fail-closed: nie ein „anfragbar“ aus dem alten Zähler), genauso ohne Zyklus-Datum. Ohne Striking-Feld wie bisher. pending_payouts bleibt unangetastet. */
+    function admAnfrageImZyklus(r){
+      const t = admAnfrageVon(r)
+      if(!t || !(r && r.striking && typeof r.striking === 'object')) return t
+      const seit = skSeitTag(r.striking.zyklus_seit), am = skSeitTag(t.requested_at)
+      // Zyklus-Datum fehlt → null: admApexStriking zeigt „Zyklus-Datum fehlt“ (fail-closed), nie der alte Zähler
+      // Prüfer S2 (20.11.2026): echt NACH dem Start-Tag — am Tag seit liegt der Payout, der den Zyklus startet (Zyklus-Start = Payout-Datum); eine Anfrage im
+      // neuen Zyklus braucht 5 Tage ≥ Schwelle und kann nie am Start-Tag liegen
+      return (seit && am && am > seit) ? t : null
+    }
     function admAnfrageChip(st, r){
       const t = admAnfrageVon(r)
       if(t){
@@ -20535,6 +20558,18 @@
         chip.textContent = `angefragt ${admGeld(Number(t.amount) || 0, t.currency)}${tag ? ' · ' + tag : ''}`
         chip.title = t.liegt_bei ? 'Liegt bei ' + t.liegt_bei : 'Anfrage offen, noch nicht erhalten'
         st.appendChild(chip)
+        // SK1-K2: Anfrage aus dem ALTEN Zyklus (vor striking_zyklus_seit) — Chip bleibt als Info (Geld unterwegs), darunter der Striking-Stand ab Zyklus-Start.
+        // Kein Knopf „anfragbar“, solange eine Anfrage offen ist (nie zwei Anfragen nebeneinander)
+        const sk = r.calc && r.calc.anf && r.calc.anf.striking
+        if(sk && !admAnfrageImZyklus(r)){
+          chip.title = `Payout aus dem alten Zyklus (vor Zyklus-Start ${sk.seit || '?'}) — Geld unterwegs, zählt nicht für den neuen Zyklus`
+            + (t.liegt_bei ? ' · liegt bei ' + t.liegt_bei : '')
+          const s = document.createElement('div'); s.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:2px;white-space:normal;max-width:220px'
+          s.textContent = r.calc.anf.minus || 'Striking erfüllt — erst nach Eingang des alten Payouts anfragen'
+          s.title = `Striking Apex: ${sk.ziel} Tage ≥ ${sk.schwelle} $ seit Zyklus-Start, Consistency ≤ 50 %, `
+            + (sk.probation ? 'Probation: Profit ≥ Minimum Profit' : 'Balance ≥ Mindest-Payout-Balance') + ' — wie das Apex-Dashboard'
+          st.appendChild(s)
+        }
       }else if(r.calc && r.calc.anf && r.calc.anf.minus){
         // PO2 (Finn 11.11.2026): Zyklus im Minus ab Zyklus 2 → kein „anfragbar“, dezent der Grund
         const s = document.createElement('div'); s.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:2px;white-space:normal;max-width:220px'
@@ -21439,7 +21474,7 @@
           const faellig = tag ? tage <= 0 : !!r.wd_ready && !wdAbAusIso(r.wd_ab)   // WE1: Ziel erst heute voll → noch nicht fällig
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
-          if(!tag && r.calc.anf.striking) r.calc.faellig = !!r.calc.anf.striking.ok   // SK1-K: Striking fällig nur bei erfüllten Regeln, nicht nach WD-Zähler
+          if(!tag && r.calc.anf.striking) r.calc.faellig = !!r.calc.anf.striking.ok && !admAnfrageVon(r)   // SK1-K: Striking fällig nur bei erfüllten Regeln, nicht nach WD-Zähler; SK1-K2: nicht, solange die alte Anfrage offen ist
           // PO2: Railway kann den Tradeify-/Lucid-Zyklus nicht entscheiden → Urteil der Konto-Kachel holen (/konto-ziele, je Konto höchstens alle 5 min, nur diese Zeilen)
           if(istWd(r)){ const zyU = window._wdZyklusRoh?.(r.account_id)
             if(zyU && zyU.art === 'tradeify' && zyU.grund_code === 'unbekannt'){ const u = _admOd.cache[String(r.account_id)]; if(!u || Date.now() - u.at > ADM_OD_TTL_MS) admOdLaden(String(r.account_id)) } }
@@ -21697,7 +21732,16 @@
             s.style.cssText = `font-weight:600;color:${w.ready ? 'var(--good)' : 'var(--violet)'}`
             // SK1-K: Striking zeigt die Tage ≥ Schwelle seit Zyklus-Start („Striking 1/5 Tage“), nicht den Lebens-WD-Zähler
             s.textContent = w.striking ? `Striking ${Math.min(w.count, w.target)}/${w.target} Tage` : `🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}`
-            if(w.striking) s.title = `Tage mit ≥ ${w.striking.schwelle} $ seit ${w.striking.seit || 'Zyklus-Start'} (Lebens-Winning-Days: ${r.wd_count ?? '—'}/${r.wd_target ?? '—'})`
+            if(w.striking){
+              // SK1-K2 (Finn 20.11.2026): welche Trades zählen — je Handelstag ab Zyklus-Start Datum + $, ✓ = Tag ≥ Schwelle
+              const tl = Array.isArray(w.striking.tageListe) ? w.striking.tageListe : []
+              const dTxt = tg => new Date(tg + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
+              const pTxt = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+              s.title = `Tage mit ≥ ${w.striking.schwelle} $ seit ${w.striking.seit || 'Zyklus-Start'} (Lebens-Winning-Days: ${r.wd_count ?? '—'}/${r.wd_target ?? '—'})`
+                + (!Array.isArray(w.striking.tageListe) ? ''   // Startwerte fehlen (fehltWas) — der Grund steht unter dem Stand
+                   : tl.length ? '\nGezählte Handelstage ab Zyklus-Start:\n' + tl.map(x => `${dTxt(x.tag)}  ${pTxt(x.pl)}${x.pl >= w.striking.schwelle ? '  ✓' : ''}`).join('\n')
+                   : '\nSeit Zyklus-Start noch kein Handelstag mit Ergebnis')
+            }
             st.appendChild(s)
             const d = dots(r); if(d) st.appendChild(d)
             admAnfrageChip(st, r)
@@ -60527,7 +60571,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2277'
+  const OS_TAB_BUILD = '2026-09-22.2278'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
