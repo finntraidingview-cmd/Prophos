@@ -9117,6 +9117,10 @@ def admin_build_overview(kapitel_id=None):
             "payout_pct": _pnum(a.get("payout_pct")),
             "payout_override": _pnum(a.get("payout_override")),
         })
+    try:   # SK1 Nachtrag 4 (Vertrag mit S4): Apex-Zeilen mit Striking-Startwerten bekommen striking {…}; Fehler/Spalten fehlen → Feld fehlt, Anzeige wie bisher
+        sk_payout_anhaengen(payout_ready, accounts)
+    except Exception as e:
+        print(f"[striking] ⚠️ payout_ready.striking: {type(e).__name__}: {str(e)[:160]}", flush=True)
     payout_ready = dk_ohne_deaktiviert(payout_ready, dk_deaktiviert_anzeige())   # DK1 (17.11.2026): deaktiviert = nicht in Admin → Payouts / WD-Überblick
     payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 
@@ -16779,6 +16783,8 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts, rc_regel=None):
         aktiv, code, grund = False, "keine_regel", "Recoverer nicht eingerichtet (zyklus_regel fehlt) → sql/2026-11-02_recoverer.sql einspielen"
     elif not r.get("aktiv", True):
         aktiv, code, grund = False, "regel_aus", "Recoverer-Regel aus (wd_farmer_regeln.zyklus_regel.aktiv)"
+    elif (konto or {}).get("striking"):   # SK1 (20.11.2026): Striking ersetzt Recoverer/Recovery — Verlust → Rest neu verteilen im Striking-Planer
+        aktiv, code, grund = False, "striking", "Striking-Add-on (Apex) — Striking verteilt den Rest neu, kein Recoverer"
     elif not farm:
         aktiv, code, grund = False, "kein_farm", "Konto nicht im Winning-Day-Farmer (Haken aus)"
     elif key not in firmen:
@@ -17279,7 +17285,10 @@ def _wd_zyklus_anhaengen(konten):
         except Exception:
             _rc_apex = None
         _rc_apex = _rc_apex if isinstance(_rc_apex, dict) else None
+        _sk_u = _sk_lesen()[0]   # SK1: Striking-Konten (alle Aufrufer, nicht nur /admin/wd-plaene) — Recoverer aus
         for k in apex:
+            if sk_ist_konto(dict(k, account_type=k.get("account_type") or k.get("type") or "winning_days"), _sk_u):
+                k["striking"] = True
             if wd_zyklus_firma_key(k):
                 k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), rc_regel=_rc_apex)
         try:   # eigener try (Gegenprüfung 03.11.2026): ein Fehler im Tradeify-Teil darf den Apex-Stand nie mitreißen
@@ -18419,6 +18428,12 @@ def admin_wd_plaene():
                     "max_risiko_trade": _wd_num(a.get("max_risiko_trade")),
                     "wd_zyklus_regel": a.get("wd_zyklus_regel"),   # Recoverer-Schalter je Konto (02.11.2026): null / an / aus
                 })
+            # SK1 STRIKING (20.11.2026): Striking ersetzt WD-Farmer und Recoverer — Apex-Konten einer ID mit Striking fahren hier nicht (Tab: „nicht im Farm“),
+            # striking = true für die Anzeige; der Recoverer (wd_zyklus_konto) bleibt für sie aus. Lesefehler → niemand Striking (wie bisher)
+            _sk_u = _sk_lesen()[0]
+            for k in konten:
+                if sk_ist_konto(k, _sk_u):
+                    k.update(wd_farm=False, striking=True)
             zyklus_ok = _wd_zyklus_anhaengen(konten)
             # HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Für den heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht
             # wurde, aber für die zukünftigen ja"): je Konto der späteste Start eines Plans im CME-Handelstag des Lauf-Tags (wd_cme_tag_start) — der Farmer
@@ -18574,6 +18589,7 @@ def admin_wd_plaene():
             return jsonify({"error": "plaene fehlt"}), 400
         angelegt, uebersprungen, verknuepft = [], [], []
         sperren = _ap_sperren()   # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein neuer Farmer-Plan; Lesefehler → leer (wie bisher)
+        _sk_u = _sk_lesen()[0]    # SK1: Striking-Konten bekommen keinen Farmer-Plan (Striking ersetzt den Farmer)
         # PAYOUT OFFEN (R2c, 05.11.2026 — Vorfall Jacob 04.11.: der Mac legte bei offener Anfrage zweimal je 3 WD-Pläne an, W1 zog sie wieder zurück):
         # dieselbe Regel wie wd_payout_abgleich — Konto mit offener Anfrage (pending_payouts status pending) bekommt keinen Plan; der Grund ist genau
         # WD_HINWEIS_PAYOUT, der Mac schreibt ihn als Hinweis in die Tageszeile, und W1 holt das Konto nach dem Abhaken von selbst zurück.
@@ -18616,9 +18632,11 @@ def admin_wd_plaene():
                 if not _admin_darf_uid(uid):   # Admin-Gruppen (08.10.2026): Verwalter legt nur für IDs seiner Gruppe an
                     uebersprungen.append({"master_account_id": mid, "grund": "ID nicht in deiner Gruppe"}); continue
                 # Konto muss dieser Person gehören — sonst landet ein Plan im falschen Profil
-                acc = sb_select("accounts", {"select": "id,user_id,name,firm,waiting_payout_since", "id": f"eq.{mid}"})
+                acc = sb_select("accounts", {"select": "id,user_id,name,firm,waiting_payout_since,account_type", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
+                if sk_ist_konto(acc[0], _sk_u):
+                    uebersprungen.append({"master_account_id": mid, "grund": SK_GRUND_WD}); continue
                 if ap_firma_gesperrt(acc[0], sperren):
                     uebersprungen.append({"master_account_id": mid, "grund": AP_GRUND_GESPERRT}); continue
                 if po_fehler:
@@ -49515,6 +49533,232 @@ def _fdp_ht_ids():
         return []
 
 
+# ══ STRIKING FÜR APEX (SK1, Finn 20.11.2026 ~04:15 Dubai: Konstrukt „passt“, Hedge „0.2 auf max drawdown“) ══
+# Spezifikation: .claude/master/berichte/2026-11-20_SK1_striking_apex_konstrukt.md. Gesetzt je ID × Firma (public.addon_firma: user_id, 'apex',
+# 'striking', an) — gilt für alle Apex-Fundeds (funded UND winning_days) dieser ID. Diese Konten plant der Funded-Planer auf einem eigenen Weg
+# (fdp_planen → sk_konto_rechnen, Rechnung in striking_apex.py): je Konto und Tag höchstens 1 Trade, erst kleine normale Trades (keine WD), dann
+# Pump-Trades bis GENAU zum Ziel (nie darüber), SL 60–90 % des Daily Loss der Stufe, Hedge 0,2 € je $ Abstand zum Konto-Boden, Lots aus der
+# Recovery-Staffel (RC3). Fenster, Abstände, Tagesdeckel und Firmen-Abstand (DB-Trigger) wie jeder Funded-Plan. Striking ersetzt WD-Farmer und
+# Recoverer: diese Konten fahren dort nicht (admin_wd_plaene, wd_zyklus_konto).
+# EIGENES GATE (Nachtrag 3, Finn 20.11. ~04:35: „Nur den Planer gerade nur für Marc freischalten … Jede ID einzeln prüfen. Nicht schnell schnell.“):
+# die Apex-Firmen-Pause (sql/2026-11-20_apex_pause.sql) sperrt Challenge-, Funded- und WD-Planer für Apex, NICHT Striking. Striking plant nur
+#   (1) wenn striking_regeln.aktiv (globaler Not-Aus, Standard aus), (2) IDs mit addon_firma (apex, striking, an), (3) Konten mit allen Startwerten
+#   (striking_zyklus_start, striking_zyklus_seit, striking_payout_nr) — fail-closed. Ohne lesbare addon_firma (SQL nicht eingespielt) ist niemand
+#   Striking — alles wie bisher. Gezählt wird nur der Zyklus (Nachtrag 1): Trades mit Ende ≥ striking_zyklus_seit, nie die Lebensdauer des Kontos.
+try:
+    import striking_apex as sk_apex   # eigenes Modul wie polar_app (reine Rechnung, Selbsttest tools/selftest_striking.py)
+except Exception as _sk_e:            # fehlt das Modul, plant Striking nichts (Konten bleiben ausgelassen mit Grund) — der Planer läuft weiter
+    sk_apex = None
+    print(f"[striking] ⚠️ striking_apex nicht ladbar: {type(_sk_e).__name__}: {_sk_e}", flush=True)
+SK_CACHE_S = 60
+SK_KONTOARTEN = ("funded", "winning_days")
+SK_FIRMA_KEY = "apextrader"   # = namen[0] der Apex-Regel (FDP_FIRMEN_STANDARD) — Schlüssel des Firmen-Abstands, auch wenn die Regel aus ist
+SK_GRUND_START = ("Striking: Startwerte fehlen — am Konto Zyklus-Start (Balance), Zyklus seit (Datum), Payout-Nr. und Probation ja/nein eintragen "
+                  "(Muster: sql/2026-11-20_striking_startwerte.sql)")
+SK_GRUND_AUS = "Striking aus (striking_regeln.aktiv = false, globaler Not-Aus) — Konto plant weder Striking noch Farmer"
+SK_GRUND_ZIEL = "Striking-Ziel erreicht — wartet auf Payout (Payout anfragen, danach Zyklus-Start, Zyklus seit + Payout-Nr. neu)"
+SK_GRUND_WD = "Striking-Add-on (Apex) — Striking plant dieses Konto, nicht der Winning-Day-Farmer"
+_sk_cache = {"at": 0.0, "uids": frozenset(), "regel": None, "aktiv": False}
+
+
+def _sk_lesen(frisch=False):
+    """→ (user_ids mit Striking für Apex an, striking_regeln.apex | None, aktiv), 60 s gemerkt. Tabelle/Spalte fehlt oder Lesefehler →
+    (leer, None, False) = niemand Striking, wie bisher. aktiv = striking_regeln.aktiv (globaler Not-Aus, Standard false)."""
+    if not frisch and time.time() - _sk_cache["at"] < SK_CACHE_S:
+        return _sk_cache["uids"], _sk_cache["regel"], _sk_cache["aktiv"]
+    uids, regel, aktiv = frozenset(), None, False
+    try:
+        uids = frozenset(str(z.get("user_id")) for z in (sb_select("addon_firma", {"select": "user_id", "firma": "eq.apex", "addon": "eq.striking",
+                                                                                   "an": "eq.true"}) or []) if z.get("user_id"))
+        if uids:
+            z1 = (sb_select("striking_regeln", {"select": "apex,aktiv", "id": "eq.1"}) or [{}])[0] or {}
+            regel, aktiv = z1.get("apex"), z1.get("aktiv") is True
+    except Exception as e:
+        # Prüfer 2 (20.11.): Lesefehler → letzten guten Stand behalten (sonst kämen Striking-Konten 60 s lang zurück in WD-Farmer/Recoverer);
+        # gab es nie einen (Tabelle fehlt = SQL nicht eingespielt) → niemand Striking, wie bisher. Auch der Not-Aus (aktiv) bleibt auf dem letzten Stand
+        if time.time() - (_sk_cache.get("fehler_at") or 0) > 3600:
+            _sk_cache["fehler_at"] = time.time()
+            print(f"[striking] addon_firma/striking_regeln nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — letzter Stand gilt (SQL eingespielt?)", flush=True)
+        _sk_cache["at"] = time.time()
+        return _sk_cache["uids"], _sk_cache["regel"], _sk_cache["aktiv"]
+    _sk_cache.update(at=time.time(), uids=uids, regel=regel if isinstance(regel, dict) else None, aktiv=aktiv)
+    return _sk_cache["uids"], _sk_cache["regel"], _sk_cache["aktiv"]
+
+
+def sk_ist_konto(konto, uids):
+    """REIN (testbar): Apex-Konto (funded / winning_days) einer ID mit Striking-Add-on."""
+    k = konto or {}
+    return (str(k.get("user_id")) in (uids or ()) and "apex" in str(k.get("firm") or "").lower()
+            and str(k.get("account_type") or k.get("type") or "funded").lower() in SK_KONTOARTEN)
+
+
+SK_ZYKLUS_SEL = "id,striking_zyklus_start,striking_zyklus_seit,striking_payout_nr,striking_probation"
+
+
+def sk_seit_tag(roh):
+    """REIN (testbar, Nachtrag 6): striking_zyklus_seit → Datum 'JJJJ-MM-TT' in Dubai-Zeit | ''. Das Frontend speichert Dubai-Mitternacht
+    (2026-11-18T00:00:00+04:00); Supabase liefert UTC zurück (2026-11-17T20:00:00+00:00) — [:10] wäre der Vortag. Reines Datum bleibt, wie es ist."""
+    s = str(roh or "").strip()
+    if not s:
+        return ""
+    if len(s) == 10:
+        return s
+    try:
+        from zoneinfo import ZoneInfo
+        t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(ZoneInfo("Asia/Dubai")).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return ""
+
+
+def sk_zyklus_aus_zeile(z):
+    """REIN (testbar): accounts-Zeile → {start, seit ('JJJJ-MM-TT', Dubai), nr, probation} oder None, wenn ein Startwert fehlt (fail-closed)."""
+    z = z or {}
+    start, nr, seit = _wd_num(z.get("striking_zyklus_start")), _wd_num(z.get("striking_payout_nr")), sk_seit_tag(z.get("striking_zyklus_seit"))
+    if start is None or nr is None or not seit:
+        return None
+    return {"start": start, "seit": seit, "nr": int(nr), "probation": z.get("striking_probation") is True}
+
+
+def _sk_zyklus_felder(ids):
+    """accounts.striking_* → {konto_id: sk_zyklus_aus_zeile | None} | None (Spalten fehlen / Lesefehler → Striking plant nicht)."""
+    out = {}
+    try:
+        for i in range(0, len(ids), 80):
+            for z in sb_select("accounts", {"select": SK_ZYKLUS_SEL, "id": f"in.({','.join(ids[i:i + 80])})"}) or []:
+                out[str(z.get("id"))] = sk_zyklus_aus_zeile(z)
+        return out
+    except Exception as e:
+        print(f"[striking] ⚠️ Zyklus-Felder nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Striking plant nicht", flush=True)
+        return None
+
+
+def sk_tage_je_tag(plaene, konto_id, seit):
+    """REIN RECHNEND (testbar, Nachtrag 1+4+6): Netto-Ergebnis je Apex-Handelstag des Zyklus → [(tag, pl)] sortiert, Verlusttage mit. Tages-Logik wie
+    wd_auto_tage (wd_gezaehlte_tage): nur completed/review mit master_pl, je CME-Handelstag des Trade-Endes (ended_at, sonst completed_at) summiert.
+    Gezählt wird jeder Handelstag ≥ dem Datum des Zyklus-Beginns (seit, sk_seit_tag) — kein Zeitstempel-Vergleich (Nachtrag 6); nie Trades davor
+    (Marc: nur ab Probation-Start 18.11.)."""
+    ab = sk_seit_tag(seit)
+    je = {}
+    for p in plaene or ():
+        if konto_id is not None and str(p.get("master_account_id") or "") != str(konto_id):
+            continue
+        if p.get("status") not in ("completed", "review"):
+            continue
+        pl, ende = _wd_num(p.get("master_pl")), p.get("ended_at") or p.get("completed_at")
+        if pl is None or not ende:
+            continue
+        tag = _cme_handelstag(ende)
+        if tag and (not ab or tag >= ab):
+            je[tag] = je.get(tag, 0.0) + pl
+    return [(t, round(v, 2)) for t, v in sorted(je.items())]
+
+
+def sk_payout_feld(zf, tage, mpb=None):
+    """REIN (testbar), Nachtrag 4 — Vertrag mit S4 (Admin → Payouts): payout_ready[i].striking = {zyklus_start, zyklus_seit 'JJJJ-MM-TT', payout_nr,
+    probation, min_payout_balance (nur ohne Probation, wenn bekannt), tage [{tag, pl}]} — tage = Netto master_pl je Apex-Handelstag ab zyklus_seit."""
+    out = {"zyklus_start": zf["start"], "zyklus_seit": str(zf["seit"])[:10], "payout_nr": zf["nr"], "probation": zf["probation"] is True,
+           "tage": [{"tag": t, "pl": v} for t, v in tage or ()]}
+    if not out["probation"] and mpb is not None:
+        out["min_payout_balance"] = mpb
+    return out
+
+
+def sk_payout_anhaengen(zeilen, konten):
+    """Admin → Payouts: hängt `striking` an jede Apex-Zeile, deren Konto Striking-Startwerte hat (unabhängig vom Add-on — die Statistik gilt
+    für den Zyklus). Eigene Abfragen; Spalten fehlen / Fehler → wirft, der Aufrufer lässt das Feld weg (Anzeige unverändert)."""
+    apex = [z for z in zeilen or () if "apex" in str(z.get("account_firm") or "").lower()]
+    if not apex or sk_apex is None:
+        return 0
+    km = {str(a.get("id")): a for a in konten or ()}
+    zf = {}
+    ids = [str(z["account_id"]) for z in apex]
+    for i in range(0, len(ids), 80):
+        for r in sb_select("accounts", {"select": SK_ZYKLUS_SEL, "id": f"in.({','.join(ids[i:i + 80])})", "striking_zyklus_start": "not.is.null"}) or []:
+            f = sk_zyklus_aus_zeile(r)
+            if f:
+                zf[str(r.get("id"))] = f
+    if not zf:
+        return 0
+    ab = min(_wd_iso_ts(f["seit"]) or 0 for f in zf.values()) - 60 * 86400   # Pläne bis 60 Tage vor dem ersten Zyklus-Beginn angelegt (gezählt wird nach Handelstag des Endes)
+    plaene, zids = [], sorted(zf)
+    for i in range(0, len(zids), 80):
+        plaene += _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,ended_at,completed_at", "master_account_id": f"in.({','.join(zids[i:i + 80])})",
+                                          "status": "in.(completed,review)", "created_at": "gte." + datetime.fromtimestamp(ab, timezone.utc).isoformat()}) or []
+    cfg = sk_apex.sk_cfg(_sk_lesen()[1])
+    n = 0
+    for z in apex:
+        f = zf.get(str(z["account_id"]))
+        if not f:
+            continue
+        g = _wd_konto_groesse(km.get(str(z["account_id"])) or {})
+        z["striking"] = sk_payout_feld(f, sk_tage_je_tag(plaene, z["account_id"], f["seit"]), sk_apex.sk_min_payout_balance(cfg, g) if g else None)
+        n += 1
+    return n
+
+
+def sk_payout_nach_seit(payouts, seit):
+    """REIN (testbar, Prüfer 20.11.): jüngster Payout (Anfrage/Buchung) an einem Tag NACH dem Zyklus-Beginn → dessen Datum, sonst ''. Dann sind
+    Zyklus-Start und Payout-Nr. veraltet (Netto = Balance − alter Start) — Striking plant das Konto nicht, bis beide neu eingetragen sind.
+    Verglichen je Kalendertag: ein Payout am Tag des Zyklus-Beginns (Jacob: genehmigt 20.11., seit 20.11.) gehört zum alten Zyklus."""
+    s = sk_seit_tag(seit)
+    neu = sorted(str(p)[:10] for p in (payouts or ()) if p and str(p)[:10] > s)
+    return neu[-1] if neu else ""
+
+
+def sk_konto_rechnen(cfg, a, balance, groesse, zfeld, tage, lr, peak, rnd, sppl=None, rc_regel=None, payouts=None):
+    """Striking-Trade des Tages für ein Apex-Konto → dict wie fdp_konto_rechnen (aktion planen | ziel | aus, tp, sl, kontrakte, Hedge-Felder,
+    liq, stufe, dll, ziel, tp_art) + instr ('mnq'|'nq') + striking {…} für die Plan-Kennung. Liest nichts (rein rechnend bis auf die Hilfsfunktionen)."""
+    if sk_apex is None:
+        return {"aktion": "aus", "grund": "Striking: Modul striking_apex fehlt"}
+    if not zfeld:
+        return {"aktion": "aus", "grund": SK_GRUND_START}
+    start, nr = zfeld["start"], zfeld["nr"]
+    _po = sk_payout_nach_seit(payouts, zfeld.get("seit"))
+    if _po:
+        return {"aktion": "aus", "grund": f"Striking: Payout am {_po} nach dem Zyklus-Beginn {str(zfeld.get('seit'))[:10]} — Zyklus-Start, Zyklus seit "
+                                          f"und Payout-Nr. am Konto neu eintragen"}
+    zr = sk_apex.sk_ziel(cfg, groesse, nr, probation=zfeld.get("probation") is True, start=start)
+    if zr[0] is None:
+        return {"aktion": "aus", "grund": "Striking: " + str(zr[1])}
+    z = zr[0]
+    boden, _txt, _dd, _art = liq_konto_boden(lr, a, groesse, peak, balance)
+    if boden is None:
+        return {"aktion": "aus", "grund": f"Striking: {_txt}"}
+    stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
+    dll, minis, st_nr = fdp_stufe(stufen, balance)
+    t = sk_apex.sk_tag_tp(cfg, groesse, z, round(balance - start, 2), tage, rnd, z_min=zr[3])
+    basis = {"ziel": round(start + t["z_eff"], 2), "start": start, "liq": boden, "stufe": st_nr, "dll": dll, "minis": minis, "balance": balance,
+             "striking": {k: t.get(k) for k in ("art", "z", "z_eff", "deckel", "rest", "tage_ok", "tage_soll", "k_klein", "n_pump", "bester", "hinweis")}}
+    basis["striking"].update(payout_nr=int(nr), probation=zfeld.get("probation") is True, bedingung=zr[2], zyklus_seit=str(zfeld.get("seit"))[:10])
+    if t["aktion"] == "ziel":
+        return dict(basis, aktion="ziel", grund=SK_GRUND_ZIEL)
+    sl, g_sl = sk_apex.sk_sl(cfg, dll, balance - boden, rnd)
+    if sl is None:
+        return dict(basis, aktion="aus", grund="Striking: " + g_sl)
+    rc = rc3_recovery_lots(t["tp"], dict(rc_regel if isinstance(rc_regel, dict) else {}, an=True), groesse, "apex")
+    if not rc:
+        return dict(basis, aktion="aus", grund=f"Striking: Lots-Staffel passt für TP {_liq_de(t['tp'])} $ nicht (Max-Kontrakte {int((groesse or 0) / 1000)}k)")
+    ppl = FDP_NQ_PPL if rc["instr"] == "nq" else FDP_NQ_PPL / 10.0
+    offen, _ab = sk_apex.sk_hedge_offen(cfg, balance, boden)
+    h = fdp_hedge(offen, balance, boden, t["tp"], sl, rc["kt"], ppl=ppl, sppl=sppl or FDP_SLAVE_PPL)
+    if not h:
+        return dict(basis, aktion="aus", grund="Striking: Hedge nicht rechenbar (Abstand zum Boden)")
+    return dict(basis, **h, aktion="planen", tp=t["tp"], sl=sl, kontrakte=rc["kt"], instr=rc["instr"], offen_eur=offen,
+                tp_art=f"striking_{t['art']}", recovery_lots=rc)
+
+
+def sk_notiz(r, auto_k):
+    """Plan-Notiz eines Striking-Trades (Anzeige)."""
+    s = r.get("striking") or {}
+    art = {"klein": "kleiner Trade", "pump": "Pump-Trade", "rest": "letzter Trade (genau der Rest)"}.get(s.get("art"), "Trade")
+    return (f"Striking Apex{'' if auto_k else ' · Vorschlag'} · Payout {s.get('payout_nr')}{' (Probation)' if s.get('probation') else ''} · {art} · "
+            f"Zyklus seit {s.get('zyklus_seit')} · {s.get('bedingung') or ''} · Ziel {_liq_de(r['ziel'])} $ "
+            f"(+{_liq_de(s.get('z_eff'))} $, Rest {_liq_de(s.get('rest'))} $, Deckel {_liq_de(s.get('deckel'))} $) · Tage {s.get('tage_ok')}/{s.get('tage_soll')} · "
+            f"Boden {_liq_de(r['liq'])} $ · SL {_liq_de(r['sl'])} $ (Daily Loss {_liq_de(r.get('dll'))} $) · {r['kontrakte']} {str(r.get('instr') or '').upper()} · "
+            f"Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r.get('verhaeltnis'), 2)} € je $ Abstand)" + (f" · {s['hinweis']}" if s.get("hinweis") else ""))
+
+
 def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     """Ein Lauf des Funded-Planers. trocken=True: nur rechnen (Vorschau, Route GET /admin/funded-plan), sonst Pläne anlegen und Ziel-Konten
     auf Winning Days stellen. → {ok, geplant[], ziel[], ausgelassen[], fenster, …}. Seit 30.10.2026 (FUNDED-PLANER JE GRUPPE) für die user_ids
@@ -49561,21 +49805,40 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
            "geplant": [], "ziel": [], "ausgelassen": [], "ids": []}
-    if not uids or not (an or any(fd_unt_an(reg, "futures", u, None, True) for u in uids)):   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
+    # SK1 STRIKING (20.11.2026, eigenes Gate — Nachtrag 3): IDs mit addon_firma (apex, striking, an), unabhängig von der Planer-ID-Liste und der
+    # Apex-Firmen-Pause; ids_aus (archivierte ID, Emin) nie. Ohne lesbare addon_firma leer → dieser Lauf ist bitgleich wie bisher
+    sk_uids, sk_regel, sk_aktiv = _sk_lesen()
+    if sk_uids:
+        _aus = _fdp_ids_aus()
+        sk_uids = frozenset(u for u in sk_uids if u not in _aus and (nur_ids is None or u in nur_ids))
+    if (not uids or not (an or any(fd_unt_an(reg, "futures", u, None, True) for u in uids))) and not sk_uids:   # UNT4: auch Firmen, die nur ein Unternehmen einschaltet
         erg["msg"] = "keine ID bzw. keine Firma an"
         return erg
     if datetime.strptime(cme_heute, "%Y-%m-%d").weekday() >= 5:
         erg["msg"] = "Wochenende — kein CME-Handelstag"
         return erg
-    konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,"
-                                            "max_drawdown,waiting_payout_since,starting_balance,created_at,"
-                                            "account_size,topstep_balance,topstep_last_check,meta_api_balance,meta_api_last_check",   # SB1: Startwert-Prüfung (Lese-Felder, Größe)
-                                  "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
+    _k_sel = ("id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,max_drawdown,waiting_payout_since,starting_balance,created_at,"
+              "account_size,topstep_balance,topstep_last_check,meta_api_balance,meta_api_last_check")   # SB1: Startwert-Prüfung (Lese-Felder, Größe)
+    konten = _sb_all("accounts", {"select": _k_sel, "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"}) if uids else []
+    if sk_uids:
+        # SK1: Apex-Konten (funded UND winning_days) der Striking-IDs dazu — auch, wenn die ID nicht in der Funded-Planer-Liste steht
+        try:
+            _da = {str(a.get("id")) for a in konten or []}
+            konten = (konten or []) + [a for a in (_sb_all("accounts", {"select": _k_sel, "user_id": "in.(" + ",".join(sorted(sk_uids)) + ")",
+                                                                        "account_type": "in.(funded,winning_days)", "firm": "ilike.*apex*"}) or [])
+                                       if str(a.get("id")) not in _da]
+        except Exception as e:
+            print(f"[striking] ⚠️ Striking-Konten nicht lesbar ({type(e).__name__}: {e}) — nur die schon gelesenen in diesem Lauf", flush=True)
+    sk_ids = {str(a["id"]) for a in konten or [] if sk_ist_konto(a, sk_uids)}
+    sk_cfg = sk_apex.sk_cfg(sk_regel) if (sk_ids and sk_apex is not None) else None
+    sk_zfeld = (_sk_zyklus_felder(sorted(sk_ids)) if sk_ids else {}) or {}
+    uids_abstand = list(dict.fromkeys(list(uids) + sorted(sk_uids)))   # SK1: Firmen-Abstand/Big Trades auch über die Pläne der Striking-IDs
     _ktx = ap_unt_kontext()   # UNT4: eingeschaltete Firmen + Werte je Unternehmen der ID (Standard + Abweichung), ohne Abweichung = an
     an_von = lambda u: an if fd_unt_reg(reg, "futures", u, _ktx, True) is reg else fd_unt_an(reg, "futures", u, _ktx, True)   # noqa: E731 — streng (S2)
     _alle_k = ap_deaktiviert_anwenden(konten) or []
-    konten = [a for a in _alle_k if ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
-              and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a)]   # LF1: Größe mit an: false wie Firma aus
+    konten = [a for a in _alle_k if str(a.get("id")) in sk_ids   # SK1: Striking-Konten am Firmen-/Größen-Schalter vorbei (eigenes Gate)
+              or (ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
+                  and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a))]   # LF1: Größe mit an: false wie Firma aus
     archiv = _ap_archiviert()
     # HN1 (Master 12.11.2026, Befund S4: Konten einer ausgeschalteten Firma fielen hier still weg): eigene Liste nicht_im_planer[] mit Grund — nur für
     # „Heute nicht drin“. Entscheidung unverändert (kein Plan); bewusst NICHT in ausgelassen[] (ID-Leiste, Braucht dich, Lauf-Zeile, Kontoliste je Firma)
@@ -49584,6 +49847,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                    "balance": (lambda v, bs: None if v is None else round(v + bs, 2))(_wd_num(a.get("tv_balance")), fdp_express_basis(a, _wd_konto_groesse(a))),   # Express absolut wie der Hauptweg (Prüfer)
                                    "grund": FDP_GRUND_FIRMA_AUS if not ap_regel_finden(an_von(a.get("user_id")), a.get("firm")) else FDP_GRUND_GROESSE_AUS}
                                   for a in _alle_k if str(a.get("id")) not in archiv and _ap_norm(a.get("firm")) not in AP_STILL_FIRMEN
+                                  and str(a.get("id")) not in sk_ids   # SK1: Striking-Konten stehen mit eigenem Grund in ausgelassen[]
                                   and not (ap_regel_finden(an_von(a.get("user_id")), a.get("firm"))
                                            and fdp_groesse_an(ap_regel_finden(an_von(a.get("user_id")), a.get("firm")), a))]   # LF1
     except Exception as _e:
@@ -49607,7 +49871,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     # Geplante/laufende Pläne ALLER IDs der Liste (auch Challenge-Planer, jede Firma): Firmen-Abstand und Big Trades je ID
     offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,start_um,started_at,status,route,orbit_v3,hedge_eur,winning_day,"
                                                    "fp_start:mt5_baseline->funded_plan->>start_um",
-                                         "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)"}) if ids else []
+                                         "user_id": "in.(" + ",".join(uids_abstand) + ")", "status": "in.(planned,open)"}) if ids else []
     verlauf = _liq_verlauf_laden(ids)
     lregeln = _liq_regeln_laden()
     je_plan = {}
@@ -49640,6 +49904,22 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     except Exception as e:
         print(f"[funded-plan] ⚠️ Startwert: {type(e).__name__}: {e} — kein Startwert in diesem Lauf", flush=True)
         startwerte = {}
+
+    try:   # SK1: Recovery-Staffel (RC3) für die Striking-Lots — eigene Spalte; fehlt/Fehler → Standard-Staffel
+        sk_rc = (_rc3_regeln_lesen() or {}).get("apex") if sk_ids else None
+    except Exception:
+        sk_rc = None
+
+    def sk_rechnen(a, pl, balance, g):
+        """SK1: Striking-Trade des Tages (sk_konto_rechnen) mit Liq-Regel, Höchststand und Tagen ab striking_zyklus_seit (Handelstag)."""
+        aid = str(a["id"])
+        lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
+        peak = liq_peak({}, a, balance, verlauf, eod=False, heute=cme_heute)   # Apex trailt intraday (wie konto_rechnen)
+        zf = sk_zfeld.get(aid)
+        tage = dict(sk_tage_je_tag(pl, aid, zf["seit"])) if zf else {}   # Nachtrag 1: nur Trades ab striking_zyklus_seit
+        sppl = fusion_sppl(None, a.get("user_id")) if "fusion_sppl" in globals() else None
+        return sk_konto_rechnen(sk_cfg, a, balance, g, zf, tage, lr, peak, rnd, sppl=sppl, rc_regel=sk_rc, payouts=payouts.get(aid)), \
+            {"nr": zf["nr"] if zf else None, "ab": zf["seit"] if zf else None, "start": zf["start"] if zf else None}
 
     def konto_rechnen(a, pl, balance, g, regel, jg, kt_fest=None):
         zy = fdp_zyklus(g, payouts.get(str(a["id"])), pl)
@@ -49697,13 +49977,25 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             erg["ausgelassen"].append(dict(zeile, grund=AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus")); continue
         if a.get("waiting_payout_since"):
             erg["ausgelassen"].append(dict(zeile, grund="wartet auf Payout")); continue
-        if not jg:
+        ist_sk = aid in sk_ids   # SK1: Striking-Konto — eigener Rechenweg, braucht keine Funded-Planer-Werte je Größe
+        if ist_sk:
+            # Prüfer 20.11. (KRITISCH): eigener Schlüssel — r.update(zeile) darf r["striking"] (Dict aus sk_konto_rechnen) nie überschreiben
+            zeile["striking_konto"] = True
+            if not sk_aktiv:
+                erg["ausgelassen"].append(dict(zeile, grund=SK_GRUND_AUS)); continue
+            if sk_cfg is None:
+                erg["ausgelassen"].append(dict(zeile, grund="Striking: Modul striking_apex fehlt")); continue
+        if not jg and not ist_sk:
             erg["ausgelassen"].append(dict(zeile, grund=f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-Planer")); continue
         try:   # Kontoliste im Reiter (E2d, 05.11.2026): Ziel-Fortschritt auch für Konten, die heute nicht gerechnet werden — ohne Würfel, ändert keinen Plan
-            zeile["anzeige"] = fdp_konto_anzeige(g, jg, zeile["balance"], fdp_zyklus(g, payouts.get(aid), pl), fdp_tage, pl, aid)
+            if not ist_sk:
+                zeile["anzeige"] = fdp_konto_anzeige(g, jg, zeile["balance"], fdp_zyklus(g, payouts.get(aid), pl), fdp_tage, pl, aid)
         except Exception as e:
             print(f"[funded-plan] ⚠️ Anzeige {a.get('name')}: {type(e).__name__}: {e}", flush=True)
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
+        if lauf and ist_sk:   # SK1: Striking-Vorschläge nie über den normalen Weg nachrechnen (andere Rechnung)
+            erg["ausgelassen"].append(dict(zeile, grund={"planned": "schon geplant", "open": "läuft gerade", "review": "wartet auf Nachlesung"}
+                                           .get(lauf[0].get("status"), "Plan offen"), plan_id=lauf[0].get("id"))); continue
         if lauf:
             # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
             # FH1b (10.11.2026): dazu jeder unbestätigte Vorschlag, dessen Hedge-Basis sich geändert hat (fdp_vorschlag_basis_neu) — nie alte Werte bestätigen
@@ -49749,13 +50041,16 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
         try:
-            r, zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
+            r, zy = sk_rechnen(a, pl, zeile["balance"], g) if ist_sk else konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
         except Exception as e:
             # S9-Stopp zu b8e6dc2b (03.11.2026): ein Konto mit kaputter Regel (z. B. neue Felder vor dem Code) bricht nie mehr den ganzen Lauf ab
             print(f"[funded-plan] ⚠️ Konto {a.get('name')} nicht rechenbar: {type(e).__name__}: {e}", flush=True)
             erg["ausgelassen"].append(dict(zeile, grund=f"nicht rechenbar ({type(e).__name__}) — Regel prüfen")); continue
-        r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=(regel.get("namen") or [""])[0])
-        if r["aktion"] == "ziel":
+        r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=((regel or {}).get("namen") or [SK_FIRMA_KEY if ist_sk else ""])[0])   # SK1: Apex-Regel kann aus sein
+        if ist_sk and r["aktion"] == "ziel":
+            # SK1: Ziel erreicht → nichts mehr planen, Konto wartet auf Payout (macht Finn) — NIE auf Winning Days umstellen wie der normale Weg
+            erg["ausgelassen"].append(dict(r, aktion="aus"))
+        elif r["aktion"] == "ziel":
             erg["ziel"].append(r)
         elif r["aktion"] != "planen":
             erg["ausgelassen"].append(r)
@@ -49794,6 +50089,9 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         rf = ap_regel_finden(an_von(b.get("user_id")), b.get("master_firm"))   # UNT4
         if rf:
             belegt_firma.setdefault(gk(b.get("user_id"), (rf.get("namen") or [""])[0]), []).append(m)
+        elif sk_ids and "apex" in str(b.get("master_firm") or "").lower():
+            # SK1 (Prüfer 2): Apex-Regel aus (Apex-Pause) — bestehende Apex-Pläne belegen trotzdem den Firmen-Abstand der Striking-Starts
+            belegt_firma.setdefault(gk(b.get("user_id"), SK_FIRMA_KEY), []).append(m)
         if (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
                 and (b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0)):
             belegt_id.setdefault(str(b.get("user_id")), []).append(m)
@@ -49864,13 +50162,16 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             if r.get("kette"):
                 lb = fdp_pump_minute(pm.get("t2_bis") or "18:30", mitternacht)
                 mb_pump["kette"] = dict(r["kette"], lesen_bis=(mitternacht + timedelta(minutes=lb)).astimezone(timezone.utc).isoformat() if lb is not None else None)
+        if r.get("striking"):
+            notiz = sk_notiz(r, auto_k)   # SK1: eigene Notiz (kleiner / Pump / letzter Trade, Rest, Deckel, Tage)
         if r.get("startwert"):
             notiz += f" · {AP_STARTWERT_TEXT}"   # SB1: Plan aus dem Startwert, nicht aus einer Lesung
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
             "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"], "orbit_v3": True, "route": fdp_route(a.get("firm")),   # TS2: Topstep → tsv2 (Nova)
-            "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "master_symbol": "NQ" + frontcode,   # TopstepX-Contract NQ + Frontmonat wie die Hand-Novas
+            # TopstepX-Contract NQ + Frontmonat wie die Hand-Novas; SK1: Striking-Lots aus der Recovery-Staffel (MNQ bis 2.000 $ TP, darüber NQ)
+            "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "master_symbol": ("MNQ" if r.get("instr") == "mnq" else "NQ") + frontcode,
             # Vorschlag (Standard): ohne start_um startet kein PC-Tab den Plan — erst „Bestätigen" setzt die Startzeit
             "start_um": start.astimezone(timezone.utc).isoformat() if auto_k else None, "status": "planned", "priority": "high",
             "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
@@ -49878,6 +50179,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                                                          "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")},
                                                  **{k: r[k] for k in ("hedge_quelle", "offen_kosten_eur", "hedge_basis", "ziel_puffer") if r.get(k) is not None},   # AH2 / FH1 B / FP-PUF
                                                  **({"pump": mb_pump["pump"]} if mb_pump.get("pump") else {}),   # FF2
+                                                 **({"striking": dict(r["striking"], instr=r.get("instr"))} if r.get("striking") else {}),   # SK1: Kennung + Stand
                                                  start_um=start.astimezone(timezone.utc).isoformat()),
                              **({"kette": mb_pump["kette"]} if mb_pump.get("kette") else {})}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start.astimezone(timezone.utc).isoformat(), richtung=richtung,
