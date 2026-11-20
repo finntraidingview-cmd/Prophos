@@ -31846,7 +31846,10 @@ PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "mar
                                "puls_beschaeftigt", "bot_fehlt", "konto_offen", "tab_nicht_erreichbar",
                                # TS-D2 (Prüfer 20.11.2026): der Tagesstopp-Beweis (DLL-Meldung) ist nach dem Schließen weg — ein Neustart + 2. Versuch sähe
                                # ihn nicht mehr und liefe bis zur Order auf dem DLL-Konto
-                               "konto_tagesstopp"))
+                               "konto_tagesstopp",
+                               # TS-D2b (Master 20.11.2026): dasselbe für MLL/Ineligible — die geschlossene Meldung fehlt dem 2. Versuch, er liefe bis zur Order
+                               # auf dem geblowten Konto
+                               "konto_geblowt"))
 
 
 def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=True, budget_s=None, min_rest_s=None,

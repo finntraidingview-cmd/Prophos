@@ -77,6 +77,8 @@ check(ob.tsx_blow_dialog([_pp(DLL_TEXT), _pp(MLL_TEXT)])["art"] == "maximum_loss
 art_n = ob.neustart_entscheid({"code": "konto_tagesstopp", "gesendet": False, "retry_ok": True}, "tsv2", 10)
 art_n = art_n[0]
 check(art_n != "direkt" and "konto_tagesstopp" in ob.PULS_NEUSTART_NIE, f"neustart_entscheid(konto_tagesstopp) → kein Neustart ({art_n})")
+art_g = ob.neustart_entscheid({"code": "konto_geblowt", "gesendet": False, "retry_ok": True}, "tsv2", 10)[0]
+check(art_g != "direkt" and "konto_geblowt" in ob.PULS_NEUSTART_NIE, f"TS-D2b: neustart_entscheid(konto_geblowt) → kein Neustart ({art_g})")
 
 # ── B) K2 mit nachgebauter Sitzung ──────────────────────────────────────────────────────────────────────────────────────────
 print("── B) K2 mit nachgebauter Sitzung")
