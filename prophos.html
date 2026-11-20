@@ -19207,7 +19207,8 @@
       if(dd == null || !caps) return { regel, grund: `${c.size / 1000}k: keine Apex-Payout-Tabelle`, anfragbar: null, erhalten: null }
       // SK1-K: Striking-Konto mit Zyklus-Start → nur ab Zyklus-Start rechnen (Recoverer und Lebens-Puffer gelten hier nicht, Striking ersetzt beides)
       // Feld `striking` als Objekt = Striking-Konto (auch ohne Start → fail-closed in admApexStriking); ein boolesches striking (FundingPips CFD) zählt nicht
-      if(r.striking && typeof r.striking === 'object') return admApexStriking(r, c, regel, caps)
+      // Offene Anfrage (Chip „angefragt …“) bleibt wie bisher, auch mit Striking-Daten (Finn 20.11.2026: „Die, die angefragt sind, das passt“)
+      if(r.striking && typeof r.striking === 'object' && !admAnfrageVon(r)) return admApexStriking(r, c, regel, caps)
       const puffer = c.size + dd
       const ueber = c.bal - puffer
       const nr = (Number(r.payouts_n) || 0) + 1
