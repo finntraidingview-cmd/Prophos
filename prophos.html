@@ -77488,6 +77488,10 @@
   /* ── PC-Tab: eigene Zeile abgleichen — (1) Vorschau mit Live-Daten + neue Konten dazu,
    *    (2) Pläne anlegen (Rückfall) / nachziehen (Zeit, Richtung, Slave nach Live-Balance) / löschen,
    *    (3) Zustand der Pläne in die Zeile spiegeln. ── */
+  // AP3 (20.11.2026): Selbstheilung nur im Farm — Tageszeile nicht farm:false UND frische accounts-Zeile mit wd_farm === true; Fehler/leer/null = nein (fail-closed)
+  const wdHeilImFarm = (k, fa, fe) => !!k && k.farm !== false && !fe && !!(Array.isArray(fa) && fa[0] && fa[0].wd_farm === true)
+  window._wdHeilImFarm = wdHeilImFarm   // Test-Haken
+  const _wdHeilAusGemeldet = new Set()   // AP3: „Heilung übersprungen“ je Plan nur einmal je Tab-Leben (wdAbgleich läuft alle 30–90 s)
   async function wdAbgleich(row){
     const r = _wd.regeln || {}, vp = wdVorplanRegeln()
     const konten = (row.konten || []).map(k => ({ ...k }))
@@ -77695,8 +77699,22 @@
         const startMs = Date.parse(k.start_um || row.start_um || '') || 0
         if(startMs && Date.now() - startMs <= 60 * 60000){
           try{
-            const { data: da } = await supabase.from('trade_plans').select('id').eq('id', String(k.plan_id)).limit(1)
-            if(!(da && da.length)){
+            const { data: da, error: de } = await supabase.from('trade_plans').select('id').eq('id', String(k.plan_id)).limit(1)
+            if(de) throw de   // AP3: Lesefehler ist nicht „Plan fehlt“ — nicht heilen (catch unten loggt)
+            // AP3 NUR IM FARM (Master 20.11.2026, Vorfall Apex-Pause: sql/2026-11-20_apex_pause.sql setzte wd_farm=false und löschte die Pläne, um 23:49/23:51 UTC
+            // legte diese Heilung zwei gelöschte Apex-WD (94c1f4aa, 2babf52c) mit derselben ID neu an — sie sah nur aktiv:true + plan_id in der Tageszeile).
+            // Jetzt nur, wenn die Zeile das Konto im Farm führt (k.farm !== false) UND accounts.wd_farm FRISCH gelesen true ist. Lesefehler/keine Zeile = unbekannt
+            // = nicht heilen (fail-closed). Der Lade-Cache (acc.wdFarm) reicht nicht: der PC-Tab hat kein Realtime auf accounts (s. „wd_farm frisch“ oben).
+            let imFarm = false
+            if(!(da && da.length) && k.farm !== false){
+              try{
+                const { data: fa, error: fe } = await supabase.from('accounts').select('id,wd_farm').eq('id', String(k.id)).limit(1)
+                imFarm = wdHeilImFarm(k, fa, fe)
+                const accF = (accounts || []).find(a => String(a.id) === String(k.id)); if(accF && !fe && fa && fa[0]) accF.wdFarm = !!fa[0].wd_farm   // Cache nachziehen
+              }catch(_){ imFarm = false }
+            }
+            if(!(da && da.length) && !imFarm && !_wdHeilAusGemeldet.has(String(k.plan_id)) && _wdHeilAusGemeldet.add(String(k.plan_id))) console.warn('[wd] Heilung übersprungen: nicht im Farm', k.plan_id, k.id, k.farm === false ? '(Tageszeile farm:false)' : '(accounts.wd_farm nicht true oder nicht lesbar)')
+            if(!(da && da.length) && imFarm){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
               // RECOVERER (S16, 02.11.2026): k.tp ist der TP des verschwundenen Plans. Passt die Regel nicht mehr dazu, käme ein falscher Geldbetrag heraus: Stand ungeklärt oder Regel
               // beendet (TP 1.499 $ mit Staffel) oder Regel erst seit dem Anlegen da (TP 380 $ mit Regel-Hedge) — dann nicht heilen, sondern einmal 🟠. Hand-TP rechnet richtig.
