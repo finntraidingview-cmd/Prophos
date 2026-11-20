@@ -3043,6 +3043,13 @@
   :is(#mp-karte,#mp-total) .mp-chip svg{width:11px;height:11px}
   :is(#mp-karte,#mp-total) .mp-chip:hover{color:var(--ink);border-color:var(--sub)}
   :is(#mp-karte,#mp-total) .mp-fehler{font-size:12px;color:var(--danger);margin-top:6px}
+  /* SK1 (Finn 20.11.2026): „+ Striking" am Apex-Tacho — klein wie .mp-chip, an = Farben des Striking-Chips der Add-ons-Spalte (.acc-addon.st.an) */
+  #mp-karte .mp-st{display:inline-flex;align-items:center;margin-top:5px;border:1px dashed var(--border);background:transparent;color:var(--sub);border-radius:999px;
+    padding:2px 8px;font:inherit;font-size:11px;font-weight:600;line-height:1.3;cursor:pointer}
+  #mp-karte .mp-st:hover:not(:disabled){color:var(--ink);border-color:var(--sub)}
+  #mp-karte .mp-st:disabled{cursor:default;opacity:.6}
+  #mp-karte .mp-st.an{border-style:solid;border-color:#B9C3F2;background:#EEF1FD;color:#3A4BA8}
+  :where([data-theme=dark]) #mp-karte .mp-st.an{background:rgba(99,120,230,.15);border-color:rgba(99,120,230,.45);color:#9fb0f5}
   @media (max-width:820px){:is(#mp-karte,#mp-total){padding:10px 12px}
     :is(#mp-karte,#mp-total) .mp-leiste{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px;margin:0 -12px;padding:2px 12px 6px;scrollbar-width:none}
     :is(#mp-karte,#mp-total) .mp-leiste::-webkit-scrollbar{display:none}
@@ -5264,6 +5271,7 @@
   :where([data-theme=dark]) #dashboard-view .acc-addon.od.an{background:rgba(22,160,120,.14);border-color:rgba(22,160,120,.45);color:#5cc4a3}
   #dashboard-view .acc-addon.st.an{border-color:#B9C3F2;background:#EEF1FD;color:#3A4BA8}   /* ST1 Striking */
   :where([data-theme=dark]) #dashboard-view .acc-addon.st.an{background:rgba(99,120,230,.15);border-color:rgba(99,120,230,.45);color:#9fb0f5}
+  #dashboard-view .acc-addon.acc-addon-fest{cursor:default}   /* SK1 Striking Apex: je ID am Apex-Tacho geschaltet, am Konto nur Anzeige */
   #dashboard-view .acc-ap-k .acc-ap-s{font-size:11px}
   #dashboard-view .acc-ap-s.raus{color:#b45309}
   #dashboard-view .acc-ap-s.bald{color:var(--violet);font-weight:600}   /* Planer-Chip „nächster Lauf ≤ 10 min" nach einer Balance-Lesung (08.10.2026) */
@@ -15594,6 +15602,17 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">FundedNext On-Demand: Ziel 2–2,25 % · Consistency 40 % · kein Refund-Trade · Payout anfragbar, sobald Ziel + Consistency erfüllt sind</div>
         </div>
         <div id="ac-ziel-fest" hidden style="grid-column:1/-1;font-size:12px;color:var(--sub)"></div>
+        <!-- SK1 (Finn 20.11.2026): Striking für Apex — nur bei Apex-Funded/WD-Konten einer ID mit Striking an (Apex-Tacho im Muster-Portfolio) und nur,
+             wenn die Spalten da sind (accounts.striking_zyklus_start / striking_payout_nr, SQL von S1). Leer = Striking plant das Konto nicht. -->
+        <div class="field" id="ac-sk-start-feld" hidden>
+          <label>Zyklus-Start-Balance ($)</label>
+          <input class="input mono" id="ac-sk-start" type="number" step="0.01" min="0" placeholder="z.B. 112288.54" autocomplete="off">
+        </div>
+        <div class="field" id="ac-sk-nr-feld" hidden>
+          <label>Nächster Payout #</label>
+          <input class="input mono" id="ac-sk-nr" type="number" step="1" min="1" max="6" placeholder="1–6" autocomplete="off">
+        </div>
+        <div id="ac-sk-hint" hidden style="grid-column:1/-1;font-size:11px;color:var(--sub);margin-top:-4px">Add-on · Striking (Apex): Balance zu Beginn der Probation bzw. nach dem letzten genehmigten Payout · Nummer des nächsten Payouts (1–6). Leer = Striking plant dieses Konto nicht.</div>
         <!-- GT2 (05.11.2026, Finn — Blue Guardian 100k …7770: „Wenn ich auf den Account draufdrücke, kann ich diese Gewinntage nicht bearbeiten … von 1 zu 3"):
              Stand der Gewinntage im laufenden Payout-Zyklus, nur bei Funded-CFD-Konten mit Mindest-$-Tagen (Regel je_groesse.gewinntage). Zahlen aus
              GET /konto-ziele (dieselbe Zählung wie Planer/Radar). „Setzen“ speichert sofort die Differenz zur Zählung als accounts.fcp_gewinntage
@@ -46732,6 +46751,10 @@
       onDemand: row.on_demand === undefined ? undefined : row.on_demand === true,
       // ST1 (15.11.2026): Add-on Striking (FundingPips) — undefined = Spalte fehlt noch (sql/2026-11-15_addon_striking.sql) → kein Chip, nichts geschrieben
       striking: row.striking === undefined ? undefined : row.striking === true,
+      // SK1 (Finn 20.11.2026): Striking für Apex — Zyklus-Start-Balance und Nummer des NÄCHSTEN Payouts, von Hand gepflegt (Konto bearbeiten).
+      // undefined = Spalte fehlt noch (SQL von S1) → kein Feld, nichts geschrieben; null = nicht gesetzt (Planer plant das Konto nicht, Chip „Zyklus-Start fehlt")
+      strikingZyklusStart: row.striking_zyklus_start === undefined ? undefined : (row.striking_zyklus_start != null && row.striking_zyklus_start !== '' && isFinite(Number(row.striking_zyklus_start)) ? Number(row.striking_zyklus_start) : null),
+      strikingPayoutNr: row.striking_payout_nr === undefined ? undefined : (row.striking_payout_nr != null && row.striking_payout_nr !== '' && isFinite(Number(row.striking_payout_nr)) ? Number(row.striking_payout_nr) : null),
       // TL1 (Finn 19.11.2026, Jacob Tradeify Elite Live): Konto mit echtem Geld, Start 0 $ — Merkmal für den WD-Schlüssel 'tradeifylive'
       // (sql/2026-11-19_tl1_accounts_echtgeld.sql; Spalte fehlt noch → false wie bisher)
       echtgeld: row.echtgeld === true,
@@ -46870,7 +46893,50 @@
     }catch(e){
       console.error('loadAccountsFromSupabase failed:', e)
     }
+    apexStrikingLaden().then(neu => { if(neu){ renderAccounts(); window._mpNeu?.() } }).catch(() => {})   // SK1: Chip „Striking" an den Apex-Fundeds + Schalter am Apex-Tacho
   }
+
+  /* STRIKING FÜR APEX (SK1, Finn 20.11.2026 — Konstrukt .claude/master/berichte/2026-11-20_SK1_striking_apex_konstrukt.md): gesetzt je ID × Firma Apex,
+   * nicht je Konto — Zeile addon_firma (user_id, 'apex', 'striking', an). Schalter „+ Striking" am Apex-Tacho im Muster-Portfolio, Anzeige als Chip in der
+   * Add-ons-Spalte jedes Apex-Funded/WD-Kontos der ID; Zyklus-Start + nächster Payout # je Konto im Bearbeiten. FundingPips-Striking (accounts.striking,
+   * je Konto) bleibt davon unberührt. Tabelle fehlt (SQL noch nicht eingespielt) oder Fehler → rows null: still nichts anzeigen, nichts schreiben. */
+  let _apexSt = { uid: '', rows: null, at: 0, laedt: null, gen: 0 }   // gen: jedes Schalten macht laufende Ladungen ungültig (ältere Antwort überschriebe sonst den neuen Stand)
+  const accApexStrikingKonto = a => !!a && /apex/i.test(String(a.firm || '')) && (a.type === 'funded' || a.type === 'winning_days')
+  function apexStrikingAn(){
+    return _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows) && _apexSt.rows.some(r => r && r.firma === 'apex' && r.addon === 'striking' && r.an === true)
+  }
+  // Liefert true, wenn sich Geladen-Sein oder an/aus geändert hat (Aufrufer zeichnen dann neu). Höchstens alle 60 s, außer erzwungen.
+  async function apexStrikingLaden(zwingen){
+    const uid = String(currentUserId || ''); if(!uid) return false
+    if(!zwingen && _apexSt.uid === uid && Date.now() - _apexSt.at < 60000) return false
+    if(_apexSt.laedt && _apexSt.laedtUid === uid) return _apexSt.laedt
+    const vorher = (Array.isArray(_apexSt.rows) ? 'g' : 'x') + apexStrikingAn()
+    _apexSt.laedtUid = uid
+    const gen = _apexSt.gen
+    _apexSt.laedt = (async () => {
+      let rows = null
+      try{ const { data, error } = await supabase.from('addon_firma').select('firma,addon,an').eq('user_id', uid); if(!error) rows = data || [] }catch(_){}
+      if(String(currentUserId || '') !== uid || _apexSt.gen !== gen) return false   // ID gewechselt oder inzwischen geschaltet: Antwort verwerfen
+      _apexSt.uid = uid; _apexSt.rows = rows; _apexSt.at = Date.now()
+      return ((Array.isArray(rows) ? 'g' : 'x') + apexStrikingAn()) !== vorher
+    })()
+    try{ return await _apexSt.laedt }finally{ _apexSt.laedt = null }
+  }
+  async function apexStrikingSetzen(an){
+    const uid = String(currentUserId || ''); if(!uid) throw new Error('nicht angemeldet')
+    if(_apexSt.uid !== uid || !Array.isArray(_apexSt.rows)) throw new Error('Add-ons der Firma noch nicht geladen')
+    _apexSt.gen++
+    const { data, error } = await supabase.from('addon_firma')
+      .upsert({ user_id: uid, firma: 'apex', addon: 'striking', an: !!an, updated_at: new Date().toISOString() }, { onConflict: 'user_id,firma,addon' }).select('firma,addon,an')
+    if(error) throw error
+    if(!data || !data.length) throw new Error('nicht gespeichert (keine Rechte?)')
+    if(String(currentUserId || '') !== uid || _apexSt.uid !== uid || !Array.isArray(_apexSt.rows)) return   // ID inzwischen gewechselt: gespeichert ist es, nicht in die Liste der neuen ID mischen
+    _apexSt.rows = _apexSt.rows.filter(r => !(r.firma === 'apex' && r.addon === 'striking')).concat(data)
+    _apexSt.at = Date.now()
+    renderAccounts()
+  }
+  // Muster-Portfolio (eigener Block weiter unten): geladen = Tabelle da → Schalter zeigen
+  window._apexStriking = { an: apexStrikingAn, geladen: () => _apexSt.uid === String(currentUserId || '') && Array.isArray(_apexSt.rows), laden: apexStrikingLaden, setzen: apexStrikingSetzen }
 
   const accEls = {
     table:    document.getElementById('accountsTable'),
@@ -46891,6 +46957,8 @@
     maxRisiko: document.getElementById('ac-max-risiko'),   // Max Risiko / Trade (07.10.2026)
     autoPlaner: document.getElementById('ac-auto-planer'),   // Auto-Planer-Haken (08.10.2026)
     onDemand: document.getElementById('ac-on-demand'), odFeld: document.getElementById('ac-od-feld'), zielFest: document.getElementById('ac-ziel-fest'),   // O1 (05.11.2026)
+    skStart: document.getElementById('ac-sk-start'), skStartFeld: document.getElementById('ac-sk-start-feld'),   // SK1 Striking Apex (20.11.2026)
+    skNr: document.getElementById('ac-sk-nr'), skNrFeld: document.getElementById('ac-sk-nr-feld'), skHint: document.getElementById('ac-sk-hint'),
     deakt: document.getElementById('ac-deaktiviert'), deaktRow: document.getElementById('ac-deakt-row'),   // Konto deaktiviert (30.10.2026)
     extId:    document.getElementById('ac-ext-id'),
     wdFarm:   document.getElementById('ac-wd-farm'),
@@ -48364,6 +48432,19 @@
         : 'Striking an, aber die Firma hat keine Striking-Regel — der Planer nimmt die normale Regel; Klick schaltet aus') : 'Striking aus — Klick schaltet an (FundingPips: 7 Gewinntage, Consistency 35 %, Verlust je Trade < 1 %)'
       chips.push(`<button type="button" class="acc-addon st${a.striking ? ' an' : ''}" data-acc-addon="st" data-acc-id="${escapeHtml(String(a.id))}" title="${escapeHtml(t)}"${frei ? '' : ' disabled'}>Striking</button>`)
     }
+    // SK1 (Finn 20.11.2026): Striking für Apex — gesetzt je ID am Apex-Tacho (Muster-Portfolio), hier nur Anzeige (span, kein Schalter je Konto).
+    // Ohne Zyklus-Start bzw. Payout # plant Striking das Konto nicht (fail-closed) → „· Zyklus-Start fehlt" / „· Payout # fehlt"; Werte im Bearbeiten
+    // Spalten fehlen noch (undefined) → kein Chip: ohne sie plant Striking nichts
+    if(accApexStrikingKonto(a) && apexStrikingAn() && a.strikingZyklusStart !== undefined && a.strikingPayoutNr !== undefined){
+      // beide Werte Pflicht (fail-closed, Konstrukt SK1): der fehlende wird am Chip genannt
+      const fehlt = a.strikingZyklusStart === null ? 'Zyklus-Start' : a.strikingPayoutNr === null ? 'Payout #' : ''
+      const zs = a.strikingZyklusStart > 0 ? ' · Zyklus-Start ' + Number(a.strikingZyklusStart).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' $' : ''
+      const pn = a.strikingPayoutNr > 0 ? ' · nächster Payout #' + a.strikingPayoutNr : ''
+      const feld = fehlt === 'Zyklus-Start' ? '„Zyklus-Start-Balance"' : '„Nächster Payout #"'
+      const t = fehlt ? `Striking (Apex) an für diese ID — ${fehlt} fehlt: ohne ihn plant Striking dieses Konto nicht → Konto bearbeiten → ${feld} eintragen`
+        : `Striking (Apex) an für diese ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), kein WD-Farmer, kein Recoverer${zs}${pn}. Schalten am Apex-Tacho im Muster-Portfolio`
+      chips.push(`<span class="acc-addon st an acc-addon-fest" title="${escapeHtml(t)}">Striking${fehlt ? ' · ' + fehlt + ' fehlt' : ''}</span>`)
+    }
     return chips.length ? `<span class="acc-addons">${chips.join('')}</span>` : ''
   }
   async function accAddonUmstellen(id, art, btn){
@@ -48654,6 +48735,14 @@
     if(ad.length || (acc.onDemand !== undefined && accIstFundedNextCfd(acc)) || (acc.striking !== undefined && accIstFundingPipsCfd(acc))) z.push(['Add-ons', ad.join(' · ') || '—'])
     const zf = accZielFestText(acc); if(zf) z.push(['Ziel fest', zf])
     return z
+  }
+  // SK1 Striking Apex: Felder nur beim Bearbeiten eines Apex-Funded/WD-Kontos, wenn Striking für die ID an ist und die Spalten da sind
+  const accSkSichtbar = () => !!(accEls.skStartFeld && !accEls.skStartFeld.hidden)
+  function accSkFelderSetzen(acc){
+    const zeig = !!acc && accApexStrikingKonto(acc) && apexStrikingAn() && acc.strikingZyklusStart !== undefined && acc.strikingPayoutNr !== undefined
+    for(const el of [accEls.skStartFeld, accEls.skNrFeld, accEls.skHint]) if(el) el.hidden = !zeig
+    if(accEls.skStart) accEls.skStart.value = zeig && acc.strikingZyklusStart != null ? String(acc.strikingZyklusStart) : ''
+    if(accEls.skNr) accEls.skNr.value = zeig && acc.strikingPayoutNr != null ? String(acc.strikingPayoutNr) : ''
   }
   function accOdFelderSetzen(acc){
     const zeig = !!acc && acc.onDemand !== undefined && (accIstFundedNextCfd(acc) || acc.onDemand === true) && acc.type === 'funded_cfd'
@@ -49618,6 +49707,7 @@
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = editAccount.maxRisikoTrade != null ? editAccount.maxRisikoTrade : ''
       accOdFelderSetzen(editAccount)   // O1: On Demand + festes Ziel
+      accSkFelderSetzen(editAccount)   // SK1: Striking Apex — Zyklus-Start + nächster Payout #
       accGtFeldSetzen(editAccount)   // GT2: Gewinntage (Funded CFD mit Mindest-$-Tagen)
       if(accEls.autoPlaner) accEls.autoPlaner.checked = editAccount.autoPlaner !== false
       if(accEls.deakt) accEls.deakt.checked = !!editAccount.deaktiviertAt
@@ -49656,6 +49746,7 @@
       accEls.maxDd.value = ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = ''
       accOdFelderSetzen(null)   // O1: neues Konto — On Demand erst nach dem Anlegen (Bearbeiten)
+      accSkFelderSetzen(null)   // SK1: Striking-Felder erst beim Bearbeiten
       accGtFeldSetzen(null)   // GT2: neues Konto — kein Gewinntage-Feld
       if(accEls.autoPlaner) accEls.autoPlaner.checked = true   // neue Konten standardmäßig im Auto-Planer (08.10.2026)
       if(accEls.extId) accEls.extId.value = ''
@@ -49975,6 +50066,18 @@
     const maxDrawdown = parseFloat(accEls.maxDd.value)
     const maxRisiko = parseFloat(accEls.maxRisiko?.value)   // leer = keine Vorgabe (07.10.2026)
     const isEdit = !!_editingAccountId
+    // SK1 Striking Apex: nur wenn die Felder sichtbar waren (sonst undefined → nichts geschrieben); leer = null (Striking plant das Konto dann nicht)
+    let skStart, skNr
+    if(isEdit && accSkSichtbar()){
+      // type=number liefert bei ungültiger Eingabe (z. B. „112.288,54") '' — nie still als „leer" speichern und damit den Wert löschen
+      if(accEls.skStart?.validity?.badInput){ setModalMsg('Zyklus-Start-Balance: nur Ziffern und Punkt als Komma — z. B. 112288.54.', 'err'); accEls.skStart.focus(); return }
+      if(accEls.skNr?.validity?.badInput){ setModalMsg('Nächster Payout #: eine ganze Zahl von 1 bis 6 eintragen.', 'err'); accEls.skNr.focus(); return }
+      const rs = String(accEls.skStart?.value || '').trim().replace(',', '.'), rn = String(accEls.skNr?.value || '').trim()
+      skStart = rs === '' ? null : Number(rs)
+      skNr = rn === '' ? null : Number(rn)
+      if(skStart !== null && !(isFinite(skStart) && skStart > 0)){ setModalMsg('Zyklus-Start-Balance: eine Zahl über 0 eintragen — z. B. 112288.54 — oder leer lassen.', 'err'); accEls.skStart?.focus(); return }
+      if(skNr !== null && !(Number.isInteger(skNr) && skNr >= 1 && skNr <= 6)){ setModalMsg('Nächster Payout #: eine ganze Zahl von 1 bis 6 eintragen — oder leer lassen.', 'err'); accEls.skNr?.focus(); return }
+    }
     // Anfangs-Balance, Trade-Limits und Notiz haben seit 02.09.2026 keine
     // Eingabefelder mehr (Finn: "Felder löschen"). Beim Bearbeiten MUESSEN die
     // bestehenden Werte weitergetragen werden — sonst wischt jeder Namens-Edit
@@ -50067,6 +50170,7 @@
       maxRisikoTrade: !isNaN(maxRisiko) && maxRisiko > 0 ? maxRisiko : null,
       onDemand: accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? accEls.onDemand.checked : undefined,   // O1: nur wenn der Schalter sichtbar war
       ...(accEls.odFeld && !accEls.odFeld.hidden && accEls.onDemand ? { name: kontoNameMitAddons(name, { od: !!accEls.onDemand.checked }) } : {}),   // O1b: Add-on im Namen
+      strikingZyklusStart: skStart, strikingPayoutNr: skNr,   // SK1: undefined = Felder nicht sichtbar → nicht schreiben
       autoPlaner: accEls.autoPlaner ? accEls.autoPlaner.checked : true,   // Auto-Planer-Haken (08.10.2026)
       // Ziel-Felder je nach sichtbarem Block: Winning Days (Futures-Funded,
       // manuell) / Fortschritts-Ziel (CFD-Phase, automatisch) / sonst Bestand.
@@ -50202,6 +50306,8 @@
           max_profit_per_trade: acc.maxProfitPerTrade,
           max_risiko_trade: acc.maxRisikoTrade,
           ...(acc.onDemand !== undefined ? { on_demand: !!acc.onDemand } : {}),   // O1: nur mit Spalte (sonst schlüge jedes Speichern fehl)
+          // SK1 Striking Apex: nur wenn die Felder sichtbar waren (sichtbar nur mit Spalten) — sonst schlüge jedes Speichern fehl
+          ...(acc.strikingZyklusStart !== undefined ? { striking_zyklus_start: acc.strikingZyklusStart, striking_payout_nr: acc.strikingPayoutNr } : {}),
           auto_planer: acc.autoPlaner !== false,   // Auto-Planer-Haken (08.10.2026)
           // Typ wechselt auf Winning Days → Haken an (Finn 03.11.2026, s. accWdUmstellen); sonst der Haken aus dem Popup (Ausschalten bleibt möglich)
           wd_farm: !!acc.wdFarm || (acc.type === 'winning_days' && String((accounts.find(x => String(x.id) === String(_editingAccountId)) || {}).type || '') !== 'winning_days'),
@@ -95304,7 +95410,27 @@ ${stBlock}
       </svg>
       <div class="mp-firma"><i></i>${mpEsc(mpName(f.firma))}</div>
       <div class="mp-sub">${mpEsc(o.sub ? o.sub(f) : mpSub(f))}</div>
+      ${o.pref ? '' : mpStrikingHtml(f, darf)}
     </div>`
+  }
+  /* SK1 (Finn 20.11.2026): „+ Striking" am Apex-Tacho — Add-on je ID × Firma Apex (addon_firma), gilt für alle Apex-Fundeds/WD-Konten der ID
+   * (Chip in der Add-ons-Spalte). Nur unter Accounts (nicht im Total), nur wenn die Tabelle geladen ist (SQL fehlt → nichts zeigen). Ohne Schalt-Recht nur „an" als Anzeige. */
+  function mpStrikingHtml(f, darf){
+    const st = window._apexStriking
+    if(mpNorm(f.firma) !== 'apex trader' || !st || !st.geladen()) return ''
+    const an = st.an()
+    if(!an && _mp.d && _mp.d.darf_schalten === false) return ''   // ohne Recht nur „an" zeigen; während des Sendens bleibt der Knopf (gesperrt) stehen
+    const t = an ? 'Striking an für alle Apex-Funded/WD-Konten dieser ID — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer. Klick: ausschalten'
+      : 'Striking für alle Apex-Funded/WD-Konten dieser ID anschalten — Ziel je Zyklus = max(2 × Payout-Cap, nötiger Profit), statt WD-Farmer und Recoverer'
+    return `<button type="button" class="mp-st${an ? ' an' : ''}" data-mp-striking="${an ? 'aus' : 'an'}" title="${mpEsc(t)}"${darf ? '' : ' disabled'}>${an ? 'Striking' : '+ Striking'}</button>`
+  }
+  async function mpStrikingSchalten(an){
+    const st = window._apexStriking; if(!st || _mp.sendet) return
+    _mp.sendet = true; mpRender()
+    try{ await st.setzen(an); _mp.fehler = '' }
+    catch(e){ _mp.fehler = `Striking (Apex) nicht ${an ? 'angeschaltet' : 'ausgeschaltet'}: ${(e && e.message) || e}` }
+    _mp.sendet = false
+    mpRender()
   }
   function mpRender(){
     const karte = document.getElementById('mp-karte'); if(!karte) return
@@ -95361,6 +95487,7 @@ ${stBlock}
       if(!Array.isArray(d.firmen)) throw new Error('unerwartete Antwort (firmen fehlt)')
       _mp.d = d; _mp.uid = uid; _mp.at = Date.now(); _mp.fehler = ''
     }catch(e){ _mp.uid = uid; _mp.at = Date.now(); _mp.fehler = 'Muster-Portfolio nicht geladen: ' + (e.message || e) + ' → Seite neu öffnen' }
+    try{ await window._apexStriking?.laden() }catch(_){}   // SK1: „+ Striking" am Apex-Tacho (höchstens alle 60 s, Tabelle fehlt → kein Schalter)
     _mp.laedt = false
     mpRender()
   }
@@ -95492,6 +95619,15 @@ ${stBlock}
   // Reiterwechsel: Hervorhebung des Tachos folgt dem Filter des jetzt offenen Reiters (Manuell-Select bzw. Echo-Filter)
   document.querySelectorAll('#dashboard-view section.view[data-view="accounts"] .subtab').forEach(b => b.addEventListener('click', () => setTimeout(mpRender, 0)))
   document.getElementById('mp-leiste')?.addEventListener('click', e => {
+    const sk = e.target.closest('[data-mp-striking]')   // SK1: „+ Striking" am Apex-Tacho — nicht den Tacho-Filter auslösen
+    if(sk){
+      e.stopPropagation()
+      if(sk.disabled || _mp.sendet || !_mp.d || _mp.d.darf_schalten === false) return
+      const an = sk.dataset.mpStriking === 'an'
+      if(confirm(an ? 'Striking für Apex bei dieser ID anschalten?\nAlle Apex-Funded/WD-Konten der ID laufen dann über Striking statt WD-Farmer und Recoverer. Je Konto „Zyklus-Start-Balance" eintragen (Konto bearbeiten), sonst plant Striking es nicht.'
+        : 'Striking für Apex bei dieser ID ausschalten?\nDie Apex-Konten laufen dann wieder normal.')) mpStrikingSchalten(an)
+      return
+    }
     const s = e.target.closest('[data-mp-sperren]')
     if(s){
       e.stopPropagation()
