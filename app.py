@@ -50026,6 +50026,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
                                                     "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,bal_rel:mt5_baseline->tv->balance_relativ,"
                                                     "richtung,master_contracts,master_tp,master_sl,slave_risk,notes,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
+                                                    "master_symbol,master_risk,multiplier,"   # SK1-L (S4, 20.11.2026): Funded-Planer-Karte fremder IDs — Symbol/Lots durchreichen
                                                     "fp_start:mt5_baseline->funded_plan->>start_um,kette:mt5_baseline->kette",   # FF2: kette für „Trade 1/2“ im Reiter
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
@@ -50427,9 +50428,23 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                       "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance")),
                       # Werte des Planers beim Anlegen (Ziel, Liq, Stufe, Hedge, offene Kosten) — Spalte Balance → Ziel und Stufe wie beim Challenge-Planer
                       **{k: (p.get("funded_plan") or {}).get(k) for k in ("ziel", "liq", "stufe", "dll", "hedge_sl_eur", "hedge_tp_eur", "offen_eur", "hedge_quelle", "offen_kosten_eur", "hedge_basis")
-                         if isinstance(p.get("funded_plan"), dict)}}
+                         if isinstance(p.get("funded_plan"), dict)},
+                      # SK1-L (S4, 20.11.2026): die Admin-Karte fremder IDs (Marc) zeigte sonst „3 × NQ“ + falsche Lots — nur durchreichen, keine Logik
+                      "master_symbol": p.get("master_symbol"), "slave_risk": _wd_num(p.get("slave_risk")), "master_risk": _wd_num(p.get("master_risk")),
+                      "multiplier": _wd_num(p.get("multiplier"))}
                      for p in plaene
                      if p.get("status") in ("planned", "open", "review") or str(p.get("started_at") or p.get("ended_at") or "") >= seit]
+    try:   # SK1-L: volles mt5_baseline nur für diese wenigen Pläne (nicht in der 180-Tage-Abfrage oben — großes JSON je Plan); Lesefehler → Feld fehlt
+        _pids = [z["plan_id"] for z in erg["plaene"]]
+        _mb = {}
+        for i in range(0, len(_pids), 80):
+            for z in sb_select("trade_plans", {"select": "id,mt5_baseline", "id": f"in.({','.join(_pids[i:i + 80])})"}) or []:
+                _mb[str(z.get("id"))] = z.get("mt5_baseline")
+        for z in erg["plaene"]:
+            if z["plan_id"] in _mb:
+                z["mt5_baseline"] = _mb[z["plan_id"]]
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ mt5_baseline der Planer-Karte: {type(e).__name__}: {e}", flush=True)
     for z in erg["plaene"]:
         je_id.setdefault(z["user_id"], {"geplant": 0, "ziel": 0, "ausgelassen": 0})
     erg["ids"] = [dict(v, user_id=u, name=namen.get(u) or u[:8], heute_schon=schon.get(u, 0)) for u, v in je_id.items()]
