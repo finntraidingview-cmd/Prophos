@@ -39436,7 +39436,16 @@
       mkl.wd.at = 0; try{ await mklWdLaden() }catch(_){} ; mklWdRender(); try{ mklChartZeichnen() }catch(_){}
     }catch(e){ if(typeof atToast === 'function') atToast('TP nicht gespeichert: ' + ((e && e.message) || e), 'end') }
   }
-  const mklWdEigenerPlan = id => { try{ return (tradePlans || []).find(x => String(x.id) === String(id)) || null }catch(_){ return null } }
+  // window._mklWdEigeneStub: nur Stub-Test ohne Login (AB-E1, wie _skPlaeneStub) — eigene Pläne vorgeben, sonst die geladenen tradePlans
+  const mklWdEigenerPlan = id => { try{ return (window._mklWdEigeneStub || tradePlans || []).find(x => String(x.id) === String(id)) || null }catch(_){ return null } }
+  /* AB-E1 (Finn als „Finn + Pascal“ 20.11.2026, Radar → „Abhaken · Funded“, 2× Blue Guardian 100k Funded CFD/Echo: „Ich habe den Trade nicht selbst geplant, das war der
+   * Autoplaner“): ein Plan der eingeloggten ID, den der Challenge-Planer (auto_plan) oder der Funded-/Funded-CFD-Planer (mt5_baseline.funded_plan, im Radar planer_plan)
+   * angelegt hat, ist kein Hand-Plan — im Radar geht er denselben Weg wie ein fremder (Radar-Popup, Railway /admin/wd-plaene, Sammel-Lauf samt Funded-CFD-Urteil).
+   * Nur echte Hand-Pläne der eigenen ID bleiben beim Trades-Dialog (dort u. a. „Nachfolger anlegen“ bei bestanden, das der Radar-Weg nicht kennt).
+   * pw = Radar-Zeile (/admin/live-trades: auto_plan, planer_plan), e = eigener Plan aus tradePlans (autoPlan, mt5Baseline.funded_plan). */
+  const mklWdPlanerPlan = (e, pw) => !!((pw && (pw.auto_plan === true || pw.planer_plan === true))
+    || (e && (e.autoPlan === true || !!(e.mt5Baseline && typeof e.mt5Baseline === 'object' && e.mt5Baseline.funded_plan))))
+  window._mklWdPlanerPlan = mklWdPlanerPlan   // Test-Haken (Stub-Test AB-E1)
   /* Aktionen der Markt-Karte (25.09.2026). ende = PATCH /admin/wd-plaene {aktion:'ende'} für jede ID (Backend .539, gleiche
    * Form wie tvV2EndeSetzen + atMoveToReview: final quelle 'hand', status review, ended_at); danach Pläne + Block neu laden.
    * hedge = hedgeSoloSchliessen(plan, 'hand') wie der Knopf auf der Trade-Karte. */
@@ -39571,10 +39580,12 @@
     const hPl = (pw.hedge && _fz(pw.hedge.pl) != null) ? ((pw.hedge.status === 'geschlossen' && _fz(pw.slave_pl) != null) ? _fz(pw.slave_pl) : _fz(pw.hedge.pl))
       : _mwdErlFusionAmPlan ? (_fz(pw.slave_pl_live) ?? _fz(pw.slave_pl) ?? (_mwdErlPolar && pw.polar ? _fz(pw.polar.slave_pl) : null)) : null
     const eigen = mklWdEigenerPlan(pid)
+    // AB-E1 (20.11.2026): im Radar (sicht) geht ein Planer-Plan der eigenen ID wie ein fremder — Trades-Dialog nur noch für eigene Hand-Pläne bzw. außerhalb des Radars
+    const eigenTc = !!eigen && !((opts && opts.sicht) && mklWdPlanerPlan(eigen, pw))
     // Ein Klick auf einem eigenen Plan (A1 03.11.2026): erst die Vorbelegung des Radar-Dialogs prüfen, gebucht wird über Railway wie bei fremden Plänen; passt sie nicht, Trades-Dialog wie bisher
     const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
     _mwdErlNr++   // WP1 (Fremd-Review): jedes Öffnen — auch der Trades-Dialog unten — macht eine noch offene Urteils-Antwort eines früheren Öffnens ungültig
-    if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
+    if(eigenTc && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
     // AB2: Abhak-Strahl (Name wie die Radar-Zeile: Firma Größe …Nummer, darunter die Person) — seit AB2c nur Funded CFD aus dem Funded-Planer (ab2Gilt)
     _mwdErlChallenge = AB2_STILL_TYPEN.includes(String(pw.konto_typ || ''))
@@ -39744,7 +39755,8 @@
         _wpListe(true)
       }
       // schaetzung: der P&L ist nur der ≈-Vorschlag (Konto weg / Topstep-MLL / TP + weg, „bitte prüfen“) — wird nie im Sammel-Lauf gebucht
-      return { wp: _mwdErlWp || null, fcfd: _wpFcfd, eigen: !!eigen, ohneHedge: _mwdErlOhneHedge, schaetzung: plVor == null && _kwSch != null }
+      // eigen = eigener HAND-Plan (AB-E1): Planer-Pläne der eigenen ID bucht der Sammel-Lauf wie fremde
+      return { wp: _mwdErlWp || null, fcfd: _wpFcfd, eigen: eigenTc, ohneHedge: _mwdErlOhneHedge, schaetzung: plVor == null && _kwSch != null }
     }
     // EIN KLICK (Finn 30.10.2026 18:0x): unauffälliger Trade (wdlEinKlickGrund) speichert mit genau dieser Vorbelegung, ohne das Popup zu zeigen. Sagt die Vorbelegung
     // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
@@ -39758,7 +39770,7 @@
       // AP6: _wpZiel = gemerkter Stand meldet das Ziel (Challenge/Phase) → Popup statt Ein Klick
       if(ruhig && !_wpFcfd && !_wpZiel && !(_mwdErlWp && wdlFcfdZielMoeglich(pw))){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
-      if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
+      if(eigenTc && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Hand-Plan: Popup = Trades-Dialog wie bisher (A1); Planer-Plan → Radar-Popup (AB-E1)
     }
     // AP6 (Prüfer K5): Ein Klick auf Challenge/Phase/Funded Futures, der doch aufgeht (nicht ruhig) → Vorwahl (und Stand für die Ziel-Karte) jetzt nachladen
     if(opts && opts.einKlick && !_wpZeigen && _wpAndere){
@@ -42243,7 +42255,7 @@
     if(!liste.length) return
     const blowGr = titel === 'Geblowt · archivieren'
     const frage = (blowGr ? `${liste.length} Trades abhaken + Konten archivieren?` : `${liste.length} Trades abhaken?`)
-      + '\n\nJede Zeile läuft wie ihr Knopf „Abhaken“ mit der Vorbelegung des Popups. Zeilen, die eine Entscheidung brauchen (geschätzter P&L, Ziel-Stand offen, eigener Plan …), bleiben stehen und werden danach genannt.'
+      + '\n\nJede Zeile läuft wie ihr Knopf „Abhaken“ mit der Vorbelegung des Popups. Zeilen, die eine Entscheidung brauchen (geschätzter P&L, Ziel-Stand offen, eigener Hand-Plan …), bleiben stehen und werden danach genannt.'
     if(!confirm(frage)) return
     const erg = { titel, ok: 0, vm: 0, stehen: [], fehler: [] }
     const name = t => { const k = (t && t.konto) || {}; return `${(t && t.person) || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
@@ -42267,8 +42279,9 @@
           if(grund && !blow && !ziel && grund !== WDL_FCFD_STAND_OFFEN){ erg.stehen.push([name(t), grund]); continue }
           const o = mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: true, sammel: true, sammelUrteil: ziel })
           if(!o){ _mwdErlId = null; erg.stehen.push([name(t), 'Popup nicht vorbereitet']); continue }
-          // eigener Plan: der Einzel-Klick öffnet hier den Trades-Dialog (anderer Weg) — nur der stille Fall bucht über Railway
-          if(o.eigen && (grund || o.fcfd)){ _mwdErlId = null; erg.stehen.push([name(t), 'eigener Plan — im Trades-Dialog abhaken']); continue }
+          // eigener HAND-Plan: der Einzel-Klick öffnet hier den Trades-Dialog (anderer Weg) — nur der stille Fall bucht über Railway.
+          // AB-E1 (20.11.2026): o.eigen ist nur noch bei Hand-Plänen gesetzt; Autoplaner-/Funded-Planer-Pläne der eigenen ID laufen hier wie fremde durch
+          if(o.eigen && (grund || o.fcfd)){ _mwdErlId = null; erg.stehen.push([name(t), 'von Hand geplant (nicht vom Planer), eigene ID — im Trades-Dialog abhaken']); continue }
           if(o.schaetzung){ _mwdErlId = null; erg.stehen.push([name(t), 'P&L nur geschätzt (≈) — einzeln prüfen']); continue }   // nie eine Schätzung endgültig buchen
           if(o.wp){
             // _wpUrteil löst nach spätestens WP_URTEIL_MS mit null auf (auch bei Fehlern) — ohne Urteil keine Vorwahl, also keine eindeutige Vorbelegung
@@ -42283,7 +42296,7 @@
           const wdh = !!document.getElementById('mwd-erl-wdh-cb')?.checked
           const passt = blow ? st === 'blown' : ziel ? ['passed', 'waiting', 'winning_days'].includes(st) : ['none', 'waiting'].includes(st)
           const unklar = (mV == null || !isFinite(mV)) ? 'P&L fehlt' : (fV == null || !isFinite(fV)) ? 'Fusion-P&L fehlt' : wdh ? 'Winning-Day-Vorschlag'
-            : !passt ? `Popup schlägt „${WDL_SAMMEL_ST[st] || st}“ vor` : (o.eigen && st === 'passed') ? 'eigener Plan — Nachfolger anlegen' : ''
+            : !passt ? `Popup schlägt „${WDL_SAMMEL_ST[st] || st}“ vor` : (o.eigen && st === 'passed') ? 'von Hand geplant, eigene ID — Nachfolger im Trades-Dialog anlegen' : ''
           if(unklar){ _mwdErlId = null; erg.stehen.push([name(t), unklar]); continue }
           _mwdErlEinKlick = true; _mwdErlStill = true   // nur_review (nichts doppelt), kein Strahl je Zeile
           // RB3b: hängt Railway, wartet die Zeile höchstens WDL_SAMMEL_FRIST_MS — die Werte hat Speichern vor dem ersten await gelesen, die nächste Zeile stört es nicht
@@ -60514,7 +60527,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2274'
+  const OS_TAB_BUILD = '2026-09-22.2275'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
