@@ -19126,11 +19126,88 @@
     const ADM_APEX_DD = { 25000: 1500, 50000: 2500, 75000: 2750, 100000: 3000, 150000: 4000, 250000: 6500, 300000: 7500 }
     const ADM_APEX_MAX = { 25000: [1000, 1000, 1000, 1000, 1000, 1000], 50000: [1500, 1500, 2000, 2500, 2500, 3000],
                            100000: [2000, 2500, 2500, 3000, 4000, 4000], 150000: [2500, 3000, 3000, 3000, 4000, 5000] }
+    /* SK1-K STRIKING APEX (Finn 20.11.2026 am Screenshot Kasse → Payouts „Winning Days … 28 Accounts“: „hier dann auch anpassen“ — Marcs
+     * Apex-Konten standen auf 🏆 5/5 · „anfragbar“ · „50 % von +9.345 $ über Puffer 103.000 $ · Payout Nr. 2 max. 2.500 $“, das Apex-Dashboard
+     * sagt aber NICHT anfragbar: Trader Probation zählt nur den Profit seit 18.11., …06 hat 1/5 Tage, +360,84 $, Consistency 100 %).
+     * Konstrukt .claude/master/berichte/2026-11-20_SK1_striking_apex_konstrukt.md. Hat die Zeile ein Feld `striking` (Railway, payout_ready —
+     * nur Apex-Konten mit striking_zyklus_start), rechnet sie NUR ab Zyklus-Start: Tage ≥ Schwelle seit zyklus_seit statt Lebens-WD-Zähler,
+     * Netto = Balance − Zyklus-Start (Verlusttage zählen mit), bester Tag, Consistency = bester Tag ÷ Netto. Anfragbar nur bei 5 Tagen +
+     * Consistency ≤ 50 % + (Probation: Netto ≥ Minimum Profit | sonst Balance ≥ Mindest-Payout-Balance) + Betrag ≥ 500 $. Betrag =
+     * min(Cap der Payout-Nr., 50 % vom Netto) — 50 % ist dieselbe Regel, aus der das Zyklus-Ziel Z = 2 × Cap kommt. Sonst Betrag 0 und
+     * der Grund wie bei Apex („1/5 Tage · Consistency 100 % · fehlt +3.239 $“). Ohne Feld bleibt alles wie vorher. Werte aus
+     * striking_regeln.apex, wenn Railway sie mitschickt (striking.regeln), sonst die Zahlen des Konstrukts. Reine Anzeige, keine Sperre
+     * außer dem Knopf „anfragbar“, der nur bei erfüllten Regeln kommt. */
+    const ADM_STRIKING_APEX = { min_profit: { 100000: 3600, 150000: 4600 }, tag_schwelle: { 100000: 300, 150000: 350 },
+                                min_payout_balance: { 100000: 103600, 150000: 154600 }, tage: 5, cons_pct: 50, min_payout: 500 }
+    function admApexStriking(r, c, regel, caps){
+      const s = r.striking, rg = (s.regeln && typeof s.regeln === 'object') ? s.regeln : {}
+      // Zahl > 0 aus Railway, sonst der Wert des Konstrukts ('' / null / Unsinn zählen nicht — Gegencheck 20.11.2026)
+      const jeGr = (feld, std) => { const v = Number(rg[feld] && rg[feld][c.size]); return v > 0 ? v : std[c.size] }
+      const schwelle = jeGr('tag_schwelle', ADM_STRIKING_APEX.tag_schwelle), minProfit = jeGr('min_profit', ADM_STRIKING_APEX.min_profit)
+      const minBal = Number(s.min_payout_balance) > 0 ? Number(s.min_payout_balance) : jeGr('min_payout_balance', ADM_STRIKING_APEX.min_payout_balance)
+      const capsRg = rg.caps && Array.isArray(rg.caps[c.size]) ? rg.caps[c.size].map(Number) : null
+      const capsS = capsRg && capsRg.length && capsRg.every(v => v > 0) ? capsRg : caps
+      const start = Number(s.zyklus_start), seit = /^\d{4}-\d{2}-\d{2}$/.test(String(s.zyklus_seit || '').slice(0, 10)) ? String(s.zyklus_seit).slice(0, 10) : ''
+      const nr = Number(s.payout_nr) >= 1 ? Math.floor(Number(s.payout_nr)) : (Number(r.payouts_n) || 0) + 1
+      const deckel = nr <= capsS.length ? capsS[nr - 1] : null
+      // FAIL-CLOSED (Konstrukt: „ohne Wert … zeigt ‚Zyklus-Start fehlt‘“; Gegencheck 20.11.2026): fehlt Start, Datum, Regel der Größe oder gibt die
+      // Cap-Tabelle die Payout-Nr. nicht her (nach dem 6. schließt der PA), ist die Zeile trotzdem Striking — Betrag 0, Grund statt Knopf, nie der WD-Zähler
+      const fehltWas = !(start > 0) ? 'Zyklus-Start fehlt' : !seit ? 'Zyklus-Datum fehlt'
+        : (schwelle == null || minProfit == null || minBal == null) ? `${c.size / 1000}k: keine Striking-Regel`
+        : deckel == null ? `Payout Nr. ${nr}: kein Cap (Tabelle endet bei ${capsS.length})` : ''
+      if(fehltWas)
+        return { regel: Object.assign({}, regel, { deckel }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub: `Striking · ${fehltWas}`, minus: fehltWas,
+                 striking: { tage: 0, ziel: ADM_STRIKING_APEX.tage, schwelle, netto: null, bester: null, cons: null, probation: !!s.probation, ok: false, fehlt: null, nr, start: start > 0 ? start : null, seit } }
+      // Einträge je Handelstag (Railway); doppelte Tage zusammenfassen, falls doch je Trade geliefert wird
+      const proTag = new Map()
+      for(const t of (Array.isArray(s.tage) ? s.tage : [])){
+        const tg = String(t && t.tag || '').slice(0, 10), pl = Number(t && t.pl)
+        if(tg >= seit && Number.isFinite(pl)) proTag.set(tg, (proTag.get(tg) || 0) + pl)
+      }
+      const tage = [...proTag].map(([tag, pl]) => ({ tag, pl }))
+      const nTage = Math.min(tage.filter(t => Number(t.pl) >= schwelle).length, ADM_STRIKING_APEX.tage)
+      const netto = c.bal - start
+      const bester = tage.reduce((m, t) => Math.max(m, Number(t.pl)), 0)
+      const cons = netto > 0 ? bester / netto * 100 : null
+      const probation = !!s.probation
+      const n0 = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
+      const geld = v => admGeld(v, c.ccy)
+      // Was noch fehlt: der größere von Profit-/Balance-Regel und Consistency (Netto ≥ 2 × bester Tag)
+      const fehltRegel = probation ? minProfit - netto : minBal - c.bal
+      const fehlt = Math.max(0, fehltRegel, ADM_STRIKING_APEX.cons_pct > 0 ? bester * 100 / ADM_STRIKING_APEX.cons_pct - netto : 0)
+      const roh = Math.max(0, netto) * .5
+      const gedeckelt = deckel != null && roh > deckel
+      const betrag = gedeckelt ? deckel : roh
+      const tageOk = nTage >= ADM_STRIKING_APEX.tage, consOk = cons != null && cons <= ADM_STRIKING_APEX.cons_pct
+      const ok = tageOk && consOk && fehltRegel <= 0 && betrag >= ADM_STRIKING_APEX.min_payout
+      const tagTxt = seit ? new Date(seit + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'UTC' }) : '?'
+      // kurz wie die bisherige Apex-Unterzeile (die Zelle bricht nicht um); Start + Datum im Tooltip (tip)
+      const sub = `${probation ? 'Probation' : 'Zyklus'} ${netto >= 0 ? '+' : '−'}${n0(netto)} $ · bester Tag ${n0(bester)} $ · Nr. ${nr} max. ${geld(deckel)}`
+      const tip = `Striking Apex: ${probation ? 'Trader Probation' : 'Zyklus'} seit ${tagTxt}, Start ${geld(start)} → Balance ${geld(c.bal)}`
+        + ` · Betrag = min(Cap Payout Nr. ${nr}, 50 % vom Netto)`
+      const info = { tage: nTage, ziel: ADM_STRIKING_APEX.tage, schwelle, netto, bester, cons, probation, ok, fehlt, nr, start, seit }
+      const rx = Object.assign({}, regel, { deckel, quelle: tip })
+      if(ok) return { regel: rx, grund: '', roh, gedeckelt, anfragbar: betrag, erhalten: betrag * c.pct / 100, sub, striking: info }
+      const teile = [`${nTage}/${ADM_STRIKING_APEX.tage} Tage`, cons == null ? 'Profit ≤ 0' : `Consistency ${Math.round(cons)} %`]
+      if(fehlt > 0) teile.push(`fehlt +${n0(fehlt)} $`)
+      else if(betrag < ADM_STRIKING_APEX.min_payout) teile.push(`unter Mindest-Payout ${geld(ADM_STRIKING_APEX.min_payout)}`)
+      return { regel: rx, grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, sub, striking: info, minus: teile.join(' · ') }
+    }
+    // SK1-K: Stand der Payouts-Zeile — Striking-Konto = Tage seit Zyklus-Start und „bereit“ nur bei erfüllten Regeln, sonst der WD-Zähler aus Railway
+    // (wd_count/wd_target/wd_ready/wd_ab bleiben unverändert in den Daten, andere Ansichten lesen sie weiter)
+    function admWdStand(r){
+      const s = r && r.calc && r.calc.anf && r.calc.anf.striking
+      return s ? { count: s.tage, target: s.ziel, ready: !!s.ok, ab: '', striking: s }
+               : { count: r.wd_count, target: r.wd_target, ready: !!r.wd_ready, ab: r.wd_ab, striking: null }
+    }
     function admApexAnfragbar(r, c, regel){
       if(c.size == null) return { regel, grund: 'Größe unklar', anfragbar: null, erhalten: null }
       if(c.bal == null) return { regel, grund: 'keine Balance', anfragbar: null, erhalten: null }
       const dd = ADM_APEX_DD[c.size], caps = ADM_APEX_MAX[c.size]
       if(dd == null || !caps) return { regel, grund: `${c.size / 1000}k: keine Apex-Payout-Tabelle`, anfragbar: null, erhalten: null }
+      // SK1-K: Striking-Konto mit Zyklus-Start → nur ab Zyklus-Start rechnen (Recoverer und Lebens-Puffer gelten hier nicht, Striking ersetzt beides)
+      // Feld `striking` als Objekt = Striking-Konto (auch ohne Start → fail-closed in admApexStriking); ein boolesches striking (FundingPips CFD) zählt nicht
+      if(r.striking && typeof r.striking === 'object') return admApexStriking(r, c, regel, caps)
       const puffer = c.size + dd
       const ueber = c.bal - puffer
       const nr = (Number(r.payouts_n) || 0) + 1
@@ -20460,8 +20537,18 @@
       }else if(r.calc && r.calc.anf && r.calc.anf.minus){
         // PO2 (Finn 11.11.2026): Zyklus im Minus ab Zyklus 2 → kein „anfragbar“, dezent der Grund
         const s = document.createElement('div'); s.style.cssText = 'font-size:11.5px;color:var(--sub);margin-top:2px;white-space:normal;max-width:220px'
-        s.textContent = r.calc.anf.minus; s.title = 'Tradeify/Lucid: Payout erst, wenn der Zyklus im Plus ist (Mindest-Net-Profit, wie die Konto-Seite)'
+        s.textContent = r.calc.anf.minus
+        s.title = r.calc.anf.striking ? `Striking Apex: ${r.calc.anf.striking.ziel} Tage ≥ ${r.calc.anf.striking.schwelle} $ seit Zyklus-Start, Consistency ≤ 50 %, `
+            + (r.calc.anf.striking.probation ? 'Probation: Profit ≥ Minimum Profit' : 'Balance ≥ Mindest-Payout-Balance') + ' — wie das Apex-Dashboard'
+          : 'Tradeify/Lucid: Payout erst, wenn der Zyklus im Plus ist (Mindest-Net-Profit, wie die Konto-Seite)'
         st.appendChild(s)
+      }else if(r.calc && r.calc.anf && r.calc.anf.striking){
+        // SK1-K: Striking-Regeln erfüllt (sonst stünde oben der Grund) → Knopf, unabhängig vom Lebens-WD-Zähler und von wd_ab
+        const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-good'
+        chip.style.cssText = 'margin-left:8px;border:0;cursor:pointer'
+        chip.textContent = 'anfragbar'; chip.title = `Striking: Payout für ${admShortName(r.person || '—')} anfragen`
+        chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
+        st.appendChild(chip)
       }else if(r.wd_ready && wdAbAusIso(r.wd_ab)){
         // WE1 (Finn 19.11.2026): Ziel erst im laufenden Handelstag voll — die Firma zählt den Tag erst nach Tagesende. 5/5 bleibt stehen, statt des Knopfs
         // „anfragbar ab 03:00“ (Gerätezeit); nach der Grenze zeichnet admCalRender neu und der Knopf kommt
@@ -21329,6 +21416,7 @@
           const faellig = tag ? tage <= 0 : !!r.wd_ready && !wdAbAusIso(r.wd_ab)   // WE1: Ziel erst heute voll → noch nicht fällig
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
+          if(!tag && r.calc.anf.striking) r.calc.faellig = !!r.calc.anf.striking.ok   // SK1-K: Striking fällig nur bei erfüllten Regeln, nicht nach WD-Zähler
           // PO2: Railway kann den Tradeify-/Lucid-Zyklus nicht entscheiden → Urteil der Konto-Kachel holen (/konto-ziele, je Konto höchstens alle 5 min, nur diese Zeilen)
           if(istWd(r)){ const zyU = window._wdZyklusRoh?.(r.account_id)
             if(zyU && zyU.art === 'tradeify' && zyU.grund_code === 'unbekannt'){ const u = _admOd.cache[String(r.account_id)]; if(!u || Date.now() - u.at > ADM_OD_TTL_MS) admOdLaden(String(r.account_id)) } }
@@ -21423,14 +21511,14 @@
         // ohne Termin zuletzt). Der Klick im Raster springt zur ersten CFD-Zeile dieses Tags (data-cal-tag an der Zeile).
         const gruppen = []
         // PO2: Zyklus im Minus (gesperrt) nach unten — nicht anfragbar, auch wenn 5/5
-        const wdMinus = r => (r.calc && r.calc.anf && (r.calc.anf.minus || r.calc.anf.zyklusOffen)) ? 1 : 0
-        const wdBereit = r => (r.wd_ready && !wdAbAusIso(r.wd_ab)) ? 1 : 0   // WE1: „anfragbar ab …“ direkt hinter die anfragbaren (5/5 sortiert danach vor 4/5)
+        const wdMinus = r => (r.calc && r.calc.anf && !r.calc.anf.striking && (r.calc.anf.minus || r.calc.anf.zyklusOffen)) ? 1 : 0   // SK1-K: Striking sortiert nach Tagen (admWdStand), nicht ans Ende
+        const wdBereit = r => { const w = admWdStand(r); return (w.ready && !wdAbAusIso(w.ab)) ? 1 : 0 }   // SK1-K: Striking-Stand statt WD-Zähler · WE1: „anfragbar ab …“ direkt hinter die anfragbaren (5/5 sortiert danach vor 4/5)
         // WE1: an der Tagesgrenze einmal neu zeichnen, damit „anfragbar ab 03:00“ ohne Neuladen zum Knopf wird
         const abNext = Math.min(...cal.map(r => wdAbAusIso(r.wd_ab)).filter(Boolean))
         clearTimeout(window._admWdAbTimer)
         if(isFinite(abNext)) window._admWdAbTimer = setTimeout(() => { try{ admCalRender() }catch(_){} }, Math.min(abNext - Date.now() + 2000, 2147000000))
         const wd = cal.filter(istWd)
-          .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (wdBereit(b) - wdBereit(a)) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
+          .sort((a, b) => (wdMinus(a) - wdMinus(b)) || (wdBereit(b) - wdBereit(a)) || (((admWdStand(b).count || 0) / (admWdStand(b).target || 1)) - ((admWdStand(a).count || 0) / (admWdStand(a).target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
         // PO1 (Finn 09.11.2026): anfragbar oben — fällige Termine (heute/überfällig) und erfüllte On-Demand-Konten zuerst, sonst wie bisher nach Termin
         const cfdAnf = r => (r.calc.tag ? r.calc.tage <= 0 : !!((r.calc.od && r.calc.od.ok === true) || r.waiting_since)) ? 0 : 1   // BS1: Waiting ohne Termin = anfragbar
         const cfd = cal.filter(r => !istWd(r))
@@ -21452,13 +21540,14 @@
           return tr
         }
         const dots = r => {
-          if(!(r.wd_target > 0) || r.wd_target > 10) return null
-          const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
+          const w = admWdStand(r)   // SK1-K: Striking = Tage seit Zyklus-Start
+          if(!(w.target > 0) || w.target > 10) return null
+          const farbe = w.ready ? 'var(--good)' : 'var(--violet)'
           const s = document.createElement('span')
           s.style.cssText = 'display:inline-flex;gap:3px;align-items:center;margin-left:8px;vertical-align:middle'
-          for(let k = 0; k < r.wd_target; k++){
+          for(let k = 0; k < w.target; k++){
             const p = document.createElement('span')
-            p.style.cssText = `width:6px;height:6px;border-radius:50%;background:${k < r.wd_count ? farbe : 'var(--border)'}`
+            p.style.cssText = `width:6px;height:6px;border-radius:50%;background:${k < w.count ? farbe : 'var(--border)'}`
             s.appendChild(p)
           }
           return s
@@ -21496,7 +21585,7 @@
           // Stand: Winning Days = 🏆-Zähler, CFD = relativer Termin bzw. „wartet seit …" ohne Termin
           const st = tr.querySelector('.c-stand')
           if(c.tag) tr.dataset.calTag = c.tag
-          if(!(istWd(r) && r.wd_target > 0) && !c.tag){
+          if(!(istWd(r) && admWdStand(r).target > 0) && !c.tag){   // SK1-K: Striking-Konto bleibt im WD-Zweig, auch wenn Railway kein wd_target liefert
             const tw = r.waiting_since ? Math.max(0, -tageBis(r.waiting_since)) : null
             const wartetTxt = 'Waiting for Payout' + (tw != null ? (tw === 0 ? ' · seit heute' : ` · seit ${tw} Tag${tw === 1 ? '' : 'en'}`) : '')
             const od = c.od && typeof c.od.ok === 'boolean' ? c.od : null, offen = !!admAnfrageVon(r)
@@ -21536,7 +21625,7 @@
               }
             }
             if(offen) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ (P3) — nur die Anzeige, nie ein zusätzlicher Knopf
-          }else if(c.tag && !(istWd(r) && r.wd_target > 0)){
+          }else if(c.tag && !(istWd(r) && admWdStand(r).target > 0)){
             // CFD DIREKT ANFRAGEN (P3, Finn 04.11.2026 ~02:20 Dubai: „Dass ich bei den CFDs auf ‚Anfragbar‘ gehen kann und direkt anfangen kann“): ist der Termin
             // fällig (heute/überfällig) und noch keine Anfrage offen, ist der Chip ein Knopf und öffnet dieselbe Anfrage wie „anfragbar“ bei den Futures
             // (admAnfrageOeffnen — Termin danach = Anfrage-Datum + 14, finNextPayoutVorschlag). „morgen“/„in N Tagen“ bleiben reiner Hinweis.
@@ -21552,9 +21641,11 @@
             st.appendChild(chip)
             if(offen) admAnfrageChip(st, r)   // offene Anfrage als „angefragt …“ — nur die Anzeige, nie ein zweiter Knopf
           }else{
-            const s = document.createElement('span')
-            s.style.cssText = `font-weight:600;color:${r.wd_ready ? 'var(--good)' : 'var(--violet)'}`
-            s.textContent = `🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}`
+            const s = document.createElement('span'), w = admWdStand(r)
+            s.style.cssText = `font-weight:600;color:${w.ready ? 'var(--good)' : 'var(--violet)'}`
+            // SK1-K: Striking zeigt die Tage ≥ Schwelle seit Zyklus-Start („Striking 1/5 Tage“), nicht den Lebens-WD-Zähler
+            s.textContent = w.striking ? `Striking ${Math.min(w.count, w.target)}/${w.target} Tage` : `🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}`
+            if(w.striking) s.title = `Tage mit ≥ ${w.striking.schwelle} $ seit ${w.striking.seit || 'Zyklus-Start'} (Lebens-Winning-Days: ${r.wd_count ?? '—'}/${r.wd_target ?? '—'})`
             st.appendChild(s)
             const d = dots(r); if(d) st.appendChild(d)
             admAnfrageChip(st, r)
@@ -21593,7 +21684,7 @@
           sub.textContent = `${a.grund} · ${anteilTxt} · × ${pctTxt} %`; b.title = a.regel.quelle
         }else{
           v.textContent = geld(a.erhalten); v.style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
-          const _ab = r.wd_ready ? wdAbAusIso(r.wd_ab) : 0   // WE1 (19.11.2026): Ziel erst heute voll → Betrag steht, „ab 03:00 · “ davor
+          const _ab = (r.wd_ready && !a.striking) ? wdAbAusIso(r.wd_ab) : 0   // SK1-K: Striking ohne WD-„ab“ · WE1 (19.11.2026): Ziel erst heute voll → Betrag steht, „ab 03:00 · “ davor
           sub.textContent = (_ab ? wdAbTxt(_ab) + ' · ' : '') + (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
             || (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
             + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : '')))
