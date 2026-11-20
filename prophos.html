@@ -56024,7 +56024,7 @@
     // Gestartet = gelöst (21.10.2026, s. sfVersuchtErneut): ein früherer Fehlstart steht nur noch in der aufklappbaren Spur, kein ⚠ mehr
     const lief = !!(p.startedAt || tv.at || ['open', 'review', 'completed'].includes(String(p.status || '')))
     let sfErneut = false; try{ sfErneut = sfVersuchtErneut(sf) }catch(_){}   // Konstanten stehen weiter unten im Modul (TDZ beim frühen Zeichnen)
-    if(sf && !lief && sf.status !== 'behoben' && (sf.msg || sf.schritt)) teile.push(`${sfErneut ? 'versucht erneut' : '⚠ Start-Fehler'}${sf.at ? ' ' + uhr(sf.at) : ''}: ${kurz(sf.msg || sf.schritt, 70)}`)
+    if(sf && !lief && sf.status !== 'behoben' && (sf.msg || sf.schritt)) teile.push(`${sfErneut ? (/Topstep DLL erreicht – Tagesstopp/.test(String(sf.msg || '')) || sf.schritt === 'konto_tagesstopp' ? 'Tagesstopp' : 'versucht erneut') : '⚠ Start-Fehler'}${sf.at ? ' ' + uhr(sf.at) : ''}: ${kurz(sf.msg || sf.schritt, 70)}`)
     if(fin.puls_at || fin.konto_weg){
       const v = Number(fin.puls_versuche) || 0
       let erg = ''
@@ -60527,7 +60527,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2275'
+  const OS_TAB_BUILD = '2026-09-22.2276'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66518,7 +66518,12 @@
   // GESPERRT = DECKEL SOFORT VOLL (Finn 26.10.2026, „Fehlstarts von heute alles fixen"): Jacob FundingPips …6925/…6924 und Marco FTMO …0116
   // liefen je 4× in „F9-Dialog nicht gefunden … trade_allowed = False" (13 Fehlstarts) — der Bot schreibt selbst „nicht neu starten", sfTick
   // plante trotzdem dreimal neu. Ein gesperrtes Konto heilt nicht in 15 min → kein Neuversuch, „Braucht dich" + Handy schon beim ersten Mal.
-  const sfDeckelVoll = sf => !!sf && (!!sfGesperrtSf(sf) || (!SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX))
+  // TOPSTEP DLL = TAGESSTOPP (TS-D2, Finn 20.11.2026: „Nein, nur Tagesstopp“): meldet Puls „Topstep DLL erreicht – Tagesstopp“ (order_bot TSX_TAGESSTOPP_TEXT,
+  // Code/Schritt konto_tagesstopp), startet der Plan heute nicht mehr neu — Deckel sofort voll wie ein gesperrtes Konto, aber kein Archiv, kein „geblowt“,
+  // kein Eingreif-Fall (sfVersuchtErneut). Am nächsten Handelstag plant der Nachtlauf normal neu. Schlüssel = schritt, Rückfall der Text irgendwo in der msg
+  // (der Tab setzt „Nichts platziert · “ davor, sfMelden kürzt auf Anfang + Ende — der Bot-Text steht vorn, überlebt also)
+  const sfIstTagesstopp = sf => !!sf && (String(sf.schritt || '') === 'konto_tagesstopp' || /Topstep DLL erreicht – Tagesstopp/.test(String(sf.msg || '') + ' ' + String(sf.grund || '')))
+  const sfDeckelVoll = sf => !!sf && (!!sfGesperrtSf(sf) || sfIstTagesstopp(sf) || (!SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX))
   // URSACHE STATT HAND-SPUR (Finn 26.10.2026): „Braucht dich" zeigte bei Jacob FundingPips …6925/…6924 und Marco FTMO …0116 nur
   // „F9-Dialog nicht gefunden — … [0.0s·Hand: Tempo … Zug …" — 13 Fehlstarts, der Grund (MT5 trade_allowed = False, Firma hat den Handel
   // gesperrt, Balance ~89,8k/93,5k/90,1k) stand abgeschnitten hinten. Die msg ist gekürzt (sfMelden: Anfang + „ … " + Ende), das Ende überlebt.
@@ -66551,6 +66556,7 @@
     const schritt = String(sf.schritt || '')
     if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit' || schritt === 'riegel_aufgegeben' || schritt === 'index_pause') return false   // R4b: nie von selbst neu → sofort in „Braucht dich“, keine 30-min-Handy-Meldung
     if(sfIstUac(sf)) return false   // Windows-Abfrage (23.10.2026): sichtbar lassen — Finn muss hin, auch wenn der Bot danach neu einplant
+    if(sfIstTagesstopp(sf)) return true   // TS-D2: Topstep-Tagesstopp ist kein Eingreif-Fall (Warten bis morgen ist richtig) — vor dem Deckel
     if(sfDeckelVoll(sf)) return false
     // ZWEI ORBIT (03.11.2026, Z4, Gegenprüfung): der Sofort-Start-Wächter plant erst bei „frei“ neu ein — f.at bleibt alt, solange der 1. Trade in der
     // Spanne steht (auch Stunden). Warten ist kein Fehler: kein „hängt“, keine Handy-Meldung, kein rotes Start-Fehler
@@ -67502,7 +67508,7 @@
     (SF_ZWEIT_TAKT.von + Math.random() * Math.max(0, SF_ZWEIT_TAKT.bis - SF_ZWEIT_TAKT.von)) * 1000)   // gestreut
   sfZweitPlanen()
   window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, zweit: sfIstZweit, zweitRunde: sfZweitRunde, zweitTakt: SF_ZWEIT_TAKT, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre, still: sfStillUrteil, STILL_MS: SF_STILL_MS,
-    uac: sfIstUac, uacText: sfIstUacText, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
+    uac: sfIstUac, uacText: sfIstUacText, fehl: sfFehlversuche, deckel: sfDeckelVoll, tagesstopp: sfIstTagesstopp, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
@@ -70389,6 +70395,7 @@
       case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
       case 'tab_nicht_erreichbar': return `Prophos-Tab am PC${pc} hat während des Starts nicht geantwortet (Tab schläft im Hintergrund) — nichts gesendet. Den Tab am PC nach vorn holen; der Plan versucht es in 15 min wieder.`
+      case 'konto_tagesstopp': return 'Nichts tun — Topstep-Konto hat heute das Daily Loss Limit erreicht (Tagesstopp, nicht geblowt). Heute kein Neuversuch, am nächsten Handelstag plant der Nachtlauf normal neu.'   // TS-D2
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
         return `Am Konto ist schon eine Position offen${pos ? ` (${pos})` : ''} — Hand-Trade? Am PC${pc} in TradingView nachsehen. Der Plan versucht es in 15 min wieder.`
@@ -70405,6 +70412,7 @@
     const bis = tplUhr(sfTagesEnde(), D.v), n = sfFehlversuche(sf)   // Windows-Abfragen zählen nicht (23.10.2026)
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
+    if(sfIstTagesstopp(sf)) return 'Heute kein Neuversuch — Topstep DLL erreicht (Tagesstopp), morgen normal weiter.'   // TS-D2
     if(sfGesperrtSf(sf)) return 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll; RA2: auch Server-Sperre)
     if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
@@ -70740,6 +70748,8 @@
       const gs = sf && (sf.status === 'rot' || sf.status === 'neu') ? sfGesperrtSf(sf) : null
       if(gs) return { text: `kann nicht starten (${uhr}) — Handel am Konto gesperrt${gs.bal ? `, Balance ${gs.bal}` : ''} (${gs.quelle})`,
         tun: 'Im Dashboard der Firma nachsehen (geblowt/gesperrt?) — dann unter Accounts abschließen bzw. archivieren und den Plan löschen. Erneut versuchen bringt nichts.', neu: false }
+      // 2c) Topstep-Tagesstopp (TS-D2, Prüfer 20.11.2026): Deckel ist zwar voll, aber das ist kein „kann nicht starten“-Fall — Warten bis morgen ist richtig
+      if(sf && sfIstTagesstopp(sf)) return null
       // 3) Deckel voll: SF_MAX Fehlstarts → sfTick plant nicht mehr neu (Memory prophos-nachholen-luecke-claim-zu-spaet, Marc/Mike 19.10.)
       if(sf && sf.status === 'rot' && sfDeckelVoll(sf))   // Windows-Abfragen zählen nicht mit (23.10.2026, sfFehlversuche)
         return { text: `kann nicht starten (${uhr}) — ${sfFehlversuche(sf)} Fehlstarts, der Bot versucht es nicht mehr; zuletzt: ${kurz(sfOhneSpur(sf.msg) || sf.schritt || 'Check rot').slice(0, 200)}`,
@@ -70813,6 +70823,11 @@
         // PC aus (19.10.2026): kein Prophos-Tab seit ≥ 10 min → nicht „Tab lief nicht" je Trade, sondern eine Zeile je ID (unten)
         const a = tplPcAus(t.user_id), o = pcAus.get(String(t.user_id)) || { pc: a.pc, alt_s: a.alt_s, konten: [] }
         o.konten.push(`${t.firma || '?'}${t.ende4 ? ' …' + t.ende4 : ''}`); pcAus.set(String(t.user_id), o)
+      } else if(t.status === 'bestaetigt' && sf && D.tag === D.heute && sfIstTagesstopp(sf)){
+        // TS-D2 (Prüfer 20.11.2026): Topstep-Tagesstopp — dezent grau wie „versucht erneut“, aber ehrlich: heute kein Neuversuch, morgen normal
+        add(t.user_id, t.user, { art: 'retry', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
+          text: `Tagesstopp — Topstep DLL erreicht, heute keine Starts mehr (nicht geblowt)`,
+          tun: 'Nichts tun — am nächsten Handelstag plant der Nachtlauf normal neu.' })
       } else if(t.status === 'bestaetigt' && sf && D.tag === D.heute && sfVersuchtErneut(sf)){
         // Neuversuch folgt (21.10.2026): dezent grau, nicht im Zähler — erst wenn er hängt, wird die Zeile rot
         add(t.user_id, t.user, { art: 'retry', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,

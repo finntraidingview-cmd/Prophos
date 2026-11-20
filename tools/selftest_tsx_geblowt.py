@@ -97,7 +97,8 @@ def main():
 
     # (7) Verdrahtung: Felder laufen durch, Meldung nur einmal je Lauf, Ineligible bleibt lesbar (tsx_k2_eintrag)
     quelle = open(os.path.join(HIER, "..", "mt5-copier", "order_bot.py"), encoding="utf-8").read()
-    check('"konto_verletzungen", "blow_dialog")' in quelle, "Lesepfad reicht konto_verletzungen/blow_dialog durch")
+    check('"konto_verletzungen", "blow_dialog", "konto_tagesstopp")' in quelle,   # TS-D2 (20.11.2026): Tagesstopp-Feld dazu
+      "Lesepfad reicht konto_verletzungen/blow_dialog durch")
     check(quelle.count("_tsx_geblowt_merken(res, ext, st)") >= 2, "Urteil im Lesepfad bei K2-Fehler UND nach der Lesung")
     check('_raus("konto_geblowt"' in quelle, "K2: Meldung nennt das Ziel → Code konto_geblowt")
     check('res["_blow_dialog_versucht"] = True' in quelle, "Meldung wird höchstens einmal je Lauf gedrückt")

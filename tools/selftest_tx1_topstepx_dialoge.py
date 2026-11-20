@@ -796,6 +796,7 @@ else:
     GEAENDERT.add("_tsx_konto_sichern")  # TS-D1 (20.11.2026): Loss-Limit-Meldung bei aktivem Ziel + Dialog-Spur bei „verdeckt“ — geprüft in selftest_tsd1_mll_dialog.py
     GEAENDERT.update({"tsx_blow_dialog", "_tsx_blow_dialog_weg"})   # TS-D1: Art aus dem Treffer; Text-Weg mit Sperrzone + Kasten-Bindung (ebd.)
     GEAENDERT.add("tsx_blow_dialog_knopf")   # TS-D1b (Stopp S2): nur ok/okay/close/dismiss/schließen/× — nie Continue/Got it/I understand (ebd.)
+    GEAENDERT.update({"tsx_verletzungen_aus_liste", "tsx_geblowt_urteil", "_tsx_geblowt_merken", "tsx_blow_dialog_verletzung"})   # TS-D2 (20.11.2026): DLL = Tagesstopp statt geblowt — geprüft in selftest_tsd2_dll_tagesstopp.py
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},
@@ -810,7 +811,7 @@ else:
         "_tsx_cdp_login": 0,             # nur die Google-Weiche davor
         "_tsx_sitzung_waehlen": 1,       # login_seite: seite → tsx_login_art
         "_tsx_auge_konto": 1,            # Bedingung nach der Bereit-Probe
-        "modus_tsxlesen_cdp": 1,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start)
+        "modus_tsxlesen_cdp": 3,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start); TS-D2: K2-Felder + Schritt konto_tagesstopp (2 Zeilen)
         "_tsx_k3_probe": 0,              # TX1b: vor dem Order-Klick nur der Überlagerungs-Zweig dazu (hinter tsx_ueberlagerung)
         "_tsx_k4_senden": 1,             # TX1b: Überlagerungs-Zweig dazu, g_ nimmt den klaren Grund (_ug), sonst wie bisher
         "tsx_k3_vor_klick": 1,           # TX1b: Text „Dialog offen" über tsx_dialog_offen_text (mit Titel/Text gleich, s. A2)

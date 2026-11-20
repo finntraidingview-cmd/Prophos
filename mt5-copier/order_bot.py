@@ -16749,14 +16749,62 @@ def tsx_verletzungen_aus_liste(liste):
         k = str(x.get("id") or x.get("id_kurz") or "").strip().upper()       # 2.4.32: ohne volle Kennung die Kurzform „EXPRES...9147"
         hw = str(x.get("hinweis") or ("Ineligible" if x.get("ineligible") else "")).strip()
         art = tsx_konto_verletzung(hw)
-        if k and art:
+        if k and art and art != "daily_loss":   # TS-D2 (Finn 20.11.2026: „Nein, nur Tagesstopp“): DLL ist bei Topstep kein Blow — nie ins Archiv
             out[k] = {"art": art, "text": hw[:60]}
     return out
+
+
+# TS-D2 TOPSTEP DLL = TAGESSTOPP (Finn 20.11.2026 auf die Frage zur Regel vom 14.10., „DLL-Treffer → konto_geblowt/Archiv?“: „Nein, nur Tagesstopp.“)
+# Das Geblowt-Auge (14.10.2026) ist ein reiner TopstepX-Weg. Ein Daily-Loss-Limit-Treffer (Dropdown „DAILY_LOSS Violation“, Meldung „You Hit Your Daily
+# Loss Limit“) macht das Konto NICHT geblowt und NICHT archiviert: für den laufenden CME-Handelstag keine weiteren Starts (Code konto_tagesstopp,
+# Text beginnt mit TSX_TAGESSTOPP_TEXT — Schlüssel für den PC-Tab sfIstTagesstopp, nie umbenennen), am nächsten Handelstag normal weiter.
+# Maximum Loss Limit / Ineligible / sonstige Violation bleiben konto_geblowt (TS-D1).
+TSX_TAGESSTOPP_TEXT = "Topstep DLL erreicht – Tagesstopp"
+
+
+def _tsx_konto_beweise(res, ext, aktiv=""):
+    """REIN RECHNEND (testbar, TS-D2): alle Beweise zum Zielkonto ext in Reihenfolge Liste (konto_hinweis), Liste (konto_verletzungen), Meldung
+    (blow_dialog: nennt ext — oder nennt kein Konto, während ext aktiv ist) → [{art, quelle, text}]."""
+    r = res if isinstance(res, dict) else {}
+    ziel = _nur_alnum(ext)
+    if len(ziel) < 5:
+        return []
+    out = []
+    art = tsx_konto_verletzung(r.get("konto_hinweis"))
+    if art:
+        out.append({"art": art, "quelle": "liste", "text": str(r.get("konto_hinweis") or "")[:60]})
+    verl = r.get("konto_verletzungen") if isinstance(r.get("konto_verletzungen"), dict) else {}
+    for k, v in verl.items():
+        if _nur_alnum(k) == ziel and isinstance(v, dict) and v.get("art"):
+            out.append({"art": str(v["art"]), "quelle": str(v.get("quelle") or "liste"), "text": str(v.get("text") or "")[:60]})
+    bd = r.get("blow_dialog") if isinstance(r.get("blow_dialog"), dict) else None
+    if bd:
+        k = _nur_alnum(bd.get("konto"))
+        if (k and k == ziel) or (not k and aktiv and _nur_alnum(aktiv) == ziel):
+            out.append({"art": str(bd.get("art") or "maximum_loss"), "quelle": "dialog", "text": str(bd.get("text") or "")[:160]})
+    return out
+
+
+def tsx_tagesstopp_urteil(res, ext, aktiv=""):
+    """REIN RECHNEND (testbar, TS-D2): hat das Zielkonto laut Lesung heute das Daily Loss Limit erreicht? → {art 'daily_loss', quelle, text} | None.
+    Nur, wenn es NICHT zugleich geblowt ist (tsx_geblowt_urteil gewinnt)."""
+    if tsx_geblowt_urteil(res, ext, aktiv):
+        return None
+    return next((b for b in _tsx_konto_beweise(res, ext, aktiv) if b["art"] == "daily_loss"), None)
+
+
+def tsx_tagesstopp_text(beweis, ext, rest="nichts gelesen"):
+    """REIN (testbar, TS-D2): Fehlertext des Tagesstopps — beginnt IMMER mit TSX_TAGESSTOPP_TEXT (Schlüssel für den PC-Tab, sfIstTagesstopp)."""
+    b = beweis if isinstance(beweis, dict) else {}
+    q = "TopstepX-Meldung" if b.get("quelle") == "dialog" else "Konto-Liste"
+    return (f"{TSX_TAGESSTOPP_TEXT}: {q} „{str(b.get('text') or 'Daily Loss Limit')[:80]}“ — Konto {ext} heute keine weiteren Starts, "
+            f"am nächsten Handelstag normal weiter (nicht geblowt, nicht archiviert), {rest}.")
 
 
 def tsx_blow_dialog(popups):
     """REIN RECHNEND (testbar): stand.popups → {art, konto, text, popup} der TopstepX-Meldung „You Hit Your Maximum Loss Limit.
     Account: KENNUNG" | None. konto '' wenn die Meldung keine Kennung trägt (dann zählt sie nur für das AKTIVE Konto)."""
+    dll = None
     for p in (popups or []):
         if not isinstance(p, dict):
             continue
@@ -16768,8 +16816,13 @@ def tsx_blow_dialog(popups):
         # „daily“ erwähnt, hieße sonst DLL)
         art = "daily_loss" if re.search(r"daily", treffer.group(0), re.I) else "maximum_loss"
         m = TSX_RX_DIALOG_KONTO.search(t)
-        return {"art": art, "konto": (m.group(1).upper() if m else ""), "text": re.sub(r"\s+", " ", t).strip()[:160], "popup": p}
-    return None
+        bd = {"art": art, "konto": (m.group(1).upper() if m else ""), "text": re.sub(r"\s+", " ", t).strip()[:160], "popup": p}
+        if art != "daily_loss":
+            return bd
+        dll = dll or bd
+    # TS-D2 (Prüfer 20.11.2026): seit DLL nur Tagesstopp ist, gewinnt eine MLL-/Eligibility-Meldung vor einer DLL-Meldung (beide offen am selben Tag
+    # → geblowt, nicht nur Tagesstopp)
+    return dll
 
 
 def tsx_dialoge_spur(popups, n=3):
@@ -16838,7 +16891,7 @@ def tsx_blow_dialog_verletzung(bd):
     Gekürzte Kennungen (16.10.: „150KTC-SKU-V2-DLL-6") → {} (nichts archivieren, was nicht eindeutig ist)."""
     b = bd if isinstance(bd, dict) else {}
     k = str(b.get("konto") or "").strip().upper()
-    if not TSX_RX_KENNUNG_VOLL.match(k):
+    if not TSX_RX_KENNUNG_VOLL.match(k) or str(b.get("art") or "") == "daily_loss":   # TS-D2: DLL-Meldung → nie ins Archiv
         return {}
     return {k: {"art": str(b.get("art") or "maximum_loss"), "text": str(b.get("text") or "")[:60], "quelle": "dialog"}}
 
@@ -16846,24 +16899,10 @@ def tsx_blow_dialog_verletzung(bd):
 def tsx_geblowt_urteil(res, ext, aktiv=""):
     """REIN RECHNEND (testbar): ist das Zielkonto ext laut Lesung geblowt? → {art, quelle, text} | None.
     quelle 'liste': Hinweis am Ziel-Eintrag (res.konto_hinweis oder res.konto_verletzungen[ext]);
-    quelle 'dialog': res.blow_dialog nennt ext — oder nennt kein Konto, während ext das aktive Konto ist (aktiv)."""
-    r = res if isinstance(res, dict) else {}
-    ziel = _nur_alnum(ext)
-    if len(ziel) < 5:
-        return None
-    art = tsx_konto_verletzung(r.get("konto_hinweis"))
-    if art:
-        return {"art": art, "quelle": "liste", "text": str(r.get("konto_hinweis") or "")[:60]}
-    verl = r.get("konto_verletzungen") if isinstance(r.get("konto_verletzungen"), dict) else {}
-    for k, v in verl.items():
-        if _nur_alnum(k) == ziel and isinstance(v, dict) and v.get("art"):
-            return {"art": str(v["art"]), "quelle": str(v.get("quelle") or "liste"), "text": str(v.get("text") or "")[:60]}
-    bd = r.get("blow_dialog") if isinstance(r.get("blow_dialog"), dict) else None
-    if bd:
-        k = _nur_alnum(bd.get("konto"))
-        if (k and k == ziel) or (not k and aktiv and _nur_alnum(aktiv) == ziel):
-            return {"art": str(bd.get("art") or "maximum_loss"), "quelle": "dialog", "text": str(bd.get("text") or "")[:160]}
-    return None
+    quelle 'dialog': res.blow_dialog nennt ext — oder nennt kein Konto, während ext das aktive Konto ist (aktiv).
+    TS-D2 (Finn 20.11.2026): ein Daily-Loss-Beweis zählt NICHT als geblowt (Tagesstopp, tsx_tagesstopp_urteil) — der erste Beweis einer anderen Art
+    (Maximum Loss, Ineligible, Violation) gewinnt, auch wenn davor ein DLL-Hinweis steht."""
+    return next((b for b in _tsx_konto_beweise(res, ext, aktiv) if b["art"] != "daily_loss"), None)
 
 
 def tsx_k2_meldung_nachgelesen(stand, res):
@@ -17459,6 +17498,11 @@ def _tsx_geblowt_merken(res, ext, st=None):
     g = tsx_geblowt_urteil(res, ext, str(ko.get("kontonr") or ko.get("aktiv") or ""))
     if g:
         res["konto_geblowt"] = g
+    else:
+        # TS-D2: Daily Loss am Ziel → nur Tagesstopp (eigenes Feld; der PC-Tab archiviert nur konto_geblowt / konto_verletzungen)
+        ts = tsx_tagesstopp_urteil(res, ext, str(ko.get("kontonr") or ko.get("aktiv") or ""))
+        if ts:
+            res["konto_tagesstopp"] = ts
     res.pop("_blow_dialog_versucht", None)
     return g
 
@@ -22287,9 +22331,14 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 verletzungen.update(bd_res.get("konto_verletzungen") or {})
                 k_bd = _nur_alnum((bd or {}).get("konto"))
                 if bd and ((k_bd and k_bd == _nur_alnum(ext)) or (not k_bd and gewaehlt is None)):
+                    if bd.get("art") == "daily_loss" and not any(_nur_alnum(k) == _nur_alnum(ext) for k in verletzungen):
+                        # TS-D2: DLL = Tagesstopp, nicht geblowt (kein blow_dialog → der PC-Tab archiviert nicht); führt die Liste das Ziel schon als
+                        # MLL/Ineligible (Prüfer 20.11.2026), bleibt es geblowt
+                        bd_res.pop("blow_dialog", None)
+                        return _raus("konto_tagesstopp", tsx_tagesstopp_text({"quelle": "dialog", "text": bd.get("text")}, ext), st,
+                                     popups=st.get("popups"), konto_tagesstopp={"art": "daily_loss", "quelle": "dialog", "text": str(bd.get("text") or "")[:160]})
                     return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen · "
-                                 f"Konto hat {'DLL' if bd.get('art') == 'daily_loss' else 'MLL'} erreicht (TopstepX-Dialog).", st,
-                                 popups=st.get("popups"))
+                                 "Konto hat MLL erreicht (TopstepX-Dialog).", st, popups=st.get("popups"))
                 if tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
                     return _raus("konto_nicht_erreicht", (f"TopstepX-Meldung „{str((bd or {}).get('text') or '')[:60]}“ steht noch (nicht geschlossen) — "
                                                           "nichts gelesen."), st, popups=st.get("popups"))
@@ -22450,10 +22499,14 @@ def _tsx_konto_sichern(s, ext, st, trail):
             st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
             verletzungen.update(bd_res.get("konto_verletzungen") or {})
             if bd and bd.get("konto") and _nur_alnum(bd["konto"]) == _nur_alnum(ext):
+                if bd.get("art") == "daily_loss" and not any(_nur_alnum(k) == _nur_alnum(ext) for k in verletzungen):
+                    # TS-D2: DLL = Tagesstopp, nicht geblowt (kein blow_dialog → der PC-Tab archiviert nicht); Liste mit MLL/Ineligible am Ziel → geblowt
+                    bd_res.pop("blow_dialog", None)
+                    return _raus("konto_tagesstopp", tsx_tagesstopp_text({"quelle": "dialog", "text": bd.get("text")}, ext), st,
+                                 popups=st.get("popups"), konto_tagesstopp={"art": "daily_loss", "quelle": "dialog", "text": str(bd.get("text") or "")[:160]})
                 # TS-D1 (20.11.2026): „Konto hat MLL erreicht (TopstepX-Dialog)“ dazu — „TopstepX meldet „…““ am Anfang bleibt (Schlüssel in app.py)
                 return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen · "
-                             f"Konto hat {'DLL' if bd.get('art') == 'daily_loss' else 'MLL'} erreicht (TopstepX-Dialog).", st,
-                             popups=st.get("popups"))
+                             "Konto hat MLL erreicht (TopstepX-Dialog).", st, popups=st.get("popups"))
             if not tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
                 trail.append("K2: Meldung zu — Konto-Auslöser neu lesen, dann das Zielkonto wählen")
                 continue                               # Meldung zu → Konto-Auslöser neu lesen
@@ -23929,10 +23982,10 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             trail.append(f"K2: im Puls-Chrome steht '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}', Ziel {ext} — Konto wechseln")
             ok2, c2, m2, st, ex2 = _tsx_konto_sichern(s, ext, st, trail)
             res.update({k: v for k, v in ex2.items() if k in ("konto_gewechselt", "konto_hinweis", "konto_zeilen", "konto_treffer", "popups",
-                                                             "konto_verletzungen", "blow_dialog")})   # Geblowt-Auge (14.10.2026)
+                                                             "konto_verletzungen", "blow_dialog", "konto_tagesstopp")})   # Geblowt-Auge (14.10.2026), TS-D2
             if not ok2:
                 _tsx_geblowt_merken(res, ext, st)          # Beweis (Meldung/Liste) auch bei gescheitertem Wechsel mitgeben
-                return raus(c2, m2, "konto")
+                return raus(c2, m2, "konto_tagesstopp" if c2 == "konto_tagesstopp" else "konto")   # TS-D2: eigener Schritt (PC-Tab: kein Neuversuch heute)
             if ex2.get("konto_gewechselt"):
                 res["schritt"] = "lesen"
                 st, bereit = _tsx_bereit_warten(s, trail)
@@ -23986,9 +24039,13 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             # TS-D1 (20.11.2026, Master: „Meldet der Dialog MLL für das Zielkonto, gilt das Konto als geblowt → Plan nicht starten“): bisher wurde der
             # Beweis nur gemerkt und danach trotzdem das Ticket geprüft. Nur der Dialog-Beweis (das aktive Ziel bzw. von der Meldung genannt) — der
             # Listen-Hinweis bleibt wie bisher
-            art_k = "DLL" if geblowt.get("art") == "daily_loss" else "MLL"
             return raus("konto_geblowt", (f"TopstepX meldet „{str(geblowt.get('text') or '')[:90]}“ — Konto {ext} geblowt, nichts platziert · "
-                                          f"Konto hat {art_k} erreicht (TopstepX-Dialog)."), "konto")
+                                          "Konto hat MLL erreicht (TopstepX-Dialog)."), "konto")
+        if order and isinstance(res.get("konto_tagesstopp"), dict):
+            # TS-D2 (Finn 20.11.2026: „Nein, nur Tagesstopp“): Ziel hat heute das Daily Loss Limit erreicht (Meldung oder Listen-Hinweis) — nicht starten,
+            # nicht archivieren; der PC-Tab plant heute nicht neu (sfIstTagesstopp), am nächsten Handelstag geht es normal weiter
+            trail.append(f"{TSX_TAGESSTOPP_TEXT}: {str(res['konto_tagesstopp'].get('text') or '')[:60]} — nichts platziert")
+            return raus("konto_tagesstopp", tsx_tagesstopp_text(res["konto_tagesstopp"], ext, "nichts platziert"), "konto_tagesstopp")
         if order:
             if res.get("offen") or res.get("positionen"):
                 # Prüfer 06.10.2026: seit die Augen Positionen lesen (tsx-0.6), endete K1 bei offener Position nicht mehr — die Probe
@@ -24010,6 +24067,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             msg += f" — Konto „{res['konto_hinweis']}“ (nur gelesen)"
         if res.get("konto_geblowt"):
             msg += f" — GEBLOWT ({res['konto_geblowt'].get('text') or res['konto_geblowt'].get('art')})"
+        elif isinstance(res.get("konto_tagesstopp"), dict):   # TS-D2: nur Anzeige in der Lese-Antwort — kein Archiv
+            msg += f" — {TSX_TAGESSTOPP_TEXT} ({str(res['konto_tagesstopp'].get('text') or 'Daily Loss Limit')[:60]})"
         if (cmd or {}).get("auge_reparieren") is True:      # Heimweg „Auge blind" (29.10.2026, s. _tsx_auge_reparieren) — nur dieser Weg
             res["schritt"] = "auge"
             aok, akonto = _tsx_auge_reparieren(s, trail, sitz, ext)
@@ -31784,7 +31843,10 @@ PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreich
 # konto_offen (08.10.2026, KONTO OFFEN): eine offene (Hand-)Position am Konto ist kein Chrome-Problem — nie neu starten, nie ein zweiter
 # Versuch im selben Lauf; neu eingeplant wird über start_fehler/sfTick
 PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
-                               "puls_beschaeftigt", "bot_fehlt", "konto_offen", "tab_nicht_erreichbar"))
+                               "puls_beschaeftigt", "bot_fehlt", "konto_offen", "tab_nicht_erreichbar",
+                               # TS-D2 (Prüfer 20.11.2026): der Tagesstopp-Beweis (DLL-Meldung) ist nach dem Schließen weg — ein Neustart + 2. Versuch sähe
+                               # ihn nicht mehr und liefe bis zur Order auf dem DLL-Konto
+                               "konto_tagesstopp"))
 
 
 def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=True, budget_s=None, min_rest_s=None,

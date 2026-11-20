@@ -63,11 +63,11 @@ check(ob.tsx_blow_dialog([{"titel": "Confirm Order", "text": "Buy 2 NQZ26 @ Mark
 check(ob.tsx_blow_dialog([popup(text="You Hit YourMaximum Loss Limit.Your daily routine matters — review your trades.")])["art"] == "maximum_loss",
       "MLL-Meldung, die beiläufig „daily“ erwähnt → maximum_loss (Art aus dem Treffer, Prüfer)")
 try:
-    alt_src = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:mt5-copier/order_bot.py"], capture_output=True, text=True, check=True).stdout
+    alt_src = subprocess.run(["git", "-C", WURZEL, "show", "9e0b722e^:mt5-copier/order_bot.py"], capture_output=True, text=True, check=True).stdout   # fester Stand vor TS-D1 (TS-D2 20.11.2026: TS-D1 liegt jetzt auf main)
     m = re.search(r'TSX_RX_BLOW_DIALOG = re\.compile\(r"(.*?)"\s*\n\s*r"(.*?)", re\.I\)', alt_src, re.S)
     alt_rx = re.compile(m.group(1) + m.group(2), re.I) if m else None
     check(alt_rx is not None and not alt_rx.search(TEXT_HEUTE) and alt_rx.search("You Hit Your Maximum Loss Limit."),
-          "Gegenprobe: die alte Regex (origin/main) traf „YourMaximum“ NICHT — die Ursache der acht Fehlstarts")
+          "Gegenprobe: die alte Regex (vor TS-D1) traf „YourMaximum“ NICHT — die Ursache der acht Fehlstarts")
 except Exception as e:
     print(f"(Gegenprobe alte Regex übersprungen: {type(e).__name__})")
 
@@ -165,7 +165,7 @@ check(not s.klicks and "Schließ-Knopf liegt über dem Kauf-Knopf" in sp, f"Sper
 src = open(ob.__file__, encoding="utf-8").read()
 i_g = src.index('if order and isinstance(geblowt, dict) and geblowt.get("quelle") == "dialog":')
 check(i_g < src.index("return _tsx_k3_probe(s, st, order, res, trail, raus, order_cmd)", i_g)
-      and 'raus("konto_geblowt"' in src[i_g:i_g + 900] and "Konto hat {art_k} erreicht (TopstepX-Dialog)" in src[i_g:i_g + 900],
+      and 'raus("konto_geblowt"' in src[i_g:i_g + 900] and "Konto hat MLL erreicht (TopstepX-Dialog)" in src[i_g:i_g + 900],   # TS-D2: DLL ist kein Blow mehr
       "Order-Weg: Dialog-Beweis „Ziel geblowt“ beendet VOR der Ticket-Probe mit konto_geblowt + Grund")
 check(ob.tsx_geblowt_urteil({"blow_dialog": {"art": "maximum_loss", "konto": "", "text": "x"}}, EXT, EXT)["quelle"] == "dialog",
       "Meldung ohne Kennung bei aktivem Ziel (ohne Wechsel) → Dialog-Beweis „geblowt“")
@@ -210,7 +210,7 @@ check(ok and not s.klicks and not ex.get("blow_dialog"), "ohne Meldung, Ziel akt
 print("── C) DOM-Schnipsel in echtem Chrome (headless)")
 NEU_AUGEN = open(os.path.join(WURZEL, "mt5-copier", "augen_tsx.js"), encoding="utf-8").read()
 try:
-    ALT_AUGEN = subprocess.run(["git", "-C", WURZEL, "show", "origin/main:mt5-copier/augen_tsx.js"], capture_output=True, text=True, check=True).stdout
+    ALT_AUGEN = subprocess.run(["git", "-C", WURZEL, "show", "9e0b722e^:mt5-copier/augen_tsx.js"], capture_output=True, text=True, check=True).stdout   # fester Stand vor TS-D1 (s. o.)
 except Exception:
     ALT_AUGEN = None
 CHROME = None
@@ -321,7 +321,7 @@ else:
         check(st.get("v") == "tsx-0.7.4" and len(pp) == 1 and pp[0].get("quelle") == "text" and bd and kn and kn["text"] == "OK",
               f"Modal OHNE ARIA-Rolle: Popup aus dem Text-Weg, Meldung erkannt, Knopf OK ({[(p.get('titel'), [b.get('text') for b in p.get('knoepfe') or []]) for p in pp]})")
         if ALT_AUGEN:
-            check((c.stand(ALT_AUGEN).get("popups") or []) == [], "Gegenprobe: die alte augen_tsx.js (origin/main) sah dieses Modal NICHT")
+            check((c.stand(ALT_AUGEN).get("popups") or []) == [], "Gegenprobe: die alte augen_tsx.js (vor TS-D1) sah dieses Modal NICHT")
         if kn:
             # genau der Beweis, den _tsx_blow_dialog_weg für den Text-Weg baut: Kasten-Bindung + strenge Tabu-Liste
             pr = {"rect": kn["rect"], "text": "OK", "aria": "", "tabu": ob.TSX_UEBER_PRUEF_TABU, "wort": "ok", "dialog": pp[0]["rect"], "kasten": True}
