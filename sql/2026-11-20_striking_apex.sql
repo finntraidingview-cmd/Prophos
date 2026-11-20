@@ -46,10 +46,12 @@ create table if not exists public.addon_firma (
 );
 
 alter table public.addon_firma enable row level security;
--- wie user_settings: eigene Zeilen; dazu Voll-Admins (wd_admin = admin_voll) für alle IDs
+-- Master 20.11.2026 (Entscheidung nach Prüfer-Hinweis): Freischalten ist Admin-Sache wie der WD-Riegel — Finn gibt jede ID einzeln frei.
+-- Lesen: eigene Zeile + Voll-Admins (wd_admin = admin_voll); Schreiben (insert/update/delete) NUR Voll-Admins. Eine ID kann sich so nie selbst freischalten.
 drop policy if exists addon_firma_eigen on public.addon_firma;
-create policy addon_firma_eigen on public.addon_firma for all to authenticated
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists addon_firma_eigen_lesen on public.addon_firma;
+create policy addon_firma_eigen_lesen on public.addon_firma for select to authenticated
+  using (auth.uid() = user_id);
 drop policy if exists addon_firma_admin on public.addon_firma;
 create policy addon_firma_admin on public.addon_firma for all to authenticated
   using (public.wd_admin()) with check (public.wd_admin());
