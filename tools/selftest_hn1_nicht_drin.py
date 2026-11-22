@@ -50,7 +50,12 @@ cb = re.search(r"^def fcp_planen\(.*?(?=^def )", app, re.S | re.M).group(0)
 check('erg["nicht_im_planer"] = [_nip(a)' in cb and 'erg.setdefault("nicht_im_planer", []).append(_nip(a))' in cb and "FCP_GRUND_FIRMA_AUS" in cb
       and re.search(r'erg\.setdefault\("nicht_im_planer", \[\]\)\.append\(_nip\(a\)\)[^\n]*\n\s+except Exception:\n\s+pass\n\s+continue', cb) is not None, "Funded CFD: Firma ohne Regel / aus als nicht_im_planer[], danach weiter continue (kein Plan)")
 # LF1 (16.11.2026): dieselbe Zeile prüft zusätzlich den Schalter je Größe (fdp_groesse_an) — das Firmen-Kriterium bleibt vorn
-check("konten = [a for a in _alle_k if ap_regel_finden(an_von(a.get(\"user_id\")), a.get(\"firm\"))" in fb, "Funded-Planer: geplant wird weiter nur mit eingeschalteten Firmen")
+# ST3 (23.11.2026): seit SK1/TS1 (4a78c070) gehen die Add-on-Konten (Striking sk_ids, RTP rtp_ids) bewusst am Firmen-/Größen-Schalter vorbei — alle anderen
+# Konten weiter nur mit eingeschalteter Firma + Größe. Der alte Anker („if ap_regel_finden…“ direkt hinter _alle_k) passte darum nicht mehr.
+check(re.search(r'konten = \[a for a in _alle_k if str\(a\.get\("id"\)\) in sk_ids or str\(a\.get\("id"\)\) in rtp_ids[^\n]*\n'
+                r'\s+or \(ap_regel_finden\(an_von\(a\.get\("user_id"\)\), a\.get\("firm"\)\)\n'
+                r'\s+and fdp_groesse_an\(ap_regel_finden\(an_von\(a\.get\("user_id"\)\), a\.get\("firm"\)\), a\)\)\]', fb) is not None,
+      "Funded-Planer: geplant wird weiter nur mit eingeschalteten Firmen (+ Größe); nur Add-on-Konten (Striking/RTP) am Schalter vorbei")
 check('"ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen")}' in fb, "Funded-Planer: Lauf-Zeile (auto_plan_lauf) unverändert ohne nicht_im_planer")
 m2 = re.search(r"^def fcp_sicht\(.*?(?=^def )", app, re.S | re.M)
 ns2 = {"admin_in_sicht": lambda u, s: (str(u) == s) if isinstance(s, str) else (str(u) in s)}
