@@ -799,6 +799,7 @@ else:
     GEAENDERT.add("tsx_blow_dialog_knopf")   # TS-D1b (Stopp S2): nur ok/okay/close/dismiss/schließen/× — nie Continue/Got it/I understand (ebd.)
     GEAENDERT.update({"tsx_verletzungen_aus_liste", "tsx_geblowt_urteil", "_tsx_geblowt_merken", "tsx_blow_dialog_verletzung"})   # TS-D2 (20.11.2026): DLL = Tagesstopp statt geblowt — geprüft in selftest_tsd2_dll_tagesstopp.py
     GEAENDERT.add("_tsx_k3_contract")   # CF1 (23.11.2026): Contract-Feld ohne Klick-Beweis → Überlagerungen weg, EIN zweiter Klick — geprüft in selftest_cf1_contract_feld.py
+    GEAENDERT.update({"_puls_mit_neustart", "_tsx_order_cdp_mit_neustart", "modus_tvkette_cdp_mit_neustart"})   # CF1b: Spur + Fehlerfoto des 1. Versuchs vor dem Neustart — ebd.
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},

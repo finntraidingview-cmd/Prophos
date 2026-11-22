@@ -40,8 +40,16 @@ FELD = [400, 150, 220, 30]
 class Sitzung:
     """TopstepX-Attrappe: Klick aufs Contract-Feld gelingt erst ab dem n-ten Versuch (vorher: am Punkt liegt nicht das Feld)."""
 
-    def __init__(self, ok_ab=2):
+    def __init__(self, ok_ab=2, fremd=""):
         self.ok_ab, self.klicks, self.feld_klicks, self.getippt, self.wert = ok_ab, [], 0, [], "MNQZ26"
+        self.fremd, self.vorn, self._klick_grund = fremd, 0, ""
+
+    def fremd_hinweis(self):
+        return self.fremd
+
+    def _win_vorn(self):
+        self.vorn += 1
+        return 1, ""
 
     def stand(self, opts=None):
         return {"ticket": {"contract": {"rect": list(FELD), "zu": {}, "fokus": True, "wert": self.wert, "offen": bool(self.getippt) and self.wert != "NQZ26"},
@@ -52,7 +60,10 @@ class Sitzung:
         self.klicks.append((n, bool(pruef)))
         if n == "Contract-Feld":
             self.feld_klicks += 1
-            return self.feld_klicks >= self.ok_ab
+            if self.feld_klicks < self.ok_ab:
+                self.spur.append("Contract-Feld: am Zielpunkt @3272,322 liegt nicht das Ziel ('span') [drin ja, klein NEIN] — kein Druck")
+                return False
+            return True
         if n.startswith("Contract "):
             self.wert = "NQZ26"
             return True
@@ -74,9 +85,11 @@ def lauf(sitz, ueber=None):
     ob._warte = lambda *a, **k: None
     ob._tsx_pause = lambda *a, **k: None
     ob._tsx_fokus_exakt = lambda *a, **k: True
-    ob._cdp_esc = lambda s, st, trail, grund: trail.append("Esc: " + grund)
     ob._tsx_ueberlagerung_weg = lambda s, st, trail: (aufrufe.append(1) or (st, ueber))
     trail = []
+    sitz.spur = trail
+    esc = []
+    ob._cdp_esc = lambda s, st, trail, grund: (esc.append(grund), trail.append("Esc: " + grund))
     try:
         r = ob._tsx_k3_contract(sitz, sitz.stand(), "nq", trail)
     finally:
@@ -92,8 +105,35 @@ check(r1[0] is True and r1[4] == "NQZ26" and s1.feld_klicks == 2 and u1 == [1] a
       f"1. Klick ohne Beweis → Überlagerungen weg, 2. Klick mit Beweis → Contract gewählt ({r1[:3]}, {t1})")
 s2 = Sitzung(ok_ab=9)
 r2, t2, u2 = lauf(s2)
-check(r2[0] is False and r2[1] == "contract" and r2[2] == "Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan." and s2.feld_klicks == 2
-      and not s2.getippt, f"zweimal ohne Beweis → Abbruch mit dem bisherigen Text, nichts getippt ({r2[2]})")
+check(r2[0] is False and r2[1] == "contract" and r2[2].startswith("Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan. Grund: ")
+      and "liegt nicht das Ziel ('span')" in r2[2] and "[drin" not in r2[2] and s2.feld_klicks == 2 and not s2.getippt,
+      f"zweimal ohne Beweis → bisheriger Text vorn + wahrer Grund aus der Spur, nichts getippt ({r2[2]})")
+check(s1.vorn == 1 and any("leichter Weg" in x for x in t1) and any(x == "Esc: Contract-Feld ohne Beweis" for x in t1),
+      "CF1b leichter Weg: Esc, Puls-Chrome nach vorn, neu lesen, ein Klick")
+s5 = Sitzung(ok_ab=9, fremd="Fenster 'Administrator: Windows PowerShell' liegt über dem Puls-Chrome — immer im Vordergrund?")
+r5, t5, u5 = lauf(s5)
+check("Grund: Fenster 'Administrator: Windows PowerShell'" in r5[2], f"fremdes Fenster über dem Puls-Chrome → steht in der Meldung ({r5[2]})")
+G = ob.klick_grund_kurz
+check(G("Puls-Chrome kommt nicht in den Vordergrund (vorn: 'Explorer' 7, Klasse 'CabinetWClass', …)", "", [], "X") == "vorn 'Explorer', CabinetWClass"
+      and G("", "", ["Y: weg", "X: am Punkt 'a' [b] — kein Druck"], "X") == "am Punkt 'a' — kein Druck" and G("", "", [], "X") == "",
+      "klick_grund_kurz: Vordergrund-Fenster zuerst, sonst die Spur-Zeile ohne [..], sonst leer")
+
+# ── CF1b: Spur + Foto des 1. Versuchs vor dem Neustart ───────────────────────────────────────────────────────────────────────────
+aus, fotos = [], []
+r1 = erg(code="knopf", schritt="knopf", trail="0.1s·Start > 8.5s·Knopf nicht gedrückt (am Punkt 'div.hs-cta')")
+ob._puls_mit_neustart("tsv2", lambda: ("", dict(r1)), lambda frist: ("", erg(ok=True, gesendet=True, bestaetigt=True, trail="2. ok")), None, "https://x/",
+                      neustart=lambda spur, url: True, jetzt=lambda: 20.0, t0=0.0, ausgeben=aus.append, diagnose=lambda **k: None,
+                      foto=lambda r: (fotos.append(r.get("code")) or ("pc-xxxxxx/2026-11-23/20261123-000000-abcdef", "")))
+tr = str((aus[-1] if aus else {}).get("trail") or "")
+check(fotos == ["knopf"] and "1. Versuch, Spur-Ende: 0.1s·Start > 8.5s·Knopf nicht gedrückt (am Punkt 'div.hs-cta')" in tr
+      and "Fehlerfoto 1. Versuch → pc-xxxxxx/2026-11-23/20261123-000000-abcdef" in tr and tr.index("Fehlerfoto 1. Versuch") < tr.index("2. Versuch:"),
+      f"Spur-Ende + Fehlerfoto des 1. Versuchs stehen in der Antwort, vor dem 2. Versuch ({tr[:300]})")
+aus2 = []
+ob._puls_mit_neustart("tsv2", lambda: ("", erg(ok=True)), lambda f: ("", {}), None, "https://x/", neustart=lambda s_, u: True, jetzt=lambda: 1.0, t0=0.0,
+                      ausgeben=aus2.append, diagnose=lambda **k: None, foto=lambda r: (_ for _ in ()).throw(AssertionError("Foto ohne Neustart")))
+check(len(aus2) == 1, "kein Neustart (ok) → kein Foto, Ausgabe wie bisher")
+src = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
+check(src.count('foto=lambda r: _fehlerfoto_sofort(') == 2, "beide Wege (Orbit, Topstep) fotografieren vor dem Neustart")
 s3 = Sitzung(ok_ab=9)
 r3, t3, u3 = lauf(s3, ueber="Dialog ohne Text offen (…) — kein eindeutiger Schließen-Knopf, nichts geklickt")
 check(r3[0] is False and r3[1] == "contract" and r3[2].startswith("Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan.")

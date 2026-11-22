@@ -1361,6 +1361,44 @@ def fehlerfoto_anstossen(weg, tab, code):
         return None, f"Anstoß gescheitert ({type(e).__name__})"
 
 
+def _fehlerfoto_sofort(weg, tab, code):
+    """CF1b (23.11.2026, Master nach S3-Befund NV3): Fehlerfoto IM Lauf, synchron — vor einem Puls-Chrome-Neustart. Der entkoppelte Foto-Prozess
+    (fehlerfoto_anstossen) wartet auf die Handlauf-Sperre dieses Laufs, die während des Neustarts noch steht → er kam nie dran, und nach dem
+    Neustart war der Zustand des 1. Versuchs weg (Marco …7245: „Contract-Feld nicht gedrückt", Ursache nicht belegbar). Gleicher Deckel wie
+    fehlerfoto_anstossen (fehlerfoto_entscheid), Bildschirm + Tab. -> (Präfix | None, Grund). Nie ein Fehler nach außen."""
+    try:
+        pc = _fehlerfoto_pc()
+        if not pc:
+            return None, "keine pc_id (pc_id.json fehlt)"
+        p = os.path.join(_FEHLERFOTO_HIER, "fehlerfoto_merk.json")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                merk = json.load(f)
+        except Exception:
+            merk = None
+        ja, merk, grund = fehlerfoto_entscheid(merk, weg, code, time.time())
+        if not ja:
+            return None, grund
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(merk, f)
+        bid = fehlerfoto_id()
+        fehler = []
+        for art, fn in (("bildschirm", lambda: _fehlerfoto_bildschirm(pc, bid)),
+                        ("tab", (lambda: _fehlerfoto_tab(pc, bid, tab)) if tab in ("tv", "tsx") else None)):
+            if fn is None:
+                continue
+            try:
+                fn()
+            except Exception as e:
+                fehler.append(f"{art}: {type(e).__name__}")
+                _fehlerfoto_status(pc, bid, art, f"{type(e).__name__}: {str(e)[:150]}")
+        _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)} ({weg} {code or '-'}, vor dem Chrome-Neustart)" + (f" · {', '.join(fehler)}" if fehler else ""))
+        return fehlerfoto_praefix(pc, bid), ""
+    except Exception as e:
+        _fehlerfoto_log(f"sofort gescheitert: {type(e).__name__}: {e}")
+        return None, f"Foto gescheitert ({type(e).__name__})"
+
+
 class _FehlerfotoAusgabe:
     """stdout-Hülle des Hauptlaufs (main): die ERSTE JSON-Zeile mit ok false bekommt „fehlerbild", danach startet das Foto entkoppelt.
     Alles andere geht unverändert durch; Teilzeilen bleiben im Puffer bis zum Zeilenende (print schreibt Text und \\n getrennt)."""
@@ -22646,6 +22684,23 @@ def _tsx_fokus_exakt(s, art, trail, schritt):
     return False
 
 
+def klick_grund_kurz(klick_grund, fremd, spur, name):
+    """REIN RECHNEND (testbar) — CF1b (23.11.2026): der wahre Grund eines Klicks ohne Beweis, kurz für die MELDUNG. Reihenfolge: fremdes Fenster
+    vorn (klick_vorn_fremd aus _klick_grund), Fenster über dem Puls-Chrome (fremd_hinweis), sonst die letzte Spur-Zeile dieses Klicks
+    („<name>: am Zielpunkt … liegt nicht das Ziel ('…') …"), ohne Klammer-Beiwerk [...], ≤ 160 Zeichen. '' = nichts bekannt."""
+    g = klick_vorn_fremd(klick_grund)
+    if g:
+        return g
+    f = str(fremd or "").strip()
+    if f:
+        return f[:160]
+    for z in reversed(list(spur or [])):
+        z = str(z)
+        if z.startswith(name + ":"):
+            return re.sub(r"\s*\[[^\]]*\]", "", z[len(name) + 1:]).strip()[:160]
+    return ""
+
+
 def _tsx_k3_contract(s, st, wurzel, trail):
     """K3a Schritt 1: ins Contract-Feld klicken (Ziel-Beweis), Fokus beweisen, Wurzel („mnq"/„nq") per echter Tastatur tippen, den
     EINEN passenden Vorschlag (tsx_k3_contract_ziel) am Code-Text anklicken, Rücklesung Feld = Code und Liste zu. Höchstens zwei
@@ -22668,15 +22723,27 @@ def _tsx_k3_contract(s, st, wurzel, trail):
             # Jetzt: frisch lesen, Überlagerungen wie beim Start wegräumen (_tsx_ueberlagerung_weg, nur mit eindeutigem X bzw. HubSpot
             # ausblenden), dann EIN zweiter Klick mit demselben Ziel-Beweis. Erst danach Abbruch — Code 'contract' löst keinen
             # Chrome-Neustart mehr aus (PULS_NEUSTART_NIE_VOR_KLICK), der Plan bleibt geplant und wird regulär nachgeholt.
+            # CF1b (S3): der wahre Grund (fremdes Fenster vorn / was am Punkt lag) gehört in die Meldung, nicht nur in die Spur
+            grund_k = klick_grund_kurz(getattr(s, "_klick_grund", ""), s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else "",
+                                       trail, "Contract-Feld")
+            zusatz = f" Grund: {grund_k}" if grund_k else ""
             if versuch == 0:
-                trail.append("Contract-Feld nicht gedrückt (Klick ohne Beweis) — neu lesen, Überlagerungen prüfen, zweiter Versuch")
+                # leichter Weg vor jedem Neustart: Esc (halbe Liste/Popup zu), Puls-Chrome nach vorn, neu lesen, Überlagerungen weg, EIN Klick
+                trail.append("Contract-Feld nicht gedrückt (Klick ohne Beweis)" + (f" [{grund_k}]" if grund_k else "")
+                             + " — leichter Weg: Esc, Puls-Chrome nach vorn, neu lesen, zweiter Versuch")
+                _cdp_esc(s, st, trail, "Contract-Feld ohne Beweis")
+                if hasattr(s, "_win_vorn"):
+                    try:
+                        s._win_vorn()
+                    except Exception:
+                        pass
                 _warte(0.8, 0.6)
                 st = s.stand()
                 st, _ug = _tsx_ueberlagerung_weg(s, st, trail)
                 if _ug:
-                    return False, "contract", f"Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan. {_ug}", st, None
+                    return False, "contract", f"Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan. {_ug}{zusatz}", st, None
                 continue
-            return False, "contract", "Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan.", st, None
+            return False, "contract", "Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan." + zusatz, st, None
         _warte(0.4, 0.3)
         if not s.fokus_im(r, "Contract-Feld") or not _tsx_fokus_exakt(s, "contract", trail, "Contract-Feld"):
             _cdp_esc(s, st, trail, "Contract-Feld ohne Fokus")
@@ -32426,7 +32493,7 @@ def _puls_neustart_ablegen(cmd, res):
 
 
 def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None,
-                       neustart_sanft=None, verboten=None, ablage=None):
+                       neustart_sanft=None, verboten=None, foto=None, ablage=None):
     """Kern des Neustart-Wrappers (testbar mit Attrappen). erster() und zweiter(frist_s) → (roh, res); lesung(spur) → dict für
     neustart_beleg_leer oder None (Weg ohne Order-Lesung, Topstep). Gibt GENAU EINE Antwort aus — die des letzten Versuchs; ein
     unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs
@@ -32463,6 +32530,15 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
                     pass
     spur = _StempelSpur()
     spur.append(neustart_spur_text(r1))
+    # CF1b (23.11.2026, S3-Befund NV3): Spur und Bild des 1. Versuchs VOR dem Neustart sichern — bisher trug die Antwort nur die Kurzfassung
+    # (neustart_spur_text) und die Spur des 2. Versuchs; puls_diagnose wird je PC überschrieben, ein Foto kam nie (Sperre des Laufs)
+    spur.append("1. Versuch, Spur-Ende: " + str(r1.get("trail") or "-")[-1500:])
+    if foto is not None:
+        try:
+            bild1, fgrund = foto(r1)
+            spur.append(f"Fehlerfoto 1. Versuch → {bild1}" if bild1 else f"kein Fehlerfoto 1. Versuch: {fgrund}")
+        except Exception as e_:
+            spur.append(f"kein Fehlerfoto 1. Versuch ({type(e_).__name__})")
     spur.append(f"chrome_neustart: Grund — {grund}; voraussichtlich {rest:.0f} s Rest")
     info = {"grund": grund, "neu_gestartet": False, "zweiter_versuch": False}
 
@@ -32611,7 +32687,9 @@ def modus_tvkette_cdp_mit_neustart(cmd):
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL,
                               neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL),   # Abriss 10053 (08.10.2026)
-                              verboten=kein_neustart_grund(c), ablage=lambda r: _puls_neustart_ablegen(c, r))
+                              verboten=kein_neustart_grund(c),
+                              foto=lambda r: _fehlerfoto_sofort("tvkette", "tv", (r or {}).get("code") or (r or {}).get("schritt")),
+                              ablage=lambda r: _puls_neustart_ablegen(c, r))
 
 
 def _tsx_order_cdp_mit_neustart(befehl, cmd):
@@ -32620,7 +32698,9 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
     lese_cmd = {"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}
     return _puls_mit_neustart("tsv2", lambda: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd, frist_s=frist),
-                              None, TSX_URL, verboten=kein_neustart_grund(cmd), ablage=lambda r: _puls_neustart_ablegen(cmd, r))
+                              None, TSX_URL, verboten=kein_neustart_grund(cmd),
+                              foto=lambda r: _fehlerfoto_sofort("tsxorder", "tsx", (r or {}).get("code") or (r or {}).get("schritt")),
+                              ablage=lambda r: _puls_neustart_ablegen(cmd, r))
 
 
 def loginok_lage(prozesse, pfad):
