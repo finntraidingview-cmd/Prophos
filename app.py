@@ -27983,12 +27983,20 @@ AP_GRUND_BAL_LIVE = "Balance nicht live — erst lesen"
 AP_GRUND_BAL_FEHLER = "Balance-Prüfung gerade nicht möglich — gleich noch mal versuchen"
 
 
-def ap_balance_live(stand, letzt):
+def ap_balance_live(stand, letzt, payout=None):
     """REIN RECHNEND (testbar): ist die Balance eines Kontos „live"? = Zeitstempel der Balance-Lesung (stand) jünger als das Ende des
     letzten beendeten Trades (letzt, ISO); ohne beendeten Trade immer live; ohne Stand bei vorhandenem Trade nicht live. Dieselbe Regel
     wie der Planer beim Auslassen („Balance nicht live (seit dem letzten Trade nicht nachgelesen)"). Finn 08.10.2026: „Wenn die Balance
     nicht live ist, warum kann ich dann überhaupt einen Trade starten? Ich will nur starten/bestätigen können, wenn es perfekt ist."
-    Zeitformate (PostgREST „T…+00:00", SQL „ …+00", Z) werden angeglichen, dann String-Vergleich."""
+    Zeitformate (PostgREST „T…+00:00", SQL „ …+00", Z) werden angeglichen, dann String-Vergleich.
+    WP3 (Master 23.11.2026, Befund BA1 Prüfer S2): payout = jüngstes Payout-Ereignis des Kontos (ap_payout_ereignis, ISO/datetime) — ein Payout
+    ändert die Balance ohne Trade; mit payout gilt letzt = max(Trade-Ende, Payout). Nur Aufrufer, die payout übergeben (Balance-Takt), rechnen so;
+    die Planer-Prüfungen bleiben bewusst ohne: dort fiele „nicht live“ auf die Nachlesung vom Trade-Ende zurück (= Balance VOR dem Payout)."""
+    if payout:
+        p_ts = payout if isinstance(payout, datetime) else _ap_ts(str(payout))
+        l_ts = _ap_ts(str(letzt)) if letzt else None
+        if p_ts is not None and (l_ts is None or p_ts > l_ts):
+            letzt = p_ts.astimezone(timezone.utc).isoformat()
     if not letzt:
         return True
     if not stand:
@@ -27998,6 +28006,35 @@ def ap_balance_live(stand, letzt):
         t = str(x).strip().replace(" ", "T").replace("Z", "+00:00")
         return t + ":00" if len(t) >= 3 and t[-3] == "+" and t[-6] != "+" else t
     return norm(stand) >= norm(letzt)
+
+
+def ap_payout_ereignis(pending):
+    """REIN RECHNEND (testbar, WP3): {account_id: datetime (UTC) des jüngsten Payout-Ereignisses} aus pending_payouts — je Zeile approved_at
+    (Auszahlung bestätigt), sonst received_at (reines Datum → 00:00 UTC, wie im Frontend accBalVorPayout). Nur angefragte Payouts (ohne beides)
+    zählen nicht: die Firma hat noch nicht abgezogen. Bewusst KEIN Betrag — der DB-Betrag ist nicht der Abzug der Firma (Apex 1.819,50 vs. 2.000)."""
+    out = {}
+    for z in pending or ():
+        aid = str(z.get("account_id") or "")
+        t = _ap_ts(str(z["approved_at"])) if z.get("approved_at") else None
+        if t is None and z.get("received_at"):
+            r = str(z["received_at"])
+            t = _ap_ts(r + "T00:00:00+00:00") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", r) else _ap_ts(r)
+        if aid and t is not None and (aid not in out or t > out[aid]):
+            out[aid] = t
+    return out
+
+
+def _ap_payout_ereignisse(ids):
+    """Payout-Ereignisse (ap_payout_ereignis) für Konto-IDs — Fehler → {} (dann wie vor WP3: nur Trade-Ende zählt), mit Log."""
+    ids = sorted({str(i) for i in ids or () if i})
+    rows = []
+    try:
+        for i in range(0, len(ids), 100):
+            rows += _sb_all("pending_payouts", {"select": "account_id,approved_at,received_at", "account_id": "in.(" + ",".join(ids[i:i + 100]) + ")"}) or []
+    except Exception as e:
+        print(f"[balance-auto] ⚠️ Payouts nicht gelesen ({type(e).__name__}: {str(e)[:120]}) — nur Trade-Ende zählt", flush=True)
+        return {}
+    return ap_payout_ereignis(rows)
 
 
 def ap_letzt_je_konto(plaene):
@@ -46052,7 +46089,7 @@ def ap_bal_auto_ohne_wert(konten, schon, echo_bal, dup_bal, archiv=None):
     return out
 
 
-def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None):
+def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None, payout=None):
     """REIN RECHNEND (testbar): {konto_id: grund} — Quelle (E) FUNDED-PLANER (Master 27.10.2026, Finn: Funded-Konten der im Funded-Planer
     eingeschalteten Firmen liest der Bot selbst, wie die Planer-Konten). konten = Funded-Konten dieser Firmen (Aufrufer filtert), letzt =
     {konto_id: Ende des letzten Trades} (ap_letzt_je_konto). Gelesen wird, was der Funded-Planer als „Balance nicht live" auslässt: nie
@@ -46074,6 +46111,8 @@ def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None):
             out[kid] = "Funded-Planer: letzte Lesung ohne Wert"
         elif not ap_balance_live(wert[3], (letzt or {}).get(kid)):
             out[kid] = "Funded-Planer: Balance seit dem letzten Trade nicht gelesen"
+        elif not ap_balance_live(wert[3], (letzt or {}).get(kid), (payout or {}).get(kid)):
+            out[kid] = "Funded-Planer: Balance vor dem Payout gelesen"   # WP3: Payout ändert die Balance ohne Trade
     return out
 
 
@@ -46085,8 +46124,9 @@ def _ap_bal_auto_funded_konten():
     uids = [str(u) for u in ((reg or {}).get("user_ids") or [])]
     if not an or not uids:
         return [], {}
+    # WP3 (Master 23.11.2026): auch Winning Days — Fall Apex 100k WD, Lesung vor dem Payout, kein Lese-Auftrag (vorher nur Typ funded)
     konten = [a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(uids) + ")",
-                                              "account_type": "eq.funded"}) or []
+                                              "account_type": "in.(funded,winning_days)"}) or []
               if ap_regel_finden(an, a.get("firm")) and (globals().get("fdp_groesse_an") or (lambda _r, _a: True))(ap_regel_finden(an, a.get("firm")), a)]   # LF1: Größe aus → keine Lesung
     ids = [str(a.get("id")) for a in konten]
     plaene = []
@@ -46096,7 +46136,7 @@ def _ap_bal_auto_funded_konten():
     return konten, ap_letzt_je_konto(plaene)
 
 
-def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv=None):
+def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv=None, payout=None):
     """REIN RECHNEND (testbar): {konto_id: grund} der Konten, deren Balance der Bot jetzt von selbst lesen soll.
     (A) ausgelassen des letzten Laufs DES TAGES mit Lese-Grund (AP_BAL_AUTO_GRUND, seit 16.10.2026 auch „nie gelesen"/„geblowt?"), ohne grund_code in AP_BAL_AUTO_OHNE_LESUNG, und die
     Balance ist seit dem Lauf NICHT gelesen (Stand ≤ Laufzeit; wie ap_bal_gelesen, nur andersherum).
@@ -46127,8 +46167,11 @@ def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_
         a = accs.get(kid)
         if not kid or kid in out or kid in archiv or not a:
             continue
-        if not ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3], letzt.get(kid)):
+        stand = acc_balance_wahl(a, echo_bal, dup_bal)[3]
+        if not ap_balance_live(stand, letzt.get(kid)):
             out[kid] = "Plan geplant, Balance seit dem letzten Trade nicht gelesen"
+        elif not ap_balance_live(stand, letzt.get(kid), (payout or {}).get(kid)):
+            out[kid] = "Plan geplant, Balance vor dem Payout gelesen"   # WP3
     return out
 
 
@@ -46246,7 +46289,9 @@ def ap_bal_auto_tick(jetzt, reg=None):
         for a in _ap_konten_laden({"id": "in.(" + ",".join(kids[i:i + 150]) + ")"}):
             accs[str(a.get("id"))] = a
     letzt = ap_letzt_je_konto(plaene)
-    kand = ap_bal_auto_kandidaten(letzter, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv)
+    # WP3 (23.11.2026): Payout-Ereignisse der geplanten Konten — eine Lesung VOR dem Payout gilt im Takt nicht als live (Fehler → {} = wie vorher)
+    payout = _ap_payout_ereignisse({str(p.get("master_account_id") or "") for p in plaene if p.get("status") == "planned"})
+    kand = ap_bal_auto_kandidaten(letzter, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv, payout=payout)
     # (C) nie gelesene + (D) ohne Wert gelesene Planer-Konten — ein Read je Takt über alle Planer-Konten, dafür wartet keins mehr auf ↻ von Hand
     konten_neu = _ap_konten_laden({"user_id": in_uids, "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     for kid, grund in ap_bal_auto_nie_gelesen(konten_neu, set(kand), echo_bal, dup_bal, archiv).items():
@@ -46258,7 +46303,8 @@ def ap_bal_auto_tick(jetzt, reg=None):
     # (E) Funded-Konten der im Funded-Planer eingeschalteten Firmen (27.10.2026) — eigener try: ein Fehler hier lässt (A)–(D) unberührt
     try:
         f_konten, f_letzt = _ap_bal_auto_funded_konten()
-        for kid, grund in ap_bal_auto_funded(f_konten, f_letzt, set(kand), echo_bal, dup_bal, archiv).items():
+        f_payout = _ap_payout_ereignisse([a.get("id") for a in f_konten])   # WP3
+        for kid, grund in ap_bal_auto_funded(f_konten, f_letzt, set(kand), echo_bal, dup_bal, archiv, payout=f_payout).items():
             kand[kid] = grund
         for a in f_konten:
             accs.setdefault(str(a.get("id")), a)
@@ -49660,14 +49706,25 @@ def sk_tage_je_tag(plaene, konto_id, seit):
     return [(t, round(v, 2)) for t, v in sorted(je.items())]
 
 
-def sk_payout_feld(zf, tage, mpb=None):
+def sk_payout_feld(zf, tage, mpb=None, vor_payout=False):
     """REIN (testbar), Nachtrag 4 — Vertrag mit S4 (Admin → Payouts): payout_ready[i].striking = {zyklus_start, zyklus_seit 'JJJJ-MM-TT', payout_nr,
-    probation, min_payout_balance (nur ohne Probation, wenn bekannt), tage [{tag, pl}]} — tage = Netto master_pl je Apex-Handelstag ab zyklus_seit."""
+    probation, min_payout_balance (nur ohne Probation, wenn bekannt), tage [{tag, pl}]} — tage = Netto master_pl je Apex-Handelstag ab zyklus_seit.
+    WP3: vor_payout True = die Balance-Lesung ist älter als das jüngste Payout-Ereignis → Kasse rechnet fail-closed (skApexRechnung „Balance vor Payout“)."""
     out = {"zyklus_start": zf["start"], "zyklus_seit": str(zf["seit"])[:10], "payout_nr": zf["nr"], "probation": zf["probation"] is True,
            "tage": [{"tag": t, "pl": v} for t, v in tage or ()]}
     if not out["probation"] and mpb is not None:
         out["min_payout_balance"] = mpb
+    if vor_payout:
+        out["vor_payout"] = True
     return out
+
+
+def sk_vor_payout(konto, ereignis):
+    """REIN (testbar, WP3): True = es gibt ein Payout-Ereignis (datetime) und die Balance-Lesung des Kontos (tv_balance_at) fehlt oder ist älter."""
+    if ereignis is None:
+        return False
+    ts = _ap_ts(str((konto or {}).get("tv_balance_at"))) if (konto or {}).get("tv_balance_at") else None
+    return ts is None or ts < ereignis
 
 
 def sk_payout_anhaengen(zeilen, konten):
@@ -49692,13 +49749,24 @@ def sk_payout_anhaengen(zeilen, konten):
         plaene += _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,ended_at,completed_at", "master_account_id": f"in.({','.join(zids[i:i + 80])})",
                                           "status": "in.(completed,review)", "created_at": "gte." + datetime.fromtimestamp(ab, timezone.utc).isoformat()}) or []
     cfg = sk_apex.sk_cfg(_sk_lesen()[1])
+    # WP3: Lesung vor dem jüngsten Payout → vor_payout (Kasse fail-closed). Nur Konten, deren Zeile tv_balance_at mitbringt — sonst nicht beurteilbar
+    ev = _ap_payout_ereignisse(zids)
+    tv_at = {}
+    try:   # Gegenprüfung WP3: ein Fehler hier darf das ganze striking-Feld nicht wegnehmen — dann nur ohne vor_payout
+        for i in range(0, len(zids), 80):
+            for r in sb_select("accounts", {"select": "id,tv_balance_at", "id": f"in.({','.join(zids[i:i + 80])})"}) or []:
+                tv_at[str(r.get("id"))] = r
+    except Exception as e:
+        print(f"[striking] ⚠️ tv_balance_at nicht gelesen ({type(e).__name__}) — vor_payout in diesem Lauf nicht beurteilt", flush=True)
+        tv_at = {}
     n = 0
     for z in apex:
         f = zf.get(str(z["account_id"]))
         if not f:
             continue
         g = _wd_konto_groesse(km.get(str(z["account_id"])) or {})
-        z["striking"] = sk_payout_feld(f, sk_tage_je_tag(plaene, z["account_id"], f["seit"]), sk_apex.sk_min_payout_balance(cfg, g) if g else None)
+        z["striking"] = sk_payout_feld(f, sk_tage_je_tag(plaene, z["account_id"], f["seit"]), sk_apex.sk_min_payout_balance(cfg, g) if g else None,
+                                       vor_payout=str(z["account_id"]) in tv_at and sk_vor_payout(tv_at[str(z["account_id"])], ev.get(str(z["account_id"]))))
         n += 1
     return n
 
