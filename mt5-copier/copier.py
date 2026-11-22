@@ -646,15 +646,23 @@ def write_status(path, data):
 HEDGE_NACHBUCHEN_S = 30.0
 
 
-def close_deal_waehlen(ds, deal_id, vol, schon, out_entries):
+def close_deal_waehlen(ds, deal_id, vol, schon, out_entries, magic=None, reason_expert=None):
     """REIN RECHNEND (testbar): der Close-Deal eines Hedge-Tickets aus seiner Deal-History. deal_id > 0 → genau dieser Deal; sonst der juengste
     unverbuchte OUT-Deal mit exakt diesem Volumen bzw. — gibt es keinen — der EINZIGE unverbuchte OUT-Deal (mehrdeutig ⇒ None, nie raten).
-    schon = Menge schon verbuchter Deal-Tickets (RAM + Sidecar). -> Deal | None"""
+    schon = Menge schon verbuchter Deal-Tickets (RAM + Sidecar). magic/reason_expert (EH3-2b, Gegenpruefung 23.11.2026): ohne deal_id zaehlen
+    nur Deals, die DIESER Copier per Order ausgefuehrt hat (reason EXPERT + eigene magic, wie find_zwilling_deals) — ein Notfall-SL/TP, Hand-Close
+    oder Stop-Out desselben Tickets im 30-s-Fenster des Nachbuchens bleibt dem Schwund-Waechter. Fehlt das Feld am Deal, zaehlt er wie bisher.
+    -> Deal | None"""
     ds = list(ds or [])
     if deal_id:
         # mitgelieferter Deal: genau dieser (schon verbucht? — das entscheidet der Verbucher, wie vor EH3 still)
         return next((d for d in ds if int(d.ticket) == int(deal_id)), None)
-    outs = [d for d in ds if int(getattr(d, "entry", -1)) in tuple(out_entries) and int(d.ticket) not in schon]
+
+    def eigen(d):
+        if reason_expert is not None and getattr(d, "reason", None) is not None and int(d.reason) != int(reason_expert):
+            return False
+        return magic is None or getattr(d, "magic", None) is None or int(d.magic or 0) == int(magic)
+    outs = [d for d in ds if int(getattr(d, "entry", -1)) in tuple(out_entries) and int(d.ticket) not in schon and eigen(d)]
     pick = [d for d in outs if abs(float(d.volume) - float(vol)) <= 1e-6] or (outs if len(outs) == 1 else [])
     return max(pick, key=lambda d: (int(getattr(d, "time_msc", 0) or 0), int(d.ticket))) if pick else None
 
@@ -2306,13 +2314,17 @@ def main():
             # Deal-Tickets aller schon verbuchten Closes (booked_deals ist nur RAM).
             schon = seen | {int(c.get("deal") or 0) for c in m.closed}
             deal = close_deal_waehlen(mt5.history_deals_get(position=int(h["ticket"])) or [], deal_id, vol, schon,
-                                      (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY))
+                                      (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY), magic=m.magic,
+                                      reason_expert=getattr(mt5, "DEAL_REASON_EXPERT", 3))
             if deal is not None:
                 break
             if attempt < 3:
                 time.sleep(0.3)
         if deal is None:
-            m.buchung_offen[int(h["ticket"])] = {"ident": ident, "h": dict(h), "vol": vol, "deal_id": deal_id, "ab": time.time()}
+            # EH3-2b: Schluessel je Close (Ticket + laufende Nummer) — ein zweiter offener Teil-Close desselben Tickets ueberschreibt den ersten nie
+            m.buchung_n = getattr(m, "buchung_n", 0) + 1
+            m.buchung_offen[(int(h["ticket"]), m.buchung_n)] = {"ident": ident, "h": dict(h), "vol": vol, "deal_id": deal_id, "ab": time.time(),
+                                                                "ticket": int(h["ticket"])}
             log(f"[{m.file}] ⏳ Close-Deal (Result deal={deal_id}, Ticket {h['ticket']}) noch nicht in der History — "
                 f"wird bis {HEDGE_NACHBUCHEN_S:.0f} s nachgebucht (nie profit=0 raten).")
             return
@@ -2343,20 +2355,22 @@ def main():
     def nachbuchen(m):
         """EH3-2: offene Closes ohne Deal (m.buchung_offen) je Takt einmal in der Deal-History nachschlagen — gefunden → verbuchen (note
         'nachgebucht', echte Fill-Zeit), Frist um → aufgeben wie vor EH3 (kein Eintrag). Haengt NICHT an own_close_mark. Wirft nie."""
-        for tk, e in list(m.buchung_offen.items()):
+        for schl, e in list(m.buchung_offen.items()):
+            tk = int(e.get("ticket") or (schl[0] if isinstance(schl, tuple) else schl))
             try:
                 schon = m.booked_deals.get(e["ident"], set()) | {int(c.get("deal") or 0) for c in m.closed}
-                deal = close_deal_waehlen(mt5.history_deals_get(position=int(tk)) or [], e.get("deal_id") or 0, e["vol"], schon,
-                                          (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY))
+                deal = close_deal_waehlen(mt5.history_deals_get(position=tk) or [], e.get("deal_id") or 0, e["vol"], schon,
+                                          (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY), magic=m.magic,
+                                          reason_expert=getattr(mt5, "DEAL_REASON_EXPERT", 3))
             except Exception:
                 deal = None
             urteil = nachbuchen_urteil(e, deal is not None, time.time())
             if urteil == "buchen":
-                m.buchung_offen.pop(tk, None)
+                m.buchung_offen.pop(schl, None)
                 if close_verbuchen(m, e["ident"], e["h"], deal, e["vol"], note="nachgebucht"):
                     log(f"[{m.file}] ✅ Close-Deal {int(deal.ticket)} (Ticket {tk}) nach {time.time() - float(e['ab']):.1f} s nachgebucht.")
             elif urteil == "aufgeben":
-                m.buchung_offen.pop(tk, None)
+                m.buchung_offen.pop(schl, None)
                 log(f"[{m.file}] ⚠ Close-Deal (Ticket {tk}) auch nach {HEDGE_NACHBUCHEN_S:.0f} s nicht in der History — "
                     f"KEIN closed_hedges-Eintrag (nie profit=0 raten).")
 

@@ -26,8 +26,12 @@ def check(ok, name):
 OUT, OUT_BY, IN = 1, 3, 0
 
 
-def deal(ticket, vol, entry=OUT, profit=30.0, msc=1000):
-    return types.SimpleNamespace(ticket=ticket, volume=vol, entry=entry, profit=profit, commission=-3.5, swap=0.0, time_msc=msc, time=msc // 1000)
+MAGIC, EXPERT, SL = 767013, 3, 4
+
+
+def deal(ticket, vol, entry=OUT, profit=30.0, msc=1000, reason=EXPERT, magic=MAGIC):
+    return types.SimpleNamespace(ticket=ticket, volume=vol, entry=entry, profit=profit, commission=-3.5, swap=0.0, time_msc=msc, time=msc // 1000,
+                                 reason=reason, magic=magic)
 
 
 # ── reine Helfer ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -40,6 +44,11 @@ check(W(zwei, 0, 1.4, set(), (OUT, OUT_BY)) is None and W(zwei, 0, 0.7, set(), (
       and W([deal(13, 0.5, OUT)], 0, 1.4, set(), (OUT, OUT_BY)).ticket == 13 and W([], 0, 1.4, set(), (OUT, OUT_BY)) is None,
       "mehrdeutig → None; gleiches Volumen → jüngster; einziger OUT → dieser; leer → None")
 U = cp.nachbuchen_urteil
+check(W([deal(14, 1.4, OUT, reason=SL)], 0, 1.4, set(), (OUT, OUT_BY), magic=MAGIC, reason_expert=EXPERT) is None
+      and W([deal(15, 1.4, OUT, magic=1)], 0, 1.4, set(), (OUT, OUT_BY), magic=MAGIC, reason_expert=EXPERT) is None
+      and W([deal(16, 1.4, OUT)], 0, 1.4, set(), (OUT, OUT_BY), magic=MAGIC, reason_expert=EXPERT).ticket == 16
+      and W([deal(17, 1.4, OUT, reason=SL)], 17, 1.4, set(), (OUT, OUT_BY), magic=MAGIC, reason_expert=EXPERT).ticket == 17,
+      "EH3-2b: ohne deal_id nur eigene Copier-Deals (EXPERT + magic) — Notfall-SL/fremde magic nie; mit deal_id genau dieser")
 check(U({"ab": 100.0}, True, 200.0) == "buchen" and U({"ab": 100.0}, False, 129.0) == "warten" and U({"ab": 100.0}, False, 131.0) == "aufgeben"
       and U({}, False, 5.0) == "aufgeben" and cp.HEDGE_NACHBUCHEN_S == 30.0, "Urteil: buchen / warten bis 30 s / aufgeben")
 
@@ -77,12 +86,13 @@ class Zeit:
 
 def welt():
     mt5 = Mt5()
+    mt5.DEAL_REASON_EXPERT = EXPERT
     logs, geschrieben = [], []
     ns = {"mt5": mt5, "time": Zeit, "log": logs.append, "close_deal_waehlen": cp.close_deal_waehlen, "nachbuchen_urteil": cp.nachbuchen_urteil,
           "HEDGE_NACHBUCHEN_S": cp.HEDGE_NACHBUCHEN_S, "deal_closed_at": lambda d, sym=None: f"t{int(d.ticket)}",
           "write_closed": lambda *a, **k: geschrieben.append(len(a[1]))}
     exec(compile(code, "copier_eh3", "exec"), ns)
-    m = types.SimpleNamespace(file="config-test.json", booked_deals={}, closed=[], buchung_offen={}, own_close_mark={}, closed_path="x",
+    m = types.SimpleNamespace(file="config-test.json", magic=MAGIC, booked_deals={}, closed=[], buchung_offen={}, own_close_mark={}, closed_path="x",
                               hedge_last_vol={}, hedge_last_tickets={}, eigene_idents=[])
     return ns, mt5, m, logs, geschrieben
 
@@ -90,7 +100,7 @@ def welt():
 H = {"ticket": 500, "symbol": "NAS100", "volume": 1.4, "type": 0}
 ns, mt5, m, logs, gs = welt()
 ns["book_close"](m, 7, H, types.SimpleNamespace(deal=0), 1.4)
-check(m.closed == [] and 500 in m.buchung_offen and any("nachgebucht" in x for x in logs), "Deal fehlt nach 4 Versuchen → Warteliste statt verloren")
+check(m.closed == [] and any(k[0] == 500 for k in m.buchung_offen) and any("nachgebucht" in x for x in logs), "Deal fehlt nach 4 Versuchen → Warteliste statt verloren")
 m.own_close_mark[7] = Uhr.t                     # eigener Close frisch markiert — darf das Nachbuchen nicht aufhalten
 Uhr.t += 5
 mt5.hist[500] = [deal(501, 1.4, OUT, profit=34.0, msc=2000)]
@@ -105,10 +115,19 @@ ns, mt5, m, logs, gs = welt()
 ns["book_close"](m, 8, H, types.SimpleNamespace(deal=0), 1.4)
 Uhr.t += 10
 ns["nachbuchen"](m)
-check(500 in m.buchung_offen and m.closed == [], "nach 10 s noch nichts → weiter warten")
+check(any(k[0] == 500 for k in m.buchung_offen) and m.closed == [], "nach 10 s noch nichts → weiter warten")
 Uhr.t += 25
 ns["nachbuchen"](m)
 check(m.buchung_offen == {} and m.closed == [] and any("auch nach 30 s" in x for x in logs), "nach 30 s nichts → aufgeben, kein Eintrag (wie vor EH3)")
+
+ns, mt5, m, logs, gs = welt()
+ns["book_close"](m, 10, H, types.SimpleNamespace(deal=0), 1.4)
+mt5.hist[500] = [deal(888, 1.4, OUT, reason=SL)]      # Broker-SL auf demselben Ticket im Fenster — gehört dem Schwund-Wächter
+ns["nachbuchen"](m)
+check(m.closed == [] and any(k[0] == 500 for k in m.buchung_offen), "EH3-2b: fremder SL-Deal im Fenster wird nicht als „nachgebucht“ verbucht")
+H2 = dict(H, volume=0.7)
+ns["book_close"](m, 10, H2, types.SimpleNamespace(deal=0), 0.7)
+check(len(m.buchung_offen) == 2, f"EH3-2b: zwei offene Teil-Closes desselben Tickets überschreiben sich nicht ({list(m.buchung_offen)})")
 
 ns, mt5, m, logs, gs = welt()
 mt5.hist[500] = [deal(777, 1.4, OUT)]
