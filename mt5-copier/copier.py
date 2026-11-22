@@ -639,6 +639,38 @@ def write_status(path, data):
         print(f"[status] konnte {os.path.basename(path)} nicht schreiben: {type(e).__name__}: {e}", flush=True)
 
 
+# ── EH3-2 NACHBUCHEN (23.11.2026, Master nach Befund EH2: Simon 118562, 25-s-Trade, Fusion +26,09 € geschlossen, aber kein closed_hedges-Eintrag) ──
+# Fusion meldet den Close-Fill asynchron (order_send deal=0); book_close suchte den OUT-Deal nur 4 × 0,3 s in der Deal-History und gab dann für immer
+# auf — und weil own_close_mark gesetzt war, stempelte auch der Schwund-Waechter nichts. Jetzt wandert so ein Close in m.buchung_offen und wird in
+# jedem Takt bis HEDGE_NACHBUCHEN_S nachgeschlagen (gleiche Deal-Regel, gleicher Doppelzaehlungs-Schutz). own_close_mark spielt dafuer keine Rolle.
+HEDGE_NACHBUCHEN_S = 30.0
+
+
+def close_deal_waehlen(ds, deal_id, vol, schon, out_entries):
+    """REIN RECHNEND (testbar): der Close-Deal eines Hedge-Tickets aus seiner Deal-History. deal_id > 0 → genau dieser Deal; sonst der juengste
+    unverbuchte OUT-Deal mit exakt diesem Volumen bzw. — gibt es keinen — der EINZIGE unverbuchte OUT-Deal (mehrdeutig ⇒ None, nie raten).
+    schon = Menge schon verbuchter Deal-Tickets (RAM + Sidecar). -> Deal | None"""
+    ds = list(ds or [])
+    if deal_id:
+        # mitgelieferter Deal: genau dieser (schon verbucht? — das entscheidet der Verbucher, wie vor EH3 still)
+        return next((d for d in ds if int(d.ticket) == int(deal_id)), None)
+    outs = [d for d in ds if int(getattr(d, "entry", -1)) in tuple(out_entries) and int(d.ticket) not in schon]
+    pick = [d for d in outs if abs(float(d.volume) - float(vol)) <= 1e-6] or (outs if len(outs) == 1 else [])
+    return max(pick, key=lambda d: (int(getattr(d, "time_msc", 0) or 0), int(d.ticket))) if pick else None
+
+
+def nachbuchen_urteil(eintrag, gefunden, jetzt, frist_s=HEDGE_NACHBUCHEN_S):
+    """REIN RECHNEND (testbar): was mit einem offenen Nachbuchungs-Eintrag {ab, ...} in diesem Takt passiert. → 'buchen' (Deal gefunden) ·
+    'aufgeben' (Frist um, nichts gefunden — dann bleibt es wie vor EH3: kein Eintrag, Prophos laesst den Hedge-P&L leer) · 'warten'."""
+    if gefunden:
+        return "buchen"
+    try:
+        ab = float((eintrag or {}).get("ab") or 0)
+    except (TypeError, ValueError):
+        ab = 0.0
+    return "aufgeben" if (not ab or jetzt - ab > float(frist_s)) else "warten"
+
+
 # ── closed_hedges-Sidecar (15.08.2026, Etappe 3) ───────────────────────────────
 # Verbuchte Hedge-Closes liegen NICHT nur im RAM: jeder Copier-Neustart
 # (Moduswechsel, Selbst-Update — das exakt auf 'alle flach' = direkt nach
@@ -1789,6 +1821,7 @@ class Master:
         if len(self.closed) > 50:
             del self.closed[:-50]
         self.booked_deals = {}    # ident -> {Deal-Tickets} — nie denselben Deal zweimal verbuchen
+        self.buchung_offen = {}   # EH3-2: Hedge-Ticket -> {ident, h, vol, deal_id, ab} — Close ohne Deal in der History, wird nachgebucht
         # hedge_last_vol (ident -> Gesamtvolumen) kommt mit aus dem Sidecar:
         # nur so erkennt der Schwund-Waechter auch Closes, die WAEHREND einer
         # Copier-Downtime passiert sind (Review-Fund 15.08.2026).
@@ -2259,53 +2292,73 @@ def main():
         order_send liefert retcode=DONE, aber deal=0. Der Beweis kommt dann
         aus der Deal-History der Position: der juengste, noch nicht verbuchte
         OUT-Deal (bevorzugt mit passendem Volumen). Das bleibt beweisfest —
-        nachgeschlagen statt mitgeliefert, geraten wird weiterhin nie."""
+        nachgeschlagen statt mitgeliefert, geraten wird weiterhin nie.
+        EH3-2 (23.11.2026): kommt der Deal in den 4 Versuchen nicht, wandert der
+        Close in m.buchung_offen und nachbuchen() schlaegt ihn jeden Takt bis
+        HEDGE_NACHBUCHEN_S nach — vorher war er dann fuer immer verloren."""
         deal_id = int(getattr(result, "deal", 0) or 0)
         seen = m.booked_deals.setdefault(ident, set())
         if deal_id and deal_id in seen:
             return  # Doppelzaehlungs-Schutz: derselbe Deal wird nie zweimal verbucht
-        # Auch ueber Neustarts hinweg nie doppelt buchen: der Sidecar traegt die
-        # Deal-Tickets aller schon verbuchten Closes (booked_deals ist nur RAM).
-        booked_sidecar = {int(c.get("deal") or 0) for c in m.closed}
         deal = None
         for attempt in range(4):
-            ds = mt5.history_deals_get(position=int(h["ticket"])) or []
-            if deal_id:
-                deal = next((d for d in ds if int(d.ticket) == deal_id), None)
-            else:
-                outs = [d for d in ds
-                        if int(getattr(d, "entry", -1)) in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)
-                        and int(d.ticket) not in seen
-                        and int(d.ticket) not in booked_sidecar]
-                # bevorzugt der Deal mit exakt dem geschlossenen Volumen; gibt es
-                # keinen (Teil-Fill), ist EIN einziger unverbuchter OUT-Deal
-                # ebenfalls eindeutig — mehrdeutig ⇒ lieber leer als falsch.
-                pick = [d for d in outs if abs(float(d.volume) - float(vol)) <= 1e-6] \
-                       or (outs if len(outs) == 1 else [])
-                if pick:
-                    deal = max(pick, key=lambda d: (int(getattr(d, "time_msc", 0) or 0), int(d.ticket)))
+            # Auch ueber Neustarts hinweg nie doppelt buchen: der Sidecar traegt die
+            # Deal-Tickets aller schon verbuchten Closes (booked_deals ist nur RAM).
+            schon = seen | {int(c.get("deal") or 0) for c in m.closed}
+            deal = close_deal_waehlen(mt5.history_deals_get(position=int(h["ticket"])) or [], deal_id, vol, schon,
+                                      (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY))
             if deal is not None:
                 break
             if attempt < 3:
                 time.sleep(0.3)
         if deal is None:
-            log(f"[{m.file}] ⚠ Close-Deal (Result deal={deal_id}, Ticket {h['ticket']}) nicht in der "
-                f"History gefunden — KEIN closed_hedges-Eintrag (nie profit=0 raten).")
+            m.buchung_offen[int(h["ticket"])] = {"ident": ident, "h": dict(h), "vol": vol, "deal_id": deal_id, "ab": time.time()}
+            log(f"[{m.file}] ⏳ Close-Deal (Result deal={deal_id}, Ticket {h['ticket']}) noch nicht in der History — "
+                f"wird bis {HEDGE_NACHBUCHEN_S:.0f} s nachgebucht (nie profit=0 raten).")
             return
+        close_verbuchen(m, ident, h, deal, vol)
+
+    def close_verbuchen(m, ident, h, deal, vol, note=None):
+        """Einen gefundenen Close-Deal in den closed-Ring + Sidecar schreiben (aus book_close ausgelagert, EH3-2). Doppelte Deals nie."""
         deal_id = int(deal.ticket)
-        if deal_id in seen or deal_id in booked_sidecar:
-            return
+        seen = m.booked_deals.setdefault(ident, set())
+        if deal_id in seen or deal_id in {int(c.get("deal") or 0) for c in m.closed}:
+            return False
         seen.add(deal_id)
-        m.closed.append({
+        e = {
             "ticket": int(h["ticket"]), "deal": deal_id, "symbol": h["symbol"],
             "volume": vol,
             # profit + commission + swap des Close-Deals = was wirklich auf dem
             # Hedge-Konto ankommt
             "profit": float(deal.profit) + float(deal.commission) + float(deal.swap),
             "closed_at": deal_closed_at(deal, h.get("symbol")),   # ms + UTC, echte Fill-Zeit (29.10.2026)
-        })
+        }
+        if note:
+            e["note"] = note
+        m.closed.append(e)
         del m.closed[:-50]
         write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets, m.eigene_idents)
+        return True
+
+    def nachbuchen(m):
+        """EH3-2: offene Closes ohne Deal (m.buchung_offen) je Takt einmal in der Deal-History nachschlagen — gefunden → verbuchen (note
+        'nachgebucht', echte Fill-Zeit), Frist um → aufgeben wie vor EH3 (kein Eintrag). Haengt NICHT an own_close_mark. Wirft nie."""
+        for tk, e in list(m.buchung_offen.items()):
+            try:
+                schon = m.booked_deals.get(e["ident"], set()) | {int(c.get("deal") or 0) for c in m.closed}
+                deal = close_deal_waehlen(mt5.history_deals_get(position=int(tk)) or [], e.get("deal_id") or 0, e["vol"], schon,
+                                          (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY))
+            except Exception:
+                deal = None
+            urteil = nachbuchen_urteil(e, deal is not None, time.time())
+            if urteil == "buchen":
+                m.buchung_offen.pop(tk, None)
+                if close_verbuchen(m, e["ident"], e["h"], deal, e["vol"], note="nachgebucht"):
+                    log(f"[{m.file}] ✅ Close-Deal {int(deal.ticket)} (Ticket {tk}) nach {time.time() - float(e['ab']):.1f} s nachgebucht.")
+            elif urteil == "aufgeben":
+                m.buchung_offen.pop(tk, None)
+                log(f"[{m.file}] ⚠ Close-Deal (Ticket {tk}) auch nach {HEDGE_NACHBUCHEN_S:.0f} s nicht in der History — "
+                    f"KEIN closed_hedges-Eintrag (nie profit=0 raten).")
 
     # ── Hauptschleife ───────────────────────────────────────────────────────────
     poll = float(ref.get("poll_interval", 0.5))
@@ -3179,6 +3232,10 @@ def main():
                 m.armed = (m.file in armed_files) or m.immer_scharf
                 if m.armed:
                     m.warned_unarmed.clear()
+                # EH3-2 (23.11.2026): offene Close-Deals ohne Deal-Beleg zuerst nachschlagen — VOR allen continue-Pfaden (eingefrorener Snapshot,
+                # Fremd-Login …), damit das Nachbuchen in jedem Takt laeuft, egal was der Master gerade meldet
+                if m.buchung_offen:
+                    nachbuchen(m)
                 # Ohne expect_login lesen und SELBST vergleichen (15.08.2026, erster
                 # Trade-Test): das Terminal oeffnete mit fremdem Konto 400005, der
                 # expect_login-Filter machte den Snapshot still zu None — im Preflight
@@ -3213,7 +3270,7 @@ def main():
                             st["standby"] = False
                             st["wrong_login"] = snap["login"]
                             write_status(m.status_path, st)
-                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo")) or bool(m.buchung_offen)
                     continue
                 if snap is None:
                     if now - m.last_status > 1.0:
@@ -3230,7 +3287,7 @@ def main():
                             # garantiert frisch (Tick waere sonst uebersprungen).
                             known, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)   # Zwillinge nie als eigene (30.10.2026)
                             write_status(m.status_path, master_status(m, None, known, False))
-                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo")) or bool(m.buchung_offen)
                     continue
 
                 # ── Eigene Hedges von Magic-Zwillingen trennen (30.10.2026, s. hedges_teilen) ──
@@ -3463,7 +3520,7 @@ def main():
                 if not snap_fresh:
                     # Offene Hedges halten den Selbst-Update-Neustart weiter auf;
                     # die eingefrorene Positionsliste zaehlt dafuer nicht.
-                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo")) or bool(m.buchung_offen)
                     if time.time() - m.last_status > 1.0:
                         m.last_status = time.time()
                         if os.path.exists(m.cfg_path):
@@ -3645,7 +3702,7 @@ def main():
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
                 # Solo-Hedge offen (24.09.2026): der Close-Auftrag braucht einen laufenden
                 # Copier — ein Update-Neustart wartet, bis auch die Solo-Position zu ist.
-                m.busy = bool(snap["positions"]) or hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
+                m.busy = bool(snap["positions"]) or hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo")) or bool(m.buchung_offen)   # EH3-2: Update wartet aufs Nachbuchen
 
                 if time.time() - m.last_status > 1.0:
                     m.last_status = time.time()
