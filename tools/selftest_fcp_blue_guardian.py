@@ -118,7 +118,8 @@ r = ruf("fcp_konto_rechnen", jf, 101700.0, 100000, 2, False, 10.0, 0.85, None, F
 check(r["aktion"] == "ziel", "FundedNext Ziel erreicht wie bisher")
 # Verdrahtung
 fp = app[app.index("def fcp_planen("):app.index("def fcp_sicht(")]
-check('"select": "account_id,received_tx_id,requested_at,created_at"' in fp and '"select": "account_id,payout_date,created_at"' in fp and '"select": "id,account_id,occurred_at"' in fp,
+# WP2 (23.11.2026): + approved_at (Bezug „Lesung nach dem Payout“)
+check('"select": "account_id,received_tx_id,requested_at,created_at,approved_at"' in fp and '"select": "account_id,payout_date,created_at"' in fp and '"select": "id,account_id,occurred_at"' in fp,
       "fcp_planen liest die Payout-Daten für den Zyklus-Beginn")
 check("fcp_gewinntage_seit(zyklus_ab.get(aid), a.get(\"created_at\"))" in fp and "zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}" in fp and ("gewinntage=gti)" in fp or "gewinntage=gti,\n" in fp) and ('"erster_payout", "gewinntage")' in fp or '"erster_payout", "gewinntage",\n' in fp),   # O1: danach ziel_fest, on_demand
       "fcp_planen zählt die Gewinntage je Konto, reicht sie durch und schreibt sie in den Vorschlag")

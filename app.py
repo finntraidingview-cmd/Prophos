@@ -52500,7 +52500,55 @@ def fcp_anfrage_zuletzt(pending):
     return out
 
 
-FCP_CONS_TP_MIN_USD = 50       # Weg A: kleinster TP eines Consistency-Trades (technisch, nicht im Panel — Finn 05.11.2026 ~04:20)
+# PAYOUT ERST NACH ECHTER LESUNG (WP2, Master 23.11.2026, Befund WP1): FundedNext 100k …7821 On Demand — Anfrage 18.11. 22:37 UTC, ausgezahlt
+# 19.11., letzte echte Lesung 18.11. 14:35 (Ende des letzten Trades, 104.915,95). Danach stand das Echo-Terminal im Standby („Snapshot eingefroren“),
+# der Heartbeat mt5_live.updated_at blieb aber frisch — der Planer hielt die Zahl von VOR der Auszahlung für live. Nach dem 72-h-Fenster oben galt sie
+# wieder als „Ziel erreicht“ → am 23.11. erneut Waiting for Payout, das Konto handelte nie wieder. Regel: nach einer Payout-Anfrage zählt ein „Ziel
+# erreicht“ (= Umstellen auf Waiting) erst mit einer ECHTEN Balance-Lesung NACH der Anfrage bzw. Auszahlung — sonst bleibt das Konto, wie es ist, mit
+# FCP_GRUND_PAYOUT_UNGELESEN. Echte Lesung = accounts.tv_balance_at: der PC-Tab schreibt sie nur bei frischem Snapshot ohne Notiz (prophos.html
+# mt5InstBalanceFrisch), Puls/Auge/Hand ebenso. Bewusst NICHT der Echo-Heartbeat — das gilt nur für diese Waiting-Entscheidung; die allgemeine
+# Balance-Live-Prüfung (_ap_balance_karten, ap_balance_live) bleibt unverändert, Standby-Snapshots im Leerlauf sind dort normal.
+FCP_GRUND_PAYOUT_UNGELESEN = "Balance nach Payout noch nicht gelesen — ↻ Balance lesen"
+
+
+def fcp_payout_bezug(pending):
+    """REIN RECHNEND (testbar, WP2): {account_id: jüngster Zeitpunkt von Anfrage oder Auszahlung als datetime} — je pending_payouts-Zeile der spätere von
+    created_at (Anfrage in Prophos angelegt) und approved_at (Auszahlung bestätigt), dann das Maximum je Konto. Zeilen ohne beides fehlen."""
+    out = {}
+    for z in pending or ():
+        aid = str(z.get("account_id") or "")
+        ts = [t for t in (_ap_ts(str(z[f])) if z.get(f) else None for f in ("created_at", "approved_at")) if t is not None]
+        if aid and ts and (aid not in out or max(ts) > out[aid]):
+            out[aid] = max(ts)
+    return out
+
+
+def fcp_payout_lesung_fehlt(bezug, plaene, konto, balance=None, toleranz=1.0):
+    """REIN RECHNEND (testbar, WP2): True = es gab einen Payout (bezug: datetime | ISO-Text), seither ist kein Plan des Kontos zu Ende gegangen
+    (status completed, ended_at/completed_at nach bezug) UND es gibt keine echte Balance-Lesung danach (accounts.tv_balance_at > bezug mit
+    tv_balance > 0), die zur Planer-Balance (balance, ± toleranz) passt → ein „Ziel erreicht“ rechnet mit einer Balance von vor der Auszahlung
+    und darf nicht auf Waiting umstellen. Der Abgleich mit balance (Gegenprüfung WP2): acc_balance_wahl nimmt Echo vor tv_balance — eine andere
+    mt5_live-Zeile im Standby mit jüngerem Heartbeat und eingefrorenem Stand dürfte die Sperre sonst mit einer fremden Zahl aufheben.
+    Ohne Payout, mit Trade danach oder mit passender Lesung danach → False (wie bisher)."""
+    b = bezug if isinstance(bezug, datetime) else (_ap_ts(str(bezug)) if bezug else None)
+    if b is None:
+        return False
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        e = _ap_ts(str(p.get("ended_at") or p.get("completed_at") or "")) if (p.get("ended_at") or p.get("completed_at")) else None
+        if e is not None and e > b:
+            return False
+    k = konto or {}
+    gelesen = _ap_ts(str(k.get("tv_balance_at"))) if k.get("tv_balance_at") else None
+    wert = _wd_num(k.get("tv_balance"))
+    if not (gelesen is not None and gelesen > b and wert is not None and wert > 0):
+        return True
+    bz = _wd_num(balance)
+    return bz is not None and abs(bz - wert) > toleranz
+
+
+FCP_CONS_TP_MIN_USD = 50      # Weg A: kleinster TP eines Consistency-Trades (technisch, nicht im Panel — Finn 05.11.2026 ~04:20)
 FCP_CONS_PUFFER_ZIEL = 1.02    # Endziel mindestens größter Tag ÷ p × 1,02
 FCP_CONS_PUFFER_DECKEL = 0.95  # Deckel je Trade = p × Endziel × 0,95 (5 % Sicherheitsabstand)
 
@@ -53273,7 +53321,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                           "master_account_id": f"in.({teil})"}) or []    # alle Trades des Kontos (Gewinne, The5ers-Consistency)
         try:
             # Datumsfelder seit BG1 (03.11.2026): Zyklus-Beginn für die Gewinntage (fcp_zyklus_start); die Zählung der Payouts bleibt
-            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []
+            # WP2 (23.11.2026): approved_at = Auszahlung bestätigt — Bezug für „Lesung nach dem Payout“ (fcp_payout_bezug)
+            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at,approved_at", "account_id": f"in.({teil})"}) or []
             verw += _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []
             buch += _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []
         except Exception as e:
@@ -53283,6 +53332,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     zyklus_ab = fcp_zyklus_start(pend, verw, buch) if payouts_ok else {}
     zyklus_ts = fcp_zyklus_anfrage_ts(pend, verw, buch) if payouts_ok else {}   # WP4: Trades am Anfrage-Tag nach der Anfrage zählen zum neuen Zyklus
     anfrage_zuletzt = fcp_anfrage_zuletzt(pend) if payouts_ok else {}   # Anfrage ohne Trade (10.11.2026, Moritz …3608)
+    payout_bezug = fcp_payout_bezug(pend) if payouts_ok else {}         # WP2: Waiting erst nach echter Lesung nach dem Payout
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -53438,6 +53488,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn
             aus("Payout angefragt — Balance noch von vor der Auszahlung (seitdem kein Trade), plant wieder, sobald die Firma sie abgezogen hat",
                 balance=round(float(bal), 2)); continue
+        if r.get("aktion") == "ziel" and fcp_payout_lesung_fehlt(payout_bezug.get(aid), pl, a, bal):
+            # WP2 (23.11.2026): nach dem 72-h-Fenster nicht blind wieder Waiting — ohne echte Lesung nach Anfrage/Auszahlung bleibt das Konto, wie es ist
+            aus(FCP_GRUND_PAYOUT_UNGELESEN, balance=round(float(bal), 2), payout_bezug=payout_bezug[aid].isoformat()); continue
         if od_an:
             r["on_demand"] = True
         if st_an and st_deckel:
