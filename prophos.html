@@ -40473,7 +40473,7 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
-      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} try{ wdlRestVorgaengerTick() }catch(_){} }, 0)
+      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} try{ wdlRestVorgaengerTick() }catch(_){} try{ wdlNieGestartetTick() }catch(_){} }, 0)   // RN1
       try{ window._wdZyklusLaden?.({ admin: true }).then(g => { if(g) wdlRender() }).catch(() => {}) }catch(_){}   // Recovery-Chip (Tradeify, 03.11.2026)   // vorgemerkte Pläne mit frischer Lesung abhaken; Vorgänger eines Rest-Trades (02.11.2026)
       wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
       try{ await wdlPolarLaden() }catch(_){}   // Polar (20.10.2026): Stand je laufendem Polar-Plan (/polar/stand), 404 = Hand-Polar
@@ -40815,6 +40815,7 @@
    * 'blown', fremd nur mit Admin-Recht wie „Braucht dich"), Überprüfen offen (> 6 h) und Manuelle Arbeit → Radar. Laden beim Öffnen und alle
    * 60 s für die Zahl (nur sichtbarer Tab). Eigene Verdrahtung, kein Sammel-Handler. Nur Anzeige + vorhandene Wege. */
   const _hand = { d: null, at: 0, laedt: false, fehler: '' }
+  const _handNgErledigt = new Set()   // RN1: in der Glocke „Keine Order → abhaken“ gedrückt (Plan-IDs, nur bis zum Neuladen)
   const HAND_GRUPPEN = [['bestanden', 'Bestanden → Phase umstellen'], ['geblowt', 'Geblowt → archivieren'], ['ueberpruefen', 'Überprüfen offen'], ['manuell', 'Manuelle Arbeit'], ['planer', 'Planer braucht dich']]   // planer (09.10.2026): Hand-Gründe des letzten Nachtlaufs
   /* NACH DEM ABHAKEN SOFORT IN „BESTANDEN" (27.10.2026, Finn: „bei Moritz Tradeify-Trades abgehakt … visuell einfach weg" und „es war schon öfter
    * so, dass ich Accounts abhake, die dann für ein paar Minuten im Radar verschwinden"). Ursache: ein Ziel-Trade steht vor dem Abhaken in Bestanden →
@@ -40996,15 +40997,29 @@
             : (!eigen ? fremdTxt(z) : '')
           return zeile(z, was, knopf)
         }
+        // RN1 (Finn 23.11.2026): nie gestartet + unklar steht nicht mehr im Radar — hier „Order am Konto prüfen“ mit dem Grund; ist am Konto nichts, bestätigt
+        // „Keine Order → abhaken“ (derselbe Railway-Weg wie der Radar-Knopf, master_pl 0). Erkannt über die Radar-Zeile (wdl.daten); ohne sie wie bisher
+        if(_handNgErledigt.has(String(z.plan_id || ''))) return ''   // gerade hier abgehakt — /admin/handarbeit liefert ihn bis zu 30 s weiter (Cache)
+        const ngT = ((typeof wdl !== 'undefined' && wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(z.plan_id || ''))
+        if(ngT && wdlNieGestartet(ngT) === 'unklar'){
+          const sf = ngT.start_fehler || {}, fi = ngT.final || {}
+          const grund = String(sf.msg || fi.unklar_grund || fi.hinweis || 'Start ohne Ergebnis').trim()
+          const was = `<b>nie gestartet — Order am Konto prüfen</b> · ${escapeHtml(grund.length > 90 ? grund.slice(0, 88) + '…' : grund)}`
+          return zeile(z, was, (eigen || adm) ? `<button type="button" class="btn btn-ghost" data-hand-ng="${escapeHtml(String(z.plan_id))}" title="Am Konto liegt keine Order und keine Position aus diesem Plan → abhaken mit P&L 0 (Grund bleibt am Plan)">Keine Order → abhaken</button>` : fremdTxt(z))
+        }
         return zeile(z, 'Trade wartet aufs Abhaken', `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Überprüfen (dort abhaken)">Im Radar →</button>`)
-      }).join('')
-      return `<div class="hand-gr"><h4>${titel} · ${liste.length}</h4>${zeilen}</div>`
+      }).filter(Boolean)   // RN1: gerade abgehakte Zeilen liefern '' — nicht mitzählen
+      if(!zeilen.length) return ''
+      return `<div class="hand-gr"><h4>${titel} · ${zeilen.length}</h4>${zeilen.join('')}</div>`
     }).join('')
     body.innerHTML = standZeile + (teile || '<div class="hand-leer">Nichts zu tun.</div>')
   }
   function handZu(){ document.getElementById('handModal')?.classList.remove('open') }
   document.getElementById('tb-hand')?.addEventListener('click', () => {
     document.getElementById('handModal')?.classList.add('open'); handRender(); handLaden()
+    // RN1 (Prüfer-Gegenprüfung): ob ein Überprüfen-Plan „nie gestartet“ ist, steht in den Radar-Daten — war der Radar noch nie offen, jetzt einmal laden, sonst
+    // zeigte die Glocke „Im Radar →“ für eine Zeile, die der Radar ausblendet
+    if(!(wdl.daten && wdl.daten.trades)) Promise.resolve().then(() => wdlLaden(true)).then(() => { try{ handRender() }catch(_){} }, () => {})
   })
   document.getElementById('handX')?.addEventListener('click', handZu)
   document.getElementById('handModal')?.addEventListener('click', ev => {
@@ -41022,6 +41037,26 @@
         else tplBalanceFremd(hb.dataset.handBalf, hb.dataset.handUid, hb.dataset.handWer).catch(err => console.warn('[handarbeit] Balance fremd', err)) }
       catch(err){ console.warn('[handarbeit] Balance lesen', err); hb.disabled = false; hb.textContent = '↻ Balance lesen' }
       return }
+    // RN1: nie gestartet + unklar → Finn hat am Konto nachgesehen, keine Order → abhaken (P&L 0, nur aus Überprüfen)
+    const ng = ev.target.closest('[data-hand-ng]')
+    if(ng){
+      const pid = ng.getAttribute('data-hand-ng')
+      if(!pid || !confirm('Am Konto liegt keine Order und keine Position aus diesem Plan?\n\nDann wird er mit P&L 0 abgehakt, der Grund bleibt am Plan.')) return
+      ng.disabled = true; ng.textContent = 'hakt ab …'
+      ;(async () => {
+        try{
+          const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+          const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?ansicht=admin`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: 0, slave_pl: null, konto_status: 'none', nur_review: true, pl_quelle: 'hand' }) })
+          const d = await r.json().catch(() => ({}))
+          if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
+          ng.textContent = '✓ abgehakt'; _handNgErledigt.add(String(pid))
+          try{ wdlSofortErledigt(pid) }catch(_){}
+          setTimeout(() => { try{ handLaden() }catch(_){} }, 800)
+        }catch(err){ ng.disabled = false; ng.textContent = 'Keine Order → abhaken'; if(typeof atToast === 'function') atToast(`Nicht abgehakt: ${(err && err.message) || err}`, 'end') }
+      })()
+      return
+    }
     if(ev.target.closest('[data-hand-radar]')){ handZu(); document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click() }
   })
   // Zahl im Kopf: erster Abruf kurz nach dem Login, dann alle 60 s (nur sichtbarer Tab)
@@ -42093,6 +42128,58 @@
     return pl > 0 && tp > 0 && Math.abs(Number(e.today_pnl) - pl) <= 5 && Math.abs(pl - tp) <= Math.max(50, tp * 0.15)
   }
   window._wdlLesungAmTp = wdlLesungAmTp   // Test-Haken
+  /* RN1 NIE GESTARTET NICHT IM RADAR (Finn 23.11.2026 über den Master: „Ich will im Radar nur beendete Trades mit P&L sehen, nicht Trades, die nie gestartet
+   * sind.“ Anlass AB1: drei Topstep-Pläne „nie gestartet (19./20./21.11.)“ standen im Radar, ohne P&L nicht abhakbar). Konstrukt (freigegeben):
+   *   beendet mit P&L → bleibt im Radar wie bisher;
+   *   nie gestartet, sauber belegt (nur die Echo-Deal-Prüfung „nicht_gelaufen“, s. unten) → erledigt sich selbst (wdlNieGestartetTick:
+   *     derselbe Railway-Weg wie der Knopf, master_pl 0, Grund bleibt am Plan für die Fehler-Auswertung), nie im Radar;
+   *   nie gestartet, unklar (Tagesreset „Order am Konto prüfen“, Start-Fehler unklar) → nicht im Radar; steht in der Glocke „Überprüfen offen“ mit
+   *     „Order am Konto prüfen“ (handRender), bis Finn dort bestätigt oder eine Lesung es klärt;
+   *   offene Position ohne Plan → Fremd-Positionen-Wache (app.py fp_tick) → „Braucht dich“, unverändert.
+   * Nie versteckt: Zeilen mit P&L (Balance-Differenz, Plan-P&L, Fusion-P&L), mit Hedge, Fill-/Ende-Werten oder einer Order-Spur im Tages-Reset-Hinweis,
+   * Manueller Arbeit, Polar. REIN — Test-Haken window._wdlNieGestartet.
+   * → '' (gehört in den Radar) | 'sauber' | 'unklar' */
+  // Prüfer-Gegenprüfung RN1 (23.11.2026): jede Spur einer Order hält die Zeile im Radar — der Tages-Reset nennt sie im Hinweis (app.py tagesreset_hinweis),
+  // dazu Hedge (jedes Hedge-Objekt außer „übersprungen“: auch unklar/wartet/geschlossen ohne P&L), Fusion-P&L live, Fill-/Ende-Werte, TradingView-Fill
+  const WDL_NG_ORDER_SPUR = /Order an Orbit gesendet|Fusion-Hedge am Plan|Ticket\/Position am Plan|Fill-\/Ergebnis-Beleg|Polar-Lauf|Leer-Versuche/i
+  function wdlNieGestartet(t){
+    if(!t || t.status !== 'review' || t.started_at || wdlIstPolar(t) || wdlManuell(t)) return ''
+    const leer = v => v == null || v === '' || v === 0 || v === false, zahl = v => v != null && v !== '' && isFinite(Number(v))
+    if(zahl(t.pl_balance) || t.balance_sprung || (t.master_pl && typeof t.master_pl === 'object' && !leer(t.master_pl.wert))) return ''
+    if(t.hedge && typeof t.hedge === 'object' && String(t.hedge.status || '') !== 'uebersprungen') return ''
+    if(!leer(t.slave_pl) || !leer(t.slave_pl_live)) return ''
+    const f = (t.final && typeof t.final === 'object') ? t.final : {}, tv = (t.tv && typeof t.tv === 'object') ? t.tv : {}
+    if(['exit_fill', 'today_pnl', 'balance_end'].some(k => !leer(f[k])) || !leer(tv.einstieg_fill)) return ''
+    if(WDL_NG_ORDER_SPUR.test(String(f.hinweis || '') + ' ' + String(f.unklar_grund || ''))) return ''
+    const sf = (t.start_fehler && typeof t.start_fehler === 'object') ? t.start_fehler : null
+    if(!(f.art === 'nicht_gelaufen' || (f.art === 'unklar' && f.grund === 'tagesende_unklar') || sf)) return ''
+    // sauber NUR mit dem Deal-Beleg (N2: Echo-Endlesung über die Deals → final.art 'nicht_gelaufen'). Nicht aus start_fehler.unklar: das Feld bleibt nach dem
+    // Nachholen am Plan stehen (status 'neu'), und /admin/live-trades liefert weder at noch status dazu — ein nachgeholter, wirklich gesendeter Plan sähe sonst sauber aus
+    return f.art === 'nicht_gelaufen' ? 'sauber' : 'unklar'
+  }
+  window._wdlNieGestartet = wdlNieGestartet
+  // Selbst-Erledigung „nie gestartet, sauber“: je Takt höchstens EIN Plan, je Plan höchstens alle 10 min ein Versuch. Fremde Pläne nur mit Schreibrecht (Railway prüft
+  // ohnehin: fremd nur „Finn + Pascal“/„Pascal“) — sonst nur die eigenen, damit eine Mitglieds-ID nicht im Takt in 403 läuft. nur_review: nie etwas überschreiben, das
+  // inzwischen abgehakt ist. Kein P&L-Schätzwert: 0 ist hier der belegte Wert (nichts platziert)
+  const _wdlNgVersuch = new Map()
+  async function wdlNieGestartetTick(){
+    if(_wdlSammel || document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    const ich = String(currentUserId || '')
+    const kand = ((wdl.daten && wdl.daten.trades) || []).filter(x => wdlNieGestartet(x) === 'sauber' && Date.now() - (_wdlNgVersuch.get(wdlTid(x)) || 0) > 10 * 60000)
+    if(!kand.length) return
+    let darf = false
+    if(kand.some(x => wdlUid(x) !== ich)){ try{ darf = typeof window._planerSchreiben === 'function' && (await window._planerSchreiben()) === true }catch(_){ darf = false } }
+    const t = kand.find(x => wdlUid(x) === ich || darf); if(!t) return
+    const pid = wdlTid(t); _wdlNgVersuch.set(pid, Date.now())
+    try{
+      const tok = await _pushTok(); if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?ansicht=admin`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: 0, slave_pl: null, konto_status: 'none', nur_review: true }) })
+      if(r.ok){ try{ wdlSofortErledigt(pid) }catch(_){} }
+      else console.warn('[radar] nie gestartet, nicht selbst erledigt', pid.slice(0, 8), r.status)
+    }catch(e){ console.warn('[radar] nie gestartet, nicht selbst erledigt', (e && e.message) || e) }
+  }
+  window._wdlNieGestartetTick = wdlNieGestartetTick   // Test-Haken
   function wdlEinKlickGrund(t){
     if(!t || t.status !== 'review') return 'nicht in Überprüfen'
     if(wdlIstPolar(t)) return 'Polar'
@@ -43004,7 +43091,8 @@
     const teile = arr => {
       // Zu laut Kurs-Feed (29.10.2026): offene Pläne mit Feed-Treffer stehen in Erledigt, nicht mehr in Läuft
       const fe = arr.filter(t => t.status === 'open' && !!wdlFeedEnde(t))
-      const la = arr.filter(t => t.status === 'open' && !fe.includes(t)), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
+      // RN1 (Finn 23.11.2026): nie gestartete Pläne (wdlNieGestartet) stehen in keiner Radar-Gruppe — sauber erledigt sie wdlNieGestartetTick, unklar steht in der Glocke
+      const la = arr.filter(t => t.status === 'open' && !fe.includes(t)), rv = arr.filter(t => t.status === 'review' && !wdlNieGestartet(t)), er = arr.filter(t => t.status === 'completed')
       // Manuelle Arbeit (08.10.2026) geht vor Wartet/Überprüfen — das Kennzeichen zieht die Zeile aus beiden heraus (Zähler mit)
       // Geparkt (12.10.2026) bleibt in Überprüfen (eigene Untergruppe) und fällt nie nach Wartet
       const ma = rv.filter(t => !!wdlManuell(t) && !wdlGeparkt(t)), rest = rv.filter(t => !ma.includes(t))
@@ -60590,7 +60678,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2281'
+  const OS_TAB_BUILD = '2026-09-22.2282'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
