@@ -40948,20 +40948,25 @@
    * (HAND_UEBERPRUEFEN_H) — dazwischen standen sie nirgends. Die Glocke nimmt sie jetzt SOFORT auf: Quelle sind die Radar-Daten (wdl.daten, wenn frisch), sonst eine
    * eigene Abfrage GET /admin/live-trades (review kommt dort immer ganz, unabhängig von ?tage) — nur in Admin-Tabs, höchstens alle 5 min, nie aus einem PC-Tab;
    * beim Öffnen der Glocke einmal für jeden Login. Bewusst NICHT wdlLaden: das stößt die Radar-Takte (vorgemerkt/Rest/nie gestartet abhaken) mit an. */
-  const _handNg = { at: 0, laedt: false, trades: null }, HAND_NG_MS = 5 * 60000
+  const _handNg = { at: 0, versuch: 0, laedt: false, trades: null }, HAND_NG_MS = 5 * 60000
   async function handNgLaden(erzwingen){
     if(_handNg.laedt || !currentUserId) return
     const radarFrisch = !!(wdl.daten && wdl.daten.trades) && Date.now() - (wdl.renderAt || 0) < HAND_NG_MS
-    if(radarFrisch || (_handNg.trades && Date.now() - _handNg.at < (erzwingen ? 30000 : HAND_NG_MS))) return
+    // RN1c (Prüfung zu RN1b): gedrosselt wird nach dem letzten VERSUCH (versuch), nicht nach der letzten guten Antwort — fiel Railway aus, fragte sonst jeder Admin-Tab
+    // im 60-s-Takt von handLaden plus dessen 5-s-Wiederholungen neu. at bleibt der Stand der Daten (handNgQuelle), trades bleiben bei einem Fehler wie sie sind
+    if(radarFrisch || Date.now() - (_handNg.versuch || 0) < (erzwingen ? 30000 : HAND_NG_MS)) return
     if(!erzwingen && !(typeof apdAdmin === 'function' && apdAdmin())) return
-    _handNg.laedt = true
+    _handNg.laedt = true; _handNg.versuch = Date.now()
+    let uhr = null
     try{
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
-      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1&${WDL_SICHT}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      // RN1c: Zeitlimit wie wdlLaden (15 s) — ohne hing _handNg.laedt bei einer stehenden Verbindung, und keine weitere Abfrage kam mehr
+      const ctrl = new AbortController(); uhr = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, 15000)
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1&${WDL_SICHT}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
       const d = await r.json().catch(() => null)
       if(r.ok && d && Array.isArray(d.trades)){ _handNg.trades = d.trades.filter(t => t && t.status === 'review'); _handNg.at = Date.now() }
     }catch(_){}
-    finally{ _handNg.laedt = false }
+    finally{ if(uhr) clearTimeout(uhr); _handNg.laedt = false }
   }
   function handNgQuelle(){
     const radar = (wdl.daten && wdl.daten.trades) || null
@@ -60720,7 +60725,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2284'
+  const OS_TAB_BUILD = '2026-09-22.2285'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
