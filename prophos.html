@@ -19167,7 +19167,7 @@
     function admApexStriking(r, c, regel, caps){
       const s = r.striking
       const e = skApexRechnung({ size: c.size, bal: c.bal, start: s.zyklus_start, seit: s.zyklus_seit, nr: s.payout_nr, payoutsN: r.payouts_n,
-                                 probation: s.probation, minBal: s.min_payout_balance, tage: s.tage, regeln: s.regeln, caps, vorPayout: s.vor_payout === true })   // WP3
+                                 probation: s.probation, minBal: s.min_payout_balance, tage: s.tage, regeln: s.regeln, caps, vorPayout: s.vor_payout === true, payoutsStand: s.payouts_unlesbar === true ? 'fehler' : 'ok' })   // WP3/WP3b
       const geld = v => admGeld(v, c.ccy)
       // FAIL-CLOSED (Konstrukt: „ohne Wert … zeigt ‚Zyklus-Start fehlt‘“; Gegencheck 20.11.2026): fehlt Start, Datum, Regel der Größe oder gibt die
       // Cap-Tabelle die Payout-Nr. nicht her (nach dem 6. schließt der PA), ist die Zeile trotzdem Striking — Betrag 0, Grund statt Knopf, nie der WD-Zähler
@@ -60678,7 +60678,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2282'
+  const OS_TAB_BUILD = '2026-09-22.2283'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -81188,6 +81188,7 @@
     const fehltWas = !(start > 0) ? 'Zyklus-Start fehlt' : !seit ? 'Zyklus-Datum fehlt'
       : (schwelle == null || minProfit == null || minBal == null) ? `${size ? size / 1000 + 'k' : 'Größe unklar'}: keine Striking-Regel`
       : deckel == null ? `Payout Nr. ${nr}: kein Cap (Tabelle endet bei ${capsS.length})` : !Number.isFinite(bal) ? 'keine Balance'
+      : o.payoutsStand === 'fehler' ? 'Payouts nicht lesbar' : o.payoutsStand === 'laden' ? 'Payouts werden geladen'   // WP3b: ohne Payout-Daten fail-closed
       : o.vorPayout === true ? 'Balance vor Payout — liest' : ''   // WP3: Lesung älter als der jüngste Payout → fail-closed bis zur neuen Lesung
     const basis = { ziel: ZIEL, schwelle, probation, nr, deckel, start: start > 0 ? start : null, seit }
     if(fehltWas) return Object.assign(basis, { ok: false, fehltWas, tage: 0, netto: null, bester: null, cons: null, fehlt: null, betrag: 0, roh: 0, gedeckelt: false, grund: fehltWas })
@@ -81240,7 +81241,7 @@
     }
     const size = kontoGroesseAnzeige(a.name, a.startingBalance, tpVorplanLive(a))
     return skApexRechnung({ size, bal: tpVorplanLive(a), start: a.strikingZyklusStart, seit: a.strikingZyklusSeit, nr: a.strikingPayoutNr,
-                            probation: a.strikingProbation === true, tage, vorPayout: accBalVorPayout(a) > 0 })   // WP3
+                            probation: a.strikingProbation === true, tage, vorPayout: accBalVorPayout(a) > 0, payoutsStand: accPayoutsStand() })   // WP3/WP3b
   }
   window._skApexKontoStand = skApexKontoStand   // Test-Haken
   // Stub-Test ohne Login (SK1-A): Zeile für ein Konto mit eigenen Test-Plänen zeichnen
@@ -81416,13 +81417,16 @@
   // Eigene Konten: offene Payout-Anfragen je Konto (nur für „angefragt"), einmal je 5 min geladen
   // WP3 (Master 23.11.2026, Befund BA1): dazu ev = jüngstes Payout-Ereignis je Konto (approved_at, sonst received_at 00:00 UTC — wie app.py
   // ap_payout_ereignis) für „Stand vor Payout“ (accBalVorPayout). Fehlen die Spalten, wie vorher nur die offenen Anfragen, ev leer.
-  let _poEigen = { je: new Map(), ev: new Map(), at: 0, laeuft: false }
+  // WP3b: evStand 'laden' (noch nie geladen) | 'ok' | 'fehler' (Abfrage gescheitert oder ohne Ereignis-Spalten) — Striking rechnet ohne 'ok' fail-closed
+  let _poEigen = { je: new Map(), ev: new Map(), evStand: 'laden', at: 0, laeuft: false }
   async function poEigenSicherstellen(){
     if(!currentUserId || _poEigen.laeuft || Date.now() - _poEigen.at < 300000) return
     _poEigen.laeuft = true
+    let evStand = 'ok'
     try{
       let { data, error } = await supabase.from('pending_payouts').select('account_id,status,approved_at,received_at').eq('user_id', currentUserId)
       if(error && /approved_at|received_at/.test(String(error.message || ''))){
+        evStand = 'fehler';   // Semikolon nötig: die nächste Zeile beginnt mit „(“
         ({ data, error } = await supabase.from('pending_payouts').select('account_id,status').eq('user_id', currentUserId).eq('status', 'pending'))
       }
       if(error) throw error
@@ -81435,10 +81439,14 @@
         const t = x.approved_at ? Date.parse(x.approved_at) : (/^\d{4}-\d{2}-\d{2}$/.test(rv) ? Date.parse(rv + 'T00:00:00Z') : NaN)
         if(isFinite(t) && t > (ev.get(id) || 0)) ev.set(id, t)
       }
-      _poEigen = { je, ev, at: Date.now(), laeuft: false }
+      _poEigen = { je, ev, evStand, at: Date.now(), laeuft: false }
       if(typeof renderAccounts === 'function') renderAccounts()
-    }catch(e){ console.warn('[payout-ab] offene Anfragen', (e && e.message) || e); _poEigen.laeuft = false; _poEigen.at = Date.now() - 240000 }
+    }catch(e){ console.warn('[payout-ab] offene Anfragen', (e && e.message) || e); _poEigen.laeuft = false; _poEigen.at = Date.now() - 240000; _poEigen.evStand = 'fehler'
+      if(typeof renderAccounts === 'function') try{ renderAccounts() }catch(_){} }
   }
+  // WP3b: Lade-Zustand der Payout-Ereignisse für Striking (window._poStandStub nur für den Stub-Test)
+  function accPayoutsStand(){ return window._poStandStub || (_poEigen && _poEigen.evStand) || 'laden' }
+  window._accPayoutsStand = accPayoutsStand   // Test-Haken
   // WP3: Zeitpunkt (ms) des jüngsten Payout-Ereignisses, wenn die gespeicherte Lesung (tv_balance_at) älter ist oder fehlt — sonst 0. Ein Payout ändert
   // die Balance ohne Trade; bis zur neuen Lesung heißt der Stand „Stand vor Payout“ und Striking rechnet fail-closed. Bewusst kein Betrag
   // (DB-Betrag ≠ Abzug der Firma). window._poEvStub nur für den Stub-Test.

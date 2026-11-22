@@ -28024,16 +28024,18 @@ def ap_payout_ereignis(pending):
     return out
 
 
-def _ap_payout_ereignisse(ids):
-    """Payout-Ereignisse (ap_payout_ereignis) für Konto-IDs — Fehler → {} (dann wie vor WP3: nur Trade-Ende zählt), mit Log."""
+def _ap_payout_ereignisse(ids, streng=False):
+    """Payout-Ereignisse (ap_payout_ereignis) für Konto-IDs — Fehler → {} (wie vor WP3, nur Trade-Ende zählt), mit Log.
+    WP3b: streng=True (Striking/Kasse) → Fehler = None, der Aufrufer rechnet dann fail-closed („Payouts nicht lesbar“)."""
     ids = sorted({str(i) for i in ids or () if i})
     rows = []
     try:
         for i in range(0, len(ids), 100):
             rows += _sb_all("pending_payouts", {"select": "account_id,approved_at,received_at", "account_id": "in.(" + ",".join(ids[i:i + 100]) + ")"}) or []
     except Exception as e:
-        print(f"[balance-auto] ⚠️ Payouts nicht gelesen ({type(e).__name__}: {str(e)[:120]}) — nur Trade-Ende zählt", flush=True)
-        return {}
+        print(f"[balance-auto] ⚠️ Payouts nicht gelesen ({type(e).__name__}: {str(e)[:120]}) — "
+              + ("Striking fail-closed" if streng else "nur Trade-Ende zählt"), flush=True)
+        return None if streng else {}
     return ap_payout_ereignis(rows)
 
 
@@ -46116,18 +46118,59 @@ def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None, pay
     return out
 
 
+def ap_bal_auto_addon_auswahl(kand, sk_uids, zfeld, schon=()):
+    """REIN (testbar, WP3b): Striking-Konten für den Balance-Takt (E) — gleiches Gate wie fdp_planen: sk_ist_konto (Apex funded/winning_days einer ID mit
+    addon_firma apex/striking) UND alle Startwerte (zfeld[id] = sk_zyklus_aus_zeile, None/fehlt/nicht lesbar → nicht lesen, fail-closed). schon = IDs, die
+    (E) schon hat (keine Dubletten). RTP (Topstep) bewusst nicht: RTP-Konten sind Topstep Express (ist_topstep_express) — die liest der Takt nie
+    (AP_BAL_AUTO_OHNE_LESUNG „express“, ap_bal_auto_funded überspringt sie), eine Auswahl hier wäre wirkungslos (Gegenprüfung WP3b)."""
+    out, gesehen = [], {str(x) for x in schon or ()}
+    for a in kand or ():
+        kid = str((a or {}).get("id") or "")
+        if not kid or kid in gesehen or not sk_ist_konto(a, sk_uids) or not (zfeld or {}).get(kid):
+            continue
+        gesehen.add(kid)
+        out.append(a)
+    return out
+
+
+def _ap_bal_auto_addon_laden(schon=()):
+    """Striking-Konten der IDs mit addon_firma (apex/striking), ohne ids_aus — wie fdp_planen, unabhängig von Planer-ID-Liste und Firmen-„an“.
+    Wirft bei Lesefehlern (der Aufrufer fängt ab)."""
+    sk_uids = set(_sk_lesen()[0] or ()) - _fdp_ids_aus()
+    if not sk_uids:
+        return []
+    kand = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(sorted(sk_uids)) + ")",
+                                "account_type": "in.(funded,winning_days)", "firm": "ilike.*apex*"}) or []
+    sk_ids = sorted({str(a.get("id")) for a in kand if sk_ist_konto(a, sk_uids)})
+    zfeld = (_sk_zyklus_felder(sk_ids) if sk_ids else {}) or {}
+    return ap_bal_auto_addon_auswahl(kand, sk_uids, zfeld, schon)
+
+
 def _ap_bal_auto_funded_konten():
     """Funded-Konten der im Funded-Planer eingeschalteten Firmen + Ende ihres letzten Trades → (konten, letzt). Ohne eingespielte
     funded_plan_regeln (oder ohne Firma an) leer — dann liest der Takt wie bisher nur die Planer-Konten."""
     reg = _fdp_regeln_laden()
     an = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")]
     uids = [str(u) for u in ((reg or {}).get("user_ids") or [])]
-    if not an or not uids:
+    konten = []
+    if an and uids:
+        # WP3 (Master 23.11.2026): auch Winning Days — Fall Apex 100k WD, Lesung vor dem Payout, kein Lese-Auftrag (vorher nur Typ funded)
+        konten = [a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(uids) + ")",
+                                                  "account_type": "in.(funded,winning_days)"}) or []
+                  if ap_regel_finden(an, a.get("firm")) and (globals().get("fdp_groesse_an") or (lambda _r, _a: True))(ap_regel_finden(an, a.get("firm")), a)]   # LF1: Größe aus → keine Lesung
+    # WP3b (Master 23.11.2026): Add-on-Konten (Striking Apex mit allen Startwerten, RTP Topstep) wie im fdp-Lauf am Firmen-/Größen-Schalter vorbei —
+    # Fall Apex 100k Striking: Apex im Funded-Planer aus, Payout bestätigt, die Balance wurde nie nachgelesen. Eigener try: ein Fehler lässt den Rest unberührt
+    try:
+        konten += _ap_bal_auto_addon_laden({str(a.get("id")) for a in konten})
+    except Exception as e:
+        print(f"[balance-auto] ⚠️ Striking-Konten nicht gelesen ({type(e).__name__}: {str(e)[:120]}) — nur Funded-Planer-Konten", flush=True)
+    if not konten:
         return [], {}
-    # WP3 (Master 23.11.2026): auch Winning Days — Fall Apex 100k WD, Lesung vor dem Payout, kein Lese-Auftrag (vorher nur Typ funded)
-    konten = [a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(uids) + ")",
-                                              "account_type": "in.(funded,winning_days)"}) or []
-              if ap_regel_finden(an, a.get("firm")) and (globals().get("fdp_groesse_an") or (lambda _r, _a: True))(ap_regel_finden(an, a.get("firm")), a)]   # LF1: Größe aus → keine Lesung
+    try:   # Gegenprüfung WP3b: deaktivierte Konten nie lesen (auto_planer False wie _ap_konten_laden / fdp_planen) — ap_bal_auto_funded lässt sie dann aus
+        ap_deaktiviert_anwenden(konten)
+    except Exception as e:
+        print(f"[balance-auto] ⚠️ deaktivierte Konten nicht lesbar ({type(e).__name__}) — in diesem Takt keine Funded-Lesung", flush=True)
+        return [], {}
     ids = [str(a.get("id")) for a in konten]
     plaene = []
     for i in range(0, len(ids), 100):
@@ -49706,7 +49749,7 @@ def sk_tage_je_tag(plaene, konto_id, seit):
     return [(t, round(v, 2)) for t, v in sorted(je.items())]
 
 
-def sk_payout_feld(zf, tage, mpb=None, vor_payout=False):
+def sk_payout_feld(zf, tage, mpb=None, vor_payout=False, payouts_unlesbar=False):
     """REIN (testbar), Nachtrag 4 — Vertrag mit S4 (Admin → Payouts): payout_ready[i].striking = {zyklus_start, zyklus_seit 'JJJJ-MM-TT', payout_nr,
     probation, min_payout_balance (nur ohne Probation, wenn bekannt), tage [{tag, pl}]} — tage = Netto master_pl je Apex-Handelstag ab zyklus_seit.
     WP3: vor_payout True = die Balance-Lesung ist älter als das jüngste Payout-Ereignis → Kasse rechnet fail-closed (skApexRechnung „Balance vor Payout“)."""
@@ -49716,6 +49759,8 @@ def sk_payout_feld(zf, tage, mpb=None, vor_payout=False):
         out["min_payout_balance"] = mpb
     if vor_payout:
         out["vor_payout"] = True
+    if payouts_unlesbar:
+        out["payouts_unlesbar"] = True   # WP3b: Payouts oder Lesung nicht lesbar → Kasse fail-closed („Payouts nicht lesbar“)
     return out
 
 
@@ -49749,24 +49794,27 @@ def sk_payout_anhaengen(zeilen, konten):
         plaene += _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,ended_at,completed_at", "master_account_id": f"in.({','.join(zids[i:i + 80])})",
                                           "status": "in.(completed,review)", "created_at": "gte." + datetime.fromtimestamp(ab, timezone.utc).isoformat()}) or []
     cfg = sk_apex.sk_cfg(_sk_lesen()[1])
-    # WP3: Lesung vor dem jüngsten Payout → vor_payout (Kasse fail-closed). Nur Konten, deren Zeile tv_balance_at mitbringt — sonst nicht beurteilbar
-    ev = _ap_payout_ereignisse(zids)
+    # WP3: Lesung vor dem jüngsten Payout → vor_payout (Kasse fail-closed). WP3b (Master 23.11.2026): Payouts oder Lesung nicht lesbar → payouts_unlesbar,
+    # die Kasse rechnet dann ebenfalls fail-closed (vorher fail-open: ohne Daten galt die alte Balance). Ein Fehler hier nimmt das striking-Feld nie weg
+    ev = _ap_payout_ereignisse(zids, streng=True)
     tv_at = {}
-    try:   # Gegenprüfung WP3: ein Fehler hier darf das ganze striking-Feld nicht wegnehmen — dann nur ohne vor_payout
+    try:
         for i in range(0, len(zids), 80):
             for r in sb_select("accounts", {"select": "id,tv_balance_at", "id": f"in.({','.join(zids[i:i + 80])})"}) or []:
                 tv_at[str(r.get("id"))] = r
     except Exception as e:
-        print(f"[striking] ⚠️ tv_balance_at nicht gelesen ({type(e).__name__}) — vor_payout in diesem Lauf nicht beurteilt", flush=True)
-        tv_at = {}
+        print(f"[striking] ⚠️ tv_balance_at nicht gelesen ({type(e).__name__}) — Striking in diesem Lauf fail-closed", flush=True)
+        tv_at = None
     n = 0
     for z in apex:
-        f = zf.get(str(z["account_id"]))
+        kid = str(z["account_id"])
+        f = zf.get(kid)
         if not f:
             continue
-        g = _wd_konto_groesse(km.get(str(z["account_id"])) or {})
+        g = _wd_konto_groesse(km.get(kid) or {})
+        unlesbar = ev is None or tv_at is None or kid not in tv_at
         z["striking"] = sk_payout_feld(f, sk_tage_je_tag(plaene, z["account_id"], f["seit"]), sk_apex.sk_min_payout_balance(cfg, g) if g else None,
-                                       vor_payout=str(z["account_id"]) in tv_at and sk_vor_payout(tv_at[str(z["account_id"])], ev.get(str(z["account_id"]))))
+                                       vor_payout=not unlesbar and sk_vor_payout(tv_at[kid], ev.get(kid)), payouts_unlesbar=unlesbar)
         n += 1
     return n
 
