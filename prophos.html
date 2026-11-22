@@ -63209,6 +63209,17 @@
             const sf0 = sfFlag(plan)
             if(!(sf0 && sf0.schritt === 'tab_nicht_erreichbar' && Date.parse(sf0.at || '') >= Date.parse(z.at || ''))) await sfMelden(plan, { schritt: 'tab_nicht_erreichbar', msg: String(e.msg || 'Prophos-Tab hat nicht geantwortet — nichts gesendet') })
           }
+          // PN1 (23.11.2026, Prüfer-Bericht NG1): Antwort eines Puls-Laufs mit Chrome-Neustart, bei dem NICHTS gesendet wurde (der Bot legt sie
+          // mit quelle 'chrome_neustart' ab, falls der wartende Tab den Neustart nicht überlebt hat) → als puls_spur an den Plan. So findet
+          // sfStillUrteil die letzte Order-Antwort statt „Geclaimt … danach kein Ergebnis" (unklar). Nur eine jüngere Spur als die vorhandene;
+          // der Plan bleibt „Geplant", nichts wird gestartet.
+          if(e.quelle === 'chrome_neustart' && plan.status === 'planned' && !e.gesendet && !e.ok && !e.geklickt){
+            const sp0 = plan.mt5Baseline && plan.mt5Baseline.puls_spur, zAt = z.at || new Date().toISOString()
+            if(!(sp0 && (Date.parse(sp0.at || '') || 0) >= (Date.parse(zAt) || 0))){
+              try{ await baselinePatch(plan.id, { puls_spur: { at: zAt, pc: z.pc_id || null, ok: false, s: null, trail: (typeof window._pulsSpurKurz === 'function' ? window._pulsSpurKurz(e.trail_ende || '') : String(e.trail_ende || '').slice(0, 4000)),
+                msg: String(e.msg || '').slice(0, 600), quelle: 'puls_ergebnisse' } }, null) }catch(err){ console.warn('[puls-ergebnisse] Spur', (err && err.message) || err) }
+            }
+          }
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
           // MASTER NIE GEFÜLLT (08.10.2026, Slave-2-Prüfung): Ergebnis eines Starts, der schon zurückgesetzt wurde (versuche_alt) → nie als
           // neuer Start übernehmen; der Klick muss NACH dem letzten Zurücksetzen liegen

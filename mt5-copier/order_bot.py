@@ -32242,10 +32242,63 @@ def _puls_chrome_beenden(trail, warten_s=PULS_NEUSTART_ENDE_S, hart_ab_s=PULS_NE
     return False, f"Puls-Chrome nach {warten_s:.0f} s nicht beendet (Port {'frei' if port_frei else 'belegt'}, {n} Prozess(e) mit Profilordner)"
 
 
+# PN1 — NEUSTART OHNE DEN PROPHOS-TAB (23.11.2026, Master nach Prüfer-Bericht NG1; Finn: „kümmere dich, dass diese Fehler nie wiederkommen"):
+# 13 von 13 „Geclaimt … danach kein Ergebnis"-Fehlstarts (puls_still) der letzten 14 Tage und 3 Orbit-„abgebrochen (Tab neu gestartet)" hatten
+# dieselbe Kette: Puls-Fehler im 1. Versuch → _puls_chrome_beenden schickt Browser.close an das GANZE Puls-Chrome → seit 30.10. lebt dort auch
+# der Prophos-Haupt-Tab, der den Start geclaimt hat und auf die Antwort wartet → er stirbt, die Puls-Wache öffnet einen neuen Tab, der 2. Versuch
+# läuft ohne Empfänger, der Plan steht „geclaimt, kein Ergebnis" (unklar, Konto im Planer blockiert). Der Anlass war schon am 02.11. bekannt
+# (kein_neustart), gesperrt wurde damals nur bei offenem TV-Trade mit Hedge.
+# Jetzt: lebt im Puls-Chrome eine Prophos-Seite, gibt es nur den SANFTEN Neustart — erst EIN neuer Tab des Wegs (TradingView bzw. TopstepX),
+# dann die alten Tabs DIESES Wegs per /json/close zu, nie Browser.close, nie taskkill. Klappt das nicht vollständig → kein Neustart (der erste
+# Versuch bleibt die Antwort). Ist die Tab-Liste nicht lesbar, weiß der Bot nicht, ob dort ein Prophos-Tab lebt → kein Neustart. Nur wenn die
+# Liste lesbar ist und KEINE Prophos-Seite zeigt (Prophos läuft in einem anderen Chrome), bleibt der harte Neustart wie bisher.
+PULS_PROPHOS_URL_RE = re.compile(r"^(https?://(localhost|127\.0\.0\.1):5000(/|$)|https://prophos\.pages\.dev(/|$))", re.I)
+
+
+def puls_neustart_lage(liste, url):
+    """REIN RECHNEND (testbar): /json/list → (prophos, alte). prophos = Prophos-Seiten (type page, localhost:5000 bzw. prophos.pages.dev —
+    wie die Panel-Wache, dazu pages.dev); alte = die Seiten DES WEGS, die ein sanfter Neustart schließt (TopstepX bei url TopstepX, sonst
+    TradingView). liste None (Port antwortet nicht) → (None, None): unbekannt."""
+    if not isinstance(liste, list):
+        return None, None
+    prophos = [t for t in liste if isinstance(t, dict) and t.get("type") == "page" and PULS_PROPHOS_URL_RE.match(str(t.get("url") or ""))]
+    alte = tsx_targets(liste) if ist_topstepx_url(url) else augen_tv_targets(liste)
+    return prophos, alte
+
+
+def _puls_chrome_sanft_neu(trail, url, alte):
+    """PN1: sanfter Neustart — EIN neuer Tab mit der Ziel-URL des Wegs, dann die alten Tabs des Wegs schließen (der Prophos-Tab und alle
+    anderen Tabs bleiben, der Prozess bleibt). -> True nur, wenn der neue Tab steht und JEDER alte zuging (sonst könnte der 2. Versuch den
+    hängenden alten Tab greifen)."""
+    neu = _cdp_http("/json/new?" + url, methode="PUT")
+    neu_id = str(neu.get("id")) if isinstance(neu, dict) and neu.get("id") else None
+    if not neu_id:
+        trail.append("Neustart sanft: neuer Tab ohne Antwort (/json/new) — alte Tabs bleiben, kein Neustart")
+        return False
+    zu = [str(t.get("id")) for t in (alte or []) if isinstance(t, dict) and t.get("id") and str(t.get("id")) != neu_id]
+    n = sum(1 for tid in zu if _cdp_tab_schliessen(tid))
+    if ist_topstepx_url(url):
+        _augen_json_schreiben("tsx_tabs.json", {"ids": [neu_id]})   # bot-eigen wie in der Auge-Reparatur (die alten IDs sind zu)
+    if n != len(zu):
+        trail.append(f"Neustart sanft: {len(zu) - n} von {len(zu)} alten Tab(s) gingen nicht zu — kein 2. Versuch auf einem hängenden Tab")
+        return False
+    _warte(2.0, 1.5)                                      # Seite baut auf, bevor der zweite Versuch Tab/Login anfasst
+    trail.append(f"Neustart sanft: neuer Tab ({str(url)[:40]}), {n} alte(r) Tab(s) des Wegs zu — Prophos-Tab und Puls-Chrome bleiben")
+    return True
+
+
 def _puls_chrome_neustart(trail, url):
     """Puls-Chrome beenden und frisch starten (wie puls-chrome-starten.bat: _puls_chrome_sicher, minimiert, eigenes Profil, Port 9333),
     mit der Ziel-URL des Wegs (TradingView-Chart bzw. TopstepX). Den Tab und den Auto-Login macht danach der zweite Versuch über den
-    bestehenden Weg. -> True/False"""
+    bestehenden Weg. -> True/False
+    PN1 (23.11.2026): lebt im Puls-Chrome eine Prophos-Seite → nur der sanfte Neustart (_puls_chrome_sanft_neu); Tab-Liste unlesbar → keiner."""
+    prophos, alte = puls_neustart_lage(_cdp_http("/json/list", timeout=1.5), url)
+    if prophos is None:
+        trail.append(f"Neustart: Tab-Liste des Puls-Chrome (Port {PULS_CDP_PORT}) nicht lesbar — ob dort ein Prophos-Tab lebt, ist unklar → kein Neustart")
+        return False
+    if prophos:
+        trail.append(f"Neustart: Prophos-Tab lebt im Puls-Chrome ({len(prophos)}) — nur die Tabs des Wegs neu, kein Browser.close")
+        return _puls_chrome_sanft_neu(trail, url, alte)
     ok, text = _puls_chrome_beenden(trail)
     trail.append(text)
     if not ok:
@@ -32290,8 +32343,28 @@ def kein_neustart_grund(cmd):
             if isinstance(cmd, dict) and cmd.get("kein_neustart") is True else None)
 
 
+def puls_neustart_gesendet(r):
+    """REIN RECHNEND (testbar): Hat dieser Versuch etwas an den Broker gegeben (gesendet/geklickt/bestätigt)? Dann meldet der Bot sein Ergebnis
+    ohnehin selbst (puls_ergebnisse 'geklickt'/'ende') — PN1 legt nur Antworten ab, bei denen nachweislich nichts rausging."""
+    return isinstance(r, dict) and bool(r.get("gesendet") or r.get("geklickt") or r.get("bestaetigt"))
+
+
+def _puls_neustart_ablegen(cmd, res):
+    """PN1 (23.11.2026): die Antwort eines Laufs mit Chrome-Neustart, bei dem nichts gesendet wurde, zusätzlich mit plan_id nach
+    puls_ergebnisse (Railway /puls-ergebnis, stufe 'ende', quelle 'chrome_neustart') — erreicht die Antwort ihren Tab nicht, legt ein
+    neu geladener Prophos-Tab sie als puls_spur an den Plan (pulsErgebnisseUebernehmen) statt „Geclaimt … kein Ergebnis". Nur scharfe
+    Läufe mit plan_id. Wirft nie."""
+    try:
+        c = cmd if isinstance(cmd, dict) else {}
+        if not isinstance(res, dict) or not tv_ist_scharf(c) or not str(c.get("plan_id") or "").strip() or puls_neustart_gesendet(res):
+            return
+        _puls_ergebnis_senden("order", "ende", c, dict(res, quelle="chrome_neustart"), [str(res.get("trail") or "")[-1500:]])
+    except Exception:
+        pass
+
+
 def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None,
-                       neustart_sanft=None, verboten=None):
+                       neustart_sanft=None, verboten=None, ablage=None):
     """Kern des Neustart-Wrappers (testbar mit Attrappen). erster() und zweiter(frist_s) → (roh, res); lesung(spur) → dict für
     neustart_beleg_leer oder None (Weg ohne Order-Lesung, Topstep). Gibt GENAU EINE Antwort aus — die des letzten Versuchs; ein
     unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs
@@ -32314,6 +32387,18 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
         else:
             ausgeben(roh1)                                 # Erfolg oder unlesbar: unverändert
         return r1
+    if ablage is not None:
+        # PN1 (23.11.2026): ab hier kann der Neustart den Tab gekostet haben, der auf diese Antwort wartet — jede Antwort ohne Sendung
+        # zusätzlich mit plan_id ablegen (nie, wenn der 1. oder der ausgegebene Versuch etwas gesendet hat: das meldet der Lauf selbst)
+        _aus0 = ausgeben
+
+        def ausgeben(x):
+            _aus0(x)
+            if isinstance(x, dict) and x and not puls_neustart_gesendet(r1) and not puls_neustart_gesendet(x):
+                try:
+                    ablage(x)
+                except Exception:
+                    pass
     spur = _StempelSpur()
     spur.append(neustart_spur_text(r1))
     spur.append(f"chrome_neustart: Grund — {grund}; voraussichtlich {rest:.0f} s Rest")
@@ -32464,7 +32549,7 @@ def modus_tvkette_cdp_mit_neustart(cmd):
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL,
                               neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL),   # Abriss 10053 (08.10.2026)
-                              verboten=kein_neustart_grund(c))
+                              verboten=kein_neustart_grund(c), ablage=lambda r: _puls_neustart_ablegen(c, r))
 
 
 def _tsx_order_cdp_mit_neustart(befehl, cmd):
@@ -32473,7 +32558,7 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
     lese_cmd = {"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}
     return _puls_mit_neustart("tsv2", lambda: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd, frist_s=frist),
-                              None, TSX_URL, verboten=kein_neustart_grund(cmd))
+                              None, TSX_URL, verboten=kein_neustart_grund(cmd), ablage=lambda r: _puls_neustart_ablegen(cmd, r))
 
 
 def loginok_lage(prozesse, pfad):
