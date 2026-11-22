@@ -11660,13 +11660,14 @@ class StufeNichtGesendet(RuntimeError):
     """Eine Auslöse-Stufe hat nachweislich NICHTS gesendet (Knopf ohne Fokus, SendInput abgelehnt) — nur dann sofort zur nächsten Stufe."""
 
 
-def stufen_ausloesen(wege, lesen, frist_s, trail, muster, jetzt_s, uhr=None, schlafen=None, ruhe=None, zeit_ok=None):
+def stufen_ausloesen(wege, lesen, frist_s, trail, muster, jetzt_s, uhr=None, schlafen=None, ruhe=None, zeit_ok=None, urteile=None):
     """Buy/Sell-Knopf in Stufen auslösen, OHNE je eine zweite Order (DO2 06.11.2026). wege = [(name, tu)], lesen(ab_s, mit_journal) →
     (position_da, dialog_weg, anfrage_zeile, dialog_text, journal_lesbar) — nur lesen. Nach jeder Stufe bis frist_s warten (Urteil
     stufe_urteil); die nächste Stufe nur bei 'nichts'. uhr/schlafen/ruhe von außen (Test: virtuelle Uhr, Fake-Terminal).
     Gegenprüfung DO2: wirft eine Stufe etwas anderes als StufeNichtGesendet, kann der Druck trotzdem angekommen sein → wie gedrückt warten;
     Anfragen zählen ab der ERSTEN Stufe (ab_erst), nicht je Stufe; zeit_ok(frist_s) False → keine weitere Stufe (Panel bricht nach 300 s ab).
-    → (ausgeloest = Name der letzten gedrückten Stufe | None, anfrage_gesehen)"""
+    → (ausgeloest = Name der letzten gedrückten Stufe | None, anfrage_gesehen)
+    urteile (NG2b, 23.11.2026): Liste → je GEDRÜCKTER Stufe ihr stufe_urteil angehängt (Beleg „nichts gesendet“ nur, wenn alle 'nichts' sind)."""
     import contextlib
     uhr = uhr or time.time
     schlafen = schlafen or (lambda: _warte(0.25, 0.4))
@@ -11703,6 +11704,8 @@ def stufen_ausloesen(wege, lesen, frist_s, trail, muster, jetzt_s, uhr=None, sch
                     beleg = anfrage or (dtext if u == "antwort" else str(dtext or "")[:80] if u == "gesendet" else "")
                     break
                 schlafen()
+        if isinstance(urteile, list):
+            urteile.append(u)
         if u == "bestaetigt":
             if not pos:
                 # Dialog zu, Position noch nicht da: steht die Anfrage im Journal, wartet Schritt 5 die langsame Ausführung ab (40 s)
@@ -11732,6 +11735,21 @@ def stufen_ausloesen(wege, lesen, frist_s, trail, muster, jetzt_s, uhr=None, sch
             break
         trail.append(f"{name}: nach {frist_s:.0f} s keine Position, Journal ohne Anfrage — naechste Stufe")
     return ausgeloest, anfrage_gesehen
+
+
+# NG2b (23.11.2026, Master nach Prüfer-Befund S4: 3 Fälle in 14 Tagen — 09.11., 11.11., 17.11. — „KEINE Bestaetigung binnen 12 s — Grund: Terminal
+# nicht mit dem Server verbunden (API)“ bzw. „… Handel am Konto gesperrt … (API)“ endeten im Tages-Reset gelb „unklar“, weil der Kopf kein
+# „nichts gesendet“ trug; das Frontend erkennt nur SF_BELEG_NICHT_PLATZIERT). Der Zusatz kommt NUR, wenn der Grund aus der API stammt (kein
+# Rechengrund „(API: …)“ — die Marge rechnet der Bot NACH dem Klick, Gegenprüfung N2) UND jede gedrückte Stufe nachweislich nichts gesendet hat
+# (stufe_urteil 'nichts': Journal gelesen, keine Anfrage). Mit gesehener Anfrage, geschlossenem Dialog, Server-Antwort oder unlesbarem Journal
+# bleibt es unklar (Fall 17.11.: Anfrage gesehen, trade_allowed bei 89.987 — die Order kann rausgegangen sein).
+def keine_bestaetigung_nichts_gesendet(grund, anfrage_gesehen, urteile):
+    """REIN RECHNEND (testbar): darf die Meldung „keine Bestätigung“ den Beleg „nichts gesendet“ tragen? grund = (text, fix, quelle) aus
+    order_grund_bestimmen, urteile = stufe_urteil je gedrückter Stufe (stufen_ausloesen). -> bool"""
+    if not grund or len(grund) < 3 or grund[2] != "API" or "(API:" in str(grund[0]) or anfrage_gesehen is not False:
+        return False
+    u = list(urteile or [])
+    return bool(u) and all(x == "nichts" for x in u)
 
 
 def order_grund_bestimmen(journal, dialog_text, api):
@@ -15003,13 +15021,15 @@ def run(cfg_path, cmd):
 
     _klick_ab_s = _jetzt_s() - 1.0   # B2: Journal-Beleg „vom Server abgelehnt“ nur für Zeilen ab diesem Klick
     _klick_spur_i = len(trail)       # B2 (Prüfer S3): ab hier zählen die gedrückten Auslöse-Stufen („<muster>-Knopf: …“)
+    _stufen_urteile = []             # NG2b: stufe_urteil je gedrückter Stufe (Beleg „nichts gesendet“ für die Meldung „keine Bestätigung“)
     ausgeloest, anfrage_gesehen = stufen_ausloesen(
         (("Fokus+Leertaste", _weg_leertaste),
          ("SendInput-Klick", _weg_sendinput),
          (".click()", lambda: knopf.click()),
          ("click_input", lambda: knopf.click_input())),
         _stufe_lesen, _stufe_frist, trail, muster, _jetzt_s, ruhe=_EchoUnruhe,
-        zeit_ok=lambda f: trail.sekunden() + f + 40 + 30 < 270)   # Panel-Timeout 300 s: Frist + Schritt 5 (40 s) + SL/TP-Nachtrag
+        zeit_ok=lambda f: trail.sekunden() + f + 40 + 30 < 270,   # Panel-Timeout 300 s: Frist + Schritt 5 (40 s) + SL/TP-Nachtrag
+        urteile=_stufen_urteile)
     if ausgeloest is None:
         try:
             _el_tasten(dlg, "{ESC}", set_foreground=False)
@@ -15259,9 +15279,14 @@ def run(cfg_path, cmd):
                     "msg": f"KEINE Bestaetigung binnen 12 s — Grund: {grund[0]} ({grund[2]}) → {grund[1]}. Position nicht am Konto, "
                            "vom Server abgelehnt — nichts platziert. Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
                     "trail": _spur(trail)}
+        # NG2b (23.11.2026): API-Grund + auf allen Stufen nachweislich keine Anfrage → „nichts gesendet“ im Kopf (vor „ Spur:“, sfVorOrderBeleg)
+        _ng = keine_bestaetigung_nichts_gesendet(grund, anfrage_gesehen, _stufen_urteile)
+        if _ng:
+            trail.append(f"nichts gesendet: Grund aus der API, Journal nach {len(_stufen_urteile)} Stufe(n) ohne Anfrage")
         return {"ok": False, "retry_ok": False, "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],
                 "msg": f"KEINE Bestaetigung binnen 12 s — Grund: {grund[0]} ({grund[2]}) → {grund[1]}. Position nicht am Konto, "
-                       "Dialog geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
+                       "Dialog geschlossen" + (" — nichts gesendet (Journal auf allen Stufen ohne Anfrage)" if _ng else "")
+                       + ". Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
                 "trail": _spur(trail)}
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto, Dialog "
