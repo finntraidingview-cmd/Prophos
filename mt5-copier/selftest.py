@@ -7322,7 +7322,12 @@ def test_cdp_konto_weg_gleicher_login():
             if self.offen:
                 st["konto"]["eintraege"] = [{"text": z["text"], "rect": z["rect"]} for z in self._sicht()]
             return st
-        def klick(self, r, n, toast_ok=False):
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            if pruef is not None:   # PS1b: Ziel-Beweis am Punkt — Text der Zeile an diesem Rechteck muss die External ID tragen
+                z = next((z for z in self._sicht() if list(z["rect"]) == list(r)), None)
+                if not z or str(pruef.get("text") or "") not in z["text"].lower():
+                    self.spur.append(n + " (kein Beweis am Punkt)")
+                    return False
             if n.startswith("Konto ") and n != "Konto-Umschalter":
                 self.aktiv_nr, self.offen = n[6:], False
             return _S.klick(self, r, n, toast_ok)
@@ -7408,8 +7413,9 @@ def test_ps1_liste_scrollen_waehlen():
         liste_kurz True (wie im Fehlerbild), konto_scroll anfang/lesen/schritt/zeige, Klick auf 'Konto X' wählt X und schließt."""
         ws = None
 
-        def __init__(self, konten, zeige_ok=True, scroll_ok=True, im_fenster=True, zu_nach_zeige=False, fehler_ab=None, aktiv=None, kurz_text=None):
-            self.alle, self.zeige_ok, self.scroll_ok = list(konten), zeige_ok, scroll_ok
+        def __init__(self, konten, zeige_ok=True, scroll_ok=True, im_fenster=True, zu_nach_zeige=False, fehler_ab=None, aktiv=None, kurz_text=None,
+                     nachbar_am_punkt=False):
+            self.alle, self.zeige_ok, self.scroll_ok, self.nachbar_am_punkt, self.pruefs = list(konten), zeige_ok, scroll_ok, nachbar_am_punkt, []
             self.im_fenster, self.zu_nach_zeige, self.fehler_ab, self.kurz_text, self.schritte = im_fenster, zu_nach_zeige, fehler_ab, kurz_text, 0
             self.top, self.offen, self.aktiv, self.spur, self.rufe = 0, False, aktiv or konten[0], [], []
 
@@ -7464,7 +7470,16 @@ def test_ps1_liste_scrollen_waehlen():
         def taste(self, k, modifiers=0):
             self.spur.append("Taste " + k); self.offen = False
 
-        def klick(self, r, n, toast_ok=False):
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            if pruef is not None:
+                self.pruefs.append(dict(pruef))
+                # PS1b: Beweis am Punkt — die Zeile dort muss den Ziel-Text tragen (win_ziel_pruef_js); Nachbarzeile = kein Druck
+                am_punkt = next((z for z in self._sicht() if list(z["rect"]) == list(r)), None)
+                text = (self._text(self.alle[self.alle.index(am_punkt["kontonr"]) + 1]) if (am_punkt and self.nachbar_am_punkt
+                        and am_punkt["kontonr"] != self.alle[-1]) else (am_punkt or {}).get("text", ""))
+                if str(pruef.get("text") or "") not in text.lower() or not pruef.get("karte"):
+                    self.spur.append(n + " (kein Beweis am Punkt)")
+                    return False
             self.spur.append(n)
             if n == "Konto-Umschalter":
                 self.offen = True
@@ -7513,6 +7528,8 @@ def test_ps1_liste_scrollen_waehlen():
         s10 = _V(AX, zeige_ok=False); t10 = []
         r10 = ob._cdp_konto_sichern(s10, AX[5], {}, t10)             # Prüfer B4: Apex gleicher User, Ziel gefunden, zeige scheitert → nie gleicher_login
         TX = ["TDFYSL15030000000" + str(i) for i in range(1, 7)]
+        s12 = _V(F[:5] + [F[5], "FTMO100007"], nachbar_am_punkt=True); t12 = []
+        r12 = ob._cdp_konto_sichern(s12, F[5], {}, t12)              # PS1b: Zeile am Punkt ≠ Ziel (Liste neu belegt) → kein Druck, kein Beleg
         s11 = _V(TX, kurz_text="TDFYSL15030000…"); t11 = []
         r11 = ob._cdp_konto_sichern(s11, TX[5], {}, t11)             # gekürzte Kennung (≥ 14 Zeichen, passt als Anfang) → nie geklickt
     finally:
@@ -7540,6 +7557,12 @@ def test_ps1_liste_scrollen_waehlen():
     chk(ohne_beleg(r10) and not klicks(s10) and r10[4].get("gleicher_login") is None and ob.cdp_konto_weg_gleicher_login(r10[4], AX[5]) == (False, None),
         f"B4: Apex, Ziel gefunden, nicht greifbar → nie Befund für konto_weg ({r10[2]}, {r10[4]})")
     chk(r11[0] is False and not klicks(s11) and "gekürzt" in r11[2] and not r11[4].get("liste_aktiv"), f"gekürzte Ziel-Kennung → nie geklickt ({r11[2]})")
+    chk(r1[0] is True and s1.pruefs and s1.pruefs[-1].get("text") == F[5].lower() and s1.pruefs[-1].get("karte") == s1.pruefs[-1].get("rect")
+        and "log ?out" in s1.pruefs[-1].get("tabu", ""), f"PS1b: Klick nach dem Zeige-Schritt nur mit Ziel-Beweis (karte, Text, Tabu) ({s1.pruefs})")
+    chk(r12[0] is False and ohne_beleg(r12) and ("Konto " + F[5] + " (kein Beweis am Punkt)") in s12.spur and s12.aktiv == F[0]
+        and "nicht gedrückt" in r12[2] and s12.spur[-1] == "Taste Escape",
+        f"PS1b: Zeile am Punkt ≠ Ziel → kein Druck, Esc, kein Login-Beleg ({r12[2]}, {s12.spur})")
+    chk(not s6.pruefs, "PS1b: ohne Zeige-Schritt (Ziel sofort sichtbar) Klick wie bisher ohne Punkt-Beweis")
     js = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "augen.js"), encoding="utf-8").read()
     ks = js.split("function kontoScroll(aktion)")[1].split("function mausMitschrift")[0]
     chk("aktion === 'zeige'" in ks and "im_bild: imBild(" in ks and ".click(" not in ks and "scrollIntoView" not in ks and "treffer.length !== 1" in ks

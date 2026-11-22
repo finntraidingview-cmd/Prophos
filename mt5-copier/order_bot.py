@@ -26514,7 +26514,14 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 _warte(0.6, 0.3)
                 st = s.stand(opts)
                 continue
-            if not s.klick(cdp_rect(e), f"Konto {ext}"):
+            # PS1b (Prüfer S2 23.11.2026, Stopp 9cc8a193): nach dem Zeige-Schritt hat die virtualisierte Liste per scrollTop neu belegt — eine Zeile kann
+            # zwischen Lesen und Druck die Nachbarzeile geworden sein (Klick dort → „Dropdown nicht erkannt" → Ein-Konto-Beleg → Abmelden einer richtigen
+            # Sitzung). Deshalb dort nur mit Ziel-Beweis am Punkt: genau diese Zeile (karte = ihr Rechteck), ihr Text trägt die External ID, kein
+            # Abmelde-Wort. Kein Beweis → kein Druck, unten Esc + konto_nicht_erreicht OHNE Login-Beleg. Ohne Zeige-Schritt unverändert (nur :hover).
+            r_e = cdp_rect(e)
+            pruef_e = ({"rect": r_e, "karte": r_e, "text": str(ext).lower(), "aria": "", "tabu": r"\b(log ?out|sign out)\b"}
+                       if ziel_zeige_ok and r_e else None)
+            if not (s.klick(r_e, f"Konto {ext}", pruef=pruef_e) if pruef_e else s.klick(r_e, f"Konto {ext}")):
                 # Prüfer 30.09.2026: ein nicht gedrückter Eintrag verbrauchte alle Runden und ließ die Liste offen
                 _cdp_esc(s, st, trail, "Konto-Eintrag nicht gedrückt")
                 return False, "konto_nicht_erreicht", f"Konto-Eintrag {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.", \
