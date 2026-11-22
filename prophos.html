@@ -39667,7 +39667,8 @@
     // Topstep-Winning-Day mit Fusion-Hedge (21.10.2026, Finn: „ob alles richtig verbucht wurde"): tsv2 galt hier pauschal als ohne Hedge —
     // Feld weg, slave_pl null überschrieb den vom Hedge geschriebenen Fusion-P&L, keine wd_hedge-Buchung (4 Pläne seit 20.10., −271,71 €).
     // Seit .1493 läuft Topstep-WD mit Fusion-Hedge → wie tvv2: nur ohne Hedge (Challenge-Weg) gilt er als ungehedgt.
-    const mitHedge = Number(pw.hedge_eur) > 0 || !!pw.hedge
+    // AB4 (23.11.2026): bei Orbit/Topstep V2 nur ein echter Hedge (pw.hedge = mt5_baseline.hedge, kommt immer mit) — hedge_eur allein ist der geplante Betrag ohne Hedge
+    const mitHedge = (pw.route === 'tvv2' || pw.route === 'tsv2') ? !!pw.hedge : (Number(pw.hedge_eur) > 0 || !!pw.hedge)
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.plattform === 'echo' || ((pw.route === 'tvv2' || pw.route === 'tsv2') && !mitHedge))
     // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
     const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
@@ -42266,7 +42267,11 @@
     if(!zahl(t.pl_balance) || !(Number(t.balance_end) > 0) || wdlPlGesch(t) || e.balance_quelle === 'folgetrade' || e.puls_aufgegeben) return 'keine echte Lesung'   // Balance 0 ergäbe P&L = −Start
     if(/unplausibel|Balance-Sprung/i.test(String(t.kette_grund || '')) || t.balance_sprung) return 'Ergebnis unplausibel'
     const fusionAmPlan = t.route === 'mt5' || t.route === 'tvplus'
-    if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
+    // AB4 (Master 23.11.2026, Simon Topstep …2392, WD 20.11.: „Alle abhaken“ → „0 abgehakt · 1 vorgemerkt“): Orbit/Topstep V2 (tvv2/tsv2) tragen ihren Fusion-Hedge in
+    // mt5_baseline.hedge, und /admin/live-trades liefert ihn komplett mit (t.hedge). Fehlt er, lief nie ein Hedge — hedge_eur ist dann nur der GEPLANTE Betrag, ein
+    // Fusion-P&L kommt nie, die Vormerkung wartete umsonst (6 h, dann wieder Erledigt). Dort zählt also nur t.hedge; andere Wege wie bisher
+    const hedgeAmPlan = (t.route === 'tvv2' || t.route === 'tsv2') ? !!t.hedge : (!!t.hedge || Number(t.hedge_eur) > 0)
+    if((hedgeAmPlan || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
     /* NEUE REGEL (A1, Finn 03.11.2026 ~18:20 Dubai, zum 5.–6. Mal: „Bei Trades, die nicht geblowt sind und nicht bestanden haben, will ich das Popup nicht jedes Mal sehen …
      * Ändere das, dass es gar nicht mehr kommt“): weder geblowt noch bestanden = Abhaken bucht direkt mit der Vorbelegung (Master = Balance nachher − vorher, Fusion aus
      * MetaTrader). Popup nur noch bei erkanntem Status-Wechsel (Blow/Ziel, oben) oder fehlendem Wert. Bisher kam es zusätzlich bei „Konto-Stand unbekannt“, „Ziel oder
@@ -46865,7 +46870,8 @@
     let ok = 0, vonHand = 0
     for(const t of offen){
       const pid = wdlTid(t)
-      const fusionAmPlan = ['mt5', 'tvplus', 'polar'].includes(t.route), mitHedge = Number(t.hedge_eur) > 0 || !!t.hedge
+      // AB4: tvv2/tsv2 nur mit echtem Hedge (t.hedge) — hedge_eur allein ist der geplante Betrag (wie mklWdErledigtOeffnen/wdlEinKlickGrund)
+      const fusionAmPlan = ['mt5', 'tvplus', 'polar'].includes(t.route), mitHedge = (t.route === 'tvv2' || t.route === 'tsv2') ? !!t.hedge : (Number(t.hedge_eur) > 0 || !!t.hedge)
       const ohneHedge = !fusionAmPlan && (t.route === 'mt5v2' || t.plattform === 'echo' || ((t.route === 'tvv2' || t.route === 'tsv2') && !mitHedge))
       const sp = t.balance_sprung || ((t.tv && t.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(t.route, t.tv, t.final) : null)
       const pl = sp ? fz(sp.tages) : (fz(t.pl_balance) ?? fz(t.master_pl && t.master_pl.wert))
@@ -60725,7 +60731,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2285'
+  const OS_TAB_BUILD = '2026-09-22.2286'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
