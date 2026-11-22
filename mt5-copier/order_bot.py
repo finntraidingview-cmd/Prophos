@@ -20157,8 +20157,23 @@ def modus_augen(cmd):
             # Aufräumen (29.09.2026, ID B pc-cccccc: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
             # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
             # die Instanz mit diesem Debug-Port (das Reader-Chrome hat keinen), kein taskkill, keine Fenstersuche.
+            # PN1c (23.11.2026, Master nach PN1): lebt dort ein Prophos-Tab, nur die TradingView-/TopstepX-Tabs zu (puls_uia_aufraeumen_ziele) —
+            # Browser.close nähme den Haupt-Tab mit (dieselbe Ursache wie die „Geclaimt … kein Ergebnis"-Fehlstarts aus NG1). Tab-Liste
+            # unlesbar → nichts schließen (ob dort Prophos lebt, ist unklar); ohne Prophos-Tab wie bisher Browser.close.
             v = _cdp_http("/json/version", timeout=1.0)
             if v and v.get("webSocketDebuggerUrl"):
+                liste_u = _cdp_http("/json/list", timeout=1.5)
+                prophos_u, ziele_u = puls_uia_aufraeumen_ziele(liste_u)
+                if prophos_u is None:
+                    trail.append("Regel 'uia' — Tab-Liste des Puls-Chrome nicht lesbar: ob dort ein Prophos-Tab lebt, ist unklar → nichts geschlossen")
+                    res.update(ok=True, msg="Regel 'uia' — Tab-Liste nicht lesbar, Puls-Chrome bleibt")
+                    return
+                if prophos_u:
+                    n_u = sum(1 for t in ziele_u if t.get("id") and _cdp_tab_schliessen(t.get("id")))
+                    trail.append(f"Regel 'uia' — Prophos-Tab lebt im Puls-Chrome: {n_u} von {len(ziele_u)} TradingView-/TopstepX-Tab(s) geschlossen, "
+                                 "kein Browser.close")
+                    res.update(ok=True, msg=f"Regel 'uia' — {n_u} TradingView-/TopstepX-Tab(s) geschlossen, Prophos-Tab bleibt")
+                    return
                 try:
                     ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=3.0)
                     try:
@@ -32284,6 +32299,15 @@ def _cdp_tab_eigenes_fenster(url, timeout=5.0):
         return str(tid) if tid else None
     except Exception:
         return None
+
+
+def puls_uia_aufraeumen_ziele(liste):
+    """REIN RECHNEND (testbar) — PN1c (23.11.2026): Aufräumen bei Regel 'uia'. /json/list → (prophos, ziele): prophos wie puls_neustart_lage,
+    ziele = ALLE TradingView- und TopstepX-Seiten (beide Wege laufen dann nicht über das Puls-Chrome). Liste unlesbar → (None, None)."""
+    prophos, _ = puls_neustart_lage(liste, AUGEN_TV_URL)
+    if prophos is None:
+        return None, None
+    return prophos, augen_tv_targets(liste) + tsx_targets(liste)
 
 
 def _puls_chrome_sanft_neu(trail, url, alte):

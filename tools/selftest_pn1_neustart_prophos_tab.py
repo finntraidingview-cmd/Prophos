@@ -8,6 +8,7 @@ Geprüft — alles mit Attrappen, kein Chrome, kein Netz, keine Order:
   * _puls_mit_neustart(ablage=…): nur Antworten ohne Sendung werden abgelegt, nie ohne Neustart-Entscheid
   * _puls_neustart_ablegen: nur scharf + plan_id + nichts gesendet; das Paket nimmt app.py puls_ergebnis_saeubern an
   * prophos.html: pulsErgebnisseUebernehmen legt die Neustart-Antwort als puls_spur an den Plan
+  * PN1c: modus_augen bei Regel 'uia' — Prophos-Tab lebt → nur TV-/TSX-Tabs zu; Liste unlesbar → nichts; ohne Prophos-Tab Browser.close
 Aufruf:  python3 tools/selftest_pn1_neustart_prophos_tab.py   Alle Kennungen erfunden."""
 import ast
 import json
@@ -130,6 +131,63 @@ def main():
     c6 = Chrome([x for x in LISTE if x["id"] != "T1"])
     r6, t6 = neustart_lauf(c6, TV)
     check(r6 is False and c6.beenden == 1 and c6.neu == [] and c6.zu == [], "ohne Prophos-Tab im Puls-Chrome → harter Weg wie bisher (Attrappe)")
+
+    # ── PN1c: Aufräumen bei Regel 'uia' (modus_augen) ─────────────────────────────────────────────────────────────────────────
+    import contextlib
+    import io
+    import tempfile
+    U = ob.puls_uia_aufraeumen_ziele
+    pu, zu_u = U(LISTE)
+    check([x["id"] for x in pu] == ["T1"] and sorted(x["id"] for x in zu_u) == ["T2", "T3", "T4", "T5"] and U(None) == (None, None),
+          "PN1c rein: Prophos T1, zu schließen alle TradingView-/TopstepX-Tabs, unlesbare Liste = unbekannt")
+
+    class WsAttrappe:
+        rufe_log = []
+
+        def __init__(self, *a, **k):
+            pass
+
+        def rufe(self, methode, *a, **k):
+            WsAttrappe.rufe_log.append(methode)
+            return {}
+
+        def zu(self):
+            pass
+
+    def uia_lauf(liste):
+        WsAttrappe.rufe_log = []
+        zu = []
+        namen = ("_augen_pc_id", "_augen_regel_holen", "_cdp_http", "_cdp_tab_schliessen", "_handlauf_aktiv", "_AUGEN_HIER", "_CdpVerbindung")
+        alt = {n: getattr(ob, n) for n in namen}
+        stand_alt = dict(ob._AUGEN_REGEL_STAND)
+        try:
+            ob._AUGEN_HIER = tempfile.mkdtemp()
+            ob._augen_pc_id = lambda: "pc-xxxxxx"
+            ob._augen_regel_holen = lambda pc: "uia"
+            ob._AUGEN_REGEL_STAND.update(explizit=True, tsx="uia")
+            ob._handlauf_aktiv = lambda: False
+            ob._cdp_http = lambda pfad, *a, **k: ({"webSocketDebuggerUrl": "ws://x"} if pfad == "/json/version"
+                                                  else ([dict(x) for x in liste] if (pfad == "/json/list" and liste is not None) else None))
+            ob._cdp_tab_schliessen = lambda tid: zu.append(tid) or True
+            ob._CdpVerbindung = WsAttrappe
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                ob.modus_augen({})
+        finally:
+            for n, v in alt.items():
+                setattr(ob, n, v)
+            ob._AUGEN_REGEL_STAND.clear()
+            ob._AUGEN_REGEL_STAND.update(stand_alt)
+        return json.loads(out.getvalue().strip().splitlines()[-1]), zu, list(WsAttrappe.rufe_log)
+    j1, z1, w1 = uia_lauf(LISTE)
+    check(j1.get("ok") and sorted(z1) == ["T2", "T3", "T4", "T5"] and "T1" not in z1 and "Browser.close" not in w1 and "Prophos-Tab bleibt" in j1.get("msg", ""),
+          f"PN1c: Prophos-Tab lebt → nur TradingView-/TopstepX-Tabs zu, kein Browser.close ({j1.get('msg')}, {z1}, {w1})")
+    j2, z2, w2 = uia_lauf(None)
+    check(j2.get("ok") and z2 == [] and "Browser.close" not in w2 and "nicht lesbar" in j2.get("msg", ""),
+          f"PN1c: Tab-Liste unlesbar → nichts geschlossen ({j2.get('msg')})")
+    j3, z3, w3 = uia_lauf([x for x in LISTE if x["id"] != "T1"])
+    check(j3.get("ok") and z3 == [] and w3 == ["Browser.close"] and "geschlossen" in j3.get("msg", ""),
+          f"PN1c: ohne Prophos-Tab → wie bisher Browser.close ({j3.get('msg')}, {w3})")
 
     # ── Ablage im Wrapper ──────────────────────────────────────────────────────────────────────────────────────────────────────
     def erg(**k):
