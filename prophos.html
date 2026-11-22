@@ -19073,7 +19073,9 @@
     const admIstFnf = firm => admIstFundedNext(firm) && /futur/i.test(String(firm || ''))
     // Topstep 90 (Finn 29.10.2026: „alles eins zu eins wie Tradeify, nur Deckel 5.000 $" — firm_rules: 90/10 seit 12.01.2026; bis .1809 fiel Topstep auf 80)
     // Apex 100 % in USD (Finn 29.10.2026 05:30: „Apex Split 100 % in USD, Puffer 154.000" — bis .1837 fiel Apex auf 80; Puffer steht in ADM_APEX_DD)
+    // FTMO Futures 90 (KS3, Finn 23.11.2026: „Profit Split 90 %") — VOR dem Rückfall 80, der für FTMO (CFD) bleibt
     const admPayoutPctDefault = firm => istTradeifyCfd(firm) ? 80 : /tradeify/i.test(String(firm || '')) ? 90 :   // Tradeify CFD 80 % (23.10.2026)
+      (/ftmo/i.test(String(firm || '')) && /futur/i.test(String(firm || ''))) ? 90 :
       /topstep/i.test(String(firm || '')) ? 90 : /lucid/i.test(String(firm || '')) ? 90 :   // Lucid 90 % (Finn 29.10.2026, vorher Standard 80)
       /apex/i.test(String(firm || '')) ? 100 :
       /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFnf(firm) ? 91.5 : admIstFundedNext(firm) ? 76.5 : 80
@@ -19131,7 +19133,10 @@
       [f => /alpha/.test(f), null, 'Alpha Futures: firm_rules nennt drei Programme (Standard 50 % / 15.000 $, Advanced, Zero) — welches am Konto gilt, steht nirgends'],
       [f => /apex/.test(f), { apex: true, anteil: .5, deckel: null, quelle: 'Finn 29.10.2026 + Vault „Apex Payout-Optimierung" (offizielle Apex-Tabelle „EOD PA Max Payouts"): 50 % von (Balance − Puffer), Max je Payout-Nr. und Größe' }],
       [f => /f(ou|u)nded\s*next/.test(f) && /futur/.test(f), { anteil: .5, deckel: 4000, quelle: 'Finn 29.10.2026: 50 % vom Gewinn, max. 4.000 $ je Anfrage, Split 91,5 % (FNF steht nicht in firm_rules.json)' }],
-      [f => /ftmo/.test(f) && /futur/.test(f), null, 'FTMO Futures: keine Payout-Regel in firm_rules.json'],
+      // FTMO Futures (KS3, Finn 23.11.2026 ~03:12 Dubai: „Bei 50k FTMO bei den Fundeds kannst du 100 % rausnehmen, maximal 5.000, Profit Split 90 %"):
+      // voller Gewinn anfragbar, Deckel 5.000 $ — gesagt für 50k, gilt hier für alle FTMO-Futures-Größen gleich (andere Größen gibt es heute nicht);
+      // Split 90 % in admPayoutPctDefault. Vorher „Regel fehlt" (firm_rules.json kennt FTMO Futures nicht)
+      [f => /ftmo/.test(f) && /futur/.test(f), { anteil: 1, deckel: 5000, quelle: 'Finn 23.11.2026: 100 % vom Gewinn, max. 5.000 $ je Anfrage, Split 90 %' }],
       [f => /f(ou|u)nded\s*next/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: jederzeit anforderbar, kein Anteil, kein Deckel' }],
       [f => /ftmo/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: on-demand, kein Anteil, kein Deckel' }],
       [f => /funding\s*pips/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: kein Anteil, kein Deckel (Mindestbetrag 1 % der Startbalance)' }],
@@ -21351,7 +21356,7 @@
       // CFD-Termine als Tages-Gruppen (überfällige zuerst), Futures-Winning-
       // Days als letzte Gruppe. Die Chip-Blöcke von vorher waren bei zehn
       // Accounts unlesbar (Lehre 15.09. abends).
-      // Betrag = (Balance − Größe) × Profit-Share (Tradeify, Topstep und Lucid 90, Blue Guardian 85, FNF 91,5, FundedNext 76,5, sonst 80 — admPayoutPctDefault) +
+      // Betrag = (Balance − Größe) × Profit-Share (Tradeify, Topstep, Lucid und FTMO Futures 90, Blue Guardian 85, FNF 91,5, FundedNext 76,5, sonst 80 — admPayoutPctDefault) +
       // FundedNext-Refund beim ersten Payout — zentral in admPayoutCalc. Die Größe
       // steht im Account-Namen („100k funded …", „funded next 200k") —
       // account_size/starting_balance sind in der DB bei ALLEN Accounts leer
@@ -60571,7 +60576,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2278'
+  const OS_TAB_BUILD = '2026-09-22.2279'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
