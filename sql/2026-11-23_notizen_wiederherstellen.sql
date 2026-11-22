@@ -1,0 +1,15 @@
+-- Notizzettel wiederherstellen (Finn 23.11.2026 ~03:10 Dubai: „ich habe ganz viele Notizen gelöscht, die von Pascal waren,
+-- mit ganz vielen Wallets — bitte wieder herholen"). notes wird im Frontend hart gelöscht (prophos.html .from('notes').delete()).
+-- Quelle: Backup-Agent ~/Prophos-Backups/2026-11-22/notes.csv (Stand 22.11.2026 21:38 Dubai). Abgleich mit der Live-Tabelle:
+-- 11 Zeilen aus dem Backup fehlten (alle fuer_alle = true, geteilte Wallet-Adressen und KYC-Links, angelegt 18.–22.11.).
+-- Inhalte stehen bewusst NICHT in dieser Datei (Wallets/KYC-Links gehören nicht ins Repo) — sie kommen 1:1 aus der CSV,
+-- eingespielt per execute_sql mit Original-id/created_at/updated_at/fuer_alle/geteilt_von, on conflict (id) do nothing.
+-- Nicht wiederherstellbar: Notizen, die nach dem Backup (22.11. 21:38) angelegt UND gelöscht wurden.
+--
+-- Wiederhergestellte ids:
+--   0ba52fcb-5a4a-4a15-bd9a-c030f24356b0 (Simon)   5a4fe719-… (Moritz)   67e5e0fd-… (Chris)   752c31cd-… (Chris)
+--   77389a90-… (Carsten)   7a43b32e-… (Moritz)   a0ebd7f2-… (Moritz)   a42d2daf-… (Mike)   d0929c27-… (Mike)
+--   da628330-… (Carsten)   ef8fd244-… (Mike)
+--
+-- Kontrolle:
+-- select count(*) from public.notes;   -- vorher 54, nachher 65
