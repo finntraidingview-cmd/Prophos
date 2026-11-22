@@ -47438,6 +47438,17 @@
    * gemerkte Stand vor (nur wenn er nach dem Trade-Ende gelesen wurde), der frische darf diese Vorwahl zurücknehmen. */
   const WP_VORLADEN_MS = 60000, WP_GEMERKT_MS = 30 * 60000
   const _wpVl = new Set(), _wpVlFehl = {}   // Prüfer S1: Fehlversuch je Konto (Zeit) — 60 s Pause, sonst feuert jeder Radar-Takt neu auf ein langsames Railway
+  /* AB3 (Master 23.11.2026, Befund AB2: ~500× 403 „fremdes Konto“ in 3 h auf GET /konto-ziele, fast alle von PC-Tabs normaler HT-IDs — der Radar lädt je Takt bis zu 6
+   * Funded-CFD-/Gewinn-Konten fremder IDs vor, app.py kz_darf lässt aber nur eigene Konten, Admins und Verwalter-Gruppen durch; nach jedem 403 kam 60 s später der
+   * nächste Versuch). Ein 403 gilt jetzt für diesen Login bis zum Neuladen bzw. ID-Wechsel: das Konto wird nicht mehr angefragt (Urteil = null wie bei jedem Fehler).
+   * Admins bekommen nie 403 → für sie ändert sich nichts. */
+  const _wpVerboten = { login: '', ids: new Set() }
+  function wpVerboten(id, setzen){
+    const login = String(currentUserId || '')
+    if(_wpVerboten.login !== login){ _wpVerboten.login = login; _wpVerboten.ids.clear() }
+    if(setzen) _wpVerboten.ids.add(String(id))
+    return _wpVerboten.ids.has(String(id))
+  }
   /* AP6 „NÄCHSTER SCHRITT BEI ZIEL“ (Finn 11.11.2026 20:02: „sobald ein Typ sein Ziel erreicht hat: ‚Yo, Ziel erreicht‘ → entweder Waiting for Payout oder Winning Days“):
    * EINE Zuordnung je Kontoart, welche Quelle das Abhak-Popup liest und welche Konto-Status-Zeile es bei erreichtem Ziel vorwählt — keine Regel je Firma im Code.
    *   cfd    Funded CFD          /konto-ziele abhak (WP4)          → „waiting“ (Waiting for Payout)
@@ -47553,7 +47564,7 @@
     for(const id of new Set(liste.filter(Boolean))){
       const c = _k1.cache[id], e = ende[id]
       const frisch = c && c.d && (e != null ? (c.at > e && Date.now() - c.at < WP_GEMERKT_MS) || Date.now() - c.at < 5 * WP_VORLADEN_MS : Date.now() - c.at < WP_VORLADEN_MS)
-      if(_wpVl.has(id) || frisch || Date.now() - (_wpVlFehl[id] || 0) < WP_VORLADEN_MS) continue
+      if(_wpVl.has(id) || frisch || Date.now() - (_wpVlFehl[id] || 0) < WP_VORLADEN_MS || wpVerboten(id)) continue   // AB3: fremdes Konto ohne Leserecht nie wieder
       if(++n > 6) break
       _wpVl.add(id); wpUrteil(id).then(u => { if(u) delete _wpVlFehl[id]; else _wpVlFehl[id] = Date.now() }, () => { _wpVlFehl[id] = Date.now() }).finally(() => _wpVl.delete(id))
     }
@@ -47567,11 +47578,12 @@
     return Promise.race([wpUrteilHolen(id, ctrl.signal), zeit]).finally(() => clearTimeout(uhr))
   }
   async function wpUrteilHolen(id, signal){
-    id = String(id || ''); if(!id) return null
+    id = String(id || ''); if(!id || wpVerboten(id)) return null   // AB3
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) return null
       const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal })
+      if(r.status === 403){ wpVerboten(id, true); return null }   // AB3: fremdes Konto — für diesen Login nicht mehr fragen
       const d = await r.json().catch(() => null)
       if(!r.ok || !d || d.ok === false) return null
       _k1.cache[id] = { at: Date.now(), d }
@@ -60576,7 +60588,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2279'
+  const OS_TAB_BUILD = '2026-09-22.2280'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -93549,7 +93561,7 @@ ${stBlock}
   function wp3ZielLaden(id){
     // Gegenprüfung: Antworten gelten nur für den Login, der sie geholt hat (ID-Wechsel → alles neu)
     const login = String(currentUserId || ''); if(_wp3.login !== login){ _wp3.login = login; for(const k of Object.keys(_wp3.cache)) delete _wp3.cache[k] }
-    id = String(id || ''); if(!id || _wp3.laeuft[id]) return
+    id = String(id || ''); if(!id || _wp3.laeuft[id] || (typeof wpVerboten === 'function' && wpVerboten(id))) return   // AB3: 403-Konten nicht alle 5 min neu fragen
     const alt = _wp3.cache[id]; if(alt && Date.now() - alt.at < WP3_TTL_MS) return
     _wp3.laeuft[id] = true
     ;(async () => {
@@ -93558,6 +93570,7 @@ ${stBlock}
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
         const r = await fetch(`${WATCHER_HOME}/konto-ziele?id=${encodeURIComponent(id)}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        if(r.status === 403 && typeof wpVerboten === 'function') wpVerboten(id, true)   // AB3
         const d = await r.json().catch(() => ({}))
         if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
         const ch = ((d.urteil && d.urteil.checks) || []).find(c => Array.isArray(c) && /^Ziel bis Waiting/.test(String(c[1] || '')))
