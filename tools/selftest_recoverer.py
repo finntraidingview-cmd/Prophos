@@ -128,6 +128,11 @@ def main():
     # Tradeify „Zyklus im Plus" (03.11.2026) hängt am selben Weg — hier nur Apex-Konten, der Tradeify-Teil hat tools/selftest_tradeify_zyklus.py
     ns.setdefault("tradeify_zyklus_firma", lambda k: False)
     ns.setdefault("_tradeify_zyklus_anhaengen", lambda *a, **k: None)
+    # SK1 (20.11.2026): _wd_zyklus_anhaengen liest seit Striking die Striking-Konten (_sk_lesen/sk_ist_konto) — der Ausschnitt kennt sie nicht, der NameError
+    # landete im except (→ False, kein zyklus) und der Test brach mit KeyError ab. Hier: keine Striking-Konten; RC3-Menge wie ohne Regel (eigener try im Code)
+    ns.setdefault("_sk_lesen", lambda: (frozenset(), None))
+    ns.setdefault("sk_ist_konto", lambda k, u: False)
+    ns.setdefault("_rc3_regeln_lesen", lambda: None)
     fragen = []
 
     class Fehler(Exception):
