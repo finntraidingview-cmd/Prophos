@@ -47,19 +47,20 @@ class Chrome:
 
     def __init__(self, liste, neu_ok=True, zu_nein=()):
         self.liste, self.neu_ok, self.zu_nein = [dict(x) for x in liste] if liste is not None else None, neu_ok, set(zu_nein)
-        self.neu, self.zu, self.beenden, self.gestartet, self.json = [], [], 0, 0, []
+        self.neu, self.zu, self.beenden, self.gestartet, self.json, self.tsx_ids = [], [], 0, 0, [], []
 
     def http(self, pfad, methode="GET", timeout=2.0):
         if pfad == "/json/list":
             return None if self.liste is None else [dict(x) for x in self.liste]
-        if pfad.startswith("/json/new?"):
-            self.neu.append(pfad[len("/json/new?"):])
-            if not self.neu_ok:
-                return None
-            t = seite(90 + len(self.neu), pfad[len("/json/new?"):])
-            self.liste.append(t)
-            return t
-        raise AssertionError("unerwarteter Aufruf " + pfad)
+        raise AssertionError("unerwarteter Aufruf " + pfad + " (PN1b: neuer Tab nur über Target.createTarget newWindow)")
+
+    def neues_fenster(self, url, timeout=5.0):
+        self.neu.append(url)
+        if not self.neu_ok:
+            return None
+        t = seite(90 + len(self.neu), url)
+        self.liste.append(t)
+        return t["id"]
 
     def schliessen(self, tid):
         if tid in self.zu_nein:
@@ -75,8 +76,10 @@ class Chrome:
 
 def neustart_lauf(chrome, url):
     alt = {n: getattr(ob, n) for n in ("_cdp_http", "_cdp_tab_schliessen", "_puls_chrome_beenden", "_puls_chrome_sicher",
-                                       "_augen_json_schreiben", "_warte")}
+                                       "_augen_json_schreiben", "_augen_json_lesen", "_warte", "_cdp_tab_eigenes_fenster")}
     ob._cdp_http, ob._cdp_tab_schliessen, ob._puls_chrome_beenden = chrome.http, chrome.schliessen, chrome.hart_beenden
+    ob._cdp_tab_eigenes_fenster = chrome.neues_fenster
+    ob._augen_json_lesen = lambda name: {"ids": list(chrome.tsx_ids)} if name == "tsx_tabs.json" else None
     ob._puls_chrome_sicher = lambda *a, **k: (_ for _ in ()).throw(AssertionError("Chrome-Start im sanften Weg"))
     ob._augen_json_schreiben = lambda name, d: chrome.json.append((name, d))
     ob._warte = lambda *a, **k: None
@@ -113,6 +116,11 @@ def main():
     c3 = Chrome(LISTE, zu_nein={"T3"})
     r3, t3 = neustart_lauf(c3, TV)
     check(r3 is False and c3.beenden == 0 and any("gingen nicht zu" in x for x in t3), f"ein alter Tab geht nicht zu → kein Neustart, nie hart ({t3})")
+    c2b = Chrome(LISTE, zu_nein={"T5"})
+    c2b.tsx_ids = ["T5", "T4", "ALT"]
+    r2b, t2b = neustart_lauf(c2b, TSX)
+    check(r2b is False and c2b.json and c2b.json[-1][1]["ids"][:-1] == ["T5"] and c2b.json[-1][1]["ids"][-1].startswith("T9"),
+          f"PN1b: TopstepX-Tab geht nicht zu → seine bot-eigene ID bleibt gemerkt, der neue kommt dazu ({c2b.json})")
     c4 = Chrome(LISTE, neu_ok=False)
     r4, t4 = neustart_lauf(c4, TV)
     check(r4 is False and c4.beenden == 0 and c4.zu == [], "kein neuer Tab → alte bleiben, kein Neustart")
@@ -186,12 +194,15 @@ def main():
     check(neu.index("puls_neustart_lage(") < neu.index("_puls_chrome_beenden(trail)") and neu.index("return _puls_chrome_sanft_neu(") < neu.index("_puls_chrome_beenden(trail)"),
           "Prophos-Prüfung und sanfter Weg stehen VOR dem harten Beenden")
     sanft = bot[bot.index("def _puls_chrome_sanft_neu("):bot.index("def _puls_chrome_neustart(")]
+    check("/json/new" not in sanft and "_cdp_tab_eigenes_fenster(url)" in sanft and "\"newWindow\": True" in bot[bot.index("def _cdp_tab_eigenes_fenster("):bot.index("def _puls_chrome_sanft_neu(")],
+          "PN1b: neuer Tab nur in einem eigenen Fenster (Target.createTarget newWindow), nie /json/new")
     check("Browser.close\"" not in sanft and "rufe(\"Browser.close\"" not in sanft and "taskkill" not in sanft and "_puls_prozesse_beenden" not in sanft,
           "sanfter Weg: kein Browser.close, kein taskkill")
     html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
     pe = html[html.index("async function pulsErgebnisseUebernehmen()"):html.index("window._pulsErgebnisseUebernehmen = pulsErgebnisseUebernehmen")]
     check("e.quelle === 'chrome_neustart' && plan.status === 'planned' && !e.gesendet && !e.ok && !e.geklickt" in pe
-          and "puls_spur: { at: zAt" in pe and pe.index("e.quelle === 'chrome_neustart'") < pe.index("if(plan.status !== 'planned' || !(e.gesendet || e.ok))"),
+          and "puls_spur: { at: zAt" in pe and pe.index("e.quelle === 'chrome_neustart'") < pe.index("if(plan.status !== 'planned' || !(e.gesendet || e.ok))")
+          and "quelle: 'puls_ergebnisse' } }, 'planned')" in pe and "(claim0 && sp0At >= claim0 - 5000)" in pe,
           "Tab: Neustart-Antwort ohne Sendung → puls_spur am Plan, vor dem Abhaken, Plan bleibt Geplant")
     print("\n" + ("ALLES GRÜN" if OK else "FEHLER"))
     return 0 if OK else 1

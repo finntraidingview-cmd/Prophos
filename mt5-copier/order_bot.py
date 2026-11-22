@@ -32266,20 +32266,42 @@ def puls_neustart_lage(liste, url):
     return prophos, alte
 
 
+def _cdp_tab_eigenes_fenster(url, timeout=5.0):
+    """PN1b (Gegenprüfung 23.11.2026): neuen Tab in einem EIGENEN Fenster des Puls-Chrome öffnen — Target.createTarget newWindow über den
+    Browser-Kanal, wie das Panel den Prophos-Tab öffnet. /json/new legt ihn ins zuletzt aktive Fenster; war das das Prophos-Fenster, läge
+    Prophos danach dauerhaft als Hintergrund-Tab hinter TradingView/TopstepX (gedrosselt/verworfen, Befund ECHO-AUSSETZER 30.10.2026).
+    Wartet bis 5 s (Chrome nach einem Puls-Fehler oft ausgelastet; _cdp_tab_neu wartet ebenso). -> Target-ID | None. Wirft nie."""
+    v = _cdp_http("/json/version", timeout=2.0)
+    if not (isinstance(v, dict) and v.get("webSocketDebuggerUrl")):
+        return None
+    try:
+        ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=timeout)
+        try:
+            r = ws.rufe("Target.createTarget", {"url": url, "newWindow": True}, timeout=timeout)
+        finally:
+            ws.zu()
+        tid = r.get("targetId") if isinstance(r, dict) else None
+        return str(tid) if tid else None
+    except Exception:
+        return None
+
+
 def _puls_chrome_sanft_neu(trail, url, alte):
-    """PN1: sanfter Neustart — EIN neuer Tab mit der Ziel-URL des Wegs, dann die alten Tabs des Wegs schließen (der Prophos-Tab und alle
-    anderen Tabs bleiben, der Prozess bleibt). -> True nur, wenn der neue Tab steht und JEDER alte zuging (sonst könnte der 2. Versuch den
-    hängenden alten Tab greifen)."""
-    neu = _cdp_http("/json/new?" + url, methode="PUT")
-    neu_id = str(neu.get("id")) if isinstance(neu, dict) and neu.get("id") else None
+    """PN1: sanfter Neustart — EIN neuer Tab mit der Ziel-URL des Wegs (PN1b: in einem eigenen Fenster), dann die alten Tabs des Wegs
+    schließen (der Prophos-Tab und alle anderen Tabs bleiben, der Prozess bleibt). -> True nur, wenn der neue Tab steht und JEDER alte zuging
+    (sonst könnte der 2. Versuch den hängenden alten Tab greifen)."""
+    neu_id = _cdp_tab_eigenes_fenster(url)
     if not neu_id:
-        trail.append("Neustart sanft: neuer Tab ohne Antwort (/json/new) — alte Tabs bleiben, kein Neustart")
+        trail.append("Neustart sanft: neuer Tab im eigenen Fenster ohne Antwort (Target.createTarget) — alte Tabs bleiben, kein Neustart")
         return False
     zu = [str(t.get("id")) for t in (alte or []) if isinstance(t, dict) and t.get("id") and str(t.get("id")) != neu_id]
-    n = sum(1 for tid in zu if _cdp_tab_schliessen(tid))
+    nicht_zu = [tid for tid in zu if not _cdp_tab_schliessen(tid)]
+    n = len(zu) - len(nicht_zu)
     if ist_topstepx_url(url):
-        _augen_json_schreiben("tsx_tabs.json", {"ids": [neu_id]})   # bot-eigen wie in der Auge-Reparatur (die alten IDs sind zu)
-    if n != len(zu):
+        # bot-eigen wie in der Auge-Reparatur; PN1b: IDs, die nicht zugingen, bleiben gemerkt (sonst räumt _tsx_sitzung_waehlen sie nie mehr weg)
+        eigene = [x for x in ((_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []) if isinstance(x, str) and x in nicht_zu][-9:]
+        _augen_json_schreiben("tsx_tabs.json", {"ids": eigene + [neu_id]})
+    if nicht_zu:
         trail.append(f"Neustart sanft: {len(zu) - n} von {len(zu)} alten Tab(s) gingen nicht zu — kein 2. Versuch auf einem hängenden Tab")
         return False
     _warte(2.0, 1.5)                                      # Seite baut auf, bevor der zweite Versuch Tab/Login anfasst

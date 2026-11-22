@@ -63215,9 +63215,12 @@
           // der Plan bleibt „Geplant", nichts wird gestartet.
           if(e.quelle === 'chrome_neustart' && plan.status === 'planned' && !e.gesendet && !e.ok && !e.geklickt){
             const sp0 = plan.mt5Baseline && plan.mt5Baseline.puls_spur, zAt = z.at || new Date().toISOString()
-            if(!(sp0 && (Date.parse(sp0.at || '') || 0) >= (Date.parse(zAt) || 0))){
+            // PN1b (Gegenprüfung): die Spur des LEBENDEN Tabs zu diesem Claim gewinnt immer (sie trägt s/zeiten/nachzug und den vollen Trail) —
+            // nicht nur per Zeitvergleich Railway-Uhr gegen PC-Uhr; geschrieben wird nur an einen noch geplanten Plan (p_status 'planned')
+            const claim0 = Date.parse(plan.startUmGestartetAt || '') || 0, sp0At = sp0 ? (Date.parse(sp0.at || '') || 0) : 0
+            if(!(sp0 && (sp0At >= (Date.parse(zAt) || 0) || (claim0 && sp0At >= claim0 - 5000)))){
               try{ await baselinePatch(plan.id, { puls_spur: { at: zAt, pc: z.pc_id || null, ok: false, s: null, trail: (typeof window._pulsSpurKurz === 'function' ? window._pulsSpurKurz(e.trail_ende || '') : String(e.trail_ende || '').slice(0, 4000)),
-                msg: String(e.msg || '').slice(0, 600), quelle: 'puls_ergebnisse' } }, null) }catch(err){ console.warn('[puls-ergebnisse] Spur', (err && err.message) || err) }
+                msg: String(e.msg || '').slice(0, 600), quelle: 'puls_ergebnisse' } }, 'planned') }catch(err){ console.warn('[puls-ergebnisse] Spur', (err && err.message) || err) }
             }
           }
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
