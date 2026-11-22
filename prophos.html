@@ -36740,7 +36740,8 @@
         }
         for(const p of (_tp || [])){
           const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
-          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0)) continue
+          // HG2 (23.11.2026): Selbstheilung auch für Topstep V2 (tsv2, Nova/WD mit Fusion-Hedge) — vorher nur tvv2, beide Topstep-Fälle (20.11., 23.11.) ohne Versuch
+          if(!p || (p.route !== 'tvv2' && p.route !== 'tsv2') || p.status !== 'open' || !(p.hedgeEur > 0)) continue
           // (a) 'oeffnet' / 'fehler' / 'wartet' OHNE Ticket, älter als 60 s → per Kennung in hedge_solo abgleichen (jeden Tick, idempotent):
           // die Antwort kann verloren gegangen sein, obwohl die Position liegt
           if(hx && ['oeffnet', 'fehler', 'wartet'].includes(hx.status) && !hx.ticket && Date.now() - (Date.parse(hx.at || '') || 0) > 60000){
@@ -36762,13 +36763,22 @@
             if(typeof atToast === 'function') atToast(`⚠ Fusion-Hedge unklar (${p.masterName || '—'}): Solo-Position ohne Zuordnung auf Fusion — im Terminal prüfen`, 'end')
           } else {
             // Einstieg aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq), nicht der Feed-Kurs von jetzt — sonst liegen die Level falsch
-            const ein = p.mt5Baseline && p.mt5Baseline.tv && Number(p.mt5Baseline.tv.einstieg_nq)
-            if(hedgeReaderMasterDa(p) === false){   // Master laut Reader schon flach → kein Hedge mehr nachholen (01.10.2026)
-              try{ await hedgeAmPlanSchreiben(p.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nicht nachgeholt: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+            // HG2 (Gegenprüfung): bei Topstep nur ein echter Fill-Einstieg (einstieg_quelle 'fill') — ein Reader-/Feed-Wert würde als Fill gelten (kein Zuschlag)
+            const ein = p.mt5Baseline && p.mt5Baseline.tv && (p.route !== 'tsv2' || p.mt5Baseline.tv.einstieg_quelle === 'fill') && Number(p.mt5Baseline.tv.einstieg_nq)
+            // HG2: Topstep fragt das TopstepX-Auge (hedgeLotsMasterDa → tsx-stand, ≤ 1 s alt); der TV-Reader kennt TopstepX nicht und sagte dort immer null
+            const daM = p.route === 'tsv2' ? await hedgeLotsMasterDa(p) : hedgeReaderMasterDa(p)
+            if(daM === false){   // Master laut Reader/Auge schon flach → kein Hedge mehr nachholen (01.10.2026)
+              try{ await hedgeAmPlanSchreiben(p.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge nicht nachgeholt: ${p.route === 'tsv2' ? 'das TopstepX-Auge' : 'der Reader'} zeigt das Master-Konto schon flach` }) }catch(_){}
               continue
             }
+            // HG2: Topstep nur mit gesehener Position (fail-closed) — nicht zu sagen → nächster Tick im Fenster 20–180 s versucht es wieder, danach bleibt der 🔴-Alarm
+            if(p.route === 'tsv2' && daM !== true){ _hedgeNachgeholt.delete(String(p.id)); continue }
             // Klickzeit aus dem Plan, sonst der Start. Ohne beide Werte wird weiter wie bisher geöffnet, dann begrenzt nur das Fenster 20–180 s oben.
-            try{ await hedgeSoloOeffnen(p, { klick_at: (p.mt5Baseline.tv && p.mt5Baseline.tv.klick_at) || p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
+            // HG2: Topstep-Baseline (tsxBaselineAusOrder) kennt keinen Fill-Einstieg, aber das echte TP-Bracket aus TopstepX (tv.tp_level_nq) — als
+            // tp_limit mitgeben, dann sitzt der Hedge-TP am Bracket statt am Feed von jetzt (hedgeTpPreisPasst prüft es wie bei Puls' TP-Limit)
+            const tpTsx = p.route === 'tsv2' && p.mt5Baseline.tv && Number(p.mt5Baseline.tv.tp_level_nq) > 1000 ? Number(p.mt5Baseline.tv.tp_level_nq) : null
+            try{ await hedgeSoloOeffnen(p, Object.assign({ klick_at: (p.mt5Baseline.tv && p.mt5Baseline.tv.klick_at) || p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined },
+                                               tpTsx ? { tp_limit: tpTsx } : {})) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
           }
         }
       }
@@ -63134,7 +63144,10 @@
         if(!row){ await pulsErgebnisAbgeholt(z.plan_id, z.art); continue }
         // Order mit Fusion-Hedge (01.10.2026, Orbit V3): schon nach 15 s — jede Minute ohne Hedge ist ungedeckt; dieser Tab hat
         // keinen eigenen Puls-Lauf offen (Riegel oben), einen zweiten Open desselben Plans lehnt der Copier ab (schon_offen)
-        const _peHedge = z.art === 'order' && row.route === 'tvv2' && Number(row.hedge_eur) > 0
+        // HG2 (Finn 23.11.2026 ~03:45 nach Marcos Nova …7245: „Schau, dass so ein Fehler nicht mehr kommt“; Befund HG1/NV3: Tab mitten im Puls-Lauf neu,
+        // Antwort verloren → hier „Läuft“ ohne Hedge; Simon Topstep-WD …2392 am 20.11. 22 min ungedeckt): auch Topstep V2 (tsv2) — gleiche Logik und Riegel
+        // wie tvv2; hedgeSoloOeffnen kennt beide Wege. hedgeSpaetAlterS (90-s-Grenze) bleibt nur tvv2 (Finns Entscheidung)
+        const _peHedge = z.art === 'order' && (row.route === 'tvv2' || row.route === 'tsv2') && Number(row.hedge_eur) > 0
         if(alt < PE_GNADE_MS && !_peHedge) continue
         const plan = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
         if(i >= 0) tradePlans[i] = plan; else tradePlans.push(plan)
@@ -63187,9 +63200,15 @@
               const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
               const hx = pf.mt5Baseline && pf.mt5Baseline.hedge
               if(!hx && typeof hedgeSoloOeffnen === 'function'){
-                if(hedgeReaderMasterDa(pf) === false){
-                  try{ await hedgeAmPlanSchreiben(pf.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nicht nachgeholt: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+                // HG2: Topstep fragt das TopstepX-Auge (der TV-Reader kennt TopstepX nicht); tvv2 unverändert über den Reader
+                const daM = pf.route === 'tsv2' ? await hedgeLotsMasterDa(pf) : hedgeReaderMasterDa(pf)
+                if(daM === false){
+                  try{ await hedgeAmPlanSchreiben(pf.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge nicht nachgeholt: ${pf.route === 'tsv2' ? 'das TopstepX-Auge' : 'der Reader'} zeigt das Master-Konto schon flach` }) }catch(_){}
                   if(typeof atToast === 'function') atToast(`⚠ ${name}: Antwort verloren und Master schon flach — KEIN Fusion-Hedge nachgeholt`, 'end')
+                } else if(pf.route === 'tsv2' && daM !== true){
+                  // HG2 (Gegenprüfung): Topstep hat keine 90-s-Grenze (hedgeSpaetAlterS nur tvv2, Finns Entscheidung) — eine alte, nie abgeholte Zeile darf darum nur
+                  // öffnen, wenn das Auge die Position JETZT sieht (fail-closed); sonst Vermerk, die Selbstheilung (20–180 s) versucht es weiter, 🔴 „ohne Hedge“ bleibt
+                  if(typeof atToast === 'function') atToast(`⚠ ${name}: Antwort verloren, TopstepX-Auge sieht die Position nicht sicher — Fusion-Hedge NICHT nachgeholt, in TopstepX prüfen`, 'end')
                 } else await hedgeSoloOeffnen(pf, Object.assign({}, e, { klick_at: klickIso, nachgeholt: true }))
               }
             }catch(err){ console.warn('[puls-ergebnisse] Hedge', err) }
