@@ -218,8 +218,9 @@ s = Sitzung([])
 st_, g = ob._tsx_ueberlagerung_weg(s, {"popups": [WERB]}, [])
 check(not s.klicks and g and "schon 4×" in g, "je Lauf höchstens 4 Überlagerungen, danach Grund")
 ob._TSX_UEBER_N[0] = 0
-check(src_bot.count("_TSX_UEBER_N[0] = 0") == 1 and src_bot.count("st, _ug = _tsx_ueberlagerung_weg(s, st, trail)") == 3,
-      "drei Stellen: Start (Lesen + Order), vor dem Order-Klick, Bracket-Schritt; Zähler je Lauf")
+# CF1 (23.11.2026): vierte Stelle — Contract-Feld ohne Klick-Beweis räumt Überlagerungen weg und klickt EINMAL neu (selftest_cf1_contract_feld.py)
+check(src_bot.count("_TSX_UEBER_N[0] = 0") == 1 and src_bot.count("st, _ug = _tsx_ueberlagerung_weg(s, st, trail)") == 4,
+      "vier Stellen: Start (Lesen + Order), vor dem Order-Klick, Bracket-Schritt, Contract-Feld (CF1); Zähler je Lauf")
 
 # ── B) Google: Regeln ───────────────────────────────────────────────────────────────────────────────────────────────────────
 print("── B) Google-Anmeldung: Regeln")
@@ -797,6 +798,7 @@ else:
     GEAENDERT.update({"tsx_blow_dialog", "_tsx_blow_dialog_weg"})   # TS-D1: Art aus dem Treffer; Text-Weg mit Sperrzone + Kasten-Bindung (ebd.)
     GEAENDERT.add("tsx_blow_dialog_knopf")   # TS-D1b (Stopp S2): nur ok/okay/close/dismiss/schließen/× — nie Continue/Got it/I understand (ebd.)
     GEAENDERT.update({"tsx_verletzungen_aus_liste", "tsx_geblowt_urteil", "_tsx_geblowt_merken", "tsx_blow_dialog_verletzung"})   # TS-D2 (20.11.2026): DLL = Tagesstopp statt geblowt — geprüft in selftest_tsd2_dll_tagesstopp.py
+    GEAENDERT.add("_tsx_k3_contract")   # CF1 (23.11.2026): Contract-Feld ohne Klick-Beweis → Überlagerungen weg, EIN zweiter Klick — geprüft in selftest_cf1_contract_feld.py
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},

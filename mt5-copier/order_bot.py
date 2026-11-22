@@ -22662,6 +22662,20 @@ def _tsx_k3_contract(s, st, wurzel, trail):
         r = list(r)[:4]
         _tsx_pause()
         if not s.klick(r, "Contract-Feld", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
+            # CF1 (23.11.2026, Master nach NV3: Marco Topstep …7245, Plan 28789882 — Versuch 1 endete hier, der Lauf startete daraufhin das
+            # GANZE Puls-Chrome neu, der Prophos-Tab mit dem Lauf starb, die Antwort ging verloren, der Trade lief ohne Hedge). Am Punkt lag
+            # nicht das Feld — meist eine spät eingeblendete Überlagerung (HubSpot-CTA „Dialog ohne Text", Werbe-Popup) oder ein Layout-Umbau.
+            # Jetzt: frisch lesen, Überlagerungen wie beim Start wegräumen (_tsx_ueberlagerung_weg, nur mit eindeutigem X bzw. HubSpot
+            # ausblenden), dann EIN zweiter Klick mit demselben Ziel-Beweis. Erst danach Abbruch — Code 'contract' löst keinen
+            # Chrome-Neustart mehr aus (PULS_NEUSTART_NIE_VOR_KLICK), der Plan bleibt geplant und wird regulär nachgeholt.
+            if versuch == 0:
+                trail.append("Contract-Feld nicht gedrückt (Klick ohne Beweis) — neu lesen, Überlagerungen prüfen, zweiter Versuch")
+                _warte(0.8, 0.6)
+                st = s.stand()
+                st, _ug = _tsx_ueberlagerung_weg(s, st, trail)
+                if _ug:
+                    return False, "contract", f"Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan. {_ug}", st, None
+                continue
             return False, "contract", "Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan.", st, None
         _warte(0.4, 0.3)
         if not s.fokus_im(r, "Contract-Feld") or not _tsx_fokus_exakt(s, "contract", trail, "Contract-Feld"):
@@ -32019,7 +32033,9 @@ PULS_NEUSTART_DAUER_S = 20.0                 # geschätzte Dauer Chrome-Ende + S
 PULS_NEUSTART_ENDE_S = 25.0                  # so lange auf das Ende des alten Puls-Chrome warten (Port frei + Prozesse weg)
 PULS_NEUSTART_HART_AB_S = 10.0               # antwortet Chrome auf Browser.close so lange nicht → nur die eigenen PIDs hart beenden
 # Codes, bei denen ein Neustart nichts hilft oder nicht erlaubt ist: Befehl/Sperre/Etappe fehlt/Markt zu/Zeit/Wachhund/abgelehnt
-PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreicht"))   # Master 08.10.2026, s. neustart_entscheid
+# CF1 (23.11.2026): 'contract' (TopstepX-Contract-Feld, Klick ohne Beweis / kein Fokus / Vorschlag fehlt) ist wie 'ticket' ein Seiten-/Feld-Problem,
+# kein Chrome-Problem — der Neustart danach kostete bei Marco …7245 den Prophos-Tab samt Antwort (NV3). Wiederholt wird im Schritt selbst.
+PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreicht", "contract"))   # Master 08.10.2026, s. neustart_entscheid
 # konto_offen (08.10.2026, KONTO OFFEN): eine offene (Hand-)Position am Konto ist kein Chrome-Problem — nie neu starten, nie ein zweiter
 # Versuch im selben Lauf; neu eingeplant wird über start_fehler/sfTick
 PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
