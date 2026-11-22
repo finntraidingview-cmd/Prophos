@@ -181,7 +181,8 @@ planen = quelle("fdp_planen")
 tick = quelle("fdp_pump_tick")
 offen = quelle("fdp_pump_offen_tick")
 check('"route": fdp_route(a.get("firm"))' in planen and '"route": "tvv2"' not in planen, "fdp_planen: Weg nach Firma, kein festes tvv2 mehr")
-check('"master_symbol": "NQ" + frontcode' in planen, "fdp_planen: Symbol NQ + Frontmonat (TopstepX-Contract wie die Hand-Novas)")
+# SK1-L (20.11.2026): fdp_planen nimmt MNQ, wenn die Regel instr 'mnq' sagt (Marc 100k …06) — Anker angepasst, Frontmonat bleibt Pflicht
+check('"master_symbol": ("MNQ" if r.get("instr") == "mnq" else "NQ") + frontcode' in planen, "fdp_planen: Symbol NQ (bzw. MNQ laut instr) + Frontmonat (TopstepX-Contract wie die Hand-Novas)")
 check('liq_fest=fdp_express_liq(a, verlauf, balance - basis, basis, (jg or {}).get("dd"), frisch_ok=not pl)' in planen and "fdp_express_basis(a, g)" in planen, "fdp_planen: Express-Adapter (Basis + Liq aus der MLL)")
 check('zeile["balance"] = round(zeile["balance"] + _basis, 2)' in planen and 'fdp_bal_start_abs(p.get("bal_start"), p.get("bal_rel"), _basis, g)' in planen
       and "bal_rel:mt5_baseline->tv->balance_relativ" in planen,
