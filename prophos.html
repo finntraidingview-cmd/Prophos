@@ -32267,6 +32267,27 @@
     const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
     return hedgeTsxMasterDaUrteil(plan, r, acc ? String(acc.externalId || '').trim() : '', tsxKontoExtIdsJetzt())
   }
+  /* HG2b (Prüfer S2 23.11.2026, Geld-Pfad): „flach“ ist bei Topstep endgültig (Vermerk master_flach = nie mehr ein Hedge) — wie der Lots-OK-Weg (ZWEITER
+   * BLICK, S9 02.11.2026) erst glauben, wenn eine zweite Lesung ~4 s später es bestätigt. → true / false (zweimal flach) / null (nicht zu sagen). */
+  const HEDGE_TSX_FLACH_ZWEITER_MS = 4000
+  async function hedgeTsxMasterDaZweimal(plan, warte){
+    const da1 = await hedgeLotsMasterDa(plan)
+    if(da1 !== false) return da1
+    await (warte || (ms => new Promise(ok => setTimeout(ok, ms))))(HEDGE_TSX_FLACH_ZWEITER_MS)
+    const da2 = await hedgeLotsMasterDa(plan)
+    return da2 === false ? false : da2
+  }
+  // HG2b: Nachholen bei Topstep nur, wenn der Puls-Klick höchstens 10 min alt ist — das Auge prüft nur „irgendeine Position gleicher Wurzel + Richtung“, eine alte,
+  // nie abgeholte Zeile könnte sonst neben einem ANDEREN Trade desselben Kontos einen Hedge öffnen. Klickzeit unbekannt = zu alt (fail-closed).
+  const HEDGE_TSX_NACHHOLEN_MAX_MS = 600000
+  function hedgeTsxKlickZuAlt(r, jetzt){   // REIN RECHNEND → Alter in min, wenn zu alt bzw. unbekannt (-1), sonst null
+    const k = Number(r && r.order_klick_ms)
+    const klick = k > 1e12 ? k : (Date.parse((r && r.klick_at) || '') || 0)
+    if(!klick) return -1
+    const alt = jetzt - klick
+    return alt > HEDGE_TSX_NACHHOLEN_MAX_MS ? Math.round(alt / 60000) : null
+  }
+  window._hedgeTsxKlickZuAlt = hedgeTsxKlickZuAlt   // Test-Haken
   let _hedgeLotsOkBusy = false
   const _hedgeLotsOkNaechst = new Map()   // OK → frühester nächster Versuch. Bricht der Kern vor 'oeffnet' ab, bleibt der Stop stehen und es geht alle 30 s weiter statt bis zum Neuladen nie mehr
   const _hedgeLotsFlachSeit = new Map()   // Plan → erster „flach“-Blick
@@ -36669,6 +36690,7 @@
     }catch(_){ return {} }
   }   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
+  const _hedgeHeilFlachSeit = new Map()   // HG2b: Topstep-Plan → erster „flach“-Blick der Selbstheilung (zweiter Blick ≥ 4 s später, sonst kein master_flach)
   const _hedgePcUmgezogen = new Set()   // Pläne, deren hedge.pc dieser Tab schon auf die gültige Kennung umgeschrieben hat
   /* RÜCKKEHR-WACHE (.1560, Finn 15.10.2026 nach Mike …1311: „kannst du das fixen, dass mir die Scheiße nicht mehr passiert"): hat der
    * Reader-Weg den Hedge geschlossen (master_ende_reader / master_nie_da) und zeigt der Reader binnen 3 min danach die Master-Position
@@ -36767,6 +36789,17 @@
             const ein = p.mt5Baseline && p.mt5Baseline.tv && (p.route !== 'tsv2' || p.mt5Baseline.tv.einstieg_quelle === 'fill') && Number(p.mt5Baseline.tv.einstieg_nq)
             // HG2: Topstep fragt das TopstepX-Auge (hedgeLotsMasterDa → tsx-stand, ≤ 1 s alt); der TV-Reader kennt TopstepX nicht und sagte dort immer null
             const daM = p.route === 'tsv2' ? await hedgeLotsMasterDa(p) : hedgeReaderMasterDa(p)
+            // HG2b (Prüfer S2): bei Topstep ist „flach“ erst endgültig, wenn der Wächter es ≥ 4 s später noch einmal sieht (ZWEITER BLICK wie Lots-OK, ohne den Takt
+            // anzuhalten) — bis dahin kein Vermerk, nächster Tick prüft neu (_hedgeNachgeholt frei)
+            if(p.route === 'tsv2'){
+              const fsId = String(p.id), fs = _hedgeHeilFlachSeit.get(fsId)
+              if(daM !== false) _hedgeHeilFlachSeit.delete(fsId)
+              else if(!fs || Date.now() - fs < HEDGE_TSX_FLACH_ZWEITER_MS){
+                if(!fs) _hedgeHeilFlachSeit.set(fsId, Date.now())
+                _hedgeNachgeholt.delete(fsId)
+                continue
+              } else _hedgeHeilFlachSeit.delete(fsId)
+            }
             if(daM === false){   // Master laut Reader/Auge schon flach → kein Hedge mehr nachholen (01.10.2026)
               try{ await hedgeAmPlanSchreiben(p.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge nicht nachgeholt: ${p.route === 'tsv2' ? 'das TopstepX-Auge' : 'der Reader'} zeigt das Master-Konto schon flach` }) }catch(_){}
               continue
@@ -60741,7 +60774,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2286'
+  const OS_TAB_BUILD = '2026-09-22.2287'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63199,9 +63232,16 @@
             try{
               const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
               const hx = pf.mt5Baseline && pf.mt5Baseline.hedge
-              if(!hx && typeof hedgeSoloOeffnen === 'function'){
-                // HG2: Topstep fragt das TopstepX-Auge (der TV-Reader kennt TopstepX nicht); tvv2 unverändert über den Reader
-                const daM = pf.route === 'tsv2' ? await hedgeLotsMasterDa(pf) : hedgeReaderMasterDa(pf)
+              const tsxAlt = pf.route === 'tsv2' ? hedgeTsxKlickZuAlt({ order_klick_ms: e.order_klick_ms, klick_at: klickIso }, Date.now()) : null
+              if(!hx && typeof hedgeSoloOeffnen === 'function' && tsxAlt != null){
+                // HG2b: Topstep-Klick älter als 10 min (oder Zeit unbekannt) → nicht nachholen, Vermerk am Plan (🔴 „ohne Hedge“ nennt ihn)
+                const msgAlt = `Hedge nicht nachgeholt: Puls-Klick ${tsxAlt < 0 ? 'ohne Zeit' : 'ist ' + tsxAlt + ' min alt'} (Grenze ${HEDGE_TSX_NACHHOLEN_MAX_MS / 60000} min) — in TopstepX und im Fusion-Terminal von Hand prüfen`
+                try{ await hedgeAmPlanSchreiben(pf.id, { status: 'uebersprungen', grund_code: 'klick_alt', msg: msgAlt, eur: pf.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() }) }catch(_){}
+                if(typeof atToast === 'function') atToast(`⚠ ${name}: ${msgAlt}`, 'end')
+              } else if(!hx && typeof hedgeSoloOeffnen === 'function'){
+                // HG2: Topstep fragt das TopstepX-Auge (der TV-Reader kennt TopstepX nicht); tvv2 unverändert über den Reader.
+                // HG2b: bei Topstep zählt „flach“ erst, wenn eine zweite Lesung ~4 s später es bestätigt (hedgeTsxMasterDaZweimal)
+                const daM = pf.route === 'tsv2' ? await hedgeTsxMasterDaZweimal(pf) : hedgeReaderMasterDa(pf)
                 if(daM === false){
                   try{ await hedgeAmPlanSchreiben(pf.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge nicht nachgeholt: ${pf.route === 'tsv2' ? 'das TopstepX-Auge' : 'der Reader'} zeigt das Master-Konto schon flach` }) }catch(_){}
                   if(typeof atToast === 'function') atToast(`⚠ ${name}: Antwort verloren und Master schon flach — KEIN Fusion-Hedge nachgeholt`, 'end')
@@ -63213,7 +63253,8 @@
               }
             }catch(err){ console.warn('[puls-ergebnisse] Hedge', err) }
           }
-          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? (hedgeSpaetAlterS(plan, { order_klick_ms: e.order_klick_ms, klick_at: klickIso }, Date.now()) != null ? ' · Fusion-Hedge NICHT nachgeholt (zu spät, von Hand prüfen)' : ' · Fusion-Hedge wird nachgeholt') : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
+          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ((hedgeSpaetAlterS(plan, { order_klick_ms: e.order_klick_ms, klick_at: klickIso }, Date.now()) != null
+            || (plan.route === 'tsv2' && hedgeTsxKlickZuAlt({ order_klick_ms: e.order_klick_ms, klick_at: klickIso }, Date.now()) != null)) ? ' · Fusion-Hedge NICHT nachgeholt (zu spät, von Hand prüfen)' : ' · Fusion-Hedge wird nachgeholt') : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
           try{ renderTradePlans() }catch(_){}
         } else if(z.art === 'close'){
           if(plan.status !== 'open'){ await pulsErgebnisAbgeholt(z.plan_id, 'close'); continue }
