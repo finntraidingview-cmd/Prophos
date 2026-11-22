@@ -25932,6 +25932,45 @@ def cdp_liste_beleg(ko, aktiv, ext=""):
     return True, ""
 
 
+# PS1 — KONTO-LISTE SCROLLEN UND WÄHLEN (23.11.2026, Auftrag Master nach Befund KA1-F): zwei FTMO-Futures-Konten (seit 12.11. bzw.
+# 17.11. ohne Trade) scheiterten 26× mit „Konto … steht im Dropdown 0x (nicht genau einmal) — nichts geklickt (anderer Tradovate-Login?)
+# … [Liste 5 … unvollständig: Container ragt aus dem Fenster]". Die Liste zeigte 5 Konten, liste_voll sagte nein, aber liste_kurz
+# (≤ 8 Zeilen, Platz drum herum, keine weitere Konto-Zeile im DOM) sagte ja — eine virtualisierte Liste rendert die Zeilen außer Sicht
+# gar nicht, also sah auch der DOM-Zähler kein sechstes Konto. Folge: „fremder Login" → Login-Weg → dieselbe Liste → Fehlstart.
+# Jetzt: jede nicht bewiesen vollständige Liste wird gescrollt (außer bei sicher anderem Login), und der Scroll-Befund schlägt die
+# Kurz-Liste: Ziel gefunden = nie fremder Login, Ende bewiesen = die ganze Liste ist die Beleg-Liste.
+def cdp_scroll_noetig(ko, aktiv, ext=""):
+    """REIN RECHNEND (testbar): Soll der Konto-Schritt eine selbst geöffnete Liste ohne Ziel scrollend lesen? Nein, wenn listeVoll die
+    Liste bewiesen hat (liste_voll True) oder das aktive Konto sicher zu einem ANDEREN Login gehört (andere Firma / anderer Apex-User:
+    dort kann das Ziel nicht stehen, der Login-Wechsel kommt ohnehin). Sonst ja — auch bei liste_kurz (PS1, 23.11.2026)."""
+    k = ko if isinstance(ko, dict) else {}
+    if k.get("liste_voll") is True:
+        return False
+    fa, _lesbar = cdp_login_familie(aktiv)
+    fz = cdp_konto_familie(ext)
+    return not (fa and fz and fa != fz)
+
+
+def cdp_liste_beleg_gescrollt(ko, aktiv, ext, scroll):
+    """REIN RECHNEND (testbar): cdp_liste_beleg mit dem Befund des Scroll-Wegs (_cdp_liste_scrollen) -> (ja, grund).
+    Ohne Scroll-Befund bzw. ohne gelesene Abschnitte → cdp_liste_beleg wie bisher. Ziel beim Scrollen gefunden → nie ein Beleg für
+    einen fremden Login (die Liste war nur abgeschnitten — sonst meldete der Login-Weg eine richtige Sitzung ab). Ende bewiesen →
+    die zusammengeführten Zeilen gelten als vollständige Liste — aber nur, wenn der Container dabei ganz im Fenster stand (ende_sichtbar,
+    augen.js ≥ 0.8.9: sonst lägen die letzten Konten unter dem Fensterrand und würden nie gelesen, Prüfer 23.11.2026). Hat der Scroll-Weg
+    gelesen (der Container ist scrollbar = die Liste ist länger als sichtbar) und kein solches Ende bewiesen → nie ein Beleg: die alte
+    Kurz-Liste ist dann widerlegt (KA1-F-Fehler). Nur ohne gelesene Abschnitte (kein Scroll-Container) gilt cdp_liste_beleg wie bisher."""
+    sc = scroll if isinstance(scroll, dict) else {}
+    if not sc.get("schritte"):
+        return cdp_liste_beleg(ko, aktiv, ext)
+    if sc.get("ziel_n"):
+        return False, f"Liste nicht vollständig im Bild — Ziel steht erst nach Scrollen darin ({sc.get('ziel_n')}×)"
+    if sc.get("ende") and sc.get("ende_sichtbar") is True and sc.get("zeilen"):
+        ja, g = cdp_liste_beleg({"liste_voll": True, "liste_kurz": False, "liste_voll_grund": "", "eintraege": sc.get("zeilen")}, aktiv, ext)
+        return ja, (g or f"Liste gescrollt {sc.get('schritte')}× vollständig gelesen ({len(sc.get('zeilen') or [])} Konten), Ziel 0×") if not ja else ""
+    return False, ("Liste länger als sichtbar, Ende nicht im Fenster bewiesen (gescrollt "
+                   f"{sc.get('schritte')}×{', ' + str(sc.get('grund')) if sc.get('grund') else ''}) — kein Beleg für einen anderen Login")
+
+
 def cdp_rect(x):
     """rect aus einem augen.js-Element ({rect: [...]}) oder direkt einer Liste."""
     if isinstance(x, dict):
@@ -26309,7 +26348,11 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     ein_konto_ziel = False                                # Ein-Konto-Login, gekürzte Kennung = Ziel (cdp_ein_konto_ziel, 27.10.2026)
     liste_bestaetigt = False                              # Ziel in der Liste schon aktiv, Esc statt Klick (cdp_liste_aktiv_bestaetigt)
     tvk_gemeldet = False                                  # L6: Namen der eigenen Liste einmal je Lauf an den Reader (_tv_konten_melden)
-    for _runde in range(6):
+    ziel_gezeigt = False                                  # PS1: Ziel aus der gescrollten Liste höchstens einmal ins Bild holen
+    ziel_zeige_ok = False                                 # PS1: der Zeige-Schritt hat eine Runde verbraucht → eine Runde mehr
+    for _runde in range(7):
+        if _runde >= 6 and not ziel_zeige_ok:
+            break                                         # ohne Zeige-Schritt bleibt es bei 6 Runden wie bisher
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
         gekuerzt = bool(aktiv) and cdp_konto_gekuerzt(aktiv)
@@ -26382,12 +26425,33 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 _tv_konten_melden(ko.get("eintraege"), trail)
             e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
             if not e:
-                # LISTE SCROLLEN (08.10.2026): Ziel 0×, gleicher Apex-User, Liste nicht ganz im Bild → VOR dem Esc abschnittsweise lesen
+                # LISTE SCROLLEN (08.10.2026): Ziel 0×, Liste nicht ganz im Bild → VOR dem Esc abschnittsweise lesen.
+                # PS1 (23.11.2026, Master nach KA1-F; zwei FTMO-Futures-Konten seit 12.11. bzw. 17.11. ohne Trade: 26 Fehlstarts
+                # „steht im Dropdown 0x … unvollständig: Container ragt aus dem Fenster"): bisher scrollte nur der Apex-Weg, und eine kurze
+                # Liste (liste_kurz, 5 von 6 Zeilen gerendert) galt sogar als Beleg für einen fremden Login. Jetzt scrollt jede Liste, die
+                # listeVoll nicht bewiesen hat (cdp_scroll_noetig); steht das Ziel darin GENAU einmal, holt _cdp_liste_ziel_zeigen es ins
+                # Bild und die nächste Runde klickt es über den normalen, bewiesenen Klick-Weg (cdp_konto_eintrag + s.klick mit Hover).
                 scroll = None
-                if n == 0 and not cdp_liste_beleg(ko, aktiv, ext)[0]:
-                    _gl0, _gg0, _ = cdp_gleicher_login_beleg(ko, aktiv, ext)
-                    if not _gl0 and _gg0.startswith("Liste nicht vollständig"):
-                        scroll = _cdp_liste_scrollen(s, ext, trail)
+                if n == 0 and ziel_gezeigt:
+                    # schon ins Bild geholt, jetzt doch 0× (Liste neu gezeichnet?) — kein zweiter Scroll-Lauf, nie ein Login-Beleg
+                    scroll = {"zeilen": [], "schritte": 1, "ende": False, "ende_sichtbar": False, "grund": "", "ziel_n": 1, "dupl": 0, "pos": [],
+                              "zeigen_grund": "nach dem Ins-Bild-Holen nicht mehr in der Liste"}
+                elif n == 0 and cdp_scroll_noetig(ko, aktiv, ext):
+                    scroll = _cdp_liste_scrollen(s, ext, trail)
+                    if scroll["ziel_n"] == 1:
+                        ziel_gezeigt = True                   # höchstens einmal je Konto-Schritt — nie in Schleife
+                        zok, zgrund = _cdp_liste_ziel_zeigen(s, ext, trail)
+                        if zok:
+                            _warte(0.4, 0.3)
+                            st = s.stand(opts)
+                            if (st.get("konto") or {}).get("liste_offen"):
+                                ziel_zeige_ok = True
+                                continue                      # Liste bleibt offen, die nächste Runde wählt das Ziel
+                            # Prüfer 23.11.2026: Liste nach dem Scrollen zu → nie in den Zweig „Dropdown nicht erkannt" (Ein-Konto-
+                            # Beleg → Abmelden einer richtigen Sitzung); hier ohne Login-Beleg raus (ziel_n zählt)
+                            zok, zgrund = False, "Konto-Liste nach dem Scrollen nicht mehr offen"
+                            trail.append(f"Konto-Liste: {zgrund} — nichts geklickt")
+                        scroll["zeigen_grund"] = zgrund
                 im_text = _cdp_ziel_im_text(s, ext) if n == 0 else None   # VOR dem Esc, solange die Liste offen ist (cdp_konto_weg)
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 ex = {"konto_eintraege": _eintr(ko), "konto_treffer": n}
@@ -26400,7 +26464,11 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 if n == 0:
                     # Beleg für „anderer Tradovate-Login" nur mit lesbarem aktivem Konto, vollständiger Liste und dem aktiven Konto
                     # darin — der Login-Weg vergleicht liste_aktiv vor dem Abmelden noch einmal (cdp_abmelden_erlaubt)
-                    ja, grund = cdp_liste_beleg(ko, aktiv, ext)
+                    # PS1 (23.11.2026): hat der Scroll-Weg gelesen, zählt SEIN Befund (Ziel gefunden = nie fremder Login; Ende bewiesen =
+                    # ganze Liste) — nicht die geometrische Kurz-Liste, die virtualisierte Zeilen nicht sieht
+                    ja, grund = cdp_liste_beleg_gescrollt(ko, aktiv, ext, scroll)
+                    if scroll and scroll.get("schritte"):
+                        ex["gescrollt"] = scroll["schritte"]
                     ex["konto_treffer_roh"] = 0
                     if ja:
                         ex["liste_aktiv"] = aktiv[:80]
@@ -26410,10 +26478,15 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                         # RICHTIGER LOGIN, Ziel fehlt (08.10.2026, cdp_gleicher_login_beleg): kein Login-Wechsel (konto_treffer None
                         # bleibt), aber Befund für _cdp_konto_mit_login — zwei davon = 'konto_weg'
                         gl, gg, gn = cdp_gleicher_login_beleg(ko, aktiv, ext)
+                        if scroll and scroll.get("ziel_n"):
+                            gl = False                        # Prüfer 23.11.2026: Ziel steht nachweislich in der Liste → nie Befund für konto_weg
                         if not gl and scroll:
                             if scroll["ziel_n"]:
-                                # das Ziel steht in der Liste, nur außer Sicht — der Scroll-Weg liest nur, kein Klick (Auftrag 08.10.2026)
-                                gg = f"Ziel steht in der Liste erst nach Scrollen ({scroll['ziel_n']}×, {len(scroll['zeilen'])} Konten) — nicht geklickt, Scroll-Weg liest nur"
+                                # das Ziel steht in der Liste, nur außer Sicht. Genau einmal → PS1 hat es ins Bild geholt und geklickt
+                                # (dann käme der Lauf nicht hierher); hier bleibt nur: mehrfach, oder nicht ins Bild zu holen
+                                warum = (scroll.get("zeigen_grund") or "") if scroll["ziel_n"] == 1 else "nicht eindeutig"
+                                gg = (f"Ziel steht in der Liste erst nach Scrollen ({scroll['ziel_n']}×, {len(scroll['zeilen'])} Konten) — nicht geklickt"
+                                      + (f": {warum}" if warum else ""))
                                 ex["ziel_nach_scrollen"] = scroll["ziel_n"]
                             elif scroll["ende"] and scroll["zeilen"]:
                                 ko_voll = {"liste_voll": True, "liste_kurz": False, "liste_voll_grund": "", "eintraege": scroll["zeilen"]}
@@ -26423,7 +26496,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                                     ex["konto_eintraege"] = [str(z.get("text"))[:40] for z in scroll["zeilen"]][:40]
                                     ex["gescrollt"] = scroll["schritte"]
                             else:
-                                gg = f"{gg}; gescrollt {scroll['schritte']}×, {scroll['grund'] or 'kein Ende'}"
+                                gg = "; ".join(x for x in (gg, f"gescrollt {scroll['schritte']}×, {scroll['grund'] or 'kein Ende'}") if x)
                         if gl:
                             ex["gleicher_login"] = {"user": cdp_konto_familie(cdp_kontonr(aktiv))[5:], "konten": gn, "gescrollt": (scroll or {}).get("schritte", 0) if gl and scroll else 0}
                             ex["ziel_im_text"] = im_text
@@ -30282,7 +30355,7 @@ def _cdp_liste_scrollen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
     Pausen über _warte (Streuung), bis Ende, Stillstand oder max_schritte. -> {"zeilen", "schritte", "ende", "grund", "ziel_n", "dupl",
     "pos": [(vorher, top, hoehe)]}; ende True nur, wenn der Container beim letzten Lesen am unteren Rand stand (Beweis aus der
     Mitschrift). Wirft nie. Liest und scrollt nur — nie ein Klick; die Liste schließt der Aufrufer wie heute mit Esc."""
-    aus = {"zeilen": [], "schritte": 0, "ende": False, "grund": "", "ziel_n": 0, "dupl": 0, "pos": []}
+    aus = {"zeilen": [], "schritte": 0, "ende": False, "ende_sichtbar": False, "grund": "", "ziel_n": 0, "dupl": 0, "pos": []}
     def _ruf(aktion):
         try:
             return s.lese_js("globalThis.prophosAugen.konto_scroll(" + json.dumps(aktion) + ")")
@@ -30306,6 +30379,7 @@ def _cdp_liste_scrollen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
         aus["pos"].append((sc.get("vorher"), sc.get("top"), sc.get("hoehe")))
         if urteil == "ende":
             aus["ende"] = True
+            aus["ende_sichtbar"] = sc.get("im_fenster") is True   # PS1/Prüfer 23.11.2026: Container ganz im Fenster (augen.js ≥ 0.8.9)
             break
         if urteil == "steht":
             aus["grund"] = grund
@@ -30320,6 +30394,65 @@ def _cdp_liste_scrollen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
     trail.append(f"Konto-Liste gescrollt: {aus['schritte']} Abschnitt(e), {len(aus['zeilen'])} Konten ({aus['dupl']} doppelt aus der Überlappung), "
                  + ("Ende erreicht" if aus["ende"] else f"KEIN Ende ({aus['grund']})") + f", scrollTop {p0[0]}→{p1[0]} von {p1[2]}, Ziel {aus['ziel_n']}×")
     return aus
+
+
+def _cdp_liste_ziel_zeigen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
+    """PS1 (23.11.2026): das Ziel, das _cdp_liste_scrollen GENAU einmal in der offenen Liste gefunden hat, ins Bild holen — klickt nie.
+    Von oben abschnittsweise lesen (konto_scroll 'lesen', dann 'schritt'), bis die Ziel-Zeile gerendert ist; dann konto_scroll
+    {aktion:'zeige', nr} (augen.js ≥ 0.8.9: scrollt NUR den Listen-Container, Zeile mittig) und nachlesen: das Ziel muss genau einmal
+    und ganz im sichtbaren Teil des Containers stehen (im_bild). Den Klick macht der Konto-Schritt danach wie bei jeder Liste
+    (cdp_konto_eintrag aus einem frischen Stand + s.klick mit Hover-Beweis). -> (ok, grund). Wirft nie."""
+    def _ruf(aktion):
+        try:
+            return s.lese_js("globalThis.prophosAugen.konto_scroll(" + json.dumps(aktion) + ")")
+        except Exception as e_:
+            return {"ok": False, "grund": f"{type(e_).__name__}"}
+
+    def _gr(v, rueck):
+        return (str(v.get("grund") or "")[:80] if isinstance(v, dict) else "") or rueck
+
+    def _nein(grund):
+        trail.append(f"Konto-Liste: Ziel {ext} nicht ins Bild geholt ({grund}) — nichts geklickt")
+        return False, grund
+    v0 = _ruf("anfang")
+    if not (isinstance(v0, dict) and v0.get("ok")):
+        return _nein(_gr(v0, "keine Antwort"))
+    letzte_top = None
+    for _i in range(max(1, int(max_schritte))):
+        _warte(0.3, 0.25)
+        v = _ruf("lesen")
+        if not (isinstance(v, dict) and v.get("ok")):
+            return _nein(_gr(v, "keine Antwort"))
+        e, n = cdp_konto_eintrag(v.get("zeilen") or [], ext)
+        if n > 1:
+            return _nein(f"Ziel {n}× im selben Abschnitt — nicht eindeutig")
+        if e:
+            if cdp_konto_gekuerzt(str(e.get("text") or "")):
+                # Prüfer 23.11.2026: gekürzte Kennungen fasst das Zusammenführen evtl. zusammen — zwei Konten könnten passen
+                return _nein("Ziel-Zeile zeigt die Kennung nur gekürzt — nicht eindeutig")
+            nr = _nur_alnum(str(e.get("kontonr") or "")).upper()
+            if not nr:
+                return _nein("Ziel-Zeile ohne lesbare Kontonummer")
+            vz = _ruf({"aktion": "zeige", "nr": nr})
+            if not (isinstance(vz, dict) and vz.get("ok")):
+                return _nein(_gr(vz, "augen.js ohne 'zeige' (< 0.8.9)"))
+            _warte(0.3, 0.2)
+            v2 = _ruf("lesen")
+            e2, n2 = cdp_konto_eintrag((v2 or {}).get("zeilen") or [] if isinstance(v2, dict) else [], ext)
+            if not e2 or n2 != 1:
+                return _nein(f"nach dem Scrollen {n2}× statt genau einmal")
+            if "im_bild" not in e2:
+                return _nein("augen.js ohne 'zeige' (< 0.8.9)")
+            if e2.get("im_bild") is not True:
+                return _nein("Ziel-Zeile nach dem Scrollen nicht ganz im sichtbaren Teil der Liste")
+            trail.append(f"Konto-Liste: Ziel {ext} nach {_i + 1} Abschnitt(en) ins Bild geholt (scrollTop {((vz or {}).get('scroll') or {}).get('top')}) — Klick folgt über den Konto-Schritt")
+            return True, ""
+        vs = _ruf("schritt")
+        urteil, grund = cdp_scroll_urteil(vs, letzte_top)
+        if urteil != "weiter":
+            return _nein("Ende der Liste ohne Ziel" if urteil == "ende" else grund)
+        letzte_top = vs["scroll"].get("top")
+    return _nein(f"nach {max_schritte} Schritten nicht gefunden")
 
 
 # KONTO-BEFUND INS ERGEBNIS (08.10.2026, Auftrag Master an Slave-Terminal 3 „Endlesung persistiert konto_eintraege + liste_voll_grund"):

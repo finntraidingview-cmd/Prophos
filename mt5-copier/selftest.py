@@ -2591,6 +2591,7 @@ def main():
     results.append(_test_sicher(test_panel_open_zweites_auge))
     results.append(_test_sicher(test_cdp_konto_weg))
     results.append(_test_sicher(test_cdp_konto_weg_gleicher_login))
+    results.append(_test_sicher(test_ps1_liste_scrollen_waehlen))
     results.append(_test_sicher(test_puls_fehler_1571))
     results.append(_test_sicher(test_puls_fehler_1603))
     results.append(_test_sicher(test_puls_fehler_1606))
@@ -5999,7 +6000,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.8'" in js and "localStorage.setItem('prophos_puls_chrome', '1')" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.9'" in js and "localStorage.setItem('prophos_puls_chrome', '1')" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.5 (26.10.2026, Routine Puls-Fehler, UNKLAR auf 2 PCs mit kleinem Fenster): Meldungsprotokoll (role=log) je Textknoten,
     # meldungenAus läuft über l.texte — Browser-Probe: node tools/selftest_augen_meldungsprotokoll.js
@@ -7309,17 +7310,43 @@ def test_cdp_konto_weg_gleicher_login():
         """Liste mit 7 Konten, 3 je Sicht (scrollbar): konto_scroll liefert Abschnitte, der Umschalter-Stand sagt liste_voll False."""
         def __init__(self, konten, ziel_drin=False, scroll_ok=True, **kw):
             _S.__init__(self, konten[:3], voll=False, **kw); self.alle, self.scroll_ok, self.top, self.rufe = konten, scroll_ok, 0, []
+            self.aktiv_nr = konten[0]
+        def _sicht(self):
+            # PS1 (23.11.2026): gerendert sind nur die Zeilen im Sichtfenster des Containers (virtualisiert), im_bild = ganz sichtbar
+            i0 = self.top // 32
+            return [{"text": z + "USD", "kontonr": z, "rect": [78, 90 + 32 * k, 228, 32], "aktiv": None, "im_bild": True}
+                    for k, z in enumerate(self.alle[i0:i0 + 3])]
+        def stand(self, opts=None):
+            st = _S.stand(self, opts)
+            st["konto"]["aktiv"] = self.aktiv_nr + "USD"
+            if self.offen:
+                st["konto"]["eintraege"] = [{"text": z["text"], "rect": z["rect"]} for z in self._sicht()]
+            return st
+        def klick(self, r, n, toast_ok=False):
+            if n.startswith("Konto ") and n != "Konto-Umschalter":
+                self.aktiv_nr, self.offen = n[6:], False
+            return _S.klick(self, r, n, toast_ok)
         def lese_js(self, a, timeout=8):
             if "konto_scroll" in a:
-                akt = a.split("(")[1].strip('")\n ')
-                self.rufe.append(akt)
+                import json
+                akt = json.loads(a.split("konto_scroll(", 1)[1].rsplit(")", 1)[0])
+                self.rufe.append(akt if isinstance(akt, str) else akt.get("aktion"))
                 if not self.scroll_ok:
                     return {"ok": False, "zeilen": [], "scroll": None, "grund": "kein Scroll-Container"}
+                hoehe = 32 * len(self.alle)
                 if akt == "anfang":
-                    self.top = 0; return {"ok": True, "zeilen": [], "scroll": {"vorher": 0, "top": 0, "hoehe": 32 * len(self.alle), "sicht": 96, "ende": False, "bewegt": False}, "grund": ""}
-                i0 = self.top // 32
-                zeilen = [{"text": z + "USD", "kontonr": z, "rect": [78, 90 + 32 * k, 228, 32], "aktiv": None} for k, z in enumerate(self.alle[i0:i0 + 3])]
-                vorher, hoehe = self.top, 32 * len(self.alle)
+                    self.top = 0; return {"ok": True, "zeilen": [], "scroll": {"vorher": 0, "top": 0, "hoehe": hoehe, "sicht": 96, "ende": False, "bewegt": False}, "grund": ""}
+                if akt == "lesen":
+                    return {"ok": True, "zeilen": self._sicht(), "scroll": {"vorher": self.top, "top": self.top, "hoehe": hoehe, "sicht": 96, "ende": self.top + 96 >= hoehe - 2, "bewegt": False}, "grund": ""}
+                if isinstance(akt, dict) and akt.get("aktion") == "zeige":
+                    nrs = [z["kontonr"] for z in self._sicht()]
+                    if nrs.count(akt.get("nr")) != 1:
+                        return {"ok": False, "zeilen": [], "scroll": None, "grund": "Ziel nicht gerendert"}
+                    i = self.alle.index(akt["nr"])
+                    vorher, self.top = self.top, max(0, min(i * 32 - 32, hoehe - 96))
+                    return {"ok": True, "zeilen": [], "scroll": {"vorher": vorher, "top": self.top, "hoehe": hoehe, "sicht": 96, "ende": False, "bewegt": True}, "grund": ""}
+                zeilen = self._sicht()
+                vorher = self.top
                 ende = vorher + 96 >= hoehe - 2
                 self.top = min(vorher + 76, hoehe - 96)
                 return {"ok": True, "zeilen": zeilen, "scroll": {"vorher": vorher, "top": self.top, "hoehe": hoehe, "sicht": 96, "ende": ende, "bewegt": self.top != vorher}, "grund": ""}
@@ -7341,18 +7368,184 @@ def test_cdp_konto_weg_gleicher_login():
         and s5.rufe[0] == "anfang" and s5.rufe.count("schritt") == 3 and s5.spur[-1] == "Taste Escape" and any("Konto-Liste gescrollt: 3 Abschnitt(e), 7 Konten (2 doppelt" in x and "Ende erreicht" in x for x in tr5)
         and ob.cdp_konto_weg_gleicher_login(r5[4], A6) == (True, 7),
         f"scrollbare Liste ohne Ziel: Abschnitte gelesen, Ende bewiesen, Beleg mit 7 Konten, danach Esc ({r5[2]}, {s5.rufe}, {tr5})")
-    chk(r6[1] == "konto_nicht_erreicht" and r6[4].get("gleicher_login") is None and r6[4].get("ziel_nach_scrollen") == 1 and "erst nach Scrollen" in r6[2] and "nicht geklickt" in r6[2]
-        and not any(x.startswith("Konto ") for x in s6.spur), f"Ziel steht erst nach Scrollen in der Liste → kein Beleg, nichts geklickt ({r6[2]}, {s6.spur})")
+    # PS1 (23.11.2026): Ziel genau einmal erst nach Scrollen → ins Bild holen und über den normalen Konto-Klick wählen (vorher: nur lesen)
+    chk(r6[0] is True and r6[4].get("konto_aktiv") == A6 + "USD" and ("Konto " + A6) in s6.spur and "zeige" in s6.rufe
+        and any("ins Bild geholt" in x for x in tr6), f"Ziel steht erst nach Scrollen in der Liste → ins Bild geholt und gewählt ({r6[:3]}, {s6.spur}, {s6.rufe})")
     chk(r7[1] == "konto_nicht_erreicht" and r7[4].get("gleicher_login") is None and "Liste nicht vollständig im Bild" in r7[2] and any("nicht möglich (kein Scroll-Container)" in x for x in tr7),
         f"kein Scroll-Container → weiter konto_nicht_erreicht mit Grund ({r7[2]}, {tr7})")
     q_km, q_ks = _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_konto_sichern)
-    chk(q_ks.index("scroll = _cdp_liste_scrollen(s, ext, trail)") < q_ks.index('_cdp_esc(s, st, trail, "Konto-Liste schließen")') and "Scroll-Weg liest nur" in q_ks
-        and "_warte(0.3, 0.25)" in _i.getsource(ob._cdp_liste_scrollen), "Scrollen vor dem Esc, nur lesen, Takt über _warte")
+    chk(q_ks.index("scroll = _cdp_liste_scrollen(s, ext, trail)") < q_ks.index('_cdp_esc(s, st, trail, "Konto-Liste schließen")')
+        and q_ks.index("_cdp_liste_ziel_zeigen(s, ext, trail)") < q_ks.index('_cdp_esc(s, st, trail, "Konto-Liste schließen")')
+        and "_warte(0.3, 0.25)" in _i.getsource(ob._cdp_liste_scrollen) and ".klick(" not in _i.getsource(ob._cdp_liste_scrollen)
+        and ".klick(" not in _i.getsource(ob._cdp_liste_ziel_zeigen), "Scrollen vor dem Esc, Scroll-/Zeige-Weg klicken nie selbst, Takt über _warte")
     chk(q_km.count("_cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res") == 2 and q_km.index("if ok or not cdp_login_noetig(code, extra):") < q_km.index("_cdp_konto_weg_gleicher_login(")
         and "cdp_gleicher_login_beleg(ko, aktiv, ext)" in q_ks and q_ks.index('ex["konto_treffer"] = None') < q_ks.index("gl, gg, gn = cdp_gleicher_login_beleg("),
         "Verdrahtung: vor dem frühen Rücksprung und nach der Login-Schleife; konto_treffer bleibt None (kein Abmelden)")
     if ok:
         print("✓ Konto weg bei richtigem Login: gleicher Apex-User + Liste 2× vollständig + Ziel 0× → konto_weg; fremder Login erst wechseln; sonst nie")
+    return ok
+
+
+def test_ps1_liste_scrollen_waehlen():
+    """PS1 (23.11.2026, Auftrag Master nach KA1-F): zwei FTMO-Futures-Konten scheiterten 26× mit „steht im Dropdown 0x … (anderer
+    Tradovate-Login?) … unvollständig: Container ragt aus dem Fenster" — virtualisierte Liste, 5 von 6 Konten gerendert, liste_kurz
+    sagte „ganz zu sehen". Jetzt: jede nicht bewiesen vollständige Liste wird gescrollt; Ziel genau einmal → ins Bild, normaler Klick;
+    Ziel fehlt → Fehlstart mit Grund (Ende bewiesen); doppelt / nicht ins Bild → nie geklickt, nie als fremder Login. Kennungen erfunden."""
+    import order_bot as ob, json as _js
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ PS1 Liste scrollen: " + text)
+            ok = False
+    F = ["FTMO100001", "FTMO100002", "FTMO100003", "FTMO100004", "FTMO100005", "FTMO100006"]
+    MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
+    SICHT = 5                                            # so viele Zeilen rendert die Liste (virtualisiert), Rest erst nach Scrollen
+
+    class _V:
+        """Puls-Chrome-Attrappe: Konto-Liste mit virtualisierten Zeilen, liste_voll False ('Container ragt aus dem Fenster'),
+        liste_kurz True (wie im Fehlerbild), konto_scroll anfang/lesen/schritt/zeige, Klick auf 'Konto X' wählt X und schließt."""
+        ws = None
+
+        def __init__(self, konten, zeige_ok=True, scroll_ok=True, im_fenster=True, zu_nach_zeige=False, fehler_ab=None, aktiv=None, kurz_text=None):
+            self.alle, self.zeige_ok, self.scroll_ok = list(konten), zeige_ok, scroll_ok
+            self.im_fenster, self.zu_nach_zeige, self.fehler_ab, self.kurz_text, self.schritte = im_fenster, zu_nach_zeige, fehler_ab, kurz_text, 0
+            self.top, self.offen, self.aktiv, self.spur, self.rufe = 0, False, aktiv or konten[0], [], []
+
+        def _text(self, z):
+            return (self.kurz_text + " 50,000.00 USD") if self.kurz_text and z == self.alle[-1] else z + " USD"
+
+        def _sicht(self):
+            i0 = self.top // 32
+            return [{"text": self._text(z), "kontonr": z, "rect": [78, 400 + 32 * k, 228, 32], "aktiv": None, "im_bild": True}
+                    for k, z in enumerate(self.alle[i0:i0 + SICHT])]
+
+        def stand(self, opts=None):
+            e = [{"text": z["text"], "rect": z["rect"]} for z in self._sicht()] if self.offen else []
+            return {"konto": {"panel": "offen", "panel_lage": "normal", "schalter": {"rect": [72, 745, 199, 28]}, "aktiv": self.aktiv + " 50,000.00 USD",
+                              "liste_offen": self.offen, "liste_voll": False, "liste_kurz": self.offen,
+                              "liste_voll_grund": "Container ragt aus dem Fenster" if self.offen else "", "eintraege": e}}
+
+        def lese_js(self, a, timeout=8):
+            if "konto_scroll(" in a:
+                akt = _js.loads(a.split("konto_scroll(", 1)[1].rsplit(")", 1)[0])
+                self.rufe.append(akt if isinstance(akt, str) else akt.get("aktion"))
+                if not self.scroll_ok:
+                    return {"ok": False, "zeilen": [], "scroll": None, "grund": "kein Scroll-Container"}
+                hoehe, sicht = 32 * len(self.alle), 32 * SICHT
+                if akt == "anfang":
+                    self.top = 0
+                    return {"ok": True, "zeilen": [], "scroll": {"vorher": 0, "top": 0, "hoehe": hoehe, "sicht": sicht, "ende": False, "bewegt": False}, "grund": ""}
+                if akt == "lesen":
+                    return {"ok": True, "zeilen": self._sicht(), "scroll": {"vorher": self.top, "top": self.top, "hoehe": hoehe, "sicht": sicht, "ende": self.top + sicht >= hoehe - 2, "bewegt": False, "im_fenster": self.im_fenster}, "grund": ""}
+                if isinstance(akt, dict) and akt.get("aktion") == "zeige":
+                    if not self.zeige_ok:
+                        return {"ok": False, "zeilen": [], "scroll": None, "grund": "Ziel 0× gerendert (nicht genau einmal)"}
+                    i = self.alle.index(akt["nr"])
+                    vorher, self.top = self.top, max(0, min(i * 32 - 64, hoehe - sicht))
+                    if self.zu_nach_zeige:
+                        self.offen = False                       # Popup schließt beim Scrollen (Prüfer B3)
+                    return {"ok": True, "zeilen": [], "scroll": {"vorher": vorher, "top": self.top, "hoehe": hoehe, "sicht": sicht, "ende": False, "bewegt": True, "im_fenster": self.im_fenster}, "grund": ""}
+                self.schritte += 1
+                if self.fehler_ab is not None and self.schritte > self.fehler_ab:
+                    return {"ok": False, "zeilen": [], "scroll": None, "grund": "TimeoutError"}   # CDP-Fehler mitten im Lauf (Prüfer B2)
+                zeilen, vorher = self._sicht(), self.top
+                ende = vorher + sicht >= hoehe - 2
+                self.top = min(vorher + 96, max(0, hoehe - sicht))
+                return {"ok": True, "zeilen": zeilen, "scroll": {"vorher": vorher, "top": self.top, "hoehe": hoehe, "sicht": sicht, "ende": ende, "bewegt": self.top != vorher, "im_fenster": self.im_fenster}, "grund": ""}
+            if "innerText" in a:
+                return False
+            return {"frei": True, "was": ""} if "elementFromPoint" in a else dict(MAX)
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.spur.append("Taste " + k); self.offen = False
+
+        def klick(self, r, n, toast_ok=False):
+            self.spur.append(n)
+            if n == "Konto-Umschalter":
+                self.offen = True
+            elif n.startswith("Konto "):
+                self.aktiv, self.offen = n[6:], False
+            return True
+
+    # REIN RECHNEND: wann scrollen, welcher Beleg
+    def ko(voll=False, kurz=True):
+        return {"liste_voll": voll, "liste_kurz": kurz, "eintraege": [{"text": z + " USD"} for z in F[:5]]}
+    N, B = ob.cdp_scroll_noetig, ob.cdp_liste_beleg_gescrollt
+    chk(N(ko(), F[0] + " USD", F[5]) is True and N(ko(kurz=False), F[0] + " USD", F[5]) is True and N(ko(voll=True), F[0] + " USD", F[5]) is False
+        and N(ko(), "APEX1234560000001 USD", "TDFYSL150300000001") is False and N(ko(), "APEX1234560000001 USD", "APEX1234560000006") is True
+        and N(None, "", F[5]) is True, "Scrollen bei jeder nicht bewiesenen Liste (auch liste_kurz), nie bei sicher anderem Login, nie bei liste_voll")
+    sc_ziel = {"schritte": 2, "ziel_n": 1, "ende": True, "zeilen": [{"text": z + " USD"} for z in F]}
+    sc_ohne = {"schritte": 2, "ziel_n": 0, "ende": True, "ende_sichtbar": True, "zeilen": [{"text": z + " USD"} for z in F[:5]]}
+    chk(B(ko(), F[0] + " USD", F[5], None) == ob.cdp_liste_beleg(ko(), F[0] + " USD", F[5]) and B(ko(), F[0] + " USD", F[5], {"schritte": 0}) == ob.cdp_liste_beleg(ko(), F[0] + " USD", F[5])
+        and B(ko(), F[0] + " USD", F[5], sc_ziel)[0] is False and "erst nach Scrollen" in B(ko(), F[0] + " USD", F[5], sc_ziel)[1]
+        and B(ko(), F[0] + " USD", F[5], sc_ohne) == (True, "") and B(ko(), "FTMO999999 USD", F[5], sc_ohne)[0] is False
+        and B(ko(), F[0] + " USD", F[5], dict(sc_ohne, ende=False))[0] is False and B(ko(), F[0] + " USD", F[5], dict(sc_ohne, ende_sichtbar=False))[0] is False
+        and "Ende nicht im Fenster bewiesen" in B(ko(), F[0] + " USD", F[5], dict(sc_ohne, ende_sichtbar=None))[1],
+        "Beleg: Ziel nach Scrollen → nie fremder Login; Ende im Fenster bewiesen → ganze Liste; gescrollt ohne solches Ende → nie Beleg")
+
+    alt = {n: getattr(ob, n) for n in ("_warte",)}
+    ob._warte = lambda a_, b_: None
+    try:
+        s1 = _V(F); t1 = []
+        r1 = ob._cdp_konto_sichern(s1, F[5], {}, t1)                 # Ziel außerhalb des Fensters → gefunden, geklickt
+        s2 = _V(F[:5] + ["FTMO100007"]); t2 = []
+        r2 = ob._cdp_konto_sichern(s2, F[5], {}, t2)                 # Ziel fehlt ganz → Fehlstart mit Grund
+        s3 = _V(F[:5] + [F[5], "FTMO100008", F[5]]); t3 = []
+        r3 = ob._cdp_konto_sichern(s3, F[5], {}, t3)                 # Ziel doppelt → nie geklickt
+        s4 = _V(F, zeige_ok=False); t4 = []
+        r4 = ob._cdp_konto_sichern(s4, F[5], {}, t4)                 # augen.js ohne 'zeige' → nie geklickt, kein Login-Beleg
+        s5 = _V(F, scroll_ok=False); t5 = []
+        r5 = ob._cdp_konto_sichern(s5, F[5], {}, t5)                 # kein Scroll-Container → Verhalten wie vor PS1
+        s6 = _V(F); t6 = []
+        r6 = ob._cdp_konto_sichern(s6, F[2], {}, t6)                 # Ziel sichtbar → kein Scrollen, direkter Klick wie immer
+        s7 = _V(F[:5] + ["FTMO100007"], im_fenster=False); t7 = []
+        r7 = ob._cdp_konto_sichern(s7, F[5], {}, t7)                 # Prüfer B1: Ende, aber Container ragt aus dem Fenster → kein Beleg
+        s8 = _V(F[:5] + ["FTMO100007", "FTMO100008", "FTMO100009"], fehler_ab=1); t8 = []
+        r8 = ob._cdp_konto_sichern(s8, F[5], {}, t8)                 # Prüfer B2: Abbruch mitten im Scrollen → kein Beleg aus der Kurz-Liste
+        s9 = _V(F, zu_nach_zeige=True); t9 = []
+        r9 = ob._cdp_konto_sichern(s9, F[5], {}, t9)                 # Prüfer B3: Liste nach 'zeige' zu → nichts geklickt, kein Ein-Konto-Beleg
+        AX = ["APEX1234560000001", "APEX1234560000002", "APEX1234560000003", "APEX1234560000004", "APEX1234560000005", "APEX1234560000006"]
+        s10 = _V(AX, zeige_ok=False); t10 = []
+        r10 = ob._cdp_konto_sichern(s10, AX[5], {}, t10)             # Prüfer B4: Apex gleicher User, Ziel gefunden, zeige scheitert → nie gleicher_login
+        TX = ["TDFYSL15030000000" + str(i) for i in range(1, 7)]
+        s11 = _V(TX, kurz_text="TDFYSL15030000…"); t11 = []
+        r11 = ob._cdp_konto_sichern(s11, TX[5], {}, t11)             # gekürzte Kennung (≥ 14 Zeichen, passt als Anfang) → nie geklickt
+    finally:
+        for n_, f_ in alt.items():
+            setattr(ob, n_, f_)
+    klicks = lambda s_: [x for x in s_.spur if x.startswith("Konto ") and x != "Konto-Umschalter"]
+    chk(r1[0] is True and klicks(s1) == ["Konto " + F[5]] and s1.aktiv == F[5] and "zeige" in s1.rufe and any("ins Bild geholt" in x for x in t1)
+        and "Taste Escape" not in s1.spur, f"Ziel außerhalb des Fensters → gescrollt, ins Bild geholt, genau ein Klick ({r1[:3]}, {s1.spur}, {s1.rufe}, {t1})")
+    chk(r2[0] is False and r2[1] == "konto_nicht_erreicht" and not klicks(s2) and r2[4].get("gescrollt") and "steht im Dropdown 0x" in r2[2]
+        and r2[4].get("liste_aktiv") and any("Ende erreicht" in x and "6 Konten" in x for x in t2),
+        f"Ziel fehlt → ganze Liste gescrollt (Ende), Fehlstart mit Grund, nichts geklickt ({r2[2]}, {r2[4]}, {t2})")
+    # das Zusammenführen zählt gleiche Nummern als Überlappung (ziel_n 1) — die Doppelung fängt dann der Zeige-Schritt im Abschnitt
+    chk(r3[0] is False and not klicks(s3) and "nicht eindeutig" in r3[2] and not r3[4].get("liste_aktiv") and r3[4].get("konto_treffer") is None
+        and "zeige" not in s3.rufe, f"Ziel doppelt → nie geklickt, kein Login-Beleg ({r3[2]}, {s3.rufe})")
+    chk(r4[0] is False and not klicks(s4) and not r4[4].get("liste_aktiv") and r4[4].get("konto_treffer") is None and "erst nach Scrollen" in r4[2]
+        and "nicht genau einmal" in r4[2] and s4.spur[-1] == "Taste Escape",
+        f"Ziel nicht ins Bild zu holen → nie geklickt, kein Abmelden (konto_treffer None), Liste per Esc zu ({r4[2]}, {s4.spur})")
+    chk(r5[0] is False and not klicks(s5) and r5[4].get("liste_aktiv") and any("nicht möglich (kein Scroll-Container)" in x for x in t5),
+        f"kein Scroll-Container → wie vor PS1 (Kurz-Liste bleibt der Beleg) ({r5[2]}, {t5})")
+    chk(r6[0] is True and klicks(s6) == ["Konto " + F[2]] and not s6.rufe, f"Ziel sichtbar → direkter Klick, kein Scrollen ({s6.spur}, {s6.rufe})")
+    ohne_beleg = lambda r_: r_[0] is False and not r_[4].get("liste_aktiv") and r_[4].get("konto_treffer") is None and not ob.cdp_login_noetig(r_[1], r_[4])
+    chk(ohne_beleg(r7) and not klicks(s7) and "Ende nicht im Fenster bewiesen" in r7[2], f"B1: Ende, Container nicht im Fenster → kein Login-Beleg ({r7[2]})")
+    chk(ohne_beleg(r8) and not klicks(s8) and "Liste länger als sichtbar" in r8[2], f"B2: Abbruch mitten im Scrollen → kein Login-Beleg ({r8[2]})")
+    chk(ohne_beleg(r9) and not klicks(s9) and "nicht mehr offen" in r9[2], f"B3: Liste nach 'zeige' zu → nichts geklickt, kein Beleg ({r9[2]}, {s9.spur})")
+    chk(ohne_beleg(r10) and not klicks(s10) and r10[4].get("gleicher_login") is None and ob.cdp_konto_weg_gleicher_login(r10[4], AX[5]) == (False, None),
+        f"B4: Apex, Ziel gefunden, nicht greifbar → nie Befund für konto_weg ({r10[2]}, {r10[4]})")
+    chk(r11[0] is False and not klicks(s11) and "gekürzt" in r11[2] and not r11[4].get("liste_aktiv"), f"gekürzte Ziel-Kennung → nie geklickt ({r11[2]})")
+    js = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "augen.js"), encoding="utf-8").read()
+    ks = js.split("function kontoScroll(aktion)")[1].split("function mausMitschrift")[0]
+    chk("aktion === 'zeige'" in ks and "im_bild: imBild(" in ks and ".click(" not in ks and "scrollIntoView" not in ks and "treffer.length !== 1" in ks
+        and "var VERSION = '0.8.9'" in js, "augen.js 0.8.9: 'zeige' nur scrollTop des Containers, nur genau ein Treffer, nie Klick/scrollIntoView, im_bild je Zeile")
+    if ok:
+        print("✓ PS1 Konto-Liste: Ziel außer Sicht → gescrollt + gewählt; fehlt → Fehlstart mit Grund; doppelt/nicht greifbar → nie geklickt")
     return ok
 
 

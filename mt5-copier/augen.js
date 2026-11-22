@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.8.8';   // 0.8.8 (30.10.2026, Simon pc-pmqd8g: Userscript lief im Puls-Chrome im NORMALEN Modus — Abzeichen „● Reader · 1 Pos", Tab-Kennung „t…" statt „puls-…", der reader-server nahm keinen Stand, Fusion schloss nie übers Script): augen.js läuft NUR per CDP im Puls-Chrome und setzt dort auf tradingview.com die Marke localStorage prophos_puls_chrome = '1'; das Userscript (≥ 0.10.4) schaltet damit den Puls-Chrome-Modus ein, solange der Tampermonkey-Schalter nicht ausdrücklich aus steht. 0.8.7 (28.10.2026, Finn: „alles aus Zufall"): konto_scroll-Schritt 55–90 % der Sichthöhe statt fest 80 %. 0.8.6 (27.10.2026, pc-2zc2we Finn + Pascal, FundedNext-Futures-Login: „kein Konto-Umschalter im Broker-Panel erkannt" bei jedem Lauf): der Umschalter zeigte 'FNFTFAFINNSAMUELHE…  155,365.92 USD' — die Kürzung schnitt ALLE Ziffern ab, RX_KONTO fand nichts, s. RX_KENNUNG_GEKUERZT an kontoSchalter. 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR-Fälle auf 2 PCs mit kleinem Fenster): toasts.log liest das Meldungsprotokoll (role=log) je Textknoten (texte) statt als geklebten textContent-Block — „Buy 1at 29,289.50" fand RX_D_EN nie; meldungen aus dem Protokoll kommen jetzt an, wenn der Stapel unter dem Fensterrand liegt und „Show more" nicht im Bild ist
+  var VERSION = '0.8.9';   // 0.8.9 (23.11.2026, PS1): konto_scroll({aktion:'zeige', nr}) holt eine gerenderte Konto-Zeile mittig in den Listen-Container (nur dessen scrollTop, nie Klick), Zeilen tragen im_bild — der Bot wählt so ein Ziel aus einer abgeschnittenen/virtualisierten Liste. 0.8.8 (30.10.2026, Simon pc-pmqd8g: Userscript lief im Puls-Chrome im NORMALEN Modus — Abzeichen „● Reader · 1 Pos", Tab-Kennung „t…" statt „puls-…", der reader-server nahm keinen Stand, Fusion schloss nie übers Script): augen.js läuft NUR per CDP im Puls-Chrome und setzt dort auf tradingview.com die Marke localStorage prophos_puls_chrome = '1'; das Userscript (≥ 0.10.4) schaltet damit den Puls-Chrome-Modus ein, solange der Tampermonkey-Schalter nicht ausdrücklich aus steht. 0.8.7 (28.10.2026, Finn: „alles aus Zufall"): konto_scroll-Schritt 55–90 % der Sichthöhe statt fest 80 %. 0.8.6 (27.10.2026, pc-2zc2we Finn + Pascal, FundedNext-Futures-Login: „kein Konto-Umschalter im Broker-Panel erkannt" bei jedem Lauf): der Umschalter zeigte 'FNFTFAFINNSAMUELHE…  155,365.92 USD' — die Kürzung schnitt ALLE Ziffern ab, RX_KONTO fand nichts, s. RX_KENNUNG_GEKUERZT an kontoSchalter. 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR-Fälle auf 2 PCs mit kleinem Fenster): toasts.log liest das Meldungsprotokoll (role=log) je Textknoten (texte) statt als geklebten textContent-Block — „Buy 1at 29,289.50" fand RX_D_EN nie; meldungen aus dem Protokoll kommen jetzt an, wenn der Stapel unter dem Fensterrand liegt und „Show more" nicht im Bild ist
     // 0.8.4 (19.10.2026, Finn: „Balance nach dem Orbit-Trade wird nicht mehr erkannt"): die Kopfzeile des Account Managers trägt seit dem TradingView-Update kein „Account Balance" mehr — die Balance steht im Umschalter neben der Kennung und kommt als Paar 'USD': '159,011.40' an; konto_summary.balance fällt auf das Währungs-Label zurück (der Bot ergänzt zusätzlich aus dem Umschalter-Text)
     // 0.8.3 (19.10.2026, Finn: TradingView-Update, Konto-Umschalter zeigt jetzt „KENNUNG  153,462.72 USD" in eigenen spans, Puls-Fehlstarts auf 4 PCs „der hat nur APEX6687940000016100" / „aktiv APEX670837000000698,115.70USD"): txtK — Konto-Texte aus den Textknoten MIT Leerzeichen zusammensetzen (textContent klebte Kennung und Balance aneinander, der Bot las die Balance-Ziffern als Teil der Kontonummer); aktiv-Abgleich der Listenzeilen nur noch über die Kontonummer; listeVoll erlaubt Zeilen bis 6 Ebenen unter dem Listen-Container (neues Dropdown „ACCOUNTS" verschachtelt tiefer: „Zeile liegt 5 Ebenen unter dem Vorfahren" → kein Login-Beleg); gekürzte Kennung „FTDFYSLX1507984146…" (title/aria-label mit voller Nummer wird bevorzugt)
     // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
@@ -1106,8 +1106,15 @@ var PROPHOS_AUGEN = (function () {
    * (Vorfahr der ersten Zeile mit overflow auto/scroll und scrollHeight > clientHeight, ≤ 10 Ebenen), klickt nie, tippt nie.
    * Zeilen wie in konto(): role=option/menuitem, sonst kontoZeilen(). Der Bot (order_bot.py _cdp_liste_scrollen) ruft das im
    * Takt mit Pausen, führt die Abschnitte zusammen (Duplikate aus der Überlappung) und schließt die Liste wie heute mit Esc. */
+  /* 0.8.9 (23.11.2026, PS1, Auftrag Master nach KA1-F — zwei FTMO-Futures-Konten: virtualisierte Liste, 5 von 6 Konten gerendert, Fehlstart
+   * „steht im Dropdown 0x … Container ragt aus dem Fenster"): aktion darf ein Objekt sein. {aktion:'zeige', nr} scrollt den Listen-
+   * Container so, dass die Zeile mit GENAU dieser Kontonummer mittig steht (nur scrollTop des Containers, kein scrollIntoView — die Seite
+   * selbst bewegt sich nie), und klickt nie; nicht genau einmal gerendert → ok false. Jede gelesene Zeile trägt im_bild: ganz im
+   * sichtbaren Teil des Containers UND des Fensters (der Bot klickt nur so eine Zeile, über den normalen Konto-Schritt). */
   function kontoScroll(aktion) {
     try {
+      var akt = (aktion && typeof aktion === 'object') ? aktion : { aktion: aktion };
+      aktion = akt.aktion;
       var s = kontoSchalter();
       var optEl = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]').filter(sichtbar);
       var els = optEl.length ? optEl : (kontoZeilen(s.el).els || []);
@@ -1118,22 +1125,40 @@ var PROPHOS_AUGEN = (function () {
         if (/(auto|scroll)/.test(st.overflowY + ' ' + st.overflow) && c.scrollHeight > c.clientHeight + 2) break;
         c = c.parentElement; n++;
       }
+      var ohneC = !c || c === document.body || c === document.documentElement;
+      function imBild(r) {
+        var H = window.innerHeight, o = 0, u = H;
+        if (!ohneC) { var cr = c.getBoundingClientRect(); o = Math.max(0, cr.top); u = Math.min(H, cr.bottom); }
+        return r.height > 0 && r.top >= o - 1 && r.bottom <= u + 1;
+      }
       function lies() {
         return els.slice(0, 60).map(function (e) {
           var t = entdoppeln(txt(e)), m = kontoNrAus(t);
-          return { text: t.slice(0, 60), kontonr: m ? m[0] : '', rect: rect(e),
+          return { text: t.slice(0, 60), kontonr: m ? m[0] : '', rect: rect(e), im_bild: imBild(e.getBoundingClientRect()),
                    aktiv: attr(e, 'aria-selected') === 'true' || attr(e, 'aria-checked') === 'true' || null };
         });
       }
-      if (!c || c === document.body || c === document.documentElement) return { ok: false, zeilen: lies(), scroll: null, grund: 'kein Scroll-Container' };
-      var vorher = c.scrollTop, zeilen = aktion === 'anfang' ? [] : lies();
-      if (aktion === 'anfang') c.scrollTop = 0;
+      if (ohneC) return { ok: false, zeilen: lies(), scroll: null, grund: 'kein Scroll-Container' };
+      var vorher = c.scrollTop, zeilen = (aktion === 'anfang' || aktion === 'zeige') ? [] : lies();
+      if (aktion === 'zeige') {
+        var ziel = String(akt.nr || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        var treffer = els.filter(function (e) { var m = kontoNrAus(entdoppeln(txt(e))); return !!ziel && !!m && String(m[0]).replace(/[^A-Za-z0-9]/g, '').toUpperCase() === ziel; });
+        if (treffer.length !== 1) return { ok: false, zeilen: [], scroll: null, grund: 'Ziel ' + treffer.length + '× gerendert (nicht genau einmal)' };
+        // mittig im SICHTBAREN Teil des Containers (Schnitt mit dem Fenster) — ragt er aus dem Fenster (KA1-F), zählt nur, was man sieht
+        var zr = treffer[0].getBoundingClientRect(), crz = c.getBoundingClientRect();
+        var so = Math.max(0, crz.top), su = Math.min(window.innerHeight, crz.bottom);
+        var soll = c.scrollTop + (zr.top - so) - Math.max(0, ((su - so) - zr.height) / 2);
+        c.scrollTop = Math.max(0, Math.min(Math.round(soll), Math.max(0, c.scrollHeight - c.clientHeight)));
+      }
+      else if (aktion === 'anfang') c.scrollTop = 0;
       // 28.10.2026 (Finn: „alles aus Zufall"): Schrittweite je Schritt 55–90 % der Sichthöhe statt immer 80 % — bleibt < 100 %, keine Zeile fällt aus
       else if (aktion === 'schritt') c.scrollTop = Math.min(vorher + Math.max(40, Math.round(c.clientHeight * (0.55 + Math.random() * 0.35))), Math.max(0, c.scrollHeight - c.clientHeight));
-      var nach = c.scrollTop;
+      var nach = c.scrollTop, cf = c.getBoundingClientRect();
+      // im_fenster (0.8.9, Prüfer 23.11.2026): Container ganz im Fenster — nur dann beweist „ende", dass alle Zeilen gelesen wurden
       return { ok: true, zeilen: zeilen, grund: '',
                scroll: { vorher: Math.round(vorher), top: Math.round(nach), hoehe: c.scrollHeight, sicht: c.clientHeight,
-                         ende: vorher + c.clientHeight >= c.scrollHeight - 2, bewegt: Math.round(nach) !== Math.round(vorher) } };
+                         ende: vorher + c.clientHeight >= c.scrollHeight - 2, bewegt: Math.round(nach) !== Math.round(vorher),
+                         im_fenster: cf.top >= -1 && cf.bottom <= window.innerHeight + 1 } };
     } catch (e) { return { ok: false, zeilen: [], scroll: null, grund: 'konto_scroll: ' + String(e) }; }
   }
 
