@@ -11,10 +11,10 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel",
-              "ap_regel_konto", "ap_echte_balancen", "lt_pl_balance", "lt_balance_sprung", "zw_ziel", "zw_erreicht", "ap_normal_tpsl_ende",
+              "ap_regel_konto", "ap_echte_balancen", "lt_pl_balance", "lt_fill_pl", "lt_balance_sprung", "zw_ziel", "zw_erreicht", "ap_normal_tpsl_ende",
               "ap_normal_auto_pruefen", "ap_auto_abhaken_schalter_lesen")
 KONSTANTEN = ("AP_TYPEN", "AP_KETTE_STANDARD", "AP_GROESSE_TOLERANZ", "AP_BLOW_AUTO_ROUTEN", "AP_NORMAL_AUTO_ROUTEN",
-              "LT_BALANCE_SPRUNG_USD", "AP_REST_MIN", "AP_FEHLT_ZEIGEN_USD", "AP_NORMAL_TPSL_TOL", "AP_NORMAL_TPSL_MIN_USD",
+              "LT_BALANCE_SPRUNG_USD", "LT_BALANCE_FILL_TOL_USD", "LT_FILL_PV", "AP_REST_MIN", "AP_FEHLT_ZEIGEN_USD", "AP_NORMAL_TPSL_TOL", "AP_NORMAL_TPSL_MIN_USD",
               "AP_NORMAL_HAND_GRUENDE")
 FEHLER = []
 

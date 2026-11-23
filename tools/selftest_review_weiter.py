@@ -19,10 +19,10 @@ def lade():
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
     ns = {}
-    for k in ("LT_BALANCE_SPRUNG_USD", "AP_TYPEN", "AP_HB_ECHT_QUELLEN", "AP_BLOW_AUTO_ROUTEN", "AP_NORMAL_AUTO_ROUTEN", "AP_REVIEW_WEITER_GRUENDE",
+    for k in ("LT_BALANCE_SPRUNG_USD", "LT_BALANCE_FILL_TOL_USD", "LT_FILL_PV", "AP_TYPEN", "AP_HB_ECHT_QUELLEN", "AP_BLOW_AUTO_ROUTEN", "AP_NORMAL_AUTO_ROUTEN", "AP_REVIEW_WEITER_GRUENDE",
               "AP_REVIEW_WEITER_ROUTEN", "AP_REVIEW_WEITER_RANG"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
-    for f in ("_wd_num", "lt_pl_balance", "lt_balance_sprung", "ap_echte_balancen", "ap_review_weiter_pruefen"):
+    for f in ("_wd_num", "lt_pl_balance", "lt_fill_pl", "lt_balance_sprung", "ap_echte_balancen", "ap_review_weiter_pruefen"):
         exec(block(f), ns)
     return ns
 

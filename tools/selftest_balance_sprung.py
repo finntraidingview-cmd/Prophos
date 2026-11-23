@@ -37,8 +37,8 @@ def lade_py():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    konst = re.search(r"^LT_BALANCE_SPRUNG_USD = .*$", src, re.M).group(0)
-    exec("\n".join([konst] + [block(f) for f in ("_wd_num", "lt_pl_balance", "lt_balance_sprung")]), ns)
+    konst = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("LT_BALANCE_SPRUNG_USD", "LT_BALANCE_FILL_TOL_USD", "LT_FILL_PV")]
+    exec("\n".join(konst + [block(f) for f in ("_wd_num", "lt_pl_balance", "lt_fill_pl", "lt_balance_sprung")]), ns)
     return ns
 
 
@@ -79,11 +79,30 @@ FAELLE = [  # (name, route, tv, fin, erwartet Sprung (balance, tages) | None)
      {"balance_end": 2000, "today_pnl": -500, "datum": "2026-10-09", "balance_relativ": True}, None),
 ]
 
+# FILL-BELEG (23.11.2026, Plan ec83e13a Lucid …0001): Balance −2.768, „Total P/L“ −180,50, Fills 25.835,25 → 26.296 × 3 MNQ = −2.764,50
+EC_TV = {"balance_start": 156844, "today_pnl_start": 0, "datum_start": "2026-11-23", "einstieg_nq": 25835.25, "einstieg_quelle": "fill",
+         "einstieg_symbol": "MNQZ6"}
+EC_FIN = {"balance_end": 154076, "today_pnl": -180.5, "datum": "2026-11-23", "quelle": "puls"}
+EC_HEDGE = {"master_exit": {"preis": 26296, "menge": 3, "seite": "buy", "symbol": "MNQZ6", "quelle": "toast"}}
+FILL_FAELLE = [  # (name, route, tv, fin, hedge, erwartet Sprung (balance, tages) | None)
+    ("ec83e13a Fills belegen −2.768 → kein Sprung", "tvv2", EC_TV, EC_FIN, EC_HEDGE, None),
+    ("ec83e13a ohne Ausstieg am Hedge → Sprung wie bisher", "tvv2", EC_TV, EC_FIN, {}, (-2768.0, -180.5)),
+    ("Einstieg nicht aus dem Fill → Sprung wie bisher", "tvv2", dict(EC_TV, einstieg_quelle="feed"), EC_FIN, EC_HEDGE, (-2768.0, -180.5)),
+    ("Auszahlung, Fills passen zum Tages-P&L (NQ −590) → Sprung bleibt", "tvv2",
+     dict(EA["tv"], einstieg_nq=20000.0, einstieg_quelle="fill", einstieg_symbol="NQZ6"), EA["fin"],
+     {"master_exit": {"preis": 19970.5, "menge": 1, "seite": "sell", "symbol": "NQZ6"}}, (-5089.2, -589.2)),
+]
+
 JS_TEST = r"""
 const F = %s
 const aus = { sprung: F.map(f => tvBalanceSprung(f[1], f[2], f[3])), text: balanceSprungText(tvBalanceSprung('tvv2', F[0][2], F[0][3])) }
 const plan = (f, route) => ({ id: 'x', route: route || 'tvv2', hedgeEur: 50, mt5Baseline: { tv: f[2], final: f[3] } })
 aus.auto = F.map(f => { const r = _autoPnlTvV2Gelesen(plan(f, f[1])); return r ? { m: r.masterPnl, q: r.quelle, v: r.vorschlag == null ? null : r.vorschlag, h: r.hinweis || '' } : null })
+const FF = %s
+aus.fill = FF.map(f => tvBalanceSprung(f[1], f[2], f[3], f[4]))
+aus.fpl = tvFillPl(FF[0][2], FF[0][4])
+const ecAuto = _autoPnlTvV2Gelesen({ id: 'ec', route: 'tvv2', hedgeEur: 108.49, mt5Baseline: { tv: FF[0][2], final: FF[0][3], hedge: FF[0][4] } })
+aus.ec = ecAuto ? { m: ecAuto.masterPnl, q: ecAuto.quelle } : null
 print(JSON.stringify(aus))
 """
 
@@ -96,14 +115,19 @@ def main():
         ok = (r is None) if soll is None else (r is not None and r["balance"] == soll[0] and r["tages"] == soll[1]
                                               and r["differenz"] == round(soll[0] - soll[1], 2))
         check(ok, f"Backend {name}: {r}")
+    check(py["lt_fill_pl"](EC_TV, EC_HEDGE) == -2764.5, f"Backend Fill-P&L ec83e13a = −2.764,50 ({py['lt_fill_pl'](EC_TV, EC_HEDGE)})")
+    for name, route, tv, fin, hg, soll in FILL_FAELLE:
+        r = S(route, tv, fin, hg)
+        ok = (r is None) if soll is None else (r is not None and r["balance"] == soll[0] and r["tages"] == soll[1])
+        check(ok, f"Backend {name}: {r}")
 
     if not os.path.exists(JSC):
         print("✗ jsc fehlt — Frontend-Teil nicht ausführbar")
         sys.exit(1)
     html = open(HTML, encoding="utf-8").read()
-    konst = re.search(r"^\s*const TV_BALANCE_SPRUNG_USD = .*$", html, re.M).group(0)
-    js = "\n".join([konst] + [js_funktion(html, n) for n in ("tvBalanceBasisGleich", "tvBalanceSprung", "balanceSprungText", "_autoPnlTvV2Gelesen")])
-    js += JS_TEST % json.dumps([[n, r, tv, fin] for n, r, tv, fin, _s in FAELLE])
+    konst = "\n".join(re.search(rf"^\s*const {k} = .*$", html, re.M).group(0) for k in ("TV_BALANCE_SPRUNG_USD", "TV_BALANCE_FILL_TOL_USD"))
+    js = "\n".join([konst] + [js_funktion(html, n) for n in ("tvBalanceBasisGleich", "tvFillPl", "tvBalanceSprung", "balanceSprungText", "_autoPnlTvV2Gelesen")])
+    js += JS_TEST % (json.dumps([[n, r, tv, fin] for n, r, tv, fin, _s in FAELLE]), json.dumps([[n, r, tv, fin, hg] for n, r, tv, fin, hg, _s in FILL_FAELLE]))
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(js)
     try:
@@ -134,6 +158,12 @@ def main():
     check(c and c["q"] == "balance" and c["m"] == -5089.2, f"anderer Handelstag: wie bisher Balance-Differenz ({c})")
     d = a["auto"][8]
     check(d and d["q"] == "balance_sprung" and d["v"] == -2020.0, f"Topstep V2 Kette Trade 2: Vorschlag −2.020 (RP&L ab dem Klick) ({d})")
+
+    gleich_f = all((py_r is None and js_r is None) or (py_r and js_r and py_r["balance"] == js_r["balance"] and py_r["tages"] == js_r["tages"])
+                   for py_r, js_r in zip([S(r_, tv, fin, hg) for _n, r_, tv, fin, hg, _s in FILL_FAELLE], a["fill"]))
+    check(gleich_f, f"Frontend = Backend in allen Fill-Fällen ({a['fill']})")
+    check(a["fpl"] == -2764.5, f"Frontend Fill-P&L ec83e13a = −2.764,50 ({a['fpl']})")
+    check(a["ec"] and a["ec"]["q"] == "balance" and a["ec"]["m"] == -2768.0, f"Auto-P&L ec83e13a: Balance-Differenz −2.768 übernommen ({a['ec']})")
 
     print()
     if FEHLER:

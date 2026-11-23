@@ -15571,10 +15571,35 @@ def lt_pl_balance(route, tv, fin):
 # 12,6 vor und nach dem Trade, Balance −50,40), sagt er nichts, dann wie bisher die Balance-Differenz (Prüfung Slave 2 / Master 08.10.2026).
 # Fehlt ein Wert / anderer Tag: wie bisher.
 LT_BALANCE_SPRUNG_USD = 100.0
+# FILL-BELEG (23.11.2026, Finn am Screenshot: „der stimmt nicht, der Master hat −2700 gemacht“, Plan ec83e13a Lucid 150k …0001 Recovery):
+# Balance 156.844 → 154.076 = −2.768, TradingViews „Total P/L“ las −180,50 → als Auszahlung gewertet, Zeile zeigte −180,50. Am Hedge stand
+# der echte Ausstieg aus dem TV-Toast (master_exit „Buy 3 at 26,296.00“), Einstieg 25.835,25 aus dem Fill-Toast: (25.835,25 − 26.296) × 3 × 2 $
+# = −2.764,50 — die Balance stimmte, der Tageswert nicht. Belegen Einstieg- UND Ausstiegs-Fill die Balance-Differenz (Abstand höchstens
+# LT_BALANCE_FILL_TOL_USD bzw. 5 % — Gebühren/Rundung), ist es kein Sprung. Ohne beide Fills (z. B. Fall ea91e359) gilt die Regel unverändert.
+LT_BALANCE_FILL_TOL_USD = 50.0
+LT_FILL_PV = {"NQ": 20.0, "MNQ": 2.0}   # $ je Punkt und Kontrakt (wie WD_HEUTE_PPL)
 
 
-def lt_balance_sprung(route, tv, fin):
-    """REIN RECHNEND (testbar): Balance-Sprung eines beendeten Puls-Plans → {balance, tages, differenz} | None (s. o.)."""
+def lt_fill_pl(tv, hedge):
+    """REIN RECHNEND (testbar): Master-P&L aus echtem Einstieg (tv.einstieg_nq, einstieg_quelle fill) und Ausstieg (hedge.master_exit aus dem
+    TV-Toast) → $ | None. Nur MNQ/NQ, Menge > 0, Ausstieg mit Seite."""
+    tv, hedge = tv or {}, hedge or {}
+    ex = hedge.get("master_exit") if isinstance(hedge.get("master_exit"), dict) else {}
+    ein, aus, menge = _wd_num(tv.get("einstieg_nq")), _wd_num(ex.get("preis")), _wd_num(ex.get("menge"))
+    if ein is None or aus is None or not menge or menge <= 0 or str(tv.get("einstieg_quelle") or "") != "fill":
+        return None
+    sym = str(ex.get("symbol") or tv.get("einstieg_symbol") or "").upper()
+    wurzel = "MNQ" if sym.startswith("MNQ") else "NQ" if sym.startswith("NQ") else None
+    seite = str(ex.get("seite") or "").lower()
+    if not wurzel or seite not in ("buy", "sell"):
+        return None
+    vz = -1.0 if seite == "buy" else 1.0     # Ausstieg Buy = Einstieg war Sell
+    return round((aus - ein) * vz * menge * LT_FILL_PV[wurzel], 2)
+
+
+def lt_balance_sprung(route, tv, fin, hedge=None):
+    """REIN RECHNEND (testbar): Balance-Sprung eines beendeten Puls-Plans → {balance, tages, differenz} | None (s. o.).
+    hedge = mt5_baseline.hedge (Fill-Beleg, 23.11.2026)."""
     tv, fin = tv or {}, fin or {}
     bal = lt_pl_balance(route, tv, fin)
     if bal is None:
@@ -15590,6 +15615,9 @@ def lt_balance_sprung(route, tv, fin):
     tages = round(ende - start, 2)
     if bal >= tages - LT_BALANCE_SPRUNG_USD:
         return None                       # nur nach unten und mehr als die Schwelle
+    fpl = lt_fill_pl(tv, hedge)
+    if fpl is not None and abs(bal - fpl) <= max(LT_BALANCE_FILL_TOL_USD, 0.05 * abs(fpl)):
+        return None                       # Fills belegen die Balance-Differenz → Today's P&L war falsch gelesen (23.11.2026)
     return {"balance": bal, "tages": tages, "differenz": round(bal - tages, 2)}
 
 
@@ -15704,7 +15732,7 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
         demo["pl_usd"] = demo_liq_pl
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
               "pl_balance": lt_pl_balance(p.get("route"), tv, fin),
-              "balance_sprung": lt_balance_sprung(p.get("route"), tv, fin),   # Auszahlung o. Ä. zwischen Start und Ende (08.10.2026)
+              "balance_sprung": lt_balance_sprung(p.get("route"), tv, fin, base.get("hedge")),   # Auszahlung o. Ä. zwischen Start und Ende (08.10.2026)
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at"),
@@ -28996,7 +29024,7 @@ def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     pl = _wd_num(p.get("master_pl"))
     if pl is None:
-        sp = lt_balance_sprung(p.get("route"), tv, fin)   # Balance-Sprung (08.10.2026): Tages-P&L statt Balance-Differenz
+        sp = lt_balance_sprung(p.get("route"), tv, fin, base.get("hedge"))   # Balance-Sprung (08.10.2026): Tages-P&L statt Balance-Differenz
         pl = sp["tages"] if sp else lt_pl_balance(p.get("route"), tv, fin)
     if pl is None:
         return None
@@ -30969,7 +30997,7 @@ def ap_normal_auto_pruefen(plan, acc, regel):
         return None                                # bestanden → Finn will es sehen (auch Tage-Mini, s. u.)
     tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
     fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
-    if lt_balance_sprung(str(p.get("route") or ""), tv, fin):
+    if lt_balance_sprung(str(p.get("route") or ""), tv, fin, bl.get("hedge")):
         return None                                # Balance-Differenz ≠ Tages-P&L
     echt = ap_echte_balancen(p)
     if not echt:
@@ -31109,7 +31137,7 @@ def ap_review_weiter_pruefen(p, acc, arch):
         return None
     tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
     fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
-    if lt_balance_sprung(str(p.get("route") or ""), tv, fin):
+    if lt_balance_sprung(str(p.get("route") or ""), tv, fin, bl.get("hedge")):
         return None                                # Balance-Differenz ≠ Tages-P&L → Finn
     echt = ap_echte_balancen(p)
     if echt:
@@ -40470,7 +40498,7 @@ def ap_kette_abhaken(jetzt=None):
         # Gesunde Konten (Verlustgrenze 3.200 ≥ 2.650) behalten genau die alte Grenze
         vg_t2 = max(vg, float(AP_KETTE_STANDARD["t1_tp"][1]))
         _kb = p.get("mt5_baseline") or {}
-        _sp = lt_balance_sprung(p.get("route"), _kb.get("tv") or {}, _kb.get("final") or {})
+        _sp = lt_balance_sprung(p.get("route"), _kb.get("tv") or {}, _kb.get("final") or {}, _kb.get("hedge"))
         if _sp:
             # Balance-Sprung (08.10.2026): Balance-Differenz mehr als 100 $ UNTER dem Tages-P&L (Auszahlung o. Ä.) → nicht automatisch abhaken
             _ap_kette_grund(p, f"Balance-Sprung: Balance {_sp['balance']:+,.0f} $ · Tages-P&L {_sp['tages']:+,.0f} $ · Differenz "

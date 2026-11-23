@@ -31566,7 +31566,24 @@
    * TV_BALANCE_SPRUNG_USD DARUNTER, gilt sie nicht als P&L. Nur nach unten (Auszahlung) und nur, wenn sich Today's P&L bewegt hat (hängendes
    * Total P/L, Fall 8da04bfe → keine Aussage, wie bisher). REIN RECHNEND → {balance, tages, differenz} | null. */
   const TV_BALANCE_SPRUNG_USD = 100
-  function tvBalanceSprung(route, tv, fin){
+  // FILL-BELEG (23.11.2026, Finn: „der stimmt nicht, der Master hat −2700 gemacht“, Plan ec83e13a Lucid …0001): Balance −2.768, TVs „Total P/L“
+  // las −180,50 → Zeile zeigte −180,50. Einstieg-Fill 25.835,25 + Ausstieg-Toast am Hedge (master_exit „Buy 3 at 26,296.00“) = −2.764,50 —
+  // belegen beide Fills die Balance-Differenz (höchstens 50 $ bzw. 5 % daneben), ist es kein Sprung. Gleiche Regel wie app.py lt_fill_pl.
+  const TV_BALANCE_FILL_TOL_USD = 50
+  function tvFillPl(tv, hedge){
+    const n = v => (typeof v === 'number' && isFinite(v)) ? v : null
+    tv = tv || {}; hedge = hedge || {}
+    const ex = (hedge.master_exit && typeof hedge.master_exit === 'object') ? hedge.master_exit : {}
+    const ein = n(tv.einstieg_nq), aus = n(ex.preis), menge = n(ex.menge)
+    if(ein == null || aus == null || !(menge > 0) || String(tv.einstieg_quelle || '') !== 'fill') return null
+    const sym = String(ex.symbol || tv.einstieg_symbol || '').toUpperCase()
+    const pv = sym.startsWith('MNQ') ? 2 : sym.startsWith('NQ') ? 20 : null
+    const seite = String(ex.seite || '').toLowerCase()
+    if(pv == null || (seite !== 'buy' && seite !== 'sell')) return null
+    return Math.round((aus - ein) * (seite === 'buy' ? -1 : 1) * menge * pv * 100) / 100   // Ausstieg Buy = Einstieg war Sell
+  }
+  window._tvFillPl = tvFillPl   // Test-Haken
+  function tvBalanceSprung(route, tv, fin, hedge){
     const n = v => (typeof v === 'number' && isFinite(v)) ? v : null
     tv = tv || {}; fin = fin || {}
     const bs = n(tv.balance_start), be = n(fin.balance_end)
@@ -31576,6 +31593,8 @@
     if(Math.abs(ende - start) < 0.005) return null   // Total P/L hängt (unverändert) → keine Aussage
     const bal = Math.round((be - bs) * 100) / 100, tages = Math.round((ende - start) * 100) / 100
     if(bal >= tages - TV_BALANCE_SPRUNG_USD) return null   // nur nach unten und mehr als die Schwelle
+    const fpl = tvFillPl(tv, hedge)
+    if(fpl != null && Math.abs(bal - fpl) <= Math.max(TV_BALANCE_FILL_TOL_USD, 0.05 * Math.abs(fpl))) return null   // Fills belegen die Balance (23.11.2026)
     return { balance: bal, tages, differenz: Math.round((bal - tages) * 100) / 100 }
   }
   window._tvBalanceSprung = tvBalanceSprung   // Test-Haken
@@ -31593,7 +31612,7 @@
     const bs = tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start) ? tv.balance_start : null
     const be = fin && typeof fin.balance_end === 'number' && isFinite(fin.balance_end) ? fin.balance_end : null
     // Balance-Sprung (08.10.2026): Differenz ≠ Tages-P&L → kein Automatik-Wert, nur der Vorschlag (Tages-P&L) fürs Abhak-Popup
-    const sprung = (bs != null && be != null) ? tvBalanceSprung(plan && plan.route, tv, fin) : null
+    const sprung = (bs != null && be != null) ? tvBalanceSprung(plan && plan.route, tv, fin, base && base.hedge) : null
     if(sprung)
       return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl: null, masterCcy: '$', quelle: 'balance_sprung', sprung, vorschlag: sprung.tages,
                hinweis: `Balance-Sprung: ${balanceSprungText(sprung)} — nicht automatisch übernommen, Tages-P&L vorgeschlagen` }
@@ -39732,7 +39751,7 @@
     const mitHedge = (pw.route === 'tvv2' || pw.route === 'tsv2') ? !!pw.hedge : (Number(pw.hedge_eur) > 0 || !!pw.hedge)
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.plattform === 'echo' || ((pw.route === 'tvv2' || pw.route === 'tsv2') && !mitHedge))
     // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
-    const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
+    const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final, pw.hedge) : null)
     // AB3b (05.11.2026, Hand-Nachtrade 7869ea6c ohne Start-Balance: Feld leer, Finn tippte 50,00 statt +86,88): fehlt pl_balance, belegt der Balance-Vortrag
     // vom Server (app.py echo_vortrag: Endbalance − Endbalance des letzten Trades desselben Kontos, nur ohne Lücke) vor — unverändert gespeichert = 'balance_vortrag'
     // nur, wenn weder Balance-Sprung, pl_balance noch master_pl.wert (Plan/Rundgang/final) etwas liefern — der Vortrag verdrängt nie einen Wert (S9-Gegenprüfung)
@@ -46934,7 +46953,7 @@
       // AB4: tvv2/tsv2 nur mit echtem Hedge (t.hedge) — hedge_eur allein ist der geplante Betrag (wie mklWdErledigtOeffnen/wdlEinKlickGrund)
       const fusionAmPlan = ['mt5', 'tvplus', 'polar'].includes(t.route), mitHedge = (t.route === 'tvv2' || t.route === 'tsv2') ? !!t.hedge : (Number(t.hedge_eur) > 0 || !!t.hedge)
       const ohneHedge = !fusionAmPlan && (t.route === 'mt5v2' || t.plattform === 'echo' || ((t.route === 'tvv2' || t.route === 'tsv2') && !mitHedge))
-      const sp = t.balance_sprung || ((t.tv && t.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(t.route, t.tv, t.final) : null)
+      const sp = t.balance_sprung || ((t.tv && t.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(t.route, t.tv, t.final, t.hedge) : null)
       const pl = sp ? fz(sp.tages) : (fz(t.pl_balance) ?? fz(t.master_pl && t.master_pl.wert))
       if(!pid || !ohneHedge || pl == null || wdlAbhakenSperre(t)){ vonHand++; continue }
       try{
@@ -60792,7 +60811,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2293'
+  const OS_TAB_BUILD = '2026-09-22.2294'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
