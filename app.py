@@ -47732,7 +47732,7 @@ MG3_LERN_TAGE = 30
 MG3_SETTINGS_KEY = "marge_je_lot"        # user_settings je ID: {konto_id: {mpl, firma, at}} — Sicherung der Lernwerte gelöschter Pläne (SQL MG3)
 MG3_GRUND = "Lots nach Marge gedeckelt"
 _MG3_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-_MG3_RE = re.compile(r"Vorprüfung: nötig ([0-9][0-9\s  .,]*?), frei -?[0-9][0-9\s  .,]*?\)")   # frei darf negativ sein (wie MG1)
+_MG3_RE = re.compile(r"Vorprüfung: nötig ([0-9][0-9\s  .,]*?), frei (-?[0-9][0-9\s  .,]*?)\)")   # frei darf negativ sein (wie MG1); Gruppe 2 = frei (MG3c)
 
 
 def _mg3_zahl(t):
@@ -47760,10 +47760,45 @@ def mg3_marge_je_lot(msg, lots):
     return round(noetig / float(n_lots), 2) if noetig else None
 
 
+def mg3_frei_aus(msg):
+    """REIN (testbar, MG3c): freie Marge aus der Vorprüfungs-Meldung („frei Y“, auch negativ) → float oder None."""
+    m = _MG3_RE.search(str(msg or ""))
+    if not m:
+        return None
+    t = m.group(2).strip()
+    v = _mg3_zahl(t.lstrip("-"))
+    return (-v if t.startswith("-") else v) if v else None
+
+
+def mg3_widerlegt(e, orders):
+    """REIN (testbar, MG3c, Master 23.11.2026): eigener Lernwert widerlegt? Ja, wenn auf demselben Konto NACH dem Lernzeitpunkt eine Order
+    erfolgreich lief (gestartet), deren Lots × Marge je Lot mehr als die ganze Balance gebraucht hätte — dann ist der Hebel gestiegen
+    (bewusst die volle Balance, nicht die 90 % des Deckels: eine Order zwischen 90 und 100 % passt auch zum gelernten Wert). Balance aus der
+    Plan-Notiz („Balance 100.000“); ohne sie kein Urteil (Wert bleibt — sichere Richtung).
+    orders = trade_plans-Zeilen {master_contracts, started_at, notes} dieses Kontos. → Beleg-Text oder None."""
+    t0 = _mg3_zeit((e or {}).get("at"))
+    mpl = _wd_num((e or {}).get("mpl"))
+    if not t0 or not mpl or mpl <= 0:
+        return None
+    for o in orders or ():
+        ts, lots = _mg3_zeit(o.get("started_at")), _wd_num(o.get("master_contracts"))
+        if not ts or ts <= t0 or not lots or lots <= 0:
+            continue
+        # nur die Balance, die der Planer selbst in die Notiz schreibt (ap_notiz: „Balance 100.000“); ohne sie kein Urteil — die freie Marge
+        # vom Lernzeitpunkt wäre nach Gewinnen zu klein und würde einen richtigen Wert verwerfen (Prüfer MG3c)
+        mb = re.search(r"(?<![-\w])Balance (\d{1,3}(?:\.\d{3})+|\d+)(?![\d,.]\d)", str(o.get("notes") or ""))
+        bal = _wd_num(mb.group(1).replace(".", "")) if mb else None
+        if bal and bal > 0 and lots * mpl > bal + 1e-6:
+            return f"Order {_ap_de(lots)} Lot am {str(o.get('started_at'))[:16]} lief bei {_ap_de(bal, 0)} $ — mehr als die gelernte Marge erlaubt"
+    return None
+
+
 def _mg3_zeit(at):
-    """REIN: ISO-Zeit (auch „…Z“) → datetime (UTC) oder None."""
+    """REIN: ISO-Zeit (auch „…Z“, Postgres-Bruchteile mit 1–6 Stellen) → datetime (UTC) oder None. Python 3.9 (Mac-Backend) liest nur 0/3/6
+    Nachkommastellen — deshalb auf 6 Stellen auffüllen (Prüfer MG3c)."""
+    t = re.sub(r"\.(\d{1,6})\d*(?=[+-]\d{2}:?\d{2}$|$)", lambda m: "." + m.group(1).ljust(6, "0"), str(at or "").strip().replace("Z", "+00:00"))
     try:
-        d = datetime.fromisoformat(str(at or "").strip().replace("Z", "+00:00"))
+        d = datetime.fromisoformat(t)
     except ValueError:
         return None
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
@@ -47788,19 +47823,22 @@ def mg3_vergleich_groesse(groesse):
     return int(round(g)) if g and g > 0 else None
 
 
-def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None, konten=None, jetzt=None):
+def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None, konten=None, jetzt=None, orders=None):
     """REIN RECHNEND (testbar): Lernwerte → {"konto": {konto_id: {mpl, at, firma, unt, art, groesse, …}}, "firma": {(unt, firma, art, groesse): höchste mpl}}.
     plaene = trade_plans-Zeilen (user_id, master_account_id, master_firm, master_contracts, start_fehler bzw. mt5_baseline.start_fehler {msg, at});
     gespeichert = user_settings-Zeilen key marge_je_lot ({user_id, value: {konto_id: {mpl, firma, at}}}); gruppe_von(uid) → Unternehmen-Schlüssel;
     konten = {konto_id: {account_type, account_size, starting_balance}} der gelernten Konten. Je Konto gilt der jüngste Wert (at), gleich alt →
-    der aus dem Plan. MG3b (23.11.2026, Prüfer S2): Werte älter als MG3_LERN_TAGE fallen weg (auch gesicherte); der Firmen-Rückfall gilt nur
-    für Konten derselben Firma, Kontoart UND Größe im selben Unternehmen — ein einziges Konto mit wenig Hebel deckelt nicht alle Konten der Firma."""
+    der aus dem Plan. MG3b (23.11.2026, Prüfer S2): der Firmen-Rückfall gilt nur für Konten derselben Firma, Kontoart UND Größe im selben
+    Unternehmen — ein einziges Konto mit wenig Hebel deckelt nicht alle Konten der Firma. MG3c (Master 23.11.2026): der EIGENE Wert eines Kontos
+    altert nicht (sonst ginge einmal im Monat ein Plan ungedeckelt raus und fiele durch); nur Werte, die als Rückfall für ANDERE Konten dienen,
+    zählen MG3_LERN_TAGE lang. Widerlegt eine erfolgreiche Order (orders = gestartete Pläne {master_account_id, master_contracts, started_at,
+    notes}) den eigenen Wert (mg3_widerlegt: Hebel gestiegen), fällt er weg → "widerlegt": {konto_id: (uid, Beleg)}."""
     gv = gruppe_von or (lambda u: "")
     kn = konten or {}
     konto = {}
 
-    def merk(aid, uid, firma, mpl, at, quelle):
-        if not aid or not mpl or mpl <= 0 or not mg3_frisch(at, jetzt):
+    def merk(aid, uid, firma, mpl, at, quelle, frei=None):
+        if not aid or not mpl or mpl <= 0 or not _mg3_zeit(at):
             return
         alt = konto.get(aid)
         if alt is not None and str(at or "") < alt["at"]:
@@ -47810,36 +47848,49 @@ def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None, konten=None, je
         # Größe wie überall (_wd_konto_groesse: „100k“ im Namen, sonst starting_balance), dann account_size — Prüfer MG3b: starting_balance allein ist oft leer/falsch
         _g = (_wd_konto_groesse(k) if "_wd_konto_groesse" in globals() else None) or k.get("account_size")
         konto[aid] = {"mpl": float(mpl), "at": str(at or ""), "firma": fn, "firma_roh": firma or (alt or {}).get("firma_roh"), "unt": gv(str(uid)),
-                      "uid": str(uid), "quelle": quelle, "art": mg3_vergleich_art(k.get("account_type")), "groesse": mg3_vergleich_groesse(_g)}
+                      "uid": str(uid), "quelle": quelle, "art": mg3_vergleich_art(k.get("account_type")), "groesse": mg3_vergleich_groesse(_g),
+                      "frei": frei if frei is not None else (alt or {}).get("frei")}
 
     for r in gespeichert or ():
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         for aid, e in v.items():
             if isinstance(e, dict):
-                merk(str(aid), r.get("user_id"), e.get("firma"), _wd_num(e.get("mpl")), e.get("at"), "gesichert")
+                merk(str(aid), r.get("user_id"), e.get("firma"), _wd_num(e.get("mpl")), e.get("at"), "gesichert", _wd_num(e.get("frei")))
     for p in plaene or ():
         sf = p.get("start_fehler")
         if not isinstance(sf, dict):
             mb = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
             sf = mb.get("start_fehler") if isinstance(mb.get("start_fehler"), dict) else {}
         merk(str(p.get("master_account_id") or ""), p.get("user_id"), p.get("master_firm"), mg3_marge_je_lot(sf.get("msg"), p.get("master_contracts")), sf.get("at"),
-             "plan")
+             "plan", mg3_frei_aus(sf.get("msg")))
+    je_konto = {}
+    for o in orders or ():
+        je_konto.setdefault(str(o.get("master_account_id") or ""), []).append(o)
+    widerlegt = {}
+    for aid in list(konto):
+        beleg = mg3_widerlegt(konto[aid], je_konto.get(aid))
+        if beleg:
+            widerlegt[aid] = (konto[aid]["uid"], beleg)
+            del konto[aid]
     firma = {}
     for e in konto.values():
-        if e["firma"] and e["art"] and e["groesse"]:
+        if e["firma"] and e["art"] and e["groesse"] and mg3_frisch(e["at"], jetzt):   # MG3c: nur frische Werte dienen anderen Konten
             k = (e["unt"], e["firma"], e["art"], e["groesse"])
             firma[k] = max(firma.get(k, 0.0), e["mpl"])
-    return {"konto": konto, "firma": firma}
+    return {"konto": konto, "firma": firma, "widerlegt": widerlegt}
 
 
 def mg3_sicherung_zeilen(tab, gespeichert, jetzt=None):
     """REIN (testbar, Prüfer-Befund MG3): user_settings-Zeilen (user_id, key, value) für Lernwerte, die bisher NUR an einem Plan hängen (neuer als
     die Sicherung oder dort noch nicht da) — der Nachtlauf löscht nie gestartete Pläne und „Plan löschen“ (MG1-Handgriff) auch; ohne Sicherung
-    wäre der Lernwert danach weg und der übernächste Tag wieder ohne Deckel. value = noch frische Einträge der ID + neue Konten (MG3b: abgelaufene
-    fallen beim Schreiben heraus; ohne neuen Wert wird nichts geschrieben — beim Lesen zählen abgelaufene ohnehin nicht)."""
-    alt = {str(r.get("user_id")): {k: v for k, v in r.get("value").items() if isinstance(v, dict) and mg3_frisch(v.get("at"), jetzt)}
+    wäre der Lernwert danach weg und der übernächste Tag wieder ohne Deckel. value = bisherige Einträge der ID + neue Konten (vollständig).
+    MG3c: eigene Werte altern nicht (keine Kürzung nach Alter); ein durch eine erfolgreiche Order widerlegter Wert (tab["widerlegt"]) fällt heraus."""
+    alt = {str(r.get("user_id")): {k: v for k, v in r.get("value").items() if isinstance(v, dict)}
            for r in (gespeichert or ()) if isinstance(r.get("value"), dict)}
     neu = {}
+    for aid, (uid, _beleg) in ((tab or {}).get("widerlegt") or {}).items():
+        if aid in alt.get(str(uid), {}):
+            neu.setdefault(str(uid), dict(alt[str(uid)])).pop(aid, None)
     for aid, e in ((tab or {}).get("konto") or {}).items():
         if e.get("quelle") != "plan" or not e.get("uid"):
             continue
@@ -47847,7 +47898,7 @@ def mg3_sicherung_zeilen(tab, gespeichert, jetzt=None):
         if isinstance(v, dict) and str(v.get("at") or "") >= e["at"] and _wd_num(v.get("mpl")) == e["mpl"]:
             continue
         neu.setdefault(e["uid"], dict(alt.get(e["uid"], {})))[aid] = {"mpl": e["mpl"], "firma": e.get("firma_roh") or e.get("firma"), "at": e["at"],
-                                                                      "quelle": "MG3 Vorprüfung"}
+                                                                      "frei": e.get("frei"), "quelle": "MG3 Vorprüfung"}
     return [{"user_id": u, "key": MG3_SETTINGS_KEY, "value": v} for u, v in sorted(neu.items())]
 
 
@@ -47931,7 +47982,34 @@ def mg3_marge_laden(uids, gruppe_von=None):
         except Exception as e:
             konten = {}
             print(f"[mg3] ⚠️ Konten der Lernwerte nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — nur eigene Werte je Konto", flush=True)
-    tab = mg3_marge_tabelle(pl, gs, gruppe_von, konten)
+    # MG3c: erfolgreiche Orders der Konten mit eigenem Wert seit dem ältesten Lernzeitpunkt — widerlegen ihn, wenn der Hebel gestiegen ist.
+    # Lesefehler → keine Widerlegung in diesem Lauf (der Deckel bleibt: sichere Richtung)
+    neuest = {}                               # je Konto der jüngste Lernzeitpunkt (nur der zählt für die Widerlegung) → Fenster = ältester davon
+    for p in pl:
+        t = _mg3_zeit((p.get("start_fehler") or {}).get("at") if isinstance(p.get("start_fehler"), dict) else None)
+        a_ = str(p.get("master_account_id") or "")
+        if a_ and t and (a_ not in neuest or t > neuest[a_]):
+            neuest[a_] = t
+    for r in gs:
+        for k, v in (r.get("value") or {}).items() if isinstance(r.get("value"), dict) else ():
+            t = _mg3_zeit(v.get("at")) if isinstance(v, dict) else None
+            if t and (str(k) not in neuest or t > neuest[str(k)]):
+                neuest[str(k)] = t
+    eigen = sorted(a for a in neuest if _MG3_UUID.match(a))
+    ab_t = min((neuest[a] for a in eigen), default=None)
+    orders = []
+    if eigen and ab_t:
+        try:
+            for i in range(0, len(eigen), 100):
+                orders += _sb_all("trade_plans", {"select": "master_account_id,master_contracts,started_at,notes",
+                                                  "master_account_id": f"in.({','.join(eigen[i:i + 100])})", "started_at": "gte." + ab_t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                                  "status": "in.(open,review,completed)"}) or []
+        except Exception as e:
+            orders = []
+            print(f"[mg3] ⚠️ Orders der Lernkonten nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Lernwerte bleiben", flush=True)
+    tab = mg3_marge_tabelle(pl, gs, gruppe_von, konten, orders=orders)
+    for aid, (_u, beleg) in (tab.get("widerlegt") or {}).items():
+        print(f"[mg3] Lernwert Konto {aid[:8]} verworfen: {beleg}", flush=True)
     zeilen = mg3_sicherung_zeilen(tab, gs)
     if zeilen:
         try:   # Upsert auf (user_id, key) — nur wenn ein Plan einen neuen Wert trägt; Fehler: der Deckel gilt in diesem Lauf trotzdem

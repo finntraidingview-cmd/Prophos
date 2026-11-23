@@ -31,7 +31,7 @@ check(syntax, "app.py übersetzt fehlerfrei")
 baum = ast.parse(src)
 NAMEN = {"_wd_num", "_ap_norm", "_ap_de", "_mg3_zahl", "mg3_marge_je_lot", "mg3_marge_tabelle", "mg3_marge_fuer", "mg3_lots_max", "mg3_deckel",
          "mg3_schritt", "mg3_ist_cfd", "mg3_marge_laden", "ap_menge_fix", "mg3_sicherung_zeilen",
-         "_mg3_zeit", "mg3_frisch", "mg3_vergleich_art", "mg3_vergleich_groesse", "_wd_konto_groesse"}
+         "_mg3_zeit", "mg3_frisch", "mg3_vergleich_art", "mg3_vergleich_groesse", "_wd_konto_groesse", "mg3_frei_aus", "mg3_widerlegt"}
 KONST = {"_MG3_UUID", "MG3_MARGE_ANTEIL", "MG3_LERN_TAGE", "MG3_SETTINGS_KEY", "MG3_GRUND", "_MG3_RE", "AP_CFD_ROUTEN", "FCP_LOT_SCHRITT"}
 teile = []
 for n in baum.body:
@@ -104,11 +104,11 @@ F = ns["mg3_marge_fuer"]
 check(abs(F(tab, "kA", "u-g1", "Blue Guardian", gv)[0] - 25747.64) < 0.01 and F(tab, "kA", "u-g1", "Blue Guardian", gv)[1] == "eigene Vorprüfung",
       "eigenes Konto: jüngster Wert (Plan von heute schlägt Sicherung von vor 22 Tagen)")
 check(F(tab, "kB", "u-g2", "Blue Guardian", gv)[0] == 25737.0, "Sicherung aus user_settings (gelöschter Plan) zählt je Konto")
-check("kALT" not in tab["konto"] and F(tab, "kALT", "u-g2", "Blue Guardian", gv, art="phase1", groesse=100000)[0] != 50000.0,
-      "MG3b: gesicherter Lernwert älter als 30 Tage → verworfen (auch nicht im Firmen-Rückfall)")
+check(F(tab, "kALT", "u-g2", "Blue Guardian", gv)[0] == 50000.0 and F(tab, "kALT", "u-g2", "Blue Guardian", gv)[1] == "eigene Vorprüfung",
+      "MG3c: der EIGENE Lernwert altert nicht (40 Tage alt, gilt für sein Konto weiter)")
 check(abs(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="Phase1", groesse=100000.0)[0] - 25747.64) < 0.01
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=100000)[1].startswith("Wert derselben Firma/Kontoart/Größe"),
-      "Konto ohne eigenen Wert, gleiche Gruppe + Firma + Kontoart + Größe → höchster Wert dieser Konten")
+      "Konto ohne eigenen Wert, gleiche Gruppe + Firma + Kontoart + Größe → höchster FRISCHER Wert dieser Konten (der 40 Tage alte 50.000 zählt für andere nicht, MG3c)")
 check(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase2", groesse=100000) == (None, "")
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=50000) == (None, "")
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv) == (None, "") and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1") == (None, ""),
@@ -125,6 +125,28 @@ check(F(tab, "kE", "u-ht2", "Blue Guardian", gv)[0] == 60000.0 and D(4.2, 100000
 check(F(tab, "kX", "u-g1", "FundedNext", gv, art="phase1", groesse=100000) == (None, ""), "andere Firma derselben Gruppe → kein Wert")
 tab_n = ns["mg3_marge_tabelle"](pl[:1], [], gv, {"kA": {"account_type": "phase1", "name": "BG 100k 1234", "starting_balance": "150000"}})
 check(list(tab_n["firma"]) == [("G", "blueguardian", "phase1", 100000)], "MG3b: Größe wie _wd_konto_groesse — „100k“ im Namen schlägt eine falsche starting_balance")
+# ── MG3c: Widerlegung durch eine erfolgreiche Order (Hebel gestiegen) ──────────────────────────────────────────────────────────
+FA, WL = ns["mg3_frei_aus"], ns["mg3_widerlegt"]
+check(FA(J) == 100000.0 and FA("(Vorprüfung: nötig 30 000.00, frei -1 250.00)") == -1250.0 and FA("") is None, "freie Marge aus der Meldung, auch negativ")
+eA = {"mpl": 25747.64, "at": iso(days=2), "frei": 100000.0}
+o_gross = {"master_account_id": "kA", "master_contracts": "4.200", "started_at": iso(days=1), "notes": "Auto-Planer · Etappe · Balance 100.000 (Echo)"}
+check(WL(eA, [o_gross]) and "4,2 Lot" in WL(eA, [o_gross]), "Order mit 4,2 Lot lief nach dem Lernen bei 100.000 $ (4,2 × 25.748 > 100.000) → Wert widerlegt")
+check(WL(eA, [dict(o_gross, master_contracts="3.6")]) is None, "3,6 Lot (92.700 $ < 100.000 $) passt zum gelernten Wert → nicht widerlegt (volle Balance als Maß, nicht 90 %)")
+check(WL(eA, [dict(o_gross, started_at=iso(days=3))]) is None, "Order VOR dem Lernzeitpunkt → zählt nicht")
+check(WL(eA, [dict(o_gross, notes="Funded-CFD-Planer · Gewinn 4.000 $")]) is None
+      and WL(eA, [dict(o_gross, notes="Mindest-Balance 3.000 · Balance 100.000")]) and WL(eA, [dict(o_gross, notes="x · Mindest-Balance 3.000")]) is None,
+      "ohne Planer-Balance in der Notiz kein Urteil (Wert bleibt); „Mindest-Balance …“ zählt nicht als Balance (Prüfer MG3c)")
+check(WL(eA, [dict(o_gross, started_at=(JETZT - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.93+00:00"))])
+      and ns["_mg3_zeit"]("2026-11-23T00:00:08.9+00:00") is not None and ns["_mg3_zeit"]("2026-11-23T00:00:08.1234567Z") is not None,
+      "Postgres-Zeit mit 1–2 bzw. 7 Nachkommastellen lesbar (Python 3.9 am Mac-Backend)")
+check(ns["mg3_marge_tabelle"](pl, gs, gv, KN, orders=[o_gross])["widerlegt"] == {}, "Order älter als der jüngste Lernwert des Kontos → nicht widerlegt")
+tab_w = ns["mg3_marge_tabelle"](pl, gs, gv, KN, orders=[dict(o_gross, started_at=iso(minutes=10))])
+check("kA" not in tab_w["konto"] and tab_w["widerlegt"]["kA"][0] == "u-g1" and F(tab_w, "kA", "u-g1", "Blue Guardian", gv) == (None, "")
+      and F(tab_w, "kA", "u-g1", "Blue Guardian", gv, art="phase1", groesse=100000)[0] == 25737.0
+      and tab_w["firma"][("G", "blueguardian", "phase1", 100000)] == 25737.0,
+      "widerlegter Wert fällt weg — eigener und als Rückfall (übrig bleibt der frische Wert eines anderen Kontos)")
+zw = ns["mg3_sicherung_zeilen"](tab_w, [{"user_id": "u-g1", "value": {"kA": {"mpl": 99999.0, "at": iso(days=22)}, "kZ": {"mpl": 1.0, "at": iso(days=2)}}}])
+check([set(z["value"]) for z in zw if z["user_id"] == "u-g1"] == [{"kZ"}], f"Sicherung: widerlegter Eintrag wird entfernt, die übrigen bleiben ({zw})")
 FR = ns["mg3_frisch"]
 check(FR(iso(days=29), JETZT) and not FR(iso(days=31), JETZT) and not FR("x", JETZT) and not FR(None, JETZT) and FR("2026-11-23T00:00:08.933Z", datetime(2026, 11, 24, tzinfo=timezone.utc)),
       "mg3_frisch: 30 Tage wie die Pläne, unlesbare Zeit → verworfen, „…Z“ mit Millisekunden lesbar")
@@ -148,15 +170,20 @@ check(SB["accounts"][0]["id"] == "in.(kA,kB)" and "account_type" in SB["accounts
 check(len(POSTS) == 1 and POSTS[0][1].endswith("/rest/v1/user_settings?on_conflict=user_id,key") and "merge-duplicates" in POSTS[0][3]
       and POSTS[0][2][0]["user_id"] == "u-g1" and set(POSTS[0][2][0]["value"]) == {"kA"} and POSTS[0][2][0]["value"]["kA"]["mpl"] == 25747.64,
       f"Laden sichert einen Lernwert, der nur am Plan hängt, sofort in user_settings (Nachtlauf/„Plan löschen“ nehmen ihn sonst mit) ({POSTS})")
-check(set(t2["konto"]) == {"kA", "kB"} and q["user_id"] == "in.(u-g1,u-g2)" and "Vorprüfung: nötig" in q["mt5_baseline->start_fehler->>msg"]
+oq = SB["trade_plans"][1] if len(SB["trade_plans"]) > 1 else {}
+check(oq.get("status") == "in.(open,review,completed)" and oq.get("started_at", "").startswith("gte.") and oq.get("master_account_id") == "in.(kA,kALT,kB)"
+      and oq["started_at"][4:14] == iso(days=40)[:10],   # Fenster ab dem ältesten der je Konto jüngsten Lernwerte (kALT: nur vor 40 Tagen)
+      
+      f"MG3c Laden: erfolgreiche Orders der Konten mit eigenem Wert seit dem ältesten Lernzeitpunkt abgefragt ({oq})")
+check(set(t2["konto"]) == {"kA", "kB", "kALT"} and q["user_id"] == "in.(u-g1,u-g2)" and "Vorprüfung: nötig" in q["mt5_baseline->start_fehler->>msg"]
       and SB["user_settings"][0]["key"] == "eq.marge_je_lot", "Laden: nur diese IDs, nur Vorprüfungs-Meldungen, dazu die Sicherung")
 Z = ns["mg3_sicherung_zeilen"]
 gs_neu = [{"user_id": "u-g1", "value": {"kA": {"mpl": 25747.64, "firma": "Blue Guardian", "at": iso(hours=1)}, "kZ": {"mpl": 1.0, "at": iso(days=2)}}}]
 check(Z(ns["mg3_marge_tabelle"](pl[:1], gs_neu), gs_neu) == [], "schon gesichert (gleicher Wert, gleich alt) → nichts schreiben")
 gs_z = [{"user_id": "u-g1", "value": {"kZ": {"mpl": 1.0, "at": iso(days=2)}, "kOLD": {"mpl": 2.0, "at": iso(days=45)}}}]
 z1 = Z(ns["mg3_marge_tabelle"](pl[:1], gs_z), gs_z)
-check(len(z1) == 1 and set(z1[0]["value"]) == {"kA", "kZ"} and z1[0]["key"] == "marge_je_lot",
-      "neuer Wert → vollständiger Wert der ID (frische Konten bleiben, abgelaufene fallen heraus — MG3b)")
+check(len(z1) == 1 and set(z1[0]["value"]) == {"kA", "kZ", "kOLD"} and z1[0]["key"] == "marge_je_lot" and z1[0]["value"]["kA"]["frei"] == 100000.0,
+      "neuer Wert → vollständiger Wert der ID, alte eigene Werte bleiben (MG3c), freie Marge mitgesichert")
 SB.clear()
 SB["fehler"] = True
 check(L(["u-g1"]) == {"konto": {}, "firma": {}}, "Lesefehler → leer (kein Deckel, wie vor MG3)")
