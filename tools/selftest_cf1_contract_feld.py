@@ -40,12 +40,13 @@ FELD = [400, 150, 220, 30]
 class Sitzung:
     """TopstepX-Attrappe: Klick aufs Contract-Feld gelingt erst ab dem n-ten Versuch (vorher: am Punkt liegt nicht das Feld)."""
 
-    def __init__(self, ok_ab=2, fremd=""):
+    def __init__(self, ok_ab=2, fremd_beim_klick="", fremd_alt="", spur_zeile=True):
         self.ok_ab, self.klicks, self.feld_klicks, self.getippt, self.wert = ok_ab, [], 0, [], "MNQZ26"
-        self.fremd, self.vorn, self._klick_grund = fremd, 0, ""
+        self.fremd_beim_klick, self._fremd_fenster, self.spur_zeile, self.vorn, self._klick_grund = fremd_beim_klick, fremd_alt, spur_zeile, 0, ""
 
     def fremd_hinweis(self):
-        return self.fremd
+        # wie _AugenSitzung.fremd_hinweis: aus _fremd_fenster
+        return f" Fenster '{self._fremd_fenster}' liegt über dem Puls-Chrome — immer im Vordergrund?" if self._fremd_fenster else ""
 
     def _win_vorn(self):
         self.vorn += 1
@@ -61,7 +62,10 @@ class Sitzung:
         if n == "Contract-Feld":
             self.feld_klicks += 1
             if self.feld_klicks < self.ok_ab:
-                self.spur.append("Contract-Feld: am Zielpunkt @3272,322 liegt nicht das Ziel ('span') [drin ja, klein NEIN] — kein Druck")
+                if self.fremd_beim_klick:
+                    self._fremd_fenster = self.fremd_beim_klick
+                if self.spur_zeile:
+                    self.spur.append("Contract-Feld: am Zielpunkt @3272,322 liegt nicht das Ziel ('span') [drin ja, klein NEIN] — kein Druck")
                 return False
             return True
         if n.startswith("Contract "):
@@ -86,7 +90,7 @@ def lauf(sitz, ueber=None):
     ob._tsx_pause = lambda *a, **k: None
     ob._tsx_fokus_exakt = lambda *a, **k: True
     ob._tsx_ueberlagerung_weg = lambda s, st, trail: (aufrufe.append(1) or (st, ueber))
-    trail = []
+    trail = ob._StempelSpur()                     # CF1c: wie im echten Lauf — jede Zeile mit „12.3s·" vorn
     sitz.spur = trail
     esc = []
     ob._cdp_esc = lambda s, st, trail, grund: (esc.append(grund), trail.append("Esc: " + grund))
@@ -108,14 +112,20 @@ r2, t2, u2 = lauf(s2)
 check(r2[0] is False and r2[1] == "contract" and r2[2].startswith("Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan. Grund: ")
       and "liegt nicht das Ziel ('span')" in r2[2] and "[drin" not in r2[2] and s2.feld_klicks == 2 and not s2.getippt,
       f"zweimal ohne Beweis → bisheriger Text vorn + wahrer Grund aus der Spur, nichts getippt ({r2[2]})")
-check(s1.vorn == 1 and any("leichter Weg" in x for x in t1) and any(x == "Esc: Contract-Feld ohne Beweis" for x in t1),
+check(s1.vorn == 1 and any("leichter Weg" in x for x in t1) and any(str(x).endswith("Esc: Contract-Feld ohne Beweis") for x in t1),
       "CF1b leichter Weg: Esc, Puls-Chrome nach vorn, neu lesen, ein Klick")
-s5 = Sitzung(ok_ab=9, fremd="Fenster 'Administrator: Windows PowerShell' liegt über dem Puls-Chrome — immer im Vordergrund?")
+s5 = Sitzung(ok_ab=9, fremd_beim_klick="Administrator: Windows PowerShell", spur_zeile=False)
 r5, t5, u5 = lauf(s5)
-check("Grund: Fenster 'Administrator: Windows PowerShell'" in r5[2], f"fremdes Fenster über dem Puls-Chrome → steht in der Meldung ({r5[2]})")
+check("Grund: Fenster 'Administrator: Windows PowerShell'" in r5[2], f"fremdes Fenster beim Klick, keine Spur-Zeile → Fenster in der Meldung ({r5[2]})")
+s6 = Sitzung(ok_ab=9, fremd_alt="Altes Fenster eines früheren Klicks", spur_zeile=False)
+r6, t6, u6 = lauf(s6)
+check("Altes Fenster" not in r6[2] and "Grund:" not in r6[2], f"CF1c: veraltetes Fremdfenster aus einem älteren Klick → nie als Grund ({r6[2]})")
+check("liegt nicht das Ziel ('span')" in r2[2], "CF1c: Grund aus der echten _StempelSpur (Zeitstempel vorn) kommt in die Meldung")
 G = ob.klick_grund_kurz
 check(G("Puls-Chrome kommt nicht in den Vordergrund (vorn: 'Explorer' 7, Klasse 'CabinetWClass', …)", "", [], "X") == "vorn 'Explorer', CabinetWClass"
-      and G("", "", ["Y: weg", "X: am Punkt 'a' [b] — kein Druck"], "X") == "am Punkt 'a' — kein Druck" and G("", "", [], "X") == "",
+      and G("", "", ["Y: weg", "X: am Punkt 'a' [b] — kein Druck"], "X") == "am Punkt 'a' — kein Druck" and G("", "", [], "X") == ""
+      and G("", "", ["12.3s·X: am Punkt 'c' — kein Druck"], "X") == "am Punkt 'c' — kein Druck"
+      and G("", " Fenster 'F' liegt über …", ["4.0s·X: Spur zuerst"], "X") == "Spur zuerst" and G("", " Fenster 'F' liegt über …", [], "X") == "Fenster 'F' liegt über …",
       "klick_grund_kurz: Vordergrund-Fenster zuerst, sonst die Spur-Zeile ohne [..], sonst leer")
 
 # ── CF1b: Spur + Foto des 1. Versuchs vor dem Neustart ───────────────────────────────────────────────────────────────────────────
@@ -133,7 +143,27 @@ ob._puls_mit_neustart("tsv2", lambda: ("", erg(ok=True)), lambda f: ("", {}), No
                       ausgeben=aus2.append, diagnose=lambda **k: None, foto=lambda r: (_ for _ in ()).throw(AssertionError("Foto ohne Neustart")))
 check(len(aus2) == 1, "kein Neustart (ok) → kein Foto, Ausgabe wie bisher")
 src = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
-check(src.count('foto=lambda r: _fehlerfoto_sofort(') == 2, "beide Wege (Orbit, Topstep) fotografieren vor dem Neustart")
+check(src.count('foto=lambda r: _fehlerfoto_sofort_begrenzt(') == 2, "beide Wege (Orbit, Topstep) fotografieren vor dem Neustart, mit Zeitgrenze")
+# CF1c: knapp an der Frist → kein Foto, der 2. Versuch geht vor
+aus3, fotos3 = [], []
+ob._puls_mit_neustart("tsv2", lambda: ("", dict(r1)), lambda frist: ("", erg(ok=True, gesendet=True, bestaetigt=True, trail="2. ok")), None, "https://x/",
+                      neustart=lambda spur, url: True, jetzt=lambda: 35.0, t0=0.0, ausgeben=aus3.append, diagnose=lambda **k: None,
+                      foto=lambda r: (fotos3.append(1) or ("x", "")))
+check(not fotos3 and "kein Fehlerfoto 1. Versuch: zu wenig Zeit" in str((aus3[-1] if aus3 else {}).get("trail") or ""),
+      "CF1c: zu wenig Rest für Foto + 2. Versuch → kein Foto, Grund in der Spur")
+# CF1c: Foto mit harter Zeitgrenze und eigenem Deckel-Schlüssel
+import time as _t
+alt_sf = ob._fehlerfoto_sofort
+gerufen = []
+ob._fehlerfoto_sofort = lambda weg, tab, code: (gerufen.append(weg), _t.sleep(2.0), ("spät", ""))[2]
+try:
+    t0_ = _t.time()
+    b_, g_ = ob._fehlerfoto_sofort_begrenzt("tsxorder", "tsx", "contract", max_s=0.6)
+    dauer_ = _t.time() - t0_
+finally:
+    ob._fehlerfoto_sofort = alt_sf
+check(b_ is None and "nicht fertig" in g_ and dauer_ < 1.5 and gerufen == ["tsxorder_v1"],
+      f"CF1c: hängendes Foto → nach der Grenze weiter, Deckel-Schlüssel tsxorder_v1 (≠ Endantwort) ({b_}, {g_}, {dauer_:.1f} s, {gerufen})")
 s3 = Sitzung(ok_ab=9)
 r3, t3, u3 = lauf(s3, ueber="Dialog ohne Text offen (…) — kein eindeutiger Schließen-Knopf, nichts geklickt")
 check(r3[0] is False and r3[1] == "contract" and r3[2].startswith("Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan.")

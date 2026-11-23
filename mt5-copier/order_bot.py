@@ -1361,6 +1361,29 @@ def fehlerfoto_anstossen(weg, tab, code):
         return None, f"Anstoß gescheitert ({type(e).__name__})"
 
 
+NEUSTART_FOTO_MAX_S = 8.0   # CF1c: so lange darf das Foto des 1. Versuchs vor einem Neustart höchstens dauern (eigener Thread, join mit Grenze)
+
+
+def _fehlerfoto_sofort_begrenzt(weg, tab, code, max_s=NEUSTART_FOTO_MAX_S):
+    """CF1c (Gegenprüfung 23.11.2026): _fehlerfoto_sofort im eigenen Thread mit harter Zeitgrenze — ein hängender Upload/CDP-Screenshot darf die
+    Frist des 2. Versuchs nicht auffressen. Eigener Deckel-Schlüssel „<weg>_v1" — sonst sperrte das Foto des 1. Versuchs (gleicher
+    Schlüssel weg|code) das Foto der Endantwort (fehlerbild in order_signale/puls_fehlstarts). -> (Präfix | None, Grund)"""
+    import threading
+    aus = [None, "Foto nicht fertig"]
+
+    def lauf():
+        try:
+            aus[0], aus[1] = _fehlerfoto_sofort(f"{weg}_v1", tab, code)
+        except Exception as e:
+            aus[0], aus[1] = None, f"{type(e).__name__}"
+    t = threading.Thread(target=lauf, daemon=True)
+    t.start()
+    t.join(max(0.5, float(max_s)))
+    if t.is_alive():
+        return None, f"Foto nach {max_s:.0f} s nicht fertig — weiter ohne Warten (läuft im Hintergrund zu Ende)"
+    return aus[0], aus[1]
+
+
 def _fehlerfoto_sofort(weg, tab, code):
     """CF1b (23.11.2026, Master nach S3-Befund NV3): Fehlerfoto IM Lauf, synchron — vor einem Puls-Chrome-Neustart. Der entkoppelte Foto-Prozess
     (fehlerfoto_anstossen) wartet auf die Handlauf-Sperre dieses Laufs, die während des Neustarts noch steht → er kam nie dran, und nach dem
@@ -22686,19 +22709,19 @@ def _tsx_fokus_exakt(s, art, trail, schritt):
 
 def klick_grund_kurz(klick_grund, fremd, spur, name):
     """REIN RECHNEND (testbar) — CF1b (23.11.2026): der wahre Grund eines Klicks ohne Beweis, kurz für die MELDUNG. Reihenfolge: fremdes Fenster
-    vorn (klick_vorn_fremd aus _klick_grund), Fenster über dem Puls-Chrome (fremd_hinweis), sonst die letzte Spur-Zeile dieses Klicks
-    („<name>: am Zielpunkt … liegt nicht das Ziel ('…') …"), ohne Klammer-Beiwerk [...], ≤ 160 Zeichen. '' = nichts bekannt."""
+    vorn (klick_vorn_fremd aus _klick_grund), sonst die letzte Spur-Zeile dieses Klicks („<name>: am Zielpunkt … liegt nicht das Ziel ('…')
+    …"), sonst ein Fenster über dem Puls-Chrome (fremd_hinweis), ohne Klammer-Beiwerk [...], ≤ 160 Zeichen. '' = nichts bekannt.
+    CF1c (Gegenprüfung): die echte Spur ist eine _StempelSpur („12.3s·Contract-Feld: …") — der Zeitstempel wird vor dem Vergleich abgeschnitten;
+    die Spur-Zeile geht vor fremd_hinweis, weil _fremd_fenster bei einem frühen Abbruch noch von einem älteren Klick stammen kann."""
     g = klick_vorn_fremd(klick_grund)
     if g:
         return g
-    f = str(fremd or "").strip()
-    if f:
-        return f[:160]
     for z in reversed(list(spur or [])):
-        z = str(z)
+        z = re.sub(r"^\d+(?:\.\d+)?s·", "", str(z))
         if z.startswith(name + ":"):
             return re.sub(r"\s*\[[^\]]*\]", "", z[len(name) + 1:]).strip()[:160]
-    return ""
+    f = str(fremd or "").strip()
+    return f[:160] if f else ""
 
 
 def _tsx_k3_contract(s, st, wurzel, trail):
@@ -22716,6 +22739,8 @@ def _tsx_k3_contract(s, st, wurzel, trail):
             return False, "contract", f"Contract-Feld {'gesperrt' if zu.get('disabled') else 'verdeckt'} — Dialog offen? Nichts getan.", st, None
         r = list(r)[:4]
         _tsx_pause()
+        if hasattr(s, "_fremd_fenster"):
+            s._fremd_fenster = ""                    # CF1c: kein Fenstertitel eines älteren Klicks als „Grund" in dieser Meldung
         if not s.klick(r, "Contract-Feld", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
             # CF1 (23.11.2026, Master nach NV3: Marco Topstep …7245, Plan 28789882 — Versuch 1 endete hier, der Lauf startete daraufhin das
             # GANZE Puls-Chrome neu, der Prophos-Tab mit dem Lauf starb, die Antwort ging verloren, der Trade lief ohne Hedge). Am Punkt lag
@@ -22731,6 +22756,7 @@ def _tsx_k3_contract(s, st, wurzel, trail):
                 # leichter Weg vor jedem Neustart: Esc (halbe Liste/Popup zu), Puls-Chrome nach vorn, neu lesen, Überlagerungen weg, EIN Klick
                 trail.append("Contract-Feld nicht gedrückt (Klick ohne Beweis)" + (f" [{grund_k}]" if grund_k else "")
                              + " — leichter Weg: Esc, Puls-Chrome nach vorn, neu lesen, zweiter Versuch")
+                st = s.stand()                       # CF1c: Esc-Schutz („kein Esc bei offenem Dialog") prüft den FRISCHEN Stand
                 _cdp_esc(s, st, trail, "Contract-Feld ohne Beweis")
                 if hasattr(s, "_win_vorn"):
                     try:
@@ -32533,7 +32559,9 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
     # CF1b (23.11.2026, S3-Befund NV3): Spur und Bild des 1. Versuchs VOR dem Neustart sichern — bisher trug die Antwort nur die Kurzfassung
     # (neustart_spur_text) und die Spur des 2. Versuchs; puls_diagnose wird je PC überschrieben, ein Foto kam nie (Sperre des Laufs)
     spur.append("1. Versuch, Spur-Ende: " + str(r1.get("trail") or "-")[-1500:])
-    if foto is not None:
+    if foto is not None and rest - PULS_NEUSTART_MIN_REST_S.get(weg, 0.0) < NEUSTART_FOTO_MAX_S:
+        spur.append(f"kein Fehlerfoto 1. Versuch: zu wenig Zeit ({rest:.0f} s Rest) — der 2. Versuch geht vor")   # CF1c
+    elif foto is not None:
         try:
             bild1, fgrund = foto(r1)
             spur.append(f"Fehlerfoto 1. Versuch → {bild1}" if bild1 else f"kein Fehlerfoto 1. Versuch: {fgrund}")
@@ -32688,7 +32716,7 @@ def modus_tvkette_cdp_mit_neustart(cmd):
                               lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL,
                               neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL),   # Abriss 10053 (08.10.2026)
                               verboten=kein_neustart_grund(c),
-                              foto=lambda r: _fehlerfoto_sofort("tvkette", "tv", (r or {}).get("code") or (r or {}).get("schritt")),
+                              foto=lambda r: _fehlerfoto_sofort_begrenzt("tvkette", "tv", (r or {}).get("code") or (r or {}).get("schritt")),
                               ablage=lambda r: _puls_neustart_ablegen(c, r))
 
 
@@ -32699,7 +32727,7 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
     return _puls_mit_neustart("tsv2", lambda: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd, frist_s=frist),
                               None, TSX_URL, verboten=kein_neustart_grund(cmd),
-                              foto=lambda r: _fehlerfoto_sofort("tsxorder", "tsx", (r or {}).get("code") or (r or {}).get("schritt")),
+                              foto=lambda r: _fehlerfoto_sofort_begrenzt("tsxorder", "tsx", (r or {}).get("code") or (r or {}).get("schritt")),
                               ablage=lambda r: _puls_neustart_ablegen(cmd, r))
 
 
