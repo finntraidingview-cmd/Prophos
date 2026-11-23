@@ -136,6 +136,22 @@ check(len(m.closed) == 1 and m.closed[0]["deal"] == 777 and "note" not in m.clos
 ns["book_close"](m, 9, H, types.SimpleNamespace(deal=777), 1.4)
 check(len(m.closed) == 1 and m.buchung_offen == {}, "bekannter, schon verbuchter Deal → still übersprungen, nicht in die Warteliste")
 
+# EH3b: ein Fehler beim Verbuchen kippt nachbuchen nicht (Hauptschleife), der Eintrag bleibt bis zur Frist
+ns, mt5, m, logs, gs = welt()
+ns["book_close"](m, 11, H, types.SimpleNamespace(deal=0), 1.4)
+mt5.hist[500] = [deal(901, 1.4, OUT)]
+ns["close_verbuchen"] = lambda *a, **k: (_ for _ in ()).throw(OSError("Platte voll"))
+try:
+    ns["nachbuchen"](m)
+    geworfen = False
+except Exception:
+    geworfen = True
+check(not geworfen and any(k[0] == 500 for k in m.buchung_offen) and any("Nachbuchen Ticket 500: OSError" in x for x in logs),
+      "EH3b: Fehler im Verbuchen → nachbuchen wirft nicht, Eintrag bleibt, Grund im Log")
+Uhr.t += 31
+ns["nachbuchen"](m)
+check(m.buchung_offen == {}, "EH3b: nach der Frist fällt der Eintrag auch nach Fehlern weg")
+
 # ── Verdrahtung im Hauptlauf ──────────────────────────────────────────────────────────────────────────────────────────────────
 runde = src[src.index("            for m in masters:\n                # immer_scharf"):]
 check(runde.index("nachbuchen(m)") < runde.index("snap_path = os.path.join(common, m.snapshot_file)"),

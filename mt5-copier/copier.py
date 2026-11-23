@@ -2354,25 +2354,36 @@ def main():
 
     def nachbuchen(m):
         """EH3-2: offene Closes ohne Deal (m.buchung_offen) je Takt einmal in der Deal-History nachschlagen — gefunden → verbuchen (note
-        'nachgebucht', echte Fill-Zeit), Frist um → aufgeben wie vor EH3 (kein Eintrag). Haengt NICHT an own_close_mark. Wirft nie."""
+        'nachgebucht', echte Fill-Zeit), Frist um → aufgeben wie vor EH3 (kein Eintrag). Haengt NICHT an own_close_mark. Wirft nie —
+        EH3b (Pruefer 23.11.2026): auch das Verbuchen steht im try, ein Fehler dort kippt die Hauptschleife nicht (der Eintrag bleibt bis
+        zur Frist, close_verbuchen bucht nie doppelt)."""
         for schl, e in list(m.buchung_offen.items()):
-            tk = int(e.get("ticket") or (schl[0] if isinstance(schl, tuple) else schl))
+            tk = None
             try:
-                schon = m.booked_deals.get(e["ident"], set()) | {int(c.get("deal") or 0) for c in m.closed}
-                deal = close_deal_waehlen(mt5.history_deals_get(position=tk) or [], e.get("deal_id") or 0, e["vol"], schon,
-                                          (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY), magic=m.magic,
-                                          reason_expert=getattr(mt5, "DEAL_REASON_EXPERT", 3))
-            except Exception:
-                deal = None
-            urteil = nachbuchen_urteil(e, deal is not None, time.time())
-            if urteil == "buchen":
-                m.buchung_offen.pop(schl, None)
-                if close_verbuchen(m, e["ident"], e["h"], deal, e["vol"], note="nachgebucht"):
-                    log(f"[{m.file}] ✅ Close-Deal {int(deal.ticket)} (Ticket {tk}) nach {time.time() - float(e['ab']):.1f} s nachgebucht.")
-            elif urteil == "aufgeben":
-                m.buchung_offen.pop(schl, None)
-                log(f"[{m.file}] ⚠ Close-Deal (Ticket {tk}) auch nach {HEDGE_NACHBUCHEN_S:.0f} s nicht in der History — "
-                    f"KEIN closed_hedges-Eintrag (nie profit=0 raten).")
+                tk = int(e.get("ticket") or (schl[0] if isinstance(schl, tuple) else schl))
+                try:
+                    schon = m.booked_deals.get(e["ident"], set()) | {int(c.get("deal") or 0) for c in m.closed}
+                    deal = close_deal_waehlen(mt5.history_deals_get(position=tk) or [], e.get("deal_id") or 0, e["vol"], schon,
+                                              (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY), magic=m.magic,
+                                              reason_expert=getattr(mt5, "DEAL_REASON_EXPERT", 3))
+                except Exception:
+                    deal = None
+                urteil = nachbuchen_urteil(e, deal is not None, time.time())
+                if urteil == "buchen":
+                    if close_verbuchen(m, e["ident"], e["h"], deal, e["vol"], note="nachgebucht"):
+                        log(f"[{m.file}] ✅ Close-Deal {int(deal.ticket)} (Ticket {tk}) nach {time.time() - float(e['ab']):.1f} s nachgebucht.")
+                    m.buchung_offen.pop(schl, None)
+                elif urteil == "aufgeben":
+                    m.buchung_offen.pop(schl, None)
+                    log(f"[{m.file}] ⚠ Close-Deal (Ticket {tk}) auch nach {HEDGE_NACHBUCHEN_S:.0f} s nicht in der History — "
+                        f"KEIN closed_hedges-Eintrag (nie profit=0 raten).")
+            except Exception as ex:
+                log(f"[{m.file}] ⚠ Nachbuchen Ticket {tk}: {type(ex).__name__}: {str(ex)[:80]} — naechster Takt")
+                try:
+                    if nachbuchen_urteil(e, False, time.time()) == "aufgeben":
+                        m.buchung_offen.pop(schl, None)
+                except Exception:
+                    m.buchung_offen.pop(schl, None)
 
     # ── Hauptschleife ───────────────────────────────────────────────────────────
     poll = float(ref.get("poll_interval", 0.5))

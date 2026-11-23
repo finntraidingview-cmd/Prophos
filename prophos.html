@@ -27286,9 +27286,11 @@
    * null, obwohl Fusion +26,09 € schloss; 3 von 565 Echo-Plänen in 14 Tagen, alle pc-pmqd8g). final wird EINMAL eingefroren, sobald der Master zweimal
    * flach ist, und nie nachgezogen — verbucht der Copier den Hedge-Close erst danach (Fusion meldet den Deal asynchron, spät eröffneter Hedge), bleibt
    * closed_sum für immer leer. Jetzt: erwartet der Plan einen Echo-Hedge (mt5_baseline.echo_hedge.status 'mit') und steht im Fenster Start…jetzt noch
-   * kein closed_hedges-Eintrag, wartet das Einfrieren bis ECHO_HEDGE_BUCHUNG_MS ab dem ersten flachen Takt; danach wie bisher (leer = kein Beleg).
+   * kein closed_hedges-Eintrag, wartet das Einfrieren bis ECHO_HEDGE_BUCHUNG_MS (40 s, EH3b) ab dem ersten flachen Takt; danach wie bisher (leer = kein Beleg).
    * Echo V2 (kein Hedge) und Pläne ohne echo_hedge bleiben unverändert. REIN — Test-Haken window._echoGeist.hedgeWarten. */
-  const ECHO_HEDGE_BUCHUNG_MS = 20000
+  // EH3b (Prüfer 23.11.2026): 40 s statt 20 s — der Copier bucht bis 30 s nach SEINEM Close nach (HEDGE_NACHBUCHEN_S), dazu Status-Takt + Panel + Poll;
+  // mit 20 s fror der Tab ein, bevor eine späte Nachbuchung ankommen konnte
+  const ECHO_HEDGE_BUCHUNG_MS = 40000
   function echoHedgeBuchungAbwarten(plan, s, flachSeit, jetzt){
     const eh = plan && plan.mt5Baseline && plan.mt5Baseline.echo_hedge
     if(!eh || eh.status !== 'mit') return false
@@ -27643,7 +27645,7 @@
         const zEnde = { streak: n, beruhigen: mt5PlanPoll.beruhigen.get(String(plan.id)) || 0, flachSeit: mt5PlanPoll.flachSeit.get(String(plan.id)),
                         loginAt: mt5PlanPoll.loginLesung.get(String(plan.id)) || 0 }
         if(!echoEndeReif(zEnde, Date.now())){ if(zEnde.beruhigen) echoLoginLesen(plan, route.masterLogin); continue }
-        if(!istV2 && echoHedgeBuchungAbwarten(plan, s, zEnde.flachSeit, Date.now())) continue   // EH3-1: Hedge-Close des Copiers noch ≤ 20 s abwarten
+        if(!istV2 && echoHedgeBuchungAbwarten(plan, s, zEnde.flachSeit, Date.now())) continue   // EH3-1: Hedge-Close des Copiers noch ≤ 40 s abwarten (EH3b)
         mt5PlanPoll.streak.set(String(plan.id), 0)
         mt5PlanPoll.beruhigen.delete(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))
 
@@ -60790,7 +60792,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2287'
+  const OS_TAB_BUILD = '2026-09-22.2288'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

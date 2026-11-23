@@ -21,7 +21,7 @@ def check(ok, name):
 
 
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
-a = html.index("  const ECHO_HEDGE_BUCHUNG_MS = 20000")
+a = html.index("  const ECHO_HEDGE_BUCHUNG_MS = 40000")
 b = html.index("  function echoBeruhigen(pid)")
 code = html[a:b]
 
@@ -33,6 +33,8 @@ faelle = {
     "mit_ohne_close_5s": [MIT, {"closed_hedges": []}, FLACH, FLACH + 5000],
     "mit_ohne_close_19s": [MIT, {"closed_hedges": []}, FLACH, FLACH + 19000],
     "mit_ohne_close_21s": [MIT, {"closed_hedges": []}, FLACH, FLACH + 21000],
+    "mit_ohne_close_39s": [MIT, {"closed_hedges": []}, FLACH, FLACH + 39000],
+    "mit_ohne_close_41s": [MIT, {"closed_hedges": []}, FLACH, FLACH + 41000],
     "mit_close_im_fenster": [MIT, {"closed_hedges": [{"ticket": 1, "profit": 30.4, "closed_at": "2026-11-22T23:30:56.000Z"}]}, FLACH, FLACH + 3000],
     "mit_close_vor_start": [MIT, {"closed_hedges": [{"ticket": 1, "profit": 30.4, "closed_at": "2026-11-22T23:10:00.000Z"}]}, FLACH, FLACH + 3000],
     "mit_nur_dryrun": [MIT, {"closed_hedges": [{"ticket": 1, "profit": 0, "note": "dryrun", "closed_at": "2026-11-22T23:30:56.000Z"}]}, FLACH, FLACH + 3000],
@@ -56,7 +58,8 @@ with tempfile.TemporaryDirectory() as d:
     except Exception:
         o = {"fehler": (r.stdout + r.stderr)[-300:]}
 check(o.get("mit_ohne_close_5s") is True and o.get("mit_ohne_close_19s") is True, f"Hedge erwartet, kein Close im Fenster, < 20 s flach → warten ({o})")
-check(o.get("mit_ohne_close_21s") is False, "nach 20 s → einfrieren wie bisher (leer = kein Beleg)")
+check(o.get("mit_ohne_close_21s") is True and o.get("mit_ohne_close_39s") is True and o.get("mit_ohne_close_41s") is False,
+      "EH3b: bis 40 s warten (Copier bucht bis 30 s nach seinem Close), danach einfrieren wie bisher (leer = kein Beleg)")
 check(o.get("mit_close_im_fenster") is False, "Close im Fenster → sofort einfrieren (wie heute)")
 check(o.get("mit_close_vor_start") is True and o.get("mit_nur_dryrun") is True, "Close vor dem Start / nur dryrun zählt nicht → warten")
 check(o.get("mit_extern_marker") is False, "Extern-Marker im Fenster → nicht warten (wie heute: closed_sum null, aber Beleg da)")
