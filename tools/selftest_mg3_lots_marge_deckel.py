@@ -31,8 +31,9 @@ check(syntax, "app.py übersetzt fehlerfrei")
 baum = ast.parse(src)
 NAMEN = {"_wd_num", "_ap_norm", "_ap_de", "_mg3_zahl", "mg3_marge_je_lot", "mg3_marge_tabelle", "mg3_marge_fuer", "mg3_lots_max", "mg3_deckel",
          "mg3_schritt", "mg3_ist_cfd", "mg3_marge_laden", "ap_menge_fix", "mg3_sicherung_zeilen",
-         "_mg3_zeit", "mg3_frisch", "mg3_vergleich_art", "mg3_vergleich_groesse", "_wd_konto_groesse", "mg3_frei_aus", "mg3_widerlegt"}
-KONST = {"_MG3_UUID", "MG3_MARGE_ANTEIL", "MG3_LERN_TAGE", "MG3_SETTINGS_KEY", "MG3_GRUND", "_MG3_RE", "AP_CFD_ROUTEN", "FCP_LOT_SCHRITT"}
+         "_mg3_zeit", "mg3_frisch", "mg3_vergleich_art", "mg3_vergleich_groesse", "_wd_konto_groesse", "mg3_frei_aus", "mg3_widerlegt",
+         "mg3_probe_lots", "mg3_probe", "mg3_probe_faellig", "mg3_probe_merken", "mg3_probe_anwenden"}
+KONST = {"MG3_PROBE_UEBER", "MG3_PROBE_TAGE", "MG3_PROBE_KEY", "MG3_PROBE_GRUND", "_MG3_UUID", "MG3_MARGE_ANTEIL", "MG3_LERN_TAGE", "MG3_SETTINGS_KEY", "MG3_GRUND", "_MG3_RE", "AP_CFD_ROUTEN", "FCP_LOT_SCHRITT"}
 teile = []
 for n in baum.body:
     if isinstance(n, ast.FunctionDef) and n.name in NAMEN:
@@ -140,6 +141,12 @@ check(WL(eA, [dict(o_gross, started_at=(JETZT - timedelta(days=1)).strftime("%Y-
       and ns["_mg3_zeit"]("2026-11-23T00:00:08.9+00:00") is not None and ns["_mg3_zeit"]("2026-11-23T00:00:08.1234567Z") is not None,
       "Postgres-Zeit mit 1–2 bzw. 7 Nachkommastellen lesbar (Python 3.9 am Mac-Backend)")
 check(ns["mg3_marge_tabelle"](pl, gs, gv, KN, orders=[o_gross])["widerlegt"] == {}, "Order älter als der jüngste Lernwert des Kontos → nicht widerlegt")
+check(WL(eA, [dict(o_gross, master_contracts="4.7", notes="Funded-CFD-Planer · Marge-Probe: 4,7 Lot statt Deckel")])
+      and WL(eA, [dict(o_gross, master_contracts="4.7", notes="Funded-CFD-Planer · Marge-Probe: 4,7 Lot", started_at=iso(days=3))]) is None,
+      "MG3d: eine nach dem Lernen mit ihren Lots gelaufene Marge-Probe widerlegt (auch ohne Balance in der Notiz); eine ältere nicht")
+check(WL(eA, [dict(o_gross, master_contracts="1.2", notes="Tag 1/3 · Neben · Funded-CFD-Planer · Marge-Probe: 4,7 Lot statt Deckel")]) is None
+      and WL(eA, [dict(o_gross, master_contracts="3.4", notes="Auto-Planer · Marge-Probe: 4,7 Lot statt Deckel")]) is None,
+      "Prüfer MG3d: weniger Lots als die Probe (Neben-Teil, von Hand gesenkt) widerlegen nie")
 tab_w = ns["mg3_marge_tabelle"](pl, gs, gv, KN, orders=[dict(o_gross, started_at=iso(minutes=10))])
 check("kA" not in tab_w["konto"] and tab_w["widerlegt"]["kA"][0] == "u-g1" and F(tab_w, "kA", "u-g1", "Blue Guardian", gv) == (None, "")
       and F(tab_w, "kA", "u-g1", "Blue Guardian", gv, art="phase1", groesse=100000)[0] == 25737.0
@@ -147,6 +154,31 @@ check("kA" not in tab_w["konto"] and tab_w["widerlegt"]["kA"][0] == "u-g1" and F
       "widerlegter Wert fällt weg — eigener und als Rückfall (übrig bleibt der frische Wert eines anderen Kontos)")
 zw = ns["mg3_sicherung_zeilen"](tab_w, [{"user_id": "u-g1", "value": {"kA": {"mpl": 99999.0, "at": iso(days=22)}, "kZ": {"mpl": 1.0, "at": iso(days=2)}}}])
 check([set(z["value"]) for z in zw if z["user_id"] == "u-g1"] == [{"kZ"}], f"Sicherung: widerlegter Eintrag wird entfernt, die übrigen bleiben ({zw})")
+# ── MG3d: Marge-Probe alle 14 Tage ───────────────────────────────────────────────────────────────────────────────────────────────
+PL, PR, PF, PA = ns["mg3_probe_lots"], ns["mg3_probe"], ns["mg3_probe_faellig"], ns["mg3_probe_anwenden"]
+check(PL(100000.0, 25747.64, 0.1) == 4.7 and PL(100000.0, 25000.0, 0.1) == 4.8 and PL(None, 1, 0.1) is None,
+      "Probe-Lots: kleinste Lots mit Lots × Marge je Lot ≥ 120 % der Balance (Julian 4,7 = 121 %; 25.000 $/Lot → genau 4,8) — Abstand zur Kursdrift")
+pr_ = PR(5.0, 100000.0, 25747.64, 0.1)
+check(pr_ and pr_[0] == 4.7 and "Marge-Probe: 4,7 Lot" in pr_[1] and PR(4.2, 100000.0, 25747.64, 0.1) is None,
+      "Probe nie über den gewürfelten Lots (4,2 gewürfelt → keine Probe, normaler Deckel; wartet auf einen Plan mit ≥ 4,7)")
+tp_ = {"konto": {"kA": {"mpl": 25747.64, "at": iso(days=20)}}, "probe": {}}
+check(PF(tp_, "kA", JETZT) and not PF({"konto": {"kA": {"mpl": 1.0, "at": iso(days=5)}}}, "kA", JETZT)
+      and not PF(dict(tp_, probe={"kA": iso(days=3)}), "kA", JETZT) and PF(dict(tp_, probe={"kA": iso(days=20)}), "kA", JETZT)
+      and not PF(tp_, "kNEU", JETZT), "fällig nur mit eigenem Wert, Lernwert UND letzte Probe älter als 14 Tage")
+POSTS.clear()
+aA = {"id": "kA", "user_id": "u-g1"}
+check(PA(dict(tp_, probe={}), aA, 5.0, 100000.0, 25747.64, 0.1, "eigene Vorprüfung", True, JETZT)[0] == 4.7 and POSTS == [],
+      "Probelauf (trocken): Probe gerechnet, nichts gemerkt")
+check(PA(tp_, aA, 5.0, 100000.0, 25747.64, 0.1, "Wert derselben Firma/Kontoart/Größe im Unternehmen", False, JETZT) is None and POSTS == [],
+      "Rückfall-Wert eines anderen Kontos → nie eine Probe")
+tp2 = {"konto": {"kA": {"mpl": 25747.64, "at": iso(days=20)}}, "probe": {}, "probe_roh": {"u-g1": {"kQ": iso(days=1)}}}
+SB.clear()
+SB["antwort_user_settings"] = [{"value": {"kNEBEN": iso(hours=2)}}]   # paralleler Lauf hat inzwischen ein anderes Konto gemerkt
+r1 = PA(tp2, aA, 5.0, 100000.0, 25747.64, 0.1, "eigene Vorprüfung", False, JETZT)
+check(r1[0] == 4.7 and len(POSTS) == 1 and POSTS[0][2][0]["key"] == "marge_probe" and set(POSTS[0][2][0]["value"]) == {"kA", "kQ", "kNEBEN"}
+      and PA(tp2, aA, 5.0, 100000.0, 25747.64, 0.1, "eigene Vorprüfung", False, JETZT) is None and len(POSTS) == 1,
+      "echter Lauf: Probe gemerkt (vorher neu gelesen und zusammengeführt — andere Konten/parallele Läufe bleiben), derselbe Lauf probt nicht doppelt")
+check(not PF(dict(tp_, probe_aus=True), "kA", JETZT), "Proben nicht lesbar (probe_aus) → keine Probe, der Deckel gilt weiter")
 FR = ns["mg3_frisch"]
 check(FR(iso(days=29), JETZT) and not FR(iso(days=31), JETZT) and not FR("x", JETZT) and not FR(None, JETZT) and FR("2026-11-23T00:00:08.933Z", datetime(2026, 11, 24, tzinfo=timezone.utc)),
       "mg3_frisch: 30 Tage wie die Pläne, unlesbare Zeit → verworfen, „…Z“ mit Millisekunden lesbar")
@@ -172,7 +204,7 @@ check(len(POSTS) == 1 and POSTS[0][1].endswith("/rest/v1/user_settings?on_confli
       f"Laden sichert einen Lernwert, der nur am Plan hängt, sofort in user_settings (Nachtlauf/„Plan löschen“ nehmen ihn sonst mit) ({POSTS})")
 oq = SB["trade_plans"][1] if len(SB["trade_plans"]) > 1 else {}
 check(oq.get("status") == "in.(open,review,completed)" and oq.get("started_at", "").startswith("gte.") and oq.get("master_account_id") == "in.(kA,kALT,kB)"
-      and oq["started_at"][4:14] == iso(days=40)[:10],   # Fenster ab dem ältesten der je Konto jüngsten Lernwerte (kALT: nur vor 40 Tagen)
+      and oq["started_at"][4:14] == iso(days=30)[:10],   # Fenster ab dem ältesten jüngsten Lernwert (kALT: vor 40 Tagen), MG3d: höchstens 30 Tage
       
       f"MG3c Laden: erfolgreiche Orders der Konten mit eigenem Wert seit dem ältesten Lernzeitpunkt abgefragt ({oq})")
 check(set(t2["konto"]) == {"kA", "kB", "kALT"} and q["user_id"] == "in.(u-g1,u-g2)" and "Vorprüfung: nötig" in q["mt5_baseline->start_fehler->>msg"]
@@ -228,7 +260,12 @@ check("art=k[\"a\"].get(\"account_type\"), groesse=w.get(\"groesse\"))" in apl
       and "art=a.get(\"account_type\"), groesse=g))" in src[src.index("def fcp_planen("):],
       "MG3b: alle drei Planer geben Kontoart + Größe des Zielkontos an mg3_marge_fuer")
 fpl = src[src.index("def fcp_planen("):]
-check("marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get(\"firm\"), _mg3_gv, art=" in fpl and "_mg3_tab = mg3_marge_laden(uids, _mg3_gv)" in fpl
+check("mg3_probe_anwenden(_mg3_tab, k[\"a\"], w.get(\"menge\"), k[\"bal\"], _mpl, _sch, _mq, trocken)" in apl
+      and "mg3_probe_anwenden(_mg3_tab, a, w.get(\"menge\"), float(bal), _mpl, _sch, _mq, trocken)" in gpl
+      and "basis[\"marge_probe\"]" in fkr and "mg3_probe_faellig(_mg3_tab, aid)" in fpl
+      and fpl.index("kand.append((a, r))") < fpl.index("mg3_probe_merken(_mg3_tab, uid, aid)"),
+      "MG3d: Probe in allen drei Planern; Funded merkt sie erst, wenn der Vorschlag entsteht")
+check("mg3_marge_fuer(_mg3_tab, aid, uid, a.get(\"firm\"), _mg3_gv, art=a.get(\"account_type\"), groesse=g)" in fpl and "marge_lot=(lambda m_:" in fpl and "_mg3_tab = mg3_marge_laden(uids, _mg3_gv)" in fpl
       and "f\" · {r['marge_deckel']}\" if r.get(\"marge_deckel\")" in fpl, "fcp_planen: Lernwerte je Unternehmen, Grund in der Notiz")
 print("\n" + ("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER"))
 sys.exit(1 if FEHLER else 0)

@@ -31941,7 +31941,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                         grund = f"{_txt} — die Marge reicht für keinen Lot-Schritt: Hebel des Kontos prüfen oder von Hand"
                     else:
                         w = dict(w, mg3_max=mg3_lots_max(k["bal"], _mpl, _sch))   # Beleg für spätere Haupt-Teile (Trades pro Tag, tt_folge)
-                        if _txt:
+                        _pr = mg3_probe_anwenden(_mg3_tab, k["a"], w.get("menge"), k["bal"], _mpl, _sch, _mq, trocken)   # MG3d: alle 14 Tage
+                        if _pr:
+                            w = dict(w, menge=_pr[0], stufe=f"{w.get('stufe') or ''} · {_pr[1]}")
+                        elif _txt:
                             w = dict(w, menge=_neu, stufe=f"{w.get('stufe') or ''} · {_txt}")
             if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
                 grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
@@ -32744,9 +32747,13 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
             # MG3 (23.11.2026): wie ap_planen — Lots nach Marge deckeln, TP/SL-$ bleiben, der Hedge (gp_hedge) rechnet mit den gedeckelten Lots
             _mpl, _mq = mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), art=a.get("account_type"), groesse=w.get("groesse"))   # MG3b
             if _mpl:
-                _neu, _txt = mg3_deckel(w.get("menge"), float(bal), _mpl, mg3_schritt(regel_k, a["account_type"], w.get("groesse")), _mq)
+                _sch = mg3_schritt(regel_k, a["account_type"], w.get("groesse"))
+                _neu, _txt = mg3_deckel(w.get("menge"), float(bal), _mpl, _sch, _mq)
+                _pr = None if (_txt and not _neu) else mg3_probe_anwenden(_mg3_tab, a, w.get("menge"), float(bal), _mpl, _sch, _mq, trocken)   # MG3d
                 if _txt and not _neu:
                     grund = f"{_txt} — die Marge reicht für keinen Lot-Schritt: Hebel des Kontos prüfen oder von Hand"
+                elif _pr:
+                    w = dict(w, menge=_pr[0], stufe=f"{w.get('stufe') or ''} · {_pr[1]}")
                 elif _txt:
                     w = dict(w, menge=_neu, stufe=f"{w.get('stufe') or ''} · {_txt}")
         if grund:
@@ -47731,6 +47738,10 @@ MG3_MARGE_ANTEIL = 0.9
 MG3_LERN_TAGE = 30
 MG3_SETTINGS_KEY = "marge_je_lot"        # user_settings je ID: {konto_id: {mpl, firma, at}} — Sicherung der Lernwerte gelöschter Pläne (SQL MG3)
 MG3_GRUND = "Lots nach Marge gedeckelt"
+MG3_PROBE_TAGE = 14                       # MG3d: je Konto höchstens alle 14 Tage eine Marge-Probe
+MG3_PROBE_KEY = "marge_probe"             # user_settings je ID: {konto_id: Zeitpunkt der letzten Probe}
+MG3_PROBE_GRUND = "Marge-Probe"
+MG3_PROBE_UEBER = 1.2                     # Probe braucht nach dem Lernwert ≥ 120 % der Balance — Abstand zur Kursdrift (Marge je Lot folgt dem Index)
 _MG3_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _MG3_RE = re.compile(r"Vorprüfung: nötig ([0-9][0-9\s  .,]*?), frei (-?[0-9][0-9\s  .,]*?)\)")   # frei darf negativ sein (wie MG1); Gruppe 2 = frei (MG3c)
 
@@ -47786,6 +47797,11 @@ def mg3_widerlegt(e, orders):
             continue
         # nur die Balance, die der Planer selbst in die Notiz schreibt (ap_notiz: „Balance 100.000“); ohne sie kein Urteil — die freie Marge
         # vom Lernzeitpunkt wäre nach Gewinnen zu klein und würde einen richtigen Wert verwerfen (Prüfer MG3c)
+        mp = re.search(r"Marge-Probe: (\d+(?:,\d+)?) Lot", str(o.get("notes") or ""))
+        if mp and lots + 1e-9 >= float(mp.group(1).replace(",", ".")):
+            # MG3d: eine mit IHREN Lots gelaufene Marge-Probe widerlegt — die lagen per Bau über 120 % der Balance (auch Funded-Notizen ohne
+            # „Balance …“). Weniger Lots (Neben-Teil eines geteilten Tages, von Hand gesenkt) widerlegen nie (Prüfer MG3d)
+            return f"Marge-Probe {_ap_de(lots)} Lot am {str(o.get('started_at'))[:16]} lief — der Hebel ist gestiegen"
         mb = re.search(r"(?<![-\w])Balance (\d{1,3}(?:\.\d{3})+|\d+)(?![\d,.]\d)", str(o.get("notes") or ""))
         bal = _wd_num(mb.group(1).replace(".", "")) if mb else None
         if bal and bal > 0 and lots * mpl > bal + 1e-6:
@@ -47937,6 +47953,86 @@ def mg3_deckel(menge, balance, mpl, schritt, quelle=""):
                  f"{round(MG3_MARGE_ANTEIL * 100)} % von {_ap_de(balance, 0)} $ frei)")
 
 
+# ══ MG3d MARGE-PROBE (23.11.2026, Master nach S2-Befund zu MG3c): über Planer-Orders kann die Widerlegung nie greifen — der Deckel hält
+# Lots × Marge je Lot ≤ 0,9 × Balance, ein gestiegener Hebel bliebe für immer unentdeckt. Deshalb plant der Planer je Konto mit EIGENEM
+# Lernwert höchstens alle MG3_PROBE_TAGE Tage EINEN Plan bewusst über der gelernten Marge: die kleinste Lot-Zahl (im Lot-Schritt), die nach
+# dem gelernten Wert MEHR als die ganze Balance bräuchte (Julian: 100.000 ÷ 25.748 = 3,88 → 3,9 Lot). Nur einen Schritt über dem 90-%-Deckel
+# (3,5) bewiese nichts: der bräuchte 90.100 $ und liefe ohne Widerlegung. Hebel gleich → die Vorprüfung hält die Probe an (nichts gesendet,
+# MG1), der Wert wird erneuert; Hebel gestiegen → die Order läuft und mg3_widerlegt verwirft den alten Wert. Nie über den gewürfelten Lots
+# des Plans (also nie über der Regel-Spanne, nie bei Klein-/Tage-/Gewinntag-Trades mit wenigen Lots). Probe-Zeitpunkt in user_settings
+# marge_probe (nur bei echten Läufen, nie im Probelauf); fällig erst, wenn Lernwert UND letzte Probe älter als 14 Tage sind. ══
+def mg3_probe_lots(balance, mpl, schritt):
+    """REIN (testbar): kleinste Lots im Schritt mit Lots × Marge je Lot ≥ MG3_PROBE_UEBER × Balance → float, ohne Wert None.
+    Prüfer MG3d: knapp über 100 % (Julian 3,9 = 100,4 %) liefe schon nach 0,5 % Kursrückgang durch die Vorprüfung — bei gleichem Hebel, mit
+    fast voller Marge, und würde den richtigen Wert verwerfen. Mit 120 %: Julian 4,7 Lot; läuft sie, ist der Hebel deutlich gestiegen."""
+    b, m = _wd_num(balance), _wd_num(mpl)
+    if not b or not m or b <= 0 or m <= 0:
+        return None
+    s = float(schritt or 1)
+    ziel = MG3_PROBE_UEBER * b
+    n = int(ziel / m / s + 1e-9)
+    while n * s * m < ziel - 1e-6:
+        n += 1
+    return round(max(n, 1) * s, 4)
+
+
+def mg3_probe(menge, balance, mpl, schritt):
+    """REIN RECHNEND (testbar): (Lots, Text) der Marge-Probe oder None, wenn die gewürfelten Lots unter der Probe liegen (dann normaler Deckel)."""
+    p, alt = mg3_probe_lots(balance, mpl, schritt), _wd_num(menge)
+    if p is None or alt is None or alt + 1e-9 < p:
+        return None
+    neu = int(p) if float(p).is_integer() else p
+    return neu, (f"{MG3_PROBE_GRUND}: {_ap_de(neu)} Lot statt Deckel (gelernte Marge je Lot ≈ {_ap_de(mpl, 0)} $ → bräuchte über {round(MG3_PROBE_UEBER * 100)} % von {_ap_de(balance, 0)} $; "
+                 f"einmal in {MG3_PROBE_TAGE} Tagen: hält die Vorprüfung sie an, wird nichts gesendet und der Wert erneuert — läuft sie, ist der Hebel gestiegen)")
+
+
+def mg3_probe_faellig(tab, aid, jetzt=None):
+    """REIN (testbar): Probe für dieses Konto fällig? Nur mit EIGENEM Lernwert; Lernzeitpunkt und letzte Probe beide älter als MG3_PROBE_TAGE."""
+    e = ((tab or {}).get("konto") or {}).get(str(aid or ""))
+    if not e or (tab or {}).get("probe_aus"):
+        return False
+    grenze = (jetzt or datetime.now(timezone.utc)) - timedelta(days=MG3_PROBE_TAGE)
+    for t in (_mg3_zeit(e.get("at")), _mg3_zeit(((tab or {}).get("probe") or {}).get(str(aid)))):
+        if t is not None and t > grenze:
+            return False
+    return _mg3_zeit(e.get("at")) is not None
+
+
+def mg3_probe_merken(tab, uid, aid, jetzt=None):
+    """Probe-Zeitpunkt am Konto merken: user_settings marge_probe der ID (Upsert, vollständiger Wert) + im Lauf (tab) — derselbe Lauf probt nie doppelt.
+    Fehler: nur Log (dann wäre die Probe frühestens beim nächsten Lauf wieder fällig — höchstens ein weiterer Probe-Plan)."""
+    at = (jetzt or datetime.now(timezone.utc)).isoformat()
+    if isinstance(tab, dict):
+        tab.setdefault("probe", {})[str(aid)] = at
+        roh = tab.setdefault("probe_roh", {}).setdefault(str(uid), {})
+        roh[str(aid)] = at
+        wert = dict(roh)
+    else:
+        wert = {str(aid): at}
+    try:   # unmittelbar vorher neu lesen und zusammenführen — parallele Planer-Läufe (HT/Gruppe/Funded) überschreiben sich nicht (Prüfer MG3d)
+        z = (_sb_all("user_settings", {"select": "value", "key": f"eq.{MG3_PROBE_KEY}", "user_id": f"eq.{uid}"}) or [{}])[0].get("value")
+        if isinstance(z, dict):
+            wert = dict(z, **{k: v for k, v in wert.items() if str(v) >= str(z.get(k) or "")})
+    except Exception:
+        pass
+    try:
+        _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings?on_conflict=user_id,key",
+                                json=[{"user_id": str(uid), "key": MG3_PROBE_KEY, "value": wert}],
+                                headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=(5, 20)))
+    except Exception as e:
+        print(f"[mg3] ⚠️ Marge-Probe Konto {str(aid)[:8]} nicht gemerkt ({type(e).__name__}: {str(e)[:120]})", flush=True)
+
+
+def mg3_probe_anwenden(tab, a, menge, balance, mpl, schritt, quelle, trocken, jetzt=None):
+    """Planer-Haken (ap_planen/gp_planen): (Lots, Text) der Marge-Probe oder None. Nur mit eigenem Lernwert und fällig; merkt die Probe bei echten Läufen."""
+    if quelle != "eigene Vorprüfung" or not mg3_probe_faellig(tab, (a or {}).get("id"), jetzt):
+        return None
+    pr = mg3_probe(menge, balance, mpl, schritt)
+    if pr and not trocken:
+        mg3_probe_merken(tab, (a or {}).get("user_id"), (a or {}).get("id"), jetzt)
+    return pr
+
+
 def mg3_schritt(regel, phase, groesse):
     """REIN: Lot-Schritt der Phase wie ap_konto_rechnen (je_groesse vor den Firmen-Phasen, ohne Angabe 1 wie dort: menge_schritt or 1)."""
     jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if groesse else None
@@ -47997,6 +48093,8 @@ def mg3_marge_laden(uids, gruppe_von=None):
                 neuest[str(k)] = t
     eigen = sorted(a for a in neuest if _MG3_UUID.match(a))
     ab_t = min((neuest[a] for a in eigen), default=None)
+    if ab_t is not None:   # MG3d (S2-Hinweis 2): Orders-Fenster höchstens MG3_LERN_TAGE Tage — eigene Werte altern nicht, das Fenster schon
+        ab_t = max(ab_t, datetime.now(timezone.utc) - timedelta(days=MG3_LERN_TAGE))
     orders = []
     if eigen and ab_t:
         try:
@@ -48008,6 +48106,13 @@ def mg3_marge_laden(uids, gruppe_von=None):
             orders = []
             print(f"[mg3] ⚠️ Orders der Lernkonten nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Lernwerte bleiben", flush=True)
     tab = mg3_marge_tabelle(pl, gs, gruppe_von, konten, orders=orders)
+    try:   # MG3d: letzte Proben — eigener try (Prüfer): Lesefehler → Deckel bleibt, nur keine Probe in diesem Lauf
+        gp_ = _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{MG3_PROBE_KEY}", "user_id": inn}) or []
+        tab["probe_roh"] = {str(r.get("user_id")): dict(r.get("value")) for r in gp_ if isinstance(r.get("value"), dict)}
+        tab["probe"] = {str(k): v for w_ in tab["probe_roh"].values() for k, v in w_.items()}
+    except Exception as e:
+        tab["probe_aus"] = True
+        print(f"[mg3] ⚠️ Marge-Proben nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — heute keine Probe, Deckel gilt", flush=True)
     for aid, (_u, beleg) in (tab.get("widerlegt") or {}).items():
         print(f"[mg3] Lernwert Konto {aid[:8]} verworfen: {beleg}", flush=True)
     zeilen = mg3_sicherung_zeilen(tab, gs)
@@ -53513,9 +53618,13 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     # unten aus den gedeckelten Lots; ohne Wert unverändert
     if lots and isinstance(marge_lot, (tuple, list)) and marge_lot and marge_lot[0] and "mg3_deckel" in globals():
         _neu, _txt = mg3_deckel(lots, balance, marge_lot[0], FCP_LOT_SCHRITT, marge_lot[1] if len(marge_lot) > 1 else "")
+        # MG3d: marge_lot[2] = Marge-Probe fällig (eigener Lernwert, 14 Tage) — fcp_planen merkt sie, wenn der Plan entsteht
+        _pr = mg3_probe(lots, balance, marge_lot[0], FCP_LOT_SCHRITT) if (len(marge_lot) > 2 and marge_lot[2] and not (_txt and not _neu)) else None
         if _txt and not _neu:
             return dict(basis, aktion="aus", grund=f"{_txt} — die Marge reicht für keinen Lot-Schritt: Hebel des Kontos prüfen oder von Hand")
-        if _txt:
+        if _pr:
+            lots, basis["marge_deckel"], basis["marge_probe"] = _pr[0], _pr[1], True
+        elif _txt:
             lots, basis["marge_deckel"] = _neu, _txt
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
@@ -53947,7 +54056,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None),
-                              marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv, art=a.get("account_type"), groesse=g))   # MG3/MG3b (23.11.2026)
+                              marge_lot=(lambda m_: (m_[0], m_[1], m_[1] == "eigene Vorprüfung" and mg3_probe_faellig(_mg3_tab, aid)))(
+                                  mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv, art=a.get("account_type"), groesse=g)))   # MG3/MG3b/MG3d (23.11.2026)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r.get("aktion") == "ziel" and fcp_anfrage_ohne_trade(anfrage_zuletzt.get(aid), pl, jetzt):
             # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn
@@ -53980,6 +54090,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         else:
             r["letzter_trade"] = max([str(p.get("started_at")) for p in pl if p.get("started_at")] or [str(a.get("created_at") or "")]) or None
             kand.append((a, r))
+            if r.get("marge_probe") and not trocken:
+                mg3_probe_merken(_mg3_tab, uid, aid)   # MG3d: Probe-Zeitpunkt am Konto (nur echte Läufe, nur wenn der Vorschlag entsteht)
     # Startzeiten (Minuten ab Mitternacht der Fenster-Zone): Firmen-Abstand je Gruppe, Abstand je ID (ein PC) gegen alle Starts der IDs
     # INDEX-PAUSE (M1, 05.11.2026): geplante Funded-CFD-Pläne, die in der Pause starten würden, bekommen in diesem Lauf eine neue Zeit
     # (fcp_pause_verschieben) — ihre alte Zeit belegt nichts mehr, die neue zählt für Firmen-Abstand und Abstand je ID der neuen Vorschläge.
