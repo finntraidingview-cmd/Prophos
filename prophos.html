@@ -60792,7 +60792,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2291'
+  const OS_TAB_BUILD = '2026-09-22.2292'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66826,10 +66826,22 @@
   // RA2 B (11.11.2026, Master nach Hinweis S4): seit Server-Ablehnungen unklar = false sind, plante sfTick sie bis SF_MAX neu — bei „nur Schließen
   // erlaubt“ / „Trade disabled“ hieße das bis zu 3 weitere abgelehnte Orders. Diese Server-Antworten (order_bot ORDER_GRUND_REGELN, Text „(Server: …“)
   // zählen deshalb wie trade_allowed = False: Deckel sofort voll, kein Neuversuch. quelle = was die Meldung belegt (Anzeige)
+  // MG1 (23.11.2026, Master nach VF2: Julian Blue Guardian 100k …4067 — 4,2 Lots NAS100 brauchten 108.140 Marge, frei 100.000; ~19 Pläne der Emin-
+  // Gruppe heute mit 4,0–5,2 Lots). Die Vorprüfung vor F9 (order_bot FS2-C) bricht VOR dem Order-Knopf ab („Vorprüfung vor F9: zu wenig freie Marge …
+  // (Vorprüfung: nötig X, frei Y) — … nichts gesendet") — mit denselben Lots scheitert jeder Neuversuch genauso. Zählt deshalb wie eine Sperre (Deckel
+  // sofort voll, kein Nachplanen bis SF_MAX), aber mit eigener Art 'marge' und eigenem Text/Handgriff (Lots senken), nicht „Handel gesperrt".
+  // NUR die Vorprüfungs-Form: der API-Rechengrund „(API: nötig …)" kommt NACH dem Klick und belegt nichts (Gegenprüfung N2).
+  const sfMargeZahl = x => { const n = Number(String(x || '').replace(/[\s  ]/g, '').replace(',', '.')); return Number.isFinite(n) ? n : NaN }
   const sfGesperrt = m => { m = String(m || ''); const server = /\(Server: (Only position closing[^)]*|Trade disabled[^)]*)/i.exec(m)
-    if(!/trade_allowed\s*=\s*False/i.test(m) && !server) return null
+    const marge = /zu wenig freie Marge[^(]*\(Vorprüfung: nötig ([\d\s  .,]+), frei ([\d\s  .,-]+)\)/i.exec(m)
+    if(!/trade_allowed\s*=\s*False/i.test(m) && !server && !marge) return null
     const k = /Kontostand\s+(-?\d[\d\s  ]*(?:[.,]\d+)?)/.exec(m), b = k ? Number(k[1].replace(/[\s  ]/g, '').replace(',', '.')) : NaN
-    return { bal: Number.isFinite(b) ? b.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '',
+    const bal = Number.isFinite(b) ? b.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
+    if(marge && !/trade_allowed\s*=\s*False/i.test(m) && !server){
+      const noetig = sfMargeZahl(marge[1]), frei = sfMargeZahl(marge[2]), de = v => Number.isFinite(v) ? Math.round(v).toLocaleString('de-DE') : '?'
+      return { art: 'marge', bal, noetig, frei, quelle: `Vorprüfung: Marge nötig ${de(noetig)}, frei ${de(frei)}` }
+    }
+    return { art: 'sperre', bal,
       quelle: /trade_allowed\s*=\s*False/i.test(m) ? 'MT5: trade_allowed = False' : 'Server: ' + server[1].trim() } }
   // Fehlstart-Flag → Sperre: der Klartext des Bots (start_fehler.grund, bei server_abgelehnt) vor der gekürzten msg
   const sfGesperrtSf = sf => sf ? (sfGesperrt(sf.grund) || sfGesperrt(sf.msg)) : null
@@ -70709,7 +70721,8 @@
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
     if(sfIstTagesstopp(sf)) return 'Heute kein Neuversuch — Topstep DLL erreicht (Tagesstopp), morgen normal weiter.'   // TS-D2
-    if(sfGesperrtSf(sf)) return 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll; RA2: auch Server-Sperre)
+    if(sfGesperrtSf(sf)) return sfGesperrtSf(sf).art === 'marge' ? 'Kein Neuversuch — mit diesen Lots reicht die freie Marge nicht (MG1).'
+      : 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll; RA2: auch Server-Sperre)
     if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
     if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
@@ -71042,6 +71055,12 @@
       // 2b) Handel am Konto gesperrt (26.10.2026): MT5 meldet trade_allowed = False — schon ab dem ersten Fehlstart zeigen, ohne ↻ (Neuversuche
       // scheitern genauso, Jacob …6925 lief heute 5×). Vor dem Deckel, damit die Sperre statt „3 Fehlstarts … F9-Dialog" dasteht
       const gs = sf && (sf.status === 'rot' || sf.status === 'neu') ? sfGesperrtSf(sf) : null
+      if(gs && gs.art === 'marge'){   // MG1: Plan-Volumen größer als die freie Marge — nichts gesendet, Lots senken
+        const lots = Number(t && t.menge), q = (Number.isFinite(gs.noetig) && gs.noetig > 0 && Number.isFinite(gs.frei)) ? gs.frei / gs.noetig : NaN
+        const max = (Number.isFinite(lots) && lots > 0 && Number.isFinite(q)) ? Math.floor(lots * q * 0.9 * 100) / 100 : NaN
+        return { text: `kann nicht starten (${uhr}) — zu wenig freie Marge für die Plan-Lots${Number.isFinite(lots) && lots > 0 ? ` (${String(lots).replace('.', ',')} Lot)` : ''}, nichts gesendet (${gs.quelle})`,
+          tun: `Lots im Plan senken${Number.isFinite(max) ? ` (höchstens ~${String(max).replace('.', ',')} Lot mit 10 % Reserve)` : ''} und ↻ Erneut versuchen — oder den Plan löschen. Mit denselben Lots bringt Erneut versuchen nichts.`, neu: false }
+      }
       if(gs) return { text: `kann nicht starten (${uhr}) — Handel am Konto gesperrt${gs.bal ? `, Balance ${gs.bal}` : ''} (${gs.quelle})`,
         tun: 'Im Dashboard der Firma nachsehen (geblowt/gesperrt?) — dann unter Accounts abschließen bzw. archivieren und den Plan löschen. Erneut versuchen bringt nichts.', neu: false }
       // 2c) Topstep-Tagesstopp (TS-D2, Prüfer 20.11.2026): Deckel ist zwar voll, aber das ist kein „kann nicht starten“-Fall — Warten bis morgen ist richtig
