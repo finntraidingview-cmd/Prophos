@@ -31932,7 +31932,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             if w and not grund and _mg3_tab and not w.get("kette") and mg3_ist_cfd(k["regel"], k["a"].get("account_type")):
                 # MG3 (23.11.2026): Lots nach der gelernten Marge je Lot deckeln — NACH Würfel/RV, VOR Trades pro Tag (Neben-Teile rechnen mit den
                 # gedeckelten Haupt-Lots). TP/SL-$ bleiben, Hedge und Punkte folgen aus master_contracts. Ohne Lernwert → unverändert
-                _mpl, _mq = mg3_marge_fuer(_mg3_tab, k["a"].get("id"), k["a"].get("user_id"), k["a"].get("firm"))
+                _mpl, _mq = mg3_marge_fuer(_mg3_tab, k["a"].get("id"), k["a"].get("user_id"), k["a"].get("firm"),
+                                           art=k["a"].get("account_type"), groesse=w.get("groesse"))   # MG3b: Rückfall nur gleiche Kontoart + Größe
                 if _mpl:
                     _sch = mg3_schritt(k["regel"], k["a"].get("account_type"), w.get("groesse"))
                     _neu, _txt = mg3_deckel(w.get("menge"), k["bal"], _mpl, _sch, _mq)
@@ -32741,7 +32742,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
             tps_je.setdefault(_tk, set()).add(w.get("tp"))
         if w and not grund and not w.get("kette") and mg3_ist_cfd(regel_k, a["account_type"]):
             # MG3 (23.11.2026): wie ap_planen — Lots nach Marge deckeln, TP/SL-$ bleiben, der Hedge (gp_hedge) rechnet mit den gedeckelten Lots
-            _mpl, _mq = mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"))
+            _mpl, _mq = mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), art=a.get("account_type"), groesse=w.get("groesse"))   # MG3b
             if _mpl:
                 _neu, _txt = mg3_deckel(w.get("menge"), float(bal), _mpl, mg3_schritt(regel_k, a["account_type"], w.get("groesse")), _mq)
                 if _txt and not _neu:
@@ -47730,6 +47731,7 @@ MG3_MARGE_ANTEIL = 0.9
 MG3_LERN_TAGE = 30
 MG3_SETTINGS_KEY = "marge_je_lot"        # user_settings je ID: {konto_id: {mpl, firma, at}} — Sicherung der Lernwerte gelöschter Pläne (SQL MG3)
 MG3_GRUND = "Lots nach Marge gedeckelt"
+_MG3_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _MG3_RE = re.compile(r"Vorprüfung: nötig ([0-9][0-9\s  .,]*?), frei -?[0-9][0-9\s  .,]*?\)")   # frei darf negativ sein (wie MG1)
 
 
@@ -47758,23 +47760,57 @@ def mg3_marge_je_lot(msg, lots):
     return round(noetig / float(n_lots), 2) if noetig else None
 
 
-def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None):
-    """REIN RECHNEND (testbar): Lernwerte → {"konto": {konto_id: {mpl, at, firma, unt}}, "firma": {(unt, firma): höchste mpl}}.
+def _mg3_zeit(at):
+    """REIN: ISO-Zeit (auch „…Z“) → datetime (UTC) oder None."""
+    try:
+        d = datetime.fromisoformat(str(at or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def mg3_frisch(at, jetzt=None, tage=None):
+    """REIN (testbar, MG3b): Lernwert noch gültig? Jünger als MG3_LERN_TAGE (wie die Pläne) — ohne/unlesbare Zeit → nein (verworfen)."""
+    d = _mg3_zeit(at)
+    if d is None:
+        return False
+    return d >= (jetzt or datetime.now(timezone.utc)) - timedelta(days=float(tage if tage is not None else MG3_LERN_TAGE))
+
+
+def mg3_vergleich_art(art):
+    """REIN (MG3b): Kontoart für den Firmen-Rückfall — klein, leer → None (dann kein Rückfall)."""
+    return str(art or "").strip().lower() or None
+
+
+def mg3_vergleich_groesse(groesse):
+    """REIN (MG3b): Kontogröße ganzzahlig, ≤ 0/leer → None (dann kein Rückfall)."""
+    g = _wd_num(groesse)
+    return int(round(g)) if g and g > 0 else None
+
+
+def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None, konten=None, jetzt=None):
+    """REIN RECHNEND (testbar): Lernwerte → {"konto": {konto_id: {mpl, at, firma, unt, art, groesse, …}}, "firma": {(unt, firma, art, groesse): höchste mpl}}.
     plaene = trade_plans-Zeilen (user_id, master_account_id, master_firm, master_contracts, start_fehler bzw. mt5_baseline.start_fehler {msg, at});
-    gespeichert = user_settings-Zeilen key marge_je_lot ({user_id, value: {konto_id: {mpl, firma, at}}}); gruppe_von(uid) → Unternehmen-Schlüssel.
-    Je Konto gilt der jüngste Wert (at), gleich alt → der aus dem Plan."""
+    gespeichert = user_settings-Zeilen key marge_je_lot ({user_id, value: {konto_id: {mpl, firma, at}}}); gruppe_von(uid) → Unternehmen-Schlüssel;
+    konten = {konto_id: {account_type, account_size, starting_balance}} der gelernten Konten. Je Konto gilt der jüngste Wert (at), gleich alt →
+    der aus dem Plan. MG3b (23.11.2026, Prüfer S2): Werte älter als MG3_LERN_TAGE fallen weg (auch gesicherte); der Firmen-Rückfall gilt nur
+    für Konten derselben Firma, Kontoart UND Größe im selben Unternehmen — ein einziges Konto mit wenig Hebel deckelt nicht alle Konten der Firma."""
     gv = gruppe_von or (lambda u: "")
+    kn = konten or {}
     konto = {}
 
     def merk(aid, uid, firma, mpl, at, quelle):
-        if not aid or not mpl or mpl <= 0:
+        if not aid or not mpl or mpl <= 0 or not mg3_frisch(at, jetzt):
             return
         alt = konto.get(aid)
         if alt is not None and str(at or "") < alt["at"]:
             return
         fn = _ap_norm(_firm_norm(firma)) if firma else (alt or {}).get("firma", "")
+        k = kn.get(aid) or {}
+        # Größe wie überall (_wd_konto_groesse: „100k“ im Namen, sonst starting_balance), dann account_size — Prüfer MG3b: starting_balance allein ist oft leer/falsch
+        _g = (_wd_konto_groesse(k) if "_wd_konto_groesse" in globals() else None) or k.get("account_size")
         konto[aid] = {"mpl": float(mpl), "at": str(at or ""), "firma": fn, "firma_roh": firma or (alt or {}).get("firma_roh"), "unt": gv(str(uid)),
-                      "uid": str(uid), "quelle": quelle}
+                      "uid": str(uid), "quelle": quelle, "art": mg3_vergleich_art(k.get("account_type")), "groesse": mg3_vergleich_groesse(_g)}
 
     for r in gespeichert or ():
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
@@ -47790,17 +47826,19 @@ def mg3_marge_tabelle(plaene, gespeichert=None, gruppe_von=None):
              "plan")
     firma = {}
     for e in konto.values():
-        if e["firma"]:
-            k = (e["unt"], e["firma"])
+        if e["firma"] and e["art"] and e["groesse"]:
+            k = (e["unt"], e["firma"], e["art"], e["groesse"])
             firma[k] = max(firma.get(k, 0.0), e["mpl"])
     return {"konto": konto, "firma": firma}
 
 
-def mg3_sicherung_zeilen(tab, gespeichert):
+def mg3_sicherung_zeilen(tab, gespeichert, jetzt=None):
     """REIN (testbar, Prüfer-Befund MG3): user_settings-Zeilen (user_id, key, value) für Lernwerte, die bisher NUR an einem Plan hängen (neuer als
     die Sicherung oder dort noch nicht da) — der Nachtlauf löscht nie gestartete Pläne und „Plan löschen“ (MG1-Handgriff) auch; ohne Sicherung
-    wäre der Lernwert danach weg und der übernächste Tag wieder ohne Deckel. value = bisherige Sicherung der ID + neue Konten (vollständig)."""
-    alt = {str(r.get("user_id")): dict(r.get("value")) for r in (gespeichert or ()) if isinstance(r.get("value"), dict)}
+    wäre der Lernwert danach weg und der übernächste Tag wieder ohne Deckel. value = noch frische Einträge der ID + neue Konten (MG3b: abgelaufene
+    fallen beim Schreiben heraus; ohne neuen Wert wird nichts geschrieben — beim Lesen zählen abgelaufene ohnehin nicht)."""
+    alt = {str(r.get("user_id")): {k: v for k, v in r.get("value").items() if isinstance(v, dict) and mg3_frisch(v.get("at"), jetzt)}
+           for r in (gespeichert or ()) if isinstance(r.get("value"), dict)}
     neu = {}
     for aid, e in ((tab or {}).get("konto") or {}).items():
         if e.get("quelle") != "plan" or not e.get("uid"):
@@ -47813,14 +47851,18 @@ def mg3_sicherung_zeilen(tab, gespeichert):
     return [{"user_id": u, "key": MG3_SETTINGS_KEY, "value": v} for u, v in sorted(neu.items())]
 
 
-def mg3_marge_fuer(tab, aid, uid, firma, gruppe_von=None):
-    """REIN (testbar): → (Marge je Lot, Quelle) — eigener Wert des Kontos, sonst der höchste derselben Firma im selben Unternehmen, sonst (None, "")."""
+def mg3_marge_fuer(tab, aid, uid, firma, gruppe_von=None, art=None, groesse=None):
+    """REIN (testbar): → (Marge je Lot, Quelle) — eigener Wert des Kontos, sonst der höchste derselben Firma, Kontoart und Größe im selben
+    Unternehmen (MG3b), sonst (None, ""). Ohne Kontoart oder Größe des Zielkontos kein Rückfall."""
     e = ((tab or {}).get("konto") or {}).get(str(aid or ""))
     if e:
         return e["mpl"], "eigene Vorprüfung"
+    a, g = mg3_vergleich_art(art), mg3_vergleich_groesse(groesse)
+    if not a or not g:
+        return None, ""
     gv = gruppe_von or (lambda u: "")
-    v = ((tab or {}).get("firma") or {}).get((gv(str(uid)), _ap_norm(_firm_norm(firma))))
-    return (v, "Wert derselben Firma im Unternehmen") if v else (None, "")
+    v = ((tab or {}).get("firma") or {}).get((gv(str(uid)), _ap_norm(_firm_norm(firma)), a, g))
+    return (v, "Wert derselben Firma/Kontoart/Größe im Unternehmen") if v else (None, "")
 
 
 def mg3_lots_max(balance, mpl, schritt, anteil=MG3_MARGE_ANTEIL):
@@ -47873,7 +47915,23 @@ def mg3_marge_laden(uids, gruppe_von=None):
     except Exception as e:
         print(f"[mg3] ⚠️ Marge-Lernwerte nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Lots ohne Marge-Deckel", flush=True)
         return leer
-    tab = mg3_marge_tabelle(pl, gs, gruppe_von)
+    # MG3b: Kontoart + Größe der gelernten Konten für den Firmen-Rückfall; Lesefehler → nur eigene Werte je Konto (kein Rückfall)
+    # nur frische Einträge, nur gültige UUIDs (ein fremder Schlüssel würde die ganze in.()-Abfrage kippen), in Paketen (URL-Länge) — Prüfer MG3b
+    aids = sorted(a for a in ({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")}
+                              | {str(k) for r in gs if isinstance(r.get("value"), dict) for k, v in r["value"].items()
+                                 if isinstance(v, dict) and mg3_frisch(v.get("at"))})
+                  if _MG3_UUID.match(a))
+    konten = {}
+    if aids:
+        try:
+            for i in range(0, len(aids), 100):
+                for a in _sb_all("accounts", {"select": "id,name,account_type,account_size,starting_balance",
+                                              "id": f"in.({','.join(aids[i:i + 100])})"}) or []:
+                    konten[str(a.get("id"))] = a
+        except Exception as e:
+            konten = {}
+            print(f"[mg3] ⚠️ Konten der Lernwerte nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — nur eigene Werte je Konto", flush=True)
+    tab = mg3_marge_tabelle(pl, gs, gruppe_von, konten)
     zeilen = mg3_sicherung_zeilen(tab, gs)
     if zeilen:
         try:   # Upsert auf (user_id, key) — nur wenn ein Plan einen neuen Wert trägt; Fehler: der Deckel gilt in diesem Lauf trotzdem
@@ -53811,7 +53869,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               gewinne=fcp_gewinne(pl, fcp_gewinntage_seit(zyklus_ab.get(aid), a.get("created_at")), zyklus_ts.get(aid)) if payouts_ok else None, gewinntage=gti,
                               # O1: festes Ziel je Konto + Zyklus — nur mit Spalte und lesbaren Payouts (Zyklus sicher), sonst wie bisher je Lauf gewürfelt
                               ziel_fest=((a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else {}) if od_spalte and payouts_ok else None),
-                              marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv))   # MG3 (23.11.2026)
+                              marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv, art=a.get("account_type"), groesse=g))   # MG3/MG3b (23.11.2026)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r.get("aktion") == "ziel" and fcp_anfrage_ohne_trade(anfrage_zuletzt.get(aid), pl, jetzt):
             # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn

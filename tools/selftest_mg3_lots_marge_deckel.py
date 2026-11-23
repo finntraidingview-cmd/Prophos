@@ -30,8 +30,9 @@ except SyntaxError as e:
 check(syntax, "app.py übersetzt fehlerfrei")
 baum = ast.parse(src)
 NAMEN = {"_wd_num", "_ap_norm", "_ap_de", "_mg3_zahl", "mg3_marge_je_lot", "mg3_marge_tabelle", "mg3_marge_fuer", "mg3_lots_max", "mg3_deckel",
-         "mg3_schritt", "mg3_ist_cfd", "mg3_marge_laden", "ap_menge_fix", "mg3_sicherung_zeilen"}
-KONST = {"MG3_MARGE_ANTEIL", "MG3_LERN_TAGE", "MG3_SETTINGS_KEY", "MG3_GRUND", "_MG3_RE", "AP_CFD_ROUTEN", "FCP_LOT_SCHRITT"}
+         "mg3_schritt", "mg3_ist_cfd", "mg3_marge_laden", "ap_menge_fix", "mg3_sicherung_zeilen",
+         "_mg3_zeit", "mg3_frisch", "mg3_vergleich_art", "mg3_vergleich_groesse", "_wd_konto_groesse"}
+KONST = {"_MG3_UUID", "MG3_MARGE_ANTEIL", "MG3_LERN_TAGE", "MG3_SETTINGS_KEY", "MG3_GRUND", "_MG3_RE", "AP_CFD_ROUTEN", "FCP_LOT_SCHRITT"}
 teile = []
 for n in baum.body:
     if isinstance(n, ast.FunctionDef) and n.name in NAMEN:
@@ -87,43 +88,75 @@ check(D(1.37, 30000.0, 25747.64, 0.01)[0] == 1.04, "Funded-Schritt 0,01: 0,9 × 
 # ── Lernen je Konto, Rückfall nur im selben Unternehmen ────────────────────────────────────────────────────────────────────────
 GR = {"u-g1": "G", "u-g2": "G", "u-ht1": "", "u-ht2": ""}
 gv = lambda u: GR.get(u, "")   # noqa: E731
+JETZT = datetime.now(timezone.utc)
+iso = lambda **d: (JETZT - timedelta(**d)).isoformat().replace("+00:00", "Z")   # noqa: E731 — Zeiten relativ zu jetzt (Test altert nicht)
 pl = [{"user_id": "u-g1", "master_account_id": "kA", "master_firm": "Blue Guardian", "master_contracts": "4.200",
-       "start_fehler": {"msg": J, "at": "2026-11-23T00:00:08Z"}},
+       "start_fehler": {"msg": J, "at": iso(hours=1)}},
       {"user_id": "u-ht2", "master_account_id": "kE", "master_firm": "Blue Guardian", "master_contracts": "2.000",
-       "mt5_baseline": {"start_fehler": {"msg": J.replace("108 140.09", "120 000.00"), "at": "2026-11-20T00:00:00Z"}}}]
-gs = [{"user_id": "u-g2", "value": {"kB": {"mpl": 25737.0, "firma": "Blue Guardian", "at": "2026-11-23T00:33:32Z"}}},
-      {"user_id": "u-g1", "value": {"kA": {"mpl": 99999.0, "firma": "Blue Guardian", "at": "2026-11-01T00:00:00Z"}}}]
-tab = ns["mg3_marge_tabelle"](pl, gs, gv)
+       "mt5_baseline": {"start_fehler": {"msg": J.replace("108 140.09", "120 000.00"), "at": iso(days=3)}}}]
+gs = [{"user_id": "u-g2", "value": {"kB": {"mpl": 25737.0, "firma": "Blue Guardian", "at": iso(minutes=30)},
+                                    "kALT": {"mpl": 50000.0, "firma": "Blue Guardian", "at": iso(days=40)}}},
+      {"user_id": "u-g1", "value": {"kA": {"mpl": 99999.0, "firma": "Blue Guardian", "at": iso(days=22)}}}]
+P1 = {"account_type": "phase1", "account_size": "100000.00"}
+KN = {"kA": P1, "kB": P1, "kE": dict(P1, account_size=None, starting_balance="100000.00"), "kALT": P1}
+tab = ns["mg3_marge_tabelle"](pl, gs, gv, KN)
 F = ns["mg3_marge_fuer"]
 check(abs(F(tab, "kA", "u-g1", "Blue Guardian", gv)[0] - 25747.64) < 0.01 and F(tab, "kA", "u-g1", "Blue Guardian", gv)[1] == "eigene Vorprüfung",
-      "eigenes Konto: jüngster Wert (Plan 23.11. schlägt alte Sicherung 01.11.)")
+      "eigenes Konto: jüngster Wert (Plan von heute schlägt Sicherung von vor 22 Tagen)")
 check(F(tab, "kB", "u-g2", "Blue Guardian", gv)[0] == 25737.0, "Sicherung aus user_settings (gelöschter Plan) zählt je Konto")
-check(abs(F(tab, "kNEU", "u-g2", "Blue Guardian", gv)[0] - 25747.64) < 0.01 and F(tab, "kNEU", "u-g2", "Blue Guardian", gv)[1].startswith("Wert derselben Firma"),
-      "Konto ohne eigenen Wert in derselben Gruppe → höchster Wert derselben Firma der Gruppe")
-tab_g = ns["mg3_marge_tabelle"](pl[:1], gs, gv)      # nur die Gruppe hat Werte
-check(F(tab_g, "kC", "u-ht1", "Blue Guardian", gv) == (None, "") and F(tab, "kC", "u-ht1", "Blue Guardian", gv)[0] == 60000.0,
-      "HT-Konto ohne eigenen Wert → nie der Wert der Gruppe (Unternehmen getrennt), nur ein HT-Wert derselben Firma")
+check("kALT" not in tab["konto"] and F(tab, "kALT", "u-g2", "Blue Guardian", gv, art="phase1", groesse=100000)[0] != 50000.0,
+      "MG3b: gesicherter Lernwert älter als 30 Tage → verworfen (auch nicht im Firmen-Rückfall)")
+check(abs(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="Phase1", groesse=100000.0)[0] - 25747.64) < 0.01
+      and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=100000)[1].startswith("Wert derselben Firma/Kontoart/Größe"),
+      "Konto ohne eigenen Wert, gleiche Gruppe + Firma + Kontoart + Größe → höchster Wert dieser Konten")
+check(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase2", groesse=100000) == (None, "")
+      and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=50000) == (None, "")
+      and F(tab, "kNEU", "u-g2", "Blue Guardian", gv) == (None, "") and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1") == (None, ""),
+      "MG3b: andere Kontoart / andere Größe / Zielkonto ohne Kontoart oder Größe → kein Rückfall")
+tab_ohne = ns["mg3_marge_tabelle"](pl, gs, gv, {"kA": {"account_type": "phase1"}})
+check(tab_ohne["firma"] == {} and abs(F(tab_ohne, "kA", "u-g1", "Blue Guardian", gv)[0] - 25747.64) < 0.01,
+      "MG3b: gelerntes Konto ohne bekannte Größe → nur sein eigener Wert, kein Rückfall für andere")
+tab_g = ns["mg3_marge_tabelle"](pl[:1], gs, gv, KN)      # nur die Gruppe hat Werte
+check(F(tab_g, "kC", "u-ht1", "Blue Guardian", gv, art="phase1", groesse=100000) == (None, "")
+      and F(tab, "kC", "u-ht1", "Blue Guardian", gv, art="phase1", groesse=100000)[0] == 60000.0,
+      "HT-Konto ohne eigenen Wert → nie der Wert der Gruppe (Unternehmen getrennt), nur ein HT-Wert gleicher Firma/Art/Größe (starting_balance als Größe)")
 check(F(tab, "kE", "u-ht2", "Blue Guardian", gv)[0] == 60000.0 and D(4.2, 100000.0, 60000.0, 0.1)[0] == 1.5,
       "HT-Konto mit eigener Vorprüfung → nur sein eigener Wert")
-check(F(tab, "kX", "u-g1", "FundedNext", gv) == (None, ""), "andere Firma derselben Gruppe → kein Wert")
+check(F(tab, "kX", "u-g1", "FundedNext", gv, art="phase1", groesse=100000) == (None, ""), "andere Firma derselben Gruppe → kein Wert")
+tab_n = ns["mg3_marge_tabelle"](pl[:1], [], gv, {"kA": {"account_type": "phase1", "name": "BG 100k 1234", "starting_balance": "150000"}})
+check(list(tab_n["firma"]) == [("G", "blueguardian", "phase1", 100000)], "MG3b: Größe wie _wd_konto_groesse — „100k“ im Namen schlägt eine falsche starting_balance")
+FR = ns["mg3_frisch"]
+check(FR(iso(days=29), JETZT) and not FR(iso(days=31), JETZT) and not FR("x", JETZT) and not FR(None, JETZT) and FR("2026-11-23T00:00:08.933Z", datetime(2026, 11, 24, tzinfo=timezone.utc)),
+      "mg3_frisch: 30 Tage wie die Pläne, unlesbare Zeit → verworfen, „…Z“ mit Millisekunden lesbar")
 
 # ── Laden: Fehler → leer, Filter auf die IDs ───────────────────────────────────────────────────────────────────────────────────
 L = ns["mg3_marge_laden"]
 SB.clear()
 POSTS.clear()
 SB["antwort_trade_plans"], SB["antwort_user_settings"] = pl[:1], gs[:1]
+SB["antwort_accounts"] = [dict(P1, id="kA"), dict(P1, id="kB")]
+_uuid_echt = ns["_MG3_UUID"]
+check(_uuid_echt.match("766ada29-edb9-4ae6-9b11-5c37917f0f2e") and not _uuid_echt.match("kA") and not _uuid_echt.match("x); drop"),
+      "MG3b: nur gültige Konto-UUIDs gehen in die accounts-Abfrage")
+ns["_MG3_UUID"] = re.compile(r"^k")                    # Test-Kennungen kA/kB zulassen
 t2 = L(["u-g1", "u-g2"], gv)
+ns["_MG3_UUID"] = _uuid_echt
 q = SB["trade_plans"][0]
+check(SB["accounts"][0]["id"] == "in.(kA,kB)" and "account_type" in SB["accounts"][0]["select"] and "name" in SB["accounts"][0]["select"]
+      and t2["firma"].get(("G", "blueguardian", "phase1", 100000)) == 25747.64,
+      f"MG3b Laden: nur frische Lernwerte abfragen (kALT abgelaufen), Kontoart/Größe aus accounts → Rückfall-Schlüssel ({t2['firma']})")
 check(len(POSTS) == 1 and POSTS[0][1].endswith("/rest/v1/user_settings?on_conflict=user_id,key") and "merge-duplicates" in POSTS[0][3]
       and POSTS[0][2][0]["user_id"] == "u-g1" and set(POSTS[0][2][0]["value"]) == {"kA"} and POSTS[0][2][0]["value"]["kA"]["mpl"] == 25747.64,
       f"Laden sichert einen Lernwert, der nur am Plan hängt, sofort in user_settings (Nachtlauf/„Plan löschen“ nehmen ihn sonst mit) ({POSTS})")
 check(set(t2["konto"]) == {"kA", "kB"} and q["user_id"] == "in.(u-g1,u-g2)" and "Vorprüfung: nötig" in q["mt5_baseline->start_fehler->>msg"]
       and SB["user_settings"][0]["key"] == "eq.marge_je_lot", "Laden: nur diese IDs, nur Vorprüfungs-Meldungen, dazu die Sicherung")
 Z = ns["mg3_sicherung_zeilen"]
-gs_neu = [{"user_id": "u-g1", "value": {"kA": {"mpl": 25747.64, "firma": "Blue Guardian", "at": "2026-11-23T00:00:08Z"}, "kZ": {"mpl": 1.0, "at": "x"}}}]
+gs_neu = [{"user_id": "u-g1", "value": {"kA": {"mpl": 25747.64, "firma": "Blue Guardian", "at": iso(hours=1)}, "kZ": {"mpl": 1.0, "at": iso(days=2)}}}]
 check(Z(ns["mg3_marge_tabelle"](pl[:1], gs_neu), gs_neu) == [], "schon gesichert (gleicher Wert, gleich alt) → nichts schreiben")
-z1 = Z(ns["mg3_marge_tabelle"](pl[:1], [{"user_id": "u-g1", "value": {"kZ": {"mpl": 1.0, "at": "x"}}}]), [{"user_id": "u-g1", "value": {"kZ": {"mpl": 1.0, "at": "x"}}}])
-check(len(z1) == 1 and set(z1[0]["value"]) == {"kA", "kZ"} and z1[0]["key"] == "marge_je_lot", "neuer Wert → vollständiger Wert der ID (andere Konten bleiben)")
+gs_z = [{"user_id": "u-g1", "value": {"kZ": {"mpl": 1.0, "at": iso(days=2)}, "kOLD": {"mpl": 2.0, "at": iso(days=45)}}}]
+z1 = Z(ns["mg3_marge_tabelle"](pl[:1], gs_z), gs_z)
+check(len(z1) == 1 and set(z1[0]["value"]) == {"kA", "kZ"} and z1[0]["key"] == "marge_je_lot",
+      "neuer Wert → vollständiger Wert der ID (frische Konten bleiben, abgelaufene fallen heraus — MG3b)")
 SB.clear()
 SB["fehler"] = True
 check(L(["u-g1"]) == {"konto": {}, "firma": {}}, "Lesefehler → leer (kein Deckel, wie vor MG3)")
@@ -163,8 +196,12 @@ check("_mg3m = _wd_num(k.get(\"mg3_max\"))" in ttf and "menge=int(_mg3m) if floa
       "Folge-Haupt-Teil: neu gerechnete Lots auf kette.mg3_max gedeckelt, nach RV, vor tt_folge_rechnen (Prüfer-Befund)")
 check("k2[\"mg3_max\"] = k[\"mg3_max\"]" in src[src.index("def _tt_zeile("):src.index("def _tt_zeile(") + 3000], "_tt_zeile: mg3_max geht an den nächsten Teil weiter")
 check("w = dict(w, mg3_max=mg3_lots_max(k[\"bal\"], _mpl, _sch))" in apl, "ap_planen: mg3_max auch ohne Deckel heute am Beleg (späterer Haupt-Teil könnte größer würfeln)")
+check("art=k[\"a\"].get(\"account_type\"), groesse=w.get(\"groesse\"))" in apl
+      and "art=a.get(\"account_type\"), groesse=w.get(\"groesse\"))" in gpl
+      and "art=a.get(\"account_type\"), groesse=g))" in src[src.index("def fcp_planen("):],
+      "MG3b: alle drei Planer geben Kontoart + Größe des Zielkontos an mg3_marge_fuer")
 fpl = src[src.index("def fcp_planen("):]
-check("marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get(\"firm\"), _mg3_gv)" in fpl and "_mg3_tab = mg3_marge_laden(uids, _mg3_gv)" in fpl
+check("marge_lot=mg3_marge_fuer(_mg3_tab, aid, uid, a.get(\"firm\"), _mg3_gv, art=" in fpl and "_mg3_tab = mg3_marge_laden(uids, _mg3_gv)" in fpl
       and "f\" · {r['marge_deckel']}\" if r.get(\"marge_deckel\")" in fpl, "fcp_planen: Lernwerte je Unternehmen, Grund in der Notiz")
 print("\n" + ("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER"))
 sys.exit(1 if FEHLER else 0)
