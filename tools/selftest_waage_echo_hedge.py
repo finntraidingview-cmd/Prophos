@@ -104,7 +104,8 @@ def schleife(ns):
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
                      "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
-BASIS = "cb980e81"     # nachgezogen (23.11.2026, Master, main-Commit cb980e81 = MG3): ap_planen bewusst geändert — Lots-Deckel nach Marge (mg3_marge_laden je Lauf, mg3_deckel nach RV, vor Trades pro Tag; Prüfer S2 OK); Richtung/Waage unverändert.
+BASIS = "af384a50"     # nachgezogen (23.11.2026, Master, Commit af384a50 = MG3d nach MG3b/MG3c): ap_planen bewusst geändert — Rückfall nur gleiche Kontoart/Größe (MG3b), Marge-Probe alle 14 Tage (MG3d); Richtung/Waage unverändert. Wird MG3d nicht vorgespult gepusht, BASIS auf den main-Commit von MG3d setzen.
+                       # Davor: BASIS = "cb980e81"     # nachgezogen (23.11.2026, Master, main-Commit cb980e81 = MG3): ap_planen bewusst geändert — Lots-Deckel nach Marge (mg3_marge_laden je Lauf, mg3_deckel nach RV, vor Trades pro Tag; Prüfer S2 OK); Richtung/Waage unverändert.
                        # Davor: BASIS = "65687b2e"     # nachgezogen (16.11.2026, Master, main-Commit 65687b2e = EOD1b): ap_planen gibt den Plan-Tag an _ap_peaks/_ap_kette_mlls (Boden/MLL, nicht Richtung/Waage; Prüfer S2 OK).
                        # Davor: BASIS = "0a141e00"     # nachgezogen (12.11.2026, Master, main-Commit 0a141e00 = TL1b): ap_planen bewusst geändert — Topstep-Ketten-Trade 1 trägt konto_typ ab dem Anlegen (Prüfer S2 OK); übrige Planer-/Waage-Funktionen unverändert.
                        # Davor: BASIS = "cbd98da0"     # nachgezogen (12.11.2026, Master, main-Commit cbd98da0 = TW3): ap_planen bewusst geändert — Firmen-Würfel je ID × Firma × Tag (tw_firma_wurf/tw_pause_dazu), Finn 12.11.: „die Zufalls-Propfirms bleiben bei 25 %“; übrige Planer-/Waage-Funktionen unverändert.
