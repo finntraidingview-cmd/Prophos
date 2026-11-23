@@ -800,6 +800,10 @@ else:
     GEAENDERT.update({"tsx_verletzungen_aus_liste", "tsx_geblowt_urteil", "_tsx_geblowt_merken", "tsx_blow_dialog_verletzung"})   # TS-D2 (20.11.2026): DLL = Tagesstopp statt geblowt — geprüft in selftest_tsd2_dll_tagesstopp.py
     GEAENDERT.add("_tsx_k3_contract")   # CF1 (23.11.2026): Contract-Feld ohne Klick-Beweis → Überlagerungen weg, EIN zweiter Klick — geprüft in selftest_cf1_contract_feld.py
     GEAENDERT.update({"_puls_mit_neustart", "_tsx_order_cdp_mit_neustart", "modus_tvkette_cdp_mit_neustart"})   # CF1b: Spur + Fehlerfoto des 1. Versuchs vor dem Neustart — ebd.
+    # 23.11.2026 (Master): Änderungen außerhalb der TopstepX-Dialoge, je mit eigenem Selbsttest — der Wächter meldete sie seit ihrem Push als „nicht bitgleich“
+    GEAENDERT.update({"_cdp_konto_sichern", "_cdp_liste_scrollen"})   # PS1/PS1b: Konto-Liste scrollen, Ziel-Beweis beim Konto-Klick
+    GEAENDERT.update({"_puls_chrome_neustart", "modus_augen"})   # PN1/PN1c: Neustart ohne den Prophos-Tab — selftest_pn1_neustart_prophos_tab.py
+    GEAENDERT.update({"run", "stufen_ausloesen"})   # NG2b: „nichts gesendet“ beim Echo-Bestätigungs-Timeout — selftest_ng2b_nichts_gesendet.py
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},
