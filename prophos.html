@@ -42621,7 +42621,9 @@
       // 2.700 $ steht in der Funded-Zeile) — Verlust ≥ 90 % des Tageslimits = Tagespause, nicht liquidiert
       if(!anHart){
         const dl = lqTageslimitUsd(t), bs = n(t.balance_start)
-        const verl = n(t.master_pl) != null ? -n(t.master_pl) : (bs != null && st && n(st.bal) != null ? bs - st.bal : null)
+        // Radar-Zeile: master_pl ist ein Objekt {wert, art} (wdlPlGesch) — Prüfer LQ2b; sonst P&L aus der Balance-Differenz (pl_balance) bzw. Start − Ende
+        const plW = n(t.master_pl && typeof t.master_pl === 'object' ? t.master_pl.wert : t.master_pl) ?? n(t.pl_balance)
+        const verl = plW != null ? -plW : (bs != null && st && n(st.bal) != null ? bs - st.bal : null)
         if(dl && verl != null && verl >= dl * 0.9) return { art: 'dll', grund: `Exit ${px}, Verlust ${Math.round(verl)} $ ≈ Tageslimit ${dl} $` }
       }
       return { art: 'liq', grund: `Exit ${px} (${ex.art || '?'}) nicht am Plan-SL ${sl ?? '–'} / TP ${tp ?? '–'}${anHart ? ', an der Konto-Liq ' + hart : ''} — von der Firma geschlossen` }
@@ -61674,7 +61676,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2312'
+  const OS_TAB_BUILD = '2026-09-22.2313'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
