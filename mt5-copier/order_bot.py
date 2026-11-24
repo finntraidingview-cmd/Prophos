@@ -3365,24 +3365,43 @@ def echo_scharf_max(cmd):
     return ECHO_SCHARF_STANDARD_S
 
 
+# PE1 (24.11.2026, Simon pc-pmqd8g Plan db8ebbf1): der letzte Blick vor dem Sell liest status_<cfg>.json genau einmal (max_s 0.0). Ersetzt der Copier
+# die Datei im selben Moment per os.replace, verweigert Windows das Öffnen kurz (PermissionError, Freigabeverletzung) → „Status-Datei nicht
+# lesbar (PermissionError)" → Fehlstart, obwohl der Copier scharf war. Jetzt: bei PermissionError (bzw. einer halb gelesenen Datei) bis zu
+# ECHO_STATUS_LESEN_VERSUCHE-mal in ~1 s nachlesen — unabhängig von max_s, nur lesen.
+ECHO_STATUS_LESEN_VERSUCHE = 4
+
+
+def _json_lesen_geduldig(pfad, versuche=ECHO_STATUS_LESEN_VERSUCHE, warte=None):
+    """PE1: JSON-Datei lesen; PermissionError/halb gelesen (ValueError) → kurz warten, erneut (höchstens `versuche` Lesungen, ~1 s).
+    -> (daten | None, Ausnahme | None). Andere Fehler (Datei fehlt) sofort zurück. Wirft nie."""
+    w = warte or (lambda: _warte(0.25, 0.15))
+    fehler = None
+    for i in range(max(1, int(versuche))):
+        try:
+            with open(pfad, "r", encoding="utf-8") as f:
+                return json.load(f), None
+        except (PermissionError, ValueError) as e:
+            fehler = e
+            if i + 1 < max(1, int(versuche)):
+                w()
+        except Exception as e:
+            return None, e
+    return None, fehler
+
+
 def _echo_scharf_abwarten(cfg_path, max_s, trail, immer_scharf=False):
     """Copier-Status dieser Config lesen, bis scharf oder max_s um sind (_warte(0.5, 0.3)-Takt, gestreut). -> (True, '') | (False, grund).
-    Nur lesend: status_<cfg>.json (schreibt der Copier atomar) und plans.json (schreibt das Panel atomar) neben der Config."""
+    Nur lesend: status_<cfg>.json (schreibt der Copier atomar) und plans.json (schreibt das Panel atomar) neben der Config.
+    PE1: jede Lesung mit kurzem Nachlesen bei PermissionError (_json_lesen_geduldig)."""
     ordner, datei = os.path.dirname(os.path.abspath(cfg_path)), os.path.basename(cfg_path)
     status_datei = os.path.join(ordner, re.sub(r"^config", "status", datei, count=1, flags=re.I))
     t0, grund = time.time(), "nicht gelesen"
     while True:
-        try:
-            with open(status_datei, "r", encoding="utf-8") as f:
-                st = json.load(f)
-        except Exception as e:
+        st, e = _json_lesen_geduldig(status_datei)
+        if e is not None:
             st, grund = None, f"Status-Datei nicht lesbar ({type(e).__name__})"
-        plans = None
-        try:
-            with open(os.path.join(ordner, "plans.json"), "r", encoding="utf-8") as f:
-                plans = json.load(f)
-        except Exception:
-            plans = None                      # unlesbar → warten (Gegenprüfung 05.11.2026)
+        plans, _e2 = _json_lesen_geduldig(os.path.join(ordner, "plans.json"))   # unlesbar → None → warten (Gegenprüfung 05.11.2026)
         if st is not None:
             from datetime import datetime as _dt
             urteil, grund = echo_scharf_urteil(st, plans, datei, _dt.now(), immer_scharf=immer_scharf)
