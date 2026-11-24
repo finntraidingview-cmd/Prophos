@@ -60,8 +60,17 @@ def j(x):
 
 
 print(f"— Bitgleich gegen {REF} (Nicht-On-Demand, normal + Striking) —")
-faelle = abw = 0
+faelle = abw = fz1 = 0
 beisp = []
+
+
+def fz1_rundung(A, B):
+    """FZ1 (24.11.2026): der letzte Consistency-Trade (Rest unter dem Deckel, n = 1) wird auf ganze $ AUFgerundet statt gerundet — gewollt.
+    Erlaubt nur genau diese Abweichung: gleiche Aktion/SL/Lots, alter TP = round(Rest), neuer TP = alter TP + 1 = ceil(Rest)."""
+    ca = A.get("consistency") if isinstance(A.get("consistency"), dict) else {}
+    r = ca.get("rest")
+    return (ca.get("n") == 1 and r is not None and A.get("aktion") == B.get("aktion") == "planen" and A.get("sl") == B.get("sl")
+            and A.get("lots") == B.get("lots") and A.get("tp") == round(r) and B.get("tp") == A.get("tp") + 1 == float(-(-(r - 0.005) // 1)))
 for regel in (FN, T5, BG, FT, FP):
     for art in ("normal", "striking"):
         jg0 = neu.fcp_je_groesse(regel, G)
@@ -85,11 +94,15 @@ for regel in (FN, T5, BG, FT, FP):
                                 A = alt.fcp_konto_rechnen(copy.deepcopy(jg), bal, G, zyk, False, 1.0, 0.85, ra, ziel_fest=copy.deepcopy(zf), **kw)
                                 B = neu.fcp_konto_rechnen(copy.deepcopy(jg), bal, G, zyk, False, 1.0, 0.85, rn, ziel_fest=copy.deepcopy(zf), **kw)
                                 faelle += 1
-                                if j(A) != j(B) or ra.random() != rn.random():
+                                gleich_rnd = ra.random() == rn.random()
+                                if j(A) != j(B) and gleich_rnd and fz1_rundung(A, B):
+                                    fz1 += 1
+                                    continue
+                                if j(A) != j(B) or not gleich_rnd:
                                     abw += 1
                                     if len(beisp) < 3:
                                         beisp.append((regel["namen"][0], art, bal, zyk, tage, gti, zf))
-ok(faelle > 20000 and abw == 0, f"{faelle} Fälle, {abw} Abweichungen {beisp}")
+ok(faelle > 20000 and abw == 0, f"{faelle} Fälle, {abw} Abweichungen {beisp} (dazu {fz1} gewollte FZ1-Aufrundungen des letzten Trades)")
 
 print("— On Demand (soll sich ändern, wo Netto ≠ Summe der Gewinn-Tage) —")
 od_f = od_d = 0

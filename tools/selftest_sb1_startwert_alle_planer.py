@@ -276,6 +276,7 @@ def main():
         a, b = kern(*lauf_f(ALT, [F_LES, F_LES2], scharf)), kern(*lauf_f(NEU, [F_LES, F_LES2], scharf))
         check(a == b, f"Funded Futures {'scharf (Zeilen + Lauf)' if scharf else 'Trockenlauf'}: bitgleich ({len(a)} Zeichen)")
         a, b = kern(*lauf_c(ALT, [C_LES, C_LES2], scharf)), kern(*lauf_c(NEU, [C_LES, C_LES2], scharf))
+        b = b.replace(', "min_je_100k": 2000.0', '')   # FZ2 (24.11.2026): On-Demand-Regel trägt das Firmen-Minimum — gewollt neu, sonst bitgleich
         check(a == b, f"Funded CFD {'scharf (Zeilen + Lauf)' if scharf else 'Trockenlauf'}: bitgleich ({len(a)} Zeichen)")
     print(f"   vorher ({BASIS}) → nachher, frische Konten:")
     for name, lf, ks in (("Futures", lauf_f, [F150, F50]), ("CFD", lauf_c, [C100, C50, C200])):
