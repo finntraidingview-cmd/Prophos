@@ -84,8 +84,9 @@ else:
 k = re.search(r"  async function v2RichtungKonflikt\(o\)\{\n.*?\n  \}\n", HTML, re.S)
 check(bool(k), "v2RichtungKonflikt gefunden")
 K = k.group(0) if k else ""
-check("',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach'" in K,
-      "frische Liste holt route, ended_at, master_pl, final, bal_nach")
+# RG1 (24.11.2026): der Select-String trägt dahinter puls_unklar (für rkMasterZu) — Präfix ohne schließendes '
+check("',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach" in K and ",puls_unklar:mt5_baseline->puls_unklar'" in K,
+      "frische Liste holt route, ended_at, master_pl, final, bal_nach (+ puls_unklar, RG1)")
 check("gelesen: rkPlanGelesen(r.status, r.route, r.ended_at, r.master_pl, r.final, r.bal_nach)" in K, "frische Zeile rechnet gelesen")
 # Prüfer S2 (20.10.2026): ein Zeilenkommentar hinter dem Select-String hatte `.in('status', …)` geschluckt → ALLE trade_plans geladen.
 # Der Status-Filter muss am Zeilenanfang als Code stehen, in keiner Kommentarzeile.
