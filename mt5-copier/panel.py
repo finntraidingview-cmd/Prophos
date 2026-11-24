@@ -5497,7 +5497,8 @@ def _instanz_heilt(inst):
     tpath = str(cfg.get("master_terminal_path") or "").strip()
     d = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
     with HEAL_LOCK:
-        return bool(d) and d in HEAL_ACTIVE
+        # MI1 (Review 25.11.2026): auch während eines MT5-API-Logins (Zugangsdaten mit Sonderzeichen) ist das Terminal noch nicht bereit
+        return bool(d) and (d in HEAL_ACTIVE or d in _MI1_LAEUFT)
 
 
 def ea_frost_entscheiden(snap_alter_s, gebraucht, letzter, jetzt, puls_frei, order_frei, terminal_da, hedges_offen=False):
@@ -5628,7 +5629,7 @@ def _ea_frost_waechter():
         time.sleep(EA_FROST_TAKT_S + random.random() * 15)
 
 
-def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
+def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False, api_creds=None):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
     ob der Snapshot wieder fliesst. Tut er es nicht, fehlt das Lese-EA auf dem
     Chart (passiert nach unsauberem Beenden — Chart-Stand verloren). Dann:
@@ -5638,19 +5639,22 @@ def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da
     mit eingefrorenem Snapshot (Fund: Terminal lief noch vom vorigen Versuch,
     der Start-Knopf holte es nur nach vorn und uebersprang die Heilung — ein
     Terminal, das nichts liefert, ist zum Kopieren nutzlos, und die Positionen
-    liegen beim Broker, ueberleben den Neustart also)."""
+    liegen beim Broker, ueberleben den Neustart also).
+    api_creds (MI1, Prüfer-Stopp 25.11.2026): Zugangsdaten mit Sonderzeichen — ein Heil-Neustart meldet sich danach wieder über die
+    MetaTrader5-API an (_mi1_api_login) statt nackt im Login-Fenster zu landen. Läuft für die Instanz gerade ein MI1-Login, heilt
+    hier nichts (die Heilung startet _mi1_api_login nach seinem Ergebnis selbst)."""
     with HEAL_LOCK:
-        if install_dir in HEAL_ACTIVE:
+        if install_dir in HEAL_ACTIVE or install_dir in _MI1_LAEUFT:
             return
         HEAL_ACTIVE.add(install_dir)
     try:
-        _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da)
+        _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da, api_creds)
     finally:
         with HEAL_LOCK:
             HEAL_ACTIVE.discard(install_dir)
 
 
-def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da=False):
+def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da=False, api_creds=None):
     snap = str(cfg.get("snapshot_file") or "prophos_master.csv")
     common = cfg.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
@@ -5722,7 +5726,9 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     exp_heil = int(cfg.get("master_expected_login") or 0)
     if _inject_ea_into_profile(fname, cfg, install_dir):
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe")], cwd=install_dir)
-        if exp_heil:
+        if api_creds:
+            _mi1_nach_heil_start(fname, install_dir, api_creds)   # MI1: wieder per API anmelden, keine OK-Wache
+        elif exp_heil:
             threading.Thread(target=_login_ok_wache, args=(fname, exp_heil, install_dir), daemon=True).start()
         return
     name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
@@ -5737,7 +5743,9 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     try:
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe"),
                           f"/config:{ini}"], cwd=install_dir)
-        if exp_heil:
+        if api_creds:
+            _mi1_nach_heil_start(fname, install_dir, api_creds)   # MI1: wieder per API anmelden, keine OK-Wache
+        elif exp_heil:
             threading.Thread(target=_login_ok_wache, args=(fname, exp_heil, install_dir), daemon=True).start()
     finally:
         # ini nach dem Start wegraeumen (ein weiterer Start damit haengte das EA
@@ -6151,13 +6159,75 @@ def mi1_api_login_moeglich(login):
         return False
 
 
-def _mi1_api_login(fname, path, install_dir, creds):
+_MI1_LAEUFT = set()   # install_dirs mit laufendem MI1-Login (unter HEAL_LOCK) — _heal_ea heilt dort nicht dazwischen
+
+
+def _mi1_api_login(fname, path, install_dir, creds, cfg=None, heal_nach=False, aus_heilung=False, reserviert=False):
     """MI1 (25.11.2026): Login für Zugangsdaten mit Sonderzeichen/Umlauten — die Start-ini kann sie nicht tragen (nur ASCII,
     UTF-16 ohne Live-Beleg), die MetaTrader5-Python-API nimmt Unicode. Wartet auf den Terminal-Prozess, dann unter dem
     In-Prozess-Lock (EH2b) mt5.initialize(path, login, password, server) → account_info muss das Konto zeigen → shutdown
     (das Terminal bleibt eingeloggt). Bis MI1_VERSUCHE Versuche. NIE Passwort in Log/Spur/Fehlertext: geloggt werden nur
     Konto, Server und mt5.last_error(). Den Beweis für den Trade liefert wie immer der Snapshot des Lese-EA (Falsch-Konto-
-    Wächter). Wirft nie."""
+    Wächter). Wirft nie.
+    Prüfer-Stopp 25.11.2026: start_terminal startete _heal_ea sofort mit — HEAL_ACTIVE stand, der Login brach ab, nach 135 s
+    killte die Heilung das Terminal und startete es nackt. Jetzt: je Instanz höchstens EIN MI1-Login (_MI1_LAEUFT, _heal_ea wartet
+    nicht dazwischen); heal_nach=True (aus start_terminal) startet _heal_ea ERST nach dem Ergebnis (started_ts = jetzt, mit
+    api_creds, damit ein Heil-Neustart wieder über die API anmeldet); aus_heilung=True (aus dem Heil-Neustart) ignoriert das eigene
+    HEAL_ACTIVE der Heilung.
+    Review 25.11.2026: der Merker wird schon VOR dem Thread-Start gesetzt (_mi1_reservieren, reserviert=True) — sonst lag zwischen
+    Popen/Heil-Ende und Thread eine Lücke ohne Schutz; _instanz_heilt + die V2-Riegel zählen _MI1_LAEUFT wie HEAL_ACTIVE (409
+    „gleich erneut“ statt Order an ein noch nicht eingeloggtes Terminal). Heilung danach NUR nach erfolgreichem Login — ein
+    falsches Passwort hieße sonst Kill + Neustart + 2 weitere Fehl-Logins beim Broker."""
+    if not reserviert:
+        if not _mi1_reservieren(install_dir):
+            print(f"[panel] {fname}: MT5-API-Login läuft schon für diese Instanz — kein zweiter.", flush=True)
+            return False
+    try:
+        ok = _mi1_api_login_inner(fname, path, install_dir, creds, aus_heilung)
+    finally:
+        with HEAL_LOCK:
+            _MI1_LAEUFT.discard(install_dir)
+    if heal_nach and cfg is not None:
+        if ok:
+            threading.Thread(target=_heal_ea, args=(fname, cfg, install_dir, time.time(), 45, False),
+                             kwargs={"api_creds": creds}, daemon=True).start()
+        else:
+            print(f"[panel] {fname}: MT5-API-Login nicht geschafft — keine Heilung (kein Neustart mit weiteren Fehl-Logins). "
+                  f"Zugangsdaten in Prophos prüfen oder einmal von Hand im Terminal einloggen.", flush=True)
+    return ok
+
+
+def _mi1_reservieren(install_dir):
+    """MI1: Merker „API-Login läuft“ für die Instanz setzen — True, wenn er frei war (unter HEAL_LOCK)."""
+    with HEAL_LOCK:
+        if install_dir in _MI1_LAEUFT:
+            return False
+        _MI1_LAEUFT.add(install_dir)
+        return True
+
+
+def _mi1_thread(fname, path, install_dir, creds, **kw):
+    """MI1: Login-Thread mit VORHER gesetztem Merker starten. False = für die Instanz läuft schon ein MI1-Login (dann keiner)."""
+    if not _mi1_reservieren(install_dir):
+        return False
+    try:
+        threading.Thread(target=_mi1_api_login, args=(fname, path, install_dir, creds), kwargs=dict(kw, reserviert=True),
+                         daemon=True).start()
+    except Exception:
+        with HEAL_LOCK:
+            _MI1_LAEUFT.discard(install_dir)
+        raise
+    return True
+
+
+def _mi1_nach_heil_start(fname, install_dir, creds):
+    """MI1: nach einem Heil-Neustart (Terminal nackt bzw. mit [StartUp]-ini gestartet) wieder per API anmelden — eigener Thread,
+    ohne neue Heilung danach (kein Kreislauf). Der Merker steht, bevor die eigene Heilung HEAL_ACTIVE freigibt."""
+    if not _mi1_thread(fname, os.path.join(install_dir, "terminal64.exe"), install_dir, creds, aus_heilung=True):
+        print(f"[panel] {fname}: MT5-API-Login läuft schon für diese Instanz — nach dem Heil-Neustart kein zweiter.", flush=True)
+
+
+def _mi1_api_login_inner(fname, path, install_dir, creds, aus_heilung=False):
     login = str(creds.get("login") or "").strip()
     try:
         konto = int(login)
@@ -6187,7 +6257,7 @@ def _mi1_api_login(fname, path, install_dir, creds):
         # initialize(path=…) startete sonst selbst ein Terminal ohne /config und die [StartUp]-ini der Heilung verpuffte
         try:
             with HEAL_LOCK:
-                heilt = install_dir in HEAL_ACTIVE
+                heilt = install_dir in HEAL_ACTIVE and not aus_heilung   # die eigene Heilung (Heil-Neustart) hält HEAL_ACTIVE noch
             laeuft = bool(provision.terminal_pids(install_dir))
         except Exception:
             heilt, laeuft = False, False
@@ -6573,6 +6643,7 @@ def start_terminal(fname, creds=None, ohne_update=False):
         _ensure_ea_compiled(fname, install_dir)
         threading.Thread(target=_heal_ea,
                          args=(fname, cfg, install_dir, time.time(), 8, True),
+                         kwargs={"api_creds": api_creds},   # MI1: ein Heil-Neustart meldet sich wieder per API an (sonst None = wie bisher)
                          daemon=True).start()
         if wrong and not creds:
             return True, (f"Terminal läuft, aber im FALSCHEN Konto ({wrong} statt {expected or '?'}) — "
@@ -6598,20 +6669,29 @@ def start_terminal(fname, creds=None, ohne_update=False):
             # Algo-Handel + ggf. EA-Chart, reines ASCII), danach Login per MetaTrader5-API im Hintergrund
             # (_mi1_api_login). Ablauf sonst wie der Zwangs-Login: alten Beweis entwerten, EA kompilieren
             # und ins Profil schreiben.
-            _drop_snapshot(cfg)
-            _ensure_ea_compiled(fname, install_dir)
-            startup = ""
-            if not _inject_ea_into_profile(fname, cfg, install_dir):
-                startup = _startup_attach_part(fname, cfg, install_dir)
-            ini = os.path.join(install_dir, "prophos-login.ini")
+            # Merker SOFORT (Review 25.11.2026): ab hier gilt die Instanz als „nicht bereit“ (_instanz_heilt, V2-Riegel)
+            if not _mi1_reservieren(install_dir):
+                return True, "MT5-API-Login läuft schon für diese Instanz — gleich erneut prüfen"
             try:
-                with open(ini, "w", encoding=provision.INI_ENCODING) as f:
-                    f.write(provision.build_experts_ini() + startup)
-                subprocess.Popen([path, f"/config:{ini}"], cwd=install_dir)
-            finally:
-                _remove_later(ini)
-            threading.Thread(target=_mi1_api_login, args=(fname, path, install_dir, api_creds),
-                             daemon=True).start()
+                _drop_snapshot(cfg)
+                _ensure_ea_compiled(fname, install_dir)
+                startup = ""
+                if not _inject_ea_into_profile(fname, cfg, install_dir):
+                    startup = _startup_attach_part(fname, cfg, install_dir)
+                ini = os.path.join(install_dir, "prophos-login.ini")
+                try:
+                    with open(ini, "w", encoding=provision.INI_ENCODING) as f:
+                        f.write(provision.build_experts_ini() + startup)
+                    subprocess.Popen([path, f"/config:{ini}"], cwd=install_dir)
+                finally:
+                    _remove_later(ini)
+                # Heilung NICHT hier, sondern erst nach dem Login-Ergebnis (heal_nach, Prüfer-Stopp 25.11.2026)
+                threading.Thread(target=_mi1_api_login, args=(fname, path, install_dir, api_creds),
+                                 kwargs={"cfg": cfg, "heal_nach": True, "reserviert": True}, daemon=True).start()
+            except BaseException:
+                with HEAL_LOCK:
+                    _MI1_LAEUFT.discard(install_dir)   # Start gescheitert → Merker nicht hängen lassen
+                raise
             msg = ("Terminal gestartet — Login über die MT5-Schnittstelle (Zugangsdaten mit Sonderzeichen)"
                    + (", Lese-EA wird direkt aufgezogen" if startup else "")
                    + "; Selbstheilung wacht im Hintergrund")
@@ -6661,9 +6741,11 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
         # wird das EA automatisch per [StartUp] nachgezogen. Schnell-Pfad nur
         # OHNE Login-Zwang (der Zwangs-Start loescht die Datei bewusst).
-        threading.Thread(target=_heal_ea,
-                         args=(fname, cfg, install_dir, time.time(), 45, not creds),
-                         daemon=True).start()
+        # MI1 (Prüfer-Stopp 25.11.2026): im API-Zweig startet _mi1_api_login die Heilung erst nach seinem Ergebnis
+        if not api_creds:
+            threading.Thread(target=_heal_ea,
+                             args=(fname, cfg, install_dir, time.time(), 45, not creds),
+                             daemon=True).start()
         # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
         threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),
                          daemon=True).start()
@@ -8940,7 +9022,7 @@ class Handler(BaseHTTPRequestHandler):
                 tpath = str(cfg_v2.get("master_terminal_path") or "").strip()
                 inst_dir = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
                 with HEAL_LOCK:
-                    heilt = bool(inst_dir) and inst_dir in HEAL_ACTIVE
+                    heilt = bool(inst_dir) and (inst_dir in HEAL_ACTIVE or inst_dir in _MI1_LAEUFT)   # MI1: API-Login läuft = noch nicht bereit
                 if heilt:
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True,
                         "grund": "terminal_heilt", "msg":
@@ -9081,7 +9163,7 @@ class Handler(BaseHTTPRequestHandler):
                 tpath = str(cfg_v2.get("master_terminal_path") or "").strip()
                 inst_dir = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
                 with HEAL_LOCK:
-                    heilt = bool(inst_dir) and inst_dir in HEAL_ACTIVE
+                    heilt = bool(inst_dir) and (inst_dir in HEAL_ACTIVE or inst_dir in _MI1_LAEUFT)   # MI1: API-Login läuft = noch nicht bereit
                 if heilt:
                     return self._send(409, json.dumps({"ok": False, "retry_ok": True,
                         "grund": "terminal_heilt", "msg":
