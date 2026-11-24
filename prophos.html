@@ -1234,6 +1234,9 @@
     :is(#adm-pane-wallet,#adm-pane-finsum) .kpis > .kpi:first-child{grid-column:1 / -1}
     :is(#fs-person-dist,#bk-person-dist,#wal-person-dist) .adm-val{min-width:64px}
   }
+  #fs-person-dist .fs-ohne .adm-row-name{color:var(--sub);font-weight:500}   /* BK3: Sammelzeile „ohne ID" */
+  #fs-person-dist .fs-ohne-zeile{display:grid;grid-template-columns:minmax(0,1fr) 44px auto;gap:12px;align-items:center;padding:6px 0 6px 18px;font-size:12.5px;color:var(--sub);border-bottom:1px solid var(--border-soft)}
+  #fs-person-dist .fs-ohne-zeile .adm-val{font-weight:500;color:var(--ink-2)} #fs-person-dist .fs-ohne-chain{font-size:11px;color:var(--sub-2)}
   #dashboard-view .fin-legende{display:flex;gap:14px;font-size:11.5px;color:var(--sub);white-space:nowrap}
   #dashboard-view .fin-info{margin-left:auto;font-size:11.5px;color:var(--sub-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* BK2: Status dezent rechts */
   /* KAPITAL IM SYSTEM (29.10.2026): kleine Karte oben in Meta Wallet — drei Kacheln, Teile als Mini-Kacheln, Verlauf, Listen eingeklappt */
@@ -1644,6 +1647,56 @@
   #adm-pane-bank .bk-knopf:hover{color:var(--ink);background:var(--surface-tint)}
   #adm-pane-bank .bk-plus{color:var(--good)} #adm-pane-bank .bk-minus{color:var(--danger)}
   #adm-pane-bank .grid-2 > .panel{min-width:0}   /* Handy: die Buchungstabelle scrollt in ihrer Box statt die Spalte aufzublähen */
+  /* BK3 (25.11.2026): ID-Liste + Detail wie ein Sheet */
+  #adm-pane-bank .bk-form-panel{margin-bottom:14px}
+  #adm-pane-bank .bk-ids-kopf,#adm-pane-bank .bk-id{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 90px 120px 16px;gap:12px;align-items:center}
+  #adm-pane-bank .bk-ids-kopf{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--sub-2);padding:0 10px 6px;border-bottom:1px solid var(--border-soft)}
+  #adm-pane-bank .bk-ids-kopf span:nth-child(n+3){text-align:right}
+  #adm-pane-bank .bk-id{width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer;padding:12px 10px;border-bottom:1px solid var(--border-soft);border-radius:0}
+  #adm-pane-bank .bk-id:last-child{border-bottom:0}
+  #adm-pane-bank .bk-id:hover{background:var(--surface-tint)}
+  #adm-pane-bank .bk-id-name{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #adm-pane-bank .bk-id-name small{font-weight:400;color:var(--sub);font-size:11.5px;margin-left:6px}
+  #adm-pane-bank .bk-id-dat,#adm-pane-bank .bk-id-n{font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #adm-pane-bank .bk-id-n,#adm-pane-bank .bk-id-saldo{text-align:right}
+  #adm-pane-bank .bk-id-saldo{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #adm-pane-bank .bk-id-pfeil{color:var(--sub-2);font-size:14px}
+  #adm-pane-bank .bk-detail-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  #adm-pane-bank .bk-detail-name{font-size:17px;font-weight:700}
+  #adm-pane-bank .bk-konten-seg{margin-left:auto}
+  #adm-pane-bank .bk-konten-seg:empty + .bk-a-auf-detail{margin-left:auto}
+  #adm-pane-bank .bk-konten-seg:empty{display:none}
+  #adm-pane-bank .bk-konten-seg button{padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
+  #adm-pane-bank .bk-saldo-zeile{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap}
+  #adm-pane-bank .bk-saldo{font-size:30px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:2px}
+  #adm-pane-bank .bk-saldo-sub{font-size:12px;color:var(--sub);margin-top:2px}
+  #adm-pane-bank .bk-konto-infos{display:grid;grid-template-columns:auto auto;gap:3px 12px;font-size:12px;color:var(--sub);text-align:left}
+  #adm-pane-bank .bk-konto-infos b{font-weight:500;color:var(--ink-2)}
+  #adm-pane-bank .bk-sheet{table-layout:fixed;min-width:680px}   /* Text-Spalte bekommt den Rest; zu schmal → die Box scrollt statt zu quetschen */
+  #adm-pane-bank .bk-sheet td{padding-top:3px;padding-bottom:3px;padding-left:4px;padding-right:4px}
+  #adm-pane-bank .bk-sheet input,#adm-pane-bank .bk-sheet select{width:100%;min-width:0;border:1px solid transparent;background:transparent;border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;color:var(--ink)}
+  #adm-pane-bank .bk-sheet input:hover,#adm-pane-bank .bk-sheet select:hover{border-color:var(--border)}
+  #adm-pane-bank .bk-sheet input:focus,#adm-pane-bank .bk-sheet select:focus{border-color:var(--violet);background:var(--surface);outline:none}
+  #adm-pane-bank .bk-sheet input.adm-num{text-align:right;font-variant-numeric:tabular-nums}
+  #adm-pane-bank .bk-sheet tr.bk-neu td{background:var(--surface-tint)}
+  #adm-pane-bank .bk-sheet tr.bk-neu input,#adm-pane-bank .bk-sheet tr.bk-neu select{background:var(--surface);border-color:var(--border)}
+  #adm-pane-bank .bk-sheet .bk-lauf{font-variant-numeric:tabular-nums;color:var(--sub);white-space:nowrap}
+  #adm-pane-bank .bk-sheet input.bk-plus{color:var(--good)} #adm-pane-bank .bk-sheet input.bk-minus{color:var(--danger)}
+  @media (max-width:820px){
+    #adm-pane-bank .bk-ids-kopf{display:none}
+    #adm-pane-bank .bk-id{grid-template-columns:minmax(0,1fr) auto 12px;grid-template-areas:"name saldo pfeil" "meta meta pfeil";row-gap:2px}
+    #adm-pane-bank .bk-id-name{grid-area:name} #adm-pane-bank .bk-id-saldo{grid-area:saldo} #adm-pane-bank .bk-id-pfeil{grid-area:pfeil}
+    #adm-pane-bank .bk-id-dat{grid-area:meta;font-size:11.5px} #adm-pane-bank .bk-id-n{display:none}
+    #adm-pane-bank .bk-konten-seg{margin-left:0;width:100%;overflow-x:auto}
+    #adm-pane-bank .bk-saldo{font-size:26px}
+    /* Handy: Sheet ohne Art- und Saldo-Spalte (Saldo steht groß darüber), passt ohne Querscrollen */
+    #adm-pane-bank .bk-sheet{min-width:0}
+    #adm-pane-bank .bk-sheet :is(th,td):nth-child(3),#adm-pane-bank .bk-sheet :is(th,td):nth-child(5){display:none}
+    #adm-pane-bank .bk-sheet th:nth-child(1){width:104px!important} #adm-pane-bank .bk-sheet th:nth-child(4){width:84px!important} #adm-pane-bank .bk-sheet th:nth-child(6){width:24px!important}
+    #dashboard-view #adm-pane-bank .bk-sheet :is(input,select){font-size:13px!important;padding:5px 3px!important}   /* der Mobil-Block setzt Eingaben sonst auf 16 px */
+    #dashboard-view #adm-pane-bank .bk-sheet td{padding-left:2px!important;padding-right:2px!important}
+    #adm-pane-bank .bk-sheet th:nth-child(1){width:112px!important}
+  }
   #dashboard-view .adm-vl-chip.is-off{opacity:.45}
   #dashboard-view .adm-sub{font-size:11.5px;color:var(--sub-2);font-weight:400}
   /* Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes Einzelne"):
@@ -14778,7 +14831,7 @@
              beiden Bereichen (wallets/walBal, bkDaten) — kein eigener Server-Weg; fsRender läuft nach jedem Laden beider Seiten. -->
         <div id="adm-pane-finsum" hidden>
           <div class="adm-toolbar">
-            <select id="fs-person" class="adm-f"><option value="">Alle Personen</option></select>
+            <select id="fs-person" class="adm-f"><option value="">Alle IDs</option></select>
             <span id="fs-info" class="fin-info"></span>
           </div>
           <div class="kpis">
@@ -14801,7 +14854,7 @@
           <div class="panel">
             <div class="panel-head">
               <div>
-                <div class="panel-title">Nach Person</div>
+                <div class="panel-title">Nach ID</div>
                 <div class="panel-sub">Meta Wallet + Bankkonto in USD · klicken filtert</div>
               </div>
               <div class="fin-legende">
@@ -15023,52 +15076,19 @@
           </p>
         </div>
 
-        <!-- BANKKONTO (BK1, 24.11.2026, Finn: „auch deren Bankkonto-Balance checken: indem ich dort immer manuell Transaktionen hinzufügen
-             kann und von jeder ID auch die IBAN sehe"). Konten je ID (bank_konten) + Hand-Buchungen (bank_buchungen), Saldo = Start + Σ.
-             Daten nur über /admin/bank (Railway, Gate wie Kapital: Finn + Pascal alle HT-IDs, Verwalter nur seine Gruppe). IBAN nie in
-             URL/Log/localStorage. Aufbau wie Meta Wallet: Kacheln, Konten-Tabelle, darunter Nach Person | Buchungen des gewählten Kontos. -->
+        <!-- BANKKONTO (BK1 24.11.2026 · BK3 25.11.2026). Finn BK1: „auch deren Bankkonto-Balance checken: indem ich dort immer manuell Transaktionen
+             hinzufügen kann und von jeder ID auch die IBAN sehe". Finn BK3: „Erst nur die Übersicht der IDs, dann klicke ich auf die ID drauf und
+             sehe da, wie in so einer Google-Sheet-Liste, den kompletten Transaktionsverlauf, den ich manuell eingebe, plus einmal die Balance."
+             → Start = Liste je ID (Name · letzte Buchung · Buchungen · Saldo), Klick = Detail: Saldo groß + Konto-Infos, Reiter je Konto,
+             Sheet-Tabelle mit Eingabezeile (Enter speichert), Zellen direkt änderbar. Daten nur über /admin/bank (Gate wie Kapital).
+             IBAN nie in URL/Log/localStorage. -->
         <div id="adm-pane-bank" hidden>
           <div id="bk-msg" style="font-size:12.5px;color:var(--sub);padding:6px 2px">Lade…</div>
           <div id="bk-body" hidden>
-            <div class="adm-toolbar">
-              <select id="bk-person" class="adm-f"><option value="">Alle Personen</option></select>
-              <!-- Standard Account-Kauf-Konten (Master 24.11.2026: „Standard-Ansicht zeigt das Account-Kauf-Konto") -->
-              <select id="bk-zweck" class="adm-f">
-                <option value="Account-Kauf">Account-Kauf-Konten</option>
-                <option value="Vergütung">Vergütungs-Konten</option>
-                <option value="">Alle Konten</option>
-              </select>
-              <button class="btn btn-ghost" id="bk-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
-              <span id="bk-info" class="fin-info"></span>
-            </div>
-
-            <div class="kpis">
-              <div class="kpi">
-                <div class="kpi-label">Auf Bankkonten (EUR)</div>
-                <div class="kpi-value" id="bk-k-eur">–</div>
-                <div class="kpi-delta delta-neutral" id="bk-k-eur-sub">–</div>
-              </div>
-              <div class="kpi" id="bk-k-usd-kachel" hidden>
-                <div class="kpi-label">Auf Bankkonten (USD)</div>
-                <div class="kpi-value" id="bk-k-usd">–</div>
-                <div class="kpi-delta delta-neutral" id="bk-k-usd-sub">–</div>
-              </div>
-              <div class="kpi">
-                <div class="kpi-label">Letzte Buchung</div>
-                <div class="kpi-value" id="bk-k-letzte">–</div>
-                <div class="kpi-delta delta-neutral" id="bk-k-letzte-sub">–</div>
-              </div>
-            </div>
-
-            <div class="panel">
-              <div class="panel-head">
-                <div>
-                  <div class="panel-title">Konten</div>
-                  <div class="panel-sub">Saldo = Startsaldo + alle Buchungen · Zeile anklicken zeigt die Buchungen</div>
-                </div>
-                <button class="btn btn-ghost" id="bk-a-auf" style="padding:7px 12px">+ Konto</button>
-              </div>
-              <div class="bk-form" id="bk-a-form" hidden>
+            <!-- Konto anlegen/ändern — gemeinsam für Liste und Detail, nur offen auf „+ Konto" bzw. ✎ -->
+            <div class="panel bk-form-panel" id="bk-a-form" hidden>
+              <div class="panel-head"><div><div class="panel-title" id="bk-a-titel">Konto hinzufügen</div></div></div>
+              <div class="bk-form">
                 <select id="bk-a-person" title="ID"></select>
                 <select id="bk-a-zweck" title="Zweck">
                   <option value="Account-Kauf">Account-Kauf</option>
@@ -15085,65 +15105,96 @@
                 <button class="btn btn-ghost" id="bk-a-abbruch">Abbrechen</button>
               </div>
               <div id="bk-a-msg" class="bk-msgzeile"></div>
-              <div class="table-wrap">
-                <table class="t">
-                  <thead><tr>
-                    <th>Konto</th>
-                    <th>Bank</th>
-                    <th>IBAN</th>
-                    <th class="adm-num">Buchungen</th>
-                    <th class="adm-num">Saldo</th>
-                    <th></th>
-                  </tr></thead>
-                  <tbody id="bk-rows"></tbody>
-                </table>
-              </div>
-              <div class="adm-empty" id="bk-empty" hidden>Noch keine Konten — oben das erste eintragen.</div>
             </div>
 
-            <div class="grid-2" style="margin-top:14px">
+            <!-- LISTE je ID -->
+            <div id="bk-liste">
+              <div class="adm-toolbar">
+                <!-- Standard Account-Kauf-Konten (Master 24.11.2026: „Standard-Ansicht zeigt das Account-Kauf-Konto") -->
+                <select id="bk-zweck" class="adm-f">
+                  <option value="Account-Kauf">Account-Kauf-Konten</option>
+                  <option value="Vergütung">Vergütungs-Konten</option>
+                  <option value="">Alle Konten</option>
+                </select>
+                <button class="btn btn-ghost" id="bk-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+                <button class="btn btn-ghost" id="bk-a-auf" style="padding:8px 12px">+ Konto</button>
+                <span id="bk-info" class="fin-info"></span>
+              </div>
+              <div id="bk-l-msg" class="bk-msgzeile" style="margin:-4px 2px 8px"></div>
+              <div class="kpis">
+                <div class="kpi">
+                  <div class="kpi-label">Auf Bankkonten (EUR)</div>
+                  <div class="kpi-value" id="bk-k-eur">–</div>
+                  <div class="kpi-delta delta-neutral" id="bk-k-eur-sub">–</div>
+                </div>
+                <div class="kpi" id="bk-k-usd-kachel" hidden>
+                  <div class="kpi-label">Auf Bankkonten (USD)</div>
+                  <div class="kpi-value" id="bk-k-usd">–</div>
+                  <div class="kpi-delta delta-neutral" id="bk-k-usd-sub">–</div>
+                </div>
+                <div class="kpi">
+                  <div class="kpi-label">Letzte Buchung</div>
+                  <div class="kpi-value" id="bk-k-letzte">–</div>
+                  <div class="kpi-delta delta-neutral" id="bk-k-letzte-sub">–</div>
+                </div>
+              </div>
               <div class="panel">
                 <div class="panel-head">
                   <div>
-                    <div class="panel-title">Nach Person</div>
-                    <div class="panel-sub">Saldo der gefilterten Konten in EUR · klicken filtert</div>
+                    <div class="panel-title">IDs</div>
+                    <div class="panel-sub">ID anklicken zeigt den Verlauf</div>
                   </div>
                 </div>
-                <div class="adm-dist" id="bk-person-dist"></div>
-              </div>
-              <div class="panel">
-                <div class="panel-head">
-                  <div>
-                    <div class="panel-title" id="bk-b-titel">Buchungen</div>
-                    <div class="panel-sub" id="bk-b-sub">Konto oben anklicken</div>
-                  </div>
-                </div>
-                <div id="bk-b-inhalt" hidden>
-                  <div class="bk-form">
-                    <input id="bk-b-datum" type="date" style="width:140px;flex:0 0 auto">
-                    <input id="bk-b-betrag" type="number" step="0.01" placeholder="± Betrag" style="width:110px;flex:0 0 auto" title="+ Eingang / − Ausgang">
-                    <select id="bk-b-art">
-                      <option>Einzahlung HT</option><option>Account-Kauf</option><option>Payout</option>
-                      <option>Gebühr</option><option>Vergütung</option><option selected>Sonstiges</option>
-                    </select>
-                    <input id="bk-b-text" placeholder="Text (z. B. topstep acc)" autocomplete="off" style="min-width:140px">
-                    <button class="btn btn-primary" id="bk-b-ok">Buchen</button>
-                  </div>
-                  <div id="bk-b-msg" class="bk-msgzeile"></div>
-                  <div class="table-wrap" style="max-height:420px;overflow:auto">
-                    <table class="t">
-                      <thead><tr><th>Datum</th><th>Text</th><th class="adm-num">Betrag</th><th class="adm-num">Saldo</th><th></th></tr></thead>
-                      <tbody id="bk-b-rows"></tbody>
-                    </table>
-                  </div>
-                  <div class="adm-empty" id="bk-b-empty" hidden>Noch keine Buchungen auf diesem Konto.</div>
-                </div>
+                <div class="bk-ids-kopf"><span>ID</span><span>Letzte Buchung</span><span>Buchungen</span><span>Saldo</span></div>
+                <div id="bk-ids"></div>
+                <div class="adm-empty" id="bk-ids-leer" hidden>Noch keine Konten — oben „+ Konto“.</div>
               </div>
             </div>
 
-            <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+            <!-- DETAIL einer ID -->
+            <div id="bk-detail" hidden>
+              <div class="bk-detail-kopf">
+                <button class="btn btn-ghost" id="bk-zurueck" style="padding:7px 12px">← alle IDs</button>
+                <div class="bk-detail-name" id="bk-d-name">–</div>
+                <div class="seg bk-konten-seg" id="bk-d-konten" role="tablist" aria-label="Konten"></div>
+                <button class="btn btn-ghost bk-a-auf-detail" id="bk-a-auf2" style="padding:7px 12px">+ Konto</button>
+              </div>
+              <div class="panel bk-saldo-panel">
+                <div class="bk-saldo-zeile">
+                  <div>
+                    <div class="kpi-label">Saldo</div>
+                    <div class="bk-saldo" id="bk-d-saldo">–</div>
+                    <div class="bk-saldo-sub" id="bk-d-saldo-sub">–</div>
+                  </div>
+                  <div class="bk-konto-infos" id="bk-d-infos"></div>
+                </div>
+              </div>
+              <div class="panel" style="margin-top:14px">
+                <div class="table-wrap">
+                  <table class="t bk-sheet">
+                    <thead><tr><th style="width:136px">Datum</th><th>Text</th><th style="width:136px">Art</th><th class="adm-num" style="width:104px">Betrag</th><th class="adm-num" style="width:108px">Saldo</th><th style="width:30px"></th></tr></thead>
+                    <tbody>
+                      <!-- Eingabezeile: Enter in einem Feld speichert -->
+                      <tr class="bk-neu">
+                        <td><input id="bk-n-datum" type="date"></td>
+                        <td><input id="bk-n-text" placeholder="Neue Buchung, z. B. topstep acc" autocomplete="off"></td>
+                        <td><select id="bk-n-art"><option>Einzahlung HT</option><option>Account-Kauf</option><option>Payout</option><option>Gebühr</option><option>Vergütung</option><option selected>Sonstiges</option></select></td>
+                        <td><input id="bk-n-betrag" type="number" step="0.01" placeholder="± Betrag" class="adm-num" title="+ Eingang / − Ausgang · Account-Kauf und Gebühr immer Ausgang"></td>
+                        <td class="adm-num" style="color:var(--sub-2);font-size:11.5px">Enter ↵</td>
+                        <td></td>
+                      </tr>
+                    </tbody>
+                    <tbody id="bk-d-rows"></tbody>
+                  </table>
+                </div>
+                <div id="bk-d-msg" class="bk-msgzeile" style="margin:6px 2px 0"></div>
+                <div class="adm-empty" id="bk-d-leer" hidden>Noch keine Buchungen auf diesem Konto.</div>
+              </div>
+            </div>
+
+            <p style="font-size:11.5px;color:var(--sub-2);margin:14px 2px 0;line-height:1.6">
               Alles von Hand: Prophos führt die Bankkonten, die alten Sheets „Finanzen &lt;Name&gt;" bleiben unverändert als Archiv.
-              IBANs sieht nur, wer Kapital sehen darf (Finn + Pascal alle HT-IDs, ein Verwalter nur seine Gruppe). Kartendaten gehören nicht hierher.
+              IBANs sieht nur, wer Kapital sehen darf. Kartendaten gehören nicht hierher.
             </p>
           </div>
         </div>
@@ -24092,29 +24143,29 @@
     }
     const bkWarten = () => new Promise(r => { const t = setInterval(() => { if(!bkLaeuft && !bkNochmal){ clearInterval(t); r() } }, 100) })
     // Gruppenwechsel (BK2-Review): alte Gruppe sofort verwerfen, sonst rechnet die Übersicht bei einem Ladefehler neue Wallets + alte Konten
-    window._bkGruppeNeu = () => { bkDaten = null; bkKonto = ''; $('bk-body').hidden = true; window._fsRender?.(); return bkLaden().then(() => window._fsRender?.()).catch(() => {}) }
-    window._bkOeffnen = () => { if(!$('bk-b-datum').value) $('bk-b-datum').value = bkHeute(); bkLaden() }
-    window._bkStub = d => { bkDaten = d; bkFehler = ''; $('bk-msg').hidden = true; $('bk-body').hidden = false; if(!$('bk-b-datum').value) $('bk-b-datum').value = bkHeute(); bkRender() }   // Test-Haken wie _kisStub (ohne Login zeichnen)
+    window._bkGruppeNeu = () => { bkDaten = null; bkKonto = ''; bkPerson = ''; bkFormLeeren(); $('bk-body').hidden = true; window._fsRender?.(); return bkLaden().then(() => window._fsRender?.()).catch(() => {}) }
+    let bkPerson = ''   // BK3: ID im Detail ('' = Liste)
+    window._bkOeffnen = () => { if(!$('bk-n-datum').value) $('bk-n-datum').value = bkHeute(); bkLaden() }
+    window._bkStub = d => { bkDaten = d; bkFehler = ''; $('bk-msg').hidden = true; $('bk-body').hidden = false; if(!$('bk-n-datum').value) $('bk-n-datum').value = bkHeute(); bkRender() }   // Test-Haken wie _kisStub (ohne Login zeichnen)
 
+    const BK_ARTEN = ['Einzahlung HT', 'Account-Kauf', 'Payout', 'Gebühr', 'Vergütung', 'Sonstiges']
+    const bkZRang = z => ({ 'Account-Kauf': 0, 'Vergütung': 1 }[z] ?? 2)
     function bkSichtbar(){
-      const d = bkDaten || {}, p = $('bk-person').value, z = $('bk-zweck').value
-      return (d.konten || []).filter(k => (!p || String(k.user_id) === p) && (!z || k.zweck === z))
+      const d = bkDaten || {}, z = $('bk-zweck').value
+      return (d.konten || []).filter(k => !z || k.zweck === z)
     }
     function bkRender(){
       const d = bkDaten; if(!d) return
-      // Personen-Auswahl (Filter + Formular), Wahl behalten
       const pers = d.personen || []
-      for(const [id, leer] of [['bk-person', 'Alle Personen'], ['bk-a-person', null]]){
-        const sel = $(id), alt = sel.value
-        sel.innerHTML = (leer ? `<option value="">${leer}</option>` : '') + pers.map(p => `<option value="${bkEsc(p.user_id)}">${bkEsc(p.name)}</option>`).join('')
-        if([...sel.options].some(o => o.value === alt)) sel.value = alt
-      }
+      { const sel = $('bk-a-person'), alt = sel.value
+        sel.innerHTML = pers.map(p => `<option value="${bkEsc(p.user_id)}">${bkEsc(p.name)}</option>`).join('')
+        if([...sel.options].some(o => o.value === alt)) sel.value = alt }
       const rows = bkSichtbar()
       const summe = w => rows.filter(k => (k.waehrung || 'EUR') === w && bkHatSaldo(k)).reduce((a, k) => a + (Number(k.saldo) || 0), 0)
       const nUsd = rows.filter(k => k.waehrung === 'USD').length
       const nPers = new Set(rows.map(k => String(k.user_id))).size
       $('bk-k-eur').textContent = bkGeld0(summe('EUR'), 'EUR')
-      $('bk-k-eur-sub').textContent = rows.length ? `${rows.length} ${rows.length === 1 ? 'Konto' : 'Konten'} · ${nPers} Person${nPers === 1 ? '' : 'en'}` : 'noch keine Konten'
+      $('bk-k-eur-sub').textContent = rows.length ? `${rows.length} ${rows.length === 1 ? 'Konto' : 'Konten'} · ${nPers} ${nPers === 1 ? 'ID' : 'IDs'}` : 'noch keine Konten'
       $('bk-k-usd-kachel').hidden = !nUsd
       $('bk-k-usd').textContent = bkGeld0(summe('USD'), 'USD')
       $('bk-k-usd-sub').textContent = `${nUsd} ${nUsd === 1 ? 'Konto' : 'Konten'}`
@@ -24122,92 +24173,102 @@
       const lk = rows.find(k => k.letzte === letzte)
       $('bk-k-letzte').textContent = bkTag(letzte)
       $('bk-k-letzte-sub').textContent = lk ? lk.name : '–'
-      $('bk-info').textContent = ''   // BK2: Unternehmen steht schon im Gruppen-Chip oben
+      $('bk-info').textContent = ''
 
-      // Konten-Tabelle, je Person eine Kopfzeile mit Summe (wie die Wallet-Tabelle)
-      const tb = $('bk-rows'); tb.innerHTML = ''
-      $('bk-empty').hidden = !!rows.length
+      // LISTE je ID (BK3): Name · letzte Buchung · Buchungen · Saldo (EUR-Konten mit Buchungen/Start; USD extra)
       const proPerson = new Map()
       for(const k of rows){ const l = proPerson.get(String(k.user_id)) || []; l.push(k); proPerson.set(String(k.user_id), l) }
-      const zRang = z => ({ 'Account-Kauf': 0, 'Vergütung': 1 }[z] ?? 2)
-      const reihen = [...proPerson.values()].sort((a, b) => String(a[0].name).localeCompare(String(b[0].name), 'de'))
-      for(const liste of reihen){
-        liste.sort((a, b) => zRang(a.zweck) - zRang(b.zweck))
-        const eur = liste.filter(k => (k.waehrung || 'EUR') === 'EUR' && bkHatSaldo(k)).reduce((a, k) => a + (Number(k.saldo) || 0), 0)
-        const kopf = document.createElement('tr'); kopf.className = 'bk-kopf'
-        kopf.innerHTML = `<td colspan="4">${bkEsc(liste[0].name)}</td><td class="adm-num">${bkGeld(eur, 'EUR')}</td><td></td>`
-        tb.appendChild(kopf)
-        for(const k of liste){
-          const tr = document.createElement('tr')
-          tr.className = 'bk-konto' + (String(k.id) === bkKonto ? ' is-on' : '')
-          const saldo = bkHatSaldo(k) ? `<b class="${Number(k.saldo) < 0 ? 'bk-minus' : ''}">${bkGeld(k.saldo, k.waehrung)}</b>` : '<span style="color:var(--sub)">–</span>'
-          tr.innerHTML =
-            `<td>${bkEsc(k.inhaber || k.name)}<span class="bk-zweck">${bkEsc(k.zweck)}</span>${k.aktiv === false ? '<span class="bk-zweck">inaktiv</span>' : ''}</td>` +
-            `<td>${bkEsc(k.bank || '–')}${k.bic ? `<div class="bk-mono" style="color:var(--sub);font-size:11px">${bkEsc(k.bic)}</div>` : ''}</td>` +
-            `<td>${k.iban ? `<span class="bk-iban">${bkEsc(bkIban(k.iban))}</span> <button type="button" class="bk-knopf" data-bk-kopie title="IBAN kopieren">⧉</button>` : '<span style="color:var(--sub)">–</span>'}</td>` +
-            `<td class="adm-num">${Number(k.anzahl) || 0}</td>` +
-            `<td class="adm-num">${saldo}</td>` +
-            `<td style="white-space:nowrap;text-align:right"><button type="button" class="bk-knopf" data-bk-edit title="Konto ändern">✎</button><button type="button" class="bk-knopf" data-bk-del title="Konto löschen">×</button></td>`
-          tr.addEventListener('click', ev => {
-            if(ev.target.closest('[data-bk-kopie]')){
-              navigator.clipboard?.writeText(k.iban).then(() => { $('bk-a-msg').className = 'bk-msgzeile gut'; $('bk-a-msg').textContent = 'IBAN kopiert.' }).catch(() => {})
-              return
-            }
-            if(ev.target.closest('[data-bk-edit]')) return bkBearbeiten(k)
-            if(ev.target.closest('[data-bk-del]')) return bkKontoLoeschen(k)
-            bkKonto = String(k.id) === bkKonto ? '' : String(k.id)
-            bkRender()
-          })
-          tb.appendChild(tr)
-        }
+      const box = $('bk-ids'); box.innerHTML = ''
+      $('bk-ids-leer').hidden = !!proPerson.size
+      const reihen = [...proPerson.entries()].sort((a, b) => String(a[1][0].name).localeCompare(String(b[1][0].name), 'de'))
+      for(const [uid, l] of reihen){
+        const mit = l.filter(bkHatSaldo)
+        const eur = mit.filter(k => (k.waehrung || 'EUR') === 'EUR').reduce((a, k) => a + (Number(k.saldo) || 0), 0)
+        const usd = mit.filter(k => k.waehrung === 'USD').reduce((a, k) => a + (Number(k.saldo) || 0), 0)
+        const n = l.reduce((a, k) => a + (Number(k.anzahl) || 0), 0)
+        const lz = l.map(k => k.letzte).filter(Boolean).sort().pop()
+        const saldo = !mit.length ? '–' : [mit.some(k => (k.waehrung || 'EUR') === 'EUR') ? bkGeld(eur, 'EUR') : '', usd ? bkGeld(usd, 'USD') : ''].filter(Boolean).join(' + ')
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'bk-id'
+        b.innerHTML = `<span class="bk-id-name"></span><span class="bk-id-dat">${lz ? bkTag(lz) : 'keine Buchung'}</span>` +
+          `<span class="bk-id-n">${n}</span><span class="bk-id-saldo${eur + usd < 0 ? ' bk-minus' : ''}">${bkEsc(saldo)}</span><span class="bk-id-pfeil">›</span>`
+        b.querySelector('.bk-id-name').textContent = l[0].name || uid.slice(0, 8)
+        if(l.length > 1){ const s = document.createElement('small'); s.textContent = `${l.length} Konten`; b.querySelector('.bk-id-name').appendChild(s) }
+        b.addEventListener('click', () => { bkPerson = uid; bkKonto = ''; $('bk-d-msg').textContent = ''; bkRender(); $('adm-fin-sicht')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
+        box.appendChild(b)
       }
 
-      // Nach Person (EUR-Saldo), Klick filtert wie Meta Wallet
-      const dist = $('bk-person-dist'); dist.innerHTML = ''
-      const proP = [...proPerson.values()].map(l => ({ uid: String(l[0].user_id), name: l[0].name,
-        eur: l.filter(k => (k.waehrung || 'EUR') === 'EUR' && bkHatSaldo(k)).reduce((a, k) => a + (Number(k.saldo) || 0), 0) }))
-        .sort((a, b) => b.eur - a.eur)
-      const grand = proP.reduce((a, g) => a + Math.max(0, g.eur), 0)
-      if(!proP.length) dist.innerHTML = '<div class="adm-empty">Noch keine Konten.</div>'
-      for(const g of proP){
-        const share = grand > 0 ? 100 * Math.max(0, g.eur) / grand : 0
-        const b = document.createElement('button'); b.type = 'button'
-        b.className = 'adm-row adm-row-btn' + ($('bk-person').value === g.uid ? ' is-on' : '')
-        b.innerHTML = '<div class="adm-row-name"></div>' +
-          `<div class="adm-track"><div style="height:100%;width:${share.toFixed(1)}%;background:var(--violet)"></div></div>` +
-          `<div class="adm-val">${bkGeld(g.eur, 'EUR')}</div><div class="adm-pct">${share.toFixed(0)}%</div>`
-        b.querySelector('.adm-row-name').textContent = g.name
-        b.addEventListener('click', () => { $('bk-person').value = $('bk-person').value === g.uid ? '' : g.uid; bkRender() })
-        dist.appendChild(b)
-      }
-      bkBuchungenRender()
+      // Liste oder Detail
+      const imDetail = !!bkPerson && (d.konten || []).some(k => String(k.user_id) === bkPerson)
+      if(!imDetail) bkPerson = ''
+      $('bk-liste').hidden = imDetail
+      $('bk-detail').hidden = !imDetail
+      if(imDetail) bkDetailRender()
       try{ window._fsRender?.() }catch(_){}   // BK2
     }
 
-    function bkBuchungenRender(){
-      const k = (bkDaten?.konten || []).find(x => String(x.id) === bkKonto)
-      $('bk-b-inhalt').hidden = !k
-      if(!k){ $('bk-b-titel').textContent = 'Buchungen'; $('bk-b-sub').textContent = 'Konto oben anklicken'; return }
-      $('bk-b-titel').textContent = 'Buchungen · ' + (k.name || '')
-      $('bk-b-sub').textContent = [k.zweck, k.bank, k.iban ? '…' + String(k.iban).slice(-4) : ''].filter(Boolean).join(' · ') +
-        (Number(k.start_saldo) ? ` · Start ${bkGeld(k.start_saldo, k.waehrung)}` : '')
+    // DETAIL einer ID (BK3): Reiter je Konto, Saldo groß, Konto-Infos klein, Buchungen wie ein Sheet (neueste oben, laufender Saldo)
+    function bkDetailRender(){
+      const konten = (bkDaten.konten || []).filter(k => String(k.user_id) === bkPerson).sort((a, b) => bkZRang(a.zweck) - bkZRang(b.zweck))
+      if(!konten.some(k => String(k.id) === bkKonto)) bkKonto = String(konten[0].id)
+      const k = konten.find(x => String(x.id) === bkKonto)
+      $('bk-d-name').textContent = k.name || ''
+      $('bk-d-konten').innerHTML = konten.length > 1 ? konten.map(x =>
+        `<button type="button" role="tab" data-bk-konto="${bkEsc(x.id)}" class="${String(x.id) === bkKonto ? 'active' : ''}" aria-selected="${String(x.id) === bkKonto}">${bkEsc(x.zweck)}${x.bank ? ' · ' + bkEsc(x.bank) : ''}</button>`).join('') : ''
+      const s = $('bk-d-saldo')
+      s.textContent = bkHatSaldo(k) ? bkGeld(k.saldo, k.waehrung) : '–'
+      s.classList.toggle('bk-minus', bkHatSaldo(k) && Number(k.saldo) < 0)
+      const n = Number(k.anzahl) || 0
+      $('bk-d-saldo-sub').textContent = `${n} ${n === 1 ? 'Buchung' : 'Buchungen'}` + (k.letzte ? ' · zuletzt ' + bkTag(k.letzte) : '') +
+        (Number(k.start_saldo) ? ' · Start ' + bkGeld(k.start_saldo, k.waehrung) : '')
+      const inf = $('bk-d-infos')
+      inf.innerHTML = `<span>Konto</span><b>${bkEsc(k.zweck)}${k.aktiv === false ? ' · inaktiv' : ''}</b>` +
+        `<span>Bank</span><b>${bkEsc(k.bank || '–')}${k.bic ? ' · <span class="bk-mono">' + bkEsc(k.bic) + '</span>' : ''}</b>` +
+        `<span>Inhaber</span><b>${bkEsc(k.inhaber || '–')}</b>` +
+        `<span>IBAN</span><b>${k.iban ? `<span class="bk-iban">${bkEsc(bkIban(k.iban))}</span> <button type="button" class="bk-knopf" data-bk-kopie title="IBAN kopieren">⧉</button>` : '–'}</b>` +
+        `<span></span><b><button type="button" class="bk-knopf" data-bk-edit>✎ Konto ändern</button> <button type="button" class="bk-knopf" data-bk-del>× Konto löschen</button></b>`
+      inf.querySelector('[data-bk-kopie]')?.addEventListener('click', () => navigator.clipboard?.writeText(k.iban).then(() => { $('bk-d-msg').className = 'bk-msgzeile gut'; $('bk-d-msg').textContent = 'IBAN kopiert.' }).catch(() => {}))
+      inf.querySelector('[data-bk-edit]').addEventListener('click', () => bkBearbeiten(k))
+      inf.querySelector('[data-bk-del]').addEventListener('click', () => bkKontoLoeschen(k))
+
+      bkZeilenRender(k)
+    }
+    // Review BK3: tippt Finn gerade in einer Zeile, die Tabelle erst nach dem Verlassen neu bauen (sonst ist die Eingabe weg)
+    let bkZeilenSpaeter = false
+    function bkZeilenRender(k){
+      if($('bk-d-rows').contains(document.activeElement)){ bkZeilenSpaeter = true; return }
+      bkZeilenSpaeter = false
       const liste = (bkDaten.buchungen || []).filter(b => String(b.konto_id) === bkKonto)
-        .sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+        .sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)))
       let lauf = Number(k.start_saldo) || 0
       const mitSaldo = liste.map(b => { lauf = Math.round((lauf + (Number(b.betrag) || 0)) * 100) / 100; return { b, saldo: lauf } }).reverse()   // neueste oben
-      const tb = $('bk-b-rows'); tb.innerHTML = ''
-      $('bk-b-empty').hidden = !!liste.length
+      const tb = $('bk-d-rows'); tb.innerHTML = ''
+      $('bk-d-leer').hidden = !!liste.length
       for(const { b, saldo } of mitSaldo){
-        const tr = document.createElement('tr')
-        const n = Number(b.betrag) || 0
-        // Art + Herkunft klein unter dem Text (sonst bricht die schmale Spalte jede Zeile um)
-        tr.innerHTML = `<td style="white-space:nowrap">${bkTag(b.datum)}</td>` +
-          `<td>${bkEsc(b.text || '–')}<div style="font-size:11px;color:var(--sub)">${bkEsc(b.art)}${b.quelle === 'sheet' ? ' · aus Sheet' : ''}</div></td>` +
-          `<td class="adm-num ${n < 0 ? 'bk-minus' : 'bk-plus'}" style="white-space:nowrap">${n > 0 ? '+' : ''}${bkGeld(n, k.waehrung)}</td>` +
-          `<td class="adm-num" style="white-space:nowrap">${bkGeld(saldo, k.waehrung)}</td><td style="text-align:right"><button type="button" class="bk-knopf" title="Buchung löschen">×</button></td>`
+        const tr = document.createElement('tr'), betrag = Number(b.betrag) || 0
+        tr.innerHTML =
+          `<td><input type="date" data-f="datum" value="${bkEsc(String(b.datum || '').slice(0, 10))}"></td>` +
+          `<td><input data-f="text" value="${bkEsc(b.text || '')}" autocomplete="off"${b.quelle === 'sheet' ? ' title="aus dem alten Sheet übernommen"' : ''}></td>` +   // Herkunft nur im Tooltip: Zeilen bleiben einzeilig wie im Sheet
+          `<td><select data-f="art">${BK_ARTEN.map(a => `<option${a === b.art ? ' selected' : ''}>${bkEsc(a)}</option>`).join('')}</select></td>` +
+          `<td><input type="number" step="0.01" data-f="betrag" class="adm-num ${betrag < 0 ? 'bk-minus' : 'bk-plus'}" value="${bkEsc(String(betrag))}"></td>` +
+          `<td class="adm-num bk-lauf">${bkGeld(saldo, k.waehrung)}</td>` +
+          `<td style="text-align:right"><button type="button" class="bk-knopf" title="Buchung löschen">×</button></td>`
+        // Zelle geändert → genau dieses Feld speichern (wie ein Sheet); Enter = fertig
+        tr.querySelectorAll('[data-f]').forEach(el => {
+          el.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); el.blur() } })
+          // Datum: Chrome meldet change schon beim Tippen einzelner Ziffern (0002-…) → erst beim Verlassen speichern
+          el.addEventListener(el.dataset.f === 'datum' ? 'blur' : 'change', async () => {
+            const f = el.dataset.f
+            let v = el.value
+            if(f === 'datum' && v === String(b.datum || '').slice(0, 10)) return
+            if(f === 'datum' && v && !(v >= '2020-01-01' && v <= '2100-12-31')){ $('bk-d-msg').className = 'bk-msgzeile'; $('bk-d-msg').textContent = 'Datum prüfen (Jahr)'; el.value = String(b.datum || '').slice(0, 10); return }
+            if(f === 'betrag'){ v = Number(v); if(!v){ $('bk-d-msg').className = 'bk-msgzeile'; $('bk-d-msg').textContent = 'Betrag ≠ 0 — zum Entfernen × drücken'; el.value = betrag; return } }
+            if(f === 'datum' && !v){ el.value = String(b.datum || '').slice(0, 10); return }
+            await bkSenden('/admin/bank/buchung', 'PATCH', { id: b.id, [f]: v }, $('bk-d-msg'), 'Gespeichert.')
+          })
+        })
         tr.querySelector('button').addEventListener('click', async () => {
-          if(!confirm(`Buchung vom ${bkTag(b.datum)} über ${bkGeld(n, k.waehrung)} löschen?`)) return
-          await bkSenden('/admin/bank/buchung', 'DELETE', { id: b.id }, $('bk-b-msg'), 'Buchung gelöscht.')
+          if(!confirm(`Buchung vom ${bkTag(b.datum)} über ${bkGeld(betrag, k.waehrung)} löschen?`)) return
+          await bkSenden('/admin/bank/buchung', 'DELETE', { id: b.id }, $('bk-d-msg'), 'Buchung gelöscht.')
         })
         tb.appendChild(tr)
       }
@@ -24234,7 +24295,7 @@
     }
     function bkBearbeiten(k){
       bkEdit = String(k.id)
-      $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true
+      $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true; $('bk-a-titel').textContent = 'Konto ändern'
       $('bk-a-person').value = String(k.user_id); $('bk-a-person').disabled = true
       $('bk-a-zweck').value = k.zweck; $('bk-a-bank').value = k.bank || ''; $('bk-a-inhaber').value = k.inhaber || ''
       $('bk-a-iban').value = bkEditIban = bkIban(k.iban); $('bk-a-bic').value = k.bic || ''; $('bk-a-waehrung').value = k.waehrung || 'EUR'
@@ -24248,13 +24309,30 @@
       if(!confirm(`Konto ${k.name} · ${k.zweck}${k.bank ? ' · ' + k.bank : ''} löschen?${n ? ` Die ${n} Buchung${n === 1 ? '' : 'en'} gehen mit.` : ''}`)) return
       if(String(k.id) === bkKonto) bkKonto = ''
       if(String(k.id) === bkEdit) bkFormLeeren()
-      await bkSenden('/admin/bank/konto', 'DELETE', { id: k.id }, $('bk-a-msg'), 'Konto gelöscht.')
+      if(await bkSenden('/admin/bank/konto', 'DELETE', { id: k.id }, $('bk-a-msg'), 'Konto gelöscht.')) bkMeldung('Konto gelöscht.')   // Review BK3: Rückmeldung in der Sicht, die danach offen ist
     }
-    $('bk-person')?.addEventListener('change', () => bkRender())
+    $('bk-d-rows')?.addEventListener('focusout', () => setTimeout(() => {
+      if(bkZeilenSpaeter && !$('bk-d-rows').contains(document.activeElement)){ const k = (bkDaten?.konten || []).find(x => String(x.id) === bkKonto); if(k) bkZeilenRender(k) }
+    }, 0))
+    // sichtbare Rückmeldung (Review BK3): Formular ist nach Erfolg zu → Text in die Zeile der gerade sichtbaren Sicht
+    function bkMeldung(text){
+      const el = !$('bk-detail').hidden ? $('bk-d-msg') : $('bk-l-msg')
+      el.className = 'bk-msgzeile gut'; el.textContent = text
+    }
     $('bk-zweck')?.addEventListener('change', () => bkRender())
     $('bk-refresh')?.addEventListener('click', () => bkLaden())
+    $('bk-zurueck')?.addEventListener('click', () => { bkPerson = ''; bkFormLeeren(); bkRender() })
+    $('bk-d-konten')?.addEventListener('click', ev => {
+      const t = ev.target.closest('[data-bk-konto]'); if(!t || t.dataset.bkKonto === bkKonto) return
+      bkKonto = t.dataset.bkKonto; $('bk-d-msg').textContent = ''; bkDetailRender()
+    })
     $('bk-a-abbruch')?.addEventListener('click', () => { bkFormLeeren(); $('bk-a-msg').textContent = '' })
-    $('bk-a-auf')?.addEventListener('click', () => { $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true; $('bk-a-ok').textContent = 'Konto hinzufügen'; $('bk-a-iban').focus() })
+    $('bk-a-auf2')?.addEventListener('click', () => $('bk-a-auf').click())   // „+ Konto" im Detail (für die offene ID)
+    $('bk-a-auf')?.addEventListener('click', () => {
+      $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true; $('bk-a-ok').textContent = 'Konto hinzufügen'; $('bk-a-titel').textContent = 'Konto hinzufügen'
+      if(bkPerson) $('bk-a-person').value = bkPerson
+      $('bk-a-iban').focus()
+    })
     $('bk-a-ok')?.addEventListener('click', async ev => {
       const body = { zweck: $('bk-a-zweck').value, bank: $('bk-a-bank').value, inhaber: $('bk-a-inhaber').value,
         iban: $('bk-a-iban').value, bic: $('bk-a-bic').value, waehrung: $('bk-a-waehrung').value, start_saldo: Number($('bk-a-start').value) || 0 }
@@ -24262,27 +24340,40 @@
       try{
         if(bkEdit){
           if(body.iban === bkEditIban) delete body.iban   // unverändert → nicht neu prüfen (eine alte, ungültige IBAN sperrt sonst jede andere Änderung)
-          if(await bkSenden('/admin/bank/konto', 'PATCH', Object.assign(body, { id: bkEdit }), $('bk-a-msg'), 'Konto gespeichert.')) bkFormLeeren()
+          if(await bkSenden('/admin/bank/konto', 'PATCH', Object.assign(body, { id: bkEdit }), $('bk-a-msg'), 'Konto gespeichert.')){ bkFormLeeren(); bkMeldung('Konto gespeichert.') }
         }else{
           if(!$('bk-a-person').value){ $('bk-a-msg').className = 'bk-msgzeile'; $('bk-a-msg').textContent = 'ID wählen'; return }
-          if(await bkSenden('/admin/bank/konto', 'POST', Object.assign(body, { user_id: $('bk-a-person').value }), $('bk-a-msg'), 'Konto angelegt.')) bkFormLeeren()
+          if(await bkSenden('/admin/bank/konto', 'POST', Object.assign(body, { user_id: $('bk-a-person').value }), $('bk-a-msg'), 'Konto angelegt.')){
+            bkFormLeeren()
+            const z = $('bk-zweck').value
+            bkMeldung('Konto angelegt.' + (z && z !== body.zweck && $('bk-detail').hidden ? ` Der Filter „${z}“ blendet es aus — „Alle Konten“ wählen.` : ''))
+          }
         }
       }finally{ btn.disabled = false }
     })
-    $('bk-b-ok')?.addEventListener('click', async ev => {
-      let betrag = Number($('bk-b-betrag').value)
-      const art = $('bk-b-art').value, m = $('bk-b-msg')
-      if(!betrag){ m.className = 'bk-msgzeile'; m.textContent = 'Betrag eingeben (+ Eingang / − Ausgang)'; return }
+    // Eingabezeile (BK3): Enter in einem Feld speichert die neue Buchung, Datum + Art bleiben für die nächste stehen
+    let bkNeuLaeuft = false   // Review BK3: Enter doppelt/gehalten → sonst zwei gleiche Buchungen
+    async function bkNeuSpeichern(){
+      if(bkNeuLaeuft) return
+      const m = $('bk-d-msg')
+      let betrag = Number($('bk-n-betrag').value)
+      const art = $('bk-n-art').value
+      if(!betrag){ m.className = 'bk-msgzeile'; m.textContent = 'Betrag eingeben (+ Eingang / − Ausgang)'; $('bk-n-betrag').focus(); return }
       // Account-Kauf und Gebühr sind immer Ausgänge — ein vergessenes Minus dreht sich um (und die Zeile sagt es)
       const gedreht = (art === 'Account-Kauf' || art === 'Gebühr') && betrag > 0
       if(gedreht) betrag = -betrag
-      const btn = ev.currentTarget; btn.disabled = true
+      const w = (bkDaten?.konten || []).find(x => String(x.id) === bkKonto)?.waehrung
+      const datum = $('bk-n-datum').value || bkHeute()
+      if(!(datum >= '2020-01-01' && datum <= '2100-12-31')){ m.className = 'bk-msgzeile'; m.textContent = 'Datum prüfen (Jahr)'; $('bk-n-datum').focus(); return }
+      bkNeuLaeuft = true
       try{
-        const ok = await bkSenden('/admin/bank/buchung', 'POST', { konto_id: bkKonto, datum: $('bk-b-datum').value || bkHeute(), betrag, art, text: $('bk-b-text').value },
-          m, `${bkGeld(betrag, (bkDaten?.konten || []).find(x => String(x.id) === bkKonto)?.waehrung)} gebucht${gedreht ? ' (als Ausgang)' : ''}.`)
-        if(ok){ $('bk-b-betrag').value = ''; $('bk-b-text').value = '' }
-      }finally{ btn.disabled = false }
-    })
+        const ok = await bkSenden('/admin/bank/buchung', 'POST', { konto_id: bkKonto, datum, betrag, art, text: $('bk-n-text').value },
+          m, `${bkGeld(betrag, w)} gebucht${gedreht ? ' (als Ausgang)' : ''}.`)
+        if(ok){ $('bk-n-betrag').value = ''; $('bk-n-text').value = ''; $('bk-n-text').focus() }
+      }finally{ bkNeuLaeuft = false }
+    }
+    for(const id of ['bk-n-datum', 'bk-n-text', 'bk-n-art', 'bk-n-betrag'])
+      $(id)?.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); bkNeuSpeichern() } })
     /* ── FINANZEN-ÜBERSICHT (BK2, 25.11.2026, Finn: „erst eine Totalübersicht, in der Meta und Bankkonto zusammengefasst werden … zuerst
      * die zusammengefassten Finanzen sehe, akkumuliert von beiden") ── nur Anzeige aus den Daten der beiden Bereiche: wallets/walBal
      * (Meta Wallet, schon nach Unternehmen gefiltert, USDT) und bkDaten (Bankkonto, Gruppe vom Chip, je Konto EUR oder USD).
@@ -24298,37 +24389,39 @@
       const { fx } = fsKurs(), map = new Map()
       const bank = ((window._admBankErlaubt?.() ?? true) && !bkFehler) ? bkDaten : null   // BK2-Review: ohne Bank-Recht bzw. nach Ladefehler nie Bankdaten (auch keine alten)
       const neu = (key, name) => { if(!map.has(key)) map.set(key, { key, name, meta: 0, metaDa: false, bankEur: 0, bankUsd: 0, bankDa: false, nWal: 0, nKto: 0 }); return map.get(key) }
-      // Name → ID nur, wenn der Name genau EINER ID gehört (Admin-Personen, Wallets mit ID, Bankkonten); mehrdeutig = nicht zuordnen
-      const kandidaten = new Map()
-      const merk = (name, uid) => { const n = String(name || '').trim().toLowerCase(); if(!n || !uid) return; if(!kandidaten.has(n)) kandidaten.set(n, new Set()); kandidaten.get(n).add(String(uid)) }
-      for(const p of (window._admData?.people || [])) merk(p.name, p.user_id)
-      for(const w of (typeof wallets !== 'undefined' ? wallets : [])) merk(w.person_name, w.person_uid)
-      for(const p of (bank?.personen || [])) merk(p.name, p.user_id)
-      const nameZuUid = new Map([...kandidaten].filter(([, u]) => u.size === 1).map(([n, u]) => [n, [...u][0]]))
+      // BK3 (25.11.2026, Finn: „dieses Mike_OKX etc. ist komisch, das ist ja keine ID"): eine Zeile je Prophos-ID (person_uid bzw.
+      // user_id), Name = Name der ID (Admin-Personen bzw. Bank), nie der frei getippte Wallet-Name. Wallets ohne person_uid werden NICHT
+      // über den Namen geraten, sondern landen in einer Sammelzeile „ohne ID" (aufklappbar); zugeordnet wird per Daten-SQL (Finns OK).
+      const idName = new Map()
+      for(const p of (window._admData?.people || [])) if(p?.user_id && p.name) idName.set(String(p.user_id), p.name)
+      for(const p of (bank?.personen || [])) if(p?.user_id && p.name && !idName.has(String(p.user_id))) idName.set(String(p.user_id), p.name)
+      const ohne = { key: 'ohne', ohne: true, name: '', meta: 0, metaDa: false, bankEur: 0, bankUsd: 0, bankDa: false, nWal: 0, nKto: 0, wallets: [] }
       for(const w of (typeof wallets !== 'undefined' ? wallets : [])){
-        const uid = String(w.person_uid || '').trim() || nameZuUid.get(String(w.person_name || '').trim().toLowerCase()) || ''
-        const g = neu(uid || 'n:' + String(w.person_name || '').toLowerCase(), w.person_name || '–')
-        const b = walBal.get(w.id)
-        if(b?.usdt != null){ g.meta += b.usdt + (b.coinUsdt || 0); g.metaDa = true }
+        const uid = String(w.person_uid || '').trim()
+        const g = uid ? neu(uid, idName.get(uid) || w.person_name || uid.slice(0, 8)) : ohne
+        const b = walBal.get(w.id), wert = b?.usdt != null ? b.usdt + (b.coinUsdt || 0) : null
+        if(wert != null){ g.meta += wert; g.metaDa = true }
         g.nWal++
+        if(!uid) ohne.wallets.push({ name: w.label ? `${w.person_name} · ${w.label}` : w.person_name, chain: w.chain, wert })
       }
       for(const k of (bank?.konten || [])){
-        const g = neu(String(k.user_id), k.name || '–')
-        if(k.name) g.name = k.name   // Prophos-Name gewinnt vor frei getipptem Wallet-Namen
+        const g = neu(String(k.user_id), idName.get(String(k.user_id)) || k.name || '–')
         g.nKto++
         if(!bkHatSaldo(k)) continue
         if(k.waehrung === 'USD') g.bankUsd += Number(k.saldo) || 0; else g.bankEur += Number(k.saldo) || 0
         g.bankDa = true
       }
+      if(ohne.nWal){ ohne.name = `ohne ID (${ohne.nWal} ${ohne.nWal === 1 ? 'Wallet' : 'Wallets'})`; map.set('ohne', ohne) }
       for(const g of map.values()){ g.bank = g.bankUsd + g.bankEur / fx; g.total = g.meta + g.bank }
       return [...map.values()]
     }
+    let fsOhneAuf = false   // Sammelzeile „ohne ID" aufgeklappt
     function fsRender(){
       if(!$('fs-person-dist')) return
       const { fx, quelle } = fsKurs()
-      const alle = fsPersonen().sort((a, b) => b.total - a.total)
+      const alle = fsPersonen().sort((a, b) => (a.ohne ? 1 : 0) - (b.ohne ? 1 : 0) || b.total - a.total)   // „ohne ID" immer unten
       const sel = $('fs-person'), cur = sel.value
-      sel.innerHTML = '<option value="">Alle Personen</option>' + [...alle].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+      sel.innerHTML = '<option value="">Alle IDs</option>' + [...alle].filter(g => !g.ohne).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
         .map(g => `<option value="${bkEsc(g.key)}">${bkEsc(g.name)}</option>`).join('')
       sel.value = alle.some(g => g.key === cur) ? cur : ''
       const rows = sel.value ? alle.filter(g => g.key === sel.value) : alle
@@ -24339,7 +24432,8 @@
       $('fs-k-ges').textContent = (metaDa || bankDa) ? fsUsd.format(meta + bank) : '–'
       const bankOk = window._admBankErlaubt?.() ?? true
       const ohneBank = bankOk && bkFehler ? ' · ohne Bankkonten' : ''   // BK2-Review: fehlende Bank nie still weglassen
-      $('fs-k-ges-sub').textContent = (metaDa || bankDa) ? `≈ ${fsEur.format((meta + bank) * fx)} · ${rows.length} Person${rows.length === 1 ? '' : 'en'}${ohneBank}` : 'lädt …'
+      const nIds = rows.filter(g => !g.ohne).length
+      $('fs-k-ges-sub').textContent = (metaDa || bankDa) ? `≈ ${fsEur.format((meta + bank) * fx)} · ${nIds} ${nIds === 1 ? 'ID' : 'IDs'}${ohneBank}` : 'lädt …'
       $('fs-k-meta').textContent = metaDa ? fsUsd.format(meta).replace('$', 'USDT').trim() : '–'
       $('fs-k-meta-sub').textContent = nWal ? `${nWal} Wallet${nWal === 1 ? '' : 's'}${metaDa ? '' : ' · Balances laden …'}` : 'keine Wallets'
       $('fs-k-bank').textContent = bankDa ? fsEur.format(bankEur) + (bankUsd ? ' + ' + fsUsd.format(bankUsd) : '') : '–'
@@ -24359,6 +24453,21 @@
           `<div style="width:${pos > 0 ? (100 * m / pos).toFixed(1) : 0}%;background:var(--violet)"></div>` +
           `<div style="width:${pos > 0 ? (100 * b / pos).toFixed(1) : 0}%;background:var(--teal)"></div></div></div>` +
           `<div class="adm-val${g.total < 0 ? ' bk-minus' : ''}">${fsUsd.format(g.total)}</div><div class="adm-pct">${share.toFixed(0)}%</div>`
+        el.querySelector('.adm-row-name').textContent = g.ohne ? (fsOhneAuf ? '▾ ' : '▸ ') + g.name : g.name
+        if(g.ohne){
+          el.classList.add('fs-ohne')
+          el.title = 'Wallets ohne Prophos-ID — klicken klappt auf · zuordnen in Meta Wallet bzw. per Daten-SQL'
+          el.addEventListener('click', () => { fsOhneAuf = !fsOhneAuf; fsRender() })
+          dist.appendChild(el)
+          if(fsOhneAuf) for(const w of g.wallets.sort((a, b) => (b.wert || 0) - (a.wert || 0))){
+            const z = document.createElement('div'); z.className = 'fs-ohne-zeile'
+            z.innerHTML = '<span></span><span class="fs-ohne-chain"></span><span class="adm-val"></span>'
+            z.children[0].textContent = w.name || '–'; z.children[1].textContent = WAL_KURZ?.[w.chain] || w.chain
+            z.children[2].textContent = w.wert != null ? fsUsd.format(w.wert) : '–'
+            dist.appendChild(z)
+          }
+          continue
+        }
         el.querySelector('.adm-row-name').textContent = g.name
         el.title = `${g.name}: Meta Wallet ${fsUsd.format(g.meta)} · Bankkonto ${fsEur.format(g.bankEur)}${g.bankUsd ? ' + ' + fsUsd.format(g.bankUsd) : ''} (≈ ${fsUsd.format(g.bank)}) — klicken filtert`
         el.addEventListener('click', () => { sel.value = sel.value === g.key ? '' : g.key; fsRender() })
@@ -61490,7 +61599,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2309'
+  const OS_TAB_BUILD = '2026-09-22.2310'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
