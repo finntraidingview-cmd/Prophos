@@ -60839,7 +60839,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2300'
+  const OS_TAB_BUILD = '2026-09-22.2301'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61091,11 +61091,16 @@
     return u === 'bestanden' ? 'Konto weg · vermutlich bestanden' : u === 'pruefen' ? 'Konto weg · bitte prüfen' : 'Konto weg · vermutlich geblowt'
   }
   const KONTO_WEG_LIQ_NAH_ANTEIL = 0.25, KONTO_WEG_LIQ_NAH_MIN = 250
+  // ZW1 (Master 24.11.2026): „Stand ≥ Start" reichte für „bestanden" — Carsten Lucid 150k …0003, nie gehandelt (Lesung 150.000 = Start), meldete beim Start am
+  // 23.11. „Konto weg" → ziel_erreicht bei 150.000, der Planer plante das Konto nie mehr („Ziel erreicht"). Ohne bekanntes Ziel jetzt erst ab Start + 3 %
+  // (niedrigste echte Markierung bisher +4,08 % über der Größe, 311 Konten), dazwischen „prüfen" (nicht archiviert, Auto-Planer aus, 🟠).
+  const KONTO_WEG_BESTANDEN_ANTEIL = 0.03
   function kontoWegUrteil(stand, start, boden, ziel){
     const n = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const s = n(stand), st = n(start), b = n(boden), z = n(ziel)
     if(s == null) return 'pruefen'
-    if((st != null && st > 0 && s >= st) || (z != null && z > 0 && s >= z)) return 'bestanden'
+    if(z != null && z > 0 ? s >= z : (st != null && st > 0 && s >= st * (1 + KONTO_WEG_BESTANDEN_ANTEIL))) return 'bestanden'   // bekanntes Ziel entscheidet allein
+    if(st != null && st > 0 && s >= st) return 'pruefen'
     if(b != null && st != null && st > b && s - b <= Math.max(KONTO_WEG_LIQ_NAH_MIN, (st - b) * KONTO_WEG_LIQ_NAH_ANTEIL)) return 'blown'
     return 'pruefen'
   }

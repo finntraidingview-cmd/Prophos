@@ -72,6 +72,11 @@ faelle = [
     ("Hedge-SL ist Liq-Level → geblowt", INA, [dict(p(), mt5Baseline={"hedge": {"grund": "level_sl", "sl_art": "liquidation"}, "final": {}})]),
     ("Hedge-SL am Daily-Loss-Level, Stand über dem Boden → prüfen", INA, [dict(p(), masterPl=-2000, mt5Baseline={"hedge": {"grund": "level_sl", "sl_art": "liquidation", "liq_art": "daily_loss"}, "final": {}})]),
     ("alter Trade (vor der Lesung, > 24 h) → Balance-Regel", dict(INA, tvBalance=149000, tvBalanceAt="2026-11-01T10:00:00Z"), [dict(p(), startedAt="2026-10-20T10:00:00Z", endedAt="2026-10-20T11:00:00Z")]),
+    # ZW1 (24.11.2026): Carsten Lucid 150k …0003, nie gehandelt, Lesung 150.000 = Start → nie „bestanden"
+    ("ZW1 nie gehandelt, Stand = Start → prüfen", dict(INA, firm="Lucid Trading", tvBalance=150000, zielUsd=None), []),
+    ("ZW1 Stand +2 % ohne Ziel → prüfen", dict(INA, tvBalance=153000, zielUsd=None), []),
+    ("ZW1 Stand +4 % ohne Ziel → bestanden", dict(INA, tvBalance=156000, zielUsd=None), []),
+    ("ZW1 bekanntes Ziel 159.000, Stand 156.000 → prüfen", dict(INA, tvBalance=156000), []),
 ]
 def eigen(i, acc, plaene):   # je Fall ein eigenes Konto: kontoWegFolge läuft je Konto nur einmal
     kid = f"k{i}"
@@ -90,7 +95,7 @@ except Exception:
     print(r.stdout[-500:], r.stderr[-500:]); erg = [[]] * len(faelle)
 for (name, _a, _p), log in zip(faelle, erg):
     print("   ", name, log)
-tp, sl, hand, alt, tppl, fund, sl_hoch, sl_boden, hedge_liq, hedge_dl, alt_trade = erg
+tp, sl, hand, alt, tppl, fund, sl_hoch, sl_boden, hedge_liq, hedge_dl, alt_trade, zw_start, zw_2, zw_4, zw_ziel = erg
 check(any(x.startswith('konto:') and '"ziel_erreicht_at"' in x and '159040' in x for x in tp) and not any(x.startswith('archiv') for x in tp) and 'plan:bestanden' not in tp,
       "TP + Konto weg: Ziel markiert (157.051 + TP 1.989 = 159.040), nicht archiviert")
 check('archiv:blown' in sl, "Liquidation (demo_liq) + Konto weg: als geblowt archiviert")
@@ -103,6 +108,11 @@ check(not any(x.startswith('archiv') for x in hand) and any('"auto_planer":false
 check('archiv:blown' in alt, "ohne bekanntes Ende gilt die Balance-Regel weiter (nahe Liq → geblowt)")
 check(any('"ziel_erreicht_at"' in x for x in tppl) and not any(x.startswith('archiv') for x in tppl), "Ende aus P&L am TP erkannt")
 check(not any(x.startswith('archiv') for x in fund) and not any('"ziel_erreicht_at"' in x for x in fund), "Funded am TP: prüfen, kein Ziel, kein Archiv")
+check(not any('"ziel_erreicht_at"' in x for x in zw_start) and not any(x.startswith('archiv') for x in zw_start) and any('"auto_planer":false' in x for x in zw_start),
+      f"ZW1: nie gehandelt (150.000 = Start) + Konto weg → prüfen, KEIN Ziel erreicht ({zw_start})")
+check(not any('"ziel_erreicht_at"' in x for x in zw_2) and any('"auto_planer":false' in x for x in zw_2), "ZW1: +2 % ohne Ziel → prüfen")
+check(any('"ziel_erreicht_at"' in x for x in zw_4) and not any(x.startswith('archiv') for x in zw_4), "ZW1: +4 % ohne Ziel → bestanden (Ziel markiert)")
+check(not any('"ziel_erreicht_at"' in x for x in zw_ziel), "ZW1: bekanntes Ziel entscheidet allein (156.000 < 159.000 → prüfen)")
 
 # Abhaken „bestanden“ → Review, kein Archiv-Eintrag (app.py)
 m = re.search(r"^def wd_erl_review_upd\(.*?(?=^\S)", app, re.S | re.M)
