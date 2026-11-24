@@ -28867,6 +28867,9 @@
             hedges: s.hedges || {},
             master_balance: s.master_balance ?? null, master_equity: s.master_equity ?? null,
             master_currency: s.master_currency ?? null,
+            // PW3 (24.11.2026, Fall Marc …7821): Datum der Snapshot-Datei (FT1-Panel: snap_alter_s) — updated_at ist nur der Push; ohne Feld (altes Panel) null.
+            // Railway (acc_balance_wahl) lässt damit eine JÜNGERE Lesung (tv_balance) vor einem eingefrorenen Echo-Stand gewinnen. Zählt nicht als Änderung (fp).
+            snap_at: (inst.snap_alter_s != null && isFinite(Number(inst.snap_alter_s))) ? new Date(Date.now() - Number(inst.snap_alter_s) * 1000).toISOString() : null,
             // Lese-Instanz (25.09.2026): Master-Stand frisch vom Panel ohne Copier — alive bleibt falsch (heißt „Copier hedgt"),
             // Echo V2 am Mac/Handy liest den Live-P&L über dieses Merkmal
             lesen: !!inst.lesen,
@@ -28925,7 +28928,7 @@
       // ohne offenen Trade). Leser prüfen updated_at mit 15–25 s (Flotte grau nach 20 s, hedgeSoloLive ≤ 25 s, Richtungs-Schutz ≤ 20 s,
       // app.py Echo ≤ 90 s, Feed-Diagnose < 2 min) — 12 s bleibt sicher darunter. Läuft ein Trade, ändern sich P&L/Positionen bei
       // jedem Tick → weiter alle 5 s. kurs_bruecke (Diagnose mit Zeitstempeln je Brücken-Tick) zählt nicht als Änderung, reist aber mit.
-      const fp = JSON.stringify(rows.map(r => [r.id, r.master_login, r.hedge_login, r.alive, Object.assign({}, r.status, { kurs_bruecke: null })]))
+      const fp = JSON.stringify(rows.map(r => [r.id, r.master_login, r.hedge_login, r.alive, Object.assign({}, r.status, { kurs_bruecke: null, snap_at: null })]))   // PW3: snap_at reist mit, zählt nicht
       // Leerlauf 12 → 30 s (01.10.2026, Supabase-Diät Teil C, NANO-Compute hing in Wellen: 382 POST mt5_live in 10 min = jeder der
       // 8 PCs alle 12,5 s, fast nur Lebenszeichen). Schnell (12 s) bleibt es, sobald es etwas zu beweisen gibt: Master-Positionen,
       // Hedges, Solo-Hedge, fremde Hedge-Positionen, ein geclaimtes Signal (_osActive) oder ein Orbit-Lauf in diesem Tab. Leser,
@@ -61599,7 +61602,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2310'
+  const OS_TAB_BUILD = '2026-09-22.2311'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

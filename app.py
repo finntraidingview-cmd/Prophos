@@ -8296,7 +8296,12 @@ def acc_balance_wahl(a, echo_bal, dup_bal):
     hit = (echo_bal or {}).get(login)
     if hit:
         b = num(hit[0])
-        if b is not None:
+        # PW3 (Master 24.11.2026, Fall Marc FundedNext …7821): mt5_live.updated_at ist der Push des PC-Tabs (alle 30 s auch im Standby), nicht das Alter
+        # des Snapshots — ein eingefrorener Echo-Stand (Terminal zu, Payout dazwischen abgebucht) galt so immer als frisch und schlug jede jüngere Lesung.
+        # Liefert der Tab das echte Snapshot-Datum (status.snap_at, ab FT1-Panel), gewinnt eine NEUERE Lesung in tv_balance; ohne snap_at wie bisher.
+        snap = _ap_ts(hit[3]) if len(hit) > 3 and hit[3] else None   # _ap_ts: auch Postgres-Form „ …+00“ (Python 3.9)
+        tv_at_ = _ap_ts(a.get("tv_balance_at")) if snap is not None and num(a.get("tv_balance")) is not None else None
+        if b is not None and not (tv_at_ is not None and tv_at_ > snap):
             return b, hit[1], "Echo", hit[2]
     tv = tv_x if express else num(a.get("tv_balance"))
     tv_at = str(a.get("tv_balance_at") or "")
@@ -8903,13 +8908,13 @@ def admin_build_overview(kapitel_id=None):
     echo_bal = {}
     try:
         for row in _sb_all("mt5_live", {"select": "master_login,updated_at,"
-                                                  "bal:status->>master_balance,ccy:status->>master_currency"}):
+                                                  "bal:status->>master_balance,ccy:status->>master_currency,snap:status->>snap_at"}):
             lg = str(row.get("master_login") or "").strip()
             if not lg or row.get("bal") in (None, ""):
                 continue
             at = str(row.get("updated_at") or "")
             if lg not in echo_bal or at > echo_bal[lg][2]:
-                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at)
+                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at, row.get("snap"))   # PW3: + Snapshot-Datum (acc_balance_wahl)
     except Exception as e:
         print(f"[admin] ⚠️ mt5_live-Balances: {type(e).__name__}: {e}", flush=True)
 
@@ -9860,13 +9865,13 @@ def admin_build_prop_baum():
         print(f"[prop-baum] ⚠️ dup_live: {type(e).__name__}: {e}", flush=True)
     try:
         for row in _sb_all("mt5_live", {"select": "master_login,updated_at,bal:status->>master_balance,"
-                                                  "ccy:status->>master_currency,pos:status->master_positions"}):
+                                                  "ccy:status->>master_currency,pos:status->master_positions,snap:status->>snap_at"}):
             lg = str(row.get("master_login") or "").strip()
             if not lg:
                 continue
             at = str(row.get("updated_at") or "")
             if row.get("bal") not in (None, "") and (lg not in echo_bal or at > echo_bal[lg][2]):
-                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at)
+                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at, row.get("snap"))   # PW3: + Snapshot-Datum
             alter = _alter_s(at)
             if isinstance(row.get("pos"), list) and row["pos"] and alter is not None and alter <= 120:
                 offen_logins.add(lg)
@@ -28098,13 +28103,13 @@ def _ap_balance_karten():
         print(f"[auto-plan] ⚠️ dup_live: {type(e).__name__}: {e}", flush=True)
     try:
         for row in _sb_all("mt5_live", {"select": "master_login,updated_at,"
-                                                  "bal:status->>master_balance,ccy:status->>master_currency"}):
+                                                  "bal:status->>master_balance,ccy:status->>master_currency,snap:status->>snap_at"}):
             lg = str(row.get("master_login") or "").strip()
             if not lg or row.get("bal") in (None, ""):
                 continue
             at = str(row.get("updated_at") or "")
             if lg not in echo_bal or at > echo_bal[lg][2]:
-                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at)
+                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at, row.get("snap"))   # PW3: + Snapshot-Datum (acc_balance_wahl)
     except Exception as e:
         print(f"[auto-plan] ⚠️ mt5_live: {type(e).__name__}: {e}", flush=True)
     return echo_bal, dup_bal
