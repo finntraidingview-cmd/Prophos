@@ -200,7 +200,7 @@ check("(1 Trade)" in c and "≈ −1.723 $" in c, f"Trade 1 nach dem Fenster: (1
 c = K.get("alt_ohne_teile") or ""
 check("Tag +2.322 $ + 2.172 $ =" in c and "T1" not in c, "alte Zeile ohne kette_teile: Chip wie bisher")
 check(L == {"lesen": True, "cap": False, "vorbei": False, "t2": False, "tagesende": False, "ohne": False}, f"tpKetteLesenWeiter ({L})")
-check("!tpKetteLesenWeiter(p, jetzt)) return `${versuche} Versuche erfolglos`" in html, "Endlesung gibt Kette-Trade 1 nicht nach 8 Versuchen auf")
+check("!tpKetteLesenWeiter(p, jetzt) && !sp) return `${versuche} Versuche erfolglos`" in html, "Endlesung gibt Kette-Trade 1 nicht nach 8 Versuchen auf")
 check("!wt.kette && (wt.login || wdlLesungVerloren(wt, jetzt))" in html, "Wartet-Zeile: kein „Jetzt abhaken“ für Kette-Trade 1")
 
 print("\nselftest_topstep_tag_ein_haken: " + ("alle Prüfungen grün" if not FEHLER else f"{len(FEHLER)} FEHLER: {FEHLER}"))
