@@ -48610,8 +48610,11 @@ def fd_ergebnis_urteil(rez_key, ausgabe):
     return "fertig", "gelesen", False, False
 
 
+FD_SF_MAX = 2   # = SF_MAX in prophos.html (TX3 24.11.2026: 1 Start + 2 Neuplanungen)
+
+
 def fd_nachplan_urteil(p, jetzt, tz=None):
-    """REIN RECHNEND (testbar): darf der Doktor diesen Plan nachplanen? Nur wenn der PC-Tab es nicht mehr selbst tut (sfTick: Deckel 3 Fehlversuche voll oder
+    """REIN RECHNEND (testbar): darf der Doktor diesen Plan nachplanen? Nur wenn der PC-Tab es nicht mehr selbst tut (sfTick: Deckel FD_SF_MAX Fehlversuche voll oder
     der Start hängt > 30 min), nichts gesendet (kein started_at/orbit_gesendet_at, nie UNKLAR) und am selben Dubai-Tag. → (ja, grund)."""
     p = p or {}
     bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -48627,7 +48630,8 @@ def fd_nachplan_urteil(p, jetzt, tz=None):
     if st.astimezone(tz).date() != jetzt.astimezone(tz).date():
         return False, "Start war an einem anderen Tag"
     versuche = int(_wd_num(sf.get("versuche")) or 0) - int(_wd_num(sf.get("uac_n")) or 0)
-    if versuche < 3 and (jetzt - st).total_seconds() < 1800:
+    # TX3 (Finn 24.11.2026, „Maximal 3 Fehlstarts und dann aufhören"): Deckel des PC-Tabs jetzt SF_MAX = 2 Neuplanungen (prophos.html) — gleich hier
+    if versuche < FD_SF_MAX and (jetzt - st).total_seconds() < 1800:
         return False, "der PC-Tab plant ihn selbst neu (Deckel nicht voll)"
     return True, ""
 

@@ -66841,7 +66841,9 @@
    *   Nie automatisch: Puls-Ergebnis UNKLAR (Doppel-Order-Gefahr) — dort bleibt es bei „erst im Terminal nachsehen".
    *   Der PC-Tab lädt Pläne sonst nur beim Login — alle 2 min gleicht er deshalb die heutigen geplanten Pläne der ID ab (eine kleine
    *   Abfrage), damit ein „↻ Neu starten" vom Mac/Handy am PC ankommt. ══ */
-  const SF_MAX = 3, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
+  // TX3 (Finn 24.11.2026: „Maximal 3 Fehlstarts und dann aufhören“): start_fehler.versuche zählt die NEUPLANUNGEN (Backend _ap_nachholen) —
+  // mit 3 liefen 1 + 3 = 4 Starts je Plan (puls_fehlstarts 23./24.11.: je Plan 4 Fehlstarts im 20-min-Takt). Jetzt 2 → höchstens 3 Starts.
+  const SF_MAX = 2, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
   // WARTEN IST KEIN FEHLER (19.10.2026, Puls bleibt zu Hause): ein Big Trade kann stundenlang knapp unter dem TP pendeln — diese Schritte
   // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
   const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar', 'auge_blind', 'auge_fehlt', 'tab_nicht_erreichbar'])   // auge_blind (29.10.2026): Nova wartet auf ein sehendes TopstepX-Auge
@@ -70812,9 +70814,9 @@
       : 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll; RA2: auch Server-Sperre)
     if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
-    if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
+    if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Start ${n + 2}/${SF_MAX + 1})` : ''   // „in 15 min wieder" steht schon im Text; TX3: zählt Starts (1 + SF_MAX Neuplanungen)
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
-    return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
+    return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Start ${n + 2}/${SF_MAX + 1}` : ''}).`   // TX3: Starts statt Neuplanungen
   }
   // BOT LIEST VON SELBST (13.10.2026, Finn: „der Bot soll eigenständig die Balance aktualisieren und dann den Handel starten"): das Backend
   // (app.py ap_bal_auto_tick, alle 10 min, seit 16.10.2026 rund um die Uhr) schickt für Konten, die eine Lesung brauchen, denselben Auftrag
@@ -71233,7 +71235,7 @@
       } else if(t.status === 'bestaetigt' && sf && D.tag === D.heute && sfVersuchtErneut(sf)){
         // Neuversuch folgt (21.10.2026): dezent grau, nicht im Zähler — erst wenn er hängt, wird die Zeile rot
         add(t.user_id, t.user, { art: 'retry', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
-          text: `versucht erneut — Versuch ${sfFehlversuche(sf) + 1} von ${SF_MAX} gescheitert: ${(sfOhneSpur(sf.msg) || sf.schritt || 'Check rot').slice(0, 140)}`,
+          text: `versucht erneut — Start ${sfFehlversuche(sf) + 1} von ${SF_MAX + 1} gescheitert: ${(sfOhneSpur(sf.msg) || sf.schritt || 'Check rot').slice(0, 140)}`,
           tun: 'Nichts tun — der Bot startet ihn von selbst neu, sobald die Ursache weg ist.' })
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
         const wer = sf.pc ? '' : t.user

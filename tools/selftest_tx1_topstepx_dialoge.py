@@ -809,6 +809,7 @@ else:
     GEAENDERT.update({"_AugenSitzung", "_tsx_google_login", "_tsx_tab_sicher", "modus_k3", "modus_tsxinventar_cdp"})   # TX2: Fenster per Titel-Marke,
     # Anmelde-Tabs aufräumen, Puls-Chrome-Sperre atomar (_handlauf_nehmen) — selftest_tx2_topstepx_fenster.py
     GEAENDERT.add("cdp_konto_familie")   # KL1 (24.11.2026): FTMO Futures als eigene Login-Familie 'ftmo' — selftest_kl1_ftmo_konto_weg.py
+    GEAENDERT.update({"_cdp_tab_neu", "_tsx_auge_reparieren", "_cdp_tab_eigenes_fenster", "modus_augen"})   # TX3 (24.11.2026): Tab-Deckel je PC vor jedem neuen Tab — selftest_tx3_tab_deckel.py
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},

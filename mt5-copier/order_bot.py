@@ -19724,6 +19724,45 @@ def _augen_json_schreiben(name, d):
 _AUGEN_REGEL_STAND = {"explizit": False, "tsx": None}
 
 
+# TAB-DECKEL JE PC (TX3, Finn 24.11.2026: „Aktuell werden manchmal 20, 30 Tabs auf einmal geöffnet bei irgendeinem Fehlstart. Maximal 3 Fehlstarts
+# und dann aufhören, aber nicht 500 Tabs öffnen.“). Befund (Lotse nur lesend, 24.11. ~19:45 Dubai): pc-pmqd8g 19 Tabs, davon 16 auf
+# login.topstep.com, pc-l5o8bv 7, pc-xc5c52 3, pc-7ftp5l vorher ~35 — umgeleitete TopstepX-Tabs, die tsx_targets nicht mehr als TopstepX erkannte, also
+# öffnete jeder Lauf einen neuen (TX2 schließt sie seit .2298). TradingView-Läufe öffnen je Fehlstart 1–2 Tabs („Tab frisch“) und schließen den alten.
+# Jetzt zusätzlich eine harte Grenze für JEDEN Weg, auf dem der Bot im Puls-Chrome einen Tab öffnet (_cdp_tab_neu, _tsx_tab_sicher, Auge-Reparatur,
+# TradingView-Tab für das Auge, eigenes Fenster beim sanften Neustart): höchstens PULS_TAB_DECKEL_N neue Tabs je PULS_TAB_DECKEL_S, gezählt in
+# puls_tabs_neu.json neben dem Bot (alle Läufe dieses PCs). Darüber öffnet der Bot keinen Tab — der Lauf scheitert ehrlich mit „Tab-Deckel“, nichts
+# gesendet; der Prophos-Tab (Panel-Wache) zählt nicht mit.
+PULS_TAB_DECKEL_N = 6
+PULS_TAB_DECKEL_S = 600.0
+_TAB_DECKEL_ZU = [False]   # Prüfer TX3: hat der Deckel in diesem Prozess einen Tab verweigert → kein harter Chrome-Neustart danach (s. _puls_mit_neustart)
+
+
+def puls_tab_deckel_urteil(zeiten, jetzt, n=PULS_TAB_DECKEL_N, fenster_s=PULS_TAB_DECKEL_S):
+    """REIN RECHNEND (testbar, TX3): (frei, zeiten_neu, anzahl) — zeiten = Öffnungszeitpunkte (epoch), nur die im Fenster zählen. frei → der neue
+    Zeitpunkt ist schon angehängt."""
+    z = sorted(float(t) for t in (zeiten or []) if isinstance(t, (int, float)) and 0 <= float(jetzt) - float(t) < float(fenster_s))
+    if len(z) >= int(n):
+        return False, z, len(z)
+    return True, z + [float(jetzt)], len(z)
+
+
+def _puls_tab_deckel(trail, wozu):
+    """TX3: darf der Bot jetzt einen neuen Tab im Puls-Chrome öffnen? Zählt mit (puls_tabs_neu.json). Lesefehler → erlaubt (wie bisher). -> bool"""
+    try:
+        d = _augen_json_lesen("puls_tabs_neu.json")
+        frei, z, n = puls_tab_deckel_urteil((d or {}).get("zeiten") if isinstance(d, dict) else None, time.time())
+        if not frei:
+            _TAB_DECKEL_ZU[0] = True
+            if trail is not None:
+                trail.append(f"Tab-Deckel: schon {n} neue Tabs in {int(PULS_TAB_DECKEL_S // 60)} min im Puls-Chrome — keinen weiteren geöffnet "
+                             f"({str(wozu)[:50]}), nichts gesendet")
+            return False
+        _augen_json_schreiben("puls_tabs_neu.json", {"zeiten": z[-50:]})
+    except Exception:
+        pass
+    return True
+
+
 def _augen_regel_holen(pc):
     """'cdp' | 'uia' von Railway (2 s), Ergebnis lokal merken. Netzfehler bzw. unlesbare Antwort: die letzte lokal gemerkte Regel
     bleibt stehen (augen_regel_weiche, ≤ 12 h) und die Datei unverändert — 29.09.2026 14:44 UTC (Railway-Deploy): ein 2-s-Timeout
@@ -20273,6 +20312,9 @@ def modus_augen(cmd):
             return
         ziel = augen_target_waehlen(_cdp_http("/json/list"))
         if not ziel:
+            if not _puls_tab_deckel(trail, "TradingView-Tab für das Auge"):   # TX3
+                res.update(ok=False, msg="Tab-Deckel: zu viele neue Tabs in 10 min — kein TradingView-Tab angelegt")
+                return
             _cdp_http("/json/new?" + AUGEN_TV_URL, methode="PUT")
             trail.append("Puls-Chrome: TradingView-Tab angelegt — Lesen beim nächsten Lauf")
             res.update(ok=True, msg="TV-Tab angelegt")
@@ -20819,6 +20861,8 @@ def _tsx_tab_sicher(trail, warten_s=20.0):
             trail.append(f"Puls-Chrome: {len(t)} TopstepX-Tabs ({[str(x.get('url'))[:40] for x in t][:4]}) — nehme den ersten (angemeldet vor Login-Seite)")
         # ein Tab ohne webSocketDebuggerUrl (anderer DevTools-Client hängt dran) wäre ein cdp_fehler — einen verbindbaren vorziehen
         return ([x for x in t if x.get("webSocketDebuggerUrl")] or t)[0]
+    if not _puls_tab_deckel(trail, "TopstepX-Tab"):              # TX3: höchstens PULS_TAB_DECKEL_N neue Tabs je 10 min
+        return None
     neu = _cdp_http("/json/new?" + TSX_URL, methode="PUT")
     trail.append("Puls-Chrome: TopstepX-Tab geöffnet (topstepx.com/trade)" if isinstance(neu, dict) and neu.get("id")
                  else "Puls-Chrome: TopstepX-Tab öffnen ohne Antwort (/json/new) — warte trotzdem auf die Tab-Liste")
@@ -24011,6 +24055,8 @@ def _tsx_auge_reparieren(s, trail, sitz, ext):
         pass
     sitz[0] = None
     # erst EINEN neuen TopstepX-Tab öffnen, dann alle anderen schließen (sonst schließt ein Puls-Chrome ohne weiteren Tab ganz)
+    if not _puls_tab_deckel(trail, "Auge-Reparatur TopstepX"):   # TX3
+        return False, None
     neu = _cdp_http("/json/new?" + TSX_URL, methode="PUT")
     neu_id = str(neu.get("id")) if isinstance(neu, dict) and neu.get("id") else None
     if not neu_id:
@@ -31123,6 +31169,8 @@ def cdp_tradovate_tabs(liste, ohne=()):
 def _cdp_tab_neu(url, trail):
     """Neuer Tab im Puls-Chrome (DevTools /json/new: ein Tab im bestehenden Fenster, nie ein neues Fenster). -> Target | None"""
     import urllib.parse
+    if not _puls_tab_deckel(trail, url):                         # TX3: höchstens PULS_TAB_DECKEL_N neue Tabs je 10 min
+        return None
     t = _cdp_http("/json/new?" + urllib.parse.quote(url, safe=":/"), methode="PUT", timeout=5.0)
     if isinstance(t, dict) and t.get("webSocketDebuggerUrl"):
         trail.append(f"[Login] neuer Tab: {url[:90]}")
@@ -32635,6 +32683,8 @@ def _cdp_tab_eigenes_fenster(url, timeout=5.0):
     v = _cdp_http("/json/version", timeout=2.0)
     if not (isinstance(v, dict) and v.get("webSocketDebuggerUrl")):
         return None
+    if not _puls_tab_deckel(None, url):                          # TX3: Tab-Deckel (der Aufrufer meldet „ohne Antwort“ — kein Neustart)
+        return None
     try:
         ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=timeout)
         try:
@@ -32772,6 +32822,8 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
     art, grund, rest = neustart_entscheid(r1, weg, jetzt() - t0, lesung_moeglich=lesung is not None)
     if verboten and art != "nein":                       # 02.11.2026: offener TV-Trade mit Hedge → kein Neustart, der erste Versuch bleibt die Antwort
         art, grund = "nein", str(verboten)
+    if art != "nein" and _TAB_DECKEL_ZU[0]:            # TX3 (Prüfer): der Tab-Deckel hat einen Tab verweigert — ein harter Neustart (Chrome mit URL) liefe am Deckel vorbei
+        art, grund = "nein", f"Tab-Deckel ({PULS_TAB_DECKEL_N} neue Tabs in {int(PULS_TAB_DECKEL_S // 60)} min) — kein Chrome-Neustart, nichts gesendet"
     if art == "nein":
         if isinstance(r1, dict) and r1 and not r1.get("ok"):
             r1["trail"] = str(r1.get("trail") or "") + f" | chrome_neustart: nein — {grund}"
