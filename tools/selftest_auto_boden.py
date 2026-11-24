@@ -10,7 +10,7 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel", "ap_kette_mll", "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de",
               "liq_peak", "_liq_peak_eod", "_cme_handelstag", "_ap_peaks", "ap_boden_sicher")   # EOD1 16.11.2026: _ap_peaks nimmt den EOD-Weg
-KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN")
+KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN", "AP_SL_MIN_PKT")
 
 
 def lade():
@@ -93,6 +93,17 @@ def main():
     # Nur Anzeige: der Planer kappt den SL bei Tradeify weiter nicht (kein Boden im Planer ohne Lock)
     w3, _ = rechnen(td, "challenge", 149000, u)
     check(w3 is not None and w3["sl"] == 3000 and "gekappt" not in w3["stufe"], f"Planer-SL bei Tradeify unberührt ({(w3 or {}).get('sl')})")
+    # SB2 (Master 24.11.2026): The5%ers 200k a1d268f9 — 4 $ über dem Boden, 60 Lot → SL 54 $ läge im Spread (Vorprüfung: ≈ 129 $ am Mindestabstand)
+    r60 = regel(boden="statisch", dd_pct=10, phasen={"phase1": {"menge": [60, 60], "tp": [500, 600], "sl": [3000, 3000]}})
+    ws, gs = rechnen(r60, "phase1", 90004, u, ppl=1.0)
+    check(ws is None and gs.startswith("am Boden → von Hand") and "54 $" in gs and "180 $" in gs,
+          f"SB2: 60 Lot, 4 $ über dem Boden → kein Plan, „am Boden → von Hand“ (Mindest-SL 3 Pkt × 60 × 1 $ = 180) ({gs})")
+    wf, gf = rechnen(regel(boden="statisch", dd_pct=10), "phase1", 90002, u, ppl=1.0)
+    check(wf is not None and wf["sl"] == 52, f"SB2: FN …0296 1 Lot, SL 52 ≥ Mindest-SL 3 $ → weiter geplant wie bisher ({gf})")
+    wn, _ = rechnen(r60, "phase1", 90004, u)
+    check(wn is not None and wn["sl"] == 54, "SB2: ohne Punktwert (ppl) keine Prüfung — wie bisher (Futures/unbekannt)")
+    wg, _ = rechnen(r60, "phase1", 92000, u, ppl=1.0)
+    check(wg is not None and wg["sl"] == 2050, f"SB2: 2.000 $ über dem Boden, SL 2.050 ≥ 180 → normal geplant ({(wg or {}).get('sl')})")
     # ap_boden_sicher (Prüfer 08.10.2026): kaputte Regel → Felder null, kein Abbruch; ohne Konto → null; gute Regel → wie ap_boden_konto
     leer3 = {"boden": None, "boden_min": None, "boden_art": None}
     check(ns["ap_boden_sicher"](None, {"id": "k-x", "account_type": "phase1"}, 100500, regel=regel(boden="statisch", dd_pct="kaputt")) == leer3,

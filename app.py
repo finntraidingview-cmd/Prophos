@@ -26095,6 +26095,7 @@ AP_REST_MIN_CFD = 1                  # CFD: erst unter 1 $ Rest Handarbeit (Ziel
 # nie als Rest-Konto ein paar $ über dem Boden. Greift nur, wo die Phase einen SL hat (heute CFD/Echo Phase 1/2; Futures-Challenges
 # ohne SL, die Topstep-Kette rechnet ihre Verlustgrenze selbst mit +200). Finn kann den Wert ändern.
 AP_SL_HINTER_BODEN = 50
+AP_SL_MIN_PKT = 3.0   # SB2 (24.11.2026): Mindest-SL in NAS100-Punkten (Spread ~1–1,5 + Mindestabstand Broker + Schlupf) × Lots × $/Pkt — darunter „am Boden → von Hand"
 # SL UNTER DER TAGESGRENZE (Finn über Master 26.10.2026, Anlass FundingPips 100k …6924 am 23.10.2026: SL 2.948 $ bei Daily Loss 3 % der
 # Tagesstart-Equity 96.463 = 2.894 $ → echter Verlust 2.990 $, Daily gerissen). Der Planer kappte den SL bisher nur am Boden, eine Tagesgrenze
 # kannte er nicht. Jetzt Kernwert je Firma bzw. Größe: daily_pct + daily_basis ('tagesstart' = % der Balance zum Planen, 'groesse' = % der
@@ -26882,6 +26883,14 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             # Finn: „bei 92.000 ist der SL eben nur 2.000" — seit 09.10.2026 + AP_SL_HINTER_BODEN dahinter (TP oder geblowt, kein Rest-Konto)
             sl = int(balance - boden) + AP_SL_HINTER_BODEN
             stufe += f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
+            # SB2 (Master 24.11.2026): The5%ers 200k a1d268f9 stand 4 $ über dem Boden → SL 54 $ bei 60 Lot = unter 1 Pkt, kleiner als der Spread; die
+            # Vorprüfung vor F9 hielt den Start an („SL-Abstand −1,14 Pkt … SL am Mindestabstand ≈ 129 $ statt 54 $"), sonst läge der SL auf der falschen
+            # Seite. Unter einem Mindest-SL (AP_SL_MIN_PKT Punkte × Lots × $/Pkt: Spread + Mindestabstand des Brokers + Schlupf) plant der Bot das Konto nicht,
+            # sondern meldet es zum Prüfen von Hand. Nur CFD mit Punktwert (ppl); Futures-Challenges haben keinen Planer-SL.
+            _slmin = round(float(globals().get("AP_SL_MIN_PKT", 3.0)) * float(menge) * float(ppl)) if ppl else None
+            if _slmin and sl < _slmin:
+                return None, (f"am Boden → von Hand: nur {f'{balance - boden:,.0f}'.replace(',', '.')} $ über dem Boden, der SL ({sl} $) läge bei "
+                              f"{f'{float(menge):g}'.replace('.', ',')} Lot im Spread (mindestens {f'{_slmin:,.0f}'.replace(',', '.')} $) — Konto prüfen, Trade von Hand oder archivieren")
     # TAGESGRENZE (26.10.2026, s. AP_TAGES_PUFFER): eigener Deckel neben dem Boden, ohne „+50 dahinter". Liegt er enger als der Boden-SL,
     # gewinnt er — dann endet der Trade nicht mehr am Boden, die Stufe verliert „SL hinter den Boden" (echoV2Final liest sonst „blow").
     # tages_grenze_usd reist am Plan mit (Vertrag Teil B: Echo V2 zieht den SL am echten Fill nach, wenn er sie reißen würde).
