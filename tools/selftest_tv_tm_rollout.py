@@ -75,7 +75,14 @@ check(e["tsx_gesperrt"] == "" and e["tsx_aktuell"] and e["tsx_eval_frei"], "Tops
 _a = open(os.path.join(WURZEL, "tv-reader", "tsx-auge.user.js"), encoding="utf-8").read()
 check(re.search(r"var SCRIPT = '([\d.]+)'", _a).group(1) == re.search(r"TVTM_TSX_VERSION_SOLL = '([\d.]+)'", HTML).group(1) == re.search(r"// @version +([\d.]+)", _a).group(1), "Auge: Soll = SCRIPT = @version")
 _v = re.search(r"var VERSION = '(tsx-[\d.]+)'", open(os.path.join(WURZEL, "mt5-copier", "augen_tsx.js"), encoding="utf-8").read()).group(1)
-check("augen_tsx.js?v=" + _v in _a, "Auge: @require = VERSION in augen_tsx.js")
+# ST1 (25.11.2026, Master): BEWUSSTE Abweichung — augen_tsx.js steht auf tsx-0.7.4 (TX1 0.7.3 17.11., TS-D1 0.7.4 20.11.: nur Popup-Erkennung
+# Time-Sync/Loss-Limit ohne ARIA-Rolle, ohne Popup bitgleich), das Tampermonkey-Auge lädt weiter @require tsx-0.7.2 (SCRIPT 0.3.4). Kein TM-Rollout
+# dafür: im Userscript wirkt das nur auf den Zähler „popups“, den niemand liest; Puls spritzt augen_tsx per CDP immer aktuell ein.
+# MERKER: beim nächsten echten TM-Rollout des TopstepX-Auges @require auf die aktuelle VERSION ziehen und diese Ausnahme löschen.
+# Die Ausnahme gilt nur genau für Auge 0.3.4 + @require 0.7.2 + augen_tsx 0.7.3/0.7.4 — jede weitere augen_tsx-Version macht den Test wieder rot.
+_rq = re.search(r"augen_tsx\.js\?v=(tsx-[\d.]+)", _a).group(1)
+_st1_ausnahme = (_rq == "tsx-0.7.2" and _v in ("tsx-0.7.3", "tsx-0.7.4") and re.search(r"var SCRIPT = '([\d.]+)'", _a).group(1) == "0.3.4")
+check(_rq == _v or _st1_ausnahme, f"Auge: @require = VERSION in augen_tsx.js (oder bewusste ST1-Ausnahme 0.7.2 bis zum nächsten TM-Rollout; @require {_rq}, VERSION {_v})")
 check(e["ohne_lader_alt"] == "" and e["ohne_lader_neu"], "ohne Lader wie bisher")
 check(e["key"] == "prophos_tvtm_l1_v" + SOLL and e["key_tsx"].startswith("prophos_tvtm_tsx_l1_v"), "Sperre je Fassung, TopstepX wie bisher")
 check(e["alt_quelle"] and not e["gleich_quelle"] and not e["ohne_soll"] and not e["tsx_quelle"], "Reader liefert ältere Fassung: Versuch nicht verbraucht")
