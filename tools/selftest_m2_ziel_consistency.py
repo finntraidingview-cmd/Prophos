@@ -15,7 +15,8 @@ FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param"
               "_ap_norm", "_ap_tz", "_ap_ts", "ap_consistency_etappe", "ap_konto_flex", "ap_regel_flex", "ap_regel_konto", "zw_ziel",
               "zw_cons_tage", "zw_cons_moeglich", "zw_cons_ziel", "ap_cons_regel", "zw_erreicht", "ap_konten_stand_zeile")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT",
-              "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN", "ZW_CONS_FIRMEN")
+              "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN", "ZW_CONS_FIRMEN",
+              "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_FUT_DECKEL_PLUS_USD")   # LC1: Futures-Zweig (Deckel +100)
 FEHLER = []
 
 
@@ -90,9 +91,15 @@ check(c4 and c4["quelle"] == "konto" and c4["ziel_cons"] == 150000 + 12667 and n
 # ── Lucid / Topstep: feste 50 % (kein tp_max nötig), Firmen-Feld consistency_pct überschreibt die Vorgabe (später Slider je Firma)
 LUCID = dict(TRADEIFY, namen=["Lucid Trading"], phasen={"challenge": {"menge": [2, 2], "tp": [3450, 3550], "sl": [1500, 1500]}})
 c5 = cons_ziel(LUCID, konto(firm="Lucid Trading"), 159200, T_EZ)
-check(c5 and c5["p"] == 50 and c5["ziel_cons"] == 159000 and c5["erfuellt"], f"Lucid 50 %: 3.800 ÷ 0,5 = 7.600 < 9.000 → erfüllt ({c5})")
+check(c5 and c5["p"] == 40 and c5["ziel_cons"] == 159500 and not c5["erfuellt"], f"LC1 Lucid 150k 40 %: 3.800 ÷ 0,4 = 9.500 > 9.000 → Ziel 159.500, nicht erfüllt ({c5})")
 c6 = cons_ziel(LUCID, konto(firm="Lucid Trading"), 159200, cons_tage([plan("2026-11-01", 5000), plan("2026-11-02", 4200)], "k1"))
-check(c6 and c6["ziel_cons"] == 160000 and not c6["erfuellt"], f"Lucid: größter Tag 5.000 → Ziel 160.000 ({c6})")
+check(c6 and c6["ziel_cons"] == 162500 and not c6["erfuellt"], f"Lucid 150k: größter Tag 5.000 → Ziel 162.500 ({c6})")
+# LC1 Fall Chris …0018 (Dashboard 24.11.: 42,88 %, Profit Target 9.738): Tage 3.894,50 · 3.468 · 1.719,50 → Balance 159.082
+c_ch = cons_ziel(LUCID, konto(firm="Lucid Trading"), 159082, cons_tage([plan("2026-11-18", 3894.5), plan("2026-11-20", 3468), plan("2026-11-23", 1719.5)], "k1"))
+check(c_ch and c_ch["p"] == 40 and c_ch["ziel_cons"] == 159737 and not c_ch["erfuellt"], f"LC1 Chris: Required 9.736,25 → Ziel 159.737, nicht erfüllt ({c_ch})")
+L50 = dict(LUCID, groessen=[50000], phasen={"challenge": {"menge": [1, 1], "tp": [1150, 1180], "sl": [700, 700]}})
+c_50 = cons_ziel(L50, konto(firm="Lucid Trading"), 53113, cons_tage([plan("2026-11-17", 1466.5), plan("2026-11-18", 1549.5)], "k1"))
+check(c_50 and c_50["p"] == 50 and c_50["ziel_cons"] == 53099 and c_50["erfuellt"] is True, f"LC1 Lucid 50k bleibt 50 % (belegt: bestanden bei 49,8 %) ({c_50})")
 c7 = cons_ziel(dict(LUCID, namen=["Topstep"]), konto(firm="Topstep"), 159200, cons_tage([plan("2026-11-01", 5000), plan("2026-11-02", 4200)], "k1"))
 check(c7 and c7["p"] == 50 and c7["ziel_cons"] == 160000, f"Topstep Combine 50 % ({c7})")
 check(cons_ziel(dict(TRADEIFY, consistency_pct=None), konto(), 159200, T_EZ) is None, "Firmen-Feld consistency_pct = null → keine Consistency (Tradeify Growth)")
@@ -127,6 +134,14 @@ w_mit, g_mit = rechnen(dict(r0, _ziel_min=None), "challenge", 155000, U)
 check(w_ohne == w_mit and g_ohne == g_mit and w_ohne and "Consistency" not in w_ohne["stufe"], "Planer ohne Consistency-Ziel: Rechnung 1:1 wie vorher")
 w_lo, _g = rechnen(dict(r0, _ziel_min=158000.0), "challenge", 155000, U)
 check(w_lo == w_ohne, "Consistency-Ziel unter dem Regel-Ziel ändert nichts")
+# LC1-Review: „Deckel +100 $“ (Futures, letzter Trade) nur, wenn der neue Tag selbst ≤ p bleibt — Lucid 150k bei 155.400 (Rest 3.600 + Puffer)
+rf = dict(rk(TRADEIFY, konto(), 155400), route="tvv2")
+w_p, _g = rechnen(rf, "challenge", 155400, U)
+w_c, _g = rechnen(dict(rf, _cons_p=40.0), "challenge", 155400, U)
+check(w_p and w_p["tp"] > 3600 and "Deckel +" in w_p["stufe"], f"ohne _cons_p: Deckel +100 wie bisher (TP {w_p and w_p['tp']})")
+check(w_c and w_c["tp"] <= 3600 and "Deckel +" not in w_c["stufe"], f"mit _cons_p 40: TP {w_c and w_c['tp']} ≤ 3.600 → neuer Tag ≤ 40 % ({w_c and w_c['stufe']})")
+w_c2, _g = rechnen(dict(rk(TRADEIFY, konto(), 155430), route="tvv2", _cons_p=40.0), "challenge", 155430, U)
+check(w_c2 and "Deckel +" in w_c2["stufe"] and w_c2["tp"] <= 0.4 * (5430 + w_c2["tp"]) + 0.01, f"mit _cons_p, Tag bleibt ≤ 40 % → Deckel +{w_c2 and w_c2['tp'] - 3600:.0f} erlaubt (TP {w_c2 and w_c2['tp']})")
 
 # ── Verdrahtung
 tk = SRC[SRC.index("def zw_tick("):SRC.index("# ZIEL-WACHE JETZT")]
@@ -156,14 +171,19 @@ check(x.get("_ziel_min") == 159500 and x["_cons"]["p"] == 40 and geladen == [["k
 check(cr(TRADEIFY, rkk, dict(konto(), ziel_erreicht_at="2026-11-04T10:00:00+00:00"), 159200, []) is rkk, "markiertes Konto: Regel unverändert (Tage-Mini bleibt Mini)")
 geladen.clear()
 check(cr(APEX, rk(APEX, konto(firm="Apex"), 159200), konto(firm="Apex"), 159200, []).get("_ziel_min") is None and geladen == [], "Apex ohne Konto-Wert: nichts gelesen, nichts geändert")
-check(cr(TRADEIFY, rk(TRADEIFY, konto(), 155000), konto(), 155000, []).get("_ziel_min") is None and geladen == [], "unter dem Regel-Ziel: nichts gelesen")
+check(cr(TRADEIFY, rk(TRADEIFY, konto(), 154000), konto(), 154000, []).get("_ziel_min") is None and geladen == [], "unter der Hälfte des Ziel-Gewinns: nichts gelesen")
+x_lt = cr(TRADEIFY, rk(TRADEIFY, konto(), 155000), konto(), 155000, [])
+check(x_lt.get("_ziel_min") == 159500 and geladen == [["k1"]], f"LC1: ab der Hälfte (155.000) gelesen → letzter Trade zielt schon auf 159.500 ({x_lt.get('_ziel_min')})")
+w_lt, _g = rechnen(dict(rk(TRADEIFY, konto(), 157362), _ziel_min=159737.0, _cons={"p": 40, "groesster_tag": 3894.5}), "challenge", 157362, U)
+check(w_lt and w_lt["rest"] == 2375 and w_lt["tp"] >= 2375 and w_lt["tp"] <= 3600 and "Rest bis Ziel" in w_lt["stufe"], f"LC1 Chris vor dem letzten Trade: TP {w_lt and w_lt['tp']} = Rest 2.375 + Puffer, ≤ 3.600 (neuer Tag ≤ 40 %)")
+geladen.clear()
 ns["_zw_cons_tage_laden"] = _laden_kaputt
 y = cr(TRADEIFY, rkk, konto(), 159200, EZ)
 check(y.get("_ziel_min") == 159500, "Lesefehler → Rückfall auf die geladenen Pläne (eig)")
 check(cr(TRADEIFY, rkk, konto(), 159200, []).get("_ziel_min") is None, "Lesefehler ohne eigene Pläne → keine Consistency (kein Absturz)")
 x2 = cr(TRADEIFY, dict(rkk, route="mt5"), konto(cons=50), 159200, EZ)
 check(x2.get("_ziel_min") is None and x2.get("route") == "mt5", "Konto-Wert 50 % erfüllt → Regel unverändert (Route bleibt)")
-check('ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": 50, "topstep": 50}' in SRC and '"apex"' not in SRC[SRC.index("ZW_CONS_FIRMEN = {"):SRC.index("ZW_CONS_FIRMEN = {") + 80],
-      "Vorgabe: Tradeify (TP-Deckel), Lucid 50, Topstep 50 — Apex nie")
+check('ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50}' in SRC and '"apex"' not in SRC[SRC.index("ZW_CONS_FIRMEN = {"):SRC.index("ZW_CONS_FIRMEN = {") + 100],
+      "Vorgabe: Tradeify (TP-Deckel), Lucid 150k 40 / 50k 50 (LC1), Topstep 50 — Apex nie")
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

@@ -26859,7 +26859,11 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
         # Der Punkte-Puffer (6 Pkt × Kontrakte × $/Pkt, 15.10.2026) ist seit 17.10.2026 raus — Puffer steht oben (AP_PUFFER_JE_KT_FUT)
     elif (not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN) and ober is not None \
-            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100):
+            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100) \
+            and not (regel.get("_cons_p") and min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100)))
+                     > float(regel["_cons_p"]) / 100.0 * (balance - groesse + min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100)))) + 0.005):
+        # LC1 (Master 24.11.2026): bei Consistency-Firmen (ap_cons_regel → _cons_p) nur, wenn der neue Tag selbst ≤ p × Gewinn am Ende bleibt —
+        # sonst hebt der Trade den Required profit (Lucid 150k: TP 3.640 bei Gewinn 5.400 → 40,3 % von 9.040 → Ziel 9.100) und braucht einen Extra-Tag
         # FUTURES: DECKEL +100 $ (Finn 21.10.2026 03:20 Dubai: „Bei Futures darf der letzte Trade den TP-Deckel um bis zu 100 $ überschreiten,
         # damit er am Ziel landet — mehr nicht"; Lucid …0001 20.10.2026: Rest 4.537 > 4.500 → Etappe 4.464 → 84 $ Rest von Hand). Rest + Puffer
         # (20 $/Kt, mindestens die Gebühren) über dem Deckel, Rest selbst höchstens Deckel + 100 → EIN letzter Trade, TP auf Deckel + 100
@@ -46999,7 +47003,12 @@ def zw_ziel(regel, phase, balance):
 #   Apex Eval NIE (firm_rules.json: „Eval (alle 4.0 Accounts): KEINE Consistency Rule" — tp_max ist dort nur Tagesdeckel); FundedNext Futures nicht
 #   (firm_rules.json nennt 40 % nur allgemein für die Futures-Programme, nicht für die Challenge-Phase).
 # Tage = Berlin-Tag des Trade-Endes, Σ master_pl der abgeschlossenen Trades des Kontos (wie die Konten-Liste); Hand-Trades ohne Plan fehlen.
-ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": 50, "topstep": 50}
+# LC1 (Master 24.11.2026, Chris Lucid Flex 150k Eval LFE15098201480018): Lucid-Dashboard (Finn-Foto 24.11.) „Consistency 40 %: 42,88 %, Profit Target
+# 9.000 → 9.738, $656 left, ACTIVE“ — Prophos setzte ziel_erreicht_at am 23.11. bei 159.082, weil hier Lucid 50 stand (3.894,50 ÷ 0,5 = 7.789 < 9.000).
+# Lucid 150k = 40 % (Dashboard, Finn 05.11.: „wir haben 40 % Consistency Rule, keine 50 %“). Lucid 50k bleibt 50 %: belegt durch drei 50k-Evals,
+# die Lucid mit größtem Tag 49,4–49,8 % des Profits bestanden hat (Funded-Nachfolger …0004→LFF…0001, …0011, …0005). Wert je Größe als Dict
+# {Größe: p}, "" = jede andere Größe (die strengere 40).
+ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50}
 
 
 def zw_cons_tage(plaene, konto_id, tz=None):
@@ -47046,6 +47055,9 @@ def zw_cons_ziel(regel, konto, balance, tage_pl):
     else:
         n = str(_ap_norm(a.get("firm")))
         vg = next((v for k, v in ZW_CONS_FIRMEN.items() if n.startswith(k)), None)
+        if isinstance(vg, dict):          # LC1: Vorgabe je Kontogröße (Lucid 150k 40 %, 50k 50 %), sonst "" (die strengere)
+            _gk = str(int(float(z["groesse"]))) if _wd_num(z.get("groesse")) else ""
+            vg = vg.get(_gk, vg.get(""))
         p, quelle = (_wd_num(z.get("cons_firma")) if vg == "tp_max" else _wd_num(vg)), "firma"
     gt = max([float(v) for v in (tage_pl or {}).values() if _wd_num(v) is not None] or [0.0])
     if not p or p <= 0 or p > 100 or gt <= 0 or not z.get("ziel") or not z.get("groesse"):
@@ -47067,7 +47079,14 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig):
     if a.get("account_type") != "challenge" or a.get("ziel_erreicht_at") or not zw_cons_moeglich(regel, a) or not balance:
         return regel_k
     z0 = zw_ziel(regel_k, "challenge", float(balance))
-    if not z0 or float(balance) < z0[0]:
+    # LC1 (Master 24.11.2026, Chris Lucid 150k …0018): der LETZTE Trade muss schon bis zum Consistency-Ziel reichen (TP = Rest bis größter Tag ÷ p
+    # + Puffer), nicht erst bis zum Regel-Ziel — sonst endet das Konto 600 $ unter dem Required profit und braucht einen Extra-Tag. Deshalb ab der
+    # Hälfte des Ziel-Gewinns (ab da kann der nächste Trade der letzte sein; der TP bleibt unter tp_max, der neue Tag also ≤ p), vorher wie bisher
+    # nichts lesen (Fremd-Review M2: kein neuer Lese-/Fehlerweg für Konten weit unter dem Ziel)
+    if not z0:
+        return regel_k
+    _g0 = float(z0[1])                                   # zw_ziel → (Ziel, Größe)
+    if float(balance) < (_g0 + (float(z0[0]) - _g0) * 0.5 if float(z0[0]) > _g0 else float(z0[0])):
         return regel_k
     aid = str(a.get("id"))
     try:
@@ -47075,7 +47094,14 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig):
     except Exception:
         ct = zw_cons_tage(eig, aid)
     cz = zw_cons_ziel(regel, a, float(balance), ct)
-    return dict(regel_k, _ziel_min=cz["ziel_cons"], _cons=cz) if cz and not cz["erfuellt"] else regel_k
+    if not cz:
+        return regel_k
+    # LC1-Review: _cons_p (p der Firma) reist immer mit — ap_konto_rechnen hält damit den neuen Tag selbst ≤ p (Deckel-+100-Weg); _ziel_min nur bei
+    # echter Anhebung (ziel_cons ist auf 2 Stellen gerundet, das Regel-Ziel nicht — sonst Hinweis „Consistency …“ ohne Grund)
+    out = dict(regel_k, _cons_p=cz["p"])
+    if not cz["erfuellt"] and float(cz["ziel_cons"]) > float(cz["ziel"]) + 0.5:
+        out.update(_ziel_min=cz["ziel_cons"], _cons=cz)
+    return out
 
 
 def zw_erreicht(ziel, balance, phase):
