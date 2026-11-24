@@ -90,5 +90,17 @@ commit;
 --   from auto_plan_regeln r, jsonb_array_elements(r.regeln->'firmen') f where r.id = 1 and f->'namen' ? 'fundednextfutures';
 --                                                                                       -- [1, 2], {"1": [15, 25], "2": [15, 25]}, [1, 1] (50k unverändert)
 
--- Rückbau (nur falls nötig; Funktionen danach wieder mit dem LF1-Stand aus sql/2026-11-06_lucid_final_hedge.sql anlegen):
--- update public.auto_plan_regeln r set regeln = s.regeln, updated_at = now() from fnf1_auto_plan_regeln_20261125 s where r.id = s.id;
+-- Rückbau (nur falls nötig) — nur die FNF1-Felder aus der Sicherung, spätere Einstellungen bleiben (Review); Funktionen danach wieder mit dem LF1-Stand
+-- aus sql/2026-11-06_lucid_final_hedge.sql anlegen (ohne 'fundednextfutures' im Feld greifen sie für FNF ohnehin nicht mehr):
+-- update public.auto_plan_regeln r
+--    set regeln = jsonb_set(jsonb_set(jsonb_set(jsonb_set(jsonb_set(r.regeln,
+--                   '{tradeify_final_hedge,firmen}', coalesce(r.regeln->'tradeify_final_hedge'->'firmen', '[]'::jsonb) - 'fundednextfutures'),
+--                   array['firmen', (x.i - 1)::text, 'planen'], coalesce(s.regeln->'firmen'->(x.i - 1)::int->'planen', 'false'::jsonb)),
+--                   array['firmen', (x.i - 1)::text, 'kauf_eur'], s.regeln->'firmen'->(x.i - 1)::int->'kauf_eur'),
+--                   array['firmen', (x.i - 1)::text, 'phasen', 'challenge', 'menge'], s.regeln->'firmen'->(x.i - 1)::int->'phasen'->'challenge'->'menge'),
+--                   array['firmen', (x.i - 1)::text, 'phasen', 'challenge', 'puffer_je_menge'], s.regeln->'firmen'->(x.i - 1)::int->'phasen'->'challenge'->'puffer_je_menge'),
+--        updated_at = now()
+--   from fnf1_auto_plan_regeln_20261125 s,
+--        (select f.i from public.auto_plan_regeln r2, jsonb_array_elements(r2.regeln->'firmen') with ordinality f(v, i)
+--          where r2.id = 1 and f.v->'namen' ? 'fundednextfutures') x
+--  where r.id = 1 and s.id = 1 and s.regeln->'firmen'->(x.i - 1)::int->'namen' ? 'fundednextfutures';

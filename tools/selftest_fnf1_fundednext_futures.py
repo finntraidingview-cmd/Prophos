@@ -57,6 +57,7 @@ check(app.tfh_name({"master_firm": "FundedNext Futures"}) == "FundedNext Futures
 mus = {k: app.TFH_FIRMA_ILIKE.get(k, f"*{k}*") for k in F}
 ilike = lambda wert, m: fnmatch.fnmatchcase(wert.lower(), m.lower())   # PostgREST ilike mit * = beliebig
 check(ilike("FundedNext Futures", mus["fundednextfutures"]) and ilike("Funded Next Futures", mus["fundednextfutures"])
+      and ilike("FoundedNext Futures", mus["fundednextfutures"]) and app.tfh_firma("FoundedNext Futures", F) == "fundednextfutures"
       and not ilike("FundedNext", mus["fundednextfutures"]) and mus["tradeify"] == "*tradeify*" and mus["lucid"] == "*lucid*",
       f"Suchmuster master_firm: FNF trifft (mit Leerzeichen), FundedNext CFD nicht, Tradeify/Lucid wie bisher ({mus['fundednextfutures']})")
 SRC = open(os.path.join(WURZEL, "app" + ".py"), encoding="utf-8").read()

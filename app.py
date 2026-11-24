@@ -34489,7 +34489,7 @@ TFH_FIRMA_NAME = {"tradeify": "Tradeify", "lucid": "Lucid", "fundednextfutures":
 # FNF1 (Finn 25.11.2026: FundedNext Futures 150k Challenge im Challenge-Planer, „letzter Trade mit Hedge wie immer"): dritte Firma in diesem Weg — genau wie
 # Lucid (nur HT, nie Orbit Prio 2, DB-Riegel nur mit Marke hedge_art 'tradeify_final', sql/2026-11-25_fnf1_fundednext_futures_150k.sql). Suchmuster
 # für trade_plans.master_firm je Schlüssel (PostgREST ilike, * = beliebig): „FundedNext Futures" hat ein Leerzeichen, FundedNext CFD fällt durch „futur".
-TFH_FIRMA_ILIKE = {"tradeify": "*tradeify*", "lucid": "*lucid*", "fundednextfutures": "*funded*next*futur*"}
+TFH_FIRMA_ILIKE = {"tradeify": "*tradeify*", "lucid": "*lucid*", "fundednextfutures": "*f*nded*next*futur*"}   # auch „FoundedNext“ wie tfh_firma (Review)
 TFH_SLAVE_PPL = 0.85          # € je Punkt und Lot Fusion — derselbe feste Wert wie hedgeMultAusRisiko im PC-Tab
 _tfh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
 
