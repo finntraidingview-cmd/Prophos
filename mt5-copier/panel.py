@@ -6587,6 +6587,13 @@ def start_terminal(fname, creds=None, ohne_update=False):
         return False, "master_terminal_path muss auf eine terminal64.exe zeigen"
     if not os.path.exists(path):
         return False, f"nicht gefunden: {path}"
+    if creds:
+        # EM2 (25.11.2026, Emin · Blue Guardian 100k …1836: DB-Zugangsdaten reines ASCII, trotzdem „Sonderzeichen/Umlaute“): Login und
+        # Server können vom PC kommen (mt5ServerBewiesen nimmt den bewiesenen Servernamen der Instanz, wenn er bis auf \s gleich ist —
+        # JS-\s umfasst NBSP & Co.). Login/Server darum normalisieren (NFKC: NBSP → Leerzeichen, Vollbreit-Ziffern → Ziffern; Null-Breiten-
+        # Zeichen weg). Das PASSWORT bleibt unangetastet. Reine ASCII-Werte bleiben bitgleich.
+        # EM2b (Prüfer S2): VOR dem Abgleich mit dem erwarteten Konto — ein Login mit BOM bekam sonst „gehört zu Konto …“.
+        creds = dict(creds, login=mi1_feld_norm(creds.get("login")), server=mi1_feld_norm(creds.get("server")))
     expected = int(cfg.get("master_expected_login") or 0)
     if creds and expected and str(creds.get("login")) != str(expected):
         # Zugangsdaten fuer ein ANDERES Konto erzwingen waere garantiert falsch —
@@ -6598,12 +6605,6 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # unberechenbar) — dann lieber der bisherige nackte Start.
         creds = None
     api_creds = None
-    if creds:
-        # EM2 (25.11.2026, Emin · Blue Guardian 100k …1836: DB-Zugangsdaten reines ASCII, trotzdem „Sonderzeichen/Umlaute“): Login und
-        # Server können vom PC kommen (mt5ServerBewiesen nimmt den bewiesenen Servernamen der Instanz, wenn er bis auf \s gleich ist —
-        # JS-\s umfasst NBSP & Co.). Login/Server darum normalisieren (NFKC: NBSP → Leerzeichen, Vollbreit-Ziffern → Ziffern; Null-Breiten-
-        # Zeichen weg). Das PASSWORT bleibt unangetastet. Reine ASCII-Werte bleiben bitgleich.
-        creds = dict(creds, login=mi1_feld_norm(creds.get("login")), server=mi1_feld_norm(creds.get("server")))
     if creds and not all(str(creds.get(k) or "").isascii() for k in ("login", "password", "server")):
         # VOR jedem Kill pruefen (Review-Fund 15.08.2026): die Start-ini schreiben wir
         # nur als ASCII (UTF-16 ohne Live-Beleg, s. MI1), ein UnicodeEncodeError nach

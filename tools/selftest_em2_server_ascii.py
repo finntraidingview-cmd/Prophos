@@ -73,6 +73,10 @@ st = PANEL[PANEL.index("\ndef start_terminal("):PANEL.index("\nPAGE = r")]
 check("creds = dict(creds, login=mi1_feld_norm(creds.get(\"login\")), server=mi1_feld_norm(creds.get(\"server\")))" in st
       and "password=mi1_feld_norm" not in st, "start_terminal normalisiert Login + Server, nie das Passwort")
 check(st.index("mi1_feld_norm(creds.get(\"login\"))") < st.index("provision.terminal_pids(install_dir)"), "Normalisieren VOR jedem Kill")
+check(st.index("mi1_feld_norm(creds.get(\"login\"))") < st.index("str(creds.get(\"login\")) != str(expected)"),
+      "EM2b: Normalisieren VOR dem Abgleich mit dem erwarteten Konto")
+check(st.index("mi1_feld_norm(creds.get(\"login\"))") < st.index("if creds and not (creds.get(\"server\") or cfg.get(\"master_server\")):"),
+      "EM2b: Server-Pflicht prüft den gesäuberten Server")
 
 print(f"\n{'ALLES GRÜN' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
 sys.exit(1 if FEHLER else 0)

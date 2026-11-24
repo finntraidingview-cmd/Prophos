@@ -342,6 +342,20 @@ check(PW not in geschrieben.get("prophos-login.ini", "") and "Password" not in g
       "C18 Unicode: Start-ini ohne Passwort")
 del ns["open"]
 
+# EM2b: Login mit BOM / Vollbreit-Ziffern + Server mit Null-Breite → gesäubert VOR dem Konto-Abgleich → normaler ASCII-Zwangs-Login
+Faden.gestartet.clear(); POPEN.clear()
+ZUSTAND["pids"] = []
+geschrieben.clear()
+ns["open"] = merk_open
+(ok, msg), out = ausgabe(ST, "config-x.json", {"login": "﻿６３１９７７", "password": "Abc123xyz", "server": "BlueGuardian-Server​"})
+del ns["open"]
+check(ok is True and "gehoeren zu Konto" not in msg and "Login wird erzwungen" in msg, f"EM2b Login mit BOM/Vollbreit → kein „gehört zu Konto“ ({msg[:60]})")
+ini = geschrieben.get("prophos-login.ini", "")
+check("Login=631977\n" in ini and "Server=BlueGuardian-Server\n" in ini and "Password=Abc123xyz" in ini, "EM2b ini mit gesäubertem Login/Server, Passwort unverändert")
+Faden.gestartet.clear()
+(ok, msg), out = ausgabe(ST, "config-x.json", {"login": "﻿631999", "password": "Abc123xyz", "server": "BlueGuardian-Server"})
+check(ok is False and "gehoeren zu Konto 631999" in msg, "EM2b echtes Fremdkonto (nach Säubern) → weiter laut gescheitert")
+
 # ohne Paket bzw. ohne Konto-Nummer: alte Ansage, nichts beendet, nichts gestartet
 del sys.modules["MetaTrader5"]
 sys.meta_path[:] = []
