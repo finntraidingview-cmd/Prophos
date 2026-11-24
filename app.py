@@ -47408,7 +47408,9 @@ def fcp_konto_ziel_boden(regel, groesse, zyklus, name=None, on_demand=False):
     ist On-Demand das Dominantere, was das Ziel vorgibt, weil das die Regel ist, wie wir einen Payout anfragen können"): wie der Planer
     fcp_on_demand_anwenden — On-Demand-Ziel je 100k statt Refund-Ziel, auch im 1. Zyklus. Firma ohne On-Demand-Regel → normale Regel."""
     jg = fcp_je_groesse(regel, groesse)
-    if not jg or any(w and w in str(name or "").lower() for w in ((regel or {}).get("ohne_namen") or [])):
+    # EM1: wie fcp_planen — greift die Flex-Variante der Firma (fcp_regel_konto → flex_konto), sperrt „flex“ im Namen nicht (sonst Planer ≠ Radar)
+    if not jg or any(w and w in str(name or "").lower() and not (w == "flex" and (regel or {}).get("flex_konto"))
+                     for w in ((regel or {}).get("ohne_namen") or [])):
         return None
     if on_demand:
         _oda = fcp_on_demand_anwenden(regel, jg, groesse)
@@ -54722,7 +54724,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         except Exception as e:
             print(f"[funded-cfd] ⚠️ Kontostand {aid[:8]}: {type(e).__name__}: {e}", flush=True)
         aus = lambda grund, **x: erg["ausgelassen"].append(dict(zeile, aktion="aus", grund=grund, **x))   # noqa: E731
-        _ohne = next((w for w in (regel.get("ohne_namen") or []) if w and w in str(a.get("name") or "").lower()), None)
+        # EM1 (Master 24.11.2026, Emin · FundingPips 100k …8250 „Striking · Flex“): hat die Firma eine Flex-Variante und greift sie an diesem Konto
+        # (fcp_regel_konto → flex_konto, Max DD ≥ ab_dd_pct), plant der Planer das Konto mit diesen Werten — „flex“ sperrt dann nicht mehr. Ohne
+        # Variante (heute: FundingPips hat keine Funded-Flex-Werte) bleibt „flex“ ein Sperrwort wie bisher.
+        _ohne = next((w for w in (regel.get("ohne_namen") or []) if w and w in str(a.get("name") or "").lower()
+                      and not (w == "flex" and regel.get("flex_konto"))), None)
         if _ohne:
             # Grund je Wort (Fremd-Review E1b: ohne_namen ist jetzt in den Einstellungen änderbar) — „flex" behält den bisherigen Text
             aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht" if _ohne == "flex" else f"Name enthält „{_ohne}“ — nicht planen (Einstellung der Firma)"); continue

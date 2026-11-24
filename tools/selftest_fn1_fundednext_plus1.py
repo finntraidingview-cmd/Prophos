@@ -61,7 +61,7 @@ check(e.get("gerechnet") == ["2026-11-23", "2026-12-05", "2026-11-15", "2026-12-
 check(HTML.count("admReceiveTage(") == 3, "Erhalten-Fenster nutzt admReceiveTage an allen drei Vorbelegungen")
 check("like '%fundednext%' then 22 else 14" in SQL and "payout_ready_alt + 1" in SQL and "fn1_payout_backup_20261125 b where b.id = a.id" in SQL,
       "SQL: Trigger 22, Bestand +1 gesichert und nie doppelt")
-check(SQL.count("a.created_at < timestamptz '2026-11-25 23:59:59+00'") == 2 and SQL.index("-- ── Teil B2") < SQL.index("-- ── Teil A: Trigger")
+check(SQL.count("a.created_at < timestamptz '2026-11-24 19:00:00+00'") == 2 and SQL.index("-- ── Teil B2") < SQL.index("-- ── Teil A: Trigger")
       and "a.payout_ready_at = b.payout_ready_alt + 1;" in SQL,
       "SQL (Prüfung): Stichtag in Vorschau + Update, erst Bestand dann Trigger, Rückbau nur wo seither nichts Neues steht")
 print()
