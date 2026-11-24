@@ -64,8 +64,18 @@ nach2 = VOR + [tr("2026-11-20T10:00:00+00:00", 800.0, 105715.95)]
 check(P(A, 100000, None, nach2)["phase"] == "offen", "Trade danach, End-Balance 105.716 (noch nicht abgebucht + Trade) → offen")
 F = app.fcp_payout_lesen_faellig
 check(not F(A, o, A + timedelta(minutes=30)), "30 min nach der Anfrage → noch nicht lesen (nicht instant)")
-check(F(A, o, A + timedelta(hours=2)) and F(A, P(A, 100000, le("2026-11-19T00:00:00+00:00", 104915.95), VOR), A + timedelta(hours=5)),
-      "1–12 h → lesen, auch nach einer Lesung ohne Abzug")
+check(F(A, o, A + timedelta(hours=2)), "ohne Konto (Versatz 1 h): 2 h nach der Anfrage, nie beobachtet → lesen")
+check(not F(A, P(A, 100000, le("2026-11-19T00:00:00+00:00", 104915.95), VOR), A + timedelta(hours=5)),
+      "PW4: gelesen, noch ohne Abbuchung → erst 12 h nach dieser Lesung wieder (nicht in jedem Takt)")
+V = app.fcp_payout_lese_versatz
+vs = [V(f"konto-{i}", A) for i in range(400)]
+check(all(timedelta(hours=1) <= v <= timedelta(hours=12) for v in vs) and V("konto-1", A) == V("konto-1", A)
+      and min(vs) < timedelta(hours=2) and max(vs) > timedelta(hours=11) and len({v for v in vs}) > 250,
+      f"PW4: Versatz je Konto + Anfrage fest, 1–12 h gestreut ({min(vs)} … {max(vs)})")
+check(V("konto-1", A) != V("konto-1", A + timedelta(minutes=1)) or V("konto-1", A) != V("konto-2", A), "neue Anfrage → neuer Wurf")
+vk = V("k-marc", A)
+check(not F(A, o, A + vk - timedelta(minutes=1), "k-marc") and F(A, o, A + vk + timedelta(minutes=1), "k-marc"),
+      f"PW4: mit Konto erst ab dem gestreuten Zeitpunkt (Marc: {vk} nach der Anfrage)")
 check(not F(A, ab, A + timedelta(hours=5)), "abgebucht → nicht mehr lesen")
 check(F(A, o, A + timedelta(days=5)), "nach 12 h, nie beobachtet → lesen (alte Fälle Marc/Mike)")
 ob = P(A, 100000, le("2026-11-23T02:00:00+00:00", 104915.95), VOR)
@@ -180,12 +190,11 @@ for z in erg.get("ausgelassen") or []:
     print(f"     AUS  {z['konto']}: {z.get('grund')}")
 for z in erg.get("geplant") or []:
     print(f"     PLAN {z['konto']}: Gewinn {z.get('gewinn')} · {z.get('bal_quelle')}")
-pm = gepl.get(MARC["id"], {})
-check(MARC["id"] in zur and pm.get("gewinn") == 0.0 and (pm.get("payout_offen") or {}).get("abzug") == 4915.95,
-      f"Marc: Waiting zurück, weiter geplant mit 104.915,95 − 4.915,95 (Gewinn des neuen Zyklus 0) ({pm.get('bal_quelle')})")
-p7 = gepl.get(M7057["id"], {})
-check(M7057["id"] in zur and p7.get("gewinn") == 0.0 and (p7.get("payout_offen") or {}).get("abzug") == 1445.7,
-      "Mike …7057: Anfrage nach Waiting → zurück, Übergangsrechnung bis zur Abbuchung")
+check(MARC["id"] in zur and MARC["id"] not in gepl and aus.get(MARC["id"], {}).get("grund") == app.FCP_GRUND_PAYOUT_LESEN and aus[MARC["id"]].get("lesen_ab"),
+      f"PW4 Marc: Waiting zurück (Funded CFD), aber NICHT geplant bis zur Lesung — kein „Balance − Gewinn“ ({aus.get(MARC['id'], {}).get('grund')})")
+check(M7057["id"] in zur and M7057["id"] not in gepl and aus.get(M7057["id"], {}).get("grund") == app.FCP_GRUND_PAYOUT_LESEN,
+      "PW4 Mike …7057: Anfrage nach Waiting → zurück, wartet auf die Lesung")
+check(not [z for z in (erg.get("geplant") or []) if z.get("payout_offen")], "PW4: kein Plan mit abgezogener Balance mehr")
 pg = gepl.get(GELESEN["id"], {})
 check(GELESEN["id"] in zur and pg.get("gewinn") == 0.0 and pg.get("bal_quelle") == "Lesung nach Payout" and not pg.get("payout_offen"),
       "Abbuchung gelesen (100.000 statt 101.900) → Waiting zurück, normal geplant mit der Lesung")
@@ -210,8 +219,19 @@ check(len(pa) == 2 and keys == {f"fcp_payout_offen|{MARC['id']}|2026-11-18T22:37
       f"scharf: genau Marc + Mike …7057 (offen, Anfrage > 12 h her), nicht das abgebuchte Konto ({len(pa)})")
 check(all(x[0][0] == 2 and "Payout abgelehnt/ausstehend?" in x[0][2] for x in pa), "Prio 2 (🟠), Titel „Payout abgelehnt/ausstehend?“")
 t_marc = next((x for x in pa if MARC["id"] in x[1].get("schluessel", "")), ((), {}))
-check("HT-1 · FundedNext 100k …0001" in t_marc[0][2] and "HT-1 · FundedNext 100k …0001" in t_marc[0][3] and "Balance − 4.91" in t_marc[0][3],
-      f"Konto als ID · Firma Größe …4, Text nennt den Abzug ({t_marc[0][3][:140] if t_marc[0] else ''})")
+check("HT-1 · FundedNext 100k …0001" in t_marc[0][2] and "HT-1 · FundedNext 100k …0001" in t_marc[0][3] and "seit 24 h keine erfolgreiche Lesung" in t_marc[0][3]
+      and "nicht geplant" in t_marc[0][3] and "−" not in t_marc[0][3],
+      f"Konto als ID · Firma Größe …4, Text ohne Abzug (PW4) ({t_marc[0][3][:160] if t_marc[0] else ''})")
+AF = app.fcp_payout_alarm_faellig
+A2 = T("2026-11-20T10:00:00+00:00")
+o_nie = {"phase": "offen", "beobachtet": False, "letzte": None}
+o_frueh = {"phase": "offen", "beobachtet": True, "letzte": A2 + timedelta(hours=2)}
+o_spaet = {"phase": "offen", "beobachtet": True, "letzte": A2 + timedelta(hours=14)}
+check(not AF(A2, o_frueh, A2 + timedelta(hours=13)) and AF(A2, o_spaet, A2 + timedelta(hours=14, minutes=5)),
+      "Review PW4: Lesung 2 h nach der Anfrage ohne Abbuchung → bei 12 h noch kein 🟠; erst wenn eine Lesung ≥ 12 h danach nichts zeigt")
+check(not AF(A2, o_nie, A2 + timedelta(hours=12, minutes=5)) and AF(A2, o_nie, A2 + timedelta(hours=24)),
+      "nie gelesen (Versatz bis 12 h) → 🟠 erst nach 24 h ohne Lesung")
+check(not AF(A2, {"phase": "abgebucht"}, A2 + timedelta(days=3)) and not AF(None, o_nie, A2 + timedelta(days=3)), "abgebucht / ohne Anfrage → nie")
 ALARME.clear()
 IM_LOG.update(keys)
 app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)

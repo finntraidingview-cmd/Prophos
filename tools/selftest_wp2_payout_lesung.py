@@ -168,11 +168,11 @@ for z in erg.get("geplant") or []:
 
 # PW1-Zielbild (Finn 24.11.2026): nach der Anfrage sofort weiter planen — bis die Abbuchung gelesen ist, rechnet der Planer mit Balance − angefragtem
 # Gewinn (Vor-Balance beim ersten Lauf gemerkt), nie „Ziel erreicht → Waiting“ auf der alten Balance (der WP2-Fehler bleibt damit ausgeschlossen)
-for k, txt in ((KONTO_A, "A: ausgezahlt, nie gelesen"), (KONTO_B, "B: Lesung nach der Anfrage ohne Abzug"), (KONTO_C, "C: Lesung ohne Abzug"),
-               (FRISCH, "Frisch: Anfrage vor 10 h")):
-    z = gepl.get(k["id"], {})
-    check(k["id"] not in ziel and z.get("gewinn") == 0.0 and (z.get("payout_offen") or {}).get("abzug", 0) > 0,
-          f"{txt} → weiter geplant, Gewinn des neuen Zyklus 0 (angefragter Gewinn {(z.get('payout_offen') or {}).get('abzug')} $ gilt als abgezogen), kein Waiting")
+# PW4 (Finn 24.11.2026, korrigiert PW1): KEIN Planen mit „Balance − Gewinn“ — bis die Lesung die Abbuchung zeigt, wird das Konto nicht geplant (und nie Waiting)
+for k, txt, grund in ((KONTO_A, "A: ausgezahlt, nie gelesen", app.FCP_GRUND_PAYOUT_LESEN), (KONTO_B, "B: Lesung nach der Anfrage ohne Abzug", app.FCP_GRUND_PAYOUT_KEIN_ABZUG),
+                      (KONTO_C, "C: Lesung ohne Abzug", app.FCP_GRUND_PAYOUT_KEIN_ABZUG), (FRISCH, "Frisch: Anfrage vor 10 h", app.FCP_GRUND_PAYOUT_KEIN_ABZUG)):
+    check(k["id"] not in ziel and k["id"] not in gepl and aus.get(k["id"], {}).get("grund") == grund,
+          f"{txt} → nicht geplant, kein Waiting: „{aus.get(k['id'], {}).get('grund')}“")
 check(NORMAL["id"] in gepl and NORMAL["id"] not in ziel and not gepl[NORMAL["id"]].get("payout_offen"),
       "Normalfall: Lesung nach dem Payout zeigt Abzug (100.000) → normal geplant, kein Waiting")
 check(GELADEN, "pending_payouts wurde gelesen")

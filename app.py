@@ -46504,7 +46504,7 @@ def ap_bal_auto_payout(konten, gelesen, anfrage, plaene, jetzt, schon=(), archiv
         if not kid or A is None or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False or not str(a.get("external_id") or "").strip():
             continue
         ph = fcp_payout_phase(A, _wd_konto_groesse(a), (gelesen or {}).get(kid), (plaene or {}).get(kid) or [])
-        if fcp_payout_lesen_faellig(A, ph, jetzt):
+        if fcp_payout_lesen_faellig(A, ph, jetzt, kid):   # PW4: gestreut je Konto + Anfrage
             out[kid] = "Funded CFD: Payout angefragt — Balance nachlesen (1–12 h nach der Anfrage, bis der Profit abgebucht ist)"
     return out
 
@@ -53633,10 +53633,29 @@ def _fcp_lesungen_laden(ids, tage=30):
 #     zählen so mit; nach einem Trade zeigt seine End-Balance, ob abgebucht ist — nie ein doppelter Abzug).
 #   • Der Balance-Takt (F) liest 1–12 h nach der Anfrage, bis die Abbuchung sichtbar ist; danach, solange nicht abgebucht, höchstens alle 12 h
 #     (alte Fälle wie Marc …7821, Mike …7055/…7057 sofort, weil seither nie beobachtet). Deckel/Abstand des Takts wie überall.
+#
+# PW4 (Finn 24.11.2026 über den Master, korrigiert PW1): „Balance minus angefragtem Gewinn ist falsch — die abgezogene Balance ist ja der Profit-Cash. Mach es
+# so: springt direkt zurück auf Funded CFD. Innerhalb von 1 bis 12 Stunden wird die Balance einmal neu gelesen — meistens wieder genau 100k bzw. 50k. Wenn die
+# Lesung erfolgreich war, mit der neuen Balance weiterhandeln.“ → Phase „offen“ plant NICHT mehr (kein Abzug): das Konto wartet auf die erste Beobachtung
+# mit Abbuchung; (F) liest einmal zu einem gestreuten Zeitpunkt 1–12 h nach der Anfrage (je Konto + Anfrage fest, Jitter-Regel), ohne Abbuchung danach
+# alle 12 h; die 🟠 nach 12 h bleibt (PW1b). Danach „abgebucht“ → normal mit der gelesenen Balance, Zyklus neu. Nur HT (PW1b).
 FCP_PAYOUT_LESEN_AB_H = 1
 FCP_PAYOUT_LESEN_BIS_H = 12
 FCP_PAYOUT_ANFRAGE_MAX_TAGE = 30           # ältere Anfragen: Phase gilt als erledigt (normal rechnen) — kein Dauerzustand aus uralten Zeilen
 FCP_GRUND_PAYOUT_OFFEN = "Payout angefragt — Waiting erst wieder, wenn die neue Balance (Profit abgebucht) gelesen ist"
+FCP_GRUND_PAYOUT_LESEN = "Payout angefragt — plant wieder, sobald die Balance nach der Anfrage gelesen ist (1–12 h danach)"
+FCP_GRUND_PAYOUT_KEIN_ABZUG = "Payout angefragt — letzte Lesung noch ohne Abbuchung, nächste Lesung spätestens in 12 h"
+
+
+def fcp_payout_lese_versatz(kid, anfrage_at):
+    """REIN RECHNEND (testbar, PW4): gestreuter Lese-Zeitpunkt nach der Anfrage — fester Versatz je Konto + Anfrage zwischen 1 und 12 h (Minuten,
+    gleichverteilt über sha256; Jitter-Regel), damit nicht alle Konten im selben Takt lesen und kein Lauf den Wurf neu würfelt. Ohne Konto → 1 h."""
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if not kid or a is None:
+        return timedelta(hours=FCP_PAYOUT_LESEN_AB_H)
+    spanne = (FCP_PAYOUT_LESEN_BIS_H - FCP_PAYOUT_LESEN_AB_H) * 60
+    h = int(hashlib.sha256(f"pw4|{kid}|{a.astimezone(timezone.utc).isoformat()}".encode()).hexdigest()[:8], 16)
+    return timedelta(minutes=FCP_PAYOUT_LESEN_AB_H * 60 + h % (spanne + 1))
 
 
 def _fcp_plan_ende(p):
@@ -53684,16 +53703,28 @@ def fcp_payout_phase(anfrage_at, groesse, lesung, plaene):
     return {"phase": "offen", "abzug": gew, "vor": vor, "beobachtet": True, "letzte": o_at}
 
 
-def fcp_payout_lesen_faellig(anfrage_at, phase, jetzt):
-    """REIN RECHNEND (testbar, PW1): soll der Balance-Takt jetzt lesen? Nur in Phase „offen“: nicht vor 1 h nach der Anfrage (Finn: „nicht instant“),
-    1–12 h danach immer (der Takt-Abstand drosselt), danach höchstens alle 12 h seit der letzten Beobachtung — sofort, wenn noch nie beobachtet."""
+def fcp_payout_lesen_faellig(anfrage_at, phase, jetzt, kid=None):
+    """REIN RECHNEND (testbar, PW1/PW4): soll der Balance-Takt jetzt lesen? Nur in Phase „offen“. PW4 (Finn: „innerhalb von 1 bis 12 Stunden wird die
+    Balance einmal neu gelesen“): noch nie beobachtet → ab dem gestreuten Zeitpunkt (fcp_payout_lese_versatz, 1–12 h nach der Anfrage; ohne kid 1 h)
+    bis zur ersten Beobachtung; beobachtet, aber noch ohne Abbuchung → höchstens alle 12 h seit der letzten Beobachtung."""
     a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
-    if a is None or not isinstance(phase, dict) or phase.get("phase") != "offen" or jetzt < a + timedelta(hours=FCP_PAYOUT_LESEN_AB_H):
+    if a is None or not isinstance(phase, dict) or phase.get("phase") != "offen" or jetzt < a + fcp_payout_lese_versatz(kid, a):
         return False
-    if jetzt <= a + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H):
-        return True
-    letzte = phase.get("letzte")
+    letzte = phase.get("letzte") if phase.get("beobachtet") else None
     return not isinstance(letzte, datetime) or jetzt - letzte >= timedelta(hours=FCP_PAYOUT_LESEN_BIS_H)
+
+
+def fcp_payout_alarm_faellig(anfrage_at, phase, jetzt):
+    """REIN RECHNEND (testbar, PW1b/PW4): 🟠 „Payout abgelehnt/ausstehend?“ — Phase offen UND entweder eine Beobachtung mindestens 12 h nach der Anfrage
+    zeigt noch keine Abbuchung, oder 24 h nach der Anfrage gibt es noch gar keine Beobachtung (Lesen klappt nicht). Review PW4: „12 h nach der Anfrage“
+    allein feuerte falsch, wenn die gestreute Lesung früh vor der Abbuchung lag (nächste erst 12 h später) oder erst kurz vor 12 h fällig war."""
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if a is None or not isinstance(phase, dict) or phase.get("phase") != "offen":
+        return False
+    letzte = phase.get("letzte") if phase.get("beobachtet") else None
+    if isinstance(letzte, datetime):
+        return letzte >= a + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H)
+    return jetzt >= a + timedelta(hours=2 * FCP_PAYOUT_LESEN_BIS_H)
 
 
 def fcp_waiting_zurueck(waiting_since, anfrage_at, phase):
@@ -54622,7 +54653,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # Vor-Balance = End-Balance des letzten Trades vor der Anfrage; ohne sie (oder ohne Gewinn davor) → None = normal rechnen. Lese-Aufträge nicht
         # lesbar (lesungen None) → nur die End-Balancen danach zählen als Beobachtung (bleibt eher „offen“ = vorsichtig)
         p_phase = fcp_payout_phase(p_anfrage, _wd_konto_groesse(a), (lesungen or {}).get(aid), pl) if p_anfrage is not None else None
-        if isinstance(p_phase, dict) and p_phase.get("phase") == "offen" and jetzt >= p_anfrage + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H):
+        if fcp_payout_alarm_faellig(p_anfrage, p_phase, jetzt):
             # PW1b (Prüfer-Hinweis): 12 h nach der Anfrage noch nicht abgebucht → einmal je Anfrage 🟠 an die Master-IDs (nach dem Lauf, nur scharf)
             _ext = str(a.get("external_id") or "").strip()
             _gk = _wd_konto_groesse(a)
@@ -54654,6 +54685,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             a = dict(a, waiting_payout_since=None)
         if a.get("waiting_payout_since"):
             aus("Waiting for Payout — Payout anfragen, danach plant der Planer wieder"); continue
+        if isinstance(p_phase, dict) and p_phase.get("phase") == "offen":
+            # PW4 (Finn 24.11.2026): bis zur Lesung mit Abbuchung kein neuer Trade — weder mit alter noch mit abgezogener Balance („die abgezogene Balance
+            # ist ja der Profit-Cash“); (F) liest 1–12 h nach der Anfrage (gestreut), danach alle 12 h, nach 12 h ohne Abbuchung 🟠 (PW1b)
+            aus(FCP_GRUND_PAYOUT_KEIN_ABZUG if p_phase.get("beobachtet") else FCP_GRUND_PAYOUT_LESEN, anfrage=p_anfrage.isoformat(),
+                lesen_ab=(p_anfrage + fcp_payout_lese_versatz(aid, p_anfrage)).isoformat()); continue
         g = _wd_konto_groesse(a)
         jg = fcp_je_groesse(regel, g)
         if not jg:
@@ -54709,15 +54745,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             zeile["startwert"] = True
         if bal is None:
             aus("keine Balance — ↻ Balance lesen"); continue
-        if p_offen and p_phase.get("abzug"):
-            # PW1 (Zielbild Finn): angefragt, Profit noch nicht abgebucht → weiter planen, als wäre er schon weg (Gewinn des neuen Zyklus = seit der Anfrage)
-            zeile["payout_offen"] = {"anfrage": p_anfrage.isoformat(), "abzug": p_phase["abzug"], "balance_echt": round(float(bal), 2)}
-            _bp = float(bal) - float(p_phase["abzug"])
-            if not p_phase.get("beobachtet") and g:
-                # Review PW1 (5): seit der Anfrage weder Lesung noch Trade → die Balance des neuen Zyklus ist ≥ Größe; zeigt Echo die Abbuchung schon live,
-                # würde der Abzug sonst doppelt wirken (−Gewinn statt 0 → Nachhol-Trades). Bis zur ersten Beobachtung höchstens auf die Größe herunter.
-                _bp = max(_bp, min(float(bal), float(g)))
-            bal, bal_quelle = round(_bp, 2), f"{bal_quelle} − angefragt {_liq_de(p_phase['abzug'])} $"
+        # PW4: kein Planen mit „Balance − angefragter Gewinn“ mehr — Phase „offen“ ist oben schon ausgelassen
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = fusion_sppl(ppl, uid)
         # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
@@ -54735,9 +54763,6 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               marge_lot=(lambda m_: (m_[0], m_[1], m_[1] == "eigene Vorprüfung" and mg3_probe_faellig(_mg3_tab, aid)))(
                                   mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv, art=a.get("account_type"), groesse=g)))   # MG3/MG3b/MG3d (23.11.2026)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
-        if r.get("aktion") == "ziel" and p_offen:
-            # PW1: vor der Abbuchung kein Waiting — erst die neue Balance entscheidet (sonst Waiting auf alter Balance, Fall …7821)
-            aus(FCP_GRUND_PAYOUT_OFFEN, balance=round(float(bal), 2), anfrage=p_anfrage.isoformat()); continue
         if r.get("aktion") == "ziel" and fcp_anfrage_ohne_trade(anfrage_zuletzt.get(aid), pl, jetzt):
             # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn
             aus("Payout angefragt — Balance noch von vor der Auszahlung (seitdem kein Trade), plant wieder, sobald die Firma sie abgezogen hat",
@@ -55018,11 +55043,11 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     continue
                 try:
                     _tag = anf.astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M")
-                    _ob = " (zuletzt gelesen: keine Abbuchung)" if ph.get("beobachtet") else " (seither nicht gelesen)"
-                    _ab = (f"Planer rechnet weiter mit Balance − {_liq_de(ph['abzug'])} $" if ph.get("abzug")
-                           else "Planer rechnet ohne Abzug (Balance vor der Anfrage unbekannt)")
+                    _ob = ("nach 12 h zeigt die Lesung noch keine Abbuchung" if ph.get("beobachtet")
+                           else "seit 24 h keine erfolgreiche Lesung")
                     alarm_senden(2, "fcp_payout_offen", f"Payout abgelehnt/ausstehend? {ktxt}",
-                                 f"{ktxt}: Payout am {_tag} Dubai angefragt, nach 12 h ist kein Abzug sichtbar{_ob}. {_ab}. Im Dashboard der Firma prüfen.",
+                                 f"{ktxt}: Payout am {_tag} Dubai angefragt, {_ob}. Das Konto wird bis zur Abbuchung nicht geplant (PW4), "
+                                 f"gelesen wird alle 12 h. Im Dashboard der Firma prüfen.",
                                  uid=uid_, schluessel=key, tag=f"fcp-payout-{aid_}"[:60], daten={"konto_id": aid_, "anfrage": anf.isoformat()})
                 except Exception as e:
                     print(f"[funded-cfd] ⚠️ Payout-Meldung {ktxt}: {type(e).__name__}: {e}", flush=True)
