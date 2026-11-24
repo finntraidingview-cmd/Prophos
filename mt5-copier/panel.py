@@ -6159,6 +6159,19 @@ MI1_INIT_TIMEOUT_MS = 30000    # mt5.initialize mit Login: höchstens 30 s (häl
 MI1_VERSUCHE = 2
 
 
+_MI1_NULLBREITE = dict.fromkeys(map(ord, "​‌‍⁠﻿­"), None)
+
+
+def mi1_feld_norm(wert):
+    """EM2: Login/Server (NIE das Passwort) säubern — NFKC (NBSP/Schmal-Leerzeichen → Leerzeichen, Vollbreit-Ziffern → Ziffern),
+    Null-Breiten-Zeichen und weiches Trennzeichen weg, außen trimmen. Reines ASCII ohne Außen-Leerraum bleibt identisch."""
+    s = str(wert if wert is not None else "")
+    if s.isascii():
+        return s.strip()
+    import unicodedata
+    return unicodedata.normalize("NFKC", s).translate(_MI1_NULLBREITE).strip()
+
+
 def mi1_api_login_moeglich(login):
     """MI1: Login per MetaTrader5-API geht nur mit Konto-NUMMER und installiertem Paket (rein prüfend, wirft nie)."""
     try:
@@ -6585,6 +6598,12 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # unberechenbar) — dann lieber der bisherige nackte Start.
         creds = None
     api_creds = None
+    if creds:
+        # EM2 (25.11.2026, Emin · Blue Guardian 100k …1836: DB-Zugangsdaten reines ASCII, trotzdem „Sonderzeichen/Umlaute“): Login und
+        # Server können vom PC kommen (mt5ServerBewiesen nimmt den bewiesenen Servernamen der Instanz, wenn er bis auf \s gleich ist —
+        # JS-\s umfasst NBSP & Co.). Login/Server darum normalisieren (NFKC: NBSP → Leerzeichen, Vollbreit-Ziffern → Ziffern; Null-Breiten-
+        # Zeichen weg). Das PASSWORT bleibt unangetastet. Reine ASCII-Werte bleiben bitgleich.
+        creds = dict(creds, login=mi1_feld_norm(creds.get("login")), server=mi1_feld_norm(creds.get("server")))
     if creds and not all(str(creds.get(k) or "").isascii() for k in ("login", "password", "server")):
         # VOR jedem Kill pruefen (Review-Fund 15.08.2026): die Start-ini schreiben wir
         # nur als ASCII (UTF-16 ohne Live-Beleg, s. MI1), ein UnicodeEncodeError nach

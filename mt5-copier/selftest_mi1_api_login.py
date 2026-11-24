@@ -119,7 +119,8 @@ ns = {"os": os, "re": re, "time": uhr, "random": types.SimpleNamespace(uniform=l
 for z in ("MI1_BOOT_WARTE_S", "MI1_BOOT_RUHE_S", "MI1_INIT_TIMEOUT_MS", "MI1_VERSUCHE"):
     exec(re.search(r"^" + z + r" = [^\n#]*", SRC, re.M).group(0), ns)
 exec(re.search(r"^_MI1_LAEUFT = [^\n#]*", SRC, re.M).group(0), ns)
-for name in ("mi1_api_login_moeglich", "_mi1_api_login", "_mi1_reservieren", "_mi1_thread", "_mi1_nach_heil_start",
+exec(re.search(r"^_MI1_NULLBREITE = [^\n]*", SRC, re.M).group(0), ns)
+for name in ("mi1_feld_norm", "mi1_api_login_moeglich", "_mi1_api_login", "_mi1_reservieren", "_mi1_thread", "_mi1_nach_heil_start",
              "_mi1_api_login_inner", "_heal_ea", "_heal_ea_inner", "start_terminal", "_instanz_heilt"):
     exec(fn(SRC, name), ns)
 CFG = {"master_terminal_path": EXE, "master_expected_login": 631977, "snapshot_file": "prophos_master.csv",
