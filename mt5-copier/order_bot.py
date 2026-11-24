@@ -19754,6 +19754,10 @@ _AUGEN_REGEL_STAND = {"explizit": False, "tsx": None}
 PULS_TAB_DECKEL_N = 6
 PULS_TAB_DECKEL_S = 600.0
 _TAB_DECKEL_ZU = [False]   # Prüfer TX3: hat der Deckel in diesem Prozess einen Tab verweigert → kein harter Chrome-Neustart danach (s. _puls_mit_neustart)
+# TX3b (Prüfer S2 Stopp be0f1880): das Schließen einer LAUFENDEN Position (modus_tvclose_cdp → _cdp_sitzung_holen/_cdp_tab_mit_link → _cdp_tab_neu)
+# darf nie am Deckel scheitern — sonst bliebe eine offene Position bis zu 10 min stehen. Schutz-Läufe setzen _TAB_DECKEL_AUS: ihre Tabs zählen mit,
+# werden aber nie verweigert (gilt für den ganzen Prozess = genau diesen Lauf, auch für verschachtelte Wege wie den Login).
+_TAB_DECKEL_AUS = [False]
 
 
 def puls_tab_deckel_urteil(zeiten, jetzt, n=PULS_TAB_DECKEL_N, fenster_s=PULS_TAB_DECKEL_S):
@@ -19770,6 +19774,11 @@ def _puls_tab_deckel(trail, wozu):
     try:
         d = _augen_json_lesen("puls_tabs_neu.json")
         frei, z, n = puls_tab_deckel_urteil((d or {}).get("zeiten") if isinstance(d, dict) else None, time.time())
+        if not frei and _TAB_DECKEL_AUS[0]:
+            z = z + [time.time()]                         # TX3b: Schutz-Lauf (Position schließen) — zählt mit, wird nie verweigert
+            if trail is not None:
+                trail.append(f"Tab-Deckel voll ({n} in {int(PULS_TAB_DECKEL_S // 60)} min) — Schließen einer Position geht trotzdem vor")
+            frei = True
         if not frei:
             _TAB_DECKEL_ZU[0] = True
             if trail is not None:
@@ -29510,6 +29519,7 @@ def modus_tvclose_cdp(cmd):
     opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
     trail.append("Weg: Puls-Chrome (CDP, Schließen)")
+    _TAB_DECKEL_AUS[0] = True                         # TX3b: Schließen einer laufenden Position nie am Tab-Deckel scheitern lassen
     if _handlauf_aktiv():
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:

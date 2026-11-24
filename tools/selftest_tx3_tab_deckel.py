@@ -69,6 +69,30 @@ with tempfile.TemporaryDirectory() as d:
     finally:
         ob._AUGEN_HIER = alt_hier
 
+# (2b) TX3b (Prüfer S2): Schließen einer laufenden Position nie am Deckel — zählt mit, wird nicht verweigert
+with tempfile.TemporaryDirectory() as d:
+    ob._AUGEN_HIER = d
+    alt_aus = ob._TAB_DECKEL_AUS[0]
+    try:
+        for i in range(N):
+            ob._puls_tab_deckel(None, f"Tab {i}")
+        ob._TAB_DECKEL_ZU[0] = False
+        ob._TAB_DECKEL_AUS[0] = True
+        tr = []
+        check(ob._puls_tab_deckel(tr, "Close") is True and ob._TAB_DECKEL_ZU[0] is False and any("Schließen einer Position geht trotzdem vor" in x for x in tr),
+              "Deckel voll, Schutz-Lauf (Close) → Tab erlaubt, kein Neustart-Riegel, Spur nennt es")
+        import json as _j
+        check(len(_j.load(open(os.path.join(d, "puls_tabs_neu.json")))["zeiten"]) == N + 1, "der Close-Tab zählt trotzdem mit")
+        ob._TAB_DECKEL_AUS[0] = False
+        check(ob._puls_tab_deckel([], "danach normal") is False, "ohne Schutz-Lauf bleibt der Deckel zu")
+    finally:
+        ob._TAB_DECKEL_AUS[0] = alt_aus
+        ob._TAB_DECKEL_ZU[0] = False
+        ob._AUGEN_HIER = alt_hier
+qc = inspect.getsource(ob.modus_tvclose_cdp)
+check(0 <= qc.find("_TAB_DECKEL_AUS[0] = True") < qc.find("_cdp_sitzung_holen(") and qc.find("_TAB_DECKEL_AUS[0] = True") < qc.find("_cdp_konto_mit_login("),
+      "modus_tvclose_cdp: Deckel-Ausnahme VOR Sitzung und Login (auch _cdp_tab_mit_link im Login)")
+
 # (3) jede Tab-Öffnung hinter dem Deckel
 src = open(os.path.join(WURZEL, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
 for fn in (ob._cdp_tab_neu, ob._tsx_tab_sicher, ob._tsx_auge_reparieren if hasattr(ob, "_tsx_auge_reparieren") else None,
