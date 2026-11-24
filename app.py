@@ -53306,7 +53306,9 @@ def fcp_cons_finn(pct, ziel, gewinn, tw, rnd=None, ziel_min=None, ende_min=None)
     lo = max(q - FCP_CONS_ANTEIL_SPANNE / 100.0, q / 2.0)
     anteil = rnd.uniform(lo, q) if rnd is not None else (lo + q) / 2.0
     if R <= c + 0.005:
-        tp = R                                          # Rest passt unter den Deckel → genau der Rest (so wenige Trades wie möglich)
+        # Rest passt unter den Deckel → genau der Rest (so wenige Trades wie möglich). FZ1 (Master 24.11.2026, Ina …0774: Rest 678,47 → TP 678, das Ziel
+        # blieb 0,47 $ unerreicht): auf ganze $ AUFrunden statt runden — der letzte Trade schließt den Rest immer ganz
+        tp = float(-(-(R - 0.005) // 1))
     else:
         tp = min(anteil * D, c, R)
     tp = float(max(FCP_CONS_TP_MIN_USD, round(tp)))

@@ -62,6 +62,18 @@ URTEILE = [
     ("Funded-CFD-Planer · Gewinn 0 $ → Ziel 101.764 $ · TP gewinntag · Gewinntage 0/3", 590, 1397, "gewinntag", {"funded_plan": {"tp_art": "gewinntag"}}),
     ("Funded-CFD-Planer · Gewinn 0 $ → Ziel 101.764 $ · TP ziel", 1764, 1397, None, {"funded_plan": {"tp_art": "ziel"}}),
     ("Funded-CFD-Planer · TP gewinntag", None, None, None, {"funded_plan": {"tp_art": "gewinntag"}}),   # ohne TP: nichts
+    # FZ1 (24.11.2026, Ina FundedNext On Demand …0774): Ziel-Trade des Funded-CFD-Planers = final pass (Rest aus funded_plan ziel − start − gewinn)
+    ("Funded-CFD-Planer · Gewinn 1.519 $ → Ziel 102.197 $ · TP consistency · noch 678 $", 678, 1964, "pass",
+     {"funded_plan": {"tp_art": "consistency", "ziel": 102197, "start": 100000, "gewinn": 1518.53}}),   # alter Plan, Rest 678,47 abgerundet (± 0,50)
+    ("Funded-CFD-Planer · Gewinn 1.519 $ → Ziel 102.197 $ · TP consistency · noch 678 $", 679, 1964, "pass",
+     {"funded_plan": {"tp_art": "consistency", "ziel": 102197, "start": 100000, "gewinn": 1518.53}}),   # neu aufgerundet
+    ("Funded-CFD-Planer · Gewinn 771 $ → Ziel 102.197 $ · TP consistency · noch 1.426 $", 770, 1964, None,
+     {"funded_plan": {"tp_art": "consistency", "ziel": 102197, "start": 100000, "gewinn": 770.74}}),    # Etappe: TP < Rest → kein Ziel-Trade
+    ("Funded-CFD-Planer · Gewinn 0 $ → Ziel 101.764 $ · TP gewinntag · Gewinntage 0/3", 590, 1397, "gewinntag",
+     {"funded_plan": {"tp_art": "gewinntag", "ziel": 101764, "start": 100000, "gewinn": 0}}),          # Gewinntag bleibt Gewinntag
+    ("Funded-CFD-Planer · Gewinn 1.500 $ → Ziel 101.764 $ · TP gewinntag · Gewinntage 2/3", 600, 1397, "pass",
+     {"funded_plan": {"tp_art": "gewinntag", "ziel": 101764, "start": 100000, "gewinn": 1500}}),       # Gewinntag, der das Ziel schließt → pass
+    ("Funded-CFD-Planer · Ziel unlesbar", 600, 1397, None, {"funded_plan": {"tp_art": "consistency", "ziel": None, "start": 100000, "gewinn": 0}}),
 ]
 
 
@@ -181,7 +193,7 @@ def main():
     if not os.path.exists(JSC):
         check(False, "jsc fehlt — Urteil im PC-Tab nicht ausführbar")
     else:
-        js = "\n".join(js_funktion(html, n) for n in ("planSchritt", "planAutoNotiz", "echoGewinntag", "echoV2Final"))
+        js = "\n".join(js_funktion(html, n) for n in ("planSchritt", "planAutoNotiz", "echoGewinntag", "echoFcfdRest", "echoV2Final"))
         js += "\nconst F = %s\nprint(JSON.stringify(F.map(f => echoV2Final({ notes: f[0], mt5Baseline: f[3] }, { tp_usd: f[1], sl_usd: f[2] }))))\n" % json.dumps(
             [[n, tp, sl, (b[0] if b else None)] for n, tp, sl, _e, *b in URTEILE])
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:

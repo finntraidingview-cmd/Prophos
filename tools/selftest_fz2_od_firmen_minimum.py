@@ -84,6 +84,12 @@ r = R(JGO, G + 2250.0, G, 2, False, 1.0, 0.85, random.Random(3), regel=RK, ziel_
       tage=tage([("2026-11-19T16:05:00+00:00", 900.0), ("2026-11-23T00:20:00+00:00", 700.0), ("2026-11-24T08:26:09+00:00", 650.0)]))
 ok(r["aktion"] == "ziel", "Profit 2.250 = größter Tag ÷ 40 % → Waiting")
 
+print("— FZ1: letzter Trade schließt den Rest ganz (aufrunden) —")
+cf = app.fcp_cons_finn(40, 2197, 1518.53, {"b": 770.74, "w": 1518.53, "n": 2, "serie": 1518.53, "serie_n": 2, "heute": 0.0})
+ok(cf["tp"] == 679.0 and cf["rest"] == 678.47, f"Rest 678,47 → TP 679 (vorher 678, Ziel um 0,47 verfehlt): {cf['tp']}")
+cf = app.fcp_cons_finn(40, 2197, 1497.0, {"b": 770.0, "w": 1497.0, "n": 2, "serie": 1497.0, "serie_n": 2, "heute": 0.0})
+ok(cf["tp"] == 700.0, f"ganzer Rest 700 bleibt 700: {cf['tp']}")
+
 print("— Konto-Seite / Radar (Quelltext) —")
 src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
 ok(src.count('_p_zt["ziel_min_usd"] = float(_wd_num(jg["ziel_min"]))') == 1, "/konto-ziele: erreicht + Abhak-Text gegen das Minimum")

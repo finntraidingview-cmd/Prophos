@@ -57964,14 +57964,31 @@
     if(fp && typeof fp === 'object' && fp.tp_art === 'gewinntag') return 'Gewinntag-Trade (Funded-Planer)'
     return n && /^Gewinntag\b/i.test(String(n.stufe || '')) ? `Gewinntag-Trade (${String(n.stufe).split(' · ')[0]})` : null
   }
+  /* FZ1/FZ2 ZIEL-TRADE DES FUNDED-CFD-PLANERS (Master 24.11.2026, Ina FundedNext On Demand …0774): planAutoNotiz liest nur die Challenge-Notiz
+   * „Auto-Planer · … · Rest X $ bis Ziel · Balance Y“ — die Notiz „Funded-CFD-Planer · … · noch 678 $“ nie, also lief JEDER Ziel-Trade eines Funded-CFD-
+   * Kontos mit „Final: keins“ (TP blieb am Kurs vor F9: Fill 3,31 Pkt schlechter → +634,01 statt +678, „fehlen 45 $“). Rest aus mt5_baseline.funded_plan
+   * (ziel = Ziel-Balance, start = Kontogröße, gewinn = Gewinn bei der Planung) → {rest, ziel} | null. Schließt der TP den Rest (± 0,50 $ Rundung), ist der
+   * Trade final 'pass' → der Bot zieht die TP-Seite am echten Fill (+ Kommission) nach, wie bei Challenges (JU1). */
+  function echoFcfdRest(plan){
+    const fp = plan && plan.mt5Baseline && plan.mt5Baseline.funded_plan
+    if(!fp || typeof fp !== 'object') return null
+    const z = Number(fp.ziel), s = Number(fp.start), g = Number(fp.gewinn)
+    if(!(isFinite(z) && z > 0 && isFinite(s) && s > 0 && isFinite(g))) return null
+    const rest = z - s - g
+    return rest > 0 ? { rest, ziel: z } : null
+  }
+  window._echoFcfdRest = echoFcfdRest   // Test-Haken
   function echoV2Final(plan, po){
     const n = plan ? planAutoNotiz(plan.notes) : null
     const tp = Number(po && po.tp_usd), sl = Number(po && po.sl_usd)
     const gt = echoGewinntag(plan, n)
-    if(!n && !gt) return { final: null, grund: 'kein Auto-Plan (Notiz ohne Rest/Ziel)' }
+    const fc = n ? null : echoFcfdRest(plan)   // FZ1: Funded-CFD-Planer (nur ohne Challenge-Notiz)
+    if(!n && !gt && !fc) return { final: null, grund: 'kein Auto-Plan (Notiz ohne Rest/Ziel)' }
     if(!(tp > 0)) return { final: null, grund: 'ohne SL/TP' }
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
-    if(!n) return { final: 'gewinntag', grund: `${gt}: TP ${de(tp)} $ exakt am Fill` }
+    if(fc && tp + 0.5 >= fc.rest) return { final: 'pass', grund: `Funded CFD: TP ${de(tp)} $ ≥ Rest ${de(fc.rest)} $ bis Ziel ${de(fc.ziel)} — TP exakt am Fill` }
+    if(!n && gt) return { final: 'gewinntag', grund: `${gt}: TP ${de(tp)} $ exakt am Fill` }
+    if(!n) return { final: null, grund: `Funded CFD: TP ${de(tp)} $ < Rest ${de(fc.rest)} $ bis Ziel — kein Ziel-Trade` }
     const pass = tp >= n.rest
     const blow = /SL hinter den Boden|SL auf Boden gekappt/i.test(n.stufe)
     const grund = (pass ? `TP ${de(tp)} $ ≥ Rest ${de(n.rest)} $ bis Ziel ${de(n.ziel)}` : gt ? `${gt}: TP ${de(tp)} $ exakt am Fill` : `TP ${de(tp)} $ < Rest ${de(n.rest)} $ bis Ziel`)
