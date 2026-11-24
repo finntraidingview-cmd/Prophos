@@ -100,6 +100,15 @@ check(c_ch and c_ch["p"] == 40 and c_ch["ziel_cons"] == 159737 and not c_ch["erf
 L50 = dict(LUCID, groessen=[50000], phasen={"challenge": {"menge": [1, 1], "tp": [1150, 1180], "sl": [700, 700]}})
 c_50 = cons_ziel(L50, konto(firm="Lucid Trading"), 53113, cons_tage([plan("2026-11-17", 1466.5), plan("2026-11-18", 1549.5)], "k1"))
 check(c_50 and c_50["p"] == 50 and c_50["ziel_cons"] == 53099 and c_50["erfuellt"] is True, f"LC1 Lucid 50k bleibt 50 % (belegt: bestanden bei 49,8 %) ({c_50})")
+# LC1b (Finn 24.11.: „50ks mit 40 % und 50ks mit 50 % … wird beim Account-Hinzufügen in der Schablone eingegeben“): der Konto-Wert (aus der Schablone)
+# geht IMMER vor dem Größen-Rückfall — 50k mit 40 % am Konto rechnet 40, 150k mit 50 % am Konto rechnet 50
+t50 = cons_tage([plan("2026-11-17", 1466.5), plan("2026-11-18", 1549.5)], "k1")
+c_50k40 = cons_ziel(L50, konto(firm="Lucid Trading", cons=40), 53113, t50)
+check(c_50k40 and c_50k40["p"] == 40 and c_50k40["quelle"] == "konto" and c_50k40["ziel_cons"] == 53874 and not c_50k40["erfuellt"],
+      f"LC1b Lucid 50k mit Konto-Wert 40 % → 1.549,50 ÷ 0,4 = 3.874 → Ziel 53.874 ({c_50k40})")
+c_150k50 = cons_ziel(LUCID, konto(firm="Lucid Trading", cons=50), 159082, cons_tage([plan("2026-11-18", 3894.5), plan("2026-11-20", 3468), plan("2026-11-23", 1719.5)], "k1"))
+check(c_150k50 and c_150k50["p"] == 50 and c_150k50["quelle"] == "konto" and c_150k50["ziel_cons"] == 159000 and c_150k50["erfuellt"],
+      f"LC1b Lucid 150k mit Konto-Wert 50 % → Ziel bleibt 159.000 ({c_150k50})")
 c7 = cons_ziel(dict(LUCID, namen=["Topstep"]), konto(firm="Topstep"), 159200, cons_tage([plan("2026-11-01", 5000), plan("2026-11-02", 4200)], "k1"))
 check(c7 and c7["p"] == 50 and c7["ziel_cons"] == 160000, f"Topstep Combine 50 % ({c7})")
 check(cons_ziel(dict(TRADEIFY, consistency_pct=None), konto(), 159200, T_EZ) is None, "Firmen-Feld consistency_pct = null → keine Consistency (Tradeify Growth)")
