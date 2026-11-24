@@ -60852,7 +60852,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2303'
+  const OS_TAB_BUILD = '2026-09-22.2304'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74567,7 +74567,9 @@
    * das Panel selbst (409 polar_aktiv auf jeder POST-Route). Der Reader (Port 8790) hängt an nichts davon. Antwort ist immer der letzte
    * bekannte Stand (nie warten); sind die Stände alt, stößt die Frage selbst einen neuen Poll an. */
   const POLAR_RIEGEL_PANEL_MS = 5000, POLAR_RIEGEL_RAILWAY_MS = 30000, POLAR_RIEGEL_SOFORT_MS = 90000
-  const _polarRiegel = { panel: null, panelAt: 0, railway: null, railwayAt: 0, sofort: null, sofortBis: 0, versuchAt: 0, busy: false, gezeigt: '' }
+  // railwayVersuchAt (NK1, 24.11.2026): Zeit des letzten Railway-Versuchs, auch eines gescheiterten — ohne ihn fragte ein Tab mit ungültigem
+  // Login (401) bei JEDEM Takt neu statt alle 30 s (Claude-App-Vorschau auf dem Mac: ~1.300× 401 je Stunde auf GET /polar/aktiv)
+  const _polarRiegel = { panel: null, panelAt: 0, railway: null, railwayAt: 0, railwayVersuchAt: 0, sofort: null, sofortBis: 0, versuchAt: 0, busy: false, gezeigt: '' }
   // SPERRE ERST AB DER ORDER (Finn 20.10.2026 02:30: „Sobald die Order platziert wurde, erst ab dann soll kein Puls mehr kommen"):
   // Bot-Phasen vor dem Klick (vorbereiten/bereit/feuer — stand.phase des Panels) und Railway-phase „vorbereiten" (start/bereit) zeigen nur
   // den Chip „Polar bereitet vor"; scharf (hart) wird der Tab-Riegel ab geklickt/gefuellt bzw. Railway „order" (ab Feuerzeit) und bei
@@ -74604,7 +74606,7 @@
   function polarRiegelSofort(laufId, seite, planId){
     _polarRiegel.sofort = { lauf_id: laufId || null, plan_id: planId || null, seite: seite || null, quelle: 'start', phase: 'vorbereiten', hart: true }   // eigener PC → hart (Panel sperrt gleich)
     _polarRiegel.sofortBis = Date.now() + POLAR_RIEGEL_SOFORT_MS
-    _polarRiegel.panelAt = 0; _polarRiegel.railwayAt = 0   // nächster Poll sofort
+    _polarRiegel.panelAt = 0; _polarRiegel.railwayAt = 0; _polarRiegel.railwayVersuchAt = 0   // nächster Poll sofort
     polarChipZeichnen(); polarRiegelAktualisieren()
   }
   async function polarRiegelAktualisieren(){
@@ -74622,10 +74624,11 @@
         }
       }
       let uid = null; try{ uid = currentUserId }catch(_){}
-      if(uid && (MT5_LOCAL || !document.hidden) && jetzt - _polarRiegel.railwayAt >= POLAR_RIEGEL_RAILWAY_MS){   // PC immer, Mac/Handy nur sichtbar
+      if(uid && (MT5_LOCAL || !document.hidden) && jetzt - Math.max(_polarRiegel.railwayAt, _polarRiegel.railwayVersuchAt) >= POLAR_RIEGEL_RAILWAY_MS){   // PC immer, Mac/Handy nur sichtbar
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
         if(tok){
+          _polarRiegel.railwayVersuchAt = jetzt   // NK1: auch ein 401/Fehler wartet den 30-s-Takt ab (Stand bleibt der letzte bekannte)
           const ctrl = new AbortController(); const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, 8000)
           try{
             const r = await fetch(`${WATCHER_HOME}/polar/aktiv`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
