@@ -13,6 +13,7 @@ import tempfile
 WURZEL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 sql = open(os.path.join(WURZEL, "sql", "2026-11-03_payout_termin_beim_anlegen.sql"), encoding="utf-8").read()
+sql_fn1 = open(os.path.join(WURZEL, "sql", "2026-11-25_fn1_fundednext_plus1.sql"), encoding="utf-8").read()
 JSC = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
 fehler = []
 
@@ -29,11 +30,16 @@ check("before insert on public.accounts" in sql and "new.account_type = 'funded_
 check("at time zone 'Europe/Berlin')::date" in sql and "like '%fundednext%' then 21 else 14" in sql and "regexp_replace(lower(" in sql,
       "Basis Anlegetag Berlin, FundedNext (auch „Funded Next“) 21, sonst 14")
 check("for each row execute function public.accounts_payout_termin_neu()" in sql and "update public." not in sql, "kein Backfill, Bestand bleibt unberührt")
+check("like '%fundednext%' then 22 else 14" in sql_fn1 and "not coalesce(new.on_demand, false)" in sql_fn1, "FN1-Trigger: FundedNext 22, sonst 14, On Demand ohne Termin (wie live)")
+check("not exists (select 1 from public.fn1_payout_backup_20261125 b where b.id = a.id)" in sql_fn1 and "payout_ready_alt + 1" in sql_fn1
+      and "a.payout_ready_at >= (now() at time zone 'Europe/Berlin')::date" in sql_fn1 and "not coalesce(a.on_demand, false)" in sql_fn1,
+      "FN1-Bestand: nur heute/künftig, nicht On Demand, gesichert, nie doppelt +1")
 
 # (b) Vorschlag ab dem Anfrage-Datum
 a = html.index("  function finNextPayoutVorschlag(")
 js = "const _deTodayStr = () => '2026-11-03', window = {}\nconst tpFirmIstCfd = f => /fundednext|ftmo|fundingpips|the5|tradeify cfd/i.test(String(f || ''))\n" \
      + html[html.index("  function payoutAbErlaubt("):html.index("  window._payoutAbErlaubt")] \
+     + html[html.index("  function payoutZyklusTage("):html.index("  window._payoutZyklusTage")] \
      + html[a:html.index("  function updateFinPayoutFields(")] + """
 const cfd = { type: 'funded_cfd', firm: 'FundedNext', payoutReadyAt: null }
 const r = {
@@ -41,6 +47,7 @@ const r = {
   heute: finNextPayoutVorschlag(cfd, ''),
   spaeter: finNextPayoutVorschlag(Object.assign({}, cfd, { payoutReadyAt: '2026-12-01' }), '2026-11-01'),
   frueher: finNextPayoutVorschlag(Object.assign({}, cfd, { payoutReadyAt: '2026-11-10' }), '2026-11-01'),
+  ftmo: finNextPayoutVorschlag({ type: 'funded_cfd', firm: 'FTMO', payoutReadyAt: null }, '2026-11-01'),
   fut: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: null }, '2026-11-01'),
   futAnlege: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: '2026-11-17' }, '2026-11-10'),
   wd: finNextPayoutVorschlag({ type: 'winning_days', firm: 'Tradeify', payoutReadyAt: null }, '2026-11-01'),
@@ -55,8 +62,10 @@ try:
     e = json.loads(rr.stdout.strip().splitlines()[-1])
 except Exception:
     print(rr.stdout[-400:], rr.stderr[-400:]); e = {}
-check(e.get("ab") == "2026-11-15" and e.get("heute") == "2026-11-17", "Anfrage-Datum + 14 (auch FundedNext, zweiter Zyklus); ohne Datum heute + 14")
-check(e.get("spaeter") == "2026-12-01" and e.get("frueher") == "2026-11-15", "späteres Datum am Konto bleibt, früheres gehört zum alten Zyklus")
+# FN1 (Finn 25.11.2026): FundedNext immer +1 Tag — nach der Anfrage 15 statt 14; andere Firmen 14
+check(e.get("ab") == "2026-11-16" and e.get("heute") == "2026-11-18", "FundedNext: Anfrage-Datum + 15 (FN1, zweiter Zyklus); ohne Datum heute + 15")
+check(e.get("ftmo") == "2026-11-15", "andere Firmen unverändert: Anfrage-Datum + 14 (FTMO)")
+check(e.get("spaeter") == "2026-12-01" and e.get("frueher") == "2026-11-16", "späteres Datum am Konto bleibt, früheres gehört zum alten Zyklus")
 # PF2 (Finn 05.11.2026: „Futures haben nicht Payout ab"): Funded Futures/Winning Days bekommen nach der Anfrage KEIN „+ 14" mehr (vorher P1)
 check(e.get("fut") == "" and e.get("istCfd") == [False, True], "Futures im Finanzen-Fenster: kein Termin (PF2); CFD-Erkennung")
 check(e.get("futAnlege") == "" and e.get("wd") == "", "PF2: Funded Futures mit Alt-Termin und Winning Days → kein Termin")

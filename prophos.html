@@ -11589,11 +11589,11 @@
               <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
             </div>
             <!-- Payout anfragbar ab (P1, Finn 03.11.2026 ~22:55 Dubai; seit PF2 05.11.2026 nur Funded CFD — Futures haben kein „Payout ab"), vorbelegt mit Anlegetag + 14 Tagen
-                 (FundedNext erster Zyklus + 21, payoutErsterTermin) — von Hand geändert bleibt es so. -->
+                 (FundedNext erster Zyklus + 22, payoutErsterTermin, FN1) — von Hand geändert bleibt es so. -->
             <div class="field" style="grid-column:span 2" id="suc-payout-row" hidden>
               <label>Payout anfragbar ab</label>
               <input class="input mono" id="suc-payout-ready" type="date" autocomplete="off">
-              <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt: heute + 14 Tage, FundedNext erster Zyklus + 21. Von Hand geändert bleibt es so.</div>
+              <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt: heute + 14 Tage, FundedNext erster Zyklus + 22. Von Hand geändert bleibt es so.</div>
             </div>
           </div>
 
@@ -16090,7 +16090,7 @@
           <div class="field" style="grid-column:1/-1">
             <label>Payout anfragbar ab</label>
             <input class="input mono" id="ac-payout-ready" type="date" autocomplete="off">
-            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Nur Funded CFD — Futures zählen Winning Days + Net Profit, kein Datum. Beim Anlegen vorbelegt: Anlegetag + 14 Tage (FundedNext erster Zyklus + 21), von Hand geändert bleibt es so. Beim Payout-Anfragen schlägt Prophos Anfrage-Datum + 14 Tage vor.</div>
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Nur Funded CFD — Futures zählen Winning Days + Net Profit, kein Datum. Beim Anlegen vorbelegt: Anlegetag + 14 Tage (FundedNext erster Zyklus + 22), von Hand geändert bleibt es so. Beim Payout-Anfragen schlägt Prophos Anfrage-Datum + 14 Tage vor (FundedNext + 15: dort geht die Anfrage immer erst einen Tag nach der angezeigten Frist).</div>
           </div>
           <!-- Waiting for Payout (29.09.2026, Finn: „der Account ist schon im Plus, wir warten nur auf den Payout") — nur bei
                Funded CFD sichtbar (toggleAcBloecke), Spalte waiting_payout_since; beim Payout-Anfragen leert wartetPayoutClear(). -->
@@ -20506,6 +20506,8 @@
     // o (Funded Planer → CFD, „Erhalten“ in „Payouts auf dem Weg“, Finn 30.10.2026 ~08:16): naechsterTage = „Payout anfragbar ab“ vorbelegt mit
     // Erhalten-Tag + N (folgt dem Datum, bis Finn das Feld selbst ändert), waitingLeeren = Konto raus aus Waiting for Payout, nachher = neu zeichnen
     const admReceivePlus = (tag, n) => { const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+    // FN1 (Finn 25.11.2026): FundedNext +1 Tag auf den Zyklus (14 → 15) — n ist der Zyklus der übrigen Firmen
+    const admReceiveTage = (t, n) => Number(n) + ((typeof payoutZyklusTage === 'function' ? payoutZyklusTage(t && t.account_firm, false) : 14) - 14)
     function admPayoutErhaltenOeffnen(t, o){
       _admReceive = t; _admReceiveO = o || {}
       $('adm-receive-amt').textContent = admEur.format(Number(t.amount) || 0)
@@ -20518,8 +20520,8 @@
       const konto = t.account_id ? (admData?.accounts || []).find(r => String(r.id) === String(t.account_id)) : null
       $('adm-receive-next').value = konto && konto.payout_at ? String(konto.payout_at).slice(0, 10) : ''
       // P1 (03.11.2026): steht am Konto schon ein Termin (die Anfrage setzt Anfrage-Datum + 14), gilt der — Erhalten + N nur, wenn das Konto keinen hat
-      if(t.account_id && !$('adm-receive-next').value && /^\d{4}-\d{2}-\d{2}/.test(String(t.requested_at || ''))){ $('adm-receive-next').value = admReceivePlus(String(t.requested_at).slice(0, 10), 14); delete $('adm-receive-next').dataset.auto }   // ohne Termin am Konto: Anfrage-Datum + 14 (P1)
-      else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, _admReceiveO.naechsterTage); $('adm-receive-next').dataset.auto = '1' }
+      if(t.account_id && !$('adm-receive-next').value && /^\d{4}-\d{2}-\d{2}/.test(String(t.requested_at || ''))){ $('adm-receive-next').value = admReceivePlus(String(t.requested_at).slice(0, 10), admReceiveTage(t, 14)); delete $('adm-receive-next').dataset.auto }   // ohne Termin am Konto: Anfrage-Datum + 14 (P1)
+      else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, admReceiveTage(t, _admReceiveO.naechsterTage)); $('adm-receive-next').dataset.auto = '1' }
       else delete $('adm-receive-next').dataset.auto
       // OD1 (Finn 05.11.2026): On Demand hat kein Payout-Datum — nichts vorbelegen (der Server setzt bei On Demand ohnehin keinen Termin, _konto_on_demand)
       if(konto && konto.on_demand === true){ $('adm-receive-next').value = ''; delete $('adm-receive-next').dataset.auto }
@@ -20537,7 +20539,7 @@
     $('admReceiveSave')?.addEventListener('click', () => admPayoutErhaltenBuchen())
     // vorbelegter Termin (Erhalten + N Tage) folgt dem Erhalten-Datum, bis Finn ihn selbst ändert
     $('adm-receive-am')?.addEventListener('change', () => { const n = $('adm-receive-next'), am = $('adm-receive-am').value
-      if(n && n.dataset.auto && _admReceiveO.naechsterTage && /^\d{4}-\d{2}-\d{2}$/.test(am)) n.value = admReceivePlus(am, _admReceiveO.naechsterTage) })
+      if(n && n.dataset.auto && _admReceiveO.naechsterTage && /^\d{4}-\d{2}-\d{2}$/.test(am)) n.value = admReceivePlus(am, admReceiveTage(_admReceive, _admReceiveO.naechsterTage)) })
     $('adm-receive-next')?.addEventListener('input', e => { delete e.target.dataset.auto })
     window._admPayoutErhaltenOeffnen = (t, o) => admPayoutErhaltenOeffnen(t, o)   // Funded Planer → CFD, „Payouts auf dem Weg“ (30.10.2026)
     /* ── PA1 APPROVED (Finn 12.11.2026 ~20:05 Dubai: „Nach dem Anfragen steht erst nur ‚Approved‘. Nach Klick auf ‚Approved‘ kommt als nächster Button ‚Erhalten‘.
@@ -61727,7 +61729,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2315'
+  const OS_TAB_BUILD = '2026-09-22.2316'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -82085,10 +82087,18 @@
   // Liste im Funktionsrumpf statt als const (keine TDZ: Accounts/Admin rendern beim Boot, bevor das Modul diese Zeile erreicht)
   function payoutAbErlaubt(typ){ return !['funded', 'winning_days'].includes(String(typ || '')) }
   window._payoutAbErlaubt = payoutAbErlaubt   // Test-Haken
+  /* FN1 (Finn 25.11.2026): „Für FundedNext-Payout-Anfragen: Wenn da steht ‚in 14 Tagen‘, kann man immer erst in 15 Tagen anfragen, immer erst einen Tag
+   * danach. Also nicht 14 oder 21, sondern immer +1 Tag: 15 und 22 Tage.“ EINE Stelle für die Zyklus-Länge: FundedNext erster Zyklus 22, danach 15;
+   * alle anderen 14 (unverändert). Gleich im DB-Trigger accounts_payout_termin_neu (sql/2026-11-25_fn1_fundednext_plus1.sql); app.py rechnet keinen Termin
+   * (Anfragen/Erhalten speichern das Datum aus dem Formular). Nutzer: payoutErsterTermin, finNextPayoutVorschlag, admReceiveTage (Payout erhalten). REIN. */
+  function payoutZyklusTage(firm, erster){
+    const fn = /fundednext/.test(String(firm || '').toLowerCase().replace(/\s/g, ''))
+    return (fn && erster ? 21 : 14) + (fn ? 1 : 0)
+  }
+  window._payoutZyklusTage = payoutZyklusTage   // Test-Haken
   function payoutErsterTermin(firm, typ, tag){
     if(String(typ || '') !== 'funded_cfd' || !/^\d{4}-\d{2}-\d{2}$/.test(String(tag || ''))) return ''   // PF2: nur Funded CFD (Futures haben kein Payout ab)
-    const f = String(firm || '').toLowerCase().replace(/\s/g, '')
-    const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (/fundednext/.test(f) ? 21 : 14))
+    const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + payoutZyklusTage(firm, true))   // FN1: FundedNext 22, sonst 14
     return d.toISOString().slice(0, 10)
   }
   // Feld vorbelegen, solange es leer ist oder noch den letzten Vorschlag trägt — ein von Hand eingetragenes Datum bleibt (dataset.vorschlag)
@@ -85365,7 +85375,7 @@
     if(acc && !payoutAbErlaubt(acc.type)) return ''   // PF2 (05.11.2026): Futures haben kein „Payout ab" — kein „Anfrage + 14"
     const heute = /^\d{4}-\d{2}-\d{2}$/.test(String(abTag || '')) ? String(abTag) : (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
     const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
-    const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
+    const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + payoutZyklusTage(acc && acc.firm, false))   // FN1: FundedNext 15, sonst 14
     const plus14 = d.toISOString().slice(0, 10)
     if(finKontoIstCfd(acc)) return (/^\d{4}-\d{2}-\d{2}$/.test(am) && am > plus14) ? am : plus14
     if(/^\d{4}-\d{2}-\d{2}$/.test(am) && am > heute) return am
@@ -94765,10 +94775,11 @@ ${stBlock}
     const letzter = (verlauf || []).filter(v => v && v.art === 'payout' && String(v.aid) === String(r.id) && v.datum).map(v => String(v.datum).slice(0, 10)).sort().pop() || ''
     const basis = letzter || String(r.created || '').slice(0, 10)
     if(!/^\d{4}-\d{2}-\d{2}$/.test(basis)) return { ab: '', gerechnet: false }
-    const fnErster = !letzter && /fundednext/i.test(String(r.firm || r.firm_raw || '').replace(/\s+/g, '')), n = fnErster ? 21 : 14
+    // FN1 (Finn 25.11.2026): FundedNext immer +1 Tag — 1. Payout nach 22, danach 15 Tagen (payoutZyklusTage); andere Firmen 14
+    const fn = /fundednext/i.test(String(r.firm || r.firm_raw || '').replace(/\s+/g, '')), n = payoutZyklusTage(r.firm || r.firm_raw, !letzter)
     const d = new Date(basis + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n)
     return { ab: d.toISOString().slice(0, 10), gerechnet: true,
-      grund: `${n} Tage ab ${letzter ? 'letztem Payout' : 'Konto-Start'} ${new Date(basis + 'T12:00:00Z').toLocaleDateString('de-DE')}${fnErster ? ' (FundedNext: 1. Payout nach 21 Tagen)' : ' (frühestens alle 14 Tage)'}` }
+      grund: `${n} Tage ab ${letzter ? 'letztem Payout' : 'Konto-Start'} ${new Date(basis + 'T12:00:00Z').toLocaleDateString('de-DE')}${fn ? ` (FundedNext: ${letzter ? '15' : '22'} Tage — anfragbar immer erst einen Tag nach der Frist)` : ' (frühestens alle 14 Tage)'}` }
   }
   /* PAYOUTS AUF DEM WEG (Finn 30.10.2026 ~07:56 über den Master, statt der Firmen-Kacheln): alle offenen Payout-Anfragen (pending_payouts
    * status pending aus /admin/overview — dieselbe Liste wie Admin → Finanzen „Payouts unterwegs“) für Funded-CFD-Konten der Sicht. Konto
@@ -94821,7 +94832,7 @@ ${stBlock}
     try{ tabelle = w.length && typeof window._admKontenTabelleHtml === 'function' ? window._admKontenTabelleHtml(w.map(x => ({ r: x.e.r, poGer: x.poGer }))) : '' }catch(e){ console.warn('[apg] Waiting-Tabelle', e) }
     return `<div data-apg-anker="wartet">${apgKarte(`Waiting for Payout · ${w.length}`, w.length ? `${jetzt} jetzt anfragbar${nGer ? ` · ${nGer} Frist gerechnet` : ''}${ohne ? ` · ${ohne} ohne Datum` : ''} · werden nie geplant` : 'keins in dieser Sicht',
       w.length ? `<div class="fcfd-wartet-tab">${tabelle || '<div class="apg-leer" style="padding:18px 0">Tabelle nicht verfügbar</div>'}</div>` : '<div class="apg-leer" style="padding:18px 0">kein Konto wartet auf den Payout</div>',
-      'Dieselbe Ansicht wie Admin → Alle Accounts, nur Funded-CFD-Konten mit „Waiting for Payout“ — Payout-Termin aus „Payout anfragbar ab“; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 1. Payout nach 21 Tagen')}</div>`
+      'Dieselbe Ansicht wie Admin → Alle Accounts, nur Funded-CFD-Konten mit „Waiting for Payout“ — Payout-Termin aus „Payout anfragbar ab“; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 15 Tage bzw. 1. Payout nach 22 Tagen')}</div>`
   }
   /* NEU AUF WAITING FOR PAYOUT (WP3b, Finn 10.11.2026: „kein Schalter, wenn Ziel erreicht → ab zu Waiting for Payout, kurz anzeigen zum Crosschecken“):
    * oben im Reiter Funded Planer → CFD alle Funded-CFD-Konten der Sicht mit accounts.waiting_payout_since in den letzten 48 h, neueste zuerst —

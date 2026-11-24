@@ -43,6 +43,7 @@ def py_fn(name):
 # a) Frontend-Rechnung
 js = ("const window = {}\nconst _deTodayStr = () => '2026-11-05'\nconst tpFirmIstCfd = f => /fundednext(?!\\s*futures)|ftmo(?!\\s*futures)|fundingpips|the5|tradeify cfd|blue guardian/i.test(String(f || ''))\n"
       + js_block("  function payoutAbErlaubt(", "  window._payoutAbErlaubt")
+      + js_block("  function payoutZyklusTage(", "  window._payoutZyklusTage")
       + js_block("  function payoutErsterTermin(", "  // Feld vorbelegen")
       + js_block("  function payoutReadyInfo(", "  /* PAYOUT AB (16.10.2026")
       + js_block("  function finNextPayoutVorschlag(", "  function updateFinPayoutFields(")
@@ -66,7 +67,7 @@ check(e.get("erlaubt") == [False, False, True, True, True, True, True], "payoutA
 check(e.get("anlegen") == [""] * n, f"Anlegen: keine der {len(FUT_FIRMEN)} Futures-Firmen × 2 Typen bekommt ein Datum (vorher P1 + 14 / + 21)")
 check(e.get("anzeige") == [None] * n, "Anzeige (payoutReadyInfo → Accounts-Zeile, Radar, Admin, Finanzen): Alt-Termin bei Futures stumm")
 check(e.get("anfrage") == [""] * n, "Anfrage/Erhalten: kein „+ 14“ bei Futures, auch nicht mit Alt-Termin")
-check(e.get("cfdAnlegen") == ["2026-11-26", "2026-11-19"] and (e.get("cfdAnzeige") or {}).get("tag") == "2026-11-19" and e.get("cfdAnfrage") == "2026-11-19",
+check(e.get("cfdAnlegen") == ["2026-11-27", "2026-11-19"] and (e.get("cfdAnzeige") or {}).get("tag") == "2026-11-19" and e.get("cfdAnfrage") == "2026-11-19",
       "Funded CFD unverändert: Anlegen + 21 (FundedNext) / + 14, Anzeige, Anfrage + 14")
 
 # b) Frontend-Verdrahtung

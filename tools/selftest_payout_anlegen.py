@@ -20,8 +20,8 @@ def check(ok, name):
         FEHLER.append(name)
 
 
-fn = HTML[HTML.index("  function payoutErsterTermin("):HTML.index("  window._payoutErsterTermin")]
-FAELLE = [("FundedNext", "funded_cfd", "2026-11-03", "2026-11-24"), ("Funded Next", "funded_cfd", "2026-11-03", "2026-11-24"),
+fn = HTML[HTML.index("  function payoutZyklusTage("):HTML.index("  window._payoutZyklusTage")] + HTML[HTML.index("  function payoutErsterTermin("):HTML.index("  window._payoutErsterTermin")]
+FAELLE = [("FundedNext", "funded_cfd", "2026-11-03", "2026-11-25"), ("Funded Next", "funded_cfd", "2026-11-03", "2026-11-25"),   # FN1: 21 + 1
           ("FTMO", "funded_cfd", "2026-11-03", "2026-11-17"),
           # PF2 (Finn 05.11.2026: „Futures haben nicht Payout ab … Payout ab ist meistens nur bei den CFDs"): Funded Futures / Winning Days kein Termin
           ("Apex", "funded", "2026-11-03", ""), ("Tradeify", "winning_days", "2026-12-25", ""), ("FundedNext Futures", "funded", "2026-11-03", ""),
@@ -55,10 +55,11 @@ check("if(pr && prRow && !prRow.hidden && /^\\d{4}-\\d{2}-\\d{2}$/.test(pr.value
 check("payout_ready_at:  a.payoutReadyAt  || null" in HTML, "accountToRow schreibt payout_ready_at")
 check("fundedArt" not in HTML and "acc && typeof window._finKontoIstCfd === 'function' && window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag" in HTML,
       "Admin-Anfrage: Anfrage-Datum + 14 nur bei CFD — Futures leer (PF2, vorher P1 auch Funded Futures/Winning Days)")
-check("else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value)" in HTML and "admReceivePlus(String(t.requested_at).slice(0, 10), 14)" in HTML,
-      "Erhalten-Modal: Termin vom Konto geht vor, sonst Anfrage-Datum + 14, erst dann Erhalten + N")
+check("else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value)" in HTML and "admReceivePlus(String(t.requested_at).slice(0, 10), admReceiveTage(t, 14))" in HTML
+      and "const admReceiveTage = (t, n) => Number(n) + ((typeof payoutZyklusTage === 'function' ? payoutZyklusTage(t && t.account_firm, false) : 14) - 14)" in HTML,
+      "Erhalten-Modal: Termin vom Konto geht vor, sonst Anfrage-Datum + 14 (FundedNext 15, FN1), erst dann Erhalten + N (FundedNext N + 1)")
 fv = HTML[HTML.index("  function finNextPayoutVorschlag("):HTML.index("  function finKontoIstCfd(")]
-check("setUTCDate(d.getUTCDate() + 14)" in fv, "Finanzen → Payout-Anfrage: Anfrage-Datum + 14 (alle Firmen)")
+check("setUTCDate(d.getUTCDate() + payoutZyklusTage(acc && acc.firm, false))" in fv, "Finanzen → Payout-Anfrage: Anfrage-Datum + Firmen-Zyklus (14, FundedNext 15 — FN1)")
 # SQL
 check("like '%fundednext%'" in SQL and "a.account_type = 'funded_cfd'" in SQL and "a.waiting_payout_since is not null" in SQL and "a.payout_ready_at is null" in SQL,
       "SQL: nur FundedNext, Funded CFD, Waiting for Payout, Feld leer (idempotent)")
