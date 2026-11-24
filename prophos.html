@@ -1222,7 +1222,7 @@
   #adm-pane-wallet .wal-chip .wal-del{font-size:13px;padding:0 2px}
   #adm-pane-wallet .wal-twin{font-size:11px;padding:1px 7px;border:1px dashed var(--border);border-radius:999px;background:none;color:var(--sub);cursor:pointer;white-space:nowrap}
   #adm-pane-wallet .wal-twin:hover{color:var(--ink);border-color:var(--violet)}
-  #adm-pane-wallet .wal-label{font-weight:600;font-size:12.5px;display:block}
+  #adm-pane-wallet .wal-label{font-weight:500;font-size:11.5px;color:var(--sub);display:inline-block;padding:1px 7px;border-radius:999px;background:var(--surface-tint);margin-right:6px}   /* BK5: früherer Wallet-Name nur noch klein */
   /* Meta-Wallet: 7 Karten (Gesamt + 6 Chains, seit Ethereum 15.09.2026) — muss VOR der
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
      auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
@@ -1639,6 +1639,7 @@
   #adm-pane-bank .bk-iban{white-space:nowrap}   /* BK2: IBAN in einer Zeile, die Tabelle scrollt am Handy */
   #adm-pane-bank .bk-msgzeile{font-size:12.5px;min-height:16px;margin-bottom:6px;color:var(--danger)}
   #adm-pane-bank .bk-msgzeile.gut{color:var(--good)}
+  #adm-pane-bank #bk-l-msg:empty{display:none}   /* BK5: keine Lücke über den Kacheln, solange nichts zu melden ist */
   #adm-pane-bank tr.bk-konto{cursor:pointer}
   #adm-pane-bank tr.bk-konto.is-on td{background:var(--violet-tint)}
   #adm-pane-bank tr.bk-kopf td{font-weight:600;color:var(--ink-2);background:var(--surface-tint);font-size:12.5px}
@@ -1673,6 +1674,9 @@
   #adm-pane-bank .bk-konto-infos{display:grid;grid-template-columns:auto auto;gap:3px 12px;font-size:12px;color:var(--sub);text-align:left}
   #adm-pane-bank .bk-konto-infos b{font-weight:500;color:var(--ink-2)}
   #adm-pane-bank .bk-arten{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-soft)}
+  #adm-pane-bank .bk-arten[hidden]{display:none}
+  #adm-pane-bank .bk-fehlt{display:inline-block;font-size:11px;font-weight:500;color:var(--sub);padding:1px 7px;border-radius:999px;border:1px dashed var(--border);margin-left:6px;vertical-align:1px}
+  #adm-pane-bank .bk-konto-infos .bk-fehlt{margin-left:0}
   #adm-pane-bank .bk-art{border:1px solid transparent;background:var(--surface-tint);border-radius:10px;padding:8px 10px;text-align:left;font:inherit;cursor:pointer;color:inherit}
   #adm-pane-bank .bk-art:hover{border-color:var(--border)}
   #adm-pane-bank .bk-art.is-on{border-color:var(--violet);background:var(--violet-tint)}
@@ -15181,7 +15185,7 @@
               <div class="panel" style="margin-top:14px">
                 <div class="table-wrap">
                   <table class="t bk-sheet">
-                    <thead><tr><th style="width:136px">Datum</th><th>Text</th><th style="width:136px">Art</th><th class="adm-num" style="width:104px">Betrag</th><th class="adm-num" style="width:108px">Saldo</th><th style="width:30px"></th></tr></thead>
+                    <thead><tr><th style="width:136px">Datum</th><th>Text</th><th style="width:150px">Art</th><th class="adm-num" style="width:98px">Betrag</th><th class="adm-num" style="width:104px">Saldo</th><th style="width:30px"></th></tr></thead>
                     <tbody>
                       <!-- Eingabezeile: Enter in einem Feld speichert -->
                       <tr class="bk-neu">
@@ -22915,7 +22919,13 @@
             `<td class="adm-num">${coins.size ? [...coins.entries()].map(([sym, m]) => coinNf.format(m.n) + ' ' + escapeHtml(sym) + ' <span style="color:var(--sub)">≈ ' + (m.da ? walNf.format(m.usdt) : '–') + '</span>').join('<br>') : '–'}</td>` +
             `<td class="adm-num" style="font-weight:650">${gesamt != null ? walNf.format(gesamt) : '–'}</td>` +
             '<td></td>'
-          if(label) tr.querySelector('.wal-label').textContent = label
+          if(label){   // BK5 (25.11.2026): seit der Zuordnung zur ID trägt label den alten Namen („Chris_OKX") → Personen-Präfix weg, ganz im Tooltip
+            const el = tr.querySelector('.wal-label'), pn = String(w0.person_name || '').trim()
+            let kurz = String(label)
+            const rest = pn && kurz.toLowerCase().startsWith(pn.toLowerCase()) ? kurz.slice(pn.length) : null
+            if(rest !== null && (!rest.trim() || /^\s/.test(rest))) el.remove()   // „Marc Fischer" bei ID Marc = nur der volle Name → kein Label
+            else{ if(rest !== null) kurz = rest.replace(/^[_\-·]+/, '') || kurz; el.textContent = kurz; el.title = label }
+          }
           tb.appendChild(tr)
         }
       }
@@ -24202,10 +24212,11 @@
         const lz = l.map(k => k.letzte).filter(Boolean).sort().pop()
         const saldo = !mit.length ? '–' : [mit.some(k => (k.waehrung || 'EUR') === 'EUR') ? bkGeld(eur, 'EUR') : '', usd ? bkGeld(usd, 'USD') : ''].filter(Boolean).join(' + ')
         const b = document.createElement('button'); b.type = 'button'; b.className = 'bk-id'
-        b.innerHTML = `<span class="bk-id-name"></span><span class="bk-id-dat">${lz ? bkTag(lz) : 'keine Buchung'}</span>` +
+        b.innerHTML = `<span class="bk-id-name"></span><span class="bk-id-dat">${lz ? bkTag(lz) : 'noch keine Buchung'}</span>` +
           `<span class="bk-id-n">${n}</span><span class="bk-id-saldo${eur + usd < 0 ? ' bk-minus' : ''}">${bkEsc(saldo)}</span><span class="bk-id-pfeil">›</span>`
         b.querySelector('.bk-id-name').textContent = l[0].name || uid.slice(0, 8)
         if(l.length > 1){ const s = document.createElement('small'); s.textContent = `${l.length} Konten`; b.querySelector('.bk-id-name').appendChild(s) }
+        if(l.some(k => !k.iban)){ const t = document.createElement('span'); t.className = 'bk-fehlt'; t.textContent = 'IBAN fehlt'; b.querySelector('.bk-id-name').appendChild(t) }   // BK5
         b.addEventListener('click', () => { bkPerson = uid; bkKonto = ''; bkArtFilter = ''; $('bk-d-msg').textContent = ''; bkRender(); $('adm-fin-sicht')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
         box.appendChild(b)
       }
@@ -24235,9 +24246,9 @@
         (Number(k.start_saldo) ? ' · Start ' + bkGeld(k.start_saldo, k.waehrung) : '')
       const inf = $('bk-d-infos')
       inf.innerHTML = `<span>Konto</span><b>${bkEsc(k.zweck)}${k.aktiv === false ? ' · inaktiv' : ''}</b>` +
-        `<span>Bank</span><b>${bkEsc(k.bank || '–')}${k.bic ? ' · <span class="bk-mono">' + bkEsc(k.bic) + '</span>' : ''}</b>` +
-        `<span>Inhaber</span><b>${bkEsc(k.inhaber || '–')}</b>` +
-        `<span>IBAN</span><b>${k.iban ? `<span class="bk-iban">${bkEsc(bkIban(k.iban))}</span> <button type="button" class="bk-knopf" data-bk-kopie title="IBAN kopieren">⧉</button>` : '–'}</b>` +
+        `<span>Bank</span><b>${k.bank ? bkEsc(k.bank) : '<span class="bk-fehlt">fehlt</span>'}${k.bic ? ' · <span class="bk-mono">' + bkEsc(k.bic) + '</span>' : ''}</b>` +
+        `<span>Inhaber</span><b>${k.inhaber ? bkEsc(k.inhaber) : '<span class="bk-fehlt">fehlt</span>'}</b>` +
+        `<span>IBAN</span><b>${k.iban ? `<span class="bk-iban">${bkEsc(bkIban(k.iban))}</span> <button type="button" class="bk-knopf" data-bk-kopie title="IBAN kopieren">⧉</button>` : '<span class="bk-fehlt">IBAN fehlt — über ✎ eintragen</span>'}</b>` +
         `<span></span><b><button type="button" class="bk-knopf" data-bk-edit>✎ Konto ändern</button> <button type="button" class="bk-knopf" data-bk-del>× Konto löschen</button></b>`
       inf.querySelector('[data-bk-kopie]')?.addEventListener('click', () => navigator.clipboard?.writeText(k.iban).then(() => { $('bk-d-msg').className = 'bk-msgzeile gut'; $('bk-d-msg').textContent = 'IBAN kopiert.' }).catch(() => {}))
       inf.querySelector('[data-bk-edit]').addEventListener('click', () => bkBearbeiten(k))
@@ -24245,6 +24256,7 @@
 
       // BK4: Summe je Art (Klick filtert die Tabelle)
       const alleB = (bkDaten.buchungen || []).filter(b => String(b.konto_id) === bkKonto)
+      $('bk-d-arten').hidden = !alleB.length   // BK5: leeres Konto ohne vier Null-Kacheln
       $('bk-d-arten').innerHTML = BK_ARTEN.map(a => {
         const z = alleB.filter(b => b.art === a), sum = z.reduce((x, b) => x + (Number(b.betrag) || 0), 0)
         return `<button type="button" class="bk-art${bkArtFilter === a ? ' is-on' : ''}" data-bk-art="${bkEsc(a)}"><span>${bkEsc(a)} · ${z.length}</span>` +
@@ -61715,7 +61727,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2314'
+  const OS_TAB_BUILD = '2026-09-22.2315'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
