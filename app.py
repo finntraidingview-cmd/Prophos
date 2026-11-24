@@ -26859,11 +26859,17 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
         # Der Punkte-Puffer (6 Pkt × Kontrakte × $/Pkt, 15.10.2026) ist seit 17.10.2026 raus — Puffer steht oben (AP_PUFFER_JE_KT_FUT)
     elif (not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN) and ober is not None \
-            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100) \
-            and not (regel.get("_cons_p") and min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100)))
-                     > float(regel["_cons_p"]) / 100.0 * (balance - groesse + min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100)))) + 0.005):
-        # LC1 (Master 24.11.2026): bei Consistency-Firmen (ap_cons_regel → _cons_p) nur, wenn der neue Tag selbst ≤ p × Gewinn am Ende bleibt —
-        # sonst hebt der Trade den Required profit (Lucid 150k: TP 3.640 bei Gewinn 5.400 → 40,3 % von 9.040 → Ziel 9.100) und braucht einen Extra-Tag
+            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100) and regel.get("_cons_p") \
+            and min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100))) \
+            > float(regel["_cons_p"]) / 100.0 * (balance - groesse + min(rest + puffer, ober + float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100)))) + 0.005:
+        # LC1 (Master 24.11.2026) + Prüfer-Stopp S2: Consistency-Firma (ap_cons_regel → _cons_p, nur Lucid), der Weg „Deckel +100 $“ höbe den neuen Tag über
+        # p × Gewinn am Ende (Lucid 150k: TP 3.640 bei Gewinn 5.400 → 40,3 % von 9.040 → Required 9.100, Extra-Tag). Statt der Etappe (TP 3.450–3.550 →
+        # Rest 51–91 $ < AP_REST_MIN → „Rest von Hand“, Konto würde nie automatisch fertig): Etappe mit TP = Rest − AP_REST_MIN − Puffer → am nächsten
+        # Tag ein normaler letzter Trade (Rest + Puffer). Bewusst nicht „TP = größter p-sicherer Tag ≥ Rest“ (Prüfer-Alternative): der läge ohne Puffer
+        # genau auf dem Rest, nach Gebühren ~40 $ darunter → wieder „Rest von Hand“.
+        tp, stufe = max(float(rest - AP_REST_MIN - puffer), 1.0), f"Etappe (Consistency {float(regel['_cons_p']):g} %: Rest bleibt ≥ {AP_REST_MIN:.0f} $)"
+    elif (not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN) and ober is not None \
+            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100):
         # FUTURES: DECKEL +100 $ (Finn 21.10.2026 03:20 Dubai: „Bei Futures darf der letzte Trade den TP-Deckel um bis zu 100 $ überschreiten,
         # damit er am Ziel landet — mehr nicht"; Lucid …0001 20.10.2026: Rest 4.537 > 4.500 → Etappe 4.464 → 84 $ Rest von Hand). Rest + Puffer
         # (20 $/Kt, mindestens die Gebühren) über dem Deckel, Rest selbst höchstens Deckel + 100 → EIN letzter Trade, TP auf Deckel + 100
@@ -47083,10 +47089,14 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig):
     # + Puffer), nicht erst bis zum Regel-Ziel — sonst endet das Konto 600 $ unter dem Required profit und braucht einen Extra-Tag. Deshalb ab der
     # Hälfte des Ziel-Gewinns (ab da kann der nächste Trade der letzte sein; der TP bleibt unter tp_max, der neue Tag also ≤ p), vorher wie bisher
     # nichts lesen (Fremd-Review M2: kein neuer Lese-/Fehlerweg für Konten weit unter dem Ziel)
+    # Prüfer-Stopp S2 (24.11.2026): die LC1-Neuerungen (ab halbem Ziel lesen, _cons_p) NUR für Lucid — beauftragt und belegt (Dashboard Chris …0018);
+    # Tradeify/Topstep wie vor LC1 (erst am Regel-Ziel, nur _ziel_min/_cons), bis ihre Regeln dafür eigens belegt sind
+    lucid = str(_ap_norm(a.get("firm"))).startswith("lucid")
     if not z0:
         return regel_k
     _g0 = float(z0[1])                                   # zw_ziel → (Ziel, Größe)
-    if float(balance) < (_g0 + (float(z0[0]) - _g0) * 0.5 if float(z0[0]) > _g0 else float(z0[0])):
+    _ab = (_g0 + (float(z0[0]) - _g0) * 0.5 if float(z0[0]) > _g0 else float(z0[0])) if lucid else float(z0[0])
+    if float(balance) < _ab:
         return regel_k
     aid = str(a.get("id"))
     try:
@@ -47096,6 +47106,8 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig):
     cz = zw_cons_ziel(regel, a, float(balance), ct)
     if not cz:
         return regel_k
+    if not lucid:   # wie vor LC1 (bitgleich): Consistency-Ziel, solange nicht erfüllt
+        return dict(regel_k, _ziel_min=cz["ziel_cons"], _cons=cz) if not cz["erfuellt"] else regel_k
     # LC1-Review: _cons_p (p der Firma) reist immer mit — ap_konto_rechnen hält damit den neuen Tag selbst ≤ p (Deckel-+100-Weg); _ziel_min nur bei
     # echter Anhebung (ziel_cons ist auf 2 Stellen gerundet, das Regel-Ziel nicht — sonst Hinweis „Consistency …“ ohne Grund)
     out = dict(regel_k, _cons_p=cz["p"])
