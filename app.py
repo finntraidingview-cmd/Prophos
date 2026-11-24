@@ -13186,6 +13186,77 @@ def wd_plan_wegraeumbar(start_um, jetzt=None):
     return t < jetzt - timedelta(hours=2)
 
 
+# WD1 (Befund KC1, 24.11.2026 — Ina · Tradeify 150k WD …2550: Plan 76ac7805 vom 24.11. scheiterte nach dem Claim am Tradovate-Login, „nichts
+# platziert“; die WD-Zeile 25.11. trug schon „hat schon einen geplanten/laufenden Plan“). Der Farmer räumte nur UNGECLAIMTE Farmer-Pläne früherer
+# Tage weg und plant den neuen Tag ~00:10 Dubai, also VOR dem Tages-Reset des Nachtlaufs (01:30, ap_tagesreset). Ein geclaimter Fehlstart vom Vortag
+# blockierte so das Konto am Folgetag. Jetzt: geclaimte Farmer-Pläne früherer Tage gehen weg, wenn der Nachtlauf sie ebenfalls löschen würde —
+# genau tagesreset_art „weg“ (kein Claim, Start-Fehler „nichts platziert“ nach dem Claim, nur verbraucht; nie bei Order-Spur, Polar, Start/Claim < 2 h).
+# Alles andere bleibt „belegt“ wie bisher (der Nachtlauf schiebt es nach „Überprüfen“).
+WD_VORTAG_SEL = ("id,user_id,route,status,auto_plan,notes,master_name,master_account_id,planned_for,start_um,start_um_gestartet_at,start_claim_art,"
+                 "orbit_gesendet_at,started_at,result_notes,mt5_baseline,polar_lauf(id,status)")
+WD_VORTAG_MERK_S = 600          # „nicht weg“-Ergebnis je Plan 10 min merken (GET alle 30 s je Tab)
+_WD_VORTAG_NICHT = {}           # plan_id → Zeitstempel (time.time()), bis wann nicht erneut geprüft wird
+
+
+def wd_vortag_weg(p, tag, jetzt=None):
+    """REIN RECHNEND (testbar, selftest_wd1_vortag_weg.py): Farmer-Plan p (volle Zeile wie WD_VORTAG_SEL) eines Tages VOR `tag` (JJJJ-MM-TT, Lauf-Tag
+    des Farmers) ist sicher ohne Order und darf weg — dieselbe Regel wie der Nachtlauf (tagesreset_art → 'weg'). Fehler/fremde Pläne → False."""
+    if (p.get("notes") or "") != "Winning-Day-Farmer":
+        return False
+    try:
+        jetzt = jetzt or datetime.now(timezone.utc)
+        # Review WD1: höchstens bis zum Dubai-Heute — lädt der Farmer einen KÜNFTIGEN Tag, während der Plan-Tag noch läuft, bleibt ein Fehlstart von
+        # heute stehen (sfBehoben kann ihn noch neu starten); weg erst, wenn sein Tag in Dubai vorbei ist (wie der Nachtlauf)
+        neu = min(str(tag or "")[:10], jetzt.astimezone(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d"))
+        alt = str(p.get("planned_for") or "")[:10]
+        if len(alt) != 10 or len(neu) != 10 or alt >= neu:
+            return False
+        return tagesreset_art(p, neu, jetzt, _ap_tz("Asia/Dubai")).get("art") == "weg"
+    except Exception:
+        return False
+
+
+def _wd_vortag_aufraeumen(ids, tag, jetzt=None):
+    """WD1: geclaimte Farmer-Pläne früherer Tage (ids) frisch voll laden, die nach wd_vortag_weg sicheren löschen — Guard wie ap_tagesreset
+    (noch planned, nie gestartet, nie an Orbit gesendet, Claim älter als 2 h; Verbrauch nur solange er Verbrauch ist). → Menge gelöschter ids.
+    Wirft nie (Lesefehler → nichts gelöscht, Konto bleibt belegt wie bisher)."""
+    import time as _t
+    weg = set()
+    jetzt = jetzt or datetime.now(timezone.utc)
+    jetzt_s = _t.time()
+    # Review WD1 (Kosten): Pläne, die „nicht weg“ ergaben (Nachtlauf → Überprüfen), 10 min nicht erneut voll laden — GET läuft alle 30 s je Tab
+    for k in [k for k, bis in _WD_VORTAG_NICHT.items() if bis < jetzt_s]:
+        _WD_VORTAG_NICHT.pop(k, None)
+    ids = sorted({str(i) for i in (ids or []) if i} - set(_WD_VORTAG_NICHT))
+    if not ids:
+        return weg
+    try:
+        rows = _sb_all("trade_plans", {"select": WD_VORTAG_SEL, "id": "in.(" + ",".join(ids) + ")"}) or []
+    except Exception as e:
+        print(f"[wd] ⚠️ Vortags-Pläne nicht lesbar: {type(e).__name__}: {e}", flush=True)
+        return weg
+    for p in rows:
+        pid = str(p.get("id") or "")
+        if not pid or not wd_vortag_weg(p, tag, jetzt):
+            if pid:
+                _WD_VORTAG_NICHT[pid] = jetzt_s + WD_VORTAG_MERK_S
+            continue
+        # Guard (Review WD1 SOLLTE 2): wie ap_tagesreset, dazu Claim und Startzeit EXAKT wie gelesen — tagsüber kann ein Plan zwischen Lesen und
+        # Löschen neu eingeplant werden (Claim geleert, neue Startzeit); dann trifft das DELETE nichts
+        guard = {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                 "start_um_gestartet_at": f"eq.{p['start_um_gestartet_at']}" if p.get("start_um_gestartet_at") else "is.null",
+                 "start_um": f"eq.{p['start_um']}" if p.get("start_um") else "is.null"}
+        if str(p.get("start_claim_art") or "") == "verbrauch":
+            guard["start_claim_art"] = "eq.verbrauch"
+        try:
+            if sb_delete("trade_plans", guard):
+                weg.add(pid)
+                print(f"[wd] Vortags-Fehlstart {pid[:8]} ({p.get('master_name') or '?'}, {p.get('planned_for')}) weg — nichts platziert", flush=True)
+        except Exception as e:
+            print(f"[wd] ⚠️ Vortags-Plan {pid[:8]} nicht gelöscht: {type(e).__name__}: {e}", flush=True)
+    return weg
+
+
 def wd_kontrakte_pruefen(v):
     """REIN RECHNEND (testbar, B39): master_contracts aus dem PATCH — ganze Zahl ≥ 1 (auch „3" / 3.0), sonst Fehler.
     -> (int, None) | (None, fehler)"""
@@ -18652,7 +18723,16 @@ def admin_wd_plaene():
                 except Exception as e:
                     print(f"[wd] ⚠️ richtung_fest: {type(e).__name__}: {e}", flush=True)
                     richtung_fest = {}
+                # WD1 (24.11.2026): GECLAIMTE Farmer-Pläne früherer Tage, die der Nachtlauf löschen würde (tagesreset_art „weg“), schon hier weg —
+                # sonst blockieren sie das Konto bis zum Tages-Reset 01:30 (der Farmer plant ~00:10). Verwalter-Ansicht: nur eigene ID (wie unten)
+                vortag_weg = _wd_vortag_aufraeumen(
+                    [o.get("id") for o in offen
+                     if (o.get("notes") or "") == "Winning-Day-Farmer" and o.get("status") == "planned" and o.get("start_um_gestartet_at")
+                     and str(o.get("planned_for") or "") and str(o.get("planned_for") or "") < tag and wd_plan_wegraeumbar(o.get("start_um"))
+                     and not (nur and str(o.get("user_id")) != str(nur))], tag)
                 for o in offen:
+                    if str(o.get("id")) in vortag_weg:
+                        continue
                     mid = str(o.get("master_account_id") or "")
                     farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
                     alt_tag = str(o.get("planned_for") or "")
@@ -18754,7 +18834,15 @@ def admin_wd_plaene():
                 # uebersprungen. Nur fremde/laufende Plaene blockieren wirklich.
                 neu_tag = str(body.get("planned_for") or "")
                 blockiert = None
+                # WD1 (24.11.2026): geclaimte Farmer-Fehlstarts früherer Tage nach der Nachtlauf-Regel weg (s. _wd_vortag_aufraeumen)
+                vortag_weg = _wd_vortag_aufraeumen(
+                    [o.get("id") for o in offen
+                     if (o.get("notes") or "") == "Winning-Day-Farmer" and o.get("status") == "planned" and o.get("start_um_gestartet_at")
+                     and str(o.get("planned_for") or "") and neu_tag and str(o.get("planned_for") or "") < neu_tag
+                     and wd_plan_wegraeumbar(o.get("start_um"))], neu_tag) if neu_tag else set()
                 for o in offen:
+                    if str(o.get("id")) in vortag_weg:
+                        continue
                     farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
                     alt_tag = str(o.get("planned_for") or "")
                     if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and neu_tag and alt_tag < neu_tag
