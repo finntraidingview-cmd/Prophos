@@ -118,7 +118,8 @@ check('tf_f.get("firma") in TFH_FIRMEN_ERLAUBT and tf_f.get("firma") != "tradeif
       "Endpunkt: nur Zusatz-Firma, Tradeify bleibt, Hauptschalter .an unberührt")
 check('"firmen": list(p["firmen"])' in SRC, "tfh_stand zeigt die Firmenliste")
 check("n === 'lucidtrading' && Array.isArray((D.tradeify_final_hedge || {}).firmen)" in HTML and "'tradeify_final_hedge_lucid'" in HTML
-      and "tradeify_final_hedge_firma: { firma: 'lucid', an }" in HTML, "Planer-Einstellungen: Lucid-Slider schreibt tradeify_final_hedge_firma")
+      and "tradeify_final_hedge_lucid: 'lucid'" in HTML and "tfFirma ? { tradeify_final_hedge_firma: { firma: tfFirma, an } }" in HTML,   # FNF1 25.11.: Zuordnung je Feld
+      "Planer-Einstellungen: Lucid-Slider schreibt tradeify_final_hedge_firma")
 check("tradeify_final: ['Final'," in HTML and "z.hedge_art === 'tradeify_final' ? 'Final-Hedge'" in HTML and "'Tradeify final'" not in HTML,
       "Anzeige firmenneutral, Schlüssel hedge_art 'tradeify_final' bleibt")
 

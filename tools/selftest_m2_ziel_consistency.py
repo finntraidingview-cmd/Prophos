@@ -204,7 +204,7 @@ check(y.get("_ziel_min") == 159500, "Lesefehler → Rückfall auf die geladenen 
 check(cr(TRADEIFY, rkk, konto(), 159200, []).get("_ziel_min") is None, "Lesefehler ohne eigene Pläne → keine Consistency (kein Absturz)")
 x2 = cr(TRADEIFY, dict(rkk, route="mt5"), konto(cons=50), 159200, EZ)
 check(x2.get("_ziel_min") is None and x2.get("route") == "mt5", "Konto-Wert 50 % erfüllt → Regel unverändert (Route bleibt)")
-check('ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50}' in SRC and '"apex"' not in SRC[SRC.index("ZW_CONS_FIRMEN = {"):SRC.index("ZW_CONS_FIRMEN = {") + 100],
+check('ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50, "fundednextfutures": {"150000": 40}}' in SRC and '"apex"' not in SRC[SRC.index("ZW_CONS_FIRMEN = {"):SRC.index("ZW_CONS_FIRMEN = {") + 100],
       "Vorgabe: Tradeify (TP-Deckel), Lucid 150k 40 / 50k 50 (LC1), Topstep 50 — Apex nie")
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

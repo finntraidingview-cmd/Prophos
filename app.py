@@ -34484,8 +34484,12 @@ TFH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "max_lots": 
 # nimmt weitere Futures-Firmen in diesen Weg — Tradeify ist immer drin (fehlt das Feld: nur Tradeify, bitgleich wie bisher). Zusatz-Firmen nur für HT-IDs
 # und nur, wo die Firma NICHT Orbit Prio 2 fährt (Emins Lucid = orbit_prio2 → bleibt bei ah_tick, ein Hedge je Plan). Die DB-Riegel (Halten, ein
 # finaler je ID, Kontoart-Weg) greifen bei der Zusatz-Firma nur an Plänen mit der Marke hedge_art 'tradeify_final' (sql/2026-11-06_lucid_final_hedge.sql).
-TFH_FIRMEN_ERLAUBT = ("tradeify", "lucid")
-TFH_FIRMA_NAME = {"tradeify": "Tradeify", "lucid": "Lucid"}
+TFH_FIRMEN_ERLAUBT = ("tradeify", "lucid", "fundednextfutures")
+TFH_FIRMA_NAME = {"tradeify": "Tradeify", "lucid": "Lucid", "fundednextfutures": "FundedNext Futures"}
+# FNF1 (Finn 25.11.2026: FundedNext Futures 150k Challenge im Challenge-Planer, „letzter Trade mit Hedge wie immer"): dritte Firma in diesem Weg — genau wie
+# Lucid (nur HT, nie Orbit Prio 2, DB-Riegel nur mit Marke hedge_art 'tradeify_final', sql/2026-11-25_fnf1_fundednext_futures_150k.sql). Suchmuster
+# für trade_plans.master_firm je Schlüssel (PostgREST ilike, * = beliebig): „FundedNext Futures" hat ein Leerzeichen, FundedNext CFD fällt durch „futur".
+TFH_FIRMA_ILIKE = {"tradeify": "*tradeify*", "lucid": "*lucid*", "fundednextfutures": "*funded*next*futur*"}
 TFH_SLAVE_PPL = 0.85          # € je Punkt und Lot Fusion — derselbe feste Wert wie hedgeMultAusRisiko im PC-Tab
 _tfh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
 
@@ -34506,13 +34510,15 @@ def tfh_param(regeln):
 
 
 def tfh_firma(firm, firmen=("tradeify",)):
-    """REIN RECHNEND (testbar): Schlüssel der Firma in diesem Weg ('tradeify' | 'lucid') oder None. Tradeify CFD nie; eine Zusatz-Firma nur, wenn sie
-    in firmen steht (tfh_param)."""
+    """REIN RECHNEND (testbar): Schlüssel der Firma in diesem Weg ('tradeify' | 'lucid' | 'fundednextfutures') oder None. Tradeify CFD nie, FundedNext CFD
+    nie (nur mit „futur", wie prophos_firma_key); eine Zusatz-Firma nur, wenn sie in firmen steht (tfh_param)."""
     f = re.sub(r"[^a-z0-9]", "", str(firm or "").lower())
     if "tradeify" in f:
         return None if _ist_tradeify_cfd(firm) else "tradeify"
     if "lucid" in f and "lucid" in (firmen or ()):
         return "lucid"
+    if ("fundednext" in f or "foundednext" in f) and "futur" in f and "fundednextfutures" in (firmen or ()):
+        return "fundednextfutures"   # FNF1 25.11.2026
     return None
 
 
@@ -34744,7 +34750,7 @@ def tfh_tick(jetzt=None, force=False):
     # alle geplanten (auch spätere/unbestätigte): Kennung hedge_art + Vorschau für den Block „Neue Hedge-Trades bestätigen"; umgestellt wird
     # nur im Fenster, bestätigt UND freigegeben (hedge_freigabe_at, sql/2026-10-29_hedge_freigabe.sql)
     firmen_filter = {"master_firm": "ilike.*tradeify*"} if par["firmen"] == ("tradeify",) else \
-        {"or": "(" + ",".join(f"master_firm.ilike.*{k}*" for k in par["firmen"]) + ")"}   # LF1: Zusatz-Firmen (Lucid); ohne = bitgleich wie bisher
+        {"or": "(" + ",".join(f"master_firm.ilike.{TFH_FIRMA_ILIKE.get(k, '*' + k + '*')}" for k in par["firmen"]) + ")"}   # LF1/FNF1: Zusatz-Firmen; ohne = bitgleich
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_symbol,master_tp,richtung,"
                                             "start_um,notes,mt5_baseline,updated_at,auto_bestaetigt_at,hedge_freigabe_at",
                                   "status": "eq.planned", "route": "eq.tvv2", "orbit_v3": "not.is.true", "auto_plan": "is.true",
@@ -43253,7 +43259,7 @@ def admin_auto_plan_ausgleich_einstellung():
         tf_f = body["tradeify_final_hedge_firma"]   # der Hauptschalter .an bleibt, Tradeify ist immer drin
         if not (isinstance(tf_f, dict) and tf_f.get("firma") in TFH_FIRMEN_ERLAUBT and tf_f.get("firma") != "tradeify"
                 and isinstance(tf_f.get("an"), bool)):
-            return jsonify({"ok": False, "msg": "tradeify_final_hedge_firma = {firma: lucid, an: true | false}"}), 400
+            return jsonify({"ok": False, "msg": "tradeify_final_hedge_firma = {firma: lucid | fundednextfutures, an: true | false}"}), 400
         tf_roh = regeln.get("tradeify_final_hedge") if isinstance(regeln.get("tradeify_final_hedge"), dict) else {}
         alt = [k for k in tfh_param(regeln)["firmen"] if k != "tradeify"]
         neu_f = sorted((set(alt) | {tf_f["firma"]}) if tf_f["an"] else (set(alt) - {tf_f["firma"]}))
@@ -47270,7 +47276,11 @@ def zw_ziel(regel, phase, balance):
 # Lucid 150k = 40 % (Dashboard, Finn 05.11.: „wir haben 40 % Consistency Rule, keine 50 %“). Lucid 50k bleibt 50 %: belegt durch drei 50k-Evals,
 # die Lucid mit größtem Tag 49,4–49,8 % des Profits bestanden hat (Funded-Nachfolger …0004→LFF…0001, …0011, …0005). Wert je Größe als Dict
 # {Größe: p}, "" = jede andere Größe (die strengere 40).
-ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50}
+# FNF1 (Finn 25.11.2026, Screenshot FundedNext Futures 150k Challenge Flex: Ziel 8.000, Max Loss EOD 4.000, Consistency 40 %): 150k = 40 %, NUR diese Größe
+# (andere Größen nicht belegt → keine Consistency, kein Lesen: zw_cons_moeglich prüft die Größe). Planer wie Lucid (LC1-Weg in ap_cons_regel, AP_CONS_LC1):
+# der neue Tag bleibt ≤ 40 % des Gewinns am Ende (Deckel-+100-Weg hält sich daran), sonst Required profit statt „Ziel erreicht".
+ZW_CONS_FIRMEN = {"tradeify": "tp_max", "lucid": {"150000": 40, "50000": 50, "": 40}, "topstep": 50, "fundednextfutures": {"150000": 40}}
+AP_CONS_LC1 = ("lucid", "fundednextfutures")   # Firmen (Anfang von _ap_norm) mit LC1-Planung in ap_cons_regel — belegt: Lucid (24.11.), FNF 150k (FNF1 25.11.)
 
 
 def zw_cons_tage(plaene, konto_id, tz=None):
@@ -47299,7 +47309,12 @@ def zw_cons_moeglich(regel, konto):
     if "consistency_pct" in regel:
         return bool(_wd_num(regel.get("consistency_pct")))
     n = str(_ap_norm(a.get("firm")))
-    return any(n.startswith(k) for k in ZW_CONS_FIRMEN)
+    vg = next((v for k, v in ZW_CONS_FIRMEN.items() if n.startswith(k)), None)
+    if isinstance(vg, dict) and not vg.get(""):   # FNF1: Vorgabe nur für bestimmte Größen (FNF 150k) — andere Größe laut Konto → nichts lesen
+        _gr = _wd_num(a.get("account_size"))
+        if _gr and str(int(float(_gr))) not in vg:
+            return False
+    return vg is not None
 
 
 def zw_cons_ziel(regel, konto, balance, tage_pl):
@@ -47347,7 +47362,8 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig, streng=False):
     # nichts lesen (Fremd-Review M2: kein neuer Lese-/Fehlerweg für Konten weit unter dem Ziel)
     # Prüfer-Stopp S2 (24.11.2026): die LC1-Neuerungen (ab halbem Ziel lesen, _cons_p) NUR für Lucid — beauftragt und belegt (Dashboard Chris …0018);
     # Tradeify/Topstep wie vor LC1 (erst am Regel-Ziel, nur _ziel_min/_cons), bis ihre Regeln dafür eigens belegt sind
-    lucid = str(_ap_norm(a.get("firm"))).startswith("lucid")
+    # FNF1 (25.11.2026): FundedNext Futures 150k (Consistency 40 %, Finns Screenshot) läuft denselben LC1-Weg — Name „lucid" bleibt für die Selbsttests
+    lucid = str(_ap_norm(a.get("firm"))).startswith(tuple(globals().get("AP_CONS_LC1", ("lucid",))))
     if not z0:
         return regel_k
     _g0 = float(z0[1])                                   # zw_ziel → (Ziel, Größe)

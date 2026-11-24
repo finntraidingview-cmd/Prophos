@@ -70818,7 +70818,7 @@
    * _ap_hedge_mit_freigeben). Dieser Block zeigt nur noch die Altlast: schon bestätigt (z. B. vom Bot oder vor dem Umbau), Freigabe fehlt —
    * derselbe eine Knopf gibt frei. Unbestätigte Hedge-Pläne zeigt er nicht mehr (die stehen in „Zu bestätigen"). ══ */
   const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
-  const AHF_ART = { tradeify_final: ['Final', 'Finaler Trade (Tradeify, Lucid): startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],   // LF1 06.11.2026: firmenneutral, Schlüssel bleibt
+  const AHF_ART = { tradeify_final: ['Final', 'Finaler Trade (Tradeify, Lucid, FundedNext Futures): startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],   // LF1 06.11.2026: firmenneutral, Schlüssel bleibt
                     apex: ['Orbit Prio 2', 'Orbit Prio 2: Challenge auf dem Winning-Day-Weg mit Fusion-Hedge (Apex und jede Firma mit Modell „Orbit Prio 2“)'],   // MO1 05.11.2026
                     // APEX-WD BESTÄTIGEN (Finn 02.11.2026 04:30: „alle Apex-Trades kurz einzeln bestätigen … nur Apex"): Farmer-Winning-Day einer Firma aus
                     // wd_farmer_regeln.bestaetigen_firmen — GET /hedge-freigabe liefert ihn mit wd:true, ✓ setzt hedge_freigabe_at, der Claim-Riegel hält bis dahin
@@ -96775,6 +96775,8 @@ ${stBlock}
       // LUCID-FINAL WIE TRADEIFY (LF1, Finn 06.11.2026): Lucid in regeln.tradeify_final_hedge.firmen — nur HT und nie Orbit Prio 2 (Emins Lucid bleibt bei
       // Orbit Prio 2); der Hauptschalter steht bei Tradeify. Fehlt firmen (älteres Backend), kein Slider.
       if(n === 'lucidtrading' && Array.isArray((D.tradeify_final_hedge || {}).firmen)) bl += slider(`Final-Trade mit Gegenhedge wie Tradeify (nur HT${(D.tradeify_final_hedge || {}).an ? '' : ' · Hauptschalter bei Tradeify aus'})`, D.tradeify_final_hedge.firmen.includes('lucid'), 'tradeify_final_hedge_lucid', '')
+      // FNF1 (Finn 25.11.2026): FundedNext Futures genauso — Schlüssel 'fundednextfutures' in regeln.tradeify_final_hedge.firmen
+      if(n === 'fundednextfutures' && Array.isArray((D.tradeify_final_hedge || {}).firmen)) bl += slider(`Final-Trade mit Gegenhedge wie Tradeify (nur HT${(D.tradeify_final_hedge || {}).an ? '' : ' · Hauptschalter bei Tradeify aus'})`, D.tradeify_final_hedge.firmen.includes('fundednextfutures'), 'tradeify_final_hedge_fundednextfutures', '')
       const md = e3ModellWert(sel, D)
       if(!cfd && sel.route !== 'tsv2' && md === 'orbit_prio2') bl += slider('Orbit Prio 2 · Fusion-Hedge (Schalter für alle Prio-2-Firmen)', !!(D.apex_hedge || {}).an, 'apex_hedge', '')
       if(cfd) bl += slider('Echo statt Echo V2', !!(D.echo_hedge || {}).an, 'echo_hedge', '')   // MK1: Schalter heißt nach dem Modell
@@ -97196,8 +97198,9 @@ ${stBlock}
     const feld = cb.dataset.e3Schalter, an = !!cb.checked
     cb.disabled = true
     try{
-      const d = await apdApi('POST', '/ausgleich-einstellung', feld === 'tradeify_final_hedge_lucid' ? { tradeify_final_hedge_firma: { firma: 'lucid', an } } : { [feld]: an })
-      if(feld === 'tradeify_final_hedge_lucid' && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { firmen: d.tradeify_final_hedge.firmen })
+      const tfFirma = { tradeify_final_hedge_lucid: 'lucid', tradeify_final_hedge_fundednextfutures: 'fundednextfutures' }[feld]   // LF1 + FNF1
+      const d = await apdApi('POST', '/ausgleich-einstellung', tfFirma ? { tradeify_final_hedge_firma: { firma: tfFirma, an } } : { [feld]: an })
+      if(tfFirma && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { firmen: d.tradeify_final_hedge.firmen })
       else if(feld === 'echo_hedge' && d.echo_hedge) _e3.d.echo_hedge = Object.assign({}, _e3.d.echo_hedge, { an: d.echo_hedge.an })
       else if(feld === 'apex_hedge' && d.apex_hedge) _e3.d.apex_hedge = Object.assign({}, _e3.d.apex_hedge, { an: d.apex_hedge.an })
       else if(feld === 'tradeify_final_hedge' && d.tradeify_final_hedge) _e3.d.tradeify_final_hedge = Object.assign({}, _e3.d.tradeify_final_hedge, { an: d.tradeify_final_hedge.an })
