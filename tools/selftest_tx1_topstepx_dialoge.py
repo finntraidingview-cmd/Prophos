@@ -227,8 +227,12 @@ print("── B) Google-Anmeldung: Regeln")
 GK = {"tag": "button", "text": "Sign in with Google", "aria": "", "rect": [700, 400, 300, 44], "aus": False}
 la = ob.tsx_login_art
 check(la({"google_n": 1, "google": [GK], "signin": True}) == "google" and la({"google_n": 1, "seite": True}) == "google", "Google-Knopf → 'google' (auch neben altem Formular)")
-check(la({"seite": True, "google_n": 0}) == "alt" and la({"signin": True}) == "anmeldung" and la({}) is None and la(None) is None,
-      "alte Login-Seite → 'alt', nur „Sign in“ → 'anmeldung', sonst None")
+check(la({"seite": True, "google_n": 0, "pw_n": 1}) == "alt" and la({"seite": True, "knoepfe": 1}) == "alt" and la({"signin": True}) == "anmeldung"
+      and la({}) is None and la(None) is None,
+      "alte Login-Seite (Passwortfeld bzw. „PLATFORM LOGIN“) → 'alt', nur „Sign in“ → 'anmeldung', sonst None")
+# TX4 (25.11.2026): topstepx.com/login OHNE Formular = Zwischenseite der Weiterleitung zu login.topstep.com → 'anmeldung' (warten), nie 'alt'
+check(la({"seite": True, "google_n": 0, "pw_n": 0, "knoepfe": 0}) == "anmeldung" and la({"seite": True}) == "anmeldung",
+      "TX4: /login ohne Passwortfeld und ohne „PLATFORM LOGIN“ → 'anmeldung' (Weiterleitung abwarten)")
 kn, gr = ob.tsx_google_knopf({"google_n": 1, "google": [GK]})
 check(kn is GK and gr == "", "genau ein Google-Knopf")
 check(ob.tsx_google_knopf({"google_n": 2, "google": [GK, dict(GK, rect=[700, 460, 300, 44])]})[0] is None, "zwei Google-Knöpfe → nichts")
@@ -407,7 +411,7 @@ check(isinstance(r, str) and "kein Knopf „Sign in with Google“" in r and not
 w = Welt(CH1, start={"url": "https://topstepx.com/x", "login": {"seite": False, "google_n": 2, "google": [GK, dict(GK, rect=[1, 1, 300, 44])], "signin": True}})
 r, t, s = google_lauf(w)
 check(isinstance(r, str) and "nicht eindeutig" in r and not w.klicks, "zwei Google-Knöpfe: nichts geklickt")
-w = Welt(CH1, start={"url": "https://topstepx.com/login", "login": {"seite": True, "google_n": 0, "signin": True}})
+w = Welt(CH1, start={"url": "https://topstepx.com/login", "login": {"seite": True, "google_n": 0, "signin": True, "pw_n": 1, "knoepfe": 1}})
 r, t, s = google_lauf(w)
 check(r is None and not w.klicks, "alte Login-Seite (Passwort + PLATFORM LOGIN, kein Google) → None, alter Weg bleibt")
 w = Welt(CH1)
@@ -823,7 +827,7 @@ else:
                       f"_tsx_k4_senden, tsx_k3_vor_klick, _tsx_blow_dialog_weg ({anders[:6]})")
     weg_erlaubt = {
         "_tsx_zeitsync_weg": 1,          # alte Spurzeile (jetzt mit „Time-Sync-Dialog weggeklickt" davor)
-        "_tsx_cdp_login": 0,             # nur die Google-Weiche davor
+        "_tsx_cdp_login": 1,             # nur die Google-Weiche davor; TX4: blick() mit try (1 Zeile, die Weiche kam mit TX1 dazu)
         "_tsx_sitzung_waehlen": 1,       # login_seite: seite → tsx_login_art
         "_tsx_auge_konto": 1,            # Bedingung nach der Bereit-Probe
         "modus_tsxlesen_cdp": 4,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start); TS-D2: K2-Felder + Schritt konto_tagesstopp (2 Zeilen); TX2: _handlauf_setzen(True) → _handlauf_nehmen (1 Zeile)
@@ -844,7 +848,8 @@ else:
         check(len(d) == n_erlaubt, f"{name}: genau {n_erlaubt} alte Zeile(n) ersetzt, sonst nur Neues ({[x[:90] for x in d]})")
     ab = [x for x in difflib.unified_diff(js_konstante(ALT_BOT, "TSX_K0_BLICK_JS").splitlines(), js_konstante(src_bot, "TSX_K0_BLICK_JS").splitlines(),
                                           lineterm="", n=0) if x.startswith("-") and not x.startswith("---")]
-    check(not ab, "TSX_K0_BLICK_JS: nur Zeilen dazu, keine alte Zeile geändert")
+    # TX4 (25.11.2026): genau eine Zeile anders — Seitentext für 2FA/Fehler aus innerText (sichtbar) statt textContent (las <script> mit)
+    check(ab == ["-  var bt = document.body ? T(document.body) : '';"], f"TSX_K0_BLICK_JS: nur Zeilen dazu, eine Zeile geändert (TX4 bt sichtbar) ({ab})")
     ab = [x for x in difflib.unified_diff(ALT_AUGEN.splitlines(), NEU_AUGEN.splitlines(), lineterm="", n=0) if x.startswith("-") and not x.startswith("---")]
     check(len(ab) == 1 and "var VERSION = 'tsx-0.7.2'" in ab[0], f"augen_tsx.js: nur VERSION geändert, sonst nur Neues ({[x[:60] for x in ab]})")
 

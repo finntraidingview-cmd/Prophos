@@ -21051,7 +21051,8 @@ TSX_K0_BLICK_JS = r"""(function () {
     lg.pw = { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw), fokus: document.activeElement === pw };
     lg.user = u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, autofill: af(u), fokus: document.activeElement === u } : null;
   }
-  var bt = document.body ? T(document.body) : '';
+  // TX4 (25.11.2026): nur SICHTBARER Text — textContent las auch <script>/<noscript> mit (reCAPTCHA-Skript der Anmeldeseite → „2FA/Captcha“ ohne Captcha)
+  var bt = document.body ? String(document.body.innerText || '').replace(/\s+/g, ' ').trim() : '';
   var fm = bt.match(/(invalid|incorrect|wrong password|login failed|access denied|locked|too many attempts)[^.]{0,80}/i);
   lg.fehler_text = fm ? fm[0].slice(0, 100) : null;
   lg.zwei_faktor = /captcha|verification code|two.?factor|2fa|one.?time (pass)?code|code (was )?sent|recaptcha/i.test(bt);
@@ -21421,7 +21422,10 @@ def _tsx_cdp_login(s, trail):
     nie tippen, nie Enter, kein zweiter Versuch. Füllt Chrome nicht von selbst, wählt Puls seit 22.10.2026 den gespeicherten Login aus
     Chromes Liste unter dem Benutzerfeld (_tsx_autofill_waehlen, nur Windows). -> True (angemeldet) | Fehlertext"""
     def blick():
-        b = s.lese_js(TSX_K0_BLICK_JS) or {}
+        try:
+            b = s.lese_js(TSX_K0_BLICK_JS) or {}
+        except Exception:
+            return {}                                     # TX4: Seite mitten in der Weiterleitung — leer = „noch nicht lesbar“, der Google-Weg wartet
         return b.get("login") if isinstance(b.get("login"), dict) else {}
 
     def warten(lg_):
@@ -21438,7 +21442,7 @@ def _tsx_cdp_login(s, trail):
         return lg_, ok_, text_
 
     lg = blick()
-    if tsx_login_art(lg) in ("google", "anmeldung"):
+    if not lg or tsx_login_art(lg) in ("google", "anmeldung"):   # TX4: leer = Seite leitet gerade weiter → der Google-Weg wartet (nie „angemeldet“)
         # TX1 (17.11.2026): TopstepX-Anmeldung über Google (Finn: „immer ‚Sign in with Google' wählen") — eigener, enger Weg. None = doch die
         # alte Login-Seite (Passwortfeld + „PLATFORM LOGIN" ohne Google-Knopf) → weiter wie bisher
         g = _tsx_google_login(s, trail, blick, lg)
@@ -21550,7 +21554,9 @@ def _tsx_cdp_login(s, trail):
 #      das Konto abgemeldet: Abbruch „TopstepX-Login braucht Hand (Google fragt nach …)". Mehrere Konten → Abbruch.
 #   4. Danach warten, bis TopstepX wieder geladen ist (Anmeldung weg), augen_tsx.js neu laden, der Lauf macht normal weiter.
 #   5. Nach einem Google-Klick ohne Erfolg 30 min kein neuer Versuch (tsx_google_login.json, wie TSX_LOGIN_SPERRE_S beim alten Login).
-TSX_GOOGLE_KNOPF_S = 8.0          # so lange (nur lesen) auf den Google-Knopf warten, wenn die Seite schon „Sign in" heißt
+TSX_GOOGLE_KNOPF_S = 15.0         # so lange (nur lesen) auf den Google-Knopf warten, wenn die Seite schon „Sign in" heißt bzw. weiterleitet
+                                  # TX4 (25.11.2026): 8 → 15 s — Finn: „Das Laden dauert 7 bis 13 Sekunden“; die Weiterleitung topstepx.com/login →
+                                  # login.topstep.com stand bei 2,7 s noch auf der Zwischenseite
 TSX_GOOGLE_WARTEN_S = 40.0        # nach dem Google-Klick: bis TopstepX wieder angemeldet ist (Google-Fenster, Kontoauswahl, Rückweg)
 # TX2 (Finn 24.11.2026, von Hand bei Marc pc-7ftp5l: „nur EINMAL auf ‚Continue with Google‘ drücken und dann chillen — das Laden dauert 7 bis 13
 # Sekunden, aber er loggt ein"): genau so — ein Klick, danach nur lesen bis zu TSX_GOOGLE_WARTEN_S (≥ 20 s), kein zweiter Klick, keine neuen Tabs.
@@ -21605,8 +21611,14 @@ def tsx_login_art(lg):
             return "google"
     except (TypeError, ValueError):
         pass
+    # TX4 (25.11.2026): 'alt' nur mit echtem Formular (Passwortfeld oder „PLATFORM LOGIN“). topstepx.com/login OHNE beides ist die Zwischenseite, die
+    # zur neuen Anmeldung (login.topstep.com, „Continue with Google“) weiterleitet — das ist 'anmeldung': warten, bis der Google-Knopf steht
     if lg.get("seite"):
-        return "alt"
+        try:
+            formular = int(lg.get("pw_n") or 0) > 0 or int(lg.get("knoepfe") or 0) > 0
+        except (TypeError, ValueError):
+            formular = True
+        return "alt" if formular else "anmeldung"
     if lg.get("signin"):
         return "anmeldung"
     return None
@@ -21732,9 +21744,13 @@ def _tsx_google_login(s, trail, blick, lg):
     """TopstepX-Anmeldung über Google (TX1, Regeln oben). blick() = TSX_K0_BLICK_JS.login des TopstepX-Tabs.
     -> True (angemeldet) | Fehlertext | None (doch die alte Login-Seite ohne Google-Knopf → der Aufrufer macht wie bisher weiter)."""
     ende = time.time() + TSX_GOOGLE_KNOPF_S
-    while tsx_login_art(lg) == "anmeldung" and time.time() < ende:   # Seite heißt „Sign in", Knopf noch nicht gezeichnet: nur lesen
+    # Seite heißt „Sign in" bzw. leitet weiter, Knopf noch nicht gezeichnet: nur lesen. TX4: ein leerer Blick (Seite mitten in der Weiterleitung,
+    # JS nicht lesbar) heißt weiter warten — nie „angemeldet"
+    while (tsx_login_art(lg) == "anmeldung" or not lg) and time.time() < ende:
         _warte(0.8, 0.4)
         lg = blick()
+    if not lg:
+        return "TopstepX-Anmeldeseite nach der Weiterleitung nicht lesbar — nichts geklickt, bitte im Puls-Chrome nachsehen."
     art = tsx_login_art(lg)
     if art is None:
         trail.append("TopstepX: Anmeldung von selbst weg (Sitzung gültig)")
