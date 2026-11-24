@@ -52568,7 +52568,7 @@ def fcp_regel_patch(zeile, body):
         if w is None or not (w[0] if isinstance(w, list) else w) > 0 or (teil == "lots_faktor" and w > 1):
             return None, f"erster_payout.{teil}: ungültiger Wert"
         ep[teil] = w
-    elif feld in ("on_demand.ziel_je_100k", "on_demand.consistency_pct"):
+    elif feld in ("on_demand.ziel_je_100k", "on_demand.consistency_pct", "on_demand.min_je_100k"):   # FZ3: + Firmen-Minimum (FZ2)
         # O1b (Finn 05.11.2026: „füg da irgendwie noch das On Demand dazu, was das ist bei FundedNext"): Add-on On Demand je Firma —
         # leer = Feld weg (Code-Standard FCP_ON_DEMAND_STANDARD); beide leer → kein Override mehr
         teil = feld.split(".", 1)[1]
@@ -52583,6 +52583,13 @@ def fcp_regel_patch(zeile, body):
             w = _fcp_bereich_ok(v)
             if w is None or not w[0] > 0:
                 return None, "On Demand · Ziel je 100k: von–bis in $ (> 0)"
+            od[teil] = w
+        elif teil == "min_je_100k":
+            # FZ3 (Master 24.11.2026): Firmen-Minimum je 100k — ab hier zählt „erreicht“ (Waiting), das Ziel oben bleibt Planungs-Ziel.
+            # Liegt es über dem Ziel-von, gilt beim Rechnen das Ziel (fcp_ziel_schwelle/fcp_od_ziel kappen) — hier nur ganz grob begrenzen
+            w = _fcp_zahl_ok(v)
+            if w is None or not 0 < w <= 100000:
+                return None, "On Demand · Firmen-Minimum je 100k: $ (> 0)"
             od[teil] = w
         else:
             w = _fcp_zahl_ok(v)

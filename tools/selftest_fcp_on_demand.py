@@ -218,6 +218,20 @@ ok(app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.consistenc
 e = app.fcp_firma_einstellung(FN)
 ok(e["on_demand"] is None and e["on_demand_eff"] == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0, "min_je_100k": 2000.0}, "Einstellung zeigt DB-Wert + was gilt")
 
+print("— FZ3: Firmen-Minimum je 100k in den Einstellungen —")
+u4, f4 = app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.min_je_100k", "wert": 1950})
+ok(u4 and u4["firmen"][0]["on_demand"] == {"min_je_100k": 1950.0} and "on_demand" not in ZF["firmen"][0], f"Patch Minimum 1.950 (Zeile unverändert): {u4 and u4['firmen'][0].get('on_demand')}")
+ok(app.fcp_on_demand_regel(u4["firmen"][0]) == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0, "min_je_100k": 1950.0}, "nur Minimum geändert → Ziel/p bleiben Standard")
+ok(app.fcp_on_demand_anwenden(u4["firmen"][0], app.fcp_je_groesse(FN, 100000), 100000)[1]["ziel_min"] == 1950.0, "Planer nimmt das Minimum (jg.ziel_min)")
+u5, _f = app.fcp_regel_patch({"id": 1, "firmen": [u4["firmen"][0]]}, {"firma": "FundedNext", "feld": "on_demand.min_je_100k", "wert": None})
+ok(u5 and "on_demand" not in u5["firmen"][0], "leer → Override weg (Code-Standard 2.000)")
+ok(app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.min_je_100k", "wert": 0})[0] is None
+   and app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.min_je_100k", "wert": "abc"})[0] is None, "0 / Text → abgelehnt")
+ZT = {"id": 1, "firmen": [copy.deepcopy(FT)]}
+ok(app.fcp_regel_patch(ZT, {"firma": "FTMO", "feld": "on_demand.min_je_100k", "wert": 2000})[0] is None, "andere Firma → abgelehnt (On Demand nur FundedNext)")
+html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+ok("feld: 'on_demand.min_je_100k'" in html and "consistency_pct: 40, min_je_100k: 2000 }" in html, "UI: Feld „Erreicht ab“ + lokaler Standard 2.000")
+
 print("— Trades je Tag (E1e): Patch, Consistency zählt den Tag als Summe —")
 Z0 = {"id": 1, "zeiten": {"vorlauf_min": 15}, "firmen": []}
 u, f_ = app.fcp_regel_patch(Z0, {"zeit": "trades_je_tag", "wert": 2})

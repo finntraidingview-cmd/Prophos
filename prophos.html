@@ -60833,7 +60833,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2296'
+  const OS_TAB_BUILD = '2026-09-22.2297'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -93477,15 +93477,17 @@
       const gtGr = gl.find(y => (y.roh || {}).gewinntage), gtBezug = gl.length > 1 && gtGr ? ` · bei ${fcfdGroesse(gtGr.groesse)}` : ''
       const epFz = fz   // Refund mit Code-Standard (noch kein DB-Block): fcrKarteSpeichern legt vorher den Block an
       // O1b (Finn 05.11.2026: „füg da irgendwie noch das On Demand dazu, was das ist bei FundedNext"): Add-on On Demand je Firma, nur FundedNext
-      const odE = String((f.namen || [])[0] || '') === 'fundednext' ? (f.on_demand_eff || { ziel_je_100k: [2000, 2250], consistency_pct: 40 }) : null
+      const odE = String((f.namen || [])[0] || '') === 'fundednext' ? (f.on_demand_eff || { ziel_je_100k: [2000, 2250], consistency_pct: 40, min_je_100k: 2000 }) : null
       const odN = odE ? fcrKontenListe(f, D).filter(x => x.on_demand).length : 0
       const odSub = `kein Refund-Trade · Payout sofort anfragbar · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`
-      const odInfo = fcrInfo('od', 'Konten mit Add-on „On Demand" (Accounts → Add-ons): Ziel je 100k skaliert mit der Kontogröße, Consistency je Zyklus, kein Refund-Trade, keine Gewinntage; SL, Lots und Hedge wie normal. Leeres Feld = Standard 2.000–2.250 $ / 40 %')
+      // FZ3 (Master 24.11.2026, nach FZ2 Ina …0774): Firmen-Minimum je 100k — ab hier gilt das Konto als erreicht (Waiting), das Ziel ist nur Planungs-Ziel
+      const odInfo = fcrInfo('od', 'Konten mit Add-on „On Demand" (Accounts → Add-ons): Ziel je 100k skaliert mit der Kontogröße, Consistency je Zyklus, kein Refund-Trade, keine Gewinntage; SL, Lots und Hedge wie normal. Ziel = Planungs-Ziel (Puffer); erreicht / Waiting for Payout schon ab dem Firmen-Minimum, wenn die Consistency stimmt. Leeres Feld = Standard 2.000–2.250 $ / 40 % / Minimum 2.000 $')
       const odBlock = !odE ? '' : ad
         ? `<div class="wd-abl-schalter lesen"><span><b>Add-on · On Demand${odInfo}</b><small>${escapeHtml(odSub)}</small></span></div>
           <div class="fcr-e-felder fcr-e-unter">${fcrFeld('Ziel je 100k', odE.ziel_je_100k, Object.assign({ feld: 'on_demand.ziel_je_100k' }, fz), { bereich: true, einheit: '$', leer: 'Standard' })}
+            ${fcrFeld('Erreicht ab', odE.min_je_100k ?? null, Object.assign({ feld: 'on_demand.min_je_100k' }, fz), { einheit: '$ je 100k · Firmen-Minimum', leer: '2000' })}
             ${fcrFeld('Consistency', odE.consistency_pct ?? null, Object.assign({ feld: 'on_demand.consistency_pct' }, fz), { einheit: '% je Zyklus', leer: '40' })}</div>`
-        : fcrZeile('Add-on On Demand', `+${fcrSpanne(odE.ziel_je_100k, '$')} je 100k · Consistency ${fcrZahl(odE.consistency_pct ?? 40)} % · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`)
+        : fcrZeile('Add-on On Demand', `+${fcrSpanne(odE.ziel_je_100k, '$')} je 100k · erreicht ab ${fcrZahl(Math.min(odE.min_je_100k ?? 2000, (odE.ziel_je_100k || [Infinity])[0]))} $ ·Consistency ${fcrZahl(odE.consistency_pct ?? 40)} % · ${odN} ${odN === 1 ? 'Konto' : 'Konten'}`)
       // ST1 (Master 15.11.2026): Add-on Striking je Firma, nur FundingPips — Werte je 100k (skaliert mit der Kontogröße), leer = Standard
       const ST_STD = { gewinntage_anzahl: 7, gewinntag_min_je_100k: 500, consistency_pct: 35, tp_je_100k: [550, 750], sl_je_100k: [700, 800], verlust_max_pct: 1, lots_je_100k: [0.2, 0.4] }
       const stE = String((f.namen || [])[0] || '') === 'fundingpips' ? (f.striking_eff || ST_STD) : null
@@ -93645,7 +93647,7 @@ ${stBlock}
         f.ohne_namen = [...new Set((b.wert || []).map(x => String(x).trim().toLowerCase()))].sort()
         f.hinweis = [f.an === false ? 'aus — wird nicht geplant' : '', f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '); return }
       if(b.feld.startsWith('on_demand.')){   // O1b: Add-on On Demand — leer = Standard (das Neuladen holt den echten Stand)
-        const t = b.feld.slice(10), STD = { ziel_je_100k: [2000, 2250], consistency_pct: 40 }
+        const t = b.feld.slice(10), STD = { ziel_je_100k: [2000, 2250], consistency_pct: 40, min_je_100k: 2000 }   // FZ3: + Firmen-Minimum
         const od = Object.assign({}, f.on_demand && typeof f.on_demand === 'object' ? f.on_demand : {}); if(b.wert == null) delete od[t]; else od[t] = b.wert
         f.on_demand = Object.keys(od).length ? od : null; f.on_demand_eff = Object.assign({}, f.on_demand_eff || STD, { [t]: b.wert ?? STD[t] }); return }
       if(b.feld.startsWith('striking.')){   // ST1: Add-on Striking — leer = Standard (das Neuladen holt den echten Stand)
