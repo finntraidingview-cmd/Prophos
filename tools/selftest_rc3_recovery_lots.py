@@ -84,7 +84,27 @@ T = [("2026-10-22T08:23:00+00:00", 270.2, 166047.92), ("2026-10-23T13:32:00+00:0
      ("2026-10-30T04:19:00+00:00", 274.8, 159419.82), ("2026-11-02T12:53:00+00:00", 270.33, 159694.62)]
 PL = [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in T]
 VP = {"regeln": {"fu": {"tradeify": [270, 290]}, "staffel": [50, 60, 70, 80, 90]}}
-TZ = app.tradeify_zyklus_konto
+def ag2_stimmig(plaene, live):
+    """AG2 (24.11.2026): Fehlbetrag = Trade-Summe, Balance nur Gegenprobe (> 50 $ daneben → kein Ausgleich). Die Fixtures dieses Tests variieren nur die
+    Live-Balance; damit Trades und Balance zusammenpassen wie am echten Konto, ist der P&L jedes Trades die Differenz zum nächsten balance_start, der letzte
+    die Differenz zur Live-Balance. Eine Payout-Abbuchung vor dem ersten Trade des Zyklus fällt in den alten Zyklus (wie am Konto)."""
+    m = [dict(p) for p in (plaene or ())]
+    seq = sorted([p for p in m if str(p.get("status") or "") in ("completed", "review") and isinstance(p.get("tv"), dict)
+                  and p["tv"].get("balance_start") is not None], key=lambda p: str(p.get("started_at") or ""))
+    for a, b in zip(seq, seq[1:]):
+        a["master_pl"] = round(float(b["tv"]["balance_start"]) - float(a["tv"]["balance_start"]), 2)
+    if seq and isinstance(live, (int, float)):
+        seq[-1]["master_pl"] = round(float(live) - float(seq[-1]["tv"]["balance_start"]), 2)
+    return m
+
+
+def ag2_wrap(fn):
+    def w(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, *a, **k):
+        return fn(konto, ag2_stimmig(plaene, live), payouts, wd_stand, wd_ziel, vorplan, live, *a, **k)
+    return w
+
+
+TZ = ag2_wrap(app.tradeify_zyklus_konto)
 RN = ("kt", "instr", "instr_kt", "recovery_lots")
 ohne = lambda d: {k: v for k, v in d.items() if k not in RN and k != "grund"}   # noqa: E731
 FELD = lambda kt, ins: {"instr": "nq", "instr_kt": kt, "kt": None} if ins == "nq" else {"instr": "mnq", "instr_kt": kt, "kt": kt}   # noqa: E731

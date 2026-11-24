@@ -67,8 +67,28 @@ FRISCH = "2026-11-02T13:38:19+00:00"
 PAY = [{"requested_at": "2026-10-22", "status": "received"}]
 
 
-def plaene(t):
-    return [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in t]
+def ag2_stimmig(plaene, live):
+    """AG2 (24.11.2026): Fehlbetrag = Trade-Summe, Balance nur Gegenprobe (> 50 $ daneben → kein Ausgleich). Die Fixtures dieses Tests variieren nur die
+    Live-Balance; damit Trades und Balance zusammenpassen wie am echten Konto, ist der P&L jedes Trades die Differenz zum nächsten balance_start, der letzte
+    die Differenz zur Live-Balance. Eine Payout-Abbuchung vor dem ersten Trade des Zyklus fällt in den alten Zyklus (wie am Konto)."""
+    m = [dict(p) for p in (plaene or ())]
+    seq = sorted([p for p in m if str(p.get("status") or "") in ("completed", "review") and isinstance(p.get("tv"), dict)
+                  and p["tv"].get("balance_start") is not None], key=lambda p: str(p.get("started_at") or ""))
+    for a, b in zip(seq, seq[1:]):
+        a["master_pl"] = round(float(b["tv"]["balance_start"]) - float(a["tv"]["balance_start"]), 2)
+    if seq and isinstance(live, (int, float)):
+        seq[-1]["master_pl"] = round(float(live) - float(seq[-1]["tv"]["balance_start"]), 2)
+    return m
+
+
+def ag2_wrap(fn):
+    def w(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, *a, **k):
+        return fn(konto, ag2_stimmig(plaene, live), payouts, wd_stand, wd_ziel, vorplan, live, *a, **k)
+    return w
+
+
+def plaene(t, live=None):
+    return ag2_stimmig([{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in t], live)
 
 
 T150 = [("2026-10-22T08:23:00+00:00", 270.2, 166047.92), ("2026-10-23T13:32:00+00:00", 263.2, 161818.12), ("2026-10-26T06:35:00+00:00", -1440.8, 162081.32),
@@ -83,21 +103,21 @@ if alt is not None:
                                      ("Tradeify", "50k T-2 → Winning Days", 2000, T50, 51415.0)):
         for stand in (3, 4, 5):
             k = {"id": "k-" + name[:5], "name": name, "firm": firma, "user_id": "u1", "max_drawdown": dd, "account_type": "winning_days"}
-            a = app.tradeify_zyklus_konto(k, plaene(t), PAY, stand, 5, VP_AUS, live, FRISCH)
-            b = alt.tradeify_zyklus_konto(k, plaene(t), PAY, stand, 5, VP_AUS, live, FRISCH)
+            a = app.tradeify_zyklus_konto(k, plaene(t, live), PAY, stand, 5, VP_AUS, live, FRISCH)
+            b = alt.tradeify_zyklus_konto(k, plaene(t, live), PAY, stand, 5, VP_AUS, live, FRISCH)
             n += 1
             abw += a != b
     ok(alt is not None and abw == 0, f"{n} Fälle Tradeify 150k / Lucid 150k / Tradeify 50k: Ausgleich wie vor LF1 ({abw} Abweichungen)")
 L50 = {"id": "k-l50", "name": "50k L-5 → Winning Days", "firm": "Lucid Trading", "user_id": "u1", "max_drawdown": 2000, "account_type": "winning_days"}
-z = app.tradeify_zyklus_konto(L50, plaene(T50), PAY, 5, 5, VP_AUS, 51415.0, FRISCH)
+z = app.tradeify_zyklus_konto(L50, plaene(T50, 51415.0), PAY, 5, 5, VP_AUS, 51415.0, FRISCH)
 ok(z["gesperrt"] and not z["aktiv"] and z["grund_code"] == "hedge_fehlt" and "Hedge-Werte fehlen für Lucid 50k" in z["grund"] and not z.get("hedge_eur"),
    f"Lucid 50k ohne eigene Hedge-Tabelle: Payout gesperrt, KEIN Ausgleichs-Trade (kein Hedge 0), Grund sichtbar ({z['grund']})")
 VP_50 = {"regeln": dict(VP_AUS["regeln"], staffelFirma=dict(VP_AUS["regeln"]["staffelFirma"], lucid50=[{"von": 0, "eur": 30}]))}
-z = app.tradeify_zyklus_konto(L50, plaene(T50), PAY, 5, 5, VP_50, 51415.0, FRISCH)
+z = app.tradeify_zyklus_konto(L50, plaene(T50, 51415.0), PAY, 5, 5, VP_50, 51415.0, FRISCH)
 ok(z["aktiv"] and z["ziel_normal"] == 180 and z["satz"] == round(30 / 180 * 1000, 2) and z["ziel"] >= 586 and z["hedge_eur"] > 0,
    f"mit eigener Tabelle lucid50 (30 €): Ausgleich aktiv, Ziel normal 180 (Mitte 170–190), Satz 30 €/180 $ ({z.get('ziel')} $ / {z.get('hedge_eur')} €)")
 VP_50b = {"regeln": dict(VP_50["regeln"], fu=dict(VP_50["regeln"]["fu"], lucid50=[160, 160]))}
-z = app.tradeify_zyklus_konto(L50, plaene(T50), PAY, 5, 5, VP_50b, 51415.0, FRISCH)
+z = app.tradeify_zyklus_konto(L50, plaene(T50, 51415.0), PAY, 5, 5, VP_50b, 51415.0, FRISCH)
 ok(z["ziel_normal"] == 160, "eigene TP-Spanne lucid50 aus dem Farmer gilt")
 
 print("— 4) Frontend (prophos.html, JavaScriptCore) —")

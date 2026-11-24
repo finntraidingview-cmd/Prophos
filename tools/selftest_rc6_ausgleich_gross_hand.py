@@ -43,6 +43,29 @@ for n in ("TRADEIFY_ZYKLUS_MIN_USD", "TRADEIFY_ZYKLUS_PUFFER", "TRADEIFY_AUSGLEI
     lade(n)
 ns["wd_plan_pnl"] = lambda p: p.get("master_pl")
 
+
+def ag2_stimmig(plaene, live):
+    """AG2 (24.11.2026): Fehlbetrag = Trade-Summe, Balance nur Gegenprobe (> 50 $ daneben → kein Ausgleich). Die Fixtures dieses Tests variieren nur die
+    Live-Balance; damit Trades und Balance zusammenpassen wie am echten Konto, ist der P&L jedes Trades die Differenz zum nächsten balance_start, der letzte
+    die Differenz zur Live-Balance. Eine Payout-Abbuchung vor dem ersten Trade des Zyklus fällt in den alten Zyklus (wie am Konto)."""
+    m = [dict(p) for p in (plaene or ())]
+    seq = sorted([p for p in m if str(p.get("status") or "") in ("completed", "review") and isinstance(p.get("tv"), dict)
+                  and p["tv"].get("balance_start") is not None], key=lambda p: str(p.get("started_at") or ""))
+    for a, b in zip(seq, seq[1:]):
+        a["master_pl"] = round(float(b["tv"]["balance_start"]) - float(a["tv"]["balance_start"]), 2)
+    if seq and isinstance(live, (int, float)):
+        seq[-1]["master_pl"] = round(float(live) - float(seq[-1]["tv"]["balance_start"]), 2)
+    return m
+
+
+def ag2_wrap(fn):
+    def w(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, *a, **k):
+        return fn(konto, ag2_stimmig(plaene, live), payouts, wd_stand, wd_ziel, vorplan, live, *a, **k)
+    return w
+
+
+ns["tradeify_zyklus_konto"] = ag2_wrap(ns["tradeify_zyklus_konto"])
+
 MORITZ = {"id": "d2277e5f-4f07-4bf2-a981-e02ff3b97d96", "name": "150k FTDFYSLX150431449666 → Winning Days", "firm": "Tradeify", "account_type": "winning_days",
           "user_id": "aff98e60", "max_drawdown": 4500}
 PAY = [{"requested_at": "2026-11-02", "status": "received"}]

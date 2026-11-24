@@ -48,6 +48,30 @@ T = [("2026-10-22T08:23:00+00:00", 270.2, 166047.92), ("2026-10-23T13:32:00+00:0
      ("2026-10-30T04:19:00+00:00", 274.8, 159419.82), ("2026-11-02T12:53:00+00:00", 270.33, 159694.62)]
 PL = [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in T]
 ns["wd_plan_pnl"] = lambda p: p.get("master_pl")
+
+
+def ag2_stimmig(plaene, live):
+    """AG2 (24.11.2026): Fehlbetrag = Trade-Summe, Balance nur Gegenprobe (> 50 $ daneben → kein Ausgleich). Die Fixtures dieses Tests variieren nur die
+    Live-Balance; damit Trades und Balance zusammenpassen wie am echten Konto, ist der P&L jedes Trades die Differenz zum nächsten balance_start, der letzte
+    die Differenz zur Live-Balance. Eine Payout-Abbuchung vor dem ersten Trade des Zyklus fällt in den alten Zyklus (wie am Konto)."""
+    m = [dict(p) for p in (plaene or ())]
+    seq = sorted([p for p in m if str(p.get("status") or "") in ("completed", "review") and isinstance(p.get("tv"), dict)
+                  and p["tv"].get("balance_start") is not None], key=lambda p: str(p.get("started_at") or ""))
+    for a, b in zip(seq, seq[1:]):
+        a["master_pl"] = round(float(b["tv"]["balance_start"]) - float(a["tv"]["balance_start"]), 2)
+    if seq and isinstance(live, (int, float)):
+        seq[-1]["master_pl"] = round(float(live) - float(seq[-1]["tv"]["balance_start"]), 2)
+    return m
+
+
+def ag2_wrap(fn):
+    def w(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, live, *a, **k):
+        return fn(konto, ag2_stimmig(plaene, live), payouts, wd_stand, wd_ziel, vorplan, live, *a, **k)
+    return w
+
+
+ns["tzk_roh"] = ns["tradeify_zyklus_konto"]   # PO2b-Fälle unten: Balance bewusst unbrauchbar, Trades unverändert
+ns["tradeify_zyklus_konto"] = ag2_wrap(ns["tradeify_zyklus_konto"])
 VP = {"regeln": {"fu": {"tradeify": [270, 290]}, "staffel": [50, 60, 70, 80, 90]}}
 
 check(ruf("tradeify_zyklus_start_bal", PL, "2026-10-22") == 161818.12, "Zyklus-Start = Balance des ersten Trades nach der Anfrage (23.10.: 161.818,12 $)")
@@ -70,19 +94,19 @@ z1 = ruf("tradeify_zyklus_konto", JACOB, PL, [], 5, 5, VP, 159964.95, FRISCH)
 check(z1["nr"] == 1 and not z1["gesperrt"] and not z1["aktiv"], "1. Zyklus (noch kein Payout): Regel gilt nicht")
 check(ruf("tradeify_zyklus_konto", JACOB, [], PAY, 5, 5, VP, 159964.95, FRISCH)["grund_code"] == "unbekannt", "kein Trade seit der Anfrage: Stand unbekannt (PO2b: Trade-Summe 0 $ < 1 $ → gesperrt)")
 # Stopp S9 zu 7388c5f4 (a) Deckel, (b) Frische
-za = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 150000.0, FRISCH)
+za = ruf("tzk_roh", JACOB, PL, PAY, 5, 5, VP, 150000.0, FRISCH)
 # PO2b (11.11.2026): „unbekannt“ urteilt über die Trade-Summe seit der Anfrage wie die Kachel — Jacobs Trades seit dem 22.10.: −1.475,37 $ → gesperrt, nie ein Ausgleich
 check(za["grund_code"] == "unbekannt" and not za["aktiv"] and za["gesperrt"] and za["gewinn_quelle"] == "trades" and za["gewinn"] == -1475.37,
       f"(a) Fehlbetrag über Max DD (−11.818 $ bei 4.500 $) → unbekannt: kein Ausgleich, Sperre aus der Trade-Summe ({za.get('gewinn')})")
-za2 = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 180000.0, FRISCH)
+za2 = ruf("tzk_roh", JACOB, PL, PAY, 5, 5, VP, 180000.0, FRISCH)
 check(za2["grund_code"] == "unbekannt" and za2["gesperrt"] and not za2["aktiv"], "(a) Plus über 3 × Max DD unplausibel → unbekannt, Urteil aus der Trade-Summe (PO2b)")
 check(ruf("tradeify_zyklus_konto", dict(JACOB, max_drawdown=None), PL, PAY, 5, 5, VP, 159964.95, FRISCH)["grund_code"] == "unbekannt", "(a) ohne Max DD am Konto → unbekannt")
-zb = ruf("tradeify_zyklus_konto", JACOB, PL, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
+zb = ruf("tzk_roh", JACOB, PL, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
 check(zb["grund_code"] == "unbekannt" and not zb["aktiv"] and zb["gesperrt"] and zb["fehl"] == 1475.37,
       "(b) Balance vor dem Ende des letzten Trades gelesen → unbekannt, kein Ausgleich, Sperre aus der Trade-Summe (PO2b)")
 # PO2b: Trade-Summe im Plus → bei unbekannt nicht gesperrt
 _plus = [dict(x, master_pl=abs(x["master_pl"])) for x in PL]
-zbp = ruf("tradeify_zyklus_konto", JACOB, _plus, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
+zbp = ruf("tzk_roh", JACOB, _plus, PAY, 5, 5, VP, 159964.95, "2026-11-02T10:00:00+00:00")
 check(zbp["grund_code"] == "unbekannt" and not zbp["gesperrt"] and zbp["gewinn"] > 0, "PO2b: unbekannt + Trade-Summe im Plus → nicht gesperrt")
 # PO2b Moritz (Befund PO2 §2): WD-Liq fest bei Größe + 100 → Puffer 11.344 $ statt Max DD 4.500 $ — Start 161.444, Balance 156.028 → −5.416 $ gesperrt
 MORITZ = {"id": "mz", "name": "150k Tradeify WD", "firm": "Tradeify", "user_id": "u", "max_drawdown": 4500, "account_type": "winning_days"}
@@ -264,6 +288,93 @@ check('_zp_typen = ("winning_days",) if _zp == "lucid" else ("funded", "winning_
       "Payout-Anfrage: Lucid nur bei Winning Days gesperrt, Tradeify wie bisher Funded + WD")
 check("E4_WIRKT = { tradeify: { min_netto: true }, lucid: { min_netto: true } }" in html and "z.firma_key === 'lucid' ? 'Lucid' : 'Tradeify'" in html,
       "Frontend: Lucid-Regel wirkt, Texte nennen Lucid")
+
+print("— AG2 (24.11.2026): Fehlbetrag = Trade-Summe, Balance nur Gegenprobe —")
+for n in ("AG2_GEGENPROBE_USD",):
+    lade(n)
+# Mike Tradeify 150k …5297 (echte Zahlen): Antrag 12.11., Tradeify buchte 4.500 $ erst NACH dem ersten Trade des Zyklus ab (17.11. → 18.11.)
+MIKE = {"id": "43f9cd07", "name": "150k FTDFYSLX150482435297 → Funded", "firm": "Tradeify", "user_id": "32b854d1", "max_drawdown": 4500}
+PAYK = [{"requested_at": "2026-11-12", "status": "received"}]
+TK = [("2026-11-11T09:00:00+00:00", 280.86, 161715.74), ("2026-11-17T00:48:00+00:00", 276.74, 161996.6), ("2026-11-18T05:15:00+00:00", 269.36, 157773.34),
+      ("2026-11-19T10:26:00+00:00", 276.24, 158042.7), ("2026-11-23T06:52:00+00:00", 273.36, 158318.94)]
+PLK = [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in TK]
+zk = ruf("tzk_roh", MIKE, PLK, PAYK, 4, 5, VP, 158592.3, "2026-11-23T08:00:00+00:00")
+check(zk["grund_code"] == "unbekannt" and not zk["aktiv"] and not zk.get("ziel") and zk["gesperrt"] and zk["gewinn"] == -3404.3 and zk["gewinn_quelle"] == "min"
+      and zk["gegenprobe_abw"] == -4500.0 and zk["gewinn_balance"] == -3404.3 and zk["profit_trades"] == 1095.7 and "Payout gesperrt" in zk["grund"],
+      f"Mike …5297: Balance −3.404 ≠ Trades +1.096 → kein Ausgleichs-Trade (vorher TP 3.462 $); Payout vorsichtig gesperrt (eine Quelle im Minus), ⚪ ({zk.get('grund')})")
+# Mike heute nach dem Ausgleich (Balance 162.026,56): beide Quellen im Plus → nicht gesperrt, trotz Abweichung kein Ausgleich
+zk2 = ruf("tzk_roh", MIKE, PLK + [{"status": "completed", "started_at": "2026-11-24T07:20:00+00:00", "ended_at": "2026-11-24T07:40:00+00:00", "master_pl": 3434.26,
+                                    "tv": {"balance_start": 158592.3}}], PAYK, 5, 5, VP, 162026.56, "2026-11-24T09:00:00+00:00")
+check(not zk2["gesperrt"] and not zk2["aktiv"] and zk2["gewinn"] == 29.96 and zk2["gegenprobe_abw"] == -4500.0, "Mike …5297 heute: +29,96 / +4.529,96 → nicht gesperrt, kein Ausgleich")
+# Finn + Pascal Lucid …0001 (echte Zahlen, BS1): TV las −180,50 $, die Balance fiel 2.768 $ → Trade-Summe +907,50, Balance −1.680 → gesperrt, kein Ausgleich
+LU1 = {"id": "lu0001", "name": "150k LFE150100019460001 → Winning Days", "firm": "Lucid Trading", "user_id": "fp", "max_drawdown": 4500}
+TL = [("2026-11-17T02:10:00+00:00", 265.0, 156032.0), ("2026-11-18T06:10:00+00:00", 269.5, 156297.0), ("2026-11-20T03:42:00+00:00", 277.5, 156566.5),
+      ("2026-11-23T06:37:00+00:00", -180.5, 156844.0), ("2026-11-24T08:56:00+00:00", 276.0, 154076.0)]
+PLL = [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in TL]
+zl = ruf("tzk_roh", LU1, PLL, PAYK, 4, 5, VP, 154352.0, "2026-11-24T10:00:00+00:00")
+check(zl["gesperrt"] and not zl["aktiv"] and zl["gewinn"] == -1680.0 and zl["profit_trades"] == 907.5,
+      f"Lucid …0001: falscher Trade-P&L (−180,50 statt −2.768) gibt den Payout NICHT frei (Balance −1.680 → gesperrt), kein Ausgleich ({zl.get('grund')})")
+# Marco Tradeify 150k …2833 (echte Zahlen): Abbuchung VOR dem ersten Trade des Zyklus → Balance = Trades, Ausgleich wie bisher
+MARCO = {"id": "10739e92", "name": "150k FTDFYSLX150306272833 → Winning Days", "firm": "Tradeify", "user_id": "1c96cf0f", "max_drawdown": 4500}
+PAYO = [{"requested_at": "2026-11-10", "status": "received"}]
+TO = [("2026-11-10T07:00:00+00:00", 267.36, 156882.78), ("2026-11-11T09:21:00+00:00", 271.24, 157150.14), ("2026-11-12T07:06:00+00:00", 272.24, 157421.38),
+      ("2026-11-16T03:02:00+00:00", -2987.76, 157693.62), ("2026-11-17T05:44:00+00:00", -786.76, 154705.86), ("2026-11-18T07:25:00+00:00", 268.24, 153919.1)]
+PLO2 = [{"status": "completed", "started_at": s, "ended_at": s, "master_pl": pl, "tv": {"balance_start": bs}} for s, pl, bs in TO]
+zo = ruf("tzk_roh", MARCO, PLO2, PAYO, 4, 5, VP, 154187.34, "2026-11-18T09:00:00+00:00")
+check(zo["grund_code"] == "ausgleich" and zo["aktiv"] and zo["fehl"] == 2962.8 and 2993 <= zo["ziel"] <= 3024 and "gegenprobe_abw" not in zo,
+      f"Marco …2833: Balance = Trades (−2.962,80) → Ausgleich wie bisher, TP {zo.get('ziel')} $ (war 3.008)")
+# Grenze: P&L 50 $ daneben → noch Ausgleich (Fehlbetrag aus den Trades), 50,01 $ → kein Ausgleich
+_d = lambda delta: [dict(x, master_pl=round(x["master_pl"] + delta, 2)) if x["started_at"].startswith("2026-11-17") else x for x in PLO2]   # noqa: E731
+z50 = ruf("tzk_roh", MARCO, _d(-50.0), PAYO, 4, 5, VP, 154187.34, "2026-11-18T09:00:00+00:00")
+z51 = ruf("tzk_roh", MARCO, _d(-50.01), PAYO, 4, 5, VP, 154187.34, "2026-11-18T09:00:00+00:00")
+check(z50["aktiv"] and z50["fehl"] == 3012.8 and z50["gewinn"] == -3012.8, f"Abweichung genau 50 $: Ausgleich, Fehlbetrag aus der Trade-Summe ({z50.get('fehl')})")
+check(not z51["aktiv"] and z51["grund_code"] == "unbekannt" and z51["gesperrt"] and z51["gegenprobe_abw"] == 50.01,
+      "Abweichung 50,01 $: kein Ausgleich, Sperre aus der Trade-Summe (im Minus)")
+# Trade ohne P&L im Zyklus (completed, Altlast): keine Gegenprobe → kein Ausgleich, Sperre wie bisher aus der Balance
+zn = ruf("tzk_roh", MARCO, [dict(x, master_pl=None) if x["started_at"].startswith("2026-11-12") else x for x in PLO2], PAYO, 4, 5, VP, 154187.34,
+         "2026-11-18T09:00:00+00:00")
+check(not zn["aktiv"] and zn["grund_code"] == "unbekannt" and zn["gesperrt"] and zn["gewinn"] == -2962.8 and zn["gewinn_quelle"] == "balance"
+      and zn.get("gegenprobe_fehlt") is True,
+      "completed ohne P&L im Zyklus: kein Ausgleich, Payout-Sperre aus der Balance (nie lockerer als vorher), Marke für ⚪")
+# Prüfer AG2 (2): review ohne P&L bleibt bei RC5 („Ausgleich wartet“), wie vor AG2
+zr = ruf("tzk_roh", MARCO, [dict(x, status="review", master_pl=None) if x["started_at"].startswith("2026-11-18") else x for x in PLO2], PAYO, 4, 5, VP,
+         154187.34, "2026-11-18T09:00:00+00:00")
+check(zr["grund_code"] == "laeuft" and not zr["aktiv"] and zr["gesperrt"], f"review ohne P&L: RC5 „Ausgleich wartet“ wie vorher ({zr.get('grund')})")
+# Prüfer AG2 (1): stimmig, aber Trades 50 $ BESSER als die Balance → Fehlbetrag/Sperre aus der Balance (die schlechtere Quelle)
+zp = ruf("tzk_roh", MARCO, _d(+50.0), PAYO, 4, 5, VP, 154187.34, "2026-11-18T09:00:00+00:00")
+check(zp["aktiv"] and zp["fehl"] == 2962.8, f"Trades +50 $ über der Balance: Fehlbetrag aus der Balance 2.962,80 (nie zu kurz) ({zp.get('fehl')})")
+_p30 = [dict(x, master_pl=round(x["master_pl"] + 2992.8, 2)) if x["started_at"].startswith("2026-11-11") else x for x in PLO2]   # Trade-Summe +30,00
+zp2 = ruf("tzk_roh", MARCO, _p30, PAYO, 2, 5, VP, 157150.14 - 20.0, "2026-11-18T09:00:00+00:00")
+check(zp2["gesperrt"] and zp2["gewinn"] == -20.0 and "gegenprobe_abw" not in zp2,
+      f"Balance −20 $, Trades +30 $ (stimmig, 50 $ daneben): Payout bleibt gesperrt — nie lockerer als vorher ({zp2.get('gewinn')})")
+# Zyklus 1 ohne Anfrage (Lucid): keine Gegenprobe, Verhalten unverändert
+check("if st[\"start\"] and not _of:\n        _ag2_im" in app, "Gegenprobe nur mit Payout-Anfrage (Zyklus 1 unverändert) und ohne RC5-Wartegrund")
+# ⚪-Meldung: nur wenn die Balance allein einen Ausgleich ausgelöst hätte, je Konto × Tag, nur HT-IDs
+check("_ag2_melden(k, stand, a.get(\"goal_target\") or 5)" in app and "key = f\"ag2_gegenprobe|{k.get('id')}|{_berlin_heute()}\"" in app
+      and "alarm_senden(3, \"ag2_gegenprobe\"" in app and "_alarm_fremd_verwaltet(owner)" in app,
+      "⚪ an die Master-IDs je Konto × Berlin-Tag (alarm_senden prio 3, gedrosselt), Emin-Gruppe ausgenommen")
+_gesendet, _frei = [], set()
+ns.update({"_ap_namen": lambda: ({"32b854d1": "Mike"}, set()), "_alarm_fremd_verwaltet": lambda u: u == "emin0001", "_berlin_heute": lambda: "2026-11-24",
+           "_tm_melde_frei": lambda key: (key not in _frei) and not _frei.add(key), "alarm_senden": lambda *a, **k: _gesendet.append((a, k))})
+lade("_ag2_melden")
+km = dict(MIKE, zyklus=zk)
+ruf("_ag2_melden", km, 4, 5)
+ruf("_ag2_melden", km, 4, 5)
+check(len(_gesendet) == 1 and _gesendet[0][0][0] == 3 and "Mike" in _gesendet[0][0][3] and "−4.500" not in _gesendet[0][0][3] and "-4.500 $" in _gesendet[0][0][3],
+      f"Mike …5297 bei WD 4/5: genau eine ⚪-Meldung je Tag ({_gesendet[0][0][3] if _gesendet else '—'})")
+_gesendet.clear()
+ruf("_ag2_melden", dict(MIKE, id="x2", zyklus=zk), 2, 5)                       # WD 2/5: Balance hätte noch keinen Ausgleich ausgelöst
+ruf("_ag2_melden", dict(MIKE, id="x3", user_id="emin0001", zyklus=zk), 4, 5)   # Emin-Gruppe
+ruf("_ag2_melden", dict(MIKE, id="x4", zyklus=zo), 4, 5)                       # keine Abweichung
+ruf("_ag2_melden", dict(MIKE, id="x5", zyklus=zk2), 5, 5)                      # beide Quellen im Plus: nicht gesperrt, kein Ausgleich fällig
+ruf("_ag2_melden", dict(MIKE, id="x7", zyklus=zr), 4, 5)                       # review ohne P&L (RC5 „wartet“): keine AG2-Meldung
+check(not _gesendet, "keine Meldung bei WD < Ziel − 1, Emin-Gruppe, ohne Abweichung, ohne Sperre oder bei RC5 „wartet“")
+ruf("_ag2_melden", dict(MIKE, id="x8", zyklus=zn), 4, 5)                       # completed ohne P&L: ⚪ mit eigenem Text
+check(len(_gesendet) == 1 and "keinen P&L" in _gesendet[0][0][3], f"completed ohne P&L: ⚪ „keine Gegenprobe“ ({_gesendet[0][0][3] if _gesendet else '—'})")
+_gesendet.clear()
+ns["alarm_senden"] = lambda *a, **k: 1 / 0
+ruf("_ag2_melden", dict(MIKE, id="x6", zyklus=zk), 4, 5)                       # Fehler beim Senden: wirft nie
+check(not _gesendet, "keine Meldung bei WD < Ziel − 1, Emin-Gruppe, ohne Abweichung oder ohne Sperre; Sende-Fehler wirft nie")
 
 print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)

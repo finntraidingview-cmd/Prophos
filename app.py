@@ -16885,6 +16885,7 @@ def _wd_zyklus_regelzeile():
 # ohne zweiten Weg; art 'tradeify' unterscheidet. Apex bleibt unverändert.
 TRADEIFY_ZYKLUS_MIN_USD = 1.0
 TRADEIFY_ZYKLUS_PUFFER = (30, 60)
+AG2_GEGENPROBE_USD = 50.0   # AG2 (24.11.2026): höchste Abweichung Balance-Differenz ↔ Trade-Summe im Zyklus, darüber kein Ausgleichs-Trade (Master)
 # BESTÄTIGEN (Stopp S9 zu 7388c5f4, 03.11.2026): ob der Ausgleichs-Trade wie der Apex-Recoverer einzeln bestätigt werden muss, fragt der Eingang bei Finn. Vorbereitet als
 # Feld zyklus.bestaetigen; scharf (Pflicht im Farmer) erst nach Finns Antwort — bis dahin False
 # RC4 (Finn 12.11.2026 ~20:00 Dubai, Frage „Sollen Recovery-Trades weiter einzeln bestätigt werden?“): „Nein, automatisch.“ — überholt das „yes“ vom 03.11.2026.
@@ -17175,6 +17176,37 @@ def tradeify_zyklus_konto(konto, plaene, payouts, wd_stand, wd_ziel, vorplan, li
     deckel = max(dd, sb - (g0 + lk)) if (wd_konto and g0 and lk is not None) else dd
     if -gewinn > deckel or (gewinn > 3 * dd and not (st["nr"] == 1 and st["start"] is None)):
         return unbekannt(f"Zyklus {gewinn:+,.0f} $ unplausibel bei {'Puffer' if deckel > dd else 'Max DD'} {deckel:,.0f} $ — ↻ Balance lesen".replace(",", "."))
+    # AG2 (Master 24.11.2026, Finn „warum +3.000? wie immer ~+350“): Mike Tradeify 150k …5297, Payout-Antrag 12.11., Tradeify buchte die 4.500 $ erst NACH dem
+    # ersten Trade des neuen Zyklus ab (17.11. balance_start 161.996,60 → 18.11. 157.773,34). Die Balance-Differenz zählte die Abbuchung als Verlust: −3.404 $ statt
+    # +1.096 $ → Ausgleichs-Trade TP 3.462 $ ohne SL, obwohl der Zyklus im Plus war. Jetzt ist der Fehlbetrag die Summe der Trade-P&Ls seit der Anfrage
+    # (wd_zyklus_stand.profit, dieselbe Quelle wie Kachel und Payouts-Liste); die Balance-Differenz ist nur noch die Gegenprobe. Weichen beide mehr als
+    # AG2_GEGENPROBE_USD voneinander ab → unbekannt: kein Ausgleich (normaler WD), ⚪ an die Master-IDs (_ag2_melden). Die Payout-Sperre ist dann VORSICHTIG:
+    # gesperrt, wenn EINE der beiden Quellen unter dem Mindest-Gewinn liegt — auch ein Trade-P&L kann falsch sein (Finn + Pascal Lucid …0001, ec83e13a: TV las
+    # −180,50 $, die Balance fiel 2.768 $ — BS1 .2294); die Trade-Summe allein gäbe dort fälschlich frei.
+    # Fehlt einem Trade im Zyklus der P&L, ist keine Gegenprobe möglich → kein Ausgleich, Sperre wie bisher aus der Balance (nie lockerer als vorher).
+    # Hinter dem DECKEL: eine unplausible Balance (über Max DD/Puffer) urteilt weiter nach PO2b allein über die Trade-Summe (oben).
+    # Zyklus-Start ab der Abbuchung bewusst NICHT gebaut: pending_payouts.amount ist der Netto-Betrag (3.652 $), abgebucht wurden brutto 4.500 $ — nicht sauber belegbar.
+    # Nur mit Payout-Anfrage (st.start): im 1. Zyklus (Lucid, Start = Kontogröße) gibt es keine Abbuchung, die Trade-Summe zählt dort keine Tage (wie bisher).
+    # Läuft ein Trade oder wartet einer auf die Nachlesung (RC5, _of), bleibt alles wie vorher: kein Ausgleich, Grund „Ausgleich wartet“ (Prüfer AG2).
+    if st["start"] and not _of:
+        _ag2_im = [x for x in (plaene or ()) if str(x.get("status") or "") in ("completed", "review")
+                   and (_wd_berlin_tag(x.get("started_at") or x.get("ended_at") or x.get("completed_at")) or "") > str(st["start"])]
+        if any(wd_plan_pnl(x) is None for x in _ag2_im):
+            # nur noch „completed“ ohne P&L (Altlast; review ohne P&L fängt RC5 oben): ohne Gegenprobe kein automatischer TP ohne SL → ⚪ (_ag2_melden), von Hand
+            return dict(out, grund_code="unbekannt", gesperrt=gewinn < min_usd, gewinn=gewinn, gewinn_quelle="balance", fehl=round(max(0.0, -gewinn), 2),
+                        start_bal=sb, gegenprobe_fehlt=True,
+                        grund="Trade ohne P&L im Zyklus — keine Gegenprobe Balance ↔ Trades, kein Ausgleichs-Trade (P&L nachtragen oder von Hand planen)")
+        _pt = round(float(_wd_num(st.get("profit")) or 0.0), 2)
+        if abs(gewinn - _pt) > AG2_GEGENPROBE_USD:
+            _min = min(gewinn, _pt)
+            _g = (f"Balance seit Zyklus-Start {gewinn:+,.0f} $ ≠ Trades seit der Anfrage {_pt:+,.0f} $ (z. B. Payout erst nach dem ersten Trade abgebucht"
+                  f" oder ein Trade-P&L falsch gelesen)").replace(",", ".") + " — kein Ausgleichs-Trade"
+            return dict(out, grund_code="unbekannt", grund=_g + (" · Payout gesperrt (eine Quelle im Minus)" if _min < min_usd else ""),
+                        gegenprobe_abw=round(gewinn - _pt, 2), gewinn_balance=gewinn, profit_trades=_pt, start_bal=sb,
+                        gewinn=_min, gewinn_quelle="min", gesperrt=_min < min_usd, fehl=round(max(0.0, -_min), 2))
+        # stimmig (≤ 50 $): die SCHLECHTERE Quelle zählt — Sperre nie lockerer als vorher und der Ausgleichs-TP deckt auch die Balance (Prüfer AG2: Balance −3.040,
+        # Trades −2.991 → TP aus −3.040, sonst bliebe der Zyklus nach dem TP knapp im Minus)
+        gewinn = min(gewinn, _pt)
     gesperrt = gewinn < min_usd
     fehl = round(max(0.0, -gewinn), 2)
     regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
@@ -17278,6 +17310,39 @@ def _tradeify_zyklus_anhaengen(konten, plaene, pay, vorplan, firmen_regeln=None)
                                             plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []), stand, a.get("goal_target") or 5, vorplan, live, live_at,
                                             regel=mn_je.get(zyklus_plus_key(k) or "tradeify"), wd_lock=_lock(k),
                                             rc_regel=rc_je.get(zyklus_plus_key(k) or "tradeify"))
+        _ag2_melden(k, stand, a.get("goal_target") or 5)
+
+
+def _ag2_melden(k, stand, ziel_tage):
+    """AG2 (Master 24.11.2026): Balance-Differenz und Trade-Summe im Zyklus weichen > AG2_GEGENPROBE_USD ab → kein Ausgleichs-Trade (tradeify_zyklus_konto). Wäre ein
+    Ausgleich dran gewesen (eine Quelle im Minus = gesperrt, WD-Stand ≥ Ziel − 1), einmal ⚪ an die Master-IDs je Konto × Berlin-Tag (_tm_melde_frei), nur HT-IDs
+    wie alarm_recoverer. Wirft nie — die Meldung darf den Zyklus-Stand nie kosten."""
+    try:
+        z = k.get("zyklus") or {}
+        if (z.get("gegenprobe_abw") is None and not z.get("gegenprobe_fehlt")) or not z.get("gesperrt") \
+                or int(_wd_num(stand) or 0) < int(_wd_num(ziel_tage) or 5) - 1:
+            return
+        owner = str(k.get("user_id") or "")
+        namen, aus = _ap_namen()
+        if not owner or owner in aus or _alarm_fremd_verwaltet(owner):
+            return
+        key = f"ag2_gegenprobe|{k.get('id')}|{_berlin_heute()}"
+        if not _tm_melde_frei(key):
+            return
+        d0 = lambda x: f"{float(x):+,.0f}".replace(",", ".")   # noqa: E731
+        wer = f"{namen.get(owner, owner[:8])} · {k.get('firm') or ''} {k.get('name') or ''}"
+        if z.get("gegenprobe_abw") is not None:
+            txt = (f"{wer}: Balance seit Zyklus-Start {d0(z.get('gewinn_balance'))} $, Trades seit der Payout-Anfrage {d0(z.get('profit_trades'))} $ "
+                   f"(Abweichung {d0(z.get('gegenprobe_abw'))} $, z. B. Payout erst nach dem ersten Trade abgebucht oder ein Trade-P&L falsch gelesen). "
+                   f"Heute normaler WD statt Ausgleich — Zyklus im Admin prüfen.")
+        else:
+            txt = (f"{wer}: Balance seit Zyklus-Start {d0(z.get('gewinn'))} $, aber ein Trade im Zyklus hat keinen P&L — keine Gegenprobe, kein automatischer "
+                   f"Ausgleich. P&L nachtragen oder Ausgleich von Hand planen.")
+        alarm_senden(3, "ag2_gegenprobe", "WD-Zyklus: Balance ≠ Trades — kein Ausgleich", txt,
+                     uid=owner, schluessel=key, tag=f"ag2-{k.get('id')}"[:60],
+                     daten={"gewinn_balance": z.get("gewinn_balance"), "profit_trades": z.get("profit_trades"), "abw": z.get("gegenprobe_abw")})
+    except Exception as e:
+        print(f"[tradeify-zyklus] ⚠️ AG2-Meldung {str(k.get('id') or '')[:8]}: {type(e).__name__}: {e}", flush=True)
 
 
 def _wd_zyklus_anhaengen(konten):
