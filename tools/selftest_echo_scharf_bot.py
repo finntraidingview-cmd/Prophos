@@ -45,9 +45,10 @@ def main():
     src = open(BOT, encoding="utf-8").read()
     uhr = Uhr()
     ns = {"os": os, "re": re, "json": json, "time": uhr}
-    for k in ("ECHO_SCHARF_FRISCH_S", "ECHO_SCHARF_MAX_S", "ECHO_SCHARF_STANDARD_S", "TERMINAL_SUCHE_BIS"):
+    # PE1 (24.11.2026): _echo_scharf_abwarten liest über _json_lesen_geduldig (Konstante ECHO_STATUS_LESEN_VERSUCHE) — beide mitladen
+    for k in ("ECHO_SCHARF_FRISCH_S", "ECHO_SCHARF_MAX_S", "ECHO_SCHARF_STANDARD_S", "TERMINAL_SUCHE_BIS", "ECHO_STATUS_LESEN_VERSUCHE"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
-    for n in ("echo_scharf_urteil", "echo_scharf_max", "_echo_scharf_abwarten"):
+    for n in ("echo_scharf_urteil", "echo_scharf_max", "_json_lesen_geduldig", "_echo_scharf_abwarten"):
         exec(fn(src, n), ns)
     U, M, A = ns["echo_scharf_urteil"], ns["echo_scharf_max"], ns["_echo_scharf_abwarten"]
     jetzt = datetime(2026, 11, 5, 19, 0, 0)
