@@ -150,7 +150,8 @@ check(r.status_code == 200, "OPTIONS (CORS-Vorabfrage) → 200")
 
 print("4) Frontend + SQL (Textprüfung)")
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
-check("admKasseNotizZelle(tr.querySelector('.c-acc').parentElement, r)" in html, "jede Kasse-Zeile (zeile, WD + CFD) bekommt die Notiz unter dem Account")
+# KS2 (0ae0b354, 20.11.2026): Notiz als eigene Spalte .c-notiz-td statt klein unter dem Account (KN1)
+check("admKasseNotizZelle(tr.querySelector('.c-notiz-td'), r)" in html, "jede Kasse-Zeile (zeile, WD + CFD) bekommt die Notiz in der eigenen Spalte (KS2)")
 check(html.count("function admKasseNotizZelle(") == 1 and html.count("async function admKasseNotizSpeichern(") == 1, "Helfer genau einmal definiert")
 m = re.search(r"async function admKasseNotizSpeichern\(r, wert\)\{(.*?)\n    \}\n", html, re.S)
 body = m.group(1) if m else ""

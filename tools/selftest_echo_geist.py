@@ -37,7 +37,7 @@ def zeile(anfang):
 def js(prog_koerper):
     code = "\n".join([
         zeile("  function routeIstEcho(r){"),
-        bis("  const ECHO_GEIST_AB_MS =", "window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs, reif: echoEndeReif }"),
+        bis("  const ECHO_GEIST_AB_MS =", "window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs, reif: echoEndeReif, hedgeWarten: echoHedgeBuchungAbwarten }"),
         zeile("  const HEDGE_REVIEW_GRUENDE ="),
         zeile("  const HEDGE_REVIEW_SPAET ="),
         zeile("  const NIE_DA_LESUNGEN ="),
