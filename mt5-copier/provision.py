@@ -152,6 +152,13 @@ def build_login_ini(login, password, server):
             "[Experts]\nEnabled=1\nAllowLiveTrading=1\n")
 
 
+def build_experts_ini():
+    """MI1 (25.11.2026): Start-ini fuer Konten mit Sonderzeichen in den Zugangsdaten — NUR der
+    Algo-Handel-Block (wie in build_login_ini), KEIN [Common]-Login: der Login laeuft danach ueber
+    die MetaTrader5-Python-API (panel._mi1_api_login). Reines ASCII, keine Zugangsdaten."""
+    return "[Experts]\nEnabled=1\nAllowLiveTrading=1\n"
+
+
 def build_startup_ini(expert=EA_NAME, symbol=STARTUP_SYMBOL, period=STARTUP_PERIOD,
                       preset=None):
     """Zweite Startdatei: haengt das EA auf einen Chart. Enthaelt KEINE

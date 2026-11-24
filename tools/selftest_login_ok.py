@@ -102,7 +102,8 @@ def main():
     st = ps[ps.index("\ndef start_terminal("):ps.index("\nPAGE = r")]
     # RT1 (05.11.2026): seit 075ce9a7 (23.10.2026, Login-Wache dauerhaft in Runden) bekommt die Wache auch install_dir und ruft den Bot
     # je Runde mit timeout=LOGIN_WACHE_RUNDE_S + 60 statt einmal mit sekunden + 30 — Regel (nur nach Kaltstart, nur mit Konto, Zeitlimit) gleich
-    check(re.search(r"if expected:\s+threading\.Thread\(target=_login_ok_wache, args=\(fname, expected, install_dir\)", st) is not None
+    # MI1 (25.11.2026): im API-Login-Zweig (Zugangsdaten mit Sonderzeichen) startet die Wache bewusst nicht → „if expected and not api_creds:“
+    check(re.search(r"if expected(?: and not api_creds)?:\s+threading\.Thread\(target=_login_ok_wache, args=\(fname, expected, install_dir\)", st) is not None
           and st.find("_login_ok_wache") > st.find("subprocess.Popen"), "Panel: Wache nur nach dem Kaltstart und nur mit bekanntem Konto")
     w = fn(ps, "_login_ok_wache")
     check('"loginok"' in w and "timeout=LOGIN_WACHE_RUNDE_S + 60" in w, "Panel: Wache ruft den Bot im Modus loginok mit Zeitlimit")

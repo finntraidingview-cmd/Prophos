@@ -6134,6 +6134,104 @@ def _master_positionen_live(cfg):
         _MT5_INPROC_LOCK.release()
 
 
+MI1_BOOT_WARTE_S = 90          # so lange auf den Terminal-Prozess warten
+MI1_BOOT_RUHE_S = (6.0, 10.0)  # danach kurz Ruhe (Boot, Profil laden) — gestreut (Jitter-Regel)
+MI1_INIT_TIMEOUT_MS = 30000    # mt5.initialize mit Login: höchstens 30 s (hält solange den In-Prozess-Lock)
+MI1_VERSUCHE = 2
+
+
+def mi1_api_login_moeglich(login):
+    """MI1: Login per MetaTrader5-API geht nur mit Konto-NUMMER und installiertem Paket (rein prüfend, wirft nie)."""
+    try:
+        if not str(login or "").strip().isdigit():
+            return False
+        import importlib.util
+        return importlib.util.find_spec("MetaTrader5") is not None
+    except Exception:
+        return False
+
+
+def _mi1_api_login(fname, path, install_dir, creds):
+    """MI1 (25.11.2026): Login für Zugangsdaten mit Sonderzeichen/Umlauten — die Start-ini kann sie nicht tragen (nur ASCII,
+    UTF-16 ohne Live-Beleg), die MetaTrader5-Python-API nimmt Unicode. Wartet auf den Terminal-Prozess, dann unter dem
+    In-Prozess-Lock (EH2b) mt5.initialize(path, login, password, server) → account_info muss das Konto zeigen → shutdown
+    (das Terminal bleibt eingeloggt). Bis MI1_VERSUCHE Versuche. NIE Passwort in Log/Spur/Fehlertext: geloggt werden nur
+    Konto, Server und mt5.last_error(). Den Beweis für den Trade liefert wie immer der Snapshot des Lese-EA (Falsch-Konto-
+    Wächter). Wirft nie."""
+    login = str(creds.get("login") or "").strip()
+    try:
+        konto = int(login)
+    except (TypeError, ValueError):
+        print(f"[panel] {fname}: MT5-API-Login: Konto ohne Nummer — nichts versucht.", flush=True)
+        return False
+    server = str(creds.get("server") or "").strip()
+    t0 = time.time()
+    while time.time() - t0 < MI1_BOOT_WARTE_S:
+        try:
+            if provision.terminal_pids(install_dir):
+                break
+        except Exception:
+            pass
+        time.sleep(2)
+    else:
+        print(f"[panel] {fname}: MT5-API-Login {konto}: Terminal-Prozess kam nicht hoch — nichts versucht.", flush=True)
+        return False
+    time.sleep(random.uniform(*MI1_BOOT_RUHE_S))
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        print(f"[panel] {fname}: MT5-API-Login {konto}: Paket MetaTrader5 fehlt.", flush=True)
+        return False
+    for versuch in range(1, MI1_VERSUCHE + 1):
+        # Review MI1 (SOLLTE 3): läuft das Terminal nicht mehr oder heilt die Instanz gerade (Kill + Neustart), NICHT anschließen —
+        # initialize(path=…) startete sonst selbst ein Terminal ohne /config und die [StartUp]-ini der Heilung verpuffte
+        try:
+            with HEAL_LOCK:
+                heilt = install_dir in HEAL_ACTIVE
+            laeuft = bool(provision.terminal_pids(install_dir))
+        except Exception:
+            heilt, laeuft = False, False
+        if heilt or not laeuft:
+            print(f"[panel] {fname}: MT5-API-Login {konto}: {'Instanz heilt gerade' if heilt else 'Terminal läuft nicht mehr'} — abgebrochen (Versuch {versuch}).", flush=True)
+            return False
+        if not _MT5_INPROC_LOCK.acquire(timeout=60):
+            print(f"[panel] {fname}: MT5-API-Login {konto}: anderer MT5-Anschluss im Panel belegt — Versuch {versuch} übersprungen.", flush=True)
+            time.sleep(random.uniform(4.0, 8.0))
+            continue
+        try:
+            kw = {"path": path, "login": konto, "password": str(creds.get("password") or ""), "timeout": MI1_INIT_TIMEOUT_MS}
+            if server:
+                kw["server"] = server
+            ok = bool(mt5.initialize(**kw))
+            kw = None                                   # Passwort nicht länger als nötig halten
+            if ok:
+                try:
+                    ai = mt5.account_info()
+                    drin = ai is not None and int(ai.login) == konto
+                finally:
+                    mt5.shutdown()
+                if drin:
+                    print(f"[panel] {fname}: MT5-API-Login {konto} ({server or 'Server aus dem Terminal'}) — eingeloggt.", flush=True)
+                    return True
+                print(f"[panel] {fname}: MT5-API-Login {konto}: Terminal zeigt ein anderes Konto — Versuch {versuch}.", flush=True)
+            else:
+                try:
+                    fehler = mt5.last_error()
+                except Exception:
+                    fehler = "?"
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+                print(f"[panel] {fname}: MT5-API-Login {konto} ({server or '?'}) fehlgeschlagen: {fehler} — Versuch {versuch}.", flush=True)
+        except Exception as e:
+            print(f"[panel] {fname}: MT5-API-Login {konto}: {type(e).__name__} — Versuch {versuch}.", flush=True)   # nie str(e): könnte Argumente spiegeln
+        finally:
+            _MT5_INPROC_LOCK.release()
+        time.sleep(random.uniform(4.0, 8.0))
+    return False
+
+
 def _ok_dialog_watcher(install_dir, dauer_s=75):
     """Start-Dialoge automatisch bestaetigen (18.08.2026, Finns The5ers-Fund:
     das Terminal oeffnete mit einem Login-/OK-Dialog, niemand drueckte OK,
@@ -6405,13 +6503,22 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # Ohne Servernamen kein Zwang (leere Server=-Zeile in der ini waere
         # unberechenbar) — dann lieber der bisherige nackte Start.
         creds = None
+    api_creds = None
     if creds and not all(str(creds.get(k) or "").isascii() for k in ("login", "password", "server")):
-        # VOR jedem Kill pruefen (Review-Fund 15.08.2026): die Start-ini ist
-        # zwingend ASCII (UTF-16 ignoriert MT5), und ein UnicodeEncodeError nach
-        # dem Kill liesse das Terminal tot zurueck. Klare Ansage statt Crash.
-        return False, ("Zugangsdaten enthalten Sonderzeichen/Umlaute — die MT5-Start-ini "
-                       "kann nur ASCII. Login einmal von Hand im Terminal machen "
-                       "(Datei → Bei Handelskonto anmelden).")
+        # VOR jedem Kill pruefen (Review-Fund 15.08.2026): die Start-ini schreiben wir
+        # nur als ASCII (UTF-16 ohne Live-Beleg, s. MI1), ein UnicodeEncodeError nach
+        # dem Kill liesse das Terminal tot zurueck.
+        # MI1 (25.11.2026, Amir Blue Guardian …1977/…1978 + Emin …1836: „kann nur ASCII“):
+        # Zugangsdaten mit Sonderzeichen/Umlauten loggen jetzt ueber die MetaTrader5-
+        # Python-API ein (mt5.initialize nimmt Unicode). Die Start-ini traegt dann KEINE
+        # Zugangsdaten. Login muss eine Zahl sein; ohne MT5-Paket bleibt es bei der Ansage.
+        if mi1_api_login_moeglich(creds.get("login")):
+            api_creds = {"login": str(creds.get("login")).strip(), "password": str(creds.get("password") or ""),
+                         "server": str(creds.get("server") or cfg.get("master_server") or "").strip()}
+        else:
+            return False, ("Zugangsdaten enthalten Sonderzeichen/Umlaute — die MT5-Start-ini "
+                           "kann nur ASCII. Login einmal von Hand im Terminal machen "
+                           "(Datei → Bei Handelskonto anmelden).")
     install_dir = os.path.dirname(os.path.abspath(path))
     pids = provision.terminal_pids(install_dir)
     wrong = None
@@ -6486,7 +6593,29 @@ def start_terminal(fname, creds=None, ohne_update=False):
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
     _vor_kaltstart(fname, install_dir)   # Download-Kennung + HKCU-Häkchen weg (23.10.2026)
     try:
-        if creds:
+        if api_creds:
+            # MI1 (25.11.2026): Zugangsdaten mit Sonderzeichen — Start-ini OHNE [Common]-Login (nur
+            # Algo-Handel + ggf. EA-Chart, reines ASCII), danach Login per MetaTrader5-API im Hintergrund
+            # (_mi1_api_login). Ablauf sonst wie der Zwangs-Login: alten Beweis entwerten, EA kompilieren
+            # und ins Profil schreiben.
+            _drop_snapshot(cfg)
+            _ensure_ea_compiled(fname, install_dir)
+            startup = ""
+            if not _inject_ea_into_profile(fname, cfg, install_dir):
+                startup = _startup_attach_part(fname, cfg, install_dir)
+            ini = os.path.join(install_dir, "prophos-login.ini")
+            try:
+                with open(ini, "w", encoding=provision.INI_ENCODING) as f:
+                    f.write(provision.build_experts_ini() + startup)
+                subprocess.Popen([path, f"/config:{ini}"], cwd=install_dir)
+            finally:
+                _remove_later(ini)
+            threading.Thread(target=_mi1_api_login, args=(fname, path, install_dir, api_creds),
+                             daemon=True).start()
+            msg = ("Terminal gestartet — Login über die MT5-Schnittstelle (Zugangsdaten mit Sonderzeichen)"
+                   + (", Lese-EA wird direkt aufgezogen" if startup else "")
+                   + "; Selbstheilung wacht im Hintergrund")
+        elif creds:
             # Login-Zwang: [Common]-only-ini (KEIN [StartUp] — das wuerde bei jedem
             # Start einen weiteren EA-Chart aufziehen; das EA haengt am Profil und
             # die Selbstheilung unten faengt den Fehlfall). ASCII ist Pflicht,
@@ -6538,8 +6667,9 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
         threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),
                          daemon=True).start()
-        # MT5-Einloggen-Fenster dieses Kontos (08.10.2026, s. _login_ok_wache; seit 23.10.2026 bis zur Verbindung) — nur mit bekanntem Konto
-        if expected:
+        # MT5-Einloggen-Fenster dieses Kontos (08.10.2026, s. _login_ok_wache; seit 23.10.2026 bis zur Verbindung) — nur mit bekanntem Konto.
+        # MI1 (Review SOLLTE 1): NICHT im API-Zweig — ohne gespeichertes Passwort hieße OK drücken Fehl-Logins beim Broker; dort loggt _mi1_api_login ein
+        if expected and not api_creds:
             threading.Thread(target=_login_ok_wache, args=(fname, expected, install_dir), daemon=True).start()
         # Fenster nach vorn, sobald es da ist (sonst startet MT5 hinter dem Browser)
         _front_when_up(install_dir)
