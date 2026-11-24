@@ -46,6 +46,12 @@ try:
 finally:
     ob.cdp_konto_familie = alt_f
 
+# (2b) zweiter Fall (Master 24.11.2026 19:2x Dubai, Chris pc-c19p2l Plan da9dd15c FTMO110764, order_signale 15:24 UTC): gleiches Muster —
+# eigener Login klappte, Liste vollständig (4 Konten, scrollTop 0→0 von 164), Ziel zuletzt gehandelt 17.11.
+EX2 = {"konto_treffer": 0, "liste_aktiv": "FTMO879191 47,003.36 USD", "liste_zu": True, "ziel_im_text": False,
+       "konto_eintraege": ["FTMO879191 USD", "FTMO296819 USD", "FTMO943996 USD", "FTMO220768 USD"]}
+check(ob.cdp_konto_weg(EX2, True, "FTMO110764") == (True, 4, False), "Chris FTMO110764: eigener Login + vollständige Liste ohne Ziel → konto_weg (4 Konten)")
+
 # (3) Riegel unverändert
 check(ob.cdp_konto_weg(EX, False, "FTMO572103")[0] is False, "ohne eigenen Formular-Login nie konto_weg")
 check(ob.cdp_konto_weg(dict(EX, liste_zu=False), True, "FTMO572103")[0] is False, "hängende Liste nie Beleg")
