@@ -1227,7 +1227,15 @@
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
      auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
      nebeneinander, darunter bricht die letzte Karte um statt die Beträge abzuschneiden. */
-  #adm-pane-wallet .kpis,#adm-pane-bank .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  #adm-pane-wallet .kpis,#adm-pane-bank .kpis,#adm-pane-finsum .kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}   /* BK2: ein Raster für Finanzen */
+  :is(#fs-person-dist,#bk-person-dist,#wal-person-dist) .adm-val{min-width:84px}   /* BK2: Balken beginnen in jeder Zeile gleich (ruhige Liste) */
+  @media (max-width:820px){   /* BK2 Handy: Gesamt-Kachel volle Breite, darunter je zwei nebeneinander (kein einzelner Rest) */
+    #adm-pane-wallet .kpis,#adm-pane-bank .kpis,#adm-pane-finsum .kpis{grid-template-columns:1fr 1fr}
+    :is(#adm-pane-wallet,#adm-pane-finsum) .kpis > .kpi:first-child{grid-column:1 / -1}
+    :is(#fs-person-dist,#bk-person-dist,#wal-person-dist) .adm-val{min-width:64px}
+  }
+  #dashboard-view .fin-legende{display:flex;gap:14px;font-size:11.5px;color:var(--sub);white-space:nowrap}
+  #dashboard-view .fin-info{margin-left:auto;font-size:11.5px;color:var(--sub-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* BK2: Status dezent rechts */
   /* KAPITAL IM SYSTEM (29.10.2026): kleine Karte oben in Meta Wallet — drei Kacheln, Teile als Mini-Kacheln, Verlauf, Listen eingeklappt */
   #adm-pane-kapital .kis-k3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
   /* Neue Hauptansicht (29.10.2026): eine große Zahl, Tagesbalken je Quelle, Aufteilung jetzt, Weitere Posten */
@@ -1616,11 +1624,16 @@
   #dashboard-view .adm-vl-chip.is-on{color:var(--ink);font-weight:600;background:var(--violet-tint)}
   #dashboard-view .adm-mail-sicht{display:flex;gap:4px;margin:0 0 12px}   /* Mails · Konten aus Mail (29.10.2026) */
   #dashboard-view .adm-mail-sicht[hidden]{display:none}
+  #dashboard-view .adm-fin-sicht{margin:0 0 14px} #dashboard-view .adm-fin-sicht[hidden]{display:none}   /* BK2: Finanzen-Umschalter */
+  #dashboard-view .fs-punkt{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:baseline}
+  #dashboard-view .fs-meta{background:var(--violet)} #dashboard-view .fs-bank{background:var(--teal)}
   /* BANKKONTO (BK1, 24.11.2026): Formzeilen wie die Wallet-Eingabe, IBAN in Mono, gewähltes Konto violett hinterlegt */
   #adm-pane-bank .bk-form{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+  #adm-pane-bank .bk-form[hidden]{display:none}
   #adm-pane-bank .bk-form input,#adm-pane-bank .bk-form select{flex:1;min-width:0;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
   #adm-pane-bank .bk-form select{flex:0 0 auto}
   #adm-pane-bank .bk-mono,#adm-pane-bank .bk-iban{font-family:var(--mono);font-size:12.5px}
+  #adm-pane-bank .bk-iban{white-space:nowrap}   /* BK2: IBAN in einer Zeile, die Tabelle scrollt am Handy */
   #adm-pane-bank .bk-msgzeile{font-size:12.5px;min-height:16px;margin-bottom:6px;color:var(--danger)}
   #adm-pane-bank .bk-msgzeile.gut{color:var(--good)}
   #adm-pane-bank tr.bk-konto{cursor:pointer}
@@ -14754,9 +14767,50 @@
         <!-- FINANZEN (BK1, 24.11.2026, Finn: „Admin, neuer Reiter Finanzen, Finanzen unterteilt in Meta Wallet und Bankkonto"): der Reiter
              „Meta Wallet" heißt jetzt „Finanzen" (data-admtab bleibt 'wallet', Rechte unverändert), oben der Umschalter wie Mails · Konten.
              Meta Wallet = adm-pane-wallet unverändert; Bankkonto = adm-pane-bank (Daten nur über /admin/bank, Gate wie Kapital). -->
-        <div class="adm-mail-sicht" id="adm-fin-sicht" hidden>
-          <button type="button" class="adm-vl-chip is-on" data-adm-fin-sicht="wallet">Meta Wallet</button>
-          <button type="button" class="adm-vl-chip" data-adm-fin-sicht="bank">Bankkonto</button>
+        <!-- BK2 (25.11.2026, Finn: „erst eine Totalübersicht, in der Meta und Bankkonto zusammengefasst werden … Ist ein bisschen hässlich,
+             wenn man draufklickt"): Segment-Umschalter (.seg wie die Gruppen-Chips oben) Übersicht · Meta Wallet · Bankkonto, Start = Übersicht -->
+        <div class="seg adm-fin-sicht" id="adm-fin-sicht" role="tablist" aria-label="Finanzen" hidden>
+          <button type="button" role="tab" class="active" data-adm-fin-sicht="uebersicht">Übersicht</button>
+          <button type="button" role="tab" data-adm-fin-sicht="wallet">Meta Wallet</button>
+          <button type="button" role="tab" data-adm-fin-sicht="bank">Bankkonto</button>
+        </div>
+        <!-- ÜBERSICHT (BK2): Meta Wallet + Bankkonto zusammen, in USD (Bank-EUR über fx_usd_eur wie Kapital/Winning Days). Daten aus den
+             beiden Bereichen (wallets/walBal, bkDaten) — kein eigener Server-Weg; fsRender läuft nach jedem Laden beider Seiten. -->
+        <div id="adm-pane-finsum" hidden>
+          <div class="adm-toolbar">
+            <select id="fs-person" class="adm-f"><option value="">Alle Personen</option></select>
+            <span id="fs-info" class="fin-info"></span>
+          </div>
+          <div class="kpis">
+            <div class="kpi">
+              <div class="kpi-label">Gesamt (USD)</div>
+              <div class="kpi-value" id="fs-k-ges">–</div>
+              <div class="kpi-delta delta-neutral" id="fs-k-ges-sub">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label"><span class="fs-punkt fs-meta"></span>Meta Wallet (USDT)</div>
+              <div class="kpi-value" id="fs-k-meta">–</div>
+              <div class="kpi-delta delta-neutral" id="fs-k-meta-sub">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label"><span class="fs-punkt fs-bank"></span>Bankkonten</div>
+              <div class="kpi-value" id="fs-k-bank">–</div>
+              <div class="kpi-delta delta-neutral" id="fs-k-bank-sub">–</div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Nach Person</div>
+                <div class="panel-sub">Meta Wallet + Bankkonto in USD · klicken filtert</div>
+              </div>
+              <div class="fin-legende">
+                <span><span class="fs-punkt fs-meta"></span>Meta Wallet</span>
+                <span><span class="fs-punkt fs-bank"></span>Bankkonto</span>
+              </div>
+            </div>
+            <div class="adm-dist" id="fs-person-dist"></div>
+          </div>
         </div>
         <div id="adm-pane-wallet" hidden>
           <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent);border:1px solid color-mix(in srgb, var(--danger) 30%, transparent);font-size:12.5px;color:var(--sub)">
@@ -14769,7 +14823,7 @@
           <div class="adm-toolbar">
             <select id="wal-person" class="adm-f"><option value="">Alle Personen</option></select>
             <button class="btn btn-ghost" id="wal-refresh" title="Balances von den Chains neu laden" style="padding:8px 12px">↻</button>
-            <span id="wal-msg" style="font-size:12px;color:var(--sub)"></span>
+            <span id="wal-msg" class="fin-info"></span>
           </div>
           <!-- MW1 (17.11.2026): Wallets ohne ID und ohne Unternehmen — nur beim HT-Admin, zählen nirgends mit (walOhneRender) -->
           <div class="adm-ohne-unt" id="wal-ohne" hidden style="margin:0 0 14px"></div>
@@ -14985,7 +15039,7 @@
                 <option value="">Alle Konten</option>
               </select>
               <button class="btn btn-ghost" id="bk-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
-              <span id="bk-info" style="font-size:12px;color:var(--sub)"></span>
+              <span id="bk-info" class="fin-info"></span>
             </div>
 
             <div class="kpis">
@@ -15010,10 +15064,11 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Konten</div>
-                  <div class="panel-sub">Nach Person · Saldo = Startsaldo + alle Buchungen · Zeile anklicken zeigt die Buchungen · ✎ ändert, × löscht das Konto mit seinen Buchungen</div>
+                  <div class="panel-sub">Saldo = Startsaldo + alle Buchungen · Zeile anklicken zeigt die Buchungen</div>
                 </div>
+                <button class="btn btn-ghost" id="bk-a-auf" style="padding:7px 12px">+ Konto</button>
               </div>
-              <div class="bk-form">
+              <div class="bk-form" id="bk-a-form" hidden>
                 <select id="bk-a-person" title="ID"></select>
                 <select id="bk-a-zweck" title="Zweck">
                   <option value="Account-Kauf">Account-Kauf</option>
@@ -15027,7 +15082,7 @@
                 <select id="bk-a-waehrung" title="Währung"><option>EUR</option><option>USD</option></select>
                 <input id="bk-a-start" type="number" step="0.01" placeholder="Startsaldo" style="width:110px;flex:0 0 auto" title="Stand vor der ersten Buchung (leer = 0)">
                 <button class="btn btn-primary" id="bk-a-ok">Konto hinzufügen</button>
-                <button class="btn btn-ghost" id="bk-a-abbruch" hidden>Abbrechen</button>
+                <button class="btn btn-ghost" id="bk-a-abbruch">Abbrechen</button>
               </div>
               <div id="bk-a-msg" class="bk-msgzeile"></div>
               <div class="table-wrap">
@@ -17515,13 +17570,13 @@
       admGruppeChips()
       // wie beim Kapitel-Regler: Übersicht/Payouts/Käufe neu vom Server, Statistik beim nächsten Öffnen bzw. sofort, wenn offen
       // Meta Wallet filtert über excluded_uids der Übersicht — erst nach der neuen Antwort neu laden
-      admLoad().then(() => { if(walOpened){ walOpened = false; if(!$('adm-pane-wallet')?.hidden) walOpen() } })
+      admLoad().then(() => { if(walOpened){ walOpened = false; if(!$('adm-pane-wallet')?.hidden || !$('adm-pane-finsum')?.hidden) walOpen() } })   // BK2: auch die Übersicht
       admKapData = null
       if(!$('adm-pane-stat')?.hidden) admKapitelLaden()
       if(!$('adm-pane-planer')?.hidden){ window._apIdsLaden?.(); window._apvGruppeNeu?.() }   // Verlauf in € folgt der Gruppe (29.10.2026)
       if(!$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()
       if(!$('adm-pane-kapital')?.hidden) window._kisGruppeNeu?.()   // Kapital lädt sofort die Gruppe von oben (29.10.2026)
-      if(!$('adm-pane-bank')?.hidden) window._bkOeffnen?.()   // Bankkonto (BK1) folgt der Gruppe von oben
+      if(!$('adm-pane-bank')?.hidden || !$('adm-pane-finsum')?.hidden) window._bkGruppeNeu?.()   // Bankkonto (BK1) + Übersicht (BK2) folgen der Gruppe von oben
       window._admPcsOeffnen?.()   // PC-Tabs neu zeichnen (Filter über _admGruppeOk)
     })
     /* Gerät merken (22.10.2026, Finn: „da mein MacBook … drin ist, nicht jedes Mal das Admin-Passwort
@@ -22657,6 +22712,7 @@
 
     function walRender(){
       if(!$('wal-rows')) return
+      try{ window._fsRender?.() }catch(_){}   // BK2: Übersicht liest dieselben wallets/walBal
       try{ walOhneRender() }catch(e){ console.warn('[wallet] ohne Zuordnung:', e.message || e) }   // MW1
       const rows = walFiltered()
 
@@ -23999,9 +24055,11 @@
      * Policy für Logins). Saldo je Konto rechnet der Server (start_saldo + Σ betrag), hier nur Anzeige + laufender Saldo der Buchungsliste.
      * IBAN nie in URL, Log oder localStorage — sie steht nur im Speicher dieses Tabs (bkDaten). Standard-Filter Account-Kauf-Konten
      * (Master 24.11.2026); die Gruppe kommt vom Gruppen-Chip oben wie bei Kapital. */
-    let bkDaten = null, bkLaeuft = false, bkNochmal = false, bkKonto = '', bkEdit = '', bkEditIban = ''
+    let bkDaten = null, bkFehler = '', bkLaeuft = false, bkNochmal = false, bkKonto = '', bkEdit = '', bkEditIban = ''
     const bkNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const bkGeld = (v, w) => bkNf.format(Number(v) || 0) + (w === 'USD' ? ' $' : ' €')
+    const bkNf0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 })
+    const bkGeld0 = (v, w) => bkNf0.format(Number(v) || 0) + (w === 'USD' ? ' $' : ' €')   // Kacheln (BK2: wie die Übersicht)
     const bkIban = i => String(i || '').replace(/(.{4})/g, '$1 ').trim()
     const bkTag = d => { const s = String(d || ''); return /^\d{4}-\d{2}-\d{2}/.test(s) ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : '–' }
     const bkHeute = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -24023,17 +24081,20 @@
         const g = bkGruppe()
         const r = await rgApi('/admin/bank?ansicht=admin' + (g ? '&gruppe=' + encodeURIComponent(g) : ''), { raw: true })
         const d = await r.json().catch(() => ({}))
-        if(r.status === 401 || r.status === 403){ bkDaten = null; $('bk-body').hidden = true; msg.hidden = false; msg.textContent = 'Kein Zugriff: ' + (d.error || ('HTTP ' + r.status)); return }
+        if(r.status === 401 || r.status === 403){ bkDaten = null; bkFehler = 'kein Zugriff'; $('bk-body').hidden = true; msg.hidden = false; msg.textContent = 'Kein Zugriff: ' + (d.error || ('HTTP ' + r.status)); return }
         if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
-        bkDaten = d; msg.hidden = true; $('bk-body').hidden = false; bkRender()
+        bkDaten = d; bkFehler = ''; msg.hidden = true; $('bk-body').hidden = false; bkRender()
       }catch(e){
         msg.hidden = false; msg.textContent = 'Bankkonto nicht verfügbar: ' + (e.message || e)
+        bkFehler = 'nicht geladen'   // BK2-Review: die Übersicht sagt es statt still nur Meta zu summieren
       }finally{ bkLaeuft = false }
       if(bkNochmal){ bkNochmal = false; await bkLaden() }
     }
     const bkWarten = () => new Promise(r => { const t = setInterval(() => { if(!bkLaeuft && !bkNochmal){ clearInterval(t); r() } }, 100) })
+    // Gruppenwechsel (BK2-Review): alte Gruppe sofort verwerfen, sonst rechnet die Übersicht bei einem Ladefehler neue Wallets + alte Konten
+    window._bkGruppeNeu = () => { bkDaten = null; bkKonto = ''; $('bk-body').hidden = true; window._fsRender?.(); return bkLaden().then(() => window._fsRender?.()).catch(() => {}) }
     window._bkOeffnen = () => { if(!$('bk-b-datum').value) $('bk-b-datum').value = bkHeute(); bkLaden() }
-    window._bkStub = d => { bkDaten = d; $('bk-msg').hidden = true; $('bk-body').hidden = false; if(!$('bk-b-datum').value) $('bk-b-datum').value = bkHeute(); bkRender() }   // Test-Haken wie _kisStub (ohne Login zeichnen)
+    window._bkStub = d => { bkDaten = d; bkFehler = ''; $('bk-msg').hidden = true; $('bk-body').hidden = false; if(!$('bk-b-datum').value) $('bk-b-datum').value = bkHeute(); bkRender() }   // Test-Haken wie _kisStub (ohne Login zeichnen)
 
     function bkSichtbar(){
       const d = bkDaten || {}, p = $('bk-person').value, z = $('bk-zweck').value
@@ -24052,16 +24113,16 @@
       const summe = w => rows.filter(k => (k.waehrung || 'EUR') === w && bkHatSaldo(k)).reduce((a, k) => a + (Number(k.saldo) || 0), 0)
       const nUsd = rows.filter(k => k.waehrung === 'USD').length
       const nPers = new Set(rows.map(k => String(k.user_id))).size
-      $('bk-k-eur').textContent = bkGeld(summe('EUR'), 'EUR')
+      $('bk-k-eur').textContent = bkGeld0(summe('EUR'), 'EUR')
       $('bk-k-eur-sub').textContent = rows.length ? `${rows.length} ${rows.length === 1 ? 'Konto' : 'Konten'} · ${nPers} Person${nPers === 1 ? '' : 'en'}` : 'noch keine Konten'
       $('bk-k-usd-kachel').hidden = !nUsd
-      $('bk-k-usd').textContent = bkGeld(summe('USD'), 'USD')
+      $('bk-k-usd').textContent = bkGeld0(summe('USD'), 'USD')
       $('bk-k-usd-sub').textContent = `${nUsd} ${nUsd === 1 ? 'Konto' : 'Konten'}`
       const letzte = rows.map(k => k.letzte).filter(Boolean).sort().pop()
       const lk = rows.find(k => k.letzte === letzte)
       $('bk-k-letzte').textContent = bkTag(letzte)
       $('bk-k-letzte-sub').textContent = lk ? lk.name : '–'
-      $('bk-info').textContent = d.gruppe?.name ? 'Unternehmen: ' + d.gruppe.name : ''
+      $('bk-info').textContent = ''   // BK2: Unternehmen steht schon im Gruppen-Chip oben
 
       // Konten-Tabelle, je Person eine Kopfzeile mit Summe (wie die Wallet-Tabelle)
       const tb = $('bk-rows'); tb.innerHTML = ''
@@ -24120,6 +24181,7 @@
         dist.appendChild(b)
       }
       bkBuchungenRender()
+      try{ window._fsRender?.() }catch(_){}   // BK2
     }
 
     function bkBuchungenRender(){
@@ -24165,12 +24227,14 @@
     }
     function bkFormLeeren(){
       bkEdit = ''
+      $('bk-a-form').hidden = true; $('bk-a-auf').hidden = false   // BK2: Formular wieder zu
       for(const id of ['bk-a-bank', 'bk-a-inhaber', 'bk-a-iban', 'bk-a-bic', 'bk-a-start']) $(id).value = ''
       $('bk-a-person').disabled = false
-      $('bk-a-ok').textContent = 'Konto hinzufügen'; $('bk-a-abbruch').hidden = true
+      $('bk-a-ok').textContent = 'Konto hinzufügen'
     }
     function bkBearbeiten(k){
       bkEdit = String(k.id)
+      $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true
       $('bk-a-person').value = String(k.user_id); $('bk-a-person').disabled = true
       $('bk-a-zweck').value = k.zweck; $('bk-a-bank').value = k.bank || ''; $('bk-a-inhaber').value = k.inhaber || ''
       $('bk-a-iban').value = bkEditIban = bkIban(k.iban); $('bk-a-bic').value = k.bic || ''; $('bk-a-waehrung').value = k.waehrung || 'EUR'
@@ -24190,6 +24254,7 @@
     $('bk-zweck')?.addEventListener('change', () => bkRender())
     $('bk-refresh')?.addEventListener('click', () => bkLaden())
     $('bk-a-abbruch')?.addEventListener('click', () => { bkFormLeeren(); $('bk-a-msg').textContent = '' })
+    $('bk-a-auf')?.addEventListener('click', () => { $('bk-a-form').hidden = false; $('bk-a-auf').hidden = true; $('bk-a-ok').textContent = 'Konto hinzufügen'; $('bk-a-iban').focus() })
     $('bk-a-ok')?.addEventListener('click', async ev => {
       const body = { zweck: $('bk-a-zweck').value, bank: $('bk-a-bank').value, inhaber: $('bk-a-inhaber').value,
         iban: $('bk-a-iban').value, bic: $('bk-a-bic').value, waehrung: $('bk-a-waehrung').value, start_saldo: Number($('bk-a-start').value) || 0 }
@@ -24218,6 +24283,101 @@
         if(ok){ $('bk-b-betrag').value = ''; $('bk-b-text').value = '' }
       }finally{ btn.disabled = false }
     })
+    /* ── FINANZEN-ÜBERSICHT (BK2, 25.11.2026, Finn: „erst eine Totalübersicht, in der Meta und Bankkonto zusammengefasst werden … zuerst
+     * die zusammengefassten Finanzen sehe, akkumuliert von beiden") ── nur Anzeige aus den Daten der beiden Bereiche: wallets/walBal
+     * (Meta Wallet, schon nach Unternehmen gefiltert, USDT) und bkDaten (Bankkonto, Gruppe vom Chip, je Konto EUR oder USD).
+     * Bank-EUR → USD über fx_usd_eur (USD→EUR) wie Kapital/Winning Days; Bank-USD zählt direkt. Person = person_uid bzw. user_id;
+     * Wallets ohne ID über den Namen, wenn er genau einer bekannten ID gehört, sonst als eigene Zeile. Saldo ohne Buchungen zählt nicht. */
+    const fsUsd = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+    const fsEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
+    function fsKurs(){
+      const a = Number(window._admData && window._admData.fx_usd_eur), e = Number(window._fxUsdEur)
+      return a > 0 ? { fx: a, quelle: 'Admin-Übersicht' } : e > 0 ? { fx: e, quelle: 'Einstellungen' } : { fx: 0.85, quelle: 'Standard' }
+    }
+    function fsPersonen(){
+      const { fx } = fsKurs(), map = new Map()
+      const bank = ((window._admBankErlaubt?.() ?? true) && !bkFehler) ? bkDaten : null   // BK2-Review: ohne Bank-Recht bzw. nach Ladefehler nie Bankdaten (auch keine alten)
+      const neu = (key, name) => { if(!map.has(key)) map.set(key, { key, name, meta: 0, metaDa: false, bankEur: 0, bankUsd: 0, bankDa: false, nWal: 0, nKto: 0 }); return map.get(key) }
+      // Name → ID nur, wenn der Name genau EINER ID gehört (Admin-Personen, Wallets mit ID, Bankkonten); mehrdeutig = nicht zuordnen
+      const kandidaten = new Map()
+      const merk = (name, uid) => { const n = String(name || '').trim().toLowerCase(); if(!n || !uid) return; if(!kandidaten.has(n)) kandidaten.set(n, new Set()); kandidaten.get(n).add(String(uid)) }
+      for(const p of (window._admData?.people || [])) merk(p.name, p.user_id)
+      for(const w of (typeof wallets !== 'undefined' ? wallets : [])) merk(w.person_name, w.person_uid)
+      for(const p of (bank?.personen || [])) merk(p.name, p.user_id)
+      const nameZuUid = new Map([...kandidaten].filter(([, u]) => u.size === 1).map(([n, u]) => [n, [...u][0]]))
+      for(const w of (typeof wallets !== 'undefined' ? wallets : [])){
+        const uid = String(w.person_uid || '').trim() || nameZuUid.get(String(w.person_name || '').trim().toLowerCase()) || ''
+        const g = neu(uid || 'n:' + String(w.person_name || '').toLowerCase(), w.person_name || '–')
+        const b = walBal.get(w.id)
+        if(b?.usdt != null){ g.meta += b.usdt + (b.coinUsdt || 0); g.metaDa = true }
+        g.nWal++
+      }
+      for(const k of (bank?.konten || [])){
+        const g = neu(String(k.user_id), k.name || '–')
+        if(k.name) g.name = k.name   // Prophos-Name gewinnt vor frei getipptem Wallet-Namen
+        g.nKto++
+        if(!bkHatSaldo(k)) continue
+        if(k.waehrung === 'USD') g.bankUsd += Number(k.saldo) || 0; else g.bankEur += Number(k.saldo) || 0
+        g.bankDa = true
+      }
+      for(const g of map.values()){ g.bank = g.bankUsd + g.bankEur / fx; g.total = g.meta + g.bank }
+      return [...map.values()]
+    }
+    function fsRender(){
+      if(!$('fs-person-dist')) return
+      const { fx, quelle } = fsKurs()
+      const alle = fsPersonen().sort((a, b) => b.total - a.total)
+      const sel = $('fs-person'), cur = sel.value
+      sel.innerHTML = '<option value="">Alle Personen</option>' + [...alle].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+        .map(g => `<option value="${bkEsc(g.key)}">${bkEsc(g.name)}</option>`).join('')
+      sel.value = alle.some(g => g.key === cur) ? cur : ''
+      const rows = sel.value ? alle.filter(g => g.key === sel.value) : alle
+      const sum = f => rows.reduce((a, g) => a + g[f], 0)
+      const metaDa = rows.some(g => g.metaDa), bankDa = rows.some(g => g.bankDa)
+      const meta = sum('meta'), bank = sum('bank'), bankEur = sum('bankEur'), bankUsd = sum('bankUsd')
+      const nWal = sum('nWal'), nKto = sum('nKto')
+      $('fs-k-ges').textContent = (metaDa || bankDa) ? fsUsd.format(meta + bank) : '–'
+      const bankOk = window._admBankErlaubt?.() ?? true
+      const ohneBank = bankOk && bkFehler ? ' · ohne Bankkonten' : ''   // BK2-Review: fehlende Bank nie still weglassen
+      $('fs-k-ges-sub').textContent = (metaDa || bankDa) ? `≈ ${fsEur.format((meta + bank) * fx)} · ${rows.length} Person${rows.length === 1 ? '' : 'en'}${ohneBank}` : 'lädt …'
+      $('fs-k-meta').textContent = metaDa ? fsUsd.format(meta).replace('$', 'USDT').trim() : '–'
+      $('fs-k-meta-sub').textContent = nWal ? `${nWal} Wallet${nWal === 1 ? '' : 's'}${metaDa ? '' : ' · Balances laden …'}` : 'keine Wallets'
+      $('fs-k-bank').textContent = bankDa ? fsEur.format(bankEur) + (bankUsd ? ' + ' + fsUsd.format(bankUsd) : '') : '–'
+      $('fs-k-bank-sub').textContent = !bankOk ? 'kein Zugriff' : bkFehler ? 'Bankkonto ' + bkFehler : bkDaten ? `${nKto} ${nKto === 1 ? 'Konto' : 'Konten'} · ≈ ${fsUsd.format(bank)}` : 'lädt …'
+      $('fs-info').textContent = `Kurs 1 $ = ${String(fx).replace('.', ',')} € (${quelle})`
+
+      const dist = $('fs-person-dist'); dist.innerHTML = ''
+      const grand = alle.reduce((a, g) => a + Math.max(0, g.meta) + Math.max(0, g.bank), 0)
+      if(!alle.length) dist.innerHTML = '<div class="adm-empty">Noch keine Wallets oder Bankkonten.</div>'
+      for(const g of alle){
+        const m = Math.max(0, g.meta), b = Math.max(0, g.bank), pos = m + b
+        const share = grand > 0 ? 100 * pos / grand : 0
+        const el = document.createElement('button'); el.type = 'button'
+        el.className = 'adm-row adm-row-btn' + (sel.value === g.key ? ' is-on' : '')
+        el.innerHTML = '<div class="adm-row-name"></div>' +
+          `<div class="adm-track"><div style="display:flex;height:100%;width:${share.toFixed(1)}%">` +
+          `<div style="width:${pos > 0 ? (100 * m / pos).toFixed(1) : 0}%;background:var(--violet)"></div>` +
+          `<div style="width:${pos > 0 ? (100 * b / pos).toFixed(1) : 0}%;background:var(--teal)"></div></div></div>` +
+          `<div class="adm-val${g.total < 0 ? ' bk-minus' : ''}">${fsUsd.format(g.total)}</div><div class="adm-pct">${share.toFixed(0)}%</div>`
+        el.querySelector('.adm-row-name').textContent = g.name
+        el.title = `${g.name}: Meta Wallet ${fsUsd.format(g.meta)} · Bankkonto ${fsEur.format(g.bankEur)}${g.bankUsd ? ' + ' + fsUsd.format(g.bankUsd) : ''} (≈ ${fsUsd.format(g.bank)}) — klicken filtert`
+        el.addEventListener('click', () => { sel.value = sel.value === g.key ? '' : g.key; fsRender() })
+        dist.appendChild(el)
+      }
+    }
+    window._fsRender = () => { if(!$('adm-pane-finsum')?.hidden) fsRender() }
+    window._fsOeffnen = () => {
+      fsRender()
+      walOpen()   // lädt Wallets + Balances nur beim ersten Öffnen; walRender zieht die Übersicht nach
+      // BK2-Review: Bank-Recht erst prüfen, wenn die Admin-Übersicht da ist (sonst gilt ein „nur eigene“-Login kurz als berechtigt)
+      const vor = admData ? Promise.resolve() : Promise.resolve(admLoad()).catch(() => {})
+      vor.then(() => {
+        const bankOk = window._admBankErlaubt?.() ?? true
+        const k = document.querySelector('#adm-fin-sicht [data-adm-fin-sicht="bank"]'); if(k) k.hidden = !bankOk
+        return bankOk ? bkLaden() : null
+      }).then(() => window._fsRender()).catch(() => {})
+    }
+    $('fs-person')?.addEventListener('change', () => fsRender())
     window._kisGruppeNeu = () => { kisDaten = null; $('kis-body').hidden = true; kisLaden() }
     window._kisStub = d => { kisDaten = d; $('kis-body').hidden = false; const m = $('kis-msg'); if(m) m.style.display = 'none'; kisRender() }   // UNT6: Test-Haken wie _admStub (Kapital ohne Login zeichnen)
     const kisEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
@@ -25067,10 +25227,10 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', fcfd: 'Funded-CFD-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Finanzen · Meta Wallet · Bankkonto', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', fcfd: 'Funded-CFD-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Wallets und Bankkonten · alle IDs', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       let admMailSicht = 'mails'   // Reiter Mail: 'mails' | 'konten' (29.10.2026), gilt bis zum Neuladen
-      let admFinSicht = 'wallet'   // Reiter Finanzen: 'wallet' | 'bank' (BK1, 24.11.2026), gilt bis zum Neuladen
+      let admFinSicht = 'uebersicht'   // Reiter Finanzen: 'uebersicht' | 'wallet' | 'bank' (BK1 24.11. / BK2 25.11.2026: Start = Übersicht), gilt bis zum Neuladen
       document.getElementById('adm-fin-sicht')?.addEventListener('click', ev => {
         const c = ev.target.closest('[data-adm-fin-sicht]'); if(!c || c.dataset.admFinSicht === admFinSicht) return
         admFinSicht = c.dataset.admFinSicht
@@ -25110,8 +25270,18 @@
         $('adm-pane-kontomail').hidden = !(name === 'mail' && mailSicht === 'konten')   // Konten aus Mail (29.10.2026), seit dem Zusammenlegen nur über den Umschalter
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         // Finanzen (BK1, 24.11.2026): Umschalter Meta Wallet · Bankkonto, Meta Wallet unverändert in adm-pane-wallet
-        if(admFinSicht === 'bank' && !(window._admBankErlaubt?.() ?? true)) admFinSicht = 'wallet'
-        if($('adm-fin-sicht')){ $('adm-fin-sicht').hidden = name !== 'wallet' || !(window._admBankErlaubt?.() ?? true); $('adm-fin-sicht').querySelectorAll('[data-adm-fin-sicht]').forEach(c => c.classList.toggle('is-on', c.dataset.admFinSicht === admFinSicht)) }
+        if(admFinSicht === 'bank' && !(window._admBankErlaubt?.() ?? true)) admFinSicht = 'uebersicht'
+        // BK2: Umschalter für alle Finanzen-Logins; ohne Kapital-Recht nur ohne den Bankkonto-Knopf
+        if($('adm-fin-sicht')){
+          const bankOk = window._admBankErlaubt?.() ?? true
+          $('adm-fin-sicht').hidden = name !== 'wallet'
+          $('adm-fin-sicht').querySelectorAll('[data-adm-fin-sicht]').forEach(c => {
+            const on = c.dataset.admFinSicht === admFinSicht
+            c.classList.toggle('active', on); c.setAttribute('aria-selected', String(on))
+            if(c.dataset.admFinSicht === 'bank') c.hidden = !bankOk
+          })
+        }
+        if($('adm-pane-finsum')) $('adm-pane-finsum').hidden = !(name === 'wallet' && admFinSicht === 'uebersicht')
         $('adm-pane-wallet').hidden   = !(name === 'wallet' && admFinSicht === 'wallet')
         if($('adm-pane-bank')) $('adm-pane-bank').hidden = !(name === 'wallet' && admFinSicht === 'bank')
         $('adm-pane-kapital').hidden  = name !== 'kapital'   // Kapital (29.10.2026)
@@ -25138,6 +25308,7 @@
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet' && admFinSicht === 'wallet') walOpen()
+        if(name === 'wallet' && admFinSicht === 'uebersicht') window._fsOeffnen?.()   // BK2: lädt Meta Wallet + Bankkonto im Hintergrund
         if(name === 'wallet' && admFinSicht === 'bank') window._bkOeffnen?.()   // Bankkonto: lädt /admin/bank bei jedem Öffnen
         if(name === 'kapital') kisOeffnen()   // Kapital (29.10.2026): rechnet bei jedem Öffnen neu
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
@@ -61319,7 +61490,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2308'
+  const OS_TAB_BUILD = '2026-09-22.2309'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
