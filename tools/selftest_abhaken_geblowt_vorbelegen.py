@@ -108,20 +108,22 @@ def main():
     # Quelltext-Vertrag: eine Wahrheit für Gruppe und beide Dialoge
     check("const istGeblowt = wdlGeblowtUrteil" in html, 'Radar-Gruppe „Geblowt · archivieren" fragt wdlGeblowtUrteil')
     # seit 30.10.2026: danach Funded CFD am Ziel → 'waiting' (fb90d54f); seit 21.10.2026: Polar-Pläne ausgenommen (!_mwdErlPolar), dazwischen „TP + weg" → 'passed' (_tw) — geblowt bleibt die erste Wahl
-    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\((?:!_mwdErlPolar && )?typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil\(pw\)\) \? 'blown' : (?:_tw \? 'passed' : )?(?:\(!_mwdErlPolar && wdlFcfdZielErreicht\(pw\)\) \? 'waiting' : )?'none'\}", html) is not None,
-          "Radar-Dialog (fremde Pläne) belegt mwd-erl-status aus wdlGeblowtUrteil vor")
+    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\((?:!_mwdErlPolar && )?typeof (?:wdlGeblowtUrteil|wdlGeblowtVorschlag) === 'function' && (?:wdlGeblowtUrteil|wdlGeblowtVorschlag)\(pw\)\) \? 'blown' : (?:_tw \? 'passed' : )?(?:\(!_mwdErlPolar && wdlFcfdZielErreicht\(pw\)\) \? 'waiting' : )?'none'\}", html) is not None,
+          "Radar-Dialog (fremde Pläne) belegt mwd-erl-status aus wdlGeblowtUrteil vor (seit LQ1 24.11.2026 über wdlGeblowtVorschlag = Urteil + Liq-Verdacht)")
+    check("function wdlGeblowtVorschlag(t){ return wdlGeblowtUrteil(t) || " in html, "wdlGeblowtVorschlag schließt wdlGeblowtUrteil ein (LQ1)")
     i = html.index("function openTradeCompleteModal(")
     block = html[i:html.index("tcWinningDayPrepare(p)", i)]
-    check("wdlGeblowtUrteil(tr)" in block and "input[name=\"tc-status\"][value=\"blown\"]" in block and "p.status !== 'completed'" in block,
+    gb = "wdlGeblowtVorschlag(tr)" if "wdlGeblowtVorschlag(tr)" in block else "wdlGeblowtUrteil(tr)"   # LQ1 (24.11.2026): Vorschlag = Urteil + Liq-Verdacht
+    check(gb in block and "input[name=\"tc-status\"][value=\"blown\"]" in block and "p.status !== 'completed'" in block,
           "Trades-Dialog (eigene Pläne) belegt tc-status aus wdlGeblowtUrteil der Radar-Zeile vor (nicht für abgehakte)")
-    check(block.index("tcPopulateStatusAccountPicker(p)") < block.index("wdlGeblowtUrteil(tr)"), 'Vorbelegung NACH dem Reset auf „Nichts ändern"')
+    check(block.index("tcPopulateStatusAccountPicker(p)") < block.index(gb), 'Vorbelegung NACH dem Reset auf „Nichts ändern"')
     check("window._mklWdErledigtOeffnen = mklWdErledigtOeffnen" in html, "Test-Haken für den Stub vorhanden")
 
     print()
     if FEHLER:
         print(f"{len(FEHLER)} FEHLER:", *FEHLER, sep="\n  ")
         sys.exit(1)
-    print(f"alle {len(FAELLE) + 5} Prüfungen bestanden")
+    print(f"alle {len(FAELLE) + 6} Prüfungen bestanden")
 
 
 if __name__ == "__main__":
