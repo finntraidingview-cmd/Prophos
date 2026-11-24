@@ -31146,10 +31146,15 @@
   function mt5InstBalanceFrisch(inst){
     const s = (inst && inst.status) || {}
     if(!inst || !(inst.alive || inst.lesen) || s.note || s.master_balance == null || !s.master_login) return null
+    // FT1 (Master 24.11.2026, Befund PW1 Marc FundedNext …7821): die note des Copiers kommt erst 15 s nach seinem Start — in diesen 15 s galt eine Tage
+    // alte Snapshot-Datei als frisch, der Flotten-Takt schrieb 104.915,95 (von vor dem Payout) mit neuem tv_balance_at ans Konto. Das Panel liefert seit
+    // FT1 das Alter der Datei (Lese-EA schreibt alle 200 ms): älter als 15 s = eingefroren → nicht schreiben, Zeitstempel bleibt. Alte Panels ohne Feld wie bisher.
+    if(inst.snap_alter_s != null && !(Number(inst.snap_alter_s) <= MT5_SNAP_FRISCH_S)) return null
     const bal = Number(s.master_balance); if(!isFinite(bal) || bal <= 0) return null
     const eq = s.master_equity != null ? Number(s.master_equity) : null
     return { login: String(s.master_login), balance: bal, equity: (eq != null && isFinite(eq)) ? eq : null, ccy: s.master_currency || null }
   }
+  const MT5_SNAP_FRISCH_S = 15            // FT1: wie panel.py LESE_FRISCH_S (Lese-EA schreibt alle 200 ms)
   const _mt5BalGeschrieben = new Map()   // accountId → {bal, t} — Drossel für den 5-s-Flotten-Takt
   const MT5_BAL_LEBENSZEICHEN_MS = 5 * 60000
   async function mt5KontoBalanceSchreiben(accountId, b, opts){
@@ -61314,7 +61319,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2307'
+  const OS_TAB_BUILD = '2026-09-22.2308'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

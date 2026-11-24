@@ -1312,6 +1312,16 @@ def snapshot():
             if ls:
                 st = dict(st, **ls)
                 lesen = True
+        # FT1 (Master 24.11.2026, Befund PW1): Alter der Snapshot-Datei des Lese-EAs (schreibt alle 200 ms) — das echte Frische-Siegel der Master-
+        # Balance. Die note des Copiers kommt erst 15 s nach seinem Start („unverändert seit 15 s“); in diesen 15 s las der PC-Tab eine Tage alte
+        # Datei als frisch und schrieb sie mit neuem tv_balance_at ans Konto (Marc FundedNext …7821: 104.915,95 von vor dem Payout). None = Datei fehlt.
+        snap_alter = None
+        try:
+            _sp = _snapshot_path(cfg)
+            if _sp:
+                snap_alter = round(max(time.time() - os.path.getmtime(_sp), 0.0), 1)
+        except OSError:
+            snap_alter = None
         data.append({
             "name": inst["name"],
             "file": inst["config_file"],
@@ -1337,6 +1347,7 @@ def snapshot():
             "alive": alive,
             # Master-Stand frisch aus der Snapshot-Datei, OHNE Copier (nur Echo V2 wertet das aus)
             "lesen": lesen,
+            "snap_alter_s": snap_alter,   # FT1: Sekunden seit dem letzten Schreiben des Lese-EAs (None = keine Datei)
         })
     # Konflikte, die der Copier beim Start mit Abbruch quittieren wuerde — hier
     # schon anzeigen, BEVOR jemand den Neustart auslöst.
