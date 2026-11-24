@@ -42479,7 +42479,7 @@
     if(b && b.geblowt) return '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>'
     // LQ1 (Finn 24.11.2026): von der Firma liquidiert (nicht am Tageslimit) = geblowt, auch über dem Boden — Vorschlag, beim Abhaken vorbelegt
     const lq = typeof lqEndeUrteil === 'function' ? lqEndeUrteil(t) : null
-    if(lq && lq.art === 'liq') return `<b style="color:var(--danger-ink, #b91c1c)" title="${escapeHtml(lq.grund + ' — von der Firma liquidiert = geblowt (Finn 24.11.2026), auch wenn die Balance über dem Boden liegt. Beim Abhaken ist „geblowt“ vorbelegt, nichts archiviert.')}">💀 vermutlich liquidiert</b>`
+    if(lq && lq.art === 'liq') return `<b style="color:var(--danger-ink, #b91c1c)" title="${escapeHtml(lq.grund + (lq.ende === 'sl' ? ' — der Plan-SL lag an der Konto-Liq, das Konto hat keine Luft mehr = geblowt (Finn 25.11.2026).' : ' — von der Firma liquidiert = geblowt (Finn 24.11.2026), auch wenn die Balance über dem Boden liegt.') + ' Beim Abhaken ist „geblowt“ vorbelegt, nichts archiviert.')}">💀 vermutlich liquidiert</b>`
     if(!b) return lq && lq.art === 'dll' ? WDL_TAGESLIMIT_ERG : ''
     return (b.softBreach || (lq && lq.art === 'dll')) ? WDL_TAGESLIMIT_ERG : ''
   }
@@ -42534,14 +42534,42 @@
    *   'liq'  — (a) Meldung mit „liquidat…/Auto-Liquidation“ (nicht Daily); (b) echter Exit auf der VERLUST-Seite zwischen Einstieg und Plan-SL bzw. ohne Plan-SL,
    *            nicht am TP, kein Hand-Schluss, nicht am Tageslimit → die Firma hat vorher zugemacht; (c) Demo-Ende 'demo_liq' an einer HARTEN Liq-Linie ohne Plan-SL.
    *   null   — nichts Eindeutiges (Gewinnseite ohne TP = Auto-Close/Hand, kein Exit-Beleg …).
-   * Nur Vorschlag: wdlGeblowtUrteil belegt im Abhak-Popup „geblowt“ vor (Finn bestätigt mit einem Klick), der Radar sagt „vermutlich liquidiert“. Nie archivieren. */
+   * Nur Vorschlag: wdlGeblowtUrteil belegt im Abhak-Popup „geblowt“ vor (Finn bestätigt mit einem Klick), der Radar sagt „vermutlich liquidiert“. Nie archivieren.
+   * LQ2 (Finn 25.11.2026: „Wenn ein Account einfach schließt, liquidiert wird und es kein Daily Stop Loss war, dann ist er liquidiert.“ — Konto von Hand
+   * archiviert, obwohl die Balance über der Linie stand; Master: beides bauen):
+   *   (a) Firmen-Schluss: Market-Exit auf der Verlustseite, nicht am eigenen SL/TP, kein eigener Schluss, kein Tageslimit → 'liq', EGAL wo die Balance danach
+   *       steht und auch ohne bekannte Liq-Linie (vorher nur an/jenseits der harten Linie). Tageslimit-Firmen (weich) vor der harten Linie bleiben 'dll'.
+   *       So Tradeify WD …f4ee2 (b50f4ee2, −1.899 $ Market-Exit, Finn archivierte ihn geblowt). Ein eigener Stop ('stop') ist nie ein Firmen-Schluss.
+   *   (b) Exit am Plan-SL, danach höchstens LQ_REST_MAX $ über der harten Konto-Liq (wdlBlowStand, kein Tageslimit) → 'liq' „Konto am Ende“: der Funded-
+   *       Planer legt den SL nach einem Verlusttag auf Balance − Liq − ~50 $, der SL IST die Liq-Linie (Marc …0001 6a9ca349 145.529 $, Chris …0001
+   *       5b1b7bdc 145.544 $, Simon …0001 82f9d471 145.544 $ — alle drei von Finn von Hand archiviert). Marc · Apex …0006 (112.429 $) bleibt 'plan'. */
   const LQ_TOL_PKT = 0.5   // ±2 Ticks NQ/MNQ (0,25)
+  const LQ_REST_MAX = 100  // LQ2 (b): so wenig Luft über der Konto-Liq nach dem Plan-SL = Konto am Ende
   function lqPlanSl(t, h){
     const n = v => (v == null || v === '' || !isFinite(Number(v)) || Number(v) <= 0) ? null : Number(v)
     const roh = (h && Array.isArray(h.tv_meldung_roh)) ? h.tv_meldung_roh : []
     for(const z of roh){ const m = /^sl platziert (?:buy|sell) [\d.,]+ @ ([\d,]+(?:\.\d+)?)/i.exec(String(z || '')); if(m) return n(m[1].replace(/,/g, '')) }   // exakt aus TradingViews Meldung
     if(typeof wdlSlEcht === 'function' && wdlSlEcht(t) != null) return wdlSlEcht(t)
     if(h && h.sl_art !== 'liquidation' && n(h.sl_level_nq) != null && t && Number(t.master_sl) > 0) return n(h.sl_level_nq)   // Hedge-Level = Master-SL (kein Liq-Level)
+    return null
+  }
+  // Tageslimit des Kontos in $ (wie hedgeLiqDll: accounts.dll_usd, sonst liq_regeln der Kontoart, sonst der Funded-Zeile derselben Firma/Größe) | null
+  function lqTageslimitUsd(t){
+    try{
+      const k = (t && t.konto) || {}
+      const acc = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts.find(a => a && String(a.id) === String(k.id || t.konto_id || '')) : null
+      if(acc && acc.dllUsd != null && isFinite(Number(acc.dllUsd))) return Number(acc.dllUsd) > 0 ? Number(acc.dllUsd) : null
+      const firma = k.firma || t.master_firm || (acc && acc.firm) || ''
+      const gr = (acc && Number(acc.startingBalance) > 0) ? Number(acc.startingBalance) : (typeof tpKontoGroesseAusName === 'function' ? Number(tpKontoGroesseAusName(k.name || (acc && acc.name) || '')) : 0)
+      const regeln = typeof _liqRegeln !== 'undefined' ? _liqRegeln : null
+      if(!Array.isArray(regeln) || !firma || !(gr > 0) || typeof liqRegelWaehlen !== 'function' || typeof liqDailyLoss !== 'function') return null
+      const bs = Number(t.balance_start) > 0 ? Number(t.balance_start) : gr
+      for(const kt of [String(t.konto_typ || (acc && acc.type) || ''), 'funded']){
+        if(!kt) continue
+        const d = liqDailyLoss(liqRegelWaehlen(regeln, firma, kt, gr), bs)
+        if(d && d.dl > 0) return d.dl
+      }
+    }catch(_){}
     return null
   }
   function lqEndeUrteil(t){
@@ -42557,7 +42585,9 @@
     const ein = n(t.einstieg_nq) ?? n(h && h.einstieg_nq)
     const sl = lqPlanSl(t, h), tp = n(t.tp_level_nq) ?? n(h && h.tp_level_nq) ?? n(h && h.tp_limit_tv)
     // Eigener Schluss = nie Liquidation: Hand/Knopf, Auto-Close vor Marktschluss, Z-Schluss/Abgleich (final.ende_grund), tv-close (positionen_danach), Hedge-Gründe unserer Wege
-    const hand = (h && (/^(hand|close|rundgang|auto_close|erledigt)$/.test(String(h.grund || '')) || (ex && ex.quelle === 'hand')))
+    const hand = (h && (/^(hand|close|rundgang|auto_close|erledigt|sl_feed|tp_feed)$/.test(String(h.grund || '')) || (ex && ex.quelle === 'hand')
+        || (typeof hedgeGrundEcht === 'function' && /^(sl_feed|tp_feed)$/.test(String(hedgeGrundEcht(h) || '')))))   // LQ2 (Prüfung): eigener Radar-Schluss über den Kurs-Feed
+      || /^(sl_feed|tp_feed)$/.test(String(fin.grund || ''))
       || /^(hand|close|beendet_knopf|auto_close|tagesende_unklar|master_nie_da|demo_unklar|demo_beide)$/.test(String(fin.grund || ''))
       || /^(close|hand)$/.test(String(fin.ende_quelle || '')) || fin.quelle === 'close' || !!fin.ende_grund || Array.isArray(fin.positionen_danach)   // quelle 'close' = tvV2EndeSetzen nach eigenem Schluss (Prüfer LQ1)
     const weich = !!t.liq_regel_soft || (h && h.sl_art === 'liquidation' && h.liq_art === 'daily_loss')
@@ -42570,7 +42600,12 @@
     const tagesPause = !!(st && !st.geblowt && st.softBreach)
     if(px != null && ri && ein != null){
       if(tp != null && Math.abs(px - tp) <= LQ_TOL_PKT) return { art: 'plan', ende: 'tp', grund: `Exit ${px} am Plan-TP ${tp}` }
-      if(sl != null && (Math.abs(px - sl) <= LQ_TOL_PKT || (px - sl) * ri < 0)) return { art: 'plan', ende: 'sl', grund: `Exit ${px} am Plan-SL ${sl}` }
+      if(sl != null && (Math.abs(px - sl) <= LQ_TOL_PKT || (px - sl) * ri < 0)){
+        // LQ2 (b): Plan-SL an der Konto-Liq — danach kaum Luft (harte Liq laut wdlBlowStand; Tageslimit/Schätzung zählen nicht)
+        if(st && !st.softBreach && !st.geschaetzt && n(st.bal) != null && n(st.liq) != null && st.bal - st.liq <= LQ_REST_MAX)
+          return { art: 'liq', ende: 'sl', grund: `Exit ${px} am Plan-SL ${sl}, danach nur noch ${Math.round(st.bal - st.liq)} $ über der Konto-Liq ${st.liq} — Konto am Ende` }
+        return { art: 'plan', ende: 'sl', grund: `Exit ${px} am Plan-SL ${sl}` }
+      }
       if(hand || (px - ein) * ri >= 0) return null                       // Hand-Schluss bzw. Gewinnseite ohne TP — kein Liq-Verdacht
       if(tagesPause) return { art: 'dll', grund: `Exit ${px}, Balance am Tageslimit` }
       if(weich && dllLvl != null && (Math.abs(px - dllLvl) <= Math.max(LQ_TOL_PKT, 2) || (px - dllLvl) * ri < 0)) return { art: 'dll', grund: `Exit ${px} am Tageslimit ${dllLvl}` }
@@ -42578,11 +42613,18 @@
       // Tageslimit, bzw. Konto-Liq der Zeile): Exit an/jenseits der Linie (Toleranz 5 Pkt bzw. 10 % des Abstands) = liquidiert; klar DAVOR = bei einer Firma mit
       // Tageslimit die Tagespause (Lucid-Market-Exits bei −2.700 $ vor der Polster-Linie), sonst unklar (Tradeify …f4ee2: 25.998 bei Linie 25.151 — kein Firmen-Schluss)
       const hart = (h && h.sl_art === 'liquidation' && h.liq_art !== 'daily_loss') ? n(h.sl_level_nq) : n(t.liq_level_nq)
-      if(hart != null && hart > 0){
-        const tolH = Math.max(5, Math.abs(ein - hart) * 0.1)
-        if(Math.abs(px - hart) > tolH && (px - hart) * ri > 0) return weich ? { art: 'dll', grund: `Exit ${px} vor der Konto-Liq ${hart} — Tageslimit` } : null
-      } else return weich ? { art: 'dll', grund: `Exit ${px} auf der Verlustseite, Tageslimit-Firma, keine Konto-Liq bekannt` } : null   // Prüfer LQ1: ohne Liq-Linie kein Liq-Urteil (Hand-Schluss in TradingView sähe genauso aus)
-      return { art: 'liq', grund: `Exit ${px} (${ex.art || '?'}) nicht am Plan-SL ${sl ?? '–'} / TP ${tp ?? '–'}${hart ? ', an der Konto-Liq ' + hart : ''} — von der Firma geschlossen` }
+      const anHart = hart != null && hart > 0 && !(Math.abs(px - hart) > Math.max(5, Math.abs(ein - hart) * 0.1) && (px - hart) * ri > 0)
+      if(weich && !anHart) return { art: 'dll', grund: hart != null && hart > 0 ? `Exit ${px} vor der Konto-Liq ${hart} — Tageslimit` : `Exit ${px} auf der Verlustseite, Tageslimit-Firma, keine Konto-Liq bekannt` }
+      // LQ2 (a): ein eigener Stop/Limit ist kein Firmen-Schluss (z. B. nachgezogener SL) — nur Market/Liquidation bzw. unbekannte Order-Art an der Linie
+      if(!anHart && /^(stop|limit|tp|sl)$/i.test(String(ex.art || ''))) return null
+      // LQ2 (Prüfung): Tageslimit auch dort, wo die Zeile es nicht als weich führt (Lucid Funded/WD: liq_regeln kennt dort nur den Drawdown, das Tageslimit
+      // 2.700 $ steht in der Funded-Zeile) — Verlust ≥ 90 % des Tageslimits = Tagespause, nicht liquidiert
+      if(!anHart){
+        const dl = lqTageslimitUsd(t), bs = n(t.balance_start)
+        const verl = n(t.master_pl) != null ? -n(t.master_pl) : (bs != null && st && n(st.bal) != null ? bs - st.bal : null)
+        if(dl && verl != null && verl >= dl * 0.9) return { art: 'dll', grund: `Exit ${px}, Verlust ${Math.round(verl)} $ ≈ Tageslimit ${dl} $` }
+      }
+      return { art: 'liq', grund: `Exit ${px} (${ex.art || '?'}) nicht am Plan-SL ${sl ?? '–'} / TP ${tp ?? '–'}${anHart ? ', an der Konto-Liq ' + hart : ''} — von der Firma geschlossen` }
     }
     if(tagesPause && fin.grund === 'demo_liq') return { art: 'dll', grund: 'Demo + Balance am Tageslimit' }
     if(fin.grund === 'demo_liq' && !hand){
@@ -83157,7 +83199,7 @@
         // LQ1: liquidiert (nicht Tageslimit) → Grund sichtbar, Finn bestätigt mit Erledigt
         const lq = typeof lqEndeUrteil === 'function' ? lqEndeUrteil(tr) : null, msgEl = document.getElementById('tradeCompleteMsg')
         if(lq && lq.art === 'liq' && tr.blown !== true && !(wdlBlowStand(tr) || {}).geblowt && msgEl && !msgEl.textContent){
-          msgEl.textContent = `💀 vermutlich liquidiert — ${lq.grund}. Von der Firma liquidiert = geblowt (auch über dem Boden) · „geblowt“ vorbelegt, bitte prüfen.`; msgEl.className = 'modal-msg' }
+          msgEl.textContent = `💀 vermutlich liquidiert — ${lq.grund}. ${lq.ende === 'sl' ? 'Plan-SL an der Konto-Liq = Konto am Ende = geblowt' : 'Von der Firma liquidiert = geblowt (auch über dem Boden)'} · „geblowt“ vorbelegt, bitte prüfen.`; msgEl.className = 'modal-msg' }
       } else if(tr && typeof wdlTpUndWeg === 'function' && wdlTpUndWeg(tr)){
         // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): „Phase bestanden" + P&L-Schätzung, Finn bestätigt
         const tw = wdlTpUndWeg(tr), rb = document.querySelector('input[name="tc-status"][value="passed"]')
