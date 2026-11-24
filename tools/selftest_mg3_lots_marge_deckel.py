@@ -110,7 +110,14 @@ check(F(tab, "kALT", "u-g2", "Blue Guardian", gv)[0] == 50000.0 and F(tab, "kALT
 check(abs(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="Phase1", groesse=100000.0)[0] - 25747.64) < 0.01
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=100000)[1].startswith("Wert derselben Firma/Kontoart/Größe"),
       "Konto ohne eigenen Wert, gleiche Gruppe + Firma + Kontoart + Größe → höchster FRISCHER Wert dieser Konten (der 40 Tage alte 50.000 zählt für andere nicht, MG3c)")
-check(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase2", groesse=100000) == (None, "")
+# BG1 (24.11.2026, Emin BG 100k Phase 2 ohne Lernwert → 5,2 Lot ohne Deckel): Phase 1 = Phase 2 = Challenge eine Klasse, Funded/WD nicht
+check(abs((F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase2", groesse=100000)[0] or 0) - 25747.64) < 0.01
+      and abs((F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="challenge", groesse=100000)[0] or 0) - 25747.64) < 0.01,
+      "BG1: Phase-2-/Challenge-Konto ohne eigenen Wert → Wert der Phase-1-Konten derselben Firma/Größe/Gruppe")
+check(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="funded_cfd", groesse=100000) == (None, "")
+      and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="winning_days", groesse=100000) == (None, ""),
+      "BG1: Funded/WD bleiben eigene Klasse (anderer Hebel möglich) → kein Rückfall aus Phase 1")
+check(F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="funded_cfd", groesse=100000) == (None, "")
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1", groesse=50000) == (None, "")
       and F(tab, "kNEU", "u-g2", "Blue Guardian", gv) == (None, "") and F(tab, "kNEU", "u-g2", "Blue Guardian", gv, art="phase1") == (None, ""),
       "MG3b: andere Kontoart / andere Größe / Zielkonto ohne Kontoart oder Größe → kein Rückfall")
@@ -125,7 +132,7 @@ check(F(tab, "kE", "u-ht2", "Blue Guardian", gv)[0] == 60000.0 and D(4.2, 100000
       "HT-Konto mit eigener Vorprüfung → nur sein eigener Wert")
 check(F(tab, "kX", "u-g1", "FundedNext", gv, art="phase1", groesse=100000) == (None, ""), "andere Firma derselben Gruppe → kein Wert")
 tab_n = ns["mg3_marge_tabelle"](pl[:1], [], gv, {"kA": {"account_type": "phase1", "name": "BG 100k 1234", "starting_balance": "150000"}})
-check(list(tab_n["firma"]) == [("G", "blueguardian", "phase1", 100000)], "MG3b: Größe wie _wd_konto_groesse — „100k“ im Namen schlägt eine falsche starting_balance")
+check(list(tab_n["firma"]) == [("G", "blueguardian", "challenge", 100000)], "MG3b: Größe wie _wd_konto_groesse — „100k“ im Namen schlägt eine falsche starting_balance")
 # ── MG3c: Widerlegung durch eine erfolgreiche Order (Hebel gestiegen) ──────────────────────────────────────────────────────────
 FA, WL = ns["mg3_frei_aus"], ns["mg3_widerlegt"]
 check(FA(J) == 100000.0 and FA("(Vorprüfung: nötig 30 000.00, frei -1 250.00)") == -1250.0 and FA("") is None, "freie Marge aus der Meldung, auch negativ")
@@ -150,7 +157,7 @@ check(WL(eA, [dict(o_gross, master_contracts="1.2", notes="Tag 1/3 · Neben · F
 tab_w = ns["mg3_marge_tabelle"](pl, gs, gv, KN, orders=[dict(o_gross, started_at=iso(minutes=10))])
 check("kA" not in tab_w["konto"] and tab_w["widerlegt"]["kA"][0] == "u-g1" and F(tab_w, "kA", "u-g1", "Blue Guardian", gv) == (None, "")
       and F(tab_w, "kA", "u-g1", "Blue Guardian", gv, art="phase1", groesse=100000)[0] == 25737.0
-      and tab_w["firma"][("G", "blueguardian", "phase1", 100000)] == 25737.0,
+      and tab_w["firma"][("G", "blueguardian", "challenge", 100000)] == 25737.0,
       "widerlegter Wert fällt weg — eigener und als Rückfall (übrig bleibt der frische Wert eines anderen Kontos)")
 zw = ns["mg3_sicherung_zeilen"](tab_w, [{"user_id": "u-g1", "value": {"kA": {"mpl": 99999.0, "at": iso(days=22)}, "kZ": {"mpl": 1.0, "at": iso(days=2)}}}])
 check([set(z["value"]) for z in zw if z["user_id"] == "u-g1"] == [{"kZ"}], f"Sicherung: widerlegter Eintrag wird entfernt, die übrigen bleiben ({zw})")
@@ -197,7 +204,7 @@ t2 = L(["u-g1", "u-g2"], gv)
 ns["_MG3_UUID"] = _uuid_echt
 q = SB["trade_plans"][0]
 check(SB["accounts"][0]["id"] == "in.(kA,kB)" and "account_type" in SB["accounts"][0]["select"] and "name" in SB["accounts"][0]["select"]
-      and t2["firma"].get(("G", "blueguardian", "phase1", 100000)) == 25747.64,
+      and t2["firma"].get(("G", "blueguardian", "challenge", 100000)) == 25747.64,
       f"MG3b Laden: nur frische Lernwerte abfragen (kALT abgelaufen), Kontoart/Größe aus accounts → Rückfall-Schlüssel ({t2['firma']})")
 check(len(POSTS) == 1 and POSTS[0][1].endswith("/rest/v1/user_settings?on_conflict=user_id,key") and "merge-duplicates" in POSTS[0][3]
       and POSTS[0][2][0]["user_id"] == "u-g1" and set(POSTS[0][2][0]["value"]) == {"kA"} and POSTS[0][2][0]["value"]["kA"]["mpl"] == 25747.64,

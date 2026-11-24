@@ -48053,8 +48053,11 @@ def mg3_frisch(at, jetzt=None, tage=None):
 
 
 def mg3_vergleich_art(art):
-    """REIN (MG3b): Kontoart für den Firmen-Rückfall — klein, leer → None (dann kein Rückfall)."""
-    return str(art or "").strip().lower() or None
+    """REIN (MG3b): Kontoart für den Firmen-Rückfall — klein, leer → None (dann kein Rückfall). BG1 (Finn/Master 24.11.2026, Emin Blue Guardian 100k:
+    3 Phase-2-Pläne 5,2/4,4/5,0 Lot ohne Deckel → „zu wenig freie Marge“, weil nur Phase 1 einen Lernwert hatte): Phase 1, Phase 2 und Challenge sind
+    dasselbe Produkt am selben Broker-Konto-Typ (gleicher Hebel) → EINE Klasse; Funded/WD bleiben getrennt (anderer Hebel möglich)."""
+    a = str(art or "").strip().lower() or None
+    return "challenge" if a in ("phase1", "phase2", "challenge") else a   # Klasse im Funktionskörper (Selbsttest-Lader ziehen die Funktion allein)
 
 
 def mg3_vergleich_groesse(groesse):
