@@ -60259,6 +60259,18 @@
     return false
   }
   window._rkPlanGelesen = rkPlanGelesen   // Entwickler-Haken wie _v2RichtungKonflikt: Definition ohne DB prüfbar
+  /* RG1 (24.11.2026, KC1-Befund D2 — Simon FundedNext …9853 sperrte …9852 bis zu 72 h, nur weil der Hedge-P&L fehlte): Echo-Plan (mt5/mt5v2) in review
+   * gilt für den Riegel als ZU, wenn der Master belegt zu und gelesen ist — ended_at, master_pl, final.master_balance > 0, kein UNKLAR. Gleiche Regel
+   * in der DB (prophos_plan_master_zu, sql/2026-11-24_rg1_riegel_master_zu.sql; dort zusätzlich: keine offene Master-Position laut mt5_live — die
+   * DB bleibt die harte Linie). rkPlanGelesen selbst bleibt unverändert. */
+  function rkMasterZu(status, route, endedAt, masterPl, fin, sf, pu){
+    if(status !== 'review' || (route !== 'mt5' && route !== 'mt5v2') || !endedAt || masterPl == null || !isFinite(Number(masterPl))) return false
+    if(!fin || typeof fin !== 'object' || !(isFinite(Number(fin.master_balance)) && Number(fin.master_balance) > 0)) return false
+    if(fin.art === 'unklar' || (sf && typeof sf === 'object' && (sf.unklar === true || sf.unklar === 'true'))) return false
+    if(pu != null && pu !== false) return false   // Prüfer RG1: puls_unklar wie in der DB
+    return true
+  }
+  window._rkMasterZu = rkMasterZu
   // „von heute" für das Plan-Popup (09.10.2026): Startzeit in [jetzt − 12 h, jetzt + 24 h]; ohne Startzeit planned_for = heute (Dubai oder
   // Berlin) bzw. ohne beides in den letzten 24 h angelegt
   function rkPlanHeute(p){
@@ -60302,7 +60314,7 @@
     let liste = null
     if(o && o.frisch){
       try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler'
-             + ',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach'   // für rkPlanGelesen (19.10.2026)
+             + ',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach,puls_unklar:mt5_baseline->puls_unklar'   // für rkPlanGelesen (19.10.2026), puls_unklar für rkMasterZu (RG1)
              + (o.geplanteHand ? ',auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : ''))   // (route steht oben schon)
              .in('status', ['open', 'review', 'planned'])
            if(o.streng && (error || !Array.isArray(data))) throw new Error('Pläne nicht lesbar: ' + ((error && error.message) || 'keine Daten'))
@@ -60312,13 +60324,14 @@
                masterAccountId: r.master_account_id, startUm: r.start_um || null, plannedFor: r.planned_for, createdAt: r.created_at } : null
              return { id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
                geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null,
-               gelesen: rkPlanGelesen(r.status, r.route, r.ended_at, r.master_pl, r.final, r.bal_nach),
+               gelesen: rkPlanGelesen(r.status, r.route, r.ended_at, r.master_pl, r.final, r.bal_nach) || rkMasterZu(r.status, r.route, r.ended_at, r.master_pl, r.final, r.start_fehler, r.puls_unklar),   // RG1
                hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(e){ if(o.streng) throw e }
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'review' || p.status === 'planned')
       .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
         geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null,
-        gelesen: rkPlanGelesen(p.status, p.route, p.endedAt, p.masterPl, p.mt5Baseline && p.mt5Baseline.final, p.mt5Baseline && p.mt5Baseline.bal_nach),
+        gelesen: rkPlanGelesen(p.status, p.route, p.endedAt, p.masterPl, p.mt5Baseline && p.mt5Baseline.final, p.mt5Baseline && p.mt5Baseline.bal_nach)
+          || rkMasterZu(p.status, p.route, p.endedAt, p.masterPl, p.mt5Baseline && p.mt5Baseline.final, p.mt5Baseline && p.mt5Baseline.start_fehler, p.mt5Baseline && p.mt5Baseline.puls_unklar),   // RG1
         hand: !p.autoPlan || tpIstWdPlan(p) || tpIstOrbitV3(p), heute: rkPlanHeute(p) }))
     const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
     for(const p of liste){

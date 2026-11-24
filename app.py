@@ -3627,6 +3627,118 @@ def ohne_unternehmen_tick():
                      uid=u, schluessel=k, tag=f"unt0-{u[:8]}")
 
 
+# ══ RG1-B ALTE RIEGEL-SPERRE MELDEN (24.11.2026, KC1-Befund D2, Finn über Master: „Sperre > 6 h bzw. vom Vortag → genau einmal 🟠 an die
+# Master-IDs, Sperre bleibt"). Anlass: ein review-/UNKLAR-Plan vom Vortag sperrte per Riegel Gegenrichtung (DB prophos_gegenrichtung_frei_konto)
+# das Schwesterkonto still bis zu 72 h — Simon FundedNext …9853 → …9852 (24 Versuche), Blue Guardian 631978 → 631979. Die DB-Funktion
+# prophos_riegel_alt (sql/2026-11-24_rg1_riegel_master_zu.sql) liefert die heute geplanten Pläne, die der Riegel über einen solchen Plan sperrt,
+# der älter als RG1_STUNDEN ist oder vom Vortag stammt; hier je SPERRENDEM Plan genau eine 🟠-Meldung (alarm_log-Schlüssel riegel_alt|<plan>,
+# RG1_LOG_TAGE). Nichts wird freigegeben. Fehlt die Funktion (SQL nicht eingespielt) oder ist die DB nicht lesbar → still, nächster Takt. ══
+RG1_STUNDEN = 6
+RG1_TAKT_S = 300
+RG1_LOG_TAGE = 7
+_rg1 = {"at": 0.0, "fehler": "", "gemeldet": 0}
+
+
+def rg1_konto_text(name, acc, plan, unternehmen):
+    """REIN RECHNEND (testbar): „ID · Firma Größe …1234 · Unternehmen" (Finns Format für Konten in Meldungen)."""
+    acc, plan = acc or {}, plan or {}
+    firma = str(acc.get("firm") or plan.get("master_firm") or "Konto").strip()
+    g = _wd_konto_groesse(acc) or _wd_konto_groesse({"name": plan.get("master_name")})
+    groesse = f"{int(g // 1000)}k" if g and g >= 1000 else ""
+    nr = re.sub(r"[^0-9A-Za-z]", "", str(acc.get("external_id") or acc.get("cred_login") or ""))
+    if not nr:
+        m = re.findall(r"\d{4,}", str(plan.get("master_name") or ""))
+        nr = m[-1] if m else ""
+    konto = " ".join(x for x in (firma, groesse, f"…{nr[-4:]}" if nr else "") if x)
+    return " · ".join(x for x in (str(name or "").strip() or "?", konto, str(unternehmen or "").strip()) if x)
+
+
+def rg1_unternehmen_name(uid, daten):
+    """REIN RECHNEND (testbar): Kurzname des Unternehmens einer ID — HT, der Gruppenname einer Verwalter-Gruppe, sonst „ohne Unternehmen"."""
+    karte = ap_unternehmen_karte(daten)
+    k = ap_unternehmen_schluessel(uid, karte)
+    if k == "ht":
+        return "HT"
+    for x in (daten or {}).get("gruppen") or ():
+        if str(x.get("id")) == str(k):
+            return str(x.get("name") or "Unternehmen").strip() or "Unternehmen"
+    return "ohne Unternehmen"
+
+
+def rg1_meldungen(zeilen, plaene, konten, namen, unternehmen):
+    """REIN RECHNEND (testbar): prophos_riegel_alt-Zeilen → [(schluessel, uid, titel, text, sperrt_plan)] — je SPERRENDEM Plan eine Meldung, darin
+    alle Pläne, die er heute sperrt. plaene/konten = {id: Zeile}, namen = {uid: Name}, unternehmen(uid) → Kurzname."""
+    je = {}
+    for z in zeilen or ():
+        if not isinstance(z, dict) or not z.get("sperrt_plan") or not z.get("gesperrt_plan"):
+            continue
+        je.setdefault(str(z["sperrt_plan"]), []).append(z)
+    out = []
+    for sp, zs in je.items():
+        p = plaene.get(sp) or {}
+        uid = str(p.get("user_id") or "")
+        wer = rg1_konto_text(namen.get(uid), konten.get(str(p.get("master_account_id") or "")), p, unternehmen(uid))
+        gesperrt = []
+        for z in zs:
+            q = plaene.get(str(z["gesperrt_plan"])) or {}
+            gesperrt.append(rg1_konto_text(namen.get(str(q.get("user_id") or "")), konten.get(str(q.get("master_account_id") or "")), q,
+                                           unternehmen(str(q.get("user_id") or ""))))
+        art = str(zs[0].get("art") or "")
+        seit = str(zs[0].get("seit") or "")
+        try:
+            seit_txt = datetime.fromisoformat(seit.replace("Z", "+00:00")).astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M") + " Dubai"
+        except Exception:
+            seit_txt = seit[:16] or "?"
+        warum = ("UNKLARER Start (Order kann liegen) — in der Plattform nachsehen und auf der Karte lösen" if art == "unklar"
+                 else "zu Ende, aber nicht gelesen/abgehakt — Endlesung bzw. Abhaken nachholen")
+        titel = f"Riegel sperrt seit {seit_txt}"
+        text = (f"{wer}: {warum}. Sperrt per Riegel Gegenrichtung: {', '.join(sorted(set(gesperrt)))[:220]}. "
+                f"Die Sperre bleibt, bis der Plan gelesen/abgehakt bzw. die UNKLAR-Marke gelöst ist.")
+        out.append((f"riegel_alt|{sp}", uid, titel, text, sp))
+    return out
+
+
+def rg1_tick():
+    if time.time() - _rg1["at"] < RG1_TAKT_S:
+        return None
+    _rg1["at"] = time.time()
+    if not _alarm_empfaenger():
+        return None
+    r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_riegel_alt", json={"p_stunden": RG1_STUNDEN}, headers=_sb_headers(), timeout=20)
+    if getattr(r, "status_code", 0) != 200:
+        _rg1["fehler"] = f"prophos_riegel_alt HTTP {getattr(r, 'status_code', '?')} (SQL eingespielt?)"
+        return None
+    zeilen = [z for z in (r.json() or []) if isinstance(z, dict)]
+    if not zeilen:
+        return 0
+    keys = {f"riegel_alt|{z.get('sperrt_plan')}" for z in zeilen if z.get("sperrt_plan")}
+    schon = alarm_im_log(keys, RG1_LOG_TAGE * 86400)
+    if schon is None:
+        return None                               # alarm_log nicht lesbar: lieber im nächsten Takt als doppelt
+    zeilen = [z for z in zeilen if f"riegel_alt|{z.get('sperrt_plan')}" not in schon]
+    if not zeilen:
+        return 0
+    ids = sorted({str(z.get(k)) for z in zeilen for k in ("sperrt_plan", "gesperrt_plan") if z.get(k)})
+    plaene = {str(p.get("id")): p for p in sb_select("trade_plans", {"select": "id,user_id,master_firm,master_name,master_account_id",
+                                                                       "id": f"in.({','.join(ids)})"}) or []}
+    # Prüfer RG1: wie alarm_tick nur HT-Sicht — ausgeblendete IDs (aus) und fremd verwaltete Gruppen (Emin) nie an die HT-Master-IDs
+    namen, aus = _ap_namen()
+    zeilen = [z for z in zeilen if (plaene.get(str(z.get("sperrt_plan"))) or {}).get("user_id")
+              and str(plaene[str(z["sperrt_plan"])]["user_id"]) not in aus and not _alarm_fremd_verwaltet(plaene[str(z["sperrt_plan"])]["user_id"])]
+    if not zeilen:
+        return 0
+    kids = sorted({str(p.get("master_account_id")) for p in plaene.values() if p.get("master_account_id")})
+    konten = {str(a.get("id")): a for a in (sb_select("accounts", {"select": "id,firm,name,external_id,cred_login,starting_balance",
+                                                                    "id": f"in.({','.join(kids)})"}) if kids else []) or []}
+    daten = admin_gruppen_daten()
+    n = 0
+    for k, uid, titel, text, sp in rg1_meldungen(zeilen, plaene, konten, namen, lambda u: rg1_unternehmen_name(u, daten)):
+        alarm_senden(2, "riegel_alt", titel, text, uid=uid or None, plan_id=sp, schluessel=k, tag=f"riegel-alt-{sp[:8]}")
+        n += 1
+    _rg1["gemeldet"] += n
+    return n
+
+
 @app.route("/admin/id-gruppe", methods=["POST", "OPTIONS"])
 def admin_id_gruppe_zuordnen():
     """UNT0: POST {user_id, gruppe_id} → eine ID OHNE Unternehmen einem bestehenden Unternehmen (id_gruppen) zuordnen — eine neue Zeile in
@@ -49215,6 +49327,12 @@ def ap_loop():
         except Exception as e:
             _unt0["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[unt0] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            if rg1_tick() is not None:        # RG1-B (24.11.2026): alte Riegel-Sperre (> 6 h / Vortag) → einmal 🟠 an die Master-IDs
+                _rg1["fehler"] = ""
+        except Exception as e:
+            _rg1["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[riegel-alt] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
             _ap_bal_auto["fehler"] = ""
