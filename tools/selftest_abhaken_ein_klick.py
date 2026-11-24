@@ -144,6 +144,7 @@ let _wdlSammel = null;   // RB3 (16.11.2026): Modul-Variable direkt vor WDL_VORM
 const window = {};
 const document = { getElementById: () => ({ classList: { contains: () => false } }) };
 let geoeffnet = []; function mklWdErledigtOeffnen(pid, t, o){ geoeffnet.push([pid, !!o.einKlick, !!o.nurStill]) }
+function wdlNieGestartet(t){ return t && t._nie ? 'sauber' : '' }   // VM1: liegt außerhalb des Ausschnitts (RN1)
 const wdl = { daten: { trades: [] } };
 """ + vm + """
 const T = """ + json.dumps(dict(BASIS, id="v1", pl_balance=None, _wart=True)) + """;
@@ -159,11 +160,18 @@ const F = """ + json.dumps(dict(BASIS, id="v3", pl_balance=None)) + """; F.vorge
 F.pl_balance = 40000; const falschSichtbar = !wdlVorgemerktVersteckt(F); wdlVorgemerktTick();
 const A = """ + json.dumps(dict(BASIS, id="v4", pl_balance=None, _wart=True)) + """; A.vorgemerkt = { at: jetztIso };
 const wartetVersteckt = wdlVorgemerktVersteckt(A);
-A.vorgemerkt = { at: new Date(Date.now() - 7 * 3600000).toISOString() }; const fristSichtbar = !wdlVorgemerktVersteckt(A);
+A.vorgemerkt = { at: new Date(Date.now() - 7 * 3600000).toISOString() }; const nach7hVersteckt = wdlVorgemerktVersteckt(A);   // VM1: 6-h-Rückkehr weg
+A.vorgemerkt = { at: new Date(Date.now() - 25 * 3600000).toISOString() }; const fristSichtbar = !wdlVorgemerktVersteckt(A), ohneLesungZeile = wdlOhneLesungLang(A);
+const E = """ + json.dumps(dict(BASIS, id="v7", pl_balance=None, _wart=True, ended_at="2026-11-01T10:00:00Z")) + """;
+const wartetBleibt = !wdlOhneLesungLang(E);   // Review VM1: nicht angeklickt + „wartet auf Lesung“ bleibt in „Wartet auf Balance“ (Jetzt lesen/Login prüfen)
+E.vorgemerkt = { at: new Date(Date.now() - 2 * 3600000).toISOString(), grund: 'wartet auf Lesung' }; const altOhneVormerk = wdlOhneLesungLang(E) && !wdlVorgemerktVersteckt(E), frischNichtZeile = !wdlOhneLesungLang(T);
+E._nie = true; const nieNicht = !wdlOhneLesungLang(E); E._nie = false;
+const Q = """ + json.dumps(dict(BASIS, id="v8", pl_balance=None, endlesung={"puls_aufgegeben": True})) + """; Q.vorgemerkt = { at: jetztIso, grund: 'wartet auf Lesung' };
+const aufgegebenRuhig = wdlEinKlickGrund(Q) === 'keine echte Lesung' ? wdlOhneLesungLang(Q) : 'grund:' + wdlEinKlickGrund(Q);
 const P = """ + json.dumps(dict(BASIS, id="v5", pl_balance=None, endlesung={"puls_aufgegeben": True})) + """; P.vorgemerkt = { at: jetztIso };
 const aufgegebenSichtbar = !wdlVorgemerktVersteckt(P), aufgegebenVormerkbar = wdlVormerkbar(P, wdlEinKlickGrund(P));
 const K = """ + json.dumps(dict(BASIS, id="v6", pl_balance=None)) + """; const fertigOhneWert = wdlVormerkbar(K, wdlEinKlickGrund(K));
-print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar, falschSichtbar, wartetVersteckt, fristSichtbar, aufgegebenSichtbar, aufgegebenVormerkbar, fertigOhneWert }));
+print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar, falschSichtbar, wartetVersteckt, nach7hVersteckt, fristSichtbar, ohneLesungZeile, altOhneVormerk, frischNichtZeile, wartetBleibt, nieNicht, aufgegebenRuhig, aufgegebenSichtbar, aufgegebenVormerkbar, fertigOhneWert }));
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d2:
     d2.write(js2)
@@ -175,7 +183,12 @@ except Exception:
     v = {}
     print("JS:", r2.stdout[-600:], r2.stderr[-600:])
 check(v.get("vorher") == "wartet auf Lesung" and v.get("versteckt") is True and v.get("ohneLesung") == 0, "wartet auf Lesung: vorgemerkt, aus „Erledigt“ raus, nichts abgehakt")
-check(v.get("wartetVersteckt") is True and v.get("fristSichtbar") is True, "nach 6 h wieder sichtbar")
+check(v.get("wartetVersteckt") is True and v.get("nach7hVersteckt") is True, "VM1: vorgemerkt bleibt still weg (keine 6-h-Rückkehr nach Erledigt)")
+check(v.get("fristSichtbar") is True and v.get("ohneLesungZeile") is True, "VM1: nach 24 h ohne Lesung → ruhige Zeile „Überprüfen · ohne Lesung“, nicht mehr versteckt")
+check(v.get("altOhneVormerk") is True and v.get("frischNichtZeile") is True, "VM1: angeklickt, 24 h nach Trade-Ende ohne Lesung → ruhige Zeile; frisch nie")
+check(v.get("wartetBleibt") is True, "VM1: nicht angeklickt + wartet auf Lesung → bleibt in „Wartet auf Balance“ (Knöpfe sichtbar)")
+check(v.get("nieNicht") is True, "VM1: nie gestartete Pläne nie in der ruhigen Zeile (RN1)")
+check(v.get("aufgegebenRuhig") is True, f"VM1: angeklickt, Puls gibt auf → ruhige Zeile statt laut zurück ({v.get('aufgegebenRuhig')})")
 check(v.get("aufgegebenSichtbar") is True and v.get("aufgegebenVormerkbar") is False and v.get("fertigOhneWert") is False, "Puls aufgegeben bzw. Lesung fertig ohne Wert: nie versteckt, Klick öffnet das Popup")
 check(v.get("sichtbar") is True and v.get("nachLesung") == [["v1", True, True]] and v.get("zweimal") == 1, "Lesung da: genau ein stiller Ein-Klick mit der echten Lesung, kein zweiter binnen 60 s")
 check(v.get("blowSichtbar") is True and v.get("zweimal") == 1, "nach der Lesung Blow: zurück in „Erledigt“, kein stilles Abhaken (Popup beim Klick)")

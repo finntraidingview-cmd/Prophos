@@ -6328,6 +6328,11 @@
   #dashboard-view .wdl-og3-kopf span{font-size:13px;font-weight:700;padding:1px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border-soft);color:var(--ink-2);font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-og3-kopf small{margin-left:auto;font-size:12px;color:var(--sub)}
   #dashboard-view .wdl-og3-kopf .wdl-vm-weg{border:0;background:transparent;padding:0;font:inherit;color:var(--violet);cursor:pointer;text-decoration:underline dotted}   /* „n vorgemerkt ×“ (02.11.2026) */
+  /* VM1 (25.11.2026): ruhige Zeile „Überprüfen · ohne Lesung seit über 24 h“ unten in Erledigt */
+  #dashboard-view .wdl-ol{margin:8px 2px 2px;font-size:12px;color:var(--sub);line-height:1.6}
+  #dashboard-view .wdl-ol b{color:var(--ink-2);font-weight:600}
+  #dashboard-view .wdl-ol .wdl-ol-k{border:0;background:transparent;padding:0;font:inherit;color:var(--ink-2);cursor:pointer;text-decoration:underline dotted}
+  #dashboard-view .wdl-ol small{color:var(--sub-2)}
   #dashboard-view .wdl-og3 > .wdl-tab + .wdl-tab{margin-top:12px}
   #dashboard-view .wdl-og3-lauf{--wdl-og:var(--blue,#2563eb)}
   #dashboard-view .wdl-og3-erledigt{--wdl-og:#ea580c}
@@ -43441,15 +43446,35 @@
    * Aktion (Blow, Ziel …), steht er wieder in „Erledigt" und öffnet beim Klick das Popup. Geschätzt wird nie etwas gebucht. */
   let _wdlSammel = null   // RB3: läuft ein Sammel-Abhaken ({ titel, i, n }) — Takte und Einzel-Klicks warten, sonst teilten sie sich die Popup-Felder (_mwdErlId)
   const WDL_VORMERK_GRUENDE = new Set(['wartet auf Lesung', 'keine echte Lesung', 'Hedge-P&L fehlt'])
-  const WDL_VORMERK_FRIST_MS = 6 * 3600000   // Stopp S9 (02.11.2026): nie ewig versteckt — danach steht der Plan wieder in „Erledigt"
+  /* VM1 (Finn 25.11.2026: „Mach dieses vorgemerkt weg, das nervt immer.“): kein „vorgemerkt“ mehr zu sehen — der Abhaken-Klick ohne Lesung merkt still vor, die
+   * Zeile ist für Finn erledigt und kommt nicht zurück; gebucht wird wie bisher nur mit der echten Lesung (wdlVorgemerktTick). Fehlt der Wert 24 h nach dem
+   * Trade-Ende noch (vorgemerkt oder nicht), steht der Trade nicht wieder in „Abhaken“, sondern EINMAL in der ruhigen Zeile „Überprüfen · ohne Lesung“ unten in
+   * Erledigt (Klick öffnet das Popup, dort von Hand nachtragen). Anlass mit: Simon · FundedNext 100k …9853 · HT, Plan 0a1e29c4 (23.11., Echo mit Hedge): der
+   * Copier buchte den Fusion-Close nie (final.closed_tickets leer, kette.tagesende.fusion_offen 1) — „Hedge-P&L fehlt“ kommt dort nie von selbst. Statt 6 h
+   * Versteck + Rückkehr nach Erledigt (Stopp S9 02.11.2026) jetzt 24 h still, dann die ruhige Zeile. */
+  const WDL_VORMERK_FRIST_MS = 24 * 3600000
   const wdlVorgemerkt = t => !!(t && t.status === 'review' && t.vorgemerkt && t.vorgemerkt.at)
+  // VM1: seit wann fehlt der Wert? Ab dem Trade-Ende (ohne Ende ab der Vormerkung) — ≥ 24 h = „alt“
+  const wdlLesungAlt = t => { const ab = Date.parse((t && (t.ended_at || (t.vorgemerkt && t.vorgemerkt.at))) || '') || 0; return !!ab && Date.now() - ab >= WDL_VORMERK_FRIST_MS }
   // Kommt der Wert noch? Nur solange Puls liest (wartet) bzw. der Hedge-P&L nachkommen kann. Aufgegeben, Folgetrade, Lesung fertig ohne Wert = endgültig → Popup
   const wdlVormerkbar = (t, grund) => {
     const e = (t && t.endlesung) || {}
     if(!WDL_VORMERK_GRUENDE.has(grund) || e.puls_aufgegeben || e.balance_quelle === 'folgetrade') return false
     return grund !== 'keine echte Lesung' || !!wdlWartet(t)
   }
-  const wdlVorgemerktVersteckt = t => wdlVorgemerkt(t) && Date.now() - (Date.parse(t.vorgemerkt.at) || 0) < WDL_VORMERK_FRIST_MS && wdlVormerkbar(t, wdlEinKlickGrund(t))
+  const wdlVorgemerktVersteckt = t => wdlVorgemerkt(t) && wdlVormerkbar(t, wdlEinKlickGrund(t)) && !wdlLesungAlt(t)
+  // VM1: ruhige Zeile „Überprüfen · ohne Lesung“ — wartet seit ≥ 24 h auf Lesung/Hedge-P&L (vorgemerkt oder nicht); nie in „Abhaken“, nie geschätzt
+  // Review VM1: (a) nie gestartete Pläne nie (die hat RN1/Glocke); (b) nicht angeklickt + „wartet auf Lesung“ bleibt in „Wartet auf Balance“ mit seinen Knöpfen
+  // (Jetzt lesen/Login prüfen — ein Login-Problem am PC bleibt sichtbar); (c) angeklickt, aber die Lesung kam endgültig ohne Wert (Puls aufgegeben, Folgetrade)
+  // → auch hierher, nicht laut zurück nach „Abhaken“ (Finn: „kommt nicht zurück“) — der Klick öffnet das Popup zum Nachtragen
+  const wdlOhneLesungLang = t => {
+    if(!t || t.status !== 'review' || wdlNieGestartet(t)) return false
+    const grund = wdlEinKlickGrund(t)
+    if(wdlVorgemerkt(t) && WDL_VORMERK_GRUENDE.has(String((t.vorgemerkt && t.vorgemerkt.grund) || '')) && WDL_VORMERK_GRUENDE.has(grund) && !wdlVormerkbar(t, grund)) return true
+    if(!wdlVorgemerkt(t) && grund === 'wartet auf Lesung') return false
+    return wdlLesungAlt(t) && wdlVormerkbar(t, grund)
+  }
+  window._wdlOhneLesungLang = wdlOhneLesungLang   // Test-Haken
   // „n vorgemerkt" anklicken: alle zurück in „Erledigt" (vormerken_weg)
   async function wdlVormerkenWeg(){
     const liste = ((wdl.daten && wdl.daten.trades) || []).filter(wdlVorgemerktVersteckt)
@@ -43468,7 +43493,7 @@
   async function wdlVormerken(pid, t, grund, still){
     const vm = { at: new Date().toISOString(), grund }
     t.vorgemerkt = vm; wdlLokalMerken(pid, { vorgemerkt: vm }); wdlRender()
-    if(!still && typeof atToast === 'function') atToast('Vorgemerkt — wird abgehakt, sobald die Lesung da ist (nichts geschätzt gebucht)', 'ok')
+    void still   // VM1 (25.11.2026): nie mehr ein „Vorgemerkt“-Toast — für Finn ist die Zeile mit dem Klick erledigt
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?${WDL_SICHT}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -43477,7 +43502,7 @@
       if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
     }catch(e){
       t.vorgemerkt = null; wdlLokalMerken(pid, { vorgemerkt: null }); wdlRender()
-      if(typeof atToast === 'function') atToast('Nicht vorgemerkt: ' + String((e && e.message) || e), 'end')
+      if(typeof atToast === 'function') atToast('Nicht abgehakt (Server): ' + String((e && e.message) || e), 'end')
     }
   }
   // Abhaken, sobald die Lesung da ist: nur über den Ein-Klick-Weg mit nurStill (öffnet nie ein Popup von selbst), einer zur Zeit, je Plan höchstens alle 60 s,
@@ -43532,6 +43557,14 @@
     }
   }
   window._wdlRestVorgaengerTick = wdlRestVorgaengerTick   // Test-Haken
+  // VM1: EINE ruhige Zeile unten in „Erledigt“ — „Überprüfen · ohne Lesung seit über 24 h“ mit je Konto Grund; Klick öffnet das Popup (von Hand nachtragen)
+  function wdlOhneLesungHtml(arr){
+    if(!arr || !arr.length) return ''
+    const name = t => { const k = (t && t.konto) || {}; return `${(t && t.person) || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
+    const tag = t => { const d = new Date(t.ended_at || ''); return isNaN(d) ? '' : ' · ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
+    const teile = arr.map(t => `<button type="button" class="wdl-ol-k" data-wdl-ol="${escapeHtml(wdlTid(t))}" title="Popup öffnen — Wert von Hand nachtragen (z. B. Fusion-P&amp;L aus MetaTrader)">${escapeHtml(name(t))}</button> <small>${escapeHtml(wdlEinKlickGrund(t))}${tag(t)}</small>`)
+    return `<div class="wdl-ol"><b>Überprüfen</b> · ohne Lesung seit über 24 h: ${teile.join(' · ')}</div>`
+  }
   function wdlVorgemerktTick(){
     if(_wdlSammel || document.getElementById('mwdErledigtModal')?.classList.contains('open')) return   // RB3: nie während eines Sammel-Abhakens
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
@@ -43570,7 +43603,7 @@
     const knopf = liste.length ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-sammel="${escapeHtml(titel)}"${_wdlSammel ? ' disabled' : ''} title="${escapeHtml(tip)}">${lauf ? `${was} … ${_wdlSammel.i}/${_wdlSammel.n}` : `${was} (${liste.length})`}</button>` : ''
     const zeilen = e ? e.fehler.map(([n, g]) => `<span class="is-fehler"><b>${escapeHtml(n)}</b> — ${escapeHtml(g)}</span>`).join('')
       + e.stehen.map(([n, g]) => `<span><b>${escapeHtml(n)}</b> — ${escapeHtml(g)}</span>`).join('') : ''
-    return `<div class="wdl-sammel">${e ? `<small>${e.ok} abgehakt${e.vm ? ` · ${e.vm} vorgemerkt` : ''} · ${e.stehen.length + e.fehler.length} nicht:</small>` : ''}${knopf}</div>`
+    return `<div class="wdl-sammel">${e ? `<small>${e.ok} abgehakt · ${e.stehen.length + e.fehler.length} nicht:</small>` : ''}${knopf}</div>`   // VM1: kein „vorgemerkt“ mehr
       + (e ? `<div class="wdl-sammel-erg">${zeilen}<button type="button" class="wdl-sammel-weg" data-wdl-sammel-weg="1" title="Liste ausblenden">×</button></div>` : '')
   }
   async function wdlSammelLauf(titel){
@@ -43596,7 +43629,7 @@
           const grund = wdlEinKlickGrund(t)
           if(wdlVormerkbar(t, grund)){   // wie der Einzel-Klick: ohne Lesung vormerken, nie schätzen
             if(await warte(wdlVormerken(pid, t, grund, true), WDL_SAMMEL_FRIST_MS) === '__zeit'){ erg.stehen.push([name(t), WDL_SAMMEL_ZEIT_TXT]); continue }   // RB3b
-            if(t.vorgemerkt) erg.vm++; else erg.fehler.push([name(t), 'nicht vorgemerkt'])
+            if(t.vorgemerkt) erg.ok++; else erg.fehler.push([name(t), 'nicht gespeichert'])   // VM1: still vorgemerkt = für Finn abgehakt
             continue
           }
           const blow = WDL_SAMMEL_BLOW.has(grund), ziel = WDL_SAMMEL_ZIEL.has(grund)
@@ -43637,7 +43670,7 @@
       _wdlSammel = null; _wdlSammelErg = erg
       wdlRender()
       try{ wdlLaden(true) }catch(_){}
-      if(typeof atToast === 'function') atToast(`${titel}: ${erg.ok} abgehakt${erg.vm ? ` · ${erg.vm} vorgemerkt` : ''}${erg.stehen.length ? ` · ${erg.stehen.length} bleiben stehen` : ''}${erg.fehler.length ? ` · ${erg.fehler.length} Fehler` : ''}`, erg.fehler.length ? 'end' : 'ok')
+      if(typeof atToast === 'function') atToast(`${titel}: ${erg.ok} abgehakt${erg.stehen.length ? ` · ${erg.stehen.length} bleiben stehen` : ''}${erg.fehler.length ? ` · ${erg.fehler.length} Fehler` : ''}`, erg.fehler.length ? 'end' : 'ok')
       try{ if(blowGr && erg.ok && typeof archivCloudAbgleich === 'function'){ await archivCloudAbgleich(); if(typeof renderAccounts === 'function') renderAccounts() } }catch(_){}   // Accounts-Zahl sinkt sofort
     }
   }
@@ -43940,8 +43973,9 @@
     wdlModelleRender(alleTrades)
     const modellTrades = alleTrades.filter(wdlModellPasst)
     wdlIdsRender(modellTrades)
-    const vorgemerktN = modellTrades.filter(wdlPasst).filter(wdlVorgemerktVersteckt).length   // vorgemerkt (02.11.2026): aus „Erledigt" raus, nur gezählt
-    const trades = modellTrades.filter(wdlPasst).filter(t => !wdlVorgemerktVersteckt(t))
+    // VM1 (25.11.2026): vorgemerkte Zeilen sind still weg (kein Zähler mehr); was seit ≥ 24 h ohne Lesung steht, kommt nur in die ruhige Zeile unten in Erledigt
+    const ohneLesungLang = modellTrades.filter(wdlPasst).filter(wdlOhneLesungLang)
+    const trades = modellTrades.filter(wdlPasst).filter(t => !wdlVorgemerktVersteckt(t) && !wdlOhneLesungLang(t))
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
@@ -44613,14 +44647,15 @@
         + manuell(g, a)
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
-        + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · <button type="button" class="wdl-vm-weg" data-wdl-vm-weg="1" title="Alle zurück nach „Erledigt" — dann öffnet der Klick wieder das Popup">${vorgemerktN} vorgemerkt ×</button> P&L vorläufig, wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
+        + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt',
+              ((erledigt || (ohneLesungLang.length ? '' : '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')) + wdlOhneLesungHtml(ohneLesungLang)))
         + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review → Waiting for Payout', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
     // Bestanden-Zeilen (08.10.2026, seit 09.10.2026 eigener Abschnitt) auch ohne Trades im Zeitraum zeigen — sonst stünde nur „Keine Trades"
-    liste.innerHTML = (trades.length || bstZeilen().length || wtZeilen().length) ? gruppen(trades, modellTrades)
+    liste.innerHTML = (trades.length || bstZeilen().length || wtZeilen().length || ohneLesungLang.length) ? gruppen(trades, modellTrades.filter(t => !wdlVorgemerktVersteckt(t) && !wdlOhneLesungLang(t)))   // VM1: Chips ohne still/ruhige
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
@@ -44697,7 +44732,15 @@
     }
     const an = ev.target.closest('[data-wdl-ansehen]')
     if(an){ if(!an.disabled) wdlAnsehen(an.getAttribute('data-wdl-ansehen')); return }
-    if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }   // „n vorgemerkt ×“ (02.11.2026)
+    if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }   // „n vorgemerkt ×“ (02.11.2026) — seit VM1 ohne Knopf (toter Pfad, unschädlich)
+    // VM1: ruhige Zeile „ohne Lesung“ → Popup mit Grund (kein Vormerken, kein Ein Klick: der Wert wird von Hand nachgetragen)
+    const ol = ev.target.closest('[data-wdl-ol]')
+    if(ol){
+      if(_wdlSammel) return
+      const pid = ol.getAttribute('data-wdl-ol'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+      if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: false, grund: wdlEinKlickGrund(t) || '' })
+      return
+    }
     // RB3: „Alle abhaken“ / „Alle archivieren“ je Gruppe und × an der Ergebnisliste
     const sm = ev.target.closest('[data-wdl-sammel]')
     if(sm){ if(!sm.disabled) wdlSammelLauf(sm.getAttribute('data-wdl-sammel')); return }
@@ -61909,7 +61952,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2321'
+  const OS_TAB_BUILD = '2026-09-22.2322'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
