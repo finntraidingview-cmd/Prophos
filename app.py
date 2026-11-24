@@ -46504,6 +46504,8 @@ def ap_bal_auto_payout(konten, gelesen, anfrage, plaene, jetzt, schon=(), archiv
         if not kid or A is None or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False or not str(a.get("external_id") or "").strip():
             continue
         ph = fcp_payout_phase(A, _wd_konto_groesse(a), (gelesen or {}).get(kid), (plaene or {}).get(kid) or [])
+        if fcp_payout_abgelehnt(A, ph, jetzt):
+            continue                                      # PW4b (Schalter, Standard aus): Payout gilt als abgelehnt → nicht mehr wegen dieser Anfrage lesen
         if fcp_payout_lesen_faellig(A, ph, jetzt, kid):   # PW4: gestreut je Konto + Anfrage
             out[kid] = "Funded CFD: Payout angefragt — Balance nachlesen (1–12 h nach der Anfrage, bis der Profit abgebucht ist)"
     return out
@@ -53723,8 +53725,24 @@ def fcp_payout_alarm_faellig(anfrage_at, phase, jetzt):
         return False
     letzte = phase.get("letzte") if phase.get("beobachtet") else None
     if isinstance(letzte, datetime):
-        return letzte >= a + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H)
+        # PW4b (Prüfer-Stopp S2 zu fa83b698): frühe Lesung ohne Abbuchung, danach scheitern alle Lesungen (PC aus, Tagesdeckel) → sonst nie ein 🟠
+        return letzte >= a + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H) or jetzt >= letzte + timedelta(hours=2 * FCP_PAYOUT_LESEN_BIS_H)
     return jetzt >= a + timedelta(hours=2 * FCP_PAYOUT_LESEN_BIS_H)
+
+
+# PW4b VORBEREITET (Master 24.11.2026, wartet auf Finns OK — Standard AUS): nach FCP_PAYOUT_ABGELEHNT_TAGE ohne sichtbare Abbuchung gilt der Payout als
+# abgelehnt: das Konto plant normal mit der aktuellen Balance weiter (Phase wie ohne Anfrage), (F) liest nicht mehr wegen dieser Anfrage, einmal 🟠.
+FCP_PAYOUT_ABGELEHNT_AN = False
+FCP_PAYOUT_ABGELEHNT_TAGE = 3
+
+
+def fcp_payout_abgelehnt(anfrage_at, phase, jetzt, an=None):
+    """REIN RECHNEND (testbar, PW4b): True = Payout gilt als abgelehnt (Schalter an, Phase offen, Anfrage ≥ FCP_PAYOUT_ABGELEHNT_TAGE her)."""
+    if not (FCP_PAYOUT_ABGELEHNT_AN if an is None else an):
+        return False
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    return (a is not None and isinstance(phase, dict) and phase.get("phase") == "offen"
+            and jetzt >= a + timedelta(days=FCP_PAYOUT_ABGELEHNT_TAGE))
 
 
 def fcp_waiting_zurueck(waiting_since, anfrage_at, phase):
@@ -54653,7 +54671,16 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         # Vor-Balance = End-Balance des letzten Trades vor der Anfrage; ohne sie (oder ohne Gewinn davor) → None = normal rechnen. Lese-Aufträge nicht
         # lesbar (lesungen None) → nur die End-Balancen danach zählen als Beobachtung (bleibt eher „offen“ = vorsichtig)
         p_phase = fcp_payout_phase(p_anfrage, _wd_konto_groesse(a), (lesungen or {}).get(aid), pl) if p_anfrage is not None else None
-        if fcp_payout_alarm_faellig(p_anfrage, p_phase, jetzt):
+        if fcp_payout_abgelehnt(p_anfrage, p_phase, jetzt):
+            # PW4b (Schalter FCP_PAYOUT_ABGELEHNT_AN, Standard aus — wartet auf Finns OK): nach 3 Tagen ohne Abbuchung gilt der Payout als abgelehnt → einmal 🟠,
+            # dann normal mit der aktuellen Balance (Phase wie ohne Anfrage)
+            _ext = str(a.get("external_id") or "").strip()
+            _gk = _wd_konto_groesse(a)
+            payout_alarm.append((f"fcp_payout_abgelehnt|{aid}|{p_anfrage.isoformat()}", uid, aid,
+                                 f"{namen.get(uid) or uid[:8]} · {a.get('firm') or 'Firma'} {int(_gk // 1000) if _gk else '?'}k …{_ext[-4:] or '?'}",
+                                 p_anfrage, {"phase": "abgelehnt"}))
+            p_phase = None
+        elif fcp_payout_alarm_faellig(p_anfrage, p_phase, jetzt):
             # PW1b (Prüfer-Hinweis): 12 h nach der Anfrage noch nicht abgebucht → einmal je Anfrage 🟠 an die Master-IDs (nach dem Lauf, nur scharf)
             _ext = str(a.get("external_id") or "").strip()
             _gk = _wd_konto_groesse(a)
@@ -55043,8 +55070,16 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                     continue
                 try:
                     _tag = anf.astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M")
-                    _ob = ("nach 12 h zeigt die Lesung noch keine Abbuchung" if ph.get("beobachtet")
-                           else "seit 24 h keine erfolgreiche Lesung")
+                    if ph.get("phase") == "abgelehnt":     # PW4b (Schalter)
+                        alarm_senden(2, "fcp_payout_abgelehnt", f"Payout abgelehnt? {ktxt}",
+                                     f"{ktxt}: Payout am {_tag} Dubai angefragt, nach {FCP_PAYOUT_ABGELEHNT_TAGE} Tagen keine Abbuchung — gilt als abgelehnt, "
+                                     f"das Konto wird wieder normal mit der aktuellen Balance geplant. Im Dashboard der Firma prüfen.",
+                                     uid=uid_, schluessel=key, tag=f"fcp-payout-{aid_}"[:60], daten={"konto_id": aid_, "anfrage": anf.isoformat()})
+                        continue
+                    _ob = ("nach 12 h zeigt die Lesung noch keine Abbuchung" if ph.get("beobachtet") and ph.get("letzte")
+                           and ph["letzte"] >= anf + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H)
+                           else "seit 24 h keine erfolgreiche Lesung" if not ph.get("beobachtet")
+                           else "frühe Lesung ohne Abbuchung, seither 24 h keine erfolgreiche Lesung")
                     alarm_senden(2, "fcp_payout_offen", f"Payout abgelehnt/ausstehend? {ktxt}",
                                  f"{ktxt}: Payout am {_tag} Dubai angefragt, {_ob}. Das Konto wird bis zur Abbuchung nicht geplant (PW4), "
                                  f"gelesen wird alle 12 h. Im Dashboard der Firma prüfen.",

@@ -232,6 +232,15 @@ check(not AF(A2, o_frueh, A2 + timedelta(hours=13)) and AF(A2, o_spaet, A2 + tim
 check(not AF(A2, o_nie, A2 + timedelta(hours=12, minutes=5)) and AF(A2, o_nie, A2 + timedelta(hours=24)),
       "nie gelesen (Versatz bis 12 h) → 🟠 erst nach 24 h ohne Lesung")
 check(not AF(A2, {"phase": "abgebucht"}, A2 + timedelta(days=3)) and not AF(None, o_nie, A2 + timedelta(days=3)), "abgebucht / ohne Anfrage → nie")
+# PW4b (Prüfer-Stopp S2): frühe Lesung (2 h, ohne Abbuchung), danach scheitern alle Lesungen (PC aus, Tagesdeckel) — Probe +15/24/48/168/696 h
+probe = {h: AF(A2, o_frueh, A2 + timedelta(hours=h)) for h in (15, 24, 25, 26, 48, 168, 696)}
+check(not probe[15] and not probe[24] and not probe[25] and probe[26] and probe[48] and probe[168] and probe[696],
+      f"PW4b: frühe Lesung, dann nur Lesefehler → 🟠 24 h nach der letzten Lesung (2 h + 24 h = 26 h) ({probe})")
+AB = app.fcp_payout_abgelehnt
+check(not AB(A2, o_spaet, A2 + timedelta(days=10)), "PW4b: Schalter „abgelehnt nach 3 Tagen“ steht standardmäßig AUS")
+check(app.FCP_PAYOUT_ABGELEHNT_AN is False and app.FCP_PAYOUT_ABGELEHNT_TAGE == 3, "PW4b: Konstanten AUS / 3 Tage")
+check(not AB(A2, o_spaet, A2 + timedelta(days=2, hours=23), an=True) and AB(A2, o_spaet, A2 + timedelta(days=3), an=True)
+      and not AB(A2, {"phase": "abgebucht"}, A2 + timedelta(days=5), an=True), "PW4b an: ab 3 Tagen offen → abgelehnt; abgebucht nie")
 ALARME.clear()
 IM_LOG.update(keys)
 app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
@@ -249,6 +258,19 @@ check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen" and MARC["id"] in 
 ALARME.clear()
 app.fcp_planen(trocken=True, jetzt=JETZT, seed=7)
 check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen"], "Trockenlauf meldet nichts")
+ALARME.clear()
+app.FCP_PAYOUT_ABGELEHNT_AN = True
+try:
+    e_ab = app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
+finally:
+    app.FCP_PAYOUT_ABGELEHNT_AN = False
+g_ab = {z["konto_id"] for z in e_ab.get("geplant") or []}
+pa_ab = [x for x in ALARME if x[0][1] == "fcp_payout_abgelehnt"]
+a_ab = {z["konto_id"]: z.get("grund") for z in e_ab.get("ausgelassen") or []}
+check(all(a_ab.get(k) not in (app.FCP_GRUND_PAYOUT_LESEN, app.FCP_GRUND_PAYOUT_KEIN_ABZUG) for k in (MARC["id"], M7057["id"]))
+      and {x[1]["schluessel"].split("|")[1] for x in pa_ab} == {MARC["id"], M7057["id"]} and not [x for x in ALARME if x[0][1] == "fcp_payout_offen"],
+      f"PW4b Schalter AN: Anfrage > 3 Tage ohne Abbuchung → keine Payout-Sperre mehr, die normalen Regeln gelten (Gewinn noch da → Waiting/WP2) "
+      f"+ 🟠 „Payout abgelehnt?“ statt „ausstehend“ ({len(pa_ab)})")
 
 
 def _kaputt():
