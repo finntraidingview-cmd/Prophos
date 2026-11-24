@@ -56381,6 +56381,12 @@ except Exception as _ke:
     print(f"[kapital] Modul nicht geladen: {type(_ke).__name__}: {_ke}", flush=True)
 
 try:
+    import bank_app             # Bankkonten je ID (BK1, 24.11.2026, Finn: Admin → Finanzen → Bankkonto): /admin/bank*, Gate wie Kapital
+    bank_app.registrieren(app, globals())
+except Exception as _be:
+    print(f"[bank] Modul nicht geladen: {type(_be).__name__}: {_be}", flush=True)
+
+try:
     import support_app          # Support-Chat „Lotse“ (27.10.2026, Finn): eigenes Modul mit den /support/*-Routen, wie Polar
     support_app.registrieren(app, globals())
 except Exception as _se:
