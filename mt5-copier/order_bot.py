@@ -24751,8 +24751,11 @@ CDP_WERBUNG_JS = r"""(function () {
     var r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.left < innerWidth && r.top < innerHeight; } catch (_) { return false; } }
   function drin(r) { return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }
   function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
+  // BF1 (24.11.2026): TradingViews Hinweis-Karten (ui-lib-HintWizard, data-role="hint", fest rechts über Watchlist/Ticket — z. B. „Get AI
+  // Copilot at 60% off for 2 months … Get 60% off") haben weder Dialog-Rolle noch Klasse; als Kasten aufnehmen, zählen s. HINT unten
   var sel = '[role="dialog"],[role="alertdialog"],[aria-modal="true"],[data-dialog-name],body > div,body > section,body > aside,' +
-            '[class*="toast"],[class*="popup"],[class*="dialog"],[class*="modal"]';
+            '[class*="toast"],[class*="popup"],[class*="dialog"],[class*="modal"],[data-role="hint"],[data-qa-id*="HintWizard"]';
+  var HINT = '[data-role="hint"],[data-qa-id*="HintWizard"]';
   var basis = Array.prototype.slice.call(document.querySelectorAll(sel));
   // Werbe-Karten IN der Seite (Trading-Panel): vom Werbetext bzw. der „AD"-Marke aufwärts bis zum ersten Kasten ≥ 200×80 px
   Array.prototype.slice.call(document.querySelectorAll('body *')).forEach(function (e) {
@@ -24776,18 +24779,32 @@ CDP_WERBUNG_JS = r"""(function () {
     var t = (k.b.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
     var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0) + (KARTE.test(t) ? 2 : 0);
     if (n >= 1 && n0(k.b)) n += 2;                         // „AD" nur MIT Werbetext (Prüfer T3: Spaltenkürzel „AD" allein ist keine Werbung)
+    // BF1 (24.11.2026): eine TradingView-Hinweis-Karte MIT einem Werbe-Merkmal („60% off") zählt doppelt — ohne Werbetext (echter
+    // Bedien-Hinweis) bleibt sie bei 0 und stehen
+    if (n >= 1 && k.b.matches && k.b.matches(HINT)) n += 1;
     if (n < 2 || HART.test(t)) return;
     var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"],' +
                                                             '[class*="Close"],[data-qa-id*="close"],[data-role*="close"]')).filter(function (e) {
       if (!sb(e)) return false;
       var q = e.getBoundingClientRect();
-      if (q.width > 60 || q.height > 60 || q.width < 6 || q.height < 6 || !drin(q)) return false;
+      if (q.width < 6 || q.height < 6 || !drin(q)) return false;
       if (k.r.right - q.right > 70 || q.top - k.r.top > 70) return false;
-      var oben = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);   // verdecktes X (Karte unter dem Modal) erst später
-      if (!oben || !(oben === e || e.contains(oben))) return false;
       var w = (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.getAttribute('data-name') || '') + ' ' + (e.textContent || '').trim();
       if (NIE.test(w) || XTABU.test(w)) return false;
-      return /close|schlie|dismiss/i.test(w) || /^\s*[×✕✖xX]?\s*$/.test(e.textContent || '');
+      var benannt = /close|schlie|dismiss/i.test(w);
+      // für die Größen-Ausnahme nur die Beschriftung (aria-label/title), mit Wortgrenze — nie Text wie „Offer closes in" (Prüfer BF1)
+      var benanntKopf = /\bclose\b|schlie(ß|ss)en|\bdismiss\b/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || ''));
+      // BF1 (24.11.2026, Finn: „Black-Friday-Banner konnten wir früher wegklicken, geht gerade nicht mehr" — 27 Fehlstarts „Nach 'Connect'
+      // keine Tradovate-Anmeldeseite" auf 5 PCs, Foto pc-xc5c52 14:20 UTC: Modal „Black Friday · Up to 80% off · Sale ends in · Explore
+      // offers" über dem Connect-Dialog): sein X ist button.close-… aria-label „Close" mit 72×72 px Klickfläche (Symbol 21 px) — die
+      // 60-px-Grenze warf es raus, der Werbe-Blick blieb leer, Connect landete auf dem Modal. Jetzt: ein BENANNTES X darf bis 96 px groß
+      // sein, wenn es etwa quadratisch ist (Klickfläche um ein Symbol, kein Text-Knopf); namenlose X bleiben bei höchstens 60 px.
+      if (q.width > 60 || q.height > 60) {
+        if (!benanntKopf || q.width > 96 || q.height > 96 || Math.abs(q.width - q.height) > 16) return false;
+      }
+      var oben = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);   // verdecktes X (Karte unter dem Modal) erst später
+      if (!oben || !(oben === e || e.contains(oben))) return false;
+      return benannt || /^\s*[×✕✖xX]?\s*$/.test(e.textContent || '');
     });
     xs = xs.filter(function (e) { return !xs.some(function (f) { return f !== e && e.contains(f); }); });
     if (xs.length !== 1) return;
@@ -27677,8 +27694,17 @@ def _cdp_ticket_neu_oeffnen(s, opts, trail):
 # muss daneben eine zweite Einheit wie ticks/%/price zeigen, sonst ist es nicht der Wähler), Beweis = Rücklesung der Beschriftung über
 # cdp_einheit → „$". Ohne Beweis bleibt der Abbruch wie bisher (plus Zusatz, was das Menü zeigte), ein offenes Menü geht per Esc zu.
 # Nie ein zweiter Anlauf, nie ein Druck auf Senden; Pausen über _warte.
-CDP_RX_EINHEIT_GELD = re.compile(r"^\s*(\$|usd|€|eur|currency|money|geld|w(ä|ae)hrung)\s*$", re.I)
-CDP_RX_EINHEIT_ANDERE = re.compile(r"^\s*(ticks?|pips?|%|percent|prozent|price|kurs|points?|punkte)\s*$", re.I)
+# BF1b (24.11.2026, 11× „'Take profit' steht nicht auf $ (Einheit 'price' …) Auch nach Klick auf den ▾-Wähler: kein Menü offen ([])" auf
+# 3 PCs seit 08:24 UTC, Foto pc-na1q6b 14:18 UTC + Inventar 14:36 UTC): TradingView hat das Ticket umgebaut („Exits") und die Einheit je
+# Browser auf „price" zurückgesetzt. Das neue Menü ist ein div ohne Rolle (React-id ':r6j:') mit den Einträgen „Price · Ticks · % price ·
+# Reward $ · Reward % balance" (SL: „Risk $ / Risk % balance"), jede Zeile mit einem ⓘ-Knopf etwa in ihrer Mitte. Darum: (1) Geld-Eintrag
+# auch „Reward $"/„Risk $" (nie „… % balance"); (2) ohne Rollen-Container sucht das Menü-JS die Einträge über ihren TEXT: sichtbare
+# Blätter mit genau einem Einheiten-Wort, je Blatt die Zeile (größter Vorfahr mit demselben Text); ein Menü = ein Eltern-Element mit
+# mindestens ZWEI solchen Zeilen, höchstens 500×500 px. Gemeldet wird das Rechteck des TEXTES (nicht der Zeile — deren Mitte läge auf dem
+# ⓘ-Knopf). Der alte Rollen-Weg bleibt unverändert zuerst.
+CDP_RX_EINHEIT_GELD = re.compile(r"^\s*((reward|risk|profit|loss|gewinn|verlust|cash)\s*)?(\$|usd|€|eur|currency|money|geld|w(ä|ae)hrung)\s*$", re.I)
+CDP_RX_EINHEIT_ANDERE = re.compile(r"^\s*(ticks?|pips?|%|percent|prozent|price|kurs|points?|punkte|%\s*price|"
+                                   r"((reward|risk)\s*)?%\s*(of\s*)?(balance|equity))\s*$", re.I)
 CDP_EINHEIT_MENUE_JS = (
     "(function(){var S='[role=\"listbox\"],[role=\"menu\"],[data-name=\"menu-inner\"],[data-name=\"popup-menu-container\"]';"
     "function sb(e){var r=e.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;var s=getComputedStyle(e);"
@@ -27692,7 +27718,61 @@ CDP_EINHEIT_MENUE_JS = (
     "out.push({text:tx(e),aria:e.getAttribute('aria-label')||'',title:e.getAttribute('title')||'',"
     "rect:[r.left,r.top,r.width,r.height],aus:(e.getAttribute('aria-disabled')==='true'||e.hasAttribute('disabled')),"
     "aktiv:(e.getAttribute('aria-selected')==='true'||e.getAttribute('aria-checked')==='true')});});});"
-    "return {menues:mm.length,eintraege:out};})()")
+    # BF1b: Text-Weg nur, wenn der Rollen-Weg nichts fand
+    "var weg='rolle';if(!out.length){weg='text';"
+    "var RX=/^(price|ticks?|pips?|points?|%|%\\s*price|((reward|risk)\\s*)?(\\$|usd)|((reward|risk)\\s*)?%\\s*(of\\s*)?(balance|equity))$/i;"
+    # strengere Sichtbarkeit als sb (Prüfer BF1): auch Deckkraft 0 und außerhalb des Bilds zählen nicht
+    "function sb2(e){if(!sb(e))return false;var r=e.getBoundingClientRect(),a=e;while(a&&a!==document.body){if(getComputedStyle(a).opacity==='0')return false;a=a.parentElement;}"
+    "return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}"
+    "var bl=Array.prototype.slice.call(document.querySelectorAll('body *')).filter(function(e){return e.children.length===0&&RX.test(tx(e))&&sb2(e);});"
+    "var grp=[];bl.forEach(function(b){var t=tx(b),z=b;while(z.parentElement&&z.parentElement!==document.body&&tx(z.parentElement)===t)z=z.parentElement;"
+    "var p=z.parentElement;if(!p)return;var g=null;for(var i=0;i<grp.length;i++)if(grp[i].p===p)g=grp[i];if(!g){g={p:p,z:[]};grp.push(g);}"
+    "g.z.push({b:b,z:z,t:t});});"
+    "var gi=0;grp.forEach(function(g){if(g.z.length<2)return;var r=g.p.getBoundingClientRect();if(r.width>500||r.height>500)return;mm.push(g.p);gi++;"
+    "g.z.forEach(function(x){if(out.length>=40)return;var q=x.b.getBoundingClientRect(),z=x.z;"
+    "out.push({text:x.t,aria:z.getAttribute('aria-label')||'',title:z.getAttribute('title')||'',rect:[q.left,q.top,q.width,q.height],"
+    "g:gi,gr:[r.left,r.top,r.width,r.height],"
+    "aus:(z.getAttribute('aria-disabled')==='true'||z.hasAttribute('disabled')),"
+    "aktiv:(z.getAttribute('aria-selected')==='true'||z.getAttribute('aria-checked')==='true')});});});}"
+    "return {menues:mm.length,eintraege:out,weg:weg};})()")
+
+
+def cdp_einheit_text_gruppen(eintraege, vorher, waehler):
+    """REIN RECHNEND (testbar, BF1b + Prüfer): Einträge des TEXT-Wegs (mit Gruppe 'g'/'gr') nur aus Gruppen, die (a) erst NACH dem Klick auf den
+    Wähler da sind (gleiche Texte an gleicher Stelle vorher → kein Menü, z. B. „$ | %"-Umschalter im Ticket), (b) nahe am Wähler liegen
+    (waagerecht höchstens 300 px daneben, senkrecht höchstens 400 px Abstand) und (c) selbst einen Geld-Eintrag UND eine andere Einheit
+    tragen. Einträge des Rollen-Wegs (ohne 'g') bleiben unverändert. -> Liste"""
+    el = [e for e in (eintraege or []) if isinstance(e, dict)]
+    if not any("g" in e for e in el):
+        return el
+
+    def schluessel(es):
+        return tuple(sorted((str(e.get("text") or ""), tuple(int(round(float(v))) for v in (cdp_rect(e.get("rect")) or [0, 0, 0, 0])[:4]))
+                            for e in es))
+    alt = {}
+    for e in (vorher or []):
+        if isinstance(e, dict) and "g" in e:
+            alt.setdefault(e.get("g"), []).append(e)
+    alt_s = {schluessel(v) for v in alt.values()}
+    w = cdp_rect(waehler)
+    gruppen = {}
+    for e in el:
+        if "g" in e:
+            gruppen.setdefault(e.get("g"), []).append(e)
+    raus = []
+    for g, es in gruppen.items():
+        gr = cdp_rect(es[0].get("gr"))
+        if schluessel(es) in alt_s or not gr or not w or len(gr) != 4 or len(w) != 4:
+            continue
+        gl, gt, gw, gh = gr
+        wl, wt, ww, wh = w
+        if gl > wl + ww + 300 or gl + gw < wl - 300 or gt > wt + wh + 400 or gt + gh < wt - 400:
+            continue
+        txt = [str(e.get(f) or "") for e in es for f in ("text", "aria", "title")]
+        if not (any(CDP_RX_EINHEIT_GELD.search(t) for t in txt) and any(CDP_RX_EINHEIT_ANDERE.search(t) for t in txt)):
+            continue
+        raus += es
+    return [e for e in el if "g" not in e] + raus
 
 
 def cdp_einheit_wahl(eintraege):
@@ -27727,7 +27807,8 @@ def _cdp_einheit_auf_dollar(s, st, schl, name, opts, trail):
             m = s.lese_js(CDP_EINHEIT_MENUE_JS, timeout=4)
         except Exception:
             m = None
-        return (m.get("eintraege") or []) if isinstance(m, dict) and isinstance(m.get("eintraege"), list) else []
+        roh = (m.get("eintraege") or []) if isinstance(m, dict) and isinstance(m.get("eintraege"), list) else []
+        return cdp_einheit_text_gruppen(roh, vorher, r)   # BF1b: Text-Weg nur neue Gruppen nahe am Wähler (Rollen-Weg unverändert)
 
     f_ = f_von(st)
     besch = f_.get("beschriftung") if isinstance(f_.get("beschriftung"), dict) else {}
@@ -27735,6 +27816,12 @@ def _cdp_einheit_auf_dollar(s, st, schl, name, opts, trail):
     if not r:
         trail.append(f"{name}: Einheit '{cdp_einheit(f_) or '?'}' — Wähler (Beschriftung) ohne Rechteck, nicht umgestellt")
         return st, False, " Wähler nicht greifbar."
+    # BF1b (Prüfer): was der Text-Weg VOR dem Klick schon sieht, ist nicht das Menü (z. B. ein „$ | %"-Umschalter im Ticket)
+    try:
+        v_ = s.lese_js(CDP_EINHEIT_MENUE_JS, timeout=4)
+    except Exception:
+        v_ = None
+    vorher = (v_.get("eintraege") or []) if isinstance(v_, dict) and isinstance(v_.get("eintraege"), list) else []
     if not s.klick(r, f"Einheiten-Wähler {name} ('{besch_text(f_)}')"):
         trail.append(f"{name}: Einheiten-Wähler nicht gedrückt (kein Beweis) — nicht umgestellt")
         return st, False, " Wähler nicht gedrückt."
