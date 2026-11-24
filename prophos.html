@@ -996,6 +996,7 @@
   #dashboard-view .ud-item.danger{color:var(--danger)}
   #dashboard-view .ud-item.danger svg{color:var(--danger)}
   #dashboard-view .ud-divider{height:1px;background:var(--border-soft);margin:4px 0}
+  #dashboard-view .ud-sec{padding:8px 10px 3px;font-size:10.5px;font-weight:600;letter-spacing:.03em;color:var(--sub)}   /* AS1: Abschnitt im ID-Umschalter */
 
   /* Main */
   #dashboard-view .main{
@@ -16635,7 +16636,10 @@
   // prophos_kasse_geraet (22.10.2026): Admin „Dieses Gerät merken" gilt dem Browser, nicht der ID — bleibt beim Wechsel liegen
   // prophos_profil_wechsel (ID1c, 09.11.2026): Wechsel-Merker eines Tabs — gehört dem Browser, nie einem Bucket
   const PROF_WECHSEL_LS = 'prophos_profil_wechsel'
-  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE, 'prophos_kasse_geraet', PROF_WECHSEL_LS]     // gehören keinem Profil
+  // AS1 (25.11.2026, Finn): Gruppen für den ID-Umschalter ({gruppen:[{name,ht,ids,ausser}], ohne:[uid]}) — aus /admin/overview (admAnwenden),
+  // gehört dem Browser wie die Profil-Liste, damit das Menü auch unter einer ID ohne Admin-Sicht nach Unternehmen sortiert
+  const PROF_GRUPPEN_LS = 'prophos_profil_gruppen'
+  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE, 'prophos_kasse_geraet', PROF_WECHSEL_LS, PROF_GRUPPEN_LS]     // gehören keinem Profil
 
   function profList(){
     try{ return JSON.parse(localStorage.getItem(PROF_LS) || '[]') }catch(_){ return [] }
@@ -17075,6 +17079,47 @@
     renderProfileMenu()
   }
 
+  /* ID-UMSCHALTER NACH UNTERNEHMEN (AS1, 25.11.2026, Finn): die gespeicherten IDs standen in der Reihenfolge, in der sie dazukamen. Jetzt
+   * Abschnitte aus den Gruppen von /admin/overview (id_gruppen, gemerkt in PROF_GRUPPEN_LS): HT zuerst, dann jede weitere Gruppe (heute
+   * „Emin") nach Name, IDs ohne bekannte Gruppe ganz unten — je Abschnitt alphabetisch. HT-Mitglied = in ids (falls geliefert), sonst
+   * „nicht in ausser"; IDs aus ohne_unternehmen nie HT. Keine Gruppen gemerkt = eine Liste alphabetisch wie bisher, ohne Überschriften. */
+  function profGruppenLesen(){
+    try{ const g = JSON.parse(localStorage.getItem(PROF_GRUPPEN_LS) || 'null'); return (g && Array.isArray(g.gruppen) && g.gruppen.length) ? g : null }catch(_){ return null }
+  }
+  function profGruppenMerken(d){
+    try{
+      if(!d || Array.isArray(d.sicht_ids) || !Array.isArray(d.gruppen) || !d.gruppen.length) return   // nur die volle Sicht kennt alle Gruppen
+      localStorage.setItem(PROF_GRUPPEN_LS, JSON.stringify({
+        gruppen: d.gruppen.map(x => ({ name: String(x.name || ''), ht: !!x.ht, ids: (x.ids || []).map(String), ausser: (x.ausser || []).map(String) })),
+        ohne: (Array.isArray(d.ohne_unternehmen) ? d.ohne_unternehmen : []).map(u => String(u && u.id || '')).filter(Boolean) }))
+      renderProfileMenu()
+    }catch(_){}
+  }
+  function profMenuAbschnitte(liste, gd){
+    const nm = p => String(p.name || p.email || '')
+    const sortiert = a => a.slice().sort((x, y) => nm(x).localeCompare(nm(y), 'de', { sensitivity: 'base' }))
+    const gruppen = (gd && Array.isArray(gd.gruppen)) ? gd.gruppen : []
+    if(!gruppen.length) return [{ titel: '', liste: sortiert(liste) }]
+    const ohne = new Set((gd.ohne || []).map(String))
+    const ht = gruppen.find(g => g.ht)
+    const andere = gruppen.filter(g => !g.ht).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de', { sensitivity: 'base' }))
+    const fach = new Map([[ht, []], ...andere.map(g => [g, []])]), rest = []
+    for(const p of liste){
+      const uid = String(p.userId)
+      const g = andere.find(x => (x.ids || []).map(String).includes(uid))
+      if(g){ fach.get(g).push(p); continue }
+      const htIds = ht ? (ht.ids || []).map(String) : []
+      if(ht && !ohne.has(uid) && (htIds.length ? htIds.includes(uid) : !(ht.ausser || []).map(String).includes(uid))){ fach.get(ht).push(p); continue }
+      rest.push(p)
+    }
+    const out = []
+    if(ht && fach.get(ht).length) out.push({ titel: String(ht.name || '').trim() || 'Hermann Technologies', liste: sortiert(fach.get(ht)) })
+    for(const g of andere) if(fach.get(g).length) out.push({ titel: String(g.name || '').trim() || 'Gruppe', liste: sortiert(fach.get(g)) })
+    if(rest.length) out.push({ titel: 'Ohne Gruppe', liste: sortiert(rest) })
+    return out
+  }
+  window._profMenuAbschnitte = profMenuAbschnitte   // Selbsttest AS1
+
   function renderProfileMenu(){
     const box = document.getElementById('ud-profiles')
     if(!box) return
@@ -17084,7 +17129,7 @@
     // geschoben hat. window statt const, weil renderProfileMenu beim Boot laufen kann,
     // bevor der Wächter-Abschnitt ausgewertet ist.
     const reviewCounts = window.mpReviewCounts || {}
-    box.innerHTML = others.length ? `<div class="ud-divider"></div>` + others.map(p => {
+    const knopf = p => {
       const n = reviewCounts[p.userId] || 0
       return `
       <button class="ud-item" data-prof-switch="${escapeHtml(p.userId)}" title="Zu ${escapeHtml(p.email)} wechseln">
@@ -17093,7 +17138,12 @@
         ${n ? `<span title="${n} Trade${n===1?'':'s'} warten auf Bestätigung" style="background:var(--violet);color:#fff;border-radius:9px;min-width:17px;height:17px;padding:0 5px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${n}</span>` : ''}
         <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;line-height:1;padding:8px 10px;margin:-8px -8px -8px 0">×</span>
       </button>`
-    }).join('') : ''
+    }
+    // AS1: Abschnitte je Unternehmen (HT zuerst, dann die anderen Gruppen nach Name, IDs ohne bekannte Gruppe ganz unten), je Abschnitt alphabetisch;
+    // ohne Gruppen-Daten (nie im Admin gewesen / Lesefehler) eine Liste alphabetisch ohne Überschriften
+    const abschnitte = profMenuAbschnitte(others, profGruppenLesen())
+    box.innerHTML = others.length ? `<div class="ud-divider"></div>` + abschnitte.map(a =>
+      (a.titel ? `<div class="ud-sec">${escapeHtml(a.titel)}</div>` : '') + a.liste.map(knopf).join('')).join('') : ''
     box.querySelectorAll('[data-prof-switch]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         if(e.target?.dataset?.profRemove){
@@ -18120,6 +18170,7 @@
       try{ planerRolleMerken(d) }catch(_){}   // PLANER-TAB: Rolle dieser ID für die Sitzung (Verwalter zuerst)
       admKroneSetzen(d, uid)   // UNT6 (K3 C1)
       if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
+      try{ profGruppenMerken(d) }catch(_){}   // AS1: ID-Umschalter nach Unternehmen (geräteweit, übersteht den ID-Wechsel)
       window._admLadeZeit = at
       window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
       // Lesbare Namen: seit 28.08.2026 liefert der Server die
@@ -61952,7 +62003,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2322'
+  const OS_TAB_BUILD = '2026-09-22.2323'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
