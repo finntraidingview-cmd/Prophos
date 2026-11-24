@@ -1672,6 +1672,12 @@
   #adm-pane-bank .bk-saldo-sub{font-size:12px;color:var(--sub);margin-top:2px}
   #adm-pane-bank .bk-konto-infos{display:grid;grid-template-columns:auto auto;gap:3px 12px;font-size:12px;color:var(--sub);text-align:left}
   #adm-pane-bank .bk-konto-infos b{font-weight:500;color:var(--ink-2)}
+  #adm-pane-bank .bk-arten{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-soft)}
+  #adm-pane-bank .bk-art{border:1px solid transparent;background:var(--surface-tint);border-radius:10px;padding:8px 10px;text-align:left;font:inherit;cursor:pointer;color:inherit}
+  #adm-pane-bank .bk-art:hover{border-color:var(--border)}
+  #adm-pane-bank .bk-art.is-on{border-color:var(--violet);background:var(--violet-tint)}
+  #adm-pane-bank .bk-art span{display:block;font-size:11px;color:var(--sub)}
+  #adm-pane-bank .bk-art b{display:block;font-size:14px;font-variant-numeric:tabular-nums;margin-top:2px}
   #adm-pane-bank .bk-sheet{table-layout:fixed;min-width:680px}   /* Text-Spalte bekommt den Rest; zu schmal → die Box scrollt statt zu quetschen */
   #adm-pane-bank .bk-sheet td{padding-top:3px;padding-bottom:3px;padding-left:4px;padding-right:4px}
   #adm-pane-bank .bk-sheet input,#adm-pane-bank .bk-sheet select{width:100%;min-width:0;border:1px solid transparent;background:transparent;border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;color:var(--ink)}
@@ -1689,6 +1695,7 @@
     #adm-pane-bank .bk-id-dat{grid-area:meta;font-size:11.5px} #adm-pane-bank .bk-id-n{display:none}
     #adm-pane-bank .bk-konten-seg{margin-left:0;width:100%;overflow-x:auto}
     #adm-pane-bank .bk-saldo{font-size:26px}
+    #adm-pane-bank .bk-arten{grid-template-columns:1fr 1fr}
     /* Handy: Sheet ohne Art- und Saldo-Spalte (Saldo steht groß darüber), passt ohne Querscrollen */
     #adm-pane-bank .bk-sheet{min-width:0}
     #adm-pane-bank .bk-sheet :is(th,td):nth-child(3),#adm-pane-bank .bk-sheet :is(th,td):nth-child(5){display:none}
@@ -15168,6 +15175,8 @@
                   </div>
                   <div class="bk-konto-infos" id="bk-d-infos"></div>
                 </div>
+                <!-- BK4: Summe je Art, Klick filtert die Tabelle (laufender Saldo rechnet weiter über alle Zeilen) -->
+                <div class="bk-arten" id="bk-d-arten"></div>
               </div>
               <div class="panel" style="margin-top:14px">
                 <div class="table-wrap">
@@ -15178,8 +15187,8 @@
                       <tr class="bk-neu">
                         <td><input id="bk-n-datum" type="date"></td>
                         <td><input id="bk-n-text" placeholder="Neue Buchung, z. B. topstep acc" autocomplete="off"></td>
-                        <td><select id="bk-n-art"><option>Einzahlung HT</option><option>Account-Kauf</option><option>Payout</option><option>Gebühr</option><option>Vergütung</option><option selected>Sonstiges</option></select></td>
-                        <td><input id="bk-n-betrag" type="number" step="0.01" placeholder="± Betrag" class="adm-num" title="+ Eingang / − Ausgang · Account-Kauf und Gebühr immer Ausgang"></td>
+                        <td><select id="bk-n-art"><option>Zahlung von HT</option><option>Zahlung an HT</option><option>Payout</option><option selected>Account-Kauf</option></select></td>
+                        <td><input id="bk-n-betrag" type="number" step="0.01" placeholder="Betrag" class="adm-num" title="Vorzeichen folgt der Art: Zahlung von HT / Payout +, Zahlung an HT / Account-Kauf −"></td>
                         <td class="adm-num" style="color:var(--sub-2);font-size:11.5px">Enter ↵</td>
                         <td></td>
                       </tr>
@@ -24148,7 +24157,11 @@
     window._bkOeffnen = () => { if(!$('bk-n-datum').value) $('bk-n-datum').value = bkHeute(); bkLaden() }
     window._bkStub = d => { bkDaten = d; bkFehler = ''; $('bk-msg').hidden = true; $('bk-body').hidden = false; if(!$('bk-n-datum').value) $('bk-n-datum').value = bkHeute(); bkRender() }   // Test-Haken wie _kisStub (ohne Login zeichnen)
 
-    const BK_ARTEN = ['Einzahlung HT', 'Account-Kauf', 'Payout', 'Gebühr', 'Vergütung', 'Sonstiges']
+    // BK4 (25.11.2026, Finn): nur noch vier Arten, Vorzeichen fest (wie bank_app.VORZEICHEN): von HT / Payout +, an HT / Account-Kauf −
+    const BK_ARTEN = ['Zahlung von HT', 'Zahlung an HT', 'Payout', 'Account-Kauf']
+    const BK_VZ = { 'Zahlung von HT': 1, 'Payout': 1, 'Zahlung an HT': -1, 'Account-Kauf': -1 }
+    const bkMitVz = (betrag, art) => BK_VZ[art] ? Math.abs(Number(betrag) || 0) * BK_VZ[art] : Number(betrag) || 0
+    let bkArtFilter = ''   // BK4: Tabelle nur eine Art ('' = alle)
     const bkZRang = z => ({ 'Account-Kauf': 0, 'Vergütung': 1 }[z] ?? 2)
     function bkSichtbar(){
       const d = bkDaten || {}, z = $('bk-zweck').value
@@ -24193,7 +24206,7 @@
           `<span class="bk-id-n">${n}</span><span class="bk-id-saldo${eur + usd < 0 ? ' bk-minus' : ''}">${bkEsc(saldo)}</span><span class="bk-id-pfeil">›</span>`
         b.querySelector('.bk-id-name').textContent = l[0].name || uid.slice(0, 8)
         if(l.length > 1){ const s = document.createElement('small'); s.textContent = `${l.length} Konten`; b.querySelector('.bk-id-name').appendChild(s) }
-        b.addEventListener('click', () => { bkPerson = uid; bkKonto = ''; $('bk-d-msg').textContent = ''; bkRender(); $('adm-fin-sicht')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
+        b.addEventListener('click', () => { bkPerson = uid; bkKonto = ''; bkArtFilter = ''; $('bk-d-msg').textContent = ''; bkRender(); $('adm-fin-sicht')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
         box.appendChild(b)
       }
 
@@ -24230,6 +24243,13 @@
       inf.querySelector('[data-bk-edit]').addEventListener('click', () => bkBearbeiten(k))
       inf.querySelector('[data-bk-del]').addEventListener('click', () => bkKontoLoeschen(k))
 
+      // BK4: Summe je Art (Klick filtert die Tabelle)
+      const alleB = (bkDaten.buchungen || []).filter(b => String(b.konto_id) === bkKonto)
+      $('bk-d-arten').innerHTML = BK_ARTEN.map(a => {
+        const z = alleB.filter(b => b.art === a), sum = z.reduce((x, b) => x + (Number(b.betrag) || 0), 0)
+        return `<button type="button" class="bk-art${bkArtFilter === a ? ' is-on' : ''}" data-bk-art="${bkEsc(a)}"><span>${bkEsc(a)} · ${z.length}</span>` +
+          `<b class="${sum < 0 ? 'bk-minus' : sum > 0 ? 'bk-plus' : ''}">${sum > 0 ? '+' : ''}${bkGeld(sum, k.waehrung)}</b></button>`
+      }).join('')
       bkZeilenRender(k)
     }
     // Review BK3: tippt Finn gerade in einer Zeile, die Tabelle erst nach dem Verlassen neu bauen (sonst ist die Eingabe weg)
@@ -24244,11 +24264,12 @@
       const tb = $('bk-d-rows'); tb.innerHTML = ''
       $('bk-d-leer').hidden = !!liste.length
       for(const { b, saldo } of mitSaldo){
+        if(bkArtFilter && b.art !== bkArtFilter) continue   // BK4: Filter nur fürs Anzeigen, Saldo läuft über alle
         const tr = document.createElement('tr'), betrag = Number(b.betrag) || 0
         tr.innerHTML =
           `<td><input type="date" data-f="datum" value="${bkEsc(String(b.datum || '').slice(0, 10))}"></td>` +
           `<td><input data-f="text" value="${bkEsc(b.text || '')}" autocomplete="off"${b.quelle === 'sheet' ? ' title="aus dem alten Sheet übernommen"' : ''}></td>` +   // Herkunft nur im Tooltip: Zeilen bleiben einzeilig wie im Sheet
-          `<td><select data-f="art">${BK_ARTEN.map(a => `<option${a === b.art ? ' selected' : ''}>${bkEsc(a)}</option>`).join('')}</select></td>` +
+          `<td><select data-f="art">${(BK_ARTEN.includes(b.art) ? BK_ARTEN : [b.art, ...BK_ARTEN]).map(a => `<option${a === b.art ? ' selected' : ''}>${bkEsc(a)}</option>`).join('')}</select></td>` +
           `<td><input type="number" step="0.01" data-f="betrag" class="adm-num ${betrag < 0 ? 'bk-minus' : 'bk-plus'}" value="${bkEsc(String(betrag))}"></td>` +
           `<td class="adm-num bk-lauf">${bkGeld(saldo, k.waehrung)}</td>` +
           `<td style="text-align:right"><button type="button" class="bk-knopf" title="Buchung löschen">×</button></td>`
@@ -24263,7 +24284,11 @@
             if(f === 'datum' && v && !(v >= '2020-01-01' && v <= '2100-12-31')){ $('bk-d-msg').className = 'bk-msgzeile'; $('bk-d-msg').textContent = 'Datum prüfen (Jahr)'; el.value = String(b.datum || '').slice(0, 10); return }
             if(f === 'betrag'){ v = Number(v); if(!v){ $('bk-d-msg').className = 'bk-msgzeile'; $('bk-d-msg').textContent = 'Betrag ≠ 0 — zum Entfernen × drücken'; el.value = betrag; return } }
             if(f === 'datum' && !v){ el.value = String(b.datum || '').slice(0, 10); return }
-            await bkSenden('/admin/bank/buchung', 'PATCH', { id: b.id, [f]: v }, $('bk-d-msg'), 'Gespeichert.')
+            // BK4: Art und Betrag immer zusammen schicken — das Vorzeichen folgt der Art (Server rechnet genauso)
+            const body = { id: b.id, [f]: v }
+            if(f === 'art') body.betrag = bkMitVz(betrag, v)
+            if(f === 'betrag'){ body.art = b.art; body.betrag = bkMitVz(v, b.art) }
+            await bkSenden('/admin/bank/buchung', 'PATCH', body, $('bk-d-msg'), 'Gespeichert.')
           })
         })
         tr.querySelector('button').addEventListener('click', async () => {
@@ -24322,6 +24347,10 @@
     $('bk-zweck')?.addEventListener('change', () => bkRender())
     $('bk-refresh')?.addEventListener('click', () => bkLaden())
     $('bk-zurueck')?.addEventListener('click', () => { bkPerson = ''; bkFormLeeren(); bkRender() })
+    $('bk-d-arten')?.addEventListener('click', ev => {   // BK4: Art-Filter
+      const t = ev.target.closest('[data-bk-art]'); if(!t) return
+      bkArtFilter = bkArtFilter === t.dataset.bkArt ? '' : t.dataset.bkArt; bkDetailRender()
+    })
     $('bk-d-konten')?.addEventListener('click', ev => {
       const t = ev.target.closest('[data-bk-konto]'); if(!t || t.dataset.bkKonto === bkKonto) return
       bkKonto = t.dataset.bkKonto; $('bk-d-msg').textContent = ''; bkDetailRender()
@@ -24358,17 +24387,18 @@
       const m = $('bk-d-msg')
       let betrag = Number($('bk-n-betrag').value)
       const art = $('bk-n-art').value
-      if(!betrag){ m.className = 'bk-msgzeile'; m.textContent = 'Betrag eingeben (+ Eingang / − Ausgang)'; $('bk-n-betrag').focus(); return }
-      // Account-Kauf und Gebühr sind immer Ausgänge — ein vergessenes Minus dreht sich um (und die Zeile sagt es)
-      const gedreht = (art === 'Account-Kauf' || art === 'Gebühr') && betrag > 0
-      if(gedreht) betrag = -betrag
+      if(!betrag){ m.className = 'bk-msgzeile'; m.textContent = 'Betrag eingeben'; $('bk-n-betrag').focus(); return }
+      // BK4: Vorzeichen folgt der Art (von HT / Payout +, an HT / Account-Kauf −) — ein anderes Vorzeichen dreht sich um und die Zeile sagt es
+      const roh = betrag
+      betrag = bkMitVz(betrag, art)
+      const gedreht = roh !== betrag
       const w = (bkDaten?.konten || []).find(x => String(x.id) === bkKonto)?.waehrung
       const datum = $('bk-n-datum').value || bkHeute()
       if(!(datum >= '2020-01-01' && datum <= '2100-12-31')){ m.className = 'bk-msgzeile'; m.textContent = 'Datum prüfen (Jahr)'; $('bk-n-datum').focus(); return }
       bkNeuLaeuft = true
       try{
         const ok = await bkSenden('/admin/bank/buchung', 'POST', { konto_id: bkKonto, datum, betrag, art, text: $('bk-n-text').value },
-          m, `${bkGeld(betrag, w)} gebucht${gedreht ? ' (als Ausgang)' : ''}.`)
+          m, `${bkGeld(betrag, w)} gebucht${gedreht ? (betrag < 0 ? ' (als Ausgang)' : ' (als Eingang)') : ''}.`)
         if(ok){ $('bk-n-betrag').value = ''; $('bk-n-text').value = ''; $('bk-n-text').focus() }
       }finally{ bkNeuLaeuft = false }
     }
@@ -61602,7 +61632,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2311'
+  const OS_TAB_BUILD = '2026-09-22.2312'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

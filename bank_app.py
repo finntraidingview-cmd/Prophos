@@ -23,7 +23,10 @@ import kapital_app as K
 A = {}                         # Namensraum von app.py — gefüllt in registrieren()
 
 ZWECKE = ("Account-Kauf", "Vergütung", "Sonstiges")
-ARTEN = ("Einzahlung HT", "Account-Kauf", "Payout", "Gebühr", "Vergütung", "Sonstiges")
+# BK4 (25.11.2026, Finn: nur noch diese vier Arten) — Vorzeichen fest: von HT / Payout = Eingang (+), an HT / Account-Kauf = Ausgang (−)
+ARTEN = ("Zahlung von HT", "Zahlung an HT", "Payout", "Account-Kauf")
+VORZEICHEN = {"Zahlung von HT": 1, "Payout": 1, "Zahlung an HT": -1, "Account-Kauf": -1}
+ARTEN_ALT = {"Einzahlung HT": "Zahlung von HT"}   # alter Name aus BK1 (offene Tabs bis zum Neuladen)
 WAEHRUNGEN = ("EUR", "USD")
 
 
@@ -152,10 +155,13 @@ def _buchung_felder(body, neu):
             return None, "Datum JJJJ-MM-TT"
         f["datum"] = d
     if "art" in body or neu:
-        a = str(body.get("art") or "Sonstiges").strip()
+        a = str(body.get("art") or "").strip()
+        a = ARTEN_ALT.get(a, a) or ("Zahlung von HT" if f.get("betrag", 0) > 0 else "Account-Kauf")
         if a not in ARTEN:
-            return None, "Art unbekannt"
+            return None, "Art: Zahlung von HT, Zahlung an HT, Payout oder Account-Kauf"
         f["art"] = a
+    if "art" in f and "betrag" in f:
+        f["betrag"] = abs(f["betrag"]) * VORZEICHEN[f["art"]]   # Vorzeichen folgt der Art (Eingabe „217“ als Account-Kauf = −217)
     if "text" in body:
         f["text"] = _txt(body.get("text"), 300)
     return f, None

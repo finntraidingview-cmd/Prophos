@@ -48,6 +48,16 @@ pruef("Buchung 0 → Fehler", B._buchung_felder({"betrag": 0}, True)[1] is not N
 f, e = B._buchung_felder({"betrag": "-217", "datum": "2026-11-25", "art": "Account-Kauf", "text": "topstep acc"}, True)
 pruef("Buchung ok", e is None and f == {"betrag": -217.0, "datum": "2026-11-25", "art": "Account-Kauf", "text": "topstep acc"})
 pruef("Buchung Art unbekannt → Fehler", B._buchung_felder({"betrag": 5, "art": "Lotto"}, True)[1] is not None)
+# BK4: vier Arten, Vorzeichen folgt der Art
+pruef("BK4 alte Art Gebühr → Fehler", B._buchung_felder({"betrag": -5, "art": "Gebühr"}, True)[1] is not None)
+pruef("BK4 Account-Kauf +217 → −217", B._buchung_felder({"betrag": 217, "art": "Account-Kauf", "datum": "2026-11-25"}, True)[0]["betrag"] == -217)
+pruef("BK4 Zahlung an HT +50 → −50", B._buchung_felder({"betrag": 50, "art": "Zahlung an HT", "datum": "2026-11-25"}, True)[0]["betrag"] == -50)
+pruef("BK4 Payout −100 → +100", B._buchung_felder({"betrag": -100, "art": "Payout", "datum": "2026-11-25"}, True)[0]["betrag"] == 100)
+pruef("BK4 Einzahlung HT → Zahlung von HT", B._buchung_felder({"betrag": 30, "art": "Einzahlung HT", "datum": "2026-11-25"}, True)[0]["art"] == "Zahlung von HT")
+pruef("BK4 ohne Art: + → Zahlung von HT, − → Account-Kauf",
+      B._buchung_felder({"betrag": 30, "datum": "2026-11-25"}, True)[0]["art"] == "Zahlung von HT"
+      and B._buchung_felder({"betrag": -30, "datum": "2026-11-25"}, True)[0]["art"] == "Account-Kauf")
+pruef("BK4 PATCH nur Text lässt Betrag/Art weg", B._buchung_felder({"text": "x"}, False) == ({"text": "x"}, None))
 
 # ── Routen mit Fälschungen ──
 HT, EMIN = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
@@ -130,7 +140,7 @@ r = c.post("/admin/bank/buchung", json={"konto_id": K_HT, "betrag": 5, "datum": 
 pruef("Verwalter: Buchung auf HT-Konto → 404", r.status_code == 404)
 r = c.delete("/admin/bank/konto", json={"id": K_HT})
 pruef("Verwalter: HT-Konto löschen → 404, nichts gelöscht", r.status_code == 404 and not any(x[0] == "DELETE" for x in geschrieben))
-r = c.post("/admin/bank/buchung", json={"konto_id": K_EM, "betrag": -20, "datum": "2026-11-24", "art": "Gebühr"})
+r = c.post("/admin/bank/buchung", json={"konto_id": K_EM, "betrag": -20, "datum": "2026-11-24", "art": "Zahlung an HT"})
 pruef("Verwalter: Buchung eigenes Konto ok, quelle hand", r.status_code == 200 and geschrieben[-1][2]["quelle"] == "hand")
 
 ROLLE["erlaubt"] = None
