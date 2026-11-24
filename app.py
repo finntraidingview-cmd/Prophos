@@ -26920,11 +26920,14 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             stufe = (stufe.replace(f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)", "")
                      + f", SL auf Tagesgrenze gekappt ({f'{tg:,.0f}'.replace(',', '.')} − {t_puffer} $)")
             # SB3 (Master 24.11.2026, Folge auf SB2): dieselbe Mindest-SL-Regel für die Tagesgrenze — ein auf den Daily-Loss-Rest gekappter SL unter
-            # AP_SL_MIN_PKT × Lots × $/Pkt läge im Spread; kein Plan, „von Hand" wie am Boden (Nur mit Punktwert; Kappung gibt es nur bei CFD/Echo).
+            # AP_SL_MIN_PKT × Lots × $/Pkt läge im Spread; kein Plan (Nur mit Punktwert; Kappung gibt es nur bei CFD/Echo).
+            # SB3b (Prüfer, Finn: keine unnötigen Hand-Listen): das löst sich morgen von selbst → Text wie „Tagesgrenze erreicht … morgen plant der Bot
+            # wieder" (gleicher Anfang, nicht „von Hand", nicht in „Braucht dich"); nur der Boden-Fall (SB2) bleibt „von Hand".
             _slmin = round(float(globals().get("AP_SL_MIN_PKT", 3.0)) * float(menge) * float(ppl)) if ppl else None
             if _slmin and sl < _slmin:
-                return None, (f"an der Tagesgrenze → von Hand: nur noch {f'{tg:,.0f}'.replace(',', '.')} $ bis zum Daily Loss, der SL ({sl} $) läge bei "
-                              f"{f'{float(menge):g}'.replace('.', ',')} Lot im Spread (mindestens {f'{_slmin:,.0f}'.replace(',', '.')} $) — Konto prüfen, Trade von Hand oder morgen")
+                return None, (f"Tagesgrenze erreicht — nur noch {f'{tg:,.0f}'.replace(',', '.')} $ bis zum Daily Loss, der SL ({sl} $) läge bei "
+                              f"{f'{float(menge):g}'.replace('.', ',')} Lot im Spread (mindestens {f'{_slmin:,.0f}'.replace(',', '.')} $): heute kein Trade mehr, "
+                              f"morgen plant der Bot wieder")
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
     if _ctxt:
         stufe = f"{stufe}{_ctxt}"

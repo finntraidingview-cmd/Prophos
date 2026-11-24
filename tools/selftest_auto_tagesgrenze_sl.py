@@ -95,8 +95,9 @@ def main():
 
     # SB3 (Master 24.11.2026): auf die Tagesgrenze gekappter SL unter dem Mindest-SL (3 Pkt × Lots × $/Pkt) → kein Plan, „von Hand“
     w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, ppl=20.0, heute_verlust=2850)
-    check(w is None and g and g.startswith("an der Tagesgrenze → von Hand: nur noch 150 $") and "SL (50 $)" in g and "mindestens 60 $" in g,
-          f"SB3: Rest 150 $ → SL 50 bei 1 Lot × 20 $/Pkt < 60 $ → kein Plan ({g})")
+    check(w is None and g and g.startswith("Tagesgrenze erreicht — nur noch 150 $") and "SL (50 $)" in g and "mindestens 60 $" in g
+          and "von Hand" not in g and g.endswith("morgen plant der Bot wieder"),
+          f"SB3: Rest 150 $ → SL 50 bei 1 Lot × 20 $/Pkt < 60 $ → kein Plan, „Tagesgrenze erreicht … morgen“, nicht von Hand (SB3b) ({g})")
     w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, ppl=10.0, heute_verlust=2850)
     check(not g and w["sl"] == 50, f"SB3: Mindest-SL 30 $ ≤ 50 → weiter geplant ({g})")
     w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, heute_verlust=2850)
