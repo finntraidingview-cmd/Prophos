@@ -25924,7 +25924,7 @@ def cdp_konto_gekuerzt(text):
 def cdp_konto_familie(nr):
     """REIN RECHNEND (testbar): Zu welchem Tradovate-Login gehört eine Kontonummer? DB-Stand 30.09.2026: Apex immer (PA)APEX + 6-stellige
     User-ID + 7-stelliger Zähler (58/58, 7 User; Username APEX_<User-ID>), Tradeify immer (F)TDFY…, Lucid LFE…/TOF…, seit 02.10.2026
-    FundedNext Futures FNFT… und MyFundedFutures MFFU…. -> 'apex:<id>' | 'tradeify' | 'lucid' | 'fundednext' | 'mff' | '' (unbekannt). Tradeify/Lucid tragen keine User-ID in der Nummer."""
+    FundedNext Futures FNFT… und MyFundedFutures MFFU…, seit 24.11.2026 (KL1) FTMO Futures FTMO<Ziffern>. -> 'apex:<id>' | 'tradeify' | 'lucid' | 'fundednext' | 'mff' | 'ftmo' | '' (unbekannt). Tradeify/Lucid tragen keine User-ID in der Nummer."""
     u = _nur_alnum(nr).upper()
     m = re.match(r"^(?:PA)?APEX(\d{6})\d{7}$", u)
     if m:
@@ -25939,6 +25939,13 @@ def cdp_konto_familie(nr):
         return "fundednext"
     if re.match(r"^MFFU", u):
         return "mff"
+    # KL1 (24.11.2026, Ina pc-xc5c52 Plan e20b62f5 FTMO572103, wie KA1-F am 23.11. 26×): FTMO Futures (FTMO + Ziffern, ein Tradovate-Login je
+    # Kunde wie Tradeify) fehlte hier — cdp_konto_weg verlangt eine bekannte, gleiche Familie, also gab es für FTMO nie 'konto_weg': nach dem
+    # eigenen Login mit 'FTMOhwethy' stand die VOLLSTÄNDIGE Liste (5 Konten, liste_kurz, gescrollt bis zum Ende) ohne das Ziel da, der Bot
+    # meldete trotzdem „anderer Tradovate-Login?" und der Plan wurde endlos neu eingeplant. Seit dem 12.11. kein Trade mehr auf 572103 (das
+    # Schwesterkonto 451263 vom selben Tag wurde am 30.10. zum Funded 535039) — das Konto ist bei FTMO beendet. Jetzt wie Tradeify.
+    if re.match(r"^FTMO\d", u):
+        return "ftmo"
     return ""
 
 
