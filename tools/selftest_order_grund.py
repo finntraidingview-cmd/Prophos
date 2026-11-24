@@ -70,7 +70,8 @@ def main():
     check(ob._mt5_journal_zeilen("") == [] and ob._mt5_journal_zeilen("/gibt/es/nicht") == [], "kein Datenordner/keine Datei → leer, kein Fehler")
 
     q = inspect.getsource(ob.run)
-    i_grund, i_spur = q.find("KEINE Bestaetigung binnen 12 s — Grund:"), q.find('"Dialog geschlossen. Spur: [" + _spur(trail)')
+    # NG2b (1f4b6ec2, 23.11.2026): zwischen „Dialog geschlossen“ und „. Spur: [“ steht jetzt der optionale Zusatz „— nichts gesendet …“
+    i_grund, i_spur = q.find("KEINE Bestaetigung binnen 12 s — Grund:"), q.find('". Spur: [" + _spur(trail)')
     check(0 < i_grund < i_spur and '"retry_ok": False, "grund": grund[0]' in q, "Meldung: Grund VOR der Spur (überlebt das Kürzen), retry_ok bleibt False")
     check("_keine_bestaetigung_grund(path, expected, symbol, cmd[\"richtung\"]" in q, "run() fragt den Grund mit Terminal, Login, Symbol, Richtung")
     print("\nALLES OK" if OK else "\nFEHLER")

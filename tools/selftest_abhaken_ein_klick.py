@@ -24,10 +24,13 @@ check("mklWdEigenerPlan(" not in fn, "A1 03.11.2026: eigener Plan ist kein Popup
 check("kette_tag" not in fn, "Topstep-Tagesergebnis allein erzwingt kein Popup")
 oe = html[html.index("function mklWdErledigtOeffnen("):html.index("function mwdErlStatusUI(")]
 check("opts.einKlick" in oe and "mklWdErledigtSpeichern(); return" in oe and "!wdhCb?.checked" in oe, "Ein Klick speichert über den Popup-Weg, Winning-Day-Vorschlag öffnet das Popup")
-check("if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }" in oe
-      and "if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }" in oe
+# AB-E1 (1bda100d, 20.11.2026): eigen → eigenTc — eigene Pläne des Auto-/Funded-Planers gehen im Radar (sicht) wie fremde ins Radar-Popup
+check("if(eigenTc && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }" in oe
+      and "if(eigenTc && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }" in oe
       and oe.index("if(opts.nurStill){ _mwdErlId = null; return }") < oe.index("_mwdErlId = null; tcOeffnen(); return }"),
       "A1: eigener Plan bucht beim Ein-Klick über den Radar-Weg, sonst (und nie beim stillen Takt) Trades-Dialog wie bisher")
+check("const eigenTc = !!eigen && !((opts && opts.sicht) && mklWdPlanerPlan(eigen, pw))" in oe,
+      "AB-E1: Trades-Dialog nur für eigene Hand-Pläne, Planer-Pläne im Radar → Radar-Popup")
 check(oe.index("opts.einKlick") < oe.index("getElementById('mwdErledigtModal')?.classList.add('open')"), "Prüfung läuft vor dem Öffnen")
 check("const ein = !!t && !grund; if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
 check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "return 'P&L passt nicht" not in fn and "return 'Ziel oder Boden unbekannt'" not in fn and "return 'eigener Plan'" not in fn and "'Gewinn, Ziel unbekannt'" in fn and "Ergebnis unplausibel (falsches Konto?)" in fn and "'Verlust, Boden unbekannt'" in fn and "dm.status === 'liquidiert'" in fn,
