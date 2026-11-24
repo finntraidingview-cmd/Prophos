@@ -85,7 +85,8 @@ FRISCH = konto("b2000000-0000-0000-0000-000000000005", "100k 5 → Funded", "Fun
 KONTEN = [KONTO_A, KONTO_B, KONTO_C, NORMAL, FRISCH]
 # Letzter Trade je Konto (vor dem Payout) — so steht es in der DB
 TRADES = [{"id": "t" + a["id"][-1], "user_id": H1, "master_account_id": a["id"], "master_firm": a["firm"], "status": "completed",
-           "started_at": s, "ended_at": e, "completed_at": e, "master_pl": pl, "notes": "Funded-CFD-Planer · Vorschlag", "planned_for": e[:10]}
+           "started_at": s, "ended_at": e, "completed_at": e, "master_pl": pl, "notes": "Funded-CFD-Planer · Vorschlag", "planned_for": e[:10],
+           "final": {"master_balance": a["_bal"]}}   # PW1: End-Balance am Trade (bei Funded CFD immer gesetzt) = Balance vor der Anfrage
           for a, s, e, pl in ((KONTO_A, "2026-11-18T13:27:15+00:00", "2026-11-18T14:35:34+00:00", 79.34),
                               (KONTO_B, "2026-11-03T02:19:19+00:00", "2026-11-03T13:31:42+00:00", 1701.97),
                               (KONTO_C, "2026-11-04T02:52:49+00:00", "2026-11-04T10:25:56+00:00", 1533.75),
@@ -129,6 +130,8 @@ def sb_all(t, p):
         check("approved_at" in str(p.get("select")), "Planer lädt approved_at aus pending_payouts") if not GELADEN else None
         GELADEN.append(1)
         return [dict(x) for x in PEND]
+    if t == "order_signale":   # PW1 (24.11.2026): „echte Lesung“ = abgeschlossener Lese-Auftrag, nie tv_balance_at allein
+        return [dict(x) for x in LESUNGEN]
     if t == "user_settings":
         return [{"user_id": H1, "value": {"accountId": "f1"}}]
     if t == "firm_specs":
@@ -139,9 +142,15 @@ def sb_all(t, p):
 
 
 GELADEN = []
+# PW1: die echten Lesungen von B, C, Normal und Frisch als abgeschlossene Lese-Aufträge (dieselben Zeiten/Werte wie tv_balance_at); Konto A hat keinen
+LESUNGEN = [{"plan_id": "konto:" + a["id"], "status": "fertig", "params": {"aktion": "mt5_balance"}, "created_at": a["tv_balance_at"],
+             "updated_at": a["tv_balance_at"], "ergebnis": {"ok": True, "balance": a["_bal"], "balance_at": a["tv_balance_at"]}}
+            for a in (KONTO_B, KONTO_C, NORMAL, FRISCH)]
 app.sb_select, app._sb_all = sb_select, sb_all
 app.sb_insert = lambda t, z: GESCHRIEBEN.append((t, z))
 app.sb_update = lambda *a: GESCHRIEBEN.append(("update",) + a)
+app._sb_anfrage = lambda m, *a, **k: (GESCHRIEBEN.append(("post", m) + a) if m != "GET" else None) or None   # PW1: nie ins Netz (user_settings fcp_payout_vor)
+app._sb_pruefen = lambda r: None
 app._ap_archiviert = lambda streng=False: set()
 app._ap_namen = lambda: ({H1: "HT-1"}, set())
 # Echo liefert für alle Konten die Planer-Balance mit frischem Heartbeat (wie mt5_live im Standby)
@@ -157,30 +166,26 @@ for z in erg.get("ausgelassen") or []:
 for z in erg.get("geplant") or []:
     print(f"     PLAN {z['konto']}: Gewinn {z.get('gewinn')}")
 
-check(KONTO_A["id"] not in ziel and aus.get(KONTO_A["id"], {}).get("grund") == app.FCP_GRUND_PAYOUT_UNGELESEN
-      and aus[KONTO_A["id"]].get("payout_bezug", "").startswith("2026-11-19T13:14:42"),
-      "Konto A: Heartbeat frisch, echte Lesung vor dem Payout → kein Waiting, Grund „Balance nach Payout noch nicht gelesen“")
-check(KONTO_B["id"] in ziel and KONTO_B["id"] not in aus,
-      "Konto B: echte Lesung 22.11. nach dem Payout zeigt keinen Abzug → weiter Ziel/Waiting (Fall B, nicht WP2)")
-check(KONTO_C["id"] in ziel and KONTO_C["id"] not in aus,
-      "Konto C: echte Lesung 22.11. nach der Auszahlung 20.11. zeigt keinen Abzug → weiter Ziel/Waiting (Fall B, nicht WP2)")
-check(NORMAL["id"] in gepl and NORMAL["id"] not in ziel,
-      "Normalfall: Lesung nach dem Payout zeigt Abzug (100.000) → geplant, kein Waiting")
-check(FRISCH["id"] not in ziel and "Balance noch von vor der Auszahlung" in aus.get(FRISCH["id"], {}).get("grund", ""),
-      "72-h-Fenster unverändert: Anfrage vor 10 h → bisheriger Text, kein Waiting")
+# PW1-Zielbild (Finn 24.11.2026): nach der Anfrage sofort weiter planen — bis die Abbuchung gelesen ist, rechnet der Planer mit Balance − angefragtem
+# Gewinn (Vor-Balance beim ersten Lauf gemerkt), nie „Ziel erreicht → Waiting“ auf der alten Balance (der WP2-Fehler bleibt damit ausgeschlossen)
+for k, txt in ((KONTO_A, "A: ausgezahlt, nie gelesen"), (KONTO_B, "B: Lesung nach der Anfrage ohne Abzug"), (KONTO_C, "C: Lesung ohne Abzug"),
+               (FRISCH, "Frisch: Anfrage vor 10 h")):
+    z = gepl.get(k["id"], {})
+    check(k["id"] not in ziel and z.get("gewinn") == 0.0 and (z.get("payout_offen") or {}).get("abzug", 0) > 0,
+          f"{txt} → weiter geplant, Gewinn des neuen Zyklus 0 (angefragter Gewinn {(z.get('payout_offen') or {}).get('abzug')} $ gilt als abgezogen), kein Waiting")
+check(NORMAL["id"] in gepl and NORMAL["id"] not in ziel and not gepl[NORMAL["id"]].get("payout_offen"),
+      "Normalfall: Lesung nach dem Payout zeigt Abzug (100.000) → normal geplant, kein Waiting")
 check(GELADEN, "pending_payouts wurde gelesen")
 check(not GESCHRIEBEN, "Trockenlauf schreibt nichts")
 
-print("4) Scharfer Lauf: nur Konto B + C werden umgestellt, Konto A nicht")
+print("4) Scharfer Lauf: vor der Abbuchung kein Waiting (PW1)")
 app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "ht", "name": "Hermann Technologies", "verwalter_id": None}],
                                    "mitglieder": [{"user_id": H1, "gruppe_id": "ht"}]}
 app.alarm_senden = lambda *a, **k: (1, 1)
 app.sb_update = lambda t, f, u: (GESCHRIEBEN.append(("update", t, f, u)) or ([{"id": f["id"][3:]}] if "waiting_payout_since" in u else []))
 app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
 umgestellt = {g[2]["id"][3:] for g in GESCHRIEBEN if g[0] == "update" and "waiting_payout_since" in g[3]}
-check(KONTO_A["id"] not in umgestellt, "Konto A wird NICHT auf Waiting gestellt")
-check({KONTO_B["id"], KONTO_C["id"]} <= umgestellt, "Konto B + C wie bisher umgestellt (echte Lesung nach dem Payout)")
-check(NORMAL["id"] not in umgestellt and FRISCH["id"] not in umgestellt, "Normalfall und 72-h-Fall nicht umgestellt")
+check(not umgestellt, f"PW1: vor der Abbuchung wird kein Konto auf Waiting gestellt ({umgestellt})")
 
 print()
 if FEHLER:

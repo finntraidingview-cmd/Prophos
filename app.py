@@ -46486,6 +46486,57 @@ def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None, pay
     return out
 
 
+def ap_bal_auto_payout(konten, gelesen, anfrage, plaene, jetzt, schon=(), archiv=None):
+    """REIN RECHNEND (testbar, PW1 — Zielbild Finn 24.11.2026): {konto_id: grund} — Funded-CFD-Konten, deren Balance nach einer Payout-Anfrage nachgelesen
+    werden muss (fcp_payout_phase „offen“ + fcp_payout_lesen_faellig: 1–12 h nach der Anfrage, danach höchstens alle 12 h, bis abgebucht), auch mit
+    Waiting for Payout. gelesen = fcp_lesung_aus_signalen (nur abgeschlossene Lese-Aufträge — tv_balance_at zählt nicht, der Flotten-Takt schreibt
+    eingefrorene Echo-Stände frisch), anfrage = fcp_anfrage_zuletzt, plaene = {konto_id: [Pläne mit final]}. Ausnahmen wie (E): archiviert, Haken
+    „Auto-Planer“ aus, ohne External ID. Deckel/Abstand je Konto macht _ap_bal_auto_senden wie überall."""
+    archiv, out = archiv or set(), {}
+    for a in konten or []:
+        kid = str((a or {}).get("id") or "")
+        A = (anfrage or {}).get(kid)
+        if not kid or A is None or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False or not str(a.get("external_id") or "").strip():
+            continue
+        ph = fcp_payout_phase(A, _wd_konto_groesse(a), (gelesen or {}).get(kid), (plaene or {}).get(kid) or [])
+        if fcp_payout_lesen_faellig(A, ph, jetzt):
+            out[kid] = "Funded CFD: Payout angefragt — Balance nachlesen (1–12 h nach der Anfrage, bis der Profit abgebucht ist)"
+    return out
+
+
+def _ap_bal_payout_kandidaten(uids, jetzt, schon=(), archiv=None):
+    """PW1: Funded-CFD-Konten der IDs mit Payout-Anfrage → (ap_bal_auto_payout, konten {id: Zeile}). Ein Lesefehler → ({}, {}) mit Log (wie vor PW1)."""
+    try:
+        in_u = "in.(" + ",".join(sorted({str(u) for u in uids or ()})) + ")"
+        konten = [a for a in (_sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,deaktiviert_at", "user_id": in_u,
+                                                   "account_type": "eq.funded_cfd"}) or []) if not a.get("deaktiviert_at")]   # Review PW1 (6): deaktivierte nie lesen
+        ids = [str(a.get("id")) for a in konten if a.get("id")]
+        rows = []
+        for i in range(0, len(ids), 100):
+            rows += _sb_all("pending_payouts", {"select": "account_id,created_at", "account_id": "in.(" + ",".join(ids[i:i + 100]) + ")",
+                                                "created_at": "gte." + (jetzt - timedelta(days=FCP_PAYOUT_ANFRAGE_MAX_TAGE)).isoformat()}) or []
+        anfrage = fcp_anfrage_zuletzt(rows)
+        if not anfrage:
+            return {}, {}
+        gelesen = _fcp_lesungen_laden(list(anfrage), tage=FCP_PAYOUT_ANFRAGE_MAX_TAGE + 1)
+        if gelesen is None:
+            return {}, {}
+        k = {str(a.get("id")): a for a in konten if str(a.get("id")) in anfrage}
+        pl = {}
+        ks = sorted(k)
+        for i in range(0, len(ks), 80):   # End-Balancen der Trades (Vor-Balance, Beobachtungen nach der Anfrage) — 45 Tage reichen für 30-Tage-Anfragen
+            for p in _sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at,master_pl,final:mt5_baseline->final",
+                                             "master_account_id": "in.(" + ",".join(ks[i:i + 80]) + ")", "status": "eq.completed",
+                                             # Review PW1 (7): wie der Planer auch Pläne ohne ended_at (completed_at)
+                                             "or": "(ended_at.gte.{0},completed_at.gte.{0})".format(
+                                                 (jetzt - timedelta(days=FCP_PAYOUT_ANFRAGE_MAX_TAGE + 15)).strftime("%Y-%m-%dT%H:%M:%SZ"))}) or []:
+                pl.setdefault(str(p.get("master_account_id")), []).append(p)
+        return ap_bal_auto_payout(list(k.values()), gelesen, anfrage, pl, jetzt, schon, archiv), k
+    except Exception as e:
+        print(f"[balance-auto] ⚠️ Payout-Nachlesung (PW1) nicht geprüft ({type(e).__name__}: {e})", flush=True)
+        return {}, {}
+
+
 def ap_bal_auto_addon_auswahl(kand, sk_uids, zfeld, schon=()):
     """REIN (testbar, WP3b): Striking-Konten für den Balance-Takt (E) — gleiches Gate wie fdp_planen: sk_ist_konto (Apex funded/winning_days einer ID mit
     addon_firma apex/striking) UND alle Startwerte (zfeld[id] = sk_zyklus_aus_zeile, None/fehlt/nicht lesbar → nicht lesen, fail-closed). schon = IDs, die
@@ -46721,6 +46772,11 @@ def ap_bal_auto_tick(jetzt, reg=None):
             accs.setdefault(str(a.get("id")), a)
     except Exception as e:
         print(f"[balance-auto] ⚠️ Funded-Konten nicht gelesen ({type(e).__name__}: {e}) — nur Planer-Konten", flush=True)
+    # (F) PW1 (Zielbild Finn 24.11.2026): Funded CFD nach einer Payout-Anfrage 1–12 h später nachlesen, bis der Profit abgebucht ist (eigener try im Helfer)
+    p_kand, p_konten = globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv) if "_ap_bal_payout_kandidaten" in globals() else ({}, {})
+    kand.update(p_kand)
+    for kid in p_kand:
+        accs.setdefault(kid, p_konten[kid])
     # Für „Braucht dich" (16.10.2026): wen der Bot jetzt liest, wen grundsätzlich nicht (ein Grund) und welche Konten Planer-Konten sind
     _ap_bal_auto.update(kandidaten=dict(kand), konten=[str(a.get("id")) for a in konten_neu if str(a.get("id")) not in archiv],
                         nicht={str(a.get("id")): w for a in konten_neu for w in [ap_bal_auto_warum_nicht(a, archiv)] if w and str(a.get("id")) not in kand})
@@ -46901,6 +46957,11 @@ def ap_bal_auto_gruppen_tick(jetzt, reg=None):
         konten.update({str(a.get("id")): a for a in f_konten})
     except Exception as e:
         print(f"[balance-auto Gruppe] ⚠️ Funded-Konten nicht gelesen ({type(e).__name__}: {e}) — nur Planer-Konten", flush=True)
+    # (F) PW1: Funded CFD der Gruppe nach einer Payout-Anfrage 1–12 h später nachlesen (wie HT); globals: Selbsttest-Lader ziehen den Takt allein
+    p_kand, p_konten = globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv) if "_ap_bal_payout_kandidaten" in globals() else ({}, {})
+    kand.update(p_kand)
+    for kid in p_kand:
+        konten.setdefault(kid, p_konten[kid])
     if not kand:
         return None
     return _ap_bal_auto_senden(kand, konten, d, tag, _ap_bal_auto_gr, uids_offen=uids_offen, wer=" Gruppe")
@@ -53513,6 +53574,138 @@ def fcp_payout_lesung_fehlt(bezug, plaene, konto, balance=None, toleranz=1.0):
     return bz is not None and abs(bz - wert) > toleranz
 
 
+# PW1 ECHTE LESUNG NACH DEM PAYOUT (Finn 24.11.2026, Marc FundedNext 100k On Demand …7821: „Nach dem Abhaken wird die Balance nicht neu gelesen und der
+# Status switcht nicht von Waiting for Payout zurück auf Funded CFD, der Zyklus beginnt nicht neu. Die Payout-Balance soll dann immer neu geladen werden.“).
+# Befund: Payout 18.11. angefragt, 19.11. ausgezahlt (approved/received) — die Nachlesung lief nur, solange ein Tab offen war (admBalanceAnstossen /
+# finBalanceNachPayout), ohne Rückmeldung; danach schrieb der Flotten-Takt (prophos.html mt5BalanceAusInstanzen) den EINGEFRORENEN Echo-Stand 104.915,95
+# immer wieder mit frischem tv_balance_at → WP2/WP3 hielten das für „gelesen nach dem Payout“, der Planer setzte am 23.11. wieder Waiting.
+# Ab jetzt zählt als Lesung nach einem Payout NUR ein abgeschlossener Lese-Auftrag (order_signale plan_id konto:<id>, aktion mt5_balance/konto_balance,
+# status fertig, ergebnis.ok + balance > 0) oder ein danach beendeter Trade — nie tv_balance_at allein.
+FCP_LESE_AKTIONEN = ("mt5_balance", "konto_balance")
+
+
+def fcp_lesung_aus_signalen(rows):
+    """REIN RECHNEND (testbar, PW1): {konto_id: {"at": datetime, "balance": float}} — je Konto der jüngste abgeschlossene Lese-Auftrag mit Wert."""
+    out = {}
+    for s in rows or ():
+        e = s.get("ergebnis") if isinstance(s.get("ergebnis"), dict) else {}
+        pid = str(s.get("plan_id") or "")
+        if not pid.startswith("konto:") or s.get("status") != "fertig" or e.get("ok") is not True:
+            continue
+        if ((s.get("params") or {}).get("aktion") if isinstance(s.get("params"), dict) else None) not in FCP_LESE_AKTIONEN:
+            continue
+        b, t = _wd_num(e.get("balance")), _ap_ts(str(e.get("balance_at") or s.get("updated_at") or s.get("created_at") or ""))
+        if b is None or b <= 0 or t is None:
+            continue
+        kid = pid[6:]
+        if kid not in out or t > out[kid]["at"]:
+            out[kid] = {"at": t, "balance": float(b)}
+    return out
+
+
+def _fcp_lesungen_laden(ids, tage=30):
+    """Lese-Aufträge der Konten (letzte `tage` Tage) → fcp_lesung_aus_signalen. Fehler → None (Aufrufer: fail-closed, nichts ändern)."""
+    ids = sorted({str(i) for i in ids or () if i and re.fullmatch(r"[0-9a-fA-F-]{36}", str(i))})
+    rows = []
+    try:
+        ab = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
+        for i in range(0, len(ids), 100):
+            rows += _sb_all("order_signale", {"select": "plan_id,status,params,ergebnis,created_at,updated_at",
+                                              "plan_id": "in.(" + ",".join("konto:" + k for k in ids[i:i + 100]) + ")",
+                                              "status": "eq.fertig", "created_at": "gte." + ab}) or []
+    except Exception as e:
+        print(f"[pw1] ⚠️ Lese-Aufträge nicht lesbar ({type(e).__name__}: {str(e)[:120]})", flush=True)
+        return None
+    return fcp_lesung_aus_signalen(rows)
+
+
+# PW1-ZIELBILD (Finn 24.11.2026 über den Master): „Wenn ich den Payout eines Kontos anfrage, soll es bei CFD direkt wieder rüberspringen zu Typ Funded CFD,
+# und es sollen da weitere Trades geplant werden. Plus: Die Balance soll wieder neu gelesen werden, 1 bis 12 Stunden nachdem der Payout angefragt wurde,
+# also nicht instant neu laden. Sobald die neue Balance ausgelesen ist und der Profit abgebucht wurde, dann ganz normal wieder im Tradeplaner einbauen.“
+#   • Anfrage (pending_payouts.created_at) nach dem Setzen von Waiting → Waiting zurück (Funded CFD), auch für Anfragen anderer Logins (Server).
+#   • Bis zur Abbuchung plant der Planer weiter, rechnet aber mit Balance − (Balance vor der Anfrage − Größe): der angefragte Gewinn gilt schon als
+#     abgezogen, Gewinn des neuen Zyklus = was seit der Anfrage dazukam; ein „Ziel erreicht“ gibt es in dieser Zeit nicht, das Zyklus-Ziel wird erst
+#     mit der neuen Balance festgeschrieben. „Balance vor der Anfrage“ = End-Balance des letzten Trades vor der Anfrage (mt5_baseline.final
+#     master_balance/balance_end — bei Funded CFD verlässlich gesetzt; Review PW1: kein nachträgliches Merken, das nach der Abbuchung falsch wäre).
+#   • Abgebucht = die jüngste Beobachtung nach der Anfrage — abgeschlossener Lese-Auftrag ODER End-Balance eines danach beendeten Trades — liegt um
+#     mindestens FCP_PAYOUT_ABZUG_MIN (½ Vor-Gewinn, höchstens 500 $, mindestens 50 $) unter Vor-Balance + Trades seit der Anfrage (Teil-Payouts On Demand
+#     zählen so mit; nach einem Trade zeigt seine End-Balance, ob abgebucht ist — nie ein doppelter Abzug).
+#   • Der Balance-Takt (F) liest 1–12 h nach der Anfrage, bis die Abbuchung sichtbar ist; danach, solange nicht abgebucht, höchstens alle 12 h
+#     (alte Fälle wie Marc …7821, Mike …7055/…7057 sofort, weil seither nie beobachtet). Deckel/Abstand des Takts wie überall.
+FCP_PAYOUT_LESEN_AB_H = 1
+FCP_PAYOUT_LESEN_BIS_H = 12
+FCP_PAYOUT_ANFRAGE_MAX_TAGE = 30           # ältere Anfragen: Phase gilt als erledigt (normal rechnen) — kein Dauerzustand aus uralten Zeilen
+FCP_GRUND_PAYOUT_OFFEN = "Payout angefragt — Waiting erst wieder, wenn die neue Balance (Profit abgebucht) gelesen ist"
+
+
+def _fcp_plan_ende(p):
+    return _ap_ts(str(p.get("ended_at") or p.get("completed_at") or "")) if (p.get("ended_at") or p.get("completed_at")) else None
+
+
+def _fcp_plan_endbal(p):
+    f = p.get("final") if isinstance(p.get("final"), dict) else {}
+    b = _wd_num(f.get("master_balance") if f.get("master_balance") is not None else f.get("balance_end"))
+    return float(b) if b is not None and b > 0 else None
+
+
+def fcp_payout_phase(anfrage_at, groesse, lesung, plaene):
+    """REIN RECHNEND (testbar, PW1): Stand nach der jüngsten Anfrage → None (keine Anfrage oder kein Gewinn vor der Anfrage bekannt → normal rechnen)
+    | {"phase": "offen", "abzug": Vor-Gewinn, "vor", "beobachtet": bool, "letzte": datetime|None} | {"phase": "abgebucht", "balance", "at", "vor"}.
+    plaene = Pläne des Kontos (status, ended_at/completed_at, master_pl, final); lesung = jüngster abgeschlossener Lese-Auftrag {at, balance} | None."""
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if a is None:
+        return None
+    g = float(groesse or 0)
+    fertig = [(e, p) for p in plaene or () if p.get("status") == "completed" for e in [_fcp_plan_ende(p)] if e is not None]
+    if not g:
+        return None
+    vorher = [(e, b) for e, p in fertig if e <= a for b in [_fcp_plan_endbal(p)] if b is not None]
+    beob = [(e, b) for e, p in fertig if e > a for b in [_fcp_plan_endbal(p)] if b is not None]
+    if isinstance(lesung, dict) and isinstance(lesung.get("at"), datetime) and lesung["at"] > a and _wd_num(lesung.get("balance")):
+        beob.append((lesung["at"], float(lesung["balance"])))
+    if not vorher:
+        # Review PW1 (3): Vor-Balance unbekannt (letzter Trade ohne End-Balance) — nie auf der Balance von vor dem Payout weiterplanen: bis zur ersten
+        # Beobachtung „offen“ ohne Abzug (kein Waiting, (F) liest), danach gilt die jüngste Beobachtung als Balance
+        if not beob:
+            return {"phase": "offen", "abzug": 0.0, "vor": None, "beobachtet": False, "letzte": None}
+        o_at, o_bal = max(beob)
+        return {"phase": "abgebucht", "balance": o_bal, "at": o_at, "vor": None}
+    vor = max(vorher)[1]
+    gew = round(max(0.0, vor - g), 2)
+    if gew <= 1.0:
+        return None                                    # vor der Anfrage kein Gewinn → nichts abzuziehen, normal rechnen
+    if not beob:
+        return {"phase": "offen", "abzug": gew, "vor": vor, "beobachtet": False, "letzte": None}
+    o_at, o_bal = max(beob)
+    sigma = sum(float(_wd_num(p.get("master_pl")) or 0) for e, p in fertig if a < e <= o_at)
+    if o_bal <= vor + sigma - max(50.0, min(0.5 * gew, 500.0)) + 0.005:
+        return {"phase": "abgebucht", "balance": o_bal, "at": o_at, "vor": vor}
+    return {"phase": "offen", "abzug": gew, "vor": vor, "beobachtet": True, "letzte": o_at}
+
+
+def fcp_payout_lesen_faellig(anfrage_at, phase, jetzt):
+    """REIN RECHNEND (testbar, PW1): soll der Balance-Takt jetzt lesen? Nur in Phase „offen“: nicht vor 1 h nach der Anfrage (Finn: „nicht instant“),
+    1–12 h danach immer (der Takt-Abstand drosselt), danach höchstens alle 12 h seit der letzten Beobachtung — sofort, wenn noch nie beobachtet."""
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if a is None or not isinstance(phase, dict) or phase.get("phase") != "offen" or jetzt < a + timedelta(hours=FCP_PAYOUT_LESEN_AB_H):
+        return False
+    if jetzt <= a + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H):
+        return True
+    letzte = phase.get("letzte")
+    return not isinstance(letzte, datetime) or jetzt - letzte >= timedelta(hours=FCP_PAYOUT_LESEN_BIS_H)
+
+
+def fcp_waiting_zurueck(waiting_since, anfrage_at, phase):
+    """REIN RECHNEND (testbar, PW1): Waiting → Funded CFD, wenn die jüngste Anfrage NACH dem Setzen von Waiting liegt (Finn: Anfrage = sofort zurück)
+    ODER Waiting nach der Anfrage gesetzt wurde, solange seither nichts beobachtet ist (Waiting auf alter Balance — Fall …7821). Ein Waiting, das
+    nach einer Beobachtung gesetzt wurde (auch von Hand), bleibt (Review PW1)."""
+    w = _ap_ts(str(waiting_since)) if waiting_since else None
+    a = anfrage_at if isinstance(anfrage_at, datetime) else (_ap_ts(str(anfrage_at)) if anfrage_at else None)
+    if w is None or a is None:
+        return False
+    return a > w or (isinstance(phase, dict) and phase.get("phase") == "offen" and not phase.get("beobachtet"))
+
+
 FCP_CONS_TP_MIN_USD = 50      # Weg A: kleinster TP eines Consistency-Trades (technisch, nicht im Panel — Finn 05.11.2026 ~04:20)
 FCP_CONS_PUFFER_ZIEL = 1.02    # Endziel mindestens größter Tag ÷ p × 1,02
 FCP_CONS_PUFFER_DECKEL = 0.95  # Deckel je Trade = p × Endziel × 0,95 (5 % Sicherheitsabstand)
@@ -54306,7 +54499,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         try:
             # Datumsfelder seit BG1 (03.11.2026): Zyklus-Beginn für die Gewinntage (fcp_zyklus_start); die Zählung der Payouts bleibt
             # WP2 (23.11.2026): approved_at = Auszahlung bestätigt — Bezug für „Lesung nach dem Payout“ (fcp_payout_bezug)
-            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at,approved_at", "account_id": f"in.({teil})"}) or []
+            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id,requested_at,created_at,approved_at,received_at", "account_id": f"in.({teil})"}) or []
             verw += _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []
             buch += _sb_all("transactions", {"select": "id,account_id,occurred_at", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []
         except Exception as e:
@@ -54317,6 +54510,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     zyklus_ts = fcp_zyklus_anfrage_ts(pend, verw, buch) if payouts_ok else {}   # WP4: Trades am Anfrage-Tag nach der Anfrage zählen zum neuen Zyklus
     anfrage_zuletzt = fcp_anfrage_zuletzt(pend) if payouts_ok else {}   # Anfrage ohne Trade (10.11.2026, Moritz …3608)
     payout_bezug = fcp_payout_bezug(pend) if payouts_ok else {}         # WP2: Waiting erst nach echter Lesung nach dem Payout
+    # PW1 (24.11.2026, Zielbild Finn): jüngster abgeschlossener Lese-Auftrag der Konten mit Anfrage (None = nicht lesbar → nur End-Balancen der Trades)
+    lesungen = _fcp_lesungen_laden(list(anfrage_zuletzt) + list(payout_bezug), tage=FCP_PAYOUT_ANFRAGE_MAX_TAGE + 1) if (anfrage_zuletzt or payout_bezug) else {}
+    # PW1-Review: Waiting zurückstellen nur bei HT-IDs (wie das Setzen unten, ist_ht) — Gruppen nicht lesbar → niemand (fail-closed, nur angezeigt)
+    try:
+        _pw1_ht_f = ap_unternehmen_filter(None, admin_gruppen_daten()) if anfrage_zuletzt else None
+    except Exception as e:
+        _pw1_ht_f = None
+        print(f"[funded-cfd] ⚠️ Gruppen nicht lesbar ({type(e).__name__}) — Waiting zurück heute nur angezeigt", flush=True)
+    _pw1_ist_ht = lambda u: bool(_pw1_ht_f and _pw1_ht_f(str(u)) and str(u) not in gr_ids_fcp)   # noqa: E731
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -54406,6 +54608,36 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht" if _ohne == "flex" else f"Name enthält „{_ohne}“ — nicht planen (Einstellung der Firma)"); continue
         if a.get("auto_planer") is False:
             aus(AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus"); continue
+        # PW1 (Zielbild Finn 24.11.2026): Phase nach der jüngsten Anfrage — None | offen (rechnet mit Balance − abzug) | abgebucht (Lesung = Balance)
+        p_anfrage = anfrage_zuletzt.get(aid) if payouts_ok else None
+        if p_anfrage is not None and jetzt - p_anfrage > timedelta(days=FCP_PAYOUT_ANFRAGE_MAX_TAGE):
+            p_anfrage = None          # PW1: alte Anfrage — Phase erledigt, normal rechnen (Lese-Aufträge sind nur 31 Tage geladen)
+        # Vor-Balance = End-Balance des letzten Trades vor der Anfrage; ohne sie (oder ohne Gewinn davor) → None = normal rechnen. Lese-Aufträge nicht
+        # lesbar (lesungen None) → nur die End-Balancen danach zählen als Beobachtung (bleibt eher „offen“ = vorsichtig)
+        p_phase = fcp_payout_phase(p_anfrage, _wd_konto_groesse(a), (lesungen or {}).get(aid), pl) if p_anfrage is not None else None
+        if a.get("waiting_payout_since") and fcp_waiting_zurueck(a.get("waiting_payout_since"), p_anfrage, p_phase):
+            # PW1 WAITING → FUNDED CFD: Anfrage nach dem Setzen von Waiting (Finn: „direkt wieder rüberspringen zu Funded CFD“) ODER Waiting wurde nach der
+            # Anfrage auf alter Balance gesetzt (Fall …7821). Neuer Zyklus: die Zählung (payout_n) hat die Anfrage schon.
+            # Nur HT-IDs schreibt der Planer um (wie beim Setzen von Waiting: andere Unternehmen stellen selbst um, Review PW1) — sonst nur angezeigt.
+            _ht = _pw1_ist_ht(uid)
+            _ok = True
+            if not trocken and _ht:
+                try:
+                    _rows = sb_update("accounts", {"id": f"eq.{aid}", "account_type": "eq.funded_cfd", "waiting_payout_since": f"eq.{a['waiting_payout_since']}"},
+                                      {"waiting_payout_since": None})
+                    _ok = bool(_rows)
+                    print(f"[funded-cfd] ↩ Waiting zurück → Funded CFD: {a.get('name')} (Anfrage {p_anfrage})" if _ok else
+                          f"[funded-cfd] Waiting zurück {a.get('name')}: Zeile geändert (anderer Lauf/Knopf) — nichts geplant", flush=True)
+                except Exception as e:
+                    _ok = False
+                    print(f"[funded-cfd] ⚠️ Waiting zurück {a.get('name')}: {type(e).__name__}: {e}", flush=True)
+            erg.setdefault("waiting_zurueck", []).append(dict(zeile, anfrage=str(p_anfrage or ""), wartete_seit=a.get("waiting_payout_since"),
+                                                              umgestellt=bool(_ht and _ok and not trocken), nur_angezeigt=not _ht))
+            if not _ht:
+                aus("Waiting for Payout — Payout angefragt: zurück auf Funded CFD stellt das Unternehmen selbst"); continue
+            if not _ok:
+                aus("Waiting for Payout — Zurückstellen nicht geschrieben, nächster Lauf"); continue
+            a = dict(a, waiting_payout_since=None)
         if a.get("waiting_payout_since"):
             aus("Waiting for Payout — Payout anfragen, danach plant der Planer wieder"); continue
         g = _wd_konto_groesse(a)
@@ -54441,6 +54673,14 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if _heute_n >= n_tag:
             aus("heute schon getradet" if n_tag == 1 else f"heute schon {_heute_n} Trades (Trades je Tag: {n_tag})"); continue
         bal, _ccy, bal_quelle, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+        p_offen = isinstance(p_phase, dict) and p_phase.get("phase") == "offen"
+        _ende_max = max([e for e in (_fcp_plan_ende(p) for p in pl if p.get("status") == "completed") if e is not None] or [None]) \
+            if any(p.get("status") == "completed" for p in pl) else None
+        if isinstance(p_phase, dict) and p_phase.get("phase") == "abgebucht" and (_ende_max is None or p_phase["at"] >= _ende_max):
+            # PW1: die Beobachtung nach der Abbuchung (jüngste — Lesung oder End-Balance eines Trades) ist die Balance bis zum nächsten Trade/zur nächsten
+            # Lesung (Echo im Standby hält sonst den Stand von vor dem Payout). Review PW1 (2): endete danach ein Trade ohne End-Balance, gilt sie nicht
+            # mehr — dann der normale Weg (Live-Prüfung ab dem Trade-Ende)
+            bal, bal_quelle, stand = float(p_phase["balance"]), "Lesung nach Payout", p_phase["at"].isoformat()
         letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
         if letzt and (bal is None or not ap_balance_live(stand, letzt)):
             fin = next((p.get("final") for p in sorted(pl, key=lambda p: str(p.get("ended_at") or p.get("completed_at") or ""), reverse=True)
@@ -54455,6 +54695,15 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             zeile["startwert"] = True
         if bal is None:
             aus("keine Balance — ↻ Balance lesen"); continue
+        if p_offen and p_phase.get("abzug"):
+            # PW1 (Zielbild Finn): angefragt, Profit noch nicht abgebucht → weiter planen, als wäre er schon weg (Gewinn des neuen Zyklus = seit der Anfrage)
+            zeile["payout_offen"] = {"anfrage": p_anfrage.isoformat(), "abzug": p_phase["abzug"], "balance_echt": round(float(bal), 2)}
+            _bp = float(bal) - float(p_phase["abzug"])
+            if not p_phase.get("beobachtet") and g:
+                # Review PW1 (5): seit der Anfrage weder Lesung noch Trade → die Balance des neuen Zyklus ist ≥ Größe; zeigt Echo die Abbuchung schon live,
+                # würde der Abzug sonst doppelt wirken (−Gewinn statt 0 → Nachhol-Trades). Bis zur ersten Beobachtung höchstens auf die Größe herunter.
+                _bp = max(_bp, min(float(bal), float(g)))
+            bal, bal_quelle = round(_bp, 2), f"{bal_quelle} − angefragt {_liq_de(p_phase['abzug'])} $"
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = fusion_sppl(ppl, uid)
         # Gewinntage im Zyklus (Blue Guardian, BG1): Payouts nicht lesbar → None → Phase A (kleiner Gewinntag-Trade, nie ein Ziel-Trade auf Verdacht)
@@ -54472,11 +54721,16 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               marge_lot=(lambda m_: (m_[0], m_[1], m_[1] == "eigene Vorprüfung" and mg3_probe_faellig(_mg3_tab, aid)))(
                                   mg3_marge_fuer(_mg3_tab, aid, uid, a.get("firm"), _mg3_gv, art=a.get("account_type"), groesse=g)))   # MG3/MG3b/MG3d (23.11.2026)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
+        if r.get("aktion") == "ziel" and p_offen:
+            # PW1: vor der Abbuchung kein Waiting — erst die neue Balance entscheidet (sonst Waiting auf alter Balance, Fall …7821)
+            aus(FCP_GRUND_PAYOUT_OFFEN, balance=round(float(bal), 2), anfrage=p_anfrage.isoformat()); continue
         if r.get("aktion") == "ziel" and fcp_anfrage_ohne_trade(anfrage_zuletzt.get(aid), pl, jetzt):
             # Anfrage ohne Trade (10.11.2026): kein Waiting, kein „anfragbar ab heute“ — die Balance enthält noch den eben angefragten Gewinn
             aus("Payout angefragt — Balance noch von vor der Auszahlung (seitdem kein Trade), plant wieder, sobald die Firma sie abgezogen hat",
                 balance=round(float(bal), 2)); continue
-        if r.get("aktion") == "ziel" and fcp_payout_lesung_fehlt(payout_bezug.get(aid), pl, a, bal):
+        _l = (lesungen or {}).get(aid)   # PW1: „echte Lesung“ nur aus einem Lese-Auftrag, nie tv_balance_at (Flotten-Takt schreibt eingefrorene Stände)
+        _abg = isinstance(p_phase, dict) and p_phase.get("phase") == "abgebucht"   # Review PW1 (8): Abbuchung schon beobachtet → WP2 erfüllt (auch bei spät eingetragenem approved_at)
+        if r.get("aktion") == "ziel" and not _abg and fcp_payout_lesung_fehlt(payout_bezug.get(aid), pl, {"tv_balance_at": _l["at"].isoformat(), "tv_balance": _l["balance"]} if _l else {}, bal):
             # WP2 (23.11.2026): nach dem 72-h-Fenster nicht blind wieder Waiting — ohne echte Lesung nach Anfrage/Auszahlung bleibt das Konto, wie es ist
             aus(FCP_GRUND_PAYOUT_UNGELESEN, balance=round(float(bal), 2), payout_bezug=payout_bezug[aid].isoformat()); continue
         if od_an:
@@ -54493,7 +54747,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             _tw_g = tw_pause_grund("funded_cfd", a, plan_tag, None, _ktx)
             if _tw_g:
                 aus(_tw_g); continue
-        if r.get("aktion") == "planen" and (r.get("ziel_fest") or {}).get("neu"):
+        if r.get("aktion") == "planen" and (r.get("ziel_fest") or {}).get("neu") and not p_offen:   # PW1: Zyklus-Ziel erst mit der neuen Balance festschreiben
             ziel_schreiben[aid] = ({"zyklus": r["ziel_fest"]["zyklus"], "usd": r["ziel_fest"]["usd"], "at": jetzt.isoformat()},
                                    a.get("fcp_ziel") if isinstance(a.get("fcp_ziel"), dict) else None)
         if r["aktion"] == "ziel":
