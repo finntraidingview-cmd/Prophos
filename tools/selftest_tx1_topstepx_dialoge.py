@@ -804,6 +804,10 @@ else:
     GEAENDERT.update({"_cdp_konto_sichern", "_cdp_liste_scrollen"})   # PS1/PS1b: Konto-Liste scrollen, Ziel-Beweis beim Konto-Klick
     GEAENDERT.update({"_puls_chrome_neustart", "modus_augen"})   # PN1/PN1c: Neustart ohne den Prophos-Tab — selftest_pn1_neustart_prophos_tab.py
     GEAENDERT.update({"run", "stufen_ausloesen"})   # NG2b: „nichts gesendet“ beim Echo-Bestätigungs-Timeout — selftest_ng2b_nichts_gesendet.py
+    # 24.11.2026 (Slave 1, Auftrag Master): BF1b und TX2, je mit eigenem Selbsttest
+    GEAENDERT.add("_cdp_einheit_auf_dollar")   # BF1b: neues TP/SL-Einheitenmenü (Text-Weg, nur neue Gruppen am Wähler) — selftest_bf1_werbung_einheit.py
+    GEAENDERT.update({"_AugenSitzung", "_tsx_google_login", "_tsx_tab_sicher", "modus_k3", "modus_tsxinventar_cdp"})   # TX2: Fenster per Titel-Marke,
+    # Anmelde-Tabs aufräumen, Puls-Chrome-Sperre atomar (_handlauf_nehmen) — selftest_tx2_topstepx_fenster.py
     ns_alt = {"json": json, "WIN_HOVER_ELTERN_JS": ob.WIN_HOVER_ELTERN_JS}
     exec(alt_d["win_ziel_pruef_js"], ns_alt)
     proben = [{"rect": [1, 2, 3, 4], "text": "", "aria": "", "tabu": "x"}, {"rect": [5, 6, 7, 8], "text": "proceed", "aria": "", "tabu": "y", "wort": "proceed"},
@@ -818,7 +822,7 @@ else:
         "_tsx_cdp_login": 0,             # nur die Google-Weiche davor
         "_tsx_sitzung_waehlen": 1,       # login_seite: seite → tsx_login_art
         "_tsx_auge_konto": 1,            # Bedingung nach der Bereit-Probe
-        "modus_tsxlesen_cdp": 3,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start); TS-D2: K2-Felder + Schritt konto_tagesstopp (2 Zeilen)
+        "modus_tsxlesen_cdp": 4,         # Bedingung nach der Bereit-Probe (Lesen + Order-Start); TS-D2: K2-Felder + Schritt konto_tagesstopp (2 Zeilen); TX2: _handlauf_setzen(True) → _handlauf_nehmen (1 Zeile)
         "_tsx_k3_probe": 0,              # TX1b: vor dem Order-Klick nur der Überlagerungs-Zweig dazu (hinter tsx_ueberlagerung)
         "_tsx_k4_senden": 1,             # TX1b: Überlagerungs-Zweig dazu, g_ nimmt den klaren Grund (_ug), sonst wie bisher
         "tsx_k3_vor_klick": 1,           # TX1b: Text „Dialog offen" über tsx_dialog_offen_text (mit Titel/Text gleich, s. A2)

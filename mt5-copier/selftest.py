@@ -8340,7 +8340,7 @@ def test_tsx_k0():
         "Sitzung: Augen-Datei wählbar, TopstepX ohne Werbung/Meldungen wegklicken")
     q_i = _i.getsource(ob.modus_tsxinventar_cdp)
     q_w = _i.getsource(ob._tsx_sitzung_waehlen)
-    chk('js_datei="augen_tsx.js", tv_riegel=False' in q_w and "_handlauf_setzen(True)" in q_i and "_handlauf_setzen(False)" in q_i
+    chk('js_datei="augen_tsx.js", tv_riegel=False' in q_w and "_handlauf_nehmen()" in q_i and "_handlauf_setzen(False)" in q_i
         and "_tsx_sitzung_waehlen(trail, sitz)" in q_i and "_tsx_cdp_login(s, trail)" in q_w,
         "K0-Inventar: augen_tsx.js, Sperre für andere Puls-Chrome-Läufe, Login nur über den Beweis")
     # Sitzungswahl (30.09.2026): eigener Tab zeigt die alte Login-Seite, ein anderer TopstepX-Tab ist angemeldet
@@ -8511,7 +8511,7 @@ def test_tsx_k1_vorbau():
              "kopf": {"balance": None, "mll": None, "rpl": None, "upl": None, "balance_relativ": None}, "positionen_sichtbar": None,
              "positionen": [], "flach": None}
     namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_puls_diagnose_senden", "_warte", "_WIN_EINGABE",
-             "TSX_K1_BEREIT_S", "puls_bot_stand", "_handlauf_setzen")
+             "TSX_K1_BEREIT_S", "puls_bot_stand", "_handlauf_setzen", "_handlauf_nehmen")
     alt_m = {n: getattr(ob, n) for n in namen}
     import threading as _th
     alt_timer = _th.Timer
@@ -8534,6 +8534,7 @@ def test_tsx_k1_vorbau():
         ob._puls_chrome_sicher = lambda trail, **k: chrome
         ob._handlauf_aktiv = lambda: handlauf
         ob._handlauf_setzen = lambda an: None            # K2 (01.10.2026): K1 setzt die Sperre jetzt selbst — im Test nie als Datei
+        ob._handlauf_nehmen = lambda: (ob._handlauf_setzen(True), True)[1]   # TX2 (24.11.2026): atomare Sperre — im Test nie als Datei
         ob._puls_diagnose_senden = lambda *a, **k: None
 
         def warte(a, b):
@@ -8632,7 +8633,7 @@ def test_tsx_k1_vorbau():
             setattr(ob, n, v)
         _th.Timer = alt_timer
     # K0-Inventar (Live 30.09.2026 20:48 UTC): nach dem Login erst die Bereit-Probe; nicht bereit → nur Grund-Inventar, KEIN Klick-Schritt
-    namen0 = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+    namen0 = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_handlauf_nehmen", "_puls_diagnose_senden", "_warte",
               "_augen_pc_id", "_tsx_k0_lesen", "_tsx_k0_zustand", "TSX_K1_BEREIT_S", "puls_bot_stand")
     alt0 = {n: getattr(ob, n) for n in namen0}
     schritte0 = []
@@ -8644,6 +8645,7 @@ def test_tsx_k1_vorbau():
         ob._tsx_sitzung_waehlen = lambda trail, sitz=None: (sitz.__setitem__(0, sz) if sitz is not None else None, (sz, True))[1]
         ob._handlauf_aktiv = lambda: False
         ob._handlauf_setzen = lambda an: None
+        ob._handlauf_nehmen = lambda: (ob._handlauf_setzen(True), True)[1]   # TX2 (24.11.2026): atomare Sperre — im Test nie als Datei
         ob._puls_diagnose_senden = lambda *a, **k: None
         ob._warte = lambda a, b: None
         ob._augen_pc_id = lambda: "pc-xxxxxx"
@@ -8995,7 +8997,7 @@ def test_tsx_k2():
         ob._warte = alt_w
 
     # ── ganze Kette in EINEM Lauf: kalt, ohne Tab, ausgeloggt, falsches Konto → Chrome mit TopstepX, Tab auf, EIN Login-Klick, K2, K1 ──
-    namen = ("_puls_chrome_sicher", "_cdp_http", "_AugenSitzung", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+    namen = ("_puls_chrome_sicher", "_cdp_http", "_AugenSitzung", "_handlauf_aktiv", "_handlauf_setzen", "_handlauf_nehmen", "_puls_diagnose_senden", "_warte",
              "_WIN_EINGABE", "puls_bot_stand", "_AUGEN_HIER", "_augen_js_holen", "TSX_K2_AKTIV")
     alt_m = {n: getattr(ob, n) for n in namen}
     alt_timer = _th.Timer
@@ -9037,6 +9039,7 @@ def test_tsx_k2():
             ob._AugenSitzung = lambda trail, ziel=None, js_datei="augen.js", tv_riegel=True: seite
             ob._handlauf_aktiv = lambda: False
             ob._handlauf_setzen = lambda an: log["sperre"].append(an)
+            ob._handlauf_nehmen = lambda: (ob._handlauf_setzen(True), True)[1]   # TX2 (24.11.2026): atomare Sperre — im Test nie als Datei
             ob._puls_diagnose_senden = lambda *a, **k: None
             ob._warte = lambda a, b: None
             ob._WIN_EINGABE = False
@@ -9554,7 +9557,7 @@ def test_tsx_k3a():
 
         def cancel(self):
             pass
-    namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+    namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_handlauf_nehmen", "_puls_diagnose_senden", "_warte",
              "_WIN_EINGABE", "tsx_frisch_urteil", "_tsx_bereit_warten", "tsx_frontmonat", "puls_bot_stand")
     alt_m = {n: getattr(ob, n) for n in namen}
     alt_timer = _th.Timer
@@ -9563,6 +9566,7 @@ def test_tsx_k3a():
         ob._tsx_sitzung_waehlen = lambda trail, sitz=None: (sitz.__setitem__(0, karte) if sitz is not None else None, (karte, True))[1]
         ob._handlauf_aktiv = lambda: False
         ob._handlauf_setzen = lambda an: None
+        ob._handlauf_nehmen = lambda: (ob._handlauf_setzen(True), True)[1]   # TX2 (24.11.2026): atomare Sperre — im Test nie als Datei
         ob._puls_diagnose_senden = lambda *a, **k: None
         ob._warte = lambda a, b: None
         ob._WIN_EINGABE = False

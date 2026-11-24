@@ -20778,6 +20778,38 @@ def tsx_targets(liste):
     return t
 
 
+# TX2 (24.11.2026, Befund FS1 + Lotse-Lesung nur lesend): Topstep leitet TopstepX auf die neue Anmeldeseite login.topstep.com/interaction/…
+# um („Sign in to TopstepX … Continue with Google"). Ein solcher Tab ist für tsx_targets kein TopstepX-Tab mehr → jeder Lauf öffnete einen
+# NEUEN TopstepX-Tab, der wieder umgeleitet wurde: pc-pmqd8g hatte 16, pc-7ftp5l ~35 „Topstep | Sign in"-Tabs in mehreren Fenstern. Jetzt
+# schließt Puls diese Anmelde-Tabs (nur Adresse https://login.topstep.com/…, nie topstepx.com, TradingView, Google oder Prophos), außer dem
+# Tab des Laufs selbst — vor dem Öffnen eines neuen TopstepX-Tabs und vor dem Google-Klick. Nur wenn DIESER Lauf die Puls-Chrome-Sperre hält
+# (kein zweiter Lauf arbeitet gerade in einem davon).
+TSX_RX_LOGIN_TAB = re.compile(r"^https://login\.topstep\.com(/|$)", re.I)
+TSX_LOGIN_TABS_MAX = 60
+
+
+def tsx_login_tabs_ueberzaehlig(liste, ausser=()):
+    """REIN RECHNEND (testbar, TX2): ids der Topstep-Anmelde-Tabs (type page, https://login.topstep.com/…) außer `ausser`. -> [id]"""
+    aus = {str(a) for a in (ausser or ()) if a}
+    return [str(x.get("id")) for x in (liste or []) if isinstance(x, dict) and x.get("type") == "page" and x.get("id")
+            and str(x.get("id")) not in aus and TSX_RX_LOGIN_TAB.match(str(x.get("url") or "").strip())][:TSX_LOGIN_TABS_MAX]
+
+
+def _tsx_login_tabs_zu(trail, ausser=()):
+    """TX2: überzählige Topstep-Anmelde-Tabs schließen (Regeln oben). -> Anzahl, wirft nie."""
+    try:
+        if _handlauf_pid() != os.getpid():
+            return 0
+        ids = tsx_login_tabs_ueberzaehlig(_cdp_http("/json/list", timeout=1.5) or [], ausser)
+        n = sum(1 for i in ids if _cdp_tab_schliessen(i))
+        if ids:
+            trail.append(f"Puls-Chrome: {n} von {len(ids)} alten Topstep-Anmelde-Tabs (login.topstep.com) geschlossen")
+        return n
+    except Exception as e_:
+        trail.append(f"Topstep-Anmelde-Tabs nicht aufgeräumt ({type(e_).__name__})")
+        return 0
+
+
 def _tsx_tab_sicher(trail, warten_s=20.0):
     """TopstepX-Tab im Puls-Chrome finden, sonst EINEN neuen öffnen (topstepx.com/trade) und warten, bis er in /json/list steht.
     Keine .bat, kein Alltags-Chrome. -> Target | None"""
@@ -20794,6 +20826,10 @@ def _tsx_tab_sicher(trail, warten_s=20.0):
         # vom Bot geöffnete Tabs merken — nur SOLCHE darf er später als toten Login-Tab schließen (nie einen Tab des Menschen)
         eigene = [x for x in ((_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []) if isinstance(x, str)][-9:]
         _augen_json_schreiben("tsx_tabs.json", {"ids": eigene + [str(neu.get("id"))]})
+        # TX2 (Prüfer): ERST der neue Tab, dann die alten, umgeleiteten Anmelde-Tabs weg — sonst schlösse Puls bei einem Chrome nur aus
+        # Anmelde-Tabs den letzten Tab (Chrome beendet sich). Der neue und die zwei zuletzt vom Bot geöffneten Tabs bleiben (die Auge-Reparatur
+        # öffnet ihren Tab 1–2 s vorher und arbeitet noch darin).
+        _tsx_login_tabs_zu(trail, ausser=tuple(eigene[-2:]) + (str(neu.get("id")),))
     ende = time.time() + warten_s
     while time.time() < ende:
         _warte(0.8, 0.4)
@@ -21643,6 +21679,7 @@ def _tsx_google_login(s, trail, blick, lg):
     if 0 <= seit < TSX_LOGIN_SPERRE_S:
         return (f"TopstepX-Login braucht Hand ({str(sp.get('grund') or 'letzter Google-Versuch ohne Erfolg')[:80]}; letzter Google-Klick vor "
                 f"{int(seit // 60)} min) — kein neuer Versuch, bitte im Puls-Chrome von Hand anmelden.")
+    _tsx_login_tabs_zu(trail, ausser=(getattr(s, "target_id", None),))   # TX2: gestapelte Anmelde-Tabs weg, nur der eigene bleibt
     vorher = [str(x.get("id")) for x in (_cdp_http("/json/list") or []) if isinstance(x, dict) and x.get("id")]
     n_spur = len(trail)
     _tsx_google_sperre("Google-Klick ohne Anmeldung")      # vor dem Druck merken — auch ein Absturz danach zählt als Versuch
@@ -24048,7 +24085,9 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
     if _handlauf_aktiv():
         return raus("handlauf", "Im Puls-Chrome läuft gerade ein Hand-Lauf — nichts gelesen, gleich erneut.", "sperre")
     # K2 klickt (Login, Konto-Auslöser, Konto-Zeile): Sperre wie K0 setzen, damit kein zweiter Puls-Chrome-Lauf dazwischen klickt
-    _handlauf_setzen(True)
+    # TX2 (24.11.2026): atomar nehmen — zwei Läufe in derselben Sekunde kamen beide durch (s. _handlauf_nehmen)
+    if not _handlauf_nehmen():
+        return raus("handlauf", "Im Puls-Chrome läuft gerade ein Hand-Lauf — nichts gelesen, gleich erneut.", "sperre")
 
     def _schliessen():
         try:
@@ -24261,7 +24300,8 @@ def modus_tsxinventar_cdp(cmd):
 
     if _handlauf_aktiv():
         return raus("handlauf", "Im Puls-Chrome läuft gerade ein anderer Hand-Lauf — nichts gelesen, gleich erneut anstoßen.", "sperre")
-    _handlauf_setzen(True)
+    if not _handlauf_nehmen():                 # TX2 (24.11.2026): atomar (s. _handlauf_nehmen)
+        return raus("handlauf", "Im Puls-Chrome läuft gerade ein anderer Hand-Lauf — nichts gelesen, gleich erneut anstoßen.", "sperre")
 
     def _schliessen():
         try:
@@ -24442,6 +24482,28 @@ def puls_fenster_waehlen(fenster, titel):
         if len(k2) == 1:
             return k2[0].get("hwnd")
     return None
+
+
+def puls_fenster_marke(fenster, marke):
+    """REIN RECHNEND (testbar, TX2): das EINE Browser-Fenster, dessen Titel mit der Marke beginnt (Marke = vorübergehend vor document.title
+    gesetzt, Chrome zeigt den Titel des aktiven Tabs im Fenstertitel). Keins oder mehrere → None. -> hwnd | None"""
+    m = str(marke or "").strip()
+    if len(m) < 8:
+        return None
+    kand = [f for f in fenster or [] if isinstance(f, dict) and f.get("sichtbar") and f.get("klasse") == "Chrome_WidgetWin_1"
+            and str(f.get("text") or "").startswith(m)]
+    return kand[0].get("hwnd") if len(kand) == 1 else None
+
+
+# TX2 (24.11.2026, Befund FS1: „Puls-Chrome-Fenster nicht eindeutig gefunden — nichts geklickt" beim Google-Knopf auf pc-pmqd8g/pc-7ftp5l
+# und beim Tradovate-Benutzerfeld auf pc-t8wg97): im Puls-Chrome standen mehrere Fenster, deren aktiver Tab gleich hieß („Topstep | Sign in")
+# — CDP Browser.getWindowForTarget belegte live 7 Fenster auf pc-pmqd8g, davon 5 maximiert mit gleicher Lage, Lage taugt also nicht. Rückfall
+# NUR wenn puls_fenster_waehlen nichts Eindeutiges findet: dem Tab für ≤ 2 s eine zufällige Marke vor den Titel setzen (nach Page.bringToFront
+# ist er der aktive Tab seines Fensters), das eine Fenster mit dieser Marke nehmen, Titel zurück. Nur document.title, kein Klick, keine Taste.
+WIN_MARKE_SETZEN_JS = ("(function(m){var a=String(document.title||'');if(a.indexOf(m)!==0){window.__pulsTitelAlt=a;document.title=m+' '+a;}"
+                       "return true;})")
+WIN_MARKE_WEG_JS = ("(function(m){var t=String(document.title||'');if(t.indexOf(m)===0&&typeof window.__pulsTitelAlt==='string'){"
+                    "document.title=window.__pulsTitelAlt;}try{delete window.__pulsTitelAlt;}catch(_){}return true;})")
 
 
 def win_hover_js(x, y):
@@ -25337,6 +25399,35 @@ class _AugenSitzung:
         self.trail.append(f"Maus über {name} @{int(p[0])},{int(p[1])}")
         return True
 
+    def _win_per_marke(self):
+        """TX2: Fenster dieses Tabs über eine vorübergehende Titel-Marke finden (Regeln an WIN_MARKE_SETZEN_JS). -> hwnd | None, wirft nie."""
+        alt = getattr(self, "_win_marke_hwnd", None)
+        if alt:                                         # in diesem Lauf schon gefunden und das Fenster gibt es noch → kein neues Titel-Flackern
+            try:
+                if any(f.get("hwnd") == alt for f in _puls_fenster_liste(_puls_chrome_browser_pid())):
+                    return alt
+            except Exception:
+                pass
+        marke = "PULS-" + os.urandom(4).hex()
+        hwnd = None
+        try:
+            self.lese_js(f"{WIN_MARKE_SETZEN_JS}({json.dumps(marke)})", timeout=3)
+            ende = time.time() + 2.0
+            while hwnd is None and time.time() < ende:
+                _warte(0.15, 0.1)
+                hwnd = puls_fenster_marke(_puls_fenster_liste(_puls_chrome_browser_pid()), marke)
+        except Exception:
+            hwnd = None
+        finally:
+            try:
+                self.lese_js(f"{WIN_MARKE_WEG_JS}({json.dumps(marke)})", timeout=3)
+            except Exception:
+                pass
+        if hwnd:
+            self._win_marke_hwnd = hwnd
+            self.trail.append(f"Puls-Chrome: mehrere gleich betitelte Fenster — Fenster {hwnd} über Titel-Marke eindeutig gefunden")
+        return hwnd
+
     def _win_vorn(self):
         """Windows-Fenster DIESES Tabs finden und in den Vordergrund holen — Wiederherstellen, nie Größe ändern. -> (hwnd | None, grund)"""
         _dpi_bewusst()
@@ -25346,6 +25437,8 @@ class _AugenSitzung:
             pass
         g = self.lese_js(WIN_GEO_JS) or {}
         hwnd = puls_fenster_waehlen(_puls_fenster_liste(_puls_chrome_browser_pid()), g.get("titel"))
+        if not hwnd:
+            hwnd = self._win_per_marke()               # TX2 (24.11.2026): mehrere gleich betitelte Fenster → Titel-Marke (s. WIN_MARKE_SETZEN_JS)
         if not hwnd:
             return None, "Puls-Chrome-Fenster nicht eindeutig gefunden"
         if getattr(self, "_win_hwnd", None) is None:
@@ -29539,6 +29632,53 @@ def _handlauf_setzen(an):
         pass
 
 
+def _handlauf_nehmen():
+    """TX2 (24.11.2026, Befund FS1 pc-pmqd8g 13:39:57 UTC: zwei tsxlesen-Läufe in DERSELBEN Sekunde, jeder mit eigenem Puls-Chrome-Fenster und
+    eigenem neuen TopstepX-Tab — „_handlauf_aktiv() dann _handlauf_setzen(True)" ist prüfen-dann-setzen, beide kamen durch). Jetzt atomar:
+    die Sperrdatei wird exklusiv angelegt (O_CREAT|O_EXCL, unter Windows/NTFS atomar). Steht sie schon und ist frisch → False (der zweite
+    Lauf antwortet „Sperre, gleich erneut"). Ist sie älter als 15 min (Absturz), übernimmt sie GENAU EIN Lauf per Umbenennen (atomar; war die
+    umbenannte doch frisch, geht sie zurück und dieser Lauf bekommt nichts — Prüfer TX2). Windows meldet PermissionError, solange der Besitzer
+    die Datei gerade löscht → kurz warten, neu versuchen, sonst False. -> True (Sperre gehört diesem Lauf)"""
+    p = os.path.join(_AUGEN_HIER, HANDLAUF_SPERRE)
+    for _ in range(6):
+        try:
+            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if handlauf_sperre_frisch(os.path.getmtime(p), time.time()):
+                    return False
+                alt = f"{p}.alt{os.getpid()}"
+                os.rename(p, alt)                  # nur EIN Lauf bekommt die alte Datei
+                if handlauf_sperre_frisch(os.path.getmtime(alt), time.time()):
+                    try:
+                        os.rename(alt, p)          # war schon die frische Sperre eines anderen → zurück (Windows: scheitert, wenn p neu steht)
+                    except OSError:
+                        pass
+                    return False
+                os.remove(alt)
+            except OSError:
+                pass
+            continue
+        except PermissionError:
+            time.sleep(0.1)                        # Datei wird gerade gelöscht (Windows) — gleich noch einmal
+            continue
+        except OSError:
+            _handlauf_setzen(True)                 # anderes Dateisystem-Fehlerbild: wie bisher setzen, nie den Lauf verhindern
+            return True
+        try:
+            os.write(fd, str(os.getpid()).encode("ascii"))
+        except OSError:
+            os.close(fd)
+            try:
+                os.remove(p)                       # keine leere Sperre liegen lassen (sie hielte 15 min)
+            except OSError:
+                pass
+            return False
+        os.close(fd)
+        return True
+    return False
+
+
 def k3_knopf_soll(richtung, menge, symbol):
     """REIN RECHNEND (testbar): der Knopf-Text, den Finn verlangt — z. B. „Buy 1 MNQZ6 MARKET"."""
     return f"{'Buy' if str(richtung).lower() == 'buy' else 'Sell'} {int(menge)} {str(symbol or '').strip().upper()} MARKET"
@@ -30193,7 +30333,8 @@ def modus_k3(cmd):
         return raus("regel", "Schalter puls_augen_cdp steht für diesen PC nicht auf 'cdp' — nichts getan.", "befehl")
     if _handlauf_aktiv():
         return raus("sperre", "Ein K3-Handlauf läuft schon (puls_handlauf.lock jünger als 15 min) — nichts getan.", "befehl")
-    _handlauf_setzen(True)
+    if not _handlauf_nehmen():                 # TX2 (24.11.2026): atomar (s. _handlauf_nehmen)
+        return raus("sperre", "Ein K3-Handlauf läuft schon (puls_handlauf.lock jünger als 15 min) — nichts getan.", "befehl")
     gesperrt[0] = True
     trail.append("Sperre gesetzt: tvlesen/tvkette (CDP) und Augen-Prozess halten still")
     try:
