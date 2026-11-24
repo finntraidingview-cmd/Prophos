@@ -86,8 +86,12 @@ if alt is not None:
     zb_abw = sum(1 for r_ in (FN, T5, BG, FT, FP) for z in (1, 2) for od in (False, True)
                  if app.fcp_konto_ziel_boden(r_, 100000, z, "100k X", on_demand=od) != alt.fcp_konto_ziel_boden(r_, 100000, z, "100k X", on_demand=od))
     ok(zb_abw == 0, "fcp_konto_ziel_boden (Radar-Ziel) unverändert")
-    e_abw = sum(1 for r_ in (FN, T5, BG, FT, FP) if {k: v for k, v in app.fcp_firma_einstellung(r_).items() if k not in ("striking", "striking_eff")}
-                != alt.fcp_firma_einstellung(r_))
+    def _ohne_fz2(e):   # FZ2 (24.11.2026): on_demand_eff trägt jetzt min_je_100k (Firmen-Minimum) — gewollt neu, sonst alles wie vor ST1
+        e = {k: v for k, v in e.items() if k not in ("striking", "striking_eff")}
+        if isinstance(e.get("on_demand_eff"), dict):
+            e["on_demand_eff"] = {k: v for k, v in e["on_demand_eff"].items() if k != "min_je_100k"}
+        return e
+    e_abw = sum(1 for r_ in (FN, T5, BG, FT, FP) if _ohne_fz2(app.fcp_firma_einstellung(r_)) != alt.fcp_firma_einstellung(r_))
     ok(e_abw == 0, "fcp_firma_einstellung: alte Felder unverändert, nur striking/striking_eff dazu")
     p_abw = 0
     for body in ({"firma": "FundedNext", "feld": "on_demand.consistency_pct", "wert": 35}, {"firma": "FundingPips", "feld": "on_demand.consistency_pct", "wert": 35},

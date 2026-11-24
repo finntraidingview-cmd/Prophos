@@ -39,8 +39,8 @@ R = app.fcp_konto_rechnen
 
 print("— On-Demand-Regel —")
 od = app.fcp_on_demand_regel(FN)
-ok(od == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0}, f"FundedNext Code-Standard {od}")
-ok(app.fcp_on_demand_regel(dict(FN, on_demand={"ziel_je_100k": [1800, 2000], "consistency_pct": 35})) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 35.0},
+ok(od == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0, "min_je_100k": 2000.0}, f"FundedNext Code-Standard {od}")
+ok(app.fcp_on_demand_regel(dict(FN, on_demand={"ziel_je_100k": [1800, 2000], "consistency_pct": 35})) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 35.0, "min_je_100k": 2000.0},
    "Regel je Firma überschreibt den Standard")
 ok(app.fcp_on_demand_regel(dict(FN, on_demand=False)) is None, "on_demand: false in der Regel = keine On-Demand-Regel")
 ok(app.fcp_on_demand_regel(dict(FN, on_demand={"ziel_je_100k": [1800, 2000]}))["consistency_pct"] == 40.0, "Regel ohne p → Standard 40 % (nicht still aus)")
@@ -207,16 +207,16 @@ ZF = {"id": 1, "firmen": [copy.deepcopy(FN)]}
 u, f_ = app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.ziel_je_100k", "wert": [1800, 2000]})
 fn_u = u and u["firmen"][0]
 ok(fn_u and fn_u["on_demand"] == {"ziel_je_100k": [1800.0, 2000.0]} and "on_demand" not in ZF["firmen"][0], f"Patch Ziel je 100k 1.800–2.000 (Zeile unverändert): {fn_u and fn_u.get('on_demand')}")
-ok(app.fcp_on_demand_regel(fn_u) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 40.0}, "nur Ziel geändert → p bleibt Standard 40 %")
+ok(app.fcp_on_demand_regel(fn_u) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 40.0, "min_je_100k": 2000.0}, "nur Ziel geändert → p bleibt Standard 40 %")
 u2, _f = app.fcp_regel_patch({"id": 1, "firmen": [fn_u]}, {"firma": "FundedNext", "feld": "on_demand.consistency_pct", "wert": 35})
-ok(app.fcp_on_demand_regel(u2["firmen"][0]) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 35.0}, "dazu p 35 % → beide aus der DB")
-ok(app.fcp_on_demand_regel(dict(FN, on_demand={"consistency_pct": 30})) == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 30.0}, "nur p geändert → Ziel bleibt Standard")
+ok(app.fcp_on_demand_regel(u2["firmen"][0]) == {"ziel_je_100k": [1800.0, 2000.0], "consistency_pct": 35.0, "min_je_100k": 2000.0}, "dazu p 35 % → beide aus der DB")
+ok(app.fcp_on_demand_regel(dict(FN, on_demand={"consistency_pct": 30})) == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 30.0, "min_je_100k": 2000.0}, "nur p geändert → Ziel bleibt Standard")
 u3, _f = app.fcp_regel_patch({"id": 1, "firmen": [fn_u]}, {"firma": "FundedNext", "feld": "on_demand.ziel_je_100k", "wert": None})
 ok(u3 and "on_demand" not in u3["firmen"][0], "leer → Override weg (Code-Standard)")
 ok(app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.consistency_pct", "wert": 100})[0] is None
    and app.fcp_regel_patch(ZF, {"firma": "FundedNext", "feld": "on_demand.ziel_je_100k", "wert": [0, 0]})[0] is None, "p 100 / Ziel 0 → abgelehnt")
 e = app.fcp_firma_einstellung(FN)
-ok(e["on_demand"] is None and e["on_demand_eff"] == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0}, "Einstellung zeigt DB-Wert + was gilt")
+ok(e["on_demand"] is None and e["on_demand_eff"] == {"ziel_je_100k": [2000.0, 2250.0], "consistency_pct": 40.0, "min_je_100k": 2000.0}, "Einstellung zeigt DB-Wert + was gilt")
 
 print("— Trades je Tag (E1e): Patch, Consistency zählt den Tag als Summe —")
 Z0 = {"id": 1, "zeiten": {"vorlauf_min": 15}, "firmen": []}

@@ -47700,12 +47700,17 @@
     const fd = ab.schritt === 'winning_days'
     if(ab.wartet && !fd) return { ok: true, text: 'Konto wartet schon auf Payout' }
     const g = n(ab.start) ?? n(d.groesse), bal = n(ab.bal), od = (!fd && d.od_ziel && typeof d.od_ziel === 'object' && n(d.od_ziel.usd) != null) ? d.od_ziel : null
-    const noetig = od ? n(od.usd) : (n(ab.ziel_bal) != null && g != null ? n(ab.ziel_bal) - g : null)
-    const zielBal = od ? (g != null ? g + n(od.usd) : null) : n(ab.ziel_bal)   // Gegenprüfung: On Demand ohne Größe nie das Radar-Ziel daneben
+    // FZ2 (Finn 24.11.2026, Ina FundedNext On Demand …0774: „Ziel 102.197 · erreicht 2.153 / 2.197 (97 %)“ — „wir haben immer diesen Puffer eingestellt …
+    // müsste schon bestanden sein“): On Demand zählt gegen den Required profit der FIRMA (od.firma_usd = max(Firmen-Minimum, größter Tag ÷ p), app.py
+    // fcp_od_ziel); das gewürfelte Planer-Ziel od.usd steht nur noch in Klammern. Ohne firma_usd (alte Antwort) wie bisher.
+    const odFirma = od && n(od.firma_usd) != null ? n(od.firma_usd) : null
+    const odSoll = od ? (odFirma ?? n(od.usd)) : null
+    const noetig = od ? odSoll : (n(ab.ziel_bal) != null && g != null ? n(ab.ziel_bal) - g : null)
+    const zielBal = od ? (g != null ? g + odSoll : null) : n(ab.ziel_bal)   // Gegenprüfung: On Demand ohne Größe nie das Radar-Ziel daneben
     const profit = bal != null && g != null ? bal - g : null
     const c = ab.cons && n(ab.cons.p) != null ? ab.cons : null
     const teile = []
-    if(zielBal != null) teile.push(`Ziel ${de(zielBal)} $`)
+    if(zielBal != null) teile.push(`Ziel ${de(zielBal)} $` + (odFirma != null && Math.round(n(od.usd)) > Math.round(odFirma) ? ` (Planer-Ziel ${de(g + n(od.usd))} $)` : ''))
     if(profit != null && noetig != null && noetig > 0)
       teile.push(`erreicht ${profit < 0 ? '−' + de(-profit) : de(profit)} / ${de(noetig)} $` + (profit > 0 ? ` (${wpProzent(profit / noetig * 100)} %)` : ''))
     // nur_anzeige (Funded Futures, kz_fdp_abhak): der Planer prüft die Consistency nicht — Stand + eigener Fehlbetrag in Klammern, nie im „fehlen“ des Ziels

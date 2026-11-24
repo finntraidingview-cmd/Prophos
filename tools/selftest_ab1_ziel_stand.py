@@ -51,6 +51,12 @@ MIKE = {"typ": "funded", "groesse": 100000,   # Apex 100k …0004 nach dem Trade
 MIKE_OK = {"typ": "funded", "abhak": dict(MIKE["abhak"], bal=112010, rest=-10, erreicht=True, bereit=True)}
 OD_OHNE_G = dict(MARC, groesse=None)
 WARTET = {"typ": "funded_cfd", "groesse": 100000, "abhak": {"bal": 104950, "ziel_bal": 102000, "bereit": True, "wartet": True}}
+# FZ2 (24.11.2026): Ina FundedNext On Demand …0774 — Profit 2.152,54, Planer-Ziel 2.197, Firmen-Minimum 2.000, Consistency 35,8 % → bereit
+INA = {"typ": "funded_cfd", "groesse": 100000,
+       "od_ziel": {"usd": 2197, "grund": "wachstum", "bereit": True, "fehlt": 0, "p": 40, "firma_usd": 2000, "firma_min": 2000},
+       "abhak": {"bal": 102152.54, "ziel_bal": 102050, "rest": -102.54, "erreicht": True, "bereit": True, "wartet": False,
+                 "cons": {"p": 40, "b": 770.74, "w": 2152.54, "anteil": 0.358, "ok": True, "basis": "netto", "lesbar": True}}}
+INA_NEIN = dict(INA, od_ziel=dict(INA["od_ziel"], usd=2250, grund="consistency", firma_usd=2250, bereit=False, fehlt=150), abhak=dict(INA["abhak"], bal=102100, bereit=False, erreicht=True))
 
 js = f"""
 let GEM = null; const window = {{ _wpGemerkt: (id, nach) => GEM }};
@@ -70,6 +76,8 @@ R.od_ohne_g = wpZielStand({json.dumps(OD_OHNE_G)});
 R.mike_c = wpZielStand({json.dumps(dict(MIKE, abhak=dict(MIKE["abhak"], cons={"p": 50, "b": 7000, "w": 11957.1, "anteil": 0.5854, "ok": False, "nur_anzeige": True})))});
 R.unplaus = wpZielStand({json.dumps(dict(MIKE, abhak=dict(MIKE["abhak"], bal=115000, rest=-3000, fehlt_text="Balance 115.000 $ unplausibel (Ziel 112.000 $) — Balance neu lesen")))});
 R.leer = wpZielStand({{ typ: 'funded_cfd' }});
+R.ina = wpZielStand({json.dumps(INA)});
+R.ina_nein = wpZielStand({json.dumps(INA_NEIN)});
 GEM = null; R.fz_ohne = wdlFcfdZielErreicht(T);
 GEM = {{ art: 'cfd', bereit: false, wartet: false }}; R.fz_nein = wdlFcfdZielErreicht(T);
 GEM = {{ art: 'cfd', bereit: true, wartet: false }}; R.fz_ja = wdlFcfdZielErreicht(T);
@@ -120,6 +128,12 @@ check(up.endswith("→ noch nicht: Balance 115.000 $ unplausibel (Ziel 112.000 $
 mc = R.get("mike_c") or {}
 check(mc.get("text") == "Ziel 112.000 $ · erreicht 11.957 / 12.000 $ (99,6 %) · Consistency 59 % (max 50 %, fehlen 2.043 $) → fehlen 43 $", f"Futures-Consistency nur Anzeige, eigener Fehlbetrag: {mc.get('text')}")
 check("102.000" not in (R.get("od_ohne_g") or {}).get("text", "x"), f"On Demand ohne Größe: nie das Radar-Ziel ({(R.get('od_ohne_g') or {}).get('text')})")
+
+ia, inn = R.get("ina") or {}, R.get("ina_nein") or {}
+check(ia.get("ok") is True and ia.get("text") == "Ziel erreicht → Waiting for Payout · Ziel 102.000 $ (Planer-Ziel 102.197 $) · erreicht 2.153 / 2.000 $ (100 %) · Consistency 36 % (max 40 %)",
+      f"FZ2 Ina On Demand: gegen das Firmen-Minimum, Planer-Ziel nur in Klammern: {ia.get('text')}")
+check(inn.get("ok") is False and inn.get("text", "").endswith("→ fehlen 150 $") and "Ziel 102.250 $" in inn.get("text", ""),
+      f"FZ2: Consistency hebt den Required profit (größter Tag ÷ p) → fehlt gegen die Firma: {inn.get('text')}")
 
 print("3) Verdrahtung")
 oe = schnitt("function mklWdErledigtOeffnen(", "function mwdErlStatusUI(")

@@ -44158,6 +44158,8 @@ def kz_rechnen(a, ctx):
         _p_zt = fcp_param(ctx.get("fcp_regel") or {})   # ZT1: Ziel-Toleranz des Funded-CFD-Planers (Unternehmen der ID), dieselbe wie im Planer
         if _oda:
             _p_zt = dict(_p_zt, ziel_toleranz_pct=0.0)      # ZT1-Prüfer M1: On Demand = Payout-Mindestsumme der Firma, ohne Toleranz (wie der Planer)
+            if _wd_num(jg.get("ziel_min")):
+                _p_zt["ziel_min_usd"] = float(_wd_num(jg["ziel_min"]))   # FZ2: erreicht ab Firmen-Minimum (wie fcp_konto_rechnen), nicht ab dem Würfel
         zt_info = None
         if zb and gewinn is not None:
             ziel_bal, boden = zb
@@ -44200,7 +44202,8 @@ def kz_rechnen(a, ctx):
             tz_c, cons_netto_k = tzn, True
             an = (tzn["b"] / tzn["w"]) if (tzn and tzn["w"] > 0) else None
             cons_ok = bool(an is not None and an <= p_cons / 100.0 + 1e-9) or bool(tzn and tzn["b"] == 0 and gewinn and gewinn > 0)
-            _odz = fcp_od_ziel(p_cons, (z_fest if z_fest is not None else bereich[0]) if bereich else 0.0, gewinn, tzn) if (tzn and gewinn is not None) else None
+            _odz = fcp_od_ziel(p_cons, (z_fest if z_fest is not None else bereich[0]) if bereich else 0.0, gewinn, tzn,
+                               jg.get("ziel_min")) if (tzn and gewinn is not None) else None   # FZ2: bereit/fehlt gegen das Firmen-Minimum
             if _odz:
                 out["od_ziel"] = _odz
             kach.append(kz_cons_kachel(p_cons, an, tzn["b"] if tzn else None, tzn["w"] if tzn else None,
@@ -44267,7 +44270,7 @@ def kz_rechnen(a, ctx):
             z_eff_ab = z_fest if z_fest is not None else (bereich[0] if bereich else None)
             if freg and jg and bal and groesse and not wartet:
                 nx = fcp_konto_rechnen(jg, float(bal), float(groesse), zyklus, fcp_eins_prozent(a), 1.0, 1.0, None, freg,
-                                       param=fcp_param(ctx.get("fcp_regel") or {}), tage=tzw,
+                                       param=_p_zt, tage=tzw,   # FZ2-Review: dieselben Parameter wie „erreicht“ oben (On Demand ohne Toleranz, ab Firmen-Minimum)
                                        gewinne=fcp_gewinne(plaene_z, seit, z_ts), gewinntage=gti,
                                        ziel_fest=({"usd": z_eff_ab, "zyklus": zyklus} if z_eff_ab is not None else None),
                                        **({"max_sl": fcp_max_sl(a.get("max_risiko_trade"), _sta[2])} if _sta else {}))   # ST1: SL < 1 % wie der Planer
@@ -44279,7 +44282,9 @@ def kz_rechnen(a, ctx):
         _zb_rel = z_fest if z_fest is not None else (bereich[0] if bereich else None)
         if zb and gewinn is not None and _zb_rel is not None:
             if erreicht and not wartet:
-                ab_ok.append(f"Ziel {kz_usd(gewinn, 0, True)} / {kz_usd(_zb_rel, 0, True)}" + (f" (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)" if zt_info else ""))
+                ab_ok.append(f"Ziel {kz_usd(gewinn, 0, True)} / {kz_usd(_zb_rel, 0, True)}" + (
+                    (f" (Firmen-Minimum {kz_usd(_p_zt['ziel_min_usd'], 0, True)} erreicht, Planer-Ziel ist Puffer)" if _p_zt.get("ziel_min_usd")   # FZ2
+                     else f" (−{_liq_de(zt_info['fehlt'])} $ in Toleranz)") if zt_info else ""))
             elif not erreicht:
                 _sw_t = fcp_ziel_schwelle(_zb_rel, _p_zt)
                 ab_fehlt.append(f"Ziel {kz_usd(gewinn, 0, True)} von {kz_usd(_zb_rel, 0, True)} — zählt ab {kz_usd(_sw_t, 0, True)}, fehlen {_liq_de(max(1.0, -(-(_sw_t - gewinn) // 1)) if _sw_t > gewinn else 0.0)} $")   # aufgerundet, nie „fehlen 0 $“
@@ -47028,6 +47033,9 @@ def zw_funded_cfd():
                 _pz = fcp_param(fd_unt_reg(reg, "cfd", a.get("user_id"), None, True) or {})
                 if aid in od_ids:
                     _pz = dict(_pz, ziel_toleranz_pct=0.0)          # Prüfer M1: On Demand ohne Toleranz
+                    _zm = _wd_num(_gt_jg(a).get("ziel_min"))
+                    if _zm:
+                        _pz["ziel_min_usd"] = float(_zm)            # FZ2: Radar-Vorauswahl „Waiting“ ab dem Firmen-Minimum
                 _zw.setdefault("ziele_tol", {})[aid] = round(float(_g) + fcp_ziel_schwelle(_zr, _pz), 2)
             if aid in gt_ids:
                 # ST1: Gewinntage aus _gt_jg (Striking 7 × 0,5 %; sonst dieselben Werte wie fcp_je_groesse — gt_ids enthält nur Konten mit Gewinntagen)
@@ -52726,11 +52734,17 @@ def fcp_payouts_zaehlen(pending, managed, buchungen):
 # und mindestens 2.000 machen … Auf den Account drücken und On Demand switchen; dann gelten diese Regeln, Lots-Verhältnis gleich, TP/SL wie hier"):
 # gilt nur für Konten mit accounts.on_demand = true. Ziel je 100k (skaliert mit der Kontogröße), Consistency p %, kein Refund-Trade, keine Gewinntage;
 # SL, Lots, Hedge wie die Firma normal. Überschreibbar je Firma in funded_cfd_plan_regeln (firmen[].on_demand = {ziel_je_100k, consistency_pct}).
-FCP_ON_DEMAND_STANDARD = {"fundednext": {"ziel_je_100k": [2000, 2250], "consistency_pct": 40}}
+# FZ2 FIRMEN-MINIMUM STATT WURF (Finn 24.11.2026, Ina FundedNext 100k On Demand …0774: Ziel 2.197 $ gewürfelt, Profit 2.153 $, Consistency 36 % ≤ 40 % —
+# „wir haben immer diesen Puffer eingestellt. Nur weil jetzt ein paar hundert Dollar da fehlen: Es müsste eigentlich schon bestanden sein, also → Waiting for
+# Payout“): ziel_je_100k ist das PLANUNGS-Ziel (Würfel über dem Firmen-Minimum, TP-Größe); „erreicht“ (Waiting, Radar, Abhak-Popup, Konto-Seite) zählt ab
+# min_je_100k, dem echten Minimum der Firma (FundedNext On Demand: 2.000 $ je 100k, Finn 05.11.: „mindestens 2.000 machen“). Consistency bleibt echte
+# Bedingung (größter Tag ≤ p × Profit). Überschreibbar je Firma in funded_cfd_plan_regeln (firmen[].on_demand.min_je_100k).
+FCP_ON_DEMAND_STANDARD = {"fundednext": {"ziel_je_100k": [2000, 2250], "consistency_pct": 40, "min_je_100k": 2000}}
 
 
 def fcp_on_demand_regel(regel):
-    """On-Demand-Werte der Firma ({ziel_je_100k [von, bis], consistency_pct}) — regel.on_demand (false = keine), sonst Standard je Firmen-Schlüssel."""
+    """On-Demand-Werte der Firma ({ziel_je_100k [von, bis], consistency_pct, min_je_100k}) — regel.on_demand (false = keine), sonst Standard je Firmen-Schlüssel.
+    min_je_100k (FZ2) = Firmen-Minimum für „erreicht“; fehlt es (auch im Standard) → None, dann gilt wie bisher das gewürfelte Ziel."""
     r = regel or {}
     std = FCP_ON_DEMAND_STANDARD.get(((r.get("namen") or [""])[0])) or {}
     od = r.get("on_demand") if "on_demand" in r else std
@@ -52739,7 +52753,9 @@ def fcp_on_demand_regel(regel):
     if not isinstance(od, dict) or not fcp_bereich(od.get("ziel_je_100k")):
         return None
     p = _wd_num(od.get("consistency_pct"))
-    return {"ziel_je_100k": list(fcp_bereich(od.get("ziel_je_100k"))), "consistency_pct": float(p) if p is not None and 0 < p < 100 else None}
+    m = _wd_num(od.get("min_je_100k")) if not isinstance(od.get("min_je_100k"), bool) else None
+    return {"ziel_je_100k": list(fcp_bereich(od.get("ziel_je_100k"))), "consistency_pct": float(p) if p is not None and 0 < p < 100 else None,
+            "min_je_100k": float(m) if m is not None and m > 0 else None}
 
 
 def fcp_on_demand_anwenden(regel, jg, groesse):
@@ -52751,6 +52767,8 @@ def fcp_on_demand_anwenden(regel, jg, groesse):
     f = float(g) / 100000.0
     jg2 = {k: v for k, v in dict(jg).items() if k not in ("gewinntage", "tp_erster")}
     jg2["ziel"] = [float(round(od["ziel_je_100k"][0] * f)), float(round(od["ziel_je_100k"][1] * f))]
+    if od.get("min_je_100k"):
+        jg2["ziel_min"] = float(round(od["min_je_100k"] * f))   # FZ2: Firmen-Minimum ($) für „erreicht“ — Planen bleibt beim Ziel oben
     # OD2 (17.11.2026): consistency_basis „netto“ — FundedNext rechnet die On-Demand-Consistency gegen den Netto-Profit, nicht gegen die Summe der
     # Gewinn-Tage (fcp_tw_netto). Nur On-Demand-Konten bekommen den Schlüssel, alle anderen Regeln bleiben bitgleich.
     r2 = dict(regel or {}, erster_payout=False, consistency_pct=od["consistency_pct"] or 0, tp_modus=None, consistency_basis="netto")
@@ -52787,17 +52805,21 @@ def fcp_od_ende_min(pct, ziel, tw):
     return float(int(B / q) + 1)
 
 
-def fcp_od_ziel(pct, ziel, gewinn, tw):
-    """REIN RECHNEND (testbar, OD2): On-Demand-Ziel des Zyklus nach FundedNext → {usd, grund, bester_tag, wachstum, bereit, fehlt} | None.
-    usd = max(Wachstumsziel, größter Tag ÷ p) (Required profit der Firma), grund „consistency“, wenn der größte Tag das Ziel hochzieht, sonst „wachstum“;
-    bereit = Profit ≥ usd. Ohne p oder ohne lesbaren Zyklus → None."""
+def fcp_od_ziel(pct, ziel, gewinn, tw, ziel_min=None):
+    """REIN RECHNEND (testbar, OD2): On-Demand-Ziel des Zyklus nach FundedNext → {usd, grund, bester_tag, wachstum, bereit, fehlt[, firma_usd, firma_min]} | None.
+    usd = max(Wachstumsziel, größter Tag ÷ p) — das Ziel, das der Planer ansteuert; grund „consistency“, wenn der größte Tag das Ziel hochzieht, sonst „wachstum“.
+    FZ2 (Finn 24.11.2026): mit ziel_min (Firmen-Minimum in $, jg.ziel_min) ist „bereit“ = Profit ≥ firma_usd = max(Minimum, größter Tag ÷ p) — der
+    Required profit der Firma ohne den gewürfelten Puffer; fehlt = Rest dazu. Ohne ziel_min wie bisher gegen usd. Ohne p oder ohne lesbaren Zyklus → None."""
     if not pct or not isinstance(tw, dict):
         return None
     q, B, Z, G = float(pct) / 100.0, float(tw.get("b") or 0), float(ziel), float(gewinn)
     req = B / q
     usd = max(Z, req)
+    m = _wd_num(ziel_min)
+    fu = max(min(float(m), Z), req) if (m is not None and m > 0) else usd   # Minimum nie über dem Planungs-Ziel (falsch eingestellt → wie bisher)
     return {"usd": round(usd, 2), "grund": "consistency" if req > Z + 0.005 else "wachstum", "bester_tag": round(B, 2), "wachstum": round(Z, 2),
-            "p": float(pct), "bereit": G >= usd - 0.005, "fehlt": round(max(usd - G, 0.0), 2)}
+            "p": float(pct), "bereit": G >= fu - 0.005, "fehlt": round(max(fu - G, 0.0), 2),
+            **({"firma_usd": round(fu, 2), "firma_min": round(min(float(m), Z), 2)} if (m is not None and m > 0) else {})}
 
 
 # ADD-ON STRIKING (ST1, Master 15.11.2026, Finn mit den FundingPips-Regeln): gilt nur für Konten mit accounts.striking = true (von Hand am Konto, Chip
@@ -53501,6 +53523,8 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel), max_sl = accounts.max_risiko_trade — der SL liegt nie darüber (30.10.2026,
     jede Firma). gewinntage = (ist, soll) aus fcp_gewinntage_ist, nur bei jg.gewinntage (Blue Guardian, BG1 03.11.2026) — Phase A/B, s. oben."""
     P = param or fcp_param_standard()        # E1b: Mindest-TP, Consistency-Start, Deckel-Standard, Refund-Werte aus der DB (fcp_param), sonst Code
+    if _wd_num((jg or {}).get("ziel_min")):  # FZ2: On Demand — „erreicht“ ab dem Firmen-Minimum (fcp_ziel_schwelle), geplant wird weiter aufs Ziel
+        P = dict(P, ziel_min_usd=float(_wd_num(jg["ziel_min"])))
     if isinstance(zyklus, bool):
         zyklus = 1 if zyklus else 2
     zyklus = max(1, int(zyklus or 1))
@@ -53547,7 +53571,7 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         z_f, _n0 = fcp_ziel_fest(ziel_fest, zyklus, ziel_b, ziel_b[0]) if ziel_fest is not None else (ziel_b[0], True)
         z_f = max(z_f, ziel_b[0])
         if cons_netto:
-            _odz = fcp_od_ziel(pct, z_f, gewinn, tw0)
+            _odz = fcp_od_ziel(pct, z_f, gewinn, tw0, jg.get("ziel_min"))   # FZ2
             if _odz:
                 basis["od_ziel"] = _odz          # OD2: On-Demand-Ziel (Required profit) in jeder Antwort dieses Kontos — Notiz, Reiter, Konto-Seite
         # ZT1 (Finn 10.11.2026): Ziel erreicht ab Ziel × (1 − Toleranz) — Consistency-Bedingung unverändert
@@ -53594,7 +53618,7 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         _tw_c = fcp_tw_aus(tage, gewinn)
         if cons_netto:
             _tw_c = fcp_tw_netto(_tw_c, gewinn)  # OD2: Basis Netto-Profit, Ende aus fcp_od_ende_min, Deckel p × Ende × 0,95 (< bisheriger größter Tag)
-            _odz2 = fcp_od_ziel(pct, ziel, gewinn, _tw_c)
+            _odz2 = fcp_od_ziel(pct, ziel, gewinn, _tw_c, jg.get("ziel_min"))   # FZ2
             if _odz2:
                 basis["od_ziel"] = _odz2         # OD2-Review: mit dem Ziel, das dieser Plan ansteuert (ohne festes Ziel gewürfelt, nicht der untere Wert)
         cr = fcp_cons_finn(pct, ziel, gewinn, _tw_c, rnd, ziel_min=fcp_ziel_schwelle(ziel, P),   # ZT1: fertig ab Schwelle
@@ -53702,7 +53726,10 @@ def fcp_ziel_schwelle(ziel, param=None):
     t = _wd_num((param or {}).get("ziel_toleranz_pct")) if isinstance(param, dict) and "ziel_toleranz_pct" in param else FCP_ZIEL_TOLERANZ_PCT
     if t is None or not 0 <= t <= 50:
         t = FCP_ZIEL_TOLERANZ_PCT
-    return round(float(z) * (1.0 - float(t) / 100.0), 2) if z > 0 else float(z)
+    sw = round(float(z) * (1.0 - float(t) / 100.0), 2) if z > 0 else float(z)
+    # FZ2 (Finn 24.11.2026): Firmen-Minimum (On Demand, jg.ziel_min) — liegt der Würfel darüber, zählt „erreicht“ schon ab dem Minimum der Firma
+    m = _wd_num((param or {}).get("ziel_min_usd")) if isinstance(param, dict) else None
+    return round(min(sw, float(m)), 2) if (m is not None and m > 0 and z > 0) else sw
 
 
 def fcp_ziel_toleranz_info(ziel, gewinn, param=None):
