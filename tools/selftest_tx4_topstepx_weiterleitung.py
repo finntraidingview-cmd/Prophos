@@ -115,6 +115,11 @@ check(bool(rx) and all(rx.search(t) for t in ("Login with Google", "Log in with 
       "Google-Knopf: „Login/Log in/Continue/Sign in with Google“ ja, „Sign up with Google“/Facebook/„Continue to TopstepX“ nein")
 src = open(ob.__file__, encoding="utf-8").read()
 check("if not lg or tsx_login_art(lg) in (\"google\", \"anmeldung\"):" in src, "_tsx_cdp_login: leerer erster Blick geht in den wartenden Google-Weg (nie „angemeldet“)")
+i = src.index("def _tsx_cdp_login(")
+cl = src[i:src.index("\ndef ", i + 10)]
+check("lg = blick_g()" in cl and "_tsx_google_login(s, trail, blick_g, lg)" in cl and cl.count("blick_g()") == 2
+      and "    def blick():\n        b = s.lese_js(TSX_K0_BLICK_JS) or {}" in cl,
+      "Prüfung: Lesefehler nur im Google-Weg geschluckt (blick_g); der alte Formular-Weg liest wie bisher (Fehler wird nie „angemeldet“)")
 
 print()
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")

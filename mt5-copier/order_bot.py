@@ -21422,11 +21422,16 @@ def _tsx_cdp_login(s, trail):
     nie tippen, nie Enter, kein zweiter Versuch. Füllt Chrome nicht von selbst, wählt Puls seit 22.10.2026 den gespeicherten Login aus
     Chromes Liste unter dem Benutzerfeld (_tsx_autofill_waehlen, nur Windows). -> True (angemeldet) | Fehlertext"""
     def blick():
-        try:
-            b = s.lese_js(TSX_K0_BLICK_JS) or {}
-        except Exception:
-            return {}                                     # TX4: Seite mitten in der Weiterleitung — leer = „noch nicht lesbar“, der Google-Weg wartet
+        b = s.lese_js(TSX_K0_BLICK_JS) or {}
         return b.get("login") if isinstance(b.get("login"), dict) else {}
+
+    def blick_g():
+        # TX4 (Prüfung): NUR für den Google-Weg — Lesefehler mitten in der Weiterleitung = leer = „weiter warten“. Der alte Formular-Weg liest mit
+        # blick() wie bisher (ein Fehler bleibt ein Fehler und wird dort nie zu „angemeldet“)
+        try:
+            return blick()
+        except Exception:
+            return {}
 
     def warten(lg_):
         """Bis ~6 s auf Chromes Autofill-Markierung (nur lesen). -> (login-Blick | None = Login-Seite weg, ok, text)"""
@@ -21441,11 +21446,11 @@ def _tsx_cdp_login(s, trail):
             ok_, text_ = tsx_login_beweis(lg_)
         return lg_, ok_, text_
 
-    lg = blick()
+    lg = blick_g()
     if not lg or tsx_login_art(lg) in ("google", "anmeldung"):   # TX4: leer = Seite leitet gerade weiter → der Google-Weg wartet (nie „angemeldet“)
         # TX1 (17.11.2026): TopstepX-Anmeldung über Google (Finn: „immer ‚Sign in with Google' wählen") — eigener, enger Weg. None = doch die
         # alte Login-Seite (Passwortfeld + „PLATFORM LOGIN" ohne Google-Knopf) → weiter wie bisher
-        g = _tsx_google_login(s, trail, blick, lg)
+        g = _tsx_google_login(s, trail, blick_g, lg)
         if g is not None:
             return g
         lg = blick()
