@@ -46957,11 +46957,7 @@ def ap_bal_auto_gruppen_tick(jetzt, reg=None):
         konten.update({str(a.get("id")): a for a in f_konten})
     except Exception as e:
         print(f"[balance-auto Gruppe] ⚠️ Funded-Konten nicht gelesen ({type(e).__name__}: {e}) — nur Planer-Konten", flush=True)
-    # (F) PW1: Funded CFD der Gruppe nach einer Payout-Anfrage 1–12 h später nachlesen (wie HT); globals: Selbsttest-Lader ziehen den Takt allein
-    p_kand, p_konten = globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv) if "_ap_bal_payout_kandidaten" in globals() else ({}, {})
-    kand.update(p_kand)
-    for kid in p_kand:
-        konten.setdefault(kid, p_konten[kid])
+    # (F) PW1 bewusst NICHT hier (PW1b, Prüfer-Stopp S2): das Nachlesen nach einer Payout-Anfrage gilt nur für Hermann Technologies
     if not kand:
         return None
     return _ap_bal_auto_senden(kand, konten, d, tag, _ap_bal_auto_gr, uids_offen=uids_offen, wer=" Gruppe")
@@ -54519,6 +54515,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         _pw1_ht_f = None
         print(f"[funded-cfd] ⚠️ Gruppen nicht lesbar ({type(e).__name__}) — Waiting zurück heute nur angezeigt", flush=True)
     _pw1_ist_ht = lambda u: bool(_pw1_ht_f and _pw1_ht_f(str(u)) and str(u) not in gr_ids_fcp)   # noqa: E731
+    payout_alarm = []                                                    # PW1b: (schlüssel, uid, konto_id, Konto-Text, Anfrage, Phase) — nach dem Lauf, nur scharf
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "id,user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -54612,9 +54609,21 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         p_anfrage = anfrage_zuletzt.get(aid) if payouts_ok else None
         if p_anfrage is not None and jetzt - p_anfrage > timedelta(days=FCP_PAYOUT_ANFRAGE_MAX_TAGE):
             p_anfrage = None          # PW1: alte Anfrage — Phase erledigt, normal rechnen (Lese-Aufträge sind nur 31 Tage geladen)
+        if p_anfrage is not None and _pw1_ht_f is None:
+            # PW1b (Review): Gruppen nicht lesbar → unklar, ob HT; eine HT-ID mit offener Anfrage hieße sonst „volle Balance vor der Abbuchung“ → nicht planen
+            aus("Payout angefragt, Gruppen nicht lesbar — heute nicht geplant (unklar, ob die Balance schon abgebucht ist)"); continue
+        if p_anfrage is not None and not _pw1_ist_ht(uid):
+            p_anfrage = None          # PW1b (Prüfer-Stopp S2): nur Hermann Technologies — andere Unternehmen rechnen wie vor PW1 („Zwei Unternehmen getrennt“)
         # Vor-Balance = End-Balance des letzten Trades vor der Anfrage; ohne sie (oder ohne Gewinn davor) → None = normal rechnen. Lese-Aufträge nicht
         # lesbar (lesungen None) → nur die End-Balancen danach zählen als Beobachtung (bleibt eher „offen“ = vorsichtig)
         p_phase = fcp_payout_phase(p_anfrage, _wd_konto_groesse(a), (lesungen or {}).get(aid), pl) if p_anfrage is not None else None
+        if isinstance(p_phase, dict) and p_phase.get("phase") == "offen" and jetzt >= p_anfrage + timedelta(hours=FCP_PAYOUT_LESEN_BIS_H):
+            # PW1b (Prüfer-Hinweis): 12 h nach der Anfrage noch nicht abgebucht → einmal je Anfrage 🟠 an die Master-IDs (nach dem Lauf, nur scharf)
+            _ext = str(a.get("external_id") or "").strip()
+            _gk = _wd_konto_groesse(a)
+            payout_alarm.append((f"fcp_payout_offen|{aid}|{p_anfrage.isoformat()}", uid, aid,
+                                 f"{namen.get(uid) or uid[:8]} · {a.get('firm') or 'Firma'} {int(_gk // 1000) if _gk else '?'}k …{_ext[-4:] or '?'}",
+                                 p_anfrage, p_phase))
         if a.get("waiting_payout_since") and fcp_waiting_zurueck(a.get("waiting_payout_since"), p_anfrage, p_phase):
             # PW1 WAITING → FUNDED CFD: Anfrage nach dem Setzen von Waiting (Finn: „direkt wieder rüberspringen zu Funded CFD“) ODER Waiting wurde nach der
             # Anfrage auf alter Balance gesetzt (Fall …7821). Neuer Zyklus: die Zählung (payout_n) hat die Anfrage schon.
@@ -54730,7 +54739,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 balance=round(float(bal), 2)); continue
         _l = (lesungen or {}).get(aid)   # PW1: „echte Lesung“ nur aus einem Lese-Auftrag, nie tv_balance_at (Flotten-Takt schreibt eingefrorene Stände)
         _abg = isinstance(p_phase, dict) and p_phase.get("phase") == "abgebucht"   # Review PW1 (8): Abbuchung schon beobachtet → WP2 erfüllt (auch bei spät eingetragenem approved_at)
-        if r.get("aktion") == "ziel" and not _abg and fcp_payout_lesung_fehlt(payout_bezug.get(aid), pl, {"tv_balance_at": _l["at"].isoformat(), "tv_balance": _l["balance"]} if _l else {}, bal):
+        # PW1b: WP2 mit Lese-Aufträgen nur für HT; andere Unternehmen wie vor PW1 (accounts.tv_balance_at)
+        _wp2_k = ({"tv_balance_at": _l["at"].isoformat(), "tv_balance": _l["balance"]} if _l else {}) if _pw1_ist_ht(uid) else a
+        if r.get("aktion") == "ziel" and not _abg and fcp_payout_lesung_fehlt(payout_bezug.get(aid), pl, _wp2_k, bal):
             # WP2 (23.11.2026): nach dem 72-h-Fenster nicht blind wieder Waiting — ohne echte Lesung nach Anfrage/Auszahlung bleibt das Konto, wie es ist
             aus(FCP_GRUND_PAYOUT_UNGELESEN, balance=round(float(bal), 2), payout_bezug=payout_bezug[aid].isoformat()); continue
         if od_an:
@@ -54989,6 +55000,27 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 sb_update("accounts", w_, {"fcp_ziel": zf})
             except Exception as e:
                 print(f"[funded-cfd] ⚠️ festes Ziel {aid[:8]}: {e}", flush=True)
+        # PW1b (Prüfer-Hinweis S2): 12 h nach der Anfrage noch keine Abbuchung sichtbar → einmal je Anfrage 🟠 an die Master-IDs (alarm_log-Schlüssel
+        # je Konto + Anfrage, 40 Tage); Lesefehler des Logs → diesmal nicht senden (lieber später als doppelt)
+        if payout_alarm:
+            try:
+                schon = alarm_im_log([z[0] for z in payout_alarm], 40 * 86400)
+            except Exception as e:
+                schon = None
+                print(f"[funded-cfd] ⚠️ alarm_log nicht lesbar ({type(e).__name__}) — Payout-Meldung später", flush=True)
+            for key, uid_, aid_, ktxt, anf, ph in (payout_alarm if schon is not None else []):
+                if key in schon:
+                    continue
+                try:
+                    _tag = anf.astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M")
+                    _ob = " (zuletzt gelesen: keine Abbuchung)" if ph.get("beobachtet") else " (seither nicht gelesen)"
+                    _ab = (f"Planer rechnet weiter mit Balance − {_liq_de(ph['abzug'])} $" if ph.get("abzug")
+                           else "Planer rechnet ohne Abzug (Balance vor der Anfrage unbekannt)")
+                    alarm_senden(2, "fcp_payout_offen", f"Payout abgelehnt/ausstehend? {ktxt}",
+                                 f"{ktxt}: Payout am {_tag} Dubai angefragt, nach 12 h ist kein Abzug sichtbar{_ob}. {_ab}. Im Dashboard der Firma prüfen.",
+                                 uid=uid_, schluessel=key, tag=f"fcp-payout-{aid_}"[:60], daten={"konto_id": aid_, "anfrage": anf.isoformat()})
+                except Exception as e:
+                    print(f"[funded-cfd] ⚠️ Payout-Meldung {ktxt}: {type(e).__name__}: {e}", flush=True)
         # O1: On Demand — Payout sofort anfragbar, sobald Ziel + Consistency erfüllt sind (keine 14/21 Tage): „Payout anfragbar ab" = heute
         for r in erg["ziel"]:
             if not r.get("on_demand") or (r.get("consistency") or {}).get("bester_tag") is None:

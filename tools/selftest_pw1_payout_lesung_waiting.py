@@ -91,8 +91,8 @@ check(app.ap_bal_auto_payout([dict(KA, auto_planer=False), dict(KN, id="k-x", ex
 check(app.ap_bal_auto_funded([KA], {}, set(), {}, {}, set(), payout={}) == {}, "Futures-Quelle (E) unverändert")
 src = open(os.path.join(WURZEL, "app" + ".py"), encoding="utf-8").read()
 tk, gt = src[src.index("def ap_bal_auto_tick("):src.index("def _ap_bal_auto_senden(")], src[src.index("def ap_bal_auto_gruppen_tick("):src.index("# ══ VON SELBST BESTÄTIGEN")]
-check('globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv)' in tk and 'globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv)' in gt,
-      "HT- und Gruppen-Takt hängen die Quelle (F) an ((E) lädt keine Funded-CFD-Konten)")
+check('globals()["_ap_bal_payout_kandidaten"](uids, jetzt, set(kand), archiv)' in tk and "_ap_bal_payout_kandidaten" not in gt,
+      "PW1b: nur der HT-Takt hängt die Quelle (F) an, der Gruppen-Takt nicht ((E) lädt keine Funded-CFD-Konten)")
 
 print("3) Funded-CFD-Planer (trocken + scharf)")
 sql = open(os.path.join(WURZEL, "sql", "2026-10-30_funded_cfd_planer.sql"), encoding="utf-8").read()
@@ -167,7 +167,9 @@ app._sb_pruefen = lambda r: None
 app._ap_archiviert = lambda streng=False: set()
 app._ap_namen = lambda: ({H1: "HT-1"}, set())
 app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "ht", "name": "Hermann Technologies", "verwalter_id": None}], "mitglieder": [{"user_id": H1, "gruppe_id": "ht"}]}
-app.alarm_senden = lambda *a, **k: (1, 1)
+ALARME, IM_LOG = [], set()
+app.alarm_senden = lambda *a, **k: ALARME.append((a, k)) or (1, 1)
+app.alarm_im_log = lambda keys, seit_s: {k for k in keys if k in IM_LOG}
 app.tw_pause_grund = lambda *a, **k: None
 app._ap_balance_karten = lambda: ({a["external_id"]: (a["_bal"], "USD", HEART) for a in KONTEN}, {})   # Echo im Standby: alter Stand, frischer Heartbeat
 erg = app.fcp_planen(trocken=True, jetzt=JETZT, seed=7)
@@ -201,18 +203,56 @@ check(all(g[2].get("waiting_payout_since", "").startswith("eq.") and g[2].get("a
 ziel_w = [g for g in GESCHR if g[0] == "update" and "fcp_ziel" in g[3] and g[2].get("id", "")[3:] in (MARC["id"], M7057["id"])]
 check(not ziel_w, "scharf: Zyklus-Ziel der offenen Konten erst mit der neuen Balance festgeschrieben (noch nicht)")
 
+print("4) PW1b: 🟠 12 h nach der Anfrage ohne Abbuchung")
+pa = [x for x in ALARME if x[0][1] == "fcp_payout_offen"]
+keys = {x[1].get("schluessel") for x in pa}
+check(len(pa) == 2 and keys == {f"fcp_payout_offen|{MARC['id']}|2026-11-18T22:37:12+00:00", f"fcp_payout_offen|{M7057['id']}|2026-11-19T17:00:00+00:00"},
+      f"scharf: genau Marc + Mike …7057 (offen, Anfrage > 12 h her), nicht das abgebuchte Konto ({len(pa)})")
+check(all(x[0][0] == 2 and "Payout abgelehnt/ausstehend?" in x[0][2] for x in pa), "Prio 2 (🟠), Titel „Payout abgelehnt/ausstehend?“")
+t_marc = next((x for x in pa if MARC["id"] in x[1].get("schluessel", "")), ((), {}))
+check("HT-1 · FundedNext 100k …0001" in t_marc[0][2] and "HT-1 · FundedNext 100k …0001" in t_marc[0][3] and "Balance − 4.91" in t_marc[0][3],
+      f"Konto als ID · Firma Größe …4, Text nennt den Abzug ({t_marc[0][3][:140] if t_marc[0] else ''})")
+ALARME.clear()
+IM_LOG.update(keys)
+app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
+check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen"], "zweiter Lauf: schon im alarm_log → keine zweite Meldung")
+ALARME.clear()
+IM_LOG.clear()
+app.alarm_im_log = lambda keys, seit_s: None
+app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
+check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen"], "alarm_log nicht lesbar → diesmal keine Meldung (lieber später als doppelt)")
+app.alarm_im_log = lambda keys, seit_s: {k for k in keys if k in IM_LOG}
+ALARME.clear()
+app.fcp_planen(trocken=False, jetzt=datetime(2026, 11, 19, 8, 0, tzinfo=timezone.utc), seed=7)
+check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen" and MARC["id"] in x[1].get("schluessel", "")],
+      "Marc 9,4 h nach der Anfrage → noch keine Meldung (erst ab 12 h)")
+ALARME.clear()
+app.fcp_planen(trocken=True, jetzt=JETZT, seed=7)
+check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen"], "Trockenlauf meldet nichts")
+
 
 def _kaputt():
     raise RuntimeError("Gruppen nicht lesbar")
 
 
+print("5) PW1b: nur Hermann Technologies")
 GESCHR.clear()
+ALARME.clear()
 app.admin_gruppen_daten = _kaputt
 e2 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
 leer2 = [g for g in GESCHR if g[0] == "update" and g[1] == "accounts" and g[3] == {"waiting_payout_since": None}]
-nur = [z for z in e2.get("waiting_zurueck") or [] if z.get("nur_angezeigt")]
-check(not leer2 and len(nur) == 3 and not [z for z in e2.get("geplant") or [] if z["konto_id"] in (MARC["id"], M7057["id"])],
-      "Gruppen nicht lesbar / nicht HT → Waiting nur angezeigt, nicht geschrieben, Konto nicht geplant (fail-closed)")
+aus2 = {z["konto_id"]: z for z in e2.get("ausgelassen") or []}
+check(not leer2 and not (e2.get("waiting_zurueck") or []) and all("Gruppen nicht lesbar" in aus2.get(k["id"], {}).get("grund", "") for k in KONTEN),
+      "Gruppen nicht lesbar → Waiting bleibt, nichts geschrieben, Konten mit Anfrage heute nicht geplant (fail-closed, nie volle Balance vor der Abbuchung)")
+check(not [x for x in ALARME if x[0][1] == "fcp_payout_offen"], "… und keine Payout-Meldung")
+app.admin_gruppen_daten = lambda: {"gruppen": [{"id": "em", "name": "Emin", "verwalter_id": "22222222-2222-2222-2222-222222222222"}],
+                                   "mitglieder": [{"user_id": H1, "gruppe_id": "em"}]}
+GESCHR.clear()
+e3 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=7)
+leer3 = [g for g in GESCHR if g[0] == "update" and g[1] == "accounts" and g[3] == {"waiting_payout_since": None}]
+p3 = [z for z in e3.get("geplant") or [] if z.get("payout_offen") or z.get("bal_quelle") == "Lesung nach Payout"]
+check(not leer3 and not (e3.get("waiting_zurueck") or []) and not p3 and not [x for x in ALARME if x[0][1] == "fcp_payout_offen"],
+      "ID in einer Gruppe mit Verwalter (Emin) → keine PW1-Rechnung, kein Zurückstellen, keine Meldung")
 
 print()
 if FEHLER:
