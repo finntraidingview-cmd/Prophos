@@ -201,6 +201,12 @@ if __name__ == "__main__":
     check(qg.index('_tsx_login_tabs_zu(trail, ausser=(getattr(s, "target_id", None),))') < qg.index("vorher = [") < qg.index("s.klick(kn[\"rect\"]"),
           "vor dem Google-Klick aufräumen (eigener Tab bleibt), Tab-Liste für das Google-Fenster danach")
 
+    # (4b) Finn 24.11.2026 (Marc pc-7ftp5l von Hand): EIN Klick auf „Continue with Google“, dann 7–13 s Laden abwarten
+    check(ob.TSX_GOOGLE_WARTEN_S >= 20, f"nach dem Google-Klick mindestens 20 s warten ({ob.TSX_GOOGLE_WARTEN_S} s)")
+    check(qg.count(" s.klick(") == 1 and qg.count('s.klick(kn["rect"]') == 1 and qg.count("gs.klick(") == 1 and "if konto_geklickt:" in qg
+          and qg.count("_cdp_http(\"/json/new") == 0 and "nie ein zweiter Druck" in qg,
+          "genau EIN Klick auf den Google-Knopf, im Warten kein zweiter Druck, keine neuen Tabs")
+
     # (5) neue Anmeldeseite (live pc-pmqd8g 24.11.2026, TSX_K0_BLICK_JS.login)
     LG = {"seite": False, "knoepfe": 0, "knopf": None, "pw_n": 0, "fehler_text": None, "zwei_faktor": False,
           "google": [{"tag": "button", "text": "Continue with Google", "aria": "", "title": "", "role": "", "testid": "",

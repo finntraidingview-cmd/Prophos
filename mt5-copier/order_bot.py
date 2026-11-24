@@ -21480,6 +21480,8 @@ def _tsx_cdp_login(s, trail):
 #   5. Nach einem Google-Klick ohne Erfolg 30 min kein neuer Versuch (tsx_google_login.json, wie TSX_LOGIN_SPERRE_S beim alten Login).
 TSX_GOOGLE_KNOPF_S = 8.0          # so lange (nur lesen) auf den Google-Knopf warten, wenn die Seite schon „Sign in" heißt
 TSX_GOOGLE_WARTEN_S = 40.0        # nach dem Google-Klick: bis TopstepX wieder angemeldet ist (Google-Fenster, Kontoauswahl, Rückweg)
+# TX2 (Finn 24.11.2026, von Hand bei Marc pc-7ftp5l: „nur EINMAL auf ‚Continue with Google‘ drücken und dann chillen — das Laden dauert 7 bis 13
+# Sekunden, aber er loggt ein"): genau so — ein Klick, danach nur lesen bis zu TSX_GOOGLE_WARTEN_S (≥ 20 s), kein zweiter Klick, keine neuen Tabs.
 TSX_GOOGLE_TABU = r"\b(sign\s*up|register|create|buy|sell|order|logout|log\s*out|abmelden)\b"
 TSX_GOOGLE_KONTO_TABU = r"use another|anderes konto|remove|entfernen|signed out|abgemeldet|add account|hinzuf"
 TSX_RX_MAIL = re.compile(r"[^\s@'\"(),;<>]+@[^\s@'\"(),;<>]+\.[a-z]{2,}", re.I)   # Adressen aus der Spur nehmen (nie mitschreiben)
