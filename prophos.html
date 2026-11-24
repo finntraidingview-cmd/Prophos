@@ -1675,6 +1675,20 @@
   #adm-pane-bank .bk-konto-infos b{font-weight:500;color:var(--ink-2)}
   #adm-pane-bank .bk-arten{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-soft)}
   #adm-pane-bank .bk-arten[hidden]{display:none}
+  /* BK6 (25.11.2026): Kontoauszug-Abgleich im Detail + „Auszug fällig" in der Liste */
+  #adm-pane-bank .bk-faellig{display:inline-block;font-size:11px;font-weight:500;color:#B54708;background:#FFFAEB;padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:1px}
+  #adm-pane-bank .bk-az-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}
+  #adm-pane-bank .bk-az-k{background:var(--surface-tint);border-radius:10px;padding:8px 10px}
+  #adm-pane-bank .bk-az-k span{display:block;font-size:11px;color:var(--sub)} #adm-pane-bank .bk-az-k b{display:block;font-size:15px;font-variant-numeric:tabular-nums;margin-top:2px}
+  #adm-pane-bank .bk-az-tag{display:inline-block;font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  #adm-pane-bank .bk-az-tag.ok{background:color-mix(in srgb, var(--good) 12%, transparent);color:var(--good)}
+  #adm-pane-bank .bk-az-tag.fehlt{background:#FFFAEB;color:#B54708}
+  #adm-pane-bank .bk-az-tag.nur{background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger)}
+  #adm-pane-bank .bk-az-tab tr.grau td{color:var(--sub-2)}
+  #adm-pane-bank .bk-az-tab select{border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-size:12.5px;padding:4px 6px;margin:0 6px}
+  #adm-pane-bank .bk-az-fuss{display:flex;align-items:center;gap:12px;margin-top:10px}
+  #adm-pane-bank .bk-az-vorschlag{font-size:12.5px;color:var(--sub);background:var(--surface-tint);border-radius:10px;padding:8px 10px;margin-bottom:10px}
+  @media (max-width:820px){ #adm-pane-bank .bk-az-kpis{grid-template-columns:1fr 1fr} #adm-pane-bank .bk-az-tab{min-width:620px} }
   #adm-pane-bank .bk-fehlt{display:inline-block;font-size:11px;font-weight:500;color:var(--sub);padding:1px 7px;border-radius:999px;border:1px dashed var(--border);margin-left:6px;vertical-align:1px}
   #adm-pane-bank .bk-konto-infos .bk-fehlt{margin-left:0}
   #adm-pane-bank .bk-art{border:1px solid transparent;background:var(--surface-tint);border-radius:10px;padding:8px 10px;text-align:left;font:inherit;cursor:pointer;color:inherit}
@@ -15182,6 +15196,37 @@
                 <!-- BK4: Summe je Art, Klick filtert die Tabelle (laufender Saldo rechnet weiter über alle Zeilen) -->
                 <div class="bk-arten" id="bk-d-arten"></div>
               </div>
+              <!-- KONTOAUSZUG (BK6, 25.11.2026, Finn: „Ja zum Kontoauszug-Upload"): PDF/CSV je Konto hochladen → Railway liest aus (CSV direkt,
+                   PDF per Claude-API) → Abgleich mit den Buchungen: ✓ passt · fehlt in Prophos (übernehmen) · nur in Prophos · Saldo-Differenz.
+                   Nie automatisch buchen. Datei privat (5-Minuten-Link), 12 Monate aufbewahrt. -->
+              <div class="panel" id="bk-az" style="margin-top:14px">
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title">Kontoauszug</div>
+                    <div class="panel-sub" id="bk-az-sub">Noch kein Auszug — PDF oder CSV hochladen</div>
+                  </div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="btn btn-ghost" id="bk-az-ansehen" style="padding:7px 12px" hidden>Auszug ansehen</button>
+                    <button class="btn btn-primary" id="bk-az-hoch" style="padding:7px 12px">Auszug hochladen</button>
+                    <input type="file" id="bk-az-datei" accept=".pdf,.csv,application/pdf,text/csv" hidden>
+                  </div>
+                </div>
+                <div id="bk-az-msg" class="bk-msgzeile"></div>
+                <div id="bk-az-vorschlag" class="bk-az-vorschlag" hidden></div>
+                <div id="bk-az-body" hidden>
+                  <div class="bk-az-kpis" id="bk-az-kpis"></div>
+                  <div class="table-wrap">
+                    <table class="t bk-az-tab">
+                      <thead><tr><th style="width:92px">Datum</th><th>Auszug</th><th>Prophos</th><th class="adm-num" style="width:110px">Betrag</th><th style="width:250px">Abgleich</th></tr></thead>
+                      <tbody id="bk-az-rows"></tbody>
+                    </table>
+                  </div>
+                  <div class="bk-az-fuss">
+                    <button class="btn btn-primary" id="bk-az-alle" style="padding:7px 12px" hidden>Alle fehlenden übernehmen</button>
+                    <button type="button" class="bk-knopf" id="bk-az-passt-zeigen" hidden></button>
+                  </div>
+                </div>
+              </div>
               <div class="panel" style="margin-top:14px">
                 <div class="table-wrap">
                   <table class="t bk-sheet">
@@ -24219,6 +24264,8 @@
         b.querySelector('.bk-id-name').textContent = l[0].name || uid.slice(0, 8)
         if(l.length > 1){ const s = document.createElement('small'); s.textContent = `${l.length} Konten`; b.querySelector('.bk-id-name').appendChild(s) }
         if(l.some(k => !k.iban)){ const t = document.createElement('span'); t.className = 'bk-fehlt'; t.textContent = 'IBAN fehlt'; b.querySelector('.bk-id-name').appendChild(t) }   // BK5
+        const fTage = Math.max(0, ...l.map(k => Number(k.auszug?.faellig_tage) || 0))   // BK6: Erinnerung nur hier (kein Alarm), ab 21 Tagen seit dem letzten Auszug
+        if(fTage){ const t = document.createElement('span'); t.className = 'bk-faellig'; t.textContent = `Auszug fällig · ${fTage} Tage`; b.querySelector('.bk-id-name').appendChild(t) }
         b.addEventListener('click', () => { bkPerson = uid; bkKonto = ''; bkArtFilter = ''; $('bk-d-msg').textContent = ''; bkRender(); $('adm-fin-sicht')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
         box.appendChild(b)
       }
@@ -24265,6 +24312,8 @@
           `<b class="${sum < 0 ? 'bk-minus' : sum > 0 ? 'bk-plus' : ''}">${sum > 0 ? '+' : ''}${bkGeld(sum, k.waehrung)}</b></button>`
       }).join('')
       bkZeilenRender(k)
+      if(bkAz.konto !== bkKonto){ clearTimeout(bkAz.poll); bkAz = { konto: bkKonto, d: null, laedt: true, passtAuf: false, poll: 0 }; $('bk-az-msg').textContent = ''; bkAzRender(); bkAzLaden(bkKonto) }   // BK6 (Review: altes Konto nicht stehen lassen)
+      else bkAzRender()
     }
     // Review BK3: tippt Finn gerade in einer Zeile, die Tabelle erst nach dem Verlassen neu bauen (sonst ist die Eingabe weg)
     let bkZeilenSpaeter = false
@@ -24418,6 +24467,134 @@
     }
     for(const id of ['bk-n-datum', 'bk-n-text', 'bk-n-art', 'bk-n-betrag'])
       $(id)?.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); bkNeuSpeichern() } })
+    /* ── KONTOAUSZUG (BK6, 25.11.2026) ── Abgleich je Konto über /admin/bank/auszug (bank_auszug.py). Zustand nur für das offene Konto;
+     * nach dem Hochladen fragt der Tab alle 3 s nach, bis Railway fertig gelesen hat (höchstens 2 min). Nie automatisch buchen. */
+    let bkAz = { konto: '', d: null, laedt: false, passtAuf: false, poll: 0 }
+    async function bkAzLaden(kontoId){
+      if(!kontoId) return
+      bkAz.laedt = true
+      try{
+        const d = await rgApi('/admin/bank/auszug?ansicht=admin&konto=' + encodeURIComponent(kontoId))
+        if(kontoId !== bkKonto) return
+        bkAz.d = d; bkAz.konto = kontoId
+        $('bk-az-msg').textContent = ''
+      }catch(e){
+        if(kontoId !== bkKonto) return
+        bkAz.d = null; bkAz.konto = kontoId
+        $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = 'Kontoauszug nicht verfügbar: ' + (e.message || e)
+      }finally{ bkAz.laedt = false }
+      bkAzRender()
+      const st = bkAz.d?.aktuell?.status
+      clearTimeout(bkAz.poll)
+      if((st === 'hochgeladen' || st === 'liest') && (bkAz.versuche = (bkAz.versuche || 0) + 1) <= 40) bkAz.poll = setTimeout(() => bkAzLaden(kontoId), 3000)
+      else{
+        if(st === 'hochgeladen' || st === 'liest'){ $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = 'Das Auslesen dauert länger — in ein paar Minuten ↻ oben drücken.' }
+        bkAz.versuche = 0
+      }
+    }
+    function bkAzRender(){
+      const k = (bkDaten?.konten || []).find(x => String(x.id) === bkKonto); if(!k) return
+      const d = bkAz.konto === bkKonto ? bkAz.d : null, a = d?.aktuell, g = d?.abgleich
+      $('bk-az-ansehen').hidden = !a
+      $('bk-az-body').hidden = !(a && a.status === 'gelesen' && g)
+      $('bk-az-vorschlag').hidden = true
+      if(!a){ $('bk-az-sub').textContent = bkAz.laedt ? 'lädt …' : 'Noch kein Auszug — PDF oder CSV hochladen'; return }
+      const zr = a.von && a.bis ? `${bkTag(a.von)} – ${bkTag(a.bis)}` : (a.datei_name || 'Auszug')
+      const st = { hochgeladen: 'wird gelesen …', liest: 'wird gelesen …', fehler: 'nicht lesbar', gelesen: '' }[a.status] ?? a.status
+      $('bk-az-sub').textContent = `${zr}${st ? ' · ' + st : ''}${a.endsaldo != null ? ' · Endsaldo ' + bkGeld(a.endsaldo, k.waehrung) : ''} · hochgeladen ${bkTag(a.created_at)}` +
+        (Number(a.uebersprungen) ? ` · ${a.uebersprungen} Zeile${Number(a.uebersprungen) === 1 ? '' : 'n'} nicht lesbar` : '')   // Review BK6: nie still weglassen
+      if(a.status === 'fehler'){ $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = a.fehler || 'Auszug nicht lesbar' }
+      // Vorschlag aus dem Auszugskopf: nur wenn am Konto etwas fehlt, nie automatisch (Klick öffnet das Konto-Formular vorbefüllt)
+      const v = a.vorschlag || {}
+      if((v.iban && !k.iban) || (v.bank && !k.bank)){
+        const el = $('bk-az-vorschlag'); el.hidden = false
+        el.innerHTML = `Im Auszug gelesen: ${[v.bank, v.inhaber, v.iban ? 'IBAN …' + String(v.iban).slice(-4) : ''].filter(Boolean).map(bkEsc).join(' · ')} ` +
+          `<button type="button" class="bk-knopf" id="bk-az-vorschlag-ok">als Konto-Daten eintragen</button>`
+        el.querySelector('button').addEventListener('click', () => {
+          bkBearbeiten(k)
+          if(v.iban && !k.iban) $('bk-a-iban').value = bkIban(v.iban)
+          if(v.bank && !k.bank) $('bk-a-bank').value = v.bank
+          if(v.inhaber && !k.inhaber) $('bk-a-inhaber').value = v.inhaber
+          $('bk-a-form').scrollIntoView({ block: 'center', behavior: 'smooth' })
+        })
+      }
+      if(!(a.status === 'gelesen' && g)) return
+      if(g.waehrung_passt === false){ $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = `Der Auszug ist in ${g.waehrung_auszug}, das Konto in ${k.waehrung || 'EUR'} — falsches Konto? Übernehmen ist gesperrt.` }
+      const kach = (t, w, cls) => `<div class="bk-az-k"><span>${t}</span><b class="${cls || ''}">${w}</b></div>`
+      $('bk-az-kpis').innerHTML = kach('✓ passt', g.passt.length) + kach('fehlt in Prophos', g.fehlt.length, g.fehlt.length ? 'bk-minus' : '') +
+        kach('nur in Prophos', g.nur.length, g.nur.length ? 'bk-minus' : '') +
+        kach('Saldo-Differenz', g.differenz == null ? '–' : (g.differenz > 0 ? '+' : '') + bkGeld(g.differenz, k.waehrung), g.differenz ? 'bk-minus' : 'bk-plus')
+      const buch = new Map((bkDaten.buchungen || []).filter(b => String(b.konto_id) === bkKonto).map(b => [String(b.id), b]))
+      const zeilen = a.zeilen || [], rows = []
+      for(const f of g.fehlt) rows.push({ art: 'fehlt', datum: zeilen[f.i].datum, z: zeilen[f.i], i: f.i, vorschlag: f.art })
+      for(const id of g.nur){ const b = buch.get(String(id)); if(b) rows.push({ art: 'nur', datum: b.datum, b }) }
+      if(bkAz.passtAuf) for(const p of g.passt){ const b = buch.get(String(p.buchung_id)); rows.push({ art: 'ok', datum: zeilen[p.i].datum, z: zeilen[p.i], b }) }
+      rows.sort((x, y) => String(y.datum).localeCompare(String(x.datum)))
+      const tb = $('bk-az-rows'); tb.innerHTML = ''
+      for(const r of rows){
+        const tr = document.createElement('tr'); if(r.art === 'ok') tr.className = 'grau'
+        const betrag = r.z ? Number(r.z.betrag) : Number(r.b?.betrag)
+        const ztext = r.z ? [r.z.text, r.z.gegenseite].filter(Boolean).join(' · ') : ''
+        tr.innerHTML = `<td style="white-space:nowrap">${bkTag(r.datum)}</td><td>${bkEsc(ztext || (r.z ? '–' : '—'))}</td>` +
+          `<td>${r.b ? bkEsc(r.b.text || r.b.art || '–') : '<span style="color:var(--sub-2)">—</span>'}</td>` +
+          `<td class="adm-num ${betrag < 0 ? 'bk-minus' : 'bk-plus'}" style="white-space:nowrap">${betrag > 0 ? '+' : ''}${bkGeld(betrag, k.waehrung)}</td><td></td>`
+        const zelle = tr.lastElementChild
+        if(r.art === 'ok') zelle.innerHTML = '<span class="bk-az-tag ok">✓ passt</span>'
+        else if(r.art === 'nur') zelle.innerHTML = '<span class="bk-az-tag nur" title="Steht in Prophos, aber nicht im Auszug — Tippfehler, anderes Konto oder löschen (in der Tabelle unten)">nur in Prophos</span>'
+        else{
+          tr.dataset.azI = r.i
+          const arten = BK_ARTEN.filter(x => (BK_VZ[x] > 0) === (betrag > 0))   // Review BK6: nur Arten mit dem Vorzeichen der Zeile
+          zelle.innerHTML = `<span class="bk-az-tag fehlt">fehlt</span><select data-az-art>${arten.map(x => `<option${x === r.vorschlag ? ' selected' : ''}>${bkEsc(x)}</option>`).join('')}</select>` +
+            (g.waehrung_passt === false ? '' : `<button type="button" class="bk-knopf" data-az-ok>übernehmen</button>`)
+          zelle.querySelector('[data-az-ok]')?.addEventListener('click', ev => bkAzUebernehmen([{ i: r.i, art: zelle.querySelector('[data-az-art]').value }], ev.currentTarget))
+        }
+        tb.appendChild(tr)
+      }
+      $('bk-az-alle').hidden = g.fehlt.length < 2 || g.waehrung_passt === false
+      const pz = $('bk-az-passt-zeigen'); pz.hidden = !g.passt.length
+      pz.textContent = bkAz.passtAuf ? 'passende ausblenden' : `${g.passt.length} passende zeigen`
+    }
+    async function bkAzUebernehmen(liste, btn){
+      const a = bkAz.d?.aktuell; if(!a || !liste.length) return
+      if(btn) btn.disabled = true
+      try{
+        const d = await rgApi('/admin/bank/auszug/uebernehmen?ansicht=admin', { method: 'POST', body: JSON.stringify({ auszug_id: a.id, zeilen: liste }) })
+        await bkLaden(); await bkAzLaden(bkKonto)
+        bkMeldung(`${d.anzahl} ${d.anzahl === 1 ? 'Buchung' : 'Buchungen'} aus dem Auszug übernommen.`)
+      }catch(e){
+        $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = 'Fehler: ' + (e.message || e)
+      }finally{ if(btn) btn.disabled = false }
+    }
+    $('bk-az-alle')?.addEventListener('click', ev => {   // jede fehlende Zeile mit der Art aus ihrem Dropdown
+      const liste = [...$('bk-az-rows').querySelectorAll('tr[data-az-i]')].map(tr => ({ i: Number(tr.dataset.azI), art: tr.querySelector('[data-az-art]').value }))
+      bkAzUebernehmen(liste, ev.currentTarget)
+    })
+    $('bk-az-passt-zeigen')?.addEventListener('click', () => { bkAz.passtAuf = !bkAz.passtAuf; bkAzRender() })
+    $('bk-az-hoch')?.addEventListener('click', () => $('bk-az-datei').click())
+    $('bk-az-datei')?.addEventListener('change', async ev => {
+      const f = ev.target.files?.[0]; ev.target.value = ''
+      if(!f || !bkKonto) return
+      const typ = /\.csv$/i.test(f.name) || f.type === 'text/csv' ? 'csv' : /\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'pdf' : ''
+      const m = $('bk-az-msg')
+      if(!typ){ m.className = 'bk-msgzeile'; m.textContent = 'Nur PDF oder CSV'; return }
+      if(f.size > 10 * 1024 * 1024){ m.className = 'bk-msgzeile'; m.textContent = 'Datei größer als 10 MB'; return }
+      const btn = $('bk-az-hoch'); btn.disabled = true; m.className = 'bk-msgzeile gut'; m.textContent = 'Lädt hoch …'
+      try{
+        const daten = await new Promise((ok, nein) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => nein(new Error('Datei nicht lesbar')); r.readAsDataURL(f) })
+        await rgApi('/admin/bank/auszug?ansicht=admin', { method: 'POST', body: JSON.stringify({ konto_id: bkKonto, name: f.name, typ, daten }) })
+        m.textContent = typ === 'pdf' ? 'Hochgeladen — die KI liest den Auszug (bis ~1 Minute) …' : 'Hochgeladen — wird gelesen …'
+        bkAz.versuche = 0; bkAzLaden(bkKonto)
+      }catch(e){ m.className = 'bk-msgzeile'; m.textContent = 'Fehler: ' + (e.message || e) }
+      finally{ btn.disabled = false }
+    })
+    $('bk-az-ansehen')?.addEventListener('click', async () => {
+      const a = bkAz.d?.aktuell; if(!a) return
+      const w = window.open('', '_blank')   // vor dem await öffnen, sonst blockt der Popup-Schutz
+      try{
+        const d = await rgApi('/admin/bank/auszug/datei?ansicht=admin', { method: 'POST', body: JSON.stringify({ id: a.id }) })
+        if(w) w.location = d.url; else window.open(d.url, '_blank')
+      }catch(e){ if(w) w.close(); $('bk-az-msg').className = 'bk-msgzeile'; $('bk-az-msg').textContent = 'Fehler: ' + (e.message || e) }
+    })
     /* ── FINANZEN-ÜBERSICHT (BK2, 25.11.2026, Finn: „erst eine Totalübersicht, in der Meta und Bankkonto zusammengefasst werden … zuerst
      * die zusammengefassten Finanzen sehe, akkumuliert von beiden") ── nur Anzeige aus den Daten der beiden Bereiche: wallets/walBal
      * (Meta Wallet, schon nach Unternehmen gefiltert, USDT) und bkDaten (Bankkonto, Gruppe vom Chip, je Konto EUR oder USD).
@@ -61732,7 +61909,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2319'
+  const OS_TAB_BUILD = '2026-09-22.2320'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

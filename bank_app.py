@@ -18,7 +18,10 @@ import re
 
 from flask import request, jsonify
 
+import sys
+
 import kapital_app as K
+import bank_auszug
 
 A = {}                         # Namensraum von app.py — gefüllt in registrieren()
 
@@ -175,6 +178,7 @@ def _fehler(wo, e):
 
 def registrieren(app, ns):
     A.update(ns)
+    bank_auszug.registrieren(app, ns, sys.modules[__name__])   # BK6: Kontoauszüge + Abgleich (/admin/bank/auszug*)
 
     @app.route("/admin/bank", methods=["GET", "OPTIONS"])
     def admin_bank():
@@ -196,8 +200,10 @@ def registrieren(app, ns):
                                                         "konto_id": K._in(ids), "order": "datum.asc,created_at.asc,id.asc"}) if ids else []
             s = saldo_rechnen(konten, buchungen)
             namen = _namen()
+            auszug = bank_auszug.letzte_je_konto(ids)   # BK6: letzter Kontoauszug je Konto („Auszug fällig" in der Liste)
             for k in konten:
                 k.update(s.get(str(k["id"])) or {})
+                k["auszug"] = auszug.get(str(k["id"]))
                 k["name"] = namen.get(str(k["user_id"])) or str(k["user_id"])[:8]
             personen = sorted(({"user_id": u, "name": namen.get(u) or u[:8]} for u in uids), key=lambda p: p["name"].lower())
         except Exception as e:
@@ -227,7 +233,9 @@ def registrieren(app, ns):
             if not kid or not _konto_erlaubt(kid, erlaubt):
                 return jsonify({"ok": False, "error": "Konto nicht gefunden"}), 404
             if request.method == "DELETE":
-                K._sb("DELETE", "bank_konten", {"id": f"eq.{kid}"})        # Buchungen gehen per on delete cascade mit
+                if not bank_auszug.konto_dateien_loeschen(kid):   # BK6-Review: Auszug-Dateien zuerst, sonst blieben sie für immer im Bucket
+                    return jsonify({"ok": False, "error": "Kontoauszüge nicht löschbar — nochmal versuchen"}), 502
+                K._sb("DELETE", "bank_konten", {"id": f"eq.{kid}"})        # Buchungen + Auszug-Zeilen gehen per on delete cascade mit
                 return jsonify({"ok": True})
             f, fehler = _konto_felder(body, False)
             if fehler:
