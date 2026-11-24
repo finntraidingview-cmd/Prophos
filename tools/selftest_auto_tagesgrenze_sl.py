@@ -19,7 +19,7 @@ FUNKTIONEN = ["_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param"
               "ap_klein_trade", "ap_klein_trade_fut", "_ap_de", "ap_tagesgrenze"]
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
               "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN",
-              "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_FUT_DECKEL_PLUS_USD", "AP_TAGES_PUFFER")
+              "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_FUT_DECKEL_PLUS_USD", "AP_TAGES_PUFFER", "AP_SL_MIN_PKT")
 FEHLER = []
 
 
@@ -92,6 +92,17 @@ def main():
     # Rest unter dem Puffer → kein Trade
     w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, heute_verlust=2950)
     check(w is None and g and g.startswith("Tagesgrenze erreicht — nur noch 50 $"), f"Rest 50 $ ≤ Puffer → kein Trade ({g})")
+
+    # SB3 (Master 24.11.2026): auf die Tagesgrenze gekappter SL unter dem Mindest-SL (3 Pkt × Lots × $/Pkt) → kein Plan, „von Hand“
+    w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, ppl=20.0, heute_verlust=2850)
+    check(w is None and g and g.startswith("an der Tagesgrenze → von Hand: nur noch 150 $") and "SL (50 $)" in g and "mindestens 60 $" in g,
+          f"SB3: Rest 150 $ → SL 50 bei 1 Lot × 20 $/Pkt < 60 $ → kein Plan ({g})")
+    w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, ppl=10.0, heute_verlust=2850)
+    check(not g and w["sl"] == 50, f"SB3: Mindest-SL 30 $ ≤ 50 → weiter geplant ({g})")
+    w, g = rechnen(regel(daily_pct=3), "phase1", 100000, U, heute_verlust=2850)
+    check(not g and w["sl"] == 50, "SB3: ohne Punktwert keine Prüfung (wie bisher)")
+    w, g = rechnen(regel(daily_pct=3), "phase1", 96463.40, U, ppl=20.0)
+    check(not g and w["sl"] == 2793, f"SB3: Vorfall …6924 mit Punktwert unverändert (SL 2.793 ≥ 60) ({g})")
 
     # ohne Grenze unverändert
     w, g = rechnen(regel(), "phase1", 96463.40, U)
