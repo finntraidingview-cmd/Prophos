@@ -58434,13 +58434,16 @@
     // ES2 (05.11.2026, Prüf-Fund): Merker „Check lebt" VOR dem ersten await — tpJetztStarten ruft diesen Check ohne await, sonst sähe der
     // nächste Echo-Start während der Lots-Deckel-Lesung keinen laufenden Check (echoVorlaufAktiv) und übernähme das Popup
     pfLebt(plan.id, 120000)
+    const vonTick = _rkTickStart.delete(String(plan.id))   // Startzeit-Start? VOR dem ersten await lesen (RF2, s. unten bei _pfPlanId)
     // WE1 (07.11.2026, Gegenprüfung): Fern-Signal und Hand-Weg springen direkt hierher, ohne faVorStart und ohne Claim — am Wochenende nie
-    if(cmeWochenende()){ pfLebt(plan.id, 0); const t = `„${plan.masterName || '—'}": ${WOCHENENDE_GRUND}`; _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
+    if(cmeWochenende()){ pfLebt(plan.id, 0); const t = `„${plan.masterName || '—'}": ${WOCHENENDE_GRUND}`; _pfRemoteMelde(plan.id, { ok:false, msg: t })
+      sfAusstiegHier(plan.id, WOCHENENDE_GRUND)   // RF2
       if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
       if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
       return }
     // LOTS-DECKEL (S9 02.11.2026): Fern-Signal und Hand-Weg springen direkt hierher. Vor allem anderen, es läuft noch kein Copier
-    if(await tpLotsDeckelFrisch(plan)){ pfLebt(plan.id, 0); const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
+    if(await tpLotsDeckelFrisch(plan)){ pfLebt(plan.id, 0); const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t })
+      sfAusstiegHier(plan.id, t)   // RF2 (Claim ist hier schon zurückgenommen — falls das scheiterte)
       if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
       if(typeof atToast === 'function') atToast(t, 'end')
       return }
@@ -58456,7 +58459,10 @@
     }
     _pfErrLog = []
     _pfPlanId = plan.id
-    const vonTick = _rkTickStart.delete(String(plan.id))   // Start zur Startzeit (tpStartUmTick) → Start-Fehler melden (30.10.2026, wie V2)
+    // vonTick (Start zur Startzeit, tpStartUmTick → Start-Fehler melden, 30.10.2026 wie V2) steht seit RF2 ganz oben: RF2 (24.11.2026, Befund RF1 — alle
+    // Echo-Fehlstarts des Tages trugen nur schritt „m5still“, nie m5check/m5order/m5term): tpJetztStarten ruft diesen Check OHNE await, tpStartUmTick
+    // löschte seine Marke _rkTickStart, sobald tpJetztStarten zurückkam — also während des ersten await oben (tpLotsDeckelFrisch liest die DB). Hier
+    // gelesen fand die Zeile die Marke darum nie, sfEinmal meldete nie, übrig blieb nach 4–5 min das Nachurteil ohne Grund.
     // NIE STILL HÄNGEN (30.10.2026, Master ECHO-STILL-HAENGT: f47544cf/e7e9782d blieben geclaimt auf planned, ohne Start-Fehler): jeder
     // Ausstieg dieses Checks nach einem Claim meldet genau EINEN Start-Fehler — auch Check-Abbrüche, Popup zu, falsches Konto, 240 s
     // Terminal. unklar nur, wo eine Order unterwegs sein kann; „nichts gesendet" plant sfTick neu ein (wie V2)
@@ -60833,7 +60839,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2299'
+  const OS_TAB_BUILD = '2026-09-22.2300'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62241,19 +62247,22 @@
 
   async function tpJetztStarten(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
-    if(!plan || plan.status !== 'planned') return
+    if(!plan || plan.status !== 'planned'){ if(planId != null) sfAusstiegHier(planId, plan ? `Plan steht im Tab nicht mehr auf Geplant (${plan.status})` : 'Plan nicht mehr in der Liste dieses Tabs'); return }   // RF2
+    // RF2 (24.11.2026, Befund RF1 pc-i8vyq8 Plan 67961440): jeder frühe Ausstieg unten merkt sich seinen Grund (sfAusstiegHier) — kam der Start vom
+    // Startzeit-Takt (Claim schon gesetzt), steht er nach SF_STILL_MS in der Meldung statt nur „endete ohne Ergebnis". Nur Text, kein anderes Verhalten.
     // Funded-Vorschlag (27.10.2026, H1): von Hand nie an „Bestätigen" vorbei — bestätigt wird nur unter Admin → Funded-Planer
-    if(plan.fundedVorschlag){ if(typeof atToast === 'function') atToast('Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.', 'end'); return }
-    { const _wdFehlt = await tpWdBestaetigungFehlt(plan); if(_wdFehlt){ if(typeof atToast === 'function') atToast(_wdFehlt, 'end'); return } }   // APEX-WD BESTÄTIGEN (02.11.2026)
-    { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
+    if(plan.fundedVorschlag){ sfAusstiegHier(plan.id, 'Funded-Vorschlag noch nicht bestätigt'); if(typeof atToast === 'function') atToast('Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.', 'end'); return }
+    { const _wdFehlt = await tpWdBestaetigungFehlt(plan); if(_wdFehlt){ sfAusstiegHier(plan.id, _wdFehlt); if(typeof atToast === 'function') atToast(_wdFehlt, 'end'); return } }   // APEX-WD BESTÄTIGEN (02.11.2026)
+    { const _pl = polarLaeuft(); if(_pl){ sfAusstiegHier(plan.id, polarRiegelText(_pl)); if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
     // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — „Trotzdem starten" nur beim Karten-Klick
     // (opts.karte, 26.10.2026); Startzeit (tpStartUmTick), Neu starten und Radar rufen ohne karte und bleiben wie bisher
     const karte = !!(opts && opts.karte)
     const sperre = await planKontoSperre(plan, { hand: karte })
-    if(sperre){ planSperreToast(plan, sperre, karte ? () => tpJetztStarten(planId, opts) : null); return }
-    if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
+    if(sperre){ sfAusstiegHier(plan.id, sperre.text); planSperreToast(plan, sperre, karte ? () => tpJetztStarten(planId, opts) : null); return }
+    { const _fa = await faVorStart(plan); if(_fa){ sfAusstiegHier(plan.id, _fa); return } }       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
+      sfAusstiegHier(plan.id, 'für den Start fehlt: ' + fehlt.join(', '))
       if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
       openTpOrderModal(planId)
       return
@@ -67227,15 +67236,39 @@
   const SF_STILL_ROUTEN = ['mt5', 'mt5v2', 'tvv2', 'tsv2'], SF_STILL_FREMD_MS = 10 * 60000
   function sfGeclaimtHier(id, claimIso){ try{ (window._sfClaimHier || (window._sfClaimHier = new Map())).set(String(id), Date.parse(claimIso) || Date.now()) }catch(_){} }
   function sfSendetHier(id){ try{ (window._sfSendetHier || (window._sfSendetHier = new Set())).add(String(id)) }catch(_){} }
+  // RF2 (24.11.2026, Befund RF1: „der Start endete in diesem Tab ohne Ergebnis, bevor etwas an den Bot ging" — ohne Grund): ein früher Ausstieg im
+  // Start (tpJetztStarten, tpPreflightMt5 vor dem Check, Ausnahme im Startzeit-Takt) merkt sich hier seinen Grund; sfStillUrteil hängt ihn hinten an.
+  // Nur Speicher dieser Seite, nur Text — Urteil (unklar/nichts gesendet) und Neu-Einplanen bleiben unverändert.
+  function sfAusstiegHier(id, grund){
+    try{ const g = String(grund || '').replace(/[„“"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
+      if(g) (window._sfAusstiegHier || (window._sfAusstiegHier = new Map())).set(String(id), { grund: g, at: Date.now() }) }catch(_){}
+  }
+  // RF2: Vorflug-Grund am Plan (mt5_baseline.vorflug a/b, nicht lesbar) aus der halben Stunde vor dem Claim — „Master-Terminal läuft nicht",
+  // „PC oder Instanz belegt" (Befund RF1 pc-onkrbk Plan 2a7ee547). REIN bis auf toLocaleTimeString. -> ' Vorflug 13:17 Dubai: …' | ''
+  function sfVorflugText(p, claim){
+    try{
+      const v = p && p.mt5Baseline && p.mt5Baseline.vorflug
+      if(!v || typeof v !== 'object' || !claim) return ''
+      const hm = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+      const k = ['a', 'b'].map(x => v[x]).filter(e => e && typeof e === 'object' && e.lesbar === false && e.grund)
+        .map(e => ({ ms: Date.parse(e.at) || 0, g: String(e.grund).replace(/\s+/g, ' ').trim().slice(0, 90) }))
+        .filter(e => e.ms && e.ms >= claim - 30 * 60000 && e.ms <= claim + 60000)
+        .sort((x, y) => x.ms - y.ms)
+        .filter((e, i, a) => a.findIndex(z => z.g === e.g) === i)
+      return k.length ? ' Vorflug ' + k.map(e => `${hm(e.ms)} Dubai: ${e.g}`).join('; ') + '.' : ''
+    }catch(_){ return '' }
+  }
+  window._sfVorflugText = sfVorflugText   // Test-Haken (RF2)
   // Laufmarke je Plan (Gegenprüfung CL1): ein Hand-/Fern-Start in tpOrbitStarten bzw. ein Plan in der Echo-V2-Kette gilt als „läuft", bis er fertig ist
   function sfLaeuftMarke(id, an){
     try{ const m = window._sfLaeuftIds || (window._sfLaeuftIds = new Map()), k = String(id), n = (m.get(k) || 0) + (an ? 1 : -1)
       if(n > 0) m.set(k, n); else m.delete(k) }catch(_){}
   }
   function sfHier(id){
-    let claim = null, gesendet = false
-    try{ claim = (window._sfClaimHier && window._sfClaimHier.get(String(id))) || null; gesendet = !!(window._sfSendetHier && window._sfSendetHier.has(String(id))) }catch(_){}
-    return { claim, gesendet }
+    let claim = null, gesendet = false, ausstieg = null
+    try{ claim = (window._sfClaimHier && window._sfClaimHier.get(String(id))) || null; gesendet = !!(window._sfSendetHier && window._sfSendetHier.has(String(id)))
+      ausstieg = (window._sfAusstiegHier && window._sfAusstiegHier.get(String(id))) || null }catch(_){}   // RF2
+    return { claim, gesendet, ausstieg }
   }
   // FS1 (10.11.2026): REIN bis auf performance/document — „ [Tab: nach dem Claim neu geladen (14:03) | seit vor dem Claim offen, Claim hier/anderswo, Hintergrund]“
   function sfTabZustandText(claim, hier){
@@ -67265,16 +67298,21 @@
     const min = Math.round((jetzt - claim) / 60000)
     // FS1 (10.11.2026): Tab-Zustand als Beleg hinten an (Schlüssel-Text vorne unverändert) — wurde dieser Tab nach dem Claim neu geladen, lief er durch?
     const tabZ = sfTabZustandText(claim, hier)
+    // RF2 (24.11.2026): Grund des frühen Ausstiegs aus diesem Tab (sfAusstiegHier, nur nach diesem Claim) und der Vorflug-Grund (sfVorflugText) hinten an —
+    // der Schlüssel-Text vorne bleibt unverändert (Muster puls_fehler_muster, sfVorOrderBeleg)
+    // Prüfblick RF2: nur ein Ausstieg kurz nach DIESEM Claim (der Startzeit-Lauf steigt binnen Sekunden aus) — ein späterer Hand-Klick auf denselben Plan zählt nicht
+    const ausZ = (hier && hier.ausstieg && hier.ausstieg.grund && Number(hier.ausstieg.at) >= claim - 5000 && Number(hier.ausstieg.at) <= claim + 3 * 60000) ? ` Grund: ${hier.ausstieg.grund}.` : ''
+    const vfZ = spNach ? '' : sfVorflugText(p, claim)
     if(spNichts) return { unklar: false, msg: `Geclaimt vor ${min} min, danach still — letzte Order-Antwort: ${String(sp.msg).slice(0, 220)}` }
-    if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.${tabZ}` }
-    if(!spNach && hierBeleg) return { unklar: false, msg: `Geclaimt vor ${min} min, der Start endete in diesem Tab ohne Ergebnis, bevor etwas an ${p.route === 'mt5' || p.route === 'mt5v2' ? 'den Bot' : 'Puls'} ging — nichts gesendet.` }
+    if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.${ausZ}${vfZ}${tabZ}` }
+    if(!spNach && hierBeleg) return { unklar: false, msg: `Geclaimt vor ${min} min, der Start endete in diesem Tab ohne Ergebnis, bevor etwas an ${p.route === 'mt5' || p.route === 'mt5v2' ? 'den Bot' : 'Puls'} ging — nichts gesendet.${ausZ}${vfZ}` }
     const wo = p.route === 'mt5v2' ? 'im Master-Terminal' : 'in ' + pulsPlattform(p)
     if(p.route !== 'mt5') return { unklar: true, msg: spNach
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → ${wo} prüfen, ob eine Order liegt.`
-      : `Geclaimt vor ${min} min, danach kein Ergebnis (Tab neu geladen oder Start lief woanders) → ${wo} prüfen, ob eine Order liegt.${tabZ}` }
+      : `Geclaimt vor ${min} min, danach kein Ergebnis (Tab neu geladen oder Start lief woanders) → ${wo} prüfen, ob eine Order liegt.${vfZ}${tabZ}` }
     return { unklar: true, msg: spNach
       ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Order-Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → im Master-Terminal prüfen, ob eine Order liegt.`
-      : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.${tabZ}` }
+      : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.${vfZ}${tabZ}` }
   }
   /* ENDLESUNG UNKLARER ECHO-PLÄNE ÜBER DIE DEALS (N2, Finn 04.11.2026 ~04:15 Dubai: „Schon öfters, dass der P&L aus irgendeinem Grund nicht erkannt wird …
    * der P&L wird nie angezeigt. Bug fixen."): Echo-Pläne (mt5/mt5v2), die der Tagesreset als „unklar" nach Überprüfen schob (final.art unklar, kein P&L),
@@ -68498,7 +68536,10 @@
       if(plan.route === 'polar'){ if(POLAR_AUTO && typeof polarStartenAmPc === 'function') await polarStartenAmPc(plan) }   // POLAR (13.10.2026): Master-PC; manuell nie
       else if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
       else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id); _rkTickStart.delete(String(plan.id)) }   // nicht verbraucht (früher Ausstieg) → kein späterer Hand-Start gilt als Startzeit-Start
-    }catch(e){ console.warn('[start-um]', e) }
+    }catch(e){
+      console.warn('[start-um]', e)
+      try{ if(plan && plan.id){ _rkTickStart.delete(String(plan.id)); sfAusstiegHier(plan.id, 'Fehler im Start-Ablauf: ' + String((e && e.message) || e)) } }catch(_){}   // RF2: Grund für sfStillUrteil
+    }
     finally{
       if(lauf === _suLauf){
         _suLaeuft = false
