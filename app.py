@@ -47076,7 +47076,7 @@ def zw_cons_ziel(regel, konto, balance, tage_pl):
             "ziel_cons": ziel_cons, "erfuellt": float(balance) >= ziel_cons}
 
 
-def ap_cons_regel(regel, regel_k, konto, balance, eig):
+def ap_cons_regel(regel, regel_k, konto, balance, eig, streng=False):
     """Planer (ap_planen UND gp_planen, M2b 05.11.2026): Konto-Regel regel_k mit Consistency-Ziel (_ziel_min/_cons), wenn die Balance am Regel-Ziel
     steht, der größte Tag aber über p × Gewinn liegt — sonst regel_k unverändert. Markierte Konten nie (Tage-Mini bleibt Mini), Rangfolge wie
     zw_cons_ziel (Konto-Wert → Firmen-Feld → Vorgabe, Apex nie). Tage aus ALLEN Trades wie die Ziel-Wache (eig kennt nur die geladenen Pläne —
@@ -47102,6 +47102,8 @@ def ap_cons_regel(regel, regel_k, konto, balance, eig):
     try:
         ct = _zw_cons_tage_laden([aid]).get(aid) or {}
     except Exception:
+        if streng:      # MW1: die Mengen-Wache hat keine eigenen Pläne als Rückfall — lieber nichts ändern als ohne Consistency rechnen
+            raise
         ct = zw_cons_tage(eig, aid)
     cz = zw_cons_ziel(regel, a, float(balance), ct)
     if not cz:
@@ -48425,9 +48427,22 @@ def ap_menge_wache(jetzt, reg):
         if not a or not regel or not m:
             continue
         bal = float(m.group(1).replace(".", ""))
-        patch, txt = ap_menge_fix(p, ap_regel_konto(regel, a, bal), str(a.get("account_type") or ""), bal)
+        regel_k = ap_regel_konto(regel, a, bal)
+        patch, txt = ap_menge_fix(p, regel_k, str(a.get("account_type") or ""), bal)
         if not patch:
             continue
+        # MW1 (Master 24.11.2026, Review LC1c): dieselbe Konto-Regel wie die Planer — mit Consistency (ap_cons_regel: _ziel_min/_cons, bei Lucid _cons_p),
+        # sonst rechnete die Wache den TP eines letzten Lucid-Trades ohne Consistency neu (Deckel +100 über p bzw. Rest nur bis zum Regel-Ziel).
+        # Erst wenn wirklich korrigiert wird (patch) — so liest die Wache die Trade-Tage nur für die seltenen Pläne außerhalb der Mengen-Spanne.
+        try:
+            regel_kc = ap_cons_regel(regel, regel_k, a, bal, [], streng=True)
+        except Exception as e:
+            print(f"[mengen-wache] ⚠️ Consistency {str(p['id'])[:8]}: {type(e).__name__}: {e} — Plan unverändert", flush=True)
+            continue
+        if regel_kc is not regel_k:
+            patch, txt = ap_menge_fix(p, regel_kc, str(a.get("account_type") or ""), bal)
+            if not patch:
+                continue
         rows = sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
                                          "started_at": "is.null", "orbit_gesendet_at": "is.null",
                                          "master_contracts": f"eq.{p.get('master_contracts')}",
