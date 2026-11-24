@@ -72,7 +72,10 @@ def _gruppe_waehlen(gruppen, wunsch):
 
 
 def _mitglieder(gid):
-    return {str(x["user_id"]) for x in (A["_sb_all"]("id_gruppe_mitglied", {"select": "user_id", "gruppe_id": f"eq.{gid}"}) or [])}
+    # order ausdrücklich: _sb_all setzt sonst order=id.asc, id_gruppe_mitglied hat aber keine Spalte id (PK user_id) → PostgREST 400
+    # (Live-Fehler .2307, 25.11.2026: „Bankkonto nicht verfügbar … HTTPError“)
+    return {str(x["user_id"]) for x in (A["_sb_all"]("id_gruppe_mitglied", {"select": "user_id", "gruppe_id": f"eq.{gid}",
+                                                                            "order": "user_id.asc"}) or [])}
 
 
 def _uid_gruppe(uid):

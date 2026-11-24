@@ -101,7 +101,17 @@ K._sb = f_sb
 K._gate = lambda: (ROLLE["erlaubt"], None)
 K._admin_uid = lambda: "tester"
 app = Flask("t")
-B.registrieren(app, {"_sb_all": lambda t, p: _filter(DB.get(t, []), p), "sb_insert": f_insert,
+def f_sb_all(t, p):
+    # wie app._sb_all: ohne order setzt es id.asc — jede order-Spalte muss es in der Tabelle geben (sonst PostgREST 400, Live-Fehler .2307)
+    p = dict(p); p.setdefault("order", "id.asc")
+    spalten = {"id_gruppe_mitglied": {"user_id", "gruppe_id", "seit", "notiz"}}.get(t)
+    for teil in p["order"].split(","):
+        if spalten is not None and teil.split(".")[0] not in spalten:
+            raise Boom(f"400 column {t}.{teil.split('.')[0]} does not exist")
+    return _filter(DB.get(t, []), p)
+
+
+B.registrieren(app, {"_sb_all": f_sb_all, "sb_insert": f_insert,
                      "sb_update": lambda t, p, b: [dict(b, id="x")], "_auth_liste_anfrage": lambda: None})
 c = app.test_client()
 
