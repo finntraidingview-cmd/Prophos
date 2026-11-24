@@ -39793,7 +39793,7 @@
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     // Blow erkannt (02.10.2026) / Konto weg (05.10.2026): „geblowt" vorbelegen — seit 20.10.2026 dieselbe Wahrheit wie die Radar-Gruppe
     // „Geblowt · archivieren" (wdlGeblowtUrteil: Balance an/unter der Liquidation, Konto weg, abgehakt geblowt); Finn kann umstellen
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : _tw ? 'passed' : (!_mwdErlPolar && wdlFcfdZielErreicht(pw)) ? 'waiting' : 'none'}"]`); if(stVor) stVor.checked = true
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtVorschlag === 'function' && wdlGeblowtVorschlag(pw)) ? 'blown' : _tw ? 'passed' : (!_mwdErlPolar && wdlFcfdZielErreicht(pw)) ? 'waiting' : 'none'}"]`); if(stVor) stVor.checked = true
     // Polar: zwei Konten zweier IDs — wer geblowt ist, entscheidet das große Erledigt-Popup im Login der ID (Backend lehnt hier ≠ none ab)
     const stFeld = document.querySelector('input[name="mwd-erl-status"]')?.closest('.field'); if(stFeld) stFeld.hidden = _mwdErlPolar
     // Winning Day (Finn 23.10.2026: „‚Account bestanden, Nachfolger anlegen' macht gar keinen Sinn"): bei einem WD-Konto keine Bestanden-Zeile,
@@ -41771,8 +41771,13 @@
     if(t && t.blown === true) return '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>'
     // .1522: Demo an der Liquidation + Konto bei der Firma nicht mehr da (tvV2LiqUndWeg) → geblowt, auch ohne gelesene Balance
     if(t && typeof tvV2LiqUndWeg === 'function' && tvV2LiqUndWeg(t.endlesung)) return `<b style="color:var(--danger-ink, #b91c1c)" title="Liquidation erreicht und das Konto ist bei ${escapeHtml(String((t.konto || {}).firma || 'der Firma'))} nicht mehr da (${Number((t.endlesung || {}).puls_versuche) || 0} Leseversuche) — geblowt. Beim Abhaken ist „geblowt" vorbelegt.">💀 geblowt</b>`
-    const b = wdlBlowStand(t); if(!b) return ''
-    return b.geblowt ? '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
+    const b = wdlBlowStand(t)
+    if(b && b.geblowt) return '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>'
+    // LQ1 (Finn 24.11.2026): von der Firma liquidiert (nicht am Tageslimit) = geblowt, auch über dem Boden — Vorschlag, beim Abhaken vorbelegt
+    const lq = typeof lqEndeUrteil === 'function' ? lqEndeUrteil(t) : null
+    if(lq && lq.art === 'liq') return `<b style="color:var(--danger-ink, #b91c1c)" title="${escapeHtml(lq.grund + ' — von der Firma liquidiert = geblowt (Finn 24.11.2026), auch wenn die Balance über dem Boden liegt. Beim Abhaken ist „geblowt“ vorbelegt, nichts archiviert.')}">💀 vermutlich liquidiert</b>`
+    if(!b) return lq && lq.art === 'dll' ? WDL_TAGESLIMIT_ERG : ''
+    return (b.softBreach || (lq && lq.art === 'dll')) ? WDL_TAGESLIMIT_ERG : ''
   }
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
@@ -41817,10 +41822,79 @@
    * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
    * Trade, sonst Konto-Boden; das Tageslimit ist kein Blow) oder Konto weg. Gruppe UND beide Abhak-Dialoge (Radar-Dialog für fremde Pläne,
    * Trades-Dialog für eigene) fragen hier — der Trades-Dialog belegte bisher nur bei „Konto weg" vor. Nur Vorbelegung, Finn bestätigt. */
+  /* LQ1 LIQUIDIERT = GEBLOWT (Finn 24.11.2026: „Wenn ein Trade liquidiert wird und es nicht am Tageslimit lag, dann ist der Account geblowt. Auch wenn er laut
+   * Balance noch über dem Boden ist — er wurde liquidiert, also geblowt.“). Wie endete der Trade? REIN RECHNEND aus der Radar-Zeile -> { art, grund } | null:
+   *   'plan' — Exit am Plan-TP oder am/jenseits des Plan-SL (±2 Ticks; jenseits = Slippage des EIGENEN Stops) → normales Ende, nie Liq. So bleibt Marc · Apex 100k
+   *            PA …0006 (Plan 754a74f3: SL 26.056, Exit-Toast „Sell 3 at 26,055.75“ art stop) ein Plan-SL.
+   *   'dll'  — Ende am weichen Tageslimit (liq_regel_soft: tagesstart/stufen, z. B. Lucid 2.700 $; bzw. Hedge-Level liq_art daily_loss) → Tagespause, kein Blow.
+   *   'liq'  — (a) Meldung mit „liquidat…/Auto-Liquidation“ (nicht Daily); (b) echter Exit auf der VERLUST-Seite zwischen Einstieg und Plan-SL bzw. ohne Plan-SL,
+   *            nicht am TP, kein Hand-Schluss, nicht am Tageslimit → die Firma hat vorher zugemacht; (c) Demo-Ende 'demo_liq' an einer HARTEN Liq-Linie ohne Plan-SL.
+   *   null   — nichts Eindeutiges (Gewinnseite ohne TP = Auto-Close/Hand, kein Exit-Beleg …).
+   * Nur Vorschlag: wdlGeblowtUrteil belegt im Abhak-Popup „geblowt“ vor (Finn bestätigt mit einem Klick), der Radar sagt „vermutlich liquidiert“. Nie archivieren. */
+  const LQ_TOL_PKT = 0.5   // ±2 Ticks NQ/MNQ (0,25)
+  function lqPlanSl(t, h){
+    const n = v => (v == null || v === '' || !isFinite(Number(v)) || Number(v) <= 0) ? null : Number(v)
+    const roh = (h && Array.isArray(h.tv_meldung_roh)) ? h.tv_meldung_roh : []
+    for(const z of roh){ const m = /^sl platziert (?:buy|sell) [\d.,]+ @ ([\d,]+(?:\.\d+)?)/i.exec(String(z || '')); if(m) return n(m[1].replace(/,/g, '')) }   // exakt aus TradingViews Meldung
+    if(typeof wdlSlEcht === 'function' && wdlSlEcht(t) != null) return wdlSlEcht(t)
+    if(h && h.sl_art !== 'liquidation' && n(h.sl_level_nq) != null && t && Number(t.master_sl) > 0) return n(h.sl_level_nq)   // Hedge-Level = Master-SL (kein Liq-Level)
+    return null
+  }
+  function lqEndeUrteil(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const obj = o => !!o && typeof o === 'object'
+    if(!t || t.status === 'open' || t.status === 'planned') return null
+    const h = obj(t.hedge) ? t.hedge : null, fin = obj(t.final) ? t.final : (obj(t.endlesung) ? t.endlesung : {})
+    const ex = h && obj(h.master_exit) ? h.master_exit : null
+    // (a) Meldung der Plattform/Firma
+    const text = [ex && ex.text, fin.meldung, fin.exit_text, fin.puls_fehler].filter(Boolean).join(' · ')
+    if(/liquidat|auto.?liq/i.test(text)) return /daily|tages|dll/i.test(text) ? { art: 'dll', grund: 'Meldung: Tageslimit' } : { art: 'liq', grund: 'Meldung der Plattform: Liquidation' }
+    const ri = t.richtung === 'buy' ? 1 : t.richtung === 'sell' ? -1 : 0
+    const ein = n(t.einstieg_nq) ?? n(h && h.einstieg_nq)
+    const sl = lqPlanSl(t, h), tp = n(t.tp_level_nq) ?? n(h && h.tp_level_nq) ?? n(h && h.tp_limit_tv)
+    // Eigener Schluss = nie Liquidation: Hand/Knopf, Auto-Close vor Marktschluss, Z-Schluss/Abgleich (final.ende_grund), tv-close (positionen_danach), Hedge-Gründe unserer Wege
+    const hand = (h && (/^(hand|close|rundgang|auto_close|erledigt)$/.test(String(h.grund || '')) || (ex && ex.quelle === 'hand')))
+      || /^(hand|close|beendet_knopf|auto_close|tagesende_unklar|master_nie_da|demo_unklar|demo_beide)$/.test(String(fin.grund || ''))
+      || /^(close|hand)$/.test(String(fin.ende_quelle || '')) || fin.quelle === 'close' || !!fin.ende_grund || Array.isArray(fin.positionen_danach)   // quelle 'close' = tvV2EndeSetzen nach eigenem Schluss (Prüfer LQ1)
+    const weich = !!t.liq_regel_soft || (h && h.sl_art === 'liquidation' && h.liq_art === 'daily_loss')
+    // Tageslimit-LINIE nur, wenn die Zeile sie wirklich als Tageslimit führt (wdlLiqIstTag: liq_gilt 'regel'); sonst kann liq_regel_level_nq der Konto-Boden sein (Prüfer LQ1)
+    const dllLvl = (typeof wdlLiqIstTag === 'function' && wdlLiqIstTag(t)) ? n(t.liq_regel_level_nq) : (h && h.sl_art === 'liquidation' && h.liq_art === 'daily_loss' ? n(h.sl_level_nq) : null)
+    const px = ex ? n(ex.preis) : null
+    // Tageslimit erreicht (Balance-Beleg wie das Radar-Wort „⏸ Tagespause“: wdlBlowStand softBreach, nicht geblowt) — Gegenprobe 24.11.: Lucid …d35b8 Market-Exit
+    // −2.762 $ ≈ DLL 2.700, Konto lebt; ohne diesen Vorrang hieße er „liquidiert“
+    const st = typeof wdlBlowStand === 'function' ? wdlBlowStand(t) : null
+    const tagesPause = !!(st && !st.geblowt && st.softBreach)
+    if(px != null && ri && ein != null){
+      if(tp != null && Math.abs(px - tp) <= LQ_TOL_PKT) return { art: 'plan', ende: 'tp', grund: `Exit ${px} am Plan-TP ${tp}` }
+      if(sl != null && (Math.abs(px - sl) <= LQ_TOL_PKT || (px - sl) * ri < 0)) return { art: 'plan', ende: 'sl', grund: `Exit ${px} am Plan-SL ${sl}` }
+      if(hand || (px - ein) * ri >= 0) return null                       // Hand-Schluss bzw. Gewinnseite ohne TP — kein Liq-Verdacht
+      if(tagesPause) return { art: 'dll', grund: `Exit ${px}, Balance am Tageslimit` }
+      if(weich && dllLvl != null && (Math.abs(px - dllLvl) <= Math.max(LQ_TOL_PKT, 2) || (px - dllLvl) * ri < 0)) return { art: 'dll', grund: `Exit ${px} am Tageslimit ${dllLvl}` }
+      // Gegenprobe 150 echte Trades (17.–24.11.): eine Firma liquidiert nur AN ihrer Linie. Harte Liq-Linie bekannt (Hedge-Level sl_art 'liquidation', nicht
+      // Tageslimit, bzw. Konto-Liq der Zeile): Exit an/jenseits der Linie (Toleranz 5 Pkt bzw. 10 % des Abstands) = liquidiert; klar DAVOR = bei einer Firma mit
+      // Tageslimit die Tagespause (Lucid-Market-Exits bei −2.700 $ vor der Polster-Linie), sonst unklar (Tradeify …f4ee2: 25.998 bei Linie 25.151 — kein Firmen-Schluss)
+      const hart = (h && h.sl_art === 'liquidation' && h.liq_art !== 'daily_loss') ? n(h.sl_level_nq) : n(t.liq_level_nq)
+      if(hart != null && hart > 0){
+        const tolH = Math.max(5, Math.abs(ein - hart) * 0.1)
+        if(Math.abs(px - hart) > tolH && (px - hart) * ri > 0) return weich ? { art: 'dll', grund: `Exit ${px} vor der Konto-Liq ${hart} — Tageslimit` } : null
+      } else return weich ? { art: 'dll', grund: `Exit ${px} auf der Verlustseite, Tageslimit-Firma, keine Konto-Liq bekannt` } : null   // Prüfer LQ1: ohne Liq-Linie kein Liq-Urteil (Hand-Schluss in TradingView sähe genauso aus)
+      return { art: 'liq', grund: `Exit ${px} (${ex.art || '?'}) nicht am Plan-SL ${sl ?? '–'} / TP ${tp ?? '–'}${hart ? ', an der Konto-Liq ' + hart : ''} — von der Firma geschlossen` }
+    }
+    if(tagesPause && fin.grund === 'demo_liq') return { art: 'dll', grund: 'Demo + Balance am Tageslimit' }
+    if(fin.grund === 'demo_liq' && !hand){
+      if(weich) return { art: 'dll', grund: 'Demo am Tageslimit' }
+      if(sl == null) return { art: 'liq', grund: 'Demo an der Liquidations-Linie (kein Plan-SL)' }
+    }
+    return null
+  }
+  window._lqEndeUrteil = lqEndeUrteil   // Test-Haken
   // Tagesende der Topstep-Kette (S2 30.10.2026): kette_tag.blown entscheidet. Die Boden-Rechnung ginge vom Start von Trade 2 aus und belegte ein lebendes Konto mit „geblowt" vor
   // Echo-Tagesteilung (19.11.2026, wdlKetteBodenBlow): kette_tag.blown ist dort nicht gerechnet → zusätzlich Balance am Tagesende ≤ Boden der Kernwerte
   function wdlGeblowtUrteil(t){ if(t && t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true || wdlKetteBodenBlow(t, (wdlBlowStand(t) || {}).bal)
     return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
+  // LQ1 (Prüfer: NICHT in wdlGeblowtUrteil — das speist auch die Gruppe „Geblowt · archivieren“ samt Sammel-Archivieren): der Liq-Verdacht belegt NUR die
+  // Abhak-Dialoge mit „geblowt“ vor (Radar-Dialog + Trades-Dialog); Finn bestätigt jeden Einzelfall
+  function wdlGeblowtVorschlag(t){ return wdlGeblowtUrteil(t) || ((typeof lqEndeUrteil === 'function' ? lqEndeUrteil(t) : null) || {}).art === 'liq' }
   const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   // Radar-Ergebnis „Konto weg" nach dem Urteil (29.10.2026): vermutlich bestanden (grün) · bitte prüfen (amber) · sonst wie bisher (nahe Liq / alter Stand)
   function wdlKontoWegErg(t){
@@ -42317,6 +42391,8 @@
     if(wdlManuell(t)) return 'manuell'
     // (a) geblowt / Konto weg — Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026)
     if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
+    // LQ1: Liq-Verdacht nie per Ein-Klick/Sammel buchen — eigener Grund (nicht in WDL_SAMMEL_BLOW), das Popup mit „geblowt“ vorbelegt öffnet sich
+    if(typeof lqEndeUrteil === 'function' && (lqEndeUrteil(t) || {}).art === 'liq') return 'vermutlich liquidiert — bitte prüfen'
     const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
     /* AB1 (Finn 10.11.2026, genervt: „haben wir schon mal besprochen, immer noch der Bug“; Fall Mike Lucid 150k …0002, Orbit, BUY 2 NQ, TP 3.451 $, −2.757 $,
      * Ergebnis „⏸ Tageslimit“): die Demo endet am Tageslimit mit grund 'demo_liq' — das galt hier als „Blow-Beweis oder unklares Ende“ und öffnete JEDES Mal das Popup,
@@ -82371,9 +82447,13 @@
     if(p.status !== 'completed' && typeof wdlGeblowtUrteil === 'function'){
       let tr = null
       try{ tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)) || null }catch(_){}
-      if(tr && wdlGeblowtUrteil(tr)){
+      if(tr && wdlGeblowtVorschlag(tr)){   // LQ1: inkl. Liq-Verdacht (nur Vorbelegung)
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+        // LQ1: liquidiert (nicht Tageslimit) → Grund sichtbar, Finn bestätigt mit Erledigt
+        const lq = typeof lqEndeUrteil === 'function' ? lqEndeUrteil(tr) : null, msgEl = document.getElementById('tradeCompleteMsg')
+        if(lq && lq.art === 'liq' && tr.blown !== true && !(wdlBlowStand(tr) || {}).geblowt && msgEl && !msgEl.textContent){
+          msgEl.textContent = `💀 vermutlich liquidiert — ${lq.grund}. Von der Firma liquidiert = geblowt (auch über dem Boden) · „geblowt“ vorbelegt, bitte prüfen.`; msgEl.className = 'modal-msg' }
       } else if(tr && typeof wdlTpUndWeg === 'function' && wdlTpUndWeg(tr)){
         // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): „Phase bestanden" + P&L-Schätzung, Finn bestätigt
         const tw = wdlTpUndWeg(tr), rb = document.querySelector('input[name="tc-status"][value="passed"]')
