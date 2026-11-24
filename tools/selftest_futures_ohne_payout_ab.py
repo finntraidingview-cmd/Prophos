@@ -114,6 +114,9 @@ def sb_select(tab, params):
         raise RuntimeError("weg")
     return lese.get(k, [])
 ns.update(sb_select=sb_select)
+ns["re"] = re
+exec(re.search(r"^FCP_OD_NAME_RE = .*$", APP, re.M).group(0), ns)   # WT1: On Demand = Flag ODER Name
+exec(py_fn("fcp_ist_on_demand"), ns)
 exec(py_fn("_konto_ohne_payout_termin"), ns)
 K = ns["_konto_ohne_payout_termin"]
 check(K("fut") and K("wd") and K("od") and not K("cfd") and not K("kaputt") and not K("") and not K("fehlt"),

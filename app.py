@@ -9072,7 +9072,8 @@ def admin_build_overview(kapitel_id=None):
     # ADD-ON ON DEMAND (OD1, Finn 05.11.2026, Marc FundedNext …7821/…7823): fremde Konten zeigten im Admin „Payout-Datum fehlt“/„Payout in 19 T“, weil die
     # Zeile on_demand nicht kannte — mit ihr fällt der Termin-Chip bei On Demand weg (payoutAbInfo). Eigenes try: fehlt die Spalte, bleibt das Feld weg (= wie bisher).
     try:
-        od_an = {str(a["id"]) for a in (_sb_all("accounts", {"select": "id", "account_type": "eq.funded_cfd", "on_demand": "is.true"}) or [])}
+        od_an = {str(a["id"]) for a in (_sb_all("accounts", {"select": "id,name,on_demand", "account_type": "eq.funded_cfd"}) or [])
+                 if fcp_ist_on_demand(a)}   # WT1: Flag ODER Name „On Demand“ (wie Planer/Payout-Termin)
         for r in rows:
             if r.get("type") == "funded_cfd":
                 r["on_demand"] = str(r["id"]) in od_an
@@ -18236,7 +18237,7 @@ def hand_radar_waiting(konten, archiv, namen, ausgeblendet):
     out = []
     for a in konten or ():
         kid, uid = str(a.get("id") or ""), str(a.get("user_id") or "")
-        if (not kid or not a.get("on_demand") or not a.get("waiting_payout_since") or a.get("deaktiviert_at")
+        if (not kid or not fcp_ist_on_demand(a) or not a.get("waiting_payout_since") or a.get("deaktiviert_at")   # WT1: Flag ODER Name
                 or kid in (archiv or ()) or uid in (ausgeblendet or ())):
             continue
         out.append({"art": "waiting", "user_id": uid, "user": (namen or {}).get(uid, ""), "konto_id": kid, "firma": a.get("firm") or "",
@@ -18361,7 +18362,8 @@ def admin_handarbeit():
         try:
             radar_wait = hand_radar_waiting(_sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
                                                                                     "on_demand,waiting_payout_since,deaktiviert_at,tv_balance",
-                                                                      on_demand="is.true", waiting_payout_since="not.is.null")),
+                                                                      waiting_payout_since="not.is.null",
+                                                                      **({} if "or" in uq_ziel else {"or": "(on_demand.is.true,name.ilike.*demand*)"}))),   # WT1: Flag ODER Name, Feinprüfung in hand_radar_waiting
                                             archiv, namen, aus_radar)
         except Exception as e_w:
             print(f"[handarbeit] ⚠️ radar_waiting: {type(e_w).__name__}: {e_w}", flush=True)
@@ -19813,7 +19815,7 @@ def _konto_ohne_payout_termin(aid):
     if not aid:
         return False
     try:
-        z = sb_select("accounts", {"select": "id,account_type,on_demand", "id": f"eq.{aid}", "limit": "1"}) or []
+        z = sb_select("accounts", {"select": "id,account_type,on_demand,name", "id": f"eq.{aid}", "limit": "1"}) or []
     except Exception as e:
         # Gegenprüfung PF2: die Futures-Sperre hängt nicht an on_demand — zweiter Versuch nur mit der Kontoart (fehlt die Spalte on_demand oder war es
         # ein kurzer Aussetzer), erst dann wie bisher „Termin wie übergeben" (die DB-Wache accounts_futures_ohne_payout_ab leert ihn dann trotzdem)
@@ -19824,7 +19826,7 @@ def _konto_ohne_payout_termin(aid):
             return False
     if not z:
         return False
-    return (not payout_ab_erlaubt(z[0].get("account_type"))) or (z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True)
+    return (not payout_ab_erlaubt(z[0].get("account_type"))) or (z[0].get("account_type") == "funded_cfd" and fcp_ist_on_demand(z[0]))   # WT1: Flag ODER Name
 
 
 def _konto_on_demand(aid):
@@ -19833,11 +19835,11 @@ def _konto_on_demand(aid):
     if not aid:
         return False
     try:
-        z = sb_select("accounts", {"select": "id,account_type,on_demand", "id": f"eq.{aid}", "limit": "1"}) or []
+        z = sb_select("accounts", {"select": "id,account_type,on_demand,name", "id": f"eq.{aid}", "limit": "1"}) or []
     except Exception as e:
         print(f"[payout] ⚠️ on_demand {str(aid)[:8]} nicht lesbar ({type(e).__name__}) — Termin wie übergeben", flush=True)
         return False
-    return bool(z) and z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True
+    return bool(z) and z[0].get("account_type") == "funded_cfd" and fcp_ist_on_demand(z[0])   # WT1: Flag ODER Name
 
 
 def payout_konto_felder(naechster, waiting_leeren):
@@ -44499,7 +44501,7 @@ def kz_rechnen(a, ctx):
         jg = fcp_je_groesse(freg, groesse) or {}
         zb = fcp_konto_ziel_boden(freg, groesse, zyklus, a.get("name")) if freg else None
         # O1 (Master 05.11.2026, Prüfer): Konto-Seite rechnet wie der Planer — On-Demand-Regel, festes Ziel des Zyklus, Consistency auf der Summe der Gewinn-Tage
-        od_an = a.get("on_demand") is True and bool(freg) and bool(jg)
+        od_an = fcp_ist_on_demand(a) and bool(freg) and bool(jg)   # WT1: Flag ODER Name „On Demand“
         _oda = fcp_on_demand_anwenden(freg, jg, groesse) if od_an else None
         if _oda:
             freg, jg = _oda
@@ -47446,7 +47448,7 @@ def zw_funded_cfd():
             raise
         konten = _sb_all("accounts", {"select": _sel, "account_type": "eq.funded_cfd"}) or []
     ids = [str(a["id"]) for a in konten]
-    od_ids = {str(a["id"]) for a in konten if a.get("on_demand") is True}
+    od_ids = {str(a["id"]) for a in konten if fcp_ist_on_demand(a)}   # WT1: Flag ODER Name „On Demand“
     st_ids = {str(a["id"]) for a in konten if a.get("striking") is True and str(a["id"]) not in od_ids}   # ST1
     pend, verw, buch = [], [], []
     for i in range(0, len(ids), 80):
@@ -53233,6 +53235,22 @@ def fcp_payouts_zaehlen(pending, managed, buchungen):
 FCP_ON_DEMAND_STANDARD = {"fundednext": {"ziel_je_100k": [2000, 2250], "consistency_pct": 40, "min_je_100k": 2000}}
 
 
+# WT1 (Finn 25.11.2026 „bei On Demand“: Waiting erst ab dem Mindest-Profit, 2 % = 2.000 $ bei 100k, ohne Toleranz — darunter keine Anfrage möglich).
+# Befund S4/Aurel FundedNext 100k …7785: im Lauf, der Waiting setzte, war das Konto noch nicht on_demand → Refund-Zyklus (Ziel 104 $), Waiting bei +96 $.
+# Flag und Name werden im Konto-Dialog getrennt bearbeitet (Checkbox „Add-on · On Demand“ vs. Namenszusatz) und können auseinanderlaufen — der Add-on-
+# Schalter der Konto-Karte setzt beide. Deshalb gilt ein Konto als On Demand, wenn das Flag gesetzt ist ODER der Name „On Demand“ trägt (alle Planer-/
+# Ziel-Wege: fcp_planen, /konto-ziele, Radar-Ziel, Payout-Termin). Firmen ohne On-Demand-Regel rechnen trotzdem normal (fcp_on_demand_anwenden → None).
+# Review WT1: genau der Add-on-Teil, den prophos.html kontoNameMitAddons setzt UND wieder entfernt (ADDON_OD_RE = /^on[\s-]*demand$/i je „ · “-Teil) —
+# sonst bliebe On Demand bei Namen wie „… · On Demand Ina“ nach „On Demand aus“ über den Namen ewig an
+FCP_OD_NAME_RE = re.compile(r"on[\s\-]*demand", re.I)
+
+
+def fcp_ist_on_demand(konto):
+    """REIN (testbar, WT1): On-Demand-Konto = accounts.on_demand true ODER ein „ · “-Teil des Namens ist genau „On Demand“ (Groß/klein, auch On-Demand)."""
+    k = konto or {}
+    return k.get("on_demand") is True or any(FCP_OD_NAME_RE.fullmatch(t.strip()) for t in str(k.get("name") or "").split("·"))
+
+
 def fcp_on_demand_regel(regel):
     """On-Demand-Werte der Firma ({ziel_je_100k [von, bis], consistency_pct, min_je_100k}) — regel.on_demand (false = keine), sonst Standard je Firmen-Schlüssel.
     min_je_100k (FZ2) = Firmen-Minimum für „erreicht“; fehlt es (auch im Standard) → None, dann gilt wie bisher das gewürfelte Ziel."""
@@ -54696,7 +54714,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 pass
             continue                     # Firma aus: nur in plaene, nie geplant
         regel = fcp_regel_konto(regel, a)   # BG2: Variante je Konto (Blue Guardian Nano Funded: Max DD 10.000) — Firma ohne flex unverändert
-        od_an = od_spalte and a.get("on_demand") is True     # O1: On-Demand-Konto (Finn schaltet es am Konto)
+        od_an = fcp_ist_on_demand(a) if od_spalte else fcp_ist_on_demand({"name": a.get("name")})   # O1 + WT1: Flag ODER Name „On Demand“
         st_an = st_spalte and a.get("striking") is True      # ST1: Striking-Konto (Finn schaltet es am Konto, FundingPips)
         fkey = (regel.get("namen") or [""])[0]
         if fkey.startswith("tradeify") and not _ist_tradeify_cfd(a.get("firm")):

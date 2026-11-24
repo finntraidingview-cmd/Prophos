@@ -76,7 +76,8 @@ ok(app._zw["boeden"].get(K_OD) == 90000.0, "Boden unverändert 90.000")
 ZUST["od_fehler"] = True
 app._zw["ziele"].clear(); app._zw["boeden"].clear()
 app.zw_funded_cfd()
-ok(app._zw["ziele"].get(K_OD) == 100050.0, "Spalte on_demand nicht lesbar → wie bisher (Refund-Ziel), kein Absturz")
+# WT1 (25.11.2026): On Demand = Flag ODER Name — das Konto heißt „… · On Demand“, also bleibt es auch ohne lesbare Spalte beim On-Demand-Ziel (nie Refund)
+ok(app._zw["ziele"].get(K_OD) == 102088.0, "Spalte on_demand nicht lesbar → Name „On Demand“ trägt (WT1): On-Demand-Ziel, kein Refund, kein Absturz")
 
 print("3) Frontend + Konto-Seite + SQL (Code-Stellen)")
 html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
@@ -110,7 +111,7 @@ app.sb_select = _sel0
 # PF2 (05.11.2026): das Erhalten prüft jetzt _konto_ohne_payout_termin (On Demand ODER Futures), das Anfragen weiter _konto_on_demand (Futures schützt dort
 # payout_anfrage_konto_felder selbst) — dieselbe On-Demand-Regel an beiden Routen
 ok(src.count("if naechster and _konto_on_demand(aid):") == 1 and src.count("if naechster and _konto_ohne_payout_termin(aid):") == 1
-   and 'z[0].get("account_type") == "funded_cfd" and z[0].get("on_demand") is True' in src[src.index("def _konto_ohne_payout_termin("):src.index("def _konto_on_demand(")],
+   and 'z[0].get("account_type") == "funded_cfd" and fcp_ist_on_demand(z[0])' in src[src.index("def _konto_ohne_payout_termin("):src.index("def _konto_on_demand(")],   # WT1
    "Anfragen UND Erhalten (Admin-Routen): bei On Demand kein nächster Termin — auch mit vorbelegtem „+ 14“")
 ok("if(konto && konto.on_demand === true){ $('adm-receive-next').value = ''" in html, "Admin → Payout erhalten: bei On Demand nichts vorbelegt")
 ok("(admData?.accounts || []).find(x => String(x.id) === String(r.account_id || r.id)) || {}).on_demand === true" in html,

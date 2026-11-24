@@ -48345,7 +48345,9 @@
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
       maxRisikoTrade: row.max_risiko_trade != null ? Number(row.max_risiko_trade) : null,
       // O1 (05.11.2026): undefined = Spalte fehlt noch (SQL nicht eingespielt) → kein Schalter, nichts geschrieben
-      onDemand: row.on_demand === undefined ? undefined : row.on_demand === true,
+      // WT1 (25.11.2026): Flag ODER „On Demand“ im Namen — wie Railway (app.py fcp_ist_on_demand); Speichern im Konto-Dialog zieht das Flag dann nach
+      // Review: nur der Add-on-Teil „ · On Demand“ (dieselbe Form wie ADDON_OD_RE / kontoNameMitAddons) — so nimmt „On Demand aus“ den Namen sicher mit
+      onDemand: row.on_demand === undefined ? undefined : (row.on_demand === true || String(row.name || '').split('·').some(t => /^on[\s-]*demand$/i.test(t.trim()))),
       // ST1 (15.11.2026): Add-on Striking (FundingPips) — undefined = Spalte fehlt noch (sql/2026-11-15_addon_striking.sql) → kein Chip, nichts geschrieben
       striking: row.striking === undefined ? undefined : row.striking === true,
       // SK1 (Finn 20.11.2026): Striking für Apex — Zyklus-Start-Balance und Nummer des NÄCHSTEN Payouts, von Hand gepflegt (Konto bearbeiten).
@@ -62003,7 +62005,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2323'
+  const OS_TAB_BUILD = '2026-09-22.2324'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
