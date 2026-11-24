@@ -34340,6 +34340,34 @@
   const TV_ENDLESUNG_SCHNELL_CODES = ['puls_beschaeftigt', 'handlauf']   // ohne login-Objekt: wie bisher schnell wiederholen
   const TV_ENDLESUNG_LOGIN_SCHRITT = { cdp_fehler: ['cdp-login'] }   // Codes, die nur in diesen Schritten als Login-Fehler zählen
   const TV_ENDLESUNG_LOGIN_PAUSE_S = 30 * 60, TV_ENDLESUNG_LOGIN_MAX = 2
+  /* SPÄT-LESUNG (NL1, Master 24.11.2026, Ina · Lucid 150k …0009, Plan 22c144fc: Endlesung 23.11. scheiterte 4× am Tradovate-Login (login_formular,
+   * Black-Friday-Banner, seit .2295 behoben) — danach griff die Login-Bremse („Login prüfen", nur noch von Hand) und es wurde NIE wieder gelesen; der Plan
+   * in „Überprüfen" sperrte das Konto drei Tage). Jetzt: steht die Nachlesung an der Login-Bremse oder an TV_ENDLESUNG_MAX Versuchen, liest Puls trotzdem
+   * weiter — alle 2–4 h, je Plan + Versuch fest gestreut (Jitter-Regel, alle Tabs sehen dieselbe Zeit), nur mit Start-Balance (tagesunabhängig) und
+   * höchstens TV_ENDLESUNG_SPAET_MAX_MS ab dem Ende. Aufgegeben (Konto weg, geblowt, Folgetrade) und „Position offen > 24 h" bleiben Stopps; 12 h nach dem
+   * Ende meldet Railway einmal 🟠 (app.py alarm_endlesung_haengt). */
+  // Review NL1: nur an der LOGIN-Bremse (die 8-Versuche-Grenze bleibt: dort hängen Blow-/Bestanden-Urteile am letzten puls_fehler), höchstens
+  // TV_ENDLESUNG_SPAET_MAX_N Spät-Versuche (eigener Zähler final.puls_spaet_n — kein Login-Sturm bis zur Broker-Sperre bei falschem Passwort), nie bei
+  // Konto weg/vermutet, Liquidations-Ende (demo_liq) oder Position > 24 h offen
+  const TV_ENDLESUNG_SPAET_MAX_MS = 72 * 3600000, TV_ENDLESUNG_SPAET_MAX_N = 6
+  function tvV2SpaetPauseMs(id, n){
+    let h = 2166136261; for(const ch of String(id || '') + ':spaet:' + String(n || 0)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0; h ^= h >>> 16
+    return (7200 + ((h >>> 0) % 7201)) * 1000   // 2–4 h
+  }
+  window._tvV2SpaetPauseMs = tvV2SpaetPauseMs   // Test-Haken
+  // REIN RECHNEND: darf die Spät-Lesung für diesen Plan laufen? → null (nein) | { bis } (nächster Versuch ab bis; bis ≤ jetzt = dran)
+  function tvV2SpaetLesung(p, fin, jetzt){
+    if(!p || !fin || fin.puls_aufgegeben || tvV2KontoWeg(fin) || fin.konto_weg_vermutet || fin.grund === 'demo_liq') return null
+    if((Number(fin.puls_spaet_n) || 0) >= TV_ENDLESUNG_SPAET_MAX_N) return null
+    if(!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')) return null   // ohne Start-Balance zählt der Handelstag
+    const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
+    if(!endeMs || jetzt - endeMs > TV_ENDLESUNG_SPAET_MAX_MS) return null
+    if((Number(fin.puls_offen_n) || 0) && jetzt - endeMs > TV_ENDLESUNG_OFFEN_MAX_MS) return null   // Position > 24 h offen: Stopp bleibt
+    const letzte = Date.parse(fin.puls_at || '') || 0
+    return { bis: letzte ? letzte + tvV2SpaetPauseMs(p.id, Number(fin.puls_versuche) || 0) : jetzt }
+  }
+  window._tvV2SpaetLesung = tvV2SpaetLesung   // Test-Haken
   /* PULS BLEIBT ZU HAUSE ≠ FEHLVERSUCH (22.10.2026, Prüf-Agent nach .1718): steht auf dem PC ein Big Trade/Winning Day nah am TP/an der Liq,
    * kommt die Endlesung gar nicht bis zum Puls (pulsHeimFrei → big_trade_nah/big_trade_unklar, nichts gesendet, kein Login). Bisher zählte
    * das als Versuch — ein WD, der ein paar Minuten am TP pendelt, fraß so die 8 Versuche. Jetzt wie „belegt": kein Versuch, puls_at bleibt,
@@ -34519,10 +34547,13 @@
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
-    if(lb && lb.pruefen) return `Login prüfen: ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''} — „Jetzt lesen" von Hand`
-    if(lb) return `Pause bis ${new Date(lb.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Login-/Verbindungsfehler${lb.code ? ' (' + lb.code + ')' : ''}, kein schneller neuer Login`
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-    if(versuche >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt)) return `${versuche} Versuche erfolglos`
+    // NL1: an der Login-Bremse weiter — Spät-Lesung alle 2–4 h, höchstens TV_ENDLESUNG_SPAET_MAX_N (tvV2SpaetLesung); sonst wie bisher „Login prüfen"
+    const sp = (lb && lb.pruefen) ? tvV2SpaetLesung(p, fin, jetzt) : null
+    if(sp && jetzt < sp.bis) return `Pause bis ${new Date(sp.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Spät-Lesung alle 2–4 h (${lb.n}× Login/Verbindung${lb.code ? ' ' + lb.code : ''} erfolglos, Spät-Versuch ${(Number(fin.puls_spaet_n) || 0) + 1}/${TV_ENDLESUNG_SPAET_MAX_N})`
+    if(lb && lb.pruefen && !sp) return `Login prüfen: ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''} — „Jetzt lesen" von Hand`
+    if(lb && !lb.pruefen) return `Pause bis ${new Date(lb.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Login-/Verbindungsfehler${lb.code ? ' (' + lb.code + ')' : ''}, kein schneller neuer Login`
+    if(versuche >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt) && !sp) return `${versuche} Versuche erfolglos`
     // Position laut Puls noch offen (08.10.2026): zählt nicht als Versuch, läuft aber im selben Takt weiter (Pausen bis 15 min) —
     // höchstens 24 h ab Ende-Erkennung, danach nur noch „Jetzt lesen" von Hand (nie endlos)
     const offenN = Number(fin.puls_offen_n) || 0
@@ -34990,6 +35021,8 @@
       if(!tvV2EndlesungPcPasst(p0)) return { ok: false, msg: `Plan gehört zu PC ${tvV2EndlesungPc(p0)} — dort liest Puls` }
       const fin0 = p0.mt5Baseline.final
       const versuch = (Number(fin0.puls_versuche) || (fin0.puls_at ? 1 : 0)) + 1
+      // NL1: Lauf der Spät-Lesung (an der Login-Bremse, nicht „Jetzt lesen") — eigener Zähler final.puls_spaet_n (Deckel TV_ENDLESUNG_SPAET_MAX_N), kein Toast
+      const spaetLauf = !force && (() => { const lb0 = tvV2LoginBremse(fin0, Date.now()); return !!(lb0 && lb0.pruefen) })()
       const konto = tvV2Konto(p0)
       let _tp = []; try{ _tp = tradePlans }catch(_){}
       const mitBal = !!(p0.mt5Baseline.tv && typeof p0.mt5Baseline.tv.balance_start === 'number')
@@ -35052,6 +35085,7 @@
       // halten die Zeit; den Takt und die 24-h-Grenze entscheidet tvV2EndlesungGrund.
       const nochOffen = !erg.ok && erg.offen === true
       if(nochOffen) Object.assign(patch, { puls_versuche: versuch - 1, puls_offen_n: (Number(fin0.puls_offen_n) || 0) + 1, puls_offen_at: nowIso })
+      if(spaetLauf) patch.puls_spaet_n = (Number(fin0.puls_spaet_n) || 0) + 1   // NL1: jeder Spät-Lauf zählt (auch „noch offen“ — sonst liefe er ohne Deckel)
       if(force) patch.puls_aufgegeben = false
       if(erg.ok) Object.assign(patch, { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null,
         puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null,
@@ -35104,7 +35138,7 @@
           if(zurueck) return { ok: false, offen: true, wieder_offen: true, msg: `Position laut Puls noch offen — Ende über ${zurueck} verworfen, Plan wieder unter „Läuft“` }
           return { ok: false, offen: true, msg: `Position laut Puls noch offen (${patch.puls_offen_n}×) — kein Versuch verbraucht, nächste Lesung im Takt${exitTxt}` }
         }
-        if(!force && versuch >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p0, Date.now()) && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        if(!force && !spaetLauf && versuch >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p0, Date.now()) && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
         try{ renderTradePlans() }catch(_){}
@@ -39824,6 +39858,11 @@
     // Konto weg (05.10.2026): die Lesung ist beendet — ruhig sagen, was Puls gefunden hat, statt „Lesung aufgegeben — konto_weg: …"
     if(typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(fin)) return { art: 'kontoweg', text: kontoWegChipText(kontoWegUrteilVon(fin)), tip: tip.join('\n'), bisMs: null, knopf: true }
     const lb = (!fin.puls_aufgegeben && typeof tvV2LoginBremse === 'function') ? tvV2LoginBremse(fin, jetzt) : null
+    // NL1: an Login-Bremse/Versuchsgrenze läuft die Spät-Lesung (alle 2–4 h, nur mit Start-Balance, bis 72 h nach dem Ende) — ehrlich zeigen, wann
+    const sp = (lb && lb.pruefen) && mitStartBalance === true && typeof tvV2SpaetLesung === 'function'
+      ? tvV2SpaetLesung({ id: pid, mt5Baseline: { tv: { balance_start: 0 } } }, fin, jetzt) : null
+    if(sp) return { art: 'laeuft', text: `Wartet · ${lb.n}× Login/Verbindung${lb.code ? ' (' + lb.code + ')' : ''} erfolglos · Spät-Lesung ${sp.bis > jetzt ? 'ab ' + uhr(sp.bis) : 'jetzt'} (alle 2–4 h)`,
+                    tip: tip.join('\n'), bisMs: sp.bis > jetzt ? sp.bis : null, knopf: true }
     if(lb && lb.pruefen) return { art: 'aufgegeben', text: `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''}`, tip: tip.join('\n'), bisMs: null, knopf: true }
     if(fin.puls_aufgegeben || versuche >= max){
       return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
@@ -61676,7 +61715,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2313'
+  const OS_TAB_BUILD = '2026-09-22.2314'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66733,12 +66772,14 @@
       const ende = Date.parse(fin.at || p.endedAt || '') || 0
       if(!ende) continue
       const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-      if(vers >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt)) continue   // Topstep-Tag: Trade 1 liest bis zum Fensterende weiter
       const letzte = Date.parse(fin.puls_at || '') || 0
       // Login-Bremse (30.09.2026): „Login prüfen" kündigt nichts mehr an, die 30-min-Pause verschiebt den Termin
       const lb = tvV2LoginBremse(fin, jetzt)
-      if(lb && lb.pruefen) continue
-      let t = lb ? lb.bis : (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
+      // NL1: an der Login-Bremse → Termin der Spät-Lesung (2–4 h gestreut), ohne Spät-Lesung wie bisher nichts
+      const sp = (lb && lb.pruefen) ? tvV2SpaetLesung(p, fin, jetzt) : null
+      if(lb && lb.pruefen && !sp) continue
+      if(!sp && vers >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt)) continue   // Topstep-Tag: Trade 1 liest bis zum Fensterende weiter
+      let t = sp ? sp.bis : lb ? lb.bis : (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
       const hb = tvV2HeimBis(p.id, fin); if(t && hb > t) t = hb   // Heim-Sperre (22.10.2026): Countdown nicht auf einen Termin, an dem nichts passiert
       if(t) out.push({ t, art: 'Bestätigung', plan: p })
     }

@@ -4431,6 +4431,52 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
     return out
 
 
+ALARM_ENDLESUNG_H = 12              # NL1: so lange nach dem Ende ohne gelesene Endlesung → einmal 🟠
+ALARM_ENDLESUNG_FENSTER_TAGE = 7    # ältere Pläne in „Überprüfen“ meldet die Wache nicht mehr (kein Alt-Schwall)
+
+
+def _alarm_konto_kurz(firm, master_name):
+    """„Lucid Trading 150k …0009“ aus master_firm + master_name („150k LFE15098406450009 → Challenge“) — Format ID · Firma Größe …4 (ohne ID)."""
+    n = str(master_name or "").split("→")[0].strip()
+    g = re.search(r"\b(\d{2,3})\s*k\b", n, re.I)
+    teile = [t for t in n.split() if not re.fullmatch(r"\d{2,3}\s*k", t, re.I)]
+    ext = re.sub(r"\W", "", teile[0]) if teile else ""
+    return " ".join(x for x in (str(firm or "").strip(), f"{g.group(1)}k" if g else "", f"…{ext[-4:]}" if ext else "") if x) or (n or "Konto")
+
+
+def alarm_endlesung_haengt(plaene, namen, jetzt):
+    """REIN RECHNEND (testbar, NL1 — Master 24.11.2026, Ina · Lucid 150k …0009 Plan 22c144fc: Endlesung scheiterte am Login, danach drei Tage „Überprüfen“,
+    Konto gesperrt): Puls-Pläne (tvv2/tsv2) in review, ALARM_ENDLESUNG_H nach dem Ende noch ohne gelesene Endlesung (tsv2: balance_end; sonst balance_end,
+    today_pnl oder quelle puls), nicht aufgegeben/Konto weg → [(schluessel, 2, art, titel, text, uid, plan_id)] — einmal je Plan (Schlüssel ohne Zeit).
+    Zeilen: id,user_id,route,master_firm,master_name,ended_at + fa (final_at), be, tp, q, auf, weg, vers, lf, lc, bs (tv.balance_start)."""
+    out = []
+    for p in plaene or ():
+        if p.get("status", "review") != "review" or p.get("route") not in ("tvv2", "tsv2"):
+            continue
+        if any(str(p.get(k) or "").lower() == "true" for k in ("auf", "weg", "kv")):
+            continue                                  # aufgegeben / Konto weg / Konto weg vermutet — dafür gibt es eigene Wege (Radar „geblowt?“)
+        gelesen = _wd_num(p.get("be")) is not None if p.get("route") == "tsv2" else (
+            _wd_num(p.get("be")) is not None or _wd_num(p.get("tp")) is not None or p.get("q") == "puls")
+        if gelesen:
+            continue
+        ende = _alarm_ts(p.get("fa")) or _alarm_ts(p.get("ended_at"))
+        if ende is None or not (timedelta(hours=ALARM_ENDLESUNG_H) <= jetzt - ende <= timedelta(days=ALARM_ENDLESUNG_FENSTER_TAGE)):
+            continue
+        pid, uid = str(p.get("id")), str(p.get("user_id"))
+        vers, lf = int(_wd_num(p.get("vers")) or 0), int(_wd_num(p.get("lf")) or 0)
+        warum = (f"{lf}× Login/Verbindung gescheitert ({p.get('lc') or '?'})" if lf else f"{vers} Leseversuch{'e' if vers != 1 else ''} erfolglos" if vers
+                 else "noch kein Leseversuch")
+        # wie prophos.html tvV2SpaetLesung: nur an der Login-Bremse (≥ 2), mit Start-Balance, ≤ 72 h, höchstens 6 Spät-Versuche, nicht nach Liquidation
+        spaet = (lf >= 2 and _wd_num(p.get("bs")) is not None and jetzt - ende <= timedelta(hours=72)
+                 and int(_wd_num(p.get("sn")) or 0) < 6 and p.get("gr") != "demo_liq")
+        weiter = "Puls liest alle 2–4 h weiter (Spät-Lesung)" if spaet else "nur noch „Jetzt lesen“ oder P&L von Hand"
+        std = int((jetzt - ende).total_seconds() // 3600)
+        out.append((f"{pid}|endlesung_haengt", 2, "endlesung_haengt", "Endlesung hängt",
+                    f"{namen.get(uid, uid[:8])} · {_alarm_konto_kurz(p.get('master_firm'), p.get('master_name'))}: Trade seit {std} h beendet, Balance nicht gelesen — "
+                    f"{warum}. Der Plan steht unter „Überprüfen“ und sperrt das Konto für den Planer; {weiter}.", uid, pid))
+    return out
+
+
 def alarm_im_log_filter(keys):
     """REIN RECHNEND (testbar): PostgREST-Filter schluessel=in.("…","…") — Schlüssel in Anführungszeichen (sie tragen „|"), ohne Anführungszeichen und Backslash."""
     ks = sorted({str(k) for k in keys or () if k and '"' not in str(k) and "\\" not in str(k)})
@@ -4489,6 +4535,28 @@ def alarm_tick():
         evs += [ev for ev in alarm_lots_deckel(ld, namen) if ev[0] not in _alarm["gemeldet"]]
     except Exception as e:
         print(f"[alarm] ⚠️ Lots-Deckel: {type(e).__name__}: {e}", flush=True)
+    try:   # NL1 (24.11.2026): Endlesung 12 h nach dem Ende noch nicht gelesen → einmal 🟠 je Plan (eigene Abfrage: updated_at bleibt beim Hängen stehen)
+        eh = _sb_all("trade_plans", {"select": "id,user_id,status,route,master_firm,master_name,ended_at,fa:mt5_baseline->final->>at,be:mt5_baseline->final->>balance_end,"
+                                               "tp:mt5_baseline->final->>today_pnl,q:mt5_baseline->final->>quelle,auf:mt5_baseline->final->>puls_aufgegeben,"
+                                               "weg:mt5_baseline->final->>konto_weg,vers:mt5_baseline->final->>puls_versuche,lf:mt5_baseline->final->>puls_login_fehler,"
+                                               "lc:mt5_baseline->final->>puls_login_code,bs:mt5_baseline->tv->>balance_start,kv:mt5_baseline->final->>konto_weg_vermutet,"
+                                               "sn:mt5_baseline->final->>puls_spaet_n,gr:mt5_baseline->final->>grund",
+                                     "status": "eq.review", "route": "in.(tvv2,tsv2)",
+                                     "and": f"(ended_at.gte.{(jetzt - timedelta(days=ALARM_ENDLESUNG_FENSTER_TAGE)).isoformat()},"
+                                            f"ended_at.lte.{(jetzt - timedelta(hours=ALARM_ENDLESUNG_H)).isoformat()})"}) or []
+        eh = [r for r in eh if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+        ev_eh = [ev for ev in alarm_endlesung_haengt(eh, namen, jetzt) if ev[0] not in _alarm["gemeldet"]]
+        if ev_eh:
+            schon_eh = alarm_im_log([ev[0] for ev in ev_eh], (ALARM_ENDLESUNG_FENSTER_TAGE + 1) * 86400)   # „einmal“: 8 Tage Gedächtnis statt 24 h
+            if schon_eh is None:
+                ev_eh = []                                   # Log nicht lesbar → diesmal nicht (lieber später als täglich doppelt)
+            for ev in ev_eh:
+                if ev[0] in schon_eh:
+                    _alarm["gemeldet"][ev[0]] = time.time()
+                else:
+                    evs.append(ev)
+    except Exception as e:
+        print(f"[alarm] ⚠️ Endlesung-Wache: {type(e).__name__}: {e}", flush=True)
     schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()   # nach einem Neustart: in 24 h Gemeldetes nicht noch einmal
     for ev in evs:
         key, prio, art, titel, text, uid, pid = ev[:7]
@@ -14772,6 +14840,7 @@ def _wd_endlesung_zeile(final):
     keys = ("today_pnl", "quelle", "datum", "at", "puls_at", "puls_versuche", "puls_fehler", "puls_aufgegeben",
             "puls_diagnose", "puls_flach", "exit_fill", "exit_diag", "ende_quelle",
             "puls_login_fehler", "puls_login_at", "puls_login_code",   # Login-Bremse (30.09.2026): Radar „Wartet · Login prüfen"
+            "puls_spaet_n", "puls_offen_n",   # NL1: Spät-Lesung (Deckel, Position-offen-Stopp) auch in Zeilen fremder IDs
             # Balance nach dem Trade (TSV2-PNL, 01.10.2026): ohne sie zeigte die Abhak-Liste „Puls liest …" trotz gelesener Balance
             # und bei TopstepX den Tages-RP&L als „gelesen"
             "balance_end", "balance_quelle", "balance_relativ", "plattform",
