@@ -31306,7 +31306,7 @@
    * jeder Puls-Aktion. NUR wenn Puls raus darf (tvkFrei + seit PA1f tvkPulsDarfRaus, s. unten): kein Start in 45 min, Puls/Polar/Rundgang/
    * Heimweg/Endlesung frei, laufender Big Trade/WD weit genug von TP/Liq — ein Neuladen der TradingView-Seite kurz vor TP/Liq wäre der schlimmste Fall. Während des Laufs gilt
    * Puls als unterwegs (hedgePulsUnterwegs: Reader-Ende blind, Konto-Beleg verfällt) und der Neulade-Wächter wartet (bwGrund). ══ */
-  const TVK_TAKT_MIN_MS = 2 * 60000, TVK_TAKT_MAX_MS = 4 * 60000, TVK_START_ABSTAND_MS = 45 * 60000
+  const TVK_TAKT_MIN_MS = 2 * 60000, TVK_TAKT_MAX_MS = 4 * 60000, TVK_START_ABSTAND_MS = 10 * 60000
   window._tvkLaeuft = false
   let _tvkLetzter = null
   /* PA1f (Finn 25.11.2026: „Es wird immer offene Trades geben. Er darf immer dann lesen, wenn Puls ganz normal raus darf. Wenn z. B. ein
@@ -31325,7 +31325,9 @@
       if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader auf diesem PC'
       const jetzt = Date.now(), plaene = tradePlans || []
       // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
-      const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
+      // PA1j (Finn 25.11.2026, FNF-Gekauft hing an „Start in 23 min“ eines Echo-Trades): nur Starts, die Puls selbst ausführt, sperren —
+      // Echo/Echo V2 (mt5, mt5v2) laufen ohne Puls-Chrome; Abstand 10 statt 45 min (eine Lesung dauert 1–2 min)
+      const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && p.route !== 'mt5' && p.route !== 'mt5v2' && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
         && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))
       if(bald) return `Start in ${Math.max(0, Math.round((Date.parse(bald.startUm) - jetzt) / 60000))} min`
       const u = hedgePulsUnterwegs(); if(u) return u
@@ -62444,7 +62446,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2351'
+  const OS_TAB_BUILD = '2026-09-22.2352'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
