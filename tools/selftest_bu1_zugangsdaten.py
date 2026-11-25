@@ -59,4 +59,27 @@ check("console." not in blk and "Toast" not in blk and "showSyncBanner" not in b
 check("(zeigen || (bEl.creds?.value || '').trim()) ? '' : 'none'" in HTML, "eingefügte Zugangsdaten werden nie weggeblendet")
 check("bulkCredsAuswerten.t = setTimeout(" in HTML, "Auswertung entprellt beim Tippen/Einfügen")
 
+# ── 3. BU1b (26.11.2026): EIN Einfügefeld + gewählte Vorlage auf der Karte ──
+check('id="bulk-creds" hidden style="display:none"' in HTML, "eigenes Zugangskarten-Feld ist aus — nur noch das Feld „External IDs“")
+check("Zugangskarte/Mail (Login / Password / Server, auch mehrere Konten)" in HTML, "Platzhalter von „External IDs“ nennt die Zugangskarte")
+check("if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t) }" in HTML, "ganze Karte in eine Passwort-/Server-Zeile → ins Feld „External IDs“ umgeleitet")
+blk2 = HTML[HTML.index("function bulkInsEineFeld(t){"):HTML.index("window._bulkCredsTest")]
+check("altZeilen.every(z => neu.toUpperCase().includes(" in blk2 and "console." not in blk2, "reine Kennungen, die in der Karte stehen, werden ersetzt; kein Log")
+blk3 = HTML[HTML.index("function bulkPasteVorlage(x){"):HTML.index("const bulkPaste = {")]
+check("if(!a || px) return null" in blk3 and "x.firma !== a.firm" in blk3 and "gr !== ga" in blk3 and blk3.rstrip().endswith("return a\n    }"),
+      "oben gewählte Vorlage gilt für MT5-Logins ohne Präfix — nicht bei anderer Firma/Größe/Präfix-Vorlage")
+# istKarte echt in JSC
+i = HTML.index("    function bulkIstKarte(t){")
+j = HTML.index("    }\n", i) + 6
+js2 = HTML[i:j] + """
+var f = [["Geheim!123", false], ["FivePercentOnline-Real", false], ["Login: 1234", true], ["a\\nb", true], ["26771591 Ab3x FivePercentOnline-Real", true], ["", false]];
+print(JSON.stringify(f.map(function(x){ return bulkIstKarte(x[0]) === x[1] ? "ok" : "FALSCH:" + x[0] })));
+"""
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+    f.write(js2)
+    pfad = f.name
+r = subprocess.run([JSC, pfad], capture_output=True, text=True)
+os.unlink(pfad)
+check(r.returncode == 0 and all(e == "ok" for e in eval(r.stdout.strip())), f"bulkIstKarte: einzelnes Passwort/Server bleibt Eingabe, Karte/Zeile wird umgeleitet ({r.stdout.strip()[:120]})")
+
 print(f"\n{n} Prüfungen grün")

@@ -16502,7 +16502,7 @@
         <div class="field" style="grid-column:1/-1">
           <!-- External IDs = Pflicht + Einfügefeld (F16, 27.09.2026): reine ID-Liste oder ganzer Dashboard-Text (Tradeify, Topstep, FundedNext) -->
           <label>External IDs *</label>
-          <textarea class="input" id="bulk-extids" rows="4" placeholder="Eine Kennung je Zeile — oder einfach alles aus dem Dashboard der Firma hier einfügen (Tradeify, Topstep, FundedNext); die Kennungen werden herausgepickt" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
+          <textarea class="input" id="bulk-extids" rows="4" placeholder="Alles hier einfügen: eine Kennung je Zeile, den Text aus dem Dashboard der Firma (Tradeify, Topstep, FundedNext) oder die Zugangskarte/Mail (Login / Password / Server, auch mehrere Konten) — Kennungen, Passwort und Server werden herausgepickt" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
           <div id="bulk-paste-vorschau" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
           <div id="bulk-paste-zaehler" style="font-size:12px;color:var(--sub);margin-top:6px"></div>
         </div>
@@ -16521,10 +16521,12 @@
           </label>
           <!-- Einfügefeld (18.10.2026): Zugangskarte der Firma („Login / Password / Server") oder eine Zeile je Konto — füllt die Zeilen
                oben je Kennung (Login = Kennung), egal ob Vorlage oder Kennungen zuerst gewählt wurden -->
-          <textarea class="input" id="bulk-creds" rows="4" placeholder="Zugangskarte der Firma hier einfügen (Login / Password / Server, auch mehrere) — oder eine Zeile pro Account:  Login  Passwort  Server" style="font-family:var(--mono);font-size:12.5px;resize:vertical;margin-top:6px" autocomplete="off"></textarea>
+          <!-- BU1b (26.11.2026, Finn: „EIN Einfügefeld, das alles nimmt"): das eigene Zugangskarten-Feld ist aus — Zugangskarten gehen ins Feld
+               „External IDs" (derselbe Parser, bulkDashboardParsen). Bleibt versteckt im DOM, damit alte Wege (getBulkCreds) leer weiterlaufen. -->
+          <textarea class="input" id="bulk-creds" hidden style="display:none" rows="4" placeholder="Zugangskarte der Firma hier einfügen (Login / Password / Server, auch mehrere) — oder eine Zeile pro Account:  Login  Passwort  Server" style="font-family:var(--mono);font-size:12.5px;resize:vertical;margin-top:6px" autocomplete="off"></textarea>
           <!-- BU1 (26.11.2026): was im Feld erkannt wurde (Login · Server · Passwort ✓, nie im Klartext) bzw. welches Format erwartet wird -->
           <div id="bulk-creds-status" class="bulk-creds-status" hidden></div>
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird den Kennungen über den Login zugeordnet (sonst der Reihe nach). Zeilen-Format: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zugangskarte oder Mail oben ins Feld <b>External IDs</b> einfügen — Passwort und Server erscheinen hier je Kennung und lassen sich nachbessern. Server leer → aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
         <!-- Checkbox „Direkt in Duplikum anlegen &amp; verknüpfen“ entfernt (Finn 04.10.2026) -->
         <div class="field" style="grid-column:1/-1">
@@ -53326,7 +53328,7 @@
       const v = kl.vorlageId ? 'z:' + kl.vorlageId : ''
       if(v && [...bEl.tplSelect.options].some(o => o.value === v)){ bEl.tplSelect.value = v; applyTemplate(v); bEl.tplDelete.disabled = !bulkIstAdmin() }
       else if(kl.firma){ bEl.firm.value = kl.firma; updatePreview(); bulkFuturesUmschalten() }
-      bEl.extids.placeholder = `${kl.anzahl === 1 ? 'Die External ID' : kl.anzahl + ' External IDs, eine je Zeile'} — einfügen mit ⌘V / Strg+V`
+      bEl.extids.placeholder = `${kl.anzahl === 1 ? 'Die External ID' : kl.anzahl + ' External IDs, eine je Zeile'} oder die Zugangskarte/Mail der Firma — einfügen mit ⌘V / Strg+V`
       setTimeout(() => bEl.extids.focus(), 80)
     }
 
@@ -53386,6 +53388,10 @@
           + `</div>`
       }).join('')
       box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('input', () => { i.dataset.hand = '1' }))
+      box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('paste', e => {   // BU1b: ganze Zugangskarte → ins Feld „External IDs"
+        const t = (e.clipboardData && e.clipboardData.getData('text')) || ''
+        if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t) }
+      }))
       box.querySelectorAll('[data-bcr-pw]').forEach(i => { i.addEventListener('focus', () => { i.style.webkitTextSecurity = 'none' }); i.addEventListener('blur', () => { i.style.webkitTextSecurity = 'disc' }) })
       box.style.display = ids.length ? 'flex' : 'none'
       // Textfeld bleibt sichtbar: es ist das Einfügefeld für die Zugangskarte, auch wenn die Zeilen schon da sind (18.10.2026)
@@ -53421,7 +53427,24 @@
       try{ bulkCredZeilenRender() }catch(_){}
       clearTimeout(bulkCredsAuswerten.t); bulkCredsAuswerten.t = setTimeout(() => { try{ bulkCredsAuswerten() }catch(_){} }, 300)
     })
-    window._bulkCredsTest = { lesen: () => getBulkCreds(), auswerten: bulkCredsAuswerten }   // Test-Haken (Stub/Selbsttest), gibt nichts aus
+    /* BU1b (26.11.2026, Finn: „EIN Einfügefeld, das alles nimmt — IDs, Blöcke, Zeilen"): Zugangskarten werden nur noch über das Feld „External IDs"
+     * gelesen (bulkDashboardParsen: Login-Anker + bulkZugangVoll, „Login Passwort Server"-Zeilen über den Rückfall). Landet eine ganze Karte doch in
+     * einer Passwort-/Server-Zeile, geht sie dorthin. Stehen im Feld schon nur reine Kennungen, die alle in der Karte vorkommen, ersetzt die Karte sie
+     * (sonst würden die Kennungen ohne Zugang neben der Karte verloren gehen — der Rückfall-Parser liest reine Listen nur, wenn sonst nichts erkannt ist). */
+    function bulkIstKarte(t){
+      const x = String(t || '').trim(); if(!x) return false
+      return /\n/.test(x) || /\b(?:login|password|passwort|server)\b/i.test(x) || /^\d{4,12}[\t ;,]+\S+/.test(x)
+    }
+    function bulkInsEineFeld(t){
+      const neu = String(t || '').trim(), alt = (bEl.extids.value || '').trim()
+      const altZeilen = alt.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+      const nurKennungen = altZeilen.length && altZeilen.every(z => /^[A-Za-z0-9#_-]{4,}$/.test(z))
+      const ersetzen = !alt || (nurKennungen && altZeilen.every(z => neu.toUpperCase().includes(z.replace(/^#/, '').toUpperCase())))
+      bEl.extids.value = ersetzen ? neu : alt + '\n' + neu
+      bEl.extids.dispatchEvent(new Event('input', { bubbles: true }))
+      try{ bEl.extids.scrollIntoView({ block: 'center', behavior: 'smooth' }) }catch(_){}
+    }
+    window._bulkCredsTest = { lesen: () => getBulkCreds(), auswerten: bulkCredsAuswerten, istKarte: bulkIstKarte, insFeld: bulkInsEineFeld }   // Test-Haken (Stub/Selbsttest), gibt nichts aus
     function bulkCredAusZeile(id){
       const r = document.querySelector(`#bulk-creds-rows [data-bcr="${CSS.escape(String(id))}"]`); if(!r) return null
       const pw = r.querySelector('[data-bcr-pw]').value.trim(), srv = r.querySelector('[data-bcr-srv]').value.trim()
@@ -53644,7 +53667,17 @@
       // „FNFTCH", die Kennung verrät die Größe nicht — sonst bekam ein 50k-Konto trotz Wahl „50k Flex" die 150k-Vorlage)
       const px = String(bulkVorlageAktiv && bulkVorlageAktiv.muster_praefix || '').trim().toUpperCase()
       if(px && String(x.id || '').toUpperCase().startsWith(px)) return bulkVorlageAktiv
-      return bulkVorlageFuer(x, bulkZentral)
+      const auto = bulkVorlageFuer(x, bulkZentral)
+      if(auto) return auto
+      // BU1b (26.11.2026, Finn: Karte „26962725 · ✓ Passwort + Server erkannt" zeigte „ohne Vorlage", obwohl oben „The5%ers 100k New Phase 1"
+      // gewählt war): eine MT5-Login-Zahl verrät keine Vorlage (kein Präfix/Titel) → die oben gewählte Vorlage gilt, wenn nichts dagegen spricht
+      // (anderes Präfix der Vorlage, andere erkannte Firma oder Größe).
+      const a = bulkVorlageAktiv
+      if(!a || px) return null
+      if(x.firma && a.firm && x.firma !== a.firm) return null
+      const gr = Number(x.groesse) || 0, ga = Number(a.account_size || a.starting_balance) || 0
+      if(gr && ga && gr !== ga) return null
+      return a
     }
     const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map(), reset: new Set() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch; reset: bulkKey der als „geresettet“ freigegebenen Kennungen
     const bpEl = { box: document.getElementById('bulk-extids'), vs: document.getElementById('bulk-paste-vorschau'), zaehler: document.getElementById('bulk-paste-zaehler') }
@@ -62279,7 +62312,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2338'
+  const OS_TAB_BUILD = '2026-09-22.2339'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
