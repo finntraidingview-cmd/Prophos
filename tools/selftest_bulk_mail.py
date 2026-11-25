@@ -97,7 +97,7 @@ ALT = [
               "Stellar 2-Step\n$100K\nFUNDED\nCurrent Balance\n$101,000.00\nLogin: 15000002\nMT5\n"),
     ("parse", "Login 541000001 Server FTMO-Server"),
     ("parse", "APEX1234567\nPAAPEX7654321\n"),
-    ("parse", "#511000003, 511000004; 511000005\n"),
+    # „#511000003, 511000004; 511000005" bewusst raus aus (D): seit BU3 (26.11.2026) = drei Konten statt einem (selftest_bu3_bulk_matrix, (F) hier)
     ("creds", "511000001 Pw!abc12 FundingPips-SIM1\n511000002 Pw!abc13 FundingPips-SIM1\n"),
     ("creds", "511000001\tPw!abc12\n"),
     ("creds", "Login: 26000002\nPassword: •••••\nServer: FivePercentOnline-Real\nPlatform: MT5\n"),
@@ -172,6 +172,7 @@ def main():
     pw = [[(b["id"], (b.get("zugang") or {}).get("password")) for b in blk] for blk in rf]
     check(all(p is None for blk in pw[:3] for _i, p in blk), f"(F) Kennung mit #/Anführungszeichen nie als Passwort: {pw[:3]}")
     check(pw[3] == [("511000010", "Pq#4abcd")], f"(F) echtes Passwort mit # im Abschnitt bleibt: {pw[3]}")
+    check([b["id"] for b in rf[0]] == ["511000003", "511000004", "511000005"], f"(F) BU3: mehrere Kennungen in einer Zeile = je ein Konto: {[b['id'] for b in rf[0]]}")
 
     print("\nALLES GRUEN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1

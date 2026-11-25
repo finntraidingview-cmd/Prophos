@@ -66,7 +66,7 @@ check("if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t); return }" in
 blk2 = HTML[HTML.index("function bulkInsEineFeld(t){"):HTML.index("window._bulkCredsTest")]
 check("altZeilen.every(z => neu.toUpperCase().includes(" in blk2 and "console." not in blk2, "reine Kennungen, die in der Karte stehen, werden ersetzt; kein Log")
 blk3 = HTML[HTML.index("function bulkPasteVorlage(x){"):HTML.index("const bulkPaste = {")]
-check("if(!a || px) return null" in blk3 and "x.firma !== a.firm" in blk3 and "gr !== ga" in blk3 and blk3.rstrip().endswith("return a\n    }"),
+check("if(!a) return null" in blk3 and "if(px) return null" in blk3 and "x.firma !== a.firm" in blk3 and "gr !== ga" in blk3 and blk3.rstrip().endswith("return a\n    }"),
       "oben gewählte Vorlage gilt für MT5-Logins ohne Präfix — nicht bei anderer Firma/Größe/Präfix-Vorlage")
 # istKarte echt in JSC
 i = HTML.index("    function bulkIstKarte(t){")
@@ -84,7 +84,7 @@ check(r.returncode == 0 and all(e == "ok" for e in eval(r.stdout.strip())), f"bu
 
 # ── 4. BU2 (26.11.2026): GFT-Karte „Server / GoatFunded-Server / This is your trading server name. / Login / … / Password / … / Platform / URL" ──
 blk4 = HTML[HTML.index("function bulkDashboardParsen(text){"):HTML.index("window._bulkDashboardParsen = bulkDashboardParsen")]
-check("const davor = bulkZugangLesen(roh.slice(k > 0 ? fnTreffer[k - 1].ende : 0, m.index))" in blk4 and "if(!(bulkZugangLesen(roh.slice(m.ende, bisNaechster)) || {}).server){" in blk4,
+check("const svDavor = bulkServerZuletzt(roh.slice(von, m.index))" in blk4 and "if(svDavor && (serverVorn || !(zugang && zugang.server)))" in blk4,
       "Server VOR dem Login (GFT) wird genommen, wenn dahinter keiner steht — beschriftet, seit dem vorigen Konto")
 check("if(lbl){ e.preventDefault(); i.value = lbl[1]; i.dataset.hand = '1' }" in HTML, "„Server: X“ / „Password: x“ einzeln eingefügt → nur der Wert ins Feld")
 check("const fokus = fe && fe.closest('[data-bcr]')" in HTML and "el.focus(); try{ el.setSelectionRange(fokus.a, fokus.b) }catch(_){}" in HTML,

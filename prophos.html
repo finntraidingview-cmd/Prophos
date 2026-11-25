@@ -53552,6 +53552,31 @@
      * ein beschriftetes Passwort oder ein Server steht (also eine Zugangs-Mail) — so wird z. B. eine „Account ID" in einem Dashboard-Text
      * nicht plötzlich zum Konto. Text vorher durch credTextSauber (Null-Breite-Zeichen aus Mail-Kopien). Rückgabe [{index, ende, login}]
      * nach Position, jede Kennung einmal; index/ende beziehen sich auf den gesäuberten Text. */
+    // BU3: letzter beschrifteter Server in einem Textstück (Wert dahinter oder in der nächsten Zeile, Beschreibungszeilen egal) → '' wenn keiner
+    function bulkServerZuletzt(teil){
+      const zl = credTextSauber(teil).split('\n')
+      for(let i = zl.length - 1; i >= 0; i--){
+        const t = zl[i].trim()
+        if(!t || CRED_NIE.test(t) || !/^(?:mt[45]\s*|trading\s*|broker\s*)?server(?:\s*name)?\b/i.test(t)) continue
+        const z = bulkZugangVoll(zl.slice(i).join('\n'))   // auch „MT5 Server / : / …“ (Label-Parser)
+        if(z && z.server) return z.server
+      }
+      return ''
+    }
+    window._bulkServerZuletzt = bulkServerZuletzt   // Test-Haken
+    /* BU3 (Finn 26.11.2026, gemischte Karten): Firma eines Blocks am Server — zuerst die MT-Server aus firm_specs (FIRM_PRESETS, exakt), dann
+     * feste Server-Stämme der CFD-Firmen mit Bulk-Vorlagen (Namen wie in bulk_vorlagen.firm). Unbekannt → '' (Vorlage/Formular gewinnt). */
+    const BULK_SERVER_FIRMA = [[/fivepercent/i, 'The5%ers'], [/goatfunded/i, 'Goat Funded Trader'], [/blueguardian/i, 'Blue Guardian'],
+      [/fundingpips/i, 'FundingPips'], [/audacity/i, 'Audacity Capital'], [/tradeify/i, 'Tradeify CFD']]
+    function bulkFirmaAusServer(srv){
+      const s = String(srv || '').trim(); if(!s) return ''
+      try{
+        if(typeof FIRM_PRESETS === 'object' && FIRM_PRESETS)
+          for(const p of Object.values(FIRM_PRESETS)) if(p && p._custom && p.server && p.label && String(p.server).trim().toLowerCase() === s.toLowerCase()) return String(p.label)
+      }catch(_){}
+      const t = BULK_SERVER_FIRMA.find(([rx]) => rx.test(s))
+      return t ? t[1] : ''
+    }
     function bulkLoginAnker(text, minZiffern){
       const roh = credTextSauber(text), min = minZiffern || 4, a = [], schon = new Set()
       for(const m of roh.matchAll(new RegExp('\\bLogin\\b\\s*[:#=]?\\s*(\\d{' + min + ',})', 'gi'))){
@@ -53606,17 +53631,17 @@
       //      23.10.2026: Anker über bulkLoginAnker (auch Login ID/Kontonummer/Account Number aus Zugangs-Mails), Zugang über bulkZugangVoll
       //      (auch „MT5 Password" / „:" / Wert) — jeder Mail-Block = genau ein Konto, Passwort/Server/Plattform nie ein eigenes.
       const fnTreffer = bulkLoginAnker(roh, 5)
+      // BU3 (Finn 26.11.2026): Steht vor dem ERSTEN Login schon ein beschrifteter Server (GFT-Karte „Server / … / Login / … / Password / …"),
+      // ist das Layout „Server vorn": jedes Konto nimmt den letzten Server VOR seinem Login — der Server hinter dem Login gehört dort schon
+      // zum nächsten Konto. Sonst wie bisher der Server dahinter, ersatzweise der letzte davor.
+      const serverVorn = fnTreffer.length > 0 && !!bulkServerZuletzt(roh.slice(0, fnTreffer[0].index))
       fnTreffer.forEach((m, k) => {
         const von = k > 0 ? fnTreffer[k - 1].ende : 0
         const bisNaechster = k + 1 < fnTreffer.length ? fnTreffer[k + 1].index : roh.length
         let zugang = bulkZugangVoll(roh.slice(m.ende, bisNaechster))
-        // BU2 (Finn 26.11.2026, GFT-Zugangskarte „Server / GoatFunded-Server / This is your trading server name. / Login / … / Password / …"):
-        // der Server steht VOR dem Login → fehlt er dahinter, gilt ein beschrifteter Server davor (seit dem vorigen Konto). Der geht auch vor einem
-        // geratenen Wert des Mail-Parsers (Lücken-Füller), denn er ist ausdrücklich beschriftet.
-        if(!(bulkZugangLesen(roh.slice(m.ende, bisNaechster)) || {}).server){
-          const davor = bulkZugangLesen(roh.slice(k > 0 ? fnTreffer[k - 1].ende : 0, m.index))
-          if(davor && davor.server) zugang = Object.assign({}, zugang || {}, { server: davor.server })
-        }
+        // BU2/BU3: Server vor dem Login (GFT) — beschriftet, seit dem vorigen Konto, der LETZTE davor (bei gemischten Karten nie der des Vorgängers)
+        const svDavor = bulkServerZuletzt(roh.slice(von, m.index))
+        if(svDavor && (serverVorn || !(zugang && zugang.server))) zugang = Object.assign({}, zugang || {}, { server: svDavor })
         // Anker = letzte Größen-Zeile („$50K") vor dem Login, Titel = Zeile davor — so stört Text anderer Firmen davor nicht (Mischtext)
         const zlAlle = roh.slice(von, m.index).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
         let si = -1; zlAlle.forEach((x, j) => { if(/^\$\s*\d+(?:[.,]\d+)?\s*K$/i.test(x)) si = j })
@@ -53631,8 +53656,10 @@
         const nachher = roh.slice(m.ende, m.ende + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
         // 17.10.2026 (Jacob 511448315): FTMO-Zugangsdaten „Login … Server FTMO-Server" wurden als FundedNext · Challenge · 150k angelegt —
         // der Block schlug die gewählte FTMO-Vorlage. FundedNext nur noch mit Merkmal (Server/Text), sonst Firma + Typ aus dem Formular.
-        const merkmal = String(zugang && zugang.server || '') + '\n' + teil
-        const firma = /ftmo/i.test(merkmal) ? 'FTMO' : /funded\s*next|stellar/i.test(merkmal) ? 'FundedNext' : ''
+        // BU3: Firma JE BLOCK — mit Server nur am Server (vorher zählte der Text seit dem vorigen Login mit: FTMO-Karte + The5ers-Karte → zweites
+        // Konto „FTMO"); ohne Server nur eine Dashboard-Karte bzw. beim ersten Konto der Text davor (Begrüßung „FTMO …")
+        const merkmal = (zugang && zugang.server) ? String(zugang.server) : (si >= 0 || k === 0) ? teil : ''
+        const firma = /ftmo/i.test(merkmal) ? 'FTMO' : /funded\s*next|stellar/i.test(merkmal) ? 'FundedNext' : bulkFirmaAusServer(zugang && zugang.server)
         dazu(m.index, { id: m.login, titel, status: '', plattform: plat.toUpperCase(), firma, groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
                         typ: ((firma === 'FundedNext' && si >= 0) || typZeile) ? typ : '', balance: bal, trailing: null, tvUebernehmen: false, zugang })
       })
@@ -53670,6 +53697,15 @@
           if(credTrenner(x.t)) continue   // „:" allein (FundedNext-Mail) — das Label davor gilt weiter für den Wert danach (23.10.2026)
           const istLabel = BULK_ZUGANG_LABEL.test(x.t), nurLabel = istLabel && !x.t.replace(BULK_ZUGANG_LABEL, '').replace(/^\s*[:#=]?\s*/, '')
           if(istLabel || labelDavor){ labelDavor = nurLabel; continue }
+          // BU3 (Finn: „mehrere Konten auf einmal → nur das erste"): eine Zeile NUR aus Kennungen („511000003, 511000004; 511000005",
+          // Leerzeichen/Tabs) = je Kennung ein Konto. Eine Zeile mit Passwort/Server („Login Passwort Server") bleibt ein Konto (erstes Token).
+          const toks = x.t.split(/[\s,;]+/).map(t => t.replace(/^[#"']+|["']+$/g, '')).filter(Boolean)
+          const istKennung = t => mt5Login(t) || !!firmaVon(t) || (!nurLogins && /^[A-Z0-9][A-Z0-9-]{3,}$/i.test(t) && /\d/.test(t) && /[A-Z]/i.test(t))
+          if(toks.length > 1 && toks.every(istKennung)){
+            let ab = 0
+            for(const t of toks){ const off = x.t.indexOf(t, ab); ab = off + t.length; dazu(x.pos + Math.max(0, off), { id: t, titel: '', status: '', plattform: '', firma: firmaVon(t), groesse: null, typ: '', balance: null, trailing: null }) }
+            continue
+          }
           const w = nurLogins ? ersterTok(x.t) : (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, '')
           if(nurLogins && !mt5Login(w) && !firmaVon(w)) continue   // Passwort-/Server-Zeile des Logins davor
           if(w.length >= 4) dazu(x.pos, { id: w, titel: '', status: '', plattform: '', firma: firmaVon(w), groesse: null, typ: '', balance: null, trailing: null })
@@ -53706,8 +53742,16 @@
       // gewählt war): eine MT5-Login-Zahl verrät keine Vorlage (kein Präfix/Titel) → die oben gewählte Vorlage gilt, wenn nichts dagegen spricht
       // (anderes Präfix der Vorlage, andere erkannte Firma oder Größe).
       const a = bulkVorlageAktiv
-      if(!a || px) return null
-      if(x.firma && a.firm && x.firma !== a.firm) return null
+      if(!a) return null
+      // BU3: Block einer ANDEREN Firma (gemischte Karten, Firma am Server erkannt) → die eine passende Vorlage dieser Firma (gleicher Typ und
+      // gleiche Größe wie oben gewählt bevorzugt); mehrere gleich gute → keine (Auswahl auf der Karte)
+      if(x.firma && a.firm && x.firma !== a.firm){
+        const l = bulkZentral.filter(v => v.firm === x.firma && v.aktiv !== false)
+        const gleich = (v, k) => String(v[k] || '') === String(a[k] || '')
+        const l2 = l.filter(v => gleich(v, 'account_type')), l3 = l2.filter(v => Number(v.account_size || v.starting_balance) === Number(a.account_size || a.starting_balance))
+        return l3.length === 1 ? l3[0] : l2.length === 1 ? l2[0] : l.length === 1 ? l[0] : null
+      }
+      if(px) return null
       const gr = Number(x.groesse) || 0, ga = Number(a.account_size || a.starting_balance) || 0
       if(gr && ga && gr !== ga) return null
       return a
@@ -53747,6 +53791,13 @@
       const firmaForm = bEl.firm.value.trim()
       return bulkPaste.bloecke.filter(x => { const v = bulkPasteVorlage(x); return bulkIstNeu(x) && ((v && v.firm) || x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached|passed/i.test(x.status)) })
     }
+    // BU3: was einem erkannten CFD-Block fehlt, ruhig benennen (Passwort → unten in der Zeile eintragen; Server → aus der Firma vorausgefüllt)
+    function bulkFehltHinweis(x, firma){
+      if(!bulkBlockIstCfd(x)) return ''
+      const z = x.zugang || {}, std = (typeof serverForFirm === 'function') ? serverForFirm(firma) : ''
+      const t = [z.password ? '' : 'Passwort fehlt — unten eintragen', z.server ? '' : (std ? `Server aus Firma: ${std}` : 'Server fehlt — unten eintragen')].filter(Boolean)
+      return t.length ? `<span class="m" style="color:var(--sub-2)">${escapeHtml(t.join(' · '))}</span>` : ''
+    }
     function bulkPasteRender(){
       const b = bulkPaste.bloecke
       if(!bpEl.vs) return
@@ -53754,7 +53805,9 @@
       const leer = !String(bpEl.box.value || '').trim()
       if(leer || !b.length){
         bpEl.vs.style.display = leer ? 'none' : ''
-        if(!leer) bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Kennung erkannt.</div>'
+        // BU3: ruhig sagen, was fehlt — Passwort/Server gefunden, aber keine Login-Zeile
+        const hatZugang = !leer && credTextSauber(bpEl.box.value).split('\n').some(l => (CRED_LBL.password.test(l.trim()) || CRED_LBL.server.test(l.trim())) && !CRED_NIE.test(l))
+        if(!leer) bpEl.vs.innerHTML = `<div class="bpv" style="color:var(--sub)">Keine Kennung erkannt.${hatZugang ? ' Passwort/Server gefunden, aber keine Login-Zeile — bitte „Login“ + Nummer mit einfügen (oder je Zeile: Login Passwort Server).' : ' Erwartet: eine Kennung je Zeile, Dashboard-Text oder die Zugangskarte der Firma.'}</div>`
         bpEl.zaehler.textContent = ''
         bulkSpeichernKnopf(0); return
       }
@@ -53778,6 +53831,7 @@
           ${reset ? `<span class="m" style="color:var(--warn)">↻ Reset · ${escapeHtml(schon)} — wird als neues Konto angelegt</span>` : ''}
           ${(t && !reset && firma) ? `<button type="button" class="btn btn-ghost btn-xs" data-bpr="${escapeHtml(x.id)}" style="margin-top:4px">↻ Geresettet – trotzdem anlegen</button>` : ''}
           ${!sperre && x.zugang && (x.zugang.password || x.zugang.server) ? `<span class="m" style="color:var(--good,#12B76A)">✓ ${[x.zugang.password ? 'Passwort' : '', x.zugang.server ? 'Server' : ''].filter(Boolean).join(' + ')} erkannt</span>` : ''}
+          ${!sperre ? bulkFehltHinweis(x, firma) : ''}
           ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkVorlagenGruppiert(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`)}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
@@ -53786,7 +53840,11 @@
       bpEl.vs.querySelectorAll('[data-bpr]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); bulkPaste.reset.add(bulkKey(btn.dataset.bpr)); bulkPaste.an.set(btn.dataset.bpr, true); bulkPasteRender() }))
       const neu = bulkWahl().length
       const nReset = b.filter(x => bulkPaste.treffer.has(bulkKey(x.id)) && bulkPaste.reset.has(bulkKey(x.id))).length
+      // BU3: beschriftete Passwörter ohne erkannten Login ruhig benennen (Login-Zeile fehlt / nicht als Zahl erkennbar)
+      const pwZeilen = credTextSauber(bpEl.box.value).split('\n').filter(l => CRED_LBL.password.test(l.trim()) && !CRED_NIE.test(l)).length
+      const pwLos = Math.max(0, pwZeilen - b.filter(x => x.zugang && x.zugang.password).length)
       bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu${nReset ? ` (davon ${nReset} Reset)` : ''} · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
+        + (pwLos ? ` · ${pwLos} Passwort${pwLos === 1 ? '' : 'e'} ohne erkannten Login — Login-Zeile prüfen` : '')
       bulkSpeichernKnopf(neu)
     }
     // „Accounts anlegen": Anzahl = neue, angehakte Kennungen; ohne Kennung gesperrt (External IDs ist Pflicht)
@@ -62345,7 +62403,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2341'
+  const OS_TAB_BUILD = '2026-09-22.2342'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
