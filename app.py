@@ -26094,8 +26094,18 @@ def pa1_posten_plus(posten, vid, n, jetzt_iso=None):
         x = {"vorlage_id": str(vid), "anzahl": int(n)}
         p.append(x)
     if jetzt_iso:
-        x["at"] = jetzt_iso
+        x["at"] = jetzt_iso               # letzter Klick (Folgelauf-Erkennung)
+        x.setdefault("ab", jetzt_iso)     # erster Klick dieses Postens — bleibt (PA1c: Bezug für „vorher gesehen")
     return p, alt + int(n)
+
+
+def pa1_bezug(a):
+    """REIN RECHNEND (PA1c, Prüfer S2 25.11.2026): Bezugszeit für „vorher gesehen" = frühester Kauf-Klick (posten.ab, sonst posten.at), erst
+    ohne Posten-Zeit created_at. Ein zum Kauf-Auftrag umgewandelter Mail-Auftrag hat ein altes created_at (live seit 29.10.) — davon aus gerechnet
+    wäre ein altes, nicht eingetragenes Challenge-Konto „neu" und belegte den Kauf-Platz."""
+    ts = [pa1_iso(x.get("ab") or x.get("at")) for x in ((a or {}).get("posten") or []) if isinstance(x, dict)]
+    ts = [t for t in ts if t]
+    return min(ts) if ts else pa1_iso((a or {}).get("created_at"))
 
 
 def pa1_nachgekauft(a):
@@ -26342,7 +26352,7 @@ def _pa1_erledigt(uid, a, b, erg):
         posten = pa1_posten(a)                      # PA1b: alle Vorlagen dieser einen Prüfung
         vids = sorted({p["vorlage_id"] for p in posten if ADMIN_MAIL_UID_RE.fullmatch(str(p["vorlage_id"]))})
         vorlagen = {str(x.get("id")): x for x in (sb_select("bulk_vorlagen", {"select": "*", "id": f"in.({','.join(vids)})"}) or [])} if vids else {}
-        erstellt = pa1_iso(a.get("created_at")) or jetzt
+        erstellt = pa1_bezug(a) or jetzt   # PA1c: erster Kauf-Klick, nicht created_at (umgewandelte Mail-Aufträge sind alt)
         vorher, weg = set(), set()
         for r in sb_select("tv_konten", {"select": "name,zuerst_at,ignoriert_at", "user_id": f"eq.{uid}", "limit": "2000"}) or []:
             k = admin_konto_ext_norm(r.get("name"))
@@ -26493,7 +26503,7 @@ def konto_suche():
                 continue
             try:
                 a = sb_insert("tv_konten_auftrag", {"user_id": ziel, "firma": firma, "art": "gekauft", "anzahl": anzahl, "vorlage_id": vid,
-                                                    "posten": [{"vorlage_id": vid, "anzahl": anzahl, "at": jetzt.isoformat()}],
+                                                    "posten": [{"vorlage_id": vid, "anzahl": anzahl, "at": jetzt.isoformat(), "ab": jetzt.isoformat()}],
                                                     "frist_bis": frist.isoformat(), "erstellt_von": wer, "faellig_at": faellig.isoformat()})
                 break
             except requests.exceptions.HTTPError as e:   # gleichzeitiger Klick hat den Auftrag eben angelegt → neu lesen, dazu addieren

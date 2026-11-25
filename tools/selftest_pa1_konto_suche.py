@@ -32,7 +32,7 @@ NAMEN = {"_wd_num", "tv_konto_normal", "admin_konto_ext_norm", "admin_konto_dopp
          "PA1_NACH_MIN_S", "PA1_NACH_MAX_S", "PA1_NACH_WE_MIN_S", "PA1_NACH_WE_MAX_S", "PA1_FRIST_S", "PA1_FRIST_WE_S", "PA1_VORHER_S",
          "PA1_MAX_ANZAHL", "PA1_MAX_FEHLVERSUCHE", "PA1_PHASE", "pa1_verzug_s", "pa1_iso", "pa1_wochenende", "pa1_klick_zeiten", "pa1_naechste",
          "pa1_art", "PA1_GROESSE_PRAEFIX", "pa1_groesse_passt", "pa1_name", "pa1_konto_zeile", "pa1_neue", "pa1_urteil", "pa1_offen_bestanden", "pa1_weiter", "pa1_nach_fehler", "pa1_hm",
-         "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen"}
+         "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen", "pa1_bezug"}
 baum = ast.parse(SRC)
 teile = []
 for n in baum.body:
@@ -130,6 +130,35 @@ check(u == "anlegen" and len(zu) == 5 and {v for _k, v in zu} == {VA}, "Apex-5er
 check(g.pa1_zuordnen(["APEX7000010000001"], "Apex Trader", APX + [{"vorlage_id": V300, "rest": 1, "groesse": 100000}])[2] == "groessen",
       "Apex mit zwei Größen offen (Größe nicht in der Kennung) → „mehrere Größen · von Hand“")
 check(g.pa1_zuordnen([], "Tradeify", OFF)[2] == "keine" and g.pa1_zuordnen(["TDFYSL150000000011"], "Tradeify", [])[2] == "ueberzahl", "keine neuen / nichts mehr offen")
+
+# ── PA1c (Prüfer S2): umgewandelter Mail-Auftrag (created_at 29.10.) — Bezug „vorher gesehen" = erster Kauf-Klick, nicht created_at ──
+KLICK = "2026-11-25T08:00:00+00:00"
+MAIL = {"art": "gekauft", "created_at": "2026-10-29T06:00:00+00:00", "vorlage_id": VA, "anzahl": 1}
+p1, _s = g.pa1_posten_plus([], VA, 1, KLICK)                     # Umwandeln: Posten frisch, ab = Klick
+MAIL["posten"] = p1
+check(g.pa1_bezug(MAIL) == datetime.fromisoformat(KLICK), "Bezug = erster Kauf-Klick (posten.ab), nicht das alte created_at")
+p2_, _s = g.pa1_posten_plus(p1, VA, 1, "2026-11-25T16:00:00+00:00")   # zweiter Klick 8 h später: ab bleibt
+check(p2_[0]["ab"] == KLICK and p2_[0]["at"].startswith("2026-11-25T16") and g.pa1_bezug(dict(MAIL, posten=p2_)) == datetime.fromisoformat(KLICK),
+      "weiterer Klick verschiebt den Bezug nicht (ab bleibt, at = letzter Klick)")
+check(g.pa1_bezug({"created_at": "2026-11-20T00:00:00+00:00"}) == datetime(2026, 11, 20, tzinfo=timezone.utc), "alte Zeile ohne Posten → created_at")
+# Der Fall: Apex (keine Größe in der Kennung). Altes, nie eingetragenes Challenge-Konto APEX…0099 sah Puls am 10.11. zuerst; das gekaufte
+# APEX…0001 erscheint 10 min nach dem Klick. Mit created_at − 6 h (28.10.) wäre APEX…0099 „neu" → belegt den einen Kauf-Platz.
+TVK = [("APEX7000990000099", "2026-11-10T12:00:00+00:00"), ("APEX7000010000001", "2026-11-25T08:10:00+00:00"), ("APEX6000000000001", "2026-10-20T00:00:00+00:00")]
+def vorher_ab(bezug):
+    return {k for k, z in TVK if datetime.fromisoformat(z) < bezug - timedelta(seconds=g.PA1_VORHER_S)}
+LISTE = [k for k, _z in TVK]
+alt_v = vorher_ab(datetime.fromisoformat(MAIL["created_at"]))
+neu_v = vorher_ab(g.pa1_bezug(MAIL))
+t_alt = g.pa1_neue(LISTE, "Apex Trader", [], vorher=alt_v)
+t_neu = g.pa1_neue(LISTE, "Apex Trader", [], vorher=neu_v)
+check(g.pa1_zuordnen(t_alt["challenge"], "Apex Trader", [{"vorlage_id": VA, "rest": 1, "groesse": 50000}])[2] == "ueberzahl",
+      "Gegenprobe: mit created_at als Bezug wären 2 „neu“ (altes …0099 + gekauftes) → Überzahl, das gekaufte bliebe „von Hand“")
+zu_c, _a3, u_c = g.pa1_zuordnen(t_neu["challenge"], "Apex Trader", [{"vorlage_id": VA, "rest": 1, "groesse": 50000}])
+check(u_c == "anlegen" and zu_c == [("APEX7000010000001", VA)] and any(g.pa1_art(k, "Apex Trader") for k in neu_v),
+      "PA1c: mit Bezug = Kauf-Klick nur das gekaufte APEX…0001 angelegt, altes …0099 ausgeschlossen, Basis vorhanden")
+er_c = SRC[SRC.index("def _pa1_erledigt("):SRC.index('\n@app.route("/konto-suche"', SRC.index("def _pa1_erledigt("))]
+check("erstellt = pa1_bezug(a) or jetzt" in er_c and 'pa1_iso(a.get("created_at"))' not in er_c, "Auswertung rechnet „vorher“ ab pa1_bezug, nicht ab created_at")
+check('"ab": jetzt.isoformat()' in SRC, "neuer Auftrag setzt posten.ab")
 
 # ── pa1_urteil ──
 U_ = lambda ch, un=(): {"challenge": list(ch), "unklar": list(un), "funded": ["F1"], "nachfolger": ["N1"]}   # noqa: E731
