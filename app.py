@@ -25973,6 +25973,9 @@ def pa1_iso(v):
 
 def pa1_wochenende(jetzt):
     """REIN RECHNEND: CME-Wochenende? Freitag ab 17:00 bis Sonntag vor 17:00 Chicago (Sommer-/Winterzeit über die Zone)."""
+    # Import hier wie überall in app.py (kein Modul-Import von ZoneInfo) — ohne ihn warf jeder „Gekauft“-Klick NameError → 502,
+    # kein Auftrag, jeder Klick fiel ins Fenster (Finn 25.11.2026, Master lokal nachgestellt).
+    from zoneinfo import ZoneInfo
     c = jetzt.astimezone(ZoneInfo("America/Chicago"))
     return (c.weekday() == 4 and c.hour >= 17) or c.weekday() == 5 or (c.weekday() == 6 and c.hour < 17)
 
@@ -26193,6 +26196,7 @@ def pa1_nach_fehler(a, jetzt, r=None):
 
 
 def pa1_hm(v):
+    from zoneinfo import ZoneInfo   # wie pa1_wochenende: kein Modul-Import in app.py (Master 25.11.2026)
     t = pa1_iso(v)
     return t.astimezone(ZoneInfo("Asia/Dubai")).strftime("%H:%M") if t else "?"
 
