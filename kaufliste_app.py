@@ -57,6 +57,7 @@ def zeilen_aus_vorrat(zellen, nur_uid=None, namen=None):
             "pack": z.get("kauf_pack"),                     # Apex: 5er-Pack (Zeilen als Pack gruppiert, Gekauft/Erledigt fürs ganze Pack)
             "einheit": nk.get("einheit"), "preis_eur": nk.get("preis_eur"),
             "untergrenze": z.get("untergrenze"), "bestellt": z.get("bestellt"),
+            "bestand": z.get("bestand_echt"),               # KP2g: Firmen-Kopf „Ist / Soll" (Ist = gesicherter Bestand, Soll = untergrenze)
         })
     rang = {"jetzt": 0, "bald": 1}
     out.sort(key=lambda x: (rang.get(x["lage"], 2), -(x["score"] or 0), str(x["name"]).lower(), str(x["firma"])))

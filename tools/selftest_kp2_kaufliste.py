@@ -154,6 +154,12 @@ pruef("· keine Kaufvorschläge</span>" in fe and "new Set(sp.map(s => s.user_id
 pruef("const posten = Array.isArray(a.posten) && a.posten.length ? a.posten : [{ vorlage_id: a.vorlage_id, anzahl: a.anzahl }]" in fe
       and "String(x.vorlage_id) === String(vid)" in fe, "PA1b: Knopf-Stand über posten[] je Vorlage")
 
+# KP2g (Finn: „1/3 laufend sieht unnötig aus", Demo abgenommen): Firmen-Kopf je ID × Firma, ruhige Konto-Zeilen ohne Chips
+pruef("const firmenKopf = (z, l) =>" in fe and "kaufen · ${lauf} ${lauf === 1 ? 'läuft' : 'laufen'}" in fe and "data-kl-firma-wahl" in fe,
+      "Firmen-Kopf: Farbpunkt · Firma · „n kaufen · m laufen · Ist / Soll“ · Kästchen für alle Zeilen der Firma")
+pruef("→ ${lauf}/${z.max} laufend" not in fe and 'class="kl-chip res"' not in fe and "kl-fk-res" in fe, "kein „1/3 laufend“-Chip mehr, Reserve nur als Punkt am Kopf")
+pruef(KL.zeilen_aus_vorrat([dict(zellen[0], bestand_echt=5000)], None, {})[0]["bestand"] == 5000, "Zeilen liefern den Bestand für „Ist / Soll“")
+
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402
 from datetime import datetime as _dt, timezone as _tz  # noqa: E402
