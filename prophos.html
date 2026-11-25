@@ -62214,7 +62214,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2329'
+  const OS_TAB_BUILD = '2026-09-22.2330'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -98173,7 +98173,7 @@ ${stBlock}
       catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
     }
     async function pausieren(uid, firma, frei){
-      if(!frei && !confirm(`${firma} für diese ID pausieren?\nDie Kaufliste schlägt dort nichts vor (und der Planer plant ihre Konten nicht neu), bis du sie wieder freigibst.`)) return
+      if(!frei && !confirm(`${firma} für diese ID pausieren?\nDie Kaufliste schlägt dort nichts vor, bis du sie wieder freigibst. Laufende Konten werden weiter geplant und getradet.`)) return
       try{ await klPost('/admin/vorrat', { user_id: uid, firma, status: frei ? 'frei' : 'pausiert' }, cfg.alle); klToast(`${firma} ${frei ? 'wieder frei' : 'pausiert'}`); laden(true) }
       catch(e){ klToast((frei ? 'Freigeben' : 'Pausieren') + ' ging nicht: ' + (e.message || e)) }
     }
