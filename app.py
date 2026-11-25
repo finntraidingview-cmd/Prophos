@@ -25788,7 +25788,9 @@ def pc_tv_konten_auftrag():
                     pass   # offener Auftrag dieser Firma existiert schon (Index) — gut so
         faellig = sb_select("tv_konten_auftrag", dict({"select": "id,firma,art,faellig_at", "user_id": f"eq.{uid}", "status": "eq.offen",
                                                        "faellig_at": f"lte.{jetzt.isoformat()}", "order": "faellig_at.asc", "limit": "1"},
-                                                      **({"art": f"in.({','.join(arten + (['taeglich'] if TV_KONTEN_TAEGLICH and mail_frei else []))})"}))) or []   # Tages-Fallback aus: nie ausgeben
+                                                      **({"art": f"in.({','.join(arten + (['taeglich'] if TV_KONTEN_TAEGLICH and mail_frei else []))})"}),
+                                                      # Einmal-Marke (Finn 25.11.2026 „nur jetzt"): PC-Tab ist streng gesperrt (offener Trade) → nur Aufträge mit ergebnis.sofort
+                                                      **({"ergebnis->>sofort": "eq.true"} if request.args.get("nur_sofort") == "1" else {}))) or []   # Tages-Fallback aus: nie ausgeben
         if not faellig:
             return jsonify({"ok": True, "auftrag": None})
         a = faellig[0]

@@ -69,7 +69,7 @@ def main():
         for k, v in alt.items():
             setattr(panel, k, v)
     ph = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
-    i = ph.index("  function tvkFrei(){")
+    i = ph.index("  function tvkFrei(sofort){")   # Einmal-Marke sofort (Finn 25.11.2026): Parameter lockert nur „offener Plan"
     blk = ph[i:ph.index("  async function tvkTick(){", i)]
     zeile = next(z for z in blk.splitlines() if "plaene.some(p => p && p.status === 'open'" in z)
     bed = zeile[zeile.index("p => ") + 5:zeile.index(")) return")]
@@ -79,6 +79,10 @@ def main():
     ok(all(sperrt(r) for r in ("tvv2", "tsv2", "tvplus", "polar", "dup", "topstep", None)),
        "PC-Tab: tvv2, tsv2, tvplus (Duplikum Puls), polar, dup, topstep und Pläne ohne route sperren weiter")
     ok("TVK_START_ABSTAND_MS" in blk, "PC-Tab: Start < 45 min bleibt für alle Routen")
+    ok("if(!sofort && plaene.some(" in blk, "PC-Tab: nur die Einmal-Marke sofort lockert „offener Plan (nicht Echo)“")
+    tk = ph[ph.index("  async function tvkTick(){"):]
+    ok("streng ? '&nur_sofort=1' : ''" in tk[:3000] and "(streng && tvkFrei(true))" in tk[:600],
+       "PC-Tab: streng gesperrt → holt nur Aufträge mit Marke sofort (nur_sofort=1)")
     j = ph.index("  function tvnRuhe(")
     ok("p.status === 'open' && !echo(p))) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],
        "TV-Neuladen/Tampermonkey (tvnPlanSperre): offene Pläne außer mt5/mt5v2 sperren")

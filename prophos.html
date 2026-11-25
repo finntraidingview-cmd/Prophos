@@ -31309,7 +31309,10 @@
   const TVK_TAKT_MIN_MS = 2 * 60000, TVK_TAKT_MAX_MS = 4 * 60000, TVK_START_ABSTAND_MS = 45 * 60000
   window._tvkLaeuft = false
   let _tvkLetzter = null
-  function tvkFrei(){
+  // sofort (Finn 25.11.2026, einmalig erlaubt: „Accounts wechseln und Puls ignorieren — nur jetzt"): true = die Sperre „offener Plan (nicht
+  // Echo)" gilt nicht. Nur für Aufträge, die Railway mit der Einmal-Marke ergebnis.sofort ausgibt (nur_sofort=1); alles andere bleibt streng.
+  // Das Panel lehnt weiter ab, wenn Puls gerade arbeitet (puls_beschaeftigt), der Heimweg danach führt zurück zum Trade-Konto.
+  function tvkFrei(sofort){
     try{
       if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return 'kein PC-Tab'
       // nur ein PC mit laufendem Puls-Chrome-Reader (Tab 'puls-…', Stand ≤ 60 s) — ein eingeloggter localhost-Tab ohne Puls (Mac) holt nie Aufträge
@@ -31319,7 +31322,7 @@
       // nur Echo/Echo V2 (MT5) sperren nicht mehr (Master 29.10.2026, Befund Chris: drei Echo-V2-Trades liefen 7–13 h und hielten das Lesen
       // den ganzen Tag zurück, ohne das Puls-Chrome zu nutzen) — das prüft das Panel selbst (MT5-Order läuft? Leerlauf ≥ 120 s?). Jede andere
       // Route (tvv2, tsv2, tvplus, polar, dup, topstep, ohne route) sperrt weiter (S2: tvplus platziert ebenfalls im Puls-Chrome)
-      if(plaene.some(p => p && p.status === 'open' && p.route !== 'mt5' && p.route !== 'mt5v2')) return 'offener Plan (nicht Echo)'
+      if(!sofort && plaene.some(p => p && p.status === 'open' && p.route !== 'mt5' && p.route !== 'mt5v2')) return 'offener Plan (nicht Echo)'
       // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
       const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
         && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))
@@ -31334,14 +31337,15 @@
     }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
   }
   async function tvkTick(){
-    if(window._tvkLaeuft || tvkFrei()) return
+    const streng = tvkFrei()
+    if(window._tvkLaeuft || (streng && tvkFrei(true))) return   // streng gesperrt → nur noch Aufträge mit Einmal-Marke „sofort" holen
     let tok = null
     try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
     if(!tok) return
     let a = null
     try{
       const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')   // Probelauf-Weiche TV_KONTEN_PCS (Railway)
-      const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}`, { headers: { 'sb-token': tok } })
+      const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}${streng ? '&nur_sofort=1' : ''}`, { headers: { 'sb-token': tok } })
       if(!r.ok) return   // Route/Tabelle noch nicht da → still
       a = ((await r.json()) || {}).auftrag
     }catch(_){ return }
@@ -31355,7 +31359,7 @@
           trail: tr.slice(-2000), fehlerbild: lauf && lauf.fehlerbild ? String(lauf.fehlerbild).slice(0, 120) : '', schritt: lauf && lauf.schritt ? String(lauf.schritt).slice(0, 40) : '' }) }) }catch(_){}
     }
     // zweiter Blick NACH dem Holen (zwischen Tick und Antwort kann ein Start losgelaufen sein) — dann zurückgeben (Fehler zählt als Versuch? nein: code 'belegt')
-    const nachher = tvkFrei()
+    const nachher = tvkFrei(!!streng)
     if(nachher){ await melden(false, [], `belegt: ${nachher}`, 'belegt'); return }
     const acc = (accounts || []).find(x => String(x.externalId || '').trim() === String(a.ext || '').trim())
     const kx = acc ? tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }) : { firma: a.firma, tv_username: '', geschwister: [] }
@@ -62404,7 +62408,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2344'
+  const OS_TAB_BUILD = '2026-09-22.2345'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
