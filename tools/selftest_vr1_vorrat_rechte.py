@@ -116,6 +116,17 @@ s, w = post(ADM, {"aktion": "einstellung", "sicherheit": 0.5})
 check(s == 200 and w, f"einstellung: ADMIN_EMAILS erlaubt ({s})")
 s, w = post(LES, {"aktion": "ki_hinweis", "text": "Bitte vorsichtig"})
 check(s == 200 and w, f"ki_hinweis: admin_mail_leser erlaubt ({s})")
+print("5) Admin-Prüfung nicht möglich (Review)")
+_alt_auth = app._admin_auth
+app._admin_auth = lambda: (None, (jsonify({"error": "Admin-Prüfung nicht verfügbar"}), 502))
+s, w = post(KUNDE, ST(FREMD))
+check(s == 502 and not w, f"fremde Zelle: 502 wird weitergereicht, nichts geschrieben ({s})")
+check(post(KUNDE, ST(ICH))[0] == 200, "eigene Zelle braucht keine Admin-Prüfung → weiter erlaubt")
+s, w = post(KUNDE, {"aktion": "einstellung", "sicherheit": 0.5})
+check(s == 502 and not w, f"einstellung: 502 weitergereicht ({s})")
+s, w = post(KUNDE, {"aktion": "bestellt_weg", "id": 7})
+check(s == 200 and w and w[0][2].get("user_id") == f"eq.{ICH}", f"bestellt_weg: eigene Bestellung trotzdem zurücknehmbar, nur eigene ({s})")
+app._admin_auth = _alt_auth
 s, _ = post(KUNDE, {"aktion": "rechnen"})
 check(s == 200, f"rechnen (nur neu rechnen, schreibt keine fremden Daten): jeder Login wie bisher ({s})")
 

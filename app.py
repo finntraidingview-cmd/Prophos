@@ -12607,8 +12607,9 @@ def _vorrat2_aktion(aktion, body, uid):
         admin = False
         if not nur and aktion in ("ki_hinweis", "ki_hinweis_weg", "ziel", "ziel_neu", "einstellung", "bestellt_weg"):
             admin, err = _vorrat_admin_frei(uid)
-            if err:
+            if err and aktion != "bestellt_weg":
                 return err
+            admin = bool(admin)   # Review VR1: Admin-Prüfung nicht möglich → bestellt_weg nur eigene (fail-closed), statt auch das zu verweigern
         if aktion in ("ki_hinweis", "ki_hinweis_weg"):
             # Hinweise an den KI-Bot (Finn 06.10.2026) — gelten für alle IDs, „nur eigene"-Nutzer dürfen nicht
             if nur or not admin:
