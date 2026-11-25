@@ -2718,6 +2718,91 @@ PROV_LOCK = threading.Lock()
 PROV_JOB = None  # {"name", "steps": {key: {"state", "note"}}, "error", "done"}
 
 
+def provision_probe(code, pfad):
+    """GT5 (Prüfer S2): Kandidat von provision.py in einem FRISCHEN Namensraum ausführen — fängt Syntax- UND Laufzeitfehler auf Modul-Ebene, bevor die
+    Datei geschrieben oder ins Panel geladen wird (Copier und order_bot importieren provision selbst und scheiterten sonst an einer kaputten Datei).
+    Wirft bei jedem Fehler."""
+    exec(compile(code, pfad, "exec"), {"__name__": "provision_probe", "__file__": pfad, "__builtins__": __builtins__})
+
+
+def provision_frisch(lesen=None, neu_laden=None, holen=None, schreiben=None, pruefen=None):
+    """GT5 (25.11.2026, Befund GT4 pc-2zc2we: Panel lief mit GT3-panel.py, im Speicher aber noch das ALTE provision.py — das Panel lädt provision
+    nur beim Start, die Datei erneuert die Copier-.bat; jede Einrichtung lief so weiter mit dem alten Stand). Vor JEDER Einrichtung: weicht
+    provision.py auf der Platte vom geladenen Abbild ab, erst probeweise kompilieren, dann importlib.reload(provision) und das Abbild nachziehen
+    (panel_lauf.provision_sha12 zeigt danach den neuen Stand, der Update-Neustart braucht für reine provision-Änderungen keinen Neustart mehr).
+    Datei unlesbar/kaputt/Fehler beim Laden → alter Stand bleibt. lesen/neu_laden/holen injizierbar (Test). → 'gleich' | 'neu' | 'fehler: …'
+    GT5b (gleicher Tag, Befund: das Panel startete 05:15 UTC neu und lud WIEDER das alte provision.py): start-panel.bat lädt nur panel.py + VERSION,
+    provision.py erneuert allein start-copier.bat — und die nur beim Copier-Neustart. Deshalb holt provision_frisch den Stand jetzt selbst aus dem
+    NEUESTEN Commit (repo_sha + repo_datei, Adresse mit Commit-Kennung wie _selbst_auffrischen): weicht er von der Platte ab und ist er plausibel
+    (≥ 5000 Bytes, „def run_provision“, kompiliert), wird er atomar geschrieben (.prev bleibt wie bei der .bat) und dann geladen. Kein Netz → Platte."""
+    pfad = os.path.abspath(getattr(provision, "__file__", "") or os.path.join(HERE, "provision.py"))
+    lesen = lesen or _datei_bytes
+    if holen is None:
+        def holen():
+            sha = repo_sha()
+            return repo_datei("mt5-copier/provision.py", sha, 10) if sha else None
+    try:
+        repo = holen()
+    except Exception as e:
+        print(f"[prov] provision.py aus dem Repo nicht holbar ({type(e).__name__}) — Stand der Platte", flush=True)
+        repo = None
+    def _datei_schreiben(p, inhalt, vorher):
+        if schreiben:
+            schreiben(p, inhalt, vorher)
+            return
+        if vorher:
+            with open(p + ".prev", "wb") as f:
+                f.write(vorher)
+        with open(p + ".tmp", "wb") as f:
+            f.write(inhalt)
+        os.replace(p + ".tmp", p)
+
+    platte = lesen(pfad)
+    geschrieben = False
+    if repo and len(repo) >= 5000 and b"def run_provision" in repo and _code_glatt(repo) != _code_glatt(platte):
+        try:
+            (pruefen or provision_probe)(repo, pfad)   # S2: erst probeweise ausführen, dann schreiben (.tmp → os.replace)
+            _datei_schreiben(pfad, repo, platte)
+            geschrieben = True
+            print("[prov] provision.py vom neuesten Stand geholt (Platte war älter)", flush=True)
+        except Exception as e:
+            print(f"[prov] provision.py vom Repo nicht übernommen ({type(e).__name__}: {str(e)[:120]}) — Stand der Platte", flush=True)
+    neu = lesen(pfad)
+    if not neu:
+        return "gleich"
+    if _code_glatt(neu) == _code_glatt(_GELADEN.get("provision")):
+        return "gleich"
+    # Prüfer-Stopp S2 (25.11.2026): compile fängt nur Syntaxfehler — ein LAUFZEITfehler beim Ausführen des Moduls bräche reload mittendrin ab
+    # (Modul halb neu, halb alt; Einrichtung und Heilung liefen gemischt weiter). Deshalb vorher den Modul-Namensraum sichern und bei jedem Fehler
+    # vollständig zurückspielen; eine eben selbst geschriebene Datei kommt ebenfalls zurück (Platte = laufender Stand).
+    try:
+        (pruefen or provision_probe)(neu, pfad)       # S2: Stand der Platte vor dem Reload ebenso probeweise ausführen
+    except Exception as e:
+        print(f"[prov] provision.py auf der Platte nicht ladbar ({type(e).__name__}: {str(e)[:120]}) — alter Stand bleibt", flush=True)
+        return f"fehler: {type(e).__name__}"
+    alt_ns = dict(provision.__dict__)
+    try:
+        if neu_laden:
+            neu_laden()
+        else:
+            import importlib
+            importlib.reload(provision)               # dasselbe Modul-Objekt: alle Verweise im Panel sehen den neuen Stand
+    except Exception as e:
+        provision.__dict__.clear()
+        provision.__dict__.update(alt_ns)
+        if geschrieben and platte:
+            try:
+                _datei_schreiben(pfad, platte, None)
+            except Exception:
+                pass
+        print(f"[prov] provision.py neu laden fehlgeschlagen ({type(e).__name__}: {str(e)[:120]}) — alter Stand bleibt"
+              + (" (Datei zurückgeschrieben)" if geschrieben and platte else ""), flush=True)
+        return f"fehler: {type(e).__name__}"
+    _GELADEN["provision"] = neu
+    print("[prov] provision.py neu geladen (Stand auf der Platte war neuer als der geladene)", flush=True)
+    return "neu"
+
+
 def prov_start(name, login, password, server, owner=None, display=None, firmen_symbol=None):
     global PROV_JOB
     with PROV_LOCK:
@@ -2745,6 +2830,10 @@ def prov_start(name, login, password, server, owner=None, display=None, firmen_s
 
     def worker():
         try:
+            try:
+                provision_frisch()                    # GT5: neuer provision.py-Stand ohne Panel-Neustart
+            except Exception as e:
+                print(f"[prov] provision_frisch übersprungen ({type(e).__name__})", flush=True)
             # Vorlage-EA sicherstellen (28.08.2026, frischer-PC-Provisionierung):
             # auf einem neu aufgesetzten PC ist das Lese-EA in der Master-Vorlage
             # noch nie kompiliert — run_provision braeche sonst am ex5-Check ab
