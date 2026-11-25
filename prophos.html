@@ -18003,7 +18003,7 @@
       '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]', '[data-wp3-zurueck]', '[data-fcr-in]', '[data-fcr-sw]', '[data-fcr-edit]', '[data-fcr-save]',
       '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
       '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
-      '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-lotsok]', '[data-gp]', '[data-tw-hand]',
+      '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-tpl-abo]', '[data-tpl-lotsok]', '[data-gp]', '[data-tw-hand]',
       '[data-e2-pfad]', '[data-e2-save]', '[data-e2-sofort]', '[data-e2-ktadd]', '[data-e2-ktx]', '[data-e2-ktsel]',   // E2 Einstellungen Funded Futures (04.11.2026), E2g Kontrakte-Zeilen
       // Winning Days
       '#wdWuerfel', '#wdSave', '#wdRiskAlle', '#wdRegelnSave', '#wdNdAlle', '#wdHedgeSave', '#wdHedgeSave2', '#wd-staffel-reset', '#wd-staffel-add', '#ws-knopf',
@@ -72893,10 +72893,36 @@
           text: gg.length ? `${was} (von Hand, seit ${uhr(z.seit)}) gegen ${gegen}` : `${was} von Hand seit ${uhr(z.seit)} — ohne Plan in Prophos` })
       }
     }catch(e){ console.warn('[tpl] Fremd-Positionen', e) }
+    // FK1 FTMO-FUTURES-ABO KÜNDIGEN (Finn 25.11.2026): geblowte FTMO-Futures-Challenges verlängern sich alle 30 Tage weiter — je Konto eine Zeile
+    // bei SEINER ID, bis „✓ gekündigt" (GET /konto/abo-kuendigen, fk1Laden). ≤ 3 Tage bis zur Verlängerung rot.
+    try{ fk1Laden() }catch(_){}   // gedrosselt (10 min), zeichnet bei neuen Fällen über tplSpaeter nach
+    for(const f of ((window._fk1 && window._fk1.faelle) || [])){
+      add(f.user_id, f.person, { art: 'abo', firma: f.firma, konto: f.konto, typ: 'challenge', ende4: f.ende4 || '', abo: String(f.konto_id || ''), aboRot: !!f.rot,
+        aboTage: Number(f.tage), aboAm: f.verlaengert_am, text: `Abo kündigen — verlängert sich am ${fk1Datum(f.verlaengert_am)}`,
+        tun: 'FTMO verlängert geblowte Futures-Challenges alle 30 Tage automatisch — im FTMO-Dashboard kündigen, dann ✓ gekündigt drücken' })
+    }
     const liste = [...je.values()]
     liste.gelesen = gelesenN
     return liste
   }
+  // FK1: Fälle laden (eigene ID; Admin/Verwalter mit alle=1 alle sichtbaren IDs), beim Öffnen und alle 10 min — Zeichnen über tplSpaeter
+  const _fk1 = { faelle: [], at: 0, laedt: false, weg: new Set() }
+  const fk1Datum = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? `${m[3]}.${m[2]}.` : '?' }
+  async function fk1Laden(erzwingen){
+    if(_fk1.laedt || (!erzwingen && Date.now() - _fk1.at < 10 * 60000)) return
+    _fk1.laedt = true; _fk1.at = Date.now()   // Drossel auch bei Netzfehlern (Review: sonst ein GET je Neuzeichnen)
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token
+      if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/konto/abo-kuendigen?alle=1`, { headers: { 'sb-token': tok } })
+      const d = r.ok ? await r.json() : null
+      if(d && d.ok && Array.isArray(d.faelle)){
+        const neu = d.faelle.filter(f => !_fk1.weg.has(String(f.konto_id)))   // eben gekündigt, Antwort war schon unterwegs (Review) → nicht zurückholen
+        const alt = JSON.stringify(_fk1.faelle); _fk1.faelle = neu; if(alt !== JSON.stringify(neu) && typeof tplSpaeter === 'function') tplSpaeter() }
+    }catch(e){ console.warn('[fk1]', (e && e.message) || e) }
+    finally{ _fk1.laedt = false }
+  }
+  window._fk1 = _fk1   // Test-Haken
   /* COUNTDOWN „NACHPLANEN" + „JETZT NEU BERECHNEN" (Finn 09.10.2026 ~01:55 Dubai: „dass hier ein Countdown ist, wann die nächste Botlesung kommt …
    * dass ich auf ‚Jetzt neu berechnen' drücken kann, dann tut er das gleich neu rein"). Zeitpunkt vom Backend (GET /admin/auto-plan info.
    * nachplan_naechster/_art: im Fenster alle 5 min, sonst der erste Takt im nächsten Fenster ab 00:00 dt); Text jede Sekunde neu
@@ -72943,6 +72969,7 @@
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'grau', r: 11 }   // Selbstheilung läuft — grau, nicht im Zähler (21.10.2026)
     if(z.art === 'retry') return { w: 'versucht erneut', ton: 'grau', r: 11 }
     if(z.art === 'pc_aus') return { w: 'PC aus', ton: 'rot', r: 0 }   // ganz oben: ohne PC startet dort nichts (19.10.2026)
+    if(z.art === 'abo') return z.aboRot ? { w: 'Abo kündigen', ton: 'rot', r: 0 } : { w: 'Abo kündigen', ton: 'gelb', r: 9 }   // FK1 (25.11.2026): ≤ 3 Tage rot, oben
     if(z.art === 'start_nein') return { w: 'kann nicht starten', ton: 'rot', r: 6 }   // Plan mit festgestelltem Grund (Finn 20.10.2026)
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
@@ -72978,6 +73005,7 @@
     const st = z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''
     // geblowt (Lesung ≤ Boden oder Boden unbekannt): Archiv nur per Klick — der Boden ist bei Tradeify nur geschätzt (Finn kann das später lockern)
     if(z.lotsOk) return z.lauf && z.lauf.laeuft ? (st || '<span class="s">speichert …</span>') : `<button type="button" class="knopf" data-tpl-lotsok="${escapeHtml(z.lotsOk)}" title="Gibt genau diesen Plan mit dieser Lot-Zahl frei">OK</button>` + st   // LOTS-DECKEL (02.11.2026)
+    if(z.abo) return z.lauf && z.lauf.laeuft ? '<span class="s">speichert …</span>' : `<button type="button" class="knopf" data-tpl-abo="${escapeHtml(z.abo)}" title="Abo bei FTMO gekündigt — der Hinweis verschwindet">✓ gekündigt</button>`   // FK1
     if(z.arch) return `<button type="button" class="knopf rot" data-tpl-blowarch="${escapeHtml(z.arch)}" title="Konto als geblowt archivieren (wie unter Accounts, Grund blown) — der Planer lässt es danach weg">Als geblowt archivieren</button>`
     if(z.bal || z.balf){
       if(z.lauf && z.lauf.laeuft) return st || '<span class="s">liest …</span>'
@@ -72999,6 +73027,10 @@
     const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
     if(z.code) return [t.replace(/^kein Kontowert — /, ''), tun].filter(Boolean).join(' → ')   // genauer Grund → So fixt du's (09.10.2026)
     if(z.art === 'pc_aus') return t   // PC aus: welcher PC, seit wann, welche Trades — das „was tun" steht im Tooltip (19.10.2026)
+    if(z.art === 'abo'){   // FK1: „verlängert sich am TT.MM." (+ „heute" / „in n Tagen" bei ≤ 3 Tagen)
+      const n = z.aboTage, wann = n <= 0 ? ' — heute' : n === 1 ? ' — morgen' : n <= 3 ? ` — in ${n} Tagen` : ''
+      return `verlängert sich am ${fk1Datum(z.aboAm)}${wann} · im FTMO-Dashboard kündigen`
+    }
     if(z.art === 'start_nein') return [t.replace(/^kann nicht starten \([^)]*\) — /, ''), tun].filter(Boolean).join(' → ')   // Grund → Fix sichtbar, nicht nur im Tooltip (20.10.2026)
     if(z.art === 'balance'){
       const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
@@ -74149,6 +74181,19 @@
         .then(d => { if(typeof atToast === 'function') atToast(`🤖 Nachplanen ${d.tag || ''}: ${d.geplant || 0} geplant für ${d.kandidaten || 0} ${d.kandidaten === 1 ? 'Konto' : 'Konten'} ohne Plan`, 'start') })
         .catch(err => { if(typeof atToast === 'function') atToast('Nachplanen: ' + ((err && err.message) || err), 'end') })
         .finally(() => { _tpl.nachplanLaeuft = false; _ap.laufAt = 0; _ap.lauf = null; tplSpaeter(); Promise.resolve(apLetztenHolen()).catch(() => {}).finally(() => { try{ apdLaden(true) }catch(_){}; tplSpaeter(); try{ if(document.getElementById('ap-ids-root')?.offsetParent) window._apIdsLaden?.() }catch(_){} }) })   // Admin-Reiter „Nachplanen“ (15.10.2026): danach den Reiter neu laden
+      return }
+    const ab = e.target.closest('[data-tpl-abo]')   // FK1 (25.11.2026): ✓ gekündigt → Marke am Konto (Railway, eigene ID oder Admin-Gate), Zeile weg
+    if(ab){ e.stopPropagation(); const kid = ab.dataset.tplAbo; ab.disabled = true; ab.textContent = 'speichert …'
+      ;(async () => {
+        try{
+          const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token
+          const r = await fetch(`${WATCHER_HOME}/konto/abo-kuendigen`, { method: 'POST', headers: { 'sb-token': tok || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ konto_id: kid }) })
+          const d = await r.json().catch(() => ({}))
+          if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+          _fk1.weg.add(String(kid)); _fk1.faelle = (_fk1.faelle || []).filter(f => String(f.konto_id) !== String(kid))
+        }catch(err){ ab.disabled = false; ab.textContent = '✓ gekündigt'; if(typeof atToast === 'function') atToast('Abo-Marke: ' + ((err && err.message) || err), 'end'); return }
+        tplSpaeter()
+      })()
       return }
     const ba = e.target.closest('[data-tpl-blowarch]')
     if(ba){ e.stopPropagation(); ba.disabled = true; ba.textContent = 'archiviert …'

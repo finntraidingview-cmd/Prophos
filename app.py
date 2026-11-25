@@ -26719,6 +26719,141 @@ def konto_suche_nachfolger():
     return jsonify({"ok": True, "nummern": nummern[:5]})
 
 
+# ══ FK1 FTMO-FUTURES-ABO KÜNDIGEN (Finn 25.11.2026: FTMO-Futures-Challenges verlängern sich nach einem Monat automatisch und kosten weiter, auch
+# geblowte — nur bestandene nicht; geblowte muss man aktiv kündigen). Jede FTMO-Futures-CHALLENGE, die im Archiv als geblowt steht (user_settings
+# 'archive', reason 'blown' — derselbe Blown-Status wie unter Accounts/Planer) und noch keine Marke accounts.abo_gekuendigt_at hat, erscheint bei
+# IHRER ID in „Braucht dich" (Trade-Planer): „Abo kündigen — verlängert sich am TT.MM.", ≤ 3 Tage rot. Verlängerung = Kaufdatum (erste Kauf-
+# Buchung account_purchase, sonst Anlegetag, Dubai) + n × 30 Tage, der nächste Tag ab heute. „✓ gekündigt" → POST setzt die Marke, Zeile weg.
+# Bestandene (reason passed), Funded/Winning Days und gekündigte erscheinen nie. Sicht: eigene ID; mit ?alle=1 alle IDs des Admin-Gates (wie
+# /admin/konto-anlegen, Verwalter nur seine Gruppe). SQL sql/2026-11-25_fk1_ftmo_futures_kuendigen.sql (Spalte) — ohne Spalte leere Liste. ══
+FK1_FIRMA = "FTMO Futures"
+FK1_ZYKLUS_T = 30
+FK1_ROT_T = 3
+FK1_SQL = "sql/2026-11-25_fk1_ftmo_futures_kuendigen.sql"
+
+
+def fk1_verlaengerung(kauf, heute):
+    """REIN RECHNEND: nächster Verlängerungstag (date) = kauf + n × 30 Tage, n ≥ 1, frühestens heute (am Verlängerungstag selbst: heute)."""
+    if not kauf or not heute:
+        return None
+    n = max(1, -(-(heute - kauf).days // FK1_ZYKLUS_T))   # aufgerundet: erstes Vielfaches ≥ heute
+    return kauf + timedelta(days=FK1_ZYKLUS_T * n)
+
+
+def fk1_archiv_je_konto(profile, kids):
+    """REIN RECHNEND (Review FK1): Archiv-Einträge ALLER Profile (user_settings 'archive' — archiveAccount schreibt ins Profil des Logins, der
+    archiviert, nicht des Besitzers; Konto-IDs sind global eindeutig, wie _ap_archiviert) → {konto_id: eintrag} für kids. Nur dict-Einträge;
+    archiviert schlägt nicht archiviert, sonst der jüngste (at)."""
+    aus, kids = {}, {str(k) for k in kids or ()}
+    for v in profile or ():
+        if not isinstance(v, dict):
+            continue
+        for kid in kids & set(v):
+            e = v.get(kid)
+            if not isinstance(e, dict):
+                continue
+            alt = aus.get(kid)
+            if alt is None or (bool(e.get("archived")), str(e.get("at") or "")) > (bool(alt.get("archived")), str(alt.get("at") or "")):
+                aus[kid] = e
+    return aus
+
+
+def fk1_faelle(konten, archiv_je_konto, kauf_je_konto, heute, namen=None):
+    """REIN RECHNEND: Konten (accounts-Zeilen) → Hinweis-Zeilen [{konto_id, user_id, person, firma, konto, ende4, kauf, verlaengert_am, tage, rot}],
+    nach Verlängerungstag sortiert. Nur FTMO Futures · challenge · Archiv reason 'blown' (archiv_je_konto aus fk1_archiv_je_konto) · ohne
+    abo_gekuendigt_at. kauf_je_konto = {id: date} (erste Kauf-Buchung), sonst created_at (Dubai-Tag)."""
+    aus = []
+    for a in konten or ():
+        kid, uid = str(a.get("id") or ""), str(a.get("user_id") or "")
+        if a.get("firm") != FK1_FIRMA or a.get("account_type") != "challenge" or a.get("abo_gekuendigt_at"):
+            continue
+        e = (archiv_je_konto or {}).get(kid) or {}
+        if not (isinstance(e, dict) and e.get("archived") and e.get("reason") == "blown"):
+            continue
+        kauf = (kauf_je_konto or {}).get(kid)
+        if not kauf:
+            t = pa1_iso(a.get("created_at"))
+            kauf = t.astimezone(ZoneInfo("Asia/Dubai")).date() if t else None
+        v = fk1_verlaengerung(kauf, heute)
+        if not v:
+            continue
+        tage = (v - heute).days
+        aus.append({"konto_id": kid, "user_id": uid, "person": (namen or {}).get(uid) or uid[:8], "firma": FK1_FIRMA, "konto": a.get("name") or "",
+                    "ende4": re.sub(r"[^0-9]", "", str(a.get("external_id") or ""))[-4:], "kauf": kauf.isoformat(), "verlaengert_am": v.isoformat(),
+                    "tage": tage, "rot": tage <= FK1_ROT_T})
+    aus.sort(key=lambda z: (z["verlaengert_am"], z["person"]))
+    return aus
+
+
+@app.route("/konto/abo-kuendigen", methods=["GET", "POST", "OPTIONS"])
+def konto_abo_kuendigen():
+    """GET [?alle=1] → {ok, faelle:[…fk1_faelle]} · POST {konto_id} → Marke abo_gekuendigt_at (eigene ID oder Admin-Gate) → {ok}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.method == "POST":
+        b = request.get_json(silent=True) or {}
+        kid = str(b.get("konto_id") or "").strip().lower()
+        if not ADMIN_MAIL_UID_RE.fullmatch(kid):
+            return jsonify({"ok": False, "msg": "konto_id ungültig"}), 400
+        try:
+            acc = (sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{kid}", "limit": "1"}) or [None])[0]
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+        if not acc or acc.get("firm") != FK1_FIRMA:
+            return jsonify({"ok": False, "msg": "kein FTMO-Futures-Konto"}), 404
+        _ziel, err = _konto_ziel_uid({"user_id": str(acc.get("user_id"))})
+        if err:
+            return err
+        try:
+            sb_update("accounts", {"id": f"eq.{kid}", "abo_gekuendigt_at": "is.null"}, {"abo_gekuendigt_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            if "abo_gekuendigt_at" in str(getattr(getattr(e, "response", None), "text", "") or e):
+                return jsonify({"ok": False, "msg": f"Datenbank noch nicht bereit ({FK1_SQL})"}), 503
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        print(f"[fk1] Abo gekündigt markiert: {kid} ({str(acc.get('user_id'))[:8]})", flush=True)
+        return jsonify({"ok": True})
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    ids = [str(uid)]
+    if str(request.args.get("alle") or "") == "1":
+        erlaubt, err2 = _admin_konto_gate()
+        if not err2:   # kein Admin → still nur die eigene ID
+            ids = None if erlaubt is None else sorted(set(erlaubt) | {str(uid)})
+    try:
+        q = {"select": "id,user_id,name,firm,account_type,external_id,created_at,abo_gekuendigt_at", "firm": f"eq.{FK1_FIRMA}", "account_type": "eq.challenge",
+             "abo_gekuendigt_at": "is.null"}
+        if ids is not None:
+            q["user_id"] = f"in.({','.join(ids)})"
+        konten = _sb_all("accounts", q) or []
+    except Exception as e:
+        if "abo_gekuendigt_at" in str(getattr(getattr(e, "response", None), "text", "") or e):
+            return jsonify({"ok": True, "faelle": [], "sql_fehlt": True})
+        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+    archiv, kauf = {}, {}
+    try:
+        if konten:   # Archiv über ALLE Profile (der archivierende Login kann ein Admin sein, Review FK1)
+            profile = [r.get("value") for r in (_sb_all("user_settings", {"select": "value", "key": "eq.archive"}) or [])]
+            archiv = fk1_archiv_je_konto(profile, [a.get("id") for a in konten])
+        kids = [k for k, e in archiv.items() if e.get("archived") and e.get("reason") == "blown"]
+        if kids:
+            for t in sb_select("transactions", {"select": "account_id,occurred_at", "kind": "eq.account_purchase", "account_id": f"in.({','.join(kids)})"}) or []:
+                try:
+                    d = datetime.strptime(str(t.get("occurred_at"))[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                k = str(t.get("account_id"))
+                kauf[k] = min(kauf.get(k, d), d)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Archiv nicht lesbar ({type(e).__name__})"}), 502
+    try:
+        namen = _ap_namen()[0]
+    except Exception:
+        namen = {}
+    heute = datetime.now(ZoneInfo("Asia/Dubai")).date()
+    return jsonify({"ok": True, "faelle": fk1_faelle(konten, archiv, kauf, heute, namen)})
+
+
 # ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts
 # anlegen, Dubletten über ALLE Nutzer ausschließen) ════════════════════════════════════════════════════════════════
 # accounts liegt unter RLS am Login — ob eine External ID schon bei einer ANDEREN Person liegt, sieht nur der Service-Key.
