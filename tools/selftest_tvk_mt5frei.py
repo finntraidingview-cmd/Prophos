@@ -69,20 +69,76 @@ def main():
         for k, v in alt.items():
             setattr(panel, k, v)
     ph = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
-    i = ph.index("  function tvkFrei(sofort){")   # Einmal-Marke sofort (Finn 25.11.2026): Parameter lockert nur „offener Plan"
+    # ── PA1f (Finn 25.11.2026: „Er darf immer dann lesen, wenn Puls ganz normal raus darf. Wenn z. B. ein Orbit-Trade kurz vor TP oder SL
+    # steht, dann nicht."): keine Pauschal-Sperre „offener Plan"/„Big Trade läuft" mehr, stattdessen der echte Puls-heim-Riegel (pulsHeimFrei)
+    i = ph.index("  function tvkFrei(){")
     blk = ph[i:ph.index("  async function tvkTick(){", i)]
-    zeile = next(z for z in blk.splitlines() if "plaene.some(p => p && p.status === 'open'" in z)
-    bed = zeile[zeile.index("p => ") + 5:zeile.index(")) return")]
-    js = bed.replace("&&", " and ").replace("!==", "!=").replace("===", "==").replace("'", '"')
-    sperrt = lambda route: bool(eval(js, {}, {"p": type("P", (), {"status": "open", "route": route})()}))   # noqa: E731
-    ok(not sperrt("mt5") and not sperrt("mt5v2"), "PC-Tab: offene Echo/Echo-V2-Pläne (mt5, mt5v2) sperren das Lesen nicht mehr")
-    ok(all(sperrt(r) for r in ("tvv2", "tsv2", "tvplus", "polar", "dup", "topstep", None)),
-       "PC-Tab: tvv2, tsv2, tvplus (Duplikum Puls), polar, dup, topstep und Pläne ohne route sperren weiter")
-    ok("TVK_START_ABSTAND_MS" in blk, "PC-Tab: Start < 45 min bleibt für alle Routen")
-    ok("if(!sofort && plaene.some(" in blk, "PC-Tab: nur die Einmal-Marke sofort lockert „offener Plan (nicht Echo)“")
-    tk = ph[ph.index("  async function tvkTick(){"):]
-    ok("streng ? '&nur_sofort=1' : ''" in tk[:3000] and "if(streng && locker){" in tk[:2500] and "nur_melden=1" in tk[:2500],
-       "PC-Tab: streng gesperrt → holt nur Aufträge mit Marke sofort (nur_sofort=1)")
+    frei_fn = blk[:blk.index("  async function tvkPulsDarfRaus(")]
+    raus_fn = blk[blk.index("  async function tvkPulsDarfRaus("):]
+    j0 = ph.index("  async function pulsHeimFrei(konto, fenster){")
+    heim_fn = ph[j0:ph.index("  // External ID des Master-Kontos", j0)]
+    ok("offener Plan (nicht Echo)" not in frei_fn and "bigTradePlan()" not in frei_fn and "sofort" not in frei_fn.split("{", 1)[0],
+       "PC-Tab: Pauschal-Sperren „offener Plan (nicht Echo)“ und „Big Trade/Winning Day läuft“ sind raus (auch die Einmal-Marke sofort)")
+    ok("TVK_START_ABSTAND_MS" in frei_fn and "hedgePulsUnterwegs()" in frei_fn and "polarLaeuft()" in frei_fn and "_osBusy || _osActive || _rsAktiv" in frei_fn
+       and "_hwWiederTimer" in frei_fn, "PC-Tab: Start < 45 min, Puls unterwegs, Polar, Signal/Fern-Lauf, Heimweg/Endlesung bleiben")
+    ok("await pulsHeimFrei('', 'tv')" in raus_fn, "PC-Tab: derselbe Riegel wie jeder Kontowechsel (pulsHeimFrei, TradingView-Fenster, ohne Konto-Abkürzung)")
+    tk = ph[ph.index("  async function tvkTick(){"):ph.index("  window._tvKonten = {")]
+    ok("nur_sofort" not in tk and "tvkFrei(true)" not in tk and "await tvkPulsDarfRaus()" in tk and "bigTradeHeimPlanen(a.ext || '', 'TV-Konten lesen', true, 'tv')" in tk,
+       "PC-Tab: Riegel nach dem Holen, gesperrt → „belegt“ (kein Fehlversuch), danach Heimweg wie nach jedem Start")
+    # echte Funktionen in JavaScriptCore: tvkFrei + tvkPulsDarfRaus + pulsHeimFrei, Railway /admin/puls-heim nachgestellt
+    js = r"""
+const window = { mtcApi: () => 0, _epLokal: null }; let MT5_LOCAL = true, _bthSelbst = false;
+let tradePlans = [], _BT = null, _ANTWORT = null, _FRAGEN = 0, _UNTERWEGS = '';
+const TVK_START_ABSTAND_MS = 45 * 60000, WATCHER_HOME = 'https://railway.invalid';
+let _osBusy = false, _osActive = false, _rsAktiv = false, _hwWiederTimer = null, _hwEndHalt = null;
+const polarLaeuft = () => false, polarStartSperre = () => false, hedgePulsUnterwegs = () => _UNTERWEGS;
+const bigTradePlan = f => (f === 'tv' ? _BT : null), tvV2Konto = p => p.ext, hedgePcId = () => 'pc-test1';
+const pulsStehtImKonto = async k => !!k;   // wie das Original: ohne Konto nie „steht schon im Konto"
+const supabase = { auth: { getSession: async () => ({ data: { session: { access_token: 'tok' } } }) } };
+class AbortController { constructor(){ this.signal = {} } abort(){} }
+const setTimeout = () => 0, clearTimeout = () => 0, console = { info(){}, warn(){} };
+const fetch = async url => { _FRAGEN++; if(_ANTWORT === 'weg') throw new Error('netz'); return { ok: true, status: 200, json: async () => _ANTWORT } };
+""" + frei_fn + heim_fn + raus_fn + r"""
+const fall = async (name, bt, antwort, plaene) => { _BT = bt; _ANTWORT = antwort; _FRAGEN = 0; tradePlans = plaene || [];
+  window._epLokal = { ab: Date.now(), stand: { positionen_tab: 'puls-1' } };
+  return { name, frei: tvkFrei(), raus: await tvkPulsDarfRaus(), fragen: _FRAGEN } };
+(async () => {
+  const offen = [{ status: 'open', route: 'tvv2' }, { status: 'open', route: 'tsv2' }, { status: 'open', route: 'tvplus' }];
+  const r = [];
+  r.push(await fall('ohne', null, null, offen));
+  r.push(await fall('wd_weit', { ext: 'LFE1' }, { ok: true, frei: true }, offen));
+  r.push(await fall('orbit_tp', { ext: 'TDFYSL1' }, { ok: true, frei: false, code: 'big_trade_nah', grund: 'Tradeify …0431 ist 83 $ vor dem TP — Puls bleibt im Konto' }, offen));
+  r.push(await fall('wd_sl', { ext: 'LFE2' }, { ok: true, frei: false, code: 'big_trade_nah', grund: 'Winning Day Lucid …0002 ist 40 $ vor der Liq — Puls bleibt im Konto' }, offen));
+  r.push(await fall('weg', { ext: 'LFE1' }, 'weg', offen));
+  r.push(await fall('kaputt', { ext: 'LFE1' }, { ok: false }, offen));
+  const bald = [{ status: 'planned', startUm: new Date(Date.now() + 30 * 60000).toISOString() }];
+  r.push(await fall('start30', null, null, bald));
+  _UNTERWEGS = 'Puls-Order'; r.push(await fall('unterwegs', null, null, [])); _UNTERWEGS = '';
+  print(JSON.stringify(r));
+})();
+"""
+    import subprocess
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
+        d.write(js)
+    p = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", d.name], capture_output=True, text=True)
+    os.unlink(d.name)
+    try:
+        r = {x["name"]: x for x in json.loads(p.stdout.strip().splitlines()[-1])}
+    except Exception:
+        r = {}
+        print(p.stdout[-2000:], p.stderr[-2000:])
+    g = lambda n: r.get(n) or {}   # noqa: E731
+    ok(g("ohne").get("frei") == "" and g("ohne").get("raus") == "" and g("ohne").get("fragen") == 0,
+       "offene Trades (tvv2/tsv2/tvplus) ohne Big Trade/WD im TV-Fenster → frei, keine Anfrage")
+    ok(g("wd_weit").get("frei") == "" and g("wd_weit").get("raus") == "" and g("wd_weit").get("fragen") == 1,
+       "offener Winning Day weit weg vom TP → Railway frei → lesen")
+    ok(g("orbit_tp").get("raus", "").startswith("Tradeify …0431 ist 83 $ vor dem TP") and g("orbit_tp").get("fragen") == 1,
+       f"Orbit nahe TP → gesperrt mit Grund ({g('orbit_tp').get('raus')})")
+    ok("vor der Liq" in g("wd_sl").get("raus", ""), "Winning Day nahe SL/Liq → gesperrt")
+    ok(g("weg").get("raus") and g("kaputt").get("raus"), "Railway weg / Antwort kaputt → gesperrt (fail-closed)")
+    ok(g("start30").get("frei", "").startswith("Start in"), "Start in < 45 min sperrt weiter")
+    ok(g("unterwegs").get("frei") == "Puls-Order", "Puls unterwegs sperrt weiter")
     j = ph.index("  function tvnRuhe(")
     ok("p.status === 'open' && !echo(p))) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],
        "TV-Neuladen/Tampermonkey (tvnPlanSperre): offene Pläne außer mt5/mt5v2 sperren")

@@ -31303,26 +31303,27 @@
    * nur bei bewiesen anderem Login der Login-Weg über ein bekanntes aktives Konto der ID (das dabei gewählt wird, wie bei jeder Balance-
    * Lesung), Umschalter → Liste → Esc, „Liste zu" bewiesen; im Lese-Schritt nie ein Listeneintrag, nie Order). Das Ergebnis geht an
    * POST /pc/tv-konten-auftrag/erledigt (→ tv_konten; ein Fehler wird höchstens einmal nach 30–60 min wiederholt). Danach Heimweg wie nach
-   * jeder Puls-Aktion. NUR wenn nichts läuft (tvkFrei): kein offener Plan dieser ID, kein bestätigter Start in 45 min, Puls/Polar/Rundgang/
-   * Heimweg/Endlesung frei — ein Neuladen der TradingView-Seite mitten in einem Trade wäre der schlimmste Fall. Während des Laufs gilt
+   * jeder Puls-Aktion. NUR wenn Puls raus darf (tvkFrei + seit PA1f tvkPulsDarfRaus, s. unten): kein Start in 45 min, Puls/Polar/Rundgang/
+   * Heimweg/Endlesung frei, laufender Big Trade/WD weit genug von TP/Liq — ein Neuladen der TradingView-Seite kurz vor TP/Liq wäre der schlimmste Fall. Während des Laufs gilt
    * Puls als unterwegs (hedgePulsUnterwegs: Reader-Ende blind, Konto-Beleg verfällt) und der Neulade-Wächter wartet (bwGrund). ══ */
   const TVK_TAKT_MIN_MS = 2 * 60000, TVK_TAKT_MAX_MS = 4 * 60000, TVK_START_ABSTAND_MS = 45 * 60000
   window._tvkLaeuft = false
   let _tvkLetzter = null
-  // sofort (Finn 25.11.2026, einmalig erlaubt: „Accounts wechseln und Puls ignorieren — nur jetzt"): true = die Sperre „offener Plan (nicht
-  // Echo)" gilt nicht. Nur für Aufträge, die Railway mit der Einmal-Marke ergebnis.sofort ausgibt (nur_sofort=1); alles andere bleibt streng.
-  // Das Panel lehnt weiter ab, wenn Puls gerade arbeitet (puls_beschaeftigt), der Heimweg danach führt zurück zum Trade-Konto.
-  function tvkFrei(sofort){
+  /* PA1f (Finn 25.11.2026: „Es wird immer offene Trades geben. Er darf immer dann lesen, wenn Puls ganz normal raus darf. Wenn z. B. ein
+   * Orbit-Trade kurz vor TP oder SL steht, dann nicht."): die Pauschal-Sperren „offener Plan (nicht Echo)" und „Big Trade/Winning Day läuft"
+   * sind raus — und damit die Einmal-Marke sofort (.2346), sie geht in dieser Regel auf. Stattdessen prüft tvkTick nach dem Holen genau den
+   * Riegel, den jeder Kontowechsel des Puls neben einem laufenden Trade fragt: pulsHeimFrei (→ Railway /admin/puls-heim = puls_heim_pruefen
+   * wie am Klick: Big Trade/Apex/Winning Day dieses PCs zu nah an TP/Liq → gesperrt, kein Kurs/Railway weg → gesperrt, fail-closed). Ohne
+   * laufenden Trade mit Hedge/WD im TradingView-Fenster: frei ohne Anfrage; offene Trades ohne Hedge sperren wie beim Start nicht. Nach dem
+   * Lesen führt der Heimweg (bigTradeHeimPlanen) zurück wie nach jedem Start. Bleiben: Start < 45 min, Puls unterwegs, Polar, Signal/Fern-Lauf,
+   * Heimweg/Endlesung. sofort-Parameter wird nicht mehr gebraucht (alte Aufrufer: ignoriert). */
+  function tvkFrei(){
     try{
       if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return 'kein PC-Tab'
       // nur ein PC mit laufendem Puls-Chrome-Reader (Tab 'puls-…', Stand ≤ 60 s) — ein eingeloggter localhost-Tab ohne Puls (Mac) holt nie Aufträge
       const ep = window._epLokal, st = ep && ep.stand
       if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader auf diesem PC'
       const jetzt = Date.now(), plaene = tradePlans || []
-      // nur Echo/Echo V2 (MT5) sperren nicht mehr (Master 29.10.2026, Befund Chris: drei Echo-V2-Trades liefen 7–13 h und hielten das Lesen
-      // den ganzen Tag zurück, ohne das Puls-Chrome zu nutzen) — das prüft das Panel selbst (MT5-Order läuft? Leerlauf ≥ 120 s?). Jede andere
-      // Route (tvv2, tsv2, tvplus, polar, dup, topstep, ohne route) sperrt weiter (S2: tvplus platziert ebenfalls im Puls-Chrome)
-      if(!sofort && plaene.some(p => p && p.status === 'open' && p.route !== 'mt5' && p.route !== 'mt5v2')) return 'offener Plan (nicht Echo)'
       // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
       const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
         && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))
@@ -31332,28 +31333,26 @@
       if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'   // wie die Starts (Prüfer 29.10.2026)
       if(_osBusy || _osActive || _rsAktiv) return 'Signal/Fern-Lauf aktiv'
       if(_hwWiederTimer || (_hwEndHalt && _hwEndHalt.bis > jetzt)) return 'Heimweg/Endlesung'
-      if(!sofort && bigTradePlan()) return 'Big Trade/Winning Day läuft'   // Einmal-Marke sofort: auch offener WD (Finn 25.11.2026, Heimweg danach zurück)
       return ''
     }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
   }
+  // PA1f: „Darf Puls jetzt raus?" — derselbe Riegel wie jeder Kontowechsel neben einem laufenden Trade (pulsHeimFrei). konto '' mit Absicht:
+  // die Abkürzung „Lesung im Big-Trade-Konto selbst = frei" gilt hier nicht, die Konten-Lesung lädt die TradingView-Seite neu. → '' frei | Grund
+  async function tvkPulsDarfRaus(){
+    try{
+      const h = await pulsHeimFrei('', 'tv')
+      return h ? String(h.msg || h.code || 'Puls darf nicht raus') : ''
+    }catch(e){ return 'Riegel nicht prüfbar' }   // fail-closed
+  }
   async function tvkTick(){
-    const streng = tvkFrei()
-    const locker = streng ? tvkFrei(true) : ''
-    if(window._tvkLaeuft) return
+    if(window._tvkLaeuft || tvkFrei()) return
     let tok = null
     try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
     if(!tok) return
-    // Sperr-Grund melden (Master 25.11.2026, FTMO-Futures-Gekauft Finn + Pascal hing ohne sichtbaren Grund): auch gesperrt fragt der Tab
-    // Railway kurz an (nur_melden=1, gibt nie einen Auftrag aus) — Railway schreibt den Grund in die Spur des fälligen „Gekauft"-Auftrags
-    if(streng && locker){
-      try{ const pcq0 = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')
-        fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq0}&nur_melden=1&sperre=${encodeURIComponent(String(locker).slice(0, 80))}`, { headers: { 'sb-token': tok } }).catch(() => {}) }catch(_){}
-      return
-    }
     let a = null
     try{
       const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')   // Probelauf-Weiche TV_KONTEN_PCS (Railway)
-      const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}${streng ? '&nur_sofort=1' : ''}`, { headers: { 'sb-token': tok } })
+      const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}`, { headers: { 'sb-token': tok } })
       if(!r.ok) return   // Route/Tabelle noch nicht da → still
       a = ((await r.json()) || {}).auftrag
     }catch(_){ return }
@@ -31367,8 +31366,9 @@
           trail: tr.slice(-2000), fehlerbild: lauf && lauf.fehlerbild ? String(lauf.fehlerbild).slice(0, 120) : '', schritt: lauf && lauf.schritt ? String(lauf.schritt).slice(0, 40) : '' }) }) }catch(_){}
     }
     // zweiter Blick NACH dem Holen (zwischen Tick und Antwort kann ein Start losgelaufen sein) — dann zurückgeben (Fehler zählt als Versuch? nein: code 'belegt')
-    const nachher = tvkFrei(!!streng)
+    const nachher = tvkFrei() || await tvkPulsDarfRaus()   // PA1f: erst jetzt (nur mit Auftrag) der Puls-heim-Riegel — fragt Railway nur bei laufendem Big Trade/WD
     if(nachher){ await melden(false, [], `belegt: ${nachher}`, 'belegt'); return }
+    if(tvkFrei()){ await melden(false, [], `belegt: ${tvkFrei()}`, 'belegt'); return }   // während der Riegel-Anfrage kann ein Start losgelaufen sein
     const acc = (accounts || []).find(x => String(x.externalId || '').trim() === String(a.ext || '').trim())
     const kx = acc ? tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }) : { firma: a.firma, tv_username: '', geschwister: [] }
     window._tvkLaeuft = true
@@ -31392,7 +31392,7 @@
   }
   ;(function tvkLoop(){ setTimeout(async () => { try{ await tvkTick() }catch(e){ console.warn('[tv-konten]', (e && e.message) || e) } tvkLoop() },
     TVK_TAKT_MIN_MS + Math.random() * (TVK_TAKT_MAX_MS - TVK_TAKT_MIN_MS)) })()
-  window._tvKonten = { frei: tvkFrei, tick: tvkTick, letzter: () => _tvkLetzter }   // Test-Haken
+  window._tvKonten = { frei: tvkFrei, tick: tvkTick, letzter: () => _tvkLetzter, darfRaus: tvkPulsDarfRaus }   // Test-Haken
   /* ══ PA1 „GEKAUFT" (Finn 25.11.2026: „Wenn ich bei Futures gekauft habe, drücke ich nur auf ‚Gekauft'. Dann soll der Knopf grün werden und dort
    * die Zeit stehen, wann überprüft wird."). Schnittstelle zum Knopf der Kaufliste (S6/KP2): pa1Gekauft({user_id, firma, vorlage_id, anzahl})
    * → Railway POST /konto-suche legt einen Auftrag art 'gekauft' an (fällig gestreut 1 min–5 h) → {ok, auftrag:{…, knopf:{text, art}}} oder
