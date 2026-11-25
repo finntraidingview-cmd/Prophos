@@ -210,4 +210,9 @@ pruef(deckel(10, zb["konten"], "Tradeify", STD)["n"] == 4, "… der Deckel allei
 zc = zelle(ZIEL_TR, VS2.TRADEIFY, wd11 + [fu(i) for i in range(2)], "frei", seed=7)
 pruef(17000 <= zc["erwartet"] < 20000 and zc["nachkauf"]["n_roh"] == 0,
       f"Tradeify 11k WD + 2 Funded: erwartet {round(zc['erwartet'])} (≥ 85 % von 20k) → 0 kaufen (Toleranz)")
+# KP2j (26.11.2026): Fällt Futures-„Gekauft" ins Fenster, steht der Puls-Grund (msg + Code, z. B. „Railway 500 (http_500)") fest im Fenster-Kopf
+fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
+pruef("b.hinweis = `Puls hat nicht übernommen: ${grund}`" in fe and "hinweis: b.hinweis || ''" in fe, "Fallback-Grund geht ans Bulk-Fenster")
+pruef("(kl.hinweis ? `<span class=\"bkk-hinweis bkk-warn\">${escapeHtml(kl.hinweis)}</span>` : '')" in fe, "Fenster-Kopf zeigt den Grund (escaped)")
+pruef("r.code && !String(r.msg || '').includes(r.code) ? `(${r.code})` : ''" in fe and "von Hand anlegen\\s*$/, '')" in fe, "Grund nennt zusätzlich den Code (http_5xx / sql_fehlt)")
 print(f"\n{ok_n} Prüfungen grün (mit Lauf-Rechnung)")
