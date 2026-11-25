@@ -113,6 +113,21 @@ pruef(not hasattr(KL, "row_pruefen") and "/admin/kaufliste/anlegen" not in open(
 fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 pruef("/admin/konto-anlegen?ansicht=admin" in fe and "bulkKlFremdAnlegen" in fe, "Frontend legt fremde IDs über /admin/konto-anlegen an (Verwalter: ansicht=admin)")
 
+# Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
+import re as _re  # noqa: E402
+from datetime import datetime as _dt, timezone as _tz  # noqa: E402
+teile2 = [k for k in baum.body if (isinstance(k, ast.FunctionDef) and k.name == "admin_konto_zeile")
+          or (isinstance(k, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("ADMIN_KONTO_TYPEN", "ADMIN_KONTO_ZIELE") for t in k.targets))]
+ns3 = {"re": _re, "datetime": _dt, "timezone": _tz}
+exec(compile(ast.Module(body=teile2, type_ignores=[]), "app.py(konto)", "exec"), ns3)
+bulk_apex = {"user_id": "eigene-wird-ersetzt", "name": "100k APEX-1-1 → Challenge", "firm": "Apex Trader", "account_type": "challenge",
+             "external_id": "APEX-1-1", "account_size": 100000, "starting_balance": 100000, "purchase_cost": 45, "max_drawdown": 3000,
+             "max_daily_drawdown": 1500, "max_loss_per_trade": 1000, "max_profit_per_trade": None, "wd_farm": False}
+zk, fk = ns3["admin_konto_zeile"](bulk_apex)
+pruef(fk is None and zk["max_daily_drawdown"] == 1500.0 and zk["account_size"] == 100000.0 and zk["starting_balance"] == 100000.0
+      and zk["max_loss_per_trade"] == 1000.0 and "max_profit_per_trade" not in zk and "user_id" not in zk,
+      "Apex-Pack für fremde ID: Größe, Startbalance, Daily DD, Max Loss je Trade kommen an (user_id setzt die Route)")
+
 # ── 3. Finns Regel (KP2-Zusatz 25.11.2026): erreicht der ERWARTETE Stand (Bestand + Σ Chance × Ertrag) das Ziel, wird nicht nachgekauft ──
 # Echte Lauf-Rechnung vorrat2_zelle (Standard-Kaufregel „sicherheit" 25 % mit 15 % Toleranz), geladen wie tools/selftest_vorrat_stufe2.py.
 sys.path.insert(0, HIER)

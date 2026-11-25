@@ -23956,6 +23956,12 @@ def admin_konto_zeile(b):
         zeile = {"name": name, "firm": firm, "account_type": typ, "external_id": ext,
                  "purchase_cost": zahl("purchase_cost"), "max_drawdown": zahl("max_drawdown"), "max_risiko_trade": zahl("max_risiko_trade"),
                  "auto_planer": b.get("auto_planer") is not False, "wd_farm": False}
+        # KP2-Prüfer S2 (25.11.2026): Größe/Startbalance und die Trade-Limits gingen hier still verloren (Kaufliste-Bulk und TV-Neu für fremde IDs) —
+        # ohne max_daily_drawdown rechnet z. B. ah_dll_balance für Apex mit None (Hedge zu klein). Nur gesetzt, wenn mitgeschickt (sonst DB-Standard).
+        for k in ("account_size", "starting_balance", "max_daily_drawdown", "max_loss_per_trade", "max_profit_per_trade"):
+            v = zahl(k)
+            if v is not None:
+                zeile[k] = v
         cons = zahl("consistency_pct")   # nur wenn im Modal gewählt (Standard = leer = DB-Standard); „Andere Zahl" darf Komma haben
         if cons is not None and cons > 100:
             raise ValueError("consistency_pct")

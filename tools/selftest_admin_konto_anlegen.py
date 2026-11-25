@@ -158,8 +158,22 @@ def main():
     ins = LOG["insert"][0][1]
     check(not any(k.startswith(("cred_", "meta_api")) for k in ins) and ins["wd_farm"] is False and "id" not in ins, "B1 keine Zugangsdaten/MetaApi/id, wd_farm aus")
     check(set(ins) <= {"user_id", "name", "firm", "account_type", "external_id", "purchase_cost", "max_drawdown", "max_risiko_trade", "auto_planer", "wd_farm",
+                       "account_size", "starting_balance", "max_daily_drawdown", "max_loss_per_trade", "max_profit_per_trade",
                        "goal_kind", "goal_target", "goal_min_profit", "goal_done_offset", "goal_since", "goal_manual"}, f"B2 nur Whitelist-Felder ({sorted(ins)})")
     check(ins["max_drawdown"] == 3000.0 and ins["goal_kind"] == "trading_days" and ins["goal_target"] == 5, "B3 Zahlen und Ziel übernommen")
+    check(not any(k in ins for k in ("account_size", "starting_balance", "max_daily_drawdown", "max_loss_per_trade", "max_profit_per_trade")),
+          "B3b Größe/Limits nicht mitgeschickt → nicht gesetzt (DB-Standard)")
+    # KP2-Prüfer S2 (25.11.2026): die Kaufliste (Bulk-Zeile, Apex-Pack) schickt Größe, Startbalance und Trade-Limits mit — vorher still verworfen
+    LOG["insert"].clear()
+    post("finn", dict(basis, user_id=MARC, account_type="challenge", account_size=100000, starting_balance="100000", max_daily_drawdown=1500,
+                      max_loss_per_trade="1000", max_profit_per_trade=2000))
+    ins = LOG["insert"][0][1]
+    check(ins.get("account_size") == 100000.0 and ins.get("starting_balance") == 100000.0 and ins.get("max_daily_drawdown") == 1500.0
+          and ins.get("max_loss_per_trade") == 1000.0 and ins.get("max_profit_per_trade") == 2000.0,
+          "B3c Größe, Startbalance, Daily DD, Max Loss/Profit je Trade übernommen (Apex-Hedge braucht max_daily_drawdown)")
+    for feld in ("account_size", "max_daily_drawdown"):
+        LOG["insert"].clear()
+        check(post("finn", dict(basis, user_id=MARC, **{feld: "viel"})).status_code == 400 and not LOG["insert"], f"B3d {feld} ungültig → 400")
     check(post("finn", dict(basis, user_id=MARC, account_type="live")).status_code == 400, "B4 live → 400")
     check(post("finn", dict(basis, user_id=MARC, external_id="")).status_code == 400, "B5 ohne External ID → 400")
     check(post("finn", dict(basis, user_id="x' or 1=1")).status_code == 400, "B6 ungültige user_id → 400")
