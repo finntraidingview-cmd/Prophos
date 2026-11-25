@@ -17319,6 +17319,7 @@ TSX_UEBER_PRUEF_TABU = (r"\b(get|code|claim|shop|buy|sell|upgrade|learn|join|sig
 # TS-D1b (Stopp S2): Ziel-Beweis der Loss-Limit-Meldung aus dem Text-Weg — Überlagerungs-Tabu plus Weiter-/Bestätigungs-Wörter. Eigene Liste, weil
 # Überlagerungen „Got it“ als (schwachen) Schließ-Knopf drücken dürfen (TSX_RX_UEBER_ZU_SCHWACH)
 TSX_BLOW_PRUEF_TABU = TSX_UEBER_PRUEF_TABU[:-3] + r"|continue|weiter|got\s+it|i\s+understand|understood|verstanden|activate|restart|practice)\b"
+TSX_RX_FEIERTAG_HINWEIS = re.compile(r"^\s*(?:20\d\d\s+)?thanksgiving\s*/\s*black\s*friday\s+update\s*$", re.I)   # TX4: nur der Titel, ganz
 TSX_UEBER_MAX = 4        # je Lauf höchstens viermal eine Überlagerung schließen — kommt immer wieder eine, Abbruch mit Grund
 _TSX_UEBER_N = [0]
 
@@ -17332,12 +17333,17 @@ def tsx_ueberlagerung(p):
     if tsx_zeitsync_dialog([p]) or tsx_blow_dialog([p]) or tsx_symbol_dialog([p]):
         return None
     t = " ".join(str(p.get(k) or "") for k in ("titel", "text", "text_voll")).strip()
-    if TSX_RX_UEBER_TABU.search(t):
+    # TX4 (Finn 26.11.2026, Thanksgiving): der Feiertags-Hinweis „2026 Thanksgiving/Black Friday Update — Please note the following changes to
+    # trading…“ (Knöpfe „Dismiss“ / „Dismiss All“) lag auf jedem Topstep-PC über dem Konto-Auslöser, jeder Lauf endete „Konto-Auslöser verdeckt“.
+    # Sein Text trägt Markt-/Feiertagswörter (Tabu unten) — NUR dieser bekannte Titel geht trotzdem als Überlagerung durch und wird über sein
+    # „Dismiss“ geschlossen; ein Order-Knopf im Popup sperrt weiter, jeder andere Markt-/Feiertags-Dialog bleibt unangetastet.
+    feiertag = bool(TSX_RX_FEIERTAG_HINWEIS.match(str(p.get("titel") or "")))
+    if TSX_RX_UEBER_TABU.search(t) and not feiertag:
         return None
     for b in (p.get("knoepfe") or []):
         if isinstance(b, dict) and re.search(TSX_DIALOG_TABU, f"{b.get('text') or ''} {b.get('aria') or ''}", re.I):
             return None                                    # ein Order-Knopf im Popup → kein Werbe-Popup
-    if TSX_RX_WERBUNG.search(t):
+    if feiertag or TSX_RX_WERBUNG.search(t):
         return {"art": "werbung", "text": re.sub(r"\s+", " ", t)[:80]}
     if not t:
         return {"art": "leer", "text": ""}
