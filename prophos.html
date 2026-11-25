@@ -3250,6 +3250,10 @@
   .bulk-kl-kopf{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;margin:-6px 0 14px;padding:9px 12px;border-radius:10px;font-size:12.5px;color:var(--sub);
     background:color-mix(in srgb,var(--violet) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--violet) 25%,var(--border))}
   .bulk-kl-kopf[hidden]{display:none}
+  .bulk-creds-status{font-size:11.5px;margin-top:6px;line-height:1.5;padding:6px 9px;border-radius:8px;font-variant-numeric:tabular-nums}
+  .bulk-creds-status[hidden]{display:none}
+  .bulk-creds-status.ok{color:var(--good-ink,#067647);background:color-mix(in srgb,var(--good,#12b76a) 9%,transparent)}
+  .bulk-creds-status.warn{color:var(--warn-ink,#b45309);background:color-mix(in srgb,var(--warn,#f59e0b) 11%,transparent)}
   .bulk-kl-kopf b{color:var(--ink);font-size:13.5px;margin-left:3px} .bulk-kl-kopf .bkk-anz b{color:var(--violet)} .bulk-kl-kopf .bkk-block{margin-left:auto}
   .bulk-kl-kopf .bkk-hinweis{flex-basis:100%;font-size:11.5px;color:var(--sub-2)}
   @media (max-width:820px){
@@ -16517,6 +16521,8 @@
           <!-- Einfügefeld (18.10.2026): Zugangskarte der Firma („Login / Password / Server") oder eine Zeile je Konto — füllt die Zeilen
                oben je Kennung (Login = Kennung), egal ob Vorlage oder Kennungen zuerst gewählt wurden -->
           <textarea class="input" id="bulk-creds" rows="4" placeholder="Zugangskarte der Firma hier einfügen (Login / Password / Server, auch mehrere) — oder eine Zeile pro Account:  Login  Passwort  Server" style="font-family:var(--mono);font-size:12.5px;resize:vertical;margin-top:6px" autocomplete="off"></textarea>
+          <!-- BU1 (26.11.2026): was im Feld erkannt wurde (Login · Server · Passwort ✓, nie im Klartext) bzw. welches Format erwartet wird -->
+          <div id="bulk-creds-status" class="bulk-creds-status" hidden></div>
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird den Kennungen über den Login zugeordnet (sonst der Reihe nach). Zeilen-Format: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
         <!-- Checkbox „Direkt in Duplikum anlegen &amp; verknüpfen“ entfernt (Finn 04.10.2026) -->
@@ -52501,7 +52507,8 @@
    * (optional „MT5 "/„Trading "/…), Wert dahinter oder in der nächsten Zeile, Trenner-Zeilen („:") übersprungen, Investor-Passwort nie.
    * Dieselben Regeln nutzt das Bulk-Popup (bulkLoginAnker, bulkZugangVoll) — ein Parser für alle Einfügefelder. */
   const CRED_LBL = {
-    login:    /^(?:mt[45]\s*|trading\s*)?(?:login(?:\s*(?:id|nr\.?|no\.?|number|nummer))?|account(?:\s*(?:number|no\.?|nr\.?|id|nummer))?|konto(?:nummer|\s*-?\s*nr\.?)?|benutzer(?:name)?|user\s*(?:name|id)?)\s*[:#=]?\s*(.*)$/i,
+    // BU1 (26.11.2026): + „MT5 ID" / „ID" / „Konto-ID" (Dashboard-Kopien) — als Konto zählt so ein Label im Bulk nur mit Passwort/Server danach
+    login:    /^(?:mt[45]\s*|trading\s*)?(?:login(?:\s*(?:id|nr\.?|no\.?|number|nummer))?|account(?:\s*(?:number|no\.?|nr\.?|id|nummer))?|konto(?:nummer|\s*-?\s*nr\.?|\s*-?\s*id)?|benutzer(?:name)?|user\s*(?:name|id)?|id(?:\s*(?:nr\.?|number))?)\s*[:#=]?\s*(.*)$/i,
     password: /^(?:mt[45]\s*|trading\s*|master\s*|main\s*|haupt\s*|konto\s*|account\s*)?(?:password|passwort|kennwort|pass|pwd)\b\s*[:#=]?\s*(.*)$/i,
     server:   /^(?:mt[45]\s*|trading\s*|broker\s*)?server(?:\s*name)?\b\s*[:#=]?\s*(.*)$/i,
     platform: /^(?:trading\s*)?(?:platform|plattform|plateforme)\b\s*[:#=]?\s*(.*)$/i,
@@ -53257,6 +53264,7 @@
       bEl.template.value = ''
       bEl.extids.value   = ''
       if(bEl.creds) bEl.creds.value = ''
+      { const st = document.getElementById('bulk-creds-status'); if(st){ st.hidden = true; st.textContent = '' } }
       bEl.tplSelect.value = ''
       bEl.tplDelete.disabled = true
       bEl.preview.style.display = 'none'
@@ -53381,7 +53389,37 @@
       // Textfeld bleibt sichtbar: es ist das Einfügefeld für die Zugangskarte, auch wenn die Zeilen schon da sind (18.10.2026)
       const eb = document.getElementById('bulk-echo-box'); if(eb) eb.style.display = ids.length ? 'flex' : 'none'
     }
-    bEl.creds?.addEventListener('input', () => { try{ bulkCredZeilenRender() }catch(_){} })
+    /* BU1 (26.11.2026, Finn, häufiger Bug: Zugangskarte aus der Firmen-Mail/dem Dashboard eingefügt — „Login / 12345678 / Password / … / Server / …",
+     * auch „Login: …", „Account ID", „MT5 ID", Leerzeilen, Tabs — und unten kam nichts, auch keine External ID). Die Zeilen je Kennung entstehen nur
+     * aus dem Feld „External IDs"; wer die Zugangsdaten ZUERST einfügt, sah deshalb nichts. Jetzt: erkannte Logins (getBulkCreds, Login-Anker
+     * bulkLoginAnker) werden ins Feld „External IDs" übernommen (fehlende angehängt, bestehende bleiben), die Zeilen bauen sich darüber auf;
+     * darunter steht, was erkannt wurde (Login · Server · Passwort ✓ — nie im Klartext, nie in Konsole/Toast). Nichts erkannt → Hinweis aufs Format. */
+    function bulkCredsAuswerten(){
+      const st = document.getElementById('bulk-creds-status'); if(!st) return
+      const raw = bEl.creds?.value || ''
+      if(!raw.trim()){ st.hidden = true; st.textContent = ''; return }
+      let liste = []
+      try{ liste = (getBulkCreds() || []).filter(c => c && /^\d{4,12}$/.test(String(c.login || '').trim())) }catch(_){ liste = [] }
+      st.hidden = false
+      if(!liste.length){
+        st.className = 'bulk-creds-status warn'
+        st.textContent = 'Nicht erkannt. Erwartet je Konto: „Login“ + Nummer, „Password“ + Passwort, „Server“ + Server — Beschriftung und Wert in einer Zeile („Login: 12345678“) oder untereinander, mehrere Konten nacheinander. Oder eine Zeile je Konto: Login Passwort Server.'
+        return
+      }
+      const da = new Set(getExtIds().map(x => x.toUpperCase())), neu = liste.map(c => String(c.login).trim()).filter(l => !da.has(l.toUpperCase()))
+      if(neu.length){
+        bEl.extids.value = [bEl.extids.value.trim(), ...neu].filter(Boolean).join('\n')
+        bEl.extids.dispatchEvent(new Event('input', { bubbles: true }))   // Kennungs-Parser (bulkPaste) baut die Zeilen je Login, Passwort/Server kommen aus diesem Feld
+      }
+      st.className = 'bulk-creds-status ok'
+      st.textContent = `${liste.length} ${liste.length === 1 ? 'Konto' : 'Konten'} erkannt${neu.length ? ` · ${neu.length} als External ID übernommen` : ''}: ` +
+        liste.map(c => `${c.login} · ${c.server || 'Server fehlt'} · Passwort ${c.password ? '✓' : 'fehlt'}`).join('  |  ')
+    }
+    bEl.creds?.addEventListener('input', () => {
+      try{ bulkCredZeilenRender() }catch(_){}
+      clearTimeout(bulkCredsAuswerten.t); bulkCredsAuswerten.t = setTimeout(() => { try{ bulkCredsAuswerten() }catch(_){} }, 300)
+    })
+    window._bulkCredsTest = { lesen: () => getBulkCreds(), auswerten: bulkCredsAuswerten }   // Test-Haken (Stub/Selbsttest), gibt nichts aus
     function bulkCredAusZeile(id){
       const r = document.querySelector(`#bulk-creds-rows [data-bcr="${CSS.escape(String(id))}"]`); if(!r) return null
       const pw = r.querySelector('[data-bcr-pw]').value.trim(), srv = r.querySelector('[data-bcr-srv]').value.trim()
@@ -53390,7 +53428,7 @@
     function bulkFuturesUmschalten(){
       const zeigen = bulkZeigtZugang(), cb = document.getElementById('bulk-creds-box')
       try{ bulkCredZeilenRender() }catch(_){}
-      if(cb) cb.style.display = zeigen ? '' : 'none'
+      if(cb) cb.style.display = (zeigen || (bEl.creds?.value || '').trim()) ? '' : 'none'   // BU1: eingefügte Zugangsdaten nie wegblenden
       try{ bulkConsUmschalten() }catch(_){}
     }
     /* Consistency im Bulk (07.10.2026): sichtbar, sobald im Batch eine Futures-Challenge steckt (Formular oder eingefügte Blöcke,
@@ -62239,7 +62277,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2336'
+  const OS_TAB_BUILD = '2026-09-22.2337'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
