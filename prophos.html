@@ -3175,11 +3175,7 @@
   .kl-karte{margin-bottom:14px;padding:10px 16px 12px}
   .kl-karte .kl-kopf{display:flex;align-items:baseline;gap:10px;margin:0 0 6px;flex-wrap:wrap}
   .kl-karte .kl-kopf h3{margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650}
-  .kl-karte .kl-kopf #kl-sub{font-size:11.5px;color:var(--sub-2)}
-  .kl-seg{margin-left:auto;display:inline-flex;background:var(--surface-tint);border-radius:999px;padding:2px}
-  .kl-seg[hidden]{display:none}
-  .kl-seg button{border:0;background:none;color:var(--sub);font:inherit;font-size:12px;padding:3px 11px;border-radius:999px;cursor:pointer}
-  .kl-seg button.an{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(16,24,40,.12)}
+  .kl-karte .kl-kopf #kl-sub,.kl-karte .kl-kopf #kl-admin-sub{font-size:11.5px;color:var(--sub-2)}
   .kl-z{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,130px) 80px auto;gap:12px;align-items:center;padding:8px 2px;border-top:1px solid var(--border-soft);font-size:13px}
   .kl-z.gew{background:color-mix(in srgb,var(--violet) 7%,transparent);border-radius:8px}
   .kl-f{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;color:var(--ink-2);font-weight:500;min-width:0}
@@ -3198,7 +3194,15 @@
   .kl-chip.res{color:var(--warn-ink,#b45309);background:color-mix(in srgb,var(--warn,#f59e0b) 14%,transparent)}
   .kl-chip.warn{color:var(--danger,#d92d20)}
   .kl-pers{margin-top:10px} .kl-pers:first-child{margin-top:2px}
-  .kl-sp-g{display:inline-flex} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+  .kl-z.kl-aus,.kl-pack.kl-aus{opacity:.45} .kl-box:disabled{cursor:not-allowed}
+  .kl-pk-knopf{width:100%;border:0;background:none;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+  .kl-pk-knopf:hover{background:var(--surface-tint)} .kl-pfeil{width:14px;color:var(--sub);font-size:13px;text-align:center}
+  #kl-admin-karte .kl-pers{border-top:1px solid var(--border-soft);margin-top:0;padding:2px 0} #kl-admin-karte .kl-pers:first-child{border-top:0}
+  #kl-admin-karte .kl-pers.auf{padding-bottom:8px}
+  .kl-sp-g{display:inline-flex}
+  .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px} .kl-sp-knopf svg{width:13px;height:13px;flex:none;opacity:.75}
+  .kl-pa1-w{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .kl-pa1-cd{font-size:11px;color:var(--good-ink,#067647);font-variant-numeric:tabular-nums;white-space:nowrap} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
   .kl-sp-g .kl-sp-pfeil{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0;padding-left:6px;padding-right:6px}
   .kl-sp-menu{position:fixed;z-index:400;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px -8px rgba(16,24,40,.3);padding:4px;display:flex;flex-direction:column;min-width:170px}
   .kl-sp-menu button{border:0;background:none;text-align:left;font:inherit;font-size:12.5px;color:var(--ink);padding:7px 10px;border-radius:7px;cursor:pointer}
@@ -9941,11 +9945,11 @@
            direkt unter dem Muster-Portfolio): eine Zeile je zu kaufendem Konto aus dem Vorrat-Lauf (GET /admin/kaufliste, kaufliste_app.py),
            „Gekauft" = echtes Bulk-Fenster mit Vorlage (nur External IDs einfügen), „Später ▾" = 3/7/30 Tage ausblenden (kaufliste_spaeter, KP2d)
            oder Firma pausieren,
-           Kästchen = mehrere auf einmal. Admin: „Meine | Alle IDs", Anlegen für fremde IDs ohne ID-Wechsel (vorhandene Route POST /admin/konto-anlegen).
+           Kästchen = mehrere auf einmal (nur gleiche Vorlage). Immer nur die eingeloggte ID (Finn: „unter Accounts NIE ‚Alle IDs'") — die Kaufliste
+           aller IDs steht unter Admin → Alle Accounts (#kl-admin-karte).
            Verdrahtung in der Sektion KAUFLISTE im Modul, eigene IDs/Klassen kl-*. -->
       <div class="card kl-karte" id="kl-karte" hidden>
-        <div class="kl-kopf"><h3>Kaufliste</h3><span id="kl-sub"></span>
-          <div class="kl-seg" id="kl-seg" hidden><button type="button" data-kl-alle="0" class="an">Meine</button><button type="button" data-kl-alle="1">Alle IDs</button></div></div>
+        <div class="kl-kopf"><h3>Kaufliste</h3><span id="kl-sub"></span></div>
         <div id="kl-liste"></div>
       </div>
       <div class="kl-auswahl" id="kl-auswahl"><span id="kl-aw-text"></span><button type="button" class="btn btn-ghost" id="kl-aw-weg">Aufheben</button><button type="button" class="btn btn-primary" id="kl-aw-ok">Jetzt hinzufügen</button></div>
@@ -14463,6 +14467,13 @@
             <div class="mp-leiste" id="mp-total-leiste"></div>
             <div class="mp-gesperrt" id="mp-total-gesperrt" hidden></div>
             <div class="mp-total-liste" id="mp-total-liste" hidden></div>
+          </div>
+          <!-- KAUFLISTE ALLER IDs (KP2d Zusatz 2, Finn 25.11.2026: unter Accounts nur die eigene ID, alle IDs hier) — je ID auf-/zuklappbar, dieselben
+               Knöpfe (Gekauft · Später ▾ · Kästchen nur gleiche Vorlage, auch über IDs), Anlegen für die jeweilige ID über /admin/konto-anlegen,
+               Puls-Stände aller IDs (pa1Stand {alle: true}). Sektion KAUFLISTE im Modul (Ort „admin"). -->
+          <div class="card kl-karte" id="kl-admin-karte" hidden>
+            <div class="kl-kopf"><h3>Kaufliste · alle IDs</h3><span id="kl-admin-sub"></span></div>
+            <div id="kl-admin-liste"></div>
           </div>
           <div id="adm-konten-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-konten-body" hidden>
@@ -25792,6 +25803,7 @@
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
+        if(name === 'konten') window._klAdminOeffnen?.()   // Kaufliste aller IDs (KP2d, 25.11.2026)
         if(name === 'mail' && mailSicht === 'mails') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
         if(name === 'mail' && mailSicht === 'konten') window._admKontoMailOeffnen?.()   // Konten aus Mail (29.10.2026): lädt beim Öffnen, sonst nie
         if(name === 'radarstat') window._rstOeffnen?.()   // Radar-Statistik (28.10.2026): /admin/live-trades beim Öffnen, Cache 60 s
@@ -97936,25 +97948,23 @@ ${stBlock}
   if(mpSichtbar()) setTimeout(window._mpOeffnen, 0)
   window._muster = { zeigen: d => { _mp.d = d; _mp.fehler = ''; mpRender() }, render: mpRender, norm: mpNorm }   // Test-Haken (Stub/Boot-Check)
 })()
-/* ── KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen — „Design ganz nice", ohne neuen Navigationspunkt unter Accounts) ──
+/* ── KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen — „Design ganz nice", ohne neuen Navigationspunkt) ──
  * Eine Zeile je zu kaufendem Konto (nachkauf.n des Vorrat-Laufs: min(Lücke zum Ziel, Max − laufende Challenges), FNF erst ab dem 1. erhaltenen
- * FundedNext-Payout — gerechnet im Backend, GET /admin/kaufliste). Je Zeile: „Gekauft" → echtes Bulk-Fenster (window._bulkKaufliste) mit der
- * Vorlage aus bulk_vorlagen (Firma + Größe der Kauf-Einheit), nur External IDs einfügen; „Später" (KP2d, Finn: „ich will gerade nicht kaufen")
- * → POST /admin/kaufliste/spaeter (3/7/30 Tage ausblenden, OHNE Rechenwirkung), Rückgängig = spaeter_weg; ▾ „Firma pausieren" = Sperr-Matrix
- * pausiert (POST /admin/vorrat status), freigeben unten in „n später · zeigen"; Kästchen → „n ausgewählt · Jetzt hinzufügen" = Blöcke je ID × Firma
- * nacheinander im Bulk-Fenster. Admin-Gerät (prophos_wd_admin): „Meine | Alle IDs" (alle=1, Server prüft selbst — 403 → nur Meine).
- * Am Muster-Portfolio-Tacho der eigenen ID „+n" (MutationObserver an #mp-leiste, mpRender bleibt unberührt). Chip „Reserve" = Blow-Reserve. */
+ * FundedNext-Payout, Apex im 5er-Pack — gerechnet im Backend, GET /admin/kaufliste). ZWEI Orte (KP2d Zusatz 2, Finn: „unter Accounts NIE ‚Alle IDs'"):
+ *   Accounts                 nur die eingeloggte ID (#kl-karte), „+n kaufen" am Muster-Portfolio-Tacho
+ *   Admin → Alle Accounts    alle IDs der Sicht (#kl-admin-karte, alle=1, Gate im Backend), je ID auf-/zuklappbar, Puls-Stände aller IDs
+ * Je Zeile: „Gekauft" → echtes Bulk-Fenster (window._bulkKaufliste, Vorlage aus bulk_vorlagen vorgewählt; fremde ID → /admin/konto-anlegen);
+ * „Später ▾" (KP2d, Finn: „ich will gerade nicht kaufen") → 3/7/30 Tage ausblenden OHNE Rechenwirkung (POST /admin/kaufliste/spaeter) oder
+ * „Firma pausieren" (Sperr-Matrix); Kästchen → „n × <Vorlage> · € · Jetzt hinzufügen" — NUR gleiche Vorlage (Firma × Größe × Phase), auch über IDs
+ * hinweg (Finn: jede Firma hat ihre eigene Schablone). PA1 (Slave 5): pa1Gekauft je Block zuerst, pa1Stand zeigt knopf.text statt „Gekauft". */
 ;(() => {
   const KL_TAKT = 300000
-  const _kl = { d: null, alle: false, at: 0, nr: 0, fehler: '', uid: '', pa1: [], keinAdmin: false }
   // Leiste „n ausgewählt" direkt an body: in der View (Einblend-Animation mit transform) wäre position:fixed an der View statt am Bildschirm
   try{ const bar = document.getElementById('kl-auswahl'); if(bar && bar.parentElement !== document.body) document.body.appendChild(bar) }catch(_){}
-  const auswahl = new Set()
   const vorlagen = { liste: null, at: 0 }
   const klEsc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const klNorm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
   const klEur = v => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(v) || 0)
-  const klAdmin = () => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } }
   const klTyp = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded CFD', winning_days: 'Winning Days' }
   const KL_TYP_RANG = { challenge: 0, phase1: 1, phase2: 2 }
   async function klToken(){
@@ -97980,150 +97990,10 @@ ${stBlock}
     const pool = passt.length ? passt : k
     return pool.slice().sort((a, b) => (KL_TYP_RANG[a.account_type] ?? 9) - (KL_TYP_RANG[b.account_type] ?? 9))[0]
   }
-  async function klLaden(frisch){
-    // Anfrage-Nummer (Review): eine ältere Antwort (ID gewechselt, Meine↔Alle umgeschaltet) wird verworfen statt angezeigt
-    const nr = ++_kl.nr, uid = String(currentUserId || ''), alle = _kl.alle
-    const veraltet = () => nr !== _kl.nr || uid !== String(currentUserId || '') || alle !== _kl.alle
-    try{
-      // Verwalter: _wd_login gibt die Gruppe nur mit ansicht=admin frei (Review) — für „Alle IDs" mitschicken
-      const q = `alle=${alle ? 1 : 0}${alle ? '&ansicht=admin' : ''}${frisch ? '&frisch=1' : ''}`
-      const r = await fetch(`${WATCHER_HOME}/admin/kaufliste?${q}`, { headers: { 'sb-token': await klToken() }, cache: 'no-store' })
-      const d = await r.json().catch(() => ({}))
-      if(veraltet()) return
-      if(r.status === 403 && alle){ _kl.alle = false; _kl.keinAdmin = true; return klLaden(frisch) }
-      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
-      const liste = await klVorlagen()
-      if(veraltet()) return
-      for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste)
-      // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
-      if(_kl.d) auswahl.clear()
-      _kl.d = d; _kl.at = Date.now(); _kl.fehler = ''; _kl.uid = uid
-    }catch(e){ if(veraltet()) return; _kl.fehler = 'Kaufliste nicht geladen: ' + (e.message || e) }
-    klRender()
-    klPa1Laden()
-  }
-  /* PA1 (Slave 5, „Gekauft" → Puls legt Futures-Konten selbst an): gibt es window.pa1Gekauft, geht „Gekauft" je Block ID × Firma zuerst dorthin;
-   * code (login_fehlt / firma_nicht / nur_ht) → wie bisher das Bulk-Fenster. pa1Stand() liefert die Aufträge der letzten 48 h je
-   * {user_id, firma, vorlage_id, anzahl, angelegt[], knopf:{text, art}} — so viele Zeilen der Zelle, wie noch offen sind, zeigen knopf.text statt „Gekauft".
-   * art: gruen | laeuft | fertig | warn (🟠, nur Anzeige) | ruhig (grau, z. B. „mehr gefunden · von Hand"). Keine Auswahl/kein Klick (Finn: Überzahl gestrichen). */
-  async function klPa1Laden(){
-    if(typeof window.pa1Stand !== 'function') return
-    // Admin-Sicht „Alle IDs": Aufträge aller sichtbaren IDs (S5: pa1Stand({alle: true}), Gate wie /admin/konto-anlegen), sonst nur die eigene ID
-    const alle = _kl.alle, uid = String(currentUserId || '')
-    try{ const l = await window.pa1Stand(alle ? { alle: true } : undefined); if(alle !== _kl.alle || uid !== String(currentUserId || '')) return; _kl.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
-    klRender()
-  }
-  window.pa1Neu = () => klPa1Laden()
-  function klPa1Slots(z){
-    const vid = z.vorlage && z.vorlage.id, out = []
-    for(const a of _kl.pa1 || []){
-      if(String(a.user_id) !== String(z.user_id) || a.firma !== z.firma || (vid && a.vorlage_id && String(a.vorlage_id) !== String(vid))) continue
-      if(!a.knopf || a.knopf.art === 'fertig') continue
-      const offen = Math.max(0, (Number(a.anzahl) || 0) - ((a.angelegt || []).length || 0))
-      for(let i = 0; i < offen; i++) out.push(a)
-    }
-    return out
-  }
-  // KP2d „Später" (Finn 25.11.2026: „ich will gerade nicht kaufen" — weg, komm in 7 Tagen wieder): so viele Zeilen der Zelle sind ausgeblendet,
-  // OHNE Rechenwirkung (eigene Tabelle kaufliste_spaeter, nicht vorrat_bestellt — das zählte als schon gekauft)
-  const klSpaeterN = z => Math.min(z.n, ((_kl.d && _kl.d.spaeter) || []).filter(s => String(s.user_id) === String(z.user_id) && s.firma === z.firma)
-    .reduce((a, s) => a + (Number(s.anzahl) || 0), 0))
-  function klZeilenAlle(){
-    // eine Zeile je SICHTBARES Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
-    const out = []
-    for(const z of (_kl.d && _kl.d.zeilen) || []){ const sichtbar = z.n - klSpaeterN(z); for(let k = 1; k <= sichtbar; k++) out.push({ z, k, rid: `${z.user_id}|${z.firma}#${k}` }) }
-    return out
-  }
-  function klPreis(z){ return Number(z.vorlage && z.vorlage.purchase_cost) || Number(z.preis_eur) || 0 }
-  function klRender(){
-    const karte = document.getElementById('kl-karte'); if(!karte) return
-    const liste = document.getElementById('kl-liste'), sub = document.getElementById('kl-sub'), seg = document.getElementById('kl-seg')
-    seg.hidden = !klAdmin() || _kl.keinAdmin
-    seg.querySelectorAll('[data-kl-alle]').forEach(b => b.classList.toggle('an', (b.dataset.klAlle === '1') === _kl.alle))
-    const zeilen = klZeilenAlle()
-    if(!_kl.d && !_kl.fehler){ karte.hidden = true; return }
-    karte.hidden = !zeilen.length && !_kl.fehler && !_kl.alle
-    for(const rid of [...auswahl]) if(!zeilen.some(x => x.rid === rid)) auswahl.delete(rid)
-    const summe = l => klEur(l.reduce((a, x) => a + klPreis(x.z), 0))
-    sub.textContent = zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}` : (_kl.fehler ? '' : 'nichts zu kaufen')
-    const slots = new Map()
-    const zeile = x => {
-      const z = x.z, v = z.vorlage, sk = z.user_id + '|' + z.firma
-      if(!slots.has(sk)) slots.set(sk, klPa1Slots(z))
-      const pa = slots.get(sk)[x.k - 1]
-      const gr = v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || '')
-      const lauf = (Number(z.laufend) || 0) + x.k, gew = auswahl.has(x.rid)
-      return `<div class="kl-z${gew ? ' gew' : ''}">
-        <div class="kl-f">${klEsc(z.firma)}${z.max ? `<span class="kl-chip fuell" title="laufende Challenges/Phasen nach diesem Kauf gegen das Maximum je Firma">→ ${lauf}/${z.max} laufend</span>` : ''}${z.reserve ? '<span class="kl-chip res" title="Blow-Reserve: das Ziel ist erreicht, hält aber nicht, wenn das größte Konto wegfällt">Reserve</span>' : ''}${v ? '' : '<span class="kl-chip warn" title="keine Vorlage in bulk_vorlagen für Firma + Größe — im Bulk-Fenster selbst wählen">ohne Vorlage</span>'}</div>
-        <div class="kl-g">${klEsc(gr)}</div>
-        <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
-        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>` : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button><span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini" data-kl-spaeter="${klEsc(x.rid)}" title="Gerade nicht kaufen: Zeile 7 Tage ausblenden (zählt nicht als gekauft)">Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(x.rid)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span><input type="checkbox" class="kl-box" data-kl-wahl="${klEsc(x.rid)}"${gew ? ' checked' : ''} aria-label="auswählen">`}</div>
-      </div>`
-    }
-    // Apex 5er-Pack (Finn 25.11.2026): die Zeilen einer Pack-Zelle als EIN Block — Kopf mit Kästchen (alle), „Gekauft" (anzahl = Pack) und „Erledigt"
-    const pack = l => {
-      const z = l[0].z, key = z.user_id + '|' + z.firma, alleGew = l.every(x => auswahl.has(x.rid))
-      const pa = (slots.has(key) ? slots.get(key) : (slots.set(key, klPa1Slots(z)), slots.get(key)))[0]
-      const zeilenP = l.map(x => { const v = z.vorlage; return `<div class="kl-z kl-pz${auswahl.has(x.rid) ? ' gew' : ''}"><div class="kl-f">${klEsc(z.firma)}</div><div class="kl-g">${klEsc(v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || ''))}</div><div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div><div class="kl-a"></div></div>` }).join('')
-      return `<div class="kl-pack"><div class="kl-z kl-pack-kopf${alleGew ? ' gew' : ''}">
-        <div class="kl-f"><b>${klEsc(z.firma)} ${z.pack}er-Pack</b>${l.length < z.pack ? `<span class="kl-chip">noch ${l.length}</span>` : ''}${z.reserve ? '<span class="kl-chip res">Reserve</span>' : ''}${z.vorlage ? '' : '<span class="kl-chip warn">ohne Vorlage</span>'}</div>
-        <div class="kl-g">${l.length} Konten</div><div class="kl-p">${summe(l)}</div>
-        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>`
-          : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button><span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini" data-kl-pack-spaeter="${klEsc(key)}" title="Pack gerade nicht kaufen: 7 Tage ausblenden (zählt nicht als gekauft)">Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(key)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span><input type="checkbox" class="kl-box" data-kl-pack-wahl="${klEsc(key)}"${alleGew ? ' checked' : ''} aria-label="Pack auswählen">`}</div>
-      </div>${zeilenP}</div>`
-    }
-    const liste_ = l => { let o = '', i = 0
-      while(i < l.length){ const z = l[i].z
-        if(z.pack > 1){ const g = []; while(i < l.length && l[i].z === z) g.push(l[i++]); o += pack(g) } else o += zeile(l[i++]) }
-      return o }
-    let h = _kl.fehler ? `<div class="kl-fehler">${klEsc(_kl.fehler)}</div>` : ''
-    if(_kl.alle){
-      const ids = [...new Set(zeilen.map(x => x.z.user_id))]
-      for(const id of ids){
-        const l = zeilen.filter(x => x.z.user_id === id)
-        h += `<div class="kl-pers"><div class="kl-pk"><b>${klEsc(l[0].z.name)}</b><span>${l.length} kaufen</span><span class="kl-pk-r">${summe(l)}</span></div>${liste_(l)}</div>`
-      }
-      if(!ids.length && !_kl.fehler) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
-    } else h += liste_(zeilen)
-    h += klSpaeterHtml()
-    liste.innerHTML = h
-    klAuswahlZeigen()
-    klTachoBadges()
-  }
-  function klSpaeterHtml(){
-    const sp = (_kl.d && _kl.d.spaeter) || [], pa = (_kl.d && _kl.d.pausiert) || []
-    if(!sp.length && !pa.length) return ''
-    const n = sp.reduce((a, s) => a + (Number(s.anzahl) || 0), 0), name = uid => ((_kl.d.zeilen || []).find(z => String(z.user_id) === String(uid)) || {}).name || ''
-    const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
-    const kopf = [n ? `${n} später` : '', pa.length ? `${pa.length} pausiert` : ''].filter(Boolean).join(' · ')
-    let h = `<div class="kl-sp"><button type="button" class="kl-sp-kopf" data-kl-sp-auf>${klEsc(kopf)} · ${_kl.spAuf ? 'ausblenden' : 'zeigen'}</button>`
-    if(_kl.spAuf){
-      h += sp.map(s => `<div class="kl-sp-z"><span>${_kl.alle ? `<b>${klEsc(name(s.user_id))}</b> · ` : ''}${klEsc(s.firma)} · ${s.anzahl} ${s.anzahl === 1 ? 'Konto' : 'Konten'}</span><span class="kl-sp-bis">wieder da am ${klEsc(datum(s.bis))}</span><button type="button" class="kl-sp-x" data-kl-sp-weg="${klEsc(s.id)}">Rückgängig</button></div>`).join('')
-      h += pa.map(p => `<div class="kl-sp-z"><span>${_kl.alle ? `<b>${klEsc(p.name)}</b> · ` : ''}${klEsc(p.firma)} · pausiert</span><span class="kl-sp-bis">bis zur Freigabe</span><button type="button" class="kl-sp-x" data-kl-frei="${klEsc(p.user_id + '|' + p.firma)}">freigeben</button></div>`).join('')
-    }
-    return h + '</div>'
-  }
-  function klAuswahlZeigen(){
-    const bar = document.getElementById('kl-auswahl'); if(!bar) return
-    const n = auswahl.size
-    bar.classList.toggle('an', n > 0 && !!document.querySelector('#dashboard-view .view[data-view="accounts"].active'))
-    if(!n) return
-    const zl = klZeilenAlle().filter(x => auswahl.has(x.rid)), ids = new Set(zl.map(x => x.z.user_id))
-    document.getElementById('kl-aw-text').innerHTML = `<b>${n}</b> ausgewählt<span class="kl-aw-mehr"> · ${klEur(zl.reduce((a, x) => a + klPreis(x.z), 0))}${ids.size > 1 ? ` · ${ids.size} IDs` : ''}</span>`
-  }
-  // „+n" am Tacho der eigenen ID (nur Zeilen dieser ID, auch in der Ansicht „Alle IDs")
-  function klTachoBadges(){
-    const leiste = document.getElementById('mp-leiste'); if(!leiste) return
-    const je = {}
-    for(const z of (_kl.d && _kl.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n - klSpaeterN(z)
-    leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
-      let b = el.querySelector('.mp-kauf-n'); const n = je[el.dataset.mpFirma] || 0
-      if(!n){ if(b) b.remove(); return }
-      if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
-      b.textContent = `+${n} kaufen`; b.title = `${n} Konto${n === 1 ? '' : 's'} in der Kaufliste unten`
-    })
-  }
-  try{ const l = document.getElementById('mp-leiste'); if(l && typeof MutationObserver === 'function') new MutationObserver(() => klTachoBadges()).observe(l, { childList: true }) }catch(_){}
+  // Schlüssel „gleiche Vorlage" für die Mehrfachauswahl: die bulk_vorlagen-Zeile, sonst Firma × Kauf-Einheit
+  const klVKey = z => z.vorlage ? 'v' + z.vorlage.id : 'f' + z.firma + '|' + (z.einheit || '')
+  const klGr = z => { const v = z.vorlage; return v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || '') }
+  const klPreis = z => Number(z.vorlage && z.vorlage.purchase_cost) || Number(z.preis_eur) || 0
   function klToast(text, undo){
     let t = document.getElementById('kl-toast')
     if(!t){ t = document.createElement('div'); t.id = 'kl-toast'; t.className = 'kl-toast'; document.body.appendChild(t) }
@@ -98132,110 +98002,277 @@ ${stBlock}
     const u = t.querySelector('.kl-undo'); if(u) u.onclick = () => { t.classList.remove('an'); undo() }
     klToast.t = setTimeout(() => t.classList.remove('an'), undo ? 6000 : 3000)
   }
-  async function klVorrat(body){
-    const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, { method: 'POST', cache: 'no-store',
+  async function klPost(pfad, body, admin){
+    const r = await fetch(`${WATCHER_HOME}${pfad}${admin ? '?ansicht=admin' : ''}`, { method: 'POST', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'sb-token': await klToken() }, body: JSON.stringify(body) })
     const d = await r.json().catch(() => ({}))
-    if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status))
+    if(!r.ok || d.error || d.ok === false) throw new Error(d.error || d.msg || ('HTTP ' + r.status))
     return d
   }
-  async function klKl(pfad, body){
-    const r = await fetch(`${WATCHER_HOME}/admin/kaufliste/${pfad}${_kl.alle ? '?ansicht=admin' : ''}`, { method: 'POST', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', 'sb-token': await klToken() }, body: JSON.stringify(body) })
-    const d = await r.json().catch(() => ({}))
-    if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
-    return d
-  }
-  async function klSpaeter(rid, anzahl, tage){
-    const x = klZeilenAlle().find(q => q.rid === rid); if(!x) return
-    const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1)), t = [3, 7, 30].includes(tage) ? tage : 7
-    try{
-      const d = await klKl('spaeter', { user_id: z.user_id, firma: z.firma, anzahl: n, tage: t })
-      if(_kl.d){ _kl.d.spaeter = [...(_kl.d.spaeter || []), d.spaeter]; auswahl.clear(); klRender() }   // sofort weg
-      const sid = d.spaeter && d.spaeter.id
-      klToast(`${z.name} · ${z.firma}: ${n === 1 ? 'kommt' : n + ' Konten kommen'} in ${t} Tagen wieder`, sid ? () => klSpaeterWeg(sid) : null)
-    }catch(e){ klToast('Später ging nicht: ' + (e.message || e)) }
-  }
-  async function klSpaeterWeg(sid){
-    try{ await klKl('spaeter_weg', { id: Number(sid) }); if(_kl.d) _kl.d.spaeter = (_kl.d.spaeter || []).filter(s => String(s.id) !== String(sid)); klRender(); klLaden(true) }
-    catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
-  }
-  async function klPausieren(uid, firma, frei){
-    if(!frei && !confirm(`${firma} für diese ID pausieren?\nDie Kaufliste schlägt dort nichts vor (und der Planer plant ihre Konten nicht neu), bis du sie wieder freigibst.`)) return
-    try{ await klVorrat({ user_id: uid, firma, status: frei ? 'frei' : 'pausiert' }); klToast(`${firma} ${frei ? 'wieder frei' : 'pausiert'}`); klLaden(true) }
-    catch(e){ klToast((frei ? 'Freigeben' : 'Pausieren') + ' ging nicht: ' + (e.message || e)) }
-  }
-  function klMenu(knopf, rid, anzahl){
-    document.getElementById('kl-sp-menu')?.remove()
-    const x = klZeilenAlle().find(q => q.rid === rid); if(!x) return
-    const m = document.createElement('div'); m.id = 'kl-sp-menu'; m.className = 'kl-sp-menu'
-    m.innerHTML = [3, 7, 30].map(t => `<button type="button" data-t="${t}">${t} Tage${t === 7 ? ' · Standard' : ''}</button>`).join('') +
-      `<button type="button" data-t="pause">${klEsc(x.z.firma)} pausieren …</button>`
-    document.body.appendChild(m)
-    const b = knopf.getBoundingClientRect()
-    m.style.top = Math.min(innerHeight - m.offsetHeight - 8, b.bottom + 4) + 'px'; m.style.left = Math.max(8, b.right - m.offsetWidth) + 'px'
-    m.onclick = e => { const o = e.target.closest('[data-t]'); if(!o) return; m.remove()
-      if(o.dataset.t === 'pause') klPausieren(x.z.user_id, x.z.firma, false); else klSpaeter(rid, anzahl, Number(o.dataset.t)) }
-    setTimeout(() => document.addEventListener('click', function zu(e){ if(!m.contains(e.target)){ m.remove(); document.removeEventListener('click', zu, true) } }, true), 0)
-  }
-  function klHinzufuegen(rids){
-    const zl = klZeilenAlle().filter(x => rids.includes(x.rid))
-    const grp = new Map()
-    for(const x of zl){ const key = x.z.user_id + '|' + x.z.firma; const b = grp.get(key) || { z: x.z, n: 0 }; b.n++; grp.set(key, b) }
-    const bl = [...grp.values()]
-    if(!bl.length || typeof window._bulkKaufliste !== 'function') return
-    let i = 0
-    const naechster = async () => {
-      if(i >= bl.length){ auswahl.clear(); klLaden(true); return }
-      const b = bl[i++], vid = b.z.vorlage && b.z.vorlage.id
-      if(typeof window.pa1Gekauft === 'function' && vid){   // PA1: Puls legt an — sonst (code) das Bulk-Fenster
-        try{
-          const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })
-          if(r && r.ok){ klToast(`${b.z.name} · ${b.z.firma}: ${(r.auftrag && r.auftrag.knopf && r.auftrag.knopf.text) || 'Puls legt an'}`); klPa1Laden(); return naechster() }
-          if(r && r.msg) klToast(r.msg)
-        }catch(e){ console.warn('[kaufliste] pa1Gekauft:', e) }
-      }
-      window._bulkKaufliste({ ziel: b.z.user_id, zielName: b.z.name, firma: b.z.firma, vorlageId: vid, anzahl: b.n,
-        block: i, bloecke: bl.length, fertig: naechster, abbruch: () => { auswahl.clear(); klLaden(true) } })
+
+  function instanz(cfg){   // cfg: { name, karte, liste, sub, alle, sichtbar(), tacho }
+    const I = { d: null, at: 0, nr: 0, fehler: '', uid: '', pa1: [], spAuf: false, offen: new Set(), auswahl: new Set(), alleAuf: false }
+    const $k = id => document.getElementById(id)
+    async function laden(frisch){
+      // Anfrage-Nummer (Review): eine ältere Antwort (ID gewechselt) wird verworfen statt angezeigt
+      const nr = ++I.nr, uid = String(currentUserId || '')
+      const veraltet = () => nr !== I.nr || uid !== String(currentUserId || '')
+      try{
+        // Verwalter: _wd_login gibt die Gruppe nur mit ansicht=admin frei (Review)
+        const q = `alle=${cfg.alle ? 1 : 0}${cfg.alle ? '&ansicht=admin' : ''}${frisch ? '&frisch=1' : ''}`
+        const r = await fetch(`${WATCHER_HOME}/admin/kaufliste?${q}`, { headers: { 'sb-token': await klToken() }, cache: 'no-store' })
+        const d = await r.json().catch(() => ({}))
+        if(veraltet()) return
+        if(r.status === 403 && cfg.alle){ I.d = null; I.fehler = ''; I.verboten = true; render(); return }
+        if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+        const liste = await klVorlagen()
+        if(veraltet()) return
+        for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste)
+        // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
+        if(I.d) I.auswahl.clear()
+        I.d = d; I.at = Date.now(); I.fehler = ''; I.uid = uid; I.verboten = false
+      }catch(e){ if(veraltet()) return; I.fehler = 'Kaufliste nicht geladen: ' + (e.message || e) }
+      render()
+      pa1Laden()
     }
-    naechster()
+    /* PA1 (Slave 5): pa1Stand() — Admin-Ort mit {alle: true} (Aufträge aller sichtbaren IDs), Accounts nur die eigene ID. art: gruen | laeuft |
+     * fertig | warn (🟠, nur Anzeige) | ruhig (grau). So viele Zeilen der Zelle, wie im Auftrag noch offen sind, zeigen knopf.text statt „Gekauft". */
+    async function pa1Laden(){
+      if(typeof window.pa1Stand !== 'function' || !I.d) return
+      const uid = String(currentUserId || '')
+      try{ const l = await window.pa1Stand(cfg.alle ? { alle: true } : undefined); if(uid !== String(currentUserId || '')) return; I.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
+      render()
+    }
+    function pa1Slots(z){
+      const vid = z.vorlage && z.vorlage.id, out = []
+      for(const a of I.pa1 || []){
+        if(String(a.user_id) !== String(z.user_id) || a.firma !== z.firma || (vid && a.vorlage_id && String(a.vorlage_id) !== String(vid))) continue
+        if(!a.knopf || a.knopf.art === 'fertig') continue
+        const offen = Math.max(0, (Number(a.anzahl) || 0) - ((a.angelegt || []).length || 0))
+        for(let i = 0; i < offen; i++) out.push(a)
+      }
+      return out
+    }
+    // KP2d „Später": so viele Zeilen der Zelle sind ausgeblendet, OHNE Rechenwirkung (Tabelle kaufliste_spaeter)
+    const spaeterN = z => Math.min(z.n, ((I.d && I.d.spaeter) || []).filter(s => String(s.user_id) === String(z.user_id) && s.firma === z.firma)
+      .reduce((a, s) => a + (Number(s.anzahl) || 0), 0))
+    function zeilenAlle(){
+      // eine Zeile je SICHTBARES Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
+      const out = []
+      for(const z of (I.d && I.d.zeilen) || []){ const sichtbar = z.n - spaeterN(z); for(let k = 1; k <= sichtbar; k++) out.push({ z, k, rid: `${z.user_id}|${z.firma}#${k}` }) }
+      return out
+    }
+    const packRids = key => zeilenAlle().filter(x => x.z.user_id + '|' + x.z.firma === key).map(x => x.rid)
+    // gewählte Vorlage (Schlüssel der ersten Auswahl) — andere Vorlagen sind solange gesperrt
+    function wahlKey(){ const r = [...I.auswahl][0]; if(!r) return null; const x = zeilenAlle().find(q => q.rid === r); return x ? klVKey(x.z) : null }
+    function render(){
+      const karte = $k(cfg.karte); if(!karte) return
+      const liste = $k(cfg.liste), sub = $k(cfg.sub)
+      if(I.verboten){ karte.hidden = true; return }
+      const zeilen = zeilenAlle()
+      if(!I.d && !I.fehler){ karte.hidden = true; return }
+      karte.hidden = !zeilen.length && !I.fehler && !(I.d && ((I.d.spaeter || []).length || (I.d.pausiert || []).length)) && !cfg.alle
+      for(const rid of [...I.auswahl]) if(!zeilen.some(x => x.rid === rid)) I.auswahl.delete(rid)
+      const wk = wahlKey()
+      const summe = l => klEur(l.reduce((a, x) => a + klPreis(x.z), 0))
+      sub.textContent = zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}${cfg.alle ? ` · ${new Set(zeilen.map(x => x.z.user_id)).size} IDs` : ''}` : (I.fehler ? '' : 'nichts zu kaufen')
+      const box = (attr, wert, gew, z, label) => {
+        const aus = wk && wk !== klVKey(z)
+        return `<input type="checkbox" class="kl-box" ${attr}="${klEsc(wert)}"${gew ? ' checked' : ''}${aus ? ' disabled title="nur gleiche Vorlage — erst „Aufheben“"' : ''} aria-label="${label}">`
+      }
+      const KL_UHR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
+      const spaeterKnopf = (attr, wert, titel) => `<span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini kl-sp-knopf" ${attr}="${klEsc(wert)}" title="7 Tage ausblenden, danach wieder da${titel ? ' — ' + titel : ''}">${KL_UHR}Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(wert)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span>`
+      // PA1-Stand am Knopf; grün + fällig in der Zukunft → darunter „Puls prüft in 2 h 14 min · 14:37" (neu gezeichnet je Minute mit dem PA1-Takt)
+      const pa1Countdown = pa => {
+        const t = pa.faellig_at ? new Date(pa.faellig_at) : null
+        if(!t || !isFinite(t) || pa.knopf.art !== 'gruen') return ''
+        const min = Math.round((t - Date.now()) / 60000), uhr = t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+        if(min <= 0) return `<span class="kl-pa1-cd">Puls prüft gleich · ${uhr}</span>`
+        return `<span class="kl-pa1-cd">Puls prüft in ${min >= 60 ? Math.floor(min / 60) + ' h ' : ''}${min % 60} min · ${uhr}</span>`
+      }
+      const pa1Span = pa => `<span class="kl-pa1-w"><span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>${pa1Countdown(pa)}</span>`
+      const slots = new Map(), slotsVon = z => { const k = z.user_id + '|' + z.firma; if(!slots.has(k)) slots.set(k, pa1Slots(z)); return slots.get(k) }
+      const zeile = x => {
+        const z = x.z, pa = slotsVon(z)[x.k - 1], gew = I.auswahl.has(x.rid), aus = wk && wk !== klVKey(z)
+        const lauf = (Number(z.laufend) || 0) + x.k
+        return `<div class="kl-z${gew ? ' gew' : ''}${aus ? ' kl-aus' : ''}">
+          <div class="kl-f">${klEsc(z.firma)}${z.max ? `<span class="kl-chip fuell" title="laufende Challenges/Phasen nach diesem Kauf gegen das Maximum je Firma">→ ${lauf}/${z.max} laufend</span>` : ''}${z.reserve ? '<span class="kl-chip res" title="Blow-Reserve: das Ziel ist erreicht, hält aber nicht, wenn das größte Konto wegfällt">Reserve</span>' : ''}${z.vorlage ? '' : '<span class="kl-chip warn" title="keine Vorlage in bulk_vorlagen für Firma + Größe — im Bulk-Fenster selbst wählen">ohne Vorlage</span>'}</div>
+          <div class="kl-g">${klEsc(klGr(z))}</div>
+          <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
+          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button>${spaeterKnopf('data-kl-spaeter', x.rid, 'zählt nicht als gekauft')}${box('data-kl-wahl', x.rid, gew, z, 'auswählen')}`}</div>
+        </div>`
+      }
+      // Apex 5er-Pack: die Zeilen einer Pack-Zelle als EIN Block — Kopf mit Kästchen (alle), „Gekauft" (anzahl = Pack) und „Später"
+      const pack = l => {
+        const z = l[0].z, key = z.user_id + '|' + z.firma, alleGew = l.every(x => I.auswahl.has(x.rid)), pa = slotsVon(z)[0], aus = wk && wk !== klVKey(z)
+        const zeilenP = l.map(x => `<div class="kl-z kl-pz${I.auswahl.has(x.rid) ? ' gew' : ''}"><div class="kl-f">${klEsc(z.firma)}</div><div class="kl-g">${klEsc(klGr(z))}</div><div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div><div class="kl-a"></div></div>`).join('')
+        return `<div class="kl-pack${aus ? ' kl-aus' : ''}"><div class="kl-z kl-pack-kopf${alleGew ? ' gew' : ''}">
+          <div class="kl-f"><b>${klEsc(z.firma)} ${z.pack}er-Pack</b>${l.length < z.pack ? `<span class="kl-chip">noch ${l.length}</span>` : ''}${z.reserve ? '<span class="kl-chip res">Reserve</span>' : ''}${z.vorlage ? '' : '<span class="kl-chip warn">ohne Vorlage</span>'}</div>
+          <div class="kl-g">${l.length} Konten</div><div class="kl-p">${summe(l)}</div>
+          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button>${spaeterKnopf('data-kl-pack-spaeter', key, 'ganzes Pack, zählt nicht als gekauft')}${box('data-kl-pack-wahl', key, alleGew, z, 'Pack auswählen')}`}</div>
+        </div>${zeilenP}</div>`
+      }
+      const liste_ = l => { let o = '', i = 0
+        while(i < l.length){ const z = l[i].z
+          if(z.pack > 1){ const g = []; while(i < l.length && l[i].z === z) g.push(l[i++]); o += pack(g) } else o += zeile(l[i++]) }
+        return o }
+      let h = I.fehler ? `<div class="kl-fehler">${klEsc(I.fehler)}</div>` : ''
+      if(cfg.alle){
+        // je ID auf-/zuklappbar (Finn: „mit den Up- und Down-…"); eine ID mit gewähltem Kästchen bleibt offen
+        const ids = [...new Set(zeilen.map(x => x.z.user_id))]
+        for(const id of ids){
+          const l = zeilen.filter(x => x.z.user_id === id), auf = I.offen.has(id) || l.some(x => I.auswahl.has(x.rid))
+          const firmen = [...new Set(l.map(x => x.z.firma))].join(' · ')
+          h += `<div class="kl-pers${auf ? ' auf' : ''}"><button type="button" class="kl-pk kl-pk-knopf" data-kl-id="${klEsc(id)}" aria-expanded="${auf}"><span class="kl-pfeil">${auf ? '▾' : '▸'}</span><b>${klEsc(l[0].z.name)}</b><span>${l.length} kaufen · ${klEsc(firmen)}</span><span class="kl-pk-r">${summe(l)}</span></button>${auf ? liste_(l) : ''}</div>`
+        }
+        if(!ids.length && !I.fehler) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
+      } else h += liste_(zeilen)
+      h += spaeterHtml()
+      liste.innerHTML = h
+      auswahlZeigen()
+      if(cfg.tacho) tachoBadges()
+    }
+    function spaeterHtml(){
+      const sp = (I.d && I.d.spaeter) || [], pa = (I.d && I.d.pausiert) || []
+      if(!sp.length && !pa.length) return ''
+      const n = sp.reduce((a, s) => a + (Number(s.anzahl) || 0), 0), name = uid => ((I.d.zeilen || []).find(z => String(z.user_id) === String(uid)) || {}).name || ''
+      const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
+      const kopf = [n ? `${n} später` : '', pa.length ? `${pa.length} pausiert` : ''].filter(Boolean).join(' · ')
+      let h = `<div class="kl-sp"><button type="button" class="kl-sp-kopf" data-kl-sp-auf>${klEsc(kopf)} · ${I.spAuf ? 'ausblenden' : 'zeigen'}</button>`
+      if(I.spAuf){
+        h += sp.map(s => `<div class="kl-sp-z"><span>${cfg.alle ? `<b>${klEsc(name(s.user_id))}</b> · ` : ''}${klEsc(s.firma)} · ${s.anzahl} ${s.anzahl === 1 ? 'Konto' : 'Konten'}</span><span class="kl-sp-bis">wieder da am ${klEsc(datum(s.bis))}</span><button type="button" class="kl-sp-x" data-kl-sp-weg="${klEsc(s.id)}">Rückgängig</button></div>`).join('')
+        h += pa.map(p => `<div class="kl-sp-z"><span>${cfg.alle ? `<b>${klEsc(p.name)}</b> · ` : ''}${klEsc(p.firma)} · pausiert</span><span class="kl-sp-bis">bis zur Freigabe</span><button type="button" class="kl-sp-x" data-kl-frei="${klEsc(p.user_id + '|' + p.firma)}">freigeben</button></div>`).join('')
+      }
+      return h + '</div>'
+    }
+    function auswahlZeigen(){ leisteZeigen() }
+    // „+n" am Tacho der eigenen ID (nur Accounts)
+    function tachoBadges(){
+      const leiste = document.getElementById('mp-leiste'); if(!leiste) return
+      const je = {}
+      for(const z of (I.d && I.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n - spaeterN(z)
+      leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
+        let b = el.querySelector('.mp-kauf-n'); const n = je[el.dataset.mpFirma] || 0
+        if(!n){ if(b) b.remove(); return }
+        if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
+        b.textContent = `+${n} kaufen`; b.title = `${n} Konto${n === 1 ? '' : 's'} in der Kaufliste unten`
+      })
+    }
+    async function spaeter(rid, anzahl, tage){
+      const x = zeilenAlle().find(q => q.rid === rid); if(!x) return
+      const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1)), t = [3, 7, 30].includes(tage) ? tage : 7
+      try{
+        const d = await klPost('/admin/kaufliste/spaeter', { user_id: z.user_id, firma: z.firma, anzahl: n, tage: t }, cfg.alle)
+        if(I.d){ I.d.spaeter = [...(I.d.spaeter || []), d.spaeter]; I.auswahl.clear(); render() }   // sofort weg
+        const sid = d.spaeter && d.spaeter.id
+        klToast(`${z.name} · ${z.firma}: ${n === 1 ? 'kommt' : n + ' Konten kommen'} in ${t} Tagen wieder`, sid ? () => spaeterWeg(sid) : null)
+      }catch(e){ klToast('Später ging nicht: ' + (e.message || e)) }
+    }
+    async function spaeterWeg(sid){
+      try{ await klPost('/admin/kaufliste/spaeter_weg', { id: Number(sid) }, cfg.alle); if(I.d) I.d.spaeter = (I.d.spaeter || []).filter(s => String(s.id) !== String(sid)); render(); laden(true) }
+      catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
+    }
+    async function pausieren(uid, firma, frei){
+      if(!frei && !confirm(`${firma} für diese ID pausieren?\nDie Kaufliste schlägt dort nichts vor (und der Planer plant ihre Konten nicht neu), bis du sie wieder freigibst.`)) return
+      try{ await klPost('/admin/vorrat', { user_id: uid, firma, status: frei ? 'frei' : 'pausiert' }, cfg.alle); klToast(`${firma} ${frei ? 'wieder frei' : 'pausiert'}`); laden(true) }
+      catch(e){ klToast((frei ? 'Freigeben' : 'Pausieren') + ' ging nicht: ' + (e.message || e)) }
+    }
+    function menu(knopf, rid, anzahl){
+      document.getElementById('kl-sp-menu')?.remove()
+      const x = zeilenAlle().find(q => q.rid === rid); if(!x) return
+      const m = document.createElement('div'); m.id = 'kl-sp-menu'; m.className = 'kl-sp-menu'
+      m.innerHTML = [3, 7, 30].map(t => `<button type="button" data-t="${t}">${t} Tage${t === 7 ? ' · Standard' : ''}</button>`).join('') +
+        `<button type="button" data-t="pause">${klEsc(x.z.firma)} pausieren …</button>`
+      document.body.appendChild(m)
+      const b = knopf.getBoundingClientRect()
+      m.style.top = Math.min(innerHeight - m.offsetHeight - 8, b.bottom + 4) + 'px'; m.style.left = Math.max(8, b.right - m.offsetWidth) + 'px'
+      m.onclick = e => { const o = e.target.closest('[data-t]'); if(!o) return; m.remove()
+        if(o.dataset.t === 'pause') pausieren(x.z.user_id, x.z.firma, false); else spaeter(rid, anzahl, Number(o.dataset.t)) }
+      setTimeout(() => document.addEventListener('click', function zu(e){ if(!m.contains(e.target)){ m.remove(); document.removeEventListener('click', zu, true) } }, true), 0)
+    }
+    function hinzufuegen(rids){
+      const zl = zeilenAlle().filter(x => rids.includes(x.rid))
+      const grp = new Map()
+      for(const x of zl){ const key = x.z.user_id + '|' + x.z.firma; const b = grp.get(key) || { z: x.z, n: 0 }; b.n++; grp.set(key, b) }
+      const bl = [...grp.values()]
+      if(!bl.length || typeof window._bulkKaufliste !== 'function') return
+      let i = 0
+      const naechster = async () => {
+        if(i >= bl.length){ I.auswahl.clear(); laden(true); return }
+        const b = bl[i++], vid = b.z.vorlage && b.z.vorlage.id
+        // Finn 25.11.2026: Futures (PA1-fähig, Login da) → KEIN Fenster, Knopf sofort grün mit Countdown bis zur Puls-Prüfung;
+        // CFD (und Futures ohne Login / PA1 sagt nein) → direkt das Anlegen-Fenster mit der Schablone
+        const futures = typeof tpFirmIstFutures === 'function' ? !!tpFirmIstFutures(b.z.firma) : true
+        if(futures && typeof window.pa1Gekauft === 'function' && vid){
+          try{
+            const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })
+            if(r && r.ok){
+              if(r.auftrag){ I.pa1 = [...(I.pa1 || []).filter(a => String(a.id) !== String(r.auftrag.id)), r.auftrag]; I.auswahl.clear(); render() }   // sofort grün
+              pa1Laden(); return naechster()
+            }
+            if(r && r.msg && r.code !== 'firma_nicht') klToast(r.msg + ' — Anlegen-Fenster')
+          }catch(e){ console.warn('[kaufliste] pa1Gekauft:', e) }
+        }
+        window._bulkKaufliste({ ziel: b.z.user_id, zielName: b.z.name, firma: b.z.firma, vorlageId: vid, anzahl: b.n,
+          block: i, bloecke: bl.length, fertig: naechster, abbruch: () => { I.auswahl.clear(); laden(true) } })
+      }
+      naechster()
+    }
+    $k(cfg.liste)?.addEventListener('click', e => {
+      const pk = e.target.closest('[data-kl-id]'); if(pk){ const id = pk.dataset.klId; I.offen.has(id) ? I.offen.delete(id) : I.offen.add(id); render(); return }
+      const g = e.target.closest('[data-kl-gekauft]'); if(g){ hinzufuegen([g.dataset.klGekauft]); return }
+      const w = e.target.closest('[data-kl-spaeter]'); if(w){ spaeter(w.dataset.klSpaeter, 1, 7); return }
+      const sm = e.target.closest('[data-kl-sp-menu]'); if(sm){ const key = sm.dataset.klSpMenu
+        if(key.includes('#')) menu(sm, key, 1); else { const r = packRids(key); if(r.length) menu(sm, r[0], r.length) } return }
+      if(e.target.closest('[data-kl-sp-auf]')){ I.spAuf = !I.spAuf; render(); return }
+      const sw = e.target.closest('[data-kl-sp-weg]'); if(sw){ spaeterWeg(sw.dataset.klSpWeg); return }
+      const fr = e.target.closest('[data-kl-frei]'); if(fr){ const [u, ...f] = fr.dataset.klFrei.split('|'); pausieren(u, f.join('|'), true); return }
+      const pg = e.target.closest('[data-kl-pack-gekauft]'); if(pg){ hinzufuegen(packRids(pg.dataset.klPackGekauft)); return }
+      const pwg = e.target.closest('[data-kl-pack-spaeter]'); if(pwg){ const r = packRids(pwg.dataset.klPackSpaeter); if(r.length) spaeter(r[0], r.length, 7); return }
+    })
+    $k(cfg.liste)?.addEventListener('change', e => {
+      const pc = e.target.closest('[data-kl-pack-wahl]')
+      if(pc){ for(const rid of packRids(pc.dataset.klPackWahl)) pc.checked ? I.auswahl.add(rid) : I.auswahl.delete(rid); render(); return }
+      const c = e.target.closest('[data-kl-wahl]'); if(!c) return
+      c.checked ? I.auswahl.add(c.dataset.klWahl) : I.auswahl.delete(c.dataset.klWahl)
+      render()   // andere Vorlagen sperren bzw. wieder freigeben
+    })
+    function oeffnen(){
+      const uid = String(currentUserId || '')
+      if(uid !== I.uid){ I.d = null; I.pa1 = []; I.auswahl.clear(); I.offen.clear(); I.verboten = false; render() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
+      if(!I.d || Date.now() - I.at >= 60000) laden(false); else render()
+    }
+    return { cfg, I, laden, render, oeffnen, pa1Laden, hinzufuegen, zeilenAlle, aufheben: () => { I.auswahl.clear(); render() },
+             zeigen: d => { I.d = d; I.at = Date.now(); I.uid = String(currentUserId || ''); I.verboten = false; render() } }
   }
-  document.getElementById('kl-liste')?.addEventListener('click', e => {
-    const g = e.target.closest('[data-kl-gekauft]'); if(g){ klHinzufuegen([g.dataset.klGekauft]); return }
-    const w = e.target.closest('[data-kl-spaeter]'); if(w){ klSpaeter(w.dataset.klSpaeter, 1, 7); return }
-    const sm = e.target.closest('[data-kl-sp-menu]'); if(sm){ const key = sm.dataset.klSpMenu
-      if(key.includes('#')) klMenu(sm, key, 1); else { const r = klPackRids(key); if(r.length) klMenu(sm, r[0], r.length) } return }
-    if(e.target.closest('[data-kl-sp-auf]')){ _kl.spAuf = !_kl.spAuf; klRender(); return }
-    const sw = e.target.closest('[data-kl-sp-weg]'); if(sw){ klSpaeterWeg(sw.dataset.klSpWeg); return }
-    const fr = e.target.closest('[data-kl-frei]'); if(fr){ const [u, ...f] = fr.dataset.klFrei.split('|'); klPausieren(u, f.join('|'), true); return }
-    const pg = e.target.closest('[data-kl-pack-gekauft]'); if(pg){ klHinzufuegen(klPackRids(pg.dataset.klPackGekauft)); return }
-    const pwg = e.target.closest('[data-kl-pack-spaeter]'); if(pwg){ const r = klPackRids(pwg.dataset.klPackSpaeter); if(r.length) klSpaeter(r[0], r.length, 7); return }
-  })
-  const klPackRids = key => klZeilenAlle().filter(x => x.z.user_id + '|' + x.z.firma === key).map(x => x.rid)
-  document.getElementById('kl-liste')?.addEventListener('change', e => {
-    const pc = e.target.closest('[data-kl-pack-wahl]')
-    if(pc){ for(const rid of klPackRids(pc.dataset.klPackWahl)) pc.checked ? auswahl.add(rid) : auswahl.delete(rid); klRender(); return }
-    const c = e.target.closest('[data-kl-wahl]'); if(!c) return
-    c.checked ? auswahl.add(c.dataset.klWahl) : auswahl.delete(c.dataset.klWahl)
-    c.closest('.kl-z')?.classList.toggle('gew', c.checked); klAuswahlZeigen()
-  })
-  document.getElementById('kl-seg')?.addEventListener('click', e => {
-    const b = e.target.closest('[data-kl-alle]'); if(!b) return
-    const alle = b.dataset.klAlle === '1'; if(alle === _kl.alle) return
-    _kl.alle = alle; auswahl.clear(); _kl.d = null; _kl.pa1 = []; klRender(); klLaden(false)
-  })
-  document.getElementById('kl-aw-ok')?.addEventListener('click', () => klHinzufuegen([...auswahl]))
-  document.getElementById('kl-aw-weg')?.addEventListener('click', () => { auswahl.clear(); klRender() })
-  const klSichtbar = () => !!document.querySelector('#dashboard-view .view[data-view="accounts"].active')
-  window._klOeffnen = () => {
-    const uid = String(currentUserId || '')
-    if(uid !== _kl.uid){ _kl.d = null; _kl.alle = false; _kl.keinAdmin = false; _kl.pa1 = []; auswahl.clear(); klRender() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
-    if(!_kl.d || Date.now() - _kl.at >= 60000) klLaden(false); else klRender()
+
+  const acc = instanz({ name: 'accounts', karte: 'kl-karte', liste: 'kl-liste', sub: 'kl-sub', alle: false, tacho: true,
+    sichtbar: () => !!document.querySelector('#dashboard-view .view[data-view="accounts"].active') })
+  const adm = instanz({ name: 'admin', karte: 'kl-admin-karte', liste: 'kl-admin-liste', sub: 'kl-admin-sub', alle: true, tacho: false,
+    sichtbar: () => { const p = document.getElementById('adm-pane-konten'); return !!(p && !p.hidden && p.offsetParent !== null) } })
+  const orte = [acc, adm]
+  // Auswahl-Leiste: gehört dem sichtbaren Ort mit Auswahl — „2 × The5%ers 100k Phase 1 · 284 €" (nur gleiche Vorlage)
+  const aktiv = () => orte.find(o => o.cfg.sichtbar() && o.I.auswahl.size)
+  function leisteZeigen(){
+    const bar = document.getElementById('kl-auswahl'); if(!bar) return
+    const o = aktiv()
+    bar.classList.toggle('an', !!o)
+    if(!o) return
+    const zl = o.zeilenAlle().filter(x => o.I.auswahl.has(x.rid)); if(!zl.length){ bar.classList.remove('an'); return }
+    const z = zl[0].z, ids = new Set(zl.map(x => x.z.user_id))
+    document.getElementById('kl-aw-text').innerHTML = `<b>${zl.length} × ${klEsc(z.firma)} ${klEsc(klGr(z))}</b><span class="kl-aw-mehr"> · ${klEur(zl.reduce((a, x) => a + klPreis(x.z), 0))}${ids.size > 1 ? ` · ${ids.size} IDs` : ''}</span>`
   }
-  setInterval(() => { if(klSichtbar() && !document.hidden && Date.now() - _kl.at >= KL_TAKT) klLaden(false); klAuswahlZeigen() }, 15000)
-  setInterval(() => { if(klSichtbar() && !document.hidden && _kl.d) klPa1Laden() }, 60000)   // PA1-Stand (Puls) je Minute
-  if(klSichtbar()) setTimeout(window._klOeffnen, 0)
-  window._kaufliste = { zeigen: d => { _kl.d = d; _kl.at = Date.now(); _kl.uid = String(currentUserId || ''); klRender() }, vorlage: klVorlage, render: klRender, auswahl }   // Test-Haken (Stub)
+  document.getElementById('kl-aw-ok')?.addEventListener('click', () => { const o = aktiv(); if(o) o.hinzufuegen([...o.I.auswahl]) })
+  document.getElementById('kl-aw-weg')?.addEventListener('click', () => { const o = aktiv(); if(o) o.aufheben(); leisteZeigen() })
+  try{ const l = document.getElementById('mp-leiste'); if(l && typeof MutationObserver === 'function') new MutationObserver(() => acc.render()).observe(l, { childList: true }) }catch(_){}
+  // Admin-Karte bei geschlossenem Bereich ausblenden lassen (Leiste), Taktgeber je Ort
+  window.pa1Neu = () => { for(const o of orte) if(o.I.d) o.pa1Laden() }
+  window._klOeffnen = () => acc.oeffnen()
+  window._klAdminOeffnen = () => adm.oeffnen()
+  setInterval(() => { for(const o of orte) if(o.cfg.sichtbar() && !document.hidden && Date.now() - o.I.at >= KL_TAKT) o.laden(false); leisteZeigen() }, 15000)
+  setInterval(() => { for(const o of orte) if(o.cfg.sichtbar() && !document.hidden && o.I.d) o.pa1Laden() }, 60000)   // PA1-Stand (Puls) je Minute
+  if(acc.cfg.sichtbar()) setTimeout(window._klOeffnen, 0)
+  window._kaufliste = { zeigen: acc.zeigen, zeigenAdmin: adm.zeigen, vorlage: klVorlage, render: acc.render, auswahl: acc.I.auswahl, admin: adm }   // Test-Haken (Stub)
 })()
 /* ── VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … eine schöne Übersicht,
  * wo jede ID bei jeder Firma im Funnel steht und was bis zum Ziel fehlt") ──

@@ -126,9 +126,25 @@ pruef([x["firma"] for x in KL.pausiert_aus_vorrat(pz, None, {"u1": "Aurel", "u2"
 pruef([x["firma"] for x in KL.pausiert_aus_vorrat(pz, "u2")] == ["The5%ers"], "pausierte Zellen (normale ID: nur eigene)")
 kq = open(os.path.join(WURZEL, "kaufliste_app.py"), encoding="utf-8").read()
 pruef('"kaufliste_spaeter"' in kq and "vorrat_bestellt" not in kq.split("def registrieren")[1], "Später schreibt kaufliste_spaeter, nie vorrat_bestellt (keine Rechenwirkung)")
-pruef("data-kl-spaeter" in fe and "data-kl-weg" not in fe and "klSpaeterN" in fe, "Frontend: „Später“ statt „Erledigt“, ausgeblendete Zeilen je Zelle abgezogen")
+pruef("data-kl-spaeter" in fe and "data-kl-weg" not in fe and "const spaeterN = z =>" in fe, "Frontend: „Später“ statt „Erledigt“, ausgeblendete Zeilen je Zelle abgezogen")
 sq = open(os.path.join(WURZEL, "sql", "2026-11-25_kp2d_kaufliste_spaeter.sql"), encoding="utf-8").read()
 pruef("enable row level security" in sq and "revoke all on public.kaufliste_spaeter from anon, authenticated" in sq, "SQL: RLS an, anon/authenticated entzogen")
+
+# KP2d Zusatz: Mehrfachauswahl nur gleiche Vorlage; „Alle IDs" nur unter Admin → Alle Accounts (nie unter Accounts)
+fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
+pruef("data-kl-alle" not in fe and 'id="kl-seg"' not in fe, "Accounts ohne Umschalter „Meine | Alle IDs“")
+i_k = fe.index('id="adm-pane-konten"'); i_a = fe.index('id="kl-admin-karte"'); i_n = fe.index('id="adm-konten-msg"')
+pruef(i_k < i_a < i_n, "Kaufliste aller IDs steht unter Admin → Alle Accounts (vor der Tabelle)")
+pruef("window._klAdminOeffnen?.()" in fe and "alle: true, tacho: false" in fe and "pa1Stand(cfg.alle ? { alle: true } : undefined)" in fe,
+      "Admin-Ort lädt alle=1 und die Puls-Stände aller IDs, Accounts nur die eigene ID")
+pruef("const klVKey = z => z.vorlage ? 'v' + z.vorlage.id" in fe and "nur gleiche Vorlage" in fe and "data-kl-id=" in fe,
+      "Kästchen anderer Vorlage gesperrt (Firma × Größe × Phase), IDs auf-/zuklappbar")
+
+# Finn zu „Gekauft": Futures → PA1 ohne Fenster (sofort grün + Countdown), CFD → direkt das Anlegen-Fenster; „Später" mit Uhr-Symbol
+pruef("const futures = typeof tpFirmIstFutures === 'function'" in fe and "if(futures && typeof window.pa1Gekauft === 'function' && vid)" in fe,
+      "Gekauft: nur Futures gehen an PA1, CFD direkt ins Anlegen-Fenster")
+pruef("Puls prüft in ${" in fe and "pa.knopf.art !== 'gruen'" in fe, "grüner Knopf mit Countdown bis zur Puls-Prüfung")
+pruef("KL_UHR" in fe and "7 Tage ausblenden, danach wieder da" in fe, "„Später“ mit Uhr-Symbol und Tooltip")
 
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402

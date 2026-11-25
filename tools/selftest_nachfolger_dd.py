@@ -59,9 +59,13 @@ r = r[:r.index("\n@app.route(")]
 check("konto_vorlage_finden(vorlagen, alt.get(\"firm\"), konto_reset_typ(alt.get(\"account_type\")), _gr_alt, dd=alt.get(\"max_drawdown\"))" in r and "if _gr_alt:" in r and "namen=(alt.get(\"name\"),)" in r,
       "Gegenprüfung: Reset sucht die Schablone mit der Größe aus dem alten Namen, ohne Größe kein Max DD")
 check("signal: AbortSignal.timeout(8000)" in html[html.index("async function sucDdErmitteln("):html.index("async function sucDdNachtragen(")], "Gegenprüfung: Kernwert-Abfrage bricht nach 8 s ab (Bulk hängt nie)")
-check(len(re.findall(r"(?<!def )konto_dd_ergaenzen\(zeile, ", src)) == 2 and "def _konto_dd_regeln(" in src, "Reset und /admin/konto-anlegen ergänzen über denselben Weg")
+# seit PA1 (ba8c6bb0, Puls legt Futures-Konten an: _pa1_anlegen) ein dritter Aufrufer desselben Wegs
+check(len(re.findall(r"(?<!def )konto_dd_ergaenzen\(zeile, ", src)) == 3 and "def _konto_dd_regeln(" in src and "def _pa1_anlegen(" in src,
+      "Reset, /admin/konto-anlegen und PA1 (_pa1_anlegen) ergänzen über denselben Weg")
 b = html[html.index("async function saveBulkAccounts("):]
-check("sucDdErmitteln({ firm, name, startingBalance: gr, maxDrawdown: null, userId: currentUserId }, typRow)" in b[:12000] and "ddCache" in b[:12000], "DD1: Bulk ohne Vorlage/Formular-Wert → Schablone/Kernwert, einmal je Firma × Größe × Typ")
+# KP2b: Kaufliste für eine FREMDE ID → Schablone/Kernwert der Ziel-ID (kl.ziel), sonst der eigenen
+check("sucDdErmitteln({ firm, name, startingBalance: gr, maxDrawdown: null, userId: fremd ? kl.ziel : currentUserId }, typRow)" in b[:12000] and "ddCache" in b[:12000],
+      "DD1: Bulk ohne Vorlage/Formular-Wert → Schablone/Kernwert (Ziel-ID bei Kaufliste für fremde IDs), einmal je Firma × Größe × Typ")
 check('"/konto/dd-vorschlag"' in src and "_uid, err = _wd_login()" in src, "Route nur mit Login")
 check("String(el.value || '').trim() !== ''" in ein and "String(_successorParentAccId) !== String(acc.id)" in ein, "Hand-Eingabe und anderer Vorgänger werden nie überschrieben")
 check(re.search(r"sucWdBlockRender\(acc\)\n\s+sucDdNachtragen\(acc, sucType\.value\)", html) is not None, "Assistent ruft den Rückfall mit dem Zieltyp auf")
