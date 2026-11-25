@@ -286,7 +286,8 @@ check("continue" in an[an.index('sb_insert("konto_suche_riegel"'):an.index("zeil
 check('sb_delete("konto_suche_riegel"' in an, "Anlegen gescheitert → Riegel wieder frei")
 check('"kind": "account_purchase"' in an and "-abs(float(zeile[\"purchase_cost\"]))" in an, "Kauf-Buchung wie Bulk-Anlegen (negativ, EUR)")
 er = block("def _pa1_erledigt(", '\n@app.route("/konto-suche"')
-check('_sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at"})' in er, "Abgleich gegen Konten ALLER IDs (ohne user_id-Filter)")
+check('_sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at,created_at"})' in er, "Abgleich gegen Konten ALLER IDs (ohne user_id-Filter)")
+check("PA1g" in er and "(pa1_iso(k.get(\"created_at\")) or jetzt) < erstellt" in er, "PA1g: Basis auch aus vor dem Klick bekannten Konten dieser ID × Firma (ueberzahl schützt weiter)")
 ue = er[er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis", "groessen"):'):er.index("else:", er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis", "groessen"):'))]
 check("pa1_zuordnen(teile[\"challenge\"]" in er and "dict(x, vorlage_id=vid)" in er and "pa1_nachgekauft(a)" in er and "random.randint(60, 180)" in er,
       "PA1b-Auswertung: Zuordnung je Posten, angelegt merkt die Vorlage, Folgelauf +1–3 min nach einem Klick während des Laufs")

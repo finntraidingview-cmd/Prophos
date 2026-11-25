@@ -26624,7 +26624,7 @@ def _pa1_erledigt(uid, a, b, erg):
     body = None
     alarm = None                                    # (titel, text) — gesendet erst nach dem greifenden Abschluss-Update
     if b.get("ok"):
-        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at"}) or []   # ALLE IDs (Service-Key), archivierte mit
+        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at,created_at"}) or []   # ALLE IDs (Service-Key), archivierte mit
         posten = pa1_posten(a)                      # PA1b: alle Vorlagen dieser einen Prüfung
         vids = sorted({p["vorlage_id"] for p in posten if ADMIN_MAIL_UID_RE.fullmatch(str(p["vorlage_id"]))})
         vorlagen = {str(x.get("id")): x for x in (sb_select("bulk_vorlagen", {"select": "*", "id": f"in.({','.join(vids)})"}) or [])} if vids else {}
@@ -26644,6 +26644,12 @@ def _pa1_erledigt(uid, a, b, erg):
         # Basis (Review 25.11.2026): sah Puls diese Firma bei der ID schon > 6 h vor dem Klick im Umschalter? Ohne Basis wäre jede alte, in
         # Prophos fehlende Nummer „neu" → dann nichts automatisch anlegen (ruhig „erste Lesung · von Hand"); die Lesung legt die Basis für den nächsten Kauf
         basis = any(pa1_art(k, a.get("firma")) for k in vorher)
+        # PA1g (Finn 25.11.2026, FTMO Futures + FundedNext Futures Finn + Pascal: „erste Lesung · von Hand“, obwohl Prophos die Firma längst kennt):
+        # Basis auch, wenn die ID schon Konten dieser Firma in Prophos hat (vor dem Klick angelegt). pa1_neue zieht ALLE bekannten Nummern ab,
+        # und „mehr gefunden als gekauft“ (ueberzahl) legt weiter nichts an — eine alte, in Prophos fehlende Nummer kann also nie still mitgehen.
+        if not basis:
+            basis = any(str(k.get("user_id")) == str(uid) and k.get("firm") == a.get("firma") and k.get("external_id")
+                        and (pa1_iso(k.get("created_at")) or jetzt) < erstellt for k in konten)
         bestanden = pa1_offen_bestanden(konten, uid, a.get("firma"), _pa1_archiv(uid))
         teile = pa1_neue([n for n in (b.get("konten") or []) if isinstance(n, str)], a.get("firma"), konten, vorher, weg, offen_bestanden=bool(bestanden))
         # Zuordnung zu den Posten (Größe aus der Vorlage; Tradeify/Lucid zusätzlich aus der Kennung) — pa1_zuordnen
