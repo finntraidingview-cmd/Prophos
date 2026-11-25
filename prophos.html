@@ -3132,6 +3132,13 @@
   :is(#mp-karte,#mp-total) .mp-nadel{transform-box:view-box;transform-origin:60px 58px;transition:transform .95s cubic-bezier(.34,1.35,.5,1)}
   :is(#mp-karte,#mp-total) .mp-nadel line{stroke:var(--ink);stroke-width:2.2;stroke-linecap:round}
   :is(#mp-karte,#mp-total) .mp-nadel circle{fill:var(--surface);stroke:var(--ink);stroke-width:2}
+  /* KP2 (Finn 25.11.2026): blasser Bogen bis „erwartet" + zweite, dünne Nadel in der Firmenfarbe mit sanftem Puls (0,45 ↔ 0,85, ~2 s) */
+  :is(#mp-karte,#mp-total) .mp-bogen-erw{opacity:.36}
+  :is(#mp-karte,#mp-total) .mp-nadel2{transform-box:view-box;transform-origin:60px 58px;transition:transform .95s cubic-bezier(.34,1.35,.5,1)}
+  :is(#mp-karte,#mp-total) .mp-nadel2 line{stroke:color-mix(in srgb,var(--mp-f) 60%,#fff);stroke-width:1.7;stroke-linecap:round;animation:mp-puls 2s ease-in-out infinite alternate}
+  :is(#mp-karte,#mp-total) .mp-nadel2.gleich{display:none}
+  @keyframes mp-puls{from{opacity:.45}to{opacity:.85}}
+  @media (prefers-reduced-motion:reduce){:is(#mp-karte,#mp-total) .mp-nadel2 line{animation:none;opacity:.7}}
   :is(#mp-karte,#mp-total) .mp-zahl{font-size:21px;font-weight:700;fill:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
   :is(#mp-karte,#mp-total) .mp-zahl tspan{font-size:11px;font-weight:500;fill:var(--sub)}
   :is(#mp-karte,#mp-total) .mp-firma{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:650;color:var(--ink);margin-top:1px;
@@ -3163,6 +3170,65 @@
     :is(#mp-karte,#mp-total) .mp-leiste::-webkit-scrollbar{display:none}
     :is(#mp-karte,#mp-total) .mp-tacho{flex:0 0 40%;scroll-snap-align:start}:is(#mp-karte,#mp-total) .mp-tacho:hover{transform:none}
     :is(#mp-karte,#mp-total) .mp-zahl{font-size:20px}:is(#mp-karte,#mp-total) .mp-firma{font-size:12px}}
+  /* KAUFLISTE (KP2, 25.11.2026) — Design wie die Admin-Kaufliste der Demo (demo/kaufplan.html), Klassen kl-*; „+n kaufen" am Tacho */
+  #mp-karte .mp-tacho .mp-kauf-n{position:absolute;top:6px;left:8px;font-size:11px;font-weight:700;color:var(--violet);letter-spacing:-.01em}
+  .kl-karte{margin-bottom:14px;padding:10px 16px 12px}
+  .kl-karte .kl-kopf{display:flex;align-items:baseline;gap:10px;margin:0 0 6px;flex-wrap:wrap}
+  .kl-karte .kl-kopf h3{margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650}
+  .kl-karte .kl-kopf #kl-sub{font-size:11.5px;color:var(--sub-2)}
+  .kl-seg{margin-left:auto;display:inline-flex;background:var(--surface-tint);border-radius:999px;padding:2px}
+  .kl-seg[hidden]{display:none}
+  .kl-seg button{border:0;background:none;color:var(--sub);font:inherit;font-size:12px;padding:3px 11px;border-radius:999px;cursor:pointer}
+  .kl-seg button.an{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(16,24,40,.12)}
+  .kl-z{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,130px) 80px auto;gap:12px;align-items:center;padding:8px 2px;border-top:1px solid var(--border-soft);font-size:13px}
+  .kl-z.gew{background:color-mix(in srgb,var(--violet) 7%,transparent);border-radius:8px}
+  .kl-f{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;color:var(--ink-2);font-weight:500;min-width:0}
+  .kl-g{color:var(--sub);font-size:12.5px} .kl-p{text-align:right;font-variant-numeric:tabular-nums}
+  .kl-a{display:inline-flex;align-items:center;gap:7px;justify-content:flex-end}
+  .kl-a .btn-mini{padding:5px 10px;font-size:12px;height:auto}
+  .kl-box{width:16px;height:16px;accent-color:var(--violet);cursor:pointer;margin:0 0 0 2px}
+  .kl-pa1{border:1px solid var(--border);background:var(--surface-tint);color:var(--sub);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+  .kl-pa1.gruen,.kl-pa1.fertig{color:var(--good-ink,#067647);background:color-mix(in srgb,var(--good,#12b76a) 12%,transparent);border-color:color-mix(in srgb,var(--good,#12b76a) 35%,transparent)}
+  .kl-pa1.laeuft{color:var(--violet);background:color-mix(in srgb,var(--violet) 10%,transparent);border-color:color-mix(in srgb,var(--violet) 30%,transparent)}
+  .kl-pa1.warn{color:var(--warn-ink,#b45309);background:color-mix(in srgb,var(--warn,#f59e0b) 14%,transparent);border-color:color-mix(in srgb,var(--warn,#f59e0b) 40%,transparent)}
+  .kl-pa1.ruhig{color:var(--sub);background:var(--surface-tint);border-color:var(--border)}
+  .kl-pa1{display:inline-block;cursor:default}
+  .kl-chip{font-size:10.5px;font-weight:500;color:var(--sub);background:var(--surface-tint);border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .kl-chip.fuell{color:var(--violet);background:color-mix(in srgb,var(--violet) 10%,transparent)}
+  .kl-chip.res{color:var(--warn-ink,#b45309);background:color-mix(in srgb,var(--warn,#f59e0b) 14%,transparent)}
+  .kl-chip.warn{color:var(--danger,#d92d20)}
+  .kl-pers{margin-top:10px} .kl-pers:first-child{margin-top:2px}
+  .kl-pack{border:1px solid color-mix(in srgb,var(--mp-apex,#e8892b) 30%,var(--border-soft));border-radius:10px;margin:6px 0;overflow:hidden}
+  .kl-pack .kl-pack-kopf{border-top:0;padding:8px 10px;background:color-mix(in srgb,var(--mp-apex,#e8892b) 7%,var(--surface))}
+  .kl-pack .kl-pz{padding:5px 10px;font-size:12px;color:var(--sub)} .kl-pack .kl-pz .kl-f{font-weight:400;color:var(--sub)}
+  .kl-pk{display:flex;align-items:baseline;gap:10px;padding:6px 2px} .kl-pk b{font-size:13.5px} .kl-pk span{font-size:12px;color:var(--sub)}
+  .kl-pk .kl-pk-r{margin-left:auto;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+  .kl-leer,.kl-fehler{font-size:12.5px;color:var(--sub);padding:8px 2px} .kl-fehler{color:var(--danger)}
+  .kl-auswahl{position:fixed;left:50%;bottom:20px;transform:translate(-50%,30px);opacity:0;pointer-events:none;z-index:150;display:flex;align-items:center;gap:10px;
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 12px 10px 16px;box-shadow:0 12px 40px -8px rgba(16,24,40,.35);
+    transition:all .2s var(--ease);font-size:13px;white-space:nowrap}
+  .kl-auswahl.an{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+  body:has(#bulkAddModal.open) .kl-auswahl{display:none}   /* Bulk-Fenster offen: Leiste weg */
+  .kl-auswahl #kl-aw-text{margin-right:6px}
+  /* die Leiste hängt an body (nicht in #dashboard-view) → eigene Knopf-Optik statt #dashboard-view .btn-* */
+  .kl-auswahl button{font:inherit;font-size:13px;font-weight:500;border-radius:8px;padding:7px 13px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
+  .kl-auswahl #kl-aw-ok{background:var(--violet);border-color:var(--violet);color:#fff;font-weight:600}
+  .kl-auswahl #kl-aw-ok:hover{background:var(--violet-dark,#4539b8)}
+  .kl-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;
+    font-size:13px;opacity:0;pointer-events:none;transition:all .2s var(--ease);z-index:300;box-shadow:var(--shadow-pop)}
+  .kl-toast.an{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+  .kl-toast .kl-undo{border:0;background:none;color:var(--violet-soft,#887CFC);font:inherit;font-weight:600;cursor:pointer;margin-left:8px}
+  .bulk-kl-kopf{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;margin:-6px 0 14px;padding:9px 12px;border-radius:10px;font-size:12.5px;color:var(--sub);
+    background:color-mix(in srgb,var(--violet) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--violet) 25%,var(--border))}
+  .bulk-kl-kopf[hidden]{display:none}
+  .bulk-kl-kopf b{color:var(--ink);font-size:13.5px;margin-left:3px} .bulk-kl-kopf .bkk-anz b{color:var(--violet)} .bulk-kl-kopf .bkk-block{margin-left:auto}
+  .bulk-kl-kopf .bkk-hinweis{flex-basis:100%;font-size:11.5px;color:var(--sub-2)}
+  @media (max-width:820px){
+    .kl-z{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"f a" "g a" "p a";row-gap:2px}
+    .kl-f{grid-area:f} .kl-g{grid-area:g} .kl-p{grid-area:p;text-align:left;font-size:12.5px} .kl-a{grid-area:a;flex-direction:column;align-items:flex-end;gap:5px}
+    .kl-auswahl{left:12px;right:12px;transform:translateY(30px);bottom:calc(84px + env(safe-area-inset-bottom,0px));padding:8px 8px 8px 12px;gap:6px;z-index:260} .kl-auswahl.an{transform:none}   /* über der Handy-Leiste unten */
+    .kl-auswahl .btn{padding:7px 10px;font-size:12.5px} .kl-auswahl #kl-aw-text{margin-right:auto} .kl-aw-mehr{display:none}
+  }
   #pb-ansicht .pb-kopf{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
   #pb-ansicht .pb-sub{font-weight:400;color:var(--sub);font-size:12px}
   #pb-ansicht .btn-mini,#dashboard-view .view[data-view="propbaum"] .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
@@ -9861,6 +9927,17 @@
         <div class="mp-leiste" id="mp-leiste"></div>
         <div class="mp-gesperrt" id="mp-gesperrt" hidden></div>
       </div>
+      <!-- KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen, „Design ganz nice" — ohne neuen Navigationspunkt, unter Accounts
+           direkt unter dem Muster-Portfolio): eine Zeile je zu kaufendem Konto aus dem Vorrat-Lauf (GET /admin/kaufliste, kaufliste_app.py),
+           „Gekauft" = echtes Bulk-Fenster mit Vorlage (nur External IDs einfügen), „Erledigt" = vorrat_bestellt (48 h, mit Rückgängig),
+           Kästchen = mehrere auf einmal. Admin: „Meine | Alle IDs", Anlegen für fremde IDs ohne ID-Wechsel (vorhandene Route POST /admin/konto-anlegen).
+           Verdrahtung in der Sektion KAUFLISTE im Modul, eigene IDs/Klassen kl-*. -->
+      <div class="card kl-karte" id="kl-karte" hidden>
+        <div class="kl-kopf"><h3>Kaufliste</h3><span id="kl-sub"></span>
+          <div class="kl-seg" id="kl-seg" hidden><button type="button" data-kl-alle="0" class="an">Meine</button><button type="button" data-kl-alle="1">Alle IDs</button></div></div>
+        <div id="kl-liste"></div>
+      </div>
+      <div class="kl-auswahl" id="kl-auswahl"><span id="kl-aw-text"></span><button type="button" class="btn btn-ghost" id="kl-aw-weg">Aufheben</button><button type="button" class="btn btn-primary" id="kl-aw-ok">Jetzt hinzufügen</button></div>
 
       <!-- TODO fuer diese ID (31.08.2026, Finns Wunsch: "mach das es bei der
            jeweiligen person dann auch angezeigt wird im dashboard seine trade
@@ -16286,6 +16363,8 @@
         </button>
       </div>
 
+      <!-- KAUFLISTE (KP2): Block-Kopf „Ziel-ID · Anzahl der Accounts · Block i/n", nur wenn das Fenster aus der Kaufliste kommt -->
+      <div class="bulk-kl-kopf" id="bulk-kl-kopf" hidden></div>
       <!-- Der eigene Kasten „Aus dem Dashboard einfügen" (F11) ist seit F16 (27.09.2026) im Feld „External IDs" aufgegangen. -->
       <div class="field" style="margin-bottom:14px">
         <label>Vorlage</label>
@@ -17413,6 +17492,7 @@
     }
     if(name === 'accounts' && typeof window.kwOnEnter === 'function') window.kwOnEnter()   // Kontowert-Spalte (07.10.2026): einmal je Öffnen
     if(name === 'accounts' && typeof window._mpOeffnen === 'function') window._mpOeffnen()   // Muster-Portfolio (16.10.2026)
+    if(name === 'accounts' && typeof window._klOeffnen === 'function') window._klOeffnen()   // Kaufliste (KP2, 25.11.2026)
     if(name === 'accounts' && typeof window._tvNeuOeffnen === 'function') window._tvNeuOeffnen()   // Neue Konten aus TradingView (29.10.2026)
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'mail' && typeof window.mailOnEnter === 'function') window.mailOnEnter()   // Mail-Reiter (16.10.2026)
@@ -53087,6 +53167,7 @@
       bEl.saveLabel.textContent = 'Accounts anlegen'
       accConsSetzen(document.getElementById('bulk-cons'), document.getElementById('bulk-cons-frei'), null)   // Consistency (07.10.2026): Standard
       bEl.modal.classList.add('open')
+      bEl.extids.placeholder = 'Eine Kennung je Zeile — oder einfach alles aus dem Dashboard der Firma hier einfügen (Tradeify, Topstep, FundedNext); die Kennungen werden herausgepickt'
       bulkPasteRender()
       loadBulkTemplates()
       setTimeout(() => bEl.firm.focus(), 50)
@@ -53094,6 +53175,49 @@
 
     function closeBulkModal(){
       bEl.modal.classList.remove('open')
+      const kl = bulkKl; bulkKl = null; bulkKlKopf(null)
+      if(kl && !kl._fertig){ kl._abgebrochen = true; if(typeof kl.abbruch === 'function') kl.abbruch() }   // Kaufliste: Abbrechen beendet die Block-Reihe — auch mitten im Speichern
+    }
+
+    /* KAUFLISTE (KP2, 25.11.2026, Finn: „Gekauft → das echte Bulk-Fenster mit der richtigen Vorlage, nur External IDs einfügen"): die
+     * Kaufliste (Sektion KAUFLISTE) öffnet DIESES Fenster je Block ID × Firma nacheinander — Vorlage vorgewählt, Kopf „Ziel-ID · Anzahl ·
+     * Block i/n". Eigene ID: Speichern wie immer (Login-Sitzung). FREMDE ID (nur Admin/Verwalter, ohne ID-Wechsel): dieselbe Zeile geht an
+     * POST /admin/konto-anlegen (Service-Key, Whitelist, Doppel-Schutz → 409, Kauf-Buchung dort) und landet nicht in der eigenen Liste. */
+    let bulkKl = null   // { ziel, zielName, firma, vorlageId, anzahl, block, bloecke, fertig(n), abbruch() }
+    function bulkKlKopf(kl){
+      const k = document.getElementById('bulk-kl-kopf'); if(!k) return
+      if(!kl){ k.hidden = true; k.innerHTML = ''; return }
+      const fremd = kl.ziel && kl.ziel !== currentUserId
+      k.hidden = false
+      k.innerHTML = `<span class="bkk-ziel">${fremd ? 'Ziel-ID' : 'Für dich'} <b>${escapeHtml(kl.zielName || '')}</b></span>`
+        + `<span class="bkk-anz">Anzahl der Accounts <b>${kl.anzahl}</b></span>`
+        + (kl.bloecke > 1 ? `<span class="bkk-block">Block ${kl.block}/${kl.bloecke}</span>` : '')
+        + (fremd ? '<span class="bkk-hinweis">Zugangsdaten und Dashboard-Balance gehen für fremde IDs nicht mit — die ID trägt sie im Konto nach</span>' : '')
+    }
+    async function bulkKlToken(){
+      const { data: { session } } = await supabase.auth.getSession()
+      if(!session?.access_token) throw new Error('nicht angemeldet')
+      return session.access_token
+    }
+    // Fremde ID → die vorhandene Route POST /admin/konto-anlegen (29.10.2026: Service-Key, _admin_konto_gate, Whitelist admin_konto_zeile, Doppel-
+    // Schutz → 409, Max DD aus der Schablone, Kauf-Transaktion). ?ansicht=admin: Verwalter (Emin) dürfen so für IDs ihrer Gruppe anlegen.
+    async function bulkKlFremdAnlegen(ziel, row){
+      const { user_id: _weg, ...felder } = row
+      const r = await fetch(`${WATCHER_HOME}/admin/konto-anlegen?ansicht=admin`, { method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'sb-token': await bulkKlToken() }, body: JSON.stringify({ ...felder, user_id: ziel }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+      return d
+    }
+    window._bulkKaufliste = async kl => {
+      openBulkModal()
+      bulkKl = kl; bulkKlKopf(kl)
+      await loadBulkTemplates()
+      const v = kl.vorlageId ? 'z:' + kl.vorlageId : ''
+      if(v && [...bEl.tplSelect.options].some(o => o.value === v)){ bEl.tplSelect.value = v; applyTemplate(v); bEl.tplDelete.disabled = !bulkIstAdmin() }
+      else if(kl.firma){ bEl.firm.value = kl.firma; updatePreview(); bulkFuturesUmschalten() }
+      bEl.extids.placeholder = `${kl.anzahl === 1 ? 'Die External ID' : kl.anzahl + ' External IDs, eine je Zeile'} — einfügen mit ⌘V / Strg+V`
+      setTimeout(() => bEl.extids.focus(), 80)
     }
 
     /* FUTURES OHNE ZUGANGSDATEN/DUPLIKUM (27.09.2026, F13, Finn per Screenshot: „Das da alles weg bei jeder Future-Propfirma"):
@@ -53478,6 +53602,7 @@
 
     async function saveBulkAccounts(){
       if(!currentUserId){ setBulkMsg('Nicht eingeloggt.', 'err'); return }
+      const kl = bulkKl, fremd = !!(kl && kl.ziel && kl.ziel !== currentUserId)   // KP2: Kaufliste für eine fremde ID
       const firmaForm = bEl.firm.value.trim(), typForm = bEl.type.value, jetzt = new Date().toISOString()
       const costRaw = parseFloat(bEl.cost.value), maxddRaw = parseFloat(bEl.maxdd.value)
       const lossRaw = parseFloat(bEl.maxLossTrade?.value), profitRaw = parseFloat(bEl.maxProfitTrade?.value), dailyRaw = parseFloat(bEl.maxDailyDd?.value)
@@ -53528,7 +53653,7 @@
         // einmal je Firma × Größe × Typ; ohne Antwort bleibt das Feld leer wie bisher
         if(!(Number(row.max_drawdown) > 0) && typeof sucDdErmitteln === 'function'){
           const ddKey = `${firm}|${gr}|${typRow}`
-          if(!ddCache.has(ddKey)) ddCache.set(ddKey, sucDdErmitteln({ firm, name, startingBalance: gr, maxDrawdown: null, userId: currentUserId }, typRow).catch(() => null))
+          if(!ddCache.has(ddKey)) ddCache.set(ddKey, sucDdErmitteln({ firm, name, startingBalance: gr, maxDrawdown: null, userId: fremd ? kl.ziel : currentUserId }, typRow).catch(() => null))
           const dd = await ddCache.get(ddKey); if(dd && dd.wert > 0) row.max_drawdown = dd.wert
         }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
@@ -53545,6 +53670,11 @@
           else if(tplCons != null) row.consistency_pct = tplCons
         }
         if(bEl.saveLabel) bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${wahl.length}`
+        if(fremd){   // KP2: fremde ID → Admin-Route (Service-Key); Zugangsdaten gehen dort bewusst nicht mit, Kauf-Buchung legt die Route an
+          try{ const d = await bulkKlFremdAnlegen(kl.ziel, row); created++; if(d.hinweis && typeof showSyncBanner === 'function') showSyncBanner(`${x.id} angelegt — ${d.hinweis}`, 'err') }
+          catch(e){ console.error(`Kaufliste: Anlegen ${x.id} für ${kl.zielName || kl.ziel} fehlgeschlagen:`, e); errors++; setBulkMsg(`${x.id}: ${e.message || e}`, 'err') }
+          continue
+        }
         try{
           let { data, error } = await supabase.from('accounts').insert(row).select('*').single()
           if(error && /tv_balance_quelle/.test(String(error.message || ''))){ ohneQuelle = true; delete row.tv_balance_quelle; ({ data, error } = await supabase.from('accounts').insert(row).select('*').single()) }
@@ -53590,7 +53720,10 @@
       bEl.saveBtn.classList.remove('ts-btn-loading')
 
       if(errors === 0){
+        const weiter = kl && !kl._abgebrochen
+        if(kl) kl._fertig = true
         closeBulkModal()
+        if(weiter && typeof kl.fertig === 'function') setTimeout(() => { try{ kl.fertig(created) }catch(e){ console.error('Kaufliste:', e) } }, 0)   // KP2: nächster Block
       } else {
         setBulkMsg(`${created} angelegt, ${errors} Fehler. Seite neu laden und prüfen.`, 'err')
         bEl.saveLabel.textContent = 'Accounts anlegen'
@@ -97443,26 +97576,40 @@ ${stBlock}
   // Große Zahl = erwarteter Fortschritt (gesichert + Chance × Beitrag der laufenden Konten), Finn 16.10.2026 — nie unter „gesichert"
   const mpWert = f => Math.max(Number(f.gesichert_pct) || 0, Math.min(100, Number(f.fortschritt_pct ?? f.gesichert_pct) || 0))
   function mpFilterWert(){ const s = document.getElementById('acc-firm-filter'); return s ? s.value : '' }
+  // Bögen + Nadeln vom zuletzt gezeigten auf den neuen Wert fahren: erwartet (blasser Bogen, Nadel 2) und Ist (kräftiger Bogen, Nadel 1)
+  function mpFahren(el, zeig){
+    const v = Number(el.dataset.mpV) || 0, g = Number(el.dataset.mpG) || 0, q = s => el.querySelector(s)
+    const be = q('.mp-bogen-erw'), bi = q('.mp-bogen-ist'), n1 = q('.mp-nadel'), n2 = q('.mp-nadel2')
+    if(be) be.style.strokeDashoffset = String(100 - v)
+    if(bi) bi.style.strokeDashoffset = String(100 - g)
+    if(n1) n1.style.transform = `rotate(${mpWinkel(g)}deg)`
+    if(n2) n2.style.transform = `rotate(${mpWinkel(v)}deg)`
+    zeig[el.dataset.mpFirma] = v; zeig[el.dataset.mpFirma + '|g'] = g
+  }
   function mpTacho(f, i, aktiv, darf, opt){   // opt (MP2): { pref, zeig, sub(f), tip(f, v) } für den Total-Tacho unter Admin → Alle Accounts
     const o = opt || {}, v = mpWert(f), alt = (o.zeig || _mp.zeig)[f.firma] ?? 0
-    const g = Math.max(0, Math.min(100, Number(f.gesichert_pct) || 0))
+    const g = Math.max(0, Math.min(100, Number(f.gesichert_pct) || 0)), altG = (o.zeig || _mp.zeig)[f.firma + '|g'] ?? 0
     const skala = [0, 25, 50, 75, 100].map(x => { const [a1, b1] = mpPunkt(x, 51), [a2, b2] = mpPunkt(x, 54)
       return `<line class="mp-skala" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }).join('')
-    let ges = ''
-    if(g > 0.5 && g < 99.5){ const [a1, b1] = mpPunkt(g, 36), [a2, b2] = mpPunkt(g, 50)
-      ges = `<line class="mp-ges" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }
+    // KP2 (Finn 25.11.2026): ZWEI Nadeln — kräftig = Ist (gesichert), dünn + blass + sanfter Puls = erwartet (Ist + Chance × Ertrag der laufenden);
+    // der Farbbogen läuft kräftig bis Ist, blass weiter bis erwartet. Die große Zahl bleibt der erwartete Fortschritt (Finn 16.10.2026).
     const zahl = f.fortschritt_pct == null && f.gesichert_pct == null ? '–' : Math.round(v)
-    const tip = o.tip ? o.tip(f, v) : `${mpName(f.firma)}: ${Math.round(v)} % vom Muster erreicht (gesichert + laufende Konten nach ihrer Chance) · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
+    const soll = Number(f.soll) || 0, stk = f.art === 'stueck', plus = f.art === 'plus_ueber_start'
+    const wert = x => stk ? (Math.round(x * 10) / 10).toLocaleString('de-DE') : (plus ? '+' : '') + mpK(x)
+    const iet = soll ? `Ist ${wert(Number(f.gesichert) || 0)} · erwartet ${wert(soll * v / 100)} · Ziel ${stk ? Math.round(soll) : mpK(soll)}` : ''
+    const tip = [mpName(f.firma) + (iet ? ': ' + iet : ''), o.tip ? o.tip(f, v) : 'Klick: Konten unten in der Tabelle zeigen'].join(' · ')
     const vid = `${o.pref || 'mp-verlauf'}-${i}`
-    return `<div role="button" tabindex="0" class="mp-tacho${aktiv ? ' aktiv' : ''}" data-mp-firma="${mpEsc(f.firma)}" data-mp-v="${v}" style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
+    return `<div role="button" tabindex="0" class="mp-tacho${aktiv ? ' aktiv' : ''}" data-mp-firma="${mpEsc(f.firma)}" data-mp-v="${v}" data-mp-g="${g}" style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
       ${darf ? `<button type="button" class="mp-schloss" data-mp-sperren="${mpEsc(f.firma)}" title="${mpEsc(mpName(f.firma))} bei dieser ID sperren (Firma hat gesperrt / Restriction) — keine neuen Pläne, laufende Trades bleiben">${MP_SCHLOSS}</button>` : ''}
       <svg viewBox="0 0 120 96" aria-hidden="true">
         <defs><linearGradient id="${vid}" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" style="stop-color:color-mix(in srgb,var(--mp-f) 30%,#fff)"/><stop offset="1" style="stop-color:var(--mp-f)"/></linearGradient></defs>
         <path class="mp-bahn" d="${MP_BOGEN}" pathLength="100"/>
-        <path class="mp-bogen" d="${MP_BOGEN}" pathLength="100" stroke="url(#${vid})" style="stroke-dashoffset:${100 - alt}"/>
-        ${skala}${ges}
-        <g class="mp-nadel" style="transform:rotate(${mpWinkel(alt)}deg)"><line x1="60" y1="62" x2="60" y2="24"/><circle cx="60" cy="58" r="4"/></g>
+        <path class="mp-bogen mp-bogen-erw" d="${MP_BOGEN}" pathLength="100" stroke="url(#${vid})" style="stroke-dashoffset:${100 - alt}"/>
+        <path class="mp-bogen mp-bogen-ist" d="${MP_BOGEN}" pathLength="100" stroke="url(#${vid})" style="stroke-dashoffset:${100 - altG}"/>
+        ${skala}
+        <g class="mp-nadel2${Math.abs(v - g) < 0.5 ? ' gleich' : ''}" style="transform:rotate(${mpWinkel(alt)}deg)"><line x1="60" y1="60" x2="60" y2="26"/></g>
+        <g class="mp-nadel" style="transform:rotate(${mpWinkel(altG)}deg)"><line x1="60" y1="62" x2="60" y2="24"/><circle cx="60" cy="58" r="4"/></g>
         <text class="mp-zahl" x="60" y="90" text-anchor="middle">${zahl}${zahl === '–' ? '' : '<tspan dx="1">%</tspan>'}</text>
       </svg>
       <div class="mp-firma"><i></i>${mpEsc(mpName(f.firma))}</div>
@@ -97529,13 +97676,7 @@ ${stBlock}
     mpSpalten()
     // Reflow erzwingen statt requestAnimationFrame: das ruht in Hintergrund-Tabs, die Nadeln blieben dort auf dem Startwert stehen
     void leiste.offsetWidth
-    leiste.querySelectorAll('.mp-tacho').forEach(el => {
-      const v = Number(el.dataset.mpV) || 0
-      const b = el.querySelector('.mp-bogen'), n = el.querySelector('.mp-nadel')
-      if(b) b.style.strokeDashoffset = String(100 - v)
-      if(n) n.style.transform = `rotate(${mpWinkel(v)}deg)`
-      _mp.zeig[el.dataset.mpFirma] = v
-    })
+    leiste.querySelectorAll('.mp-tacho').forEach(el => mpFahren(el, _mp.zeig))
   }
   // Gleich volle Reihen über die ganze Breite (Finn: „nicht links gestaucht mit Leerraum rechts"): so viele Spalten, wie Platz ist, dann
   // die Karten gleichmäßig auf die nötigen Reihen verteilen (6 Karten bei Platz für 4 → 3 + 3). Am Handy wischbare Leiste (CSS).
@@ -97678,12 +97819,7 @@ ${stBlock}
       st.textContent = [d.ids_n ? mpIds(d.ids_n) : '', t && isFinite(t) ? 'Stand ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''].filter(Boolean).join(' · ') }
     mpSpalten(leiste)
     void leiste.offsetWidth
-    leiste.querySelectorAll('.mp-tacho').forEach(el => {
-      const v = Number(el.dataset.mpV) || 0, b = el.querySelector('.mp-bogen'), n = el.querySelector('.mp-nadel')
-      if(b) b.style.strokeDashoffset = String(100 - v)
-      if(n) n.style.transform = `rotate(${mpWinkel(v)}deg)`
-      _mpT.zeig[el.dataset.mpFirma] = v
-    })
+    leiste.querySelectorAll('.mp-tacho').forEach(el => mpFahren(el, _mpT.zeig))
   }
   document.getElementById('mp-total-leiste')?.addEventListener('click', e => {
     const t = e.target.closest('.mp-tacho[data-mp-firma]'); if(!t) return
@@ -97735,6 +97871,255 @@ ${stBlock}
   setInterval(() => { if(mpSichtbar() && !document.hidden && !_mp.sendet) window._mpOeffnen() }, 15000)
   if(mpSichtbar()) setTimeout(window._mpOeffnen, 0)
   window._muster = { zeigen: d => { _mp.d = d; _mp.fehler = ''; mpRender() }, render: mpRender, norm: mpNorm }   // Test-Haken (Stub/Boot-Check)
+})()
+/* ── KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen — „Design ganz nice", ohne neuen Navigationspunkt unter Accounts) ──
+ * Eine Zeile je zu kaufendem Konto (nachkauf.n des Vorrat-Laufs: min(Lücke zum Ziel, Max − laufende Challenges), FNF erst ab dem 1. erhaltenen
+ * FundedNext-Payout — gerechnet im Backend, GET /admin/kaufliste). Je Zeile: „Gekauft" → echtes Bulk-Fenster (window._bulkKaufliste) mit der
+ * Vorlage aus bulk_vorlagen (Firma + Größe der Kauf-Einheit), nur External IDs einfügen; „Erledigt" → POST /admin/vorrat {aktion: 'bestellt'}
+ * (48 h, zählt als laufend), Rückgängig = {aktion: 'bestellt_weg', id}; Kästchen → „n ausgewählt · Jetzt hinzufügen" = Blöcke je ID × Firma
+ * nacheinander im Bulk-Fenster. Admin-Gerät (prophos_wd_admin): „Meine | Alle IDs" (alle=1, Server prüft selbst — 403 → nur Meine).
+ * Am Muster-Portfolio-Tacho der eigenen ID „+n" (MutationObserver an #mp-leiste, mpRender bleibt unberührt). Chip „Reserve" = Blow-Reserve. */
+;(() => {
+  const KL_TAKT = 300000
+  const _kl = { d: null, alle: false, at: 0, nr: 0, fehler: '', uid: '', pa1: [], keinAdmin: false }
+  // Leiste „n ausgewählt" direkt an body: in der View (Einblend-Animation mit transform) wäre position:fixed an der View statt am Bildschirm
+  try{ const bar = document.getElementById('kl-auswahl'); if(bar && bar.parentElement !== document.body) document.body.appendChild(bar) }catch(_){}
+  const auswahl = new Set()
+  const vorlagen = { liste: null, at: 0 }
+  const klEsc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const klNorm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const klEur = v => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(v) || 0)
+  const klAdmin = () => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } }
+  const klTyp = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded CFD', winning_days: 'Winning Days' }
+  const KL_TYP_RANG = { challenge: 0, phase1: 1, phase2: 2 }
+  async function klToken(){
+    const { data: { session } } = await supabase.auth.getSession()
+    if(!session?.access_token) throw new Error('nicht angemeldet')
+    return session.access_token
+  }
+  async function klVorlagen(){
+    if(vorlagen.liste && Date.now() - vorlagen.at < 600000) return vorlagen.liste
+    try{
+      const { data, error } = await supabase.from('bulk_vorlagen').select('*').eq('aktiv', true).order('sortierung', { ascending: true }).order('name', { ascending: true })
+      vorlagen.liste = !error && Array.isArray(data) ? data : []
+    }catch(_){ vorlagen.liste = [] }
+    vorlagen.at = Date.now()
+    return vorlagen.liste
+  }
+  // REIN RECHNEND: Vorlage für Firma + Kauf-Einheit („150k") — gleiche Firma, passende Größe, erste Stufe (Challenge/Phase 1), sonst Sortierung
+  function klVorlage(firma, einheit, liste){
+    const m = /^(\d+(?:[.,]\d+)?)\s*k/i.exec(String(einheit || '')), gr = m ? Math.round(parseFloat(m[1].replace(',', '.')) * 1000) : 0
+    const k = (liste || []).filter(v => klNorm(v.firm) === klNorm(firma))
+    if(!k.length) return null
+    const passt = gr ? k.filter(v => Number(v.account_size || v.starting_balance) === gr) : []
+    const pool = passt.length ? passt : k
+    return pool.slice().sort((a, b) => (KL_TYP_RANG[a.account_type] ?? 9) - (KL_TYP_RANG[b.account_type] ?? 9))[0]
+  }
+  async function klLaden(frisch){
+    // Anfrage-Nummer (Review): eine ältere Antwort (ID gewechselt, Meine↔Alle umgeschaltet) wird verworfen statt angezeigt
+    const nr = ++_kl.nr, uid = String(currentUserId || ''), alle = _kl.alle
+    const veraltet = () => nr !== _kl.nr || uid !== String(currentUserId || '') || alle !== _kl.alle
+    try{
+      // Verwalter: _wd_login gibt die Gruppe nur mit ansicht=admin frei (Review) — für „Alle IDs" mitschicken
+      const q = `alle=${alle ? 1 : 0}${alle ? '&ansicht=admin' : ''}${frisch ? '&frisch=1' : ''}`
+      const r = await fetch(`${WATCHER_HOME}/admin/kaufliste?${q}`, { headers: { 'sb-token': await klToken() }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(veraltet()) return
+      if(r.status === 403 && alle){ _kl.alle = false; _kl.keinAdmin = true; return klLaden(frisch) }
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      const liste = await klVorlagen()
+      if(veraltet()) return
+      for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste)
+      // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
+      if(_kl.d) auswahl.clear()
+      _kl.d = d; _kl.at = Date.now(); _kl.fehler = ''; _kl.uid = uid
+    }catch(e){ if(veraltet()) return; _kl.fehler = 'Kaufliste nicht geladen: ' + (e.message || e) }
+    klRender()
+    klPa1Laden()
+  }
+  /* PA1 (Slave 5, „Gekauft" → Puls legt Futures-Konten selbst an): gibt es window.pa1Gekauft, geht „Gekauft" je Block ID × Firma zuerst dorthin;
+   * code (login_fehlt / firma_nicht / nur_ht) → wie bisher das Bulk-Fenster. pa1Stand() liefert die Aufträge der letzten 48 h je
+   * {user_id, firma, vorlage_id, anzahl, angelegt[], knopf:{text, art}} — so viele Zeilen der Zelle, wie noch offen sind, zeigen knopf.text statt „Gekauft".
+   * art: gruen | laeuft | fertig | warn (🟠, nur Anzeige) | ruhig (grau, z. B. „mehr gefunden · von Hand"). Keine Auswahl/kein Klick (Finn: Überzahl gestrichen). */
+  async function klPa1Laden(){
+    if(typeof window.pa1Stand !== 'function') return
+    try{ const l = await window.pa1Stand(); _kl.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
+    klRender()
+  }
+  window.pa1Neu = () => klPa1Laden()
+  function klPa1Slots(z){
+    const vid = z.vorlage && z.vorlage.id, out = []
+    for(const a of _kl.pa1 || []){
+      if(String(a.user_id) !== String(z.user_id) || a.firma !== z.firma || (vid && a.vorlage_id && String(a.vorlage_id) !== String(vid))) continue
+      if(!a.knopf || a.knopf.art === 'fertig') continue
+      const offen = Math.max(0, (Number(a.anzahl) || 0) - ((a.angelegt || []).length || 0))
+      for(let i = 0; i < offen; i++) out.push(a)
+    }
+    return out
+  }
+  function klZeilenAlle(){
+    // eine Zeile je Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
+    const out = []
+    for(const z of (_kl.d && _kl.d.zeilen) || []) for(let k = 1; k <= z.n; k++) out.push({ z, k, rid: `${z.user_id}|${z.firma}#${k}` })
+    return out
+  }
+  function klPreis(z){ return Number(z.vorlage && z.vorlage.purchase_cost) || Number(z.preis_eur) || 0 }
+  function klRender(){
+    const karte = document.getElementById('kl-karte'); if(!karte) return
+    const liste = document.getElementById('kl-liste'), sub = document.getElementById('kl-sub'), seg = document.getElementById('kl-seg')
+    seg.hidden = !klAdmin() || _kl.keinAdmin
+    seg.querySelectorAll('[data-kl-alle]').forEach(b => b.classList.toggle('an', (b.dataset.klAlle === '1') === _kl.alle))
+    const zeilen = klZeilenAlle()
+    if(!_kl.d && !_kl.fehler){ karte.hidden = true; return }
+    karte.hidden = !zeilen.length && !_kl.fehler && !_kl.alle
+    for(const rid of [...auswahl]) if(!zeilen.some(x => x.rid === rid)) auswahl.delete(rid)
+    const summe = l => klEur(l.reduce((a, x) => a + klPreis(x.z), 0))
+    sub.textContent = zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}` : (_kl.fehler ? '' : 'nichts zu kaufen')
+    const slots = new Map()
+    const zeile = x => {
+      const z = x.z, v = z.vorlage, sk = z.user_id + '|' + z.firma
+      if(!slots.has(sk)) slots.set(sk, klPa1Slots(z))
+      const pa = slots.get(sk)[x.k - 1]
+      const gr = v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || '')
+      const lauf = (Number(z.laufend) || 0) + x.k, gew = auswahl.has(x.rid)
+      return `<div class="kl-z${gew ? ' gew' : ''}">
+        <div class="kl-f">${klEsc(z.firma)}${z.max ? `<span class="kl-chip fuell" title="laufende Challenges/Phasen nach diesem Kauf gegen das Maximum je Firma">→ ${lauf}/${z.max} laufend</span>` : ''}${z.reserve ? '<span class="kl-chip res" title="Blow-Reserve: das Ziel ist erreicht, hält aber nicht, wenn das größte Konto wegfällt">Reserve</span>' : ''}${v ? '' : '<span class="kl-chip warn" title="keine Vorlage in bulk_vorlagen für Firma + Größe — im Bulk-Fenster selbst wählen">ohne Vorlage</span>'}</div>
+        <div class="kl-g">${klEsc(gr)}</div>
+        <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
+        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>` : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button><button type="button" class="btn btn-ghost btn-mini" data-kl-weg="${klEsc(x.rid)}" title="Schon anderswo angelegt: Zeile ausblenden (zählt 48 h als laufend)">Erledigt</button><input type="checkbox" class="kl-box" data-kl-wahl="${klEsc(x.rid)}"${gew ? ' checked' : ''} aria-label="auswählen">`}</div>
+      </div>`
+    }
+    // Apex 5er-Pack (Finn 25.11.2026): die Zeilen einer Pack-Zelle als EIN Block — Kopf mit Kästchen (alle), „Gekauft" (anzahl = Pack) und „Erledigt"
+    const pack = l => {
+      const z = l[0].z, key = z.user_id + '|' + z.firma, alleGew = l.every(x => auswahl.has(x.rid))
+      const pa = (slots.has(key) ? slots.get(key) : (slots.set(key, klPa1Slots(z)), slots.get(key)))[0]
+      const zeilenP = l.map(x => { const v = z.vorlage; return `<div class="kl-z kl-pz${auswahl.has(x.rid) ? ' gew' : ''}"><div class="kl-f">${klEsc(z.firma)}</div><div class="kl-g">${klEsc(v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || ''))}</div><div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div><div class="kl-a"></div></div>` }).join('')
+      return `<div class="kl-pack"><div class="kl-z kl-pack-kopf${alleGew ? ' gew' : ''}">
+        <div class="kl-f"><b>${klEsc(z.firma)} ${z.pack}er-Pack</b>${l.length < z.pack ? `<span class="kl-chip">noch ${l.length}</span>` : ''}${z.reserve ? '<span class="kl-chip res">Reserve</span>' : ''}${z.vorlage ? '' : '<span class="kl-chip warn">ohne Vorlage</span>'}</div>
+        <div class="kl-g">${l.length} Konten</div><div class="kl-p">${summe(l)}</div>
+        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>`
+          : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button><button type="button" class="btn btn-ghost btn-mini" data-kl-pack-weg="${klEsc(key)}" title="Pack schon anderswo angelegt: ausblenden (zählt 48 h als laufend)">Erledigt</button><input type="checkbox" class="kl-box" data-kl-pack-wahl="${klEsc(key)}"${alleGew ? ' checked' : ''} aria-label="Pack auswählen">`}</div>
+      </div>${zeilenP}</div>`
+    }
+    const liste_ = l => { let o = '', i = 0
+      while(i < l.length){ const z = l[i].z
+        if(z.pack > 1){ const g = []; while(i < l.length && l[i].z === z) g.push(l[i++]); o += pack(g) } else o += zeile(l[i++]) }
+      return o }
+    let h = _kl.fehler ? `<div class="kl-fehler">${klEsc(_kl.fehler)}</div>` : ''
+    if(_kl.alle){
+      const ids = [...new Set(zeilen.map(x => x.z.user_id))]
+      for(const id of ids){
+        const l = zeilen.filter(x => x.z.user_id === id)
+        h += `<div class="kl-pers"><div class="kl-pk"><b>${klEsc(l[0].z.name)}</b><span>${l.length} kaufen</span><span class="kl-pk-r">${summe(l)}</span></div>${liste_(l)}</div>`
+      }
+      if(!ids.length && !_kl.fehler) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
+    } else h += liste_(zeilen)
+    liste.innerHTML = h
+    klAuswahlZeigen()
+    klTachoBadges()
+  }
+  function klAuswahlZeigen(){
+    const bar = document.getElementById('kl-auswahl'); if(!bar) return
+    const n = auswahl.size
+    bar.classList.toggle('an', n > 0 && !!document.querySelector('#dashboard-view .view[data-view="accounts"].active'))
+    if(!n) return
+    const zl = klZeilenAlle().filter(x => auswahl.has(x.rid)), ids = new Set(zl.map(x => x.z.user_id))
+    document.getElementById('kl-aw-text').innerHTML = `<b>${n}</b> ausgewählt<span class="kl-aw-mehr"> · ${klEur(zl.reduce((a, x) => a + klPreis(x.z), 0))}${ids.size > 1 ? ` · ${ids.size} IDs` : ''}</span>`
+  }
+  // „+n" am Tacho der eigenen ID (nur Zeilen dieser ID, auch in der Ansicht „Alle IDs")
+  function klTachoBadges(){
+    const leiste = document.getElementById('mp-leiste'); if(!leiste) return
+    const je = {}
+    for(const z of (_kl.d && _kl.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n
+    leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
+      let b = el.querySelector('.mp-kauf-n'); const n = je[el.dataset.mpFirma] || 0
+      if(!n){ if(b) b.remove(); return }
+      if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
+      b.textContent = `+${n} kaufen`; b.title = `${n} Konto${n === 1 ? '' : 's'} in der Kaufliste unten`
+    })
+  }
+  try{ const l = document.getElementById('mp-leiste'); if(l && typeof MutationObserver === 'function') new MutationObserver(() => klTachoBadges()).observe(l, { childList: true }) }catch(_){}
+  function klToast(text, undo){
+    let t = document.getElementById('kl-toast')
+    if(!t){ t = document.createElement('div'); t.id = 'kl-toast'; t.className = 'kl-toast'; document.body.appendChild(t) }
+    t.innerHTML = klEsc(text) + (undo ? ' <button type="button" class="kl-undo">Rückgängig</button>' : '')
+    t.classList.add('an'); clearTimeout(klToast.t)
+    const u = t.querySelector('.kl-undo'); if(u) u.onclick = () => { t.classList.remove('an'); undo() }
+    klToast.t = setTimeout(() => t.classList.remove('an'), undo ? 6000 : 3000)
+  }
+  async function klVorrat(body){
+    const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, { method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'sb-token': await klToken() }, body: JSON.stringify(body) })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status))
+    return d
+  }
+  async function klErledigt(rid, anzahl){
+    const x = klZeilenAlle().find(q => q.rid === rid); if(!x) return
+    const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1))
+    z.n = Math.max(0, z.n - n); auswahl.clear(); klRender()   // sofort weg, Server bestätigt danach
+    try{
+      const d = await klVorrat({ aktion: 'bestellt', user_id: z.user_id, firma: z.firma, anzahl: n, einheit: z.einheit || null })
+      const bid = d.bestellt && d.bestellt.id
+      klToast(`${z.name} · ${z.firma} erledigt`, bid ? async () => {
+        try{ await klVorrat({ aktion: 'bestellt_weg', id: bid }); klLaden(true) }catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
+      } : null)
+      klLaden(true)
+    }catch(e){ klToast('Erledigt ging nicht: ' + (e.message || e)); klLaden(true) }
+  }
+  function klHinzufuegen(rids){
+    const zl = klZeilenAlle().filter(x => rids.includes(x.rid))
+    const grp = new Map()
+    for(const x of zl){ const key = x.z.user_id + '|' + x.z.firma; const b = grp.get(key) || { z: x.z, n: 0 }; b.n++; grp.set(key, b) }
+    const bl = [...grp.values()]
+    if(!bl.length || typeof window._bulkKaufliste !== 'function') return
+    let i = 0
+    const naechster = async () => {
+      if(i >= bl.length){ auswahl.clear(); klLaden(true); return }
+      const b = bl[i++], vid = b.z.vorlage && b.z.vorlage.id
+      if(typeof window.pa1Gekauft === 'function' && vid){   // PA1: Puls legt an — sonst (code) das Bulk-Fenster
+        try{
+          const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })
+          if(r && r.ok){ klToast(`${b.z.name} · ${b.z.firma}: ${(r.auftrag && r.auftrag.knopf && r.auftrag.knopf.text) || 'Puls legt an'}`); klPa1Laden(); return naechster() }
+          if(r && r.msg) klToast(r.msg)
+        }catch(e){ console.warn('[kaufliste] pa1Gekauft:', e) }
+      }
+      window._bulkKaufliste({ ziel: b.z.user_id, zielName: b.z.name, firma: b.z.firma, vorlageId: vid, anzahl: b.n,
+        block: i, bloecke: bl.length, fertig: naechster, abbruch: () => { auswahl.clear(); klLaden(true) } })
+    }
+    naechster()
+  }
+  document.getElementById('kl-liste')?.addEventListener('click', e => {
+    const g = e.target.closest('[data-kl-gekauft]'); if(g){ klHinzufuegen([g.dataset.klGekauft]); return }
+    const w = e.target.closest('[data-kl-weg]'); if(w){ klErledigt(w.dataset.klWeg); return }
+    const pg = e.target.closest('[data-kl-pack-gekauft]'); if(pg){ klHinzufuegen(klPackRids(pg.dataset.klPackGekauft)); return }
+    const pwg = e.target.closest('[data-kl-pack-weg]'); if(pwg){ const r = klPackRids(pwg.dataset.klPackWeg); if(r.length) klErledigt(r[0], r.length); return }
+  })
+  const klPackRids = key => klZeilenAlle().filter(x => x.z.user_id + '|' + x.z.firma === key).map(x => x.rid)
+  document.getElementById('kl-liste')?.addEventListener('change', e => {
+    const pc = e.target.closest('[data-kl-pack-wahl]')
+    if(pc){ for(const rid of klPackRids(pc.dataset.klPackWahl)) pc.checked ? auswahl.add(rid) : auswahl.delete(rid); klRender(); return }
+    const c = e.target.closest('[data-kl-wahl]'); if(!c) return
+    c.checked ? auswahl.add(c.dataset.klWahl) : auswahl.delete(c.dataset.klWahl)
+    c.closest('.kl-z')?.classList.toggle('gew', c.checked); klAuswahlZeigen()
+  })
+  document.getElementById('kl-seg')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-kl-alle]'); if(!b) return
+    const alle = b.dataset.klAlle === '1'; if(alle === _kl.alle) return
+    _kl.alle = alle; auswahl.clear(); _kl.d = null; klRender(); klLaden(false)
+  })
+  document.getElementById('kl-aw-ok')?.addEventListener('click', () => klHinzufuegen([...auswahl]))
+  document.getElementById('kl-aw-weg')?.addEventListener('click', () => { auswahl.clear(); klRender() })
+  const klSichtbar = () => !!document.querySelector('#dashboard-view .view[data-view="accounts"].active')
+  window._klOeffnen = () => {
+    const uid = String(currentUserId || '')
+    if(uid !== _kl.uid){ _kl.d = null; _kl.alle = false; _kl.keinAdmin = false; _kl.pa1 = []; auswahl.clear(); klRender() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
+    if(!_kl.d || Date.now() - _kl.at >= 60000) klLaden(false); else klRender()
+  }
+  setInterval(() => { if(klSichtbar() && !document.hidden && Date.now() - _kl.at >= KL_TAKT) klLaden(false); klAuswahlZeigen() }, 15000)
+  setInterval(() => { if(klSichtbar() && !document.hidden && _kl.d) klPa1Laden() }, 60000)   // PA1-Stand (Puls) je Minute
+  if(klSichtbar()) setTimeout(window._klOeffnen, 0)
+  window._kaufliste = { zeigen: d => { _kl.d = d; _kl.at = Date.now(); _kl.uid = String(currentUserId || ''); klRender() }, vorlage: klVorlage, render: klRender, auswahl }   // Test-Haken (Stub)
 })()
 /* ── VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … eine schöne Übersicht,
  * wo jede ID bei jeder Firma im Funnel steht und was bis zum Ziel fehlt") ──

@@ -10593,7 +10593,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 8               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 9               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.25,                # P(Bestand ≥ Untergrenze) — Finn 06.10.2026 spät, Hauptregel für alle Firmen: „ca. 25 %, darunter
                                        # nachkaufen, lieber einen Tick zu wenig"; am Frontend einstellbar (vorrat_einstellung.sicherheit)
@@ -10603,6 +10603,15 @@ VORRAT2_STD = {
     "gefaehrdet_faktor": 0.5, "mindest_funnel": 0, "bestellt_h": 48,   # Mindest-Funnel aus (Finn: „lieber zu wenig als zu viel")
     "totband_laeufe": 2, "totband_nur_hoch": True,
     "alter_handelstage_max": 2, "n_max_kauf": 10, "ziel_erreicht_chance": 0.95, "chance_max": 0.98,
+    # KP2 (Finn 25.11.2026, Kaufliste): je ID × Firma laufen höchstens so viele Challenges/Phasen gleichzeitig — Kauf = min(Lücke, Max − laufend).
+    # Nachgekauft wird erst, wenn eine wegfällt (geblowt) oder weiterkommt (bestanden → Funded). Schlüssel = _firm_norm. Fehlt die Firma: max_laufend_std.
+    "max_laufend": {"Tradeify": 4, "The5%ers": 3, "Lucid Trading": 3, "Apex Trader": 5, "Topstep": 3, "FTMO Futures": 3,
+                    "FundedNext Futures": 3, "FTMO": 2, "FundedNext": 2, "FundingPips": 2, "Tradeify CFD": 3, "Blue Guardian": 3,
+                    "Audacity": 2},                  # Audacity vorläufig (Finn hat sie noch nicht genannt)
+    "max_laufend_std": 3,
+    # KP2 Apex (Finn 25.11.2026): Apex kauft man nur im 5er-Pack. Will der Lauf kaufen (erwarteter Stand < Ziel), ist der Vorschlag genau 1 Pack,
+    # egal wie viele gerade laufen — aber höchstens 1 Pack offen: läuft noch ein Konto ohne erste Balance-Lesung (Pack noch nicht gelesen), 0.
+    "kauf_pack": {"Apex Trader": 5},
     "kauf_regel": "sicherheit",        # 'sicherheit' (Standard seit 06.10.2026 spät, Finn: Wahrscheinlichkeit ≈ 25 %) = Monte Carlo, n bis
                                        # P(Bestand + Funnel + neu ≥ Untergrenze) ≥ sicherheit; vorher Toleranz (≥ 85 % gedeckt → nichts) ·
                                        # 'mitte' (Finn 06.10.2026 abends: „die gute Mitte" zwischen erwartung und nominal) =
@@ -11127,6 +11136,69 @@ def vorrat_totband(n_roh, vorher, lauf_at, param=None):
     if n_roh == alt or (n_roh < alt and p["totband_nur_hoch"]) or (len(folge) >= k and len(set(folge)) == 1):
         return {"n_tb": int(n_roh), "n_seit": lauf_at, "folge": folge}
     return {"n_tb": alt, "n_seit": v.get("n_seit") or lauf_at, "folge": folge}
+
+
+VORRAT_LAUFEND_TYPEN = ("challenge", "phase1", "phase2")
+_vr2_fn_cache = {}
+VORRAT_FNF_SPERRE = "ab 1. FN-Payout"
+
+
+def vorrat_kauf_deckel(n_roh, konten, firma, param, fn_payout_ok=True, erwartet=None, ziel=None, frei=True):
+    """REIN RECHNEND (testbar) — KP2 (Finn 25.11.2026, Kaufliste): Kauf = min(Lücke zum Ziel, Max − laufend), nie < 0.
+    laufend = Konten der Zelle, die noch nicht im Bestand sind und in einer Challenge/Phase stehen (Funded = „weitergekommen“ zählt
+    nicht). FundedNext Futures erst, wenn die ID bei FundedNext (CFD) schon einen Payout ERHALTEN hat (fn_payout_ok), sonst 0.
+    n_roh None (Sperre/Daten fehlen) bleibt None. → {n, laufend, max, sperre}"""
+    p = param or {}
+    laufend = sum(1 for k in (konten or []) if not k.get("im_bestand") and (k.get("stufe") or k.get("typ")) in VORRAT_LAUFEND_TYPEN)
+    try:
+        mx = int((p.get("max_laufend") or {}).get(firma, p.get("max_laufend_std", 3)))
+    except (TypeError, ValueError):
+        mx = 3
+    sperre = VORRAT_FNF_SPERRE if firma == "FundedNext Futures" and not fn_payout_ok else None
+    try:
+        pack = int((p.get("kauf_pack") or {}).get(firma) or 0)
+    except (TypeError, ValueError):
+        pack = 0
+    if n_roh is None:
+        n = None
+    elif sperre:
+        n = 0
+    elif pack > 1:
+        # Pack-Firma (Apex): 1 Pack, sobald der ERWARTETE Stand (Bestand + Chance × Ertrag) das Ziel nicht erreicht (Finn) — ohne Zahlen
+        # die Kaufzahl des Laufs; offen = ein laufendes Konto ohne erste Balance-Lesung (letztes Pack noch nicht gelesen) → 0
+        offen = any(not k.get("im_bestand") and (k.get("stufe") or k.get("typ")) in VORRAT_LAUFEND_TYPEN and not k.get("balance_at")
+                    for k in (konten or []))
+        try:
+            fehlt = float(erwartet) < float(ziel) - 1e-6 if erwartet is not None and ziel else int(n_roh) > 0
+        except (TypeError, ValueError):
+            fehlt = int(n_roh) > 0
+        n = pack if frei and fehlt and not offen else 0
+    else:
+        n = max(0, min(int(n_roh), mx - laufend))
+    return {"n": n, "laufend": laufend, "max": mx, "sperre": sperre, "pack": pack if pack > 1 else None}
+
+
+def _vorrat2_fn_payout_uids():
+    """KP2: user_ids mit mindestens einem ERHALTENEN FundedNext-(CFD-)Payout — transactions kind 'payout' (= gebucht/erhalten) und
+    pending_payouts mit status 'received' bzw. received_at. Fehler → None (der Aufrufer sperrt FNF dann: lieber zu wenig als zu viel).
+    10 min gemerkt (das Muster-Portfolio rechnet je offener Accounts-Seite alle 5 min)."""
+    c = _vr2_fn_cache.get("v")
+    if c and time.time() - c[0] < 600:
+        return set(c[1])
+    try:
+        uids = set()
+        for t in _sb_all("transactions", {"select": "user_id,account_firm", "kind": "eq.payout"}) or []:
+            if _firm_norm(t.get("account_firm")) == "FundedNext":
+                uids.add(str(t.get("user_id")))
+        for pp in _sb_all("pending_payouts", {"select": "user_id,account_firm,status,received_at",
+                                              "or": "(status.eq.received,received_at.not.is.null)"}) or []:
+            if _firm_norm(pp.get("account_firm")) == "FundedNext":
+                uids.add(str(pp.get("user_id")))
+        _vr2_fn_cache["v"] = (time.time(), frozenset(uids))
+        return uids
+    except Exception as e:
+        print(f"[vorrat2] ⚠️ FN-Payouts nicht lesbar — FundedNext Futures bleibt gesperrt: {type(e).__name__}: {e}", flush=True)
+        return None
 
 
 def vorrat_anzeige_n(n_tb, n_seit, konten_angelegt, bestellungen, jetzt_iso):
@@ -12115,6 +12187,7 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
         alt = {}
     vorher = {(z.get("user_id"), z.get("firma")): z.get("totband") for z in ((alt.get("ergebnis") or {}).get("zellen") or [])}
     bestellungen = _vorrat2_bestellungen()
+    fn_ok = _vorrat2_fn_payout_uids() if "FundedNext Futures" in ziele else set()
     zellen = []
     for f in sorted(ziele, key=lambda x: (float(ziele[x].get("reihe") or 0), x)):
         for uid in uids:
@@ -12125,6 +12198,14 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             _st_u, _kw_u = _stufen_kw(uid, f)
             z = vorrat2_zelle(ziele[f], _st_u, liste, status, param, faktoren.get(f), seed, _kw_u)
             nr = z["nachkauf"]["n_roh"]
+            # KP2: Deckel „max. laufend“ + FNF-Freischaltung VOR dem Totband — Anzeige, Tagesliste und Kaufliste rechnen damit
+            dk = vorrat_kauf_deckel(nr, z.get("konten"), f, param, bool(fn_ok) and uid in fn_ok,
+                                    z.get("erwartet"), z.get("untergrenze"), status == "frei")
+            z["nachkauf"]["n_luecke"] = nr
+            if isinstance(nr, int):
+                nr = z["nachkauf"]["n_roh"] = dk["n"]
+            z.update(laufend_n=dk["laufend"], max_laufend=dk["max"], kauf_sperre=dk["sperre"], kauf_pack=dk["pack"],
+                     reserve=(z.get("lage") == "bald" and z["nachkauf"].get("grund") == "blow_reserve"))
             tb = vorrat_totband(nr, vorher.get((uid, f)), jetzt_iso, param) if isinstance(nr, int) else None
             z["totband"] = tb
             if tb:
@@ -12319,6 +12400,9 @@ def vorrat2_anhaengen(erg1):
                  rechnung=(dict(s.get("rechnung") or {}, n=nk.get("n")) if s.get("rechnung") else None),
                  tagesrate=s.get("tagesrate"), abdeckung=s.get("abdeckung"),
                  toleranz=bool(s.get("toleranz")),
+                 laufend_n=s.get("laufend_n"), max_laufend=s.get("max_laufend"), kauf_sperre=s.get("kauf_sperre"),   # KP2 Kaufliste
+                 kauf_pack=s.get("kauf_pack"),
+                 reserve=bool(s.get("reserve")),
                  # flach für die Box „So wird gerechnet" (T1 06.10.2026) — dieselben Zahlen wie in rechnung
                  zaehlt_neu_usd=(s.get("rechnung") or {}).get("zaehlt_neu_usd"), wert_neu_usd=s.get("wert_neu"),
                  unterwegs_zaehlt_usd=(s.get("rechnung") or {}).get("funnel_zaehlt"),
@@ -56845,6 +56929,12 @@ try:
     bank_app.registrieren(app, globals())
 except Exception as _be:
     print(f"[bank] Modul nicht geladen: {type(_be).__name__}: {_be}", flush=True)
+
+try:
+    import kaufliste_app        # Kaufliste unter Accounts (KP2, 25.11.2026, Finn): GET /admin/kaufliste (Fremd-Anlegen über /admin/konto-anlegen)
+    kaufliste_app.registrieren(app, globals())
+except Exception as _kle:
+    print(f"[kaufliste] Modul nicht geladen: {type(_kle).__name__}: {_kle}", flush=True)
 
 try:
     import support_app          # Support-Chat „Lotse“ (27.10.2026, Finn): eigenes Modul mit den /support/*-Routen, wie Polar
