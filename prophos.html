@@ -3213,6 +3213,8 @@
   #kl-admin-karte .kl-pers.auf{padding-bottom:8px}
   .kl-sp-g{display:inline-flex}
   .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px}
+  [data-kl-gekauft],[data-kl-pack-gekauft]{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  .kl-lp{transition:box-shadow .6s linear;box-shadow:inset 0 0 0 40px rgba(255,255,255,.18)}   /* langes Drücken läuft */
   #mp-karte .mp-tacho .mp-kauf-n.ruhig{color:var(--sub-2);font-weight:500} .kl-sp-knopf svg{width:13px;height:13px;flex:none;opacity:.75}
   .kl-pa1-w{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px}
   .kl-pa1-cd{font-size:11px;color:var(--good-ink,#067647);font-variant-numeric:tabular-nums;white-space:nowrap} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
@@ -62236,7 +62238,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2334'
+  const OS_TAB_BUILD = '2026-09-22.2335'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -97994,12 +97996,15 @@ ${stBlock}
     if(!session?.access_token) throw new Error('nicht angemeldet')
     return session.access_token
   }
-  async function klVorlagen(){
-    if(vorlagen.liste && Date.now() - vorlagen.at < 600000) return vorlagen.liste
+  // KP2i (Bug live .2334, Finn + Pascal · Tradeify: „Gekauft" öffnete das Fenster, kein /konto-suche): eine LEERE Liste (Abfrage vor dem Login,
+  // RLS/Netz-Fehler) wurde 10 min gemerkt → jede Zeile ohne vorlage_id → Futures gingen still ins Fenster. Leere Liste nie merken; neu = erzwingen.
+  async function klVorlagen(neu){
+    if(!neu && vorlagen.liste && vorlagen.liste.length && Date.now() - vorlagen.at < 600000) return vorlagen.liste
     try{
       const { data, error } = await supabase.from('bulk_vorlagen').select('*').eq('aktiv', true).order('sortierung', { ascending: true }).order('name', { ascending: true })
+      if(error) console.warn('[kaufliste] bulk_vorlagen:', error.message || error)
       vorlagen.liste = !error && Array.isArray(data) ? data : []
-    }catch(_){ vorlagen.liste = [] }
+    }catch(e){ console.warn('[kaufliste] bulk_vorlagen:', e); vorlagen.liste = [] }
     vorlagen.at = Date.now()
     return vorlagen.liste
   }
@@ -98020,6 +98025,9 @@ ${stBlock}
   const klVKey = z => z.vorlage ? 'v' + z.vorlage.id : 'f' + z.firma + '|' + (z.einheit || '')
   const klGr = z => { const v = z.vorlage; return v ? `${Math.round(Number(v.account_size || v.starting_balance) / 1000)}k ${klTyp[v.account_type] || v.account_type}` : (z.einheit || '') }
   const klPreis = z => Number(z.vorlage && z.vorlage.purchase_cost) || Number(z.preis_eur) || 0
+  // Futures = PA1-Weg (Puls legt an), CFD = Fenster. tpFirmIstFutures ist die zentrale Liste; fehlt sie, entscheidet die bekannte Futures-Liste
+  const KL_FUTURES = ['topstep', 'tradeify', 'apex trader', 'lucid trading', 'fundednext futures', 'myfundedfutures', 'alpha future', 'alpha futures', 'ftmo futures']
+  const klFutures = f => { try{ if(typeof tpFirmIstFutures === 'function') return !!tpFirmIstFutures(f) }catch(_){} return KL_FUTURES.includes(String(f || '').trim().toLowerCase()) }
   const KL_FARBE = { 'Tradeify': '#4f5bd5', 'Tradeify CFD': '#6b8e23', 'Topstep': '#1f93c9', 'Apex Trader': '#e8892b', 'FTMO': '#2a3f8f', 'FTMO Futures': '#5a78c9',
                      'FundedNext': '#a14fc9', 'FundingPips': '#1f9e8f', 'The5%ers': '#3a9d5d' }   // = Firmenfarben des Muster-Portfolios (#mp-karte)
   const klFarbe = f => KL_FARBE[f] || 'var(--violet)'
@@ -98069,7 +98077,13 @@ ${stBlock}
     async function pa1Laden(){
       if(typeof window.pa1Stand !== 'function' || !I.d) return
       const uid = String(currentUserId || '')
-      try{ const l = await window.pa1Stand(cfg.alle ? { alle: true } : undefined); if(uid !== String(currentUserId || '')) return; I.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
+      try{
+        const l = await window.pa1Stand(cfg.alle ? { alle: true } : undefined); if(uid !== String(currentUserId || '')) return
+        const server = Array.isArray(l) ? l : []
+        // KP2i: frisch angelegter Auftrag (sofort grün) bleibt 2 min stehen, auch wenn die Stand-Abfrage ihn noch nicht liefert (kein Zurückspringen)
+        const frisch = (I.pa1Lokal || []).filter(a => Date.now() - a._lokal_at < 120000 && !server.some(x => String(x.id) === String(a.id)))
+        I.pa1Lokal = frisch; I.pa1 = [...server, ...frisch]
+      }catch(_){ return }
       render()
     }
     // PA1b (Slave 5, Finn: mehrere „Gekauft" derselben ID × Firma = EINE Prüfung): ein Auftrag trägt posten [{vorlage_id, anzahl}] — Zuordnung über
@@ -98153,7 +98167,7 @@ ${stBlock}
         return `<div class="kl-z kl-zr${gew ? ' gew' : ''}${aus ? ' kl-aus' : ''}">
           <div class="kl-g">${klEsc(klGr(z))}</div>
           <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
-          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button>${spaeterKnopf('data-kl-spaeter', x.rid, 'zählt nicht als gekauft')}${box('data-kl-wahl', x.rid, gew, z, 'auswählen')}`}</div>
+          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="${klFutures(z.firma) ? 'Gekauft: Puls legt das Konto mit der Vorlage an (kein Fenster) — lang drücken: von Hand anlegen' : 'Gekauft: Anlegen-Fenster mit Vorlage, nur External ID einfügen'}">Gekauft</button>${spaeterKnopf('data-kl-spaeter', x.rid, 'zählt nicht als gekauft')}${box('data-kl-wahl', x.rid, gew, z, 'auswählen')}`}</div>
         </div>`
       }
       // Apex 5er-Pack: unter dem Firmen-Kopf EIN Pack-Block — „Gekauft" (anzahl = Pack) und „Später" fürs ganze Pack, darunter die Konten
@@ -98162,7 +98176,7 @@ ${stBlock}
         const zeilenP = l.map(x => `<div class="kl-z kl-zr kl-pz${I.auswahl.has(x.rid) ? ' gew' : ''}"><div class="kl-g">${klEsc(klGr(z))}</div><div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div><div class="kl-a"></div></div>`).join('')
         return `<div class="kl-pack${aus ? ' kl-aus' : ''}"><div class="kl-z kl-zr kl-pack-kopf">
           <div class="kl-g"><b>${z.pack}er-Pack</b>${l.length < z.pack ? ` · noch ${l.length}` : ''}</div><div class="kl-p">${summe(l)}</div>
-          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button>${spaeterKnopf('data-kl-pack-spaeter', key, 'ganzes Pack, zählt nicht als gekauft')}`}</div>
+          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack (${l.length} Konten): Puls legt an — lang drücken: von Hand anlegen">Gekauft</button>${spaeterKnopf('data-kl-pack-spaeter', key, 'ganzes Pack, zählt nicht als gekauft')}`}</div>
         </div>${zeilenP}</div>`
       }
       const liste_ = l => { let o = '', i = 0
@@ -98250,7 +98264,8 @@ ${stBlock}
         if(o.dataset.t === 'pause') pausieren(x.z.user_id, x.z.firma, false); else spaeter(rid, anzahl, Number(o.dataset.t)) }
       setTimeout(() => document.addEventListener('click', function zu(e){ if(!m.contains(e.target)){ m.remove(); document.removeEventListener('click', zu, true) } }, true), 0)
     }
-    function hinzufuegen(rids){
+    function hinzufuegen(rids, opt){
+      const manuell = !!(opt && opt.manuell)   // KP2i: langes Drücken = immer das Anlegen-Fenster (Consistency ändern, 50k-Kauf umwandeln …)
       const zl = zeilenAlle().filter(x => rids.includes(x.rid))
       const grp = new Map()
       for(const x of zl){ const key = x.z.user_id + '|' + x.z.firma; const b = grp.get(key) || { z: x.z, n: 0 }; b.n++; grp.set(key, b) }
@@ -98259,26 +98274,57 @@ ${stBlock}
       let i = 0
       const naechster = async () => {
         if(i >= bl.length){ I.auswahl.clear(); laden(true); return }
-        const b = bl[i++], vid = b.z.vorlage && b.z.vorlage.id
-        // Finn 25.11.2026: Futures (PA1-fähig, Login da) → KEIN Fenster, Knopf sofort grün mit Countdown bis zur Puls-Prüfung;
-        // CFD (und Futures ohne Login / PA1 sagt nein) → direkt das Anlegen-Fenster mit der Schablone
-        const futures = typeof tpFirmIstFutures === 'function' ? !!tpFirmIstFutures(b.z.firma) : true
-        if(futures && typeof window.pa1Gekauft === 'function' && vid){
-          try{
-            const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })
-            if(r && r.ok){
-              if(r.auftrag){ I.pa1 = [...(I.pa1 || []).filter(a => String(a.id) !== String(r.auftrag.id)), r.auftrag]; I.auswahl.clear(); render() }   // sofort grün
-              pa1Laden(); return naechster()
-            }
-            if(r && r.msg && r.code !== 'firma_nicht') klToast(r.msg + ' — Anlegen-Fenster')
-          }catch(e){ console.warn('[kaufliste] pa1Gekauft:', e) }
+        const b = bl[i++]
+        // Finn 25.11.2026 (KP2i bestätigt): CFD → immer das Anlegen-Fenster. Futures → KEIN Fenster: Knopf sofort grün mit Countdown bis zur
+        // Puls-Prüfung (Puls legt mit der Vorlage an). Nur bei langem Drücken oder wenn PA1 nicht kann (Grund als Toast) das Fenster.
+        const futures = klFutures(b.z.firma)
+        if(!(b.z.vorlage && b.z.vorlage.id)){   // Vorlage fehlt an der Zeile (Liste leer gemerkt) → einmal frisch holen — Futures UND CFD (Fenster mit Schablone)
+          const liste = await klVorlagen(true)
+          for(const x of zl) if(x.z.firma === b.z.firma) x.z.vorlage = klVorlage(x.z.firma, x.z.einheit, liste, x.z.groesse, x.z.gruppe_ziel)
         }
+        if(futures && !manuell){
+          const vid = b.z.vorlage && b.z.vorlage.id
+          let grund = ''
+          if(typeof window.pa1Gekauft !== 'function') grund = 'Puls-Anlegen ist auf diesem Gerät nicht geladen'
+          else if(!vid) grund = `keine Bulk-Vorlage für ${b.z.firma}${b.z.groesse ? ' ' + Math.round(b.z.groesse / 1000) + 'k' : ''}`
+          else {
+            try{
+              const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })
+              if(r && r.ok){
+                if(r.auftrag){ const au = Object.assign({}, r.auftrag, { _lokal_at: Date.now() })
+                  I.pa1Lokal = [...(I.pa1Lokal || []).filter(a => String(a.id) !== String(au.id)), au]
+                  I.pa1 = [...(I.pa1 || []).filter(a => String(a.id) !== String(au.id)), au]; I.auswahl.clear(); render() }   // sofort grün
+                pa1Laden(); return naechster()
+              }
+              grund = (r && (r.msg || r.code)) || 'Puls hat nicht angenommen'
+            }catch(e){ console.warn('[kaufliste] pa1Gekauft:', e); grund = 'Puls nicht erreichbar' }
+          }
+          console.warn('[kaufliste] Futures-Gekauft fällt ins Fenster:', b.z.firma, grund)
+          klToast(`${b.z.firma}: ${grund} — bitte von Hand anlegen`)
+        }
+        const vid = b.z.vorlage && b.z.vorlage.id
         window._bulkKaufliste({ ziel: b.z.user_id, zielName: b.z.name, firma: b.z.firma, vorlageId: vid, anzahl: b.n,
           block: i, bloecke: bl.length, fertig: naechster, abbruch: () => { I.auswahl.clear(); laden(true) } })
       }
       naechster()
     }
+    // KP2i: langes Drücken (~600 ms, Maus oder Touch) auf „Gekauft" = Anlegen-Fenster von Hand; der folgende Klick wird geschluckt
+    let lp = null, lpGeschluckt = false
+    const lpStop = () => { if(lp){ clearTimeout(lp.t); lp.el.classList.remove('kl-lp'); lp = null } }
+    $k(cfg.liste)?.addEventListener('pointerdown', e => {
+      const el = e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]'); if(!el || e.button > 0) return
+      lpStop(); el.classList.add('kl-lp')
+      lp = { el, t: setTimeout(() => {
+        const rids = el.dataset.klGekauft ? [el.dataset.klGekauft] : packRids(el.dataset.klPackGekauft)
+        lpStop(); lpGeschluckt = true; if(navigator.vibrate) try{ navigator.vibrate(15) }catch(_){}
+        hinzufuegen(rids, { manuell: true })
+      }, 600) }
+    })
+    for(const ev of ['pointerup', 'pointerleave', 'pointercancel']) $k(cfg.liste)?.addEventListener(ev, lpStop)
+    $k(cfg.liste)?.addEventListener('contextmenu', e => { if(e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]')) e.preventDefault() })
     $k(cfg.liste)?.addEventListener('click', e => {
+      if(lpGeschluckt && e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]')){ lpGeschluckt = false; return }
+      lpGeschluckt = false
       const pk = e.target.closest('[data-kl-id]'); if(pk){ const id = pk.dataset.klId; I.offen.has(id) ? I.offen.delete(id) : I.offen.add(id); render(); return }
       const g = e.target.closest('[data-kl-gekauft]'); if(g){ hinzufuegen([g.dataset.klGekauft]); return }
       const w = e.target.closest('[data-kl-spaeter]'); if(w){ spaeter(w.dataset.klSpaeter, 1, 7); return }

@@ -141,7 +141,8 @@ pruef("const klVKey = z => z.vorlage ? 'v' + z.vorlage.id" in fe and "nur gleich
       "Kästchen anderer Vorlage gesperrt (Firma × Größe × Phase), IDs auf-/zuklappbar")
 
 # Finn zu „Gekauft": Futures → PA1 ohne Fenster (sofort grün + Countdown), CFD → direkt das Anlegen-Fenster; „Später" mit Uhr-Symbol
-pruef("const futures = typeof tpFirmIstFutures === 'function'" in fe and "if(futures && typeof window.pa1Gekauft === 'function' && vid)" in fe,
+pruef("const futures = klFutures(b.z.firma)" in fe and "if(typeof tpFirmIstFutures === 'function') return !!tpFirmIstFutures(f)" in fe
+      and "const r = await window.pa1Gekauft({ user_id: b.z.user_id, firma: b.z.firma, vorlage_id: vid, anzahl: b.n })" in fe,
       "Gekauft: nur Futures gehen an PA1, CFD direkt ins Anlegen-Fenster")
 pruef("Puls prüft in ${" in fe and "pa.knopf.art !== 'gruen'" in fe, "grüner Knopf mit Countdown bis zur Puls-Prüfung")
 pruef("KL_UHR" in fe and "7 Tage ausblenden (alle Zeilen, auch neue), danach wieder da" in fe, "„Später“ mit Uhr-Symbol und Tooltip")
@@ -159,6 +160,15 @@ pruef("const firmenKopf = (z, l) =>" in fe and "kaufen · ${lauf} ${lauf === 1 ?
       "Firmen-Kopf: Farbpunkt · Firma · „n kaufen · m laufen · Ist / Soll“ · Kästchen für alle Zeilen der Firma")
 pruef("→ ${lauf}/${z.max} laufend" not in fe and 'class="kl-chip res"' not in fe and "kl-fk-res" in fe, "kein „1/3 laufend“-Chip mehr, Reserve nur als Punkt am Kopf")
 pruef(KL.zeilen_aus_vorrat([dict(zellen[0], bestand_echt=5000)], None, {})[0]["bestand"] == 5000, "Zeilen liefern den Bestand für „Ist / Soll“")
+
+# KP2i (Bug live .2334: Futures-„Gekauft“ öffnete das Fenster ohne /konto-suche)
+fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
+pruef("if(!neu && vorlagen.liste && vorlagen.liste.length &&" in fe, "leere Vorlagen-Liste wird nie gemerkt (Abfrage vor dem Login)")
+pruef("const liste = await klVorlagen(true)" in fe and "if(futures && !manuell){" in fe, "fehlt die Vorlage an der Zeile: frisch holen, dann Futures → PA1")
+pruef("klToast(`${b.z.firma}: ${grund} — bitte von Hand anlegen`)" in fe, "Futures fällt nie still ins Fenster — Grund als Toast")
+pruef("}, 600) }" in fe and "hinzufuegen(rids, { manuell: true })" in fe and "'pointerdown'" in fe and "lpGeschluckt" in fe,
+      "langes Drücken (600 ms, auch Touch) = Anlegen-Fenster von Hand, Klick danach geschluckt")
+pruef("_lokal_at: Date.now()" in fe, "frischer Auftrag bleibt grün, bis die Stand-Abfrage ihn liefert")
 
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402
