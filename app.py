@@ -10371,6 +10371,37 @@ def admin_build_vorrat():
     return dict(erg, bereit=bereit, hinweis=hinweis, standard=standard, people=people, generated=_wt_now_iso())
 
 
+# VR1 (Master 25.11.2026, Befund Prüfer S2 bei KP2/KP2d): die Schreib-Aktionen der Vorrat-Seite prüften nur _admin_darf_uid — das sperrt allein
+# eingeschränkte Logins (admin_zugang: Verwalter = Gruppe, Mitglied = er selbst). Eine HT-ID OHNE admin_zugang (g.admin_sicht None, z. B. jeder Kunde)
+# durfte so Sperr-Matrix-Zellen und Bestellungen FREMDER IDs setzen und die „nur Admin"-Einstellungen (Sicherheit, Ziele, KI-Hinweise) ändern.
+# Jetzt wie kaufliste_spaeter / konto-anlegen (kapital_app._gate): eigene ID immer; fremde ID eingeschränkt wie bisher (_admin_darf_uid: Verwalter nur
+# Mitglieder seiner Gruppe), uneingeschränkt nur mit ADMIN_EMAILS (_admin_auth) oder Eintrag in admin_mail_leser.
+def _vorrat_admin_frei(uid):
+    """Uneingeschränkter Login mit Admin-Recht (ADMIN_EMAILS oder admin_mail_leser)? → (True|False, None) oder (None, Fehler-Antwort bei 401/502).
+    Eng wie kapital_app._gate / _admin_konto_gate (nicht _planer_admin_auth mit admin_voll)."""
+    _mail, err = _admin_auth()
+    if err is None:
+        return True, None
+    if err[1] != 403:
+        return None, err
+    try:
+        return str(uid or "") in admin_mail_leser_uids(), None
+    except Exception:
+        return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
+
+
+def _vorrat_darf_uid(uid, ziel_uid):
+    """VR1: darf der Login uid an Zellen/Bestellungen der ID ziel_uid schreiben? → None (ja) oder Fehler-Antwort (403/401/502)."""
+    if str(ziel_uid or "") == str(uid or ""):
+        return None
+    if getattr(g, "admin_sicht", None) is not None:   # eingeschränkt wie bisher: Verwalter = seine Gruppe, Mitglied = nur er
+        return None if _admin_darf_uid(ziel_uid) else (jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403)
+    frei, err = _vorrat_admin_frei(uid)
+    if err:
+        return err
+    return None if frei else (jsonify({"error": "nur eigene ID — fremde IDs nur Admin oder Verwalter der Gruppe"}), 403)
+
+
 @app.route("/admin/vorrat", methods=["GET", "POST", "OPTIONS"])
 def admin_vorrat():
     """GET = Funnel und sicherer Bestand je ID × Firma. POST {aktion: 'rechnen'} = „Jetzt aktualisieren" (Stufe 1: sofort neu
@@ -10411,8 +10442,9 @@ def admin_vorrat():
         return jsonify({"error": "firma fehlt"}), 400
     if status not in VORRAT_STATUS:
         return jsonify({"error": "status muss frei, pausiert oder gesperrt sein"}), 400
-    if not _admin_darf_uid(ziel_uid):   # seit 08.10.2026 Verwalter: jede ID seiner Gruppe
-        return jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403
+    nein = _vorrat_darf_uid(uid, ziel_uid)   # VR1: fremde ID nur Admin / Verwalter seiner Gruppe (vorher jede HT-ID ohne admin_zugang)
+    if nein:
+        return nein
     try:
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/vorrat_matrix", params={"on_conflict": "user_id,firma"},
                         json={"user_id": ziel_uid, "firma": firma, "status": status, "geaendert_von": uid,
@@ -12571,9 +12603,15 @@ def _vorrat2_aktion(aktion, body, uid):
     """POST-Aktionen der Seite: einstellung {sicherheit} · bestellt {user_id, firma, anzahl, einheit} · bestellt_weg {id}."""
     nur = _admin_nur_uid()
     try:
+        # VR1: „nur Admin" hieß bisher nur „nicht eingeschränkt" — jede HT-ID ohne admin_zugang kam durch. Uneingeschränkt jetzt nur mit Admin-Recht.
+        admin = False
+        if not nur and aktion in ("ki_hinweis", "ki_hinweis_weg", "ziel", "ziel_neu", "einstellung", "bestellt_weg"):
+            admin, err = _vorrat_admin_frei(uid)
+            if err:
+                return err
         if aktion in ("ki_hinweis", "ki_hinweis_weg"):
             # Hinweise an den KI-Bot (Finn 06.10.2026) — gelten für alle IDs, „nur eigene"-Nutzer dürfen nicht
-            if nur:
+            if nur or not admin:
                 return jsonify({"error": "nur Admin"}), 403
             try:
                 ein = (sb_select("vorrat_einstellung", {"select": "parameter", "id": "eq.1"}) or [{}])[0]
@@ -12595,7 +12633,7 @@ def _vorrat2_aktion(aktion, body, uid):
             return jsonify({"ok": True, "ki_hinweise": liste})
         if aktion in ("ziel", "ziel_neu"):
             # Ziele gelten für alle IDs — „nur eigene"-Nutzer dürfen sie nicht ändern (wie die Sicherheit)
-            if nur:
+            if nur or not admin:
                 return jsonify({"error": "nur Admin"}), 403
             firma = _firm_norm(str(body.get("firma") or "")[:80])
             if firma == "—":
@@ -12631,7 +12669,7 @@ def _vorrat2_aktion(aktion, body, uid):
                 print(f"[vorrat2] ⚠️ Lauf nach Ziel-Änderung: {type(e).__name__}: {e}", flush=True)
             return jsonify({"ok": True, "ziel": neu_row})
         if aktion == "einstellung":
-            if nur:
+            if nur or not admin:
                 return jsonify({"error": "nur Admin"}), 403
             s = _vr2_num(body.get("sicherheit"))
             if s is None or not (0.1 <= s <= 0.95):
@@ -12651,8 +12689,9 @@ def _vorrat2_aktion(aktion, body, uid):
                 return jsonify({"error": "user_id/firma fehlt"}), 400
             if not isinstance(anzahl, int) or not (1 <= anzahl <= 20):
                 return jsonify({"error": "anzahl muss 1–20 sein"}), 400
-            if not _admin_darf_uid(ziel_uid):   # seit 08.10.2026 Verwalter: jede ID seiner Gruppe
-                return jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403
+            nein = _vorrat_darf_uid(uid, ziel_uid)   # VR1
+            if nein:
+                return nein
             _, prm, _, _ok = _vorrat2_tabellen()
             from datetime import timedelta as _td
             verfall = (datetime.now(timezone.utc) + _td(hours=float(prm.get("bestellt_h") or 48))).isoformat()
@@ -12672,6 +12711,8 @@ def _vorrat2_aktion(aktion, body, uid):
         params = {"id": f"eq.{bid}", "weg_at": "is.null"}
         if nur:   # seit 08.10.2026 die ganze Sicht (Verwalter: Gruppe)
             params["user_id"] = admin_sicht_filter(getattr(g, "admin_sicht", None) or frozenset({nur}))
+        elif not admin:   # VR1: uneingeschränkt ohne Admin-Recht → nur eigene Bestellungen
+            params["user_id"] = f"eq.{uid}"
         r = sb_update("vorrat_bestellt", params, {"weg_at": _wt_now_iso()})
         if not r:
             return jsonify({"error": "Bestellung nicht gefunden"}), 404
