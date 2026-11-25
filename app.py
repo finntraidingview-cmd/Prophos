@@ -26108,6 +26108,22 @@ def pa1_posten_plus(posten, vid, n, jetzt_iso=None):
     return p, alt + int(n)
 
 
+def pa1_posten_minus(posten, angelegt, vid, n, vorlage_alt=None):
+    """REIN RECHNEND (PA1d, Finn 25.11.2026: „Verklickt? Zweiter Klick nimmt ‚Gekauft' zurück"): Posten der Vorlage um n senken → (posten_neu,
+    summe) oder (None, grund) — grund 'nicht_da' (kein Posten dieser Vorlage) | 'angelegt' (zurücknehmen würde unter die schon angelegten
+    Konten dieser Vorlage fallen). Posten mit 0 fallen weg; summe 0 = Auftrag schließen."""
+    p = [dict(x) for x in posten or ()]
+    ziel = next((x for x in p if str(x.get("vorlage_id")) == str(vid)), None)
+    if not ziel:
+        return None, "nicht_da"
+    schon = sum(1 for x in angelegt or () if isinstance(x, dict) and str(x.get("vorlage_id") or vorlage_alt or "") == str(vid))
+    if int(ziel.get("anzahl") or 0) - int(n) < schon:
+        return None, "angelegt"
+    ziel["anzahl"] = int(ziel.get("anzahl") or 0) - int(n)
+    p = [x for x in p if int(x.get("anzahl") or 0) > 0]
+    return p, sum(int(x["anzahl"]) for x in p)
+
+
 def pa1_bezug(a):
     """REIN RECHNEND (PA1c, Prüfer S2 25.11.2026): Bezugszeit für „vorher gesehen" = frühester Kauf-Klick (posten.ab, sonst posten.at), erst
     ohne Posten-Zeit created_at. Ein zum Kauf-Auftrag umgewandelter Mail-Auftrag hat ein altes created_at (live seit 29.10.) — davon aus gerechnet
@@ -26531,6 +26547,57 @@ def konto_suche():
     return jsonify({"ok": True, "auftrag": _pa1_aus(a)})
 
 
+@app.route("/konto-suche/zurueck", methods=["POST", "OPTIONS"])
+def konto_suche_zurueck():
+    """PA1d (Finn 25.11.2026: „Verklickt? Ein zweiter Klick auf den grünen Knopf nimmt ‚Gekauft' zurück"). POST {user_id?, firma, vorlage_id,
+    anzahl:1} — Gate wie POST /konto-suche (_konto_ziel_uid). Nur solange der Auftrag OFFEN ist (noch nicht gelaufen): Posten dieser Vorlage − n;
+    Summe 0 → Auftrag geschlossen (status fehler, ergebnis.code 'zurueckgenommen', nichts angelegt; GET /konto-suche zeigt ihn nicht mehr).
+    → {ok, auftrag | null} | 409 {code 'laeuft' (Puls prüft gerade) | 'angelegt' (schon angelegt — nicht zurücknehmbar) | 'warten'} |
+    {ok:true, auftrag:null, code 'nichts'} (kein offener Auftrag). Race-sicher: Guard auf status offen + alte Anzahl, sonst neu lesen (≤ 6×)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    b = request.get_json(silent=True) or {}
+    ziel, err = _konto_ziel_uid(b)
+    if err:
+        return err
+    wahl, fehler = pa1_klick_lesen(b)
+    if fehler:
+        return jsonify({"ok": False, "code": fehler[0], "msg": fehler[1]}), 400
+    firma, vid, n = wahl
+    try:
+        for _versuch in range(6):
+            o = (sb_select("tv_konten_auftrag", {"select": "*", "user_id": f"eq.{ziel}", "firma": f"eq.{firma}", "art": "eq.gekauft",
+                                                  "status": "in.(offen,laeuft)", "limit": "1"}) or [None])[0]
+            if not o:
+                return jsonify({"ok": True, "auftrag": None, "code": "nichts", "msg": "Kein offener Gekauft-Auftrag — nichts zurückzunehmen"})
+            if o.get("status") == "laeuft":
+                return jsonify({"ok": False, "code": "laeuft", "msg": "Puls prüft gerade — gleich nochmal", "auftrag": _pa1_aus(o)}), 409
+            posten, summe = pa1_posten_minus(pa1_posten(o), o.get("angelegt"), vid, n, o.get("vorlage_id"))
+            if posten is None:
+                msg = "Schon angelegt — nicht zurücknehmbar" if summe == "angelegt" else "Für diese Vorlage ist nichts gekauft"
+                return jsonify({"ok": False, "code": summe, "msg": msg, "auftrag": _pa1_aus(o)}), 409
+            jetzt = datetime.now(timezone.utc)
+            n_ang = len(o.get("angelegt") or [])
+            if summe == 0:
+                body = {"status": "fehler", "erledigt_at": jetzt.isoformat(), "posten": [], "anzahl": None,
+                        "ergebnis": dict(o.get("ergebnis") or {}, code="zurueckgenommen", pa1="zurückgenommen")}
+            elif summe <= n_ang:   # alles Übrige ist schon angelegt → fertig
+                body = {"status": "erledigt", "erledigt_at": jetzt.isoformat(), "posten": posten, "anzahl": summe}
+            else:
+                body = {"posten": posten, "anzahl": summe}
+            guard = {"id": f"eq.{o['id']}", "status": "eq.offen", "anzahl": f"eq.{o.get('anzahl')}" if o.get("anzahl") is not None else "is.null"}
+            got = sb_update("tv_konten_auftrag", guard, body) or []
+            if got:
+                a = got[0]
+                print(f"[pa1] Zurück: {str(ziel)[:8]} · {firma} − {n} (Vorlage {vid[:8]}) → {'geschlossen' if summe == 0 else summe}", flush=True)
+                return jsonify({"ok": True, "auftrag": _pa1_aus(a) if a.get("status") != "fehler" else None})
+        return jsonify({"ok": False, "code": "warten", "msg": "Auftrag hat sich gerade mehrfach geändert — nochmal drücken"}), 409
+    except Exception as e:
+        if _pa1_sql_fehlt(e):
+            return jsonify({"ok": False, "code": "sql_fehlt", "msg": f"Datenbank noch nicht bereit ({PA1_SQL})"}), 503
+        return jsonify({"ok": False, "code": "fehler", "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+
+
 def _pa1_stand():
     uid, _mail, err = _login_uid_mail()
     if err:
@@ -26567,6 +26634,7 @@ def _pa1_stand():
         pn = _ap_namen()[0]
     except Exception:
         pn = {}
+    rows = [r for r in rows if (r.get("ergebnis") or {}).get("code") != "zurueckgenommen"] if rows else rows   # PA1d: zurückgenommen = weg
     return jsonify({"ok": True, "auftraege": [_pa1_aus(r, pn.get(str(r.get("user_id")))) for r in rows]})
 
 

@@ -32,7 +32,8 @@ NAMEN = {"_wd_num", "tv_konto_normal", "admin_konto_ext_norm", "admin_konto_dopp
          "PA1_NACH_MIN_S", "PA1_NACH_MAX_S", "PA1_NACH_WE_MIN_S", "PA1_NACH_WE_MAX_S", "PA1_FRIST_S", "PA1_FRIST_WE_S", "PA1_VORHER_S",
          "PA1_MAX_ANZAHL", "PA1_MAX_FEHLVERSUCHE", "PA1_PHASE", "pa1_verzug_s", "pa1_iso", "pa1_wochenende", "pa1_klick_zeiten", "pa1_naechste",
          "pa1_art", "PA1_GROESSE_PRAEFIX", "pa1_groesse_passt", "pa1_name", "pa1_konto_zeile", "pa1_neue", "pa1_urteil", "pa1_offen_bestanden", "pa1_weiter", "pa1_nach_fehler", "pa1_hm",
-         "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen", "pa1_bezug"}
+         "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen", "pa1_bezug",
+         "pa1_posten_minus"}
 baum = ast.parse(SRC)
 teile = []
 for n in baum.body:
@@ -159,6 +160,25 @@ check(u_c == "anlegen" and zu_c == [("APEX7000010000001", VA)] and any(g.pa1_art
 er_c = SRC[SRC.index("def _pa1_erledigt("):SRC.index('\n@app.route("/konto-suche"', SRC.index("def _pa1_erledigt("))]
 check("erstellt = pa1_bezug(a) or jetzt" in er_c and 'pa1_iso(a.get("created_at"))' not in er_c, "Auswertung rechnet „vorher“ ab pa1_bezug, nicht ab created_at")
 check('"ab": jetzt.isoformat()' in SRC, "neuer Auftrag setzt posten.ab")
+
+# ── PA1d: verklickt → zweiter Klick nimmt „Gekauft“ zurück ──
+PP = [{"vorlage_id": V150, "anzahl": 3, "ab": KLICK}, {"vorlage_id": V300, "anzahl": 1}]
+pm, sm = g.pa1_posten_minus(PP, [], V150, 1)
+check(sm == 3 and pm[0]["anzahl"] == 2 and pm[0]["ab"] == KLICK and PP[0]["anzahl"] == 3, "zurück: Posten der Vorlage − 1, Rest bleibt, Eingabe unverändert")
+pm, sm = g.pa1_posten_minus(PP, [], V300, 1)
+check(sm == 3 and [x["vorlage_id"] for x in pm] == [V150], "Posten auf 0 fällt weg")
+check(g.pa1_posten_minus([{"vorlage_id": V150, "anzahl": 1}], [], V150, 1) == ([], 0), "letzter Posten → Summe 0 = Auftrag schließen")
+check(g.pa1_posten_minus(PP, [{"ext": "A", "vorlage_id": V300}], V300, 1) == (None, "angelegt"), "schon angelegt → nicht zurücknehmbar")
+check(g.pa1_posten_minus(PP, [{"ext": "A"}], V150, 1, V150)[1] == 3 and g.pa1_posten_minus([{"vorlage_id": V150, "anzahl": 1}], [{"ext": "A"}], V150, 1, V150) == (None, "angelegt"),
+      "alte angelegt ohne vorlage_id zählen zur alten Vorlage")
+check(g.pa1_posten_minus(PP, [], VA, 1) == (None, "nicht_da"), "andere Vorlage → nichts zurückzunehmen")
+zr = SRC[SRC.index('@app.route("/konto-suche/zurueck"'):SRC.index("\ndef _pa1_stand(")]
+check("_konto_ziel_uid(b)" in zr and '"status": "eq.offen"' in zr and "\"anzahl\": f\"eq.{o.get('anzahl')}\"" in zr and "for _versuch in range(6):" in zr,
+      "zurück: Gate wie der Klick, nur offen, Guard auf die alte Anzahl, neu lesen")
+check('"code": "laeuft"' in zr and "Puls prüft gerade" in zr and '"zurueckgenommen"' in zr and "sb_insert" not in zr and "_pa1_anlegen" not in zr,
+      "zurück: läuft → 409, Summe 0 → geschlossen (zurueckgenommen), legt nie etwas an")
+check('!= "zurueckgenommen"' in SRC[SRC.index("\ndef _pa1_stand("):], "Stand zeigt zurückgenommene Aufträge nicht mehr")
+check("window.pa1Zurueck = " in HTML and "/konto-suche/zurueck" in HTML, "Frontend: pa1Zurueck für den zweiten Klick")
 
 # ── pa1_urteil ──
 U_ = lambda ch, un=(): {"challenge": list(ch), "unklar": list(un), "funded": ["F1"], "nachfolger": ["N1"]}   # noqa: E731
