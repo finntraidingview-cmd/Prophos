@@ -62444,7 +62444,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2350'
+  const OS_TAB_BUILD = '2026-09-22.2351'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -88048,6 +88048,8 @@
       if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
       try{ window._planerLinkSync?.() }catch(_){}   // PLANER-TAB (30.10.2026): Link „Planer" je ID (Admin entsperrt + Recht)
       try{ window._admStandVorladen?.() }catch(_){}   // LD1: gemerkten Admin-Stand dieser ID schon jetzt lesen (Öffnen zeichnet sofort)
+      // KP4: steht nach dem Neuladen schon Accounts offen, Muster-Portfolio + Kaufliste sofort mit der ID anstoßen (vorher erst beim 15-s-Takt)
+      try{ if(document.querySelector('#dashboard-view .view[data-view="accounts"].active')){ window._mpOeffnen?.(); window._klOeffnen?.() } }catch(_){}
     }
     if(!bootGeradeGeladen(_dashExtra, currentUserId)){
       _dashExtra = { uid: currentUserId, at: Date.now() }
@@ -88070,6 +88072,7 @@
   const _origShowLogin = showLogin
   showLogin = function(){
     try{ window._admStandLeeren?.(currentUserId) }catch(_){}   // LD1 (S4): gemerkter Admin-Stand dieser ID weg (vor currentUserId = null)
+    try{ window._kp4?.leeren(currentUserId) }catch(_){}   // KP4: gemerkte Kaufliste + Muster-Portfolio dieser ID weg
     _bootGeladen = _dashExtra = null   // ID1b F2: nächster Login (auch derselben ID) lädt sofort wieder
     try{ _syncGestartet = null }catch(_){}   // ID1b: Initial-Sync beim nächsten Login wieder
     accounts = []
@@ -97886,6 +97889,47 @@ ${stBlock}
   }
   window._aufTabSchliessen = () => { clearInterval(_auf.timer); _auf.timer = null }
 })()
+/* ── KP4 SOFORTSTAND ACCOUNTS (Finn 26.11.2026: „Nach einem Reload dauert es, bis Musterportfolio und Kaufliste erscheinen — ich will sie sofort
+ * sehen"). Die letzte Antwort von GET /admin/muster-portfolio und GET /admin/kaufliste (nur Accounts, eigene ID) liegt je ID in IndexedDB
+ * (NICHT localStorage: auf manchen Geräten voll → ID-Wechsel scheitert stumm, Memory „localStorage voll"). Beim Öffnen sofort gezeichnet, frisch
+ * still im Hintergrund nachgeladen und ersetzt. Schlüssel „art|user_id" — eine andere ID sieht nie diesen Stand (Anwenden nur bei gleicher ID,
+ * Antwort einer inzwischen gewechselten ID verworfen). Größenbremse 1 MB je Eintrag, höchstens 24 h alt, alles in try/catch (kein IndexedDB →
+ * einfach wie bisher). Abmelden löscht die Einträge der ID. Grüne „Gekauft"-Knöpfe/Countdowns kommen nie aus dem Speicher (pa1 immer frisch). ── */
+;(() => {
+  const DB = 'prophos_kp4_stand', MAX_ZEICHEN = 1000000, MAX_MS = 24 * 3600 * 1000
+  let _dbP = null
+  function db(){
+    if(_dbP) return _dbP
+    _dbP = new Promise((res, rej) => {
+      try{ const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => { try{ r.result.createObjectStore('kv') }catch(_){} }
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }catch(e){ rej(e) }
+    })
+    _dbP.catch(() => { _dbP = null })
+    return _dbP
+  }
+  const schluessel = (art, uid) => art + '|' + uid
+  async function lesen(art, uid){
+    uid = String(uid || ''); if(!uid || typeof indexedDB === 'undefined') return null
+    try{
+      const d = await db()
+      const e = await new Promise(res => { try{ const g = d.transaction('kv', 'readonly').objectStore('kv').get(schluessel(art, uid)); g.onsuccess = () => res(g.result || null); g.onerror = () => res(null) }catch(_){ res(null) } })
+      if(!e || e.uid !== uid || e.art !== art || typeof e.t !== 'string' || Date.now() - (Number(e.at) || 0) > MAX_MS) return null
+      return { at: Number(e.at) || 0, d: JSON.parse(e.t) }
+    }catch(_){ return null }
+  }
+  async function schreiben(art, uid, daten){
+    uid = String(uid || ''); if(!uid || typeof indexedDB === 'undefined') return
+    try{
+      const t = JSON.stringify(daten); if(!t || t.length > MAX_ZEICHEN) return   // Größenbremse
+      const d = await db(); d.transaction('kv', 'readwrite').objectStore('kv').put({ art, uid, at: Date.now(), t }, schluessel(art, uid))
+    }catch(_){}
+  }
+  async function leeren(uid){
+    uid = String(uid || ''); if(!uid || typeof indexedDB === 'undefined') return
+    try{ const d = await db(), st = d.transaction('kv', 'readwrite').objectStore('kv'); for(const art of ['mp', 'kl']) st.delete(schluessel(art, uid)) }catch(_){}
+  }
+  window._kp4 = { lesen, schreiben, leeren }
+})()
 /* ── MUSTER-PORTFOLIO (16.10.2026, Finn: „Ich will, dass es ein Muster-Portfolio gibt — Portfolio an Accounts pro Prop-ID, jedes Portfolio
  * orientiert sich daran … in jeder Gruppe wie ein Tacho im Auto, wie viel man vom Muster-Portfolio bei dieser Firma schon erreicht hat, in den
  * Farben der jeweiligen Propfirm"; „jede ID muss mit derselben Logik Propfirms pausieren oder sperren können") ──
@@ -98064,12 +98108,19 @@ ${stBlock}
     if(!uid || _mp.laedt) return
     if(_mp.uid !== uid){ _mp.d = null; _mp.zeig = {} }        // ID gewechselt: nie die Tachos der vorigen ID zeigen, Nadeln wieder von 0
     _mp.laedt = true
+    // KP4: noch nichts da → gemerkten Stand DIESER ID sofort zeichnen, der Abruf unten läuft parallel und ersetzt ihn still
+    if(!_mp.d && window._kp4) window._kp4.lesen('mp', uid).then(c => {
+      if(!c || _mp.d || !c.d || !Array.isArray(c.d.firmen) || uid !== String(currentUserId || '')) return
+      _mp.d = c.d; _mp.uid = uid; _mp.ausSpeicher = true; mpRender()
+    }).catch(() => {})
     try{
       const r = await fetch(`${WATCHER_HOME}/admin/muster-portfolio?user_id=${encodeURIComponent(uid)}`, { headers: { 'sb-token': await mpToken() }, cache: 'no-store' })
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       if(!Array.isArray(d.firmen)) throw new Error('unerwartete Antwort (firmen fehlt)')
-      _mp.d = d; _mp.uid = uid; _mp.at = Date.now(); _mp.fehler = ''
+      if(uid !== String(currentUserId || '')){ _mp.laedt = false; return }   // KP4: ID inzwischen gewechselt → Antwort verwerfen
+      _mp.d = d; _mp.uid = uid; _mp.at = Date.now(); _mp.fehler = ''; _mp.ausSpeicher = false
+      try{ window._kp4?.schreiben('mp', uid, d) }catch(_){}
     }catch(e){ _mp.uid = uid; _mp.at = Date.now(); _mp.fehler = 'Muster-Portfolio nicht geladen: ' + (e.message || e) + ' → Seite neu öffnen' }
     try{ await window._apexStriking?.laden() }catch(_){}   // SK1: „+ Striking" am Apex-Tacho (höchstens alle 60 s, Tabelle fehlt → kein Schalter)
     try{ await window._planerSchreiben?.() }catch(_){}   // SK1-F3: Admin-Recht für den Schalter (5 min gemerkt; ohne Antwort = kein Schalter)
@@ -98316,6 +98367,13 @@ ${stBlock}
     const I = { d: null, at: 0, nr: 0, fehler: '', uid: '', pa1: [], spAuf: false, offen: new Set(), auswahl: new Set(), alleAuf: false }
     const $k = id => document.getElementById(id)
     async function laden(frisch){
+      // KP4: läuft für diese ID schon ein Abruf (Start: Init, Login, Accounts-Öffnen, Takt), nicht noch einen — „frisch" (nach eigenem Schreiben) immer
+      const uid0 = String(currentUserId || '')
+      if(!frisch && I.laeuft && I.laeuft.uid === uid0 && Date.now() - I.laeuft.at < 20000) return
+      I.laeuft = { uid: uid0, at: Date.now() }
+      try{ await ladenEcht(frisch) }finally{ if(I.laeuft && I.laeuft.uid === uid0) I.laeuft = null }
+    }
+    async function ladenEcht(frisch){
       // Anfrage-Nummer (Review): eine ältere Antwort (ID gewechselt) wird verworfen statt angezeigt
       const nr = ++I.nr, uid = String(currentUserId || '')
       const veraltet = () => nr !== I.nr || uid !== String(currentUserId || '')
@@ -98332,7 +98390,8 @@ ${stBlock}
         for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste, z.groesse, z.gruppe_ziel)
         // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
         if(I.d) I.auswahl.clear()
-        I.d = d; I.at = Date.now(); I.fehler = ''; I.uid = uid; I.verboten = false
+        I.d = d; I.at = Date.now(); I.fehler = ''; I.uid = uid; I.verboten = false; I.ausSpeicher = 0
+        if(!cfg.alle) try{ window._kp4?.schreiben('kl', uid, d) }catch(_){}   // KP4: Sofortstand nur für Accounts (eigene ID)
       }catch(e){ if(veraltet()) return; I.fehler = 'Kaufliste nicht geladen: ' + (e.message || e) }
       render()
       pa1Laden()
@@ -98395,7 +98454,8 @@ ${stBlock}
       for(const rid of [...I.auswahl]) if(!zeilen.some(x => x.rid === rid)) I.auswahl.delete(rid)
       const wk = wahlKey()
       const summe = l => klEur(l.reduce((a, x) => a + klPreis(x.z), 0))
-      sub.textContent = zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}${cfg.alle ? ` · ${new Set(zeilen.map(x => x.z.user_id)).size} IDs` : ''}` : (I.fehler ? '' : 'nichts zu kaufen')
+      sub.textContent = (zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}${cfg.alle ? ` · ${new Set(zeilen.map(x => x.z.user_id)).size} IDs` : ''}` : (I.fehler ? '' : 'nichts zu kaufen'))
+        + (I.ausSpeicher ? ` · Stand ${new Date(I.ausSpeicher).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : '')   // KP4: gemerkter Stand, frisch lädt
       const box = (attr, wert, gew, z, label) => {
         const aus = wk && wk !== klVKey(z)
         return `<input type="checkbox" class="kl-box" ${attr}="${klEsc(wert)}"${gew ? ' checked' : ''}${aus ? ' disabled title="nur gleiche Vorlage — erst „Aufheben“"' : ''} aria-label="${label}">`
@@ -98662,7 +98722,12 @@ ${stBlock}
     const slotsVon_ = z => pa1Slots(z)
     function oeffnen(){
       const uid = String(currentUserId || '')
-      if(uid !== I.uid){ I.d = null; I.pa1 = []; I.auswahl.clear(); I.offen.clear(); I.verboten = false; render() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
+      if(uid !== I.uid){ I.d = null; I.pa1 = []; I.pa1Lokal = []; I.auswahl.clear(); I.offen.clear(); I.verboten = false; I.ausSpeicher = 0; render() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
+      // KP4: noch keine Liste → gemerkten Stand DIESER ID sofort zeichnen (Grün/Countdown nur aus pa1Laden, nie aus dem Speicher); frisch lädt parallel
+      if(!I.d && !cfg.alle && uid && window._kp4) window._kp4.lesen('kl', uid).then(c => {
+        if(!c || I.d || !c.d || !Array.isArray(c.d.zeilen) || uid !== String(currentUserId || '')) return
+        I.d = c.d; I.uid = uid; I.at = 0; I.ausSpeicher = c.at; I.fehler = ''; render(); pa1Laden()
+      }).catch(() => {})
       if(!I.d || Date.now() - I.at >= 60000) laden(false); else render()
     }
     return { cfg, I, laden, render, oeffnen, pa1Laden, hinzufuegen, zeilenAlle, tachoBadges: () => { if(cfg.tacho) tachoBadges() }, aufheben: () => { I.auswahl.clear(); render() },
