@@ -98044,12 +98044,21 @@ ${stBlock}
       try{ const l = await window.pa1Stand(cfg.alle ? { alle: true } : undefined); if(uid !== String(currentUserId || '')) return; I.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
       render()
     }
+    // PA1b (Slave 5, Finn: mehrere „Gekauft" derselben ID × Firma = EINE Prüfung): ein Auftrag trägt posten [{vorlage_id, anzahl}] — Zuordnung über
+    // user_id + firma und vorlage_id ∈ posten[]; Slots je Vorlage = posten.anzahl minus schon Angelegtes dieser Vorlage (Angelegtes
+    // ohne vorlage_id → erste Vorlage). Ältere Aufträge ohne posten: wie bisher über auftrag.vorlage_id/anzahl.
     function pa1Slots(z){
       const vid = z.vorlage && z.vorlage.id, out = []
       for(const a of I.pa1 || []){
-        if(String(a.user_id) !== String(z.user_id) || a.firma !== z.firma || (vid && a.vorlage_id && String(a.vorlage_id) !== String(vid))) continue
+        if(String(a.user_id) !== String(z.user_id) || a.firma !== z.firma) continue
         if(!a.knopf || a.knopf.art === 'fertig') continue
-        const offen = Math.max(0, (Number(a.anzahl) || 0) - ((a.angelegt || []).length || 0))
+        const posten = Array.isArray(a.posten) && a.posten.length ? a.posten : [{ vorlage_id: a.vorlage_id, anzahl: a.anzahl }]
+        const p = posten.find(x => !vid || !x.vorlage_id || String(x.vorlage_id) === String(vid))
+        if(!p) continue
+        // angelegt[] = {id, ext, name, vorlage_id} (ab PA1b); Einträge ohne vorlage_id (Aufträge von vor PA1b) zählen zur ersten Vorlage (auftrag.vorlage_id)
+        const erste = a.vorlage_id != null ? a.vorlage_id : posten[0].vorlage_id
+        const schon = (a.angelegt || []).filter(x => String((x && typeof x === 'object' && x.vorlage_id != null) ? x.vorlage_id : erste) === String(p.vorlage_id)).length
+        const offen = Math.max(0, (Number(p.anzahl) || 0) - schon)
         for(let i = 0; i < offen; i++) out.push(a)
       }
       return out

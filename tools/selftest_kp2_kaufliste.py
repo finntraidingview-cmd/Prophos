@@ -150,6 +150,10 @@ pruef("const spaeterN = z => spaeterBis(z) ? z.n : 0" in fe, "Später blendet di
 pruef("später bis ${datum(bis)}" in fe and "kaufen` : `später bis" in fe, "Tacho: „später bis TT.MM.“ statt „+n kaufen“")
 pruef("· keine Kaufvorschläge</span>" in fe and "new Set(sp.map(s => s.user_id + '|' + s.firma)).size" in fe, "Abschnitt „n später“ zählt Firmen, nicht Konten")
 
+# PA1b: ein Auftrag je ID × Firma mit posten[] — Zuordnung über vorlage_id ∈ posten[], Slots je Vorlage = posten.anzahl
+pruef("const posten = Array.isArray(a.posten) && a.posten.length ? a.posten : [{ vorlage_id: a.vorlage_id, anzahl: a.anzahl }]" in fe
+      and "String(x.vorlage_id) === String(vid)" in fe, "PA1b: Knopf-Stand über posten[] je Vorlage")
+
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402
 from datetime import datetime as _dt, timezone as _tz  # noqa: E402
