@@ -28912,6 +28912,52 @@ def ap_regel_flex(regel, konto, balance):
     return dict(regel, je_groesse=je, flex_konto=False)
 
 
+# T5C (Finn 25.11.2026): VARIANTE ÜBER DEN KONTONAMEN — The5%ers High Stakes 2-Step gibt es als „New" (wie bisher: Phase 1 8 %, Phase 2 5 %) und als
+# „Classic" (Phase 1 10 %, Phase 2 5 %, sonst gleich; billiger). Gleiche Größe, gleicher Max DD → am Konto nur über den Namen unterscheidbar (Add-on
+# „ · Classic", wie On Demand). regel.varianten = {"classic": {"ziel_pct": {...}, "kauf_eur": {...}}}: enthält der Kontoname das Wort (ganzes Wort,
+# Groß/klein egal), gelten ziel_pct (je Phase, auch in den Größen-Blöcken) und kauf_eur der Variante; ohne Wort = Firma unverändert (= New).
+# EIN Weg für Planer, Ziel-Wache, Radar, Konten-Stand (ap_regel_konto) und Kontowert/Echo-Hedge (ap_kw_regel_konto). accounts.ziel_pct_konto geht weiter vor.
+def ap_konto_variante(regel, konto):
+    """REIN RECHNEND (testbar, T5C): Schlüssel der Namens-Variante dieses Kontos ('classic') oder None."""
+    va = (regel or {}).get("varianten")
+    if not isinstance(va, dict) or not va:
+        return None
+    name = str((konto or {}).get("name") or "")
+    return next((k for k in va if isinstance(va.get(k), dict) and re.search(r"(?<![a-z0-9])" + re.escape(str(k)) + r"(?![a-z0-9])", name, re.I)), None)
+
+
+def ap_regel_variante(regel, konto):
+    """REIN RECHNEND (testbar, T5C): Firmen-Regel mit den Werten der Namens-Variante (ziel_pct je Phase — auch in phasen{} und je_groesse{} —, kauf_eur
+    je Größe) + Marke variante. Ohne Variante: dieselbe Regel (bitgleich)."""
+    k = ap_konto_variante(regel, konto)
+    if not k:
+        return regel
+    v = regel["varianten"][k]
+    r = dict(regel, variante=k)
+    zv = {p: float(x) for p, x in (v.get("ziel_pct") or {}).items() if _wd_num(x) is not None} if isinstance(v.get("ziel_pct"), dict) else {}
+    if zv:
+        r["ziel_pct"] = dict(regel.get("ziel_pct") if isinstance(regel.get("ziel_pct"), dict) else {}, **zv)
+        if isinstance(regel.get("phasen"), dict):
+            r["phasen"] = {p: (dict(ph, ziel_pct=zv[p]) if isinstance(ph, dict) and p in zv else ph) for p, ph in regel["phasen"].items()}
+        if isinstance(regel.get("je_groesse"), dict):
+            def _jg(jg):
+                if not isinstance(jg, dict):
+                    return jg
+                out = dict(jg)
+                if isinstance(jg.get("ziel_pct"), dict):
+                    out["ziel_pct"] = dict(jg["ziel_pct"], **zv)
+                if isinstance(jg.get("phasen"), dict):
+                    out["phasen"] = {p: (dict(ph, ziel_pct=zv[p]) if isinstance(ph, dict) and p in zv else ph) for p, ph in jg["phasen"].items()}
+                return out
+            r["je_groesse"] = {g: _jg(jg) for g, jg in regel["je_groesse"].items()}
+    kv = v.get("kauf_eur")
+    if isinstance(kv, dict) and kv:
+        r["kauf_eur"] = dict(regel.get("kauf_eur") if isinstance(regel.get("kauf_eur"), dict) else {}, **kv)
+    elif _wd_num(kv):
+        r["kauf_eur"] = kv
+    return r
+
+
 def ap_regel_konto(regel, konto, balance):
     """Firmen-Regel mit der Consistency des Kontos (07.10.2026): phasen.challenge.tp_max = consistency_pct × Ziel-$, die TP-Spanne
     rückt um dieselbe Differenz mit (Tradeify 3.600 [3.450, 3.550] → 50 %: 4.500 [4.350, 4.450]). Ohne consistency_pct oder ohne
@@ -28919,6 +28965,8 @@ def ap_regel_konto(regel, konto, balance):
     # 07.10.2026 (Finn, FundingPips-Konto …9722 auf dem ALTEN Plan 10 %/5 %, Regel seit Kernwerten 8 %/5 %): accounts.ziel_pct_konto
     # {"phase1": 10, …} überschreibt je Phase den ziel_pct der Regel — nur für dieses Konto, neue Konten bleiben bei der Regel.
     # Ziel-Wache (zw_tick) und Planer gehen beide hier durch, damit Tag und Plan dasselbe Ziel sehen.
+    if isinstance((regel or {}).get("varianten"), dict):
+        regel = ap_regel_variante(regel, konto)        # T5C: The5%ers Classic (Name) — vor Flex und Konto-Wert
     if isinstance((regel or {}).get("flex"), dict):
         regel = ap_regel_flex(regel, konto, balance)   # FundingPips Flex (max_drawdown ≥ 12 %) / Standard je Konto (Finn 08.10.2026)
     zk = (konto or {}).get("ziel_pct_konto")
@@ -30190,6 +30238,8 @@ def ap_kw_regel_konto(regel, konto, balance):
     flex.kauf_eur trägt — dann Kauf, dd_pct und ziel_pct der Variante (Größen-Block flex.je_groesse[g] vor flex), sonst die Firma unverändert.
     Warum opt-in: der Echo-Hedge (eh_hedge über ap_kontowert_konto) rechnete ein Nano-Konto mit Standard 300 € / 8 % → Satz 0,0375 statt
     0,0145 €/$ (≈ 2,6× zu viel Fusion-Hedge). FundingPips Flex hat kein flex.kauf_eur und behält bitgleich den Firmen-Kontowert."""
+    if isinstance((regel or {}).get("varianten"), dict) and "ap_regel_variante" in globals():   # T5C: Classic-Kauf + Ziel 10 % auch im Kontowert/Echo-Hedge
+        regel = ap_regel_variante(regel, konto)
     fx = (regel or {}).get("flex")
     if not isinstance(fx, dict) or fx.get("kauf_eur") in (None, "") or not ap_konto_flex(regel, konto, balance):
         return regel
@@ -30571,7 +30621,10 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
     out["fusion_eur"] = (_wd_num(p.get("slave_pl")) if _wd_num(p.get("slave_pl")) is not None else _wd_num(_h.get("pl"))) if (_h and _h.get("ticket")) else None
     # Kontowert + Polster VOR dem Trade (ap_kontowert, dieselbe Formel wie live): Balance vorher = Start-Lesung, sonst Ende − P&L
     pl = z["pl_usd"] if z else None
-    kp = ap_kw_param(ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm")))
+    _hb_r = ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm"))
+    if isinstance((_hb_r or {}).get("varianten"), dict) and "ap_regel_variante" in globals():
+        _hb_r = ap_regel_variante(_hb_r, acc or {"name": p.get("master_name")})   # T5C: The5%ers Classic (Ziel 10 %, Kauf) auch in der Hypo-Bilanz
+    kp = ap_kw_param(_hb_r)
     bs = _wd_num(tv.get("balance_start"))
     if bs is None:
         bs = _wd_num(base.get("balance_start"))

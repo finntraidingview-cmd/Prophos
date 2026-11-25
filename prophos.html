@@ -53739,7 +53739,8 @@
         // Namensregel .1472 (Finn 12.10.2026): immer „<Größe> <External ID> → <Phase>" — Vorlagen-Text und Dashboard-Titel zählen nicht mehr
         // (vorher ergab „{size} {firm} {ex}" Namen wie „150k FundedNext Futures FNFT…88778" neben „150k FNFT…27926 → Challenge")
         const typRow = vv('account_type', x.typ || typForm)
-        const name = kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typRow, '')
+        // T5C (25.11.2026): Schablone mit Namens-Variante (The5%ers „Classic") → Add-on im Namen, daran erkennt der Planer Phase 1 = 10 %
+        const name = kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typRow, (typeof window._kontoVorlageZusatz === 'function' && window._kontoVorlageZusatz(v)) || '')
         const row = {
           user_id: currentUserId, name, firm, account_type: typRow,
           external_id: x.id, account_size: gr, starting_balance: gr,
@@ -87212,13 +87213,22 @@
     if(!gr) return null
     const n = (liste || []).filter(v => String(v.firm || '').trim().toLowerCase() === firma && (!z.typ || v.account_type === z.typ)
       && Number(v.account_size || v.starting_balance) === gr)
-    return n.length > 1 ? n.map(v => v.name || v.firm) : null
+    // T5C (25.11.2026): The5%ers New/Classic — Phase 2 und Funded haben je Größe zwei Schablonen mit GLEICHEN Werten (Ziel 5 %, Funded gleich), da entscheidet
+    // nichts → nicht mehrdeutig (erste = New). Phase 1 (8 % vs. 10 %, anderer Kaufpreis) bleibt mehrdeutig → ein Mensch wählt im Modal.
+    const sig = v => [v.purchase_cost, v.max_drawdown, v.max_daily_drawdown, v.consistency_pct, v.goal_kind, v.goal_target, kontoVorlageZusatz(v) && z.typ === 'phase1' ? 'v' : ''].map(x => x == null ? '' : String(Number(x) || x)).join('|')
+    return n.length > 1 && new Set(n.map(sig)).size > 1 ? n.map(v => v.name || v.firm) : null
   }
+  /* T5C (Finn 25.11.2026): Namens-Variante einer Schablone → Add-on im Kontonamen (kontoNameRegel-Zusatz). The5%ers „Classic" (Phase 1 10 %) unterscheidet sich
+   * am Konto nur über den Namen (gleiche Größe, gleicher Max DD) — der Planer liest „Classic" aus dem Namen (app.py ap_konto_variante). Sonst ''. */
+  function kontoVorlageZusatz(v){
+    return v && /(^|[^a-z0-9])classic([^a-z0-9]|$)/i.test(String(v.name || '')) ? 'Classic' : ''
+  }
+  window._kontoVorlageZusatz = v => kontoVorlageZusatz(v)   // Test-Haken
   window._kontoVorlagenMehrdeutig = (z, liste) => kontoVorlagenMehrdeutig(z, liste)   // Test-Haken
   async function kontoSchabloneEintragen(z, E){
     const _liste = await kontoVorlagenLaden(), _mehr = kontoVorlagenMehrdeutig(z, _liste)
     if(_mehr){   // nichts vorbelegen: der Max DD entscheidet Standard/Nano — Hinweis statt einer zufälligen Schablone
-      if(E.modal?.classList.contains('open') && E.msg && !E.msg.textContent){ E.msg.textContent = `Mehrere Schablonen passen (${_mehr.join(' · ')}) — Kaufpreis und Max Drawdown bitte selbst eintragen.`; E.msg.className = 'modal-msg muted' }
+      if(E.modal?.classList.contains('open') && E.msg && !E.msg.textContent){ E.msg.textContent = `Mehrere Schablonen passen (${_mehr.join(' · ')}) — Kaufpreis und Max Drawdown bitte selbst eintragen${_mehr.some(n => /classic/i.test(n)) ? '; bei Classic im Feld Add-on „Classic" eintragen (Phase 1 = 10 %)' : ''}.`; E.msg.className = 'modal-msg muted' }
       return
     }
     const v = kontoVorlageFinden(z, _liste)
@@ -87229,6 +87239,7 @@
     if(leer(E.groesse) && Number(v.account_size)) { E.groesse.value = Number(v.account_size) / 1000; if(typeof acNameVorschlag === 'function') acNameVorschlag() }
     if(v.consistency_pct != null && E.cons && !E.cons.value && typeof accConsSetzen === 'function') accConsSetzen(E.cons, E.consFrei, v.consistency_pct)
     if(v.goal_kind && E.goalKind && !E.goalKind.value){ E.goalKind.value = v.goal_kind; if(E.goalTarget && !E.goalTarget.value && v.goal_target) E.goalTarget.value = v.goal_target }
+    if(E.zusatz && !String(E.zusatz.value || '').trim() && kontoVorlageZusatz(v)){ E.zusatz.value = kontoVorlageZusatz(v); if(typeof acNameVorschlag === 'function') acNameVorschlag() }   // T5C
     if(E.msg && !E.msg.textContent) { E.msg.textContent = `Schablone „${v.name}" eingetragen — prüfen, dann Hinzufügen.`; E.msg.className = 'modal-msg muted' }
   }
   window._admKontoMailOeffnen = () => admKontoMailLaden()
@@ -87415,7 +87426,7 @@
     const uid = fremd ? fremd.uid : String(currentUserId || ''); if(!uid) return 'modal'
     const fuer = fremd || { uid, name: 'die eingeloggte ID', tvName: (z.quellen || []).includes('TV') ? String((z.tv && z.tv.name) || z.ext) : '', ext: z.ext }
     const zahl = x => x != null && isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null
-    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, ''), firm: z.firma, type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
+    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v)), firm: z.firma,   // T5C: Classic-Schablone → „ · Classic" type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
       maxDrawdown: zahl(v.max_drawdown), maxRisikoTrade: null, autoPlaner: true, goalKind: v.goal_kind || null, goalTarget: v.goal_kind ? Number(v.goal_target) : null }
     let d = null
     try{ d = await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct), true) }
