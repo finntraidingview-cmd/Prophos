@@ -10640,7 +10640,7 @@ def _mp_alle_antwort():
         ziele, _m, _e, bereit = _vorrat_tabellen()
         if not bereit:
             return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
-        erg = vorrat2_rechnen_lauf("hand")
+        erg = vorrat2_rechnen_lauf("hand", alle_unternehmen=False)   # KP6: „Alle" bleibt die Sicht der Anfrage (Finn HT, Emin seine Gruppe)
         je_uid = {}
         for z in erg.get("zellen") or []:
             je_uid.setdefault(str(z.get("user_id")), []).append(z)
@@ -12217,10 +12217,42 @@ def _vorrat2_bestellungen():
         raise
 
 
-def vorrat2_rechnen_lauf(quelle, nur_uid=None):
+def vorrat_unternehmen_karte(daten):
+    """REIN RECHNEND (KP6): {user_id: gruppe_id} für alle IDs der Gruppen MIT Verwalter (Mitglieder + Verwalter, wie _admin_verwalter_gruppen_ids) —
+    jede andere ID ist Hermann Technologies."""
+    daten = daten or {}
+    mit_v = {str(x.get("id")): str(x.get("verwalter_id")) for x in daten.get("gruppen") or () if x.get("verwalter_id")}
+    karte = {v: gid for gid, v in mit_v.items()}
+    for m in daten.get("mitglieder") or ():
+        if str(m.get("gruppe_id")) in mit_v:
+            karte[str(m.get("user_id"))] = str(m.get("gruppe_id"))
+    return karte
+
+
+def vorrat_lauf_aus_ids(names, exclude_mails, unternehmen):
+    """REIN RECHNEND (KP6, Finn 25.11.2026: „Ist der Einkaufszettel bei Emin-IDs auch live?"): IDs, die der Vorrat-Lauf über ALLE Unternehmen
+    auslässt — die ADMIN_EXCLUDE-Mails, außer die ID gehört zu einer Gruppe mit Verwalter (Emin selbst ist Verwalter seiner Gruppe und hat eigene
+    Konten, Ziele und Kaufliste). Die Standard-Sicht „nur HT" (_admin_standard_aus) gilt für den Lauf NICHT mehr — sie ist eine Anzeige-Sicht."""
+    mails = {str(m).strip().lower() for m in exclude_mails or ()}
+    return {str(u) for u, m in (names or {}).items() if str(m).strip().lower() in mails and str(u) not in (unternehmen or {})}
+
+
+def vorrat_zellen_trennen(zellen):
+    """REIN RECHNEND (KP6): (zellen_ht, zellen_gruppen) — Zellen mit z['unternehmen'] (Gruppe mit Verwalter) getrennt von Hermann Technologies.
+    HT-Zahlen (Gesamt-Score, Trend, KI-Bot, Tagesliste) rechnen weiter NUR mit zellen_ht (Memory „Zwei Unternehmen getrennt")."""
+    ht, gr = [], []
+    for z in zellen or ():
+        (gr if z.get("unternehmen") else ht).append(z)
+    return ht, gr
+
+
+def vorrat2_rechnen_lauf(quelle, nur_uid=None, alle_unternehmen=True):
     """Ein Lauf: Daten holen, je freier Zelle rechnen, Totband gegen den letzten Lauf, Ergebnis in vorrat_lauf. → Lauf-Zeile.
     nur_uid (Muster-Portfolio 16.10.2026): nur die Zellen dieser einen ID, ohne die ohne_ids-Liste der Vorrat-Seite — der Tacho gilt
-    für jede ID (Finn: „jedes Portfolio orientiert sich daran"), auch für die, die aus der Kauf-Rechnung raus sind. Schreibt nichts."""
+    für jede ID (Finn: „jedes Portfolio orientiert sich daran"), auch für die, die aus der Kauf-Rechnung raus sind. Schreibt nichts.
+    KP6 (25.11.2026): alle_unternehmen=True (Takt, Hand-Lauf, Muster-Portfolio je ID) rechnet ALLE IDs — auch die Gruppen mit Verwalter (Emin) mit
+    ihren Gruppen-Zielen (KP3) — unabhängig von der Sicht der Anfrage; ohne nur_uid landen deren Zellen getrennt in zellen_gruppen (HT-Zahlen bleiben
+    unvermischt). alle_unternehmen=False (Muster-Portfolio „Alle" je Sicht): wie bisher nur die IDs der Sicht der Anfrage, alles in zellen."""
     jetzt = datetime.now(timezone.utc)
     jetzt_iso = jetzt.isoformat()
     firmen_regeln, param, ohne_ids, bereit = _vorrat2_tabellen()
@@ -12228,7 +12260,12 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
         raise RuntimeError(f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
     b = _admin_basis()
     accounts, archived, arch_info = b["accounts"], b["archived"], b.get("arch_info") or {}
-    excluded_ids = b["excluded_ids"] | (set() if nur_uid else ohne_ids)
+    if alle_unternehmen:
+        unternehmen = vorrat_unternehmen_karte(admin_gruppen_daten())   # Fehler fliegt (lieber kein Lauf als Emin-Zahlen bei HT)
+        excluded_ids = vorrat_lauf_aus_ids(b["names"], ADMIN_EXCLUDE_EMAILS, unternehmen) | (set() if nur_uid else ohne_ids)
+    else:
+        unternehmen = {}
+        excluded_ids = b["excluded_ids"] | (set() if nur_uid else ohne_ids)
     ziele, matrix, ein, _ = _vorrat_tabellen()
     try:
         ziele_ext = {_firm_norm(z.get("firma")): z for z in sb_select("vorrat_ziele", {"select": "firma,kauf_groesse"})}
@@ -12314,7 +12351,8 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
                or [{}])[0]
     except requests.exceptions.HTTPError:
         alt = {}
-    vorher = {(z.get("user_id"), z.get("firma")): z.get("totband") for z in ((alt.get("ergebnis") or {}).get("zellen") or [])}
+    vorher = {(z.get("user_id"), z.get("firma")): z.get("totband")
+              for z in ((alt.get("ergebnis") or {}).get("zellen") or []) + ((alt.get("ergebnis") or {}).get("zellen_gruppen") or [])}   # KP6
     bestellungen = _vorrat2_bestellungen()
     fn_ok = _vorrat2_fn_payout_uids() if "FundedNext Futures" in ziele else set()
     zellen = []
@@ -12354,9 +12392,14 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             z["fakten_text"] = vorrat_fakten_text(z, name, f, ziel_u, status)
             if ug.get(uid):
                 z["gruppe_id"] = ug[uid]                             # KP3: Zelle rechnet mit Gruppen-Zielen (Anzeige/Test)
+            if unternehmen.get(uid):
+                z["unternehmen"] = unternehmen[uid]                  # KP6: Gruppe mit Verwalter (Emin) — nie in HT-Zahlen
             zellen.append(z)
     _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
-    return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "gesamt_score": vorrat_gesamt(zellen)["score"], "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
+    # KP6: Gruppen-Zellen getrennt ablegen (außer beim Muster-Portfolio einer ID) — zellen bleibt Hermann Technologies wie bisher
+    zellen_ht, zellen_gr = (zellen, []) if (nur_uid or not alle_unternehmen) else vorrat_zellen_trennen(zellen)
+    return {"zellen": zellen_ht, "zellen_gruppen": zellen_gr, "stand": VORRAT2_RECHEN_STAND, "gesamt_score": vorrat_gesamt(zellen_ht)["score"],
+            "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
             "parameter": param, "gerechnet_um": jetzt_iso, "naechster_lauf": naechster.isoformat(), "quelle": quelle}
 
 
@@ -12503,7 +12546,8 @@ def vorrat2_anhaengen(erg1):
             ki_aktiv = False
     jetzt_iso = _wt_now_iso()
     bestellungen = _vorrat2_bestellungen()
-    z2 = {(z.get("user_id"), z.get("firma")): z for z in (e2.get("zellen") or [])}
+    # KP6: Zellen beider Unternehmen nachschlagen — welche erg1 zeigt, entscheidet die Sicht der Anfrage (HT-Standard, Emin-Verwalter, eigene ID)
+    z2 = {(z.get("user_id"), z.get("firma")): z for z in (e2.get("zellen") or []) + (e2.get("zellen_gruppen") or [])}
     stufen_skala = {d["wert"]: d for d in VORRAT2_DRINGLICHKEITEN}
     for z in erg1.get("zellen") or []:
         s = z2.get((z["user_id"], z["firma"]))

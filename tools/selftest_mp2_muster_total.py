@@ -47,7 +47,7 @@ check(f5["soll"] == 9 and f5["gesichert"] == 4 and f5["gesichert_pct"] == 44.4 a
 check(f5["fortschritt_pct"] >= f5["gesichert_pct"], "7 Fortschritt nie unter gesichert (ID ohne fortschritt zählt mit gesichert_pct)")
 check([f["firma"] for f in S(daten)] == ["Tradeify", "Topstep", "The5%ers"], "8 Reihenfolge wie die Ziele (reihe)")
 check(S({}) == [], "9 leer → []")
-check('if request.args.get("alle") == "1":\n        return _mp_alle_antwort()' in app and 'erg = vorrat2_rechnen_lauf("hand")' in app, "10 ?alle=1 → ein Lauf über alle IDs der Sicht")
+check('if request.args.get("alle") == "1":\n        return _mp_alle_antwort()' in app and 'erg = vorrat2_rechnen_lauf("hand", alle_unternehmen=False)' in app, "10 ?alle=1 → ein Lauf über alle IDs der Sicht (KP6: Sicht der Anfrage, nicht alle Unternehmen)")
 check('k[0] == "__alle__"' in app, "11 Sperre umschalten leert auch den Total-Merker")
 check("alle=1&ansicht=admin" in html and 'id="mp-total"' in html, "12 Frontend: Total-Karte unter Admin → Alle Accounts lädt ?alle=1")
 
