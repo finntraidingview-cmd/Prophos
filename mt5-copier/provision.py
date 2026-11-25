@@ -46,6 +46,35 @@ NAME_RE = re.compile(r"[A-Za-z0-9]{1,24}")
 EA_NAME = "ProphosHedgeReader"
 MAGIC_BASE = 770000
 STARTUP_SYMBOL = "EURUSD"   # existiert bei allen relevanten Brokern
+# GT3 (25.11.2026, Goat Funded Trader): Broker mit Symbol-Endung („NAS100.x“, also auch „EURUSD.x“) haben KEIN „EURUSD“ — das [StartUp]-Chart ging
+# nicht auf, das Lese-EA nie, kein Snapshot → Provisionierung brach ab (Kill + Neustart, Finn: „loggt nach ein paar Minuten aus“), keine Config.
+# Start-Symbol je Firma: das Firmen-Symbol aus firm_specs (vom Tab mitgeschickt) → Kandidaten EURUSD+Endung, dann das Firmen-Symbol selbst.
+# Ohne Endung (NAS100, TECH100, MNQ, leer — alle Firmen bis heute) bleibt es bei EURUSD, bitgleich.
+_SYMBOL_OK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._#+!\-]{0,31}$")
+_SYMBOL_ENDUNG_RE = re.compile(r"^[A-Za-z0-9]+([._#][A-Za-z0-9._#+!\-]*)$")
+
+
+def symbol_endung(symbol):
+    """REIN (testbar, GT3): Endung eines Broker-Symbols ab dem ersten '.', '_' oder '#' („NAS100.x“ → „.x“), sonst ''."""
+    s = str(symbol or "").strip()
+    m = _SYMBOL_ENDUNG_RE.match(s) if _SYMBOL_OK_RE.match(s) else None
+    return m.group(1) if m else ""
+
+
+def startup_symbole(firmen_symbol):
+    """REIN (testbar, GT3): Start-Symbole für das [StartUp]-Chart in Reihenfolge. Ohne Endung → [EURUSD] (wie bisher);
+    mit Endung → [EURUSD<Endung>, Firmen-Symbol] (GFT: EURUSD.x, NAS100.x). Ungültiges Zeichen → wie ohne Endung."""
+    s = str(firmen_symbol or "").strip()
+    e = symbol_endung(s)
+    if not e:
+        return [STARTUP_SYMBOL]
+    return list(dict.fromkeys([STARTUP_SYMBOL + e, s]))
+
+
+def startup_symbol_cfg(cfg):
+    """GT3: Start-Symbol einer Instanz-Config (Feld startup_symbol, von der Provisionierung geschrieben), sonst EURUSD."""
+    s = str((cfg or {}).get("startup_symbol") or "").strip()
+    return s if _SYMBOL_OK_RE.match(s) else STARTUP_SYMBOL
 STARTUP_PERIOD = "H1"
 # Kodierung der selbst geschriebenen Startdateien: SCHLICHTER ASCII-TEXT.
 # Erster Live-Test 14.08.2026: mit UTF-16 (BOM) hat das Terminal die /config-ini
@@ -960,7 +989,7 @@ def mt5_updates_einspielen(ausstehend=None, max_s=420):
 
 def run_provision(*, name, login, password, server, template_exe,
                   folder=HERE, report=lambda step, state, note=None: None,
-                  owner=None, display=None, magic_base=MAGIC_BASE):
+                  owner=None, display=None, magic_base=MAGIC_BASE, startup_symbols=None):
     """Fuehrt die komplette Provisionierung aus. `report(step, state, note)`
     meldet Fortschritt ans Panel ('running' | 'done' | 'error').
 
@@ -1145,10 +1174,13 @@ def run_provision(*, name, login, password, server, template_exe,
         except OSError:
             return False
 
+    # GT3: Start-Symbole je Firma (Tab → Panel); ohne Angabe genau EURUSD wie bisher. symbol_ok = das Symbol, mit dem der Snapshot kam
+    sym_liste = [s for s in (startup_symbols or []) if _SYMBOL_OK_RE.match(str(s or ""))] or [STARTUP_SYMBOL]
+    symbol_ok = sym_liste[0]
     try:
         with open(start_ini, "w", encoding=INI_ENCODING) as f:
             f.write(build_login_ini(login, password, server) + "\n"
-                    + build_startup_ini(preset=preset_name))
+                    + build_startup_ini(symbol=sym_liste[0], preset=preset_name))
         subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
         # Erst den Login im Journal verifizieren. Beim ERSTEN Konto eines neuen
         # Brokers kann die Startdatei den Servernamen nicht aufloesen — MT5
@@ -1195,7 +1227,7 @@ def run_provision(*, name, login, password, server, template_exe,
                 jbase = journal_baseline(new_data)
                 with open(start_ini, "w", encoding=INI_ENCODING) as f:
                     f.write(build_login_ini(login, password, server) + "\n"
-                            + build_startup_ini(preset=preset_name))
+                            + build_startup_ini(symbol=sym_liste[0], preset=preset_name))
                 subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
                 t0 = time.time()  # Wartefenster fuer die Variante neu starten
                 hinted = False
@@ -1215,17 +1247,28 @@ def run_provision(*, name, login, password, server, template_exe,
             # sich beim Einrichten per LiveUpdate selbst neu gestartet ("full
             # recompilation has been started" im Journal) und den [StartUp]-EA
             # dabei verworfen ("loaded successfully" → "removed"). Heilung:
-            # Terminal neu starten und den EA ein zweites Mal aufziehen — die
-            # Retry-ini enthaelt KEIN Passwort, der Login ist schon gespeichert.
-            report("neustart", "running", "EA fehlt (Terminal-Update?) — zweiter Anlauf")
-            _kill_terminal_at(target_install)
-            with open(retry_ini, "w", encoding=INI_ENCODING) as f:
-                f.write(build_startup_ini(preset=preset_name))
-            subprocess.Popen([target_exe, f"/config:{retry_ini}"], cwd=target_install)
-            if not _wait_snapshot(90):
+            # Terminal neu starten und den EA ein zweites Mal aufziehen.
+            # GT3 (25.11.2026): die Retry-ini traegt den Login MIT Passwort (wie die Start-ini, wird im finally geloescht) — vorher ohne:
+            # war das Passwort beim Hand-Login im Dialog nicht gespeichert, stand das Terminal nach dem Kill ausgeloggt da (GFT, Finn:
+            # „loggt nach ein paar Minuten aus“). Dazu je weiterem Start-Symbol ein Anlauf (GFT: EURUSD.x, dann NAS100.x); ohne weiteres
+            # Symbol genau ein zweiter Anlauf mit demselben wie bisher.
+            weiter = sym_liste[1:] or [sym_liste[0]]
+            geschafft = False
+            for i, sym in enumerate(weiter, 1):
+                report("neustart", "running", f"EA fehlt (Terminal-Update/Chart {symbol_ok} fehlt?) — Anlauf {i + 1} mit Chart {sym}")
+                _kill_terminal_at(target_install)
+                with open(retry_ini, "w", encoding=INI_ENCODING) as f:
+                    f.write(build_login_ini(login, password, server) + "\n"
+                            + build_startup_ini(symbol=sym, preset=preset_name))
+                subprocess.Popen([target_exe, f"/config:{retry_ini}"], cwd=target_install)
+                if _wait_snapshot(90):
+                    symbol_ok, geschafft = sym, True
+                    break
+            if not geschafft:
                 raise ProvisionError(
                     f"Login ok, aber Snapshot {ident['snapshot']} kam auch im zweiten "
-                    f"Anlauf nicht — im neuen Terminal Reiter 'Experten' pruefen. "
+                    f"Anlauf nicht — im neuen Terminal Reiter 'Experten' pruefen "
+                    f"(Chart {' / '.join(dict.fromkeys(sym_liste))} in der Marktuebersicht?). "
                     f"Journal: {_journal_tail(new_data, jbase)}")
     finally:
         for p in (start_ini, retry_ini):
@@ -1284,6 +1327,9 @@ def run_provision(*, name, login, password, server, template_exe,
     # Anzeigename mit Leerzeichen (15.08.2026) — intern laeuft ueberall der Slug
     if display:
         cfg["display_name"] = display
+    # GT3: Start-Symbol merken, mit dem das EA lief — die Heilung (panel.py) zieht das EA darauf wieder auf; EURUSD = kein Feld (bitgleich)
+    if symbol_ok != STARTUP_SYMBOL:
+        cfg["startup_symbol"] = symbol_ok
     cfg_path = os.path.join(folder, f"config-{name}.json")
     tmp = cfg_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

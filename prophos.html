@@ -52779,6 +52779,7 @@
     const slug = display.replace(/[^A-Za-z0-9]/g, '').slice(0, 24) || ('mt5' + login.slice(-6))
     const body = { name: slug, display, login, password: acc.creds.password, server: String(acc.creds.server) }
     if(typeof currentUserId !== 'undefined' && currentUserId) body.owner = String(currentUserId)
+    const _ss = mt5StartSymbol(acc.firm, acc.creds.server); if(_ss) body.startup_symbol = _ss   // GT3: GFT „NAS100.x“ → Start-Chart EURUSD.x
     const d = await window.mtcApi('provision', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if(!d.ok) return { error: String(d.msg || d.error || 'Fehler') }
@@ -52789,6 +52790,17 @@
     return { ok: true }
   }
   window._mt5CreateAccountInCopier = mt5CreateAccountInCopier
+  /* GT3 (25.11.2026, Goat Funded Trader): Firmen-Symbol aus den Firmen-Einstellungen (firm_specs.symbol) für das Start-Chart der Echo-Einrichtung —
+   * das Panel nimmt EURUSD + Endung des Symbols (NAS100.x → EURUSD.x, dann NAS100.x). Erst nach Firmenname, sonst nach Server. Ohne Symbol → ''
+   * (Panel bleibt bei EURUSD, wie bisher). */
+  function mt5StartSymbol(firma, server){
+    let liste = []; try{ liste = (typeof window._getCustomFirms === 'function' ? window._getCustomFirms() : []) || [] }catch(_){ liste = [] }
+    const n = s => String(s || '').trim().toLowerCase()
+    const f = liste.find(x => x && n(x.name) && n(x.name) === n(firma)) || (n(server) ? liste.find(x => x && n(x.server) === n(server)) : null)
+    const s = String((f && f.symbol) || '').trim()
+    return /^[A-Za-z0-9][A-Za-z0-9._#+!-]{0,31}$/.test(s) ? s : ''
+  }
+  window._mt5StartSymbol = (firma, server) => mt5StartSymbol(firma, server)   // auch für „Echo hinzufügen“ von Hand + Test-Haken
 
   /* ECHO NACH DER BULK-ANLAGE (03.10.2026, Finn: „von jedem einzelnen die Login-Daten eintragen und dann automatisch direkt in Echo
    * verbunden"). Das Panel richtet nur EIN Terminal gleichzeitig ein (prov_start: „läuft schon") → nacheinander, je Konto auf das
@@ -56130,6 +56142,7 @@
     { name:'Tradeify CFD',  symbol:'NAS100', unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NAS100', server:'TradeifyVenturesFX-Server' }
   ]
   function getCustomFirms(){ return customFirms }
+  window._getCustomFirms = () => getCustomFirms()   // GT3: Start-Chart-Symbol der Echo-Einrichtung (mt5StartSymbol)
   function rowToFirmSpec(row){
     return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'', server: row.server||'', tvUsername: row.tv_username||'' }
   }
@@ -62431,7 +62444,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2349'
+  const OS_TAB_BUILD = '2026-09-22.2350'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -92216,6 +92229,8 @@
     if(!body.name){
       msg.className = 'mtc-msg err'; msg.textContent = 'Name braucht mindestens einen Buchstaben/eine Zahl.'; return }
     msg.className = 'mtc-msg'; msg.textContent = 'starte…'
+    // GT3: Start-Chart je Firma — Firma des vorbefüllten Kontos, sonst über den Server (GFT: NAS100.x → EURUSD.x)
+    try{ const _pa = (accounts || []).find(x => prefillSel && String(x.id) === prefillSel.value); const _ss = window._mt5StartSymbol?.(_pa && _pa.firm, body.server); if(_ss) body.startup_symbol = _ss }catch(_){}
     const d = await mtcApi('provision', { method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     // Passwort bleibt STEHEN (Finns Wunsch 15.08.2026) — geleert wird erst

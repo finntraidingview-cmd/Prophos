@@ -2718,7 +2718,7 @@ PROV_LOCK = threading.Lock()
 PROV_JOB = None  # {"name", "steps": {key: {"state", "note"}}, "error", "done"}
 
 
-def prov_start(name, login, password, server, owner=None, display=None):
+def prov_start(name, login, password, server, owner=None, display=None, firmen_symbol=None):
     global PROV_JOB
     with PROV_LOCK:
         if PROV_JOB and not PROV_JOB.get("done"):
@@ -2765,8 +2765,10 @@ def prov_start(name, login, password, server, owner=None, display=None):
                         print(f"[mt5-build] Vorlage: {_txt}", flush=True)
                 except Exception:
                     pass
+            # GT3 (25.11.2026): Start-Chart je Firma (GFT „NAS100.x“ → EURUSD.x, NAS100.x); ohne Firmen-Symbol EURUSD wie bisher
+            _sk = {"startup_symbols": provision.startup_symbole(firmen_symbol)} if firmen_symbol and hasattr(provision, "startup_symbole") else {}
             provision.run_provision(name=name, login=login, password=password,
-                                    server=server, template_exe=template,
+                                    server=server, template_exe=template, **_sk,
                                     folder=HERE, report=report, owner=owner, display=display,
                                     magic_base=magic_base)
         except provision.ProvisionError as e:
@@ -5750,7 +5752,7 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
         f.write(provision.build_preset(snap))
     ini = os.path.join(install_dir, "prophos-heal.ini")
     with open(ini, "w", encoding=provision.INI_ENCODING) as f:
-        f.write(provision.build_startup_ini(preset=preset))
+        f.write(provision.build_startup_ini(symbol=_startup_symbol(cfg), preset=preset))   # GT3: Chart je Firma (GFT EURUSD.x)
     try:
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe"),
                           f"/config:{ini}"], cwd=install_dir)
@@ -6031,7 +6033,14 @@ def _startup_attach_part(fname, cfg, install_dir):
     with open(os.path.join(data_dir, "MQL5", "Presets", preset), "w",
               encoding=provision.SET_ENCODING) as f:
         f.write(provision.build_preset(snapf))
-    return "\n" + provision.build_startup_ini(preset=preset)
+    return "\n" + provision.build_startup_ini(symbol=_startup_symbol(cfg), preset=preset)   # GT3: Chart je Firma (GFT EURUSD.x)
+
+
+def _startup_symbol(cfg):
+    """GT3 (25.11.2026): Start-Chart-Symbol der Instanz (config startup_symbol, von der Provisionierung geschrieben), sonst EURUSD wie bisher.
+    Älteres provision.py ohne den Helfer (Selbst-Update in anderer Reihenfolge) → EURUSD."""
+    f = getattr(provision, "startup_symbol_cfg", None)
+    return f(cfg) if f else provision.STARTUP_SYMBOL
 
 
 def hedge_null_urteil(volumen, multiplier, m_cs, hs):
@@ -7762,7 +7771,11 @@ class Handler(BaseHTTPRequestHandler):
                                           base_config().get("master_terminal_path"))
             if probs:
                 return self._send(400, json.dumps({"ok": False, "msg": " · ".join(probs)}, ensure_ascii=False))
-            ok, msg = prov_start(name, login, password, server, owner=owner, display=display)
+            # GT3 (25.11.2026): Firmen-Symbol aus firm_specs (Tab) — nur Symbol-Zeichen, sonst verworfen (dann EURUSD wie bisher)
+            fsym = str(body.get("startup_symbol") or "").strip()[:32]
+            if fsym and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._#+!\-]{0,31}", fsym):
+                fsym = None
+            ok, msg = prov_start(name, login, password, server, owner=owner, display=display, firmen_symbol=fsym or None)
             print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
