@@ -31368,6 +31368,8 @@
    * mit knopf (gruen „✓ Gekauft · Prüfung 14:37" · laeuft „läuft …" · fertig „angelegt: …1234" · ruhig „mehr gefunden · von Hand" · warn 🟠).
    * Den Lauf selbst macht der bestehende tvkTick oben (Puls liest nur); anlegen tut Railway (nur Challenge-Nummern, nie Funded/Nachfolger).
    * Nach jedem Lauf/Klick ruft dieser Block window.pa1Neu() (Haken der Kaufliste zum Neu-Zeichnen), falls es ihn gibt.
+   * PA1b: je ID × Firma EIN Auftrag — weitere Klicks (auch andere Vorlage) addieren in auftrag.posten [{vorlage_id, anzahl}] und behalten die
+   * Prüfzeit; alle zugehörigen Knöpfe zeigen dieselbe knopf.text. Mehrfachauswahl = ein Aufruf mit anzahl n.
    * pa1NachfolgerHinweis(acc): im Nachfolger-Assistenten ruhig „Nachfolger-Nummer gesehen: …1234" (GET /konto-suche/nachfolger) — Klick setzt
    * die Nummer ins Feld External ID, nichts wird angelegt. ══ */
   async function pa1Fetch(pfad, opt){

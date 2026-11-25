@@ -16,7 +16,8 @@ alter table public.tv_konten_auftrag add constraint tv_konten_auftrag_status_che
 
 alter table public.tv_konten_auftrag add column if not exists anzahl      integer check (anzahl is null or anzahl between 1 and 20);  -- gekauft (Stück)
 alter table public.tv_konten_auftrag add column if not exists vorlage_id  uuid;                                       -- bulk_vorlagen.id
-alter table public.tv_konten_auftrag add column if not exists angelegt    jsonb not null default '[]'::jsonb;        -- [{id, ext, name}]
+alter table public.tv_konten_auftrag add column if not exists posten      jsonb;                                      -- PA1b: [{vorlage_id, anzahl, at}] — mehrere Klicks = EINE Prüfung
+alter table public.tv_konten_auftrag add column if not exists angelegt   jsonb not null default '[]'::jsonb;        -- [{id, ext, name}]
 alter table public.tv_konten_auftrag add column if not exists frist_bis   timestamptz;                                -- Klick + 24 h, danach 🟠
 alter table public.tv_konten_auftrag add column if not exists erstellt_von uuid;                                      -- Login, der „Gekauft" drückte
 
@@ -39,9 +40,9 @@ commit;
 
 -- Prüfung:
 --   select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.tv_konten_auftrag'::regclass and contype = 'c';
---   select column_name from information_schema.columns where table_name = 'tv_konten_auftrag' and column_name in ('anzahl','vorlage_id','angelegt','kandidaten','frist_bis','erstellt_von');
+--   select column_name from information_schema.columns where table_name = 'tv_konten_auftrag' and column_name in ('anzahl','vorlage_id','posten','angelegt','frist_bis','erstellt_von');
 --   select count(*) from public.konto_suche_riegel;
 -- Zurück (nur wenn keine Zeile art 'gekauft'/status 'pruefen' mehr existiert):
 --   drop table public.konto_suche_riegel;
---   alter table public.tv_konten_auftrag drop column anzahl, drop column vorlage_id, drop column angelegt, drop column kandidaten, drop column frist_bis, drop column erstellt_von;
+--   alter table public.tv_konten_auftrag drop column anzahl, drop column vorlage_id, drop column posten, drop column angelegt, drop column frist_bis, drop column erstellt_von;
 --   (Checks wie in sql/2026-10-29_tv_konten.sql)

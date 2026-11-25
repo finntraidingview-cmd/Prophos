@@ -25821,7 +25821,11 @@ def pc_tv_konten_auftrag_erledigt():
             # Fehlversuch (Master 29.10.2026): höchstens EINMAL nach 30–60 min (gestreut) neu, dann „fehler" mit Grund — kein Dauer-Retry
             alt = (sb_select("tv_konten_auftrag", {"select": "versuche", "id": f"eq.{aid}", "user_id": f"eq.{uid}"}) or [{}])[0]
             body = tv_auftrag_nach_fehler(int(alt.get("versuche") or 0), datetime.now(timezone.utc), random.random(), erg)
-        sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"}, body)
+        # Guard auch auf die Art (PA1b-Review): drückt Finn genau jetzt „Gekauft", wird der laufende Mail-Auftrag zum Kauf-Auftrag — der darf
+        # dann nicht als Mail-Auftrag „erledigt" enden (still nichts angelegt). Stattdessen gleich noch einmal lesen (+1–3 min).
+        if not sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft", "art": f"eq.{a.get('art') or 'mail'}"}, body):
+            sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft", "art": "eq.gekauft"},
+                      {"status": "offen", "laeuft_at": None, "faellig_at": (datetime.now(timezone.utc) + timedelta(seconds=random.randint(60, 180))).isoformat()})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     return jsonify({"ok": True, "n": len(zeilen)})
@@ -26066,6 +26070,83 @@ def pa1_urteil(teile, rest):
     return "ueberzahl" if len(ch) > max(0, int(rest or 0)) else "anlegen"
 
 
+def pa1_posten(a):
+    """REIN RECHNEND (PA1b): Posten eines Auftrags [{vorlage_id, anzahl}] — Spalte posten, sonst (alte Zeile) aus vorlage_id + anzahl."""
+    p = [x for x in ((a or {}).get("posten") or []) if isinstance(x, dict) and x.get("vorlage_id") and int(x.get("anzahl") or 0) > 0]
+    if p:
+        return [dict(x, vorlage_id=str(x["vorlage_id"]), anzahl=int(x["anzahl"])) for x in p]
+    return [{"vorlage_id": str(a.get("vorlage_id")), "anzahl": int(a.get("anzahl") or 1)}] if (a or {}).get("vorlage_id") else []
+
+
+def pa1_posten_plus(posten, vid, n, jetzt_iso=None):
+    """REIN RECHNEND (PA1b, Finn 25.11.2026: 4–5 Tradeify für dieselbe ID → EINE Prüfung): weiterer Klick „Gekauft" → (posten_neu, summe) oder
+    (None, summe_alt), wenn der Deckel PA1_MAX_ANZAHL je Suche überschritten würde. Gleiche Vorlage addiert, andere Vorlage = neuer Posten.
+    at = Zeit des letzten Klicks am Posten (liegt sie nach laeuft_at, prüft der Auftrag direkt nach dem Lauf noch einmal, +1–3 min)."""
+    p = [dict(x) for x in posten or ()]
+    alt = sum(int(x.get("anzahl") or 0) for x in p)
+    if alt + int(n) > PA1_MAX_ANZAHL:
+        return None, alt
+    for x in p:
+        if str(x.get("vorlage_id")) == str(vid):
+            x["anzahl"] = int(x.get("anzahl") or 0) + int(n)
+            break
+    else:
+        x = {"vorlage_id": str(vid), "anzahl": int(n)}
+        p.append(x)
+    if jetzt_iso:
+        x["at"] = jetzt_iso
+    return p, alt + int(n)
+
+
+def pa1_nachgekauft(a):
+    """REIN RECHNEND (PA1b): wurde während des laufenden Lese-Laufs noch „Gekauft" gedrückt (ein Posten-Klick nach laeuft_at)?"""
+    lauf = pa1_iso((a or {}).get("laeuft_at"))
+    return bool(lauf) and any((pa1_iso(x.get("at")) or lauf) > lauf for x in ((a or {}).get("posten") or []) if isinstance(x, dict))
+
+
+def pa1_posten_rest(posten, angelegt, vorlage_alt=None):
+    """REIN RECHNEND: je Posten noch offene Stückzahl → [{vorlage_id, rest}] (angelegt-Einträge ohne vorlage_id zählen zur alten vorlage_id)."""
+    n = {}
+    for x in angelegt or ():
+        if isinstance(x, dict):
+            v = str(x.get("vorlage_id") or vorlage_alt or "")
+            n[v] = n.get(v, 0) + 1
+    return [{"vorlage_id": p["vorlage_id"], "rest": max(0, p["anzahl"] - n.get(p["vorlage_id"], 0))} for p in posten or ()]
+
+
+def pa1_zuordnen(neu, firma, offen):
+    """REIN RECHNEND (PA1b): neue Challenge-Kennungen → Posten. offen = [{vorlage_id, rest, groesse}] (rest > 0 zählt). Je Größe eine Gruppe:
+    Firmen mit Größe in der Kennung (Tradeify/Lucid) ordnen danach zu (andere Größe = anderer Kauf, zählt nicht); sonst muss es genau EINE Größe
+    geben (Apex-5er-Pack …), mehrere → 'groessen' (nichts anlegen, „von Hand"). Mehr Kennungen einer Größe als dort offen → 'ueberzahl'.
+    → (zuordnung [(kennung, vorlage_id)], andere [kennung], urteil 'keine'|'anlegen'|'ueberzahl'|'groessen')."""
+    offen = [o for o in offen or () if int(o.get("rest") or 0) > 0]
+    if not neu:
+        return [], [], "keine"
+    if not offen:
+        return [], [], "ueberzahl"
+    gruppen = {}
+    for o in offen:
+        gruppen.setdefault(_wd_num(o.get("groesse")), []).append(o)
+    mit_groesse = firma in PA1_GROESSE_PRAEFIX
+    if not mit_groesse and len(gruppen) > 1:
+        return [], [], "groessen"
+    je, andere = {}, []
+    for k in neu:
+        # Gruppen mit bekannter Größe zuerst — eine Vorlage ohne Größe passt zu allem und nimmt nur, was sonst nirgends passt (PA1b-Review)
+        g = next((gr for gr in sorted(gruppen, key=lambda x: x is None) if pa1_groesse_passt(k, firma, gr)), "kein") if mit_groesse else next(iter(gruppen))
+        if g == "kein":
+            andere.append(k)
+        else:
+            je.setdefault(g, []).append(k)
+    zu = []
+    for g, ks in je.items():
+        plaetze = [o["vorlage_id"] for o in gruppen[g] for _ in range(int(o["rest"]))]
+        if len(ks) > len(plaetze):
+            return [], andere, "ueberzahl"
+        zu += list(zip(ks, plaetze))
+    return zu, andere, ("anlegen" if zu else "keine")
+
+
 def pa1_offen_bestanden(konten, uid, firma, archiv):
     """REIN RECHNEND: hat die ID × Firma ein Konto mit Ziel erreicht (accounts.ziel_erreicht_at, Ziel-Wache), das noch eine Challenge/Phase ist
     und nicht archiviert — also einen offenen Nachfolger (wie die Gruppe „Bestanden" in /admin/handarbeit)? → Liste dieser Konten."""
@@ -26173,7 +26254,7 @@ def _pa1_archiv(uid):
 
 def _pa1_sql_fehlt(e):
     t = str(getattr(getattr(e, "response", None), "text", "") or e)
-    return any(w in t for w in ("anzahl", "vorlage_id", "angelegt", "frist_bis", "erstellt_von", "konto_suche_riegel", "tv_konten_auftrag_art_check",
+    return any(w in t for w in ("anzahl", "vorlage_id", "posten", "angelegt", "frist_bis", "erstellt_von", "konto_suche_riegel", "tv_konten_auftrag_art_check",
                                 "tv_konten_auftrag_status_check", "PGRST204", "42703", "42P01"))
 
 
@@ -26181,6 +26262,7 @@ def _pa1_aus(a, person=None):
     """Auftragszeile → Antwort für das Frontend (S6-Knopf)."""
     a = dict(a or {})
     return {"id": a.get("id"), "user_id": a.get("user_id"), "person": person, "firma": a.get("firma"), "vorlage_id": a.get("vorlage_id"),
+            "posten": [{"vorlage_id": p["vorlage_id"], "anzahl": p["anzahl"]} for p in pa1_posten(a)],   # PA1b: alle Vorlagen dieser einen Prüfung
             "anzahl": a.get("anzahl"), "angelegt": a.get("angelegt") or [], "status": a.get("status"), "faellig_at": a.get("faellig_at"),
             "frist_bis": a.get("frist_bis"), "created_at": a.get("created_at"), "knopf": pa1_knopf(a)}
 
@@ -26254,9 +26336,12 @@ def _pa1_erledigt(uid, a, b, erg):
     anzahl0 = a.get("anzahl")                       # Guard: ein zweiter Klick während des Laufs erhöht anzahl → nicht mit der alten abschließen
     frist = pa1_iso(a.get("frist_bis")) or (jetzt + timedelta(seconds=PA1_FRIST_S))
     body = None
+    alarm = None                                    # (titel, text) — gesendet erst nach dem greifenden Abschluss-Update
     if b.get("ok"):
         konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at"}) or []   # ALLE IDs (Service-Key), archivierte mit
-        v = (sb_select("bulk_vorlagen", {"select": "*", "id": f"eq.{a.get('vorlage_id')}", "limit": "1"}) or [None])[0]
+        posten = pa1_posten(a)                      # PA1b: alle Vorlagen dieser einen Prüfung
+        vids = sorted({p["vorlage_id"] for p in posten if ADMIN_MAIL_UID_RE.fullmatch(str(p["vorlage_id"]))})
+        vorlagen = {str(x.get("id")): x for x in (sb_select("bulk_vorlagen", {"select": "*", "id": f"in.({','.join(vids)})"}) or [])} if vids else {}
         erstellt = pa1_iso(a.get("created_at")) or jetzt
         vorher, weg = set(), set()
         for r in sb_select("tv_konten", {"select": "name,zuerst_at,ignoriert_at", "user_id": f"eq.{uid}", "limit": "2000"}) or []:
@@ -26274,30 +26359,33 @@ def _pa1_erledigt(uid, a, b, erg):
         # Prophos fehlende Nummer „neu" → dann nichts automatisch anlegen (ruhig „erste Lesung · von Hand"); die Lesung legt die Basis für den nächsten Kauf
         basis = any(pa1_art(k, a.get("firma")) for k in vorher)
         bestanden = pa1_offen_bestanden(konten, uid, a.get("firma"), _pa1_archiv(uid))
-        gr = _wd_num((v or {}).get("starting_balance")) or _wd_num((v or {}).get("account_size"))
-        teile = pa1_neue([n for n in (b.get("konten") or []) if isinstance(n, str)], a.get("firma"), konten, vorher, weg,
-                         offen_bestanden=bool(bestanden), groesse=gr)
-        neu = teile["challenge"]
-        rest = int(a.get("anzahl") or 1) - len(a.get("angelegt") or [])
-        urteil = pa1_urteil(teile, rest)
+        teile = pa1_neue([n for n in (b.get("konten") or []) if isinstance(n, str)], a.get("firma"), konten, vorher, weg, offen_bestanden=bool(bestanden))
+        # Zuordnung zu den Posten (Größe aus der Vorlage; Tradeify/Lucid zusätzlich aus der Kennung) — pa1_zuordnen
+        gr_v = lambda vid: _wd_num((vorlagen.get(vid) or {}).get("starting_balance")) or _wd_num((vorlagen.get(vid) or {}).get("account_size"))   # noqa: E731
+        offen_p = [dict(r, groesse=gr_v(r["vorlage_id"])) for r in pa1_posten_rest(posten, a.get("angelegt"), a.get("vorlage_id"))]
+        zu, andere, urteil = ([], [], "unklar") if teile["unklar"] else pa1_zuordnen(teile["challenge"], a.get("firma"), offen_p)
         if urteil == "anlegen" and not basis:
             urteil = "ohne_basis"
+        neu = [k for k, _vid in zu]
         erg = dict(erg, pa1_neu=neu, pa1_nachfolger=teile["nachfolger"], pa1_funded=teile["funded"], pa1_unklar=teile["unklar"],
-                   pa1_andere_groesse=teile["andere_groesse"], pa1_urteil=urteil)
+                   pa1_andere_groesse=teile["andere_groesse"] + andere, pa1_urteil=urteil)
         if teile["nachfolger"]:   # Funded-Nummer eines bestandenen Kontos: nie ein Kauf — nur gemerkt (Nachfolger-Assistent zeigt sie an)
             print(f"[pa1] {str(uid)[:8]} · {a.get('firma')}: Nachfolger-Nummer(n) gesehen {', '.join(teile['nachfolger'])} — nicht als Kauf gezählt", flush=True)
-        if urteil in ("ueberzahl", "unklar", "ohne_basis"):
+        if urteil in ("ueberzahl", "unklar", "ohne_basis", "groessen"):
             # Finn 25.11.2026 („Wird nicht passieren, einfach auslassen"): nichts anlegen, ruhig am Knopf — kein 🟠, keine Auswahl
             body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
-            erg["pa1_ruhig"] = {"ueberzahl": "mehr gefunden · von Hand", "unklar": "unklare Nummer · von Hand"}.get(urteil, "erste Lesung · von Hand")
+            erg["pa1_ruhig"] = {"ueberzahl": "mehr gefunden · von Hand", "unklar": "unklare Nummer · von Hand",
+                                "groessen": "mehrere Größen · von Hand"}.get(urteil, "erste Lesung · von Hand")
         else:
             if urteil == "anlegen":
-                if not v:
+                if any(vid not in vorlagen for _k, vid in zu):
                     body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
                     erg["pa1"] = "Vorlage nicht mehr da — von Hand anlegen"
-                    _pa1_alarm(dict(a, status="pruefen"), "Vorlage nicht mehr da — nichts angelegt", "Neue Konten: " + ", ".join(neu) + " — bitte von Hand anlegen.")
+                    alarm = ("Vorlage nicht mehr da — nichts angelegt", "Neue Konten: " + ", ".join(neu) + " — bitte von Hand anlegen.")
                 else:
-                    angelegt = _pa1_anlegen(uid, a, neu, v)
+                    angelegt = []
+                    for vid in dict.fromkeys(w for _k, w in zu):   # je Vorlage ihre Kennungen, angelegt merkt die Vorlage (Rest je Posten)
+                        angelegt += [dict(x, vorlage_id=vid) for x in _pa1_anlegen(uid, a, [k for k, w in zu if w == vid], vorlagen[vid])]
                     if angelegt:   # sofort festhalten — unabhängig vom Status-Guard unten (sonst gälten sie beim nächsten Lauf als „bekannt, fehlt")
                         a = dict(a, angelegt=(a.get("angelegt") or []) + angelegt)
                         try:
@@ -26308,41 +26396,43 @@ def _pa1_erledigt(uid, a, b, erg):
                 body = pa1_weiter(a, 0, jetzt)
             if body.get("status") == "pruefen" and "pa1" not in erg and "pa1_ruhig" not in erg:
                 n_ang = len(a.get("angelegt") or [])
-                _pa1_alarm(dict(a, status="pruefen"), f"{n_ang}/{a.get('anzahl')} Konten aufgetaucht — Rest nach 24 h nicht da",
-                           "Bitte prüfen und den Rest von Hand anlegen (Accounts › Kaufliste).")
+                alarm = (f"{n_ang}/{a.get('anzahl')} Konten aufgetaucht — Rest nach 24 h nicht da",
+                         "Bitte prüfen und den Rest von Hand anlegen (Accounts › Kaufliste).")
     elif str(b.get("code") or "") == "belegt":
         # PC gerade belegt — kein Fehlversuch, in 10–30 min erneut; nach der Frist aber Schluss (Review: sonst endlos „Prüfung HH:MM" ohne 🟠)
         if jetzt >= frist:
             body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
             erg = dict(erg, pa1="PC war bis zur Frist belegt — von Hand anlegen")
-            _pa1_alarm(dict(a, status="pruefen"), "PC bis zur Frist belegt — nichts gelesen", "Bitte von Hand anlegen.")
+            alarm = ("PC bis zur Frist belegt — nichts gelesen", "Bitte von Hand anlegen.")
         else:
             body = {"status": "offen", "laeuft_at": None, "faellig_at": min(jetzt + timedelta(seconds=random.randint(600, 1800)), frist).isoformat()}
     else:
         body = pa1_nach_fehler(a, jetzt)
         erg = dict(erg, pa1_fehler=True)
         if body.get("status") == "pruefen":
-            _pa1_alarm(dict(a, status="pruefen"), "Puls konnte die Konto-Liste nicht lesen",
-                       f"{str(b.get('msg') or b.get('code') or '?')[:200]} — bitte von Hand anlegen.")
+            alarm = ("Puls konnte die Konto-Liste nicht lesen", f"{str(b.get('msg') or b.get('code') or '?')[:200]} — bitte von Hand anlegen.")
+    if body.get("status") == "offen" and pa1_nachgekauft(a):
+        # PA1b: während dieses Laufs kam noch „Gekauft" dazu → gleich noch einmal lesen (+1–3 min), nicht erst in 1–3 h
+        body["faellig_at"] = (jetzt + timedelta(seconds=random.randint(60, 180))).isoformat()
     body["ergebnis"] = erg
     body["angelegt"] = a.get("angelegt") or []      # auch im Abschluss (Review: Zwischen-Update kann ausfallen)
     guard = {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft", "anzahl": f"eq.{anzahl0}" if anzahl0 is not None else "is.null"}
     got = sb_update("tv_konten_auftrag", guard, body)
-    if not got and body.get("status") != "offen":
-        # anzahl während des Laufs geändert (zweiter Klick „Gekauft") → nicht abschließen, bald neu prüfen (dann mit der neuen Anzahl)
+    if not got:
+        # anzahl während der Auswertung geändert (Klick „Gekauft") → nie abschließen, direkt danach neu prüfen (+1–3 min, PA1b) — auch bei Teilfund
         sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"},
-                  {"status": "offen", "laeuft_at": None, "faellig_at": pa1_naechste(jetzt, max(frist, jetzt + timedelta(hours=1))).isoformat(),
+                  {"status": "offen", "laeuft_at": None, "faellig_at": (jetzt + timedelta(seconds=random.randint(60, 180))).isoformat(),
                    "angelegt": body["angelegt"], "ergebnis": erg})
         body = dict(body, status="offen")
-    elif not got:
-        sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"}, body)
+    elif alarm and body.get("status") == "pruefen":   # 🟠 erst, wenn der Abschluss wirklich gegriffen hat (PA1b-Review)
+        _pa1_alarm(dict(a, status="pruefen"), *alarm)
     return body
 
 
 @app.route("/konto-suche", methods=["GET", "POST", "OPTIONS"])
 def konto_suche():
-    """POST {user_id?, firma, vorlage_id, anzahl} → {ok, auftrag} | {ok:false, code, msg} (code login_fehlt | firma_nicht | nur_ht | vorlage |
-    anzahl | warten | sql_fehlt). Eigene ID per sb-token, fremde ID mit dem Gate von /admin/konto-anlegen (_konto_ziel_uid).
+    """POST {user_id?, firma, vorlage_id, anzahl} → {ok, auftrag} | {ok:false, code, msg} (code login_fehlt | firma_nicht | vorlage | anzahl |
+    warten (nur nach 6 gleichzeitigen Kollisionen) | sql_fehlt). Weitere Klicks derselben ID × Firma landen im SELBEN Auftrag (PA1b). Eigene ID per sb-token, fremde ID mit dem Gate von /admin/konto-anlegen (_konto_ziel_uid).
     GET [?alle=1] → {ok, auftraege:[…]} — „Gekauft"-Aufträge der letzten 48 h bzw. noch offene/zu prüfende; alle=1 = alle IDs der Admin-Sicht."""
     if request.method == "OPTIONS":
         return "", 200
@@ -26368,31 +26458,51 @@ def konto_suche():
         if not lebt or not str(tvu or "").strip():
             grund = "kein aktives Konto dieser Firma als Login-Weg" if not lebt else "TradingView-Login fehlt in den Firmen-Einstellungen"
             return jsonify({"ok": False, "code": "login_fehlt", "msg": f"Login fehlt → von Hand anlegen ({grund})"})
-        jetzt = datetime.now(timezone.utc)
-        offen = sb_select("tv_konten_auftrag", {"select": "*", "user_id": f"eq.{ziel}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
-        faellig, frist = pa1_klick_zeiten(jetzt)   # werktags 1 min–6 h, CME-Wochenende 1 min–24 h; Frist = erste Prüfung + 24 h (WE 48 h)
-        if offen:
-            o = offen[0]
-            if o.get("art") == "gekauft":
-                if str(o.get("vorlage_id")) != vid:
-                    return jsonify({"ok": False, "code": "warten", "msg": f"Für {firma} läuft schon eine Suche mit einer anderen Vorlage — danach erneut drücken"}), 409
-                # zweiter Kauf derselben Vorlage: Anzahl addiert, Prüfzeit bleibt, Frist reicht mindestens bis zur Frist dieses Klicks
-                neu_n = min(PA1_MAX_ANZAHL, int(o.get("anzahl") or 1) + anzahl)
-                f_alt = pa1_iso(o.get("frist_bis"))
-                got = sb_update("tv_konten_auftrag", {"id": f"eq.{o['id']}", "status": f"eq.{o.get('status')}", "anzahl": f"eq.{o.get('anzahl')}"},   # Doppelklick: nie verlieren
-                                {"anzahl": neu_n, "frist_bis": max(frist, f_alt).isoformat() if f_alt else frist.isoformat()}) or []
-            elif o.get("status") == "offen":   # Mail-/Tages-Auftrag derselben Firma wird zum Kauf-Auftrag (je ID × Firma nur EIN offener)
-                got = sb_update("tv_konten_auftrag", {"id": f"eq.{o['id']}", "status": "eq.offen"},
-                                {"art": "gekauft", "anzahl": anzahl, "vorlage_id": vid, "frist_bis": frist.isoformat(), "erstellt_von": wer,
-                                 "faellig_at": faellig.isoformat(), "versuche": 0}) or []
-            else:
-                return jsonify({"ok": False, "code": "warten", "msg": f"Puls liest gerade die {firma}-Liste — in ein paar Minuten nochmal drücken"}), 409
-            if not got:
-                return jsonify({"ok": False, "code": "warten", "msg": "Auftrag hat sich gerade geändert — nochmal drücken"}), 409
-            a = got[0]
-        else:
-            a = sb_insert("tv_konten_auftrag", {"user_id": ziel, "firma": firma, "art": "gekauft", "anzahl": anzahl, "vorlage_id": vid, "frist_bis": frist.isoformat(),
-                                                "erstellt_von": wer, "faellig_at": faellig.isoformat()})
+        # PA1b (Finn 25.11.2026: „4–5 Tradeify für dieselbe ID … EINE Prüfung: eine Lesung, alle Konten auf einmal, eine Zeit"): je ID × Firma
+        # genau EIN Auftrag. Weitere Klicks (auch andere Vorlage, auch gleichzeitig aus der Kaufliste) erhöhen dessen Posten und behalten die
+        # Prüfzeit; läuft er gerade, merkt er sich den Klick (posten.at > laeuft_at) und prüft direkt nach dem Lauf noch einmal (+1–3 min).
+        # Gleichzeitige Klicks: Guard auf die alte Anzahl bzw. der eindeutige Index beim Insert → neu lesen und wieder versuchen (≤ 6×).
+        a = None
+        for _versuch in range(6):
+            jetzt = datetime.now(timezone.utc)
+            offen = sb_select("tv_konten_auftrag", {"select": "*", "user_id": f"eq.{ziel}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
+            faellig, frist = pa1_klick_zeiten(jetzt)   # werktags 1 min–6 h, CME-Wochenende 1 min–24 h; Frist = erste Prüfung + 24 h (WE 48 h)
+            if offen:
+                o = offen[0]
+                gek = o.get("art") == "gekauft"
+                posten, summe = pa1_posten_plus(pa1_posten(o) if gek else [], vid, anzahl, jetzt.isoformat())
+                if posten is None:
+                    return jsonify({"ok": False, "code": "anzahl", "msg": f"Höchstens {PA1_MAX_ANZAHL} Konten je Suche ({firma}: schon {summe}) — Rest von Hand"}), 400
+                body = {"posten": posten, "anzahl": summe}
+                if gek:   # Prüfzeit bleibt; Frist reicht mindestens bis zur Frist dieses Klicks
+                    f_alt = pa1_iso(o.get("frist_bis"))
+                    body["frist_bis"] = (max(frist, f_alt) if f_alt else frist).isoformat()
+                    if not o.get("vorlage_id"):
+                        body["vorlage_id"] = vid
+                else:     # Mail-/Tages-Auftrag derselben Firma wird zum Kauf-Auftrag (läuft er gerade, gilt das Lese-Ergebnis schon dafür)
+                    body.update(art="gekauft", vorlage_id=vid, erstellt_von=wer, versuche=0,
+                                frist_bis=(frist if o.get("status") == "offen" else jetzt + timedelta(seconds=PA1_FRIST_S)).isoformat())
+                    if o.get("status") == "offen":
+                        body["faellig_at"] = faellig.isoformat()
+                guard = {"id": f"eq.{o['id']}", "status": f"eq.{o.get('status')}", "art": f"eq.{o.get('art')}",
+                         "anzahl": f"eq.{o.get('anzahl')}" if o.get("anzahl") is not None else "is.null"}   # Doppelklick: nie verlieren
+                got = sb_update("tv_konten_auftrag", guard, body) or []
+                if got:
+                    a = got[0]
+                    break
+                continue
+            try:
+                a = sb_insert("tv_konten_auftrag", {"user_id": ziel, "firma": firma, "art": "gekauft", "anzahl": anzahl, "vorlage_id": vid,
+                                                    "posten": [{"vorlage_id": vid, "anzahl": anzahl, "at": jetzt.isoformat()}],
+                                                    "frist_bis": frist.isoformat(), "erstellt_von": wer, "faellig_at": faellig.isoformat()})
+                break
+            except requests.exceptions.HTTPError as e:   # gleichzeitiger Klick hat den Auftrag eben angelegt → neu lesen, dazu addieren
+                t = str(getattr(getattr(e, "response", None), "text", "") or "")
+                if "23505" in t or "tv_konten_auftrag_offen_uq" in t or "duplicate key" in t:
+                    continue
+                raise
+        if not a:
+            return jsonify({"ok": False, "code": "warten", "msg": "Auftrag hat sich gerade mehrfach geändert — nochmal drücken"}), 409
     except Exception as e:
         if _pa1_sql_fehlt(e):
             return jsonify({"ok": False, "code": "sql_fehlt", "msg": f"Datenbank noch nicht bereit ({PA1_SQL}) — von Hand anlegen"}), 503
@@ -26425,7 +26535,7 @@ def _pa1_stand():
             f = pa1_iso(r.get("frist_bis"))
             if r.get("status") == "offen" and f and jetzt >= f:
                 erg = dict(r.get("ergebnis") or {}, pa1="nie abgeholt (PC aus?) — von Hand anlegen")
-                if sb_update("tv_konten_auftrag", {"id": f"eq.{r['id']}", "status": "eq.offen"},
+                if sb_update("tv_konten_auftrag", {"id": f"eq.{r['id']}", "status": "eq.offen", "frist_bis": f"lte.{jetzt.isoformat()}"},   # Klick verlängert → bleibt offen
                              {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "ergebnis": erg}):
                     r.update(status="pruefen", ergebnis=erg)
                     _pa1_alarm(r, "Konto-Suche nie abgeholt — nichts gelesen", "PC der ID war bis zur Frist nicht bereit. Bitte von Hand anlegen.")

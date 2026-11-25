@@ -32,7 +32,7 @@ NAMEN = {"_wd_num", "tv_konto_normal", "admin_konto_ext_norm", "admin_konto_dopp
          "PA1_NACH_MIN_S", "PA1_NACH_MAX_S", "PA1_NACH_WE_MIN_S", "PA1_NACH_WE_MAX_S", "PA1_FRIST_S", "PA1_FRIST_WE_S", "PA1_VORHER_S",
          "PA1_MAX_ANZAHL", "PA1_MAX_FEHLVERSUCHE", "PA1_PHASE", "pa1_verzug_s", "pa1_iso", "pa1_wochenende", "pa1_klick_zeiten", "pa1_naechste",
          "pa1_art", "PA1_GROESSE_PRAEFIX", "pa1_groesse_passt", "pa1_name", "pa1_konto_zeile", "pa1_neue", "pa1_urteil", "pa1_offen_bestanden", "pa1_weiter", "pa1_nach_fehler", "pa1_hm",
-         "pa1_knopf", "pa1_klick_lesen"}
+         "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen"}
 baum = ast.parse(SRC)
 teile = []
 for n in baum.body:
@@ -103,6 +103,33 @@ check(g.pa1_groesse_passt("TDFYSL150555000111", "Tradeify", 150000) and not g.pa
 t = g.pa1_neue(["TDFYSL050555000111", "TDFYSL150555000222"], "Tradeify", [], groesse=150000)
 check(t["challenge"] == ["TDFYSL150555000222"] and t["andere_groesse"] == ["TDFYSL050555000111"] and g.pa1_urteil(t, 1) == "anlegen",
       "50k-Nummer bei 150k-Vorlage zählt nicht (anderer Kauf), 150k wird angelegt")
+
+# ── PA1b: mehrere Klicks = EINE Prüfung (Finn: 4–5 Tradeify für dieselbe ID) ──
+V150, V300, VA = "aaaaaaaa-0000-4000-8000-000000000150", "aaaaaaaa-0000-4000-8000-000000000300", "aaaaaaaa-0000-4000-8000-0000000000a5"
+p = g.pa1_posten({"vorlage_id": V150, "anzahl": 1})
+check(p == [{"vorlage_id": V150, "anzahl": 1}], "alte Zeile ohne posten → ein Posten aus vorlage_id/anzahl")
+p, s = g.pa1_posten_plus(p, V150, 1, "2026-11-25T10:00:00+00:00")
+for _ in range(3):
+    p, s = g.pa1_posten_plus(p, V150, 1)
+check(s == 5 and len(p) == 1 and p[0]["anzahl"] == 5 and p[0]["at"] == "2026-11-25T10:00:00+00:00", "5 Klicks Tradeify 150k → ein Posten × 5 (eine Prüfung)")
+p2, s2 = g.pa1_posten_plus(p, V300, 2, "2026-11-25T10:05:00+00:00")
+check(s2 == 7 and [x["anzahl"] for x in p2] == [5, 2] and p2[1]["at"].startswith("2026-11-25T10:05"), "andere Vorlage → zweiter Posten im selben Auftrag")
+check(g.pa1_posten_plus(p2, V150, 14)[0] is None and g.pa1_posten_plus(p2, V150, 13)[1] == 20, "Deckel 20 je Suche")
+check(g.pa1_nachgekauft({"laeuft_at": "2026-11-25T10:02:00+00:00", "posten": p2}) and not g.pa1_nachgekauft({"laeuft_at": "2026-11-25T10:06:00+00:00", "posten": p2})
+      and not g.pa1_nachgekauft({"laeuft_at": None, "posten": p2}), "Klick während des Laufs erkannt (posten.at > laeuft_at) → Folgelauf +1–3 min")
+rest = g.pa1_posten_rest(p2, [{"ext": "X1"}, {"ext": "X2", "vorlage_id": V300}], V150)
+check(rest == [{"vorlage_id": V150, "rest": 4}, {"vorlage_id": V300, "rest": 1}], "Rest je Posten (alte angelegt ohne vorlage_id zählen zur ersten Vorlage)")
+OFF = [{"vorlage_id": V150, "rest": 4, "groesse": 150000}, {"vorlage_id": V300, "rest": 1, "groesse": 300000}]
+zu, andere, u = g.pa1_zuordnen(["TDFYSL150000000011", "TDFYSL300000000022", "TDFYSL150000000033", "TDFYSL050000000044"], "Tradeify", OFF)
+check(u == "anlegen" and zu == [("TDFYSL150000000011", V150), ("TDFYSL150000000033", V150), ("TDFYSL300000000022", V300)] and andere == ["TDFYSL050000000044"],
+      f"Tradeify 150k + 300k in EINER Lesung: Zuordnung nach Größe in der Kennung, 50k zählt nicht → {zu}")
+check(g.pa1_zuordnen(["TDFYSL300000000022", "TDFYSL300000000023"], "Tradeify", OFF)[2] == "ueberzahl", "mehr 300k als gekauft → Überzahl, nichts anlegen")
+APX = [{"vorlage_id": VA, "rest": 5, "groesse": 50000}]
+zu, _a, u = g.pa1_zuordnen([f"APEX70000100000{i:02d}" for i in range(1, 6)], "Apex Trader", APX)
+check(u == "anlegen" and len(zu) == 5 and {v for _k, v in zu} == {VA}, "Apex-5er-Pack: 5 neue in einer Lesung → alle 5 angelegt")
+check(g.pa1_zuordnen(["APEX7000010000001"], "Apex Trader", APX + [{"vorlage_id": V300, "rest": 1, "groesse": 100000}])[2] == "groessen",
+      "Apex mit zwei Größen offen (Größe nicht in der Kennung) → „mehrere Größen · von Hand“")
+check(g.pa1_zuordnen([], "Tradeify", OFF)[2] == "keine" and g.pa1_zuordnen(["TDFYSL150000000011"], "Tradeify", [])[2] == "ueberzahl", "keine neuen / nichts mehr offen")
 
 # ── pa1_urteil ──
 U_ = lambda ch, un=(): {"challenge": list(ch), "unklar": list(un), "funded": ["F1"], "nachfolger": ["N1"]}   # noqa: E731
@@ -187,23 +214,35 @@ check('sb_delete("konto_suche_riegel"' in an, "Anlegen gescheitert → Riegel wi
 check('"kind": "account_purchase"' in an and "-abs(float(zeile[\"purchase_cost\"]))" in an, "Kauf-Buchung wie Bulk-Anlegen (negativ, EUR)")
 er = block("def _pa1_erledigt(", '\n@app.route("/konto-suche"')
 check('_sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at"})' in er, "Abgleich gegen Konten ALLER IDs (ohne user_id-Filter)")
-ue = er[er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis"):'):er.index("else:", er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis"):'))]
+ue = er[er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis", "groessen"):'):er.index("else:", er.index('if urteil in ("ueberzahl", "unklar", "ohne_basis", "groessen"):'))]
+check("pa1_zuordnen(teile[\"challenge\"]" in er and "dict(x, vorlage_id=vid)" in er and "pa1_nachgekauft(a)" in er and "random.randint(60, 180)" in er,
+      "PA1b-Auswertung: Zuordnung je Posten, angelegt merkt die Vorlage, Folgelauf +1–3 min nach einem Klick während des Laufs")
 check('if urteil == "anlegen" and not basis:' in er and "basis = any(pa1_art(k, a.get(\"firma\")) for k in vorher)" in er,
       "ohne frühere Lesung der Firma (Basis) nichts automatisch anlegen")
 check('"anzahl": f"eq.{anzahl0}"' in er and 'body["angelegt"] = a.get("angelegt") or []' in er, "Abschluss nur mit unveränderter Anzahl, angelegt immer mitgeschrieben")
+check("_pa1_alarm(" not in er[:er.index("got = sb_update(")] and "elif alarm and body.get(\"status\") == \"pruefen\":" in er,
+      "🟠 erst nach dem greifenden Abschluss-Update (kein Alarm, wenn ein neuer Klick den Auftrag wieder öffnet)")
+check('"art": f"eq.{a.get(\'art\') or \'mail\'}"' in block("def pc_tv_konten_auftrag_erledigt():", "\n@app.route(\"/tv-konten/mein\""), "Mail-Zweig: Guard auf die Art — ein eben gekaufter Auftrag endet nie als Mail-Auftrag")
+zu_n, _a2, u_n = g.pa1_zuordnen(["TDFYSL150000000011", "TDFYSL300000000022"], "Tradeify",
+                                [{"vorlage_id": "ohne", "rest": 1, "groesse": None}, {"vorlage_id": V150, "rest": 1, "groesse": 150000}])
+check(u_n == "anlegen" and ("TDFYSL150000000011", V150) in zu_n and ("TDFYSL300000000022", "ohne") in zu_n, "Vorlage ohne Größe nimmt nur, was sonst nirgends passt")
 be = er[er.index('elif str(b.get("code") or "") == "belegt":'):er.index("    else:", er.index('elif str(b.get("code") or "") == "belegt":'))]
 check("jetzt >= frist" in be, "belegt: Frist gilt auch hier (kein endloses Verschieben)")
 check("_alarm_fremd_verwaltet(uid)" in block("def _pa1_alarm(", "\ndef _pa1_anlegen("), "🟠 von Emins Gruppe nie an die Master-IDs")
 st = block("def _pa1_stand(", '\n@app.route("/konto-suche/nachfolger"')
 check('"status": "eq.offen"' in st and "jetzt >= f" in st and "status.eq.pruefen" in st, "Stand: Liegengebliebene nach der Frist → pruefen + 🟠, Endstände 7 Tage sichtbar")
 check("_pa1_anlegen" not in ue and "_pa1_alarm" not in ue and "pa1_ruhig" in ue, "Überzahl/unklar: nichts anlegen, ruhig, kein 🟠")
-check('neu = teile["challenge"]' in er and "offen_bestanden=bool(bestanden)" in er, "angelegt werden nur Challenge-Nummern; Bestanden-Konten der ID × Firma zählen")
+check('neu = [k for k, _vid in zu]' in er and 'pa1_zuordnen(teile["challenge"]' in er and "offen_bestanden=bool(bestanden)" in er, "angelegt werden nur Challenge-Nummern; Bestanden-Konten der ID × Firma zählen")
 check('"status": "eq.laeuft"' in er and 'sb_update("tv_konten_auftrag", {"id": f"eq.{aid}"}, {"angelegt"' in er, "Angelegte sofort festgehalten, Status nur aus laeuft")
 ks = block('@app.route("/konto-suche", methods=["GET", "POST", "OPTIONS"])', "\ndef _pa1_stand(")
 check("_konto_ziel_uid(b)" in ks and "_alarm_fremd_verwaltet(ziel)" not in ks and '"nur_ht"' not in ks, "Klick: eigene ID oder Admin-Gate, alle Gruppen")
 check('"login_fehlt"' in ks and "tv_username" in ks and "archived" in ks, "ohne Login (tv_username) oder ohne aktives Konto → login_fehlt")
-check('o.get("art") == "gekauft"' in ks and '"warten"' in ks, "je ID × Firma ein offener Auftrag: Gekauft addiert, Mail-Auftrag wird Kauf-Auftrag")
-check("\"anzahl\": f\"eq.{o.get('anzahl')}\"" in ks, "Doppelklick: Anzahl nur mit Guard auf den alten Wert erhöht")
+check('o.get("art") == "gekauft"' in ks and "pa1_posten_plus(" in ks, "je ID × Firma ein Auftrag: Gekauft addiert (auch andere Vorlage), Mail-Auftrag wird Kauf-Auftrag")
+check("läuft schon eine Suche mit einer anderen Vorlage" not in ks and "Puls liest gerade" not in ks,
+      "kein 409 mehr bei zweitem Klick (andere Vorlage / Auftrag läuft)")
+check("\"anzahl\": f\"eq.{o.get('anzahl')}\"" in ks and "for _versuch in range(6):" in ks and "tv_konten_auftrag_offen_uq" in ks,
+      "gleichzeitige Klicks: Guard auf die alte Anzahl + Insert-Konflikt → neu lesen und addieren")
+check("if gek:" in ks and '"faellig_at"' not in ks[ks.index("if gek:"):ks.index("else:", ks.index("if gek:"))], "weiterer Klick behält die Prüfzeit")
 check("pa1_klick_zeiten(jetzt)" in ks, "faellig_at/frist_bis aus pa1_klick_zeiten (werktags 6 h, Wochenende 24 h)")
 pc = block("def pc_tv_konten_auftrag():", "\n@app.route(\"/pc/tv-konten-auftrag/erledigt\"")
 check("pa1_pc_frei(" in pc and "tv_konten_pc_frei(" in pc and "arten" in pc, "PC-Weiche: Mail wie bisher, Gekauft eigene Weiche (Standard alle)")
