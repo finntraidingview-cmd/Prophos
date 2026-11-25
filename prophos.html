@@ -87426,7 +87426,8 @@
     const uid = fremd ? fremd.uid : String(currentUserId || ''); if(!uid) return 'modal'
     const fuer = fremd || { uid, name: 'die eingeloggte ID', tvName: (z.quellen || []).includes('TV') ? String((z.tv && z.tv.name) || z.ext) : '', ext: z.ext }
     const zahl = x => x != null && isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null
-    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v)), firm: z.firma,   // T5C: Classic-Schablone → „ · Classic" type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
+    // T5C: Classic-Schablone → Add-on „ · Classic" im Namen (kontoVorlageZusatz)
+    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v)), firm: z.firma, type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
       maxDrawdown: zahl(v.max_drawdown), maxRisikoTrade: null, autoPlaner: true, goalKind: v.goal_kind || null, goalTarget: v.goal_kind ? Number(v.goal_target) : null }
     let d = null
     try{ d = await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct), true) }

@@ -112,6 +112,43 @@ check(len(r) == 4 and r[0] == "true", f"kontoVorlageZusatz: Classic-Schablone �
 check(len(r) == 4 and r[1] == "true", "Phase 1: New und Classic mehrdeutig → Modal (ein Mensch wählt 8 % / 10 %)")
 check(len(r) == 4 and r[2] == "true", "Phase 2: gleiche Werte → nicht mehrdeutig (Ein-Klick bleibt)")
 check(len(r) == 4 and r[3] == "true", "Blue Guardian Standard/Nano weiter mehrdeutig (BG1)")
+# Prüfer-Stopp S2 (25.11.2026): der T5C-Kommentar stand mitten im acc-Literal von kontoDirektAnlegen → type/externalId/purchaseCost auskommentiert,
+# Ein-Klick „Bestätigen" 400 für jede Firma. Das echte Literal aus prophos.html in JavaScriptCore auswerten.
+i0 = HTML.index("    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v))")
+lit = HTML[i0:HTML.index("\n    let d = null", i0)]
+js2 = fn("kontoVorlageZusatz") + r"""
+const kontoNameRegel = (g, e, t, zs) => g + ' ' + e + ' → ' + t + (zs ? ' · ' + zs : '')
+const zahl = x => x != null && isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null
+const gr = 200, z = {ext: '26999999', firma: 'The5%ers', typ: 'phase1'}
+const v = {name: 'The5%ers 200k Classic Phase 1', purchase_cost: 245, max_drawdown: 20000, goal_kind: null}
+""" + lit + r"""
+print(JSON.stringify([acc.name, acc.firm, acc.type, acc.externalId, acc.purchaseCost, acc.maxDrawdown, acc.autoPlaner]))
+"""
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+    f.write(js2)
+out2 = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", f.name], capture_output=True, text=True)
+os.unlink(f.name)
+check(out2.stdout.strip() == '["200k 26999999 → phase1 · Classic","The5%ers","phase1","26999999",245,20000,true]',
+      f"Ein-Klick-Anlegen: acc hat name (mit „ · Classic“), firm, type, externalId, purchaseCost, maxDrawdown ({out2.stdout.strip() or out2.stderr.strip()[:120]})")
+check(not re.search(r"//[^\n]*\b(type|externalId|purchaseCost): ", HTML[i0:i0 + 600]), "kein Kommentar vor Feldern im acc-Literal")
+# Finn (25.11.): Schablonen nur Phase 1 — Phase 2/Funded über den Nachfolger-Assistenten (sucNameVorschlag → kontoNameBauen); „ · Classic" muss mit
+i1 = HTML.index("const SUC_PHASE_LABEL = ")
+js3 = HTML[i1:HTML.index("\n", i1)] + "\n" + fn("kontoNameRegel") + fn("kontoNameTeile") + fn("kontoNameBauen") + r"""
+const p2 = kontoNameBauen('100k 26999999 → Phase 1 · Classic', 'phase2', '27000001')
+const f = kontoNameBauen(p2, 'funded_cfd', '27100002')
+const n = kontoNameBauen('200k 26962573 → Phase 1', 'phase2', '27000003')
+const m = kontoNameBauen('100k 1 → Phase 1 · 1% Rule · Classic', 'phase2', '2')
+print(JSON.stringify([p2, f, n, m]))
+"""
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+    f.write(js3)
+out3 = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", f.name], capture_output=True, text=True)
+os.unlink(f.name)
+check(out3.stdout.strip() == '["100k 27000001 → Phase 2 · Classic","100k 27100002 → Funded · Classic","200k 27000003 → Phase 2","100k 2 → Phase 2 · 1% Rule · Classic"]',
+      f"Nachfolger-Assistent trägt „ · Classic“ weiter: Phase 1 → Phase 2 → Funded; New bleibt ohne ({out3.stdout.strip() or out3.stderr.strip()[:120]})")
+check(V(T5, K("100k 27100002 → Funded · Classic", "funded_cfd")) == "classic"
+      and z(app.ap_regel_konto(copy.deepcopy(T5), K("100k 27000001 → Phase 2 · Classic", "phase2"), 100000.0), "phase2", 100000.0)[0] == 105000.0,
+      "Nachfolger-Namen werden als Classic erkannt; Phase 2 Ziel 105.000")
 check("kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v))" in HTML and "window._kontoVorlageZusatz(v)) || '')" in HTML
       and "E.zusatz.value = kontoVorlageZusatz(v)" in HTML, "Ein-Klick, Bulk und Modal setzen das Add-on „Classic“ aus der Schablone")
 
@@ -123,8 +160,9 @@ check('\'{"classic": {"ziel_pct": {"phase1": 10, "phase2": 5}, "kauf_eur": {"200
 check("'The5%ers 100k New Phase 1'" in SQL and "'The5%ers 200k New Phase 1'" in SQL and "delete from public.bulk_vorlagen" not in SQL.split("commit;")[0],
       "bestehende Schablonen → New (umbenannt, nicht gelöscht)")
 neu = re.findall(r"\('The5%ers (\d+k) (New|Classic) (Phase 1|Phase 2|Funded)'", SQL)
-check(len(neu) == 10 and ("200k", "Classic", "Phase 1") in neu and ("100k", "New", "Funded") in neu, f"10 neue Schablonen (New P2/Funded, Classic P1/P2/Funded je Größe) ({len(neu)})")
-check("'The5%ers 200k Classic Phase 1',    'phase1',     200000,          245" in SQL and "'The5%ers 100k Classic Phase 1',    'phase1',     100000,          null" in SQL,
+check(sorted(neu) == [("100k", "Classic", "Phase 1"), ("200k", "Classic", "Phase 1")] and "funded_cfd" not in SQL and "'phase2'" not in SQL,
+      f"nur 2 neue Schablonen: Classic Phase 1 je 100k/200k (Finn: Schablonen nur Phase 1) ({neu})")
+check("'The5%ers 200k Classic Phase 1',    'phase1',     200000,          245" in SQL and "'The5%ers 100k Classic Phase 1',    'phase1',     100000::numeric, null" in SQL,
       "Kaufpreis Classic 200k 245 €, 100k offen")
 check("where not exists (select 1 from public.bulk_vorlagen b where b.name = v.name)" in SQL, "idempotent (Name ist unique)")
 

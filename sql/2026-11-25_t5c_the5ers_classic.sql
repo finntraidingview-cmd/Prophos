@@ -8,10 +8,10 @@
 --   2. auto_plan_regeln (the5ers): varianten.classic = {ziel_pct {phase1 10, phase2 5}, kauf_eur {200000: 245}}. 245 € = 269,10 $ (Aktionspreis 200k)
 --      × 0,91216 (Live-Kurs 24.11.2026). 100k-Classic-Preis OFFEN (nicht belegt) → ohne Eintrag gilt der Firmen-Kauf 100k (146 €) im Kontowert, bis
 --      Finn den Preis nennt. TP/SL/Lots wie New — mit 10 % braucht Phase 1 eine Etappe mehr (100k: Ziel 10.000 bei TP 5.400–6.300).
---   3. bulk_vorlagen: die zwei bestehenden („The5ers 100k/200k Summerplan Phase 1") → „The5%ers 100k/200k New Phase 1" (umbenannt, Werte unverändert);
---      neu: New Phase 2 / New Funded und Classic Phase 1 / Phase 2 / Funded je 100k und 200k. Classic-Namen enthalten „Classic" → der Konto-Name bekommt
---      beim Anlegen das Add-on „ · Classic" (prophos.html kontoVorlageZusatz). Classic 100k Kaufpreis leer (offen), Classic 200k 245 €. Phase 2 / Funded
---      ohne Kaufpreis (Nachfolger, Kauf 0 wie die Bestandskonten). Funded: Consistency 50 %.
+--   3. bulk_vorlagen (Finn: Schablonen IMMER nur für Phase 1 — Phase 2/Funded entstehen über den Nachfolger-Assistenten, der das Add-on „ · Classic"
+--      im Namen weiterträgt): die zwei bestehenden („The5ers 100k/200k Summerplan Phase 1") → „The5%ers 100k/200k New Phase 1" (umbenannt, Werte
+--      unverändert); neu „The5%ers 100k Classic Phase 1" (Kaufpreis leer = offen) und „The5%ers 200k Classic Phase 1" (245 €). Classic-Namen enthalten
+--      „Classic" → der Konto-Name bekommt beim Anlegen das Add-on „ · Classic" (prophos.html kontoVorlageZusatz).
 -- Idempotent: zweimal einspielen ändert nichts. Rückbau unten (auskommentiert).
 
 begin;
@@ -48,16 +48,8 @@ insert into public.bulk_vorlagen (name, firm, account_type, account_size, starti
                                   name_template, plattform, aktiv, sortierung, consistency_pct)
 select v.name, 'The5%ers', v.typ, v.gr, v.gr, v.gr * 0.10, v.gr * 0.03, v.kauf, 'EUR', v.vorlage, 'MT5', true, v.sort, v.cons
   from (values
-    ('The5%ers 100k New Phase 2',        'phase2',     100000::numeric, null::numeric, '100k The5ers New {ex}',     45, null::numeric),
-    ('The5%ers 100k New Funded',         'funded_cfd', 100000,          null,          '100k The5ers New {ex}',     46, 50),
-    ('The5%ers 200k New Phase 2',        'phase2',     200000,          null,          '200k The5ers New {ex}',     47, null),
-    ('The5%ers 200k New Funded',         'funded_cfd', 200000,          null,          '200k The5ers New {ex}',     48, 50),
-    ('The5%ers 100k Classic Phase 1',    'phase1',     100000,          null,          '100k The5ers Classic {ex}', 49, null),
-    ('The5%ers 100k Classic Phase 2',    'phase2',     100000,          null,          '100k The5ers Classic {ex}', 50, null),
-    ('The5%ers 100k Classic Funded',     'funded_cfd', 100000,          null,          '100k The5ers Classic {ex}', 51, 50),
-    ('The5%ers 200k Classic Phase 1',    'phase1',     200000,          245,           '200k The5ers Classic {ex}', 54, null),
-    ('The5%ers 200k Classic Phase 2',    'phase2',     200000,          null,          '200k The5ers Classic {ex}', 55, null),
-    ('The5%ers 200k Classic Funded',     'funded_cfd', 200000,          null,          '200k The5ers Classic {ex}', 56, 50)
+    ('The5%ers 100k Classic Phase 1',    'phase1',     100000::numeric, null::numeric, '100k The5ers Classic {ex}', 45, null::numeric),
+    ('The5%ers 200k Classic Phase 1',    'phase1',     200000,          245,           '200k The5ers Classic {ex}', 46, null)
   ) as v(name, typ, gr, kauf, vorlage, sort, cons)
  where not exists (select 1 from public.bulk_vorlagen b where b.name = v.name);
 
@@ -67,7 +59,7 @@ commit;
 -- select f->'varianten', f->'ziel_pct', f->'kauf_eur' from auto_plan_regeln r, jsonb_array_elements(r.regeln->'firmen') f
 --  where r.id = 1 and f->'namen' ? 'the5ers';            -- {"classic": {...10/5, 200000: 245}}, {"phase1": 8, "phase2": 5}, {"100000": 146, "200000": 226}
 -- select name, account_type, account_size, max_drawdown, max_daily_drawdown, purchase_cost, consistency_pct, sortierung
---   from bulk_vorlagen where firm = 'The5%ers' order by sortierung;                                    -- 12 Zeilen
+--   from bulk_vorlagen where firm = 'The5%ers' order by sortierung;                                    -- 4 Zeilen (New P1 100k/200k, Classic P1 100k/200k)
 
 -- Rückbau (nur falls nötig):
 -- delete from public.bulk_vorlagen where firm = 'The5%ers' and name like 'The5\%ers %' escape '\'
