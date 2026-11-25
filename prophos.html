@@ -3210,6 +3210,12 @@
   .kl-pk-knopf{width:100%;border:0;background:none;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
   .kl-pk-knopf:hover{background:var(--surface-tint)} .kl-pfeil{width:14px;color:var(--sub);font-size:13px;text-align:center}
   #kl-admin-karte .kl-pers{border-top:1px solid var(--border-soft);margin-top:0;padding:2px 0} #kl-admin-karte .kl-pers:first-child{border-top:0}
+  /* KP6b: Abschnitt je Unternehmen (Hermann Technologies · Emin) — eigene Summe, nie gemischt */
+  #kl-admin-karte .kl-gr-kopf{display:flex;align-items:baseline;gap:10px;margin:18px 0 4px;padding:12px 2px 0;border-top:1px solid var(--border);font-size:12px;color:var(--sub)}
+  #kl-admin-karte .kl-gr-kopf.erst{margin-top:2px;padding-top:0;border-top:0}
+  #kl-admin-karte .kl-gr-kopf b{font-size:12px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.04em}
+  #kl-admin-karte .kl-gr-kopf .kl-gr-sum{margin-left:auto;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  #kl-admin-karte .kl-gr-kopf + .kl-pers{border-top:0}
   #kl-admin-karte .kl-pers.auf{padding-bottom:8px}
   .kl-sp-g{display:inline-flex}
   .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px}
@@ -17822,6 +17828,10 @@
     // von HT sehen — bin ich auf Emin, das von Emin"): gewählte Verwalter-Gruppe oder die HT-Gruppen-ID; eingeschränkt = Server entscheidet (Gate)
     // BK1 (24.11.2026, Review): Bankkonto nur für Logins, die auch Kapital dürfen — eingeschränkte „nur eigene“ (ohne Verwalter) sehen den Chip nicht
     window._admBankErlaubt = () => !admEingeschraenkt() || admIstVerwalter()
+    // KP6b: Gruppen MIT Verwalter für einen eigenen Abschnitt der Admin-Kaufliste — nur volle Sicht (Finn/HT-Admin) mit geladener Übersicht;
+    // ein Verwalter (Emin) oder eigener Code bekommt [] (der Server zeigt ihm ohnehin nur seine Gruppe — sonst stünde sie doppelt da)
+    window._admVerwalterGruppen = () => (!admData || admEingeschraenkt() || eigenerCode) ? []
+      : admGruppenListe().filter(x => x && x.id && !x.ht).map(x => ({ id: String(x.id), name: String(x.name || 'Gruppe') }))
     window._admGruppeSicht = () => ({ eingeschraenkt: admEingeschraenkt(), gruppe: admData ? admGruppeAktiv() : (admGruppe || ''),
       ht: String((admGruppenListe().find(x => x.ht) || {}).id || '') })
     // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
@@ -62459,7 +62469,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2356'
+  const OS_TAB_BUILD = '2026-09-22.2357'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -98403,6 +98413,25 @@ ${stBlock}
         const liste = await klVorlagen()
         if(veraltet()) return
         for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste, z.groesse, z.gruppe_ziel)
+        // KP6b (Master 25.11.2026): Admin → Alle Accounts bekommt je Gruppe mit Verwalter (Emin) einen eigenen Abschnitt — Zellen aus
+        // zellen_gruppen (KP6), abgefragt mit ?gruppe=<id> (Server-Lesefilter, nur für die volle Sicht). Zeilen tragen _gruppe; Knöpfe/Rechte gleich.
+        const gruppen = []
+        if(cfg.alle) for(const g of (typeof window._admVerwalterGruppen === 'function' ? window._admVerwalterGruppen() : [])){
+          try{
+            const rg = await fetch(`${WATCHER_HOME}/admin/kaufliste?${q}&gruppe=${encodeURIComponent(g.id)}`, { headers: { 'sb-token': await klToken() }, cache: 'no-store' })
+            const dg = await rg.json().catch(() => ({}))
+            if(!rg.ok || !dg.ok) throw new Error(dg.error || ('HTTP ' + rg.status))
+            const ht = new Set((d.zeilen || []).map(z => String(z.user_id)))
+            const gz = (dg.zeilen || []).filter(z => !ht.has(String(z.user_id)))   // nie dieselbe ID in zwei Abschnitten
+            for(const z of gz){ z.vorlage = klVorlage(z.firma, z.einheit, liste, z.groesse, z.gruppe_ziel); z._gruppe = g.id }
+            d.zeilen = [...(d.zeilen || []), ...gz]
+            d.spaeter = [...(d.spaeter || []), ...(dg.spaeter || []).filter(x => !ht.has(String(x.user_id)))]
+            d.pausiert = [...(d.pausiert || []), ...(dg.pausiert || []).filter(x => !ht.has(String(x.user_id)))]
+            gruppen.push({ id: g.id, name: g.name, fehler: '' })
+          }catch(e){ gruppen.push({ id: g.id, name: g.name, fehler: String(e.message || e) }) }
+          if(veraltet()) return
+        }
+        d.gruppen_abschnitte = gruppen
         // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
         if(I.d) I.auswahl.clear()
         I.d = d; I.at = Date.now(); I.fehler = ''; I.uid = uid; I.verboten = false; I.ausSpeicher = 0
@@ -98469,7 +98498,8 @@ ${stBlock}
       for(const rid of [...I.auswahl]) if(!zeilen.some(x => x.rid === rid)) I.auswahl.delete(rid)
       const wk = wahlKey()
       const summe = l => klEur(l.reduce((a, x) => a + klPreis(x.z), 0))
-      sub.textContent = (zeilen.length ? `${zeilen.length} zu kaufen · ${summe(zeilen)}${cfg.alle ? ` · ${new Set(zeilen.map(x => x.z.user_id)).size} IDs` : ''}` : (I.fehler ? '' : 'nichts zu kaufen'))
+      const oben = zeilen.filter(x => !x.z._gruppe)   // KP6b: Kopf-Summe = Hermann Technologies (bzw. Sicht), Gruppen-Abschnitte zählen extra
+      sub.textContent = (oben.length ? `${oben.length} zu kaufen · ${summe(oben)}${cfg.alle ? ` · ${new Set(oben.map(x => x.z.user_id)).size} IDs` : ''}` : zeilen.length ? 'Hermann Technologies: nichts zu kaufen' : (I.fehler ? '' : 'nichts zu kaufen'))
         + (I.ausSpeicher ? ` · Stand ${new Date(I.ausSpeicher).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : '')   // KP4: gemerkter Stand, frisch lädt
       const box = (attr, wert, gew, z, label) => {
         const aus = wk && wk !== klVKey(z)
@@ -98529,6 +98559,23 @@ ${stBlock}
         return o }
       let h = I.fehler ? `<div class="kl-fehler">${klEsc(I.fehler)}</div>` : ''
       if(cfg.alle){
+        // KP6b: Abschnitt je Unternehmen — Hermann Technologies (bzw. die Sicht des Logins) zuerst, dann je Gruppe mit Verwalter; eigene Summe, nie gemischt
+        const abschn = (I.d && I.d.gruppen_abschnitte) || []
+        const htZ = zeilen.filter(x => !x.z._gruppe)
+        if(abschn.length) h += `<div class="kl-gr-kopf erst"><b>Hermann Technologies</b><span>${htZ.length} zu kaufen</span><span class="kl-gr-sum">${summe(htZ)}</span></div>`
+        h += idsHtml(htZ, !abschn.length)
+        for(const g of abschn){
+          const gz = zeilen.filter(x => x.z._gruppe === g.id)
+          h += `<div class="kl-gr-kopf"><b>${klEsc(g.name)}</b><span>${g.fehler ? 'nicht geladen: ' + klEsc(g.fehler) : `${gz.length} zu kaufen`}</span>${g.fehler ? '' : `<span class="kl-gr-sum">${summe(gz)}</span>`}</div>`
+          if(!g.fehler) h += idsHtml(gz, true)
+        }
+      } else h += liste_(zeilen)
+      h += spaeterHtml()
+      liste.innerHTML = h
+      auswahlZeigen()
+      if(cfg.tacho) tachoBadges()
+      function idsHtml(zeilen, leerText){
+        let h = ''
         // je ID auf-/zuklappbar (Finn: „mit den Up- und Down-…"); eine ID mit gewähltem Kästchen bleibt offen
         const ids = [...new Set(zeilen.map(x => x.z.user_id))]
         for(const id of ids){
@@ -98536,12 +98583,9 @@ ${stBlock}
           const firmen = [...new Set(l.map(x => x.z.firma))].join(' · ')
           h += `<div class="kl-pers${auf ? ' auf' : ''}"><button type="button" class="kl-pk kl-pk-knopf" data-kl-id="${klEsc(id)}" aria-expanded="${auf}"><span class="kl-pfeil">${auf ? '▾' : '▸'}</span><b>${klEsc(l[0].z.name)}</b><span>${l.length} kaufen · ${klEsc(firmen)}</span><span class="kl-pk-r">${summe(l)}</span></button>${auf ? liste_(l) : ''}</div>`
         }
-        if(!ids.length && !I.fehler) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
-      } else h += liste_(zeilen)
-      h += spaeterHtml()
-      liste.innerHTML = h
-      auswahlZeigen()
-      if(cfg.tacho) tachoBadges()
+        if(!ids.length && !I.fehler && leerText) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
+        return h
+      }
     }
     function spaeterHtml(){
       const sp = (I.d && I.d.spaeter) || [], pa = (I.d && I.d.pausiert) || []
