@@ -61256,7 +61256,8 @@
   // Der Planer (app.py ap_tage_ist / ap_konto_rechnen regel.gewinntage) sammelt die Tage mit Trades um 1.000 $ zuerst, dann die Big Trades.
   // FTMO (Finn 30.10.2026: „Bei FTMO gibt's ab jetzt auch 4, in Phase 1 4 und in Phase 2 4"): 2-Step-CFD-Phasen = 4 Trading Days; „FTMO Futures" ist eine eigene Firma (Schlüssel und tpFirmIstFutures), bleibt ohne
   const MINDESTTAGE_JE_FIRMA = { fundednext: 5, ftmo: 4 }
-  const GEWINNTAGE_JE_FIRMA = { 'blue guardian': { target: 3, minProfit: 500 } }
+  // Goat Funded Trader (GF2, Master 25.11.2026, Finn): 2-Step-Phasen verlangen 3 profitable Tage mit ≥ 0,5 % (100k = 500 $, nur 100k im Planer) → wie Blue Guardian
+  const GEWINNTAGE_JE_FIRMA = { 'blue guardian': { target: 3, minProfit: 500 }, 'goat funded trader': { target: 3, minProfit: 500 } }
   function kontoMindesttage(firm, typ){
     const n = String(firm || '').trim().toLowerCase()
     if(!n || !(typ === 'phase1' || typ === 'phase2')) return null
@@ -62403,7 +62404,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2342'
+  const OS_TAB_BUILD = '2026-09-22.2343'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
