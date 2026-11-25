@@ -70,7 +70,10 @@ check(k2["kauf"] == "2026-10-28" and k2["verlaengert_am"] == "2026-11-27" and k2
 check(ids[0] == "k2" and k1["person"] == "Julian" and k1["ende4"] == "0761" and k1["firma"] == "FTMO Futures", "sortiert nach Verlängerungstag, Person + …4")
 check(next(x for x in z if x["konto_id"] == "k7")["user_id"] == U2, "Zeile gehört zur ID des Kontos (Mike), nicht zum Login")
 
-r = SRC[SRC.index('@app.route("/konto/abo-kuendigen"'):SRC.index("# ══ KONTEN PRÜFEN")]
+r = SRC[SRC.index('@app.route("/konto/abo-kuendigen"'):SRC.index("# ══ PA1", SRC.index('@app.route("/konto/abo-kuendigen"'))]   # FK1 steht direkt vor PA1
+fk1_block = SRC[SRC.index("# ══ FK1 "):SRC.index("# ══ PA1")]
+check(SRC.index("# ══ FK1 ") < SRC.index("# ══ PA1") and "/konto-suche" not in fk1_block,
+      "FK1-Block steht vor dem PA1-Block, nicht zwischen /konto-suche/nachfolger und KONTEN PRÜFEN (dort schneidet der PA1-Test)")
 check('_konto_ziel_uid({"user_id": str(acc.get("user_id"))})' in r and '"abo_gekuendigt_at": "is.null"' in r and 'acc.get("firm") != FK1_FIRMA' in r,
       "POST: Gate eigene ID/Admin, nur FTMO Futures, Marke einmal (is.null)")
 check('"sql_fehlt": True' in r and "_admin_konto_gate()" in r and '"account_type": "eq.challenge"' in r, "GET: ohne Spalte leer, alle=1 nur mit Admin-Gate, nur Challenges")
