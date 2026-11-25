@@ -3198,6 +3198,16 @@
   .kl-chip.res{color:var(--warn-ink,#b45309);background:color-mix(in srgb,var(--warn,#f59e0b) 14%,transparent)}
   .kl-chip.warn{color:var(--danger,#d92d20)}
   .kl-pers{margin-top:10px} .kl-pers:first-child{margin-top:2px}
+  .kl-sp-g{display:inline-flex} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+  .kl-sp-g .kl-sp-pfeil{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0;padding-left:6px;padding-right:6px}
+  .kl-sp-menu{position:fixed;z-index:400;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px -8px rgba(16,24,40,.3);padding:4px;display:flex;flex-direction:column;min-width:170px}
+  .kl-sp-menu button{border:0;background:none;text-align:left;font:inherit;font-size:12.5px;color:var(--ink);padding:7px 10px;border-radius:7px;cursor:pointer}
+  .kl-sp-menu button:hover{background:var(--surface-tint)} .kl-sp-menu button[data-t="pause"]{color:var(--warn-ink,#b45309);border-top:1px solid var(--border-soft);border-radius:0 0 7px 7px}
+  .kl-sp{margin-top:8px;border-top:1px solid var(--border-soft);padding-top:6px}
+  .kl-sp-kopf{border:0;background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;padding:4px 2px} .kl-sp-kopf:hover{color:var(--ink)}
+  .kl-sp-z{display:flex;align-items:baseline;gap:10px;font-size:12.5px;color:var(--sub);padding:4px 2px}
+  .kl-sp-z b{color:var(--ink-2);font-weight:600} .kl-sp-bis{margin-left:auto;font-size:12px}
+  .kl-sp-x{border:0;background:none;font:inherit;font-size:12px;color:var(--violet);cursor:pointer;font-weight:600}
   .kl-pack{border:1px solid color-mix(in srgb,var(--mp-apex,#e8892b) 30%,var(--border-soft));border-radius:10px;margin:6px 0;overflow:hidden}
   .kl-pack .kl-pack-kopf{border-top:0;padding:8px 10px;background:color-mix(in srgb,var(--mp-apex,#e8892b) 7%,var(--surface))}
   .kl-pack .kl-pz{padding:5px 10px;font-size:12px;color:var(--sub)} .kl-pack .kl-pz .kl-f{font-weight:400;color:var(--sub)}
@@ -9929,7 +9939,8 @@
       </div>
       <!-- KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen, „Design ganz nice" — ohne neuen Navigationspunkt, unter Accounts
            direkt unter dem Muster-Portfolio): eine Zeile je zu kaufendem Konto aus dem Vorrat-Lauf (GET /admin/kaufliste, kaufliste_app.py),
-           „Gekauft" = echtes Bulk-Fenster mit Vorlage (nur External IDs einfügen), „Erledigt" = vorrat_bestellt (48 h, mit Rückgängig),
+           „Gekauft" = echtes Bulk-Fenster mit Vorlage (nur External IDs einfügen), „Später ▾" = 3/7/30 Tage ausblenden (kaufliste_spaeter, KP2d)
+           oder Firma pausieren,
            Kästchen = mehrere auf einmal. Admin: „Meine | Alle IDs", Anlegen für fremde IDs ohne ID-Wechsel (vorhandene Route POST /admin/konto-anlegen).
            Verdrahtung in der Sektion KAUFLISTE im Modul, eigene IDs/Klassen kl-*. -->
       <div class="card kl-karte" id="kl-karte" hidden>
@@ -97928,8 +97939,9 @@ ${stBlock}
 /* ── KAUFLISTE (KP2, 25.11.2026, Finn: Demo demo/kaufplan.html abgenommen — „Design ganz nice", ohne neuen Navigationspunkt unter Accounts) ──
  * Eine Zeile je zu kaufendem Konto (nachkauf.n des Vorrat-Laufs: min(Lücke zum Ziel, Max − laufende Challenges), FNF erst ab dem 1. erhaltenen
  * FundedNext-Payout — gerechnet im Backend, GET /admin/kaufliste). Je Zeile: „Gekauft" → echtes Bulk-Fenster (window._bulkKaufliste) mit der
- * Vorlage aus bulk_vorlagen (Firma + Größe der Kauf-Einheit), nur External IDs einfügen; „Erledigt" → POST /admin/vorrat {aktion: 'bestellt'}
- * (48 h, zählt als laufend), Rückgängig = {aktion: 'bestellt_weg', id}; Kästchen → „n ausgewählt · Jetzt hinzufügen" = Blöcke je ID × Firma
+ * Vorlage aus bulk_vorlagen (Firma + Größe der Kauf-Einheit), nur External IDs einfügen; „Später" (KP2d, Finn: „ich will gerade nicht kaufen")
+ * → POST /admin/kaufliste/spaeter (3/7/30 Tage ausblenden, OHNE Rechenwirkung), Rückgängig = spaeter_weg; ▾ „Firma pausieren" = Sperr-Matrix
+ * pausiert (POST /admin/vorrat status), freigeben unten in „n später · zeigen"; Kästchen → „n ausgewählt · Jetzt hinzufügen" = Blöcke je ID × Firma
  * nacheinander im Bulk-Fenster. Admin-Gerät (prophos_wd_admin): „Meine | Alle IDs" (alle=1, Server prüft selbst — 403 → nur Meine).
  * Am Muster-Portfolio-Tacho der eigenen ID „+n" (MutationObserver an #mp-leiste, mpRender bleibt unberührt). Chip „Reserve" = Blow-Reserve. */
 ;(() => {
@@ -98012,10 +98024,14 @@ ${stBlock}
     }
     return out
   }
+  // KP2d „Später" (Finn 25.11.2026: „ich will gerade nicht kaufen" — weg, komm in 7 Tagen wieder): so viele Zeilen der Zelle sind ausgeblendet,
+  // OHNE Rechenwirkung (eigene Tabelle kaufliste_spaeter, nicht vorrat_bestellt — das zählte als schon gekauft)
+  const klSpaeterN = z => Math.min(z.n, ((_kl.d && _kl.d.spaeter) || []).filter(s => String(s.user_id) === String(z.user_id) && s.firma === z.firma)
+    .reduce((a, s) => a + (Number(s.anzahl) || 0), 0))
   function klZeilenAlle(){
-    // eine Zeile je Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
+    // eine Zeile je SICHTBARES Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
     const out = []
-    for(const z of (_kl.d && _kl.d.zeilen) || []) for(let k = 1; k <= z.n; k++) out.push({ z, k, rid: `${z.user_id}|${z.firma}#${k}` })
+    for(const z of (_kl.d && _kl.d.zeilen) || []){ const sichtbar = z.n - klSpaeterN(z); for(let k = 1; k <= sichtbar; k++) out.push({ z, k, rid: `${z.user_id}|${z.firma}#${k}` }) }
     return out
   }
   function klPreis(z){ return Number(z.vorlage && z.vorlage.purchase_cost) || Number(z.preis_eur) || 0 }
@@ -98041,7 +98057,7 @@ ${stBlock}
         <div class="kl-f">${klEsc(z.firma)}${z.max ? `<span class="kl-chip fuell" title="laufende Challenges/Phasen nach diesem Kauf gegen das Maximum je Firma">→ ${lauf}/${z.max} laufend</span>` : ''}${z.reserve ? '<span class="kl-chip res" title="Blow-Reserve: das Ziel ist erreicht, hält aber nicht, wenn das größte Konto wegfällt">Reserve</span>' : ''}${v ? '' : '<span class="kl-chip warn" title="keine Vorlage in bulk_vorlagen für Firma + Größe — im Bulk-Fenster selbst wählen">ohne Vorlage</span>'}</div>
         <div class="kl-g">${klEsc(gr)}</div>
         <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
-        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>` : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button><button type="button" class="btn btn-ghost btn-mini" data-kl-weg="${klEsc(x.rid)}" title="Schon anderswo angelegt: Zeile ausblenden (zählt 48 h als laufend)">Erledigt</button><input type="checkbox" class="kl-box" data-kl-wahl="${klEsc(x.rid)}"${gew ? ' checked' : ''} aria-label="auswählen">`}</div>
+        <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>` : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="Account anlegen: Bulk-Fenster mit Vorlage, nur External ID einfügen">Gekauft</button><span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini" data-kl-spaeter="${klEsc(x.rid)}" title="Gerade nicht kaufen: Zeile 7 Tage ausblenden (zählt nicht als gekauft)">Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(x.rid)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span><input type="checkbox" class="kl-box" data-kl-wahl="${klEsc(x.rid)}"${gew ? ' checked' : ''} aria-label="auswählen">`}</div>
       </div>`
     }
     // Apex 5er-Pack (Finn 25.11.2026): die Zeilen einer Pack-Zelle als EIN Block — Kopf mit Kästchen (alle), „Gekauft" (anzahl = Pack) und „Erledigt"
@@ -98053,7 +98069,7 @@ ${stBlock}
         <div class="kl-f"><b>${klEsc(z.firma)} ${z.pack}er-Pack</b>${l.length < z.pack ? `<span class="kl-chip">noch ${l.length}</span>` : ''}${z.reserve ? '<span class="kl-chip res">Reserve</span>' : ''}${z.vorlage ? '' : '<span class="kl-chip warn">ohne Vorlage</span>'}</div>
         <div class="kl-g">${l.length} Konten</div><div class="kl-p">${summe(l)}</div>
         <div class="kl-a">${pa ? `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>`
-          : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button><button type="button" class="btn btn-ghost btn-mini" data-kl-pack-weg="${klEsc(key)}" title="Pack schon anderswo angelegt: ausblenden (zählt 48 h als laufend)">Erledigt</button><input type="checkbox" class="kl-box" data-kl-pack-wahl="${klEsc(key)}"${alleGew ? ' checked' : ''} aria-label="Pack auswählen">`}</div>
+          : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack anlegen (${l.length} Konten)">Gekauft</button><span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini" data-kl-pack-spaeter="${klEsc(key)}" title="Pack gerade nicht kaufen: 7 Tage ausblenden (zählt nicht als gekauft)">Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(key)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span><input type="checkbox" class="kl-box" data-kl-pack-wahl="${klEsc(key)}"${alleGew ? ' checked' : ''} aria-label="Pack auswählen">`}</div>
       </div>${zeilenP}</div>`
     }
     const liste_ = l => { let o = '', i = 0
@@ -98069,9 +98085,23 @@ ${stBlock}
       }
       if(!ids.length && !_kl.fehler) h += '<div class="kl-leer">Für keine ID etwas zu kaufen.</div>'
     } else h += liste_(zeilen)
+    h += klSpaeterHtml()
     liste.innerHTML = h
     klAuswahlZeigen()
     klTachoBadges()
+  }
+  function klSpaeterHtml(){
+    const sp = (_kl.d && _kl.d.spaeter) || [], pa = (_kl.d && _kl.d.pausiert) || []
+    if(!sp.length && !pa.length) return ''
+    const n = sp.reduce((a, s) => a + (Number(s.anzahl) || 0), 0), name = uid => ((_kl.d.zeilen || []).find(z => String(z.user_id) === String(uid)) || {}).name || ''
+    const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
+    const kopf = [n ? `${n} später` : '', pa.length ? `${pa.length} pausiert` : ''].filter(Boolean).join(' · ')
+    let h = `<div class="kl-sp"><button type="button" class="kl-sp-kopf" data-kl-sp-auf>${klEsc(kopf)} · ${_kl.spAuf ? 'ausblenden' : 'zeigen'}</button>`
+    if(_kl.spAuf){
+      h += sp.map(s => `<div class="kl-sp-z"><span>${_kl.alle ? `<b>${klEsc(name(s.user_id))}</b> · ` : ''}${klEsc(s.firma)} · ${s.anzahl} ${s.anzahl === 1 ? 'Konto' : 'Konten'}</span><span class="kl-sp-bis">wieder da am ${klEsc(datum(s.bis))}</span><button type="button" class="kl-sp-x" data-kl-sp-weg="${klEsc(s.id)}">Rückgängig</button></div>`).join('')
+      h += pa.map(p => `<div class="kl-sp-z"><span>${_kl.alle ? `<b>${klEsc(p.name)}</b> · ` : ''}${klEsc(p.firma)} · pausiert</span><span class="kl-sp-bis">bis zur Freigabe</span><button type="button" class="kl-sp-x" data-kl-frei="${klEsc(p.user_id + '|' + p.firma)}">freigeben</button></div>`).join('')
+    }
+    return h + '</div>'
   }
   function klAuswahlZeigen(){
     const bar = document.getElementById('kl-auswahl'); if(!bar) return
@@ -98085,7 +98115,7 @@ ${stBlock}
   function klTachoBadges(){
     const leiste = document.getElementById('mp-leiste'); if(!leiste) return
     const je = {}
-    for(const z of (_kl.d && _kl.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n
+    for(const z of (_kl.d && _kl.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n - klSpaeterN(z)
     leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
       let b = el.querySelector('.mp-kauf-n'); const n = je[el.dataset.mpFirma] || 0
       if(!n){ if(b) b.remove(); return }
@@ -98109,18 +98139,44 @@ ${stBlock}
     if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status))
     return d
   }
-  async function klErledigt(rid, anzahl){
+  async function klKl(pfad, body){
+    const r = await fetch(`${WATCHER_HOME}/admin/kaufliste/${pfad}${_kl.alle ? '?ansicht=admin' : ''}`, { method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'sb-token': await klToken() }, body: JSON.stringify(body) })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+    return d
+  }
+  async function klSpaeter(rid, anzahl, tage){
     const x = klZeilenAlle().find(q => q.rid === rid); if(!x) return
-    const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1))
-    z.n = Math.max(0, z.n - n); auswahl.clear(); klRender()   // sofort weg, Server bestätigt danach
+    const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1)), t = [3, 7, 30].includes(tage) ? tage : 7
     try{
-      const d = await klVorrat({ aktion: 'bestellt', user_id: z.user_id, firma: z.firma, anzahl: n, einheit: z.einheit || null })
-      const bid = d.bestellt && d.bestellt.id
-      klToast(`${z.name} · ${z.firma} erledigt`, bid ? async () => {
-        try{ await klVorrat({ aktion: 'bestellt_weg', id: bid }); klLaden(true) }catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
-      } : null)
-      klLaden(true)
-    }catch(e){ klToast('Erledigt ging nicht: ' + (e.message || e)); klLaden(true) }
+      const d = await klKl('spaeter', { user_id: z.user_id, firma: z.firma, anzahl: n, tage: t })
+      if(_kl.d){ _kl.d.spaeter = [...(_kl.d.spaeter || []), d.spaeter]; auswahl.clear(); klRender() }   // sofort weg
+      const sid = d.spaeter && d.spaeter.id
+      klToast(`${z.name} · ${z.firma}: ${n === 1 ? 'kommt' : n + ' Konten kommen'} in ${t} Tagen wieder`, sid ? () => klSpaeterWeg(sid) : null)
+    }catch(e){ klToast('Später ging nicht: ' + (e.message || e)) }
+  }
+  async function klSpaeterWeg(sid){
+    try{ await klKl('spaeter_weg', { id: Number(sid) }); if(_kl.d) _kl.d.spaeter = (_kl.d.spaeter || []).filter(s => String(s.id) !== String(sid)); klRender(); klLaden(true) }
+    catch(e){ klToast('Rückgängig ging nicht: ' + (e.message || e)) }
+  }
+  async function klPausieren(uid, firma, frei){
+    if(!frei && !confirm(`${firma} für diese ID pausieren?\nDie Kaufliste schlägt dort nichts vor (und der Planer plant ihre Konten nicht neu), bis du sie wieder freigibst.`)) return
+    try{ await klVorrat({ user_id: uid, firma, status: frei ? 'frei' : 'pausiert' }); klToast(`${firma} ${frei ? 'wieder frei' : 'pausiert'}`); klLaden(true) }
+    catch(e){ klToast((frei ? 'Freigeben' : 'Pausieren') + ' ging nicht: ' + (e.message || e)) }
+  }
+  function klMenu(knopf, rid, anzahl){
+    document.getElementById('kl-sp-menu')?.remove()
+    const x = klZeilenAlle().find(q => q.rid === rid); if(!x) return
+    const m = document.createElement('div'); m.id = 'kl-sp-menu'; m.className = 'kl-sp-menu'
+    m.innerHTML = [3, 7, 30].map(t => `<button type="button" data-t="${t}">${t} Tage${t === 7 ? ' · Standard' : ''}</button>`).join('') +
+      `<button type="button" data-t="pause">${klEsc(x.z.firma)} pausieren …</button>`
+    document.body.appendChild(m)
+    const b = knopf.getBoundingClientRect()
+    m.style.top = Math.min(innerHeight - m.offsetHeight - 8, b.bottom + 4) + 'px'; m.style.left = Math.max(8, b.right - m.offsetWidth) + 'px'
+    m.onclick = e => { const o = e.target.closest('[data-t]'); if(!o) return; m.remove()
+      if(o.dataset.t === 'pause') klPausieren(x.z.user_id, x.z.firma, false); else klSpaeter(rid, anzahl, Number(o.dataset.t)) }
+    setTimeout(() => document.addEventListener('click', function zu(e){ if(!m.contains(e.target)){ m.remove(); document.removeEventListener('click', zu, true) } }, true), 0)
   }
   function klHinzufuegen(rids){
     const zl = klZeilenAlle().filter(x => rids.includes(x.rid))
@@ -98146,9 +98202,14 @@ ${stBlock}
   }
   document.getElementById('kl-liste')?.addEventListener('click', e => {
     const g = e.target.closest('[data-kl-gekauft]'); if(g){ klHinzufuegen([g.dataset.klGekauft]); return }
-    const w = e.target.closest('[data-kl-weg]'); if(w){ klErledigt(w.dataset.klWeg); return }
+    const w = e.target.closest('[data-kl-spaeter]'); if(w){ klSpaeter(w.dataset.klSpaeter, 1, 7); return }
+    const sm = e.target.closest('[data-kl-sp-menu]'); if(sm){ const key = sm.dataset.klSpMenu
+      if(key.includes('#')) klMenu(sm, key, 1); else { const r = klPackRids(key); if(r.length) klMenu(sm, r[0], r.length) } return }
+    if(e.target.closest('[data-kl-sp-auf]')){ _kl.spAuf = !_kl.spAuf; klRender(); return }
+    const sw = e.target.closest('[data-kl-sp-weg]'); if(sw){ klSpaeterWeg(sw.dataset.klSpWeg); return }
+    const fr = e.target.closest('[data-kl-frei]'); if(fr){ const [u, ...f] = fr.dataset.klFrei.split('|'); klPausieren(u, f.join('|'), true); return }
     const pg = e.target.closest('[data-kl-pack-gekauft]'); if(pg){ klHinzufuegen(klPackRids(pg.dataset.klPackGekauft)); return }
-    const pwg = e.target.closest('[data-kl-pack-weg]'); if(pwg){ const r = klPackRids(pwg.dataset.klPackWeg); if(r.length) klErledigt(r[0], r.length); return }
+    const pwg = e.target.closest('[data-kl-pack-spaeter]'); if(pwg){ const r = klPackRids(pwg.dataset.klPackSpaeter); if(r.length) klSpaeter(r[0], r.length, 7); return }
   })
   const klPackRids = key => klZeilenAlle().filter(x => x.z.user_id + '|' + x.z.firma === key).map(x => x.rid)
   document.getElementById('kl-liste')?.addEventListener('change', e => {

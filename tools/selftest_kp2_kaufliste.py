@@ -113,6 +113,23 @@ pruef(not hasattr(KL, "row_pruefen") and "/admin/kaufliste/anlegen" not in open(
 fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 pruef("/admin/konto-anlegen?ansicht=admin" in fe and "bulkKlFremdAnlegen" in fe, "Frontend legt fremde IDs über /admin/konto-anlegen an (Verwalter: ansicht=admin)")
 
+# KP2d „Später": Prüfung des Bodys + pausierte Zellen
+U = "11111111-2222-4333-8444-555555555555"
+pruef(KL.spaeter_pruefen({"user_id": U, "firma": "Tradeify", "anzahl": 2, "tage": 7})[0] == (U, "Tradeify", 2, 7), "Später: gültig (2 Konten, 7 Tage)")
+pruef(KL.spaeter_pruefen({"user_id": U, "firma": "Tradeify", "anzahl": 1})[0][3] == 7, "Später: Standard 7 Tage")
+for kaputt, txt in ((dict(tage=5), "nur 3/7/30 Tage"), (dict(anzahl=0), "anzahl ≥ 1"), (dict(anzahl=21), "anzahl ≤ 20"), (dict(anzahl=True), "anzahl kein bool"),
+                    (dict(user_id="x"), "user_id uuid"), (dict(firma=""), "firma Pflicht")):
+    pruef(KL.spaeter_pruefen(dict({"user_id": U, "firma": "Tradeify", "anzahl": 1, "tage": 7}, **kaputt))[1] is not None, f"Später abgewiesen: {txt}")
+pz = [{"user_id": "u1", "firma": "Tradeify", "status": "pausiert"}, {"user_id": "u2", "firma": "The5%ers", "status": "pausiert"},
+      {"user_id": "u1", "firma": "FTMO", "status": "frei"}]
+pruef([x["firma"] for x in KL.pausiert_aus_vorrat(pz, None, {"u1": "Aurel", "u2": "Carsten"})] == ["Tradeify", "The5%ers"], "pausierte Zellen (Admin: alle)")
+pruef([x["firma"] for x in KL.pausiert_aus_vorrat(pz, "u2")] == ["The5%ers"], "pausierte Zellen (normale ID: nur eigene)")
+kq = open(os.path.join(WURZEL, "kaufliste_app.py"), encoding="utf-8").read()
+pruef('"kaufliste_spaeter"' in kq and "vorrat_bestellt" not in kq.split("def registrieren")[1], "Später schreibt kaufliste_spaeter, nie vorrat_bestellt (keine Rechenwirkung)")
+pruef("data-kl-spaeter" in fe and "data-kl-weg" not in fe and "klSpaeterN" in fe, "Frontend: „Später“ statt „Erledigt“, ausgeblendete Zeilen je Zelle abgezogen")
+sq = open(os.path.join(WURZEL, "sql", "2026-11-25_kp2d_kaufliste_spaeter.sql"), encoding="utf-8").read()
+pruef("enable row level security" in sq and "revoke all on public.kaufliste_spaeter from anon, authenticated" in sq, "SQL: RLS an, anon/authenticated entzogen")
+
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402
 from datetime import datetime as _dt, timezone as _tz  # noqa: E402
