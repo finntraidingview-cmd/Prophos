@@ -81,7 +81,7 @@ def main():
     ok("TVK_START_ABSTAND_MS" in blk, "PC-Tab: Start < 45 min bleibt für alle Routen")
     ok("if(!sofort && plaene.some(" in blk, "PC-Tab: nur die Einmal-Marke sofort lockert „offener Plan (nicht Echo)“")
     tk = ph[ph.index("  async function tvkTick(){"):]
-    ok("streng ? '&nur_sofort=1' : ''" in tk[:3000] and "(streng && tvkFrei(true))" in tk[:600],
+    ok("streng ? '&nur_sofort=1' : ''" in tk[:3000] and "if(streng && locker){" in tk[:2500] and "nur_melden=1" in tk[:2500],
        "PC-Tab: streng gesperrt → holt nur Aufträge mit Marke sofort (nur_sofort=1)")
     j = ph.index("  function tvnRuhe(")
     ok("p.status === 'open' && !echo(p))) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],

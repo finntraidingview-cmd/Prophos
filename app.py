@@ -25750,6 +25750,19 @@ def pc_tv_konten_auftrag():
     uid, _mail, err = _login_uid_mail()
     if err:
         return err
+    if request.args.get("nur_melden") == "1":   # PC-Tab gesperrt: nur den Grund am fälligen „Gekauft"-Auftrag vermerken, nie etwas ausgeben (Master 25.11.2026)
+        try:
+            _sp = str(request.args.get("sperre") or "")[:80]
+            _jz = datetime.now(timezone.utc).isoformat()
+            for _o in (sb_select("tv_konten_auftrag", {"select": "id,ergebnis", "user_id": f"eq.{uid}", "status": "eq.offen", "art": "eq.gekauft",
+                                                       "faellig_at": f"lte.{_jz}", "limit": "5"}) or []):
+                _e = _o.get("ergebnis") if isinstance(_o.get("ergebnis"), dict) else {}
+                sb_update("tv_konten_auftrag", {"id": f"eq.{_o['id']}", "status": "eq.offen"},
+                          {"ergebnis": dict(_e, gesperrt=_sp, gesperrt_at=_jz, gesperrt_pc=str(request.args.get("pc") or "")[:40])})
+                print(f"[pa1] PC-Tab {str(request.args.get('pc') or '?')[:20]} gesperrt: {_sp} (Auftrag {str(_o['id'])[:8]})", flush=True)
+        except Exception as e:
+            print(f"[pa1] Sperr-Meldung: {type(e).__name__}: {str(e)[:100]}", flush=True)
+        return jsonify({"ok": True, "auftrag": None})
     # Probelauf-Weiche (tv_konten_pcs) gilt für Mail-Aufträge; „Gekauft"-Aufträge (PA1) haben ihre eigene (konto_suche_pcs, Standard alle Puls-PCs)
     mail_frei = tv_konten_pc_frei(request.args.get("pc"))
     gekauft_frei = pa1_pc_frei(request.args.get("pc"))

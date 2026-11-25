@@ -31338,10 +31338,18 @@
   }
   async function tvkTick(){
     const streng = tvkFrei()
-    if(window._tvkLaeuft || (streng && tvkFrei(true))) return   // streng gesperrt → nur noch Aufträge mit Einmal-Marke „sofort" holen
+    const locker = streng ? tvkFrei(true) : ''
+    if(window._tvkLaeuft) return
     let tok = null
     try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
     if(!tok) return
+    // Sperr-Grund melden (Master 25.11.2026, FTMO-Futures-Gekauft Finn + Pascal hing ohne sichtbaren Grund): auch gesperrt fragt der Tab
+    // Railway kurz an (nur_melden=1, gibt nie einen Auftrag aus) — Railway schreibt den Grund in die Spur des fälligen „Gekauft"-Auftrags
+    if(streng && locker){
+      try{ const pcq0 = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')
+        fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq0}&nur_melden=1&sperre=${encodeURIComponent(String(locker).slice(0, 80))}`, { headers: { 'sb-token': tok } }).catch(() => {}) }catch(_){}
+      return
+    }
     let a = null
     try{
       const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')   // Probelauf-Weiche TV_KONTEN_PCS (Railway)
@@ -62408,7 +62416,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2346'
+  const OS_TAB_BUILD = '2026-09-22.2347'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
