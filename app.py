@@ -25804,6 +25804,11 @@ def pc_tv_konten_auftrag():
         _arch = _arch if isinstance(_arch, dict) else {}
         _lebt = [k for k in konten if k.get("firm") == a["firma"] and k.get("external_id") and not ((_arch.get(str(k.get("id"))) or {}).get("archived"))]
         ext = (_lebt[0] if _lebt else {}).get("external_id")
+        # PA1e (Finn 25.11.2026, Finn + Pascal · FTMO Futures: beide alten Konten geblowt/archiviert, 3 neu gekauft): bei „Gekauft" darf das
+        # jüngste ARCHIVIERTE Konto den Login-Weg geben — die geblowte Nummer steht im Tradovate-Umschalter weiter drin, und ohne sie könnte
+        # nach einem Blow nie automatisch angelegt werden. Mail-Aufträge bleiben beim lebenden Konto (Prüfer 29.10.2026).
+        if not ext and a.get("art") == "gekauft":
+            ext = next((k.get("external_id") for k in konten if k.get("firm") == a["firma"] and k.get("external_id")), None)
         if not ext:   # kein lebendes Konto dieser Firma → nichts zu lesen, Auftrag als Fehler (kein Puls-Lauf); „Gekauft" → 🟠 (Finn legt von Hand an)
             gek = a.get("art") == "gekauft"
             sb_update("tv_konten_auftrag", {"id": f"eq.{a['id']}", "status": "eq.laeuft"},
