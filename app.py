@@ -26531,8 +26531,11 @@ def konto_suche():
         konten = _sb_all("accounts", {"select": "id,firm,external_id,created_at", "user_id": f"eq.{ziel}", "firm": f"eq.{firma}", "order": "created_at.desc"}) or []
         lebt = [k for k in konten if k.get("external_id") and not ((arch.get(str(k.get("id"))) or {}).get("archived"))]
         tvu = (sb_select("firm_specs", {"select": "tv_username", "user_id": f"eq.{ziel}", "name": f"eq.{firma}", "limit": "1"}) or [{}])[0].get("tv_username")
-        if not lebt or not str(tvu or "").strip():
-            grund = "kein aktives Konto dieser Firma als Login-Weg" if not lebt else "TradingView-Login fehlt in den Firmen-Einstellungen"
+        # PA1e (Finn 25.11.2026, Finn + Pascal · FTMO Futures: „Gekauft" öffnete das Fenster): alle alten Konten der Firma waren archiviert
+        # (geblowt) → „kein aktives Konto als Login-Weg". Der Weg ist der TradingView-Login aus firm_specs — ein lebendes Konto braucht es nicht,
+        # gerade nach geblowten Konten wird neu gekauft. Nur ohne Login UND ohne jedes Konto abbrechen.
+        if not str(tvu or "").strip():
+            grund = "TradingView-Login fehlt in den Firmen-Einstellungen" if lebt or konten else "kein Konto und kein TradingView-Login dieser Firma"
             return jsonify({"ok": False, "code": "login_fehlt", "msg": f"Login fehlt → von Hand anlegen ({grund})"})
         # PA1b (Finn 25.11.2026: „4–5 Tradeify für dieselbe ID … EINE Prüfung: eine Lesung, alle Konten auf einmal, eine Zeit"): je ID × Firma
         # genau EIN Auftrag. Weitere Klicks (auch andere Vorlage, auch gleichzeitig aus der Kaufliste) erhöhen dessen Posten und behalten die
