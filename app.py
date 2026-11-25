@@ -25520,8 +25520,12 @@ def pc_tv_konten_auftrag():
     uid, _mail, err = _login_uid_mail()
     if err:
         return err
-    if not tv_konten_pc_frei(request.args.get("pc")):
-        return jsonify({"ok": True, "auftrag": None, "pc_frei": False})   # Probelauf-Weiche: dieser PC liest (noch) nicht
+    # Probelauf-Weiche (tv_konten_pcs) gilt für Mail-Aufträge; „Gekauft"-Aufträge (PA1) haben ihre eigene (konto_suche_pcs, Standard alle Puls-PCs)
+    mail_frei = tv_konten_pc_frei(request.args.get("pc"))
+    gekauft_frei = pa1_pc_frei(request.args.get("pc"))
+    if not mail_frei and not gekauft_frei:
+        return jsonify({"ok": True, "auftrag": None, "pc_frei": False})   # dieser PC liest (noch) nicht
+    arten = [x for x, frei in (("mail", mail_frei), ("gekauft", gekauft_frei)) if frei]
     jetzt = datetime.now(timezone.utc)
     try:
         alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S)).isoformat()
@@ -25554,7 +25558,7 @@ def pc_tv_konten_auftrag():
                     pass   # offener Auftrag dieser Firma existiert schon (Index) — gut so
         faellig = sb_select("tv_konten_auftrag", dict({"select": "id,firma,art,faellig_at", "user_id": f"eq.{uid}", "status": "eq.offen",
                                                        "faellig_at": f"lte.{jetzt.isoformat()}", "order": "faellig_at.asc", "limit": "1"},
-                                                      **({} if TV_KONTEN_TAEGLICH else {"art": "eq.mail"}))) or []   # Tages-Fallback aus: nie ausgeben
+                                                      **({"art": f"in.({','.join(arten + (['taeglich'] if TV_KONTEN_TAEGLICH and mail_frei else []))})"}))) or []   # Tages-Fallback aus: nie ausgeben
         if not faellig:
             return jsonify({"ok": True, "auftrag": None})
         a = faellig[0]
@@ -25570,9 +25574,13 @@ def pc_tv_konten_auftrag():
         _arch = _arch if isinstance(_arch, dict) else {}
         _lebt = [k for k in konten if k.get("firm") == a["firma"] and k.get("external_id") and not ((_arch.get(str(k.get("id"))) or {}).get("archived"))]
         ext = (_lebt[0] if _lebt else {}).get("external_id")
-        if not ext:   # kein lebendes Konto dieser Firma → nichts zu lesen, Auftrag als Fehler (kein Puls-Lauf)
+        if not ext:   # kein lebendes Konto dieser Firma → nichts zu lesen, Auftrag als Fehler (kein Puls-Lauf); „Gekauft" → 🟠 (Finn legt von Hand an)
+            gek = a.get("art") == "gekauft"
             sb_update("tv_konten_auftrag", {"id": f"eq.{a['id']}", "status": "eq.laeuft"},
-                      {"status": "fehler", "erledigt_at": jetzt.isoformat(), "ergebnis": {"msg": "kein aktives Konto dieser Firma in Prophos"}})
+                      {"status": "pruefen" if gek else "fehler", "erledigt_at": jetzt.isoformat(),
+                       "ergebnis": {"msg": "kein aktives Konto dieser Firma in Prophos", "code": "kein_konto", "pa1_fehler": gek}})
+            if gek:
+                _pa1_alarm(dict(a, user_id=uid, status="pruefen"), "kein aktives Konto als Login-Weg", "Puls kann die Liste nicht lesen — bitte von Hand anlegen.")
             return jsonify({"ok": True, "auftrag": None})
         return jsonify({"ok": True, "auftrag": {"id": a["id"], "firma": a["firma"], "art": a["art"], "ext": ext}})
     except Exception as e:
@@ -25612,6 +25620,13 @@ def pc_tv_konten_auftrag_erledigt():
         sch = str(b.get("schritt") or "")[:40]
         if sch:
             erg["schritt"] = sch
+        # PA1: „Gekauft"-Auftrag → Abgleich gegen alle Konten, anlegen, nächste Prüfung/🟠 (eigener Zweig, Mail-Aufträge unverändert)
+        a = (sb_select("tv_konten_auftrag", {"select": "*", "id": f"eq.{aid}", "user_id": f"eq.{uid}", "limit": "1"}) or [{}])[0]
+        if a.get("art") == "gekauft":
+            if a.get("status") != "laeuft":
+                return jsonify({"ok": True, "n": len(zeilen), "pa1": "nicht mehr laufend"})
+            pb = _pa1_erledigt(uid, a, b, erg)
+            return jsonify({"ok": True, "n": len(zeilen), "pa1": pb.get("status")})
         if b.get("ok"):
             body = {"status": "erledigt", "erledigt_at": jetzt, "ergebnis": erg}
         elif str(b.get("code") or "") == "belegt":
@@ -25690,6 +25705,593 @@ def _tv_konten_markieren(uid, name, ignoriert, angelegt_account_id):
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     return jsonify({"ok": True, "n": len(rows)})
+
+
+# ══ PA1 „GEKAUFT" → PULS LEGT DIE FUTURES-KONTEN AN (Finn 25.11.2026: „Wenn ich bei Futures gekauft habe, drücke ich nur auf ‚Gekauft'. Dann
+# soll der Knopf grün werden und dort die Zeit stehen, wann überprüft wird."; Konstrukt .claude/master/berichte/2026-11-25_PA1_puls_konto_anlegen.md).
+# Klick „Gekauft" in der Kaufliste (S6/KP2: ID × Firma × Vorlage × Anzahl) → POST /konto-suche legt einen Auftrag art 'gekauft' in
+# tv_konten_auftrag an, fällig gestreut auf die Sekunde (Jitter-Regel): werktags 1 min–6 h, am Wochenende 1 min–24 h (Finn 25.11.2026).
+# WOCHENENDE = CME-Wochenende: Freitag 17:00 bis Sonntag 17:00 Chicago (Handelsschluss → Öffnung; Winter Fr 03:00 bis Mo 03:00 Dubai). Gewählt statt
+# Sa/So Dubai, weil Finn genau dann nicht tradet und die PCs frei sind — ein Klick Freitagabend Dubai (US-Markt noch offen) zählt noch als
+# Werktag. Der PC-Tab der ID holt ihn über den BESTEHENDEN Weg (GET /pc/tv-konten-
+# auftrag → tvkTick → Panel /api/tv-konten-liste → order_bot modus_tvkontenliste: neu laden, Umschalter auf, lesen, Esc, „Liste zu" bewiesen —
+# nur lesen, nie ein Konto wählen, nie Order; tvkFrei sperrt bei jedem offenen Nicht-Echo-Plan, Start ≤ 45 min, Puls/Polar/Big Trade).
+# POST /pc/tv-konten-auftrag/erledigt rechnet hier: unbekannt = gelesene Kennungen der Firma − External IDs ALLER Konten ALLER IDs (archivierte
+# zählen mit) − verworfene/ignorierte − Namen, die Puls schon > 6 h vor dem Klick sah. Jede unbekannte Kennung wird nach PA1_MUSTER eingeordnet:
+# CHALLENGE (zählt als Kauf) · FUNDED (nie ein Kauf — ein bestandenes Konto bekommt bei Funded eine NEUE Nummer, z. B. Tradeify TDFYSL… →
+# FTDFYSLX…; hat die ID × Firma ein bestandenes Konto ohne Nachfolger, ist sie dessen Nachfolger-Nummer: nur gemerkt, der Nachfolger-Assistent
+# zeigt sie an) · MEHRDEUTIG (Challenge und Funded gleich geformt, heute FTMO Futures „FTMO" + Ziffern: zählt nur als Kauf, wenn die ID × Firma
+# KEIN bestandenes Konto ohne Nachfolger hat — dann kann keine Funded-Nummer neu sein) · UNKLAR (kein Muster). Unklare Kennung oder mehr
+# Challenges als gekauft → nichts anlegen, Knopf ruhig „… · von Hand" (Finn 25.11.2026: kein 🟠, keine Liste). Sonst anlegen mit der Vorlage
+# (Name „<Größe> <External ID> → <Phase>", Kauf-Buchung wie das Bulk-Anlegen; die Balance liest der Bot danach von selbst). Fehlt noch etwas:
+# nächste Prüfung in 1–3 h (Wochenende 4–12 h), bis 24 h nach der ersten Prüfung (Klick am Wochenende: 48 h), dann 🟠. Riegel gegen Doppel-
+# Anlage: konto_suche_riegel (Firma × normierte Kennung, Primärschlüssel). Alle Gruppen (HT und Emin, Finn 25.11.2026); Topstep/CFD nie (kein
+# Tradovate-Umschalter). Die Vorschlags-Sperre vom 16.11. bleibt: angelegt wird NUR nach „Gekauft".
+# MUSTER je Firma (aus den External IDs in accounts abgeleitet, 25.11.2026 — Challenge ↔ Funded/Winning Days, normiert ohne Sonderzeichen):
+#   Tradeify            Challenge TDFYSL<Größe><Nr.>     z. B. TDFYSL150104577938  (538)   Funded FTDFYSLX…/FTDFY…  FTDFYSLX150132677414 (129)
+#   Apex Trader         Challenge APEX<13 Ziffern>       APEX4503090000004         (223)   Funded PAAPEX<13>        PAAPEX4503090000003   (53)
+#   Lucid Trading       Challenge LFE<Ziffern>           LFE050100730720001        (150)   Funded LFF<Ziffern>      LFF05097865230001     (23)
+#   FundedNext Futures  Challenge FNFTCH<Name><Nr.>      FNFTCHAMIRSHARIF14974      (37)   Funded FNFTFA<Name><Nr.> FNFTFAAMIRSHARIF66387  (6)
+#   MyFundedFutures     Challenge MFFUEV…<Ziffern>       MFFUEVPRO656214001          (7)   Funded MFFUSF…           MFFUSFPRO656214009     (1)
+#   FTMO Futures        Challenge FTMO<6 Ziffern>        FTMO110764                 (29)   Funded GLEICH            FTMO409613             (5)  → mehrdeutig
+PA1_MUSTER = {   # accounts.firm → (Challenge-Regex, Funded-Regex) auf der normierten Kennung (fullmatch)
+    "Tradeify": (r"TDFYSL\d{6,}", r"FTDFY[A-Z]*\d{6,}"),
+    "Apex Trader": (r"APEX\d{10,}", r"PAAPEX\d{10,}"),
+    "Lucid Trading": (r"LFE\d{8,}", r"LFF\d{8,}"),
+    "FundedNext Futures": (r"FNFTCH[A-Z]+\d{3,}", r"FNFTFA[A-Z]+\d{3,}"),
+    "MyFundedFutures": (r"MFFUEV[A-Z]*\d{6,}", r"MFFUSF[A-Z]*\d{6,}"),
+    "FTMO Futures": (r"FTMO\d{5,}", r"FTMO\d{5,}"),
+}
+PA1_FIRMEN = tuple(PA1_MUSTER)
+# Größe steckt in der Challenge-Kennung (3 Ziffern nach dem Präfix, × 1000): Tradeify TDFYSL150…/TDFYSL300…, Lucid LFE050…/LFE100…/LFE150…
+# (Review 25.11.2026: 150k gekauft, die 50k-Nummer taucht zuerst auf → sonst mit der falschen Vorlage angelegt). Andere Größe = anderer Kauf, zählt nicht.
+PA1_GROESSE_PRAEFIX = {"Tradeify": "TDFYSL", "Lucid Trading": "LFE"}
+PA1_TYPEN = frozenset({"challenge"})            # Futures-Kauf = Challenge (Kontoart Futures = challenge)
+PA1_BESTANDEN_TYPEN = frozenset({"challenge", "phase1", "phase2"})   # wie HAND_NACH: Ziel erreicht → Nachfolger nötig
+PA1_VERZUG_MIN_S, PA1_VERZUG_MAX_S = 60, 6 * 3600          # werktags 1 min–6 h
+PA1_VERZUG_WE_MAX_S = 24 * 3600                            # Wochenende 1 min–24 h
+PA1_NACH_MIN_S, PA1_NACH_MAX_S = 3600, 3 * 3600            # Nachprüfung werktags 1–3 h
+PA1_NACH_WE_MIN_S, PA1_NACH_WE_MAX_S = 4 * 3600, 12 * 3600  # … am Wochenende 4–12 h
+PA1_FRIST_S = 24 * 3600                                    # ab der ersten Prüfung; Klick am Wochenende: PA1_FRIST_WE_S
+PA1_FRIST_WE_S = 48 * 3600
+PA1_VORHER_S = 6 * 3600
+PA1_MAX_ANZAHL = 20
+PA1_MAX_FEHLVERSUCHE = 4
+PA1_STAND_H = 48
+PA1_SQL = "sql/2026-11-25_pa1_konto_suche.sql"
+PA1_PHASE = {"challenge": "Challenge", "phase1": "Phase 1", "phase2": "Phase 2", "funded": "Funded", "funded_cfd": "Funded", "winning_days": "Winning Days", "live": "Live"}
+_pa1_pcs_merk = {"s": 0.0, "liste": None}
+
+
+def pa1_verzug_s(r=None, lo=PA1_VERZUG_MIN_S, hi=PA1_VERZUG_MAX_S):
+    """REIN RECHNEND: gestreute Wartezeit in Sekunden, gleichverteilt zwischen lo und hi (Jitter-Regel: nie fest)."""
+    r = random.random() if r is None else min(1.0, max(0.0, float(r)))
+    return int(lo + (hi - lo) * r)
+
+
+def pa1_iso(v):
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def pa1_wochenende(jetzt):
+    """REIN RECHNEND: CME-Wochenende? Freitag ab 17:00 bis Sonntag vor 17:00 Chicago (Sommer-/Winterzeit über die Zone)."""
+    c = jetzt.astimezone(ZoneInfo("America/Chicago"))
+    return (c.weekday() == 4 and c.hour >= 17) or c.weekday() == 5 or (c.weekday() == 6 and c.hour < 17)
+
+
+def pa1_klick_zeiten(jetzt, r=None):
+    """REIN RECHNEND: Klick „Gekauft" → (faellig_at, frist_bis) als datetime. Erste Prüfung werktags in 1 min–6 h, am Wochenende 1 min–24 h
+    (auf die Sekunde gestreut); Frist = erste Prüfung + 24 h (Klick am Wochenende + 48 h)."""
+    we = pa1_wochenende(jetzt)
+    faellig = jetzt + timedelta(seconds=pa1_verzug_s(r, PA1_VERZUG_MIN_S, PA1_VERZUG_WE_MAX_S if we else PA1_VERZUG_MAX_S))
+    return faellig, faellig + timedelta(seconds=PA1_FRIST_WE_S if we else PA1_FRIST_S)
+
+
+def pa1_naechste(jetzt, frist, r=None):
+    """REIN RECHNEND: nächste Prüfung nach einem Teilfund/Fehler — werktags +1–3 h, am Wochenende +4–12 h, nie hinter der Frist."""
+    lo, hi = (PA1_NACH_WE_MIN_S, PA1_NACH_WE_MAX_S) if pa1_wochenende(jetzt) else (PA1_NACH_MIN_S, PA1_NACH_MAX_S)
+    return min(jetzt + timedelta(seconds=pa1_verzug_s(r, lo, hi)), frist)
+
+
+def pa1_art(k, firma):
+    """REIN RECHNEND: normierte Kennung → 'challenge' | 'funded' | 'mehrdeutig' | None (passt zu keinem Muster der Firma)."""
+    m = PA1_MUSTER.get(firma)
+    if not m:
+        return None
+    c, f = bool(re.fullmatch(m[0], k)), bool(re.fullmatch(m[1], k))
+    return "mehrdeutig" if c and f else "challenge" if c else "funded" if f else None
+
+
+def pa1_name(vorlage, ext):
+    """REIN RECHNEND: Namensregel .1472 wie kontoNameRegel im Browser — „<Größe> <External ID> → <Phase>" (Größe gerundet auf k)."""
+    v = vorlage or {}
+    gr = _wd_num(v.get("starting_balance")) or _wd_num(v.get("account_size"))
+    kopf = " ".join(x for x in ((f"{int(gr / 1000 + 0.5)}k" if gr else ""), str(ext or "").strip()) if x)
+    return f"{kopf}{' ' if kopf else ''}→ {PA1_PHASE.get(v.get('account_type') or 'challenge', '')}".strip()
+
+
+def pa1_konto_zeile(vorlage, firma, ext):
+    """REIN RECHNEND: neue Konto-Zeile aus der Vorlage (wie saveBulkAccounts: Größe, Kosten, DD-Felder, Ziel, Consistency; wd_farm aus).
+    user_id setzt der Aufrufer. Leere Felder fehlen (DB-Standard)."""
+    v = vorlage or {}
+    gr = _wd_num(v.get("starting_balance")) or _wd_num(v.get("account_size"))
+    z = {"name": pa1_name(v, ext), "firm": firma, "account_type": v.get("account_type") or "challenge", "external_id": ext,
+         "account_size": gr, "starting_balance": gr, "wd_farm": False}
+    for k in ("purchase_cost", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade", "max_profit_per_trade"):
+        if _wd_num(v.get(k)) and _wd_num(v.get(k)) > 0:
+            z[k] = _wd_num(v.get(k))
+    if v.get("goal_kind"):
+        z.update(goal_kind=v.get("goal_kind"), goal_target=v.get("goal_target") or None)
+    if v.get("consistency_pct") is not None and _wd_num(v.get("consistency_pct")) is not None:
+        z["consistency_pct"] = _wd_num(v.get("consistency_pct"))
+    return {k: x for k, x in z.items() if x is not None}
+
+
+def pa1_groesse_passt(k, firma, groesse):
+    """REIN RECHNEND: passt die Größe in der Kennung (PA1_GROESSE_PRAEFIX) zur Vorlage? Ohne Größe in Kennung/Vorlage → True."""
+    pre = PA1_GROESSE_PRAEFIX.get(firma)
+    m = re.match(re.escape(pre) + r"(\d{3})", k) if pre else None
+    if not m or not _wd_num(groesse):
+        return True
+    return int(m.group(1)) * 1000 == int(_wd_num(groesse))
+
+
+def pa1_neue(namen, firma, konten, vorher=(), weg=(), offen_bestanden=False, groesse=None):
+    """REIN RECHNEND: gelesene Umschalter-Namen → {challenge, nachfolger, funded, unklar} (Listen normierter Kennungen, Reihenfolge wie gelesen,
+    ohne Doppel). Nur Kennungen, die in KEINEM Konto stehen (alle IDs, archivierte mit; admin_konto_doppel: External ID normiert, Name enthält
+    die Nummer ab 8 Zeichen) und nicht in vorher/weg. offen_bestanden = die ID × Firma hat ein bestandenes Konto ohne Nachfolger: neue Funded-
+    Nummern sind dann Nachfolger-Nummern (nachfolger), mehrdeutige zählen NICHT als Challenge (nachfolger + unklar → „von Hand"). Gekürzte
+    Namen („TDFYSL…") nie. groesse = Kontogröße der Vorlage: Challenges mit anderer Größe in der Kennung → andere_groesse (zählen nicht)."""
+    aus = {"challenge": [], "nachfolger": [], "funded": [], "unklar": [], "andere_groesse": []}
+    if firma not in PA1_MUSTER:
+        return aus
+    gesehen = set()
+    for n in namen or ():
+        k = admin_konto_ext_norm(n)
+        if not TV_KONTEN_NAME_RE.fullmatch(k) or sum(c.isdigit() for c in k) < 3 or k in gesehen:
+            continue
+        gesehen.add(k)
+        if k in vorher or k in weg or admin_konto_doppel(k, konten):
+            continue
+        art = pa1_art(k, firma)
+        if art == "challenge" or (art == "mehrdeutig" and not offen_bestanden):
+            aus["challenge" if pa1_groesse_passt(k, firma, groesse) else "andere_groesse"].append(k)
+        elif art == "funded":
+            aus["nachfolger" if offen_bestanden else "funded"].append(k)
+        elif art == "mehrdeutig":   # FTMO Futures mit offenem Nachfolger: Hinweis UND „von Hand" (nicht eindeutig als Kauf)
+            aus["nachfolger"].append(k)
+            aus["unklar"].append(k)
+        else:
+            aus["unklar"].append(k)
+    return aus
+
+
+def pa1_urteil(teile, rest):
+    """REIN RECHNEND: {challenge, unklar, …} → 'keine' | 'anlegen' (1…rest Challenges) | 'ueberzahl' (mehr Challenges als noch gekauft offen)
+    | 'unklar' (eine unbekannte Kennung passt zu keinem Muster). ueberzahl/unklar → nichts anlegen, Knopf ruhig „von Hand" (kein 🟠).
+    Funded-/Nachfolger-Nummern zählen nie."""
+    if teile.get("unklar"):
+        return "unklar"
+    ch = teile.get("challenge") or []
+    if not ch:
+        return "keine"
+    return "ueberzahl" if len(ch) > max(0, int(rest or 0)) else "anlegen"
+
+
+def pa1_offen_bestanden(konten, uid, firma, archiv):
+    """REIN RECHNEND: hat die ID × Firma ein Konto mit Ziel erreicht (accounts.ziel_erreicht_at, Ziel-Wache), das noch eine Challenge/Phase ist
+    und nicht archiviert — also einen offenen Nachfolger (wie die Gruppe „Bestanden" in /admin/handarbeit)? → Liste dieser Konten."""
+    return [a for a in konten or () if str(a.get("user_id")) == str(uid) and a.get("firm") == firma and a.get("ziel_erreicht_at")
+            and a.get("account_type") in PA1_BESTANDEN_TYPEN and not ((archiv or {}).get(str(a.get("id"))) or {}).get("archived")]
+
+
+def pa1_weiter(a, n_neu, jetzt, r=None):
+    """REIN RECHNEND: Update-Body nach einer Lesung (n_neu = gerade angelegt). Alle da → erledigt; sonst vor der Frist nächste Prüfung in
+    1–3 h (höchstens bis zur Frist), nach der Frist → pruefen (🟠 „fehlt noch")."""
+    gesamt = len(a.get("angelegt") or []) + int(n_neu or 0)
+    anzahl = int(a.get("anzahl") or 1)
+    if gesamt >= anzahl:
+        return {"status": "erledigt", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+    frist = pa1_iso(a.get("frist_bis")) or (jetzt + timedelta(seconds=PA1_FRIST_S))
+    if jetzt >= frist:
+        return {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+    return {"status": "offen", "laeuft_at": None, "faellig_at": pa1_naechste(jetzt, frist, r).isoformat()}
+
+
+def pa1_nach_fehler(a, jetzt, r=None):
+    """REIN RECHNEND: Puls konnte nicht lesen → versuche + 1; vor der Frist und unter PA1_MAX_FEHLVERSUCHE neu in 1–3 h, sonst pruefen (🟠)."""
+    v = int(a.get("versuche") or 0) + 1
+    frist = pa1_iso(a.get("frist_bis")) or (jetzt + timedelta(seconds=PA1_FRIST_S))
+    if v >= PA1_MAX_FEHLVERSUCHE or jetzt >= frist:
+        return {"status": "pruefen", "versuche": v, "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+    return {"status": "offen", "versuche": v, "laeuft_at": None, "faellig_at": pa1_naechste(jetzt, frist, r).isoformat()}
+
+
+def pa1_hm(v):
+    t = pa1_iso(v)
+    return t.astimezone(ZoneInfo("Asia/Dubai")).strftime("%H:%M") if t else "?"
+
+
+def pa1_knopf(a):
+    """REIN RECHNEND: Text + Art des Knopfs „Gekauft" (Zeiten Dubai). art: gruen | laeuft | fertig | ruhig („… · von Hand", kein 🟠) | warn (🟠)."""
+    a = a or {}
+    st, anzahl = a.get("status"), int(a.get("anzahl") or 1)
+    ang = [x for x in (a.get("angelegt") or []) if isinstance(x, dict)]
+    enden = ", ".join("…" + str(x.get("ext") or "")[-4:] for x in ang)
+    erg = a.get("ergebnis") if isinstance(a.get("ergebnis"), dict) else {}
+    if st == "laeuft":
+        return {"text": "läuft …", "art": "laeuft"}
+    if st == "offen":
+        if ang:
+            return {"text": f"{len(ang)}/{anzahl} gefunden · nächste Prüfung {pa1_hm(a.get('faellig_at'))}", "art": "gruen"}
+        return {"text": f"✓ Gekauft · Prüfung {pa1_hm(a.get('faellig_at'))}", "art": "gruen"}
+    if st == "erledigt":
+        if ang:
+            return {"text": f"angelegt: {enden}", "art": "fertig"}
+        return {"text": str(erg.get("pa1") or "erledigt"), "art": "fertig"}
+    if st == "pruefen":
+        if erg.get("pa1_ruhig"):
+            return {"text": str(erg.get("pa1_ruhig"))[:80], "art": "ruhig"}
+        if erg.get("code") and erg.get("pa1_fehler"):
+            return {"text": "🟠 Puls konnte nicht lesen — von Hand anlegen", "art": "warn"}
+        if erg.get("pa1"):
+            return {"text": "🟠 " + str(erg.get("pa1"))[:80], "art": "warn"}
+        return {"text": f"🟠 {len(ang)}/{anzahl} gefunden — Rest nicht aufgetaucht", "art": "warn"}
+    return {"text": "🟠 Suche abgebrochen — von Hand anlegen", "art": "warn"}
+
+
+def pa1_klick_lesen(b):
+    """REIN RECHNEND: Body von POST /konto-suche → ((firma, vorlage_id, anzahl), None) | (None, (code, msg))."""
+    b = b if isinstance(b, dict) else {}
+    firma = str(b.get("firma") or "").strip()
+    if firma not in PA1_FIRMEN:
+        return None, ("firma_nicht", f"„{firma or '?'}“: Puls sucht nur Tradovate-Futures ({', '.join(PA1_FIRMEN)}) — von Hand anlegen")
+    vid = str(b.get("vorlage_id") or "").strip().lower()
+    if not ADMIN_MAIL_UID_RE.fullmatch(vid):
+        return None, ("vorlage", "vorlage_id fehlt oder ungültig")
+    n = b.get("anzahl", 1)
+    if isinstance(n, bool) or not (isinstance(n, int) or (isinstance(n, str) and re.fullmatch(r"\d{1,2}", n.strip()))):
+        return None, ("anzahl", "anzahl = ganze Zahl 1–20")
+    n = int(n)
+    if not 1 <= n <= PA1_MAX_ANZAHL:
+        return None, ("anzahl", "anzahl = ganze Zahl 1–20")
+    return (firma, vid, n), None
+
+
+def pa1_pc_frei(pc, jetzt=None):
+    """Weiche nur für „Gekauft"-Aufträge: auto_plan_regeln.regeln.konto_suche_pcs = Liste der PCs bzw. ["alle"]; fehlt der Schlüssel → alle
+    Puls-PCs (Finn kauft für jede ID). Unabhängig von der Probelauf-Weiche tv_konten_pcs (Mail-Aufträge). 60 s gemerkt; DB nicht lesbar → alle."""
+    jetzt = time.time() if jetzt is None else jetzt
+    if _pa1_pcs_merk["liste"] is None or jetzt - _pa1_pcs_merk["s"] >= 60:
+        liste = ["alle"]
+        try:
+            regeln = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln")) or {}
+            if isinstance(regeln, dict) and isinstance(regeln.get("konto_suche_pcs"), list):
+                liste = [str(x).strip().lower() for x in regeln["konto_suche_pcs"]]
+        except Exception:
+            pass
+        _pa1_pcs_merk.update(s=jetzt, liste=liste)
+    liste = _pa1_pcs_merk["liste"]
+    return "alle" in liste or (bool(pc) and str(pc).strip().lower() in liste)
+
+
+def _pa1_archiv(uid):
+    try:
+        v = ((sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"}) or [{}])[0].get("value")) or {}
+    except Exception:
+        v = {}
+    return v if isinstance(v, dict) else {}
+
+
+def _pa1_sql_fehlt(e):
+    t = str(getattr(getattr(e, "response", None), "text", "") or e)
+    return any(w in t for w in ("anzahl", "vorlage_id", "angelegt", "frist_bis", "erstellt_von", "konto_suche_riegel", "tv_konten_auftrag_art_check",
+                                "tv_konten_auftrag_status_check", "PGRST204", "42703", "42P01"))
+
+
+def _pa1_aus(a, person=None):
+    """Auftragszeile → Antwort für das Frontend (S6-Knopf)."""
+    a = dict(a or {})
+    return {"id": a.get("id"), "user_id": a.get("user_id"), "person": person, "firma": a.get("firma"), "vorlage_id": a.get("vorlage_id"),
+            "anzahl": a.get("anzahl"), "angelegt": a.get("angelegt") or [], "status": a.get("status"), "faellig_at": a.get("faellig_at"),
+            "frist_bis": a.get("frist_bis"), "created_at": a.get("created_at"), "knopf": pa1_knopf(a)}
+
+
+def _pa1_alarm(a, titel, text):
+    try:
+        uid = str(a.get("user_id") or "")
+        if uid and _alarm_fremd_verwaltet(uid):   # Emins Gruppe: nie an die Master-IDs (wie _alarm_weiter) — der Knopf zeigt den Stand
+            return
+        person = _ap_namen()[0].get(uid) or uid[:8]
+        alarm_senden(2, "konto_suche", f"{person} · {a.get('firma')}: {titel}", text, uid=uid or None, schluessel=f"pa1-{str(a.get('id'))[:8]}-{a.get('status')}",
+                     tag=f"pa1-{str(a.get('id'))[:8]}")
+    except Exception as e:
+        print(f"[pa1] ⚠️ Alarm nicht gesendet: {type(e).__name__}: {e}", flush=True)
+
+
+def _pa1_anlegen(uid, a, namen, vorlage):
+    """Legt je Kennung ein Konto für uid an (Riegel zuerst, dann accounts, Kauf-Buchung, tv_konten markiert). → [{id, ext, name}]. Wirft nie;
+    eine Kennung mit Fehler fällt raus (Riegel wieder frei, damit eine spätere Prüfung sie anlegen kann)."""
+    aus = []
+    firma = a.get("firma")
+    for k in namen or ():
+        try:
+            sb_insert("konto_suche_riegel", {"firma": firma, "ext_norm": k, "user_id": uid, "auftrag_id": a.get("id")})
+        except Exception as e:
+            print(f"[pa1] {firma} {k}: Riegel belegt/nicht setzbar ({type(e).__name__}) — nicht angelegt", flush=True)
+            continue
+        zeile = pa1_konto_zeile(vorlage, firma, k)
+        try:
+            if not _wd_num(zeile.get("max_drawdown")):
+                konto_dd_ergaenzen(zeile, vorlage, *_konto_dd_regeln(uid, zeile.get("account_type")))
+        except Exception as e:
+            print(f"[pa1] ⚠️ Max DD nicht ergänzt: {type(e).__name__}: {e}", flush=True)
+        try:
+            try:
+                neu = sb_insert("accounts", dict(zeile, user_id=uid))
+            except requests.exceptions.HTTPError as e:
+                if "consistency_pct" not in zeile or "consistency_pct" not in str(getattr(getattr(e, "response", None), "text", "") or ""):
+                    raise
+                zeile.pop("consistency_pct")
+                neu = sb_insert("accounts", dict(zeile, user_id=uid))
+        except Exception as e:
+            print(f"[pa1] ⚠️ {firma} {k} nicht angelegt: {type(e).__name__}: {str(e)[:160]}", flush=True)
+            try:
+                sb_delete("konto_suche_riegel", {"firma": f"eq.{firma}", "ext_norm": f"eq.{k}", "account_id": "is.null"})
+            except Exception:
+                pass
+            continue
+        acc_id = (neu or {}).get("id")
+        aus.append({"id": acc_id, "ext": k, "name": zeile["name"]})
+        print(f"[pa1] {str(uid)[:8]} · {firma}: {zeile['name']} angelegt ({acc_id}, Auftrag {str(a.get('id'))[:8]})", flush=True)
+        for schritt, f in (
+            ("Riegel", lambda: sb_update("konto_suche_riegel", {"firma": f"eq.{firma}", "ext_norm": f"eq.{k}"}, {"account_id": acc_id})),
+            ("Kauf-Buchung", lambda: zeile.get("purchase_cost") and sb_insert("transactions", {
+                "user_id": uid, "account_id": acc_id, "account_name": zeile["name"], "account_firm": firma, "kind": "account_purchase",
+                "amount": -abs(float(zeile["purchase_cost"])), "currency": "EUR", "occurred_at": datetime.now(timezone.utc).date().isoformat(),
+                "notes": "Account-Kauf (auto, Gekauft-Knopf)", "auto_generated": True})),
+            ("TV-Zeile", lambda: sb_update("tv_konten", {"user_id": f"eq.{uid}", "name": f"eq.{k}", "angelegt_account_id": "is.null"}, {"angelegt_account_id": acc_id})),
+        ):
+            try:
+                f()
+            except Exception as e:
+                print(f"[pa1] ⚠️ {k}: {schritt} nicht gebucht ({type(e).__name__})", flush=True)
+    return aus
+
+
+def _pa1_erledigt(uid, a, b, erg):
+    """Ergebnis eines „Gekauft"-Laufs (aus pc_tv_konten_auftrag_erledigt, nach dem tv_konten-Upsert): auswerten, anlegen, Auftrag weiter. Wirft."""
+    jetzt = datetime.now(timezone.utc)
+    aid = a["id"]
+    anzahl0 = a.get("anzahl")                       # Guard: ein zweiter Klick während des Laufs erhöht anzahl → nicht mit der alten abschließen
+    frist = pa1_iso(a.get("frist_bis")) or (jetzt + timedelta(seconds=PA1_FRIST_S))
+    body = None
+    if b.get("ok"):
+        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,ziel_erreicht_at"}) or []   # ALLE IDs (Service-Key), archivierte mit
+        v = (sb_select("bulk_vorlagen", {"select": "*", "id": f"eq.{a.get('vorlage_id')}", "limit": "1"}) or [None])[0]
+        erstellt = pa1_iso(a.get("created_at")) or jetzt
+        vorher, weg = set(), set()
+        for r in sb_select("tv_konten", {"select": "name,zuerst_at,ignoriert_at", "user_id": f"eq.{uid}", "limit": "2000"}) or []:
+            k = admin_konto_ext_norm(r.get("name"))
+            if r.get("ignoriert_at"):
+                weg.add(k)
+            z = pa1_iso(r.get("zuerst_at"))
+            if z and z < erstellt - timedelta(seconds=PA1_VORHER_S):
+                vorher.add(k)
+        try:
+            weg |= {admin_konto_ext_norm(x) for x in (_konto_verworfen_lesen([uid]).get(str(uid)) or [])}
+        except Exception:
+            pass
+        # Basis (Review 25.11.2026): sah Puls diese Firma bei der ID schon > 6 h vor dem Klick im Umschalter? Ohne Basis wäre jede alte, in
+        # Prophos fehlende Nummer „neu" → dann nichts automatisch anlegen (ruhig „erste Lesung · von Hand"); die Lesung legt die Basis für den nächsten Kauf
+        basis = any(pa1_art(k, a.get("firma")) for k in vorher)
+        bestanden = pa1_offen_bestanden(konten, uid, a.get("firma"), _pa1_archiv(uid))
+        gr = _wd_num((v or {}).get("starting_balance")) or _wd_num((v or {}).get("account_size"))
+        teile = pa1_neue([n for n in (b.get("konten") or []) if isinstance(n, str)], a.get("firma"), konten, vorher, weg,
+                         offen_bestanden=bool(bestanden), groesse=gr)
+        neu = teile["challenge"]
+        rest = int(a.get("anzahl") or 1) - len(a.get("angelegt") or [])
+        urteil = pa1_urteil(teile, rest)
+        if urteil == "anlegen" and not basis:
+            urteil = "ohne_basis"
+        erg = dict(erg, pa1_neu=neu, pa1_nachfolger=teile["nachfolger"], pa1_funded=teile["funded"], pa1_unklar=teile["unklar"],
+                   pa1_andere_groesse=teile["andere_groesse"], pa1_urteil=urteil)
+        if teile["nachfolger"]:   # Funded-Nummer eines bestandenen Kontos: nie ein Kauf — nur gemerkt (Nachfolger-Assistent zeigt sie an)
+            print(f"[pa1] {str(uid)[:8]} · {a.get('firma')}: Nachfolger-Nummer(n) gesehen {', '.join(teile['nachfolger'])} — nicht als Kauf gezählt", flush=True)
+        if urteil in ("ueberzahl", "unklar", "ohne_basis"):
+            # Finn 25.11.2026 („Wird nicht passieren, einfach auslassen"): nichts anlegen, ruhig am Knopf — kein 🟠, keine Auswahl
+            body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+            erg["pa1_ruhig"] = {"ueberzahl": "mehr gefunden · von Hand", "unklar": "unklare Nummer · von Hand"}.get(urteil, "erste Lesung · von Hand")
+        else:
+            if urteil == "anlegen":
+                if not v:
+                    body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+                    erg["pa1"] = "Vorlage nicht mehr da — von Hand anlegen"
+                    _pa1_alarm(dict(a, status="pruefen"), "Vorlage nicht mehr da — nichts angelegt", "Neue Konten: " + ", ".join(neu) + " — bitte von Hand anlegen.")
+                else:
+                    angelegt = _pa1_anlegen(uid, a, neu, v)
+                    if angelegt:   # sofort festhalten — unabhängig vom Status-Guard unten (sonst gälten sie beim nächsten Lauf als „bekannt, fehlt")
+                        a = dict(a, angelegt=(a.get("angelegt") or []) + angelegt)
+                        try:
+                            sb_update("tv_konten_auftrag", {"id": f"eq.{aid}"}, {"angelegt": a["angelegt"]})
+                        except Exception as e:
+                            print(f"[pa1] ⚠️ angelegt nicht vorab gemerkt ({type(e).__name__}) — kommt mit dem Abschluss", flush=True)
+            if body is None:
+                body = pa1_weiter(a, 0, jetzt)
+            if body.get("status") == "pruefen" and "pa1" not in erg and "pa1_ruhig" not in erg:
+                n_ang = len(a.get("angelegt") or [])
+                _pa1_alarm(dict(a, status="pruefen"), f"{n_ang}/{a.get('anzahl')} Konten aufgetaucht — Rest nach 24 h nicht da",
+                           "Bitte prüfen und den Rest von Hand anlegen (Accounts › Kaufliste).")
+    elif str(b.get("code") or "") == "belegt":
+        # PC gerade belegt — kein Fehlversuch, in 10–30 min erneut; nach der Frist aber Schluss (Review: sonst endlos „Prüfung HH:MM" ohne 🟠)
+        if jetzt >= frist:
+            body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
+            erg = dict(erg, pa1="PC war bis zur Frist belegt — von Hand anlegen")
+            _pa1_alarm(dict(a, status="pruefen"), "PC bis zur Frist belegt — nichts gelesen", "Bitte von Hand anlegen.")
+        else:
+            body = {"status": "offen", "laeuft_at": None, "faellig_at": min(jetzt + timedelta(seconds=random.randint(600, 1800)), frist).isoformat()}
+    else:
+        body = pa1_nach_fehler(a, jetzt)
+        erg = dict(erg, pa1_fehler=True)
+        if body.get("status") == "pruefen":
+            _pa1_alarm(dict(a, status="pruefen"), "Puls konnte die Konto-Liste nicht lesen",
+                       f"{str(b.get('msg') or b.get('code') or '?')[:200]} — bitte von Hand anlegen.")
+    body["ergebnis"] = erg
+    body["angelegt"] = a.get("angelegt") or []      # auch im Abschluss (Review: Zwischen-Update kann ausfallen)
+    guard = {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft", "anzahl": f"eq.{anzahl0}" if anzahl0 is not None else "is.null"}
+    got = sb_update("tv_konten_auftrag", guard, body)
+    if not got and body.get("status") != "offen":
+        # anzahl während des Laufs geändert (zweiter Klick „Gekauft") → nicht abschließen, bald neu prüfen (dann mit der neuen Anzahl)
+        sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"},
+                  {"status": "offen", "laeuft_at": None, "faellig_at": pa1_naechste(jetzt, max(frist, jetzt + timedelta(hours=1))).isoformat(),
+                   "angelegt": body["angelegt"], "ergebnis": erg})
+        body = dict(body, status="offen")
+    elif not got:
+        sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"}, body)
+    return body
+
+
+@app.route("/konto-suche", methods=["GET", "POST", "OPTIONS"])
+def konto_suche():
+    """POST {user_id?, firma, vorlage_id, anzahl} → {ok, auftrag} | {ok:false, code, msg} (code login_fehlt | firma_nicht | nur_ht | vorlage |
+    anzahl | warten | sql_fehlt). Eigene ID per sb-token, fremde ID mit dem Gate von /admin/konto-anlegen (_konto_ziel_uid).
+    GET [?alle=1] → {ok, auftraege:[…]} — „Gekauft"-Aufträge der letzten 48 h bzw. noch offene/zu prüfende; alle=1 = alle IDs der Admin-Sicht."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.method == "GET":
+        return _pa1_stand()
+    b = request.get_json(silent=True) or {}
+    ziel, err = _konto_ziel_uid(b)
+    if err:
+        return err
+    wahl, fehler = pa1_klick_lesen(b)
+    if fehler:
+        return jsonify({"ok": False, "code": fehler[0], "msg": fehler[1]}), (200 if fehler[0] == "firma_nicht" else 400)
+    firma, vid, anzahl = wahl
+    wer = str(_login_uid_mail()[0] or "") or None   # Login, der drückte (Spur)
+    try:   # alle Gruppen (HT und Emin, Finn 25.11.2026) — fremde IDs nur über das Gate in _konto_ziel_uid
+        v = (sb_select("bulk_vorlagen", {"select": "id,firm,account_type,aktiv", "id": f"eq.{vid}", "limit": "1"}) or [None])[0]
+        if not v or v.get("aktiv") is False or str(v.get("firm") or "").strip() != firma or v.get("account_type") not in PA1_TYPEN:
+            return jsonify({"ok": False, "code": "vorlage", "msg": "Vorlage passt nicht (Firma/Challenge/aktiv) — von Hand anlegen"}), 400
+        arch = _pa1_archiv(ziel)
+        konten = _sb_all("accounts", {"select": "id,firm,external_id,created_at", "user_id": f"eq.{ziel}", "firm": f"eq.{firma}", "order": "created_at.desc"}) or []
+        lebt = [k for k in konten if k.get("external_id") and not ((arch.get(str(k.get("id"))) or {}).get("archived"))]
+        tvu = (sb_select("firm_specs", {"select": "tv_username", "user_id": f"eq.{ziel}", "name": f"eq.{firma}", "limit": "1"}) or [{}])[0].get("tv_username")
+        if not lebt or not str(tvu or "").strip():
+            grund = "kein aktives Konto dieser Firma als Login-Weg" if not lebt else "TradingView-Login fehlt in den Firmen-Einstellungen"
+            return jsonify({"ok": False, "code": "login_fehlt", "msg": f"Login fehlt → von Hand anlegen ({grund})"})
+        jetzt = datetime.now(timezone.utc)
+        offen = sb_select("tv_konten_auftrag", {"select": "*", "user_id": f"eq.{ziel}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
+        faellig, frist = pa1_klick_zeiten(jetzt)   # werktags 1 min–6 h, CME-Wochenende 1 min–24 h; Frist = erste Prüfung + 24 h (WE 48 h)
+        if offen:
+            o = offen[0]
+            if o.get("art") == "gekauft":
+                if str(o.get("vorlage_id")) != vid:
+                    return jsonify({"ok": False, "code": "warten", "msg": f"Für {firma} läuft schon eine Suche mit einer anderen Vorlage — danach erneut drücken"}), 409
+                # zweiter Kauf derselben Vorlage: Anzahl addiert, Prüfzeit bleibt, Frist reicht mindestens bis zur Frist dieses Klicks
+                neu_n = min(PA1_MAX_ANZAHL, int(o.get("anzahl") or 1) + anzahl)
+                f_alt = pa1_iso(o.get("frist_bis"))
+                got = sb_update("tv_konten_auftrag", {"id": f"eq.{o['id']}", "status": f"eq.{o.get('status')}", "anzahl": f"eq.{o.get('anzahl')}"},   # Doppelklick: nie verlieren
+                                {"anzahl": neu_n, "frist_bis": max(frist, f_alt).isoformat() if f_alt else frist.isoformat()}) or []
+            elif o.get("status") == "offen":   # Mail-/Tages-Auftrag derselben Firma wird zum Kauf-Auftrag (je ID × Firma nur EIN offener)
+                got = sb_update("tv_konten_auftrag", {"id": f"eq.{o['id']}", "status": "eq.offen"},
+                                {"art": "gekauft", "anzahl": anzahl, "vorlage_id": vid, "frist_bis": frist.isoformat(), "erstellt_von": wer,
+                                 "faellig_at": faellig.isoformat(), "versuche": 0}) or []
+            else:
+                return jsonify({"ok": False, "code": "warten", "msg": f"Puls liest gerade die {firma}-Liste — in ein paar Minuten nochmal drücken"}), 409
+            if not got:
+                return jsonify({"ok": False, "code": "warten", "msg": "Auftrag hat sich gerade geändert — nochmal drücken"}), 409
+            a = got[0]
+        else:
+            a = sb_insert("tv_konten_auftrag", {"user_id": ziel, "firma": firma, "art": "gekauft", "anzahl": anzahl, "vorlage_id": vid, "frist_bis": frist.isoformat(),
+                                                "erstellt_von": wer, "faellig_at": faellig.isoformat()})
+    except Exception as e:
+        if _pa1_sql_fehlt(e):
+            return jsonify({"ok": False, "code": "sql_fehlt", "msg": f"Datenbank noch nicht bereit ({PA1_SQL}) — von Hand anlegen"}), 503
+        return jsonify({"ok": False, "code": "fehler", "msg": f"nicht gespeichert ({type(e).__name__}: {str(e)[:100]})"}), 502
+    print(f"[pa1] Gekauft: {str(ziel)[:8]} · {firma} × {a.get('anzahl')} (Vorlage {vid[:8]}) → Prüfung {pa1_hm(a.get('faellig_at'))} Dubai", flush=True)
+    return jsonify({"ok": True, "auftrag": _pa1_aus(a)})
+
+
+def _pa1_stand():
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    ids = [str(uid)]
+    if str(request.args.get("alle") or "") == "1":
+        erlaubt, err = _admin_konto_gate()
+        if err:
+            return err
+        ids = None if erlaubt is None else sorted(erlaubt)
+    jetzt = datetime.now(timezone.utc)
+    seit = (jetzt - timedelta(hours=PA1_STAND_H)).isoformat()
+    seit_p = (jetzt - timedelta(days=7)).isoformat()   # „von Hand"/🟠-Endstände 7 Tage sichtbar (Review: sonst nach 48 h still weg)
+    q = {"select": "*", "art": "eq.gekauft", "or": f"(status.in.(offen,laeuft),created_at.gte.{seit},and(status.eq.pruefen,created_at.gte.{seit_p}))",
+         "order": "created_at.desc", "limit": "300"}
+    if ids is not None:
+        q["user_id"] = f"in.({','.join(ids)})"
+    try:
+        rows = sb_select("tv_konten_auftrag", q) or []
+        # Liegengebliebene (PC der ID aus, nie abgeholt): nach der Frist hier auf pruefen + 🟠 (Review: sonst ewig „Prüfung HH:MM")
+        for r in rows:
+            f = pa1_iso(r.get("frist_bis"))
+            if r.get("status") == "offen" and f and jetzt >= f:
+                erg = dict(r.get("ergebnis") or {}, pa1="nie abgeholt (PC aus?) — von Hand anlegen")
+                if sb_update("tv_konten_auftrag", {"id": f"eq.{r['id']}", "status": "eq.offen"},
+                             {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "ergebnis": erg}):
+                    r.update(status="pruefen", ergebnis=erg)
+                    _pa1_alarm(r, "Konto-Suche nie abgeholt — nichts gelesen", "PC der ID war bis zur Frist nicht bereit. Bitte von Hand anlegen.")
+    except Exception as e:
+        if _pa1_sql_fehlt(e):
+            return jsonify({"ok": True, "auftraege": [], "sql_fehlt": True})
+        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+    try:
+        pn = _ap_namen()[0]
+    except Exception:
+        pn = {}
+    return jsonify({"ok": True, "auftraege": [_pa1_aus(r, pn.get(str(r.get("user_id")))) for r in rows]})
+
+
+@app.route("/konto-suche/nachfolger", methods=["GET", "OPTIONS"])
+def konto_suche_nachfolger():
+    """GET ?konto_id= (eigene ID oder Admin-Gate) → {ok, nummern:[…]} — Funded-Nummern, die Puls bei einer „Gekauft"-Suche dieser ID × Firma
+    neu im Umschalter sah, solange das Konto bestanden ist und keinen Nachfolger hat (ergebnis.pa1_nachfolger der letzten 14 Tage, noch in
+    keinem Konto). Nur Anzeige im Nachfolger-Assistenten („Nachfolger-Nummer gesehen: …1234"), nie automatisch angelegt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    kid = str(request.args.get("konto_id") or "").strip().lower()
+    if not ADMIN_MAIL_UID_RE.fullmatch(kid):
+        return jsonify({"ok": False, "msg": "konto_id ungültig"}), 400
+    try:
+        acc = (sb_select("accounts", {"select": "id,user_id,firm,account_type,ziel_erreicht_at", "id": f"eq.{kid}", "limit": "1"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+    if not acc:
+        return jsonify({"ok": True, "nummern": []})
+    ziel, err = _konto_ziel_uid({"user_id": str(acc.get("user_id"))})
+    if err:
+        return err
+    if acc.get("firm") not in PA1_MUSTER or not acc.get("ziel_erreicht_at") or acc.get("account_type") not in PA1_BESTANDEN_TYPEN:
+        return jsonify({"ok": True, "nummern": []})
+    seit = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    try:
+        rows = sb_select("tv_konten_auftrag", {"select": "ergebnis,erledigt_at", "user_id": f"eq.{ziel}", "firma": f"eq.{acc.get('firm')}", "art": "eq.gekauft",
+                                               "created_at": f"gte.{seit}", "order": "created_at.desc", "limit": "20"}) or []
+        konten = _sb_all("accounts", {"select": "id,name,external_id", "firm": f"eq.{acc.get('firm')}"}) or []
+    except Exception as e:
+        if _pa1_sql_fehlt(e):
+            return jsonify({"ok": True, "nummern": []})
+        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+    nummern = []
+    for r in rows:
+        for k in ((r.get("ergebnis") or {}).get("pa1_nachfolger") or []) if isinstance(r.get("ergebnis"), dict) else []:
+            if isinstance(k, str) and k not in nummern and not admin_konto_doppel(k, konten):
+                nummern.append(k)
+    return jsonify({"ok": True, "nummern": nummern[:5]})
 
 
 # ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts

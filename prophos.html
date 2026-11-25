@@ -11684,6 +11684,7 @@
             <div class="field" style="grid-column:span 2">
               <label>External ID (neue Nummer, Pflicht)</label>
               <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
+              <div id="suc-pa1-hinweis" hidden style="font-size:11px;color:var(--sub);margin-top:4px"></div>
             </div>
             <!-- Payout anfragbar ab (P1, Finn 03.11.2026 ~22:55 Dubai; seit PF2 05.11.2026 nur Funded CFD — Futures haben kein „Payout ab"), vorbelegt mit Anlegetag + 14 Tagen
                  (FundedNext erster Zyklus + 22, payoutErsterTermin, FN1) — von Hand geändert bleibt es so. -->
@@ -31309,12 +31310,61 @@
       code: (r && r.code) || '', msg: String((r && r.msg) || '').slice(0, 200) }
     console.info(`[tv-konten] ${a.firma} (${a.art}): ${r && r.ok ? `${(r.konten || []).length} Name(n)` : `FEHLER ${(r && r.code) || '?'}`} in ${((Date.now() - t0) / 1000).toFixed(0)} s`, (r && r.msg) || '')
     await melden(!!(r && r.ok), (r && r.konten) || [], (r && r.msg) || '', (r && r.code) || '', r)
+    // PA1: „Gekauft"-Lauf fertig → Railway hat angelegt bzw. neu eingeplant; Kaufliste neu zeichnen lassen (Knopf „angelegt: …1234")
+    if(a.art === 'gekauft'){ try{ if(typeof window.pa1Neu === 'function') window.pa1Neu() }catch(_){} }
     // Heimweg wie nach jeder Puls-Aktion (gibt es keinen Big Trade/WD, kehrt bigTradeHeimPlanen sofort zurück)
     try{ bigTradeHeimPlanen(a.ext || '', 'TV-Konten lesen', true, 'tv') }catch(_){}
   }
   ;(function tvkLoop(){ setTimeout(async () => { try{ await tvkTick() }catch(e){ console.warn('[tv-konten]', (e && e.message) || e) } tvkLoop() },
     TVK_TAKT_MIN_MS + Math.random() * (TVK_TAKT_MAX_MS - TVK_TAKT_MIN_MS)) })()
   window._tvKonten = { frei: tvkFrei, tick: tvkTick, letzter: () => _tvkLetzter }   // Test-Haken
+  /* ══ PA1 „GEKAUFT" (Finn 25.11.2026: „Wenn ich bei Futures gekauft habe, drücke ich nur auf ‚Gekauft'. Dann soll der Knopf grün werden und dort
+   * die Zeit stehen, wann überprüft wird."). Schnittstelle zum Knopf der Kaufliste (S6/KP2): pa1Gekauft({user_id, firma, vorlage_id, anzahl})
+   * → Railway POST /konto-suche legt einen Auftrag art 'gekauft' an (fällig gestreut 1 min–5 h) → {ok, auftrag:{…, knopf:{text, art}}} oder
+   * {ok:false, code, msg} (login_fehlt / firma_nicht / vorlage / … → Bulk-Fenster wie bisher). pa1Stand({alle}) → Aufträge der letzten 48 h je
+   * mit knopf (gruen „✓ Gekauft · Prüfung 14:37" · laeuft „läuft …" · fertig „angelegt: …1234" · ruhig „mehr gefunden · von Hand" · warn 🟠).
+   * Den Lauf selbst macht der bestehende tvkTick oben (Puls liest nur); anlegen tut Railway (nur Challenge-Nummern, nie Funded/Nachfolger).
+   * Nach jedem Lauf/Klick ruft dieser Block window.pa1Neu() (Haken der Kaufliste zum Neu-Zeichnen), falls es ihn gibt.
+   * pa1NachfolgerHinweis(acc): im Nachfolger-Assistenten ruhig „Nachfolger-Nummer gesehen: …1234" (GET /konto-suche/nachfolger) — Klick setzt
+   * die Nummer ins Feld External ID, nichts wird angelegt. ══ */
+  async function pa1Fetch(pfad, opt){
+    let tok = null
+    try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
+    if(!tok) return { ok: false, code: 'login', msg: 'Nicht eingeloggt' }
+    try{
+      const r = await fetch(`${WATCHER_HOME}${pfad}`, Object.assign({}, opt || {}, { headers: Object.assign({ 'sb-token': tok }, (opt && opt.body) ? { 'Content-Type': 'application/json' } : {}) }))
+      const d = await r.json().catch(() => ({}))
+      return Object.assign({ ok: r.ok }, d || {}, r.ok ? {} : { ok: false, code: (d && d.code) || ('http_' + r.status), msg: (d && d.msg) || `Railway ${r.status} — von Hand anlegen` })
+    }catch(e){ return { ok: false, code: 'verbindung', msg: 'Railway nicht erreichbar — von Hand anlegen' } }
+  }
+  const pa1Neu = () => { try{ if(typeof window.pa1Neu === 'function') window.pa1Neu() }catch(_){} }
+  window.pa1Gekauft = async ({ user_id, firma, vorlage_id, anzahl } = {}) => {
+    const d = await pa1Fetch('/konto-suche', { method: 'POST', body: JSON.stringify({ user_id: user_id || undefined, firma, vorlage_id, anzahl: anzahl || 1 }) })
+    pa1Neu()
+    return d
+  }
+  window.pa1Stand = async ({ alle } = {}) => {
+    const d = await pa1Fetch('/konto-suche' + (alle ? '?alle=1' : ''))
+    return (d && d.ok && Array.isArray(d.auftraege)) ? d.auftraege : []
+  }
+  async function pa1NachfolgerHinweis(acc){
+    const el = document.getElementById('suc-pa1-hinweis')
+    if(!el) return
+    el.hidden = true; el.innerHTML = ''
+    if(!acc || !acc.id) return
+    const kid = String(acc.id)
+    const d = await pa1Fetch('/konto-suche/nachfolger?konto_id=' + encodeURIComponent(kid))
+    const nr = (d && d.ok && Array.isArray(d.nummern)) ? d.nummern.filter(x => typeof x === 'string') : []
+    if(!nr.length || el.dataset.kid !== kid) return   // Assistent inzwischen für ein anderes Konto offen
+    el.innerHTML = 'Nachfolger-Nummer gesehen: ' + nr.map(n => `<button type="button" class="btn btn-ghost btn-xs" data-pa1-nr="${escapeHtml(n)}" title="${escapeHtml(n)} ins Feld übernehmen">…${escapeHtml(n.slice(-4))}</button>`).join(' ')
+    el.hidden = false
+  }
+  document.getElementById('suc-pa1-hinweis')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-pa1-nr]'); if(!b) return
+    const ext = document.getElementById('suc-extid')
+    if(ext){ ext.value = b.dataset.pa1Nr; ext.dispatchEvent(new Event('input')) }
+  })
+  window._pa1 = { fetch: pa1Fetch, neu: pa1Neu, nachfolger: pa1NachfolgerHinweis }   // Test-Haken
   /* ══ USERSCRIPT-UPDATE: TV-TAB NEU LADEN (29.10.2026, Finn 05:20: „dass das Tampermonkey-Script in Zukunft immer automatisch und schneller
    * aktualisiert wird — es dauert ewig"). Der Lader im Puls-Chrome (Userscript ≥ 0.10.0) meldet im Reader-Stand lader {laeuft, bereit}: liegt
    * eine NEUERE Fassung bereit, läuft sie erst nach dem nächsten Laden des TradingView-Tabs. Dieser Block lässt den Tab dann neu laden
@@ -48017,6 +48067,9 @@
     document.getElementById('suc-max-loss-trade').value  = acc.maxLossPerTrade   != null ? acc.maxLossPerTrade   : ''
     document.getElementById('suc-max-profit-trade').value = acc.maxProfitPerTrade != null ? acc.maxProfitPerTrade : ''
     document.getElementById('suc-extid').value = ''
+    // PA1: Funded-Nummer, die Puls bei einer Gekauft-Suche neu sah — nur Hinweis, Klick übernimmt sie (nichts wird automatisch angelegt)
+    { const h = document.getElementById('suc-pa1-hinweis'); if(h){ h.dataset.kid = String(acc.id || ''); h.hidden = true; h.innerHTML = '' }
+      try{ if(window._pa1 && typeof window._pa1.nachfolger === 'function') window._pa1.nachfolger(acc) }catch(_){} }
 
     // Zugangsdaten-Block (07.09.2026): nur zeigen, wenn der Vorgänger ein
     // Echo-/MT5-Account ist — erkennbar am mt5_links-Eintrag oder an eigenen
