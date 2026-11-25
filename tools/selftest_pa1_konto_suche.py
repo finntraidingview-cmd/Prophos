@@ -245,9 +245,11 @@ ku = g.pa1_knopf(dict(AV, faellig_at="2026-11-25T09:30:00+00:00", ergebnis={}), 
 check(ku["text"] == "✓ Gekauft · wartet auf PC (fällig 13:30)", f"fällig, aber 30 min nicht abgeholt → „wartet auf PC“ statt stumm vergangener Zeit → {ku['text']}")
 check(g.pa1_knopf(dict(AV, faellig_at="2026-11-25T09:50:00+00:00", ergebnis={}), J0)["text"] == "✓ Gekauft · Prüfung 13:50", "unter 15 min drüber → noch normale Zeit")
 pc_ = SRC[SRC.index("def pc_tv_konten_auftrag():"):SRC.index("    try:\n        alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S))")]
-check('request.args.get("verschieben")' in pc_ and '"art": "eq.gekauft"' in pc_ and "pa1_verschieben_body(r, grund_v, jetzt)" in pc_
-      and '"status": "eq.offen", "faellig_at": f"lte.{jetzt.isoformat()}"' in pc_ and '"status": "laeuft"' not in pc_,
-      "?verschieben=<Grund>: nur fällige offene Kauf-Aufträge, nie ein Claim, Guard gegen gleichzeitiges Abholen")
+nm_ = pc_[pc_.index('if request.args.get("nur_melden") == "1":'):pc_.index("    # Probelauf-Weiche (tv_konten_pcs)")]
+check('"art": "eq.gekauft"' in nm_ and "pa1_verschieben_body(dict(_o, ergebnis=_body[\"ergebnis\"]), _sp, _jt) if _schieben else None" in nm_
+      and '"status": "eq.offen", "faellig_at": f"lte.{_jz}"' in nm_ and '"status": "laeuft"' not in nm_ and "gesperrt=_sp" in nm_ and "pa1_pc_frei(" in nm_
+      and 'request.args.get("verschieben")' not in SRC,
+      "nur_melden (Sperr-Meldung des Masters): Grund bleibt in ergebnis.gesperrt, dazu sichtbar verschoben; nie ein Claim, Guard gegen gleichzeitiges Abholen")
 check(g.pa1_knopf(dict(O, status="erledigt", angelegt=[{"ext": "TDFYSL150555001234"}])) == {"text": "angelegt: …1234", "art": "fertig"}, "Knopf: angelegt: …1234")
 k = g.pa1_knopf(dict(O, status="pruefen", anzahl=2, ergebnis={"pa1_ruhig": "mehr gefunden · von Hand"}))
 check(k == {"text": "mehr gefunden · von Hand", "art": "ruhig"}, "Knopf Überzahl ruhig „mehr gefunden · von Hand“ (kein 🟠)")

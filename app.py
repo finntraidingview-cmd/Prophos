@@ -25751,18 +25751,30 @@ def pc_tv_konten_auftrag():
     if err:
         return err
     if request.args.get("nur_melden") == "1":   # PC-Tab gesperrt: nur den Grund am fälligen „Gekauft"-Auftrag vermerken, nie etwas ausgeben (Master 25.11.2026)
+        # PA1f-Zusatz (Finn 25.11.2026: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben."): der fällige Kauf-Auftrag rückt dabei
+        # sichtbar um 3–10 min weiter (pa1_verschieben_body: gestreut, nie hinter die Frist, Grund + Zähler in ergebnis.pa1_verschoben) — nur, wenn
+        # dieser PC Kauf-Aufträge überhaupt holen darf (pa1_pc_frei). Frist vorbei → nur die Meldung, 🟠 macht der Stand. Nie ein Claim.
+        n_v = 0
         try:
             _sp = str(request.args.get("sperre") or "")[:80]
-            _jz = datetime.now(timezone.utc).isoformat()
-            for _o in (sb_select("tv_konten_auftrag", {"select": "id,ergebnis", "user_id": f"eq.{uid}", "status": "eq.offen", "art": "eq.gekauft",
+            _jt = datetime.now(timezone.utc)
+            _jz = _jt.isoformat()
+            _schieben = pa1_pc_frei(request.args.get("pc"))
+            for _o in (sb_select("tv_konten_auftrag", {"select": "id,ergebnis,faellig_at,frist_bis", "user_id": f"eq.{uid}", "status": "eq.offen", "art": "eq.gekauft",
                                                        "faellig_at": f"lte.{_jz}", "limit": "5"}) or []):
                 _e = _o.get("ergebnis") if isinstance(_o.get("ergebnis"), dict) else {}
-                sb_update("tv_konten_auftrag", {"id": f"eq.{_o['id']}", "status": "eq.offen"},
-                          {"ergebnis": dict(_e, gesperrt=_sp, gesperrt_at=_jz, gesperrt_pc=str(request.args.get("pc") or "")[:40])})
-                print(f"[pa1] PC-Tab {str(request.args.get('pc') or '?')[:20]} gesperrt: {_sp} (Auftrag {str(_o['id'])[:8]})", flush=True)
+                _body = {"ergebnis": dict(_e, gesperrt=_sp, gesperrt_at=_jz, gesperrt_pc=str(request.args.get("pc") or "")[:40])}
+                _vb = pa1_verschieben_body(dict(_o, ergebnis=_body["ergebnis"]), _sp, _jt) if _schieben else None
+                if _vb:
+                    _body = _vb
+                # Guard: noch offen UND noch fällig — ein PC, der eben geholt oder schon verschoben hat, wird nicht überschrieben
+                if sb_update("tv_konten_auftrag", {"id": f"eq.{_o['id']}", "status": "eq.offen", "faellig_at": f"lte.{_jz}"}, _body) and _vb:
+                    n_v += 1
+                print(f"[pa1] PC-Tab {str(request.args.get('pc') or '?')[:20]} gesperrt: {_sp} (Auftrag {str(_o['id'])[:8]}"
+                      f"{', verschoben auf ' + pa1_hm(_vb['faellig_at']) + ' Dubai' if _vb else ''})", flush=True)
         except Exception as e:
             print(f"[pa1] Sperr-Meldung: {type(e).__name__}: {str(e)[:100]}", flush=True)
-        return jsonify({"ok": True, "auftrag": None})
+        return jsonify({"ok": True, "auftrag": None, "verschoben": n_v})
     # Probelauf-Weiche (tv_konten_pcs) gilt für Mail-Aufträge; „Gekauft"-Aufträge (PA1) haben ihre eigene (konto_suche_pcs, Standard alle Puls-PCs)
     mail_frei = tv_konten_pc_frei(request.args.get("pc"))
     gekauft_frei = pa1_pc_frei(request.args.get("pc"))
@@ -25770,22 +25782,6 @@ def pc_tv_konten_auftrag():
         return jsonify({"ok": True, "auftrag": None, "pc_frei": False})   # dieser PC liest (noch) nicht
     arten = [x for x, frei in (("mail", mail_frei), ("gekauft", gekauft_frei)) if frei]
     jetzt = datetime.now(timezone.utc)
-    # PA1f-Zusatz (Finn 25.11.2026: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben."): ?verschieben=<Grund> — der PC-Tab darf gerade
-    # nicht raus (tvkFrei: Start < 45 min, Puls unterwegs, Polar …) und holt deshalb NICHTS; fällige Kauf-Aufträge dieser ID rücken sichtbar um
-    # 3–10 min (pa1_verschieben_body, Frist unverändert), statt stumm fällig herumzuliegen. Nie ein Claim, nie Mail-Aufträge.
-    grund_v = str(request.args.get("verschieben") or "").strip()[:160]
-    if grund_v:
-        n = 0
-        if gekauft_frei:
-            try:
-                for r in sb_select("tv_konten_auftrag", {"select": "id,faellig_at,frist_bis,ergebnis", "user_id": f"eq.{uid}", "art": "eq.gekauft", "status": "eq.offen",
-                                                         "faellig_at": f"lte.{jetzt.isoformat()}", "limit": "20"}) or []:
-                    body = pa1_verschieben_body(r, grund_v, jetzt)
-                    if body and sb_update("tv_konten_auftrag", {"id": f"eq.{r['id']}", "status": "eq.offen", "faellig_at": f"lte.{jetzt.isoformat()}"}, body):
-                        n += 1
-            except Exception as e:
-                print(f"[pa1] ⚠️ verschieben: {type(e).__name__}: {str(e)[:120]}", flush=True)
-        return jsonify({"ok": True, "auftrag": None, "verschoben": n})
     try:
         alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S)).isoformat()
         sb_update("tv_konten_auftrag", {"user_id": f"eq.{uid}", "status": "eq.laeuft", "laeuft_at": f"lt.{alt}"}, {"status": "offen", "laeuft_at": None})
