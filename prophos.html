@@ -21129,8 +21129,13 @@
       }else if(r.wd_ready && wdAbAusIso(r.wd_ab)){
         // WE1 (Finn 19.11.2026): Ziel erst im laufenden Handelstag voll — die Firma zählt den Tag erst nach Tagesende. 5/5 bleibt stehen, statt des Knopfs
         // „anfragbar ab 03:00“ (Gerätezeit); nach der Grenze zeichnet admCalRender neu und der Knopf kommt
-        const chip = document.createElement('span'); chip.className = 'chip chip-neutral'; chip.style.marginLeft = '8px'
-        chip.textContent = 'anfragbar ' + wdAbTxt(wdAbAusIso(r.wd_ab)); chip.title = wdAbTip()
+        // WE2 (Finn 26.11.2026: „bei manchen Accounts kann man trotzdem schon anfragen“): der Hinweis „ab 03:00“ bleibt stehen (grau statt grün),
+        // ist aber ein Knopf — derselbe Weg wie „anfragbar“ darunter. Nur dieser Chip; Sortierung, Zähler und „fällig“ rechnen weiter mit der Tagesgrenze
+        const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-neutral'
+        chip.style.cssText = 'margin-left:8px;border:0;cursor:pointer'
+        chip.textContent = 'anfragbar ' + wdAbTxt(wdAbAusIso(r.wd_ab))
+        chip.title = wdAbTip() + ` — trotzdem schon anfragen: klicken (Payout für ${admShortName(r.person || '—')})`
+        chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
         st.appendChild(chip)
       }else if(r.wd_ready && !(r.calc && r.calc.anf && r.calc.anf.zyklusOffen)){   // PO2: Zyklus noch nicht geprüft → noch kein Knopf
         const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-good'
@@ -62469,7 +62474,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2357'
+  const OS_TAB_BUILD = '2026-09-22.2358'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
