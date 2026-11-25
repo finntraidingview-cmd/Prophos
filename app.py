@@ -25768,6 +25768,10 @@ def pc_tv_konten_auftrag():
         # sichtbar um 3–10 min weiter (pa1_verschieben_body: gestreut, nie hinter die Frist, Grund + Zähler in ergebnis.pa1_verschoben) — nur, wenn
         # dieser PC Kauf-Aufträge überhaupt holen darf (pa1_pc_frei). Frist vorbei → nur die Meldung, 🟠 macht der Stand. Nie ein Claim.
         n_v = 0
+        if re.match(r"kein (PC-Tab|Puls-Chrome)", str(request.args.get("sperre") or "")):
+            # Tab ohne PC/Puls (alter Stand im Browser, z. B. Mac) holt nie — darf auch nichts verschieben (FNF Finn + Pascal 25.11.2026: ein
+            # alter Tab schob die Prüfung immer wieder um 3–10 min)
+            return jsonify({"ok": True, "auftrag": None})
         try:
             _sp = str(request.args.get("sperre") or "")[:80]
             _jt = datetime.now(timezone.utc)
