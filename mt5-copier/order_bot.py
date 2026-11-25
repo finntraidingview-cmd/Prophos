@@ -26026,7 +26026,7 @@ def cdp_konto_familie(nr):
         return "apex:" + m.group(1)
     if re.match(r"^F?TDFY", u):
         return "tradeify"
-    if re.match(r"^(LFE|TOF)", u):
+    if re.match(r"^(LFE|LFF|TOF)", u):   # LFF = Lucid Funded/WD (PA1k 25.11.2026: aktives LFF…0001 → „login_unklar“, FNF-Lesung blieb stehen)
         return "lucid"
     # 02.10.2026 (Finn + Pascal: Balance-Lesen FundedNext Futures scheiterte mit „kein Login-Beleg", weil die lange Tradeify-Liste
     # scrollbar war): FundedNext Futures (FNFT…) und MyFundedFutures (MFFU…) haben je einen eigenen Tradovate-Login
