@@ -1537,12 +1537,12 @@
   #vr-view .vr-wert small.vr-blau{color:#175CD3}
   #vr-view .vr-pk.alt{opacity:.45}
   /* Sicherheits-Auswahl im Kopf (Finn 06.10.2026: selbst drehen) — Segment wie die Chip-Auswahl, gewählter Wert violett */
-  #vr-view .vr-sich{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);border-radius:9px;padding:2px;background:var(--surface);font-size:12px}
-  #vr-view .vr-sich[hidden]{display:none}
-  #vr-view .vr-sich span{color:var(--sub);padding:0 6px 0 5px}
-  #vr-view .vr-sich button{border:0;background:transparent;color:var(--sub);border-radius:7px;padding:3px 7px;font:inherit;font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums}
-  #vr-view .vr-sich button.an{background:var(--violet-tint);color:var(--violet);font-weight:600}
-  #vr-view .vr-sich button:disabled{cursor:default;opacity:.55}
+  :is(#vr-view,#adm-kp-root) .vr-sich{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);border-radius:9px;padding:2px;background:var(--surface);font-size:12px}
+  :is(#vr-view,#adm-kp-root) .vr-sich[hidden]{display:none}
+  :is(#vr-view,#adm-kp-root) .vr-sich span{color:var(--sub);padding:0 6px 0 5px}
+  :is(#vr-view,#adm-kp-root) .vr-sich button{border:0;background:transparent;color:var(--sub);border-radius:7px;padding:3px 7px;font:inherit;font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums}
+  :is(#vr-view,#adm-kp-root) .vr-sich button.an{background:var(--violet-tint);color:var(--violet);font-weight:600}
+  :is(#vr-view,#adm-kp-root) .vr-sich button:disabled{cursor:default;opacity:.55}
   #vr-view .vr-kz-menge small.vr-mind-n{color:var(--sub);font-weight:500}
   #vr-view .vr-leer{font-size:12.5px;color:var(--sub);padding:6px 0 2px}
   #vr-view .vr-gef{font-style:normal;font-size:10.5px;font-weight:600;color:#B54708;white-space:nowrap}
@@ -3671,35 +3671,35 @@
   #vr-view .vr-h-chips{margin:14px 0 0}
   #vr-view .vr-h-liste{margin-top:14px}
   /* Deine Ziele (06.10.2026): kompakte Karte ganz oben, eine Zeile je Firma, ✎ macht die Zeile zum Formular */
-  #vr-view .vr-zk{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:6px 18px 10px;margin-bottom:6px}
-  #vr-view .vr-zl{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--border-soft);font-size:13.5px;min-width:0}
-  #vr-view .vr-zk > .vr-zl:first-child{border-top:none}
-  #vr-view .vr-zl > i{width:9px;height:9px;border-radius:3px;flex:none}
-  #vr-view .vr-zl > b{font-weight:600;color:var(--ink);white-space:nowrap}
-  #vr-view .vr-zl-txt{color:var(--ink-2);flex:1 1 auto;min-width:0}
-  #vr-view .vr-zl-edit{flex:none;border:1px solid transparent;background:transparent;color:var(--sub);border-radius:7px;width:30px;height:28px;font-size:14px;cursor:pointer}
-  #vr-view .vr-zl-edit:hover{border-color:var(--border);color:var(--ink)}
-  #vr-view .vr-zl-edit:disabled{opacity:.4;cursor:default}
-  #vr-view .vr-zl-form{flex-wrap:wrap;align-items:flex-end;background:var(--surface-tint);margin:4px -10px;padding:10px;border-radius:10px;border-top:none}
-  #vr-view .vr-zl-form > b,#vr-view .vr-zl-form > i{align-self:center}
-  #vr-view .vr-zl-felder{display:flex;flex-wrap:wrap;gap:8px 10px;flex:1 1 300px;min-width:0}
-  #vr-view .vr-zl-felder label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--sub)}
-  #vr-view .vr-zl-felder input{width:118px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
-  #vr-view .vr-zl-felder label.breit input{width:190px}
-  #vr-view .vr-zl-knoepfe{display:flex;gap:6px}
-  #vr-view .vr-zk-hinweis{margin:6px 0 0;font-size:12px;color:var(--sub)}
+  :is(#vr-view,#adm-kp-root) .vr-zk{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:6px 18px 10px;margin-bottom:6px}
+  :is(#vr-view,#adm-kp-root) .vr-zl{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--border-soft);font-size:13.5px;min-width:0}
+  :is(#vr-view,#adm-kp-root) .vr-zk > .vr-zl:first-child{border-top:none}
+  :is(#vr-view,#adm-kp-root) .vr-zl > i{width:9px;height:9px;border-radius:3px;flex:none}
+  :is(#vr-view,#adm-kp-root) .vr-zl > b{font-weight:600;color:var(--ink);white-space:nowrap}
+  :is(#vr-view,#adm-kp-root) .vr-zl-txt{color:var(--ink-2);flex:1 1 auto;min-width:0}
+  :is(#vr-view,#adm-kp-root) .vr-zl-edit{flex:none;border:1px solid transparent;background:transparent;color:var(--sub);border-radius:7px;width:30px;height:28px;font-size:14px;cursor:pointer}
+  :is(#vr-view,#adm-kp-root) .vr-zl-edit:hover{border-color:var(--border);color:var(--ink)}
+  :is(#vr-view,#adm-kp-root) .vr-zl-edit:disabled{opacity:.4;cursor:default}
+  :is(#vr-view,#adm-kp-root) .vr-zl-form{flex-wrap:wrap;align-items:flex-end;background:var(--surface-tint);margin:4px -10px;padding:10px;border-radius:10px;border-top:none}
+  :is(#vr-view,#adm-kp-root) .vr-zl-form > b,:is(#vr-view,#adm-kp-root) .vr-zl-form > i{align-self:center}
+  :is(#vr-view,#adm-kp-root) .vr-zl-felder{display:flex;flex-wrap:wrap;gap:8px 10px;flex:1 1 300px;min-width:0}
+  :is(#vr-view,#adm-kp-root) .vr-zl-felder label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--sub)}
+  :is(#vr-view,#adm-kp-root) .vr-zl-felder input{width:118px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
+  :is(#vr-view,#adm-kp-root) .vr-zl-felder label.breit input{width:190px}
+  :is(#vr-view,#adm-kp-root) .vr-zl-knoepfe{display:flex;gap:6px}
+  :is(#vr-view,#adm-kp-root) .vr-zk-hinweis{margin:6px 0 0;font-size:12px;color:var(--sub)}
   /* KP3: Umschalter Ziele je Unternehmen */
-  #vr-view .vr-zk-gruppen{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
-  #vr-view .vr-zk-gruppen button{border:1px solid var(--border-soft);background:var(--surface);color:var(--sub);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer}
-  #vr-view .vr-zk-gruppen button.an{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+  :is(#vr-view,#adm-kp-root) .vr-zk-gruppen{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+  :is(#vr-view,#adm-kp-root) .vr-zk-gruppen button{border:1px solid var(--border-soft);background:var(--surface);color:var(--sub);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+  :is(#vr-view,#adm-kp-root) .vr-zk-gruppen button.an{background:var(--ink);color:var(--surface);border-color:var(--ink)}
   @media (max-width:760px){
-    #vr-view .vr-zk{padding:4px 12px 8px}
-    #vr-view .vr-zl{flex-wrap:wrap;row-gap:2px}
-    #vr-view .vr-zl-txt{flex-basis:calc(100% - 50px);order:3;padding-left:17px;font-size:13px}
-    #vr-view .vr-zl-edit{margin-left:auto}
-    #vr-view .vr-zl-felder input{width:120px}
-    #vr-view .vr-zl-felder label.breit input{width:100%}
-    #vr-view .vr-zl-felder label.breit{flex:1 1 100%}
+    :is(#vr-view,#adm-kp-root) .vr-zk{padding:4px 12px 8px}
+    :is(#vr-view,#adm-kp-root) .vr-zl{flex-wrap:wrap;row-gap:2px}
+    :is(#vr-view,#adm-kp-root) .vr-zl-txt{flex-basis:calc(100% - 50px);order:3;padding-left:17px;font-size:13px}
+    :is(#vr-view,#adm-kp-root) .vr-zl-edit{margin-left:auto}
+    :is(#vr-view,#adm-kp-root) .vr-zl-felder input{width:120px}
+    :is(#vr-view,#adm-kp-root) .vr-zl-felder label.breit input{width:100%}
+    :is(#vr-view,#adm-kp-root) .vr-zl-felder label.breit{flex:1 1 100%}
   }
   #vr-view .vr-h-filter{display:inline-flex;align-items:center;gap:6px;margin:10px 0 0;font-size:12.5px;color:var(--ink);background:var(--surface-tint);border-radius:8px;padding:3px 4px 3px 10px}
   #vr-view .vr-h-filter button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0 5px}
@@ -3743,19 +3743,20 @@
   #vr-view .vr-klapp[open] > summary::after{content:'▾'}
   #vr-view .vr-klapp > summary:hover{color:var(--ink)}
   #vr-view .vr-klapp[open] > summary{margin-bottom:8px}
-  #vr-view .vr-einst{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:16px 18px}
-  #vr-view .vr-einst-kopf{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 8px}
-  #vr-view .vr-einst-kopf span{font-weight:400;color:var(--sub);font-size:12px;margin-left:8px}
-  #vr-view .vr-einst .vr-sich{margin-bottom:18px}
-  #vr-view .vr-mx-z{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid var(--border-soft)}
-  #vr-view .vr-mx-n{flex:0 0 110px;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding-top:3px;min-width:0}
-  #vr-view .vr-mx-n i{width:8px;height:8px;border-radius:3px;flex:none}
-  #vr-view .vr-mx-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
-  #vr-view .vr-mx-c{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
-  #vr-view .vr-mx-c svg{width:11px;height:11px}
-  #vr-view .vr-mx-c.pausiert{color:#B54708;background:rgba(247,144,9,.1);border-color:rgba(247,144,9,.45)}
-  #vr-view .vr-mx-c.gesperrt{color:var(--sub);border-style:dashed;background:transparent}
-  #vr-view .vr-mx-c:disabled{cursor:default;opacity:.6}
+  :is(#vr-view,#adm-kp-root) .vr-einst{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:16px 18px}
+  :is(#vr-view,#adm-kp-root) .vr-einst-kopf{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 8px}
+  :is(#vr-view,#adm-kp-root) .vr-einst-kopf span{font-weight:400;color:var(--sub);font-size:12px;margin-left:8px}
+  :is(#vr-view,#adm-kp-root) .vr-einst .vr-sich{margin-bottom:18px}
+  #adm-kp-root .vr-einst{border:0;padding:4px 0 0;background:none}   /* KP5: im Admin-Panel ohne zweiten Rahmen */
+  :is(#vr-view,#adm-kp-root) .vr-mx-z{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid var(--border-soft)}
+  :is(#vr-view,#adm-kp-root) .vr-mx-n{flex:0 0 110px;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding-top:3px;min-width:0}
+  :is(#vr-view,#adm-kp-root) .vr-mx-n i{width:8px;height:8px;border-radius:3px;flex:none}
+  :is(#vr-view,#adm-kp-root) .vr-mx-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c svg{width:11px;height:11px}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c.pausiert{color:#B54708;background:rgba(247,144,9,.1);border-color:rgba(247,144,9,.45)}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c.gesperrt{color:var(--sub);border-style:dashed;background:transparent}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c:disabled{cursor:default;opacity:.6}
   @media (max-width:760px){
     #vr-view .vr-heute{padding:16px 14px 6px}
     #vr-view .vr-h-titel h2{font-size:21px}
@@ -3765,8 +3766,8 @@
     #vr-view .vr-h-menge{font-size:17px}
     #vr-view .vr-h-menge span{display:block;margin:2px 0 0}
     #vr-view .vr-h-knopf{margin-left:auto}
-    #vr-view .vr-mx-z{flex-direction:column;gap:6px}
-    #vr-view .vr-mx-n{flex:none}
+    :is(#vr-view,#adm-kp-root) .vr-mx-z{flex-direction:column;gap:6px}
+    :is(#vr-view,#adm-kp-root) .vr-mx-n{flex:none}
   }
   /* FARBEN VORRAT (06.10.2026, Finn: „Farben müssen miteinander matchen"): EIN Akzent (--violet) + Grau, Signal nur für Dringlichkeit,
      gedämpft aus --danger/--warn gemischt — keine eigenen Hex-Werte. Steht hinter allen #vr-view-Regeln und überschreibt sie. */
@@ -3786,7 +3787,7 @@
   #vr-view .vr-gef,#vr-view .vr-pause{color:var(--vr-amber)} #vr-view .vr-pause{background:var(--vr-amber-bg)}
   #vr-view .adm-val.is-jetzt,#vr-view .adm-val.is-bald{color:var(--vr-akzent)}
   #vr-view .vr-id b{color:var(--vr-akzent)}
-  #vr-view .vr-mx-c.pausiert{color:var(--vr-amber);background:var(--vr-amber-bg);border-color:color-mix(in srgb,var(--warn) 35%,var(--border))}
+  :is(#vr-view,#adm-kp-root) .vr-mx-c.pausiert{color:var(--vr-amber);background:var(--vr-amber-bg);border-color:color-mix(in srgb,var(--warn) 35%,var(--border))}
   #vr-view .vr-h-leg i.hoch{background:var(--vr-rot)} #vr-view .vr-h-leg i.mittel{background:var(--vr-amber)} #vr-view .vr-h-leg i.niedrig{background:var(--sub-2)}
   #vr-view .prio-hoch .vr-h-rang b{background:var(--vr-rot-bg);color:var(--vr-rot)}
   #vr-view .prio-mittel .vr-h-rang b{background:var(--vr-amber-bg);color:var(--vr-amber)}
@@ -3842,8 +3843,8 @@
   #vr-view .vr-h-quelle{flex-basis:100%;font-style:normal;font-size:12px;color:var(--sub)}
   #vr-view .vr-fz-satz{grid-column:1/-1;font-size:12px;color:var(--sub);line-height:1.45;margin-top:3px}
   #vr-view .vr-re-ki{margin:0 0 8px;font-size:12.5px;color:var(--sub);line-height:1.5}
-  #vr-view .vr-einst .vr-zk{border:0;background:none;padding:0;margin:0 0 18px}   /* Ziele in „Einstellungen": ohne eigenen Kasten */
-  #vr-view .vr-einst .vr-zl-form{margin:4px 0}
+  :is(#vr-view,#adm-kp-root) .vr-einst .vr-zk{border:0;background:none;padding:0;margin:0 0 18px}   /* Ziele in „Einstellungen": ohne eigenen Kasten */
+  :is(#vr-view,#adm-kp-root) .vr-einst .vr-zl-form{margin:4px 0}
   /* Zell-Detail (06.10.2026 spät): Kopfzeile · ein Balken · Konten-Tabelle · „Details ▸" */
   #vr-view .vr-zd{grid-column:1/-1;margin-top:8px;padding:12px 14px;background:var(--surface-tint);border-radius:10px;cursor:default;font-size:13px}
   /* Kennzahl-Reihe statt Kopf-Satz (06.10.2026, Finn: „Zahlen, Statistiken, Charts — nie diese Sätze"): fünf kleine .kpi-Kacheln
@@ -13611,6 +13612,9 @@
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Alle Accounts (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel, 1:1 wie unter Accounts, nur mit Filter nach Zielen und Typen") -->
           <button class="subtab adm-tab" data-admtab="konten">Alle Accounts</button>
+          <!-- KP5 (26.11.2026, Finn sucht die Kaufplan-Einstellungen): Ziele je Unternehmen · Mindest-Chance · Freigeschaltet je ID und Firma — dieselben
+               Blöcke wie im (seit 16.10. auf Accounts umgeleiteten) Vorrat-View, gleiche Speicherwege und Rechte (Server-Gate /admin/vorrat) -->
+          <button class="subtab adm-tab" data-admtab="kaufplan">Kaufplan</button>
           <!-- Mail (21.10.2026, Finn: „alle Gmail-Accounts jeder einzelnen ID im Überblick … nach jeder ID filtern oder alles") — nur Hermann Technologies
                (KASSE_REITER_HT), Server nur ADMIN_EMAILS -->
           <button class="subtab adm-tab" data-admtab="mail">Mail</button>
@@ -14492,6 +14496,13 @@
                 <tbody id="adm-km-rows"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+        <div id="adm-pane-kaufplan" hidden>
+          <div class="panel">
+            <div class="panel-head"><div><div class="panel-title">Kaufplan</div>
+              <div class="panel-sub" id="adm-kp-stand">Ziele je Unternehmen · Mindest-Chance · Freigeschaltet je ID und Firma — Speichern rechnet die Kaufliste sofort neu</div></div></div>
+            <div id="adm-kp-root" style="color:var(--sub);font-size:13px;padding:6px 2px">Lade Kaufplan…</div>
           </div>
         </div>
         <div id="adm-pane-konten" hidden>
@@ -25756,7 +25767,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', fcfd: 'Funded-CFD-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Wallets und Bankkonten · alle IDs', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', fcfd: 'Funded-CFD-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', kaufplan: 'Kaufplan · Ziele, Mindest-Chance, Freigaben', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Wallets und Bankkonten · alle IDs', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       let admMailSicht = 'mails'   // Reiter Mail: 'mails' | 'konten' (29.10.2026), gilt bis zum Neuladen
       let admFinSicht = 'uebersicht'   // Reiter Finanzen: 'uebersicht' | 'wallet' | 'bank' (BK1 24.11. / BK2 25.11.2026: Start = Übersicht), gilt bis zum Neuladen
@@ -25792,6 +25803,7 @@
         $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-konten').hidden   = name !== 'konten'   // Alle Accounts (13.10.2026)
+        if($('adm-pane-kaufplan')) $('adm-pane-kaufplan').hidden = name !== 'kaufplan'   // KP5 Kaufplan (26.11.2026)
         // Mail + Konten aus Mail in EINEM Reiter (29.10.2026, Finn): der Umschalter oben wählt die Sicht; 'kontomail' als Name bleibt gültig
         const mailSicht = admMailSicht
         if($('adm-mail-sicht')){ $('adm-mail-sicht').hidden = name !== 'mail'; $('adm-mail-sicht').querySelectorAll('[data-adm-mail-sicht]').forEach(c => c.classList.toggle('is-on', c.dataset.admMailSicht === mailSicht)) }
@@ -25844,6 +25856,7 @@
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
         if(name === 'konten') window._klAdminOeffnen?.()   // Kaufliste aller IDs (KP2d, 25.11.2026)
+        if(name === 'kaufplan') window._vrKaufplanOeffnen?.()   // KP5: lädt /admin/vorrat, zeichnet die drei Einstellungs-Blöcke
         if(name === 'mail' && mailSicht === 'mails') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
         if(name === 'mail' && mailSicht === 'konten') window._admKontoMailOeffnen?.()   // Konten aus Mail (29.10.2026): lädt beim Öffnen, sonst nie
         if(name === 'radarstat') window._rstOeffnen?.()   // Radar-Statistik (28.10.2026): /admin/live-trades beim Öffnen, Cache 60 s
@@ -62446,7 +62459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2353'
+  const OS_TAB_BUILD = '2026-09-22.2354'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -98758,6 +98771,7 @@ ${stBlock}
   // Admin-Karte bei geschlossenem Bereich ausblenden lassen (Leiste), Taktgeber je Ort
   window.pa1Neu = () => { for(const o of orte) if(o.I.d) o.pa1Laden() }
   window._klOeffnen = () => acc.oeffnen()
+  window._klNeu = () => { for(const o of orte) if(o.I.d) o.laden(true) }   // KP5: nach Kaufplan-Änderung frisch (beide Orte)
   window._klTachoBadges = () => acc.tachoBadges()
   window._klAdminOeffnen = () => adm.oeffnen()
   setInterval(() => { for(const o of orte) if(o.cfg.sichtbar() && !document.hidden && Date.now() - o.I.at >= KL_TAKT) o.laden(false); leisteZeigen() }, 15000)
@@ -98941,9 +98955,20 @@ ${stBlock}
       const a = await r.json().catch(() => ({}))
       if(!r.ok || !a.ok) throw new Error(a.error || ('HTTP ' + r.status))
       _vr.fehler = ''
+      // KP5: nach dem letzten Klick (1,5 s Ruhe) einmal neu rechnen — mehrere Klicks hintereinander = ein Lauf
+      clearTimeout(_vr.kpTimer); _vr.kpTimer = setTimeout(() => { vrNeuRechnen() }, 1500)
     }catch(e){ z.status = alt.status; z.gesetzt = alt.gesetzt; _vr.fehler = 'Sperre nicht gespeichert: ' + (e.message || e) }
     _vr.sendet--
     vrRender()
+  }
+  /* KP5 (26.11.2026, Master: „Nach dem Speichern sofort neu rechnen lassen, damit die Kaufliste den neuen Stand zeigt"): Lauf anstoßen
+   * (POST aktion rechnen = „Jetzt aktualisieren"), danach die Kaufliste beider Orte frisch (window._klNeu, am 60-s-Server-Merker vorbei).
+   * Läuft gerade ein Laden/Schalten, kurz warten (höchstens ~8 s) statt den Lauf zu verlieren. */
+  async function vrNeuRechnen(){
+    _vr.kpRechnet = true; vrRender()
+    for(let i = 0; i < 16 && (_vr.laedt || _vr.sendet); i++) await new Promise(res => setTimeout(res, 500))
+    try{ await vrLaden(true) }finally{ _vr.kpRechnet = false; vrRender() }
+    try{ window._klNeu?.() }catch(_){}
   }
 
   // NEU 06.10.2026 (Finn zur Seite „Vorrat": „ich erkenne nichts, eine ewig lange Liste, den Score ‚100' versteh ich nicht" — er will
@@ -99030,7 +99055,30 @@ ${stBlock}
   const VR_KACHEL_WORT = { jetzt: 'Heute kaufen', bald: 'Bald', gedeckt: 'Gedeckt', vorrat: 'mit Vorrat', funnel: 'mit Funnel' }
   const VR_NB = '\u00a0'
 
-  function vrRender(){
+  // KP5 (26.11.2026): EIN Baustein für die Einstellungen — Vorrat-View („Einstellungen") und Admin → Kaufplan zeichnen dasselbe
+  function vrEinstHtml(d, name){
+    return `<div class="vr-einst">${vrZieleHtml(d)}<div class="vr-einst-kopf">Mindest-Chance aufs Ziel <span>nachgekauft wird, bis die Chance mit den vorhandenen Konten mindestens so hoch ist</span></div><div class="vr-sich" data-vr-sich-box></div>`
+      + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div>`
+  }
+  // Admin → Kaufplan: dieselben Blöcke, dieselben Handler (vrZieleVerdrahten, vrSicherheit über vrSichRender, vrSchalten) — nur ein anderer Ort
+  function vrKaufplanRender(){
+    const root = document.getElementById('adm-kp-root'); if(!root) return
+    const d = _vr.daten
+    if(!d){ root.textContent = _vr.fehler || 'Lade Kaufplan…'; return }
+    root.removeAttribute('style')
+    const name = new Map((d.people || []).map(p => [p.user_id, p.name]))
+    const st = document.getElementById('adm-kp-stand')
+    if(st) st.textContent = 'Ziele je Unternehmen · Mindest-Chance · Freigeschaltet je ID und Firma — Speichern rechnet die Kaufliste sofort neu'
+      + (vrUhr(d.gerechnet_um) ? ' · gerechnet ' + vrUhr(d.gerechnet_um) : '') + (_vr.kpRechnet ? ' · rechnet …' : '')
+    root.innerHTML = (_vr.fehler ? `<div class="vr-fehler" style="color:var(--danger);font-size:12.5px;margin:0 0 10px">${vrEsc(_vr.fehler)}</div>` : '')
+      + (d.bereit ? '' : '<div style="color:var(--sub);font-size:12.5px;margin:0 0 10px">SQL noch nicht eingespielt — nur lesen</div>')
+      + vrEinstHtml(d, name)
+    vrSichRender(d, vrS2(d))
+    vrZieleVerdrahten(root)
+    root.querySelectorAll('[data-vr-s]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); vrSchalten(b.dataset.vrU, b.dataset.vrF, b.dataset.vrS) }))
+  }
+  function vrRender(){ vrRenderVorrat(); try{ vrKaufplanRender() }catch(e){ console.warn('[kaufplan]', e) } }
+  function vrRenderVorrat(){
     const root = document.getElementById('vr-root')
     if(!root) return
     const d = _vr.daten
@@ -99160,9 +99208,7 @@ ${stBlock}
         Firmen-Balken: graues Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div></details>`
       + vrHeuteHtml(d, s2, name, firma)
       // + vrRechnungHtml(d, s2, name, firma)   // Finn 08.10.2026: „So wird gerechnet“ visuell weg — Markup/Logik bleiben, Render-Aufruf aus (wie Auftrag/Konten-Abdeckung)
-      + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>`
-      + `<div class="vr-einst">${vrZieleHtml(d)}<div class="vr-einst-kopf">Mindest-Chance aufs Ziel <span>nachgekauft wird, bis die Chance mit den vorhandenen Konten mindestens so hoch ist</span></div><div id="vr-sich" class="vr-sich"></div>`
-      + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
+      + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>${vrEinstHtml(d, name)}</details>`
     vrSichRender(d, s2)
     root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => {
       _vr[el.dataset.vrKlapp] = el.open
@@ -99486,7 +99532,7 @@ ${stBlock}
       const a = await r.json().catch(() => ({}))
       if(!r.ok || !a.ok){ _vr.fehler = a.error || a.msg || ('Ziel nicht gespeichert (HTTP ' + r.status + ')'); _vr.zielSendet = false; vrRender(); return }
       _vr.fehler = ''; _vr.zielEdit = ''; _vr.zielSendet = false
-      await vrLaden(false)     // der Server hat schon neu gerechnet — nur neu lesen
+      await vrNeuRechnen()     // KP5: Lauf neu (Kaufliste zeigt den neuen Stand), dann neu lesen
       return
     }catch(e){ _vr.fehler = 'Ziel nicht gespeichert: ' + (e.message || e) }
     _vr.zielSendet = false; vrRender()
@@ -99582,8 +99628,9 @@ ${stBlock}
   // 'einstellung', sicherheit: 0..1} und rechnet danach sofort neu. Aktueller Wert aus d.sicherheit_ziel; nur mit Stufe 2.
   const VR_SICH = [0.15, 0.25, 0.35, 0.5], VR_SICH_STD = 0.25
   function vrSichRender(d, s2){
-    const el = document.getElementById('vr-sich')
-    if(!el) return
+    document.querySelectorAll('[data-vr-sich-box]').forEach(el => vrSichBox(el, d, s2))   // KP5: Vorrat-View + Admin → Kaufplan
+  }
+  function vrSichBox(el, d, s2){
     el.hidden = !s2
     if(!s2) return
     const ist = Number(d.sicherheit_ziel) || VR_SICH_STD
@@ -99602,7 +99649,7 @@ ${stBlock}
       if(!r.ok || !a.ok) throw new Error(a.error || ('HTTP ' + r.status))
       _vr.fehler = ''
       _vr.sichert = false
-      await vrLaden(true)
+      await vrNeuRechnen()     // KP5: wie bisher neu rechnen, dazu die Kaufliste
       return
     }catch(e){ d.sicherheit_ziel = alt; _vr.fehler = 'Sicherheit nicht gespeichert: ' + (e.message || e) }
     _vr.sichert = false; vrRender()
@@ -99773,6 +99820,8 @@ ${stBlock}
     clearInterval(_vr.timer); _vr.timer = setInterval(() => { if(document.visibilityState === 'visible') vrLaden(false) }, 300000)
   }
   window._vrTabSchliessen = () => { clearInterval(_vr.timer); _vr.timer = null }
+  // KP5 Admin → Kaufplan: Stand sofort zeigen, frisch laden (dieselbe Antwort wie der Vorrat-View, Server-Gate /admin/vorrat)
+  window._vrKaufplanOeffnen = () => { vrKaufplanRender(); vrLaden(false) }
   // Seite direkt mit #vorrat geöffnet und die Ansicht war schon aktiv, bevor dieser Block lief → jetzt nachholen
   if(document.querySelector('#dashboard-view .view[data-view="vorrat"].active')) window._vrTabOeffnen()
 })()
@@ -100627,10 +100676,10 @@ ${stBlock}
 :where([data-theme=dark]) #vr-view .vr-ki span{color:var(--sub-2)}
 :where([data-theme=dark]) #vr-view .vr-d-blau{color:#5089ec;background-color:rgba(46,144,250,.12)}
 :where([data-theme=dark]) #vr-view .vr-wert small.vr-blau{color:#5089ec}
-:where([data-theme=dark]) #vr-view .vr-sich{border-color:var(--border);background-color:var(--surface)}
-:where([data-theme=dark]) #vr-view .vr-sich span{color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-sich button{background-color:transparent;color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-sich button.an{color:var(--violet)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-sich{border-color:var(--border);background-color:var(--surface)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-sich span{color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-sich button{background-color:transparent;color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-sich button.an{color:var(--violet)}
 :where([data-theme=dark]) #vr-view .vr-kz-menge small.vr-mind-n,:where([data-theme=dark]) #vr-view .vr-leer{color:var(--sub)}
 :where([data-theme=dark]) #vr-view .vr-gef{color:#f6935a}
 :where([data-theme=dark]) #vr-view .vr-pk{background-color:var(--sub-2)}
@@ -101139,17 +101188,17 @@ ${stBlock}
 :where([data-theme=dark]) #vr-view .vr-h-leg i.mittel{background-color:#F79009}
 :where([data-theme=dark]) #vr-view .vr-h-leg i.niedrig{background-color:var(--sub-2)}
 :where([data-theme=dark]) #vr-view .vr-h-satz{color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-zk{background-color:var(--surface);border-color:var(--border-soft)}
-:where([data-theme=dark]) #vr-view .vr-zl{border-top-color:var(--border-soft)}
-:where([data-theme=dark]) #vr-view .vr-zk > .vr-zl:first-child{border-top-color:currentcolor}
-:where([data-theme=dark]) #vr-view .vr-zl > b{color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-zl-txt{color:var(--ink-2)}
-:where([data-theme=dark]) #vr-view .vr-zl-edit{border-color:transparent;background-color:transparent;color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-zl-edit:hover{border-color:var(--border);color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-zl-form{background-color:var(--surface-tint);border-top-color:currentcolor}
-:where([data-theme=dark]) #vr-view .vr-zl-felder label{color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-zl-felder input{border-color:var(--border);background-color:var(--surface);color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-zk-hinweis{color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zk{background-color:var(--surface);border-color:var(--border-soft)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl{border-top-color:var(--border-soft)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zk > .vr-zl:first-child{border-top-color:currentcolor}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl > b{color:var(--ink)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-txt{color:var(--ink-2)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-edit{border-color:transparent;background-color:transparent;color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-edit:hover{border-color:var(--border);color:var(--ink)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-form{background-color:var(--surface-tint);border-top-color:currentcolor}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-felder label{color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zl-felder input{border-color:var(--border);background-color:var(--surface);color:var(--ink)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-zk-hinweis{color:var(--sub)}
 :where([data-theme=dark]) #vr-view .vr-h-filter{color:var(--ink);background-color:var(--surface-tint)}
 :where([data-theme=dark]) #vr-view .vr-h-filter button{border-color:currentcolor;background-color:transparent;color:var(--sub)}
 :where([data-theme=dark]) #vr-view .vr-h-filter button:hover{color:var(--ink)}
@@ -101176,13 +101225,13 @@ ${stBlock}
 :where([data-theme=dark]) #vr-view .vr-h-leer b{background-color:rgba(18,183,106,.13);color:#5af6b5}
 :where([data-theme=dark]) #vr-view .vr-klapp > summary{color:var(--sub)}
 :where([data-theme=dark]) #vr-view .vr-klapp > summary:hover{color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-einst{background-color:var(--surface);border-color:var(--border-soft)}
-:where([data-theme=dark]) #vr-view .vr-einst-kopf{color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-einst-kopf span{color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-mx-z{border-top-color:var(--border-soft)}
-:where([data-theme=dark]) #vr-view .vr-mx-c{border-color:var(--border);background-color:var(--surface);color:var(--ink)}
-:where([data-theme=dark]) #vr-view .vr-mx-c.pausiert{color:#f6935a;background-color:rgba(247,144,9,.1);border-color:rgba(244,154,37,0.45)}
-:where([data-theme=dark]) #vr-view .vr-mx-c.gesperrt{color:var(--sub);background-color:transparent}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-einst{background-color:var(--surface);border-color:var(--border-soft)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-einst-kopf{color:var(--ink)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-einst-kopf span{color:var(--sub)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-mx-z{border-top-color:var(--border-soft)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-mx-c{border-color:var(--border);background-color:var(--surface);color:var(--ink)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-mx-c.pausiert{color:#f6935a;background-color:rgba(247,144,9,.1);border-color:rgba(244,154,37,0.45)}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-mx-c.gesperrt{color:var(--sub);background-color:transparent}
 :where([data-theme=dark]) #vr-view .vr-rot{color:var(--vr-rot)}
 :where([data-theme=dark]) #vr-view .vr-gelb{color:var(--vr-amber)}
 :where([data-theme=dark]) #vr-view .vr-gut{color:var(--ink)}
@@ -101199,7 +101248,7 @@ ${stBlock}
 :where([data-theme=dark]) #vr-view .vr-gef{color:var(--vr-amber)}
 :where([data-theme=dark]) #vr-view .vr-pause{color:var(--vr-amber);background-color:var(--vr-amber-bg)}
 :where([data-theme=dark]) #vr-view .adm-val.is-jetzt,:where([data-theme=dark]) #vr-view .adm-val.is-bald,:where([data-theme=dark]) #vr-view .vr-id b{color:var(--vr-akzent)}
-:where([data-theme=dark]) #vr-view .vr-mx-c.pausiert{color:var(--vr-amber);background-color:var(--vr-amber-bg);border-color:color-mix(in srgb,var(--warn) 35%,var(--border))}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-mx-c.pausiert{color:var(--vr-amber);background-color:var(--vr-amber-bg);border-color:color-mix(in srgb,var(--warn) 35%,var(--border))}
 :where([data-theme=dark]) #vr-view .vr-h-leg i.hoch{background-color:var(--vr-rot)}
 :where([data-theme=dark]) #vr-view .vr-h-leg i.mittel{background-color:var(--vr-amber)}
 :where([data-theme=dark]) #vr-view .vr-h-leg i.niedrig{background-color:var(--sub-2)}
@@ -101230,7 +101279,7 @@ ${stBlock}
 :where([data-theme=dark]) #vr-view .vr-g-mittel .kpi-delta{color:var(--vr-amber)}
 :where([data-theme=dark]) #vr-view .vr-g-hoch .kpi-delta{color:var(--vr-rot)}
 :where([data-theme=dark]) #vr-view .vr-h-quelle,:where([data-theme=dark]) #vr-view .vr-fz-satz,:where([data-theme=dark]) #vr-view .vr-re-ki{color:var(--sub)}
-:where([data-theme=dark]) #vr-view .vr-einst .vr-zk{border-color:currentcolor;background-color:transparent}
+:where([data-theme=dark]) :is(#vr-view,#adm-kp-root) .vr-einst .vr-zk{border-color:currentcolor;background-color:transparent}
 :where([data-theme=dark]) #vr-view .vr-zd{background-color:var(--surface-tint)}
 :where([data-theme=dark]) #vr-view .vr-mk .kpi{border-color:var(--border-soft);box-shadow:none;background-color:var(--surface)}
 :where([data-theme=dark]) #vr-view .vr-mk .kpi-value{color:var(--ink)}
