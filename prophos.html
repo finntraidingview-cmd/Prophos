@@ -3200,7 +3200,8 @@
   #kl-admin-karte .kl-pers{border-top:1px solid var(--border-soft);margin-top:0;padding:2px 0} #kl-admin-karte .kl-pers:first-child{border-top:0}
   #kl-admin-karte .kl-pers.auf{padding-bottom:8px}
   .kl-sp-g{display:inline-flex}
-  .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px} .kl-sp-knopf svg{width:13px;height:13px;flex:none;opacity:.75}
+  .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px}
+  #mp-karte .mp-tacho .mp-kauf-n.ruhig{color:var(--sub-2);font-weight:500} .kl-sp-knopf svg{width:13px;height:13px;flex:none;opacity:.75}
   .kl-pa1-w{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px}
   .kl-pa1-cd{font-size:11px;color:var(--good-ink,#067647);font-variant-numeric:tabular-nums;white-space:nowrap} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
   .kl-sp-g .kl-sp-pfeil{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0;padding-left:6px;padding-right:6px}
@@ -62214,7 +62215,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2330'
+  const OS_TAB_BUILD = '2026-09-22.2331'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -98053,9 +98054,12 @@ ${stBlock}
       }
       return out
     }
-    // KP2d „Später": so viele Zeilen der Zelle sind ausgeblendet, OHNE Rechenwirkung (Tabelle kaufliste_spaeter)
-    const spaeterN = z => Math.min(z.n, ((I.d && I.d.spaeter) || []).filter(s => String(s.user_id) === String(z.user_id) && s.firma === z.firma)
-      .reduce((a, s) => a + (Number(s.anzahl) || 0), 0))
+    // KP2d/KP2f „Später" wirkt je ID × FIRMA (Finn: eine Tradeify-Zeile → 7 Tage → ALLE Tradeify-Zeilen dieser ID weg, auch neue, die der Lauf
+    // in der Zeit will; danach wieder normal). OHNE Rechenwirkung (Tabelle kaufliste_spaeter). anzahl der Einträge zählt nicht mehr — auch alte
+    // Einträge mit anzahl < Zellen-Anzahl gelten als ganze Firma.
+    const spaeterBis = z => ((I.d && I.d.spaeter) || []).filter(s => String(s.user_id) === String(z.user_id) && s.firma === z.firma)
+      .reduce((a, s) => (!a || String(s.bis) > a) ? String(s.bis) : a, '')
+    const spaeterN = z => spaeterBis(z) ? z.n : 0
     function zeilenAlle(){
       // eine Zeile je SICHTBARES Konto: k = laufende Nummer innerhalb ID × Firma (Kästchen-Schlüssel)
       const out = []
@@ -98081,7 +98085,7 @@ ${stBlock}
         return `<input type="checkbox" class="kl-box" ${attr}="${klEsc(wert)}"${gew ? ' checked' : ''}${aus ? ' disabled title="nur gleiche Vorlage — erst „Aufheben“"' : ''} aria-label="${label}">`
       }
       const KL_UHR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
-      const spaeterKnopf = (attr, wert, titel) => `<span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini kl-sp-knopf" ${attr}="${klEsc(wert)}" title="7 Tage ausblenden, danach wieder da${titel ? ' — ' + titel : ''}">${KL_UHR}Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(wert)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span>`
+      const spaeterKnopf = (attr, wert, titel) => `<span class="kl-sp-g"><button type="button" class="btn btn-ghost btn-mini kl-sp-knopf" ${attr}="${klEsc(wert)}" title="Firma 7 Tage ausblenden (alle Zeilen, auch neue), danach wieder da${titel ? ' — ' + titel : ''}">${KL_UHR}Später</button><button type="button" class="btn btn-ghost btn-mini kl-sp-pfeil" data-kl-sp-menu="${klEsc(wert)}" aria-label="Später: Dauer wählen" title="3 · 7 · 30 Tage oder Firma pausieren">▾</button></span>`
       // PA1-Stand am Knopf; grün + fällig in der Zukunft → darunter „Puls prüft in 2 h 14 min · 14:37" (neu gezeichnet je Minute mit dem PA1-Takt)
       const pa1Countdown = pa => {
         const t = pa.faellig_at ? new Date(pa.faellig_at) : null
@@ -98135,12 +98139,13 @@ ${stBlock}
     function spaeterHtml(){
       const sp = (I.d && I.d.spaeter) || [], pa = (I.d && I.d.pausiert) || []
       if(!sp.length && !pa.length) return ''
-      const n = sp.reduce((a, s) => a + (Number(s.anzahl) || 0), 0), name = uid => ((I.d.zeilen || []).find(z => String(z.user_id) === String(uid)) || {}).name || ''
+      const name = uid => ((I.d.zeilen || []).find(z => String(z.user_id) === String(uid)) || {}).name || ''
       const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
+      const n = new Set(sp.map(s => s.user_id + '|' + s.firma)).size   // je ID × Firma (KP2f)
       const kopf = [n ? `${n} später` : '', pa.length ? `${pa.length} pausiert` : ''].filter(Boolean).join(' · ')
       let h = `<div class="kl-sp"><button type="button" class="kl-sp-kopf" data-kl-sp-auf>${klEsc(kopf)} · ${I.spAuf ? 'ausblenden' : 'zeigen'}</button>`
       if(I.spAuf){
-        h += sp.map(s => `<div class="kl-sp-z"><span>${cfg.alle ? `<b>${klEsc(name(s.user_id))}</b> · ` : ''}${klEsc(s.firma)} · ${s.anzahl} ${s.anzahl === 1 ? 'Konto' : 'Konten'}</span><span class="kl-sp-bis">wieder da am ${klEsc(datum(s.bis))}</span><button type="button" class="kl-sp-x" data-kl-sp-weg="${klEsc(s.id)}">Rückgängig</button></div>`).join('')
+        h += sp.map(s => `<div class="kl-sp-z"><span>${cfg.alle ? `<b>${klEsc(name(s.user_id))}</b> · ` : ''}${klEsc(s.firma)} · keine Kaufvorschläge</span><span class="kl-sp-bis">wieder da am ${klEsc(datum(s.bis))}</span><button type="button" class="kl-sp-x" data-kl-sp-weg="${klEsc(s.id)}">Rückgängig</button></div>`).join('')
         h += pa.map(p => `<div class="kl-sp-z"><span>${cfg.alle ? `<b>${klEsc(p.name)}</b> · ` : ''}${klEsc(p.firma)} · pausiert</span><span class="kl-sp-bis">bis zur Freigabe</span><button type="button" class="kl-sp-x" data-kl-frei="${klEsc(p.user_id + '|' + p.firma)}">freigeben</button></div>`).join('')
       }
       return h + '</div>'
@@ -98150,22 +98155,27 @@ ${stBlock}
     function tachoBadges(){
       const leiste = document.getElementById('mp-leiste'); if(!leiste) return
       const je = {}
-      for(const z of (I.d && I.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')) je[z.firma] = (je[z.firma] || 0) + z.n - spaeterN(z)
+      const spt = {}
+      for(const z of (I.d && I.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')){
+        je[z.firma] = (je[z.firma] || 0) + z.n - spaeterN(z); const b = spaeterBis(z); if(b) spt[z.firma] = b }
+      const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
       leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
-        let b = el.querySelector('.mp-kauf-n'); const n = je[el.dataset.mpFirma] || 0
-        if(!n){ if(b) b.remove(); return }
+        let b = el.querySelector('.mp-kauf-n'); const f = el.dataset.mpFirma, n = je[f] || 0, bis = spt[f]
+        if(!n && !bis){ if(b) b.remove(); return }
         if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
-        b.textContent = `+${n} kaufen`; b.title = `${n} Konto${n === 1 ? '' : 's'} in der Kaufliste unten`
+        b.classList.toggle('ruhig', !n && !!bis)   // KP2f: Firma auf „Später" → ruhig „später bis 02.12." statt „+n kaufen"
+        b.textContent = n ? `+${n} kaufen` : `später bis ${datum(bis)}`
+        b.title = n ? `${n} Konto${n === 1 ? '' : 's'} in der Kaufliste unten` : 'Kaufliste für diese Firma auf „Später“ — keine Kaufvorschläge bis dahin'
       })
     }
     async function spaeter(rid, anzahl, tage){
       const x = zeilenAlle().find(q => q.rid === rid); if(!x) return
-      const z = x.z, n = Math.max(1, Math.min(20, anzahl || 1)), t = [3, 7, 30].includes(tage) ? tage : 7
+      const z = x.z, n = Math.max(1, Math.min(20, z.n || anzahl || 1)), t = [3, 7, 30].includes(tage) ? tage : 7   // KP2f: ganze Firma
       try{
         const d = await klPost('/admin/kaufliste/spaeter', { user_id: z.user_id, firma: z.firma, anzahl: n, tage: t }, cfg.alle)
         if(I.d){ I.d.spaeter = [...(I.d.spaeter || []), d.spaeter]; I.auswahl.clear(); render() }   // sofort weg
         const sid = d.spaeter && d.spaeter.id
-        klToast(`${z.name} · ${z.firma}: ${n === 1 ? 'kommt' : n + ' Konten kommen'} in ${t} Tagen wieder`, sid ? () => spaeterWeg(sid) : null)
+        klToast(`${z.name} · ${z.firma}: ${t} Tage keine Kaufvorschläge`, sid ? () => spaeterWeg(sid) : null)
       }catch(e){ klToast('Später ging nicht: ' + (e.message || e)) }
     }
     async function spaeterWeg(sid){

@@ -144,7 +144,11 @@ pruef("const klVKey = z => z.vorlage ? 'v' + z.vorlage.id" in fe and "nur gleich
 pruef("const futures = typeof tpFirmIstFutures === 'function'" in fe and "if(futures && typeof window.pa1Gekauft === 'function' && vid)" in fe,
       "Gekauft: nur Futures gehen an PA1, CFD direkt ins Anlegen-Fenster")
 pruef("Puls prüft in ${" in fe and "pa.knopf.art !== 'gruen'" in fe, "grüner Knopf mit Countdown bis zur Puls-Prüfung")
-pruef("KL_UHR" in fe and "7 Tage ausblenden, danach wieder da" in fe, "„Später“ mit Uhr-Symbol und Tooltip")
+pruef("KL_UHR" in fe and "7 Tage ausblenden (alle Zeilen, auch neue), danach wieder da" in fe, "„Später“ mit Uhr-Symbol und Tooltip")
+# KP2f: „Später" je ID × Firma — ganze Zelle weg (auch neue Zeilen), alte Einträge mit kleinerer anzahl zählen als ganze Firma, Tacho ruhig „später bis …"
+pruef("const spaeterN = z => spaeterBis(z) ? z.n : 0" in fe, "Später blendet die ganze Firma der ID aus (unabhängig von anzahl)")
+pruef("später bis ${datum(bis)}" in fe and "kaufen` : `später bis" in fe, "Tacho: „später bis TT.MM.“ statt „+n kaufen“")
+pruef("· keine Kaufvorschläge</span>" in fe and "new Set(sp.map(s => s.user_id + '|' + s.firma)).size" in fe, "Abschnitt „n später“ zählt Firmen, nicht Konten")
 
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)
 import re as _re  # noqa: E402
