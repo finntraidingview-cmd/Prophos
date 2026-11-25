@@ -97996,7 +97996,9 @@ ${stBlock}
    * art: gruen | laeuft | fertig | warn (🟠, nur Anzeige) | ruhig (grau, z. B. „mehr gefunden · von Hand"). Keine Auswahl/kein Klick (Finn: Überzahl gestrichen). */
   async function klPa1Laden(){
     if(typeof window.pa1Stand !== 'function') return
-    try{ const l = await window.pa1Stand(); _kl.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
+    // Admin-Sicht „Alle IDs": Aufträge aller sichtbaren IDs (S5: pa1Stand({alle: true}), Gate wie /admin/konto-anlegen), sonst nur die eigene ID
+    const alle = _kl.alle, uid = String(currentUserId || '')
+    try{ const l = await window.pa1Stand(alle ? { alle: true } : undefined); if(alle !== _kl.alle || uid !== String(currentUserId || '')) return; _kl.pa1 = Array.isArray(l) ? l : [] }catch(_){ return }
     klRender()
   }
   window.pa1Neu = () => klPa1Laden()
@@ -98159,7 +98161,7 @@ ${stBlock}
   document.getElementById('kl-seg')?.addEventListener('click', e => {
     const b = e.target.closest('[data-kl-alle]'); if(!b) return
     const alle = b.dataset.klAlle === '1'; if(alle === _kl.alle) return
-    _kl.alle = alle; auswahl.clear(); _kl.d = null; klRender(); klLaden(false)
+    _kl.alle = alle; auswahl.clear(); _kl.d = null; _kl.pa1 = []; klRender(); klLaden(false)
   })
   document.getElementById('kl-aw-ok')?.addEventListener('click', () => klHinzufuegen([...auswahl]))
   document.getElementById('kl-aw-weg')?.addEventListener('click', () => { auswahl.clear(); klRender() })
