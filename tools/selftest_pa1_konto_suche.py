@@ -298,8 +298,8 @@ check("pa1_pc_frei(" in pc and "tv_konten_pc_frei(" in pc and "arten" in pc, "PC
 ed = block("def pc_tv_konten_auftrag_erledigt():", "\n@app.route(\"/tv-konten/mein\"")
 check('if a.get("art") == "gekauft":' in ed and "_pa1_erledigt(uid, a, b, erg)" in ed, "Erledigt-Route: eigener Zweig für Gekauft")
 check(ed.index("tv_konten\", params") < ed.index("_pa1_erledigt("), "gelesene Namen landen zuerst in tv_konten (wie bisher)")
-check('@app.route("/konto-suche/waehlen"' not in SRC and "kandidaten" not in block("# ══ PA1", "# ══ KONTEN PRÜFEN"), "keine Antipp-Liste/Auswahl-Route (Finn 25.11.)")
-nf = block('@app.route("/konto-suche/nachfolger"', "# ══ KONTEN PRÜFEN")
+check('@app.route("/konto-suche/waehlen"' not in SRC and "kandidaten" not in block("# ══ PA1", "# ══ FK1 "), "keine Antipp-Liste/Auswahl-Route (Finn 25.11.)")
+nf = block('@app.route("/konto-suche/nachfolger"', "# ══ FK1 ")
 check("_konto_ziel_uid(" in nf and "pa1_nachfolger" in nf and "sb_insert" not in nf and "sb_update" not in nf, "Nachfolger-Nummern: nur lesen/anzeigen, Gate, nie anlegen")
 check("password" not in block("def pa1_konto_zeile(", "\ndef pa1_neue(").lower(), "keine Zugangsdaten in der Konto-Zeile")
 
