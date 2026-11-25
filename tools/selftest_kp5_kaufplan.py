@@ -46,4 +46,7 @@ check("window._klNeu = () => { for(const o of orte) if(o.I.d) o.laden(true) }" i
 check(":is(#vr-view,#adm-kp-root) .vr-zl{" in HTML and ":is(#vr-view,#adm-kp-root) .vr-mx-z{" in HTML and ":is(#vr-view,#adm-kp-root) .vr-sich{" in HTML,
       "Design der Blöcke gilt auch im Admin")
 check("kaufplan: 'Kaufplan · Ziele, Mindest-Chance, Freigaben'" in HTML, "Untertitel im Kopf")
+check("if(_vr.laedt || _vr.sendet){ _vr.rechnenOffen = true; return }" in HTML and "if(_vr.rechnenOffen && !_vr.sendet){ _vr.rechnenOffen = false; setTimeout(() => { vrNeuRechnen() }, 0) }" in HTML,
+      "S2: belegt (laufendes GET) → Neu-Rechnen wird am Ende von vrLaden nachgeholt, nie verschluckt")
+check("#adm-kp-root div.vr-einst{border:0" in HTML, "S2: im Dark-Mode kein zweiter Hintergrund (Spezifität über der Dark-Regel)")
 print(f"\n{n} Prüfungen grün")

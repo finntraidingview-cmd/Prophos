@@ -3747,7 +3747,7 @@
   :is(#vr-view,#adm-kp-root) .vr-einst-kopf{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 8px}
   :is(#vr-view,#adm-kp-root) .vr-einst-kopf span{font-weight:400;color:var(--sub);font-size:12px;margin-left:8px}
   :is(#vr-view,#adm-kp-root) .vr-einst .vr-sich{margin-bottom:18px}
-  #adm-kp-root .vr-einst{border:0;padding:4px 0 0;background:none}   /* KP5: im Admin-Panel ohne zweiten Rahmen */
+  #adm-kp-root div.vr-einst{border:0;padding:4px 0 0;background:none}   /* KP5: im Admin-Panel ohne zweiten Rahmen — div. hebt die Spezifität über die Dark-Regel (S2) */
   :is(#vr-view,#adm-kp-root) .vr-mx-z{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid var(--border-soft)}
   :is(#vr-view,#adm-kp-root) .vr-mx-n{flex:0 0 110px;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding-top:3px;min-width:0}
   :is(#vr-view,#adm-kp-root) .vr-mx-n i{width:8px;height:8px;border-radius:3px;flex:none}
@@ -62459,7 +62459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2355'
+  const OS_TAB_BUILD = '2026-09-22.2356'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -98939,6 +98939,8 @@ ${stBlock}
     _vr.laedt = false
     if(knopf){ knopf.disabled = false; knopf.textContent = 'Jetzt aktualisieren' }
     vrRender()
+    // KP5: ein Neu-Rechnen, das wegen Belegung warten musste, jetzt nachholen (danach Kaufliste frisch)
+    if(_vr.rechnenOffen && !_vr.sendet){ _vr.rechnenOffen = false; setTimeout(() => { vrNeuRechnen() }, 0) }
   }
 
   // Eine Zelle der Sperr-Matrix schalten: sofort anzeigen, dann speichern; schlägt das Speichern fehl, springt die Zelle zurück
@@ -98966,7 +98968,10 @@ ${stBlock}
    * Läuft gerade ein Laden/Schalten, kurz warten (höchstens ~8 s) statt den Lauf zu verlieren. */
   async function vrNeuRechnen(){
     _vr.kpRechnet = true; vrRender()
-    for(let i = 0; i < 16 && (_vr.laedt || _vr.sendet); i++) await new Promise(res => setTimeout(res, 500))
+    // S2-Review KP5: ein laufendes GET (Admin-Basis 5–10 s) darf den Lauf nicht verschlucken — bis 30 s warten; ist es dann noch belegt,
+    // holt das Ende von vrLaden den Lauf nach (_vr.rechnenOffen) und lädt danach die Kaufliste
+    for(let i = 0; i < 60 && (_vr.laedt || _vr.sendet); i++) await new Promise(res => setTimeout(res, 500))
+    if(_vr.laedt || _vr.sendet){ _vr.rechnenOffen = true; return }
     try{ await vrLaden(true) }finally{ _vr.kpRechnet = false; vrRender() }
     try{ window._klNeu?.() }catch(_){}
   }
