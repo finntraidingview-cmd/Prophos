@@ -32,7 +32,10 @@ def _wd_num(v):
         return None
 
 
-ns = {"_wd_num": _wd_num}
+ns = {"_wd_num": _wd_num, "re": re}
+# WT1 (25.11.2026): hand_radar_waiting fragt fcp_ist_on_demand (Flag ODER Name „· On Demand“) — Regex-Konstante + Funktion mitladen
+exec(re.search(r"^FCP_OD_NAME_RE = .*?$", app, re.M).group(0), ns)
+exec(re.search(r"^def fcp_ist_on_demand\(.*?(?=^\S)", app, re.S | re.M).group(0), ns)
 exec(src, ns)
 W = ns["hand_radar_waiting"]
 
@@ -42,14 +45,16 @@ k = lambda **o: dict({"id": "k1", "user_id": "u1", "name": "100k 14367821 → Fu
 z = W([k()], set(), {"u1": "Marc"}, set())
 check(len(z) == 1 and z[0]["user"] == "Marc" and z[0]["ende4"] == "7821" and z[0]["seit"] == "2026-11-18T14:53:14Z" and z[0]["bal"] == 104210.5 and z[0]["art"] == "waiting",
       "On Demand im Waiting → eine Zeile mit Name, …7821, seit = waiting_payout_since, Balance")
-check(W([k(on_demand=False)], set(), {}, set()) == [], "ohne On Demand → keine Zeile")
+check(W([k(on_demand=False, name="100k 14367821 → Funded")], set(), {}, set()) == [], "ohne On Demand (kein Flag, kein Namenszusatz) → keine Zeile")
+check(len(W([k(on_demand=False)], set(), {}, set())) == 1, "WT1: Flag aus, aber Name „· On Demand“ → On Demand, eine Zeile")
 check(W([k(waiting_payout_since=None)], set(), {}, set()) == [], "ohne Waiting → keine Zeile")
 check(W([k(deaktiviert_at="2026-11-17T00:00:00Z")], set(), {}, set()) == [], "deaktiviert → keine Zeile")
 check(W([k()], {"k1"}, {}, set()) == [], "archiviert → keine Zeile")
 check(W([k()], set(), {}, {"u1"}) == [], "ID ausgeblendet (andere Gruppe) → keine Zeile")
 r = W([k(id="a", waiting_payout_since="2026-10-31T08:00:00Z"), k(id="b", waiting_payout_since="2026-11-18T14:53:14Z")], set(), {}, set())
 check([x["konto_id"] for x in r] == ["b", "a"], "neueste zuerst")
-check('"radar_waiting": radar_wait' in app and 'on_demand="is.true", waiting_payout_since="not.is.null"' in app and "radar_wait = None" in app,
+check('"radar_waiting": radar_wait' in app and 'waiting_payout_since="not.is.null",' in app and '{"or": "(on_demand.is.true,name.ilike.*demand*)"}' in app
+      and "radar_wait = None" in app,   # WT1: Abfrage Flag ODER Name
       "Handarbeit liefert radar_waiting (eigene Abfrage, Fehler → None, nie die Bestanden-Liste)")
 
 # Frontend
