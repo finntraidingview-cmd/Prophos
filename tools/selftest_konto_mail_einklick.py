@@ -23,7 +23,7 @@ def main():
     d = s[i:s.index("\n  }\n", i)]
     ok("if(!z.ext || !z.firma || z.firma === '?' || !(gr > 0) || !z.typ" in d and "if(!v) return 'modal'" in d, "ein Klick nur mit Firma, Größe, Nummer, Typ, Schablone")
     ok("if(v.goal_kind && !(Number(v.goal_target) > 0)) return 'modal'" in d, "Ziel ohne Zahl → Modal (nichts erfunden)")
-    ok("kontoNameRegel(gr + 'k', z.ext, z.typ, '')" in d, "Name nach Namensregel")
+    ok("kontoNameRegel(gr + 'k', z.ext, z.typ, kontoVorlageZusatz(v))" in d, "Name nach Namensregel (T5C: Zusatz aus der Vorlage, z. B. „ · Classic“)")
     ok("await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct), true)" in d and "/Nur für Admins|HTTP 403/i" in d, "über /admin/konto-anlegen, 403 → Modal")
     ok("let direkt = 'modal'; try{ direkt = await kontoDirektAnlegen(z, fremd) }" in s, "Bestätigen versucht zuerst den einen Klick")
     ok("if(z.art === 'reset' && z.vorher && !(await kontoResetBestaetigen(z, fremd, td))) return" in s, "Reset vor dem Kauf")
