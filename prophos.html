@@ -31332,7 +31332,7 @@
       if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'   // wie die Starts (Prüfer 29.10.2026)
       if(_osBusy || _osActive || _rsAktiv) return 'Signal/Fern-Lauf aktiv'
       if(_hwWiederTimer || (_hwEndHalt && _hwEndHalt.bis > jetzt)) return 'Heimweg/Endlesung'
-      if(bigTradePlan()) return 'Big Trade/Winning Day läuft'
+      if(!sofort && bigTradePlan()) return 'Big Trade/Winning Day läuft'   // Einmal-Marke sofort: auch offener WD (Finn 25.11.2026, Heimweg danach zurück)
       return ''
     }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
   }
@@ -62408,7 +62408,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2345'
+  const OS_TAB_BUILD = '2026-09-22.2346'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
