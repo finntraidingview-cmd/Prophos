@@ -54,7 +54,7 @@ def main():
     ok(len(zu) == 1 and zu[0][1].get("status") == "eq.offen" and zu[0][2].get("status") == "fehler" and zu[0][2]["ergebnis"].get("code") == "taeglich_aus",
        "offene Tages-Aufträge → „fehler“ (verworfen, code taeglich_aus); laufende bleiben")
     hol = [q for t, q in sel if t == "tv_konten_auftrag" and "faellig_at" in q]
-    ok(hol and hol[0].get("art") == "eq.mail", "Abholen nur art = mail")
+    ok(hol and str(hol[0].get("art", "")).startswith("in.(") and "mail" in hol[0]["art"] and "taeglich" not in hol[0]["art"], "Abholen nur Mail/Gekauft, nie taeglich (PA1: in.(…)-Filter)")
     ok(j.get("ok") and j.get("auftrag") is None, "ohne Mail-Auftrag: kein Auftrag")
     # 2) Mail-Auftrag fällig → wird wie bisher ausgegeben
     j2, _i, _u, _s = lauf(False, {"id": "11111111-1111-1111-1111-111111111111", "firma": "Tradeify", "art": "mail", "faellig_at": "2026-11-04T00:00:00+00:00"})
@@ -86,7 +86,7 @@ def main():
     j4, ins4, upd4, sel4 = lauf(True)
     ok(any(r.get("art") == "taeglich" for t, r in ins4) and not any(u[1].get("art") == "eq.taeglich" for u in upd4), "TV_KONTEN_TAEGLICH = True: Tages-Auftrag wie bisher")
     hol4 = [q for t, q in sel4 if t == "tv_konten_auftrag" and "faellig_at" in q]
-    ok(hol4 and "art" not in hol4[0], "… und Abholen ohne Art-Filter")
+    ok(hol4 and "taeglich" in str(hol4[0].get("art", "")), "… und Abholen inkl. taeglich (PA1: in.(…)-Filter)")
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")
