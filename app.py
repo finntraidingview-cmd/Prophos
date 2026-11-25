@@ -17218,6 +17218,7 @@ WD_ZYKLUS_KT, WD_ZYKLUS_INSTR = 1, "nq"                              # Recoverer
 WD_ZYKLUS_FU = {"apex": (370, 390), "apex100": (320, 340)}          # wie TP_VP_VORGABE.fu im Frontend
 WD_ZYKLUS_STAFFEL_VON = (0, 2000, 4000, 6000, 8000)                 # altes 5-Zahlen-Format der Staffel
 WD_ZYKLUS_STAFFEL_STD = (50, 60, 70, 80, 90)
+WD_PNL_BALANCE_TOL = 50.0                                            # WD5: Endlesung ↔ Balance-Differenz (wie AG2_GEGENPROBE_USD)
 
 
 def _wd_berlin_tag(iso):
@@ -17251,7 +17252,19 @@ def wd_plan_pnl(p):
     else:
         start = _wd_num(tv.get("today_pnl_start"))
         if ende is not None and start is not None and fin.get("datum") and fin.get("datum") == tv.get("datum_start"):
-            return round(ende - start, 2)
+            wert = round(ende - start, 2)
+            # WD5 (25.11.2026, Finn + Pascal Lucid 150k …0001, Plan ec83e13a 23.11.): die Endlesung las „Total P/L“ −180,50 $, die Balance fiel aber
+            # 156.844 → 154.076 = −2.768 $ (= master_pl). Mit −180,50 lag die Trade-Summe des Zyklus bei +1.153 $ statt −1.434,50 $ → AG2-Gegenprobe
+            # „Balance ≠ Trades“ → kein Ausgleichs-Trade, der Farmer plante beim letzten fehlenden WD einen normalen WD. Zwei Quellen schlagen eine:
+            # weicht die Endlesung um mehr als WD_PNL_BALANCE_TOL von der Balance-Differenz desselben Trades ab UND stimmt master_pl mit ihr überein,
+            # zählt master_pl. Sonst (nur eine Quelle, oder master_pl passt auch nicht) wie bisher die Endlesung.
+            bs, be, mp = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end")), _wd_num(p.get("master_pl"))
+            tol = float(globals().get("WD_PNL_BALANCE_TOL") or 50.0)   # globals: Selbsttest-Lader ziehen die Funktion einzeln
+            if bs and be and bs > 0 and be > 0 and mp is not None:
+                diff = round(be - bs, 2)
+                if abs(diff - wert) > tol and abs(diff - mp) <= tol:
+                    return round(mp, 2)
+            return wert
     return _wd_num(p.get("master_pl")) if _wd_num(p.get("master_pl")) is not None else (ende if p.get("route") != "tsv2" else None)
 
 
