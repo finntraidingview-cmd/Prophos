@@ -21,9 +21,22 @@ def check(ok, name):
 baum = ast.parse(SRC)
 compile(baum, "app.py", "exec")
 teile = [x for x in baum.body if (isinstance(x, ast.FunctionDef) and x.name in ("_vorrat2_fn_payout_uids", "vorrat_kauf_deckel"))
-         or (isinstance(x, ast.Assign) and any(getattr(t, "id", "") in ("VORRAT_FN_PAYOUT_FIRMEN", "VORRAT_FNF_SPERRE", "VORRAT_LAUFEND_TYPEN")
-                                               for t in x.targets))]
-check(len(teile) == 5, f"Funktionen + Konstanten in app.py ({len(teile)})")
+         or (isinstance(x, ast.Assign) and any(getattr(t, "id", "") in ("VORRAT_FN_PAYOUT_FIRMEN", "VORRAT_FNF_SPERRE", "VORRAT_LAUFEND_TYPEN",
+                                                                          "VORRAT2_RECHEN_STAND") for t in x.targets))]
+check(len(teile) == 6, f"Funktionen + Konstanten in app.py ({len(teile)})")
+# FN2b (26.11.2026): live kam nach FN2 kein Lauf (letzter 25.11. 01:43 UTC, Takt 05:00 fehlt) — Kaufliste/Tacho lesen kauf_sperre aus dem gespeicherten
+# Lauf. Stand hochgezählt → vorrat2_anhaengen rechnet beim nächsten GET einmal neu (stand != VORRAT2_RECHEN_STAND)
+_st = {}
+exec(compile(ast.Module(body=[x for x in teile if isinstance(x, ast.Assign) and getattr(x.targets[0], "id", "") == "VORRAT2_RECHEN_STAND"],
+                        type_ignores=[]), "app.py", "exec"), _st)
+check(_st.get("VORRAT2_RECHEN_STAND", 0) >= 11, "RECHEN_STAND ≥ 11: alter Lauf (vor FN2) rechnet beim nächsten GET neu")
+anh = SRC[SRC.index("def vorrat2_anhaengen("):SRC.index("\ndef ", SRC.index("def vorrat2_anhaengen(") + 10)]
+check('(lauf.get("ergebnis") or {}).get("stand") != VORRAT2_RECHEN_STAND' in anh and 'vorrat2_lauf("hand")' in anh, "Neurechnung bei Stand-Wechsel vorhanden")
+kl_baum = ast.parse(open(os.path.join(W, "kaufliste_app.py"), encoding="utf-8").read())
+kl = ast.unparse(kl_baum)                                    # Code ohne Kommentare/Docstrings-Inhalt zählt nur als Strings
+kl_code = "\n".join(ast.unparse(n) for n in ast.walk(kl_baum) if isinstance(n, (ast.Call, ast.Compare, ast.Name, ast.Attribute)))
+check("str(z.get('kauf_sperre'))" in kl and "transactions" not in kl_code and "pending_payouts" not in kl_code and "fn_payout" not in kl_code,
+      "Kaufliste gesperrt[] (KP2k) liest nur kauf_sperre aus dem Lauf — keine eigene Payout-Prüfung")
 
 DB = {}
 NORM = {"fundednext": "FundedNext", "funded next": "FundedNext", "fundednext futures": "FundedNext Futures", "apex trader": "Apex Trader"}

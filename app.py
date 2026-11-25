@@ -10674,7 +10674,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 10              # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 11              # FN2b (26.11.2026): 10 → 11, damit der gespeicherte Lauf von vor FN2 (FNF „ab 1. FN-Payout“ bei Finn + Pascal) beim nächsten GET neu rechnet — hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.25,                # P(Bestand ≥ Untergrenze) — Finn 06.10.2026 spät, Hauptregel für alle Firmen: „ca. 25 %, darunter
                                        # nachkaufen, lieber einen Tick zu wenig"; am Frontend einstellbar (vorrat_einstellung.sicherheit)
