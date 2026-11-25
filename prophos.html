@@ -3672,6 +3672,10 @@
   #vr-view .vr-zl-felder label.breit input{width:190px}
   #vr-view .vr-zl-knoepfe{display:flex;gap:6px}
   #vr-view .vr-zk-hinweis{margin:6px 0 0;font-size:12px;color:var(--sub)}
+  /* KP3: Umschalter Ziele je Unternehmen */
+  #vr-view .vr-zk-gruppen{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+  #vr-view .vr-zk-gruppen button{border:1px solid var(--border-soft);background:var(--surface);color:var(--sub);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+  #vr-view .vr-zk-gruppen button.an{background:var(--ink);color:var(--surface);border-color:var(--ink)}
   @media (max-width:760px){
     #vr-view .vr-zk{padding:4px 12px 8px}
     #vr-view .vr-zl{flex-wrap:wrap;row-gap:2px}
@@ -97998,11 +98002,15 @@ ${stBlock}
     return vorlagen.liste
   }
   // REIN RECHNEND: Vorlage für Firma + Kauf-Einheit („150k") — gleiche Firma, passende Größe, erste Stufe (Challenge/Phase 1), sonst Sortierung
-  function klVorlage(firma, einheit, liste){
-    const m = /^(\d+(?:[.,]\d+)?)\s*k/i.exec(String(einheit || '')), gr = m ? Math.round(parseFloat(m[1].replace(',', '.')) * 1000) : 0
+  // KP3 (26.11.2026): liefert der Lauf die Kauf-Größe (groesse), sucht die Vorlage genau diese Größe. Rechnet die Zeile mit eigenen Zielen ihres
+  // Unternehmens (streng = gruppe_ziel, Emin 50k bei Futures), gilt NUR diese Größe — fehlt sie → null („Vorlage fehlt“), nie still 150k. HT (ohne
+  // eigene Ziele) wie bisher mit Rückfall auf die Firma (Review: FTMO „100k oder 200k“ wählt 200k, es gibt nur die 100k-Vorlage → bitgleich).
+  function klVorlage(firma, einheit, liste, groesse, streng){
+    const m = /^(\d+(?:[.,]\d+)?)\s*k/i.exec(String(einheit || '')), gr = Number(groesse) > 0 ? Math.round(Number(groesse)) : (m ? Math.round(parseFloat(m[1].replace(',', '.')) * 1000) : 0)
     const k = (liste || []).filter(v => klNorm(v.firm) === klNorm(firma))
     if(!k.length) return null
     const passt = gr ? k.filter(v => Number(v.account_size || v.starting_balance) === gr) : []
+    if(streng && gr && !passt.length) return null
     const pool = passt.length ? passt : k
     return pool.slice().sort((a, b) => (KL_TYP_RANG[a.account_type] ?? 9) - (KL_TYP_RANG[b.account_type] ?? 9))[0]
   }
@@ -98046,7 +98054,7 @@ ${stBlock}
         if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
         const liste = await klVorlagen()
         if(veraltet()) return
-        for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste)
+        for(const z of d.zeilen || []) z.vorlage = klVorlage(z.firma, z.einheit, liste, z.groesse, z.gruppe_ziel)
         // Auswahl hängt an Platznummern (uid|firma#k): nach jedem Neuladen kann #k ein anderes Konto sein → leeren (Review)
         if(I.d) I.auswahl.clear()
         I.d = d; I.at = Date.now(); I.fehler = ''; I.uid = uid; I.verboten = false
@@ -98341,7 +98349,7 @@ ${stBlock}
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, ziele: true, rechnung: true, rechKey: '', hPerson: '', zielEdit: '', zielSendet: false, kiEntwurf: '', kiSendet: false }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, ziele: true, rechnung: true, rechKey: '', hPerson: '', zielEdit: '', zielSendet: false, zielGruppe: '', kiEntwurf: '', kiSendet: false }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -98956,12 +98964,27 @@ ${stBlock}
   // Quelle: d.ziele[] {firma, art, typen, von, bis, groessen[{groesse | null = jede Größe, stueck}], kauf_einheit, reihe} (T2, Vertrag
   // §3c); solange es das Feld nicht gibt, die Ziele aus d.firmen[].ziel. Speichern: POST {aktion:'ziel', firma, von, bis | groessen,
   // kauf_einheit} — die art bleibt fest, der Server rechnet sofort neu, hier nur GET neu; Fehler ({error}) unverändert anzeigen.
+  // KP3 (26.11.2026, Finn: „Kaufliste/Musterportfolio müssen HT-IDs und Emin-IDs unterscheiden“): Ziele je Unternehmen. d.ziele_gruppen = Gruppen mit
+  // Verwalter, die dieser Login bearbeiten darf (Admin alle, Verwalter seine), je mit eigenen Zeilen (vorrat_ziele_gruppe). Umschalter über der Liste;
+  // die Liste einer Gruppe = globale Zeilen, überschrieben von ihren eigenen (eigen: true). Speichern mit gruppe_id; d.ziele_global_darf false
+  // (Verwalter) → nur seine Gruppe. Ohne Gruppen (SQL nicht eingespielt) wie bisher.
+  function vrZielGruppen(d){ return Array.isArray(d && d.ziele_gruppen) ? d.ziele_gruppen.filter(g => g && g.gruppe_id) : [] }
+  function vrZielGruppeAktiv(d){
+    const gs = vrZielGruppen(d)
+    if(gs.some(g => g.gruppe_id === _vr.zielGruppe)) return _vr.zielGruppe
+    return (d && d.ziele_global_darf === false && gs.length) ? gs[0].gruppe_id : ''
+  }
   function vrZieleListe(d){
-    if(Array.isArray(d.ziele)) return d.ziele.filter(z => z && z.firma)
-    return (d.firmen || []).filter(f => f.ziel).map(f => ({ firma: f.firma, ...f.ziel }))
+    const basis = Array.isArray(d.ziele) ? d.ziele.filter(z => z && z.firma) : (d.firmen || []).filter(f => f.ziel).map(f => ({ firma: f.firma, ...f.ziel }))
+    const gid = vrZielGruppeAktiv(d)
+    const g = gid && vrZielGruppen(d).find(x => x.gruppe_id === gid)
+    if(!g) return basis
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    return basis.map(z => { const e = (g.ziele || []).find(x => norm(x.firma) === norm(z.firma)); return e ? { ...z, ...e, firma: z.firma, reihe: z.reihe, eigen: true } : z })
   }
   function vrZielKlartext(z){
-    const wo = vrTypTxt(z.typen), kauf = z.kauf_einheit ? ` · Nachkauf ${vrEinheitKurz(z.kauf_einheit, z.firma)}` : ''
+    const wo = vrTypTxt(z.typen), kauf = (z.kauf_einheit ? ` · Nachkauf ${vrEinheitKurz(z.kauf_einheit, z.firma)}` : '')
+      + (Number(z.kauf_groesse) > 0 && !/^\s*\d+\s*k\s*$/i.test(String(z.kauf_einheit || '')) ? ` (${vrK(z.kauf_groesse)})` : '')
     const gr = (z.groessen || []).filter(t => Number(t.stueck) > 0)
     if(z.art === 'plus_ueber_start') return `je ID +${Number(z.von || 0).toLocaleString('de-DE')} bis +${Number(z.bis || 0).toLocaleString('de-DE')} $ Plus in ${wo}${kauf}`
     if(z.art === 'groessen_summe') return `je ID ${vrK(z.von)} bis ${vrK(z.bis)} in ${wo}${kauf}`
@@ -98982,18 +99005,23 @@ ${stBlock}
         ? (z.groessen || []).map((t, i) => zahl('stueck:' + i, t.stueck, t.groesse ? `Anzahl ${vrK(t.groesse)}` : 'Anzahl Konten')).join('')
         : zahl('von', z.von, z.art === 'plus_ueber_start' ? 'von (+$)' : 'von ($)') + zahl('bis', z.bis, z.art === 'plus_ueber_start' ? 'bis (+$)' : 'bis ($)')
       return `<form class="vr-zl vr-zl-form" data-vr-zform="${fa}"><b>${fa}</b>
-        <div class="vr-zl-felder">${felder}<label class="breit">Nachkauf<input type="text" data-feld="kauf_einheit" value="${vrEsc(z.kauf_einheit || '')}"></label></div>
+        <div class="vr-zl-felder">${felder}<label class="breit">Nachkauf<input type="text" data-feld="kauf_einheit" value="${vrEsc(z.kauf_einheit || '')}"></label>${z.art === 'stueck' ? '' : zahl('kauf_groesse', z.kauf_groesse, 'Kauf-Größe ($)')}</div>
         <div class="vr-zl-knoepfe"><button type="submit" class="btn btn-mini"${aus}>${_vr.zielSendet ? 'speichert …' : 'Speichern'}</button><button type="button" class="btn btn-ghost btn-mini" data-vr-zc="1">Abbrechen</button></div></form>`
     }
     // seit 06.10.2026 spät als erster Block in „Einstellungen" (Finn: die Karte oben „kannst du weglassen, ist unnötig" — die Seite
     // beginnt mit der Übersicht); Funktion unverändert
-    return `<div class="vr-einst-kopf">Ziele je ID</div>
-      <div class="vr-zk">${zs.map(zeile).join('')}<p class="vr-zk-hinweis">Gilt für jede ID einzeln. Gesperrte/pausierte Kombinationen weiter unten.</p></div>`
+    const gs = vrZielGruppen(d), gid = vrZielGruppeAktiv(d), gName = (gs.find(g => g.gruppe_id === gid) || {}).name
+    const chips = gs.length ? `<div class="vr-zk-gruppen" role="tablist">${d.ziele_global_darf === false ? '' : `<button type="button" role="tab" class="${gid ? '' : 'an'}" data-vr-zg="">Hermann Technologies</button>`}${gs.map(g => `<button type="button" role="tab" class="${g.gruppe_id === gid ? 'an' : ''}" data-vr-zg="${vrEsc(g.gruppe_id)}">${vrEsc(g.name)}</button>`).join('')}</div>` : ''
+    const hinweis = gid ? `Gilt für jede ID von ${vrEsc(gName || 'dieser Gruppe')} einzeln — eigene Werte überschreiben die von Hermann Technologies (Firmen ohne eigene Werte wie HT).`
+      : `Gilt für jede ID einzeln${gs.length ? ' — Hermann Technologies und jedes Unternehmen ohne eigene Werte' : ''}. Gesperrte/pausierte Kombinationen weiter unten.`
+    return `<div class="vr-einst-kopf">Ziele je ID</div>${chips}
+      <div class="vr-zk">${zs.map(zeile).join('')}<p class="vr-zk-hinweis">${hinweis}</p></div>`
   }
   function vrZieleVerdrahten(root){
     root.querySelectorAll('[data-vr-ze]').forEach(b => b.addEventListener('click', () => { _vr.zielEdit = b.dataset.vrZe; vrRender()
       root.querySelector('[data-vr-zform] input')?.focus() }))
     root.querySelectorAll('[data-vr-zc]').forEach(b => b.addEventListener('click', () => { _vr.zielEdit = ''; vrRender() }))
+    root.querySelectorAll('[data-vr-zg]').forEach(b => b.addEventListener('click', () => { _vr.zielGruppe = b.dataset.vrZg || ''; _vr.zielEdit = ''; vrRender() }))   // KP3
     root.querySelectorAll('[data-vr-zform]').forEach(fm => fm.addEventListener('submit', ev => { ev.preventDefault(); vrZielSpeichern(fm) }))
   }
   async function vrZielSpeichern(fm){
@@ -99003,6 +99031,15 @@ ${stBlock}
     const wert = feld => { const el = fm.querySelector(`[data-feld="${feld}"]`); return el ? el.value.trim() : '' }
     const num = feld => { const v = Number(String(wert(feld)).replace(',', '.')); return isFinite(v) && v >= 0 ? v : NaN }
     const body = { aktion: 'ziel', firma, kauf_einheit: wert('kauf_einheit') || null }
+    const gid = vrZielGruppeAktiv(d)
+    if(gid) body.gruppe_id = gid                                               // KP3: Ziel dieses Unternehmens
+    if(z.art !== 'stueck' && fm.querySelector('[data-feld="kauf_groesse"]')){
+      const kg = wert('kauf_groesse')
+      if(kg !== '' || z.kauf_groesse != null){
+        body.kauf_groesse = kg === '' ? null : num('kauf_groesse')
+        if(body.kauf_groesse !== null && !(body.kauf_groesse > 0)){ _vr.fehler = 'Ziel nicht gespeichert: Kauf-Größe muss größer als 0 sein'; vrRender(); return }
+      }
+    }
     if(z.art === 'stueck'){
       body.groessen = (z.groessen || []).map((t, i) => ({ groesse: t.groesse, stueck: Math.round(num('stueck:' + i)) }))
       if(body.groessen.some(t => !isFinite(t.stueck))){ _vr.fehler = 'Ziel nicht gespeichert: Anzahl muss eine Zahl ab 0 sein'; vrRender(); return }

@@ -56,6 +56,8 @@ def zeilen_aus_vorrat(zellen, nur_uid=None, namen=None):
             "laufend": z.get("laufend_n"), "max": z.get("max_laufend"), "reserve": bool(z.get("reserve")),
             "pack": z.get("kauf_pack"),                     # Apex: 5er-Pack (Zeilen als Pack gruppiert, Gekauft/Erledigt fürs ganze Pack)
             "einheit": nk.get("einheit"), "preis_eur": nk.get("preis_eur"),
+            "groesse": nk.get("groesse"),                   # KP3: Kauf-Größe des Unternehmens der ID (Emin 50k bei Futures) → Vorlage Firma × Größe
+            "gruppe_ziel": bool(z.get("gruppe_id")),         # KP3: Zelle rechnet mit eigenen Gruppen-Zielen → Vorlage nur in genau dieser Größe
             "untergrenze": z.get("untergrenze"), "bestellt": z.get("bestellt"),
             "bestand": z.get("bestand_echt"),               # KP2g: Firmen-Kopf „Ist / Soll" (Ist = gesicherter Bestand, Soll = untergrenze)
         })

@@ -10268,7 +10268,7 @@ def vorrat_bestand(ziel, stock):
             "wartend": wartend, "teile": None}
 
 
-def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zaehlt=True):
+def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zaehlt=True, ziele_fuer=None):
     """REIN RECHNEND (testbar): Funnel und sicherer Bestand je ID × Firma.
     konten   = aktive Prop-Konten [{user_id, firma, typ, groesse (gespeichert), balance, express, waiting}]
     ziele    = {firma: {art, typen, von, bis, groessen, kauf_einheit, reihe}} — NUR diese Firmen stehen auf der Seite
@@ -10293,9 +10293,9 @@ def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zae
     firmen = sorted(ziele, key=lambda f: (float(ziele[f].get("reihe") or 0), f))
     zellen = []
     for f in firmen:
-        ziel = ziele[f]
-        typen = ziel.get("typen") or []
         for uid in ids:
+            ziel = ziele_fuer(uid)[f] if ziele_fuer else ziele[f]     # KP3: Ziel des Unternehmens der ID (sonst global)
+            typen = ziel.get("typen") or []
             liste = je.get((uid, f), [])
             gesetzt = matrix.get((uid, f))
             funnel = {}
@@ -10329,11 +10329,59 @@ def _vorrat_tabellen():
         raise
 
 
+# KP3 ZIELE JE UNTERNEHMEN (26.11.2026, Finn über den Master: „Kaufliste/Musterportfolio müssen HT-IDs und Emin-IDs unterscheiden, z. B. kauft Emin
+# immer nur 50k-Konten“). vorrat_ziele_gruppe (sql/2026-11-26_kp3_vorrat_ziele_gruppe.sql) trägt eigene Ziel-Zeilen je Gruppe (id_gruppen.id) × Firma.
+# Eine ID einer Gruppe MIT Zeile für die Firma rechnet mit dieser Zeile (Ziel, Kauf-Einheit, Kauf-Größe), sonst wie bisher mit vorrat_ziele — HT hat
+# keine Zeilen → bitgleich. Die Reihenfolge der Firmen bleibt die von vorrat_ziele (reihe). Tabelle fehlt (404) → wie bisher, ohne Gruppen-Ziele.
+VORRAT_ZG_SQL = "sql/2026-11-26_kp3_vorrat_ziele_gruppe.sql"
+VORRAT_ZG_FELDER = ("art", "typen", "von", "bis", "groessen", "kauf_einheit", "kauf_groesse")
+
+
+def vorrat_ziele_fuer(ziele, ziele_gruppe, uid_gruppe, uid):
+    """REIN RECHNEND (testbar): Ziele EINER ID. ziele = {firma: ziel} (vorrat_ziele), ziele_gruppe = {gruppe_id: {firma: ziel}}, uid_gruppe =
+    {user_id: gruppe_id} (nur IDs von Gruppen mit eigenen Zeilen). Firma mit Gruppen-Zeile → deren Felder (reihe bleibt global), sonst die globale
+    Zeile. Ohne Gruppen-Zeilen kommt dasselbe Objekt zurück (bitgleich)."""
+    eigene = (ziele_gruppe or {}).get((uid_gruppe or {}).get(str(uid)))
+    if not eigene:
+        return ziele
+    return {f: (dict(z, **{k: eigene[f].get(k) for k in VORRAT_ZG_FELDER}) if f in eigene else z) for f, z in ziele.items()}
+
+
+def _vorrat_ziele_gruppen():
+    """vorrat_ziele_gruppe + Mitglieder → ({gruppe_id: {firma: ziel}}, {user_id: gruppe_id}, bereit). Mitglieder = id_gruppe_mitglied der Gruppen mit
+    Zeilen, dazu ihr Verwalter. Tabelle fehlt (404) → ({}, {}, False); andere Fehler fliegen (lieber kein Lauf als Emin mit HT-Größen)."""
+    try:
+        rows = _sb_all("vorrat_ziele_gruppe", {"select": "gruppe_id,firma," + ",".join(VORRAT_ZG_FELDER), "order": "gruppe_id.asc,firma.asc"})
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return {}, {}, False
+        raise
+    zg = {}
+    for r in rows or []:
+        zg.setdefault(str(r.get("gruppe_id")), {})[_firm_norm(r.get("firma"))] = {k: r.get(k) for k in VORRAT_ZG_FELDER}
+    if not zg:
+        return {}, {}, True
+    return zg, vorrat_uid_gruppe(admin_gruppen_daten(), zg), True
+
+
+def vorrat_uid_gruppe(daten, zg):
+    """REIN RECHNEND (testbar): {user_id: gruppe_id} für die Gruppen mit eigenen Ziel-Zeilen (zg) — Mitglieder (id_gruppe_mitglied) und Verwalter."""
+    ug = {}
+    for m in (daten or {}).get("mitglieder") or ():
+        if str(m.get("gruppe_id")) in zg:
+            ug[str(m.get("user_id"))] = str(m.get("gruppe_id"))
+    for g in (daten or {}).get("gruppen") or ():
+        if str(g.get("id")) in zg and g.get("verwalter_id"):
+            ug.setdefault(str(g["verwalter_id"]), str(g.get("id")))
+    return ug
+
+
 def admin_build_vorrat():
     b = _admin_basis()
     accounts, archived = b["accounts"], b["archived"]
     names, disp, excluded_ids = b["names"], b["disp"], b["excluded_ids"]
     ziele, matrix, ein, bereit = _vorrat_tabellen()
+    zg, ug, _zg_ok = _vorrat_ziele_gruppen() if bereit else ({}, {}, False)   # KP3
     # Live-Spiegel (Echo, Duplikum) für die Balance wie im Prop-Baum; fehlen sie, reicht der gespeicherte Stand am Konto
     try:
         echo_bal, dup_bal = _ap_balance_karten()
@@ -10361,7 +10409,8 @@ def admin_build_vorrat():
     people = sorted([{"user_id": u, "name": disp.get(u) or names.get(u, u[:8])} for u in uids],
                     key=lambda p: str(p["name"]).lower())
     standard = ein.get("standard_status") if ein.get("standard_status") in ("frei", "gesperrt") else "frei"
-    erg = vorrat_rechnen(konten, ziele, matrix, [p["user_id"] for p in people], standard=standard)
+    erg = vorrat_rechnen(konten, ziele, matrix, [p["user_id"] for p in people], standard=standard,
+                         ziele_fuer=(lambda u: vorrat_ziele_fuer(ziele, zg, ug, u)) if zg else None)
     angelegt = {}
     for k in konten:
         angelegt.setdefault((k["user_id"], k["firma"]), []).append(k.get("created_at"))
@@ -10625,7 +10674,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 9               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 10              # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.25,                # P(Bestand ≥ Untergrenze) — Finn 06.10.2026 spät, Hauptregel für alle Firmen: „ca. 25 %, darunter
                                        # nachkaufen, lieber einen Tick zu wenig"; am Frontend einstellbar (vorrat_einstellung.sicherheit)
@@ -11638,7 +11687,8 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     if preis is not None:
         preis = round(preis)
     nachkauf = {"n_roh": n_roh_ges, "n_erwartung": n_erw_ges, "n_max": n_max_ges, "einheit": einheit,
-                "teile": teile if stueck else None, "grund": grund, "preis_eur": preis}
+                "teile": teile if stueck else None, "grund": grund, "preis_eur": preis,
+                "groesse": (int(g_kauf) if (g_kauf and not stueck) else None)}   # KP3: Kauf-Größe → Bulk-Vorlage Firma × Größe in der Kaufliste
     if status != "frei":
         nachkauf.update(n_roh=0, grund=status)
         lage_ges, score = None, None
@@ -12140,6 +12190,7 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
         ziele_ext = {}
     for f, z in ziele.items():
         z.update({k: (ziele_ext.get(f) or {}).get(k) for k in ("kauf_groesse",)})
+    zg, ug, _zg_ok = _vorrat_ziele_gruppen()     # KP3: Ziele + Kauf-Größe je Unternehmen (Emin 50k bei Futures), HT ohne Zeilen = global
     # Stufen-Kette und Kernwerte je Vorrats-Firma aus auto_plan_regeln (ap_regel_finden: Vergleich nach _ap_norm über namen[])
     stufen, kws = {}, {}
     for f in ziele:
@@ -12228,7 +12279,8 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             liste = je.get((uid, f), [])
             seed = zlib.crc32(f"{uid}|{f}".encode("utf-8")) % 1000003
             _st_u, _kw_u = _stufen_kw(uid, f)
-            z = vorrat2_zelle(ziele[f], _st_u, liste, status, param, faktoren.get(f), seed, _kw_u)
+            ziel_u = vorrat_ziele_fuer(ziele, zg, ug, uid)[f]       # KP3
+            z = vorrat2_zelle(ziel_u, _st_u, liste, status, param, faktoren.get(f), seed, _kw_u)
             nr = z["nachkauf"]["n_roh"]
             # KP2: Deckel „max. laufend“ + FNF-Freischaltung VOR dem Totband — Anzeige, Tagesliste und Kaufliste rechnen damit
             dk = vorrat_kauf_deckel(nr, z.get("konten"), f, param, bool(fn_ok) and uid in fn_ok,
@@ -12253,7 +12305,9 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
             name = b["disp"].get(uid) or b["names"].get(uid) or uid[:8]
             z.update(user_id=uid, firma=f, status=status, user=name)
             # Fakten in Klartext für den KI-Bot (Master 06.10.2026) — liegen im Lauf, /admin/vorrat/lauf liefert sie aus
-            z["fakten_text"] = vorrat_fakten_text(z, name, f, ziele[f], status)
+            z["fakten_text"] = vorrat_fakten_text(z, name, f, ziel_u, status)
+            if ug.get(uid):
+                z["gruppe_id"] = ug[uid]                             # KP3: Zelle rechnet mit Gruppen-Zielen (Anzeige/Test)
             zellen.append(z)
     _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
     return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "gesamt_score": vorrat_gesamt(zellen)["score"], "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
@@ -12525,11 +12579,51 @@ def _vorrat_antwort(erg1):
                                                       "order": "reihe.asc"})
         except requests.exceptions.HTTPError:
             out["ziele"] = []
+    out["ziele_global_darf"] = not _admin_nur_uid()                           # globale Ziele (HT) ändert wie bisher nur ein uneingeschränkter Login
+    try:
+        out["ziele_gruppen"] = vorrat_ziele_gruppen_sicht(_admin_nur_uid())   # KP3: Ziele je Unternehmen zum Bearbeiten (Admin alle, Verwalter seine)
+    except Exception as e:
+        print(f"[vorrat] ⚠️ Gruppen-Ziele: {type(e).__name__}", flush=True)
+        out["ziele_gruppen"] = []
     out.setdefault("luecke_gesamt", None)
     if _admin_nur_uid():
         # Admin-Gruppen (08.10.2026): der KI-Text und Finns KI-Hinweise sprechen über alle IDs (HT-weit) — nicht an Eingeschränkte
         out["ki_text"], out["ki_hinweise"] = None, []
     return out
+
+
+def _vorrat_zg_admin():
+    """KP3: uneingeschränkter Login ist nicht automatisch Admin (alle HT-IDs ohne admin_zugang-Zeile) — dasselbe enge Gate wie Kapital/Kaufliste
+    (kapital_app._gate: ADMIN_EMAILS oder admin_mail_leser). → True/False, Fehler beim Prüfen = False."""
+    try:
+        import kapital_app as _K
+        erlaubt, gerr = _K._gate()
+        return gerr is None and erlaubt is None
+    except Exception:
+        return False
+
+
+def vorrat_ziele_gruppen_sicht(nur):
+    """KP3: Gruppen mit eigenen Ziel-Zeilen für die Ziele-Karte → [{gruppe_id, name, darf, ziele: [Zeilen nach reihe von vorrat_ziele]}].
+    nur = _admin_nur_uid(): None (Admin) → alle Gruppen mit Verwalter (auch ohne Zeilen, damit Finn sie anlegen kann); sonst nur die Gruppe, deren
+    Verwalter nur ist (Emin). Einfache Mitglieder sehen nichts (Ziele ändern nur Admin/Verwalter)."""
+    q = {"select": "id,name,verwalter_user_id", "verwalter_user_id": "not.is.null", "order": "name.asc"}
+    if nur:
+        q["verwalter_user_id"] = f"eq.{nur}"
+    elif not _vorrat_zg_admin():
+        return []
+    gruppen = sb_select("id_gruppen", q) or []
+    if not gruppen:
+        return []
+    try:
+        rows = _sb_all("vorrat_ziele_gruppe", {"select": "gruppe_id,firma," + ",".join(VORRAT_ZG_FELDER), "order": "gruppe_id.asc,firma.asc",
+                                               "gruppe_id": f"in.({','.join(str(g['id']) for g in gruppen)})"}) or []
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return []                                    # SQL noch nicht eingespielt → Karte wie bisher
+        raise
+    return [{"gruppe_id": str(g["id"]), "name": g.get("name") or "Gruppe", "darf": True,
+             "ziele": [r for r in rows if str(r.get("gruppe_id")) == str(g["id"])]} for g in gruppen]
 
 
 def vorrat_ziel_pruefen(alt, body, neu=False):
@@ -12599,6 +12693,52 @@ def vorrat_ziel_pruefen(alt, body, neu=False):
     return out, None
 
 
+def _vorrat_ziel_gruppe_aendern(body, uid, nur):
+    """KP3 POST /admin/vorrat {aktion: 'ziel', gruppe_id, firma, von/bis/groessen/kauf_einheit/kauf_groesse}: Ziel-Zeile EINES Unternehmens ändern.
+    Recht: Admin (nicht eingeschränkt) jede Gruppe mit Verwalter; ein eingeschränkter Login nur die Gruppe, deren Verwalter er ist (Emin). Gibt es für
+    die Firma noch keine Gruppen-Zeile, wird sie aus der globalen Zeile (vorrat_ziele) angelegt und geändert — die Firma muss dort ein Ziel haben."""
+    gid = str(body.get("gruppe_id") or "").strip().lower()
+    if not re.match(r"^[0-9a-f-]{36}$", gid):
+        return jsonify({"error": "gruppe_id ungültig"}), 400
+    firma = _firm_norm(str(body.get("firma") or "")[:80])
+    if firma == "—":
+        return jsonify({"error": "firma fehlt"}), 400
+    g = (sb_select("id_gruppen", {"select": "id,verwalter_user_id", "id": f"eq.{gid}"}) or [None])[0]
+    if not g or not g.get("verwalter_user_id"):
+        return jsonify({"error": "Gruppe unbekannt (nur Unternehmen mit Verwalter haben eigene Ziele)"}), 404
+    if nur and str(g.get("verwalter_user_id")) != str(uid):
+        return jsonify({"error": "nur Ziele der eigenen Gruppe"}), 403
+    if not nur and not _vorrat_zg_admin():
+        return jsonify({"error": "nur Admin oder der Verwalter der Gruppe"}), 403
+    try:
+        eigene = sb_select("vorrat_ziele_gruppe", {"select": "*", "gruppe_id": f"eq.{gid}"}) or []
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_ZG_SQL})"}), 503
+        raise
+    alt = next((r for r in eigene if _firm_norm(r.get("firma")) == firma), None)
+    basis = None
+    if not alt:
+        basis = next((r for r in (sb_select("vorrat_ziele", {"select": "*"}) or []) if _firm_norm(r.get("firma")) == firma), None)
+        if not basis:
+            return jsonify({"error": f"{firma} hat kein Ziel — erst für alle anlegen"}), 404
+    felder, fehler = vorrat_ziel_pruefen(alt or basis, body, neu=False)
+    if fehler:
+        return jsonify({"error": fehler}), 400
+    felder.update(updated_at=_wt_now_iso(), updated_by=str(uid))
+    if alt:
+        neu_row = (sb_update("vorrat_ziele_gruppe", {"gruppe_id": f"eq.{gid}", "firma": f"eq.{alt['firma']}"}, felder) or [None])[0]
+    else:
+        neu_row = sb_insert("vorrat_ziele_gruppe", dict({k: basis.get(k) for k in VORRAT_ZG_FELDER}, gruppe_id=gid, firma=basis["firma"],
+                                                         reihe=basis.get("reihe"), **felder))
+    _mp_cache.clear()                                  # Muster-Portfolio-Tachos rechnen mit dem neuen Ziel
+    try:
+        vorrat2_lauf("hand")
+    except Exception as e:
+        print(f"[vorrat2] ⚠️ Lauf nach Gruppen-Ziel: {type(e).__name__}: {e}", flush=True)
+    return jsonify({"ok": True, "ziel": neu_row, "gruppe_id": gid})
+
+
 def _vorrat2_aktion(aktion, body, uid):
     """POST-Aktionen der Seite: einstellung {sicherheit} · bestellt {user_id, firma, anzahl, einheit} · bestellt_weg {id}."""
     nur = _admin_nur_uid()
@@ -12632,6 +12772,8 @@ def _vorrat2_aktion(aktion, body, uid):
             prm["ki_hinweise"] = liste
             sb_update("vorrat_einstellung", {"id": "eq.1"}, {"parameter": prm, "updated_at": _wt_now_iso()})
             return jsonify({"ok": True, "ki_hinweise": liste})
+        if aktion == "ziel" and body.get("gruppe_id"):
+            return _vorrat_ziel_gruppe_aendern(body, uid, nur)      # KP3: Ziel eines Unternehmens (Admin jede Gruppe, Verwalter seine)
         if aktion in ("ziel", "ziel_neu"):
             # Ziele gelten für alle IDs — „nur eigene"-Nutzer dürfen sie nicht ändern (wie die Sicherheit)
             if nur or not admin:
