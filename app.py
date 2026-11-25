@@ -22425,6 +22425,48 @@ def _code_stand_sha():
     return (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "").strip().lower()
 
 
+# ── MINI-BACKEND JE PC (PS1, 25.11.2026, Finn: „Das Wissen darf nicht auf dem PC liegen … erstmal nur der eine PC, an allen
+# bestehenden PCs soll sich nichts ändern"). Anlass Aarons Laptop (fremder Host): jeder PC lud bisher diese ganze Datei (Auto-Planer,
+# Firmenregeln) auf die Platte. PCs/IDs in der Env MINI_BACKEND_PCS (komma-getrennt: pc-xxxxxx und/oder user_id; die user_id ist der
+# sichere Eintrag, weil die pc-Kennung vom PC selbst kommt) bekommen stattdessen mt5-copier/pc_backend.py (nur Durchreichen):
+#   · /code/datei/mt5-copier/start-prophos.bat liefert ihnen den Inhalt von start-prophos-mini.bat (derselbe Dateiname am PC,
+#     start-alles.bat bleibt unberührt)   · /code/datei/app.py gibt es für sie nicht mehr (403)
+#   · /code/backend-wahl sagt dem Starter und dem Mini-Backend „mini" oder „alt" (Not-Schalter: Eintrag aus der Env nehmen).
+# Für alle PCs, die NICHT in der Liste stehen, ist jede Antwort Byte für Byte wie vorher. ──
+MINI_BACKEND_TAUSCH = {"mt5-copier/start-prophos.bat": "mt5-copier/start-prophos-mini.bat"}
+MINI_BACKEND_GESPERRT = {"app.py"}
+
+
+def mini_backend_fuer(wer, liste_roh):
+    """REIN RECHNEND (testbar): fährt dieser Schlüssel (uid, pc) das Mini-Backend? liste_roh = Env MINI_BACKEND_PCS."""
+    if not wer:
+        return False
+    liste = {x.strip().lower() for x in str(liste_roh or "").split(",") if x.strip()}
+    return str(wer[0]).lower() in liste or str(wer[1]).lower() in liste
+
+
+def code_pfad_fuer(pfad, mini):
+    """REIN RECHNEND (testbar): welche Repo-Datei bekommt der PC für diesen Pfad? None = für Mini-PCs gesperrt. Ohne mini unverändert."""
+    if not mini:
+        return pfad
+    if pfad in MINI_BACKEND_GESPERRT:
+        return None
+    return MINI_BACKEND_TAUSCH.get(pfad, pfad)
+
+
+@app.route("/code/backend-wahl", methods=["GET"])
+def code_backend_wahl():
+    """Welches lokale Backend dieser PC starten soll: {"backend": "mini" | "alt"}. Nur Railway (sonst 404), Header X-Code-Token."""
+    if not _code_stand_sha():
+        return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
+    wer = _code_zugang()
+    if not wer:
+        return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+    resp = jsonify({"ok": True, "backend": "mini" if mini_backend_fuer(wer, os.environ.get("MINI_BACKEND_PCS")) else "alt"})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/code/stand", methods=["GET"])
 def code_stand():
     """Commit-Kennung + VERSION des hier ausgelieferten Stands. Nur Railway (sonst 404), Header X-Code-Token."""
@@ -25017,10 +25059,15 @@ def code_datei(pfad):
     sha = _code_stand_sha()
     if not sha:
         return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
-    if not _code_zugang():
+    wer = _code_zugang()
+    if not wer:
         return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
     if not code_pfad_ok(pfad):
         return jsonify({"ok": False, "msg": "Pfad nicht erlaubt"}), 400
+    # PS1 (25.11.2026): nur für PCs in MINI_BACKEND_PCS anderer Starter und kein app.py — sonst pfad unverändert
+    pfad = code_pfad_fuer(pfad, mini_backend_fuer(wer, os.environ.get("MINI_BACKEND_PCS")))
+    if pfad is None:
+        return jsonify({"ok": False, "msg": "für diesen PC nicht vorgesehen"}), 403
     will = (request.args.get("sha") or "").strip().lower()
     if will and will != sha:
         return jsonify({"ok": False, "msg": "anderer Stand", "sha": sha}), 409
