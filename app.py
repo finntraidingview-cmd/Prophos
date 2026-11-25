@@ -10674,7 +10674,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 11              # FN2b (26.11.2026): 10 → 11, damit der gespeicherte Lauf von vor FN2 (FNF „ab 1. FN-Payout“ bei Finn + Pascal) beim nächsten GET neu rechnet — hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 12              # VF1 (26.11.2026): 11 → 12, Funded-Wege aus funded_plan_regeln (Lucid/FNF/FTMO Futures) — FN2b (26.11.2026): 10 → 11, damit der gespeicherte Lauf von vor FN2 (FNF „ab 1. FN-Payout“ bei Finn + Pascal) beim nächsten GET neu rechnet — hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.25,                # P(Bestand ≥ Untergrenze) — Finn 06.10.2026 spät, Hauptregel für alle Firmen: „ca. 25 %, darunter
                                        # nachkaufen, lieber einen Tick zu wenig"; am Frontend einstellbar (vorrat_einstellung.sicherheit)
@@ -10874,6 +10874,9 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None, peak=N
         out["chance"] = (bal - boden) / (ziel - boden)
         return out
     if modell == "trades":
+        jg = (r.get("je_groesse") or {}).get(str(int(gr))) if isinstance(r.get("je_groesse"), dict) else None
+        if isinstance(jg, dict):
+            r = dict(r, **jg)                # VF1: Funded-Weg aus dem Funded-Planer je Kontogröße (Lucid 50k/150k, FNF 50k, FTMO Futures 50k)
         dd = (_vr2_num(r.get("risiko_usd")) or 0.0) * f
         tps = [float(x) * f for x in (r.get("tps_usd") or []) if _vr2_num(x)]
         if not tps and _vr2_num(r.get("ziel_pct")):
@@ -11083,7 +11086,8 @@ def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=No
         ges *= c
         w = _vr2_num(r.get("wert_usd"))
         if w is None and r.get("modell") == "trades":
-            w = sum(float(x) for x in (r.get("tps_usd") or []) if _vr2_num(x))
+            jg = (r.get("je_groesse") or {}).get(str(int(float(groesse)))) if (isinstance(r.get("je_groesse"), dict) and _vr2_num(groesse)) else None
+            w = sum(float(x) for x in ((jg or {}).get("tps_usd") or r.get("tps_usd") or []) if _vr2_num(x))   # VF1: Wert je Größe wie die Chance
         if w is None and r.get("modell") == "siege":
             w = _vr2_num(r.get("ziel_usd"))
         if w is not None:
@@ -12155,7 +12159,43 @@ def _vorrat2_tabellen():
     param = dict(VORRAT2_STD, **(ein.get("parameter") or {}))
     if _vr2_num(ein.get("sicherheit")):
         param["sicherheit"] = float(ein["sicherheit"])
+    # VF1 (26.11.2026): fehlende Funded-Wege (Lucid, FundedNext Futures, FTMO Futures) aus Finns Funded-Planer-Einstellung — fest im Code bleiben nur
+    # Tradeify/Topstep/Apex (bitgleich). Lesefehler → ohne (diese Firmen dann wie bisher „daten_fehlen“), nie den Lauf abbrechen.
+    try:
+        fpr = (sb_select("funded_plan_regeln", {"select": "firmen", "id": "eq.1"}) or [{}])[0].get("firmen") or []
+        param["funded_wege"] = dict(vorrat_funded_wege_aus_planer(fpr), **(param.get("funded_wege") or {}))
+    except Exception as e:
+        print(f"[vorrat2] ⚠️ funded_plan_regeln nicht lesbar — Funded-Wege nur aus dem Code: {type(e).__name__}", flush=True)
     return stufen, param, {str(u) for u in (ein.get("ohne_ids") or [])}, True
+
+
+def vorrat_funded_wege_aus_planer(firmen):
+    """REIN RECHNEND (testbar), VF1 (26.11.2026, Befund: Lucid, FundedNext Futures, FTMO Futures standen in jedem Lauf für alle IDs auf „daten_fehlen“ —
+    VORRAT2_STD.funded_wege kennt nur Tradeify/Topstep/Apex, ohne Funded-Weg ist die Chance eines neuen Kontos bis Winning Days 0, „Deckel 10 Käufe …
+    unter 25 % Sicherheit“). Aus funded_plan_regeln.firmen[] (Finns Funded-Planer Futures): je eingeschalteter Firma und Größe ein Trade-Weg
+    {risiko_usd: dd, tps_usd: [Mitte von ziel_gewinn]} — derselbe Wert, den der Funded-Planer als Ziel plant. → {_ap_norm(namen[0]): {modell 'trades',
+    tps_usd (größte Größe), je_groesse {str(groesse): {risiko_usd, tps_usd}}, quelle}}. Firma aus (an false), Größe aus (an false) oder ohne dd/Ziel → weg."""
+    out = {}
+    for f in firmen or []:
+        if not isinstance(f, dict) or f.get("an") is False:
+            continue
+        key = _ap_norm(((f.get("namen") or [f.get("name") or ""]) or [""])[0])
+        if not key:
+            continue
+        je = {}
+        for g, w in (f.get("je_groesse") or {}).items():
+            if not isinstance(w, dict) or w.get("an") is False:
+                continue
+            dd, zg = _vr2_num(w.get("dd")), w.get("ziel_gewinn")
+            zs = [z for z in (zg if isinstance(zg, list) else [zg]) if _vr2_num(z)]
+            gr = _vr2_num(g)
+            if not dd or dd <= 0 or not zs or not gr:
+                continue
+            je[str(int(gr))] = {"risiko_usd": dd, "tps_usd": [round((float(zs[0]) + float(zs[-1])) / 2.0, 2)]}
+        if je:
+            groesste = je[max(je, key=lambda x: int(x))]
+            out[key] = {"modell": "trades", "tps_usd": list(groesste["tps_usd"]), "je_groesse": je, "quelle": "funded_plan_regeln"}
+    return out
 
 
 def _vorrat2_ki_hinweise():
