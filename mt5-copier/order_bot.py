@@ -27127,6 +27127,12 @@ def modus_tvkontenliste(cmd):
             ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
             s = sitz[0]
             res["login_gewechselt"] = True
+            # PA1e3 (Finn 25.11.2026, Finn + Pascal · FTMO Futures): Bezugskonto geblowt — der Formular-Login der Firma STEHT aber („im Login
+            # des Kontos stehen 3 Konten, dieses nicht"). Zum Lesen der Liste reicht der Login; das fehlende Bezugskonto ist kein Grund
+            # abzubrechen (genau dann wurde neu gekauft). Nur 'konto_weg' (Login bewiesen, Ziel fehlt) — jeder andere Fehler bricht ab wie bisher.
+            if not ok and code == "konto_weg" and sitz[0]:
+                trail.append(f"Bezugskonto {ext} nicht mehr im Login (geblowt) — Login der Firma steht, Liste wird trotzdem gelesen")
+                ok = True
             if not ok:
                 return raus(code or "konto", f"Login der Firma nicht erreicht: {msg}", "login")
             _warte(1.0, 0.6)
