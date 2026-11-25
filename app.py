@@ -28929,6 +28929,8 @@ def ap_konto_variante(regel, konto):
 def ap_regel_variante(regel, konto):
     """REIN RECHNEND (testbar, T5C): Firmen-Regel mit den Werten der Namens-Variante (ziel_pct je Phase — auch in phasen{} und je_groesse{} —, kauf_eur
     je Größe) + Marke variante. Ohne Variante: dieselbe Regel (bitgleich)."""
+    if (regel or {}).get("variante"):
+        return regel   # Review T5C: schon angewandt (_ap_bewerten: ap_regel_konto, dann ap_kw_regel_konto) — sonst überschriebe sie ziel_pct_konto
     k = ap_konto_variante(regel, konto)
     if not k:
         return regel

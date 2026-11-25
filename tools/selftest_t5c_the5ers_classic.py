@@ -63,6 +63,8 @@ check(z(app.ap_regel_konto(copy.deepcopy(T5), K("100k 3 → Phase 2 · Classic",
       "Phase 2 Classic: 105.000 (5 %, gleich wie New)")
 rk = app.ap_regel_konto(copy.deepcopy(T5), dict(CL1, ziel_pct_konto={"phase1": 9}), 100000.0)
 check(z(rk, "phase1", 100000.0)[0] == 109000.0, "accounts.ziel_pct_konto geht weiter vor (9 % → 109.000)")
+rk2 = app.ap_kw_regel_konto(rk, dict(CL1, ziel_pct_konto={"phase1": 9}), 100000.0)   # wie _ap_bewerten: ap_regel_konto, dann ap_kw_regel_konto
+check(rk2["ziel_pct"]["phase1"] == 9.0, f"Variante nur einmal: danach ap_kw_regel_konto überschreibt ziel_pct_konto nicht (Review) ({rk2['ziel_pct']})")
 
 print("3) Planer (ap_konto_rechnen)")
 u = {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5}
@@ -159,7 +161,7 @@ check(SQL.count("enable row level security") == 2 and "revoke all on t5c_auto_pl
 check('\'{"classic": {"ziel_pct": {"phase1": 10, "phase2": 5}, "kauf_eur": {"200000": 245}}}\'::jsonb' in SQL, "Regel: varianten.classic 10/5 %, Kauf 200k 245 €")
 check("'The5%ers 100k New Phase 1'" in SQL and "'The5%ers 200k New Phase 1'" in SQL and "delete from public.bulk_vorlagen" not in SQL.split("commit;")[0],
       "bestehende Schablonen → New (umbenannt, nicht gelöscht)")
-neu = re.findall(r"\('The5%ers (\d+k) (New|Classic) (Phase 1|Phase 2|Funded)'", SQL)
+neu = re.findall(r"\('The5%ers (\d+k) (New|Classic) (Phase 1|Phase 2|Funded)'", SQL.split("commit;")[0])
 check(sorted(neu) == [("100k", "Classic", "Phase 1"), ("200k", "Classic", "Phase 1")] and "funded_cfd" not in SQL and "'phase2'" not in SQL,
       f"nur 2 neue Schablonen: Classic Phase 1 je 100k/200k (Finn: Schablonen nur Phase 1) ({neu})")
 check("'The5%ers 200k Classic Phase 1',    'phase1',     200000,          245" in SQL and "'The5%ers 100k Classic Phase 1',    'phase1',     100000::numeric, null" in SQL,

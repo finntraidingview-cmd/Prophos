@@ -62,8 +62,8 @@ commit;
 --   from bulk_vorlagen where firm = 'The5%ers' order by sortierung;                                    -- 4 Zeilen (New P1 100k/200k, Classic P1 100k/200k)
 
 -- Rückbau (nur falls nötig):
--- delete from public.bulk_vorlagen where firm = 'The5%ers' and name like 'The5\%ers %' escape '\'
---    and id not in ('cccc8778-e5ff-434b-a669-a365824dd355', '1ab6da88-3f90-4ab2-908a-18b40ec85e2c');
+-- delete from public.bulk_vorlagen where name in ('The5%ers 100k Classic Phase 1', 'The5%ers 200k Classic Phase 1')
+--    and id not in (select id from t5c_bulk_vorlagen_20261125);   -- nur die von dieser Datei angelegten (Review)
 -- update public.bulk_vorlagen b set name = s.name from t5c_bulk_vorlagen_20261125 s where b.id = s.id;
 -- update public.auto_plan_regeln r set regeln = r.regeln #- array['firmen', (x.i - 1)::text, 'varianten'], updated_at = now()
 --   from (select f.i from public.auto_plan_regeln r2, jsonb_array_elements(r2.regeln->'firmen') with ordinality f(v, i)
