@@ -62,7 +62,7 @@ check("bulkCredsAuswerten.t = setTimeout(" in HTML, "Auswertung entprellt beim T
 # ── 3. BU1b (26.11.2026): EIN Einfügefeld + gewählte Vorlage auf der Karte ──
 check('id="bulk-creds" hidden style="display:none"' in HTML, "eigenes Zugangskarten-Feld ist aus — nur noch das Feld „External IDs“")
 check("Zugangskarte/Mail (Login / Password / Server, auch mehrere Konten)" in HTML, "Platzhalter von „External IDs“ nennt die Zugangskarte")
-check("if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t) }" in HTML, "ganze Karte in eine Passwort-/Server-Zeile → ins Feld „External IDs“ umgeleitet")
+check("if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t); return }" in HTML, "ganze Karte in eine Passwort-/Server-Zeile → ins Feld „External IDs“ umgeleitet")
 blk2 = HTML[HTML.index("function bulkInsEineFeld(t){"):HTML.index("window._bulkCredsTest")]
 check("altZeilen.every(z => neu.toUpperCase().includes(" in blk2 and "console." not in blk2, "reine Kennungen, die in der Karte stehen, werden ersetzt; kein Log")
 blk3 = HTML[HTML.index("function bulkPasteVorlage(x){"):HTML.index("const bulkPaste = {")]
@@ -72,7 +72,7 @@ check("if(!a || px) return null" in blk3 and "x.firma !== a.firm" in blk3 and "g
 i = HTML.index("    function bulkIstKarte(t){")
 j = HTML.index("    }\n", i) + 6
 js2 = HTML[i:j] + """
-var f = [["Geheim!123", false], ["FivePercentOnline-Real", false], ["Login: 1234", true], ["a\\nb", true], ["26771591 Ab3x FivePercentOnline-Real", true], ["", false]];
+var f = [["Geheim!123", false], ["FivePercentOnline-Real", false], ["Login: 1234", true], ["a\\nb", true], ["26771591 Ab3x FivePercentOnline-Real", true], ["", false], ["GoatFunded-Server", false], ["Server: GoatFunded-Server", false], ["MT5 Login 315500000", true], ["Account ID: 7001234", true]];
 print(JSON.stringify(f.map(function(x){ return bulkIstKarte(x[0]) === x[1] ? "ok" : "FALSCH:" + x[0] })));
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
@@ -81,5 +81,15 @@ with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-
 r = subprocess.run([JSC, pfad], capture_output=True, text=True)
 os.unlink(pfad)
 check(r.returncode == 0 and all(e == "ok" for e in eval(r.stdout.strip())), f"bulkIstKarte: einzelnes Passwort/Server bleibt Eingabe, Karte/Zeile wird umgeleitet ({r.stdout.strip()[:120]})")
+
+# ── 4. BU2 (26.11.2026): GFT-Karte „Server / GoatFunded-Server / This is your trading server name. / Login / … / Password / … / Platform / URL" ──
+blk4 = HTML[HTML.index("function bulkDashboardParsen(text){"):HTML.index("window._bulkDashboardParsen = bulkDashboardParsen")]
+check("const davor = bulkZugangLesen(roh.slice(k > 0 ? fnTreffer[k - 1].ende : 0, m.index))" in blk4 and "if(!(bulkZugangLesen(roh.slice(m.ende, bisNaechster)) || {}).server){" in blk4,
+      "Server VOR dem Login (GFT) wird genommen, wenn dahinter keiner steht — beschriftet, seit dem vorigen Konto")
+check("if(lbl){ e.preventDefault(); i.value = lbl[1]; i.dataset.hand = '1' }" in HTML, "„Server: X“ / „Password: x“ einzeln eingefügt → nur der Wert ins Feld")
+check("const fokus = fe && fe.closest('[data-bcr]')" in HTML and "el.focus(); try{ el.setSelectionRange(fokus.a, fokus.b) }catch(_){}" in HTML,
+      "Zeilen-Neubau behält Fokus + Cursor (Server-/Passwort-Feld bleibt beim Tippen bedienbar)")
+check("pw = a.pw || zg.password || t.password || '', srv = a.srv || zg.server || t.server || std" in HTML and "serverForFirm(bEl.firm?.value.trim())" in HTML,
+      "fehlt der Server → aus firm_specs der Firma (serverForFirm) vorausgefüllt")
 
 print(f"\n{n} Prüfungen grün")

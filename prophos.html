@@ -53383,6 +53383,9 @@
       // Nur von Hand getippte Werte überleben den Neuaufbau (data-hand) — alles andere kommt frisch aus den Quellen, damit ein
       // später eingefügter oder korrigierter Text im Feld unten auch in den Zeilen ankommt (18.10.2026)
       const alt = {}
+      // BU2: wer gerade in einer Zeile tippt, behält Fokus + Cursor, auch wenn die Zeilen im Hintergrund neu gebaut werden (Dubletten-Prüfung o. Ä.)
+      const fe = box.contains(document.activeElement) ? document.activeElement : null
+      const fokus = fe && fe.closest('[data-bcr]') ? { id: fe.closest('[data-bcr]').getAttribute('data-bcr'), pw: fe.hasAttribute('data-bcr-pw'), a: fe.selectionStart, b: fe.selectionEnd } : null
       box.querySelectorAll('[data-bcr]').forEach(r => { const pw = r.querySelector('[data-bcr-pw]'), srv = r.querySelector('[data-bcr-srv]'); alt[r.getAttribute('data-bcr')] = { pw: pw.dataset.hand ? pw.value : '', srv: srv.dataset.hand ? srv.value : '' } })
       const std = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
       // Zugangsdaten aus dem Textfeld unten (Zugangskarte oder Zeilen): Login = Kennung; ohne einen einzigen Treffer der Reihe nach
@@ -53406,9 +53409,14 @@
       box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('input', () => { i.dataset.hand = '1' }))
       box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('paste', e => {   // BU1b: ganze Zugangskarte → ins Feld „External IDs"
         const t = (e.clipboardData && e.clipboardData.getData('text')) || ''
-        if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t) }
+        if(bulkIstKarte(t)){ e.preventDefault(); bulkInsEineFeld(t); return }
+        // BU2: eine Zeile „Server: X" / „Password: x" → nur der Wert ins Feld; sonst ganz normales Einfügen (Feld bleibt immer editierbar)
+        const lbl = /^\s*(?:(?:mt[45]\s*)?server(?:\s*name)?|(?:master\s*|mt[45]\s*)?(?:password|passwort|kennwort))\s*[:#=]\s*(\S+)\s*$/i.exec(t)
+        if(lbl){ e.preventDefault(); i.value = lbl[1]; i.dataset.hand = '1' }
       }))
       box.querySelectorAll('[data-bcr-pw]').forEach(i => { i.addEventListener('focus', () => { i.style.webkitTextSecurity = 'none' }); i.addEventListener('blur', () => { i.style.webkitTextSecurity = 'disc' }) })
+      if(fokus){ const zr = [...box.querySelectorAll('[data-bcr]')].find(x => x.getAttribute('data-bcr') === fokus.id), el = zr && zr.querySelector(fokus.pw ? '[data-bcr-pw]' : '[data-bcr-srv]')
+        if(el){ el.focus(); try{ el.setSelectionRange(fokus.a, fokus.b) }catch(_){} } }
       box.style.display = ids.length ? 'flex' : 'none'
       // Textfeld bleibt sichtbar: es ist das Einfügefeld für die Zugangskarte, auch wenn die Zeilen schon da sind (18.10.2026)
       const eb = document.getElementById('bulk-echo-box'); if(eb) eb.style.display = ids.length ? 'flex' : 'none'
@@ -53448,8 +53456,10 @@
      * einer Passwort-/Server-Zeile, geht sie dorthin. Stehen im Feld schon nur reine Kennungen, die alle in der Karte vorkommen, ersetzt die Karte sie
      * (sonst würden die Kennungen ohne Zugang neben der Karte verloren gehen — der Rückfall-Parser liest reine Listen nur, wenn sonst nichts erkannt ist). */
     function bulkIstKarte(t){
+      // BU2 (Finn 26.11.2026): „GoatFunded-Server" (Server-NAME mit „Server" darin) ist keine Karte — vorher griff \bserver\b und leitete jedes
+      // Einfügen ins Server-Feld um („kann weder tippen noch pasten"). Karte = mehrere Zeilen, ein Login-Label vorn oder „Login Passwort Server" in einer Zeile.
       const x = String(t || '').trim(); if(!x) return false
-      return /\n/.test(x) || /\b(?:login|password|passwort|server)\b/i.test(x) || /^\d{4,12}[\t ;,]+\S+/.test(x)
+      return /\n/.test(x) || /^(?:mt[45]\s*)?(?:login|account\s*(?:id|number)|konto-?id)\b\s*[:#=]?\s*\d/i.test(x) || /^\d{4,12}[\t ;,]+\S+[\t ;,]+\S+/.test(x)
     }
     function bulkInsEineFeld(t){
       const neu = String(t || '').trim(), alt = (bEl.extids.value || '').trim()
@@ -53599,7 +53609,14 @@
       fnTreffer.forEach((m, k) => {
         const von = k > 0 ? fnTreffer[k - 1].ende : 0
         const bisNaechster = k + 1 < fnTreffer.length ? fnTreffer[k + 1].index : roh.length
-        const zugang = bulkZugangVoll(roh.slice(m.ende, bisNaechster))
+        let zugang = bulkZugangVoll(roh.slice(m.ende, bisNaechster))
+        // BU2 (Finn 26.11.2026, GFT-Zugangskarte „Server / GoatFunded-Server / This is your trading server name. / Login / … / Password / …"):
+        // der Server steht VOR dem Login → fehlt er dahinter, gilt ein beschrifteter Server davor (seit dem vorigen Konto). Der geht auch vor einem
+        // geratenen Wert des Mail-Parsers (Lücken-Füller), denn er ist ausdrücklich beschriftet.
+        if(!(bulkZugangLesen(roh.slice(m.ende, bisNaechster)) || {}).server){
+          const davor = bulkZugangLesen(roh.slice(k > 0 ? fnTreffer[k - 1].ende : 0, m.index))
+          if(davor && davor.server) zugang = Object.assign({}, zugang || {}, { server: davor.server })
+        }
         // Anker = letzte Größen-Zeile („$50K") vor dem Login, Titel = Zeile davor — so stört Text anderer Firmen davor nicht (Mischtext)
         const zlAlle = roh.slice(von, m.index).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
         let si = -1; zlAlle.forEach((x, j) => { if(/^\$\s*\d+(?:[.,]\d+)?\s*K$/i.test(x)) si = j })
@@ -62328,7 +62345,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2340'
+  const OS_TAB_BUILD = '2026-09-22.2341'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
