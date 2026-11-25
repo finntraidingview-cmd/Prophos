@@ -31345,10 +31345,24 @@
     }catch(e){ return 'Riegel nicht prüfbar' }   // fail-closed
   }
   async function tvkTick(){
-    if(window._tvkLaeuft || tvkFrei()) return
+    if(window._tvkLaeuft) return
+    const sperre = tvkFrei()
+    // ohne PC-Tab/Puls-Chrome holt dieser Tab nie — dann auch nichts verschieben (ein anderer PC der ID kann der Leser sein)
+    if(sperre && /^kein (PC-Tab|Puls-Chrome)/.test(sperre)) return
     let tok = null
     try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
     if(!tok) return
+    if(sperre){
+      // PA1f-Zusatz (Finn 25.11.2026: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben."): Puls darf gerade nicht raus → fällige
+      // Kauf-Aufträge dieser ID rücken sichtbar 3–10 min weiter (Railway, Grund in ergebnis.pa1_verschoben), nichts wird geholt
+      try{
+        const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')
+        const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}&verschieben=${encodeURIComponent(String(sperre).slice(0, 160))}`, { headers: { 'sb-token': tok } })
+        const d = r.ok ? await r.json().catch(() => null) : null
+        if(d && d.verschoben){ try{ if(typeof window.pa1Neu === 'function') window.pa1Neu() }catch(_){} }
+      }catch(_){}
+      return
+    }
     let a = null
     try{
       const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')   // Probelauf-Weiche TV_KONTEN_PCS (Railway)

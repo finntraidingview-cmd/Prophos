@@ -33,7 +33,7 @@ NAMEN = {"_wd_num", "tv_konto_normal", "admin_konto_ext_norm", "admin_konto_dopp
          "PA1_MAX_ANZAHL", "PA1_MAX_FEHLVERSUCHE", "PA1_PHASE", "pa1_verzug_s", "pa1_iso", "pa1_wochenende", "pa1_klick_zeiten", "pa1_naechste",
          "pa1_art", "PA1_GROESSE_PRAEFIX", "pa1_groesse_passt", "pa1_name", "pa1_konto_zeile", "pa1_neue", "pa1_urteil", "pa1_offen_bestanden", "pa1_weiter", "pa1_nach_fehler", "pa1_hm",
          "pa1_knopf", "pa1_klick_lesen", "pa1_posten", "pa1_posten_plus", "pa1_nachgekauft", "pa1_posten_rest", "pa1_zuordnen", "pa1_bezug",
-         "pa1_posten_minus"}
+         "pa1_posten_minus", "PA1_SCHIEB_MIN_S", "PA1_SCHIEB_MAX_S", "PA1_UEBERFAELLIG_S", "pa1_verschieben_body"}
 baum = ast.parse(SRC)
 teile = []
 for n in baum.body:
@@ -222,10 +222,32 @@ check(g.pa1_nach_fehler(dict(A, versuche=3), J)["status"] == "pruefen", "4. Lese
 
 # ── Knopf ──
 O = {"status": "offen", "anzahl": 1, "angelegt": [], "faellig_at": "2026-11-25T10:37:00+00:00"}
-check(g.pa1_knopf(O) == {"text": "✓ Gekauft · Prüfung 14:37", "art": "gruen"}, "Knopf grün mit Prüfzeit (Dubai)")
-check(g.pa1_knopf(dict(O, status="laeuft"))["text"] == "läuft …", "Knopf: läuft …")
-check(g.pa1_knopf(dict(O, anzahl=3, angelegt=[{"ext": "TDFYSL150555001234"}], faellig_at="2026-11-25T12:10:00Z"))["text"] == "1/3 gefunden · nächste Prüfung 16:10",
+J0 = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)   # Knopf-Zeit fest (PA1f-Zusatz: pa1_knopf kennt „überfällig")
+check(g.pa1_knopf(O, J0) == {"text": "✓ Gekauft · Prüfung 14:37", "art": "gruen"}, "Knopf grün mit Prüfzeit (Dubai)")
+check(g.pa1_knopf(dict(O, status="laeuft"), J0)["text"] == "läuft …", "Knopf: läuft …")
+check(g.pa1_knopf(dict(O, anzahl=3, angelegt=[{"ext": "TDFYSL150555001234"}], faellig_at="2026-11-25T12:10:00Z"), J0)["text"] == "1/3 gefunden · nächste Prüfung 16:10",
       "Knopf: 1/3 gefunden · nächste Prüfung")
+# ── PA1f-Zusatz (Finn: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben.") ──
+AV = {"status": "offen", "anzahl": 1, "angelegt": [], "faellig_at": "2026-11-25T10:00:00+00:00", "frist_bis": "2026-11-26T10:00:00+00:00",
+      "ergebnis": {"msg": "alt", "pa1_verschoben": {"n": 2}}}
+vb = g.pa1_verschieben_body(AV, "Start in 30 min", J0, 0)
+vb1 = g.pa1_verschieben_body(AV, "Start in 30 min", J0, 1)
+check(vb["faellig_at"] == "2026-11-25T10:03:00+00:00" and vb1["faellig_at"] == "2026-11-25T10:10:00+00:00", "verschoben um 3 … 10 min (gestreut)")
+check(vb["ergebnis"]["pa1_verschoben"]["grund"] == "Start in 30 min" and vb["ergebnis"]["pa1_verschoben"]["n"] == 3 and vb["ergebnis"]["msg"] == "alt"
+      and "frist_bis" not in vb, "Grund + Zähler in ergebnis.pa1_verschoben, übriges ergebnis bleibt, Frist unverändert")
+vs_ = {s: len({g.pa1_verschieben_body(AV, "x", J0)["faellig_at"] for _ in range(80)}) for s in [0]}
+check(vs_[0] > 60, "Verschiebung auf die Sekunde gestreut (Jitter-Regel)")
+check(g.pa1_verschieben_body(dict(AV, frist_bis="2026-11-25T10:05:00+00:00"), "x", J0, 1)["faellig_at"] == "2026-11-25T10:05:00+00:00", "nie hinter die Frist")
+check(g.pa1_verschieben_body(dict(AV, frist_bis="2026-11-25T09:59:00+00:00"), "x", J0) is None, "Frist vorbei → nicht verschieben (🟠 macht der Stand)")
+kv = g.pa1_knopf(dict(AV, faellig_at=vb["faellig_at"], ergebnis=vb["ergebnis"]), J0)
+check(kv["text"] == "✓ Gekauft · Prüfung 14:03 · verschoben" and kv["titel"] == "Verschoben: Start in 30 min", f"Knopf zeigt die neue Zeit + „verschoben“ → {kv}")
+ku = g.pa1_knopf(dict(AV, faellig_at="2026-11-25T09:30:00+00:00", ergebnis={}), J0)
+check(ku["text"] == "✓ Gekauft · wartet auf PC (fällig 13:30)", f"fällig, aber 30 min nicht abgeholt → „wartet auf PC“ statt stumm vergangener Zeit → {ku['text']}")
+check(g.pa1_knopf(dict(AV, faellig_at="2026-11-25T09:50:00+00:00", ergebnis={}), J0)["text"] == "✓ Gekauft · Prüfung 13:50", "unter 15 min drüber → noch normale Zeit")
+pc_ = SRC[SRC.index("def pc_tv_konten_auftrag():"):SRC.index("    try:\n        alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S))")]
+check('request.args.get("verschieben")' in pc_ and '"art": "eq.gekauft"' in pc_ and "pa1_verschieben_body(r, grund_v, jetzt)" in pc_
+      and '"status": "eq.offen", "faellig_at": f"lte.{jetzt.isoformat()}"' in pc_ and '"status": "laeuft"' not in pc_,
+      "?verschieben=<Grund>: nur fällige offene Kauf-Aufträge, nie ein Claim, Guard gegen gleichzeitiges Abholen")
 check(g.pa1_knopf(dict(O, status="erledigt", angelegt=[{"ext": "TDFYSL150555001234"}])) == {"text": "angelegt: …1234", "art": "fertig"}, "Knopf: angelegt: …1234")
 k = g.pa1_knopf(dict(O, status="pruefen", anzahl=2, ergebnis={"pa1_ruhig": "mehr gefunden · von Hand"}))
 check(k == {"text": "mehr gefunden · von Hand", "art": "ruhig"}, "Knopf Überzahl ruhig „mehr gefunden · von Hand“ (kein 🟠)")
@@ -276,7 +298,7 @@ zu_n, _a2, u_n = g.pa1_zuordnen(["TDFYSL150000000011", "TDFYSL300000000022"], "T
                                 [{"vorlage_id": "ohne", "rest": 1, "groesse": None}, {"vorlage_id": V150, "rest": 1, "groesse": 150000}])
 check(u_n == "anlegen" and ("TDFYSL150000000011", V150) in zu_n and ("TDFYSL300000000022", "ohne") in zu_n, "Vorlage ohne Größe nimmt nur, was sonst nirgends passt")
 be = er[er.index('elif str(b.get("code") or "") == "belegt":'):er.index("    else:", er.index('elif str(b.get("code") or "") == "belegt":'))]
-check("jetzt >= frist" in be, "belegt: Frist gilt auch hier (kein endloses Verschieben)")
+check("if jetzt < frist else None" in be and "pa1_verschieben_body(a," in be and 'pa1_verschoben=vb["ergebnis"]["pa1_verschoben"]' in er, "belegt: sichtbar verschoben (3–10 min, Grund), Frist gilt (kein endloses Verschieben)")
 check("_alarm_fremd_verwaltet(uid)" in block("def _pa1_alarm(", "\ndef _pa1_anlegen("), "🟠 von Emins Gruppe nie an die Master-IDs")
 st = block("def _pa1_stand(", '\n@app.route("/konto-suche/nachfolger"')
 check('"status": "eq.offen"' in st and "jetzt >= f" in st and "status.eq.pruefen" in st, "Stand: Liegengebliebene nach der Frist → pruefen + 🟠, Endstände 7 Tage sichtbar")

@@ -85,6 +85,9 @@ def main():
     tk = ph[ph.index("  async function tvkTick(){"):ph.index("  window._tvKonten = {")]
     ok("nur_sofort" not in tk and "tvkFrei(true)" not in tk and "await tvkPulsDarfRaus()" in tk and "bigTradeHeimPlanen(a.ext || '', 'TV-Konten lesen', true, 'tv')" in tk,
        "PC-Tab: Riegel nach dem Holen, gesperrt → „belegt“ (kein Fehlversuch), danach Heimweg wie nach jedem Start")
+    ok("&verschieben=${encodeURIComponent(String(sperre).slice(0, 160))}" in tk and "/^kein (PC-Tab|Puls-Chrome)/.test(sperre)" in tk
+       and tk.index("&verschieben=") < tk.index("/pc/tv-konten-auftrag?pc=${pcq}`"),
+       "PC-Tab (PA1f-Zusatz): darf gerade nicht raus → fällige Kauf-Aufträge sichtbar verschieben (Grund mit), nichts holen; ohne Puls-Chrome nie")
     # echte Funktionen in JavaScriptCore: tvkFrei + tvkPulsDarfRaus + pulsHeimFrei, Railway /admin/puls-heim nachgestellt
     js = r"""
 const window = { mtcApi: () => 0, _epLokal: null }; let MT5_LOCAL = true, _bthSelbst = false;

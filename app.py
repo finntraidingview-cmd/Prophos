@@ -25770,6 +25770,22 @@ def pc_tv_konten_auftrag():
         return jsonify({"ok": True, "auftrag": None, "pc_frei": False})   # dieser PC liest (noch) nicht
     arten = [x for x, frei in (("mail", mail_frei), ("gekauft", gekauft_frei)) if frei]
     jetzt = datetime.now(timezone.utc)
+    # PA1f-Zusatz (Finn 25.11.2026: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben."): ?verschieben=<Grund> — der PC-Tab darf gerade
+    # nicht raus (tvkFrei: Start < 45 min, Puls unterwegs, Polar …) und holt deshalb NICHTS; fällige Kauf-Aufträge dieser ID rücken sichtbar um
+    # 3–10 min (pa1_verschieben_body, Frist unverändert), statt stumm fällig herumzuliegen. Nie ein Claim, nie Mail-Aufträge.
+    grund_v = str(request.args.get("verschieben") or "").strip()[:160]
+    if grund_v:
+        n = 0
+        if gekauft_frei:
+            try:
+                for r in sb_select("tv_konten_auftrag", {"select": "id,faellig_at,frist_bis,ergebnis", "user_id": f"eq.{uid}", "art": "eq.gekauft", "status": "eq.offen",
+                                                         "faellig_at": f"lte.{jetzt.isoformat()}", "limit": "20"}) or []:
+                    body = pa1_verschieben_body(r, grund_v, jetzt)
+                    if body and sb_update("tv_konten_auftrag", {"id": f"eq.{r['id']}", "status": "eq.offen", "faellig_at": f"lte.{jetzt.isoformat()}"}, body):
+                        n += 1
+            except Exception as e:
+                print(f"[pa1] ⚠️ verschieben: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        return jsonify({"ok": True, "auftrag": None, "verschoben": n})
     try:
         alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S)).isoformat()
         sb_update("tv_konten_auftrag", {"user_id": f"eq.{uid}", "status": "eq.laeuft", "laeuft_at": f"lt.{alt}"}, {"status": "offen", "laeuft_at": None})
@@ -26413,9 +26429,31 @@ def pa1_hm(v):
     return t.astimezone(ZoneInfo("Asia/Dubai")).strftime("%H:%M") if t else "?"
 
 
-def pa1_knopf(a):
-    """REIN RECHNEND: Text + Art des Knopfs „Gekauft" (Zeiten Dubai). art: gruen | laeuft | fertig | ruhig („… · von Hand", kein 🟠) | warn (🟠)."""
+PA1_SCHIEB_MIN_S, PA1_SCHIEB_MAX_S = 180, 600     # PA1f-Zusatz: Puls darf zur Prüfzeit nicht raus → 3–10 min später (gestreut)
+PA1_UEBERFAELLIG_S = 15 * 60                        # fällig, aber seit 15 min nicht abgeholt → Knopf sagt „wartet auf PC"
+
+
+def pa1_verschieben_body(a, grund, jetzt, r=None):
+    """REIN RECHNEND (PA1f-Zusatz, Finn 25.11.2026: „Jedes Mal, wenn er eben nicht darf, wird er immer verschoben."): Update für einen offenen
+    bzw. eben zurückgegebenen Kauf-Auftrag → {faellig_at, ergebnis} — fällig in 3–10 min (auf die Sekunde gestreut), nie hinter der Frist; Grund,
+    Zeit und Zähler in ergebnis.pa1_verschoben. Frist abgelaufen → None (die Frist läuft unverändert, Stand/Erledigt-Route machen dann 🟠)."""
+    frist = pa1_iso((a or {}).get("frist_bis"))
+    if frist and jetzt >= frist:
+        return None
+    neu = jetzt + timedelta(seconds=pa1_verzug_s(r, PA1_SCHIEB_MIN_S, PA1_SCHIEB_MAX_S))
+    if frist:
+        neu = min(neu, frist)
+    alt = (a or {}).get("ergebnis") if isinstance((a or {}).get("ergebnis"), dict) else {}
+    vor = alt.get("pa1_verschoben") if isinstance(alt.get("pa1_verschoben"), dict) else {}
+    return {"faellig_at": neu.isoformat(), "ergebnis": dict(alt, pa1_verschoben={"at": jetzt.isoformat(), "grund": str(grund or "")[:160], "bis": neu.isoformat(),
+                                                                         "n": int(vor.get("n") or 0) + 1})}
+
+
+def pa1_knopf(a, jetzt=None):
+    """REIN RECHNEND: Text + Art des Knopfs „Gekauft" (Zeiten Dubai). art: gruen | laeuft | fertig | ruhig („… · von Hand", kein 🟠) | warn (🟠).
+    PA1f-Zusatz: verschoben → „· verschoben" hinter der neuen Zeit (Grund in titel); fällig, aber seit 15 min nicht abgeholt → „wartet auf PC"."""
     a = a or {}
+    jetzt = jetzt or datetime.now(timezone.utc)
     st, anzahl = a.get("status"), int(a.get("anzahl") or 1)
     ang = [x for x in (a.get("angelegt") or []) if isinstance(x, dict)]
     enden = ", ".join("…" + str(x.get("ext") or "")[-4:] for x in ang)
@@ -26423,9 +26461,16 @@ def pa1_knopf(a):
     if st == "laeuft":
         return {"text": "läuft …", "art": "laeuft"}
     if st == "offen":
-        if ang:
-            return {"text": f"{len(ang)}/{anzahl} gefunden · nächste Prüfung {pa1_hm(a.get('faellig_at'))}", "art": "gruen"}
-        return {"text": f"✓ Gekauft · Prüfung {pa1_hm(a.get('faellig_at'))}", "art": "gruen"}
+        f = pa1_iso(a.get("faellig_at"))
+        vs = erg.get("pa1_verschoben") if isinstance(erg.get("pa1_verschoben"), dict) else {}
+        kopf = f"{len(ang)}/{anzahl} gefunden · nächste Prüfung" if ang else "✓ Gekauft · Prüfung"
+        if f and (jetzt - f).total_seconds() > PA1_UEBERFAELLIG_S:
+            return {"text": f"{'✓ Gekauft' if not ang else f'{len(ang)}/{anzahl} gefunden'} · wartet auf PC (fällig {pa1_hm(f.isoformat())})", "art": "gruen",
+                    "titel": "Der PC-Tab dieser ID hat die Prüfung noch nicht abgeholt (PC aus oder ohne Puls-Chrome?)"}
+        vb = pa1_iso(vs.get("bis")) if vs else None
+        if vb and f and abs((vb - f).total_seconds()) < 2:   # die aktuelle Prüfzeit IST die verschobene (sonst längst neu geplant)
+            return {"text": f"{kopf} {pa1_hm(a.get('faellig_at'))} · verschoben", "art": "gruen", "titel": f"Verschoben: {vs.get('grund') or 'Puls darf gerade nicht raus'}"}
+        return {"text": f"{kopf} {pa1_hm(a.get('faellig_at'))}", "art": "gruen"}
     if st == "erledigt":
         if ang:
             return {"text": f"angelegt: {enden}", "art": "fertig"}
@@ -26631,13 +26676,16 @@ def _pa1_erledigt(uid, a, b, erg):
                 alarm = (f"{n_ang}/{a.get('anzahl')} Konten aufgetaucht — Rest nach 24 h nicht da",
                          "Bitte prüfen und den Rest von Hand anlegen (Accounts › Kaufliste).")
     elif str(b.get("code") or "") == "belegt":
-        # PC gerade belegt — kein Fehlversuch, in 10–30 min erneut; nach der Frist aber Schluss (Review: sonst endlos „Prüfung HH:MM" ohne 🟠)
-        if jetzt >= frist:
+        # PC gerade belegt / Puls darf nicht raus — kein Fehlversuch, sichtbar verschoben um 3–10 min (PA1f-Zusatz, Grund in ergebnis.pa1_verschoben,
+        # der Knopf zeigt die neue Zeit „· verschoben"); nach der Frist aber Schluss (Review: sonst endlos „Prüfung HH:MM" ohne 🟠)
+        vb = pa1_verschieben_body(a, str(b.get("msg") or "belegt").replace("belegt: ", "", 1), jetzt) if jetzt < frist else None
+        if not vb:
             body = {"status": "pruefen", "erledigt_at": jetzt.isoformat(), "laeuft_at": None}
             erg = dict(erg, pa1="PC war bis zur Frist belegt — von Hand anlegen")
             alarm = ("PC bis zur Frist belegt — nichts gelesen", "Bitte von Hand anlegen.")
         else:
-            body = {"status": "offen", "laeuft_at": None, "faellig_at": min(jetzt + timedelta(seconds=random.randint(600, 1800)), frist).isoformat()}
+            body = {"status": "offen", "laeuft_at": None, "faellig_at": vb["faellig_at"]}
+            erg = dict(erg, pa1_verschoben=vb["ergebnis"]["pa1_verschoben"])
     else:
         body = pa1_nach_fehler(a, jetzt)
         erg = dict(erg, pa1_fehler=True)
