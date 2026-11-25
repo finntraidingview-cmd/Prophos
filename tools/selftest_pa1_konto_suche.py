@@ -124,7 +124,9 @@ OFF = [{"vorlage_id": V150, "rest": 4, "groesse": 150000}, {"vorlage_id": V300, 
 zu, andere, u = g.pa1_zuordnen(["TDFYSL150000000011", "TDFYSL300000000022", "TDFYSL150000000033", "TDFYSL050000000044"], "Tradeify", OFF)
 check(u == "anlegen" and zu == [("TDFYSL150000000011", V150), ("TDFYSL150000000033", V150), ("TDFYSL300000000022", V300)] and andere == ["TDFYSL050000000044"],
       f"Tradeify 150k + 300k in EINER Lesung: Zuordnung nach Größe in der Kennung, 50k zählt nicht → {zu}")
-check(g.pa1_zuordnen(["TDFYSL300000000022", "TDFYSL300000000023"], "Tradeify", OFF)[2] == "ueberzahl", "mehr 300k als gekauft → Überzahl, nichts anlegen")
+_zu2 = g.pa1_zuordnen(["TDFYSL300000000022", "TDFYSL300000000023"], "Tradeify", OFF)
+check(_zu2[2] == "anlegen" and _zu2[0] == [("TDFYSL300000000022", V300), ("TDFYSL300000000023", V300)],
+      "PA1h: mehr 300k als gekauft → alle neuen anlegen, Überzählige mit der Vorlage dieser Größe (Finn 25.11.2026)")
 APX = [{"vorlage_id": VA, "rest": 5, "groesse": 50000}]
 zu, _a, u = g.pa1_zuordnen([f"APEX70000100000{i:02d}" for i in range(1, 6)], "Apex Trader", APX)
 check(u == "anlegen" and len(zu) == 5 and {v for _k, v in zu} == {VA}, "Apex-5er-Pack: 5 neue in einer Lesung → alle 5 angelegt")
@@ -152,8 +154,8 @@ alt_v = vorher_ab(datetime.fromisoformat(MAIL["created_at"]))
 neu_v = vorher_ab(g.pa1_bezug(MAIL))
 t_alt = g.pa1_neue(LISTE, "Apex Trader", [], vorher=alt_v)
 t_neu = g.pa1_neue(LISTE, "Apex Trader", [], vorher=neu_v)
-check(g.pa1_zuordnen(t_alt["challenge"], "Apex Trader", [{"vorlage_id": VA, "rest": 1, "groesse": 50000}])[2] == "ueberzahl",
-      "Gegenprobe: mit created_at als Bezug wären 2 „neu“ (altes …0099 + gekauftes) → Überzahl, das gekaufte bliebe „von Hand“")
+check(len(t_alt["challenge"]) == 2,
+      "Gegenprobe: mit created_at als Bezug wären 2 „neu“ (altes …0099 + gekauftes) — seit PA1h würde das alte mit angelegt, darum Bezug = erster Klick")
 zu_c, _a3, u_c = g.pa1_zuordnen(t_neu["challenge"], "Apex Trader", [{"vorlage_id": VA, "rest": 1, "groesse": 50000}])
 check(u_c == "anlegen" and zu_c == [("APEX7000010000001", VA)] and any(g.pa1_art(k, "Apex Trader") for k in neu_v),
       "PA1c: mit Bezug = Kauf-Klick nur das gekaufte APEX…0001 angelegt, altes …0099 ausgeschlossen, Basis vorhanden")

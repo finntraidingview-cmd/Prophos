@@ -26398,7 +26398,9 @@ def pa1_zuordnen(neu, firma, offen):
     for g, ks in je.items():
         plaetze = [o["vorlage_id"] for o in gruppen[g] for _ in range(int(o["rest"]))]
         if len(ks) > len(plaetze):
-            return [], andere, "ueberzahl"
+            # PA1h (Finn 25.11.2026: „Es soll immer alle hinzufügen, die neu gekauft sind“ — 5 FNF gekauft, 3× „Gekauft“ gedrückt): mehr neue
+            # Challenge-Nummern als gedrückt → alle anlegen, die überzähligen mit der Vorlage dieser Größe (Basis-Pflicht bleibt davor)
+            plaetze = plaetze + [gruppen[g][-1]["vorlage_id"]] * (len(ks) - len(plaetze))
         zu += list(zip(ks, plaetze))
     return zu, andere, ("anlegen" if zu else "keine")
 
