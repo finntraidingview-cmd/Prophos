@@ -10693,6 +10693,7 @@ VORRAT2_STD = {
     # KP2 Apex (Finn 25.11.2026): Apex kauft man nur im 5er-Pack. Will der Lauf kaufen (erwarteter Stand < Ziel), ist der Vorschlag genau 1 Pack,
     # egal wie viele gerade laufen — aber höchstens 1 Pack offen: läuft noch ein Konto ohne erste Balance-Lesung (Pack noch nicht gelesen), 0.
     "kauf_pack": {"Apex Trader": 5},
+    "pack_nachkauf_ab": {"Apex Trader": 2},   # KP7: neues Pack erst bei ≤ 2 laufenden Challenges (Finn 25.11.2026)
     "kauf_regel": "sicherheit",        # 'sicherheit' (Standard seit 06.10.2026 spät, Finn: Wahrscheinlichkeit ≈ 25 %) = Monte Carlo, n bis
                                        # P(Bestand + Funnel + neu ≥ Untergrenze) ≥ sicherheit; vorher Toleranz (≥ 85 % gedeckt → nichts) ·
                                        # 'mitte' (Finn 06.10.2026 abends: „die gute Mitte" zwischen erwartung und nominal) =
@@ -11257,7 +11258,13 @@ def vorrat_kauf_deckel(n_roh, konten, firma, param, fn_payout_ok=True, erwartet=
             fehlt = float(erwartet) < float(ziel) - 1e-6 if erwartet is not None and ziel else int(n_roh) > 0
         except (TypeError, ValueError):
             fehlt = int(n_roh) > 0
-        n = pack if frei and fehlt and not offen else 0
+        # KP7 (Finn 25.11.2026: „alles unter drei nachkaufen — sobald du zwei oder eins hast, dann nachkaufen … nie übers Ziel hinaus“): ein neues
+        # Pack erst, wenn höchstens pack_nachkauf_ab (2) Challenges laufen — Vorrat bleibt, aber nie 2 Packs übereinander
+        try:
+            ab = int((p.get("pack_nachkauf_ab") or {}).get(firma, 2))
+        except (TypeError, ValueError, AttributeError):
+            ab = 2
+        n = pack if frei and fehlt and not offen and laufend <= ab else 0
     else:
         n = max(0, min(int(n_roh), mx - laufend))
     return {"n": n, "laufend": laufend, "max": mx, "sperre": sperre, "pack": pack if pack > 1 else None}
