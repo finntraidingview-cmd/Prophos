@@ -11259,21 +11259,27 @@ def vorrat_kauf_deckel(n_roh, konten, firma, param, fn_payout_ok=True, erwartet=
     return {"n": n, "laufend": laufend, "max": mx, "sperre": sperre, "pack": pack if pack > 1 else None}
 
 
+VORRAT_FN_PAYOUT_FIRMEN = ("FundedNext", "FundedNext Futures")
+
+
 def _vorrat2_fn_payout_uids():
-    """KP2: user_ids mit mindestens einem ERHALTENEN FundedNext-(CFD-)Payout — transactions kind 'payout' (= gebucht/erhalten) und
+    """KP2: user_ids mit mindestens einem ERHALTENEN FundedNext-Payout — transactions kind 'payout' (= gebucht/erhalten) und
     pending_payouts mit status 'received' bzw. received_at. Fehler → None (der Aufrufer sperrt FNF dann: lieber zu wenig als zu viel).
-    10 min gemerkt (das Muster-Portfolio rechnet je offener Accounts-Seite alle 5 min)."""
+    10 min gemerkt (das Muster-Portfolio rechnet je offener Accounts-Seite alle 5 min).
+    FN2 (26.11.2026, Finn: bei „Finn + Pascal“ war FundedNext Futures gesperrt, obwohl er FundedNext längst ausgezahlt bekommt): ein erhaltener
+    FundedNext-FUTURES-Payout zählt genauso (FundedNext hat dann schon an diese ID ausgezahlt) — bis dahin zählte nur CFD; „Finn + Pascal“ hatte
+    6 erhaltene FNF-Payouts und 0 CFD. Die archivierte ID „Finn“ hat keinen FundedNext-Payout in der DB (nur Apex) — nicht die Ursache."""
     c = _vr2_fn_cache.get("v")
     if c and time.time() - c[0] < 600:
         return set(c[1])
     try:
         uids = set()
         for t in _sb_all("transactions", {"select": "user_id,account_firm", "kind": "eq.payout"}) or []:
-            if _firm_norm(t.get("account_firm")) == "FundedNext":
+            if _firm_norm(t.get("account_firm")) in VORRAT_FN_PAYOUT_FIRMEN:
                 uids.add(str(t.get("user_id")))
         for pp in _sb_all("pending_payouts", {"select": "user_id,account_firm,status,received_at",
                                               "or": "(status.eq.received,received_at.not.is.null)"}) or []:
-            if _firm_norm(pp.get("account_firm")) == "FundedNext":
+            if _firm_norm(pp.get("account_firm")) in VORRAT_FN_PAYOUT_FIRMEN:
                 uids.add(str(pp.get("user_id")))
         _vr2_fn_cache["v"] = (time.time(), frozenset(uids))
         return uids
