@@ -74,6 +74,17 @@ def pausiert_aus_vorrat(zellen, nur_uid=None, namen=None):
     return sorted(out, key=lambda x: (str(x["name"]).lower(), str(x["firma"])))
 
 
+def gesperrt_aus_vorrat(zellen, nur_uid=None, namen=None):
+    """REIN RECHNEND (Selbsttest), KP2k (Finn 26.11.2026): Zellen, die der Kauf-Deckel sperrt (kauf_sperre, z. B. FundedNext Futures
+    „ab 1. FN-Payout") → [{user_id, name, firma, grund}]. Am Tacho grau + Chip statt 0 % wie eine normale Lücke."""
+    namen = namen or {}
+    out = [{"user_id": str(z.get("user_id")), "name": namen.get(str(z.get("user_id"))) or str(z.get("user_id"))[:8], "firma": z.get("firma"),
+            "grund": str(z.get("kauf_sperre"))}
+           for z in zellen or [] if z.get("kauf_sperre") and z.get("status") in (None, "frei")
+           and (not nur_uid or str(z.get("user_id")) == nur_uid)]
+    return sorted(out, key=lambda x: (str(x["name"]).lower(), str(x["firma"])))
+
+
 SPAETER_TAGE = (3, 7, 30)
 UUID = re.compile(r"^[0-9a-f-]{36}$")
 
@@ -215,6 +226,7 @@ def registrieren(app, ns):
             zeilen = zeilen_aus_vorrat(zellen, None if admin else str(uid), namen)
             antwort = {"ok": True, "alle": admin, "zeilen": zeilen, "n": sum(z["n"] for z in zeilen),
                        "pausiert": pausiert_aus_vorrat(zellen, None if admin else str(uid), namen),
+                       "gesperrt": gesperrt_aus_vorrat(zellen, None if admin else str(uid), namen),
                        "lauf_at": antwort_v.get("gerechnet_um"),
                        "naechster_lauf": antwort_v.get("naechster_lauf")}
             _cache[schl] = (time.time(), antwort)

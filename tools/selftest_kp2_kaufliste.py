@@ -166,8 +166,29 @@ fe = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
 pruef("if(!neu && vorlagen.liste && vorlagen.liste.length &&" in fe, "leere Vorlagen-Liste wird nie gemerkt (Abfrage vor dem Login)")
 pruef("const liste = await klVorlagen(true)" in fe and "if(futures && !manuell){" in fe, "fehlt die Vorlage an der Zeile: frisch holen, dann Futures → PA1")
 pruef("klToast(`${b.z.firma}: ${grund} — bitte von Hand anlegen`)" in fe, "Futures fällt nie still ins Fenster — Grund als Toast")
-pruef("}, 600) }" in fe and "hinzufuegen(rids, { manuell: true })" in fe and "'pointerdown'" in fe and "lpGeschluckt" in fe,
-      "langes Drücken (600 ms, auch Touch) = Anlegen-Fenster von Hand, Klick danach geschluckt")
+pruef("const LP_MS = 1500, LP_ABBRUCH_MS = 350" in fe and "t: setTimeout(fertig, still ? LP_MS : LP_MS + 400)" in fe and "if(ev.animationName === 'kl-lp-fill' && lp && Date.now() - lp.start >= LP_MS - 200) fertig()" in fe and "void el.offsetWidth; el.classList.add('kl-lp')" in fe and "hinzufuegen(rids, { manuell: true })" in fe and "'pointerdown'" in fe,
+      "KP2k: 1,5 s gedrückt halten (Maus + Touch) = Anlegen-Fenster von Hand")
+pruef("if(schlucken || Date.now() - lp.start >= LP_ABBRUCH_MS) lpSchluck = Date.now()" in fe and "Date.now() - lpSchluck < 1000" in fe,
+      "KP2k: vorher loslassen (ab 0,35 s) = nichts; geschluckt wird nur der Klick direkt danach")
+pruef("lp.el.contains(e.target) && !lp.el.contains(e.relatedTarget)) lpStop(true)" in fe and "addEventListener('pointercancel', () => lpStop(true))" in fe,
+      "KP2k: vom Knopf wegziehen / Scrollen bricht ab")
+pruef(".kl-lp::after{" in fe and "@keyframes kl-lp-fill" in fe and "@media (prefers-reduced-motion:reduce){.kl-lp::after{animation:none" in fe,
+      "KP2k: Füllbalken im Knopf (CSS), ohne Bewegung bei prefers-reduced-motion")
+pruef('data-kl-zurueck="${klEsc(rid)}"' in fe and "pa.knopf.art === 'gruen' && rid" in fe and "const zr = e.target.closest('[data-kl-zurueck]'); if(zr){ zuruecknehmen(zr); return }" in fe,
+      "KP2k: grüner Knopf = Zurücknehmen (nur grün; andere Stände bleiben Anzeige)")
+blk = fe[fe.index("async function zuruecknehmen(knopf){"):fe.index("const slotsVon_ = z => pa1Slots(z)")]
+pruef("window.pa1Zurueck({ user_id: z.user_id, firma: z.firma, vorlage_id: vid, anzahl: n })" in blk and "klToast(`${z.firma}: ${(r && r.msg) || 'nicht zurückgenommen'}`)" in blk
+      and "I.pa1Lokal = au ?" in blk, "KP2k: Zurücknehmen über pa1Zurueck, Fehler als Toast, lokaler Stand wird mit entfernt")
+pruef("const el = e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]'); if(!el || e.button > 0 || el.disabled) return" in fe,
+      "KP2k: Long-Press nur am normalen „Gekauft“ (grüner Knopf hat kein data-kl-gekauft)")
+pruef("el.classList.toggle('mp-kl-gesperrt', !!gg)" in fe and "window._klTachoBadges()" in fe, "KP2k: gesperrte Firma am Tacho grau + Chip, auch nach Neuzeichnen")
+gz = [{"user_id": "u1", "firma": "FundedNext Futures", "status": "frei", "kauf_sperre": "ab 1. FN-Payout"},
+      {"user_id": "u2", "firma": "FundedNext Futures", "status": "frei", "kauf_sperre": None},
+      {"user_id": "u1", "firma": "Tradeify", "status": "pausiert", "kauf_sperre": "ab 1. FN-Payout"}]
+g = KL.gesperrt_aus_vorrat(gz, None, {"u1": "Aurel"})
+pruef(g == [{"user_id": "u1", "name": "Aurel", "firma": "FundedNext Futures", "grund": "ab 1. FN-Payout"}], "KP2k: gesperrt_aus_vorrat nur frei + kauf_sperre")
+pruef(KL.gesperrt_aus_vorrat(gz, "u2") == [], "KP2k: normale ID sieht nur eigene Sperren")
+pruef('"gesperrt": gesperrt_aus_vorrat(zellen, None if admin else str(uid), namen)' in open(os.path.join(WURZEL, "kaufliste_app.py"), encoding="utf-8").read(), "KP2k: GET /admin/kaufliste liefert gesperrt[]")
 pruef("_lokal_at: Date.now()" in fe, "frischer Auftrag bleibt grün, bis die Stand-Abfrage ihn liefert")
 
 # Fremd-Anlegen: die Whitelist von /admin/konto-anlegen behält, was die Bulk-Zeile der Kaufliste schickt (Prüfer S2: Apex-Pack ohne Daily DD → Hedge zu klein)

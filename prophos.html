@@ -3214,7 +3214,16 @@
   .kl-sp-g{display:inline-flex}
   .kl-sp-knopf{display:inline-flex;align-items:center;gap:5px}
   [data-kl-gekauft],[data-kl-pack-gekauft]{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-  .kl-lp{transition:box-shadow .6s linear;box-shadow:inset 0 0 0 40px rgba(255,255,255,.18)}   /* langes Drücken läuft */
+  /* KP2k (Finn 26.11.2026): gedrückt halten → Balken füllt sich im Knopf von links nach rechts (1,5 s); erst voll = Fenster zum Anlegen von Hand.
+     Startet nach 0,15 s, damit ein kurzer Klick nichts aufblitzen lässt. Ohne Bewegung (prefers-reduced-motion): fester Schimmer, gleiche Haltezeit. */
+  [data-kl-gekauft],[data-kl-pack-gekauft]{position:relative;overflow:hidden}
+  .kl-lp::after{content:'';position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.38);pointer-events:none;animation:kl-lp-fill 1.35s linear .15s forwards}
+  @keyframes kl-lp-fill{from{width:0}to{width:100%}}
+  @media (prefers-reduced-motion:reduce){.kl-lp::after{animation:none;width:100%;opacity:.45}}
+  button.kl-pa1.gruen{cursor:pointer} button.kl-pa1.gruen:hover{border-color:var(--good,#12b76a)}
+  button.kl-pa1.gruen:disabled{opacity:.6;cursor:progress}
+  #mp-karte .mp-tacho.mp-kl-gesperrt svg{filter:grayscale(1);opacity:.45}
+  #mp-karte .mp-tacho .mp-kauf-n.gesperrt{color:var(--sub);font-weight:600;background:var(--surface-tint);border:1px solid var(--border);border-radius:999px;padding:1px 7px;top:5px}
   #mp-karte .mp-tacho .mp-kauf-n.ruhig{color:var(--sub-2);font-weight:500} .kl-sp-knopf svg{width:13px;height:13px;flex:none;opacity:.75}
   .kl-pa1-w{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px}
   .kl-pa1-cd{font-size:11px;color:var(--good-ink,#067647);font-variant-numeric:tabular-nums;white-space:nowrap} .kl-sp-g .btn-mini:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
@@ -62319,7 +62328,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2339'
+  const OS_TAB_BUILD = '2026-09-22.2340'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -97869,6 +97878,7 @@ ${stBlock}
     // Reflow erzwingen statt requestAnimationFrame: das ruht in Hintergrund-Tabs, die Nadeln blieben dort auf dem Startwert stehen
     void leiste.offsetWidth
     leiste.querySelectorAll('.mp-tacho').forEach(el => mpFahren(el, _mp.zeig))
+    try{ if(typeof window._klTachoBadges === 'function') window._klTachoBadges() }catch(_){}   // KP2k: „+n kaufen" / gesperrt-Chip überleben das Neuzeichnen
   }
   // Gleich volle Reihen über die ganze Breite (Finn: „nicht links gestaucht mit Leerraum rechts"): so viele Spalten, wie Platz ist, dann
   // die Karten gleichmäßig auf die nötigen Reihen verteilen (6 Karten bei Platz für 4 → 3 + 3). Am Handy wischbare Leiste (CSS).
@@ -98237,7 +98247,10 @@ ${stBlock}
         if(min <= 0) return `<span class="kl-pa1-cd">Puls prüft gleich · ${uhr}</span>`
         return `<span class="kl-pa1-cd">Puls prüft in ${min >= 60 ? Math.floor(min / 60) + ' h ' : ''}${min % 60} min · ${uhr}</span>`
       }
-      const pa1Span = pa => `<span class="kl-pa1-w"><span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>${pa1Countdown(pa)}</span>`
+      // KP2k (Finn 26.11.2026): Klick auf den GRÜNEN Knopf (vor der Puls-Prüfung) = zurücknehmen → wieder „Gekauft". Andere Stände bleiben reine Anzeige.
+      const pa1Span = (pa, rid, n) => `<span class="kl-pa1-w">${pa.knopf.art === 'gruen' && rid
+        ? `<button type="button" class="kl-pa1 gruen" data-kl-zurueck="${klEsc(rid)}" data-kl-zn="${Number(n) || 1}" title="Puls legt an — Klick: „Gekauft“ zurücknehmen">${klEsc(pa.knopf.text || '…')}</button>`
+        : `<span class="kl-pa1 ${klEsc(pa.knopf.art || '')}" title="Puls (PA1) legt die Konten an — Stand des Auftrags">${klEsc(pa.knopf.text || '…')}</span>`}${pa1Countdown(pa)}</span>`
       const slots = new Map(), slotsVon = z => { const k = z.user_id + '|' + z.firma; if(!slots.has(k)) slots.set(k, pa1Slots(z)); return slots.get(k) }
       // KP2g (Finn: „die rechte Spalte mit Gekauft/Später ist sehr cool, aber links das ‚1/3 laufend' sieht unnötig aus" — abgenommen in der Demo):
       // je ID × Firma EIN schlanker Firmen-Kopf (Farbpunkt · Firma · „4 kaufen · 0 laufen · +9,7k / 20k WD" · Reserve-Punkt · Summe · Kästchen für alle
@@ -98259,7 +98272,7 @@ ${stBlock}
         return `<div class="kl-z kl-zr${gew ? ' gew' : ''}${aus ? ' kl-aus' : ''}">
           <div class="kl-g">${klEsc(klGr(z))}</div>
           <div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div>
-          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="${klFutures(z.firma) ? 'Gekauft: Puls legt das Konto mit der Vorlage an (kein Fenster) — lang drücken: von Hand anlegen' : 'Gekauft: Anlegen-Fenster mit Vorlage, nur External ID einfügen'}">Gekauft</button>${spaeterKnopf('data-kl-spaeter', x.rid, 'zählt nicht als gekauft')}${box('data-kl-wahl', x.rid, gew, z, 'auswählen')}`}</div>
+          <div class="kl-a">${pa ? pa1Span(pa, x.rid, 1) : `<button type="button" class="btn btn-primary btn-mini" data-kl-gekauft="${klEsc(x.rid)}" title="${klFutures(z.firma) ? 'Gekauft: Puls legt das Konto mit der Vorlage an (kein Fenster) — 1,5 s gedrückt halten: von Hand anlegen' : 'Gekauft: Anlegen-Fenster mit Vorlage, nur External ID einfügen'}">Gekauft</button>${spaeterKnopf('data-kl-spaeter', x.rid, 'zählt nicht als gekauft')}${box('data-kl-wahl', x.rid, gew, z, 'auswählen')}`}</div>
         </div>`
       }
       // Apex 5er-Pack: unter dem Firmen-Kopf EIN Pack-Block — „Gekauft" (anzahl = Pack) und „Später" fürs ganze Pack, darunter die Konten
@@ -98268,7 +98281,7 @@ ${stBlock}
         const zeilenP = l.map(x => `<div class="kl-z kl-zr kl-pz${I.auswahl.has(x.rid) ? ' gew' : ''}"><div class="kl-g">${klEsc(klGr(z))}</div><div class="kl-p">${klPreis(z) ? klEur(klPreis(z)) : '–'}</div><div class="kl-a"></div></div>`).join('')
         return `<div class="kl-pack${aus ? ' kl-aus' : ''}"><div class="kl-z kl-zr kl-pack-kopf">
           <div class="kl-g"><b>${z.pack}er-Pack</b>${l.length < z.pack ? ` · noch ${l.length}` : ''}</div><div class="kl-p">${summe(l)}</div>
-          <div class="kl-a">${pa ? pa1Span(pa) : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack (${l.length} Konten): Puls legt an — lang drücken: von Hand anlegen">Gekauft</button>${spaeterKnopf('data-kl-pack-spaeter', key, 'ganzes Pack, zählt nicht als gekauft')}`}</div>
+          <div class="kl-a">${pa ? pa1Span(pa, l[0].rid, slotsVon(z).filter(a => a === pa).length) : `<button type="button" class="btn btn-primary btn-mini" data-kl-pack-gekauft="${klEsc(key)}" title="Ganzes Pack (${l.length} Konten): Puls legt an — 1,5 s gedrückt halten: von Hand anlegen">Gekauft</button>${spaeterKnopf('data-kl-pack-spaeter', key, 'ganzes Pack, zählt nicht als gekauft')}`}</div>
         </div>${zeilenP}</div>`
       }
       const liste_ = l => { let o = '', i = 0
@@ -98315,8 +98328,18 @@ ${stBlock}
       for(const z of (I.d && I.d.zeilen) || []) if(String(z.user_id) === String(currentUserId || '')){
         je[z.firma] = (je[z.firma] || 0) + z.n - spaeterN(z); const b = spaeterBis(z); if(b) spt[z.firma] = b }
       const datum = t => { const d = new Date(t); return isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '' }
+      // KP2k (Finn 26.11.2026): vom Kauf-Deckel gesperrte Firma (FundedNext Futures „ab 1. FN-Payout") → Tacho grau + Chip mit Grund, nicht 0 % wie eine Lücke
+      const gesp = {}
+      for(const g of (I.d && I.d.gesperrt) || []) if(String(g.user_id) === String(currentUserId || '')) gesp[g.firma] = g.grund || 'gesperrt'
       leiste.querySelectorAll('.mp-tacho[data-mp-firma]').forEach(el => {
-        let b = el.querySelector('.mp-kauf-n'); const f = el.dataset.mpFirma, n = je[f] || 0, bis = spt[f]
+        let b = el.querySelector('.mp-kauf-n'); const f = el.dataset.mpFirma, n = je[f] || 0, bis = spt[f], gg = gesp[f]
+        el.classList.toggle('mp-kl-gesperrt', !!gg)
+        if(gg){
+          if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
+          b.className = 'mp-kauf-n gesperrt'; b.textContent = gg
+          b.title = `${f}: kein Kauf — ${gg} (dann rechnet der Vorrat wieder normal)`; return
+        }
+        if(b) b.classList.remove('gesperrt')
         if(!n && !bis){ if(b) b.remove(); return }
         if(!b){ b = document.createElement('span'); b.className = 'mp-kauf-n'; el.appendChild(b) }
         b.classList.toggle('ruhig', !n && !!bis)   // KP2f: Firma auf „Später" → ruhig „später bis 02.12." statt „+n kaufen"
@@ -98401,23 +98424,37 @@ ${stBlock}
       }
       naechster()
     }
-    // KP2i: langes Drücken (~600 ms, Maus oder Touch) auf „Gekauft" = Anlegen-Fenster von Hand; der folgende Klick wird geschluckt
-    let lp = null, lpGeschluckt = false
-    const lpStop = () => { if(lp){ clearTimeout(lp.t); lp.el.classList.remove('kl-lp'); lp = null } }
+    /* KP2k (Finn 26.11.2026, ersetzt KP2i 600 ms): kurz drücken = „Gekauft" (Puls legt an, kein Fenster). Gedrückt halten = Balken füllt sich
+     * im Knopf (CSS .kl-lp, 1,5 s); erst wenn er voll ist → Fenster zum Anlegen von Hand. Vorher loslassen oder vom Knopf wegziehen = nichts
+     * (kein Fenster, kein Gekauft) — ab 0,35 s Halten zählt es als abgebrochenes Halten, der folgende Klick wird geschluckt. Nur am normalen
+     * „Gekauft" (nicht am grünen Knopf). Geschluckt wird nur ein Klick direkt danach (≤ 1 s), nie ein späterer echter Klick. */
+    const LP_MS = 1500, LP_ABBRUCH_MS = 350
+    let lp = null, lpSchluck = 0
+    const lpStop = schlucken => { if(!lp) return; clearTimeout(lp.t); lp.el.removeEventListener('animationend', lp.ende); lp.el.classList.remove('kl-lp')
+      if(schlucken || Date.now() - lp.start >= LP_ABBRUCH_MS) lpSchluck = Date.now(); lp = null }
     $k(cfg.liste)?.addEventListener('pointerdown', e => {
-      const el = e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]'); if(!el || e.button > 0) return
-      lpStop(); el.classList.add('kl-lp')
-      lp = { el, t: setTimeout(() => {
+      const el = e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]'); if(!el || e.button > 0 || el.disabled) return
+      lpStop(); el.classList.remove('kl-lp'); void el.offsetWidth; el.classList.add('kl-lp')   // Animation sicher neu starten (kein Rest vom letzten Drücken)
+      const fertig = () => {
+        if(!lp || lp.el !== el) return
         const rids = el.dataset.klGekauft ? [el.dataset.klGekauft] : packRids(el.dataset.klPackGekauft)
-        lpStop(); lpGeschluckt = true; if(navigator.vibrate) try{ navigator.vibrate(15) }catch(_){}
+        lpStop(true); if(navigator.vibrate) try{ navigator.vibrate(15) }catch(_){}
         hinzufuegen(rids, { manuell: true })
-      }, 600) }
+      }
+      // Fenster genau dann, wenn der Balken voll ist (animationend); ohne Bewegung bzw. falls die Animation nicht läuft: nach LP_MS (+ Puffer)
+      const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      lp = { el, start: Date.now(), ende: ev => { if(ev.animationName === 'kl-lp-fill' && lp && Date.now() - lp.start >= LP_MS - 200) fertig() }, t: setTimeout(fertig, still ? LP_MS : LP_MS + 400) }
+      if(!still) el.addEventListener('animationend', lp.ende)
     })
-    for(const ev of ['pointerup', 'pointerleave', 'pointercancel']) $k(cfg.liste)?.addEventListener(ev, lpStop)
+    $k(cfg.liste)?.addEventListener('pointerup', () => lpStop())
+    $k(cfg.liste)?.addEventListener('pointercancel', () => lpStop(true))
+    // vom Knopf weggezogen (auch auf ein Kind-Element außerhalb des Knopfs) = abbrechen; pointerleave der Liste allein reicht dafür nicht
+    $k(cfg.liste)?.addEventListener('pointerout', e => { if(lp && lp.el.contains(e.target) && !lp.el.contains(e.relatedTarget)) lpStop(true) })
     $k(cfg.liste)?.addEventListener('contextmenu', e => { if(e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]')) e.preventDefault() })
     $k(cfg.liste)?.addEventListener('click', e => {
-      if(lpGeschluckt && e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]')){ lpGeschluckt = false; return }
-      lpGeschluckt = false
+      const geschluckt = lpSchluck && Date.now() - lpSchluck < 1000; lpSchluck = 0
+      if(geschluckt && e.target.closest('[data-kl-gekauft],[data-kl-pack-gekauft]')) return
+      const zr = e.target.closest('[data-kl-zurueck]'); if(zr){ zuruecknehmen(zr); return }
       const pk = e.target.closest('[data-kl-id]'); if(pk){ const id = pk.dataset.klId; I.offen.has(id) ? I.offen.delete(id) : I.offen.add(id); render(); return }
       const g = e.target.closest('[data-kl-gekauft]'); if(g){ hinzufuegen([g.dataset.klGekauft]); return }
       const w = e.target.closest('[data-kl-spaeter]'); if(w){ spaeter(w.dataset.klSpaeter, 1, 7); return }
@@ -98436,12 +98473,36 @@ ${stBlock}
       c.checked ? I.auswahl.add(c.dataset.klWahl) : I.auswahl.delete(c.dataset.klWahl)
       render()   // andere Vorlagen sperren bzw. wieder freigeben
     })
+    // KP2k: grüner Knopf → „Gekauft" zurücknehmen (S5 PA1d: window.pa1Zurueck → POST /konto-suche/zurueck). Geht nur, solange der Auftrag offen ist
+    // (vor der Puls-Prüfung); läuft Puls gerade bzw. schon angelegt → Toast mit Grund, Knopf bleibt.
+    async function zuruecknehmen(knopf){
+      const x = zeilenAlle().find(q => q.rid === knopf.dataset.klZurueck); if(!x || knopf.disabled) return
+      if(typeof window.pa1Zurueck !== 'function'){ klToast('Zurücknehmen ist auf diesem Stand noch nicht da — bitte Seite neu laden'); return }
+      const z = x.z, pa = (slotsVon_(z)[x.k - 1]) || null, n = Math.max(1, Number(knopf.dataset.klZn) || 1)
+      const vid = (z.vorlage && z.vorlage.id) || (pa && pa.vorlage_id) || undefined
+      knopf.disabled = true
+      let r = null
+      try{ r = await window.pa1Zurueck({ user_id: z.user_id, firma: z.firma, vorlage_id: vid, anzahl: n }) }
+      catch(e){ r = { ok: false, msg: 'Railway nicht erreichbar' } }
+      if(r && r.ok){
+        const altId = pa && String(pa.id), au = r.auftrag ? Object.assign({}, r.auftrag, { _lokal_at: Date.now() }) : null
+        const ohne = l => (l || []).filter(a => String(a.id) !== altId && !(au && String(a.id) === String(au.id)))
+        I.pa1Lokal = au ? [...ohne(I.pa1Lokal), au] : ohne(I.pa1Lokal)
+        I.pa1 = au ? [...ohne(I.pa1), au] : ohne(I.pa1)
+        render(); pa1Laden()
+        if(r.code === 'nichts') klToast(`${z.firma}: kein offener Auftrag — Knopf zeigt wieder „Gekauft“`)
+      } else {
+        klToast(`${z.firma}: ${(r && r.msg) || 'nicht zurückgenommen'}`)
+        knopf.disabled = false
+      }
+    }
+    const slotsVon_ = z => pa1Slots(z)
     function oeffnen(){
       const uid = String(currentUserId || '')
       if(uid !== I.uid){ I.d = null; I.pa1 = []; I.auswahl.clear(); I.offen.clear(); I.verboten = false; render() }   // ID gewechselt: nie die Liste der vorigen ID zeigen
       if(!I.d || Date.now() - I.at >= 60000) laden(false); else render()
     }
-    return { cfg, I, laden, render, oeffnen, pa1Laden, hinzufuegen, zeilenAlle, aufheben: () => { I.auswahl.clear(); render() },
+    return { cfg, I, laden, render, oeffnen, pa1Laden, hinzufuegen, zeilenAlle, tachoBadges: () => { if(cfg.tacho) tachoBadges() }, aufheben: () => { I.auswahl.clear(); render() },
              zeigen: d => { I.d = d; I.at = Date.now(); I.uid = String(currentUserId || ''); I.verboten = false; render() } }
   }
 
@@ -98467,6 +98528,7 @@ ${stBlock}
   // Admin-Karte bei geschlossenem Bereich ausblenden lassen (Leiste), Taktgeber je Ort
   window.pa1Neu = () => { for(const o of orte) if(o.I.d) o.pa1Laden() }
   window._klOeffnen = () => acc.oeffnen()
+  window._klTachoBadges = () => acc.tachoBadges()
   window._klAdminOeffnen = () => adm.oeffnen()
   setInterval(() => { for(const o of orte) if(o.cfg.sichtbar() && !document.hidden && Date.now() - o.I.at >= KL_TAKT) o.laden(false); leisteZeigen() }, 15000)
   setInterval(() => { for(const o of orte) if(o.cfg.sichtbar() && !document.hidden && o.I.d) o.pa1Laden() }, 60000)   // PA1-Stand (Puls) je Minute
