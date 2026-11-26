@@ -6264,6 +6264,9 @@
   #dashboard-view .wdl-ansehen{display:block;margin:3px 0 0 auto;padding:1px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--violet);background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer}
   #dashboard-view .wdl-ansehen:hover{border-color:var(--violet)}
   #dashboard-view .wdl-ansehen:disabled{color:var(--sub);cursor:default}   /* Slave-P&L unter dem Master (01.10.2026) */
+  #dashboard-view .wdl-ansehen.wdl-schliessen{color:var(--danger)}   /* „Jetzt schließen" (RS1 26.11.2026): gleicher Knopf, rot */
+  #dashboard-view .wdl-ansehen.wdl-schliessen:hover{border-color:var(--danger)}
+  #dashboard-view .wdl-ansehen.wdl-schliessen:disabled{color:var(--sub)}
   /* Modell-Leiste im Radar (01.10.2026 abends, Finn: „ein Tab je Modell, schön geordnet") — Gruppen wie im Plan-Popup */
   /* Vorprüfung Orbit/WD (02.10.2026): Abschlusszeile unter den pf-Zeilen */
   #vcModal .vc-final{margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;line-height:1.45}
@@ -43525,6 +43528,44 @@
       ende(`👁 ${wer}: kein PC hat geantwortet — läuft Prophos am PC dieser ID?`, 'end')
     }catch(e){ ende('Ansehen nicht gesendet: ' + String((e && e.message) || e), 'end') }
   }
+  /* JETZT SCHLIESSEN (RS1, Finn 26.11.2026 Thanksgiving: „ich bin draußen, am Handy nur die Finn + Pascal-ID — ein Knopf, mit dem ich
+   * laufende Echo-Trades schließen kann, so wie wir es immer gemacht haben: Puls geht auf die Position und schließt"). Nur Echo-Zeilen.
+   * Railway legt das close-Signal im Namen des Plan-Besitzers an (PATCH /admin/wd-plaene aktion 'schliessen' — dasselbe Signal wie
+   * „Schließen" auf der Karte); der PC-Tab der ID claimt es, Puls schließt im Terminal. Eine Rückfrage vor dem Senden, Stand im Knopf,
+   * Ergebnis als Toast. Höchstens 9 min warten (der PC-Tab meldet spätestens nach 8 min „unklar"). Eigene Verdrahtung, eigener Merker. */
+  const _wdlSchliessenStand = new Map()   // plan_id → Text im Knopf, solange ein Schließ-Auftrag läuft
+  async function wdlSchliessen(pid){
+    pid = String(pid || ''); if(!pid || _wdlSchliessenStand.has(pid)) return
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+    const wer = t ? `${t.person || '?'} · ${(t.konto && t.konto.firma) || ''}${t.konto && t.konto.kontonr_ende ? ' …' + t.konto.kontonr_ende : ''}` : 'Trade'
+    if(!confirm(`${wer}\n\nEcho-Trade jetzt schließen? Puls schließt die Master-Position am PC der ID.`)) return
+    const stand = txt => { _wdlSchliessenStand.set(pid, txt); try{ wdlRender() }catch(_){} }
+    const ende = (txt, art) => { _wdlSchliessenStand.delete(pid); try{ wdlRender() }catch(_){} if(typeof atToast === 'function') atToast(txt, art) }
+    stand('sendet …')
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene?${WDL_SICHT}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json().then(d => ({ r, d })).catch(() => ({ r, d: {} })))
+      const { r, d } = await ruf({ aktion: 'schliessen', plan_id: pid, symbol: (t && t.symbol) || '' })   // Symbol der offenen Position (Radar-Zeile)
+      if(!r.ok || !d.signal_id) throw new Error(d.error || ('HTTP ' + r.status))
+      stand('wartet auf PC …')
+      const t0 = Date.now()
+      while(Date.now() - t0 < 540000){
+        await new Promise(res => setTimeout(res, 4000))
+        const { d: st } = await ruf({ aktion: 'endlesung_stand', signal_id: d.signal_id })
+        const s = st && st.status, e = (st && st.ergebnis) || {}, msg = String(e.msg || e.grund || '')
+        if(s === 'laeuft') stand('Puls schließt …')
+        if(s === 'fertig' || s === 'fehler'){
+          const ok = e.ok === true
+          ende(`${ok ? '✓' : e.unklar ? '⚠' : '✗'} ${wer}: ${msg || (ok ? 'Position geschlossen' : 'nicht geschlossen')}${st.pc ? ` (PC ${pcLabel(st.pc)})` : ''}`, ok ? 'ok' : 'end')
+          try{ wdlLaden(true) }catch(_){}
+          return
+        }
+        if(['verfallen', 'verworfen'].includes(s)){ ende(`✗ ${wer}: ${msg || 'kein PC hat das Signal abgeholt'} — nichts geschlossen`, 'end'); try{ wdlLaden(true) }catch(_){} return }
+      }
+      ende(`⚠ ${wer}: keine Rückmeldung vom PC — am Terminal prüfen, ob die Position noch offen ist`, 'end')
+    }catch(e){ ende('Schließen nicht gesendet: ' + String((e && e.message) || e), 'end') }
+  }
   /* MANUELLE ARBEIT (08.10.2026, Finn am Radar „Überprüfen": „ein Feld … manuelle Arbeit. Wo z. B. noch eine Winning-Day-Fahrt mit
    * 0,01 fehlt oder ein, zwei Dollar — das mache ich dann manuell oder warte ein paar Tage. Per Drag & Drop in die Gruppe
    * runterziehen, kurze Notiz dazu, in zwei Tagen abhaken und den Nachfolger anlegen. Erst dann wird verbucht."): Kennzeichen
@@ -44452,7 +44493,10 @@
         // seit .1032 nur bei Puls-Plänen durch. Dort sieht Puls nicht nach: Knopf gesperrt, Tooltip sagt es; Puls-Pläne wie bisher.
         const aHand = t.route === 'tsv2' && ((t.tv || {}).puls !== 'tsx')
         const aKnopf = `<button type="button" class="wdl-ansehen" data-wdl-ansehen="${escapeHtml(apid)}"${(aBusy || aHand) ? ' disabled' : ''} title="${escapeHtml(aHand ? 'Topstep-Handplan — Puls sieht hier nicht nach' : echo ? 'MT5-Terminal dieses Kontos am PC der ID nach vorn holen — keine Order' : 'Puls springt am PC der ID in TradingView auf dieses Konto — ist die Position schon zu, geht der Trade auf „Überprüfen"')}">${aBusy ? 'öffnet …' : 'Ansehen'}</button>`
-        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>${aKnopf}`, { tip: 'läuft seit ' + zeit(t.started_at) })
+        // „Jetzt schließen" (RS1, Finn 26.11.2026): nur Echo, nur laufend — close-Signal an den PC der ID, Puls schließt im Terminal (wdlSchliessen)
+        const sStand = _wdlSchliessenStand.get(apid)
+        const sKnopf = echo ? `<button type="button" class="wdl-ansehen wdl-schliessen" data-wdl-schliessen="${escapeHtml(apid)}"${sStand ? ' disabled' : ''} title="Master-Position dieses Echo-Trades am PC der ID schließen — Puls klickt im MT5-Terminal, der Hedge geht über Echo mit">${sStand ? escapeHtml(sStand) : 'Jetzt schließen'}</button>` : ''
+        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>${aKnopf}${sKnopf}`, { tip: 'läuft seit ' + zeit(t.started_at) })
       } else if(gepl){
         art = 'plan'
         miZ = zelle('mi', num(t.master_tp) != null ? f0(t.master_tp) + ' $' : '–')
@@ -45042,6 +45086,8 @@
     }
     const an = ev.target.closest('[data-wdl-ansehen]')
     if(an){ if(!an.disabled) wdlAnsehen(an.getAttribute('data-wdl-ansehen')); return }
+    const sz = ev.target.closest('[data-wdl-schliessen]')   // RS1: „Jetzt schließen" (nur Echo-Zeilen)
+    if(sz){ if(!sz.disabled) wdlSchliessen(sz.getAttribute('data-wdl-schliessen')); return }
     if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }   // „n vorgemerkt ×“ (02.11.2026) — seit VM1 ohne Knopf (toter Pfad, unschädlich)
     // VM1: ruhige Zeile „ohne Lesung“ → Popup mit Grund (kein Vormerken, kein Ein Klick: der Wert wird von Hand nachgetragen)
     const ol = ev.target.closest('[data-wdl-ol]')
@@ -62474,7 +62520,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2359'
+  const OS_TAB_BUILD = '2026-09-22.2360'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

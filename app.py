@@ -19110,7 +19110,7 @@ def admin_wd_plaene():
                         tab, key = "order_signale", str(d.get("signal_id") or "").strip()
                     elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg", "review_notiz"):
                         tab, key = "accounts", str(d.get("account_id") or "").strip()
-                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg", "vormerken", "vormerken_weg") + WD_HAND_AKTIONEN:
+                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "schliessen", "manuell", "manuell_weg", "vormerken", "vormerken_weg") + WD_HAND_AKTIONEN:
                         tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
                     else:
                         tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
@@ -19591,6 +19591,46 @@ def admin_wd_plaene():
                                 "art": zeile["params"]["aktion"]})
             except Exception as e:
                 return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "schliessen":
+            # „Jetzt schließen" im Radar (RS1, Finn 26.11.2026 Thanksgiving: „ich bin draußen und habe am Handy nur die Finn + Pascal-ID —
+            # ein Knopf, mit dem ich laufende Echo-Trades schließen kann, so wie wir es immer gemacht haben"). Kein neuer PC-Weg: dasselbe
+            # close-Signal wie „Schließen" auf der Karte vom Mac/Handy (prophos.html tpPlanSchliessen / tpV2PlanSchliessen), nur im Namen des
+            # Plan-Besitzers angelegt, weil der Admin fremde order_signale per RLS nicht schreiben darf. Der PC-Tab der ID claimt es
+            # (orderSignalTick, Zweig close), löst das Ticket frisch aus der eigenen Instanz auf, Puls schließt im Terminal; bei Echo mit
+            # Hedge zieht der Copier die Fusion-Position mit. NUR Echo (mt5/mt5v2) und nur laufende Pläne. Stand über endlesung_stand.
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_symbol,master_name", "id": f"eq.{pid}", "limit": "1"})
+                plan = rows[0] if rows else None
+                if not plan:
+                    return jsonify({"error": "Plan nicht gefunden", "plan_id": pid}), 404
+                route, uid = str(plan.get("route") or ""), str(plan.get("user_id") or "")
+                if len(uid) < 10:
+                    return jsonify({"error": "Plan ohne Besitzer", "plan_id": pid}), 409
+                if route not in ("mt5", "mt5v2"):
+                    return jsonify({"error": "Nur Echo-Trades lassen sich hier schließen", "plan_id": pid}), 409
+                if plan.get("status") != "open":
+                    return jsonify({"error": f"Plan läuft nicht (Status: {plan.get('status')}) — nichts gesendet", "plan_id": pid}), 409
+                # schon ein Schließ-Signal unterwegs → kein zweites (Doppelklick, zweites Gerät)
+                offen = sb_select("order_signale", {"select": "id,status,params", "plan_id": f"eq.{pid}", "status": "in.(wartet,laeuft)",
+                                                    "order": "created_at.desc", "limit": "5"}) or []
+                for sg in offen:
+                    if (sg.get("params") or {}).get("aktion") == "close":
+                        return jsonify({"ok": True, "plan_id": pid, "signal_id": str(sg["id"]), "neu": False})
+                # Symbol wie beim Karten-Knopf: Override am Plan zuerst, sonst das Symbol der offenen Position aus der Radar-Zeile (Absender);
+                # der PC filtert damit nur seine eigenen Master-Positionen und verlangt weiter genau eine
+                sym = str(plan.get("master_symbol") or daten.get("symbol") or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9._#!-]{1,24}", sym):
+                    sym = ""
+                params = {"aktion": "close", "symbol": sym, "von": "admin"}
+                if route == "mt5v2":
+                    params.update(v2=route, konto=None)   # Form wie tpV2PlanSchliessen (Empfänger: eigener V2-Zweig)
+                sig = sb_insert("order_signale", {"user_id": uid, "plan_id": pid, "status": "wartet", "params": params})
+                return jsonify({"ok": True, "plan_id": pid, "signal_id": str((sig or {}).get("id") or ""), "neu": True})
+            except Exception as e:
+                return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
         if daten.get("aktion") == "tab_neu_laden":
             # „Tab neu laden" (08.10.2026, Admin → Übersicht → PC-Tabs, Finn: „dass jeder einzelne PC immer die Updates direkt bekommt"):
             # Signal im Namen der ID, nur der genannte PC claimt es (prophos.html orderSignalTick, Zweig tab_neu_laden) und lädt im ruhigen
@@ -19686,7 +19726,7 @@ def admin_wd_plaene():
                 return jsonify({"error": "signal_id fehlt"}), 400
             try:
                 rows = sb_select("order_signale", {"select": "id,status,ergebnis,pc,updated_at,params", "id": f"eq.{sid}", "limit": "1"})
-                if not rows or (rows[0].get("params") or {}).get("aktion") not in ("endlesung", "mt5_terminal", "mt5_balance", "konto_balance"):   # mt5_terminal: „Ansehen"; *_balance: „↻ Balance lesen" (08.10.2026)
+                if not rows or (rows[0].get("params") or {}).get("aktion") not in ("endlesung", "mt5_terminal", "mt5_balance", "konto_balance", "close"):   # mt5_terminal: „Ansehen"; *_balance: „↻ Balance lesen" (08.10.2026); close: „Jetzt schließen" (RS1 26.11.2026)
                     return jsonify({"error": "Signal nicht gefunden"}), 404
                 z = rows[0]
                 return jsonify({"ok": True, "status": z.get("status"), "ergebnis": z.get("ergebnis"), "pc": z.get("pc"), "updated_at": z.get("updated_at")})
