@@ -33261,7 +33261,8 @@ def _ap_leichen_abschliessen(plan_ids, jetzt):
 #   weg      — sicher nichts platziert: kein Claim, ODER Puls gab vor jedem Kauf auf (final.puls_aufgegeben ohne Fill-Beleg), ODER der
 #              letzte Start-Fehler sagt selbst „nichts platziert" (start_fehler.unklar = false — dieselbe Marke, mit der sfBehoben einen
 #              Plan von selbst neu startet; „zu_spaet" ohne Versuch fällt auch darunter). Gelöscht wie der Papierkorb (delete … planned).
-#   pruefen  — es KANN eine Order am Konto sein (geclaimt ohne Ergebnis, Unklar-Marke, Fill-/Ticket-/Hedge-/TV-Spur, Puls-Pause, Polar):
+#   pruefen  — es KANN eine Order am Konto sein (geclaimt ohne Ergebnis, Unklar-Marke, Fill-/Ticket-/Hedge-/TV-Spur, Polar; die Puls-Pause-
+#              Marke allein seit TR1 27.11.2026 nicht mehr — angehalten ist nicht gesendet):
 #              nie löschen → „Überprüfen" mit Grund „Plan von gestern nie fertig — Order am Konto prüfen", master_pl leer. Damit
 #              verliert nie eine echte Position ihren Plan; das Konto bleibt bis zum Abhaken belegt (Planer, Gegenrichtung).
 # Keine Regel- oder Risikoprüfung — nur der Zustand des Plans. Nie ein Plan, dessen Start oder Claim < 2 h her ist (wie wd_plan_wegraeumbar).
@@ -33302,8 +33303,11 @@ def tagesreset_hinweis(p):
         return "Polar-Lauf am Plan"
     if b.get("versuche_alt"):
         return "Leer-Versuche mit Fusion-Hedge am Plan"
-    if b.get("puls_pause"):
-        return "Puls-Pause-Marke (Trade evtl. von Hand)"
+    # TR1 (Finn 27.11.2026, Vorfall Thanksgiving 26.11.: 43 angehaltene Pläne — nichts gesendet, 34 nie geclaimt — gingen allein wegen der
+    # Marke mt5_baseline.puls_pause als „⚠ unklar: nie fertig — Order am Konto prüfen" nach Überprüfen; der Nachtlauf ließ deshalb 30 Konten
+    # aus, an keinem der 43 lag eine Order). Die Pause-Marke ist KEINE Order-Spur mehr: sie sagt nur „angehalten". Alles, was eine Order
+    # belegen kann (gesendet, Hedge, Unklar-Marke, Ticket, TV-Spur, Polar, Leer-Versuche, Ende-Eintrag), steht oben/unten weiter und hat
+    # Vorrang; ein echter Start-Claim ohne Ergebnis bleibt in tagesreset_art „pruefen". Der Text „Puls-Pause-Marke …" entfällt damit.
     if fin is not None:
         if any(fin.get(k) not in (None, "", 0, False) for k in TR_FILL_FELDER):
             return "Fill-/Ergebnis-Beleg im Ende-Eintrag"
@@ -33337,20 +33341,21 @@ def tagesreset_art(p, tag, jetzt, tz):
     b = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     fin = b.get("final") if isinstance(b.get("final"), dict) else None
     sf = b.get("start_fehler") if isinstance(b.get("start_fehler"), dict) else None
+    pause = " — Puls-Pause, nichts gesendet" if b.get("puls_pause") else ""    # TR1 27.11.2026: nur fürs Log, eingeteilt wird wie ohne Pause
     if not claim:
-        return {"art": "weg", "grund": "nie gestartet (kein Claim)"}
+        return {"art": "weg", "grund": "nie gestartet (kein Claim)" + pause}
     if fin is not None and fin.get("puls_aufgegeben"):
         return {"art": "weg", "grund": "Puls gab vor dem Kauf auf: " + str(fin.get("puls_fehler") or fin.get("grund") or "?")[:80]}
     sf_at = _ap_ts((sf or {}).get("at"))
     if sf and sf.get("unklar") is False and sf_at and sf_at >= claim:
-        return {"art": "weg", "grund": f"Start-Fehler ohne Order ({sf.get('schritt') or '?'}, Bot: nichts platziert)"}
+        return {"art": "weg", "grund": f"Start-Fehler ohne Order ({sf.get('schritt') or '?'}, Bot: nichts platziert)" + pause}
     # TR2 (Finn 18.11.2026, Vorfall Chris 17.11.: PC bis ~17:00 aus, beim Anlauf hat der PC-Tab 5 verpasste Pläne mit
     # start_claim_art='verbrauch' geclaimt → Nachtlauf kannte das Feld nicht → alle 5 „⚠ unklar: Plan … nie fertig" im Abhaken, Konten
     # blockiert, obwohl nie ein Trade lief). Verbrauch = verpasst / Ziel erreicht / Manuelle Arbeit / Archiv / Riegel aufgegeben — der
     # Tab startet dann NIE. Steht kein Hinweis am Plan (oben, hat Vorrang), ist er also sicher ohne Order → weg. Echte Starts ('start')
     # und alte Pläne ohne Feld bleiben beim „pruefen".
     if str(p.get("start_claim_art") or "") == "verbrauch":
-        return {"art": "weg", "grund": "nur verbraucht (verpasst/Ziel/Manuell/Archiv), nie gestartet"}
+        return {"art": "weg", "grund": "nur verbraucht (verpasst/Ziel/Manuell/Archiv), nie gestartet" + pause}
     return {"art": "pruefen", "grund": "geclaimt, aber kein Ergebnis am Plan"}
 
 

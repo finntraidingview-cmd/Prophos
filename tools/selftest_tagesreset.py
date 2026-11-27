@@ -98,7 +98,6 @@ FAELLE = [
     ("Echo-Ticket", {"route": "mt5v2", "mt5_baseline": {"ticket": 123}}, "pruefen", "Ticket"),
     ("Polar mit Lauf-Zeile", {"route": "polar", "polar_lauf": [{"id": "l1", "status": "bereit"}], "mt5_baseline": {"polar_auftrag": {"lots": 1}}}, "pruefen", "Polar"),
     ("Polar mit Abrechnung", {"route": "polar", "start_um_gestartet_at": None, "mt5_baseline": {"polar": {"status": "fertig"}}}, "pruefen", "Polar"),
-    ("Puls-Pause (Trade evtl. von Hand)", {"start_um_gestartet_at": None, "mt5_baseline": {"puls_pause": "Polar von Hand"}}, "pruefen", "Pause"),
     ("Ende mit Fill trotz Aufgabe", {"mt5_baseline": {"final": {"puls_aufgegeben": True, "today_pnl": -310.5}}}, "pruefen", "Fill"),
     ("Ende ohne Aufgabe", {"mt5_baseline": {"final": {"grund": "demo_liq"}}}, "pruefen", "Ende-Eintrag"),
 ]
@@ -136,6 +135,60 @@ for pid, route, start in (("a27777b5", "mt5v2", "2026-11-17T02:57:00+00:00"), ("
          "start_um_gestartet_at": "2026-11-17T13:02:11+00:00", "start_claim_art": "verbrauch", "orbit_gesendet_at": None, "mt5_baseline": None}
     e = ART(p, "2026-11-18", J18, TZ)
     check(e["art"] == "weg", f"TR2 Chris {pid} (17.11., PC aus, beim Anlauf verbraucht): weg — {e['grund']}")
+
+# TR1 (Finn 27.11.2026, Vorfall Thanksgiving 26.11.: 43 angehaltene Pläne gingen allein wegen mt5_baseline.puls_pause als „unklar" nach
+# Überprüfen, der Nachtlauf ließ 30 Konten aus — an keinem lag eine Order). Die Pause-Marke ist keine Order-Spur mehr: nichts gesendet → weg;
+# jede echte Spur (Hinweis) und ein Start-Claim ohne Ergebnis bleiben „pruefen". Form der Marke wie sql/2026-11-26_thanksgiving_…: start_um
+# = NULL, planned_for bleibt, der Claim bleibt am Plan stehen (claim_war).
+J27 = datetime(2026, 11, 26, 21, 30, tzinfo=timezone.utc)      # Nachtlauf 01:30 Dubai am 27.11.
+T27 = "2026-11-27"
+
+
+def pause(claim_war=None):
+    return {"at": "2026-11-26T13:05:16+00:00", "grund": "Thanksgiving 26.11.2026 — heute keine Trades mehr starten",
+            "start_um_war": "2026-11-26T14:10:00+00:00", "bestaetigt_war": True, "bestaetigt_at_war": "2026-11-25T22:00:00+00:00", "claim_war": claim_war}
+
+
+PB = {"id": "p", "status": "planned", "started_at": None, "route": "tvv2", "planned_for": "2026-11-26", "start_um": None,
+      "start_um_gestartet_at": None, "start_claim_art": None, "orbit_gesendet_at": None}
+C = "2026-11-26T08:01:18.441+00:00"                             # Claim vom Vormittag, vor der Pause (17:05 Dubai)
+PAUSE = [
+    ("ohne Claim (34 der 43)", {"mt5_baseline": {"puls_pause": pause()}}, "weg", "kein Claim"),
+    ("ohne Claim, alte Marke als Text (19.10.)", {"mt5_baseline": {"puls_pause": "tv_dropdown_2026-10-19"}}, "weg", "kein Claim"),
+    ("ohne Claim, mit Vorflug/Hedge-Vorschau (keine Order-Spur)", {"route": "mt5", "mt5_baseline": {"puls_pause": pause(), "vorflug": {"ok": True},
+                                                                   "echo_hedge": {"lots": 0.5}, "hedge_vorschau": {"lots": 0.5}, "wd_sl": 300}}, "weg", "kein Claim"),
+    ("Claim verbrauch", {"start_um_gestartet_at": C, "start_claim_art": "verbrauch", "mt5_baseline": {"puls_pause": pause(C)}}, "weg", "verbraucht"),
+    ("Claim start ohne Ergebnis", {"start_um_gestartet_at": C, "start_claim_art": "start", "mt5_baseline": {"puls_pause": pause(C)}}, "pruefen", "kein Ergebnis"),
+    ("Claim ohne Art (alter Plan) ohne Ergebnis", {"start_um_gestartet_at": C, "mt5_baseline": {"puls_pause": pause(C)}}, "pruefen", "kein Ergebnis"),
+    # die 9 geclaimten vom 26.11. (b9370fe3 u. a.): Start-Fehler NACH dem Claim mit unklar=false = Bot-Beleg „nichts platziert" → weg wie ohne Pause
+    ("Claim start, Bot: nichts platziert (9 der 43)", {"start_um_gestartet_at": C, "start_claim_art": "start",
+                                                      "mt5_baseline": {"puls_pause": pause(C), "start_fehler": sf("2026-11-26T08:04:45.861Z", "konto"),
+                                                                       "richtung_konflikt": {"status": "aufgegeben"}}}, "weg", "nichts platziert"),
+    ("Claim start, Start-Fehler unklar", {"start_um_gestartet_at": C, "start_claim_art": "start",
+                                          "mt5_baseline": {"puls_pause": pause(C), "start_fehler": sf("2026-11-26T08:04:45Z", "knopf", unklar=True)}}, "pruefen", "unklar"),
+    ("mit Ticket", {"route": "mt5v2", "mt5_baseline": {"puls_pause": pause(), "ticket": 4711}}, "pruefen", "Ticket"),
+    ("mit offener Position (live.offen)", {"route": "mt5v2", "mt5_baseline": {"puls_pause": pause(), "live": {"offen": True}}}, "pruefen", "Ticket"),
+    ("mit orbit_gesendet_at", {"orbit_gesendet_at": "2026-11-26T08:01:25+00:00", "mt5_baseline": {"puls_pause": pause()}}, "pruefen", "Orbit"),
+    ("Claim verbrauch MIT orbit_gesendet_at", {"start_um_gestartet_at": C, "start_claim_art": "verbrauch", "orbit_gesendet_at": "2026-11-26T08:01:25+00:00",
+                                               "mt5_baseline": {"puls_pause": pause(C)}}, "pruefen", "Orbit"),
+    ("mit Fusion-Hedge", {"mt5_baseline": {"puls_pause": pause(), "hedge": {"status": "offen"}}}, "pruefen", "Hedge"),
+    ("mit TradingView-Spur", {"mt5_baseline": {"puls_pause": pause(), "tv": {"klick_at": "2026-11-26T08:01:30Z"}}}, "pruefen", "TradingView"),
+    ("mit Puls-Unklar-Marke", {"mt5_baseline": {"puls_pause": pause(), "puls_unklar": {"code": "unklar"}}}, "pruefen", "unklar"),
+    ("mit Leer-Versuchen", {"mt5_baseline": {"puls_pause": pause(), "versuche_alt": [{"slave_pl": -3.2}]}}, "pruefen", "Leer-Versuche"),
+    ("mit Ende-Eintrag samt Fill", {"mt5_baseline": {"puls_pause": pause(), "final": {"today_pnl": 120.0}}}, "pruefen", "Fill"),
+]
+for name, extra, soll, wort in PAUSE:
+    e = ART(dict(PB, **extra), T27, J27, TZ)
+    check(e["art"] == soll and wort.lower() in e["grund"].lower(), f"TR1 Puls-Pause {name}: {soll} — {e['grund']}")
+check(ns["tagesreset_hinweis"](dict(PB, mt5_baseline={"puls_pause": pause()})) is None, "TR1 Pause-Marke allein ist kein Order-Hinweis mehr")
+e = ART(dict(PB, start_um="2027-01-01T00:00:00+00:00", mt5_baseline={"puls_pause": pause()}), T27, J27, TZ)
+check(e["art"] is None, f"TR1 Pause mit geparktem Start (2027) bleibt stehen — {e['grund']}")
+e = ART(dict(PB, planned_for="2026-11-27", mt5_baseline={"puls_pause": pause()}), T27, J27, TZ)
+check(e["art"] is None, f"TR1 Pause-Plan für heute bleibt stehen — {e['grund']}")
+e = ART(dict(PB, route="polar", mt5_baseline={"puls_pause": pause(), "polar_auftrag": {"lots": 1}}), T27, J27, TZ)
+check(e["art"] is None, f"TR1 Polar nur gespeichert + Pause bleibt stehen — {e['grund']}")
+e = ART(dict(PB, start_um_gestartet_at="2026-11-26T20:40:00+00:00", start_claim_art="verbrauch", mt5_baseline={"puls_pause": pause()}), T27, J27, TZ)
+check(e["art"] is None, f"TR1 Pause, Claim < 2 h her: nicht betroffen — {e['grund']}")
 
 # NICHT BETROFFEN → None
 NICHT = [
@@ -267,6 +320,24 @@ check(all(g.get("start_claim_art") == "eq.verbrauch" for g in DB["delete_params"
       f"TR2 Lösch-Guard mit start_claim_art=eq.verbrauch — {DB['delete_params']}")
 check([x[0] for x in DB["update"]] == ["start-0008"], f"TR2 echter Start ohne Ergebnis → Überprüfen — {[x[0] for x in DB['update']]}")
 check("start_claim_art" in fn("ap_tagesreset").split("sel = (")[1].split(")")[0], "TR2 start_claim_art wird mitgeladen")
+
+# TR1: ap_tagesreset löscht den Pause-Plan ohne Claim und den mit Claim „verbrauch"; Claim „start" ohne Ergebnis und gesendet → Überprüfen
+ROWS[:] = [dict(PB, id="pause-0009", master_name="Konto J", result_notes=None, mt5_baseline={"puls_pause": pause()}),
+           dict(PB, id="pause-0010", master_name="Konto K", result_notes=None, start_um_gestartet_at=C, start_claim_art="verbrauch", mt5_baseline={"puls_pause": pause(C)}),
+           dict(PB, id="pause-0011", master_name="Konto L", result_notes=None, start_um_gestartet_at=C, start_claim_art="start", mt5_baseline={"puls_pause": pause(C)}),
+           dict(PB, id="pause-0012", master_name="Konto M", result_notes=None, orbit_gesendet_at="2026-11-26T08:01:25+00:00", mt5_baseline={"puls_pause": pause()})]
+ns["_sb_all"] = _lies
+for k in ("geloescht", "update", "rpc", "delete_params", "update_params"):
+    DB[k] = []
+out = ns["ap_tagesreset"](T27, J27)
+check(DB["geloescht"] == ["pause-0009", "pause-0010"] and [z["plan_id"] for z in out["weg"]] == ["pause-0009", "pause-0010"],
+      f"TR1 Pause ohne Claim + Claim verbrauch gelöscht — {DB['geloescht']}")
+check([x[0] for x in DB["update"]] == ["pause-0011", "pause-0012"] and [z["plan_id"] for z in out["pruefen"]] == ["pause-0011", "pause-0012"],
+      f"TR1 Pause mit Start-Claim ohne Ergebnis und mit Orbit-Sendung → Überprüfen — {[x[0] for x in DB['update']]}")
+check(all(g.get("status") == "eq.planned" and g.get("started_at") == "is.null" and g.get("orbit_gesendet_at") == "is.null" for g in DB["delete_params"])
+      and DB["delete_params"][1].get("start_claim_art") == "eq.verbrauch", f"TR1 Lösch-Guards unverändert — {DB['delete_params']}")
+check(not any("Puls-Pause-Marke" in str((r_.get("p_patch") or {}).get("final", {}).get("hinweis", "")) for r_ in DB["rpc"]),
+      "TR1 kein „Puls-Pause-Marke“-Hinweis mehr im Ende-Eintrag")
 
 # Einhängen im Nachtlauf: vor ap_planen, auch wenn der Planer aus ist, eigener try
 nt = fn("ap_nacht_tick")
