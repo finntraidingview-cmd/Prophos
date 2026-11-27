@@ -22493,6 +22493,23 @@ def tsx_rect_gleich(a, b, tol=2.0):
         return False
 
 
+def tsx_ausloeser_gewandert(r_vor, ko_neu, stabil):
+    """REIN RECHNEND (testbar, TK1 27.11.2026): ist der Konto-Auslöser nach einem abgelehnten Druck („am Zielpunkt liegt nicht das Ziel") bewiesen
+    an einen ANDEREN Ort gewandert? Beleg 25.–27.11.2026, 7 von 7 Fehlstarts „Konto-Auslöser nicht gedrückt (Klick ohne Beweis)" auf 4 PCs, alle
+    direkt nach der Google-Anmeldung: TopstepX schiebt 2–6 s nach dem Laden ein Werbe-Band (iframe „Popup CTA", volle Breite, 64–71 px hoch) über
+    die Seite, alles rutscht nach unten — das vorher gelesene Rechteck [68, 4, …] liegt dann im Band, der Auslöser steht frei bei y ≈ 75.
+    -> True nur, wenn der frische Stand ein gültiges Rechteck an anderer Stelle (> 2 px) zeigt, das zweimal gleich gelesen wurde (stabil), der
+    Auslöser dort weder gesperrt noch verdeckt ist und keine Liste offen steht. Sonst False (kein zweiter Versuch, ehrlich raus wie bisher)."""
+    ko = ko_neu if isinstance(ko_neu, dict) else {}
+    r_n = cdp_rect(ko.get("rect"))
+    if not stabil or not (isinstance(r_n, (list, tuple)) and len(r_n) >= 4 and r_n[2] >= 2 and r_n[3] >= 2):
+        return False
+    if not (isinstance(r_vor, (list, tuple)) and len(r_vor) >= 4) or tsx_rect_gleich(list(r_vor)[:4], list(r_n)[:4]):
+        return False
+    zu = ko.get("zu") if isinstance(ko.get("zu"), dict) else {}
+    return not (zu.get("disabled") or zu.get("verdeckt") or ko.get("liste_offen"))
+
+
 def _tsx_ausloeser_stabil(s, st, ko, r, trail, lesungen=4):
     """Konto-Auslöser vor dem Hover auf STABILE Position warten (09.10.2026, Ina 333d4791 e944cde2: Seite 1,5 s vorher frisch geöffnet,
     TopstepX baute nach — „nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel"). Bis zu `lesungen` Mal neu lesen (_warte-Jitter),
@@ -22786,10 +22803,29 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 gedrueckt = True
                 break
             neu_spur = " ".join(str(x) for x in list(trail)[n_spur:])
-            if _versuch or "kein Druck" not in neu_spur or "nicht mehr das Ziel" not in neu_spur:
+            if _versuch or "kein Druck" not in neu_spur:
                 break                                     # anderer Grund oder schon zweiter Versuch: ehrlich raus wie bisher
-            trail.append("K2: Konto-Auslöser hat sich verschoben — Ziel neu lesen, ein zweiter Versuch")
-            st, ko, r, _stabil = _tsx_ausloeser_stabil(s, s.stand(), {}, r, trail)
+            if "nicht mehr das Ziel" in neu_spur:
+                trail.append("K2: Konto-Auslöser hat sich verschoben — Ziel neu lesen, ein zweiter Versuch")
+                st, ko, r, _stabil = _tsx_ausloeser_stabil(s, s.stand(), {}, r, trail)
+            elif "liegt nicht das Ziel" in neu_spur:
+                # TK1 (27.11.2026, Finn: Fehlstarts an der Ursache beheben — Simon …6316 07:46, Marco …4844 09:41 Dubai, dazu 5 weitere seit 25.11.,
+                # alle direkt nach der Google-Anmeldung): das Werbe-Band oben kam NACH dem Lesen und schob die Seite um seine Höhe nach unten, am
+                # alten Punkt lag das Band ('popup cta', iframe [0, 0, Breite, 71]). Es wurde NICHT gedrückt. Bisher: raus, 16 min bis zum nächsten
+                # Versuch. Jetzt: Ziel neu lesen, bis es zweimal gleich steht — NUR wenn es bewiesen woanders steht (tsx_ausloeser_gewandert), genau
+                # ein zweiter Versuch am neuen Ort, mit demselben Ziel-Beweis. Steht es am alten Ort (echte Verdeckung) → raus wie bisher.
+                r_vor = list(r)[:4]
+                st_n, ko_n, r_n, stabil_n = _tsx_ausloeser_stabil(s, s.stand(), {}, r, trail)
+                if tsx_konto_urteil(ko_n, ext) == "ja" or ko_n.get("liste_offen"):
+                    st, ko = st_n, ko_n                   # inzwischen steht das Konto bzw. eine Liste — die Runde entscheidet neu (kein Druck hier)
+                    break
+                if tsx_k2_meldung_nachgelesen(st_n, bd_res) or not tsx_ausloeser_gewandert(r_vor, ko_n, stabil_n):
+                    break                                 # Meldung da (die Runde unten schließt sie) bzw. nicht gewandert: wie bisher
+                trail.append(f"K2: Konto-Auslöser gewandert {[int(round(float(v))) for v in r_vor]} → {[int(round(float(v))) for v in list(r_n)[:4]]} "
+                             "(Seite nach dem Lesen verschoben, z. B. Werbe-Band oben) — ein zweiter Versuch am neuen Ort")
+                st, ko, r = st_n, ko_n, list(r_n)[:4]
+            else:
+                break
             if tsx_konto_urteil(ko, ext) == "ja" or ko.get("liste_offen"):
                 break                                     # inzwischen steht das Konto bzw. eine Liste — die Runde entscheidet neu
         if not gedrueckt:
@@ -22801,6 +22837,16 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 trail.append("K2: TopstepX-Meldung lag unter dem Konto-Auslöser — Runde von vorn: schließen, dann wechseln")
                 geklickt = False
                 continue
+            # TK1 (27.11.2026): was Puls am Ende am Auslöser sah (Ort, gesperrt/verdeckt, was darüber liegt) — nur Spur, ändert nichts
+            try:
+                _ko_e = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
+                _zu_e = _ko_e.get("zu") if isinstance(_ko_e.get("zu"), dict) else {}
+                _pp_e = st.get("popups") if isinstance(st, dict) and isinstance(st.get("popups"), list) else []
+                trail.append(f"K2: Auslöser zuletzt bei {list(cdp_rect(_ko_e.get('rect')) or [])[:4]} (geklickt wurde {list(r)[:4]}) · "
+                             f"gesperrt {bool(_zu_e.get('disabled'))} · verdeckt {bool(_zu_e.get('verdeckt'))} · darüber "
+                             f"{json.dumps(_zu_e.get('oben'), ensure_ascii=False, default=str)[:160]} · Dialoge {len(_pp_e)}")
+            except Exception as e_spur:                   # die Spur darf den ehrlichen Abbruch nie ersetzen
+                trail.append(f"K2: Auslöser-Spur nicht schreibbar ({type(e_spur).__name__})")
             return _raus("konto_nicht_erreicht", "Konto-Auslöser nicht gedrückt (Klick ohne Beweis) — nichts gewechselt.", st)
         _warte(0.9, 0.4)
         st = s.stand()
