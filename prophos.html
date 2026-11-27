@@ -55301,15 +55301,18 @@
   const newsUhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
   // Start-Sperre für Plan p jetzt → { text, bis } | null
   function newsStartSperre(p, now){
-    if(!newsIstFundedCfd(p)) return null
     now = now || Date.now()
-    const st = newsRegelStand(now)
-    if(!st.an) return null
-    if(!st.ok) return { text: `🔴 ${st.grund} — kein Funded-CFD-Start, bis der Kalender wieder da ist`, bis: 0, kalender: true }
-    const b = st.bloecke.find(x => x.t0 <= now && now < x.t1)
-    if(!b) return null
-    const tt = b.termine.map(x => `${x.titel} ${newsUhr(x.t)}`).join(', ')
-    return { text: `🔴 USD-News ${tt} — kein Funded-CFD-Start bis ${newsUhr(b.t1)}`, bis: b.t1 }
+    if(newsIstFundedCfd(p)){
+      const st = newsRegelStand(now)
+      if(!st.an) return null
+      if(!st.ok) return { text: `🔴 ${st.grund} — kein Funded-CFD-Start, bis der Kalender wieder da ist`, bis: 0, kalender: true }
+      const b = st.bloecke.find(x => x.t0 <= now && now < x.t1)
+      if(b){
+        const tt = b.termine.map(x => `${x.titel} ${newsUhr(x.t)}`).join(', ')
+        return { text: `🔴 USD-News ${tt} — kein Funded-CFD-Start bis ${newsUhr(b.t1)}`, bis: b.t1 }
+      }
+    }
+    return newsFomcSperre(p, now)   // NW2 (27.11.2026): FOMC unter rot — nur Kontoart mit Einstellung (Standard funded_cfd), sonst null wie bisher
   }
   // NACHHOLEN (Master 30.10.2026, Vorschlag ja): liegt die Startzeit in einem News-Block, zählt das Start-Fenster ab dem Block-Ende —
   // sonst wäre ein Plan nach bis zu 45 min Sperre „verpasst". → Bezugszeit in ms
@@ -55318,12 +55321,26 @@
   const _newsKalenderGesperrt = new Map()   // planId → ms, zuletzt wegen fehlendem Kalender gesperrt
   function newsStartBezug(p){
     const s = new Date(p && p.startUm).getTime()
-    if(!isFinite(s) || !newsIstFundedCfd(p)) return s
-    const now = Date.now(), st = newsRegelStand(now)
-    if(!st.an) return s
-    if(!st.ok){ if(s <= now){ _newsKalenderGesperrt.set(String(p.id), now); return now } return s }
-    const b = st.bloecke.find(x => x.t0 <= s && s < x.t1)
-    return Math.max(s, b ? b.t1 : s, _newsKalenderGesperrt.get(String(p.id)) || 0)
+    if(!isFinite(s)) return s
+    const now = Date.now(), cfd = newsIstFundedCfd(p)
+    let bloecke = []
+    if(cfd){
+      const st = newsRegelStand(now)
+      if(!st.an) return s
+      if(!st.ok){ if(s <= now){ _newsKalenderGesperrt.set(String(p.id), now); return now } return s }
+      bloecke = st.bloecke
+    }
+    // NW2 (27.11.2026): auch das schmale FOMC-Fenster der Firma schiebt den Bezug ans Fenster-Ende; ohne Einstellung ist fomc leer und das
+    // Ergebnis wie vorher (Blöcke sind verschmolzen, ein zweiter Durchlauf findet nichts). Höchstens 3 Runden: rot ↔ FOMC können sich ablösen.
+    const fomc = newsFomcFenster(p, now)
+    if(!cfd && !fomc.length) return s
+    let r = s
+    for(let i = 0; i < 3; i++){
+      const b = bloecke.find(x => x.t0 <= r && r < x.t1), f = fomc.find(y => y.t0 <= r && r < y.t1)
+      if(!b && !f) break
+      r = Math.max(b ? b.t1 : r, f ? f.t1 : r)
+    }
+    return Math.max(r, cfd ? (_newsKalenderGesperrt.get(String(p.id)) || 0) : 0)
   }
   // Steht gerade ein roter Termin in ±6 min? → Termin | null (Market-Close-Zweig fasst Funded CFD dann nicht an)
   function newsKeinKlick(now){
@@ -55331,6 +55348,89 @@
     if(!st.an || !st.ok) return null
     const R = NEWS_REGEL, M = 60000   // ab t − 12 (nicht erst t − 6): ein Market-Close-Versuch hat keine Frist (Gegenprüfung Nachtrag 30.10.2026, S2)
     return st.bloecke.flatMap(b => b.termine).find(y => now > y.t - R.markt_sperre_vor_min * M && now < y.t + R.kein_klick_min * M) || null
+  }
+
+  /* ══ NEWS-FENSTER: FOMC JEDER STUFE (NW2, Finn 27.11.2026 — Blue Guardian zog zweimal Profit ab; dort zählt bei Funded jeder FOMC-Termin,
+   * auch gelb/orange und Reden, ±5 min kein Öffnen/Schließen. Finn erst „nur Blue Guardian", dann: „Mach alle Prop … alle CFD Forex halt").
+   * Die Regel oben kennt nur rot. Gilt für dieselbe Menge wie sie: Kontoart funded_cfd, alle Firmen (NEWS_FOMC_STANDARD). Schalter und Minuten
+   * stehen in der Tabelle news_fenster_regeln (Zeile firmen '*'; eine Zeile mit Firmenname ginge vor — Daten, kein Firmenname im Code).
+   * Schmales Fenster: vor_min vor bis nach_min nach dem Termin (je mindestens 6, plus 0…streu_min gewürfelt wie oben — auf jedem Gerät gleich)
+   * kein Start (Plan wartet, Nachholen zählt ab Fenster-Ende). NUR START-SPERRE (Prüfer-Stopp 27.11.2026 zu 8ced0598, Vorgabe Master: ein
+   * Schließen, das es vorher gab, darf durch das FOMC-Fenster nie ausfallen): Auto-Close vor Marktschluss, Schließen vor roter News, Abgleich,
+   * Hand- und Notfall-Schließen laufen unverändert, auch im Fenster. Kein Zwangsschließen. FOMC in rot bleibt die Regel oben, unverändert. Kalender fehlt oder Schalter aus → hier nichts
+   * (für Funded CFD greift dann ohnehin die Fail-closed-Sperre oben). Andere Kontoarten (Challenge, Phase 1/2, Winning Days, Futures) unberührt. ══ */
+  // Standard ohne Tabellen-Zeile (Finn 27.11.2026, Korrektur: „Mach alle Prop für uns bei FOMC, nicht nur Blue Guardian, alle … alle CFD Forex halt"):
+  // jede Firma, Kontoart funded_cfd — dieselbe Menge wie die rote Regel. Eine Zeile in news_fenster_regeln (firmen '*' oder eine Firma) geht vor.
+  const NEWS_FOMC_STANDARD = { name: 'Standard', firmen: ['*'], kontoarten: ['funded_cfd'], fomc_jede_stufe: true, vor_min: 7, nach_min: 6, streu_min: 2, aktiv: true }
+  const newsFenster = { zeilen: [], geladen: 0, versuch: 0, laeuft: false }
+  try{ const z = JSON.parse(localStorage.getItem('newsFensterRegeln') || '[]'); if(Array.isArray(z)) newsFenster.zeilen = z }catch(_){}
+  // Einstellung lesen: alle 30 min, nach einem Fehler frühestens nach 5 min; ein Fehler behält den letzten Stand (auch den aus localStorage)
+  async function newsFensterLaden(){
+    const now = Date.now()
+    if(newsFenster.laeuft || now - newsFenster.versuch < 5 * 60000 || (newsFenster.geladen && now - newsFenster.geladen < 30 * 60000)) return
+    let uid = null; try{ uid = currentUserId }catch(_){}
+    if(!uid) return
+    newsFenster.laeuft = true; newsFenster.versuch = now
+    try{
+      const { data, error } = await supabase.from('news_fenster_regeln').select('*')
+      if(!error && Array.isArray(data)){
+        newsFenster.zeilen = data; newsFenster.geladen = Date.now(); newsFenster.versuch = 0
+        try{ localStorage.setItem('newsFensterRegeln', JSON.stringify(data)) }catch(_){}
+      }
+    }catch(_){}
+    finally{ newsFenster.laeuft = false }
+  }
+  // FOMC-Termin am Titel (Forex Factory hat kein eigenes Feld): „FOMC Member … Speaks", „FOMC Meeting Minutes", „FOMC Statement",
+  // „FOMC Press Conference", „FOMC Economic Projections", „Federal Funds Rate", „Fed Chair … Speaks/Testifies". Rein.
+  function newsIstFomc(titel){
+    return /\bFOMC\b|\bFederal Funds Rate\b|\bFed Chair\b/i.test(String(titel || ''))
+  }
+  function newsFirmaKey(name){
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  }
+  // Rein: die Zeile der Einstellung für Firma × Kontoart | null
+  function newsFensterZeile(zeilen, firma, kontoart){
+    const f = newsFirmaKey(firma), k = String(kontoart || '').toLowerCase()
+    if(!k) return null
+    const art = z => z && (z.kontoarten || []).some(a => String(a).toLowerCase() === k)
+    const alle = (zeilen || []).concat([NEWS_FOMC_STANDARD])
+    // genaue Firma vor „*" (alle Firmen), Tabelle vor dem eingebauten Standard — die erste passende Zeile entscheidet, auch wenn sie aus ist
+    const z = (f && alle.find(x => art(x) && (x.firmen || []).some(n => n !== '*' && newsFirmaKey(n) === f))) || alle.find(x => art(x) && (x.firmen || []).includes('*')) || null
+    return z && z.aktiv !== false && z.fomc_jede_stufe === true ? z : null
+  }
+  // Rein: FOMC-Termine unter rot (USD) als Fenster [{ t, titel, vor, nach, t0, t1 }] — rot lässt die bestehende Regel nicht los
+  function newsFomcTermine(events, z){
+    if(!z) return []
+    const vorMin = Math.max(6, Number(z.vor_min) || 0), nachMin = Math.max(6, Number(z.nach_min) || 0), streu = Math.max(0, Number(z.streu_min) || 0), out = []
+    for(const e of (events || [])){
+      if(!e || e.impact === 'High' || String(e.country || 'USD').toUpperCase() !== 'USD' || !newsIstFomc(e.title)) continue
+      const t = Date.parse(e.date); if(!isFinite(t)) continue
+      const k = String(e.date) + '|' + String(e.title || '')
+      const vor = (vorMin + newsHash01(k, 'fvor') * streu) * 60000, nach = (nachMin + newsHash01(k, 'fnach') * streu) * 60000
+      out.push({ t, titel: String(e.title || 'FOMC'), vor, nach, t0: t - vor, t1: t + nach })
+    }
+    return out.sort((a, b) => a.t0 - b.t0)
+  }
+  // Firma + Kontoart eines Plans (Konto im Cache geht vor, sonst die Felder am Plan)
+  function newsPlanKonto(p){
+    let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) }catch(_){}
+    const kontoart = (p.fundedCfd || p.kontoTyp === 'funded_cfd') ? 'funded_cfd' : String((acc && acc.type) || p.kontoTyp || '').toLowerCase()
+    return { firma: (acc && acc.firm) || p.masterFirm || '', kontoart }
+  }
+  // FOMC-Fenster, die für Plan p gelten ([] = Kontoart nicht betroffen, Schalter aus oder Kalender fehlt)
+  function newsFomcFenster(p, now){
+    if(!p) return []
+    newsFensterLaden()
+    const k = newsPlanKonto(p), z = newsFensterZeile(newsFenster.zeilen, k.firma, k.kontoart)
+    if(!z) return []
+    const st = newsRegelStand(now)
+    if(!st.an || !st.ok) return []
+    return newsFomcTermine(newsState.events, z)
+  }
+  // Start-Sperre im FOMC-Fenster → { text, bis } | null (gleiche Form wie die rote Sperre)
+  function newsFomcSperre(p, now){
+    const x = newsFomcFenster(p, now).find(y => y.t0 <= now && now < y.t1)
+    return x ? { text: `🔴 FOMC-Termin ${x.titel} ${newsUhr(x.t)} — kein Start bis ${newsUhr(x.t1)}`, bis: x.t1, fomc: true } : null
   }
   // „Trotzdem starten" im News-Toast (wie bei Ziel erreicht): nur Hand-Start auf der Karte, 10 min je Plan
   const _newsTrotzdem = new Map()
@@ -55340,7 +55440,9 @@
     _newsTrotzdem.delete(String(id)); return false
   }
   window._news = { hash: newsHash01, bloecke: newsBloecke, stand: newsRegelStand, sperre: newsStartSperre, bezug: newsStartBezug,
-    istCfd: newsIstFundedCfd, state: newsState, regel: NEWS_REGEL, keinKlick: newsKeinKlick }   // Test-Haken
+    istCfd: newsIstFundedCfd, state: newsState, regel: NEWS_REGEL, keinKlick: newsKeinKlick,
+    istFomc: newsIstFomc, fensterZeile: newsFensterZeile, fomcTermine: newsFomcTermine, fomcFenster: newsFomcFenster, fomcSperre: newsFomcSperre,
+    fenster: newsFenster }   // Test-Haken
 
   // Time helper
   function timeAgo(iso){
@@ -62520,7 +62622,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2362'
+  const OS_TAB_BUILD = '2026-09-22.2363'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
