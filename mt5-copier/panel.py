@@ -6033,6 +6033,26 @@ def _drop_snapshot(cfg):
         pass
 
 
+def _chr_symbol_passend(txt, start_symbol):
+    """REIN (testbar, GT4 27.11.2026): Chart-Text mit dem Symbol, auf dem das Lese-EA beim Broker dieser Instanz laufen kann → (text, geändert).
+    Befund pc-2zc2we, drei Goat-Funded-Konten (…3686/…3687/…3752): die Profil-Injektion hängte das EA ans erste Chart des Profils („EURUSD“), GFT kennt
+    nur Symbole mit Endung („EURUSD.x“) → Journal „ProphosHedgeReader (EURUSD,H1) … failed with code 0 (symbol synchronization timeout)“, EA entfernt,
+    nie ein Snapshot, jeder Echo-Start „Copier nicht scharf — warte auf Snapshot des Master-Terminals“. GT3 hatte nur den [StartUp]-Weg umgestellt.
+    Regel: hat das Start-Symbol der Config eine Endung (GFT „.x“) und endet das Chart-Symbol nicht darauf, bekommt das Chart das Start-Symbol.
+    Ohne Endung (alle Firmen bis heute) oder ohne symbol-Zeile bleibt der Text bitgleich. Älteres provision.py ohne symbol_endung → bitgleich.
+    Prüfer GT4: nur wenn das Start-Symbol „EURUSD<Endung>“ ist — das belegt, dass der Broker die Standard-Symbole mit Endung führt. Ein Firmen-Symbol
+    mit Punkt wie „US100.cash“ (FTMO: dort läuft das EA auf „EURUSD“) fasst kein laufendes Chart an („Funktionierendes nicht anfassen“)."""
+    f = getattr(provision, "symbol_endung", None)
+    sym = str(start_symbol or "").strip()
+    e = f(sym) if f else ""
+    if not e or sym != provision.STARTUP_SYMBOL + e:
+        return txt, False
+    m = re.search(r"(?m)^symbol=([^\r\n]*)", txt)
+    if not m or m.group(1).strip().endswith(e):
+        return txt, False
+    return txt[:m.start(1)] + sym + txt[m.end(1):], True
+
+
 def _inject_ea_into_profile(fname, cfg, install_dir):
     """Lese-EA FEST ins Chart-Profil schreiben (15.08.2026, Experten-Log-Beweis:
     'ProphosHedgeReader beendet, reason=4' = Chart geschlossen). Das /config-
@@ -6060,6 +6080,7 @@ def _inject_ea_into_profile(fname, cfg, install_dir):
              "InpTimerMs=200\r\n"
              "</inputs>\r\n"
              "</expert>\r\n")
+    start_sym = _startup_symbol(cfg)   # GT4: Chart-Symbol je Firma (GFT EURUSD.x), sonst EURUSD → Chart bleibt, wie es ist
     injected = False
     for prof in sorted(os.listdir(charts_root)):
         pdir = os.path.join(charts_root, prof)
@@ -6072,16 +6093,33 @@ def _inject_ea_into_profile(fname, cfg, install_dir):
                     raw = f.read()
             except OSError:
                 continue
-            enc = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
+            # BOM merken und beim Schreiben wieder davorsetzen: "utf-16" dekodiert ihn weg und schriebe ihn in der Byte-Reihenfolge der Maschine neu
+            bom = raw[:2] if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else b""
+            enc = ("utf-16-le" if bom == b"\xff\xfe" else "utf-16-be") if bom else "utf-8"
             try:
-                txt = raw.decode(enc)
+                txt = raw[len(bom):].decode(enc)
             except (UnicodeDecodeError, UnicodeError):
                 continue
             if provision.EA_NAME in txt:
-                injected = True   # Profil traegt das EA schon — nichts zu tun
+                # Profil traegt das EA schon. GT4: steht es auf einem Symbol, das der Broker nicht hat (GFT: „EURUSD“ statt „EURUSD.x“), das
+                # Chart-Symbol nachziehen — sonst entfernt das Terminal das EA bei jedem Start wieder (symbol synchronization timeout)
+                neu, geaendert = _chr_symbol_passend(txt, start_sym)
+                if geaendert:
+                    try:
+                        if not os.path.exists(p + ".prophos-bak"):
+                            with open(p + ".prophos-bak", "wb") as f:
+                                f.write(raw)
+                        with open(p, "wb") as f:
+                            f.write(bom + neu.encode(enc))
+                        print(f"[panel] {fname}: Chart des Lese-EA auf {start_sym} gestellt ({prof}/{fn}) — "
+                              f"der Broker kennt das alte Chart-Symbol nicht.", flush=True)
+                    except OSError:
+                        pass
+                injected = True
                 break
             if "<expert>" in txt:
                 continue          # Chart hat schon ein anderes EA — naechstes
+            txt, _sym_neu = _chr_symbol_passend(txt, start_sym)   # GT4: EA nur auf ein Chart, das der Broker laden kann
             idx = txt.rfind("</chart>")
             if idx < 0:
                 continue
@@ -6089,11 +6127,11 @@ def _inject_ea_into_profile(fname, cfg, install_dir):
                 with open(p + ".prophos-bak", "wb") as f:
                     f.write(raw)
                 with open(p, "wb") as f:
-                    f.write((txt[:idx] + block + txt[idx:]).encode(enc))
+                    f.write(bom + (txt[:idx] + block + txt[idx:]).encode(enc))
             except OSError:
                 continue
             print(f"[panel] {fname}: Lese-EA fest ins Profil geschrieben ({prof}/{fn}, "
-                  f"InpFileName={snapf}).", flush=True)
+                  f"InpFileName={snapf}{', Chart ' + start_sym if _sym_neu else ''}).", flush=True)
             injected = True
             break
     return injected
