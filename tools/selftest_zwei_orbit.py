@@ -132,7 +132,7 @@ A = {"id": "a1", "status": "open", "route": "tvv2", "hedge_eur": 50, "master_acc
 W = {"id": "w1", "status": "open", "route": "tvv2", "hedge_eur": 100, "winning_day": True, "master_account_id": None, "mt5_baseline": hd}
 NAH = {}
 app._lt_zeile = lambda p, *a, **k: {"id": p["id"], "richtung": "buy", "kt": 2, "symbol_root": "NQ"}
-app.puls_heim_kurs_frisch = lambda kurse, w: 20000.0
+app.puls_heim_kurs_frisch = lambda kurse, w, **k: 20000.0     # **k: FD2 27.11.2026 reicht spur= mit
 app.puls_heim_nah = lambda z, kurs, schw: dict(nah(NAH.get(z["id"], False)), schw=schw)
 app._sb_all = lambda t, p: [dict(z) for z in pc_zeilen]
 pc_zeilen[:] = [W, A, B]

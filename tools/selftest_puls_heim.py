@@ -80,6 +80,37 @@ def main():
     ok(frisch({"NQ": {"kurs": 30000, "minute": "2026-10-19T09:50:00+00:00"}}, "NQ", jetzt) is None, "10 min alt nicht None")
     ok(frisch({}, "NQ", jetzt) is None, "leer nicht None")
 
+    # FD2 (Finn 27.11.2026, Vorfall Plan d2750aae: NQ-Minutenkerzen fehlten 5,5 h, MNQ war frisch → 50 min „kein frischer NQ-Kurs"):
+    # ist die gefragte Wurzel alt, zählt die frische andere (NQ ↔ MNQ); beide alt bleibt None; die Grenze selbst (300 + 60 s) bleibt
+    j27 = datetime(2026, 11, 27, 3, 46, 55, tzinfo=timezone.utc)                    # 1. Sperre am 27.11.
+    nq_alt, mnq_fr = {"kurs": 25210.25, "minute": "2026-11-26T23:00:00+00:00", "quelle": "NQ"}, {"kurs": 25214.5, "minute": "2026-11-27T03:46:00+00:00", "quelle": "MNQ"}
+    nq_fr, mnq_alt = {"kurs": 25215.0, "minute": "2026-11-27T03:45:00+00:00", "quelle": "NQ"}, {"kurs": 25100.0, "minute": "2026-11-26T23:00:00+00:00", "quelle": "MNQ"}
+    s = {}
+    ok(frisch({"NQ": nq_fr, "MNQ": mnq_fr}, "NQ", j27, s) == 25215.0 and s == {"quelle": "NQ", "ersatz": False}, f"FD2 NQ frisch: NQ, kein Ersatz — {s}")
+    s = {}
+    ok(frisch({"NQ": nq_alt, "MNQ": mnq_fr}, "NQ", j27, s) == 25214.5 and s == {"quelle": "MNQ", "ersatz": True}, f"FD2 NQ alt + MNQ frisch: MNQ als Ersatz — {s}")
+    ok(frisch({"NQ": nq_alt, "MNQ": mnq_fr}, "NQ", j27) == 25214.5, "FD2 Ersatz auch ohne spur")
+    s = {}
+    ok(frisch({"NQ": nq_alt, "MNQ": mnq_alt}, "NQ", j27, s) is None and s == {}, f"FD2 beide alt: None wie bisher, spur leer — {s}")
+    s = {}
+    ok(frisch({"NQ": nq_fr, "MNQ": mnq_alt}, "MNQ", j27, s) == 25215.0 and s == {"quelle": "NQ", "ersatz": True}, f"FD2 MNQ gefragt, MNQ alt + NQ frisch: NQ als Ersatz — {s}")
+    s = {}
+    ok(frisch({"NQ": nq_fr, "MNQ": mnq_fr}, "MNQ", j27, s) == 25214.5 and s == {"quelle": "MNQ", "ersatz": False}, f"FD2 MNQ gefragt + frisch: MNQ — {s}")
+    s = {}
+    ok(frisch({}, "NQ", j27, s) is None and frisch(None, "MNQ", j27, s) is None and s == {}, "FD2 leere Tabelle: None")
+    s = {}
+    ok(frisch({"NQ": nq_fr}, "MNQ", j27, s) == 25215.0 and s == {"quelle": "NQ", "ersatz": True}, f"FD2 MNQ fehlt ganz: NQ als Ersatz — {s}")
+    s = {}     # kurs_jetzt_wahl kopiert eine ganz fehlende Wurzel aus der anderen und trägt deren Herkunft: quelle MNQ unter dem Schlüssel NQ
+    ok(frisch({"NQ": dict(mnq_fr), "MNQ": mnq_fr}, "NQ", j27, s) == 25214.5 and s == {"quelle": "MNQ", "ersatz": True}, f"FD2 kopierte Wurzel: Herkunft MNQ — {s}")
+    ok(frisch({"NQ": {"kurs": None, "minute": "2026-11-27T03:46:00+00:00"}, "MNQ": mnq_fr}, "NQ", j27) == 25214.5, "FD2 NQ ohne Kurs: MNQ")
+    ok(frisch({"NQ": {"kurs": 25215.0, "minute": "kaputt"}, "MNQ": mnq_fr}, "NQ", j27) == 25214.5, "FD2 NQ-Minute unlesbar: MNQ")
+    ok(frisch({"NQ": {"kurs": 25215.0, "minute": None}}, "NQ", j27) is None, "FD2 Minute fehlt, kein Ersatz: None")
+    grenze = j27 - timedelta(seconds=ns["PULS_HEIM_KURS_MAX_ALTER_S"] + 60)
+    ok(frisch({"NQ": nq_alt, "MNQ": dict(mnq_fr, minute=grenze.isoformat())}, "NQ", j27) == 25214.5, "FD2 Ersatz genau an der Grenze (360 s) zählt")
+    ok(frisch({"NQ": nq_alt, "MNQ": dict(mnq_fr, minute=(grenze - timedelta(seconds=1)).isoformat())}, "NQ", j27) is None,
+       "FD2 Ersatz 1 s über der Grenze: None — Grenze nicht gelockert")
+    ok(frisch({"NQ": nq_alt, "MNQ": mnq_fr}, None, j27) == 25214.5 and frisch({"NQ": nq_alt, "MNQ": mnq_fr}, "nq", j27) == 25214.5, "FD2 Wurzel leer/klein = NQ")
+
     # Big Trades dieses PCs
     pl = [{"id": "a", "status": "open", "route": "tvv2", "hedge_eur": 800, "mt5_baseline": {"hedge": {"pc": "pc-1"}}},
           {"id": "b", "status": "open", "route": "tvv2", "orbit_v3": True, "mt5_baseline": {"hedge": {"pc": "pc-1"}}},

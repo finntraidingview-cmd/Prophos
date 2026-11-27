@@ -22673,19 +22673,32 @@ def puls_heim_nah(zeile, kurs, schwellen):
     return out
 
 
-def puls_heim_kurs_frisch(kurse, wurzel, jetzt=None):
-    """REIN RECHNEND (testbar): Kurs der Wurzel aus kurs_jetzt_wahl, nur wenn die Reader-Minute jünger als PULS_HEIM_KURS_MAX_ALTER_S ist."""
-    e = (kurse or {}).get(str(wurzel or "NQ").upper()) or (kurse or {}).get("NQ")
-    if not e or _wd_num(e.get("kurs")) is None:
-        return None
-    try:
-        m = datetime.fromisoformat(str(e.get("minute")).replace("Z", "+00:00"))
-        if m.tzinfo is None:
-            m = m.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return None
+def puls_heim_kurs_frisch(kurse, wurzel, jetzt=None, spur=None):
+    """REIN RECHNEND (testbar): Kurs der Wurzel aus kurs_jetzt_wahl, nur wenn die Reader-Minute jünger als PULS_HEIM_KURS_MAX_ALTER_S ist.
+    FD2 (Finn 27.11.2026, Vorfall Simon · Tradeify …2772, Plan d2750aae: 50 min „kein frischer NQ-Kurs (Reader-Feed)", weil nur die NQ-
+    Minutenkerzen 5,5 h fehlten — der Feed lief, MNQ war frisch): ist die Zeile der gefragten Wurzel alt oder leer, zählt die frische Zeile
+    der anderen Wurzel (NQ ↔ MNQ laufen preisgleich, wie kurs_jetzt_wahl beim ganz fehlenden Eintrag). Die Frische-Grenze selbst bleibt;
+    sind beide alt → None wie bisher (fail-closed). spur (dict, optional) bekommt quelle = Wurzel, aus der der Kurs wirklich stammt, und
+    ersatz = True, wenn das nicht die gefragte ist."""
+    w = str(wurzel or "NQ").upper()
     j = jetzt or datetime.now(timezone.utc)
-    return _wd_num(e.get("kurs")) if (j - m).total_seconds() <= PULS_HEIM_KURS_MAX_ALTER_S + 60 else None
+    for key in dict.fromkeys((w, "NQ", "MNQ")):           # gefragte Wurzel zuerst, dann die andere; jede höchstens einmal
+        e = (kurse or {}).get(key)
+        k = _wd_num(e.get("kurs")) if isinstance(e, dict) else None
+        if k is None:
+            continue
+        try:
+            m = datetime.fromisoformat(str(e.get("minute")).replace("Z", "+00:00"))
+            if m.tzinfo is None:
+                m = m.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if (j - m).total_seconds() <= PULS_HEIM_KURS_MAX_ALTER_S + 60:
+            if isinstance(spur, dict):
+                q = str(e.get("quelle") or key).upper()   # kurs_jetzt_wahl trägt die Herkunft schon, wenn eine Wurzel ganz fehlte
+                spur.update(quelle=q, ersatz=q != w)
+            return k
+    return None
 
 
 def puls_heim_big_trades(plaene, pc, ausser=None):
@@ -22924,12 +22937,13 @@ def _puls_heim_naehe(plaene, schwellen_je):
         acc = accs.get(str(p.get("master_account_id") or ""))
         z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
                       kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
-        kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+        ks = {}                                              # FD2 27.11.2026: aus welcher Wurzel der Kurs stammt (NQ ↔ MNQ als Ersatz)
+        kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"), spur=ks)
         n = puls_heim_nah(z, kurs, schwellen_je(acc, p))
         name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
         art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'NQ'}"
         info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
-                "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"]}
+                "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], "kurs_quelle": ks.get("quelle")}
         out.append((p, n, info, name, art))
     return out
 
@@ -23229,12 +23243,13 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
             acc = accs.get(str(p.get("master_account_id") or ""))
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
                           kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
-            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+            ks = {}                                          # FD2 27.11.2026: aus welcher Wurzel der Kurs stammt (NQ ↔ MNQ als Ersatz)
+            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"), spur=ks)
             n = puls_heim_nah(z, kurs, puls_heim_schwellen(regel, (acc or {}).get("firm") or p.get("master_firm")))
             name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
             art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'NQ'}"
             info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
-                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"]}
+                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], "kurs_quelle": ks.get("quelle")}
             if n["nah"] is None:
                 return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "big_trade": info,
                         "grund": f"Big Trade {name} ({art}) nicht prüfbar: {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
@@ -23247,7 +23262,8 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
             acc = accs.get(str(p.get("master_account_id") or ""))
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf,
                           kw_firmen=ap_unt_firmen(p.get("user_id"), liq_kw, streng=False) if liq_kw is not None else None)   # UNT3
-            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+            ks = {}                                          # FD2 27.11.2026 (s. Big-Trade-Schleife oben)
+            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"), spur=ks)
             n = puls_heim_nah(z, kurs, schw)
             # Liq-Level unbekannt → puls_heim_nah sagt „nicht prüfbar“, obwohl der TP-Rest feststeht: dann zählt der TP allein (Prüfer 22.10.2026)
             tp_nah = n["nah"] is None and n["rest_tp_usd"] is not None and n["rest_tp_usd"] <= schw[0]
@@ -23258,7 +23274,7 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
             name = f"{(acc or {}).get('firm') or p.get('master_firm') or art_name} …{str((acc or {}).get('external_id') or '')[-4:]}"
             art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'MNQ'}"
             info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
-                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], **art_info}
+                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], "kurs_quelle": ks.get("quelle"), **art_info}
             return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
                     "grund": f"{art_name} {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
         return {"frei": True}
